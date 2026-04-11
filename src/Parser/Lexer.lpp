@@ -1,0 +1,118 @@
+%{
+#include <cerrno>
+#include <climits>
+#include <cstdlib>
+#include <cstring> // strerror
+#include <iostream>
+#include <string>
+#include "AST.h"
+#include "Parser.ypp.h"
+#include "ParserDriverImpl.h"
+%}
+
+%option noyywrap nounput noinput batch debug
+
+%{
+  // A number symbol corresponding to the value in S.
+  yy::parser::symbol_type
+  make_INT (const std::string &s, const yy::parser::location_type& loc);
+
+  yy::parser::symbol_type
+  make_FLOAT (const std::string &s, const yy::parser::location_type& loc);
+%}
+
+true        True
+false       False
+id          [_a-zA-Z][_a-zA-Z_0-9]*
+int         [0-9]+
+float       ([0-9]+[.])?[0-9]+
+blank       [ \t\r]
+comment     \/\/[^\n]*
+
+%{
+  // Code run each time a pattern is matched.
+  # define YY_USER_ACTION  loc.columns (yyleng);
+%}
+
+%%
+
+%{
+  // A handy shortcut to the location held by the driver.
+  yy::location& loc = paykan::parser::impl(drv).Location;
+  // Code run each time yylex is called.
+  loc.step ();
+%}
+
+{blank}+   loc.step ();
+{comment}+ loc.step();
+\n+        loc.lines (yyleng); loc.step ();
+
+
+"-"        return yy::parser::make_MINUS  (loc);
+"+"        return yy::parser::make_PLUS   (loc);
+"*"        return yy::parser::make_STAR   (loc);
+"/"        return yy::parser::make_SLASH  (loc);
+"%"        return yy::parser::make_MOD (loc);
+">"        return yy::parser::make_MORE  (loc);
+"<"        return yy::parser::make_LESS  (loc);
+">="       return yy::parser::make_MOREEQ  (loc);
+"<="       return yy::parser::make_LESSEQ  (loc);
+"=="       return yy::parser::make_EQUAL (loc);
+"!="       return yy::parser::make_NOT_EQUAL(loc);
+"("        return yy::parser::make_LPAREN (loc);
+")"        return yy::parser::make_RPAREN (loc);
+"{"        return yy::parser::make_LBRACK (loc);
+"}"        return yy::parser::make_RBRACK (loc);
+"="        return yy::parser::make_ASSIGN (loc);
+":"        return yy::parser::make_COLON  (loc);
+"."        return yy::parser::make_DOT(loc);
+";"        return yy::parser::make_SEMICOLON (loc);
+","        return yy::parser::make_COMMA (loc);
+"!"        return yy::parser::make_NOT(loc);
+"->"       return yy::parser::make_ARROW(loc);
+{int}      return make_INT (yytext, loc);
+{float}    return make_FLOAT (yytext, loc);
+{true}     return yy::parser::make_BOOL (true, loc);
+{false}    return yy::parser::make_BOOL (false, loc);
+{id}       return yy::parser::make_IDENT (yytext, loc);
+
+<<EOF>>    return yy::parser::make_YYEOF (loc);
+
+%%
+
+yy::parser::symbol_type
+make_INT (const std::string &s, const yy::parser::location_type& loc)
+{
+  long n = strtol (s.c_str(), NULL, 10);
+  if (! (LONG_MIN <= n && n <= LONG_MAX && errno != ERANGE))
+    throw yy::parser::syntax_error (loc, "integer is out of range: " + s);
+  return yy::parser::make_INT (n, loc);
+}
+
+yy::parser::symbol_type
+make_FLOAT (const std::string &s, const yy::parser::location_type& loc)
+{
+  double n = strtod (s.c_str(), NULL);
+  return yy::parser::make_FLOAT ((double) n, loc);
+}
+
+void
+paykan::parser::ParserDriver::Impl::scanBegin()
+{
+  errno = 0;
+  yy_flex_debug = TraceScanning;
+  if (CurFile.empty () || CurFile == "-")
+    yyin = stdin;
+
+  else if (!(yyin = fopen (CurFile.c_str (), "r")))
+  {
+    std::cerr << "cannot open " << CurFile << ": " << strerror (errno) << '\n';
+    exit (EXIT_FAILURE);
+  }
+}
+
+void
+paykan::parser::ParserDriver::Impl::scanEnd()
+{
+  fclose (yyin);
+}

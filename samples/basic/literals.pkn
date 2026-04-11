@@ -1,0 +1,5 @@
+// Literals: integer, float, and boolean
+42;
+3.14;
+True;
+False;

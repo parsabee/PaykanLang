@@ -1,10 +1,14 @@
-# src/CMakeLists.txt
+# src/ASTPrinter/CMakeLists.txt
 # ────────────────────────────────────────────────────────────────────────────
-# Paykan compiler front-end:
-#   Parser/  – paykan_parser static library (Bison + Flex + Driver)
-#   Driver/  – executable entry points (mains for all project binaries)
+# paykan_ast_printer – static library for AST pretty-printing.
 # ────────────────────────────────────────────────────────────────────────────
 
-add_subdirectory(Parser)
-add_subdirectory(ASTPrinter)
-add_subdirectory(Driver)
+add_library(paykan_ast_printer STATIC ASTPrinter.cpp)
+target_include_directories(paykan_ast_printer SYSTEM
+    PRIVATE ${LLVM_INCLUDE_DIRS}
+)
+target_link_libraries(paykan_ast_printer
+    PUBLIC  paykan_parser
+    PRIVATE paykan_compile_options
+            LLVMSupport
+)

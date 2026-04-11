@@ -1,0 +1,185 @@
+%skeleton "lalr1.cc" // -*- C++ -*-
+%require "3.7.1"
+%defines
+
+%define api.token.constructor
+%define api.value.type variant
+%define parse.assert
+
+%code requires {
+  #include <string>
+  #include <iostream>
+  #include "AST.h"
+
+  namespace paykan::parser
+  {
+    class ParserDriver;
+  }
+
+  using namespace paykan::ast;
+}
+
+// The parsing context.
+%param { paykan::parser::ParserDriver& drv }
+%locations
+
+%define parse.trace
+%define parse.error detailed
+%define parse.lac full
+
+%code {
+  #include "ParserDriverImpl.h"
+  using paykan::parser::impl;
+
+  // Creates a source location from Bison location tokens
+  #define loc(BEGIN_TOK, END_TOK) \
+    SourceLocation(BEGIN_TOK.begin.line, BEGIN_TOK.begin.column, END_TOK.end.line, END_TOK.end.column)
+}
+
+%define api.token.prefix {TOK_}
+%token
+  ASSIGN  "="
+  MINUS   "-"
+  PLUS    "+"
+  STAR    "*"
+  SLASH   "/"
+  MOD     "%"
+  LESS   "<"
+  MORE   ">"
+  LESSEQ   "<="
+  MOREEQ   ">="
+  EQUAL    "=="
+  NOT_EQUAL "!="
+  NOT     "!"
+  COLON   ":"
+  DOT     "."
+  SEMICOLON ";"
+  COMMA     ","
+  LPAREN  "("
+  RPAREN  ")"
+  LBRACK  "{"
+  RBRACK  "}"
+  ARROW "->"
+;
+
+// associating terminals with types
+%token <long> INT
+%token <double> FLOAT
+%token <bool> BOOL
+%token <std::string> IDENT
+
+%type <TranslationUnit *> translationUnit
+%type <Stmt *> statement
+%type <Identifier *> identifier
+%type <CompoundStmt *> compoundStmt
+%type <VarDecl *> varDecl
+%type <DeclStmt *> staticAssignment
+%type <BinaryExpr::Opcode> relationalOperator
+%type <Expr *> primaryExpression
+%type <Expr *> unaryExpression
+%type <Expr *> additiveExpression
+%type <Expr *> multiplicativeExpression
+%type <Expr *> expression
+%type <Expr *> relationalExpression
+%type <UnaryExpr::Opcode> unaryOperator
+%%
+
+%start translationUnit;
+
+translationUnit : compoundStmt
+                                    { $$ = impl(drv).Ctx.make<TranslationUnit>(loc(@1, @1), $1);
+                                      impl(drv).Root = $$;
+                                    }
+;
+
+compoundStmt: %empty                { $$ = impl(drv).Ctx.make<CompoundStmt>(loc(@$, @$)); }
+    | compoundStmt statement        { $$ = $1;
+                                      if ($2) // can be null (empty stmt ";")
+                                        $$->addStatement($2);
+                                    }
+    ;
+
+identifier: IDENT                   { $$ = impl(drv).Ctx.make<Identifier>(loc(@1, @1), $1); }
+    ;
+
+varDecl: IDENT ":" identifier
+                                    { $$ = impl(drv).Ctx.make<VarDecl>(loc(@1, @3), $1, nullptr, nullptr); }
+    ;
+
+staticAssignment: varDecl "=" expression
+                                    { auto *vd = impl(drv).Ctx.make<VarDecl>(
+                                          loc(@1, @3), $1->getName(), $1->getType(), $3);
+                                      $$ = impl(drv).Ctx.make<DeclStmt>(loc(@1, @3), vd);
+                                    }
+    ;
+
+statement: ";"                      { $$ = nullptr; }
+    | expression ";"                { $$ = impl(drv).Ctx.make<ExprStmt>(loc(@1, @2), $1); }
+    | expression "=" expression ";" { auto *lhs = dyn_cast<Identifier>($1);
+                                      if (!lhs)
+                                        throw yy::parser::syntax_error(@1, "left-hand side of assignment must be an identifier");
+                                      $$ = impl(drv).Ctx.make<AssignStmt>(loc(@1, @4), lhs->getName(), $3);
+                                    }
+    | staticAssignment ";"          { $$ = $1; }
+    ;
+
+relationalOperator:
+      "<"                           { $$ = BinaryExpr::Lt; }
+    | ">"                           { $$ = BinaryExpr::Gt; }
+    | "<="                          { $$ = BinaryExpr::Le; }
+    | ">="                          { $$ = BinaryExpr::Ge; }
+    | "=="                          { $$ = BinaryExpr::Eq; }
+    | "!="                          { $$ = BinaryExpr::Ne; }
+    ;
+
+primaryExpression:
+      INT                           { $$ = impl(drv).Ctx.make<IntegerLiteral>(loc(@1, @1), $1); }
+    | FLOAT                         { $$ = impl(drv).Ctx.make<FloatLiteral>(loc(@1, @1), $1); }
+    | BOOL                          { $$ = impl(drv).Ctx.make<BoolLiteral>(loc(@1, @1), $1); }
+    | IDENT                         { $$ = impl(drv).Ctx.make<Identifier>(loc(@1, @1), $1); }
+    | "(" expression ")"            { $$ = $2; }
+    ;
+
+unaryOperator: "!"                  { $$ = UnaryExpr::Not; }
+    | "-"                           { $$ = UnaryExpr::Neg; }
+    ;
+
+unaryExpression:
+      primaryExpression             { $$ = $1; }
+    | unaryOperator primaryExpression
+                                    { $$ = impl(drv).Ctx.make<UnaryExpr>(loc(@1, @2), $1, $2); }
+    ;
+
+multiplicativeExpression:
+      unaryExpression               { $$ = $1; }
+    | multiplicativeExpression "*" unaryExpression
+                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryExpr::Mul, $1, $3); }
+    | multiplicativeExpression "/" unaryExpression
+                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryExpr::Div, $1, $3); }
+    | multiplicativeExpression "%" unaryExpression
+                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryExpr::Mod, $1, $3); }
+    ;
+
+additiveExpression:
+      multiplicativeExpression      { $$ = $1; }
+    | additiveExpression "+" multiplicativeExpression
+                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryExpr::Add, $1, $3); }
+    | additiveExpression "-" multiplicativeExpression
+                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryExpr::Sub, $1, $3); }
+    ;
+
+relationalExpression:
+      additiveExpression            { $$ = $1; }
+    | relationalExpression relationalOperator additiveExpression
+                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), $2, $1, $3); }
+    ;
+
+expression: relationalExpression    { $$ = $1; }
+    ;
+
+%%
+
+void yy::parser::error (const location_type& l, const std::string& m) {
+  ++impl(drv).ErrorCount;
+  std::cerr << "error @" << l << ": " << m << "\n\n";
+}

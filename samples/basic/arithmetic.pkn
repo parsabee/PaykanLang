@@ -1,0 +1,11 @@
+// Arithmetic: addition, subtraction, multiplication, division, modulo
+1 + 2;
+10 - 3;
+4 * 5;
+20 / 4;
+7 % 3;
+
+// Nested arithmetic with precedence
+2 + 3 * 4;
+(2 + 3) * 4;
+1 + 2 * 3 - 4 / 2;

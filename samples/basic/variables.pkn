@@ -1,0 +1,9 @@
+// Variable declarations with type annotation and initializer
+count: int = 42;
+pi: float = 3.14;
+done: bool = False;
+name: str = 0;
+
+// Using declared variables in expressions
+count + 1;
+pi * 2.0;

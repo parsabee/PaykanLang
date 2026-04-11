@@ -1,0 +1,7 @@
+// Assignment to variables
+x: int = 0;
+x = 10;
+x = x + 1;
+
+y: float = 1.0;
+y = y * 2.0;

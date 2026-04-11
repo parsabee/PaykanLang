@@ -1,0 +1,8 @@
+// Empty statements (just semicolons) are valid
+;
+;;
+
+// Mixed with real statements
+x: int = 1;
+;
+x = x + 1;
