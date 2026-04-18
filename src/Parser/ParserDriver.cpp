@@ -5,7 +5,7 @@
 
 namespace paykan::parser {
 
-// ── ParserDriver (public PIMPL wrapper) ─────────────────────────────────────
+// -- ParserDriver (public PIMPL wrapper) -------------------------------------
 
 ParserDriver::ParserDriver(bool TraceParsing, bool TraceScanning)
     : PImpl(std::make_unique<Impl>(TraceParsing, TraceScanning)) {}
@@ -24,9 +24,11 @@ int ParserDriver::parseFile(const std::string &filename) {
 
 ast::TranslationUnit *ParserDriver::getRoot() { return PImpl->Root; }
 
+ast::ASTContext &ParserDriver::getASTContext() { return PImpl->Ctx; }
+
 unsigned ParserDriver::getErrorCount() const { return PImpl->ErrorCount; }
 
-// ── ParserDriver::Impl ──────────────────────────────────────────────────────
+// -- ParserDriver::Impl ------------------------------------------------------
 
 int ParserDriver::Impl::parse(ParserDriver &drv) {
   yy::parser parser(drv);

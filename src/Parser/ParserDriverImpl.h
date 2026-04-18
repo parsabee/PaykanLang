@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "ASTContext.h"
 #include "AST.h"
 #include "ParserDriver.h"
 #include "Parser.ypp.h"

@@ -6,7 +6,7 @@
 namespace paykan {
 namespace ast {
 
-// ── Private helpers ─────────────────────────────────────────────────────────
+// -- Private helpers ---------------------------------------------------------
 
 void ASTPrinter::printIndent() {
   for (unsigned i = 0; i < LastChild.size(); ++i) {
@@ -46,11 +46,11 @@ void ASTPrinter::visitChildren(CallExpr *node) {
   }
 }
 
-// ── Constructor ─────────────────────────────────────────────────────────────
+// -- Constructor -------------------------------------------------------------
 
 ASTPrinter::ASTPrinter(llvm::raw_ostream &os) : OS(os) {}
 
-// ── Top-level ───────────────────────────────────────────────────────────────
+// -- Top-level ---------------------------------------------------------------
 
 void ASTPrinter::visitTranslationUnit(TranslationUnit *node) {
   printIndent();
@@ -63,7 +63,7 @@ void ASTPrinter::visitTranslationUnit(TranslationUnit *node) {
   }
 }
 
-// ── Statements ──────────────────────────────────────────────────────────────
+// -- Statements --------------------------------------------------------------
 
 void ASTPrinter::visitCompoundStmt(CompoundStmt *node) {
   printIndent();
@@ -117,7 +117,7 @@ void ASTPrinter::visitExprStmt(ExprStmt *node) {
   }
 }
 
-// ── Declarations ────────────────────────────────────────────────────────────
+// -- Declarations ------------------------------------------------------------
 
 void ASTPrinter::visitVarDecl(VarDecl *node) {
   printIndent();
@@ -137,26 +137,7 @@ void ASTPrinter::visitVarDecl(VarDecl *node) {
   }
 }
 
-void ASTPrinter::visitParamDecl(ParamDecl *node) {
-  printIndent();
-  OS << "ParamDecl";
-  printLoc(node);
-  OS << " '" << node->getName() << "'";
-  OS << "\n";
-  if (node->getType()) {
-    ChildScope cs(*this, true);
-    visit(node->getType());
-  }
-}
-
-void ASTPrinter::visitFunctionDecl(Decl *node) {
-  printIndent();
-  OS << "FunctionDecl";
-  printLoc(node);
-  OS << "\n";
-}
-
-// ── Expressions ─────────────────────────────────────────────────────────────
+// -- Expressions -------------------------------------------------------------
 
 void ASTPrinter::visitIntegerLiteral(IntegerLiteral *node) {
   printIndent();
@@ -177,6 +158,13 @@ void ASTPrinter::visitBoolLiteral(BoolLiteral *node) {
   OS << "BoolLiteral";
   printLoc(node);
   OS << " " << (node->getValue() ? "true" : "false") << "\n";
+}
+
+void ASTPrinter::visitStringLiteral(StringLiteral *node) {
+  printIndent();
+  OS << "StringLiteral";
+  printLoc(node);
+  OS << " \"" << node->getValue() << "\"\n";
 }
 
 void ASTPrinter::visitUnaryExpr(UnaryExpr *node) {
@@ -220,7 +208,7 @@ void ASTPrinter::visitCallExpr(CallExpr *node) {
   visitChildren(node);
 }
 
-// ── Types ───────────────────────────────────────────────────────────────────
+// -- Types -------------------------------------------------------------------
 
 void ASTPrinter::visitBuiltinType(BuiltinType *node) {
   printIndent();
@@ -229,10 +217,29 @@ void ASTPrinter::visitBuiltinType(BuiltinType *node) {
   switch (node->getTypeKind()) {
   case BuiltinType::Int:   OS << " 'int'";   break;
   case BuiltinType::Float: OS << " 'float'"; break;
-  case BuiltinType::Str:   OS << " 'str'";   break;
   case BuiltinType::Bool:  OS << " 'bool'";  break;
   case BuiltinType::Void:  OS << " 'void'";  break;
   }
+  OS << "\n";
+}
+
+void ASTPrinter::visitClassType(ClassType *node) {
+  printIndent();
+  OS << "ClassType";
+  printLoc(node);
+  OS << " '" << node->getName() << "'";
+  if (node->getSuperClass())
+    OS << " : '" << node->getSuperClass()->getName() << "'";
+  OS << "\n";
+}
+
+void ASTPrinter::visitMethodDecl(MethodDecl *node) {
+  printIndent();
+  OS << "MethodDecl";
+  printLoc(node);
+  OS << " '" << node->getName() << "'";
+  if (node->isStatic())  OS << " static";
+  if (node->isPrivate()) OS << " private";
   OS << "\n";
 }
 

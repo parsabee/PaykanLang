@@ -1,0 +1,18 @@
+# src/CodeGen/CMakeLists.txt
+# ----------------------------------------------------------------------------
+# paykan_codegen -- static library for LLVM IR code generation.
+# ----------------------------------------------------------------------------
+
+llvm_map_components_to_libnames(CODEGEN_LLVM_LIBS
+    core support passes
+)
+
+add_library(paykan_codegen STATIC CodeGen.cpp)
+target_include_directories(paykan_codegen SYSTEM
+    PRIVATE ${LLVM_INCLUDE_DIRS}
+)
+target_link_libraries(paykan_codegen
+    PUBLIC  paykan_parser
+    PRIVATE paykan_compile_options
+            ${CODEGEN_LLVM_LIBS}
+)

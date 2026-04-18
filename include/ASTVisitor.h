@@ -11,7 +11,57 @@
 namespace paykan {
 namespace ast {
 
-// ── CRTP AST Visitor ────────────────────────────────────────────────────────
+// -- X-macro node table ------------------------------------------------------
+//
+// Each entry: NODE(Kind, VisitName, CastTo)
+// where:
+//   Kind      -- the ASTNode::NK_xxx enumerator
+//   VisitName -- the visitXxx method name suffix (and the class name)
+//   CastTo    -- the type to cast to in the dispatch
+//
+// Grouped by category so we can selectively expand subsets.
+
+#define PAYKAN_DECL_NODES(NODE) \
+  NODE(NK_VarDecl,        VarDecl,        VarDecl) \
+  NODE(NK_MethodDecl,     MethodDecl,     MethodDecl)
+
+#define PAYKAN_STMT_NODES(NODE) \
+  NODE(NK_CompoundStmt,   CompoundStmt,   CompoundStmt)    \
+  NODE(NK_ReturnStmt,     ReturnStmt,     ReturnStmt)      \
+  NODE(NK_AssignStmt,     AssignStmt,     AssignStmt)      \
+  NODE(NK_DeclStmt,       DeclStmt,       DeclStmt)        \
+  NODE(NK_ExprStmt,       ExprStmt,       ExprStmt)
+
+#define PAYKAN_EXPR_NODES(NODE) \
+  NODE(NK_IntegerLiteral, IntegerLiteral, IntegerLiteral)  \
+  NODE(NK_FloatLiteral,   FloatLiteral,   FloatLiteral)    \
+  NODE(NK_BoolLiteral,    BoolLiteral,    BoolLiteral)     \
+  NODE(NK_StringLiteral,  StringLiteral,  StringLiteral)   \
+  NODE(NK_UnaryExpr,      UnaryExpr,      UnaryExpr)       \
+  NODE(NK_BinaryExpr,     BinaryExpr,     BinaryExpr)      \
+  NODE(NK_Identifier,     Identifier,     Identifier)      \
+  NODE(NK_CallExpr,       CallExpr,       CallExpr)
+
+#define PAYKAN_TYPE_NODES(NODE) \
+  NODE(NK_BuiltinType,    BuiltinType,    BuiltinType) \
+  NODE(NK_ClassType,      ClassType,      ClassType)
+
+#define PAYKAN_TOPLEVEL_NODES(NODE) \
+  NODE(NK_TranslationUnit, TranslationUnit, TranslationUnit)
+
+// All non-expression nodes.
+#define PAYKAN_NON_EXPR_NODES(NODE) \
+  PAYKAN_DECL_NODES(NODE)           \
+  PAYKAN_STMT_NODES(NODE)           \
+  PAYKAN_TYPE_NODES(NODE)           \
+  PAYKAN_TOPLEVEL_NODES(NODE)
+
+// Every node kind.
+#define PAYKAN_ALL_NODES(NODE) \
+  PAYKAN_NON_EXPR_NODES(NODE) \
+  PAYKAN_EXPR_NODES(NODE)
+
+// -- CRTP AST Visitor --------------------------------------------------------
 //
 // Derive from ASTVisitor<YourClass, ReturnType> and override any visitXxx()
 // method you care about.  Unhandled nodes return RetTy{} by default (or
@@ -21,90 +71,65 @@ template <typename Derived, typename RetTy = void>
 class ASTVisitor {
   static RetTy defaultResult() {
     if constexpr (!std::is_void_v<RetTy>)
-      return defaultResult();
+      return RetTy{};
   }
 
 public:
   RetTy visit(ASTNode *node) {
     switch (node->getKind()) {
-    // Declarations
-    case ASTNode::NK_FunctionDecl:
-      return derived().visitFunctionDecl(cast<Decl>(node));
-    case ASTNode::NK_ParamDecl:
-      return derived().visitParamDecl(cast<ParamDecl>(node));
-    case ASTNode::NK_VarDecl:
-      return derived().visitVarDecl(cast<VarDecl>(node));
-
-    // Statements
-    case ASTNode::NK_CompoundStmt:
-      return derived().visitCompoundStmt(cast<CompoundStmt>(node));
-    case ASTNode::NK_ReturnStmt:
-      return derived().visitReturnStmt(cast<ReturnStmt>(node));
-    case ASTNode::NK_AssignStmt:
-      return derived().visitAssignStmt(cast<AssignStmt>(node));
-    case ASTNode::NK_DeclStmt:
-      return derived().visitDeclStmt(cast<DeclStmt>(node));
-    case ASTNode::NK_ExprStmt:
-      return derived().visitExprStmt(cast<ExprStmt>(node));
-
-    // Expressions
-    case ASTNode::NK_IntegerLiteral:
-      return derived().visitIntegerLiteral(cast<IntegerLiteral>(node));
-    case ASTNode::NK_FloatLiteral:
-      return derived().visitFloatLiteral(cast<FloatLiteral>(node));
-    case ASTNode::NK_BoolLiteral:
-      return derived().visitBoolLiteral(cast<BoolLiteral>(node));
-    case ASTNode::NK_UnaryExpr:
-      return derived().visitUnaryExpr(cast<UnaryExpr>(node));
-    case ASTNode::NK_BinaryExpr:
-      return derived().visitBinaryExpr(cast<BinaryExpr>(node));
-    case ASTNode::NK_Identifier:
-      return derived().visitIdentifier(cast<Identifier>(node));
-    case ASTNode::NK_CallExpr:
-      return derived().visitCallExpr(cast<CallExpr>(node));
-
-    // Types
-    case ASTNode::NK_BuiltinType:
-      return derived().visitBuiltinType(cast<BuiltinType>(node));
-
-    // Top-level
-    case ASTNode::NK_TranslationUnit:
-      return derived().visitTranslationUnit(cast<TranslationUnit>(node));
+#define DISPATCH(Kind, Name, Cast) \
+    case ASTNode::Kind:            \
+      return derived().visit##Name(cast<Cast>(node));
+    PAYKAN_ALL_NODES(DISPATCH)
+#undef DISPATCH
     }
     assert(false && "Unknown NodeKind");
     return defaultResult();
   }
 
-  // Default implementations — override in Derived as needed.
-  // Declarations
-  RetTy visitFunctionDecl(Decl *) { return defaultResult(); }
-  RetTy visitParamDecl(ParamDecl *) { return defaultResult(); }
-  RetTy visitVarDecl(VarDecl *) { return defaultResult(); }
-
-  // Statements
-  RetTy visitCompoundStmt(CompoundStmt *) { return defaultResult(); }
-  RetTy visitReturnStmt(ReturnStmt *) { return defaultResult(); }
-  RetTy visitAssignStmt(AssignStmt *) { return defaultResult(); }
-  RetTy visitDeclStmt(DeclStmt *) { return defaultResult(); }
-  RetTy visitExprStmt(ExprStmt *) { return defaultResult(); }
-
-  // Expressions
-  RetTy visitIntegerLiteral(IntegerLiteral *) { return defaultResult(); }
-  RetTy visitFloatLiteral(FloatLiteral *) { return defaultResult(); }
-  RetTy visitBoolLiteral(BoolLiteral *) { return defaultResult(); }
-  RetTy visitUnaryExpr(UnaryExpr *) { return defaultResult(); }
-  RetTy visitBinaryExpr(BinaryExpr *) { return defaultResult(); }
-  RetTy visitIdentifier(Identifier *) { return defaultResult(); }
-  RetTy visitCallExpr(CallExpr *) { return defaultResult(); }
-
-  // Types
-  RetTy visitBuiltinType(BuiltinType *) { return defaultResult(); }
-
-  // Top-level
-  RetTy visitTranslationUnit(TranslationUnit *) { return defaultResult(); }
+  // Default implementations -- override in Derived as needed.
+#define DEFAULT_VISIT(Kind, Name, Cast) \
+  RetTy visit##Name(Cast *) { return defaultResult(); }
+  PAYKAN_ALL_NODES(DEFAULT_VISIT)
+#undef DEFAULT_VISIT
 
 protected:
   Derived &derived() { return static_cast<Derived &>(*this); }
+};
+
+// -- CRTP Expression Visitor -------------------------------------------------
+//
+// Inherits visitXxx defaults from ASTVisitor but provides its own visit()
+// that only dispatches expression nodes.  The entry point accepts Expr*
+// for compile-time safety.
+//
+template <typename Derived, typename RetTy = void>
+class ExprVisitor : public ASTVisitor<Derived, RetTy> {
+  static RetTy defaultResult() {
+    if constexpr (!std::is_void_v<RetTy>)
+      return RetTy{};
+  }
+
+public:
+  // Type-safe entry point: accepts only Expr*.
+  RetTy visit(Expr *node) {
+    switch (node->getKind()) {
+#define DISPATCH(Kind, Name, Cast) \
+    case ASTNode::Kind:            \
+      return this->derived().visit##Name(cast<Cast>(node));
+    PAYKAN_EXPR_NODES(DISPATCH)
+#undef DISPATCH
+    default:
+      assert(false && "ExprVisitor: unexpected node kind");
+      return defaultResult();
+    }
+  }
+
+  // Non-expression visitors are deleted -- calling them is a compile error.
+#define DELETE_VISIT(Kind, Name, Cast) \
+  RetTy visit##Name(Cast *) = delete;
+  PAYKAN_NON_EXPR_NODES(DELETE_VISIT)
+#undef DELETE_VISIT
 };
 
 } // namespace ast

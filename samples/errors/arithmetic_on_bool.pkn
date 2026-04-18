@@ -1,0 +1,4 @@
+// Error: arithmetic on bool
+a: bool = True;
+b: bool = False;
+a + b;

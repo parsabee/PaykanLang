@@ -6,12 +6,12 @@ project(PaykanLang
     LANGUAGES C CXX
 )
 
-# ── Language standard ────────────────────────────────────────────────────────
+# -- Language standard --------------------------------------------------------
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)           # Strict ISO C++, no GNU extensions
 
-# ── Build defaults ───────────────────────────────────────────────────────────
+# -- Build defaults -----------------------------------------------------------
 # Prevents an empty CMAKE_BUILD_TYPE (which applies no optimisation flags).
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     message(STATUS "No build type specified, defaulting to Debug")
@@ -24,7 +24,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
-# ── Third-party dependency versions ──────────────────────────────────────────
+# -- Third-party dependency versions ------------------------------------------
 # Pinned versions; hashes are verified in each Setup module.
 set(LLVM_VERSION  "17.0.6")
 set(BISON_VERSION "3.8")
@@ -38,12 +38,12 @@ set(BISON_INSTALL_DIR ${THIRD_PARTY_DIR}/bison)
 set(FLEX_INSTALL_DIR  ${THIRD_PARTY_DIR}/flex)
 set(GTEST_INSTALL_DIR ${THIRD_PARTY_DIR}/gtest)
 
-# ── Compiler gate ────────────────────────────────────────────────────────────
+# -- Compiler gate ------------------------------------------------------------
 if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     message(FATAL_ERROR "Unsupported compiler: ${CMAKE_CXX_COMPILER_ID}. Only Clang and GCC are supported.")
 endif()
 
-# ── Third-party setup ────────────────────────────────────────────────────────
+# -- Third-party setup --------------------------------------------------------
 # Each module downloads/builds its dependency on first configure and then
 # reuses the cached result on subsequent runs.  See cmake/ for details.
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
@@ -54,7 +54,7 @@ include(GTestSetup)         # → gtest, gmock       via FetchContent
 
 enable_testing()
 
-# ── Project compile options ──────────────────────────────────────────────────
+# -- Project compile options --------------------------------------------------
 # INTERFACE library that carries warnings, RTTI/exception policy, and
 # per-config optimisation flags.  Link to every first-party target:
 #   target_link_libraries(<target> PRIVATE paykan_compile_options)
@@ -71,6 +71,6 @@ target_compile_definitions(paykan_compile_options INTERFACE
     $<$<CONFIG:Release>:NDEBUG>
 )
 
-# ── Subdirectories ───────────────────────────────────────────────────────────
+# -- Subdirectories -----------------------------------------------------------
 add_subdirectory(src)
 add_subdirectory(tests)

@@ -1,0 +1,2 @@
+// Error: use of undeclared variable in expression
+x + 1;

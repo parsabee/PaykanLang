@@ -1,0 +1,2 @@
+// Error: use of undeclared variable inside expression
+y: int = x + 1;

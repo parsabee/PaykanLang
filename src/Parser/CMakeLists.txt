@@ -1,12 +1,12 @@
 # src/Parser/CMakeLists.txt
-# ────────────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------------
 # Builds the paykan_parser static library (Bison parser + Flex lexer + Driver).
 #
 # This is the ONLY target that compiles with -fexceptions and -frtti, which
 # are required by Bison's lalr1.cc skeleton (throw/catch + typeid).
-# ────────────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------------
 
-# ── Generated source paths ───────────────────────────────────────────────────
+# -- Generated source paths ---------------------------------------------------
 # Bison and Flex write into the binary dir so source tree stays clean.
 set(PARSER_YPP   ${CMAKE_CURRENT_SOURCE_DIR}/Parser.ypp)
 set(LEXER_LPP    ${CMAKE_CURRENT_SOURCE_DIR}/Lexer.lpp)
@@ -20,7 +20,7 @@ set(LOCATION_HPP ${PARSER_GEN_DIR}/location.hh)
 
 set(LEXER_CPP    ${PARSER_GEN_DIR}/Lexer.lpp.cpp)
 
-# ── Bison ────────────────────────────────────────────────────────────────────
+# -- Bison --------------------------------------------------------------------
 add_custom_command(
     OUTPUT  ${PARSER_CPP} ${PARSER_HPP} ${LOCATION_HPP}
     COMMAND ${BISON_EXECUTABLE}
@@ -32,7 +32,7 @@ add_custom_command(
     VERBATIM
 )
 
-# ── Flex ─────────────────────────────────────────────────────────────────────
+# -- Flex ---------------------------------------------------------------------
 add_custom_command(
     OUTPUT  ${LEXER_CPP}
     COMMAND ${FLEX_EXECUTABLE}
@@ -43,7 +43,7 @@ add_custom_command(
     VERBATIM
 )
 
-# ── Parser library ───────────────────────────────────────────────────────────
+# -- Parser library -----------------------------------------------------------
 add_library(paykan_parser STATIC
     ${PARSER_CPP}
     ${LEXER_CPP}
@@ -57,10 +57,11 @@ target_include_directories(paykan_parser
 )
 
 target_link_libraries(paykan_parser
+    PUBLIC  paykan_ast
     PRIVATE paykan_llvm
 )
 
-# Bison's lalr1.cc uses throw/catch and typeid — this is the ONLY target
+# Bison's lalr1.cc uses throw/catch and typeid -- this is the ONLY target
 # that enables RTTI and exceptions.  We set our own flags instead of linking
 # paykan_compile_options (which carries -fno-rtti -fno-exceptions).
 target_compile_options(paykan_parser PRIVATE

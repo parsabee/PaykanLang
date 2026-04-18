@@ -6,6 +6,7 @@
 
 #include <cassert>
 #include <concepts>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -40,9 +41,8 @@ class ASTNode {
 public:
   enum NodeKind {
     // Declarations
-    NK_FunctionDecl,
-    NK_ParamDecl,
     NK_VarDecl,
+    NK_MethodDecl,
 
     // Statements
     NK_CompoundStmt,
@@ -55,6 +55,7 @@ public:
     NK_IntegerLiteral,
     NK_FloatLiteral,
     NK_BoolLiteral,
+    NK_StringLiteral,
     NK_UnaryExpr,
     NK_BinaryExpr,
     NK_Identifier,
@@ -62,6 +63,7 @@ public:
 
     // Types
     NK_BuiltinType,
+    NK_ClassType,
 
     // Top-level
     NK_TranslationUnit,
@@ -81,14 +83,14 @@ public:
 };
 
 // Concept for valid AST node types: must derive from ASTNode and provide
-// LLVM-style RTTI via a static classof method.  Extend as needed.
+// LLVM-style RTTI via a static classof method.
 template <typename T>
 concept ASTNodeType = std::derived_from<T, ASTNode> &&
     requires(const ASTNode *n) {
       { T::classof(n) } -> std::same_as<bool>;
     };
 
-// ── LLVM-style RTTI free functions ──────────────────────────────────────────
+// -- LLVM-style RTTI free functions ------------------------------------------
 
 template <ASTNodeType T>
 bool isa(const ASTNode *n) { return T::classof(n); }
@@ -119,7 +121,7 @@ public:
   Decl(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_FunctionDecl && N->getKind() <= NK_VarDecl;
+    return N->getKind() >= NK_VarDecl && N->getKind() <= NK_MethodDecl;
   }
 };
 
@@ -143,30 +145,71 @@ public:
   }
 };
 
+// -- Operator enums (at namespace scope so Type can reference them) ----------
+
+enum class UnaryOpcode {
+  Neg, // -
+  Not, // !
+};
+
+enum class BinaryOpcode {
+  // Arithmetic
+  Add, // +
+  Sub, // -
+  Mul, // *
+  Div, // /
+  Mod, // %
+  // Relational
+  Lt,  // <
+  Gt,  // >
+  Le,  // <=
+  Ge,  // >=
+  Eq,  // ==
+  Ne,  // !=
+};
+
 // Base for all types
 class Type : public ASTNode {
+  uint32_t UnaryOps = 0;   // bitmask of supported UnaryOpcode values
+  uint32_t BinaryOps = 0;  // bitmask of supported BinaryOpcode values
+
 public:
   Type(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
 
-  static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_BuiltinType && N->getKind() <= NK_BuiltinType;
+  /// Register a unary operator. Returns true if newly added, false if already present.
+  bool addUnaryOp(UnaryOpcode op) {
+    uint32_t bit = 1u << static_cast<unsigned>(op);
+    if (UnaryOps & bit) return false;
+    UnaryOps |= bit;
+    return true;
   }
-};
 
-// Parameter declaration
-class ParamDecl : public Decl {
-private:
-  std::string Name;
-  Type *ParamType;
+  /// Register a binary operator. Returns true if newly added, false if already present.
+  bool addBinaryOp(BinaryOpcode op) {
+    uint32_t bit = 1u << static_cast<unsigned>(op);
+    if (BinaryOps & bit) return false;
+    BinaryOps |= bit;
+    return true;
+  }
 
-public:
-  ParamDecl(SourceLocation loc, const std::string &name, Type *type)
-      : Decl(NK_ParamDecl, loc), Name(name), ParamType(type) {}
+  /// Returns true if the unary operator is defined for this type.
+  bool hasUnaryOp(UnaryOpcode op) const {
+    return (UnaryOps >> static_cast<unsigned>(op)) & 1u;
+  }
 
-  const std::string &getName() const { return Name; }
-  Type *getType() const { return ParamType; }
+  /// Returns true if the binary operator is defined for (this, rhs).
+  bool hasBinaryOp(BinaryOpcode op, const Type *rhs) const {
+    return hasOp(op) && rhs->hasOp(op);
+  }
 
-  static bool classof(const ASTNode *N) { return N->getKind() == NK_ParamDecl; }
+  /// Returns true if this type supports the given binary operator at all.
+  bool hasOp(BinaryOpcode op) const {
+    return (BinaryOps >> static_cast<unsigned>(op)) & 1u;
+  }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() >= NK_BuiltinType && N->getKind() <= NK_ClassType;
+  }
 };
 
 // Variable declaration with explicit type (x: int = 10)
@@ -313,54 +356,38 @@ public:
   }
 };
 
+// String literal
+class StringLiteral : public Expr {
+private:
+  std::string Value;
+
+public:
+  StringLiteral(SourceLocation loc, const std::string &value)
+      : Expr(NK_StringLiteral, loc), Value(value) {}
+
+  const std::string &getValue() const { return Value; }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_StringLiteral;
+  }
+};
+
 // Binary expression
 class BinaryExpr : public Expr {
-public:
-  enum Opcode {
-    // Arithmetic
-    Add, // +
-    Sub, // -
-    Mul, // *
-    Div, // /
-    Mod, // %
-    // Relational
-    Lt,  // <
-    Gt,  // >
-    Le,  // <=
-    Ge,  // >=
-    Eq,  // ==
-    Ne,  // !=
-  };
-
 private:
-  Opcode Op;
+  BinaryOpcode Op;
   Expr *LHS;
   Expr *RHS;
 
 public:
-  BinaryExpr(SourceLocation loc, Opcode op, Expr *lhs, Expr *rhs)
+  BinaryExpr(SourceLocation loc, BinaryOpcode op, Expr *lhs, Expr *rhs)
       : Expr(NK_BinaryExpr, loc), Op(op), LHS(lhs), RHS(rhs) {}
 
-  Opcode getOpcode() const { return Op; }
+  BinaryOpcode getOpcode() const { return Op; }
   Expr *getLHS() const { return LHS; }
   Expr *getRHS() const { return RHS; }
 
-  const char *getOpcodeStr() const {
-    switch (Op) {
-    case Add: return "+";
-    case Sub: return "-";
-    case Mul: return "*";
-    case Div: return "/";
-    case Mod: return "%";
-    case Lt:  return "<";
-    case Gt:  return ">";
-    case Le:  return "<=";
-    case Ge:  return ">=";
-    case Eq:  return "==";
-    case Ne:  return "!=";
-    }
-    return "?";
-  }
+  const char *getOpcodeStr() const;
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_BinaryExpr;
@@ -369,30 +396,18 @@ public:
 
 // Unary expression
 class UnaryExpr : public Expr {
-public:
-  enum Opcode {
-    Neg, // -
-    Not, // !
-  };
-
 private:
-  Opcode Op;
+  UnaryOpcode Op;
   Expr *Operand;
 
 public:
-  UnaryExpr(SourceLocation loc, Opcode op, Expr *operand)
+  UnaryExpr(SourceLocation loc, UnaryOpcode op, Expr *operand)
       : Expr(NK_UnaryExpr, loc), Op(op), Operand(operand) {}
 
-  Opcode getOpcode() const { return Op; }
+  UnaryOpcode getOpcode() const { return Op; }
   Expr *getOperand() const { return Operand; }
 
-  const char *getOpcodeStr() const {
-    switch (Op) {
-    case Neg: return "-";
-    case Not: return "!";
-    }
-    return "?";
-  }
+  const char *getOpcodeStr() const;
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_UnaryExpr;
@@ -438,7 +453,6 @@ public:
   enum Kind {
     Int,
     Float,
-    Str,
     Bool,
     Void,
   };
@@ -446,13 +460,133 @@ public:
 private:
   Kind TypeKind;
 
+  void initOps();
+
 public:
-  BuiltinType(SourceLocation loc, Kind kind) : Type(NK_BuiltinType, loc), TypeKind(kind) {}
+  BuiltinType(SourceLocation loc, Kind kind) : Type(NK_BuiltinType, loc), TypeKind(kind) {
+    initOps();
+  }
 
   Kind getTypeKind() const { return TypeKind; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_BuiltinType;
+  }
+};
+
+// Method declaration (name + signature + flags)
+class MethodDecl : public Decl {
+public:
+  enum Flags : uint8_t {
+    None    = 0,
+    Static  = 1 << 0,
+    Private = 1 << 1,
+  };
+
+private:
+  std::string Name;
+  Type *ReturnType;
+  std::vector<Type *> ParamTypes;
+  uint8_t MethodFlags;
+
+public:
+  MethodDecl(SourceLocation loc, const std::string &name, Type *retTy,
+             std::vector<Type *> params, uint8_t flags = None)
+      : Decl(NK_MethodDecl, loc), Name(name), ReturnType(retTy),
+        ParamTypes(std::move(params)), MethodFlags(flags) {}
+
+  const std::string &getName() const { return Name; }
+  Type *getReturnType() const { return ReturnType; }
+  const std::vector<Type *> &getParamTypes() const { return ParamTypes; }
+  size_t getNumParams() const { return ParamTypes.size(); }
+
+  /// Replace the return type (used for forward-reference patching).
+  void setReturnType(Type *ty) { ReturnType = ty; }
+
+  /// Replace a parameter type at index i (used for forward-reference patching).
+  void setParamType(size_t i, Type *ty) {
+    assert(i < ParamTypes.size() && "param index out of range");
+    ParamTypes[i] = ty;
+  }
+
+  bool isStatic() const { return MethodFlags & Static; }
+  bool isPrivate() const { return MethodFlags & Private; }
+  bool isVirtual() const { return !isStatic() && !isPrivate(); }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_MethodDecl;
+  }
+};
+
+// Class type (reference type with vtable)
+//
+// Holds the class name, optional superclass pointer, instance fields,
+// all methods, and a flattened vtable of virtual methods in layout order.
+//
+// Vtable construction:
+//   1. Copy the parent's vtable.
+//   2. For each virtual method in this class:
+//      - If a same-named method exists in the parent vtable, override that slot.
+//      - Otherwise, append a new slot.
+//
+class ClassType : public Type {
+  std::string Name;
+  ClassType *SuperClass;
+
+  // Instance fields: (name, type) pairs.
+  std::vector<std::pair<std::string, Type *>> Fields;
+
+  // All methods declared in this class.
+  std::vector<MethodDecl *> Methods;
+
+  // Flattened vtable: virtual methods in layout order.
+  std::vector<MethodDecl *> VTable;
+
+public:
+  ClassType(SourceLocation loc, const std::string &name,
+            ClassType *superClass = nullptr)
+      : Type(NK_ClassType, loc), Name(name), SuperClass(superClass) {
+    // Inherit parent vtable.
+    if (SuperClass)
+      VTable = SuperClass->VTable;
+    // Inherit parent operators (Eq/Ne).
+    if (SuperClass) {
+      // Object-typed values can at least be compared for equality.
+    }
+  }
+
+  const std::string &getName() const { return Name; }
+  ClassType *getSuperClass() const { return SuperClass; }
+
+  // -- Fields ---------------------------------------------------------------
+
+  void addField(const std::string &name, Type *ty) {
+    Fields.emplace_back(name, ty);
+  }
+  const std::vector<std::pair<std::string, Type *>> &getFields() const {
+    return Fields;
+  }
+  size_t getNumFields() const { return Fields.size(); }
+
+  // -- Methods --------------------------------------------------------------
+
+  void addMethod(MethodDecl *m);
+
+  const std::vector<MethodDecl *> &getMethods() const { return Methods; }
+  const std::vector<MethodDecl *> &getVTable() const { return VTable; }
+  size_t getVTableSize() const { return VTable.size(); }
+
+  /// Find the vtable slot index for a method name, or -1 if not found.
+  int getVTableIndex(const std::string &name) const;
+
+  /// Look up a method by name (searches this class and parents).
+  MethodDecl *findMethod(const std::string &name) const;
+
+  /// Returns true if this type is a subtype of (or equal to) Other.
+  bool isSubtypeOf(const ClassType *other) const;
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_ClassType;
   }
 };
 
@@ -469,22 +603,6 @@ public:
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_TranslationUnit;
-  }
-};
-
-// Arena-style memory pool that owns every AST node.
-// All nodes are destroyed when the ASTContext goes out of scope.
-class ASTContext {
-  std::vector<std::unique_ptr<ASTNode>> Pool;
-
-public:
-  /// Create an AST node of type T, store it in the pool, return a raw pointer.
-  template <ASTNodeType T, typename... Args>
-  T *make(Args &&...args) {
-    auto node = std::make_unique<T>(std::forward<Args>(args)...);
-    T *ptr = node.get();
-    Pool.push_back(std::move(node));
-    return ptr;
   }
 };
 

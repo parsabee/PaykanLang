@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "ASTContext.h"
 #include "AST.h"
 #include <memory>
 #include <string>
@@ -25,6 +26,9 @@ public:
 
   /// Root of the parsed AST (owned by the internal ASTContext).
   ast::TranslationUnit *getRoot();
+
+  /// The ASTContext that owns all AST nodes.
+  ast::ASTContext &getASTContext();
 
   /// Number of syntax errors encountered during the last parse.
   unsigned getErrorCount() const;

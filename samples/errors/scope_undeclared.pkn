@@ -1,0 +1,5 @@
+// Error: variable declared in inner scope is not visible outside
+{
+  y = 42;
+}
+y + 1;

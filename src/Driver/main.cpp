@@ -3,13 +3,16 @@
 
 #include "ParserDriver.h"
 #include "ASTPrinter.h"
+#include "CodeGen.h"
+#include "Sema.h"
 
+#include <llvm/IR/LLVMContext.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/raw_ostream.h>
 
 #include <cstdlib>
 
-// ── Command-line options (LLVM cl style) ────────────────────────────────────
+// -- Command-line options ---------------------------------------------------
 
 static llvm::cl::opt<std::string>
     InputFilename(llvm::cl::Positional, llvm::cl::desc("<source-file>"),
@@ -29,7 +32,18 @@ static llvm::cl::opt<bool>
                   llvm::cl::desc("Enable Flex scanner debug traces"),
                   llvm::cl::init(false));
 
-// ── Entry point ─────────────────────────────────────────────────────────────
+static llvm::cl::opt<bool>
+    EmitLLVM("emit-llvm",
+             llvm::cl::desc("Emit LLVM IR to stdout"),
+             llvm::cl::init(false));
+
+static llvm::cl::opt<unsigned>
+    OptLevel("O",
+             llvm::cl::desc("Optimization level (0–3)"),
+             llvm::cl::Prefix,
+             llvm::cl::init(0));
+
+// -- Entry point -------------------------------------------------------------
 
 int main(int argc, char *argv[]) {
   llvm::cl::ParseCommandLineOptions(argc, argv, "Paykan language compiler\n");
@@ -44,12 +58,41 @@ int main(int argc, char *argv[]) {
   }
 
   auto *root = driver.getRoot();
+
   if (DumpAST) {
     paykan::ast::ASTPrinter printer(llvm::outs());
     printer.visit(root);
-  } else {
-    llvm::outs() << "parse ok — " << root->getBody()->size()
-                 << " top-level statement(s)\n";
+    return EXIT_SUCCESS;
   }
+
+  // -- Semantic analysis ----------------------------------------------------
+  paykan::sema::Sema sema(driver.getASTContext(), llvm::errs());
+  sema.run(root);
+
+  if (sema.hasErrors())
+    return EXIT_FAILURE;
+
+  // -- Code generation ------------------------------------------------------
+  if (EmitLLVM) {
+    llvm::LLVMContext llvmCtx;
+    paykan::codegen::CodeGen cg(driver.getASTContext(), llvmCtx,
+                                InputFilename);
+    if (!cg.run(root)) {
+      llvm::errs() << "code generation failed (module verification error)\n";
+      return EXIT_FAILURE;
+    }
+    // Map -O<n> to LLVM optimization level.
+    static const llvm::OptimizationLevel levels[] = {
+        llvm::OptimizationLevel::O0,
+        llvm::OptimizationLevel::O1,
+        llvm::OptimizationLevel::O2,
+        llvm::OptimizationLevel::O3,
+    };
+    unsigned lvl = OptLevel < 4 ? OptLevel : 3;
+    cg.optimize(levels[lvl]);
+    cg.getModule().print(llvm::outs(), nullptr);
+    return EXIT_SUCCESS;
+  }
+  
   return EXIT_SUCCESS;
 }

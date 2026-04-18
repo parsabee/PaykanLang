@@ -47,33 +47,36 @@ comment     \/\/[^\n]*
 {comment}+ loc.step();
 \n+        loc.lines (yyleng); loc.step ();
 
-
-"-"        return yy::parser::make_MINUS  (loc);
-"+"        return yy::parser::make_PLUS   (loc);
-"*"        return yy::parser::make_STAR   (loc);
-"/"        return yy::parser::make_SLASH  (loc);
-"%"        return yy::parser::make_MOD (loc);
-">"        return yy::parser::make_MORE  (loc);
-"<"        return yy::parser::make_LESS  (loc);
-">="       return yy::parser::make_MOREEQ  (loc);
-"<="       return yy::parser::make_LESSEQ  (loc);
-"=="       return yy::parser::make_EQUAL (loc);
-"!="       return yy::parser::make_NOT_EQUAL(loc);
-"("        return yy::parser::make_LPAREN (loc);
-")"        return yy::parser::make_RPAREN (loc);
-"{"        return yy::parser::make_LBRACK (loc);
-"}"        return yy::parser::make_RBRACK (loc);
-"="        return yy::parser::make_ASSIGN (loc);
-":"        return yy::parser::make_COLON  (loc);
-"."        return yy::parser::make_DOT(loc);
+"->"       return yy::parser::make_ARROW     (loc);
+">="       return yy::parser::make_MOREEQ    (loc);
+"<="       return yy::parser::make_LESSEQ    (loc);
+"=="       return yy::parser::make_EQUAL     (loc);
+"!="       return yy::parser::make_NOT_EQUAL (loc);
+"-"        return yy::parser::make_MINUS     (loc);
+"+"        return yy::parser::make_PLUS      (loc);
+"*"        return yy::parser::make_STAR      (loc);
+"/"        return yy::parser::make_SLASH     (loc);
+"%"        return yy::parser::make_MOD       (loc);
+">"        return yy::parser::make_MORE      (loc);
+"<"        return yy::parser::make_LESS      (loc);
+"("        return yy::parser::make_LPAREN    (loc);
+")"        return yy::parser::make_RPAREN    (loc);
+"{"        return yy::parser::make_LBRACK    (loc);
+"}"        return yy::parser::make_RBRACK    (loc);
+"="        return yy::parser::make_ASSIGN    (loc);
+":"        return yy::parser::make_COLON     (loc);
+"."        return yy::parser::make_DOT       (loc);
 ";"        return yy::parser::make_SEMICOLON (loc);
-","        return yy::parser::make_COMMA (loc);
-"!"        return yy::parser::make_NOT(loc);
-"->"       return yy::parser::make_ARROW(loc);
-{int}      return make_INT (yytext, loc);
+","        return yy::parser::make_COMMA     (loc);
+"!"        return yy::parser::make_NOT       (loc);
+
+\"([^\\\"]|\\.)*\"  { std::string s(yytext + 1, yyleng - 2);
+                      return yy::parser::make_STRING (s, loc); }
+
+{int}      return make_INT   (yytext, loc);
 {float}    return make_FLOAT (yytext, loc);
-{true}     return yy::parser::make_BOOL (true, loc);
-{false}    return yy::parser::make_BOOL (false, loc);
+{true}     return yy::parser::make_BOOL  (true,  loc);
+{false}    return yy::parser::make_BOOL  (false, loc);
 {id}       return yy::parser::make_IDENT (yytext, loc);
 
 <<EOF>>    return yy::parser::make_YYEOF (loc);

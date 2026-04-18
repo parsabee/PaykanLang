@@ -1,0 +1,6 @@
+// Error: unary negate on bool, logical not on int
+flag: bool = True;
+-flag;
+
+count: int = 5;
+!count;

@@ -66,22 +66,26 @@
 %token <long> INT
 %token <double> FLOAT
 %token <bool> BOOL
+%token <std::string> STRING
 %token <std::string> IDENT
 
 %type <TranslationUnit *> translationUnit
 %type <Stmt *> statement
 %type <Identifier *> identifier
 %type <CompoundStmt *> compoundStmt
+%type <CompoundStmt *> block
+%type <Type *> typeAnnotation
 %type <VarDecl *> varDecl
 %type <DeclStmt *> staticAssignment
-%type <BinaryExpr::Opcode> relationalOperator
+%type <BinaryOpcode> relationalOperator
 %type <Expr *> primaryExpression
 %type <Expr *> unaryExpression
 %type <Expr *> additiveExpression
 %type <Expr *> multiplicativeExpression
 %type <Expr *> expression
 %type <Expr *> relationalExpression
-%type <UnaryExpr::Opcode> unaryOperator
+%type <std::vector<Expr *>> argumentList
+%type <UnaryOpcode> unaryOperator
 %%
 
 %start translationUnit;
@@ -99,11 +103,21 @@ compoundStmt: %empty                { $$ = impl(drv).Ctx.make<CompoundStmt>(loc(
                                     }
     ;
 
+block: "{" compoundStmt "}"        { $$ = $2; }
+    ;
+
 identifier: IDENT                   { $$ = impl(drv).Ctx.make<Identifier>(loc(@1, @1), $1); }
     ;
 
-varDecl: IDENT ":" identifier
-                                    { $$ = impl(drv).Ctx.make<VarDecl>(loc(@1, @3), $1, nullptr, nullptr); }
+typeAnnotation: IDENT               { auto *ty = impl(drv).Ctx.lookupType($1);
+                                      if (!ty)
+                                        throw yy::parser::syntax_error(@1, "unknown type '" + $1 + "'");
+                                      $$ = ty;
+                                    }
+    ;
+
+varDecl: IDENT ":" typeAnnotation
+                                    { $$ = impl(drv).Ctx.make<VarDecl>(loc(@1, @3), $1, $3, nullptr); }
     ;
 
 staticAssignment: varDecl "=" expression
@@ -121,27 +135,35 @@ statement: ";"                      { $$ = nullptr; }
                                       $$ = impl(drv).Ctx.make<AssignStmt>(loc(@1, @4), lhs->getName(), $3);
                                     }
     | staticAssignment ";"          { $$ = $1; }
+    | block                         { $$ = $1; }
     ;
 
 relationalOperator:
-      "<"                           { $$ = BinaryExpr::Lt; }
-    | ">"                           { $$ = BinaryExpr::Gt; }
-    | "<="                          { $$ = BinaryExpr::Le; }
-    | ">="                          { $$ = BinaryExpr::Ge; }
-    | "=="                          { $$ = BinaryExpr::Eq; }
-    | "!="                          { $$ = BinaryExpr::Ne; }
+      "<"                           { $$ = BinaryOpcode::Lt; }
+    | ">"                           { $$ = BinaryOpcode::Gt; }
+    | "<="                          { $$ = BinaryOpcode::Le; }
+    | ">="                          { $$ = BinaryOpcode::Ge; }
+    | "=="                          { $$ = BinaryOpcode::Eq; }
+    | "!="                          { $$ = BinaryOpcode::Ne; }
     ;
 
 primaryExpression:
       INT                           { $$ = impl(drv).Ctx.make<IntegerLiteral>(loc(@1, @1), $1); }
     | FLOAT                         { $$ = impl(drv).Ctx.make<FloatLiteral>(loc(@1, @1), $1); }
     | BOOL                          { $$ = impl(drv).Ctx.make<BoolLiteral>(loc(@1, @1), $1); }
+    | STRING                        { $$ = impl(drv).Ctx.make<StringLiteral>(loc(@1, @1), $1); }
+    | IDENT "(" argumentList ")"    { $$ = impl(drv).Ctx.make<CallExpr>(loc(@1, @4), $1, std::move($3)); }
     | IDENT                         { $$ = impl(drv).Ctx.make<Identifier>(loc(@1, @1), $1); }
     | "(" expression ")"            { $$ = $2; }
     ;
 
-unaryOperator: "!"                  { $$ = UnaryExpr::Not; }
-    | "-"                           { $$ = UnaryExpr::Neg; }
+argumentList: %empty                { $$ = std::vector<Expr *>(); }
+    | expression                    { $$ = std::vector<Expr *>{$1}; }
+    | argumentList "," expression   { $$ = std::move($1); $$.push_back($3); }
+    ;
+
+unaryOperator: "!"                  { $$ = UnaryOpcode::Not; }
+    | "-"                           { $$ = UnaryOpcode::Neg; }
     ;
 
 unaryExpression:
@@ -153,19 +175,19 @@ unaryExpression:
 multiplicativeExpression:
       unaryExpression               { $$ = $1; }
     | multiplicativeExpression "*" unaryExpression
-                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryExpr::Mul, $1, $3); }
+                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryOpcode::Mul, $1, $3); }
     | multiplicativeExpression "/" unaryExpression
-                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryExpr::Div, $1, $3); }
+                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryOpcode::Div, $1, $3); }
     | multiplicativeExpression "%" unaryExpression
-                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryExpr::Mod, $1, $3); }
+                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryOpcode::Mod, $1, $3); }
     ;
 
 additiveExpression:
       multiplicativeExpression      { $$ = $1; }
     | additiveExpression "+" multiplicativeExpression
-                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryExpr::Add, $1, $3); }
+                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryOpcode::Add, $1, $3); }
     | additiveExpression "-" multiplicativeExpression
-                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryExpr::Sub, $1, $3); }
+                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryOpcode::Sub, $1, $3); }
     ;
 
 relationalExpression:

@@ -1,13 +1,13 @@
-# src/ASTPrinter/CMakeLists.txt
+# src/Sema/CMakeLists.txt
 # ----------------------------------------------------------------------------
-# paykan_ast_printer – static library for AST pretty-printing.
+# paykan_sema -- static library for semantic analysis.
 # ----------------------------------------------------------------------------
 
-add_library(paykan_ast_printer STATIC ASTPrinter.cpp)
-target_include_directories(paykan_ast_printer SYSTEM
+add_library(paykan_sema STATIC Sema.cpp)
+target_include_directories(paykan_sema SYSTEM
     PRIVATE ${LLVM_INCLUDE_DIRS}
 )
-target_link_libraries(paykan_ast_printer
+target_link_libraries(paykan_sema
     PUBLIC  paykan_parser
     PRIVATE paykan_compile_options
             LLVMSupport

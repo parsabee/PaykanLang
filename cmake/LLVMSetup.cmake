@@ -1,17 +1,17 @@
 # LLVMSetup.cmake
-# ────────────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------------
 # Downloads pre-built LLVM binaries on first configure and caches them under
 # ${LLVM_INSTALL_DIR}.  Subsequent configures reuse the cached copy.
 #
 # Provides:
-#   paykan_llvm  — INTERFACE library carrying LLVM include dirs & definitions.
+#   paykan_llvm  -- INTERFACE library carrying LLVM include dirs & definitions.
 #                  Link with: target_link_libraries(<t> PRIVATE paykan_llvm)
-#   LLVM CMake   — AddLLVM, HandleLLVMOptions, and the full LLVM package.
+#   LLVM CMake   -- AddLLVM, HandleLLVMOptions, and the full LLVM package.
 #
 # Supported platforms:
 #   • macOS  ARM64 (Apple Silicon)
 #   • Linux  x86_64
-# ────────────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------------
 
 # Fast path: reuse a previously-downloaded copy.
 if(EXISTS ${LLVM_INSTALL_DIR}/lib/cmake/llvm)
@@ -102,12 +102,12 @@ if(NOT LLVM_FOUND)
     find_package(LLVM REQUIRED CONFIG PATHS ${LLVM_DIR} NO_DEFAULT_PATH)
 endif()
 
-# ── Import LLVM's own CMake helpers ──────────────────────────────────────────
+# -- Import LLVM's own CMake helpers ------------------------------------------
 list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
 include(AddLLVM)              # llvm_add_library, llvm_add_executable, etc.
 include(HandleLLVMOptions)    # Applies LLVM-recommended compiler flags
 
-# ── paykan_llvm INTERFACE target ─────────────────────────────────────────────
+# -- paykan_llvm INTERFACE target ---------------------------------------------
 # Scoped alternative to global include_directories() / add_definitions().
 # Link only the targets that actually need LLVM headers & definitions.
 add_library(paykan_llvm INTERFACE)

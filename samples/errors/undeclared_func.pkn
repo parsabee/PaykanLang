@@ -1,0 +1,3 @@
+x: int = foo(1, 2);
+bar();
+baz(x, 3 + 4, "hello");

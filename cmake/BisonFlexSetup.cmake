@@ -1,15 +1,15 @@
 # BisonFlexSetup.cmake
-# ────────────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------------
 # Builds Bison and Flex from source via ExternalProject and installs them
 # into ${BISON_INSTALL_DIR} / ${FLEX_INSTALL_DIR}.  Skips the build if the
 # binaries already exist from a previous configure.
 #
 # Provides:
-#   BISON_EXECUTABLE  — path to the built bison binary
-#   FLEX_EXECUTABLE   — path to the built flex binary
-#   bison_ext         — target that other targets can depend on
-#   flex_ext          — target that other targets can depend on
-# ────────────────────────────────────────────────────────────────────────────
+#   BISON_EXECUTABLE  -- path to the built bison binary
+#   FLEX_EXECUTABLE   -- path to the built flex binary
+#   bison_ext         -- target that other targets can depend on
+#   flex_ext          -- target that other targets can depend on
+# ----------------------------------------------------------------------------
 
 include(ExternalProject)
 
@@ -20,7 +20,7 @@ if(NPROC EQUAL 0)
     set(NPROC 4)
 endif()
 
-# ── Bison ────────────────────────────────────────────────────────────────────
+# -- Bison --------------------------------------------------------------------
 if(NOT EXISTS ${BISON_INSTALL_DIR}/bin/bison)
     message(STATUS "Building Bison ${BISON_VERSION} from source...")
     ExternalProject_Add(bison_ext
@@ -41,7 +41,7 @@ else()
 endif()
 set(BISON_EXECUTABLE ${BISON_INSTALL_DIR}/bin/bison)
 
-# ── Flex ─────────────────────────────────────────────────────────────────────
+# -- Flex ---------------------------------------------------------------------
 if(NOT EXISTS ${FLEX_INSTALL_DIR}/bin/flex)
     message(STATUS "Building Flex ${FLEX_VERSION} from source...")
     ExternalProject_Add(flex_ext

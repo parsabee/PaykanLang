@@ -1,10 +1,10 @@
 # GTestSetup.cmake
-# ────────────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------------
 # Fetches Google Test via FetchContent (CMake-native, integrates directly
 # into the build graph).  Downloaded once into ${GTEST_INSTALL_DIR}.
 #
 # Provides targets:  gtest, gtest_main, gmock, gmock_main
-# ────────────────────────────────────────────────────────────────────────────
+# ----------------------------------------------------------------------------
 
 include(FetchContent)
 

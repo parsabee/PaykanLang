@@ -52,32 +52,11 @@ class ASTPrinter : public ASTVisitor<ASTPrinter, void> {
 public:
   explicit ASTPrinter(llvm::raw_ostream &os);
 
-  // ── Top-level ───────────────────────────────────────────────────────────
-  void visitTranslationUnit(TranslationUnit *node);
-
-  // ── Statements ──────────────────────────────────────────────────────────
-  void visitCompoundStmt(CompoundStmt *node);
-  void visitReturnStmt(ReturnStmt *node);
-  void visitAssignStmt(AssignStmt *node);
-  void visitDeclStmt(DeclStmt *node);
-  void visitExprStmt(ExprStmt *node);
-
-  // ── Declarations ────────────────────────────────────────────────────────
-  void visitVarDecl(VarDecl *node);
-  void visitParamDecl(ParamDecl *node);
-  void visitFunctionDecl(Decl *node);
-
-  // ── Expressions ─────────────────────────────────────────────────────────
-  void visitIntegerLiteral(IntegerLiteral *node);
-  void visitFloatLiteral(FloatLiteral *node);
-  void visitBoolLiteral(BoolLiteral *node);
-  void visitUnaryExpr(UnaryExpr *node);
-  void visitBinaryExpr(BinaryExpr *node);
-  void visitIdentifier(Identifier *node);
-  void visitCallExpr(CallExpr *node);
-
-  // ── Types ───────────────────────────────────────────────────────────────
-  void visitBuiltinType(BuiltinType *node);
+  // -- Visitor overrides (generated from X-macros) -------------------------
+#define AST_PRINT(Kind, Name, Cast) \
+  void visit##Name(Cast *node);
+  PAYKAN_ALL_NODES(AST_PRINT)
+#undef AST_PRINT
 };
 
 } // namespace ast
