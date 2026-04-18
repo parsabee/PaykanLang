@@ -8,6 +8,7 @@
 #include "ASTVisitor.h"
 
 #include <llvm/ADT/StringMap.h>
+#include <llvm/ADT/StringSet.h>
 #include <llvm/Support/raw_ostream.h>
 #include <string>
 #include <vector>
@@ -50,15 +51,34 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   struct Scope {
     Scope *Parent = nullptr;
     llvm::StringMap<ast::Type *> Locals;
+    llvm::StringMap<ast::Ownership> OwnershipMap;
+    llvm::StringSet<> MovedSet;  // unique variables that have been moved
+    llvm::StringSet<> ConstSet;  // variables declared as const
 
     explicit Scope(Scope *parent = nullptr);
 
     /// Look up a name, walking the scope chain.
     ast::Type *lookup(llvm::StringRef name) const;
 
+    /// Look up ownership of a name, walking the scope chain.
+    ast::Ownership lookupOwnership(llvm::StringRef name) const;
+
+    /// Check if a variable has been moved (walks scope chain).
+    bool isMoved(llvm::StringRef name) const;
+
+    /// Mark a variable as moved in the scope that owns it.
+    void markMoved(llvm::StringRef name);
+
     /// Declare a name in *this* scope (does not check parent scopes).
     /// Returns false if the name already exists in this scope.
     bool declare(llvm::StringRef name, ast::Type *ty);
+
+    /// Declare with ownership info.
+    bool declare(llvm::StringRef name, ast::Type *ty, ast::Ownership ownership,
+                 bool isConst = false);
+
+    /// Check if a variable is const (walks scope chain).
+    bool isConst(llvm::StringRef name) const;
 
     /// Insert or update a binding in this scope.
     void set(llvm::StringRef name, ast::Type *ty);

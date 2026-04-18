@@ -60,6 +60,10 @@
   LBRACK  "{"
   RBRACK  "}"
   ARROW "->"
+  AMP   "&"
+  SHARED "shared"
+  MOV    "mov"
+  CONST  "const"
 ;
 
 // associating terminals with types
@@ -117,12 +121,25 @@ typeAnnotation: IDENT               { auto *ty = impl(drv).Ctx.lookupType($1);
     ;
 
 varDecl: IDENT ":" typeAnnotation
-                                    { $$ = impl(drv).Ctx.make<VarDecl>(loc(@1, @3), $1, $3, nullptr); }
+                                    { $$ = impl(drv).Ctx.make<VarDecl>(loc(@1, @3), $1, $3, nullptr, Ownership::Unique, false); }
+    | IDENT ":" typeAnnotation "&"
+                                    { $$ = impl(drv).Ctx.make<VarDecl>(loc(@1, @4), $1, $3, nullptr, Ownership::Reference, false); }
+    | IDENT ":" "shared" typeAnnotation
+                                    { $$ = impl(drv).Ctx.make<VarDecl>(loc(@1, @4), $1, $4, nullptr, Ownership::Shared, false);
+                                    }
+    | IDENT ":" "const" typeAnnotation
+                                    { $$ = impl(drv).Ctx.make<VarDecl>(loc(@1, @4), $1, $4, nullptr, Ownership::Unique, true); }
+    | IDENT ":" "const" typeAnnotation "&"
+                                    { $$ = impl(drv).Ctx.make<VarDecl>(loc(@1, @5), $1, $4, nullptr, Ownership::Reference, true); }
+    | IDENT ":" "const" "shared" typeAnnotation
+                                    { $$ = impl(drv).Ctx.make<VarDecl>(loc(@1, @5), $1, $5, nullptr, Ownership::Shared, true);
+                                    }
     ;
 
 staticAssignment: varDecl "=" expression
                                     { auto *vd = impl(drv).Ctx.make<VarDecl>(
-                                          loc(@1, @3), $1->getName(), $1->getType(), $3);
+                                          loc(@1, @3), $1->getName(), $1->getType(), $3,
+                                          $1->getOwnership(), $1->isConst());
                                       $$ = impl(drv).Ctx.make<DeclStmt>(loc(@1, @3), vd);
                                     }
     ;
@@ -170,6 +187,8 @@ unaryExpression:
       primaryExpression             { $$ = $1; }
     | unaryOperator primaryExpression
                                     { $$ = impl(drv).Ctx.make<UnaryExpr>(loc(@1, @2), $1, $2); }
+    | "mov" IDENT                    { auto *id = impl(drv).Ctx.make<Identifier>(loc(@2, @2), $2);
+                                      $$ = impl(drv).Ctx.make<MovExpr>(loc(@1, @2), id); }
     ;
 
 multiplicativeExpression:

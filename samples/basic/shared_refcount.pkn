@@ -1,0 +1,11 @@
+a: shared String = "hello";
+{
+  b: shared String = "world";
+  a = b;
+  out(a);
+  out(b);
+  // b goes out of scope here — release drops refcount to 1 (a still holds it)
+}
+// "world" is still alive because a holds a reference
+out(a);
+// a goes out of scope — release drops refcount to 0, "world" is freed

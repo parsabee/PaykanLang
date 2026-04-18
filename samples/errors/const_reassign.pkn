@@ -1,0 +1,3 @@
+// Error: cannot assign to const variable
+x: const int = 42;
+x = 99;

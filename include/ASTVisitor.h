@@ -40,7 +40,8 @@ namespace ast {
   NODE(NK_UnaryExpr,      UnaryExpr,      UnaryExpr)       \
   NODE(NK_BinaryExpr,     BinaryExpr,     BinaryExpr)      \
   NODE(NK_Identifier,     Identifier,     Identifier)      \
-  NODE(NK_CallExpr,       CallExpr,       CallExpr)
+  NODE(NK_CallExpr,       CallExpr,       CallExpr)        \
+  NODE(NK_MovExpr,        MovExpr,        MovExpr)
 
 #define PAYKAN_TYPE_NODES(NODE) \
   NODE(NK_BuiltinType,    BuiltinType,    BuiltinType) \

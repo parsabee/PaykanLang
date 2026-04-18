@@ -4,6 +4,7 @@
 #include "ParserDriver.h"
 #include "ASTPrinter.h"
 #include "CodeGen.h"
+#include "JIT.h"
 #include "Sema.h"
 
 #include <llvm/IR/LLVMContext.h>
@@ -36,6 +37,11 @@ static llvm::cl::opt<bool>
     EmitLLVM("emit-llvm",
              llvm::cl::desc("Emit LLVM IR to stdout"),
              llvm::cl::init(false));
+
+static llvm::cl::opt<bool>
+    RunJIT("run",
+           llvm::cl::desc("JIT-compile and execute the program"),
+           llvm::cl::init(false));
 
 static llvm::cl::opt<unsigned>
     OptLevel("O",
@@ -73,9 +79,9 @@ int main(int argc, char *argv[]) {
     return EXIT_FAILURE;
 
   // -- Code generation ------------------------------------------------------
-  if (EmitLLVM) {
-    llvm::LLVMContext llvmCtx;
-    paykan::codegen::CodeGen cg(driver.getASTContext(), llvmCtx,
+  if (EmitLLVM || RunJIT) {
+    auto llvmCtx = std::make_unique<llvm::LLVMContext>();
+    paykan::codegen::CodeGen cg(driver.getASTContext(), *llvmCtx,
                                 InputFilename);
     if (!cg.run(root)) {
       llvm::errs() << "code generation failed (module verification error)\n";
@@ -90,9 +96,21 @@ int main(int argc, char *argv[]) {
     };
     unsigned lvl = OptLevel < 4 ? OptLevel : 3;
     cg.optimize(levels[lvl]);
-    cg.getModule().print(llvm::outs(), nullptr);
-    return EXIT_SUCCESS;
+
+    if (EmitLLVM) {
+      cg.getModule().print(llvm::outs(), nullptr);
+      return EXIT_SUCCESS;
+    }
+
+    // -- JIT execution ------------------------------------------------------
+    auto resultOrErr =
+        paykan::jit::runModule(cg.takeModule(), std::move(llvmCtx));
+    if (!resultOrErr) {
+      llvm::errs() << "JIT error: " << resultOrErr.takeError() << "\n";
+      return EXIT_FAILURE;
+    }
+    return *resultOrErr;
   }
-  
+
   return EXIT_SUCCESS;
 }

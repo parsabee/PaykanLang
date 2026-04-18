@@ -1,0 +1,3 @@
+// Error: cannot reassign a unique class-type variable
+a: String = "hello";
+a = "world";  // error: cannot reassign unique variable 'a'

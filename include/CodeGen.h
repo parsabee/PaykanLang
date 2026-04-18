@@ -41,11 +41,27 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   struct Scope {
     Scope *Parent = nullptr;
     llvm::StringMap<llvm::AllocaInst *> Locals;
+    llvm::StringMap<ast::Ownership> OwnershipMap;
+    /// For reference variables: maps ref name → referent's alloca.
+    llvm::StringMap<llvm::AllocaInst *> RefTargets;
+
+    /// Metadata for variables that need cleanup at scope exit.
+    struct VarMeta {
+      llvm::AllocaInst *Alloca;
+      ast::Ownership Ownership;
+      ast::Type *ASTType;  // for choosing the right delete function
+    };
+    /// Variables declared in this scope, in declaration order.
+    std::vector<VarMeta> DeclOrder;
 
     explicit Scope(Scope *parent = nullptr);
 
     llvm::AllocaInst *lookup(llvm::StringRef name) const;
+    llvm::AllocaInst *lookupRefTarget(llvm::StringRef name) const;
+    ast::Ownership lookupOwnership(llvm::StringRef name) const;
     void set(llvm::StringRef name, llvm::AllocaInst *alloca);
+    void declare(llvm::StringRef name, llvm::AllocaInst *alloca,
+                 ast::Ownership own, ast::Type *astTy);
     Scope *findOwner(llvm::StringRef name);
   };
 
@@ -67,6 +83,12 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
 
   /// Wrap a raw C string pointer into a PaykanString* via PaykanString_new.
   llvm::Value *wrapStringLiteral(llvm::Value *rawStr, size_t len);
+
+  /// Emit cleanup (delete / release) for all variables in the given scope.
+  void emitScopeCleanup(Scope &scope);
+
+  /// Return the runtime delete function name for a given class type.
+  llvm::StringRef getDeleteFnName(ast::Type *ty);
 
   /// RAII helper to push/pop a scope.
   struct ScopeGuard {

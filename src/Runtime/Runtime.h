@@ -93,6 +93,36 @@ PaykanObject *PaykanString_concat(PaykanObject *self, PaykanObject *other);
 extern PaykanStringVTable PaykanString_vtable;
 
 // ============================================================================
+// Shared — reference-counted wrapper around any PaykanObject
+// ============================================================================
+//
+// A PaykanShared box holds a strong reference count and a pointer to the
+// owned object.  When the count drops to zero, the owned object is deleted
+// and the box itself is freed.
+
+typedef struct PaykanShared {
+  int64_t       refCount;  // strong reference count (starts at 1)
+  PaykanObject *object;    // the owned object (never NULL)
+  void        (*destroy)(PaykanObject *); // destructor for the owned object
+} PaykanShared;
+
+/// Create a shared wrapper around `obj`.  `destroyFn` is the destructor
+/// to call on the owned object when refCount reaches zero
+/// (e.g. PaykanObject_delete, PaykanString_delete cast to the right sig).
+PaykanShared *PaykanShared_new(PaykanObject *obj,
+                               void (*destroyFn)(PaykanObject *));
+
+/// Increment the reference count.
+void Paykan_retain(PaykanShared *shared);
+
+/// Decrement the reference count.  Destroys the owned object and frees
+/// the box when it reaches zero.
+void Paykan_release(PaykanShared *shared);
+
+/// Convenience: return the underlying object pointer.
+PaykanObject *PaykanShared_get(PaykanShared *shared);
+
+// ============================================================================
 // I/O builtins
 // ============================================================================
 

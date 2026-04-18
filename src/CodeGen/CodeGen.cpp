@@ -18,6 +18,12 @@ namespace codegen {
 
 static constexpr llvm::StringLiteral kPaykanStringNew    = "PaykanString_new";
 static constexpr llvm::StringLiteral kPaykanStringConcat = "PaykanString_concat";
+static constexpr llvm::StringLiteral kPaykanStringDelete = "PaykanString_delete";
+static constexpr llvm::StringLiteral kPaykanObjectDelete = "PaykanObject_delete";
+static constexpr llvm::StringLiteral kPaykanSharedNew    = "PaykanShared_new";
+static constexpr llvm::StringLiteral kPaykanRetain       = "Paykan_retain";
+static constexpr llvm::StringLiteral kPaykanRelease      = "Paykan_release";
+static constexpr llvm::StringLiteral kPaykanSharedGet    = "PaykanShared_get";
 static constexpr llvm::StringLiteral kPaykanOut          = "Paykan_out";
 static constexpr llvm::StringLiteral kPaykanErr          = "Paykan_err";
 static constexpr llvm::StringLiteral kMainFnName         = "main";
@@ -52,8 +58,29 @@ llvm::AllocaInst *CodeGen::Scope::lookup(llvm::StringRef name) const {
   return Parent ? Parent->lookup(name) : nullptr;
 }
 
+llvm::AllocaInst *CodeGen::Scope::lookupRefTarget(llvm::StringRef name) const {
+  auto it = RefTargets.find(name);
+  if (it != RefTargets.end())
+    return it->second;
+  return Parent ? Parent->lookupRefTarget(name) : nullptr;
+}
+
 void CodeGen::Scope::set(llvm::StringRef name, llvm::AllocaInst *alloca) {
   Locals[name] = alloca;
+}
+
+void CodeGen::Scope::declare(llvm::StringRef name, llvm::AllocaInst *alloca,
+                             ast::Ownership own, ast::Type *astTy) {
+  Locals[name] = alloca;
+  OwnershipMap[name] = own;
+  DeclOrder.push_back({alloca, own, astTy});
+}
+
+ast::Ownership CodeGen::Scope::lookupOwnership(llvm::StringRef name) const {
+  auto it = OwnershipMap.find(name);
+  if (it != OwnershipMap.end())
+    return it->second;
+  return Parent ? Parent->lookupOwnership(name) : ast::Ownership::Unique;
 }
 
 CodeGen::Scope *CodeGen::Scope::findOwner(llvm::StringRef name) {
@@ -67,7 +94,10 @@ CodeGen::ScopeGuard::ScopeGuard(CodeGen &cg)
   CG.CurrentScope = &ScopeObj;
 }
 
-CodeGen::ScopeGuard::~ScopeGuard() { CG.CurrentScope = ScopeObj.Parent; }
+CodeGen::ScopeGuard::~ScopeGuard() {
+  CG.emitScopeCleanup(ScopeObj);
+  CG.CurrentScope = ScopeObj.Parent;
+}
 
 // -- Helpers -----------------------------------------------------------------
 
@@ -114,6 +144,60 @@ llvm::Value *CodeGen::wrapStringLiteral(llvm::Value *rawStr, size_t len) {
   auto *fnTy = llvm::FunctionType::get(ptrTy, {ptrTy, i64Ty}, false);
   auto *callee = declareFunction(kPaykanStringNew, fnTy);
   return Builder.CreateCall(callee, {rawStr, lenVal}, "str");
+}
+
+llvm::StringRef CodeGen::getDeleteFnName(ast::Type *ty) {
+  if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
+    if (ct->getName() == "String")
+      return kPaykanStringDelete;
+  }
+  return kPaykanObjectDelete;
+}
+
+void CodeGen::emitScopeCleanup(Scope &scope) {
+  auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
+  auto *voidTy = llvm::Type::getVoidTy(LLVMCtx);
+  auto *deleteFnTy = llvm::FunctionType::get(voidTy, {ptrTy}, false);
+
+  // Walk in reverse declaration order for proper LIFO cleanup.
+  for (auto it = scope.DeclOrder.rbegin(); it != scope.DeclOrder.rend(); ++it) {
+    auto &meta = *it;
+    if (!ast::isa<ast::ClassType>(meta.ASTType))
+      continue; // builtins don't need cleanup
+    if (meta.Ownership == ast::Ownership::Reference)
+      continue; // references don't own the object
+
+    llvm::Value *ptr = Builder.CreateLoad(ptrTy, meta.Alloca);
+
+    switch (meta.Ownership) {
+    case ast::Ownership::Unique: {
+      // Guard: skip delete if the pointer is null (variable was moved).
+      auto *parentFn = Builder.GetInsertBlock()->getParent();
+      auto *deleteBB = llvm::BasicBlock::Create(LLVMCtx, "cleanup.del", parentFn);
+      auto *skipBB = llvm::BasicBlock::Create(LLVMCtx, "cleanup.skip", parentFn);
+      auto *isNull = Builder.CreateICmpEQ(
+          ptr, llvm::ConstantPointerNull::get(
+                   llvm::cast<llvm::PointerType>(ptrTy)),
+          "isnull");
+      Builder.CreateCondBr(isNull, skipBB, deleteBB);
+
+      Builder.SetInsertPoint(deleteBB);
+      auto *delFn = declareFunction(getDeleteFnName(meta.ASTType), deleteFnTy);
+      Builder.CreateCall(delFn, {ptr});
+      Builder.CreateBr(skipBB);
+
+      Builder.SetInsertPoint(skipBB);
+      break;
+    }
+    case ast::Ownership::Shared: {
+      auto *releaseFn = declareFunction(kPaykanRelease, deleteFnTy);
+      Builder.CreateCall(releaseFn, {ptr});
+      break;
+    }
+    case ast::Ownership::Reference:
+      break; // unreachable due to continue above
+    }
+  }
 }
 
 llvm::Value *CodeGen::emitExpr(ast::Expr *expr) {
@@ -214,10 +298,47 @@ llvm::Value *CodeGen::visitAssignStmt(ast::AssignStmt *node) {
     auto *alloca = owner->lookup(node->getVarName());
     llvm::Type *allocaTy = alloca->getAllocatedType();
 
+    // Assignment through a reference: store to the referent's alloca.
+    auto own = CurrentScope->lookupOwnership(node->getVarName());
+    if (own == ast::Ownership::Reference) {
+      auto *refTarget = CurrentScope->lookupRefTarget(node->getVarName());
+      if (refTarget) {
+        Builder.CreateStore(val, refTarget);
+        // Also update the reference's own alloca so subsequent reads see the new value.
+        Builder.CreateStore(val, alloca);
+        return val;
+      }
+    }
     // Implicit int → float promotion.
     if (allocaTy->isDoubleTy() && val->getType()->isIntegerTy(64))
       val = Builder.CreateSIToFP(val, llvm::Type::getDoubleTy(LLVMCtx),
                                  kInt2FPName);
+
+    // Shared reassignment: retain new, release old, then store.
+    if (own == ast::Ownership::Shared) {
+      // We need the raw PaykanShared* wrapper, not the unwrapped object.
+      // If the RHS is an identifier referring to a shared var, reload from its alloca.
+      llvm::Value *sharedVal = val; // default: use emitted value
+      if (auto *ident = ast::dyn_cast<ast::Identifier>(node->getValue())) {
+        auto rhsOwn = CurrentScope->lookupOwnership(ident->getName());
+        if (rhsOwn == ast::Ownership::Shared) {
+          auto *rhsAlloca = CurrentScope->lookup(ident->getName());
+          auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
+          sharedVal = Builder.CreateLoad(ptrTy, rhsAlloca, ident->getName() + ".shared");
+        }
+      }
+
+      auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
+      auto *voidTy = llvm::Type::getVoidTy(LLVMCtx);
+      auto *fnTy = llvm::FunctionType::get(voidTy, {ptrTy}, false);
+      auto *retainFn = declareFunction(kPaykanRetain, fnTy);
+      auto *releaseFn = declareFunction(kPaykanRelease, fnTy);
+      Builder.CreateCall(retainFn, {sharedVal});
+      auto *oldVal = Builder.CreateLoad(ptrTy, alloca, "old.shared");
+      Builder.CreateCall(releaseFn, {oldVal});
+      Builder.CreateStore(sharedVal, alloca);
+      return val;
+    }
 
     Builder.CreateStore(val, alloca);
     return val;
@@ -256,8 +377,10 @@ llvm::Value *CodeGen::visitVarDecl(ast::VarDecl *node) {
     initVal = emitExpr(node->getInitExpr());
 
     // Wrap raw string literal into a PaykanString* object.
+    // References don't allocate — they just alias the raw pointer.
     if (auto *sl = ast::dyn_cast<ast::StringLiteral>(node->getInitExpr()))
-      initVal = wrapStringLiteral(initVal, sl->getValue().size());
+      if (node->getOwnership() != ast::Ownership::Reference)
+        initVal = wrapStringLiteral(initVal, sl->getValue().size());
 
     // If no explicit type, infer from the initializer value.
     if (!llvmTy)
@@ -267,6 +390,19 @@ llvm::Value *CodeGen::visitVarDecl(ast::VarDecl *node) {
     if (llvmTy->isDoubleTy() && initVal->getType()->isIntegerTy(64))
       initVal = Builder.CreateSIToFP(initVal, llvm::Type::getDoubleTy(LLVMCtx),
                                      kInt2FPName);
+
+    // Wrap in a PaykanShared box for shared ownership.
+    if (node->getOwnership() == ast::Ownership::Shared &&
+        initVal->getType()->isPointerTy()) {
+      auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
+      auto *sharedNewTy = llvm::FunctionType::get(ptrTy, {ptrTy, ptrTy}, false);
+      auto *sharedNewFn = declareFunction(kPaykanSharedNew, sharedNewTy);
+      // Pass the appropriate destroy function as the second argument.
+      auto *voidTy = llvm::Type::getVoidTy(LLVMCtx);
+      auto *destroyTy = llvm::FunctionType::get(voidTy, {ptrTy}, false);
+      auto *destroyFn = declareFunction(getDeleteFnName(node->getType()), destroyTy);
+      initVal = Builder.CreateCall(sharedNewFn, {initVal, destroyFn}, "shared");
+    }
   }
 
   // If we still have no type (shouldn't happen after Sema), default to i64.
@@ -280,7 +416,17 @@ llvm::Value *CodeGen::visitVarDecl(ast::VarDecl *node) {
   else
     Builder.CreateStore(llvm::Constant::getNullValue(llvmTy), alloca);
 
-  CurrentScope->set(node->getName(), alloca);
+  // For references, record the referent's alloca so assignment-through-ref works.
+  if (node->getOwnership() == ast::Ownership::Reference) {
+    if (auto *ident = ast::dyn_cast<ast::Identifier>(node->getInitExpr())) {
+      if (auto *refTarget = CurrentScope->lookup(ident->getName()))
+        CurrentScope->RefTargets[node->getName()] = refTarget;
+    }
+  }
+
+  CurrentScope->declare(node->getName(), alloca,
+                        node->getOwnership(),
+                        node->getType());
   return alloca;
 }
 
@@ -311,8 +457,32 @@ llvm::Value *CodeGen::ExprEmitter::visitStringLiteral(ast::StringLiteral *node) 
 llvm::Value *CodeGen::ExprEmitter::visitIdentifier(ast::Identifier *node) {
   auto *alloca = CG.CurrentScope->lookup(node->getName());
   assert(alloca && "Sema should have caught undeclared variable");
-  return CG.Builder.CreateLoad(alloca->getAllocatedType(), alloca,
-                               node->getName());
+  llvm::Value *val = CG.Builder.CreateLoad(alloca->getAllocatedType(), alloca,
+                                           node->getName());
+
+  // Shared variables store a PaykanShared* — unwrap to get the underlying object.
+  auto own = CG.CurrentScope->lookupOwnership(node->getName());
+  if (own == ast::Ownership::Shared && val->getType()->isPointerTy()) {
+    auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
+    auto *getFnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
+    auto *getFn = CG.declareFunction(kPaykanSharedGet, getFnTy);
+    val = CG.Builder.CreateCall(getFn, {val}, node->getName() + ".obj");
+  }
+
+  return val;
+}
+
+llvm::Value *CodeGen::ExprEmitter::visitMovExpr(ast::MovExpr *node) {
+  // Evaluate the operand (loads the pointer).
+  llvm::Value *val = visit(node->getOperand());
+  // Null-out the source alloca so scope cleanup skips it.
+  auto *alloca = CG.CurrentScope->lookup(node->getOperand()->getName());
+  if (alloca) {
+    auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
+    CG.Builder.CreateStore(llvm::ConstantPointerNull::get(
+        llvm::cast<llvm::PointerType>(ptrTy)), alloca);
+  }
+  return val;
 }
 
 llvm::Value *CodeGen::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {

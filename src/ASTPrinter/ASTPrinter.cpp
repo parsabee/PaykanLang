@@ -124,6 +124,13 @@ void ASTPrinter::visitVarDecl(VarDecl *node) {
   OS << "VarDecl";
   printLoc(node);
   OS << " '" << node->getName() << "'";
+  if (node->isConst())
+    OS << " const";
+  switch (node->getOwnership()) {
+  case Ownership::Unique:    OS << " unique"; break;
+  case Ownership::Shared:    OS << " shared"; break;
+  case Ownership::Reference: OS << " ref";    break;
+  }
   if (node->getType())
     OS << " type";
   OS << "\n";
@@ -165,6 +172,17 @@ void ASTPrinter::visitStringLiteral(StringLiteral *node) {
   OS << "StringLiteral";
   printLoc(node);
   OS << " \"" << node->getValue() << "\"\n";
+}
+
+void ASTPrinter::visitMovExpr(MovExpr *node) {
+  printIndent();
+  OS << "MovExpr";
+  printLoc(node);
+  OS << "\n";
+  {
+    ChildScope cs(*this, true);
+    visit(node->getOperand());
+  }
 }
 
 void ASTPrinter::visitUnaryExpr(UnaryExpr *node) {

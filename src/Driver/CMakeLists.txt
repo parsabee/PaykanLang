@@ -10,7 +10,7 @@ target_include_directories(paykan SYSTEM
     PRIVATE ${LLVM_INCLUDE_DIRS}
 )
 llvm_map_components_to_libnames(DRIVER_LLVM_LIBS
-    core support passes
+    core support passes orcjit native
 )
 
 target_link_libraries(paykan
@@ -18,6 +18,7 @@ target_link_libraries(paykan
             paykan_codegen
             paykan_sema
             paykan_parser
+            paykan_jit
             paykan_compile_options
             ${DRIVER_LLVM_LIBS}
 )

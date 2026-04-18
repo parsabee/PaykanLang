@@ -69,6 +69,7 @@ comment     \/\/[^\n]*
 ";"        return yy::parser::make_SEMICOLON (loc);
 ","        return yy::parser::make_COMMA     (loc);
 "!"        return yy::parser::make_NOT       (loc);
+"&"        return yy::parser::make_AMP       (loc);
 
 \"([^\\\"]|\\.)*\"  { std::string s(yytext + 1, yyleng - 2);
                       return yy::parser::make_STRING (s, loc); }
@@ -77,6 +78,9 @@ comment     \/\/[^\n]*
 {float}    return make_FLOAT (yytext, loc);
 {true}     return yy::parser::make_BOOL  (true,  loc);
 {false}    return yy::parser::make_BOOL  (false, loc);
+"shared"   return yy::parser::make_SHARED(loc);
+"mov"      return yy::parser::make_MOV(loc);
+"const"    return yy::parser::make_CONST(loc);
 {id}       return yy::parser::make_IDENT (yytext, loc);
 
 <<EOF>>    return yy::parser::make_YYEOF (loc);

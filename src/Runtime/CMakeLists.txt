@@ -10,6 +10,7 @@
 add_library(paykan_runtime STATIC
     Object.c
     String.c
+    Shared.c
     IO.c
 )
 

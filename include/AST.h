@@ -60,6 +60,7 @@ public:
     NK_BinaryExpr,
     NK_Identifier,
     NK_CallExpr,
+    NK_MovExpr,
 
     // Types
     NK_BuiltinType,
@@ -168,6 +169,15 @@ enum class BinaryOpcode {
   Ne,  // !=
 };
 
+/// Ownership qualifier for class-type variables.
+/// Builtins (int, float, bool) always have automatic (stack) storage;
+/// ownership only applies to heap-allocated class types.
+enum class Ownership : uint8_t {
+  Unique,    // default — single owner, destroyed at scope exit
+  Shared,    // reference-counted
+  Reference, // borrowed pointer (&), no ownership
+};
+
 // Base for all types
 class Type : public ASTNode {
   uint32_t UnaryOps = 0;   // bitmask of supported UnaryOpcode values
@@ -218,14 +228,20 @@ private:
   std::string Name;
   Type *VarType;
   Expr *InitExpr;
+  Ownership OwnershipKind;
+  bool IsConst;
 
 public:
-  VarDecl(SourceLocation loc, const std::string &name, Type *type, Expr *init)
-      : Decl(NK_VarDecl, loc), Name(name), VarType(type), InitExpr(init) {}
+  VarDecl(SourceLocation loc, const std::string &name, Type *type, Expr *init,
+          Ownership ownership = Ownership::Unique, bool isConst = false)
+      : Decl(NK_VarDecl, loc), Name(name), VarType(type), InitExpr(init),
+        OwnershipKind(ownership), IsConst(isConst) {}
 
   const std::string &getName() const { return Name; }
   Type *getType() const { return VarType; }
   Expr *getInitExpr() const { return InitExpr; }
+  Ownership getOwnership() const { return OwnershipKind; }
+  bool isConst() const { return IsConst; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_VarDecl; }
 };
@@ -445,6 +461,20 @@ public:
   size_t getNumArguments() const { return Arguments.size(); }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_CallExpr; }
+};
+
+// Move expression (mov x)
+class MovExpr : public Expr {
+private:
+  Identifier *Operand;
+
+public:
+  MovExpr(SourceLocation loc, Identifier *operand)
+      : Expr(NK_MovExpr, loc), Operand(operand) {}
+
+  Identifier *getOperand() const { return Operand; }
+
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_MovExpr; }
 };
 
 // Builtin type (int, void, etc.)

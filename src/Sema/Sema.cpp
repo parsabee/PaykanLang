@@ -18,8 +18,40 @@ ast::Type *Sema::Scope::lookup(llvm::StringRef name) const {
   return Parent ? Parent->lookup(name) : nullptr;
 }
 
+ast::Ownership Sema::Scope::lookupOwnership(llvm::StringRef name) const {
+  auto it = OwnershipMap.find(name);
+  if (it != OwnershipMap.end()) return it->second;
+  return Parent ? Parent->lookupOwnership(name) : ast::Ownership::Unique;
+}
+
+bool Sema::Scope::isMoved(llvm::StringRef name) const {
+  if (MovedSet.count(name)) return true;
+  return Parent ? Parent->isMoved(name) : false;
+}
+
+void Sema::Scope::markMoved(llvm::StringRef name) {
+  // Mark in the scope that owns the variable.
+  if (Locals.count(name)) { MovedSet.insert(name); return; }
+  if (Parent) Parent->markMoved(name);
+}
+
 bool Sema::Scope::declare(llvm::StringRef name, ast::Type *ty) {
   return Locals.try_emplace(name, ty).second;
+}
+
+bool Sema::Scope::declare(llvm::StringRef name, ast::Type *ty, ast::Ownership ownership,
+                          bool isConst) {
+  if (!Locals.try_emplace(name, ty).second)
+    return false;
+  OwnershipMap[name] = ownership;
+  if (isConst)
+    ConstSet.insert(name);
+  return true;
+}
+
+bool Sema::Scope::isConst(llvm::StringRef name) const {
+  if (ConstSet.count(name)) return true;
+  return Parent ? Parent->isConst(name) : false;
 }
 
 void Sema::Scope::set(llvm::StringRef name, ast::Type *ty) {
@@ -167,6 +199,12 @@ ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
             "use of undeclared variable '" + node->getName() + "'");
     return nullptr;
   }
+  // Reject use of moved unique variable.
+  if (S.CurrentScope->isMoved(node->getName())) {
+    S.error(node->getLocation(),
+            "use of moved variable '" + node->getName() + "'");
+    return nullptr;
+  }
   return ty;
 }
 
@@ -301,6 +339,29 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   return sig->ReturnType;
 }
 
+ast::Type *Sema::ExprChecker::visitMovExpr(ast::MovExpr *node) {
+  auto *ident = node->getOperand();
+  auto *ty = S.CurrentScope->lookup(ident->getName());
+  if (!ty) {
+    S.error(ident->getLocation(),
+            "use of undeclared variable '" + ident->getName() + "'");
+    return nullptr;
+  }
+  if (S.CurrentScope->isMoved(ident->getName())) {
+    S.error(ident->getLocation(),
+            "use of moved variable '" + ident->getName() + "'");
+    return nullptr;
+  }
+  auto ownership = S.CurrentScope->lookupOwnership(ident->getName());
+  if (ownership != ast::Ownership::Unique) {
+    S.error(node->getLocation(),
+            "'mov' can only be used on unique variables");
+    return nullptr;
+  }
+  S.CurrentScope->markMoved(ident->getName());
+  return ty;
+}
+
 // -- Entry point -------------------------------------------------------------
 
 bool Sema::run(ast::TranslationUnit *tu) {
@@ -357,6 +418,23 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   }
 
   auto *varTy = owner->lookup(node->getVarName());
+  auto varOwnership = CurrentScope->lookupOwnership(node->getVarName());
+
+  // Reject assignment to const variables.
+  if (CurrentScope->isConst(node->getVarName())) {
+    error(node->getLocation(),
+          "cannot assign to const variable '" + node->getVarName() + "'");
+    return false;
+  }
+
+  // Reject reassignment of unique class-type variables (would create two owners).
+  if (varOwnership == ast::Ownership::Unique && varTy &&
+      !ast::isa<ast::BuiltinType>(varTy)) {
+    error(node->getLocation(),
+          "cannot reassign unique variable '" + node->getVarName() +
+              "'; consider using 'shared' ownership");
+    return false;
+  }
 
   if (!isAssignable(varTy, valTy)) {
     error(node->getLocation(),
@@ -386,6 +464,20 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     return false;
   }
 
+  auto ownership = node->getOwnership();
+
+  // Reject ownership qualifiers on builtin types.
+  if (ownership != ast::Ownership::Unique &&
+      node->getType() && ast::isa<ast::BuiltinType>(node->getType())) {
+    const char *qual = ownership == ast::Ownership::Shared
+                           ? "shared"
+                           : "reference (&)";
+    error(node->getLocation(),
+          std::string(qual) + " qualifier is not allowed on builtin type");
+    CurrentScope->set(node->getName(), node->getType());
+    return false;
+  }
+
   // Resolve the declared type.
   ast::Type *declTy = nullptr;
 
@@ -394,6 +486,18 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
                          "variable '" + node->getName() + "'");
     if (!declTy) {
       CurrentScope->set(node->getName(), Ctx.getVoidTy());
+      return false;
+    }
+  }
+
+  // Reference must bind to an existing variable (lvalue), not a temporary.
+  if (ownership == ast::Ownership::Reference) {
+    if (!node->getInitExpr() ||
+        !ast::isa<ast::Identifier>(node->getInitExpr())) {
+      error(node->getLocation(),
+            "reference variable '" + node->getName() +
+                "' must be initialized from an existing variable");
+      if (declTy) CurrentScope->set(node->getName(), declTy);
       return false;
     }
   }
@@ -421,6 +525,21 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     } else {
       declTy = initTy;
     }
+
+    // If initializing a unique var from another unique var without mov, reject.
+    if (ownership == ast::Ownership::Unique && declTy &&
+        !ast::isa<ast::BuiltinType>(declTy)) {
+      if (auto *ident = ast::dyn_cast<ast::Identifier>(node->getInitExpr())) {
+        auto srcOwnership = CurrentScope->lookupOwnership(ident->getName());
+        if (srcOwnership == ast::Ownership::Unique) {
+          error(node->getLocation(),
+                "cannot copy unique variable '" + ident->getName() +
+                    "'; use 'mov' to transfer ownership");
+          CurrentScope->declare(node->getName(), declTy, ownership);
+          return false;
+        }
+      }
+    }
   }
 
   if (!declTy) {
@@ -431,8 +550,8 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     return false;
   }
 
-  // Register the variable in the current scope.
-  CurrentScope->set(node->getName(), declTy);
+  // Register the variable in the current scope with ownership.
+  CurrentScope->declare(node->getName(), declTy, ownership, node->isConst());
   return true;
 }
 

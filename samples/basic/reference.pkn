@@ -1,0 +1,7 @@
+// Reference ownership: borrowed pointer, no cleanup
+a: String = "ref hello";
+b: String& = a;
+out(b);
+
+// b aliases a — same underlying object
+out(a);
