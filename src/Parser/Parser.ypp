@@ -71,6 +71,8 @@
   IF     "if"
   ELSE   "else"
   WHILE  "while"
+  BREAK  "break"
+  CONTINUE "continue"
   THEN   "then"
 ;
 
@@ -178,6 +180,8 @@ statement: ";"                      { $$ = nullptr; }
     | block                         { $$ = $1; }
     | ifStmt                        { $$ = $1; }
     | whileStmt                     { $$ = $1; }
+    | "break" ";"                    { $$ = impl(drv).Ctx.make<BreakStmt>(loc(@1, @2)); }
+    | "continue" ";"                 { $$ = impl(drv).Ctx.make<ContinueStmt>(loc(@1, @2)); }
     ;
 
 param: IDENT ":" typeAnnotation                     { $$ = Param{$1, $3, Ownership::Unique, false}; }

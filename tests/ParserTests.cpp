@@ -397,3 +397,48 @@ TEST(Parser, TernaryWithRelational) {
   )");
   EXPECT_TRUE(ok);
 }
+
+// ============================================================================
+// break / continue
+// ============================================================================
+
+TEST(Parser, BreakInWhile) {
+  auto [ok, _] = parse(R"(
+    fn main() -> int {
+      while (True) {
+        break;
+      }
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(ok);
+}
+
+TEST(Parser, ContinueInWhile) {
+  auto [ok, _] = parse(R"(
+    fn main() -> int {
+      i: int = 0;
+      while (i < 10) {
+        i = i + 1;
+        continue;
+      }
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(ok);
+}
+
+TEST(Parser, BreakContinueNested) {
+  auto [ok, _] = parse(R"(
+    fn main() -> int {
+      while (True) {
+        while (True) {
+          break;
+        }
+        continue;
+      }
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(ok);
+}

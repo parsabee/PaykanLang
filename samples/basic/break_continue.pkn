@@ -1,0 +1,33 @@
+// break and continue statements
+
+fn main() -> int {
+  // break: exit loop early
+  i: int = 0;
+  while (True) {
+    if (i == 5) { break; }
+    out(StringInt(i));
+    i = i + 1;
+  }
+
+  // continue: skip rest of iteration
+  j: int = 0;
+  while (j < 10) {
+    j = j + 1;
+    if (j % 2 == 0) { continue; }
+    out(StringInt(j));
+  }
+
+  // nested loops: break only exits inner
+  row: int = 0;
+  while (row < 3) {
+    col: int = 0;
+    while (True) {
+      if (col == 3) { break; }
+      out(StringInt(row * 10 + col));
+      col = col + 1;
+    }
+    row = row + 1;
+  }
+
+  return 0;
+}

@@ -545,3 +545,85 @@ TEST(CodeGen, TernaryBoolResult) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "False\n");
 }
+
+// ============================================================================
+// break / continue
+// ============================================================================
+
+TEST(CodeGen, BreakExitsLoop) {
+  auto r = compileAndRun(wrapMain(R"(
+    i: int = 0;
+    while (True) {
+      if (i == 3) { break; }
+      i = i + 1;
+    }
+    out(StringInt(i));
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "3\n");
+}
+
+TEST(CodeGen, ContinueSkipsRest) {
+  auto r = compileAndRun(wrapMain(R"(
+    i: int = 0;
+    sum: int = 0;
+    while (i < 5) {
+      i = i + 1;
+      if (i == 3) { continue; }
+      sum = sum + i;
+    }
+    out(StringInt(sum));
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "12\n");
+}
+
+TEST(CodeGen, BreakInnerLoopOnly) {
+  auto r = compileAndRun(wrapMain(R"(
+    i: int = 0;
+    count: int = 0;
+    while (i < 3) {
+      j: int = 0;
+      while (True) {
+        if (j == 2) { break; }
+        j = j + 1;
+        count = count + 1;
+      }
+      i = i + 1;
+    }
+    out(StringInt(count));
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "6\n");
+}
+
+TEST(CodeGen, ContinueSumEvens) {
+  auto r = compileAndRun(wrapMain(R"(
+    i: int = 0;
+    result: int = 0;
+    while (i < 10) {
+      if (i % 2 != 0) {
+        i = i + 1;
+        continue;
+      }
+      result = result + i;
+      i = i + 1;
+    }
+    out(StringInt(result));
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "20\n");
+}
+
+TEST(CodeGen, BreakWhileTrue) {
+  auto r = compileAndRun(wrapMain(R"(
+    x: int = 100;
+    while (True) {
+      x = x - 7;
+      if (x < 50) { break; }
+    }
+    out(StringInt(x));
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "44\n");
+}

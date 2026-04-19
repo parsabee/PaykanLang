@@ -33,7 +33,9 @@ namespace ast {
   NODE(NK_DeclStmt,       DeclStmt,       DeclStmt)        \
   NODE(NK_ExprStmt,       ExprStmt,       ExprStmt)        \
   NODE(NK_IfStmt,         IfStmt,         IfStmt)          \
-  NODE(NK_WhileStmt,      WhileStmt,      WhileStmt)
+  NODE(NK_WhileStmt,      WhileStmt,      WhileStmt)       \
+  NODE(NK_BreakStmt,      BreakStmt,      BreakStmt)       \
+  NODE(NK_ContinueStmt,   ContinueStmt,   ContinueStmt)
 
 #define PAYKAN_EXPR_NODES(NODE) \
   NODE(NK_IntegerLiteral, IntegerLiteral, IntegerLiteral)  \

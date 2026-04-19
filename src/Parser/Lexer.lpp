@@ -89,6 +89,8 @@ comment     \/\/[^\n]*
 "then"     return yy::parser::make_THEN(loc);
 "else"     return yy::parser::make_ELSE(loc);
 "while"    return yy::parser::make_WHILE(loc);
+"break"    return yy::parser::make_BREAK(loc);
+"continue" return yy::parser::make_CONTINUE(loc);
 {id}       return yy::parser::make_IDENT (yytext, loc);
 
 <<EOF>>    return yy::parser::make_YYEOF (loc);

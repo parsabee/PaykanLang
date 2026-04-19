@@ -53,6 +53,8 @@ public:
     NK_ExprStmt,
     NK_IfStmt,
     NK_WhileStmt,
+    NK_BreakStmt,
+    NK_ContinueStmt,
 
     // Expressions
     NK_IntegerLiteral,
@@ -137,7 +139,7 @@ public:
   Stmt(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_CompoundStmt && N->getKind() <= NK_WhileStmt;
+    return N->getKind() >= NK_CompoundStmt && N->getKind() <= NK_ContinueStmt;
   }
 };
 
@@ -403,6 +405,20 @@ public:
   Stmt *getBody() const { return Body; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_WhileStmt; }
+};
+
+// Break statement
+class BreakStmt : public Stmt {
+public:
+  explicit BreakStmt(SourceLocation loc) : Stmt(NK_BreakStmt, loc) {}
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_BreakStmt; }
+};
+
+// Continue statement
+class ContinueStmt : public Stmt {
+public:
+  explicit ContinueStmt(SourceLocation loc) : Stmt(NK_ContinueStmt, loc) {}
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_ContinueStmt; }
 };
 
 // Integer literal

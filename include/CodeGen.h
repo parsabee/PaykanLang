@@ -70,6 +70,14 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
 
   Scope *CurrentScope = nullptr;
 
+  // -- Loop context (for break / continue) ----------------------------------
+
+  struct LoopContext {
+    llvm::BasicBlock *CondBB; ///< Loop condition (target of continue)
+    llvm::BasicBlock *EndBB;  ///< Loop exit (target of break)
+  };
+  std::vector<LoopContext> LoopStack;
+
   // -- Function table -------------------------------------------------------
 
   struct FunctionInfo {

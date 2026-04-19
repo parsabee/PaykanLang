@@ -599,3 +599,67 @@ TEST(Sema, TernaryNestedOk) {
   auto r = semaCheck(wrapMain("x: int = if True then 1 else if False then 2 else 3;"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
+
+// ============================================================================
+// break / continue
+// ============================================================================
+
+TEST(Sema, BreakInsideLoop) {
+  auto r = semaCheck(wrapMain(R"(
+    while (True) {
+      break;
+    }
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Sema, ContinueInsideLoop) {
+  auto r = semaCheck(wrapMain(R"(
+    i: int = 0;
+    while (i < 10) {
+      i = i + 1;
+      continue;
+    }
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Sema, BreakOutsideLoopRejected) {
+  auto r = semaCheck(wrapMain("break;"));
+  EXPECT_FALSE(r.Ok);
+}
+
+TEST(Sema, ContinueOutsideLoopRejected) {
+  auto r = semaCheck(wrapMain("continue;"));
+  EXPECT_FALSE(r.Ok);
+}
+
+TEST(Sema, BreakInIfInsideLoopOk) {
+  auto r = semaCheck(wrapMain(R"(
+    i: int = 0;
+    while (i < 10) {
+      if (i == 5) { break; }
+      i = i + 1;
+    }
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Sema, BreakInIfOutsideLoopRejected) {
+  auto r = semaCheck(wrapMain(R"(
+    if (True) { break; }
+  )"));
+  EXPECT_FALSE(r.Ok);
+}
+
+TEST(Sema, BreakInNestedLoop) {
+  auto r = semaCheck(wrapMain(R"(
+    while (True) {
+      while (True) {
+        break;
+      }
+      break;
+    }
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}

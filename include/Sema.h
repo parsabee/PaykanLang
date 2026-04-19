@@ -95,6 +95,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// The expected return type of the current function (nullptr = top-level / void).
   ast::Type *CurrentReturnType = nullptr;
 
+  /// Loop nesting depth (0 = not inside a loop).
+  unsigned LoopDepth = 0;
+
   // -- Function signature table ---------------------------------------------
 
   /// Describes a known function's type signature.

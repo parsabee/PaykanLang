@@ -153,6 +153,20 @@ void ASTPrinter::visitWhileStmt(WhileStmt *node) {
   }
 }
 
+void ASTPrinter::visitBreakStmt(BreakStmt *node) {
+  printIndent();
+  OS << "BreakStmt";
+  printLoc(node);
+  OS << "\n";
+}
+
+void ASTPrinter::visitContinueStmt(ContinueStmt *node) {
+  printIndent();
+  OS << "ContinueStmt";
+  printLoc(node);
+  OS << "\n";
+}
+
 // -- Declarations ------------------------------------------------------------
 
 void ASTPrinter::visitVarDecl(VarDecl *node) {

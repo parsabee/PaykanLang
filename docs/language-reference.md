@@ -474,6 +474,38 @@ while (True) {
 }
 ```
 
+### `break`
+
+Exits the innermost enclosing loop immediately.
+
+```
+i: int = 0;
+while (True) {
+  if (i == 5) { break; }
+  i = i + 1;
+}
+// i == 5 here
+```
+
+- `break` is only allowed inside a `while` loop body.
+- In nested loops, `break` exits only the innermost loop.
+
+### `continue`
+
+Skips the rest of the current iteration and jumps to the loop condition.
+
+```
+i: int = 0;
+while (i < 10) {
+  i = i + 1;
+  if (i % 2 == 0) { continue; }
+  out(StringInt(i));  // prints 1, 3, 5, 7, 9
+}
+```
+
+- `continue` is only allowed inside a `while` loop body.
+- Using `break` or `continue` outside a loop is a compile-time error.
+
 ---
 
 ## Built-in Functions
@@ -614,7 +646,9 @@ statement      = ";"
                | "return" [ expression ] ";"
                | block
                | ifStmt
-               | whileStmt ;
+               | whileStmt
+               | "break" ";"
+               | "continue" ";" ;
 
 ifStmt         = "if" "(" expression ")" block
                | "if" "(" expression ")" block "else" block

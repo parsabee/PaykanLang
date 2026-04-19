@@ -669,8 +669,27 @@ bool Sema::visitWhileStmt(ast::WhileStmt *node) {
     return false;
   }
 
-  // Type-check the body.
-  return visit(node->getBody());
+  // Type-check the body inside a loop context.
+  ++LoopDepth;
+  bool ok = visit(node->getBody());
+  --LoopDepth;
+  return ok;
+}
+
+bool Sema::visitBreakStmt(ast::BreakStmt *node) {
+  if (LoopDepth == 0) {
+    error(node->getLocation(), "'break' outside of a loop");
+    return false;
+  }
+  return true;
+}
+
+bool Sema::visitContinueStmt(ast::ContinueStmt *node) {
+  if (LoopDepth == 0) {
+    error(node->getLocation(), "'continue' outside of a loop");
+    return false;
+  }
+  return true;
 }
 
 // -- Declarations ------------------------------------------------------------

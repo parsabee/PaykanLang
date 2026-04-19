@@ -412,6 +412,9 @@ llvm::Value *CodeGen::visitWhileStmt(ast::WhileStmt *node) {
   auto *bodyBB = llvm::BasicBlock::Create(LLVMCtx, "while.body", parentFn);
   auto *endBB  = llvm::BasicBlock::Create(LLVMCtx, "while.end", parentFn);
 
+  // Push loop context for break/continue.
+  LoopStack.push_back({condBB, endBB});
+
   // Branch to the condition block.
   Builder.CreateBr(condBB);
 
@@ -426,8 +429,31 @@ llvm::Value *CodeGen::visitWhileStmt(ast::WhileStmt *node) {
   if (!Builder.GetInsertBlock()->getTerminator())
     Builder.CreateBr(condBB);
 
+  // Pop loop context.
+  LoopStack.pop_back();
+
   // Continue after loop.
   Builder.SetInsertPoint(endBB);
+  return nullptr;
+}
+
+llvm::Value *CodeGen::visitBreakStmt(ast::BreakStmt *) {
+  assert(!LoopStack.empty() && "break outside loop");
+  Builder.CreateBr(LoopStack.back().EndBB);
+  // Create an unreachable block for any code after break.
+  auto *deadBB = llvm::BasicBlock::Create(
+      LLVMCtx, "break.dead", Builder.GetInsertBlock()->getParent());
+  Builder.SetInsertPoint(deadBB);
+  return nullptr;
+}
+
+llvm::Value *CodeGen::visitContinueStmt(ast::ContinueStmt *) {
+  assert(!LoopStack.empty() && "continue outside loop");
+  Builder.CreateBr(LoopStack.back().CondBB);
+  // Create an unreachable block for any code after continue.
+  auto *deadBB = llvm::BasicBlock::Create(
+      LLVMCtx, "cont.dead", Builder.GetInsertBlock()->getParent());
+  Builder.SetInsertPoint(deadBB);
   return nullptr;
 }
 
