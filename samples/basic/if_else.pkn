@@ -1,0 +1,50 @@
+// Demonstrates if/else and else-if chains
+
+fn classify(x: int) -> int {
+  if (x > 0) {
+    return 1;
+  } else if (x < 0) {
+    return -1;
+  } else {
+    return 0;
+  }
+}
+
+fn main() -> int {
+  x: int = 42;
+
+  // Simple if
+  if (x > 0) {
+    out("x is positive");
+  }
+
+  // if/else
+  if (x > 100) {
+    out("x is large");
+  } else {
+    out("x is not large");
+  }
+
+  // else-if chain
+  if (x > 100) {
+    out("large");
+  } else if (x > 10) {
+    out("medium");
+  } else {
+    out("small");
+  }
+
+  // Nested if
+  if (x > 0) {
+    if (x < 100) {
+      out("x is between 0 and 100");
+    }
+  }
+
+  // Using a function with if/else
+  out("classify(42)  = ", StringInt(classify(42)));
+  out("classify(-5)  = ", StringInt(classify(-5)));
+  out("classify(0)   = ", StringInt(classify(0)));
+
+  return 0;
+}

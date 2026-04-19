@@ -38,11 +38,6 @@ static llvm::cl::opt<bool>
              llvm::cl::desc("Emit LLVM IR to stdout"),
              llvm::cl::init(false));
 
-static llvm::cl::opt<bool>
-    RunJIT("run",
-           llvm::cl::desc("JIT-compile and execute the program"),
-           llvm::cl::init(false));
-
 static llvm::cl::opt<unsigned>
     OptLevel("O",
              llvm::cl::desc("Optimization level (0–3)"),
@@ -79,38 +74,34 @@ int main(int argc, char *argv[]) {
     return EXIT_FAILURE;
 
   // -- Code generation ------------------------------------------------------
-  if (EmitLLVM || RunJIT) {
-    auto llvmCtx = std::make_unique<llvm::LLVMContext>();
-    paykan::codegen::CodeGen cg(driver.getASTContext(), *llvmCtx,
-                                InputFilename);
-    if (!cg.run(root)) {
-      llvm::errs() << "code generation failed (module verification error)\n";
-      return EXIT_FAILURE;
-    }
-    // Map -O<n> to LLVM optimization level.
-    static const llvm::OptimizationLevel levels[] = {
-        llvm::OptimizationLevel::O0,
-        llvm::OptimizationLevel::O1,
-        llvm::OptimizationLevel::O2,
-        llvm::OptimizationLevel::O3,
-    };
-    unsigned lvl = OptLevel < 4 ? OptLevel : 3;
-    cg.optimize(levels[lvl]);
+  auto llvmCtx = std::make_unique<llvm::LLVMContext>();
+  paykan::codegen::CodeGen cg(driver.getASTContext(), *llvmCtx,
+                              InputFilename);
+  if (!cg.run(root)) {
+    llvm::errs() << "code generation failed (module verification error)\n";
+    return EXIT_FAILURE;
+  }
+  // Map -O<n> to LLVM optimization level.
+  static const llvm::OptimizationLevel levels[] = {
+      llvm::OptimizationLevel::O0,
+      llvm::OptimizationLevel::O1,
+      llvm::OptimizationLevel::O2,
+      llvm::OptimizationLevel::O3,
+  };
+  unsigned lvl = OptLevel < 4 ? OptLevel : 3;
+  cg.optimize(levels[lvl]);
 
-    if (EmitLLVM) {
-      cg.getModule().print(llvm::outs(), nullptr);
-      return EXIT_SUCCESS;
-    }
-
-    // -- JIT execution ------------------------------------------------------
-    auto resultOrErr =
-        paykan::jit::runModule(cg.takeModule(), std::move(llvmCtx));
-    if (!resultOrErr) {
-      llvm::errs() << "JIT error: " << resultOrErr.takeError() << "\n";
-      return EXIT_FAILURE;
-    }
-    return *resultOrErr;
+  if (EmitLLVM) {
+    cg.getModule().print(llvm::outs(), nullptr);
+    return EXIT_SUCCESS;
   }
 
-  return EXIT_SUCCESS;
+  // -- JIT execution ------------------------------------------------------
+  auto resultOrErr =
+      paykan::jit::runModule(cg.takeModule(), std::move(llvmCtx));
+  if (!resultOrErr) {
+    llvm::errs() << "JIT error: " << resultOrErr.takeError() << "\n";
+    return EXIT_FAILURE;
+  }
+  return *resultOrErr;
 }

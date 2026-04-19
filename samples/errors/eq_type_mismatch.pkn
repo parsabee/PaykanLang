@@ -1,4 +1,7 @@
-// Error: equality comparison between different types
-x: int = 10;
-flag: bool = True;
-x == flag;
+fn main() -> int {
+  // Error: equality comparison between different types
+  x: int = 10;
+  flag: bool = True;
+  x == flag;
+  return 0;
+}

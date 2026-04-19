@@ -1,4 +1,7 @@
-// Error: use of moved unique variable
-a: String = "hello";
-b: String = mov a;
-out(a);  // error: use of moved variable 'a'
+fn main() -> int {
+  // Error: use of moved unique variable
+  a: String = "hello";
+  b: String = mov a;
+  out(a);  // error: use of moved variable 'a'
+  return 0;
+}

@@ -81,6 +81,9 @@ struct PaykanString {
 
 // Constructor / destructor.
 PaykanString *PaykanString_new(const char *data, int64_t len);
+PaykanString *PaykanString_from_int(int64_t value);
+PaykanString *PaykanString_from_float(double value);
+PaykanString *PaykanString_from_bool(int64_t value);
 void          PaykanString_delete(PaykanString *self);
 
 // Method implementations.

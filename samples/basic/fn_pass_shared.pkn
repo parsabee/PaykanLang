@@ -1,0 +1,33 @@
+// Passing shared strings to functions — no mov needed, refcount managed
+
+fn show(s: shared String) {
+  out(&s);
+}
+
+fn showTwo(a: shared String, b: shared String) {
+  out(&a);
+  out(&b);
+}
+
+fn main() -> int {
+  a: shared String = "alpha";
+  b: shared String = "beta";
+
+  // Shared passed without mov — refcount bumps
+  show(a);
+  show(b);
+  showTwo(a, b);
+
+  // Still alive after calls
+  out(&a);
+  out(&b);
+
+  // Shared reassigned, then passed
+  a = "gamma";
+  show(a);
+
+  // Pass same shared var twice
+  showTwo(a, a);
+
+  return 0;
+}

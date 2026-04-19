@@ -7,6 +7,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 // -- VTable ------------------------------------------------------------------
 
@@ -29,6 +30,23 @@ PaykanString *PaykanString_new(const char *data, int64_t len) {
   memcpy(s->data, data, (size_t)len);
   s->data[len] = '\0';
   return s;
+}
+
+PaykanString *PaykanString_from_int(int64_t value) {
+  char buf[32];
+  int n = snprintf(buf, sizeof(buf), "%lld", (long long)value);
+  return PaykanString_new(buf, n);
+}
+
+PaykanString *PaykanString_from_float(double value) {
+  char buf[64];
+  int n = snprintf(buf, sizeof(buf), "%g", value);
+  return PaykanString_new(buf, n);
+}
+
+PaykanString *PaykanString_from_bool(int64_t value) {
+  if (value) return PaykanString_new("True", 4);
+  return PaykanString_new("False", 5);
 }
 
 void PaykanString_delete(PaykanString *self) {

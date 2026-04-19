@@ -23,6 +23,7 @@ namespace ast {
 
 #define PAYKAN_DECL_NODES(NODE) \
   NODE(NK_VarDecl,        VarDecl,        VarDecl) \
+  NODE(NK_FuncDecl,       FuncDecl,       FuncDecl) \
   NODE(NK_MethodDecl,     MethodDecl,     MethodDecl)
 
 #define PAYKAN_STMT_NODES(NODE) \
@@ -30,7 +31,9 @@ namespace ast {
   NODE(NK_ReturnStmt,     ReturnStmt,     ReturnStmt)      \
   NODE(NK_AssignStmt,     AssignStmt,     AssignStmt)      \
   NODE(NK_DeclStmt,       DeclStmt,       DeclStmt)        \
-  NODE(NK_ExprStmt,       ExprStmt,       ExprStmt)
+  NODE(NK_ExprStmt,       ExprStmt,       ExprStmt)        \
+  NODE(NK_IfStmt,         IfStmt,         IfStmt)          \
+  NODE(NK_WhileStmt,      WhileStmt,      WhileStmt)
 
 #define PAYKAN_EXPR_NODES(NODE) \
   NODE(NK_IntegerLiteral, IntegerLiteral, IntegerLiteral)  \
@@ -41,7 +44,9 @@ namespace ast {
   NODE(NK_BinaryExpr,     BinaryExpr,     BinaryExpr)      \
   NODE(NK_Identifier,     Identifier,     Identifier)      \
   NODE(NK_CallExpr,       CallExpr,       CallExpr)        \
-  NODE(NK_MovExpr,        MovExpr,        MovExpr)
+  NODE(NK_TernaryExpr,    TernaryExpr,    TernaryExpr)     \
+  NODE(NK_MovExpr,        MovExpr,        MovExpr)         \
+  NODE(NK_RefExpr,        RefExpr,        RefExpr)
 
 #define PAYKAN_TYPE_NODES(NODE) \
   NODE(NK_BuiltinType,    BuiltinType,    BuiltinType) \

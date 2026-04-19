@@ -1,12 +1,15 @@
-// Shared ownership: reference-counted via PaykanShared wrapper
-a: shared String = "shared hello";
-out(a);
+fn main() -> int {
+  // Shared ownership: reference-counted via PaykanShared wrapper
+  a: shared String = "shared hello";
+  out(&a);
 
-// Inner scope: b shares the same underlying string
-{
-  b: shared String = "shared inner";
-  out(b);
+  // Inner scope: b shares the same underlying string
+  {
+    b: shared String = "shared inner";
+    out(&b);
+  }
+
+  // a is still alive, released at end of this scope
+  out(&a);
+  return 0;
 }
-
-// a is still alive, released at end of this scope
-out(a);

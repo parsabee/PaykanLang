@@ -1,11 +1,14 @@
-// Relational operators: <, >, <=, >=, ==, !=
-1 < 2;
-3 > 2;
-4 <= 4;
-5 >= 3;
-1 == 1;
-1 != 2;
+fn main() -> int {
+  // Relational operators: <, >, <=, >=, ==, !=
+  1 < 2;
+  3 > 2;
+  4 <= 4;
+  5 >= 3;
+  1 == 1;
+  1 != 2;
 
-// Chained relational expressions
-1 + 2 < 3 + 4;
-10 * 2 >= 5 + 15;
+  // Chained relational expressions
+  1 + 2 < 3 + 4;
+  10 * 2 >= 5 + 15;
+  return 0;
+}

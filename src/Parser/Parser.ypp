@@ -61,9 +61,17 @@
   RBRACK  "}"
   ARROW "->"
   AMP   "&"
+  AND   "&&"
+  OR    "||"
   SHARED "shared"
   MOV    "mov"
   CONST  "const"
+  FN     "fn"
+  RETURN "return"
+  IF     "if"
+  ELSE   "else"
+  WHILE  "while"
+  THEN   "then"
 ;
 
 // associating terminals with types
@@ -88,17 +96,30 @@
 %type <Expr *> multiplicativeExpression
 %type <Expr *> expression
 %type <Expr *> relationalExpression
+%type <Expr *> logicalAndExpression
+%type <Expr *> logicalOrExpression
+%type <Expr *> ternaryExpression
+%type <Stmt *> ifStmt
+%type <Stmt *> whileStmt
 %type <std::vector<Expr *>> argumentList
 %type <UnaryOpcode> unaryOperator
+%type <std::vector<Param>> paramList
+%type <Param> param
+%type <FuncDecl *> funcDecl
+%type <std::vector<FuncDecl *>> funcDeclList
 %%
 
 %start translationUnit;
 
-translationUnit : compoundStmt
-                                    { $$ = impl(drv).Ctx.make<TranslationUnit>(loc(@1, @1), $1);
+translationUnit : funcDeclList
+                                    { $$ = impl(drv).Ctx.make<TranslationUnit>(loc(@1, @1), std::move($1));
                                       impl(drv).Root = $$;
                                     }
 ;
+
+funcDeclList: %empty                { $$ = std::vector<FuncDecl *>(); }
+    | funcDeclList funcDecl          { $$ = std::move($1); $$.push_back($2); }
+    ;
 
 compoundStmt: %empty                { $$ = impl(drv).Ctx.make<CompoundStmt>(loc(@$, @$)); }
     | compoundStmt statement        { $$ = $1;
@@ -152,7 +173,42 @@ statement: ";"                      { $$ = nullptr; }
                                       $$ = impl(drv).Ctx.make<AssignStmt>(loc(@1, @4), lhs->getName(), $3);
                                     }
     | staticAssignment ";"          { $$ = $1; }
+    | "return" expression ";"       { $$ = impl(drv).Ctx.make<ReturnStmt>(loc(@1, @3), $2); }
+    | "return" ";"                  { $$ = impl(drv).Ctx.make<ReturnStmt>(loc(@1, @2), nullptr); }
     | block                         { $$ = $1; }
+    | ifStmt                        { $$ = $1; }
+    | whileStmt                     { $$ = $1; }
+    ;
+
+param: IDENT ":" typeAnnotation                     { $$ = Param{$1, $3, Ownership::Unique, false}; }
+    | IDENT ":" typeAnnotation "&"                   { $$ = Param{$1, $3, Ownership::Reference, false}; }
+    | IDENT ":" "shared" typeAnnotation               { $$ = Param{$1, $4, Ownership::Shared, false}; }
+    | IDENT ":" "const" typeAnnotation                { $$ = Param{$1, $4, Ownership::Unique, true}; }
+    | IDENT ":" "const" typeAnnotation "&"            { $$ = Param{$1, $4, Ownership::Reference, true}; }
+    | IDENT ":" "const" "shared" typeAnnotation       { $$ = Param{$1, $5, Ownership::Shared, true}; }
+    ;
+
+paramList: %empty                   { $$ = std::vector<Param>(); }
+    | param                         { $$ = std::vector<Param>{std::move($1)}; }
+    | paramList "," param           { $$ = std::move($1); $$.push_back(std::move($3)); }
+    ;
+
+ifStmt: "if" "(" expression ")" block
+                                    { $$ = impl(drv).Ctx.make<IfStmt>(loc(@1, @5), $3, $5); }
+    | "if" "(" expression ")" block "else" block
+                                    { $$ = impl(drv).Ctx.make<IfStmt>(loc(@1, @7), $3, $5, $7); }
+    | "if" "(" expression ")" block "else" ifStmt
+                                    { $$ = impl(drv).Ctx.make<IfStmt>(loc(@1, @7), $3, $5, $7); }
+    ;
+
+whileStmt: "while" "(" expression ")" block
+                                    { $$ = impl(drv).Ctx.make<WhileStmt>(loc(@1, @5), $3, $5); }
+    ;
+
+funcDecl: "fn" IDENT "(" paramList ")" "->" typeAnnotation block
+                                    { $$ = impl(drv).Ctx.make<FuncDecl>(loc(@1, @8), $2, std::move($4), $7, $8); }
+    | "fn" IDENT "(" paramList ")" block
+                                    { $$ = impl(drv).Ctx.make<FuncDecl>(loc(@1, @6), $2, std::move($4), nullptr, $6); }
     ;
 
 relationalOperator:
@@ -189,6 +245,7 @@ unaryExpression:
                                     { $$ = impl(drv).Ctx.make<UnaryExpr>(loc(@1, @2), $1, $2); }
     | "mov" IDENT                    { auto *id = impl(drv).Ctx.make<Identifier>(loc(@2, @2), $2);
                                       $$ = impl(drv).Ctx.make<MovExpr>(loc(@1, @2), id); }
+    | "&" expression                { $$ = impl(drv).Ctx.make<RefExpr>(loc(@1, @2), $2); }
     ;
 
 multiplicativeExpression:
@@ -215,7 +272,25 @@ relationalExpression:
                                     { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), $2, $1, $3); }
     ;
 
-expression: relationalExpression    { $$ = $1; }
+logicalAndExpression:
+      relationalExpression          { $$ = $1; }
+    | logicalAndExpression "&&" relationalExpression
+                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryOpcode::And, $1, $3); }
+    ;
+
+logicalOrExpression:
+      logicalAndExpression          { $$ = $1; }
+    | logicalOrExpression "||" logicalAndExpression
+                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryOpcode::Or, $1, $3); }
+    ;
+
+ternaryExpression:
+      logicalOrExpression          { $$ = $1; }
+    | "if" logicalOrExpression "then" expression "else" ternaryExpression
+                                    { $$ = impl(drv).Ctx.make<TernaryExpr>(loc(@1, @6), $2, $4, $6); }
+    ;
+
+expression: ternaryExpression       { $$ = $1; }
     ;
 
 %%

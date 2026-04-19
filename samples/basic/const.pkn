@@ -1,14 +1,17 @@
-// const: immutable variables cannot be reassigned
-x: const int = 42;
-y: const float = 3.14;
-a: const String = "immutable";
-out(a);
+fn main() -> int {
+  // const: immutable variables cannot be reassigned
+  x: const int = 42;
+  y: const float = 3.14;
+  a: const String = "immutable";
+  out(&a);
 
-// const shared: immutable shared ownership
-b: const shared String = "shared const";
-out(b);
+  // const shared: immutable shared ownership
+  b: const shared String = "shared const";
+  out(&b);
 
-// const reference: cannot assign through it
-c: String = "original";
-d: const String& = c;
-out(d);
+  // const reference: cannot assign through it
+  c: String = "original";
+  d: const String& = &c;
+  out(d);
+  return 0;
+}

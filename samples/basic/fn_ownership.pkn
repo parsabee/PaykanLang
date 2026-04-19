@@ -1,0 +1,40 @@
+// Combining function calls with all ownership modes
+
+fn greet_unique(name: String) {
+  out(&name);
+}
+
+fn greet_shared(name: shared String) {
+  out(&name);
+}
+
+fn greet_ref(name: String&) {
+  out(name);
+}
+
+fn main() -> int {
+  // Unique: create, move into call
+  u: String = "unique greeting";
+  greet_unique(mov u);
+
+  // Shared: refcounted, survives scope
+  s: shared String = "shared greeting";
+  greet_shared(s);
+  {
+    b: shared String = "shared inner";
+    greet_shared(b);
+  }
+  greet_shared(s);
+
+  // Reference: borrow without ownership
+  orig: String = "original";
+  r: String& = &orig;
+  greet_ref(r);
+  greet_unique(mov orig);
+
+  // Move: transfer ownership into the call
+  m1: String = "movable";
+  greet_unique(mov m1);
+
+  return 0;
+}

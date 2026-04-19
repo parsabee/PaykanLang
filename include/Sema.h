@@ -92,13 +92,19 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   Scope *CurrentScope = nullptr;
 
+  /// The expected return type of the current function (nullptr = top-level / void).
+  ast::Type *CurrentReturnType = nullptr;
+
   // -- Function signature table ---------------------------------------------
 
   /// Describes a known function's type signature.
   struct FunctionSig {
     ast::Type *ReturnType;
     std::vector<ast::Type *> ParamTypes;
+    std::vector<ast::Ownership> ParamOwnerships;
+    std::vector<bool> ParamIsConst;
     bool IsVariadic = false;
+    bool IsBuiltin = false;
   };
 
   /// Maps function names to their signatures.
@@ -107,7 +113,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// Register a function signature.
   void declareFunction(llvm::StringRef name, ast::Type *retTy,
                        std::vector<ast::Type *> paramTys,
-                       bool isVariadic = false);
+                       std::vector<ast::Ownership> paramOwns = {},
+                       std::vector<bool> paramConst = {},
+                       bool isVariadic = false, bool isBuiltin = false);
 
   /// Look up a function signature, or nullptr if unknown.
   const FunctionSig *lookupFunction(llvm::StringRef name) const;
@@ -149,6 +157,15 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // emits an error on failure.
   ast::Type *resolveType(ast::Type *ty, ast::SourceLocation loc,
                          const std::string &context);
+
+  // Check that a variable is declared and not moved.  Returns its type,
+  // or nullptr (with error emitted) on failure.
+  ast::Type *checkIdentLive(llvm::StringRef name, ast::SourceLocation loc);
+
+  // Check ownership compatibility of a single call argument against its
+  // parameter.  Emits errors and returns false on mismatch.
+  bool checkArgOwnership(const FunctionSig &sig, size_t paramIdx,
+                         ast::Expr *argExpr, const std::string &calleeName);
 
   // -- Expression type-checker ----------------------------------------------
   //

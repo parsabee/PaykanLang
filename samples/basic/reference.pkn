@@ -1,7 +1,10 @@
-// Reference ownership: borrowed pointer, no cleanup
-a: String = "ref hello";
-b: String& = a;
-out(b);
+fn main() -> int {
+  // Reference ownership: borrowed pointer, no cleanup
+  a: String = "ref hello";
+  b: const String& = &a;
+  out(b);
 
-// b aliases a — same underlying object
-out(a);
+  // b aliases a — same underlying object
+  out(&a);
+  return 0;
+}

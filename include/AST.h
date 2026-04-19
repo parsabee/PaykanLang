@@ -42,6 +42,7 @@ public:
   enum NodeKind {
     // Declarations
     NK_VarDecl,
+    NK_FuncDecl,
     NK_MethodDecl,
 
     // Statements
@@ -50,6 +51,8 @@ public:
     NK_AssignStmt,
     NK_DeclStmt,
     NK_ExprStmt,
+    NK_IfStmt,
+    NK_WhileStmt,
 
     // Expressions
     NK_IntegerLiteral,
@@ -60,7 +63,9 @@ public:
     NK_BinaryExpr,
     NK_Identifier,
     NK_CallExpr,
+    NK_TernaryExpr,
     NK_MovExpr,
+    NK_RefExpr,
 
     // Types
     NK_BuiltinType,
@@ -132,7 +137,7 @@ public:
   Stmt(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_CompoundStmt && N->getKind() <= NK_ExprStmt;
+    return N->getKind() >= NK_CompoundStmt && N->getKind() <= NK_WhileStmt;
   }
 };
 
@@ -142,7 +147,7 @@ public:
   Expr(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_IntegerLiteral && N->getKind() <= NK_CallExpr;
+    return N->getKind() >= NK_IntegerLiteral && N->getKind() <= NK_RefExpr;
   }
 };
 
@@ -167,6 +172,9 @@ enum class BinaryOpcode {
   Ge,  // >=
   Eq,  // ==
   Ne,  // !=
+  // Logical
+  And, // &&
+  Or,  // ||
 };
 
 /// Ownership qualifier for class-type variables.
@@ -244,6 +252,40 @@ public:
   bool isConst() const { return IsConst; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_VarDecl; }
+};
+
+// A single function parameter (name + type + ownership).
+struct Param {
+  std::string Name;
+  Type *ParamType;
+  Ownership Own = Ownership::Unique;
+  bool IsConst = false;
+};
+
+// Forward declaration for FuncDecl body.
+class CompoundStmt;
+
+// Free function declaration:  fn name(params) -> retType { body }
+class FuncDecl : public Decl {
+private:
+  std::string Name;
+  std::vector<Param> Params;
+  Type *ReturnType;       // nullptr means void
+  CompoundStmt *Body;
+
+public:
+  FuncDecl(SourceLocation loc, const std::string &name,
+           std::vector<Param> params, Type *retTy, CompoundStmt *body)
+      : Decl(NK_FuncDecl, loc), Name(name), Params(std::move(params)),
+        ReturnType(retTy), Body(body) {}
+
+  const std::string &getName() const { return Name; }
+  const std::vector<Param> &getParams() const { return Params; }
+  size_t getNumParams() const { return Params.size(); }
+  Type *getReturnType() const { return ReturnType; }
+  CompoundStmt *getBody() const { return Body; }
+
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_FuncDecl; }
 };
 
 // Compound statement (block)
@@ -324,6 +366,43 @@ public:
   Expr *getExpr() const { return Expression; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_ExprStmt; }
+};
+
+// If statement (with optional else branch — else-if chains are nested IfStmts)
+class IfStmt : public Stmt {
+private:
+  Expr *Condition;
+  Stmt *ThenBranch;
+  Stmt *ElseBranch; // nullptr if no else; IfStmt* for else-if chains
+
+public:
+  IfStmt(SourceLocation loc, Expr *cond, Stmt *thenBranch,
+         Stmt *elseBranch = nullptr)
+      : Stmt(NK_IfStmt, loc), Condition(cond), ThenBranch(thenBranch),
+        ElseBranch(elseBranch) {}
+
+  Expr *getCondition() const { return Condition; }
+  Stmt *getThenBranch() const { return ThenBranch; }
+  Stmt *getElseBranch() const { return ElseBranch; }
+  bool hasElse() const { return ElseBranch != nullptr; }
+
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_IfStmt; }
+};
+
+// While loop
+class WhileStmt : public Stmt {
+private:
+  Expr *Condition;
+  Stmt *Body;
+
+public:
+  WhileStmt(SourceLocation loc, Expr *cond, Stmt *body)
+      : Stmt(NK_WhileStmt, loc), Condition(cond), Body(body) {}
+
+  Expr *getCondition() const { return Condition; }
+  Stmt *getBody() const { return Body; }
+
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_WhileStmt; }
 };
 
 // Integer literal
@@ -477,6 +556,46 @@ public:
   static bool classof(const ASTNode *N) { return N->getKind() == NK_MovExpr; }
 };
 
+// Reference expression (&x) — borrow a variable or expression
+class RefExpr : public Expr {
+private:
+  Expr *Operand;
+
+public:
+  RefExpr(SourceLocation loc, Expr *operand)
+      : Expr(NK_RefExpr, loc), Operand(operand) {}
+
+  Expr *getOperand() const { return Operand; }
+
+  /// If the operand is an Identifier, return it; otherwise nullptr.
+  Identifier *getIdentOperand() const {
+    return dyn_cast<Identifier>(Operand);
+  }
+
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_RefExpr; }
+};
+
+// Ternary expression (cond ? then : else)
+class TernaryExpr : public Expr {
+private:
+  Expr *Condition;
+  Expr *TrueExpr;
+  Expr *FalseExpr;
+
+public:
+  TernaryExpr(SourceLocation loc, Expr *cond, Expr *trueExpr, Expr *falseExpr)
+      : Expr(NK_TernaryExpr, loc), Condition(cond), TrueExpr(trueExpr),
+        FalseExpr(falseExpr) {}
+
+  Expr *getCondition() const { return Condition; }
+  Expr *getTrueExpr() const { return TrueExpr; }
+  Expr *getFalseExpr() const { return FalseExpr; }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_TernaryExpr;
+  }
+};
+
 // Builtin type (int, void, etc.)
 class BuiltinType : public Type {
 public:
@@ -623,13 +742,13 @@ public:
 // Translation unit (top-level container)
 class TranslationUnit : public ASTNode {
 private:
-  CompoundStmt *Body;
+  std::vector<FuncDecl *> FuncDecls;
 
 public:
-  TranslationUnit(SourceLocation loc, CompoundStmt *body)
-      : ASTNode(NK_TranslationUnit, loc), Body(body) {}
+  TranslationUnit(SourceLocation loc, std::vector<FuncDecl *> funcs)
+      : ASTNode(NK_TranslationUnit, loc), FuncDecls(std::move(funcs)) {}
 
-  CompoundStmt *getBody() const { return Body; }
+  const std::vector<FuncDecl *> &getFuncDecls() const { return FuncDecls; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_TranslationUnit;

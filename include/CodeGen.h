@@ -13,6 +13,7 @@
 #include <llvm/IR/Value.h>
 
 #include <llvm/ADT/StringMap.h>
+#include <llvm/ADT/StringSet.h>
 #include <llvm/Passes/OptimizationLevel.h>
 
 #include <memory>
@@ -42,6 +43,7 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
     Scope *Parent = nullptr;
     llvm::StringMap<llvm::AllocaInst *> Locals;
     llvm::StringMap<ast::Ownership> OwnershipMap;
+    llvm::StringMap<ast::Type *> ASTTypeMap;
     /// For reference variables: maps ref name → referent's alloca.
     llvm::StringMap<llvm::AllocaInst *> RefTargets;
 
@@ -59,6 +61,7 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
     llvm::AllocaInst *lookup(llvm::StringRef name) const;
     llvm::AllocaInst *lookupRefTarget(llvm::StringRef name) const;
     ast::Ownership lookupOwnership(llvm::StringRef name) const;
+    ast::Type *lookupASTType(llvm::StringRef name) const;
     void set(llvm::StringRef name, llvm::AllocaInst *alloca);
     void declare(llvm::StringRef name, llvm::AllocaInst *alloca,
                  ast::Ownership own, ast::Type *astTy);
@@ -77,6 +80,13 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
 
   /// Maps Paykan-level function names to their codegen info.
   llvm::StringMap<FunctionInfo> FunctionTable;
+
+  /// Names of identity constructors (e.g. "String") that simply
+  /// return their single argument, wrapping string literals as needed.
+  llvm::StringSet<> IdentityCtors;
+
+  /// Per-function parameter ownerships for user-defined functions.
+  llvm::StringMap<std::vector<ast::Ownership>> UserFuncParamOwns;
 
   /// Register builtin functions in the function table.
   void bootstrapBuiltins();

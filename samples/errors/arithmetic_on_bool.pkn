@@ -1,4 +1,7 @@
-// Error: arithmetic on bool
-a: bool = True;
-b: bool = False;
-a + b;
+fn main() -> int {
+  // Error: arithmetic on bool
+  a: bool = True;
+  b: bool = False;
+  a + b;
+  return 0;
+}

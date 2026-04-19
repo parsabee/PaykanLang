@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "JIT.h"
+#include "Names.h"
 #include "Runtime.h"
 
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
@@ -22,30 +23,35 @@ struct RuntimeSymbol {
   void       *Addr;
 };
 
+using namespace paykan::names;
+
 // clang-format off
 const RuntimeSymbol kRuntimeSymbols[] = {
-    {"PaykanObject_new",       reinterpret_cast<void *>(&PaykanObject_new)},
-    {"PaykanObject_delete",    reinterpret_cast<void *>(&PaykanObject_delete)},
-    {"PaykanObject_toString",  reinterpret_cast<void *>(&PaykanObject_toString)},
-    {"PaykanObject_equals",    reinterpret_cast<void *>(&PaykanObject_equals)},
+    {kPaykanObjectNew,       reinterpret_cast<void *>(&PaykanObject_new)},
+    {kPaykanObjectDelete,    reinterpret_cast<void *>(&PaykanObject_delete)},
+    {kPaykanObjectToString,  reinterpret_cast<void *>(&PaykanObject_toString)},
+    {kPaykanObjectEquals,    reinterpret_cast<void *>(&PaykanObject_equals)},
 
-    {"PaykanString_new",       reinterpret_cast<void *>(&PaykanString_new)},
-    {"PaykanString_delete",    reinterpret_cast<void *>(&PaykanString_delete)},
-    {"PaykanString_toString",  reinterpret_cast<void *>(&PaykanString_toString)},
-    {"PaykanString_equals",    reinterpret_cast<void *>(&PaykanString_equals)},
-    {"PaykanString_length",    reinterpret_cast<void *>(&PaykanString_length)},
-    {"PaykanString_concat",    reinterpret_cast<void *>(&PaykanString_concat)},
+    {kPaykanStringNew,       reinterpret_cast<void *>(&PaykanString_new)},
+    {kPaykanStringFromInt,   reinterpret_cast<void *>(&PaykanString_from_int)},
+    {kPaykanStringFromFloat, reinterpret_cast<void *>(&PaykanString_from_float)},
+    {kPaykanStringFromBool,  reinterpret_cast<void *>(&PaykanString_from_bool)},
+    {kPaykanStringDelete,    reinterpret_cast<void *>(&PaykanString_delete)},
+    {kPaykanStringToString,  reinterpret_cast<void *>(&PaykanString_toString)},
+    {kPaykanStringEquals,    reinterpret_cast<void *>(&PaykanString_equals)},
+    {kPaykanStringLength,    reinterpret_cast<void *>(&PaykanString_length)},
+    {kPaykanStringConcat,    reinterpret_cast<void *>(&PaykanString_concat)},
 
-    {"Paykan_out",             reinterpret_cast<void *>(&Paykan_out)},
-    {"Paykan_err",             reinterpret_cast<void *>(&Paykan_err)},
+    {kPaykanOut,             reinterpret_cast<void *>(&Paykan_out)},
+    {kPaykanErr,             reinterpret_cast<void *>(&Paykan_err)},
 
-    {"PaykanShared_new",       reinterpret_cast<void *>(&PaykanShared_new)},
-    {"PaykanShared_get",       reinterpret_cast<void *>(&PaykanShared_get)},
-    {"Paykan_retain",          reinterpret_cast<void *>(&Paykan_retain)},
-    {"Paykan_release",         reinterpret_cast<void *>(&Paykan_release)},
+    {kPaykanSharedNew,       reinterpret_cast<void *>(&PaykanShared_new)},
+    {kPaykanSharedGet,       reinterpret_cast<void *>(&PaykanShared_get)},
+    {kPaykanRetain,          reinterpret_cast<void *>(&Paykan_retain)},
+    {kPaykanRelease,         reinterpret_cast<void *>(&Paykan_release)},
 
-    {"PaykanObject_vtable",    reinterpret_cast<void *>(&PaykanObject_vtable)},
-    {"PaykanString_vtable",    reinterpret_cast<void *>(&PaykanString_vtable)},
+    {kPaykanObjectVtable,    reinterpret_cast<void *>(&PaykanObject_vtable)},
+    {kPaykanStringVtable,    reinterpret_cast<void *>(&PaykanString_vtable)},
 };
 // clang-format on
 

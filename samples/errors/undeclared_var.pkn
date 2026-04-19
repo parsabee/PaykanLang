@@ -1,2 +1,5 @@
-// Error: use of undeclared variable in expression
-x + 1;
+fn main() -> int {
+  // Error: use of undeclared variable in expression
+  x + 1;
+  return 0;
+}

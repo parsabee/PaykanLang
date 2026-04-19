@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "Sema.h"
+#include "Names.h"
 
 #include <llvm/Support/raw_ostream.h>
 
@@ -81,8 +82,16 @@ Sema::Sema(ast::ASTContext &ctx, llvm::raw_ostream &os)
 
 void Sema::declareFunction(llvm::StringRef name, ast::Type *retTy,
                            std::vector<ast::Type *> paramTys,
-                           bool isVariadic) {
-  FunctionTable[name] = {retTy, std::move(paramTys), isVariadic};
+                           std::vector<ast::Ownership> paramOwns,
+                           std::vector<bool> paramConst,
+                           bool isVariadic, bool isBuiltin) {
+  // Default all param ownerships to Unique if not provided.
+  if (paramOwns.empty())
+    paramOwns.resize(paramTys.size(), ast::Ownership::Unique);
+  if (paramConst.empty())
+    paramConst.resize(paramTys.size(), false);
+  FunctionTable[name] = {retTy, std::move(paramTys), std::move(paramOwns),
+                         std::move(paramConst), isVariadic, isBuiltin};
 }
 
 const Sema::FunctionSig *Sema::lookupFunction(llvm::StringRef name) const {
@@ -169,6 +178,107 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
   return nullptr;
 }
 
+// Check that a variable is declared and has not been moved.
+ast::Type *Sema::checkIdentLive(llvm::StringRef name, ast::SourceLocation loc) {
+  auto *ty = CurrentScope->lookup(name);
+  if (!ty) {
+    error(loc, "use of undeclared variable '" + std::string(name) + "'");
+    return nullptr;
+  }
+  if (CurrentScope->isMoved(name)) {
+    error(loc, "use of moved variable '" + std::string(name) + "'");
+    return nullptr;
+  }
+  return ty;
+}
+
+// Check ownership compatibility of a single call argument.
+bool Sema::checkArgOwnership(const FunctionSig &sig, size_t i,
+                             ast::Expr *argExpr,
+                             const std::string &calleeName) {
+  auto paramOwn = sig.ParamOwnerships[i];
+  bool paramConst = sig.ParamIsConst[i];
+  bool isMov = ast::isa<ast::MovExpr>(argExpr);
+  bool isRef = ast::isa<ast::RefExpr>(argExpr);
+
+  // Determine the argument's ownership and name.
+  ast::Ownership argOwn = ast::Ownership::Unique;
+  bool argIsIdent = false;
+  std::string argName;
+  if (auto *id = ast::dyn_cast<ast::Identifier>(argExpr)) {
+    argOwn = CurrentScope->lookupOwnership(id->getName());
+    argIsIdent = true;
+    argName = id->getName();
+  } else if (isRef) {
+    if (auto *id = ast::cast<ast::RefExpr>(argExpr)->getIdentOperand()) {
+      argOwn = CurrentScope->lookupOwnership(id->getName());
+      argName = id->getName();
+    }
+  }
+
+  auto err = [&](const std::string &msg) {
+    error(argExpr->getLocation(),
+          "argument " + std::to_string(i + 1) + " of '" + calleeName + "': " + msg);
+  };
+
+  switch (paramOwn) {
+  case ast::Ownership::Unique:
+    if (!isMov) {
+      if (argIsIdent && argOwn == ast::Ownership::Shared)
+        err("shared variable '" + argName + "' cannot be passed to unique parameter");
+      else if (argIsIdent && argOwn == ast::Ownership::Reference)
+        err("reference '" + argName + "' cannot be passed to unique parameter");
+      else
+        err("unique ownership must be transferred with 'mov'");
+      return false;
+    }
+    break;
+
+  case ast::Ownership::Shared:
+    if (isMov) {
+      // mov → shared: OK
+    } else if (argIsIdent) {
+      if (argOwn == ast::Ownership::Unique) {
+        err("unique variable '" + argName + "' must be 'mov'd to shared parameter");
+        return false;
+      } else if (argOwn == ast::Ownership::Reference) {
+        err("reference '" + argName + "' cannot be passed to shared parameter");
+        return false;
+      }
+      // shared → shared: OK
+    } else {
+      err("unique ownership must be transferred with 'mov' to shared parameter");
+      return false;
+    }
+    break;
+
+  case ast::Ownership::Reference:
+    if (isMov) {
+      err("'mov' cannot be used when passing to a reference parameter");
+      return false;
+    } else if (isRef) {
+      // &x — check source ownership for non-const ref.
+      if (!paramConst) {
+        if (auto *id = ast::cast<ast::RefExpr>(argExpr)->getIdentOperand()) {
+          if (CurrentScope->lookupOwnership(id->getName()) == ast::Ownership::Shared) {
+            err("shared variable '" + std::string(id->getName()) +
+                "' cannot be passed to non-const reference parameter");
+            return false;
+          }
+        }
+      }
+    } else if (argIsIdent && argOwn != ast::Ownership::Reference) {
+      err("reference parameter requires '&' on the argument");
+      return false;
+    } else if (!argIsIdent && !paramConst) {
+      err("cannot pass rvalue to non-const reference parameter");
+      return false;
+    }
+    break;
+  }
+  return true;
+}
+
 // Visit an expression and return its resolved type (nullptr on error).
 ast::Type *Sema::resolveExprType(ast::Expr *expr) {
   return EC.visit(expr);
@@ -193,19 +303,7 @@ ast::Type *Sema::ExprChecker::visitStringLiteral(ast::StringLiteral *) {
 }
 
 ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
-  auto *ty = S.CurrentScope->lookup(node->getName());
-  if (!ty) {
-    S.error(node->getLocation(),
-            "use of undeclared variable '" + node->getName() + "'");
-    return nullptr;
-  }
-  // Reject use of moved unique variable.
-  if (S.CurrentScope->isMoved(node->getName())) {
-    S.error(node->getLocation(),
-            "use of moved variable '" + node->getName() + "'");
-    return nullptr;
-  }
-  return ty;
+  return S.checkIdentLive(node->getName(), node->getLocation());
 }
 
 ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
@@ -284,6 +382,23 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   case ast::BinaryOpcode::Eq:
   case ast::BinaryOpcode::Ne:
     return S.Ctx.getBoolTy();
+
+  // Logical: both operands must be bool, result is bool.
+  case ast::BinaryOpcode::And:
+  case ast::BinaryOpcode::Or:
+    if (lhsTy != S.Ctx.getBoolTy()) {
+      S.error(node->getLHS()->getLocation(),
+              "left operand of '" + std::string(node->getOpcodeStr()) +
+                  "' must be 'bool', got '" + std::string(typeName(lhsTy)) + "'");
+      return nullptr;
+    }
+    if (rhsTy != S.Ctx.getBoolTy()) {
+      S.error(node->getRHS()->getLocation(),
+              "right operand of '" + std::string(node->getOpcodeStr()) +
+                  "' must be 'bool', got '" + std::string(typeName(rhsTy)) + "'");
+      return nullptr;
+    }
+    return S.Ctx.getBoolTy();
   }
 
   return nullptr;
@@ -298,13 +413,13 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   }
 
   const auto *sig = S.lookupFunction(node->getCalleeName());
+
   if (!sig) {
     S.error(node->getLocation(),
             "call to undeclared function '" + node->getCalleeName() + "'");
     return nullptr;
   }
 
-  // Check argument count.
   if (sig->IsVariadic) {
     if (argTypes.size() < sig->ParamTypes.size()) {
       S.error(node->getLocation(),
@@ -334,6 +449,12 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
                   node->getCalleeName() + "' has type '" +
                   typeName(argTypes[i]) + "', expected '" +
                   typeName(sig->ParamTypes[paramIdx]) + "'");
+
+    // ---- Ownership checking for class-type parameters ----
+    if (i < sig->ParamTypes.size() &&
+        ast::isa<ast::ClassType>(sig->ParamTypes[i]))
+      S.checkArgOwnership(*sig, i, node->getArguments()[i],
+                          node->getCalleeName());
   }
 
   return sig->ReturnType;
@@ -341,26 +462,54 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
 
 ast::Type *Sema::ExprChecker::visitMovExpr(ast::MovExpr *node) {
   auto *ident = node->getOperand();
-  auto *ty = S.CurrentScope->lookup(ident->getName());
-  if (!ty) {
-    S.error(ident->getLocation(),
-            "use of undeclared variable '" + ident->getName() + "'");
+  auto *ty = S.checkIdentLive(ident->getName(), ident->getLocation());
+  if (!ty)
     return nullptr;
-  }
-  if (S.CurrentScope->isMoved(ident->getName())) {
-    S.error(ident->getLocation(),
-            "use of moved variable '" + ident->getName() + "'");
-    return nullptr;
-  }
   auto ownership = S.CurrentScope->lookupOwnership(ident->getName());
-  if (ownership != ast::Ownership::Unique) {
+  if (ownership == ast::Ownership::Reference) {
     S.error(node->getLocation(),
-            "'mov' can only be used on unique variables");
+            "'mov' cannot be used on reference variables");
     return nullptr;
   }
   S.CurrentScope->markMoved(ident->getName());
   return ty;
 }
+
+ast::Type *Sema::ExprChecker::visitRefExpr(ast::RefExpr *node) {
+  if (auto *ident = node->getIdentOperand())
+    return S.checkIdentLive(ident->getName(), ident->getLocation());
+  // '&' can only be applied to a variable.
+  S.error(node->getLocation(),
+          "'&' can only be applied to a variable");
+  return nullptr;
+}
+
+ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
+  auto *condTy = visit(node->getCondition());
+  auto *trueTy = visit(node->getTrueExpr());
+  auto *falseTy = visit(node->getFalseExpr());
+  if (!condTy || !trueTy || !falseTy)
+    return nullptr;
+
+  if (condTy != S.Ctx.getBoolTy()) {
+    S.error(node->getCondition()->getLocation(),
+            "ternary condition must be 'bool', got '" +
+                std::string(typeName(condTy)) + "'");
+    return nullptr;
+  }
+
+  if (trueTy != falseTy) {
+    S.error(node->getLocation(),
+            "ternary branches have mismatched types '" +
+                std::string(typeName(trueTy)) + "' and '" +
+                std::string(typeName(falseTy)) + "'");
+    return nullptr;
+  }
+
+  return trueTy;
+}
+
+
 
 // -- Entry point -------------------------------------------------------------
 
@@ -369,9 +518,19 @@ bool Sema::run(ast::TranslationUnit *tu) {
   Diagnostics.clear();
   ErrorCount = 0;
 
-  // Bootstrap builtin functions.
-  declareFunction("out", Ctx.getVoidTy(), {Ctx.getObjectTy()}, /*variadic=*/true);
-  declareFunction("err", Ctx.getVoidTy(), {Ctx.getObjectTy()}, /*variadic=*/true);
+  // Bootstrap builtin functions — out/err take const T&.
+  declareFunction(names::kOut, Ctx.getVoidTy(), {Ctx.getObjectTy()},
+                  {ast::Ownership::Reference}, {true}, /*variadic=*/true, /*builtin=*/true);
+  declareFunction(names::kErr, Ctx.getVoidTy(), {Ctx.getObjectTy()},
+                  {ast::Ownership::Reference}, {true}, /*variadic=*/true, /*builtin=*/true);
+
+  // Register type-conversion builtins (take unique builtin types — no ownership check needed).
+  auto *StrTy = Ctx.getStringTy();
+  declareFunction(names::kStringInt,   StrTy, {Ctx.getIntTy()},   {}, {}, false, true);
+  declareFunction(names::kStringFloat, StrTy, {Ctx.getFloatTy()}, {}, {}, false, true);
+  declareFunction(names::kStringBool,  StrTy, {Ctx.getBoolTy()},  {}, {}, false, true);
+  declareFunction(names::kString,      StrTy, {StrTy},
+                  {ast::Ownership::Reference}, {true}, false, true);
 
   visit(tu);
   return !hasErrors();
@@ -380,7 +539,11 @@ bool Sema::run(ast::TranslationUnit *tu) {
 // -- Top-level ---------------------------------------------------------------
 
 bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
-  return visitCompoundStmt(node->getBody());
+  bool ok = true;
+  for (auto *fn : node->getFuncDecls())
+    if (!visitFuncDecl(fn))
+      ok = false;
+  return ok;
 }
 
 // -- Statements --------------------------------------------------------------
@@ -448,13 +611,119 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
 }
 
 bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
-  // No function context yet -- just validate the return expression if present.
-  if (node->getReturnValue())
-    return resolveExprType(node->getReturnValue()) != nullptr;
+  if (node->getReturnValue()) {
+    auto *valTy = resolveExprType(node->getReturnValue());
+    if (!valTy)
+      return false;
+    if (CurrentReturnType && !isAssignable(CurrentReturnType, valTy)) {
+      error(node->getLocation(),
+            "return value of type '" + std::string(typeName(valTy)) +
+                "' does not match function return type '" +
+                typeName(CurrentReturnType) + "'");
+      return false;
+    }
+    return true;
+  }
+  // void return
+  if (CurrentReturnType && CurrentReturnType != Ctx.getVoidTy()) {
+    error(node->getLocation(),
+          "non-void function must return a value");
+    return false;
+  }
   return true;
 }
 
+bool Sema::visitIfStmt(ast::IfStmt *node) {
+  // Type-check the condition — must be bool.
+  auto *condTy = resolveExprType(node->getCondition());
+  if (!condTy)
+    return false;
+  if (condTy != Ctx.getBoolTy()) {
+    error(node->getCondition()->getLocation(),
+          "if condition must be 'bool', got '" +
+              std::string(typeName(condTy)) + "'");
+    return false;
+  }
+
+  bool ok = true;
+  // Type-check the then branch.
+  if (!visit(node->getThenBranch()))
+    ok = false;
+  // Type-check the else branch (if present).
+  if (node->hasElse()) {
+    if (!visit(node->getElseBranch()))
+      ok = false;
+  }
+  return ok;
+}
+
+bool Sema::visitWhileStmt(ast::WhileStmt *node) {
+  // Type-check the condition — must be bool.
+  auto *condTy = resolveExprType(node->getCondition());
+  if (!condTy)
+    return false;
+  if (condTy != Ctx.getBoolTy()) {
+    error(node->getCondition()->getLocation(),
+          "while condition must be 'bool', got '" +
+              std::string(typeName(condTy)) + "'");
+    return false;
+  }
+
+  // Type-check the body.
+  return visit(node->getBody());
+}
+
 // -- Declarations ------------------------------------------------------------
+
+bool Sema::visitFuncDecl(ast::FuncDecl *node) {
+  // Resolve return type.
+  ast::Type *retTy = Ctx.getVoidTy();
+  if (node->getReturnType()) {
+    retTy = resolveType(node->getReturnType(), node->getLocation(),
+                        "function '" + node->getName() + "' return type");
+    if (!retTy)
+      return false;
+  }
+
+  // Resolve parameter types and ownerships.
+  std::vector<ast::Type *> paramTypes;
+  std::vector<ast::Ownership> paramOwns;
+  std::vector<bool> paramConst;
+  for (auto &p : node->getParams()) {
+    auto *ty = resolveType(p.ParamType, node->getLocation(),
+                           "parameter '" + p.Name + "'");
+    if (!ty)
+      return false;
+    paramTypes.push_back(ty);
+    paramOwns.push_back(p.Own);
+    paramConst.push_back(p.IsConst);
+  }
+
+  // Register the function in the function table.
+  if (lookupFunction(node->getName())) {
+    error(node->getLocation(),
+          "redefinition of function '" + node->getName() + "'");
+    return false;
+  }
+  declareFunction(node->getName(), retTy, paramTypes, paramOwns, paramConst);
+
+  // Type-check the body in a new scope with params.
+  auto *savedRetTy = CurrentReturnType;
+  CurrentReturnType = retTy;
+  {
+    ScopeGuard guard(*this);
+    for (size_t i = 0; i < node->getParams().size(); ++i)
+      CurrentScope->declare(node->getParams()[i].Name, paramTypes[i],
+                            node->getParams()[i].Own, node->getParams()[i].IsConst);
+    bool ok = true;
+    for (auto *stmt : node->getBody()->getStatements())
+      if (!visit(stmt))
+        ok = false;
+    CurrentReturnType = savedRetTy;
+    if (!ok) return false;
+  }
+  return true;
+}
 
 bool Sema::visitVarDecl(ast::VarDecl *node) {
   // Check for duplicate declaration in the current scope.
@@ -490,13 +759,14 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     }
   }
 
-  // Reference must bind to an existing variable (lvalue), not a temporary.
+  // Reference must bind via & to an existing variable (lvalue), not a temporary.
   if (ownership == ast::Ownership::Reference) {
-    if (!node->getInitExpr() ||
-        !ast::isa<ast::Identifier>(node->getInitExpr())) {
+    auto *initExpr = node->getInitExpr();
+    ast::RefExpr *refExpr = initExpr ? ast::dyn_cast<ast::RefExpr>(initExpr) : nullptr;
+    if (!refExpr || !refExpr->getIdentOperand()) {
       error(node->getLocation(),
             "reference variable '" + node->getName() +
-                "' must be initialized from an existing variable");
+                "' must be initialized with '&' on an existing variable");
       if (declTy) CurrentScope->set(node->getName(), declTy);
       return false;
     }

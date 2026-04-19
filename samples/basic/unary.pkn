@@ -1,9 +1,12 @@
-// Unary operators: negation and logical not
--42;
--3.14;
-!True;
-!False;
+fn main() -> int {
+  // Unary operators: negation and logical not
+  -42;
+  -3.14;
+  !True;
+  !False;
 
-// Unary combined with binary
--1 + 2;
-!True == False;
+  // Unary combined with binary
+  -1 + 2;
+  !True == False;
+  return 0;
+}

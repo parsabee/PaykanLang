@@ -1,0 +1,10 @@
+// Error: passing unique variable without mov
+fn consume(s: String) {
+  out(s);
+}
+
+fn main() -> int {
+  a: String = "hello";
+  consume(a);  // error: requires 'mov'
+  return 0;
+}

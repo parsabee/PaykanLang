@@ -21,6 +21,8 @@ const char *BinaryExpr::getOpcodeStr() const {
   case BinaryOpcode::Ge:  return ">=";
   case BinaryOpcode::Eq:  return "==";
   case BinaryOpcode::Ne:  return "!=";
+  case BinaryOpcode::And: return "&&";
+  case BinaryOpcode::Or:  return "||";
   }
   return "?";
 }
@@ -58,6 +60,8 @@ void BuiltinType::initOps() {
     addUnaryOp(UnaryOpcode::Not);
     addBinaryOp(BinaryOpcode::Eq);
     addBinaryOp(BinaryOpcode::Ne);
+    addBinaryOp(BinaryOpcode::And);
+    addBinaryOp(BinaryOpcode::Or);
     break;
   case Void:
     break;

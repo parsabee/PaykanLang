@@ -1,0 +1,33 @@
+// Passing rvalues to functions expecting const T&
+
+fn show(s: const String&) {
+  out(s);
+}
+
+fn main() -> int {
+  // String literal → const String&
+  show("hello directly");
+
+  // Constructor result → const String&
+  show(StringInt(42));
+  show(StringFloat(3.14));
+  show(StringBool(True));
+  show(String("wrapped"));
+
+  // Nested call result → const String&
+  show(StringInt(10 + 20));
+
+  // Owned variable with &
+  a: String = "owned";
+  show(&a);
+
+  // Shared variable with &
+  b: shared String = "shared";
+  show(&b);
+
+  // Reference variable passes directly
+  r: String& = &a;
+  show(r);
+
+  return 0;
+}

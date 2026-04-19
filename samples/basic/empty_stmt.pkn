@@ -1,8 +1,11 @@
-// Empty statements (just semicolons) are valid
-;
-;;
+fn main() -> int {
+  // Empty statements (just semicolons) are valid
+  ;
+  ;;
 
-// Mixed with real statements
-x: int = 1;
-;
-x = x + 1;
+  // Mixed with real statements
+  x: int = 1;
+  ;
+  x = x + 1;
+  return 0;
+}

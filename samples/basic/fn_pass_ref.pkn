@@ -1,0 +1,30 @@
+// Passing references to functions — borrows without ownership transfer
+
+fn display(s: String&) {
+  out(s);
+}
+
+fn consume(s: String) {
+  out(&s);
+}
+
+fn main() -> int {
+  orig: String = "the original";
+  r: String& = &orig;
+
+  // Reference passed without mov — just a borrow
+  display(r);
+
+  // Original still usable
+  out(&orig);
+
+  // Multiple references to the same string
+  r2: String& = &orig;
+  display(r2);
+  display(r);
+
+  // Finally move the original away
+  consume(mov orig);
+
+  return 0;
+}

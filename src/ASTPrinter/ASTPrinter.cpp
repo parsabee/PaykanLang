@@ -57,9 +57,10 @@ void ASTPrinter::visitTranslationUnit(TranslationUnit *node) {
   OS << "TranslationUnit";
   printLoc(node);
   OS << "\n";
-  {
-    ChildScope cs(*this, true);
-    visit(node->getBody());
+  for (size_t i = 0; i < node->getFuncDecls().size(); ++i) {
+    bool last = (i + 1 == node->getFuncDecls().size());
+    ChildScope cs(*this, last);
+    visitFuncDecl(node->getFuncDecls()[i]);
   }
 }
 
@@ -114,6 +115,41 @@ void ASTPrinter::visitExprStmt(ExprStmt *node) {
   {
     ChildScope cs(*this, true);
     visit(node->getExpr());
+  }
+}
+
+void ASTPrinter::visitIfStmt(IfStmt *node) {
+  printIndent();
+  OS << "IfStmt";
+  printLoc(node);
+  OS << "\n";
+  {
+    ChildScope cs(*this, !node->hasElse() && true);
+    OS << "  "; // condition label
+    visit(node->getCondition());
+  }
+  {
+    ChildScope cs(*this, !node->hasElse());
+    visit(node->getThenBranch());
+  }
+  if (node->hasElse()) {
+    ChildScope cs(*this, true);
+    visit(node->getElseBranch());
+  }
+}
+
+void ASTPrinter::visitWhileStmt(WhileStmt *node) {
+  printIndent();
+  OS << "WhileStmt";
+  printLoc(node);
+  OS << "\n";
+  {
+    ChildScope cs(*this, false);
+    visit(node->getCondition());
+  }
+  {
+    ChildScope cs(*this, true);
+    visit(node->getBody());
   }
 }
 
@@ -185,6 +221,19 @@ void ASTPrinter::visitMovExpr(MovExpr *node) {
   }
 }
 
+void ASTPrinter::visitRefExpr(RefExpr *node) {
+  printIndent();
+  OS << "RefExpr";
+  printLoc(node);
+  OS << "\n";
+  {
+    ChildScope cs(*this, true);
+    visit(node->getOperand());
+  }
+}
+
+
+
 void ASTPrinter::visitUnaryExpr(UnaryExpr *node) {
   printIndent();
   OS << "UnaryExpr";
@@ -208,6 +257,25 @@ void ASTPrinter::visitBinaryExpr(BinaryExpr *node) {
   {
     ChildScope cs(*this, true);
     visit(node->getRHS());
+  }
+}
+
+void ASTPrinter::visitTernaryExpr(TernaryExpr *node) {
+  printIndent();
+  OS << "TernaryExpr";
+  printLoc(node);
+  OS << "\n";
+  {
+    ChildScope cs(*this, false);
+    visit(node->getCondition());
+  }
+  {
+    ChildScope cs(*this, false);
+    visit(node->getTrueExpr());
+  }
+  {
+    ChildScope cs(*this, true);
+    visit(node->getFalseExpr());
   }
 }
 
@@ -249,6 +317,25 @@ void ASTPrinter::visitClassType(ClassType *node) {
   if (node->getSuperClass())
     OS << " : '" << node->getSuperClass()->getName() << "'";
   OS << "\n";
+}
+
+void ASTPrinter::visitFuncDecl(FuncDecl *node) {
+  printIndent();
+  OS << "FuncDecl";
+  printLoc(node);
+  OS << " '" << node->getName() << "'";
+  if (node->getReturnType())
+    OS << " ->";
+  OS << "\n";
+  // Print params and body as children.
+  if (node->getReturnType()) {
+    ChildScope cs(*this, false);
+    visit(node->getReturnType());
+  }
+  {
+    ChildScope cs(*this, true);
+    visit(node->getBody());
+  }
 }
 
 void ASTPrinter::visitMethodDecl(MethodDecl *node) {

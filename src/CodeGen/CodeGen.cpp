@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "CodeGen.h"
+#include "Names.h"
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -16,25 +17,12 @@
 namespace paykan {
 namespace codegen {
 
-static constexpr llvm::StringLiteral kPaykanStringNew    = "PaykanString_new";
-static constexpr llvm::StringLiteral kPaykanStringConcat = "PaykanString_concat";
-static constexpr llvm::StringLiteral kPaykanStringDelete = "PaykanString_delete";
-static constexpr llvm::StringLiteral kPaykanObjectDelete = "PaykanObject_delete";
-static constexpr llvm::StringLiteral kPaykanSharedNew    = "PaykanShared_new";
-static constexpr llvm::StringLiteral kPaykanRetain       = "Paykan_retain";
-static constexpr llvm::StringLiteral kPaykanRelease      = "Paykan_release";
-static constexpr llvm::StringLiteral kPaykanSharedGet    = "PaykanShared_get";
-static constexpr llvm::StringLiteral kPaykanOut          = "Paykan_out";
-static constexpr llvm::StringLiteral kPaykanErr          = "Paykan_err";
-static constexpr llvm::StringLiteral kMainFnName         = "main";
-static constexpr llvm::StringLiteral kEntryBBName        = "entry";
-static constexpr llvm::StringLiteral kStrGlobalName      = ".str";
-static constexpr llvm::StringLiteral kInt2FPName         = "int2fp";
+using namespace names;
 
 /// Map Paykan-level builtin function names to their C runtime symbols.
-static const llvm::StringMap<llvm::StringLiteral> kBuiltinNames = {
-    {"out", kPaykanOut},
-    {"err", kPaykanErr},
+static const llvm::StringMap<const char *> kBuiltinNames = {
+    {kOut, kPaykanOut},
+    {kErr, kPaykanErr},
 };
 
 // -- Constructor -------------------------------------------------------------
@@ -73,7 +61,16 @@ void CodeGen::Scope::declare(llvm::StringRef name, llvm::AllocaInst *alloca,
                              ast::Ownership own, ast::Type *astTy) {
   Locals[name] = alloca;
   OwnershipMap[name] = own;
+  if (astTy)
+    ASTTypeMap[name] = astTy;
   DeclOrder.push_back({alloca, own, astTy});
+}
+
+ast::Type *CodeGen::Scope::lookupASTType(llvm::StringRef name) const {
+  auto it = ASTTypeMap.find(name);
+  if (it != ASTTypeMap.end())
+    return it->second;
+  return Parent ? Parent->lookupASTType(name) : nullptr;
 }
 
 ast::Ownership CodeGen::Scope::lookupOwnership(llvm::StringRef name) const {
@@ -95,7 +92,9 @@ CodeGen::ScopeGuard::ScopeGuard(CodeGen &cg)
 }
 
 CodeGen::ScopeGuard::~ScopeGuard() {
-  CG.emitScopeCleanup(ScopeObj);
+  // Only emit cleanup if the current block is not yet terminated.
+  if (!CG.Builder.GetInsertBlock()->getTerminator())
+    CG.emitScopeCleanup(ScopeObj);
   CG.CurrentScope = ScopeObj.Parent;
 }
 
@@ -148,7 +147,7 @@ llvm::Value *CodeGen::wrapStringLiteral(llvm::Value *rawStr, size_t len) {
 
 llvm::StringRef CodeGen::getDeleteFnName(ast::Type *ty) {
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
-    if (ct->getName() == "String")
+    if (ct->getName() == kString)
       return kPaykanStringDelete;
   }
   return kPaykanObjectDelete;
@@ -162,7 +161,7 @@ void CodeGen::emitScopeCleanup(Scope &scope) {
   // Walk in reverse declaration order for proper LIFO cleanup.
   for (auto it = scope.DeclOrder.rbegin(); it != scope.DeclOrder.rend(); ++it) {
     auto &meta = *it;
-    if (!ast::isa<ast::ClassType>(meta.ASTType))
+    if (!meta.ASTType || !ast::isa<ast::ClassType>(meta.ASTType))
       continue; // builtins don't need cleanup
     if (meta.Ownership == ast::Ownership::Reference)
       continue; // references don't own the object
@@ -243,26 +242,28 @@ void CodeGen::bootstrapBuiltins() {
 
   for (auto &[paykanName, runtimeName] : kBuiltinNames)
     FunctionTable[paykanName] = {runtimeName, varArgFnTy, /*IsVariadic=*/true};
+
+  // Register type-conversion builtins.
+  auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
+  auto *dblTy = llvm::Type::getDoubleTy(LLVMCtx);
+
+  auto *ptrFromI64  = llvm::FunctionType::get(ptrTy, {i64Ty}, false);
+  auto *ptrFromDbl  = llvm::FunctionType::get(ptrTy, {dblTy}, false);
+
+  FunctionTable[kStringInt]   = {kPaykanStringFromInt,   ptrFromI64, false};
+  FunctionTable[kStringFloat] = {kPaykanStringFromFloat, ptrFromDbl, false};
+  FunctionTable[kStringBool]  = {kPaykanStringFromBool,  ptrFromI64, false};
+
+  // Identity constructors — just return the argument as-is.
+  IdentityCtors.insert(kString);
 }
 
 // -- Top-level ---------------------------------------------------------------
 
 llvm::Value *CodeGen::visitTranslationUnit(ast::TranslationUnit *node) {
-  // Create main(): i32 main()
-  auto *mainTy = llvm::FunctionType::get(llvm::Type::getInt32Ty(LLVMCtx),
-                                         /*isVarArg=*/false);
-  auto *mainFn = llvm::Function::Create(mainTy, llvm::Function::ExternalLinkage,
-                                        kMainFnName, Module.get());
-
-  auto *entry = llvm::BasicBlock::Create(LLVMCtx, kEntryBBName, mainFn);
-  Builder.SetInsertPoint(entry);
-
-  visitCompoundStmt(node->getBody());
-
-  // Terminate with `return 0`.
-  Builder.CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(LLVMCtx), 0));
-
-  return mainFn;
+  for (auto *fn : node->getFuncDecls())
+    visitFuncDecl(fn);
+  return nullptr;
 }
 
 // -- Statements --------------------------------------------------------------
@@ -316,9 +317,10 @@ llvm::Value *CodeGen::visitAssignStmt(ast::AssignStmt *node) {
 
     // Shared reassignment: retain new, release old, then store.
     if (own == ast::Ownership::Shared) {
-      // We need the raw PaykanShared* wrapper, not the unwrapped object.
-      // If the RHS is an identifier referring to a shared var, reload from its alloca.
-      llvm::Value *sharedVal = val; // default: use emitted value
+      llvm::Value *sharedVal = nullptr;
+
+      // If the RHS is an identifier referring to a shared var, reload from its alloca
+      // to get the PaykanShared* wrapper (not the unwrapped object).
       if (auto *ident = ast::dyn_cast<ast::Identifier>(node->getValue())) {
         auto rhsOwn = CurrentScope->lookupOwnership(ident->getName());
         if (rhsOwn == ast::Ownership::Shared) {
@@ -333,6 +335,17 @@ llvm::Value *CodeGen::visitAssignStmt(ast::AssignStmt *node) {
       auto *fnTy = llvm::FunctionType::get(voidTy, {ptrTy}, false);
       auto *retainFn = declareFunction(kPaykanRetain, fnTy);
       auto *releaseFn = declareFunction(kPaykanRelease, fnTy);
+
+      if (!sharedVal) {
+        // RHS is a new value (literal, constructor, etc.) — wrap in PaykanShared_new.
+        auto *newFnTy = llvm::FunctionType::get(ptrTy, {ptrTy, ptrTy}, false);
+        auto *sharedNewFn = declareFunction(kPaykanSharedNew, newFnTy);
+        auto *deleteFn = Module->getOrInsertFunction(
+            getDeleteFnName(CurrentScope->lookupASTType(node->getVarName())),
+            llvm::FunctionType::get(voidTy, {ptrTy}, false)).getCallee();
+        sharedVal = Builder.CreateCall(sharedNewFn, {val, deleteFn}, "shared");
+      }
+
       Builder.CreateCall(retainFn, {sharedVal});
       auto *oldVal = Builder.CreateLoad(ptrTy, alloca, "old.shared");
       Builder.CreateCall(releaseFn, {oldVal});
@@ -359,6 +372,63 @@ llvm::Value *CodeGen::visitReturnStmt(ast::ReturnStmt *node) {
     return Builder.CreateRet(val);
   }
   return Builder.CreateRetVoid();
+}
+
+llvm::Value *CodeGen::visitIfStmt(ast::IfStmt *node) {
+  llvm::Value *condVal = emitExpr(node->getCondition());
+  if (!condVal)
+    return nullptr;
+
+  auto *parentFn = Builder.GetInsertBlock()->getParent();
+  auto *thenBB = llvm::BasicBlock::Create(LLVMCtx, "if.then", parentFn);
+  auto *elseBB = node->hasElse()
+                     ? llvm::BasicBlock::Create(LLVMCtx, "if.else", parentFn)
+                     : nullptr;
+  auto *mergeBB = llvm::BasicBlock::Create(LLVMCtx, "if.end", parentFn);
+
+  Builder.CreateCondBr(condVal, thenBB, elseBB ? elseBB : mergeBB);
+
+  // Emit then branch.
+  Builder.SetInsertPoint(thenBB);
+  visit(node->getThenBranch());
+  if (!Builder.GetInsertBlock()->getTerminator())
+    Builder.CreateBr(mergeBB);
+
+  // Emit else branch.
+  if (node->hasElse()) {
+    Builder.SetInsertPoint(elseBB);
+    visit(node->getElseBranch());
+    if (!Builder.GetInsertBlock()->getTerminator())
+      Builder.CreateBr(mergeBB);
+  }
+
+  Builder.SetInsertPoint(mergeBB);
+  return nullptr;
+}
+
+llvm::Value *CodeGen::visitWhileStmt(ast::WhileStmt *node) {
+  auto *parentFn = Builder.GetInsertBlock()->getParent();
+  auto *condBB = llvm::BasicBlock::Create(LLVMCtx, "while.cond", parentFn);
+  auto *bodyBB = llvm::BasicBlock::Create(LLVMCtx, "while.body", parentFn);
+  auto *endBB  = llvm::BasicBlock::Create(LLVMCtx, "while.end", parentFn);
+
+  // Branch to the condition block.
+  Builder.CreateBr(condBB);
+
+  // Emit condition.
+  Builder.SetInsertPoint(condBB);
+  llvm::Value *condVal = emitExpr(node->getCondition());
+  Builder.CreateCondBr(condVal, bodyBB, endBB);
+
+  // Emit body.
+  Builder.SetInsertPoint(bodyBB);
+  visit(node->getBody());
+  if (!Builder.GetInsertBlock()->getTerminator())
+    Builder.CreateBr(condBB);
+
+  // Continue after loop.
+  Builder.SetInsertPoint(endBB);
+  return nullptr;
 }
 
 // -- Declarations ------------------------------------------------------------
@@ -485,6 +555,41 @@ llvm::Value *CodeGen::ExprEmitter::visitMovExpr(ast::MovExpr *node) {
   return val;
 }
 
+llvm::Value *CodeGen::ExprEmitter::visitRefExpr(ast::RefExpr *node) {
+  // A reference expression (&x) just loads the value — it's a borrow.
+  return visit(node->getOperand());
+}
+
+llvm::Value *CodeGen::ExprEmitter::visitTernaryExpr(ast::TernaryExpr *node) {
+  llvm::Value *condVal = visit(node->getCondition());
+  if (!condVal)
+    return nullptr;
+
+  auto *parentFn = CG.Builder.GetInsertBlock()->getParent();
+  auto *thenBB = llvm::BasicBlock::Create(CG.LLVMCtx, "tern.then", parentFn);
+  auto *elseBB = llvm::BasicBlock::Create(CG.LLVMCtx, "tern.else", parentFn);
+  auto *mergeBB = llvm::BasicBlock::Create(CG.LLVMCtx, "tern.end", parentFn);
+
+  CG.Builder.CreateCondBr(condVal, thenBB, elseBB);
+
+  CG.Builder.SetInsertPoint(thenBB);
+  llvm::Value *trueVal = visit(node->getTrueExpr());
+  auto *thenEndBB = CG.Builder.GetInsertBlock();
+  CG.Builder.CreateBr(mergeBB);
+
+  CG.Builder.SetInsertPoint(elseBB);
+  llvm::Value *falseVal = visit(node->getFalseExpr());
+  auto *elseEndBB = CG.Builder.GetInsertBlock();
+  CG.Builder.CreateBr(mergeBB);
+
+  CG.Builder.SetInsertPoint(mergeBB);
+  auto *phi = CG.Builder.CreatePHI(trueVal->getType(), 2, "tern");
+  phi->addIncoming(trueVal, thenEndBB);
+  phi->addIncoming(falseVal, elseEndBB);
+  return phi;
+}
+
+
 llvm::Value *CodeGen::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {
   llvm::Value *operand = visit(node->getOperand());
   if (!operand)
@@ -503,6 +608,48 @@ llvm::Value *CodeGen::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {
 }
 
 llvm::Value *CodeGen::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
+  // Short-circuit logical operators: evaluate LHS first, conditionally evaluate RHS.
+  if (node->getOpcode() == ast::BinaryOpcode::And) {
+    auto *parentFn = CG.Builder.GetInsertBlock()->getParent();
+    auto *rhsBB = llvm::BasicBlock::Create(CG.LLVMCtx, "and.rhs", parentFn);
+    auto *mergeBB = llvm::BasicBlock::Create(CG.LLVMCtx, "and.end", parentFn);
+
+    llvm::Value *lhs = visit(node->getLHS());
+    auto *lhsBB = CG.Builder.GetInsertBlock();
+    CG.Builder.CreateCondBr(lhs, rhsBB, mergeBB);
+
+    CG.Builder.SetInsertPoint(rhsBB);
+    llvm::Value *rhs = visit(node->getRHS());
+    auto *rhsEndBB = CG.Builder.GetInsertBlock();
+    CG.Builder.CreateBr(mergeBB);
+
+    CG.Builder.SetInsertPoint(mergeBB);
+    auto *phi = CG.Builder.CreatePHI(llvm::Type::getInt1Ty(CG.LLVMCtx), 2, "and");
+    phi->addIncoming(llvm::ConstantInt::getFalse(CG.LLVMCtx), lhsBB);
+    phi->addIncoming(rhs, rhsEndBB);
+    return phi;
+  }
+  if (node->getOpcode() == ast::BinaryOpcode::Or) {
+    auto *parentFn = CG.Builder.GetInsertBlock()->getParent();
+    auto *rhsBB = llvm::BasicBlock::Create(CG.LLVMCtx, "or.rhs", parentFn);
+    auto *mergeBB = llvm::BasicBlock::Create(CG.LLVMCtx, "or.end", parentFn);
+
+    llvm::Value *lhs = visit(node->getLHS());
+    auto *lhsBB = CG.Builder.GetInsertBlock();
+    CG.Builder.CreateCondBr(lhs, mergeBB, rhsBB);
+
+    CG.Builder.SetInsertPoint(rhsBB);
+    llvm::Value *rhs = visit(node->getRHS());
+    auto *rhsEndBB = CG.Builder.GetInsertBlock();
+    CG.Builder.CreateBr(mergeBB);
+
+    CG.Builder.SetInsertPoint(mergeBB);
+    auto *phi = CG.Builder.CreatePHI(llvm::Type::getInt1Ty(CG.LLVMCtx), 2, "or");
+    phi->addIncoming(llvm::ConstantInt::getTrue(CG.LLVMCtx), lhsBB);
+    phi->addIncoming(rhs, rhsEndBB);
+    return phi;
+  }
+
   llvm::Value *lhs = visit(node->getLHS());
   llvm::Value *rhs = visit(node->getRHS());
   if (!lhs || !rhs)
@@ -575,6 +722,17 @@ llvm::Value *CodeGen::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
 }
 
 llvm::Value *CodeGen::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
+  // -- Identity constructor (e.g. String(x)) — return the arg as-is ---------
+  if (CG.IdentityCtors.count(node->getCalleeName()) &&
+      node->getNumArguments() == 1) {
+    llvm::Value *arg = visit(node->getArguments()[0]);
+    if (!arg) return nullptr;
+    if (auto *sl = ast::dyn_cast<ast::StringLiteral>(node->getArguments()[0]))
+      arg = CG.wrapStringLiteral(arg, sl->getValue().size());
+    return arg;
+  }
+
+  // -- Builtin function from FunctionTable ----------------------------------
   auto it = CG.FunctionTable.find(node->getCalleeName());
   if (it != CG.FunctionTable.end()) {
     auto &info = it->second;
@@ -597,6 +755,11 @@ llvm::Value *CodeGen::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
       // Wrap raw string literals into PaykanString* objects.
       if (auto *sl = ast::dyn_cast<ast::StringLiteral>(node->getArguments()[i]))
         v = CG.wrapStringLiteral(v, sl->getValue().size());
+      // Bool (i1) → i64 coercion when the callee expects i64.
+      if (v->getType()->isIntegerTy(1)) {
+        auto *i64Ty = llvm::Type::getInt64Ty(CG.LLVMCtx);
+        v = CG.Builder.CreateZExt(v, i64Ty, "boolext");
+      }
       args.push_back(v);
     }
 
@@ -613,20 +776,121 @@ llvm::Value *CodeGen::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
   if (!callee)
     return nullptr;
 
+  // Look up parameter ownerships for this function (if known).
+  const std::vector<ast::Ownership> *paramOwns = nullptr;
+  auto ownsIt = CG.UserFuncParamOwns.find(node->getCalleeName());
+  if (ownsIt != CG.UserFuncParamOwns.end())
+    paramOwns = &ownsIt->second;
+
   std::vector<llvm::Value *> args;
-  for (auto *arg : node->getArguments()) {
-    llvm::Value *v = visit(arg);
+  for (size_t i = 0; i < node->getNumArguments(); ++i) {
+    auto *arg = node->getArguments()[i];
+
+    // If the param is shared and the arg is a shared identifier, load the
+    // shared pointer directly — don't unwrap via PaykanShared_get.
+    bool needRawShared = paramOwns && i < paramOwns->size() &&
+                         (*paramOwns)[i] == ast::Ownership::Shared;
+    llvm::Value *v = nullptr;
+    if (needRawShared) {
+      if (auto *id = ast::dyn_cast<ast::Identifier>(arg)) {
+        auto *alloca = CG.CurrentScope->lookup(id->getName());
+        if (alloca)
+          v = CG.Builder.CreateLoad(alloca->getAllocatedType(), alloca,
+                                    id->getName());
+      }
+    }
+    if (!v)
+      v = visit(arg);
     if (!v)
       return nullptr;
+    // Wrap raw string literals into PaykanString* objects.
+    if (auto *sl = ast::dyn_cast<ast::StringLiteral>(arg))
+      v = CG.wrapStringLiteral(v, sl->getValue().size());
+    // Bool (i1) → i64 coercion when the callee expects i64.
+    if (v->getType()->isIntegerTy(1) &&
+        i < callee->arg_size() &&
+        callee->getArg(i)->getType()->isIntegerTy(64)) {
+      auto *i64Ty = llvm::Type::getInt64Ty(CG.LLVMCtx);
+      v = CG.Builder.CreateZExt(v, i64Ty, "boolext");
+    }
     args.push_back(v);
   }
 
+  if (callee->getReturnType()->isVoidTy()) {
+    CG.Builder.CreateCall(callee, args);
+    return nullptr;
+  }
   return CG.Builder.CreateCall(callee, args, "call");
 }
 
 llvm::Value *CodeGen::visitMethodDecl(ast::MethodDecl *) {
   // MethodDecl nodes are not produced by the parser yet.
   return nullptr;
+}
+
+llvm::Value *CodeGen::visitFuncDecl(ast::FuncDecl *node) {
+  // Build the LLVM function type.
+  llvm::Type *retTy = node->getReturnType()
+                          ? toLLVMType(node->getReturnType())
+                          : llvm::Type::getVoidTy(LLVMCtx);
+  std::vector<llvm::Type *> paramTys;
+  for (auto &p : node->getParams())
+    paramTys.push_back(toLLVMType(p.ParamType));
+
+  auto *fnTy = llvm::FunctionType::get(retTy, paramTys, false);
+  auto *fn = llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage,
+                                    node->getName(), Module.get());
+
+  // Record parameter ownerships for call-site codegen.
+  {
+    std::vector<ast::Ownership> owns;
+    for (auto &p : node->getParams())
+      owns.push_back(p.Own);
+    UserFuncParamOwns[node->getName()] = std::move(owns);
+  }
+
+  // Name the parameters.
+  size_t idx = 0;
+  for (auto &arg : fn->args())
+    arg.setName(node->getParams()[idx++].Name);
+
+  // Save current insert point.
+  auto *savedBB = Builder.GetInsertBlock();
+  auto savedIP = Builder.GetInsertPoint();
+
+  // Create entry block and emit body.
+  auto *entry = llvm::BasicBlock::Create(LLVMCtx, "entry", fn);
+  Builder.SetInsertPoint(entry);
+
+  {
+    ScopeGuard guard(*this);
+    // Create allocas for each parameter.
+    for (size_t i = 0; i < fn->arg_size(); ++i) {
+      auto &arg = *std::next(fn->arg_begin(), i);
+      auto *alloca = createEntryAlloca(fn, arg.getName(), arg.getType());
+      Builder.CreateStore(&arg, alloca);
+      CurrentScope->declare(std::string(arg.getName()), alloca,
+                            node->getParams()[i].Own, nullptr);
+    }
+
+    // Emit the body statements.
+    for (auto *stmt : node->getBody()->getStatements())
+      visit(stmt);
+  }
+
+  // If no terminator, add implicit return.
+  if (!Builder.GetInsertBlock()->getTerminator()) {
+    if (retTy->isVoidTy())
+      Builder.CreateRetVoid();
+    else
+      Builder.CreateRet(llvm::Constant::getNullValue(retTy));
+  }
+
+  // Restore insert point to the caller.
+  if (savedBB)
+    Builder.SetInsertPoint(savedBB, savedIP);
+
+  return fn;
 }
 
 } // namespace codegen

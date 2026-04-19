@@ -1,4 +1,7 @@
-out("hello");
-out("foo", "bar", "baz");
-s: String = "world";
-out(s);
+fn main() -> int {
+  out("hello");
+  out("foo", "bar", "baz");
+  s: String = "world";
+  out(&s);
+  return 0;
+}

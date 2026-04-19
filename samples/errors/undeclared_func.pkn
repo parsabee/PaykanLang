@@ -1,3 +1,6 @@
-x: int = foo(1, 2);
-bar();
-baz(x, 3 + 4, "hello");
+fn main() -> int {
+  x: int = foo(1, 2);
+  bar();
+  baz(x, 3 + 4, "hello");
+  return 0;
+}

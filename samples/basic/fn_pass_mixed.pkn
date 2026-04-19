@@ -1,0 +1,37 @@
+// Mixed parameter passing: builtins + strings with different ownership
+
+fn formatInt(label: String, val: int) {
+  out(&label);
+  out(StringInt(val));
+}
+
+fn formatIntRef(label: String&, val: int) {
+  out(label);
+  out(StringInt(val));
+}
+
+fn formatBoolShared(label: shared String, val: bool) {
+  out(&label);
+  out(StringBool(val));
+}
+
+fn main() -> int {
+  // Move unique string + pass builtin int
+  name: String = "count:";
+  formatInt(mov name, 42);
+
+  // Shared string + builtin bool
+  tag: shared String = "flag:";
+  formatBoolShared(tag, True);
+  formatBoolShared(tag, False);
+
+  // Reference string + builtin int
+  orig: String = "ref-label:";
+  r: String& = &orig;
+  formatIntRef(r, 99);
+
+  // orig still alive, move it
+  formatInt(mov orig, 0);
+
+  return 0;
+}

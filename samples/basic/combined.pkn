@@ -1,26 +1,29 @@
-// A comprehensive sample combining all current features:
-// literals, arithmetic, unary, relational, variables, assignment
+fn main() -> int {
+  // A comprehensive sample combining all current features:
+  // literals, arithmetic, unary, relational, variables, assignment
 
-// Declarations
-radius: float = 5.0;
-pi: float = 3.14;
+  // Declarations
+  radius: float = 5.0;
+  pi: float = 3.14;
 
-// Arithmetic
-area: float = pi * radius * radius;
+  // Arithmetic
+  area: float = pi * radius * radius;
 
-// Reassignment
-radius = 10.0;
-area = pi * radius * radius;
+  // Reassignment
+  radius = 10.0;
+  area = pi * radius * radius;
 
-// Relational
-area > 100.0;
-radius >= 5.0;
-area == pi * radius * radius;
+  // Relational
+  area > 100.0;
+  radius >= 5.0;
+  area == pi * radius * radius;
 
-// Unary
-negRadius: float = -radius;
-!True;
+  // Unary
+  negRadius: float = -radius;
+  !True;
 
-// Precedence
-result: int = 2 + 3 * 4 - 1;
-check: bool = (1 + 2) * 3 == 9;
+  // Precedence
+  result: int = 2 + 3 * 4 - 1;
+  check: bool = (1 + 2) * 3 == 9;
+  return 0;
+}

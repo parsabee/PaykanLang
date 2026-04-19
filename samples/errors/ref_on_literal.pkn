@@ -1,0 +1,5 @@
+// Error: '&' can only be applied to a variable, not a literal
+fn main() -> int {
+  out(&"hello");
+  return 0;
+}

@@ -48,6 +48,8 @@ comment     \/\/[^\n]*
 \n+        loc.lines (yyleng); loc.step ();
 
 "->"       return yy::parser::make_ARROW     (loc);
+"&&"       return yy::parser::make_AND       (loc);
+"||"       return yy::parser::make_OR        (loc);
 ">="       return yy::parser::make_MOREEQ    (loc);
 "<="       return yy::parser::make_LESSEQ    (loc);
 "=="       return yy::parser::make_EQUAL     (loc);
@@ -81,6 +83,12 @@ comment     \/\/[^\n]*
 "shared"   return yy::parser::make_SHARED(loc);
 "mov"      return yy::parser::make_MOV(loc);
 "const"    return yy::parser::make_CONST(loc);
+"fn"       return yy::parser::make_FN(loc);
+"return"   return yy::parser::make_RETURN(loc);
+"if"       return yy::parser::make_IF(loc);
+"then"     return yy::parser::make_THEN(loc);
+"else"     return yy::parser::make_ELSE(loc);
+"while"    return yy::parser::make_WHILE(loc);
 {id}       return yy::parser::make_IDENT (yytext, loc);
 
 <<EOF>>    return yy::parser::make_YYEOF (loc);
@@ -116,6 +124,8 @@ paykan::parser::ParserDriver::Impl::scanBegin()
     std::cerr << "cannot open " << CurFile << ": " << strerror (errno) << '\n';
     exit (EXIT_FAILURE);
   }
+  // Reset scanner state to discard any leftover buffer from a previous parse.
+  yyrestart(yyin);
 }
 
 void
