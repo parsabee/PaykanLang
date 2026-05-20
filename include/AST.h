@@ -44,6 +44,7 @@ public:
     NK_VarDecl,
     NK_FuncDecl,
     NK_MethodDecl,
+    NK_ImportDecl,
 
     // Statements
     NK_CompoundStmt,
@@ -755,15 +756,50 @@ public:
   }
 };
 
+// Import declaration
+//   import path::module;                      — SelectedNames empty, Alias empty
+//   import path::{a, b};                      — SelectedNames = {a, b}, Alias empty
+//   import path::module as alias;             — SelectedNames empty, Alias = "alias"
+//   import ::system_module;                   — IsSystem true
+class ImportDecl : public Decl {
+private:
+  std::string ModulePath;               // e.g. "std", "utils::math"
+  std::vector<std::string> SelectedNames; // empty = import all exported names
+  std::string Alias;                    // empty = no alias; otherwise surface name
+  bool IsSystem;                        // true if leading :: (system/stdlib module)
+
+public:
+  ImportDecl(SourceLocation loc, const std::string &path, bool isSystem,
+             std::vector<std::string> selectedNames = {},
+             const std::string &alias = "")
+      : Decl(NK_ImportDecl, loc), ModulePath(path),
+        SelectedNames(std::move(selectedNames)), Alias(alias),
+        IsSystem(isSystem) {}
+
+  const std::string &getModulePath() const { return ModulePath; }
+  const std::vector<std::string> &getSelectedNames() const { return SelectedNames; }
+  const std::string &getAlias() const { return Alias; }
+  bool hasAlias() const { return !Alias.empty(); }
+  bool isSystem() const { return IsSystem; }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_ImportDecl;
+  }
+};
+
 // Translation unit (top-level container)
 class TranslationUnit : public ASTNode {
 private:
+  std::vector<ImportDecl *> Imports;
   std::vector<FuncDecl *> FuncDecls;
 
 public:
-  TranslationUnit(SourceLocation loc, std::vector<FuncDecl *> funcs)
-      : ASTNode(NK_TranslationUnit, loc), FuncDecls(std::move(funcs)) {}
+  TranslationUnit(SourceLocation loc, std::vector<ImportDecl *> imports,
+                  std::vector<FuncDecl *> funcs)
+      : ASTNode(NK_TranslationUnit, loc), Imports(std::move(imports)),
+        FuncDecls(std::move(funcs)) {}
 
+  const std::vector<ImportDecl *> &getImports() const { return Imports; }
   const std::vector<FuncDecl *> &getFuncDecls() const { return FuncDecls; }
 
   static bool classof(const ASTNode *N) {

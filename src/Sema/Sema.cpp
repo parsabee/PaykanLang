@@ -2,12 +2,19 @@
 // SPDX-License-Identifier: MIT
 
 #include "Sema.h"
+#include "ModuleUtils.h"
 #include "Names.h"
+#include "ParserDriver.h"
 
 #include <llvm/Support/raw_ostream.h>
 
+#include <algorithm>
+
 namespace paykan {
 namespace sema {
+
+// Static module cache.
+llvm::StringMap<Sema::ModuleInfo> Sema::ModuleCache;
 
 // -- Scope / ScopeGuard ------------------------------------------------------
 
@@ -77,8 +84,12 @@ Sema::ScopeGuard::~ScopeGuard() { S.CurrentScope = ScopeObj.Parent; }
 
 // -- Helpers -----------------------------------------------------------------
 
-Sema::Sema(ast::ASTContext &ctx, llvm::raw_ostream &os)
-    : OS(os), Ctx(ctx) {}
+Sema::Sema(ast::ASTContext &ctx, llvm::raw_ostream &os,
+      const std::string &projectRoot,
+      const std::string &sourceName,
+      const std::vector<std::string> *sourceLines)
+    : OS(os), Ctx(ctx), ProjectRoot(projectRoot), SourceName(sourceName),
+      SourceLines(sourceLines) {}
 
 void Sema::declareFunction(llvm::StringRef name, ast::Type *retTy,
                            std::vector<ast::Type *> paramTys,
@@ -105,9 +116,11 @@ void Sema::diag(Diagnostic::Severity level, ast::SourceLocation loc,
   if (level == Diagnostic::Error)
     ++ErrorCount;
 
-  // Print immediately (clang-style one-liner).
-  if (loc.isValid())
+  if (loc.isValid()) {
+    if (!SourceName.empty())
+      OS << SourceName << ":";
     OS << loc.getLineStart() << ":" << loc.getColumnStart() << ": ";
+  }
 
   switch (level) {
   case Diagnostic::Error:   OS << "error: ";   break;
@@ -115,6 +128,54 @@ void Sema::diag(Diagnostic::Severity level, ast::SourceLocation loc,
   case Diagnostic::Note:    OS << "note: ";    break;
   }
   OS << msg << "\n";
+
+  if (!loc.isValid() || !SourceLines)
+    return;
+
+  size_t lineNo = loc.getLineStart();
+  if (lineNo == 0 || lineNo > SourceLines->size())
+    return;
+
+  size_t prevLineNo = lineNo > 1 ? lineNo - 1 : lineNo;
+  size_t nextLineNo = std::min(lineNo + 1, SourceLines->size());
+  size_t gutterWidth = std::max<size_t>(3, std::to_string(nextLineNo).size());
+
+  if (prevLineNo < lineNo) {
+    const std::string &prevLine = (*SourceLines)[prevLineNo - 1];
+    std::string prevNoStr = std::to_string(prevLineNo);
+    OS << std::string(gutterWidth - prevNoStr.size(), ' ')
+       << prevNoStr << " | " << prevLine << "\n";
+  }
+
+  const std::string &line = (*SourceLines)[lineNo - 1];
+  std::string lineNoStr = std::to_string(lineNo);
+  OS << std::string(gutterWidth - lineNoStr.size(), ' ')
+     << lineNoStr << " | " << line << "\n";
+
+  size_t startCol = std::max<size_t>(1, loc.getColumnStart());
+  size_t endCol = std::max(startCol, loc.getColumnEnd());
+  size_t width = 1;
+  if (loc.getLineEnd() == loc.getLineStart() && endCol > startCol)
+    width = endCol - startCol;
+
+  std::string marker = std::string(gutterWidth, ' ') + " | ";
+  for (size_t i = 1; i < startCol; ++i) {
+    if (i - 1 < line.size() && line[i - 1] == '\t')
+      marker.push_back('\t');
+    else
+      marker.push_back(' ');
+  }
+  marker.push_back('^');
+  if (width > 1)
+    marker.append(width - 1, '~');
+  OS << marker << "\n";
+
+  if (nextLineNo > lineNo) {
+    const std::string &nextLine = (*SourceLines)[nextLineNo - 1];
+    std::string nextNoStr = std::to_string(nextLineNo);
+    OS << std::string(gutterWidth - nextNoStr.size(), ' ')
+       << nextNoStr << " | " << nextLine << "\n";
+  }
 }
 
 void Sema::error(ast::SourceLocation loc, const std::string &msg) {
@@ -146,7 +207,14 @@ bool Sema::isNumeric(ast::Type *ty) {
   return false;
 }
 
-bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
+bool Sema::isAssignable(ast::Type *dst, ast::Type *src,
+                        ast::Expr *srcExpr,
+                        ast::Ownership dstOwn) const {
+  // '&expr' is only assignable to reference destinations.
+  if (srcExpr && ast::isa<ast::RefExpr>(srcExpr) &&
+      dstOwn != ast::Ownership::Reference)
+    return false;
+
   if (dst == src)
     return true;
 
@@ -443,12 +511,24 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     // For variadic functions, extra arguments are checked against the
     // last declared parameter type.
     size_t paramIdx = (i < sig->ParamTypes.size()) ? i : sig->ParamTypes.size() - 1;
-    if (!S.isAssignable(sig->ParamTypes[paramIdx], argTypes[i]))
+
+    if (!S.isAssignable(sig->ParamTypes[paramIdx], argTypes[i],
+                        node->getArguments()[i],
+                        sig->ParamOwnerships[paramIdx])) {
+      if (ast::isa<ast::RefExpr>(node->getArguments()[i]) &&
+          sig->ParamOwnerships[paramIdx] != ast::Ownership::Reference) {
+        S.error(node->getArguments()[i]->getLocation(),
+                "argument " + std::to_string(i + 1) + " of '" +
+                    node->getCalleeName() +
+                    "': '&' can only be passed to a reference parameter");
+      } else {
       S.error(node->getArguments()[i]->getLocation(),
               "argument " + std::to_string(i + 1) + " of '" +
                   node->getCalleeName() + "' has type '" +
                   typeName(argTypes[i]) + "', expected '" +
                   typeName(sig->ParamTypes[paramIdx]) + "'");
+      }
+    }
 
     // ---- Ownership checking for class-type parameters ----
     if (i < sig->ParamTypes.size() &&
@@ -465,6 +545,13 @@ ast::Type *Sema::ExprChecker::visitMovExpr(ast::MovExpr *node) {
   auto *ty = S.checkIdentLive(ident->getName(), ident->getLocation());
   if (!ty)
     return nullptr;
+
+  if (!ast::isa<ast::ClassType>(ty)) {
+    S.error(node->getLocation(),
+            "'mov' can only be used on class types");
+    return nullptr;
+  }
+
   auto ownership = S.CurrentScope->lookupOwnership(ident->getName());
   if (ownership == ast::Ownership::Reference) {
     S.error(node->getLocation(),
@@ -531,6 +618,13 @@ bool Sema::run(ast::TranslationUnit *tu) {
   declareFunction(names::kStringBool,  StrTy, {Ctx.getBoolTy()},  {}, {}, false, true);
   declareFunction(names::kString,      StrTy, {StrTy},
                   {ast::Ownership::Reference}, {true}, false, true);
+
+  // Process imports before local declarations.
+  llvm::StringSet<> localImportStack;
+  if (!ImportStack)
+    ImportStack = &localImportStack;
+  for (auto *imp : tu->getImports())
+    processImport(imp);
 
   visit(tu);
   return !hasErrors();
@@ -599,7 +693,7 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
     return false;
   }
 
-  if (!isAssignable(varTy, valTy)) {
+  if (!isAssignable(varTy, valTy, node->getValue(), varOwnership)) {
     error(node->getLocation(),
           "cannot assign value of type '" + std::string(typeName(valTy)) +
               "' to variable '" + node->getVarName() + "' of type '" +
@@ -615,7 +709,8 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
     auto *valTy = resolveExprType(node->getReturnValue());
     if (!valTy)
       return false;
-    if (CurrentReturnType && !isAssignable(CurrentReturnType, valTy)) {
+    if (CurrentReturnType && !isAssignable(CurrentReturnType, valTy,
+                         node->getReturnValue())) {
       error(node->getLocation(),
             "return value of type '" + std::string(typeName(valTy)) +
                 "' does not match function return type '" +
@@ -754,18 +849,6 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
 
   auto ownership = node->getOwnership();
 
-  // Reject ownership qualifiers on builtin types.
-  if (ownership != ast::Ownership::Unique &&
-      node->getType() && ast::isa<ast::BuiltinType>(node->getType())) {
-    const char *qual = ownership == ast::Ownership::Shared
-                           ? "shared"
-                           : "reference (&)";
-    error(node->getLocation(),
-          std::string(qual) + " qualifier is not allowed on builtin type");
-    CurrentScope->set(node->getName(), node->getType());
-    return false;
-  }
-
   // Resolve the declared type.
   ast::Type *declTy = nullptr;
 
@@ -803,7 +886,7 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     }
 
     if (declTy) {
-      if (!isAssignable(declTy, initTy)) {
+      if (!isAssignable(declTy, initTy, node->getInitExpr(), node->getOwnership())) {
         error(node->getLocation(),
               "initializer of type '" + std::string(typeName(initTy)) +
                   "' does not match declared type '" + typeName(declTy) +
@@ -847,6 +930,153 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
 bool Sema::visitMethodDecl(ast::MethodDecl *) {
   // MethodDecl nodes are not produced by the parser yet.
   return true;
+}
+
+bool Sema::visitImportDecl(ast::ImportDecl *) {
+  // Import processing happens in run() before visiting the TU.
+  // Nothing to do here.
+  return true;
+}
+
+// -- Import resolution -------------------------------------------------------
+
+std::string Sema::resolveModulePath(const std::string &modulePath,
+                                    bool isSystem,
+                                    ast::SourceLocation loc) {
+  auto relPath = module_utils::modulePathToRelative(modulePath);
+
+  if (isSystem) {
+    // System modules: check PAYKAN_STDLIB env var, else <project>/stdlib/.
+    llvm::SmallString<256> base;
+    const char *stdlibEnv = std::getenv(names::kPaykanStdlibEnv);
+    if (stdlibEnv && stdlibEnv[0])
+      base = stdlibEnv;
+    else {
+      base = ProjectRoot;
+      llvm::sys::path::append(base, "stdlib");
+    }
+    llvm::sys::path::append(base, relPath);
+    if (auto resolved = module_utils::realPath(base); !resolved.empty())
+      return resolved;
+    error(loc, "system module '" + modulePath + "' not found (tried " +
+               std::string(base) + ")");
+    return "";
+  }
+
+  
+  // User module: relative to project root.
+  llvm::SmallString<256> full(ProjectRoot);
+  llvm::sys::path::append(full, relPath);
+  if (auto resolved = module_utils::realPath(full); !resolved.empty())
+    return resolved;
+  error(loc, "module '" + modulePath + "' not found (tried " +
+             std::string(full) + ")");
+  return "";
+}
+
+bool Sema::processImport(ast::ImportDecl *node) {
+  const std::string &modulePath = node->getModulePath();
+  const bool isSystem = node->isSystem();
+  const auto &selectedNames = node->getSelectedNames();
+
+  // Helper: load one module from a resolved path, cache it, inject its exports.
+  auto loadModule = [&](const std::string &path, const std::string &qualifier,
+                        ast::SourceLocation loc) -> bool {
+    // Cycle detection.
+    if (ImportStack && ImportStack->count(path)) {
+      error(loc, "circular import detected for '" + path + "'");
+      return false;
+    }
+
+    // Check cache first.
+    auto cacheIt = ModuleCache.find(path);
+    if (cacheIt != ModuleCache.end()) {
+      for (auto &[name, sig] : cacheIt->second.ExportedFunctions) {
+        std::string injected = qualifier + "::" + name;
+        if (!lookupFunction(injected))
+          declareFunction(injected, sig.ReturnType, sig.ParamTypes,
+                          sig.ParamOwnerships, sig.ParamIsConst,
+                          sig.IsVariadic, /*isBuiltin=*/true);
+      }
+      return true;
+    }
+
+    // Parse the imported file.
+    parser::ParserDriver importDriver;
+    if (importDriver.parseFile(path) != 0) {
+      error(loc, "failed to parse module '" + path + "'");
+      return false;
+    }
+
+    // Run Sema on the imported module.
+    Sema importSema(importDriver.getASTContext(), OS, ProjectRoot,
+                    importDriver.getCurrentFile(),
+                    &importDriver.getSourceLines());
+    if (ImportStack)
+      ImportStack->insert(path);
+    importSema.ImportStack = ImportStack;
+
+    auto *importRoot = importDriver.getRoot();
+    if (!importSema.run(importRoot)) {
+      error(loc, "errors in imported module '" + path + "'");
+      return false;
+    }
+
+    // Collect exported functions, remap types, and cache.
+    ModuleInfo info;
+    for (auto &[name, sig] : importSema.FunctionTable) {
+      if (sig.IsBuiltin)
+        continue;
+      FunctionSig remapped = sig;
+      remapped.ReturnType = module_utils::remapType(sig.ReturnType, Ctx);
+      for (size_t i = 0; i < remapped.ParamTypes.size(); ++i)
+        remapped.ParamTypes[i] = module_utils::remapType(sig.ParamTypes[i], Ctx);
+      info.ExportedFunctions.emplace_back(name.str(), remapped);
+    }
+    ModuleCache[path] = std::move(info);
+
+    // Inject into our FunctionTable as qualifier::name.
+    for (auto &[name, sig] : ModuleCache[path].ExportedFunctions) {
+      std::string injected = qualifier + "::" + name;
+      if (!lookupFunction(injected))
+        declareFunction(injected, sig.ReturnType, sig.ParamTypes,
+                        sig.ParamOwnerships, sig.ParamIsConst,
+                        sig.IsVariadic, /*isBuiltin=*/true);
+    }
+    return true;
+  };
+
+  if (selectedNames.empty()) {
+    // Plain import or aliased import: single module.
+    // Qualifier is the alias if set, otherwise the last path segment.
+    auto lastSep = modulePath.rfind("::");
+    std::string qualifier = node->hasAlias()
+                                ? node->getAlias()
+                                : (lastSep == std::string::npos
+                                       ? modulePath
+                                       : modulePath.substr(lastSep + 2));
+    std::string resolved =
+        resolveModulePath(modulePath, isSystem, node->getLocation());
+    if (resolved.empty())
+      return false;
+    return loadModule(resolved, qualifier, node->getLocation());
+  }
+
+  // Selective sibling-module import: import path::{a, b}
+  // Each name in SelectedNames is a sub-module under ModulePath.
+  bool ok = true;
+  for (const auto &name : selectedNames) {
+    std::string subPath = modulePath.empty() ? name : modulePath + "::" + name;
+    std::string resolved =
+        resolveModulePath(subPath, isSystem, node->getLocation());
+    if (resolved.empty()) {
+      ok = false;
+      continue;
+    }
+    if (!loadModule(resolved, name, node->getLocation()))
+      ok = false;
+  }
+  return ok;
 }
 
 } // namespace sema

@@ -442,3 +442,57 @@ TEST(Parser, BreakContinueNested) {
   )");
   EXPECT_TRUE(ok);
 }
+
+// ============================================================================
+// Imports
+// ============================================================================
+
+TEST(Parser, ImportUser) {
+  auto [ok, _] = parse(R"(
+    import foo;
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_TRUE(ok);
+}
+
+TEST(Parser, ImportSystem) {
+  auto [ok, _] = parse(R"(
+    import ::io;
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_TRUE(ok);
+}
+
+TEST(Parser, ImportNestedPath) {
+  auto [ok, _] = parse(R"(
+    import math::arith;
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_TRUE(ok);
+}
+
+TEST(Parser, ImportFrom) {
+  auto [ok, _] = parse(R"(
+    import math::{add};
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_TRUE(ok);
+}
+
+TEST(Parser, ImportFromSystem) {
+  auto [ok, _] = parse(R"(
+    import ::{io};
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_TRUE(ok);
+}
+
+TEST(Parser, ImportMultiple) {
+  auto [ok, _] = parse(R"(
+    import foo;
+    import bar::baz;
+    import qux::{thing};
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_TRUE(ok);
+}

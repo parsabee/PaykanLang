@@ -47,6 +47,7 @@ comment     \/\/[^\n]*
 {comment}+ loc.step();
 \n+        loc.lines (yyleng); loc.step ();
 
+"::"       return yy::parser::make_COLONCOLON(loc);
 "->"       return yy::parser::make_ARROW     (loc);
 "&&"       return yy::parser::make_AND       (loc);
 "||"       return yy::parser::make_OR        (loc);
@@ -91,6 +92,8 @@ comment     \/\/[^\n]*
 "while"    return yy::parser::make_WHILE(loc);
 "break"    return yy::parser::make_BREAK(loc);
 "continue" return yy::parser::make_CONTINUE(loc);
+"import"   return yy::parser::make_IMPORT(loc);
+"as"       return yy::parser::make_AS(loc);
 {id}       return yy::parser::make_IDENT (yytext, loc);
 
 <<EOF>>    return yy::parser::make_YYEOF (loc);

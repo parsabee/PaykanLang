@@ -63,6 +63,9 @@
   AMP   "&"
   AND   "&&"
   OR    "||"
+  COLONCOLON "::"
+  IMPORT "import"
+  AS     "as"
   SHARED "shared"
   MOV    "mov"
   CONST  "const"
@@ -109,15 +112,50 @@
 %type <Param> param
 %type <FuncDecl *> funcDecl
 %type <std::vector<FuncDecl *>> funcDeclList
+%type <ImportDecl *> importDecl
+%type <std::vector<ImportDecl *>> importList
+%type <std::vector<std::string>> identList
+%type <std::string> modulePath
 %%
 
 %start translationUnit;
 
-translationUnit : funcDeclList
-                                    { $$ = impl(drv).Ctx.make<TranslationUnit>(loc(@1, @1), std::move($1));
+translationUnit : importList funcDeclList
+                                    { $$ = impl(drv).Ctx.make<TranslationUnit>(loc(@1, @2), std::move($1), std::move($2));
                                       impl(drv).Root = $$;
                                     }
 ;
+
+importList: %empty                  { $$ = std::vector<ImportDecl *>(); }
+    | importList importDecl         { $$ = std::move($1); $$.push_back($2); }
+    ;
+
+importDecl:
+      "import" "::" modulePath ";"
+                                    { $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @4), $3, true); }
+    | "import" modulePath ";"
+                                    { $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @3), $2, false); }
+    | "import" "::" modulePath "as" IDENT ";"
+                                    { $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @6), $3, true, std::vector<std::string>{}, $5); }
+    | "import" modulePath "as" IDENT ";"
+                                    { $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @5), $2, false, std::vector<std::string>{}, $4); }
+    | "import" modulePath "::" "{" identList "}" ";"
+                                    { $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @7), $2, false, $5); }
+    | "import" "::" modulePath "::" "{" identList "}" ";"
+                                    { $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @8), $3, true, $6); }
+    | "import" "::" "{" identList "}" ";"
+                                    { $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @6), "", true, $4); }
+    ;
+
+identList:
+      IDENT                         { $$ = std::vector<std::string>{$1}; }
+    | identList "," IDENT           { $$ = std::move($1); $$.push_back($3); }
+    ;
+
+modulePath:
+      IDENT                         { $$ = $1; }
+    | modulePath "::" IDENT         { $$ = $1 + "::" + $3; }
+    ;
 
 funcDeclList: %empty                { $$ = std::vector<FuncDecl *>(); }
     | funcDeclList funcDecl          { $$ = std::move($1); $$.push_back($2); }
@@ -230,6 +268,8 @@ primaryExpression:
     | BOOL                          { $$ = impl(drv).Ctx.make<BoolLiteral>(loc(@1, @1), $1); }
     | STRING                        { $$ = impl(drv).Ctx.make<StringLiteral>(loc(@1, @1), $1); }
     | IDENT "(" argumentList ")"    { $$ = impl(drv).Ctx.make<CallExpr>(loc(@1, @4), $1, std::move($3)); }
+    | modulePath "::" IDENT "(" argumentList ")"
+                                    { $$ = impl(drv).Ctx.make<CallExpr>(loc(@1, @6), $1 + "::" + $3, std::move($5)); }
     | IDENT                         { $$ = impl(drv).Ctx.make<Identifier>(loc(@1, @1), $1); }
     | "(" expression ")"            { $$ = $2; }
     ;

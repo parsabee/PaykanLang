@@ -627,3 +627,87 @@ TEST(CodeGen, BreakWhileTrue) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "44\n");
 }
+
+// ============================================================================
+// Imports
+// ============================================================================
+
+// Helper: write a file to a temporary directory and return its path.
+static std::string writeTempFile(const std::string &dir,
+                                 const std::string &relPath,
+                                 const std::string &content) {
+  auto full = std::filesystem::path(dir) / relPath;
+  std::filesystem::create_directories(full.parent_path());
+  std::ofstream ofs(full);
+  ofs << content;
+  return full.string();
+}
+
+TEST(CodeGen, ImportBasic) {
+  // Create a temp project with a helper module.
+  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_import_test";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+
+  writeTempFile(tmpDir.string(), "helper.pkn", R"(
+fn add(a: int, b: int) -> int { return a + b; }
+)");
+
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+import helper;
+fn main() -> int { return helper::add(10, 22); }
+)");
+
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 32);
+
+  std::filesystem::remove_all(tmpDir);
+}
+
+TEST(CodeGen, ImportNested) {
+  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_import_nested";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+
+  writeTempFile(tmpDir.string(), "math/arith.pkn", R"(
+fn mul(a: int, b: int) -> int { return a * b; }
+)");
+
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+import math::arith;
+fn main() -> int { return arith::mul(6, 7); }
+)");
+
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 42);
+
+  std::filesystem::remove_all(tmpDir);
+}
+
+TEST(CodeGen, ImportTransitive) {
+  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_import_trans";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+
+  writeTempFile(tmpDir.string(), "base.pkn", R"(
+fn double(x: int) -> int { return x + x; }
+)");
+
+  writeTempFile(tmpDir.string(), "mid.pkn", R"(
+import base;
+fn quadruple(x: int) -> int { return base::double(base::double(x)); }
+)");
+
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+import mid;
+fn main() -> int { return mid::quadruple(5); }
+)");
+
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 20);
+
+  std::filesystem::remove_all(tmpDir);
+}

@@ -57,9 +57,16 @@ void ASTPrinter::visitTranslationUnit(TranslationUnit *node) {
   OS << "TranslationUnit";
   printLoc(node);
   OS << "\n";
+  size_t total = node->getImports().size() + node->getFuncDecls().size();
+  size_t idx = 0;
+  for (auto *imp : node->getImports()) {
+    ++idx;
+    ChildScope cs(*this, idx == total);
+    visitImportDecl(imp);
+  }
   for (size_t i = 0; i < node->getFuncDecls().size(); ++i) {
-    bool last = (i + 1 == node->getFuncDecls().size());
-    ChildScope cs(*this, last);
+    ++idx;
+    ChildScope cs(*this, idx == total);
     visitFuncDecl(node->getFuncDecls()[i]);
   }
 }
@@ -359,6 +366,27 @@ void ASTPrinter::visitMethodDecl(MethodDecl *node) {
   OS << " '" << node->getName() << "'";
   if (node->isStatic())  OS << " static";
   if (node->isPrivate()) OS << " private";
+  OS << "\n";
+}
+
+void ASTPrinter::visitImportDecl(ImportDecl *node) {
+  printIndent();
+  OS << "ImportDecl";
+  printLoc(node);
+  OS << (node->isSystem() ? " system" : " user");
+  OS << " '" << node->getModulePath() << "'";
+  if (!node->getSelectedNames().empty()) {
+    OS << " selected={";
+    bool first = true;
+    for (const auto &n : node->getSelectedNames()) {
+      if (!first) OS << ", ";
+      OS << n;
+      first = false;
+    }
+    OS << "}";
+  }
+  if (node->hasAlias())
+    OS << " as=" << node->getAlias();
   OS << "\n";
 }
 

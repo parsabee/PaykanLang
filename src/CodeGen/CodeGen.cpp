@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include "CodeGen.h"
+#include "ModuleUtils.h"
 #include "Names.h"
+#include "ParserDriver.h"
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -12,6 +14,9 @@
 #include <llvm/IR/Verifier.h>
 
 #include <llvm/Passes/PassBuilder.h>
+#include <llvm/Bitcode/BitcodeReader.h>
+#include <llvm/Bitcode/BitcodeWriter.h>
+#include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Transforms/Scalar/SimplifyCFG.h>
 
 namespace paykan {
@@ -28,10 +33,11 @@ static const llvm::StringMap<const char *> kBuiltinNames = {
 // -- Constructor -------------------------------------------------------------
 
 CodeGen::CodeGen(ast::ASTContext &astCtx, llvm::LLVMContext &llvmCtx,
-                 llvm::StringRef moduleName)
+                 llvm::StringRef moduleName,
+                 const std::string &projectRoot)
     : ASTCtx(astCtx), LLVMCtx(llvmCtx),
       Module(std::make_unique<llvm::Module>(moduleName, llvmCtx)),
-      Builder(llvmCtx) {
+      Builder(llvmCtx), ProjectRoot(projectRoot) {
   (void)ASTCtx; // reserved for future use
 }
 
@@ -231,6 +237,7 @@ void CodeGen::optimize(llvm::OptimizationLevel level) {
 bool CodeGen::run(ast::TranslationUnit *tu) {
   CurrentScope = nullptr;
   bootstrapBuiltins();
+  processImports(tu);
   visit(tu);
   return !llvm::verifyModule(*Module, &llvm::errs());
 }
@@ -299,13 +306,18 @@ llvm::Value *CodeGen::visitAssignStmt(ast::AssignStmt *node) {
     auto *alloca = owner->lookup(node->getVarName());
     llvm::Type *allocaTy = alloca->getAllocatedType();
 
-    // Assignment through a reference: store to the referent's alloca.
+    // Assignment through a reference: store to the referent via the saved pointer.
     auto own = CurrentScope->lookupOwnership(node->getVarName());
     if (own == ast::Ownership::Reference) {
       auto *refTarget = CurrentScope->lookupRefTarget(node->getVarName());
       if (refTarget) {
-        Builder.CreateStore(val, refTarget);
-        // Also update the reference's own alloca so subsequent reads see the new value.
+        // refTarget is an alloca holding the caller's ptr — load the ptr then store.
+        auto *callerPtr = Builder.CreateLoad(
+            llvm::PointerType::getUnqual(LLVMCtx), refTarget,
+            node->getVarName() + ".callerptr");
+        Builder.CreateStore(val, callerPtr);
+        // Also update the local val-slot so subsequent reads in this function
+        // see the updated value.
         Builder.CreateStore(val, alloca);
         return val;
       }
@@ -512,11 +524,19 @@ llvm::Value *CodeGen::visitVarDecl(ast::VarDecl *node) {
   else
     Builder.CreateStore(llvm::Constant::getNullValue(llvmTy), alloca);
 
-  // For references, record the referent's alloca so assignment-through-ref works.
+  // For references, record the referent's alloca address in a ptr slot so
+  // assignment-through-ref writes back to the correct location.
   if (node->getOwnership() == ast::Ownership::Reference) {
-    if (auto *ident = ast::dyn_cast<ast::Identifier>(node->getInitExpr())) {
-      if (auto *refTarget = CurrentScope->lookup(ident->getName()))
-        CurrentScope->RefTargets[node->getName()] = refTarget;
+    if (auto *refExpr = ast::dyn_cast<ast::RefExpr>(node->getInitExpr())) {
+      if (auto *ident = refExpr->getIdentOperand()) {
+        if (auto *refTarget = CurrentScope->lookup(ident->getName())) {
+          auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
+          auto *fn = Builder.GetInsertBlock()->getParent();
+          auto *ptrSlot = createEntryAlloca(fn, std::string(node->getName()) + ".ref", ptrTy);
+          Builder.CreateStore(refTarget, ptrSlot);
+          CurrentScope->RefTargets[node->getName()] = ptrSlot;
+        }
+      }
     }
   }
 
@@ -812,6 +832,45 @@ llvm::Value *CodeGen::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     auto *arg = node->getArguments()[i];
 
+    // If the param is a reference, pass the alloca address (pointer).
+    bool isRefParam = paramOwns && i < paramOwns->size() &&
+                      (*paramOwns)[i] == ast::Ownership::Reference;
+    if (isRefParam) {
+      // The argument can be &x, a reference variable, or an rvalue (for const refs).
+      llvm::AllocaInst *targetAlloca = nullptr;
+      if (auto *refExpr = ast::dyn_cast<ast::RefExpr>(arg)) {
+        if (auto *ident = refExpr->getIdentOperand())
+          targetAlloca = CG.CurrentScope->lookup(ident->getName());
+      } else if (auto *ident = ast::dyn_cast<ast::Identifier>(arg)) {
+        // Reference variable passed directly — pass its referent through the ptr slot.
+        auto *ptrSlot = CG.CurrentScope->lookupRefTarget(ident->getName());
+        if (ptrSlot) {
+          llvm::Value *callerPtr = CG.Builder.CreateLoad(
+              llvm::PointerType::getUnqual(CG.LLVMCtx), ptrSlot,
+              std::string(ident->getName()) + ".fwdptr");
+          args.push_back(callerPtr);
+          continue;
+        }
+        targetAlloca = CG.CurrentScope->lookup(ident->getName());
+      }
+      if (targetAlloca) {
+        args.push_back(targetAlloca);
+        continue;
+      }
+
+      // Rvalue (e.g. literal/expression) passed to reference param: materialize temporary.
+      llvm::Value *rval = visit(arg);
+      if (!rval)
+        return nullptr;
+      if (auto *sl = ast::dyn_cast<ast::StringLiteral>(arg))
+        rval = CG.wrapStringLiteral(rval, sl->getValue().size());
+      auto *fn = CG.Builder.GetInsertBlock()->getParent();
+      auto *tmpAlloca = CG.createEntryAlloca(fn, "tmp.ref", rval->getType());
+      CG.Builder.CreateStore(rval, tmpAlloca);
+      args.push_back(tmpAlloca);
+      continue;
+    }
+
     // If the param is shared and the arg is a shared identifier, load the
     // shared pointer directly — don't unwrap via PaykanShared_get.
     bool needRawShared = paramOwns && i < paramOwns->size() &&
@@ -854,14 +913,187 @@ llvm::Value *CodeGen::visitMethodDecl(ast::MethodDecl *) {
   return nullptr;
 }
 
+llvm::Value *CodeGen::visitImportDecl(ast::ImportDecl *) {
+  // Import processing happens in processImports() before visiting the TU.
+  return nullptr;
+}
+
+// Compute the qualifier that call sites use for an import, matching Sema logic.
+static std::string importQualifier(ast::ImportDecl *imp) {
+  if (imp->hasAlias())
+    return imp->getAlias();
+  const auto &path = imp->getModulePath();
+  auto lastSep = path.rfind("::");
+  return lastSep == std::string::npos ? path : path.substr(lastSep + 2);
+}
+
+// Declare fn under qualifiedName in module if not already present.
+static void declareExternAs(llvm::Module *mod, llvm::Function &fn,
+                            const std::string &qualifiedName) {
+  if (mod->getFunction(qualifiedName))
+    return;
+  llvm::Function::Create(fn.getFunctionType(),
+                         llvm::Function::ExternalLinkage,
+                         qualifiedName, mod);
+}
+
+void CodeGen::processImports(ast::TranslationUnit *tu) {
+  for (auto *imp : tu->getImports()) {
+    // Resolve the module path to a file (same logic as Sema).
+    auto relPath = module_utils::modulePathToRelative(imp->getModulePath());
+
+    llvm::SmallString<256> fullBuf;
+    if (imp->isSystem()) {
+      const char *env = std::getenv(names::kPaykanStdlibEnv);
+      if (env && env[0])
+        fullBuf = env;
+      else {
+        fullBuf = ProjectRoot;
+        llvm::sys::path::append(fullBuf, "stdlib");
+      }
+    } else {
+      fullBuf = ProjectRoot;
+    }
+    llvm::sys::path::append(fullBuf, relPath);
+
+    std::string resolved = module_utils::realPath(fullBuf);
+    if (resolved.empty())
+      continue; // Sema already reported the error.
+
+    // Skip if already codegen'd.
+    if (CodeGenedImports.count(resolved))
+      continue;
+    CodeGenedImports.insert(resolved);
+
+    // -- Bitcode cache check --------------------------------------------------
+    auto cachePath = module_utils::getCachePath(resolved, ProjectRoot);
+    if (!module_utils::isSourceNewer(resolved, cachePath)) {
+      // Load cached bitcode.
+      auto bufOrErr = llvm::MemoryBuffer::getFile(cachePath);
+      if (bufOrErr) {
+        auto modOrErr = llvm::parseBitcodeFile((*bufOrErr)->getMemBufferRef(),
+                                               LLVMCtx);
+        if (modOrErr) {
+          auto &cachedMod = *modOrErr;
+          // Declare imported functions as external in our module.
+          std::string qualifier = importQualifier(imp);
+          for (auto &fn : cachedMod->functions()) {
+            if (fn.isDeclaration()) continue;
+            // Bare name (for the imported module's own call sites).
+            if (!Module->getFunction(fn.getName()))
+              llvm::Function::Create(fn.getFunctionType(),
+                                     llvm::Function::ExternalLinkage,
+                                     fn.getName(), Module.get());
+            // Qualified name (for call sites in this module).
+            declareExternAs(Module.get(), fn,
+                            qualifier + "::" + fn.getName().str());
+            // Add alias in the cached module so linking resolves the qualified name.
+            std::string qualName = qualifier + "::" + fn.getName().str();
+            if (!cachedMod->getFunction(qualName) &&
+                !cachedMod->getNamedAlias(qualName))
+              llvm::GlobalAlias::create(fn.getFunctionType(),
+                                        fn.getAddressSpace(),
+                                        llvm::GlobalValue::ExternalLinkage,
+                                        qualName, &fn, cachedMod.get());
+          }
+          ImportedModules.push_back(std::move(cachedMod));
+
+          // Still need to process transitive imports: parse the source to
+          // discover its import declarations, then recurse.
+          parser::ParserDriver depDriver;
+          if (depDriver.parseFile(resolved) == 0)
+            processImports(depDriver.getRoot());
+
+          continue;
+        }
+      }
+      // If loading failed, fall through to recompile.
+    }
+
+    // -- Full parse + codegen -------------------------------------------------
+    parser::ParserDriver importDriver;
+    if (importDriver.parseFile(resolved) != 0)
+      continue;
+
+    // Use the same project root so relative imports resolve consistently.
+    CodeGen importCG(importDriver.getASTContext(), LLVMCtx, resolved,
+                     ProjectRoot);
+    if (!importCG.run(importDriver.getRoot()))
+      continue;
+
+    // Take the imported module and any transitively imported modules.
+    auto impMod = importCG.takeModule();
+
+    // Declare imported functions as external in our module so call sites resolve.
+    std::string qualifier = importQualifier(imp);
+    for (auto &fn : impMod->functions()) {
+      if (fn.isDeclaration())
+        continue; // skip forward decls / runtime decls
+      // Bare name.
+      if (!Module->getFunction(fn.getName())) {
+        llvm::Function::Create(fn.getFunctionType(),
+                               llvm::Function::ExternalLinkage,
+                               fn.getName(), Module.get());
+        auto ownsIt = importCG.UserFuncParamOwns.find(fn.getName());
+        if (ownsIt != importCG.UserFuncParamOwns.end())
+          UserFuncParamOwns[fn.getName()] = ownsIt->second;
+      }
+      // Qualified name: qualifier::bareName
+      std::string qualName = qualifier + "::" + fn.getName().str();
+      if (!Module->getFunction(qualName)) {
+        llvm::Function::Create(fn.getFunctionType(),
+                               llvm::Function::ExternalLinkage,
+                               qualName, Module.get());
+        auto ownsIt = importCG.UserFuncParamOwns.find(fn.getName());
+        if (ownsIt != importCG.UserFuncParamOwns.end())
+          UserFuncParamOwns[qualName] = ownsIt->second;
+      }
+    }
+
+    // Add qualifier::name aliases into the imported module so they survive linking.
+    for (auto &fn : impMod->functions()) {
+      if (fn.isDeclaration()) continue;
+      std::string qualName = qualifier + "::" + fn.getName().str();
+      if (!impMod->getFunction(qualName) && !impMod->getNamedAlias(qualName))
+        llvm::GlobalAlias::create(fn.getFunctionType(), fn.getAddressSpace(),
+                                  llvm::GlobalValue::ExternalLinkage,
+                                  qualName, &fn, impMod.get());
+    }
+
+    // -- Write bitcode to cache -----------------------------------------------
+    {
+      // Ensure the parent directory exists.
+      auto parentDir = llvm::sys::path::parent_path(cachePath);
+      if (!parentDir.empty())
+        llvm::sys::fs::create_directories(parentDir);
+
+      std::error_code ec;
+      llvm::raw_fd_ostream cacheOut(cachePath, ec);
+      if (!ec)
+        llvm::WriteBitcodeToFile(*impMod, cacheOut);
+    }
+
+    ImportedModules.push_back(std::move(impMod));
+    for (auto &m : importCG.takeImportedModules())
+      ImportedModules.push_back(std::move(m));
+  }
+}
+
 llvm::Value *CodeGen::visitFuncDecl(ast::FuncDecl *node) {
   // Build the LLVM function type.
+  // Reference parameters are passed as pointers (ptr) — the caller passes
+  // the address of their alloca; reads/writes inside the function go through it.
   llvm::Type *retTy = node->getReturnType()
                           ? toLLVMType(node->getReturnType())
                           : llvm::Type::getVoidTy(LLVMCtx);
+  auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
   std::vector<llvm::Type *> paramTys;
-  for (auto &p : node->getParams())
-    paramTys.push_back(toLLVMType(p.ParamType));
+  for (auto &p : node->getParams()) {
+    if (p.Own == ast::Ownership::Reference)
+      paramTys.push_back(ptrTy);
+    else
+      paramTys.push_back(toLLVMType(p.ParamType));
+  }
 
   auto *fnTy = llvm::FunctionType::get(retTy, paramTys, false);
   auto *fn = llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage,
@@ -893,10 +1125,37 @@ llvm::Value *CodeGen::visitFuncDecl(ast::FuncDecl *node) {
     // Create allocas for each parameter.
     for (size_t i = 0; i < fn->arg_size(); ++i) {
       auto &arg = *std::next(fn->arg_begin(), i);
-      auto *alloca = createEntryAlloca(fn, arg.getName(), arg.getType());
-      Builder.CreateStore(&arg, alloca);
-      CurrentScope->declare(std::string(arg.getName()), alloca,
-                            node->getParams()[i].Own, nullptr);
+      auto own = node->getParams()[i].Own;
+
+      if (own == ast::Ownership::Reference) {
+        // For reference params, the arg IS the pointer to the caller's alloca.
+        // Allocate a local ptr slot to hold the incoming pointer, then record
+        // both the slot and the pointer itself as the ref target so reads load
+        // through the pointer and writes store through it.
+        auto *slot = createEntryAlloca(fn, arg.getName(), ptrTy);
+        Builder.CreateStore(&arg, slot);
+
+        // Create a value-sized alloca that acts as a proxy for reads:
+        // immediately load the pointed-to value into a fresh alloca.
+        auto *valTy = toLLVMType(node->getParams()[i].ParamType);
+        auto *valSlot = createEntryAlloca(fn, std::string(arg.getName()) + ".val", valTy);
+        llvm::Value *deref = Builder.CreateLoad(valTy, &arg,
+                                                std::string(arg.getName()) + ".deref");
+        Builder.CreateStore(deref, valSlot);
+
+        // Declare the variable using valSlot so identifier reads get the value.
+        CurrentScope->declare(std::string(arg.getName()), valSlot, own, nullptr);
+        // Record the original pointer arg as the ref target so assignment
+        // writes back through the caller's alloca.
+        CurrentScope->RefTargets[arg.getName()] = slot;  // slot holds ptr to caller
+        // Store the ptr itself (not slot) in RefTargets for direct use.
+        // We use a sentinel: store &arg directly by saving arg's ptr into slot.
+        // visitAssignStmt will load slot to get the ptr, then store through it.
+      } else {
+        auto *alloca = createEntryAlloca(fn, arg.getName(), arg.getType());
+        Builder.CreateStore(&arg, alloca);
+        CurrentScope->declare(std::string(arg.getName()), alloca, own, nullptr);
+      }
     }
 
     // Emit the body statements.
