@@ -1,0 +1,32 @@
+// Unique variables in nested scopes are destroyed when the inner scope exits.
+
+fn check(s: const String&) -> int {
+  return 1;
+}
+
+fn main() -> int {
+  a: String = "outer";
+  acc: int = check(&a);
+
+  {
+    b: String = "inner-1";
+    acc = acc + check(&b);
+    // b destroyed here
+  }
+
+  // a is still alive
+  acc = acc + check(&a);
+
+  {
+    c: String = "inner-2";
+    {
+      d: String = "inner-3";
+      acc = acc + check(&d);
+      // d destroyed here
+    }
+    acc = acc + check(&c);
+    // c destroyed here
+  }
+
+  return acc;   // exit 5
+}

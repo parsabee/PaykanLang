@@ -1,0 +1,6 @@
+// Error: cannot copy a unique variable to another unique variable.
+fn main() -> int {
+  a: String = "original";
+  b: String = a;    // error: cannot copy unique variable 'a'; use 'mov'
+  return 0;
+}

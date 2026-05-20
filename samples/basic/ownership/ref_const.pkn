@@ -1,0 +1,19 @@
+// Const references: borrowed read-only views.
+// Rvalues (literals, call results) can be passed directly to const T& params.
+
+fn display(s: const String&) -> int {
+  return 7;
+}
+
+fn main() -> int {
+  a: String = "borrowed";
+  acc: int = display(&a);           // borrow a → 7
+
+  // String literals are rvalues — OK for const ref params
+  acc = acc + display("a literal"); // → 7
+
+  // Constructor results are rvalues — OK for const ref
+  acc = acc + display(StringInt(42)); // → 7
+
+  return acc;   // exit 21
+}

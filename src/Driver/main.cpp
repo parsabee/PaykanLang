@@ -12,6 +12,9 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include <cstdlib>
+#include <filesystem>
+
+#include <llvm/Linker/Linker.h>
 
 // -- Command-line options ---------------------------------------------------
 
@@ -67,7 +70,10 @@ int main(int argc, char *argv[]) {
   }
 
   // -- Semantic analysis ----------------------------------------------------
-  paykan::sema::Sema sema(driver.getASTContext(), llvm::errs());
+  std::string projectRoot =
+      std::filesystem::path(InputFilename.getValue()).parent_path().string();
+  paykan::sema::Sema sema(driver.getASTContext(), llvm::errs(), projectRoot,
+                          driver.getCurrentFile(), &driver.getSourceLines());
   sema.run(root);
 
   if (sema.hasErrors())
@@ -76,7 +82,7 @@ int main(int argc, char *argv[]) {
   // -- Code generation ------------------------------------------------------
   auto llvmCtx = std::make_unique<llvm::LLVMContext>();
   paykan::codegen::CodeGen cg(driver.getASTContext(), *llvmCtx,
-                              InputFilename);
+                              InputFilename, projectRoot);
   if (!cg.run(root)) {
     llvm::errs() << "code generation failed (module verification error)\n";
     return EXIT_FAILURE;
@@ -97,8 +103,17 @@ int main(int argc, char *argv[]) {
   }
 
   // -- JIT execution ------------------------------------------------------
+  // Link imported modules into the main module.
+  auto importedModules = cg.takeImportedModules();
+  auto mainModule = cg.takeModule();
+  for (auto &impMod : importedModules) {
+    if (llvm::Linker::linkModules(*mainModule, std::move(impMod))) {
+      llvm::errs() << "failed to link imported module\n";
+      return EXIT_FAILURE;
+    }
+  }
   auto resultOrErr =
-      paykan::jit::runModule(cg.takeModule(), std::move(llvmCtx));
+      paykan::jit::runModule(std::move(mainModule), std::move(llvmCtx));
   if (!resultOrErr) {
     llvm::errs() << "JIT error: " << resultOrErr.takeError() << "\n";
     return EXIT_FAILURE;

@@ -711,3 +711,31 @@ fn main() -> int { return mid::quadruple(5); }
 
   std::filesystem::remove_all(tmpDir);
 }
+
+// A module function whose param type is a ClassType (String) must be callable
+// across module boundaries with correct type remapping end-to-end.
+TEST(CodeGen, ImportClassTypeRemap) {
+  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_cg_classremap";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+
+  // strmod: accepts a String by reference and returns a fixed int so we can
+  // verify the call actually succeeded without dealing with String returns.
+  writeTempFile(tmpDir.string(), "strmod.pkn", R"(
+fn check(s: String&) -> int { return 7; }
+)");
+
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+import strmod;
+fn main() -> int {
+  s: String = "hello";
+  return strmod::check(&s);
+}
+)");
+
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 7);
+
+  std::filesystem::remove_all(tmpDir);
+}

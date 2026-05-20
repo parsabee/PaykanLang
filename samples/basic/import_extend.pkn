@@ -1,0 +1,11 @@
+// Chain of imports: each module builds on the previous one
+import imports::math;
+
+fn double(x: int) -> int {
+  return mul(x, 2);
+}
+
+fn main() -> int {
+  x: int = double(square(5));  // double(25) = 50
+  return x;
+}

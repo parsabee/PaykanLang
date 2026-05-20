@@ -1,0 +1,13 @@
+// Passing shared to a shared parameter bumps the reference count.
+
+fn hold(s: shared String) -> int {
+  // s's ref released here, but original still alive
+  return 10;
+}
+
+fn main() -> int {
+  a: shared String = "shared copy";
+  acc: int = hold(a);       // refcount bump, returns 10
+  acc = acc + hold(a);      // again, returns 10
+  return acc;   // exit 20
+}

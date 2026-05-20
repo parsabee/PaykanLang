@@ -1,0 +1,9 @@
+// Error: shared variable cannot be passed to unique parameter.
+fn consume(s: String) -> int {
+  return 0;
+}
+
+fn main() -> int {
+  a: shared String = "shared";
+  return consume(a);   // error: shared variable 'a' cannot be passed to unique parameter
+}

@@ -1,0 +1,10 @@
+// Higher-level math built on top of imports::math
+import imports::math;
+
+fn sum_of_squares(a: int, b: int) -> int {
+  return add(square(a), square(b));
+}
+
+fn diff_of_cubes(a: int, b: int) -> int {
+  return sub(cube(a), cube(b));
+}

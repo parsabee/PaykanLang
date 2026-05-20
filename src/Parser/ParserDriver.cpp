@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "ParserDriverImpl.h"
+#include <fstream>
 
 namespace paykan::parser {
 
@@ -15,6 +16,13 @@ ParserDriver::~ParserDriver() = default;
 int ParserDriver::parseFile(const std::string &filename) {
   PImpl->CurFile = filename;
   PImpl->ErrorCount = 0;
+  PImpl->SourceLines.clear();
+
+  std::ifstream in(filename);
+  std::string line;
+  while (std::getline(in, line))
+    PImpl->SourceLines.push_back(line);
+
   PImpl->Location.initialize(&PImpl->CurFile);
   PImpl->scanBegin();
   int result = PImpl->parse(*this);
@@ -27,6 +35,12 @@ ast::TranslationUnit *ParserDriver::getRoot() { return PImpl->Root; }
 ast::ASTContext &ParserDriver::getASTContext() { return PImpl->Ctx; }
 
 unsigned ParserDriver::getErrorCount() const { return PImpl->ErrorCount; }
+
+const std::string &ParserDriver::getCurrentFile() const { return PImpl->CurFile; }
+
+const std::vector<std::string> &ParserDriver::getSourceLines() const {
+  return PImpl->SourceLines;
+}
 
 // -- ParserDriver::Impl ------------------------------------------------------
 

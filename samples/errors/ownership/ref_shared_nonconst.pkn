@@ -1,0 +1,9 @@
+// Error: shared variable cannot be passed to non-const reference parameter.
+fn borrow(s: String&) -> int {
+  return 0;
+}
+
+fn main() -> int {
+  a: shared String = "shared val";
+  return borrow(&a);   // error: shared variable 'a' cannot be passed to non-const reference parameter
+}

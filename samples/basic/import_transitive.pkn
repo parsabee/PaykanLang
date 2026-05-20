@@ -1,0 +1,13 @@
+// Transitive import: algebra imports math, we import algebra
+// This demonstrates that math functions are available transitively
+import imports::algebra;
+
+fn main() -> int {
+  // sum_of_squares(3, 4) = 9 + 16 = 25
+  a: int = sum_of_squares(3, 4);
+
+  // diff_of_cubes(3, 2) = 27 - 8 = 19
+  b: int = diff_of_cubes(3, 2);
+
+  return a + b;  // 25 + 19 = 44
+}

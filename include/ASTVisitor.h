@@ -24,7 +24,8 @@ namespace ast {
 #define PAYKAN_DECL_NODES(NODE) \
   NODE(NK_VarDecl,        VarDecl,        VarDecl) \
   NODE(NK_FuncDecl,       FuncDecl,       FuncDecl) \
-  NODE(NK_MethodDecl,     MethodDecl,     MethodDecl)
+  NODE(NK_MethodDecl,     MethodDecl,     MethodDecl) \
+  NODE(NK_ImportDecl,     ImportDecl,     ImportDecl)
 
 #define PAYKAN_STMT_NODES(NODE) \
   NODE(NK_CompoundStmt,   CompoundStmt,   CompoundStmt)    \

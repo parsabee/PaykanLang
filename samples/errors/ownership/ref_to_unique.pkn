@@ -1,0 +1,10 @@
+// Error: reference variable cannot be passed to unique parameter.
+fn consume(s: String) -> int {
+  return 0;
+}
+
+fn main() -> int {
+  a: String = "owned";
+  r: String& = &a;
+  return consume(r);   // error: reference 'r' cannot be passed to unique parameter
+}

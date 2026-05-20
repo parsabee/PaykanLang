@@ -18,6 +18,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace paykan {
 namespace codegen {
@@ -99,6 +100,18 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   /// Register builtin functions in the function table.
   void bootstrapBuiltins();
 
+  /// Project root directory for import resolution.
+  std::string ProjectRoot;
+
+  /// LLVM modules generated for imported files.
+  std::vector<std::unique_ptr<llvm::Module>> ImportedModules;
+
+  /// Set of already-codegen'd import file paths (avoids duplicates).
+  llvm::StringSet<> CodeGenedImports;
+
+  /// Process imports: codegen each imported module.
+  void processImports(ast::TranslationUnit *tu);
+
   /// Wrap a raw C string pointer into a PaykanString* via PaykanString_new.
   llvm::Value *wrapStringLiteral(llvm::Value *rawStr, size_t len);
 
@@ -152,7 +165,8 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
 
 public:
   CodeGen(ast::ASTContext &astCtx, llvm::LLVMContext &llvmCtx,
-          llvm::StringRef moduleName);
+          llvm::StringRef moduleName,
+          const std::string &projectRoot = "");
 
   /// Run code generation on the translation unit.
   /// Returns true on success.
@@ -163,6 +177,11 @@ public:
 
   /// Release ownership of the generated LLVM module.
   std::unique_ptr<llvm::Module> takeModule() { return std::move(Module); }
+
+  /// Release ownership of all imported LLVM modules.
+  std::vector<std::unique_ptr<llvm::Module>> takeImportedModules() {
+    return std::move(ImportedModules);
+  }
 
   /// Access the module (non-owning).
   llvm::Module &getModule() const { return *Module; }

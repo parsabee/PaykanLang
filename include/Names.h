@@ -47,6 +47,14 @@ inline constexpr const char *kPaykanSharedGet        = "PaykanShared_get";
 inline constexpr const char *kPaykanRetain           = "Paykan_retain";
 inline constexpr const char *kPaykanRelease          = "Paykan_release";
 
+// -- Environment variables --------------------------------------------------
+
+inline constexpr const char *kPaykanStdlibEnv         = "PAYKAN_STDLIB";
+
+// -- Cache ------------------------------------------------------------------
+
+inline constexpr const char *kCacheDir                = ".paykan_cache";
+
 // -- LLVM IR internal names -------------------------------------------------
 
 inline constexpr const char *kStrGlobalName          = ".str";

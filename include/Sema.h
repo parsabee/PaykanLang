@@ -12,6 +12,8 @@
 #include <llvm/Support/raw_ostream.h>
 #include <string>
 #include <vector>
+#include <memory>
+#include <functional>
 
 namespace paykan {
 namespace sema {
@@ -151,8 +153,11 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   // Returns true if a value of type `src` can be assigned to a location of
   // type `dst`.  This includes exact match, int→float promotion, and
-  // ClassType subtyping.
-  bool isAssignable(ast::Type *dst, ast::Type *src) const;
+  // ClassType subtyping. When `srcExpr` is provided, expression-form checks
+  // (such as '&' argument usage) are also enforced.
+  bool isAssignable(ast::Type *dst, ast::Type *src,
+                    ast::Expr *srcExpr = nullptr,
+                    ast::Ownership dstOwn = ast::Ownership::Unique) const;
 
   // Resolve a declared AST Type* to its canonical equivalent from
   // ASTContext (e.g. a BuiltinType(Int) node → Ctx.getIntTy(), a
@@ -193,8 +198,67 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // Visit an expression and return its resolved type (nullptr on error).
   ast::Type *resolveExprType(ast::Expr *expr);
 
+  // -- Import resolution ----------------------------------------------------
+
+  /// The directory of the file currently being analyzed.
+  std::string ProjectRoot;
+
+  /// Filename used in diagnostics.
+  std::string SourceName;
+
+  /// Optional source lines for GCC-style snippets.
+  const std::vector<std::string> *SourceLines = nullptr;
+
+  /// Files currently being imported (for cycle detection).
+  llvm::StringSet<> *ImportStack = nullptr;
+
+  /// Info about an already-analyzed module.
+  struct ModuleInfo {
+    // Functions are stored as serialised name-strings so the cache entry never
+    // holds raw Type* pointers into a foreign (potentially destroyed) ASTContext.
+    struct FunctionInfo {
+      std::string Name;
+      std::string ReturnTypeName;
+      std::vector<std::string> ParamTypeNames;
+      std::vector<ast::Ownership> ParamOwnerships;
+      std::vector<bool> ParamIsConst;
+      bool IsVariadic = false;
+    };
+    std::vector<FunctionInfo> ExportedFunctions;
+
+    // Serialised class-type descriptions so they can be reconstructed in
+    // any importing ASTContext without holding raw pointers into a foreign arena.
+    struct ClassInfo {
+      std::string Name;
+      std::string SuperClassName; // "" → implicit Object root
+      struct FieldInfo  { std::string FieldName; std::string TypeName; };
+      struct MethodInfo {
+        std::string Name;
+        std::string ReturnTypeName;
+        std::vector<std::string> ParamTypeNames;
+        uint8_t Flags; // ast::MethodDecl::Static / Private bits
+      };
+      std::vector<FieldInfo>  Fields;
+      std::vector<MethodInfo> Methods;
+    };
+    std::vector<ClassInfo> ExportedClasses;
+  };
+
+  /// Global cache of already-analyzed modules (keyed by resolved file path).
+  static llvm::StringMap<ModuleInfo> ModuleCache;
+
+  /// Resolve a module path to an absolute file path.
+  std::string resolveModulePath(const std::string &modulePath, bool isSystem,
+                                ast::SourceLocation loc);
+
+  /// Process a single import declaration.
+  bool processImport(ast::ImportDecl *node);
+
 public:
-  explicit Sema(ast::ASTContext &ctx, llvm::raw_ostream &os = llvm::errs());
+  explicit Sema(ast::ASTContext &ctx, llvm::raw_ostream &os = llvm::errs(),
+                const std::string &projectRoot = "",
+                const std::string &sourceName = "",
+                const std::vector<std::string> *sourceLines = nullptr);
 
   // Entry point -- run semantic analysis on a TranslationUnit.
   bool run(ast::TranslationUnit *tu);

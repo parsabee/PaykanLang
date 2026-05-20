@@ -8,6 +8,7 @@
 #include "AST.h"
 #include "ParserDriver.h"
 #include "Parser.ypp.h"
+#include <vector>
 
 // Flex needs this macro for our custom driver
 #define YY_DECL yy::parser::symbol_type yylex(paykan::parser::ParserDriver &drv)
@@ -33,6 +34,9 @@ struct ParserDriver::Impl {
 
   /// The name of the file being parsed.
   std::string CurFile;
+
+  /// Source split by lines for downstream diagnostics.
+  std::vector<std::string> SourceLines;
 
   /// Number of syntax errors encountered during parsing.
   unsigned ErrorCount = 0;

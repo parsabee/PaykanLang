@@ -1,0 +1,15 @@
+// Reassigning shared variables: old value released, new value wrapped.
+
+fn peek(s: shared String) -> int {
+  return 1;
+}
+
+fn main() -> int {
+  a: shared String = "first";
+  acc: int = peek(a);
+  a = "second";
+  acc = acc + peek(a);
+  a = "third";
+  acc = acc + peek(a);
+  return acc;   // exit 3
+}

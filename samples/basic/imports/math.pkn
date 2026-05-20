@@ -1,0 +1,20 @@
+// Utility functions for integer math
+fn add(a: int, b: int) -> int {
+  return a + b;
+}
+
+fn sub(a: int, b: int) -> int {
+  return a - b;
+}
+
+fn mul(a: int, b: int) -> int {
+  return a * b;
+}
+
+fn square(x: int) -> int {
+  return x * x;
+}
+
+fn cube(x: int) -> int {
+  return x * square(x);
+}

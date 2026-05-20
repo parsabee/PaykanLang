@@ -111,6 +111,12 @@ public:
   /// Look up any type by name: builtins (int, float, bool, void) first,
   /// then the class type registry.  Returns nullptr if not found.
   Type *lookupType(const std::string &name) const;
+
+  /// Read-only view of the class type registry (used by Sema to export types
+  /// across module boundaries).
+  const std::unordered_map<std::string, ClassType *> &getClassTypes() const {
+    return ClassTypes;
+  }
 };
 
 } // namespace ast

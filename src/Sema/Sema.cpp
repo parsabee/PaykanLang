@@ -974,10 +974,81 @@ std::string Sema::resolveModulePath(const std::string &modulePath,
   return "";
 }
 
+// ---------------------------------------------------------------------------
+// Class-type export helpers
+// ---------------------------------------------------------------------------
+
+/// Return the canonical string name for a type (used when serialising ClassInfo).
+static std::string typeToName(ast::Type *ty) {
+  if (!ty) return "void";
+  if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty)) {
+    switch (bt->getTypeKind()) {
+    case ast::BuiltinType::Int:   return "int";
+    case ast::BuiltinType::Float: return "float";
+    case ast::BuiltinType::Bool:  return "bool";
+    case ast::BuiltinType::Void:  return "void";
+    }
+  }
+  if (auto *ct = ast::dyn_cast<ast::ClassType>(ty))
+    return ct->getName();
+  return "void";
+}
+
+/// Reconstruct a single ClassInfo into a context, guaranteeing type identity.
+/// Defined as a static member-accessible helper; called from processImport.
+static void registerClassInfoInto(const std::string &name,
+                                  const std::string &superName,
+                                  const std::vector<std::pair<std::string,std::string>> &fields,
+                                  const std::vector<std::tuple<std::string,std::string,
+                                                               std::vector<std::string>,uint8_t>> &methods,
+                                  ast::ASTContext &ctx) {
+  if (ctx.lookupClassType(name))
+    return; // already present — pointer identity guaranteed
+
+  ast::ClassType *superClass = nullptr;
+  if (!superName.empty())
+    superClass = ctx.lookupClassType(superName);
+  if (!superClass)
+    superClass = ctx.getObjectTy(); // fall back to root
+
+  auto builder = ctx.buildClassType(name, superClass);
+  for (auto &[fname, ftname] : fields) {
+    ast::Type *fty = ctx.lookupType(ftname);
+    if (!fty) fty = ctx.getObjectTy();
+    builder.field(fname, fty);
+  }
+  for (auto &[mname, retName, paramNames, flags] : methods) {
+    ast::Type *retTy = ctx.lookupType(retName);
+    if (!retTy) retTy = ctx.getVoidTy();
+    std::vector<ast::Type *> params;
+    for (auto &pn : paramNames) {
+      ast::Type *pty = ctx.lookupType(pn);
+      if (!pty) pty = ctx.getObjectTy();
+      params.push_back(pty);
+    }
+    builder.method(mname, retTy, std::move(params), flags);
+  }
+  builder.build();
+}
+
 bool Sema::processImport(ast::ImportDecl *node) {
   const std::string &modulePath = node->getModulePath();
   const bool isSystem = node->isSystem();
   const auto &selectedNames = node->getSelectedNames();
+
+  // Helper: register a cached ClassInfo into an ASTContext (lambda so it can
+  // access ModuleInfo::ClassInfo, which is a private nested type of Sema).
+  auto applyClassInfo = [&](const ModuleInfo::ClassInfo &ci, ast::ASTContext &ctx) {
+    // Convert to flat vectors to call the file-scope helper (which has no
+    // access to the private ClassInfo type).
+    std::vector<std::pair<std::string,std::string>> fields;
+    for (auto &f : ci.Fields)
+      fields.emplace_back(f.FieldName, f.TypeName);
+    std::vector<std::tuple<std::string,std::string,std::vector<std::string>,uint8_t>> methods;
+    for (auto &m : ci.Methods)
+      methods.emplace_back(m.Name, m.ReturnTypeName, m.ParamTypeNames, m.Flags);
+    registerClassInfoInto(ci.Name, ci.SuperClassName, fields, methods, ctx);
+  };
 
   // Helper: load one module from a resolved path, cache it, inject its exports.
   auto loadModule = [&](const std::string &path, const std::string &qualifier,
@@ -991,12 +1062,26 @@ bool Sema::processImport(ast::ImportDecl *node) {
     // Check cache first.
     auto cacheIt = ModuleCache.find(path);
     if (cacheIt != ModuleCache.end()) {
-      for (auto &[name, sig] : cacheIt->second.ExportedFunctions) {
-        std::string injected = qualifier + "::" + name;
-        if (!lookupFunction(injected))
-          declareFunction(injected, sig.ReturnType, sig.ParamTypes,
-                          sig.ParamOwnerships, sig.ParamIsConst,
-                          sig.IsVariadic, /*isBuiltin=*/true);
+      // Re-register exported class types (type identity: skip if already present).
+      for (auto &ci : cacheIt->second.ExportedClasses)
+        applyClassInfo(ci, Ctx);
+      // Reconstruct FunctionSig from serialised type names into the CURRENT
+      // context — this avoids using raw pointers from a possibly-dead context.
+      for (auto &fi : cacheIt->second.ExportedFunctions) {
+        std::string injected = qualifier + "::" + fi.Name;
+        if (!lookupFunction(injected)) {
+          ast::Type *retTy = Ctx.lookupType(fi.ReturnTypeName);
+          if (!retTy) retTy = Ctx.getVoidTy();
+          std::vector<ast::Type *> params;
+          for (auto &pn : fi.ParamTypeNames) {
+            ast::Type *pty = Ctx.lookupType(pn);
+            if (!pty) pty = Ctx.getObjectTy();
+            params.push_back(pty);
+          }
+          declareFunction(injected, retTy, params,
+                          fi.ParamOwnerships, fi.ParamIsConst,
+                          fi.IsVariadic, /*isBuiltin=*/true);
+        }
       }
       return true;
     }
@@ -1017,31 +1102,86 @@ bool Sema::processImport(ast::ImportDecl *node) {
     importSema.ImportStack = ImportStack;
 
     auto *importRoot = importDriver.getRoot();
-    if (!importSema.run(importRoot)) {
+    bool importOk = importSema.run(importRoot);
+    // Backtrack: remove from the stack so sibling imports of the same module
+    // are not falsely reported as cycles.
+    if (ImportStack)
+      ImportStack->erase(path);
+    if (!importOk) {
       error(loc, "errors in imported module '" + path + "'");
       return false;
     }
 
-    // Collect exported functions, remap types, and cache.
+    // Collect and register user-defined class types from the imported module.
+    // Process in a simple two-pass loop so that superclasses are registered
+    // before their subclasses (handles shallow hierarchies; deep chains with
+    // cross-module supers are resolved transitively via recursive imports).
     ModuleInfo info;
+    {
+      // Build serialised ClassInfo for every non-canonical class.
+      for (auto &[name, ct] : importSema.Ctx.getClassTypes()) {
+        if (name == "Object" || name == "String")
+          continue; // canonical builtins — always present in every ASTContext
+        ModuleInfo::ClassInfo ci;
+        ci.Name = name;
+        if (ct->getSuperClass()) {
+          ci.SuperClassName = ct->getSuperClass()->getName();
+          if (ci.SuperClassName == "Object")
+            ci.SuperClassName = ""; // implicit root — no need to store
+        }
+        for (auto &[fname, fty] : ct->getFields())
+          ci.Fields.push_back({fname, typeToName(fty)});
+        for (auto *m : ct->getMethods()) {
+          ModuleInfo::ClassInfo::MethodInfo mi;
+          mi.Name            = m->getName();
+          mi.ReturnTypeName  = typeToName(m->getReturnType());
+          for (auto *pty : m->getParamTypes())
+            mi.ParamTypeNames.push_back(typeToName(pty));
+          mi.Flags = static_cast<uint8_t>(
+              (m->isStatic()  ? ast::MethodDecl::Static  : 0) |
+              (m->isPrivate() ? ast::MethodDecl::Private : 0));
+          ci.Methods.push_back(std::move(mi));
+        }
+        info.ExportedClasses.push_back(std::move(ci));
+      }
+      // Register into the current context (respects type identity).
+      for (auto &ci : info.ExportedClasses)
+        applyClassInfo(ci, Ctx);
+    }
+
+    // Collect exported functions, serialise to type names (no raw Type* stored),
+    // then inject into the current FunctionTable by reconstructing from names.
     for (auto &[name, sig] : importSema.FunctionTable) {
       if (sig.IsBuiltin)
         continue;
-      FunctionSig remapped = sig;
-      remapped.ReturnType = module_utils::remapType(sig.ReturnType, Ctx);
-      for (size_t i = 0; i < remapped.ParamTypes.size(); ++i)
-        remapped.ParamTypes[i] = module_utils::remapType(sig.ParamTypes[i], Ctx);
-      info.ExportedFunctions.emplace_back(name.str(), remapped);
+      ModuleInfo::FunctionInfo fi;
+      fi.Name            = name.str();
+      fi.ReturnTypeName  = typeToName(sig.ReturnType);
+      for (auto *pty : sig.ParamTypes)
+        fi.ParamTypeNames.push_back(typeToName(pty));
+      fi.ParamOwnerships = sig.ParamOwnerships;
+      fi.ParamIsConst    = sig.ParamIsConst;
+      fi.IsVariadic      = sig.IsVariadic;
+      info.ExportedFunctions.push_back(std::move(fi));
     }
     ModuleCache[path] = std::move(info);
 
-    // Inject into our FunctionTable as qualifier::name.
-    for (auto &[name, sig] : ModuleCache[path].ExportedFunctions) {
-      std::string injected = qualifier + "::" + name;
-      if (!lookupFunction(injected))
-        declareFunction(injected, sig.ReturnType, sig.ParamTypes,
-                        sig.ParamOwnerships, sig.ParamIsConst,
-                        sig.IsVariadic, /*isBuiltin=*/true);
+    // Inject into our FunctionTable as qualifier::name (reconstruct from names).
+    for (auto &fi : ModuleCache[path].ExportedFunctions) {
+      std::string injected = qualifier + "::" + fi.Name;
+      if (!lookupFunction(injected)) {
+        ast::Type *retTy = Ctx.lookupType(fi.ReturnTypeName);
+        if (!retTy) retTy = Ctx.getVoidTy();
+        std::vector<ast::Type *> params;
+        for (auto &pn : fi.ParamTypeNames) {
+          ast::Type *pty = Ctx.lookupType(pn);
+          if (!pty) pty = Ctx.getObjectTy();
+          params.push_back(pty);
+        }
+        declareFunction(injected, retTy, params,
+                        fi.ParamOwnerships, fi.ParamIsConst,
+                        fi.IsVariadic, /*isBuiltin=*/true);
+      }
     }
     return true;
   };

@@ -8,6 +8,7 @@
 #include "AST.h"
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace paykan::parser {
 
@@ -32,6 +33,12 @@ public:
 
   /// Number of syntax errors encountered during the last parse.
   unsigned getErrorCount() const;
+
+  /// Absolute/relative filename of the last parsed source.
+  const std::string &getCurrentFile() const;
+
+  /// Source split by lines for diagnostics/snippets.
+  const std::vector<std::string> &getSourceLines() const;
 
 private:
   struct Impl;

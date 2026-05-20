@@ -1,0 +1,24 @@
+// Multiple imports: combine functions from different modules
+import imports::math;
+import imports::logic;
+
+fn main() -> int {
+  // Math
+  a: int = mul(6, 7);     // 42
+  b: int = square(a);     // 1764
+
+  // Logic
+  p: bool = xor(True, False);   // True
+  q: bool = implies(True, True); // True
+  r: bool = nand(p, q);          // False
+
+  // Use logic result to pick a return value
+  result: int = 0;
+  if (r) {
+    result = b;
+  } else {
+    result = a;
+  }
+  out(StringInt(result));
+  return result;  // 42
+}

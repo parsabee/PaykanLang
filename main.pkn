@@ -1,0 +1,33 @@
+fn f1(x: const int&) -> int {
+    return 1;
+}
+
+fn f2(x: int&) -> int {
+    return 2;
+}
+
+fn f3(x: int) -> int {
+    return 3;
+}
+
+fn f4(x: const int) -> int {
+    return 4;
+}
+
+fn f5(x: shared int) -> int {
+    return 5;
+}
+
+fn f6(x: const shared int) -> int {
+    return 6;
+}
+
+fn main() -> int {
+    x: int = 20;
+    y: shared int = 30;
+    z: int& = &x;
+    
+    f1(&x);
+    f1(&y);
+    f1(z); 
+}

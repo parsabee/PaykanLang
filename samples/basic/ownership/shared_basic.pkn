@@ -1,0 +1,16 @@
+// Shared ownership: reference-counted, multiple owners allowed.
+
+fn peek(s: shared String) -> int {
+  return 1;
+}
+
+fn main() -> int {
+  a: shared String = "shared hello";
+  acc: int = peek(a);
+
+  // shared variables can be reassigned — old value is released
+  a = "shared world";
+  acc = acc + peek(a);
+
+  return acc;   // exit 2
+}

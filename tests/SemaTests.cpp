@@ -98,18 +98,17 @@ TEST(Sema, SharedReassignAllowed) {
 }
 
 // ============================================================================
-// Ownership qualifiers on builtins — rejected
+// Ownership qualifiers on builtins
 // ============================================================================
 
-TEST(Sema, SharedOnBuiltinRejected) {
+TEST(Sema, SharedOnBuiltinAllowed) {
   auto r = semaCheck(wrapMain("x: shared int = 1;"));
-  EXPECT_FALSE(r.Ok);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Sema, RefOnBuiltinRejected) {
-  // We can't write "x: int& = &y" for builtins
+TEST(Sema, RefOnBuiltinAllowed) {
   auto r = semaCheck(wrapMain("y: int = 1;\n  x: int& = &y;"));
-  EXPECT_FALSE(r.Ok);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
 // ============================================================================
@@ -214,6 +213,13 @@ TEST(Sema, RefToUniqueRejected) {
                              "a: String = \"hi\";\n  r: String& = &a;\n  take(r);"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("reference"), std::string::npos);
+}
+
+TEST(Sema, AmpersandToNonRefBuiltinParamRejected) {
+  auto r = semaCheck(withFns("fn take(x: int) {}",
+                             "a: int = 20;\n  take(&a);"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("reference parameter"), std::string::npos);
 }
 
 // ============================================================================
@@ -339,6 +345,15 @@ TEST(Sema, MovOnRefVarRejected) {
   auto r = semaCheck(src);
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("reference"), std::string::npos);
+}
+
+TEST(Sema, MovOnBuiltinRejected) {
+  auto r = semaCheck(wrapMain(R"(
+    x: int = 20;
+    y: int = mov x;
+  )"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("class types"), std::string::npos);
 }
 
 TEST(Sema, RefBindsTemporary) {
@@ -662,4 +677,128 @@ TEST(Sema, BreakInNestedLoop) {
     }
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+// ============================================================================
+// Imports
+// ============================================================================
+
+TEST(Sema, ImportUnresolved) {
+  auto r = semaCheck(R"(
+    import nonexistent;
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("not found"), std::string::npos);
+}
+
+TEST(Sema, ImportCircular) {
+  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_sema_circ";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+
+  // a imports b, b imports a => cycle
+  {
+    std::ofstream(tmpDir / "a.pkn") << "import b;\nfn fa() -> int { return 1; }\n";
+    std::ofstream(tmpDir / "b.pkn") << "import a;\nfn fb() -> int { return 2; }\n";
+  }
+
+  paykan::parser::ParserDriver drv;
+  ASSERT_EQ(drv.parseFile((tmpDir / "a.pkn").string()), 0);
+
+  std::string diag;
+  llvm::raw_string_ostream os(diag);
+  paykan::sema::Sema sema(drv.getASTContext(), os, tmpDir.string(),
+                          drv.getCurrentFile(), &drv.getSourceLines());
+  bool ok = sema.run(drv.getRoot());
+  EXPECT_FALSE(ok);
+  EXPECT_NE(diag.find("circular"), std::string::npos);
+
+  std::filesystem::remove_all(tmpDir);
+}
+
+// ============================================================================
+// Import — ClassType remapping
+// ============================================================================
+
+// A module function whose parameter/return type is a ClassType (String)
+// must be importable; the return type must be remapped to the importer's
+// canonical StringTy so that it can be stored in a String variable.
+TEST(Sema, ImportClassTypeRemap) {
+  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_sema_classremap";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+
+  std::ofstream(tmpDir / "strmod.pkn") << R"(
+fn wrap(s: String&) -> int { return 0; }
+)";
+
+  paykan::parser::ParserDriver drv;
+  {
+    auto mainPath = (tmpDir / "main.pkn").string();
+    std::ofstream(mainPath) << R"(
+import strmod;
+fn main() -> int {
+  s: String = "hi";
+  return strmod::wrap(&s);
+}
+)";
+    ASSERT_EQ(drv.parseFile(mainPath), 0);
+  }
+
+  std::string diag;
+  llvm::raw_string_ostream os(diag);
+  paykan::sema::Sema sema(drv.getASTContext(), os, tmpDir.string(),
+                          drv.getCurrentFile(), &drv.getSourceLines());
+  bool ok = sema.run(drv.getRoot());
+  EXPECT_TRUE(ok) << diag;
+
+  std::filesystem::remove_all(tmpDir);
+}
+
+// Importing the same module twice must yield the same canonical ClassType
+// pointer (type identity) rather than two distinct instances.
+TEST(Sema, ImportClassTypeIdentity) {
+  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_sema_classid";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+
+  // strutil defines functions that take/return String.
+  std::ofstream(tmpDir / "strutil.pkn") << R"(
+fn id(s: String&) -> int { return 0; }
+)";
+
+  std::ofstream(tmpDir / "modA.pkn") << R"(
+import strutil;
+fn useA(s: String&) -> int { return strutil::id(&s); }
+)";
+  std::ofstream(tmpDir / "modB.pkn") << R"(
+import strutil;
+fn useB(s: String&) -> int { return strutil::id(&s); }
+)";
+
+  paykan::parser::ParserDriver drv;
+  {
+    auto mainPath = (tmpDir / "main.pkn").string();
+    std::ofstream(mainPath) << R"(
+import modA;
+import modB;
+fn main() -> int {
+  s: String = "hello";
+  a: int = modA::useA(&s);
+  b: int = modB::useB(&s);
+  return 0;
+}
+)";
+    ASSERT_EQ(drv.parseFile(mainPath), 0);
+  }
+
+  std::string diag;
+  llvm::raw_string_ostream os(diag);
+  paykan::sema::Sema sema(drv.getASTContext(), os, tmpDir.string(),
+                          drv.getCurrentFile(), &drv.getSourceLines());
+  bool ok = sema.run(drv.getRoot());
+  EXPECT_TRUE(ok) << diag;
+
+  std::filesystem::remove_all(tmpDir);
 }

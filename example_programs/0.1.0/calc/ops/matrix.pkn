@@ -1,0 +1,95 @@
+// matrix.pkn — dynamic M×N float matrix class and operations
+//
+// Exported:
+//   class Mat                                      — M×N matrix
+//   fn matGet(self: Mat, r: int, c: int) -> float
+//   fn matSet(self: Mat, r: int, c: int, v: float)
+//   fn matAdd(self: Mat, b: Mat) -> Mat            — element-wise add; dims must match
+//   fn matSub(self: Mat, b: Mat) -> Mat            — element-wise sub; dims must match
+//   fn matMul(self: Mat, b: Mat) -> Mat            — matrix multiply; self.cols == b.rows
+//   fn matScale(self: Mat, s: float) -> Mat        — scalar scale every element
+//   fn matDimsStr(self: Mat) -> Str                — "MxN"
+//   fn matToStr(self: Mat) -> Str                  — human-readable grid
+
+class Mat {
+  rows: int;
+  cols: int;
+  data: float[][];
+
+  fn __init__(rows: int, cols: int) {
+    self.rows = rows;
+    self.cols = cols;
+    // Fill syntax with runtime counts initialises a rows×cols zero matrix.
+    self.data = [[0.0; cols]; rows];
+  }
+}
+
+fn matGet(self: Mat, r: int, c: int) -> float {
+  return self.data[r][c];
+}
+
+fn matSet(self: Mat, r: int, c: int, v: float) {
+  self.data[r][c] = v;
+}
+
+fn matAdd(self: Mat, b: Mat) -> Mat {
+  result = Mat(self.rows, self.cols);
+  for r in 0..self.rows {
+    for c in 0..self.cols {
+      result.data[r][c] = self.data[r][c] + b.data[r][c];
+    }
+  }
+  return result;
+}
+
+fn matSub(self: Mat, b: Mat) -> Mat {
+  result = Mat(self.rows, self.cols);
+  for r in 0..self.rows {
+    for c in 0..self.cols {
+      result.data[r][c] = self.data[r][c] - b.data[r][c];
+    }
+  }
+  return result;
+}
+
+fn matMul(self: Mat, b: Mat) -> Mat {
+  // (rows × cols) * (b.rows × b.cols) = (rows × b.cols); requires cols == b.rows
+  result = Mat(self.rows, b.cols);
+  for r in 0..self.rows {
+    for c in 0..b.cols {
+      sum: float = 0.0;
+      for k in 0..self.cols {
+        sum = sum + self.data[r][k] * b.data[k][c];
+      }
+      result.data[r][c] = sum;
+    }
+  }
+  return result;
+}
+
+fn matScale(self: Mat, s: float) -> Mat {
+  result = Mat(self.rows, self.cols);
+  for r in 0..self.rows {
+    for c in 0..self.cols {
+      result.data[r][c] = self.data[r][c] * s;
+    }
+  }
+  return result;
+}
+
+fn matDimsStr(self: Mat) -> Str {
+  return (Str)self.rows + "x" + (Str)self.cols;
+}
+
+fn matToStr(self: Mat) -> Str {
+  result: Str = "";
+  for r in 0..self.rows {
+    result = result + "[ ";
+    for c in 0..self.cols {
+      result = result + (Str)self.data[r][c];
+      if (c < self.cols - 1) { result = result + "\t"; }
+    }
+    result = result + " ]\n";
+  }
+  return result;
+}

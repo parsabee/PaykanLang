@@ -1,0 +1,10 @@
+// Error: 'mov' cannot be used on reference variables.
+fn consume(s: String) -> int {
+  return 0;
+}
+
+fn main() -> int {
+  a: String = "owned";
+  r: String& = &a;
+  return consume(mov r);   // error: 'mov' cannot be used on reference variables
+}

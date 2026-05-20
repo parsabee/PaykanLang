@@ -1,0 +1,9 @@
+// Error: unique variable must be 'mov'd to shared parameter.
+fn hold(s: shared String) -> int {
+  return 0;
+}
+
+fn main() -> int {
+  a: String = "unique";
+  return hold(a);   // error: unique variable 'a' must be 'mov'd to shared parameter
+}
