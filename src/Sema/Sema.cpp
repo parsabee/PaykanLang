@@ -166,6 +166,19 @@ std::string Sema::typeName(ast::Type *ty) {
   return "unknown";
 }
 
+// Structural type equality (pointer equality is insufficient for ArrayType
+// nodes because each make<ArrayType>() call yields a fresh allocation).
+static bool typesEqual(ast::Type *a, ast::Type *b) {
+  if (a == b) return true;
+  if (!a || !b) return false;
+  if (a->getKind() != b->getKind()) return false;
+  if (auto *aa = ast::dyn_cast<ast::ArrayType>(a))
+    return typesEqual(aa->getElementType(),
+                      ast::cast<ast::ArrayType>(b)->getElementType());
+  // BuiltinType / ClassType: pointer equality is canonical (singletons / interned).
+  return false;
+}
+
 bool Sema::isNumeric(ast::Type *ty) {
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty))
     return bt->getTypeKind() == ast::BuiltinType::Int ||
@@ -576,7 +589,7 @@ ast::Type *Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node)
     if (!ty) return nullptr;
     if (!elemTy) {
       elemTy = ty;
-    } else if (elemTy != ty) {
+    } else if (!typesEqual(elemTy, ty)) {
       // int <-> float promotion across elements.
       if (elemTy == S.Ctx.getIntTy() && ty == S.Ctx.getFloatTy()) {
         elemTy = S.Ctx.getFloatTy();

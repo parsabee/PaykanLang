@@ -79,6 +79,32 @@ fn concatAll(a: Str[]) -> Str {
   return result;
 }
 
+// matMul: multiply two NxM and MxP int matrices, return NxP result as int[][]
+fn matMul(A: int[][], B: int[][]) -> int[][] {
+  rows: int = A.len();
+  cols: int = B[0].len();
+  inner: int = B.len();
+  C: int[][] = [];
+  i: int = 0;
+  while (i < rows) {
+    row: int[] = [];
+    j: int = 0;
+    while (j < cols) {
+      sum: int = 0;
+      k: int = 0;
+      while (k < inner) {
+        sum = sum + A[i][k] * B[k][j];
+        k = k + 1;
+      }
+      row.push(sum);
+      j = j + 1;
+    }
+    C.push(row);
+    i = i + 1;
+  }
+  return C;
+}
+
 // ===========================================================================
 // main
 // ===========================================================================
@@ -224,6 +250,72 @@ fn main() -> int {
   ca.concat(cb);
   println(ca);                            // hello world
   println(StrInt(ca.len()));        // 11
+
+  // --- 21. Multidimensional arrays (int[][]) --------------------------------
+  println("=== 2D int array ===");
+  row0: int[] = [1, 2, 3];
+  row1: int[] = [4, 5, 6];
+  row2: int[] = [7, 8, 9];
+  matrix: int[][] = [row0, row1, row2];
+  println(StrInt(matrix.len()));        // 3
+  println(StrInt(matrix[0][0]));        // 1
+  println(StrInt(matrix[1][1]));        // 5
+  println(StrInt(matrix[2][2]));        // 9
+  println(StrInt(matrix[0][2]));        // 3
+  println(StrInt(matrix[2][0]));        // 7
+
+  // --- 22. Iterating a 2D array with nested while loops --------------------
+  println("=== 2D iteration ===");
+  r: int = 0;
+  while (r < matrix.len()) {
+    c: int = 0;
+    while (c < matrix[r].len()) {
+      println(StrInt(matrix[r][c]));
+      c = c + 1;
+    }
+    r = r + 1;
+  }
+  // 1 2 3 4 5 6 7 8 9
+
+  // --- 23. 2D array arithmetic ----------------------------------------------
+  println("=== 2D arithmetic ===");
+  println(StrInt(matrix[0][0] + matrix[1][1] + matrix[2][2]));  // 15  (diagonal)
+  println(StrInt(matrix[0][1] + matrix[1][0]));                  // 6   (2+4)
+
+  // --- 24. Array of Str arrays (Str[][]) ------------------------------------
+  println("=== 2D Str array ===");
+  s0: Str[] = ["a", "b", "c"];
+  s1: Str[] = ["d", "e", "f"];
+  grid: Str[][] = [s0, s1];
+  println(StrInt(grid.len()));          // 2
+  println(grid[0][0]);                    // a
+  println(grid[1][2]);                    // f
+
+  // --- 26. Matrix multiplication via matMul() --------------------------------
+  // A = [[1,2],[3,4]]   B = [[5,6],[7,8]]
+  // C = [[19,22],[43,50]]
+  println("=== mat mul ===");
+  ma0: int[] = [1, 2];
+  ma1: int[] = [3, 4];
+  MA: int[][] = [ma0, ma1];
+  mb0: int[] = [5, 6];
+  mb1: int[] = [7, 8];
+  MB: int[][] = [mb0, mb1];
+  C: int[][] = matMul(MA, MB);
+  println(StrInt(C[0][0]));   // 19
+  println(StrInt(C[0][1]));   // 22
+  println(StrInt(C[1][0]));   // 43
+  println(StrInt(C[1][1]));   // 50
+
+  // --- 27. 2D array of Point rows (Point[][]) --------------------------------
+  println("=== 2D Point array ===");
+  pr0: Point[] = [Point(0, 0), Point(1, 0)];
+  pr1: Point[] = [Point(0, 1), Point(1, 1)];
+  grid2: Point[][] = [pr0, pr1];
+  println(StrInt(grid2.len()));         // 2
+  println(grid2[0][0].toString());        // (0,0)
+  println(grid2[1][1].toString());        // (1,1)
+  println(StrInt(grid2[1][0].sum()));  // 1
 
   return 0;
 }

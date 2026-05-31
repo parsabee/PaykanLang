@@ -1,6 +1,0 @@
-fn main() -> int {
-  x: Str = "hello";
-  s: Str = x as Str;
-  println(s);
-  return 0;
-}

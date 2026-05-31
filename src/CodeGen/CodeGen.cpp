@@ -1363,18 +1363,19 @@ llvm::Value *CodeGen::ExprEmitter::emitArrayPush(ast::MethodCallExpr *node,
 
   if (node->getNumArguments() != 1) return nullptr;
   auto *argExpr = node->getArguments()[0];
-  llvm::Value *argVal = CG.emitExpr(argExpr);
-  if (!argVal) return nullptr;
 
   bool isObjElem = ast::isa<ast::ClassType>(elemTy) || ast::isa<ast::ArrayType>(elemTy);
   if (isObjElem) {
-    if (auto *sl = ast::dyn_cast<ast::StringLiteral>(argExpr))
-      argVal = CG.wrapStringLiteral(argVal, sl->getValue().size());
-    if (!CG.exprAlreadyShared(argExpr))
-      argVal = CG.emitSharedNew(argVal, kIRArgShared);
+    // Use emitAsShared so that existing owned variables are retained rather than
+    // double-wrapped (emitExpr on a ref-typed identifier unwraps to the raw pointer,
+    // and a subsequent emitSharedNew would create a second owner of the same object).
+    llvm::Value *argVal = CG.emitAsShared(argExpr);
+    if (!argVal) return nullptr;
     auto *fnTy = llvm::FunctionType::get(voidTy, {ptrTy, ptrTy}, false);
     CG.Builder.CreateCall(CG.declareFunction(kPaykanArrayPushObj, fnTy), {recv, argVal});
   } else {
+    llvm::Value *argVal = CG.emitExpr(argExpr);
+    if (!argVal) return nullptr;
     if (argVal->getType()->isDoubleTy())
       argVal = CG.Builder.CreateBitCast(argVal, i64Ty, kIRF64Bits);
     else if (argVal->getType()->isIntegerTy(1))
