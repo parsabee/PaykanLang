@@ -55,7 +55,7 @@ TEST(Arith, TypeMismatchAssign) {
 // ============================================================================
 
 TEST(Arith, UndeclaredVariable) {
-  auto r = semaCheck(wrapMain("out(x);"));
+  auto r = semaCheck(wrapMain("println(x);"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("undeclared"), std::string::npos);
 }
@@ -122,12 +122,12 @@ TEST(Arith, EqualityTypeMismatch) {
 TEST(Arith, OutAcceptsMultipleArgs) {
   auto r = semaCheck(wrapMain(R"(
     a: Str = "hello";
-    out(a, StringInt(42));
+    println(a, StrInt(42));
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
 TEST(Arith, OutAcceptsLiterals) {
-  auto r = semaCheck(wrapMain("out(\"hello\");"));
+  auto r = semaCheck(wrapMain("println(\"hello\");"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }

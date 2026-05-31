@@ -59,6 +59,7 @@ public:
     NK_ContinueStmt,
     NK_MemberAssignStmt,
     NK_MatchStmt,
+    NK_SubscriptAssignStmt,
 
     // Expressions
     NK_IntegerLiteral,
@@ -124,11 +125,11 @@ const T *cast(const ASTNode *n) {
 }
 
 template <ASTNodeType T>
-T *dyn_cast(ASTNode *n) { return isa<T>(n) ? cast<T>(n) : nullptr; }
+T *dyn_cast(ASTNode *n) { return n && isa<T>(n) ? cast<T>(n) : nullptr; }
 
 template <ASTNodeType T>
 const T *dyn_cast(const ASTNode *n) {
-  return isa<T>(n) ? cast<T>(n) : nullptr;
+  return n && isa<T>(n) ? cast<T>(n) : nullptr;
 }
 
 // Base for all declarations
@@ -147,7 +148,7 @@ public:
   Stmt(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_CompoundStmt && N->getKind() <= NK_MatchStmt;
+    return N->getKind() >= NK_CompoundStmt && N->getKind() <= NK_SubscriptAssignStmt;
   }
 };
 
@@ -432,6 +433,27 @@ public:
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_MemberAssignStmt;
+  }
+};
+
+// Index-assignment statement: array[index] = value
+class SubscriptAssignStmt : public Stmt {
+private:
+  Expr *Array;
+  Expr *Index;
+  Expr *Value;
+
+public:
+  SubscriptAssignStmt(SourceLocation loc, Expr *array, Expr *index, Expr *value)
+      : Stmt(NK_SubscriptAssignStmt, loc), Array(array), Index(index),
+        Value(value) {}
+
+  Expr *getArray() const { return Array; }
+  Expr *getIndex() const { return Index; }
+  Expr *getValue() const { return Value; }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_SubscriptAssignStmt;
   }
 };
 
@@ -805,6 +827,9 @@ class ClassType : public Type {
   // static function, not a virtual method, and has no vtable slot.
   MethodDecl *InitMethod = nullptr;
 
+  // When true, no user class may inherit from this type.
+  bool Final = false;
+
 public:
   ClassType(SourceLocation loc, const std::string &name,
             ClassType *superClass = nullptr)
@@ -823,6 +848,11 @@ public:
 
   const std::string &getName() const { return Name; }
   ClassType *getSuperClass() const { return SuperClass; }
+
+  /// Returns true if no user class may inherit from this type.
+  bool isFinal() const { return Final; }
+  /// Mark this type as non-inheritable.
+  void setFinal(bool v = true) { Final = v; }
 
   /// Set (or change) the superclass, inheriting its vtable and operator
   /// bitmasks. Used during ASTContext bootstrap to break the Obj/Str cycle.
@@ -1009,6 +1039,7 @@ public:
 // A non-empty literal's element type is inferred by Sema.
 class ArrayLiteralExpr : public Expr {
   std::vector<Expr *> Elements;
+  Type *ResolvedType = nullptr; // set by Sema (the full ArrayType)
 
 public:
   ArrayLiteralExpr(SourceLocation loc, std::vector<Expr *> elems)
@@ -1017,6 +1048,9 @@ public:
   const std::vector<Expr *> &getElements() const { return Elements; }
   size_t getNumElements() const { return Elements.size(); }
   bool isEmpty() const { return Elements.empty(); }
+
+  void setResolvedType(Type *ty) { ResolvedType = ty; }
+  Type *getResolvedType() const { return ResolvedType; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_ArrayLiteralExpr;
@@ -1043,6 +1077,13 @@ public:
     return N->getKind() == NK_SubscriptExpr;
   }
 };
+
+/// Returns true for any type whose values are heap-allocated and
+/// reference-counted at runtime: ClassType and ArrayType.
+/// Use this instead of spelling out the `||` condition everywhere.
+inline bool isRefType(const Type *ty) {
+  return ty && (isa<ClassType>(ty) || isa<ArrayType>(ty));
+}
 
 } // namespace ast
 } // namespace paykan

@@ -74,7 +74,7 @@ TEST(Func, BlockScopeIsolation) {
     {
       x: int = 1;
     }
-    out(StringInt(x));
+    println(StrInt(x));
   )"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("undeclared"), std::string::npos);

@@ -94,21 +94,21 @@ public:
   /// Emit a member-assignment statement (receiver.field = value).
   llvm::Value *visitMemberAssignStmt(ast::MemberAssignStmt *node);
 
-  /// Emit a member-access expression (receiver.field → value).
+  /// Emit a member-access expression (receiver.field -> value).
   llvm::Value *visitMemberAccessExpr(ast::MemberAccessExpr *node);
 
   // -------------------------------------------------------------------------
   // State
   // -------------------------------------------------------------------------
 
-  /// Maps ClassType* → LLVM named struct type.
+  /// Maps ClassType* -> LLVM named struct type.
   llvm::DenseMap<ast::ClassType *, llvm::StructType *> ClassStructTypes;
 
-  /// Maps ClassType* → emitted vtable global variable.
+  /// Maps ClassType* -> emitted vtable global variable.
   llvm::DenseMap<ast::ClassType *, llvm::GlobalVariable *> ClassVTableGlobals;
 
-  /// Maps imported ClassType* → the LLVM name qualifier used for its methods
-  /// (e.g. ClassType for 'Adder' imported as 'helper' → "helper").
+  /// Maps imported ClassType* -> the LLVM name qualifier used for its methods
+  /// (e.g. ClassType for 'Adder' imported as 'helper' -> "helper").
   /// Populated by CodeGen::processImports; used by findConcreteMethodFuncName.
   llvm::DenseMap<ast::ClassType *, std::string> ImportedClassQualifiers;
 

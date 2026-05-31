@@ -1,0 +1,6 @@
+// OK: any array type is assignable to Obj
+fn main() -> int {
+  a: Obj = [1, 2, 3];
+  b: Obj = ["hello", "world"];
+  return 0;
+}

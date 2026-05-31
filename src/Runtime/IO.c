@@ -16,23 +16,40 @@ static void print_objects(FILE *stream, int64_t argc, va_list ap) {
     PaykanObject *obj = va_arg(ap, PaykanObject *);
     if (!obj)
       continue;
-    PaykanString *s = obj->vtable->toString(obj);
+    PaykanShared *shared = obj->vtable->toString(obj);
+    PaykanString *s = (PaykanString *)PaykanShared_get(shared);
     if (s && s->data)
       fwrite(s->data, 1, (size_t)s->len, stream);
+    Paykan_release(shared);
   }
-  fputc('\n', stream);
 }
 
-void Paykan_out(int64_t argc, ...) {
+void Paykan_print(int64_t argc, ...) {
   va_list ap;
   va_start(ap, argc);
   print_objects(stdout, argc, ap);
   va_end(ap);
 }
 
-void Paykan_err(int64_t argc, ...) {
+void Paykan_println(int64_t argc, ...) {
+  va_list ap;
+  va_start(ap, argc);
+  print_objects(stdout, argc, ap);
+  va_end(ap);
+  fputc('\n', stdout);
+}
+
+void Paykan_printerr(int64_t argc, ...) {
   va_list ap;
   va_start(ap, argc);
   print_objects(stderr, argc, ap);
   va_end(ap);
+}
+
+void Paykan_printerrln(int64_t argc, ...) {
+  va_list ap;
+  va_start(ap, argc);
+  print_objects(stderr, argc, ap);
+  va_end(ap);
+  fputc('\n', stderr);
 }

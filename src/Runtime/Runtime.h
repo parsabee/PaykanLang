@@ -18,6 +18,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,6 +30,8 @@ extern "C" {
 
 typedef struct PaykanObject  PaykanObject;
 typedef struct PaykanString  PaykanString;
+typedef struct PaykanShared  PaykanShared;
+typedef struct PaykanArray   PaykanArray;
 
 // ============================================================================
 // Object
@@ -39,7 +42,7 @@ typedef struct PaykanString  PaykanString;
 
 typedef struct PaykanObjectVTable {
   void          (*destroy) (PaykanObject *self);
-  PaykanString *(*toString)(PaykanObject *self);
+  PaykanShared *(*toString)(PaykanObject *self);
   int64_t       (*equals)  (PaykanObject *self, PaykanObject *other);
 } PaykanObjectVTable;
 
@@ -52,7 +55,7 @@ PaykanObject *PaykanObject_new(void);
 
 // Default method implementations.
 void          PaykanObject_destroy(PaykanObject *self);
-PaykanString *PaykanObject_toString(PaykanObject *self);
+PaykanShared *PaykanObject_toString(PaykanObject *self);
 int64_t       PaykanObject_equals(PaykanObject *self, PaykanObject *other);
 
 // Global vtable instance.
@@ -71,11 +74,11 @@ extern PaykanObject PaykanObject_None;
 typedef struct PaykanStringVTable {
   // Inherited (Object-compatible prefix)
   void          (*destroy) (PaykanObject *self);
-  PaykanString *(*toString)(PaykanObject *self);
+  PaykanShared *(*toString)(PaykanObject *self);
   int64_t       (*equals)  (PaykanObject *self, PaykanObject *other);
   // String-specific
   int64_t        (*length)(PaykanObject *self);
-  PaykanObject  *(*concat)(PaykanObject *self, PaykanObject *other);
+  void          (*concat)  (PaykanObject *self, PaykanObject *other);
 } PaykanStringVTable;
 
 struct PaykanString {
@@ -92,13 +95,142 @@ PaykanString *PaykanString_from_bool(int64_t value);
 
 // Method implementations.
 void          PaykanString_destroy(PaykanObject *self);
-PaykanString *PaykanString_toString(PaykanObject *self);
+PaykanShared *PaykanString_toString(PaykanObject *self);
 int64_t       PaykanString_equals(PaykanObject *self, PaykanObject *other);
 int64_t       PaykanString_length(PaykanObject *self);
 PaykanObject *PaykanString_concat(PaykanObject *self, PaykanObject *other);
+void          PaykanString_concat_inplace(PaykanObject *self, PaykanObject *other);
+PaykanShared *PaykanString_at(PaykanObject *self, int64_t idx);
 
 // Global vtable instance.
 extern PaykanStringVTable PaykanString_vtable;
+
+// ============================================================================
+// File
+// ============================================================================
+//
+// Inherits Object.  Vtable layout matches PaykanObjectVTable exactly
+// (destroy / toString / equals); no File-specific slots yet.
+
+typedef struct PaykanFileVTable {
+  void          (*destroy) (PaykanObject *self);
+  PaykanShared *(*toString)(PaykanObject *self);
+  int64_t       (*equals)  (PaykanObject *self, PaykanObject *other);
+  // File-specific
+  void          (*write)   (PaykanObject *self, PaykanObject *str);
+  PaykanShared *(*readln)  (PaykanObject *self);
+} PaykanFileVTable;
+
+typedef struct PaykanFile {
+  PaykanObjectVTable *vtable; // points to PaykanFile_vtable
+  FILE               *handle; // underlying C file handle (NULL if closed)
+} PaykanFile;
+
+// Constructor / destructor.
+PaykanFile   *PaykanFile_new(void);
+
+/// Open a file at `path` with the given `mode` string (e.g. "r", "rw").
+/// Returns a PaykanShared* wrapping a PaykanFile on success, or a
+/// PaykanShared* wrapping PaykanObject_None on failure.
+PaykanFile   *PaykanFile_open   (PaykanObject *path, PaykanObject *mode);
+void          PaykanFile_destroy (PaykanObject *self);
+PaykanShared *PaykanFile_toString(PaykanObject *self);
+int64_t       PaykanFile_equals  (PaykanObject *self, PaykanObject *other);
+void          PaykanFile_write   (PaykanObject *self, PaykanObject *str);
+PaykanShared *PaykanFile_readln  (PaykanObject *self);
+
+// Global vtable instance.
+extern PaykanFileVTable PaykanFile_vtable;
+
+// ============================================================================
+// Array
+// ============================================================================
+//
+// Inherits Object.  The first three vtable slots match Object's layout;
+// additional slots follow for Array-specific methods.
+//
+// Every element slot is pointer-sized (8 bytes on all supported targets).
+// Primitive elements (int, float, bool) are stored unboxed as int64_t/double;
+// class-type elements store a PaykanShared* (retained by the array).
+
+typedef struct PaykanArray PaykanArray;
+
+typedef struct PaykanArrayVTable {
+  // Inherited (Object-compatible prefix)
+  void          (*destroy) (PaykanObject *self);
+  PaykanShared *(*toString)(PaykanObject *self);
+  int64_t       (*equals)  (PaykanObject *self, PaykanObject *other);
+  // Array-specific
+  int64_t       (*length)  (PaykanObject *self);
+} PaykanArrayVTable;
+
+struct PaykanArray {
+  PaykanObjectVTable *vtable; // PaykanArray_vtable (primitive) or PaykanArray_obj_vtable (object)
+  void               *data;  // heap-allocated element buffer (8 bytes/slot)
+  unsigned long       len;   // number of live elements
+  unsigned long       cap;   // allocated capacity (in elements)
+};
+
+// -- Constructors ------------------------------------------------------------
+
+/// Primitive array (int / float / bool): elements stored as raw 8-byte values.
+PaykanArray *PaykanArray_new(unsigned long len);
+PaykanArray *PaykanArray_new_from_data(unsigned long len, const void *data);
+
+/// Object array (class-type elements stored as PaykanShared*):
+/// set/destroy manage reference counts automatically.
+PaykanArray *PaykanArray_new_obj(unsigned long len);
+
+// -- Element access ----------------------------------------------------------
+
+/// Read an 8-byte slot as a void*.
+/// Caller reinterprets as int64_t, double, or PaykanShared* as appropriate.
+void *PaykanArray_get(PaykanArray *arr, unsigned long idx);
+
+/// Primitive set: plain 8-byte store, no reference counting.
+void PaykanArray_set(PaykanArray *arr, unsigned long idx, void *value);
+
+/// Object set: releases the old PaykanShared* in the slot and retains the new one.
+void PaykanArray_set_obj(PaykanArray *arr, unsigned long idx, PaykanShared *value);
+
+// -- Method implementations --------------------------------------------------
+void          PaykanArray_destroy    (PaykanObject *self);
+void          PaykanArray_destroy_obj(PaykanObject *self);
+PaykanShared *PaykanArray_toString   (PaykanObject *self);
+int64_t       PaykanArray_equals     (PaykanObject *self, PaykanObject *other);
+int64_t       PaykanArray_length     (PaykanObject *self);
+
+/// Append a primitive value to the array (reallocs the backing buffer).
+void PaykanArray_push(PaykanArray *arr, void *value);
+
+/// Append an object (PaykanShared*) to the array; retains the new element.
+void PaykanArray_push_obj(PaykanArray *arr, PaykanShared *value);
+
+/// Remove and return the last primitive element.  Aborts if array is empty.
+void *PaykanArray_pop(PaykanArray *arr);
+
+/// Remove and return the last object element (transferred ownership — caller
+/// is responsible for releasing the returned PaykanShared*).
+PaykanShared *PaykanArray_pop_obj(PaykanArray *arr);
+
+// -- VTable instances --------------------------------------------------------
+extern PaykanArrayVTable PaykanArray_vtable;     // for primitive-element arrays
+extern PaykanArrayVTable PaykanArray_obj_vtable; // for object-element arrays
+
+/// Read element at `idx` as a pointer-sized value.  Aborts on out-of-bounds.
+void *PaykanArray_get(PaykanArray *arr, unsigned long idx);
+
+/// Write element at `idx`.  Aborts on out-of-bounds.
+void PaykanArray_set(PaykanArray *arr, unsigned long idx, void *value);
+
+// Method implementations (also used directly by CodeGen).
+void          PaykanArray_destroy (PaykanObject *self);
+PaykanShared *PaykanArray_toString(PaykanObject *self);
+int64_t       PaykanArray_equals  (PaykanObject *self, PaykanObject *other);
+int64_t       PaykanArray_length  (PaykanObject *self);
+
+// Global vtable instance.
+extern PaykanArrayVTable PaykanArray_vtable;
 
 // ============================================================================
 // Shared — reference-counted wrapper around any PaykanObject
@@ -131,11 +263,17 @@ PaykanObject *PaykanShared_get(PaykanShared *shared);
 // I/O builtins
 // ============================================================================
 
+/// Print object arguments (via toString) to stdout, without a newline.
+void Paykan_print(int64_t argc, ...);
+
 /// Print object arguments (via toString) to stdout, followed by a newline.
-void Paykan_out(int64_t argc, ...);
+void Paykan_println(int64_t argc, ...);
+
+/// Print object arguments (via toString) to stderr, without a newline.
+void Paykan_printerr(int64_t argc, ...);
 
 /// Print object arguments (via toString) to stderr, followed by a newline.
-void Paykan_err(int64_t argc, ...);
+void Paykan_printerrln(int64_t argc, ...);
 
 #ifdef __cplusplus
 }

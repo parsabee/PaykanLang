@@ -77,7 +77,7 @@ Indexing reads/writes `a[i]` for `0 <= i < len(a)`.
 ## `len()`
 
 ```
-n:   int = len(a);       // T[]   → dynamic length
+n:   int = len(a);       // T[]   -> dynamic length
 ```
 
 For multi-dimensional fixed arrays, use `len(arr[k])` to query the `k`-th dimension

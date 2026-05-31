@@ -189,6 +189,17 @@ TEST(Class, CyclicInheritance) {
   EXPECT_FALSE(r.Ok);
 }
 
+TEST(Class, ExplicitObjSuperclassAllowed) {
+  auto r = semaCheck(withClasses("class A: Obj {}"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Class, InheritFromStrRejected) {
+  auto r = semaCheck(withClasses("class MyStr: Str {}"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("class is final"), std::string::npos);
+}
+
 TEST(Class, FieldShadowingSuperclass) {
   auto r = semaCheck(withClasses(R"(
     class Animal { name: Str; }

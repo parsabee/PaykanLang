@@ -1,0 +1,229 @@
+// 15_arrays.pkn — comprehensive codegen sample for arrays
+// Covers: int/float/bool primitive array literals, Str array literals,
+//         user-class array literals, subscript read (primitive + object),
+//         len() builtin, array as function parameter, array as return type,
+//         array.toString(), array.equals(), array element method call,
+//         nested len+subscript expressions,
+//         constant-literal optimization (PaykanArray_new_from_data),
+//         dynamic arrays (non-constant elements), empty array with annotation,
+//         array in while loop (manual iteration), multi-element str concat
+//         from subscript results, bool array elements, float array elements,
+//         array assigned to Obj (vtable toString ABI), Str.concat() via vtable.
+// Exercises: visitArrayLiteralExpr (primitive constant, primitive dynamic,
+//            object), visitSubscriptExpr (int, float, bool, Str, class),
+//            visitCallExpr len(), visitMethodCallExpr on array variable and
+//            on subscript result, InternedArrayData, InternedStrings,
+//            PaykanArray_new_from_data, PaykanArray_new_obj / set_obj / get,
+//            Scope::SharedVars for array variables, emitScopeCleanup,
+//            visitFuncDecl with array-typed params, visitReturnStmt with
+//            array return type.
+
+// ---- A simple class to put into arrays ------------------------------------
+
+class Point {
+  x: int;
+  y: int;
+
+  fn __init__(px: int, py: int) {
+    self.x = px;
+    self.y = py;
+  }
+  fn toString() -> Str {
+    return "(" + StrInt(self.x) + "," + StrInt(self.y) + ")";
+  }
+  fn sum() -> int {
+    return self.x + self.y;
+  }
+}
+
+class Labeled {
+  label: Str;
+  value: int;
+
+  fn __init__(l: Str, v: int) {
+    self.label = l;
+    self.value = v;
+  }
+  fn describe() -> Str {
+    return self.label + "=" + StrInt(self.value);
+  }
+}
+
+// ---- Helper functions -------------------------------------------------------
+
+fn sumArray(a: int[]) -> int {
+  total: int = 0;
+  i: int = 0;
+  while (i < a.len()) {
+    total = total + a[i];
+    i = i + 1;
+  }
+  return total;
+}
+
+fn firstStr(a: Str[]) -> Str {
+  return a[0];
+}
+
+fn makePoints() -> Point[] {
+  return [Point(1, 2), Point(3, 4), Point(5, 6)];
+}
+
+fn concatAll(a: Str[]) -> Str {
+  result: Str = "";
+  i: int = 0;
+  while (i < a.len()) {
+    result = result + a[i];
+    i = i + 1;
+  }
+  return result;
+}
+
+// ===========================================================================
+// main
+// ===========================================================================
+
+fn main() -> int {
+
+  // --- 1. Int array literal (constant -> PaykanArray_new_from_data) ----------
+  println("=== int array ===");
+  nums: int[] = [10, 20, 30, 40, 50];
+  println(StrInt(nums.len()));          // 5
+  println(StrInt(nums[0]));            // 10
+  println(StrInt(nums[2]));            // 30
+  println(StrInt(nums[4]));            // 50
+
+  // --- 2. Float array literal -----------------------------------------------
+  println("=== float array ===");
+  fs: float[] = [1.5, 2.5, 3.5];
+  println(StrInt(fs.len()));            // 3
+  println(StrFloat(fs[1]));            // 2.5
+
+  // --- 3. Bool array literal ------------------------------------------------
+  println("=== bool array ===");
+  bs: bool[] = [1 == 1, 1 == 0, 1 == 1, 1 == 1];
+  println(StrInt(bs.len()));            // 4
+  println(StrBool(bs[0]));             // True
+  println(StrBool(bs[1]));             // False
+  println(StrBool(bs[3]));             // True
+
+  // --- 4. Str array literal (object array) ----------------------------------
+  println("=== str array ===");
+  words: Str[] = ["hello", "world", "paykan"];
+  println(StrInt(words.len()));         // 3
+  println(words[0]);                      // hello
+  println(words[1]);                      // world
+  println(words[2]);                      // paykan
+
+  // --- 5. Method call on Str array element ----------------------------------
+  println("=== str element method ===");
+  strs: Str[] = ["foo", "bar", "baz"];
+  println(strs[0].toString());            // foo
+  println(StrInt(strs[1].len()));    // 3
+  println(StrInt(strs[2].len()));   // 3
+
+  // --- 6. User-class array --------------------------------------------------
+  println("=== Point array ===");
+  pts: Point[] = [Point(0, 0), Point(3, 4), Point(6, 8)];
+  println(StrInt(pts.len()));           // 3
+  println(pts[0].toString());             // (0,0)
+  println(pts[1].toString());             // (3,4)
+  println(pts[2].toString());             // (6,8)
+
+  // --- 7. Method call on class array element --------------------------------
+  println("=== Point element method ===");
+  println(StrInt(pts[1].sum()));       // 7
+  println(StrInt(pts[2].sum()));       // 14
+
+  // --- 8. len() builtin -----------------------------------------------------
+  println("=== len ===");
+  a1: int[] = [1, 2, 3];
+  a2: int[] = [1, 2, 3, 4, 5, 6, 7];
+  println(StrInt(a1.len()));            // 3
+  println(StrInt(a2.len()));            // 7
+
+  // --- 9. Array as function parameter ---------------------------------------
+  println("=== array param ===");
+  data: int[] = [1, 2, 3, 4, 5];
+  println(StrInt(sumArray(data)));     // 15
+
+  arr2: int[] = [10, 20, 30];
+  println(StrInt(sumArray(arr2)));     // 60
+
+  // --- 10. Array as function return value -----------------------------------
+  println("=== array return ===");
+  returned: Point[] = makePoints();
+  println(StrInt(returned.len()));      // 3
+  println(returned[0].toString());        // (1,2)
+  println(returned[2].toString());        // (5,6)
+
+  // --- 11. Str array helpers ------------------------------------------------
+  println("=== str array helpers ===");
+  greetings: Str[] = ["hi", "hey", "hello"];
+  println(firstStr(greetings));           // hi
+  println(concatAll(greetings));          // hiheyhello
+
+  // --- 12. Dynamic int array (non-constant elements via variables) ----------
+  println("=== dynamic int array ===");
+  base: int = 5;
+  dynamic: int[] = [base, base + 1, base + 2, base + 3];
+  println(StrInt(dynamic.len()));       // 4
+  println(StrInt(dynamic[0]));         // 5
+  println(StrInt(dynamic[3]));         // 8
+
+  // --- 13. Empty array with annotation --------------------------------------
+  println("=== empty array ===");
+  empty: int[] = [];
+  println(StrInt(empty.len()));         // 0
+
+  // --- 14. Array.toString() -------------------------------------------------
+  println("=== array toString ===");
+  t: int[] = [1, 2, 3];
+  println(t.toString());                  // Array@0x...[len=3]
+
+  // --- 15. Array.equals() — identity equality: two distinct arrays are never equal
+  println("=== array equals ===");
+  e1: int[] = [7, 8, 9];
+  e2: int[] = [7, 8, 9];
+  println(StrBool(e1.equals(e2)));     // False (different objects)
+  println(StrBool(e1.equals(e1)));     // True  (same object)
+
+  // --- 16. Labeled class array with describe() calls -----------------------
+  println("=== Labeled array ===");
+  labels: Labeled[] = [Labeled("x", 10), Labeled("y", 20), Labeled("z", 30)];
+  i: int = 0;
+  while (i < labels.len()) {
+    println(labels[i].describe());
+    i = i + 1;
+  }
+  // x=10, y=20, z=30
+
+  // --- 17. Array subscript in expressions -----------------------------------
+  println("=== subscript in expressions ===");
+  ns: int[] = [3, 7, 2, 8, 1];
+  println(StrInt(ns[0] + ns[1]));      // 10
+  println(StrInt(ns[3] - ns[2]));      // 6
+  println(StrBool(ns[4] < ns[0]));     // True
+
+  // --- 18. Interning: identical constant arrays share one global ------------
+  println("=== interned arrays ===");
+  ia1: int[] = [100, 200, 300];
+  ia2: int[] = [100, 200, 300];
+  println(StrInt(ia1[0] + ia2[0]));    // 200
+  println(StrInt(ia1.len() + ia2.len())); // 6
+
+  // --- 19. Array assigned to Obj — toString() dispatches via Object vtable ----
+  println("=== array as Obj ===");
+  arrObj: Obj = [1, 2, 3];
+  println(arrObj.toString());                  // Array@0x...[len=3]
+
+  // --- 20. Str.concat() via vtable (in-place mutation) ---
+  println("=== str concat vtable ===");
+  ca: Str = "hello";
+  cb: Str = " world";
+  ca.concat(cb);
+  println(ca);                            // hello world
+  println(StrInt(ca.len()));        // 11
+
+  return 0;
+}

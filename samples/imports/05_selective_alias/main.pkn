@@ -1,7 +1,7 @@
 // OK: selective import with per-module aliases — import path::{a as x, b as y, c};
-//   "add" → aliased as "plus"
-//   "mul" → aliased as "times"
-//   "sub" → bare (no alias), qualifier = "sub"
+//   "add" -> aliased as "plus"
+//   "mul" -> aliased as "times"
+//   "sub" -> bare (no alias), qualifier = "sub"
 import ops::{add as plus, mul as times, sub};
 
 fn main() -> int {

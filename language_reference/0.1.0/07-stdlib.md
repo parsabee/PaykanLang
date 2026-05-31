@@ -218,9 +218,9 @@ Floating-point math functions and constants. All functions operate on `float`; c
 | `math::sin(x)` | fn | Sine (radians) |
 | `math::cos(x)` | fn | Cosine (radians) |
 | `math::tan(x)` | fn | Tangent (radians) |
-| `math::asin(x)` | fn | Arc-sine → radians |
-| `math::acos(x)` | fn | Arc-cosine → radians |
-| `math::atan(x)` | fn | Arc-tangent → radians |
+| `math::asin(x)` | fn | Arc-sine -> radians |
+| `math::acos(x)` | fn | Arc-cosine -> radians |
+| `math::atan(x)` | fn | Arc-tangent -> radians |
 | `math::atan2(y, x)` | fn | Two-argument arc-tangent |
 
 ### Constants

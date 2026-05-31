@@ -356,6 +356,16 @@ void ASTPrinter::visitArrayLiteralExpr(ArrayLiteralExpr *node) {
   }
 }
 
+void ASTPrinter::visitSubscriptAssignStmt(SubscriptAssignStmt *node) {
+  printIndent();
+  OS << "SubscriptAssignStmt";
+  printLoc(node);
+  OS << "\n";
+  { ChildScope cs(*this, false); visit(node->getArray()); }
+  { ChildScope cs(*this, false); visit(node->getIndex()); }
+  { ChildScope cs(*this, true);  visit(node->getValue()); }
+}
+
 void ASTPrinter::visitSubscriptExpr(SubscriptExpr *node) {
   printIndent();
   OS << "SubscriptExpr";

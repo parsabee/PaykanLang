@@ -1,0 +1,10 @@
+// ERROR: binding declared inside a match arm is not visible outside it
+fn main() -> int {
+  x: Obj = [1, 2, 3];
+  match x {
+    arr: int[] { }
+    _ { }
+  }
+  n: int = len(arr);  // sema error: use of undeclared variable 'arr'
+  return 0;
+}

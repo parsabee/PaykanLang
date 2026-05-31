@@ -37,6 +37,7 @@ add_executable(sema_tests
     Sema/ControlFlowTests.cpp
     Sema/ClassTests.cpp
     Sema/ModuleTests.cpp
+    Sema/ArrayTests.cpp
 )
 target_include_directories(sema_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -78,3 +79,22 @@ target_link_libraries(codegen_tests
             ${TEST_LLVM_LIBS}
 )
 add_test(NAME CodeGenTests COMMAND codegen_tests)
+
+# --- Runtime tests ----------------------------------------------------------
+add_executable(runtime_tests
+    Runtime/ArrayTests.cpp
+    Runtime/ObjectTests.cpp
+    Runtime/StringTests.cpp
+    Runtime/SharedTests.cpp
+    Runtime/FileTests.cpp
+)
+target_include_directories(runtime_tests
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_SOURCE_DIR}/src/Runtime
+)
+target_link_libraries(runtime_tests
+    PRIVATE gtest_main
+            paykan_runtime
+            paykan_compile_options
+)
+add_test(NAME RuntimeTests COMMAND runtime_tests)

@@ -1,0 +1,6 @@
+// ERROR: Str is a built-in non-inheritable class
+class MyStr: Str {}  // sema error: built-in class is not inheritable
+
+fn main() -> int {
+  return 0;
+}

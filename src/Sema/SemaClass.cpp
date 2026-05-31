@@ -68,9 +68,11 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
       } else {
         // Imported base class: must be referenced by its full module path
         // (e.g. "tmp_import::helper::Adder"), not a bare name or short
-        // qualifier.  A name with no "::" can only be a local class.
+        // qualifier.  A name with no "::" can only be a local class — unless
+        // it is a built-in class type (Obj, Str) which lives in ASTContext.
         bool hasQualifier = superName.find("::") != std::string::npos;
-        if (!hasQualifier || !Ctx.lookupClassType(superName)) {
+        if (!Ctx.lookupClassType(superName) &&
+            (!hasQualifier || !Ctx.lookupClassType(superName))) {
           error(cd->getLocation(),
                 "superclass '" + superName +
                     "' of class '" + cd->getName() + "' is not defined");
@@ -95,8 +97,19 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
   // -------------------------------------------------------------------------
   for (auto *cd : sorted) {
     ast::ClassType *superClass = nullptr;
-    if (cd->hasSuperClass())
+    if (cd->hasSuperClass()) {
       superClass = Ctx.lookupClassType(cd->getSuperClassName());
+      // Non-inheritable (final) classes cannot be subclassed.
+      // Currently this covers built-in types like Str; it will also apply
+      // to user-defined `final` classes once that keyword is added.
+      if (superClass && superClass->isFinal()) {
+        error(cd->getLocation(),
+              "cannot inherit from '" + cd->getSuperClassName() +
+                  "': class is final");
+        ok = false;
+        superClass = nullptr; // fall back to Obj so analysis can continue
+      }
+    }
     if (!superClass)
       superClass = Ctx.getObjTy();
     Ctx.preRegisterClassType(cd->getName(), superClass);

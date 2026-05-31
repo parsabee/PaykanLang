@@ -1,0 +1,16 @@
+// OK: class array — element type is a user-defined class
+class Point {
+  x: int;
+  y: int;
+
+  fn __init__(px: int, py: int) {
+    self.x = px;
+    self.y = py;
+  }
+}
+
+fn main() -> int {
+  pts: Point[] = [Point(1, 2), Point(3, 4)];
+  n: int = len(pts);
+  return 0;
+}

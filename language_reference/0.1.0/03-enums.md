@@ -189,8 +189,8 @@ if (o == Op::Add) { ... }
 
 | Direction | Allowed | Notes |
 |---|---|---|
-| enum → `int` | Yes | Yields the ordinal |
-| `int` → enum | No | Would allow invalid tags; use a function with a `match` if you really need this |
+| enum -> `int` | Yes | Yields the ordinal |
+| `int` -> enum | No | Would allow invalid tags; use a function with a `match` if you really need this |
 
 ---
 
@@ -207,7 +207,7 @@ if (o == Op::Add) { ... }
 | `_` on exhaustive `bool` match | `bool` scrutinee with both `True` and `False` arms plus a `_` arm |
 | Non-literal arm on builtin match | An expression or binding used as a pattern for an `int` / `float` / `bool` / `Str` scrutinee |
 | Type mismatch in builtin arm | Arm literal's type differs from the scrutinee's type (e.g. `0.0` arm on an `int` match) |
-| Cast `int → enum` | Not allowed |
+| Cast `int -> enum` | Not allowed |
 
 ---
 

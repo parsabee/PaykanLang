@@ -1,0 +1,7 @@
+// OK: subscript with a variable index
+fn main() -> int {
+  a: float[] = [1.0, 2.0, 3.0];
+  i: int = 1;
+  x: float = a[i];
+  return 0;
+}

@@ -43,78 +43,78 @@ fn main() -> int {
   // --- Test 1: basic no-binding dispatch ---
   a: Animal = Dog();
   match a {
-    Dog  { out("test1: Dog"); }
-    Cat  { out("test1: Cat"); }
-    Bird { out("test1: Bird"); }
-    _    { out("test1: other"); }
+    Dog  { println("test1: Dog"); }
+    Cat  { println("test1: Cat"); }
+    Bird { println("test1: Bird"); }
+    _    { println("test1: other"); }
   }
 
   // --- Test 2: wildcard only ---
   b: Animal = Cat();
   match b {
-    _ { out("test2: wildcard"); }
+    _ { println("test2: wildcard"); }
   }
 
   // --- Test 3: binding + field access ---
   d: Animal = Labrador();
   match d {
-    lab: Labrador { out(lab.name); }
-    Dog           { out("test3: plain dog"); }
-    _             { out("test3: other"); }
+    lab: Labrador { println(lab.name); }
+    Dog           { println("test3: plain dog"); }
+    _             { println("test3: other"); }
   }
 
   // --- Test 4: binding + method call ---
   match d {
-    dog: Dog { out(dog.speak()); }
-    _        { out("test4: other"); }
+    dog: Dog { println(dog.speak()); }
+    _        { println("test4: other"); }
   }
 
   // --- Test 5: Cat subject ---
   c: Animal = Cat();
   match c {
-    Dog { out("test5: dog"); }
-    Cat { out("test5: Cat"); }
-    _   { out("test5: other"); }
+    Dog { println("test5: dog"); }
+    Cat { println("test5: Cat"); }
+    _   { println("test5: other"); }
   }
 
   // --- Test 6: match inside a helper function ---
-  out(describeAnimal(Dog()));
-  out(describeAnimal(Bird()));
-  out(describeAnimal(Cat()));
+  println(describeAnimal(Dog()));
+  println(describeAnimal(Bird()));
+  println(describeAnimal(Cat()));
 
   // --- Test 7: Labrador does NOT match Dog arm (exact-type comparison) ---
   e: Animal = Labrador();
   match e {
-    Cat      { out("test7: cat"); }
-    Dog      { out("test7: Dog"); }
-    Labrador { out("test7: Labrador"); }
-    _        { out("test7: other"); }
+    Cat      { println("test7: cat"); }
+    Dog      { println("test7: Dog"); }
+    Labrador { println("test7: Labrador"); }
+    _        { println("test7: other"); }
   }
 
   // --- Test 8: no match -> wildcard ---
   f: Animal = Bird();
   match f {
-    Dog { out("test8: dog"); }
-    Cat { out("test8: cat"); }
-    _   { out("test8: wildcard Bird"); }
+    Dog { println("test8: dog"); }
+    Cat { println("test8: cat"); }
+    _   { println("test8: wildcard Bird"); }
   }
 
   // --- Test 9: Labrador-specific arm with binding ---
   g: Animal = Labrador();
   match g {
-    lab: Labrador { out("test9: Labrador, name=" + lab.name); }
-    Dog           { out("test9: plain Dog"); }
-    _             { out("test9: other"); }
+    lab: Labrador { println("test9: Labrador, name=" + lab.name); }
+    Dog           { println("test9: plain Dog"); }
+    _             { println("test9: other"); }
   }
 
   // --- Test 10: exhaustive arms ---
   h: Animal = Cat();
   match h {
-    Dog      { out("test10: dog"); }
-    Cat      { out("test10: Cat"); }
-    Bird     { out("test10: bird"); }
-    Labrador { out("test10: labrador"); }
-    _        { out("test10: other"); }
+    Dog      { println("test10: dog"); }
+    Cat      { println("test10: Cat"); }
+    Bird     { println("test10: bird"); }
+    Labrador { println("test10: labrador"); }
+    _        { println("test10: other"); }
   }
 
   return 0;

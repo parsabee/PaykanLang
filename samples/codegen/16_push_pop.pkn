@@ -1,0 +1,36 @@
+// 16_push_pop.pkn — push / pop on typed arrays
+fn main() -> int {
+    // === int array ===
+    a: int[] = [];
+    a.push(10);
+    a.push(20);
+    a.push(30);
+    println(StrInt(a.len()));   // 3
+    v = a.pop();
+    println(StrInt(v));         // 30
+    println(StrInt(a.len()));   // 2
+
+    // === float array ===
+    fs: float[] = [];
+    fs.push(1.5);
+    fs.push(2.5);
+    println(StrInt(fs.len()));  // 2
+    f = fs.pop();
+    println(StrFloat(f));       // 2.500000
+    println(StrInt(fs.len()));  // 1
+
+    // === push onto non-empty literal ===
+    nums: int[] = [1, 2, 3];
+    nums.push(4);
+    println(StrInt(nums.len())); // 4
+    println(StrInt(nums[3]));    // 4
+
+
+    objs: Obj[] = [];
+    objs.push("HelloWorld");
+    objs.push(None);
+    println(objs[0].toString());
+
+    return 0;
+}
+

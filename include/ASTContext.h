@@ -28,13 +28,23 @@ class ASTContext {
   // Canonical class types.
   ClassType *ObjTy;
   ClassType *StrTy;
+  // Canonical array type (ClassType with vtable matching PaykanArrayVTable).
+  ClassType *ArrayTy;
+  // Canonical file type (ClassType inheriting Obj).
+  ClassType *FileTy;
 
   // Registry of all class types, keyed by name.
   std::unordered_map<std::string, ClassType *> ClassTypes;
 
+  // Per-element specialized array ClassTypes (lazily created).
+  // Key: element Type* pointer (canonical within this ASTContext).
+  std::unordered_map<Type *, ClassType *> SpecializedArrayTypes;
+
   // -- Bootstrap helpers (called from the constructor) ----------------------
   void buildObjectType();
   void buildStringType();
+  void buildArrayType();
+  void buildFileType();
 
 public:
   ASTContext();
@@ -96,13 +106,20 @@ public:
   BuiltinType *getVoidTy()  const { return VoidTy; }
 
   // Canonical class type accessors.
-  ClassType *getObjTy() const { return ObjTy; }
-  ClassType *getStrTy() const { return StrTy; }
+  ClassType *getObjTy()   const { return ObjTy; }
+  ClassType *getStrTy()   const { return StrTy; }
+  ClassType *getArrayTy() const { return ArrayTy; }
+  ClassType *getFileTy()  const { return FileTy; }
+
+  /// Return (creating if needed) the specialized ClassType for arrays whose
+  /// elements have type @p elemTy.  The returned type is a subtype of ArrayTy
+  /// and carries push(elemTy)->void and pop()->elemTy method declarations.
+  ClassType *getOrCreateSpecializedArrayType(Type *elemTy);
 
   /// Return the canonical BuiltinType* for a given Kind.
   BuiltinType *getBuiltinType(BuiltinType::Kind k) const;
 
-  /// Register a class type in the name → type registry.
+  /// Register a class type in the name -> type registry.
   void registerClassType(ClassType *ct);
 
   /// Pre-register a ClassType stub (name + superclass; no fields/methods yet).
@@ -116,7 +133,7 @@ public:
   ClassType *lookupClassType(const std::string &name) const;
 
   /// Register an additional name that resolves to an already-registered
-  /// ClassType (e.g. a qualified alias like "module::Foo" → Foo's ClassType).
+  /// ClassType (e.g. a qualified alias like "module::Foo" -> Foo's ClassType).
   /// Has no effect if the alias is already present.
   void addClassTypeAlias(const std::string &alias, ClassType *ct);
 

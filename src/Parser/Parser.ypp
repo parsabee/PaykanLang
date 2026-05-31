@@ -263,8 +263,10 @@ statement: ";"                      { $$ = nullptr; }
                                         $$ = impl(drv).Ctx.make<AssignStmt>(loc(@1, @4), lhs->getName(), $3);
                                       } else if (auto *ma = dyn_cast<MemberAccessExpr>($1)) {
                                         $$ = impl(drv).Ctx.make<MemberAssignStmt>(loc(@1, @4), ma->getReceiver(), ma->getFieldName(), $3);
+                                      } else if (auto *se = dyn_cast<SubscriptExpr>($1)) {
+                                        $$ = impl(drv).Ctx.make<SubscriptAssignStmt>(loc(@1, @4), se->getArray(), se->getIndex(), $3);
                                       } else {
-                                        throw yy::parser::syntax_error(@1, "left-hand side of '=' must be an identifier or field access");
+                                        throw yy::parser::syntax_error(@1, "left-hand side of '=' must be an identifier, field access, or subscript");
                                       }
                                     }
     | staticAssignment ";"          { $$ = $1; }

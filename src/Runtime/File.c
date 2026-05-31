@@ -1,0 +1,122 @@
+// Copyright (c) 2026 Parsa Bagheri
+// SPDX-License-Identifier: MIT
+//
+// Paykan runtime — File type implementation.
+//
+// File is a builtin class that inherits Obj.  Its vtable mirrors
+// PaykanObjectVTable (destroy / toString / equals); no File-specific
+// methods exist yet.
+
+#include "Runtime.h"
+
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+// ============================================================================
+// Forward declarations
+// ============================================================================
+
+void          PaykanFile_destroy (PaykanObject *self);
+PaykanShared *PaykanFile_toString(PaykanObject *self);
+int64_t       PaykanFile_equals  (PaykanObject *self, PaykanObject *other);
+void          PaykanFile_write   (PaykanObject *self, PaykanObject *str);
+PaykanShared *PaykanFile_readln  (PaykanObject *self);
+PaykanFile   *PaykanFile_open    (PaykanObject *path, PaykanObject *mode);
+
+// ============================================================================
+// VTable
+// ============================================================================
+
+PaykanFileVTable PaykanFile_vtable = {
+    .destroy  = PaykanFile_destroy,
+    .toString = PaykanFile_toString,
+    .equals   = PaykanFile_equals,
+    .write    = PaykanFile_write,
+    .readln   = PaykanFile_readln,
+};
+
+// ============================================================================
+// Constructor
+// ============================================================================
+
+PaykanFile *PaykanFile_new(void) {
+  PaykanFile *f = (PaykanFile *)malloc(sizeof(PaykanFile));
+  f->vtable = (PaykanObjectVTable *)&PaykanFile_vtable;
+  f->handle = NULL;
+  return f;
+}
+
+// ============================================================================
+// Method implementations
+// ============================================================================
+
+PaykanFile *PaykanFile_open(PaykanObject *pathObj, PaykanObject *modeObj) {
+  PaykanString *path = (PaykanString *)pathObj;
+  PaykanString *mode = (PaykanString *)modeObj;
+  PaykanFile *f = PaykanFile_new();
+  FILE *handle = fopen(path->data, mode->data);
+  if (!handle) {
+    fprintf(stderr, "paykan: open(\"%s\", \"%s\"): %s\n",
+            path->data, mode->data, strerror(errno));
+    /* f->handle stays NULL — all methods guard against this */
+  } else {
+    f->handle = handle;
+  }
+  return f;
+}
+
+void PaykanFile_destroy(PaykanObject *self) {
+  PaykanFile *f = (PaykanFile *)self;
+  if (f->handle)
+    fclose(f->handle);
+  free(f);
+}
+
+PaykanShared *PaykanFile_toString(PaykanObject *self) {
+  char buf[32];
+  int n = snprintf(buf, sizeof(buf), "File@%p", (void *)self);
+  return PaykanShared_new((PaykanObject *)PaykanString_new(buf, n));
+}
+
+int64_t PaykanFile_equals(PaykanObject *self, PaykanObject *other) {
+  return self == other;
+}
+
+void PaykanFile_write(PaykanObject *self, PaykanObject *strObj) {
+  PaykanFile   *f   = (PaykanFile *)self;
+  PaykanString *str = (PaykanString *)strObj;
+  if (!f->handle) {
+    fprintf(stderr, "paykan: write on closed File\n");
+    return;
+  }
+  fwrite(str->data, 1, (size_t)str->len, f->handle);
+}
+
+PaykanShared *PaykanFile_readln(PaykanObject *self) {
+  PaykanFile *f = (PaykanFile *)self;
+  if (!f->handle) {
+    fprintf(stderr, "paykan: readln on closed File\n");
+    return PaykanShared_new((PaykanObject *)PaykanString_new("", 0));
+  }
+  // Read one line (including the trailing '\n' if present).
+  size_t cap  = 128;
+  size_t used = 0;
+  char  *buf  = (char *)malloc(cap);
+  int    c;
+  while ((c = fgetc(f->handle)) != EOF) {
+    if (used + 1 >= cap) {
+      cap *= 2;
+      buf  = (char *)realloc(buf, cap);
+    }
+    buf[used++] = (char)c;
+    if (c == '\n')
+      break;
+  }
+  buf[used] = '\0';
+  PaykanShared *result =
+      PaykanShared_new((PaykanObject *)PaykanString_new(buf, (int64_t)used));
+  free(buf);
+  return result;
+}

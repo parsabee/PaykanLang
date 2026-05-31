@@ -11,7 +11,7 @@ fn main() -> int {
   x: Obj = Dog("Rex");
   match x {
     d: Dog {
-      out(d.name);
+      println(d.name);
     }
     _ { }
   }

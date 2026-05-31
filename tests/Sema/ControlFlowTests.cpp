@@ -18,7 +18,7 @@ static std::string wrapMain(const std::string &body) {
 TEST(ControlFlow, IfBoolCondition) {
   auto r = semaCheck(wrapMain(R"(
     x: int = 10;
-    if (x > 5) { out("big"); }
+    if (x > 5) { println("big"); }
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -26,7 +26,7 @@ TEST(ControlFlow, IfBoolCondition) {
 TEST(ControlFlow, IfElse) {
   auto r = semaCheck(wrapMain(R"(
     x: int = 10;
-    if (x > 5) { out("big"); } else { out("small"); }
+    if (x > 5) { println("big"); } else { println("small"); }
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -34,7 +34,7 @@ TEST(ControlFlow, IfElse) {
 TEST(ControlFlow, IfNonBoolConditionRejected) {
   auto r = semaCheck(wrapMain(R"(
     x: int = 10;
-    if (x) { out("nope"); }
+    if (x) { println("nope"); }
   )"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("bool"), std::string::npos);
@@ -43,9 +43,9 @@ TEST(ControlFlow, IfNonBoolConditionRejected) {
 TEST(ControlFlow, IfElseIfChain) {
   auto r = semaCheck(wrapMain(R"(
     x: int = 42;
-    if (x > 100) { out("large"); }
-    else if (x > 10) { out("medium"); }
-    else { out("small"); }
+    if (x > 100) { println("large"); }
+    else if (x > 10) { println("medium"); }
+    else { println("small"); }
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -53,7 +53,7 @@ TEST(ControlFlow, IfElseIfChain) {
 TEST(ControlFlow, IfStringConditionRejected) {
   auto r = semaCheck(wrapMain(R"(
     x: int = 1;
-    if (x) { out("nope"); }
+    if (x) { println("nope"); }
   )"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("bool"), std::string::npos);
@@ -141,7 +141,7 @@ TEST(ControlFlow, LogicalInIfCondition) {
   auto r = semaCheck(wrapMain(R"(
     x: int = 5;
     y: int = 10;
-    if (x > 0 && y > 0) { out("both positive"); }
+    if (x > 0 && y > 0) { println("both positive"); }
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }

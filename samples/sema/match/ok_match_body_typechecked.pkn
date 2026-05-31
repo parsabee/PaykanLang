@@ -10,7 +10,7 @@ fn main() -> int {
   match x {
     d: Dog {
       sound: Str = d.bark();
-      out(sound);
+      println(sound);
     }
     _ { }
   }

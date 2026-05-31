@@ -1,0 +1,7 @@
+// ERROR: subscript result type mismatch — element is int, assigned to float var? No.
+// Element type is int but caller expects Str.
+fn main() -> int {
+  a: int[] = [1, 2, 3];
+  s: Str = a[0];  // sema error: initializer type 'int' does not match declared type 'Str'
+  return 0;
+}

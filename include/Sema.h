@@ -13,7 +13,6 @@
 #include <string>
 #include <vector>
 #include <memory>
-#include <functional>
 
 namespace paykan {
 namespace parser { class ParserDriver; }
@@ -123,10 +122,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   /// Describes a known function's type signature.
   struct FunctionSig {
-    ast::Type *ReturnType;
+    ast::Type *ReturnType = nullptr;
     std::vector<ast::Type *> ParamTypes;
-    bool IsVariadic = false;
-    bool IsBuiltin = false;
+    bool IsVariadic  = false;
+    bool IsBuiltin   = false;
   };
 
   /// Maps function names to their signatures.
@@ -161,13 +160,14 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   void error(ast::SourceLocation loc, const std::string &msg);
   void warning(ast::SourceLocation loc, const std::string &msg);
 
-  static const char *typeName(ast::Type *ty);
+  static std::string typeName(ast::Type *ty);
 
   // Returns true if the type is a numeric builtin (int or float).
   static bool isNumeric(ast::Type *ty);
 
+
   // Returns true if a value of type `src` can be assigned to a location of
-  // type `dst`.  This includes exact match, int→float promotion, and
+  // type `dst`.  This includes exact match, int->float promotion, and
   // ClassType subtyping. When `srcExpr` is provided, expression-form checks
   // (such as '&' argument usage) are also enforced.
   bool isAssignable(ast::Type *dst, ast::Type *src) const;
@@ -178,8 +178,8 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
                                                   ast::ClassType *b);
 
   // Resolve a declared AST Type* to its canonical equivalent from
-  // ASTContext (e.g. a BuiltinType(Int) node → Ctx.getIntTy(), a
-  // ClassType("Str") → Ctx.getStrTy()).  Returns nullptr and
+  // ASTContext (e.g. a BuiltinType(Int) node -> Ctx.getIntTy(), a
+  // ClassType("Str") -> Ctx.getStrTy()).  Returns nullptr and
   // emits an error on failure.
   ast::Type *resolveType(ast::Type *ty, ast::SourceLocation loc,
                          const std::string &context);
@@ -246,7 +246,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     // any importing ASTContext without holding raw pointers into a foreign arena.
     struct ClassInfo {
       std::string Name;
-      std::string SuperClassName; // "" → implicit Object root
+      std::string SuperClassName; // "" -> implicit Object root
       struct FieldInfo  { std::string FieldName; std::string TypeName; };
       struct MethodInfo {
         std::string Name;

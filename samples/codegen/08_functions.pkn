@@ -38,10 +38,10 @@ fn average(a: float, b: float) -> float { return (a + b) / 2.0; }
 // ---- Void functions --------------------------------------------------------
 
 fn printInt(label: Str, n: int) {
-  out(label, StringInt(n));
+  println(label, StrInt(n));
 }
 fn printBool(label: Str, b: bool) {
-  out(label, StringBool(b));
+  println(label, StrBool(b));
 }
 
 // ---- Str-returning functions (exercises shared-box return path) -----------
@@ -102,14 +102,14 @@ fn classify(n: int) -> Str {
 // ---- main -----------------------------------------------------------------
 
 fn main() -> int {
-  out("=== basic int ops ===");
+  println("=== basic int ops ===");
   printInt("add 3+4=",  add(3, 4));        // 7
   printInt("sub 10-6=", sub(10, 6));       // 4
   printInt("mul 6*7=",  mul(6, 7));        // 42
   printInt("div 15/4=", div(15, 4));       // 3
   printInt("mod 17%5=", mod(17, 5));       // 2
 
-  out("=== helpers ===");
+  println("=== helpers ===");
   printInt("square 9=",  square(9));       // 81
   printInt("cube 3=",    cube(3));         // 27
   printInt("max(4,7)=",  maxOf(4, 7));     // 7
@@ -118,22 +118,22 @@ fn main() -> int {
   printInt("clamp(5,0,10)=",  clamp(5, 0, 10));       // 5
   printInt("clamp(15,0,10)=", clamp(15, 0, 10));      // 10
 
-  out("=== bool-returning ===");
+  println("=== bool-returning ===");
   printBool("even(4)=",      isEven(4));            // True
   printBool("even(7)=",      isEven(7));            // False
   printBool("positive(-1)=", isPositive(0 - 1));   // False
   printBool("inRange(5,1,10)=", inRange(5, 1, 10));  // True
   printBool("inRange(0,1,10)=", inRange(0, 1, 10));  // False
 
-  out("=== float ===");
-  out("avg(3.0,7.0)=", StringFloat(average(3.0, 7.0)));  // 5
+  println("=== float ===");
+  println("avg(3.0,7.0)=", StrFloat(average(3.0, 7.0)));  // 5
 
-  out("=== Str-returning ===");
-  out(greeting("Paykan"));          // Hello, Paykan!
-  out(repeat("ab", 3));             // ababab
-  out(repeat("x", 0));              // (empty)
+  println("=== Str-returning ===");
+  println(greeting("Paykan"));          // Hello, Paykan!
+  println(repeat("ab", 3));             // ababab
+  println(repeat("x", 0));              // (empty)
 
-  out("=== recursive ===");
+  println("=== recursive ===");
   printInt("0!=", factorial(0));    // 1
   printInt("5!=", factorial(5));    // 120
   printInt("10!=",factorial(10));   // 3628800
@@ -142,12 +142,12 @@ fn main() -> int {
   printInt("gcd(48,18)=", gcd(48, 18));  // 6
   printInt("2^10=", power(2, 10));       // 1024
 
-  out("=== multiple return paths ===");
+  println("=== multiple return paths ===");
   printInt("abs(-7)=", abs(0 - 7));    // 7
   printInt("abs(7)=",  abs(7));         // 7
-  out(classify(5));     // pos
-  out(classify(0 - 2)); // neg
-  out(classify(0));     // zero
+  println(classify(5));     // pos
+  println(classify(0 - 2)); // neg
+  println(classify(0));     // zero
 
   return 0;
 }

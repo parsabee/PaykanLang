@@ -1,0 +1,11 @@
+// OK: match arm with a binding — binding has the narrowed array type
+fn main() -> int {
+  x: Obj = ["hello", "world"];
+  match x {
+    arr: Str[] {
+      n: int = len(arr);
+    }
+    _ { }
+  }
+  return 0;
+}

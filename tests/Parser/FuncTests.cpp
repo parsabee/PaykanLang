@@ -20,7 +20,7 @@ TEST(Func, FunctionWithParams) {
 TEST(Func, VoidFunction) {
   auto [ok, _] = parse(R"(
     fn greet() {
-      out("hi");
+      println("hi");
     }
     fn main() -> int { greet(); return 0; }
   )");

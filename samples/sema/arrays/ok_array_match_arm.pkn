@@ -1,0 +1,9 @@
+// OK: match on an array arm — subject is Obj, arm is T[]
+fn main() -> int {
+  x: Obj = [1, 2, 3];
+  match x {
+    int[] { }
+    _     { }
+  }
+  return 0;
+}

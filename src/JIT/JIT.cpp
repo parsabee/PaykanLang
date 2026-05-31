@@ -27,6 +27,15 @@ using namespace paykan::names;
 
 // clang-format off
 const RuntimeSymbol kRuntimeSymbols[] = {
+    {kPaykanFileNew,      reinterpret_cast<void *>(&PaykanFile_new)},
+    {kPaykanFileOpen,     reinterpret_cast<void *>(&PaykanFile_open)},
+    {kPaykanFileDestroy,  reinterpret_cast<void *>(&PaykanFile_destroy)},
+    {kPaykanFileToString, reinterpret_cast<void *>(&PaykanFile_toString)},
+    {kPaykanFileEquals,   reinterpret_cast<void *>(&PaykanFile_equals)},
+    {kPaykanFileWrite,    reinterpret_cast<void *>(&PaykanFile_write)},
+    {kPaykanFileReadln,   reinterpret_cast<void *>(&PaykanFile_readln)},
+    {kPaykanFileVtable,   reinterpret_cast<void *>(&PaykanFile_vtable)},
+
     {kPaykanObjectNew,       reinterpret_cast<void *>(&PaykanObject_new)},
     {kPaykanObjectToString,  reinterpret_cast<void *>(&PaykanObject_toString)},
     {kPaykanObjectEquals,    reinterpret_cast<void *>(&PaykanObject_equals)},
@@ -39,9 +48,12 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanStringEquals,    reinterpret_cast<void *>(&PaykanString_equals)},
     {kPaykanStringLength,    reinterpret_cast<void *>(&PaykanString_length)},
     {kPaykanStringConcat,    reinterpret_cast<void *>(&PaykanString_concat)},
+    {kPaykanStringAt,        reinterpret_cast<void *>(&PaykanString_at)},
 
-    {kPaykanOut,             reinterpret_cast<void *>(&Paykan_out)},
-    {kPaykanErr,             reinterpret_cast<void *>(&Paykan_err)},
+    {kPaykanPrint,           reinterpret_cast<void *>(&Paykan_print)},
+    {kPaykanPrintln,         reinterpret_cast<void *>(&Paykan_println)},
+    {kPaykanErrPrint,        reinterpret_cast<void *>(&Paykan_printerr)},
+    {kPaykanErrPrintln,      reinterpret_cast<void *>(&Paykan_printerrln)},
 
     {kPaykanSharedNew,       reinterpret_cast<void *>(&PaykanShared_new)},
     {kPaykanSharedGet,       reinterpret_cast<void *>(&PaykanShared_get)},
@@ -50,6 +62,24 @@ const RuntimeSymbol kRuntimeSymbols[] = {
 
     {kPaykanObjectVtable,    reinterpret_cast<void *>(&PaykanObject_vtable)},
     {kPaykanStringVtable,    reinterpret_cast<void *>(&PaykanString_vtable)},
+
+    {kPaykanArrayNew,        reinterpret_cast<void *>(&PaykanArray_new)},
+    {kPaykanArrayNewFromData,reinterpret_cast<void *>(&PaykanArray_new_from_data)},
+    {kPaykanArrayNewObj,     reinterpret_cast<void *>(&PaykanArray_new_obj)},
+    {kPaykanArrayDestroy,    reinterpret_cast<void *>(&PaykanArray_destroy)},
+    {kPaykanArrayDestroyObj, reinterpret_cast<void *>(&PaykanArray_destroy_obj)},
+    {kPaykanArrayGet,        reinterpret_cast<void *>(&PaykanArray_get)},
+    {kPaykanArraySet,        reinterpret_cast<void *>(&PaykanArray_set)},
+    {kPaykanArraySetObj,     reinterpret_cast<void *>(&PaykanArray_set_obj)},
+    {kPaykanArrayLength,     reinterpret_cast<void *>(&PaykanArray_length)},
+    {kPaykanArrayPush,       reinterpret_cast<void *>(&PaykanArray_push)},
+    {kPaykanArrayPushObj,    reinterpret_cast<void *>(&PaykanArray_push_obj)},
+    {kPaykanArrayPop,        reinterpret_cast<void *>(&PaykanArray_pop)},
+    {kPaykanArrayPopObj,     reinterpret_cast<void *>(&PaykanArray_pop_obj)},
+    {kPaykanArrayToString,   reinterpret_cast<void *>(&PaykanArray_toString)},
+    {kPaykanArrayEquals,     reinterpret_cast<void *>(&PaykanArray_equals)},
+    {kPaykanArrayVtable,     reinterpret_cast<void *>(&PaykanArray_vtable)},
+    {kPaykanArrayObjVtable,  reinterpret_cast<void *>(&PaykanArray_obj_vtable)},
 };
 // clang-format on
 

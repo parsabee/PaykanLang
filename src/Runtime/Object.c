@@ -30,11 +30,11 @@ void PaykanObject_destroy(PaykanObject *self) {
 
 // -- Default method implementations ------------------------------------------
 
-PaykanString *PaykanObject_toString(PaykanObject *self) {
+PaykanShared *PaykanObject_toString(PaykanObject *self) {
   // Default: "Object@<hex address>"
   char buf[64];
   int n = snprintf(buf, sizeof(buf), "Object@%p", (void *)self);
-  return PaykanString_new(buf, n);
+  return PaykanShared_new((PaykanObject *)PaykanString_new(buf, n));
 }
 
 int64_t PaykanObject_equals(PaykanObject *self, PaykanObject *other) {
@@ -51,9 +51,9 @@ static void PaykanNone_destroy(PaykanObject *self) {
   (void)self; // immortal — never freed
 }
 
-static PaykanString *PaykanNone_toString(PaykanObject *self) {
+static PaykanShared *PaykanNone_toString(PaykanObject *self) {
   (void)self;
-  return PaykanString_new("None", 4);
+  return PaykanShared_new((PaykanObject *)PaykanString_new("None", 4));
 }
 
 static int64_t PaykanNone_equals(PaykanObject *self, PaykanObject *other) {

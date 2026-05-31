@@ -149,7 +149,8 @@ void Sema::warning(ast::SourceLocation loc, const std::string &msg) {
   diag(Diagnostic::Warning, loc, msg);
 }
 
-const char *Sema::typeName(ast::Type *ty) {
+std::string Sema::typeName(ast::Type *ty) {
+  if (!ty) return "unknown";
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty)) {
     switch (bt->getTypeKind()) {
     case ast::BuiltinType::Int:   return names::kTypeInt;
@@ -159,7 +160,9 @@ const char *Sema::typeName(ast::Type *ty) {
     }
   }
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ty))
-    return ct->getName().c_str();
+    return ct->getName();
+  if (auto *at = ast::dyn_cast<ast::ArrayType>(ty))
+    return typeName(at->getElementType()) + "[]";
   return "unknown";
 }
 
@@ -174,9 +177,24 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
   if (dst == src)
     return true;
 
-  // int → float promotion.
+  // int -> float promotion.
   if (dst == Ctx.getFloatTy() && src == Ctx.getIntTy())
     return true;
+
+  // Any array type is assignable to Obj (arrays are heap-allocated objects).
+  if (dst == Ctx.getObjTy() && ast::isa<ast::ArrayType>(src))
+    return true;
+
+  // Array assignability: element types must be compatible.
+  if (auto *dstAT = ast::dyn_cast<ast::ArrayType>(dst)) {
+    if (auto *srcAT = ast::dyn_cast<ast::ArrayType>(src)) {
+      // An empty literal (void element) is assignable to any array type.
+      if (srcAT->getElementType() == Ctx.getVoidTy())
+        return true;
+      return isAssignable(dstAT->getElementType(), srcAT->getElementType());
+    }
+    return false;
+  }
 
   // ClassType subtyping: src <: dst.
   if (auto *dstCT = ast::dyn_cast<ast::ClassType>(dst))
@@ -199,11 +217,10 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
   }
 
   if (auto *at = ast::dyn_cast<ast::ArrayType>(ty)) {
-    // TODO(arrays): validate element type; for now just return the ArrayType as-is.
     auto *elemTy = resolveType(at->getElementType(), loc, context + " element");
     if (!elemTy)
       return nullptr;
-    return at; // reuse the parser-created node; Sema/CodeGen will flesh this out later
+    return Ctx.make<ast::ArrayType>(at->getLocation(), elemTy);
   }
 
   error(loc, context + " has unknown type");
@@ -260,7 +277,7 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
     S.error(node->getLocation(),
             "unary '" + std::string(node->getOpcodeStr()) +
                 "' is not defined for type '" +
-                std::string(typeName(operandTy)) + "'");
+                typeName(operandTy) + "'");
     return nullptr;
   }
 
@@ -308,7 +325,7 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   switch (node->getOpcode()) {
   // Arithmetic: result is float if either operand is float, else int.
   case ast::BinaryOpcode::Add:
-    // String concatenation: String + String → String.
+    // String concatenation: String + String -> String.
     if (lhsTy == S.Ctx.getStrTy() && rhsTy == S.Ctx.getStrTy())
       return S.Ctx.getStrTy();
     [[fallthrough]];
@@ -335,13 +352,13 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
     if (lhsTy != S.Ctx.getBoolTy()) {
       S.error(node->getLHS()->getLocation(),
               "left operand of '" + std::string(node->getOpcodeStr()) +
-                  "' must be 'bool', got '" + std::string(typeName(lhsTy)) + "'");
+                  "' must be 'bool', got '" + typeName(lhsTy) + "'");
       return nullptr;
     }
     if (rhsTy != S.Ctx.getBoolTy()) {
       S.error(node->getRHS()->getLocation(),
               "right operand of '" + std::string(node->getOpcodeStr()) +
-                  "' must be 'bool', got '" + std::string(typeName(rhsTy)) + "'");
+                  "' must be 'bool', got '" + typeName(rhsTy) + "'");
       return nullptr;
     }
     return S.Ctx.getBoolTy();
@@ -392,16 +409,15 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
           S.error(node->getArguments()[i]->getLocation(),
                   "argument " + std::to_string(i + 1) +
                       " of '" + names::kMethodSuper + "' has type '" +
-                      std::string(typeName(argTypes[i])) + "', expected '" +
+                      typeName(argTypes[i]) + "', expected '" +
                       typeName(expectedParams[i]) + "'");
       }
     }
-    S.CurrentClassCtx->SuperInitCalled = true;
-    return S.Ctx.getVoidTy();
-  }
+  S.CurrentClassCtx->SuperInitCalled = true;
+  return S.Ctx.getVoidTy();
+}
 
   const auto *sig = S.lookupFunction(node->getCalleeName());
-
   if (!sig) {
     S.error(node->getLocation(),
             "call to undeclared function '" + node->getCalleeName() + "'");
@@ -451,19 +467,28 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   if (!recvTy)
     return nullptr;
 
-  auto *ct = ast::dyn_cast<ast::ClassType>(recvTy);
+  // Resolve the ClassType to look up the method on.
+  // Array types dispatch through a per-element specialized ClassType so that
+  // push/pop signatures are element-type-aware.
+  ast::ClassType *ct = nullptr;
+  if (auto *at = ast::dyn_cast<ast::ArrayType>(recvTy))
+    ct = S.Ctx.getOrCreateSpecializedArrayType(at->getElementType());
+  else
+    ct = ast::dyn_cast<ast::ClassType>(recvTy);
+
   if (!ct) {
     S.error(node->getLocation(),
-            "method call on non-class type '" +
-                std::string(typeName(recvTy)) + "'");
+            "method call on non-class type '" + typeName(recvTy) + "'");
     return nullptr;
   }
 
   ast::MethodDecl *method = ct->findMethod(node->getMethodName());
+  std::string ownerName = ct->getName();
+
   if (!method) {
     S.error(node->getLocation(),
             "no method '" + node->getMethodName() + "' on type '" +
-                ct->getName() + "'");
+                ownerName + "'");
     return nullptr;
   }
 
@@ -514,7 +539,7 @@ ast::Type *Sema::ExprChecker::visitMemberAccessExpr(ast::MemberAccessExpr *node)
   if (!ct) {
     S.error(node->getLocation(),
             "member access '." + node->getFieldName() +
-                "' on non-class type '" + std::string(typeName(recvTy)) + "'");
+                "' on non-class type '" + typeName(recvTy) + "'");
     return nullptr;
   }
 
@@ -534,15 +559,82 @@ ast::Type *Sema::ExprChecker::visitMemberAccessExpr(ast::MemberAccessExpr *node)
   return nullptr;
 }
 
-// TODO(arrays): full array sema not yet implemented.
 ast::Type *Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
-  S.error(node->getLocation(), "array literals are not yet fully supported");
-  return nullptr;
+  // Empty literal [] is valid only where an explicit array type annotation is
+  // present (e.g. a: int[] = []).  Return ArrayType(void) as a sentinel;
+  // isAssignable() treats it as compatible with any array destination.
+  if (node->isEmpty()) {
+    auto *arrTy = S.Ctx.make<ast::ArrayType>(node->getLocation(), S.Ctx.getVoidTy());
+    node->setResolvedType(arrTy);
+    return arrTy;
+  }
+
+  // Non-empty: resolve all elements and unify to a common element type.
+  ast::Type *elemTy = nullptr;
+  for (size_t i = 0; i < node->getNumElements(); ++i) {
+    auto *ty = visit(node->getElements()[i]);
+    if (!ty) return nullptr;
+    if (!elemTy) {
+      elemTy = ty;
+    } else if (elemTy != ty) {
+      // int <-> float promotion across elements.
+      if (elemTy == S.Ctx.getIntTy() && ty == S.Ctx.getFloatTy()) {
+        elemTy = S.Ctx.getFloatTy();
+      } else if (elemTy == S.Ctx.getFloatTy() && ty == S.Ctx.getIntTy()) {
+        // keep elemTy = float
+      } else {
+        // For class types try the lowest common ancestor.
+        auto *eCT = ast::dyn_cast<ast::ClassType>(elemTy);
+        auto *tCT = ast::dyn_cast<ast::ClassType>(ty);
+        if (eCT && tCT) {
+          if (auto *lca = S.findLowestCommonAncestor(eCT, tCT)) {
+            elemTy = lca;
+            continue;
+          }
+        }
+        S.error(node->getElements()[i]->getLocation(),
+                "array literal has inconsistent element types: '" +
+                    typeName(elemTy) + "' and '" + typeName(ty) + "'");
+        return nullptr;
+      }
+    }
+  }
+  auto *arrTy = S.Ctx.make<ast::ArrayType>(node->getLocation(), elemTy);
+  node->setResolvedType(arrTy);
+  return arrTy;
 }
 
 ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
-  S.error(node->getLocation(), "array subscript is not yet fully supported");
-  return nullptr;
+  auto *arrayTy = visit(node->getArray());
+  if (!arrayTy) return nullptr;
+
+  // String subscript: str[idx] -> Str
+  if (arrayTy == S.Ctx.getStrTy()) {
+    auto *idxTy = visit(node->getIndex());
+    if (idxTy && idxTy != S.Ctx.getIntTy())
+      S.error(node->getIndex()->getLocation(),
+              "string index must be 'int', got '" + typeName(idxTy) + "'");
+    node->setResolvedType(S.Ctx.getStrTy());
+    return S.Ctx.getStrTy();
+  }
+
+  auto *at = ast::dyn_cast<ast::ArrayType>(arrayTy);
+  if (!at) {
+    S.error(node->getLocation(),
+            "subscript '[]' applied to non-array type '" + typeName(arrayTy) + "'");
+    return nullptr;
+  }
+
+  auto *idxTy = visit(node->getIndex());
+  if (!idxTy) return nullptr;
+  if (idxTy != S.Ctx.getIntTy()) {
+    S.error(node->getIndex()->getLocation(),
+            "array index must be 'int', got '" + typeName(idxTy) + "'");
+    return nullptr;
+  }
+
+  node->setResolvedType(at->getElementType());
+  return at->getElementType();
 }
 
 ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
@@ -555,7 +647,7 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
   if (condTy != S.Ctx.getBoolTy()) {
     S.error(node->getCondition()->getLocation(),
             "ternary condition must be 'bool', got '" +
-                std::string(typeName(condTy)) + "'");
+                typeName(condTy) + "'");
     return nullptr;
   }
 
@@ -576,8 +668,8 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
 
   S.error(node->getLocation(),
           "ternary branches have incompatible types '" +
-              std::string(typeName(trueTy)) + "' and '" +
-              std::string(typeName(falseTy)) + "'");
+              typeName(trueTy) + "' and '" +
+              typeName(falseTy) + "'");
   return nullptr;
 }
 
@@ -591,19 +683,24 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
   ErrorCount = 0;
   AccumulatedImportContexts.clear();
 
-  // Bootstrap builtin functions — out/err take any object.
-  declareFunction(names::kOut, Ctx.getVoidTy(), {Ctx.getObjTy()},
+  // Bootstrap builtin functions — print/println take any object.
+  declareFunction(names::kPrint,       Ctx.getVoidTy(), {Ctx.getObjTy()},
                   /*variadic=*/true, /*builtin=*/true);
-  declareFunction(names::kErr, Ctx.getVoidTy(), {Ctx.getObjTy()},
+  declareFunction(names::kPrintln,     Ctx.getVoidTy(), {Ctx.getObjTy()},
+                  /*variadic=*/true, /*builtin=*/true);
+  declareFunction(names::kErrPrint,    Ctx.getVoidTy(), {Ctx.getObjTy()},
+                  /*variadic=*/true, /*builtin=*/true);
+  declareFunction(names::kErrPrintln,  Ctx.getVoidTy(), {Ctx.getObjTy()},
                   /*variadic=*/true, /*builtin=*/true);
 
   // Register type-conversion builtins (take unique builtin types — no ownership check needed).
   auto *StrTy = Ctx.getStrTy();
-  declareFunction(names::kStringInt,   StrTy, {Ctx.getIntTy()},   false, true);
-  declareFunction(names::kStringFloat, StrTy, {Ctx.getFloatTy()}, false, true);
-  declareFunction(names::kStringBool,  StrTy, {Ctx.getBoolTy()},  false, true);
+  declareFunction(names::kStrInt,   StrTy, {Ctx.getIntTy()},   false, true);
+  declareFunction(names::kStrFloat, StrTy, {Ctx.getFloatTy()}, false, true);
+  declareFunction(names::kStrBool,  StrTy, {Ctx.getBoolTy()},  false, true);
   declareFunction(names::kString,      StrTy, {StrTy},
                   false, true);
+  declareFunction(names::kOpen, Ctx.getFileTy(), {StrTy, StrTy}, false, true);
 
   // Process imports before local declarations.
   llvm::StringSet<> localImportStack;
@@ -663,6 +760,7 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   const auto &varName = node->getVarName();
   if (Ctx.lookupClassType(varName) ||
       varName == names::kObj     || varName == names::kString ||
+      varName == names::kFile    ||
       varName == names::kTypeInt || varName == names::kTypeBool ||
       varName == names::kTypeFloat) {
     error(node->getLocation(),
@@ -674,15 +772,35 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   auto *owner = CurrentScope->findOwner(varName);
   if (!owner) {
     // First assignment — declare in the current scope.
+    // An empty array literal without an explicit type annotation is ambiguous.
+    if (auto *at = ast::dyn_cast<ast::ArrayType>(valTy)) {
+      if (at->getElementType() == Ctx.getVoidTy()) {
+        error(node->getLocation(),
+              "cannot infer element type of empty array literal '[]'; "
+              "add an explicit type annotation");
+        return false;
+      }
+    }
     CurrentScope->set(varName, valTy);
     return true;
   }
 
   auto *varTy = owner->lookup(varName);
 
+  // Reject empty array literal when the target type can't supply the element type.
+  if (auto *at = ast::dyn_cast<ast::ArrayType>(valTy)) {
+    if (at->getElementType() == Ctx.getVoidTy() &&
+        !ast::isa<ast::ArrayType>(varTy)) {
+      error(node->getLocation(),
+            "cannot infer element type of empty array literal '[]'; "
+            "add an explicit type annotation");
+      return false;
+    }
+  }
+
   if (!isAssignable(varTy, valTy)) {
     error(node->getLocation(),
-          "cannot assign value of type '" + std::string(typeName(valTy)) +
+          "cannot assign value of type '" + typeName(valTy) +
               "' to variable '" + varName + "' of type '" +
               typeName(varTy) + "'");
     return false;
@@ -698,7 +816,7 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
       return false;
     if (CurrentReturnType && !isAssignable(CurrentReturnType, valTy)) {
       error(node->getLocation(),
-            "return value of type '" + std::string(typeName(valTy)) +
+            "return value of type '" + typeName(valTy) +
                 "' does not match function return type '" +
                 typeName(CurrentReturnType) + "'");
       return false;
@@ -722,7 +840,7 @@ bool Sema::visitIfStmt(ast::IfStmt *node) {
   if (condTy != Ctx.getBoolTy()) {
     error(node->getCondition()->getLocation(),
           "if condition must be 'bool', got '" +
-              std::string(typeName(condTy)) + "'");
+              typeName(condTy) + "'");
     return false;
   }
 
@@ -746,7 +864,7 @@ bool Sema::visitWhileStmt(ast::WhileStmt *node) {
   if (condTy != Ctx.getBoolTy()) {
     error(node->getCondition()->getLocation(),
           "while condition must be 'bool', got '" +
-              std::string(typeName(condTy)) + "'");
+              typeName(condTy) + "'");
     return false;
   }
 
@@ -896,15 +1014,37 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     }
 
     if (declTy) {
+      // Reject an empty array literal when the declared type cannot supply the
+      // element type (e.g. `a: Obj = []` — the element type is uninferable).
+      if (auto *at = ast::dyn_cast<ast::ArrayType>(initTy)) {
+        if (at->getElementType() == Ctx.getVoidTy() &&
+            !ast::isa<ast::ArrayType>(declTy)) {
+          error(node->getLocation(),
+                "cannot infer element type of empty array literal '[]'; "
+                "add an explicit type annotation");
+          CurrentScope->set(node->getName(), declTy);
+          return false;
+        }
+      }
       if (!isAssignable(declTy, initTy)) {
         error(node->getLocation(),
-              "initializer of type '" + std::string(typeName(initTy)) +
+              "initializer of type '" + typeName(initTy) +
                   "' does not match declared type '" + typeName(declTy) +
                   "' for variable '" + node->getName() + "'");
         CurrentScope->set(node->getName(), declTy);
         return false;
       }
     } else {
+      // Infer type from initializer — but reject bare [] with no annotation.
+      if (auto *at = ast::dyn_cast<ast::ArrayType>(initTy)) {
+        if (at->getElementType() == Ctx.getVoidTy()) {
+          error(node->getLocation(),
+                "cannot infer element type of empty array literal '[]'; "
+                "add an explicit type annotation");
+          CurrentScope->set(node->getName(), Ctx.getVoidTy());
+          return false;
+        }
+      }
       declTy = initTy;
     }
 
@@ -932,7 +1072,7 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
   if (!ct) {
     error(node->getLocation(),
           "member assignment '." + node->getFieldName() +
-              "' on non-class type '" + std::string(typeName(recvTy)) + "'");
+              "' on non-class type '" + typeName(recvTy) + "'");
     return false;
   }
 
@@ -962,12 +1102,36 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
 
   if (!isAssignable(fieldTy, valTy)) {
     error(node->getLocation(),
-          "cannot assign value of type '" + std::string(typeName(valTy)) +
+          "cannot assign value of type '" + typeName(valTy) +
               "' to field '" + node->getFieldName() + "' of type '" +
               typeName(fieldTy) + "'");
     return false;
   }
 
+  return true;
+}
+
+bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
+  auto *arrTy = resolveExprType(node->getArray());
+  if (!arrTy) return false;
+  auto *at = ast::dyn_cast<ast::ArrayType>(arrTy);
+  if (!at) {
+    error(node->getLocation(),
+          "subscript assignment on non-array type '" + typeName(arrTy) + "'");
+    return false;
+  }
+  auto *idxTy = resolveExprType(node->getIndex());
+  if (idxTy && idxTy != Ctx.getIntTy()) {
+    error(node->getIndex()->getLocation(),
+          "array index must be int, got '" + typeName(idxTy) + "'");
+  }
+  auto *valTy = resolveExprType(node->getValue());
+  if (!valTy) return false;
+  if (!isAssignable(at->getElementType(), valTy)) {
+    error(node->getLocation(),
+          "cannot assign value of type '" + typeName(valTy) +
+              "' to array of '" + typeName(at->getElementType()) + "'");
+  }
   return true;
 }
 
@@ -986,7 +1150,7 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
   if (!subjectCt) {
     error(node->getSubject()->getLocation(),
           "match subject must be a class type, got '" +
-              std::string(typeName(subjectTy)) + "'");
+              typeName(subjectTy) + "'");
     return false;
   }
 
@@ -1017,21 +1181,37 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
       auto *resolvedArmTy = resolveType(arm.ArmType, arm.Loc, "match arm");
       arm.ArmType = resolvedArmTy; // write canonical pointer back
       auto *armCt = resolvedArmTy ? ast::dyn_cast<ast::ClassType>(resolvedArmTy) : nullptr;
-      if (!armCt) {
+      auto *armAt = resolvedArmTy ? ast::dyn_cast<ast::ArrayType>(resolvedArmTy) : nullptr;
+      if (!armCt && !armAt) {
         // Only emit a secondary diagnostic if resolution succeeded but the
-        // type is not a class (e.g. int[], bool). If resolveType already
-        // emitted "unknown type", resolvedArmTy is null and that's enough.
+        // type is not a class or array. If resolveType already emitted
+        // "unknown type", resolvedArmTy is null and that's enough.
         if (resolvedArmTy)
-          error(arm.Loc, "match arm type must be a class type");
+          error(arm.Loc, "match arm type must be a class or array type");
         ok = false;
         // Still try to visit the body to surface further errors.
+      } else if (armAt) {
+        // Array arm: the subject must be Obj (arrays are dispatched as Obj
+        // at runtime — they share the Obj vtable header).
+        if (subjectCt != Ctx.getObjTy()) {
+          error(arm.Loc,
+                "array match arm requires an 'Obj' subject, got '" +
+                    subjectCt->getName() + "'");
+          ok = false;
+        }
+        if (arm.hasBinding()) {
+          if (!CurrentScope->declare(arm.Binding, armAt)) {
+            error(arm.Loc, "redeclaration of '" + arm.Binding + "' in match arm");
+            ok = false;
+          }
+        }
       } else {
         // 3. The arm type must be a subclass of the subject's static type.
         //    (Matching Obj against Obj arms is always allowed since every class
         //    descends from Obj; the subjectCt == Ctx.getObjTy() case passes
         //    trivially because every armCt IS a subclass of Obj.)
         if (!isSubclassOf(armCt, subjectCt)) {
-          error(arm.Loc, "type '" + std::string(typeName(armCt)) + "' is not a subclass of '" +
+          error(arm.Loc, "type '" + typeName(armCt) + "' is not a subclass of '" +
                              subjectCt->getName() + "'");
           ok = false;
         }

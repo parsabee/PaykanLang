@@ -234,7 +234,7 @@ fn main() -> int { s: Str = "hi"; return strmod::wrap(s); }
   std::filesystem::remove_all(tmp);
 }
 
-// ─── OK: same module imported twice → same ClassType pointer ────────────────
+// ─── OK: same module imported twice -> same ClassType pointer ────────────────
 
 TEST(Module, ClassTypeIdentityOk) {
   auto tmp = std::filesystem::temp_directory_path() / "pkn_ms_classid";

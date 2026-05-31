@@ -39,7 +39,8 @@ namespace ast {
   NODE(NK_BreakStmt,      BreakStmt,      BreakStmt)       \
   NODE(NK_ContinueStmt,   ContinueStmt,   ContinueStmt)    \
   NODE(NK_MemberAssignStmt, MemberAssignStmt, MemberAssignStmt) \
-  NODE(NK_MatchStmt,      MatchStmt,      MatchStmt)
+  NODE(NK_MatchStmt,      MatchStmt,      MatchStmt)            \
+  NODE(NK_SubscriptAssignStmt, SubscriptAssignStmt, SubscriptAssignStmt)
 
 #define PAYKAN_EXPR_NODES(NODE) \
   NODE(NK_IntegerLiteral, IntegerLiteral, IntegerLiteral)  \

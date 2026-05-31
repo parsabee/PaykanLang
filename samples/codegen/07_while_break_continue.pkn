@@ -4,37 +4,37 @@
 //            break/continue leaving unreachable blocks correct
 
 fn main() -> int {
-  out("=== basic while ===");
+  println("=== basic while ===");
   i: int = 0;
   while (i < 5) {
-    out(StringInt(i));
+    println(StrInt(i));
     i = i + 1;
   }
 
-  out("=== while sum ===");
+  println("=== while sum ===");
   sum: int = 0;
   n: int = 1;
   while (n <= 100) {
     sum = sum + n;
     n = n + 1;
   }
-  out("sum 1..100=", StringInt(sum));   // 5050
+  println("sum 1..100=", StrInt(sum));   // 5050
 
-  out("=== while never executes ===");
+  println("=== while never executes ===");
   while (False) {
-    out("unreachable");
+    println("unreachable");
   }
-  out("after never");
+  println("after never");
 
-  out("=== while True + break ===");
+  println("=== while True + break ===");
   count: int = 0;
   while (True) {
     if (count == 5) { break; }
     count = count + 1;
   }
-  out("count=", StringInt(count));      // 5
+  println("count=", StrInt(count));      // 5
 
-  out("=== continue skips odd ===");
+  println("=== continue skips odd ===");
   evens: int = 0;
   j: int = 0;
   while (j < 10) {
@@ -42,9 +42,9 @@ fn main() -> int {
     if (j % 2 != 0) { continue; }
     evens = evens + j;
   }
-  out("sum evens 2..10=", StringInt(evens));  // 30
+  println("sum evens 2..10=", StrInt(evens));  // 30
 
-  out("=== nested loops ===");
+  println("=== nested loops ===");
   total: int = 0;
   r: int = 0;
   while (r < 4) {
@@ -55,9 +55,9 @@ fn main() -> int {
     }
     r = r + 1;
   }
-  out("4x4 iterations=", StringInt(total));  // 16
+  println("4x4 iterations=", StrInt(total));  // 16
 
-  out("=== break inner loop only ===");
+  println("=== break inner loop only ===");
   outer: int = 0;
   inner_total: int = 0;
   while (outer < 3) {
@@ -69,26 +69,26 @@ fn main() -> int {
     }
     outer = outer + 1;
   }
-  out("3 * 3 inner=", StringInt(inner_total));  // 9
+  println("3 * 3 inner=", StrInt(inner_total));  // 9
 
-  out("=== Str var per iteration (scope cleanup) ===");
+  println("=== Str var per iteration (scope cleanup) ===");
   k: int = 0;
   while (k < 3) {
-    label: Str = "iter-" + StringInt(k);
-    out(label);
+    label: Str = "iter-" + StrInt(k);
+    println(label);
     k = k + 1;
   }
 
-  out("=== loop with complex condition ===");
+  println("=== loop with complex condition ===");
   a: int = 0;
   b: int = 100;
   while (a < 10 && b > 90) {
     a = a + 1;
     b = b - 1;
   }
-  out("a=", StringInt(a), " b=", StringInt(b));  // a=10 b=90
+  println("a=", StrInt(a), " b=", StrInt(b));  // a=10 b=90
 
-  out("=== countdown with multiple continues ===");
+  println("=== countdown with multiple continues ===");
   x: int = 10;
   out_count: int = 0;
   while (x > 0) {
@@ -99,7 +99,7 @@ fn main() -> int {
   }
   // x=0..9: skip multiples of 3 (0,3,6,9) and multiples of 4 (0,4,8)
   // skipped: 0,3,4,6,8,9 => 4 remaining: 1,2,5,7
-  out("non-3/4 count=", StringInt(out_count));   // 4
+  println("non-3/4 count=", StrInt(out_count));   // 4
 
   return 0;
 }

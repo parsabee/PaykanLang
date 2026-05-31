@@ -23,7 +23,7 @@ inheritance, and the `Obj` root.
   `__init__` takes explicit parameters and must assign every field before returning. The field
   values are **not** passed implicitly by position; you write `self.x = ...` yourself.
 - **`__del__` is the destructor.** It is `virtual`, called automatically when the object is
-  destroyed (scope exit for refcount → 0). Users **cannot call `__del__` directly.** Destruction of member fields
+  destroyed (scope exit for refcount -> 0). Users **cannot call `__del__` directly.** Destruction of member fields
   (dropping unique, releasing shared) is automatic after `__del__` returns; you only need
   to write custom cleanup (e.g. closing a handle).
 
@@ -319,7 +319,7 @@ class Dog extends Animal {
     fn speak() { std::write(std::out(), "woof"); }
 }
 
-a = (Animal)Dog("rex", "lab");   // upcast: Dog → Animal, always succeeds, type is Animal
+a = (Animal)Dog("rex", "lab");   // upcast: Dog -> Animal, always succeeds, type is Animal
 match a {                        // downcast
     Dog  { std::write(std::out(), a.breed); }    // safe — a is Dog inside this arm
     _    {}

@@ -1,0 +1,5 @@
+// ERROR: inconsistent element types in the same literal
+fn main() -> int {
+  a = [1, "hello", 3];  // sema error: 'int' and 'Str' are inconsistent
+  return 0;
+}

@@ -7,7 +7,7 @@ fn main() -> int {
   match x {
     Dog { }
     _ {
-      out("not a Dog");
+      println("not a Dog");
     }
   }
   return 0;

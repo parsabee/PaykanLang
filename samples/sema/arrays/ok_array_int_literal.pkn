@@ -1,0 +1,5 @@
+// OK: int[] declared and initialised with a literal
+fn main() -> int {
+  a: int[] = [1, 2, 3];
+  return 0;
+}

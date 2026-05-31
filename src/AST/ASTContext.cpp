@@ -12,13 +12,16 @@ ASTContext::ASTContext()
       FloatTy(make<BuiltinType>(SourceLocation(), BuiltinType::Float)),
       BoolTy(make<BuiltinType>(SourceLocation(), BuiltinType::Bool)),
       VoidTy(make<BuiltinType>(SourceLocation(), BuiltinType::Void)),
-      ObjTy(nullptr), StrTy(nullptr) {
-  // Pre-allocate both ObjTy and StrTy so that Obj's own methods can
-  // reference them directly — no post-hoc patching required.
-  ObjTy = make<ClassType>(SourceLocation(), names::kObj,    nullptr);
-  StrTy = make<ClassType>(SourceLocation(), names::kString, nullptr);
+      ObjTy(nullptr), StrTy(nullptr), ArrayTy(nullptr), FileTy(nullptr) {
+  // Pre-allocate Obj, Str, Array, and File so method signatures are correct from the start.
+  ObjTy   = make<ClassType>(SourceLocation(), names::kObj,    nullptr);
+  StrTy   = make<ClassType>(SourceLocation(), names::kString, nullptr);
+  ArrayTy = make<ClassType>(SourceLocation(), names::kArray,  nullptr);
+  FileTy  = make<ClassType>(SourceLocation(), names::kFile,   nullptr);
   buildObjectType();
   buildStringType();
+  buildArrayType();
+  buildFileType();
 }
 
 // -- Bootstrap Obj ----------------------------------------------------------
@@ -45,13 +48,17 @@ void ASTContext::buildObjectType() {
 // Str inherits Obj.
 //   operators : + == !=
 //   vtable    : [ toString(override), equals(override),
-//                 length(new), concat(new) ]
+//                 length(new), concat(new — mutates self) ]
 //   fields    : _data (void*), _len (int)
 //
 void ASTContext::buildStringType() {
   // StrTy was pre-allocated as an empty shell; wire it up to ObjTy now
   // (this also inherits Obj's vtable and == / != operators).
   StrTy->setSuperClass(ObjTy);
+
+  // Str is non-inheritable (final). This flag is checked by Sema;
+  // it will be reused for user-defined `final` classes in the future.
+  StrTy->setFinal();
 
   // Populate the pre-allocated shell via ClassTypeBuilder.
   // All method types are correct from the start — no patching required.
@@ -63,10 +70,84 @@ void ASTContext::buildStringType() {
       .method(names::kMethodToString, StrTy)            // slot 1 — override
       .method(names::kMethodEquals, BoolTy, {ObjTy})    // slot 2 — override
       .method(names::kMethodLength, IntTy)              // new
-      .method(names::kMethodConcat, StrTy, {StrTy})     // new
-      .field(names::kFieldData, VoidTy)
-      .field(names::kFieldLen, IntTy)
+      .method(names::kMethodConcat, VoidTy, {StrTy})     // new
       .build();
+}
+
+// -- Bootstrap Array -------------------------------------------------------
+//
+// Array is a subtype of Obj.  Its vtable mirrors PaykanArrayVTable:
+//   vtable : [ destroy(override), toString(override), equals(override),
+//              len(new) ]
+//
+void ASTContext::buildArrayType() {
+  ArrayTy->setSuperClass(ObjTy);
+
+  ClassTypeBuilder(*this, ArrayTy)
+      .addOp(BinaryOpcode::Eq)
+      .addOp(BinaryOpcode::Ne)
+      .method(names::kMethodDestroy, VoidTy)         // slot 0 — override
+      .method(names::kMethodToString, StrTy)         // slot 1 — override
+      .method(names::kMethodEquals, BoolTy, {ObjTy}) // slot 2 — override
+      .method(names::kLen, IntTy)                    // slot 3 — new
+      .build();
+}
+
+// -- Bootstrap File --------------------------------------------------------
+//
+// File inherits Obj.
+//   operators : == !=
+//   vtable    : [ destroy(override), toString(override), equals(override) ]
+//
+void ASTContext::buildFileType() {
+  FileTy->setSuperClass(ObjTy);
+
+  ClassTypeBuilder(*this, FileTy)
+      .addOp(BinaryOpcode::Eq)
+      .addOp(BinaryOpcode::Ne)
+      .method(names::kMethodDestroy,  VoidTy)            // slot 0 — override
+      .method(names::kMethodToString, StrTy)             // slot 1 — override
+      .method(names::kMethodEquals,   BoolTy, {ObjTy})   // slot 2 — override
+      .method(names::kMethodWrite,    VoidTy, {StrTy})   // slot 3 — new
+      .method(names::kMethodReadln,   StrTy)             // slot 4 — new
+      .build();
+}
+
+// -- Specialized per-element array types ------------------------------------
+//
+// Lazily create Array<int>, Array<float>, etc.  Each specialized type is a
+// subtype of ArrayTy and adds push(elemTy)->void and pop()->elemTy so that
+// Sema can type-check calls with the correct element type.
+// These types are NOT used for vtable dispatch; CodeGen emits direct calls to
+// PaykanArray_push / PaykanArray_pop for those methods.
+//
+static std::string elemTypeName(ast::Type *ty) {
+  if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty)) {
+    switch (bt->getTypeKind()) {
+    case ast::BuiltinType::Int:   return "int";
+    case ast::BuiltinType::Float: return "float";
+    case ast::BuiltinType::Bool:  return "bool";
+    case ast::BuiltinType::Void:  return "void";
+    }
+  }
+  if (auto *ct = ast::dyn_cast<ast::ClassType>(ty))
+    return ct->getName();
+  return "?";
+}
+
+ClassType *ASTContext::getOrCreateSpecializedArrayType(Type *elemTy) {
+  auto it = SpecializedArrayTypes.find(elemTy);
+  if (it != SpecializedArrayTypes.end())
+    return it->second;
+
+  std::string name = std::string(names::kArray) + "<" + elemTypeName(elemTy) + ">";
+  auto *specTy = make<ClassType>(SourceLocation(), name, ArrayTy);
+  ClassTypeBuilder(*this, specTy)
+      .method(names::kPush, VoidTy, {elemTy}) // slot 0 in specialized type
+      .method(names::kPop,  elemTy)           // slot 1 in specialized type
+      .build();
+  SpecializedArrayTypes[elemTy] = specTy;
+  return specTy;
 }
 
 // -- ClassTypeBuilder --------------------------------------------------------

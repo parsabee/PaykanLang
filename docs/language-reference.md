@@ -90,7 +90,7 @@ Object
 
 ### Implicit Promotions
 
-- `int` → `float`: an `int` value is silently promoted to `float` when assigned to a `float` variable or passed to a `float` parameter.
+- `int` -> `float`: an `int` value is silently promoted to `float` when assigned to a `float` variable or passed to a `float` parameter.
 
 ---
 
@@ -169,7 +169,7 @@ r: const String& = &a;     // const borrow — cannot assign through r
 | Qualifier   | Syntax              | Cleanup          | Reassignable | Copyable |
 |-------------|---------------------|------------------|-------------|----------|
 | Unique      | `x: String`         | Scope exit       | No          | No (use `mov`) |
-| Shared      | `x: shared String`  | Refcount → 0     | Yes         | Yes (refcount bump) |
+| Shared      | `x: shared String`  | Refcount -> 0     | Yes         | Yes (refcount bump) |
 | Reference   | `x: String&`        | None (borrowed)  | No          | N/A      |
 
 ---
@@ -227,7 +227,7 @@ When calling a function, how you pass an argument depends on the **parameter's o
 
 #### Passing Rules Summary
 
-| Argument \ Param →    | `T` (unique) | `shared T` | `T&`            | `const T&`       |
+| Argument \ Param ->    | `T` (unique) | `shared T` | `T&`            | `const T&`       |
 |-----------------------|-------------|-----------|-----------------|------------------|
 | Unique variable       | `mov x`     | `mov x`   | `&x`            | `&x`             |
 | Shared variable       | ✗           | `s`       | ✗               | `&s`             |
@@ -462,7 +462,7 @@ Repeats a block while the condition is `True`. The condition must be `bool` (par
 ```
 i: int = 0;
 while (i < 5) {
-  out(StringInt(i));
+  out(StrInt(i));
   i = i + 1;
 }
 ```
@@ -499,7 +499,7 @@ i: int = 0;
 while (i < 10) {
   i = i + 1;
   if (i % 2 == 0) { continue; }
-  out(StringInt(i));  // prints 1, 3, 5, 7, 9
+  out(StrInt(i));  // prints 1, 3, 5, 7, 9
 }
 ```
 
@@ -518,7 +518,7 @@ Prints one or more values to **stdout**, each converted to a string via its `toS
 - Accepts: literals, rvalues, references, and `&owned_var` for owned variables.
 
 ```
-out("count: ", StringInt(42));   // prints: count: 42
+out("count: ", StrInt(42));   // prints: count: 42
 ```
 
 ### `err(args...)`
@@ -534,14 +534,14 @@ Built-in functions that convert values to `String`:
 | Constructor       | Parameter | Description                    |
 |-------------------|-----------|--------------------------------|
 | `String(s)`       | `const String&` | Identity (wraps string literal) |
-| `StringInt(n)`    | `int`     | Integer to string              |
-| `StringFloat(f)`  | `float`   | Float to string                |
-| `StringBool(b)`   | `bool`    | Boolean to string (`True`/`False`) |
+| `StrInt(n)`    | `int`     | Integer to string              |
+| `StrFloat(f)`  | `float`   | Float to string                |
+| `StrBool(b)`   | `bool`    | Boolean to string (`True`/`False`) |
 
 ```
-s: String = StringInt(42);         // "42"
-t: String = StringFloat(3.14);     // "3.14"
-u: String = StringBool(True);      // "True"
+s: String = StrInt(42);         // "42"
+t: String = StrFloat(3.14);     // "3.14"
+u: String = StrBool(True);      // "True"
 v: String = String("hello");       // "hello"
 ```
 
@@ -594,10 +594,10 @@ The compiler performs the following checks at compile time:
 - **Missing `&`** — passing an owned variable to a reference parameter without `&`.
 - **`mov` on reference** — attempting to move a borrowed reference variable.
 - **`&` on non-variable** — applying `&` to a literal or expression (only variables allowed).
-- **Shared → unique** — shared variable cannot be passed to a unique parameter.
-- **Reference → unique/shared** — reference variable cannot be passed to owned parameters.
-- **Rvalue → non-const `T&`** — rvalues can only be passed to `const T&`, not `T&`.
-- **`&shared_var` → non-const `T&`** — mutable reference cannot borrow shared variable.
+- **Shared -> unique** — shared variable cannot be passed to a unique parameter.
+- **Reference -> unique/shared** — reference variable cannot be passed to owned parameters.
+- **Rvalue -> non-const `T&`** — rvalues can only be passed to `const T&`, not `T&`.
+- **`&shared_var` -> non-const `T&`** — mutable reference cannot borrow shared variable.
 - **Reference binding** — `T& = expr` requires `&identifier` (must borrow a named variable).
 
 ### Function Checks

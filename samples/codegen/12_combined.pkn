@@ -58,7 +58,7 @@ fn favg(a: float, b: float) -> float { return (a + b) / 2.0; }
 
 fn padLeft(s: Str, width: int) -> Str {
   result: Str = s;
-  while (result.length() < width) {
+  while (result.len() < width) {
     result = " " + result;
   }
   return result;
@@ -68,107 +68,107 @@ fn fizzbuzz(n: int) -> Str {
   if (n % 15 == 0) { return "FizzBuzz"; }
   if (n % 3  == 0) { return "Fizz"; }
   if (n % 5  == 0) { return "Buzz"; }
-  return StringInt(n);
+  return StrInt(n);
 }
 
 fn tableRow(label: Str, val: int) -> Str {
-  return label + ": " + padLeft(StringInt(val), 6);
+  return label + ": " + padLeft(StrInt(val), 6);
 }
 
 // ---- main -----------------------------------------------------------------
 
 fn main() -> int {
-  out("============================");
-  out("  PaykanLang CodeGen Suite  ");
-  out("============================");
+  println("============================");
+  println("  PaykanLang CodeGen Suite  ");
+  println("============================");
 
   // ---------- Int arithmetic & operators -----------------------------------
-  out("\n--- Int arithmetic ---");
-  out(tableRow("2+3*4",    2 + 3 * 4));    // 14
-  out(tableRow("(2+3)*4",  (2 + 3) * 4));  // 20
-  out(tableRow("17%5",     17 % 5));        // 2
-  out(tableRow("abs(-99)", abs(0 - 99)));   // 99
-  out(tableRow("clamp", clamp(150, 0, 100))); // 100
+  println("\n--- Int arithmetic ---");
+  println(tableRow("2+3*4",    2 + 3 * 4));    // 14
+  println(tableRow("(2+3)*4",  (2 + 3) * 4));  // 20
+  println(tableRow("17%5",     17 % 5));        // 2
+  println(tableRow("abs(-99)", abs(0 - 99)));   // 99
+  println(tableRow("clamp", clamp(150, 0, 100))); // 100
 
   // ---------- Relational & logical -----------------------------------------
-  out("\n--- Relational/Logical ---");
+  println("\n--- Relational/Logical ---");
   x: int = 7;
-  out("7 in [1,10]: ",   StringBool(x >= 1 && x <= 10));  // True
-  out("7 prime:     ",   StringBool(isPrime(x)));           // True
-  out("7 even:      ",   StringBool(x % 2 == 0));          // False
-  out("!prime(4):   ",   StringBool(!isPrime(4)));          // True
+  println("7 in [1,10]: ",   StrBool(x >= 1 && x <= 10));  // True
+  println("7 prime:     ",   StrBool(isPrime(x)));           // True
+  println("7 even:      ",   StrBool(x % 2 == 0));          // False
+  println("!prime(4):   ",   StrBool(!isPrime(4)));          // True
 
   // ---------- Float ---------------------------------------------------------
-  out("\n--- Float ---");
+  println("\n--- Float ---");
   pi: float = 3.14159;
-  out("pi^2=",  StringFloat(fsquare(pi)));          // ~9.8696
-  out("avg=",   StringFloat(favg(1.0, 3.0)));       // 2
-  out("0.1+0.2=",StringFloat(0.1 + 0.2));
+  println("pi^2=",  StrFloat(fsquare(pi)));          // ~9.8696
+  println("avg=",   StrFloat(favg(1.0, 3.0)));       // 2
+  println("0.1+0.2=",StrFloat(0.1 + 0.2));
 
   // ---------- Ternary -------------------------------------------------------
-  out("\n--- Ternary ---");
+  println("\n--- Ternary ---");
   grade: int = 83;
   band: Str = if grade >= 90 then "A"
               else if grade >= 80 then "B"
               else if grade >= 70 then "C"
               else "F";
-  out("grade 83 -> ", band);   // B
+  println("grade 83 -> ", band);   // B
 
   // ---------- Control flow --------------------------------------------------
-  out("\n--- FizzBuzz 1-20 ---");
+  println("\n--- FizzBuzz 1-20 ---");
   k: int = 1;
   while (k <= 20) {
-    out(fizzbuzz(k));
+    println(fizzbuzz(k));
     k = k + 1;
   }
 
-  out("\n--- Primes up to 30 ---");
+  println("\n--- Primes up to 30 ---");
   p: int = 2;
   while (p <= 30) {
-    if (isPrime(p)) { out(StringInt(p)); }
+    if (isPrime(p)) { println(StrInt(p)); }
     p = p + 1;
   }
 
   // ---------- Math results --------------------------------------------------
-  out("\n--- Math ---");
-  out(tableRow("sum 1..100",   sumRange(1, 100)));   // 5050
-  out(tableRow("gcd(48,18)",   gcd(48, 18)));         // 6
-  out(tableRow("lcm(12,18)",   lcm(12, 18)));         // 36
-  out(tableRow("2^16",         power(2, 16)));         // 65536
+  println("\n--- Math ---");
+  println(tableRow("sum 1..100",   sumRange(1, 100)));   // 5050
+  println(tableRow("gcd(48,18)",   gcd(48, 18)));         // 6
+  println(tableRow("lcm(12,18)",   lcm(12, 18)));         // 36
+  println(tableRow("2^16",         power(2, 16)));         // 65536
 
   // ---------- Str methods & ops --------------------------------------------
-  out("\n--- Str methods ---");
+  println("\n--- Str methods ---");
   hello: Str = "Hello";
   world: Str = " World";
-  hw: Str = hello.concat(world);
-  out(hw);                          // Hello World
-  out(StringInt(hw.length()));      // 11
-  out(hw.toString());               // Hello World
+  hw: Str = hello + world;
+  println(hw);                          // Hello World
+  println(StrInt(hw.len()));      // 11
+  println(hw.toString());               // Hello World
 
   // Padded table rows via Str helper
-  out("\n--- Padded table ---");
+  println("\n--- Padded table ---");
   i: int = 1;
   while (i <= 5) {
-    out(tableRow("item-" + StringInt(i), i * i));
+    println(tableRow("item-" + StrInt(i), i * i));
     i = i + 1;
   }
 
   // ---------- Nested scopes + cleanup --------------------------------------
-  out("\n--- Scope stress ---");
+  println("\n--- Scope stress ---");
   j: int = 0;
   while (j < 4) {
-    row: Str = "row-" + StringInt(j);
+    row: Str = "row-" + StrInt(j);
     col: int = 0;
     while (col < 3) {
-      cell: Str = row + "-" + StringInt(col);
-      out(cell);
+      cell: Str = row + "-" + StrInt(col);
+      println(cell);
       col = col + 1;
     }
     j = j + 1;
   }
 
-  out("\n============================");
-  out("         All done           ");
-  out("============================");
+  println("\n============================");
+  println("         All done           ");
+  println("============================");
   return 0;
 }

@@ -8,7 +8,7 @@
 //            getOrCreateClassStructType, ClassVTableGlobals,
 //            emitAsShared (class-typed return), PaykanShared ARC,
 //            visitFuncDecl with class-typed params, reinheritVTable,
-//            promoteToOwned (None → concrete class rebind)
+//            promoteToOwned (None -> concrete class rebind)
 
 // ---- Simple class with int fields -----------------------------------------
 
@@ -137,7 +137,7 @@ class Person {
     self.age = a;
   }
   fn toString() -> Str {
-    return self.name + " (age " + StringInt(self.age) + ")";
+    return self.name + " (age " + StrInt(self.age) + ")";
   }
   fn birthday() {
     self.age = self.age + 1;
@@ -171,7 +171,7 @@ class SportsCar : Car {
 // ---- Functions that take / return class instances -------------------------
 
 fn printCounterValue(c: Counter) {
-  out(StringInt(c.value()));
+  println(StrInt(c.value()));
 }
 
 fn makeCounter(start: int) -> Counter {
@@ -183,7 +183,7 @@ fn sumAreas(r: Rectangle, s: Square) -> int {
 }
 
 fn describePerson(p: Person) {
-  out(p.toString());
+  println(p.toString());
 }
 
 fn makeAdult(n: Str) -> Person {
@@ -197,101 +197,101 @@ fn makeAdult(n: Str) -> Person {
 fn main() -> int {
 
   // --- Counter ---
-  out("=== Counter ===");
+  println("=== Counter ===");
   c: Counter = Counter(0);
   c.increment();
   c.increment();
   c.increment();
-  out(StringInt(c.value()));    // 3
+  println(StrInt(c.value()));    // 3
   c.decrement();
-  out(StringInt(c.value()));    // 2
+  println(StrInt(c.value()));    // 2
   c.reset();
-  out(StringInt(c.value()));    // 0
+  println(StrInt(c.value()));    // 0
 
   // --- Counter via helper functions ---
-  out("=== Counter via helpers ===");
+  println("=== Counter via helpers ===");
   c2: Counter = makeCounter(10);
   printCounterValue(c2);        // 10
   c2.increment();
   printCounterValue(c2);        // 11
 
   // --- Greeter with field mutation ---
-  out("=== Greeter ===");
+  println("=== Greeter ===");
   g: Greeter = Greeter("World");
-  out(g.greet());               // Hello, World!
+  println(g.greet());               // Hello, World!
   g.rename("PaykanLang");
-  out(g.greet());               // Hello, PaykanLang!
+  println(g.greet());               // Hello, PaykanLang!
 
   // --- Rectangle ---
-  out("=== Rectangle ===");
+  println("=== Rectangle ===");
   r: Rectangle = Rectangle(4, 5);
-  out(StringInt(r.area()));     // 20
-  out(StringInt(r.perimeter())); // 18
-  out(r.describe());            // rectangle
+  println(StrInt(r.area()));     // 20
+  println(StrInt(r.perimeter())); // 18
+  println(r.describe());            // rectangle
 
   // --- Square (3-level inheritance) ---
-  out("=== Square ===");
+  println("=== Square ===");
   sq: Square = Square(6);
-  out(StringInt(sq.area()));    // 36
-  out(StringInt(sq.perimeter())); // 24
-  out(sq.describe());           // square
+  println(StrInt(sq.area()));    // 36
+  println(StrInt(sq.perimeter())); // 24
+  println(sq.describe());           // square
 
   // --- sumAreas ---
-  out("=== sumAreas ===");
+  println("=== sumAreas ===");
   r2 = Rectangle(3, 7);
   sq2 = Square(4);
-  out(StringInt(sumAreas(r2, sq2)));  // 21 + 16 = 37
+  println(StrInt(sumAreas(r2, sq2)));  // 21 + 16 = 37
 
   // --- Polymorphism: Animal base variable holds Dog / Cat subclass ----------
-  out("=== Polymorphism via base type ===");
+  println("=== Polymorphism via base type ===");
   a: Animal = Dog();
-  out(a.sound());               // woof
+  println(a.sound());               // woof
   a = Cat();
-  out(a.sound());               // meow
+  println(a.sound());               // meow
 
   // --- Inherited method calls through base variable ---
-  out("=== Animal describe (inherited + override) ===");
+  println("=== Animal describe (inherited + override) ===");
   d: Animal = Dog();
-  out(d.describe());            // animal: woof
+  println(d.describe());            // animal: woof
   cat: Animal = Cat();
-  out(cat.describe());          // animal: meow
+  println(cat.describe());          // animal: meow
 
   // --- Person (mixed fields, method, Str return) ---
-  out("=== Person ===");
+  println("=== Person ===");
   p: Person = Person("Alice", 29);
-  out(p.toString());            // Alice (age 29)
+  println(p.toString());            // Alice (age 29)
   p.birthday();
-  out(p.toString());            // Alice (age 30)
+  println(p.toString());            // Alice (age 30)
   describePerson(p);            // Alice (age 30)
 
   adult = makeAdult("Bob");
-  out(adult.toString());        // Bob (age 18)
+  println(adult.toString());        // Bob (age 18)
 
   // --- Vehicle hierarchy ---
-  out("=== Vehicle hierarchy ===");
+  println("=== Vehicle hierarchy ===");
   v: Vehicle = Car(120);
-  out(v.kind());                // car
-  out(StringInt(v.topSpeed())); // 120
+  println(v.kind());                // car
+  println(StrInt(v.topSpeed())); // 120
 
   sc = SportsCar(180, 40);
-  out(sc.kind());               // sports car
-  out(StringInt(sc.topSpeed())); // 220
+  println(sc.kind());               // sports car
+  println(StrInt(sc.topSpeed())); // 220
 
   // --- Summer (loop inside method) ---
-  out("=== Summer ===");
+  println("=== Summer ===");
   sm = Summer();
   sm.sumTo(10);
-  out(StringInt(sm.total));     // 55
+  println(StrInt(sm.total));     // 55
   sm.reset();
   sm.sumTo(4);
-  out(StringInt(sm.total));     // 10
+  println(StrInt(sm.total));     // 10
 
   // --- Sign (if/else inside method) ---
-  out("=== Sign ===");
+  println("=== Sign ===");
   sg = Sign();
-  out(sg.of(7));                // positive
-  out(sg.of(-3));               // negative
-  out(sg.of(0));                // zero
+  println(sg.of(7));                // positive
+  println(sg.of(-3));               // negative
+  println(sg.of(0));                // zero
 
   return 0;
 }

@@ -18,7 +18,7 @@ static std::string wrapMain(const std::string &body) {
 TEST(Arith, IntArithmetic) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = 2 + 3 * 4;
-    out(StringInt(x));
+    println(StrInt(x));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "14\n");
@@ -27,7 +27,7 @@ TEST(Arith, IntArithmetic) {
 TEST(Arith, FloatArithmetic) {
   auto r = compileAndRun(wrapMain(R"(
     x: float = 1.5 + 2.5;
-    out(StringFloat(x));
+    println(StrFloat(x));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "4\n");
@@ -37,7 +37,7 @@ TEST(Arith, BoolLiterals) {
   auto r = compileAndRun(wrapMain(R"(
     a: bool = True;
     b: bool = False;
-    out(StringBool(a), StringBool(b));
+    println(StrBool(a), StrBool(b));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "TrueFalse\n");
@@ -48,7 +48,7 @@ TEST(Arith, BoolLiterals) {
 // ============================================================================
 
 TEST(Arith, StringLiteral) {
-  auto r = compileAndRun(wrapMain(R"(out("hello world");)"));
+  auto r = compileAndRun(wrapMain(R"(println("hello world");)"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "hello world\n");
 }
@@ -58,7 +58,7 @@ TEST(Arith, StringConcat) {
     a: Str = "hello";
     b: Str = " world";
     c: Str = a + b;
-    out(c);
+    println(c);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "hello world\n");
@@ -66,7 +66,7 @@ TEST(Arith, StringConcat) {
 
 TEST(Arith, StringBuiltins) {
   auto r = compileAndRun(wrapMain(R"(
-    out(StringInt(42), StringFloat(3.14), StringBool(True));
+    println(StrInt(42), StrFloat(3.14), StrBool(True));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "423.14True\n");
@@ -75,7 +75,7 @@ TEST(Arith, StringBuiltins) {
 TEST(Arith, StringVarBasic) {
   auto r = compileAndRun(wrapMain(R"(
     a: Str = "alpha";
-    out(a);
+    println(a);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "alpha\n");
@@ -85,7 +85,7 @@ TEST(Arith, StringReassign) {
   auto r = compileAndRun(wrapMain(R"(
     a: Str = "alpha";
     a = "beta";
-    out(a);
+    println(a);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "beta\n");

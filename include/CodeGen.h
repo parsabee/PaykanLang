@@ -43,7 +43,7 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   std::unique_ptr<llvm::Module> Module;
   llvm::IRBuilder<> Builder;
 
-  // -- Scoped symbol table (name → alloca) --------------------------------
+  // -- Scoped symbol table (name -> alloca) --------------------------------
 
   struct Scope {
     Scope *Parent = nullptr;
@@ -124,6 +124,17 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   /// Set of already-codegen'd import file paths (avoids duplicates).
   llvm::StringSet<> CodeGenedImports;
 
+  // -- Global interning ----------------------------------------------------
+
+  /// Intern table for raw C-string globals (keyed by string content).
+  /// Avoids emitting duplicate `.str` globals for identical string literals.
+  llvm::StringMap<llvm::GlobalVariable *> InternedStrings;
+
+  /// Intern table for primitive array data globals (keyed by a byte-level
+  /// fingerprint of the element values).  Avoids duplicate `.arr.data`
+  /// globals for identical array literals.
+  llvm::StringMap<llvm::GlobalVariable *> InternedArrayData;
+
   /// Process imports: codegen each imported module.
   void processImports(ast::TranslationUnit *tu);
 
@@ -166,7 +177,7 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   /// Convenience wrappers for the three most common runtime calls.
   /// Returns true when expr already produces a PaykanShared* — i.e. it is a
   /// user-defined call/method-call/ternary whose resolved type is a class.
-  /// Builtin calls (StringInt, StringFloat, etc.) return raw pointers and are
+  /// Builtin calls (StrInt, StrFloat, etc.) return raw pointers and are
   /// excluded.
   bool exprAlreadyShared(ast::Expr *expr) const;
   void emitRetain(llvm::Value *shared);
@@ -188,12 +199,24 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   // -- Expression emitter ---------------------------------------------------
 
   class ExprEmitter : public ast::ExprVisitor<ExprEmitter, llvm::Value *> {
+  public:
     CodeGen &CG;
 
     llvm::Value *emitIdentityCtor(ast::CallExpr *node);
     llvm::Value *emitBuiltinCall(ast::CallExpr *node);
+    /// Emit a primitive (non-object) array literal, returning the raw PaykanArray*.
+    /// Tries the constant-interning fast path first; falls back to dynamic per-element stores.
+    llvm::Value *emitPrimitiveArrayLiteral(ast::ArrayLiteralExpr *node, size_t len,
+                                           llvm::Value *lenVal,
+                                           llvm::FunctionType *newFnTy);
+    /// Emit a direct call to PaykanArray_push / PaykanArray_push_obj.
+    /// @p recv   raw PaykanArray*; @p elemTy  Paykan element type.
+    llvm::Value *emitArrayPush(ast::MethodCallExpr *node, llvm::Value *recv,
+                               ast::Type *elemTy);
+    /// Emit a direct call to PaykanArray_pop / PaykanArray_pop_obj.
+    /// Returns the popped element value (cast to the appropriate LLVM type).
+    llvm::Value *emitArrayPop(llvm::Value *recv, ast::Type *elemTy);
 
-  public:
     explicit ExprEmitter(CodeGen &cg) : CG(cg) {}
 
 #define EXPR_EMIT(Kind, Name, Cast) \

@@ -6,8 +6,8 @@ class Cat : Animal {}
 fn main() -> int {
   a: Animal = Dog();
   match a {
-    Dog { out("woof"); }
-    Cat { out("meow"); }
+    Dog { println("woof"); }
+    Cat { println("meow"); }
     _ { }
   }
   return 0;

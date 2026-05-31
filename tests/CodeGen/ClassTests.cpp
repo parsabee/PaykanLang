@@ -27,7 +27,7 @@ TEST(Class, EmptyClassInstantiate) {
     class Empty {}
   )", R"(
     e: Empty = Empty();
-    out("ok");
+    println("ok");
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "ok\n");
@@ -44,7 +44,7 @@ TEST(Class, InitStoresIntField) {
     }
   )", R"(
     c: Counter = Counter(42);
-    out(StringInt(c.count));
+    println(StrInt(c.count));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "42\n");
@@ -58,7 +58,7 @@ TEST(Class, FieldDefaultZero) {
     }
   )", R"(
     b: Box = Box();
-    out(StringInt(b.val));
+    println(StrInt(b.val));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "0\n");
@@ -77,8 +77,8 @@ TEST(Class, FieldReadWrite) {
     p: Point = Point();
     p.x = 3;
     p.y = 7;
-    out(StringInt(p.x));
-    out(StringInt(p.y));
+    println(StrInt(p.x));
+    println(StrInt(p.y));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "3\n7\n");
@@ -99,9 +99,9 @@ TEST(Class, MultipleIntFields) {
     }
   )", R"(
     t: Triple = Triple(1, 2, 3);
-    out(StringInt(t.a));
-    out(StringInt(t.b));
-    out(StringInt(t.c));
+    println(StrInt(t.a));
+    println(StrInt(t.b));
+    println(StrInt(t.c));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "1\n2\n3\n");
@@ -118,7 +118,7 @@ TEST(Class, StrField) {
     }
   )", R"(
     g: Greeter = Greeter("hello");
-    out(g.msg);
+    println(g.msg);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "hello\n");
@@ -135,7 +135,7 @@ TEST(Class, FieldReassign) {
   )", R"(
     m: Mutable = Mutable(10);
     m.set(99);
-    out(StringInt(m.val));
+    println(StrInt(m.val));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "99\n");
@@ -153,7 +153,7 @@ TEST(Class, MethodReturnsField) {
     }
   )", R"(
     f: Foo = Foo(7);
-    out(StringInt(f.get()));
+    println(StrInt(f.get()));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "7\n");
@@ -170,7 +170,7 @@ TEST(Class, MethodWithParam) {
     a: Acc = Acc();
     a.add(5);
     a.add(3);
-    out(StringInt(a.total));
+    println(StrInt(a.total));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "8\n");
@@ -187,7 +187,7 @@ TEST(Class, MethodComputed) {
     }
   )", R"(
     r: Rect = Rect(4, 5);
-    out(StringInt(r.area()));
+    println(StrInt(r.area()));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "20\n");
@@ -203,8 +203,8 @@ TEST(Class, TwoInstancesIndependent) {
   )", R"(
     a: Val = Val(1);
     b: Val = Val(2);
-    out(StringInt(a.n));
-    out(StringInt(b.n));
+    println(StrInt(a.n));
+    println(StrInt(b.n));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "1\n2\n");
@@ -224,7 +224,7 @@ TEST(Class, InheritedField) {
     }
   )", R"(
     d: Dog = Dog("Rex");
-    out(d.name);
+    println(d.name);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "Rex\n");
@@ -246,8 +246,8 @@ TEST(Class, SubclassOwnField) {
     }
   )", R"(
     c: Child = Child(3, 4);
-    out(StringInt(c.x));
-    out(StringInt(c.y));
+    println(StrInt(c.x));
+    println(StrInt(c.y));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "3\n4\n");
@@ -264,7 +264,7 @@ TEST(Class, MethodOverride) {
     }
   )", R"(
     c: Circle = Circle();
-    out(c.describe());
+    println(c.describe());
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "circle\n");
@@ -286,8 +286,8 @@ TEST(Class, SuperInit) {
     }
   )", R"(
     car: Car = Car(120, "Toyota");
-    out(StringInt(car.speed));
-    out(car.brand);
+    println(StrInt(car.speed));
+    println(car.brand);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "120\nToyota\n");
@@ -308,7 +308,7 @@ TEST(Class, ThreeLevelInheritance) {
     }
   )", R"(
     c: C = C(99);
-    out(StringInt(c.val));
+    println(StrInt(c.val));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "99\n");
@@ -327,7 +327,7 @@ TEST(Class, InheritedMethod) {
     }
   )", R"(
     s: Sub = Sub(6);
-    out(StringInt(s.doubled()));
+    println(StrInt(s.doubled()));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "12\n");
@@ -343,7 +343,7 @@ TEST(Class, PassToFunction) {
       fn __init__(x: int) { self.v = x; }
     }
     fn show(n: Num) {
-      out(StringInt(n.v));
+      println(StrInt(n.v));
     }
   )", R"(
     x: Num = Num(55);
@@ -366,8 +366,8 @@ TEST(Class, ReturnClassFromFunction) {
     }
   )", R"(
     p: Pair = makePair(3, 7);
-    out(StringInt(p.a));
-    out(StringInt(p.b));
+    println(StrInt(p.a));
+    println(StrInt(p.b));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "3\n7\n");
@@ -389,8 +389,8 @@ TEST(Class, MethodWithIfElse) {
     }
   )", R"(
     s: Sign = Sign();
-    out(s.of(5));
-    out(s.of(-3));
+    println(s.of(5));
+    println(s.of(-3));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "pos\nneg\n");
@@ -412,7 +412,7 @@ TEST(Class, MethodWithLoop) {
   )", R"(
     s: Summer = Summer();
     s.sumTo(5);
-    out(StringInt(s.total));
+    println(StrInt(s.total));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "15\n");
@@ -451,24 +451,24 @@ TEST(MatchCodeGen, BasicDispatch) {
   auto r = compileAndRun(withFns(kMatchHierarchy, R"(
     a: Animal = Dog();
     match a {
-      Dog  { out("dog"); }
-      Cat  { out("cat"); }
-      Bird { out("bird"); }
-      _    { out("other"); }
+      Dog  { println("dog"); }
+      Cat  { println("cat"); }
+      Bird { println("bird"); }
+      _    { println("other"); }
     }
     b: Animal = Cat();
     match b {
-      Dog  { out("dog"); }
-      Cat  { out("cat"); }
-      Bird { out("bird"); }
-      _    { out("other"); }
+      Dog  { println("dog"); }
+      Cat  { println("cat"); }
+      Bird { println("bird"); }
+      _    { println("other"); }
     }
     c: Animal = Bird();
     match c {
-      Dog  { out("dog"); }
-      Cat  { out("cat"); }
-      Bird { out("bird"); }
-      _    { out("other"); }
+      Dog  { println("dog"); }
+      Cat  { println("cat"); }
+      Bird { println("bird"); }
+      _    { println("other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -480,9 +480,9 @@ TEST(MatchCodeGen, WildcardFallthrough) {
   auto r = compileAndRun(withFns(kMatchHierarchy, R"(
     a: Animal = Bird();
     match a {
-      Dog { out("dog"); }
-      Cat { out("cat"); }
-      _   { out("other"); }
+      Dog { println("dog"); }
+      Cat { println("cat"); }
+      _   { println("other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -494,7 +494,7 @@ TEST(MatchCodeGen, WildcardOnly) {
   auto r = compileAndRun(withFns(kMatchHierarchy, R"(
     a: Animal = Cat();
     match a {
-      _ { out("wildcard"); }
+      _ { println("wildcard"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -513,8 +513,8 @@ TEST(MatchCodeGen, BindingIntField) {
   )", R"(
     s: Shape = Rect(4, 5);
     match s {
-      r: Rect { out(StringInt(r.w)); out(StringInt(r.h)); }
-      _       { out("other"); }
+      r: Rect { println(StrInt(r.w)); println(StrInt(r.h)); }
+      _       { println("other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -526,8 +526,8 @@ TEST(MatchCodeGen, BindingStrField) {
   auto r = compileAndRun(withFns(kMatchHierarchy, R"(
     a: Animal = Labrador();
     match a {
-      lab: Labrador { out(lab.name); }
-      _             { out("other"); }
+      lab: Labrador { println(lab.name); }
+      _             { println("other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -539,8 +539,8 @@ TEST(MatchCodeGen, BindingMethodCall) {
   auto r = compileAndRun(withFns(kMatchHierarchy, R"(
     a: Animal = Dog();
     match a {
-      dog: Dog { out(dog.speak()); }
-      _        { out("other"); }
+      dog: Dog { println(dog.speak()); }
+      _        { println("other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -552,9 +552,9 @@ TEST(MatchCodeGen, ExactTypeLabradorNotDog) {
   auto r = compileAndRun(withFns(kMatchHierarchy, R"(
     a: Animal = Labrador();
     match a {
-      Dog      { out("dog"); }
-      Labrador { out("labrador"); }
-      _        { out("other"); }
+      Dog      { println("dog"); }
+      Labrador { println("labrador"); }
+      _        { println("other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -566,9 +566,9 @@ TEST(MatchCodeGen, LabradorFallsToWildcard) {
   auto r = compileAndRun(withFns(kMatchHierarchy, R"(
     a: Animal = Labrador();
     match a {
-      Dog { out("dog"); }
-      Cat { out("cat"); }
-      _   { out("other"); }
+      Dog { println("dog"); }
+      Cat { println("cat"); }
+      _   { println("other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -588,10 +588,10 @@ TEST(MatchCodeGen, MatchInFunction) {
       return "unreachable";
     }
   )", R"(
-    out(describe(Dog()));
-    out(describe(Cat()));
-    out(describe(Bird()));
-    out(describe(Labrador()));
+    println(describe(Dog()));
+    println(describe(Cat()));
+    println(describe(Bird()));
+    println(describe(Labrador()));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "dog\ncat\nbird\nunknown\n");
@@ -602,14 +602,14 @@ TEST(MatchCodeGen, MultipleMatchStmts) {
   auto r = compileAndRun(withFns(kMatchHierarchy, R"(
     a: Animal = Cat();
     match a {
-      Dog { out("1:dog"); }
-      Cat { out("1:cat"); }
-      _   { out("1:other"); }
+      Dog { println("1:dog"); }
+      Cat { println("1:cat"); }
+      _   { println("1:other"); }
     }
     match a {
-      Bird { out("2:bird"); }
-      Cat  { out("2:cat"); }
-      _    { out("2:other"); }
+      Bird { println("2:bird"); }
+      Cat  { println("2:cat"); }
+      _    { println("2:other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -629,12 +629,12 @@ TEST(MatchCodeGen, ControlFlowInArm) {
     match n {
       leaf: Leaf {
         if (leaf.val > 5) {
-          out("big");
+          println("big");
         } else {
-          out("small");
+          println("small");
         }
       }
-      _ { out("other"); }
+      _ { println("other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -650,14 +650,14 @@ TEST(MatchCodeGen, SubjectIsCallExpr) {
     }
   )", R"(
     match makeAnimal(1) {
-      Dog { out("dog"); }
-      Cat { out("cat"); }
-      _   { out("other"); }
+      Dog { println("dog"); }
+      Cat { println("cat"); }
+      _   { println("other"); }
     }
     match makeAnimal(2) {
-      Dog { out("dog"); }
-      Cat { out("cat"); }
-      _   { out("other"); }
+      Dog { println("dog"); }
+      Cat { println("cat"); }
+      _   { println("other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -673,24 +673,24 @@ TEST(MatchCodeGen, DeepInheritanceExactType) {
   )", R"(
     x: A = A();
     match x {
-      C { out("C"); }
-      B { out("B"); }
-      A { out("A"); }
-      _ { out("?"); }
+      C { println("C"); }
+      B { println("B"); }
+      A { println("A"); }
+      _ { println("?"); }
     }
     y: A = B();
     match y {
-      C { out("C"); }
-      B { out("B"); }
-      A { out("A"); }
-      _ { out("?"); }
+      C { println("C"); }
+      B { println("B"); }
+      A { println("A"); }
+      _ { println("?"); }
     }
     z: A = C();
     match z {
-      C { out("C"); }
-      B { out("B"); }
-      A { out("A"); }
-      _ { out("?"); }
+      C { println("C"); }
+      B { println("B"); }
+      A { println("A"); }
+      _ { println("?"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -704,11 +704,11 @@ TEST(MatchCodeGen, ArmScopeCleanup) {
     match a {
       Dog {
         tmp: Str = "cleanup-me";
-        out(tmp);
+        println(tmp);
       }
-      _ { out("other"); }
+      _ { println("other"); }
     }
-    out("after");
+    println("after");
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "cleanup-me\nafter\n");

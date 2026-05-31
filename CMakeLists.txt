@@ -48,9 +48,9 @@ endif()
 # reuses the cached result on subsequent runs.  See cmake/ for details.
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
-include(LLVMSetup)          # → paykan_llvm       INTERFACE target
-include(BisonFlexSetup)     # → bison_ext, flex_ext ExternalProject targets
-include(GTestSetup)         # → gtest, gmock       via FetchContent
+include(LLVMSetup)          # -> paykan_llvm       INTERFACE target
+include(BisonFlexSetup)     # -> bison_ext, flex_ext ExternalProject targets
+include(GTestSetup)         # -> gtest, gmock       via FetchContent
 
 enable_testing()
 

@@ -54,7 +54,7 @@ fn main() -> int {
 | `void`  | `void`   | Function return type only          |
 
 
-- `int` → `float` promotion is implicit when assigning or passing to a `float` parameter.
+- `int` -> `float` promotion is implicit when assigning or passing to a `float` parameter.
 
 ### Arrays
 
@@ -177,8 +177,8 @@ if <condition> then <expr> else <expr>
 
 - Condition must be `bool`.
 - Both branches must have a **common supertype** (LUB). For builtins this means equal types
-  (modulo `int → float` promotion). For class types it is the nearest common ancestor in the
-  class hierarchy (e.g. `if c then dog else cat` → `Animal`).
+  (modulo `int -> float` promotion). For class types it is the nearest common ancestor in the
+  class hierarchy (e.g. `if c then dog else cat` -> `Animal`).
 - Both branches must have the **same ownership mode**. Mixing modes is rejected — either both
   unique, both shared, or both `const T&`. To unify across modes, convert explicitly first.
 - Right-associative; can be nested.
@@ -195,7 +195,7 @@ Cast expressions use C-style syntax: `(T)expr`.
 n: int = 42;
 f = (float)n;      // numeric cast — always succeeds, result type: float
 
-a: Animal = Dog("rex");   // upcast Dog → Animal (implicit, non-optional)
+a: Animal = Dog("rex");   // upcast Dog -> Animal (implicit, non-optional)
 b = Cat("meow");
 c = (Animal)b;            // upcast, fine
 match a {                 // downcast using a match statement
@@ -212,7 +212,7 @@ match a {                 // downcast using a match statement
 Cast is an expression and has the **highest precedence** (level 1, prefix form `(T)`).  
 Casting is **not an implicit coercion** — only explicit `(T)` syntax triggers a cast.
 
-### Operator Precedence (highest → lowest)
+### Operator Precedence (highest -> lowest)
 
 | Level | Operators                              | Associativity |
 |-------|----------------------------------------|---------------|
@@ -309,9 +309,9 @@ Use the `(Str)` cast to convert builtin values to strings:
 
 | Expression        | Input type | Result                        |
 |-------------------|------------|-------------------------------|
-| `(Str)n`       | `int`      | Integer → string              |
-| `(Str)f`       | `float`    | Float → string                |
-| `(Str)b`       | `bool`     | Boolean → `"True"` / `"False"`|
+| `(Str)n`       | `int`      | Integer -> string              |
+| `(Str)f`       | `float`    | Float -> string                |
+| `(Str)b`       | `bool`     | Boolean -> `"True"` / `"False"`|
 
 ```
 s: Str = (Str)42;       // "42"

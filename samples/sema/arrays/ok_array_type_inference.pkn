@@ -1,0 +1,7 @@
+// OK: element type is inferred from the literal — no annotation needed
+fn main() -> int {
+  ints   = [1, 2, 3];       // inferred int[]
+  floats = [1.0, 2.0, 3.0]; // inferred float[]
+  bools  = [True, False];   // inferred bool[]
+  return 0;
+}

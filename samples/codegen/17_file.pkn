@@ -1,0 +1,55 @@
+// 17_file.pkn — File builtin type: open, write, readln, equals, toString
+// Exercises: open() builtin returning File, File.write(),
+//            File.readln(), File.toString(), File.equals(), destroy on scope exit
+
+fn writelines(path: Str) -> int {
+  f: File = open(path, "w");
+  f.write("line one\n");
+  f.write("line two\n");
+  f.write("line three\n");
+  return 0;
+}
+
+fn readlines(path: Str) -> int {
+  f: File = open(path, "r");
+  line: Str = f.readln();
+  println(line);           // line one
+  line = f.readln();
+  println(line);           // line two
+  line = f.readln();
+  println(line);           // line three
+  return 0;
+}
+
+fn main() -> int {
+  path: Str = "/tmp/paykan_sample_17.txt";
+
+  // --- 1. open for writing, write lines ------------------------------------
+  println("=== write lines ===");
+  writelines(path);
+
+  // --- 2. open for reading, read lines back --------------------------------
+  println("=== read lines ===");
+  readlines(path);
+
+  // --- 3. toString shows File@ prefix --------------------------------------
+  println("=== toString ===");
+  f: File = open(path, "r");
+  s: Str = f.toString();
+  // We can't predict the exact address, but we can print it.
+  println(s);              // File@0x...
+
+  // --- 4. equals: identity -------------------------------------------------
+  println("=== equals ===");
+  g: File = open(path, "r");
+  // f and g are different handles — not equal
+  eq: bool = f.equals(g);
+  println(StrBool(eq)); // false
+
+  // --- 5. open nonexistent file — stderr message shown, no method call -----
+  println("=== open failure ===");
+  open("/no/such/file_sample_17.txt", "r");
+  // stderr: paykan: open("/no/such/file_sample_17.txt", "r"): No such file or directory
+
+  return 0;
+}

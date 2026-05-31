@@ -1,7 +1,7 @@
 // OK: cross-module class inheritance — three qualifier forms
 //
-//   import shapes::base        → short qualifier "base", full "shapes::base"
-//   import shapes::base as sh  → alias "sh", full "shapes::base"
+//   import shapes::base        -> short qualifier "base", full "shapes::base"
+//   import shapes::base as sh  -> alias "sh", full "shapes::base"
 //
 //   With a plain import (no alias):
 //     base::Shape         — short qualifier (last path segment)

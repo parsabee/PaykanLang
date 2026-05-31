@@ -18,7 +18,7 @@ static std::string wrapMain(const std::string &body) {
 TEST(ControlFlow, IfTrue) {
   auto r = compileAndRun(wrapMain(R"(
     if (True) {
-      out("yes");
+      println("yes");
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -28,9 +28,9 @@ TEST(ControlFlow, IfTrue) {
 TEST(ControlFlow, IfFalse) {
   auto r = compileAndRun(wrapMain(R"(
     if (False) {
-      out("no");
+      println("no");
     }
-    out("done");
+    println("done");
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "done\n");
@@ -40,9 +40,9 @@ TEST(ControlFlow, IfElseTrueBranch) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = 10;
     if (x > 5) {
-      out("big");
+      println("big");
     } else {
-      out("small");
+      println("small");
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -53,9 +53,9 @@ TEST(ControlFlow, IfElseFalseBranch) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = 3;
     if (x > 5) {
-      out("big");
+      println("big");
     } else {
-      out("small");
+      println("small");
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -66,11 +66,11 @@ TEST(ControlFlow, IfElseIfChain) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = 42;
     if (x > 100) {
-      out("large");
+      println("large");
     } else if (x > 10) {
-      out("medium");
+      println("medium");
     } else {
-      out("small");
+      println("small");
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -81,11 +81,11 @@ TEST(ControlFlow, IfElseIfLastBranch) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = 3;
     if (x > 100) {
-      out("large");
+      println("large");
     } else if (x > 10) {
-      out("medium");
+      println("medium");
     } else {
-      out("small");
+      println("small");
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -97,9 +97,9 @@ TEST(ControlFlow, NestedIf) {
     x: int = 5;
     if (x > 0) {
       if (x < 10) {
-        out("single digit");
+        println("single digit");
       } else {
-        out("big");
+        println("big");
       }
     }
   )"));
@@ -119,9 +119,9 @@ TEST(ControlFlow, IfWithReturn) {
       }
     }
     fn main() -> int {
-      out(StringInt(classify(42)));
-      out(StringInt(classify(-5)));
-      out(StringInt(classify(0)));
+      println(StrInt(classify(42)));
+      println(StrInt(classify(-5)));
+      println(StrInt(classify(0)));
       return 0;
     }
   )");
@@ -137,7 +137,7 @@ TEST(ControlFlow, WhileCountUp) {
   auto r = compileAndRun(wrapMain(R"(
     i: int = 0;
     while (i < 5) {
-      out(StringInt(i));
+      println(StrInt(i));
       i = i + 1;
     }
   )"));
@@ -148,9 +148,9 @@ TEST(ControlFlow, WhileCountUp) {
 TEST(ControlFlow, WhileNeverExecutes) {
   auto r = compileAndRun(wrapMain(R"(
     while (False) {
-      out("nope");
+      println("nope");
     }
-    out("done");
+    println("done");
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "done\n");
@@ -164,7 +164,7 @@ TEST(ControlFlow, WhileSum) {
       sum = sum + i;
       i = i + 1;
     }
-    out(StringInt(sum));
+    println(StrInt(sum));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "55\n");
@@ -175,7 +175,7 @@ TEST(ControlFlow, WhileWithIf) {
     i: int = 0;
     while (i < 6) {
       if (i % 2 == 0) {
-        out(StringInt(i));
+        println(StrInt(i));
       }
       i = i + 1;
     }
@@ -196,7 +196,7 @@ TEST(ControlFlow, NestedWhile) {
       }
       i = i + 1;
     }
-    out(StringInt(count));
+    println(StrInt(count));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "9\n");
@@ -209,7 +209,7 @@ TEST(ControlFlow, NestedWhile) {
 TEST(ControlFlow, LogicalAndTrueTrue) {
   auto r = compileAndRun(wrapMain(R"(
     a: bool = True && True;
-    out(StringBool(a));
+    println(StrBool(a));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "True\n");
@@ -218,7 +218,7 @@ TEST(ControlFlow, LogicalAndTrueTrue) {
 TEST(ControlFlow, LogicalAndTrueFalse) {
   auto r = compileAndRun(wrapMain(R"(
     a: bool = True && False;
-    out(StringBool(a));
+    println(StrBool(a));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "False\n");
@@ -227,7 +227,7 @@ TEST(ControlFlow, LogicalAndTrueFalse) {
 TEST(ControlFlow, LogicalAndFalseShortCircuit) {
   auto r = compileAndRun(wrapMain(R"(
     a: bool = False && True;
-    out(StringBool(a));
+    println(StrBool(a));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "False\n");
@@ -236,7 +236,7 @@ TEST(ControlFlow, LogicalAndFalseShortCircuit) {
 TEST(ControlFlow, LogicalOrFalseFalse) {
   auto r = compileAndRun(wrapMain(R"(
     a: bool = False || False;
-    out(StringBool(a));
+    println(StrBool(a));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "False\n");
@@ -245,7 +245,7 @@ TEST(ControlFlow, LogicalOrFalseFalse) {
 TEST(ControlFlow, LogicalOrTrueShortCircuit) {
   auto r = compileAndRun(wrapMain(R"(
     a: bool = True || False;
-    out(StringBool(a));
+    println(StrBool(a));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "True\n");
@@ -254,7 +254,7 @@ TEST(ControlFlow, LogicalOrTrueShortCircuit) {
 TEST(ControlFlow, LogicalOrFalseTrue) {
   auto r = compileAndRun(wrapMain(R"(
     a: bool = False || True;
-    out(StringBool(a));
+    println(StrBool(a));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "True\n");
@@ -264,9 +264,9 @@ TEST(ControlFlow, LogicalWithRelational) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = 5;
     a: bool = x > 0 && x < 10;
-    out(StringBool(a));
+    println(StrBool(a));
     b: bool = x < 0 || x > 3;
-    out(StringBool(b));
+    println(StrBool(b));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "True\nTrue\n");
@@ -277,9 +277,9 @@ TEST(ControlFlow, LogicalInIfCondition) {
     x: int = 5;
     y: int = 10;
     if (x > 0 && y > 0) {
-      out("both positive");
+      println("both positive");
     } else {
-      out("not both positive");
+      println("not both positive");
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -294,7 +294,7 @@ TEST(ControlFlow, LogicalInWhileCondition) {
       i = i + 1;
       j = j - 1;
     }
-    out(StringInt(i), StringInt(j));
+    println(StrInt(i), StrInt(j));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "55\n");
@@ -303,9 +303,9 @@ TEST(ControlFlow, LogicalInWhileCondition) {
 TEST(ControlFlow, LogicalChained) {
   auto r = compileAndRun(wrapMain(R"(
     a: bool = True && True || False;
-    out(StringBool(a));
+    println(StrBool(a));
     b: bool = False || False && True;
-    out(StringBool(b));
+    println(StrBool(b));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "True\nFalse\n");
@@ -314,9 +314,9 @@ TEST(ControlFlow, LogicalChained) {
 TEST(ControlFlow, LogicalNot) {
   auto r = compileAndRun(wrapMain(R"(
     a: bool = !True && False;
-    out(StringBool(a));
+    println(StrBool(a));
     b: bool = !False || False;
-    out(StringBool(b));
+    println(StrBool(b));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "False\nTrue\n");
@@ -329,7 +329,7 @@ TEST(ControlFlow, LogicalNot) {
 TEST(ControlFlow, TernaryTrueBranch) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = if True then 10 else 20;
-    out(StringInt(x));
+    println(StrInt(x));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "10\n");
@@ -338,7 +338,7 @@ TEST(ControlFlow, TernaryTrueBranch) {
 TEST(ControlFlow, TernaryFalseBranch) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = if False then 10 else 20;
-    out(StringInt(x));
+    println(StrInt(x));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "20\n");
@@ -348,7 +348,7 @@ TEST(ControlFlow, TernaryWithCondition) {
   auto r = compileAndRun(wrapMain(R"(
     a: int = 5;
     x: int = if a > 3 then 100 else 200;
-    out(StringInt(x));
+    println(StrInt(x));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "100\n");
@@ -357,7 +357,7 @@ TEST(ControlFlow, TernaryWithCondition) {
 TEST(ControlFlow, TernaryNested) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = if False then 1 else if True then 2 else 3;
-    out(StringInt(x));
+    println(StrInt(x));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "2\n");
@@ -366,7 +366,7 @@ TEST(ControlFlow, TernaryNested) {
 TEST(ControlFlow, TernaryBoolResult) {
   auto r = compileAndRun(wrapMain(R"(
     x: bool = if True then False else True;
-    out(StringBool(x));
+    println(StrBool(x));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "False\n");
@@ -383,7 +383,7 @@ TEST(ControlFlow, BreakExitsLoop) {
       if (i == 3) { break; }
       i = i + 1;
     }
-    out(StringInt(i));
+    println(StrInt(i));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "3\n");
@@ -398,7 +398,7 @@ TEST(ControlFlow, ContinueSkipsRest) {
       if (i == 3) { continue; }
       sum = sum + i;
     }
-    out(StringInt(sum));
+    println(StrInt(sum));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "12\n");
@@ -417,7 +417,7 @@ TEST(ControlFlow, BreakInnerLoopOnly) {
       }
       i = i + 1;
     }
-    out(StringInt(count));
+    println(StrInt(count));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "6\n");
@@ -435,7 +435,7 @@ TEST(ControlFlow, ContinueSumEvens) {
       result = result + i;
       i = i + 1;
     }
-    out(StringInt(result));
+    println(StrInt(result));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "20\n");
@@ -448,7 +448,7 @@ TEST(ControlFlow, BreakWhileTrue) {
       x = x - 7;
       if (x < 50) { break; }
     }
-    out(StringInt(x));
+    println(StrInt(x));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "44\n");

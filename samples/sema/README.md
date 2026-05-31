@@ -1,8 +1,16 @@
 # Sema Samples
 
-Sample `.pkn` files that exercise the semantic analysis pass for class-related
-checks. Each file is self-contained and can be run with the `--check-only` flag
-to stop after type-checking (no codegen or JIT execution).
+Sample `.pkn` files that exercise the semantic analysis pass. Each file is
+self-contained and can be run with the `--check-only` flag to stop after
+type-checking (no codegen or JIT execution).
+
+## Directory layout
+
+| Directory  | Feature area                                      |
+|------------|---------------------------------------------------|
+| `arrays/`  | Array types, literals, subscript, `len()`, match  |
+| `classes/` | Class declarations, fields, methods, inheritance, `__super__` |
+| `match/`   | `match` statement — arms, bindings, wildcards     |
 
 ## Running
 
@@ -10,8 +18,13 @@ to stop after type-checking (no codegen or JIT execution).
 # Type-check a single file — exits 0 on success, 1 on error
 paykan --check-only <file.pkn>
 
-# Type-check all samples and print results
-for f in samples/sema/*.pkn; do
+# Type-check all samples in a feature directory
+for f in samples/sema/arrays/*.pkn; do
+  paykan --check-only "$f" 2>&1 && echo "OK: $f" || echo "ERR: $f"
+done
+
+# Type-check every sample across all feature directories
+for f in samples/sema/arrays/*.pkn samples/sema/classes/*.pkn samples/sema/match/*.pkn; do
   paykan --check-only "$f" 2>&1 && echo "OK: $f" || echo "ERR: $f"
 done
 ```

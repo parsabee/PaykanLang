@@ -1,0 +1,5 @@
+// ERROR: len() argument is not an array
+fn main() -> int {
+  n: int = len(42);  // sema error: 'len' expects an array argument, got 'int'
+  return 0;
+}

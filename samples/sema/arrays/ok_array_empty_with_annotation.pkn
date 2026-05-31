@@ -1,0 +1,7 @@
+// OK: empty literal is valid when an explicit array type annotation is present
+fn main() -> int {
+  a: int[]   = [];
+  b: float[] = [];
+  c: Str[]   = [];
+  return 0;
+}

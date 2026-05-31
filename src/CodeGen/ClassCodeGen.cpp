@@ -127,7 +127,7 @@ ast::ClassType *ClassCodeGen::getExprClassType(ast::Expr *expr) const {
   if (auto *id = ast::dyn_cast<ast::Identifier>(expr)) {
     if (CG.CurrentScope) {
       auto *astTy = CG.CurrentScope->lookupASTType(id->getName());
-      if (auto *ct = llvm::dyn_cast_or_null<ast::ClassType>(astTy)) {
+      if (auto *ct = ast::dyn_cast<ast::ClassType>(astTy)) {
         // Canonicalize: parser may have stored a stub ClassType.
         if (auto *canonical = CG.ASTCtx.lookupClassType(ct->getName()))
           return canonical;
@@ -139,11 +139,13 @@ ast::ClassType *ClassCodeGen::getExprClassType(ast::Expr *expr) const {
       return CurrentMethodClassType;
   }
   if (auto *mae = ast::dyn_cast<ast::MemberAccessExpr>(expr))
-    return llvm::dyn_cast_or_null<ast::ClassType>(mae->getResolvedType());
+    return ast::dyn_cast<ast::ClassType>(mae->getResolvedType());
   if (auto *mce = ast::dyn_cast<ast::MethodCallExpr>(expr))
-    return llvm::dyn_cast_or_null<ast::ClassType>(mce->getResolvedType());
+    return ast::dyn_cast<ast::ClassType>(mce->getResolvedType());
   if (auto *ce = ast::dyn_cast<ast::CallExpr>(expr))
-    return llvm::dyn_cast_or_null<ast::ClassType>(ce->getResolvedType());
+    return ast::dyn_cast<ast::ClassType>(ce->getResolvedType());
+  if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(expr))
+    return ast::dyn_cast<ast::ClassType>(se->getResolvedType());
   return nullptr;
 }
 
@@ -169,6 +171,15 @@ std::string ClassCodeGen::findConcreteMethodFuncName(ast::ClassType *ct,
     if (name == kMethodEquals)   return kPaykanStringEquals;
     if (name == kMethodLength)   return kPaykanStringLength;
     if (name == kMethodConcat)   return kPaykanStringConcat;
+    return "";
+  }
+  // Builtin File.
+  if (ct == CG.ASTCtx.getFileTy()) {
+    if (name == kMethodDestroy)  return kPaykanFileDestroy;
+    if (name == kMethodToString) return kPaykanFileToString;
+    if (name == kMethodEquals)   return kPaykanFileEquals;
+    if (name == kMethodWrite)    return kPaykanFileWrite;
+    if (name == kMethodReadln)   return kPaykanFileReadln;
     return "";
   }
   // User-defined class: prefer the most-derived concrete function.
@@ -261,7 +272,7 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
         auto *pty  = md->getParamTypes()[i];
         auto *alloca = CG.createEntryAlloca(fn, p.Name, arg->getType());
         CG.Builder.CreateStore(arg, alloca);
-        if (ast::isa<ast::ClassType>(pty))
+        if (ast::isRefType(pty))
           CG.CurrentScope->declare(p.Name, alloca, pty);
         else
           CG.CurrentScope->declare(p.Name, alloca, nullptr);
@@ -441,7 +452,7 @@ ClassCodeGen::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
 
   // Evaluate the receiver.
   // Note: visitIdentifier already unwraps owned class variables (PaykanShared*
-  // → raw object pointer), so no additional unwrapping is needed here.
+  // -> raw object pointer), so no additional unwrapping is needed here.
   llvm::Value *objPtr = CG.emitExpr(node->getReceiver());
   if (!objPtr) return nullptr;
 
@@ -525,7 +536,7 @@ ClassCodeGen::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
 
   // Determine the ClassType of the receiver.
   // Note: visitIdentifier already unwraps owned class variables (PaykanShared*
-  // → raw object pointer), so objPtr is already the raw struct pointer.
+  // -> raw object pointer), so objPtr is already the raw struct pointer.
   ast::ClassType *ct = getExprClassType(node->getReceiver());
   if (!ct) return nullptr;
 

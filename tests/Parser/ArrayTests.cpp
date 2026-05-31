@@ -178,7 +178,7 @@ TEST(Array, SubscriptPassedToCall) {
   auto [ok, _] = parse(R"(
     fn main() -> int {
       a: Str[] = ["hi"];
-      out(a[0]);
+      println(a[0]);
       return 0;
     }
   )");
@@ -242,7 +242,7 @@ TEST(Array, MatchArrayArmWithBinding) {
     fn main() -> int {
       x: Obj = ["hello", "world"];
       match x {
-        arr: Str[] { out(arr[0]); }
+        arr: Str[] { println(arr[0]); }
         _          { }
       }
       return 0;
@@ -273,7 +273,7 @@ TEST(Array, MatchArrayWithBody) {
       match x {
         arr: Str[] {
           n: int = len(arr);
-          if (n > 0) { out(arr[0]); }
+          if (n > 0) { println(arr[0]); }
         }
         _ { }
       }

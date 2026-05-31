@@ -1,0 +1,132 @@
+// 18_subscript_assign.pkn — array index assignment and string subscript read
+// Covers: arr[idx] = val for int / float / bool / Str arrays,
+//         str[idx] returning a single-char Str,
+//         iterating over string characters via subscript,
+//         mixed subscript read + write in a loop.
+// Exercises: visitSubscriptAssignStmt (CodeGen), PaykanArray_set,
+//            PaykanString_at, visitSubscriptExpr on Str receiver.
+
+// ---- helpers ---------------------------------------------------------------
+
+fn printBool(b: bool) -> int {
+  println(StrBool(b));
+  return 0;
+}
+
+// ---- 1. int array index assignment -----------------------------------------
+
+fn intArrayAssign() -> int {
+  println("=== int array assign ===");
+  arr: int[] = [10, 20, 30];
+  arr[0] = 99;
+  arr[2] = 42;
+  println(StrInt(arr[0]));  // 99
+  println(StrInt(arr[1]));  // 20
+  println(StrInt(arr[2]));  // 42
+  return 0;
+}
+
+// ---- 2. float array index assignment ---------------------------------------
+
+fn floatArrayAssign() -> int {
+  println("=== float array assign ===");
+  arr: float[] = [1.0, 2.0, 3.0];
+  arr[1] = 9.5;
+  println(StrFloat(arr[0]));  // 1.0
+  println(StrFloat(arr[1]));  // 9.5
+  println(StrFloat(arr[2]));  // 3.0
+  return 0;
+}
+
+// ---- 3. bool array index assignment ----------------------------------------
+
+fn boolArrayAssign() -> int {
+  println("=== bool array assign ===");
+  arr: bool[] = [True, False, True];
+  arr[0] = False;
+  arr[2] = False;
+  printBool(arr[0]);  // False
+  printBool(arr[1]);  // False
+  printBool(arr[2]);  // False
+  return 0;
+}
+
+// ---- 4. Str array index assignment -----------------------------------------
+
+fn strArrayAssign() -> int {
+  println("=== str array assign ===");
+  arr: Str[] = ["a", "b", "c"];
+  arr[1] = "hello";
+  println(arr[0]);  // a
+  println(arr[1]);  // hello
+  println(arr[2]);  // c
+  return 0;
+}
+
+// ---- 5. In-place loop overwrite --------------------------------------------
+
+fn loopOverwrite() -> int {
+  println("=== loop overwrite ===");
+  arr: int[] = [0, 0, 0, 0, 0];
+  i: int = 0;
+  while (i < 5) {
+    arr[i] = i * i;
+    i = i + 1;
+  }
+  i = 0;
+  while (i < 5) {
+    println(StrInt(arr[i]));  // 0 1 4 9 16
+    i = i + 1;
+  }
+  return 0;
+}
+
+// ---- 6. String subscript read ----------------------------------------------
+
+fn strSubscript() -> int {
+  println("=== str subscript ===");
+  s: Str = "paykan";
+  println(s[0]);  // p
+  println(s[5]);  // n
+  c: Str = s[3];
+  println(c);     // k
+  return 0;
+}
+
+// ---- 7. Iterate over string characters -------------------------------------
+
+fn iterString() -> int {
+  println("=== iter string ===");
+  s: Str = "hello";
+  n: int = s.len();
+  i: int = 0;
+  while (i < n) {
+    println(s[i]);
+    i = i + 1;
+  }
+  return 0;
+}
+
+// ---- 8. Build a new string by reading chars --------------------------------
+
+fn reverseFirstThree() -> int {
+  println("=== reverse first three ===");
+  s: Str = "abcdef";
+  result: Str = s[2] + s[1] + s[0];
+  println(result);  // cba
+  return 0;
+}
+
+// ---- main ------------------------------------------------------------------
+
+fn main() -> int {
+  intArrayAssign();
+  floatArrayAssign();
+  boolArrayAssign();
+  strArrayAssign();
+  loopOverwrite();
+  strSubscript();
+  iterString();
+  reverseFirstThree();
+  return 0;
+}

@@ -13,7 +13,7 @@ TEST(ControlFlow, IfStmt) {
   auto [ok, _] = parse(R"(
     fn main() -> int {
       if (True) {
-        out("yes");
+        println("yes");
       }
       return 0;
     }
@@ -26,9 +26,9 @@ TEST(ControlFlow, IfElseStmt) {
     fn main() -> int {
       x: int = 10;
       if (x > 5) {
-        out("big");
+        println("big");
       } else {
-        out("small");
+        println("small");
       }
       return 0;
     }
@@ -41,11 +41,11 @@ TEST(ControlFlow, IfElseIfElse) {
     fn main() -> int {
       x: int = 42;
       if (x > 100) {
-        out("large");
+        println("large");
       } else if (x > 10) {
-        out("medium");
+        println("medium");
       } else {
-        out("small");
+        println("small");
       }
       return 0;
     }
@@ -59,7 +59,7 @@ TEST(ControlFlow, NestedIf) {
       x: int = 5;
       if (x > 0) {
         if (x < 10) {
-          out("single digit positive");
+          println("single digit positive");
         }
       }
       return 0;

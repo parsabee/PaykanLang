@@ -16,7 +16,7 @@
 //
 // Matrix literal format: "[[r0c0 r0c1 ...] [r1c0 r1c1 ...] ...]"
 //   Rows are space-separated numbers inside [...]; rows are separated by spaces.
-//   Example:  a = [[1 2 3] [4 5 6]]  →  2×3 matrix
+//   Example:  a = [[1 2 3] [4 5 6]]  ->  2×3 matrix
 //
 // Parsing uses std::read(std::in()), std::split(s," "), and (int)/(float) casts.
 
@@ -27,8 +27,8 @@ import env::env;
 
 // ── output helpers ────────────────────────────────────────────────────────────
 
-fn print(msg: Str) {
-  std::write(std::out(), msg);
+fn println(msg: Str) {
+  std::write(std::println(), msg);
 }
 
 fn error(msg: Str) {
@@ -46,7 +46,7 @@ fn isMatLit(s: Str) -> bool {
 fn joinFrom(parts: Str[], start: int) -> Str {
   result: Str = parts[start];
   i: int = start + 1;
-  while (i < len(parts)) {
+  while (i < parts.len()) {
     result = result + " " + parts[i];
     i = i + 1;
   }
@@ -57,7 +57,7 @@ fn joinFrom(parts: Str[], start: int) -> Str {
 fn countValid(toks: Str[]) -> int {
   n: int = 0;
   i: int = 0;
-  while (i < len(toks)) {
+  while (i < toks.len()) {
     if (toks[i] != "") { n = n + 1; }
     i = i + 1;
   }
@@ -68,8 +68,8 @@ fn countValid(toks: Str[]) -> int {
 // Parses "[[r0c0 r0c1 ...] [r1c0 ...] ...]" into a Mat.
 //
 // Algorithm (only std::split is needed):
-//   1. Split the whole string by "]"  → one segment per row + trailing empty.
-//   2. Per segment: split by "["  → last element is the space-separated numbers.
+//   1. Split the whole string by "]"  -> one segment per row + trailing empty.
+//   2. Per segment: split by "["  -> last element is the space-separated numbers.
 //   3. Split that by " " and skip empty tokens to get individual values.
 //   4. Two passes: first count rows/cols, then create Mat and fill.
 
@@ -80,9 +80,9 @@ fn parseMatLit(s: Str) -> matrix::Mat {
   rows: int = 0;
   cols: int = 0;
   i: int = 0;
-  while (i < len(rowSegs)) {
+  while (i < rowSegs.len()) {
     bParts: Str[] = std::split(rowSegs[i], "[");
-    numStr: Str = bParts[len(bParts) - 1];
+    numStr: Str = bParts[bParts.len() - 1];
     validCols: int = countValid(std::split(numStr, " "));
     if (validCols > 0) {
       if (rows == 0) { cols = validCols; }
@@ -96,13 +96,13 @@ fn parseMatLit(s: Str) -> matrix::Mat {
   // Pass 2 — fill values
   r: int = 0;
   i = 0;
-  while (i < len(rowSegs)) {
+  while (i < rowSegs.len()) {
     bParts: Str[] = std::split(rowSegs[i], "[");
-    numStr: Str = bParts[len(bParts) - 1];
+    numStr: Str = bParts[bParts.len() - 1];
     toks: Str[] = std::split(numStr, " ");
     c: int = 0;
     j: int = 0;
-    while (j < len(toks)) {
+    while (j < toks.len()) {
       if (toks[j] != "") {
         matrix::matSet(result, r, c, (float)toks[j]);
         c = c + 1;
@@ -144,10 +144,10 @@ fn applyMatOp(a: matrix::Mat, op: Str, b: matrix::Mat) -> matrix::Mat {
 
 fn runShow(environ: env::Env, name: Str) {
   if (env::envHasInt(environ, name)) {
-    print(name + " = " + (Str)env::envGetInt(environ, name) + "\n");
+    println(name + " = " + (Str)env::envGetInt(environ, name) + "\n");
   } else if (env::envHasMat(environ, name)) {
     m: matrix::Mat = env::envGetMat(environ, name);
-    print(name + " [" + matrix::matDimsStr(m) + "] =\n" + matrix::matToStr(m) + "\n");
+    println(name + " [" + matrix::matDimsStr(m) + "] =\n" + matrix::matToStr(m) + "\n");
   } else {
     error("undefined variable '" + name + "'");
   }
@@ -161,7 +161,7 @@ fn runScale(environ: env::Env, name: Str, sStr: Str) {
     return;
   }
   result: matrix::Mat = matrix::matScale(env::envGetMat(environ, name), (float)sStr);
-  print(sStr + " * " + name + " =\n" + matrix::matToStr(result) + "\n");
+  println(sStr + " * " + name + " =\n" + matrix::matToStr(result) + "\n");
 }
 
 fn runScaleStore(environ: env::Env, target: Str, name: Str, sStr: Str) {
@@ -171,7 +171,7 @@ fn runScaleStore(environ: env::Env, target: Str, name: Str, sStr: Str) {
   }
   result: matrix::Mat = matrix::matScale(env::envGetMat(environ, name), (float)sStr);
   env::envSetMat(environ, target, result);
-  print(target + " = [" + matrix::matDimsStr(result) + " matrix]\n");
+  println(target + " = [" + matrix::matDimsStr(result) + " matrix]\n");
 }
 
 // ── binary op (print result) ──────────────────────────────────────────────────
@@ -187,7 +187,7 @@ fn runBinOp(environ: env::Env, lhs: Str, op: Str, rhs: Str) {
     b: matrix::Mat = env::envGetMat(environ, rhs);
     if (!dimOk(a, op, b)) { error(dimErrMsg(a, op, b)); return; }
     result: matrix::Mat = applyMatOp(a, op, b);
-    print(lhs + " " + op + " " + rhs + " =\n" + matrix::matToStr(result) + "\n");
+    println(lhs + " " + op + " " + rhs + " =\n" + matrix::matToStr(result) + "\n");
   } else {
     // int: look up in env or treat as literal
     a: int = if env::envHasInt(environ, lhs) then env::envGetInt(environ, lhs) else (int)lhs;
@@ -196,7 +196,7 @@ fn runBinOp(environ: env::Env, lhs: Str, op: Str, rhs: Str) {
     sop: scalar::Op = scalar::parseOp(op);
     if (sop == scalar::Op::Div && b == 0) { error("division by zero"); return; }
     result: int = scalar::applyOp(sop, a, b);
-    print(lhs + " " + op + " " + rhs + " = " + (Str)result + "\n");
+    println(lhs + " " + op + " " + rhs + " = " + (Str)result + "\n");
   }
 }
 
@@ -214,7 +214,7 @@ fn runBinOpStore(environ: env::Env, target: Str, lhs: Str, op: Str, rhs: Str) {
     if (!dimOk(a, op, b)) { error(dimErrMsg(a, op, b)); return; }
     result: matrix::Mat = applyMatOp(a, op, b);
     env::envSetMat(environ, target, result);
-    print(target + " = [" + matrix::matDimsStr(result) + " matrix]\n");
+    println(target + " = [" + matrix::matDimsStr(result) + " matrix]\n");
   } else {
     a: int = if env::envHasInt(environ, lhs) then env::envGetInt(environ, lhs) else (int)lhs;
     b: int = if env::envHasInt(environ, rhs) then env::envGetInt(environ, rhs) else (int)rhs;
@@ -223,7 +223,7 @@ fn runBinOpStore(environ: env::Env, target: Str, lhs: Str, op: Str, rhs: Str) {
     if (sop == scalar::Op::Div && b == 0) { error("division by zero"); return; }
     result: int = scalar::applyOp(sop, a, b);
     env::envSetInt(environ, target, result);
-    print(target + " = " + (Str)result + "\n");
+    println(target + " = " + (Str)result + "\n");
   }
 }
 
@@ -241,25 +241,25 @@ fn runAssign(environ: env::Env, parts: Str[]) {
   if (isMatLit(parts[2])) {
     m: matrix::Mat = parseMatLit(joinFrom(parts, 2));
     env::envSetMat(environ, target, m);
-    print(target + " = [" + matrix::matDimsStr(m) + " matrix assigned]\n");
-  } else if (len(parts) == 5 && parts[2] == "scale") {
+    println(target + " = [" + matrix::matDimsStr(m) + " matrix assigned]\n");
+  } else if (parts.len() == 5 && parts[2] == "scale") {
     runScaleStore(environ, target, parts[3], parts[4]);
-  } else if (len(parts) == 5) {
+  } else if (parts.len() == 5) {
     // name = src1 op src2
     runBinOpStore(environ, target, parts[2], parts[3], parts[4]);
-  } else if (len(parts) == 3) {
+  } else if (parts.len() == 3) {
     // name = int_literal  or  name = varname
     if (env::envHasMat(environ, parts[2])) {
       env::envSetMat(environ, target, env::envGetMat(environ, parts[2]));
       m: matrix::Mat = env::envGetMat(environ, target);
-      print(target + " = [" + matrix::matDimsStr(m) + " matrix copied]\n");
+      println(target + " = [" + matrix::matDimsStr(m) + " matrix copied]\n");
     } else if (env::envHasInt(environ, parts[2])) {
       env::envSetInt(environ, target, env::envGetInt(environ, parts[2]));
-      print(target + " = " + (Str)env::envGetInt(environ, target) + "\n");
+      println(target + " = " + (Str)env::envGetInt(environ, target) + "\n");
     } else {
       v: int = (int)parts[2];
       env::envSetInt(environ, target, v);
-      print(target + " = " + (Str)v + "\n");
+      println(target + " = " + (Str)v + "\n");
     }
   } else {
     error("unrecognized assignment form");
@@ -269,32 +269,32 @@ fn runAssign(environ: env::Env, parts: Str[]) {
 // ── main ──────────────────────────────────────────────────────────────────────
 
 fn main() -> int {
-  print("Paykan Calc REPL\n");
-  print("  <name> = <int>                    assign integer\n");
-  print("  <name> = [[r0c0 r0c1] [r1c0 ...]] assign matrix\n");
-  print("  <name> = <a> <op> <b>             compute and store  (ops: + - * /)\n");
-  print("  <a> <op> <b>                      compute and print  (vars or literals)\n");
-  print("  scale <name> <float>              scale matrix by float\n");
-  print("  <name> = scale <src> <float>      scale and store\n");
-  print("  show <name>                       print variable\n");
-  print("  vars                              list all variables\n");
-  print("  quit\n\n");
+  println("Paykan Calc REPL\n");
+  println("  <name> = <int>                    assign integer\n");
+  println("  <name> = [[r0c0 r0c1] [r1c0 ...]] assign matrix\n");
+  println("  <name> = <a> <op> <b>             compute and store  (ops: + - * /)\n");
+  println("  <a> <op> <b>                      compute and print  (vars or literals)\n");
+  println("  scale <name> <float>              scale matrix by float\n");
+  println("  <name> = scale <src> <float>      scale and store\n");
+  println("  show <name>                       print variable\n");
+  println("  vars                              list all variables\n");
+  println("  quit\n\n");
 
   environ = env::Env();
 
   running: bool = True;
   while (running) {
-    print("> ");
+    println("> ");
     line: Str = std::read(std::in());
     parts: Str[] = std::split(line, " ");
-    n = len(parts);
+    n = parts.len();
 
     if (n == 0) {
       // empty line — skip
     } else if (n == 1) {
       match parts[0] {
         "quit" { running = False; }
-        "vars" { print(env::envListVars(environ)); }
+        "vars" { println(env::envListVars(environ)); }
         _      { error("unknown command '" + parts[0] + "'"); }
       }
     } else if (n == 2 && parts[0] == "show") {
@@ -310,6 +310,6 @@ fn main() -> int {
     }
   }
 
-  print("bye.\n");
+  println("bye.\n");
   return 0;
 }

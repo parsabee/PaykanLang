@@ -28,7 +28,7 @@ add_custom_command(
             --output=${PARSER_CPP}
             ${PARSER_YPP}
     DEPENDS ${PARSER_YPP} bison_ext
-    COMMENT "Bison: Parser.ypp → Parser.ypp.cpp + Parser.ypp.h"
+    COMMENT "Bison: Parser.ypp -> Parser.ypp.cpp + Parser.ypp.h"
     VERBATIM
 )
 
@@ -39,7 +39,7 @@ add_custom_command(
             --outfile=${LEXER_CPP}
             ${LEXER_LPP}
     DEPENDS ${LEXER_LPP} flex_ext ${PARSER_HPP}   # lexer includes the parser header
-    COMMENT "Flex: Lexer.lpp → Lexer.lpp.cpp"
+    COMMENT "Flex: Lexer.lpp -> Lexer.lpp.cpp"
     VERBATIM
 )
 

@@ -1,4 +1,4 @@
-// ERROR: assigning wrong type to a field (float → int is not assignable)
+// ERROR: assigning wrong type to a field (float -> int is not assignable)
 class A {
   x: int;
 

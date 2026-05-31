@@ -10,7 +10,7 @@ reference is qualified with the module's name.
 
 - **One module per file.** Each `.pkn` file *is* a module. There is no syntactic module
   declaration — the file is the module.
-- **Module name = file basename**, lowercased (`lexer.pkn` → module `lexer`).
+- **Module name = file basename**, lowercased (`lexer.pkn` -> module `lexer`).
 - Module names follow Python naming: `lower_snake_case`. The compiler rejects any other
   casing for source files used as modules.
 - **All cross-module access is qualified.** After `import other::ast;`, every name

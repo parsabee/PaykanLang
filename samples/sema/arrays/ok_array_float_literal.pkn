@@ -1,0 +1,5 @@
+// OK: float[] declared and initialised
+fn main() -> int {
+  a: float[] = [1.0, 2.5, 3.14];
+  return 0;
+}

@@ -1,0 +1,5 @@
+// ERROR: declared type and literal element type disagree
+fn main() -> int {
+  a: int[] = [1.0, 2.0, 3.0];  // sema error: float[] does not match int[]
+  return 0;
+}
