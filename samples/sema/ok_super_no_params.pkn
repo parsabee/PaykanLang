@@ -1,0 +1,16 @@
+// OK: superclass __init__ has no parameters — __super__ not required
+class Base {
+  fn __init__() {}
+}
+
+class Child : Base {
+  x: int;
+
+  fn __init__(x: int) {
+    self.x = x;
+  }
+}
+
+fn main() -> int {
+  return 0;
+}

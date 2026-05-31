@@ -1,5 +1,0 @@
-fn main() -> int {
-  // Error: reference must bind to an existing variable, not a literal
-  a: String& = "hello";  // error: must be initialized from an existing variable
-  return 0;
-}

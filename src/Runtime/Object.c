@@ -11,6 +11,7 @@
 // -- VTable ------------------------------------------------------------------
 
 PaykanObjectVTable PaykanObject_vtable = {
+    .destroy  = PaykanObject_destroy,
     .toString = PaykanObject_toString,
     .equals   = PaykanObject_equals,
 };
@@ -23,7 +24,7 @@ PaykanObject *PaykanObject_new(void) {
   return obj;
 }
 
-void PaykanObject_delete(PaykanObject *self) {
+void PaykanObject_destroy(PaykanObject *self) {
   free(self);
 }
 
@@ -40,3 +41,29 @@ int64_t PaykanObject_equals(PaykanObject *self, PaykanObject *other) {
   // Default: identity (pointer) equality.
   return self == other;
 }
+
+// -- None singleton ----------------------------------------------------------
+//
+// None is a shared immortal Obj instance.  Its toString returns "None" and
+// its equals always returns 0 (None is only equal to itself via identity).
+
+static void PaykanNone_destroy(PaykanObject *self) {
+  (void)self; // immortal — never freed
+}
+
+static PaykanString *PaykanNone_toString(PaykanObject *self) {
+  (void)self;
+  return PaykanString_new("None", 4);
+}
+
+static int64_t PaykanNone_equals(PaykanObject *self, PaykanObject *other) {
+  return self == other;
+}
+
+static PaykanObjectVTable PaykanNone_vtable = {
+    .destroy  = PaykanNone_destroy,
+    .toString = PaykanNone_toString,
+    .equals   = PaykanNone_equals,
+};
+
+PaykanObject PaykanObject_None = { &PaykanNone_vtable };

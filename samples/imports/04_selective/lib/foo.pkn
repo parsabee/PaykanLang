@@ -1,0 +1,2 @@
+// Module: lib/foo
+fn fooVal() -> int { return 10; }

@@ -8,8 +8,20 @@ llvm_map_components_to_libnames(TEST_LLVM_LIBS
 )
 
 # --- Parser tests -----------------------------------------------------------
-add_executable(parser_tests ParserTests.cpp)
-target_include_directories(parser_tests SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
+add_executable(parser_tests
+    Parser/ArithTests.cpp
+    Parser/FuncTests.cpp
+    Parser/ControlFlowTests.cpp
+    Parser/ClassTests.cpp
+    Parser/ModuleTests.cpp
+    Parser/ArrayTests.cpp
+)
+target_include_directories(parser_tests
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_include_directories(parser_tests SYSTEM
+    PRIVATE ${LLVM_INCLUDE_DIRS}
+)
 target_link_libraries(parser_tests
     PRIVATE gtest_main
             paykan_parser
@@ -19,8 +31,19 @@ target_link_libraries(parser_tests
 add_test(NAME ParserTests COMMAND parser_tests)
 
 # --- Sema tests -------------------------------------------------------------
-add_executable(sema_tests SemaTests.cpp)
-target_include_directories(sema_tests SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
+add_executable(sema_tests
+    Sema/ArithTests.cpp
+    Sema/FuncTests.cpp
+    Sema/ControlFlowTests.cpp
+    Sema/ClassTests.cpp
+    Sema/ModuleTests.cpp
+)
+target_include_directories(sema_tests
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_include_directories(sema_tests SYSTEM
+    PRIVATE ${LLVM_INCLUDE_DIRS}
+)
 target_link_libraries(sema_tests
     PRIVATE gtest_main
             paykan_sema
@@ -31,8 +54,19 @@ target_link_libraries(sema_tests
 add_test(NAME SemaTests COMMAND sema_tests)
 
 # --- CodeGen / E2E tests ----------------------------------------------------
-add_executable(codegen_tests CodeGenTests.cpp)
-target_include_directories(codegen_tests SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS})
+add_executable(codegen_tests
+    CodeGen/ArithTests.cpp
+    CodeGen/FuncTests.cpp
+    CodeGen/ControlFlowTests.cpp
+    CodeGen/ClassTests.cpp
+    CodeGen/ModuleTests.cpp
+)
+target_include_directories(codegen_tests
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_include_directories(codegen_tests SYSTEM
+    PRIVATE ${LLVM_INCLUDE_DIRS}
+)
 target_link_libraries(codegen_tests
     PRIVATE gtest_main
             paykan_jit

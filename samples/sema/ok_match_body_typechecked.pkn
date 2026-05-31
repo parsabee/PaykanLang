@@ -1,0 +1,18 @@
+// OK: arm body is fully type-checked — local variables, method calls, assignments
+class Dog {
+  name: Str;
+  fn __init__(n: Str) { self.name = n; }
+  fn bark() -> Str { return "woof"; }
+}
+
+fn main() -> int {
+  x: Obj = Dog("Rex");
+  match x {
+    d: Dog {
+      sound: Str = d.bark();
+      out(sound);
+    }
+    _ { }
+  }
+  return 0;
+}

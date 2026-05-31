@@ -28,7 +28,6 @@ using namespace paykan::names;
 // clang-format off
 const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanObjectNew,       reinterpret_cast<void *>(&PaykanObject_new)},
-    {kPaykanObjectDelete,    reinterpret_cast<void *>(&PaykanObject_delete)},
     {kPaykanObjectToString,  reinterpret_cast<void *>(&PaykanObject_toString)},
     {kPaykanObjectEquals,    reinterpret_cast<void *>(&PaykanObject_equals)},
 
@@ -36,7 +35,6 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanStringFromInt,   reinterpret_cast<void *>(&PaykanString_from_int)},
     {kPaykanStringFromFloat, reinterpret_cast<void *>(&PaykanString_from_float)},
     {kPaykanStringFromBool,  reinterpret_cast<void *>(&PaykanString_from_bool)},
-    {kPaykanStringDelete,    reinterpret_cast<void *>(&PaykanString_delete)},
     {kPaykanStringToString,  reinterpret_cast<void *>(&PaykanString_toString)},
     {kPaykanStringEquals,    reinterpret_cast<void *>(&PaykanString_equals)},
     {kPaykanStringLength,    reinterpret_cast<void *>(&PaykanString_length)},

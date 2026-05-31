@@ -1,0 +1,6 @@
+// ERROR: calling a function that is not exported by the imported module
+import math;
+
+fn main() -> int {
+  return math::multiply(2, 3);  // ERROR: 'math::multiply' not declared
+}

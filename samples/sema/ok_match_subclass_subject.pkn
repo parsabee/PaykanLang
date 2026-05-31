@@ -1,0 +1,14 @@
+// OK: match on a non-Obj base class — arms must be subclasses of Animal
+class Animal {}
+class Dog : Animal {}
+class Cat : Animal {}
+
+fn main() -> int {
+  a: Animal = Dog();
+  match a {
+    Dog { out("woof"); }
+    Cat { out("meow"); }
+    _ { }
+  }
+  return 0;
+}

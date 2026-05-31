@@ -1,0 +1,71 @@
+// 05 — Ternary expressions: if <cond> then <expr> else <expr>
+// Exercises: visitTernaryExpr for int/float/bool results,
+//            nested ternaries, class-type ternary (Str branches via emitAsShared),
+//            ternary used in assignment and function return
+
+fn classify(n: int) -> Str {
+  return if n > 0 then "positive" else if n < 0 then "negative" else "zero";
+}
+
+fn pickStr(flag: bool, a: Str, b: Str) -> Str {
+  return if flag then a else b;
+}
+
+fn main() -> int {
+  out("=== int ternary ===");
+  x: int = if True  then 10 else 20;
+  y: int = if False then 10 else 20;
+  out("True  ->", StringInt(x));    // 10
+  out("False ->", StringInt(y));    // 20
+
+  out("=== float ternary ===");
+  f: float = if 1 < 2 then 1.5 else 2.5;
+  out("1<2 ->", StringFloat(f));    // 1.5
+
+  out("=== bool ternary ===");
+  b: bool = if True then False else True;
+  out("bool ->", StringBool(b));    // False
+
+  out("=== nested ternary ===");
+  grade: int = 85;
+  label: int = if grade >= 90 then 1
+               else if grade >= 80 then 2
+               else if grade >= 70 then 3
+               else 4;
+  out("grade 85 -> band", StringInt(label));  // 2
+
+  out("=== ternary with relational condition ===");
+  a: int = 7;
+  out("max(7,3)=", StringInt(if a > 3 then a else 3));  // 7
+  out("min(7,3)=", StringInt(if a < 3 then a else 3));  // 3
+
+  out("=== Str ternary (class branches) ===");
+  // Both branches produce Str — exercises the isClassResult path which
+  // calls emitAsShared on each branch.
+  cond: bool = True;
+  s: Str = if cond then "yes" else "no";
+  out(s);           // yes
+  s = if !cond then "yes" else "no";
+  out(s);           // no
+
+  out("=== Str ternary rebind (double-box regression) ===");
+  // Assigning a ternary-Str to an existing variable must not double-box.
+  t: Str = "initial";
+  t = if True then "replaced" else "original";
+  out(t);           // replaced
+
+  out("=== ternary in function return ===");
+  out(classify(5));    // positive
+  out(classify(0 - 3));// negative
+  out(classify(0));    // zero
+
+  out("=== ternary with owned Str variables as branches ===");
+  p: Str = "alpha";
+  q: Str = "beta";
+  r: Str = pickStr(True,  p, q);
+  out(r);           // alpha
+  r = pickStr(False, p, q);
+  out(r);           // beta
+
+  return 0;
+}

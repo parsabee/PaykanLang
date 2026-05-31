@@ -10,8 +10,10 @@ llvm_map_components_to_libnames(JIT_LLVM_LIBS
 
 add_library(paykan_jit STATIC JIT.cpp)
 target_include_directories(paykan_jit
-    PUBLIC  ${CMAKE_SOURCE_DIR}/include
-    SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS}
+    PUBLIC ${CMAKE_SOURCE_DIR}/include
+)
+target_include_directories(paykan_jit SYSTEM
+    PRIVATE ${LLVM_INCLUDE_DIRS}
 )
 target_link_libraries(paykan_jit
     PRIVATE paykan_runtime

@@ -1,0 +1,174 @@
+// 12 — Comprehensive: combines every codegen feature in one program.
+// Acts as a smoke-test that all paths compose correctly together.
+// Exercises: all operators, all control flow, all types, Str methods,
+//            recursion, multiple function return paths, nested scopes,
+//            bool/int/float/Str passing in every direction
+
+// ---- Utility functions (int) ----------------------------------------------
+
+fn abs(x: int) -> int       { return if x < 0 then 0 - x else x; }
+fn max(a: int, b: int) -> int { return if a > b then a else b; }
+fn min(a: int, b: int) -> int { return if a < b then a else b; }
+fn clamp(v: int, lo: int, hi: int) -> int {
+  return max(lo, min(hi, v));
+}
+
+fn gcd(a: int, b: int) -> int {
+  while (b != 0) {
+    t: int = b;
+    b = a % b;
+    a = t;
+  }
+  return a;
+}
+fn lcm(a: int, b: int) -> int { return (a / gcd(a, b)) * b; }
+
+fn isPrime(n: int) -> bool {
+  if (n < 2)  { return False; }
+  if (n == 2) { return True; }
+  if (n % 2 == 0) { return False; }
+  d: int = 3;
+  while (d * d <= n) {
+    if (n % d == 0) { return False; }
+    d = d + 2;
+  }
+  return True;
+}
+
+fn sumRange(lo: int, hi: int) -> int {
+  s: int = 0;
+  i: int = lo;
+  while (i <= hi) { s = s + i; i = i + 1; }
+  return s;
+}
+
+fn power(base: int, exp: int) -> int {
+  r: int = 1;
+  i: int = 0;
+  while (i < exp) { r = r * base; i = i + 1; }
+  return r;
+}
+
+// ---- Float helpers --------------------------------------------------------
+
+fn fsquare(x: float) -> float { return x * x; }
+fn favg(a: float, b: float) -> float { return (a + b) / 2.0; }
+
+// ---- Str helpers ----------------------------------------------------------
+
+fn padLeft(s: Str, width: int) -> Str {
+  result: Str = s;
+  while (result.length() < width) {
+    result = " " + result;
+  }
+  return result;
+}
+
+fn fizzbuzz(n: int) -> Str {
+  if (n % 15 == 0) { return "FizzBuzz"; }
+  if (n % 3  == 0) { return "Fizz"; }
+  if (n % 5  == 0) { return "Buzz"; }
+  return StringInt(n);
+}
+
+fn tableRow(label: Str, val: int) -> Str {
+  return label + ": " + padLeft(StringInt(val), 6);
+}
+
+// ---- main -----------------------------------------------------------------
+
+fn main() -> int {
+  out("============================");
+  out("  PaykanLang CodeGen Suite  ");
+  out("============================");
+
+  // ---------- Int arithmetic & operators -----------------------------------
+  out("\n--- Int arithmetic ---");
+  out(tableRow("2+3*4",    2 + 3 * 4));    // 14
+  out(tableRow("(2+3)*4",  (2 + 3) * 4));  // 20
+  out(tableRow("17%5",     17 % 5));        // 2
+  out(tableRow("abs(-99)", abs(0 - 99)));   // 99
+  out(tableRow("clamp", clamp(150, 0, 100))); // 100
+
+  // ---------- Relational & logical -----------------------------------------
+  out("\n--- Relational/Logical ---");
+  x: int = 7;
+  out("7 in [1,10]: ",   StringBool(x >= 1 && x <= 10));  // True
+  out("7 prime:     ",   StringBool(isPrime(x)));           // True
+  out("7 even:      ",   StringBool(x % 2 == 0));          // False
+  out("!prime(4):   ",   StringBool(!isPrime(4)));          // True
+
+  // ---------- Float ---------------------------------------------------------
+  out("\n--- Float ---");
+  pi: float = 3.14159;
+  out("pi^2=",  StringFloat(fsquare(pi)));          // ~9.8696
+  out("avg=",   StringFloat(favg(1.0, 3.0)));       // 2
+  out("0.1+0.2=",StringFloat(0.1 + 0.2));
+
+  // ---------- Ternary -------------------------------------------------------
+  out("\n--- Ternary ---");
+  grade: int = 83;
+  band: Str = if grade >= 90 then "A"
+              else if grade >= 80 then "B"
+              else if grade >= 70 then "C"
+              else "F";
+  out("grade 83 -> ", band);   // B
+
+  // ---------- Control flow --------------------------------------------------
+  out("\n--- FizzBuzz 1-20 ---");
+  k: int = 1;
+  while (k <= 20) {
+    out(fizzbuzz(k));
+    k = k + 1;
+  }
+
+  out("\n--- Primes up to 30 ---");
+  p: int = 2;
+  while (p <= 30) {
+    if (isPrime(p)) { out(StringInt(p)); }
+    p = p + 1;
+  }
+
+  // ---------- Math results --------------------------------------------------
+  out("\n--- Math ---");
+  out(tableRow("sum 1..100",   sumRange(1, 100)));   // 5050
+  out(tableRow("gcd(48,18)",   gcd(48, 18)));         // 6
+  out(tableRow("lcm(12,18)",   lcm(12, 18)));         // 36
+  out(tableRow("2^16",         power(2, 16)));         // 65536
+
+  // ---------- Str methods & ops --------------------------------------------
+  out("\n--- Str methods ---");
+  hello: Str = "Hello";
+  world: Str = " World";
+  hw: Str = hello.concat(world);
+  out(hw);                          // Hello World
+  out(StringInt(hw.length()));      // 11
+  out(hw.toString());               // Hello World
+
+  // Padded table rows via Str helper
+  out("\n--- Padded table ---");
+  i: int = 1;
+  while (i <= 5) {
+    out(tableRow("item-" + StringInt(i), i * i));
+    i = i + 1;
+  }
+
+  // ---------- Nested scopes + cleanup --------------------------------------
+  out("\n--- Scope stress ---");
+  j: int = 0;
+  while (j < 4) {
+    row: Str = "row-" + StringInt(j);
+    col: int = 0;
+    while (col < 3) {
+      cell: Str = row + "-" + StringInt(col);
+      out(cell);
+      col = col + 1;
+    }
+    j = j + 1;
+  }
+
+  out("\n============================");
+  out("         All done           ");
+  out("============================");
+  return 0;
+}

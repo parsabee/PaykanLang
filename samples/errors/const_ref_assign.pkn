@@ -1,7 +1,0 @@
-fn main() -> int {
-  // Error: cannot assign through a const reference
-  a: String = "hello";
-  b: const String& = a;
-  b = "world";
-  return 0;
-}

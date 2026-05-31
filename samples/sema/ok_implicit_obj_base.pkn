@@ -1,0 +1,19 @@
+// OK: classes with no explicit superclass implicitly inherit from Obj.
+// Obj defines == and !=, so every user class supports them too.
+class A {}
+
+fn eq(a: A, b: A) -> bool {
+  return a == b;
+}
+
+fn neq(a: A, b: A) -> bool {
+  return a != b;
+}
+
+fn toString(a: A) -> Str {
+  return a.toString();
+}
+
+fn main() -> int {
+  return 0;
+}

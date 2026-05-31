@@ -1,7 +1,0 @@
-fn main() -> int {
-  // Error: type mismatch in initializer
-  // (declared type is not stored in AST yet, so we test via assignment)
-  x: int = 1;
-  x = True;
-  return 0;
-}

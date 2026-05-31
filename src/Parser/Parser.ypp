@@ -59,6 +59,8 @@
   RPAREN  ")"
   LBRACK  "{"
   RBRACK  "}"
+  LSQUARE "["
+  RSQUARE "]"
   ARROW "->"
   AMP   "&"
   AND   "&&"
@@ -66,9 +68,9 @@
   COLONCOLON "::"
   IMPORT "import"
   AS     "as"
-  SHARED "shared"
-  MOV    "mov"
-  CONST  "const"
+  CLASS  "class"
+  MATCH  "match"
+  UNDERSCORE "_"
   FN     "fn"
   RETURN "return"
   IF     "if"
@@ -83,12 +85,12 @@
 %token <long> INT
 %token <double> FLOAT
 %token <bool> BOOL
+%token       NONE
 %token <std::string> STRING
 %token <std::string> IDENT
 
 %type <TranslationUnit *> translationUnit
 %type <Stmt *> statement
-%type <Identifier *> identifier
 %type <CompoundStmt *> compoundStmt
 %type <CompoundStmt *> block
 %type <Type *> typeAnnotation
@@ -96,6 +98,7 @@
 %type <DeclStmt *> staticAssignment
 %type <BinaryOpcode> relationalOperator
 %type <Expr *> primaryExpression
+%type <Expr *> postfixExpression
 %type <Expr *> unaryExpression
 %type <Expr *> additiveExpression
 %type <Expr *> multiplicativeExpression
@@ -114,14 +117,21 @@
 %type <std::vector<FuncDecl *>> funcDeclList
 %type <ImportDecl *> importDecl
 %type <std::vector<ImportDecl *>> importList
-%type <std::vector<std::string>> identList
 %type <std::string> modulePath
+%type <std::pair<std::string,std::string>> importedModule
+%type <std::vector<std::pair<std::string,std::string>>> importedModuleList
+%type <ClassDecl *> classDecl
+%type <std::vector<ClassDecl *>> classDeclList
+%type <ClassBody> classMemberList
+%type <MatchStmt *> matchStmt
+%type <std::vector<MatchArm>> matchArmList
+%type <MatchArm> matchArm
 %%
 
 %start translationUnit;
 
-translationUnit : importList funcDeclList
-                                    { $$ = impl(drv).Ctx.make<TranslationUnit>(loc(@1, @2), std::move($1), std::move($2));
+translationUnit : importList classDeclList funcDeclList
+                                    { $$ = impl(drv).Ctx.make<TranslationUnit>(loc(@1, @3), std::move($1), std::move($2), std::move($3));
                                       impl(drv).Root = $$;
                                     }
 ;
@@ -131,25 +141,58 @@ importList: %empty                  { $$ = std::vector<ImportDecl *>(); }
     ;
 
 importDecl:
-      "import" "::" modulePath ";"
-                                    { $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @4), $3, true); }
-    | "import" modulePath ";"
-                                    { $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @3), $2, false); }
-    | "import" "::" modulePath "as" IDENT ";"
-                                    { $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @6), $3, true, std::vector<std::string>{}, $5); }
+      "import" modulePath ";"
+                                    { // Split at last :: to separate base path from module name.
+                                      auto sep = $2.rfind("::");
+                                      std::string base = (sep == std::string::npos) ? "" : $2.substr(0, sep);
+                                      std::string name = (sep == std::string::npos) ? $2 : $2.substr(sep + 2);
+                                      $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @3), base, false,
+                                           std::vector<ImportDecl::Module>{{name, ""}});
+                                    }
     | "import" modulePath "as" IDENT ";"
-                                    { $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @5), $2, false, std::vector<std::string>{}, $4); }
-    | "import" modulePath "::" "{" identList "}" ";"
-                                    { $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @7), $2, false, $5); }
-    | "import" "::" modulePath "::" "{" identList "}" ";"
-                                    { $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @8), $3, true, $6); }
-    | "import" "::" "{" identList "}" ";"
-                                    { $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @6), "", true, $4); }
+                                    { auto sep = $2.rfind("::");
+                                      std::string base = (sep == std::string::npos) ? "" : $2.substr(0, sep);
+                                      std::string name = (sep == std::string::npos) ? $2 : $2.substr(sep + 2);
+                                      $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @5), base, false,
+                                           std::vector<ImportDecl::Module>{{name, $4}});
+                                    }
+    | "import" modulePath "::" "{" importedModuleList "}" ";"
+                                    { $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @7), $2, false,
+                                           [&]{ std::vector<ImportDecl::Module> ms; for (auto &p : $5) ms.push_back({p.first, p.second}); return ms; }());
+                                    }
+    | "import" "::" modulePath ";"
+                                    { auto sep = $3.rfind("::");
+                                      std::string base = (sep == std::string::npos) ? "" : $3.substr(0, sep);
+                                      std::string name = (sep == std::string::npos) ? $3 : $3.substr(sep + 2);
+                                      $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @4), base, true,
+                                           std::vector<ImportDecl::Module>{{name, ""}});
+                                    }
+    | "import" "::" modulePath "as" IDENT ";"
+                                    { auto sep = $3.rfind("::");
+                                      std::string base = (sep == std::string::npos) ? "" : $3.substr(0, sep);
+                                      std::string name = (sep == std::string::npos) ? $3 : $3.substr(sep + 2);
+                                      $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @6), base, true,
+                                           std::vector<ImportDecl::Module>{{name, $5}});
+                                    }
+    | "import" "::" modulePath "::" "{" importedModuleList "}" ";"
+                                    { $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @8), $3, true,
+                                           [&]{ std::vector<ImportDecl::Module> ms; for (auto &p : $6) ms.push_back({p.first, p.second}); return ms; }());
+                                    }
+    | "import" "::" "{" importedModuleList "}" ";"
+                                    { $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @6), "", true,
+                                           [&]{ std::vector<ImportDecl::Module> ms; for (auto &p : $4) ms.push_back({p.first, p.second}); return ms; }());
+                                    }
     ;
 
-identList:
-      IDENT                         { $$ = std::vector<std::string>{$1}; }
-    | identList "," IDENT           { $$ = std::move($1); $$.push_back($3); }
+importedModule:
+      IDENT                         { $$ = {$1, ""}; }
+    | IDENT "as" IDENT              { $$ = {$1, $3}; }
+    ;
+
+importedModuleList:
+      importedModule                { $$ = std::vector<std::pair<std::string,std::string>>{std::move($1)}; }
+    | importedModuleList "," importedModule
+                                    { $$ = std::move($1); $$.push_back(std::move($3)); }
     ;
 
 modulePath:
@@ -159,6 +202,24 @@ modulePath:
 
 funcDeclList: %empty                { $$ = std::vector<FuncDecl *>(); }
     | funcDeclList funcDecl          { $$ = std::move($1); $$.push_back($2); }
+    ;
+
+classDeclList: %empty               { $$ = std::vector<ClassDecl *>(); }
+    | classDeclList classDecl        { $$ = std::move($1); $$.push_back($2); }
+    ;
+
+classDecl:
+      "class" IDENT "{" classMemberList "}"
+                                    { $$ = impl(drv).Ctx.make<ClassDecl>(loc(@1, @5), $2,
+ "", std::move($4.Fields), std::move($4.Methods)); }
+    | "class" IDENT ":" modulePath "{" classMemberList "}"
+                                    { $$ = impl(drv).Ctx.make<ClassDecl>(loc(@1, @7), $2,
+ $4, std::move($6.Fields), std::move($6.Methods)); }
+    ;
+
+classMemberList: %empty             { $$ = ClassBody{}; }
+    | classMemberList varDecl ";"   { $$ = std::move($1); $$.Fields.push_back($2); }
+    | classMemberList funcDecl      { $$ = std::move($1); $$.Methods.push_back($2); }
     ;
 
 compoundStmt: %empty                { $$ = impl(drv).Ctx.make<CompoundStmt>(loc(@$, @$)); }
@@ -171,46 +232,40 @@ compoundStmt: %empty                { $$ = impl(drv).Ctx.make<CompoundStmt>(loc(
 block: "{" compoundStmt "}"        { $$ = $2; }
     ;
 
-identifier: IDENT                   { $$ = impl(drv).Ctx.make<Identifier>(loc(@1, @1), $1); }
-    ;
-
 typeAnnotation: IDENT               { auto *ty = impl(drv).Ctx.lookupType($1);
                                       if (!ty)
-                                        throw yy::parser::syntax_error(@1, "unknown type '" + $1 + "'");
+                                        // Unknown at parse time — could be a forward-referenced
+                                        // class type. Sema's resolveType() will validate it.
+                                        ty = impl(drv).Ctx.make<ClassType>(loc(@1, @1), $1, nullptr);
                                       $$ = ty;
+                                    }
+    | IDENT "[" "]"                 { auto *elemTy = impl(drv).Ctx.lookupType($1);
+                                      if (!elemTy)
+                                        elemTy = impl(drv).Ctx.make<ClassType>(loc(@1, @1), $1, nullptr);
+                                      $$ = impl(drv).Ctx.make<ArrayType>(loc(@1, @3), elemTy);
                                     }
     ;
 
 varDecl: IDENT ":" typeAnnotation
-                                    { $$ = impl(drv).Ctx.make<VarDecl>(loc(@1, @3), $1, $3, nullptr, Ownership::Unique, false); }
-    | IDENT ":" typeAnnotation "&"
-                                    { $$ = impl(drv).Ctx.make<VarDecl>(loc(@1, @4), $1, $3, nullptr, Ownership::Reference, false); }
-    | IDENT ":" "shared" typeAnnotation
-                                    { $$ = impl(drv).Ctx.make<VarDecl>(loc(@1, @4), $1, $4, nullptr, Ownership::Shared, false);
-                                    }
-    | IDENT ":" "const" typeAnnotation
-                                    { $$ = impl(drv).Ctx.make<VarDecl>(loc(@1, @4), $1, $4, nullptr, Ownership::Unique, true); }
-    | IDENT ":" "const" typeAnnotation "&"
-                                    { $$ = impl(drv).Ctx.make<VarDecl>(loc(@1, @5), $1, $4, nullptr, Ownership::Reference, true); }
-    | IDENT ":" "const" "shared" typeAnnotation
-                                    { $$ = impl(drv).Ctx.make<VarDecl>(loc(@1, @5), $1, $5, nullptr, Ownership::Shared, true);
-                                    }
+                                    { $$ = impl(drv).Ctx.make<VarDecl>(loc(@1, @3), $1, $3, nullptr); }
     ;
 
 staticAssignment: varDecl "=" expression
                                     { auto *vd = impl(drv).Ctx.make<VarDecl>(
-                                          loc(@1, @3), $1->getName(), $1->getType(), $3,
-                                          $1->getOwnership(), $1->isConst());
+                                          loc(@1, @3), $1->getName(), $1->getType(), $3);
                                       $$ = impl(drv).Ctx.make<DeclStmt>(loc(@1, @3), vd);
                                     }
     ;
 
 statement: ";"                      { $$ = nullptr; }
     | expression ";"                { $$ = impl(drv).Ctx.make<ExprStmt>(loc(@1, @2), $1); }
-    | expression "=" expression ";" { auto *lhs = dyn_cast<Identifier>($1);
-                                      if (!lhs)
-                                        throw yy::parser::syntax_error(@1, "left-hand side of assignment must be an identifier");
-                                      $$ = impl(drv).Ctx.make<AssignStmt>(loc(@1, @4), lhs->getName(), $3);
+    | expression "=" expression ";" { if (auto *lhs = dyn_cast<Identifier>($1)) {
+                                        $$ = impl(drv).Ctx.make<AssignStmt>(loc(@1, @4), lhs->getName(), $3);
+                                      } else if (auto *ma = dyn_cast<MemberAccessExpr>($1)) {
+                                        $$ = impl(drv).Ctx.make<MemberAssignStmt>(loc(@1, @4), ma->getReceiver(), ma->getFieldName(), $3);
+                                      } else {
+                                        throw yy::parser::syntax_error(@1, "left-hand side of '=' must be an identifier or field access");
+                                      }
                                     }
     | staticAssignment ";"          { $$ = $1; }
     | "return" expression ";"       { $$ = impl(drv).Ctx.make<ReturnStmt>(loc(@1, @3), $2); }
@@ -220,14 +275,26 @@ statement: ";"                      { $$ = nullptr; }
     | whileStmt                     { $$ = $1; }
     | "break" ";"                    { $$ = impl(drv).Ctx.make<BreakStmt>(loc(@1, @2)); }
     | "continue" ";"                 { $$ = impl(drv).Ctx.make<ContinueStmt>(loc(@1, @2)); }
+    | matchStmt                      { $$ = $1; }
     ;
 
-param: IDENT ":" typeAnnotation                     { $$ = Param{$1, $3, Ownership::Unique, false}; }
-    | IDENT ":" typeAnnotation "&"                   { $$ = Param{$1, $3, Ownership::Reference, false}; }
-    | IDENT ":" "shared" typeAnnotation               { $$ = Param{$1, $4, Ownership::Shared, false}; }
-    | IDENT ":" "const" typeAnnotation                { $$ = Param{$1, $4, Ownership::Unique, true}; }
-    | IDENT ":" "const" typeAnnotation "&"            { $$ = Param{$1, $4, Ownership::Reference, true}; }
-    | IDENT ":" "const" "shared" typeAnnotation       { $$ = Param{$1, $5, Ownership::Shared, true}; }
+matchStmt: "match" expression "{" matchArmList "}"
+                                    { $$ = impl(drv).Ctx.make<MatchStmt>(loc(@1, @5), $2, std::move($4)); }
+    ;
+
+matchArmList: %empty                { $$ = std::vector<MatchArm>(); }
+    | matchArmList matchArm         { $$ = std::move($1); $$.push_back(std::move($2)); }
+    ;
+
+matchArm:
+      typeAnnotation "{" compoundStmt "}"
+                                    { $$ = MatchArm{loc(@1, @4), "", $1, $3}; }
+    | IDENT ":" typeAnnotation "{" compoundStmt "}"
+                                    { $$ = MatchArm{loc(@1, @6), $1, $3, $5}; }
+    | "_" "{" compoundStmt "}"      { $$ = MatchArm{loc(@1, @4), "", nullptr, $3}; }
+    ;
+
+param: IDENT ":" typeAnnotation                     { $$ = Param{$1, $3}; }
     ;
 
 paramList: %empty                   { $$ = std::vector<Param>(); }
@@ -266,12 +333,14 @@ primaryExpression:
       INT                           { $$ = impl(drv).Ctx.make<IntegerLiteral>(loc(@1, @1), $1); }
     | FLOAT                         { $$ = impl(drv).Ctx.make<FloatLiteral>(loc(@1, @1), $1); }
     | BOOL                          { $$ = impl(drv).Ctx.make<BoolLiteral>(loc(@1, @1), $1); }
+    | NONE                          { $$ = impl(drv).Ctx.make<NoneLiteral>(loc(@1, @1)); }
     | STRING                        { $$ = impl(drv).Ctx.make<StringLiteral>(loc(@1, @1), $1); }
     | IDENT "(" argumentList ")"    { $$ = impl(drv).Ctx.make<CallExpr>(loc(@1, @4), $1, std::move($3)); }
     | modulePath "::" IDENT "(" argumentList ")"
                                     { $$ = impl(drv).Ctx.make<CallExpr>(loc(@1, @6), $1 + "::" + $3, std::move($5)); }
     | IDENT                         { $$ = impl(drv).Ctx.make<Identifier>(loc(@1, @1), $1); }
     | "(" expression ")"            { $$ = $2; }
+    | "[" argumentList "]"          { $$ = impl(drv).Ctx.make<ArrayLiteralExpr>(loc(@1, @3), std::move($2)); }
     ;
 
 argumentList: %empty                { $$ = std::vector<Expr *>(); }
@@ -279,17 +348,24 @@ argumentList: %empty                { $$ = std::vector<Expr *>(); }
     | argumentList "," expression   { $$ = std::move($1); $$.push_back($3); }
     ;
 
+postfixExpression:
+      primaryExpression             { $$ = $1; }
+    | postfixExpression "." IDENT "(" argumentList ")"
+                                    { $$ = impl(drv).Ctx.make<MethodCallExpr>(loc(@1, @6), $1, $3, std::move($5)); }
+    | postfixExpression "." IDENT
+                                    { $$ = impl(drv).Ctx.make<MemberAccessExpr>(loc(@1, @3), $1, $3); }
+    | postfixExpression "[" expression "]"
+                                    { $$ = impl(drv).Ctx.make<SubscriptExpr>(loc(@1, @4), $1, $3); }
+    ;
+
 unaryOperator: "!"                  { $$ = UnaryOpcode::Not; }
     | "-"                           { $$ = UnaryOpcode::Neg; }
     ;
 
 unaryExpression:
-      primaryExpression             { $$ = $1; }
-    | unaryOperator primaryExpression
+      postfixExpression             { $$ = $1; }
+    | unaryOperator unaryExpression
                                     { $$ = impl(drv).Ctx.make<UnaryExpr>(loc(@1, @2), $1, $2); }
-    | "mov" IDENT                    { auto *id = impl(drv).Ctx.make<Identifier>(loc(@2, @2), $2);
-                                      $$ = impl(drv).Ctx.make<MovExpr>(loc(@1, @2), id); }
-    | "&" expression                { $$ = impl(drv).Ctx.make<RefExpr>(loc(@1, @2), $2); }
     ;
 
 multiplicativeExpression:

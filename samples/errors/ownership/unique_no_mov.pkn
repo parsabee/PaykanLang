@@ -1,9 +1,0 @@
-// Error: passing unique variable to unique param without mov.
-fn consume(s: String) -> int {
-  return 0;
-}
-
-fn main() -> int {
-  a: String = "hello";
-  return consume(a);    // error: unique ownership must be transferred with 'mov'
-}

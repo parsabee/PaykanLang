@@ -1,0 +1,9 @@
+// ERROR: duplicate method name within a class
+class A {
+  fn foo() -> int { return 1; }
+  fn foo() -> int { return 2; }  // redeclaration of method 'foo'
+}
+
+fn main() -> int {
+  return 0;
+}

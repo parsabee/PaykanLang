@@ -1,0 +1,12 @@
+// ERROR: assigning wrong type to a field (float → int is not assignable)
+class A {
+  x: int;
+
+  fn setX(v: float) {
+    self.x = v;  // cannot assign float to int field
+  }
+}
+
+fn main() -> int {
+  return 0;
+}

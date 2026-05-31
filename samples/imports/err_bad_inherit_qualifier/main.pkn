@@ -1,0 +1,8 @@
+// ERROR: intermediate path segment used as qualifier in inheritance
+//   import shapes::base  →  valid: "base::Shape" or "shapes::base::Shape"
+//   "shapes::Shape" uses only the base path prefix — not a valid qualifier
+import shapes::base;
+
+class Circle : shapes::Shape {}  // ERROR: 'shapes::Shape' is not defined
+
+fn main() -> int { return 0; }

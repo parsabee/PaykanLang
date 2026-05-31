@@ -48,6 +48,7 @@ class ASTPrinter : public ASTVisitor<ASTPrinter, void> {
 
   void visitChildren(CompoundStmt *node);
   void visitChildren(CallExpr *node);
+  void visitChildren(MethodCallExpr *node);
 
 public:
   explicit ASTPrinter(llvm::raw_ostream &os);

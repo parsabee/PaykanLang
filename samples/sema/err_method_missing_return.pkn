@@ -1,0 +1,11 @@
+// ERROR: non-void method does not always return
+class A {
+  fn compute() -> int {
+    x: int = 1;
+    // missing return statement
+  }
+}
+
+fn main() -> int {
+  return 0;
+}

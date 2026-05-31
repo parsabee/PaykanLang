@@ -1,0 +1,10 @@
+// OK: aliased import — import path::to::mod as alias;
+//   alias qualifier = "str"
+//   full  qualifier = "utils::strings"  (always available too)
+import utils::strings as str;
+
+fn main() -> int {
+  x: int = str::len("hello");            // via alias
+  y: int = utils::strings::len("world"); // via full path
+  return x + y;  // 0 + 0 = 0
+}

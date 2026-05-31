@@ -1,0 +1,346 @@
+// Copyright (c) 2026 Parsa Bagheri
+// SPDX-License-Identifier: MIT
+// Sema tests: module imports — all syntactic forms, OK and error cases.
+
+#include "TestUtils.h"
+#include <gtest/gtest.h>
+
+using namespace paykan::test;
+
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+static std::string writeFile(const std::string &dir,
+                              const std::string &relPath,
+                              const std::string &content) {
+  auto full = std::filesystem::path(dir) / relPath;
+  std::filesystem::create_directories(full.parent_path());
+  std::ofstream ofs(full);
+  ofs << content;
+  return full.string();
+}
+
+struct SemaFileResult { bool Ok; std::string Diagnostics; };
+
+static SemaFileResult semaCheckFile(const std::string &filePath,
+                                    const std::string &projectRoot) {
+  paykan::parser::ParserDriver drv;
+  if (drv.parseFile(filePath) != 0)
+    return {false, "parse error"};
+  std::string diag;
+  llvm::raw_string_ostream os(diag);
+  paykan::sema::Sema sema(drv.getASTContext(), os, projectRoot,
+                          drv.getCurrentFile(), &drv.getSourceLines());
+  bool ok = sema.run(drv.getRoot()).Ok;
+  return {ok, diag};
+}
+
+// ─── OK: import mod; ────────────────────────────────────────────────────────
+
+TEST(Module, BareImportOk) {
+  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_bare").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "math.pkn", "fn add(a: int, b: int) -> int { return a + b; }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import math;
+fn main() -> int { return math::add(1, 2); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// ─── OK: import path::mod; — short + full qualifier both valid ───────────────
+
+TEST(Module, NestedShortQualifierOk) {
+  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_nshort").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "math/arith.pkn", "fn mul(a: int, b: int) -> int { return a * b; }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import math::arith;
+fn main() -> int { return arith::mul(3, 4); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, NestedFullQualifierOk) {
+  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_nfull").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "math/arith.pkn", "fn mul(a: int, b: int) -> int { return a * b; }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import math::arith;
+fn main() -> int { return math::arith::mul(3, 4); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// ─── OK: import path::mod as alias; — alias + full path both valid ───────────
+
+TEST(Module, AliasQualifierOk) {
+  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_alias").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "utils/strings.pkn", "fn upper(s: Str) -> int { return 0; }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import utils::strings as str;
+fn main() -> int { return str::upper("hi"); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, AliasFullPathAlsoOk) {
+  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_alias_full").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "utils/strings.pkn", "fn upper(s: Str) -> int { return 0; }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import utils::strings as str;
+fn main() -> int { return utils::strings::upper("hi"); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// ─── OK: import path::{a, b}; ────────────────────────────────────────────────
+
+TEST(Module, SelectiveOk) {
+  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_sel").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib/foo.pkn", "fn val() -> int { return 1; }\n");
+  writeFile(tmp, "lib/bar.pkn", "fn val() -> int { return 2; }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import lib::{foo, bar};
+fn main() -> int { return foo::val() + bar::val(); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// ─── OK: import path::{a as x, b as y}; ─────────────────────────────────────
+
+TEST(Module, SelectiveAliasOk) {
+  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_sel_alias").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib/foo.pkn", "fn val() -> int { return 10; }\n");
+  writeFile(tmp, "lib/bar.pkn", "fn val() -> int { return 20; }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import lib::{foo as f, bar as b};
+fn main() -> int { return f::val() + b::val(); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// ─── OK: import path::{a, b as y}; (mixed) ───────────────────────────────────
+
+TEST(Module, SelectiveMixedAliasOk) {
+  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_sel_mix").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib/foo.pkn", "fn val() -> int { return 5; }\n");
+  writeFile(tmp, "lib/bar.pkn", "fn val() -> int { return 7; }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import lib::{foo, bar as b};
+fn main() -> int { return foo::val() + b::val(); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// ─── OK: class inheritance — short, full, alias qualifier ────────────────────
+
+TEST(Module, ClassInheritShortQualOk) {
+  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_inh_s").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "shapes/base.pkn", "class Shape { fn area() -> int { return 0; } }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import shapes::base;
+class Circle : base::Shape { fn area() -> int { return 1; } }
+fn main() -> int { return 0; }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, ClassInheritFullQualOk) {
+  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_inh_f").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "shapes/base.pkn", "class Shape { fn area() -> int { return 0; } }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import shapes::base;
+class Circle : shapes::base::Shape { fn area() -> int { return 1; } }
+fn main() -> int { return 0; }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, ClassInheritAliasOk) {
+  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_inh_a").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "shapes/base.pkn", "class Shape { fn area() -> int { return 0; } }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import shapes::base as sh;
+class Circle : sh::Shape { fn area() -> int { return 1; } }
+fn main() -> int { return 0; }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// ─── OK: circular import detection ──────────────────────────────────────────
+
+TEST(Module, CircularImportErr) {
+  auto tmp = std::filesystem::temp_directory_path() / "pkn_ms_circ";
+  std::filesystem::remove_all(tmp);
+  std::filesystem::create_directories(tmp);
+  std::ofstream(tmp / "a.pkn") << "import b;\nfn fa() -> int { return 1; }\n";
+  std::ofstream(tmp / "b.pkn") << "import a;\nfn fb() -> int { return 2; }\n";
+
+  paykan::parser::ParserDriver drv;
+  ASSERT_EQ(drv.parseFile((tmp / "a.pkn").string()), 0);
+  std::string diag;
+  llvm::raw_string_ostream os(diag);
+  paykan::sema::Sema sema(drv.getASTContext(), os, tmp.string(),
+                          drv.getCurrentFile(), &drv.getSourceLines());
+  EXPECT_FALSE(sema.run(drv.getRoot()).Ok);
+  EXPECT_NE(diag.find("circular"), std::string::npos);
+  std::filesystem::remove_all(tmp);
+}
+
+// ─── OK: ClassType remapping across import ───────────────────────────────────
+
+TEST(Module, ClassTypeRemapOk) {
+  auto tmp = std::filesystem::temp_directory_path() / "pkn_ms_classremap";
+  std::filesystem::remove_all(tmp);
+  std::filesystem::create_directories(tmp);
+  std::ofstream(tmp / "strmod.pkn") << "fn wrap(s: Str) -> int { return 0; }\n";
+  auto mainPath = (tmp / "main.pkn").string();
+  std::ofstream(mainPath) << R"(
+import strmod;
+fn main() -> int { s: Str = "hi"; return strmod::wrap(s); }
+)";
+  auto r = semaCheckFile(mainPath, tmp.string());
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// ─── OK: same module imported twice → same ClassType pointer ────────────────
+
+TEST(Module, ClassTypeIdentityOk) {
+  auto tmp = std::filesystem::temp_directory_path() / "pkn_ms_classid";
+  std::filesystem::remove_all(tmp);
+  std::filesystem::create_directories(tmp);
+  std::ofstream(tmp / "strutil.pkn") << "fn id(s: Str) -> int { return 0; }\n";
+  std::ofstream(tmp / "modA.pkn") << "import strutil;\nfn useA(s: Str) -> int { return strutil::id(s); }\n";
+  std::ofstream(tmp / "modB.pkn") << "import strutil;\nfn useB(s: Str) -> int { return strutil::id(s); }\n";
+  auto mainPath = (tmp / "main.pkn").string();
+  std::ofstream(mainPath) << R"(
+import modA;
+import modB;
+fn main() -> int { s: Str = "hello"; modA::useA(s); modB::useB(s); return 0; }
+)";
+  auto r = semaCheckFile(mainPath, tmp.string());
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// ─── ERR cases ──────────────────────────────────────────────────────────────
+
+TEST(Module, ModuleNotFoundErr) {
+  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_notfound").string();
+  std::filesystem::remove_all(tmp);
+  auto main = writeFile(tmp, "main.pkn", "import does_not_exist;\nfn main() -> int { return 0; }\n");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("not found"), std::string::npos);
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, WrongQualifierErr) {
+  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_wrongq").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "math/arith.pkn", "fn add(a: int, b: int) -> int { return a + b; }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import math::arith as ar;
+fn main() -> int { return arith::add(1, 2); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, UndeclaredFnErr) {
+  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_undefn").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "math.pkn", "fn add(a: int, b: int) -> int { return a + b; }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import math;
+fn main() -> int { return math::multiply(2, 3); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, WrongArgTypeErr) {
+  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_wrongarg").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "math.pkn", "fn add(a: int, b: int) -> int { return a + b; }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import math;
+fn main() -> int { return math::add(1.0, 2); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, ClassInheritBadQualifierErr) {
+  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_inh_badq").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "shapes/base.pkn", "class Shape {}\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import shapes::base;
+class Circle : shapes::Shape {}
+fn main() -> int { return 0; }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, SelectiveMissingErr) {
+  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_sel_miss").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib/foo.pkn", "fn val() -> int { return 1; }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import lib::{foo, bar};
+fn main() -> int { return foo::val(); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, AliasUnknownCallErr) {
+  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_alias_unk").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "utils/strings.pkn", "fn trim(s: Str) -> int { return 0; }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import utils::strings as str;
+fn main() -> int { return strings::trim("x"); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  std::filesystem::remove_all(tmp);
+}

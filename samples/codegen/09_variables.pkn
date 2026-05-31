@@ -1,0 +1,90 @@
+// 09 — Variables: explicit type declarations, implicit (inferred) declarations,
+//       rebinding, int→float promotion on rebind, scope shadowing
+// Exercises: visitVarDecl (explicit typed), visitAssignStmt (implicit first-assign),
+//            visitAssignStmt (rebind), emitImplicitVarDecl, emitClassVarRebind,
+//            Scope::declare/declareUnowned, Scope::findOwner
+
+fn main() -> int {
+  out("=== explicit typed declarations ===");
+  a: int   = 42;
+  b: float = 3.14;
+  c: bool  = True;
+  d: Str   = "hello";
+  out(StringInt(a));    // 42
+  out(StringFloat(b));  // 3.14
+  out(StringBool(c));   // True
+  out(d);               // hello
+
+  out("=== implicit (inferred) declarations ===");
+  // No type annotation — CodeGen infers from RHS value
+  x = 100;
+  y = 2.718;
+  z = False;
+  w = "world";
+  out(StringInt(x));    // 100
+  out(StringFloat(y));  // 2.718
+  out(StringBool(z));   // False
+  out(w);               // world
+
+  out("=== rebind int ===");
+  v: int = 1;
+  v = 2;
+  v = v + 10;
+  v = v * 3;
+  out(StringInt(v));    // 36
+
+  out("=== rebind float ===");
+  f: float = 0.0;
+  f = 1.5;
+  f = f + 0.5;
+  out(StringFloat(f));  // 2
+
+  out("=== rebind bool ===");
+  flag: bool = False;
+  flag = True;
+  flag = !flag;
+  out(StringBool(flag)); // False
+
+  out("=== int→float promotion on rebind ===");
+  pf: float = 0.0;
+  pf = 7;              // int literal assigned to float var → SIToFP
+  out(StringFloat(pf));  // 7
+  pf = pf + 1;         // int 1 promoted
+  out(StringFloat(pf));  // 8
+
+  out("=== Str rebind (emitClassVarRebind) ===");
+  s: Str = "first";
+  out(s);               // first
+  s = "second";
+  out(s);               // second
+  s = s + "!";          // concat then rebind
+  out(s);               // second!
+
+  out("=== Str implicit decl then rebind ===");
+  msg = "initial";
+  out(msg);             // initial
+  msg = "updated";
+  out(msg);             // updated
+
+  out("=== multiple vars same scope ===");
+  p: int = 1;
+  q: int = 2;
+  r: int = 3;
+  p = p + q + r;
+  out(StringInt(p));    // 6
+
+  out("=== nested scope variable access ===");
+  outer: int = 10;
+  if (True) {
+    inner: int = 20;
+    outer = outer + inner;   // outer accessible from inner scope
+    out(StringInt(outer));   // 30
+  }
+  out(StringInt(outer));     // 30 (modified by inner scope)
+
+  out("=== None initialised var ===");
+  n: Obj = None;   // None has type Obj, not Str
+  out("none ok");  // just checking it doesn't crash
+
+  return 0;
+}

@@ -1,9 +1,0 @@
-// Basic import: use functions from a sibling module
-import imports::math;
-
-fn main() -> int {
-  x: int = add(3, 4);
-  y: int = square(5);
-  z: int = cube(3);
-  return x + y + z;  // 7 + 25 + 27 = 59
-}

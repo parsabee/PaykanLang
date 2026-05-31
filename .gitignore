@@ -37,7 +37,3 @@ compile_commands.json
 
 # Log files
 *.log
-
-# Project TODO (local only)
-TODO.md
-.versions

@@ -1,0 +1,13 @@
+// OK: basic match on Obj subject with valid subclass arms
+class Dog {}
+class Cat {}
+
+fn main() -> int {
+  x: Obj = Dog();
+  match x {
+    Dog { }
+    Cat { }
+    _ { }
+  }
+  return 0;
+}

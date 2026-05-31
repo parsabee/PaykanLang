@@ -1,0 +1,28 @@
+// OK: explicit inheritance chain — all classes are subtypes of Obj.
+// A subclass instance is assignable wherever a superclass type is expected.
+class Shape {
+  fn area() -> int {
+    return 0;
+  }
+}
+
+class Circle : Shape {
+  radius: int;
+
+  fn __init__(r: int) {
+    self.radius = r;
+  }
+
+  fn area() -> int {
+    return self.radius;
+  }
+}
+
+// Circle is a Shape, Shape is an Obj — both == and != are available.
+fn sameRef(a: Shape, b: Shape) -> bool {
+  return a == b;
+}
+
+fn main() -> int {
+  return 0;
+}

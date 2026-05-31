@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "ASTContext.h"
+#include "Names.h"
 
 namespace paykan {
 namespace ast {
@@ -11,59 +12,61 @@ ASTContext::ASTContext()
       FloatTy(make<BuiltinType>(SourceLocation(), BuiltinType::Float)),
       BoolTy(make<BuiltinType>(SourceLocation(), BuiltinType::Bool)),
       VoidTy(make<BuiltinType>(SourceLocation(), BuiltinType::Void)),
-      ObjectTy(nullptr), StringTy(nullptr) {
+      ObjTy(nullptr), StrTy(nullptr) {
+  // Pre-allocate both ObjTy and StrTy so that Obj's own methods can
+  // reference them directly — no post-hoc patching required.
+  ObjTy = make<ClassType>(SourceLocation(), names::kObj,    nullptr);
+  StrTy = make<ClassType>(SourceLocation(), names::kString, nullptr);
   buildObjectType();
   buildStringType();
 }
 
-// -- Bootstrap Object -------------------------------------------------------
+// -- Bootstrap Obj ----------------------------------------------------------
 //
-// Object is the root of the class hierarchy.
+// Obj is the root of the class hierarchy.
 //   operators : == !=
 //   vtable    : [ toString, equals ]
 //
-// Note: toString's return type is ObjectTy (a placeholder) because StringTy
-// has not been created yet.  It could be patched later if needed.
 //
 void ASTContext::buildObjectType() {
-  ObjectTy = buildClassType("Object")
-                 .addOp(BinaryOpcode::Eq)
-                 .addOp(BinaryOpcode::Ne)
-                 .method("toString", /*retTy=*/nullptr) // patched below
-                 .method("equals", BoolTy, {/*ObjectTy*/nullptr})
-                 .build();
-
-  // Patch forward references that needed ObjectTy itself.
-  // toString() -> ObjectTy  (placeholder for StringTy)
-  // equals(Object) param[0] -> ObjectTy
-  for (auto *m : ObjectTy->getMethods()) {
-    if (m->getName() == "toString")
-      m->setReturnType(ObjectTy);
-    if (m->getName() == "equals")
-      m->setParamType(0, ObjectTy);
-  }
+  // ObjTy and StrTy are both pre-allocated before this call, so all
+  // method signatures are correct from the start — no patching required.
+  ClassTypeBuilder(*this, ObjTy)
+      .addOp(BinaryOpcode::Eq)
+      .addOp(BinaryOpcode::Ne)
+      .method(names::kMethodDestroy, VoidTy)         // slot 0
+      .method(names::kMethodToString, StrTy)         // slot 1
+      .method(names::kMethodEquals, BoolTy, {ObjTy}) // slot 2
+      .build();
 }
 
-// -- Bootstrap String -------------------------------------------------------
+// -- Bootstrap Str ---------------------------------------------------------
 //
-// String inherits Object.
+// Str inherits Obj.
 //   operators : + == !=
 //   vtable    : [ toString(override), equals(override),
 //                 length(new), concat(new) ]
 //   fields    : _data (void*), _len (int)
 //
 void ASTContext::buildStringType() {
-  StringTy = buildClassType("String", ObjectTy)
-                 .addOp(BinaryOpcode::Add)
-                 .addOp(BinaryOpcode::Eq)
-                 .addOp(BinaryOpcode::Ne)
-                 .method("toString", StringTy)                  // override
-                 .method("equals", BoolTy, {ObjectTy})          // override
-                 .method("length", IntTy)                       // new
-                 .method("concat", StringTy, {StringTy})        // new
-                 .field("_data", VoidTy)
-                 .field("_len", IntTy)
-                 .build();
+  // StrTy was pre-allocated as an empty shell; wire it up to ObjTy now
+  // (this also inherits Obj's vtable and == / != operators).
+  StrTy->setSuperClass(ObjTy);
+
+  // Populate the pre-allocated shell via ClassTypeBuilder.
+  // All method types are correct from the start — no patching required.
+  ClassTypeBuilder(*this, StrTy)
+      .addOp(BinaryOpcode::Add)
+      .addOp(BinaryOpcode::Eq)
+      .addOp(BinaryOpcode::Ne)
+      .method(names::kMethodDestroy, VoidTy)            // slot 0 — override
+      .method(names::kMethodToString, StrTy)            // slot 1 — override
+      .method(names::kMethodEquals, BoolTy, {ObjTy})    // slot 2 — override
+      .method(names::kMethodLength, IntTy)              // new
+      .method(names::kMethodConcat, StrTy, {StrTy})     // new
+      .field(names::kFieldData, VoidTy)
+      .field(names::kFieldLen, IntTy)
+      .build();
 }
 
 // -- ClassTypeBuilder --------------------------------------------------------
@@ -127,16 +130,27 @@ void ASTContext::registerClassType(ClassType *ct) {
   ClassTypes[ct->getName()] = ct;
 }
 
+ClassType *ASTContext::preRegisterClassType(const std::string &name,
+                                            ClassType *superClass) {
+  auto *ty = make<ClassType>(SourceLocation(), name, superClass);
+  ClassTypes[name] = ty;
+  return ty;
+}
+
 ClassType *ASTContext::lookupClassType(const std::string &name) const {
   auto it = ClassTypes.find(name);
   return it != ClassTypes.end() ? it->second : nullptr;
 }
 
+void ASTContext::addClassTypeAlias(const std::string &alias, ClassType *ct) {
+  ClassTypes.emplace(alias, ct); // no-op if already present
+}
+
 Type *ASTContext::lookupType(const std::string &name) const {
-  if (name == "int")   return IntTy;
-  if (name == "float") return FloatTy;
-  if (name == "bool")  return BoolTy;
-  if (name == "void")  return VoidTy;
+  if (name == names::kTypeInt)   return IntTy;
+  if (name == names::kTypeFloat) return FloatTy;
+  if (name == names::kTypeBool)  return BoolTy;
+  if (name == names::kTypeVoid)  return VoidTy;
   return lookupClassType(name);
 }
 

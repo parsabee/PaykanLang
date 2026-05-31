@@ -1,0 +1,5 @@
+// Module: lib
+// Exported functions used by the bare import example.
+
+fn add(a: int, b: int) -> int { return a + b; }
+fn sub(a: int, b: int) -> int { return a - b; }

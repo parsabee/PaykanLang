@@ -25,7 +25,8 @@ namespace ast {
   NODE(NK_VarDecl,        VarDecl,        VarDecl) \
   NODE(NK_FuncDecl,       FuncDecl,       FuncDecl) \
   NODE(NK_MethodDecl,     MethodDecl,     MethodDecl) \
-  NODE(NK_ImportDecl,     ImportDecl,     ImportDecl)
+  NODE(NK_ImportDecl,     ImportDecl,     ImportDecl) \
+  NODE(NK_ClassDecl,      ClassDecl,      ClassDecl)
 
 #define PAYKAN_STMT_NODES(NODE) \
   NODE(NK_CompoundStmt,   CompoundStmt,   CompoundStmt)    \
@@ -36,24 +37,30 @@ namespace ast {
   NODE(NK_IfStmt,         IfStmt,         IfStmt)          \
   NODE(NK_WhileStmt,      WhileStmt,      WhileStmt)       \
   NODE(NK_BreakStmt,      BreakStmt,      BreakStmt)       \
-  NODE(NK_ContinueStmt,   ContinueStmt,   ContinueStmt)
+  NODE(NK_ContinueStmt,   ContinueStmt,   ContinueStmt)    \
+  NODE(NK_MemberAssignStmt, MemberAssignStmt, MemberAssignStmt) \
+  NODE(NK_MatchStmt,      MatchStmt,      MatchStmt)
 
 #define PAYKAN_EXPR_NODES(NODE) \
   NODE(NK_IntegerLiteral, IntegerLiteral, IntegerLiteral)  \
   NODE(NK_FloatLiteral,   FloatLiteral,   FloatLiteral)    \
   NODE(NK_BoolLiteral,    BoolLiteral,    BoolLiteral)     \
+  NODE(NK_NoneLiteral,    NoneLiteral,    NoneLiteral)     \
   NODE(NK_StringLiteral,  StringLiteral,  StringLiteral)   \
   NODE(NK_UnaryExpr,      UnaryExpr,      UnaryExpr)       \
   NODE(NK_BinaryExpr,     BinaryExpr,     BinaryExpr)      \
   NODE(NK_Identifier,     Identifier,     Identifier)      \
   NODE(NK_CallExpr,       CallExpr,       CallExpr)        \
+  NODE(NK_MethodCallExpr, MethodCallExpr, MethodCallExpr)  \
   NODE(NK_TernaryExpr,    TernaryExpr,    TernaryExpr)     \
-  NODE(NK_MovExpr,        MovExpr,        MovExpr)         \
-  NODE(NK_RefExpr,        RefExpr,        RefExpr)
+  NODE(NK_MemberAccessExpr, MemberAccessExpr, MemberAccessExpr) \
+  NODE(NK_ArrayLiteralExpr, ArrayLiteralExpr, ArrayLiteralExpr) \
+  NODE(NK_SubscriptExpr,  SubscriptExpr,  SubscriptExpr)
 
 #define PAYKAN_TYPE_NODES(NODE) \
   NODE(NK_BuiltinType,    BuiltinType,    BuiltinType) \
-  NODE(NK_ClassType,      ClassType,      ClassType)
+  NODE(NK_ClassType,      ClassType,      ClassType)   \
+  NODE(NK_ArrayType,      ArrayType,      ArrayType)
 
 #define PAYKAN_TOPLEVEL_NODES(NODE) \
   NODE(NK_TranslationUnit, TranslationUnit, TranslationUnit)

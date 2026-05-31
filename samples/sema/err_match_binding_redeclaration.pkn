@@ -1,0 +1,12 @@
+// ERROR: binding name 'd' is redeclared inside the same arm body
+class Dog {}
+
+fn main() -> int {
+  x: Obj = Dog();
+  match x {
+    d: Dog {
+      d: int = 1;   // sema error: redeclaration of 'd'
+    }
+  }
+  return 0;
+}

@@ -7,7 +7,7 @@ llvm_map_components_to_libnames(CODEGEN_LLVM_LIBS
     core support passes bitreader bitwriter
 )
 
-add_library(paykan_codegen STATIC CodeGen.cpp)
+add_library(paykan_codegen STATIC CodeGen.cpp ClassCodeGen.cpp CodeGenImport.cpp)
 target_include_directories(paykan_codegen SYSTEM
     PRIVATE ${LLVM_INCLUDE_DIRS}
 )

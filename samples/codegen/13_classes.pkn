@@ -1,0 +1,297 @@
+// 13 — User-defined classes: fields, methods, inheritance, vtable dispatch,
+//       constructors (__init__), super initializers (__super__),
+//       method override, class instances as function arguments and returns,
+//       control flow inside methods (if/else, while loop),
+//       base-type variable holding subclass instance (Obj polymorphism)
+// Exercises: visitClassDecl, visitMethodCallExpr (vtable dispatch),
+//            visitMemberAccessExpr, visitMemberAssignStmt,
+//            getOrCreateClassStructType, ClassVTableGlobals,
+//            emitAsShared (class-typed return), PaykanShared ARC,
+//            visitFuncDecl with class-typed params, reinheritVTable,
+//            promoteToOwned (None → concrete class rebind)
+
+// ---- Simple class with int fields -----------------------------------------
+
+class Counter {
+  count: int;
+
+  fn __init__(start: int) {
+    self.count = start;
+  }
+  fn increment() {
+    self.count = self.count + 1;
+  }
+  fn decrement() {
+    self.count = self.count - 1;
+  }
+  fn reset() {
+    self.count = 0;
+  }
+  fn value() -> int {
+    return self.count;
+  }
+}
+
+// ---- Class with a Str field -----------------------------------------------
+
+class Greeter {
+  name: Str;
+
+  fn __init__(n: Str) {
+    self.name = n;
+  }
+  fn greet() -> Str {
+    return "Hello, " + self.name + "!";
+  }
+  fn rename(n: Str) {
+    self.name = n;
+  }
+}
+
+// ---- Inheritance: Shape / Rectangle / Square ------------------------------
+
+class Shape {
+  fn area() -> int { return 0; }
+  fn perimeter() -> int { return 0; }
+  fn describe() -> Str { return "shape"; }
+}
+
+class Rectangle : Shape {
+  w: int;
+  h: int;
+
+  fn __init__(width: int, height: int) {
+    self.w = width;
+    self.h = height;
+  }
+  fn area() -> int { return self.w * self.h; }
+  fn perimeter() -> int { return 2 * (self.w + self.h); }
+  fn describe() -> Str { return "rectangle"; }
+}
+
+class Square : Rectangle {
+  fn __init__(side: int) {
+    __super__(side, side);
+  }
+  fn describe() -> Str { return "square"; }
+}
+
+// ---- Inheritance: Animal / Dog / Cat  (inherited method, overrides) -------
+
+class Animal {
+  fn __init__() {}
+  fn sound() -> Str { return "..."; }
+  fn isAnimal() -> int { return 1; }
+  fn describe() -> Str { return "animal: " + self.sound(); }
+}
+
+class Dog : Animal {
+  fn __init__() { __super__(); }
+  fn sound() -> Str { return "woof"; }
+}
+
+class Cat : Animal {
+  fn __init__() { __super__(); }
+  fn sound() -> Str { return "meow"; }
+}
+
+// ---- Accumulator using a while loop inside a method ----------------------
+
+class Summer {
+  total: int;
+
+  fn __init__() { self.total = 0; }
+
+  fn sumTo(n: int) {
+    i: int = 1;
+    while (i <= n) {
+      self.total = self.total + i;
+      i = i + 1;
+    }
+  }
+  fn reset() { self.total = 0; }
+}
+
+// ---- Sign detector using if/else inside a method -------------------------
+
+class Sign {
+  fn of(n: int) -> Str {
+    if (n > 0) {
+      return "positive";
+    } else if (n < 0) {
+      return "negative";
+    } else {
+      return "zero";
+    }
+  }
+}
+
+// ---- Class with mixed int + Str fields ------------------------------------
+
+class Person {
+  name: Str;
+  age: int;
+
+  fn __init__(n: Str, a: int) {
+    self.name = n;
+    self.age = a;
+  }
+  fn toString() -> Str {
+    return self.name + " (age " + StringInt(self.age) + ")";
+  }
+  fn birthday() {
+    self.age = self.age + 1;
+  }
+}
+
+// ---- Three-level inheritance: Vehicle / Car / SportsCar -------------------
+
+class Vehicle {
+  speed: int;
+  fn __init__(s: int) { self.speed = s; }
+  fn kind() -> Str { return "vehicle"; }
+  fn topSpeed() -> int { return self.speed; }
+}
+
+class Car : Vehicle {
+  fn __init__(s: int) { __super__(s); }
+  fn kind() -> Str { return "car"; }
+}
+
+class SportsCar : Car {
+  boost: int;
+  fn __init__(s: int, b: int) {
+    __super__(s);
+    self.boost = b;
+  }
+  fn kind() -> Str { return "sports car"; }
+  fn topSpeed() -> int { return self.speed + self.boost; }
+}
+
+// ---- Functions that take / return class instances -------------------------
+
+fn printCounterValue(c: Counter) {
+  out(StringInt(c.value()));
+}
+
+fn makeCounter(start: int) -> Counter {
+  return Counter(start);
+}
+
+fn sumAreas(r: Rectangle, s: Square) -> int {
+  return r.area() + s.area();
+}
+
+fn describePerson(p: Person) {
+  out(p.toString());
+}
+
+fn makeAdult(n: Str) -> Person {
+  return Person(n, 18);
+}
+
+// ===========================================================================
+// main
+// ===========================================================================
+
+fn main() -> int {
+
+  // --- Counter ---
+  out("=== Counter ===");
+  c: Counter = Counter(0);
+  c.increment();
+  c.increment();
+  c.increment();
+  out(StringInt(c.value()));    // 3
+  c.decrement();
+  out(StringInt(c.value()));    // 2
+  c.reset();
+  out(StringInt(c.value()));    // 0
+
+  // --- Counter via helper functions ---
+  out("=== Counter via helpers ===");
+  c2: Counter = makeCounter(10);
+  printCounterValue(c2);        // 10
+  c2.increment();
+  printCounterValue(c2);        // 11
+
+  // --- Greeter with field mutation ---
+  out("=== Greeter ===");
+  g: Greeter = Greeter("World");
+  out(g.greet());               // Hello, World!
+  g.rename("PaykanLang");
+  out(g.greet());               // Hello, PaykanLang!
+
+  // --- Rectangle ---
+  out("=== Rectangle ===");
+  r: Rectangle = Rectangle(4, 5);
+  out(StringInt(r.area()));     // 20
+  out(StringInt(r.perimeter())); // 18
+  out(r.describe());            // rectangle
+
+  // --- Square (3-level inheritance) ---
+  out("=== Square ===");
+  sq: Square = Square(6);
+  out(StringInt(sq.area()));    // 36
+  out(StringInt(sq.perimeter())); // 24
+  out(sq.describe());           // square
+
+  // --- sumAreas ---
+  out("=== sumAreas ===");
+  r2 = Rectangle(3, 7);
+  sq2 = Square(4);
+  out(StringInt(sumAreas(r2, sq2)));  // 21 + 16 = 37
+
+  // --- Polymorphism: Animal base variable holds Dog / Cat subclass ----------
+  out("=== Polymorphism via base type ===");
+  a: Animal = Dog();
+  out(a.sound());               // woof
+  a = Cat();
+  out(a.sound());               // meow
+
+  // --- Inherited method calls through base variable ---
+  out("=== Animal describe (inherited + override) ===");
+  d: Animal = Dog();
+  out(d.describe());            // animal: woof
+  cat: Animal = Cat();
+  out(cat.describe());          // animal: meow
+
+  // --- Person (mixed fields, method, Str return) ---
+  out("=== Person ===");
+  p: Person = Person("Alice", 29);
+  out(p.toString());            // Alice (age 29)
+  p.birthday();
+  out(p.toString());            // Alice (age 30)
+  describePerson(p);            // Alice (age 30)
+
+  adult = makeAdult("Bob");
+  out(adult.toString());        // Bob (age 18)
+
+  // --- Vehicle hierarchy ---
+  out("=== Vehicle hierarchy ===");
+  v: Vehicle = Car(120);
+  out(v.kind());                // car
+  out(StringInt(v.topSpeed())); // 120
+
+  sc = SportsCar(180, 40);
+  out(sc.kind());               // sports car
+  out(StringInt(sc.topSpeed())); // 220
+
+  // --- Summer (loop inside method) ---
+  out("=== Summer ===");
+  sm = Summer();
+  sm.sumTo(10);
+  out(StringInt(sm.total));     // 55
+  sm.reset();
+  sm.sumTo(4);
+  out(StringInt(sm.total));     // 10
+
+  // --- Sign (if/else inside method) ---
+  out("=== Sign ===");
+  sg = Sign();
+  out(sg.of(7));                // positive
+  out(sg.of(-3));               // negative
+  out(sg.of(0));                // zero
+
+  return 0;
+}

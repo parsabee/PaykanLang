@@ -9,9 +9,13 @@
 #include <string.h>
 #include <stdio.h>
 
+// Forward declarations
+void PaykanString_destroy(PaykanObject *self);
+
 // -- VTable ------------------------------------------------------------------
 
 PaykanStringVTable PaykanString_vtable = {
+    .destroy  = PaykanString_destroy,
     .toString = PaykanString_toString,
     .equals   = PaykanString_equals,
     .length   = PaykanString_length,
@@ -49,18 +53,21 @@ PaykanString *PaykanString_from_bool(int64_t value) {
   return PaykanString_new("False", 5);
 }
 
-void PaykanString_delete(PaykanString *self) {
-  if (self) {
-    free(self->data);
-    free(self);
+void PaykanString_destroy(PaykanObject *self) {
+  PaykanString *s = (PaykanString *)self;
+  if (s) {
+    free(s->data);
+    free(s);
   }
 }
 
 // -- Method implementations --------------------------------------------------
 
 PaykanString *PaykanString_toString(PaykanObject *self) {
-  // String's toString returns itself.
-  return (PaykanString *)self;
+  // Return a fresh copy so the caller takes ownership of an independent
+  // object.
+  PaykanString *s = (PaykanString *)self;
+  return PaykanString_new(s->data, s->len);
 }
 
 int64_t PaykanString_equals(PaykanObject *self, PaykanObject *other) {
@@ -82,11 +89,12 @@ PaykanObject *PaykanString_concat(PaykanObject *self, PaykanObject *other) {
   PaykanString *lhs = (PaykanString *)self;
   PaykanString *rhs = (PaykanString *)other;
   int64_t newLen = lhs->len + rhs->len;
-  char *buf = (char *)malloc((size_t)newLen + 1);
-  memcpy(buf, lhs->data, (size_t)lhs->len);
-  memcpy(buf + lhs->len, rhs->data, (size_t)rhs->len);
-  buf[newLen] = '\0';
-  PaykanString *result = PaykanString_new(buf, newLen);
-  free(buf);
-  return (PaykanObject *)result;
+  PaykanString *s = (PaykanString *)malloc(sizeof(PaykanString));
+  s->vtable = (PaykanObjectVTable *)&PaykanString_vtable;
+  s->len    = newLen;
+  s->data   = (char *)malloc((size_t)newLen + 1);
+  memcpy(s->data, lhs->data, (size_t)lhs->len);
+  memcpy(s->data + lhs->len, rhs->data, (size_t)rhs->len);
+  s->data[newLen] = '\0';
+  return (PaykanObject *)s;
 }

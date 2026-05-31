@@ -1,0 +1,13 @@
+// ERROR: match has no wildcard '_' arm and no fallthrough return —
+// the function does not always return a value.
+class Dog {}
+class Cat {}
+
+fn main() -> int {
+  x: Obj = Dog();
+  match x {
+    Dog { return 0; }
+    Cat { return 1; }
+    // no _ arm and no return after the match
+  }
+}

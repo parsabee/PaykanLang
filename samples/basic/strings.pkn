@@ -1,5 +1,0 @@
-fn main() -> int {
-  s: String = "hello";
-  t: String = "world";
-  return 0;
-}

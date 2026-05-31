@@ -1,8 +1,0 @@
-// Error: cannot pass rvalue to non-const reference parameter.
-fn borrow(s: String&) -> int {
-  return 0;
-}
-
-fn main() -> int {
-  return borrow("a literal");   // error: cannot pass rvalue to non-const reference parameter
-}

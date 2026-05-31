@@ -1,0 +1,47 @@
+// 03 — Relational and equality operators: < > <= >= == !=
+// Exercises: visitBinaryExpr for Lt/Gt/Le/Ge/Eq/Ne,
+//            int comparisons, float comparisons, float-int mixed
+
+fn main() -> int {
+  out("=== int relational ===");
+  out("1<2:  ",  StringBool(1 < 2));     // True
+  out("2<1:  ",  StringBool(2 < 1));     // False
+  out("3>3:  ",  StringBool(3 > 3));     // False
+  out("4>3:  ",  StringBool(4 > 3));     // True
+  out("5<=5: ",  StringBool(5 <= 5));    // True
+  out("5<=4: ",  StringBool(5 <= 4));    // False
+  out("6>=6: ",  StringBool(6 >= 6));    // True
+  out("6>=7: ",  StringBool(6 >= 7));    // False
+  out("7==7: ",  StringBool(7 == 7));    // True
+  out("7==8: ",  StringBool(7 == 8));    // False
+  out("9!=9: ",  StringBool(9 != 9));    // False
+  out("9!=10:",  StringBool(9 != 10));   // True
+
+  out("=== float relational ===");
+  out("1.0<2.0:", StringBool(1.0 < 2.0));  // True
+  out("3.5>3.5:", StringBool(3.5 > 3.5));  // False
+  out("3.5>=3.5:",StringBool(3.5 >= 3.5)); // True
+  out("1.5==1.5:",StringBool(1.5 == 1.5)); // True
+  out("1.5!=2.5:",StringBool(1.5 != 2.5)); // True
+
+  out("=== float-int mixed (promotion) ===");
+  out("1<1.5:",   StringBool(1 < 1.5));    // True
+  out("2.0==2:",  StringBool(2.0 == 2.0));  // True
+  out("3>2.9:",   StringBool(3 > 2.9));    // True
+
+  out("=== equality in variables ===");
+  a: int = 10;
+  b: int = 10;
+  c: int = 20;
+  out("a==b:", StringBool(a == b));        // True
+  out("a==c:", StringBool(a == c));        // False
+  out("a!=c:", StringBool(a != c));        // True
+
+  // Comparisons used in assignments
+  big: bool = a > 5;
+  small: bool = c < 5;
+  out("big:  ", StringBool(big));          // True
+  out("small:", StringBool(small));        // False
+
+  return 0;
+}

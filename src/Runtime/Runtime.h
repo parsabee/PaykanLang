@@ -38,6 +38,7 @@ typedef struct PaykanString  PaykanString;
 // layout so that a PaykanObject* can always reach the vtable.
 
 typedef struct PaykanObjectVTable {
+  void          (*destroy) (PaykanObject *self);
   PaykanString *(*toString)(PaykanObject *self);
   int64_t       (*equals)  (PaykanObject *self, PaykanObject *other);
 } PaykanObjectVTable;
@@ -46,16 +47,19 @@ struct PaykanObject {
   PaykanObjectVTable *vtable;
 };
 
-// Constructor / destructor.
+// Constructor.
 PaykanObject *PaykanObject_new(void);
-void          PaykanObject_delete(PaykanObject *self);
 
 // Default method implementations.
+void          PaykanObject_destroy(PaykanObject *self);
 PaykanString *PaykanObject_toString(PaykanObject *self);
 int64_t       PaykanObject_equals(PaykanObject *self, PaykanObject *other);
 
 // Global vtable instance.
 extern PaykanObjectVTable PaykanObject_vtable;
+
+// Singleton None instance — an Obj whose toString returns "None".
+extern PaykanObject PaykanObject_None;
 
 // ============================================================================
 // String
@@ -66,6 +70,7 @@ extern PaykanObjectVTable PaykanObject_vtable;
 
 typedef struct PaykanStringVTable {
   // Inherited (Object-compatible prefix)
+  void          (*destroy) (PaykanObject *self);
   PaykanString *(*toString)(PaykanObject *self);
   int64_t       (*equals)  (PaykanObject *self, PaykanObject *other);
   // String-specific
@@ -84,9 +89,9 @@ PaykanString *PaykanString_new(const char *data, int64_t len);
 PaykanString *PaykanString_from_int(int64_t value);
 PaykanString *PaykanString_from_float(double value);
 PaykanString *PaykanString_from_bool(int64_t value);
-void          PaykanString_delete(PaykanString *self);
 
 // Method implementations.
+void          PaykanString_destroy(PaykanObject *self);
 PaykanString *PaykanString_toString(PaykanObject *self);
 int64_t       PaykanString_equals(PaykanObject *self, PaykanObject *other);
 int64_t       PaykanString_length(PaykanObject *self);
@@ -106,14 +111,11 @@ extern PaykanStringVTable PaykanString_vtable;
 typedef struct PaykanShared {
   int64_t       refCount;  // strong reference count (starts at 1)
   PaykanObject *object;    // the owned object (never NULL)
-  void        (*destroy)(PaykanObject *); // destructor for the owned object
 } PaykanShared;
 
-/// Create a shared wrapper around `obj`.  `destroyFn` is the destructor
-/// to call on the owned object when refCount reaches zero
-/// (e.g. PaykanObject_delete, PaykanString_delete cast to the right sig).
-PaykanShared *PaykanShared_new(PaykanObject *obj,
-                               void (*destroyFn)(PaykanObject *));
+/// Create a shared wrapper around `obj`.  The destructor is taken from
+/// `obj->vtable->destroy` when the refcount reaches zero.
+PaykanShared *PaykanShared_new(PaykanObject *obj);
 
 /// Increment the reference count.
 void Paykan_retain(PaykanShared *shared);

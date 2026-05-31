@@ -69,8 +69,8 @@ inline SemaResult semaCheck(const std::string &source) {
   llvm::raw_string_ostream diagOS(diagStr);
   sema::Sema sema(driver->getASTContext(), diagOS, "",
                   driver->getCurrentFile(), &driver->getSourceLines());
-  bool ok = sema.run(driver->getRoot());
-  return {ok, diagStr, sema.getErrorCount()};
+  auto semaCtx = sema.run(driver->getRoot());
+  return {semaCtx.Ok, diagStr, semaCtx.ErrorCount};
 }
 
 /// Compile and JIT-execute source. Returns {exitCode, stdout, stderr, compiledOk}.
@@ -92,12 +92,13 @@ inline RunResult compileAndRun(const std::string &source,
   llvm::raw_string_ostream diagOS(diagStr);
   sema::Sema sema(driver->getASTContext(), diagOS, projectRoot,
                   driver->getCurrentFile(), &driver->getSourceLines());
-  if (!sema.run(driver->getRoot()))
+  auto semaCtx = sema.run(driver->getRoot());
+  if (!semaCtx)
     return {-1, "", diagStr, false};
 
   // CodeGen
   auto llvmCtx = std::make_unique<llvm::LLVMContext>();
-  codegen::CodeGen cg(driver->getASTContext(), *llvmCtx, "test", projectRoot);
+  codegen::CodeGen cg(semaCtx, *llvmCtx, "test", projectRoot);
   if (!cg.run(driver->getRoot()))
     return {-1, "", "codegen failed", false};
 
@@ -169,11 +170,12 @@ inline RunResult compileAndRunFile(const std::string &filePath) {
   llvm::raw_string_ostream diagOS(diagStr);
   sema::Sema sema(fileDriver.getASTContext(), diagOS, projectRoot,
                   fileDriver.getCurrentFile(), &fileDriver.getSourceLines());
-  if (!sema.run(fileDriver.getRoot()))
+  auto semaCtx = sema.run(fileDriver.getRoot());
+  if (!semaCtx)
     return {-1, "", diagStr, false};
 
   auto llvmCtx = std::make_unique<llvm::LLVMContext>();
-  codegen::CodeGen cg(fileDriver.getASTContext(), *llvmCtx, "test", projectRoot);
+  codegen::CodeGen cg(semaCtx, *llvmCtx, "test", projectRoot);
   if (!cg.run(fileDriver.getRoot()))
     return {-1, "", "codegen failed", false};
 

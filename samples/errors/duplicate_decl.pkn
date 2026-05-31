@@ -1,6 +1,0 @@
-fn main() -> int {
-  // Error: duplicate variable declaration
-  x: int = 1;
-  x: int = 2;
-  return 0;
-}

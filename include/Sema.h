@@ -16,6 +16,7 @@
 #include <functional>
 
 namespace paykan {
+namespace parser { class ParserDriver; }
 namespace sema {
 
 // A single diagnostic emitted during semantic analysis.
@@ -25,6 +26,28 @@ struct Diagnostic {
   Severity Level;
   ast::SourceLocation Loc;
   std::string Message;
+};
+
+/// Result object returned by Sema::run(). Carries the populated ASTContext
+/// and (for imported modules) the owning ParserDriver plus pre-computed child
+/// SemaContexts so CodeGen can consume them without re-running Sema.
+struct SemaContext {
+  /// For imported modules: owns the ParserDriver (and thus its ASTContext).
+  /// nullptr for top-level contexts where the caller owns the driver.
+  std::shared_ptr<parser::ParserDriver> OwnedDriver;
+  /// Non-owning pointer into the relevant ASTContext.
+  ast::ASTContext *ASTCtx = nullptr;
+  /// Root TU node — set when OwnedDriver is non-null.
+  ast::TranslationUnit *Root = nullptr;
+  bool Ok = false;
+  unsigned ErrorCount = 0;
+  std::vector<Diagnostic> Diagnostics;
+  /// Pre-computed SemaContexts for directly-imported modules, keyed by
+  /// resolved file path. Populated by Sema::run() so CodeGen can reuse
+  /// them without re-running the Sema pass.
+  llvm::StringMap<std::shared_ptr<SemaContext>> ImportedContexts;
+
+  explicit operator bool() const { return Ok; }
 };
 
 // Semantic analysis visitor.
@@ -53,34 +76,17 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   struct Scope {
     Scope *Parent = nullptr;
     llvm::StringMap<ast::Type *> Locals;
-    llvm::StringMap<ast::Ownership> OwnershipMap;
-    llvm::StringSet<> MovedSet;  // unique variables that have been moved
-    llvm::StringSet<> ConstSet;  // variables declared as const
 
     explicit Scope(Scope *parent = nullptr);
 
     /// Look up a name, walking the scope chain.
     ast::Type *lookup(llvm::StringRef name) const;
 
-    /// Look up ownership of a name, walking the scope chain.
-    ast::Ownership lookupOwnership(llvm::StringRef name) const;
-
-    /// Check if a variable has been moved (walks scope chain).
-    bool isMoved(llvm::StringRef name) const;
-
-    /// Mark a variable as moved in the scope that owns it.
-    void markMoved(llvm::StringRef name);
-
     /// Declare a name in *this* scope (does not check parent scopes).
     /// Returns false if the name already exists in this scope.
     bool declare(llvm::StringRef name, ast::Type *ty);
 
-    /// Declare with ownership info.
-    bool declare(llvm::StringRef name, ast::Type *ty, ast::Ownership ownership,
-                 bool isConst = false);
-
     /// Check if a variable is const (walks scope chain).
-    bool isConst(llvm::StringRef name) const;
 
     /// Insert or update a binding in this scope.
     void set(llvm::StringRef name, ast::Type *ty);
@@ -100,14 +106,25 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// Loop nesting depth (0 = not inside a loop).
   unsigned LoopDepth = 0;
 
+  // -- Class analysis context ----------------------------------------------
+  //
+  // Populated while visitClassDecl is running; nullptr outside of a class.
+  //
+  struct ClassContext {
+    ast::ClassType *ClassType;  // the type being checked
+    std::string     MethodName; // method currently being checked (empty = none)
+    bool SuperInitRequired = false; // __init__ must call __super__
+    bool SuperInitCalled   = false; // __super__ has been called
+  };
+
+  ClassContext *CurrentClassCtx = nullptr;
+
   // -- Function signature table ---------------------------------------------
 
   /// Describes a known function's type signature.
   struct FunctionSig {
     ast::Type *ReturnType;
     std::vector<ast::Type *> ParamTypes;
-    std::vector<ast::Ownership> ParamOwnerships;
-    std::vector<bool> ParamIsConst;
     bool IsVariadic = false;
     bool IsBuiltin = false;
   };
@@ -118,8 +135,6 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// Register a function signature.
   void declareFunction(llvm::StringRef name, ast::Type *retTy,
                        std::vector<ast::Type *> paramTys,
-                       std::vector<ast::Ownership> paramOwns = {},
-                       std::vector<bool> paramConst = {},
                        bool isVariadic = false, bool isBuiltin = false);
 
   /// Look up a function signature, or nullptr if unknown.
@@ -155,25 +170,23 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // type `dst`.  This includes exact match, int→float promotion, and
   // ClassType subtyping. When `srcExpr` is provided, expression-form checks
   // (such as '&' argument usage) are also enforced.
-  bool isAssignable(ast::Type *dst, ast::Type *src,
-                    ast::Expr *srcExpr = nullptr,
-                    ast::Ownership dstOwn = ast::Ownership::Unique) const;
+  bool isAssignable(ast::Type *dst, ast::Type *src) const;
+
+  // Returns the lowest common ancestor in the class hierarchy of two class
+  // types, or nullptr if they share no common ancestor.
+  static ast::ClassType *findLowestCommonAncestor(ast::ClassType *a,
+                                                  ast::ClassType *b);
 
   // Resolve a declared AST Type* to its canonical equivalent from
   // ASTContext (e.g. a BuiltinType(Int) node → Ctx.getIntTy(), a
-  // ClassType("String") → Ctx.getStringTy()).  Returns nullptr and
+  // ClassType("Str") → Ctx.getStrTy()).  Returns nullptr and
   // emits an error on failure.
   ast::Type *resolveType(ast::Type *ty, ast::SourceLocation loc,
                          const std::string &context);
 
-  // Check that a variable is declared and not moved.  Returns its type,
+  // Check that a variable is declared. Returns its type,
   // or nullptr (with error emitted) on failure.
   ast::Type *checkIdentLive(llvm::StringRef name, ast::SourceLocation loc);
-
-  // Check ownership compatibility of a single call argument against its
-  // parameter.  Emits errors and returns false on mismatch.
-  bool checkArgOwnership(const FunctionSig &sig, size_t paramIdx,
-                         ast::Expr *argExpr, const std::string &calleeName);
 
   // -- Expression type-checker ----------------------------------------------
   //
@@ -212,6 +225,11 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// Files currently being imported (for cycle detection).
   llvm::StringSet<> *ImportStack = nullptr;
 
+  /// Accumulated SemaContexts for each directly-imported module, keyed by
+  /// resolved path. Built by processImport; moved into the SemaContext
+  /// returned by run().
+  llvm::StringMap<std::shared_ptr<SemaContext>> AccumulatedImportContexts;
+
   /// Info about an already-analyzed module.
   struct ModuleInfo {
     // Functions are stored as serialised name-strings so the cache entry never
@@ -220,8 +238,6 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
       std::string Name;
       std::string ReturnTypeName;
       std::vector<std::string> ParamTypeNames;
-      std::vector<ast::Ownership> ParamOwnerships;
-      std::vector<bool> ParamIsConst;
       bool IsVariadic = false;
     };
     std::vector<FunctionInfo> ExportedFunctions;
@@ -254,6 +270,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// Process a single import declaration.
   bool processImport(ast::ImportDecl *node);
 
+  /// Run the 5-phase class declaration check on the given class decls.
+  /// Called from visitTranslationUnit.
+  bool checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls);
+
 public:
   explicit Sema(ast::ASTContext &ctx, llvm::raw_ostream &os = llvm::errs(),
                 const std::string &projectRoot = "",
@@ -261,7 +281,8 @@ public:
                 const std::vector<std::string> *sourceLines = nullptr);
 
   // Entry point -- run semantic analysis on a TranslationUnit.
-  bool run(ast::TranslationUnit *tu);
+  // Returns a SemaContext whose bool operator is true on success.
+  SemaContext run(ast::TranslationUnit *tu);
 
   // Access diagnostics after analysis.
   const std::vector<Diagnostic> &getDiagnostics() const { return Diagnostics; }

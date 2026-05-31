@@ -1,0 +1,8 @@
+// ERROR: match subject is 'int', not a class type
+fn main() -> int {
+  x: int = 42;
+  match x {   // sema error: match subject must be a class type
+    _ { }
+  }
+  return 0;
+}

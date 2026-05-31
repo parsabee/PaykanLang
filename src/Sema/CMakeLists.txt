@@ -3,7 +3,11 @@
 # paykan_sema -- static library for semantic analysis.
 # ----------------------------------------------------------------------------
 
-add_library(paykan_sema STATIC Sema.cpp)
+add_library(paykan_sema STATIC
+    Sema.cpp
+    SemaClass.cpp
+    SemaImport.cpp
+)
 target_include_directories(paykan_sema SYSTEM
     PRIVATE ${LLVM_INCLUDE_DIRS}
 )

@@ -1,0 +1,22 @@
+// ERROR: __init__ in a derived class does not call __super__
+// when the superclass __init__ has parameters
+class Animal {
+  name: Str;
+
+  fn __init__(n: Str) {
+    self.name = n;
+  }
+}
+
+class Dog : Animal {
+  breed: Str;
+
+  fn __init__(n: Str, b: Str) {
+    // missing: __super__(n);
+    self.breed = b;
+  }
+}
+
+fn main() -> int {
+  return 0;
+}

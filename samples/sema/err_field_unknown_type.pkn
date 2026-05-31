@@ -1,0 +1,8 @@
+// ERROR: field has an unknown type
+class A {
+  data: NoSuchType;
+}
+
+fn main() -> int {
+  return 0;
+}

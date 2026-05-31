@@ -41,6 +41,11 @@ static llvm::cl::opt<bool>
              llvm::cl::desc("Emit LLVM IR to stdout"),
              llvm::cl::init(false));
 
+static llvm::cl::opt<bool>
+    CheckOnly("check-only",
+              llvm::cl::desc("Run parsing and semantic analysis only (no codegen)"),
+              llvm::cl::init(false));
+
 static llvm::cl::opt<unsigned>
     OptLevel("O",
              llvm::cl::desc("Optimization level (0–3)"),
@@ -74,14 +79,17 @@ int main(int argc, char *argv[]) {
       std::filesystem::path(InputFilename.getValue()).parent_path().string();
   paykan::sema::Sema sema(driver.getASTContext(), llvm::errs(), projectRoot,
                           driver.getCurrentFile(), &driver.getSourceLines());
-  sema.run(root);
+  auto semaCtx = sema.run(root);
 
-  if (sema.hasErrors())
+  if (!semaCtx)
     return EXIT_FAILURE;
+
+  if (CheckOnly)
+    return EXIT_SUCCESS;
 
   // -- Code generation ------------------------------------------------------
   auto llvmCtx = std::make_unique<llvm::LLVMContext>();
-  paykan::codegen::CodeGen cg(driver.getASTContext(), *llvmCtx,
+  paykan::codegen::CodeGen cg(semaCtx, *llvmCtx,
                               InputFilename, projectRoot);
   if (!cg.run(root)) {
     llvm::errs() << "code generation failed (module verification error)\n";

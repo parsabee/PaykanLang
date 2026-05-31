@@ -1,0 +1,11 @@
+// ERROR: wildcard '_' is not the last arm — Dog arm after it is unreachable
+class Dog {}
+
+fn main() -> int {
+  x: Obj = Dog();
+  match x {
+    _ { }
+    Dog { }   // sema error: unreachable arm after wildcard
+  }
+  return 0;
+}

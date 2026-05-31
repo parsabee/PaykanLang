@@ -65,7 +65,7 @@ target_link_libraries(paykan_parser
 # that enables RTTI and exceptions.  We set our own flags instead of linking
 # paykan_compile_options (which carries -fno-rtti -fno-exceptions).
 target_compile_options(paykan_parser PRIVATE
-    -Wall -Wextra -Wpedantic
+    -Wall -Wextra -Wpedantic -Werror
     -fexceptions -frtti
     $<$<CONFIG:Debug>:-g -O0>
     $<$<CONFIG:Release>:-O3>

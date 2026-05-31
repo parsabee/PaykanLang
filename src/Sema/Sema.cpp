@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 #include "Sema.h"
-#include "ModuleUtils.h"
 #include "Names.h"
-#include "ParserDriver.h"
+#include "SemaInternal.h"
 
+#include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/Support/raw_ostream.h>
 
 #include <algorithm>
+#include <functional>
 
 namespace paykan {
 namespace sema {
@@ -26,40 +27,10 @@ ast::Type *Sema::Scope::lookup(llvm::StringRef name) const {
   return Parent ? Parent->lookup(name) : nullptr;
 }
 
-ast::Ownership Sema::Scope::lookupOwnership(llvm::StringRef name) const {
-  auto it = OwnershipMap.find(name);
-  if (it != OwnershipMap.end()) return it->second;
-  return Parent ? Parent->lookupOwnership(name) : ast::Ownership::Unique;
-}
-
-bool Sema::Scope::isMoved(llvm::StringRef name) const {
-  if (MovedSet.count(name)) return true;
-  return Parent ? Parent->isMoved(name) : false;
-}
-
-void Sema::Scope::markMoved(llvm::StringRef name) {
-  // Mark in the scope that owns the variable.
-  if (Locals.count(name)) { MovedSet.insert(name); return; }
-  if (Parent) Parent->markMoved(name);
-}
-
 bool Sema::Scope::declare(llvm::StringRef name, ast::Type *ty) {
-  return Locals.try_emplace(name, ty).second;
-}
-
-bool Sema::Scope::declare(llvm::StringRef name, ast::Type *ty, ast::Ownership ownership,
-                          bool isConst) {
   if (!Locals.try_emplace(name, ty).second)
     return false;
-  OwnershipMap[name] = ownership;
-  if (isConst)
-    ConstSet.insert(name);
   return true;
-}
-
-bool Sema::Scope::isConst(llvm::StringRef name) const {
-  if (ConstSet.count(name)) return true;
-  return Parent ? Parent->isConst(name) : false;
 }
 
 void Sema::Scope::set(llvm::StringRef name, ast::Type *ty) {
@@ -93,16 +64,8 @@ Sema::Sema(ast::ASTContext &ctx, llvm::raw_ostream &os,
 
 void Sema::declareFunction(llvm::StringRef name, ast::Type *retTy,
                            std::vector<ast::Type *> paramTys,
-                           std::vector<ast::Ownership> paramOwns,
-                           std::vector<bool> paramConst,
                            bool isVariadic, bool isBuiltin) {
-  // Default all param ownerships to Unique if not provided.
-  if (paramOwns.empty())
-    paramOwns.resize(paramTys.size(), ast::Ownership::Unique);
-  if (paramConst.empty())
-    paramConst.resize(paramTys.size(), false);
-  FunctionTable[name] = {retTy, std::move(paramTys), std::move(paramOwns),
-                         std::move(paramConst), isVariadic, isBuiltin};
+  FunctionTable[name] = {retTy, std::move(paramTys), isVariadic, isBuiltin};
 }
 
 const Sema::FunctionSig *Sema::lookupFunction(llvm::StringRef name) const {
@@ -189,10 +152,10 @@ void Sema::warning(ast::SourceLocation loc, const std::string &msg) {
 const char *Sema::typeName(ast::Type *ty) {
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty)) {
     switch (bt->getTypeKind()) {
-    case ast::BuiltinType::Int:   return "int";
-    case ast::BuiltinType::Float: return "float";
-    case ast::BuiltinType::Bool:  return "bool";
-    case ast::BuiltinType::Void:  return "void";
+    case ast::BuiltinType::Int:   return names::kTypeInt;
+    case ast::BuiltinType::Float: return names::kTypeFloat;
+    case ast::BuiltinType::Bool:  return names::kTypeBool;
+    case ast::BuiltinType::Void:  return names::kTypeVoid;
     }
   }
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ty))
@@ -207,14 +170,7 @@ bool Sema::isNumeric(ast::Type *ty) {
   return false;
 }
 
-bool Sema::isAssignable(ast::Type *dst, ast::Type *src,
-                        ast::Expr *srcExpr,
-                        ast::Ownership dstOwn) const {
-  // '&expr' is only assignable to reference destinations.
-  if (srcExpr && ast::isa<ast::RefExpr>(srcExpr) &&
-      dstOwn != ast::Ownership::Reference)
-    return false;
-
+bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
   if (dst == src)
     return true;
 
@@ -242,109 +198,26 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     return nullptr;
   }
 
+  if (auto *at = ast::dyn_cast<ast::ArrayType>(ty)) {
+    // TODO(arrays): validate element type; for now just return the ArrayType as-is.
+    auto *elemTy = resolveType(at->getElementType(), loc, context + " element");
+    if (!elemTy)
+      return nullptr;
+    return at; // reuse the parser-created node; Sema/CodeGen will flesh this out later
+  }
+
   error(loc, context + " has unknown type");
   return nullptr;
 }
 
-// Check that a variable is declared and has not been moved.
+// Check that a variable is declared.
 ast::Type *Sema::checkIdentLive(llvm::StringRef name, ast::SourceLocation loc) {
   auto *ty = CurrentScope->lookup(name);
   if (!ty) {
     error(loc, "use of undeclared variable '" + std::string(name) + "'");
     return nullptr;
   }
-  if (CurrentScope->isMoved(name)) {
-    error(loc, "use of moved variable '" + std::string(name) + "'");
-    return nullptr;
-  }
   return ty;
-}
-
-// Check ownership compatibility of a single call argument.
-bool Sema::checkArgOwnership(const FunctionSig &sig, size_t i,
-                             ast::Expr *argExpr,
-                             const std::string &calleeName) {
-  auto paramOwn = sig.ParamOwnerships[i];
-  bool paramConst = sig.ParamIsConst[i];
-  bool isMov = ast::isa<ast::MovExpr>(argExpr);
-  bool isRef = ast::isa<ast::RefExpr>(argExpr);
-
-  // Determine the argument's ownership and name.
-  ast::Ownership argOwn = ast::Ownership::Unique;
-  bool argIsIdent = false;
-  std::string argName;
-  if (auto *id = ast::dyn_cast<ast::Identifier>(argExpr)) {
-    argOwn = CurrentScope->lookupOwnership(id->getName());
-    argIsIdent = true;
-    argName = id->getName();
-  } else if (isRef) {
-    if (auto *id = ast::cast<ast::RefExpr>(argExpr)->getIdentOperand()) {
-      argOwn = CurrentScope->lookupOwnership(id->getName());
-      argName = id->getName();
-    }
-  }
-
-  auto err = [&](const std::string &msg) {
-    error(argExpr->getLocation(),
-          "argument " + std::to_string(i + 1) + " of '" + calleeName + "': " + msg);
-  };
-
-  switch (paramOwn) {
-  case ast::Ownership::Unique:
-    if (!isMov) {
-      if (argIsIdent && argOwn == ast::Ownership::Shared)
-        err("shared variable '" + argName + "' cannot be passed to unique parameter");
-      else if (argIsIdent && argOwn == ast::Ownership::Reference)
-        err("reference '" + argName + "' cannot be passed to unique parameter");
-      else
-        err("unique ownership must be transferred with 'mov'");
-      return false;
-    }
-    break;
-
-  case ast::Ownership::Shared:
-    if (isMov) {
-      // mov → shared: OK
-    } else if (argIsIdent) {
-      if (argOwn == ast::Ownership::Unique) {
-        err("unique variable '" + argName + "' must be 'mov'd to shared parameter");
-        return false;
-      } else if (argOwn == ast::Ownership::Reference) {
-        err("reference '" + argName + "' cannot be passed to shared parameter");
-        return false;
-      }
-      // shared → shared: OK
-    } else {
-      err("unique ownership must be transferred with 'mov' to shared parameter");
-      return false;
-    }
-    break;
-
-  case ast::Ownership::Reference:
-    if (isMov) {
-      err("'mov' cannot be used when passing to a reference parameter");
-      return false;
-    } else if (isRef) {
-      // &x — check source ownership for non-const ref.
-      if (!paramConst) {
-        if (auto *id = ast::cast<ast::RefExpr>(argExpr)->getIdentOperand()) {
-          if (CurrentScope->lookupOwnership(id->getName()) == ast::Ownership::Shared) {
-            err("shared variable '" + std::string(id->getName()) +
-                "' cannot be passed to non-const reference parameter");
-            return false;
-          }
-        }
-      }
-    } else if (argIsIdent && argOwn != ast::Ownership::Reference) {
-      err("reference parameter requires '&' on the argument");
-      return false;
-    } else if (!argIsIdent && !paramConst) {
-      err("cannot pass rvalue to non-const reference parameter");
-      return false;
-    }
-    break;
-  }
-  return true;
 }
 
 // Visit an expression and return its resolved type (nullptr on error).
@@ -366,8 +239,12 @@ ast::Type *Sema::ExprChecker::visitBoolLiteral(ast::BoolLiteral *) {
   return S.Ctx.getBoolTy();
 }
 
+ast::Type *Sema::ExprChecker::visitNoneLiteral(ast::NoneLiteral *) {
+  return S.Ctx.getObjTy();
+}
+
 ast::Type *Sema::ExprChecker::visitStringLiteral(ast::StringLiteral *) {
-  return S.Ctx.getStringTy();
+  return S.Ctx.getStrTy();
 }
 
 ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
@@ -390,8 +267,9 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
   switch (node->getOpcode()) {
   case ast::UnaryOpcode::Neg: return operandTy;
   case ast::UnaryOpcode::Not: return S.Ctx.getBoolTy();
+  case ast::UnaryOpcode::Count: break;
   }
-  return nullptr;
+  llvm_unreachable("unknown UnaryOpcode");
 }
 
 ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
@@ -431,8 +309,8 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   // Arithmetic: result is float if either operand is float, else int.
   case ast::BinaryOpcode::Add:
     // String concatenation: String + String → String.
-    if (lhsTy == S.Ctx.getStringTy() && rhsTy == S.Ctx.getStringTy())
-      return S.Ctx.getStringTy();
+    if (lhsTy == S.Ctx.getStrTy() && rhsTy == S.Ctx.getStrTy())
+      return S.Ctx.getStrTy();
     [[fallthrough]];
   case ast::BinaryOpcode::Sub:
   case ast::BinaryOpcode::Mul:
@@ -467,9 +345,10 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
       return nullptr;
     }
     return S.Ctx.getBoolTy();
+  case ast::BinaryOpcode::Count:
+    break;
   }
-
-  return nullptr;
+  llvm_unreachable("unknown BinaryOpcode");
 }
 
 ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
@@ -478,6 +357,47 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   for (auto *arg : node->getArguments()) {
     auto *ty = visit(arg);
     argTypes.push_back(ty);
+  }
+
+  // -- __super__(args): superclass initializer call -------------------------
+  if (node->getCalleeName() == names::kMethodSuper) {
+    if (!S.CurrentClassCtx || S.CurrentClassCtx->MethodName != names::kMethodInit) {
+      S.error(node->getLocation(),
+              std::string("'") + names::kMethodSuper + "' can only be called inside '" + names::kMethodInit + "'");
+      return nullptr;
+    }
+    auto *superClass = S.CurrentClassCtx->ClassType->getSuperClass();
+    if (!superClass || superClass == S.Ctx.getObjTy()) {
+      S.error(node->getLocation(),
+              std::string("'") + names::kMethodSuper + "' called in class '" +
+                  S.CurrentClassCtx->ClassType->getName() +
+                  "' which has no explicit superclass");
+      return nullptr;
+    }
+    auto *superInit = superClass->findMethod(names::kMethodInit);
+    std::vector<ast::Type *> expectedParams;
+    if (superInit)
+      expectedParams = superInit->getParamTypes();
+    if (argTypes.size() != expectedParams.size()) {
+      S.error(node->getLocation(),
+              std::string("'") + names::kMethodSuper + "' expects " +
+                  std::to_string(expectedParams.size()) +
+                  " argument(s), got " +
+                  std::to_string(argTypes.size()));
+    } else {
+      for (size_t i = 0; i < argTypes.size(); ++i) {
+        if (!argTypes[i])
+          continue;
+        if (!S.isAssignable(expectedParams[i], argTypes[i]))
+          S.error(node->getArguments()[i]->getLocation(),
+                  "argument " + std::to_string(i + 1) +
+                      " of '" + names::kMethodSuper + "' has type '" +
+                      std::string(typeName(argTypes[i])) + "', expected '" +
+                      typeName(expectedParams[i]) + "'");
+      }
+    }
+    S.CurrentClassCtx->SuperInitCalled = true;
+    return S.Ctx.getVoidTy();
   }
 
   const auto *sig = S.lookupFunction(node->getCalleeName());
@@ -512,62 +432,116 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     // last declared parameter type.
     size_t paramIdx = (i < sig->ParamTypes.size()) ? i : sig->ParamTypes.size() - 1;
 
-    if (!S.isAssignable(sig->ParamTypes[paramIdx], argTypes[i],
-                        node->getArguments()[i],
-                        sig->ParamOwnerships[paramIdx])) {
-      if (ast::isa<ast::RefExpr>(node->getArguments()[i]) &&
-          sig->ParamOwnerships[paramIdx] != ast::Ownership::Reference) {
-        S.error(node->getArguments()[i]->getLocation(),
-                "argument " + std::to_string(i + 1) + " of '" +
-                    node->getCalleeName() +
-                    "': '&' can only be passed to a reference parameter");
-      } else {
+    if (!S.isAssignable(sig->ParamTypes[paramIdx], argTypes[i])) {
       S.error(node->getArguments()[i]->getLocation(),
               "argument " + std::to_string(i + 1) + " of '" +
                   node->getCalleeName() + "' has type '" +
                   typeName(argTypes[i]) + "', expected '" +
                   typeName(sig->ParamTypes[paramIdx]) + "'");
-      }
     }
-
-    // ---- Ownership checking for class-type parameters ----
-    if (i < sig->ParamTypes.size() &&
-        ast::isa<ast::ClassType>(sig->ParamTypes[i]))
-      S.checkArgOwnership(*sig, i, node->getArguments()[i],
-                          node->getCalleeName());
   }
 
+  node->setResolvedType(sig->ReturnType);
   return sig->ReturnType;
 }
 
-ast::Type *Sema::ExprChecker::visitMovExpr(ast::MovExpr *node) {
-  auto *ident = node->getOperand();
-  auto *ty = S.checkIdentLive(ident->getName(), ident->getLocation());
-  if (!ty)
+ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
+  // Resolve receiver type.
+  auto *recvTy = visit(node->getReceiver());
+  if (!recvTy)
     return nullptr;
 
-  if (!ast::isa<ast::ClassType>(ty)) {
+  auto *ct = ast::dyn_cast<ast::ClassType>(recvTy);
+  if (!ct) {
     S.error(node->getLocation(),
-            "'mov' can only be used on class types");
+            "method call on non-class type '" +
+                std::string(typeName(recvTy)) + "'");
     return nullptr;
   }
 
-  auto ownership = S.CurrentScope->lookupOwnership(ident->getName());
-  if (ownership == ast::Ownership::Reference) {
+  ast::MethodDecl *method = ct->findMethod(node->getMethodName());
+  if (!method) {
     S.error(node->getLocation(),
-            "'mov' cannot be used on reference variables");
+            "no method '" + node->getMethodName() + "' on type '" +
+                ct->getName() + "'");
     return nullptr;
   }
-  S.CurrentScope->markMoved(ident->getName());
-  return ty;
+
+  // Type-check arguments (receiver is implicit — not in getArguments()).
+  const auto &paramTys = method->getParamTypes();
+  if (node->getNumArguments() != paramTys.size()) {
+    S.error(node->getLocation(),
+            "method '" + node->getMethodName() + "' expects " +
+                std::to_string(paramTys.size()) + " argument(s), got " +
+                std::to_string(node->getNumArguments()));
+    return method->getReturnType();
+  }
+  for (size_t i = 0; i < node->getNumArguments(); ++i) {
+    auto *argTy = visit(node->getArguments()[i]);
+    if (!argTy)
+      continue;
+    if (!S.isAssignable(paramTys[i], argTy)) {
+      S.error(node->getArguments()[i]->getLocation(),
+              "argument " + std::to_string(i + 1) + " of '" +
+                  node->getMethodName() + "' has type '" +
+                  typeName(argTy) + "', expected '" +
+                  typeName(paramTys[i]) + "'");
+    }
+  }
+
+  node->setResolvedType(method->getReturnType());
+  return method->getReturnType();
 }
 
-ast::Type *Sema::ExprChecker::visitRefExpr(ast::RefExpr *node) {
-  if (auto *ident = node->getIdentOperand())
-    return S.checkIdentLive(ident->getName(), ident->getLocation());
-  // '&' can only be applied to a variable.
+// static
+ast::ClassType *Sema::findLowestCommonAncestor(ast::ClassType *a,
+                                               ast::ClassType *b) {
+  llvm::SmallPtrSet<ast::ClassType *, 8> aAncestors;
+  for (auto *c = a; c; c = c->getSuperClass())
+    aAncestors.insert(c);
+  for (auto *c = b; c; c = c->getSuperClass())
+    if (aAncestors.count(c))
+      return c;
+  return nullptr;
+}
+
+ast::Type *Sema::ExprChecker::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
+  auto *recvTy = visit(node->getReceiver());
+  if (!recvTy)
+    return nullptr;
+
+  auto *ct = ast::dyn_cast<ast::ClassType>(recvTy);
+  if (!ct) {
+    S.error(node->getLocation(),
+            "member access '." + node->getFieldName() +
+                "' on non-class type '" + std::string(typeName(recvTy)) + "'");
+    return nullptr;
+  }
+
+  // Walk the class hierarchy (this class + all ancestors) for the field.
+  for (auto *c = ct; c; c = c->getSuperClass()) {
+    for (auto &[fname, fty] : c->getFields()) {
+      if (fname == node->getFieldName()) {
+        node->setResolvedType(fty);
+        return fty;
+      }
+    }
+  }
+
   S.error(node->getLocation(),
-          "'&' can only be applied to a variable");
+          "no field '" + node->getFieldName() + "' in class '" +
+              ct->getName() + "'");
+  return nullptr;
+}
+
+// TODO(arrays): full array sema not yet implemented.
+ast::Type *Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
+  S.error(node->getLocation(), "array literals are not yet fully supported");
+  return nullptr;
+}
+
+ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
+  S.error(node->getLocation(), "array subscript is not yet fully supported");
   return nullptr;
 }
 
@@ -585,39 +559,51 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
     return nullptr;
   }
 
-  if (trueTy != falseTy) {
-    S.error(node->getLocation(),
-            "ternary branches have mismatched types '" +
-                std::string(typeName(trueTy)) + "' and '" +
-                std::string(typeName(falseTy)) + "'");
-    return nullptr;
+  if (trueTy == falseTy) {
+    node->setResolvedType(trueTy);
+    return trueTy;
   }
 
-  return trueTy;
+  // For class types, find the lowest common ancestor in the hierarchy.
+  auto *trueCT  = ast::dyn_cast<ast::ClassType>(trueTy);
+  auto *falseCT = ast::dyn_cast<ast::ClassType>(falseTy);
+  if (trueCT && falseCT) {
+    if (auto *lca = S.findLowestCommonAncestor(trueCT, falseCT)) {
+      node->setResolvedType(lca);
+      return lca;
+    }
+  }
+
+  S.error(node->getLocation(),
+          "ternary branches have incompatible types '" +
+              std::string(typeName(trueTy)) + "' and '" +
+              std::string(typeName(falseTy)) + "'");
+  return nullptr;
 }
 
 
 
 // -- Entry point -------------------------------------------------------------
 
-bool Sema::run(ast::TranslationUnit *tu) {
+SemaContext Sema::run(ast::TranslationUnit *tu) {
   CurrentScope = nullptr;
   Diagnostics.clear();
   ErrorCount = 0;
+  AccumulatedImportContexts.clear();
 
-  // Bootstrap builtin functions — out/err take const T&.
-  declareFunction(names::kOut, Ctx.getVoidTy(), {Ctx.getObjectTy()},
-                  {ast::Ownership::Reference}, {true}, /*variadic=*/true, /*builtin=*/true);
-  declareFunction(names::kErr, Ctx.getVoidTy(), {Ctx.getObjectTy()},
-                  {ast::Ownership::Reference}, {true}, /*variadic=*/true, /*builtin=*/true);
+  // Bootstrap builtin functions — out/err take any object.
+  declareFunction(names::kOut, Ctx.getVoidTy(), {Ctx.getObjTy()},
+                  /*variadic=*/true, /*builtin=*/true);
+  declareFunction(names::kErr, Ctx.getVoidTy(), {Ctx.getObjTy()},
+                  /*variadic=*/true, /*builtin=*/true);
 
   // Register type-conversion builtins (take unique builtin types — no ownership check needed).
-  auto *StrTy = Ctx.getStringTy();
-  declareFunction(names::kStringInt,   StrTy, {Ctx.getIntTy()},   {}, {}, false, true);
-  declareFunction(names::kStringFloat, StrTy, {Ctx.getFloatTy()}, {}, {}, false, true);
-  declareFunction(names::kStringBool,  StrTy, {Ctx.getBoolTy()},  {}, {}, false, true);
+  auto *StrTy = Ctx.getStrTy();
+  declareFunction(names::kStringInt,   StrTy, {Ctx.getIntTy()},   false, true);
+  declareFunction(names::kStringFloat, StrTy, {Ctx.getFloatTy()}, false, true);
+  declareFunction(names::kStringBool,  StrTy, {Ctx.getBoolTy()},  false, true);
   declareFunction(names::kString,      StrTy, {StrTy},
-                  {ast::Ownership::Reference}, {true}, false, true);
+                  false, true);
 
   // Process imports before local declarations.
   llvm::StringSet<> localImportStack;
@@ -627,16 +613,23 @@ bool Sema::run(ast::TranslationUnit *tu) {
     processImport(imp);
 
   visit(tu);
-  return !hasErrors();
+  return SemaContext{nullptr, &Ctx, nullptr, !hasErrors(), ErrorCount,
+                     Diagnostics, std::move(AccumulatedImportContexts)};
 }
 
 // -- Top-level ---------------------------------------------------------------
 
 bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   bool ok = true;
+
+  if (!node->getClassDecls().empty())
+    if (!checkClassDecls(node->getClassDecls()))
+      ok = false;
+
   for (auto *fn : node->getFuncDecls())
     if (!visitFuncDecl(fn))
       ok = false;
+
   return ok;
 }
 
@@ -666,37 +659,31 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   if (!valTy)
     return false;
 
+  // Guard: the target name must not shadow a registered type name.
+  const auto &varName = node->getVarName();
+  if (Ctx.lookupClassType(varName) ||
+      varName == names::kObj     || varName == names::kString ||
+      varName == names::kTypeInt || varName == names::kTypeBool ||
+      varName == names::kTypeFloat) {
+    error(node->getLocation(),
+          "'" + varName + "' is a type name and cannot be used as a variable");
+    return false;
+  }
+
   // Look up the variable in all enclosing scopes.
-  auto *owner = CurrentScope->findOwner(node->getVarName());
+  auto *owner = CurrentScope->findOwner(varName);
   if (!owner) {
     // First assignment — declare in the current scope.
-    CurrentScope->set(node->getVarName(), valTy);
+    CurrentScope->set(varName, valTy);
     return true;
   }
 
-  auto *varTy = owner->lookup(node->getVarName());
-  auto varOwnership = CurrentScope->lookupOwnership(node->getVarName());
+  auto *varTy = owner->lookup(varName);
 
-  // Reject assignment to const variables.
-  if (CurrentScope->isConst(node->getVarName())) {
-    error(node->getLocation(),
-          "cannot assign to const variable '" + node->getVarName() + "'");
-    return false;
-  }
-
-  // Reject reassignment of unique class-type variables (would create two owners).
-  if (varOwnership == ast::Ownership::Unique && varTy &&
-      !ast::isa<ast::BuiltinType>(varTy)) {
-    error(node->getLocation(),
-          "cannot reassign unique variable '" + node->getVarName() +
-              "'; consider using 'shared' ownership");
-    return false;
-  }
-
-  if (!isAssignable(varTy, valTy, node->getValue(), varOwnership)) {
+  if (!isAssignable(varTy, valTy)) {
     error(node->getLocation(),
           "cannot assign value of type '" + std::string(typeName(valTy)) +
-              "' to variable '" + node->getVarName() + "' of type '" +
+              "' to variable '" + varName + "' of type '" +
               typeName(varTy) + "'");
     return false;
   }
@@ -709,8 +696,7 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
     auto *valTy = resolveExprType(node->getReturnValue());
     if (!valTy)
       return false;
-    if (CurrentReturnType && !isAssignable(CurrentReturnType, valTy,
-                         node->getReturnValue())) {
+    if (CurrentReturnType && !isAssignable(CurrentReturnType, valTy)) {
       error(node->getLocation(),
             "return value of type '" + std::string(typeName(valTy)) +
                 "' does not match function return type '" +
@@ -789,6 +775,42 @@ bool Sema::visitContinueStmt(ast::ContinueStmt *node) {
 
 // -- Declarations ------------------------------------------------------------
 
+/// Returns true if every control-flow path through `stmts` ends in a
+/// ReturnStmt.  This is a conservative syntactic check — it catches the common
+/// "missing return" cases without requiring full CFG analysis.
+/// Returns true if `stmt` (a single statement) always returns on every path.
+bool detail::blockAlwaysReturns(llvm::ArrayRef<ast::Stmt *> stmts) {
+  if (stmts.empty())
+    return false;
+  for (int i = (int)stmts.size() - 1; i >= 0; --i)
+    if (detail::stmtAlwaysReturns(stmts[i]))
+      return true;
+  return false;
+}
+
+bool detail::stmtAlwaysReturns(ast::Stmt *s) {
+  if (ast::isa<ast::ReturnStmt>(s))
+    return true;
+  if (auto *ifStmt = ast::dyn_cast<ast::IfStmt>(s)) {
+    if (!ifStmt->getElseBranch())
+      return false;
+    return detail::stmtAlwaysReturns(ifStmt->getThenBranch()) &&
+           detail::stmtAlwaysReturns(ifStmt->getElseBranch());
+  }
+  if (auto *cs = ast::dyn_cast<ast::CompoundStmt>(s))
+    return detail::blockAlwaysReturns(cs->getStatements());
+  if (auto *ms = ast::dyn_cast<ast::MatchStmt>(s)) {
+    bool hasWildcard = false;
+    for (const auto &arm : ms->getArms()) {
+      if (arm.isWildcard()) hasWildcard = true;
+      if (!detail::blockAlwaysReturns(arm.Body->getStatements()))
+        return false;
+    }
+    return hasWildcard;
+  }
+  return false;
+}
+
 bool Sema::visitFuncDecl(ast::FuncDecl *node) {
   // Resolve return type.
   ast::Type *retTy = Ctx.getVoidTy();
@@ -799,18 +821,14 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
       return false;
   }
 
-  // Resolve parameter types and ownerships.
+  // Resolve parameter types.
   std::vector<ast::Type *> paramTypes;
-  std::vector<ast::Ownership> paramOwns;
-  std::vector<bool> paramConst;
   for (auto &p : node->getParams()) {
     auto *ty = resolveType(p.ParamType, node->getLocation(),
                            "parameter '" + p.Name + "'");
     if (!ty)
       return false;
     paramTypes.push_back(ty);
-    paramOwns.push_back(p.Own);
-    paramConst.push_back(p.IsConst);
   }
 
   // Register the function in the function table.
@@ -819,7 +837,7 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
           "redefinition of function '" + node->getName() + "'");
     return false;
   }
-  declareFunction(node->getName(), retTy, paramTypes, paramOwns, paramConst);
+  declareFunction(node->getName(), retTy, paramTypes);
 
   // Type-check the body in a new scope with params.
   auto *savedRetTy = CurrentReturnType;
@@ -827,14 +845,21 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
   {
     ScopeGuard guard(*this);
     for (size_t i = 0; i < node->getParams().size(); ++i)
-      CurrentScope->declare(node->getParams()[i].Name, paramTypes[i],
-                            node->getParams()[i].Own, node->getParams()[i].IsConst);
+      CurrentScope->declare(node->getParams()[i].Name, paramTypes[i]);
     bool ok = true;
     for (auto *stmt : node->getBody()->getStatements())
       if (!visit(stmt))
         ok = false;
     CurrentReturnType = savedRetTy;
     if (!ok) return false;
+    // Non-void functions must always return a value on every path.
+    if (retTy != Ctx.getVoidTy() &&
+        !detail::blockAlwaysReturns(node->getBody()->getStatements())) {
+      error(node->getLocation(),
+            "non-void function '" + node->getName() +
+                "' does not always return a value");
+      return false;
+    }
   }
   return true;
 }
@@ -847,8 +872,6 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     return false;
   }
 
-  auto ownership = node->getOwnership();
-
   // Resolve the declared type.
   ast::Type *declTy = nullptr;
 
@@ -857,19 +880,6 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
                          "variable '" + node->getName() + "'");
     if (!declTy) {
       CurrentScope->set(node->getName(), Ctx.getVoidTy());
-      return false;
-    }
-  }
-
-  // Reference must bind via & to an existing variable (lvalue), not a temporary.
-  if (ownership == ast::Ownership::Reference) {
-    auto *initExpr = node->getInitExpr();
-    ast::RefExpr *refExpr = initExpr ? ast::dyn_cast<ast::RefExpr>(initExpr) : nullptr;
-    if (!refExpr || !refExpr->getIdentOperand()) {
-      error(node->getLocation(),
-            "reference variable '" + node->getName() +
-                "' must be initialized with '&' on an existing variable");
-      if (declTy) CurrentScope->set(node->getName(), declTy);
       return false;
     }
   }
@@ -886,7 +896,7 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     }
 
     if (declTy) {
-      if (!isAssignable(declTy, initTy, node->getInitExpr(), node->getOwnership())) {
+      if (!isAssignable(declTy, initTy)) {
         error(node->getLocation(),
               "initializer of type '" + std::string(typeName(initTy)) +
                   "' does not match declared type '" + typeName(declTy) +
@@ -898,20 +908,6 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
       declTy = initTy;
     }
 
-    // If initializing a unique var from another unique var without mov, reject.
-    if (ownership == ast::Ownership::Unique && declTy &&
-        !ast::isa<ast::BuiltinType>(declTy)) {
-      if (auto *ident = ast::dyn_cast<ast::Identifier>(node->getInitExpr())) {
-        auto srcOwnership = CurrentScope->lookupOwnership(ident->getName());
-        if (srcOwnership == ast::Ownership::Unique) {
-          error(node->getLocation(),
-                "cannot copy unique variable '" + ident->getName() +
-                    "'; use 'mov' to transfer ownership");
-          CurrentScope->declare(node->getName(), declTy, ownership);
-          return false;
-        }
-      }
-    }
   }
 
   if (!declTy) {
@@ -922,300 +918,139 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     return false;
   }
 
-  // Register the variable in the current scope with ownership.
-  CurrentScope->declare(node->getName(), declTy, ownership, node->isConst());
+  // Register the variable in the current scope.
+  CurrentScope->declare(node->getName(), declTy);
   return true;
 }
 
-bool Sema::visitMethodDecl(ast::MethodDecl *) {
-  // MethodDecl nodes are not produced by the parser yet.
+bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
+  auto *recvTy = resolveExprType(node->getReceiver());
+  if (!recvTy)
+    return false;
+
+  auto *ct = ast::dyn_cast<ast::ClassType>(recvTy);
+  if (!ct) {
+    error(node->getLocation(),
+          "member assignment '." + node->getFieldName() +
+              "' on non-class type '" + std::string(typeName(recvTy)) + "'");
+    return false;
+  }
+
+  // Look up the field in the class hierarchy.
+  ast::Type *fieldTy = nullptr;
+  for (auto *c = ct; c; c = c->getSuperClass()) {
+    for (auto &[fname, fty] : c->getFields()) {
+      if (fname == node->getFieldName()) {
+        fieldTy = fty;
+        break;
+      }
+    }
+    if (fieldTy)
+      break;
+  }
+
+  if (!fieldTy) {
+    error(node->getLocation(),
+          "no field '" + node->getFieldName() + "' in class '" +
+              ct->getName() + "'");
+    return false;
+  }
+
+  auto *valTy = resolveExprType(node->getValue());
+  if (!valTy)
+    return false;
+
+  if (!isAssignable(fieldTy, valTy)) {
+    error(node->getLocation(),
+          "cannot assign value of type '" + std::string(typeName(valTy)) +
+              "' to field '" + node->getFieldName() + "' of type '" +
+              typeName(fieldTy) + "'");
+    return false;
+  }
+
   return true;
 }
 
 bool Sema::visitImportDecl(ast::ImportDecl *) {
   // Import processing happens in run() before visiting the TU.
-  // Nothing to do here.
   return true;
 }
 
-// -- Import resolution -------------------------------------------------------
+bool Sema::visitMatchStmt(ast::MatchStmt *node) {
+  auto *subjectTy = resolveExprType(node->getSubject());
+  if (!subjectTy)
+    return false;
 
-std::string Sema::resolveModulePath(const std::string &modulePath,
-                                    bool isSystem,
-                                    ast::SourceLocation loc) {
-  auto relPath = module_utils::modulePathToRelative(modulePath);
-
-  if (isSystem) {
-    // System modules: check PAYKAN_STDLIB env var, else <project>/stdlib/.
-    llvm::SmallString<256> base;
-    const char *stdlibEnv = std::getenv(names::kPaykanStdlibEnv);
-    if (stdlibEnv && stdlibEnv[0])
-      base = stdlibEnv;
-    else {
-      base = ProjectRoot;
-      llvm::sys::path::append(base, "stdlib");
-    }
-    llvm::sys::path::append(base, relPath);
-    if (auto resolved = module_utils::realPath(base); !resolved.empty())
-      return resolved;
-    error(loc, "system module '" + modulePath + "' not found (tried " +
-               std::string(base) + ")");
-    return "";
+  // The subject must be a class type — matching on builtins is not supported.
+  auto *subjectCt = ast::dyn_cast<ast::ClassType>(subjectTy);
+  if (!subjectCt) {
+    error(node->getSubject()->getLocation(),
+          "match subject must be a class type, got '" +
+              std::string(typeName(subjectTy)) + "'");
+    return false;
   }
 
-  
-  // User module: relative to project root.
-  llvm::SmallString<256> full(ProjectRoot);
-  llvm::sys::path::append(full, relPath);
-  if (auto resolved = module_utils::realPath(full); !resolved.empty())
-    return resolved;
-  error(loc, "module '" + modulePath + "' not found (tried " +
-             std::string(full) + ")");
-  return "";
-}
-
-// ---------------------------------------------------------------------------
-// Class-type export helpers
-// ---------------------------------------------------------------------------
-
-/// Return the canonical string name for a type (used when serialising ClassInfo).
-static std::string typeToName(ast::Type *ty) {
-  if (!ty) return "void";
-  if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty)) {
-    switch (bt->getTypeKind()) {
-    case ast::BuiltinType::Int:   return "int";
-    case ast::BuiltinType::Float: return "float";
-    case ast::BuiltinType::Bool:  return "bool";
-    case ast::BuiltinType::Void:  return "void";
-    }
-  }
-  if (auto *ct = ast::dyn_cast<ast::ClassType>(ty))
-    return ct->getName();
-  return "void";
-}
-
-/// Reconstruct a single ClassInfo into a context, guaranteeing type identity.
-/// Defined as a static member-accessible helper; called from processImport.
-static void registerClassInfoInto(const std::string &name,
-                                  const std::string &superName,
-                                  const std::vector<std::pair<std::string,std::string>> &fields,
-                                  const std::vector<std::tuple<std::string,std::string,
-                                                               std::vector<std::string>,uint8_t>> &methods,
-                                  ast::ASTContext &ctx) {
-  if (ctx.lookupClassType(name))
-    return; // already present — pointer identity guaranteed
-
-  ast::ClassType *superClass = nullptr;
-  if (!superName.empty())
-    superClass = ctx.lookupClassType(superName);
-  if (!superClass)
-    superClass = ctx.getObjectTy(); // fall back to root
-
-  auto builder = ctx.buildClassType(name, superClass);
-  for (auto &[fname, ftname] : fields) {
-    ast::Type *fty = ctx.lookupType(ftname);
-    if (!fty) fty = ctx.getObjectTy();
-    builder.field(fname, fty);
-  }
-  for (auto &[mname, retName, paramNames, flags] : methods) {
-    ast::Type *retTy = ctx.lookupType(retName);
-    if (!retTy) retTy = ctx.getVoidTy();
-    std::vector<ast::Type *> params;
-    for (auto &pn : paramNames) {
-      ast::Type *pty = ctx.lookupType(pn);
-      if (!pty) pty = ctx.getObjectTy();
-      params.push_back(pty);
-    }
-    builder.method(mname, retTy, std::move(params), flags);
-  }
-  builder.build();
-}
-
-bool Sema::processImport(ast::ImportDecl *node) {
-  const std::string &modulePath = node->getModulePath();
-  const bool isSystem = node->isSystem();
-  const auto &selectedNames = node->getSelectedNames();
-
-  // Helper: register a cached ClassInfo into an ASTContext (lambda so it can
-  // access ModuleInfo::ClassInfo, which is a private nested type of Sema).
-  auto applyClassInfo = [&](const ModuleInfo::ClassInfo &ci, ast::ASTContext &ctx) {
-    // Convert to flat vectors to call the file-scope helper (which has no
-    // access to the private ClassInfo type).
-    std::vector<std::pair<std::string,std::string>> fields;
-    for (auto &f : ci.Fields)
-      fields.emplace_back(f.FieldName, f.TypeName);
-    std::vector<std::tuple<std::string,std::string,std::vector<std::string>,uint8_t>> methods;
-    for (auto &m : ci.Methods)
-      methods.emplace_back(m.Name, m.ReturnTypeName, m.ParamTypeNames, m.Flags);
-    registerClassInfoInto(ci.Name, ci.SuperClassName, fields, methods, ctx);
+  // Helper: return true if `sub` is a subclass of (or equal to) `super`.
+  auto isSubclassOf = [](ast::ClassType *sub, ast::ClassType *super) -> bool {
+    for (auto *c = sub; c; c = c->getSuperClass())
+      if (c == super) return true;
+    return false;
   };
 
-  // Helper: load one module from a resolved path, cache it, inject its exports.
-  auto loadModule = [&](const std::string &path, const std::string &qualifier,
-                        ast::SourceLocation loc) -> bool {
-    // Cycle detection.
-    if (ImportStack && ImportStack->count(path)) {
-      error(loc, "circular import detected for '" + path + "'");
-      return false;
-    }
-
-    // Check cache first.
-    auto cacheIt = ModuleCache.find(path);
-    if (cacheIt != ModuleCache.end()) {
-      // Re-register exported class types (type identity: skip if already present).
-      for (auto &ci : cacheIt->second.ExportedClasses)
-        applyClassInfo(ci, Ctx);
-      // Reconstruct FunctionSig from serialised type names into the CURRENT
-      // context — this avoids using raw pointers from a possibly-dead context.
-      for (auto &fi : cacheIt->second.ExportedFunctions) {
-        std::string injected = qualifier + "::" + fi.Name;
-        if (!lookupFunction(injected)) {
-          ast::Type *retTy = Ctx.lookupType(fi.ReturnTypeName);
-          if (!retTy) retTy = Ctx.getVoidTy();
-          std::vector<ast::Type *> params;
-          for (auto &pn : fi.ParamTypeNames) {
-            ast::Type *pty = Ctx.lookupType(pn);
-            if (!pty) pty = Ctx.getObjectTy();
-            params.push_back(pty);
-          }
-          declareFunction(injected, retTy, params,
-                          fi.ParamOwnerships, fi.ParamIsConst,
-                          fi.IsVariadic, /*isBuiltin=*/true);
-        }
-      }
-      return true;
-    }
-
-    // Parse the imported file.
-    parser::ParserDriver importDriver;
-    if (importDriver.parseFile(path) != 0) {
-      error(loc, "failed to parse module '" + path + "'");
-      return false;
-    }
-
-    // Run Sema on the imported module.
-    Sema importSema(importDriver.getASTContext(), OS, ProjectRoot,
-                    importDriver.getCurrentFile(),
-                    &importDriver.getSourceLines());
-    if (ImportStack)
-      ImportStack->insert(path);
-    importSema.ImportStack = ImportStack;
-
-    auto *importRoot = importDriver.getRoot();
-    bool importOk = importSema.run(importRoot);
-    // Backtrack: remove from the stack so sibling imports of the same module
-    // are not falsely reported as cycles.
-    if (ImportStack)
-      ImportStack->erase(path);
-    if (!importOk) {
-      error(loc, "errors in imported module '" + path + "'");
-      return false;
-    }
-
-    // Collect and register user-defined class types from the imported module.
-    // Process in a simple two-pass loop so that superclasses are registered
-    // before their subclasses (handles shallow hierarchies; deep chains with
-    // cross-module supers are resolved transitively via recursive imports).
-    ModuleInfo info;
-    {
-      // Build serialised ClassInfo for every non-canonical class.
-      for (auto &[name, ct] : importSema.Ctx.getClassTypes()) {
-        if (name == "Object" || name == "String")
-          continue; // canonical builtins — always present in every ASTContext
-        ModuleInfo::ClassInfo ci;
-        ci.Name = name;
-        if (ct->getSuperClass()) {
-          ci.SuperClassName = ct->getSuperClass()->getName();
-          if (ci.SuperClassName == "Object")
-            ci.SuperClassName = ""; // implicit root — no need to store
-        }
-        for (auto &[fname, fty] : ct->getFields())
-          ci.Fields.push_back({fname, typeToName(fty)});
-        for (auto *m : ct->getMethods()) {
-          ModuleInfo::ClassInfo::MethodInfo mi;
-          mi.Name            = m->getName();
-          mi.ReturnTypeName  = typeToName(m->getReturnType());
-          for (auto *pty : m->getParamTypes())
-            mi.ParamTypeNames.push_back(typeToName(pty));
-          mi.Flags = static_cast<uint8_t>(
-              (m->isStatic()  ? ast::MethodDecl::Static  : 0) |
-              (m->isPrivate() ? ast::MethodDecl::Private : 0));
-          ci.Methods.push_back(std::move(mi));
-        }
-        info.ExportedClasses.push_back(std::move(ci));
-      }
-      // Register into the current context (respects type identity).
-      for (auto &ci : info.ExportedClasses)
-        applyClassInfo(ci, Ctx);
-    }
-
-    // Collect exported functions, serialise to type names (no raw Type* stored),
-    // then inject into the current FunctionTable by reconstructing from names.
-    for (auto &[name, sig] : importSema.FunctionTable) {
-      if (sig.IsBuiltin)
-        continue;
-      ModuleInfo::FunctionInfo fi;
-      fi.Name            = name.str();
-      fi.ReturnTypeName  = typeToName(sig.ReturnType);
-      for (auto *pty : sig.ParamTypes)
-        fi.ParamTypeNames.push_back(typeToName(pty));
-      fi.ParamOwnerships = sig.ParamOwnerships;
-      fi.ParamIsConst    = sig.ParamIsConst;
-      fi.IsVariadic      = sig.IsVariadic;
-      info.ExportedFunctions.push_back(std::move(fi));
-    }
-    ModuleCache[path] = std::move(info);
-
-    // Inject into our FunctionTable as qualifier::name (reconstruct from names).
-    for (auto &fi : ModuleCache[path].ExportedFunctions) {
-      std::string injected = qualifier + "::" + fi.Name;
-      if (!lookupFunction(injected)) {
-        ast::Type *retTy = Ctx.lookupType(fi.ReturnTypeName);
-        if (!retTy) retTy = Ctx.getVoidTy();
-        std::vector<ast::Type *> params;
-        for (auto &pn : fi.ParamTypeNames) {
-          ast::Type *pty = Ctx.lookupType(pn);
-          if (!pty) pty = Ctx.getObjectTy();
-          params.push_back(pty);
-        }
-        declareFunction(injected, retTy, params,
-                        fi.ParamOwnerships, fi.ParamIsConst,
-                        fi.IsVariadic, /*isBuiltin=*/true);
-      }
-    }
-    return true;
-  };
-
-  if (selectedNames.empty()) {
-    // Plain import or aliased import: single module.
-    // Qualifier is the alias if set, otherwise the last path segment.
-    auto lastSep = modulePath.rfind("::");
-    std::string qualifier = node->hasAlias()
-                                ? node->getAlias()
-                                : (lastSep == std::string::npos
-                                       ? modulePath
-                                       : modulePath.substr(lastSep + 2));
-    std::string resolved =
-        resolveModulePath(modulePath, isSystem, node->getLocation());
-    if (resolved.empty())
-      return false;
-    return loadModule(resolved, qualifier, node->getLocation());
-  }
-
-  // Selective sibling-module import: import path::{a, b}
-  // Each name in SelectedNames is a sub-module under ModulePath.
   bool ok = true;
-  for (const auto &name : selectedNames) {
-    std::string subPath = modulePath.empty() ? name : modulePath + "::" + name;
-    std::string resolved =
-        resolveModulePath(subPath, isSystem, node->getLocation());
-    if (resolved.empty()) {
+  bool seenWildcard = false;
+
+  for (auto &arm : node->getArms()) {
+    if (seenWildcard) {
+      error(arm.Loc, "unreachable arm: wildcard '_' must be the last arm");
       ok = false;
       continue;
     }
-    if (!loadModule(resolved, name, node->getLocation()))
-      ok = false;
+
+    // Open a new scope for each arm (the binding, if any, lives here).
+    ScopeGuard armGuard(*this);
+
+    if (arm.isWildcard()) {
+      seenWildcard = true;
+    } else {
+      // 2. Resolve the arm's type annotation.
+      auto *resolvedArmTy = resolveType(arm.ArmType, arm.Loc, "match arm");
+      arm.ArmType = resolvedArmTy; // write canonical pointer back
+      auto *armCt = resolvedArmTy ? ast::dyn_cast<ast::ClassType>(resolvedArmTy) : nullptr;
+      if (!armCt) {
+        // Only emit a secondary diagnostic if resolution succeeded but the
+        // type is not a class (e.g. int[], bool). If resolveType already
+        // emitted "unknown type", resolvedArmTy is null and that's enough.
+        if (resolvedArmTy)
+          error(arm.Loc, "match arm type must be a class type");
+        ok = false;
+        // Still try to visit the body to surface further errors.
+      } else {
+        // 3. The arm type must be a subclass of the subject's static type.
+        //    (Matching Obj against Obj arms is always allowed since every class
+        //    descends from Obj; the subjectCt == Ctx.getObjTy() case passes
+        //    trivially because every armCt IS a subclass of Obj.)
+        if (!isSubclassOf(armCt, subjectCt)) {
+          error(arm.Loc, "type '" + std::string(typeName(armCt)) + "' is not a subclass of '" +
+                             subjectCt->getName() + "'");
+          ok = false;
+        }
+
+        // 4. Declare the binding variable with the narrowed (arm) type.
+        if (arm.hasBinding()) {
+          if (!CurrentScope->declare(arm.Binding, armCt)) {
+            error(arm.Loc, "redeclaration of '" + arm.Binding + "' in match arm");
+            ok = false;
+          }
+        }
+      }
+    }
+
+    // 5. Recursively type-check the arm body.
+    for (auto *stmt : arm.Body->getStatements())
+      if (!visit(stmt)) ok = false;
   }
+
   return ok;
 }
 

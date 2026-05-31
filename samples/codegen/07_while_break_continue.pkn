@@ -1,0 +1,105 @@
+// 07 — while loops, break, continue
+// Exercises: visitWhileStmt, visitBreakStmt, visitContinueStmt,
+//            nested loops, loop with Str vars (scope cleanup per iteration),
+//            break/continue leaving unreachable blocks correct
+
+fn main() -> int {
+  out("=== basic while ===");
+  i: int = 0;
+  while (i < 5) {
+    out(StringInt(i));
+    i = i + 1;
+  }
+
+  out("=== while sum ===");
+  sum: int = 0;
+  n: int = 1;
+  while (n <= 100) {
+    sum = sum + n;
+    n = n + 1;
+  }
+  out("sum 1..100=", StringInt(sum));   // 5050
+
+  out("=== while never executes ===");
+  while (False) {
+    out("unreachable");
+  }
+  out("after never");
+
+  out("=== while True + break ===");
+  count: int = 0;
+  while (True) {
+    if (count == 5) { break; }
+    count = count + 1;
+  }
+  out("count=", StringInt(count));      // 5
+
+  out("=== continue skips odd ===");
+  evens: int = 0;
+  j: int = 0;
+  while (j < 10) {
+    j = j + 1;
+    if (j % 2 != 0) { continue; }
+    evens = evens + j;
+  }
+  out("sum evens 2..10=", StringInt(evens));  // 30
+
+  out("=== nested loops ===");
+  total: int = 0;
+  r: int = 0;
+  while (r < 4) {
+    c: int = 0;
+    while (c < 4) {
+      total = total + 1;
+      c = c + 1;
+    }
+    r = r + 1;
+  }
+  out("4x4 iterations=", StringInt(total));  // 16
+
+  out("=== break inner loop only ===");
+  outer: int = 0;
+  inner_total: int = 0;
+  while (outer < 3) {
+    inner: int = 0;
+    while (True) {
+      if (inner == 3) { break; }
+      inner_total = inner_total + 1;
+      inner = inner + 1;
+    }
+    outer = outer + 1;
+  }
+  out("3 * 3 inner=", StringInt(inner_total));  // 9
+
+  out("=== Str var per iteration (scope cleanup) ===");
+  k: int = 0;
+  while (k < 3) {
+    label: Str = "iter-" + StringInt(k);
+    out(label);
+    k = k + 1;
+  }
+
+  out("=== loop with complex condition ===");
+  a: int = 0;
+  b: int = 100;
+  while (a < 10 && b > 90) {
+    a = a + 1;
+    b = b - 1;
+  }
+  out("a=", StringInt(a), " b=", StringInt(b));  // a=10 b=90
+
+  out("=== countdown with multiple continues ===");
+  x: int = 10;
+  out_count: int = 0;
+  while (x > 0) {
+    x = x - 1;
+    if (x % 3 == 0) { continue; }
+    if (x % 4 == 0) { continue; }
+    out_count = out_count + 1;
+  }
+  // x=0..9: skip multiples of 3 (0,3,6,9) and multiples of 4 (0,4,8)
+  // skipped: 0,3,4,6,8,9 => 4 remaining: 1,2,5,7
+  out("non-3/4 count=", StringInt(out_count));   // 4
+
+  return 0;
+}

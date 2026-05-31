@@ -1,0 +1,14 @@
+// OK: deep inheritance — Labrador is a valid arm when matching an Animal
+class Animal {}
+class Dog : Animal {}
+class Labrador : Dog {}
+
+fn main() -> int {
+  a: Animal = Labrador();
+  match a {
+    Labrador { out("labrador"); }
+    Dog      { out("dog"); }
+    _ { }
+  }
+  return 0;
+}

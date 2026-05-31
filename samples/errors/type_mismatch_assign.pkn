@@ -1,6 +1,0 @@
-fn main() -> int {
-  // Error: type mismatch in assignment (assigning bool to float)
-  x: float = 3.14;
-  x = True;
-  return 0;
-}

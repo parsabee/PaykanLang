@@ -41,12 +41,12 @@ inline ast::Type *remapType(ast::Type *ty, ast::ASTContext &ctx) {
     return ctx.getBuiltinType(bt->getTypeKind());
   }
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
-    // All class types (including Object and String) are always registered in
+    // All class types (including Obj and Str) are always registered in
     // the ASTContext that owns them.  Look up by name for identity; fall back
     // to Object only when the type has not been exported yet.
     if (auto *found = ctx.lookupClassType(ct->getName()))
       return found;
-    return ctx.getObjectTy(); // fallback: type not exported — treat as Object
+    return ctx.getObjTy(); // fallback: type not exported — treat as Obj
   }
   return ty;
 }

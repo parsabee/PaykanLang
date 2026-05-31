@@ -45,6 +45,7 @@ public:
     NK_FuncDecl,
     NK_MethodDecl,
     NK_ImportDecl,
+    NK_ClassDecl,
 
     // Statements
     NK_CompoundStmt,
@@ -56,23 +57,29 @@ public:
     NK_WhileStmt,
     NK_BreakStmt,
     NK_ContinueStmt,
+    NK_MemberAssignStmt,
+    NK_MatchStmt,
 
     // Expressions
     NK_IntegerLiteral,
     NK_FloatLiteral,
     NK_BoolLiteral,
+    NK_NoneLiteral,
     NK_StringLiteral,
     NK_UnaryExpr,
     NK_BinaryExpr,
     NK_Identifier,
     NK_CallExpr,
+    NK_MethodCallExpr,
     NK_TernaryExpr,
-    NK_MovExpr,
-    NK_RefExpr,
+    NK_MemberAccessExpr,
+    NK_ArrayLiteralExpr,
+    NK_SubscriptExpr,
 
     // Types
     NK_BuiltinType,
     NK_ClassType,
+    NK_ArrayType,
 
     // Top-level
     NK_TranslationUnit,
@@ -130,7 +137,7 @@ public:
   Decl(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_VarDecl && N->getKind() <= NK_MethodDecl;
+    return N->getKind() >= NK_VarDecl && N->getKind() <= NK_ClassDecl;
   }
 };
 
@@ -140,7 +147,7 @@ public:
   Stmt(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_CompoundStmt && N->getKind() <= NK_ContinueStmt;
+    return N->getKind() >= NK_CompoundStmt && N->getKind() <= NK_MatchStmt;
   }
 };
 
@@ -150,7 +157,7 @@ public:
   Expr(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_IntegerLiteral && N->getKind() <= NK_RefExpr;
+    return N->getKind() >= NK_IntegerLiteral && N->getKind() <= NK_SubscriptExpr;
   }
 };
 
@@ -159,6 +166,7 @@ public:
 enum class UnaryOpcode {
   Neg, // -
   Not, // !
+  Count,
 };
 
 enum class BinaryOpcode {
@@ -178,15 +186,7 @@ enum class BinaryOpcode {
   // Logical
   And, // &&
   Or,  // ||
-};
-
-/// Ownership qualifier for class-type variables.
-/// Builtins (int, float, bool) always have automatic (stack) storage;
-/// ownership only applies to heap-allocated class types.
-enum class Ownership : uint8_t {
-  Unique,    // default — single owner, destroyed at scope exit
-  Shared,    // reference-counted
-  Reference, // borrowed pointer (&), no ownership
+  Count,
 };
 
 // Base for all types
@@ -229,7 +229,7 @@ public:
   }
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_BuiltinType && N->getKind() <= NK_ClassType;
+    return N->getKind() >= NK_BuiltinType && N->getKind() <= NK_ArrayType;
   }
 };
 
@@ -239,30 +239,21 @@ private:
   std::string Name;
   Type *VarType;
   Expr *InitExpr;
-  Ownership OwnershipKind;
-  bool IsConst;
-
 public:
-  VarDecl(SourceLocation loc, const std::string &name, Type *type, Expr *init,
-          Ownership ownership = Ownership::Unique, bool isConst = false)
-      : Decl(NK_VarDecl, loc), Name(name), VarType(type), InitExpr(init),
-        OwnershipKind(ownership), IsConst(isConst) {}
+  VarDecl(SourceLocation loc, const std::string &name, Type *type, Expr *init)
+      : Decl(NK_VarDecl, loc), Name(name), VarType(type), InitExpr(init) {}
 
   const std::string &getName() const { return Name; }
   Type *getType() const { return VarType; }
   Expr *getInitExpr() const { return InitExpr; }
-  Ownership getOwnership() const { return OwnershipKind; }
-  bool isConst() const { return IsConst; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_VarDecl; }
 };
 
-// A single function parameter (name + type + ownership).
+// A single function parameter.
 struct Param {
   std::string Name;
   Type *ParamType;
-  Ownership Own = Ownership::Unique;
-  bool IsConst = false;
 };
 
 // Forward declaration for FuncDecl body.
@@ -422,6 +413,74 @@ public:
   static bool classof(const ASTNode *N) { return N->getKind() == NK_ContinueStmt; }
 };
 
+// Member field assignment: receiver.field = value  (e.g. self.x = 1)
+class MemberAssignStmt : public Stmt {
+private:
+  Expr *Receiver;
+  std::string FieldName;
+  Expr *Value;
+
+public:
+  MemberAssignStmt(SourceLocation loc, Expr *receiver,
+                   const std::string &field, Expr *value)
+      : Stmt(NK_MemberAssignStmt, loc), Receiver(receiver),
+        FieldName(field), Value(value) {}
+
+  Expr *getReceiver() const { return Receiver; }
+  const std::string &getFieldName() const { return FieldName; }
+  Expr *getValue() const { return Value; }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_MemberAssignStmt;
+  }
+};
+
+// A single arm of a match statement.
+//
+//   TypeName { body }             -- no variable binding
+//   binding: TypeName { body }    -- with variable binding
+//   _ { body }                    -- wildcard (catch-all)
+//
+// TypeName is empty when the arm is a wildcard.
+struct MatchArm {
+  SourceLocation  Loc;
+  std::string     Binding;   // "" = no binding
+  Type           *ArmType;   // nullptr = wildcard (_)
+  CompoundStmt   *Body;
+
+  bool isWildcard()  const { return ArmType == nullptr; }
+  bool hasBinding()  const { return !Binding.empty(); }
+};
+
+// Match statement (downcasting switch):
+//
+//   match expr {
+//       TypeA { body }
+//       ty_b: TypeB { body }
+//       _ { body }
+//   }
+//
+// Each arm either names a class type, optionally giving it a local binding,
+// or is the wildcard arm (_) that catches any unmatched value.
+class MatchStmt : public Stmt {
+private:
+  Expr                  *Subject;
+  std::vector<MatchArm>  Arms;
+
+public:
+  MatchStmt(SourceLocation loc, Expr *subject, std::vector<MatchArm> arms)
+      : Stmt(NK_MatchStmt, loc), Subject(subject), Arms(std::move(arms)) {}
+
+  Expr *getSubject() const { return Subject; }
+  std::vector<MatchArm> &getArms() { return Arms; }
+  const std::vector<MatchArm> &getArms() const { return Arms; }
+  size_t getNumArms() const { return Arms.size(); }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_MatchStmt;
+  }
+};
+
 // Integer literal
 class IntegerLiteral : public Expr {
 private:
@@ -465,6 +524,16 @@ public:
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_BoolLiteral;
+  }
+};
+
+// None literal (null reference for class types)
+class NoneLiteral : public Expr {
+public:
+  explicit NoneLiteral(SourceLocation loc) : Expr(NK_NoneLiteral, loc) {}
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_NoneLiteral;
   }
 };
 
@@ -547,6 +616,7 @@ class CallExpr : public Expr {
 private:
   std::string CalleeName;
   std::vector<Expr *> Arguments;
+  Type *ResolvedType = nullptr; // set by Sema
 
 public:
   CallExpr(SourceLocation loc, const std::string &callee, std::vector<Expr *> args)
@@ -556,40 +626,39 @@ public:
   const std::vector<Expr *> &getArguments() const { return Arguments; }
   size_t getNumArguments() const { return Arguments.size(); }
 
+  // Set/get the resolved return type (filled in by Sema).
+  void setResolvedType(Type *ty) { ResolvedType = ty; }
+  Type *getResolvedType() const { return ResolvedType; }
+
   static bool classof(const ASTNode *N) { return N->getKind() == NK_CallExpr; }
 };
 
-// Move expression (mov x)
-class MovExpr : public Expr {
+// Method call expression: receiver.method(args)
+class MethodCallExpr : public Expr {
 private:
-  Identifier *Operand;
+  Expr *Receiver;
+  std::string MethodName;
+  std::vector<Expr *> Arguments;
+  Type *ResolvedType = nullptr; // set by Sema
 
 public:
-  MovExpr(SourceLocation loc, Identifier *operand)
-      : Expr(NK_MovExpr, loc), Operand(operand) {}
+  MethodCallExpr(SourceLocation loc, Expr *receiver, const std::string &method,
+                 std::vector<Expr *> args)
+      : Expr(NK_MethodCallExpr, loc), Receiver(receiver),
+        MethodName(method), Arguments(std::move(args)) {}
 
-  Identifier *getOperand() const { return Operand; }
+  Expr *getReceiver() const { return Receiver; }
+  const std::string &getMethodName() const { return MethodName; }
+  const std::vector<Expr *> &getArguments() const { return Arguments; }
+  size_t getNumArguments() const { return Arguments.size(); }
 
-  static bool classof(const ASTNode *N) { return N->getKind() == NK_MovExpr; }
-};
+  // Set/get the resolved return type (filled in by Sema).
+  void setResolvedType(Type *ty) { ResolvedType = ty; }
+  Type *getResolvedType() const { return ResolvedType; }
 
-// Reference expression (&x) — borrow a variable or expression
-class RefExpr : public Expr {
-private:
-  Expr *Operand;
-
-public:
-  RefExpr(SourceLocation loc, Expr *operand)
-      : Expr(NK_RefExpr, loc), Operand(operand) {}
-
-  Expr *getOperand() const { return Operand; }
-
-  /// If the operand is an Identifier, return it; otherwise nullptr.
-  Identifier *getIdentOperand() const {
-    return dyn_cast<Identifier>(Operand);
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_MethodCallExpr;
   }
-
-  static bool classof(const ASTNode *N) { return N->getKind() == NK_RefExpr; }
 };
 
 // Ternary expression (cond ? then : else)
@@ -598,6 +667,7 @@ private:
   Expr *Condition;
   Expr *TrueExpr;
   Expr *FalseExpr;
+  Type *ResolvedType = nullptr; // set by Sema
 
 public:
   TernaryExpr(SourceLocation loc, Expr *cond, Expr *trueExpr, Expr *falseExpr)
@@ -608,8 +678,34 @@ public:
   Expr *getTrueExpr() const { return TrueExpr; }
   Expr *getFalseExpr() const { return FalseExpr; }
 
+  void setResolvedType(Type *ty) { ResolvedType = ty; }
+  Type *getResolvedType() const { return ResolvedType; }
+
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_TernaryExpr;
+  }
+};
+
+// Member field access expression: receiver.field  (e.g. self.x, obj.count)
+class MemberAccessExpr : public Expr {
+private:
+  Expr *Receiver;
+  std::string FieldName;
+  Type *ResolvedType = nullptr; // set by Sema
+
+public:
+  MemberAccessExpr(SourceLocation loc, Expr *receiver,
+                   const std::string &field)
+      : Expr(NK_MemberAccessExpr, loc), Receiver(receiver), FieldName(field) {}
+
+  Expr *getReceiver() const { return Receiver; }
+  const std::string &getFieldName() const { return FieldName; }
+
+  void setResolvedType(Type *ty) { ResolvedType = ty; }
+  Type *getResolvedType() const { return ResolvedType; }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_MemberAccessExpr;
   }
 };
 
@@ -677,7 +773,7 @@ public:
 
   bool isStatic() const { return MethodFlags & Static; }
   bool isPrivate() const { return MethodFlags & Private; }
-  bool isVirtual() const { return !isStatic() && !isPrivate(); }
+  bool isVirtual() const { return !isPrivate(); }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_MethodDecl;
@@ -702,27 +798,45 @@ class ClassType : public Type {
   // Instance fields: (name, type) pairs.
   std::vector<std::pair<std::string, Type *>> Fields;
 
-  // All methods declared in this class.
-  std::vector<MethodDecl *> Methods;
-
-  // Flattened vtable: virtual methods in layout order.
+  // All virtual methods in layout order (vtable). __init__ is NOT here.
   std::vector<MethodDecl *> VTable;
+
+  // The class initialiser (__init__), stored separately because it is a
+  // static function, not a virtual method, and has no vtable slot.
+  MethodDecl *InitMethod = nullptr;
 
 public:
   ClassType(SourceLocation loc, const std::string &name,
             ClassType *superClass = nullptr)
       : Type(NK_ClassType, loc), Name(name), SuperClass(superClass) {
-    // Inherit parent vtable.
-    if (SuperClass)
-      VTable = SuperClass->VTable;
-    // Inherit parent operators (Eq/Ne).
+    // Inherit parent vtable and operator support.
     if (SuperClass) {
-      // Object-typed values can at least be compared for equality.
+      VTable = SuperClass->VTable;
+      // Copy the parent's operator bitmasks so that, e.g., every class
+      // that descends from Obj automatically supports == and !=.
+      for (int op = 0; op < static_cast<int>(UnaryOpcode::Count); ++op)
+        if (SuperClass->hasUnaryOp(static_cast<UnaryOpcode>(op))) addUnaryOp(static_cast<UnaryOpcode>(op));
+      for (int op = 0; op < static_cast<int>(BinaryOpcode::Count); ++op)
+        if (SuperClass->hasOp(static_cast<BinaryOpcode>(op))) addBinaryOp(static_cast<BinaryOpcode>(op));
     }
   }
 
   const std::string &getName() const { return Name; }
   ClassType *getSuperClass() const { return SuperClass; }
+
+  /// Set (or change) the superclass, inheriting its vtable and operator
+  /// bitmasks. Used during ASTContext bootstrap to break the Obj/Str cycle.
+  void setSuperClass(ClassType *sc) {
+    SuperClass = sc;
+    if (!sc) return;
+    VTable = sc->VTable;
+    for (int op = 0; op < static_cast<int>(UnaryOpcode::Count); ++op)
+      if (sc->hasUnaryOp(static_cast<UnaryOpcode>(op)))
+        addUnaryOp(static_cast<UnaryOpcode>(op));
+    for (int op = 0; op < static_cast<int>(BinaryOpcode::Count); ++op)
+      if (sc->hasOp(static_cast<BinaryOpcode>(op)))
+        addBinaryOp(static_cast<BinaryOpcode>(op));
+  }
 
   // -- Fields ---------------------------------------------------------------
 
@@ -738,7 +852,16 @@ public:
 
   void addMethod(MethodDecl *m);
 
-  const std::vector<MethodDecl *> &getMethods() const { return Methods; }
+  /// Returns the __init__ MethodDecl if one was declared, or nullptr.
+  MethodDecl *getInitMethod() const { return InitMethod; }
+
+  /// Reset the vtable to start with the parent's slots (re-inherit).
+  /// Call this after the parent's methods are fully populated.
+  void reinheritVTable(ClassType *parent) {
+    VTable = parent->VTable;
+    // Do NOT inherit InitMethod — every class has its own or none.
+  }
+
   const std::vector<MethodDecl *> &getVTable() const { return VTable; }
   size_t getVTableSize() const { return VTable.size(); }
 
@@ -762,28 +885,79 @@ public:
 //   import path::module as alias;             — SelectedNames empty, Alias = "alias"
 //   import ::system_module;                   — IsSystem true
 class ImportDecl : public Decl {
+public:
+  /// A single module being imported, with an optional alias.
+  /// qualifier() returns the name used at call sites (alias if set, else Name).
+  struct Module {
+    std::string Name;   // bare module name (final path segment)
+    std::string Alias;  // empty = use Name as qualifier
+    const std::string &qualifier() const { return Alias.empty() ? Name : Alias; }
+  };
+
 private:
-  std::string ModulePath;               // e.g. "std", "utils::math"
-  std::vector<std::string> SelectedNames; // empty = import all exported names
-  std::string Alias;                    // empty = no alias; otherwise surface name
-  bool IsSystem;                        // true if leading :: (system/stdlib module)
+  std::string BasePath;         // directory portion, e.g. "path::to::file" (may be empty)
+  std::vector<Module> Modules;  // always ≥1 entry
+  bool IsSystem;                // true for :: prefix (stdlib) imports
 
 public:
-  ImportDecl(SourceLocation loc, const std::string &path, bool isSystem,
-             std::vector<std::string> selectedNames = {},
-             const std::string &alias = "")
-      : Decl(NK_ImportDecl, loc), ModulePath(path),
-        SelectedNames(std::move(selectedNames)), Alias(alias),
-        IsSystem(isSystem) {}
+  ImportDecl(SourceLocation loc, const std::string &basePath, bool isSystem,
+             std::vector<Module> modules)
+      : Decl(NK_ImportDecl, loc), BasePath(basePath),
+        Modules(std::move(modules)), IsSystem(isSystem) {}
 
-  const std::string &getModulePath() const { return ModulePath; }
-  const std::vector<std::string> &getSelectedNames() const { return SelectedNames; }
-  const std::string &getAlias() const { return Alias; }
-  bool hasAlias() const { return !Alias.empty(); }
+  const std::string &getBasePath() const { return BasePath; }
+  const std::vector<Module> &getModules() const { return Modules; }
   bool isSystem() const { return IsSystem; }
+
+  /// Full module path for module m: "base::name" (or just "name" if base is empty).
+  std::string modulePath(const Module &m) const {
+    return BasePath.empty() ? m.Name : BasePath + "::" + m.Name;
+  }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_ImportDecl;
+  }
+};
+
+// Helper struct used during parsing to accumulate class body members.
+struct ClassBody {
+  std::vector<VarDecl *>  Fields;
+  std::vector<FuncDecl *> Methods;
+};
+
+// User-defined class declaration:
+//   class Foo { field: Type; fn method(...) { ... } }
+//
+// Fields are stored as VarDecl nodes (no initializer).
+// Methods are stored as FuncDecl nodes (fn keyword, full body).
+// The optional superclass is recorded by name; Sema resolves it to a
+// ClassType* and registers the fully-built ClassType in the ASTContext.
+class ClassDecl : public Decl {
+private:
+  std::string Name;
+  std::string SuperClassName; // "" = no explicit superclass
+  std::vector<VarDecl *> Fields;
+  std::vector<FuncDecl *> Methods;
+
+public:
+  ClassDecl(SourceLocation loc, const std::string &name,
+            const std::string &superName,
+            std::vector<VarDecl *> fields,
+            std::vector<FuncDecl *> methods)
+      : Decl(NK_ClassDecl, loc), Name(name), SuperClassName(superName),
+        Fields(std::move(fields)), Methods(std::move(methods)) {}
+
+  const std::string &getName() const { return Name; }
+  const std::string &getSuperClassName() const { return SuperClassName; }
+  bool hasSuperClass() const { return !SuperClassName.empty(); }
+
+  const std::vector<VarDecl *> &getFields() const { return Fields; }
+  const std::vector<FuncDecl *> &getMethods() const { return Methods; }
+  size_t getNumFields() const { return Fields.size(); }
+  size_t getNumMethods() const { return Methods.size(); }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_ClassDecl;
   }
 };
 
@@ -791,19 +965,82 @@ public:
 class TranslationUnit : public ASTNode {
 private:
   std::vector<ImportDecl *> Imports;
+  std::vector<ClassDecl *> ClassDecls;
   std::vector<FuncDecl *> FuncDecls;
 
 public:
   TranslationUnit(SourceLocation loc, std::vector<ImportDecl *> imports,
+                  std::vector<ClassDecl *> classes,
                   std::vector<FuncDecl *> funcs)
       : ASTNode(NK_TranslationUnit, loc), Imports(std::move(imports)),
-        FuncDecls(std::move(funcs)) {}
+        ClassDecls(std::move(classes)), FuncDecls(std::move(funcs)) {}
 
   const std::vector<ImportDecl *> &getImports() const { return Imports; }
+  const std::vector<ClassDecl *> &getClassDecls() const { return ClassDecls; }
   const std::vector<FuncDecl *> &getFuncDecls() const { return FuncDecls; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_TranslationUnit;
+  }
+};
+
+// Array type: T[]  (e.g. int[], Str[], float[])
+//
+// The array itself is heap-allocated (a subclass of Obj at runtime).
+// ElementType points to the type of each stored element.
+class ArrayType : public Type {
+  Type *ElementType;
+
+public:
+  ArrayType(SourceLocation loc, Type *elemTy)
+      : Type(NK_ArrayType, loc), ElementType(elemTy) {}
+
+  Type *getElementType() const { return ElementType; }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_ArrayType;
+  }
+};
+
+// Array literal expression: [expr, expr, ...] or []
+//
+// An empty literal ([]) requires an explicit type annotation on the
+// surrounding declaration; Sema rejects bare `y = []`.
+// A non-empty literal's element type is inferred by Sema.
+class ArrayLiteralExpr : public Expr {
+  std::vector<Expr *> Elements;
+
+public:
+  ArrayLiteralExpr(SourceLocation loc, std::vector<Expr *> elems)
+      : Expr(NK_ArrayLiteralExpr, loc), Elements(std::move(elems)) {}
+
+  const std::vector<Expr *> &getElements() const { return Elements; }
+  size_t getNumElements() const { return Elements.size(); }
+  bool isEmpty() const { return Elements.empty(); }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_ArrayLiteralExpr;
+  }
+};
+
+// Subscript expression: array[index]
+class SubscriptExpr : public Expr {
+  Expr *Array;
+  Expr *Index;
+  Type *ResolvedType = nullptr; // set by Sema (element type of array)
+
+public:
+  SubscriptExpr(SourceLocation loc, Expr *array, Expr *index)
+      : Expr(NK_SubscriptExpr, loc), Array(array), Index(index) {}
+
+  Expr *getArray() const { return Array; }
+  Expr *getIndex() const { return Index; }
+
+  void setResolvedType(Type *ty) { ResolvedType = ty; }
+  Type *getResolvedType() const { return ResolvedType; }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_SubscriptExpr;
   }
 };
 

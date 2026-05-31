@@ -20,7 +20,7 @@ target_include_directories(paykan_runtime
 
 # The runtime is pure C — no RTTI/exception flags needed.
 target_compile_options(paykan_runtime PRIVATE
-    -Wall -Wextra -Wpedantic
+    -Wall -Wextra -Wpedantic -Werror
     -std=c11
     $<$<CONFIG:Debug>:-g -O0>
     $<$<CONFIG:Release>:-O3>

@@ -1,0 +1,33 @@
+// OK: inheritance with __super__ call
+class Animal {
+  name: Str;
+
+  fn __init__(n: Str) {
+    self.name = n;
+  }
+
+  fn getName() -> Str {
+    return self.name;
+  }
+}
+
+class Dog : Animal {
+  breed: Str;
+
+  fn __init__(n: Str, b: Str) {
+    __super__(n);
+    self.breed = b;
+  }
+
+  fn getBreed() -> Str {
+    return self.breed;
+  }
+
+  fn describe() -> Str {
+    return self.name;
+  }
+}
+
+fn main() -> int {
+  return 0;
+}

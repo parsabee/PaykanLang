@@ -1,0 +1,7 @@
+// OK: selective import — import path::{a, b};
+//   Each module gets its own short qualifier: "foo", "bar"
+import lib::{foo, bar};
+
+fn main() -> int {
+  return foo::fooVal() + bar::barVal();  // 10 + 32 = 42
+}

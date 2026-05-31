@@ -1,0 +1,56 @@
+// 02 — Arithmetic operators: + - * / % on int and float
+// Exercises: visitBinaryExpr for Add/Sub/Mul/Div/Mod,
+//            implicit int→float promotion in binary ops and assignments
+
+fn main() -> int {
+  // ---- Integer arithmetic ---------------------------------------------------
+  out("=== int arithmetic ===");
+  out("2+3=",    StringInt(2 + 3));       // 5
+  out("10-4=",   StringInt(10 - 4));      // 6
+  out("3*7=",    StringInt(3 * 7));       // 21
+  out("20/4=",   StringInt(20 / 4));      // 5
+  out("17%5=",   StringInt(17 % 5));      // 2
+  out("7%7=",    StringInt(7 % 7));       // 0
+
+  // Operator precedence
+  out("2+3*4=",  StringInt(2 + 3 * 4));          // 14
+  out("(2+3)*4=",StringInt((2 + 3) * 4));        // 20
+  out("10-2*3=", StringInt(10 - 2 * 3));         // 4
+  out("8/2+1=",  StringInt(8 / 2 + 1));          // 5
+  out("10%3+1=", StringInt(10 % 3 + 1));         // 2
+
+  // Negative numbers (via subtraction)
+  out("0-5=",    StringInt(0 - 5));              // -5
+  out("0-5*2=",  StringInt(0 - 5 * 2));         // -10
+
+  // ---- Float arithmetic -----------------------------------------------------
+  out("=== float arithmetic ===");
+  out("1.5+2.5=",  StringFloat(1.5 + 2.5));      // 4
+  out("5.0-1.5=",  StringFloat(5.0 - 1.5));      // 3.5
+  out("2.0*3.5=",  StringFloat(2.0 * 3.5));      // 7
+  out("7.0/2.0=",  StringFloat(7.0 / 2.0));      // 3.5
+  out("5.5%2.0=",  StringFloat(5.5 % 2.0));      // 1.5
+
+  // ---- Int→float promotion --------------------------------------------------
+  out("=== int→float promotion ===");
+  // In binary expr: one side is float, other is int
+  out("1+0.5=",    StringFloat(1 + 0.5));        // 1.5
+  out("0.5+1=",    StringFloat(0.5 + 1));        // 1.5
+  out("3*1.0=",    StringFloat(3 * 1.0));        // 3
+  // In variable declaration: explicit float var gets int expr
+  promoted: float = 7;
+  out("float=7: ", StringFloat(promoted));        // 7
+  // Rebind
+  promoted = 3;
+  out("float=3: ", StringFloat(promoted));        // 3
+
+  // ---- Chained assignments and compound exprs ------------------------------
+  out("=== chained ===");
+  x: int = 1;
+  x = x + 10;
+  x = x * 2;
+  x = x - 3;
+  out("x=(1+10)*2-3=", StringInt(x));            // 19
+
+  return 0;
+}

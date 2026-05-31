@@ -6,6 +6,8 @@
 
 #include "ASTContext.h"
 #include "ASTVisitor.h"
+#include "ClassCodeGen.h"
+#include "Sema.h"
 
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
@@ -35,6 +37,9 @@ namespace codegen {
 class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   ast::ASTContext &ASTCtx;
   llvm::LLVMContext &LLVMCtx;
+  /// Copy of the SemaContext passed at construction; holds the pre-computed
+  /// per-import SemaContexts that processImports reuses instead of re-running Sema.
+  sema::SemaContext SemaCtx;
   std::unique_ptr<llvm::Module> Module;
   llvm::IRBuilder<> Builder;
 
@@ -43,15 +48,13 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   struct Scope {
     Scope *Parent = nullptr;
     llvm::StringMap<llvm::AllocaInst *> Locals;
-    llvm::StringMap<ast::Ownership> OwnershipMap;
     llvm::StringMap<ast::Type *> ASTTypeMap;
-    /// For reference variables: maps ref name → referent's alloca.
-    llvm::StringMap<llvm::AllocaInst *> RefTargets;
+    /// Variables whose alloca stores a PaykanShared* (owned, ref-counted).
+    llvm::StringSet<> SharedVars;
 
     /// Metadata for variables that need cleanup at scope exit.
     struct VarMeta {
       llvm::AllocaInst *Alloca;
-      ast::Ownership Ownership;
       ast::Type *ASTType;  // for choosing the right delete function
     };
     /// Variables declared in this scope, in declaration order.
@@ -60,16 +63,23 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
     explicit Scope(Scope *parent = nullptr);
 
     llvm::AllocaInst *lookup(llvm::StringRef name) const;
-    llvm::AllocaInst *lookupRefTarget(llvm::StringRef name) const;
-    ast::Ownership lookupOwnership(llvm::StringRef name) const;
+    bool isOwned(llvm::StringRef name) const;
     ast::Type *lookupASTType(llvm::StringRef name) const;
+    void updateASTType(llvm::StringRef name, ast::Type *newTy);
     void set(llvm::StringRef name, llvm::AllocaInst *alloca);
     void declare(llvm::StringRef name, llvm::AllocaInst *alloca,
-                 ast::Ownership own, ast::Type *astTy);
+                 ast::Type *astTy);
+    void declareUnowned(llvm::StringRef name, llvm::AllocaInst *alloca,
+                        ast::Type *astTy);
+    /// Promote a previously-unowned class variable to owned (SharedVars).
+    void promoteToOwned(llvm::StringRef name, ast::Type *astTy);
     Scope *findOwner(llvm::StringRef name);
   };
 
   Scope *CurrentScope = nullptr;
+
+  /// AST return type of the currently-emitting function (nullptr at top level).
+  ast::Type *CurrentFuncReturnASTType = nullptr;
 
   // -- Loop context (for break / continue) ----------------------------------
 
@@ -90,15 +100,20 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   /// Maps Paykan-level function names to their codegen info.
   llvm::StringMap<FunctionInfo> FunctionTable;
 
-  /// Names of identity constructors (e.g. "String") that simply
+  /// Names of identity constructors (e.g. "Str") that simply
   /// return their single argument, wrapping string literals as needed.
   llvm::StringSet<> IdentityCtors;
 
-  /// Per-function parameter ownerships for user-defined functions.
-  llvm::StringMap<std::vector<ast::Ownership>> UserFuncParamOwns;
-
   /// Register builtin functions in the function table.
   void bootstrapBuiltins();
+
+  // -- Class codegen --------------------------------------------------------
+
+  /// Handles all class-specific lowering: struct types, vtables,
+  /// method bodies, constructors, and member access / assignment.
+  ClassCodeGen Classes;
+
+  friend class ClassCodeGen;
 
   /// Project root directory for import resolution.
   std::string ProjectRoot;
@@ -118,8 +133,12 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   /// Emit cleanup (delete / release) for all variables in the given scope.
   void emitScopeCleanup(Scope &scope);
 
-  /// Return the runtime delete function name for a given class type.
-  llvm::StringRef getDeleteFnName(ast::Type *ty);
+  /// Emit cleanup for all active scopes (used by return statements).
+  void emitAllScopesCleanup();
+
+  /// Emit expr as a PaykanShared* — wraps raw pointers, retains owned vars,
+  /// passes through already-shared call/ternary results.
+  llvm::Value *emitAsShared(ast::Expr *expr);
 
   /// RAII helper to push/pop a scope.
   struct ScopeGuard {
@@ -144,10 +163,35 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   llvm::Function *declareFunction(llvm::StringRef name,
                                   llvm::FunctionType *fnTy);
 
+  /// Convenience wrappers for the three most common runtime calls.
+  /// Returns true when expr already produces a PaykanShared* — i.e. it is a
+  /// user-defined call/method-call/ternary whose resolved type is a class.
+  /// Builtin calls (StringInt, StringFloat, etc.) return raw pointers and are
+  /// excluded.
+  bool exprAlreadyShared(ast::Expr *expr) const;
+  void emitRetain(llvm::Value *shared);
+  void emitRelease(llvm::Value *shared);
+  llvm::Value *emitSharedNew(llvm::Value *raw, llvm::StringRef name = "shared");
+
+  /// Handle the first-assignment (implicit declaration) path of visitAssignStmt:
+  /// allocates an alloca, optionally wraps the value in a PaykanShared box,
+  /// and registers the variable in the current scope.
+  llvm::Value *emitImplicitVarDecl(llvm::StringRef name, ast::Expr *rhsExpr,
+                                   llvm::Value *val);
+
+  /// Rebind an existing class-type variable to a new shared box:
+  /// retains the RHS box (if it's an owned var) or wraps a fresh value,
+  /// releases the old box, and stores the new one into the alloca.
+  void emitClassVarRebind(llvm::AllocaInst *alloca, ast::Expr *rhsExpr,
+                          llvm::Value *val);
+
   // -- Expression emitter ---------------------------------------------------
 
   class ExprEmitter : public ast::ExprVisitor<ExprEmitter, llvm::Value *> {
     CodeGen &CG;
+
+    llvm::Value *emitIdentityCtor(ast::CallExpr *node);
+    llvm::Value *emitBuiltinCall(ast::CallExpr *node);
 
   public:
     explicit ExprEmitter(CodeGen &cg) : CG(cg) {}
@@ -164,7 +208,7 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   llvm::Value *emitExpr(ast::Expr *expr);
 
 public:
-  CodeGen(ast::ASTContext &astCtx, llvm::LLVMContext &llvmCtx,
+  CodeGen(const sema::SemaContext &semaCtx, llvm::LLVMContext &llvmCtx,
           llvm::StringRef moduleName,
           const std::string &projectRoot = "");
 

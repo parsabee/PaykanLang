@@ -1,9 +1,0 @@
-// Error: 'mov' cannot be used when passing to a reference parameter.
-fn borrow(s: String&) -> int {
-  return 0;
-}
-
-fn main() -> int {
-  a: String = "owned";
-  return borrow(mov a);   // error: 'mov' cannot be used when passing to a reference parameter
-}

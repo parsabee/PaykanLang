@@ -1,0 +1,29 @@
+// OK: cross-module class inheritance — three qualifier forms
+//
+//   import shapes::base        → short qualifier "base", full "shapes::base"
+//   import shapes::base as sh  → alias "sh", full "shapes::base"
+//
+//   With a plain import (no alias):
+//     base::Shape         — short qualifier (last path segment)
+//     shapes::base::Shape — full path qualifier
+//   With an aliased import:
+//     sh::Shape           — alias qualifier
+//     shapes::base::Shape — full path qualifier
+
+import shapes::base;
+
+// Using short qualifier
+class Circle : base::Shape {
+  fn area() -> int { return 1; }
+}
+
+// Using full path qualifier
+class Triangle : shapes::base::Shape {
+  fn area() -> int { return 3; }
+}
+
+fn main() -> int {
+  c: Shape = Circle();
+  t: Shape = Triangle();
+  return c.area() + t.area();  // 1 + 3 = 4
+}

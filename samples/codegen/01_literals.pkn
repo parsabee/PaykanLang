@@ -1,0 +1,50 @@
+// 01 — Literals: integer, float, bool, string, None
+// Exercises: visitIntegerLiteral, visitFloatLiteral, visitBoolLiteral,
+//            visitStringLiteral, visitNoneLiteral, wrapStringLiteral
+
+fn main() -> int {
+  // ---- Integer literals ----------------------------------------------------
+  a: int = 0;
+  b: int = 1;
+  c: int = 42;
+  d: int = 9223372036854775807;   // INT64_MAX
+  neg: int = 0 - 2147483648;     // large negative via unary-minus at runtime
+  out("int 0:    ", StringInt(a));
+  out("int 1:    ", StringInt(b));
+  out("int 42:   ", StringInt(c));
+  out("INT64_MAX:", StringInt(d));
+  out("neg large:", StringInt(neg));
+
+  // ---- Float literals -------------------------------------------------------
+  f0: float = 0.0;
+  f1: float = 1.0;
+  pi: float = 3.14159;
+  neg_f: float = 0.0 - 2.718;
+  out("float 0:  ", StringFloat(f0));
+  out("float 1:  ", StringFloat(f1));
+  out("pi:       ", StringFloat(pi));
+  out("neg float:", StringFloat(neg_f));
+
+  // ---- Bool literals --------------------------------------------------------
+  t: bool = True;
+  f: bool = False;
+  out("True:     ", StringBool(t));
+  out("False:    ", StringBool(f));
+
+  // ---- String literals -------------------------------------------------------
+  // Direct literal passed to out()
+  out("raw literal");
+  // Assigned to a Str variable (exercises VarDecl shared-box path)
+  s: Str = "hello world";
+  out(s);
+  // Empty string
+  empty: Str = "";
+  out("empty='", empty, "'");
+
+  // ---- None literal ---------------------------------------------------------
+  // None is an unowned class var; just declaring it must not crash.
+  n: Obj = None;
+  out("none decl ok");
+
+  return 0;
+}

@@ -1,0 +1,10 @@
+// ERROR: __super__ called in a class with no explicit superclass
+class A {
+  fn __init__() {
+    __super__();  // A has no explicit superclass
+  }
+}
+
+fn main() -> int {
+  return 0;
+}

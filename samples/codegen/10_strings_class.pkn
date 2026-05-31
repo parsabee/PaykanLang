@@ -1,0 +1,128 @@
+// 10 — Str class type: VarDecl, rebind, pass as arg, return from fn,
+//       methods (length, concat, toString, equals), string concatenation op,
+//       StringInt/StringFloat/StringBool conversion builtins
+// Exercises: emitSharedNew (VarDecl + ImplicitVarDecl + RebindFromCall),
+//            emitClassVarRebind with exprAlreadyShared guard,
+//            visitMethodCallExpr (primitive + class-typed returns),
+//            emitAsShared in call args, emitRetain/emitRelease,
+//            scope cleanup releasing shared boxes
+
+// ---- Helpers that pass/return Str ----------------------------------------
+
+fn shout(s: Str) -> Str {
+  return s + "!!!";
+}
+fn repeat(s: Str, n: int) -> Str {
+  acc: Str = "";
+  i: int = 0;
+  while (i < n) {
+    acc = acc + s;
+    i = i + 1;
+  }
+  return acc;
+}
+fn longerOf(a: Str, b: Str) -> Str {
+  return if a.length() >= b.length() then a else b;
+}
+
+// ---- main -----------------------------------------------------------------
+
+fn main() -> int {
+  out("=== basic Str VarDecl ===");
+  s: Str = "hello";
+  out(s);               // hello
+
+  out("=== Str rebind from literal ===");
+  s = "world";
+  out(s);               // world
+
+  out("=== Str rebind from concat expr ===");
+  s = "foo" + "bar";
+  out(s);               // foobar
+
+  out("=== Str rebind from function call (no double-box) ===");
+  s = shout("hi");
+  out(s);               // hi!!!
+
+  out("=== implicit Str decl from function call ===");
+  implicit_s = shout("bye");
+  out(implicit_s);      // bye!!!
+
+  out("=== Str rebind from ternary (no double-box) ===");
+  flag: bool = True;
+  s = if flag then "yes" else "no";
+  out(s);               // yes
+  s = if !flag then "yes" else "no";
+  out(s);               // no
+
+  out("=== method: length() ===");
+  t: Str = "hello";
+  n: int = t.length();
+  out(StringInt(n));    // 5
+  empty: Str = "";
+  out(StringInt(empty.length()));  // 0
+
+  out("=== method: concat() (class-typed return, no double-box) ===");
+  a: Str = "hello";
+  b: Str = " world";
+  c: Str = a.concat(b);
+  out(c);               // hello world
+  // concat chain
+  d: Str = a.concat(" ").concat("!!");
+  out(d);               // hello !!
+
+  out("=== method: toString() (class-typed return) ===");
+  e: Str = "paykan";
+  f: Str = e.toString();
+  out(f);               // paykan
+
+  out("=== string + operator ===");
+  g: Str = "abc" + "def";
+  out(g);               // abcdef
+  g = g + g;
+  out(g);               // abcdefabcdef
+
+  out("=== StringInt / StringFloat / StringBool builtins ===");
+  si: Str = StringInt(255);
+  sf: Str = StringFloat(3.14);
+  sb: Str = StringBool(True);
+  out(si);              // 255
+  out(sf);              // 3.14
+  out(sb);              // True
+
+  out("=== Str passed to function ===");
+  base: Str = "hi";
+  out(shout(base));     // hi!!!
+  out(repeat("ab", 4)); // abababab
+
+  out("=== Str returned and used immediately ===");
+  out(longerOf("short", "much longer string"));  // much longer string
+  out(longerOf("equal!", "equal!"));             // equal!
+
+  out("=== many Str vars same scope (stress refcount) ===");
+  v0: Str = "s0";
+  v1: Str = "s1";
+  v2: Str = "s2";
+  v3: Str = "s3";
+  v4: Str = "s4";
+  out(v0 + v1 + v2 + v3 + v4);   // s0s1s2s3s4
+
+  out("=== Str vars in loop (scope cleanup per iteration) ===");
+  i: int = 0;
+  while (i < 4) {
+    label: Str = "item-" + StringInt(i);
+    out(label);
+    i = i + 1;
+  }
+
+  out("=== Str var in if/else branches ===");
+  if (True) {
+    branch: Str = "true-branch";
+    out(branch);
+  } else {
+    branch: Str = "false-branch";
+    out(branch);
+  }
+
+  return 0;
+}

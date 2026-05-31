@@ -1,0 +1,153 @@
+// 08 — Functions: declarations, parameters, return types, recursion, void
+// Exercises: visitFuncDecl, visitCallExpr (user-defined functions),
+//            visitReturnStmt, parameter allocas, scope guard in function body,
+//            bool/int/float/Str parameters and return values,
+//            emitAllScopesCleanup on every return path
+
+// ---- Arithmetic helpers ---------------------------------------------------
+
+fn add(a: int, b: int) -> int { return a + b; }
+fn sub(a: int, b: int) -> int { return a - b; }
+fn mul(a: int, b: int) -> int { return a * b; }
+fn div(a: int, b: int) -> int { return a / b; }
+fn mod(a: int, b: int) -> int { return a % b; }
+
+fn square(n: int) -> int { return n * n; }
+fn cube(n: int)   -> int { return n * n * n; }
+
+fn maxOf(a: int, b: int) -> int {
+  return if a > b then a else b;
+}
+fn minOf(a: int, b: int) -> int {
+  return if a < b then a else b;
+}
+fn clamp(v: int, lo: int, hi: int) -> int {
+  return if v < lo then lo else if v > hi then hi else v;
+}
+
+// ---- Bool-returning functions ---------------------------------------------
+
+fn isEven(n: int) -> bool { return n % 2 == 0; }
+fn isPositive(n: int) -> bool { return n > 0; }
+fn inRange(v: int, lo: int, hi: int) -> bool { return v >= lo && v <= hi; }
+
+// ---- Float functions -------------------------------------------------------
+
+fn average(a: float, b: float) -> float { return (a + b) / 2.0; }
+
+// ---- Void functions --------------------------------------------------------
+
+fn printInt(label: Str, n: int) {
+  out(label, StringInt(n));
+}
+fn printBool(label: Str, b: bool) {
+  out(label, StringBool(b));
+}
+
+// ---- Str-returning functions (exercises shared-box return path) -----------
+
+fn greeting(name: Str) -> Str {
+  return "Hello, " + name + "!";
+}
+fn repeat(s: Str, times: int) -> Str {
+  result: Str = "";
+  i: int = 0;
+  while (i < times) {
+    result = result + s;
+    i = i + 1;
+  }
+  return result;
+}
+
+// ---- Recursive functions ---------------------------------------------------
+
+fn factorial(n: int) -> int {
+  if (n <= 1) { return 1; }
+  return n * factorial(n - 1);
+}
+fn fib(n: int) -> int {
+  if (n <= 1) { return n; }
+  return fib(n - 1) + fib(n - 2);
+}
+fn gcd(a: int, b: int) -> int {
+  while (b != 0) {
+    tmp: int = b;
+    b = a % b;
+    a = tmp;
+  }
+  return a;
+}
+fn power(base: int, exp: int) -> int {
+  result: int = 1;
+  i: int = 0;
+  while (i < exp) {
+    result = result * base;
+    i = i + 1;
+  }
+  return result;
+}
+
+// ---- Multiple return paths -------------------------------------------------
+
+fn abs(n: int) -> int {
+  if (n < 0) { return 0 - n; }
+  return n;
+}
+fn classify(n: int) -> Str {
+  if (n > 0) { return "pos"; }
+  if (n < 0) { return "neg"; }
+  return "zero";
+}
+
+// ---- main -----------------------------------------------------------------
+
+fn main() -> int {
+  out("=== basic int ops ===");
+  printInt("add 3+4=",  add(3, 4));        // 7
+  printInt("sub 10-6=", sub(10, 6));       // 4
+  printInt("mul 6*7=",  mul(6, 7));        // 42
+  printInt("div 15/4=", div(15, 4));       // 3
+  printInt("mod 17%5=", mod(17, 5));       // 2
+
+  out("=== helpers ===");
+  printInt("square 9=",  square(9));       // 81
+  printInt("cube 3=",    cube(3));         // 27
+  printInt("max(4,7)=",  maxOf(4, 7));     // 7
+  printInt("min(4,7)=",  minOf(4, 7));     // 4
+  printInt("clamp(-1,0,10)=", clamp(0 - 1, 0, 10));  // 0
+  printInt("clamp(5,0,10)=",  clamp(5, 0, 10));       // 5
+  printInt("clamp(15,0,10)=", clamp(15, 0, 10));      // 10
+
+  out("=== bool-returning ===");
+  printBool("even(4)=",      isEven(4));            // True
+  printBool("even(7)=",      isEven(7));            // False
+  printBool("positive(-1)=", isPositive(0 - 1));   // False
+  printBool("inRange(5,1,10)=", inRange(5, 1, 10));  // True
+  printBool("inRange(0,1,10)=", inRange(0, 1, 10));  // False
+
+  out("=== float ===");
+  out("avg(3.0,7.0)=", StringFloat(average(3.0, 7.0)));  // 5
+
+  out("=== Str-returning ===");
+  out(greeting("Paykan"));          // Hello, Paykan!
+  out(repeat("ab", 3));             // ababab
+  out(repeat("x", 0));              // (empty)
+
+  out("=== recursive ===");
+  printInt("0!=", factorial(0));    // 1
+  printInt("5!=", factorial(5));    // 120
+  printInt("10!=",factorial(10));   // 3628800
+  printInt("fib(0)=",  fib(0));     // 0
+  printInt("fib(10)=", fib(10));    // 55
+  printInt("gcd(48,18)=", gcd(48, 18));  // 6
+  printInt("2^10=", power(2, 10));       // 1024
+
+  out("=== multiple return paths ===");
+  printInt("abs(-7)=", abs(0 - 7));    // 7
+  printInt("abs(7)=",  abs(7));         // 7
+  out(classify(5));     // pos
+  out(classify(0 - 2)); // neg
+  out(classify(0));     // zero
+
+  return 0;
+}

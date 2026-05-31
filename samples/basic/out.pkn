@@ -1,6 +1,0 @@
-fn main() -> int {
-  out("hello", "world");
-  s: String = "foo" + "bar";
-  out(&s);
-  return 0;
-}

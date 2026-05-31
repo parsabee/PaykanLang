@@ -1,0 +1,10 @@
+// ERROR: wrong qualifier at call site
+//   import utils::math as m
+//     valid qualifiers: "m" (alias), "utils::math" (full path)
+//   calling via "math::" is neither — it's only the last segment, not registered
+//   when an alias overrides the short name
+import utils::math as m;
+
+fn main() -> int {
+  return math::add(1, 2);  // ERROR: 'math::add' undeclared — use 'm::add'
+}

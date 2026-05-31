@@ -57,12 +57,17 @@ void ASTPrinter::visitTranslationUnit(TranslationUnit *node) {
   OS << "TranslationUnit";
   printLoc(node);
   OS << "\n";
-  size_t total = node->getImports().size() + node->getFuncDecls().size();
+  size_t total = node->getImports().size() + node->getClassDecls().size() + node->getFuncDecls().size();
   size_t idx = 0;
   for (auto *imp : node->getImports()) {
     ++idx;
     ChildScope cs(*this, idx == total);
     visitImportDecl(imp);
+  }
+  for (auto *cls : node->getClassDecls()) {
+    ++idx;
+    ChildScope cs(*this, idx == total);
+    visitClassDecl(cls);
   }
   for (size_t i = 0; i < node->getFuncDecls().size(); ++i) {
     ++idx;
@@ -181,13 +186,6 @@ void ASTPrinter::visitVarDecl(VarDecl *node) {
   OS << "VarDecl";
   printLoc(node);
   OS << " '" << node->getName() << "'";
-  if (node->isConst())
-    OS << " const";
-  switch (node->getOwnership()) {
-  case Ownership::Unique:    OS << " unique"; break;
-  case Ownership::Shared:    OS << " shared"; break;
-  case Ownership::Reference: OS << " ref";    break;
-  }
   if (node->getType())
     OS << " type";
   OS << "\n";
@@ -224,36 +222,19 @@ void ASTPrinter::visitBoolLiteral(BoolLiteral *node) {
   OS << " " << (node->getValue() ? "true" : "false") << "\n";
 }
 
+void ASTPrinter::visitNoneLiteral(NoneLiteral *node) {
+  printIndent();
+  OS << "NoneLiteral";
+  printLoc(node);
+  OS << " None\n";
+}
+
 void ASTPrinter::visitStringLiteral(StringLiteral *node) {
   printIndent();
   OS << "StringLiteral";
   printLoc(node);
   OS << " \"" << node->getValue() << "\"\n";
 }
-
-void ASTPrinter::visitMovExpr(MovExpr *node) {
-  printIndent();
-  OS << "MovExpr";
-  printLoc(node);
-  OS << "\n";
-  {
-    ChildScope cs(*this, true);
-    visit(node->getOperand());
-  }
-}
-
-void ASTPrinter::visitRefExpr(RefExpr *node) {
-  printIndent();
-  OS << "RefExpr";
-  printLoc(node);
-  OS << "\n";
-  {
-    ChildScope cs(*this, true);
-    visit(node->getOperand());
-  }
-}
-
-
 
 void ASTPrinter::visitUnaryExpr(UnaryExpr *node) {
   printIndent();
@@ -315,6 +296,21 @@ void ASTPrinter::visitCallExpr(CallExpr *node) {
   visitChildren(node);
 }
 
+void ASTPrinter::visitMethodCallExpr(MethodCallExpr *node) {
+  printIndent();
+  OS << "MethodCallExpr";
+  printLoc(node);
+  OS << " '" << node->getMethodName() << "'\n";
+  {
+    ChildScope cs(*this, node->getNumArguments() == 0);
+    visit(node->getReceiver());
+  }
+  for (size_t i = 0; i < node->getNumArguments(); ++i) {
+    ChildScope cs(*this, i + 1 == node->getNumArguments());
+    visit(node->getArguments()[i]);
+  }
+}
+
 // -- Types -------------------------------------------------------------------
 
 void ASTPrinter::visitBuiltinType(BuiltinType *node) {
@@ -338,6 +334,35 @@ void ASTPrinter::visitClassType(ClassType *node) {
   if (node->getSuperClass())
     OS << " : '" << node->getSuperClass()->getName() << "'";
   OS << "\n";
+}
+
+void ASTPrinter::visitArrayType(ArrayType *node) {
+  printIndent();
+  OS << "ArrayType";
+  printLoc(node);
+  OS << "\n";
+  ChildScope cs(*this, true);
+  visit(node->getElementType());
+}
+
+void ASTPrinter::visitArrayLiteralExpr(ArrayLiteralExpr *node) {
+  printIndent();
+  OS << "ArrayLiteralExpr";
+  printLoc(node);
+  OS << " " << node->getNumElements() << " elements\n";
+  for (size_t i = 0; i < node->getNumElements(); ++i) {
+    ChildScope cs(*this, i + 1 == node->getNumElements());
+    visit(node->getElements()[i]);
+  }
+}
+
+void ASTPrinter::visitSubscriptExpr(SubscriptExpr *node) {
+  printIndent();
+  OS << "SubscriptExpr";
+  printLoc(node);
+  OS << "\n";
+  { ChildScope cs(*this, false); visit(node->getArray()); }
+  { ChildScope cs(*this, true);  visit(node->getIndex()); }
 }
 
 void ASTPrinter::visitFuncDecl(FuncDecl *node) {
@@ -369,25 +394,85 @@ void ASTPrinter::visitMethodDecl(MethodDecl *node) {
   OS << "\n";
 }
 
+void ASTPrinter::visitClassDecl(ClassDecl *node) {
+  printIndent();
+  OS << "ClassDecl";
+  printLoc(node);
+  OS << " '" << node->getName() << "'";
+  if (node->hasSuperClass())
+    OS << " : " << node->getSuperClassName();
+  OS << "\n";
+  size_t total = node->getNumFields() + node->getNumMethods();
+  size_t idx = 0;
+  for (auto *field : node->getFields()) {
+    ++idx;
+    ChildScope cs(*this, idx == total);
+    visitVarDecl(field);
+  }
+  for (auto *method : node->getMethods()) {
+    ++idx;
+    ChildScope cs(*this, idx == total);
+    visitFuncDecl(method);
+  }
+}
+
+void ASTPrinter::visitMemberAssignStmt(MemberAssignStmt *node) {
+  printIndent();
+  OS << "MemberAssignStmt '" << node->getFieldName() << "'";
+  printLoc(node);
+  OS << "\n";
+  { ChildScope cs(*this, false); visit(node->getReceiver()); }
+  { ChildScope cs(*this, true);  visit(node->getValue()); }
+}
+
+void ASTPrinter::visitMemberAccessExpr(MemberAccessExpr *node) {
+  printIndent();
+  OS << "MemberAccessExpr '" << node->getFieldName() << "'";
+  printLoc(node);
+  OS << "\n";
+  ChildScope cs(*this, true);
+  visit(node->getReceiver());
+}
+
 void ASTPrinter::visitImportDecl(ImportDecl *node) {
   printIndent();
   OS << "ImportDecl";
   printLoc(node);
   OS << (node->isSystem() ? " system" : " user");
-  OS << " '" << node->getModulePath() << "'";
-  if (!node->getSelectedNames().empty()) {
-    OS << " selected={";
-    bool first = true;
-    for (const auto &n : node->getSelectedNames()) {
-      if (!first) OS << ", ";
-      OS << n;
-      first = false;
-    }
-    OS << "}";
+  if (!node->getBasePath().empty())
+    OS << " base='" << node->getBasePath() << "'";
+  OS << " modules={";
+  bool first = true;
+  for (const auto &m : node->getModules()) {
+    if (!first) OS << ", ";
+    OS << m.Name;
+    if (!m.Alias.empty()) OS << " as " << m.Alias;
+    first = false;
   }
-  if (node->hasAlias())
-    OS << " as=" << node->getAlias();
+  OS << "}\n";
+}
+
+void ASTPrinter::visitMatchStmt(MatchStmt *node) {
+  printIndent();
+  OS << "MatchStmt";
+  printLoc(node);
   OS << "\n";
+  { ChildScope cs(*this, false); visit(node->getSubject()); }
+  const auto &arms = node->getArms();
+  for (size_t i = 0; i < arms.size(); ++i) {
+    const auto &arm = arms[i];
+    bool isLast = (i + 1 == arms.size());
+    ChildScope cs(*this, isLast);
+    printIndent();
+    OS << (arm.isWildcard() ? "MatchArm wildcard" : "MatchArm");
+    if (arm.hasBinding())
+      OS << " binding='" << arm.Binding << "'";
+    OS << "\n";
+    if (!arm.isWildcard()) {
+      { ChildScope cs2(*this, false); visit(arm.ArmType); }
+    }
+    { ChildScope cs2(*this, true); visit(arm.Body); }
+  }
 }
 
 } // namespace ast

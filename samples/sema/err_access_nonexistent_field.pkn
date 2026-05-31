@@ -1,0 +1,12 @@
+// ERROR: accessing a field that does not exist on the class
+class A {
+  x: int;
+
+  fn bad() -> int {
+    return self.y;  // no field 'y' in class 'A'
+  }
+}
+
+fn main() -> int {
+  return 0;
+}

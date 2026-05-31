@@ -1,0 +1,11 @@
+// ERROR: Car is not a subclass of Animal — cannot appear in a match on Animal
+class Animal {}
+class Car {}
+
+fn main() -> int {
+  a: Animal = Animal();
+  match a {
+    Car { }   // sema error: 'Car' is not a subclass of 'Animal'
+  }
+  return 0;
+}

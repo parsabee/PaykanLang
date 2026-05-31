@@ -1,0 +1,19 @@
+// OK: match arm binding narrows the type — binding is visible inside the arm body
+class Dog {
+  name: Str;
+
+  fn __init__(n: Str) {
+    self.name = n;
+  }
+}
+
+fn main() -> int {
+  x: Obj = Dog("Rex");
+  match x {
+    d: Dog {
+      out(d.name);
+    }
+    _ { }
+  }
+  return 0;
+}

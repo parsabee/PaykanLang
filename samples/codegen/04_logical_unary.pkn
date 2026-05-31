@@ -1,0 +1,62 @@
+// 04 — Logical operators && || ! and unary negation
+// Exercises: visitBinaryExpr (And/Or short-circuit), visitUnaryExpr (Not/Neg),
+//            bool short-circuit semantics, combined logical expressions
+
+fn main() -> int {
+  out("=== AND truth table ===");
+  out("T&&T=", StringBool(True  && True));   // True
+  out("T&&F=", StringBool(True  && False));  // False
+  out("F&&T=", StringBool(False && True));   // False
+  out("F&&F=", StringBool(False && False));  // False
+
+  out("=== OR truth table ===");
+  out("T||T=", StringBool(True  || True));   // True
+  out("T||F=", StringBool(True  || False));  // True
+  out("F||T=", StringBool(False || True));   // True
+  out("F||F=", StringBool(False || False));  // False
+
+  out("=== NOT ===");
+  out("!T=",   StringBool(!True));            // False
+  out("!F=",   StringBool(!False));           // True
+  out("!!T=",  StringBool(!!True));           // True
+
+  out("=== short-circuit && ===");
+  // The side effect counter verifies RHS is skipped when LHS is False.
+  counter: int = 0;
+  flag: bool = False && (counter == 0);  // RHS never executed
+  out("F&&(c==0)=", StringBool(flag));   // False
+  // counter stays 0 whether or not RHS ran (no side-effect possible in
+  // this language without a call), but the path still exercises the
+  // correct codegen branch structure.
+
+  out("=== short-circuit || ===");
+  flag2: bool = True || False;           // RHS skipped
+  out("T||F=", StringBool(flag2));       // True
+
+  out("=== precedence && before || ===");
+  // && binds tighter than ||
+  a: bool = True || False && False;     // True || (False && False) = True || F = True
+  b: bool = False && True || True;      // (False && True) || True = False || True = True
+  c: bool = False && True || False;     // (False && True) || False = False
+  out("T||F&&F=",  StringBool(a));      // True
+  out("F&&T||T=",  StringBool(b));      // True
+  out("F&&T||F=",  StringBool(c));      // False
+
+  out("=== unary negation (int) ===");
+  x: int = 5;
+  neg_x: int = 0 - x;
+  out("-5=",       StringInt(neg_x));   // -5
+  out("-(3+2)=",   StringInt(0 - (3 + 2)));  // -5
+
+  out("=== unary negation (float) ===");
+  out("-3.14=", StringFloat(0.0 - 3.14));     // -3.14
+
+  out("=== combined ===");
+  v: int = 7;
+  result: bool = v > 0 && v < 10 && v != 5;
+  out("7 in (0,10) and !=5:", StringBool(result));  // True
+  result2: bool = v < 0 || v > 5 && v < 10;
+  out("7<0 or in (5,10):",   StringBool(result2)); // True
+
+  return 0;
+}

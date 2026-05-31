@@ -23,6 +23,7 @@
 
 true        True
 false       False
+None        None
 id          [_a-zA-Z][_a-zA-Z_0-9]*
 int         [0-9]+
 float       ([0-9]+[.])?[0-9]+
@@ -64,6 +65,8 @@ comment     \/\/[^\n]*
 "<"        return yy::parser::make_LESS      (loc);
 "("        return yy::parser::make_LPAREN    (loc);
 ")"        return yy::parser::make_RPAREN    (loc);
+"["        return yy::parser::make_LSQUARE   (loc);
+"]"        return yy::parser::make_RSQUARE   (loc);
 "{"        return yy::parser::make_LBRACK    (loc);
 "}"        return yy::parser::make_RBRACK    (loc);
 "="        return yy::parser::make_ASSIGN    (loc);
@@ -74,16 +77,31 @@ comment     \/\/[^\n]*
 "!"        return yy::parser::make_NOT       (loc);
 "&"        return yy::parser::make_AMP       (loc);
 
-\"([^\\\"]|\\.)*\"  { std::string s(yytext + 1, yyleng - 2);
+\"([^\\\"]|\\.)*\"  { std::string raw(yytext + 1, yyleng - 2);
+                      std::string s;
+                      s.reserve(raw.size());
+                      for (size_t i = 0; i < raw.size(); ++i) {
+                        if (raw[i] == '\\' && i + 1 < raw.size()) {
+                          switch (raw[++i]) {
+                            case 'n':  s += '\n'; break;
+                            case 't':  s += '\t'; break;
+                            case 'r':  s += '\r'; break;
+                            case '\\': s += '\\'; break;
+                            case '"':  s += '"';  break;
+                            case '0':  s += '\0'; break;
+                            default:   s += '\\'; s += raw[i]; break;
+                          }
+                        } else {
+                          s += raw[i];
+                        }
+                      }
                       return yy::parser::make_STRING (s, loc); }
 
 {int}      return make_INT   (yytext, loc);
 {float}    return make_FLOAT (yytext, loc);
 {true}     return yy::parser::make_BOOL  (true,  loc);
 {false}    return yy::parser::make_BOOL  (false, loc);
-"shared"   return yy::parser::make_SHARED(loc);
-"mov"      return yy::parser::make_MOV(loc);
-"const"    return yy::parser::make_CONST(loc);
+{None}     return yy::parser::make_NONE  (loc);
 "fn"       return yy::parser::make_FN(loc);
 "return"   return yy::parser::make_RETURN(loc);
 "if"       return yy::parser::make_IF(loc);
@@ -94,6 +112,9 @@ comment     \/\/[^\n]*
 "continue" return yy::parser::make_CONTINUE(loc);
 "import"   return yy::parser::make_IMPORT(loc);
 "as"       return yy::parser::make_AS(loc);
+"class"    return yy::parser::make_CLASS(loc);
+"match"    return yy::parser::make_MATCH(loc);
+"_"        return yy::parser::make_UNDERSCORE(loc);
 {id}       return yy::parser::make_IDENT (yytext, loc);
 
 <<EOF>>    return yy::parser::make_YYEOF (loc);

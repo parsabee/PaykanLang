@@ -1,0 +1,7 @@
+// ERROR: duplicate class name
+class A {}
+class A {}
+
+fn main() -> int {
+  return 0;
+}

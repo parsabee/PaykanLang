@@ -1,0 +1,2 @@
+// Module: lib/bar
+fn barVal() -> int { return 32; }

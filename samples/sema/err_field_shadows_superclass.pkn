@@ -1,0 +1,12 @@
+// ERROR: subclass field shadows a field from the superclass
+class Animal {
+  name: Str;
+}
+
+class Dog : Animal {
+  name: Str;  // shadows 'name' from Animal
+}
+
+fn main() -> int {
+  return 0;
+}

@@ -1,0 +1,7 @@
+// ERROR: cyclic inheritance — A inherits B, B inherits A
+class A : B {}
+class B : A {}
+
+fn main() -> int {
+  return 0;
+}

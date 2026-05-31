@@ -1,0 +1,14 @@
+// OK: wildcard arm as the last arm is valid
+class Dog {}
+class Cat {}
+
+fn main() -> int {
+  x: Obj = Cat();
+  match x {
+    Dog { }
+    _ {
+      out("not a Dog");
+    }
+  }
+  return 0;
+}

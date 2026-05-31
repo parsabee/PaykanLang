@@ -60,7 +60,7 @@ enable_testing()
 #   target_link_libraries(<target> PRIVATE paykan_compile_options)
 add_library(paykan_compile_options INTERFACE)
 target_compile_options(paykan_compile_options INTERFACE
-    -Wall -Wextra -Wpedantic
+    -Wall -Wextra -Wpedantic -Werror
     -fno-rtti -fno-exceptions
 )
 target_compile_options(paykan_compile_options INTERFACE

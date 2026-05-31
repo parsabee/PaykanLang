@@ -1,0 +1,6 @@
+// ERROR: superclass is not defined
+class Dog : Animal {}  // 'Animal' does not exist
+
+fn main() -> int {
+  return 0;
+}

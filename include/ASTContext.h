@@ -26,8 +26,8 @@ class ASTContext {
   BuiltinType *VoidTy;
 
   // Canonical class types.
-  ClassType *ObjectTy;
-  ClassType *StringTy;
+  ClassType *ObjTy;
+  ClassType *StrTy;
 
   // Registry of all class types, keyed by name.
   std::unordered_map<std::string, ClassType *> ClassTypes;
@@ -96,8 +96,8 @@ public:
   BuiltinType *getVoidTy()  const { return VoidTy; }
 
   // Canonical class type accessors.
-  ClassType *getObjectTy() const { return ObjectTy; }
-  ClassType *getStringTy() const { return StringTy; }
+  ClassType *getObjTy() const { return ObjTy; }
+  ClassType *getStrTy() const { return StrTy; }
 
   /// Return the canonical BuiltinType* for a given Kind.
   BuiltinType *getBuiltinType(BuiltinType::Kind k) const;
@@ -105,8 +105,20 @@ public:
   /// Register a class type in the name → type registry.
   void registerClassType(ClassType *ct);
 
+  /// Pre-register a ClassType stub (name + superclass; no fields/methods yet).
+  /// Places the type in the registry immediately so that forward field-type
+  /// references within the same compilation unit resolve correctly.
+  /// Fields and methods may be added via addField() / addMethod() afterwards.
+  ClassType *preRegisterClassType(const std::string &name,
+                                  ClassType *superClass = nullptr);
+
   /// Look up a registered class type by name.  Returns nullptr if not found.
   ClassType *lookupClassType(const std::string &name) const;
+
+  /// Register an additional name that resolves to an already-registered
+  /// ClassType (e.g. a qualified alias like "module::Foo" → Foo's ClassType).
+  /// Has no effect if the alias is already present.
+  void addClassTypeAlias(const std::string &alias, ClassType *ct);
 
   /// Look up any type by name: builtins (int, float, bool, void) first,
   /// then the class type registry.  Returns nullptr if not found.

@@ -1,5 +1,0 @@
-// Error: ownership qualifiers (shared, &) are not allowed on builtin types.
-fn main() -> int {
-  a: shared int = 42;    // error: shared qualifier is not allowed on builtin type
-  return 0;
-}

@@ -1,6 +1,0 @@
-// Error: cannot assign to a const variable.
-fn main() -> int {
-  x: const int = 10;
-  x = 20;    // error: cannot assign to const variable 'x'
-  return 0;
-}

@@ -1,0 +1,9 @@
+// ERROR: duplicate field name within a class
+class A {
+  x: int;
+  x: float;  // redeclaration of field 'x'
+}
+
+fn main() -> int {
+  return 0;
+}

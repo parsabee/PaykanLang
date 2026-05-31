@@ -1,0 +1,6 @@
+// ERROR: argument type mismatch when calling an imported function
+import math;
+
+fn main() -> int {
+  return math::add(1.0, 2);  // ERROR: first arg is float, expected int
+}

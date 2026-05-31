@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "AST.h"
+#include "Names.h"
 
 namespace paykan {
 namespace ast {
@@ -22,9 +23,10 @@ const char *BinaryExpr::getOpcodeStr() const {
   case BinaryOpcode::Eq:  return "==";
   case BinaryOpcode::Ne:  return "!=";
   case BinaryOpcode::And: return "&&";
-  case BinaryOpcode::Or:  return "||";
+  case BinaryOpcode::Or:  return "||";  
+  case BinaryOpcode::Count: break;
   }
-  return "?";
+  __builtin_unreachable();
 }
 
 // -- UnaryExpr ---------------------------------------------------------------
@@ -33,8 +35,9 @@ const char *UnaryExpr::getOpcodeStr() const {
   switch (Op) {
   case UnaryOpcode::Neg: return "-";
   case UnaryOpcode::Not: return "!";
+  case UnaryOpcode::Count: break;
   }
-  return "?";
+  __builtin_unreachable();
 }
 
 // -- BuiltinType -------------------------------------------------------------
@@ -71,20 +74,19 @@ void BuiltinType::initOps() {
 // -- ClassType ---------------------------------------------------------------
 
 void ClassType::addMethod(MethodDecl *m) {
-  Methods.push_back(m);
-  if (m->isVirtual()) {
-    // Check if this overrides a parent vtable slot.
-    bool overridden = false;
-    for (size_t i = 0; i < VTable.size(); ++i) {
-      if (VTable[i]->getName() == m->getName()) {
-        VTable[i] = m; // override
-        overridden = true;
-        break;
-      }
-    }
-    if (!overridden)
-      VTable.push_back(m); // new slot
+  // __init__ is a static constructor helper — it has no vtable slot.
+  if (m->getName() == names::kMethodInit) {
+    InitMethod = m;
+    return;
   }
+  // Check if this overrides an existing slot.
+  for (size_t i = 0; i < VTable.size(); ++i) {
+    if (VTable[i]->getName() == m->getName()) {
+      VTable[i] = m; // override
+      return;
+    }
+  }
+  VTable.push_back(m); // new slot
 }
 
 int ClassType::getVTableIndex(const std::string &name) const {
@@ -95,10 +97,16 @@ int ClassType::getVTableIndex(const std::string &name) const {
 }
 
 MethodDecl *ClassType::findMethod(const std::string &name) const {
-  for (auto *m : Methods)
+  // __init__ lives outside the vtable.
+  if (name == names::kMethodInit)
+    return InitMethod; // nullptr if not declared in this class
+  for (auto *m : VTable)
     if (m->getName() == name)
       return m;
-  return SuperClass ? SuperClass->findMethod(name) : nullptr;
+  // Walk up the inheritance chain.
+  if (SuperClass)
+    return SuperClass->findMethod(name);
+  return nullptr;
 }
 
 bool ClassType::isSubtypeOf(const ClassType *other) const {
