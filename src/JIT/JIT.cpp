@@ -55,6 +55,7 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanStringFromFloat, reinterpret_cast<void *>(&PaykanString_from_float)},
     {kPaykanStringFromBool,  reinterpret_cast<void *>(&PaykanString_from_bool)},
     {kPaykanStringToString,  reinterpret_cast<void *>(&PaykanString_toString)},
+    {kPaykanStringDestroy,   reinterpret_cast<void *>(&PaykanString_destroy)},
     {kPaykanStringEquals,    reinterpret_cast<void *>(&PaykanString_equals)},
     {kPaykanStringLength,    reinterpret_cast<void *>(&PaykanString_length)},
     {kPaykanStringConcat,    reinterpret_cast<void *>(&PaykanString_concat)},
@@ -69,6 +70,13 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanSharedGet,       reinterpret_cast<void *>(&PaykanShared_get)},
     {kPaykanRetain,          reinterpret_cast<void *>(&Paykan_retain)},
     {kPaykanRelease,         reinterpret_cast<void *>(&Paykan_release)},
+
+    {kPaykanMalloc,          reinterpret_cast<void *>(&Paykan_malloc)},
+    {kPaykanRealloc,         reinterpret_cast<void *>(&Paykan_realloc)},
+    {kPaykanFree,            reinterpret_cast<void *>(&Paykan_free)},
+    {kPaykanHeapReset,       reinterpret_cast<void *>(&Paykan_heap_reset)},
+    {kPaykanHeapLiveBlocks,  reinterpret_cast<void *>(&Paykan_heap_live_blocks)},
+    {kPaykanHeapLiveBytes,   reinterpret_cast<void *>(&Paykan_heap_live_bytes)},
 
     {kPaykanObjectVtable,    reinterpret_cast<void *>(&PaykanObject_vtable)},
     {kPaykanStringVtable,    reinterpret_cast<void *>(&PaykanString_vtable)},

@@ -19,13 +19,13 @@ PaykanObjectVTable PaykanObject_vtable = {
 // -- Constructor / Destructor ------------------------------------------------
 
 PaykanObject *PaykanObject_new(void) {
-  PaykanObject *obj = (PaykanObject *)malloc(sizeof(PaykanObject));
+  PaykanObject *obj = (PaykanObject *)Paykan_malloc(sizeof(PaykanObject));
   obj->vtable = &PaykanObject_vtable;
   return obj;
 }
 
 void PaykanObject_destroy(PaykanObject *self) {
-  free(self);
+  Paykan_free(self);
 }
 
 // -- Default method implementations ------------------------------------------

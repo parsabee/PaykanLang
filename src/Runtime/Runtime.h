@@ -296,6 +296,80 @@ void Paykan_printerr(int64_t argc, ...);
 /// Print object arguments (via toString) to stderr, followed by a newline.
 void Paykan_printerrln(int64_t argc, ...);
 
+// ============================================================================
+// Pluggable heap allocator
+// ============================================================================
+//
+// Every heap allocation made by the runtime *and* by JIT/AOT-generated code
+// (object structs are allocated via the `Paykan_malloc` symbol) flows through
+// these functions instead of the C library malloc/free/realloc directly.
+//
+// They dispatch through a function-pointer table with two back-ends:
+//
+//   • passthrough (default) — thin wrappers over libc, zero overhead.
+//   • tracking — counts every live block so a leak check can assert that a
+//     program frees everything it allocates:
+//
+//       Paykan_heap_set_tracking(1);
+//       Paykan_heap_reset();
+//       <run program>
+//       assert(Paykan_heap_live_blocks() == 0);   // no leaks
+//
+// The back-end is selected once at start-up (driven by a command-line flag in
+// the driver, or by the test harness).  Immortal singletons (e.g.
+// PaykanObject_None) are statically allocated and never pass through here, so
+// they correctly do not affect the counters.
+
+typedef struct PaykanHeapStats {
+  int64_t liveBlocks;  // currently-allocated blocks (alloc - free)
+  int64_t liveBytes;   // currently-allocated payload bytes
+  int64_t totalAllocs; // cumulative successful allocations
+  int64_t totalFrees;  // cumulative frees of non-NULL pointers
+  int64_t peakBytes;   // high-water mark of liveBytes
+} PaykanHeapStats;
+
+/// Allocate `size` bytes.  Returns NULL on failure.
+void *Paykan_malloc(size_t size);
+
+/// Resize a block previously returned by Paykan_malloc/Paykan_realloc.
+/// Passing NULL behaves like Paykan_malloc.
+void *Paykan_realloc(void *ptr, size_t size);
+
+/// Free a block previously returned by Paykan_malloc/Paykan_realloc.
+/// Passing NULL is a no-op.
+void Paykan_free(void *ptr);
+
+// -- Back-end selection ------------------------------------------------------
+
+/// Select the allocator back-end.  Pass non-zero to enable the tracking
+/// allocator, zero to use the plain passthrough allocator (the default).
+/// Call this once at start-up, before any allocation, so that every pointer is
+/// allocated and freed by the same back-end.
+void Paykan_heap_set_tracking(int enable);
+
+/// Returns non-zero if the tracking back-end is currently selected.
+int Paykan_heap_tracking_enabled(void);
+
+// -- Test / diagnostic hooks (meaningful only while tracking is enabled) -----
+
+/// Reset all counters to zero.  Call immediately before running a program
+/// whose allocations you want to measure in isolation.
+void Paykan_heap_reset(void);
+
+/// Snapshot the current counters.
+PaykanHeapStats Paykan_heap_stats(void);
+
+/// Convenience: number of blocks currently live (alloc - free).
+/// This is the value a leak check asserts to be zero after a clean run.
+int64_t Paykan_heap_live_blocks(void);
+
+/// Convenience: number of payload bytes currently live.
+int64_t Paykan_heap_live_bytes(void);
+
+/// Print the current heap statistics to stderr (a leak warning is appended if
+/// any blocks remain live).  If tracking is disabled, prints a notice instead.
+void Paykan_heap_dump(void);
+
 #ifdef __cplusplus
 }
 #endif

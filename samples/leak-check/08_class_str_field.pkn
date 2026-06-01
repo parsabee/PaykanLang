@@ -1,0 +1,19 @@
+// Isolates: a class instance that owns a Str field.
+// Runtime allocation sites: object struct + PaykanShared box, plus the Str
+// stored in the field (PaykanString_new). The field must be released by the
+// generated destructor.
+//
+// Expected under --track-heap: live blocks : 0.
+
+class Named {
+  name: Str;
+
+  fn __init__(n: Str) {
+    self.name = n;
+  }
+}
+
+fn main() -> int {
+  x: Named = Named("hi");
+  return 0;
+}

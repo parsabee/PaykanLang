@@ -16,6 +16,7 @@
 
 #include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/StringSet.h>
+#include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/Passes/OptimizationLevel.h>
 
 #include <memory>
@@ -59,6 +60,10 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
     };
     /// Variables declared in this scope, in declaration order.
     std::vector<VarMeta> DeclOrder;
+    /// Extra owned PaykanShared* boxes (not bound to a named variable) that
+    /// must be released when this scope exits — e.g. a match subject whose
+    /// arm binding is only an unowned alias.  Released LIFO at scope cleanup.
+    std::vector<llvm::Value *> PendingReleases;
     /// For unowned arm bindings: the PaykanShared* that backs the raw-ptr alias.
     llvm::StringMap<llvm::Value *> BackingShared;
 
@@ -96,6 +101,7 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   struct LoopContext {
     llvm::BasicBlock *CondBB; ///< Loop condition (target of continue)
     llvm::BasicBlock *EndBB;  ///< Loop exit (target of break)
+    Scope *EnclosingScope;    ///< Scope active when the loop was entered.
   };
   std::vector<LoopContext> LoopStack;
 
@@ -157,6 +163,12 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   /// Emit cleanup for all active scopes (used by return statements).
   void emitAllScopesCleanup();
 
+  /// Emit cleanup for scopes from the current scope up to (but not including)
+  /// the innermost loop's enclosing scope.  Used by break / continue so that
+  /// owned variables and pending box releases inside the loop body are not
+  /// leaked when control jumps out of / restarts the loop.
+  void emitLoopScopesCleanup();
+
   /// Emit expr as a PaykanShared* — wraps raw pointers, retains owned vars,
   /// passes through already-shared call/ternary results.
   llvm::Value *emitAsShared(ast::Expr *expr);
@@ -190,9 +202,33 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   /// Builtin calls (StrInt, StrFloat, etc.) return raw pointers and are
   /// excluded.
   bool exprAlreadyShared(ast::Expr *expr) const;
+  /// Returns true when `expr` yields a *freshly owned* PaykanShared* (+1 ref)
+  /// that the consumer must release — as opposed to a borrowed box such as a
+  /// member-access field load or an owned-variable read.  Used to decide
+  /// whether a box unwrapped for a borrow (e.g. println(call())) must be
+  /// released afterwards.
+  bool exprProducesFreshBox(ast::Expr *expr) const;
   void emitRetain(llvm::Value *shared);
   void emitRelease(llvm::Value *shared);
   llvm::Value *emitSharedNew(llvm::Value *raw, llvm::StringRef name = "shared");
+
+  // -- Transient string-temporary tracking ----------------------------------
+  //
+  // A raw PaykanString* produced by a string literal, a Str-returning builtin
+  // (StrInt/StrFloat/StrBool), or string concatenation is heap-allocated and
+  // owned by the code that produced it.  When such a value is consumed without
+  // being boxed in a PaykanShared (e.g. passed directly to println, used as a
+  // concat operand, or used as the receiver of a method call) nothing would
+  // otherwise free it.  These helpers track those temporaries so the consuming
+  // site can destroy them in the same basic block where they were produced
+  // (keeping SSA dominance valid).  Boxing a temporary via emitSharedNew
+  // transfers ownership to the box and untracks it.
+  llvm::SmallPtrSet<llvm::Value *, 16> OwnedStringTemps;
+  void trackStringTemp(llvm::Value *v);
+  void untrackStringTemp(llvm::Value *v);
+  /// If `v` is a tracked owned string temporary, emit PaykanString_destroy(v)
+  /// at the current insertion point and stop tracking it.
+  void destroyStringTempIfOwned(llvm::Value *v);
 
   /// Handle the first-assignment (implicit declaration) path of visitAssignStmt:
   /// allocates an alloca, optionally wraps the value in a PaykanShared box,

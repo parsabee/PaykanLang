@@ -232,6 +232,12 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
   //    __init__ returns void (the constructor wrapper handles the allocation).
   // -------------------------------------------------------------------------
   for (auto *funcDecl : node->getMethods()) {
+    // The `destroy` slot is emitted as a synthetic destructor (see
+    // emitDestructor) that also releases owned fields, so skip it here to
+    // avoid defining ClassName_destroy twice.
+    if (funcDecl->getName() == kMethodDestroy)
+      continue;
+
     // Get the Sema-resolved MethodDecl (has resolved types).
     auto *md = ct->findMethod(funcDecl->getName());
     if (!md) continue;
@@ -312,7 +318,14 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
   }
 
   // -------------------------------------------------------------------------
-  // 2. Build the vtable global constant.
+  // 2. Emit the synthetic destructor before building the vtable so that the
+  //    destroy slot resolves to ClassName_destroy (which releases owned
+  //    fields) rather than the default PaykanObject_destroy.
+  // -------------------------------------------------------------------------
+  emitDestructor(node, ct);
+
+  // -------------------------------------------------------------------------
+  // 3. Build the vtable global constant.
   //    An array of function pointers in vtable-slot order.
   //    Inherited slots that are not overridden in this class resolve to the
   //    nearest ancestor's concrete function.
@@ -356,7 +369,7 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
   ClassVTableGlobals[ct] = vtableGlobal;
 
   // -------------------------------------------------------------------------
-  // 3. Emit the constructor function.
+  // 4. Emit the constructor function.
   //
   //    Signature: ptr  ClassName(initParam0_ty, ...)
   //    Returns a PaykanShared* (the caller owns the first reference).
@@ -453,6 +466,92 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
     CG.Builder.SetInsertPoint(savedBB2, savedIP2);
 
   return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// emitDestructor
+// ---------------------------------------------------------------------------
+//
+// Generates `void ClassName_destroy(ptr self)`:
+//
+//   1. (optional) runs the user-defined `destroy` body with `self` bound;
+//   2. releases every reference-counted field so the objects they own are
+//      freed (Paykan_release is null-safe, so unset fields cost nothing);
+//   3. frees the object struct itself.
+//
+// This function becomes the class's vtable destroy slot, so the final
+// Paykan_release of an instance tears down the whole object graph.
+void ClassCodeGen::emitDestructor(ast::ClassDecl *node, ast::ClassType *ct) {
+  auto *ptrTy  = llvm::PointerType::getUnqual(CG.LLVMCtx);
+  auto *voidTy = llvm::Type::getVoidTy(CG.LLVMCtx);
+
+  auto *structTy = getOrCreateClassStructType(ct);
+
+  // Create the destructor function: void ClassName_destroy(ptr self).
+  auto  fnName = node->getName() + kNameSep + kMethodDestroy;
+  auto *fnTy   = llvm::FunctionType::get(voidTy, {ptrTy}, false);
+  auto *fn     = llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage,
+                                        fnName, CG.Module.get());
+  fn->arg_begin()->setName(kSelf);
+
+  // Locate a user-defined `destroy` body to run before field teardown.
+  ast::FuncDecl *userDestroy = nullptr;
+  for (auto *m : node->getMethods())
+    if (m->getName() == kMethodDestroy) { userDestroy = m; break; }
+
+  // Save outer codegen state.
+  auto *savedBB            = CG.Builder.GetInsertBlock();
+  auto  savedIP            = CG.Builder.GetInsertPoint();
+  auto *savedRetASTTy      = CG.CurrentFuncReturnASTType;
+  auto *savedMethodClassTy = CurrentMethodClassType;
+  CG.CurrentFuncReturnASTType = nullptr; // void
+  CurrentMethodClassType      = ct;
+
+  auto *entry = llvm::BasicBlock::Create(CG.LLVMCtx, kIREntry, fn);
+  CG.Builder.SetInsertPoint(entry);
+
+  // Run the user-defined destroy body (if any) inside its own scope.
+  if (userDestroy && userDestroy->getBody()) {
+    CodeGen::ScopeGuard guard(CG);
+
+    // 'self' is a raw pointer — not ref-counted inside the destructor body.
+    auto *selfAlloca = CG.createEntryAlloca(fn, kSelf, ptrTy);
+    CG.Builder.CreateStore(fn->getArg(0), selfAlloca);
+    CG.CurrentScope->declareUnowned(kSelf, selfAlloca, ct);
+
+    for (auto *stmt : userDestroy->getBody()->getStatements())
+      CG.visit(stmt);
+  }
+
+  // Release owned fields and free the struct — unless the user body already
+  // terminated the block (e.g. an explicit `return`).
+  if (!CG.Builder.GetInsertBlock()->getTerminator()) {
+    llvm::Value *self = fn->getArg(0);
+
+    // Release every reference-counted field (Str, Obj, class, array).
+    auto allFields = getAllFieldsInOrder(ct);
+    for (size_t fi = 0; fi < allFields.size(); ++fi) {
+      if (!ast::isRefType(allFields[fi].second))
+        continue;
+      auto *fieldSlot = CG.Builder.CreateStructGEP(
+          structTy, self, static_cast<unsigned>(fi + 1),
+          kIRFieldPrefix + allFields[fi].first);
+      auto *box = CG.Builder.CreateLoad(ptrTy, fieldSlot, allFields[fi].first);
+      CG.emitRelease(box); // Paykan_release tolerates null boxes.
+    }
+
+    // Free the object struct.
+    auto *freeFnTy = llvm::FunctionType::get(voidTy, {ptrTy}, false);
+    auto *freeFn   = CG.declareFunction(kPaykanFree, freeFnTy);
+    CG.Builder.CreateCall(freeFn, {self});
+    CG.Builder.CreateRetVoid();
+  }
+
+  // Restore outer state.
+  CG.CurrentFuncReturnASTType = savedRetASTTy;
+  CurrentMethodClassType      = savedMethodClassTy;
+  if (savedBB)
+    CG.Builder.SetInsertPoint(savedBB, savedIP);
 }
 
 // ---------------------------------------------------------------------------

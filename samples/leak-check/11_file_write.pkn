@@ -1,0 +1,13 @@
+// Isolates: a File object from a successful open() for writing.
+// Runtime allocation site: PaykanFile_new (File.c) — allocates the file handle
+// wrapper. The handle must be closed and freed by ARC destroy at end of scope.
+//
+// Expected under --track-heap: live blocks : 0.
+
+fn main() -> int {
+  match open("/tmp/pkn_leakcheck_write.txt", "w") {
+    e: Error { }
+    f: File  { f.write("hello"); }
+  }
+  return 0;
+}

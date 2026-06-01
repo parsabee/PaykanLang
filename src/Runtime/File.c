@@ -42,7 +42,7 @@ PaykanFileVTable PaykanFile_vtable = {
 // ============================================================================
 
 PaykanFile *PaykanFile_new(void) {
-  PaykanFile *f = (PaykanFile *)malloc(sizeof(PaykanFile));
+  PaykanFile *f = (PaykanFile *)Paykan_malloc(sizeof(PaykanFile));
   f->vtable = (PaykanObjectVTable *)&PaykanFile_vtable;
   f->handle = NULL;
   return f;
@@ -72,7 +72,7 @@ void PaykanFile_destroy(PaykanObject *self) {
   PaykanFile *f = (PaykanFile *)self;
   if (f->handle)
     fclose(f->handle);
-  free(f);
+  Paykan_free(f);
 }
 
 PaykanShared *PaykanFile_toString(PaykanObject *self) {
@@ -104,12 +104,12 @@ PaykanShared *PaykanFile_readln(PaykanObject *self) {
   // Read one line (including the trailing '\n' if present).
   size_t cap  = 128;
   size_t used = 0;
-  char  *buf  = (char *)malloc(cap);
+  char  *buf  = (char *)Paykan_malloc(cap);
   int    c;
   while ((c = fgetc(f->handle)) != EOF) {
     if (used + 1 >= cap) {
       cap *= 2;
-      buf  = (char *)realloc(buf, cap);
+      buf  = (char *)Paykan_realloc(buf, cap);
     }
     buf[used++] = (char)c;
     if (c == '\n')
@@ -118,11 +118,11 @@ PaykanShared *PaykanFile_readln(PaykanObject *self) {
   buf[used] = '\0';
   // EOF with no bytes read — return None to signal end-of-file.
   if (used == 0) {
-    free(buf);
+    Paykan_free(buf);
     return PaykanShared_new(&PaykanObject_None);
   }
   PaykanShared *result =
       PaykanShared_new((PaykanObject *)PaykanString_new(buf, (int64_t)used));
-  free(buf);
+  Paykan_free(buf);
   return result;
 }

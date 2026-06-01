@@ -19,6 +19,7 @@ target_link_libraries(paykan
             paykan_sema
             paykan_parser
             paykan_jit
+            paykan_runtime
             paykan_compile_options
             ${DRIVER_LLVM_LIBS}
 )

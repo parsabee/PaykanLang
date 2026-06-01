@@ -1047,6 +1047,16 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
         CurrentScope->set(node->getName(), declTy);
         return false;
       }
+
+      // Propagate the declared array type onto an empty array literal `[]`
+      // (whose own resolved type is the ArrayType(void) sentinel).  Without
+      // this, codegen cannot tell an empty `Obj[]` from an empty `int[]` and
+      // emits a primitive array whose destructor never releases the elements
+      // pushed into it later — a leak.
+      if (auto *lit = ast::dyn_cast<ast::ArrayLiteralExpr>(node->getInitExpr())) {
+        if (lit->isEmpty() && ast::isa<ast::ArrayType>(declTy))
+          lit->setResolvedType(declTy);
+      }
     } else {
       // Infer type from initializer — but reject bare [] with no annotation.
       if (auto *at = ast::dyn_cast<ast::ArrayType>(initTy)) {

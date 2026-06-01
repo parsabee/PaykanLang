@@ -69,12 +69,12 @@ PaykanArrayVTable PaykanArray_obj_vtable = {
 // Primitive array (int / float / bool): elements are stored as raw 8-byte
 // values; no reference counting.
 PaykanArray *PaykanArray_new(unsigned long len) {
-  PaykanArray *arr = (PaykanArray *)malloc(sizeof(PaykanArray));
+  PaykanArray *arr = (PaykanArray *)Paykan_malloc(sizeof(PaykanArray));
   arr->vtable = (PaykanObjectVTable *)&PaykanArray_vtable;
   arr->len    = len;
   arr->cap    = len;
   if (len > 0) {
-    arr->data = malloc(len * PAYKAN_ELEM_SIZE);
+    arr->data = Paykan_malloc(len * PAYKAN_ELEM_SIZE);
     memset(arr->data, 0, len * PAYKAN_ELEM_SIZE);
   } else {
     arr->data = NULL;
@@ -85,12 +85,12 @@ PaykanArray *PaykanArray_new(unsigned long len) {
 // Primitive array from a compile-time constant data buffer (e.g. a literal).
 // 'data' must point to (len * 8) bytes of packed i64 values.
 PaykanArray *PaykanArray_new_from_data(unsigned long len, const void *data) {
-  PaykanArray *arr = (PaykanArray *)malloc(sizeof(PaykanArray));
+  PaykanArray *arr = (PaykanArray *)Paykan_malloc(sizeof(PaykanArray));
   arr->vtable = (PaykanObjectVTable *)&PaykanArray_vtable;
   arr->len    = len;
   arr->cap    = len;
   if (len > 0) {
-    arr->data = malloc(len * PAYKAN_ELEM_SIZE);
+    arr->data = Paykan_malloc(len * PAYKAN_ELEM_SIZE);
     memcpy(arr->data, data, len * PAYKAN_ELEM_SIZE);
   } else {
     arr->data = NULL;
@@ -101,12 +101,12 @@ PaykanArray *PaykanArray_new_from_data(unsigned long len, const void *data) {
 // Object array (class-type elements stored as PaykanShared*): reference
 // counts are managed by PaykanArray_set_obj / PaykanArray_destroy_obj.
 PaykanArray *PaykanArray_new_obj(unsigned long len) {
-  PaykanArray *arr = (PaykanArray *)malloc(sizeof(PaykanArray));
+  PaykanArray *arr = (PaykanArray *)Paykan_malloc(sizeof(PaykanArray));
   arr->vtable = (PaykanObjectVTable *)&PaykanArray_obj_vtable;
   arr->len    = len;
   arr->cap    = len;
   if (len > 0) {
-    arr->data = malloc(len * PAYKAN_ELEM_SIZE);
+    arr->data = Paykan_malloc(len * PAYKAN_ELEM_SIZE);
     // Zero-init so every slot starts as NULL (no accidental release on first set).
     memset(arr->data, 0, len * PAYKAN_ELEM_SIZE);
   } else {
@@ -122,8 +122,8 @@ PaykanArray *PaykanArray_new_obj(unsigned long len) {
 // Primitive destructor: just free the buffer and the array itself.
 void PaykanArray_destroy(PaykanObject *self) {
   PaykanArray *arr = (PaykanArray *)self;
-  free(arr->data);
-  free(arr);
+  Paykan_free(arr->data);
+  Paykan_free(arr);
 }
 
 // Object destructor: release every non-null PaykanShared* slot, then free.
@@ -137,8 +137,8 @@ void PaykanArray_destroy_obj(PaykanObject *self) {
         Paykan_release(elem);
     }
   }
-  free(arr->data);
-  free(arr);
+  Paykan_free(arr->data);
+  Paykan_free(arr);
 }
 
 // ============================================================================
@@ -226,7 +226,7 @@ static void array_grow(PaykanArray *arr) {
   if (arr->len < arr->cap)
     return; // still room
   unsigned long newCap = arr->cap == 0 ? 1 : arr->cap * 2;
-  arr->data = realloc(arr->data, newCap * PAYKAN_ELEM_SIZE);
+  arr->data = Paykan_realloc(arr->data, newCap * PAYKAN_ELEM_SIZE);
   // Zero the freshly allocated slots.
   memset((char *)arr->data + arr->cap * PAYKAN_ELEM_SIZE, 0,
          (newCap - arr->cap) * PAYKAN_ELEM_SIZE);
@@ -238,11 +238,11 @@ static void array_maybe_shrink(PaykanArray *arr) {
   if (arr->cap == 0 || arr->len > arr->cap / 2)
     return;
   if (arr->len == 0) {
-    free(arr->data);
+    Paykan_free(arr->data);
     arr->data = NULL;
     arr->cap  = 0;
   } else {
-    arr->data = realloc(arr->data, arr->len * PAYKAN_ELEM_SIZE);
+    arr->data = Paykan_realloc(arr->data, arr->len * PAYKAN_ELEM_SIZE);
     arr->cap  = arr->len;
   }
 }

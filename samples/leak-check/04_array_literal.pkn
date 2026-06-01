@@ -1,0 +1,10 @@
+// Isolates: an int[] array literal.
+// Runtime allocation site: PaykanArray_* (Array.c) — allocates the PaykanArray
+// header and its backing element buffer.
+//
+// Expected under --track-heap: live blocks : 0.
+
+fn main() -> int {
+  a: int[] = [1, 2, 3];
+  return 0;
+}

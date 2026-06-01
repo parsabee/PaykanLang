@@ -15,6 +15,7 @@ add_library(paykan_runtime STATIC
     Error.c
     Shared.c
     IO.c
+    Heap.c
 )
 
 target_include_directories(paykan_runtime

@@ -1,0 +1,14 @@
+// Isolates: a single fieldless class instance.
+// Runtime allocation site: object struct (emitted Paykan_malloc in the
+// constructor) wrapped by a PaykanShared ARC box (Shared.c).
+//
+// Expected under --track-heap: live blocks : 0 (destroy runs at end of scope).
+
+class Box {
+  fn __init__() {}
+}
+
+fn main() -> int {
+  b: Box = Box();
+  return 0;
+}

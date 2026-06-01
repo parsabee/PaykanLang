@@ -1,0 +1,30 @@
+// Isolates: the readln line buffer.
+// Runtime allocation site: PaykanFile_readln (File.c) — allocates (and grows)
+// the line buffer, then hands back a Str. Both the temporary buffer and the
+// returned Str must be released.
+//
+// The program first writes a one-line file, then reads that line back so the
+// readln path is exercised on real data.
+//
+// Expected under --track-heap: live blocks : 0.
+
+fn writeIt() {
+  match open("/tmp/pkn_leakcheck_readln.txt", "w") {
+    e: Error { }
+    f: File  { f.write("line one\n"); }
+  }
+}
+
+fn main() -> int {
+  writeIt();
+  match open("/tmp/pkn_leakcheck_readln.txt", "r") {
+    e: Error { }
+    f: File {
+      match f.readln() {
+        line: Str { }
+        _         { }
+      }
+    }
+  }
+  return 0;
+}

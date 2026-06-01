@@ -120,6 +120,15 @@ inline constexpr const char *kPaykanSharedGet        = "PaykanShared_get";
 inline constexpr const char *kPaykanRetain           = "Paykan_retain";
 inline constexpr const char *kPaykanRelease          = "Paykan_release";
 
+// Tracking heap allocator
+inline constexpr const char *kPaykanMalloc           = "Paykan_malloc";
+inline constexpr const char *kPaykanRealloc          = "Paykan_realloc";
+inline constexpr const char *kPaykanFree             = "Paykan_free";
+inline constexpr const char *kPaykanHeapReset        = "Paykan_heap_reset";
+inline constexpr const char *kPaykanHeapStats        = "Paykan_heap_stats";
+inline constexpr const char *kPaykanHeapLiveBlocks   = "Paykan_heap_live_blocks";
+inline constexpr const char *kPaykanHeapLiveBytes    = "Paykan_heap_live_bytes";
+
 // -- Environment variables --------------------------------------------------
 
 inline constexpr const char *kPaykanStdlibEnv         = "PAYKAN_STDLIB";
@@ -141,7 +150,10 @@ inline constexpr const char *kStructSuffix            = "_struct"; ///< Suffix f
 
 // -- C runtime symbols ------------------------------------------------------
 
-inline constexpr const char *kMalloc                  = "malloc";
+// Object structs emitted by CodeGen are allocated through the tracking
+// allocator so that JIT/AOT-generated allocations are counted alongside the
+// runtime's own (see src/Runtime/Heap.c).
+inline constexpr const char *kMalloc                  = "Paykan_malloc";
 
 // -- Cache ------------------------------------------------------------------
 

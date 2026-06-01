@@ -1,0 +1,26 @@
+// Isolates: an Error object produced by a failing open().
+// Runtime allocation site: PaykanError_new (Error.c) — allocates the error
+// object (and its message Str). The match binding must release it.
+//
+// Expected under --track-heap: live blocks : 0.
+
+fn func1() {
+  match open("/nonexistent/paykan/leak-check/path.txt", "r") {
+    e: Error { }
+    f: File  { }
+  } 
+}
+
+fn func2() {
+  obj: Obj = open("/nonexistent/paykan/leak-check/path.txt", "r");
+  match obj {
+    e: Error { }
+    f: File  { }
+  }
+}
+
+fn main() -> int {
+  func1();
+  func2();
+  return 0;
+}

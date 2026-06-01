@@ -1,0 +1,11 @@
+// Isolates: a single string literal.
+// Runtime allocation site: PaykanString_new (String.c) — allocates the
+// PaykanString struct and its character buffer.
+//
+// Expected under --track-heap: live blocks : 0 (the Str is released when it
+// falls out of scope at the end of main).
+
+fn main() -> int {
+  s: Str = "hello";
+  return 0;
+}

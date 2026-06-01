@@ -1,0 +1,20 @@
+// Isolates: a subclass instance constructed through __super__.
+// Runtime allocation sites: object struct + PaykanShared box, exercising the
+// super-initializer chain (no double allocation should occur).
+//
+// Expected under --track-heap: live blocks : 0.
+
+class Base {
+  fn __init__() {}
+}
+
+class Derived : Base {
+  fn __init__() {
+    __super__();
+  }
+}
+
+fn main() -> int {
+  d: Derived = Derived();
+  return 0;
+}

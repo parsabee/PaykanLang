@@ -7,6 +7,8 @@
 #include "JIT.h"
 #include "Sema.h"
 
+#include "Runtime.h"
+
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/raw_ostream.h>
@@ -51,6 +53,12 @@ static llvm::cl::opt<unsigned>
              llvm::cl::desc("Optimization level (0–3)"),
              llvm::cl::Prefix,
              llvm::cl::init(0));
+
+static llvm::cl::opt<bool>
+    TrackHeap("track-heap",
+              llvm::cl::desc("Track runtime heap allocations and dump "
+                             "statistics (incl. leaks) at exit"),
+              llvm::cl::init(false));
 
 // -- Entry point -------------------------------------------------------------
 
@@ -120,8 +128,19 @@ int main(int argc, char *argv[]) {
       return EXIT_FAILURE;
     }
   }
+  // Select the tracking allocator before any program allocation happens, so
+  // that every block is allocated and freed by the same back-end.
+  if (TrackHeap) {
+    Paykan_heap_set_tracking(1);
+    Paykan_heap_reset();
+  }
+
   auto resultOrErr =
       paykan::jit::runModule(std::move(mainModule), std::move(llvmCtx));
+
+  if (TrackHeap)
+    Paykan_heap_dump();
+
   if (!resultOrErr) {
     llvm::errs() << "JIT error: " << resultOrErr.takeError() << "\n";
     return EXIT_FAILURE;

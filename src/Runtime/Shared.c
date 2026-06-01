@@ -10,7 +10,7 @@
 // -- Constructor -------------------------------------------------------------
 
 PaykanShared *PaykanShared_new(PaykanObject *obj) {
-  PaykanShared *s = (PaykanShared *)malloc(sizeof(PaykanShared));
+  PaykanShared *s = (PaykanShared *)Paykan_malloc(sizeof(PaykanShared));
   s->refCount = 1;
   s->object   = obj;
   return s;
@@ -27,7 +27,7 @@ void Paykan_release(PaykanShared *shared) {
   if (shared && --shared->refCount <= 0) {
     if (shared->object)
       shared->object->vtable->destroy(shared->object);
-    free(shared);
+    Paykan_free(shared);
   }
 }
 

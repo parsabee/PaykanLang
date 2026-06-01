@@ -1,0 +1,12 @@
+// Isolates: Str + Str concatenation.
+// Runtime allocation site: PaykanString_concat (String.c) — allocates a new
+// PaykanString holding the joined bytes (in addition to the two operands).
+//
+// Expected under --track-heap: live blocks : 0.
+
+fn main() -> int {
+  a: Str = "foo";
+  b: Str = "bar";
+  c: Str = a + b;
+  return 0;
+}

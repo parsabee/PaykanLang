@@ -1,0 +1,13 @@
+// Isolates: push growth on an initially-empty array.
+// Runtime allocation site: PaykanArray_push -> Paykan_realloc (Array.c) — grows
+// the backing buffer as elements are appended.
+//
+// Expected under --track-heap: live blocks : 0.
+
+fn main() -> int {
+  a: int[] = [];
+  a.push(1);
+  a.push(2);
+  a.push(3);
+  return 0;
+}

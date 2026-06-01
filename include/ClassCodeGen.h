@@ -97,6 +97,14 @@ public:
   /// Emit a member-access expression (receiver.field -> value).
   llvm::Value *visitMemberAccessExpr(ast::MemberAccessExpr *node);
 
+  /// Emit the synthetic destructor `ClassName_destroy(ptr self)` for a class.
+  /// It runs the user-defined `destroy` body (if any), releases every
+  /// reference-counted field (Str/Obj/class/array), and frees the object
+  /// struct.  It becomes the class's vtable `destroy` slot so that the last
+  /// `Paykan_release` of an instance also releases everything the instance
+  /// owns — without this, object-typed fields leak.
+  void emitDestructor(ast::ClassDecl *node, ast::ClassType *ct);
+
   // -------------------------------------------------------------------------
   // State
   // -------------------------------------------------------------------------

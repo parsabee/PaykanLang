@@ -26,7 +26,7 @@ PaykanObjectVTable PaykanError_vtable = {
 // ============================================================================
 
 PaykanError *PaykanError_new(const char *msg, int64_t len) {
-  PaykanError *e = (PaykanError *)malloc(sizeof(PaykanError));
+  PaykanError *e = (PaykanError *)Paykan_malloc(sizeof(PaykanError));
   e->vtable  = &PaykanError_vtable;
   e->message = PaykanString_new(msg, len);
   return e;
@@ -39,7 +39,7 @@ PaykanError *PaykanError_new(const char *msg, int64_t len) {
 void PaykanError_destroy(PaykanObject *self) {
   PaykanError *e = (PaykanError *)self;
   PaykanString_destroy((PaykanObject *)e->message);
-  free(e);
+  Paykan_free(e);
 }
 
 PaykanShared *PaykanError_toString(PaykanObject *self) {
