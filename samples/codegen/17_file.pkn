@@ -1,24 +1,58 @@
 // 17_file.pkn — File builtin type: open, write, readln, equals, toString
-// Exercises: open() builtin returning File, File.write(),
-//            File.readln(), File.toString(), File.equals(), destroy on scope exit
+// Exercises: open() returning Obj (File on success, Error on failure),
+//            File.write(), File.readln() returning Obj (Str or None),
+//            File.toString(), File.equals(), destroy on scope exit.
 
 fn writelines(path: Str) -> int {
-  f: File = open(path, "w");
-  f.write("line one\n");
-  f.write("line two\n");
-  f.write("line three\n");
+  match open(path, "w") {
+    err: Error { printerrln("writelines: " + err.toString()); return 1; }
+    f: File {
+      f.write("line one\n");
+      f.write("line two\n");
+      f.write("line three\n");
+    }
+  }
   return 0;
 }
 
 fn readlines(path: Str) -> int {
-  f: File = open(path, "r");
-  line: Str = f.readln();
-  println(line);           // line one
-  line = f.readln();
-  println(line);           // line two
-  line = f.readln();
-  println(line);           // line three
+  match open(path, "r") {
+    err: Error { printerrln("readlines: " + err.toString()); return 1; }
+    f: File {
+      while (True) {
+        match f.readln() {
+          line: Str { print(line); }
+          _          { break; }
+        }
+      }
+    }
+  }
   return 0;
+}
+
+fn showToString(path: Str) {
+  match open(path, "r") {
+    err: Error { printerrln("showToString: " + err.toString()); }
+    f: File {
+      s: Str = f.toString();
+      println(s);   // File@0x...
+    }
+  }
+}
+
+fn showEquals(path: Str) {
+  match open(path, "r") {
+    err: Error { printerrln("showEquals: " + err.toString()); }
+    f: File {
+      match open(path, "r") {
+        err2: Error { printerrln("showEquals inner: " + err2.toString()); }
+        g: File {
+          eq: bool = f.equals(g);
+          println(StrBool(eq));  // False — different handles
+        }
+      }
+    }
+  }
 }
 
 fn main() -> int {
@@ -34,22 +68,18 @@ fn main() -> int {
 
   // --- 3. toString shows File@ prefix --------------------------------------
   println("=== toString ===");
-  f: File = open(path, "r");
-  s: Str = f.toString();
-  // We can't predict the exact address, but we can print it.
-  println(s);              // File@0x...
+  showToString(path);
 
   // --- 4. equals: identity -------------------------------------------------
   println("=== equals ===");
-  g: File = open(path, "r");
-  // f and g are different handles — not equal
-  eq: bool = f.equals(g);
-  println(StrBool(eq)); // false
+  showEquals(path);
 
-  // --- 5. open nonexistent file — stderr message shown, no method call -----
+  // --- 5. open nonexistent file — Error arm prints message -----------------
   println("=== open failure ===");
-  open("/no/such/file_sample_17.txt", "r");
-  // stderr: paykan: open("/no/such/file_sample_17.txt", "r"): No such file or directory
+  match open("/no/such/file_sample_17.txt", "r") {
+    err: Error { println("error: " + err.toString()); }
+    _          { println("unexpected success"); }
+  }
 
   return 0;
 }

@@ -2,7 +2,7 @@
 
 ## What is Paykan?
 
-Paykan (`.pkn`) is a statically-typed, **high-performance computing (HPC)** language.
+Paykan (`.pkn`) is a statically-typed clean and simple language.
 It compiles to LLVM and can be **JIT-executed or compiled to a native binary**. Memory
 lifetimes for objects are managed via automatic reference counting — there is no garbage
 collector.
@@ -51,7 +51,7 @@ fn main() -> int {
 | `bool`  | `i1`      | Boolean — literals `True` / `False` |
 | `void`  | `void`    | Function return type only           |
 
-- `int` → `float` promotion is implicit when assigning or passing to a `float` parameter.
+- `int` -> `float` promotion is implicit when assigning or passing to a `float` parameter.
 
 ### String Type
 
@@ -84,14 +84,24 @@ mat: int[][] = [[1, 2], [3, 4]];   // 2D
 
 `None` is an `Obj` literal representing the absence of a value.
 
-`File` is a built-in class type returned by `open()`. It extends `Obj` and provides:
+`File` is a built-in class type representing an open file handle. It extends `Obj` and provides:
 
-| Slot        | Signature              | Description                                    |
-|-------------|------------------------|------------------------------------------------|
-| `write`     | `fn write(s: Str)`     | Writes `s` to the file                         |
-| `readln`    | `fn readln() -> Str`   | Reads one line (including `\n`) from the file  |
-| `toString`  | `fn toString() -> Str` | Returns a string description of the `File`     |
-| `equals`    | `fn equals(other: Obj) -> bool` | Reference identity comparison        |
+| Slot        | Signature                       | Description                                      |
+|-------------|---------------------------------|--------------------------------------------------|
+| `write`     | `fn write(s: Str)`              | Writes `s` to the file                           |
+| `readln`    | `fn readln() -> Obj`            | Returns the next line as `Str`, or `None` at EOF |
+| `toString`  | `fn toString() -> Str`          | Returns a string description of the handle       |
+| `equals`    | `fn equals(other: Obj) -> bool` | Reference identity comparison                    |
+
+The file handle is closed automatically when the `File` object goes out of scope (ARC destroy).
+
+`Error` is a built-in class type returned by operations that can fail (e.g. `open()`). It
+extends `Obj` and provides:
+
+| Slot        | Signature                       | Description                    |
+|-------------|---------------------------------|--------------------------------|
+| `toString`  | `fn toString() -> Str`          | Returns the error message      |
+| `equals`    | `fn equals(other: Obj) -> bool` | Reference identity comparison  |
 
 ---
 
@@ -176,7 +186,7 @@ result: int = if x > 0 then x else 0 - x;
 label: Str = if score >= 90 then "A" else if score >= 80 then "B" else "C";
 ```
 
-### Operator Precedence (highest → lowest)
+### Operator Precedence (highest -> lowest)
 
 | Level | Operators                              | Associativity  |
 |-------|----------------------------------------|----------------|
@@ -347,8 +357,25 @@ println(StrBool(True));   // "True"
 
 ### File I/O
 
-| Function           | Description                                                |
-|--------------------|------------------------------------------------------------|
-| `open(path, mode)` | Open a file. `mode` is `"r"`, `"w"`, or `"a"`. Returns `File`. |
+| Function           | Description                                                              |
+|--------------------|--------------------------------------------------------------------------|
+| `open(path, mode)` | Open a file. `mode` is `"r"`, `"w"`, or `"a"`. Returns `Obj` — either a `File` on success or an `Error` on failure. |
 
-The `File` type and its methods (`write`, `readln`, `toString`, `equals`) are described in the **File built-in class type** section above.
+Because `open()` returns `Obj`, always use `match` to distinguish the two cases:
+
+```pkn
+match open("/tmp/data.txt", "r") {
+  err: Error { printerrln("open failed: " + err.toString()); }
+  f: File {
+    while (True) {
+      match f.readln() {
+        line: Str { print(line); }
+        _          { break; }   // None — EOF
+      }
+    }
+  }
+}
+```
+
+The `File` handle and its methods (`write`, `readln`, `toString`, `equals`) are described
+in the **File built-in class type** section above.

@@ -59,6 +59,8 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
     };
     /// Variables declared in this scope, in declaration order.
     std::vector<VarMeta> DeclOrder;
+    /// For unowned arm bindings: the PaykanShared* that backs the raw-ptr alias.
+    llvm::StringMap<llvm::Value *> BackingShared;
 
     explicit Scope(Scope *parent = nullptr);
 
@@ -71,6 +73,14 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
                  ast::Type *astTy);
     void declareUnowned(llvm::StringRef name, llvm::AllocaInst *alloca,
                         ast::Type *astTy);
+    /// Like declareUnowned but also records the PaykanShared* that backs this
+    /// binding so that call sites can retain+pass the original box instead of
+    /// wrapping the raw pointer in a fresh PaykanShared_new (which would give
+    /// the callee sole ownership, destroying the object prematurely).
+    void declareUnownedWithBacking(llvm::StringRef name, llvm::AllocaInst *alloca,
+                                   llvm::Value *shared, ast::Type *astTy);
+    /// Walk the scope chain looking for a backing PaykanShared* for name.
+    llvm::Value *lookupBackingShared(llvm::StringRef name) const;
     /// Promote a previously-unowned class variable to owned (SharedVars).
     void promoteToOwned(llvm::StringRef name, ast::Type *astTy);
     Scope *findOwner(llvm::StringRef name);

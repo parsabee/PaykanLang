@@ -1,6 +1,6 @@
 // 02 — Arithmetic operators: + - * / % on int and float
 // Exercises: visitBinaryExpr for Add/Sub/Mul/Div/Mod,
-//            implicit int→float promotion in binary ops and assignments
+//            implicit int->float promotion in binary ops and assignments
 
 fn main() -> int {
   // ---- Integer arithmetic ---------------------------------------------------

@@ -23,7 +23,7 @@ PaykanShared *PaykanFile_toString(PaykanObject *self);
 int64_t       PaykanFile_equals  (PaykanObject *self, PaykanObject *other);
 void          PaykanFile_write   (PaykanObject *self, PaykanObject *str);
 PaykanShared *PaykanFile_readln  (PaykanObject *self);
-PaykanFile   *PaykanFile_open    (PaykanObject *path, PaykanObject *mode);
+PaykanShared *PaykanFile_open    (PaykanObject *path, PaykanObject *mode);
 
 // ============================================================================
 // VTable
@@ -52,19 +52,20 @@ PaykanFile *PaykanFile_new(void) {
 // Method implementations
 // ============================================================================
 
-PaykanFile *PaykanFile_open(PaykanObject *pathObj, PaykanObject *modeObj) {
+PaykanShared *PaykanFile_open(PaykanObject *pathObj, PaykanObject *modeObj) {
   PaykanString *path = (PaykanString *)pathObj;
   PaykanString *mode = (PaykanString *)modeObj;
-  PaykanFile *f = PaykanFile_new();
   FILE *handle = fopen(path->data, mode->data);
   if (!handle) {
-    fprintf(stderr, "paykan: open(\"%s\", \"%s\"): %s\n",
-            path->data, mode->data, strerror(errno));
-    /* f->handle stays NULL — all methods guard against this */
-  } else {
-    f->handle = handle;
+    // Build a human-readable error message and wrap it in an Error object.
+    char buf[512];
+    int n = snprintf(buf, sizeof(buf), "open(\"%s\", \"%s\"): %s",
+                     path->data, mode->data, strerror(errno));
+    return PaykanShared_new((PaykanObject *)PaykanError_new(buf, (int64_t)n));
   }
-  return f;
+  PaykanFile *f = PaykanFile_new();
+  f->handle = handle;
+  return PaykanShared_new((PaykanObject *)f);
 }
 
 void PaykanFile_destroy(PaykanObject *self) {
@@ -98,7 +99,7 @@ PaykanShared *PaykanFile_readln(PaykanObject *self) {
   PaykanFile *f = (PaykanFile *)self;
   if (!f->handle) {
     fprintf(stderr, "paykan: readln on closed File\n");
-    return PaykanShared_new((PaykanObject *)PaykanString_new("", 0));
+    return PaykanShared_new(&PaykanObject_None);
   }
   // Read one line (including the trailing '\n' if present).
   size_t cap  = 128;
@@ -115,6 +116,11 @@ PaykanShared *PaykanFile_readln(PaykanObject *self) {
       break;
   }
   buf[used] = '\0';
+  // EOF with no bytes read — return None to signal end-of-file.
+  if (used == 0) {
+    free(buf);
+    return PaykanShared_new(&PaykanObject_None);
+  }
   PaykanShared *result =
       PaykanShared_new((PaykanObject *)PaykanString_new(buf, (int64_t)used));
   free(buf);

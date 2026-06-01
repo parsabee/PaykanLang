@@ -129,10 +129,10 @@ typedef struct PaykanFile {
 // Constructor / destructor.
 PaykanFile   *PaykanFile_new(void);
 
-/// Open a file at `path` with the given `mode` string (e.g. "r", "rw").
+/// Open a file at `path` with the given `mode` string (e.g. "r", "w").
 /// Returns a PaykanShared* wrapping a PaykanFile on success, or a
-/// PaykanShared* wrapping PaykanObject_None on failure.
-PaykanFile   *PaykanFile_open   (PaykanObject *path, PaykanObject *mode);
+/// PaykanShared* wrapping a PaykanError on failure.
+PaykanShared *PaykanFile_open   (PaykanObject *path, PaykanObject *mode);
 void          PaykanFile_destroy (PaykanObject *self);
 PaykanShared *PaykanFile_toString(PaykanObject *self);
 int64_t       PaykanFile_equals  (PaykanObject *self, PaykanObject *other);
@@ -141,6 +141,27 @@ PaykanShared *PaykanFile_readln  (PaykanObject *self);
 
 // Global vtable instance.
 extern PaykanFileVTable PaykanFile_vtable;
+
+// ============================================================================
+// Error
+// ============================================================================
+//
+// Inherits Object.  Returned by open() when fopen fails.
+// Carries a human-readable message string.
+
+typedef struct PaykanError {
+  PaykanObjectVTable *vtable; // points to PaykanError_vtable
+  PaykanString       *message;
+} PaykanError;
+
+// Constructor: creates an Error with the given message.
+PaykanError  *PaykanError_new    (const char *msg, int64_t len);
+void          PaykanError_destroy (PaykanObject *self);
+PaykanShared *PaykanError_toString(PaykanObject *self);
+int64_t       PaykanError_equals  (PaykanObject *self, PaykanObject *other);
+
+// Global vtable instance.
+extern PaykanObjectVTable PaykanError_vtable;
 
 // ============================================================================
 // Array

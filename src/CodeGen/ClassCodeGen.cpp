@@ -108,6 +108,19 @@ llvm::Value *ClassCodeGen::emitIsExactType(llvm::Value *rawObjPtr,
     auto *arrTy = llvm::cast<llvm::ArrayType>(vtableGlobal->getValueType());
     expectedVtable = CG.Builder.CreateConstInBoundsGEP2_64(
         arrTy, vtableGlobal, 0, 0, kIRVtableExpected + ct->getName());
+  } else if (auto *elemTy = CG.ASTCtx.getSpecializedArrayElemType(ct)) {
+    // Specialized array type (e.g. Array<Str>): use the runtime vtable.
+    // Value-element arrays (int/float/bool) use PaykanArray_vtable;
+    // object-element arrays (Str[], Point[], ...) use PaykanArray_obj_vtable.
+    bool isObjElem = ast::isa<ast::ClassType>(elemTy) || ast::isa<ast::ArrayType>(elemTy);
+    const char *vtName = isObjElem ? names::kPaykanArrayObjVtable
+                                   : names::kPaykanArrayVtable;
+    // Use [0 x ptr] as placeholder — GEP(0,0) is offset zero so the address
+    // equals the global base.
+    auto *arrTy = llvm::ArrayType::get(ptrTy, 0);
+    auto *extGlobal = CG.Module->getOrInsertGlobal(vtName, arrTy);
+    expectedVtable = CG.Builder.CreateConstInBoundsGEP2_64(
+        arrTy, extGlobal, 0, 0, kIRVtableExpected + ct->getName());
   } else {
     // Imported class: reference the global by name as an external symbol.
     // Use [0 x ptr] as a placeholder — GEP(0,0) has zero offset so the

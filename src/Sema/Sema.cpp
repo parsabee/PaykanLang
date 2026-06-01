@@ -713,7 +713,7 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
   declareFunction(names::kStrBool,  StrTy, {Ctx.getBoolTy()},  false, true);
   declareFunction(names::kString,      StrTy, {StrTy},
                   false, true);
-  declareFunction(names::kOpen, Ctx.getFileTy(), {StrTy, StrTy}, false, true);
+  declareFunction(names::kOpen, Ctx.getObjTy(), {StrTy, StrTy}, false, true);
 
   // Process imports before local declarations.
   llvm::StringSet<> localImportStack;

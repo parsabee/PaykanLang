@@ -3,7 +3,7 @@ fn main() -> int {
   x: Obj = ["hello", "world"];
   match x {
     arr: Str[] {
-      n: int = len(arr);
+      n: int = arr.len();
     }
     _ { }
   }

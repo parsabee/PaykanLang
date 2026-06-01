@@ -86,6 +86,22 @@ void CodeGen::Scope::declareUnowned(llvm::StringRef name,
     ASTTypeMap[name] = astTy;
 }
 
+void CodeGen::Scope::declareUnownedWithBacking(llvm::StringRef name,
+                                               llvm::AllocaInst *alloca,
+                                               llvm::Value *shared,
+                                               ast::Type *astTy) {
+  declareUnowned(name, alloca, astTy);
+  if (shared)
+    BackingShared[name] = shared;
+}
+
+llvm::Value *CodeGen::Scope::lookupBackingShared(llvm::StringRef name) const {
+  auto it = BackingShared.find(name);
+  if (it != BackingShared.end())
+    return it->second;
+  return Parent ? Parent->lookupBackingShared(name) : nullptr;
+}
+
 ast::Type *CodeGen::Scope::lookupASTType(llvm::StringRef name) const {
   auto it = ASTTypeMap.find(name);
   if (it != ASTTypeMap.end())
@@ -257,8 +273,11 @@ bool CodeGen::exprAlreadyShared(ast::Expr *expr) const {
     if (!ce->getResolvedType() || !ast::isRefType(ce->getResolvedType()))
       return false;
     // Builtins in FunctionTable or IdentityCtors return raw pointers — not shared.
-    if (FunctionTable.count(ce->getCalleeName()) || IdentityCtors.count(ce->getCalleeName()))
+    // Exception: open() was changed to return PaykanShared* so match works on the result.
+    if (FunctionTable.count(ce->getCalleeName()) || IdentityCtors.count(ce->getCalleeName())) {
+      if (ce->getCalleeName() == names::kOpen) return true;
       return false;
+    }
     return true;
   }
   return false;
@@ -514,6 +533,16 @@ llvm::Value *CodeGen::emitAsShared(ast::Expr *expr) {
       auto *sharedPtr = Builder.CreateLoad(ptrTy, alloca, id->getName());
       emitRetain(sharedPtr);
       return sharedPtr;
+    }
+    // Unowned arm-binding backed by a PaykanShared*: retain + return the
+    // original box instead of wrapping the raw pointer in a fresh one.
+    // A fresh PaykanShared_new would give the callee sole ownership, dropping
+    // the refcount to 0 on callee return and destroying the object prematurely.
+    if (alloca) {
+      if (auto *backing = CurrentScope->lookupBackingShared(id->getName())) {
+        emitRetain(backing);
+        return backing;
+      }
     }
   }
 
@@ -1311,6 +1340,14 @@ llvm::Value *CodeGen::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
           // Load the existing shared box, retain, pass.
           v = CG.Builder.CreateLoad(ptrTy, argAlloca, id->getName());
           CG.emitRetain(v);
+        } else if (argAlloca) {
+          // Unowned arm-binding with a backing PaykanShared*: retain the
+          // original box instead of creating a fresh one (which would give
+          // the callee sole ownership and destroy the object prematurely).
+          if (auto *backing = CG.CurrentScope->lookupBackingShared(id->getName())) {
+            CG.emitRetain(backing);
+            v = backing;
+          }
         }
       }
       if (!v) {
@@ -1678,13 +1715,19 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
   // 1. Emit the subject — visitIdentifier already unwraps owned class vars
   //    (PaykanShared* -> raw object pointer).  If the subject is a call/method-
   //    call/ternary result it may be a PaykanShared* — unwrap it here.
-  llvm::Value *subjRaw = emitExpr(node->getSubject());
+  //    We keep a pointer to the shared wrapper so we can release it at match.end
+  //    (the arm binding is an unowned raw-pointer alias, so the wrapper's
+  //    refcount never drops otherwise — causing a resource leak, e.g. fclose
+  //    never called on a File returned by open()).
+  llvm::Value *subjRaw    = emitExpr(node->getSubject());
   if (!subjRaw)
     return nullptr;
+  llvm::Value *sharedSubj = nullptr; // non-null iff we must release at end
   if (exprAlreadyShared(node->getSubject())) {
+    sharedSubj = subjRaw;
     auto *getFnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
     subjRaw = Builder.CreateCall(declareFunction(kPaykanSharedGet, getFnTy),
-                                 {subjRaw}, kIRSubjObj);
+                                 {sharedSubj}, kIRSubjObj);
   }
 
   // 2. Build control-flow blocks.
@@ -1707,7 +1750,14 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
   for (size_t i = 0; i < node->getArms().size(); ++i) {
     const auto &arm = node->getArms()[i];
     if (arm.isWildcard()) continue;
-    auto *armCt = ast::dyn_cast<ast::ClassType>(arm.ArmType);
+    ast::ClassType *armCt = ast::dyn_cast<ast::ClassType>(arm.ArmType);
+    // Array-type arms (e.g. int[]) have an ArrayType, not a ClassType.
+    // Resolve to the ASTContext's specialized array ClassType so that vtable
+    // identity comparison works the same way as class-type arms.
+    if (!armCt) {
+      if (auto *at = ast::dyn_cast<ast::ArrayType>(arm.ArmType))
+        armCt = ASTCtx.getOrCreateSpecializedArrayType(at->getElementType());
+    }
     assert(armCt && "Sema should have verified arm type exists");
     auto *bodyBB = llvm::BasicBlock::Create(
         LLVMCtx, kIRMatchArmPfx + std::to_string(i), parentFn);
@@ -1744,7 +1794,12 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
         auto *alloca = createEntryAlloca(parentFn, arm.Binding, ptrTy);
         Builder.CreateStore(subjRaw, alloca);
         // Unowned alias — the subject's scope owns the reference.
-        CurrentScope->declareUnowned(arm.Binding, alloca, ta.CT);
+        // Record the backing PaykanShared* (if any) so that call sites can
+        // retain+pass the original box rather than wrapping the raw pointer.
+        if (sharedSubj)
+          CurrentScope->declareUnownedWithBacking(arm.Binding, alloca, sharedSubj, ta.CT);
+        else
+          CurrentScope->declareUnowned(arm.Binding, alloca, ta.CT);
       }
       for (auto *stmt : arm.Body->getStatements())
         visit(stmt);
@@ -1768,6 +1823,11 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
   }
 
   Builder.SetInsertPoint(endBB);
+  // Release the PaykanShared* wrapper produced by the subject expression (e.g.
+  // open(), a method call, etc.).  The arm binding is an unowned raw-pointer
+  // alias so it never bumps the refcount — we must drop it here at match.end.
+  if (sharedSubj)
+    emitRelease(sharedSubj);
   return nullptr;
 }
 

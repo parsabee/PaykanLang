@@ -35,6 +35,16 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanFileWrite,    reinterpret_cast<void *>(&PaykanFile_write)},
     {kPaykanFileReadln,   reinterpret_cast<void *>(&PaykanFile_readln)},
     {kPaykanFileVtable,   reinterpret_cast<void *>(&PaykanFile_vtable)},
+    // match dispatch looks up "File_vtable" (ClassName + "_vtable"); alias it.
+    {"File_vtable",       reinterpret_cast<void *>(&PaykanFile_vtable)},
+
+    {kPaykanErrorNew,      reinterpret_cast<void *>(&PaykanError_new)},
+    {kPaykanErrorDestroy,  reinterpret_cast<void *>(&PaykanError_destroy)},
+    {kPaykanErrorToString, reinterpret_cast<void *>(&PaykanError_toString)},
+    {kPaykanErrorEquals,   reinterpret_cast<void *>(&PaykanError_equals)},
+    {kPaykanErrorVtable,   reinterpret_cast<void *>(&PaykanError_vtable)},
+    // match dispatch looks up "Error_vtable"; alias it.
+    {"Error_vtable",       reinterpret_cast<void *>(&PaykanError_vtable)},
 
     {kPaykanObjectNew,       reinterpret_cast<void *>(&PaykanObject_new)},
     {kPaykanObjectToString,  reinterpret_cast<void *>(&PaykanObject_toString)},
@@ -62,6 +72,8 @@ const RuntimeSymbol kRuntimeSymbols[] = {
 
     {kPaykanObjectVtable,    reinterpret_cast<void *>(&PaykanObject_vtable)},
     {kPaykanStringVtable,    reinterpret_cast<void *>(&PaykanString_vtable)},
+    // match dispatch looks up "Str_vtable" (ClassName + "_vtable"); alias it.
+    {"Str_vtable",           reinterpret_cast<void *>(&PaykanString_vtable)},
 
     {kPaykanArrayNew,        reinterpret_cast<void *>(&PaykanArray_new)},
     {kPaykanArrayNewFromData,reinterpret_cast<void *>(&PaykanArray_new_from_data)},

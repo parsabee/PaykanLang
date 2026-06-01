@@ -1,3 +1,247 @@
 # PaykanLang
 
-A clean and simple, statically typed, object-oriented programming language.
+PaykanLang (`.pkn`) is a statically-typed, object-oriented language. It compiles to LLVM and can be **JIT-executed** for rapid
+development or **compiled to a native binary** for deployment. Memory lifetimes are managed
+via automatic reference counting — there is no garbage collector.
+
+---
+
+## Features
+
+- **Static typing** — every variable, parameter, and return value has a compile-time type
+- **Single-inheritance classes** with vtable-based virtual dispatch, automatic construction and destruction
+- **Automatic reference counting (ARC)** — no GC pauses; objects are freed deterministically when the last reference drops
+- **Match statements** — safe runtime type dispatch on class hierarchies and arrays
+- **Arrays** — heap-allocated, dynamically-sized, element-typed (`int[]`, `Str[]`, `Point[]`, …)
+- **Modules** — file-based module system with selective and aliased imports
+- **Built-in I/O** — `open()` / `File` / `Error` for file I/O; `println` / `printerrln` for console output
+- **LLVM backend** — JIT execution or ahead-of-time native binary compilation
+
+---
+
+## Quick Tour
+
+### Hello, World
+
+```pkn
+fn main() -> int {
+  println("Hello, world!");
+  return 0;
+}
+```
+
+### Variables & Types
+
+```pkn
+x: int     = 42;
+pi: float  = 3.14;
+ok: bool   = True;
+msg: Str   = "paykan";
+inferred   = 100;          // type inferred as int
+```
+
+### Functions
+
+```pkn
+fn add(a: int, b: int) -> int {
+  return a + b;
+}
+
+fn greet(name: Str) -> Str {
+  return "Hello, " + name + "!";
+}
+```
+
+- No overloading — each function name is unique.
+- Every control-flow path in a non-void function must `return` a value.
+
+### Classes
+
+```pkn
+class Animal {
+  name: Str;
+  fn __init__(n: Str) { self.name = n; }
+  fn sound() -> Str   { return "..."; }
+}
+
+class Dog : Animal {
+  fn __init__(n: Str) { __super__(n); }
+  fn sound() -> Str   { return "woof"; }
+}
+
+a: Animal = Dog("Rex");
+println(a.sound());   // woof  — virtual dispatch
+```
+
+- `__init__` is the constructor; `destroy` is the destructor (called automatically by ARC).
+- `__super__(args)` calls the parent constructor and is required when the parent has a
+  parameterised `__init__`.
+- All methods are virtual.
+
+### Match
+
+`match` dispatches on the **runtime class** of a value. It works on any `Obj`-typed
+expression, including arrays and the return value of `open()`.
+
+```pkn
+a: Obj = Dog("Rex");
+match a {
+  d: Dog { println(d.sound()); }   // binding + narrowed type
+  Cat    { println("cat"); }
+  _      { println("other"); }     // wildcard — must be last
+}
+```
+
+### Arrays
+
+```pkn
+nums: int[]  = [1, 2, 3, 4, 5];
+strs: Str[]  = ["hello", "world"];
+
+println(StrInt(nums.len()));   // 5
+nums.push(6);
+nums.pop();
+
+i: int = 0;
+while (i < nums.len()) {
+  println(StrInt(nums[i]));
+  i = i + 1;
+}
+```
+
+Arrays are `Obj` subtypes — they can be stored in `Obj` variables and matched with array-type arms.
+
+### File I/O
+
+`open()` returns `Obj` — either a `File` on success or an `Error` on failure.
+Always use `match` to handle both cases.
+
+```pkn
+fn copyLines(src: Str, dst: Str) -> int {
+  match open(src, "r") {
+    err: Error { printerrln("cannot open: " + err.toString()); return 1; }
+    inFile: File {
+      match open(dst, "w") {
+        err: Error { printerrln("cannot create: " + err.toString()); return 1; }
+        outFile: File {
+          while (True) {
+            match inFile.readln() {
+              line: Str { outFile.write(line); }
+              _          { break; }   // None — EOF
+            }
+          }
+        }
+      }
+    }
+  }
+  return 0;
+}
+```
+
+`File` handles are closed automatically when they go out of scope.
+
+### Modules
+
+```pkn
+// geometry/point.pkn
+class Point {
+  x: int; y: int;
+  fn __init__(x: int, y: int) { self.x = x; self.y = y; }
+}
+
+// main.pkn
+import geometry::point;
+
+fn main() -> int {
+  p: point::Point = point::Point(3, 4);
+  println(p.toString());
+  return 0;
+}
+```
+
+---
+
+## Built-in Types
+
+| Type    | Description                                                      |
+|---------|------------------------------------------------------------------|
+| `int`   | 64-bit signed integer                                            |
+| `float` | 64-bit IEEE 754 double                                           |
+| `bool`  | Boolean — literals `True` / `False`                             |
+| `Str`   | Immutable heap-allocated string; `+` concatenates               |
+| `T[]`   | Dynamic array of element type `T`                                |
+| `Obj`   | Root of the class hierarchy; all classes extend `Obj`           |
+| `File`  | Open file handle returned by `open()`; extends `Obj`            |
+| `Error` | Error value returned by `open()` on failure; extends `Obj`      |
+| `None`  | The absence of a value; an `Obj` literal                        |
+
+---
+
+## Built-in Functions
+
+| Function            | Description                                              |
+|---------------------|----------------------------------------------------------|
+| `print(args…)`      | Print values to stdout, no newline                       |
+| `println(args…)`    | Print values to stdout, then newline                     |
+| `printerr(args…)`   | Print values to stderr, no newline                       |
+| `printerrln(args…)` | Print values to stderr, then newline                     |
+| `StrInt(n)`         | Convert `int` to `Str`                                   |
+| `StrFloat(f)`       | Convert `float` to `Str`                                 |
+| `StrBool(b)`        | Convert `bool` to `Str` (`"True"` / `"False"`)           |
+| `open(path, mode)`  | Open a file (`"r"`, `"w"`, `"a"`); returns `File` or `Error` |
+
+---
+
+## Building
+
+PaykanLang uses CMake and requires LLVM (pre-built, vendored under `third-party/llvm`),
+Bison, and Flex.
+
+```sh
+mkdir build && cd build
+cmake ..
+make -j$(nproc) paykan
+```
+
+The `paykan` binary is placed at `build/bin/paykan`.
+
+---
+
+## Running Programs
+
+```sh
+# JIT-execute a source file
+./build/bin/paykan program.pkn
+
+# Emit LLVM IR (for inspection)
+./build/bin/paykan --emit-llvm program.pkn
+```
+
+---
+
+## Running Tests
+
+```sh
+cd build
+ctest --output-on-failure
+```
+
+---
+
+## Language Reference
+
+Detailed documentation lives in `language_reference/`:
+
+| File | Contents |
+|------|----------|
+| `01-language-basics.md`       | Types, variables, expressions, operators, control flow, built-ins |
+| `02-functions-and-calling.md` | Function declarations, parameters, return values, ARC semantics   |
+| `03-classes.md`               | Classes, fields, methods, inheritance, `__init__`, `destroy`      |
+| `04-arrays.md`                | Array literals, subscript, `.len()`, `.push()`, `.pop()`, 2D arrays |
+| `05-modules.md`               | Import forms, module paths, selective and aliased imports          |
+
+---
+
+## License
+
+See [LICENSE](LICENSE).

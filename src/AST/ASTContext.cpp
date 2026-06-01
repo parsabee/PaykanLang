@@ -12,16 +12,20 @@ ASTContext::ASTContext()
       FloatTy(make<BuiltinType>(SourceLocation(), BuiltinType::Float)),
       BoolTy(make<BuiltinType>(SourceLocation(), BuiltinType::Bool)),
       VoidTy(make<BuiltinType>(SourceLocation(), BuiltinType::Void)),
-      ObjTy(nullptr), StrTy(nullptr), ArrayTy(nullptr), FileTy(nullptr) {
-  // Pre-allocate Obj, Str, Array, and File so method signatures are correct from the start.
+      ObjTy(nullptr), StrTy(nullptr), ArrayTy(nullptr), FileTy(nullptr),
+      ErrorTy(nullptr) {
+  // Pre-allocate Obj, Str, Array, File, and Error so method signatures are
+  // correct from the start.
   ObjTy   = make<ClassType>(SourceLocation(), names::kObj,    nullptr);
   StrTy   = make<ClassType>(SourceLocation(), names::kString, nullptr);
   ArrayTy = make<ClassType>(SourceLocation(), names::kArray,  nullptr);
   FileTy  = make<ClassType>(SourceLocation(), names::kFile,   nullptr);
+  ErrorTy = make<ClassType>(SourceLocation(), names::kError,  nullptr);
   buildObjectType();
   buildStringType();
   buildArrayType();
   buildFileType();
+  buildErrorType();
 }
 
 // -- Bootstrap Obj ----------------------------------------------------------
@@ -109,7 +113,25 @@ void ASTContext::buildFileType() {
       .method(names::kMethodToString, StrTy)             // slot 1 — override
       .method(names::kMethodEquals,   BoolTy, {ObjTy})   // slot 2 — override
       .method(names::kMethodWrite,    VoidTy, {StrTy})   // slot 3 — new
-      .method(names::kMethodReadln,   StrTy)             // slot 4 — new
+      .method(names::kMethodReadln,   ObjTy)             // slot 4 — new: Str on success, None at EOF
+      .build();
+}
+
+// -- Bootstrap Error -------------------------------------------------------
+//
+// Error inherits Obj.  Returned by open() when fopen fails.
+//   operators : == !=
+//   vtable    : [ destroy(override), toString(override), equals(override) ]
+//
+void ASTContext::buildErrorType() {
+  ErrorTy->setSuperClass(ObjTy);
+
+  ClassTypeBuilder(*this, ErrorTy)
+      .addOp(BinaryOpcode::Eq)
+      .addOp(BinaryOpcode::Ne)
+      .method(names::kMethodDestroy,  VoidTy)            // slot 0 — override
+      .method(names::kMethodToString, StrTy)             // slot 1 — override
+      .method(names::kMethodEquals,   BoolTy, {ObjTy})   // slot 2 — override
       .build();
 }
 
@@ -148,6 +170,13 @@ ClassType *ASTContext::getOrCreateSpecializedArrayType(Type *elemTy) {
       .build();
   SpecializedArrayTypes[elemTy] = specTy;
   return specTy;
+}
+
+Type *ASTContext::getSpecializedArrayElemType(ClassType *ct) const {
+  for (const auto &kv : SpecializedArrayTypes)
+    if (kv.second == ct)
+      return kv.first;
+  return nullptr;
 }
 
 // -- ClassTypeBuilder --------------------------------------------------------

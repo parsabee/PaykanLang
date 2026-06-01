@@ -1,0 +1,74 @@
+// 19_file_copy.pkn — Copy every line from a source file to a destination file.
+// Demonstrates: open() returning Obj, match on File/Error/Str/None,
+//               File.readln() returning Str or None, File.write().
+//
+// open()   -> Obj : File on success, Error on failure
+// readln() -> Obj : Str  on a line,  None  at EOF
+
+fn writeSource(path: Str) -> int {
+  match open(path, "w") {
+    err: Error { printerrln("writeSource: " + err.toString()); return 1; }
+    f: File {
+      f.write("first line\n");
+      f.write("second line\n");
+      f.write("third line\n");
+    }
+  }
+  return 0;
+  // f destroyed here -> fclose -> data flushed to disk
+}
+
+fn copy(inFile: File, outFile: File) {
+  while (True) {
+    match inFile.readln() {
+        line: Str { outFile.write(line); }
+        _         { break; }
+    }
+  }
+}
+
+fn copyFile(src: Str, dst: Str) -> int {
+  match open(src, "r") {
+    err: Error { printerrln("copyFile: cannot open src: " + err.toString()); return 1; }
+    inFile: File {
+      match open(dst, "w") {
+        err: Error { printerrln("copyFile: cannot open dst: " + err.toString()); return 1; }
+        outFile: File {
+          copy(inFile, outFile);
+        }
+      }
+    }
+  }
+  return 0;
+  // both File handles destroyed here -> fclose
+}
+
+fn printFile(path: Str) -> int {
+  match open(path, "r") {
+    err: Error { printerrln("printFile: " + err.toString()); return 1; }
+    f: File {
+      while (True) {
+        match f.readln() {
+          line: Str { print(line); }
+          _          { break; }
+        }
+      }
+    }
+    _ { printerrln("printFile: unexpected open() result"); return 1; }
+  }
+  return 0;
+}
+
+fn main() -> int {
+  src: Str = "/tmp/paykan_copy_src.txt";
+  dst: Str = "/tmp/paykan_copy_dst.txt";
+
+  writeSource(src);    // write & close src
+  printFile(src);
+  copyFile(src, dst);  // copy src -> dst, close both
+  printFile(dst);      // read & print dst
+
+  return 0;
+}
+
+

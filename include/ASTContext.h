@@ -32,6 +32,8 @@ class ASTContext {
   ClassType *ArrayTy;
   // Canonical file type (ClassType inheriting Obj).
   ClassType *FileTy;
+  // Canonical error type (ClassType inheriting Obj, returned by open() on failure).
+  ClassType *ErrorTy;
 
   // Registry of all class types, keyed by name.
   std::unordered_map<std::string, ClassType *> ClassTypes;
@@ -45,6 +47,7 @@ class ASTContext {
   void buildStringType();
   void buildArrayType();
   void buildFileType();
+  void buildErrorType();
 
 public:
   ASTContext();
@@ -110,11 +113,16 @@ public:
   ClassType *getStrTy()   const { return StrTy; }
   ClassType *getArrayTy() const { return ArrayTy; }
   ClassType *getFileTy()  const { return FileTy; }
+  ClassType *getErrorTy() const { return ErrorTy; }
 
   /// Return (creating if needed) the specialized ClassType for arrays whose
   /// elements have type @p elemTy.  The returned type is a subtype of ArrayTy
   /// and carries push(elemTy)->void and pop()->elemTy method declarations.
   ClassType *getOrCreateSpecializedArrayType(Type *elemTy);
+
+  /// If @p ct is a specialized array ClassType (e.g. Array<Str>), return its
+  /// element type; otherwise return nullptr.
+  Type *getSpecializedArrayElemType(ClassType *ct) const;
 
   /// Return the canonical BuiltinType* for a given Kind.
   BuiltinType *getBuiltinType(BuiltinType::Kind k) const;

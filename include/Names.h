@@ -23,6 +23,7 @@ inline constexpr const char *kArray        = "Array";
 inline constexpr const char *kObj          = "Obj";
 inline constexpr const char *kString       = "Str";
 inline constexpr const char *kFile         = "File";
+inline constexpr const char *kError        = "Error";
 
 // Built-in literals
 inline constexpr const char *kNone         = "None";
@@ -99,6 +100,13 @@ inline constexpr const char *kPaykanFileEquals    = "PaykanFile_equals";
 inline constexpr const char *kPaykanFileWrite     = "PaykanFile_write";
 inline constexpr const char *kPaykanFileReadln    = "PaykanFile_readln";
 inline constexpr const char *kPaykanFileVtable    = "PaykanFile_vtable";
+
+// Error
+inline constexpr const char *kPaykanErrorNew      = "PaykanError_new";
+inline constexpr const char *kPaykanErrorDestroy  = "PaykanError_destroy";
+inline constexpr const char *kPaykanErrorToString = "PaykanError_toString";
+inline constexpr const char *kPaykanErrorEquals   = "PaykanError_equals";
+inline constexpr const char *kPaykanErrorVtable   = "PaykanError_vtable";
 
 // IO
 inline constexpr const char *kPaykanPrint            = "Paykan_print";

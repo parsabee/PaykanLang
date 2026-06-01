@@ -5,6 +5,6 @@ fn makeInts() -> int[] {
 
 fn main() -> int {
   a: int[] = makeInts();
-  n: int = len(a);
+  n: int = a.len();
   return 0;
 }

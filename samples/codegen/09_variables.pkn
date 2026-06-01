@@ -1,5 +1,5 @@
 // 09 — Variables: explicit type declarations, implicit (inferred) declarations,
-//       rebinding, int→float promotion on rebind, scope shadowing
+//       rebinding, int->float promotion on rebind, scope shadowing
 // Exercises: visitVarDecl (explicit typed), visitAssignStmt (implicit first-assign),
 //            visitAssignStmt (rebind), emitImplicitVarDecl, emitClassVarRebind,
 //            Scope::declare/declareUnowned, Scope::findOwner
