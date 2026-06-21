@@ -389,7 +389,7 @@ additiveExpression:
 
 relationalExpression:
       additiveExpression            { $$ = $1; }
-    | relationalExpression relationalOperator additiveExpression
+    | additiveExpression relationalOperator additiveExpression
                                     { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), $2, $1, $3); }
     ;
 

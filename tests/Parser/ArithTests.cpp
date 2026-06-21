@@ -119,6 +119,16 @@ TEST(Arith, RelationalOperators) {
   EXPECT_TRUE(ok);
 }
 
+TEST(Arith, ChainedRelationalRejected) {
+  auto [ok, _] = parse(R"(
+    fn main() -> int {
+      a: bool = 1 < 2 < 3;
+      return 0;
+    }
+  )");
+  EXPECT_FALSE(ok);
+}
+
 TEST(Arith, NestedBlocks) {
   auto [ok, _] = parse(R"(
     fn main() -> int {
