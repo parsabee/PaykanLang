@@ -8,14 +8,19 @@ namespace paykan {
 namespace ast {
 
 ASTContext::ASTContext()
-    : IntTy(make<BuiltinType>(SourceLocation(), BuiltinType::Int)),
-      FloatTy(make<BuiltinType>(SourceLocation(), BuiltinType::Float)),
-      BoolTy(make<BuiltinType>(SourceLocation(), BuiltinType::Bool)),
-      CharTy(make<BuiltinType>(SourceLocation(), BuiltinType::Char)),
-      VoidTy(make<BuiltinType>(SourceLocation(), BuiltinType::Void)),
-      ObjTy(nullptr), StrTy(nullptr), ArrayTy(nullptr), FileTy(nullptr),
-      ErrorTy(nullptr), IntBoxTy(nullptr), FloatBoxTy(nullptr),
+    : IntTy(nullptr), FloatTy(nullptr), BoolTy(nullptr), CharTy(nullptr),
+      VoidTy(nullptr), ObjTy(nullptr), StrTy(nullptr), ArrayTy(nullptr),
+      FileTy(nullptr), ErrorTy(nullptr), IntBoxTy(nullptr), FloatBoxTy(nullptr),
       BoolBoxTy(nullptr) {
+  // Reserve enough capacity to avoid repeated reallocations during parsing.
+  // The bootstrap phase alone creates ~150 nodes; a typical program adds
+  // a few hundred more.  512 slots eliminates most reallocation churn.
+  Pool.reserve(512);
+  IntTy   = make<BuiltinType>(SourceLocation(), BuiltinType::Int);
+  FloatTy = make<BuiltinType>(SourceLocation(), BuiltinType::Float);
+  BoolTy  = make<BuiltinType>(SourceLocation(), BuiltinType::Bool);
+  CharTy  = make<BuiltinType>(SourceLocation(), BuiltinType::Char);
+  VoidTy  = make<BuiltinType>(SourceLocation(), BuiltinType::Void);
   // Pre-allocate Obj, Str, Array, File, Error, and boxed primitives so all
   // method signatures are correct from the start.
   ObjTy = make<ClassType>(SourceLocation(), names::kObj, nullptr);
