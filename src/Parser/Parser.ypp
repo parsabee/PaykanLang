@@ -85,6 +85,7 @@
 %token <long> INT
 %token <double> FLOAT
 %token <bool> BOOL
+%token <char> CHAR
 %token       NONE
 %token <std::string> STRING
 %token <std::string> IDENT
@@ -256,7 +257,7 @@ staticAssignment: varDecl "=" expression
 statement: ";"                      { $$ = nullptr; }
     | expression ";"                { $$ = impl(drv).Ctx.make<ExprStmt>(loc(@1, @2), $1); }
     | expression "=" expression ";" { if (auto *lhs = dyn_cast<Identifier>($1)) {
-                                        $$ = impl(drv).Ctx.make<AssignStmt>(loc(@1, @4), lhs->getName(), $3);
+                                        $$ = impl(drv).Ctx.make<AssignStmt>(loc(@1, @4), lhs, $3);
                                       } else if (auto *ma = dyn_cast<MemberAccessExpr>($1)) {
                                         $$ = impl(drv).Ctx.make<MemberAssignStmt>(loc(@1, @4), ma->getReceiver(), ma->getFieldName(), $3);
                                       } else if (auto *se = dyn_cast<SubscriptExpr>($1)) {
@@ -274,6 +275,7 @@ statement: ";"                      { $$ = nullptr; }
     | "break" ";"                    { $$ = impl(drv).Ctx.make<BreakStmt>(loc(@1, @2)); }
     | "continue" ";"                 { $$ = impl(drv).Ctx.make<ContinueStmt>(loc(@1, @2)); }
     | matchStmt                      { $$ = $1; }
+    | error ";"                      { $$ = nullptr; yyerrok; }
     ;
 
 matchStmt: "match" expression "{" matchArmList "}"
@@ -331,6 +333,7 @@ primaryExpression:
       INT                           { $$ = impl(drv).Ctx.make<IntegerLiteral>(loc(@1, @1), $1); }
     | FLOAT                         { $$ = impl(drv).Ctx.make<FloatLiteral>(loc(@1, @1), $1); }
     | BOOL                          { $$ = impl(drv).Ctx.make<BoolLiteral>(loc(@1, @1), $1); }
+    | CHAR                          { $$ = impl(drv).Ctx.make<CharLiteral>(loc(@1, @1), $1); }
     | NONE                          { $$ = impl(drv).Ctx.make<NoneLiteral>(loc(@1, @1)); }
     | STRING                        { $$ = impl(drv).Ctx.make<StringLiteral>(loc(@1, @1), $1); }
     | IDENT "(" argumentList ")"    { $$ = impl(drv).Ctx.make<CallExpr>(loc(@1, @4), $1, std::move($3)); }

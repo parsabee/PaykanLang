@@ -390,3 +390,122 @@ TEST(FileRoundTrip, WriteAndReadBack) {
 
   std::remove(path);
 }
+
+// ============================================================================
+// PaykanFile_readbytes
+// ============================================================================
+
+TEST(FileReadbytes, ReadsUpToN) {
+  std::string path = makeTempFile("hello world");
+  PaykanObject *pathStr = strObj(path.c_str());
+  PaykanObject *modeStr = strObj("r");
+  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr);
+  PaykanObject *fObj    = PaykanShared_get(fShared);
+  ASSERT_NE(fObj, &PaykanObject_None);
+
+  PaykanShared *chunk = PaykanFile_readbytes(fObj, 5);
+  PaykanString *s = (PaykanString *)PaykanShared_get(chunk);
+  EXPECT_EQ(std::string(s->data, (size_t)s->len), "hello");
+  Paykan_release(chunk);
+
+  Paykan_release(fShared);
+  PaykanString_destroy(pathStr);
+  PaykanString_destroy(modeStr);
+  std::remove(path.c_str());
+}
+
+TEST(FileReadbytes, ReadsLessThanNAtEOF) {
+  std::string path = makeTempFile("hi");
+  PaykanObject *pathStr = strObj(path.c_str());
+  PaykanObject *modeStr = strObj("r");
+  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr);
+  PaykanObject *fObj    = PaykanShared_get(fShared);
+  ASSERT_NE(fObj, &PaykanObject_None);
+
+  PaykanShared *chunk = PaykanFile_readbytes(fObj, 100);
+  PaykanString *s = (PaykanString *)PaykanShared_get(chunk);
+  EXPECT_EQ(std::string(s->data, (size_t)s->len), "hi");
+  Paykan_release(chunk);
+
+  Paykan_release(fShared);
+  PaykanString_destroy(pathStr);
+  PaykanString_destroy(modeStr);
+  std::remove(path.c_str());
+}
+
+TEST(FileReadbytes, ReturnsNoneAtEOF) {
+  std::string path = makeTempFile("");
+  PaykanObject *pathStr = strObj(path.c_str());
+  PaykanObject *modeStr = strObj("r");
+  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr);
+  PaykanObject *fObj    = PaykanShared_get(fShared);
+  ASSERT_NE(fObj, &PaykanObject_None);
+
+  PaykanShared *chunk = PaykanFile_readbytes(fObj, 8);
+  EXPECT_EQ(PaykanShared_get(chunk), &PaykanObject_None);
+  Paykan_release(chunk);
+
+  Paykan_release(fShared);
+  PaykanString_destroy(pathStr);
+  PaykanString_destroy(modeStr);
+  std::remove(path.c_str());
+}
+
+// ============================================================================
+// PaykanFile_read
+// ============================================================================
+
+TEST(FileRead, ReadsEntireFile) {
+  std::string path = makeTempFile("line1\nline2\n");
+  PaykanObject *pathStr = strObj(path.c_str());
+  PaykanObject *modeStr = strObj("r");
+  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr);
+  PaykanObject *fObj    = PaykanShared_get(fShared);
+  ASSERT_NE(fObj, &PaykanObject_None);
+
+  PaykanShared *all = PaykanFile_read(fObj);
+  PaykanString *s   = (PaykanString *)PaykanShared_get(all);
+  EXPECT_EQ(std::string(s->data, (size_t)s->len), "line1\nline2\n");
+  Paykan_release(all);
+
+  Paykan_release(fShared);
+  PaykanString_destroy(pathStr);
+  PaykanString_destroy(modeStr);
+  std::remove(path.c_str());
+}
+
+TEST(FileRead, ReturnsNoneOnEmptyFile) {
+  std::string path = makeTempFile("");
+  PaykanObject *pathStr = strObj(path.c_str());
+  PaykanObject *modeStr = strObj("r");
+  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr);
+  PaykanObject *fObj    = PaykanShared_get(fShared);
+  ASSERT_NE(fObj, &PaykanObject_None);
+
+  PaykanShared *all = PaykanFile_read(fObj);
+  EXPECT_EQ(PaykanShared_get(all), &PaykanObject_None);
+  Paykan_release(all);
+
+  Paykan_release(fShared);
+  PaykanString_destroy(pathStr);
+  PaykanString_destroy(modeStr);
+  std::remove(path.c_str());
+}
+
+// ============================================================================
+// PaykanFile_Stdin singleton safety
+// ============================================================================
+
+TEST(FileStdin, SingletonHasCorrectVtable) {
+  // Stdin uses a separate vtable (no-op destroy), but file operations must match.
+  auto *vt = (PaykanFileVTable *)PaykanFile_Stdin.vtable;
+  ASSERT_NE(vt, nullptr);
+  EXPECT_EQ((void *)vt->read,     (void *)PaykanFile_vtable.read);
+  EXPECT_EQ((void *)vt->readln,   (void *)PaykanFile_vtable.readln);
+  EXPECT_EQ((void *)vt->readbytes,(void *)PaykanFile_vtable.readbytes);
+  EXPECT_EQ((void *)vt->write,    (void *)PaykanFile_vtable.write);
+}
+
+TEST(FileStdin, SingletonHandleIsStdin) {
+  EXPECT_EQ(PaykanFile_Stdin.handle, stdin);
+}

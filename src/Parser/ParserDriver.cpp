@@ -27,7 +27,7 @@ int ParserDriver::parseFile(const std::string &filename) {
   PImpl->scanBegin();
   int result = PImpl->parse(*this);
   PImpl->scanEnd();
-  return result;
+  return (result != 0 || PImpl->ErrorCount > 0) ? 1 : 0;
 }
 
 ast::TranslationUnit *ParserDriver::getRoot() { return PImpl->Root; }

@@ -65,6 +65,7 @@ public:
     NK_IntegerLiteral,
     NK_FloatLiteral,
     NK_BoolLiteral,
+    NK_CharLiteral,
     NK_NoneLiteral,
     NK_StringLiteral,
     NK_UnaryExpr,
@@ -319,17 +320,23 @@ public:
   }
 };
 
+// Forward declaration — Identifier is defined below with the other Expr nodes.
+class Identifier;
+
 // Assignment statement
 class AssignStmt : public Stmt {
 private:
-  std::string VarName;
+  Identifier *LHS;  // preserves source location of the target variable
   Expr *Value;
 
 public:
-  AssignStmt(SourceLocation loc, const std::string &varName, Expr *value)
-      : Stmt(NK_AssignStmt, loc), VarName(varName), Value(value) {}
+  AssignStmt(SourceLocation loc, Identifier *lhs, Expr *value)
+      : Stmt(NK_AssignStmt, loc), LHS(lhs), Value(value) {}
 
-  const std::string &getVarName() const { return VarName; }
+  Identifier *getLHS() const { return LHS; }
+  // Convenience: callers that only need the name string.
+  // Defined as inline below, after Identifier is fully declared.
+  inline const std::string &getVarName() const;
   Expr *getValue() const { return Value; }
 
   static bool classof(const ASTNode *N) {
@@ -549,6 +556,21 @@ public:
   }
 };
 
+// Char literal  ('a', '\n', etc.)
+class CharLiteral : public Expr {
+  char Value;
+
+public:
+  CharLiteral(SourceLocation loc, char value)
+      : Expr(NK_CharLiteral, loc), Value(value) {}
+
+  char getValue() const { return Value; }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_CharLiteral;
+  }
+};
+
 // None literal (null reference for class types)
 class NoneLiteral : public Expr {
 public:
@@ -632,6 +654,11 @@ public:
     return N->getKind() == NK_Identifier;
   }
 };
+
+// Deferred inline: AssignStmt::getVarName() requires complete Identifier type.
+inline const std::string &AssignStmt::getVarName() const {
+  return LHS->getName();
+}
 
 // Function call expression
 class CallExpr : public Expr {
@@ -738,6 +765,7 @@ public:
     Int,
     Float,
     Bool,
+    Char,
     Void,
   };
 

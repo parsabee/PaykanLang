@@ -350,3 +350,74 @@ TEST(StringAt, NegativeIndexDies) {
   EXPECT_DEATH(PaykanString_at((PaykanObject *)s, -1), "");
   PaykanString_destroy((PaykanObject *)s);
 }
+
+// ============================================================================
+// PaykanString_char_at
+// ============================================================================
+
+TEST(StringCharAt, FirstChar) {
+  PaykanString *s = PaykanString_new("hello", 5);
+  EXPECT_EQ(PaykanString_char_at((PaykanObject *)s, 0), 'h');
+  PaykanString_destroy((PaykanObject *)s);
+}
+
+TEST(StringCharAt, LastChar) {
+  PaykanString *s = PaykanString_new("hello", 5);
+  EXPECT_EQ(PaykanString_char_at((PaykanObject *)s, 4), 'o');
+  PaykanString_destroy((PaykanObject *)s);
+}
+
+TEST(StringCharAt, MidChar) {
+  PaykanString *s = PaykanString_new("paykan", 6);
+  EXPECT_EQ(PaykanString_char_at((PaykanObject *)s, 3), 'k');
+  PaykanString_destroy((PaykanObject *)s);
+}
+
+TEST(StringCharAt, SingleChar) {
+  PaykanString *s = PaykanString_new("x", 1);
+  EXPECT_EQ(PaykanString_char_at((PaykanObject *)s, 0), 'x');
+  PaykanString_destroy((PaykanObject *)s);
+}
+
+// ============================================================================
+// PaykanString_concat_inplace
+// ============================================================================
+
+TEST(StringConcatInplace, AppendToEmpty) {
+  PaykanString *a = PaykanString_new("", 0);
+  PaykanString *b = PaykanString_new("hello", 5);
+  PaykanString_concat_inplace((PaykanObject *)a, (PaykanObject *)b);
+  EXPECT_EQ(a->len, 5);
+  EXPECT_STREQ(a->data, "hello");
+  PaykanString_destroy((PaykanObject *)a);
+  PaykanString_destroy((PaykanObject *)b);
+}
+
+TEST(StringConcatInplace, AppendNonEmpty) {
+  PaykanString *a = PaykanString_new("foo", 3);
+  PaykanString *b = PaykanString_new("bar", 3);
+  PaykanString_concat_inplace((PaykanObject *)a, (PaykanObject *)b);
+  EXPECT_EQ(a->len, 6);
+  EXPECT_STREQ(a->data, "foobar");
+  PaykanString_destroy((PaykanObject *)a);
+  PaykanString_destroy((PaykanObject *)b);
+}
+
+TEST(StringConcatInplace, AppendEmpty) {
+  PaykanString *a = PaykanString_new("hello", 5);
+  PaykanString *b = PaykanString_new("", 0);
+  PaykanString_concat_inplace((PaykanObject *)a, (PaykanObject *)b);
+  EXPECT_EQ(a->len, 5);
+  EXPECT_STREQ(a->data, "hello");
+  PaykanString_destroy((PaykanObject *)a);
+  PaykanString_destroy((PaykanObject *)b);
+}
+
+TEST(StringConcatInplace, ResultIsNulTerminated) {
+  PaykanString *a = PaykanString_new("ab", 2);
+  PaykanString *b = PaykanString_new("cd", 2);
+  PaykanString_concat_inplace((PaykanObject *)a, (PaykanObject *)b);
+  EXPECT_EQ(a->data[4], '\0');
+  PaykanString_destroy((PaykanObject *)a);
+  PaykanString_destroy((PaykanObject *)b);
+}
