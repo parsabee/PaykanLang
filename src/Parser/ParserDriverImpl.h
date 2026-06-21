@@ -41,6 +41,9 @@ struct ParserDriver::Impl {
   /// Number of syntax errors encountered during parsing.
   unsigned ErrorCount = 0;
 
+  /// Optional diagnostic engine for routing parser errors.
+  sema::DiagEngine *Diags = nullptr;
+
   /// Whether to generate parser debug traces.
   bool TraceParsing;
   /// Whether to generate scanner debug traces.

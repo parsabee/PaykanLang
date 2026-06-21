@@ -42,6 +42,10 @@ const std::vector<std::string> &ParserDriver::getSourceLines() const {
   return PImpl->SourceLines;
 }
 
+void ParserDriver::setDiagEngine(sema::DiagEngine *diag) {
+  PImpl->Diags = diag;
+}
+
 // -- ParserDriver::Impl ------------------------------------------------------
 
 int ParserDriver::Impl::parse(ParserDriver &drv) {

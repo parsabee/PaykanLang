@@ -4,6 +4,7 @@
 #include "ParserDriver.h"
 #include "ASTPrinter.h"
 #include "CodeGen.h"
+#include "DiagEngine.h"
 #include "JIT.h"
 #include "Sema.h"
 
@@ -92,8 +93,9 @@ int main(int argc, char *argv[]) {
   // -- Semantic analysis ----------------------------------------------------
   std::string projectRoot =
       std::filesystem::path(InputFilename.getValue()).parent_path().string();
-  paykan::sema::Sema sema(driver.getASTContext(), llvm::errs(), projectRoot,
-                          driver.getCurrentFile(), &driver.getSourceLines());
+  paykan::sema::DiagEngine diag(llvm::errs());
+  diag.setSourceInfo(driver.getCurrentFile(), &driver.getSourceLines());
+  paykan::sema::Sema sema(driver.getASTContext(), diag, projectRoot);
   auto semaCtx = sema.run(root);
 
   if (!semaCtx)

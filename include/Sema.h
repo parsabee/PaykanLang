@@ -6,10 +6,10 @@
 
 #include "ASTContext.h"
 #include "ASTVisitor.h"
+#include "DiagEngine.h"
 
 #include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/StringSet.h>
-#include <llvm/Support/raw_ostream.h>
 #include <string>
 #include <vector>
 #include <memory>
@@ -17,15 +17,6 @@
 namespace paykan {
 namespace parser { class ParserDriver; }
 namespace sema {
-
-// A single diagnostic emitted during semantic analysis.
-struct Diagnostic {
-  enum Severity { Error, Warning, Note };
-
-  Severity Level;
-  ast::SourceLocation Loc;
-  std::string Message;
-};
 
 /// Result object returned by Sema::run(). Carries the populated ASTContext
 /// and (for imported modules) the owning ParserDriver plus pre-computed child
@@ -60,12 +51,14 @@ struct SemaContext {
 // Statement and declaration visitors return true on success, false on failure.
 //
 // Usage:
-//   Sema S(llvm::errs());
+//   DiagEngine diag(llvm::errs());
+//   diag.setSourceInfo("foo.pkn", &lines);
+//   Sema S(ctx, diag);
 //   bool ok = S.run(translationUnit);
-//   // S.getDiagnostics() contains all collected errors/warnings.
+//   // diag.getDiagnostics() contains all collected errors/warnings.
 //
 class Sema : public ast::ASTVisitor<Sema, bool> {
-  llvm::raw_ostream &OS;
+  DiagEngine &Diags;
   ast::ASTContext &Ctx;
 
   // -- Scoped symbol table --------------------------------------------------
@@ -147,18 +140,11 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     ~ScopeGuard();
   };
 
-  // Collected diagnostics.
-  std::vector<Diagnostic> Diagnostics;
-
-  // Count of errors (not warnings) emitted so far.
-  unsigned ErrorCount = 0;
-
   // -- Internal helpers -----------------------------------------------------
 
-  void diag(Diagnostic::Severity level, ast::SourceLocation loc,
-            const std::string &msg);
   void error(ast::SourceLocation loc, const std::string &msg);
   void warning(ast::SourceLocation loc, const std::string &msg);
+  void note(ast::SourceLocation loc, const std::string &msg);
 
   static std::string typeName(ast::Type *ty);
 
@@ -216,12 +202,6 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// The directory of the file currently being analyzed.
   std::string ProjectRoot;
 
-  /// Filename used in diagnostics.
-  std::string SourceName;
-
-  /// Optional source lines for GCC-style snippets.
-  const std::vector<std::string> *SourceLines = nullptr;
-
   /// Files currently being imported (for cycle detection).
   llvm::StringSet<> *ImportStack = nullptr;
 
@@ -275,19 +255,17 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   bool checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls);
 
 public:
-  explicit Sema(ast::ASTContext &ctx, llvm::raw_ostream &os = llvm::errs(),
-                const std::string &projectRoot = "",
-                const std::string &sourceName = "",
-                const std::vector<std::string> *sourceLines = nullptr);
+  explicit Sema(ast::ASTContext &ctx, DiagEngine &diags,
+                const std::string &projectRoot = "");
 
   // Entry point -- run semantic analysis on a TranslationUnit.
   // Returns a SemaContext whose bool operator is true on success.
   SemaContext run(ast::TranslationUnit *tu);
 
   // Access diagnostics after analysis.
-  const std::vector<Diagnostic> &getDiagnostics() const { return Diagnostics; }
-  unsigned getErrorCount() const { return ErrorCount; }
-  bool hasErrors() const { return ErrorCount > 0; }
+  const std::vector<Diagnostic> &getDiagnostics() const { return Diags.getDiagnostics(); }
+  unsigned getErrorCount() const { return Diags.getErrorCount(); }
+  bool hasErrors() const { return Diags.hasErrors(); }
 
   // -- Visitor overrides ----------------------------------------------------
 

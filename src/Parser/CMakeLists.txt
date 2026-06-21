@@ -58,6 +58,7 @@ target_include_directories(paykan_parser
 
 target_link_libraries(paykan_parser
     PUBLIC  paykan_ast
+            paykan_diag
     PRIVATE paykan_llvm
 )
 

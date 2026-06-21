@@ -98,8 +98,9 @@ inline SemaResult semaCheck(const std::string &source) {
 
   std::string diagStr;
   llvm::raw_string_ostream diagOS(diagStr);
-  sema::Sema sema(driver->getASTContext(), diagOS, "",
-                  driver->getCurrentFile(), &driver->getSourceLines());
+  sema::DiagEngine diag(diagOS);
+  diag.setSourceInfo(driver->getCurrentFile(), &driver->getSourceLines());
+  sema::Sema sema(driver->getASTContext(), diag, "");
   auto semaCtx = sema.run(driver->getRoot());
   return {semaCtx.Ok, diagStr, semaCtx.ErrorCount};
 }
@@ -121,8 +122,9 @@ inline RunResult compileAndRun(const std::string &source,
   // Sema
   std::string diagStr;
   llvm::raw_string_ostream diagOS(diagStr);
-  sema::Sema sema(driver->getASTContext(), diagOS, projectRoot,
-                  driver->getCurrentFile(), &driver->getSourceLines());
+  sema::DiagEngine diag(diagOS);
+  diag.setSourceInfo(driver->getCurrentFile(), &driver->getSourceLines());
+  sema::Sema sema(driver->getASTContext(), diag, projectRoot);
   auto semaCtx = sema.run(driver->getRoot());
   if (!semaCtx)
     return {-1, "", diagStr, false};
@@ -172,8 +174,9 @@ inline RunResult compileAndRunWithArgs(const std::string &source,
 
   std::string diagStr;
   llvm::raw_string_ostream diagOS(diagStr);
-  sema::Sema sema(driver->getASTContext(), diagOS, projectRoot,
-                  driver->getCurrentFile(), &driver->getSourceLines());
+  sema::DiagEngine diag(diagOS);
+  diag.setSourceInfo(driver->getCurrentFile(), &driver->getSourceLines());
+  sema::Sema sema(driver->getASTContext(), diag, projectRoot);
   auto semaCtx = sema.run(driver->getRoot());
   if (!semaCtx)
     return {-1, "", diagStr, false};
@@ -221,8 +224,9 @@ inline RunResult compileAndRunFile(const std::string &filePath) {
 
   std::string diagStr;
   llvm::raw_string_ostream diagOS(diagStr);
-  sema::Sema sema(fileDriver.getASTContext(), diagOS, projectRoot,
-                  fileDriver.getCurrentFile(), &fileDriver.getSourceLines());
+  sema::DiagEngine diag(diagOS);
+  diag.setSourceInfo(fileDriver.getCurrentFile(), &fileDriver.getSourceLines());
+  sema::Sema sema(fileDriver.getASTContext(), diag, projectRoot);
   auto semaCtx = sema.run(fileDriver.getRoot());
   if (!semaCtx)
     return {-1, "", diagStr, false};

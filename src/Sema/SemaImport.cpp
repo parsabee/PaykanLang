@@ -23,6 +23,7 @@ static std::string typeToName(ast::Type *ty) {
     case ast::BuiltinType::Int:   return names::kTypeInt;
     case ast::BuiltinType::Float: return names::kTypeFloat;
     case ast::BuiltinType::Bool:  return names::kTypeBool;
+    case ast::BuiltinType::Char:  return names::kTypeChar;
     case ast::BuiltinType::Void:  return names::kTypeVoid;
     }
   }
@@ -174,9 +175,10 @@ bool Sema::processImport(ast::ImportDecl *node) {
     }
 
     // Run Sema on the imported module.
-    Sema importSema(importDriverPtr->getASTContext(), OS, ProjectRoot,
-                    importDriverPtr->getCurrentFile(),
-                    &importDriverPtr->getSourceLines());
+    DiagEngine importDiag(Diags.getOS());
+    importDiag.setSourceInfo(importDriverPtr->getCurrentFile(),
+                             &importDriverPtr->getSourceLines());
+    Sema importSema(importDriverPtr->getASTContext(), importDiag, ProjectRoot);
     if (ImportStack)
       ImportStack->insert(path);
     importSema.ImportStack = ImportStack;

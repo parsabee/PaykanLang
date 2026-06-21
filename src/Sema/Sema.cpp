@@ -6,9 +6,7 @@
 #include "SemaInternal.h"
 
 #include <llvm/ADT/SmallPtrSet.h>
-#include <llvm/Support/raw_ostream.h>
 
-#include <algorithm>
 #include <functional>
 
 namespace paykan {
@@ -55,12 +53,9 @@ Sema::ScopeGuard::~ScopeGuard() { S.CurrentScope = ScopeObj.Parent; }
 
 // -- Helpers -----------------------------------------------------------------
 
-Sema::Sema(ast::ASTContext &ctx, llvm::raw_ostream &os,
-      const std::string &projectRoot,
-      const std::string &sourceName,
-      const std::vector<std::string> *sourceLines)
-    : OS(os), Ctx(ctx), ProjectRoot(projectRoot), SourceName(sourceName),
-      SourceLines(sourceLines) {}
+Sema::Sema(ast::ASTContext &ctx, DiagEngine &diags,
+           const std::string &projectRoot)
+    : Diags(diags), Ctx(ctx), ProjectRoot(projectRoot) {}
 
 void Sema::declareFunction(llvm::StringRef name, ast::Type *retTy,
                            std::vector<ast::Type *> paramTys,
@@ -73,80 +68,16 @@ const Sema::FunctionSig *Sema::lookupFunction(llvm::StringRef name) const {
   return it != FunctionTable.end() ? &it->second : nullptr;
 }
 
-void Sema::diag(Diagnostic::Severity level, ast::SourceLocation loc,
-                const std::string &msg) {
-  Diagnostics.push_back({level, loc, msg});
-  if (level == Diagnostic::Error)
-    ++ErrorCount;
-
-  if (loc.isValid()) {
-    if (!SourceName.empty())
-      OS << SourceName << ":";
-    OS << loc.getLineStart() << ":" << loc.getColumnStart() << ": ";
-  }
-
-  switch (level) {
-  case Diagnostic::Error:   OS << "error: ";   break;
-  case Diagnostic::Warning: OS << "warning: "; break;
-  case Diagnostic::Note:    OS << "note: ";    break;
-  }
-  OS << msg << "\n";
-
-  if (!loc.isValid() || !SourceLines)
-    return;
-
-  size_t lineNo = loc.getLineStart();
-  if (lineNo == 0 || lineNo > SourceLines->size())
-    return;
-
-  size_t prevLineNo = lineNo > 1 ? lineNo - 1 : lineNo;
-  size_t nextLineNo = std::min(lineNo + 1, SourceLines->size());
-  size_t gutterWidth = std::max<size_t>(3, std::to_string(nextLineNo).size());
-
-  if (prevLineNo < lineNo) {
-    const std::string &prevLine = (*SourceLines)[prevLineNo - 1];
-    std::string prevNoStr = std::to_string(prevLineNo);
-    OS << std::string(gutterWidth - prevNoStr.size(), ' ')
-       << prevNoStr << " | " << prevLine << "\n";
-  }
-
-  const std::string &line = (*SourceLines)[lineNo - 1];
-  std::string lineNoStr = std::to_string(lineNo);
-  OS << std::string(gutterWidth - lineNoStr.size(), ' ')
-     << lineNoStr << " | " << line << "\n";
-
-  size_t startCol = std::max<size_t>(1, loc.getColumnStart());
-  size_t endCol = std::max(startCol, loc.getColumnEnd());
-  size_t width = 1;
-  if (loc.getLineEnd() == loc.getLineStart() && endCol > startCol)
-    width = endCol - startCol;
-
-  std::string marker = std::string(gutterWidth, ' ') + " | ";
-  for (size_t i = 1; i < startCol; ++i) {
-    if (i - 1 < line.size() && line[i - 1] == '\t')
-      marker.push_back('\t');
-    else
-      marker.push_back(' ');
-  }
-  marker.push_back('^');
-  if (width > 1)
-    marker.append(width - 1, '~');
-  OS << marker << "\n";
-
-  if (nextLineNo > lineNo) {
-    const std::string &nextLine = (*SourceLines)[nextLineNo - 1];
-    std::string nextNoStr = std::to_string(nextLineNo);
-    OS << std::string(gutterWidth - nextNoStr.size(), ' ')
-       << nextNoStr << " | " << nextLine << "\n";
-  }
-}
-
 void Sema::error(ast::SourceLocation loc, const std::string &msg) {
-  diag(Diagnostic::Error, loc, msg);
+  Diags.error(loc, msg);
 }
 
 void Sema::warning(ast::SourceLocation loc, const std::string &msg) {
-  diag(Diagnostic::Warning, loc, msg);
+  Diags.warning(loc, msg);
+}
+
+void Sema::note(ast::SourceLocation loc, const std::string &msg) {
+  Diags.note(loc, msg);
 }
 
 std::string Sema::typeName(ast::Type *ty) {
@@ -699,8 +630,6 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
 
 SemaContext Sema::run(ast::TranslationUnit *tu) {
   CurrentScope = nullptr;
-  Diagnostics.clear();
-  ErrorCount = 0;
   AccumulatedImportContexts.clear();
 
   // Bootstrap builtin functions — print/println take any object.
@@ -733,8 +662,8 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
     processImport(imp);
 
   visit(tu);
-  return SemaContext{nullptr, &Ctx, nullptr, !hasErrors(), ErrorCount,
-                     Diagnostics, std::move(AccumulatedImportContexts)};
+  return SemaContext{nullptr, &Ctx, nullptr, !Diags.hasErrors(), Diags.getErrorCount(),
+                     Diags.getDiagnostics(), std::move(AccumulatedImportContexts)};
 }
 
 // -- Top-level ---------------------------------------------------------------

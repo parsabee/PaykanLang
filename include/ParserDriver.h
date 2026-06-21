@@ -6,6 +6,7 @@
 
 #include "ASTContext.h"
 #include "AST.h"
+#include "DiagEngine.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -39,6 +40,10 @@ public:
 
   /// Source split by lines for diagnostics/snippets.
   const std::vector<std::string> &getSourceLines() const;
+
+  /// Attach a DiagEngine so parser syntax errors are routed through it.
+  /// Must be called before parseFile(); nullptr disables routing.
+  void setDiagEngine(sema::DiagEngine *diag);
 
 private:
   struct Impl;

@@ -6,6 +6,7 @@
 # ----------------------------------------------------------------------------
 
 add_subdirectory(AST)
+add_subdirectory(Diag)
 add_subdirectory(Parser)
 add_subdirectory(ASTPrinter)
 add_subdirectory(Sema)

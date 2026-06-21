@@ -418,5 +418,11 @@ expression: ternaryExpression       { $$ = $1; }
 
 void yy::parser::error (const location_type& l, const std::string& m) {
   ++impl(drv).ErrorCount;
-  std::cerr << "error @" << l << ": " << m << "\n\n";
+  if (auto *diags = impl(drv).Diags) {
+    paykan::ast::SourceLocation sloc(l.begin.line, l.begin.column,
+                                     l.end.line,   l.end.column);
+    diags->error(sloc, m);
+  } else {
+    std::cerr << "error @" << l << ": " << m << "\n\n";
+  }
 }
