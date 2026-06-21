@@ -89,6 +89,9 @@ public:
     NK_ClassType,
     NK_ArrayType,
 
+    // Match arm (child of MatchStmt, not a Stmt itself)
+    NK_MatchArm,
+
     // Top-level
     NK_TranslationUnit,
   };
@@ -482,14 +485,27 @@ public:
 //   _ { body }                    -- wildcard (catch-all)
 //
 // TypeName is empty when the arm is a wildcard.
-struct MatchArm {
-  SourceLocation  Loc;
-  std::string     Binding;   // "" = no binding
-  Type           *ArmType;   // nullptr = wildcard (_)
-  CompoundStmt   *Body;
+class MatchArm : public ASTNode {
+  std::string   Binding;   // "" = no binding
+  Type         *ArmType;   // nullptr = wildcard (_)
+  CompoundStmt *Body;
 
-  bool isWildcard()  const { return ArmType == nullptr; }
-  bool hasBinding()  const { return !Binding.empty(); }
+public:
+  MatchArm(SourceLocation loc, std::string binding, Type *armType,
+           CompoundStmt *body)
+      : ASTNode(NK_MatchArm, loc), Binding(std::move(binding)),
+        ArmType(armType), Body(body) {}
+
+  bool isWildcard() const { return ArmType == nullptr; }
+  bool hasBinding() const { return !Binding.empty(); }
+  const std::string &getBinding() const { return Binding; }
+  Type *getArmType() const { return ArmType; }
+  void setArmType(Type *t) { ArmType = t; }
+  CompoundStmt *getBody() const { return Body; }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_MatchArm;
+  }
 };
 
 // Match statement (downcasting switch):
@@ -504,16 +520,16 @@ struct MatchArm {
 // or is the wildcard arm (_) that catches any unmatched value.
 class MatchStmt : public Stmt {
 private:
-  Expr                  *Subject;
-  std::vector<MatchArm>  Arms;
+  Expr                   *Subject;
+  std::vector<MatchArm *> Arms;
 
 public:
-  MatchStmt(SourceLocation loc, Expr *subject, std::vector<MatchArm> arms)
+  MatchStmt(SourceLocation loc, Expr *subject, std::vector<MatchArm *> arms)
       : Stmt(NK_MatchStmt, loc), Subject(subject), Arms(std::move(arms)) {}
 
   Expr *getSubject() const { return Subject; }
-  std::vector<MatchArm> &getArms() { return Arms; }
-  const std::vector<MatchArm> &getArms() const { return Arms; }
+  std::vector<MatchArm *> &getArms() { return Arms; }
+  const std::vector<MatchArm *> &getArms() const { return Arms; }
   size_t getNumArms() const { return Arms.size(); }
 
   static bool classof(const ASTNode *N) {

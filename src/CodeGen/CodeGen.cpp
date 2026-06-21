@@ -1980,8 +1980,8 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
   // 2. Build control-flow blocks.
   auto *endBB      = llvm::BasicBlock::Create(LLVMCtx, kIRMatchEnd, parentFn);
   auto *wildcardBB = [&]() -> llvm::BasicBlock * {
-    for (const auto &arm : node->getArms())
-      if (arm.isWildcard())
+    for (ast::MatchArm *arm : node->getArms())
+      if (arm->isWildcard())
         return llvm::BasicBlock::Create(LLVMCtx, kIRMatchWildcard, parentFn);
     return nullptr;
   }();
@@ -1995,14 +1995,14 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
   };
   std::vector<TypeArm> typeArms;
   for (size_t i = 0; i < node->getArms().size(); ++i) {
-    const auto &arm = node->getArms()[i];
-    if (arm.isWildcard()) continue;
-    ast::ClassType *armCt = ast::dyn_cast<ast::ClassType>(arm.ArmType);
+    ast::MatchArm *arm = node->getArms()[i];
+    if (arm->isWildcard()) continue;
+    ast::ClassType *armCt = ast::dyn_cast<ast::ClassType>(arm->getArmType());
     // Array-type arms (e.g. int[]) have an ArrayType, not a ClassType.
     // Resolve to the ASTContext's specialized array ClassType so that vtable
     // identity comparison works the same way as class-type arms.
     if (!armCt) {
-      if (auto *at = ast::dyn_cast<ast::ArrayType>(arm.ArmType))
+      if (auto *at = ast::dyn_cast<ast::ArrayType>(arm->getArmType()))
         armCt = ASTCtx.getOrCreateSpecializedArrayType(at->getElementType());
     }
     assert(armCt && "Sema should have verified arm type exists");
@@ -2033,22 +2033,22 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
 
   // 5. Emit body blocks.
   for (const auto &ta : typeArms) {
-    const auto &arm = node->getArms()[ta.ArmIdx];
+    ast::MatchArm *arm = node->getArms()[ta.ArmIdx];
     Builder.SetInsertPoint(ta.BodyBB);
     {
       ScopeGuard armGuard(*this);
-      if (arm.hasBinding()) {
-        auto *alloca = createEntryAlloca(parentFn, arm.Binding, ptrTy);
+      if (arm->hasBinding()) {
+        auto *alloca = createEntryAlloca(parentFn, arm->getBinding(), ptrTy);
         Builder.CreateStore(subjRaw, alloca);
         // Unowned alias — the subject's scope owns the reference.
         // Record the backing PaykanShared* (if any) so that call sites can
         // retain+pass the original box rather than wrapping the raw pointer.
         if (sharedSubj)
-          CurrentScope->declareUnownedWithBacking(arm.Binding, alloca, sharedSubj, ta.CT);
+          CurrentScope->declareUnownedWithBacking(arm->getBinding(), alloca, sharedSubj, ta.CT);
         else
-          CurrentScope->declareUnowned(arm.Binding, alloca, ta.CT);
+          CurrentScope->declareUnowned(arm->getBinding(), alloca, ta.CT);
       }
-      for (auto *stmt : arm.Body->getStatements())
+      for (auto *stmt : arm->getBody()->getStatements())
         visit(stmt);
     }
     if (!Builder.GetInsertBlock()->getTerminator())
@@ -2058,10 +2058,10 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
   // 6. Emit the wildcard arm body.
   if (wildcardBB) {
     Builder.SetInsertPoint(wildcardBB);
-    for (const auto &arm : node->getArms()) {
-      if (!arm.isWildcard()) continue;
+    for (ast::MatchArm *arm : node->getArms()) {
+      if (!arm->isWildcard()) continue;
       ScopeGuard armGuard(*this);
-      for (auto *stmt : arm.Body->getStatements())
+      for (auto *stmt : arm->getBody()->getStatements())
         visit(stmt);
       break;
     }

@@ -222,6 +222,19 @@ void ASTPrinter::visitBoolLiteral(BoolLiteral *node) {
   OS << " " << (node->getValue() ? "true" : "false") << "\n";
 }
 
+void ASTPrinter::visitCharLiteral(CharLiteral *node) {
+  printIndent();
+  OS << "CharLiteral";
+  printLoc(node);
+  char c = node->getValue();
+  if (c == '\n')      OS << " '\\n'\n";
+  else if (c == '\t') OS << " '\\t'\n";
+  else if (c == '\r') OS << " '\\r'\n";
+  else if (c == '\\') OS << " '\\\\'\n";
+  else if (c == '\'') OS << " '\\''\n";
+  else                OS << " '" << c << "'\n";
+}
+
 void ASTPrinter::visitNoneLiteral(NoneLiteral *node) {
   printIndent();
   OS << "NoneLiteral";
@@ -321,6 +334,7 @@ void ASTPrinter::visitBuiltinType(BuiltinType *node) {
   case BuiltinType::Int:   OS << " 'int'";   break;
   case BuiltinType::Float: OS << " 'float'"; break;
   case BuiltinType::Bool:  OS << " 'bool'";  break;
+  case BuiltinType::Char:  OS << " 'char'";  break;
   case BuiltinType::Void:  OS << " 'void'";  break;
   }
   OS << "\n";
@@ -462,6 +476,11 @@ void ASTPrinter::visitImportDecl(ImportDecl *node) {
   OS << "}\n";
 }
 
+void ASTPrinter::visitMatchArm(MatchArm *) {
+  // MatchArm nodes are printed inline from visitMatchStmt; never dispatched
+  // through the generic visit() path.
+}
+
 void ASTPrinter::visitMatchStmt(MatchStmt *node) {
   printIndent();
   OS << "MatchStmt";
@@ -470,18 +489,18 @@ void ASTPrinter::visitMatchStmt(MatchStmt *node) {
   { ChildScope cs(*this, false); visit(node->getSubject()); }
   const auto &arms = node->getArms();
   for (size_t i = 0; i < arms.size(); ++i) {
-    const auto &arm = arms[i];
+    MatchArm *arm = arms[i];
     bool isLast = (i + 1 == arms.size());
     ChildScope cs(*this, isLast);
     printIndent();
-    OS << (arm.isWildcard() ? "MatchArm wildcard" : "MatchArm");
-    if (arm.hasBinding())
-      OS << " binding='" << arm.Binding << "'";
+    OS << (arm->isWildcard() ? "MatchArm wildcard" : "MatchArm");
+    if (arm->hasBinding())
+      OS << " binding='" << arm->getBinding() << "'";
     OS << "\n";
-    if (!arm.isWildcard()) {
-      { ChildScope cs2(*this, false); visit(arm.ArmType); }
+    if (!arm->isWildcard()) {
+      { ChildScope cs2(*this, false); visit(arm->getArmType()); }
     }
-    { ChildScope cs2(*this, true); visit(arm.Body); }
+    { ChildScope cs2(*this, true); visit(arm->getBody()); }
   }
 }
 

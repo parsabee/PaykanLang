@@ -46,6 +46,7 @@ namespace ast {
   NODE(NK_IntegerLiteral, IntegerLiteral, IntegerLiteral)  \
   NODE(NK_FloatLiteral,   FloatLiteral,   FloatLiteral)    \
   NODE(NK_BoolLiteral,    BoolLiteral,    BoolLiteral)     \
+  NODE(NK_CharLiteral,    CharLiteral,    CharLiteral)     \
   NODE(NK_NoneLiteral,    NoneLiteral,    NoneLiteral)     \
   NODE(NK_StringLiteral,  StringLiteral,  StringLiteral)   \
   NODE(NK_UnaryExpr,      UnaryExpr,      UnaryExpr)       \
@@ -66,11 +67,15 @@ namespace ast {
 #define PAYKAN_TOPLEVEL_NODES(NODE) \
   NODE(NK_TranslationUnit, TranslationUnit, TranslationUnit)
 
+#define PAYKAN_MATCHARM_NODES(NODE) \
+  NODE(NK_MatchArm, MatchArm, MatchArm)
+
 // All non-expression nodes.
 #define PAYKAN_NON_EXPR_NODES(NODE) \
   PAYKAN_DECL_NODES(NODE)           \
   PAYKAN_STMT_NODES(NODE)           \
   PAYKAN_TYPE_NODES(NODE)           \
+  PAYKAN_MATCHARM_NODES(NODE)       \
   PAYKAN_TOPLEVEL_NODES(NODE)
 
 // Every node kind.

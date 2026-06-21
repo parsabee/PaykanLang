@@ -156,6 +156,7 @@ std::string Sema::typeName(ast::Type *ty) {
     case ast::BuiltinType::Int:   return names::kTypeInt;
     case ast::BuiltinType::Float: return names::kTypeFloat;
     case ast::BuiltinType::Bool:  return names::kTypeBool;
+    case ast::BuiltinType::Char:  return names::kTypeChar;
     case ast::BuiltinType::Void:  return names::kTypeVoid;
     }
   }
@@ -269,6 +270,10 @@ ast::Type *Sema::ExprChecker::visitBoolLiteral(ast::BoolLiteral *) {
   return S.Ctx.getBoolTy();
 }
 
+ast::Type *Sema::ExprChecker::visitCharLiteral(ast::CharLiteral *) {
+  return S.Ctx.getCharTy();
+}
+
 ast::Type *Sema::ExprChecker::visitNoneLiteral(ast::NoneLiteral *) {
   return S.Ctx.getObjTy();
 }
@@ -278,6 +283,8 @@ ast::Type *Sema::ExprChecker::visitStringLiteral(ast::StringLiteral *) {
 }
 
 ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
+  if (node->getName() == names::kStdin)
+    return S.Ctx.getFileTy();
   return S.checkIdentLive(node->getName(), node->getLocation());
 }
 
@@ -621,14 +628,14 @@ ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
   auto *arrayTy = visit(node->getArray());
   if (!arrayTy) return nullptr;
 
-  // String subscript: str[idx] -> Str
+  // String subscript: str[idx] -> char
   if (arrayTy == S.Ctx.getStrTy()) {
     auto *idxTy = visit(node->getIndex());
     if (idxTy && idxTy != S.Ctx.getIntTy())
       S.error(node->getIndex()->getLocation(),
               "string index must be 'int', got '" + typeName(idxTy) + "'");
-    node->setResolvedType(S.Ctx.getStrTy());
-    return S.Ctx.getStrTy();
+    node->setResolvedType(S.Ctx.getCharTy());
+    return S.Ctx.getCharTy();
   }
 
   auto *at = ast::dyn_cast<ast::ArrayType>(arrayTy);
@@ -711,9 +718,12 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
   declareFunction(names::kStrInt,   StrTy, {Ctx.getIntTy()},   false, true);
   declareFunction(names::kStrFloat, StrTy, {Ctx.getFloatTy()}, false, true);
   declareFunction(names::kStrBool,  StrTy, {Ctx.getBoolTy()},  false, true);
+  declareFunction(names::kStrChar,  StrTy, {Ctx.getCharTy()},  false, true);
   declareFunction(names::kString,      StrTy, {StrTy},
                   false, true);
-  declareFunction(names::kOpen, Ctx.getObjTy(), {StrTy, StrTy}, false, true);
+  declareFunction(names::kOpen,     Ctx.getObjTy(), {StrTy, StrTy}, false, true);
+  declareFunction(names::kIntStr,   Ctx.getObjTy(), {StrTy},        false, true);
+  declareFunction(names::kFloatStr, Ctx.getObjTy(), {StrTy},        false, true);
 
   // Process imports before local declarations.
   llvm::StringSet<> localImportStack;
@@ -775,7 +785,8 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
       varName == names::kObj     || varName == names::kString ||
       varName == names::kFile    ||
       varName == names::kTypeInt || varName == names::kTypeBool ||
-      varName == names::kTypeFloat) {
+      varName == names::kTypeFloat || varName == names::kTypeChar ||
+      varName == names::kStdin) {
     error(node->getLocation(),
           "'" + varName + "' is a type name and cannot be used as a variable");
     return false;
@@ -932,9 +943,9 @@ bool detail::stmtAlwaysReturns(ast::Stmt *s) {
     return detail::blockAlwaysReturns(cs->getStatements());
   if (auto *ms = ast::dyn_cast<ast::MatchStmt>(s)) {
     bool hasWildcard = false;
-    for (const auto &arm : ms->getArms()) {
-      if (arm.isWildcard()) hasWildcard = true;
-      if (!detail::blockAlwaysReturns(arm.Body->getStatements()))
+    for (ast::MatchArm *arm : ms->getArms()) {
+      if (arm->isWildcard()) hasWildcard = true;
+      if (!detail::blockAlwaysReturns(arm->getBody()->getStatements()))
         return false;
     }
     return hasWildcard;
@@ -1187,9 +1198,9 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
   bool ok = true;
   bool seenWildcard = false;
 
-  for (auto &arm : node->getArms()) {
+  for (ast::MatchArm *arm : node->getArms()) {
     if (seenWildcard) {
-      error(arm.Loc, "unreachable arm: wildcard '_' must be the last arm");
+      error(arm->getLocation(), "unreachable arm: wildcard '_' must be the last arm");
       ok = false;
       continue;
     }
@@ -1197,12 +1208,12 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
     // Open a new scope for each arm (the binding, if any, lives here).
     ScopeGuard armGuard(*this);
 
-    if (arm.isWildcard()) {
+    if (arm->isWildcard()) {
       seenWildcard = true;
     } else {
       // 2. Resolve the arm's type annotation.
-      auto *resolvedArmTy = resolveType(arm.ArmType, arm.Loc, "match arm");
-      arm.ArmType = resolvedArmTy; // write canonical pointer back
+      auto *resolvedArmTy = resolveType(arm->getArmType(), arm->getLocation(), "match arm");
+      arm->setArmType(resolvedArmTy); // write canonical pointer back
       auto *armCt = resolvedArmTy ? ast::dyn_cast<ast::ClassType>(resolvedArmTy) : nullptr;
       auto *armAt = resolvedArmTy ? ast::dyn_cast<ast::ArrayType>(resolvedArmTy) : nullptr;
       if (!armCt && !armAt) {
@@ -1210,21 +1221,21 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
         // type is not a class or array. If resolveType already emitted
         // "unknown type", resolvedArmTy is null and that's enough.
         if (resolvedArmTy)
-          error(arm.Loc, "match arm type must be a class or array type");
+          error(arm->getLocation(), "match arm type must be a class or array type");
         ok = false;
         // Still try to visit the body to surface further errors.
       } else if (armAt) {
         // Array arm: the subject must be Obj (arrays are dispatched as Obj
         // at runtime — they share the Obj vtable header).
         if (subjectCt != Ctx.getObjTy()) {
-          error(arm.Loc,
+          error(arm->getLocation(),
                 "array match arm requires an 'Obj' subject, got '" +
                     subjectCt->getName() + "'");
           ok = false;
         }
-        if (arm.hasBinding()) {
-          if (!CurrentScope->declare(arm.Binding, armAt)) {
-            error(arm.Loc, "redeclaration of '" + arm.Binding + "' in match arm");
+        if (arm->hasBinding()) {
+          if (!CurrentScope->declare(arm->getBinding(), armAt)) {
+            error(arm->getLocation(), "redeclaration of '" + arm->getBinding() + "' in match arm");
             ok = false;
           }
         }
@@ -1234,15 +1245,15 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
         //    descends from Obj; the subjectCt == Ctx.getObjTy() case passes
         //    trivially because every armCt IS a subclass of Obj.)
         if (!isSubclassOf(armCt, subjectCt)) {
-          error(arm.Loc, "type '" + typeName(armCt) + "' is not a subclass of '" +
+          error(arm->getLocation(), "type '" + typeName(armCt) + "' is not a subclass of '" +
                              subjectCt->getName() + "'");
           ok = false;
         }
 
         // 4. Declare the binding variable with the narrowed (arm) type.
-        if (arm.hasBinding()) {
-          if (!CurrentScope->declare(arm.Binding, armCt)) {
-            error(arm.Loc, "redeclaration of '" + arm.Binding + "' in match arm");
+        if (arm->hasBinding()) {
+          if (!CurrentScope->declare(arm->getBinding(), armCt)) {
+            error(arm->getLocation(), "redeclaration of '" + arm->getBinding() + "' in match arm");
             ok = false;
           }
         }
@@ -1250,7 +1261,7 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
     }
 
     // 5. Recursively type-check the arm body.
-    for (auto *stmt : arm.Body->getStatements())
+    for (auto *stmt : arm->getBody()->getStatements())
       if (!visit(stmt)) ok = false;
   }
 
