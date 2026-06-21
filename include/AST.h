@@ -36,6 +36,9 @@ public:
   bool isValid() const { return LineStart > 0; }
 };
 
+// Forward declaration — Type is defined later in this header.
+class Type;
+
 // Base AST node with LLVM-style RTTI
 class ASTNode {
 public:
@@ -155,8 +158,13 @@ public:
 
 // Base for all expressions
 class Expr : public ASTNode {
+  Type *ResolvedType = nullptr; // set by Sema after type-checking
+
 public:
   Expr(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
+
+  void setResolvedType(Type *ty) { ResolvedType = ty; }
+  Type *getResolvedType() const { return ResolvedType; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() >= NK_IntegerLiteral && N->getKind() <= NK_SubscriptExpr;
@@ -665,7 +673,6 @@ class CallExpr : public Expr {
 private:
   std::string CalleeName;
   std::vector<Expr *> Arguments;
-  Type *ResolvedType = nullptr; // set by Sema
 
 public:
   CallExpr(SourceLocation loc, const std::string &callee, std::vector<Expr *> args)
@@ -674,10 +681,6 @@ public:
   const std::string &getCalleeName() const { return CalleeName; }
   const std::vector<Expr *> &getArguments() const { return Arguments; }
   size_t getNumArguments() const { return Arguments.size(); }
-
-  // Set/get the resolved return type (filled in by Sema).
-  void setResolvedType(Type *ty) { ResolvedType = ty; }
-  Type *getResolvedType() const { return ResolvedType; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_CallExpr; }
 };
@@ -688,7 +691,6 @@ private:
   Expr *Receiver;
   std::string MethodName;
   std::vector<Expr *> Arguments;
-  Type *ResolvedType = nullptr; // set by Sema
 
 public:
   MethodCallExpr(SourceLocation loc, Expr *receiver, const std::string &method,
@@ -701,10 +703,6 @@ public:
   const std::vector<Expr *> &getArguments() const { return Arguments; }
   size_t getNumArguments() const { return Arguments.size(); }
 
-  // Set/get the resolved return type (filled in by Sema).
-  void setResolvedType(Type *ty) { ResolvedType = ty; }
-  Type *getResolvedType() const { return ResolvedType; }
-
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_MethodCallExpr;
   }
@@ -716,7 +714,6 @@ private:
   Expr *Condition;
   Expr *TrueExpr;
   Expr *FalseExpr;
-  Type *ResolvedType = nullptr; // set by Sema
 
 public:
   TernaryExpr(SourceLocation loc, Expr *cond, Expr *trueExpr, Expr *falseExpr)
@@ -726,9 +723,6 @@ public:
   Expr *getCondition() const { return Condition; }
   Expr *getTrueExpr() const { return TrueExpr; }
   Expr *getFalseExpr() const { return FalseExpr; }
-
-  void setResolvedType(Type *ty) { ResolvedType = ty; }
-  Type *getResolvedType() const { return ResolvedType; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_TernaryExpr;
@@ -740,7 +734,6 @@ class MemberAccessExpr : public Expr {
 private:
   Expr *Receiver;
   std::string FieldName;
-  Type *ResolvedType = nullptr; // set by Sema
 
 public:
   MemberAccessExpr(SourceLocation loc, Expr *receiver,
@@ -749,9 +742,6 @@ public:
 
   Expr *getReceiver() const { return Receiver; }
   const std::string &getFieldName() const { return FieldName; }
-
-  void setResolvedType(Type *ty) { ResolvedType = ty; }
-  Type *getResolvedType() const { return ResolvedType; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_MemberAccessExpr;
@@ -1067,7 +1057,6 @@ public:
 // A non-empty literal's element type is inferred by Sema.
 class ArrayLiteralExpr : public Expr {
   std::vector<Expr *> Elements;
-  Type *ResolvedType = nullptr; // set by Sema (the full ArrayType)
 
 public:
   ArrayLiteralExpr(SourceLocation loc, std::vector<Expr *> elems)
@@ -1076,9 +1065,6 @@ public:
   const std::vector<Expr *> &getElements() const { return Elements; }
   size_t getNumElements() const { return Elements.size(); }
   bool isEmpty() const { return Elements.empty(); }
-
-  void setResolvedType(Type *ty) { ResolvedType = ty; }
-  Type *getResolvedType() const { return ResolvedType; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_ArrayLiteralExpr;
@@ -1089,7 +1075,6 @@ public:
 class SubscriptExpr : public Expr {
   Expr *Array;
   Expr *Index;
-  Type *ResolvedType = nullptr; // set by Sema (element type of array)
 
 public:
   SubscriptExpr(SourceLocation loc, Expr *array, Expr *index)
@@ -1097,9 +1082,6 @@ public:
 
   Expr *getArray() const { return Array; }
   Expr *getIndex() const { return Index; }
-
-  void setResolvedType(Type *ty) { ResolvedType = ty; }
-  Type *getResolvedType() const { return ResolvedType; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_SubscriptExpr;
