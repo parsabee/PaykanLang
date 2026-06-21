@@ -105,6 +105,25 @@ TEST(Class, MultipleClasses) {
   EXPECT_TRUE(ok);
 }
 
+TEST(Class, FuncBeforeClass) {
+  auto [ok, _] = parse(R"(
+    fn helper() -> int { return 1; }
+    class A { a: int; }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_TRUE(ok);
+}
+
+TEST(Class, InterleavedDecls) {
+  auto [ok, _] = parse(R"(
+    class A { a: int; }
+    fn helper() -> int { return 0; }
+    class B { b: float; }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_TRUE(ok);
+}
+
 TEST(Class, MissingCloseBrace) {
   auto [ok, _] = parse(R"(
     class A {

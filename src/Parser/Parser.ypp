@@ -17,6 +17,13 @@
   }
 
   using namespace paykan::ast;
+
+  // Accumulator used while parsing top-level declarations in any order.
+  struct TLDeclBag {
+    std::vector<ImportDecl *> Imports;
+    std::vector<ClassDecl  *> Classes;
+    std::vector<FuncDecl   *> Funcs;
+  };
 }
 
 // The parsing context.
@@ -115,14 +122,12 @@
 %type <std::vector<Param>> paramList
 %type <Param> param
 %type <FuncDecl *> funcDecl
-%type <std::vector<FuncDecl *>> funcDeclList
 %type <ImportDecl *> importDecl
-%type <std::vector<ImportDecl *>> importList
 %type <std::string> modulePath
 %type <std::pair<std::string,std::string>> importedModule
 %type <std::vector<std::pair<std::string,std::string>>> importedModuleList
 %type <ClassDecl *> classDecl
-%type <std::vector<ClassDecl *>> classDeclList
+%type <TLDeclBag> topLevelDeclList
 %type <ClassBody> classMemberList
 %type <MatchStmt *> matchStmt
 %type <std::vector<MatchArm>> matchArmList
@@ -131,14 +136,17 @@
 
 %start translationUnit;
 
-translationUnit : importList classDeclList funcDeclList
-                                    { $$ = impl(drv).Ctx.make<TranslationUnit>(loc(@1, @3), std::move($1), std::move($2), std::move($3));
+translationUnit : topLevelDeclList
+                                    { $$ = impl(drv).Ctx.make<TranslationUnit>(loc(@1, @1),
+                                           std::move($1.Imports), std::move($1.Classes), std::move($1.Funcs));
                                       impl(drv).Root = $$;
                                     }
 ;
 
-importList: %empty                  { $$ = std::vector<ImportDecl *>(); }
-    | importList importDecl         { $$ = std::move($1); $$.push_back($2); }
+topLevelDeclList: %empty            { $$ = TLDeclBag{}; }
+    | topLevelDeclList importDecl   { $$ = std::move($1); $$.Imports.push_back($2); }
+    | topLevelDeclList classDecl    { $$ = std::move($1); $$.Classes.push_back($2); }
+    | topLevelDeclList funcDecl     { $$ = std::move($1); $$.Funcs.push_back($2); }
     ;
 
 importDecl:
@@ -199,14 +207,6 @@ importedModuleList:
 modulePath:
       IDENT                         { $$ = $1; }
     | modulePath "::" IDENT         { $$ = $1 + "::" + $3; }
-    ;
-
-funcDeclList: %empty                { $$ = std::vector<FuncDecl *>(); }
-    | funcDeclList funcDecl          { $$ = std::move($1); $$.push_back($2); }
-    ;
-
-classDeclList: %empty               { $$ = std::vector<ClassDecl *>(); }
-    | classDeclList classDecl        { $$ = std::move($1); $$.push_back($2); }
     ;
 
 classDecl:
