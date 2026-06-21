@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace paykan {
@@ -842,6 +843,8 @@ class ClassType : public Type {
 
   // All virtual methods in layout order (vtable). __init__ is NOT here.
   std::vector<MethodDecl *> VTable;
+  // O(1) index: method name -> vtable slot index. Kept in sync with VTable.
+  std::unordered_map<std::string, int> VTableIndex;
 
   // The class initialiser (__init__), stored separately because it is a
   // static function, not a virtual method, and has no vtable slot.
@@ -850,6 +853,12 @@ class ClassType : public Type {
   // When true, no user class may inherit from this type.
   bool Final = false;
 
+  void rebuildVTableIndex() {
+    VTableIndex.clear();
+    for (int i = 0, n = static_cast<int>(VTable.size()); i < n; ++i)
+      VTableIndex[VTable[i]->getName()] = i;
+  }
+
 public:
   ClassType(SourceLocation loc, const std::string &name,
             ClassType *superClass = nullptr)
@@ -857,6 +866,7 @@ public:
     // Inherit parent vtable and operator support.
     if (SuperClass) {
       VTable = SuperClass->VTable;
+      rebuildVTableIndex();
       // Copy the parent's operator bitmasks so that, e.g., every class
       // that descends from Obj automatically supports == and !=.
       for (int op = 0; op < static_cast<int>(UnaryOpcode::Count); ++op)
@@ -880,6 +890,7 @@ public:
     SuperClass = sc;
     if (!sc) return;
     VTable = sc->VTable;
+    rebuildVTableIndex();
     for (int op = 0; op < static_cast<int>(UnaryOpcode::Count); ++op)
       if (sc->hasUnaryOp(static_cast<UnaryOpcode>(op)))
         addUnaryOp(static_cast<UnaryOpcode>(op));
@@ -909,6 +920,7 @@ public:
   /// Call this after the parent's methods are fully populated.
   void reinheritVTable(ClassType *parent) {
     VTable = parent->VTable;
+    rebuildVTableIndex();
     // Do NOT inherit InitMethod — every class has its own or none.
   }
 

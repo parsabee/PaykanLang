@@ -46,6 +46,8 @@ class ASTContext {
   // Per-element specialized array ClassTypes (lazily created).
   // Key: element Type* pointer (canonical within this ASTContext).
   std::unordered_map<Type *, ClassType *> SpecializedArrayTypes;
+  // Reverse map for O(1) getSpecializedArrayElemType lookups.
+  std::unordered_map<ClassType *, Type *> SpecializedArrayElemTypes;
 
   // -- Bootstrap helpers (called from the constructor) ----------------------
   void buildObjectType();

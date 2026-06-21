@@ -66,6 +66,14 @@ void BuiltinType::initOps() {
     addBinaryOp(BinaryOpcode::And);
     addBinaryOp(BinaryOpcode::Or);
     break;
+  case Char:
+    addBinaryOp(BinaryOpcode::Eq);
+    addBinaryOp(BinaryOpcode::Ne);
+    addBinaryOp(BinaryOpcode::Lt);
+    addBinaryOp(BinaryOpcode::Gt);
+    addBinaryOp(BinaryOpcode::Le);
+    addBinaryOp(BinaryOpcode::Ge);
+    break;
   case Void:
     break;
   }
@@ -80,29 +88,28 @@ void ClassType::addMethod(MethodDecl *m) {
     return;
   }
   // Check if this overrides an existing slot.
-  for (size_t i = 0; i < VTable.size(); ++i) {
-    if (VTable[i]->getName() == m->getName()) {
-      VTable[i] = m; // override
-      return;
-    }
+  auto it = VTableIndex.find(m->getName());
+  if (it != VTableIndex.end()) {
+    VTable[it->second] = m; // override, slot index unchanged
+    return;
   }
-  VTable.push_back(m); // new slot
+  // New slot.
+  VTableIndex[m->getName()] = static_cast<int>(VTable.size());
+  VTable.push_back(m);
 }
 
 int ClassType::getVTableIndex(const std::string &name) const {
-  for (size_t i = 0; i < VTable.size(); ++i)
-    if (VTable[i]->getName() == name)
-      return static_cast<int>(i);
-  return -1;
+  auto it = VTableIndex.find(name);
+  return it != VTableIndex.end() ? it->second : -1;
 }
 
 MethodDecl *ClassType::findMethod(const std::string &name) const {
   // __init__ lives outside the vtable.
   if (name == names::kMethodInit)
     return InitMethod; // nullptr if not declared in this class
-  for (auto *m : VTable)
-    if (m->getName() == name)
-      return m;
+  auto it = VTableIndex.find(name);
+  if (it != VTableIndex.end())
+    return VTable[it->second];
   // Walk up the inheritance chain.
   if (SuperClass)
     return SuperClass->findMethod(name);

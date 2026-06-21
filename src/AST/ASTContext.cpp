@@ -11,21 +11,29 @@ ASTContext::ASTContext()
     : IntTy(make<BuiltinType>(SourceLocation(), BuiltinType::Int)),
       FloatTy(make<BuiltinType>(SourceLocation(), BuiltinType::Float)),
       BoolTy(make<BuiltinType>(SourceLocation(), BuiltinType::Bool)),
+      CharTy(make<BuiltinType>(SourceLocation(), BuiltinType::Char)),
       VoidTy(make<BuiltinType>(SourceLocation(), BuiltinType::Void)),
       ObjTy(nullptr), StrTy(nullptr), ArrayTy(nullptr), FileTy(nullptr),
-      ErrorTy(nullptr) {
-  // Pre-allocate Obj, Str, Array, File, and Error so method signatures are
-  // correct from the start.
-  ObjTy   = make<ClassType>(SourceLocation(), names::kObj,    nullptr);
-  StrTy   = make<ClassType>(SourceLocation(), names::kString, nullptr);
-  ArrayTy = make<ClassType>(SourceLocation(), names::kArray,  nullptr);
-  FileTy  = make<ClassType>(SourceLocation(), names::kFile,   nullptr);
-  ErrorTy = make<ClassType>(SourceLocation(), names::kError,  nullptr);
+      ErrorTy(nullptr), IntBoxTy(nullptr), FloatBoxTy(nullptr),
+      BoolBoxTy(nullptr) {
+  // Pre-allocate Obj, Str, Array, File, Error, and boxed primitives so all
+  // method signatures are correct from the start.
+  ObjTy = make<ClassType>(SourceLocation(), names::kObj, nullptr);
+  StrTy = make<ClassType>(SourceLocation(), names::kString, nullptr);
+  ArrayTy = make<ClassType>(SourceLocation(), names::kArray, nullptr);
+  FileTy = make<ClassType>(SourceLocation(), names::kFile, nullptr);
+  ErrorTy = make<ClassType>(SourceLocation(), names::kError, nullptr);
+  IntBoxTy = make<ClassType>(SourceLocation(), names::kIntBox, nullptr);
+  FloatBoxTy = make<ClassType>(SourceLocation(), names::kFloatBox, nullptr);
+  BoolBoxTy = make<ClassType>(SourceLocation(), names::kBoolBox, nullptr);
   buildObjectType();
   buildStringType();
   buildArrayType();
   buildFileType();
   buildErrorType();
+  buildBoxedIntType();
+  buildBoxedFloatType();
+  buildBoxedBoolType();
 }
 
 // -- Bootstrap Obj ----------------------------------------------------------
@@ -70,11 +78,11 @@ void ASTContext::buildStringType() {
       .addOp(BinaryOpcode::Add)
       .addOp(BinaryOpcode::Eq)
       .addOp(BinaryOpcode::Ne)
-      .method(names::kMethodDestroy, VoidTy)            // slot 0 — override
-      .method(names::kMethodToString, StrTy)            // slot 1 — override
-      .method(names::kMethodEquals, BoolTy, {ObjTy})    // slot 2 — override
-      .method(names::kMethodLength, IntTy)              // new
-      .method(names::kMethodConcat, VoidTy, {StrTy})     // new
+      .method(names::kMethodDestroy, VoidTy)         // slot 0 — override
+      .method(names::kMethodToString, StrTy)         // slot 1 — override
+      .method(names::kMethodEquals, BoolTy, {ObjTy}) // slot 2 — override
+      .method(names::kMethodLength, IntTy)           // new
+      .method(names::kMethodConcat, VoidTy, {StrTy}) // new
       .build();
 }
 
@@ -109,11 +117,15 @@ void ASTContext::buildFileType() {
   ClassTypeBuilder(*this, FileTy)
       .addOp(BinaryOpcode::Eq)
       .addOp(BinaryOpcode::Ne)
-      .method(names::kMethodDestroy,  VoidTy)            // slot 0 — override
-      .method(names::kMethodToString, StrTy)             // slot 1 — override
-      .method(names::kMethodEquals,   BoolTy, {ObjTy})   // slot 2 — override
-      .method(names::kMethodWrite,    VoidTy, {StrTy})   // slot 3 — new
-      .method(names::kMethodReadln,   ObjTy)             // slot 4 — new: Str on success, None at EOF
+      .method(names::kMethodDestroy, VoidTy)         // slot 0 — override
+      .method(names::kMethodToString, StrTy)         // slot 1 — override
+      .method(names::kMethodEquals, BoolTy, {ObjTy}) // slot 2 — override
+      .method(names::kMethodWrite, VoidTy, {StrTy})  // slot 3 — new
+      .method(names::kMethodReadln,
+              ObjTy) // slot 4 — new: Str on success, None at EOF
+      .method(names::kMethodReadBytes, ObjTy,
+              {IntTy})                   // slot 5 — new: read up to n bytes
+      .method(names::kMethodRead, ObjTy) // slot 6 — new: read all remaining
       .build();
 }
 
@@ -129,9 +141,52 @@ void ASTContext::buildErrorType() {
   ClassTypeBuilder(*this, ErrorTy)
       .addOp(BinaryOpcode::Eq)
       .addOp(BinaryOpcode::Ne)
-      .method(names::kMethodDestroy,  VoidTy)            // slot 0 — override
-      .method(names::kMethodToString, StrTy)             // slot 1 — override
-      .method(names::kMethodEquals,   BoolTy, {ObjTy})   // slot 2 — override
+      .method(names::kMethodDestroy, VoidTy)         // slot 0 — override
+      .method(names::kMethodToString, StrTy)         // slot 1 — override
+      .method(names::kMethodEquals, BoolTy, {ObjTy}) // slot 2 — override
+      .build();
+}
+
+// -- Bootstrap Int / Float / Bool (boxed primitives) -------------------------
+//
+// These class types mirror the C runtime's PaykanInt / PaykanFloat / PaykanBool
+// structs.  They inherit Obj and override only the three base vtable slots
+// (destroy / toString / equals).  Marked final so no user class may extend
+// them.
+
+void ASTContext::buildBoxedIntType() {
+  IntBoxTy->setSuperClass(ObjTy);
+  IntBoxTy->setFinal();
+  ClassTypeBuilder(*this, IntBoxTy)
+      .addOp(BinaryOpcode::Eq)
+      .addOp(BinaryOpcode::Ne)
+      .method(names::kMethodDestroy, VoidTy)
+      .method(names::kMethodToString, StrTy)
+      .method(names::kMethodEquals, BoolTy, {ObjTy})
+      .build();
+}
+
+void ASTContext::buildBoxedFloatType() {
+  FloatBoxTy->setSuperClass(ObjTy);
+  FloatBoxTy->setFinal();
+  ClassTypeBuilder(*this, FloatBoxTy)
+      .addOp(BinaryOpcode::Eq)
+      .addOp(BinaryOpcode::Ne)
+      .method(names::kMethodDestroy, VoidTy)
+      .method(names::kMethodToString, StrTy)
+      .method(names::kMethodEquals, BoolTy, {ObjTy})
+      .build();
+}
+
+void ASTContext::buildBoxedBoolType() {
+  BoolBoxTy->setSuperClass(ObjTy);
+  BoolBoxTy->setFinal();
+  ClassTypeBuilder(*this, BoolBoxTy)
+      .addOp(BinaryOpcode::Eq)
+      .addOp(BinaryOpcode::Ne)
+      .method(names::kMethodDestroy, VoidTy)
+      .method(names::kMethodToString, StrTy)
+      .method(names::kMethodEquals, BoolTy, {ObjTy})
       .build();
 }
 
@@ -146,10 +201,16 @@ void ASTContext::buildErrorType() {
 static std::string elemTypeName(ast::Type *ty) {
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty)) {
     switch (bt->getTypeKind()) {
-    case ast::BuiltinType::Int:   return "int";
-    case ast::BuiltinType::Float: return "float";
-    case ast::BuiltinType::Bool:  return "bool";
-    case ast::BuiltinType::Void:  return "void";
+    case ast::BuiltinType::Int:
+      return "int";
+    case ast::BuiltinType::Float:
+      return "float";
+    case ast::BuiltinType::Bool:
+      return "bool";
+    case ast::BuiltinType::Char:
+      return "char";
+    case ast::BuiltinType::Void:
+      return "void";
     }
   }
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ty))
@@ -162,21 +223,21 @@ ClassType *ASTContext::getOrCreateSpecializedArrayType(Type *elemTy) {
   if (it != SpecializedArrayTypes.end())
     return it->second;
 
-  std::string name = std::string(names::kArray) + "<" + elemTypeName(elemTy) + ">";
+  std::string name =
+      std::string(names::kArray) + "<" + elemTypeName(elemTy) + ">";
   auto *specTy = make<ClassType>(SourceLocation(), name, ArrayTy);
   ClassTypeBuilder(*this, specTy)
       .method(names::kPush, VoidTy, {elemTy}) // slot 0 in specialized type
-      .method(names::kPop,  elemTy)           // slot 1 in specialized type
+      .method(names::kPop, elemTy)            // slot 1 in specialized type
       .build();
   SpecializedArrayTypes[elemTy] = specTy;
+  SpecializedArrayElemTypes[specTy] = elemTy;
   return specTy;
 }
 
 Type *ASTContext::getSpecializedArrayElemType(ClassType *ct) const {
-  for (const auto &kv : SpecializedArrayTypes)
-    if (kv.second == ct)
-      return kv.first;
-  return nullptr;
+  auto it = SpecializedArrayElemTypes.find(ct);
+  return it != SpecializedArrayElemTypes.end() ? it->second : nullptr;
 }
 
 // -- ClassTypeBuilder --------------------------------------------------------
@@ -219,19 +280,24 @@ ClassType *ASTContext::ClassTypeBuilder::build() {
 
 // -- ASTContext --------------------------------------------------------------
 
-ASTContext::ClassTypeBuilder
-ASTContext::buildClassType(const std::string &name,
-                           ClassType *superClass) {
+ASTContext::ClassTypeBuilder ASTContext::buildClassType(const std::string &name,
+                                                        ClassType *superClass) {
   auto *ty = make<ClassType>(SourceLocation(), name, superClass);
   return ClassTypeBuilder(*this, ty);
 }
 
 BuiltinType *ASTContext::getBuiltinType(BuiltinType::Kind k) const {
   switch (k) {
-  case BuiltinType::Int:   return IntTy;
-  case BuiltinType::Float: return FloatTy;
-  case BuiltinType::Bool:  return BoolTy;
-  case BuiltinType::Void:  return VoidTy;
+  case BuiltinType::Int:
+    return IntTy;
+  case BuiltinType::Float:
+    return FloatTy;
+  case BuiltinType::Bool:
+    return BoolTy;
+  case BuiltinType::Char:
+    return CharTy;
+  case BuiltinType::Void:
+    return VoidTy;
   }
   return VoidTy;
 }
@@ -257,10 +323,16 @@ void ASTContext::addClassTypeAlias(const std::string &alias, ClassType *ct) {
 }
 
 Type *ASTContext::lookupType(const std::string &name) const {
-  if (name == names::kTypeInt)   return IntTy;
-  if (name == names::kTypeFloat) return FloatTy;
-  if (name == names::kTypeBool)  return BoolTy;
-  if (name == names::kTypeVoid)  return VoidTy;
+  if (name == names::kTypeInt)
+    return IntTy;
+  if (name == names::kTypeFloat)
+    return FloatTy;
+  if (name == names::kTypeBool)
+    return BoolTy;
+  if (name == names::kTypeChar)
+    return CharTy;
+  if (name == names::kTypeVoid)
+    return VoidTy;
   return lookupClassType(name);
 }
 

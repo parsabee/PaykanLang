@@ -5,7 +5,9 @@
 #include "Names.h"
 #include "Runtime.h"
 
+#include <cassert>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
@@ -137,6 +139,17 @@ const RuntimeSymbol kRuntimeSymbols[] = {
 llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
                               std::unique_ptr<llvm::LLVMContext> ctx,
                               std::vector<std::string> args) {
+#ifndef NDEBUG
+  {
+    std::unordered_set<std::string_view> registered;
+    for (const auto &sym : kRuntimeSymbols)
+      registered.insert(sym.Name);
+    for (const char *name : names::kCodeGenRequiredSymbols)
+      assert(registered.count(name) &&
+             "JIT symbol table is missing a symbol required by CodeGen");
+  }
+#endif
+
   // Initialise native target (idempotent).
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
