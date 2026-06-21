@@ -276,6 +276,9 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
     auto *entry = llvm::BasicBlock::Create(CG.LLVMCtx, kIREntry, fn);
     CG.Builder.SetInsertPoint(entry);
 
+    llvm::SmallPtrSet<llvm::Value *, 16> savedTemps;
+    std::swap(savedTemps, CG.OwnedStringTemps);
+
     {
       CodeGen::ScopeGuard guard(CG);
 
@@ -301,6 +304,8 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
       for (auto *stmt : funcDecl->getBody()->getStatements())
         CG.visit(stmt);
     }
+
+    std::swap(CG.OwnedStringTemps, savedTemps);
 
     // Add implicit return if the block has no terminator.
     if (!CG.Builder.GetInsertBlock()->getTerminator()) {
@@ -512,20 +517,33 @@ void ClassCodeGen::emitDestructor(ast::ClassDecl *node, ast::ClassType *ct) {
 
   // Run the user-defined destroy body (if any) inside its own scope.
   if (userDestroy && userDestroy->getBody()) {
-    CodeGen::ScopeGuard guard(CG);
+    // Create the cleanup block that always runs field teardown, even when the
+    // user body terminates early with an explicit `return`.
+    auto *cleanupBB = llvm::BasicBlock::Create(CG.LLVMCtx, "dtor.cleanup", fn);
 
-    // 'self' is a raw pointer — not ref-counted inside the destructor body.
-    auto *selfAlloca = CG.createEntryAlloca(fn, kSelf, ptrTy);
-    CG.Builder.CreateStore(fn->getArg(0), selfAlloca);
-    CG.CurrentScope->declareUnowned(kSelf, selfAlloca, ct);
+    {
+      CodeGen::ScopeGuard guard(CG);
 
-    for (auto *stmt : userDestroy->getBody()->getStatements())
-      CG.visit(stmt);
+      // 'self' is a raw pointer — not ref-counted inside the destructor body.
+      auto *selfAlloca = CG.createEntryAlloca(fn, kSelf, ptrTy);
+      CG.Builder.CreateStore(fn->getArg(0), selfAlloca);
+      CG.CurrentScope->declareUnowned(kSelf, selfAlloca, ct);
+
+      for (auto *stmt : userDestroy->getBody()->getStatements())
+        CG.visit(stmt);
+    }
+
+    // Redirect the user-body exit to the cleanup block, replacing any `ret
+    // void` that an early `return` statement may have emitted.
+    auto *exitBB = CG.Builder.GetInsertBlock();
+    if (exitBB->getTerminator())
+      exitBB->getTerminator()->eraseFromParent();
+    CG.Builder.CreateBr(cleanupBB);
+    CG.Builder.SetInsertPoint(cleanupBB);
   }
 
-  // Release owned fields and free the struct — unless the user body already
-  // terminated the block (e.g. an explicit `return`).
-  if (!CG.Builder.GetInsertBlock()->getTerminator()) {
+  // Always release ref-counted fields and free the struct.
+  {
     llvm::Value *self = fn->getArg(0);
 
     // Release every reference-counted field (Str, Obj, class, array).

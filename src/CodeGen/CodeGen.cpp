@@ -2095,6 +2095,11 @@ llvm::Value *CodeGen::visitFuncDecl(ast::FuncDecl *node) {
   auto *entry = llvm::BasicBlock::Create(LLVMCtx, kIREntry, fn);
   Builder.SetInsertPoint(entry);
 
+  // Isolate string-temp tracking: stale entries from a sibling function must
+  // not affect this body's ownership decisions.
+  llvm::SmallPtrSet<llvm::Value *, 16> savedStringTemps;
+  std::swap(savedStringTemps, OwnedStringTemps);
+
   {
     ScopeGuard guard(*this);
     // Create allocas for each parameter.
@@ -2120,6 +2125,8 @@ llvm::Value *CodeGen::visitFuncDecl(ast::FuncDecl *node) {
     for (auto *stmt : node->getBody()->getStatements())
       visit(stmt);
   }
+
+  std::swap(OwnedStringTemps, savedStringTemps);
 
   // If no terminator, add implicit return.
   if (!Builder.GetInsertBlock()->getTerminator()) {
