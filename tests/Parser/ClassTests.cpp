@@ -210,7 +210,7 @@ TEST(Class, MatchEmptyBody) {
       return 0;
     }
   )");
-  EXPECT_TRUE(ok);
+  EXPECT_FALSE(ok); // empty match arm list is a parse error
 }
 
 TEST(Class, MatchWithStmtsInArm) {

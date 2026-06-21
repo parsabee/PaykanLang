@@ -51,7 +51,8 @@ public:
     NK_ClassDecl,
 
     // Statements
-    NK_CompoundStmt,
+    NK_StmtBegin,
+    NK_CompoundStmt = NK_StmtBegin,
     NK_ReturnStmt,
     NK_AssignStmt,
     NK_DeclStmt,
@@ -63,6 +64,7 @@ public:
     NK_MemberAssignStmt,
     NK_MatchStmt,
     NK_SubscriptAssignStmt,
+    NK_StmtEnd = NK_SubscriptAssignStmt,
 
     // Expressions
     NK_IntegerLiteral,
@@ -152,7 +154,7 @@ public:
   Stmt(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_CompoundStmt && N->getKind() <= NK_SubscriptAssignStmt;
+    return N->getKind() >= NK_StmtBegin && N->getKind() <= NK_StmtEnd;
   }
 };
 

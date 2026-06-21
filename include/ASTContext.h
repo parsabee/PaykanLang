@@ -23,6 +23,7 @@ class ASTContext {
   BuiltinType *IntTy;
   BuiltinType *FloatTy;
   BuiltinType *BoolTy;
+  BuiltinType *CharTy;
   BuiltinType *VoidTy;
 
   // Canonical class types.
@@ -34,6 +35,10 @@ class ASTContext {
   ClassType *FileTy;
   // Canonical error type (ClassType inheriting Obj, returned by open() on failure).
   ClassType *ErrorTy;
+  // Boxed primitive types (ClassType inheriting Obj, returned by IntStr/FloatStr).
+  ClassType *IntBoxTy;
+  ClassType *FloatBoxTy;
+  ClassType *BoolBoxTy;
 
   // Registry of all class types, keyed by name.
   std::unordered_map<std::string, ClassType *> ClassTypes;
@@ -48,9 +53,16 @@ class ASTContext {
   void buildArrayType();
   void buildFileType();
   void buildErrorType();
+  void buildBoxedIntType();
+  void buildBoxedFloatType();
+  void buildBoxedBoolType();
 
 public:
   ASTContext();
+  ASTContext(const ASTContext &) = delete;
+  ASTContext &operator=(const ASTContext &) = delete;
+  ASTContext(ASTContext &&) = delete;
+  ASTContext &operator=(ASTContext &&) = delete;
 
   /// Create an AST node of type T, store it in the pool, return a raw pointer.
   template <ASTNodeType T, typename... Args>
@@ -106,14 +118,18 @@ public:
   BuiltinType *getIntTy()   const { return IntTy; }
   BuiltinType *getFloatTy() const { return FloatTy; }
   BuiltinType *getBoolTy()  const { return BoolTy; }
+  BuiltinType *getCharTy()  const { return CharTy; }
   BuiltinType *getVoidTy()  const { return VoidTy; }
 
   // Canonical class type accessors.
-  ClassType *getObjTy()   const { return ObjTy; }
-  ClassType *getStrTy()   const { return StrTy; }
-  ClassType *getArrayTy() const { return ArrayTy; }
-  ClassType *getFileTy()  const { return FileTy; }
-  ClassType *getErrorTy() const { return ErrorTy; }
+  ClassType *getObjTy()      const { return ObjTy; }
+  ClassType *getStrTy()      const { return StrTy; }
+  ClassType *getArrayTy()    const { return ArrayTy; }
+  ClassType *getFileTy()     const { return FileTy; }
+  ClassType *getErrorTy()    const { return ErrorTy; }
+  ClassType *getIntBoxTy()   const { return IntBoxTy; }
+  ClassType *getFloatBoxTy() const { return FloatBoxTy; }
+  ClassType *getBoolBoxTy()  const { return BoolBoxTy; }
 
   /// Return (creating if needed) the specialized ClassType for arrays whose
   /// elements have type @p elemTy.  The returned type is a subtype of ArrayTy

@@ -265,8 +265,8 @@ TEST(StringVtable, ToStringViaVtable) {
 
 TEST(StringVtable, LengthViaVtable) {
   PaykanString *s = PaykanString_new("hello", 5);
-  auto *lenFn = (int64_t(*)(PaykanObject *))((void **)s->vtable)[3];
-  EXPECT_EQ(lenFn((PaykanObject *)s), 5);
+  auto *vt = (PaykanStringVTable *)s->vtable;
+  EXPECT_EQ(vt->length((PaykanObject *)s), 5);
   PaykanString_destroy((PaykanObject *)s);
 }
 

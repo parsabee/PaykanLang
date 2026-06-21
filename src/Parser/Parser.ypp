@@ -282,7 +282,7 @@ matchStmt: "match" expression "{" matchArmList "}"
                                     { $$ = impl(drv).Ctx.make<MatchStmt>(loc(@1, @5), $2, std::move($4)); }
     ;
 
-matchArmList: %empty                { $$ = std::vector<MatchArm>(); }
+matchArmList: matchArm              { $$ = std::vector<MatchArm>(); $$.push_back(std::move($1)); }
     | matchArmList matchArm         { $$ = std::move($1); $$.push_back(std::move($2)); }
     ;
 
