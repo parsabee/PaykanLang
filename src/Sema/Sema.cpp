@@ -896,7 +896,7 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
   std::vector<ast::Type *> paramTypes;
   for (auto &p : node->getParams()) {
     auto *ty = resolveType(p.ParamType, node->getLocation(),
-                           "parameter '" + p.Name + "'");
+                           "parameter '" + p.getName() + "'");
     if (!ty)
       return false;
     paramTypes.push_back(ty);
@@ -916,7 +916,7 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
   {
     ScopeGuard guard(*this);
     for (size_t i = 0; i < node->getParams().size(); ++i)
-      CurrentScope->declare(node->getParams()[i].Name, paramTypes[i]);
+      CurrentScope->declare(node->getParams()[i].getName(), paramTypes[i]);
     bool ok = true;
     for (auto *stmt : node->getBody()->getStatements())
       if (!visit(stmt))

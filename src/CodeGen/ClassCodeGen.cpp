@@ -262,7 +262,7 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
     fn->arg_begin()->setName(kSelf);
     for (size_t i = 0; i < funcDecl->getParams().size(); ++i)
       std::next(fn->arg_begin(), static_cast<int>(i + 1))
-          ->setName(funcDecl->getParams()[i].Name);
+          ->setName(funcDecl->getParams()[i].getName());
 
     // Save outer codegen state.
     auto *savedBB            = CG.Builder.GetInsertBlock();
@@ -292,12 +292,12 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
         auto &p    = funcDecl->getParams()[i];
         auto *arg  = fn->getArg(static_cast<unsigned>(i + 1));
         auto *pty  = md->getParamTypes()[i];
-        auto *alloca = CG.createEntryAlloca(fn, p.Name, arg->getType());
+        auto *alloca = CG.createEntryAlloca(fn, p.getName(), arg->getType());
         CG.Builder.CreateStore(arg, alloca);
         if (ast::isRefType(pty))
-          CG.CurrentScope->declare(p.Name, alloca, pty);
+          CG.CurrentScope->declare(p.getName(), alloca, pty);
         else
-          CG.CurrentScope->declare(p.Name, alloca, nullptr);
+          CG.CurrentScope->declare(p.getName(), alloca, nullptr);
       }
 
       // Emit the method body.
@@ -409,7 +409,7 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
       size_t ai = 0;
       for (auto &arg : ctorFn->args())
         if (ai < initParams->size())
-          arg.setName((*initParams)[ai++].Name);
+          arg.setName((*initParams)[ai++].getName());
     }
   }
 

@@ -7,6 +7,7 @@
 #include "AST.h"
 
 #include <memory>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -18,6 +19,10 @@ namespace ast {
 // All nodes are destroyed when the ASTContext goes out of scope.
 class ASTContext {
   std::vector<std::unique_ptr<ASTNode>> Pool;
+
+  // Stable string intern pool.  std::set guarantees that references to stored
+  // elements are never invalidated by subsequent insertions.
+  std::set<std::string> StringPool;
 
   // Canonical builtin types -- created once in the constructor.
   BuiltinType *IntTy;
@@ -65,6 +70,12 @@ public:
   ASTContext &operator=(const ASTContext &) = delete;
   ASTContext(ASTContext &&) = delete;
   ASTContext &operator=(ASTContext &&) = delete;
+
+  /// Intern a string and return a stable reference into the pool.
+  /// The reference is valid for the lifetime of this ASTContext.
+  const std::string &intern(const std::string &s) {
+    return *StringPool.insert(s).first;
+  }
 
   /// Create an AST node of type T, store it in the pool, return a raw pointer.
   template <ASTNodeType T, typename... Args>

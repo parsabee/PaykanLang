@@ -244,7 +244,7 @@ typeAnnotation: IDENT               { auto *ty = impl(drv).Ctx.lookupType($1);
     ;
 
 varDecl: IDENT ":" typeAnnotation
-                                    { $$ = impl(drv).Ctx.make<VarDecl>(loc(@1, @3), $1, $3, nullptr); }
+                                    { $$ = impl(drv).Ctx.make<VarDecl>(loc(@1, @3), impl(drv).Ctx.intern($1), $3, nullptr); }
     ;
 
 staticAssignment: varDecl "=" expression
@@ -294,7 +294,7 @@ matchArm:
     | "_" "{" compoundStmt "}"      { $$ = impl(drv).Ctx.make<MatchArm>(loc(@1, @4), "", nullptr, $3); }
     ;
 
-param: IDENT ":" typeAnnotation                     { $$ = Param{$1, $3}; }
+param: IDENT ":" typeAnnotation                     { $$ = Param{&impl(drv).Ctx.intern($1), $3}; }
     ;
 
 paramList: %empty                   { $$ = std::vector<Param>(); }
@@ -315,9 +315,9 @@ whileStmt: "while" "(" expression ")" block
     ;
 
 funcDecl: "fn" IDENT "(" paramList ")" "->" typeAnnotation block
-                                    { $$ = impl(drv).Ctx.make<FuncDecl>(loc(@1, @8), $2, std::move($4), $7, $8); }
+                                    { $$ = impl(drv).Ctx.make<FuncDecl>(loc(@1, @8), impl(drv).Ctx.intern($2), std::move($4), $7, $8); }
     | "fn" IDENT "(" paramList ")" block
-                                    { $$ = impl(drv).Ctx.make<FuncDecl>(loc(@1, @6), $2, std::move($4), nullptr, $6); }
+                                    { $$ = impl(drv).Ctx.make<FuncDecl>(loc(@1, @6), impl(drv).Ctx.intern($2), std::move($4), nullptr, $6); }
     ;
 
 relationalOperator:
@@ -336,10 +336,10 @@ primaryExpression:
     | CHAR                          { $$ = impl(drv).Ctx.make<CharLiteral>(loc(@1, @1), $1); }
     | NONE                          { $$ = impl(drv).Ctx.make<NoneLiteral>(loc(@1, @1)); }
     | STRING                        { $$ = impl(drv).Ctx.make<StringLiteral>(loc(@1, @1), $1); }
-    | IDENT "(" argumentList ")"    { $$ = impl(drv).Ctx.make<CallExpr>(loc(@1, @4), $1, std::move($3)); }
+    | IDENT "(" argumentList ")"    { $$ = impl(drv).Ctx.make<CallExpr>(loc(@1, @4), impl(drv).Ctx.intern($1), std::move($3)); }
     | modulePath "::" IDENT "(" argumentList ")"
-                                    { $$ = impl(drv).Ctx.make<CallExpr>(loc(@1, @6), $1 + "::" + $3, std::move($5)); }
-    | IDENT                         { $$ = impl(drv).Ctx.make<Identifier>(loc(@1, @1), $1); }
+                                    { $$ = impl(drv).Ctx.make<CallExpr>(loc(@1, @6), impl(drv).Ctx.intern($1 + "::" + $3), std::move($5)); }
+    | IDENT                         { $$ = impl(drv).Ctx.make<Identifier>(loc(@1, @1), impl(drv).Ctx.intern($1)); }
     | "(" expression ")"            { $$ = $2; }
     | "[" argumentList "]"          { $$ = impl(drv).Ctx.make<ArrayLiteralExpr>(loc(@1, @3), std::move($2)); }
     ;
@@ -352,9 +352,9 @@ argumentList: %empty                { $$ = std::vector<Expr *>(); }
 postfixExpression:
       primaryExpression             { $$ = $1; }
     | postfixExpression "." IDENT "(" argumentList ")"
-                                    { $$ = impl(drv).Ctx.make<MethodCallExpr>(loc(@1, @6), $1, $3, std::move($5)); }
+                                    { $$ = impl(drv).Ctx.make<MethodCallExpr>(loc(@1, @6), $1, impl(drv).Ctx.intern($3), std::move($5)); }
     | postfixExpression "." IDENT
-                                    { $$ = impl(drv).Ctx.make<MemberAccessExpr>(loc(@1, @3), $1, $3); }
+                                    { $$ = impl(drv).Ctx.make<MemberAccessExpr>(loc(@1, @3), $1, impl(drv).Ctx.intern($3)); }
     | postfixExpression "[" expression "]"
                                     { $$ = impl(drv).Ctx.make<SubscriptExpr>(loc(@1, @4), $1, $3); }
     ;

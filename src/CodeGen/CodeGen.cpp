@@ -2095,7 +2095,7 @@ llvm::Value *CodeGen::visitFuncDecl(ast::FuncDecl *node) {
   // Name the parameters.
   size_t idx = 0;
   for (auto &arg : fn->args())
-    arg.setName(node->getParams()[idx++].Name);
+    arg.setName(node->getParams()[idx++].getName());
 
   // Save/restore current function return type.
   auto *savedRetASTTy = CurrentFuncReturnASTType;

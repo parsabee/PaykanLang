@@ -266,7 +266,7 @@ ASTContext::ClassTypeBuilder &
 ASTContext::ClassTypeBuilder::method(const std::string &name, Type *retTy,
                                      std::vector<Type *> params,
                                      uint8_t flags) {
-  auto *m = Ctx.make<MethodDecl>(SourceLocation(), name, retTy,
+  auto *m = Ctx.make<MethodDecl>(SourceLocation(), Ctx.intern(name), retTy,
                                  std::move(params), flags);
   Ty->addMethod(m);
   return *this;

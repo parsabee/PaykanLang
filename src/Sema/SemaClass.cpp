@@ -185,7 +185,7 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
       bool paramsOk = true;
       for (auto &p : method->getParams()) {
         auto *pty = resolveType(p.ParamType, method->getLocation(),
-                                "parameter '" + p.Name + "' of method '" +
+                                "parameter '" + p.getName() + "' of method '" +
                                     method->getName() + "' in '" +
                                     cd->getName() + "'");
         if (!pty) {
@@ -275,7 +275,7 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
     std::vector<ast::Type *> paramTys;
     for (auto &p : method->getParams()) {
       auto *pty = resolveType(p.ParamType, method->getLocation(),
-                              "parameter '" + p.Name + "'");
+                              "parameter '" + p.getName() + "'");
       paramTys.push_back(pty ? pty : Ctx.getVoidTy());
     }
 
@@ -285,7 +285,7 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
       ScopeGuard guard(*this);
       CurrentScope->declare(names::kSelf, ct);
       for (size_t i = 0; i < method->getParams().size(); ++i)
-        CurrentScope->declare(method->getParams()[i].Name, paramTys[i]);
+        CurrentScope->declare(method->getParams()[i].getName(), paramTys[i]);
 
       bool bodyOk = true;
       for (auto *stmt : method->getBody()->getStatements())

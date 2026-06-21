@@ -252,14 +252,14 @@ public:
 // Variable declaration with explicit type (x: int = 10)
 class VarDecl : public Decl {
 private:
-  std::string Name;
+  const std::string *Name; // points into ASTContext::StringPool (stable)
   Type *VarType;
   Expr *InitExpr;
 public:
-  VarDecl(SourceLocation loc, const std::string &name, Type *type, Expr *init)
-      : Decl(NK_VarDecl, loc), Name(name), VarType(type), InitExpr(init) {}
+  VarDecl(SourceLocation loc, const std::string &internedName, Type *type, Expr *init)
+      : Decl(NK_VarDecl, loc), Name(&internedName), VarType(type), InitExpr(init) {}
 
-  const std::string &getName() const { return Name; }
+  const std::string &getName() const { return *Name; }
   Type *getType() const { return VarType; }
   Expr *getInitExpr() const { return InitExpr; }
 
@@ -268,8 +268,10 @@ public:
 
 // A single function parameter.
 struct Param {
-  std::string Name;
+  const std::string *Name; // points into ASTContext::StringPool (stable)
   Type *ParamType;
+
+  const std::string &getName() const { return *Name; }
 };
 
 // Forward declaration for FuncDecl body.
@@ -278,18 +280,18 @@ class CompoundStmt;
 // Free function declaration:  fn name(params) -> retType { body }
 class FuncDecl : public Decl {
 private:
-  std::string Name;
+  const std::string *Name; // points into ASTContext::StringPool (stable)
   std::vector<Param> Params;
-  Type *ReturnType;       // nullptr means void
+  Type *ReturnType;        // nullptr means void
   CompoundStmt *Body;
 
 public:
-  FuncDecl(SourceLocation loc, const std::string &name,
+  FuncDecl(SourceLocation loc, const std::string &internedName,
            std::vector<Param> params, Type *retTy, CompoundStmt *body)
-      : Decl(NK_FuncDecl, loc), Name(name), Params(std::move(params)),
+      : Decl(NK_FuncDecl, loc), Name(&internedName), Params(std::move(params)),
         ReturnType(retTy), Body(body) {}
 
-  const std::string &getName() const { return Name; }
+  const std::string &getName() const { return *Name; }
   const std::vector<Param> &getParams() const { return Params; }
   size_t getNumParams() const { return Params.size(); }
   Type *getReturnType() const { return ReturnType; }
@@ -439,17 +441,17 @@ public:
 class MemberAssignStmt : public Stmt {
 private:
   Expr *Receiver;
-  std::string FieldName;
+  const std::string *FieldName; // points into ASTContext::StringPool (stable)
   Expr *Value;
 
 public:
   MemberAssignStmt(SourceLocation loc, Expr *receiver,
-                   const std::string &field, Expr *value)
+                   const std::string &internedField, Expr *value)
       : Stmt(NK_MemberAssignStmt, loc), Receiver(receiver),
-        FieldName(field), Value(value) {}
+        FieldName(&internedField), Value(value) {}
 
   Expr *getReceiver() const { return Receiver; }
-  const std::string &getFieldName() const { return FieldName; }
+  const std::string &getFieldName() const { return *FieldName; }
   Expr *getValue() const { return Value; }
 
   static bool classof(const ASTNode *N) {
@@ -669,13 +671,13 @@ public:
 // Identifier expression
 class Identifier : public Expr {
 private:
-  std::string Name;
+  const std::string *Name; // points into ASTContext::StringPool (stable)
 
 public:
-  Identifier(SourceLocation loc, const std::string &name)
-      : Expr(NK_Identifier, loc), Name(name) {}
+  Identifier(SourceLocation loc, const std::string &internedName)
+      : Expr(NK_Identifier, loc), Name(&internedName) {}
 
-  const std::string &getName() const { return Name; }
+  const std::string &getName() const { return *Name; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_Identifier;
@@ -690,14 +692,14 @@ inline const std::string &AssignStmt::getVarName() const {
 // Function call expression
 class CallExpr : public Expr {
 private:
-  std::string CalleeName;
+  const std::string *CalleeName; // points into ASTContext::StringPool (stable)
   std::vector<Expr *> Arguments;
 
 public:
-  CallExpr(SourceLocation loc, const std::string &callee, std::vector<Expr *> args)
-      : Expr(NK_CallExpr, loc), CalleeName(callee), Arguments(std::move(args)) {}
+  CallExpr(SourceLocation loc, const std::string &internedCallee, std::vector<Expr *> args)
+      : Expr(NK_CallExpr, loc), CalleeName(&internedCallee), Arguments(std::move(args)) {}
 
-  const std::string &getCalleeName() const { return CalleeName; }
+  const std::string &getCalleeName() const { return *CalleeName; }
   const std::vector<Expr *> &getArguments() const { return Arguments; }
   size_t getNumArguments() const { return Arguments.size(); }
 
@@ -708,17 +710,17 @@ public:
 class MethodCallExpr : public Expr {
 private:
   Expr *Receiver;
-  std::string MethodName;
+  const std::string *MethodName; // points into ASTContext::StringPool (stable)
   std::vector<Expr *> Arguments;
 
 public:
-  MethodCallExpr(SourceLocation loc, Expr *receiver, const std::string &method,
+  MethodCallExpr(SourceLocation loc, Expr *receiver, const std::string &internedMethod,
                  std::vector<Expr *> args)
       : Expr(NK_MethodCallExpr, loc), Receiver(receiver),
-        MethodName(method), Arguments(std::move(args)) {}
+        MethodName(&internedMethod), Arguments(std::move(args)) {}
 
   Expr *getReceiver() const { return Receiver; }
-  const std::string &getMethodName() const { return MethodName; }
+  const std::string &getMethodName() const { return *MethodName; }
   const std::vector<Expr *> &getArguments() const { return Arguments; }
   size_t getNumArguments() const { return Arguments.size(); }
 
@@ -752,15 +754,15 @@ public:
 class MemberAccessExpr : public Expr {
 private:
   Expr *Receiver;
-  std::string FieldName;
+  const std::string *FieldName; // points into ASTContext::StringPool (stable)
 
 public:
   MemberAccessExpr(SourceLocation loc, Expr *receiver,
-                   const std::string &field)
-      : Expr(NK_MemberAccessExpr, loc), Receiver(receiver), FieldName(field) {}
+                   const std::string &internedField)
+      : Expr(NK_MemberAccessExpr, loc), Receiver(receiver), FieldName(&internedField) {}
 
   Expr *getReceiver() const { return Receiver; }
-  const std::string &getFieldName() const { return FieldName; }
+  const std::string &getFieldName() const { return *FieldName; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_MemberAccessExpr;
@@ -805,18 +807,18 @@ public:
   };
 
 private:
-  std::string Name;
+  const std::string *Name; // points into ASTContext::StringPool (stable)
   Type *ReturnType;
   std::vector<Type *> ParamTypes;
   uint8_t MethodFlags;
 
 public:
-  MethodDecl(SourceLocation loc, const std::string &name, Type *retTy,
+  MethodDecl(SourceLocation loc, const std::string &internedName, Type *retTy,
              std::vector<Type *> params, uint8_t flags = None)
-      : Decl(NK_MethodDecl, loc), Name(name), ReturnType(retTy),
+      : Decl(NK_MethodDecl, loc), Name(&internedName), ReturnType(retTy),
         ParamTypes(std::move(params)), MethodFlags(flags) {}
 
-  const std::string &getName() const { return Name; }
+  const std::string &getName() const { return *Name; }
   Type *getReturnType() const { return ReturnType; }
   const std::vector<Type *> &getParamTypes() const { return ParamTypes; }
   size_t getNumParams() const { return ParamTypes.size(); }
