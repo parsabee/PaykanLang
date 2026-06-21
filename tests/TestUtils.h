@@ -12,6 +12,7 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include <fcntl.h>
 #include <unistd.h>
 
 #include <atomic>
@@ -37,6 +38,36 @@ inline std::string writeTempFile(const std::string &source) {
   ofs << source;
   ofs.close();
   return pathStr;
+}
+
+/// Read the full contents of a file into a string and delete the file.
+inline std::string drainAndRemoveTempFile(const std::string &path) {
+  std::ifstream ifs(path, std::ios::binary);
+  std::string content((std::istreambuf_iterator<char>(ifs)),
+                       std::istreambuf_iterator<char>());
+  ifs.close();
+  std::filesystem::remove(path);
+  return content;
+}
+
+/// Redirect fd to a fresh temp file; return (saved_fd, temp_path).
+/// Caller must restore the fd and call drainAndRemoveTempFile when done.
+inline std::pair<int, std::string> redirectFdToTempFile(int fd) {
+  static std::atomic<int> cnt{0};
+  auto path = (std::filesystem::temp_directory_path() /
+               ("paykan_cap_" + std::to_string(getpid()) + "_" +
+                std::to_string(cnt++) + ".txt")).string();
+  int saved = dup(fd);
+  int tmp = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+  dup2(tmp, fd);
+  close(tmp);
+  return {saved, path};
+}
+
+/// Restore fd from a previously saved descriptor.
+inline void restoreFd(int fd, int saved) {
+  dup2(saved, fd);
+  close(saved);
 }
 
 /// Parse source code. Returns {success, driver (moved)}.
@@ -110,50 +141,24 @@ inline RunResult compileAndRun(const std::string &source,
       return {-1, "", "link failed", false};
   }
 
-  // Capture stdout by redirecting fd 1 to a pipe.
-  int pipefd[2];
-  if (pipe(pipefd) != 0)
-    return {-1, "", "pipe() failed", false};
+  // Capture stdout/stderr via temp files (pipe-free to avoid hang-on-crash).
+  auto [savedOut, outPath] = redirectFdToTempFile(STDOUT_FILENO);
+  auto [savedErr, errPath] = redirectFdToTempFile(STDERR_FILENO);
 
-  // Save original stdout/stderr.
-  int savedStdout = dup(STDOUT_FILENO);
-  int savedStderr = dup(STDERR_FILENO);
-  dup2(pipefd[1], STDOUT_FILENO);
-
-  int errPipe[2];
-  pipe(errPipe);
-  dup2(errPipe[1], STDERR_FILENO);
-
-  // JIT run
   auto resultOrErr = jit::runModule(std::move(mainModule), std::move(llvmCtx));
   fflush(stdout);
   fflush(stderr);
 
-  // Restore stdout/stderr.
-  dup2(savedStdout, STDOUT_FILENO);
-  dup2(savedStderr, STDERR_FILENO);
-  close(savedStdout);
-  close(savedStderr);
-  close(pipefd[1]);
-  close(errPipe[1]);
+  restoreFd(STDOUT_FILENO, savedOut);
+  restoreFd(STDERR_FILENO, savedErr);
 
-  // Read captured output.
-  std::string outStr, errStr;
-  char buf[4096];
-  ssize_t n;
-  while ((n = read(pipefd[0], buf, sizeof(buf))) > 0)
-    outStr.append(buf, n);
-  close(pipefd[0]);
-
-  while ((n = read(errPipe[0], buf, sizeof(buf))) > 0)
-    errStr.append(buf, n);
-  close(errPipe[0]);
+  std::string outStr = drainAndRemoveTempFile(outPath);
+  std::string errStr = drainAndRemoveTempFile(errPath);
 
   if (!resultOrErr) {
     llvm::consumeError(resultOrErr.takeError());
     return {-1, outStr, errStr, false};
   }
-
   return {*resultOrErr, outStr, errStr, true};
 }
 
@@ -184,33 +189,19 @@ inline RunResult compileAndRunWithArgs(const std::string &source,
     if (llvm::Linker::linkModules(*mainModule, std::move(impMod)))
       return {-1, "", "link failed", false};
 
-  int pipefd[2];
-  if (pipe(pipefd) != 0)
-    return {-1, "", "pipe() failed", false};
-  int savedStdout = dup(STDOUT_FILENO);
-  int savedStderr = dup(STDERR_FILENO);
-  dup2(pipefd[1], STDOUT_FILENO);
-  int errPipe[2];
-  pipe(errPipe);
-  dup2(errPipe[1], STDERR_FILENO);
+  auto [savedOut, outPath] = redirectFdToTempFile(STDOUT_FILENO);
+  auto [savedErr, errPath] = redirectFdToTempFile(STDERR_FILENO);
 
   auto resultOrErr =
       jit::runModule(std::move(mainModule), std::move(llvmCtx), std::move(args));
   fflush(stdout);
   fflush(stderr);
 
-  dup2(savedStdout, STDOUT_FILENO);
-  dup2(savedStderr, STDERR_FILENO);
-  close(savedStdout); close(savedStderr);
-  close(pipefd[1]); close(errPipe[1]);
+  restoreFd(STDOUT_FILENO, savedOut);
+  restoreFd(STDERR_FILENO, savedErr);
 
-  std::string outStr, errStr;
-  char buf[4096];
-  ssize_t n;
-  while ((n = read(pipefd[0], buf, sizeof(buf))) > 0) outStr.append(buf, n);
-  close(pipefd[0]);
-  while ((n = read(errPipe[0], buf, sizeof(buf))) > 0) errStr.append(buf, n);
-  close(errPipe[0]);
+  std::string outStr = drainAndRemoveTempFile(outPath);
+  std::string errStr = drainAndRemoveTempFile(errPath);
 
   if (!resultOrErr) {
     llvm::consumeError(resultOrErr.takeError());
