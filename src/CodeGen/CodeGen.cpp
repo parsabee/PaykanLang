@@ -186,8 +186,10 @@ llvm::Function *CodeGen::declareFunction(llvm::StringRef name,
                                          llvm::FunctionType *fnTy) {
   if (auto *existing = Module->getFunction(name))
     return existing;
-  return llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage,
-                                name, Module.get());
+  auto *fn = llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage,
+                                    name, Module.get());
+  fn->addFnAttr(llvm::Attribute::NoUnwind);
+  return fn;
 }
 
 llvm::Value *CodeGen::wrapStringLiteral(llvm::Value *rawStr, size_t len) {
@@ -1022,9 +1024,17 @@ llvm::Value *CodeGen::ExprEmitter::emitPrimitiveArrayLiteral(
     if (!v) return nullptr;
     if (auto *sl = ast::dyn_cast<ast::StringLiteral>(elemExpr))
       v = CG.wrapStringLiteral(v, sl->getValue().size());
-    if (v->getType()->isDoubleTy())
-      v = CG.Builder.CreateBitCast(v, i64Ty, kIRF64Bits);
-    else if (v->getType()->isIntegerTy(1))
+    if (v->getType()->isDoubleTy()) {
+      // For a ConstantFP, extract the bit pattern directly so we get a
+      // ConstantInt rather than a ConstantExpr(BitCast) — the latter would
+      // crash the cast<ConstantInt> in the key-generation loop below.
+      if (auto *cf = llvm::dyn_cast<llvm::ConstantFP>(v)) {
+        uint64_t bits = cf->getValueAPF().bitcastToAPInt().getZExtValue();
+        v = llvm::ConstantInt::get(i64Ty, bits);
+      } else {
+        v = CG.Builder.CreateBitCast(v, i64Ty, kIRF64Bits);
+      }
+    } else if (v->getType()->isIntegerTy(1))
       v = CG.Builder.CreateZExt(v, i64Ty, kIRBoolExtArr);
     if (auto *c = llvm::dyn_cast<llvm::Constant>(v))
       elems.push_back(c);
@@ -1822,7 +1832,11 @@ llvm::Value *CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node
   // The pointer stored in the object points to methods[0] in the vtable array
   // [N x ptr]. GEP through the array type so LLVM's type system can verify
   // the index — avoids the ambiguity of GEP-ing a raw ptr by element count.
-  llvm::Value *vtablePtr = CG.Builder.CreateLoad(ptrTy, recv, kIRVtable);
+  auto *vtableLoad = CG.Builder.CreateLoad(ptrTy, recv, kIRVtable);
+  // Vtable pointer is immutable after construction — mark as invariant.
+  vtableLoad->setMetadata(llvm::LLVMContext::MD_invariant_load,
+                          llvm::MDNode::get(CG.LLVMCtx, {}));
+  llvm::Value *vtablePtr = vtableLoad;
   auto *vtableTy = llvm::ArrayType::get(ptrTy, 0);
   llvm::Value *gep_indices[] = {
       llvm::ConstantInt::get(i64Ty, 0),

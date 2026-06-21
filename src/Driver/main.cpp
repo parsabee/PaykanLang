@@ -10,11 +10,13 @@
 #include "Runtime.h"
 
 #include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Verifier.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/raw_ostream.h>
 
 #include <cstdlib>
 #include <filesystem>
+#include <vector>
 
 #include <llvm/Linker/Linker.h>
 
@@ -59,6 +61,11 @@ static llvm::cl::opt<bool>
               llvm::cl::desc("Track runtime heap allocations and dump "
                              "statistics (incl. leaks) at exit"),
               llvm::cl::init(false));
+
+// Arguments forwarded to the Paykan program (everything after the source file).
+static llvm::cl::list<std::string>
+    ProgramArgs(llvm::cl::ConsumeAfter,
+                llvm::cl::desc("<program arguments>"));
 
 // -- Entry point -------------------------------------------------------------
 
@@ -113,6 +120,17 @@ int main(int argc, char *argv[]) {
   unsigned lvl = OptLevel < 4 ? OptLevel : 3;
   cg.optimize(levels[lvl]);
 
+#ifndef NDEBUG
+  {
+    std::string errMsg;
+    llvm::raw_string_ostream errStream(errMsg);
+    if (llvm::verifyModule(cg.getModule(), &errStream)) {
+      llvm::errs() << "LLVM IR verification failed:\n" << errMsg << "\n";
+      return EXIT_FAILURE;
+    }
+  }
+#endif
+
   if (EmitLLVM) {
     cg.getModule().print(llvm::outs(), nullptr);
     return EXIT_SUCCESS;
@@ -135,8 +153,15 @@ int main(int argc, char *argv[]) {
     Paykan_heap_reset();
   }
 
+  // Build the args vector: args[0] = script path, args[1..] = program args.
+  std::vector<std::string> progArgs;
+  progArgs.push_back(InputFilename.getValue());
+  for (const auto &a : ProgramArgs)
+    progArgs.push_back(a);
+
   auto resultOrErr =
-      paykan::jit::runModule(std::move(mainModule), std::move(llvmCtx));
+      paykan::jit::runModule(std::move(mainModule), std::move(llvmCtx),
+                             std::move(progArgs));
 
   if (TrackHeap)
     Paykan_heap_dump();
