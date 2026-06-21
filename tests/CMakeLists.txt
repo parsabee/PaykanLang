@@ -61,9 +61,13 @@ add_executable(codegen_tests
     CodeGen/ControlFlowTests.cpp
     CodeGen/ClassTests.cpp
     CodeGen/ModuleTests.cpp
+    CodeGen/CharTests.cpp
+    CodeGen/ArrayTests.cpp
+    CodeGen/LeakTests.cpp
 )
 target_include_directories(codegen_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_SOURCE_DIR}/src/Runtime
 )
 target_include_directories(codegen_tests SYSTEM
     PRIVATE ${LLVM_INCLUDE_DIRS}

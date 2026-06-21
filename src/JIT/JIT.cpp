@@ -5,6 +5,9 @@
 #include "Names.h"
 #include "Runtime.h"
 
+#include <string>
+#include <vector>
+
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <llvm/ExecutionEngine/Orc/ThreadSafeModule.h>
 #include <llvm/Support/Error.h>
@@ -32,9 +35,12 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanFileDestroy,  reinterpret_cast<void *>(&PaykanFile_destroy)},
     {kPaykanFileToString, reinterpret_cast<void *>(&PaykanFile_toString)},
     {kPaykanFileEquals,   reinterpret_cast<void *>(&PaykanFile_equals)},
-    {kPaykanFileWrite,    reinterpret_cast<void *>(&PaykanFile_write)},
-    {kPaykanFileReadln,   reinterpret_cast<void *>(&PaykanFile_readln)},
-    {kPaykanFileVtable,   reinterpret_cast<void *>(&PaykanFile_vtable)},
+    {kPaykanFileWrite,     reinterpret_cast<void *>(&PaykanFile_write)},
+    {kPaykanFileReadln,    reinterpret_cast<void *>(&PaykanFile_readln)},
+    {kPaykanFileReadBytes, reinterpret_cast<void *>(&PaykanFile_readbytes)},
+    {kPaykanFileRead,      reinterpret_cast<void *>(&PaykanFile_read)},
+    {kPaykanFileVtable,    reinterpret_cast<void *>(&PaykanFile_vtable)},
+    {kPaykanFileStdin,     reinterpret_cast<void *>(&PaykanFile_Stdin)},
     // match dispatch looks up "File_vtable" (ClassName + "_vtable"); alias it.
     {"File_vtable",       reinterpret_cast<void *>(&PaykanFile_vtable)},
 
@@ -49,11 +55,30 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanObjectNew,       reinterpret_cast<void *>(&PaykanObject_new)},
     {kPaykanObjectToString,  reinterpret_cast<void *>(&PaykanObject_toString)},
     {kPaykanObjectEquals,    reinterpret_cast<void *>(&PaykanObject_equals)},
+    {kPaykanObjectNone,      reinterpret_cast<void *>(&PaykanObject_None)},
+    // match dispatch alias for Obj
+    {"Obj_vtable",           reinterpret_cast<void *>(&PaykanObject_vtable)},
+
+    {kPaykanIntNew,          reinterpret_cast<void *>(&PaykanInt_new)},
+    {kPaykanIntFromStr,      reinterpret_cast<void *>(&PaykanInt_from_str)},
+    {kPaykanIntVtable,       reinterpret_cast<void *>(&PaykanInt_vtable)},
+    {"Int_vtable",           reinterpret_cast<void *>(&PaykanInt_vtable)},
+
+    {kPaykanFloatNew,        reinterpret_cast<void *>(&PaykanFloat_new)},
+    {kPaykanFloatFromStr,    reinterpret_cast<void *>(&PaykanFloat_from_str)},
+    {kPaykanFloatVtable,     reinterpret_cast<void *>(&PaykanFloat_vtable)},
+    {"Float_vtable",         reinterpret_cast<void *>(&PaykanFloat_vtable)},
+
+    {kPaykanBoolNew,         reinterpret_cast<void *>(&PaykanBool_new)},
+    {kPaykanBoolVtable,      reinterpret_cast<void *>(&PaykanBool_vtable)},
+    {"Bool_vtable",          reinterpret_cast<void *>(&PaykanBool_vtable)},
 
     {kPaykanStringNew,       reinterpret_cast<void *>(&PaykanString_new)},
     {kPaykanStringFromInt,   reinterpret_cast<void *>(&PaykanString_from_int)},
     {kPaykanStringFromFloat, reinterpret_cast<void *>(&PaykanString_from_float)},
     {kPaykanStringFromBool,  reinterpret_cast<void *>(&PaykanString_from_bool)},
+    {kPaykanStringFromChar,  reinterpret_cast<void *>(&PaykanString_from_char)},
+    {kPaykanStringCharAt,    reinterpret_cast<void *>(&PaykanString_char_at)},
     {kPaykanStringToString,  reinterpret_cast<void *>(&PaykanString_toString)},
     {kPaykanStringDestroy,   reinterpret_cast<void *>(&PaykanString_destroy)},
     {kPaykanStringEquals,    reinterpret_cast<void *>(&PaykanString_equals)},
@@ -110,7 +135,8 @@ const RuntimeSymbol kRuntimeSymbols[] = {
 // ---------------------------------------------------------------------------
 
 llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
-                              std::unique_ptr<llvm::LLVMContext> ctx) {
+                              std::unique_ptr<llvm::LLVMContext> ctx,
+                              std::vector<std::string> args) {
   // Initialise native target (idempotent).
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
@@ -133,6 +159,11 @@ llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
           llvm::orc::absoluteSymbols(std::move(runtimeSyms))))
     return std::move(err);
 
+  // Inspect main's param count before the module is consumed by the JIT.
+  unsigned mainParamCount = 0;
+  if (auto *mainIRFn = module->getFunction("main"))
+    mainParamCount = mainIRFn->arg_size();
+
   // Add the module.
   auto tsm = llvm::orc::ThreadSafeModule(std::move(module), std::move(ctx));
   if (auto err = jit->addIRModule(std::move(tsm)))
@@ -143,8 +174,21 @@ llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
   if (!mainAddr)
     return mainAddr.takeError();
 
-  auto *mainFn = mainAddr->toPtr<int (*)()>();
-  return mainFn();
+  if (mainParamCount == 1) {
+    // main(args: Str[]) — build a PaykanArray<Str> from the args vector.
+    PaykanArray *arr = PaykanArray_new_obj(0);
+    for (const auto &s : args) {
+      PaykanString *ps     = PaykanString_new(s.c_str(), (int64_t)s.size());
+      PaykanShared *shared = PaykanShared_new((PaykanObject *)ps);
+      PaykanArray_push_obj(arr, shared);
+      Paykan_release(shared); // array retained; drop our ref
+    }
+    PaykanShared *argsShared = PaykanShared_new((PaykanObject *)arr);
+    // Transfer ownership to main — its scope cleanup releases argsShared.
+    return mainAddr->toPtr<int (*)(void *)>()(argsShared);
+  }
+
+  return mainAddr->toPtr<int (*)()>()();
 }
 
 } // namespace paykan::jit

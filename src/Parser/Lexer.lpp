@@ -19,6 +19,9 @@
 
   yy::parser::symbol_type
   make_FLOAT (const std::string &s, const yy::parser::location_type& loc);
+
+  yy::parser::symbol_type
+  make_CHAR (const char *text, int len, const yy::parser::location_type& loc);
 %}
 
 true        True
@@ -26,7 +29,7 @@ false       False
 None        None
 id          [_a-zA-Z][_a-zA-Z_0-9]*
 int         [0-9]+
-float       ([0-9]+[.])?[0-9]+
+float       [0-9]+\.[0-9]*([eE][+-]?[0-9]+)?|[0-9]+[eE][+-]?[0-9]+
 blank       [ \t\r]
 comment     \/\/[^\n]*
 
@@ -76,6 +79,8 @@ comment     \/\/[^\n]*
 ","        return yy::parser::make_COMMA     (loc);
 "!"        return yy::parser::make_NOT       (loc);
 "&"        return yy::parser::make_AMP       (loc);
+
+\'([^\\']|\\.)\'  { return make_CHAR(yytext, yyleng, loc); }
 
 \"([^\\\"]|\\.)*\"  { std::string raw(yytext + 1, yyleng - 2);
                       std::string s;
@@ -137,6 +142,27 @@ make_FLOAT (const std::string &s, const yy::parser::location_type& loc)
   return yy::parser::make_FLOAT ((double) n, loc);
 }
 
+yy::parser::symbol_type
+make_CHAR (const char *text, int len, const yy::parser::location_type& loc)
+{
+  if (len == 3) // 'x'
+    return yy::parser::make_CHAR(text[1], loc);
+  if (len == 4) { // '\X'
+    char c;
+    switch (text[2]) {
+    case 'n':  c = '\n'; break;
+    case 't':  c = '\t'; break;
+    case 'r':  c = '\r'; break;
+    case '\\': c = '\\'; break;
+    case '\'': c = '\''; break;
+    case '0':  c = '\0'; break;
+    default:   c = text[2]; break;
+    }
+    return yy::parser::make_CHAR(c, loc);
+  }
+  throw yy::parser::syntax_error(loc, "invalid character literal: " + std::string(text));
+}
+
 void
 paykan::parser::ParserDriver::Impl::scanBegin()
 {
@@ -157,5 +183,6 @@ paykan::parser::ParserDriver::Impl::scanBegin()
 void
 paykan::parser::ParserDriver::Impl::scanEnd()
 {
-  fclose (yyin);
+  if (yyin && yyin != stdin)
+    fclose(yyin);
 }
