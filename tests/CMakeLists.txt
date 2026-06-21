@@ -65,6 +65,7 @@ add_executable(codegen_tests
     CodeGen/ArrayTests.cpp
     CodeGen/LeakTests.cpp
     CodeGen/BoxedPrimitiveTests.cpp
+    CodeGen/ArgsTests.cpp
 )
 target_include_directories(codegen_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -104,3 +105,20 @@ target_link_libraries(runtime_tests
             paykan_compile_options
 )
 add_test(NAME RuntimeTests COMMAND runtime_tests)
+
+# --- Driver smoke tests (--check-only, --dump-ast) --------------------------
+add_executable(driver_tests
+    Driver/DriverTests.cpp
+)
+target_compile_definitions(driver_tests
+    PRIVATE PAYKAN_BIN="$<TARGET_FILE:paykan>"
+)
+target_include_directories(driver_tests SYSTEM
+    PRIVATE ${LLVM_INCLUDE_DIRS}
+)
+target_link_libraries(driver_tests
+    PRIVATE gtest_main
+            paykan_compile_options
+)
+add_dependencies(driver_tests paykan)
+add_test(NAME DriverTests COMMAND driver_tests)
