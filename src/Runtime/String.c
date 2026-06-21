@@ -53,6 +53,20 @@ PaykanString *PaykanString_from_bool(int64_t value) {
   return PaykanString_new("False", 5);
 }
 
+PaykanString *PaykanString_from_char(int8_t c) {
+  return PaykanString_new((const char *)&c, 1);
+}
+
+int8_t PaykanString_char_at(PaykanObject *self, int64_t idx) {
+  PaykanString *s = (PaykanString *)self;
+  if (idx < 0 || idx >= s->len) {
+    fprintf(stderr, "paykan: string index %lld out of bounds (len=%lld)\n",
+            (long long)idx, (long long)s->len);
+    abort();
+  }
+  return (int8_t)s->data[idx];
+}
+
 void PaykanString_destroy(PaykanObject *self) {
   PaykanString *s = (PaykanString *)self;
   if (s) {

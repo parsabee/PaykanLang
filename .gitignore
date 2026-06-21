@@ -31,9 +31,13 @@ _deps/
 *.swp
 *.swo
 *~
+.claude/
 
 # Clangd / compile commands
 compile_commands.json
 
 # Log files
 *.log
+
+# TODO
+TODO.md

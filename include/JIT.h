@@ -11,14 +11,19 @@
 #include <llvm/Support/Error.h>
 
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace paykan::jit {
 
 /// Run the "main" function inside the given module via ORC JIT.
 /// The module is consumed (moved into the JIT).
+/// @param args  Arguments forwarded to the Paykan main function as Str[].
+///              args[0] should be the script path (like argv[0] for scripts).
 /// Returns the exit code from main(), or an Error on failure.
 llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
-                              std::unique_ptr<llvm::LLVMContext> ctx);
+                              std::unique_ptr<llvm::LLVMContext> ctx,
+                              std::vector<std::string> args = {});
 
 } // namespace paykan::jit
 

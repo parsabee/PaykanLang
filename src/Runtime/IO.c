@@ -53,3 +53,7 @@ void Paykan_printerrln(int64_t argc, ...) {
   va_end(ap);
   fputc('\n', stderr);
 }
+
+void Paykan_flush(void) {
+  fflush(stdout);
+}

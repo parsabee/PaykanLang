@@ -65,6 +65,70 @@ extern PaykanObjectVTable PaykanObject_vtable;
 extern PaykanObject PaykanObject_None;
 
 // ============================================================================
+// Int
+// ============================================================================
+//
+// Boxed 64-bit signed integer.  Inherits Object.
+
+typedef struct PaykanInt {
+  PaykanObjectVTable *vtable;
+  int64_t             value;
+} PaykanInt;
+
+PaykanInt    *PaykanInt_new    (int64_t value);
+void          PaykanInt_destroy (PaykanObject *self);
+PaykanShared *PaykanInt_toString(PaykanObject *self);
+int64_t       PaykanInt_equals  (PaykanObject *self, PaykanObject *other);
+
+extern PaykanObjectVTable PaykanInt_vtable;
+
+/// Parse a Str as a decimal integer.
+/// Returns a PaykanShared* wrapping a PaykanInt on success,
+/// or a PaykanShared* wrapping a PaykanError on failure.
+PaykanShared *PaykanInt_from_str(PaykanObject *str);
+
+// ============================================================================
+// Float
+// ============================================================================
+//
+// Boxed 64-bit IEEE 754 double.  Inherits Object.
+
+typedef struct PaykanFloat {
+  PaykanObjectVTable *vtable;
+  double              value;
+} PaykanFloat;
+
+PaykanFloat  *PaykanFloat_new    (double value);
+void          PaykanFloat_destroy (PaykanObject *self);
+PaykanShared *PaykanFloat_toString(PaykanObject *self);
+int64_t       PaykanFloat_equals  (PaykanObject *self, PaykanObject *other);
+
+extern PaykanObjectVTable PaykanFloat_vtable;
+
+/// Parse a Str as a floating-point number.
+/// Returns a PaykanShared* wrapping a PaykanFloat on success,
+/// or a PaykanShared* wrapping a PaykanError on failure.
+PaykanShared *PaykanFloat_from_str(PaykanObject *str);
+
+// ============================================================================
+// Bool
+// ============================================================================
+//
+// Boxed boolean (stored as int64_t 0/1).  Inherits Object.
+
+typedef struct PaykanBool {
+  PaykanObjectVTable *vtable;
+  int64_t             value; // 0 = False, 1 = True
+} PaykanBool;
+
+PaykanBool   *PaykanBool_new    (int64_t value);
+void          PaykanBool_destroy (PaykanObject *self);
+PaykanShared *PaykanBool_toString(PaykanObject *self);
+int64_t       PaykanBool_equals  (PaykanObject *self, PaykanObject *other);
+
+extern PaykanObjectVTable PaykanBool_vtable;
+
+// ============================================================================
 // String
 // ============================================================================
 //
@@ -92,6 +156,8 @@ PaykanString *PaykanString_new(const char *data, int64_t len);
 PaykanString *PaykanString_from_int(int64_t value);
 PaykanString *PaykanString_from_float(double value);
 PaykanString *PaykanString_from_bool(int64_t value);
+PaykanString *PaykanString_from_char(int8_t c);
+int8_t        PaykanString_char_at(PaykanObject *self, int64_t idx);
 
 // Method implementations.
 void          PaykanString_destroy(PaykanObject *self);
@@ -113,12 +179,14 @@ extern PaykanStringVTable PaykanString_vtable;
 // (destroy / toString / equals); no File-specific slots yet.
 
 typedef struct PaykanFileVTable {
-  void          (*destroy) (PaykanObject *self);
-  PaykanShared *(*toString)(PaykanObject *self);
-  int64_t       (*equals)  (PaykanObject *self, PaykanObject *other);
+  void          (*destroy)   (PaykanObject *self);
+  PaykanShared *(*toString)  (PaykanObject *self);
+  int64_t       (*equals)    (PaykanObject *self, PaykanObject *other);
   // File-specific
-  void          (*write)   (PaykanObject *self, PaykanObject *str);
-  PaykanShared *(*readln)  (PaykanObject *self);
+  void          (*write)     (PaykanObject *self, PaykanObject *str);
+  PaykanShared *(*readln)    (PaykanObject *self);
+  PaykanShared *(*readbytes) (PaykanObject *self, int64_t n);
+  PaykanShared *(*read)      (PaykanObject *self);
 } PaykanFileVTable;
 
 typedef struct PaykanFile {
@@ -136,11 +204,16 @@ PaykanShared *PaykanFile_open   (PaykanObject *path, PaykanObject *mode);
 void          PaykanFile_destroy (PaykanObject *self);
 PaykanShared *PaykanFile_toString(PaykanObject *self);
 int64_t       PaykanFile_equals  (PaykanObject *self, PaykanObject *other);
-void          PaykanFile_write   (PaykanObject *self, PaykanObject *str);
-PaykanShared *PaykanFile_readln  (PaykanObject *self);
+void          PaykanFile_write     (PaykanObject *self, PaykanObject *str);
+PaykanShared *PaykanFile_readln   (PaykanObject *self);
+PaykanShared *PaykanFile_readbytes(PaykanObject *self, int64_t n);
+PaykanShared *PaykanFile_read     (PaykanObject *self);
 
 // Global vtable instance.
 extern PaykanFileVTable PaykanFile_vtable;
+
+// Stdin singleton — immortal PaykanFile wrapping C's stdin.
+extern PaykanFile PaykanFile_Stdin;
 
 // ============================================================================
 // Error
@@ -295,6 +368,9 @@ void Paykan_printerr(int64_t argc, ...);
 
 /// Print object arguments (via toString) to stderr, followed by a newline.
 void Paykan_printerrln(int64_t argc, ...);
+
+/// Flush stdout so that prompts appear before blocking reads.
+void Paykan_flush(void);
 
 // ============================================================================
 // Pluggable heap allocator
