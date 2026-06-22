@@ -469,8 +469,8 @@ void ASTPrinter::visitImportDecl(ImportDecl *node) {
   bool first = true;
   for (const auto &m : node->getModules()) {
     if (!first) OS << ", ";
-    OS << m.Name;
-    if (!m.Alias.empty()) OS << " as " << m.Alias;
+    OS << *m.Name;
+    if (!m.Alias->empty()) OS << " as " << *m.Alias;
     first = false;
   }
   OS << "}\n";

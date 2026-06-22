@@ -152,44 +152,51 @@ topLevelDeclList: %empty            { $$ = TLDeclBag{}; }
 importDecl:
       "import" modulePath ";"
                                     { // Split at last :: to separate base path from module name.
+                                      auto &C = impl(drv).Ctx;
                                       auto sep = $2.rfind("::");
                                       std::string base = (sep == std::string::npos) ? "" : $2.substr(0, sep);
                                       std::string name = (sep == std::string::npos) ? $2 : $2.substr(sep + 2);
-                                      $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @3), base, false,
-                                           std::vector<ImportDecl::Module>{{name, ""}});
+                                      $$ = C.make<ImportDecl>(loc(@1, @3), C.intern(base), false,
+                                           std::vector<ImportDecl::Module>{{&C.intern(name), &C.intern("")}});
                                     }
     | "import" modulePath "as" IDENT ";"
-                                    { auto sep = $2.rfind("::");
+                                    { auto &C = impl(drv).Ctx;
+                                      auto sep = $2.rfind("::");
                                       std::string base = (sep == std::string::npos) ? "" : $2.substr(0, sep);
                                       std::string name = (sep == std::string::npos) ? $2 : $2.substr(sep + 2);
-                                      $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @5), base, false,
-                                           std::vector<ImportDecl::Module>{{name, $4}});
+                                      $$ = C.make<ImportDecl>(loc(@1, @5), C.intern(base), false,
+                                           std::vector<ImportDecl::Module>{{&C.intern(name), &C.intern($4)}});
                                     }
     | "import" modulePath "::" "{" importedModuleList "}" ";"
-                                    { $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @7), $2, false,
-                                           [&]{ std::vector<ImportDecl::Module> ms; for (auto &p : $5) ms.push_back({p.first, p.second}); return ms; }());
+                                    { auto &C = impl(drv).Ctx;
+                                      $$ = C.make<ImportDecl>(loc(@1, @7), C.intern($2), false,
+                                           [&]{ std::vector<ImportDecl::Module> ms; for (auto &p : $5) ms.push_back({&C.intern(p.first), &C.intern(p.second)}); return ms; }());
                                     }
     | "import" "::" modulePath ";"
-                                    { auto sep = $3.rfind("::");
+                                    { auto &C = impl(drv).Ctx;
+                                      auto sep = $3.rfind("::");
                                       std::string base = (sep == std::string::npos) ? "" : $3.substr(0, sep);
                                       std::string name = (sep == std::string::npos) ? $3 : $3.substr(sep + 2);
-                                      $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @4), base, true,
-                                           std::vector<ImportDecl::Module>{{name, ""}});
+                                      $$ = C.make<ImportDecl>(loc(@1, @4), C.intern(base), true,
+                                           std::vector<ImportDecl::Module>{{&C.intern(name), &C.intern("")}});
                                     }
     | "import" "::" modulePath "as" IDENT ";"
-                                    { auto sep = $3.rfind("::");
+                                    { auto &C = impl(drv).Ctx;
+                                      auto sep = $3.rfind("::");
                                       std::string base = (sep == std::string::npos) ? "" : $3.substr(0, sep);
                                       std::string name = (sep == std::string::npos) ? $3 : $3.substr(sep + 2);
-                                      $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @6), base, true,
-                                           std::vector<ImportDecl::Module>{{name, $5}});
+                                      $$ = C.make<ImportDecl>(loc(@1, @6), C.intern(base), true,
+                                           std::vector<ImportDecl::Module>{{&C.intern(name), &C.intern($5)}});
                                     }
     | "import" "::" modulePath "::" "{" importedModuleList "}" ";"
-                                    { $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @8), $3, true,
-                                           [&]{ std::vector<ImportDecl::Module> ms; for (auto &p : $6) ms.push_back({p.first, p.second}); return ms; }());
+                                    { auto &C = impl(drv).Ctx;
+                                      $$ = C.make<ImportDecl>(loc(@1, @8), C.intern($3), true,
+                                           [&]{ std::vector<ImportDecl::Module> ms; for (auto &p : $6) ms.push_back({&C.intern(p.first), &C.intern(p.second)}); return ms; }());
                                     }
     | "import" "::" "{" importedModuleList "}" ";"
-                                    { $$ = impl(drv).Ctx.make<ImportDecl>(loc(@1, @6), "", true,
-                                           [&]{ std::vector<ImportDecl::Module> ms; for (auto &p : $4) ms.push_back({p.first, p.second}); return ms; }());
+                                    { auto &C = impl(drv).Ctx;
+                                      $$ = C.make<ImportDecl>(loc(@1, @6), C.intern(""), true,
+                                           [&]{ std::vector<ImportDecl::Module> ms; for (auto &p : $4) ms.push_back({&C.intern(p.first), &C.intern(p.second)}); return ms; }());
                                     }
     ;
 
@@ -211,11 +218,11 @@ modulePath:
 
 classDecl:
       "class" IDENT "{" classMemberList "}"
-                                    { $$ = impl(drv).Ctx.make<ClassDecl>(loc(@1, @5), $2,
- "", std::move($4.Fields), std::move($4.Methods)); }
+                                    { $$ = impl(drv).Ctx.make<ClassDecl>(loc(@1, @5), impl(drv).Ctx.intern($2),
+ impl(drv).Ctx.intern(""), std::move($4.Fields), std::move($4.Methods)); }
     | "class" IDENT ":" modulePath "{" classMemberList "}"
-                                    { $$ = impl(drv).Ctx.make<ClassDecl>(loc(@1, @7), $2,
- $4, std::move($6.Fields), std::move($6.Methods)); }
+                                    { $$ = impl(drv).Ctx.make<ClassDecl>(loc(@1, @7), impl(drv).Ctx.intern($2),
+ impl(drv).Ctx.intern($4), std::move($6.Fields), std::move($6.Methods)); }
     ;
 
 classMemberList: %empty             { $$ = ClassBody{}; }
@@ -237,7 +244,7 @@ typeAnnotation: IDENT               { auto *ty = impl(drv).Ctx.lookupType($1);
                                       if (!ty)
                                         // Unknown at parse time — could be a forward-referenced
                                         // class type. Sema's resolveType() will validate it.
-                                        ty = impl(drv).Ctx.make<ClassType>(loc(@1, @1), $1, nullptr);
+                                        ty = impl(drv).Ctx.make<ClassType>(loc(@1, @1), impl(drv).Ctx.intern($1), nullptr);
                                       $$ = ty;
                                     }
     | typeAnnotation "[" "]"        { $$ = impl(drv).Ctx.make<ArrayType>(loc(@1, @3), $1); }
@@ -288,10 +295,10 @@ matchArmList: matchArm              { $$ = std::vector<MatchArm *>(); $$.push_ba
 
 matchArm:
       typeAnnotation "{" compoundStmt "}"
-                                    { $$ = impl(drv).Ctx.make<MatchArm>(loc(@1, @4), "", $1, $3); }
+                                    { $$ = impl(drv).Ctx.make<MatchArm>(loc(@1, @4), impl(drv).Ctx.intern(""), $1, $3); }
     | IDENT ":" typeAnnotation "{" compoundStmt "}"
-                                    { $$ = impl(drv).Ctx.make<MatchArm>(loc(@1, @6), $1, $3, $5); }
-    | "_" "{" compoundStmt "}"      { $$ = impl(drv).Ctx.make<MatchArm>(loc(@1, @4), "", nullptr, $3); }
+                                    { $$ = impl(drv).Ctx.make<MatchArm>(loc(@1, @6), impl(drv).Ctx.intern($1), $3, $5); }
+    | "_" "{" compoundStmt "}"      { $$ = impl(drv).Ctx.make<MatchArm>(loc(@1, @4), impl(drv).Ctx.intern(""), nullptr, $3); }
     ;
 
 param: IDENT ":" typeAnnotation                     { $$ = Param{&impl(drv).Ctx.intern($1), $3}; }

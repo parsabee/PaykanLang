@@ -23,14 +23,14 @@ ASTContext::ASTContext()
   VoidTy  = make<BuiltinType>(SourceLocation(), BuiltinType::Void);
   // Pre-allocate Obj, Str, Array, File, Error, and boxed primitives so all
   // method signatures are correct from the start.
-  ObjTy = make<ClassType>(SourceLocation(), names::kObj, nullptr);
-  StrTy = make<ClassType>(SourceLocation(), names::kString, nullptr);
-  ArrayTy = make<ClassType>(SourceLocation(), names::kArray, nullptr);
-  FileTy = make<ClassType>(SourceLocation(), names::kFile, nullptr);
-  ErrorTy = make<ClassType>(SourceLocation(), names::kError, nullptr);
-  IntBoxTy = make<ClassType>(SourceLocation(), names::kIntBox, nullptr);
-  FloatBoxTy = make<ClassType>(SourceLocation(), names::kFloatBox, nullptr);
-  BoolBoxTy = make<ClassType>(SourceLocation(), names::kBoolBox, nullptr);
+  ObjTy = make<ClassType>(SourceLocation(), intern(names::kObj), nullptr);
+  StrTy = make<ClassType>(SourceLocation(), intern(names::kString), nullptr);
+  ArrayTy = make<ClassType>(SourceLocation(), intern(names::kArray), nullptr);
+  FileTy = make<ClassType>(SourceLocation(), intern(names::kFile), nullptr);
+  ErrorTy = make<ClassType>(SourceLocation(), intern(names::kError), nullptr);
+  IntBoxTy = make<ClassType>(SourceLocation(), intern(names::kIntBox), nullptr);
+  FloatBoxTy = make<ClassType>(SourceLocation(), intern(names::kFloatBox), nullptr);
+  BoolBoxTy = make<ClassType>(SourceLocation(), intern(names::kBoolBox), nullptr);
   buildObjectType();
   buildStringType();
   buildArrayType();
@@ -230,7 +230,7 @@ ClassType *ASTContext::getOrCreateSpecializedArrayType(Type *elemTy) {
 
   std::string name =
       std::string(names::kArray) + "<" + elemTypeName(elemTy) + ">";
-  auto *specTy = make<ClassType>(SourceLocation(), name, ArrayTy);
+  auto *specTy = make<ClassType>(SourceLocation(), intern(name), ArrayTy);
   ClassTypeBuilder(*this, specTy)
       .method(names::kPush, VoidTy, {elemTy}) // slot 0 in specialized type
       .method(names::kPop, elemTy)            // slot 1 in specialized type
@@ -287,7 +287,7 @@ ClassType *ASTContext::ClassTypeBuilder::build() {
 
 ASTContext::ClassTypeBuilder ASTContext::buildClassType(const std::string &name,
                                                         ClassType *superClass) {
-  auto *ty = make<ClassType>(SourceLocation(), name, superClass);
+  auto *ty = make<ClassType>(SourceLocation(), intern(name), superClass);
   return ClassTypeBuilder(*this, ty);
 }
 
@@ -313,7 +313,7 @@ void ASTContext::registerClassType(ClassType *ct) {
 
 ClassType *ASTContext::preRegisterClassType(const std::string &name,
                                             ClassType *superClass) {
-  auto *ty = make<ClassType>(SourceLocation(), name, superClass);
+  auto *ty = make<ClassType>(SourceLocation(), intern(name), superClass);
   ClassTypes[name] = ty;
   return ty;
 }

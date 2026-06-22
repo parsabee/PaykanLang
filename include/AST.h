@@ -488,19 +488,19 @@ public:
 //
 // TypeName is empty when the arm is a wildcard.
 class MatchArm : public ASTNode {
-  std::string   Binding;   // "" = no binding
+  const std::string *Binding; // points into ASTContext::StringPool (stable); "" = no binding
   Type         *ArmType;   // nullptr = wildcard (_)
   CompoundStmt *Body;
 
 public:
-  MatchArm(SourceLocation loc, std::string binding, Type *armType,
+  MatchArm(SourceLocation loc, const std::string &internedBinding, Type *armType,
            CompoundStmt *body)
-      : ASTNode(NK_MatchArm, loc), Binding(std::move(binding)),
+      : ASTNode(NK_MatchArm, loc), Binding(&internedBinding),
         ArmType(armType), Body(body) {}
 
   bool isWildcard() const { return ArmType == nullptr; }
-  bool hasBinding() const { return !Binding.empty(); }
-  const std::string &getBinding() const { return Binding; }
+  bool hasBinding() const { return !Binding->empty(); }
+  const std::string &getBinding() const { return *Binding; }
   Type *getArmType() const { return ArmType; }
   void setArmType(Type *t) { ArmType = t; }
   CompoundStmt *getBody() const { return Body; }
@@ -853,7 +853,7 @@ public:
 //      - Otherwise, append a new slot.
 //
 class ClassType : public Type {
-  std::string Name;
+  const std::string *Name; // points into ASTContext::StringPool (stable)
   ClassType *SuperClass;
 
   // Instance fields: (name, type) pairs.
@@ -878,9 +878,9 @@ class ClassType : public Type {
   }
 
 public:
-  ClassType(SourceLocation loc, const std::string &name,
+  ClassType(SourceLocation loc, const std::string &internedName,
             ClassType *superClass = nullptr)
-      : Type(NK_ClassType, loc), Name(name), SuperClass(superClass) {
+      : Type(NK_ClassType, loc), Name(&internedName), SuperClass(superClass) {
     // Inherit parent vtable and operator support.
     if (SuperClass) {
       VTable = SuperClass->VTable;
@@ -894,7 +894,7 @@ public:
     }
   }
 
-  const std::string &getName() const { return Name; }
+  const std::string &getName() const { return *Name; }
   ClassType *getSuperClass() const { return SuperClass; }
 
   /// Returns true if no user class may inherit from this type.
@@ -969,29 +969,30 @@ public:
   /// A single module being imported, with an optional alias.
   /// qualifier() returns the name used at call sites (alias if set, else Name).
   struct Module {
-    std::string Name;   // bare module name (final path segment)
-    std::string Alias;  // empty = use Name as qualifier
-    const std::string &qualifier() const { return Alias.empty() ? Name : Alias; }
+    // Both point into ASTContext::StringPool (stable).
+    const std::string *Name;   // bare module name (final path segment)
+    const std::string *Alias;  // empty = use Name as qualifier
+    const std::string &qualifier() const { return Alias->empty() ? *Name : *Alias; }
   };
 
 private:
-  std::string BasePath;         // directory portion, e.g. "path::to::file" (may be empty)
+  const std::string *BasePath;  // directory portion, e.g. "path::to::file" (may be empty); interned
   std::vector<Module> Modules;  // always ≥1 entry
   bool IsSystem;                // true for :: prefix (stdlib) imports
 
 public:
-  ImportDecl(SourceLocation loc, const std::string &basePath, bool isSystem,
+  ImportDecl(SourceLocation loc, const std::string &internedBasePath, bool isSystem,
              std::vector<Module> modules)
-      : Decl(NK_ImportDecl, loc), BasePath(basePath),
+      : Decl(NK_ImportDecl, loc), BasePath(&internedBasePath),
         Modules(std::move(modules)), IsSystem(isSystem) {}
 
-  const std::string &getBasePath() const { return BasePath; }
+  const std::string &getBasePath() const { return *BasePath; }
   const std::vector<Module> &getModules() const { return Modules; }
   bool isSystem() const { return IsSystem; }
 
   /// Full module path for module m: "base::name" (or just "name" if base is empty).
   std::string modulePath(const Module &m) const {
-    return BasePath.empty() ? m.Name : BasePath + "::" + m.Name;
+    return BasePath->empty() ? *m.Name : *BasePath + "::" + *m.Name;
   }
 
   static bool classof(const ASTNode *N) {
@@ -1014,22 +1015,23 @@ struct ClassBody {
 // ClassType* and registers the fully-built ClassType in the ASTContext.
 class ClassDecl : public Decl {
 private:
-  std::string Name;
-  std::string SuperClassName; // "" = no explicit superclass
+  const std::string *Name;           // points into ASTContext::StringPool (stable)
+  const std::string *SuperClassName; // interned; "" = no explicit superclass
   std::vector<VarDecl *> Fields;
   std::vector<FuncDecl *> Methods;
 
 public:
-  ClassDecl(SourceLocation loc, const std::string &name,
-            const std::string &superName,
+  ClassDecl(SourceLocation loc, const std::string &internedName,
+            const std::string &internedSuperName,
             std::vector<VarDecl *> fields,
             std::vector<FuncDecl *> methods)
-      : Decl(NK_ClassDecl, loc), Name(name), SuperClassName(superName),
+      : Decl(NK_ClassDecl, loc), Name(&internedName),
+        SuperClassName(&internedSuperName),
         Fields(std::move(fields)), Methods(std::move(methods)) {}
 
-  const std::string &getName() const { return Name; }
-  const std::string &getSuperClassName() const { return SuperClassName; }
-  bool hasSuperClass() const { return !SuperClassName.empty(); }
+  const std::string &getName() const { return *Name; }
+  const std::string &getSuperClassName() const { return *SuperClassName; }
+  bool hasSuperClass() const { return !SuperClassName->empty(); }
 
   const std::vector<VarDecl *> &getFields() const { return Fields; }
   const std::vector<FuncDecl *> &getMethods() const { return Methods; }
