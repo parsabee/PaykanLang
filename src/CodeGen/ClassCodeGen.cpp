@@ -264,20 +264,12 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
       std::next(fn->arg_begin(), static_cast<int>(i + 1))
           ->setName(funcDecl->getParams()[i].getName());
 
-    // Save outer codegen state.
-    auto *savedBB            = CG.Builder.GetInsertBlock();
-    auto  savedIP            = CG.Builder.GetInsertPoint();
-    auto *savedRetASTTy      = CG.CurrentFuncReturnASTType;
-    auto *savedMethodClassTy = CurrentMethodClassType;
-
-    CG.CurrentFuncReturnASTType = md->getReturnType();
-    CurrentMethodClassType      = ct;
+    // Save/restore all per-function codegen state (#34): return type, insertion
+    // point, string-temp tracking, and method-class context.
+    CodeGen::FunctionStateGuard fnState(CG, md->getReturnType(), ct);
 
     auto *entry = llvm::BasicBlock::Create(CG.LLVMCtx, kIREntry, fn);
     CG.Builder.SetInsertPoint(entry);
-
-    llvm::SmallPtrSet<llvm::Value *, 16> savedTemps;
-    std::swap(savedTemps, CG.OwnedStringTemps);
 
     {
       CodeGen::ScopeGuard guard(CG);
@@ -305,8 +297,6 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
         CG.visit(stmt);
     }
 
-    std::swap(CG.OwnedStringTemps, savedTemps);
-
     // Add implicit return if the block has no terminator.
     if (!CG.Builder.GetInsertBlock()->getTerminator()) {
       if (retTy->isVoidTy())
@@ -314,12 +304,8 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
       else
         CG.Builder.CreateRet(llvm::Constant::getNullValue(retTy));
     }
-
-    // Restore outer state.
-    CG.CurrentFuncReturnASTType = savedRetASTTy;
-    CurrentMethodClassType      = savedMethodClassTy;
-    if (savedBB)
-      CG.Builder.SetInsertPoint(savedBB, savedIP);
+    // fnState's destructor restores per-function state and the caller's
+    // insertion point at end of scope.
   }
 
   // -------------------------------------------------------------------------
@@ -413,8 +399,12 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
     }
   }
 
-  auto *savedBB2 = CG.Builder.GetInsertBlock();
-  auto  savedIP2 = CG.Builder.GetInsertPoint();
+  // Per-function state guard (#34).  The constructor body emits only fixed IR
+  // (no user statements), so it touches none of the return-type / string-temp /
+  // method-class state, but routing it through the same guard keeps a single
+  // "emitting a function body" pattern and restores the caller's insert point.
+  CodeGen::FunctionStateGuard fnState(CG, /*retASTType=*/nullptr,
+                                      /*methodClassTy=*/nullptr);
 
   auto *ctorEntry = llvm::BasicBlock::Create(CG.LLVMCtx, kIREntry, ctorFn);
   CG.Builder.SetInsertPoint(ctorEntry);
@@ -467,9 +457,7 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
     CG.Builder.CreateRet(shared);
   }
 
-  if (savedBB2)
-    CG.Builder.SetInsertPoint(savedBB2, savedIP2);
-
+  // fnState's destructor restores the caller's insertion point at end of scope.
   return nullptr;
 }
 
@@ -504,13 +492,9 @@ void ClassCodeGen::emitDestructor(ast::ClassDecl *node, ast::ClassType *ct) {
   for (auto *m : node->getMethods())
     if (m->getName() == kMethodDestroy) { userDestroy = m; break; }
 
-  // Save outer codegen state.
-  auto *savedBB            = CG.Builder.GetInsertBlock();
-  auto  savedIP            = CG.Builder.GetInsertPoint();
-  auto *savedRetASTTy      = CG.CurrentFuncReturnASTType;
-  auto *savedMethodClassTy = CurrentMethodClassType;
-  CG.CurrentFuncReturnASTType = nullptr; // void
-  CurrentMethodClassType      = ct;
+  // Save/restore all per-function codegen state (#34): return type (void here),
+  // insertion point, string-temp tracking, and method-class context.
+  CodeGen::FunctionStateGuard fnState(CG, /*retASTType=*/nullptr, ct);
 
   auto *entry = llvm::BasicBlock::Create(CG.LLVMCtx, kIREntry, fn);
   CG.Builder.SetInsertPoint(entry);
@@ -565,11 +549,8 @@ void ClassCodeGen::emitDestructor(ast::ClassDecl *node, ast::ClassType *ct) {
     CG.Builder.CreateRetVoid();
   }
 
-  // Restore outer state.
-  CG.CurrentFuncReturnASTType = savedRetASTTy;
-  CurrentMethodClassType      = savedMethodClassTy;
-  if (savedBB)
-    CG.Builder.SetInsertPoint(savedBB, savedIP);
+  // fnState's destructor restores per-function state and the caller's insertion
+  // point at end of scope.
 }
 
 // ---------------------------------------------------------------------------

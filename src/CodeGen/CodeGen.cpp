@@ -150,6 +150,32 @@ CodeGen::ScopeGuard::~ScopeGuard() {
   CG.CurrentScope = ScopeObj.Parent;
 }
 
+// -- FunctionStateGuard (#34) ------------------------------------------------
+
+CodeGen::FunctionStateGuard::FunctionStateGuard(CodeGen &cg,
+                                                ast::Type *retASTType,
+                                                ast::ClassType *methodClassTy)
+    : CG(cg), SavedBB(cg.Builder.GetInsertBlock()),
+      SavedIP(SavedBB ? cg.Builder.GetInsertPoint()
+                      : llvm::BasicBlock::iterator()),
+      SavedRetASTType(cg.CurrentFuncReturnASTType),
+      SavedMethodClassType(cg.Classes.CurrentMethodClassType) {
+  CG.CurrentFuncReturnASTType = retASTType;
+  CG.Classes.CurrentMethodClassType = methodClassTy;
+  // Isolate string-temp tracking: stale entries from a sibling function must
+  // not affect this body's ownership decisions.  Swap the live set out so the
+  // body starts with an empty tracker and the caller's set is restored intact.
+  std::swap(SavedStringTemps, CG.OwnedStringTemps);
+}
+
+CodeGen::FunctionStateGuard::~FunctionStateGuard() {
+  std::swap(CG.OwnedStringTemps, SavedStringTemps);
+  CG.CurrentFuncReturnASTType = SavedRetASTType;
+  CG.Classes.CurrentMethodClassType = SavedMethodClassType;
+  if (SavedBB)
+    CG.Builder.SetInsertPoint(SavedBB, SavedIP);
+}
+
 // -- Helpers -----------------------------------------------------------------
 
 llvm::Type *CodeGen::toLLVMType(ast::Type *ty) {
@@ -189,6 +215,23 @@ llvm::Function *CodeGen::declareFunction(llvm::StringRef name,
   auto *fn = llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage,
                                     name, Module.get());
   fn->addFnAttr(llvm::Attribute::NoUnwind);
+
+  // Mark pointer-returning allocator functions as nonnull — all of them call
+  // Paykan_malloc which aborts on failure, so they never return null.  This
+  // lets the optimiser elide null-checks and improves alias analysis.
+  if (fnTy->getReturnType()->isPointerTy()) {
+    static const llvm::StringSet<> kNonNullReturn = {
+        kPaykanSharedNew, kPaykanStringNew, kPaykanStringFromInt,
+        kPaykanStringFromFloat, kPaykanStringFromBool, kPaykanStringFromChar,
+        kPaykanStringConcat, kPaykanArrayNew, kPaykanArrayNewObj,
+        kPaykanArrayNewFromData, kPaykanMalloc, kPaykanRealloc,
+        kPaykanFileNew, kPaykanFileOpen,
+        kPaykanErrorNew, kPaykanObjectNew,
+        kPaykanIntNew, kPaykanFloatNew, kPaykanBoolNew,
+    };
+    if (kNonNullReturn.count(name))
+      fn->addRetAttr(llvm::Attribute::NonNull);
+  }
   return fn;
 }
 
@@ -374,6 +417,43 @@ void CodeGen::destroyStringTempIfOwned(llvm::Value *v) {
   Builder.CreateCall(declareFunction(kPaykanStringDestroy, fnTy), {v});
 }
 
+// -- Unified ownership classification / cleanup (#32) ------------------------
+
+ExprValue CodeGen::classifyExpr(ast::Expr *expr, llvm::Value *val) const {
+  if (!val)
+    return ExprValue();
+
+  // A raw PaykanString* temporary we are tracking (string literal wrapped via
+  // wrapStringLiteral, a Str-returning builtin result, or a concat result) is
+  // owned by the consumer until torn down or boxed.
+  if (OwnedStringTemps.count(val))
+    return ExprValue::owned(val);
+
+  // A PaykanShared* box.  Only a *freshly* produced +1 box is owned by the
+  // consumer; a borrowed field/member box (exprAlreadyShared but not
+  // exprProducesFreshBox) must not be released.
+  if (exprAlreadyShared(expr) && val->getType()->isPointerTy() &&
+      exprProducesFreshBox(expr))
+    return ExprValue::owned(val);
+
+  return ExprValue::borrowed(val);
+}
+
+void CodeGen::releaseIfOwned(const ExprValue &ev) {
+  if (!ev.isOwned() || !ev.Val)
+    return;
+  // The teardown depends on what the value actually is: a tracked raw
+  // PaykanString* temporary is destroyed in place, while a PaykanShared* box is
+  // reference-counted down.  destroyStringTempIfOwned() no-ops for values that
+  // are not tracked string temps, so a non-string owned value falls through to
+  // the box release path.
+  if (OwnedStringTemps.count(ev.Val)) {
+    destroyStringTempIfOwned(ev.Val);
+    return;
+  }
+  emitRelease(ev.Val);
+}
+
 void CodeGen::bootstrapBuiltins() {
   auto *i64Ty = llvm::Type::getInt64Ty(LLVMCtx);
   auto *voidTy = llvm::Type::getVoidTy(LLVMCtx);
@@ -436,14 +516,11 @@ llvm::Value *CodeGen::visitDeclStmt(ast::DeclStmt *node) {
 
 llvm::Value *CodeGen::visitExprStmt(ast::ExprStmt *node) {
   llvm::Value *val = emitExpr(node->getExpr());
-  // If the expression produces a PaykanShared* that is not bound to any
-  // variable (e.g. `A();`), release it immediately to avoid a memory leak.
-  if (val && exprAlreadyShared(node->getExpr())) {
-    auto *ptrTy  = llvm::PointerType::getUnqual(LLVMCtx);
-    auto *voidTy = llvm::Type::getVoidTy(LLVMCtx);
-    auto *relFnTy = llvm::FunctionType::get(voidTy, {ptrTy}, false);
-    Builder.CreateCall(declareFunction(kPaykanRelease, relFnTy), {val});
-  }
+  // If the expression result is owned but bound to nothing (e.g. `A();` or a
+  // bare string temporary), tear it down immediately to avoid a leak.  The
+  // unified classification handles both fresh PaykanShared* boxes and tracked
+  // raw PaykanString* temporaries.
+  releaseIfOwned(classifyExpr(node->getExpr(), val));
   return val;
 }
 
@@ -1295,22 +1372,21 @@ llvm::Value *CodeGen::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
       if (auto *sl = ast::dyn_cast<ast::StringLiteral>(node->getRHS()))
         rhs = CG.wrapStringLiteral(rhs, sl->getValue().size());
 
+      // Classify each operand's ownership once (#32): an owned raw string temp
+      // or a fresh PaykanShared* box must be torn down after the concat, which
+      // borrows its operands and returns a brand-new owned string.
+      ExprValue lhsEV = CG.classifyExpr(node->getLHS(), lhs);
+      ExprValue rhsEV = CG.classifyExpr(node->getRHS(), rhs);
+
       // Unwrap PaykanShared* -> raw PaykanObject* for any call/method/ternary
-      // result used directly as a concat operand.  We keep the box so it can
-      // be released after the concat (we own that reference).
+      // result used directly as a concat operand.  The captured ExprValue still
+      // refers to the box so it can be released after the concat.
       auto *ptrTy2 = llvm::PointerType::getUnqual(CG.LLVMCtx);
       auto *getFnTy2 = llvm::FunctionType::get(ptrTy2, {ptrTy2}, false);
-      llvm::Value *lhsBox = nullptr, *rhsBox = nullptr;
-      if (CG.exprAlreadyShared(node->getLHS())) {
-        if (CG.exprProducesFreshBox(node->getLHS()))
-          lhsBox = lhs;
+      if (CG.exprAlreadyShared(node->getLHS()))
         lhs = CG.Builder.CreateCall(CG.declareFunction(kPaykanSharedGet, getFnTy2), {lhs}, kIRLhsObj);
-      }
-      if (CG.exprAlreadyShared(node->getRHS())) {
-        if (CG.exprProducesFreshBox(node->getRHS()))
-          rhsBox = rhs;
+      if (CG.exprAlreadyShared(node->getRHS()))
         rhs = CG.Builder.CreateCall(CG.declareFunction(kPaykanSharedGet, getFnTy2), {rhs}, kIRRhsObj);
-      }
 
       // String concatenation: call PaykanString_concat(lhs, rhs) -> ptr
       auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
@@ -1318,13 +1394,10 @@ llvm::Value *CodeGen::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
       auto *callee = CG.declareFunction(kPaykanStringConcat, fnTy);
       auto *result = CG.Builder.CreateCall(callee, {lhs, rhs}, kIRConcat);
 
-      // concat borrows its operands and returns a fresh owned string.  Tear
-      // down any owned operand temporaries and release any operand boxes, then
-      // track the result as a new owned temporary for the consumer to manage.
-      CG.destroyStringTempIfOwned(lhs);
-      CG.destroyStringTempIfOwned(rhs);
-      if (lhsBox) CG.emitRelease(lhsBox);
-      if (rhsBox) CG.emitRelease(rhsBox);
+      // Tear down owned operands, then track the result as a new owned
+      // temporary for the consumer to manage.
+      CG.releaseIfOwned(lhsEV);
+      CG.releaseIfOwned(rhsEV);
       CG.trackStringTemp(result);
       return result;
     }
@@ -1395,14 +1468,12 @@ llvm::Value *CodeGen::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
     args.push_back(llvm::ConstantInt::get(i64Ty, node->getNumArguments()));
   }
 
-  // Owned raw PaykanString* temporaries passed to this builtin (string
-  // literals, StrInt/StrFloat/StrBool results, concatenations).  The builtin
-  // borrows them, so we destroy them after the call.
-  std::vector<llvm::Value *> ownedStrArgs;
-  // PaykanShared* boxes produced by Str-returning call/method/ternary
-  // arguments (e.g. println(p.toString())).  We unbox them for the vararg but
-  // still own the box, so it must be released after the call.
-  std::vector<llvm::Value *> argBoxes;
+  // Owned argument temporaries the builtin borrows: raw PaykanString* temps
+  // (string literals, StrInt/StrFloat/StrBool results, concatenations) and
+  // fresh PaykanShared* boxes produced by Str-returning call/method/ternary
+  // arguments (e.g. println(p.toString())).  Classified once per argument and
+  // torn down after the call via the unified ownership path (#32).
+  std::vector<ExprValue> ownedArgs;
 
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     auto *argExpr = node->getArguments()[i];
@@ -1412,9 +1483,10 @@ llvm::Value *CodeGen::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
     // Wrap raw string literals into PaykanString* objects.
     if (auto *sl = ast::dyn_cast<ast::StringLiteral>(argExpr))
       v = CG.wrapStringLiteral(v, sl->getValue().size());
-    // Remember owned string temporaries so we can destroy them post-call.
-    if (CG.OwnedStringTemps.count(v))
-      ownedStrArgs.push_back(v);
+    // Classify ownership of the value as produced, before any unboxing below.
+    ExprValue ev = CG.classifyExpr(argExpr, v);
+    if (ev.isOwned())
+      ownedArgs.push_back(ev);
     // Unwrap PaykanShared* -> raw PaykanObject* for class-typed call/method-call/
     // ternary results passed directly to a builtin vararg (e.g. out()).
     // visitIdentifier already unwraps owned variables; this covers the case
@@ -1423,10 +1495,6 @@ llvm::Value *CodeGen::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
     if (CG.exprAlreadyShared(argExpr) && v->getType()->isPointerTy()) {
       auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
       auto *getFnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
-      // Only release the box afterwards if this expression produced a fresh
-      // +1 box (a borrowed field/member box must not be released here).
-      if (CG.exprProducesFreshBox(argExpr))
-        argBoxes.push_back(v);
       v = CG.Builder.CreateCall(
           CG.declareFunction(kPaykanSharedGet, getFnTy), {v}, kIRUnboxed);
     }
@@ -1440,10 +1508,8 @@ llvm::Value *CodeGen::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
 
   // Emit the call, then tear down the argument temporaries we own.
   auto cleanupArgs = [&]() {
-    for (auto *t : ownedStrArgs)
-      CG.destroyStringTempIfOwned(t);
-    for (auto *box : argBoxes)
-      CG.emitRelease(box);
+    for (const auto &ev : ownedArgs)
+      CG.releaseIfOwned(ev);
   };
 
   // Str-returning builtins (StrInt/StrFloat/StrBool) hand back a fresh, owned
@@ -1639,15 +1705,16 @@ llvm::Value *CodeGen::ExprEmitter::emitArrayPop(llvm::Value *recv, ast::Type *el
     return CG.Builder.CreateCall(CG.declareFunction(kPaykanArrayPopObj, fnTy), {recv}, kIRMcall);
   }
 
-  auto *fnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
-  llvm::Value *rawPtr = CG.Builder.CreateCall(
+  // Declare PaykanArray_pop as i64(ptr) — consistent with how PaykanArray_get
+  // is declared, and avoids a PtrToInt cast.  On LP64 the ABI is identical to
+  // the C declaration (void*(PaykanArray*)) since both return an 8-byte value.
+  auto *fnTy = llvm::FunctionType::get(i64Ty, {ptrTy}, false);
+  llvm::Value *raw = CG.Builder.CreateCall(
       CG.declareFunction(kPaykanArrayPop, fnTy), {recv}, kIRMcall);
-  // Runtime stores the 8-byte slot as a void*; reinterpret as the element type.
+  // Reinterpret the 8-byte slot based on the element type.
   llvm::Type *retLLTy = CG.toLLVMType(elemTy);
-  if (!retLLTy || retLLTy == ptrTy) return rawPtr;
-  llvm::Value *asI64 = CG.Builder.CreatePtrToInt(rawPtr, i64Ty, kIRMcall);
-  return retLLTy->isIntegerTy(64) ? asI64
-                                  : CG.Builder.CreateBitCast(asI64, retLLTy, kIRMcall);
+  if (!retLLTy || retLLTy->isIntegerTy(64)) return raw;
+  return CG.Builder.CreateBitCast(raw, retLLTy, kIRMcall);
 }
 
 llvm::Value *CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node) {
@@ -1773,10 +1840,10 @@ llvm::Value *CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node
 
   // Emit user arguments.
   std::vector<llvm::Value *> args = {recv};
-  // Owned raw PaykanString* temporaries (literals, StrInt/concat results)
-  // passed to a builtin method (e.g. File.write("...")).  The callee borrows
-  // them, so we destroy them after the call.
-  std::vector<llvm::Value *> ownedStrArgs;
+  // Owned argument temporaries (literals, StrInt/concat results) passed to a
+  // builtin method (e.g. File.write("...")).  The callee borrows them, so we
+  // tear them down after the call via the unified ownership path (#32).
+  std::vector<ExprValue> ownedArgs;
   bool isUserDefinedMethod = ct && ct != CG.ASTCtx.getObjTy() &&
                              ct != CG.ASTCtx.getStrTy() &&
                              ct != CG.ASTCtx.getFileTy() &&
@@ -1819,8 +1886,8 @@ llvm::Value *CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node
     if (!v) return nullptr;
     if (auto *sl = ast::dyn_cast<ast::StringLiteral>(argExpr))
       v = CG.wrapStringLiteral(v, sl->getValue().size());
-    if (CG.OwnedStringTemps.count(v))
-      ownedStrArgs.push_back(v);
+    if (ExprValue ev = CG.classifyExpr(argExpr, v); ev.isOwned())
+      ownedArgs.push_back(ev);
     // Coerce bool i1 -> i64 if needed.
     if (v->getType()->isIntegerTy(1) && i + 1 < paramLLTys.size() &&
         paramLLTys[i + 1]->isIntegerTy(64))
@@ -1845,10 +1912,10 @@ llvm::Value *CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node
       vtableTy, vtablePtr, gep_indices, kIRVtSlot);
   llvm::Value *fnPtr = CG.Builder.CreateLoad(ptrTy, slotPtr, kIRVfn);
 
-  // Destroy raw owned string temporaries created for the arguments.
+  // Tear down owned argument temporaries created for the arguments.
   auto destroyTemps = [&]() {
-    for (auto *t : ownedStrArgs)
-      CG.destroyStringTempIfOwned(t);
+    for (const auto &ev : ownedArgs)
+      CG.releaseIfOwned(ev);
   };
 
   if (retLLTy->isVoidTy()) {
@@ -1933,14 +2000,12 @@ llvm::Value *CodeGen::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
     else if (val->getType()->isIntegerTy(1))
       val = Builder.CreateZExt(val, i64Ty);
 
-    // PaykanArray_set signature: (arr, idx, void* value) where value is the
-    // 8-byte element passed as a pointer-width integer (memcpy'd by value).
-    // Cast i64 -> ptr so the bits round-trip through &value in the C function.
-    llvm::Value *valAsPtr = Builder.CreateIntToPtr(val, ptrTy);
-
-    auto *setFnTy = llvm::FunctionType::get(voidTy, {ptrTy, i64Ty, ptrTy}, false);
+    // PaykanArray_set(arr, idx, i64 value): declare as void(ptr, i64, i64)
+    // so the type is consistent with how emitPrimitiveArrayLiteral declares
+    // the same function — the C ABI passes an 8-byte value either way.
+    auto *setFnTy = llvm::FunctionType::get(voidTy, {ptrTy, i64Ty, i64Ty}, false);
     Builder.CreateCall(declareFunction(kPaykanArraySet, setFnTy),
-                       {arrRaw, idx, valAsPtr});
+                       {arrRaw, idx, val});
   }
   return nullptr;
 }
@@ -2097,22 +2162,13 @@ llvm::Value *CodeGen::visitFuncDecl(ast::FuncDecl *node) {
   for (auto &arg : fn->args())
     arg.setName(node->getParams()[idx++].getName());
 
-  // Save/restore current function return type.
-  auto *savedRetASTTy = CurrentFuncReturnASTType;
-  CurrentFuncReturnASTType = node->getReturnType();
-
-  // Save current insert point.
-  auto *savedBB = Builder.GetInsertBlock();
-  auto savedIP = Builder.GetInsertPoint();
+  // Save/restore all per-function codegen state (#34): return type, insertion
+  // point, string-temp tracking, and method-class context.
+  FunctionStateGuard fnState(*this, node->getReturnType(), /*methodClassTy=*/nullptr);
 
   // Create entry block and emit body.
   auto *entry = llvm::BasicBlock::Create(LLVMCtx, kIREntry, fn);
   Builder.SetInsertPoint(entry);
-
-  // Isolate string-temp tracking: stale entries from a sibling function must
-  // not affect this body's ownership decisions.
-  llvm::SmallPtrSet<llvm::Value *, 16> savedStringTemps;
-  std::swap(savedStringTemps, OwnedStringTemps);
 
   {
     ScopeGuard guard(*this);
@@ -2140,8 +2196,6 @@ llvm::Value *CodeGen::visitFuncDecl(ast::FuncDecl *node) {
       visit(stmt);
   }
 
-  std::swap(OwnedStringTemps, savedStringTemps);
-
   // If no terminator, add implicit return.
   if (!Builder.GetInsertBlock()->getTerminator()) {
     if (retTy->isVoidTy())
@@ -2150,12 +2204,8 @@ llvm::Value *CodeGen::visitFuncDecl(ast::FuncDecl *node) {
       Builder.CreateRet(llvm::Constant::getNullValue(retTy));
   }
 
-  CurrentFuncReturnASTType = savedRetASTTy;
-
-  // Restore insert point to the caller.
-  if (savedBB)
-    Builder.SetInsertPoint(savedBB, savedIP);
-
+  // fnState's destructor restores per-function state (return type, string-temp
+  // tracking, method-class context) and the caller's insertion point.
   return fn;
 }
 

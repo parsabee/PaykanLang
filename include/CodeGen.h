@@ -26,6 +26,48 @@
 namespace paykan {
 namespace codegen {
 
+/// Ownership classification for a code-generated expression value (#32).
+///
+/// Every produced `llvm::Value*` is either:
+///
+///   • Borrowed — nothing to free (primitives, borrowed field/box loads, raw
+///                C-string globals).  The consumer must NOT release it.
+///   • Owned    — the consumer owns the value and must tear it down.  The exact
+///                teardown depends on the underlying runtime object: a raw
+///                `PaykanString*` temporary is freed with `PaykanString_destroy`
+///                (tracked in `OwnedStringTemps`), while a freshly produced
+///                `PaykanShared*` box (+1 refcount) is freed with
+///                `Paykan_release`.  That distinction is a property of the value,
+///                not of the ownership decision, so it is resolved at teardown
+///                time (releaseIfOwned) rather than encoded in a separate kind.
+///
+/// Previously each consumer re-derived ownership from the AST (via
+/// `exprAlreadyShared` / `exprProducesFreshBox`) and from `OwnedStringTemps`
+/// membership, in an ad-hoc way scattered across many call sites.  `ExprValue`
+/// bundles the value with a single ownership bit so the decision is made once,
+/// at production, and acted on consistently at consumption.
+struct ExprValue {
+  enum class Ownership {
+    Borrowed, ///< Caller must not release; nothing to free.
+    Owned,    ///< Caller owns it and must tear it down (string temp or box).
+  };
+
+  llvm::Value *Val = nullptr;
+  Ownership Own = Ownership::Borrowed;
+
+  ExprValue() = default;
+  ExprValue(llvm::Value *v, Ownership own) : Val(v), Own(own) {}
+
+  static ExprValue borrowed(llvm::Value *v) {
+    return {v, Ownership::Borrowed};
+  }
+  static ExprValue owned(llvm::Value *v) { return {v, Ownership::Owned}; }
+
+  bool isOwned() const { return Own == Ownership::Owned; }
+  llvm::Value *value() const { return Val; }
+  explicit operator bool() const { return Val != nullptr; }
+};
+
 /// LLVM IR code generator.
 ///
 /// Walks the (already Sema-checked) AST and emits LLVM IR.  The entire
@@ -181,6 +223,41 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
     ~ScopeGuard();
   };
 
+  /// RAII helper that saves and restores ALL per-function codegen state around
+  /// the emission of one function/method/destructor body (#34).
+  ///
+  /// This consolidates the previously-scattered manual save/restore at the
+  /// three body-emission sites (visitFuncDecl, ClassCodeGen method emission,
+  /// emitDestructor) into a single named unit.  It is the seam at which a
+  /// standalone `CodeGenFunction` can later be split out: everything this guard
+  /// snapshots is exactly the mutable state that must NOT leak between sibling
+  /// functions, and which a future parallel per-function compiler would have to
+  /// own privately rather than share on `CodeGen`.
+  ///
+  /// Saved/restored state:
+  ///   • Builder insertion point (block + iterator)
+  ///   • CurrentFuncReturnASTType
+  ///   • OwnedStringTemps (swapped out to an empty set for the body)
+  ///   • ClassCodeGen::CurrentMethodClassType
+  struct FunctionStateGuard {
+    CodeGen &CG;
+    llvm::BasicBlock *SavedBB;
+    llvm::BasicBlock::iterator SavedIP;
+    ast::Type *SavedRetASTType;
+    ast::ClassType *SavedMethodClassType;
+    llvm::SmallPtrSet<llvm::Value *, 16> SavedStringTemps;
+
+    /// @param retASTType    AST return type for the body being emitted.
+    /// @param methodClassTy ClassType when emitting a method/destructor body,
+    ///                      or nullptr for a free function.
+    FunctionStateGuard(CodeGen &cg, ast::Type *retASTType,
+                       ast::ClassType *methodClassTy);
+    ~FunctionStateGuard();
+
+    FunctionStateGuard(const FunctionStateGuard &) = delete;
+    FunctionStateGuard &operator=(const FunctionStateGuard &) = delete;
+  };
+
   // -- Helpers --------------------------------------------------------------
 
   /// Map an AST Type* to the corresponding LLVM type.
@@ -211,6 +288,20 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   void emitRetain(llvm::Value *shared);
   void emitRelease(llvm::Value *shared);
   llvm::Value *emitSharedNew(llvm::Value *raw, llvm::StringRef name = "shared");
+
+  // -- Unified ownership classification / cleanup (#32) ----------------------
+  //
+  // classifyExpr() pairs the just-emitted llvm::Value* for `expr` with its
+  // ownership bit (Borrowed vs Owned), derived once from the same predicates the
+  // scattered call sites used to consult (exprAlreadyShared /
+  // exprProducesFreshBox / OwnedStringTemps).  releaseIfOwned() acts on that
+  // classification, emitting the teardown that matches the underlying value: a
+  // tracked raw PaykanString* temp is freed with PaykanString_destroy, while a
+  // fresh PaykanShared* box is freed with Paykan_release; Borrowed values are
+  // left untouched.  Together they let a consumer manage an arbitrary expression
+  // result without re-inspecting the AST.
+  ExprValue classifyExpr(ast::Expr *expr, llvm::Value *val) const;
+  void releaseIfOwned(const ExprValue &ev);
 
   // -- Transient string-temporary tracking ----------------------------------
   //

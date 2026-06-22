@@ -53,9 +53,9 @@ void CodeGen::processImports(ast::TranslationUnit *tu) {
       llvm::SmallString<256> fullBuf;
       if (imp->isSystem()) {
         const char *env = std::getenv(names::kPaykanStdlibEnv);
-        if (env && env[0])
+        if (env && env[0]) {
           fullBuf = env;
-          else {
+        } else {
           fullBuf = ProjectRoot;
           llvm::sys::path::append(fullBuf, names::kStdlibDir);
         }
@@ -124,6 +124,30 @@ void CodeGen::processImports(ast::TranslationUnit *tu) {
         continue;
       auto &importedSemaCtx = *ctxIt->second;
 
+      // #33 (parallel imported-module codegen) seam:
+      //
+      // To compile imports in parallel under ORCv2 each imported module would
+      // need its OWN llvm::LLVMContext (an LLVMContext is not thread-safe), so
+      // this line would become:
+      //
+      //     auto importTSCtx =
+      //         std::make_unique<llvm::orc::ThreadSafeContext>(
+      //             std::make_unique<llvm::LLVMContext>());
+      //     CodeGen importCG(importedSemaCtx, *importTSCtx.getContext(),
+      //                      resolved, ProjectRoot);
+      //
+      // and the resulting module would be handed to the JIT as its own
+      // ThreadSafeModule rather than linked into the parent module.
+      //
+      // That is currently BLOCKED end-to-end: the driver (src/Driver/main.cpp)
+      // and the test harness (tests/TestUtils.h) both consume imported modules
+      // via llvm::Linker::linkModules() into the single parent context, and the
+      // cross-module qualifier aliases below are created in the imported
+      // module's context referencing the parent module's functions — both of
+      // which require all modules to share ONE context.  Switching to per-import
+      // contexts therefore requires rewiring the link-merge pipeline into a
+      // multi-ThreadSafeModule JIT add (a separate, larger change).  Until then
+      // imports share the parent LLVMCtx and codegen runs serially.
       CodeGen importCG(importedSemaCtx, LLVMCtx, resolved, ProjectRoot);
       if (!importCG.run(importedSemaCtx.Root))
         continue;
@@ -151,12 +175,16 @@ void CodeGen::processImports(ast::TranslationUnit *tu) {
       // -- Write bitcode to cache ------------------------------------------
       {
         auto parentDir = llvm::sys::path::parent_path(cachePath);
+        std::error_code mkdirEc;
         if (!parentDir.empty())
-          llvm::sys::fs::create_directories(parentDir);
-        std::error_code ec;
-        llvm::raw_fd_ostream cacheOut(cachePath, ec);
-        if (!ec)
-          llvm::WriteBitcodeToFile(*impMod, cacheOut);
+          mkdirEc = llvm::sys::fs::create_directories(parentDir);
+        // Cache is best-effort: only write if the directory is in place.
+        if (!mkdirEc) {
+          std::error_code ec;
+          llvm::raw_fd_ostream cacheOut(cachePath, ec);
+          if (!ec)
+            llvm::WriteBitcodeToFile(*impMod, cacheOut);
+        }
       }
 
       ImportedModules.push_back(std::move(impMod));
