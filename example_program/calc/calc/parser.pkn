@@ -1,0 +1,132 @@
+// calc/parser — recursive descent arithmetic expression parser
+//
+// Grammar (lowest to highest precedence):
+//   expr   ::= term   (('+' | '-') term)*
+//   term   ::= factor (('*' | '/') factor)*
+//   factor ::= '(' expr ')' | '-' factor | number
+//   number ::= [0-9]+ ('.' [0-9]+)?
+
+class Parser {
+  input: Str;
+  pos: int;
+
+  fn __init__(s: Str) {
+    self.input = s;
+    self.pos = 0;
+  }
+
+  fn done() -> bool {
+    return self.pos >= self.input.len();
+  }
+
+  fn atIs(ch: char) -> bool {
+    if (self.done()) { return False; }
+    return self.input[self.pos] == ch;
+  }
+
+  fn atIsOr(a: char, b: char) -> bool {
+    if (self.done()) { return False; }
+    c: char = self.input[self.pos];
+    return c == a || c == b;
+  }
+
+  fn atIsDigit() -> bool {
+    if (self.done()) { return False; }
+    c: char = self.input[self.pos];
+    return c >= '0' && c <= '9';
+  }
+
+  fn atDigitVal() -> int {
+    if (self.done()) { return 0; }
+    c: char = self.input[self.pos];
+    if (c == '0') { return 0; }
+    if (c == '1') { return 1; }
+    if (c == '2') { return 2; }
+    if (c == '3') { return 3; }
+    if (c == '4') { return 4; }
+    if (c == '5') { return 5; }
+    if (c == '6') { return 6; }
+    if (c == '7') { return 7; }
+    if (c == '8') { return 8; }
+    if (c == '9') { return 9; }
+    return 0;
+  }
+
+  fn advance() {
+    self.pos = self.pos + 1;
+  }
+
+  fn skipWs() {
+    while (!self.done() && self.atIs(' ')) {
+      self.advance();
+    }
+  }
+
+  fn parseNumber() -> float {
+    result: float = 0.0;
+    while (self.atIsDigit()) {
+      result = result * 10.0 + self.atDigitVal();
+      self.advance();
+    }
+    if (self.atIs('.')) {
+      self.advance();
+      frac: float = 0.1;
+      while (self.atIsDigit()) {
+        result = result + self.atDigitVal() * frac;
+        frac = frac * 0.1;
+        self.advance();
+      }
+    }
+    return result;
+  }
+
+  fn parseFactor() -> float {
+    self.skipWs();
+    if (self.atIs('(')) {
+      self.advance();
+      val: float = self.parseExpr();
+      self.skipWs();
+      if (self.atIs(')')) { self.advance(); }
+      return val;
+    }
+    if (self.atIs('-')) {
+      self.advance();
+      return 0.0 - self.parseFactor();
+    }
+    return self.parseNumber();
+  }
+
+  fn parseTerm() -> float {
+    result: float = self.parseFactor();
+    self.skipWs();
+    while (self.atIsOr('*', '/')) {
+      isMul: bool = self.atIs('*');
+      self.advance();
+      rhs: float = self.parseFactor();
+      if (isMul) {
+        result = result * rhs;
+      } else {
+        result = result / rhs;
+      }
+      self.skipWs();
+    }
+    return result;
+  }
+
+  fn parseExpr() -> float {
+    result: float = self.parseTerm();
+    self.skipWs();
+    while (self.atIsOr('+', '-')) {
+      isAdd: bool = self.atIs('+');
+      self.advance();
+      rhs: float = self.parseTerm();
+      if (isAdd) {
+        result = result + rhs;
+      } else {
+        result = result - rhs;
+      }
+      self.skipWs();
+    }
+    return result;
+  }
+}

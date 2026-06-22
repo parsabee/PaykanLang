@@ -32,6 +32,8 @@ _deps/
 *.swo
 *~
 .claude/
+.cache/
+.paykan_cache/
 
 # Clangd / compile commands
 compile_commands.json

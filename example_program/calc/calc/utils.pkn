@@ -1,0 +1,45 @@
+// calc/utils — string formatting helpers for the calculator
+
+// Strip trailing zeros from a StrFloat result.
+// Examples: "7.000000" -> "7",  "3.140000" -> "3.14",  "2.5" -> "2.5"
+fn trimFloat(s: Str) -> Str {
+  dot: int = -1;
+  i: int = 0;
+  while (i < s.len()) {
+    if (s[i] == '.') { dot = i; }
+    i = i + 1;
+  }
+  if (dot == -1) { return s; }
+
+  end: int = s.len() - 1;
+  while (end > dot && s[end] == '0') {
+    end = end - 1;
+  }
+  if (end == dot) {
+    end = end - 1;
+  }
+
+  result: Str = "";
+  i = 0;
+  while (i <= end) {
+    result = result + StrChar(s[i]);
+    i = i + 1;
+  }
+  return result;
+}
+
+// Strip trailing newline, carriage-return, and spaces from a line.
+// Used to clean up input from Stdin.readln().
+fn stripLine(s: Str) -> Str {
+  end: int = s.len() - 1;
+  while (end >= 0 && (s[end] == '\n' || s[end] == '\r' || s[end] == ' ')) {
+    end = end - 1;
+  }
+  result: Str = "";
+  i: int = 0;
+  while (i <= end) {
+    result = result + StrChar(s[i]);
+    i = i + 1;
+  }
+  return result;
+}

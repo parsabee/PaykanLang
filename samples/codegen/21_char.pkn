@@ -1,0 +1,31 @@
+// Sample 21 — char primitive type
+//
+// char is an 8-bit primitive (i8 in LLVM). char literals use single quotes.
+// Escape sequences supported: \n \t \r \\ \'  \0
+// StrChar(c: char) -> Str converts a char to a one-character string.
+// Comparison operators ==, !=, <, >, <=, >= are supported.
+
+fn main() -> int {
+  // Basic literal and StrChar conversion
+  c: char = 'A';
+  println(StrChar(c));                 // A
+
+  // Escape sequences
+  println("tab:" + StrChar('\t') + "end");
+  println("newline before:");
+  println(StrChar('\n') + "newline after");
+
+  // Comparison
+  lo: char = 'a';
+  hi: char = 'z';
+  if (lo < hi) { println("a < z"); }
+  if (lo != hi) { println("a != z"); }
+  if (lo == lo) { println("a == a"); }
+  if (hi > lo)  { println("z > a"); }
+
+  // char in a variable used multiple times
+  sep: char = '-';
+  println(StrChar(sep) + StrChar(sep) + StrChar(sep));  // ---
+
+  return 0;
+}

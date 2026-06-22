@@ -1,0 +1,93 @@
+// Sample 20 — Boxed primitives: IntStr and FloatStr
+//
+// IntStr(s: Str) -> Obj  parses a decimal integer string.
+// FloatStr(s: Str) -> Obj  parses a floating-point string.
+// Both return an Int / Float box on success, or an Error on failure.
+// Use match to distinguish the two cases.
+
+fn tryParseInt(s: Str) -> Str {
+  match IntStr(s) {
+    n: Int     { return "ok: " + n.toString(); }
+    err: Error { return "err: " + err.toString(); }
+    _          { return "?"; }
+  }
+}
+
+fn tryParseFloat(s: Str) -> Str {
+  match FloatStr(s) {
+    f: Float   { return "ok: " + f.toString(); }
+    err: Error { return "err: " + err.toString(); }
+    _          { return "?"; }
+  }
+}
+
+fn main() -> int {
+  // === IntStr ===
+  println("=== IntStr ===");
+
+  // valid integers
+  println(tryParseInt("0"));
+  println(tryParseInt("42"));
+  println(tryParseInt("-99"));
+  println(tryParseInt("9223372036854775807"));   // INT64_MAX
+
+  // invalid inputs
+  println(tryParseInt("abc"));
+  println(tryParseInt("12abc"));
+  println(tryParseInt(""));
+  println(tryParseInt("3.14"));
+
+  // === FloatStr ===
+  println("=== FloatStr ===");
+
+  // valid floats
+  println(tryParseFloat("0"));
+  println(tryParseFloat("3.14"));
+  println(tryParseFloat("-2.718"));
+  println(tryParseFloat("1e10"));
+  println(tryParseFloat("2.5e-3"));
+
+  // invalid inputs
+  println(tryParseFloat("abc"));
+  println(tryParseFloat("1.2.3"));
+  println(tryParseFloat(""));
+
+  // === match in expressions ===
+  println("=== match in expressions ===");
+
+  i: int = 0;
+  total = 0;
+  inputs: Str[] = ["10", "20", "bad", "30", "nope", "40"];
+  while (i < inputs.len()) {
+    match IntStr(inputs[i]) {
+      n: Int { total = total + 1; }
+      _      {}
+    }
+    i = i + 1;
+  }
+  println("valid ints in list: " + StrInt(total));
+
+  // === toString and equals on boxed values ===
+  println("=== toString / equals ===");
+
+  match IntStr("7") {
+    a: Int {
+      match IntStr("7") {
+        b: Int { println(StrBool(a.equals(b))); }
+        _ {}
+      }
+      match IntStr("8") {
+        c: Int { println(StrBool(a.equals(c))); }
+        _ {}
+      }
+    }
+    _ {}
+  }
+
+  match FloatStr("1.5") {
+    f: Float { println(f.toString()); }
+    _ {}
+  }
+
+  return 0;
+}

@@ -1,0 +1,77 @@
+// Sample 22 — String indexing: str[i] -> char
+//
+// Indexing a Str with an integer subscript now yields a char (primitive i8).
+// Out-of-bounds access aborts with a runtime error message.
+
+fn countChar(s: Str, target: char) -> int {
+  count: int = 0;
+  i: int = 0;
+  while (i < s.len()) {
+    if (s[i] == target) {
+      count = count + 1;
+    }
+    i = i + 1;
+  }
+  return count;
+}
+
+fn reverseStr(s: Str) -> Str {
+  result: Str = "";
+  i: int = s.len() - 1;
+  while (i >= 0) {
+    result = result + StrChar(s[i]);
+    i = i - 1;
+  }
+  return result;
+}
+
+fn isPalindrome(s: Str) -> bool {
+  lo: int = 0;
+  hi: int = s.len() - 1;
+  while (lo < hi) {
+    if (s[lo] != s[hi]) {
+      return False;
+    }
+    lo = lo + 1;
+    hi = hi - 1;
+  }
+  return True;
+}
+
+fn main() -> int {
+  // Basic indexing
+  word: Str = "hello";
+  println(StrChar(word[0]));   // h
+  println(StrChar(word[4]));   // o
+
+  // Round-trip: index then StrChar
+  i: int = 0;
+  while (i < word.len()) {
+    print(StrChar(word[i]));
+    i = i + 1;
+  }
+  println("");   // newline
+
+  // Count occurrences of a char
+  sentence: Str = "the quick brown fox jumps over the lazy dog";
+  println("'e' count: " + StrInt(countChar(sentence, 'e')));   // 3
+  println("'o' count: " + StrInt(countChar(sentence, 'o')));   // 4
+
+  // Reverse a string
+  println(reverseStr("abcde"));   // edcba
+  println(reverseStr("racecar")); // racecar
+
+  // Palindrome check
+  println(StrBool(isPalindrome("racecar")));  // True
+  println(StrBool(isPalindrome("hello")));    // False
+  println(StrBool(isPalindrome("a")));        // True
+  println(StrBool(isPalindrome("")));         // True
+
+  // Comparison between indexed chars
+  s: Str = "az";
+  if (s[0] < s[1]) {
+    println("a < z: true");
+  }
+
+  return 0;
+}

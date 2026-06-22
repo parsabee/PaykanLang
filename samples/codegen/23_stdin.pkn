@@ -1,0 +1,39 @@
+// Sample 23 — Stdin
+//
+// Stdin is a built-in File singleton wrapping C's stdin.
+// Supported methods (same as any File):
+//   Stdin.readln()        -> Obj  (Str on success, None at EOF)
+//   Stdin.readbytes(n)    -> Obj  (Str of up to n bytes on success, None at EOF)
+//   Stdin.read()          -> Obj  (Str with all remaining input, None at EOF)
+//
+// Run this sample with piped input, e.g.:
+//   printf "hello\nworld\n42\n" | ./build/bin/paykan samples/codegen/23_stdin.pkn
+
+fn main() -> int {
+  // --- readln: read lines until EOF ---
+  println("=== readln ===");
+  i: int = 0;
+  while (True) {
+    match Stdin.readln() {
+      line: Str {
+        // strip trailing newline for display
+        n: int = line.len();
+        display: Str = "";
+        j: int = 0;
+        while (j < n) {
+          c: char = line[j];
+          if (c != '\n') {
+            display = display + StrChar(c);
+          }
+          j = j + 1;
+        }
+        println("  [" + StrInt(i) + "] " + display);
+        i = i + 1;
+      }
+      _ { break; }
+    }
+  }
+  println("read " + StrInt(i) + " lines");
+
+  return 0;
+}

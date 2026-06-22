@@ -1,0 +1,32 @@
+// calc — Basic arithmetic calculator
+//
+// Evaluates an expression with +, -, *, /, and parentheses.
+// Numbers may be integers or floating-point.
+//
+// Usage:
+//   ./build/bin/paykan example_program/calc/main.pkn "3 + 4 * (2 - 1)"
+//   echo "10 / 4 + 1.5" | ./build/bin/paykan example_program/calc/main.pkn
+
+import calc::parser;
+import calc::utils;
+
+fn main(args: Str[]) -> int {
+  expr: Str = "";
+
+  if (args.len() > 1) {
+    expr = args[1];
+  } else {
+    match Stdin.readln() {
+      line: Str { expr = utils::stripLine(line); }
+      _ {
+        printerrln("error: no input");
+        return 1;
+      }
+    }
+  }
+
+  p: Parser = parser::Parser(expr);
+  result: float = p.parseExpr();
+  println(expr + " = " + utils::trimFloat(StrFloat(result)));
+  return 0;
+}
