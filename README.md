@@ -1,8 +1,10 @@
 # PaykanLang
 
-PaykanLang (`.pkn`) is a statically-typed, object-oriented language. It compiles to LLVM and can be **JIT-executed** for rapid
-development or **compiled to a native binary** for deployment. Memory lifetimes are managed
-via automatic reference counting — there is no garbage collector.
+PaykanLang (`.pkn`) is a statically-typed, object-oriented language. It compiles to LLVM IR and is **JIT-executed**.
+Memory lifetimes are managed via automatic reference counting — there is no garbage collector.
+
+> **Status: v0.0 — JIT only.** Programs are run via the LLVM JIT (`paykan program.pkn`). Ahead-of-time
+> compilation to a standalone native binary is planned for v0.1 and is not yet implemented.
 
 ---
 
@@ -15,7 +17,7 @@ via automatic reference counting — there is no garbage collector.
 - **Arrays** — heap-allocated, dynamically-sized, element-typed (`int[]`, `Str[]`, `Point[]`, …)
 - **Modules** — file-based module system with selective and aliased imports
 - **Built-in I/O** — `open()` / `File` / `Error` for file I/O; `println` / `printerrln` for console output
-- **LLVM backend** — JIT execution or ahead-of-time native binary compilation
+- **LLVM backend** — programs are compiled to LLVM IR and JIT-executed (ahead-of-time native compilation planned for v0.1)
 
 ---
 
@@ -205,6 +207,13 @@ make -j$(nproc) paykan
 
 The `paykan` binary is placed at `build/bin/paykan`.
 
+To install the compiler to a prefix (the binary statically links the runtime, so it is
+self-contained for JIT execution):
+
+```sh
+cmake --install build --prefix /usr/local
+```
+
 ---
 
 ## Running Programs
@@ -215,6 +224,9 @@ The `paykan` binary is placed at `build/bin/paykan`.
 
 # Emit LLVM IR (for inspection)
 ./build/bin/paykan --emit-llvm program.pkn
+
+# Print the compiler and LLVM versions
+./build/bin/paykan --version
 ```
 
 ---

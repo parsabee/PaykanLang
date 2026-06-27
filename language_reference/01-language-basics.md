@@ -3,8 +3,8 @@
 ## What is Paykan?
 
 Paykan (`.pkn`) is a statically-typed clean and simple language.
-It compiles to LLVM and can be **JIT-executed or compiled to a native binary**. Memory
-lifetimes for objects are managed via automatic reference counting — there is no garbage
+It compiles to LLVM IR and is **JIT-executed** (ahead-of-time native compilation is planned for v0.1).
+Memory lifetimes for objects are managed via automatic reference counting — there is no garbage
 collector.
 
 ### Design Pillars
@@ -13,7 +13,7 @@ collector.
 |--------|-------------|
 | **Zero-cost abstractions** | Functions and arrays map directly to machine code with no overhead |
 | **Classes with virtual dispatch** | vtable-based method dispatch, single inheritance, method overriding — class instances are heap-allocated with reference counting |
-| **Binary + JIT** | Programs can be JIT-executed for rapid development or compiled to standalone native binaries |
+| **JIT execution** | Programs are JIT-executed for rapid development (standalone native binaries planned for v0.1) |
 
 ---
 
