@@ -65,3 +65,10 @@ static PaykanObjectVTable PaykanNone_vtable = {
 };
 
 PaykanObject PaykanObject_None = {&PaykanNone_vtable};
+
+// -- Runtime panics ----------------------------------------------------------
+
+void Paykan_panic_div_by_zero(void) {
+  fprintf(stderr, "paykan: integer division or modulo by zero\n");
+  abort();
+}

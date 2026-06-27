@@ -1474,6 +1474,24 @@ llvm::Value *CodeGen::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
 
   bool isFloat = lhs->getType()->isDoubleTy();
 
+  // Integer divide/modulo by zero is undefined behaviour for LLVM's sdiv/srem.
+  // Emit a guard that aborts via the runtime, mirroring array bounds checking.
+  // (Float division by zero is well-defined IEEE-754 and is left untouched.)
+  auto emitIntDivByZeroGuard = [&](llvm::Value *divisor) {
+    auto *zero = llvm::ConstantInt::get(divisor->getType(), 0);
+    auto *isZero = CG.Builder.CreateICmpEQ(divisor, zero, kIRDivZeroChk);
+    auto *fn = CG.Builder.GetInsertBlock()->getParent();
+    auto *panicBB = llvm::BasicBlock::Create(CG.LLVMCtx, kIRDivZeroPanic, fn);
+    auto *contBB = llvm::BasicBlock::Create(CG.LLVMCtx, kIRDivZeroCont, fn);
+    CG.Builder.CreateCondBr(isZero, panicBB, contBB);
+    CG.Builder.SetInsertPoint(panicBB);
+    auto *panicTy =
+        llvm::FunctionType::get(llvm::Type::getVoidTy(CG.LLVMCtx), false);
+    CG.Builder.CreateCall(CG.declareFunction(kPaykanPanicDivByZero, panicTy), {});
+    CG.Builder.CreateUnreachable();
+    CG.Builder.SetInsertPoint(contBB);
+  };
+
   switch (node->getOpcode()) {
   // -- Arithmetic -----------------------------------------------------------
   case ast::BinaryOpcode::Add:
@@ -1524,11 +1542,15 @@ llvm::Value *CodeGen::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
     return isFloat ? CG.Builder.CreateFMul(lhs, rhs, kIRFMul)
                    : CG.Builder.CreateMul(lhs, rhs, kIRMul);
   case ast::BinaryOpcode::Div:
-    return isFloat ? CG.Builder.CreateFDiv(lhs, rhs, kIRFDiv)
-                   : CG.Builder.CreateSDiv(lhs, rhs, kIRSDiv);
+    if (isFloat)
+      return CG.Builder.CreateFDiv(lhs, rhs, kIRFDiv);
+    emitIntDivByZeroGuard(rhs);
+    return CG.Builder.CreateSDiv(lhs, rhs, kIRSDiv);
   case ast::BinaryOpcode::Mod:
-    return isFloat ? CG.Builder.CreateFRem(lhs, rhs, kIRFMod)
-                   : CG.Builder.CreateSRem(lhs, rhs, kIRSRem);
+    if (isFloat)
+      return CG.Builder.CreateFRem(lhs, rhs, kIRFMod);
+    emitIntDivByZeroGuard(rhs);
+    return CG.Builder.CreateSRem(lhs, rhs, kIRSRem);
 
   // -- Relational -----------------------------------------------------------
   case ast::BinaryOpcode::Lt:

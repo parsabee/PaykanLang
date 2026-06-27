@@ -142,6 +142,9 @@ inline constexpr const char *kPaykanErrPrint = "Paykan_printerr";
 inline constexpr const char *kPaykanErrPrintln = "Paykan_printerrln";
 inline constexpr const char *kPaykanFlush = "Paykan_flush";
 
+// Runtime panics (noreturn)
+inline constexpr const char *kPaykanPanicDivByZero = "Paykan_panic_div_by_zero";
+
 // Reference counting
 inline constexpr const char *kPaykanSharedNew = "PaykanShared_new";
 inline constexpr const char *kPaykanSharedGet = "PaykanShared_get";
@@ -206,6 +209,8 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanRelease,
     kPaykanSharedNew,
     kPaykanSharedGet,
+    // Panics
+    kPaykanPanicDivByZero,
     // String
     kPaykanStringNew,
     kPaykanStringDestroy,

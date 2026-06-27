@@ -95,6 +95,35 @@ TEST(Driver, ShortVersionFlagMatchesLong) {
 }
 
 // ---------------------------------------------------------------------------
+// integer divide / modulo by zero trap
+// ---------------------------------------------------------------------------
+
+TEST(Driver, IntDivByZeroTraps) {
+  auto src = writeTmp(
+      "fn main() -> int { z: int = 0; q: int = 7 / z; return q; }");
+  auto [rc, out] = run(std::string(kPaykan) + " " + src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_NE(rc, 0);
+  EXPECT_NE(out.find("division or modulo by zero"), std::string::npos) << out;
+}
+
+TEST(Driver, IntModByZeroTraps) {
+  auto src = writeTmp(
+      "fn main() -> int { z: int = 0; r: int = 7 % z; return r; }");
+  auto [rc, out] = run(std::string(kPaykan) + " " + src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_NE(rc, 0);
+  EXPECT_NE(out.find("division or modulo by zero"), std::string::npos) << out;
+}
+
+TEST(Driver, IntDivNonZeroSucceeds) {
+  auto src = writeTmp("fn main() -> int { return 17 / 5; }");
+  auto [rc, _] = run(std::string(kPaykan) + " " + src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_EQ(rc, 3); // 17 / 5 == 3, returned as the process exit code
+}
+
+// ---------------------------------------------------------------------------
 // --dump-ast
 // ---------------------------------------------------------------------------
 

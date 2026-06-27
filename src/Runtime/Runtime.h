@@ -24,6 +24,14 @@
 extern "C" {
 #endif
 
+// Portable noreturn attribute: `_Noreturn` is C11-only and not valid C++,
+// but this header is included from both the C runtime and the C++ compiler.
+#ifdef __cplusplus
+#define PAYKAN_NORETURN [[noreturn]]
+#else
+#define PAYKAN_NORETURN _Noreturn
+#endif
+
 // ============================================================================
 // Forward declarations
 // ============================================================================
@@ -355,6 +363,15 @@ void Paykan_release(PaykanShared *shared);
 
 /// Convenience: return the underlying object pointer.
 PaykanObject *PaykanShared_get(PaykanShared *shared);
+
+// ============================================================================
+// Runtime panics
+// ============================================================================
+
+/// Print an integer divide-by-zero diagnostic to stderr and abort the process.
+/// Emitted by CodeGen as the trap target for integer `/` and `%` by zero,
+/// mirroring the runtime abort on out-of-bounds array access.
+PAYKAN_NORETURN void Paykan_panic_div_by_zero(void);
 
 // ============================================================================
 // I/O builtins
