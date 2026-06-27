@@ -193,7 +193,8 @@ TEST(ControlFlow, TernaryMismatchedBranchesRejected) {
 }
 
 TEST(ControlFlow, TernaryNestedOk) {
-  auto r = semaCheck(wrapMain("x: int = if True then 1 else if False then 2 else 3;"));
+  auto r = semaCheck(
+      wrapMain("x: int = if True then 1 else if False then 2 else 3;"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 

@@ -11,7 +11,9 @@
 
 // Forward declaration — callers that need raw_ostream methods must include
 // <llvm/Support/raw_ostream.h> themselves.
-namespace llvm { class raw_ostream; }
+namespace llvm {
+class raw_ostream;
+}
 
 namespace paykan {
 namespace sema {

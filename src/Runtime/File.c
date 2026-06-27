@@ -18,27 +18,27 @@
 // Forward declarations
 // ============================================================================
 
-void          PaykanFile_destroy  (PaykanObject *self);
-PaykanShared *PaykanFile_toString (PaykanObject *self);
-int64_t       PaykanFile_equals   (PaykanObject *self, PaykanObject *other);
-void          PaykanFile_write    (PaykanObject *self, PaykanObject *str);
-PaykanShared *PaykanFile_readln   (PaykanObject *self);
+void PaykanFile_destroy(PaykanObject *self);
+PaykanShared *PaykanFile_toString(PaykanObject *self);
+int64_t PaykanFile_equals(PaykanObject *self, PaykanObject *other);
+void PaykanFile_write(PaykanObject *self, PaykanObject *str);
+PaykanShared *PaykanFile_readln(PaykanObject *self);
 PaykanShared *PaykanFile_readbytes(PaykanObject *self, int64_t n);
-PaykanShared *PaykanFile_read     (PaykanObject *self);
-PaykanShared *PaykanFile_open     (PaykanObject *path, PaykanObject *mode);
+PaykanShared *PaykanFile_read(PaykanObject *self);
+PaykanShared *PaykanFile_open(PaykanObject *path, PaykanObject *mode);
 
 // ============================================================================
 // VTable
 // ============================================================================
 
 PaykanFileVTable PaykanFile_vtable = {
-    .destroy   = PaykanFile_destroy,
-    .toString  = PaykanFile_toString,
-    .equals    = PaykanFile_equals,
-    .write     = PaykanFile_write,
-    .readln    = PaykanFile_readln,
+    .destroy = PaykanFile_destroy,
+    .toString = PaykanFile_toString,
+    .equals = PaykanFile_equals,
+    .write = PaykanFile_write,
+    .readln = PaykanFile_readln,
     .readbytes = PaykanFile_readbytes,
-    .read      = PaykanFile_read,
+    .read = PaykanFile_read,
 };
 
 // ============================================================================
@@ -63,8 +63,8 @@ PaykanShared *PaykanFile_open(PaykanObject *pathObj, PaykanObject *modeObj) {
   if (!handle) {
     // Build a human-readable error message and wrap it in an Error object.
     char buf[512];
-    int n = snprintf(buf, sizeof(buf), "open(\"%s\", \"%s\"): %s",
-                     path->data, mode->data, strerror(errno));
+    int n = snprintf(buf, sizeof(buf), "open(\"%s\", \"%s\"): %s", path->data,
+                     mode->data, strerror(errno));
     return PaykanShared_new((PaykanObject *)PaykanError_new(buf, (int64_t)n));
   }
   PaykanFile *f = PaykanFile_new();
@@ -90,7 +90,7 @@ int64_t PaykanFile_equals(PaykanObject *self, PaykanObject *other) {
 }
 
 void PaykanFile_write(PaykanObject *self, PaykanObject *strObj) {
-  PaykanFile   *f   = (PaykanFile *)self;
+  PaykanFile *f = (PaykanFile *)self;
   PaykanString *str = (PaykanString *)strObj;
   if (!f->handle) {
     fprintf(stderr, "paykan: write on closed File\n");
@@ -106,14 +106,14 @@ PaykanShared *PaykanFile_readln(PaykanObject *self) {
     return PaykanShared_new(&PaykanObject_None);
   }
   // Read one line (including the trailing '\n' if present).
-  size_t cap  = 128;
+  size_t cap = 128;
   size_t used = 0;
-  char  *buf  = (char *)Paykan_malloc(cap);
-  int    c;
+  char *buf = (char *)Paykan_malloc(cap);
+  int c;
   while ((c = fgetc(f->handle)) != EOF) {
     if (used + 1 >= cap) {
       cap *= 2;
-      buf  = (char *)Paykan_realloc(buf, cap);
+      buf = (char *)Paykan_realloc(buf, cap);
     }
     buf[used++] = (char)c;
     if (c == '\n')
@@ -156,15 +156,15 @@ PaykanShared *PaykanFile_read(PaykanObject *self) {
     fprintf(stderr, "paykan: read on closed File\n");
     return PaykanShared_new(&PaykanObject_None);
   }
-  size_t cap  = 4096;
+  size_t cap = 4096;
   size_t used = 0;
-  char  *buf  = (char *)Paykan_malloc(cap);
+  char *buf = (char *)Paykan_malloc(cap);
   size_t got;
   while ((got = fread(buf + used, 1, cap - used, f->handle)) > 0) {
     used += got;
     if (used == cap) {
       cap *= 2;
-      buf  = (char *)Paykan_realloc(buf, cap);
+      buf = (char *)Paykan_realloc(buf, cap);
     }
   }
   if (used == 0) {
@@ -187,13 +187,13 @@ PaykanShared *PaykanFile_read(PaykanObject *self) {
 static void PaykanStdin_destroy(PaykanObject *self) { (void)self; }
 
 static PaykanFileVTable PaykanStdin_vtable = {
-    .destroy   = PaykanStdin_destroy,
-    .toString  = PaykanFile_toString,
-    .equals    = PaykanFile_equals,
-    .write     = PaykanFile_write,
-    .readln    = PaykanFile_readln,
+    .destroy = PaykanStdin_destroy,
+    .toString = PaykanFile_toString,
+    .equals = PaykanFile_equals,
+    .write = PaykanFile_write,
+    .readln = PaykanFile_readln,
     .readbytes = PaykanFile_readbytes,
-    .read      = PaykanFile_read,
+    .read = PaykanFile_read,
 };
 
 PaykanFile PaykanFile_Stdin = {
@@ -201,7 +201,6 @@ PaykanFile PaykanFile_Stdin = {
     .handle = NULL, // set to stdin at startup via __attribute__((constructor))
 };
 
-__attribute__((constructor))
-static void PaykanFile_Stdin_init(void) {
-    PaykanFile_Stdin.handle = stdin;
+__attribute__((constructor)) static void PaykanFile_Stdin_init(void) {
+  PaykanFile_Stdin.handle = stdin;
 }

@@ -4,10 +4,10 @@
 
 #pragma once
 
-#include "ASTContext.h"
 #include "AST.h"
-#include "ParserDriver.h"
+#include "ASTContext.h"
 #include "Parser.ypp.h"
+#include "ParserDriver.h"
 #include <vector>
 
 // Flex needs this macro for our custom driver

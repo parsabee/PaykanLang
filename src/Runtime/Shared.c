@@ -12,7 +12,7 @@
 PaykanShared *PaykanShared_new(PaykanObject *obj) {
   PaykanShared *s = (PaykanShared *)Paykan_malloc(sizeof(PaykanShared));
   s->refCount = 1;
-  s->object   = obj;
+  s->object = obj;
   return s;
 }
 

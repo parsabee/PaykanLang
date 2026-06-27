@@ -3,8 +3,8 @@
 // Unit tests for boxed primitive runtime types: PaykanInt, PaykanFloat,
 // PaykanBool, and PaykanError.
 
-#include <gtest/gtest.h>
 #include <cstring>
+#include <gtest/gtest.h>
 #include <string>
 
 extern "C" {

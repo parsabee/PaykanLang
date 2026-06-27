@@ -44,9 +44,8 @@ TEST(Func, FunctionVoid) {
 }
 
 TEST(Func, StringPassToFunction) {
-  auto r = compileAndRun(withFns(
-    "fn show(s: Str) { println(s); }",
-    "a: Str = \"hi\";\n  show(a);"));
+  auto r = compileAndRun(withFns("fn show(s: Str) { println(s); }",
+                                 "a: Str = \"hi\";\n  show(a);"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "hi\n");
 }

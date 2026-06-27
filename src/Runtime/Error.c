@@ -16,9 +16,9 @@
 // ============================================================================
 
 PaykanObjectVTable PaykanError_vtable = {
-    .destroy  = PaykanError_destroy,
+    .destroy = PaykanError_destroy,
     .toString = PaykanError_toString,
-    .equals   = PaykanError_equals,
+    .equals = PaykanError_equals,
 };
 
 // ============================================================================
@@ -27,7 +27,7 @@ PaykanObjectVTable PaykanError_vtable = {
 
 PaykanError *PaykanError_new(const char *msg, int64_t len) {
   PaykanError *e = (PaykanError *)Paykan_malloc(sizeof(PaykanError));
-  e->vtable  = &PaykanError_vtable;
+  e->vtable = &PaykanError_vtable;
   e->message = PaykanString_new(msg, len);
   return e;
 }

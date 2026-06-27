@@ -11,20 +11,34 @@ namespace ast {
 
 const char *BinaryExpr::getOpcodeStr() const {
   switch (Op) {
-  case BinaryOpcode::Add: return "+";
-  case BinaryOpcode::Sub: return "-";
-  case BinaryOpcode::Mul: return "*";
-  case BinaryOpcode::Div: return "/";
-  case BinaryOpcode::Mod: return "%";
-  case BinaryOpcode::Lt:  return "<";
-  case BinaryOpcode::Gt:  return ">";
-  case BinaryOpcode::Le:  return "<=";
-  case BinaryOpcode::Ge:  return ">=";
-  case BinaryOpcode::Eq:  return "==";
-  case BinaryOpcode::Ne:  return "!=";
-  case BinaryOpcode::And: return "&&";
-  case BinaryOpcode::Or:  return "||";  
-  case BinaryOpcode::Count: break;
+  case BinaryOpcode::Add:
+    return "+";
+  case BinaryOpcode::Sub:
+    return "-";
+  case BinaryOpcode::Mul:
+    return "*";
+  case BinaryOpcode::Div:
+    return "/";
+  case BinaryOpcode::Mod:
+    return "%";
+  case BinaryOpcode::Lt:
+    return "<";
+  case BinaryOpcode::Gt:
+    return ">";
+  case BinaryOpcode::Le:
+    return "<=";
+  case BinaryOpcode::Ge:
+    return ">=";
+  case BinaryOpcode::Eq:
+    return "==";
+  case BinaryOpcode::Ne:
+    return "!=";
+  case BinaryOpcode::And:
+    return "&&";
+  case BinaryOpcode::Or:
+    return "||";
+  case BinaryOpcode::Count:
+    break;
   }
   __builtin_unreachable();
 }
@@ -33,9 +47,12 @@ const char *BinaryExpr::getOpcodeStr() const {
 
 const char *UnaryExpr::getOpcodeStr() const {
   switch (Op) {
-  case UnaryOpcode::Neg: return "-";
-  case UnaryOpcode::Not: return "!";
-  case UnaryOpcode::Count: break;
+  case UnaryOpcode::Neg:
+    return "-";
+  case UnaryOpcode::Not:
+    return "!";
+  case UnaryOpcode::Count:
+    break;
   }
   __builtin_unreachable();
 }

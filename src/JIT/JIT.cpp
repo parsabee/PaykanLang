@@ -25,7 +25,7 @@ namespace {
 
 struct RuntimeSymbol {
   const char *Name;
-  void       *Addr;
+  void *Addr;
 };
 
 using namespace paykan::names;
@@ -168,8 +168,8 @@ llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
         llvm::orc::ExecutorAddr::fromPtr(sym.Addr),
         llvm::JITSymbolFlags::Exported};
   }
-  if (auto err = mainDylib.define(
-          llvm::orc::absoluteSymbols(std::move(runtimeSyms))))
+  if (auto err =
+          mainDylib.define(llvm::orc::absoluteSymbols(std::move(runtimeSyms))))
     return std::move(err);
 
   // Inspect main's param count before the module is consumed by the JIT.
@@ -191,7 +191,7 @@ llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
     // main(args: Str[]) — build a PaykanArray<Str> from the args vector.
     PaykanArray *arr = PaykanArray_new_obj(0);
     for (const auto &s : args) {
-      PaykanString *ps     = PaykanString_new(s.c_str(), (int64_t)s.size());
+      PaykanString *ps = PaykanString_new(s.c_str(), (int64_t)s.size());
       PaykanShared *shared = PaykanShared_new((PaykanObject *)ps);
       PaykanArray_push_obj(arr, shared);
       Paykan_release(shared); // array retained; drop our ref

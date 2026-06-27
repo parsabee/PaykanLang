@@ -5,6 +5,7 @@
 #define PAYKAN_MODULE_UTILS_H
 
 #include "AST.h"
+#include "ASTContext.h" // remapType() calls into ASTContext members
 
 #include <llvm/ADT/SmallString.h>
 #include <llvm/ADT/SmallVector.h>
@@ -31,7 +32,7 @@ inline llvm::SmallString<128> modulePathToRelative(llvm::StringRef modulePath) {
 inline std::string realPath(const llvm::Twine &path) {
   llvm::SmallString<256> resolved;
   if (llvm::sys::fs::real_path(path, resolved))
-    return "";          // real_path returns non-zero on failure
+    return ""; // real_path returns non-zero on failure
   return std::string(resolved);
 }
 
@@ -87,8 +88,7 @@ inline llvm::SmallString<256> getCachePath(llvm::StringRef resolvedPath,
   }
 
   // Append the relative source path, replacing .pkn with .bc.
-  for (auto comp = llvm::sys::path::begin(rel),
-            end  = llvm::sys::path::end(rel);
+  for (auto comp = llvm::sys::path::begin(rel), end = llvm::sys::path::end(rel);
        comp != end; ++comp) {
     llvm::sys::path::append(cachePath, *comp);
   }

@@ -4,8 +4,8 @@
 // Paykan runtime — I/O builtins.
 
 #include "Runtime.h"
-#include <stdio.h>
 #include <stdarg.h>
+#include <stdio.h>
 
 // ---------------------------------------------------------------------------
 // Common helper — print variadic PaykanObject arguments to a stream.
@@ -54,6 +54,4 @@ void Paykan_printerrln(int64_t argc, ...) {
   fputc('\n', stderr);
 }
 
-void Paykan_flush(void) {
-  fflush(stdout);
-}
+void Paykan_flush(void) { fflush(stdout); }

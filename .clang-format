@@ -1,0 +1,9 @@
+# PaykanLang C/C++ formatting.
+# The codebase follows LLVM style (2-space indent, 80-column, LLVM-style
+# braces and pointer alignment); this pins it so it is enforced uniformly.
+BasedOnStyle: LLVM
+Language: Cpp
+Standard: c++20
+ColumnLimit: 80
+IndentWidth: 2
+PointerAlignment: Right

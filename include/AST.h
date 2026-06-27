@@ -27,8 +27,10 @@ class SourceLocation {
 
 public:
   SourceLocation() : LineStart(0), ColumnStart(0), LineEnd(0), ColumnEnd(0) {}
-  SourceLocation(size_t lineStart, size_t colStart, size_t lineEnd, size_t colEnd)
-      : LineStart(lineStart), ColumnStart(colStart), LineEnd(lineEnd), ColumnEnd(colEnd) {}
+  SourceLocation(size_t lineStart, size_t colStart, size_t lineEnd,
+                 size_t colEnd)
+      : LineStart(lineStart), ColumnStart(colStart), LineEnd(lineEnd),
+        ColumnEnd(colEnd) {}
 
   size_t getLineStart() const { return LineStart; }
   size_t getColumnStart() const { return ColumnStart; }
@@ -113,39 +115,35 @@ public:
 
   NodeKind getKind() const { return Kind; }
   SourceLocation getLocation() const { return Loc; }
-
 };
 
 // Concept for valid AST node types: must derive from ASTNode and provide
 // LLVM-style RTTI via a static classof method.
 template <typename T>
-concept ASTNodeType = std::derived_from<T, ASTNode> &&
-    requires(const ASTNode *n) {
+concept ASTNodeType =
+    std::derived_from<T, ASTNode> && requires(const ASTNode *n) {
       { T::classof(n) } -> std::same_as<bool>;
     };
 
 // -- LLVM-style RTTI free functions ------------------------------------------
 
-template <ASTNodeType T>
-bool isa(const ASTNode *n) { return T::classof(n); }
+template <ASTNodeType T> bool isa(const ASTNode *n) { return T::classof(n); }
 
-template <ASTNodeType T>
-T *cast(ASTNode *n) {
+template <ASTNodeType T> T *cast(ASTNode *n) {
   assert(isa<T>(n) && "Invalid cast");
   return static_cast<T *>(n);
 }
 
-template <ASTNodeType T>
-const T *cast(const ASTNode *n) {
+template <ASTNodeType T> const T *cast(const ASTNode *n) {
   assert(isa<T>(n) && "Invalid cast");
   return static_cast<const T *>(n);
 }
 
-template <ASTNodeType T>
-T *dyn_cast(ASTNode *n) { return n && isa<T>(n) ? cast<T>(n) : nullptr; }
+template <ASTNodeType T> T *dyn_cast(ASTNode *n) {
+  return n && isa<T>(n) ? cast<T>(n) : nullptr;
+}
 
-template <ASTNodeType T>
-const T *dyn_cast(const ASTNode *n) {
+template <ASTNodeType T> const T *dyn_cast(const ASTNode *n) {
   return n && isa<T>(n) ? cast<T>(n) : nullptr;
 }
 
@@ -180,7 +178,8 @@ public:
   Type *getResolvedType() const { return ResolvedType; }
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_IntegerLiteral && N->getKind() <= NK_EnumValueExpr;
+    return N->getKind() >= NK_IntegerLiteral &&
+           N->getKind() <= NK_EnumValueExpr;
   }
 };
 
@@ -200,12 +199,12 @@ enum class BinaryOpcode {
   Div, // /
   Mod, // %
   // Relational
-  Lt,  // <
-  Gt,  // >
-  Le,  // <=
-  Ge,  // >=
-  Eq,  // ==
-  Ne,  // !=
+  Lt, // <
+  Gt, // >
+  Le, // <=
+  Ge, // >=
+  Eq, // ==
+  Ne, // !=
   // Logical
   And, // &&
   Or,  // ||
@@ -214,24 +213,28 @@ enum class BinaryOpcode {
 
 // Base for all types
 class Type : public ASTNode {
-  uint32_t UnaryOps = 0;   // bitmask of supported UnaryOpcode values
-  uint32_t BinaryOps = 0;  // bitmask of supported BinaryOpcode values
+  uint32_t UnaryOps = 0;  // bitmask of supported UnaryOpcode values
+  uint32_t BinaryOps = 0; // bitmask of supported BinaryOpcode values
 
 public:
   Type(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
 
-  /// Register a unary operator. Returns true if newly added, false if already present.
+  /// Register a unary operator. Returns true if newly added, false if already
+  /// present.
   bool addUnaryOp(UnaryOpcode op) {
     uint32_t bit = 1u << static_cast<unsigned>(op);
-    if (UnaryOps & bit) return false;
+    if (UnaryOps & bit)
+      return false;
     UnaryOps |= bit;
     return true;
   }
 
-  /// Register a binary operator. Returns true if newly added, false if already present.
+  /// Register a binary operator. Returns true if newly added, false if already
+  /// present.
   bool addBinaryOp(BinaryOpcode op) {
     uint32_t bit = 1u << static_cast<unsigned>(op);
-    if (BinaryOps & bit) return false;
+    if (BinaryOps & bit)
+      return false;
     BinaryOps |= bit;
     return true;
   }
@@ -262,9 +265,12 @@ private:
   const std::string *Name; // points into ASTContext::StringPool (stable)
   Type *VarType;
   Expr *InitExpr;
+
 public:
-  VarDecl(SourceLocation loc, const std::string &internedName, Type *type, Expr *init)
-      : Decl(NK_VarDecl, loc), Name(&internedName), VarType(type), InitExpr(init) {}
+  VarDecl(SourceLocation loc, const std::string &internedName, Type *type,
+          Expr *init)
+      : Decl(NK_VarDecl, loc), Name(&internedName), VarType(type),
+        InitExpr(init) {}
 
   const std::string &getName() const { return *Name; }
   Type *getType() const { return VarType; }
@@ -289,7 +295,7 @@ class FuncDecl : public Decl {
 private:
   const std::string *Name; // points into ASTContext::StringPool (stable)
   std::vector<Param> Params;
-  Type *ReturnType;        // nullptr means void
+  Type *ReturnType; // nullptr means void
   CompoundStmt *Body;
 
 public:
@@ -349,7 +355,7 @@ class Identifier;
 // Assignment statement
 class AssignStmt : public Stmt {
 private:
-  Identifier *LHS;  // preserves source location of the target variable
+  Identifier *LHS; // preserves source location of the target variable
   Expr *Value;
 
 public:
@@ -373,7 +379,8 @@ private:
   Decl *Declaration;
 
 public:
-  DeclStmt(SourceLocation loc, Decl *decl) : Stmt(NK_DeclStmt, loc), Declaration(decl) {}
+  DeclStmt(SourceLocation loc, Decl *decl)
+      : Stmt(NK_DeclStmt, loc), Declaration(decl) {}
 
   Decl *getDecl() const { return Declaration; }
 
@@ -386,7 +393,8 @@ private:
   Expr *Expression;
 
 public:
-  ExprStmt(SourceLocation loc, Expr *expr) : Stmt(NK_ExprStmt, loc), Expression(expr) {}
+  ExprStmt(SourceLocation loc, Expr *expr)
+      : Stmt(NK_ExprStmt, loc), Expression(expr) {}
 
   Expr *getExpr() const { return Expression; }
 
@@ -441,7 +449,9 @@ public:
 class ContinueStmt : public Stmt {
 public:
   explicit ContinueStmt(SourceLocation loc) : Stmt(NK_ContinueStmt, loc) {}
-  static bool classof(const ASTNode *N) { return N->getKind() == NK_ContinueStmt; }
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_ContinueStmt;
+  }
 };
 
 // Member field assignment: receiver.field = value  (e.g. self.x = 1)
@@ -491,32 +501,37 @@ public:
 //
 //   TypeName { body }             -- type arm, no variable binding
 //   binding: TypeName { body }    -- type arm, with variable binding
-//   literal : { body }            -- value arm (e.g. "Hello" : { ... }, 42 : { ... })
-//   _ { body }                    -- wildcard (catch-all), colon optional
+//   literal : { body }            -- value arm (e.g. "Hello" : { ... }, 42 : {
+//   ... }) _ { body }                    -- wildcard (catch-all), colon
+//   optional
 //
 // An arm is exactly one of: type arm (ArmType != nullptr), value arm
 // (LiteralPattern != nullptr), or wildcard (both nullptr).  ArmType and
 // LiteralPattern are never both set.
 class MatchArm : public ASTNode {
-  const std::string *Binding; // points into ASTContext::StringPool (stable); "" = no binding
-  Type         *ArmType;        // type arm: the matched type; nullptr otherwise
-  Expr         *LiteralPattern; // value arm: the literal to compare against; nullptr otherwise
+  const std::string
+      *Binding;  // points into ASTContext::StringPool (stable); "" = no binding
+  Type *ArmType; // type arm: the matched type; nullptr otherwise
+  Expr *LiteralPattern; // value arm: the literal to compare against; nullptr
+                        // otherwise
   CompoundStmt *Body;
 
 public:
   // Type arm (or wildcard when armType == nullptr).
-  MatchArm(SourceLocation loc, const std::string &internedBinding, Type *armType,
-           CompoundStmt *body)
-      : ASTNode(NK_MatchArm, loc), Binding(&internedBinding),
-        ArmType(armType), LiteralPattern(nullptr), Body(body) {}
+  MatchArm(SourceLocation loc, const std::string &internedBinding,
+           Type *armType, CompoundStmt *body)
+      : ASTNode(NK_MatchArm, loc), Binding(&internedBinding), ArmType(armType),
+        LiteralPattern(nullptr), Body(body) {}
 
   // Value arm: matches when the subject equals the literal pattern.
   MatchArm(SourceLocation loc, const std::string &internedBinding,
            Expr *literalPattern, CompoundStmt *body)
-      : ASTNode(NK_MatchArm, loc), Binding(&internedBinding),
-        ArmType(nullptr), LiteralPattern(literalPattern), Body(body) {}
+      : ASTNode(NK_MatchArm, loc), Binding(&internedBinding), ArmType(nullptr),
+        LiteralPattern(literalPattern), Body(body) {}
 
-  bool isWildcard() const { return ArmType == nullptr && LiteralPattern == nullptr; }
+  bool isWildcard() const {
+    return ArmType == nullptr && LiteralPattern == nullptr;
+  }
   bool isLiteral() const { return LiteralPattern != nullptr; }
   bool hasBinding() const { return !Binding->empty(); }
   const std::string &getBinding() const { return *Binding; }
@@ -525,9 +540,7 @@ public:
   Expr *getLiteralPattern() const { return LiteralPattern; }
   CompoundStmt *getBody() const { return Body; }
 
-  static bool classof(const ASTNode *N) {
-    return N->getKind() == NK_MatchArm;
-  }
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_MatchArm; }
 };
 
 // Match statement (downcasting switch):
@@ -542,7 +555,7 @@ public:
 // or is the wildcard arm (_) that catches any unmatched value.
 class MatchStmt : public Stmt {
 private:
-  Expr                   *Subject;
+  Expr *Subject;
   std::vector<MatchArm *> Arms;
 
 public:
@@ -554,9 +567,7 @@ public:
   const std::vector<MatchArm *> &getArms() const { return Arms; }
   size_t getNumArms() const { return Arms.size(); }
 
-  static bool classof(const ASTNode *N) {
-    return N->getKind() == NK_MatchStmt;
-  }
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_MatchStmt; }
 };
 
 // Integer literal
@@ -581,7 +592,8 @@ private:
   double Value;
 
 public:
-  FloatLiteral(SourceLocation loc, double value) : Expr(NK_FloatLiteral, loc), Value(value) {}
+  FloatLiteral(SourceLocation loc, double value)
+      : Expr(NK_FloatLiteral, loc), Value(value) {}
 
   double getValue() const { return Value; }
 
@@ -596,7 +608,8 @@ private:
   bool Value;
 
 public:
-  BoolLiteral(SourceLocation loc, bool value) : Expr(NK_BoolLiteral, loc), Value(value) {}
+  BoolLiteral(SourceLocation loc, bool value)
+      : Expr(NK_BoolLiteral, loc), Value(value) {}
 
   bool getValue() const { return Value; }
 
@@ -683,9 +696,7 @@ public:
 
   const char *getOpcodeStr() const;
 
-  static bool classof(const ASTNode *N) {
-    return N->getKind() == NK_UnaryExpr;
-  }
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_UnaryExpr; }
 };
 
 // Identifier expression
@@ -716,8 +727,10 @@ private:
   std::vector<Expr *> Arguments;
 
 public:
-  CallExpr(SourceLocation loc, const std::string &internedCallee, std::vector<Expr *> args)
-      : Expr(NK_CallExpr, loc), CalleeName(&internedCallee), Arguments(std::move(args)) {}
+  CallExpr(SourceLocation loc, const std::string &internedCallee,
+           std::vector<Expr *> args)
+      : Expr(NK_CallExpr, loc), CalleeName(&internedCallee),
+        Arguments(std::move(args)) {}
 
   const std::string &getCalleeName() const { return *CalleeName; }
   const std::vector<Expr *> &getArguments() const { return Arguments; }
@@ -734,8 +747,8 @@ private:
   std::vector<Expr *> Arguments;
 
 public:
-  MethodCallExpr(SourceLocation loc, Expr *receiver, const std::string &internedMethod,
-                 std::vector<Expr *> args)
+  MethodCallExpr(SourceLocation loc, Expr *receiver,
+                 const std::string &internedMethod, std::vector<Expr *> args)
       : Expr(NK_MethodCallExpr, loc), Receiver(receiver),
         MethodName(&internedMethod), Arguments(std::move(args)) {}
 
@@ -779,7 +792,8 @@ private:
 public:
   MemberAccessExpr(SourceLocation loc, Expr *receiver,
                    const std::string &internedField)
-      : Expr(NK_MemberAccessExpr, loc), Receiver(receiver), FieldName(&internedField) {}
+      : Expr(NK_MemberAccessExpr, loc), Receiver(receiver),
+        FieldName(&internedField) {}
 
   Expr *getReceiver() const { return Receiver; }
   const std::string &getFieldName() const { return *FieldName; }
@@ -806,7 +820,8 @@ private:
   void initOps();
 
 public:
-  BuiltinType(SourceLocation loc, Kind kind) : Type(NK_BuiltinType, loc), TypeKind(kind) {
+  BuiltinType(SourceLocation loc, Kind kind)
+      : Type(NK_BuiltinType, loc), TypeKind(kind) {
     initOps();
   }
 
@@ -821,8 +836,8 @@ public:
 class MethodDecl : public Decl {
 public:
   enum Flags : uint8_t {
-    None    = 0,
-    Static  = 1 << 0,
+    None = 0,
+    Static = 1 << 0,
     Private = 1 << 1,
   };
 
@@ -869,7 +884,8 @@ public:
 // Vtable construction:
 //   1. Copy the parent's vtable.
 //   2. For each virtual method in this class:
-//      - If a same-named method exists in the parent vtable, override that slot.
+//      - If a same-named method exists in the parent vtable, override that
+//      slot.
 //      - Otherwise, append a new slot.
 //
 class ClassType : public Type {
@@ -908,9 +924,11 @@ public:
       // Copy the parent's operator bitmasks so that, e.g., every class
       // that descends from Obj automatically supports == and !=.
       for (int op = 0; op < static_cast<int>(UnaryOpcode::Count); ++op)
-        if (SuperClass->hasUnaryOp(static_cast<UnaryOpcode>(op))) addUnaryOp(static_cast<UnaryOpcode>(op));
+        if (SuperClass->hasUnaryOp(static_cast<UnaryOpcode>(op)))
+          addUnaryOp(static_cast<UnaryOpcode>(op));
       for (int op = 0; op < static_cast<int>(BinaryOpcode::Count); ++op)
-        if (SuperClass->hasOp(static_cast<BinaryOpcode>(op))) addBinaryOp(static_cast<BinaryOpcode>(op));
+        if (SuperClass->hasOp(static_cast<BinaryOpcode>(op)))
+          addBinaryOp(static_cast<BinaryOpcode>(op));
     }
   }
 
@@ -926,7 +944,8 @@ public:
   /// bitmasks. Used during ASTContext bootstrap to break the Obj/Str cycle.
   void setSuperClass(ClassType *sc) {
     SuperClass = sc;
-    if (!sc) return;
+    if (!sc)
+      return;
     VTable = sc->VTable;
     rebuildVTableIndex();
     for (int op = 0; op < static_cast<int>(UnaryOpcode::Count); ++op)
@@ -974,35 +993,37 @@ public:
   /// Returns true if this type is a subtype of (or equal to) Other.
   bool isSubtypeOf(const ClassType *other) const;
 
-  static bool classof(const ASTNode *N) {
-    return N->getKind() == NK_ClassType;
-  }
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_ClassType; }
 };
 
 // Import declaration
-//   import path::module;                      — SelectedNames empty, Alias empty
-//   import path::{a, b};                      — SelectedNames = {a, b}, Alias empty
-//   import path::module as alias;             — SelectedNames empty, Alias = "alias"
-//   import ::system_module;                   — IsSystem true
+//   import path::module;                      — SelectedNames empty, Alias
+//   empty import path::{a, b};                      — SelectedNames = {a, b},
+//   Alias empty import path::module as alias;             — SelectedNames
+//   empty, Alias = "alias" import ::system_module;                   — IsSystem
+//   true
 class ImportDecl : public Decl {
 public:
   /// A single module being imported, with an optional alias.
   /// qualifier() returns the name used at call sites (alias if set, else Name).
   struct Module {
     // Both point into ASTContext::StringPool (stable).
-    const std::string *Name;   // bare module name (final path segment)
-    const std::string *Alias;  // empty = use Name as qualifier
-    const std::string &qualifier() const { return Alias->empty() ? *Name : *Alias; }
+    const std::string *Name;  // bare module name (final path segment)
+    const std::string *Alias; // empty = use Name as qualifier
+    const std::string &qualifier() const {
+      return Alias->empty() ? *Name : *Alias;
+    }
   };
 
 private:
-  const std::string *BasePath;  // directory portion, e.g. "path::to::file" (may be empty); interned
-  std::vector<Module> Modules;  // always ≥1 entry
-  bool IsSystem;                // true for :: prefix (stdlib) imports
+  const std::string *BasePath; // directory portion, e.g. "path::to::file" (may
+                               // be empty); interned
+  std::vector<Module> Modules; // always ≥1 entry
+  bool IsSystem;               // true for :: prefix (stdlib) imports
 
 public:
-  ImportDecl(SourceLocation loc, const std::string &internedBasePath, bool isSystem,
-             std::vector<Module> modules)
+  ImportDecl(SourceLocation loc, const std::string &internedBasePath,
+             bool isSystem, std::vector<Module> modules)
       : Decl(NK_ImportDecl, loc), BasePath(&internedBasePath),
         Modules(std::move(modules)), IsSystem(isSystem) {}
 
@@ -1010,7 +1031,8 @@ public:
   const std::vector<Module> &getModules() const { return Modules; }
   bool isSystem() const { return IsSystem; }
 
-  /// Full module path for module m: "base::name" (or just "name" if base is empty).
+  /// Full module path for module m: "base::name" (or just "name" if base is
+  /// empty).
   std::string modulePath(const Module &m) const {
     return BasePath->empty() ? *m.Name : *BasePath + "::" + *m.Name;
   }
@@ -1022,7 +1044,7 @@ public:
 
 // Helper struct used during parsing to accumulate class body members.
 struct ClassBody {
-  std::vector<VarDecl *>  Fields;
+  std::vector<VarDecl *> Fields;
   std::vector<FuncDecl *> Methods;
 };
 
@@ -1035,19 +1057,18 @@ struct ClassBody {
 // ClassType* and registers the fully-built ClassType in the ASTContext.
 class ClassDecl : public Decl {
 private:
-  const std::string *Name;           // points into ASTContext::StringPool (stable)
+  const std::string *Name; // points into ASTContext::StringPool (stable)
   const std::string *SuperClassName; // interned; "" = no explicit superclass
   std::vector<VarDecl *> Fields;
   std::vector<FuncDecl *> Methods;
 
 public:
   ClassDecl(SourceLocation loc, const std::string &internedName,
-            const std::string &internedSuperName,
-            std::vector<VarDecl *> fields,
+            const std::string &internedSuperName, std::vector<VarDecl *> fields,
             std::vector<FuncDecl *> methods)
       : Decl(NK_ClassDecl, loc), Name(&internedName),
-        SuperClassName(&internedSuperName),
-        Fields(std::move(fields)), Methods(std::move(methods)) {}
+        SuperClassName(&internedSuperName), Fields(std::move(fields)),
+        Methods(std::move(methods)) {}
 
   const std::string &getName() const { return *Name; }
   const std::string &getSuperClassName() const { return *SuperClassName; }
@@ -1058,9 +1079,7 @@ public:
   size_t getNumFields() const { return Fields.size(); }
   size_t getNumMethods() const { return Methods.size(); }
 
-  static bool classof(const ASTNode *N) {
-    return N->getKind() == NK_ClassDecl;
-  }
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_ClassDecl; }
 };
 
 // Translation unit (top-level container)
@@ -1103,9 +1122,7 @@ public:
 
   Type *getElementType() const { return ElementType; }
 
-  static bool classof(const ASTNode *N) {
-    return N->getKind() == NK_ArrayType;
-  }
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_ArrayType; }
 };
 
 // Enum type (nominal value type backed by a 64-bit unsigned integer).
@@ -1132,7 +1149,9 @@ public:
   void addVariant(const std::string &internedVariant) {
     Variants.push_back(&internedVariant);
   }
-  const std::vector<const std::string *> &getVariants() const { return Variants; }
+  const std::vector<const std::string *> &getVariants() const {
+    return Variants;
+  }
   size_t getNumVariants() const { return Variants.size(); }
 
   /// Return the underlying value (declaration index) of a variant, or -1 if
@@ -1144,9 +1163,7 @@ public:
     return -1;
   }
 
-  static bool classof(const ASTNode *N) {
-    return N->getKind() == NK_EnumType;
-  }
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_EnumType; }
 };
 
 // Enum variant access expression:  MyEnum::Variant
@@ -1154,8 +1171,8 @@ public:
 // Resolves to the variant's implicit 64-bit value.  The EnumType pointer is
 // filled in by Sema (the parser only records the spelled names).
 class EnumValueExpr : public Expr {
-  const std::string *EnumName;    // interned; spelled enum name
-  const std::string *VariantName; // interned; spelled variant name
+  const std::string *EnumName;      // interned; spelled enum name
+  const std::string *VariantName;   // interned; spelled variant name
   EnumType *ResolvedEnum = nullptr; // set by Sema
   int64_t Value = -1;               // set by Sema (variant index)
 
@@ -1194,12 +1211,12 @@ public:
         Variants(std::move(variants)) {}
 
   const std::string &getName() const { return *Name; }
-  const std::vector<const std::string *> &getVariants() const { return Variants; }
+  const std::vector<const std::string *> &getVariants() const {
+    return Variants;
+  }
   size_t getNumVariants() const { return Variants.size(); }
 
-  static bool classof(const ASTNode *N) {
-    return N->getKind() == NK_EnumDecl;
-  }
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_EnumDecl; }
 };
 
 // Array literal expression: [expr, expr, ...] or []

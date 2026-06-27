@@ -1,11 +1,11 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 
-#include "ParserDriver.h"
 #include "ASTPrinter.h"
 #include "CodeGen.h"
 #include "DiagEngine.h"
 #include "JIT.h"
+#include "ParserDriver.h"
 #include "Sema.h"
 #include "Version.h"
 
@@ -26,13 +26,13 @@
 
 // -- Command-line options ---------------------------------------------------
 
-static llvm::cl::opt<std::string>
-    InputFilename(llvm::cl::Positional, llvm::cl::desc("<source-file>"),
-                  llvm::cl::Required);
+static llvm::cl::opt<std::string> InputFilename(llvm::cl::Positional,
+                                                llvm::cl::desc("<source-file>"),
+                                                llvm::cl::Required);
 
-static llvm::cl::opt<bool>
-    DumpAST("dump-ast", llvm::cl::desc("Print the AST in tree form"),
-            llvm::cl::init(false));
+static llvm::cl::opt<bool> DumpAST("dump-ast",
+                                   llvm::cl::desc("Print the AST in tree form"),
+                                   llvm::cl::init(false));
 
 static llvm::cl::opt<bool>
     TraceParsing("trace-parser",
@@ -44,20 +44,17 @@ static llvm::cl::opt<bool>
                   llvm::cl::desc("Enable Flex scanner debug traces"),
                   llvm::cl::init(false));
 
-static llvm::cl::opt<bool>
-    EmitLLVM("emit-llvm",
-             llvm::cl::desc("Emit LLVM IR to stdout"),
-             llvm::cl::init(false));
+static llvm::cl::opt<bool> EmitLLVM("emit-llvm",
+                                    llvm::cl::desc("Emit LLVM IR to stdout"),
+                                    llvm::cl::init(false));
 
-static llvm::cl::opt<bool>
-    CheckOnly("check-only",
-              llvm::cl::desc("Run parsing and semantic analysis only (no codegen)"),
-              llvm::cl::init(false));
+static llvm::cl::opt<bool> CheckOnly(
+    "check-only",
+    llvm::cl::desc("Run parsing and semantic analysis only (no codegen)"),
+    llvm::cl::init(false));
 
 static llvm::cl::opt<unsigned>
-    OptLevel("O",
-             llvm::cl::desc("Optimization level (0–3)"),
-             llvm::cl::Prefix,
+    OptLevel("O", llvm::cl::desc("Optimization level (0–3)"), llvm::cl::Prefix,
              llvm::cl::init(0));
 
 static llvm::cl::opt<bool>
@@ -68,8 +65,7 @@ static llvm::cl::opt<bool>
 
 // Arguments forwarded to the Paykan program (everything after the source file).
 static llvm::cl::list<std::string>
-    ProgramArgs(llvm::cl::ConsumeAfter,
-                llvm::cl::desc("<program arguments>"));
+    ProgramArgs(llvm::cl::ConsumeAfter, llvm::cl::desc("<program arguments>"));
 
 // -- Entry point -------------------------------------------------------------
 
@@ -126,8 +122,7 @@ int main(int argc, char *argv[]) {
 
   // -- Code generation ------------------------------------------------------
   auto llvmCtx = std::make_unique<llvm::LLVMContext>();
-  paykan::codegen::CodeGen cg(semaCtx, *llvmCtx,
-                              InputFilename, projectRoot);
+  paykan::codegen::CodeGen cg(semaCtx, *llvmCtx, InputFilename, projectRoot);
   if (!cg.run(root)) {
     llvm::errs() << "code generation failed (module verification error)\n";
     return EXIT_FAILURE;
@@ -181,9 +176,8 @@ int main(int argc, char *argv[]) {
   for (const auto &a : ProgramArgs)
     progArgs.push_back(a);
 
-  auto resultOrErr =
-      paykan::jit::runModule(std::move(mainModule), std::move(llvmCtx),
-                             std::move(progArgs));
+  auto resultOrErr = paykan::jit::runModule(
+      std::move(mainModule), std::move(llvmCtx), std::move(progArgs));
 
   if (TrackHeap)
     Paykan_heap_dump();

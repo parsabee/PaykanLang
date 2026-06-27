@@ -16,11 +16,11 @@ ASTContext::ASTContext()
   // The bootstrap phase alone creates ~150 nodes; a typical program adds
   // a few hundred more.  512 slots eliminates most reallocation churn.
   Pool.reserve(512);
-  IntTy   = make<BuiltinType>(SourceLocation(), BuiltinType::Int);
+  IntTy = make<BuiltinType>(SourceLocation(), BuiltinType::Int);
   FloatTy = make<BuiltinType>(SourceLocation(), BuiltinType::Float);
-  BoolTy  = make<BuiltinType>(SourceLocation(), BuiltinType::Bool);
-  CharTy  = make<BuiltinType>(SourceLocation(), BuiltinType::Char);
-  VoidTy  = make<BuiltinType>(SourceLocation(), BuiltinType::Void);
+  BoolTy = make<BuiltinType>(SourceLocation(), BuiltinType::Bool);
+  CharTy = make<BuiltinType>(SourceLocation(), BuiltinType::Char);
+  VoidTy = make<BuiltinType>(SourceLocation(), BuiltinType::Void);
   // Pre-allocate Obj, Str, Array, File, Error, and boxed primitives so all
   // method signatures are correct from the start.
   ObjTy = make<ClassType>(SourceLocation(), intern(names::kObj), nullptr);
@@ -29,8 +29,10 @@ ASTContext::ASTContext()
   FileTy = make<ClassType>(SourceLocation(), intern(names::kFile), nullptr);
   ErrorTy = make<ClassType>(SourceLocation(), intern(names::kError), nullptr);
   IntBoxTy = make<ClassType>(SourceLocation(), intern(names::kIntBox), nullptr);
-  FloatBoxTy = make<ClassType>(SourceLocation(), intern(names::kFloatBox), nullptr);
-  BoolBoxTy = make<ClassType>(SourceLocation(), intern(names::kBoolBox), nullptr);
+  FloatBoxTy =
+      make<ClassType>(SourceLocation(), intern(names::kFloatBox), nullptr);
+  BoolBoxTy =
+      make<ClassType>(SourceLocation(), intern(names::kBoolBox), nullptr);
   buildObjectType();
   buildStringType();
   buildArrayType();

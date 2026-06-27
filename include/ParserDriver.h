@@ -4,8 +4,8 @@
 
 #pragma once
 
-#include "ASTContext.h"
 #include "AST.h"
+#include "ASTContext.h"
 #include "DiagEngine.h"
 #include <memory>
 #include <string>
@@ -15,8 +15,7 @@ namespace paykan::parser {
 
 class ParserDriver {
 public:
-  explicit ParserDriver(bool traceParsing = false,
-                        bool traceScanning = false);
+  explicit ParserDriver(bool traceParsing = false, bool traceScanning = false);
   ~ParserDriver();
 
   // Non-copyable, non-movable (owns the AST arena).

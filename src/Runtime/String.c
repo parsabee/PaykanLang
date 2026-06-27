@@ -5,9 +5,9 @@
 
 #include "Runtime.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 
 // Forward declarations
 void PaykanString_destroy(PaykanObject *self);
@@ -15,11 +15,11 @@ void PaykanString_destroy(PaykanObject *self);
 // -- VTable ------------------------------------------------------------------
 
 PaykanStringVTable PaykanString_vtable = {
-    .destroy  = PaykanString_destroy,
+    .destroy = PaykanString_destroy,
     .toString = PaykanString_toString,
-    .equals   = PaykanString_equals,
-    .length   = PaykanString_length,
-    .concat   = PaykanString_concat_inplace,
+    .equals = PaykanString_equals,
+    .length = PaykanString_length,
+    .concat = PaykanString_concat_inplace,
 };
 
 // -- Constructor / Destructor ------------------------------------------------
@@ -29,8 +29,8 @@ PaykanString *PaykanString_new(const char *data, int64_t len) {
   // Cast: the Object-compatible prefix of PaykanStringVTable matches
   // PaykanObjectVTable, so this pointer cast is safe.
   s->vtable = (PaykanObjectVTable *)&PaykanString_vtable;
-  s->len    = len;
-  s->data   = (char *)Paykan_malloc((size_t)len + 1);
+  s->len = len;
+  s->data = (char *)Paykan_malloc((size_t)len + 1);
   memcpy(s->data, data, (size_t)len);
   s->data[len] = '\0';
   return s;
@@ -49,7 +49,8 @@ PaykanString *PaykanString_from_float(double value) {
 }
 
 PaykanString *PaykanString_from_bool(int64_t value) {
-  if (value) return PaykanString_new("True", 4);
+  if (value)
+    return PaykanString_new("True", 4);
   return PaykanString_new("False", 5);
 }
 
@@ -105,8 +106,8 @@ PaykanObject *PaykanString_concat(PaykanObject *self, PaykanObject *other) {
   int64_t newLen = lhs->len + rhs->len;
   PaykanString *s = (PaykanString *)Paykan_malloc(sizeof(PaykanString));
   s->vtable = (PaykanObjectVTable *)&PaykanString_vtable;
-  s->len    = newLen;
-  s->data   = (char *)Paykan_malloc((size_t)newLen + 1);
+  s->len = newLen;
+  s->data = (char *)Paykan_malloc((size_t)newLen + 1);
   memcpy(s->data, lhs->data, (size_t)lhs->len);
   memcpy(s->data + lhs->len, rhs->data, (size_t)rhs->len);
   s->data[newLen] = '\0';
@@ -127,11 +128,11 @@ void PaykanString_concat_inplace(PaykanObject *self, PaykanObject *other) {
   PaykanString *lhs = (PaykanString *)self;
   PaykanString *rhs = (PaykanString *)other;
   int64_t newLen = lhs->len + rhs->len;
-  char *newData   = (char *)Paykan_malloc((size_t)newLen + 1);
+  char *newData = (char *)Paykan_malloc((size_t)newLen + 1);
   memcpy(newData, lhs->data, (size_t)lhs->len);
   memcpy(newData + lhs->len, rhs->data, (size_t)rhs->len);
   newData[newLen] = '\0';
   Paykan_free(lhs->data);
   lhs->data = newData;
-  lhs->len  = newLen;
+  lhs->len = newLen;
 }

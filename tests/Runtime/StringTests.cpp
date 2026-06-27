@@ -165,7 +165,7 @@ TEST(StringEquals, EmptyStrings) {
 }
 
 TEST(StringEquals, NonStringOtherFallsBackToIdentity) {
-  PaykanString *s  = PaykanString_new("x", 1);
+  PaykanString *s = PaykanString_new("x", 1);
   PaykanObject *obj = PaykanObject_new();
   // Different types -> identity comparison -> not equal.
   EXPECT_EQ(PaykanString_equals((PaykanObject *)s, obj), 0);
@@ -196,8 +196,8 @@ TEST(StringLength, EmptyIsZero) {
 TEST(StringConcat, TwoStrings) {
   PaykanString *a = PaykanString_new("foo", 3);
   PaykanString *b = PaykanString_new("bar", 3);
-  PaykanString *c = (PaykanString *)PaykanString_concat(
-      (PaykanObject *)a, (PaykanObject *)b);
+  PaykanString *c =
+      (PaykanString *)PaykanString_concat((PaykanObject *)a, (PaykanObject *)b);
   EXPECT_EQ(c->len, 6);
   EXPECT_STREQ(c->data, "foobar");
   PaykanString_destroy((PaykanObject *)a);
@@ -208,8 +208,8 @@ TEST(StringConcat, TwoStrings) {
 TEST(StringConcat, WithEmptyLeft) {
   PaykanString *a = PaykanString_new("", 0);
   PaykanString *b = PaykanString_new("bar", 3);
-  PaykanString *c = (PaykanString *)PaykanString_concat(
-      (PaykanObject *)a, (PaykanObject *)b);
+  PaykanString *c =
+      (PaykanString *)PaykanString_concat((PaykanObject *)a, (PaykanObject *)b);
   EXPECT_STREQ(c->data, "bar");
   PaykanString_destroy((PaykanObject *)a);
   PaykanString_destroy((PaykanObject *)b);
@@ -219,8 +219,8 @@ TEST(StringConcat, WithEmptyLeft) {
 TEST(StringConcat, WithEmptyRight) {
   PaykanString *a = PaykanString_new("foo", 3);
   PaykanString *b = PaykanString_new("", 0);
-  PaykanString *c = (PaykanString *)PaykanString_concat(
-      (PaykanObject *)a, (PaykanObject *)b);
+  PaykanString *c =
+      (PaykanString *)PaykanString_concat((PaykanObject *)a, (PaykanObject *)b);
   EXPECT_STREQ(c->data, "foo");
   PaykanString_destroy((PaykanObject *)a);
   PaykanString_destroy((PaykanObject *)b);
@@ -230,8 +230,8 @@ TEST(StringConcat, WithEmptyRight) {
 TEST(StringConcat, BothEmpty) {
   PaykanString *a = PaykanString_new("", 0);
   PaykanString *b = PaykanString_new("", 0);
-  PaykanString *c = (PaykanString *)PaykanString_concat(
-      (PaykanObject *)a, (PaykanObject *)b);
+  PaykanString *c =
+      (PaykanString *)PaykanString_concat((PaykanObject *)a, (PaykanObject *)b);
   EXPECT_EQ(c->len, 0);
   EXPECT_STREQ(c->data, "");
   PaykanString_destroy((PaykanObject *)a);
@@ -242,8 +242,8 @@ TEST(StringConcat, BothEmpty) {
 TEST(StringConcat, ResultIsNulTerminated) {
   PaykanString *a = PaykanString_new("ab", 2);
   PaykanString *b = PaykanString_new("cd", 2);
-  PaykanString *c = (PaykanString *)PaykanString_concat(
-      (PaykanObject *)a, (PaykanObject *)b);
+  PaykanString *c =
+      (PaykanString *)PaykanString_concat((PaykanObject *)a, (PaykanObject *)b);
   EXPECT_EQ(c->data[4], '\0');
   PaykanString_destroy((PaykanObject *)a);
   PaykanString_destroy((PaykanObject *)b);

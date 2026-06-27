@@ -8,7 +8,7 @@
 using namespace paykan::test;
 
 static std::string withClasses(const std::string &classDefs,
-                                const std::string &body = "return 0;") {
+                               const std::string &body = "return 0;") {
   return classDefs + "\nfn main() -> int {\n" + body + "\n}\n";
 }
 

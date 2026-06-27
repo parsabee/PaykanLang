@@ -11,9 +11,9 @@
 // -- VTable ------------------------------------------------------------------
 
 PaykanObjectVTable PaykanObject_vtable = {
-    .destroy  = PaykanObject_destroy,
+    .destroy = PaykanObject_destroy,
     .toString = PaykanObject_toString,
-    .equals   = PaykanObject_equals,
+    .equals = PaykanObject_equals,
 };
 
 // -- Constructor / Destructor ------------------------------------------------
@@ -24,9 +24,7 @@ PaykanObject *PaykanObject_new(void) {
   return obj;
 }
 
-void PaykanObject_destroy(PaykanObject *self) {
-  Paykan_free(self);
-}
+void PaykanObject_destroy(PaykanObject *self) { Paykan_free(self); }
 
 // -- Default method implementations ------------------------------------------
 
@@ -61,9 +59,9 @@ static int64_t PaykanNone_equals(PaykanObject *self, PaykanObject *other) {
 }
 
 static PaykanObjectVTable PaykanNone_vtable = {
-    .destroy  = PaykanNone_destroy,
+    .destroy = PaykanNone_destroy,
     .toString = PaykanNone_toString,
-    .equals   = PaykanNone_equals,
+    .equals = PaykanNone_equals,
 };
 
-PaykanObject PaykanObject_None = { &PaykanNone_vtable };
+PaykanObject PaykanObject_None = {&PaykanNone_vtable};

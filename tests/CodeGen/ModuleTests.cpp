@@ -3,9 +3,9 @@
 // Codegen tests: import / module loading across file boundaries.
 
 #include "TestUtils.h"
-#include <gtest/gtest.h>
 #include <filesystem>
 #include <fstream>
+#include <gtest/gtest.h>
 
 using namespace paykan::test;
 

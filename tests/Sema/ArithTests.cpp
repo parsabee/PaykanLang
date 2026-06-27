@@ -79,7 +79,8 @@ TEST(Arith, UnknownTypeInVarDecl) {
     }
   )");
   EXPECT_FALSE(r.Ok);
-  EXPECT_NE(r.Diagnostics.find("unknown class type 'FooBar'"), std::string::npos);
+  EXPECT_NE(r.Diagnostics.find("unknown class type 'FooBar'"),
+            std::string::npos);
 }
 
 // ============================================================================

@@ -10,12 +10,14 @@
 
 #include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/StringSet.h>
+#include <memory>
 #include <string>
 #include <vector>
-#include <memory>
 
 namespace paykan {
-namespace parser { class ParserDriver; }
+namespace parser {
+class ParserDriver;
+}
 namespace sema {
 
 /// Result object returned by Sema::run(). Carries the populated ASTContext
@@ -92,7 +94,8 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   Scope *CurrentScope = nullptr;
 
-  /// The expected return type of the current function (nullptr = top-level / void).
+  /// The expected return type of the current function (nullptr = top-level /
+  /// void).
   ast::Type *CurrentReturnType = nullptr;
 
   /// Loop nesting depth (0 = not inside a loop).
@@ -103,10 +106,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // Populated while visitClassDecl is running; nullptr outside of a class.
   //
   struct ClassContext {
-    ast::ClassType *ClassType;  // the type being checked
-    std::string     MethodName; // method currently being checked (empty = none)
+    ast::ClassType *ClassType; // the type being checked
+    std::string MethodName;    // method currently being checked (empty = none)
     bool SuperInitRequired = false; // __init__ must call __super__
-    bool SuperInitCalled   = false; // __super__ has been called
+    bool SuperInitCalled = false;   // __super__ has been called
   };
 
   ClassContext *CurrentClassCtx = nullptr;
@@ -117,8 +120,8 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   struct FunctionSig {
     ast::Type *ReturnType = nullptr;
     std::vector<ast::Type *> ParamTypes;
-    bool IsVariadic  = false;
-    bool IsBuiltin   = false;
+    bool IsVariadic = false;
+    bool IsBuiltin = false;
   };
 
   /// Maps function names to their signatures.
@@ -150,7 +153,6 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   // Returns true if the type is a numeric builtin (int or float).
   static bool isNumeric(ast::Type *ty);
-
 
   // Returns true if a value of type `src` can be assigned to a location of
   // type `dst`.  This includes exact match, int->float promotion, and
@@ -186,8 +188,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   public:
     explicit ExprChecker(Sema &sema) : S(sema) {}
 
-#define EXPR_VISIT(Kind, Name, Cast) \
-    ast::Type *visit##Name(ast::Cast *node);
+#define EXPR_VISIT(Kind, Name, Cast) ast::Type *visit##Name(ast::Cast *node);
     PAYKAN_EXPR_NODES(EXPR_VISIT)
 #undef EXPR_VISIT
   };
@@ -220,7 +221,8 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// Info about an already-analyzed module.
   struct ModuleInfo {
     // Functions are stored as serialised name-strings so the cache entry never
-    // holds raw Type* pointers into a foreign (potentially destroyed) ASTContext.
+    // holds raw Type* pointers into a foreign (potentially destroyed)
+    // ASTContext.
     struct FunctionInfo {
       std::string Name;
       std::string ReturnTypeName;
@@ -230,18 +232,22 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     std::vector<FunctionInfo> ExportedFunctions;
 
     // Serialised class-type descriptions so they can be reconstructed in
-    // any importing ASTContext without holding raw pointers into a foreign arena.
+    // any importing ASTContext without holding raw pointers into a foreign
+    // arena.
     struct ClassInfo {
       std::string Name;
       std::string SuperClassName; // "" -> implicit Object root
-      struct FieldInfo  { std::string FieldName; std::string TypeName; };
+      struct FieldInfo {
+        std::string FieldName;
+        std::string TypeName;
+      };
       struct MethodInfo {
         std::string Name;
         std::string ReturnTypeName;
         std::vector<std::string> ParamTypeNames;
         uint8_t Flags; // ast::MethodDecl::Static / Private bits
       };
-      std::vector<FieldInfo>  Fields;
+      std::vector<FieldInfo> Fields;
       std::vector<MethodInfo> Methods;
     };
     std::vector<ClassInfo> ExportedClasses;
@@ -267,14 +273,14 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// checkClassDecls and after free-function signatures are registered.
   bool checkClassBodies();
 
-  /// Topologically-sorted class decls (superclass before subclass), populated by
-  /// checkClassDecls and consumed by checkClassBodies.
+  /// Topologically-sorted class decls (superclass before subclass), populated
+  /// by checkClassDecls and consumed by checkClassBodies.
   std::vector<ast::ClassDecl *> SortedClasses;
 
-  /// Resolve a free function's signature (return + parameter types) and register
-  /// it in the function table.  Run as a forward-declaration pass before any
-  /// function or method body is checked, so calls resolve regardless of the
-  /// order declarations appear in the module.
+  /// Resolve a free function's signature (return + parameter types) and
+  /// register it in the function table.  Run as a forward-declaration pass
+  /// before any function or method body is checked, so calls resolve regardless
+  /// of the order declarations appear in the module.
   bool declareFunctionSignature(ast::FuncDecl *node);
 
 public:
@@ -286,14 +292,15 @@ public:
   SemaContext run(ast::TranslationUnit *tu);
 
   // Access diagnostics after analysis.
-  const std::vector<Diagnostic> &getDiagnostics() const { return Diags.getDiagnostics(); }
+  const std::vector<Diagnostic> &getDiagnostics() const {
+    return Diags.getDiagnostics();
+  }
   unsigned getErrorCount() const { return Diags.getErrorCount(); }
   bool hasErrors() const { return Diags.hasErrors(); }
 
   // -- Visitor overrides ----------------------------------------------------
 
-#define SEMA_VISIT(Kind, Name, Cast) \
-  bool visit##Name(ast::Cast *node);
+#define SEMA_VISIT(Kind, Name, Cast) bool visit##Name(ast::Cast *node);
   PAYKAN_STMT_NODES(SEMA_VISIT)
   PAYKAN_DECL_NODES(SEMA_VISIT)
   PAYKAN_TOPLEVEL_NODES(SEMA_VISIT)

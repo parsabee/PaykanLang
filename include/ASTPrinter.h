@@ -28,10 +28,10 @@ class ASTPrinter : public ASTVisitor<ASTPrinter, void> {
   llvm::raw_ostream &OS;
 
   // Characters for drawing the tree.
-  static constexpr const char *Pipe   = "| ";
+  static constexpr const char *Pipe = "| ";
   static constexpr const char *Branch = "|-";
-  static constexpr const char *Tail   = "`-";
-  static constexpr const char *Blank  = "  ";
+  static constexpr const char *Tail = "`-";
+  static constexpr const char *Blank = "  ";
 
   // Stack of "is last child" flags for each depth level.
   std::vector<bool> LastChild;
@@ -54,8 +54,7 @@ public:
   explicit ASTPrinter(llvm::raw_ostream &os);
 
   // -- Visitor overrides (generated from X-macros) -------------------------
-#define AST_PRINT(Kind, Name, Cast) \
-  void visit##Name(Cast *node);
+#define AST_PRINT(Kind, Name, Cast) void visit##Name(Cast *node);
   PAYKAN_ALL_NODES(AST_PRINT)
 #undef AST_PRINT
 };

@@ -23,22 +23,19 @@ using namespace names;
 
 /// Map Paykan-level builtin function names to their C runtime symbols.
 static const llvm::StringMap<const char *> kBuiltinNames = {
-    {kPrint,      kPaykanPrint},
-    {kPrintln,    kPaykanPrintln},
-    {kErrPrint,   kPaykanErrPrint},
+    {kPrint, kPaykanPrint},
+    {kPrintln, kPaykanPrintln},
+    {kErrPrint, kPaykanErrPrint},
     {kErrPrintln, kPaykanErrPrintln},
 };
 
 // -- Constructor -------------------------------------------------------------
 
 CodeGen::CodeGen(const sema::SemaContext &semaCtx, llvm::LLVMContext &llvmCtx,
-                 llvm::StringRef moduleName,
-                 const std::string &projectRoot)
-    : ASTCtx(*semaCtx.ASTCtx), LLVMCtx(llvmCtx),
-      SemaCtx(semaCtx),
+                 llvm::StringRef moduleName, const std::string &projectRoot)
+    : ASTCtx(*semaCtx.ASTCtx), LLVMCtx(llvmCtx), SemaCtx(semaCtx),
       Module(std::make_unique<llvm::Module>(moduleName, llvmCtx)),
-      Builder(llvmCtx), Classes(*this), ProjectRoot(projectRoot) {
-}
+      Builder(llvmCtx), Classes(*this), ProjectRoot(projectRoot) {}
 
 // -- Scope / ScopeGuard ------------------------------------------------------
 
@@ -52,11 +49,13 @@ llvm::AllocaInst *CodeGen::Scope::lookup(llvm::StringRef name) const {
 }
 
 bool CodeGen::Scope::isOwned(llvm::StringRef name) const {
-  if (SharedVars.count(name)) return true;
+  if (SharedVars.count(name))
+    return true;
   // If the name is declared in THIS scope (but not in SharedVars), it is
   // explicitly NOT owned — stop here and do not walk up to a parent scope
   // that may have an owned variable with the same name.
-  if (Locals.count(name)) return false;
+  if (Locals.count(name))
+    return false;
   return Parent ? Parent->isOwned(name) : false;
 }
 
@@ -239,8 +238,8 @@ llvm::Function *CodeGen::declareFunctionPrototype(ast::FuncDecl *node) {
     return existing;
 
   ast::Type *retAstTy = canonicalizeDeclType(node->getReturnType());
-  llvm::Type *retTy = retAstTy ? toLLVMType(retAstTy)
-                               : llvm::Type::getVoidTy(LLVMCtx);
+  llvm::Type *retTy =
+      retAstTy ? toLLVMType(retAstTy) : llvm::Type::getVoidTy(LLVMCtx);
   std::vector<llvm::Type *> paramTys;
   for (auto &p : node->getParams())
     paramTys.push_back(toLLVMType(p.ParamType));
@@ -266,8 +265,8 @@ llvm::Function *CodeGen::declareFunction(llvm::StringRef name,
                                          llvm::FunctionType *fnTy) {
   if (auto *existing = Module->getFunction(name))
     return existing;
-  auto *fn = llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage,
-                                    name, Module.get());
+  auto *fn = llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage, name,
+                                    Module.get());
   fn->addFnAttr(llvm::Attribute::NoUnwind);
 
   // Mark pointer-returning allocator functions as nonnull — all of them call
@@ -275,13 +274,13 @@ llvm::Function *CodeGen::declareFunction(llvm::StringRef name,
   // lets the optimiser elide null-checks and improves alias analysis.
   if (fnTy->getReturnType()->isPointerTy()) {
     static const llvm::StringSet<> kNonNullReturn = {
-        kPaykanSharedNew, kPaykanStringNew, kPaykanStringFromInt,
-        kPaykanStringFromFloat, kPaykanStringFromBool, kPaykanStringFromChar,
-        kPaykanStringConcat, kPaykanArrayNew, kPaykanArrayNewObj,
-        kPaykanArrayNewFromData, kPaykanMalloc, kPaykanRealloc,
-        kPaykanFileNew, kPaykanFileOpen,
-        kPaykanErrorNew, kPaykanObjectNew,
-        kPaykanIntNew, kPaykanFloatNew, kPaykanBoolNew,
+        kPaykanSharedNew,        kPaykanStringNew,      kPaykanStringFromInt,
+        kPaykanStringFromFloat,  kPaykanStringFromBool, kPaykanStringFromChar,
+        kPaykanStringConcat,     kPaykanArrayNew,       kPaykanArrayNewObj,
+        kPaykanArrayNewFromData, kPaykanMalloc,         kPaykanRealloc,
+        kPaykanFileNew,          kPaykanFileOpen,       kPaykanErrorNew,
+        kPaykanObjectNew,        kPaykanIntNew,         kPaykanFloatNew,
+        kPaykanBoolNew,
     };
     if (kNonNullReturn.count(name))
       fn->addRetAttr(llvm::Attribute::NonNull);
@@ -340,9 +339,7 @@ void CodeGen::emitLoopScopesCleanup() {
     emitScopeCleanup(*s);
 }
 
-llvm::Value *CodeGen::emitExpr(ast::Expr *expr) {
-  return Emitter.visit(expr);
-}
+llvm::Value *CodeGen::emitExpr(ast::Expr *expr) { return Emitter.visit(expr); }
 
 // -- Optimization -----------------------------------------------------------
 
@@ -362,8 +359,7 @@ void CodeGen::optimize(llvm::OptimizationLevel level) {
   PB.registerLoopAnalyses(LAM);
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
 
-  llvm::ModulePassManager MPM =
-      PB.buildPerModuleDefaultPipeline(level);
+  llvm::ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(level);
   MPM.run(*Module, MAM);
 }
 
@@ -395,12 +391,15 @@ bool CodeGen::exprAlreadyShared(ast::Expr *expr) const {
   if (auto *ce = ast::dyn_cast<ast::CallExpr>(expr)) {
     if (!ce->getResolvedType() || !ast::isRefType(ce->getResolvedType()))
       return false;
-    // Builtins in FunctionTable or IdentityCtors return raw pointers — not shared.
-    // Exception: open() was changed to return PaykanShared* so match works on the result.
-    if (FunctionTable.count(ce->getCalleeName()) || IdentityCtors.count(ce->getCalleeName())) {
-      if (ce->getCalleeName() == names::kOpen     ||
-          ce->getCalleeName() == names::kIntStr   ||
-          ce->getCalleeName() == names::kFloatStr) return true;
+    // Builtins in FunctionTable or IdentityCtors return raw pointers — not
+    // shared. Exception: open() was changed to return PaykanShared* so match
+    // works on the result.
+    if (FunctionTable.count(ce->getCalleeName()) ||
+        IdentityCtors.count(ce->getCalleeName())) {
+      if (ce->getCalleeName() == names::kOpen ||
+          ce->getCalleeName() == names::kIntStr ||
+          ce->getCalleeName() == names::kFloatStr)
+        return true;
       return false;
     }
     return true;
@@ -428,25 +427,26 @@ bool CodeGen::exprProducesFreshBox(ast::Expr *expr) const {
 }
 
 void CodeGen::emitRetain(llvm::Value *shared) {
-  auto *ptrTy  = llvm::PointerType::getUnqual(LLVMCtx);
+  auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
   auto *voidTy = llvm::Type::getVoidTy(LLVMCtx);
-  auto *fnTy   = llvm::FunctionType::get(voidTy, {ptrTy}, false);
+  auto *fnTy = llvm::FunctionType::get(voidTy, {ptrTy}, false);
   Builder.CreateCall(declareFunction(kPaykanRetain, fnTy), {shared});
 }
 
 void CodeGen::emitRelease(llvm::Value *shared) {
-  auto *ptrTy  = llvm::PointerType::getUnqual(LLVMCtx);
+  auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
   auto *voidTy = llvm::Type::getVoidTy(LLVMCtx);
-  auto *fnTy   = llvm::FunctionType::get(voidTy, {ptrTy}, false);
+  auto *fnTy = llvm::FunctionType::get(voidTy, {ptrTy}, false);
   Builder.CreateCall(declareFunction(kPaykanRelease, fnTy), {shared});
 }
 
 llvm::Value *CodeGen::emitSharedNew(llvm::Value *raw, llvm::StringRef name) {
   auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
-  auto *fnTy  = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
+  auto *fnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
   // Boxing transfers ownership of a raw string temporary to the PaykanShared.
   untrackStringTemp(raw);
-  return Builder.CreateCall(declareFunction(kPaykanSharedNew, fnTy), {raw}, name);
+  return Builder.CreateCall(declareFunction(kPaykanSharedNew, fnTy), {raw},
+                            name);
 }
 
 void CodeGen::trackStringTemp(llvm::Value *v) {
@@ -465,9 +465,9 @@ void CodeGen::destroyStringTempIfOwned(llvm::Value *v) {
   OwnedStringTemps.erase(v);
   if (Builder.GetInsertBlock()->getTerminator())
     return;
-  auto *ptrTy  = llvm::PointerType::getUnqual(LLVMCtx);
+  auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
   auto *voidTy = llvm::Type::getVoidTy(LLVMCtx);
-  auto *fnTy   = llvm::FunctionType::get(voidTy, {ptrTy}, false);
+  auto *fnTy = llvm::FunctionType::get(voidTy, {ptrTy}, false);
   Builder.CreateCall(declareFunction(kPaykanStringDestroy, fnTy), {v});
 }
 
@@ -511,7 +511,8 @@ void CodeGen::releaseIfOwned(const ExprValue &ev) {
 void CodeGen::bootstrapBuiltins() {
   auto *i64Ty = llvm::Type::getInt64Ty(LLVMCtx);
   auto *voidTy = llvm::Type::getVoidTy(LLVMCtx);
-  auto *varArgFnTy = llvm::FunctionType::get(voidTy, {i64Ty}, /*isVarArg=*/true);
+  auto *varArgFnTy =
+      llvm::FunctionType::get(voidTy, {i64Ty}, /*isVarArg=*/true);
 
   for (auto &[paykanName, runtimeName] : kBuiltinNames)
     FunctionTable[paykanName] = {runtimeName, varArgFnTy, /*IsVariadic=*/true};
@@ -520,16 +521,16 @@ void CodeGen::bootstrapBuiltins() {
   auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
   auto *dblTy = llvm::Type::getDoubleTy(LLVMCtx);
 
-  auto *ptrFromI64  = llvm::FunctionType::get(ptrTy, {i64Ty}, false);
-  auto *ptrFromDbl  = llvm::FunctionType::get(ptrTy, {dblTy}, false);
+  auto *ptrFromI64 = llvm::FunctionType::get(ptrTy, {i64Ty}, false);
+  auto *ptrFromDbl = llvm::FunctionType::get(ptrTy, {dblTy}, false);
 
   auto *i8Ty = llvm::Type::getInt8Ty(LLVMCtx);
   auto *ptrFromI8 = llvm::FunctionType::get(ptrTy, {i8Ty}, false);
 
-  FunctionTable[kStrInt]   = {kPaykanStringFromInt,   ptrFromI64, false};
+  FunctionTable[kStrInt] = {kPaykanStringFromInt, ptrFromI64, false};
   FunctionTable[kStrFloat] = {kPaykanStringFromFloat, ptrFromDbl, false};
-  FunctionTable[kStrBool]  = {kPaykanStringFromBool,  ptrFromI64, false};
-  FunctionTable[kStrChar]  = {kPaykanStringFromChar,  ptrFromI8,  false};
+  FunctionTable[kStrBool] = {kPaykanStringFromBool, ptrFromI64, false};
+  FunctionTable[kStrChar] = {kPaykanStringFromChar, ptrFromI8, false};
 
   // open(path: Str, mode: Str) -> Obj  (PaykanShared*)
   auto *ptrFromPtrPtr = llvm::FunctionType::get(ptrTy, {ptrTy, ptrTy}, false);
@@ -537,7 +538,7 @@ void CodeGen::bootstrapBuiltins() {
 
   // IntStr(s: Str) -> Obj  /  FloatStr(s: Str) -> Obj  (PaykanShared*)
   auto *ptrFromPtr = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
-  FunctionTable[kIntStr]   = {kPaykanIntFromStr,   ptrFromPtr, false};
+  FunctionTable[kIntStr] = {kPaykanIntFromStr, ptrFromPtr, false};
   FunctionTable[kFloatStr] = {kPaykanFloatFromStr, ptrFromPtr, false};
 
   // Identity constructors — just return the argument as-is.
@@ -547,9 +548,9 @@ void CodeGen::bootstrapBuiltins() {
 // -- Top-level ---------------------------------------------------------------
 
 llvm::Value *CodeGen::visitTranslationUnit(ast::TranslationUnit *node) {
-  // Forward-declare every free-function prototype before emitting any body, so a
-  // call inside a class method (emitted below) resolves even when the callee is
-  // defined later in the module.
+  // Forward-declare every free-function prototype before emitting any body, so
+  // a call inside a class method (emitted below) resolves even when the callee
+  // is defined later in the module.
   for (auto *fn : node->getFuncDecls())
     declareFunctionPrototype(fn);
   for (auto *cls : node->getClassDecls())
@@ -590,8 +591,8 @@ llvm::Value *CodeGen::visitExprStmt(ast::ExprStmt *node) {
 }
 
 llvm::Value *CodeGen::emitImplicitVarDecl(llvm::StringRef name,
-                                           ast::Expr *rhsExpr,
-                                           llvm::Value *val) {
+                                          ast::Expr *rhsExpr,
+                                          llvm::Value *val) {
   auto *fn = Builder.GetInsertBlock()->getParent();
   bool isNoneRHS = ast::isa<ast::NoneLiteral>(rhsExpr);
 
@@ -623,9 +624,9 @@ llvm::Value *CodeGen::emitImplicitVarDecl(llvm::StringRef name,
   if (!isNoneRHS && val->getType()->isPointerTy() && rhsAstTy) {
     auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
     if (exprAlreadyShared(rhsExpr)) {
-      // val is already a PaykanShared* (from a call/method-call/ternary) — use as-is.
-      // Do NOT call emitAsShared here — that would re-emit the expression and call
-      // the function a second time.
+      // val is already a PaykanShared* (from a call/method-call/ternary) — use
+      // as-is. Do NOT call emitAsShared here — that would re-emit the
+      // expression and call the function a second time.
     } else if (auto *id = ast::dyn_cast<ast::Identifier>(rhsExpr);
                id && CurrentScope->isOwned(id->getName())) {
       // Owned identifier: visitIdentifier already unwrapped to raw; load the
@@ -650,7 +651,7 @@ llvm::Value *CodeGen::emitImplicitVarDecl(llvm::StringRef name,
 }
 
 void CodeGen::emitClassVarRebind(llvm::AllocaInst *alloca, ast::Expr *rhsExpr,
-                                  llvm::Value *val) {
+                                 llvm::Value *val) {
   auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
 
   llvm::Value *newBox = nullptr;
@@ -664,7 +665,8 @@ void CodeGen::emitClassVarRebind(llvm::AllocaInst *alloca, ast::Expr *rhsExpr,
   }
   if (!newBox) {
     if (exprAlreadyShared(rhsExpr))
-      newBox = val; // already a PaykanShared* — use directly (refcount already = 1)
+      newBox =
+          val; // already a PaykanShared* — use directly (refcount already = 1)
     else if (ast::isa<ast::StringLiteral>(rhsExpr))
       // val is already a PaykanString* (pre-wrapped by visitAssignStmt via
       // wrapStringLiteral). Box it directly to avoid a second PaykanString_new.
@@ -737,8 +739,8 @@ llvm::Value *CodeGen::visitAssignStmt(ast::AssignStmt *node) {
       CurrentScope->updateASTType(node->getVarName(), rhsCT);
     }
     if (wasUnowned)
-      CurrentScope->promoteToOwned(node->getVarName(),
-                                   rhsCT ? static_cast<ast::Type *>(rhsCT) : astTy);
+      CurrentScope->promoteToOwned(
+          node->getVarName(), rhsCT ? static_cast<ast::Type *>(rhsCT) : astTy);
     return val;
   }
 
@@ -783,9 +785,8 @@ llvm::Value *CodeGen::emitAsShared(ast::Expr *expr) {
   if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(expr)) {
     bool isStrReceiver = false;
     if (auto *id = ast::dyn_cast<ast::Identifier>(se->getArray()))
-      isStrReceiver =
-          CurrentScope &&
-          CurrentScope->lookupASTType(id->getName()) == ASTCtx.getStrTy();
+      isStrReceiver = CurrentScope && CurrentScope->lookupASTType(
+                                          id->getName()) == ASTCtx.getStrTy();
     if (!isStrReceiver && se->getResolvedType() &&
         ast::isRefType(se->getResolvedType())) {
       auto *i64Ty = llvm::Type::getInt64Ty(LLVMCtx);
@@ -875,7 +876,7 @@ llvm::Value *CodeGen::visitWhileStmt(ast::WhileStmt *node) {
   auto *parentFn = Builder.GetInsertBlock()->getParent();
   auto *condBB = llvm::BasicBlock::Create(LLVMCtx, kIRWhileCond, parentFn);
   auto *bodyBB = llvm::BasicBlock::Create(LLVMCtx, kIRWhileBody, parentFn);
-  auto *endBB  = llvm::BasicBlock::Create(LLVMCtx, kIRWhileEnd, parentFn);
+  auto *endBB = llvm::BasicBlock::Create(LLVMCtx, kIRWhileEnd, parentFn);
 
   // Push loop context for break/continue.
   LoopStack.push_back({condBB, endBB, CurrentScope});
@@ -906,7 +907,8 @@ llvm::Value *CodeGen::visitBreakStmt(ast::BreakStmt *) {
   assert(!LoopStack.empty() && "break outside loop");
   emitLoopScopesCleanup();
   Builder.CreateBr(LoopStack.back().EndBB);
-  // Dead block for any code after break — must be terminated to satisfy the verifier.
+  // Dead block for any code after break — must be terminated to satisfy the
+  // verifier.
   auto *deadBB = llvm::BasicBlock::Create(
       LLVMCtx, kIRBreakDead, Builder.GetInsertBlock()->getParent());
   Builder.SetInsertPoint(deadBB);
@@ -918,7 +920,8 @@ llvm::Value *CodeGen::visitContinueStmt(ast::ContinueStmt *) {
   assert(!LoopStack.empty() && "continue outside loop");
   emitLoopScopesCleanup();
   Builder.CreateBr(LoopStack.back().CondBB);
-  // Dead block for any code after continue — must be terminated to satisfy the verifier.
+  // Dead block for any code after continue — must be terminated to satisfy the
+  // verifier.
   auto *deadBB = llvm::BasicBlock::Create(
       LLVMCtx, kIRContDead, Builder.GetInsertBlock()->getParent());
   Builder.SetInsertPoint(deadBB);
@@ -983,8 +986,8 @@ llvm::Value *CodeGen::visitVarDecl(ast::VarDecl *node) {
 
       // Implicit int -> float promotion.
       if (llvmTy->isDoubleTy() && initVal->getType()->isIntegerTy(64))
-        initVal = Builder.CreateSIToFP(initVal, llvm::Type::getDoubleTy(LLVMCtx),
-                                       kInt2FPName);
+        initVal = Builder.CreateSIToFP(
+            initVal, llvm::Type::getDoubleTy(LLVMCtx), kInt2FPName);
     }
   }
 
@@ -1001,8 +1004,8 @@ llvm::Value *CodeGen::visitVarDecl(ast::VarDecl *node) {
 
   // Pass nullptr for AST type when None-init so the var is NOT marked owned
   // (it holds a raw PaykanObject* singleton, not a PaykanShared*).
-  bool isNoneVar = node->getInitExpr() &&
-                   ast::isa<ast::NoneLiteral>(node->getInitExpr());
+  bool isNoneVar =
+      node->getInitExpr() && ast::isa<ast::NoneLiteral>(node->getInitExpr());
 
   // Canonicalize ClassType to the registry entry (the parser may have created
   // a stub with no fields before Sema populated the canonical ClassType).
@@ -1037,7 +1040,8 @@ llvm::Value *CodeGen::visitVarDecl(ast::VarDecl *node) {
 
 // -- Expression emitter ------------------------------------------------------
 
-llvm::Value *CodeGen::ExprEmitter::visitIntegerLiteral(ast::IntegerLiteral *node) {
+llvm::Value *
+CodeGen::ExprEmitter::visitIntegerLiteral(ast::IntegerLiteral *node) {
   return llvm::ConstantInt::get(llvm::Type::getInt64Ty(CG.LLVMCtx),
                                 node->getValue(), /*isSigned=*/true);
 }
@@ -1066,7 +1070,8 @@ llvm::Value *CodeGen::ExprEmitter::visitNoneLiteral(ast::NoneLiteral *) {
   return noneGlobal;
 }
 
-llvm::Value *CodeGen::ExprEmitter::visitStringLiteral(ast::StringLiteral *node) {
+llvm::Value *
+CodeGen::ExprEmitter::visitStringLiteral(ast::StringLiteral *node) {
   llvm::StringRef content = node->getValue();
 
   // Return the existing global if we already emitted this string.
@@ -1082,7 +1087,8 @@ llvm::Value *CodeGen::ExprEmitter::visitStringLiteral(ast::StringLiteral *node) 
   return gv;
 }
 
-llvm::Value *CodeGen::ExprEmitter::visitEnumValueExpr(ast::EnumValueExpr *node) {
+llvm::Value *
+CodeGen::ExprEmitter::visitEnumValueExpr(ast::EnumValueExpr *node) {
   // Enums lower to a 64-bit integer constant (the variant's index).  Sema has
   // already resolved and validated the variant value.  No ARC: enum values are
   // plain primitives, not heap objects.
@@ -1101,7 +1107,8 @@ llvm::Value *CodeGen::ExprEmitter::visitIdentifier(ast::Identifier *node) {
   llvm::Value *val = CG.Builder.CreateLoad(alloca->getAllocatedType(), alloca,
                                            node->getName());
 
-  // Owned class/array vars store a PaykanShared* — unwrap to get the underlying object.
+  // Owned class/array vars store a PaykanShared* — unwrap to get the underlying
+  // object.
   auto *astTy = CG.CurrentScope->lookupASTType(node->getName());
   if (ast::isRefType(astTy) && CG.CurrentScope->isOwned(node->getName())) {
     auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
@@ -1113,13 +1120,15 @@ llvm::Value *CodeGen::ExprEmitter::visitIdentifier(ast::Identifier *node) {
   return val;
 }
 
-llvm::Value *CodeGen::ExprEmitter::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
+llvm::Value *
+CodeGen::ExprEmitter::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
   return CG.Classes.visitMemberAccessExpr(node);
 }
 
-llvm::Value *CodeGen::ExprEmitter::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
-  auto *ptrTy  = llvm::PointerType::getUnqual(CG.LLVMCtx);
-  auto *i64Ty  = llvm::Type::getInt64Ty(CG.LLVMCtx);
+llvm::Value *
+CodeGen::ExprEmitter::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
+  auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
+  auto *i64Ty = llvm::Type::getInt64Ty(CG.LLVMCtx);
   auto *voidTy = llvm::Type::getVoidTy(CG.LLVMCtx);
 
   // Determine element type from the ArrayType resolved by Sema.
@@ -1140,38 +1149,43 @@ llvm::Value *CodeGen::ExprEmitter::visitArrayLiteralExpr(ast::ArrayLiteralExpr *
   auto *newFnTy = llvm::FunctionType::get(ptrTy, {i64Ty}, false);
   const char *newFnName = isObjectArray ? kPaykanArrayNewObj : kPaykanArrayNew;
   // arr is reassigned below for constant-primitive arrays.
-  llvm::Value *arr = (!isObjectArray && len > 0)
-                         ? nullptr // defer: may use new_from_data
-                         : CG.Builder.CreateCall(
-                               CG.declareFunction(newFnName, newFnTy),
-                               {lenVal}, kIRArr);
+  llvm::Value *arr =
+      (!isObjectArray && len > 0)
+          ? nullptr // defer: may use new_from_data
+          : CG.Builder.CreateCall(CG.declareFunction(newFnName, newFnTy),
+                                  {lenVal}, kIRArr);
 
   if (isObjectArray) {
-    // Object array: each element needs retain semantics — emit per-element set_obj.
+    // Object array: each element needs retain semantics — emit per-element
+    // set_obj.
     for (size_t i = 0; i < len; ++i) {
       auto *elemExpr = node->getElements()[i];
-      auto *idxVal   = llvm::ConstantInt::get(i64Ty, (uint64_t)i);
+      auto *idxVal = llvm::ConstantInt::get(i64Ty, (uint64_t)i);
       llvm::Value *v = CG.emitAsShared(elemExpr);
-      if (!v) return nullptr;
-      auto *setFnTy = llvm::FunctionType::get(voidTy, {ptrTy, i64Ty, ptrTy}, false);
-      CG.Builder.CreateCall(
-          CG.declareFunction(kPaykanArraySetObj, setFnTy), {arr, idxVal, v});
+      if (!v)
+        return nullptr;
+      auto *setFnTy =
+          llvm::FunctionType::get(voidTy, {ptrTy, i64Ty, ptrTy}, false);
+      CG.Builder.CreateCall(CG.declareFunction(kPaykanArraySetObj, setFnTy),
+                            {arr, idxVal, v});
       // set_obj retains the stored box; release the +1 temporary from
       // emitAsShared so the literal's elements are not leaked.
       CG.emitRelease(v);
     }
   } else if (len > 0) {
     arr = emitPrimitiveArrayLiteral(node, len, lenVal, newFnTy);
-    if (!arr) return nullptr;
+    if (!arr)
+      return nullptr;
   }
 
   // Box the raw PaykanArray* in a PaykanShared*.
   return CG.emitSharedNew(arr, kIRArrShared);
 }
 
-llvm::Value *CodeGen::ExprEmitter::emitPrimitiveArrayLiteral(
-    ast::ArrayLiteralExpr *node, size_t len,
-    llvm::Value *lenVal, llvm::FunctionType *newFnTy) {
+llvm::Value *
+CodeGen::ExprEmitter::emitPrimitiveArrayLiteral(ast::ArrayLiteralExpr *node,
+                                                size_t len, llvm::Value *lenVal,
+                                                llvm::FunctionType *newFnTy) {
   auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
   auto *i64Ty = llvm::Type::getInt64Ty(CG.LLVMCtx);
   auto *voidTy = llvm::Type::getVoidTy(CG.LLVMCtx);
@@ -1185,7 +1199,8 @@ llvm::Value *CodeGen::ExprEmitter::emitPrimitiveArrayLiteral(
   for (size_t i = 0; i < len; ++i) {
     auto *elemExpr = node->getElements()[i];
     llvm::Value *v = visit(elemExpr);
-    if (!v) return nullptr;
+    if (!v)
+      return nullptr;
     if (auto *sl = ast::dyn_cast<ast::StringLiteral>(elemExpr))
       v = CG.wrapStringLiteral(v, sl->getValue().size());
     if (v->getType()->isDoubleTy()) {
@@ -1223,11 +1238,11 @@ llvm::Value *CodeGen::ExprEmitter::emitPrimitiveArrayLiteral(
     if (internIt != CG.InternedArrayData.end()) {
       global = internIt->second;
     } else {
-      auto *arrTy    = llvm::ArrayType::get(i64Ty, len);
+      auto *arrTy = llvm::ArrayType::get(i64Ty, len);
       auto *initData = llvm::ConstantArray::get(arrTy, elems);
-      global = new llvm::GlobalVariable(
-          *CG.Module, arrTy, /*isConstant=*/true,
-          llvm::GlobalValue::PrivateLinkage, initData, kIRArrData);
+      global = new llvm::GlobalVariable(*CG.Module, arrTy, /*isConstant=*/true,
+                                        llvm::GlobalValue::PrivateLinkage,
+                                        initData, kIRArrData);
       global->setAlignment(llvm::Align(8));
       global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
       CG.InternedArrayData.insert({key, global});
@@ -1244,29 +1259,33 @@ llvm::Value *CodeGen::ExprEmitter::emitPrimitiveArrayLiteral(
       CG.declareFunction(kPaykanArrayNew, newFnTy), {lenVal}, kIRArr);
   for (size_t i = 0; i < len; ++i) {
     auto *elemExpr = node->getElements()[i];
-    auto *idxVal   = llvm::ConstantInt::get(i64Ty, (uint64_t)i);
+    auto *idxVal = llvm::ConstantInt::get(i64Ty, (uint64_t)i);
     llvm::Value *v = visit(elemExpr);
-    if (!v) return nullptr;
+    if (!v)
+      return nullptr;
     if (auto *sl = ast::dyn_cast<ast::StringLiteral>(elemExpr))
       v = CG.wrapStringLiteral(v, sl->getValue().size());
     if (v->getType()->isDoubleTy())
       v = CG.Builder.CreateBitCast(v, i64Ty, kIRF64Bits);
     else if (v->getType()->isIntegerTy(1))
       v = CG.Builder.CreateZExt(v, i64Ty, kIRBoolExtArr);
-    auto *setFnTy = llvm::FunctionType::get(voidTy, {ptrTy, i64Ty, i64Ty}, false);
-    CG.Builder.CreateCall(
-        CG.declareFunction(kPaykanArraySet, setFnTy), {arr, idxVal, v});
+    auto *setFnTy =
+        llvm::FunctionType::get(voidTy, {ptrTy, i64Ty, i64Ty}, false);
+    CG.Builder.CreateCall(CG.declareFunction(kPaykanArraySet, setFnTy),
+                          {arr, idxVal, v});
   }
   return arr;
 }
 
-llvm::Value *CodeGen::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
+llvm::Value *
+CodeGen::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
   auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
   auto *i64Ty = llvm::Type::getInt64Ty(CG.LLVMCtx);
 
   // Emit the index (shared by both string and array paths).
   llvm::Value *idx = visit(node->getIndex());
-  if (!idx) return nullptr;
+  if (!idx)
+    return nullptr;
   if (idx->getType()->isIntegerTy(1))
     idx = CG.Builder.CreateZExt(idx, i64Ty, kIRIdxExt);
 
@@ -1279,7 +1298,8 @@ llvm::Value *CodeGen::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) 
   // String subscript: str[idx] -> char  (PaykanString_char_at)
   if (receiverIsStr) {
     llvm::Value *strRaw = visit(node->getArray());
-    if (!strRaw) return nullptr;
+    if (!strRaw)
+      return nullptr;
     // visit() returns a PaykanShared* when the array expression is a member-
     // access field or a ref-returning call.  PaykanString_char_at expects the
     // unwrapped PaykanString*, so unbox via PaykanShared_get when needed.
@@ -1291,14 +1311,16 @@ llvm::Value *CodeGen::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) 
     auto *i8Ty = llvm::Type::getInt8Ty(CG.LLVMCtx);
     auto *charAtFnTy = llvm::FunctionType::get(i8Ty, {ptrTy, i64Ty}, false);
     return CG.Builder.CreateCall(
-        CG.declareFunction(kPaykanStringCharAt, charAtFnTy), {strRaw, idx}, "str.char_at");
+        CG.declareFunction(kPaykanStringCharAt, charAtFnTy), {strRaw, idx},
+        "str.char_at");
   }
 
   // Array subscript: arr[idx]
   // visitIdentifier already calls PaykanShared_get for owned array vars,
   // so visit() yields the raw PaykanArray* directly.
   llvm::Value *arrRaw = visit(node->getArray());
-  if (!arrRaw) return nullptr;
+  if (!arrRaw)
+    return nullptr;
 
   // Call PaykanArray_get(arr, idx) -> i64.
   auto *getFnTy = llvm::FunctionType::get(i64Ty, {ptrTy, i64Ty}, false);
@@ -1313,12 +1335,10 @@ llvm::Value *CodeGen::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) 
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(elemTy)) {
     switch (bt->getTypeKind()) {
     case ast::BuiltinType::Float:
-      return CG.Builder.CreateBitCast(raw,
-                                      llvm::Type::getDoubleTy(CG.LLVMCtx),
+      return CG.Builder.CreateBitCast(raw, llvm::Type::getDoubleTy(CG.LLVMCtx),
                                       kIRElemF64);
     case ast::BuiltinType::Bool:
-      return CG.Builder.CreateTrunc(raw,
-                                    llvm::Type::getInt1Ty(CG.LLVMCtx),
+      return CG.Builder.CreateTrunc(raw, llvm::Type::getInt1Ty(CG.LLVMCtx),
                                     kIRElemBool);
     case ast::BuiltinType::Int:
     default:
@@ -1329,11 +1349,12 @@ llvm::Value *CodeGen::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) 
   if (!CG.isObjectElementType(elemTy))
     return raw;
   // ClassType or ArrayType: slot stores a PaykanShared* as bits — convert back,
-  // then unwrap to the raw PaykanObject* (same as visitIdentifier for owned vars).
+  // then unwrap to the raw PaykanObject* (same as visitIdentifier for owned
+  // vars).
   llvm::Value *shared = CG.Builder.CreateIntToPtr(raw, ptrTy, kIRElemShared);
   auto *unwrapFnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
-  return CG.Builder.CreateCall(
-      CG.declareFunction(kPaykanSharedGet, unwrapFnTy), {shared}, kIRElemObj);
+  return CG.Builder.CreateCall(CG.declareFunction(kPaykanSharedGet, unwrapFnTy),
+                               {shared}, kIRElemObj);
 }
 
 llvm::Value *CodeGen::ExprEmitter::visitTernaryExpr(ast::TernaryExpr *node) {
@@ -1348,23 +1369,21 @@ llvm::Value *CodeGen::ExprEmitter::visitTernaryExpr(ast::TernaryExpr *node) {
                        ast::isa<ast::ClassType>(node->getResolvedType());
 
   auto *parentFn = CG.Builder.GetInsertBlock()->getParent();
-  auto *thenBB  = llvm::BasicBlock::Create(CG.LLVMCtx, kIRTernThen, parentFn);
-  auto *elseBB  = llvm::BasicBlock::Create(CG.LLVMCtx, kIRTernElse, parentFn);
-  auto *mergeBB = llvm::BasicBlock::Create(CG.LLVMCtx, kIRTernEnd,  parentFn);
+  auto *thenBB = llvm::BasicBlock::Create(CG.LLVMCtx, kIRTernThen, parentFn);
+  auto *elseBB = llvm::BasicBlock::Create(CG.LLVMCtx, kIRTernElse, parentFn);
+  auto *mergeBB = llvm::BasicBlock::Create(CG.LLVMCtx, kIRTernEnd, parentFn);
 
   CG.Builder.CreateCondBr(condVal, thenBB, elseBB);
 
   CG.Builder.SetInsertPoint(thenBB);
-  llvm::Value *trueVal = isClassResult
-      ? CG.emitAsShared(node->getTrueExpr())
-      : visit(node->getTrueExpr());
+  llvm::Value *trueVal = isClassResult ? CG.emitAsShared(node->getTrueExpr())
+                                       : visit(node->getTrueExpr());
   auto *thenEndBB = CG.Builder.GetInsertBlock();
   CG.Builder.CreateBr(mergeBB);
 
   CG.Builder.SetInsertPoint(elseBB);
-  llvm::Value *falseVal = isClassResult
-      ? CG.emitAsShared(node->getFalseExpr())
-      : visit(node->getFalseExpr());
+  llvm::Value *falseVal = isClassResult ? CG.emitAsShared(node->getFalseExpr())
+                                        : visit(node->getFalseExpr());
   auto *elseEndBB = CG.Builder.GetInsertBlock();
   CG.Builder.CreateBr(mergeBB);
 
@@ -1374,7 +1393,6 @@ llvm::Value *CodeGen::ExprEmitter::visitTernaryExpr(ast::TernaryExpr *node) {
   phi->addIncoming(falseVal, elseEndBB);
   return phi;
 }
-
 
 llvm::Value *CodeGen::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {
   llvm::Value *operand = visit(node->getOperand());
@@ -1389,13 +1407,15 @@ llvm::Value *CodeGen::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {
 
   case ast::UnaryOpcode::Not:
     return CG.Builder.CreateNot(operand, kIRNot);
-  case ast::UnaryOpcode::Count: break;
+  case ast::UnaryOpcode::Count:
+    break;
   }
   llvm_unreachable("unknown UnaryOpcode");
 }
 
 llvm::Value *CodeGen::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
-  // Short-circuit logical operators: evaluate LHS first, conditionally evaluate RHS.
+  // Short-circuit logical operators: evaluate LHS first, conditionally evaluate
+  // RHS.
   if (node->getOpcode() == ast::BinaryOpcode::And) {
     auto *parentFn = CG.Builder.GetInsertBlock()->getParent();
     auto *rhsBB = llvm::BasicBlock::Create(CG.LLVMCtx, kIRAndRhs, parentFn);
@@ -1411,7 +1431,8 @@ llvm::Value *CodeGen::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
     CG.Builder.CreateBr(mergeBB);
 
     CG.Builder.SetInsertPoint(mergeBB);
-    auto *phi = CG.Builder.CreatePHI(llvm::Type::getInt1Ty(CG.LLVMCtx), 2, kIRAnd);
+    auto *phi =
+        CG.Builder.CreatePHI(llvm::Type::getInt1Ty(CG.LLVMCtx), 2, kIRAnd);
     phi->addIncoming(llvm::ConstantInt::getFalse(CG.LLVMCtx), lhsBB);
     phi->addIncoming(rhs, rhsEndBB);
     return phi;
@@ -1431,7 +1452,8 @@ llvm::Value *CodeGen::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
     CG.Builder.CreateBr(mergeBB);
 
     CG.Builder.SetInsertPoint(mergeBB);
-    auto *phi = CG.Builder.CreatePHI(llvm::Type::getInt1Ty(CG.LLVMCtx), 2, kIROr);
+    auto *phi =
+        CG.Builder.CreatePHI(llvm::Type::getInt1Ty(CG.LLVMCtx), 2, kIROr);
     phi->addIncoming(llvm::ConstantInt::getTrue(CG.LLVMCtx), lhsBB);
     phi->addIncoming(rhs, rhsEndBB);
     return phi;
@@ -1445,10 +1467,10 @@ llvm::Value *CodeGen::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
   // Implicit int -> float promotion: if one side is double, promote the other.
   if (lhs->getType()->isDoubleTy() && rhs->getType()->isIntegerTy(64))
     rhs = CG.Builder.CreateSIToFP(rhs, llvm::Type::getDoubleTy(CG.LLVMCtx),
-                                   kInt2FPName);
+                                  kInt2FPName);
   else if (rhs->getType()->isDoubleTy() && lhs->getType()->isIntegerTy(64))
     lhs = CG.Builder.CreateSIToFP(lhs, llvm::Type::getDoubleTy(CG.LLVMCtx),
-                                   kInt2FPName);
+                                  kInt2FPName);
 
   bool isFloat = lhs->getType()->isDoubleTy();
 
@@ -1474,9 +1496,11 @@ llvm::Value *CodeGen::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
       auto *ptrTy2 = llvm::PointerType::getUnqual(CG.LLVMCtx);
       auto *getFnTy2 = llvm::FunctionType::get(ptrTy2, {ptrTy2}, false);
       if (CG.exprAlreadyShared(node->getLHS()))
-        lhs = CG.Builder.CreateCall(CG.declareFunction(kPaykanSharedGet, getFnTy2), {lhs}, kIRLhsObj);
+        lhs = CG.Builder.CreateCall(
+            CG.declareFunction(kPaykanSharedGet, getFnTy2), {lhs}, kIRLhsObj);
       if (CG.exprAlreadyShared(node->getRHS()))
-        rhs = CG.Builder.CreateCall(CG.declareFunction(kPaykanSharedGet, getFnTy2), {rhs}, kIRRhsObj);
+        rhs = CG.Builder.CreateCall(
+            CG.declareFunction(kPaykanSharedGet, getFnTy2), {rhs}, kIRRhsObj);
 
       // String concatenation: call PaykanString_concat(lhs, rhs) -> ptr
       auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
@@ -1522,10 +1546,12 @@ llvm::Value *CodeGen::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
 
   // -- Equality -------------------------------------------------------------
   case ast::BinaryOpcode::Eq:
-    if (isFloat) return CG.Builder.CreateFCmpOEQ(lhs, rhs, kIRFEQ);
+    if (isFloat)
+      return CG.Builder.CreateFCmpOEQ(lhs, rhs, kIRFEQ);
     return CG.Builder.CreateICmpEQ(lhs, rhs, kIREQ);
   case ast::BinaryOpcode::Ne:
-    if (isFloat) return CG.Builder.CreateFCmpONE(lhs, rhs, kIRFNE);
+    if (isFloat)
+      return CG.Builder.CreateFCmpONE(lhs, rhs, kIRFNE);
     return CG.Builder.CreateICmpNE(lhs, rhs, kIRNE);
   case ast::BinaryOpcode::And:
   case ast::BinaryOpcode::Or:
@@ -1538,7 +1564,8 @@ llvm::Value *CodeGen::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
 
 llvm::Value *CodeGen::ExprEmitter::emitIdentityCtor(ast::CallExpr *node) {
   llvm::Value *arg = visit(node->getArguments()[0]);
-  if (!arg) return nullptr;
+  if (!arg)
+    return nullptr;
   if (auto *sl = ast::dyn_cast<ast::StringLiteral>(node->getArguments()[0]))
     arg = CG.wrapStringLiteral(arg, sl->getValue().size());
   return arg;
@@ -1577,16 +1604,16 @@ llvm::Value *CodeGen::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
     ExprValue ev = CG.classifyExpr(argExpr, v);
     if (ev.isOwned())
       ownedArgs.push_back(ev);
-    // Unwrap PaykanShared* -> raw PaykanObject* for class-typed call/method-call/
-    // ternary results passed directly to a builtin vararg (e.g. out()).
-    // visitIdentifier already unwraps owned variables; this covers the case
-    // where a Str-returning call is used as an argument without an intermediate
-    // variable assignment.
+    // Unwrap PaykanShared* -> raw PaykanObject* for class-typed
+    // call/method-call/ ternary results passed directly to a builtin vararg
+    // (e.g. out()). visitIdentifier already unwraps owned variables; this
+    // covers the case where a Str-returning call is used as an argument without
+    // an intermediate variable assignment.
     if (CG.exprAlreadyShared(argExpr) && v->getType()->isPointerTy()) {
       auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
       auto *getFnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
-      v = CG.Builder.CreateCall(
-          CG.declareFunction(kPaykanSharedGet, getFnTy), {v}, kIRUnboxed);
+      v = CG.Builder.CreateCall(CG.declareFunction(kPaykanSharedGet, getFnTy),
+                                {v}, kIRUnboxed);
     }
     // Bool (i1) -> i64 coercion when the callee expects i64.
     if (v->getType()->isIntegerTy(1)) {
@@ -1604,10 +1631,9 @@ llvm::Value *CodeGen::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
 
   // Str-returning builtins (StrInt/StrFloat/StrBool) hand back a fresh, owned
   // PaykanString* — track it as a temporary for the consumer to manage.
-  bool returnsOwnedString = node->getCalleeName() == kStrInt ||
-                            node->getCalleeName() == kStrFloat ||
-                            node->getCalleeName() == kStrBool  ||
-                            node->getCalleeName() == kStrChar;
+  bool returnsOwnedString =
+      node->getCalleeName() == kStrInt || node->getCalleeName() == kStrFloat ||
+      node->getCalleeName() == kStrBool || node->getCalleeName() == kStrChar;
 
   if (info.FnTy->getReturnType()->isVoidTy()) {
     CG.Builder.CreateCall(callee, args);
@@ -1636,10 +1662,13 @@ llvm::Value *CodeGen::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     if (!CG.Classes.CurrentMethodClassType)
       return nullptr;
     auto *superClass = CG.Classes.CurrentMethodClassType->getSuperClass();
-    if (!superClass) return nullptr;
-    std::string superInitName = superClass->getName() + "_" + names::kMethodInit;
+    if (!superClass)
+      return nullptr;
+    std::string superInitName =
+        superClass->getName() + "_" + names::kMethodInit;
     llvm::Function *superFn = CG.Module->getFunction(superInitName);
-    if (!superFn) return nullptr;
+    if (!superFn)
+      return nullptr;
     // `self` is the raw ptr stored in the unowned "self" alloca.
     auto *selfAlloca = CG.CurrentScope->lookup(kSelf);
     auto *ptrTy2 = llvm::PointerType::getUnqual(CG.LLVMCtx);
@@ -1647,7 +1676,7 @@ llvm::Value *CodeGen::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     std::vector<llvm::Value *> initArgs = {selfVal};
     for (size_t i = 0; i < node->getNumArguments(); ++i) {
       auto *argExpr = node->getArguments()[i];
-      auto *ptrTy3  = llvm::PointerType::getUnqual(CG.LLVMCtx);
+      auto *ptrTy3 = llvm::PointerType::getUnqual(CG.LLVMCtx);
 
       // Class-typed args must arrive as PaykanShared* (same as user-fn calls).
       // Check whether the arg is an owned identifier so we load the shared box
@@ -1656,8 +1685,8 @@ llvm::Value *CodeGen::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
       if (auto *id = ast::dyn_cast<ast::Identifier>(argExpr)) {
         if (CG.CurrentScope && CG.CurrentScope->isOwned(id->getName())) {
           auto *argAlloca = CG.CurrentScope->lookup(id->getName());
-          llvm::Value *v = CG.Builder.CreateLoad(ptrTy3, argAlloca,
-                                                  id->getName());
+          llvm::Value *v =
+              CG.Builder.CreateLoad(ptrTy3, argAlloca, id->getName());
           CG.emitRetain(v);
           initArgs.push_back(v);
           passedAsShared = true;
@@ -1665,7 +1694,8 @@ llvm::Value *CodeGen::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
       }
       if (!passedAsShared) {
         llvm::Value *v = visit(argExpr);
-        if (!v) return nullptr;
+        if (!v)
+          return nullptr;
         if (auto *sl = ast::dyn_cast<ast::StringLiteral>(argExpr))
           v = CG.wrapStringLiteral(v, sl->getValue().size());
         initArgs.push_back(v);
@@ -1689,8 +1719,8 @@ llvm::Value *CodeGen::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     // Any mutation inside the callee via PaykanShared_set is visible to
     // the caller because they share the same box.
     llvm::Value *v = nullptr;
-    bool isClassArg = i < callee->arg_size() &&
-                      callee->getArg(i)->getType()->isPointerTy();
+    bool isClassArg =
+        i < callee->arg_size() && callee->getArg(i)->getType()->isPointerTy();
     if (isClassArg) {
       auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
       if (auto *id = ast::dyn_cast<ast::Identifier>(arg)) {
@@ -1703,7 +1733,8 @@ llvm::Value *CodeGen::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
           // Unowned arm-binding with a backing PaykanShared*: retain the
           // original box instead of creating a fresh one (which would give
           // the callee sole ownership and destroy the object prematurely).
-          if (auto *backing = CG.CurrentScope->lookupBackingShared(id->getName())) {
+          if (auto *backing =
+                  CG.CurrentScope->lookupBackingShared(id->getName())) {
             CG.emitRetain(backing);
             v = backing;
           }
@@ -1712,7 +1743,8 @@ llvm::Value *CodeGen::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
       if (!v) {
         // Temporary (literal, call result, etc.): produce a PaykanShared*.
         llvm::Value *raw = visit(arg);
-        if (!raw) return nullptr;
+        if (!raw)
+          return nullptr;
         if (auto *sl = ast::dyn_cast<ast::StringLiteral>(arg))
           raw = CG.wrapStringLiteral(raw, sl->getValue().size());
         // If the arg already produced a PaykanShared* (e.g. Str-returning user
@@ -1728,14 +1760,14 @@ llvm::Value *CodeGen::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
 
     // Non-class arg: evaluate normally.
     v = visit(arg);
-    if (!v) return nullptr;
+    if (!v)
+      return nullptr;
     // Wrap raw string literals into PaykanString* objects.
     if (auto *sl = ast::dyn_cast<ast::StringLiteral>(arg))
       v = CG.wrapStringLiteral(v, sl->getValue().size());
 
     // Bool (i1) -> i64 coercion when the callee expects i64.
-    if (v->getType()->isIntegerTy(1) &&
-        i < callee->arg_size() &&
+    if (v->getType()->isIntegerTy(1) && i < callee->arg_size() &&
         callee->getArg(i)->getType()->isIntegerTy(64)) {
       auto *i64Ty = llvm::Type::getInt64Ty(CG.LLVMCtx);
       v = CG.Builder.CreateZExt(v, i64Ty, kIRBoolExt);
@@ -1751,48 +1783,56 @@ llvm::Value *CodeGen::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
 }
 
 llvm::Value *CodeGen::ExprEmitter::emitArrayPush(ast::MethodCallExpr *node,
-                                                  llvm::Value *recv,
-                                                  ast::Type *elemTy) {
-  auto *ptrTy  = llvm::PointerType::getUnqual(CG.LLVMCtx);
-  auto *i64Ty  = llvm::Type::getInt64Ty(CG.LLVMCtx);
+                                                 llvm::Value *recv,
+                                                 ast::Type *elemTy) {
+  auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
+  auto *i64Ty = llvm::Type::getInt64Ty(CG.LLVMCtx);
   auto *voidTy = llvm::Type::getVoidTy(CG.LLVMCtx);
 
-  if (node->getNumArguments() != 1) return nullptr;
+  if (node->getNumArguments() != 1)
+    return nullptr;
   auto *argExpr = node->getArguments()[0];
 
   bool isObjElem = CG.isObjectElementType(elemTy);
   if (isObjElem) {
-    // Use emitAsShared so that existing owned variables are retained rather than
-    // double-wrapped (emitExpr on a ref-typed identifier unwraps to the raw pointer,
-    // and a subsequent emitSharedNew would create a second owner of the same object).
+    // Use emitAsShared so that existing owned variables are retained rather
+    // than double-wrapped (emitExpr on a ref-typed identifier unwraps to the
+    // raw pointer, and a subsequent emitSharedNew would create a second owner
+    // of the same object).
     llvm::Value *argVal = CG.emitAsShared(argExpr);
-    if (!argVal) return nullptr;
+    if (!argVal)
+      return nullptr;
     auto *fnTy = llvm::FunctionType::get(voidTy, {ptrTy, ptrTy}, false);
-    CG.Builder.CreateCall(CG.declareFunction(kPaykanArrayPushObj, fnTy), {recv, argVal});
+    CG.Builder.CreateCall(CG.declareFunction(kPaykanArrayPushObj, fnTy),
+                          {recv, argVal});
     // push_obj takes its own retain on the stored box; emitAsShared handed us a
     // +1 temporary, so release it here to avoid leaking the pushed element.
     CG.emitRelease(argVal);
   } else {
     llvm::Value *argVal = CG.emitExpr(argExpr);
-    if (!argVal) return nullptr;
+    if (!argVal)
+      return nullptr;
     if (argVal->getType()->isDoubleTy())
       argVal = CG.Builder.CreateBitCast(argVal, i64Ty, kIRF64Bits);
     else if (argVal->getType()->isIntegerTy(1))
       argVal = CG.Builder.CreateZExt(argVal, i64Ty, kIRBoolExt);
     auto *fnTy = llvm::FunctionType::get(voidTy, {ptrTy, i64Ty}, false);
-    CG.Builder.CreateCall(CG.declareFunction(kPaykanArrayPush, fnTy), {recv, argVal});
+    CG.Builder.CreateCall(CG.declareFunction(kPaykanArrayPush, fnTy),
+                          {recv, argVal});
   }
   return nullptr; // void
 }
 
-llvm::Value *CodeGen::ExprEmitter::emitArrayPop(llvm::Value *recv, ast::Type *elemTy) {
+llvm::Value *CodeGen::ExprEmitter::emitArrayPop(llvm::Value *recv,
+                                                ast::Type *elemTy) {
   auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
   auto *i64Ty = llvm::Type::getInt64Ty(CG.LLVMCtx);
 
   bool isObjElem = CG.isObjectElementType(elemTy);
   if (isObjElem) {
     auto *fnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
-    return CG.Builder.CreateCall(CG.declareFunction(kPaykanArrayPopObj, fnTy), {recv}, kIRMcall);
+    return CG.Builder.CreateCall(CG.declareFunction(kPaykanArrayPopObj, fnTy),
+                                 {recv}, kIRMcall);
   }
 
   // Declare PaykanArray_pop as i64(ptr) — consistent with how PaykanArray_get
@@ -1803,16 +1843,20 @@ llvm::Value *CodeGen::ExprEmitter::emitArrayPop(llvm::Value *recv, ast::Type *el
       CG.declareFunction(kPaykanArrayPop, fnTy), {recv}, kIRMcall);
   // Reinterpret the 8-byte slot based on the element type.
   llvm::Type *retLLTy = CG.toLLVMType(elemTy);
-  if (!retLLTy || retLLTy->isIntegerTy(64)) return raw;
+  if (!retLLTy || retLLTy->isIntegerTy(64))
+    return raw;
   return CG.Builder.CreateBitCast(raw, retLLTy, kIRMcall);
 }
 
-llvm::Value *CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node) {
+llvm::Value *
+CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node) {
   // Emit the receiver and resolve its ClassType.
   llvm::Value *recv = visit(node->getReceiver());
-  if (!recv) return nullptr;
+  if (!recv)
+    return nullptr;
 
-  // Wrap a raw string literal receiver (shouldn't happen in practice but be safe).
+  // Wrap a raw string literal receiver (shouldn't happen in practice but be
+  // safe).
   if (auto *sl = ast::dyn_cast<ast::StringLiteral>(node->getReceiver()))
     recv = CG.wrapStringLiteral(recv, sl->getValue().size());
 
@@ -1821,18 +1865,19 @@ llvm::Value *CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node
       recv->getType()->isPointerTy()) {
     auto *ptrTy2 = llvm::PointerType::getUnqual(CG.LLVMCtx);
     auto *getFnTy2 = llvm::FunctionType::get(ptrTy2, {ptrTy2}, false);
-    recv = CG.Builder.CreateCall(
-        CG.declareFunction(kPaykanSharedGet, getFnTy2), {recv}, kIRRecvObj);
+    recv = CG.Builder.CreateCall(CG.declareFunction(kPaykanSharedGet, getFnTy2),
+                                 {recv}, kIRRecvObj);
   }
 
-  // If the receiver is already a PaykanShared* (e.g. result of another method call
-  // or a Str-returning user-defined call), unwrap it to the raw PaykanObject*
-  // before vtable dispatch.
-  if (CG.exprAlreadyShared(node->getReceiver()) && recv->getType()->isPointerTy()) {
+  // If the receiver is already a PaykanShared* (e.g. result of another method
+  // call or a Str-returning user-defined call), unwrap it to the raw
+  // PaykanObject* before vtable dispatch.
+  if (CG.exprAlreadyShared(node->getReceiver()) &&
+      recv->getType()->isPointerTy()) {
     auto *sharedPtrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
     auto *getFnTy = llvm::FunctionType::get(sharedPtrTy, {sharedPtrTy}, false);
-    recv = CG.Builder.CreateCall(
-        CG.declareFunction(kPaykanSharedGet, getFnTy), {recv}, kIRRecvObj);
+    recv = CG.Builder.CreateCall(CG.declareFunction(kPaykanSharedGet, getFnTy),
+                                 {recv}, kIRRecvObj);
   }
 
   // Determine the vtable slot index via the AST ClassType.
@@ -1845,12 +1890,12 @@ llvm::Value *CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node
   // We use the LLVM IR approach: the object layout is { vtable*, fields... }.
   // vtable is a ptr-to-array-of-fn-ptrs.  Load vtable[slot](recv, args...).
 
-  auto *ptrTy  = llvm::PointerType::getUnqual(CG.LLVMCtx);
-  auto *i64Ty  = llvm::Type::getInt64Ty(CG.LLVMCtx);
+  auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
+  auto *i64Ty = llvm::Type::getInt64Ty(CG.LLVMCtx);
 
   // -- Resolve the AST type of the receiver ----------------------------------
-  // Returns the AST Type* (ArrayType, ClassType, …) for the receiver expression.
-  // Handles identifiers, `self`, and member-access expressions.
+  // Returns the AST Type* (ArrayType, ClassType, …) for the receiver
+  // expression. Handles identifiers, `self`, and member-access expressions.
   auto resolveReceiverASTType = [&]() -> ast::Type * {
     auto *recvExpr = node->getReceiver();
     if (auto *id = ast::dyn_cast<ast::Identifier>(recvExpr)) {
@@ -1866,10 +1911,11 @@ llvm::Value *CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node
     }
     if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(recvExpr)) {
       if (auto *rid = ast::dyn_cast<ast::Identifier>(ma->getReceiver())) {
-        ast::Type *ownerTy = CG.CurrentScope
-                                 ? CG.CurrentScope->lookupASTType(rid->getName())
-                                 : nullptr;
-        if (!ownerTy && rid->getName() == kSelf && CG.Classes.CurrentMethodClassType)
+        ast::Type *ownerTy =
+            CG.CurrentScope ? CG.CurrentScope->lookupASTType(rid->getName())
+                            : nullptr;
+        if (!ownerTy && rid->getName() == kSelf &&
+            CG.Classes.CurrentMethodClassType)
           ownerTy = CG.Classes.CurrentMethodClassType;
         if (auto *ownerCt = ast::dyn_cast<ast::ClassType>(ownerTy))
           for (auto &[fn, ft] : ownerCt->getFields())
@@ -1902,7 +1948,8 @@ llvm::Value *CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node
   if (!ct)
     ct = CG.Classes.getExprClassType(node->getReceiver());
   if (!ct) {
-    for (auto *candidate : {CG.ASTCtx.getStrTy(), CG.ASTCtx.getFileTy(), CG.ASTCtx.getObjTy()}) {
+    for (auto *candidate :
+         {CG.ASTCtx.getStrTy(), CG.ASTCtx.getFileTy(), CG.ASTCtx.getObjTy()}) {
       if (candidate && candidate->findMethod(node->getMethodName())) {
         ct = candidate;
         break;
@@ -1913,11 +1960,13 @@ llvm::Value *CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node
   int vtableIdx = ct ? ct->getVTableIndex(node->getMethodName()) : -1;
   assert(vtableIdx >= 0 && "Sema should have verified method exists");
 
-  ast::MethodDecl *method = ct ? ct->findMethod(node->getMethodName()) : nullptr;
+  ast::MethodDecl *method =
+      ct ? ct->findMethod(node->getMethodName()) : nullptr;
 
   // Build LLVM function type from the method signature.
   llvm::Type *retLLTy = method ? CG.toLLVMType(method->getReturnType()) : ptrTy;
-  if (!retLLTy) retLLTy = ptrTy; // fallback for void/class return
+  if (!retLLTy)
+    retLLTy = ptrTy; // fallback for void/class return
 
   std::vector<llvm::Type *> paramLLTys = {ptrTy}; // receiver (self)
   if (method) {
@@ -1934,14 +1983,11 @@ llvm::Value *CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node
   // builtin method (e.g. File.write("...")).  The callee borrows them, so we
   // tear them down after the call via the unified ownership path (#32).
   std::vector<ExprValue> ownedArgs;
-  bool isUserDefinedMethod = ct && ct != CG.ASTCtx.getObjTy() &&
-                             ct != CG.ASTCtx.getStrTy() &&
-                             ct != CG.ASTCtx.getFileTy() &&
-                             ct != CG.ASTCtx.getArrayTy() &&
-                             ct != CG.ASTCtx.getErrorTy() &&
-                             ct != CG.ASTCtx.getIntBoxTy() &&
-                             ct != CG.ASTCtx.getFloatBoxTy() &&
-                             ct != CG.ASTCtx.getBoolBoxTy();
+  bool isUserDefinedMethod =
+      ct && ct != CG.ASTCtx.getObjTy() && ct != CG.ASTCtx.getStrTy() &&
+      ct != CG.ASTCtx.getFileTy() && ct != CG.ASTCtx.getArrayTy() &&
+      ct != CG.ASTCtx.getErrorTy() && ct != CG.ASTCtx.getIntBoxTy() &&
+      ct != CG.ASTCtx.getFloatBoxTy() && ct != CG.ASTCtx.getBoolBoxTy();
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     auto *argExpr = node->getArguments()[i];
     // Determine expected param type from the resolved MethodDecl.
@@ -1952,7 +1998,8 @@ llvm::Value *CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node
                         ast::isa<ast::ClassType>(paramASTTy);
 
     if (isClassParam) {
-      // Class-type param: must arrive as PaykanShared* (callee releases on scope exit).
+      // Class-type param: must arrive as PaykanShared* (callee releases on
+      // scope exit).
       llvm::Value *v = nullptr;
       if (auto *id = ast::dyn_cast<ast::Identifier>(argExpr)) {
         if (CG.CurrentScope && CG.CurrentScope->isOwned(id->getName())) {
@@ -1963,17 +2010,20 @@ llvm::Value *CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node
       }
       if (!v) {
         llvm::Value *raw = visit(argExpr);
-        if (!raw) return nullptr;
+        if (!raw)
+          return nullptr;
         if (auto *sl = ast::dyn_cast<ast::StringLiteral>(argExpr))
           raw = CG.wrapStringLiteral(raw, sl->getValue().size());
-        v = CG.exprAlreadyShared(argExpr) ? raw : CG.emitSharedNew(raw, kIRArgShared);
+        v = CG.exprAlreadyShared(argExpr) ? raw
+                                          : CG.emitSharedNew(raw, kIRArgShared);
       }
       args.push_back(v);
       continue;
     }
 
     llvm::Value *v = visit(argExpr);
-    if (!v) return nullptr;
+    if (!v)
+      return nullptr;
     if (auto *sl = ast::dyn_cast<ast::StringLiteral>(argExpr))
       v = CG.wrapStringLiteral(v, sl->getValue().size());
     if (ExprValue ev = CG.classifyExpr(argExpr, v); ev.isOwned())
@@ -1995,11 +2045,10 @@ llvm::Value *CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node
                           llvm::MDNode::get(CG.LLVMCtx, {}));
   llvm::Value *vtablePtr = vtableLoad;
   auto *vtableTy = llvm::ArrayType::get(ptrTy, 0);
-  llvm::Value *gep_indices[] = {
-      llvm::ConstantInt::get(i64Ty, 0),
-      llvm::ConstantInt::get(i64Ty, vtableIdx)};
-  llvm::Value *slotPtr = CG.Builder.CreateInBoundsGEP(
-      vtableTy, vtablePtr, gep_indices, kIRVtSlot);
+  llvm::Value *gep_indices[] = {llvm::ConstantInt::get(i64Ty, 0),
+                                llvm::ConstantInt::get(i64Ty, vtableIdx)};
+  llvm::Value *slotPtr =
+      CG.Builder.CreateInBoundsGEP(vtableTy, vtablePtr, gep_indices, kIRVtSlot);
   llvm::Value *fnPtr = CG.Builder.CreateLoad(ptrTy, slotPtr, kIRVfn);
 
   // Tear down owned argument temporaries created for the arguments.
@@ -2015,9 +2064,10 @@ llvm::Value *CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node
   }
   auto *mcallResult = CG.Builder.CreateCall(fnTy, fnPtr, args, kIRMcall);
   destroyTemps();
-  // All vtable methods returning a ref type (class or array) return PaykanShared*.
-  // This holds for both builtin runtime methods (normalized ABI) and user-defined
-  // class methods (emitted via visitReturnStmt -> emitAsShared).
+  // All vtable methods returning a ref type (class or array) return
+  // PaykanShared*. This holds for both builtin runtime methods (normalized ABI)
+  // and user-defined class methods (emitted via visitReturnStmt ->
+  // emitAsShared).
   bool returnsRef = method && method->getReturnType() &&
                     ast::isRefType(method->getReturnType());
   if (returnsRef)
@@ -2034,23 +2084,24 @@ llvm::Value *CodeGen::visitClassDecl(ast::ClassDecl *node) {
   return Classes.visitClassDecl(node);
 }
 
-
 llvm::Value *CodeGen::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
   return Classes.visitMemberAssignStmt(node);
 }
 
 llvm::Value *CodeGen::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
-  auto *ptrTy  = llvm::PointerType::getUnqual(LLVMCtx);
-  auto *i64Ty  = llvm::Type::getInt64Ty(LLVMCtx);
+  auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
+  auto *i64Ty = llvm::Type::getInt64Ty(LLVMCtx);
   auto *voidTy = llvm::Type::getVoidTy(LLVMCtx);
 
   // Get the raw PaykanArray*.
   llvm::Value *arrRaw = emitExpr(node->getArray());
-  if (!arrRaw) return nullptr;
+  if (!arrRaw)
+    return nullptr;
 
   // Emit the index.
   llvm::Value *idx = emitExpr(node->getIndex());
-  if (!idx) return nullptr;
+  if (!idx)
+    return nullptr;
   if (idx->getType()->isIntegerTy(1))
     idx = Builder.CreateZExt(idx, i64Ty);
 
@@ -2069,8 +2120,10 @@ llvm::Value *CodeGen::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   if (isObjElem) {
     // Object element: use PaykanArray_set_obj (retains new, releases old).
     llvm::Value *val = emitAsShared(node->getValue());
-    if (!val) return nullptr;
-    auto *setFnTy = llvm::FunctionType::get(voidTy, {ptrTy, i64Ty, ptrTy}, false);
+    if (!val)
+      return nullptr;
+    auto *setFnTy =
+        llvm::FunctionType::get(voidTy, {ptrTy, i64Ty, ptrTy}, false);
     Builder.CreateCall(declareFunction(kPaykanArraySetObj, setFnTy),
                        {arrRaw, idx, val});
     // set_obj retains the stored box; release the +1 temporary from
@@ -2081,7 +2134,8 @@ llvm::Value *CodeGen::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
     llvm::Value *val = emitExpr(node->getValue());
     if (auto *sl = ast::dyn_cast<ast::StringLiteral>(node->getValue()))
       val = wrapStringLiteral(val, sl->getValue().size());
-    if (!val) return nullptr;
+    if (!val)
+      return nullptr;
 
     // Promote to i64 storage slot.
     if (val->getType()->isDoubleTy())
@@ -2092,7 +2146,8 @@ llvm::Value *CodeGen::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
     // PaykanArray_set(arr, idx, i64 value): declare as void(ptr, i64, i64)
     // so the type is consistent with how emitPrimitiveArrayLiteral declares
     // the same function — the C ABI passes an 8-byte value either way.
-    auto *setFnTy = llvm::FunctionType::get(voidTy, {ptrTy, i64Ty, i64Ty}, false);
+    auto *setFnTy =
+        llvm::FunctionType::get(voidTy, {ptrTy, i64Ty, i64Ty}, false);
     Builder.CreateCall(declareFunction(kPaykanArraySet, setFnTy),
                        {arrRaw, idx, val});
   }
@@ -2101,16 +2156,16 @@ llvm::Value *CodeGen::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
 
 llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
   auto *parentFn = Builder.GetInsertBlock()->getParent();
-  auto *ptrTy    = llvm::PointerType::getUnqual(LLVMCtx);
+  auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
 
   // 1. Emit the subject — visitIdentifier already unwraps owned class vars
   //    (PaykanShared* -> raw object pointer).  If the subject is a call/method-
   //    call/ternary result it may be a PaykanShared* — unwrap it here.
-  //    We keep a pointer to the shared wrapper so we can release it at match.end
-  //    (the arm binding is an unowned raw-pointer alias, so the wrapper's
-  //    refcount never drops otherwise — causing a resource leak, e.g. fclose
-  //    never called on a File returned by open()).
-  llvm::Value *subjRaw    = emitExpr(node->getSubject());
+  //    We keep a pointer to the shared wrapper so we can release it at
+  //    match.end (the arm binding is an unowned raw-pointer alias, so the
+  //    wrapper's refcount never drops otherwise — causing a resource leak, e.g.
+  //    fclose never called on a File returned by open()).
+  llvm::Value *subjRaw = emitExpr(node->getSubject());
   if (!subjRaw)
     return nullptr;
   llvm::Value *sharedSubj = nullptr; // non-null iff we must release at end
@@ -2125,8 +2180,9 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
   // every exit path: normal fall-through (matchGuard at match.end), early
   // `return` (emitAllScopesCleanup walks this scope), and `break` / `continue`
   // (emitLoopScopesCleanup walks this scope).  Registering it as a pending
-  // release here \u2014 rather than a single emitRelease at match.end \u2014 prevents a
-  // leak when an arm jumps out of the match before reaching match.end.
+  // release here \u2014 rather than a single emitRelease at match.end \u2014
+  // prevents a leak when an arm jumps out of the match before reaching
+  // match.end.
   ScopeGuard matchGuard(*this);
   if (sharedSubj)
     CurrentScope->PendingReleases.push_back(sharedSubj);
@@ -2142,12 +2198,15 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
   // match.  Emit an equality if-else chain instead of vtable dispatch.
   bool valueMode = false;
   for (ast::MatchArm *arm : node->getArms())
-    if (arm->isLiteral()) { valueMode = true; break; }
+    if (arm->isLiteral()) {
+      valueMode = true;
+      break;
+    }
   if (valueMode)
     return emitValueMatch(node, subjRaw, parentFn);
 
   // 2. Build control-flow blocks.
-  auto *endBB      = llvm::BasicBlock::Create(LLVMCtx, kIRMatchEnd, parentFn);
+  auto *endBB = llvm::BasicBlock::Create(LLVMCtx, kIRMatchEnd, parentFn);
   auto *wildcardBB = [&]() -> llvm::BasicBlock * {
     for (ast::MatchArm *arm : node->getArms())
       if (arm->isWildcard())
@@ -2158,14 +2217,15 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
 
   // 3. Collect type arms and pre-allocate body blocks.
   struct TypeArm {
-    ast::ClassType    *CT;
-    llvm::BasicBlock  *BodyBB;
-    size_t             ArmIdx;
+    ast::ClassType *CT;
+    llvm::BasicBlock *BodyBB;
+    size_t ArmIdx;
   };
   std::vector<TypeArm> typeArms;
   for (size_t i = 0; i < node->getArms().size(); ++i) {
     ast::MatchArm *arm = node->getArms()[i];
-    if (arm->isWildcard()) continue;
+    if (arm->isWildcard())
+      continue;
     ast::ClassType *armCt = ast::dyn_cast<ast::ClassType>(arm->getArmType());
     // Array-type arms (e.g. int[]) have an ArrayType, not a ClassType.
     // Resolve to the ASTContext's specialized array ClassType so that vtable
@@ -2189,11 +2249,11 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
   } else {
     for (size_t i = 0; i < typeArms.size(); ++i) {
       llvm::Value *isMatch = Classes.emitIsExactType(subjRaw, typeArms[i].CT);
-      auto *nextBB = (i + 1 < typeArms.size())
-                         ? llvm::BasicBlock::Create(
-                               LLVMCtx, kIRMatchCheckPfx + std::to_string(i + 1),
-                               parentFn)
-                         : defaultBB;
+      auto *nextBB =
+          (i + 1 < typeArms.size())
+              ? llvm::BasicBlock::Create(
+                    LLVMCtx, kIRMatchCheckPfx + std::to_string(i + 1), parentFn)
+              : defaultBB;
       Builder.CreateCondBr(isMatch, typeArms[i].BodyBB, nextBB);
       if (nextBB != defaultBB)
         Builder.SetInsertPoint(nextBB);
@@ -2213,7 +2273,8 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
         // Record the backing PaykanShared* (if any) so that call sites can
         // retain+pass the original box rather than wrapping the raw pointer.
         if (sharedSubj)
-          CurrentScope->declareUnownedWithBacking(arm->getBinding(), alloca, sharedSubj, ta.CT);
+          CurrentScope->declareUnownedWithBacking(arm->getBinding(), alloca,
+                                                  sharedSubj, ta.CT);
         else
           CurrentScope->declareUnowned(arm->getBinding(), alloca, ta.CT);
       }
@@ -2228,7 +2289,8 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
   if (wildcardBB) {
     Builder.SetInsertPoint(wildcardBB);
     for (ast::MatchArm *arm : node->getArms()) {
-      if (!arm->isWildcard()) continue;
+      if (!arm->isWildcard())
+        continue;
       ScopeGuard armGuard(*this);
       for (auto *stmt : arm->getBody()->getStatements())
         visit(stmt);
@@ -2254,7 +2316,7 @@ llvm::Value *CodeGen::emitValueMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
   auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
   auto *i64Ty = llvm::Type::getInt64Ty(LLVMCtx);
 
-  auto *endBB      = llvm::BasicBlock::Create(LLVMCtx, kIRMatchEnd, parentFn);
+  auto *endBB = llvm::BasicBlock::Create(LLVMCtx, kIRMatchEnd, parentFn);
   auto *wildcardBB = [&]() -> llvm::BasicBlock * {
     for (ast::MatchArm *arm : node->getArms())
       if (arm->isWildcard())
@@ -2264,31 +2326,37 @@ llvm::Value *CodeGen::emitValueMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
   auto *defaultBB = wildcardBB ? wildcardBB : endBB;
 
   // Pre-allocate a body block for each literal arm.
-  struct LitArm { ast::MatchArm *Arm; llvm::BasicBlock *BodyBB; };
+  struct LitArm {
+    ast::MatchArm *Arm;
+    llvm::BasicBlock *BodyBB;
+  };
   std::vector<LitArm> litArms;
   for (size_t i = 0; i < node->getArms().size(); ++i) {
     ast::MatchArm *arm = node->getArms()[i];
-    if (!arm->isLiteral()) continue;
-    litArms.push_back({arm, llvm::BasicBlock::Create(
-                                LLVMCtx, kIRMatchArmPfx + std::to_string(i),
-                                parentFn)});
+    if (!arm->isLiteral())
+      continue;
+    litArms.push_back(
+        {arm, llvm::BasicBlock::Create(
+                  LLVMCtx, kIRMatchArmPfx + std::to_string(i), parentFn)});
   }
 
-  // Emit the comparison chain.  Each check evaluates the arm's literal, compares
-  // it against the subject, and branches to the body block on equality.
+  // Emit the comparison chain.  Each check evaluates the arm's literal,
+  // compares it against the subject, and branches to the body block on
+  // equality.
   if (litArms.empty()) {
     Builder.CreateBr(defaultBB);
   } else {
     for (size_t i = 0; i < litArms.size(); ++i) {
-      ast::Expr   *lit  = litArms[i].Arm->getLiteralPattern();
+      ast::Expr *lit = litArms[i].Arm->getLiteralPattern();
       llvm::Value *isEq = nullptr;
       if (auto *sl = ast::dyn_cast<ast::StringLiteral>(lit)) {
         // Build a temporary PaykanString* for the literal and compare contents.
-        llvm::Value *litStr = wrapStringLiteral(emitExpr(sl), sl->getValue().size());
+        llvm::Value *litStr =
+            wrapStringLiteral(emitExpr(sl), sl->getValue().size());
         auto *eqFnTy = llvm::FunctionType::get(i64Ty, {ptrTy, ptrTy}, false);
-        llvm::Value *eq = Builder.CreateCall(
-            declareFunction(kPaykanStringEquals, eqFnTy), {subjRaw, litStr},
-            kIRMatchEq);
+        llvm::Value *eq =
+            Builder.CreateCall(declareFunction(kPaykanStringEquals, eqFnTy),
+                               {subjRaw, litStr}, kIRMatchEq);
         // The literal temp is owned; destroy it now that the compare is done.
         destroyStringTempIfOwned(litStr);
         isEq = Builder.CreateICmpNE(eq, llvm::ConstantInt::get(i64Ty, 0),
@@ -2299,11 +2367,11 @@ llvm::Value *CodeGen::emitValueMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
         // int / bool / char are all integer-typed scalars.
         isEq = Builder.CreateICmpEQ(subjRaw, emitExpr(lit), kIRMatchEq);
       }
-      auto *nextBB = (i + 1 < litArms.size())
-                         ? llvm::BasicBlock::Create(
-                               LLVMCtx, kIRMatchCheckPfx + std::to_string(i + 1),
-                               parentFn)
-                         : defaultBB;
+      auto *nextBB =
+          (i + 1 < litArms.size())
+              ? llvm::BasicBlock::Create(
+                    LLVMCtx, kIRMatchCheckPfx + std::to_string(i + 1), parentFn)
+              : defaultBB;
       Builder.CreateCondBr(isEq, litArms[i].BodyBB, nextBB);
       if (nextBB != defaultBB)
         Builder.SetInsertPoint(nextBB);
@@ -2326,7 +2394,8 @@ llvm::Value *CodeGen::emitValueMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
   if (wildcardBB) {
     Builder.SetInsertPoint(wildcardBB);
     for (ast::MatchArm *arm : node->getArms()) {
-      if (!arm->isWildcard()) continue;
+      if (!arm->isWildcard())
+        continue;
       ScopeGuard armGuard(*this);
       for (auto *stmt : arm->getBody()->getStatements())
         visit(stmt);
@@ -2346,9 +2415,10 @@ llvm::Value *CodeGen::emitValueMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
 llvm::Value *CodeGen::emitEnumMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
                                     llvm::Function *parentFn) {
   auto *i64Ty = llvm::Type::getInt64Ty(LLVMCtx);
-  auto *enumTy = ast::cast<ast::EnumType>(node->getSubject()->getResolvedType());
+  auto *enumTy =
+      ast::cast<ast::EnumType>(node->getSubject()->getResolvedType());
 
-  auto *endBB      = llvm::BasicBlock::Create(LLVMCtx, kIRMatchEnd, parentFn);
+  auto *endBB = llvm::BasicBlock::Create(LLVMCtx, kIRMatchEnd, parentFn);
   auto *wildcardBB = [&]() -> llvm::BasicBlock * {
     for (ast::MatchArm *arm : node->getArms())
       if (arm->isWildcard())
@@ -2358,11 +2428,16 @@ llvm::Value *CodeGen::emitEnumMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
   auto *defaultBB = wildcardBB ? wildcardBB : endBB;
 
   // Pre-allocate a body block for each variant arm, recording its value.
-  struct VariantArm { ast::MatchArm *Arm; llvm::BasicBlock *BodyBB; int64_t Value; };
+  struct VariantArm {
+    ast::MatchArm *Arm;
+    llvm::BasicBlock *BodyBB;
+    int64_t Value;
+  };
   std::vector<VariantArm> variantArms;
   for (size_t i = 0; i < node->getArms().size(); ++i) {
     ast::MatchArm *arm = node->getArms()[i];
-    if (arm->isWildcard()) continue;
+    if (arm->isWildcard())
+      continue;
     std::string variant;
     if (auto *stub = ast::dyn_cast<ast::ClassType>(arm->getArmType()))
       variant = stub->getName();
@@ -2370,9 +2445,11 @@ llvm::Value *CodeGen::emitEnumMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
       variant = et->getName();
     int64_t val = enumTy->findVariant(variant);
     assert(val >= 0 && "Sema should have verified the variant exists");
-    variantArms.push_back({arm, llvm::BasicBlock::Create(
-                                    LLVMCtx, kIRMatchArmPfx + std::to_string(i),
-                                    parentFn), val});
+    variantArms.push_back(
+        {arm,
+         llvm::BasicBlock::Create(LLVMCtx, kIRMatchArmPfx + std::to_string(i),
+                                  parentFn),
+         val});
   }
 
   // Emit the comparison chain.
@@ -2381,14 +2458,15 @@ llvm::Value *CodeGen::emitEnumMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
   } else {
     for (size_t i = 0; i < variantArms.size(); ++i) {
       llvm::Value *isEq = Builder.CreateICmpEQ(
-          subjRaw, llvm::ConstantInt::get(i64Ty,
-                                          static_cast<uint64_t>(variantArms[i].Value)),
+          subjRaw,
+          llvm::ConstantInt::get(i64Ty,
+                                 static_cast<uint64_t>(variantArms[i].Value)),
           kIRMatchEq);
-      auto *nextBB = (i + 1 < variantArms.size())
-                         ? llvm::BasicBlock::Create(
-                               LLVMCtx, kIRMatchCheckPfx + std::to_string(i + 1),
-                               parentFn)
-                         : defaultBB;
+      auto *nextBB =
+          (i + 1 < variantArms.size())
+              ? llvm::BasicBlock::Create(
+                    LLVMCtx, kIRMatchCheckPfx + std::to_string(i + 1), parentFn)
+              : defaultBB;
       Builder.CreateCondBr(isEq, variantArms[i].BodyBB, nextBB);
       if (nextBB != defaultBB)
         Builder.SetInsertPoint(nextBB);
@@ -2411,7 +2489,8 @@ llvm::Value *CodeGen::emitEnumMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
   if (wildcardBB) {
     Builder.SetInsertPoint(wildcardBB);
     for (ast::MatchArm *arm : node->getArms()) {
-      if (!arm->isWildcard()) continue;
+      if (!arm->isWildcard())
+        continue;
       ScopeGuard armGuard(*this);
       for (auto *stmt : arm->getBody()->getStatements())
         visit(stmt);
@@ -2451,8 +2530,9 @@ llvm::Value *CodeGen::visitFuncDecl(ast::FuncDecl *node) {
       auto &arg = *std::next(fn->arg_begin(), i);
       auto *alloca = createEntryAlloca(fn, arg.getName(), arg.getType());
       Builder.CreateStore(&arg, alloca);
-      // Class-type params arrive as PaykanShared* (caller retained) — declare as
-      // owned so scope cleanup releases them. Non-class params get nullptr AST type.
+      // Class-type params arrive as PaykanShared* (caller retained) — declare
+      // as owned so scope cleanup releases them. Non-class params get nullptr
+      // AST type.
       auto *astTy = node->getParams()[i].ParamType;
       if (astTy) {
         if (auto *ct = ast::dyn_cast<ast::ClassType>(astTy)) {

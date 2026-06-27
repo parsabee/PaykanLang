@@ -88,7 +88,8 @@ TEST(Func, UnknownParamType) {
     fn main() -> int { return 0; }
   )");
   EXPECT_FALSE(r.Ok);
-  EXPECT_NE(r.Diagnostics.find("unknown class type 'FooBar'"), std::string::npos);
+  EXPECT_NE(r.Diagnostics.find("unknown class type 'FooBar'"),
+            std::string::npos);
 }
 
 TEST(Func, ClassTypeAsParam) {

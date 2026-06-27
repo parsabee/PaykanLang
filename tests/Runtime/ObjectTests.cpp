@@ -112,8 +112,9 @@ TEST(ObjectNone, ToStringReturnsNone) {
 }
 
 TEST(ObjectNone, EqualsOnlyItself) {
-  EXPECT_EQ(PaykanObject_None.vtable->equals(&PaykanObject_None,
-                                              &PaykanObject_None), 1);
+  EXPECT_EQ(
+      PaykanObject_None.vtable->equals(&PaykanObject_None, &PaykanObject_None),
+      1);
   PaykanObject *other = PaykanObject_new();
   EXPECT_EQ(PaykanObject_None.vtable->equals(&PaykanObject_None, other), 0);
   PaykanObject_destroy(other);

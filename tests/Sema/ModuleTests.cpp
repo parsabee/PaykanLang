@@ -9,9 +9,8 @@ using namespace paykan::test;
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-static std::string writeFile(const std::string &dir,
-                              const std::string &relPath,
-                              const std::string &content) {
+static std::string writeFile(const std::string &dir, const std::string &relPath,
+                             const std::string &content) {
   auto full = std::filesystem::path(dir) / relPath;
   std::filesystem::create_directories(full.parent_path());
   std::ofstream ofs(full);
@@ -19,7 +18,10 @@ static std::string writeFile(const std::string &dir,
   return full.string();
 }
 
-struct SemaFileResult { bool Ok; std::string Diagnostics; };
+struct SemaFileResult {
+  bool Ok;
+  std::string Diagnostics;
+};
 
 static SemaFileResult semaCheckFile(const std::string &filePath,
                                     const std::string &projectRoot) {
@@ -40,7 +42,8 @@ static SemaFileResult semaCheckFile(const std::string &filePath,
 TEST(Module, BareImportOk) {
   auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_bare").string();
   std::filesystem::remove_all(tmp);
-  writeFile(tmp, "math.pkn", "fn add(a: int, b: int) -> int { return a + b; }\n");
+  writeFile(tmp, "math.pkn",
+            "fn add(a: int, b: int) -> int { return a + b; }\n");
   auto main = writeFile(tmp, "main.pkn", R"(
 import math;
 fn main() -> int { return math::add(1, 2); }
@@ -53,9 +56,11 @@ fn main() -> int { return math::add(1, 2); }
 // ─── OK: import path::mod; — short + full qualifier both valid ───────────────
 
 TEST(Module, NestedShortQualifierOk) {
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_nshort").string();
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_nshort").string();
   std::filesystem::remove_all(tmp);
-  writeFile(tmp, "math/arith.pkn", "fn mul(a: int, b: int) -> int { return a * b; }\n");
+  writeFile(tmp, "math/arith.pkn",
+            "fn mul(a: int, b: int) -> int { return a * b; }\n");
   auto main = writeFile(tmp, "main.pkn", R"(
 import math::arith;
 fn main() -> int { return arith::mul(3, 4); }
@@ -68,7 +73,8 @@ fn main() -> int { return arith::mul(3, 4); }
 TEST(Module, NestedFullQualifierOk) {
   auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_nfull").string();
   std::filesystem::remove_all(tmp);
-  writeFile(tmp, "math/arith.pkn", "fn mul(a: int, b: int) -> int { return a * b; }\n");
+  writeFile(tmp, "math/arith.pkn",
+            "fn mul(a: int, b: int) -> int { return a * b; }\n");
   auto main = writeFile(tmp, "main.pkn", R"(
 import math::arith;
 fn main() -> int { return math::arith::mul(3, 4); }
@@ -83,7 +89,8 @@ fn main() -> int { return math::arith::mul(3, 4); }
 TEST(Module, AliasQualifierOk) {
   auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_alias").string();
   std::filesystem::remove_all(tmp);
-  writeFile(tmp, "utils/strings.pkn", "fn upper(s: Str) -> int { return 0; }\n");
+  writeFile(tmp, "utils/strings.pkn",
+            "fn upper(s: Str) -> int { return 0; }\n");
   auto main = writeFile(tmp, "main.pkn", R"(
 import utils::strings as str;
 fn main() -> int { return str::upper("hi"); }
@@ -94,9 +101,11 @@ fn main() -> int { return str::upper("hi"); }
 }
 
 TEST(Module, AliasFullPathAlsoOk) {
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_alias_full").string();
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_alias_full").string();
   std::filesystem::remove_all(tmp);
-  writeFile(tmp, "utils/strings.pkn", "fn upper(s: Str) -> int { return 0; }\n");
+  writeFile(tmp, "utils/strings.pkn",
+            "fn upper(s: Str) -> int { return 0; }\n");
   auto main = writeFile(tmp, "main.pkn", R"(
 import utils::strings as str;
 fn main() -> int { return utils::strings::upper("hi"); }
@@ -125,7 +134,8 @@ fn main() -> int { return foo::val() + bar::val(); }
 // ─── OK: import path::{a as x, b as y}; ─────────────────────────────────────
 
 TEST(Module, SelectiveAliasOk) {
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_sel_alias").string();
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_sel_alias").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "lib/foo.pkn", "fn val() -> int { return 10; }\n");
   writeFile(tmp, "lib/bar.pkn", "fn val() -> int { return 20; }\n");
@@ -141,7 +151,8 @@ fn main() -> int { return f::val() + b::val(); }
 // ─── OK: import path::{a, b as y}; (mixed) ───────────────────────────────────
 
 TEST(Module, SelectiveMixedAliasOk) {
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_sel_mix").string();
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_sel_mix").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "lib/foo.pkn", "fn val() -> int { return 5; }\n");
   writeFile(tmp, "lib/bar.pkn", "fn val() -> int { return 7; }\n");
@@ -159,7 +170,8 @@ fn main() -> int { return foo::val() + b::val(); }
 TEST(Module, ClassInheritShortQualOk) {
   auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_inh_s").string();
   std::filesystem::remove_all(tmp);
-  writeFile(tmp, "shapes/base.pkn", "class Shape { fn area() -> int { return 0; } }\n");
+  writeFile(tmp, "shapes/base.pkn",
+            "class Shape { fn area() -> int { return 0; } }\n");
   auto main = writeFile(tmp, "main.pkn", R"(
 import shapes::base;
 class Circle : base::Shape { fn area() -> int { return 1; } }
@@ -173,7 +185,8 @@ fn main() -> int { return 0; }
 TEST(Module, ClassInheritFullQualOk) {
   auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_inh_f").string();
   std::filesystem::remove_all(tmp);
-  writeFile(tmp, "shapes/base.pkn", "class Shape { fn area() -> int { return 0; } }\n");
+  writeFile(tmp, "shapes/base.pkn",
+            "class Shape { fn area() -> int { return 0; } }\n");
   auto main = writeFile(tmp, "main.pkn", R"(
 import shapes::base;
 class Circle : shapes::base::Shape { fn area() -> int { return 1; } }
@@ -187,7 +200,8 @@ fn main() -> int { return 0; }
 TEST(Module, ClassInheritAliasOk) {
   auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_inh_a").string();
   std::filesystem::remove_all(tmp);
-  writeFile(tmp, "shapes/base.pkn", "class Shape { fn area() -> int { return 0; } }\n");
+  writeFile(tmp, "shapes/base.pkn",
+            "class Shape { fn area() -> int { return 0; } }\n");
   auto main = writeFile(tmp, "main.pkn", R"(
 import shapes::base as sh;
 class Circle : sh::Shape { fn area() -> int { return 1; } }
@@ -243,8 +257,10 @@ TEST(Module, ClassTypeIdentityOk) {
   std::filesystem::remove_all(tmp);
   std::filesystem::create_directories(tmp);
   std::ofstream(tmp / "strutil.pkn") << "fn id(s: Str) -> int { return 0; }\n";
-  std::ofstream(tmp / "modA.pkn") << "import strutil;\nfn useA(s: Str) -> int { return strutil::id(s); }\n";
-  std::ofstream(tmp / "modB.pkn") << "import strutil;\nfn useB(s: Str) -> int { return strutil::id(s); }\n";
+  std::ofstream(tmp / "modA.pkn")
+      << "import strutil;\nfn useA(s: Str) -> int { return strutil::id(s); }\n";
+  std::ofstream(tmp / "modB.pkn")
+      << "import strutil;\nfn useB(s: Str) -> int { return strutil::id(s); }\n";
   auto mainPath = (tmp / "main.pkn").string();
   std::ofstream(mainPath) << R"(
 import modA;
@@ -259,9 +275,12 @@ fn main() -> int { s: Str = "hello"; modA::useA(s); modB::useB(s); return 0; }
 // ─── ERR cases ──────────────────────────────────────────────────────────────
 
 TEST(Module, ModuleNotFoundErr) {
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_notfound").string();
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_notfound").string();
   std::filesystem::remove_all(tmp);
-  auto main = writeFile(tmp, "main.pkn", "import does_not_exist;\nfn main() -> int { return 0; }\n");
+  auto main =
+      writeFile(tmp, "main.pkn",
+                "import does_not_exist;\nfn main() -> int { return 0; }\n");
   auto r = semaCheckFile(main, tmp);
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("not found"), std::string::npos);
@@ -269,9 +288,11 @@ TEST(Module, ModuleNotFoundErr) {
 }
 
 TEST(Module, WrongQualifierErr) {
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_wrongq").string();
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_wrongq").string();
   std::filesystem::remove_all(tmp);
-  writeFile(tmp, "math/arith.pkn", "fn add(a: int, b: int) -> int { return a + b; }\n");
+  writeFile(tmp, "math/arith.pkn",
+            "fn add(a: int, b: int) -> int { return a + b; }\n");
   auto main = writeFile(tmp, "main.pkn", R"(
 import math::arith as ar;
 fn main() -> int { return arith::add(1, 2); }
@@ -282,9 +303,11 @@ fn main() -> int { return arith::add(1, 2); }
 }
 
 TEST(Module, UndeclaredFnErr) {
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_undefn").string();
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_undefn").string();
   std::filesystem::remove_all(tmp);
-  writeFile(tmp, "math.pkn", "fn add(a: int, b: int) -> int { return a + b; }\n");
+  writeFile(tmp, "math.pkn",
+            "fn add(a: int, b: int) -> int { return a + b; }\n");
   auto main = writeFile(tmp, "main.pkn", R"(
 import math;
 fn main() -> int { return math::multiply(2, 3); }
@@ -295,9 +318,11 @@ fn main() -> int { return math::multiply(2, 3); }
 }
 
 TEST(Module, WrongArgTypeErr) {
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_wrongarg").string();
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_wrongarg").string();
   std::filesystem::remove_all(tmp);
-  writeFile(tmp, "math.pkn", "fn add(a: int, b: int) -> int { return a + b; }\n");
+  writeFile(tmp, "math.pkn",
+            "fn add(a: int, b: int) -> int { return a + b; }\n");
   auto main = writeFile(tmp, "main.pkn", R"(
 import math;
 fn main() -> int { return math::add(1.0, 2); }
@@ -308,7 +333,8 @@ fn main() -> int { return math::add(1.0, 2); }
 }
 
 TEST(Module, ClassInheritBadQualifierErr) {
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_inh_badq").string();
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_inh_badq").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "shapes/base.pkn", "class Shape {}\n");
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -322,7 +348,8 @@ fn main() -> int { return 0; }
 }
 
 TEST(Module, SelectiveMissingErr) {
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_sel_miss").string();
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_sel_miss").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "lib/foo.pkn", "fn val() -> int { return 1; }\n");
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -335,7 +362,8 @@ fn main() -> int { return foo::val(); }
 }
 
 TEST(Module, AliasUnknownCallErr) {
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_alias_unk").string();
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_alias_unk").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "utils/strings.pkn", "fn trim(s: Str) -> int { return 0; }\n");
   auto main = writeFile(tmp, "main.pkn", R"(

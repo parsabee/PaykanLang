@@ -3,8 +3,8 @@
 //
 // Semantic analysis: class declarations and method bodies.
 
-#include "Sema.h"
 #include "Names.h"
+#include "Sema.h"
 #include "SemaInternal.h"
 
 #include <functional>
@@ -25,8 +25,7 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
   llvm::StringMap<ast::ClassDecl *> localClasses;
   for (auto *cd : classDecls) {
     if (!localClasses.try_emplace(cd->getName(), cd).second) {
-      error(cd->getLocation(),
-            "redefinition of class '" + cd->getName() + "'");
+      error(cd->getLocation(), "redefinition of class '" + cd->getName() + "'");
       ok = false;
       continue;
     }
@@ -37,9 +36,8 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
       ok = false;
     }
     if (Ctx.lookupEnumType(cd->getName())) {
-      error(cd->getLocation(),
-            "class '" + cd->getName() +
-                "' conflicts with an enum of the same name");
+      error(cd->getLocation(), "class '" + cd->getName() +
+                                   "' conflicts with an enum of the same name");
       ok = false;
     }
   }
@@ -79,9 +77,8 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
         bool hasQualifier = superName.find("::") != std::string::npos;
         if (!Ctx.lookupClassType(superName) &&
             (!hasQualifier || !Ctx.lookupClassType(superName))) {
-          error(cd->getLocation(),
-                "superclass '" + superName +
-                    "' of class '" + cd->getName() + "' is not defined");
+          error(cd->getLocation(), "superclass '" + superName + "' of class '" +
+                                       cd->getName() + "' is not defined");
           aborted = true;
           return;
         }
@@ -109,9 +106,9 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
       // Currently this covers built-in types like Str; it will also apply
       // to user-defined `final` classes once that keyword is added.
       if (superClass && superClass->isFinal()) {
-        error(cd->getLocation(),
-              "cannot inherit from '" + cd->getSuperClassName() +
-                  "': class is final");
+        error(cd->getLocation(), "cannot inherit from '" +
+                                     cd->getSuperClassName() +
+                                     "': class is final");
         ok = false;
         superClass = nullptr; // fall back to Obj so analysis can continue
       }
@@ -136,9 +133,8 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
     llvm::StringSet<> fieldNames;
     for (auto *field : cd->getFields()) {
       if (!fieldNames.insert(field->getName()).second) {
-        error(field->getLocation(),
-              "duplicate field '" + field->getName() + "' in class '" +
-                  cd->getName() + "'");
+        error(field->getLocation(), "duplicate field '" + field->getName() +
+                                        "' in class '" + cd->getName() + "'");
         ok = false;
         continue;
       }
@@ -169,9 +165,8 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
     llvm::StringSet<> methodNames;
     for (auto *method : cd->getMethods()) {
       if (!methodNames.insert(method->getName()).second) {
-        error(method->getLocation(),
-              "duplicate method '" + method->getName() + "' in class '" +
-                  cd->getName() + "'");
+        error(method->getLocation(), "duplicate method '" + method->getName() +
+                                         "' in class '" + cd->getName() + "'");
         ok = false;
         continue;
       }
@@ -190,10 +185,10 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
       std::vector<ast::Type *> paramTys;
       bool paramsOk = true;
       for (auto &p : method->getParams()) {
-        auto *pty = resolveType(p.ParamType, method->getLocation(),
-                                "parameter '" + p.getName() + "' of method '" +
-                                    method->getName() + "' in '" +
-                                    cd->getName() + "'");
+        auto *pty =
+            resolveType(p.ParamType, method->getLocation(),
+                        "parameter '" + p.getName() + "' of method '" +
+                            method->getName() + "' in '" + cd->getName() + "'");
         if (!pty) {
           paramsOk = false;
           ok = false;
@@ -203,9 +198,8 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
       }
       if (!paramsOk)
         continue;
-      auto *mdecl = Ctx.make<ast::MethodDecl>(method->getLocation(),
-                                              method->getName(), retTy,
-                                              std::move(paramTys));
+      auto *mdecl = Ctx.make<ast::MethodDecl>(
+          method->getLocation(), method->getName(), retTy, std::move(paramTys));
       ct->addMethod(mdecl);
     }
   }
@@ -272,7 +266,7 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
 
     // Determine whether this __init__ must call __super__.
     classCtx.SuperInitRequired = false;
-    classCtx.SuperInitCalled   = false;
+    classCtx.SuperInitCalled = false;
     if (method->getName() == names::kMethodInit && ct->getSuperClass() &&
         ct->getSuperClass() != Ctx.getObjTy()) {
       auto *superInit = ct->getSuperClass()->findMethod(names::kMethodInit);
@@ -312,19 +306,18 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
       } else {
         if (retTy != Ctx.getVoidTy() &&
             !detail::blockAlwaysReturns(method->getBody()->getStatements())) {
-          error(method->getLocation(),
-                "non-void method '" + method->getName() +
-                    "' in class '" + node->getName() +
-                    "' does not always return a value");
+          error(method->getLocation(), "non-void method '" + method->getName() +
+                                           "' in class '" + node->getName() +
+                                           "' does not always return a value");
           ok = false;
         }
         if (classCtx.SuperInitRequired && !classCtx.SuperInitCalled) {
           error(method->getLocation(),
                 std::string("'") + names::kMethodInit + "' in class '" +
-                    node->getName() +
-                    "' must call '" + names::kMethodSuper + "' because its superclass '" +
-                    ct->getSuperClass()->getName() +
-                    "' has a parameterized '" + names::kMethodInit + "'");
+                    node->getName() + "' must call '" + names::kMethodSuper +
+                    "' because its superclass '" +
+                    ct->getSuperClass()->getName() + "' has a parameterized '" +
+                    names::kMethodInit + "'");
           ok = false;
         }
       }

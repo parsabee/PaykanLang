@@ -23,8 +23,7 @@ static void declareExternAs(llvm::Module *mod, llvm::Function &fn,
                             const std::string &qualifiedName) {
   if (mod->getFunction(qualifiedName))
     return;
-  llvm::Function::Create(fn.getFunctionType(),
-                         llvm::Function::ExternalLinkage,
+  llvm::Function::Create(fn.getFunctionType(), llvm::Function::ExternalLinkage,
                          qualifiedName, mod);
 }
 
@@ -45,7 +44,7 @@ void CodeGen::processImports(ast::TranslationUnit *tu) {
   for (auto *imp : tu->getImports()) {
     for (auto &m : imp->getModules()) {
       std::string modulePath = imp->modulePath(m);
-      std::string qualifier  = m.qualifier();
+      std::string qualifier = m.qualifier();
 
       // Resolve the module path to a file (same logic as Sema).
       auto relPath = module_utils::modulePathToRelative(modulePath);
@@ -79,20 +78,22 @@ void CodeGen::processImports(ast::TranslationUnit *tu) {
         // Load cached bitcode.
         auto bufOrErr = llvm::MemoryBuffer::getFile(cachePath);
         if (bufOrErr) {
-          auto modOrErr = llvm::parseBitcodeFile((*bufOrErr)->getMemBufferRef(),
-                                                 LLVMCtx);
+          auto modOrErr =
+              llvm::parseBitcodeFile((*bufOrErr)->getMemBufferRef(), LLVMCtx);
           if (modOrErr) {
             auto &cachedMod = *modOrErr;
             // Helper: declare + alias a function under a qualified name.
             auto addAlias = [&](llvm::Function &fn, const std::string &qn) {
               declareExternAs(Module.get(), fn, qn);
               if (!cachedMod->getFunction(qn) && !cachedMod->getNamedAlias(qn))
-                llvm::GlobalAlias::create(fn.getFunctionType(), fn.getAddressSpace(),
+                llvm::GlobalAlias::create(fn.getFunctionType(),
+                                          fn.getAddressSpace(),
                                           llvm::GlobalValue::ExternalLinkage,
                                           qn, &fn, cachedMod.get());
             };
             for (auto &fn : cachedMod->functions()) {
-              if (fn.isDeclaration()) continue;
+              if (fn.isDeclaration())
+                continue;
               addAlias(fn, qualifier + names::kQualSep + fn.getName().str());
               if (qualifier != modulePath)
                 addAlias(fn, modulePath + names::kQualSep + fn.getName().str());
@@ -100,14 +101,13 @@ void CodeGen::processImports(ast::TranslationUnit *tu) {
             ImportedModules.push_back(std::move(cachedMod));
 
             auto ctxIt = SemaCtx.ImportedContexts.find(resolved);
-            if (ctxIt != SemaCtx.ImportedContexts.end() &&
-                ctxIt->second->Root)
+            if (ctxIt != SemaCtx.ImportedContexts.end() && ctxIt->second->Root)
               processImports(ctxIt->second->Root);
 
             if (ctxIt != SemaCtx.ImportedContexts.end()) {
-              for (auto &[name, _] :
-                   ctxIt->second->ASTCtx->getClassTypes()) {
-                if (name == names::kObj || name == names::kString) continue;
+              for (auto &[name, _] : ctxIt->second->ASTCtx->getClassTypes()) {
+                if (name == names::kObj || name == names::kString)
+                  continue;
                 if (auto *ct = ASTCtx.lookupClassType(name))
                   Classes.ImportedClassQualifiers.try_emplace(ct, qualifier);
               }
@@ -144,10 +144,10 @@ void CodeGen::processImports(ast::TranslationUnit *tu) {
       // via llvm::Linker::linkModules() into the single parent context, and the
       // cross-module qualifier aliases below are created in the imported
       // module's context referencing the parent module's functions — both of
-      // which require all modules to share ONE context.  Switching to per-import
-      // contexts therefore requires rewiring the link-merge pipeline into a
-      // multi-ThreadSafeModule JIT add (a separate, larger change).  Until then
-      // imports share the parent LLVMCtx and codegen runs serially.
+      // which require all modules to share ONE context.  Switching to
+      // per-import contexts therefore requires rewiring the link-merge pipeline
+      // into a multi-ThreadSafeModule JIT add (a separate, larger change).
+      // Until then imports share the parent LLVMCtx and codegen runs serially.
       CodeGen importCG(importedSemaCtx, LLVMCtx, resolved, ProjectRoot);
       if (!importCG.run(importedSemaCtx.Root))
         continue;
@@ -159,14 +159,16 @@ void CodeGen::processImports(ast::TranslationUnit *tu) {
       auto addImpAlias = [&](llvm::Function &fn, const std::string &qn) {
         if (!Module->getFunction(qn))
           llvm::Function::Create(fn.getFunctionType(),
-                                 llvm::Function::ExternalLinkage, qn, Module.get());
+                                 llvm::Function::ExternalLinkage, qn,
+                                 Module.get());
         if (!impMod->getFunction(qn) && !impMod->getNamedAlias(qn))
           llvm::GlobalAlias::create(fn.getFunctionType(), fn.getAddressSpace(),
-                                    llvm::GlobalValue::ExternalLinkage,
-                                    qn, &fn, impMod.get());
+                                    llvm::GlobalValue::ExternalLinkage, qn, &fn,
+                                    impMod.get());
       };
       for (auto &fn : impMod->functions()) {
-        if (fn.isDeclaration()) continue;
+        if (fn.isDeclaration())
+          continue;
         addImpAlias(fn, qualifier + names::kQualSep + fn.getName().str());
         if (qualifier != modulePath)
           addImpAlias(fn, modulePath + names::kQualSep + fn.getName().str());
@@ -192,7 +194,8 @@ void CodeGen::processImports(ast::TranslationUnit *tu) {
         ImportedModules.push_back(std::move(mm));
 
       for (auto &[name, _] : importedSemaCtx.ASTCtx->getClassTypes()) {
-        if (name == names::kObj || name == names::kString) continue;
+        if (name == names::kObj || name == names::kString)
+          continue;
         if (auto *ct = ASTCtx.lookupClassType(name))
           Classes.ImportedClassQualifiers.try_emplace(ct, qualifier);
       }

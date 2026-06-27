@@ -10,7 +10,8 @@ using namespace paykan::test;
 static std::string wrapMain(const std::string &body) {
   return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
-static std::string withEnums(const std::string &enums, const std::string &body) {
+static std::string withEnums(const std::string &enums,
+                             const std::string &body) {
   return enums + "\n" + wrapMain(body);
 }
 
@@ -102,38 +103,36 @@ TEST(EnumCodeGen, VariantOrderingValues) {
 // return) is exhaustive, so it satisfies the "always returns" requirement of a
 // non-void function — no trailing return or `_` arm needed.
 TEST(EnumCodeGen, ExhaustiveMatchSatisfiesReturn) {
-  auto src =
-      "enum Dir { North, East, South, West }\n"
-      "fn name(d: Dir) -> Str {\n"
-      "  match d {\n"
-      "    North { return \"N\"; }\n"
-      "    East  { return \"E\"; }\n"
-      "    South { return \"S\"; }\n"
-      "    West  { return \"W\"; }\n"
-      "  }\n"
-      "}\n" +
-      wrapMain("println(name(Dir::South));");
+  auto src = "enum Dir { North, East, South, West }\n"
+             "fn name(d: Dir) -> Str {\n"
+             "  match d {\n"
+             "    North { return \"N\"; }\n"
+             "    East  { return \"E\"; }\n"
+             "    South { return \"S\"; }\n"
+             "    West  { return \"W\"; }\n"
+             "  }\n"
+             "}\n" +
+             wrapMain("println(name(Dir::South));");
   auto r = compileAndRun(src);
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "S\n");
 }
 
 // Returning an enum from a function: the i64 value must flow back unboxed (an
-// enum is not a ref type, so the return path must not wrap it in a PaykanShared).
+// enum is not a ref type, so the return path must not wrap it in a
+// PaykanShared).
 TEST(EnumCodeGen, ReturnEnumFromFunction) {
-  auto src =
-      "enum Dir { North, East, South, West }\n"
-      "fn opp(d: Dir) -> Dir {\n"
-      "  match d {\n"
-      "    North { return Dir::South; }\n"
-      "    South { return Dir::North; }\n"
-      "    East  { return Dir::West; }\n"
-      "    West  { return Dir::East; }\n"
-      "  }\n"
-      "}\n" +
-      wrapMain(
-          "x: Dir = opp(Dir::North);\n"
-          "  if (x == Dir::South) { println(\"south\"); }");
+  auto src = "enum Dir { North, East, South, West }\n"
+             "fn opp(d: Dir) -> Dir {\n"
+             "  match d {\n"
+             "    North { return Dir::South; }\n"
+             "    South { return Dir::North; }\n"
+             "    East  { return Dir::West; }\n"
+             "    West  { return Dir::East; }\n"
+             "  }\n"
+             "}\n" +
+             wrapMain("x: Dir = opp(Dir::North);\n"
+                      "  if (x == Dir::South) { println(\"south\"); }");
   auto r = compileAndRun(src);
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "south\n");
@@ -153,12 +152,11 @@ TEST(EnumCodeGen, ArrayOfEnums) {
       "    West  { return \"W\"; }\n"
       "  }\n"
       "}\n" +
-      wrapMain(
-          "xs: Dir[] = [Dir::North, Dir::East];\n"
-          "  xs.push(Dir::South);\n"          // grow
-          "  xs[0] = Dir::West;\n"            // subscript set
-          "  i: int = 0;\n"
-          "  while (i < xs.len()) { println(nm(xs[i])); i = i + 1; }");
+      wrapMain("xs: Dir[] = [Dir::North, Dir::East];\n"
+               "  xs.push(Dir::South);\n" // grow
+               "  xs[0] = Dir::West;\n"   // subscript set
+               "  i: int = 0;\n"
+               "  while (i < xs.len()) { println(nm(xs[i])); i = i + 1; }");
   auto r = compileAndRun(src);
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "W\nE\nS\n");

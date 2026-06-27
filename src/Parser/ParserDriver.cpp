@@ -36,7 +36,9 @@ ast::ASTContext &ParserDriver::getASTContext() { return PImpl->Ctx; }
 
 unsigned ParserDriver::getErrorCount() const { return PImpl->ErrorCount; }
 
-const std::string &ParserDriver::getCurrentFile() const { return PImpl->CurFile; }
+const std::string &ParserDriver::getCurrentFile() const {
+  return PImpl->CurFile;
+}
 
 const std::vector<std::string> &ParserDriver::getSourceLines() const {
   return PImpl->SourceLines;

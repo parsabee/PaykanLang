@@ -4,10 +4,10 @@
 
 #pragma once
 
-#include "ParserDriver.h"
-#include "Sema.h"
 #include "CodeGen.h"
 #include "JIT.h"
+#include "ParserDriver.h"
+#include "Sema.h"
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/Support/raw_ostream.h>
@@ -20,8 +20,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <string>
 #include <sstream>
+#include <string>
 
 #include <llvm/Linker/Linker.h>
 
@@ -32,8 +32,9 @@ inline std::string writeTempFile(const std::string &source) {
   // Use a unique name per call (atomic counter + pid for cross-process safety).
   static std::atomic<int> counter{0};
   auto pathStr = (std::filesystem::temp_directory_path() /
-             ("paykan_test_" + std::to_string(getpid()) + "_" +
-              std::to_string(counter++) + ".pkn")).string();
+                  ("paykan_test_" + std::to_string(getpid()) + "_" +
+                   std::to_string(counter++) + ".pkn"))
+                     .string();
   std::ofstream ofs(pathStr);
   ofs << source;
   ofs.close();
@@ -44,7 +45,7 @@ inline std::string writeTempFile(const std::string &source) {
 inline std::string drainAndRemoveTempFile(const std::string &path) {
   std::ifstream ifs(path, std::ios::binary);
   std::string content((std::istreambuf_iterator<char>(ifs)),
-                       std::istreambuf_iterator<char>());
+                      std::istreambuf_iterator<char>());
   ifs.close();
   std::filesystem::remove(path);
   return content;
@@ -56,7 +57,8 @@ inline std::pair<int, std::string> redirectFdToTempFile(int fd) {
   static std::atomic<int> cnt{0};
   auto path = (std::filesystem::temp_directory_path() /
                ("paykan_cap_" + std::to_string(getpid()) + "_" +
-                std::to_string(cnt++) + ".txt")).string();
+                std::to_string(cnt++) + ".txt"))
+                  .string();
   int saved = dup(fd);
   int tmp = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
   dup2(tmp, fd);
@@ -105,7 +107,8 @@ inline SemaResult semaCheck(const std::string &source) {
   return {semaCtx.Ok, diagStr, semaCtx.ErrorCount};
 }
 
-/// Compile and JIT-execute source. Returns {exitCode, stdout, stderr, compiledOk}.
+/// Compile and JIT-execute source. Returns {exitCode, stdout, stderr,
+/// compiledOk}.
 struct RunResult {
   int ExitCode;
   std::string StdOut;
@@ -195,8 +198,8 @@ inline RunResult compileAndRunWithArgs(const std::string &source,
   auto [savedOut, outPath] = redirectFdToTempFile(STDOUT_FILENO);
   auto [savedErr, errPath] = redirectFdToTempFile(STDERR_FILENO);
 
-  auto resultOrErr =
-      jit::runModule(std::move(mainModule), std::move(llvmCtx), std::move(args));
+  auto resultOrErr = jit::runModule(std::move(mainModule), std::move(llvmCtx),
+                                    std::move(args));
   fflush(stdout);
   fflush(stderr);
 

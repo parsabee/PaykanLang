@@ -16,9 +16,10 @@
 //   Object arrays  (class-type elements stored as PaykanShared*)
 //     constructor : PaykanArray_new_obj(len)
 //     vtable      : PaykanArray_obj_vtable
-//     set         : PaykanArray_set_obj(arr, idx, value) — retain new, release old
-//     get         : PaykanArray_get(arr, idx)            — same plain read
-//     destroy     : PaykanArray_destroy_obj              — release all + free buffer + self
+//     set         : PaykanArray_set_obj(arr, idx, value) — retain new, release
+//     old get         : PaykanArray_get(arr, idx)            — same plain read
+//     destroy     : PaykanArray_destroy_obj              — release all + free
+//     buffer + self
 //
 // Every element slot is exactly 8 bytes wide regardless of element type.
 // CodeGen selects the right constructor/set/destroy based on the static
@@ -36,11 +37,11 @@
 // Forward declarations
 // ============================================================================
 
-void          PaykanArray_destroy    (PaykanObject *self);
-void          PaykanArray_destroy_obj(PaykanObject *self);
-PaykanShared *PaykanArray_toString   (PaykanObject *self);
-int64_t       PaykanArray_equals     (PaykanObject *self, PaykanObject *other);
-int64_t       PaykanArray_length     (PaykanObject *self);
+void PaykanArray_destroy(PaykanObject *self);
+void PaykanArray_destroy_obj(PaykanObject *self);
+PaykanShared *PaykanArray_toString(PaykanObject *self);
+int64_t PaykanArray_equals(PaykanObject *self, PaykanObject *other);
+int64_t PaykanArray_length(PaykanObject *self);
 
 // ============================================================================
 // VTables
@@ -48,18 +49,18 @@ int64_t       PaykanArray_length     (PaykanObject *self);
 
 // Primitive elements — destroy just frees the buffer.
 PaykanArrayVTable PaykanArray_vtable = {
-    .destroy  = PaykanArray_destroy,
+    .destroy = PaykanArray_destroy,
     .toString = PaykanArray_toString,
-    .equals   = PaykanArray_equals,
-    .length   = PaykanArray_length,
+    .equals = PaykanArray_equals,
+    .length = PaykanArray_length,
 };
 
 // Object elements — destroy releases every PaykanShared* before freeing.
 PaykanArrayVTable PaykanArray_obj_vtable = {
-    .destroy  = PaykanArray_destroy_obj,
+    .destroy = PaykanArray_destroy_obj,
     .toString = PaykanArray_toString,
-    .equals   = PaykanArray_equals,
-    .length   = PaykanArray_length,
+    .equals = PaykanArray_equals,
+    .length = PaykanArray_length,
 };
 
 // ============================================================================
@@ -71,8 +72,8 @@ PaykanArrayVTable PaykanArray_obj_vtable = {
 PaykanArray *PaykanArray_new(unsigned long len) {
   PaykanArray *arr = (PaykanArray *)Paykan_malloc(sizeof(PaykanArray));
   arr->vtable = (PaykanObjectVTable *)&PaykanArray_vtable;
-  arr->len    = len;
-  arr->cap    = len;
+  arr->len = len;
+  arr->cap = len;
   if (len > 0) {
     arr->data = Paykan_malloc(len * PAYKAN_ELEM_SIZE);
     memset(arr->data, 0, len * PAYKAN_ELEM_SIZE);
@@ -87,8 +88,8 @@ PaykanArray *PaykanArray_new(unsigned long len) {
 PaykanArray *PaykanArray_new_from_data(unsigned long len, const void *data) {
   PaykanArray *arr = (PaykanArray *)Paykan_malloc(sizeof(PaykanArray));
   arr->vtable = (PaykanObjectVTable *)&PaykanArray_vtable;
-  arr->len    = len;
-  arr->cap    = len;
+  arr->len = len;
+  arr->cap = len;
   if (len > 0) {
     arr->data = Paykan_malloc(len * PAYKAN_ELEM_SIZE);
     memcpy(arr->data, data, len * PAYKAN_ELEM_SIZE);
@@ -103,11 +104,12 @@ PaykanArray *PaykanArray_new_from_data(unsigned long len, const void *data) {
 PaykanArray *PaykanArray_new_obj(unsigned long len) {
   PaykanArray *arr = (PaykanArray *)Paykan_malloc(sizeof(PaykanArray));
   arr->vtable = (PaykanObjectVTable *)&PaykanArray_obj_vtable;
-  arr->len    = len;
-  arr->cap    = len;
+  arr->len = len;
+  arr->cap = len;
   if (len > 0) {
     arr->data = Paykan_malloc(len * PAYKAN_ELEM_SIZE);
-    // Zero-init so every slot starts as NULL (no accidental release on first set).
+    // Zero-init so every slot starts as NULL (no accidental release on first
+    // set).
     memset(arr->data, 0, len * PAYKAN_ELEM_SIZE);
   } else {
     arr->data = NULL;
@@ -150,8 +152,8 @@ void PaykanArray_destroy_obj(PaykanObject *self) {
 // For object arrays the caller uses the result as a PaykanShared*.
 void *PaykanArray_get(PaykanArray *arr, unsigned long idx) {
   if (idx >= arr->len) {
-    fprintf(stderr, "paykan: array index %lu out of bounds (len=%lu)\n",
-            idx, arr->len);
+    fprintf(stderr, "paykan: array index %lu out of bounds (len=%lu)\n", idx,
+            arr->len);
     abort();
   }
   void *val;
@@ -166,8 +168,8 @@ void *PaykanArray_get(PaykanArray *arr, unsigned long idx) {
 // Primitive set: plain 8-byte store, no reference counting.
 void PaykanArray_set(PaykanArray *arr, unsigned long idx, void *value) {
   if (idx >= arr->len) {
-    fprintf(stderr, "paykan: array index %lu out of bounds (len=%lu)\n",
-            idx, arr->len);
+    fprintf(stderr, "paykan: array index %lu out of bounds (len=%lu)\n", idx,
+            arr->len);
     abort();
   }
   memcpy((char *)arr->data + idx * PAYKAN_ELEM_SIZE, &value, PAYKAN_ELEM_SIZE);
@@ -175,10 +177,11 @@ void PaykanArray_set(PaykanArray *arr, unsigned long idx, void *value) {
 
 // Object set: release the old PaykanShared* in the slot (if any), retain the
 // incoming one, then store it.
-void PaykanArray_set_obj(PaykanArray *arr, unsigned long idx, PaykanShared *value) {
+void PaykanArray_set_obj(PaykanArray *arr, unsigned long idx,
+                         PaykanShared *value) {
   if (idx >= arr->len) {
-    fprintf(stderr, "paykan: array index %lu out of bounds (len=%lu)\n",
-            idx, arr->len);
+    fprintf(stderr, "paykan: array index %lu out of bounds (len=%lu)\n", idx,
+            arr->len);
     abort();
   }
   void *slot = (char *)arr->data + idx * PAYKAN_ELEM_SIZE;
@@ -198,8 +201,8 @@ void PaykanArray_set_obj(PaykanArray *arr, unsigned long idx, PaykanShared *valu
 PaykanShared *PaykanArray_toString(PaykanObject *self) {
   PaykanArray *arr = (PaykanArray *)self;
   char buf[80];
-  int n = snprintf(buf, sizeof(buf), "Array@%p[len=%lu]",
-                   (void *)arr, (unsigned long)arr->len);
+  int n = snprintf(buf, sizeof(buf), "Array@%p[len=%lu]", (void *)arr,
+                   (unsigned long)arr->len);
   return PaykanShared_new((PaykanObject *)PaykanString_new(buf, n));
 }
 
@@ -240,16 +243,17 @@ static void array_maybe_shrink(PaykanArray *arr) {
   if (arr->len == 0) {
     Paykan_free(arr->data);
     arr->data = NULL;
-    arr->cap  = 0;
+    arr->cap = 0;
   } else {
     arr->data = Paykan_realloc(arr->data, arr->len * PAYKAN_ELEM_SIZE);
-    arr->cap  = arr->len;
+    arr->cap = arr->len;
   }
 }
 
 void PaykanArray_push(PaykanArray *arr, void *value) {
   array_grow(arr);
-  memcpy((char *)arr->data + arr->len * PAYKAN_ELEM_SIZE, &value, PAYKAN_ELEM_SIZE);
+  memcpy((char *)arr->data + arr->len * PAYKAN_ELEM_SIZE, &value,
+         PAYKAN_ELEM_SIZE);
   arr->len += 1;
 }
 
@@ -257,7 +261,8 @@ void PaykanArray_push_obj(PaykanArray *arr, PaykanShared *value) {
   array_grow(arr);
   if (value)
     Paykan_retain(value);
-  memcpy((char *)arr->data + arr->len * PAYKAN_ELEM_SIZE, &value, PAYKAN_ELEM_SIZE);
+  memcpy((char *)arr->data + arr->len * PAYKAN_ELEM_SIZE, &value,
+         PAYKAN_ELEM_SIZE);
   arr->len += 1;
 }
 
@@ -268,7 +273,8 @@ void *PaykanArray_pop(PaykanArray *arr) {
   }
   arr->len -= 1;
   void *val;
-  memcpy(&val, (char *)arr->data + arr->len * PAYKAN_ELEM_SIZE, PAYKAN_ELEM_SIZE);
+  memcpy(&val, (char *)arr->data + arr->len * PAYKAN_ELEM_SIZE,
+         PAYKAN_ELEM_SIZE);
   array_maybe_shrink(arr);
   return val;
 }
@@ -280,7 +286,8 @@ PaykanShared *PaykanArray_pop_obj(PaykanArray *arr) {
   }
   arr->len -= 1;
   PaykanShared *val;
-  memcpy(&val, (char *)arr->data + arr->len * PAYKAN_ELEM_SIZE, PAYKAN_ELEM_SIZE);
+  memcpy(&val, (char *)arr->data + arr->len * PAYKAN_ELEM_SIZE,
+         PAYKAN_ELEM_SIZE);
   // Clear the vacated slot before any potential realloc.
   memset((char *)arr->data + arr->len * PAYKAN_ELEM_SIZE, 0, PAYKAN_ELEM_SIZE);
   array_maybe_shrink(arr);

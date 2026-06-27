@@ -16,7 +16,7 @@
 #include <string>
 
 #ifndef PAYKAN_BIN
-#  error "PAYKAN_BIN must be defined via CMake compile definition"
+#error "PAYKAN_BIN must be defined via CMake compile definition"
 #endif
 
 static const char *kPaykan = PAYKAN_BIN;

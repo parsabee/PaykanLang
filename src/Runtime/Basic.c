@@ -11,30 +11,28 @@
 #include "Runtime.h"
 
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
 
 // ============================================================================
 // Int
 // ============================================================================
 
 PaykanObjectVTable PaykanInt_vtable = {
-    .destroy  = PaykanInt_destroy,
+    .destroy = PaykanInt_destroy,
     .toString = PaykanInt_toString,
-    .equals   = PaykanInt_equals,
+    .equals = PaykanInt_equals,
 };
 
 PaykanInt *PaykanInt_new(int64_t value) {
   PaykanInt *obj = (PaykanInt *)Paykan_malloc(sizeof(PaykanInt));
   obj->vtable = &PaykanInt_vtable;
-  obj->value  = value;
+  obj->value = value;
   return obj;
 }
 
-void PaykanInt_destroy(PaykanObject *self) {
-  Paykan_free(self);
-}
+void PaykanInt_destroy(PaykanObject *self) { Paykan_free(self); }
 
 PaykanShared *PaykanInt_toString(PaykanObject *self) {
   PaykanInt *obj = (PaykanInt *)self;
@@ -54,7 +52,8 @@ PaykanShared *PaykanInt_from_str(PaykanObject *str) {
   long long val = strtoll(s->data, &end, 10);
   if (end == s->data || *end != '\0' || errno != 0) {
     const char *msg = "IntStr: invalid integer string";
-    return PaykanShared_new((PaykanObject *)PaykanError_new(msg, (int64_t)strlen(msg)));
+    return PaykanShared_new(
+        (PaykanObject *)PaykanError_new(msg, (int64_t)strlen(msg)));
   }
   return PaykanShared_new((PaykanObject *)PaykanInt_new((int64_t)val));
 }
@@ -64,21 +63,19 @@ PaykanShared *PaykanInt_from_str(PaykanObject *str) {
 // ============================================================================
 
 PaykanObjectVTable PaykanFloat_vtable = {
-    .destroy  = PaykanFloat_destroy,
+    .destroy = PaykanFloat_destroy,
     .toString = PaykanFloat_toString,
-    .equals   = PaykanFloat_equals,
+    .equals = PaykanFloat_equals,
 };
 
 PaykanFloat *PaykanFloat_new(double value) {
   PaykanFloat *obj = (PaykanFloat *)Paykan_malloc(sizeof(PaykanFloat));
   obj->vtable = &PaykanFloat_vtable;
-  obj->value  = value;
+  obj->value = value;
   return obj;
 }
 
-void PaykanFloat_destroy(PaykanObject *self) {
-  Paykan_free(self);
-}
+void PaykanFloat_destroy(PaykanObject *self) { Paykan_free(self); }
 
 PaykanShared *PaykanFloat_toString(PaykanObject *self) {
   PaykanFloat *obj = (PaykanFloat *)self;
@@ -98,7 +95,8 @@ PaykanShared *PaykanFloat_from_str(PaykanObject *str) {
   double val = strtod(s->data, &end);
   if (end == s->data || *end != '\0' || errno != 0) {
     const char *msg = "FloatStr: invalid float string";
-    return PaykanShared_new((PaykanObject *)PaykanError_new(msg, (int64_t)strlen(msg)));
+    return PaykanShared_new(
+        (PaykanObject *)PaykanError_new(msg, (int64_t)strlen(msg)));
   }
   return PaykanShared_new((PaykanObject *)PaykanFloat_new(val));
 }
@@ -108,21 +106,19 @@ PaykanShared *PaykanFloat_from_str(PaykanObject *str) {
 // ============================================================================
 
 PaykanObjectVTable PaykanBool_vtable = {
-    .destroy  = PaykanBool_destroy,
+    .destroy = PaykanBool_destroy,
     .toString = PaykanBool_toString,
-    .equals   = PaykanBool_equals,
+    .equals = PaykanBool_equals,
 };
 
 PaykanBool *PaykanBool_new(int64_t value) {
   PaykanBool *obj = (PaykanBool *)Paykan_malloc(sizeof(PaykanBool));
   obj->vtable = &PaykanBool_vtable;
-  obj->value  = value ? 1 : 0;
+  obj->value = value ? 1 : 0;
   return obj;
 }
 
-void PaykanBool_destroy(PaykanObject *self) {
-  Paykan_free(self);
-}
+void PaykanBool_destroy(PaykanObject *self) { Paykan_free(self); }
 
 PaykanShared *PaykanBool_toString(PaykanObject *self) {
   PaykanBool *obj = (PaykanBool *)self;

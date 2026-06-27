@@ -21,7 +21,8 @@ Sema::Scope::Scope(Scope *parent) : Parent(parent) {}
 
 ast::Type *Sema::Scope::lookup(llvm::StringRef name) const {
   auto it = Locals.find(name);
-  if (it != Locals.end()) return it->second;
+  if (it != Locals.end())
+    return it->second;
   return Parent ? Parent->lookup(name) : nullptr;
 }
 
@@ -40,12 +41,12 @@ bool Sema::Scope::contains(llvm::StringRef name) const {
 }
 
 Sema::Scope *Sema::Scope::findOwner(llvm::StringRef name) {
-  if (Locals.count(name)) return this;
+  if (Locals.count(name))
+    return this;
   return Parent ? Parent->findOwner(name) : nullptr;
 }
 
-Sema::ScopeGuard::ScopeGuard(Sema &s)
-    : S(s), ScopeObj(s.CurrentScope) {
+Sema::ScopeGuard::ScopeGuard(Sema &s) : S(s), ScopeObj(s.CurrentScope) {
   S.CurrentScope = &ScopeObj;
 }
 
@@ -58,8 +59,8 @@ Sema::Sema(ast::ASTContext &ctx, DiagEngine &diags,
     : Diags(diags), Ctx(ctx), ProjectRoot(projectRoot) {}
 
 void Sema::declareFunction(llvm::StringRef name, ast::Type *retTy,
-                           std::vector<ast::Type *> paramTys,
-                           bool isVariadic, bool isBuiltin) {
+                           std::vector<ast::Type *> paramTys, bool isVariadic,
+                           bool isBuiltin) {
   FunctionTable[name] = {retTy, std::move(paramTys), isVariadic, isBuiltin};
 }
 
@@ -81,14 +82,20 @@ void Sema::note(ast::SourceLocation loc, const std::string &msg) {
 }
 
 std::string Sema::typeName(ast::Type *ty) {
-  if (!ty) return "unknown";
+  if (!ty)
+    return "unknown";
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty)) {
     switch (bt->getTypeKind()) {
-    case ast::BuiltinType::Int:   return names::kTypeInt;
-    case ast::BuiltinType::Float: return names::kTypeFloat;
-    case ast::BuiltinType::Bool:  return names::kTypeBool;
-    case ast::BuiltinType::Char:  return names::kTypeChar;
-    case ast::BuiltinType::Void:  return names::kTypeVoid;
+    case ast::BuiltinType::Int:
+      return names::kTypeInt;
+    case ast::BuiltinType::Float:
+      return names::kTypeFloat;
+    case ast::BuiltinType::Bool:
+      return names::kTypeBool;
+    case ast::BuiltinType::Char:
+      return names::kTypeChar;
+    case ast::BuiltinType::Void:
+      return names::kTypeVoid;
     }
   }
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ty))
@@ -103,13 +110,17 @@ std::string Sema::typeName(ast::Type *ty) {
 // Structural type equality (pointer equality is insufficient for ArrayType
 // nodes because each make<ArrayType>() call yields a fresh allocation).
 static bool typesEqual(ast::Type *a, ast::Type *b) {
-  if (a == b) return true;
-  if (!a || !b) return false;
-  if (a->getKind() != b->getKind()) return false;
+  if (a == b)
+    return true;
+  if (!a || !b)
+    return false;
+  if (a->getKind() != b->getKind())
+    return false;
   if (auto *aa = ast::dyn_cast<ast::ArrayType>(a))
     return typesEqual(aa->getElementType(),
                       ast::cast<ast::ArrayType>(b)->getElementType());
-  // BuiltinType / ClassType: pointer equality is canonical (singletons / interned).
+  // BuiltinType / ClassType: pointer equality is canonical (singletons /
+  // interned).
   return false;
 }
 
@@ -192,9 +203,7 @@ ast::Type *Sema::checkIdentLive(llvm::StringRef name, ast::SourceLocation loc) {
 }
 
 // Visit an expression and return its resolved type (nullptr on error).
-ast::Type *Sema::resolveExprType(ast::Expr *expr) {
-  return EC.visit(expr);
-}
+ast::Type *Sema::resolveExprType(ast::Expr *expr) { return EC.visit(expr); }
 
 // -- ExprVisitor -------------------------------------------------------------
 
@@ -237,9 +246,9 @@ ast::Type *Sema::ExprChecker::visitEnumValueExpr(ast::EnumValueExpr *node) {
   }
   int64_t idx = enumTy->findVariant(node->getVariantName());
   if (idx < 0) {
-    S.error(node->getLocation(),
-            "enum '" + node->getEnumName() + "' has no variant '" +
-                node->getVariantName() + "'");
+    S.error(node->getLocation(), "enum '" + node->getEnumName() +
+                                     "' has no variant '" +
+                                     node->getVariantName() + "'");
     return nullptr;
   }
   node->setResolvedEnum(enumTy);
@@ -254,17 +263,19 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
     return nullptr;
 
   if (!operandTy->hasUnaryOp(node->getOpcode())) {
-    S.error(node->getLocation(),
-            "unary '" + std::string(node->getOpcodeStr()) +
-                "' is not defined for type '" +
-                typeName(operandTy) + "'");
+    S.error(node->getLocation(), "unary '" + std::string(node->getOpcodeStr()) +
+                                     "' is not defined for type '" +
+                                     typeName(operandTy) + "'");
     return nullptr;
   }
 
   switch (node->getOpcode()) {
-  case ast::UnaryOpcode::Neg: return operandTy;
-  case ast::UnaryOpcode::Not: return S.Ctx.getBoolTy();
-  case ast::UnaryOpcode::Count: break;
+  case ast::UnaryOpcode::Neg:
+    return operandTy;
+  case ast::UnaryOpcode::Not:
+    return S.Ctx.getBoolTy();
+  case ast::UnaryOpcode::Count:
+    break;
   }
   llvm_unreachable("unknown UnaryOpcode");
 }
@@ -278,8 +289,8 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   if (!lhsTy->hasBinaryOp(node->getOpcode(), rhsTy)) {
     S.error(node->getLocation(),
             "operator '" + std::string(node->getOpcodeStr()) +
-                "' is not defined for types '" + typeName(lhsTy) +
-                "' and '" + typeName(rhsTy) + "'");
+                "' is not defined for types '" + typeName(lhsTy) + "' and '" +
+                typeName(rhsTy) + "'");
     return nullptr;
   }
 
@@ -295,8 +306,8 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
           (!lhsCT->isSubtypeOf(rhsCT) && !rhsCT->isSubtypeOf(lhsCT))) {
         S.error(node->getLocation(),
                 "operands of '" + std::string(node->getOpcodeStr()) +
-                    "' have mismatched types '" + typeName(lhsTy) +
-                    "' and '" + typeName(rhsTy) + "'");
+                    "' have mismatched types '" + typeName(lhsTy) + "' and '" +
+                    typeName(rhsTy) + "'");
         return nullptr;
       }
     }
@@ -358,17 +369,19 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
 
   // -- __super__(args): superclass initializer call -------------------------
   if (node->getCalleeName() == names::kMethodSuper) {
-    if (!S.CurrentClassCtx || S.CurrentClassCtx->MethodName != names::kMethodInit) {
-      S.error(node->getLocation(),
-              std::string("'") + names::kMethodSuper + "' can only be called inside '" + names::kMethodInit + "'");
+    if (!S.CurrentClassCtx ||
+        S.CurrentClassCtx->MethodName != names::kMethodInit) {
+      S.error(node->getLocation(), std::string("'") + names::kMethodSuper +
+                                       "' can only be called inside '" +
+                                       names::kMethodInit + "'");
       return nullptr;
     }
     auto *superClass = S.CurrentClassCtx->ClassType->getSuperClass();
     if (!superClass || superClass == S.Ctx.getObjTy()) {
-      S.error(node->getLocation(),
-              std::string("'") + names::kMethodSuper + "' called in class '" +
-                  S.CurrentClassCtx->ClassType->getName() +
-                  "' which has no explicit superclass");
+      S.error(node->getLocation(), std::string("'") + names::kMethodSuper +
+                                       "' called in class '" +
+                                       S.CurrentClassCtx->ClassType->getName() +
+                                       "' which has no explicit superclass");
       return nullptr;
     }
     auto *superInit = superClass->findMethod(names::kMethodInit);
@@ -378,8 +391,7 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     if (argTypes.size() != expectedParams.size()) {
       S.error(node->getLocation(),
               std::string("'") + names::kMethodSuper + "' expects " +
-                  std::to_string(expectedParams.size()) +
-                  " argument(s), got " +
+                  std::to_string(expectedParams.size()) + " argument(s), got " +
                   std::to_string(argTypes.size()));
     } else {
       for (size_t i = 0; i < argTypes.size(); ++i) {
@@ -387,15 +399,15 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
           continue;
         if (!S.isAssignable(expectedParams[i], argTypes[i]))
           S.error(node->getArguments()[i]->getLocation(),
-                  "argument " + std::to_string(i + 1) +
-                      " of '" + names::kMethodSuper + "' has type '" +
+                  "argument " + std::to_string(i + 1) + " of '" +
+                      names::kMethodSuper + "' has type '" +
                       typeName(argTypes[i]) + "', expected '" +
                       typeName(expectedParams[i]) + "'");
       }
     }
-  S.CurrentClassCtx->SuperInitCalled = true;
-  return S.Ctx.getVoidTy();
-}
+    S.CurrentClassCtx->SuperInitCalled = true;
+    return S.Ctx.getVoidTy();
+  }
 
   const auto *sig = S.lookupFunction(node->getCalleeName());
   if (!sig) {
@@ -408,8 +420,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     if (argTypes.size() < sig->ParamTypes.size()) {
       S.error(node->getLocation(),
               "function '" + node->getCalleeName() + "' requires at least " +
-                  std::to_string(sig->ParamTypes.size()) + " argument(s), got " +
-                  std::to_string(argTypes.size()));
+                  std::to_string(sig->ParamTypes.size()) +
+                  " argument(s), got " + std::to_string(argTypes.size()));
       return sig->ReturnType;
     }
   } else if (argTypes.size() != sig->ParamTypes.size()) {
@@ -426,7 +438,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
       continue; // already reported
     // For variadic functions, extra arguments are checked against the
     // last declared parameter type.
-    size_t paramIdx = (i < sig->ParamTypes.size()) ? i : sig->ParamTypes.size() - 1;
+    size_t paramIdx =
+        (i < sig->ParamTypes.size()) ? i : sig->ParamTypes.size() - 1;
 
     if (!S.isAssignable(sig->ParamTypes[paramIdx], argTypes[i])) {
       S.error(node->getArguments()[i]->getLocation(),
@@ -466,9 +479,8 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   std::string ownerName = ct->getName();
 
   if (!method) {
-    S.error(node->getLocation(),
-            "no method '" + node->getMethodName() + "' on type '" +
-                ownerName + "'");
+    S.error(node->getLocation(), "no method '" + node->getMethodName() +
+                                     "' on type '" + ownerName + "'");
     return nullptr;
   }
 
@@ -488,9 +500,8 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     if (!S.isAssignable(paramTys[i], argTy)) {
       S.error(node->getArguments()[i]->getLocation(),
               "argument " + std::to_string(i + 1) + " of '" +
-                  node->getMethodName() + "' has type '" +
-                  typeName(argTy) + "', expected '" +
-                  typeName(paramTys[i]) + "'");
+                  node->getMethodName() + "' has type '" + typeName(argTy) +
+                  "', expected '" + typeName(paramTys[i]) + "'");
     }
   }
 
@@ -510,16 +521,17 @@ ast::ClassType *Sema::findLowestCommonAncestor(ast::ClassType *a,
   return nullptr;
 }
 
-ast::Type *Sema::ExprChecker::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
+ast::Type *
+Sema::ExprChecker::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
   auto *recvTy = visit(node->getReceiver());
   if (!recvTy)
     return nullptr;
 
   auto *ct = ast::dyn_cast<ast::ClassType>(recvTy);
   if (!ct) {
-    S.error(node->getLocation(),
-            "member access '." + node->getFieldName() +
-                "' on non-class type '" + typeName(recvTy) + "'");
+    S.error(node->getLocation(), "member access '." + node->getFieldName() +
+                                     "' on non-class type '" +
+                                     typeName(recvTy) + "'");
     return nullptr;
   }
 
@@ -533,18 +545,19 @@ ast::Type *Sema::ExprChecker::visitMemberAccessExpr(ast::MemberAccessExpr *node)
     }
   }
 
-  S.error(node->getLocation(),
-          "no field '" + node->getFieldName() + "' in class '" +
-              ct->getName() + "'");
+  S.error(node->getLocation(), "no field '" + node->getFieldName() +
+                                   "' in class '" + ct->getName() + "'");
   return nullptr;
 }
 
-ast::Type *Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
+ast::Type *
+Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
   // Empty literal [] is valid only where an explicit array type annotation is
   // present (e.g. a: int[] = []).  Return ArrayType(void) as a sentinel;
   // isAssignable() treats it as compatible with any array destination.
   if (node->isEmpty()) {
-    auto *arrTy = S.Ctx.make<ast::ArrayType>(node->getLocation(), S.Ctx.getVoidTy());
+    auto *arrTy =
+        S.Ctx.make<ast::ArrayType>(node->getLocation(), S.Ctx.getVoidTy());
     node->setResolvedType(arrTy);
     return arrTy;
   }
@@ -553,7 +566,8 @@ ast::Type *Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node)
   ast::Type *elemTy = nullptr;
   for (size_t i = 0; i < node->getNumElements(); ++i) {
     auto *ty = visit(node->getElements()[i]);
-    if (!ty) return nullptr;
+    if (!ty)
+      return nullptr;
     if (!elemTy) {
       elemTy = ty;
     } else if (!typesEqual(elemTy, ty)) {
@@ -586,7 +600,8 @@ ast::Type *Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node)
 
 ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
   auto *arrayTy = visit(node->getArray());
-  if (!arrayTy) return nullptr;
+  if (!arrayTy)
+    return nullptr;
 
   // String subscript: str[idx] -> char
   if (arrayTy == S.Ctx.getStrTy()) {
@@ -600,13 +615,14 @@ ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
 
   auto *at = ast::dyn_cast<ast::ArrayType>(arrayTy);
   if (!at) {
-    S.error(node->getLocation(),
-            "subscript '[]' applied to non-array type '" + typeName(arrayTy) + "'");
+    S.error(node->getLocation(), "subscript '[]' applied to non-array type '" +
+                                     typeName(arrayTy) + "'");
     return nullptr;
   }
 
   auto *idxTy = visit(node->getIndex());
-  if (!idxTy) return nullptr;
+  if (!idxTy)
+    return nullptr;
   if (idxTy != S.Ctx.getIntTy()) {
     S.error(node->getIndex()->getLocation(),
             "array index must be 'int', got '" + typeName(idxTy) + "'");
@@ -626,8 +642,7 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
 
   if (condTy != S.Ctx.getBoolTy()) {
     S.error(node->getCondition()->getLocation(),
-            "ternary condition must be 'bool', got '" +
-                typeName(condTy) + "'");
+            "ternary condition must be 'bool', got '" + typeName(condTy) + "'");
     return nullptr;
   }
 
@@ -637,7 +652,7 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
   }
 
   // For class types, find the lowest common ancestor in the hierarchy.
-  auto *trueCT  = ast::dyn_cast<ast::ClassType>(trueTy);
+  auto *trueCT = ast::dyn_cast<ast::ClassType>(trueTy);
   auto *falseCT = ast::dyn_cast<ast::ClassType>(falseTy);
   if (trueCT && falseCT) {
     if (auto *lca = S.findLowestCommonAncestor(trueCT, falseCT)) {
@@ -646,14 +661,11 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
     }
   }
 
-  S.error(node->getLocation(),
-          "ternary branches have incompatible types '" +
-              typeName(trueTy) + "' and '" +
-              typeName(falseTy) + "'");
+  S.error(node->getLocation(), "ternary branches have incompatible types '" +
+                                   typeName(trueTy) + "' and '" +
+                                   typeName(falseTy) + "'");
   return nullptr;
 }
-
-
 
 // -- Entry point -------------------------------------------------------------
 
@@ -662,26 +674,26 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
   AccumulatedImportContexts.clear();
 
   // Bootstrap builtin functions — print/println take any object.
-  declareFunction(names::kPrint,       Ctx.getVoidTy(), {Ctx.getObjTy()},
+  declareFunction(names::kPrint, Ctx.getVoidTy(), {Ctx.getObjTy()},
                   /*variadic=*/true, /*builtin=*/true);
-  declareFunction(names::kPrintln,     Ctx.getVoidTy(), {Ctx.getObjTy()},
+  declareFunction(names::kPrintln, Ctx.getVoidTy(), {Ctx.getObjTy()},
                   /*variadic=*/true, /*builtin=*/true);
-  declareFunction(names::kErrPrint,    Ctx.getVoidTy(), {Ctx.getObjTy()},
+  declareFunction(names::kErrPrint, Ctx.getVoidTy(), {Ctx.getObjTy()},
                   /*variadic=*/true, /*builtin=*/true);
-  declareFunction(names::kErrPrintln,  Ctx.getVoidTy(), {Ctx.getObjTy()},
+  declareFunction(names::kErrPrintln, Ctx.getVoidTy(), {Ctx.getObjTy()},
                   /*variadic=*/true, /*builtin=*/true);
 
-  // Register type-conversion builtins (take unique builtin types — no ownership check needed).
+  // Register type-conversion builtins (take unique builtin types — no ownership
+  // check needed).
   auto *StrTy = Ctx.getStrTy();
-  declareFunction(names::kStrInt,   StrTy, {Ctx.getIntTy()},   false, true);
+  declareFunction(names::kStrInt, StrTy, {Ctx.getIntTy()}, false, true);
   declareFunction(names::kStrFloat, StrTy, {Ctx.getFloatTy()}, false, true);
-  declareFunction(names::kStrBool,  StrTy, {Ctx.getBoolTy()},  false, true);
-  declareFunction(names::kStrChar,  StrTy, {Ctx.getCharTy()},  false, true);
-  declareFunction(names::kString,      StrTy, {StrTy},
-                  false, true);
-  declareFunction(names::kOpen,     Ctx.getObjTy(), {StrTy, StrTy}, false, true);
-  declareFunction(names::kIntStr,   Ctx.getObjTy(), {StrTy},        false, true);
-  declareFunction(names::kFloatStr, Ctx.getObjTy(), {StrTy},        false, true);
+  declareFunction(names::kStrBool, StrTy, {Ctx.getBoolTy()}, false, true);
+  declareFunction(names::kStrChar, StrTy, {Ctx.getCharTy()}, false, true);
+  declareFunction(names::kString, StrTy, {StrTy}, false, true);
+  declareFunction(names::kOpen, Ctx.getObjTy(), {StrTy, StrTy}, false, true);
+  declareFunction(names::kIntStr, Ctx.getObjTy(), {StrTy}, false, true);
+  declareFunction(names::kFloatStr, Ctx.getObjTy(), {StrTy}, false, true);
 
   // Process imports before local declarations.
   llvm::StringSet<> localImportStack;
@@ -691,8 +703,13 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
     processImport(imp);
 
   visit(tu);
-  return SemaContext{nullptr, &Ctx, nullptr, !Diags.hasErrors(), Diags.getErrorCount(),
-                     Diags.getDiagnostics(), std::move(AccumulatedImportContexts)};
+  return SemaContext{nullptr,
+                     &Ctx,
+                     nullptr,
+                     !Diags.hasErrors(),
+                     Diags.getErrorCount(),
+                     Diags.getDiagnostics(),
+                     std::move(AccumulatedImportContexts)};
 }
 
 // -- Top-level ---------------------------------------------------------------
@@ -754,9 +771,8 @@ bool Sema::visitEnumDecl(ast::EnumDecl *node) {
   llvm::StringSet<> seen;
   for (const auto *variant : node->getVariants()) {
     if (!seen.insert(*variant).second) {
-      error(node->getLocation(),
-            "duplicate variant '" + *variant + "' in enum '" +
-                node->getName() + "'");
+      error(node->getLocation(), "duplicate variant '" + *variant +
+                                     "' in enum '" + node->getName() + "'");
       ok = false;
       continue;
     }
@@ -777,9 +793,7 @@ bool Sema::visitCompoundStmt(ast::CompoundStmt *node) {
   return ok;
 }
 
-bool Sema::visitDeclStmt(ast::DeclStmt *node) {
-  return visit(node->getDecl());
-}
+bool Sema::visitDeclStmt(ast::DeclStmt *node) { return visit(node->getDecl()); }
 
 bool Sema::visitExprStmt(ast::ExprStmt *node) {
   // Type-check the expression; we discard the type.
@@ -794,11 +808,10 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   // Guard: the target name must not shadow a registered type name.
   const auto &varName = node->getVarName();
   if (Ctx.lookupClassType(varName) || Ctx.lookupEnumType(varName) ||
-      varName == names::kObj     || varName == names::kString ||
-      varName == names::kFile    ||
-      varName == names::kTypeInt || varName == names::kTypeBool ||
-      varName == names::kTypeFloat || varName == names::kTypeChar ||
-      varName == names::kStdin) {
+      varName == names::kObj || varName == names::kString ||
+      varName == names::kFile || varName == names::kTypeInt ||
+      varName == names::kTypeBool || varName == names::kTypeFloat ||
+      varName == names::kTypeChar || varName == names::kStdin) {
     error(node->getLocation(),
           "'" + varName + "' is a type name and cannot be used as a variable");
     return false;
@@ -823,7 +836,8 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
 
   auto *varTy = owner->lookup(varName);
 
-  // Reject empty array literal when the target type can't supply the element type.
+  // Reject empty array literal when the target type can't supply the element
+  // type.
   if (auto *at = ast::dyn_cast<ast::ArrayType>(valTy)) {
     if (at->getElementType() == Ctx.getVoidTy() &&
         !ast::isa<ast::ArrayType>(varTy)) {
@@ -835,10 +849,10 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   }
 
   if (!isAssignable(varTy, valTy)) {
-    error(node->getLocation(),
-          "cannot assign value of type '" + typeName(valTy) +
-              "' to variable '" + varName + "' of type '" +
-              typeName(varTy) + "'");
+    error(node->getLocation(), "cannot assign value of type '" +
+                                   typeName(valTy) + "' to variable '" +
+                                   varName + "' of type '" + typeName(varTy) +
+                                   "'");
     return false;
   }
 
@@ -851,18 +865,16 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
     if (!valTy)
       return false;
     if (CurrentReturnType && !isAssignable(CurrentReturnType, valTy)) {
-      error(node->getLocation(),
-            "return value of type '" + typeName(valTy) +
-                "' does not match function return type '" +
-                typeName(CurrentReturnType) + "'");
+      error(node->getLocation(), "return value of type '" + typeName(valTy) +
+                                     "' does not match function return type '" +
+                                     typeName(CurrentReturnType) + "'");
       return false;
     }
     return true;
   }
   // void return
   if (CurrentReturnType && CurrentReturnType != Ctx.getVoidTy()) {
-    error(node->getLocation(),
-          "non-void function must return a value");
+    error(node->getLocation(), "non-void function must return a value");
     return false;
   }
   return true;
@@ -875,8 +887,7 @@ bool Sema::visitIfStmt(ast::IfStmt *node) {
     return false;
   if (condTy != Ctx.getBoolTy()) {
     error(node->getCondition()->getLocation(),
-          "if condition must be 'bool', got '" +
-              typeName(condTy) + "'");
+          "if condition must be 'bool', got '" + typeName(condTy) + "'");
     return false;
   }
 
@@ -899,8 +910,7 @@ bool Sema::visitWhileStmt(ast::WhileStmt *node) {
     return false;
   if (condTy != Ctx.getBoolTy()) {
     error(node->getCondition()->getLocation(),
-          "while condition must be 'bool', got '" +
-              typeName(condTy) + "'");
+          "while condition must be 'bool', got '" + typeName(condTy) + "'");
     return false;
   }
 
@@ -1040,13 +1050,13 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
       if (!visit(stmt))
         ok = false;
     CurrentReturnType = savedRetTy;
-    if (!ok) return false;
+    if (!ok)
+      return false;
     // Non-void functions must always return a value on every path.
     if (retTy != Ctx.getVoidTy() &&
         !detail::blockAlwaysReturns(node->getBody()->getStatements())) {
-      error(node->getLocation(),
-            "non-void function '" + node->getName() +
-                "' does not always return a value");
+      error(node->getLocation(), "non-void function '" + node->getName() +
+                                     "' does not always return a value");
       return false;
     }
   }
@@ -1098,10 +1108,10 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
         }
       }
       if (!isAssignable(declTy, initTy)) {
-        error(node->getLocation(),
-              "initializer of type '" + typeName(initTy) +
-                  "' does not match declared type '" + typeName(declTy) +
-                  "' for variable '" + node->getName() + "'");
+        error(node->getLocation(), "initializer of type '" + typeName(initTy) +
+                                       "' does not match declared type '" +
+                                       typeName(declTy) + "' for variable '" +
+                                       node->getName() + "'");
         CurrentScope->set(node->getName(), declTy);
         return false;
       }
@@ -1111,7 +1121,8 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
       // this, codegen cannot tell an empty `Obj[]` from an empty `int[]` and
       // emits a primitive array whose destructor never releases the elements
       // pushed into it later — a leak.
-      if (auto *lit = ast::dyn_cast<ast::ArrayLiteralExpr>(node->getInitExpr())) {
+      if (auto *lit =
+              ast::dyn_cast<ast::ArrayLiteralExpr>(node->getInitExpr())) {
         if (lit->isEmpty() && ast::isa<ast::ArrayType>(declTy))
           lit->setResolvedType(declTy);
       }
@@ -1128,7 +1139,6 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
       }
       declTy = initTy;
     }
-
   }
 
   if (!declTy) {
@@ -1151,9 +1161,9 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
 
   auto *ct = ast::dyn_cast<ast::ClassType>(recvTy);
   if (!ct) {
-    error(node->getLocation(),
-          "member assignment '." + node->getFieldName() +
-              "' on non-class type '" + typeName(recvTy) + "'");
+    error(node->getLocation(), "member assignment '." + node->getFieldName() +
+                                   "' on non-class type '" + typeName(recvTy) +
+                                   "'");
     return false;
   }
 
@@ -1171,9 +1181,8 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
   }
 
   if (!fieldTy) {
-    error(node->getLocation(),
-          "no field '" + node->getFieldName() + "' in class '" +
-              ct->getName() + "'");
+    error(node->getLocation(), "no field '" + node->getFieldName() +
+                                   "' in class '" + ct->getName() + "'");
     return false;
   }
 
@@ -1183,9 +1192,8 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
 
   if (!isAssignable(fieldTy, valTy)) {
     error(node->getLocation(),
-          "cannot assign value of type '" + typeName(valTy) +
-              "' to field '" + node->getFieldName() + "' of type '" +
-              typeName(fieldTy) + "'");
+          "cannot assign value of type '" + typeName(valTy) + "' to field '" +
+              node->getFieldName() + "' of type '" + typeName(fieldTy) + "'");
     return false;
   }
 
@@ -1194,7 +1202,8 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
 
 bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   auto *arrTy = resolveExprType(node->getArray());
-  if (!arrTy) return false;
+  if (!arrTy)
+    return false;
   auto *at = ast::dyn_cast<ast::ArrayType>(arrTy);
   if (!at) {
     error(node->getLocation(),
@@ -1207,11 +1216,12 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
           "array index must be int, got '" + typeName(idxTy) + "'");
   }
   auto *valTy = resolveExprType(node->getValue());
-  if (!valTy) return false;
+  if (!valTy)
+    return false;
   if (!isAssignable(at->getElementType(), valTy)) {
-    error(node->getLocation(),
-          "cannot assign value of type '" + typeName(valTy) +
-              "' to array of '" + typeName(at->getElementType()) + "'");
+    error(node->getLocation(), "cannot assign value of type '" +
+                                   typeName(valTy) + "' to array of '" +
+                                   typeName(at->getElementType()) + "'");
   }
   return true;
 }
@@ -1229,7 +1239,8 @@ bool Sema::checkValueMatch(ast::MatchStmt *node, ast::Type *subjectTy) {
 
   for (ast::MatchArm *arm : node->getArms()) {
     if (seenWildcard) {
-      error(arm->getLocation(), "unreachable arm: wildcard '_' must be the last arm");
+      error(arm->getLocation(),
+            "unreachable arm: wildcard '_' must be the last arm");
       ok = false;
       continue;
     }
@@ -1247,9 +1258,10 @@ bool Sema::checkValueMatch(ast::MatchStmt *node, ast::Type *subjectTy) {
       }
       auto *litTy = resolveExprType(arm->getLiteralPattern());
       if (litTy && !typesEqual(litTy, subjectTy)) {
-        error(arm->getLocation(),
-              "match arm literal of type '" + typeName(litTy) +
-                  "' does not match subject type '" + typeName(subjectTy) + "'");
+        error(arm->getLocation(), "match arm literal of type '" +
+                                      typeName(litTy) +
+                                      "' does not match subject type '" +
+                                      typeName(subjectTy) + "'");
         ok = false;
       }
     } else {
@@ -1261,7 +1273,8 @@ bool Sema::checkValueMatch(ast::MatchStmt *node, ast::Type *subjectTy) {
     }
 
     for (auto *stmt : arm->getBody()->getStatements())
-      if (!visit(stmt)) ok = false;
+      if (!visit(stmt))
+        ok = false;
   }
 
   return ok;
@@ -1277,7 +1290,8 @@ bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
 
   for (ast::MatchArm *arm : node->getArms()) {
     if (seenWildcard) {
-      error(arm->getLocation(), "unreachable arm: wildcard '_' must be the last arm");
+      error(arm->getLocation(),
+            "unreachable arm: wildcard '_' must be the last arm");
       ok = false;
       continue;
     }
@@ -1303,9 +1317,9 @@ bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
       else if (auto *et = ast::dyn_cast<ast::EnumType>(arm->getArmType()))
         variant = et->getName();
       if (variant.empty() || subjectTy->findVariant(variant) < 0) {
-        error(arm->getLocation(),
-              "'" + variant + "' is not a variant of enum '" +
-                  subjectTy->getName() + "'");
+        error(arm->getLocation(), "'" + variant +
+                                      "' is not a variant of enum '" +
+                                      subjectTy->getName() + "'");
         ok = false;
       } else if (!seenVariants.insert(variant).second) {
         error(arm->getLocation(),
@@ -1315,7 +1329,8 @@ bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
     }
 
     for (auto *stmt : arm->getBody()->getStatements())
-      if (!visit(stmt)) ok = false;
+      if (!visit(stmt))
+        ok = false;
   }
 
   return ok;
@@ -1333,8 +1348,8 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
   // (int/float/bool/char) or to Str.  In value-mode, arms compare the subject
   // against literal patterns instead of dispatching on runtime type.  Str is a
   // ClassType internally, so it is steered into value-mode explicitly.
-  bool valueMode = ast::isa<ast::BuiltinType>(subjectTy) ||
-                   subjectTy == Ctx.getStrTy();
+  bool valueMode =
+      ast::isa<ast::BuiltinType>(subjectTy) || subjectTy == Ctx.getStrTy();
   if (valueMode)
     return checkValueMatch(node, subjectTy);
 
@@ -1343,19 +1358,21 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
   if (auto *enumTy = ast::dyn_cast<ast::EnumType>(subjectTy))
     return checkEnumMatch(node, enumTy);
 
-  // The subject must be a class type — matching on other builtins is not supported.
+  // The subject must be a class type — matching on other builtins is not
+  // supported.
   auto *subjectCt = ast::dyn_cast<ast::ClassType>(subjectTy);
   if (!subjectCt) {
     error(node->getSubject()->getLocation(),
-          "match subject must be a class type, got '" +
-              typeName(subjectTy) + "'");
+          "match subject must be a class type, got '" + typeName(subjectTy) +
+              "'");
     return false;
   }
 
   // Helper: return true if `sub` is a subclass of (or equal to) `super`.
   auto isSubclassOf = [](ast::ClassType *sub, ast::ClassType *super) -> bool {
     for (auto *c = sub; c; c = c->getSuperClass())
-      if (c == super) return true;
+      if (c == super)
+        return true;
     return false;
   };
 
@@ -1364,7 +1381,8 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
 
   for (ast::MatchArm *arm : node->getArms()) {
     if (seenWildcard) {
-      error(arm->getLocation(), "unreachable arm: wildcard '_' must be the last arm");
+      error(arm->getLocation(),
+            "unreachable arm: wildcard '_' must be the last arm");
       ok = false;
       continue;
     }
@@ -1381,20 +1399,25 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
                 "' requires type-name arms, not literal patterns");
       ok = false;
       for (auto *stmt : arm->getBody()->getStatements())
-        if (!visit(stmt)) ok = false;
+        if (!visit(stmt))
+          ok = false;
       continue;
     } else {
       // 2. Resolve the arm's type annotation.
-      auto *resolvedArmTy = resolveType(arm->getArmType(), arm->getLocation(), "match arm");
+      auto *resolvedArmTy =
+          resolveType(arm->getArmType(), arm->getLocation(), "match arm");
       arm->setArmType(resolvedArmTy); // write canonical pointer back
-      auto *armCt = resolvedArmTy ? ast::dyn_cast<ast::ClassType>(resolvedArmTy) : nullptr;
-      auto *armAt = resolvedArmTy ? ast::dyn_cast<ast::ArrayType>(resolvedArmTy) : nullptr;
+      auto *armCt = resolvedArmTy ? ast::dyn_cast<ast::ClassType>(resolvedArmTy)
+                                  : nullptr;
+      auto *armAt = resolvedArmTy ? ast::dyn_cast<ast::ArrayType>(resolvedArmTy)
+                                  : nullptr;
       if (!armCt && !armAt) {
         // Only emit a secondary diagnostic if resolution succeeded but the
         // type is not a class or array. If resolveType already emitted
         // "unknown type", resolvedArmTy is null and that's enough.
         if (resolvedArmTy)
-          error(arm->getLocation(), "match arm type must be a class or array type");
+          error(arm->getLocation(),
+                "match arm type must be a class or array type");
         ok = false;
         // Still try to visit the body to surface further errors.
       } else if (armAt) {
@@ -1408,7 +1431,8 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
         }
         if (arm->hasBinding()) {
           if (!CurrentScope->declare(arm->getBinding(), armAt)) {
-            error(arm->getLocation(), "redeclaration of '" + arm->getBinding() + "' in match arm");
+            error(arm->getLocation(),
+                  "redeclaration of '" + arm->getBinding() + "' in match arm");
             ok = false;
           }
         }
@@ -1418,15 +1442,17 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
         //    descends from Obj; the subjectCt == Ctx.getObjTy() case passes
         //    trivially because every armCt IS a subclass of Obj.)
         if (!isSubclassOf(armCt, subjectCt)) {
-          error(arm->getLocation(), "type '" + typeName(armCt) + "' is not a subclass of '" +
-                             subjectCt->getName() + "'");
+          error(arm->getLocation(), "type '" + typeName(armCt) +
+                                        "' is not a subclass of '" +
+                                        subjectCt->getName() + "'");
           ok = false;
         }
 
         // 4. Declare the binding variable with the narrowed (arm) type.
         if (arm->hasBinding()) {
           if (!CurrentScope->declare(arm->getBinding(), armCt)) {
-            error(arm->getLocation(), "redeclaration of '" + arm->getBinding() + "' in match arm");
+            error(arm->getLocation(),
+                  "redeclaration of '" + arm->getBinding() + "' in match arm");
             ok = false;
           }
         }
@@ -1435,7 +1461,8 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
 
     // 5. Recursively type-check the arm body.
     for (auto *stmt : arm->getBody()->getStatements())
-      if (!visit(stmt)) ok = false;
+      if (!visit(stmt))
+        ok = false;
   }
 
   return ok;

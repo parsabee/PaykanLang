@@ -25,7 +25,8 @@ static std::string withFns(const std::string &fns, const std::string &body) {
 TEST(Class, EmptyClassInstantiate) {
   auto r = compileAndRun(withFns(R"(
     class Empty {}
-  )", R"(
+  )",
+                                 R"(
     e: Empty = Empty();
     println("ok");
   )"));
@@ -42,7 +43,8 @@ TEST(Class, InitStoresIntField) {
         self.count = n;
       }
     }
-  )", R"(
+  )",
+                                 R"(
     c: Counter = Counter(42);
     println(StrInt(c.count));
   )"));
@@ -56,7 +58,8 @@ TEST(Class, FieldDefaultZero) {
     class Box {
       val: int;
     }
-  )", R"(
+  )",
+                                 R"(
     b: Box = Box();
     println(StrInt(b.val));
   )"));
@@ -73,7 +76,8 @@ TEST(Class, FieldReadWrite) {
       x: int;
       y: int;
     }
-  )", R"(
+  )",
+                                 R"(
     p: Point = Point();
     p.x = 3;
     p.y = 7;
@@ -97,7 +101,8 @@ TEST(Class, MultipleIntFields) {
         self.c = z;
       }
     }
-  )", R"(
+  )",
+                                 R"(
     t: Triple = Triple(1, 2, 3);
     println(StrInt(t.a));
     println(StrInt(t.b));
@@ -116,7 +121,8 @@ TEST(Class, StrField) {
         self.msg = s;
       }
     }
-  )", R"(
+  )",
+                                 R"(
     g: Greeter = Greeter("hello");
     println(g.msg);
   )"));
@@ -132,7 +138,8 @@ TEST(Class, FieldReassign) {
       fn __init__(v: int) { self.val = v; }
       fn set(v: int) { self.val = v; }
     }
-  )", R"(
+  )",
+                                 R"(
     m: Mutable = Mutable(10);
     m.set(99);
     println(StrInt(m.val));
@@ -151,7 +158,8 @@ TEST(Class, MethodReturnsField) {
       fn __init__(v: int) { self.x = v; }
       fn get() -> int { return self.x; }
     }
-  )", R"(
+  )",
+                                 R"(
     f: Foo = Foo(7);
     println(StrInt(f.get()));
   )"));
@@ -166,7 +174,8 @@ TEST(Class, MethodWithParam) {
       total: int;
       fn add(n: int) { self.total = self.total + n; }
     }
-  )", R"(
+  )",
+                                 R"(
     a: Acc = Acc();
     a.add(5);
     a.add(3);
@@ -185,7 +194,8 @@ TEST(Class, MethodComputed) {
       fn __init__(w: int, h: int) { self.w = w; self.h = h; }
       fn area() -> int { return self.w * self.h; }
     }
-  )", R"(
+  )",
+                                 R"(
     r: Rect = Rect(4, 5);
     println(StrInt(r.area()));
   )"));
@@ -200,7 +210,8 @@ TEST(Class, TwoInstancesIndependent) {
       n: int;
       fn __init__(v: int) { self.n = v; }
     }
-  )", R"(
+  )",
+                                 R"(
     a: Val = Val(1);
     b: Val = Val(2);
     println(StrInt(a.n));
@@ -222,7 +233,8 @@ TEST(Class, InheritedField) {
     class Dog : Animal {
       fn __init__(n: Str) { __super__(n); }
     }
-  )", R"(
+  )",
+                                 R"(
     d: Dog = Dog("Rex");
     println(d.name);
   )"));
@@ -244,7 +256,8 @@ TEST(Class, SubclassOwnField) {
         self.y = w;
       }
     }
-  )", R"(
+  )",
+                                 R"(
     c: Child = Child(3, 4);
     println(StrInt(c.x));
     println(StrInt(c.y));
@@ -262,7 +275,8 @@ TEST(Class, MethodOverride) {
     class Circle : Shape {
       fn describe() -> Str { return "circle"; }
     }
-  )", R"(
+  )",
+                                 R"(
     c: Circle = Circle();
     println(c.describe());
   )"));
@@ -284,7 +298,8 @@ TEST(Class, SuperInit) {
         self.brand = b;
       }
     }
-  )", R"(
+  )",
+                                 R"(
     car: Car = Car(120, "Toyota");
     println(StrInt(car.speed));
     println(car.brand);
@@ -306,7 +321,8 @@ TEST(Class, ThreeLevelInheritance) {
     class C : B {
       fn __init__(v: int) { __super__(v); }
     }
-  )", R"(
+  )",
+                                 R"(
     c: C = C(99);
     println(StrInt(c.val));
   )"));
@@ -325,7 +341,8 @@ TEST(Class, InheritedMethod) {
     class Sub : Base {
       fn __init__(v: int) { __super__(v); }
     }
-  )", R"(
+  )",
+                                 R"(
     s: Sub = Sub(6);
     println(StrInt(s.doubled()));
   )"));
@@ -345,7 +362,8 @@ TEST(Class, PassToFunction) {
     fn show(n: Num) {
       println(StrInt(n.v));
     }
-  )", R"(
+  )",
+                                 R"(
     x: Num = Num(55);
     show(x);
   )"));
@@ -364,7 +382,8 @@ TEST(Class, ReturnClassFromFunction) {
     fn makePair(x: int, y: int) -> Pair {
       return Pair(x, y);
     }
-  )", R"(
+  )",
+                                 R"(
     p: Pair = makePair(3, 7);
     println(StrInt(p.a));
     println(StrInt(p.b));
@@ -387,7 +406,8 @@ TEST(Class, MethodWithIfElse) {
         }
       }
     }
-  )", R"(
+  )",
+                                 R"(
     s: Sign = Sign();
     println(s.of(5));
     println(s.of(-3));
@@ -409,7 +429,8 @@ TEST(Class, MethodWithLoop) {
         }
       }
     }
-  )", R"(
+  )",
+                                 R"(
     s: Summer = Summer();
     s.sumTo(5);
     println(StrInt(s.total));
@@ -510,7 +531,8 @@ TEST(MatchCodeGen, BindingIntField) {
       h: int;
       fn __init__(a: int, b: int) { __super__(); self.w = a; self.h = b; }
     }
-  )", R"(
+  )",
+                                 R"(
     s: Shape = Rect(4, 5);
     match s {
       r: Rect { println(StrInt(r.w)); println(StrInt(r.h)); }
@@ -587,7 +609,8 @@ TEST(MatchCodeGen, MatchInFunction) {
       }
       return "unreachable";
     }
-  )", R"(
+  )",
+                                 R"(
     println(describe(Dog()));
     println(describe(Cat()));
     println(describe(Bird()));
@@ -624,7 +647,8 @@ TEST(MatchCodeGen, ControlFlowInArm) {
       val: int;
       fn __init__(v: int) { __super__(); self.val = v; }
     }
-  )", R"(
+  )",
+                                 R"(
     n: Node = Leaf(7);
     match n {
       leaf: Leaf {
@@ -648,7 +672,8 @@ TEST(MatchCodeGen, SubjectIsCallExpr) {
       if (kind == 1) { return Dog(); }
       return Cat();
     }
-  )", R"(
+  )",
+                                 R"(
     match makeAnimal(1) {
       Dog { println("dog"); }
       Cat { println("cat"); }
@@ -670,7 +695,8 @@ TEST(MatchCodeGen, DeepInheritanceExactType) {
     class A { fn __init__() {} }
     class B : A { fn __init__() { __super__(); } }
     class C : B { fn __init__() { __super__(); } }
-  )", R"(
+  )",
+                                 R"(
     x: A = A();
     match x {
       C { println("C"); }
@@ -794,25 +820,23 @@ TEST(MatchCodeGen, BoolValueMatch) {
 // ============================================================================
 
 TEST(Class, MethodCallsFreeFunctionDefinedBefore) {
-  auto r = compileAndRun(
-      "fn helper() -> int { return 7; }\n"
-      "class C {\n"
-      "  fn __init__() {}\n"
-      "  fn get() -> int { return helper(); }\n"
-      "}\n" +
-      wrapMain("c: C = C();\n  println(StrInt(c.get()));"));
+  auto r = compileAndRun("fn helper() -> int { return 7; }\n"
+                         "class C {\n"
+                         "  fn __init__() {}\n"
+                         "  fn get() -> int { return helper(); }\n"
+                         "}\n" +
+                         wrapMain("c: C = C();\n  println(StrInt(c.get()));"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "7\n");
 }
 
 TEST(Class, MethodCallsFreeFunctionDefinedAfter) {
-  auto r = compileAndRun(
-      "class C {\n"
-      "  fn __init__() {}\n"
-      "  fn get() -> int { return helper(); }\n"
-      "}\n"
-      "fn helper() -> int { return 42; }\n" +
-      wrapMain("c: C = C();\n  println(StrInt(c.get()));"));
+  auto r = compileAndRun("class C {\n"
+                         "  fn __init__() {}\n"
+                         "  fn get() -> int { return helper(); }\n"
+                         "}\n"
+                         "fn helper() -> int { return 42; }\n" +
+                         wrapMain("c: C = C();\n  println(StrInt(c.get()));"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "42\n");
 }

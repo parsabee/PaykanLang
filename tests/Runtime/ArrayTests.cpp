@@ -14,9 +14,7 @@ extern "C" {
 // ============================================================================
 
 // Wrap a raw object in a fresh PaykanShared* (refcount=1).
-static PaykanShared *wrap(PaykanObject *obj) {
-  return PaykanShared_new(obj);
-}
+static PaykanShared *wrap(PaykanObject *obj) { return PaykanShared_new(obj); }
 
 // ============================================================================
 // PaykanArray_new — primitive arrays
@@ -227,7 +225,7 @@ TEST(ArrayToString, ContainsLenAndAddress) {
   ASSERT_NE(s, nullptr);
   // Output should contain "Array@" and "len=4".
   EXPECT_NE(std::string(s->data).find("Array@"), std::string::npos);
-  EXPECT_NE(std::string(s->data).find("len=4"),  std::string::npos);
+  EXPECT_NE(std::string(s->data).find("len=4"), std::string::npos);
   Paykan_release(shared);
   PaykanArray_destroy((PaykanObject *)arr);
 }
@@ -411,7 +409,7 @@ TEST(ArrayPop, ShrinksWhenLenHalfOfCap) {
 TEST(ArrayPop, ShrinkToZeroFreesBuffer) {
   PaykanArray *arr = PaykanArray_new(0);
   PaykanArray_push(arr, i64vp(5)); // len=1, cap=1
-  PaykanArray_pop(arr);             // len=0 -> shrink: free buffer, cap=0
+  PaykanArray_pop(arr);            // len=0 -> shrink: free buffer, cap=0
   EXPECT_EQ(arr->len, 0UL);
   EXPECT_EQ(arr->cap, 0UL);
   EXPECT_EQ(arr->data, nullptr);
@@ -465,12 +463,12 @@ TEST(ArrayPopObj, ReturnsElementAndReleasesSlot) {
   PaykanArray *arr = PaykanArray_new_obj(0);
   PaykanShared *s = wrap(PaykanObject_new());
   PaykanArray_push_obj(arr, s); // arr retains -> refcount 2
-  Paykan_release(s);             // drop our ref; arr holds the only one
+  Paykan_release(s);            // drop our ref; arr holds the only one
 
   PaykanShared *got = PaykanArray_pop_obj(arr); // returned, not released
   EXPECT_EQ(got, s);
   EXPECT_EQ(got->refCount, 1); // ownership transferred to caller
-  Paykan_release(got);          // caller drops it
+  Paykan_release(got);         // caller drops it
 
   EXPECT_EQ(arr->len, 0UL);
   PaykanArray_destroy_obj((PaykanObject *)arr);
@@ -489,10 +487,12 @@ TEST(ArrayPopObj, ShrinksWhenLenHalfOfCap) {
   for (int i = 0; i < 4; ++i)
     Paykan_release(elems[i]);
 
-  PaykanShared *v3 = PaykanArray_pop_obj(arr); Paykan_release(v3); // len=3
+  PaykanShared *v3 = PaykanArray_pop_obj(arr);
+  Paykan_release(v3);       // len=3
   EXPECT_EQ(arr->cap, 4UL); // not yet half
 
-  PaykanShared *v2 = PaykanArray_pop_obj(arr); Paykan_release(v2); // len=2 == cap/2 -> shrink
+  PaykanShared *v2 = PaykanArray_pop_obj(arr);
+  Paykan_release(v2); // len=2 == cap/2 -> shrink
   EXPECT_EQ(arr->len, 2UL);
   EXPECT_EQ(arr->cap, 2UL);
 

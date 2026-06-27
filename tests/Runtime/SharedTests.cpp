@@ -65,11 +65,11 @@ TEST(SharedRetain, NullIsNoOp) {
 TEST(SharedRelease, DecrementsRefCount) {
   PaykanObject *obj = PaykanObject_new();
   PaykanShared *s = PaykanShared_new(obj);
-  Paykan_retain(s);           // refcount = 2
+  Paykan_retain(s); // refcount = 2
   EXPECT_EQ(s->refCount, 2);
-  Paykan_release(s);          // refcount = 1
+  Paykan_release(s); // refcount = 1
   EXPECT_EQ(s->refCount, 1);
-  Paykan_release(s);          // refcount = 0 -> freed
+  Paykan_release(s); // refcount = 0 -> freed
 }
 
 TEST(SharedRelease, FreesAtZero) {
@@ -81,9 +81,7 @@ TEST(SharedRelease, FreesAtZero) {
   Paykan_release(s);
 }
 
-TEST(SharedRelease, NullIsNoOp) {
-  Paykan_release(nullptr);
-}
+TEST(SharedRelease, NullIsNoOp) { Paykan_release(nullptr); }
 
 TEST(SharedRelease, RetainThenReleasePair) {
   PaykanObject *obj = PaykanObject_new();
@@ -121,9 +119,9 @@ TEST(SharedRelease, CallsVtableDestroy) {
   // will catch any use-after-free or leak.
   PaykanString *str = PaykanString_new("hello", 5);
   PaykanShared *s = PaykanShared_new((PaykanObject *)str);
-  Paykan_retain(s);     // refcount = 2
-  Paykan_release(s);    // refcount = 1 — must NOT destroy yet
+  Paykan_retain(s);  // refcount = 2
+  Paykan_release(s); // refcount = 1 — must NOT destroy yet
   // str->data should still be valid here.
   EXPECT_STREQ(str->data, "hello");
-  Paykan_release(s);    // refcount = 0 — destroys str and frees box
+  Paykan_release(s); // refcount = 0 — destroys str and frees box
 }

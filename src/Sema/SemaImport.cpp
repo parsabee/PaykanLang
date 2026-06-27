@@ -3,10 +3,10 @@
 //
 // Semantic analysis: import resolution and module caching.
 
-#include "Sema.h"
 #include "ModuleUtils.h"
 #include "Names.h"
 #include "ParserDriver.h"
+#include "Sema.h"
 
 namespace paykan {
 namespace sema {
@@ -15,16 +15,23 @@ namespace sema {
 // Static helpers (file-scope, not part of the Sema class)
 // ---------------------------------------------------------------------------
 
-/// Return the canonical string name for a type (used when serialising ClassInfo).
+/// Return the canonical string name for a type (used when serialising
+/// ClassInfo).
 static std::string typeToName(ast::Type *ty) {
-  if (!ty) return names::kTypeVoid;
+  if (!ty)
+    return names::kTypeVoid;
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty)) {
     switch (bt->getTypeKind()) {
-    case ast::BuiltinType::Int:   return names::kTypeInt;
-    case ast::BuiltinType::Float: return names::kTypeFloat;
-    case ast::BuiltinType::Bool:  return names::kTypeBool;
-    case ast::BuiltinType::Char:  return names::kTypeChar;
-    case ast::BuiltinType::Void:  return names::kTypeVoid;
+    case ast::BuiltinType::Int:
+      return names::kTypeInt;
+    case ast::BuiltinType::Float:
+      return names::kTypeFloat;
+    case ast::BuiltinType::Bool:
+      return names::kTypeBool;
+    case ast::BuiltinType::Char:
+      return names::kTypeChar;
+    case ast::BuiltinType::Void:
+      return names::kTypeVoid;
     }
   }
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ty))
@@ -34,8 +41,7 @@ static std::string typeToName(ast::Type *ty) {
 
 /// Reconstruct a single ClassInfo into a context, guaranteeing type identity.
 static void registerClassInfoInto(
-    const std::string &name,
-    const std::string &superName,
+    const std::string &name, const std::string &superName,
     const std::vector<std::pair<std::string, std::string>> &fields,
     const std::vector<std::tuple<std::string, std::string,
                                  std::vector<std::string>, uint8_t>> &methods,
@@ -52,16 +58,19 @@ static void registerClassInfoInto(
   auto builder = ctx.buildClassType(name, superClass);
   for (auto &[fname, ftname] : fields) {
     ast::Type *fty = ctx.lookupType(ftname);
-    if (!fty) fty = ctx.getObjTy();
+    if (!fty)
+      fty = ctx.getObjTy();
     builder.field(fname, fty);
   }
   for (auto &[mname, retName, paramNames, flags] : methods) {
     ast::Type *retTy = ctx.lookupType(retName);
-    if (!retTy) retTy = ctx.getVoidTy();
+    if (!retTy)
+      retTy = ctx.getVoidTy();
     std::vector<ast::Type *> params;
     for (auto &pn : paramNames) {
       ast::Type *pty = ctx.lookupType(pn);
-      if (!pty) pty = ctx.getObjTy();
+      if (!pty)
+        pty = ctx.getObjTy();
       params.push_back(pty);
     }
     builder.method(mname, retTy, std::move(params), flags);
@@ -74,8 +83,7 @@ static void registerClassInfoInto(
 // ---------------------------------------------------------------------------
 
 std::string Sema::resolveModulePath(const std::string &modulePath,
-                                    bool isSystem,
-                                    ast::SourceLocation loc) {
+                                    bool isSystem, ast::SourceLocation loc) {
   auto relPath = module_utils::modulePathToRelative(modulePath);
 
   if (isSystem) {
@@ -91,7 +99,7 @@ std::string Sema::resolveModulePath(const std::string &modulePath,
     if (auto resolved = module_utils::realPath(base); !resolved.empty())
       return resolved;
     error(loc, "system module '" + modulePath + "' not found (tried " +
-               std::string(base) + ")");
+                   std::string(base) + ")");
     return "";
   }
 
@@ -100,7 +108,7 @@ std::string Sema::resolveModulePath(const std::string &modulePath,
   if (auto resolved = module_utils::realPath(full); !resolved.empty())
     return resolved;
   error(loc, "module '" + modulePath + "' not found (tried " +
-             std::string(full) + ")");
+                 std::string(full) + ")");
   return "";
 }
 
@@ -117,16 +125,16 @@ bool Sema::processImport(ast::ImportDecl *node) {
     std::vector<std::pair<std::string, std::string>> fields;
     for (auto &f : ci.Fields)
       fields.emplace_back(f.FieldName, f.TypeName);
-    std::vector<std::tuple<std::string, std::string,
-                           std::vector<std::string>, uint8_t>> methods;
+    std::vector<
+        std::tuple<std::string, std::string, std::vector<std::string>, uint8_t>>
+        methods;
     for (auto &m : ci.Methods)
       methods.emplace_back(m.Name, m.ReturnTypeName, m.ParamTypeNames, m.Flags);
     registerClassInfoInto(ci.Name, ci.SuperClassName, fields, methods, ctx);
   };
 
   // Helper: load one module from a resolved path, cache it, inject exports.
-  auto loadModule = [&](const std::string &path,
-                        const std::string &qualifier,
+  auto loadModule = [&](const std::string &path, const std::string &qualifier,
                         const std::string &fullModulePath,
                         ast::SourceLocation loc) -> bool {
     // Cycle detection.
@@ -143,18 +151,22 @@ bool Sema::processImport(ast::ImportDecl *node) {
         if (auto *ct = Ctx.lookupClassType(ci.Name)) {
           Ctx.addClassTypeAlias(qualifier + names::kQualSep + ci.Name, ct);
           if (qualifier != fullModulePath)
-            Ctx.addClassTypeAlias(fullModulePath + names::kQualSep + ci.Name, ct);
+            Ctx.addClassTypeAlias(fullModulePath + names::kQualSep + ci.Name,
+                                  ct);
         }
       }
       auto injectFn = [&](const ModuleInfo::FunctionInfo &fi,
                           const std::string &name) {
-        if (lookupFunction(name)) return;
+        if (lookupFunction(name))
+          return;
         ast::Type *retTy = Ctx.lookupType(fi.ReturnTypeName);
-        if (!retTy) retTy = Ctx.getVoidTy();
+        if (!retTy)
+          retTy = Ctx.getVoidTy();
         std::vector<ast::Type *> params;
         for (auto &pn : fi.ParamTypeNames) {
           ast::Type *pty = Ctx.lookupType(pn);
-          if (!pty) pty = Ctx.getObjTy();
+          if (!pty)
+            pty = Ctx.getObjTy();
           params.push_back(pty);
         }
         declareFunction(name, retTy, params, fi.IsVariadic, /*isBuiltin=*/true);
@@ -211,12 +223,12 @@ bool Sema::processImport(ast::ImportDecl *node) {
           ci.Fields.push_back({fname, typeToName(fty)});
         for (auto *m : ct->getVTable()) {
           ModuleInfo::ClassInfo::MethodInfo mi;
-          mi.Name           = m->getName();
+          mi.Name = m->getName();
           mi.ReturnTypeName = typeToName(m->getReturnType());
           for (auto *pty : m->getParamTypes())
             mi.ParamTypeNames.push_back(typeToName(pty));
           mi.Flags = static_cast<uint8_t>(
-              (m->isStatic()  ? ast::MethodDecl::Static  : 0) |
+              (m->isStatic() ? ast::MethodDecl::Static : 0) |
               (m->isPrivate() ? ast::MethodDecl::Private : 0));
           ci.Methods.push_back(std::move(mi));
         }
@@ -227,7 +239,8 @@ bool Sema::processImport(ast::ImportDecl *node) {
         if (auto *ct = Ctx.lookupClassType(ci.Name)) {
           Ctx.addClassTypeAlias(qualifier + names::kQualSep + ci.Name, ct);
           if (qualifier != fullModulePath)
-            Ctx.addClassTypeAlias(fullModulePath + names::kQualSep + ci.Name, ct);
+            Ctx.addClassTypeAlias(fullModulePath + names::kQualSep + ci.Name,
+                                  ct);
         }
       }
     }
@@ -237,7 +250,7 @@ bool Sema::processImport(ast::ImportDecl *node) {
       if (sig.IsBuiltin)
         continue;
       ModuleInfo::FunctionInfo fi;
-      fi.Name           = name.str();
+      fi.Name = name.str();
       fi.ReturnTypeName = typeToName(sig.ReturnType);
       for (auto *pty : sig.ParamTypes)
         fi.ParamTypeNames.push_back(typeToName(pty));
@@ -249,13 +262,16 @@ bool Sema::processImport(ast::ImportDecl *node) {
     // Inject functions as qualifier::name and fullModulePath::name.
     auto injectFn2 = [&](const ModuleInfo::FunctionInfo &fi,
                          const std::string &name) {
-      if (lookupFunction(name)) return;
+      if (lookupFunction(name))
+        return;
       ast::Type *retTy = Ctx.lookupType(fi.ReturnTypeName);
-      if (!retTy) retTy = Ctx.getVoidTy();
+      if (!retTy)
+        retTy = Ctx.getVoidTy();
       std::vector<ast::Type *> params;
       for (auto &pn : fi.ParamTypeNames) {
         ast::Type *pty = Ctx.lookupType(pn);
-        if (!pty) pty = Ctx.getObjTy();
+        if (!pty)
+          pty = Ctx.getObjTy();
         params.push_back(pty);
       }
       declareFunction(name, retTy, params, fi.IsVariadic, /*isBuiltin=*/true);
@@ -267,7 +283,7 @@ bool Sema::processImport(ast::ImportDecl *node) {
     }
 
     childCtx.OwnedDriver = importDriverPtr;
-    childCtx.Root        = importRoot;
+    childCtx.Root = importRoot;
     AccumulatedImportContexts[path] =
         std::make_shared<SemaContext>(std::move(childCtx));
     return true;

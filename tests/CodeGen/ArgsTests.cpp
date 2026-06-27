@@ -27,7 +27,8 @@ TEST(Args, ArgCountViaLen) {
     fn main(args: Str[]) -> int {
       return args.len();
     }
-  )", {"script.pkn", "hello", "world"});
+  )",
+                                 {"script.pkn", "hello", "world"});
   ASSERT_TRUE(r.CompileOk);
   EXPECT_EQ(r.ExitCode, 3);
 }
@@ -39,7 +40,8 @@ TEST(Args, FirstArgIsScriptPath) {
       print(x);
       return 0;
     }
-  )", {"myscript.pkn"});
+  )",
+                                 {"myscript.pkn"});
   ASSERT_TRUE(r.CompileOk);
   EXPECT_EQ(r.ExitCode, 0);
   EXPECT_EQ(r.StdOut, "myscript.pkn");
@@ -51,7 +53,8 @@ TEST(Args, SecondArgReadable) {
       print(args[1]);
       return 0;
     }
-  )", {"script.pkn", "greet"});
+  )",
+                                 {"script.pkn", "greet"});
   ASSERT_TRUE(r.CompileOk);
   EXPECT_EQ(r.StdOut, "greet");
 }
@@ -61,7 +64,8 @@ TEST(Args, EmptyArgList) {
     fn main(args: Str[]) -> int {
       return args.len();
     }
-  )", {});
+  )",
+                                 {});
   ASSERT_TRUE(r.CompileOk);
   EXPECT_EQ(r.ExitCode, 0);
 }
@@ -75,7 +79,8 @@ TEST(Args, ArgLenUsedInLogic) {
         return 0;
       }
     }
-  )", {"script.pkn", "extra"});
+  )",
+                                 {"script.pkn", "extra"});
   ASSERT_TRUE(r.CompileOk);
   EXPECT_EQ(r.ExitCode, 1);
 }

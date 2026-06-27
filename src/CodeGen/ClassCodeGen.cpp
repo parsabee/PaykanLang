@@ -3,8 +3,8 @@
 //
 // ClassCodeGen — LLVM IR code generation for user-defined Paykan classes.
 //
-// This file implements ClassCodeGen, a helper owned by CodeGen that encapsulates
-// all class-specific lowering:
+// This file implements ClassCodeGen, a helper owned by CodeGen that
+// encapsulates all class-specific lowering:
 //
 //   • LLVM struct types: { vtable_ptr, field0, field1, ... }
 //   • Vtable globals: constant array of function pointers in vtable order
@@ -38,7 +38,8 @@ namespace {
 /// then the class's own fields — mirrors C struct inheritance by composition.
 std::vector<std::pair<std::string, ast::Type *>>
 getAllFieldsInOrder(ast::ClassType *ct) {
-  if (!ct) return {};
+  if (!ct)
+    return {};
   auto fields = getAllFieldsInOrder(ct->getSuperClass());
   for (auto &[name, ty] : ct->getFields())
     fields.emplace_back(name, ty);
@@ -51,8 +52,7 @@ getAllFieldsInOrder(ast::ClassType *ct) {
 // Struct-type helpers
 // ---------------------------------------------------------------------------
 
-llvm::StructType *
-ClassCodeGen::getOrCreateClassStructType(ast::ClassType *ct) {
+llvm::StructType *ClassCodeGen::getOrCreateClassStructType(ast::ClassType *ct) {
   auto it = ClassStructTypes.find(ct);
   if (it != ClassStructTypes.end())
     return it->second;
@@ -65,7 +65,7 @@ ClassCodeGen::getOrCreateClassStructType(ast::ClassType *ct) {
     elems.push_back(llvmTy ? llvmTy : ptrTy);
   }
   auto *structTy = llvm::StructType::create(CG.LLVMCtx, elems,
-                                             ct->getName() + kStructSuffix);
+                                            ct->getName() + kStructSuffix);
   ClassStructTypes[ct] = structTy;
   return structTy;
 }
@@ -91,10 +91,10 @@ llvm::Value *ClassCodeGen::emitIsExactType(llvm::Value *rawObjPtr,
 
   // Load the vtable pointer stored at slot 0 of the object struct.
   auto *structTy = getOrCreateClassStructType(ct);
-  auto *vtableSlotPtr = CG.Builder.CreateStructGEP(structTy, rawObjPtr, 0,
-                                                    kIRVtableSlot);
+  auto *vtableSlotPtr =
+      CG.Builder.CreateStructGEP(structTy, rawObjPtr, 0, kIRVtableSlot);
   auto *loadedVtable = CG.Builder.CreateLoad(ptrTy, vtableSlotPtr,
-                                              kIRVtablePrefix + ct->getName());
+                                             kIRVtablePrefix + ct->getName());
 
   // Obtain the vtable global for this class.  It is created by visitClassDecl
   // before any function bodies are emitted, so it must be present.
@@ -112,9 +112,10 @@ llvm::Value *ClassCodeGen::emitIsExactType(llvm::Value *rawObjPtr,
     // Specialized array type (e.g. Array<Str>): use the runtime vtable.
     // Value-element arrays (int/float/bool) use PaykanArray_vtable;
     // object-element arrays (Str[], Point[], ...) use PaykanArray_obj_vtable.
-    bool isObjElem = ast::isa<ast::ClassType>(elemTy) || ast::isa<ast::ArrayType>(elemTy);
-    const char *vtName = isObjElem ? names::kPaykanArrayObjVtable
-                                   : names::kPaykanArrayVtable;
+    bool isObjElem =
+        ast::isa<ast::ClassType>(elemTy) || ast::isa<ast::ArrayType>(elemTy);
+    const char *vtName =
+        isObjElem ? names::kPaykanArrayObjVtable : names::kPaykanArrayVtable;
     // Use [0 x ptr] as placeholder — GEP(0,0) is offset zero so the address
     // equals the global base.
     auto *arrTy = llvm::ArrayType::get(ptrTy, 0);
@@ -133,7 +134,7 @@ llvm::Value *ClassCodeGen::emitIsExactType(llvm::Value *rawObjPtr,
   }
 
   return CG.Builder.CreateICmpEQ(loadedVtable, expectedVtable,
-                                  kIRIsPrefix + ct->getName());
+                                 kIRIsPrefix + ct->getName());
 }
 
 ast::ClassType *ClassCodeGen::getExprClassType(ast::Expr *expr) const {
@@ -167,39 +168,54 @@ ast::ClassType *ClassCodeGen::getExprClassType(ast::Expr *expr) const {
 // ---------------------------------------------------------------------------
 
 std::string ClassCodeGen::findConcreteMethodFuncName(ast::ClassType *ct,
-                                                      const std::string &name) {
-  if (!ct) return "";
+                                                     const std::string &name) {
+  if (!ct)
+    return "";
 
   // Builtin Obj.
   if (ct == CG.ASTCtx.getObjTy()) {
-    if (name == kMethodDestroy)  return kPaykanObjectDestroy;
-    if (name == kMethodToString) return kPaykanObjectToString;
-    if (name == kMethodEquals)   return kPaykanObjectEquals;
+    if (name == kMethodDestroy)
+      return kPaykanObjectDestroy;
+    if (name == kMethodToString)
+      return kPaykanObjectToString;
+    if (name == kMethodEquals)
+      return kPaykanObjectEquals;
     return ""; // e.g. __init__ — no runtime symbol
   }
   // Builtin Str.
   if (ct == CG.ASTCtx.getStrTy()) {
-    if (name == kMethodDestroy)  return kPaykanStringDestroy;
-    if (name == kMethodToString) return kPaykanStringToString;
-    if (name == kMethodEquals)   return kPaykanStringEquals;
-    if (name == kMethodLength)   return kPaykanStringLength;
-    if (name == kMethodConcat)   return kPaykanStringConcat;
+    if (name == kMethodDestroy)
+      return kPaykanStringDestroy;
+    if (name == kMethodToString)
+      return kPaykanStringToString;
+    if (name == kMethodEquals)
+      return kPaykanStringEquals;
+    if (name == kMethodLength)
+      return kPaykanStringLength;
+    if (name == kMethodConcat)
+      return kPaykanStringConcat;
     return "";
   }
   // Builtin File.
   if (ct == CG.ASTCtx.getFileTy()) {
-    if (name == kMethodDestroy)  return kPaykanFileDestroy;
-    if (name == kMethodToString) return kPaykanFileToString;
-    if (name == kMethodEquals)   return kPaykanFileEquals;
-    if (name == kMethodWrite)    return kPaykanFileWrite;
-    if (name == kMethodReadln)   return kPaykanFileReadln;
+    if (name == kMethodDestroy)
+      return kPaykanFileDestroy;
+    if (name == kMethodToString)
+      return kPaykanFileToString;
+    if (name == kMethodEquals)
+      return kPaykanFileEquals;
+    if (name == kMethodWrite)
+      return kPaykanFileWrite;
+    if (name == kMethodReadln)
+      return kPaykanFileReadln;
     return "";
   }
   // User-defined class: prefer the most-derived concrete function.
   std::string mangled = ct->getName() + kNameSep + name;
   if (CG.Module->getFunction(mangled))
     return mangled;
-  // If this is an imported class, try the qualified name (e.g. "helper::Adder_get").
+  // If this is an imported class, try the qualified name (e.g.
+  // "helper::Adder_get").
   auto qualIt = ImportedClassQualifiers.find(ct);
   if (qualIt != ImportedClassQualifiers.end()) {
     std::string qualMangled = qualIt->second + kQualSep + mangled;
@@ -218,8 +234,8 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
   auto *ct = CG.ASTCtx.lookupClassType(node->getName());
   assert(ct && "ClassType must have been registered by Sema");
 
-  auto *ptrTy  = llvm::PointerType::getUnqual(CG.LLVMCtx);
-  auto *i64Ty  = llvm::Type::getInt64Ty(CG.LLVMCtx);
+  auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
+  auto *i64Ty = llvm::Type::getInt64Ty(CG.LLVMCtx);
   auto *voidTy = llvm::Type::getVoidTy(CG.LLVMCtx);
 
   // Ensure the struct type exists before emitting any method bodies
@@ -240,12 +256,13 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
 
     // Get the Sema-resolved MethodDecl (has resolved types).
     auto *md = ct->findMethod(funcDecl->getName());
-    if (!md) continue;
+    if (!md)
+      continue;
 
-    llvm::Type *retTy = md->getReturnType()
-                            ? CG.toLLVMType(md->getReturnType())
-                            : voidTy;
-    if (!retTy) retTy = voidTy;
+    llvm::Type *retTy =
+        md->getReturnType() ? CG.toLLVMType(md->getReturnType()) : voidTy;
+    if (!retTy)
+      retTy = voidTy;
 
     std::vector<llvm::Type *> paramTys;
     paramTys.push_back(ptrTy); // self (raw PaykanObject*)
@@ -253,8 +270,8 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
       auto *lty = CG.toLLVMType(pty);
       paramTys.push_back(lty ? lty : ptrTy);
     }
-    auto *fnTy  = llvm::FunctionType::get(retTy, paramTys, false);
-    auto  fnName = node->getName() + kNameSep + funcDecl->getName();
+    auto *fnTy = llvm::FunctionType::get(retTy, paramTys, false);
+    auto fnName = node->getName() + kNameSep + funcDecl->getName();
     auto *fn = llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage,
                                       fnName, CG.Module.get());
 
@@ -281,9 +298,9 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
 
       // Bind parameters.
       for (size_t i = 0; i < funcDecl->getParams().size(); ++i) {
-        auto &p    = funcDecl->getParams()[i];
-        auto *arg  = fn->getArg(static_cast<unsigned>(i + 1));
-        auto *pty  = md->getParamTypes()[i];
+        auto &p = funcDecl->getParams()[i];
+        auto *arg = fn->getArg(static_cast<unsigned>(i + 1));
+        auto *pty = md->getParamTypes()[i];
         auto *alloca = CG.createEntryAlloca(fn, p.getName(), arg->getType());
         CG.Builder.CreateStore(arg, alloca);
         if (ast::isRefType(pty))
@@ -328,10 +345,10 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
 
     llvm::Constant *fnPtr = nullptr;
     if (!concreteName.empty()) {
-      llvm::Type *slotRetTy = md->getReturnType()
-                                   ? CG.toLLVMType(md->getReturnType())
-                                   : voidTy;
-      if (!slotRetTy) slotRetTy = voidTy;
+      llvm::Type *slotRetTy =
+          md->getReturnType() ? CG.toLLVMType(md->getReturnType()) : voidTy;
+      if (!slotRetTy)
+        slotRetTy = voidTy;
       std::vector<llvm::Type *> slotParams = {ptrTy};
       for (auto *pty : md->getParamTypes()) {
         auto *lty = CG.toLLVMType(pty);
@@ -351,7 +368,7 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
   // Each class's vtable global has a unique address in memory — this address
   // IS the type identity, used for match dispatch via pointer comparison.
   // This is stable across modules because the linker resolves addresses.
-  auto *methodArrTy    = llvm::ArrayType::get(ptrTy, vtableEntries.size());
+  auto *methodArrTy = llvm::ArrayType::get(ptrTy, vtableEntries.size());
   auto *methodArrConst = llvm::ConstantArray::get(methodArrTy, vtableEntries);
   std::string vtableGlobalName = node->getName() + kVTableSuffix;
   auto *vtableGlobal = new llvm::GlobalVariable(
@@ -382,15 +399,18 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
   }
 
   auto *ctorFnTy = llvm::FunctionType::get(ptrTy, ctorParamTys, false);
-  auto *ctorFn   = llvm::Function::Create(ctorFnTy,
-                                           llvm::Function::ExternalLinkage,
-                                           node->getName(), CG.Module.get());
+  auto *ctorFn =
+      llvm::Function::Create(ctorFnTy, llvm::Function::ExternalLinkage,
+                             node->getName(), CG.Module.get());
 
   // Name constructor parameters to match __init__.
   if (initMd) {
     const std::vector<ast::Param> *initParams = nullptr;
     for (auto *m : node->getMethods())
-      if (m->getName() == names::kMethodInit) { initParams = &m->getParams(); break; }
+      if (m->getName() == names::kMethodInit) {
+        initParams = &m->getParams();
+        break;
+      }
     if (initParams) {
       size_t ai = 0;
       for (auto &arg : ctorFn->args())
@@ -414,20 +434,20 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
 
     // a. Allocate raw memory.
     auto *mallocFnTy = llvm::FunctionType::get(ptrTy, {i64Ty}, false);
-    auto *mallocFn   = CG.declareFunction(kMalloc, mallocFnTy);
+    auto *mallocFn = CG.declareFunction(kMalloc, mallocFnTy);
     llvm::DataLayout dl(CG.Module.get());
-    auto  structSize = dl.getTypeAllocSize(structTy);
-    auto *sizeVal    = llvm::ConstantInt::get(i64Ty, structSize);
-    auto *rawPtr     = CG.Builder.CreateCall(mallocFn, {sizeVal}, kIRObj);
+    auto structSize = dl.getTypeAllocSize(structTy);
+    auto *sizeVal = llvm::ConstantInt::get(i64Ty, structSize);
+    auto *rawPtr = CG.Builder.CreateCall(mallocFn, {sizeVal}, kIRObj);
 
     // b. Store the vtable pointer (&vtable[0]) at struct slot 0.
-    auto *vtableSlotPtr = CG.Builder.CreateStructGEP(structTy, rawPtr, 0,
-                                                      kIRVtableSlot);
+    auto *vtableSlotPtr =
+        CG.Builder.CreateStructGEP(structTy, rawPtr, 0, kIRVtableSlot);
     // vtable global is [N x ptr]. Store &vtable[0] so that dispatch works as
     // vtablePtr[slotIdx], and the global's unique address is the type identity.
     auto *arrTy = llvm::cast<llvm::ArrayType>(vtableGlobal->getValueType());
-    auto *vtableGEP = CG.Builder.CreateConstInBoundsGEP2_64(
-        arrTy, vtableGlobal, 0, 0, kIRVtablePtr);
+    auto *vtableGEP = CG.Builder.CreateConstInBoundsGEP2_64(arrTy, vtableGlobal,
+                                                            0, 0, kIRVtablePtr);
     CG.Builder.CreateStore(vtableGEP, vtableSlotPtr);
 
     // c. Zero-initialise field slots.
@@ -437,7 +457,8 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
           structTy, rawPtr, static_cast<unsigned>(fi + 1),
           kIRFieldPrefix + allFields[fi].first);
       auto *fty = CG.toLLVMType(allFields[fi].second);
-      if (!fty) fty = ptrTy;
+      if (!fty)
+        fty = ptrTy;
       CG.Builder.CreateStore(llvm::Constant::getNullValue(fty), fieldSlot);
     }
 
@@ -475,22 +496,25 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
 // This function becomes the class's vtable destroy slot, so the final
 // Paykan_release of an instance tears down the whole object graph.
 void ClassCodeGen::emitDestructor(ast::ClassDecl *node, ast::ClassType *ct) {
-  auto *ptrTy  = llvm::PointerType::getUnqual(CG.LLVMCtx);
+  auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
   auto *voidTy = llvm::Type::getVoidTy(CG.LLVMCtx);
 
   auto *structTy = getOrCreateClassStructType(ct);
 
   // Create the destructor function: void ClassName_destroy(ptr self).
-  auto  fnName = node->getName() + kNameSep + kMethodDestroy;
-  auto *fnTy   = llvm::FunctionType::get(voidTy, {ptrTy}, false);
-  auto *fn     = llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage,
-                                        fnName, CG.Module.get());
+  auto fnName = node->getName() + kNameSep + kMethodDestroy;
+  auto *fnTy = llvm::FunctionType::get(voidTy, {ptrTy}, false);
+  auto *fn = llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage,
+                                    fnName, CG.Module.get());
   fn->arg_begin()->setName(kSelf);
 
   // Locate a user-defined `destroy` body to run before field teardown.
   ast::FuncDecl *userDestroy = nullptr;
   for (auto *m : node->getMethods())
-    if (m->getName() == kMethodDestroy) { userDestroy = m; break; }
+    if (m->getName() == kMethodDestroy) {
+      userDestroy = m;
+      break;
+    }
 
   // Save/restore all per-function codegen state (#34): return type (void here),
   // insertion point, string-temp tracking, and method-class context.
@@ -544,7 +568,7 @@ void ClassCodeGen::emitDestructor(ast::ClassDecl *node, ast::ClassType *ct) {
 
     // Free the object struct.
     auto *freeFnTy = llvm::FunctionType::get(voidTy, {ptrTy}, false);
-    auto *freeFn   = CG.declareFunction(kPaykanFree, freeFnTy);
+    auto *freeFn = CG.declareFunction(kPaykanFree, freeFnTy);
     CG.Builder.CreateCall(freeFn, {self});
     CG.Builder.CreateRetVoid();
   }
@@ -557,28 +581,32 @@ void ClassCodeGen::emitDestructor(ast::ClassDecl *node, ast::ClassType *ct) {
 // visitMemberAssignStmt
 // ---------------------------------------------------------------------------
 
-llvm::Value *
-ClassCodeGen::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
+llvm::Value *ClassCodeGen::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
   auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
 
   // Evaluate the receiver.
   // Note: visitIdentifier already unwraps owned class variables (PaykanShared*
   // -> raw object pointer), so no additional unwrapping is needed here.
   llvm::Value *objPtr = CG.emitExpr(node->getReceiver());
-  if (!objPtr) return nullptr;
+  if (!objPtr)
+    return nullptr;
 
   // Determine the ClassType of the receiver.
   ast::ClassType *ct = getExprClassType(node->getReceiver());
-  if (!ct) return nullptr;
+  if (!ct)
+    return nullptr;
 
   auto *structTy = getOrCreateClassStructType(ct);
-  int   fieldIdx = getFieldIndex(ct, node->getFieldName());
+  int fieldIdx = getFieldIndex(ct, node->getFieldName());
   assert(fieldIdx > 0 && "Sema should have verified field exists");
 
   // Determine the field's AST type to handle class-typed fields correctly.
   ast::Type *fieldASTTy = nullptr;
   for (auto &[fname, fty] : getAllFieldsInOrder(ct))
-    if (fname == node->getFieldName()) { fieldASTTy = fty; break; }
+    if (fname == node->getFieldName()) {
+      fieldASTTy = fty;
+      break;
+    }
 
   llvm::Value *fieldSlot = CG.Builder.CreateStructGEP(
       structTy, objPtr, static_cast<unsigned>(fieldIdx),
@@ -600,7 +628,8 @@ ClassCodeGen::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
     if (!newShared) {
       // Evaluate the RHS normally (string literal, call, etc.)
       llvm::Value *rhs = CG.emitExpr(node->getValue());
-      if (!rhs) return nullptr;
+      if (!rhs)
+        return nullptr;
       // Wrap raw string literals into PaykanString* before boxing.
       if (auto *sl = ast::dyn_cast<ast::StringLiteral>(node->getValue()))
         rhs = CG.wrapStringLiteral(rhs, sl->getValue().size());
@@ -610,14 +639,16 @@ ClassCodeGen::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
     }
 
     // Release old value only if it's non-null.
-    llvm::Value *old    = CG.Builder.CreateLoad(ptrTy, fieldSlot, kIROldField);
-    auto        *isNull = CG.Builder.CreateICmpEQ(
+    llvm::Value *old = CG.Builder.CreateLoad(ptrTy, fieldSlot, kIROldField);
+    auto *isNull = CG.Builder.CreateICmpEQ(
         old,
         llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(ptrTy)),
         kIRIsNull);
-    auto *parentFn  = CG.Builder.GetInsertBlock()->getParent();
-    auto *releaseBB = llvm::BasicBlock::Create(CG.LLVMCtx, kIRFieldRel,   parentFn);
-    auto *afterBB   = llvm::BasicBlock::Create(CG.LLVMCtx, kIRFieldAfter, parentFn);
+    auto *parentFn = CG.Builder.GetInsertBlock()->getParent();
+    auto *releaseBB =
+        llvm::BasicBlock::Create(CG.LLVMCtx, kIRFieldRel, parentFn);
+    auto *afterBB =
+        llvm::BasicBlock::Create(CG.LLVMCtx, kIRFieldAfter, parentFn);
     CG.Builder.CreateCondBr(isNull, afterBB, releaseBB);
     CG.Builder.SetInsertPoint(releaseBB);
     CG.emitRelease(old);
@@ -627,7 +658,8 @@ ClassCodeGen::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
     CG.Builder.CreateStore(newShared, fieldSlot);
   } else {
     llvm::Value *rhs = CG.emitExpr(node->getValue());
-    if (!rhs) return nullptr;
+    if (!rhs)
+      return nullptr;
     CG.Builder.CreateStore(rhs, fieldSlot);
   }
   return nullptr;
@@ -637,27 +669,29 @@ ClassCodeGen::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
 // visitMemberAccessExpr
 // ---------------------------------------------------------------------------
 
-llvm::Value *
-ClassCodeGen::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
+llvm::Value *ClassCodeGen::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
   auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
 
   // Evaluate the receiver.
   llvm::Value *objPtr = CG.emitExpr(node->getReceiver());
-  if (!objPtr) return nullptr;
+  if (!objPtr)
+    return nullptr;
 
   // Determine the ClassType of the receiver.
   // Note: visitIdentifier already unwraps owned class variables (PaykanShared*
   // -> raw object pointer), so objPtr is already the raw struct pointer.
   ast::ClassType *ct = getExprClassType(node->getReceiver());
-  if (!ct) return nullptr;
+  if (!ct)
+    return nullptr;
 
   auto *structTy = getOrCreateClassStructType(ct);
-  int   fieldIdx = getFieldIndex(ct, node->getFieldName());
+  int fieldIdx = getFieldIndex(ct, node->getFieldName());
   assert(fieldIdx > 0 && "Sema should have verified field exists");
 
-  ast::Type    *fieldASTTy = node->getResolvedType();
-  llvm::Type   *fieldLLTy  = fieldASTTy ? CG.toLLVMType(fieldASTTy) : ptrTy;
-  if (!fieldLLTy) fieldLLTy = ptrTy;
+  ast::Type *fieldASTTy = node->getResolvedType();
+  llvm::Type *fieldLLTy = fieldASTTy ? CG.toLLVMType(fieldASTTy) : ptrTy;
+  if (!fieldLLTy)
+    fieldLLTy = ptrTy;
 
   llvm::Value *fieldSlot = CG.Builder.CreateStructGEP(
       structTy, objPtr, static_cast<unsigned>(fieldIdx),

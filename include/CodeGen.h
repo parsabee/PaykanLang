@@ -14,9 +14,9 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Value.h>
 
+#include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/StringSet.h>
-#include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/Passes/OptimizationLevel.h>
 
 #include <memory>
@@ -34,12 +34,13 @@ namespace codegen {
 ///                C-string globals).  The consumer must NOT release it.
 ///   • Owned    — the consumer owns the value and must tear it down.  The exact
 ///                teardown depends on the underlying runtime object: a raw
-///                `PaykanString*` temporary is freed with `PaykanString_destroy`
-///                (tracked in `OwnedStringTemps`), while a freshly produced
-///                `PaykanShared*` box (+1 refcount) is freed with
-///                `Paykan_release`.  That distinction is a property of the value,
-///                not of the ownership decision, so it is resolved at teardown
-///                time (releaseIfOwned) rather than encoded in a separate kind.
+///                `PaykanString*` temporary is freed with
+///                `PaykanString_destroy` (tracked in `OwnedStringTemps`), while
+///                a freshly produced `PaykanShared*` box (+1 refcount) is freed
+///                with `Paykan_release`.  That distinction is a property of the
+///                value, not of the ownership decision, so it is resolved at
+///                teardown time (releaseIfOwned) rather than encoded in a
+///                separate kind.
 ///
 /// Previously each consumer re-derived ownership from the AST (via
 /// `exprAlreadyShared` / `exprProducesFreshBox`) and from `OwnedStringTemps`
@@ -58,9 +59,7 @@ struct ExprValue {
   ExprValue() = default;
   ExprValue(llvm::Value *v, Ownership own) : Val(v), Own(own) {}
 
-  static ExprValue borrowed(llvm::Value *v) {
-    return {v, Ownership::Borrowed};
-  }
+  static ExprValue borrowed(llvm::Value *v) { return {v, Ownership::Borrowed}; }
   static ExprValue owned(llvm::Value *v) { return {v, Ownership::Owned}; }
 
   bool isOwned() const { return Own == Ownership::Owned; }
@@ -81,7 +80,8 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   ast::ASTContext &ASTCtx;
   llvm::LLVMContext &LLVMCtx;
   /// Copy of the SemaContext passed at construction; holds the pre-computed
-  /// per-import SemaContexts that processImports reuses instead of re-running Sema.
+  /// per-import SemaContexts that processImports reuses instead of re-running
+  /// Sema.
   sema::SemaContext SemaCtx;
   std::unique_ptr<llvm::Module> Module;
   llvm::IRBuilder<> Builder;
@@ -98,7 +98,7 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
     /// Metadata for variables that need cleanup at scope exit.
     struct VarMeta {
       llvm::AllocaInst *Alloca;
-      ast::Type *ASTType;  // for choosing the right delete function
+      ast::Type *ASTType; // for choosing the right delete function
     };
     /// Variables declared in this scope, in declaration order.
     std::vector<VarMeta> DeclOrder;
@@ -106,7 +106,8 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
     /// must be released when this scope exits — e.g. a match subject whose
     /// arm binding is only an unowned alias.  Released LIFO at scope cleanup.
     std::vector<llvm::Value *> PendingReleases;
-    /// For unowned arm bindings: the PaykanShared* that backs the raw-ptr alias.
+    /// For unowned arm bindings: the PaykanShared* that backs the raw-ptr
+    /// alias.
     llvm::StringMap<llvm::Value *> BackingShared;
 
     explicit Scope(Scope *parent = nullptr);
@@ -124,7 +125,8 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
     /// binding so that call sites can retain+pass the original box instead of
     /// wrapping the raw pointer in a fresh PaykanShared_new (which would give
     /// the callee sole ownership, destroying the object prematurely).
-    void declareUnownedWithBacking(llvm::StringRef name, llvm::AllocaInst *alloca,
+    void declareUnownedWithBacking(llvm::StringRef name,
+                                   llvm::AllocaInst *alloca,
                                    llvm::Value *shared, ast::Type *astTy);
     /// Walk the scope chain looking for a backing PaykanShared* for name.
     llvm::Value *lookupBackingShared(llvm::StringRef name) const;
@@ -199,7 +201,8 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   /// Wrap a raw C string pointer into a PaykanString* via PaykanString_new.
   llvm::Value *wrapStringLiteral(llvm::Value *rawStr, size_t len);
 
-  /// Value-mode match: emit an equality if-else chain over literal-pattern arms.
+  /// Value-mode match: emit an equality if-else chain over literal-pattern
+  /// arms.
   llvm::Value *emitValueMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
                               llvm::Function *parentFn);
 
@@ -274,24 +277,24 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
 
   /// True when an array element of this type occupies a PaykanShared* slot (a
   /// real class or nested array), as opposed to a raw primitive slot.  Enums
-  /// lower to i64 primitives, so an EnumType — or a ClassType stub that actually
-  /// names an enum — is NOT an object element.
+  /// lower to i64 primitives, so an EnumType — or a ClassType stub that
+  /// actually names an enum — is NOT an object element.
   bool isObjectElementType(ast::Type *elemTy) const;
 
-  /// Create (or return the existing) LLVM prototype for a free function, without
-  /// emitting its body.  Run for every function before any body so a call —
-  /// including one inside a class method — resolves regardless of source order.
+  /// Create (or return the existing) LLVM prototype for a free function,
+  /// without emitting its body.  Run for every function before any body so a
+  /// call — including one inside a class method — resolves regardless of source
+  /// order.
   llvm::Function *declareFunctionPrototype(ast::FuncDecl *node);
 
-  /// Canonicalize a declared type annotation: a parser ClassType stub that names
-  /// an enum becomes the EnumType (so it lowers to i64, not a boxed pointer); a
-  /// stub naming a class becomes the canonical ClassType.  Returns the input for
-  /// anything else (including nullptr).
+  /// Canonicalize a declared type annotation: a parser ClassType stub that
+  /// names an enum becomes the EnumType (so it lowers to i64, not a boxed
+  /// pointer); a stub naming a class becomes the canonical ClassType.  Returns
+  /// the input for anything else (including nullptr).
   ast::Type *canonicalizeDeclType(ast::Type *ty);
 
   /// Create an alloca in the entry block of the current function.
-  llvm::AllocaInst *createEntryAlloca(llvm::Function *fn,
-                                      llvm::StringRef name,
+  llvm::AllocaInst *createEntryAlloca(llvm::Function *fn, llvm::StringRef name,
                                       llvm::Type *ty);
 
   /// Declare a runtime function in the LLVM module, or return the existing
@@ -318,14 +321,14 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   // -- Unified ownership classification / cleanup (#32) ----------------------
   //
   // classifyExpr() pairs the just-emitted llvm::Value* for `expr` with its
-  // ownership bit (Borrowed vs Owned), derived once from the same predicates the
-  // scattered call sites used to consult (exprAlreadyShared /
+  // ownership bit (Borrowed vs Owned), derived once from the same predicates
+  // the scattered call sites used to consult (exprAlreadyShared /
   // exprProducesFreshBox / OwnedStringTemps).  releaseIfOwned() acts on that
   // classification, emitting the teardown that matches the underlying value: a
   // tracked raw PaykanString* temp is freed with PaykanString_destroy, while a
   // fresh PaykanShared* box is freed with Paykan_release; Borrowed values are
-  // left untouched.  Together they let a consumer manage an arbitrary expression
-  // result without re-inspecting the AST.
+  // left untouched.  Together they let a consumer manage an arbitrary
+  // expression result without re-inspecting the AST.
   ExprValue classifyExpr(ast::Expr *expr, llvm::Value *val) const;
   void releaseIfOwned(const ExprValue &ev);
 
@@ -347,9 +350,9 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   /// at the current insertion point and stop tracking it.
   void destroyStringTempIfOwned(llvm::Value *v);
 
-  /// Handle the first-assignment (implicit declaration) path of visitAssignStmt:
-  /// allocates an alloca, optionally wraps the value in a PaykanShared box,
-  /// and registers the variable in the current scope.
+  /// Handle the first-assignment (implicit declaration) path of
+  /// visitAssignStmt: allocates an alloca, optionally wraps the value in a
+  /// PaykanShared box, and registers the variable in the current scope.
   llvm::Value *emitImplicitVarDecl(llvm::StringRef name, ast::Expr *rhsExpr,
                                    llvm::Value *val);
 
@@ -367,10 +370,11 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
 
     llvm::Value *emitIdentityCtor(ast::CallExpr *node);
     llvm::Value *emitBuiltinCall(ast::CallExpr *node);
-    /// Emit a primitive (non-object) array literal, returning the raw PaykanArray*.
-    /// Tries the constant-interning fast path first; falls back to dynamic per-element stores.
-    llvm::Value *emitPrimitiveArrayLiteral(ast::ArrayLiteralExpr *node, size_t len,
-                                           llvm::Value *lenVal,
+    /// Emit a primitive (non-object) array literal, returning the raw
+    /// PaykanArray*. Tries the constant-interning fast path first; falls back
+    /// to dynamic per-element stores.
+    llvm::Value *emitPrimitiveArrayLiteral(ast::ArrayLiteralExpr *node,
+                                           size_t len, llvm::Value *lenVal,
                                            llvm::FunctionType *newFnTy);
     /// Emit a direct call to PaykanArray_push / PaykanArray_push_obj.
     /// @p recv   raw PaykanArray*; @p elemTy  Paykan element type.
@@ -382,8 +386,7 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
 
     explicit ExprEmitter(CodeGen &cg) : CG(cg) {}
 
-#define EXPR_EMIT(Kind, Name, Cast) \
-    llvm::Value *visit##Name(ast::Cast *node);
+#define EXPR_EMIT(Kind, Name, Cast) llvm::Value *visit##Name(ast::Cast *node);
     PAYKAN_EXPR_NODES(EXPR_EMIT)
 #undef EXPR_EMIT
   };
@@ -395,8 +398,7 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
 
 public:
   CodeGen(const sema::SemaContext &semaCtx, llvm::LLVMContext &llvmCtx,
-          llvm::StringRef moduleName,
-          const std::string &projectRoot = "");
+          llvm::StringRef moduleName, const std::string &projectRoot = "");
 
   /// Run code generation on the translation unit.
   /// Returns true on success.
@@ -418,8 +420,7 @@ public:
 
   // -- Visitor overrides ----------------------------------------------------
 
-#define CG_VISIT(Kind, Name, Cast) \
-  llvm::Value *visit##Name(ast::Cast *node);
+#define CG_VISIT(Kind, Name, Cast) llvm::Value *visit##Name(ast::Cast *node);
   PAYKAN_STMT_NODES(CG_VISIT)
   PAYKAN_DECL_NODES(CG_VISIT)
   PAYKAN_TOPLEVEL_NODES(CG_VISIT)

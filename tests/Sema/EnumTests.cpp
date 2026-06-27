@@ -11,21 +11,22 @@ using namespace paykan::test;
 static std::string wrapMain(const std::string &body) {
   return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
-static std::string withEnums(const std::string &enums, const std::string &body) {
+static std::string withEnums(const std::string &enums,
+                             const std::string &body) {
   return enums + "\n" + wrapMain(body);
 }
 
 // --- Declaration & basic use ------------------------------------------------
 
 TEST(Enum, DeclareAndUse) {
-  auto r = semaCheck(withEnums("enum Color { Red, Green, Blue }",
-                               "c: Color = Color::Green;"));
+  auto r = semaCheck(
+      withEnums("enum Color { Red, Green, Blue }", "c: Color = Color::Green;"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
 TEST(Enum, TrailingCommaAllowed) {
-  auto r = semaCheck(withEnums("enum Color { Red, Green, Blue, }",
-                               "c: Color = Color::Blue;"));
+  auto r = semaCheck(
+      withEnums("enum Color { Red, Green, Blue, }", "c: Color = Color::Blue;"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
@@ -35,21 +36,22 @@ TEST(Enum, DuplicateVariantRejected) {
 }
 
 TEST(Enum, DuplicateEnumNameRejected) {
-  auto r = semaCheck(withEnums("enum Color { Red }\nenum Color { Blue }",
-                               "return 0;"));
+  auto r = semaCheck(
+      withEnums("enum Color { Red }\nenum Color { Blue }", "return 0;"));
   EXPECT_FALSE(r.Ok);
 }
 
 TEST(Enum, NameClashesWithClassRejected) {
-  auto r = semaCheck("class Color {}\nenum Color { Red }\n" + wrapMain("return 0;"));
+  auto r =
+      semaCheck("class Color {}\nenum Color { Red }\n" + wrapMain("return 0;"));
   EXPECT_FALSE(r.Ok);
 }
 
 // --- Variant access ---------------------------------------------------------
 
 TEST(Enum, UnknownVariantRejected) {
-  auto r = semaCheck(withEnums("enum Color { Red, Green }",
-                               "c: Color = Color::Nope;"));
+  auto r = semaCheck(
+      withEnums("enum Color { Red, Green }", "c: Color = Color::Nope;"));
   EXPECT_FALSE(r.Ok);
 }
 
@@ -79,8 +81,8 @@ TEST(Enum, CompareDifferentEnumsRejected) {
 }
 
 TEST(Enum, CompareEnumWithIntRejected) {
-  auto r = semaCheck(withEnums("enum Color { Red }",
-                               "if (Color::Red == 0) { }"));
+  auto r =
+      semaCheck(withEnums("enum Color { Red }", "if (Color::Red == 0) { }"));
   EXPECT_FALSE(r.Ok);
 }
 
@@ -141,30 +143,28 @@ TEST(Enum, MatchWildcardNotLastRejected) {
 // A wildcard-less enum match covering every variant (all arms returning)
 // satisfies the non-void return requirement — no trailing return needed.
 TEST(Enum, ExhaustiveMatchSatisfiesReturn) {
-  auto r = semaCheck(
-      "enum Color { Red, Green, Blue }\n"
-      "fn pick(c: Color) -> Str {\n"
-      "  match c {\n"
-      "    Red   { return \"r\"; }\n"
-      "    Green { return \"g\"; }\n"
-      "    Blue  { return \"b\"; }\n"
-      "  }\n"
-      "}\n"
-      "fn main() -> int { return 0; }\n");
+  auto r = semaCheck("enum Color { Red, Green, Blue }\n"
+                     "fn pick(c: Color) -> Str {\n"
+                     "  match c {\n"
+                     "    Red   { return \"r\"; }\n"
+                     "    Green { return \"g\"; }\n"
+                     "    Blue  { return \"b\"; }\n"
+                     "  }\n"
+                     "}\n"
+                     "fn main() -> int { return 0; }\n");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
 // A wildcard-less enum match that misses a variant is NOT exhaustive, so the
 // non-void function can fall through without returning -> error.
 TEST(Enum, NonExhaustiveMatchDoesNotSatisfyReturn) {
-  auto r = semaCheck(
-      "enum Color { Red, Green, Blue }\n"
-      "fn pick(c: Color) -> Str {\n"
-      "  match c {\n"
-      "    Red   { return \"r\"; }\n"
-      "    Green { return \"g\"; }\n"
-      "  }\n"
-      "}\n"
-      "fn main() -> int { return 0; }\n");
+  auto r = semaCheck("enum Color { Red, Green, Blue }\n"
+                     "fn pick(c: Color) -> Str {\n"
+                     "  match c {\n"
+                     "    Red   { return \"r\"; }\n"
+                     "    Green { return \"g\"; }\n"
+                     "  }\n"
+                     "}\n"
+                     "fn main() -> int { return 0; }\n");
   EXPECT_FALSE(r.Ok);
 }
