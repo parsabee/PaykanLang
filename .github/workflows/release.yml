@@ -1,0 +1,96 @@
+name: Release
+
+# Triggered by pushing a version tag (e.g. v0.0.0). Builds Release binaries on
+# every supported platform, stages them with `cmake --install`, packages each
+# staged tree into a tarball, and publishes a GitHub Release with the tarballs
+# (and their SHA-256 sums) attached.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # required to create the GitHub Release
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macos-arm64
+            runner: macos-14
+            generator: "Unix Makefiles"
+          - label: linux-x86_64
+            runner: ubuntu-latest
+            generator: "Ninja"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Cache third-party dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/third-party
+          key: third-party-${{ matrix.label }}-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
+
+      - name: Configure (Release)
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G "${{ matrix.generator }}"
+
+      - name: Build
+        run: cmake --build build --parallel --target paykan paykan_runtime
+
+      # Sanity-check the release binary actually runs before we publish it.
+      - name: Smoke test (--version + JIT run)
+        run: |
+          set -euo pipefail
+          ./build/bin/paykan --version
+          printf 'fn main() -> int {\n  println("Hello from release CI!");\n  return 0;\n}\n' > /tmp/hello.pkn
+          ./build/bin/paykan /tmp/hello.pkn
+
+      - name: Stage install tree
+        run: cmake --install build --prefix "stage/paykanlang"
+
+      - name: Package tarball
+        id: package
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          ARCHIVE="paykanlang-${VERSION}-${{ matrix.label }}.tar.gz"
+          tar -C stage -czf "${ARCHIVE}" paykanlang
+          shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
+          echo "archive=${ARCHIVE}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.label }}
+          path: |
+            paykanlang-*.tar.gz
+            paykanlang-*.tar.gz.sha256
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: PaykanLang ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/paykanlang-*.tar.gz
+            dist/paykanlang-*.tar.gz.sha256
