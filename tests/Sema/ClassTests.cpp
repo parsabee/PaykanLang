@@ -69,6 +69,23 @@ TEST(Class, ImplicitObjBaseEqNeq) {
 }
 
 // ============================================================================
+// destroy() may not be called directly
+// ============================================================================
+
+TEST(Class, DestroyDirectCallRejected) {
+  auto r = semaCheck(withClasses(
+      "class Box { v: int; fn __init__(x: int) { self.v = x; } }",
+      "b: Box = Box(5); b.destroy(); return 0;"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("destroy"), std::string::npos) << r.Diagnostics;
+}
+
+TEST(Class, DestroyDirectCallOnObjRejected) {
+  auto r = semaCheck(withClasses("", "o: Obj = Obj(); o.destroy(); return 0;"));
+  EXPECT_FALSE(r.Ok);
+}
+
+// ============================================================================
 // Duplicate definitions
 // ============================================================================
 

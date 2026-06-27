@@ -484,6 +484,16 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     return nullptr;
   }
 
+  // `destroy` is the ARC destructor; it runs automatically when the last
+  // reference is released. Calling it directly would free a still-referenced
+  // object and lead to a use-after-free, so reject it at compile time.
+  if (node->getMethodName() == names::kMethodDestroy) {
+    S.error(node->getLocation(),
+            "'destroy' cannot be called directly; an object is destroyed "
+            "automatically when its last reference is released");
+    return method->getReturnType();
+  }
+
   // Type-check arguments (receiver is implicit — not in getArguments()).
   const auto &paramTys = method->getParamTypes();
   if (node->getNumArguments() != paramTys.size()) {
