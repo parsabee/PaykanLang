@@ -1,10 +1,12 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// Smoke tests for the paykan driver CLI (--check-only, --dump-ast).
+// Smoke tests for the paykan driver CLI (--check-only, --dump-ast, --version).
 // The PAYKAN_BIN CMake variable is injected so tests find the binary.
 
 #include <gtest/gtest.h>
+
+#include "Version.h"
 
 #include <array>
 #include <cstdio>
@@ -71,6 +73,25 @@ TEST(Driver, CheckOnlyFailsOnSemanticError) {
   std::filesystem::remove(src);
   EXPECT_NE(rc, 0);
   EXPECT_FALSE(out.empty());
+}
+
+// ---------------------------------------------------------------------------
+// --version / -v
+// ---------------------------------------------------------------------------
+
+TEST(Driver, VersionFlagPrintsVersion) {
+  auto [rc, out] = run(std::string(kPaykan) + " --version 2>&1");
+  EXPECT_EQ(rc, 0);
+  EXPECT_NE(out.find("PaykanLang"), std::string::npos);
+  EXPECT_NE(out.find(paykan::kVersion), std::string::npos);
+  EXPECT_NE(out.find("LLVM"), std::string::npos);
+}
+
+TEST(Driver, ShortVersionFlagMatchesLong) {
+  auto longOut = run(std::string(kPaykan) + " --version 2>&1");
+  auto shortOut = run(std::string(kPaykan) + " -v 2>&1");
+  EXPECT_EQ(shortOut.exitCode, 0);
+  EXPECT_EQ(shortOut.out, longOut.out);
 }
 
 // ---------------------------------------------------------------------------

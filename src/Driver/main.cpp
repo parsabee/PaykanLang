@@ -7,9 +7,12 @@
 #include "DiagEngine.h"
 #include "JIT.h"
 #include "Sema.h"
+#include "Version.h"
 
 #include "Runtime.h"
 
+#include <llvm/ADT/StringRef.h>
+#include <llvm/Config/llvm-config.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/CommandLine.h>
@@ -70,7 +73,24 @@ static llvm::cl::list<std::string>
 
 // -- Entry point -------------------------------------------------------------
 
+// Prints the PaykanLang version and the LLVM version the compiler is built
+// against, then leaves the caller to exit.
+static void printVersion() {
+  llvm::outs() << "PaykanLang " << paykan::kVersion << "\n"
+               << "LLVM " << LLVM_VERSION_STRING << "\n";
+}
+
 int main(int argc, char *argv[]) {
+  // Handle --version / -v before LLVM's command-line parser runs, since the
+  // required positional <source-file> would otherwise reject these flags.
+  for (int i = 1; i < argc; ++i) {
+    llvm::StringRef arg(argv[i]);
+    if (arg == "--version" || arg == "-version" || arg == "-v") {
+      printVersion();
+      return EXIT_SUCCESS;
+    }
+  }
+
   llvm::cl::ParseCommandLineOptions(argc, argv, "Paykan language compiler\n");
 
   paykan::parser::ParserDriver driver(TraceParsing, TraceScanning);

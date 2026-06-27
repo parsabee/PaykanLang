@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(PaykanLang
-    VERSION 0.1.0
+    VERSION 0.0.0
     DESCRIPTION "A clean and simple, statically typed, object-oriented programming language"
     LANGUAGES C CXX
 )
@@ -71,6 +71,23 @@ target_compile_options(paykan_compile_options INTERFACE
 target_compile_definitions(paykan_compile_options INTERFACE
     $<$<CONFIG:Release>:NDEBUG>
 )
+
+# -- Generated version header -------------------------------------------------
+# Single source of truth: project(... VERSION ...) above is expanded into
+# Version.h via the template in include/Version.h.in.  The generated header is
+# placed on the include path of every first-party target through the shared
+# compile-options interface library.
+set(PAYKAN_VERSION       ${PROJECT_VERSION})
+set(PAYKAN_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
+set(PAYKAN_VERSION_MINOR ${PROJECT_VERSION_MINOR})
+set(PAYKAN_VERSION_PATCH ${PROJECT_VERSION_PATCH})
+set(PAYKAN_GENERATED_INCLUDE_DIR ${CMAKE_BINARY_DIR}/generated/include)
+configure_file(
+    ${CMAKE_SOURCE_DIR}/include/Version.h.in
+    ${PAYKAN_GENERATED_INCLUDE_DIR}/Version.h
+    @ONLY
+)
+target_include_directories(paykan_compile_options INTERFACE ${PAYKAN_GENERATED_INCLUDE_DIR})
 
 # -- Subdirectories -----------------------------------------------------------
 add_subdirectory(src)
