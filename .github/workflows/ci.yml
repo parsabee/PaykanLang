@@ -8,6 +8,36 @@ on:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # Code quality gate: clang-format (check) + clang-tidy (bug-focused).
+  # Uses the vendored LLVM 17 toolchain so the gate matches local runs exactly.
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint | clang-format + clang-tidy
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache third-party dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/third-party
+          key: third-party-macos-arm64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
+
+      # Configure + build so compile_commands.json and generated Parser/Lexer
+      # headers exist (clang-tidy needs them to parse the TUs).
+      - name: Configure (Debug)
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: clang-format (check)
+        run: python3 scripts/clang_format.py
+
+      - name: clang-tidy (bug-focused gate)
+        run: python3 scripts/run_clang_tidy.py --build-dir build
+
+  # ---------------------------------------------------------------------------
   # Debug build + full test suite (Apple Silicon)
   # ---------------------------------------------------------------------------
   build-test-macos:

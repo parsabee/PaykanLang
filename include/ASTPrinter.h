@@ -54,6 +54,9 @@ public:
   explicit ASTPrinter(llvm::raw_ostream &os);
 
   // -- Visitor overrides (generated from X-macros) -------------------------
+  // `Cast` is a type name used in a declarator (`Cast *node`) and cannot be
+  // parenthesized, so the macro-parentheses check is suppressed here.
+  // NOLINTNEXTLINE(bugprone-macro-parentheses)
 #define AST_PRINT(Kind, Name, Cast) void visit##Name(Cast *node);
   PAYKAN_ALL_NODES(AST_PRINT)
 #undef AST_PRINT

@@ -73,9 +73,9 @@ TEST(Class, ImplicitObjBaseEqNeq) {
 // ============================================================================
 
 TEST(Class, DestroyDirectCallRejected) {
-  auto r = semaCheck(withClasses(
-      "class Box { v: int; fn __init__(x: int) { self.v = x; } }",
-      "b: Box = Box(5); b.destroy(); return 0;"));
+  auto r = semaCheck(
+      withClasses("class Box { v: int; fn __init__(x: int) { self.v = x; } }",
+                  "b: Box = Box(5); b.destroy(); return 0;"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("destroy"), std::string::npos) << r.Diagnostics;
 }

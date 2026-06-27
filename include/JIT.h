@@ -23,7 +23,7 @@ namespace paykan::jit {
 /// Returns the exit code from main(), or an Error on failure.
 llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
                               std::unique_ptr<llvm::LLVMContext> ctx,
-                              std::vector<std::string> args = {});
+                              const std::vector<std::string> &args = {});
 
 } // namespace paykan::jit
 

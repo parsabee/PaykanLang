@@ -99,8 +99,8 @@ TEST(Driver, ShortVersionFlagMatchesLong) {
 // ---------------------------------------------------------------------------
 
 TEST(Driver, IntDivByZeroTraps) {
-  auto src = writeTmp(
-      "fn main() -> int { z: int = 0; q: int = 7 / z; return q; }");
+  auto src =
+      writeTmp("fn main() -> int { z: int = 0; q: int = 7 / z; return q; }");
   auto [rc, out] = run(std::string(kPaykan) + " " + src + " 2>&1");
   std::filesystem::remove(src);
   EXPECT_NE(rc, 0);
@@ -108,8 +108,8 @@ TEST(Driver, IntDivByZeroTraps) {
 }
 
 TEST(Driver, IntModByZeroTraps) {
-  auto src = writeTmp(
-      "fn main() -> int { z: int = 0; r: int = 7 % z; return r; }");
+  auto src =
+      writeTmp("fn main() -> int { z: int = 0; r: int = 7 % z; return r; }");
   auto [rc, out] = run(std::string(kPaykan) + " " + src + " 2>&1");
   std::filesystem::remove(src);
   EXPECT_NE(rc, 0);

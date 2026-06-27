@@ -176,8 +176,8 @@ int main(int argc, char *argv[]) {
   for (const auto &a : ProgramArgs)
     progArgs.push_back(a);
 
-  auto resultOrErr = paykan::jit::runModule(
-      std::move(mainModule), std::move(llvmCtx), std::move(progArgs));
+  auto resultOrErr = paykan::jit::runModule(std::move(mainModule),
+                                            std::move(llvmCtx), progArgs);
 
   if (TrackHeap)
     Paykan_heap_dump();

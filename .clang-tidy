@@ -1,0 +1,17 @@
+# PaykanLang clang-tidy configuration.
+#
+# Bug-focused, blocking gate: only the high-signal families that catch real
+# defects are enabled, and findings are treated as errors in CI. Stylistic
+# families (readability/modernize/misc namespace & include rules) are
+# intentionally left off so the gate stays low-noise and actionable.
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  clang-analyzer-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions
+
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*/(src|include)/.*\.h$'
+FormatStyle: file

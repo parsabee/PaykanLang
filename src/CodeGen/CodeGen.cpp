@@ -1487,7 +1487,8 @@ llvm::Value *CodeGen::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
     CG.Builder.SetInsertPoint(panicBB);
     auto *panicTy =
         llvm::FunctionType::get(llvm::Type::getVoidTy(CG.LLVMCtx), false);
-    CG.Builder.CreateCall(CG.declareFunction(kPaykanPanicDivByZero, panicTy), {});
+    CG.Builder.CreateCall(CG.declareFunction(kPaykanPanicDivByZero, panicTy),
+                          {});
     CG.Builder.CreateUnreachable();
     CG.Builder.SetInsertPoint(contBB);
   };

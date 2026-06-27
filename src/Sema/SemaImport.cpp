@@ -123,11 +123,13 @@ bool Sema::processImport(ast::ImportDecl *node) {
   auto applyClassInfo = [&](const ModuleInfo::ClassInfo &ci,
                             ast::ASTContext &ctx) {
     std::vector<std::pair<std::string, std::string>> fields;
+    fields.reserve(ci.Fields.size());
     for (auto &f : ci.Fields)
       fields.emplace_back(f.FieldName, f.TypeName);
     std::vector<
         std::tuple<std::string, std::string, std::vector<std::string>, uint8_t>>
         methods;
+    methods.reserve(ci.Methods.size());
     for (auto &m : ci.Methods)
       methods.emplace_back(m.Name, m.ReturnTypeName, m.ParamTypeNames, m.Flags);
     registerClassInfoInto(ci.Name, ci.SuperClassName, fields, methods, ctx);
@@ -292,7 +294,7 @@ bool Sema::processImport(ast::ImportDecl *node) {
   bool ok = true;
   for (auto &m : node->getModules()) {
     std::string fullPath = node->modulePath(m);
-    std::string qualifier = m.qualifier();
+    const std::string &qualifier = m.qualifier();
     std::string resolved =
         resolveModulePath(fullPath, isSystem, node->getLocation());
     if (resolved.empty()) {

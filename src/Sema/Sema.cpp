@@ -685,13 +685,13 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
 
   // Bootstrap builtin functions — print/println take any object.
   declareFunction(names::kPrint, Ctx.getVoidTy(), {Ctx.getObjTy()},
-                  /*variadic=*/true, /*builtin=*/true);
+                  /*isVariadic=*/true, /*isBuiltin=*/true);
   declareFunction(names::kPrintln, Ctx.getVoidTy(), {Ctx.getObjTy()},
-                  /*variadic=*/true, /*builtin=*/true);
+                  /*isVariadic=*/true, /*isBuiltin=*/true);
   declareFunction(names::kErrPrint, Ctx.getVoidTy(), {Ctx.getObjTy()},
-                  /*variadic=*/true, /*builtin=*/true);
+                  /*isVariadic=*/true, /*isBuiltin=*/true);
   declareFunction(names::kErrPrintln, Ctx.getVoidTy(), {Ctx.getObjTy()},
-                  /*variadic=*/true, /*builtin=*/true);
+                  /*isVariadic=*/true, /*isBuiltin=*/true);
 
   // Register type-conversion builtins (take unique builtin types — no ownership
   // check needed).

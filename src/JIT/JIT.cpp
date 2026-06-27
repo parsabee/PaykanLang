@@ -140,7 +140,7 @@ const RuntimeSymbol kRuntimeSymbols[] = {
 
 llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
                               std::unique_ptr<llvm::LLVMContext> ctx,
-                              std::vector<std::string> args) {
+                              const std::vector<std::string> &args) {
 #ifndef NDEBUG
   {
     std::unordered_set<std::string_view> registered;

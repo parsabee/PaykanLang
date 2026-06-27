@@ -66,9 +66,11 @@ namespace module_utils {
 /// If the resolved path is not under projectRoot, uses the filename only.
 inline llvm::SmallString<256> getCachePath(llvm::StringRef resolvedPath,
                                            llvm::StringRef projectRoot) {
-  // Current working directory.
+  // Current working directory. On failure `cwd` is left empty, which yields a
+  // cache path relative to the process root — acceptable for a best-effort
+  // cache location, so the error code is intentionally ignored.
   llvm::SmallString<256> cwd;
-  llvm::sys::fs::current_path(cwd);
+  (void)llvm::sys::fs::current_path(cwd);
 
   llvm::SmallString<256> cachePath(cwd);
   llvm::sys::path::append(cachePath, names::kCacheDir);
