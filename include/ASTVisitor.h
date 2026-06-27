@@ -26,7 +26,8 @@ namespace ast {
   NODE(NK_FuncDecl,       FuncDecl,       FuncDecl) \
   NODE(NK_MethodDecl,     MethodDecl,     MethodDecl) \
   NODE(NK_ImportDecl,     ImportDecl,     ImportDecl) \
-  NODE(NK_ClassDecl,      ClassDecl,      ClassDecl)
+  NODE(NK_ClassDecl,      ClassDecl,      ClassDecl)  \
+  NODE(NK_EnumDecl,       EnumDecl,       EnumDecl)
 
 #define PAYKAN_STMT_NODES(NODE) \
   NODE(NK_CompoundStmt,   CompoundStmt,   CompoundStmt)    \
@@ -57,12 +58,14 @@ namespace ast {
   NODE(NK_TernaryExpr,    TernaryExpr,    TernaryExpr)     \
   NODE(NK_MemberAccessExpr, MemberAccessExpr, MemberAccessExpr) \
   NODE(NK_ArrayLiteralExpr, ArrayLiteralExpr, ArrayLiteralExpr) \
-  NODE(NK_SubscriptExpr,  SubscriptExpr,  SubscriptExpr)
+  NODE(NK_SubscriptExpr,  SubscriptExpr,  SubscriptExpr)   \
+  NODE(NK_EnumValueExpr,  EnumValueExpr,  EnumValueExpr)
 
 #define PAYKAN_TYPE_NODES(NODE) \
   NODE(NK_BuiltinType,    BuiltinType,    BuiltinType) \
   NODE(NK_ClassType,      ClassType,      ClassType)   \
-  NODE(NK_ArrayType,      ArrayType,      ArrayType)
+  NODE(NK_ArrayType,      ArrayType,      ArrayType)    \
+  NODE(NK_EnumType,       EnumType,       EnumType)
 
 #define PAYKAN_TOPLEVEL_NODES(NODE) \
   NODE(NK_TranslationUnit, TranslationUnit, TranslationUnit)

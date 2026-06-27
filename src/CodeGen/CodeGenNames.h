@@ -34,6 +34,7 @@ inline constexpr const char *kIRMatchEnd       = "match.end";
 inline constexpr const char *kIRMatchWildcard  = "match.wildcard";
 inline constexpr const char *kIRMatchArmPfx    = "match.arm";
 inline constexpr const char *kIRMatchCheckPfx  = "match.check";
+inline constexpr const char *kIRMatchEq        = "match.eq";
 
 // ---------------------------------------------------------------------------
 // Value names (general)

@@ -1,0 +1,9 @@
+// ERROR: == is only allowed between two values of the SAME enum type.
+// Comparing two different enums is a type error.
+enum A { X, Y }
+enum B { P, Q }
+
+fn main() -> int {
+  if (A::X == B::P) { }   // sema error: mismatched types 'A' and 'B'
+  return 0;
+}

@@ -38,6 +38,7 @@ add_executable(sema_tests
     Sema/ClassTests.cpp
     Sema/ModuleTests.cpp
     Sema/ArrayTests.cpp
+    Sema/EnumTests.cpp
 )
 target_include_directories(sema_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -66,6 +67,7 @@ add_executable(codegen_tests
     CodeGen/LeakTests.cpp
     CodeGen/BoxedPrimitiveTests.cpp
     CodeGen/ArgsTests.cpp
+    CodeGen/EnumTests.cpp
 )
 target_include_directories(codegen_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}

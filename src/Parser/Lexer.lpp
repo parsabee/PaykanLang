@@ -119,6 +119,7 @@ comment     \/\/[^\n]*
 "import"   return yy::parser::make_IMPORT(loc);
 "as"       return yy::parser::make_AS(loc);
 "class"    return yy::parser::make_CLASS(loc);
+"enum"     return yy::parser::make_ENUM(loc);
 "match"    return yy::parser::make_MATCH(loc);
 "_"        return yy::parser::make_UNDERSCORE(loc);
 {id}       return yy::parser::make_IDENT (yytext, loc);

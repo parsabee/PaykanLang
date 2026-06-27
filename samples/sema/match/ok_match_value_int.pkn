@@ -1,0 +1,10 @@
+// OK: value-mode match on an int subject with integer-literal arms.
+fn main() -> int {
+  n: int = 2;
+  match n {
+    1 { }
+    2 { }
+    _ { }
+  }
+  return 0;
+}

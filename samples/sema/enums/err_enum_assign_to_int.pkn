@@ -1,0 +1,8 @@
+// ERROR: an enum is a distinct nominal type and is NOT convertible to int.
+// Initialising an `int` variable with an enum value is a type error.
+enum Color { Red, Green }
+
+fn main() -> int {
+  x: int = Color::Red;   // sema error: 'Color' does not match declared type 'int'
+  return 0;
+}

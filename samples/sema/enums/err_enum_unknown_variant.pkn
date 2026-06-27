@@ -1,0 +1,7 @@
+// ERROR: referencing a variant that the enum does not declare.
+enum Color { Red, Green }
+
+fn main() -> int {
+  c: Color = Color::Nope;   // sema error: enum 'Color' has no variant 'Nope'
+  return 0;
+}

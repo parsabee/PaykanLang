@@ -11,6 +11,7 @@ type-checking (no codegen or JIT execution).
 | `arrays/`  | Array types, literals, subscript, `len()`, match  |
 | `classes/` | Class declarations, fields, methods, inheritance, `__super__` |
 | `match/`   | `match` statement — arms, bindings, wildcards     |
+| `enums/`   | `enum` declarations, variant access, equality, enum match |
 
 ## Running
 

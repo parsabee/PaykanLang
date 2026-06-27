@@ -23,6 +23,7 @@
     std::vector<ImportDecl *> Imports;
     std::vector<ClassDecl  *> Classes;
     std::vector<FuncDecl   *> Funcs;
+    std::vector<EnumDecl   *> Enums;
   };
 }
 
@@ -76,6 +77,7 @@
   IMPORT "import"
   AS     "as"
   CLASS  "class"
+  ENUM   "enum"
   MATCH  "match"
   UNDERSCORE "_"
   FN     "fn"
@@ -127,18 +129,22 @@
 %type <std::pair<std::string,std::string>> importedModule
 %type <std::vector<std::pair<std::string,std::string>>> importedModuleList
 %type <ClassDecl *> classDecl
+%type <EnumDecl *> enumDecl
+%type <std::vector<const std::string *>> enumVariantList
 %type <TLDeclBag> topLevelDeclList
 %type <ClassBody> classMemberList
 %type <MatchStmt *> matchStmt
 %type <std::vector<MatchArm *>> matchArmList
 %type <MatchArm *> matchArm
+%type <Expr *> literalPattern
 %%
 
 %start translationUnit;
 
 translationUnit : topLevelDeclList
                                     { $$ = impl(drv).Ctx.make<TranslationUnit>(loc(@1, @1),
-                                           std::move($1.Imports), std::move($1.Classes), std::move($1.Funcs));
+                                           std::move($1.Imports), std::move($1.Classes), std::move($1.Funcs),
+                                           std::move($1.Enums));
                                       impl(drv).Root = $$;
                                     }
 ;
@@ -147,6 +153,7 @@ topLevelDeclList: %empty            { $$ = TLDeclBag{}; }
     | topLevelDeclList importDecl   { $$ = std::move($1); $$.Imports.push_back($2); }
     | topLevelDeclList classDecl    { $$ = std::move($1); $$.Classes.push_back($2); }
     | topLevelDeclList funcDecl     { $$ = std::move($1); $$.Funcs.push_back($2); }
+    | topLevelDeclList enumDecl     { $$ = std::move($1); $$.Enums.push_back($2); }
     ;
 
 importDecl:
@@ -230,6 +237,20 @@ classMemberList: %empty             { $$ = ClassBody{}; }
     | classMemberList funcDecl      { $$ = std::move($1); $$.Methods.push_back($2); }
     ;
 
+enumDecl:
+      "enum" IDENT "{" enumVariantList "}"
+                                    { $$ = impl(drv).Ctx.make<EnumDecl>(loc(@1, @5),
+                                           impl(drv).Ctx.intern($2), std::move($4)); }
+    ;
+
+// Variants are interned-string pointers in declaration order.  A trailing
+// comma after the last variant is permitted.
+enumVariantList:
+      IDENT                         { $$ = std::vector<const std::string *>{&impl(drv).Ctx.intern($1)}; }
+    | enumVariantList "," IDENT     { $$ = std::move($1); $$.push_back(&impl(drv).Ctx.intern($3)); }
+    | enumVariantList ","           { $$ = std::move($1); }
+    ;
+
 compoundStmt: %empty                { $$ = impl(drv).Ctx.make<CompoundStmt>(loc(@$, @$)); }
     | compoundStmt statement        { $$ = $1;
                                       if ($2) // can be null (empty stmt ";")
@@ -298,7 +319,19 @@ matchArm:
                                     { $$ = impl(drv).Ctx.make<MatchArm>(loc(@1, @4), impl(drv).Ctx.intern(""), $1, $3); }
     | IDENT ":" typeAnnotation "{" compoundStmt "}"
                                     { $$ = impl(drv).Ctx.make<MatchArm>(loc(@1, @6), impl(drv).Ctx.intern($1), $3, $5); }
-    | "_" "{" compoundStmt "}"      { $$ = impl(drv).Ctx.make<MatchArm>(loc(@1, @4), impl(drv).Ctx.intern(""), nullptr, $3); }
+    | literalPattern "{" compoundStmt "}"
+                                    { $$ = impl(drv).Ctx.make<MatchArm>(loc(@1, @4), impl(drv).Ctx.intern(""), $1, $3); }
+    | "_" "{" compoundStmt "}"      { $$ = impl(drv).Ctx.make<MatchArm>(loc(@1, @4), impl(drv).Ctx.intern(""), (Type *)nullptr, $3); }
+    ;
+
+// A literal usable as a value-match pattern.  Restricted to bare literal tokens
+// so the grammar stays unambiguous against type arms (which start with IDENT).
+literalPattern:
+      INT                           { $$ = impl(drv).Ctx.make<IntegerLiteral>(loc(@1, @1), $1); }
+    | FLOAT                         { $$ = impl(drv).Ctx.make<FloatLiteral>(loc(@1, @1), $1); }
+    | BOOL                          { $$ = impl(drv).Ctx.make<BoolLiteral>(loc(@1, @1), $1); }
+    | CHAR                          { $$ = impl(drv).Ctx.make<CharLiteral>(loc(@1, @1), $1); }
+    | STRING                        { $$ = impl(drv).Ctx.make<StringLiteral>(loc(@1, @1), $1); }
     ;
 
 param: IDENT ":" typeAnnotation                     { $$ = Param{&impl(drv).Ctx.intern($1), $3}; }
@@ -346,6 +379,13 @@ primaryExpression:
     | IDENT "(" argumentList ")"    { $$ = impl(drv).Ctx.make<CallExpr>(loc(@1, @4), impl(drv).Ctx.intern($1), std::move($3)); }
     | modulePath "::" IDENT "(" argumentList ")"
                                     { $$ = impl(drv).Ctx.make<CallExpr>(loc(@1, @6), impl(drv).Ctx.intern($1 + "::" + $3), std::move($5)); }
+    | modulePath "::" IDENT         { // Enum variant access:  MyEnum::Variant.
+                                      // Shares the `modulePath "::" IDENT` prefix
+                                      // with the qualified-call rule above; the
+                                      // only decision is shift '(' (call) vs
+                                      // reduce here, resolved by 1-token lookahead.
+                                      $$ = impl(drv).Ctx.make<EnumValueExpr>(loc(@1, @3),
+                                           impl(drv).Ctx.intern($1), impl(drv).Ctx.intern($3)); }
     | IDENT                         { $$ = impl(drv).Ctx.make<Identifier>(loc(@1, @1), impl(drv).Ctx.intern($1)); }
     | "(" expression ")"            { $$ = $2; }
     | "[" argumentList "]"          { $$ = impl(drv).Ctx.make<ArrayLiteralExpr>(loc(@1, @3), std::move($2)); }

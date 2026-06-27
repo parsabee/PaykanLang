@@ -1,0 +1,14 @@
+// ERROR: a match arm names a bare identifier that is not a variant of the
+// subject enum.
+enum Color { Red, Green }
+
+fn main() -> int {
+  c: Color = Color::Red;
+  match c {
+    Red   { }
+    Green { }
+    Blue  { }   // sema error: 'Blue' is not a variant of enum 'Color'
+    _     { }
+  }
+  return 0;
+}

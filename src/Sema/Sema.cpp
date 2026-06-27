@@ -93,6 +93,8 @@ std::string Sema::typeName(ast::Type *ty) {
   }
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ty))
     return ct->getName();
+  if (auto *et = ast::dyn_cast<ast::EnumType>(ty))
+    return et->getName();
   if (auto *at = ast::dyn_cast<ast::ArrayType>(ty))
     return typeName(at->getElementType()) + "[]";
   return "unknown";
@@ -154,7 +156,14 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty))
     return Ctx.getBuiltinType(bt->getTypeKind());
 
+  if (auto *et = ast::dyn_cast<ast::EnumType>(ty))
+    return Ctx.lookupEnumType(et->getName());
+
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
+    // The parser emits a ClassType stub for any unknown type name; it may in
+    // fact be an enum, which is resolved here before falling back to classes.
+    if (auto *enumTy = Ctx.lookupEnumType(ct->getName()))
+      return enumTy;
     if (auto *canonical = Ctx.lookupClassType(ct->getName()))
       return canonical;
     error(loc, context + " has unknown class type '" + ct->getName() + "'");
@@ -217,6 +226,26 @@ ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
   if (node->getName() == names::kStdin)
     return S.Ctx.getFileTy();
   return S.checkIdentLive(node->getName(), node->getLocation());
+}
+
+ast::Type *Sema::ExprChecker::visitEnumValueExpr(ast::EnumValueExpr *node) {
+  auto *enumTy = S.Ctx.lookupEnumType(node->getEnumName());
+  if (!enumTy) {
+    S.error(node->getLocation(),
+            "unknown enum type '" + node->getEnumName() + "'");
+    return nullptr;
+  }
+  int64_t idx = enumTy->findVariant(node->getVariantName());
+  if (idx < 0) {
+    S.error(node->getLocation(),
+            "enum '" + node->getEnumName() + "' has no variant '" +
+                node->getVariantName() + "'");
+    return nullptr;
+  }
+  node->setResolvedEnum(enumTy);
+  node->setValue(idx);
+  node->setResolvedType(enumTy);
+  return enumTy;
 }
 
 ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
@@ -671,14 +700,68 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
 bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   bool ok = true;
 
+  // Register enum types first so that class fields, parameters, and variable
+  // declarations can reference them by name during the passes that follow.
+  for (auto *ed : node->getEnumDecls())
+    if (!visitEnumDecl(ed))
+      ok = false;
+
+  // Register class types, fields, method signatures, and constructors first, so
+  // that function signatures below can name class types (e.g. a function that
+  // takes or returns a class).  Method bodies are deferred (checkClassBodies).
   if (!node->getClassDecls().empty())
     if (!checkClassDecls(node->getClassDecls()))
       ok = false;
 
+  // Forward-declare every free function's signature next, so that any body —
+  // a free function OR a class method — may call any module-level function
+  // regardless of the order it is defined.
+  for (auto *fn : node->getFuncDecls())
+    if (!declareFunctionSignature(fn))
+      ok = false;
+
+  // Now check class method bodies (they can resolve free functions) …
+  if (!node->getClassDecls().empty())
+    if (!checkClassBodies())
+      ok = false;
+
+  // … and finally free-function bodies (signatures all registered above).
   for (auto *fn : node->getFuncDecls())
     if (!visitFuncDecl(fn))
       ok = false;
 
+  return ok;
+}
+
+// -- Declarations ------------------------------------------------------------
+
+bool Sema::visitEnumDecl(ast::EnumDecl *node) {
+  // Reject names that collide with a builtin, class, or existing enum.
+  if (Ctx.lookupType(node->getName())) {
+    error(node->getLocation(),
+          "redefinition of type '" + node->getName() + "'");
+    return false;
+  }
+
+  auto *enumTy = Ctx.registerEnumType(node->getName(), node->getLocation());
+  if (!enumTy) {
+    error(node->getLocation(),
+          "redefinition of enum '" + node->getName() + "'");
+    return false;
+  }
+
+  bool ok = true;
+  llvm::StringSet<> seen;
+  for (const auto *variant : node->getVariants()) {
+    if (!seen.insert(*variant).second) {
+      error(node->getLocation(),
+            "duplicate variant '" + *variant + "' in enum '" +
+                node->getName() + "'");
+      ok = false;
+      continue;
+    }
+    enumTy->addVariant(*variant);
+  }
   return ok;
 }
 
@@ -710,7 +793,7 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
 
   // Guard: the target name must not shadow a registered type name.
   const auto &varName = node->getVarName();
-  if (Ctx.lookupClassType(varName) ||
+  if (Ctx.lookupClassType(varName) || Ctx.lookupEnumType(varName) ||
       varName == names::kObj     || varName == names::kString ||
       varName == names::kFile    ||
       varName == names::kTypeInt || varName == names::kTypeBool ||
@@ -872,17 +955,30 @@ bool detail::stmtAlwaysReturns(ast::Stmt *s) {
     return detail::blockAlwaysReturns(cs->getStatements());
   if (auto *ms = ast::dyn_cast<ast::MatchStmt>(s)) {
     bool hasWildcard = false;
+    unsigned variantArms = 0;
     for (ast::MatchArm *arm : ms->getArms()) {
-      if (arm->isWildcard()) hasWildcard = true;
+      if (arm->isWildcard())
+        hasWildcard = true;
+      else if (!arm->isLiteral())
+        ++variantArms; // an enum/type-name (bare-variant) arm
       if (!detail::blockAlwaysReturns(arm->getBody()->getStatements()))
         return false;
     }
-    return hasWildcard;
+    if (hasWildcard)
+      return true;
+    // A wildcard-less enum match is exhaustive iff its arms cover every
+    // variant.  Sema has already validated the arms (visitFuncDecl runs this
+    // analysis only after the body type-checks cleanly), so each variant arm
+    // names a distinct, valid variant — counting them suffices.
+    if (auto *subjTy = ms->getSubject()->getResolvedType())
+      if (auto *et = ast::dyn_cast<ast::EnumType>(subjTy))
+        return variantArms == et->getNumVariants();
+    return false;
   }
   return false;
 }
 
-bool Sema::visitFuncDecl(ast::FuncDecl *node) {
+bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
   // Resolve return type.
   ast::Type *retTy = Ctx.getVoidTy();
   if (node->getReturnType()) {
@@ -909,6 +1005,28 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
     return false;
   }
   declareFunction(node->getName(), retTy, paramTypes);
+  return true;
+}
+
+bool Sema::visitFuncDecl(ast::FuncDecl *node) {
+  // The signature was registered by the forward-declaration pass in
+  // visitTranslationUnit.  If it is absent, signature resolution failed earlier
+  // (the error was already reported) — skip the body to avoid duplicate
+  // diagnostics.
+  if (!lookupFunction(node->getName()))
+    return false;
+
+  // Re-resolve the annotations to set up the body scope (resolveType is
+  // idempotent and, for a registered function, is guaranteed to succeed).
+  ast::Type *retTy = Ctx.getVoidTy();
+  if (node->getReturnType())
+    retTy = resolveType(node->getReturnType(), node->getLocation(),
+                        "function '" + node->getName() + "' return type");
+
+  std::vector<ast::Type *> paramTypes;
+  for (auto &p : node->getParams())
+    paramTypes.push_back(resolveType(p.ParamType, node->getLocation(),
+                                     "parameter '" + p.getName() + "'"));
 
   // Type-check the body in a new scope with params.
   auto *savedRetTy = CurrentReturnType;
@@ -1103,12 +1221,129 @@ bool Sema::visitImportDecl(ast::ImportDecl *) {
   return true;
 }
 
+// Value-mode match: the subject is a primitive (int/float/bool/char) or Str.
+// Every non-wildcard arm must be a literal whose type matches the subject.
+bool Sema::checkValueMatch(ast::MatchStmt *node, ast::Type *subjectTy) {
+  bool ok = true;
+  bool seenWildcard = false;
+
+  for (ast::MatchArm *arm : node->getArms()) {
+    if (seenWildcard) {
+      error(arm->getLocation(), "unreachable arm: wildcard '_' must be the last arm");
+      ok = false;
+      continue;
+    }
+
+    ScopeGuard armGuard(*this);
+
+    if (arm->isWildcard()) {
+      seenWildcard = true;
+    } else if (arm->isLiteral()) {
+      // Bindings are meaningless in value-mode; the grammar never produces a
+      // binding on a literal arm, but guard anyway.
+      if (arm->hasBinding()) {
+        error(arm->getLocation(), "value-match arm cannot bind a variable");
+        ok = false;
+      }
+      auto *litTy = resolveExprType(arm->getLiteralPattern());
+      if (litTy && !typesEqual(litTy, subjectTy)) {
+        error(arm->getLocation(),
+              "match arm literal of type '" + typeName(litTy) +
+                  "' does not match subject type '" + typeName(subjectTy) + "'");
+        ok = false;
+      }
+    } else {
+      // A type-named arm in a value-mode match.
+      error(arm->getLocation(),
+            "match on a value of type '" + typeName(subjectTy) +
+                "' requires literal patterns, not type names");
+      ok = false;
+    }
+
+    for (auto *stmt : arm->getBody()->getStatements())
+      if (!visit(stmt)) ok = false;
+  }
+
+  return ok;
+}
+
+// Enum-mode match: the subject is an enum, and each non-wildcard arm names a
+// bare variant.  The variant name is carried by the arm's type-name (a
+// ClassType stub produced by the parser's `typeAnnotation: IDENT` rule).
+bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
+  bool ok = true;
+  bool seenWildcard = false;
+  llvm::StringSet<> seenVariants;
+
+  for (ast::MatchArm *arm : node->getArms()) {
+    if (seenWildcard) {
+      error(arm->getLocation(), "unreachable arm: wildcard '_' must be the last arm");
+      ok = false;
+      continue;
+    }
+
+    ScopeGuard armGuard(*this);
+
+    if (arm->isWildcard()) {
+      seenWildcard = true;
+    } else if (arm->isLiteral()) {
+      error(arm->getLocation(),
+            "match on enum '" + subjectTy->getName() +
+                "' requires bare variant names, not literal patterns");
+      ok = false;
+    } else {
+      // The arm's type-name stub carries the variant name.
+      if (arm->hasBinding()) {
+        error(arm->getLocation(), "enum-match arm cannot bind a variable");
+        ok = false;
+      }
+      std::string variant;
+      if (auto *stub = ast::dyn_cast<ast::ClassType>(arm->getArmType()))
+        variant = stub->getName();
+      else if (auto *et = ast::dyn_cast<ast::EnumType>(arm->getArmType()))
+        variant = et->getName();
+      if (variant.empty() || subjectTy->findVariant(variant) < 0) {
+        error(arm->getLocation(),
+              "'" + variant + "' is not a variant of enum '" +
+                  subjectTy->getName() + "'");
+        ok = false;
+      } else if (!seenVariants.insert(variant).second) {
+        error(arm->getLocation(),
+              "duplicate variant '" + variant + "' in enum match");
+        ok = false;
+      }
+    }
+
+    for (auto *stmt : arm->getBody()->getStatements())
+      if (!visit(stmt)) ok = false;
+  }
+
+  return ok;
+}
+
 bool Sema::visitMatchStmt(ast::MatchStmt *node) {
   auto *subjectTy = resolveExprType(node->getSubject());
   if (!subjectTy)
     return false;
+  // Record the subject type so CodeGen can pick the right lowering (in
+  // particular, distinguish an enum subject from a class subject).
+  node->getSubject()->setResolvedType(subjectTy);
 
-  // The subject must be a class type — matching on builtins is not supported.
+  // A match is value-mode when its subject resolves to a builtin primitive
+  // (int/float/bool/char) or to Str.  In value-mode, arms compare the subject
+  // against literal patterns instead of dispatching on runtime type.  Str is a
+  // ClassType internally, so it is steered into value-mode explicitly.
+  bool valueMode = ast::isa<ast::BuiltinType>(subjectTy) ||
+                   subjectTy == Ctx.getStrTy();
+  if (valueMode)
+    return checkValueMatch(node, subjectTy);
+
+  // Enum-mode: the subject is an enum.  Arms name bare variants (each parsed as
+  // a type-name arm whose ClassType-stub name is the variant name).
+  if (auto *enumTy = ast::dyn_cast<ast::EnumType>(subjectTy))
+    return checkEnumMatch(node, enumTy);
+
+  // The subject must be a class type — matching on other builtins is not supported.
   auto *subjectCt = ast::dyn_cast<ast::ClassType>(subjectTy);
   if (!subjectCt) {
     error(node->getSubject()->getLocation(),
@@ -1139,6 +1374,15 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
 
     if (arm->isWildcard()) {
       seenWildcard = true;
+    } else if (arm->isLiteral()) {
+      // A literal pattern in a class-mode match.
+      error(arm->getLocation(),
+            "match on a class subject of type '" + subjectCt->getName() +
+                "' requires type-name arms, not literal patterns");
+      ok = false;
+      for (auto *stmt : arm->getBody()->getStatements())
+        if (!visit(stmt)) ok = false;
+      continue;
     } else {
       // 2. Resolve the arm's type annotation.
       auto *resolvedArmTy = resolveType(arm->getArmType(), arm->getLocation(), "match arm");

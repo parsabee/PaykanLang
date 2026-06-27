@@ -36,6 +36,12 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
                 "' conflicts with an imported type of the same name");
       ok = false;
     }
+    if (Ctx.lookupEnumType(cd->getName())) {
+      error(cd->getLocation(),
+            "class '" + cd->getName() +
+                "' conflicts with an enum of the same name");
+      ok = false;
+    }
   }
   if (!ok)
     return false;
@@ -219,13 +225,22 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
     declareFunction(cd->getName(), ct, ctorParams);
   }
 
+  // Method bodies (Phase 5) are checked later by checkClassBodies(), after free
+  // functions are forward-declared — so a method may call any module function.
+  // Remember the topological order for that pass.
+  SortedClasses = std::move(sorted);
+  return ok;
+}
+
+bool Sema::checkClassBodies() {
   // -------------------------------------------------------------------------
-  // Phase 5: Type-check method bodies.
+  // Phase 5: Type-check method bodies (class types, fields, method signatures,
+  // constructors, and all free functions are registered by now).
   // -------------------------------------------------------------------------
-  for (auto *cd : sorted)
+  bool ok = true;
+  for (auto *cd : SortedClasses)
     if (!visitClassDecl(cd))
       ok = false;
-
   return ok;
 }
 

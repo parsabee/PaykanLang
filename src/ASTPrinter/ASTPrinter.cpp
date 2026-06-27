@@ -57,12 +57,18 @@ void ASTPrinter::visitTranslationUnit(TranslationUnit *node) {
   OS << "TranslationUnit";
   printLoc(node);
   OS << "\n";
-  size_t total = node->getImports().size() + node->getClassDecls().size() + node->getFuncDecls().size();
+  size_t total = node->getImports().size() + node->getEnumDecls().size() +
+                 node->getClassDecls().size() + node->getFuncDecls().size();
   size_t idx = 0;
   for (auto *imp : node->getImports()) {
     ++idx;
     ChildScope cs(*this, idx == total);
     visitImportDecl(imp);
+  }
+  for (auto *en : node->getEnumDecls()) {
+    ++idx;
+    ChildScope cs(*this, idx == total);
+    visitEnumDecl(en);
   }
   for (auto *cls : node->getClassDecls()) {
     ++idx;
@@ -438,6 +444,34 @@ void ASTPrinter::visitClassDecl(ClassDecl *node) {
     ChildScope cs(*this, idx == total);
     visitFuncDecl(method);
   }
+}
+
+void ASTPrinter::visitEnumDecl(EnumDecl *node) {
+  printIndent();
+  OS << "EnumDecl";
+  printLoc(node);
+  OS << " '" << node->getName() << "' {";
+  bool first = true;
+  for (const auto *v : node->getVariants()) {
+    if (!first) OS << ", ";
+    OS << *v;
+    first = false;
+  }
+  OS << "}\n";
+}
+
+void ASTPrinter::visitEnumType(EnumType *node) {
+  printIndent();
+  OS << "EnumType";
+  printLoc(node);
+  OS << " '" << node->getName() << "'\n";
+}
+
+void ASTPrinter::visitEnumValueExpr(EnumValueExpr *node) {
+  printIndent();
+  OS << "EnumValueExpr";
+  printLoc(node);
+  OS << " '" << node->getEnumName() << "::" << node->getVariantName() << "'\n";
 }
 
 void ASTPrinter::visitMemberAssignStmt(MemberAssignStmt *node) {

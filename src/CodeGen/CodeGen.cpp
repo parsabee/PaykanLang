@@ -193,11 +193,65 @@ llvm::Type *CodeGen::toLLVMType(ast::Type *ty) {
       return llvm::Type::getVoidTy(LLVMCtx);
     }
   }
+  // The parser emits a ClassType stub for any unknown type name, which may in
+  // fact be an enum (resolved by Sema).  Canonicalize such stubs to the enum
+  // type so they lower to i64 rather than an opaque pointer.
+  if (auto *ct = ast::dyn_cast<ast::ClassType>(ty))
+    if (ASTCtx.lookupEnumType(ct->getName()))
+      return llvm::Type::getInt64Ty(LLVMCtx);
+  if (ast::isa<ast::EnumType>(ty)) {
+    // Enums lower to a 64-bit unsigned integer (the variant's index).
+    return llvm::Type::getInt64Ty(LLVMCtx);
+  }
   if (ast::isRefType(ty)) {
     // All class/array types are represented as opaque pointers (ptr) for now.
     return llvm::PointerType::getUnqual(LLVMCtx);
   }
   return nullptr;
+}
+
+bool CodeGen::isObjectElementType(ast::Type *elemTy) const {
+  if (!elemTy)
+    return false;
+  if (ast::isa<ast::EnumType>(elemTy))
+    return false;
+  // The parser emits a ClassType stub for any named type; one naming an enum is
+  // an i64 primitive, not an object slot.
+  if (auto *ct = ast::dyn_cast<ast::ClassType>(elemTy))
+    return ASTCtx.lookupEnumType(ct->getName()) == nullptr;
+  return ast::isa<ast::ArrayType>(elemTy);
+}
+
+ast::Type *CodeGen::canonicalizeDeclType(ast::Type *ty) {
+  if (!ty)
+    return ty;
+  if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
+    if (auto *et = ASTCtx.lookupEnumType(ct->getName()))
+      return et;
+    if (auto *canonical = ASTCtx.lookupClassType(ct->getName()))
+      return canonical;
+  }
+  return ty;
+}
+
+llvm::Function *CodeGen::declareFunctionPrototype(ast::FuncDecl *node) {
+  if (auto *existing = Module->getFunction(node->getName()))
+    return existing;
+
+  ast::Type *retAstTy = canonicalizeDeclType(node->getReturnType());
+  llvm::Type *retTy = retAstTy ? toLLVMType(retAstTy)
+                               : llvm::Type::getVoidTy(LLVMCtx);
+  std::vector<llvm::Type *> paramTys;
+  for (auto &p : node->getParams())
+    paramTys.push_back(toLLVMType(p.ParamType));
+
+  auto *fnTy = llvm::FunctionType::get(retTy, paramTys, false);
+  auto *fn = llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage,
+                                    node->getName(), Module.get());
+  size_t idx = 0;
+  for (auto &arg : fn->args())
+    arg.setName(node->getParams()[idx++].getName());
+  return fn;
 }
 
 llvm::AllocaInst *CodeGen::createEntryAlloca(llvm::Function *fn,
@@ -493,10 +547,21 @@ void CodeGen::bootstrapBuiltins() {
 // -- Top-level ---------------------------------------------------------------
 
 llvm::Value *CodeGen::visitTranslationUnit(ast::TranslationUnit *node) {
+  // Forward-declare every free-function prototype before emitting any body, so a
+  // call inside a class method (emitted below) resolves even when the callee is
+  // defined later in the module.
+  for (auto *fn : node->getFuncDecls())
+    declareFunctionPrototype(fn);
   for (auto *cls : node->getClassDecls())
     visitClassDecl(cls);
   for (auto *fn : node->getFuncDecls())
     visitFuncDecl(fn);
+  return nullptr;
+}
+
+llvm::Value *CodeGen::visitEnumDecl(ast::EnumDecl *) {
+  // Enum declarations emit no code — they are pure type definitions (like a
+  // typedef).  Variant values are materialized at use sites via EnumValueExpr.
   return nullptr;
 }
 
@@ -873,9 +938,14 @@ llvm::Value *CodeGen::visitVarDecl(ast::VarDecl *node) {
     // Canonicalize ClassType: the parser may have created a stub before Sema
     // populated the canonical ClassType in the registry.
     ast::Type *annoTy = node->getType();
-    if (auto *ct = ast::dyn_cast<ast::ClassType>(annoTy))
-      if (auto *canonical = ASTCtx.lookupClassType(ct->getName()))
+    if (auto *ct = ast::dyn_cast<ast::ClassType>(annoTy)) {
+      // The parser emits a ClassType stub for unknown names; it may actually be
+      // an enum, so resolve the enum registry first, then the class registry.
+      if (auto *enumTy = ASTCtx.lookupEnumType(ct->getName()))
+        annoTy = enumTy;
+      else if (auto *canonical = ASTCtx.lookupClassType(ct->getName()))
         annoTy = canonical;
+    }
     llvmTy = toLLVMType(annoTy);
   }
 
@@ -886,8 +956,16 @@ llvm::Value *CodeGen::visitVarDecl(ast::VarDecl *node) {
     // For class-typed (non-None) VarDecls, use emitAsShared to get a properly
     // owned PaykanShared* — handles owned-identifier retain, already-shared
     // call pass-through, string literal wrapping, and raw->shared boxing.
-    bool isClassDecl = !isNoneInit && node->getType() &&
-                       ast::isRefType(node->getType());
+    // Resolve the annotation's canonical type so enum stubs (which are
+    // ClassType stubs at this point) are not mistaken for reference types.
+    ast::Type *declTy = node->getType();
+    if (auto *ct = ast::dyn_cast<ast::ClassType>(declTy)) {
+      if (ASTCtx.lookupEnumType(ct->getName()))
+        declTy = nullptr; // enum: a plain i64 value, not a ref type
+      else if (auto *canonical = ASTCtx.lookupClassType(ct->getName()))
+        declTy = canonical;
+    }
+    bool isClassDecl = !isNoneInit && declTy && ast::isRefType(declTy);
     if (isClassDecl) {
       initVal = emitAsShared(node->getInitExpr());
       if (!llvmTy)
@@ -930,7 +1008,9 @@ llvm::Value *CodeGen::visitVarDecl(ast::VarDecl *node) {
   // a stub with no fields before Sema populated the canonical ClassType).
   ast::Type *scopeTy = node->getType();
   if (auto *ct = ast::dyn_cast<ast::ClassType>(scopeTy)) {
-    if (auto *canonical = ASTCtx.lookupClassType(ct->getName()))
+    if (auto *enumTy = ASTCtx.lookupEnumType(ct->getName()))
+      scopeTy = enumTy;
+    else if (auto *canonical = ASTCtx.lookupClassType(ct->getName()))
       scopeTy = canonical;
   }
   // Narrow the scope type to the concrete RHS type when the declared type is a
@@ -1002,6 +1082,14 @@ llvm::Value *CodeGen::ExprEmitter::visitStringLiteral(ast::StringLiteral *node) 
   return gv;
 }
 
+llvm::Value *CodeGen::ExprEmitter::visitEnumValueExpr(ast::EnumValueExpr *node) {
+  // Enums lower to a 64-bit integer constant (the variant's index).  Sema has
+  // already resolved and validated the variant value.  No ARC: enum values are
+  // plain primitives, not heap objects.
+  return llvm::ConstantInt::get(llvm::Type::getInt64Ty(CG.LLVMCtx),
+                                static_cast<uint64_t>(node->getValue()));
+}
+
 llvm::Value *CodeGen::ExprEmitter::visitIdentifier(ast::Identifier *node) {
   if (node->getName() == names::kStdin) {
     auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
@@ -1039,10 +1127,9 @@ llvm::Value *CodeGen::ExprEmitter::visitArrayLiteralExpr(ast::ArrayLiteralExpr *
   if (auto *at = ast::dyn_cast<ast::ArrayType>(node->getResolvedType()))
     elemTy = at->getElementType();
 
-  // An object array holds PaykanShared* slots; a primitive array holds raw values.
-  bool isObjectArray = elemTy &&
-                       (ast::isa<ast::ClassType>(elemTy) ||
-                        ast::isa<ast::ArrayType>(elemTy));
+  // An object array holds PaykanShared* slots; a primitive array holds raw
+  // values.  Enum elements are i64 primitives (see isObjectElementType).
+  bool isObjectArray = CG.isObjectElementType(elemTy);
 
   size_t len = node->getNumElements();
   auto *lenVal = llvm::ConstantInt::get(i64Ty, (uint64_t)len);
@@ -1238,6 +1325,9 @@ llvm::Value *CodeGen::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) 
       return raw;
     }
   }
+  // Enum elements are i64 primitives stored raw — not boxed.
+  if (!CG.isObjectElementType(elemTy))
+    return raw;
   // ClassType or ArrayType: slot stores a PaykanShared* as bits — convert back,
   // then unwrap to the raw PaykanObject* (same as visitIdentifier for owned vars).
   llvm::Value *shared = CG.Builder.CreateIntToPtr(raw, ptrTy, kIRElemShared);
@@ -1670,7 +1760,7 @@ llvm::Value *CodeGen::ExprEmitter::emitArrayPush(ast::MethodCallExpr *node,
   if (node->getNumArguments() != 1) return nullptr;
   auto *argExpr = node->getArguments()[0];
 
-  bool isObjElem = ast::isa<ast::ClassType>(elemTy) || ast::isa<ast::ArrayType>(elemTy);
+  bool isObjElem = CG.isObjectElementType(elemTy);
   if (isObjElem) {
     // Use emitAsShared so that existing owned variables are retained rather than
     // double-wrapped (emitExpr on a ref-typed identifier unwraps to the raw pointer,
@@ -1699,7 +1789,7 @@ llvm::Value *CodeGen::ExprEmitter::emitArrayPop(llvm::Value *recv, ast::Type *el
   auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
   auto *i64Ty = llvm::Type::getInt64Ty(CG.LLVMCtx);
 
-  bool isObjElem = ast::isa<ast::ClassType>(elemTy) || ast::isa<ast::ArrayType>(elemTy);
+  bool isObjElem = CG.isObjectElementType(elemTy);
   if (isObjElem) {
     auto *fnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
     return CG.Builder.CreateCall(CG.declareFunction(kPaykanArrayPopObj, fnTy), {recv}, kIRMcall);
@@ -1974,8 +2064,7 @@ llvm::Value *CodeGen::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
     }
   }
 
-  bool isObjElem = elemTy && (ast::isa<ast::ClassType>(elemTy) ||
-                               ast::isa<ast::ArrayType>(elemTy));
+  bool isObjElem = isObjectElementType(elemTy);
 
   if (isObjElem) {
     // Object element: use PaykanArray_set_obj (retains new, releases old).
@@ -2041,6 +2130,21 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
   ScopeGuard matchGuard(*this);
   if (sharedSubj)
     CurrentScope->PendingReleases.push_back(sharedSubj);
+
+  // Enum-mode: the subject resolves to an EnumType.  Each non-wildcard arm
+  // names a bare variant (parsed as a type-name arm).  Emit an icmp-eq if-else
+  // chain comparing the subject i64 against each variant's constant.
+  if (auto *subjTy = node->getSubject()->getResolvedType())
+    if (ast::isa<ast::EnumType>(subjTy))
+      return emitEnumMatch(node, subjRaw, parentFn);
+
+  // Value-mode: any literal arm means Sema verified this is a primitive/Str
+  // match.  Emit an equality if-else chain instead of vtable dispatch.
+  bool valueMode = false;
+  for (ast::MatchArm *arm : node->getArms())
+    if (arm->isLiteral()) { valueMode = true; break; }
+  if (valueMode)
+    return emitValueMatch(node, subjRaw, parentFn);
 
   // 2. Build control-flow blocks.
   auto *endBB      = llvm::BasicBlock::Create(LLVMCtx, kIRMatchEnd, parentFn);
@@ -2141,30 +2245,200 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
   return nullptr;
 }
 
+// Value-mode match: emit an equality if-else chain.  `subjRaw` is the subject
+// value already materialized by visitMatchStmt (a raw scalar for primitives, a
+// raw PaykanString* for Str subjects).  The enclosing matchGuard scope still
+// owns the subject-box release (if any); we only add the control flow here.
+llvm::Value *CodeGen::emitValueMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
+                                     llvm::Function *parentFn) {
+  auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
+  auto *i64Ty = llvm::Type::getInt64Ty(LLVMCtx);
+
+  auto *endBB      = llvm::BasicBlock::Create(LLVMCtx, kIRMatchEnd, parentFn);
+  auto *wildcardBB = [&]() -> llvm::BasicBlock * {
+    for (ast::MatchArm *arm : node->getArms())
+      if (arm->isWildcard())
+        return llvm::BasicBlock::Create(LLVMCtx, kIRMatchWildcard, parentFn);
+    return nullptr;
+  }();
+  auto *defaultBB = wildcardBB ? wildcardBB : endBB;
+
+  // Pre-allocate a body block for each literal arm.
+  struct LitArm { ast::MatchArm *Arm; llvm::BasicBlock *BodyBB; };
+  std::vector<LitArm> litArms;
+  for (size_t i = 0; i < node->getArms().size(); ++i) {
+    ast::MatchArm *arm = node->getArms()[i];
+    if (!arm->isLiteral()) continue;
+    litArms.push_back({arm, llvm::BasicBlock::Create(
+                                LLVMCtx, kIRMatchArmPfx + std::to_string(i),
+                                parentFn)});
+  }
+
+  // Emit the comparison chain.  Each check evaluates the arm's literal, compares
+  // it against the subject, and branches to the body block on equality.
+  if (litArms.empty()) {
+    Builder.CreateBr(defaultBB);
+  } else {
+    for (size_t i = 0; i < litArms.size(); ++i) {
+      ast::Expr   *lit  = litArms[i].Arm->getLiteralPattern();
+      llvm::Value *isEq = nullptr;
+      if (auto *sl = ast::dyn_cast<ast::StringLiteral>(lit)) {
+        // Build a temporary PaykanString* for the literal and compare contents.
+        llvm::Value *litStr = wrapStringLiteral(emitExpr(sl), sl->getValue().size());
+        auto *eqFnTy = llvm::FunctionType::get(i64Ty, {ptrTy, ptrTy}, false);
+        llvm::Value *eq = Builder.CreateCall(
+            declareFunction(kPaykanStringEquals, eqFnTy), {subjRaw, litStr},
+            kIRMatchEq);
+        // The literal temp is owned; destroy it now that the compare is done.
+        destroyStringTempIfOwned(litStr);
+        isEq = Builder.CreateICmpNE(eq, llvm::ConstantInt::get(i64Ty, 0),
+                                    kIRMatchEq);
+      } else if (ast::isa<ast::FloatLiteral>(lit)) {
+        isEq = Builder.CreateFCmpOEQ(subjRaw, emitExpr(lit), kIRMatchEq);
+      } else {
+        // int / bool / char are all integer-typed scalars.
+        isEq = Builder.CreateICmpEQ(subjRaw, emitExpr(lit), kIRMatchEq);
+      }
+      auto *nextBB = (i + 1 < litArms.size())
+                         ? llvm::BasicBlock::Create(
+                               LLVMCtx, kIRMatchCheckPfx + std::to_string(i + 1),
+                               parentFn)
+                         : defaultBB;
+      Builder.CreateCondBr(isEq, litArms[i].BodyBB, nextBB);
+      if (nextBB != defaultBB)
+        Builder.SetInsertPoint(nextBB);
+    }
+  }
+
+  // Emit literal-arm body blocks.
+  for (const auto &la : litArms) {
+    Builder.SetInsertPoint(la.BodyBB);
+    {
+      ScopeGuard armGuard(*this);
+      for (auto *stmt : la.Arm->getBody()->getStatements())
+        visit(stmt);
+    }
+    if (!Builder.GetInsertBlock()->getTerminator())
+      Builder.CreateBr(endBB);
+  }
+
+  // Emit the wildcard arm body.
+  if (wildcardBB) {
+    Builder.SetInsertPoint(wildcardBB);
+    for (ast::MatchArm *arm : node->getArms()) {
+      if (!arm->isWildcard()) continue;
+      ScopeGuard armGuard(*this);
+      for (auto *stmt : arm->getBody()->getStatements())
+        visit(stmt);
+      break;
+    }
+    if (!Builder.GetInsertBlock()->getTerminator())
+      Builder.CreateBr(endBB);
+  }
+
+  Builder.SetInsertPoint(endBB);
+  return nullptr;
+}
+
+// Enum-mode match: emit an icmp-eq if-else chain.  `subjRaw` is the subject's
+// i64 value.  Each non-wildcard arm names a bare variant (carried by the arm's
+// type-name stub); we compare against the variant's constant index.
+llvm::Value *CodeGen::emitEnumMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
+                                    llvm::Function *parentFn) {
+  auto *i64Ty = llvm::Type::getInt64Ty(LLVMCtx);
+  auto *enumTy = ast::cast<ast::EnumType>(node->getSubject()->getResolvedType());
+
+  auto *endBB      = llvm::BasicBlock::Create(LLVMCtx, kIRMatchEnd, parentFn);
+  auto *wildcardBB = [&]() -> llvm::BasicBlock * {
+    for (ast::MatchArm *arm : node->getArms())
+      if (arm->isWildcard())
+        return llvm::BasicBlock::Create(LLVMCtx, kIRMatchWildcard, parentFn);
+    return nullptr;
+  }();
+  auto *defaultBB = wildcardBB ? wildcardBB : endBB;
+
+  // Pre-allocate a body block for each variant arm, recording its value.
+  struct VariantArm { ast::MatchArm *Arm; llvm::BasicBlock *BodyBB; int64_t Value; };
+  std::vector<VariantArm> variantArms;
+  for (size_t i = 0; i < node->getArms().size(); ++i) {
+    ast::MatchArm *arm = node->getArms()[i];
+    if (arm->isWildcard()) continue;
+    std::string variant;
+    if (auto *stub = ast::dyn_cast<ast::ClassType>(arm->getArmType()))
+      variant = stub->getName();
+    else if (auto *et = ast::dyn_cast<ast::EnumType>(arm->getArmType()))
+      variant = et->getName();
+    int64_t val = enumTy->findVariant(variant);
+    assert(val >= 0 && "Sema should have verified the variant exists");
+    variantArms.push_back({arm, llvm::BasicBlock::Create(
+                                    LLVMCtx, kIRMatchArmPfx + std::to_string(i),
+                                    parentFn), val});
+  }
+
+  // Emit the comparison chain.
+  if (variantArms.empty()) {
+    Builder.CreateBr(defaultBB);
+  } else {
+    for (size_t i = 0; i < variantArms.size(); ++i) {
+      llvm::Value *isEq = Builder.CreateICmpEQ(
+          subjRaw, llvm::ConstantInt::get(i64Ty,
+                                          static_cast<uint64_t>(variantArms[i].Value)),
+          kIRMatchEq);
+      auto *nextBB = (i + 1 < variantArms.size())
+                         ? llvm::BasicBlock::Create(
+                               LLVMCtx, kIRMatchCheckPfx + std::to_string(i + 1),
+                               parentFn)
+                         : defaultBB;
+      Builder.CreateCondBr(isEq, variantArms[i].BodyBB, nextBB);
+      if (nextBB != defaultBB)
+        Builder.SetInsertPoint(nextBB);
+    }
+  }
+
+  // Emit variant-arm body blocks.
+  for (const auto &va : variantArms) {
+    Builder.SetInsertPoint(va.BodyBB);
+    {
+      ScopeGuard armGuard(*this);
+      for (auto *stmt : va.Arm->getBody()->getStatements())
+        visit(stmt);
+    }
+    if (!Builder.GetInsertBlock()->getTerminator())
+      Builder.CreateBr(endBB);
+  }
+
+  // Emit the wildcard arm body.
+  if (wildcardBB) {
+    Builder.SetInsertPoint(wildcardBB);
+    for (ast::MatchArm *arm : node->getArms()) {
+      if (!arm->isWildcard()) continue;
+      ScopeGuard armGuard(*this);
+      for (auto *stmt : arm->getBody()->getStatements())
+        visit(stmt);
+      break;
+    }
+    if (!Builder.GetInsertBlock()->getTerminator())
+      Builder.CreateBr(endBB);
+  }
+
+  Builder.SetInsertPoint(endBB);
+  return nullptr;
+}
+
 // processImports and visitImportDecl are defined in CodeGenImport.cpp.
 
 // ---------------------------------------------------------------------------
 
 llvm::Value *CodeGen::visitFuncDecl(ast::FuncDecl *node) {
-  llvm::Type *retTy = node->getReturnType()
-                          ? toLLVMType(node->getReturnType())
-                          : llvm::Type::getVoidTy(LLVMCtx);
-  std::vector<llvm::Type *> paramTys;
-  for (auto &p : node->getParams())
-    paramTys.push_back(toLLVMType(p.ParamType));
-
-  auto *fnTy = llvm::FunctionType::get(retTy, paramTys, false);
-  auto *fn = llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage,
-                                    node->getName(), Module.get());
-
-  // Name the parameters.
-  size_t idx = 0;
-  for (auto &arg : fn->args())
-    arg.setName(node->getParams()[idx++].getName());
+  // The prototype was created by the forward-declaration pass in
+  // visitTranslationUnit; fetch it (the enum/class return-type canonicalization
+  // lives in declareFunctionPrototype) and emit the body here.
+  llvm::Function *fn = declareFunctionPrototype(node);
+  ast::Type *retAstTy = canonicalizeDeclType(node->getReturnType());
 
   // Save/restore all per-function codegen state (#34): return type, insertion
   // point, string-temp tracking, and method-class context.
-  FunctionStateGuard fnState(*this, node->getReturnType(), /*methodClassTy=*/nullptr);
+  FunctionStateGuard fnState(*this, retAstTy, /*methodClassTy=*/nullptr);
 
   // Create entry block and emit body.
   auto *entry = llvm::BasicBlock::Create(LLVMCtx, kIREntry, fn);
@@ -2181,9 +2455,14 @@ llvm::Value *CodeGen::visitFuncDecl(ast::FuncDecl *node) {
       // owned so scope cleanup releases them. Non-class params get nullptr AST type.
       auto *astTy = node->getParams()[i].ParamType;
       if (astTy) {
-        if (auto *ct = ast::dyn_cast<ast::ClassType>(astTy))
-          if (auto *canonical = ASTCtx.lookupClassType(ct->getName()))
+        if (auto *ct = ast::dyn_cast<ast::ClassType>(astTy)) {
+          // An enum-typed param is a plain i64 value, not a ref type: drop the
+          // stub so it is declared as a non-owned primitive below.
+          if (ASTCtx.lookupEnumType(ct->getName()))
+            astTy = nullptr;
+          else if (auto *canonical = ASTCtx.lookupClassType(ct->getName()))
             astTy = canonical;
+        }
       }
       if (astTy && ast::isRefType(astTy))
         CurrentScope->declare(std::string(arg.getName()), alloca, astTy);
@@ -2198,6 +2477,7 @@ llvm::Value *CodeGen::visitFuncDecl(ast::FuncDecl *node) {
 
   // If no terminator, add implicit return.
   if (!Builder.GetInsertBlock()->getTerminator()) {
+    llvm::Type *retTy = fn->getReturnType();
     if (retTy->isVoidTy())
       Builder.CreateRetVoid();
     else

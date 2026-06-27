@@ -1,7 +1,10 @@
-// ERROR: match subject is 'int', not a class type
+// ERROR: a primitive subject selects value-mode matching, where arms must be
+// literal patterns — a type-name arm is rejected.
+class Animal {}
 fn main() -> int {
   x: int = 42;
-  match x {   // sema error: match subject must be a class type
+  match x {
+    Animal { }   // sema error: value-match requires literal patterns, not type names
     _ { }
   }
   return 0;

@@ -713,3 +713,106 @@ TEST(MatchCodeGen, ArmScopeCleanup) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "cleanup-me\nafter\n");
 }
+
+// ============================================================================
+// Value-mode match (primitive / Str subjects matched against literal patterns)
+// ============================================================================
+
+// String value match: the literal arm whose content equals the subject fires.
+TEST(MatchCodeGen, StringValueMatch) {
+  auto r = compileAndRun(wrapMain(R"(
+    s: Str = "World";
+    match s {
+      "Hello" { println("got hello"); }
+      "World" { println("got world"); }
+      _ { println("got other"); }
+    }
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "got world\n");
+}
+
+// String value match falls through to the wildcard when nothing matches.
+TEST(MatchCodeGen, StringValueMatchWildcard) {
+  auto r = compileAndRun(wrapMain(R"(
+    s: Str = "Nope";
+    match s {
+      "Hello" { println("got hello"); }
+      "World" { println("got world"); }
+      _ { println("got other"); }
+    }
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "got other\n");
+}
+
+// Integer value match.
+TEST(MatchCodeGen, IntValueMatch) {
+  auto r = compileAndRun(wrapMain(R"(
+    n: int = 2;
+    match n {
+      1 { println("one"); }
+      2 { println("two"); }
+      3 { println("three"); }
+      _ { println("many"); }
+    }
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "two\n");
+}
+
+// Char value match.
+TEST(MatchCodeGen, CharValueMatch) {
+  auto r = compileAndRun(wrapMain(R"(
+    c: char = 'b';
+    match c {
+      'a' { println("a"); }
+      'b' { println("b"); }
+      _ { println("other"); }
+    }
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "b\n");
+}
+
+// Bool value match.
+TEST(MatchCodeGen, BoolValueMatch) {
+  auto r = compileAndRun(wrapMain(R"(
+    b: bool = False;
+    match b {
+      True { println("yes"); }
+      False { println("no"); }
+    }
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "no\n");
+}
+
+// ============================================================================
+// A class method may call a module-level free function, regardless of whether
+// the function is defined before or after the class (forward-declared).
+// ============================================================================
+
+TEST(Class, MethodCallsFreeFunctionDefinedBefore) {
+  auto r = compileAndRun(
+      "fn helper() -> int { return 7; }\n"
+      "class C {\n"
+      "  fn __init__() {}\n"
+      "  fn get() -> int { return helper(); }\n"
+      "}\n" +
+      wrapMain("c: C = C();\n  println(StrInt(c.get()));"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "7\n");
+}
+
+TEST(Class, MethodCallsFreeFunctionDefinedAfter) {
+  auto r = compileAndRun(
+      "class C {\n"
+      "  fn __init__() {}\n"
+      "  fn get() -> int { return helper(); }\n"
+      "}\n"
+      "fn helper() -> int { return 42; }\n" +
+      wrapMain("c: C = C();\n  println(StrInt(c.get()));"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "42\n");
+}

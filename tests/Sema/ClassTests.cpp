@@ -305,7 +305,22 @@ TEST(Class, MatchWildcardValid) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Class, MatchSubjectNotClassType) {
+// A primitive subject now selects value-mode matching; a type-named arm there
+// is an error (value-mode requires literal patterns).
+TEST(Class, MatchValueModeRejectsTypeArm) {
+  auto r = semaCheck(R"(
+    class Animal {}
+    fn main() -> int {
+      x: int = 1;
+      match x { Animal {} _ {} }
+      return 0;
+    }
+  )");
+  EXPECT_FALSE(r.Ok);
+}
+
+// A wildcard-only match over a primitive subject is valid (value-mode).
+TEST(Class, MatchValueModeWildcardOnly) {
   auto r = semaCheck(R"(
     fn main() -> int {
       x: int = 1;
@@ -313,7 +328,43 @@ TEST(Class, MatchSubjectNotClassType) {
       return 0;
     }
   )");
+  EXPECT_TRUE(r.Ok);
+}
+
+// Value-mode literal arms must match the subject's type.
+TEST(Class, MatchValueModeLiteralTypeMismatch) {
+  auto r = semaCheck(R"(
+    fn main() -> int {
+      x: int = 1;
+      match x { "a" {} _ {} }
+      return 0;
+    }
+  )");
   EXPECT_FALSE(r.Ok);
+}
+
+// Value-mode int match with matching literal arms is valid.
+TEST(Class, MatchValueModeIntLiterals) {
+  auto r = semaCheck(R"(
+    fn main() -> int {
+      x: int = 1;
+      match x { 1 {} 2 {} _ {} }
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(r.Ok);
+}
+
+// Str subject selects value-mode; string literal arms are valid.
+TEST(Class, MatchValueModeStrLiterals) {
+  auto r = semaCheck(R"(
+    fn main() -> int {
+      s: Str = "hi";
+      match s { "a" {} "b" {} _ {} }
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(r.Ok);
 }
 
 TEST(Class, MatchArmUnknownType) {

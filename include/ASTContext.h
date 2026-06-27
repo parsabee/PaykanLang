@@ -48,6 +48,10 @@ class ASTContext {
   // Registry of all class types, keyed by name.
   std::unordered_map<std::string, ClassType *> ClassTypes;
 
+  // Registry of all enum types, keyed by name.  Enum types are nominal value
+  // types backed by i64; they are NOT class types and live in their own map.
+  std::unordered_map<std::string, EnumType *> EnumTypes;
+
   // Per-element specialized array ClassTypes (lazily created).
   // Key: element Type* pointer (canonical within this ASTContext).
   std::unordered_map<Type *, ClassType *> SpecializedArrayTypes;
@@ -168,6 +172,18 @@ public:
 
   /// Look up a registered class type by name.  Returns nullptr if not found.
   ClassType *lookupClassType(const std::string &name) const;
+
+  /// Create and register a new (empty) EnumType.  Variants are added to the
+  /// returned type via addVariant().  Returns nullptr if the name is taken.
+  EnumType *registerEnumType(const std::string &name, SourceLocation loc);
+
+  /// Look up a registered enum type by name.  Returns nullptr if not found.
+  EnumType *lookupEnumType(const std::string &name) const;
+
+  /// Read-only view of the enum type registry.
+  const std::unordered_map<std::string, EnumType *> &getEnumTypes() const {
+    return EnumTypes;
+  }
 
   /// Register an additional name that resolves to an already-registered
   /// ClassType (e.g. a qualified alias like "module::Foo" -> Foo's ClassType).

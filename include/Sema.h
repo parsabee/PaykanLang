@@ -197,6 +197,13 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // Visit an expression and return its resolved type (nullptr on error).
   ast::Type *resolveExprType(ast::Expr *expr);
 
+  // Value-mode match checking (primitive / Str subject with literal arms).
+  bool checkValueMatch(ast::MatchStmt *node, ast::Type *subjectTy);
+
+  // Enum-mode match checking: each non-wildcard arm names a bare variant of the
+  // subject enum (parsed as a type-name arm).  No bindings are allowed.
+  bool checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy);
+
   // -- Import resolution ----------------------------------------------------
 
   /// The directory of the file currently being analyzed.
@@ -250,9 +257,25 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// Process a single import declaration.
   bool processImport(ast::ImportDecl *node);
 
-  /// Run the 5-phase class declaration check on the given class decls.
-  /// Called from visitTranslationUnit.
+  /// Register classes: names, hierarchy, field types, method signatures, and
+  /// constructors (phases 1–4b).  Method bodies are deferred to
+  /// checkClassBodies() so that free functions can be forward-declared in
+  /// between.  Stores the topological class order in SortedClasses.
   bool checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls);
+
+  /// Type-check class method bodies (phase 5) over SortedClasses.  Run after
+  /// checkClassDecls and after free-function signatures are registered.
+  bool checkClassBodies();
+
+  /// Topologically-sorted class decls (superclass before subclass), populated by
+  /// checkClassDecls and consumed by checkClassBodies.
+  std::vector<ast::ClassDecl *> SortedClasses;
+
+  /// Resolve a free function's signature (return + parameter types) and register
+  /// it in the function table.  Run as a forward-declaration pass before any
+  /// function or method body is checked, so calls resolve regardless of the
+  /// order declarations appear in the module.
+  bool declareFunctionSignature(ast::FuncDecl *node);
 
 public:
   explicit Sema(ast::ASTContext &ctx, DiagEngine &diags,

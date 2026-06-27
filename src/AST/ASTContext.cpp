@@ -323,6 +323,20 @@ ClassType *ASTContext::lookupClassType(const std::string &name) const {
   return it != ClassTypes.end() ? it->second : nullptr;
 }
 
+EnumType *ASTContext::registerEnumType(const std::string &name,
+                                       SourceLocation loc) {
+  if (EnumTypes.count(name))
+    return nullptr;
+  auto *ty = make<EnumType>(loc, intern(name));
+  EnumTypes[name] = ty;
+  return ty;
+}
+
+EnumType *ASTContext::lookupEnumType(const std::string &name) const {
+  auto it = EnumTypes.find(name);
+  return it != EnumTypes.end() ? it->second : nullptr;
+}
+
 void ASTContext::addClassTypeAlias(const std::string &alias, ClassType *ct) {
   ClassTypes.emplace(alias, ct); // no-op if already present
 }
@@ -338,6 +352,8 @@ Type *ASTContext::lookupType(const std::string &name) const {
     return CharTy;
   if (name == names::kTypeVoid)
     return VoidTy;
+  if (auto *et = lookupEnumType(name))
+    return et;
   return lookupClassType(name);
 }
 

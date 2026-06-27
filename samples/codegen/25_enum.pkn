@@ -1,0 +1,164 @@
+// 25_enum.pkn — an in-depth tour of the `enum` type.
+//
+// Enums are distinct nominal types backed by a 64-bit unsigned integer.
+// Variants are assigned implicit values 0, 1, 2, … in declaration order.
+// They are NOT convertible to/from int and support only `==` / `!=` against
+// values of the SAME enum.  This sample exercises, in order:
+//
+//   1. declaration (incl. trailing comma) + multiple enums in one file
+//   2. variant access `Enum::Variant` and implicit ordering values
+//   3. equality / inequality
+//   4. returning an enum from a function
+//   5. `match` with a wildcard
+//   6. exhaustive `match` (every variant covered, no wildcard needed)
+//   7. an enum field inside a class, mutated through a method
+//   8. a state machine: enum-in / enum-out transitions reassigned in a loop
+//   9. arrays of enums: literal, push, subscript get/set, iteration
+//  10. a single-variant enum
+
+// --- Multiple enum declarations -------------------------------------------
+
+enum Direction {
+  North,
+  East,
+  South,
+  West,        // trailing comma allowed
+}
+
+enum Suit { Hearts, Diamonds, Clubs, Spades }
+
+enum Light { Red, Yellow, Green }
+
+enum Signal { Only }   // single-variant enum
+
+// --- Functions over enums --------------------------------------------------
+
+// Returns an enum (exercises enum return values).
+fn opposite(d: Direction) -> Direction {
+  match d {
+    North { return Direction::South; }
+    South { return Direction::North; }
+    East  { return Direction::West; }
+    West  { return Direction::East; }
+  }
+}
+
+// Exhaustive match (no wildcard) mapping an enum to a Str.
+fn dirName(d: Direction) -> Str {
+  match d {
+    North { return "North"; }
+    East  { return "East"; }
+    South { return "South"; }
+    West  { return "West"; }
+  }
+}
+
+// Match WITH a wildcard: only two suits are red, the rest fall through.
+fn isRed(s: Suit) -> bool {
+  match s {
+    Hearts   { return True; }
+    Diamonds { return True; }
+    _        { return False; }
+  }
+}
+
+// A state transition: enum in, enum out.
+fn nextLight(l: Light) -> Light {
+  match l {
+    Red    { return Light::Green; }
+    Green  { return Light::Yellow; }
+    Yellow { return Light::Red; }
+  }
+}
+
+fn lightName(l: Light) -> Str {
+  match l {
+    Red    { return "Red"; }
+    Yellow { return "Yellow"; }
+    Green  { return "Green"; }
+  }
+}
+
+// Single-variant enum, matched exhaustively.
+fn signalName(s: Signal) -> Str {
+  match s {
+    Only { return "Only"; }
+  }
+}
+
+// --- An enum stored in a class field --------------------------------------
+
+class Player {
+  facing: Direction;
+  fn __init__(d: Direction) { self.facing = d; }
+  // Methods may call module-level free functions (defined anywhere in the file)
+  // and pass/return enum values through them.
+  fn turnAround() { self.facing = opposite(self.facing); }
+  fn report() -> Str { return dirName(self.facing); }
+}
+
+fn main() -> int {
+  // 1. Declaration & variant access.
+  println("== basics ==");
+  d: Direction = Direction::East;
+  println(dirName(d));                       // East
+
+  // 2. Implicit ordering: variants are 0,1,2,3 in declaration order, so the
+  //    later a variant is declared the later this chain reaches it.
+  println("== ordering ==");
+  probe: Direction = Direction::South;       // index 2
+  if (probe == Direction::North) { println("0"); }
+  if (probe == Direction::East)  { println("1"); }
+  if (probe == Direction::South) { println("2"); } // prints
+  if (probe == Direction::West)  { println("3"); }
+
+  // 3. Equality / inequality (same enum only).
+  println("== equality ==");
+  if (d == Direction::East)  { println("facing east"); }
+  if (d != Direction::North) { println("not north"); }
+
+  // 4. Returning an enum from a function.
+  println("== return enum ==");
+  println(dirName(opposite(d)));             // West
+
+  // 5. Match with a wildcard.
+  println("== wildcard match ==");
+  if (isRed(Suit::Hearts)) { println("Hearts is red"); }
+  if (isRed(Suit::Spades)) { println("Spades is red"); }
+  else { println("Spades is black"); }
+
+  // 6. Exhaustive match used directly.
+  println("== exhaustive ==");
+  println(dirName(Direction::West));         // West
+  println(signalName(Signal::Only));         // Only
+
+  // 7. Enum field in a class, mutated via a method.
+  println("== class field ==");
+  p: Player = Player(Direction::North);
+  println(p.report());                       // North
+  p.turnAround();
+  println(p.report());                       // South
+
+  // 8. State machine: reassign an enum in a loop using a transition function.
+  println("== state machine ==");
+  l: Light = Light::Red;
+  i: int = 0;
+  while (i < 4) {
+    println(lightName(l));                   // Red, Green, Yellow, Red
+    l = nextLight(l);
+    i = i + 1;
+  }
+
+  // 9. Arrays of enums: literal, push, subscript get/set, iteration.
+  println("== arrays ==");
+  route: Direction[] = [Direction::North, Direction::East, Direction::South];
+  route.push(Direction::West);               // grow
+  route[0] = opposite(route[0]);             // North -> South
+  j: int = 0;
+  while (j < route.len()) {
+    println(dirName(route[j]));              // South, East, South, West
+    j = j + 1;
+  }
+
+  return 0;
+}

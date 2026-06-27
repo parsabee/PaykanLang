@@ -199,6 +199,15 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   /// Wrap a raw C string pointer into a PaykanString* via PaykanString_new.
   llvm::Value *wrapStringLiteral(llvm::Value *rawStr, size_t len);
 
+  /// Value-mode match: emit an equality if-else chain over literal-pattern arms.
+  llvm::Value *emitValueMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
+                              llvm::Function *parentFn);
+
+  /// Enum-mode match: emit an icmp-eq if-else chain comparing the subject's
+  /// i64 value against each bare-variant arm's constant.
+  llvm::Value *emitEnumMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
+                             llvm::Function *parentFn);
+
   /// Emit cleanup (delete / release) for all variables in the given scope.
   void emitScopeCleanup(Scope &scope);
 
@@ -262,6 +271,23 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
 
   /// Map an AST Type* to the corresponding LLVM type.
   llvm::Type *toLLVMType(ast::Type *ty);
+
+  /// True when an array element of this type occupies a PaykanShared* slot (a
+  /// real class or nested array), as opposed to a raw primitive slot.  Enums
+  /// lower to i64 primitives, so an EnumType — or a ClassType stub that actually
+  /// names an enum — is NOT an object element.
+  bool isObjectElementType(ast::Type *elemTy) const;
+
+  /// Create (or return the existing) LLVM prototype for a free function, without
+  /// emitting its body.  Run for every function before any body so a call —
+  /// including one inside a class method — resolves regardless of source order.
+  llvm::Function *declareFunctionPrototype(ast::FuncDecl *node);
+
+  /// Canonicalize a declared type annotation: a parser ClassType stub that names
+  /// an enum becomes the EnumType (so it lowers to i64, not a boxed pointer); a
+  /// stub naming a class becomes the canonical ClassType.  Returns the input for
+  /// anything else (including nullptr).
+  ast::Type *canonicalizeDeclType(ast::Type *ty);
 
   /// Create an alloca in the entry block of the current function.
   llvm::AllocaInst *createEntryAlloca(llvm::Function *fn,

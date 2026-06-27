@@ -40,6 +40,10 @@ public:
 // Forward declaration — Type is defined later in this header.
 class Type;
 
+// Forward declaration — EnumDecl is defined later (after TranslationUnit) but
+// referenced by TranslationUnit's member vector.
+class EnumDecl;
+
 // Base AST node with LLVM-style RTTI
 class ASTNode {
 public:
@@ -50,6 +54,7 @@ public:
     NK_MethodDecl,
     NK_ImportDecl,
     NK_ClassDecl,
+    NK_EnumDecl,
 
     // Statements
     NK_StmtBegin,
@@ -83,11 +88,13 @@ public:
     NK_MemberAccessExpr,
     NK_ArrayLiteralExpr,
     NK_SubscriptExpr,
+    NK_EnumValueExpr,
 
     // Types
     NK_BuiltinType,
     NK_ClassType,
     NK_ArrayType,
+    NK_EnumType,
 
     // Match arm (child of MatchStmt, not a Stmt itself)
     NK_MatchArm,
@@ -148,7 +155,7 @@ public:
   Decl(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_VarDecl && N->getKind() <= NK_ClassDecl;
+    return N->getKind() >= NK_VarDecl && N->getKind() <= NK_EnumDecl;
   }
 };
 
@@ -173,7 +180,7 @@ public:
   Type *getResolvedType() const { return ResolvedType; }
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_IntegerLiteral && N->getKind() <= NK_SubscriptExpr;
+    return N->getKind() >= NK_IntegerLiteral && N->getKind() <= NK_EnumValueExpr;
   }
 };
 
@@ -245,7 +252,7 @@ public:
   }
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_BuiltinType && N->getKind() <= NK_ArrayType;
+    return N->getKind() >= NK_BuiltinType && N->getKind() <= NK_EnumType;
   }
 };
 
@@ -482,27 +489,40 @@ public:
 
 // A single arm of a match statement.
 //
-//   TypeName { body }             -- no variable binding
-//   binding: TypeName { body }    -- with variable binding
-//   _ { body }                    -- wildcard (catch-all)
+//   TypeName { body }             -- type arm, no variable binding
+//   binding: TypeName { body }    -- type arm, with variable binding
+//   literal : { body }            -- value arm (e.g. "Hello" : { ... }, 42 : { ... })
+//   _ { body }                    -- wildcard (catch-all), colon optional
 //
-// TypeName is empty when the arm is a wildcard.
+// An arm is exactly one of: type arm (ArmType != nullptr), value arm
+// (LiteralPattern != nullptr), or wildcard (both nullptr).  ArmType and
+// LiteralPattern are never both set.
 class MatchArm : public ASTNode {
   const std::string *Binding; // points into ASTContext::StringPool (stable); "" = no binding
-  Type         *ArmType;   // nullptr = wildcard (_)
+  Type         *ArmType;        // type arm: the matched type; nullptr otherwise
+  Expr         *LiteralPattern; // value arm: the literal to compare against; nullptr otherwise
   CompoundStmt *Body;
 
 public:
+  // Type arm (or wildcard when armType == nullptr).
   MatchArm(SourceLocation loc, const std::string &internedBinding, Type *armType,
            CompoundStmt *body)
       : ASTNode(NK_MatchArm, loc), Binding(&internedBinding),
-        ArmType(armType), Body(body) {}
+        ArmType(armType), LiteralPattern(nullptr), Body(body) {}
 
-  bool isWildcard() const { return ArmType == nullptr; }
+  // Value arm: matches when the subject equals the literal pattern.
+  MatchArm(SourceLocation loc, const std::string &internedBinding,
+           Expr *literalPattern, CompoundStmt *body)
+      : ASTNode(NK_MatchArm, loc), Binding(&internedBinding),
+        ArmType(nullptr), LiteralPattern(literalPattern), Body(body) {}
+
+  bool isWildcard() const { return ArmType == nullptr && LiteralPattern == nullptr; }
+  bool isLiteral() const { return LiteralPattern != nullptr; }
   bool hasBinding() const { return !Binding->empty(); }
   const std::string &getBinding() const { return *Binding; }
   Type *getArmType() const { return ArmType; }
   void setArmType(Type *t) { ArmType = t; }
+  Expr *getLiteralPattern() const { return LiteralPattern; }
   CompoundStmt *getBody() const { return Body; }
 
   static bool classof(const ASTNode *N) {
@@ -1049,17 +1069,21 @@ private:
   std::vector<ImportDecl *> Imports;
   std::vector<ClassDecl *> ClassDecls;
   std::vector<FuncDecl *> FuncDecls;
+  std::vector<EnumDecl *> EnumDecls;
 
 public:
   TranslationUnit(SourceLocation loc, std::vector<ImportDecl *> imports,
                   std::vector<ClassDecl *> classes,
-                  std::vector<FuncDecl *> funcs)
+                  std::vector<FuncDecl *> funcs,
+                  std::vector<EnumDecl *> enums = {})
       : ASTNode(NK_TranslationUnit, loc), Imports(std::move(imports)),
-        ClassDecls(std::move(classes)), FuncDecls(std::move(funcs)) {}
+        ClassDecls(std::move(classes)), FuncDecls(std::move(funcs)),
+        EnumDecls(std::move(enums)) {}
 
   const std::vector<ImportDecl *> &getImports() const { return Imports; }
   const std::vector<ClassDecl *> &getClassDecls() const { return ClassDecls; }
   const std::vector<FuncDecl *> &getFuncDecls() const { return FuncDecls; }
+  const std::vector<EnumDecl *> &getEnumDecls() const { return EnumDecls; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_TranslationUnit;
@@ -1081,6 +1105,100 @@ public:
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_ArrayType;
+  }
+};
+
+// Enum type (nominal value type backed by a 64-bit unsigned integer).
+//
+// Each enum is a distinct nominal type.  Variants are assigned implicit
+// values 0, 1, 2, … in declaration order.  Enums are NOT convertible to or
+// from any other type, and only support == / != against the *same* enum type.
+class EnumType : public Type {
+  const std::string *Name; // points into ASTContext::StringPool (stable)
+  // Variant names in declaration order; index == underlying value.
+  // Each entry points into ASTContext::StringPool (stable).
+  std::vector<const std::string *> Variants;
+
+public:
+  EnumType(SourceLocation loc, const std::string &internedName)
+      : Type(NK_EnumType, loc), Name(&internedName) {
+    // Enums support only equality / inequality comparisons.
+    addBinaryOp(BinaryOpcode::Eq);
+    addBinaryOp(BinaryOpcode::Ne);
+  }
+
+  const std::string &getName() const { return *Name; }
+
+  void addVariant(const std::string &internedVariant) {
+    Variants.push_back(&internedVariant);
+  }
+  const std::vector<const std::string *> &getVariants() const { return Variants; }
+  size_t getNumVariants() const { return Variants.size(); }
+
+  /// Return the underlying value (declaration index) of a variant, or -1 if
+  /// the name is not a variant of this enum.
+  int64_t findVariant(const std::string &name) const {
+    for (size_t i = 0; i < Variants.size(); ++i)
+      if (*Variants[i] == name)
+        return static_cast<int64_t>(i);
+    return -1;
+  }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_EnumType;
+  }
+};
+
+// Enum variant access expression:  MyEnum::Variant
+//
+// Resolves to the variant's implicit 64-bit value.  The EnumType pointer is
+// filled in by Sema (the parser only records the spelled names).
+class EnumValueExpr : public Expr {
+  const std::string *EnumName;    // interned; spelled enum name
+  const std::string *VariantName; // interned; spelled variant name
+  EnumType *ResolvedEnum = nullptr; // set by Sema
+  int64_t Value = -1;               // set by Sema (variant index)
+
+public:
+  EnumValueExpr(SourceLocation loc, const std::string &internedEnum,
+                const std::string &internedVariant)
+      : Expr(NK_EnumValueExpr, loc), EnumName(&internedEnum),
+        VariantName(&internedVariant) {}
+
+  const std::string &getEnumName() const { return *EnumName; }
+  const std::string &getVariantName() const { return *VariantName; }
+
+  EnumType *getResolvedEnum() const { return ResolvedEnum; }
+  void setResolvedEnum(EnumType *e) { ResolvedEnum = e; }
+  int64_t getValue() const { return Value; }
+  void setValue(int64_t v) { Value = v; }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_EnumValueExpr;
+  }
+};
+
+// Enum declaration:
+//   enum MyEnum { One, Two, Three }
+//
+// Variants are recorded in declaration order; their underlying values are
+// their indices.  Sema registers a corresponding EnumType in the ASTContext.
+class EnumDecl : public Decl {
+  const std::string *Name; // points into ASTContext::StringPool (stable)
+  std::vector<const std::string *> Variants; // each interned (stable)
+
+public:
+  EnumDecl(SourceLocation loc, const std::string &internedName,
+           std::vector<const std::string *> variants)
+      : Decl(NK_EnumDecl, loc), Name(&internedName),
+        Variants(std::move(variants)) {}
+
+  const std::string &getName() const { return *Name; }
+  const std::vector<const std::string *> &getVariants() const { return Variants; }
+  size_t getNumVariants() const { return Variants.size(); }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_EnumDecl;
   }
 };
 

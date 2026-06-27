@@ -1,6 +1,22 @@
-// 14_match.pkn — codegen sample for match statements
-// Covers: no-binding dispatch, wildcard, binding+field, binding+method,
-//         match in helper function, exact-type dispatch, match-as-sole-return.
+// 14_match.pkn — comprehensive codegen sample for the `match` statement.
+//
+// Covers BOTH modes of match:
+//
+//   TYPE MODE  (subject is a class type) — runtime downcasting dispatch via
+//              vtable identity. Arms name a class type, optionally with a
+//              binding (`name: Type`). Comparison is *exact* type (a subclass
+//              does not match a parent arm).
+//
+//   VALUE MODE (subject is a builtin type: int/float/bool/char/Str) — value
+//              comparison against a literal pattern. Arms are literals written
+//              `literal { ... }`. First match wins. Str arms compare string
+//              *content*.
+//
+// In both modes `_` is the catch-all and must be the last arm.
+
+// ===========================================================================
+// Type-mode fixtures
+// ===========================================================================
 
 class Animal {
   fn __init__() {}
@@ -27,7 +43,7 @@ class Labrador : Dog {
   fn __init__() { __super__(); self.name = "Rex"; }
 }
 
-// --- Test 6 helper ---
+// match inside a helper function (type mode), used as the function's value.
 fn describeAnimal(x: Animal) -> Str {
   match x {
     Dog  { return "it is a dog"; }
@@ -38,84 +54,132 @@ fn describeAnimal(x: Animal) -> Str {
   return "unreachable";
 }
 
+// match inside a helper function (value mode).
+fn classify(n: int) -> Str {
+  match n {
+    0 { return "zero"; }
+    1 { return "one"; }
+    2 { return "two"; }
+    _ { return "many"; }
+  }
+  return "unreachable";
+}
+
 fn main() -> int {
 
-  // --- Test 1: basic no-binding dispatch ---
+  // =========================================================================
+  // PART A — TYPE MODE
+  // =========================================================================
+
+  // --- A1: basic no-binding dispatch ---
   a: Animal = Dog();
   match a {
-    Dog  { println("test1: Dog"); }
-    Cat  { println("test1: Cat"); }
-    Bird { println("test1: Bird"); }
-    _    { println("test1: other"); }
+    Dog  { println("A1: Dog"); }
+    Cat  { println("A1: Cat"); }
+    Bird { println("A1: Bird"); }
+    _    { println("A1: other"); }
   }
 
-  // --- Test 2: wildcard only ---
+  // --- A2: wildcard-only arm ---
   b: Animal = Cat();
   match b {
-    _ { println("test2: wildcard"); }
+    _ { println("A2: wildcard"); }
   }
 
-  // --- Test 3: binding + field access ---
+  // --- A3: binding + field access ---
   d: Animal = Labrador();
   match d {
-    lab: Labrador { println(lab.name); }
-    Dog           { println("test3: plain dog"); }
-    _             { println("test3: other"); }
+    lab: Labrador { println("A3: " + lab.name); }
+    Dog           { println("A3: plain dog"); }
+    _             { println("A3: other"); }
   }
 
-  // --- Test 4: binding + method call ---
-  match d {
-    dog: Dog { println(dog.speak()); }
-    _        { println("test4: other"); }
+  // --- A4: binding + method call (dispatch through the binding) ---
+  plainDog: Animal = Dog();
+  match plainDog {
+    dog: Dog { println("A4: " + dog.speak()); }
+    _        { println("A4: other"); }
   }
 
-  // --- Test 5: Cat subject ---
-  c: Animal = Cat();
-  match c {
-    Dog { println("test5: dog"); }
-    Cat { println("test5: Cat"); }
-    _   { println("test5: other"); }
+  // --- A5: exact-type comparison — a Labrador does NOT match the Dog arm ---
+  e: Animal = Labrador();
+  match e {
+    Cat      { println("A5: cat"); }
+    Dog      { println("A5: Dog"); }
+    Labrador { println("A5: Labrador"); }
+    _        { println("A5: other"); }
   }
 
-  // --- Test 6: match inside a helper function ---
+  // --- A6: no arm matches -> wildcard ---
+  f: Animal = Bird();
+  match f {
+    Dog { println("A6: dog"); }
+    Cat { println("A6: cat"); }
+    _   { println("A6: wildcard Bird"); }
+  }
+
+  // --- A7: match inside a helper function ---
   println(describeAnimal(Dog()));
   println(describeAnimal(Bird()));
   println(describeAnimal(Cat()));
 
-  // --- Test 7: Labrador does NOT match Dog arm (exact-type comparison) ---
-  e: Animal = Labrador();
-  match e {
-    Cat      { println("test7: cat"); }
-    Dog      { println("test7: Dog"); }
-    Labrador { println("test7: Labrador"); }
-    _        { println("test7: other"); }
+  // =========================================================================
+  // PART B — VALUE MODE
+  // =========================================================================
+
+  // --- B1: Str literal match (content comparison) ---
+  greeting: Str = "World";
+  match greeting {
+    "Hello" { println("B1: got Hello"); }
+    "World" { println("B1: got World"); }
+    _       { println("B1: other"); }
   }
 
-  // --- Test 8: no match -> wildcard ---
-  f: Animal = Bird();
-  match f {
-    Dog { println("test8: dog"); }
-    Cat { println("test8: cat"); }
-    _   { println("test8: wildcard Bird"); }
+  // --- B2: Str match falls through to wildcard ---
+  nope: Str = "Nope";
+  match nope {
+    "Hello" { println("B2: got Hello"); }
+    "World" { println("B2: got World"); }
+    _       { println("B2: wildcard"); }
   }
 
-  // --- Test 9: Labrador-specific arm with binding ---
-  g: Animal = Labrador();
-  match g {
-    lab: Labrador { println("test9: Labrador, name=" + lab.name); }
-    Dog           { println("test9: plain Dog"); }
-    _             { println("test9: other"); }
+  // --- B3: int literal match ---
+  n: int = 2;
+  match n {
+    1 { println("B3: one"); }
+    2 { println("B3: two"); }
+    3 { println("B3: three"); }
+    _ { println("B3: many"); }
   }
 
-  // --- Test 10: exhaustive arms ---
-  h: Animal = Cat();
-  match h {
-    Dog      { println("test10: dog"); }
-    Cat      { println("test10: Cat"); }
-    Bird     { println("test10: bird"); }
-    Labrador { println("test10: labrador"); }
-    _        { println("test10: other"); }
+  // --- B4: float literal match ---
+  pi: float = 2.5;
+  match pi {
+    1.0 { println("B4: one"); }
+    2.5 { println("B4: two-point-five"); }
+    _   { println("B4: other"); }
   }
+
+  // --- B5: char literal match ---
+  ch: char = 'b';
+  match ch {
+    'a' { println("B5: a"); }
+    'b' { println("B5: b"); }
+    _   { println("B5: other"); }
+  }
+
+  // --- B6: bool literal match — exhaustive, no wildcard needed ---
+  flag: bool = False;
+  match flag {
+    True  { println("B6: yes"); }
+    False { println("B6: no"); }
+  }
+
+  // --- B7: value match inside a helper function ---
+  println(classify(0));
+  println(classify(1));
+  println(classify(2));
+  println(classify(9));
 
   return 0;
 }
