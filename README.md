@@ -240,6 +240,37 @@ ctest --output-on-failure
 
 ---
 
+## Development Tooling
+
+Quality gates are enforced in CI and available locally via Python helpers in
+`scripts/` (they use the vendored LLVM 17 tools so results match CI):
+
+```sh
+# Format check / apply
+python3 scripts/clang_format.py            # check only (prints diffs)
+python3 scripts/clang_format.py --apply    # reformat in place
+
+# Bug-focused clang-tidy gate (needs a configured build/)
+python3 scripts/run_clang_tidy.py --build-dir build
+
+# Coverage report + floor gate (needs an instrumented tree)
+cmake -B build-cov -DPAYKAN_COVERAGE=ON \
+  -DCMAKE_C_COMPILER=build/third-party/llvm/bin/clang \
+  -DCMAKE_CXX_COMPILER=build/third-party/llvm/bin/clang++
+cmake --build build-cov --parallel
+python3 scripts/coverage.py --build-dir build-cov
+```
+
+Install the pre-commit hooks (clang-format on commit, clang-tidy on push):
+
+```sh
+pip install pre-commit        # or: brew install pre-commit
+pre-commit install
+pre-commit install --hook-type pre-push
+```
+
+---
+
 ## Language Reference
 
 Detailed documentation lives in `language_reference/`:

@@ -1,0 +1,36 @@
+# Pre-commit hooks for PaykanLang.
+#
+# Install (one-time):
+#   pip install pre-commit        # or: brew install pre-commit
+#   pre-commit install            # clang-format on every commit
+#   pre-commit install --hook-type pre-push   # clang-tidy before push
+#
+# The hooks call the project's Python wrappers, which prefer the vendored
+# LLVM 17 clang-format / clang-tidy (build/third-party/llvm) for results that
+# match CI exactly. clang-tidy needs a configured build tree
+# (build/compile_commands.json); run `cmake -B build` once before pushing.
+#
+# Run manually over the whole repo:
+#   pre-commit run --all-files
+#   pre-commit run --hook-stage pre-push --all-files
+repos:
+  - repo: local
+    hooks:
+      # Fast: format-check changed C/C++ files on every commit.
+      - id: clang-format
+        name: clang-format (check)
+        entry: python3 scripts/clang_format.py
+        language: system
+        files: \.(c|cpp|h|hpp)$
+        exclude: '(^build/|/third-party/|Parser\.tab|Lexer\.yy)'
+        pass_filenames: true
+
+      # Slower: bug-focused clang-tidy gate, only before push (needs a build).
+      - id: clang-tidy
+        name: clang-tidy (bug-focused gate)
+        entry: python3 scripts/run_clang_tidy.py --build-dir build
+        language: system
+        files: \.(c|cpp)$
+        exclude: '(^build/|/third-party/|Parser\.tab|Lexer\.yy)'
+        pass_filenames: true
+        stages: [pre-push]
