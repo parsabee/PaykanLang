@@ -140,3 +140,47 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure --parallel 4
+
+  # ---------------------------------------------------------------------------
+  # Code coverage (LLVM source-based) + floor gate.
+  # Builds an instrumented tree with the vendored clang, runs the suite, and
+  # fails if total first-party line coverage drops below the floor.
+  # ---------------------------------------------------------------------------
+  coverage:
+    name: Coverage | macOS ARM64
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache third-party dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/third-party
+          key: third-party-macos-arm64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
+
+      # A plain configure populates build/third-party (vendored LLVM + GTest),
+      # which the coverage tree below reuses for its clang and gtest source.
+      - name: Configure base tree (provisions vendored toolchain)
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Configure coverage tree
+        run: |
+          LLVM="$PWD/build/third-party/llvm"
+          cmake -B build-cov -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_COVERAGE=ON \
+            -DCMAKE_C_COMPILER="$LLVM/bin/clang" \
+            -DCMAKE_CXX_COMPILER="$LLVM/bin/clang++" \
+            -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST="$PWD/build/third-party/gtest"
+
+      - name: Build coverage tree
+        run: cmake --build build-cov --parallel
+
+      - name: Report coverage + enforce floor
+        run: python3 scripts/coverage.py --build-dir build-cov
+
+      - name: Upload lcov report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: build-cov/coverage/coverage.lcov
+          if-no-files-found: warn
