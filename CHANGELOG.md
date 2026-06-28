@@ -18,6 +18,8 @@ deliberately small, honest preview; several features are planned for v0.1.
 - Primitive types `int`, `float`, `bool`, `char`, and the built-in `Str` class.
 - Single-inheritance classes with vtable-based virtual dispatch, automatic
   construction (`__init__`) and destruction.
+- Object equality with consistent identity semantics: `==` and the default
+  `Obj.equals()` agree, and classes may override `equals()`.
 - Automatic reference counting (ARC) for deterministic object lifetimes; no GC.
 - Enum types and `match` expressions with class-hierarchy, array, and
   int/str literal value patterns.
@@ -35,22 +37,5 @@ deliberately small, honest preview; several features are planned for v0.1.
 - Direct calls to `destroy()` are rejected at compile time.
 - Quality gates: `.clang-format` (LLVM style), `.clang-tidy` (bug-focused),
   sanitizer builds (ASan/LSan, UBSan), and CI on every push and pull request.
-
-### Known limitations
-
-These are known, documented gaps in v0.0. Fixes are planned for v0.1.
-
-- **`Obj.equals()` on user-class instances is unreliable.** The default
-  `equals()` compares by an inconsistent identity and may return `False` even
-  for the same object (e.g. `b.equals(b)` is `False` while `b == b` is `True`).
-  Use `==` for object identity. (Fix planned for v0.1.)
-- **`toString()` formatting is incomplete.** `toString()` on arrays prints
-  `Array@<addr>[len=N]` rather than a `[1, 2, 3]` form, and the default object
-  `toString()` prints `Object@<addr>` rather than a class-name-based format.
-  (Fix planned for v0.1.)
-- **JIT only.** Ahead-of-time compilation to a standalone native binary is not
-  yet implemented. (Planned for v0.1.)
-- **Platforms.** Only macOS ARM64 and Linux x86-64 are supported. Ubuntu
-  `.deb` / PPA packaging is planned for v0.1.
 
 [0.0.0]: https://github.com/parsabee/PaykanLang/releases/tag/v0.0.0
