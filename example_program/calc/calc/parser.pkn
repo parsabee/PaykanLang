@@ -5,6 +5,25 @@
 //   term   ::= factor (('*' | '/') factor)*
 //   factor ::= '(' expr ')' | '-' factor | number
 //   number ::= [0-9]+ ('.' [0-9]+)?
+//
+// Language features on display: an `enum` for the operator kind, `match` for
+// dispatch (on the enum and on digit characters), and the `if … then … else`
+// ternary expression.
+
+// The four binary operators, modelled as a distinct enum type rather than
+// raw characters.
+enum Op { Add, Sub, Mul, Div }
+
+// Apply a binary operator. The match is exhaustive over Op, so no wildcard or
+// trailing return is needed.
+fn applyOp(op: Op, a: float, b: float) -> float {
+  match op {
+    Add { return a + b; }
+    Sub { return a - b; }
+    Mul { return a * b; }
+    Div { return a / b; }
+  }
+}
 
 class Parser {
   input: Str;
@@ -20,8 +39,8 @@ class Parser {
   }
 
   fn atIs(ch: char) -> bool {
-    if (self.done()) { return False; }
-    return self.input[self.pos] == ch;
+    // Short-circuit guards the subscript: when done, the input is not indexed.
+    return !self.done() && self.input[self.pos] == ch;
   }
 
   fn atIsOr(a: char, b: char) -> bool {
@@ -39,17 +58,19 @@ class Parser {
   fn atDigitVal() -> int {
     if (self.done()) { return 0; }
     c: char = self.input[self.pos];
-    if (c == '0') { return 0; }
-    if (c == '1') { return 1; }
-    if (c == '2') { return 2; }
-    if (c == '3') { return 3; }
-    if (c == '4') { return 4; }
-    if (c == '5') { return 5; }
-    if (c == '6') { return 6; }
-    if (c == '7') { return 7; }
-    if (c == '8') { return 8; }
-    if (c == '9') { return 9; }
-    return 0;
+    match c {
+      '0' { return 0; }
+      '1' { return 1; }
+      '2' { return 2; }
+      '3' { return 3; }
+      '4' { return 4; }
+      '5' { return 5; }
+      '6' { return 6; }
+      '7' { return 7; }
+      '8' { return 8; }
+      '9' { return 9; }
+      _   { return 0; }
+    }
   }
 
   fn advance() {
@@ -100,14 +121,10 @@ class Parser {
     result: float = self.parseFactor();
     self.skipWs();
     while (self.atIsOr('*', '/')) {
-      isMul: bool = self.atIs('*');
+      op: Op = if self.atIs('*') then Op::Mul else Op::Div;
       self.advance();
       rhs: float = self.parseFactor();
-      if (isMul) {
-        result = result * rhs;
-      } else {
-        result = result / rhs;
-      }
+      result = applyOp(op, result, rhs);
       self.skipWs();
     }
     return result;
@@ -117,14 +134,10 @@ class Parser {
     result: float = self.parseTerm();
     self.skipWs();
     while (self.atIsOr('+', '-')) {
-      isAdd: bool = self.atIs('+');
+      op: Op = if self.atIs('+') then Op::Add else Op::Sub;
       self.advance();
       rhs: float = self.parseTerm();
-      if (isAdd) {
-        result = result + rhs;
-      } else {
-        result = result - rhs;
-      }
+      result = applyOp(op, result, rhs);
       self.skipWs();
     }
     return result;
