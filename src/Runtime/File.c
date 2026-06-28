@@ -86,7 +86,11 @@ PaykanShared *PaykanFile_toString(PaykanObject *self) {
 }
 
 int64_t PaykanFile_equals(PaykanObject *self, PaykanObject *other) {
-  return self == other;
+  // `other` arrives as a PaykanShared box and is consumed by this call.
+  PaykanObject *o = PaykanShared_get((PaykanShared *)other);
+  int64_t result = (self == o);
+  Paykan_release((PaykanShared *)other);
+  return result;
 }
 
 void PaykanFile_write(PaykanObject *self, PaykanObject *strObj) {

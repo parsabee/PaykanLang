@@ -840,3 +840,63 @@ TEST(Class, MethodCallsFreeFunctionDefinedAfter) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "42\n");
 }
+
+// ============================================================================
+// Default Obj.equals — identity semantics
+// ============================================================================
+
+// A user class without an equals override uses the inherited identity equals:
+// an object equals itself, and not a distinct object. This must agree with the
+// `==` operator.
+TEST(Class, DefaultEqualsIsIdentity) {
+  auto r = compileAndRun(withFns(R"(
+    class Box { v: int; fn __init__(x: int) { self.v = x; } }
+  )",
+                                 R"(
+    b: Box = Box(5);
+    c: Box = Box(5);
+    println(StrBool(b.equals(b)));
+    println(StrBool(b.equals(c)));
+    println(StrBool(b == b));
+    println(StrBool(b == c));
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "True\nFalse\nTrue\nFalse\n");
+}
+
+// A user class may override equals; the override is dispatched through the
+// vtable in place of the runtime default.
+TEST(Class, EqualsOverrideDispatched) {
+  auto r = compileAndRun(withFns(R"(
+    class Always {
+      v: int;
+      fn __init__(x: int) { self.v = x; }
+      fn equals(o: Obj) -> bool { return True; }
+    }
+  )",
+                                 R"(
+    a: Always = Always(1);
+    b: Always = Always(2);
+    println(StrBool(a.equals(b)));
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "True\n");
+}
+
+// equals must also work when the argument is a match binding (which stores the
+// unboxed object): the call passes the binding's backing box, not a fresh wrap.
+TEST(Class, EqualsWithMatchBoundArgument) {
+  auto r = compileAndRun(wrapMain(R"(
+    match IntStr("7") {
+      a: Int {
+        match IntStr("7") {
+          b: Int { println(StrBool(a.equals(b))); }
+          _ {}
+        }
+      }
+      _ {}
+    }
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "True\n");
+}

@@ -10,6 +10,8 @@ extern "C" {
 #include "Runtime.h"
 }
 
+#include "RuntimeEqualsHelper.h"
+
 // ============================================================================
 // PaykanObject_new / PaykanObject_destroy
 // ============================================================================
@@ -61,14 +63,14 @@ TEST(ObjectToString, ReturnsNewStringEachCall) {
 
 TEST(ObjectEquals, SameObjectIsEqual) {
   PaykanObject *obj = PaykanObject_new();
-  EXPECT_EQ(PaykanObject_equals(obj, obj), 1);
+  EXPECT_EQ(paykanTestEquals(PaykanObject_equals, obj, obj), 1);
   PaykanObject_destroy(obj);
 }
 
 TEST(ObjectEquals, DifferentObjectsAreNotEqual) {
   PaykanObject *a = PaykanObject_new();
   PaykanObject *b = PaykanObject_new();
-  EXPECT_EQ(PaykanObject_equals(a, b), 0);
+  EXPECT_EQ(paykanTestEquals(PaykanObject_equals, a, b), 0);
   PaykanObject_destroy(a);
   PaykanObject_destroy(b);
 }
@@ -89,7 +91,7 @@ TEST(ObjectVtable, ToStringViaVtable) {
 
 TEST(ObjectVtable, EqualsViaVtable) {
   PaykanObject *obj = PaykanObject_new();
-  EXPECT_EQ(obj->vtable->equals(obj, obj), 1);
+  EXPECT_EQ(paykanTestEquals(obj->vtable->equals, obj, obj), 1);
   PaykanObject_destroy(obj);
 }
 
@@ -112,11 +114,13 @@ TEST(ObjectNone, ToStringReturnsNone) {
 }
 
 TEST(ObjectNone, EqualsOnlyItself) {
-  EXPECT_EQ(
-      PaykanObject_None.vtable->equals(&PaykanObject_None, &PaykanObject_None),
-      1);
+  EXPECT_EQ(paykanTestEquals(PaykanObject_None.vtable->equals,
+                             &PaykanObject_None, &PaykanObject_None),
+            1);
   PaykanObject *other = PaykanObject_new();
-  EXPECT_EQ(PaykanObject_None.vtable->equals(&PaykanObject_None, other), 0);
+  EXPECT_EQ(paykanTestEquals(PaykanObject_None.vtable->equals,
+                             &PaykanObject_None, other),
+            0);
   PaykanObject_destroy(other);
 }
 

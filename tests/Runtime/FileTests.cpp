@@ -13,6 +13,8 @@ extern "C" {
 #include "Runtime.h"
 }
 
+#include "RuntimeEqualsHelper.h"
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -92,14 +94,18 @@ TEST(FileToString, ContainsFilePrefix) {
 
 TEST(FileEquals, SameObjectIsEqual) {
   PaykanFile *f = PaykanFile_new();
-  EXPECT_EQ(PaykanFile_equals((PaykanObject *)f, (PaykanObject *)f), 1);
+  EXPECT_EQ(
+      paykanTestEquals(PaykanFile_equals, (PaykanObject *)f, (PaykanObject *)f),
+      1);
   PaykanFile_destroy((PaykanObject *)f);
 }
 
 TEST(FileEquals, DifferentObjectsAreNotEqual) {
   PaykanFile *a = PaykanFile_new();
   PaykanFile *b = PaykanFile_new();
-  EXPECT_EQ(PaykanFile_equals((PaykanObject *)a, (PaykanObject *)b), 0);
+  EXPECT_EQ(
+      paykanTestEquals(PaykanFile_equals, (PaykanObject *)a, (PaykanObject *)b),
+      0);
   PaykanFile_destroy((PaykanObject *)a);
   PaykanFile_destroy((PaykanObject *)b);
 }

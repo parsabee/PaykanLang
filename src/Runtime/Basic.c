@@ -40,9 +40,12 @@ PaykanShared *PaykanInt_toString(PaykanObject *self) {
 }
 
 int64_t PaykanInt_equals(PaykanObject *self, PaykanObject *other) {
-  if (other->vtable != &PaykanInt_vtable)
-    return 0;
-  return ((PaykanInt *)self)->value == ((PaykanInt *)other)->value;
+  // `other` arrives as a PaykanShared box and is consumed by this call.
+  PaykanObject *o = PaykanShared_get((PaykanShared *)other);
+  int64_t result = o->vtable == &PaykanInt_vtable &&
+                   ((PaykanInt *)self)->value == ((PaykanInt *)o)->value;
+  Paykan_release((PaykanShared *)other);
+  return result;
 }
 
 PaykanShared *PaykanInt_from_str(PaykanObject *str) {
@@ -83,9 +86,12 @@ PaykanShared *PaykanFloat_toString(PaykanObject *self) {
 }
 
 int64_t PaykanFloat_equals(PaykanObject *self, PaykanObject *other) {
-  if (other->vtable != &PaykanFloat_vtable)
-    return 0;
-  return ((PaykanFloat *)self)->value == ((PaykanFloat *)other)->value;
+  // `other` arrives as a PaykanShared box and is consumed by this call.
+  PaykanObject *o = PaykanShared_get((PaykanShared *)other);
+  int64_t result = o->vtable == &PaykanFloat_vtable &&
+                   ((PaykanFloat *)self)->value == ((PaykanFloat *)o)->value;
+  Paykan_release((PaykanShared *)other);
+  return result;
 }
 
 PaykanShared *PaykanFloat_from_str(PaykanObject *str) {
@@ -126,7 +132,10 @@ PaykanShared *PaykanBool_toString(PaykanObject *self) {
 }
 
 int64_t PaykanBool_equals(PaykanObject *self, PaykanObject *other) {
-  if (other->vtable != &PaykanBool_vtable)
-    return 0;
-  return ((PaykanBool *)self)->value == ((PaykanBool *)other)->value;
+  // `other` arrives as a PaykanShared box and is consumed by this call.
+  PaykanObject *o = PaykanShared_get((PaykanShared *)other);
+  int64_t result = o->vtable == &PaykanBool_vtable &&
+                   ((PaykanBool *)self)->value == ((PaykanBool *)o)->value;
+  Paykan_release((PaykanShared *)other);
+  return result;
 }

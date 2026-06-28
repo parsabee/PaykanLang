@@ -2017,8 +2017,14 @@ CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node) {
     ast::Type *paramASTTy = (method && i < method->getParamTypes().size())
                                 ? method->getParamTypes()[i]
                                 : nullptr;
-    bool isClassParam = isUserDefinedMethod && paramASTTy &&
-                        ast::isa<ast::ClassType>(paramASTTy);
+    // Class-typed arguments are passed as PaykanShared boxes (callee consumes)
+    // for user-defined methods. The builtin `equals` is virtual and may be
+    // overridden by a user class, so its `other` argument must use the same
+    // boxed-and-consumed ABI regardless of the static receiver type; the
+    // runtime `*_equals` implementations unbox and release it to match.
+    bool isClassParam =
+        paramASTTy && ast::isa<ast::ClassType>(paramASTTy) &&
+        (isUserDefinedMethod || node->getMethodName() == names::kMethodEquals);
 
     if (isClassParam) {
       // Class-type param: must arrive as PaykanShared* (callee releases on
@@ -2029,6 +2035,16 @@ CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node) {
           auto *argAlloca = CG.CurrentScope->lookup(id->getName());
           v = CG.Builder.CreateLoad(ptrTy, argAlloca, id->getName());
           CG.emitRetain(v);
+        } else if (CG.CurrentScope) {
+          // Unowned alias (e.g. a match binding stores the raw object, not a
+          // box). Pass its backing PaykanShared* — retained so the callee can
+          // consume it — instead of wrapping the borrowed object in a fresh
+          // box, which would double-free the inner on release.
+          if (llvm::Value *backing =
+                  CG.CurrentScope->lookupBackingShared(id->getName())) {
+            CG.emitRetain(backing);
+            v = backing;
+          }
         }
       }
       if (!v) {
@@ -2374,14 +2390,16 @@ llvm::Value *CodeGen::emitValueMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
       llvm::Value *isEq = nullptr;
       if (auto *sl = ast::dyn_cast<ast::StringLiteral>(lit)) {
         // Build a temporary PaykanString* for the literal and compare contents.
+        // PaykanString_equals consumes its `other` argument as a PaykanShared
+        // box (the vtable-equals ABI), so box the literal and let the call
+        // release it — this transfers ownership of the temp into the box.
         llvm::Value *litStr =
             wrapStringLiteral(emitExpr(sl), sl->getValue().size());
+        llvm::Value *litBox = emitSharedNew(litStr, kIRMatchEq);
         auto *eqFnTy = llvm::FunctionType::get(i64Ty, {ptrTy, ptrTy}, false);
         llvm::Value *eq =
             Builder.CreateCall(declareFunction(kPaykanStringEquals, eqFnTy),
-                               {subjRaw, litStr}, kIRMatchEq);
-        // The literal temp is owned; destroy it now that the compare is done.
-        destroyStringTempIfOwned(litStr);
+                               {subjRaw, litBox}, kIRMatchEq);
         isEq = Builder.CreateICmpNE(eq, llvm::ConstantInt::get(i64Ty, 0),
                                     kIRMatchEq);
       } else if (ast::isa<ast::FloatLiteral>(lit)) {

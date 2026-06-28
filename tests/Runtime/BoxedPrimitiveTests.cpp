@@ -11,6 +11,8 @@ extern "C" {
 #include "Runtime.h"
 }
 
+#include "RuntimeEqualsHelper.h"
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -61,14 +63,18 @@ TEST(BoxedInt, ToStringNegative) {
 
 TEST(BoxedInt, EqualsSelf) {
   PaykanInt *i = PaykanInt_new(5);
-  EXPECT_EQ(PaykanInt_equals((PaykanObject *)i, (PaykanObject *)i), 1);
+  EXPECT_EQ(
+      paykanTestEquals(PaykanInt_equals, (PaykanObject *)i, (PaykanObject *)i),
+      1);
   PaykanInt_destroy((PaykanObject *)i);
 }
 
 TEST(BoxedInt, EqualsSameValue) {
   PaykanInt *a = PaykanInt_new(10);
   PaykanInt *b = PaykanInt_new(10);
-  EXPECT_EQ(PaykanInt_equals((PaykanObject *)a, (PaykanObject *)b), 1);
+  EXPECT_EQ(
+      paykanTestEquals(PaykanInt_equals, (PaykanObject *)a, (PaykanObject *)b),
+      1);
   PaykanInt_destroy((PaykanObject *)a);
   PaykanInt_destroy((PaykanObject *)b);
 }
@@ -76,7 +82,9 @@ TEST(BoxedInt, EqualsSameValue) {
 TEST(BoxedInt, NotEqualDifferentValue) {
   PaykanInt *a = PaykanInt_new(1);
   PaykanInt *b = PaykanInt_new(2);
-  EXPECT_EQ(PaykanInt_equals((PaykanObject *)a, (PaykanObject *)b), 0);
+  EXPECT_EQ(
+      paykanTestEquals(PaykanInt_equals, (PaykanObject *)a, (PaykanObject *)b),
+      0);
   PaykanInt_destroy((PaykanObject *)a);
   PaykanInt_destroy((PaykanObject *)b);
 }
@@ -143,7 +151,9 @@ TEST(BoxedFloat, ToString) {
 TEST(BoxedFloat, EqualsSameValue) {
   PaykanFloat *a = PaykanFloat_new(1.0);
   PaykanFloat *b = PaykanFloat_new(1.0);
-  EXPECT_EQ(PaykanFloat_equals((PaykanObject *)a, (PaykanObject *)b), 1);
+  EXPECT_EQ(paykanTestEquals(PaykanFloat_equals, (PaykanObject *)a,
+                             (PaykanObject *)b),
+            1);
   PaykanFloat_destroy((PaykanObject *)a);
   PaykanFloat_destroy((PaykanObject *)b);
 }
@@ -151,7 +161,9 @@ TEST(BoxedFloat, EqualsSameValue) {
 TEST(BoxedFloat, NotEqualDifferentValue) {
   PaykanFloat *a = PaykanFloat_new(1.0);
   PaykanFloat *b = PaykanFloat_new(2.0);
-  EXPECT_EQ(PaykanFloat_equals((PaykanObject *)a, (PaykanObject *)b), 0);
+  EXPECT_EQ(paykanTestEquals(PaykanFloat_equals, (PaykanObject *)a,
+                             (PaykanObject *)b),
+            0);
   PaykanFloat_destroy((PaykanObject *)a);
   PaykanFloat_destroy((PaykanObject *)b);
 }
@@ -217,7 +229,9 @@ TEST(BoxedBool, ToStringFalse) {
 TEST(BoxedBool, EqualsSameValue) {
   PaykanBool *a = PaykanBool_new(1);
   PaykanBool *b = PaykanBool_new(1);
-  EXPECT_EQ(PaykanBool_equals((PaykanObject *)a, (PaykanObject *)b), 1);
+  EXPECT_EQ(
+      paykanTestEquals(PaykanBool_equals, (PaykanObject *)a, (PaykanObject *)b),
+      1);
   PaykanBool_destroy((PaykanObject *)a);
   PaykanBool_destroy((PaykanObject *)b);
 }
@@ -251,14 +265,18 @@ TEST(BoxedError, ToStringContainsMessage) {
 
 TEST(BoxedError, EqualsSelf) {
   PaykanError *e = PaykanError_new("err", 3);
-  EXPECT_EQ(PaykanError_equals((PaykanObject *)e, (PaykanObject *)e), 1);
+  EXPECT_EQ(paykanTestEquals(PaykanError_equals, (PaykanObject *)e,
+                             (PaykanObject *)e),
+            1);
   PaykanError_destroy((PaykanObject *)e);
 }
 
 TEST(BoxedError, NotEqualDifferentErrors) {
   PaykanError *a = PaykanError_new("a", 1);
   PaykanError *b = PaykanError_new("b", 1);
-  EXPECT_EQ(PaykanError_equals((PaykanObject *)a, (PaykanObject *)b), 0);
+  EXPECT_EQ(paykanTestEquals(PaykanError_equals, (PaykanObject *)a,
+                             (PaykanObject *)b),
+            0);
   PaykanError_destroy((PaykanObject *)a);
   PaykanError_destroy((PaykanObject *)b);
 }

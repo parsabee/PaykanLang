@@ -9,6 +9,8 @@ extern "C" {
 #include "Runtime.h"
 }
 
+#include "RuntimeEqualsHelper.h"
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -236,14 +238,18 @@ TEST(ArrayToString, ContainsLenAndAddress) {
 
 TEST(ArrayEquals, SameObjectIsEqual) {
   PaykanArray *arr = PaykanArray_new(2);
-  EXPECT_EQ(PaykanArray_equals((PaykanObject *)arr, (PaykanObject *)arr), 1);
+  EXPECT_EQ(paykanTestEquals(PaykanArray_equals, (PaykanObject *)arr,
+                             (PaykanObject *)arr),
+            1);
   PaykanArray_destroy((PaykanObject *)arr);
 }
 
 TEST(ArrayEquals, DifferentObjectsAreNotEqual) {
   PaykanArray *a = PaykanArray_new(2);
   PaykanArray *b = PaykanArray_new(2);
-  EXPECT_EQ(PaykanArray_equals((PaykanObject *)a, (PaykanObject *)b), 0);
+  EXPECT_EQ(paykanTestEquals(PaykanArray_equals, (PaykanObject *)a,
+                             (PaykanObject *)b),
+            0);
   PaykanArray_destroy((PaykanObject *)a);
   PaykanArray_destroy((PaykanObject *)b);
 }

@@ -86,14 +86,20 @@ PaykanShared *PaykanString_toString(PaykanObject *self) {
 }
 
 int64_t PaykanString_equals(PaykanObject *self, PaykanObject *other) {
+  // `other` arrives as a PaykanShared box and is consumed by this call.
+  PaykanObject *o = PaykanShared_get((PaykanShared *)other);
   PaykanString *lhs = (PaykanString *)self;
-  // If the other object is not a String, fall back to identity.
-  if (other->vtable != (PaykanObjectVTable *)&PaykanString_vtable)
-    return self == other;
-  PaykanString *rhs = (PaykanString *)other;
-  if (lhs->len != rhs->len)
-    return 0;
-  return memcmp(lhs->data, rhs->data, (size_t)lhs->len) == 0;
+  int64_t result;
+  if (o->vtable != (PaykanObjectVTable *)&PaykanString_vtable) {
+    // Not a String — fall back to identity.
+    result = (self == o);
+  } else {
+    PaykanString *rhs = (PaykanString *)o;
+    result = lhs->len == rhs->len &&
+             memcmp(lhs->data, rhs->data, (size_t)lhs->len) == 0;
+  }
+  Paykan_release((PaykanShared *)other);
+  return result;
 }
 
 int64_t PaykanString_length(PaykanObject *self) {

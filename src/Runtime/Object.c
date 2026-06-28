@@ -36,8 +36,13 @@ PaykanShared *PaykanObject_toString(PaykanObject *self) {
 }
 
 int64_t PaykanObject_equals(PaykanObject *self, PaykanObject *other) {
-  // Default: identity (pointer) equality.
-  return self == other;
+  // `other` is passed as a PaykanShared box (the calling convention for
+  // class-typed method arguments) and is consumed by this call. Unbox it so
+  // identity compares the underlying objects, matching the unboxed `self`.
+  PaykanObject *o = PaykanShared_get((PaykanShared *)other);
+  int64_t result = (self == o);
+  Paykan_release((PaykanShared *)other);
+  return result;
 }
 
 // -- None singleton ----------------------------------------------------------
@@ -55,7 +60,10 @@ static PaykanShared *PaykanNone_toString(PaykanObject *self) {
 }
 
 static int64_t PaykanNone_equals(PaykanObject *self, PaykanObject *other) {
-  return self == other;
+  PaykanObject *o = PaykanShared_get((PaykanShared *)other);
+  int64_t result = (self == o);
+  Paykan_release((PaykanShared *)other);
+  return result;
 }
 
 static PaykanObjectVTable PaykanNone_vtable = {

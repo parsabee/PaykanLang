@@ -208,7 +208,11 @@ PaykanShared *PaykanArray_toString(PaykanObject *self) {
 
 int64_t PaykanArray_equals(PaykanObject *self, PaykanObject *other) {
   // Identity equality — two arrays are equal only if they are the same object.
-  return self == other;
+  // `other` arrives as a PaykanShared box and is consumed by this call.
+  PaykanObject *o = PaykanShared_get((PaykanShared *)other);
+  int64_t result = (self == o);
+  Paykan_release((PaykanShared *)other);
+  return result;
 }
 
 int64_t PaykanArray_length(PaykanObject *self) {

@@ -10,6 +10,8 @@ extern "C" {
 #include "Runtime.h"
 }
 
+#include "RuntimeEqualsHelper.h"
+
 // ============================================================================
 // PaykanString_new
 // ============================================================================
@@ -135,7 +137,9 @@ TEST(StringToString, CopyIsIndependent) {
 TEST(StringEquals, SameContent) {
   PaykanString *a = PaykanString_new("foo", 3);
   PaykanString *b = PaykanString_new("foo", 3);
-  EXPECT_EQ(PaykanString_equals((PaykanObject *)a, (PaykanObject *)b), 1);
+  EXPECT_EQ(paykanTestEquals(PaykanString_equals, (PaykanObject *)a,
+                             (PaykanObject *)b),
+            1);
   PaykanString_destroy((PaykanObject *)a);
   PaykanString_destroy((PaykanObject *)b);
 }
@@ -143,7 +147,9 @@ TEST(StringEquals, SameContent) {
 TEST(StringEquals, DifferentContent) {
   PaykanString *a = PaykanString_new("foo", 3);
   PaykanString *b = PaykanString_new("bar", 3);
-  EXPECT_EQ(PaykanString_equals((PaykanObject *)a, (PaykanObject *)b), 0);
+  EXPECT_EQ(paykanTestEquals(PaykanString_equals, (PaykanObject *)a,
+                             (PaykanObject *)b),
+            0);
   PaykanString_destroy((PaykanObject *)a);
   PaykanString_destroy((PaykanObject *)b);
 }
@@ -151,7 +157,9 @@ TEST(StringEquals, DifferentContent) {
 TEST(StringEquals, DifferentLength) {
   PaykanString *a = PaykanString_new("foo", 3);
   PaykanString *b = PaykanString_new("fo", 2);
-  EXPECT_EQ(PaykanString_equals((PaykanObject *)a, (PaykanObject *)b), 0);
+  EXPECT_EQ(paykanTestEquals(PaykanString_equals, (PaykanObject *)a,
+                             (PaykanObject *)b),
+            0);
   PaykanString_destroy((PaykanObject *)a);
   PaykanString_destroy((PaykanObject *)b);
 }
@@ -159,7 +167,9 @@ TEST(StringEquals, DifferentLength) {
 TEST(StringEquals, EmptyStrings) {
   PaykanString *a = PaykanString_new("", 0);
   PaykanString *b = PaykanString_new("", 0);
-  EXPECT_EQ(PaykanString_equals((PaykanObject *)a, (PaykanObject *)b), 1);
+  EXPECT_EQ(paykanTestEquals(PaykanString_equals, (PaykanObject *)a,
+                             (PaykanObject *)b),
+            1);
   PaykanString_destroy((PaykanObject *)a);
   PaykanString_destroy((PaykanObject *)b);
 }
@@ -168,7 +178,7 @@ TEST(StringEquals, NonStringOtherFallsBackToIdentity) {
   PaykanString *s = PaykanString_new("x", 1);
   PaykanObject *obj = PaykanObject_new();
   // Different types -> identity comparison -> not equal.
-  EXPECT_EQ(PaykanString_equals((PaykanObject *)s, obj), 0);
+  EXPECT_EQ(paykanTestEquals(PaykanString_equals, (PaykanObject *)s, obj), 0);
   PaykanString_destroy((PaykanObject *)s);
   PaykanObject_destroy(obj);
 }
