@@ -297,6 +297,21 @@ Detailed documentation lives in `language_reference/`:
 
 ---
 
+## Known Limitations
+
+v0.0 is an honest preview. The following are known gaps; fixes are planned for v0.1
+(see [CHANGELOG.md](CHANGELOG.md) for the full list):
+
+- **`Obj.equals()` on user-class instances is unreliable** — it may return `False`
+  even for the same object (`b.equals(b)` is `False` while `b == b` is `True`).
+  Use `==` for object identity.
+- **`toString()` formatting is incomplete** — arrays print `Array@<addr>[len=N]`
+  rather than `[1, 2, 3]`, and the default object `toString()` prints
+  `Object@<addr>` rather than a class-name-based format.
+- **JIT only** — ahead-of-time native compilation is planned for v0.1.
+
+---
+
 ## License
 
 See [LICENSE](LICENSE).
