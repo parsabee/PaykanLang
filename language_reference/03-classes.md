@@ -89,6 +89,10 @@ c.increment();
 println(StrInt(c.value()));   // 1
 ```
 
+There is **no method overloading** — each method name must be unique within a class.
+This also means a class has **exactly one `__init__`**; multiple constructors with
+different parameter lists are not supported.
+
 ### Static Dispatch via Free Functions
 
 There is no per-method opt-out for virtual dispatch. For static dispatch (e.g. hot
