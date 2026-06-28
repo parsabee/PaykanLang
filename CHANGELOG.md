@@ -34,7 +34,8 @@ deliberately small, honest preview; several features are planned for v0.1.
 - `cmake --install` rules (GNUInstallDirs): the `paykan` binary, the runtime
   archive, and `Runtime.h` are staged for packaging.
 - Integer divide and modulo by zero trap via a `noreturn` runtime panic.
-- Direct calls to `destroy()` are rejected at compile time.
+- The `destroy()` destructor is compiler-generated and final: user classes cannot
+  override it, and direct calls are rejected at compile time.
 - Quality gates: `.clang-format` (LLVM style), `.clang-tidy` (bug-focused),
   sanitizer builds (ASan/LSan, UBSan), and CI on every push and pull request.
 

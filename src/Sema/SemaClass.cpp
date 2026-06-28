@@ -264,6 +264,17 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
   for (auto *method : node->getMethods()) {
     classCtx.MethodName = method->getName();
 
+    // `destroy` is the compiler-generated destructor: it is emitted for every
+    // class (releasing fields and freeing the object) and is final. User
+    // classes may not declare or override it.
+    if (method->getName() == names::kMethodDestroy) {
+      error(method->getLocation(),
+            "'destroy' is the compiler-generated destructor and cannot be "
+            "overridden");
+      ok = false;
+      continue;
+    }
+
     // Determine whether this __init__ must call __super__.
     classCtx.SuperInitRequired = false;
     classCtx.SuperInitCalled = false;

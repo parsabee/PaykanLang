@@ -80,7 +80,7 @@ mat: int[][] = [[1, 2], [3, 4]];   // 2D
 |------------|---------------------------------|----------------------|
 | `toString` | `fn toString() -> Str`          | Returns class name   |
 | `equals`   | `fn equals(other: Obj) -> bool` | Identity comparison  |
-| `destroy`  | `fn destroy()`                  | Destructor (auto-called on last release) |
+| `destroy`  | (compiler-generated)            | Destructor — final, runs on last release |
 
 `None` is an `Obj` literal representing the absence of a value.
 

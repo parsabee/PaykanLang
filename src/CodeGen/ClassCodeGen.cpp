@@ -250,7 +250,7 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
   for (auto *funcDecl : node->getMethods()) {
     // The `destroy` slot is emitted as a synthetic destructor (see
     // emitDestructor) that also releases owned fields, so skip it here to
-    // avoid defining ClassName_destroy twice.
+    // avoid defining the destructor twice.
     if (funcDecl->getName() == kMethodDestroy)
       continue;
 

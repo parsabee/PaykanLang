@@ -69,7 +69,7 @@ TEST(Class, ImplicitObjBaseEqNeq) {
 }
 
 // ============================================================================
-// destroy() may not be called directly
+// destroy is the compiler-generated destructor: final and not callable
 // ============================================================================
 
 TEST(Class, DestroyDirectCallRejected) {
@@ -83,6 +83,14 @@ TEST(Class, DestroyDirectCallRejected) {
 TEST(Class, DestroyDirectCallOnObjRejected) {
   auto r = semaCheck(withClasses("", "o: Obj = Obj(); o.destroy(); return 0;"));
   EXPECT_FALSE(r.Ok);
+}
+
+TEST(Class, DestroyOverrideRejected) {
+  auto r = semaCheck(
+      withClasses("class Box { v: int; fn __init__(x: int) { self.v = x; }\n"
+                  "  fn destroy() { } }"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("destroy"), std::string::npos) << r.Diagnostics;
 }
 
 // ============================================================================
