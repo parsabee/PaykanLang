@@ -194,6 +194,18 @@ fn main() -> int {
 
 ---
 
+## Installing
+
+### Homebrew (macOS)
+
+```sh
+brew tap parsabee/paykanlang https://github.com/parsabee/PaykanLang
+brew install parsabee/paykanlang/paykanlang
+paykan --version
+```
+
+---
+
 ## Building
 
 PaykanLang uses CMake and requires LLVM (pre-built, vendored under `third-party/llvm`),

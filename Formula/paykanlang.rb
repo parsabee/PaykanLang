@@ -1,0 +1,66 @@
+# Homebrew formula for PaykanLang (JIT-only v0.0 preview).
+#
+# This file doubles as a tap: a user can install with
+#
+#   brew tap parsabee/paykanlang https://github.com/parsabee/PaykanLang
+#   brew install parsabee/paykanlang/paykanlang
+#
+# It builds from the source tarball that the release workflow attaches to the
+# v0.0.0 GitHub Release (or the auto-generated source archive for the tag) and
+# invokes the project's `cmake --install` rules: the `paykan` binary -> bin/,
+# the runtime archive -> lib/, and Runtime.h -> include/paykan/.
+#
+# LLVM 17 is the one large dependency; we use Homebrew's llvm@17 and point the
+# build's LLVMSetup fast path at it via -DLLVM_DIR, so no prebuilt LLVM is
+# downloaded during the build. Bison, Flex, and GoogleTest are fetched by the
+# build's own setup modules.
+#
+# NOTE: `sha256` below is a placeholder. After the v0.0.0 tag exists, set it to
+# the real digest, e.g.:
+#   curl -fsSL https://github.com/parsabee/PaykanLang/archive/refs/tags/v0.0.0.tar.gz | shasum -a 256
+class Paykanlang < Formula
+  desc "Statically-typed, object-oriented language that JIT-compiles via LLVM"
+  homepage "https://github.com/parsabee/PaykanLang"
+  url "https://github.com/parsabee/PaykanLang/archive/refs/tags/v0.0.0.tar.gz"
+  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  license "MIT"
+
+  depends_on "cmake" => :build
+  depends_on "ninja" => :build
+  depends_on "llvm@17"
+
+  def install
+    llvm = Formula["llvm@17"]
+    system "cmake", "-S", ".", "-B", "build", "-G", "Ninja",
+           "-DCMAKE_BUILD_TYPE=Release",
+           "-DLLVM_DIR=#{llvm.opt_prefix}/lib/cmake/llvm",
+           *std_cmake_args
+    system "cmake", "--build", "build", "--parallel"
+    system "cmake", "--install", "build"
+  end
+
+  test do
+    # A real end-to-end exercise: the installed compiler must JIT-run a program
+    # that uses variables, arithmetic, and println, and exit with the value the
+    # program returns.
+    (testpath/"hello.pkn").write <<~PKN
+      fn main() -> int {
+        x: int = 20;
+        y: int = 22;
+        println("Hello from the Homebrew test!");
+        return x + y;
+      }
+    PKN
+
+    # --version reports the compiler and LLVM versions.
+    assert_match "PaykanLang #{version}", shell_output("#{bin}/paykan --version")
+
+    # The program returns 42, so paykan should exit 42.
+    output = shell_output("#{bin}/paykan #{testpath}/hello.pkn", 42)
+    assert_match "Hello from the Homebrew test!", output
+
+    # Installed layout sanity: runtime archive and public header are staged.
+    assert_path_exists lib/"libpaykan_runtime.a"
+    assert_path_exists include/"paykan/Runtime.h"
+  end
+end
