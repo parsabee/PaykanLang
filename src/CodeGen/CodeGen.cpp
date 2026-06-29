@@ -667,15 +667,18 @@ void CodeGen::emitClassVarRebind(llvm::AllocaInst *alloca, ast::Expr *rhsExpr,
     if (exprAlreadyShared(rhsExpr))
       newBox =
           val; // already a PaykanShared* — use directly (refcount already = 1)
-    else if (ast::isa<ast::StringLiteral>(rhsExpr))
-      // val is already a PaykanString* (pre-wrapped by visitAssignStmt via
-      // wrapStringLiteral). Box it directly to avoid a second PaykanString_new.
-      newBox = emitSharedNew(val, kIRNewBox);
-    else
-      // emitAsShared handles all remaining cases correctly:
-      // - object-array subscripts: retains the existing PaykanShared* box
-      // - other raw values: wraps in a fresh PaykanShared_new
+    else if (ast::isa<ast::SubscriptExpr>(rhsExpr) ||
+             ast::isa<ast::MemberAccessExpr>(rhsExpr))
+      // Borrowed reference (array element / object field): emitAsShared retains
+      // the stored box rather than wrapping the borrowed object in a fresh one.
       newBox = emitAsShared(rhsExpr);
+    else
+      // Any freshly-produced raw value already computed as `val` — a string
+      // literal (pre-wrapped to a PaykanString* by visitAssignStmt) or a
+      // concatenation result. Box it directly. Re-emitting via emitAsShared
+      // would evaluate the RHS a second time and leak the first result (e.g.
+      // `s = s + x` in a loop).
+      newBox = emitSharedNew(val, kIRNewBox);
   }
 
   // Release the old box and store the new one.
