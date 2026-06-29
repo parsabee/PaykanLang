@@ -5,17 +5,16 @@
 [![Version](https://img.shields.io/badge/version-0.0.0-blue.svg)](CHANGELOG.md)
 
 PaykanLang (`.pkn`) is a high-performance language for building applications on modern,
-heterogeneous machines. The goal is to make ordinary application code run fast — across
-many cores and, increasingly, across the different compute units in a system (CPUs, GPUs,
-and other accelerators), with work offloaded to them seamlessly rather than wired up by
-hand. It aims to be **memory-safe and thread-safe** by design, with a clean, small surface:
+heterogeneous machines. The goal is application development across many cores and, 
+increasingly, across the different compute units in a system (CPUs, GPUs, and other accelerators), 
+with work offloaded to them seamlessly rather than wired up by hand. 
+It aims to be **memory-safe and thread-safe** by design, with a clean, small surface:
 a real module system, C interoperability exposed through modules, and automatic reference
-counting in place of a garbage collector or manual memory management. PaykanLang deliberately
-trades the full low-level control of a systems language for safety and ergonomics — it sits
-at the productive, high-level end of the spectrum while still compiling to native speed.
+counting in place of a garbage collector or manual memory management. PaykanLang aims to 
+provide a safe, ergonomic, performant, and productive interface that compiles to native speed.
 
-This is **v0.0**, an early but honest preview that lays the foundation. Implemented and
-tested today: static typing with inference, single-inheritance classes with virtual dispatch,
+This is **v0.0** that lays the foundation. Implemented and tested today: 
+static typing with inference, single-inheritance classes with virtual dispatch,
 ARC, dynamic arrays, a file-based module system, `match` type dispatch, and enums — all
 compiled to LLVM IR and JIT-executed. The defining goals — seamless offloading to
 heterogeneous compute units, thread-safe concurrency, C interop through modules, and

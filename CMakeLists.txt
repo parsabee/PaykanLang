@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(PaykanLang
     VERSION 0.0.0
-    DESCRIPTION "A clean and simple, statically typed, object-oriented programming language"
+    DESCRIPTION "A performant, productive, statically-typed, object-oriented programming language."
     LANGUAGES C CXX
 )
 
