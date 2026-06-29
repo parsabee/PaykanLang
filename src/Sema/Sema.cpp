@@ -109,7 +109,7 @@ std::string Sema::typeName(ast::Type *ty) {
 
 // Structural type equality (pointer equality is insufficient for ArrayType
 // nodes because each make<ArrayType>() call yields a fresh allocation).
-static bool typesEqual(ast::Type *a, ast::Type *b) {
+bool Sema::typesEqual(ast::Type *a, ast::Type *b) {
   if (a == b)
     return true;
   if (!a || !b)

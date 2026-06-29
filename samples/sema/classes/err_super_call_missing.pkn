@@ -1,5 +1,5 @@
-// ERROR: __init__ in a derived class does not call __super__
-// when the superclass __init__ has parameters
+// ERROR: __init__ in a derived class does not call __super__ as its first
+// statement (required whenever the superclass declares an __init__)
 class Animal {
   name: Str;
 

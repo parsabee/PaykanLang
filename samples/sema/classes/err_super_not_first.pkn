@@ -1,0 +1,17 @@
+// ERROR: __super__(...) must be the FIRST statement of a derived __init__.
+class Base {
+  val: int;
+  fn __init__(v: int) { self.val = v; }
+}
+
+class Derived : Base {
+  y: int;
+  fn __init__(v: int) {
+    self.y = 1;
+    __super__(v);   // too late — must be first
+  }
+}
+
+fn main() -> int {
+  return 0;
+}

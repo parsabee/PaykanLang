@@ -151,8 +151,18 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   static std::string typeName(ast::Type *ty);
 
+  // Render a method signature for diagnostics, e.g. "Animal.describe() -> int".
+  static std::string signatureString(const ast::ClassType *owner,
+                                     const std::string &methodName,
+                                     ast::Type *retTy,
+                                     const std::vector<ast::Type *> &paramTys);
+
   // Returns true if the type is a numeric builtin (int or float).
   static bool isNumeric(ast::Type *ty);
+
+  // Structural type equality (pointer equality is insufficient for ArrayType
+  // nodes because each make<ArrayType>() call yields a fresh allocation).
+  static bool typesEqual(ast::Type *a, ast::Type *b);
 
   // Returns true if a value of type `src` can be assigned to a location of
   // type `dst`.  This includes exact match, int->float promotion, and
@@ -272,6 +282,15 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// Type-check class method bodies (phase 5) over SortedClasses.  Run after
   /// checkClassDecls and after free-function signatures are registered.
   bool checkClassBodies();
+
+  /// Definite-assignment check for a constructor body: verify every own field
+  /// of `ct` is assigned (self.field = …) on every control-flow path out of
+  /// `body` (each return and the final fall-through).  Emits an error per
+  /// field left possibly-unassigned.  Returns true if all fields are
+  /// definitely assigned.
+  bool checkInitFieldsAssigned(ast::ClassType *ct, ast::CompoundStmt *body,
+                               ast::SourceLocation initLoc,
+                               const std::string &className);
 
   /// Topologically-sorted class decls (superclass before subclass), populated
   /// by checkClassDecls and consumed by checkClassBodies.

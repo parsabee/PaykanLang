@@ -488,3 +488,319 @@ TEST(Class, MatchMissingWildcardNoFallthrough) {
   )");
   EXPECT_FALSE(r.Ok);
 }
+
+// ============================================================================
+// Check 3 — override signature mismatch (strict equality, no covariance)
+// ============================================================================
+
+TEST(Class, OverrideReturnTypeMismatchRejected) {
+  auto r = semaCheck(R"(
+    class Animal {
+      fn __init__() {}
+      fn describe() -> int { return 1; }
+    }
+    class Dog : Animal {
+      fn __init__() { __super__(); }
+      fn describe() -> Str { return "dog"; }
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("incompatible signature"), std::string::npos)
+      << r.Diagnostics;
+}
+
+TEST(Class, OverrideParamTypeMismatchRejected) {
+  auto r = semaCheck(R"(
+    class Base {
+      fn __init__() {}
+      fn take(x: int) -> int { return x; }
+    }
+    class Derived : Base {
+      fn __init__() { __super__(); }
+      fn take(x: Str) -> int { return 0; }
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("incompatible signature"), std::string::npos)
+      << r.Diagnostics;
+}
+
+TEST(Class, OverrideParamCountMismatchRejected) {
+  auto r = semaCheck(R"(
+    class Base {
+      fn __init__() {}
+      fn f(x: int) -> int { return x; }
+    }
+    class Derived : Base {
+      fn __init__() { __super__(); }
+      fn f() -> int { return 0; }
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_FALSE(r.Ok);
+}
+
+TEST(Class, OverrideMatchingSignatureAccepted) {
+  auto r = semaCheck(R"(
+    class Animal {
+      fn __init__() {}
+      fn describe() -> int { return 1; }
+    }
+    class Dog : Animal {
+      fn __init__() { __super__(); }
+      fn describe() -> int { return 2; }
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Class, OverrideToStringAndEqualsAccepted) {
+  // Legitimate overrides of the Obj root methods must still type-check.
+  auto r = semaCheck(R"(
+    class Person {
+      name: Str;
+      fn __init__(n: Str) { self.name = n; }
+      fn toString() -> Str { return self.name; }
+      fn equals(other: Obj) -> bool { return True; }
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Class, OverrideThreeLevelMismatchRejected) {
+  auto r = semaCheck(R"(
+    class A { fn __init__() {} fn kind() -> int { return 0; } }
+    class B : A { fn __init__() { __super__(); } fn kind() -> int { return 1; } }
+    class C : B { fn __init__() { __super__(); } fn kind() -> Str { return "c"; } }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_FALSE(r.Ok);
+}
+
+// ============================================================================
+// Check 2 — derived __init__ must call __super__() as its first statement
+// ============================================================================
+
+TEST(Class, SuperRequiredForParameterizedBase) {
+  auto r = semaCheck(R"(
+    class Base {
+      val: int;
+      fn __init__(v: int) { self.val = v; }
+    }
+    class Derived : Base {
+      fn __init__() { }
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("__super__"), std::string::npos)
+      << r.Diagnostics;
+}
+
+TEST(Class, SuperRequiredForZeroParamBase) {
+  // Per the language reference, __super__() is required even when the base
+  // __init__ takes no parameters.
+  auto r = semaCheck(R"(
+    class Base { fn __init__() {} }
+    class Child : Base {
+      x: int;
+      fn __init__(x: int) { self.x = x; }
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("__super__"), std::string::npos)
+      << r.Diagnostics;
+}
+
+TEST(Class, SuperMustBeFirstStatement) {
+  auto r = semaCheck(R"(
+    class Base {
+      val: int;
+      fn __init__(v: int) { self.val = v; }
+    }
+    class Derived : Base {
+      y: int;
+      fn __init__(v: int) {
+        self.y = 1;
+        __super__(v);
+      }
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("first statement"), std::string::npos)
+      << r.Diagnostics;
+}
+
+TEST(Class, DerivedMustDeclareInitWhenBaseHasOne) {
+  auto r = semaCheck(R"(
+    class Base {
+      val: int;
+      fn __init__(v: int) { self.val = v; }
+    }
+    class Derived : Base {
+      y: int;
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_FALSE(r.Ok);
+}
+
+TEST(Class, SuperFirstStatementAccepted) {
+  auto r = semaCheck(R"(
+    class Base { fn __init__() {} }
+    class Child : Base {
+      x: int;
+      fn __init__(x: int) { __super__(); self.x = x; }
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Class, SuperWithArgsFirstStatementAccepted) {
+  auto r = semaCheck(R"(
+    class Base {
+      val: int;
+      fn __init__(v: int) { self.val = v; }
+    }
+    class Derived : Base {
+      y: int;
+      fn __init__(v: int) { __super__(v); self.y = v; }
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+// ============================================================================
+// Check 1 — __init__ must definitely assign every field on every path
+// ============================================================================
+
+TEST(Class, InitMissingFieldRejected) {
+  auto r = semaCheck(R"(
+    class Bad {
+      x: int;
+      y: int;
+      fn __init__(a: int) { self.x = a; }
+      fn toString() -> Str { return StrInt(self.x) + StrInt(self.y); }
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("not assigned on every path"), std::string::npos)
+      << r.Diagnostics;
+}
+
+TEST(Class, InitAllFieldsAssignedAccepted) {
+  auto r = semaCheck(R"(
+    class Point {
+      x: int;
+      y: int;
+      fn __init__(a: int, b: int) { self.x = a; self.y = b; }
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Class, InitFieldAssignedOnBothBranchesAccepted) {
+  auto r = semaCheck(R"(
+    class C {
+      x: int;
+      fn __init__(a: int) {
+        if (a > 0) { self.x = 1; } else { self.x = 2; }
+      }
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Class, InitFieldAssignedOnOnlyOneBranchRejected) {
+  auto r = semaCheck(R"(
+    class C {
+      x: int;
+      fn __init__(a: int) {
+        if (a > 0) { self.x = 1; }
+      }
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_FALSE(r.Ok);
+}
+
+TEST(Class, InitFieldAssignedBeforeEarlyReturnAccepted) {
+  auto r = semaCheck(R"(
+    class C {
+      x: int;
+      fn __init__(a: int) {
+        self.x = a;
+        if (a > 0) { return; }
+        self.x = 0;
+      }
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Class, InitMissingFieldBeforeEarlyReturnRejected) {
+  auto r = semaCheck(R"(
+    class C {
+      x: int;
+      y: int;
+      fn __init__(a: int) {
+        self.x = a;
+        if (a > 0) { return; }
+        self.y = a;
+      }
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_FALSE(r.Ok);
+}
+
+TEST(Class, InitWhileLoopDoesNotGuaranteeAssignment) {
+  auto r = semaCheck(R"(
+    class C {
+      x: int;
+      fn __init__(a: int) {
+        while (a > 0) { self.x = a; }
+      }
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_FALSE(r.Ok);
+}
+
+TEST(Class, InitNoFieldsNoInitAccepted) {
+  auto r = semaCheck(R"(
+    class A {}
+    class B { fn foo() -> int { return 1; } }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Class, InitDerivedOwnFieldOnlyAccepted) {
+  // Base fields are covered by __super__; the derived __init__ need only assign
+  // its own declared fields.
+  auto r = semaCheck(R"(
+    class Base {
+      a: int;
+      fn __init__(a: int) { self.a = a; }
+    }
+    class Derived : Base {
+      b: int;
+      fn __init__(a: int, b: int) { __super__(a); self.b = b; }
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}

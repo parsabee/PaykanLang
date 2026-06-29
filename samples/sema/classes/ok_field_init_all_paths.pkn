@@ -1,0 +1,17 @@
+// OK: every field is assigned on every control-flow path out of __init__.
+class Point {
+  x: int;
+  y: int;
+  fn __init__(a: int) {
+    self.x = a;
+    if (a > 0) {
+      self.y = a;
+    } else {
+      self.y = 0;
+    }
+  }
+}
+
+fn main() -> int {
+  return 0;
+}

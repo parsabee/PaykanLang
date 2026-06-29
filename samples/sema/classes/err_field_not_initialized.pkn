@@ -1,0 +1,14 @@
+// ERROR: __init__ must assign every field on every path; 'y' is left unset.
+class Bad {
+  x: int;
+  y: int;
+  fn __init__(a: int) {
+    self.x = a;
+    // missing: self.y = ...
+  }
+  fn toString() -> Str { return StrInt(self.x) + "," + StrInt(self.y); }
+}
+
+fn main() -> int {
+  return 0;
+}

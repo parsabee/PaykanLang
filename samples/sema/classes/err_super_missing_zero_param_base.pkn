@@ -1,0 +1,17 @@
+// ERROR: __super__() is required as the first statement even when the base
+// __init__ takes no parameters.
+class Base {
+  fn __init__() {}
+}
+
+class Derived : Base {
+  x: int;
+
+  fn __init__(v: int) {
+    self.x = v;   // missing: __super__();
+  }
+}
+
+fn main() -> int {
+  return 0;
+}

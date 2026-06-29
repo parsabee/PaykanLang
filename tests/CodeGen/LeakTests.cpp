@@ -156,7 +156,7 @@ TEST(Leak, ClassStrField) {
   auto r = compileAndRun(R"(
     class Person {
       name: Str;
-      fn __init__(n: Str) { name = n; }
+      fn __init__(n: Str) { self.name = n; }
     }
     fn main() -> int {
       p: Person = Person("Alice");
@@ -176,7 +176,7 @@ TEST(Leak, ClassInherit) {
   auto r = compileAndRun(R"(
     class Animal {
       name: Str;
-      fn __init__(n: Str) { name = n; }
+      fn __init__(n: Str) { self.name = n; }
     }
     class Dog : Animal {
       fn __init__(n: Str) { __super__(n); }

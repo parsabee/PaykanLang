@@ -1,4 +1,6 @@
-// OK: superclass __init__ has no parameters — __super__ not required
+// OK: superclass __init__ takes no parameters, so __super__() is called with
+// no arguments — but it is still required as the first statement of a derived
+// __init__ whenever the base declares an __init__ at all.
 class Base {
   fn __init__() {}
 }
@@ -7,6 +9,7 @@ class Child : Base {
   x: int;
 
   fn __init__(x: int) {
+    __super__();
     self.x = x;
   }
 }
