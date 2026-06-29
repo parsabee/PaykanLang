@@ -1748,38 +1748,12 @@ llvm::Value *CodeGen::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     bool isClassArg =
         i < callee->arg_size() && callee->getArg(i)->getType()->isPointerTy();
     if (isClassArg) {
-      auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
-      if (auto *id = ast::dyn_cast<ast::Identifier>(arg)) {
-        auto *argAlloca = CG.CurrentScope->lookup(id->getName());
-        if (argAlloca && CG.CurrentScope->isOwned(id->getName())) {
-          // Load the existing shared box, retain, pass.
-          v = CG.Builder.CreateLoad(ptrTy, argAlloca, id->getName());
-          CG.emitRetain(v);
-        } else if (argAlloca) {
-          // Unowned arm-binding with a backing PaykanShared*: retain the
-          // original box instead of creating a fresh one (which would give
-          // the callee sole ownership and destroy the object prematurely).
-          if (auto *backing =
-                  CG.CurrentScope->lookupBackingShared(id->getName())) {
-            CG.emitRetain(backing);
-            v = backing;
-          }
-        }
-      }
-      if (!v) {
-        // Temporary (literal, call result, etc.): produce a PaykanShared*.
-        llvm::Value *raw = visit(arg);
-        if (!raw)
-          return nullptr;
-        if (auto *sl = ast::dyn_cast<ast::StringLiteral>(arg))
-          raw = CG.wrapStringLiteral(raw, sl->getValue().size());
-        // If the arg already produced a PaykanShared* (e.g. Str-returning user
-        // function), use it directly — wrapping again creates a double-box.
-        if (CG.exprAlreadyShared(arg))
-          v = raw;
-        else
-          v = CG.emitSharedNew(raw, kIRArgShared);
-      }
+      // Class/Str argument: emitAsShared yields a +1 PaykanShared* box for the
+      // callee to consume — retaining the existing box for owned variables,
+      // match bindings (via backing), array elements, and object fields, and
+      // wrapping fresh values otherwise. Wrapping a borrowed element/field in a
+      // new box would double-free it (e.g. `f(arr[i])`).
+      v = CG.emitAsShared(arg);
       args.push_back(v);
       continue;
     }
