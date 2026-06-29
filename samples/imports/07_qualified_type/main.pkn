@@ -1,0 +1,36 @@
+// OK: an imported class used as a qualified type `mod::Type` in every
+// type position — function parameter, return type, variable annotation,
+// and class field.
+//
+//   import geometry::point  -> short qualifier "point" (last path segment)
+//                              full qualifier "geometry::point"
+//
+// Both `point::Point` and `geometry::point::Point` name the imported class
+// as a type, mirroring how the constructor call resolves in expressions.
+
+import geometry::point;
+
+// Qualified type as a class field.
+class Box {
+  origin: point::Point;
+  fn __init__(p: point::Point) { self.origin = p; }
+  fn total() -> int { return self.origin.sum(); }
+}
+
+// Qualified type as a parameter type.
+fn describe(p: point::Point) -> int {
+  println(p.toString());
+  return p.sum();
+}
+
+// Qualified type as a return type (full path form).
+fn origin() -> geometry::point::Point { return point::Point(0, 0); }
+
+fn main() -> int {
+  // Qualified type as a variable annotation.
+  p: point::Point = point::Point(15, 27);
+  b = Box(p);
+  o = origin();
+  println(o.toString());
+  return describe(p) + b.total();  // 42 + 42 = 84
+}

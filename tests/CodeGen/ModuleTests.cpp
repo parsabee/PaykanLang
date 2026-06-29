@@ -117,3 +117,63 @@ fn main() -> int {
 
   std::filesystem::remove_all(tmpDir);
 }
+
+// An imported class used as a qualified type `mod::Type` in a function
+// parameter must compile and run end-to-end.
+TEST(Module, QualifiedTypeParamRuns) {
+  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_cg_qt_param";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+
+  writeTempFile(tmpDir.string(), "geometry/point.pkn", R"(
+class Point {
+  x: int; y: int;
+  fn __init__(x: int, y: int) { self.x = x; self.y = y; }
+  fn sum() -> int { return self.x + self.y; }
+}
+)");
+
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+import geometry::point;
+fn total(p: point::Point) -> int { return p.sum(); }
+fn main() -> int { p = point::Point(15, 27); return total(p); }
+)");
+
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 42);
+
+  std::filesystem::remove_all(tmpDir);
+}
+
+// An imported class used as a qualified type `mod::Type` for a class field
+// must compile and run end-to-end.
+TEST(Module, QualifiedTypeFieldRuns) {
+  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_cg_qt_field";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+
+  writeTempFile(tmpDir.string(), "geometry/point.pkn", R"(
+class Point {
+  x: int; y: int;
+  fn __init__(x: int, y: int) { self.x = x; self.y = y; }
+  fn sum() -> int { return self.x + self.y; }
+}
+)");
+
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+import geometry::point;
+class Box {
+  origin: point::Point;
+  fn __init__() { self.origin = point::Point(20, 22); }
+  fn total() -> int { return self.origin.sum(); }
+}
+fn main() -> int { b = Box(); return b.total(); }
+)");
+
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 42);
+
+  std::filesystem::remove_all(tmpDir);
+}

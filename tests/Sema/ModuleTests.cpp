@@ -361,6 +361,128 @@ fn main() -> int { return foo::val(); }
   std::filesystem::remove_all(tmp);
 }
 
+// ─── OK: qualified type `mod::Type` in every type position ───────────────────
+
+// Shared module body declaring a class that is used as a typed annotation.
+static const char *const kPointModule =
+    "class Point {\n"
+    "  x: int; y: int;\n"
+    "  fn __init__(x: int, y: int) { self.x = x; self.y = y; }\n"
+    "  fn getX() -> int { return self.x; }\n"
+    "}\n";
+
+TEST(Module, QualifiedTypeParamOk) {
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_qt_param").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "geometry/point.pkn", kPointModule);
+  auto main = writeFile(tmp, "main.pkn", R"(
+import geometry::point;
+fn show(p: point::Point) -> int { return p.getX(); }
+fn main() -> int { p = point::Point(3, 4); return show(p); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, QualifiedTypeVarDeclOk) {
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_qt_var").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "geometry/point.pkn", kPointModule);
+  auto main = writeFile(tmp, "main.pkn", R"(
+import geometry::point;
+fn main() -> int { p: point::Point = point::Point(3, 4); return p.getX(); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, QualifiedTypeReturnOk) {
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_qt_ret").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "geometry/point.pkn", kPointModule);
+  auto main = writeFile(tmp, "main.pkn", R"(
+import geometry::point;
+fn make() -> point::Point { return point::Point(1, 2); }
+fn main() -> int { p = make(); return p.getX(); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, QualifiedTypeFieldOk) {
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_qt_field").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "geometry/point.pkn", kPointModule);
+  auto main = writeFile(tmp, "main.pkn", R"(
+import geometry::point;
+class Box {
+  origin: point::Point;
+  fn __init__() { self.origin = point::Point(0, 0); }
+  fn x() -> int { return self.origin.getX(); }
+}
+fn main() -> int { b = Box(); return b.x(); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, QualifiedTypeArrayOk) {
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_qt_arr").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "geometry/point.pkn", kPointModule);
+  auto main = writeFile(tmp, "main.pkn", R"(
+import geometry::point;
+fn first(ps: point::Point[]) -> int { return ps[0].getX(); }
+fn main() -> int { ps: point::Point[] = [point::Point(7, 8)]; return first(ps); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, QualifiedTypeAliasOk) {
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_qt_alias").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "geometry/point.pkn", kPointModule);
+  auto main = writeFile(tmp, "main.pkn", R"(
+import geometry::point as geo;
+fn show(p: geo::Point) -> int { return p.getX(); }
+fn main() -> int { return show(geo::Point(3, 4)); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// ─── ERR: unknown qualified type ─────────────────────────────────────────────
+
+TEST(Module, QualifiedTypeUnknownErr) {
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_qt_unknown").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "geometry/point.pkn", kPointModule);
+  auto main = writeFile(tmp, "main.pkn", R"(
+import geometry::point;
+fn show(p: point::Nope) -> int { return 0; }
+fn main() -> int { return 0; }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("unknown class type"), std::string::npos)
+      << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
 TEST(Module, AliasUnknownCallErr) {
   auto tmp =
       (std::filesystem::temp_directory_path() / "pkn_ms_alias_unk").string();
