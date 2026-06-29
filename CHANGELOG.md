@@ -5,7 +5,7 @@ All notable changes to PaykanLang are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.0.0] - Unreleased
+## [0.0.0] - 2026-06-28
 
 First tagged preview release. PaykanLang is a statically-typed, object-oriented
 language that compiles to LLVM IR and is **JIT-executed**. This release is a
@@ -13,8 +13,7 @@ deliberately small, honest preview; several features are planned for v0.1.
 
 ### Added
 
-- Statically-typed language front end: lexer (Flex), parser (Bison/LALR(1)),
-  and a full semantic-analysis pass with a central diagnostic engine.
+- Static typing with full semantic analysis and clear, source-located diagnostics.
 - Primitive types `int`, `float`, `bool`, `char`, and the built-in `Str` class.
 - Single-inheritance classes with vtable-based virtual dispatch, automatic
   construction (`__init__`) and destruction.
@@ -36,7 +35,5 @@ deliberately small, honest preview; several features are planned for v0.1.
 - Integer divide and modulo by zero trap via a `noreturn` runtime panic.
 - The `destroy()` destructor is compiler-generated and final: user classes cannot
   override it, and direct calls are rejected at compile time.
-- Quality gates: `.clang-format` (LLVM style), `.clang-tidy` (bug-focused),
-  sanitizer builds (ASan/LSan, UBSan), and CI on every push and pull request.
 
 [0.0.0]: https://github.com/parsabee/PaykanLang/releases/tag/v0.0.0
