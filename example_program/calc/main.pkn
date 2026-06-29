@@ -1,32 +1,45 @@
 // calc — Basic arithmetic calculator
 //
-// Evaluates an expression with +, -, *, /, and parentheses.
-// Numbers may be integers or floating-point.
+// Evaluates expressions with +, -, *, /, and parentheses. Numbers may be
+// integers or floating-point. Every available expression is evaluated: one per
+// command-line argument, or one per line read from standard input until EOF.
 //
 // Usage:
-//   ./build/bin/paykan example_program/calc/main.pkn "3 + 4 * (2 - 1)"
-//   echo "10 / 4 + 1.5" | ./build/bin/paykan example_program/calc/main.pkn
+//   ./build/bin/paykan example_program/calc/main.pkn "3 + 4 * (2 - 1)" "10 / 4"
+//   printf "1 + 2\n3 * 4\n" | ./build/bin/paykan example_program/calc/main.pkn
 
 import calc::parser;
 import calc::utils;
 
-fn main(args: Str[]) -> int {
-  expr: Str = "";
-
-  if (args.len() > 1) {
-    expr = args[1];
-  } else {
-    match Stdin.readln() {
-      line: Str { expr = utils::stripLine(line); }
-      _ {
-        printerrln("error: no input");
-        return 1;
-      }
-    }
-  }
-
+// Evaluate one expression and print "<expr> = <result>".
+fn evalAndPrint(expr: Str) {
   p: Parser = parser::Parser(expr);
   result: float = p.parseExpr();
   println(expr + " = " + utils::trimFloat(StrFloat(result)));
+}
+
+fn main(args: Str[]) -> int {
+  // With command-line arguments, evaluate each one.
+  if (args.len() > 1) {
+    i: int = 1;
+    while (i < args.len()) {
+      evalAndPrint(args[i]);
+      i = i + 1;
+    }
+    return 0;
+  }
+
+  // Otherwise read expressions from standard input, one per line, until EOF.
+  while (True) {
+    match Stdin.readln() {
+      line: Str {
+        expr: Str = utils::stripLine(line);
+        if (expr.len() > 0) {
+          evalAndPrint(expr);
+        }
+      }
+      _ { break; } // None — end of input
+    }
+  }
   return 0;
 }
