@@ -9,7 +9,6 @@ replaced by `::` and the `.pkn` extension dropped) is the module's canonical nam
 
 - `import modulePath;` — bring all public declarations into scope.
 - `import modulePath as Alias;` — bring declarations in under `Alias::name`.
-- `import modulePath :: { name1, name2 };` — selective import.
 - Module paths use `::` as a separator, mirroring directory structure.
 - There are no visibility modifiers. Everything declared at the top level of a module is
   importable.
@@ -39,16 +38,6 @@ result: int = M::add(3, 4);
 
 Useful for shortening long module paths or avoiding name collisions.
 
-### Selective Import
-
-```pkn
-import utils::math :: { add, multiply };
-
-result: int = add(3, 4);
-```
-
-Only `add` and `multiply` are brought into scope, without a qualifier.
-
 ### Deeply Nested Module
 
 ```pkn
@@ -72,11 +61,28 @@ search path beyond the source root.
 
 ## What Can Be Imported
 
-- Free function declarations (`fn`)
-- Class declarations (`class`)
-- Top-level `const` and variable declarations
+A module exposes its top-level **function** (`fn`), **class**, and **enum** declarations. There
+is no explicit `export` keyword and no visibility modifiers — everything declared at the top
+level is importable under the chosen qualifier or alias.
 
-All top-level declarations are importable; there is no explicit `export` keyword.
+An imported enum is named like any other qualified type. Use `mod::Enum` (or `Alias::Enum`, or
+the full `path::to::mod::Enum`) wherever a type is expected, and `mod::Enum::Variant` to name a
+variant:
+
+```pkn
+// file: pal/color.pkn
+enum Color { Red, Green, Blue }
+fn name(c: Color) -> Str { /* … */ }
+
+// file: main.pkn
+import pal::color;
+
+fn main() -> int {
+  c: color::Color = color::Color::Green;   // qualified type + variant
+  println(color::name(c));                 // pass an enum to an imported function
+  return 0;
+}
+```
 
 ---
 
@@ -125,4 +131,3 @@ in a compilation error.
 | Module not found | The `.pkn` file corresponding to the module path does not exist |
 | Unresolved name | Qualified name `Mod::name` where `name` is not in `Mod` |
 | Circular import | Import graph contains a cycle |
-| Duplicate import | Same module imported more than once in one file |

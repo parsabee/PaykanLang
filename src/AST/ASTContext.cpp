@@ -343,6 +343,10 @@ void ASTContext::addClassTypeAlias(const std::string &alias, ClassType *ct) {
   ClassTypes.emplace(alias, ct); // no-op if already present
 }
 
+void ASTContext::addEnumTypeAlias(const std::string &alias, EnumType *et) {
+  EnumTypes.emplace(alias, et); // no-op if already present
+}
+
 Type *ASTContext::lookupType(const std::string &name) const {
   if (name == names::kTypeInt)
     return IntTy;

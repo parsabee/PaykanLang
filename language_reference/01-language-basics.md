@@ -25,7 +25,7 @@ collector.
 - Functions and classes must be **declared before use**.
 - **No function overloading** — each function name must be unique.
 - Comments use `//` (single-line only).
-- Modules are imported with `import path::to::module;`. See `05-modules.md` for details.
+- Modules are imported with `import path::to::module;`. See `06-modules.md` for details.
 
 ```pkn
 fn greet() {
@@ -65,7 +65,7 @@ t: Str = s + " world";   // "hello world"
 
 ### Arrays
 
-Dynamic arrays stored on the heap. See `04-arrays.md` for the full array system.
+Dynamic arrays stored on the heap. See `05-arrays.md` for the full array system.
 
 ```pkn
 a: int[]    = [1, 2, 3, 4, 5];
@@ -102,6 +102,27 @@ extends `Obj` and provides:
 |-------------|---------------------------------|--------------------------------|
 | `toString`  | `fn toString() -> Str`          | Returns the error message      |
 | `equals`    | `fn equals(other: Obj) -> bool` | Reference identity comparison  |
+
+### Enum Types (distinct nominal value types)
+
+An `enum` declares a new type whose values are a fixed, named set of variants. Each variant
+is written `EnumName::Variant`, and variants take implicit ordinal values `0, 1, 2, …` in
+declaration order. An enum is a **distinct nominal type**: it is *not* an `int` and does not
+convert to or from one, even though it is represented as an integer at runtime. The only
+operators defined on enums are `==` and `!=`, and both operands must belong to the **same**
+enum. Enums are stack values (no heap allocation, no reference counting) and can be stored in
+variables, passed and returned by functions, held in class fields, and collected in arrays.
+The idiomatic way to branch on an enum is `match`, which can be made exhaustive over the
+variants without a wildcard.
+
+```pkn
+enum Direction { North, East, South, West }
+
+d: Direction = Direction::East;
+if (d == Direction::East) { println("heading east"); }
+```
+
+See `03-enums.md` for the full treatment, including using `enum` with `match`.
 
 ---
 
@@ -298,7 +319,9 @@ match a {
 }
 ```
 
-See `03-classes.md` for more on `match` and class dispatch.
+`match` has a second form that compares a builtin value against literal patterns, and it is
+also the primary way to branch on an `enum`. See `07-match-statements.md` for the full
+treatment and `03-enums.md` for matching on enums.
 
 ---
 

@@ -37,6 +37,33 @@ llvm::Value *CodeGen::visitImportDecl(ast::ImportDecl *) {
 }
 
 // ---------------------------------------------------------------------------
+// addImportAliases
+// ---------------------------------------------------------------------------
+
+void CodeGen::addImportAliases(llvm::Module *defMod,
+                               const std::string &qualifier,
+                               const std::string &modulePath) {
+  auto addAlias = [&](llvm::Function &fn, const std::string &qn) {
+    // Declare the qualified name in the importing (current) module so its
+    // references resolve at link time.
+    declareExternAs(Module.get(), fn, qn);
+    // Define the alias in the module that owns the function (idempotent: a
+    // diamond may reach the same module under the same qualifier twice).
+    if (!defMod->getFunction(qn) && !defMod->getNamedAlias(qn))
+      llvm::GlobalAlias::create(fn.getFunctionType(), fn.getAddressSpace(),
+                                llvm::GlobalValue::ExternalLinkage, qn, &fn,
+                                defMod);
+  };
+  for (auto &fn : defMod->functions()) {
+    if (fn.isDeclaration())
+      continue;
+    addAlias(fn, qualifier + names::kQualSep + fn.getName().str());
+    if (qualifier != modulePath)
+      addAlias(fn, modulePath + names::kQualSep + fn.getName().str());
+  }
+}
+
+// ---------------------------------------------------------------------------
 // processImports
 // ---------------------------------------------------------------------------
 
@@ -67,10 +94,16 @@ void CodeGen::processImports(ast::TranslationUnit *tu) {
       if (resolved.empty())
         continue; // Sema already reported the error.
 
-      // Skip if already codegen'd.
-      if (CodeGenedImports.count(resolved))
+      // Already generated somewhere in the import graph?  Generate the body
+      // only once, but still wire up THIS import site's qualifier aliases
+      // against the module that defines it (handles diamond imports, including
+      // the same module reached under different qualifiers).
+      if (auto regIt = ImportRegistry->find(resolved);
+          regIt != ImportRegistry->end()) {
+        if (regIt->second)
+          addImportAliases(regIt->second, qualifier, modulePath);
         continue;
-      CodeGenedImports.insert(resolved);
+      }
 
       // -- Bitcode cache check ----------------------------------------------
       auto cachePath = module_utils::getCachePath(resolved, ProjectRoot);
@@ -82,22 +115,9 @@ void CodeGen::processImports(ast::TranslationUnit *tu) {
               llvm::parseBitcodeFile((*bufOrErr)->getMemBufferRef(), LLVMCtx);
           if (modOrErr) {
             auto &cachedMod = *modOrErr;
-            // Helper: declare + alias a function under a qualified name.
-            auto addAlias = [&](llvm::Function &fn, const std::string &qn) {
-              declareExternAs(Module.get(), fn, qn);
-              if (!cachedMod->getFunction(qn) && !cachedMod->getNamedAlias(qn))
-                llvm::GlobalAlias::create(fn.getFunctionType(),
-                                          fn.getAddressSpace(),
-                                          llvm::GlobalValue::ExternalLinkage,
-                                          qn, &fn, cachedMod.get());
-            };
-            for (auto &fn : cachedMod->functions()) {
-              if (fn.isDeclaration())
-                continue;
-              addAlias(fn, qualifier + names::kQualSep + fn.getName().str());
-              if (qualifier != modulePath)
-                addAlias(fn, modulePath + names::kQualSep + fn.getName().str());
-            }
+            llvm::Module *defMod = cachedMod.get();
+            addImportAliases(defMod, qualifier, modulePath);
+            (*ImportRegistry)[resolved] = defMod;
             ImportedModules.push_back(std::move(cachedMod));
 
             auto ctxIt = SemaCtx.ImportedContexts.find(resolved);
@@ -148,31 +168,18 @@ void CodeGen::processImports(ast::TranslationUnit *tu) {
       // per-import contexts therefore requires rewiring the link-merge pipeline
       // into a multi-ThreadSafeModule JIT add (a separate, larger change).
       // Until then imports share the parent LLVMCtx and codegen runs serially.
-      CodeGen importCG(importedSemaCtx, LLVMCtx, resolved, ProjectRoot);
+      CodeGen importCG(importedSemaCtx, LLVMCtx, resolved, ProjectRoot,
+                       ImportRegistry);
       if (!importCG.run(importedSemaCtx.Root))
         continue;
 
       auto impMod = importCG.takeModule();
+      llvm::Module *defMod = impMod.get();
 
-      // Declare externals + add aliases in imported module for both
-      // qualifier:: and modulePath::.
-      auto addImpAlias = [&](llvm::Function &fn, const std::string &qn) {
-        if (!Module->getFunction(qn))
-          llvm::Function::Create(fn.getFunctionType(),
-                                 llvm::Function::ExternalLinkage, qn,
-                                 Module.get());
-        if (!impMod->getFunction(qn) && !impMod->getNamedAlias(qn))
-          llvm::GlobalAlias::create(fn.getFunctionType(), fn.getAddressSpace(),
-                                    llvm::GlobalValue::ExternalLinkage, qn, &fn,
-                                    impMod.get());
-      };
-      for (auto &fn : impMod->functions()) {
-        if (fn.isDeclaration())
-          continue;
-        addImpAlias(fn, qualifier + names::kQualSep + fn.getName().str());
-        if (qualifier != modulePath)
-          addImpAlias(fn, modulePath + names::kQualSep + fn.getName().str());
-      }
+      // Declare externals in this module + add qualifier aliases in the
+      // imported module that defines the functions.
+      addImportAliases(defMod, qualifier, modulePath);
+      (*ImportRegistry)[resolved] = defMod;
 
       // -- Write bitcode to cache ------------------------------------------
       {

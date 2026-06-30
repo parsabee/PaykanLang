@@ -496,3 +496,137 @@ fn main() -> int { return strings::trim("x"); }
   EXPECT_FALSE(r.Ok);
   std::filesystem::remove_all(tmp);
 }
+
+// ─── OK: imported enums — qualified type + variants in every position
+// ─────────
+
+static const char *const kColorModule =
+    "enum Color { Red, Green, Blue }\n"
+    "fn name(c: Color) -> Str {\n"
+    "  match c { Red { return \"red\"; } Green { return \"green\"; }\n"
+    "            Blue { return \"blue\"; } }\n"
+    "}\n"
+    "fn favorite() -> Color { return Color::Blue; }\n";
+
+TEST(Module, EnumQualifiedTypeAndVariantOk) {
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_enum_basic").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "pal/color.pkn", kColorModule);
+  auto main = writeFile(tmp, "main.pkn", R"(
+import pal::color;
+fn main() -> int {
+  c: color::Color = color::Color::Green;
+  if (c == color::Color::Green) { return 0; }
+  return 1;
+}
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, EnumFullPathQualifierOk) {
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_enum_full").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "pal/color.pkn", kColorModule);
+  auto main = writeFile(tmp, "main.pkn", R"(
+import pal::color;
+fn main() -> int {
+  c: pal::color::Color = pal::color::Color::Blue;
+  return 0;
+}
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, EnumAliasQualifierOk) {
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_enum_alias").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "pal/color.pkn", kColorModule);
+  auto main = writeFile(tmp, "main.pkn", R"(
+import pal::color as C;
+fn main() -> int {
+  c: C::Color = C::Color::Red;
+  println(C::name(c));
+  return 0;
+}
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, EnumParamAndReturnOk) {
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_enum_fn").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "pal/color.pkn", kColorModule);
+  auto main = writeFile(tmp, "main.pkn", R"(
+import pal::color;
+fn main() -> int {
+  f: color::Color = color::favorite();
+  println(color::name(f));
+  return 0;
+}
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// Imported enum as a class field type: the field type (resolved by bare name
+// during class reconstruction) and the constructor argument (resolved by
+// qualified name) must be the SAME enum type, or this fails to type-check.
+TEST(Module, EnumAsClassFieldTypeIdentityOk) {
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_enum_field").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "pal/color.pkn", kColorModule);
+  writeFile(tmp, "pal/widget.pkn", R"(
+import pal::color;
+class Widget {
+  tint: color::Color;
+  fn __init__(t: color::Color) { self.tint = t; }
+  fn tintName() -> Str { return color::name(self.tint); }
+}
+fn makeBlue() -> Widget { return Widget(color::Color::Blue); }
+)");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import pal::widget;
+fn main() -> int {
+  w: widget::Widget = widget::makeBlue();
+  println(w.tintName());
+  return 0;
+}
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// ─── ERR: unknown variant on an imported enum still diagnosed
+// ─────────────────
+
+TEST(Module, EnumUnknownVariantErr) {
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_enum_badvar").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "pal/color.pkn", kColorModule);
+  auto main = writeFile(tmp, "main.pkn", R"(
+import pal::color;
+fn main() -> int {
+  c: color::Color = color::Color::Purple;
+  return 0;
+}
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("has no variant 'Purple'"), std::string::npos)
+      << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}

@@ -110,7 +110,7 @@ class Point {
 fn distance(a: Point, b: Point) -> float {
   dx: int = a.x - b.x;
   dy: int = a.y - b.y;
-  return sqrt((dx * dx + dy * dy) as float);   // statically dispatched
+  return my_sqrt(dx * dx + dy * dy);   // statically dispatched
 }
 ```
 
@@ -215,7 +215,7 @@ a: Animal = Dog();   // Dog stored as Animal — valid
 
 ## Runtime Type Dispatch (`match`)
 
-Use `match` to test and downcast at runtime. See `03-enums.md` for full `match` documentation.
+Use `match` to test and downcast at runtime. See `07-match-statements.md` for full `match` documentation.
 
 ```pkn
 a: Animal = Labrador();

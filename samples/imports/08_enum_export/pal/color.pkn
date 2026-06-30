@@ -1,0 +1,12 @@
+// An exported enum plus functions that take and return it.
+enum Color { Red, Green, Blue }
+
+fn name(c: Color) -> Str {
+  match c {
+    Red   { return "red"; }
+    Green { return "green"; }
+    Blue  { return "blue"; }
+  }
+}
+
+fn favorite() -> Color { return Color::Blue; }

@@ -191,6 +191,11 @@ public:
   /// Has no effect if the alias is already present.
   void addClassTypeAlias(const std::string &alias, ClassType *ct);
 
+  /// Register an additional name that resolves to an already-registered
+  /// EnumType (e.g. a qualified alias like "module::Color" -> Color's
+  /// EnumType). Has no effect if the alias is already present.
+  void addEnumTypeAlias(const std::string &alias, EnumType *et);
+
   /// Look up any type by name: builtins (int, float, bool, void) first,
   /// then the class type registry.  Returns nullptr if not found.
   Type *lookupType(const std::string &name) const;

@@ -32,10 +32,12 @@ static const llvm::StringMap<const char *> kBuiltinNames = {
 // -- Constructor -------------------------------------------------------------
 
 CodeGen::CodeGen(const sema::SemaContext &semaCtx, llvm::LLVMContext &llvmCtx,
-                 llvm::StringRef moduleName, const std::string &projectRoot)
+                 llvm::StringRef moduleName, const std::string &projectRoot,
+                 llvm::StringMap<llvm::Module *> *importRegistry)
     : ASTCtx(*semaCtx.ASTCtx), LLVMCtx(llvmCtx), SemaCtx(semaCtx),
       Module(std::make_unique<llvm::Module>(moduleName, llvmCtx)),
-      Builder(llvmCtx), Classes(*this), ProjectRoot(projectRoot) {}
+      Builder(llvmCtx), Classes(*this), ProjectRoot(projectRoot),
+      ImportRegistry(importRegistry ? importRegistry : &CodeGenedImports) {}
 
 // -- Scope / ScopeGuard ------------------------------------------------------
 

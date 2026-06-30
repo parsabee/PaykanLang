@@ -181,8 +181,24 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   /// LLVM modules generated for imported files.
   std::vector<std::unique_ptr<llvm::Module>> ImportedModules;
 
-  /// Set of already-codegen'd import file paths (avoids duplicates).
-  llvm::StringSet<> CodeGenedImports;
+  /// Registry of already-codegen'd imports: resolved file path -> the LLVM
+  /// module that DEFINES that import's functions (the target for qualifier
+  /// aliases).  Backing store for the top-level CodeGen; nested import
+  /// CodeGens share the top-level's registry via @ref ImportRegistry so a
+  /// module reachable through multiple import paths (a diamond) is generated
+  /// exactly once.
+  llvm::StringMap<llvm::Module *> CodeGenedImports;
+
+  /// Points at the registry shared across the whole import graph.  Defaults to
+  /// this instance's own @ref CodeGenedImports for the top-level CodeGen.
+  llvm::StringMap<llvm::Module *> *ImportRegistry = nullptr;
+
+  /// Wire up one import site: for every function defined in @p defMod, declare
+  /// the qualified name in the current module and add the matching alias to
+  /// @p defMod (idempotent).  Used both when a module is freshly generated and
+  /// when it was already generated via another import path.
+  void addImportAliases(llvm::Module *defMod, const std::string &qualifier,
+                        const std::string &modulePath);
 
   // -- Global interning ----------------------------------------------------
 
@@ -398,7 +414,8 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
 
 public:
   CodeGen(const sema::SemaContext &semaCtx, llvm::LLVMContext &llvmCtx,
-          llvm::StringRef moduleName, const std::string &projectRoot = "");
+          llvm::StringRef moduleName, const std::string &projectRoot = "",
+          llvm::StringMap<llvm::Module *> *importRegistry = nullptr);
 
   /// Run code generation on the translation unit.
   /// Returns true on success.

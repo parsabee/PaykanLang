@@ -1,0 +1,28 @@
+// OK: an imported enum used as a qualified type `mod::Enum` and variant
+// `mod::Enum::Variant` in every position — variable annotation, equality,
+// an argument to an imported function, and an imported function's return value.
+//
+//   import pal::color  -> short qualifier "color" (last path segment)
+//                         full qualifier "pal::color"
+//
+// Both `color::Color` and `pal::color::Color` name the imported enum as a type.
+
+import pal::color;
+
+// Qualified enum type as a parameter type.
+fn describe(c: color::Color) -> Str { return color::name(c); }
+
+fn main() -> int {
+  // Qualified enum type as a variable annotation + variant access.
+  c: color::Color = color::Color::Green;
+  println(describe(c));                       // green
+
+  // Imported function returning an enum.
+  f: color::Color = color::favorite();
+  println(color::name(f));                    // blue
+
+  // Equality against an imported variant (same enum only).
+  if (c == color::Color::Green) { println("is green"); }
+
+  return 0;
+}

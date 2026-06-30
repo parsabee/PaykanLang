@@ -1,0 +1,317 @@
+# PaykanLang — Match Statements
+
+`match` is PaykanLang's structured branching construct. It inspects a single subject and runs the
+first arm that applies. Depending on the subject's type, `match` operates in one of three modes:
+
+| Subject type | Mode | Arms compare against |
+|--------------|------|----------------------|
+| A class type (`Obj`, `File`, a user class, …) | **type mode** | the **runtime class** of the object |
+| An `enum` | **variant mode** | the enum's **variants** |
+| A builtin (`int`, `float`, `bool`, `char`, `Str`) | **value mode** | **literal** values |
+
+The mode is chosen by the static type of the subject — you do not select it explicitly.
+
+---
+
+## Quick Summary
+
+- Syntax: `match <expr> { arm … }`. Each arm is `pattern { statements }`.
+- **`match` is a statement, not an expression** — it does not produce a value. Arms act by
+  running statements (assigning, calling, `return`ing).
+- Arm patterns:
+  - `TypeName { … }` — type/variant pattern, no binding.
+  - `name: TypeName { … }` — type pattern that **binds** the narrowed object to `name`.
+  - `literal { … }` — value pattern (`int`, `float`, `bool`, `char`, or `Str` literal).
+  - `_ { … }` — wildcard catch-all.
+- The first matching arm wins; remaining arms are not considered.
+- `_` must be the **last** arm. Any arm after it is unreachable and rejected.
+- Each arm body is its own scope and is fully type-checked.
+- A `match` may be **exhaustive** (covers every case) and then needs no `_`; otherwise a `_` arm
+  is required wherever every path must produce a result.
+
+---
+
+## Type Mode — matching on the runtime class
+
+When the subject is a class-typed value, `match` dispatches on the object's **runtime class**
+via its vtable identity. This is how you test and downcast a value held under a more general
+static type such as `Obj` or a base class.
+
+```pkn
+a: Animal = Dog();
+match a {
+  Dog  { println("a dog"); }
+  Cat  { println("a cat"); }
+  Bird { println("a bird"); }
+  _    { println("some other animal"); }
+}
+```
+
+### Exact-type comparison
+
+A type arm matches **only** when the object's runtime class is *exactly* that class — a subclass
+does **not** match a base-class arm:
+
+```pkn
+class Animal { fn __init__() {} }
+class Dog : Animal { fn __init__() { __super__(); } }
+class Labrador : Dog { fn __init__() { __super__(); } }
+
+e: Animal = Labrador();
+match e {
+  Dog      { println("Dog"); }       // NOT taken — Labrador is not exactly Dog
+  Labrador { println("Labrador"); }  // taken
+  _        { println("other"); }
+}
+```
+
+Because matching is exact, ordering type arms from most- to least-derived is not required for
+correctness; list them in whatever order reads best, and use `_` for everything you do not name.
+
+### Valid arm types
+
+In type mode, every arm type must be the subject's type or a subtype of it. Naming an unrelated
+class is an error, as is naming a type that does not exist:
+
+```pkn
+match a {          // a: Animal
+  Car { }          // error: 'Car' is not a subclass of 'Animal'
+}
+
+match x {          // x: Obj
+  Dragon { }       // error: unknown type 'Dragon' in match arm
+}
+```
+
+A subject typed as `Obj` accepts any class as an arm, since every class is a subtype of `Obj`.
+
+---
+
+## Bindings
+
+A type arm may bind the narrowed object to a name with `name: TypeName`. Inside that arm body the
+name has the arm's type, so you can access fields and call methods directly:
+
+```pkn
+x: Obj = Dog("Rex");
+match x {
+  d: Dog {
+    println(d.name);          // d has type Dog here
+    println(d.bark());
+  }
+  _ { }
+}
+```
+
+The binding is scoped to its arm body. Redeclaring the binding name inside the same body is an
+error:
+
+```pkn
+match x {
+  d: Dog {
+    d: int = 1;   // error: redeclaration of 'd'
+  }
+}
+```
+
+Bindings are available only on type/variant arms — value-pattern arms and `_` do not bind.
+
+---
+
+## Variant Mode — matching on an enum
+
+When the subject is an `enum`, each arm names a **bare variant** (not `Enum::Variant`):
+
+```pkn
+fn dirName(d: Direction) -> Str {
+  match d {
+    North { return "North"; }
+    East  { return "East"; }
+    South { return "South"; }
+    West  { return "West"; }
+  }
+}
+```
+
+An enum `match` that names every variant is **exhaustive** and needs no `_`. Naming an identifier
+that is not a variant of the subject enum is an error. See `03-enums.md` for the full enum
+treatment.
+
+---
+
+## Value Mode — matching on a builtin value
+
+When the subject is a builtin (`int`, `float`, `bool`, `char`, or `Str`), arms are **literal
+patterns** and the subject is compared by value. The first equal literal wins.
+
+```pkn
+n: int = 2;
+match n {
+  1 { println("one"); }
+  2 { println("two"); }     // taken
+  3 { println("three"); }
+  _ { println("many"); }
+}
+```
+
+- **`int` / `float` / `char`** arms compare by value.
+- **`Str`** arms compare by **content**, not reference identity:
+
+  ```pkn
+  greeting: Str = "World";
+  match greeting {
+    "Hello" { println("hi"); }
+    "World" { println("hello world"); }   // taken — content match
+    _       { println("other"); }
+  }
+  ```
+
+- **`bool`** has only two values, so `True` / `False` arms are exhaustive without a `_`:
+
+  ```pkn
+  match flag {
+    True  { println("yes"); }
+    False { println("no"); }
+  }
+  ```
+
+Each literal must have the same type as the subject. A literal of the wrong type, or a type-name
+arm in a value-mode `match`, is an error:
+
+```pkn
+match n {            // n: int
+  1     { }
+  "two" { }          // error: Str literal does not match int subject
+  _     { }
+}
+
+match x {            // x: int
+  Animal { }         // error: value-match requires literal patterns, not type names
+  _ { }
+}
+```
+
+---
+
+## The Wildcard `_`
+
+`_` matches anything and is the catch-all. It must appear as the **last** arm — anything after it
+can never run:
+
+```pkn
+match x {
+  _   { }
+  Dog { }   // error: unreachable arm after wildcard
+}
+```
+
+A `match` needs a `_` arm unless it is otherwise exhaustive (all enum variants, or both `bool`
+values).
+
+---
+
+## Arm Bodies
+
+An arm body is a normal block: it has its own scope, may declare locals, and is fully
+type-checked. Errors inside an arm are reported like any other code:
+
+```pkn
+match x {
+  d: Dog {
+    sound: Str = d.bark();   // local to this arm
+    println(sound);
+  }
+  Dog {
+    y: int = 3.14;           // error: cannot assign float to int
+  }
+  _ { }
+}
+```
+
+---
+
+## Exhaustiveness and Control Flow
+
+`match` participates in the same flow analysis as the rest of the language. When a `match` is the
+last thing in a function whose every path must `return` a value, the analysis treats the `match`
+as guaranteeing a result only if it is exhaustive — every arm returns *and* the arms cover every
+case (via `_`, all enum variants, or both `bool` values). A `match` with uncovered cases and no
+fallthrough is rejected:
+
+```pkn
+fn main() -> int {
+  x: Obj = Dog();
+  match x {
+    Dog { return 0; }
+    Cat { return 1; }
+    // error: no '_' arm and no return after the match —
+    //        the function does not always return a value
+  }
+}
+```
+
+The same exhaustiveness rule lets `match` satisfy field-initialisation analysis inside `__init__`
+(see `04-classes.md`): a field assigned in every arm of an exhaustive `match` counts as
+definitely assigned.
+
+---
+
+## Common Patterns
+
+### Distinguishing `File` from `Error`
+
+`open()` returns `Obj` — either a `File` or an `Error`. `match` separates the two:
+
+```pkn
+match open("/tmp/data.txt", "r") {
+  err: Error { printerrln("open failed: " + err.toString()); }
+  f: File {
+    while (True) {
+      match f.readln() {
+        line: Str { print(line); }
+        _         { break; }      // None — end of file
+      }
+    }
+  }
+}
+```
+
+### Unboxing parsed primitives
+
+`IntStr` / `FloatStr` return a boxed `Int` / `Float` on success or an `Error` on failure:
+
+```pkn
+match IntStr(s) {
+  n: Int     { return "ok: " + n.toString(); }
+  err: Error { return "err: " + err.toString(); }
+  _          { return "?"; }
+}
+```
+
+### Detecting end of input
+
+A `readln` that yields `None` at EOF is matched by falling through to `_`:
+
+```pkn
+match f.readln() {
+  line: Str { process(line); }
+  _         { break; }   // None
+}
+```
+
+---
+
+## Semantic Checks
+
+| Error | Trigger |
+|-------|---------|
+| Subject is not matchable | The subject type supports neither type-, variant-, nor value-mode matching |
+| Arm type not a subtype | A type arm names a class that is not the subject type or a subtype of it |
+| Unknown arm type | A type arm names a class that is not declared anywhere |
+| Unknown enum variant | A variant arm names an identifier that is not a variant of the subject enum |
+| Literal type mismatch | A value arm's literal has a different type than the subject |
+| Type name in value mode | A value-mode `match` has a type-name arm instead of a literal |
+| Binding redeclaration | An arm body redeclares the arm's binding name |
+| Arm body type error | Any type error inside an arm body |
+| Wildcard not last | A `_` arm is followed by another arm |
+| Non-exhaustive match | A `match` leaves cases uncovered where every path must produce a value |

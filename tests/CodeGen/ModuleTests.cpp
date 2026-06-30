@@ -177,3 +177,94 @@ fn main() -> int { b = Box(); return b.total(); }
 
   std::filesystem::remove_all(tmpDir);
 }
+
+// End-to-end: an imported enum used as a qualified type, a variant, an argument
+// to an imported function, and an imported function's return value.
+TEST(Module, ImportEnum) {
+  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_import_enum";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+
+  writeTempFile(tmpDir.string(), "pal/color.pkn", R"(
+enum Color { Red, Green, Blue }
+fn name(c: Color) -> Str {
+  match c { Red { return "red"; } Green { return "green"; } Blue { return "blue"; } }
+}
+fn favorite() -> Color { return Color::Blue; }
+)");
+
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+import pal::color;
+fn main() -> int {
+  c: color::Color = color::Color::Green;
+  println(color::name(c));            // green
+  f: color::Color = color::favorite();
+  println(color::name(f));            // blue
+  if (f == color::Color::Blue) { return 0; }
+  return 1;
+}
+)");
+
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "green\nblue\n");
+
+  std::filesystem::remove_all(tmpDir);
+}
+
+// Diamond import: main imports both `widget` and `color`, and `widget` itself
+// imports `color`.  The shared `color` module must be code-generated exactly
+// once, or linking fails with "symbol multiply defined".
+TEST(Module, ImportDiamond) {
+  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_import_diamond";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+
+  writeTempFile(tmpDir.string(), "pal/leaf.pkn", R"(
+fn base() -> int { return 7; }
+)");
+  writeTempFile(tmpDir.string(), "pal/mid.pkn", R"(
+import pal::leaf;
+fn bumped() -> int { return leaf::base() + 1; }
+)");
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+import pal::mid;
+import pal::leaf;
+fn main() -> int { return mid::bumped() + leaf::base(); }
+)");
+
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 15); // 8 + 7
+
+  std::filesystem::remove_all(tmpDir);
+}
+
+// Diamond import where the shared module is reached under DIFFERENT qualifiers:
+// `mid` imports it as `leaf`, `main` imports it aliased as `lf`.  Both
+// qualifier aliases must resolve against the single generated module.
+TEST(Module, ImportDiamondDifferentQualifier) {
+  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_import_diamond_q";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+
+  writeTempFile(tmpDir.string(), "pal/leaf.pkn", R"(
+fn base() -> int { return 7; }
+)");
+  writeTempFile(tmpDir.string(), "pal/mid.pkn", R"(
+import pal::leaf;
+fn bumped() -> int { return leaf::base() + 1; }
+)");
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+import pal::mid;
+import pal::leaf as lf;
+fn main() -> int { return mid::bumped() + lf::base(); }
+)");
+
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 15); // 8 + 7
+
+  std::filesystem::remove_all(tmpDir);
+}

@@ -261,6 +261,14 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
       std::vector<MethodInfo> Methods;
     };
     std::vector<ClassInfo> ExportedClasses;
+
+    // Serialised enum-type descriptions: the enum name plus its variant names
+    // in declaration order (the index is the variant's underlying value).
+    struct EnumInfo {
+      std::string Name;
+      std::vector<std::string> Variants;
+    };
+    std::vector<EnumInfo> ExportedEnums;
   };
 
   /// Global cache of already-analyzed modules (keyed by resolved file path).

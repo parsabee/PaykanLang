@@ -36,6 +36,8 @@ static std::string typeToName(ast::Type *ty) {
   }
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ty))
     return ct->getName();
+  if (auto *et = ast::dyn_cast<ast::EnumType>(ty))
+    return et->getName();
   return names::kTypeVoid;
 }
 
@@ -76,6 +78,19 @@ static void registerClassInfoInto(
     builder.method(mname, retTy, std::move(params), flags);
   }
   builder.build();
+}
+
+/// Reconstruct a single enum into a context, guaranteeing type identity.
+static void registerEnumInfoInto(const std::string &name,
+                                 const std::vector<std::string> &variants,
+                                 ast::ASTContext &ctx) {
+  if (ctx.lookupEnumType(name))
+    return; // already present — pointer identity guaranteed
+  auto *et = ctx.registerEnumType(name, ast::SourceLocation());
+  if (!et)
+    return;
+  for (auto &v : variants)
+    et->addVariant(ctx.intern(v));
 }
 
 // ---------------------------------------------------------------------------
@@ -148,6 +163,15 @@ bool Sema::processImport(ast::ImportDecl *node) {
     // Check cache first.
     auto cacheIt = ModuleCache.find(path);
     if (cacheIt != ModuleCache.end()) {
+      for (auto &ei : cacheIt->second.ExportedEnums) {
+        registerEnumInfoInto(ei.Name, ei.Variants, Ctx);
+        if (auto *et = Ctx.lookupEnumType(ei.Name)) {
+          Ctx.addEnumTypeAlias(qualifier + names::kQualSep + ei.Name, et);
+          if (qualifier != fullModulePath)
+            Ctx.addEnumTypeAlias(fullModulePath + names::kQualSep + ei.Name,
+                                 et);
+        }
+      }
       for (auto &ci : cacheIt->second.ExportedClasses) {
         applyClassInfo(ci, Ctx);
         if (auto *ct = Ctx.lookupClassType(ci.Name)) {
@@ -235,6 +259,32 @@ bool Sema::processImport(ast::ImportDecl *node) {
           ci.Methods.push_back(std::move(mi));
         }
         info.ExportedClasses.push_back(std::move(ci));
+      }
+
+      // Serialise exported enum types (name + variants in declaration order).
+      // The registry holds each enum under its canonical name and again under
+      // any qualified import aliases; serialise only the canonical entry so the
+      // type is reconstructed once and keeps a single identity.
+      for (auto &[name, et] : importDriverPtr->getASTContext().getEnumTypes()) {
+        if (name != et->getName())
+          continue; // alias key — skip
+        ModuleInfo::EnumInfo ei;
+        ei.Name = name;
+        for (auto *v : et->getVariants())
+          ei.Variants.push_back(*v);
+        info.ExportedEnums.push_back(std::move(ei));
+      }
+
+      // Reconstruct enums first: a class field or method may be enum-typed,
+      // and registerClassInfoInto resolves those names against this context.
+      for (auto &ei : info.ExportedEnums) {
+        registerEnumInfoInto(ei.Name, ei.Variants, Ctx);
+        if (auto *et = Ctx.lookupEnumType(ei.Name)) {
+          Ctx.addEnumTypeAlias(qualifier + names::kQualSep + ei.Name, et);
+          if (qualifier != fullModulePath)
+            Ctx.addEnumTypeAlias(fullModulePath + names::kQualSep + ei.Name,
+                                 et);
+        }
       }
       for (auto &ci : info.ExportedClasses) {
         applyClassInfo(ci, Ctx);
