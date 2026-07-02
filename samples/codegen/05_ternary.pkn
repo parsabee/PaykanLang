@@ -15,16 +15,16 @@ fn main() -> int {
   println("=== int ternary ===");
   x: int = if True  then 10 else 20;
   y: int = if False then 10 else 20;
-  println("True  ->", StrInt(x));    // 10
-  println("False ->", StrInt(y));    // 20
+  println("True  ->" + StrInt(x));    // 10
+  println("False ->" + StrInt(y));    // 20
 
   println("=== float ternary ===");
   f: float = if 1 < 2 then 1.5 else 2.5;
-  println("1<2 ->", StrFloat(f));    // 1.5
+  println("1<2 ->" + StrFloat(f));    // 1.5
 
   println("=== bool ternary ===");
   b: bool = if True then False else True;
-  println("bool ->", StrBool(b));    // False
+  println("bool ->" + StrBool(b));    // False
 
   println("=== nested ternary ===");
   grade: int = 85;
@@ -32,12 +32,12 @@ fn main() -> int {
                else if grade >= 80 then 2
                else if grade >= 70 then 3
                else 4;
-  println("grade 85 -> band", StrInt(label));  // 2
+  println("grade 85 -> band" + StrInt(label));  // 2
 
   println("=== ternary with relational condition ===");
   a: int = 7;
-  println("max(7,3)=", StrInt(if a > 3 then a else 3));  // 7
-  println("min(7,3)=", StrInt(if a < 3 then a else 3));  // 3
+  println("max(7,3)=" + StrInt(if a > 3 then a else 3));  // 7
+  println("min(7,3)=" + StrInt(if a < 3 then a else 3));  // 3
 
   println("=== Str ternary (class branches) ===");
   // Both branches produce Str — exercises the isClassResult path which

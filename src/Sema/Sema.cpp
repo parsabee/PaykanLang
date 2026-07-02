@@ -59,9 +59,8 @@ Sema::Sema(ast::ASTContext &ctx, DiagEngine &diags,
     : Diags(diags), Ctx(ctx), ProjectRoot(projectRoot) {}
 
 void Sema::declareFunction(llvm::StringRef name, ast::Type *retTy,
-                           std::vector<ast::Type *> paramTys, bool isVariadic,
-                           bool isBuiltin) {
-  FunctionTable[name] = {retTy, std::move(paramTys), isVariadic, isBuiltin};
+                           std::vector<ast::Type *> paramTys, bool isBuiltin) {
+  FunctionTable[name] = {retTy, std::move(paramTys), isBuiltin};
 }
 
 const Sema::FunctionSig *Sema::lookupFunction(llvm::StringRef name) const {
@@ -416,15 +415,7 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     return nullptr;
   }
 
-  if (sig->IsVariadic) {
-    if (argTypes.size() < sig->ParamTypes.size()) {
-      S.error(node->getLocation(),
-              "function '" + node->getCalleeName() + "' requires at least " +
-                  std::to_string(sig->ParamTypes.size()) +
-                  " argument(s), got " + std::to_string(argTypes.size()));
-      return sig->ReturnType;
-    }
-  } else if (argTypes.size() != sig->ParamTypes.size()) {
+  if (argTypes.size() != sig->ParamTypes.size()) {
     S.error(node->getLocation(),
             "function '" + node->getCalleeName() + "' expects " +
                 std::to_string(sig->ParamTypes.size()) + " argument(s), got " +
@@ -436,17 +427,12 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   for (size_t i = 0; i < argTypes.size(); ++i) {
     if (!argTypes[i])
       continue; // already reported
-    // For variadic functions, extra arguments are checked against the
-    // last declared parameter type.
-    size_t paramIdx =
-        (i < sig->ParamTypes.size()) ? i : sig->ParamTypes.size() - 1;
-
-    if (!S.isAssignable(sig->ParamTypes[paramIdx], argTypes[i])) {
+    if (!S.isAssignable(sig->ParamTypes[i], argTypes[i])) {
       S.error(node->getArguments()[i]->getLocation(),
               "argument " + std::to_string(i + 1) + " of '" +
                   node->getCalleeName() + "' has type '" +
                   typeName(argTypes[i]) + "', expected '" +
-                  typeName(sig->ParamTypes[paramIdx]) + "'");
+                  typeName(sig->ParamTypes[i]) + "'");
     }
   }
 
@@ -683,27 +669,29 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
   CurrentScope = nullptr;
   AccumulatedImportContexts.clear();
 
-  // Bootstrap builtin functions — print/println take any object.
+  // Bootstrap builtin functions — the print family takes a single Obj
+  // (printed via toString); compose multiple pieces with `+`.  Paykan has no
+  // variadic functions or overloading, so these are ordinary one-arg builtins.
   declareFunction(names::kPrint, Ctx.getVoidTy(), {Ctx.getObjTy()},
-                  /*isVariadic=*/true, /*isBuiltin=*/true);
+                  /*isBuiltin=*/true);
   declareFunction(names::kPrintln, Ctx.getVoidTy(), {Ctx.getObjTy()},
-                  /*isVariadic=*/true, /*isBuiltin=*/true);
+                  /*isBuiltin=*/true);
   declareFunction(names::kErrPrint, Ctx.getVoidTy(), {Ctx.getObjTy()},
-                  /*isVariadic=*/true, /*isBuiltin=*/true);
+                  /*isBuiltin=*/true);
   declareFunction(names::kErrPrintln, Ctx.getVoidTy(), {Ctx.getObjTy()},
-                  /*isVariadic=*/true, /*isBuiltin=*/true);
+                  /*isBuiltin=*/true);
 
   // Register type-conversion builtins (take unique builtin types — no ownership
   // check needed).
   auto *StrTy = Ctx.getStrTy();
-  declareFunction(names::kStrInt, StrTy, {Ctx.getIntTy()}, false, true);
-  declareFunction(names::kStrFloat, StrTy, {Ctx.getFloatTy()}, false, true);
-  declareFunction(names::kStrBool, StrTy, {Ctx.getBoolTy()}, false, true);
-  declareFunction(names::kStrChar, StrTy, {Ctx.getCharTy()}, false, true);
-  declareFunction(names::kString, StrTy, {StrTy}, false, true);
-  declareFunction(names::kOpen, Ctx.getObjTy(), {StrTy, StrTy}, false, true);
-  declareFunction(names::kIntStr, Ctx.getObjTy(), {StrTy}, false, true);
-  declareFunction(names::kFloatStr, Ctx.getObjTy(), {StrTy}, false, true);
+  declareFunction(names::kStrInt, StrTy, {Ctx.getIntTy()}, true);
+  declareFunction(names::kStrFloat, StrTy, {Ctx.getFloatTy()}, true);
+  declareFunction(names::kStrBool, StrTy, {Ctx.getBoolTy()}, true);
+  declareFunction(names::kStrChar, StrTy, {Ctx.getCharTy()}, true);
+  declareFunction(names::kString, StrTy, {StrTy}, true);
+  declareFunction(names::kOpen, Ctx.getObjTy(), {StrTy, StrTy}, true);
+  declareFunction(names::kIntStr, Ctx.getObjTy(), {StrTy}, true);
+  declareFunction(names::kFloatStr, Ctx.getObjTy(), {StrTy}, true);
 
   // Process imports before local declarations.
   llvm::StringSet<> localImportStack;

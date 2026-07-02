@@ -1,37 +1,68 @@
-// calc/parser — recursive descent arithmetic expression parser
+// calc/parser — recursive-descent parser for arithmetic with variables.
 //
 // Grammar (lowest to highest precedence):
+//   stmt   ::= IDENT '=' expr | expr
 //   expr   ::= term   (('+' | '-') term)*
-//   term   ::= factor (('*' | '/') factor)*
-//   factor ::= '(' expr ')' | '-' factor | number
+//   term   ::= factor (('*' | '/' | '%') factor)*
+//   factor ::= '(' expr ')' | '-' factor | number | IDENT
 //   number ::= [0-9]+ ('.' [0-9]+)?
+//   IDENT  ::= [A-Za-z_] [A-Za-z0-9_]*
 //
-// Language features on display: an `enum` for the operator kind, `match` for
-// dispatch (on the enum and on digit characters), and the `if … then … else`
-// ternary expression.
+// A `factor` may now be a variable name, looked up in the shared environment
+// (a calc::hashmap::HashMap). A leading `IDENT '='` is an assignment; anything
+// else is an expression — so the parser saves its position and backtracks if
+// the `=` does not materialise. Undefined variables set an error flag rather
+// than aborting, so the REPL can report and continue.
 
-// The four binary operators, modelled as a distinct enum type rather than
-// raw characters.
-enum Op { Add, Sub, Mul, Div }
+import calc::hashmap;
 
-// Apply a binary operator. The match is exhaustive over Op, so no wildcard or
-// trailing return is needed.
+// The four binary operators plus modulo, modelled as a distinct enum type.
+enum Op { Add, Sub, Mul, Div, Mod }
+
 fn applyOp(op: Op, a: float, b: float) -> float {
   match op {
     Add { return a + b; }
     Sub { return a - b; }
     Mul { return a * b; }
     Div { return a / b; }
+    Mod { return a % b; }
+  }
+}
+
+// The result of parsing one line: either an assignment (name = value) or a
+// bare expression (value only).
+class Stmt {
+  isAssign: bool;
+  name: Str;
+  value: float;
+  fn __init__(a: bool, n: Str, v: float) {
+    self.isAssign = a;
+    self.name = n;
+    self.value = v;
   }
 }
 
 class Parser {
   input: Str;
   pos: int;
+  env: hashmap::HashMap;
+  hasError: bool;
+  errorMsg: Str;
 
-  fn __init__(s: Str) {
+  fn __init__(s: Str, env: hashmap::HashMap) {
     self.input = s;
     self.pos = 0;
+    self.env = env;
+    self.hasError = False;
+    self.errorMsg = "";
+  }
+
+  // Record the first error only; later errors are usually cascades.
+  fn fail(msg: Str) {
+    if (!self.hasError) {
+      self.hasError = True;
+      self.errorMsg = msg;
+    }
   }
 
   fn done() -> bool {
@@ -39,7 +70,6 @@ class Parser {
   }
 
   fn atIs(ch: char) -> bool {
-    // Short-circuit guards the subscript: when done, the input is not indexed.
     return !self.done() && self.input[self.pos] == ch;
   }
 
@@ -53,6 +83,26 @@ class Parser {
     if (self.done()) { return False; }
     c: char = self.input[self.pos];
     return c >= '0' && c <= '9';
+  }
+
+  fn atIsIdentStart() -> bool {
+    if (self.done()) { return False; }
+    c: char = self.input[self.pos];
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+  }
+
+  fn atIsIdentChar() -> bool {
+    if (self.done()) { return False; }
+    c: char = self.input[self.pos];
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+        || (c >= '0' && c <= '9') || c == '_';
+  }
+
+  // Current char is '=' and it is NOT the start of '=='.
+  fn atAssign() -> bool {
+    if (!self.atIs('=')) { return False; }
+    if (self.pos + 1 >= self.input.len()) { return True; }
+    return self.input[self.pos + 1] != '=';
   }
 
   fn atDigitVal() -> int {
@@ -83,6 +133,26 @@ class Parser {
     }
   }
 
+  fn parseIdent() -> Str {
+    name: Str = "";
+    while (self.atIsIdentChar()) {
+      name = name + StrChar(self.input[self.pos]);
+      self.advance();
+    }
+    return name;
+  }
+
+  // The unconsumed remainder of the input (for "unexpected '…'" diagnostics).
+  fn rest() -> Str {
+    out: Str = "";
+    i: int = self.pos;
+    while (i < self.input.len()) {
+      out = out + StrChar(self.input[i]);
+      i = i + 1;
+    }
+    return out;
+  }
+
   fn parseNumber() -> float {
     result: float = 0.0;
     while (self.atIsDigit()) {
@@ -108,11 +178,22 @@ class Parser {
       val: float = self.parseExpr();
       self.skipWs();
       if (self.atIs(')')) { self.advance(); }
+      else { self.fail("missing ')'"); }
       return val;
     }
     if (self.atIs('-')) {
       self.advance();
       return 0.0 - self.parseFactor();
+    }
+    if (self.atIsIdentStart()) {
+      name: Str = self.parseIdent();
+      if (self.env.has(name)) { return self.env.get(name); }
+      self.fail("undefined variable '" + name + "'");
+      return 0.0;
+    }
+    if (!self.atIsDigit()) {
+      self.fail("expected a number, variable, or '('");
+      return 0.0;
     }
     return self.parseNumber();
   }
@@ -120,8 +201,9 @@ class Parser {
   fn parseTerm() -> float {
     result: float = self.parseFactor();
     self.skipWs();
-    while (self.atIsOr('*', '/')) {
-      op: Op = if self.atIs('*') then Op::Mul else Op::Div;
+    while (!self.done() && (self.atIs('*') || self.atIs('/') || self.atIs('%'))) {
+      op: Op = if self.atIs('*') then Op::Mul
+               else if self.atIs('/') then Op::Div else Op::Mod;
       self.advance();
       rhs: float = self.parseFactor();
       result = applyOp(op, result, rhs);
@@ -141,5 +223,27 @@ class Parser {
       self.skipWs();
     }
     return result;
+  }
+
+  // Parse a whole line: an assignment if it begins `IDENT =` (not `==`),
+  // otherwise a bare expression. The position is saved so a non-assignment
+  // that merely starts with a variable name backtracks cleanly.
+  fn parseStatement() -> Stmt {
+    self.skipWs();
+    start: int = self.pos;
+    if (self.atIsIdentStart()) {
+      name: Str = self.parseIdent();
+      self.skipWs();
+      if (self.atAssign()) {
+        self.advance(); // consume '='
+        v: float = self.parseExpr();
+        self.skipWs();
+        return Stmt(True, name, v);
+      }
+      self.pos = start; // not an assignment — rewind and parse as an expression
+    }
+    v: float = self.parseExpr();
+    self.skipWs();
+    return Stmt(False, "", v);
   }
 }

@@ -38,7 +38,24 @@ static std::string typeToName(ast::Type *ty) {
     return ct->getName();
   if (auto *et = ast::dyn_cast<ast::EnumType>(ty))
     return et->getName();
+  if (auto *at = ast::dyn_cast<ast::ArrayType>(ty))
+    return typeToName(at->getElementType()) + "[]";
   return names::kTypeVoid;
+}
+
+/// Resolve a serialised type name (possibly carrying trailing "[]" array
+/// markers) to a Type* in @p ctx.  Builtins/classes/enums resolve by name;
+/// "T[]" becomes an ArrayType over the resolved element type.  Returns nullptr
+/// if the base name is unknown.
+static ast::Type *resolveExportedType(ast::ASTContext &ctx,
+                                      const std::string &name) {
+  if (name.size() > 2 && name.compare(name.size() - 2, 2, "[]") == 0) {
+    ast::Type *elem = resolveExportedType(ctx, name.substr(0, name.size() - 2));
+    if (!elem)
+      return nullptr;
+    return ctx.make<ast::ArrayType>(ast::SourceLocation(), elem);
+  }
+  return ctx.lookupType(name);
 }
 
 /// Reconstruct a single ClassInfo into a context, guaranteeing type identity.
@@ -59,18 +76,18 @@ static void registerClassInfoInto(
 
   auto builder = ctx.buildClassType(name, superClass);
   for (auto &[fname, ftname] : fields) {
-    ast::Type *fty = ctx.lookupType(ftname);
+    ast::Type *fty = resolveExportedType(ctx, ftname);
     if (!fty)
       fty = ctx.getObjTy();
     builder.field(fname, fty);
   }
   for (auto &[mname, retName, paramNames, flags] : methods) {
-    ast::Type *retTy = ctx.lookupType(retName);
+    ast::Type *retTy = resolveExportedType(ctx, retName);
     if (!retTy)
       retTy = ctx.getVoidTy();
     std::vector<ast::Type *> params;
     for (auto &pn : paramNames) {
-      ast::Type *pty = ctx.lookupType(pn);
+      ast::Type *pty = resolveExportedType(ctx, pn);
       if (!pty)
         pty = ctx.getObjTy();
       params.push_back(pty);
@@ -185,17 +202,17 @@ bool Sema::processImport(ast::ImportDecl *node) {
                           const std::string &name) {
         if (lookupFunction(name))
           return;
-        ast::Type *retTy = Ctx.lookupType(fi.ReturnTypeName);
+        ast::Type *retTy = resolveExportedType(Ctx, fi.ReturnTypeName);
         if (!retTy)
           retTy = Ctx.getVoidTy();
         std::vector<ast::Type *> params;
         for (auto &pn : fi.ParamTypeNames) {
-          ast::Type *pty = Ctx.lookupType(pn);
+          ast::Type *pty = resolveExportedType(Ctx, pn);
           if (!pty)
             pty = Ctx.getObjTy();
           params.push_back(pty);
         }
-        declareFunction(name, retTy, params, fi.IsVariadic, /*isBuiltin=*/true);
+        declareFunction(name, retTy, params, /*isBuiltin=*/true);
       };
       for (auto &fi : cacheIt->second.ExportedFunctions) {
         injectFn(fi, qualifier + names::kQualSep + fi.Name);
@@ -237,6 +254,12 @@ bool Sema::processImport(ast::ImportDecl *node) {
       for (auto &[name, ct] :
            importDriverPtr->getASTContext().getClassTypes()) {
         if (name == names::kObj || name == names::kString)
+          continue;
+        // The registry holds each class under its canonical name and again
+        // under any qualified import aliases; serialise only the canonical
+        // entry so a class reached through several import paths keeps one
+        // identity (the same fix applied to enum export).
+        if (name != ct->getName())
           continue;
         ModuleInfo::ClassInfo ci;
         ci.Name = name;
@@ -306,7 +329,6 @@ bool Sema::processImport(ast::ImportDecl *node) {
       fi.ReturnTypeName = typeToName(sig.ReturnType);
       for (auto *pty : sig.ParamTypes)
         fi.ParamTypeNames.push_back(typeToName(pty));
-      fi.IsVariadic = sig.IsVariadic;
       info.ExportedFunctions.push_back(std::move(fi));
     }
     ModuleCache[path] = std::move(info);
@@ -316,17 +338,17 @@ bool Sema::processImport(ast::ImportDecl *node) {
                          const std::string &name) {
       if (lookupFunction(name))
         return;
-      ast::Type *retTy = Ctx.lookupType(fi.ReturnTypeName);
+      ast::Type *retTy = resolveExportedType(Ctx, fi.ReturnTypeName);
       if (!retTy)
         retTy = Ctx.getVoidTy();
       std::vector<ast::Type *> params;
       for (auto &pn : fi.ParamTypeNames) {
-        ast::Type *pty = Ctx.lookupType(pn);
+        ast::Type *pty = resolveExportedType(Ctx, pn);
         if (!pty)
           pty = Ctx.getObjTy();
         params.push_back(pty);
       }
-      declareFunction(name, retTy, params, fi.IsVariadic, /*isBuiltin=*/true);
+      declareFunction(name, retTy, params, /*isBuiltin=*/true);
     };
     for (auto &fi : ModuleCache[path].ExportedFunctions) {
       injectFn2(fi, qualifier + names::kQualSep + fi.Name);

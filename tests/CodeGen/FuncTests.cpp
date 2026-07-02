@@ -73,7 +73,7 @@ TEST(Func, VarDeclMultipleStrVars) {
     a: Str = "foo";
     b: Str = "bar";
     c: Str = "baz";
-    println(a, b, c);
+    println(a + b + c);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "foobarbaz\n");

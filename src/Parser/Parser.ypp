@@ -308,10 +308,10 @@ statement: ";"                      { $$ = nullptr; }
     | block                         { $$ = $1; }
     | ifStmt                        { $$ = $1; }
     | whileStmt                     { $$ = $1; }
-    | "break" ";"                    { $$ = impl(drv).Ctx.make<BreakStmt>(loc(@1, @2)); }
-    | "continue" ";"                 { $$ = impl(drv).Ctx.make<ContinueStmt>(loc(@1, @2)); }
-    | matchStmt                      { $$ = $1; }
-    | error ";"                      { $$ = nullptr; yyerrok; }
+    | "break" ";"                   { $$ = impl(drv).Ctx.make<BreakStmt>(loc(@1, @2)); }
+    | "continue" ";"                { $$ = impl(drv).Ctx.make<ContinueStmt>(loc(@1, @2)); }
+    | matchStmt                     { $$ = $1; }
+    | error ";"                     { $$ = nullptr; yyerrok; }
     ;
 
 matchStmt: "match" expression "{" matchArmList "}"
@@ -342,7 +342,7 @@ literalPattern:
     | STRING                        { $$ = impl(drv).Ctx.make<StringLiteral>(loc(@1, @1), $1); }
     ;
 
-param: IDENT ":" typeAnnotation                     { $$ = Param{&impl(drv).Ctx.intern($1), $3}; }
+param: IDENT ":" typeAnnotation     { $$ = Param{&impl(drv).Ctx.intern($1), $3}; }
     ;
 
 paramList: %empty                   { $$ = std::vector<Param>(); }

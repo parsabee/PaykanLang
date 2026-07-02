@@ -154,7 +154,6 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   struct FunctionInfo {
     llvm::StringRef RuntimeName; ///< C symbol name in the runtime.
     llvm::FunctionType *FnTy = nullptr;
-    bool IsVariadic = false;
   };
 
   /// Maps Paykan-level function names to their codegen info.
@@ -333,6 +332,17 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   void emitRetain(llvm::Value *shared);
   void emitRelease(llvm::Value *shared);
   llvm::Value *emitSharedNew(llvm::Value *raw, llvm::StringRef name = "shared");
+
+  /// Emit a reference-typed expression and return the *raw* underlying pointer
+  /// (PaykanArray* / PaykanString* / PaykanObject*), unwrapping the
+  /// PaykanShared* box when the expression produces one.  Identifiers and
+  /// object-element subscripts already yield raw pointers; member accesses,
+  /// user calls, ternaries and array literals yield a box that is unwrapped
+  /// here.  This is the single point that turns "any ref expression" into the
+  /// raw receiver a runtime call (PaykanArray_get, PaykanString_char_at, …)
+  /// expects, so no call site has to re-implement the box/raw distinction.
+  llvm::Value *emitUnwrappedRef(ast::Expr *expr,
+                                llvm::StringRef name = "ref.obj");
 
   // -- Unified ownership classification / cleanup (#32) ----------------------
   //

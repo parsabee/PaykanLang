@@ -294,7 +294,7 @@ TEST(ControlFlow, LogicalInWhileCondition) {
       i = i + 1;
       j = j - 1;
     }
-    println(StrInt(i), StrInt(j));
+    println(StrInt(i) + StrInt(j));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "55\n");

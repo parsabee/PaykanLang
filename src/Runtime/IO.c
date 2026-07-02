@@ -4,53 +4,34 @@
 // Paykan runtime — I/O builtins.
 
 #include "Runtime.h"
-#include <stdarg.h>
 #include <stdio.h>
 
 // ---------------------------------------------------------------------------
-// Common helper — print variadic PaykanObject arguments to a stream.
-// Each argument is converted to a string via its vtable's toString method.
+// Common helper — print one object to a stream, converted to a string via its
+// vtable's toString method.  (Paykan has no variadic functions; the print
+// builtins take a single Obj — compose with `+` for multiple pieces.)
 // ---------------------------------------------------------------------------
-static void print_objects(FILE *stream, int64_t argc, va_list ap) {
-  for (int64_t i = 0; i < argc; ++i) {
-    PaykanObject *obj = va_arg(ap, PaykanObject *);
-    if (!obj)
-      continue;
-    PaykanShared *shared = obj->vtable->toString(obj);
-    PaykanString *s = (PaykanString *)PaykanShared_get(shared);
-    if (s && s->data)
-      fwrite(s->data, 1, (size_t)s->len, stream);
-    Paykan_release(shared);
-  }
+static void print_object(FILE *stream, PaykanObject *obj) {
+  if (!obj)
+    return;
+  PaykanShared *shared = obj->vtable->toString(obj);
+  PaykanString *s = (PaykanString *)PaykanShared_get(shared);
+  if (s && s->data)
+    fwrite(s->data, 1, (size_t)s->len, stream);
+  Paykan_release(shared);
 }
 
-void Paykan_print(int64_t argc, ...) {
-  va_list ap;
-  va_start(ap, argc);
-  print_objects(stdout, argc, ap);
-  va_end(ap);
-}
+void Paykan_print(PaykanObject *obj) { print_object(stdout, obj); }
 
-void Paykan_println(int64_t argc, ...) {
-  va_list ap;
-  va_start(ap, argc);
-  print_objects(stdout, argc, ap);
-  va_end(ap);
+void Paykan_println(PaykanObject *obj) {
+  print_object(stdout, obj);
   fputc('\n', stdout);
 }
 
-void Paykan_printerr(int64_t argc, ...) {
-  va_list ap;
-  va_start(ap, argc);
-  print_objects(stderr, argc, ap);
-  va_end(ap);
-}
+void Paykan_printerr(PaykanObject *obj) { print_object(stderr, obj); }
 
-void Paykan_printerrln(int64_t argc, ...) {
-  va_list ap;
-  va_start(ap, argc);
-  print_objects(stderr, argc, ap);
-  va_end(ap);
+void Paykan_printerrln(PaykanObject *obj) {
+  print_object(stderr, obj);
   fputc('\n', stderr);
 }
 

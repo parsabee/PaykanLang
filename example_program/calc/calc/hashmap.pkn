@@ -1,0 +1,187 @@
+// calc/hashmap — a string-keyed hash map (Str -> float).
+//
+// A separate-chaining hash table that backs the calculator's variable store.
+// Two language facts shape the design:
+//
+//   1. `Str ==` is reference identity, not content — so keys are compared with
+//      `Str.equals()`, which compares character-by-character.
+//   2. There is no char -> int conversion — so `charOrd` derives an ordinal by
+//      finding the character's index in a reference alphabet.
+//
+// Buckets are an array of arrays (`Entry[][]`). The table doubles its bucket
+// count when the load factor passes 0.75 and rehashes, keeping lookups O(1)
+// on average.
+
+// One key/value pair living in a bucket chain.
+class Entry {
+  key: Str;
+  value: float;
+  fn __init__(k: Str, v: float) {
+    self.key = k;
+    self.value = v;
+  }
+}
+
+// Ordinal of a character: its 1-based index in a reference alphabet, or 0 for
+// any character outside it. Distinct identifier characters get distinct codes,
+// which is all the hash needs.
+fn charOrd(c: char) -> int {
+  alpha: Str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+  i: int = 0;
+  while (i < alpha.len()) {
+    if (alpha[i] == c) { return i + 1; }
+    i = i + 1;
+  }
+  return 0;
+}
+
+class HashMap {
+  buckets: Entry[][];
+  size: int;
+  nbuckets: int;
+
+  fn __init__() {
+    self.nbuckets = 8;
+    self.size = 0;
+    self.buckets = [];
+    self.fill();
+  }
+
+  // Append `nbuckets` empty chains to a freshly-reset bucket array.
+  fn fill() {
+    i: int = 0;
+    while (i < self.nbuckets) {
+      chain: Entry[] = [];
+      self.buckets.push(chain);
+      i = i + 1;
+    }
+  }
+
+  // djb2 over the key's character ordinals, folded into the bucket range.
+  fn indexFor(key: Str) -> int {
+    h: int = 5381;
+    i: int = 0;
+    while (i < key.len()) {
+      h = h * 33 + charOrd(key[i]);
+      i = i + 1;
+    }
+    if (h < 0) { h = 0 - h; }
+    return h % self.nbuckets;
+  }
+
+  fn has(key: Str) -> bool {
+    chain: Entry[] = self.buckets[self.indexFor(key)];
+    i: int = 0;
+    while (i < chain.len()) {
+      if (chain[i].key.equals(key)) { return True; }
+      i = i + 1;
+    }
+    return False;
+  }
+
+  // Returns the stored value, or 0.0 if absent (callers guard with has()).
+  fn get(key: Str) -> float {
+    chain: Entry[] = self.buckets[self.indexFor(key)];
+    i: int = 0;
+    while (i < chain.len()) {
+      e: Entry = chain[i];
+      if (e.key.equals(key)) { return e.value; }
+      i = i + 1;
+    }
+    return 0.0;
+  }
+
+  // Find-or-append into the right chain. Returns True if a NEW key was added.
+  fn insert(key: Str, value: float) -> bool {
+    chain: Entry[] = self.buckets[self.indexFor(key)];
+    i: int = 0;
+    while (i < chain.len()) {
+      e: Entry = chain[i];
+      if (e.key.equals(key)) {
+        e.value = value; // update in place (Entry is a reference type)
+        return False;
+      }
+      i = i + 1;
+    }
+    chain.push(Entry(key, value));
+    return True;
+  }
+
+  fn put(key: Str, value: float) {
+    if (self.insert(key, value)) {
+      self.size = self.size + 1;
+      // Grow when load factor exceeds 3/4.
+      if (self.size * 4 > self.nbuckets * 3) { self.resize(); }
+    }
+  }
+
+  // Double the bucket count and redistribute every entry.
+  fn resize() {
+    old: Entry[][] = self.buckets;
+    self.nbuckets = self.nbuckets * 2;
+    self.buckets = [];
+    self.fill();
+    bi: int = 0;
+    while (bi < old.len()) {
+      chain: Entry[] = old[bi];
+      j: int = 0;
+      while (j < chain.len()) {
+        e: Entry = chain[j];
+        self.insert(e.key, e.value); // size already counted; just redistribute
+        j = j + 1;
+      }
+      bi = bi + 1;
+    }
+  }
+
+  // Delete a key. Returns True if it was present.
+  fn remove(key: Str) -> bool {
+    chain: Entry[] = self.buckets[self.indexFor(key)];
+    survivors: Entry[] = [];
+    found: bool = False;
+    i: int = 0;
+    while (i < chain.len()) {
+      e: Entry = chain[i];
+      if (e.key.equals(key)) { found = True; }
+      else { survivors.push(e); }
+      i = i + 1;
+    }
+    if (found) {
+      // Compact the chain in place: drop everything, push the survivors back.
+      while (chain.len() > 0) { chain.pop(); }
+      k: int = 0;
+      while (k < survivors.len()) {
+        chain.push(survivors[k]);
+        k = k + 1;
+      }
+      self.size = self.size - 1;
+    }
+    return found;
+  }
+
+  // Every key currently stored, in bucket order.
+  fn keys() -> Str[] {
+    out: Str[] = [];
+    bi: int = 0;
+    while (bi < self.buckets.len()) {
+      chain: Entry[] = self.buckets[bi];
+      j: int = 0;
+      while (j < chain.len()) {
+        out.push(chain[j].key);
+        j = j + 1;
+      }
+      bi = bi + 1;
+    }
+    return out;
+  }
+
+  fn count() -> int { return self.size; }
+
+  // Drop all entries and shrink back to the initial bucket count.
+  fn clear() {
+    self.nbuckets = 8;
+    self.size = 0;
+    self.buckets = [];
+    self.fill();
+  }
+}

@@ -125,3 +125,26 @@ TEST(Func, InnerScopeCanAccessOuter) {
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
+
+// ============================================================================
+// The print family is single-argument (no variadic functions / overloading)
+// ============================================================================
+
+TEST(Func, PrintlnSingleArgOk) {
+  auto r = semaCheck(wrapMain(R"(println("hello" + " world");)"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Func, PrintlnRejectsMultipleArgs) {
+  auto r = semaCheck(wrapMain(R"(println("hello", "world");)"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("expects 1 argument"), std::string::npos)
+      << r.Diagnostics;
+}
+
+TEST(Func, PrintRejectsMultipleArgs) {
+  auto r = semaCheck(wrapMain(R"(print("a", StrInt(1), "b");)"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("expects 1 argument"), std::string::npos)
+      << r.Diagnostics;
+}

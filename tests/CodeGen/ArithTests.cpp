@@ -37,7 +37,7 @@ TEST(Arith, BoolLiterals) {
   auto r = compileAndRun(wrapMain(R"(
     a: bool = True;
     b: bool = False;
-    println(StrBool(a), StrBool(b));
+    println(StrBool(a) + StrBool(b));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "TrueFalse\n");
@@ -66,7 +66,7 @@ TEST(Arith, StringConcat) {
 
 TEST(Arith, StringBuiltins) {
   auto r = compileAndRun(wrapMain(R"(
-    println(StrInt(42), StrFloat(3.14), StrBool(True));
+    println(StrInt(42) + StrFloat(3.14) + StrBool(True));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "423.14True\n");

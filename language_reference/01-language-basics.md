@@ -350,18 +350,20 @@ fn main() -> int {
 
 ### Output
 
-| Function            | Description                              |
-|---------------------|------------------------------------------|
-| `print(args…)`      | Print one or more values, no newline     |
-| `println(args…)`    | Print one or more values, then newline   |
-| `printerr(args…)`   | Print to stderr, no newline              |
-| `printerrln(args…)` | Print to stderr, then newline            |
+| Function          | Description                             |
+|-------------------|-----------------------------------------|
+| `print(o)`        | Print one value (via `toString`), no newline |
+| `println(o)`      | Print one value, then a newline         |
+| `printerr(o)`     | Print to stderr, no newline             |
+| `printerrln(o)`   | Print to stderr, then a newline         |
 
-All print functions accept any number of arguments of any type.
+Each takes **exactly one** argument — an `Obj`, printed via its `toString`.
+Paykan has no variadic functions or overloading, so there is no multi-argument
+form: compose pieces with `+` (string concatenation).
 
 ```pkn
-println("x =", StrInt(x));
-print("a=", StrInt(a), " b=", StrInt(b));
+println("x = " + StrInt(x));
+print("a=" + StrInt(a) + " b=" + StrInt(b));
 ```
 
 ### Type-to-String Conversion

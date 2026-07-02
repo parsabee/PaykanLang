@@ -1,45 +1,229 @@
-// calc — Basic arithmetic calculator
+// calc — an arithmetic calculator with variables and memory.
 //
-// Evaluates expressions with +, -, *, /, and parentheses. Numbers may be
-// integers or floating-point. Every available expression is evaluated: one per
-// command-line argument, or one per line read from standard input until EOF.
+// Expressions support + - * / %, parentheses, unary minus, and decimals.
+// Results are remembered: assign with `x = expr`, then use `x` (and the
+// built-in `ans`, `pi`, `e`) in later expressions. Variables live in a
+// string-keyed hash map (calc/hashmap.pkn).
 //
-// Usage:
-//   ./build/bin/paykan example_program/calc/main.pkn "3 + 4 * (2 - 1)" "10 / 4"
-//   printf "1 + 2\n3 * 4\n" | ./build/bin/paykan example_program/calc/main.pkn
+// Command line:
+//   paykan main.pkn "3 + 4 * (2 - 1)" "10 / 4"     # evaluate each argument
+//   paykan main.pkn -e "x = 6" -e "x * 7"          # -e flags, shared state
+//   paykan main.pkn -q "1 + 2"                     # quiet: results only
+//   paykan main.pkn                                # REPL on stdin
+//   printf "x = 5\nx * x\n" | paykan main.pkn
+//
+// REPL commands: :vars  :del <name>  :clear  :help  :quit
 
 import calc::parser;
+import calc::hashmap;
 import calc::utils;
 
-// Evaluate one expression and print "<expr> = <result>".
-fn evalAndPrint(expr: Str) {
-  p: Parser = parser::Parser(expr);
-  result: float = p.parseExpr();
-  println(expr + " = " + utils::trimFloat(StrFloat(result)));
+// Format a result with trailing zeros trimmed.
+fn show(v: float) -> Str {
+  return utils::trimFloat(StrFloat(v));
 }
 
-fn main(args: Str[]) -> int {
-  // With command-line arguments, evaluate each one.
-  if (args.len() > 1) {
-    i: int = 1;
-    while (i < args.len()) {
-      evalAndPrint(args[i]);
-      i = i + 1;
-    }
-    return 0;
+// Seed the environment with the constants and the `ans` register.
+fn defineConstants(env: hashmap::HashMap) {
+  env.put("pi", 3.141592653589793);
+  env.put("e", 2.718281828459045);
+  env.put("ans", 0.0);
+}
+
+// Evaluate one statement line (an assignment or a bare expression) and print.
+fn evalStatement(src: Str, env: hashmap::HashMap, quiet: bool) {
+  p: parser::Parser = parser::Parser(src, env);
+  st: parser::Stmt = p.parseStatement();
+
+  if (p.hasError) {
+    printerrln("error: " + p.errorMsg);
+    return;
+  }
+  if (!p.done()) {
+    printerrln("error: unexpected '" + p.rest() + "'");
+    return;
   }
 
-  // Otherwise read expressions from standard input, one per line, until EOF.
+  if (st.isAssign) {
+    env.put(st.name, st.value);
+    env.put("ans", st.value);
+    if (quiet) { println(show(st.value)); }
+    else { println(st.name + " = " + show(st.value)); }
+  } else {
+    env.put("ans", st.value);
+    if (quiet) { println(show(st.value)); }
+    else { println(src + " = " + show(st.value)); }
+  }
+}
+
+// List every stored variable.
+fn listVars(env: hashmap::HashMap) {
+  ks: Str[] = env.keys();
+  if (ks.len() == 0) {
+    println("(no variables)");
+    return;
+  }
+  i: int = 0;
+  while (i < ks.len()) {
+    k: Str = ks[i];
+    println("  " + k + " = " + show(env.get(k)));
+    i = i + 1;
+  }
+}
+
+// The command word of a `:command` line (between ':' and the first space).
+fn cmdWord(s: Str) -> Str {
+  out: Str = "";
+  i: int = 1;
+  while (i < s.len() && s[i] != ' ') {
+    out = out + StrChar(s[i]);
+    i = i + 1;
+  }
+  return out;
+}
+
+// The argument of a `:command arg` line (everything after the command word).
+fn cmdArg(s: Str) -> Str {
+  i: int = 1;
+  while (i < s.len() && s[i] != ' ') { i = i + 1; } // skip the word
+  while (i < s.len() && s[i] == ' ') { i = i + 1; } // skip the spaces
+  out: Str = "";
+  while (i < s.len()) {
+    out = out + StrChar(s[i]);
+    i = i + 1;
+  }
+  return out;
+}
+
+// Run a `:command`. Returns False only for :quit (stop the REPL).
+fn runCommand(s: Str, env: hashmap::HashMap, quiet: bool) -> bool {
+  word: Str = cmdWord(s);
+  arg: Str = cmdArg(s);
+
+  if (word.equals("quit") || word.equals("q") || word.equals("exit")) {
+    return False;
+  }
+  if (word.equals("help") || word.equals("h")) {
+    printHelp();
+    return True;
+  }
+  if (word.equals("vars")) {
+    listVars(env);
+    return True;
+  }
+  if (word.equals("clear")) {
+    env.clear();
+    defineConstants(env);
+    if (!quiet) { println("cleared all variables"); }
+    return True;
+  }
+  if (word.equals("del")) {
+    if (arg.len() == 0) {
+      printerrln("usage: :del <name>");
+      return True;
+    }
+    if (env.remove(arg)) {
+      if (!quiet) { println("deleted '" + arg + "'"); }
+    } else {
+      printerrln("no such variable: '" + arg + "'");
+    }
+    return True;
+  }
+  printerrln("unknown command ':" + word + "' (try :help)");
+  return True;
+}
+
+// Handle one input line. Returns False only when the user asked to quit.
+fn handle(line: Str, env: hashmap::HashMap, quiet: bool) -> bool {
+  s: Str = utils::stripLine(line);
+  if (s.len() == 0) { return True; }
+  if (s[0] == ':') { return runCommand(s, env, quiet); }
+  evalStatement(s, env, quiet);
+  return True;
+}
+
+// Read-evaluate-print loop over standard input.
+fn repl(env: hashmap::HashMap, quiet: bool) -> int {
+  if (!quiet) {
+    println("calc — arithmetic with variables.  :help for commands, :quit to exit.");
+  }
   while (True) {
     match Stdin.readln() {
-      line: Str {
-        expr: Str = utils::stripLine(line);
-        if (expr.len() > 0) {
-          evalAndPrint(expr);
-        }
-      }
+      line: Str { if (!handle(line, env, quiet)) { return 0; } }
       _ { break; } // None — end of input
     }
   }
   return 0;
+}
+
+fn printHelp() {
+  println("expressions:  + - * / %, parentheses, unary minus, decimals");
+  println("variables:    x = 3 + 4     assign, then use x later");
+  println("              ans           the last computed result");
+  println("              pi, e         predefined constants");
+  println("commands:     :vars         list all variables");
+  println("              :del <name>   delete a variable");
+  println("              :clear        remove all variables");
+  println("              :help         show this help");
+  println("              :quit         exit");
+}
+
+fn printUsage() {
+  println("calc - arithmetic calculator with variables");
+  println("");
+  println("usage: paykan main.pkn [options] [expr ...]");
+  println("");
+  println("options:");
+  println("  -e, --eval <expr>   evaluate <expr> (may be repeated)");
+  println("  -q, --quiet         print only results (no echo, no banner)");
+  println("  -h, --help          show this help");
+  println("");
+  println("With no expressions, reads one statement per line from stdin.");
+}
+
+fn main(args: Str[]) -> int {
+  quiet: bool = False;
+  exprs: Str[] = [];
+
+  // -- command-line parsing: flags, repeatable -e, positional expressions --
+  i: int = 1;
+  while (i < args.len()) {
+    a: Str = args[i];
+    if (a.equals("-h") || a.equals("--help")) {
+      printUsage();
+      return 0;
+    } else if (a.equals("-q") || a.equals("--quiet")) {
+      quiet = True;
+    } else if (a.equals("-e") || a.equals("--eval")) {
+      if (i + 1 < args.len()) {
+        i = i + 1;
+        exprs.push(args[i]);
+      } else {
+        printerrln("error: " + a + " requires an argument");
+        return 2;
+      }
+    } else if (utils::startsWith(a, "-") && a.len() > 1) {
+      printerrln("error: unknown option '" + a + "' (try -h)");
+      return 2;
+    } else {
+      exprs.push(a); // a positional argument is an expression
+    }
+    i = i + 1;
+  }
+
+  env: hashmap::HashMap = hashmap::HashMap();
+  defineConstants(env);
+
+  // Batch mode: evaluate every collected expression, sharing one environment.
+  if (exprs.len() > 0) {
+    j: int = 0;
+    while (j < exprs.len()) {
+      evalStatement(exprs[j], env, quiet);
+      j = j + 1;
+    }
+    return 0;
+  }
+
+  // Interactive mode.
+  return repl(env, quiet);
 }

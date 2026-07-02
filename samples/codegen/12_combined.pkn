@@ -93,17 +93,17 @@ fn main() -> int {
   // ---------- Relational & logical -----------------------------------------
   println("\n--- Relational/Logical ---");
   x: int = 7;
-  println("7 in [1,10]: ",   StrBool(x >= 1 && x <= 10));  // True
-  println("7 prime:     ",   StrBool(isPrime(x)));           // True
-  println("7 even:      ",   StrBool(x % 2 == 0));          // False
-  println("!prime(4):   ",   StrBool(!isPrime(4)));          // True
+  println("7 in [1,10]: " + StrBool(x >= 1 && x <= 10));  // True
+  println("7 prime:     " + StrBool(isPrime(x)));           // True
+  println("7 even:      " + StrBool(x % 2 == 0));          // False
+  println("!prime(4):   " + StrBool(!isPrime(4)));          // True
 
   // ---------- Float ---------------------------------------------------------
   println("\n--- Float ---");
   pi: float = 3.14159;
-  println("pi^2=",  StrFloat(fsquare(pi)));          // ~9.8696
-  println("avg=",   StrFloat(favg(1.0, 3.0)));       // 2
-  println("0.1+0.2=",StrFloat(0.1 + 0.2));
+  println("pi^2=" + StrFloat(fsquare(pi)));          // ~9.8696
+  println("avg=" + StrFloat(favg(1.0, 3.0)));       // 2
+  println("0.1+0.2=" + StrFloat(0.1 + 0.2));
 
   // ---------- Ternary -------------------------------------------------------
   println("\n--- Ternary ---");
@@ -112,7 +112,7 @@ fn main() -> int {
               else if grade >= 80 then "B"
               else if grade >= 70 then "C"
               else "F";
-  println("grade 83 -> ", band);   // B
+  println("grade 83 -> " + band);   // B
 
   // ---------- Control flow --------------------------------------------------
   println("\n--- FizzBuzz 1-20 ---");

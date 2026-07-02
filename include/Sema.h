@@ -120,7 +120,6 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   struct FunctionSig {
     ast::Type *ReturnType = nullptr;
     std::vector<ast::Type *> ParamTypes;
-    bool IsVariadic = false;
     bool IsBuiltin = false;
   };
 
@@ -130,7 +129,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// Register a function signature.
   void declareFunction(llvm::StringRef name, ast::Type *retTy,
                        std::vector<ast::Type *> paramTys,
-                       bool isVariadic = false, bool isBuiltin = false);
+                       bool isBuiltin = false);
 
   /// Look up a function signature, or nullptr if unknown.
   const FunctionSig *lookupFunction(llvm::StringRef name) const;
@@ -237,7 +236,6 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
       std::string Name;
       std::string ReturnTypeName;
       std::vector<std::string> ParamTypeNames;
-      bool IsVariadic = false;
     };
     std::vector<FunctionInfo> ExportedFunctions;
 

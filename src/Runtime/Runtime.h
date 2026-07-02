@@ -377,17 +377,17 @@ PAYKAN_NORETURN void Paykan_panic_div_by_zero(void);
 // I/O builtins
 // ============================================================================
 
-/// Print object arguments (via toString) to stdout, without a newline.
-void Paykan_print(int64_t argc, ...);
+/// Print one object (via toString) to stdout, without a newline.
+void Paykan_print(PaykanObject *obj);
 
-/// Print object arguments (via toString) to stdout, followed by a newline.
-void Paykan_println(int64_t argc, ...);
+/// Print one object (via toString) to stdout, followed by a newline.
+void Paykan_println(PaykanObject *obj);
 
-/// Print object arguments (via toString) to stderr, without a newline.
-void Paykan_printerr(int64_t argc, ...);
+/// Print one object (via toString) to stderr, without a newline.
+void Paykan_printerr(PaykanObject *obj);
 
-/// Print object arguments (via toString) to stderr, followed by a newline.
-void Paykan_printerrln(int64_t argc, ...);
+/// Print one object (via toString) to stderr, followed by a newline.
+void Paykan_printerrln(PaykanObject *obj);
 
 /// Flush stdout so that prompts appear before blocking reads.
 void Paykan_flush(void);

@@ -451,6 +451,23 @@ llvm::Value *CodeGen::emitSharedNew(llvm::Value *raw, llvm::StringRef name) {
                             name);
 }
 
+llvm::Value *CodeGen::emitUnwrappedRef(ast::Expr *expr, llvm::StringRef name) {
+  llvm::Value *val = emitExpr(expr);
+  if (!val)
+    return nullptr;
+  // A member access, user call, ternary or array literal yields a
+  // PaykanShared* box; unwrap it to the raw pointer.  Identifiers and
+  // object-element subscripts are already raw (their emitters unwrap), and are
+  // not flagged by exprAlreadyShared, so they pass through unchanged.
+  if (exprAlreadyShared(expr)) {
+    auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
+    auto *getFnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
+    val = Builder.CreateCall(declareFunction(kPaykanSharedGet, getFnTy), {val},
+                             name);
+  }
+  return val;
+}
+
 void CodeGen::trackStringTemp(llvm::Value *v) {
   if (v)
     OwnedStringTemps.insert(v);
@@ -513,14 +530,15 @@ void CodeGen::releaseIfOwned(const ExprValue &ev) {
 void CodeGen::bootstrapBuiltins() {
   auto *i64Ty = llvm::Type::getInt64Ty(LLVMCtx);
   auto *voidTy = llvm::Type::getVoidTy(LLVMCtx);
-  auto *varArgFnTy =
-      llvm::FunctionType::get(voidTy, {i64Ty}, /*isVarArg=*/true);
+  auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
 
+  // The print family takes a single object pointer (printed via toString).
+  auto *printFnTy =
+      llvm::FunctionType::get(voidTy, {ptrTy}, /*isVarArg=*/false);
   for (auto &[paykanName, runtimeName] : kBuiltinNames)
-    FunctionTable[paykanName] = {runtimeName, varArgFnTy, /*IsVariadic=*/true};
+    FunctionTable[paykanName] = {runtimeName, printFnTy};
 
   // Register type-conversion builtins.
-  auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
   auto *dblTy = llvm::Type::getDoubleTy(LLVMCtx);
 
   auto *ptrFromI64 = llvm::FunctionType::get(ptrTy, {i64Ty}, false);
@@ -529,19 +547,19 @@ void CodeGen::bootstrapBuiltins() {
   auto *i8Ty = llvm::Type::getInt8Ty(LLVMCtx);
   auto *ptrFromI8 = llvm::FunctionType::get(ptrTy, {i8Ty}, false);
 
-  FunctionTable[kStrInt] = {kPaykanStringFromInt, ptrFromI64, false};
-  FunctionTable[kStrFloat] = {kPaykanStringFromFloat, ptrFromDbl, false};
-  FunctionTable[kStrBool] = {kPaykanStringFromBool, ptrFromI64, false};
-  FunctionTable[kStrChar] = {kPaykanStringFromChar, ptrFromI8, false};
+  FunctionTable[kStrInt] = {kPaykanStringFromInt, ptrFromI64};
+  FunctionTable[kStrFloat] = {kPaykanStringFromFloat, ptrFromDbl};
+  FunctionTable[kStrBool] = {kPaykanStringFromBool, ptrFromI64};
+  FunctionTable[kStrChar] = {kPaykanStringFromChar, ptrFromI8};
 
   // open(path: Str, mode: Str) -> Obj  (PaykanShared*)
   auto *ptrFromPtrPtr = llvm::FunctionType::get(ptrTy, {ptrTy, ptrTy}, false);
-  FunctionTable[kOpen] = {kPaykanFileOpen, ptrFromPtrPtr, false};
+  FunctionTable[kOpen] = {kPaykanFileOpen, ptrFromPtrPtr};
 
   // IntStr(s: Str) -> Obj  /  FloatStr(s: Str) -> Obj  (PaykanShared*)
   auto *ptrFromPtr = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
-  FunctionTable[kIntStr] = {kPaykanIntFromStr, ptrFromPtr, false};
-  FunctionTable[kFloatStr] = {kPaykanFloatFromStr, ptrFromPtr, false};
+  FunctionTable[kIntStr] = {kPaykanIntFromStr, ptrFromPtr};
+  FunctionTable[kFloatStr] = {kPaykanFloatFromStr, ptrFromPtr};
 
   // Identity constructors — just return the argument as-is.
   IdentityCtors.insert(kString);
@@ -798,7 +816,7 @@ llvm::Value *CodeGen::emitAsShared(ast::Expr *expr) {
       llvm::Value *idx = emitExpr(se->getIndex());
       if (idx->getType()->isIntegerTy(1))
         idx = Builder.CreateZExt(idx, i64Ty);
-      llvm::Value *arrRaw = emitExpr(se->getArray());
+      llvm::Value *arrRaw = emitUnwrappedRef(se->getArray());
       auto *getFnTy = llvm::FunctionType::get(i64Ty, {ptrTy, i64Ty}, false);
       llvm::Value *bits = Builder.CreateCall(
           declareFunction(kPaykanArrayGet, getFnTy), {arrRaw, idx}, kIRElemRaw);
@@ -1300,19 +1318,11 @@ CodeGen::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
   // self.field[i].
   bool receiverIsStr = (node->getResolvedType() == CG.ASTCtx.getCharTy());
 
-  // String subscript: str[idx] -> char  (PaykanString_char_at)
+  // String subscript: str[idx] -> char  (PaykanString_char_at).
   if (receiverIsStr) {
-    llvm::Value *strRaw = visit(node->getArray());
+    llvm::Value *strRaw = CG.emitUnwrappedRef(node->getArray(), "str.obj");
     if (!strRaw)
       return nullptr;
-    // visit() returns a PaykanShared* when the array expression is a member-
-    // access field or a ref-returning call.  PaykanString_char_at expects the
-    // unwrapped PaykanString*, so unbox via PaykanShared_get when needed.
-    if (CG.exprAlreadyShared(node->getArray())) {
-      auto *getFnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
-      strRaw = CG.Builder.CreateCall(
-          CG.declareFunction(kPaykanSharedGet, getFnTy), {strRaw}, "str.obj");
-    }
     auto *i8Ty = llvm::Type::getInt8Ty(CG.LLVMCtx);
     auto *charAtFnTy = llvm::FunctionType::get(i8Ty, {ptrTy, i64Ty}, false);
     return CG.Builder.CreateCall(
@@ -1320,14 +1330,11 @@ CodeGen::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
         "str.char_at");
   }
 
-  // Array subscript: arr[idx]
-  // visitIdentifier already calls PaykanShared_get for owned array vars,
-  // so visit() yields the raw PaykanArray* directly.
-  llvm::Value *arrRaw = visit(node->getArray());
+  // Array subscript: arr[idx] -> PaykanArray_get(arr, idx) -> i64.
+  llvm::Value *arrRaw = CG.emitUnwrappedRef(node->getArray(), "arr.obj");
   if (!arrRaw)
     return nullptr;
 
-  // Call PaykanArray_get(arr, idx) -> i64.
   auto *getFnTy = llvm::FunctionType::get(i64Ty, {ptrTy, i64Ty}, false);
   llvm::Value *raw = CG.Builder.CreateCall(
       CG.declareFunction(kPaykanArrayGet, getFnTy), {arrRaw, idx}, kIRElemRaw);
@@ -1608,10 +1615,6 @@ llvm::Value *CodeGen::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
   llvm::Function *callee = CG.declareFunction(info.RuntimeName, info.FnTy);
 
   std::vector<llvm::Value *> args;
-  if (info.IsVariadic) {
-    auto *i64Ty = llvm::Type::getInt64Ty(CG.LLVMCtx);
-    args.push_back(llvm::ConstantInt::get(i64Ty, node->getNumArguments()));
-  }
 
   // Owned argument temporaries the builtin borrows: raw PaykanString* temps
   // (string literals, StrInt/StrFloat/StrBool results, concatenations) and
@@ -2006,35 +2009,17 @@ CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node) {
         (isUserDefinedMethod || node->getMethodName() == names::kMethodEquals);
 
     if (isClassParam) {
-      // Class-type param: must arrive as PaykanShared* (callee releases on
-      // scope exit).
-      llvm::Value *v = nullptr;
-      if (auto *id = ast::dyn_cast<ast::Identifier>(argExpr)) {
-        if (CG.CurrentScope && CG.CurrentScope->isOwned(id->getName())) {
-          auto *argAlloca = CG.CurrentScope->lookup(id->getName());
-          v = CG.Builder.CreateLoad(ptrTy, argAlloca, id->getName());
-          CG.emitRetain(v);
-        } else if (CG.CurrentScope) {
-          // Unowned alias (e.g. a match binding stores the raw object, not a
-          // box). Pass its backing PaykanShared* — retained so the callee can
-          // consume it — instead of wrapping the borrowed object in a fresh
-          // box, which would double-free the inner on release.
-          if (llvm::Value *backing =
-                  CG.CurrentScope->lookupBackingShared(id->getName())) {
-            CG.emitRetain(backing);
-            v = backing;
-          }
-        }
-      }
-      if (!v) {
-        llvm::Value *raw = visit(argExpr);
-        if (!raw)
-          return nullptr;
-        if (auto *sl = ast::dyn_cast<ast::StringLiteral>(argExpr))
-          raw = CG.wrapStringLiteral(raw, sl->getValue().size());
-        v = CG.exprAlreadyShared(argExpr) ? raw
-                                          : CG.emitSharedNew(raw, kIRArgShared);
-      }
+      // Class-type param uses the callee-consumes ABI: the argument must
+      // arrive as an owned (+1) PaykanShared* that the callee releases on
+      // scope exit.  emitAsShared produces exactly that for every expression
+      // form — retaining borrowed member-access / array-element / owned-
+      // identifier boxes, passing fresh call/ternary results through, and
+      // boxing raw values / string literals.  (Previously a borrowed member
+      // access was passed without retaining, so the callee's release and the
+      // owner's release together freed the object one time too many.)
+      llvm::Value *v = CG.emitAsShared(argExpr);
+      if (!v)
+        return nullptr;
       args.push_back(v);
       continue;
     }
@@ -2111,8 +2096,9 @@ llvm::Value *CodeGen::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   auto *i64Ty = llvm::Type::getInt64Ty(LLVMCtx);
   auto *voidTy = llvm::Type::getVoidTy(LLVMCtx);
 
-  // Get the raw PaykanArray*.
-  llvm::Value *arrRaw = emitExpr(node->getArray());
+  // Get the raw PaykanArray* (unwrapping the box for member-access fields,
+  // call results, etc. — not just bare identifiers).
+  llvm::Value *arrRaw = emitUnwrappedRef(node->getArray());
   if (!arrRaw)
     return nullptr;
 
@@ -2123,13 +2109,21 @@ llvm::Value *CodeGen::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   if (idx->getType()->isIntegerTy(1))
     idx = Builder.CreateZExt(idx, i64Ty);
 
-  // Determine element type from the array expression's AST type in scope.
+  // Determine the element type from the array expression's resolved type, so
+  // this works for any array-valued receiver (identifier, self.field, arr[i],
+  // call()), not only bare identifiers in scope.
   ast::Type *elemTy = nullptr;
-  if (auto *id = ast::dyn_cast<ast::Identifier>(node->getArray())) {
-    if (CurrentScope) {
-      if (auto *at = ast::dyn_cast<ast::ArrayType>(
-              CurrentScope->lookupASTType(id->getName())))
-        elemTy = at->getElementType();
+  if (ast::Type *arrTy = node->getArray()->getResolvedType()) {
+    if (auto *at = ast::dyn_cast<ast::ArrayType>(arrTy))
+      elemTy = at->getElementType();
+  }
+  if (!elemTy) {
+    if (auto *id = ast::dyn_cast<ast::Identifier>(node->getArray())) {
+      if (CurrentScope) {
+        if (auto *st = CurrentScope->lookupASTType(id->getName()))
+          if (auto *at = ast::dyn_cast<ast::ArrayType>(st))
+            elemTy = at->getElementType();
+      }
     }
   }
 

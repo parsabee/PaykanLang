@@ -5,44 +5,44 @@
 fn main() -> int {
   // ---- Integer arithmetic ---------------------------------------------------
   println("=== int arithmetic ===");
-  println("2+3=",    StrInt(2 + 3));       // 5
-  println("10-4=",   StrInt(10 - 4));      // 6
-  println("3*7=",    StrInt(3 * 7));       // 21
-  println("20/4=",   StrInt(20 / 4));      // 5
-  println("17%5=",   StrInt(17 % 5));      // 2
-  println("7%7=",    StrInt(7 % 7));       // 0
+  println("2+3=" + StrInt(2 + 3));       // 5
+  println("10-4=" + StrInt(10 - 4));      // 6
+  println("3*7=" + StrInt(3 * 7));       // 21
+  println("20/4=" + StrInt(20 / 4));      // 5
+  println("17%5=" + StrInt(17 % 5));      // 2
+  println("7%7=" + StrInt(7 % 7));       // 0
 
   // Operator precedence
-  println("2+3*4=",  StrInt(2 + 3 * 4));          // 14
-  println("(2+3)*4=",StrInt((2 + 3) * 4));        // 20
-  println("10-2*3=", StrInt(10 - 2 * 3));         // 4
-  println("8/2+1=",  StrInt(8 / 2 + 1));          // 5
-  println("10%3+1=", StrInt(10 % 3 + 1));         // 2
+  println("2+3*4=" + StrInt(2 + 3 * 4));          // 14
+  println("(2+3)*4=" + StrInt((2 + 3) * 4));        // 20
+  println("10-2*3=" + StrInt(10 - 2 * 3));         // 4
+  println("8/2+1=" + StrInt(8 / 2 + 1));          // 5
+  println("10%3+1=" + StrInt(10 % 3 + 1));         // 2
 
   // Negative numbers (via subtraction)
-  println("0-5=",    StrInt(0 - 5));              // -5
-  println("0-5*2=",  StrInt(0 - 5 * 2));         // -10
+  println("0-5=" + StrInt(0 - 5));              // -5
+  println("0-5*2=" + StrInt(0 - 5 * 2));         // -10
 
   // ---- Float arithmetic -----------------------------------------------------
   println("=== float arithmetic ===");
-  println("1.5+2.5=",  StrFloat(1.5 + 2.5));      // 4
-  println("5.0-1.5=",  StrFloat(5.0 - 1.5));      // 3.5
-  println("2.0*3.5=",  StrFloat(2.0 * 3.5));      // 7
-  println("7.0/2.0=",  StrFloat(7.0 / 2.0));      // 3.5
-  println("5.5%2.0=",  StrFloat(5.5 % 2.0));      // 1.5
+  println("1.5+2.5=" + StrFloat(1.5 + 2.5));      // 4
+  println("5.0-1.5=" + StrFloat(5.0 - 1.5));      // 3.5
+  println("2.0*3.5=" + StrFloat(2.0 * 3.5));      // 7
+  println("7.0/2.0=" + StrFloat(7.0 / 2.0));      // 3.5
+  println("5.5%2.0=" + StrFloat(5.5 % 2.0));      // 1.5
 
   // ---- Int->float promotion --------------------------------------------------
   println("=== int->float promotion ===");
   // In binary expr: one side is float, other is int
-  println("1+0.5=",    StrFloat(1 + 0.5));        // 1.5
-  println("0.5+1=",    StrFloat(0.5 + 1));        // 1.5
-  println("3*1.0=",    StrFloat(3 * 1.0));        // 3
+  println("1+0.5=" + StrFloat(1 + 0.5));        // 1.5
+  println("0.5+1=" + StrFloat(0.5 + 1));        // 1.5
+  println("3*1.0=" + StrFloat(3 * 1.0));        // 3
   // In variable declaration: explicit float var gets int expr
   promoted: float = 7;
-  println("float=7: ", StrFloat(promoted));        // 7
+  println("float=7: " + StrFloat(promoted));        // 7
   // Rebind
   promoted = 3;
-  println("float=3: ", StrFloat(promoted));        // 3
+  println("float=3: " + StrFloat(promoted));        // 3
 
   // ---- Chained assignments and compound exprs ------------------------------
   println("=== chained ===");
@@ -50,7 +50,7 @@ fn main() -> int {
   x = x + 10;
   x = x * 2;
   x = x - 3;
-  println("x=(1+10)*2-3=", StrInt(x));            // 19
+  println("x=(1+10)*2-3=" + StrInt(x));            // 19
 
   return 0;
 }
