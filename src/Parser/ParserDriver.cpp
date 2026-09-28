@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "ParserDriverImpl.h"
+#include <cerrno>
+#include <cstring> // strerror
 #include <fstream>
+#include <iostream>
 
 namespace paykan::parser {
 
@@ -24,7 +27,20 @@ int ParserDriver::parseFile(const std::string &filename) {
     PImpl->SourceLines.push_back(line);
 
   PImpl->Location.initialize(&PImpl->CurFile);
-  PImpl->scanBegin();
+  if (!PImpl->scanBegin()) {
+    // The input file could not be opened.  Report through the attached
+    // DiagEngine when there is one (same channel as every other compiler
+    // diagnostic) with an invalid location -- there is no source to point
+    // at -- and fall back to stderr otherwise.  Either way the parse fails
+    // cleanly; library code must never exit() the whole process.
+    ++PImpl->ErrorCount;
+    std::string msg = "cannot open '" + filename + "': " + std::strerror(errno);
+    if (PImpl->Diags)
+      PImpl->Diags->error(ast::SourceLocation(), msg);
+    else
+      std::cerr << "error: " << msg << "\n";
+    return 1;
+  }
   int result = PImpl->parse(*this);
   PImpl->scanEnd();
   return (result != 0 || PImpl->ErrorCount > 0) ? 1 : 0;

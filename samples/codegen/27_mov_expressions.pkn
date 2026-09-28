@@ -1,0 +1,71 @@
+// 27 — mov as an expression: using `mov` in every operand position
+// Exercises: MovExpr nested inside call arguments, method-call arguments,
+//            constructor arguments, array-literal elements, ternary branches,
+//            concatenation operands, and as a (parenthesised) method receiver.
+//            Also exercises the receiver teardown that releases a freshly-owned
+//            temporary receiver such as `(mov s).len()` (no leak).
+//
+// `mov <expr>` is an expression, so it composes anywhere a value is expected.
+
+class Box {
+  v: Str;
+  fn __init__(s: Str) {
+    self.v = s;
+  }
+  fn get() -> Str {
+    return self.v;
+  }
+  fn combine(other: Str) -> Str {
+    return self.v + other;
+  }
+}
+
+fn shout(s: Str) -> Str {
+  return s + "!";
+}
+
+fn main() -> int {
+  println("=== mov in a free-function argument ===");
+  a: Str = "arg";
+  println(shout(mov a));                 // arg!
+
+  println("=== mov in a method-call argument ===");
+  b: Box = Box("base");
+  tail: Str = "-tail";
+  println(b.combine(mov tail));          // base-tail
+
+  println("=== mov in a constructor argument ===");
+  payload: Str = "boxed";
+  b2: Box = Box(mov payload);
+  println(b2.get());                     // boxed
+
+  println("=== mov in array-literal elements ===");
+  e0: Str = "x";
+  e1: Str = "y";
+  arr: Str[] = [mov e0, mov e1];
+  println(arr[0] + arr[1]);              // xy
+
+  println("=== mov in ternary branches ===");
+  left: Str = "yes";
+  right: Str = "no";
+  flag: bool = True;
+  pick: Str = if flag then mov left else mov right;
+  println(pick);                         // yes
+
+  println("=== mov as concatenation operands ===");
+  h: Str = "hello ";
+  w: Str = "world";
+  joined: Str = (mov h) + (mov w);
+  println(joined);                       // hello world
+
+  println("=== mov as a (parenthesised) method receiver ===");
+  recv: Str = "receiver";
+  len: int = (mov recv).len();
+  println(StrInt(len));                  // 8
+
+  println("=== mov directly into println ===");
+  d: Str = "direct";
+  println(mov d);                        // direct
+
+  return 0;
+}

@@ -1,0 +1,7 @@
+// ERR: == requires structurally equal array types — int[] vs Str[] mismatch
+fn main() -> int {
+  a: int[] = [1];
+  b: Str[] = ["x"];
+  eq: bool = a == b;
+  return 0;
+}

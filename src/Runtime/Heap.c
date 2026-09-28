@@ -177,8 +177,6 @@ int Paykan_heap_tracking_enabled(void) { return g_tracking_enabled; }
 
 void Paykan_heap_reset(void) { memset(&g_stats, 0, sizeof(g_stats)); }
 
-PaykanHeapStats Paykan_heap_stats(void) { return g_stats; }
-
 int64_t Paykan_heap_live_blocks(void) { return g_stats.liveBlocks; }
 
 int64_t Paykan_heap_live_bytes(void) { return g_stats.liveBytes; }

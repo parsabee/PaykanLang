@@ -254,3 +254,62 @@ TEST(ControlFlow, BreakInNestedLoop) {
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
+
+// ============================================================================
+// Return-path analysis: bool-exhaustive match (True + False literal arms)
+// ============================================================================
+
+TEST(ControlFlow, BoolMatchTrueFalseArmsIsExhaustiveReturn) {
+  auto r = semaCheck(R"(
+    fn pick(b: bool) -> int {
+      match b {
+        True  { return 1; }
+        False { return 0; }
+      }
+    }
+    fn main() -> int { return pick(True); }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(ControlFlow, BoolMatchMissingFalseArmRejected) {
+  auto r = semaCheck(R"(
+    fn pick(b: bool) -> int {
+      match b {
+        True { return 1; }
+      }
+    }
+    fn main() -> int { return pick(True); }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("does not always return"), std::string::npos);
+}
+
+TEST(ControlFlow, BoolMatchArmWithoutReturnRejected) {
+  auto r = semaCheck(R"(
+    fn pick(b: bool) -> int {
+      match b {
+        True  { return 1; }
+        False { println("no"); }
+      }
+    }
+    fn main() -> int { return pick(True); }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("does not always return"), std::string::npos);
+}
+
+TEST(ControlFlow, IntMatchLiteralArmsNotExhaustive) {
+  // Literal coverage is only decidable for bool subjects.
+  auto r = semaCheck(R"(
+    fn pick(n: int) -> int {
+      match n {
+        0 { return 1; }
+        1 { return 0; }
+      }
+    }
+    fn main() -> int { return pick(0); }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("does not always return"), std::string::npos);
+}

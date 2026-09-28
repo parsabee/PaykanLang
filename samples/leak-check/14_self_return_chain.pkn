@@ -1,0 +1,27 @@
+// Isolates: `self` used as a value — returned (and chained) out of a method.
+// Every ownership-taking use of the raw `self` parameter must recover the
+// object's unique PaykanShared box via its header backpointer (Shared.c,
+// unique-box invariant) instead of wrapping `self` in a second box; a second
+// box would drop to zero on its own and destroy the object while the caller's
+// box still owns it (double free).
+//
+// Runtime allocation sites: one object struct + its unique PaykanShared box,
+// retained once per chained `return self` hop and by the extra owner `c`.
+//
+// Expected under --track-heap: live blocks : 0.
+
+class Counter {
+  n: int;
+  fn __init__() { self.n = 0; }
+  fn bump() -> Counter {
+    self.n = self.n + 1;
+    return self;
+  }
+}
+
+fn main() -> int {
+  a: Counter = Counter();
+  c: Counter = a.bump().bump().bump();  // each hop retains the same box
+  println(StrInt(c.n));                 // 3
+  return 0;
+}

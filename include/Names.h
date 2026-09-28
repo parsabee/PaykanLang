@@ -13,7 +13,6 @@ inline constexpr const char *kPrint = "print";
 inline constexpr const char *kPrintln = "println";
 inline constexpr const char *kErrPrint = "printerr";
 inline constexpr const char *kErrPrintln = "printerrln";
-inline constexpr const char *kFlush = "flush";
 inline constexpr const char *kLen = "len";
 inline constexpr const char *kPush = "push";
 inline constexpr const char *kPop = "pop";
@@ -29,9 +28,6 @@ inline constexpr const char *kStdin = "Stdin";
 inline constexpr const char *kIntBox = "Int";
 inline constexpr const char *kFloatBox = "Float";
 inline constexpr const char *kBoolBox = "Bool";
-
-// Built-in literals
-inline constexpr const char *kNone = "None";
 
 // Built-in method names
 inline constexpr const char *kMethodInit = "__init__";
@@ -140,7 +136,6 @@ inline constexpr const char *kPaykanPrint = "Paykan_print";
 inline constexpr const char *kPaykanPrintln = "Paykan_println";
 inline constexpr const char *kPaykanErrPrint = "Paykan_printerr";
 inline constexpr const char *kPaykanErrPrintln = "Paykan_printerrln";
-inline constexpr const char *kPaykanFlush = "Paykan_flush";
 
 // Runtime panics (noreturn)
 inline constexpr const char *kPaykanPanicDivByZero = "Paykan_panic_div_by_zero";
@@ -151,12 +146,13 @@ inline constexpr const char *kPaykanSharedGet = "PaykanShared_get";
 inline constexpr const char *kPaykanRetain = "Paykan_retain";
 inline constexpr const char *kPaykanRelease = "Paykan_release";
 
-// Tracking heap allocator
+// Tracking heap allocator.  Object structs emitted by CodeGen are allocated
+// through kPaykanMalloc as well, so JIT/AOT-generated allocations are counted
+// alongside the runtime's own (see src/Runtime/Heap.c).
 inline constexpr const char *kPaykanMalloc = "Paykan_malloc";
 inline constexpr const char *kPaykanRealloc = "Paykan_realloc";
 inline constexpr const char *kPaykanFree = "Paykan_free";
 inline constexpr const char *kPaykanHeapReset = "Paykan_heap_reset";
-inline constexpr const char *kPaykanHeapStats = "Paykan_heap_stats";
 inline constexpr const char *kPaykanHeapLiveBlocks = "Paykan_heap_live_blocks";
 inline constexpr const char *kPaykanHeapLiveBytes = "Paykan_heap_live_bytes";
 
@@ -183,13 +179,6 @@ inline constexpr const char *kVTableSuffix =
 inline constexpr const char *kStructSuffix =
     "_struct"; ///< Suffix for LLVM struct type names
 
-// -- C runtime symbols ------------------------------------------------------
-
-// Object structs emitted by CodeGen are allocated through the tracking
-// allocator so that JIT/AOT-generated allocations are counted alongside the
-// runtime's own (see src/Runtime/Heap.c).
-inline constexpr const char *kMalloc = "Paykan_malloc";
-
 // -- Cache ------------------------------------------------------------------
 
 inline constexpr const char *kCacheDir = ".paykan_cache";
@@ -203,7 +192,7 @@ inline constexpr const char *kCacheDir = ".paykan_cache";
 //
 inline constexpr const char *kCodeGenRequiredSymbols[] = {
     // Memory / RC
-    kMalloc,
+    kPaykanMalloc,
     kPaykanFree,
     kPaykanRetain,
     kPaykanRelease,

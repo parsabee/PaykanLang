@@ -804,3 +804,81 @@ TEST(Class, InitDerivedOwnFieldOnlyAccepted) {
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
+
+// ============================================================================
+// `self` as a parameter name is rejected
+// ============================================================================
+
+TEST(Class, SelfParameterNameRejected) {
+  auto r = semaCheck(R"(
+    class A {
+      fn __init__() {}
+      fn m(self: int) -> int { return 1; }
+    }
+    fn main() -> int {
+      a: A = A();
+      return 0;
+    }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("'self' cannot be used as a parameter name"),
+            std::string::npos);
+}
+
+TEST(Class, SelfParameterNameInInitRejected) {
+  auto r = semaCheck(R"(
+    class A {
+      fn __init__(self: int) {}
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("'self' cannot be used as a parameter name"),
+            std::string::npos);
+}
+
+// ============================================================================
+// __init__ definite-assignment: bool-exhaustive match
+// ============================================================================
+
+TEST(Class, InitFieldAssignedInBoolMatchArmsOk) {
+  // True + False literal arms over a bool subject cover every value, so a
+  // field assigned in both arms is definitely assigned.
+  auto r = semaCheck(R"(
+    class A {
+      x: int;
+      fn __init__(b: bool) {
+        match b {
+          True  { self.x = 1; }
+          False { self.x = 0; }
+        }
+      }
+    }
+    fn main() -> int {
+      a: A = A(True);
+      return a.x;
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Class, InitFieldMissingInOneBoolMatchArmRejected) {
+  auto r = semaCheck(R"(
+    class A {
+      x: int;
+      fn __init__(b: bool) {
+        match b {
+          True  { self.x = 1; }
+          False { println("no"); }
+        }
+      }
+    }
+    fn main() -> int {
+      a: A = A(True);
+      return a.x;
+    }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("not assigned on every path"),
+            std::string::npos);
+}

@@ -1,10 +1,14 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(PaykanLang
-    VERSION 0.0.0
+    VERSION 0.1.0
     DESCRIPTION "A performant, productive, statically-typed, object-oriented programming language."
     LANGUAGES C CXX
 )
+
+# Pre-release label appended to the dotted version, e.g. "0.1.0-alpha".
+# Leave empty for a final release.
+set(PAYKAN_VERSION_PRERELEASE "alpha")
 
 # -- Language standard --------------------------------------------------------
 set(CMAKE_CXX_STANDARD 20)
@@ -82,6 +86,9 @@ set(PAYKAN_VERSION       ${PROJECT_VERSION})
 set(PAYKAN_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
 set(PAYKAN_VERSION_MINOR ${PROJECT_VERSION_MINOR})
 set(PAYKAN_VERSION_PATCH ${PROJECT_VERSION_PATCH})
+if(PAYKAN_VERSION_PRERELEASE)
+    set(PAYKAN_VERSION "${PAYKAN_VERSION}-${PAYKAN_VERSION_PRERELEASE}")
+endif()
 set(PAYKAN_GENERATED_INCLUDE_DIR ${CMAKE_BINARY_DIR}/generated/include)
 configure_file(
     ${CMAKE_SOURCE_DIR}/include/Version.h.in

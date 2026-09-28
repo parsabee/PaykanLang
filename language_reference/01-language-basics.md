@@ -21,8 +21,11 @@ collector.
 
 - A Paykan program is a list of **top-level declarations**: imports, classes, and functions.
   There are no top-level statements.
-- Execution begins at `main`, which must return `int`.
-- Functions and classes must be **declared before use**.
+- Execution begins at `main`, which must return `int`. Its return value becomes the process
+  exit code. `main` may optionally take the command-line arguments as `fn main(args: Str[]) -> int`;
+  `args[0]` is the source-file path and the remaining elements are the arguments after it.
+- Declarations may appear in **any order** — a function or class may be used before the point
+  in the file where it is declared (forward references are allowed).
 - **No function overloading** — each function name must be unique.
 - Comments use `//` (single-line only).
 - Modules are imported with `import path::to::module;`. See `06-modules.md` for details.
@@ -49,6 +52,7 @@ fn main() -> int {
 | `int`   | `i64`     | 64-bit signed integer               |
 | `float` | `double`  | 64-bit IEEE 754 floating-point      |
 | `bool`  | `i1`      | Boolean — literals `True` / `False` |
+| `char`  | `i8`      | Character — literals `'a'`, `'\n'`  |
 | `void`  | `void`    | Function return type only           |
 
 - `int` -> `float` promotion is implicit when assigning or passing to a `float` parameter.
@@ -56,12 +60,18 @@ fn main() -> int {
 ### String Type
 
 `Str` is a built-in heap-allocated class type. String literals produce a `Str`. The `+`
-operator concatenates two `Str` values and returns a new `Str`.
+operator concatenates two `Str` values and returns a new `Str`. `s.len()` returns the
+length as an `int`, and subscripting `s[i]` reads the `char` at index `i`.
 
 ```pkn
 s: Str = "hello";
 t: Str = s + " world";   // "hello world"
+n: int = t.len();        // 11
+c: char = t[0];          // 'h'
 ```
+
+A string literal must close on the line it opens — a raw newline inside a string literal is a
+compile-time error. Use the `\n` escape for line breaks.
 
 ### Arrays
 
@@ -78,7 +88,7 @@ mat: int[][] = [[1, 2], [3, 4]];   // 2D
 
 | Slot       | Signature                       | Default              |
 |------------|---------------------------------|----------------------|
-| `toString` | `fn toString() -> Str`          | Returns class name   |
+| `toString` | `fn toString() -> Str`          | Returns `Object@<address>` (a per-class name is planned) |
 | `equals`   | `fn equals(other: Obj) -> bool` | Identity comparison  |
 | `destroy`  | (compiler-generated)            | Destructor — final, runs on last release |
 
@@ -157,8 +167,14 @@ n: Obj = None;
 | Integer        | `int`   | `0`, `42`, `-17`  |
 | Floating-point | `float` | `3.14`, `0.5`     |
 | Boolean        | `bool`  | `True`, `False`   |
+| Character      | `char`  | `'a'`, `'\n'`, `'\t'` |
 | String         | `Str`   | `"hello"`, `""`   |
 | None           | `Obj`   | `None`            |
+
+An integer literal must fit in a signed 64-bit integer; a larger one (above
+`9223372036854775807`) is a compile-time error. `-17` is unary minus applied to the literal
+`17`, so the most negative `int` cannot be written directly — compute it as
+`-9223372036854775807 - 1`.
 
 ### Arithmetic
 
@@ -184,6 +200,15 @@ Result type is `float` if either operand is `float`, otherwise `int`.
 `<`, `>`, `<=`, `>=`, `==`, `!=` — result is `bool`.
 Equality operators require compatible types.
 
+For **reference types** (classes, `Str`, arrays), `==` dispatches to `equals`: `a == b` invokes
+`a.equals(b)` through the vtable, and `a != b` is its negation. A class may override `equals` to
+define what equality means for it; the default (inherited from `Obj`) compares object identity, so
+two separately-constructed instances are unequal unless the class overrides `equals`. `Str`
+overrides `equals` to compare by content, so `"ab" == "ab"` is `True`. Arrays do **not**
+override it: array `==` compares reference identity, and both operands must be arrays of the
+**same element type** (`int[] == Str[]` is a compile-time error; see `05-arrays.md`). For
+**value types** (`int`, `float`, `bool`, `char`, enums) `==` compares the values directly.
+
 ### Logical
 
 | Op     | Meaning     | Short-circuits |
@@ -207,18 +232,39 @@ result: int = if x > 0 then x else 0 - x;
 label: Str = if score >= 90 then "A" else if score >= 80 then "B" else "C";
 ```
 
+### Move (`mov`)
+
+`mov <expr>` transfers ownership of a value rather than copying/sharing it. It applies to a local
+variable or a temporary. Moving a variable **consumes** it — the variable may not be used again
+until it is re-assigned:
+
+```pkn
+a: int = 3;
+b = mov a;        // b takes a's value; a is consumed
+// c = a;         // error: use of moved variable 'a'
+
+s: Str = "hi";
+t = mov s;        // t takes ownership of the string with no extra retain/release
+```
+
+A member variable (`obj.field`) or array element (`arr[i]`) cannot be moved. `mov` binds like a
+unary prefix operator. See `08-memory-model.md` for how moves interact with reference counting.
+
 ### Operator Precedence (highest -> lowest)
 
 | Level | Operators                              | Associativity  |
 |-------|----------------------------------------|----------------|
 | 1     | postfix: `.method()`, `.field`, `[i]`  | Left           |
-| 2     | `!`, `-` (unary)                       | Right (prefix) |
+| 2     | `!`, `-` (unary), `mov`                | Right (prefix) |
 | 3     | `*`, `/`, `%`                          | Left           |
 | 4     | `+`, `-`                               | Left           |
-| 5     | `<`, `>`, `<=`, `>=`, `==`, `!=`       | Left           |
+| 5     | `<`, `>`, `<=`, `>=`, `==`, `!=`       | **Non-associative** |
 | 6     | `&&`                                   | Left           |
 | 7     | `\|\|`                                 | Left           |
 | 8     | `if…then…else` (ternary)               | Right          |
+
+Comparison and equality operators do **not** chain: `1 < 2 < 3` and `1 < 2 == True` are syntax
+errors — parenthesize instead, e.g. `(1 < 2) == True`.
 
 ---
 
@@ -373,6 +419,7 @@ print("a=" + StrInt(a) + " b=" + StrInt(b));
 | `StrInt(n)`   | `int`   | Integer as string       |
 | `StrFloat(f)` | `float` | Float as string         |
 | `StrBool(b)`  | `bool`  | `"True"` or `"False"`   |
+| `StrChar(c)`  | `char`  | One-character string    |
 
 ```pkn
 println(StrInt(42));      // "42"

@@ -3,8 +3,7 @@
 //
 // Thin wrapper around LLVM ORC LLJIT for Paykan JIT execution.
 
-#ifndef PAYKAN_JIT_H
-#define PAYKAN_JIT_H
+#pragma once
 
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <llvm/ExecutionEngine/Orc/ThreadSafeModule.h>
@@ -26,5 +25,3 @@ llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
                               const std::vector<std::string> &args = {});
 
 } // namespace paykan::jit
-
-#endif // PAYKAN_JIT_H

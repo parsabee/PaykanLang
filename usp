@@ -1,0 +1,27 @@
+this is the USP(unique selling point) of Paykan.
+
+version 0.1 roadmap:
+	- clean, sequential, simple programming language for users.
+	- compiler generates mlir code
+	- ai assisted optimization to offload and parallelize code
+	- ai optimization should be cleanly integrated in the compiler with safe gaurdrails that prevent erroneous code gen
+	- universal plugin for ai models (claude code, chat gpt, ...)
+
+alpha release:
+	- working, no major bugs, version of the language
+        - module system improved
+	- generate llvm ir
+	- jit orc
+
+beta release:
+        - add syntax for loops and static arrays
+	- generate mlir, with a custom dialect.
+	- write mcp server for ai to understand our dialect and the lowering paths. 
+	- write mcp server for ai to detect parallelizable, async, and offloadable work and rewrite the code with these optimizations
+	- support plugin ai llm.
+	- jit
+
+0.1:
+	- all major bugs resolved
+	- generate binary + jit
+	- package manager

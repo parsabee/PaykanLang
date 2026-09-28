@@ -7,7 +7,8 @@ inheritance, and the `Obj` root.
 
 ## Quick Summary
 
-- Class instances are **heap-allocated** with a leading vtable pointer; layout is `{ vptr, fields… }`.
+- Class instances are **heap-allocated** with a leading vtable pointer; layout is
+  `{ vptr, owner-box pointer, fields… }` (see `08-memory-model.md` for the owner box).
 - Class names use `UpperCamelCase`.
 - Every class transitively extends `Obj`. There is no multiple inheritance.
 - **All methods declared inside a class are virtual** — dispatched through the vtable.
@@ -180,12 +181,18 @@ Every class transitively extends `Obj`. `Obj` defines:
 
 | Slot       | Signature                       | Default                      |
 |------------|---------------------------------|------------------------------|
-| `toString` | `fn toString() -> Str`          | Returns the class name       |
+| `toString` | `fn toString() -> Str`          | Returns `Object@<address>` (a per-class name is planned) |
 | `equals`   | `fn equals(other: Obj) -> bool` | Identity (pointer) comparison |
 | `destroy`  | (compiler-generated)            | Frees the object             |
 
 Override `toString` and `equals` in your class to customise behaviour. `destroy` is generated
 by the compiler and is final — it cannot be overridden.
+
+The `==` and `!=` operators are defined in terms of `equals`: `a == b` evaluates `a.equals(b)`
+and `a != b` its negation, dispatched through the vtable. So overriding `equals` also changes how
+`==`/`!=` behave for your class. The default `equals` compares object identity, meaning two
+distinct instances are unequal unless you override it (typically by matching on the other object's
+type and comparing fields).
 
 ```pkn
 class Person {

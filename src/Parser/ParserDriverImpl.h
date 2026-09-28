@@ -52,8 +52,9 @@ struct ParserDriver::Impl {
   explicit Impl(bool TraceParsing, bool TraceScanning)
       : TraceParsing(TraceParsing), TraceScanning(TraceScanning) {}
 
-  /// Handling the scanner.
-  void scanBegin();
+  /// Handling the scanner.  scanBegin returns false when the input file
+  /// cannot be opened (errno is left set); the caller reports the failure.
+  bool scanBegin();
   void scanEnd();
   int parse(ParserDriver &drv);
 };

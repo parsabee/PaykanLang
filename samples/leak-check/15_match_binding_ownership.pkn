@@ -1,0 +1,38 @@
+// Isolates: ownership-taking uses of a match-arm binding.
+// The binding is a raw unowned alias of the subject; consuming it — as a
+// function argument, a new owned variable, or a class field — must retain the
+// subject's existing PaykanShared box (recovered through the object-header
+// backpointer, Shared.c) rather than boxing the raw alias afresh, which would
+// double-free against the subject's owner.
+//
+// Runtime allocation sites: two object structs + their PaykanShared boxes
+// (the matched A and the Holder), shared across the binding's consumers.
+//
+// Expected under --track-heap: live blocks : 0.
+
+class A {
+  x: int;
+  fn __init__() { self.x = 5; }
+}
+
+class Holder {
+  a: A;
+  fn __init__(a0: A) { self.a = a0; }
+}
+
+fn probe(a: A) { println(StrInt(a.x)); }
+
+fn main() -> int {
+  o: Obj = A();
+  h: Holder = Holder(A());
+  match o {
+    b: A {
+      probe(b);      // consumed argument: retains the subject's box
+      c: A = b;      // new owner: shares the same box
+      h.a = b;       // field slot: releases old box, retains subject's
+      println(StrInt(c.x + h.a.x));  // 10
+    }
+    _ { println("no"); }
+  }
+  return 0;
+}

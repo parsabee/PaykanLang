@@ -9,6 +9,7 @@
 // other heap object.
 
 #include "Runtime.h"
+#include "RuntimeInternal.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -28,6 +29,7 @@ PaykanObjectVTable PaykanInt_vtable = {
 PaykanInt *PaykanInt_new(int64_t value) {
   PaykanInt *obj = (PaykanInt *)Paykan_malloc(sizeof(PaykanInt));
   obj->vtable = &PaykanInt_vtable;
+  obj->shared = NULL; // not yet boxed (unique-box invariant)
   obj->value = value;
   return obj;
 }
@@ -40,12 +42,11 @@ PaykanShared *PaykanInt_toString(PaykanObject *self) {
 }
 
 int64_t PaykanInt_equals(PaykanObject *self, PaykanObject *other) {
-  // `other` arrives as a PaykanShared box and is consumed by this call.
-  PaykanObject *o = PaykanShared_get((PaykanShared *)other);
-  int64_t result = o->vtable == &PaykanInt_vtable &&
+  // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
+  PaykanObject *o = Paykan_equals_unbox_other(other);
+  int64_t result = o && o->vtable == &PaykanInt_vtable &&
                    ((PaykanInt *)self)->value == ((PaykanInt *)o)->value;
-  Paykan_release((PaykanShared *)other);
-  return result;
+  return Paykan_equals_consume_other(other, result);
 }
 
 PaykanShared *PaykanInt_from_str(PaykanObject *str) {
@@ -74,6 +75,7 @@ PaykanObjectVTable PaykanFloat_vtable = {
 PaykanFloat *PaykanFloat_new(double value) {
   PaykanFloat *obj = (PaykanFloat *)Paykan_malloc(sizeof(PaykanFloat));
   obj->vtable = &PaykanFloat_vtable;
+  obj->shared = NULL; // not yet boxed (unique-box invariant)
   obj->value = value;
   return obj;
 }
@@ -86,12 +88,11 @@ PaykanShared *PaykanFloat_toString(PaykanObject *self) {
 }
 
 int64_t PaykanFloat_equals(PaykanObject *self, PaykanObject *other) {
-  // `other` arrives as a PaykanShared box and is consumed by this call.
-  PaykanObject *o = PaykanShared_get((PaykanShared *)other);
-  int64_t result = o->vtable == &PaykanFloat_vtable &&
+  // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
+  PaykanObject *o = Paykan_equals_unbox_other(other);
+  int64_t result = o && o->vtable == &PaykanFloat_vtable &&
                    ((PaykanFloat *)self)->value == ((PaykanFloat *)o)->value;
-  Paykan_release((PaykanShared *)other);
-  return result;
+  return Paykan_equals_consume_other(other, result);
 }
 
 PaykanShared *PaykanFloat_from_str(PaykanObject *str) {
@@ -120,6 +121,7 @@ PaykanObjectVTable PaykanBool_vtable = {
 PaykanBool *PaykanBool_new(int64_t value) {
   PaykanBool *obj = (PaykanBool *)Paykan_malloc(sizeof(PaykanBool));
   obj->vtable = &PaykanBool_vtable;
+  obj->shared = NULL; // not yet boxed (unique-box invariant)
   obj->value = value ? 1 : 0;
   return obj;
 }
@@ -132,10 +134,9 @@ PaykanShared *PaykanBool_toString(PaykanObject *self) {
 }
 
 int64_t PaykanBool_equals(PaykanObject *self, PaykanObject *other) {
-  // `other` arrives as a PaykanShared box and is consumed by this call.
-  PaykanObject *o = PaykanShared_get((PaykanShared *)other);
-  int64_t result = o->vtable == &PaykanBool_vtable &&
+  // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
+  PaykanObject *o = Paykan_equals_unbox_other(other);
+  int64_t result = o && o->vtable == &PaykanBool_vtable &&
                    ((PaykanBool *)self)->value == ((PaykanBool *)o)->value;
-  Paykan_release((PaykanShared *)other);
-  return result;
+  return Paykan_equals_consume_other(other, result);
 }

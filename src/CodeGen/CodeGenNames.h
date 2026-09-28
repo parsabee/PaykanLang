@@ -77,6 +77,7 @@ inline constexpr const char *kIRArrLen = "arr.len";
 
 inline constexpr const char *kIRObj = "obj";
 inline constexpr const char *kIRVtableSlot = "vtable.slot";
+inline constexpr const char *kIRSharedSlot = "shared.slot";
 inline constexpr const char *kIRVtablePtr = "vtable.ptr";
 inline constexpr const char *kIRVtablePrefix = "vtable.";
 inline constexpr const char *kIRVtableExpected = "vtable.expected.";

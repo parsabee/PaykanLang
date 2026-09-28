@@ -8,6 +8,7 @@
 // methods exist yet.
 
 #include "Runtime.h"
+#include "RuntimeInternal.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -48,6 +49,7 @@ PaykanFileVTable PaykanFile_vtable = {
 PaykanFile *PaykanFile_new(void) {
   PaykanFile *f = (PaykanFile *)Paykan_malloc(sizeof(PaykanFile));
   f->vtable = (PaykanObjectVTable *)&PaykanFile_vtable;
+  f->shared = NULL; // not yet boxed (unique-box invariant)
   f->handle = NULL;
   return f;
 }
@@ -86,11 +88,10 @@ PaykanShared *PaykanFile_toString(PaykanObject *self) {
 }
 
 int64_t PaykanFile_equals(PaykanObject *self, PaykanObject *other) {
-  // `other` arrives as a PaykanShared box and is consumed by this call.
-  PaykanObject *o = PaykanShared_get((PaykanShared *)other);
-  int64_t result = (self == o);
-  Paykan_release((PaykanShared *)other);
-  return result;
+  // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
+  PaykanObject *o = Paykan_equals_unbox_other(other);
+  int64_t result = o && self == o;
+  return Paykan_equals_consume_other(other, result);
 }
 
 void PaykanFile_write(PaykanObject *self, PaykanObject *strObj) {
@@ -202,6 +203,7 @@ static PaykanFileVTable PaykanStdin_vtable = {
 
 PaykanFile PaykanFile_Stdin = {
     .vtable = (PaykanObjectVTable *)&PaykanStdin_vtable,
+    .shared = NULL, // boxed on demand; release re-clears it (immortal destroy)
     .handle = NULL, // set to stdin at startup via __attribute__((constructor))
 };
 

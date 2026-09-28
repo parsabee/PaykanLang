@@ -197,3 +197,77 @@ TEST(Array, StrIndexIsChar) {
   )"));
   EXPECT_FALSE(r.Ok);
 }
+
+// ============================================================================
+// Array equality (== / != lower to the virtual `equals` — identity semantics)
+// ============================================================================
+
+TEST(Array, IntArrayEqualityOk) {
+  auto r = semaCheck(wrapMain(R"(
+    a: int[] = [1, 2];
+    b: int[] = [1, 2];
+    same: bool = a == a;
+    eq: bool = a == b;
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Array, IntArrayInequalityOk) {
+  auto r = semaCheck(wrapMain(R"(
+    a: int[] = [1, 2];
+    b: int[] = [3];
+    ne: bool = a != b;
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Array, StrArrayEqualityOk) {
+  auto r = semaCheck(wrapMain(R"(
+    a: Str[] = ["x", "y"];
+    b: Str[] = ["x", "y"];
+    eq: bool = a == b;
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Array, ClassElementArrayEqualityOk) {
+  auto r = semaCheck(R"(
+    class P {
+      v: int;
+      fn __init__(v: int) { self.v = v; }
+    }
+    fn main() -> int {
+      a: P[] = [P(1)];
+      b: P[] = [P(1)];
+      if (a == b) { println("eq"); }
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Array, ArrayLiteralEqualityOk) {
+  // Fresh ArrayType nodes on both sides must unify structurally.
+  auto r = semaCheck(wrapMain(R"(
+    eq: bool = [1, 2] == [1, 2];
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Array, MismatchedElementArrayEqualityRejected) {
+  auto r = semaCheck(wrapMain(R"(
+    a: int[] = [1];
+    b: Str[] = ["x"];
+    eq: bool = a == b;
+  )"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("mismatched types"), std::string::npos);
+}
+
+TEST(Array, ArrayVsScalarEqualityRejected) {
+  auto r = semaCheck(wrapMain(R"(
+    a: int[] = [1];
+    eq: bool = a == 1;
+  )"));
+  EXPECT_FALSE(r.Ok);
+}

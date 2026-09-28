@@ -89,7 +89,16 @@ int main(int argc, char *argv[]) {
 
   llvm::cl::ParseCommandLineOptions(argc, argv, "Paykan language compiler\n");
 
+  // One DiagEngine shared by every pass, wired into the parser up front so
+  // syntax errors come out in the same rich source-located format as sema
+  // errors (file:line:col + snippet + caret) instead of the yacc-style
+  // fallback.  SourceLines lives inside the driver and is filled by
+  // parseFile before the parser runs, so handing its address over now is
+  // safe -- the vector itself never moves.
+  paykan::sema::DiagEngine diag(llvm::errs());
   paykan::parser::ParserDriver driver(TraceParsing, TraceScanning);
+  diag.setSourceInfo(InputFilename.getValue(), &driver.getSourceLines());
+  driver.setDiagEngine(&diag);
   int result = driver.parseFile(InputFilename);
 
   if (result != 0) {
@@ -109,8 +118,9 @@ int main(int argc, char *argv[]) {
   // -- Semantic analysis ----------------------------------------------------
   std::string projectRoot =
       std::filesystem::path(InputFilename.getValue()).parent_path().string();
-  paykan::sema::DiagEngine diag(llvm::errs());
-  diag.setSourceInfo(driver.getCurrentFile(), &driver.getSourceLines());
+  // Sema reuses the DiagEngine constructed above (already carrying the
+  // source info for the parsed file), so error counts accumulate across
+  // passes and all diagnostics share one output stream.
   paykan::sema::Sema sema(driver.getASTContext(), diag, projectRoot);
   auto semaCtx = sema.run(root);
 

@@ -44,7 +44,7 @@ Build an array of any size at runtime using a loop:
 ```pkn
 squares: int[] = [];
 i: int = 0;
-while i < 5 {
+while (i < 5) {
   squares.push(i * i);
   i = i + 1;
 }
@@ -74,8 +74,9 @@ a[1] = 99;
 println(StrInt(a[1]));   // 99
 ```
 
-Indices are zero-based. Accessing an out-of-bounds index is undefined behaviour at
-runtime (no automatic bounds check).
+Indices are zero-based. Every access is **bounds-checked at runtime**: an out-of-bounds
+index aborts the program with a message such as `paykan: array index 10 out of bounds (len=3)`.
+(A negative index is currently reported as its unsigned wrap-around value.)
 
 ---
 
@@ -101,14 +102,19 @@ println(StrInt(stack.len()));    // 2
 
 ```pkn
 a: int[] = [1, 2, 3];
-println(a.toString());           // [1, 2, 3]
+println(a.toString());           // Array@0x…[len=3]
 
 b: int[] = [1, 2, 3];
-println(StrBool(a.equals(b)));   // false  (reference identity, not deep equality)
+println(StrBool(a.equals(b)));   // False  (reference identity, not deep equality)
 ```
 
-`toString` formats the array as `[e1, e2, …]` using each element's `toString`.  
+`toString` currently prints an address-and-length form, `Array@<address>[len=N]` — rendering
+the elements as `[e1, e2, …]` is planned but not shipped.  
 `equals` compares by **reference identity** (same underlying array object), not element-by-element.
+Because `==` lowers to `equals`, `a == b` is likewise identity comparison for arrays (`a == a` is
+`True`; two arrays with equal contents are not), and `a != b` is its negation. Both operands of
+`==` / `!=` must be arrays of the **same element type** — comparing `int[]` with `Str[]` is a
+compile-time error.
 
 ---
 
@@ -119,7 +125,7 @@ Use `while` with an index variable:
 ```pkn
 nums: int[] = [10, 20, 30, 40];
 i: int = 0;
-while i < nums.len() {
+while (i < nums.len()) {
   println(StrInt(nums[i]));
   i = i + 1;
 }
@@ -145,10 +151,10 @@ println(StrInt(matrix[1][2]));   // 6
 fn makeGrid(rows: int, cols: int) -> int[][] {
   grid: int[][] = [];
   r: int = 0;
-  while r < rows {
+  while (r < rows) {
     row: int[] = [];
     c: int = 0;
-    while c < cols {
+    while (c < cols) {
       row.push(r * cols + c);
       c = c + 1;
     }
@@ -173,7 +179,7 @@ class Point {
 
 pts: Point[] = [Point(0,0), Point(1,2), Point(-3,4)];
 i: int = 0;
-while i < pts.len() {
+while (i < pts.len()) {
   println(pts[i].toString());
   i = i + 1;
 }
@@ -188,7 +194,7 @@ Arrays are passed by reference. Mutations inside a function are visible to the c
 ```pkn
 fn doubleAll(a: int[]) {
   i: int = 0;
-  while i < a.len() {
+  while (i < a.len()) {
     a[i] = a[i] * 2;
     i = i + 1;
   }
@@ -208,4 +214,4 @@ println(nums.toString());   // [2, 4, 6]
 | Type mismatch on element | Literal `[1, "two"]` has mixed element types |
 | Empty literal without annotation | `x = []` with no type annotation |
 | Subscript on non-array type | `x[0]` where `x` is not an array |
-| `.pop()` on empty array | Runtime error (undefined behaviour; not checked statically) |
+| `.pop()` on empty array | Runtime abort with `paykan: pop on empty array` (checked at runtime, not statically) |

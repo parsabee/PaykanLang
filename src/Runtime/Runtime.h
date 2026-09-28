@@ -46,7 +46,18 @@ typedef struct PaykanArray PaykanArray;
 // ============================================================================
 //
 // Root of the class hierarchy.  Every Paykan heap object starts with this
-// layout so that a PaykanObject* can always reach the vtable.
+// two-word header so that a PaykanObject* can always reach the vtable AND its
+// owning PaykanShared box:
+//
+//   [0] vtable  — method dispatch + type identity
+//   [1] shared  — backpointer to this object's unique PaykanShared box
+//                 (the unique-box invariant, see PaykanShared below), or NULL
+//                 while the object has never been boxed / is not currently
+//                 boxed.
+//
+// Every constructor (runtime C constructors here, and the generated class
+// constructors in CodeGen) must initialise `shared` to NULL; PaykanShared_new
+// installs the backpointer and Paykan_release clears it when the box dies.
 
 typedef struct PaykanObjectVTable {
   void (*destroy)(PaykanObject *self);
@@ -56,9 +67,12 @@ typedef struct PaykanObjectVTable {
 
 struct PaykanObject {
   PaykanObjectVTable *vtable;
+  PaykanShared *shared; // unique-box backpointer (header slot 1)
 };
 
-// Constructor.
+// Constructor.  Test-only: CodeGen never emits a call to this symbol (user
+// `Obj()` construction goes through the generated class machinery); it is kept
+// for the unit tests and remains JIT-mapped for completeness.
 PaykanObject *PaykanObject_new(void);
 
 // Default method implementations.
@@ -80,6 +94,7 @@ extern PaykanObject PaykanObject_None;
 
 typedef struct PaykanInt {
   PaykanObjectVTable *vtable;
+  PaykanShared *shared; // object header (see PaykanObject)
   int64_t value;
 } PaykanInt;
 
@@ -103,6 +118,7 @@ PaykanShared *PaykanInt_from_str(PaykanObject *str);
 
 typedef struct PaykanFloat {
   PaykanObjectVTable *vtable;
+  PaykanShared *shared; // object header (see PaykanObject)
   double value;
 } PaykanFloat;
 
@@ -126,9 +142,13 @@ PaykanShared *PaykanFloat_from_str(PaykanObject *str);
 
 typedef struct PaykanBool {
   PaykanObjectVTable *vtable;
-  int64_t value; // 0 = False, 1 = True
+  PaykanShared *shared; // object header (see PaykanObject)
+  int64_t value;        // 0 = False, 1 = True
 } PaykanBool;
 
+// Test-only constructor: CodeGen never emits a call to this symbol (bools are
+// unboxed i1/i64 values in generated code); kept for the unit tests and
+// JIT-mapped for completeness.
 PaykanBool *PaykanBool_new(int64_t value);
 void PaykanBool_destroy(PaykanObject *self);
 PaykanShared *PaykanBool_toString(PaykanObject *self);
@@ -155,6 +175,7 @@ typedef struct PaykanStringVTable {
 
 struct PaykanString {
   PaykanObjectVTable *vtable; // points to PaykanString_vtable (cast-compatible)
+  PaykanShared *shared;       // object header (see PaykanObject)
   char *data;                 // heap-allocated NUL-terminated buffer
   int64_t len;                // length in bytes (excludes NUL)
 };
@@ -174,6 +195,8 @@ int64_t PaykanString_equals(PaykanObject *self, PaykanObject *other);
 int64_t PaykanString_length(PaykanObject *self);
 PaykanObject *PaykanString_concat(PaykanObject *self, PaykanObject *other);
 void PaykanString_concat_inplace(PaykanObject *self, PaykanObject *other);
+// Test-only: CodeGen lowers string subscripts through PaykanString_char_at;
+// kept for the unit tests and JIT-mapped for completeness.
 PaykanShared *PaykanString_at(PaykanObject *self, int64_t idx);
 
 // Global vtable instance.
@@ -199,6 +222,7 @@ typedef struct PaykanFileVTable {
 
 typedef struct PaykanFile {
   PaykanObjectVTable *vtable; // points to PaykanFile_vtable
+  PaykanShared *shared;       // object header (see PaykanObject)
   FILE *handle;               // underlying C file handle (NULL if closed)
 } PaykanFile;
 
@@ -232,6 +256,7 @@ extern PaykanFile PaykanFile_Stdin;
 
 typedef struct PaykanError {
   PaykanObjectVTable *vtable; // points to PaykanError_vtable
+  PaykanShared *shared;       // object header (see PaykanObject)
   PaykanString *message;
 } PaykanError;
 
@@ -269,6 +294,7 @@ typedef struct PaykanArrayVTable {
 struct PaykanArray {
   PaykanObjectVTable *vtable; // PaykanArray_vtable (primitive) or
                               // PaykanArray_obj_vtable (object)
+  PaykanShared *shared;       // object header (see PaykanObject)
   void *data;                 // heap-allocated element buffer (8 bytes/slot)
   unsigned long len;          // number of live elements
   unsigned long cap;          // allocated capacity (in elements)
@@ -322,21 +348,6 @@ PaykanShared *PaykanArray_pop_obj(PaykanArray *arr);
 extern PaykanArrayVTable PaykanArray_vtable;     // for primitive-element arrays
 extern PaykanArrayVTable PaykanArray_obj_vtable; // for object-element arrays
 
-/// Read element at `idx` as a pointer-sized value.  Aborts on out-of-bounds.
-void *PaykanArray_get(PaykanArray *arr, unsigned long idx);
-
-/// Write element at `idx`.  Aborts on out-of-bounds.
-void PaykanArray_set(PaykanArray *arr, unsigned long idx, void *value);
-
-// Method implementations (also used directly by CodeGen).
-void PaykanArray_destroy(PaykanObject *self);
-PaykanShared *PaykanArray_toString(PaykanObject *self);
-int64_t PaykanArray_equals(PaykanObject *self, PaykanObject *other);
-int64_t PaykanArray_length(PaykanObject *self);
-
-// Global vtable instance.
-extern PaykanArrayVTable PaykanArray_vtable;
-
 // ============================================================================
 // Shared — reference-counted wrapper around any PaykanObject
 // ============================================================================
@@ -344,13 +355,39 @@ extern PaykanArrayVTable PaykanArray_vtable;
 // A PaykanShared box holds a strong reference count and a pointer to the
 // owned object.  When the count drops to zero, the owned object is deleted
 // and the box itself is freed.
+//
+// -- The unique-box invariant ------------------------------------------------
+//
+// Every live heap object has AT MOST ONE PaykanShared box, and the object's
+// header backpointer (`obj->shared`, slot 1) names it.  Two independent boxes
+// around the same object would each destroy it when their own refcount hits
+// zero — a double free.  That situation used to arise whenever generated code
+// needed ownership of a value it only held as a raw PaykanObject* alias (the
+// raw `self` method parameter, a match-arm binding, an array element) and
+// wrapped it in a *fresh* box.
+//
+// Design decision (PAY-1): the invariant is enforced here, in the runtime, by
+// giving PaykanShared_new "create OR acquire" semantics — if `obj` already has
+// a box, its refcount is bumped and that same box is returned; only an unboxed
+// object gets a fresh box (whose backpointer is installed).  The alternative
+// (plumbing a backing box through every alias site in CodeGen) cannot cover
+// raw `self`, because the method ABI passes the unboxed object pointer and the
+// caller's box is unreachable from the callee.  A separate
+// `PaykanShared_from_object` entry point was considered and rejected: the JIT
+// resolves runtime symbols from a fixed table (src/JIT/JIT.cpp), so recovery
+// must ride on the already-registered PaykanShared_new symbol.  With these
+// semantics, "box this raw pointer" is *always* correct: it degenerates to the
+// old behaviour for freshly constructed objects and to a retain for aliases.
 
 typedef struct PaykanShared {
   int64_t refCount;     // strong reference count (starts at 1)
   PaykanObject *object; // the owned object (never NULL)
 } PaykanShared;
 
-/// Create a shared wrapper around `obj`.  The destructor is taken from
+/// Return an owned (+1) box for `obj` — the unique-box invariant's single
+/// entry point.  If `obj` already has a box (obj->shared != NULL) that box is
+/// retained and returned; otherwise a fresh box (refcount 1) is created and
+/// installed as `obj->shared`.  The destructor is taken from
 /// `obj->vtable->destroy` when the refcount reaches zero.
 PaykanShared *PaykanShared_new(PaykanObject *obj);
 
@@ -358,7 +395,9 @@ PaykanShared *PaykanShared_new(PaykanObject *obj);
 void Paykan_retain(PaykanShared *shared);
 
 /// Decrement the reference count.  Destroys the owned object and frees
-/// the box when it reaches zero.
+/// the box when it reaches zero, clearing the object's box backpointer
+/// first (so an immortal object — static None / Stdin, whose destroy is a
+/// no-op — is left unboxed rather than dangling).
 void Paykan_release(PaykanShared *shared);
 
 /// Convenience: return the underlying object pointer.
@@ -390,6 +429,10 @@ void Paykan_printerr(PaykanObject *obj);
 void Paykan_printerrln(PaykanObject *obj);
 
 /// Flush stdout so that prompts appear before blocking reads.
+/// NOTE: not currently wired to a Paykan-level builtin — Sema/CodeGen/JIT do
+/// not register it and no `flush()` exists in the language.  Kept for direct
+/// runtime embedders; exposing a `flush()` builtin is a future language
+/// decision.
 void Paykan_flush(void);
 
 // ============================================================================
@@ -451,9 +494,6 @@ int Paykan_heap_tracking_enabled(void);
 /// Reset all counters to zero.  Call immediately before running a program
 /// whose allocations you want to measure in isolation.
 void Paykan_heap_reset(void);
-
-/// Snapshot the current counters.
-PaykanHeapStats Paykan_heap_stats(void);
 
 /// Convenience: number of blocks currently live (alloc - free).
 /// This is the value a leak check asserts to be zero after a clean run.

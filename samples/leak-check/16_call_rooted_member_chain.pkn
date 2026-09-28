@@ -1,0 +1,48 @@
+// Isolates: member chains rooted in a call result — the fresh receiver box
+// (`makeH()` below) is owned by the member access and must be torn down after
+// the field is read, with a ref-typed field value retained first so it
+// survives the receiver teardown.  Also exercises acquiring a BORROWED field
+// box for a new owner (x = h.a), which must retain the box rather than steal
+// the field slot's reference.
+//
+// Runtime allocation sites: object structs + PaykanShared boxes (Shared.c),
+// PaykanString_new (String.c).
+//
+// Expected under --track-heap: live blocks : 0.
+
+class H {
+  a: Str;
+
+  fn __init__() {
+    self.a = "hello";
+  }
+}
+
+class O {
+  h: H;
+
+  fn __init__() {
+    self.h = H();
+  }
+}
+
+fn makeH() -> H {
+  return H();
+}
+
+fn makeO() -> O {
+  return O();
+}
+
+fn main() -> int {
+  x = makeH().a;         // chain used as a value
+  println(x);
+  n: int = makeH().a.len(); // chain used as a receiver
+  println(StrInt(n));
+  y = makeO().h.a;       // nested chain
+  println(y);
+  h: H = H();
+  z = h.a;               // borrowed field read acquired by a new owner
+  println(z);
+  return 0;
+}

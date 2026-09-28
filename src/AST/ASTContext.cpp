@@ -205,33 +205,12 @@ void ASTContext::buildBoxedBoolType() {
 // These types are NOT used for vtable dispatch; CodeGen emits direct calls to
 // PaykanArray_push / PaykanArray_pop for those methods.
 //
-static std::string elemTypeName(ast::Type *ty) {
-  if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty)) {
-    switch (bt->getTypeKind()) {
-    case ast::BuiltinType::Int:
-      return "int";
-    case ast::BuiltinType::Float:
-      return "float";
-    case ast::BuiltinType::Bool:
-      return "bool";
-    case ast::BuiltinType::Char:
-      return "char";
-    case ast::BuiltinType::Void:
-      return "void";
-    }
-  }
-  if (auto *ct = ast::dyn_cast<ast::ClassType>(ty))
-    return ct->getName();
-  return "?";
-}
-
 ClassType *ASTContext::getOrCreateSpecializedArrayType(Type *elemTy) {
   auto it = SpecializedArrayTypes.find(elemTy);
   if (it != SpecializedArrayTypes.end())
     return it->second;
 
-  std::string name =
-      std::string(names::kArray) + "<" + elemTypeName(elemTy) + ">";
+  std::string name = std::string(names::kArray) + "<" + typeName(elemTy) + ">";
   auto *specTy = make<ClassType>(SourceLocation(), intern(name), ArrayTy);
   ClassTypeBuilder(*this, specTy)
       .method(names::kPush, VoidTy, {elemTy}) // slot 0 in specialized type
@@ -361,6 +340,32 @@ Type *ASTContext::lookupType(const std::string &name) const {
   if (auto *et = lookupEnumType(name))
     return et;
   return lookupClassType(name);
+}
+
+std::string typeName(Type *ty) {
+  if (!ty)
+    return "unknown";
+  if (auto *bt = dyn_cast<BuiltinType>(ty)) {
+    switch (bt->getTypeKind()) {
+    case BuiltinType::Int:
+      return names::kTypeInt;
+    case BuiltinType::Float:
+      return names::kTypeFloat;
+    case BuiltinType::Bool:
+      return names::kTypeBool;
+    case BuiltinType::Char:
+      return names::kTypeChar;
+    case BuiltinType::Void:
+      return names::kTypeVoid;
+    }
+  }
+  if (auto *ct = dyn_cast<ClassType>(ty))
+    return ct->getName();
+  if (auto *et = dyn_cast<EnumType>(ty))
+    return et->getName();
+  if (auto *at = dyn_cast<ArrayType>(ty))
+    return typeName(at->getElementType()) + "[]";
+  return "unknown";
 }
 
 } // namespace ast

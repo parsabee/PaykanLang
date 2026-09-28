@@ -26,6 +26,7 @@
 // element type known at compile time.
 
 #include "Runtime.h"
+#include "RuntimeInternal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -72,6 +73,7 @@ PaykanArrayVTable PaykanArray_obj_vtable = {
 PaykanArray *PaykanArray_new(unsigned long len) {
   PaykanArray *arr = (PaykanArray *)Paykan_malloc(sizeof(PaykanArray));
   arr->vtable = (PaykanObjectVTable *)&PaykanArray_vtable;
+  arr->shared = NULL; // not yet boxed (unique-box invariant)
   arr->len = len;
   arr->cap = len;
   if (len > 0) {
@@ -88,6 +90,7 @@ PaykanArray *PaykanArray_new(unsigned long len) {
 PaykanArray *PaykanArray_new_from_data(unsigned long len, const void *data) {
   PaykanArray *arr = (PaykanArray *)Paykan_malloc(sizeof(PaykanArray));
   arr->vtable = (PaykanObjectVTable *)&PaykanArray_vtable;
+  arr->shared = NULL; // not yet boxed (unique-box invariant)
   arr->len = len;
   arr->cap = len;
   if (len > 0) {
@@ -104,6 +107,7 @@ PaykanArray *PaykanArray_new_from_data(unsigned long len, const void *data) {
 PaykanArray *PaykanArray_new_obj(unsigned long len) {
   PaykanArray *arr = (PaykanArray *)Paykan_malloc(sizeof(PaykanArray));
   arr->vtable = (PaykanObjectVTable *)&PaykanArray_obj_vtable;
+  arr->shared = NULL; // not yet boxed (unique-box invariant)
   arr->len = len;
   arr->cap = len;
   if (len > 0) {
@@ -208,11 +212,10 @@ PaykanShared *PaykanArray_toString(PaykanObject *self) {
 
 int64_t PaykanArray_equals(PaykanObject *self, PaykanObject *other) {
   // Identity equality — two arrays are equal only if they are the same object.
-  // `other` arrives as a PaykanShared box and is consumed by this call.
-  PaykanObject *o = PaykanShared_get((PaykanShared *)other);
-  int64_t result = (self == o);
-  Paykan_release((PaykanShared *)other);
-  return result;
+  // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
+  PaykanObject *o = Paykan_equals_unbox_other(other);
+  int64_t result = o && self == o;
+  return Paykan_equals_consume_other(other, result);
 }
 
 int64_t PaykanArray_length(PaykanObject *self) {

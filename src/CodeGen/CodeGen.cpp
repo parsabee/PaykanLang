@@ -235,6 +235,33 @@ ast::Type *CodeGen::canonicalizeDeclType(ast::Type *ty) {
   return ty;
 }
 
+ast::ClassType *CodeGen::resolveExprClassType(ast::Expr *expr) {
+  ast::Type *resolved = nullptr;
+  if (auto *ce = ast::dyn_cast<ast::CallExpr>(expr))
+    resolved = ce->getResolvedType();
+  else if (auto *mce = ast::dyn_cast<ast::MethodCallExpr>(expr))
+    resolved = mce->getResolvedType();
+  else if (auto *mae = ast::dyn_cast<ast::MemberAccessExpr>(expr))
+    resolved = mae->getResolvedType();
+  else if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(expr))
+    resolved = se->getResolvedType(); // object array element: y = arr[i]
+  // `mov expr` transfers the operand's value unchanged, so it resolves to the
+  // operand's type.
+  else if (auto *mv = ast::dyn_cast<ast::MovExpr>(expr))
+    resolved = mv->getResolvedType();
+  else if (auto *id = ast::dyn_cast<ast::Identifier>(expr))
+    resolved =
+        CurrentScope ? CurrentScope->lookupASTType(id->getName()) : nullptr;
+
+  auto *ct = ast::dyn_cast<ast::ClassType>(resolved); // null-safe
+  if (!ct)
+    return nullptr;
+  // Canonicalize: parser stubs have no fields/methods.
+  if (auto *canonical = ASTCtx.lookupClassType(ct->getName()))
+    return canonical;
+  return ct;
+}
+
 llvm::Function *CodeGen::declareFunctionPrototype(ast::FuncDecl *node) {
   if (auto *existing = Module->getFunction(node->getName()))
     return existing;
@@ -275,14 +302,15 @@ llvm::Function *CodeGen::declareFunction(llvm::StringRef name,
   // Paykan_malloc which aborts on failure, so they never return null.  This
   // lets the optimiser elide null-checks and improves alias analysis.
   if (fnTy->getReturnType()->isPointerTy()) {
+    // (PaykanObject_new / PaykanBool_new are test-only constructors that
+    // CodeGen never declares, so they carry no entry here.)
     static const llvm::StringSet<> kNonNullReturn = {
         kPaykanSharedNew,        kPaykanStringNew,      kPaykanStringFromInt,
         kPaykanStringFromFloat,  kPaykanStringFromBool, kPaykanStringFromChar,
         kPaykanStringConcat,     kPaykanArrayNew,       kPaykanArrayNewObj,
         kPaykanArrayNewFromData, kPaykanMalloc,         kPaykanRealloc,
         kPaykanFileNew,          kPaykanFileOpen,       kPaykanErrorNew,
-        kPaykanObjectNew,        kPaykanIntNew,         kPaykanFloatNew,
-        kPaykanBoolNew,
+        kPaykanIntNew,           kPaykanFloatNew,
     };
     if (kNonNullReturn.count(name))
       fn->addRetAttr(llvm::Attribute::NonNull);
@@ -378,6 +406,16 @@ bool CodeGen::run(ast::TranslationUnit *tu) {
 /// Returns true when `expr` already produces a PaykanShared* — i.e. the
 /// expression is a call/method-call/ternary whose resolved type is a class.
 bool CodeGen::exprAlreadyShared(ast::Expr *expr) const {
+  // `mov x`: an owned ref-typed variable transfers its existing +1 box, so the
+  // result is already a PaykanShared*.  Any other operand is a pass-through
+  // that inherits the operand's ownership.
+  if (auto *mv = ast::dyn_cast<ast::MovExpr>(expr)) {
+    ast::Expr *op = mv->getOperand();
+    if (auto *id = ast::dyn_cast<ast::Identifier>(op))
+      if (CurrentScope && CurrentScope->isOwned(id->getName()))
+        return true;
+    return exprAlreadyShared(op);
+  }
   // ArrayLiteralExpr always produces a PaykanShared* wrapping a PaykanArray*.
   if (ast::isa<ast::ArrayLiteralExpr>(expr))
     return true;
@@ -410,12 +448,25 @@ bool CodeGen::exprAlreadyShared(ast::Expr *expr) const {
 }
 
 bool CodeGen::exprProducesFreshBox(ast::Expr *expr) const {
+  // `mov x` of an owned ref variable hands its +1 box to the consumer (who now
+  // owns it); any other operand inherits the operand's freshness.
+  if (auto *mv = ast::dyn_cast<ast::MovExpr>(expr)) {
+    ast::Expr *op = mv->getOperand();
+    if (auto *id = ast::dyn_cast<ast::Identifier>(op))
+      if (CurrentScope && CurrentScope->isOwned(id->getName()))
+        return true;
+    return exprProducesFreshBox(op);
+  }
   // A borrowed box (member-access field load, owned-variable read) must NOT be
   // released by a transient consumer — only freshly-produced +1 boxes are
-  // owned by the consumer.  MemberAccessExpr returns the field's box without
-  // retaining, so it is excluded here even though exprAlreadyShared is true.
-  if (ast::isa<ast::MemberAccessExpr>(expr))
-    return false;
+  // owned by the consumer.  A plain field read returns the field's box without
+  // retaining, so it is borrowed even though exprAlreadyShared is true — EXCEPT
+  // when the receiver chain is itself a fresh temporary (e.g. `makeH().a`):
+  // visitMemberAccessExpr then retains the field box before tearing the
+  // temporary receiver down, handing the consumer an owned +1 box.
+  if (auto *mae = ast::dyn_cast<ast::MemberAccessExpr>(expr))
+    return mae->getResolvedType() && ast::isRefType(mae->getResolvedType()) &&
+           exprProducesFreshBox(mae->getReceiver());
   if (auto *mce = ast::dyn_cast<ast::MethodCallExpr>(expr))
     return mce->getResolvedType() && ast::isRefType(mce->getResolvedType());
   if (auto *te = ast::dyn_cast<ast::TernaryExpr>(expr))
@@ -442,11 +493,26 @@ void CodeGen::emitRelease(llvm::Value *shared) {
   Builder.CreateCall(declareFunction(kPaykanRelease, fnTy), {shared});
 }
 
+llvm::Value *CodeGen::takeSharedOwnership(ast::Expr *expr, llvm::Value *val) {
+  // See CodeGen.h: fresh +1 boxes are owned as-is; a borrowed box (plain
+  // ref-typed field read) must be retained because its field slot keeps its
+  // own reference.
+  if (!exprProducesFreshBox(expr))
+    emitRetain(val);
+  return val;
+}
+
 llvm::Value *CodeGen::emitSharedNew(llvm::Value *raw, llvm::StringRef name) {
   auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
   auto *fnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
   // Boxing transfers ownership of a raw string temporary to the PaykanShared.
   untrackStringTemp(raw);
+  // PaykanShared_new has create-OR-acquire semantics (unique-box invariant,
+  // see Runtime.h): a freshly constructed object gets a new box, while a raw
+  // pointer that merely aliases an already-boxed object (`self`, a match-arm
+  // binding, an array element) yields a +1 on the object's existing box.
+  // Either way the caller receives an owned (+1) PaykanShared*, so boxing a
+  // raw value is always safe — no call site needs to know which case it is.
   return Builder.CreateCall(declareFunction(kPaykanSharedNew, fnTy), {raw},
                             name);
 }
@@ -617,36 +683,18 @@ llvm::Value *CodeGen::emitImplicitVarDecl(llvm::StringRef name,
   bool isNoneRHS = ast::isa<ast::NoneLiteral>(rhsExpr);
 
   // Determine the AST class type for the RHS (for isOwned / method dispatch).
-  ast::ClassType *rhsAstTy = nullptr;
-  if (auto *id = ast::dyn_cast<ast::Identifier>(rhsExpr))
-    rhsAstTy = ast::dyn_cast<ast::ClassType>(
-        CurrentScope->lookupASTType(id->getName()));
-  // For constructor calls / method calls / member access — use resolved type.
-  if (!rhsAstTy) {
-    ast::Type *resolved = nullptr;
-    if (auto *ce = ast::dyn_cast<ast::CallExpr>(rhsExpr))
-      resolved = ce->getResolvedType();
-    else if (auto *mce = ast::dyn_cast<ast::MethodCallExpr>(rhsExpr))
-      resolved = mce->getResolvedType();
-    else if (auto *mae = ast::dyn_cast<ast::MemberAccessExpr>(rhsExpr))
-      resolved = mae->getResolvedType();
-    if (resolved)
-      rhsAstTy = ast::dyn_cast<ast::ClassType>(resolved);
-  }
+  ast::ClassType *rhsAstTy = resolveExprClassType(rhsExpr);
   if (!rhsAstTy && val->getType()->isPointerTy())
     rhsAstTy = ASTCtx.getObjTy(); // conservative fallback
-  // Canonicalize: parser stubs have no fields/methods.
-  if (rhsAstTy) {
-    if (auto *canonical = ASTCtx.lookupClassType(rhsAstTy->getName()))
-      rhsAstTy = canonical;
-  }
 
   if (!isNoneRHS && val->getType()->isPointerTy() && rhsAstTy) {
     auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
     if (exprAlreadyShared(rhsExpr)) {
-      // val is already a PaykanShared* (from a call/method-call/ternary) — use
-      // as-is. Do NOT call emitAsShared here — that would re-emit the
-      // expression and call the function a second time.
+      // val is already a PaykanShared* (from a call/method-call/ternary or a
+      // ref-typed field read) — take ownership without re-emitting the
+      // expression (emitAsShared would call the function a second time).  A
+      // borrowed field-read box is retained inside takeSharedOwnership.
+      val = takeSharedOwnership(rhsExpr, val);
     } else if (auto *id = ast::dyn_cast<ast::Identifier>(rhsExpr);
                id && CurrentScope->isOwned(id->getName())) {
       // Owned identifier: visitIdentifier already unwrapped to raw; load the
@@ -655,7 +703,10 @@ llvm::Value *CodeGen::emitImplicitVarDecl(llvm::StringRef name,
                                id->getName());
       emitRetain(val);
     } else {
-      // Raw value (string literal, unowned identifier, etc.) — box it.
+      // Raw value — box it.  For a fresh temporary (string literal, concat
+      // result) this creates the object's first box; for an unowned alias
+      // (`self`, a match-arm binding) emitSharedNew's acquire semantics
+      // retain the object's existing unique box instead.
       val = emitSharedNew(val, kIRShared);
     }
   }
@@ -685,12 +736,15 @@ void CodeGen::emitClassVarRebind(llvm::AllocaInst *alloca, ast::Expr *rhsExpr,
   }
   if (!newBox) {
     if (exprAlreadyShared(rhsExpr))
-      newBox =
-          val; // already a PaykanShared* — use directly (refcount already = 1)
-    else if (ast::isa<ast::SubscriptExpr>(rhsExpr) ||
-             ast::isa<ast::MemberAccessExpr>(rhsExpr))
-      // Borrowed reference (array element / object field): emitAsShared retains
-      // the stored box rather than wrapping the borrowed object in a fresh one.
+      // Already a PaykanShared* — take ownership of it.  A fresh box
+      // (call/method-call/ternary result, refcount already = 1) is used
+      // directly; a borrowed ref-typed field read is retained first (its
+      // field slot keeps its own reference).
+      newBox = takeSharedOwnership(rhsExpr, val);
+    else if (ast::isa<ast::SubscriptExpr>(rhsExpr))
+      // Borrowed array element: emitAsShared retains the stored box rather
+      // than wrapping the borrowed object in a fresh one.  (A ref-typed
+      // member access is always exprAlreadyShared and handled above.)
       newBox = emitAsShared(rhsExpr);
     else
       // Any freshly-produced raw value already computed as `val` — a string
@@ -737,7 +791,7 @@ llvm::Value *CodeGen::visitAssignStmt(ast::AssignStmt *node) {
       // without releasing the old one (it's a singleton, not a shared box).
       llvm::Value *newBox = nullptr;
       if (exprAlreadyShared(node->getValue()))
-        newBox = val;
+        newBox = takeSharedOwnership(node->getValue(), val);
       else
         newBox = emitSharedNew(val, kIRNewBox);
       Builder.CreateStore(newBox, alloca);
@@ -746,21 +800,9 @@ llvm::Value *CodeGen::visitAssignStmt(ast::AssignStmt *node) {
     }
     // Narrow the scope type to the concrete RHS type (enables vtable dispatch
     // through base-type variables, e.g. `obj: Obj = MyObj(...)`).
-    ast::ClassType *rhsCT = nullptr;
-    if (auto *ce = ast::dyn_cast<ast::CallExpr>(node->getValue()))
-      rhsCT = ast::dyn_cast<ast::ClassType>(ce->getResolvedType());
-    else if (auto *mce = ast::dyn_cast<ast::MethodCallExpr>(node->getValue()))
-      rhsCT = ast::dyn_cast<ast::ClassType>(mce->getResolvedType());
-    else if (auto *mae = ast::dyn_cast<ast::MemberAccessExpr>(node->getValue()))
-      rhsCT = ast::dyn_cast<ast::ClassType>(mae->getResolvedType());
-    else if (auto *id = ast::dyn_cast<ast::Identifier>(node->getValue()))
-      rhsCT = ast::dyn_cast<ast::ClassType>(
-          CurrentScope->lookupASTType(id->getName()));
-    if (rhsCT) {
-      if (auto *canonical = ASTCtx.lookupClassType(rhsCT->getName()))
-        rhsCT = canonical;
+    ast::ClassType *rhsCT = resolveExprClassType(node->getValue());
+    if (rhsCT)
       CurrentScope->updateASTType(node->getVarName(), rhsCT);
-    }
     if (wasUnowned)
       CurrentScope->promoteToOwned(
           node->getVarName(), rhsCT ? static_cast<ast::Type *>(rhsCT) : astTy);
@@ -788,10 +830,10 @@ llvm::Value *CodeGen::emitAsShared(ast::Expr *expr) {
       emitRetain(sharedPtr);
       return sharedPtr;
     }
-    // Unowned arm-binding backed by a PaykanShared*: retain + return the
-    // original box instead of wrapping the raw pointer in a fresh one.
-    // A fresh PaykanShared_new would give the callee sole ownership, dropping
-    // the refcount to 0 on callee return and destroying the object prematurely.
+    // Unowned arm-binding backed by a recorded PaykanShared*: retain + return
+    // the original box directly.  (The emitSharedNew fallback below would now
+    // recover the same box via the object's backpointer — this branch just
+    // keeps the recorded-backing fast path.)
     if (alloca) {
       if (auto *backing = CurrentScope->lookupBackingShared(id->getName())) {
         emitRetain(backing);
@@ -828,11 +870,12 @@ llvm::Value *CodeGen::emitAsShared(ast::Expr *expr) {
 
   // Ref-typed member-access field (obj.field): the field slot owns its box, so
   // acquiring it for a new owner must retain rather than alias the borrow.
+  // (takeSharedOwnership skips the retain when the read is call-rooted, e.g.
+  // `makeH().a`, and the loaded box is already a fresh +1 for us.)
   if (auto *mae = ast::dyn_cast<ast::MemberAccessExpr>(expr)) {
     if (mae->getResolvedType() && ast::isRefType(mae->getResolvedType())) {
       llvm::Value *box = emitExpr(expr); // loads the field's PaykanShared* box
-      emitRetain(box);
-      return box;
+      return takeSharedOwnership(expr, box);
     }
   }
 
@@ -840,7 +883,11 @@ llvm::Value *CodeGen::emitAsShared(ast::Expr *expr) {
   if (exprAlreadyShared(expr))
     return emitExpr(expr);
 
-  // Everything else: emit raw, wrap string literals, then PaykanShared_new.
+  // Everything else: emit raw, wrap string literals, then box.  The raw value
+  // may alias an already-boxed object — `self` inside a method, a match-arm
+  // binding whose subject was a plain owned variable — and emitSharedNew's
+  // acquire semantics then retain that unique box instead of creating a
+  // doomed second one (double free).
   llvm::Value *val = emitExpr(expr);
   if (auto *sl = ast::dyn_cast<ast::StringLiteral>(expr))
     val = wrapStringLiteral(val, sl->getValue().size());
@@ -961,18 +1008,9 @@ llvm::Value *CodeGen::visitVarDecl(ast::VarDecl *node) {
   // otherwise fall back to the initializer's type.
   llvm::Type *llvmTy = nullptr;
   if (node->getType()) {
-    // Canonicalize ClassType: the parser may have created a stub before Sema
-    // populated the canonical ClassType in the registry.
-    ast::Type *annoTy = node->getType();
-    if (auto *ct = ast::dyn_cast<ast::ClassType>(annoTy)) {
-      // The parser emits a ClassType stub for unknown names; it may actually be
-      // an enum, so resolve the enum registry first, then the class registry.
-      if (auto *enumTy = ASTCtx.lookupEnumType(ct->getName()))
-        annoTy = enumTy;
-      else if (auto *canonical = ASTCtx.lookupClassType(ct->getName()))
-        annoTy = canonical;
-    }
-    llvmTy = toLLVMType(annoTy);
+    // Canonicalize: the parser may have created a ClassType stub (possibly
+    // naming an enum) before Sema populated the registries.
+    llvmTy = toLLVMType(canonicalizeDeclType(node->getType()));
   }
 
   llvm::Value *initVal = nullptr;
@@ -982,15 +1020,9 @@ llvm::Value *CodeGen::visitVarDecl(ast::VarDecl *node) {
     // For class-typed (non-None) VarDecls, use emitAsShared to get a properly
     // owned PaykanShared* — handles owned-identifier retain, already-shared
     // call pass-through, string literal wrapping, and raw->shared boxing.
-    // Resolve the annotation's canonical type so enum stubs (which are
-    // ClassType stubs at this point) are not mistaken for reference types.
-    ast::Type *declTy = node->getType();
-    if (auto *ct = ast::dyn_cast<ast::ClassType>(declTy)) {
-      if (ASTCtx.lookupEnumType(ct->getName()))
-        declTy = nullptr; // enum: a plain i64 value, not a ref type
-      else if (auto *canonical = ASTCtx.lookupClassType(ct->getName()))
-        declTy = canonical;
-    }
+    // Canonicalize the annotation so an enum stub (a ClassType stub at this
+    // point) resolves to its EnumType and is not mistaken for a ref type.
+    ast::Type *declTy = canonicalizeDeclType(node->getType());
     bool isClassDecl = !isNoneInit && declTy && ast::isRefType(declTy);
     if (isClassDecl) {
       initVal = emitAsShared(node->getInitExpr());
@@ -1032,26 +1064,14 @@ llvm::Value *CodeGen::visitVarDecl(ast::VarDecl *node) {
 
   // Canonicalize ClassType to the registry entry (the parser may have created
   // a stub with no fields before Sema populated the canonical ClassType).
-  ast::Type *scopeTy = node->getType();
-  if (auto *ct = ast::dyn_cast<ast::ClassType>(scopeTy)) {
-    if (auto *enumTy = ASTCtx.lookupEnumType(ct->getName()))
-      scopeTy = enumTy;
-    else if (auto *canonical = ASTCtx.lookupClassType(ct->getName()))
-      scopeTy = canonical;
-  }
+  ast::Type *scopeTy = canonicalizeDeclType(node->getType());
   // Narrow the scope type to the concrete RHS type when the declared type is a
   // base class (e.g. `obj: Obj = MyObj(...)`). This ensures method dispatch
   // uses the concrete vtable convention, not the builtin Obj/Str convention.
   if (node->getInitExpr() && scopeTy && ast::isa<ast::ClassType>(scopeTy)) {
-    ast::ClassType *rhsCT = nullptr;
-    if (auto *ce = ast::dyn_cast<ast::CallExpr>(node->getInitExpr()))
-      rhsCT = ast::dyn_cast<ast::ClassType>(ce->getResolvedType());
-    if (rhsCT) {
-      if (auto *canonical = ASTCtx.lookupClassType(rhsCT->getName()))
-        rhsCT = canonical;
-      if (rhsCT && rhsCT != ASTCtx.getObjTy() && rhsCT != ASTCtx.getStrTy())
-        scopeTy = rhsCT;
-    }
+    ast::ClassType *rhsCT = resolveExprClassType(node->getInitExpr());
+    if (rhsCT && rhsCT != ASTCtx.getObjTy() && rhsCT != ASTCtx.getStrTy())
+      scopeTy = rhsCT;
   }
 
   if (isNoneVar)
@@ -1141,6 +1161,30 @@ llvm::Value *CodeGen::ExprEmitter::visitIdentifier(ast::Identifier *node) {
   }
 
   return val;
+}
+
+llvm::Value *CodeGen::ExprEmitter::visitMovExpr(ast::MovExpr *node) {
+  ast::Expr *op = node->getOperand();
+
+  // Owned ref-typed variable: transfer its PaykanShared* box.  Load the box,
+  // null the source alloca so scope cleanup releases nothing for it, and hand
+  // the existing +1 reference to the consumer WITHOUT an extra retain.  The
+  // runtime's release/retain/get are all null-safe, so the nulled slot is
+  // harmless on every control-flow path (including the not-taken branch of an
+  // `if` that performed the move).
+  if (auto *id = ast::dyn_cast<ast::Identifier>(op)) {
+    if (CG.CurrentScope->isOwned(id->getName())) {
+      auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
+      auto *alloca = CG.CurrentScope->lookup(id->getName());
+      llvm::Value *box = CG.Builder.CreateLoad(ptrTy, alloca, id->getName());
+      CG.Builder.CreateStore(llvm::ConstantPointerNull::get(ptrTy), alloca);
+      return box;
+    }
+  }
+
+  // Primitive variable or any temporary: `mov` is a transparent forward — the
+  // value is already owned by (or a plain register of) the producing context.
+  return CG.emitExpr(op);
 }
 
 llvm::Value *
@@ -1318,31 +1362,51 @@ CodeGen::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
   // self.field[i].
   bool receiverIsStr = (node->getResolvedType() == CG.ASTCtx.getCharTy());
 
+  // Emit the receiver, classify its ownership (a call-rooted receiver like
+  // `makeArr()[0]` hands us a fresh +1 box to tear down once the element is
+  // copied out — mirrors visitMemberAccessExpr), then unwrap to the raw
+  // object pointer.
+  llvm::Value *recv = CG.emitExpr(node->getArray());
+  if (!recv)
+    return nullptr;
+  ExprValue recvOwned = CG.classifyExpr(node->getArray(), recv);
+  llvm::Value *recvRaw = recv;
+  if (CG.exprAlreadyShared(node->getArray()) &&
+      recv->getType()->isPointerTy()) {
+    auto *unwrapTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
+    recvRaw = CG.Builder.CreateCall(
+        CG.declareFunction(kPaykanSharedGet, unwrapTy), {recv}, "recv.obj");
+  }
+
   // String subscript: str[idx] -> char  (PaykanString_char_at).
   if (receiverIsStr) {
-    llvm::Value *strRaw = CG.emitUnwrappedRef(node->getArray(), "str.obj");
-    if (!strRaw)
-      return nullptr;
     auto *i8Ty = llvm::Type::getInt8Ty(CG.LLVMCtx);
     auto *charAtFnTy = llvm::FunctionType::get(i8Ty, {ptrTy, i64Ty}, false);
-    return CG.Builder.CreateCall(
-        CG.declareFunction(kPaykanStringCharAt, charAtFnTy), {strRaw, idx},
+    llvm::Value *ch = CG.Builder.CreateCall(
+        CG.declareFunction(kPaykanStringCharAt, charAtFnTy), {recvRaw, idx},
         "str.char_at");
+    CG.releaseIfOwned(recvOwned); // char copied out — receiver may die now
+    return ch;
   }
 
   // Array subscript: arr[idx] -> PaykanArray_get(arr, idx) -> i64.
-  llvm::Value *arrRaw = CG.emitUnwrappedRef(node->getArray(), "arr.obj");
-  if (!arrRaw)
-    return nullptr;
-
   auto *getFnTy = llvm::FunctionType::get(i64Ty, {ptrTy, i64Ty}, false);
   llvm::Value *raw = CG.Builder.CreateCall(
-      CG.declareFunction(kPaykanArrayGet, getFnTy), {arrRaw, idx}, kIRElemRaw);
+      CG.declareFunction(kPaykanArrayGet, getFnTy), {recvRaw, idx}, kIRElemRaw);
 
-  // Reinterpret the 8-byte slot based on the element type.
+  // Reinterpret the 8-byte slot based on the element type.  Primitive/enum
+  // elements are copied out of the slot, so a fresh receiver temporary can be
+  // released as soon as the load is done.  An OBJECT element, however, is
+  // returned as a raw alias whose box is owned by the array — releasing a
+  // fresh array here would free the element under the caller, so the fresh
+  // array box is intentionally kept alive (leaked) in that case; a proper fix
+  // needs the element to carry its own ownership (tracked follow-up).
   ast::Type *elemTy = node->getResolvedType();
-  if (!elemTy)
-    return raw; // unknown type: return as i64
+  if (!elemTy || !CG.isObjectElementType(elemTy)) {
+    CG.releaseIfOwned(recvOwned);
+    if (!elemTy)
+      return raw; // unknown type: return as i64
+  }
 
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(elemTy)) {
     switch (bt->getTypeKind()) {
@@ -1471,6 +1535,34 @@ llvm::Value *CodeGen::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
     return phi;
   }
 
+  // Reference-typed equality lowers to the virtual `equals` method:
+  //   a == b  ==>  a.equals(b)
+  //   a != b  ==>  !a.equals(b)
+  // Dispatched through the object's vtable, so a user `equals` override is
+  // honoured and the runtime default (identity) applies otherwise.  We
+  // synthesize a MethodCallExpr and emit it, which reuses the method-call ABI
+  // (receiver-temporary teardown + the callee-consumes `Obj` argument) and
+  // evaluates each operand exactly once — avoiding the eager double-evaluation
+  // below.  Operand types were recorded by Sema (visitBinaryExpr).
+  if (node->getOpcode() == ast::BinaryOpcode::Eq ||
+      node->getOpcode() == ast::BinaryOpcode::Ne) {
+    ast::Type *lt = node->getLHS()->getResolvedType();
+    ast::Type *rt = node->getRHS()->getResolvedType();
+    if (lt && rt && ast::isRefType(lt) && ast::isRefType(rt)) {
+      auto *call = CG.ASTCtx.make<ast::MethodCallExpr>(
+          node->getLocation(), node->getLHS(),
+          CG.ASTCtx.intern(names::kMethodEquals),
+          std::vector<ast::Expr *>{node->getRHS()});
+      call->setResolvedType(CG.ASTCtx.getBoolTy());
+      llvm::Value *eq = visit(call);
+      if (!eq)
+        return nullptr;
+      if (node->getOpcode() == ast::BinaryOpcode::Ne)
+        eq = CG.Builder.CreateNot(eq, kIRNE);
+      return eq;
+    }
+  }
+
   llvm::Value *lhs = visit(node->getLHS());
   llvm::Value *rhs = visit(node->getRHS());
   if (!lhs || !rhs)
@@ -1580,6 +1672,8 @@ llvm::Value *CodeGen::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
                    : CG.Builder.CreateICmpSGE(lhs, rhs, kIRSGE);
 
   // -- Equality -------------------------------------------------------------
+  // Reference-typed equality is handled earlier (lowered to `equals`); by here
+  // the operands are primitives (int/bool/char/enum) or floats.
   case ast::BinaryOpcode::Eq:
     if (isFloat)
       return CG.Builder.CreateFCmpOEQ(lhs, rhs, kIRFEQ);
@@ -1865,18 +1959,23 @@ CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node) {
   if (auto *sl = ast::dyn_cast<ast::StringLiteral>(node->getReceiver()))
     recv = CG.wrapStringLiteral(recv, sl->getValue().size());
 
-  // Array literal receivers arrive as PaykanShared* — unwrap before dispatch.
-  if (ast::isa<ast::ArrayLiteralExpr>(node->getReceiver()) &&
-      recv->getType()->isPointerTy()) {
-    auto *ptrTy2 = llvm::PointerType::getUnqual(CG.LLVMCtx);
-    auto *getFnTy2 = llvm::FunctionType::get(ptrTy2, {ptrTy2}, false);
-    recv = CG.Builder.CreateCall(CG.declareFunction(kPaykanSharedGet, getFnTy2),
-                                 {recv}, kIRRecvObj);
-  }
+  // Classify the receiver for teardown BEFORE it is unwrapped to a raw object
+  // below.  A receiver that is a freshly-owned temporary — a user
+  // call/ternary/array-literal/`mov` PaykanShared* box, or a raw PaykanString*
+  // temp from a literal/concatenation — is owned by this expression and must be
+  // released after the call (the method borrows it).  A borrowed receiver (a
+  // plain variable, `self`, or an object field) is left untouched.  This
+  // mirrors the owned-argument teardown below and fixes receiver leaks such as
+  // `make().len()`, `("a" + "b").len()`, and `(mov s).len()`.
+  ExprValue recvOwned = CG.classifyExpr(node->getReceiver(), recv);
 
-  // If the receiver is already a PaykanShared* (e.g. result of another method
-  // call or a Str-returning user-defined call), unwrap it to the raw
-  // PaykanObject* before vtable dispatch.
+  // If the receiver is a PaykanShared* (an array literal, the result of
+  // another method call, or a Str-returning user-defined call), unwrap it to
+  // the raw PaykanObject* before vtable dispatch.  exprAlreadyShared covers
+  // ArrayLiteralExpr, so this is the SINGLE unwrap point — a second,
+  // literal-specific unwrap here used to strip the box twice and then
+  // dispatch through the raw array reinterpreted as a box (SIGSEGV on
+  // `[1, 2] == [1, 2]` and any other literal-receiver method call).
   if (CG.exprAlreadyShared(node->getReceiver()) &&
       recv->getType()->isPointerTy()) {
     auto *sharedPtrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
@@ -1928,6 +2027,15 @@ CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node) {
               return ft;
       }
     }
+    // Fallback: any other receiver form — a call result (makeArr().push(x)),
+    // a subscript (m[0].push(x)), a nested member access, an array literal —
+    // carries its Sema-resolved type on the expression itself.  Without this,
+    // array receivers that are not bare identifiers / self.field missed the
+    // push/pop direct dispatch and the Array vtable entirely, tripping the
+    // vtableIdx assert (or dispatching through a coincidental Str slot).
+    // Canonicalize so a parser ClassType stub resolves to the registry entry.
+    if (auto *resolved = recvExpr->getResolvedType())
+      return CG.canonicalizeDeclType(resolved);
     return nullptr;
   };
 
@@ -1936,11 +2044,18 @@ CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node) {
 
   // -- Direct-call dispatch for push / pop -----------------------------------
   // push/pop are NOT in the runtime vtable; they are emitted as direct calls.
+  // This path returns early, so it must tear down an owned receiver
+  // temporary itself (e.g. the fresh array box from `makeArr().push(3)`) —
+  // the vtable path's destroyTemps below never runs for it.
   const std::string &mname = node->getMethodName();
-  if (arrTy && mname == names::kPush)
-    return emitArrayPush(node, recv, arrTy->getElementType());
-  if (arrTy && mname == names::kPop)
-    return emitArrayPop(recv, arrTy->getElementType());
+  if (arrTy && (mname == names::kPush || mname == names::kPop)) {
+    llvm::Value *result =
+        mname == names::kPush
+            ? emitArrayPush(node, recv, arrTy->getElementType())
+            : emitArrayPop(recv, arrTy->getElementType());
+    CG.releaseIfOwned(recvOwned);
+    return result;
+  }
 
   // -- Resolve the vtable ClassType ------------------------------------------
   ast::ClassType *ct = nullptr;
@@ -2054,10 +2169,12 @@ CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node) {
       CG.Builder.CreateInBoundsGEP(vtableTy, vtablePtr, gep_indices, kIRVtSlot);
   llvm::Value *fnPtr = CG.Builder.CreateLoad(ptrTy, slotPtr, kIRVfn);
 
-  // Tear down owned argument temporaries created for the arguments.
+  // Tear down owned argument temporaries and, if the receiver was itself a
+  // freshly-owned temporary, the receiver too.
   auto destroyTemps = [&]() {
     for (const auto &ev : ownedArgs)
       CG.releaseIfOwned(ev);
+    CG.releaseIfOwned(recvOwned);
   };
 
   if (retLLTy->isVoidTy()) {
@@ -2067,14 +2184,10 @@ CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node) {
   }
   auto *mcallResult = CG.Builder.CreateCall(fnTy, fnPtr, args, kIRMcall);
   destroyTemps();
-  // All vtable methods returning a ref type (class or array) return
-  // PaykanShared*. This holds for both builtin runtime methods (normalized ABI)
-  // and user-defined class methods (emitted via visitReturnStmt ->
-  // emitAsShared).
-  bool returnsRef = method && method->getReturnType() &&
-                    ast::isRefType(method->getReturnType());
-  if (returnsRef)
-    return mcallResult;
+  // A vtable method returning a ref type (class or array) hands back a
+  // PaykanShared* — for both builtin runtime methods (normalized ABI) and
+  // user-defined class methods (emitted via visitReturnStmt -> emitAsShared);
+  // primitive returns come back raw.  Either way the value is returned as-is.
   return mcallResult;
 }
 
@@ -2166,6 +2279,38 @@ llvm::Value *CodeGen::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   return nullptr;
 }
 
+// -- Match-lowering scaffolding shared by all three modes --------------------
+
+llvm::BasicBlock *CodeGen::createMatchWildcardBlock(ast::MatchStmt *node,
+                                                    llvm::Function *parentFn) {
+  for (ast::MatchArm *arm : node->getArms())
+    if (arm->isWildcard())
+      return llvm::BasicBlock::Create(LLVMCtx, kIRMatchWildcard, parentFn);
+  return nullptr;
+}
+
+void CodeGen::emitMatchArmBody(ast::MatchArm *arm, llvm::BasicBlock *bodyBB,
+                               llvm::BasicBlock *endBB) {
+  Builder.SetInsertPoint(bodyBB);
+  {
+    ScopeGuard armGuard(*this);
+    for (auto *stmt : arm->getBody()->getStatements())
+      visit(stmt);
+  }
+  if (!Builder.GetInsertBlock()->getTerminator())
+    Builder.CreateBr(endBB);
+}
+
+void CodeGen::emitMatchWildcardBody(ast::MatchStmt *node,
+                                    llvm::BasicBlock *wildcardBB,
+                                    llvm::BasicBlock *endBB) {
+  if (!wildcardBB)
+    return;
+  for (ast::MatchArm *arm : node->getArms())
+    if (arm->isWildcard())
+      return emitMatchArmBody(arm, wildcardBB, endBB);
+}
+
 llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
   auto *parentFn = Builder.GetInsertBlock()->getParent();
   auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
@@ -2182,7 +2327,11 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
     return nullptr;
   llvm::Value *sharedSubj = nullptr; // non-null iff we must release at end
   if (exprAlreadyShared(node->getSubject())) {
-    sharedSubj = subjRaw;
+    // Take ownership of the subject box for the duration of the match: a
+    // fresh +1 box (call result) is ours as-is, while a borrowed box (a
+    // ref-typed field read, `match h.a`) must be retained — releasing the
+    // field slot's own reference at match.end would free the field under it.
+    sharedSubj = takeSharedOwnership(node->getSubject(), subjRaw);
     auto *getFnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
     subjRaw = Builder.CreateCall(declareFunction(kPaykanSharedGet, getFnTy),
                                  {sharedSubj}, kIRSubjObj);
@@ -2219,12 +2368,7 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
 
   // 2. Build control-flow blocks.
   auto *endBB = llvm::BasicBlock::Create(LLVMCtx, kIRMatchEnd, parentFn);
-  auto *wildcardBB = [&]() -> llvm::BasicBlock * {
-    for (ast::MatchArm *arm : node->getArms())
-      if (arm->isWildcard())
-        return llvm::BasicBlock::Create(LLVMCtx, kIRMatchWildcard, parentFn);
-    return nullptr;
-  }();
+  auto *wildcardBB = createMatchWildcardBlock(node, parentFn);
   auto *defaultBB = wildcardBB ? wildcardBB : endBB;
 
   // 3. Collect type arms and pre-allocate body blocks.
@@ -2284,6 +2428,11 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
         // Unowned alias — the subject's scope owns the reference.
         // Record the backing PaykanShared* (if any) so that call sites can
         // retain+pass the original box rather than wrapping the raw pointer.
+        // When the subject is a plain owned variable there is no box value in
+        // hand here; that is safe because every ownership-taking use of the
+        // binding boxes the raw alias through emitSharedNew, whose acquire
+        // semantics (unique-box invariant, Runtime.h) recover the subject's
+        // existing box via the object-header backpointer.
         if (sharedSubj)
           CurrentScope->declareUnownedWithBacking(arm->getBinding(), alloca,
                                                   sharedSubj, ta.CT);
@@ -2298,19 +2447,7 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
   }
 
   // 6. Emit the wildcard arm body.
-  if (wildcardBB) {
-    Builder.SetInsertPoint(wildcardBB);
-    for (ast::MatchArm *arm : node->getArms()) {
-      if (!arm->isWildcard())
-        continue;
-      ScopeGuard armGuard(*this);
-      for (auto *stmt : arm->getBody()->getStatements())
-        visit(stmt);
-      break;
-    }
-    if (!Builder.GetInsertBlock()->getTerminator())
-      Builder.CreateBr(endBB);
-  }
+  emitMatchWildcardBody(node, wildcardBB, endBB);
 
   Builder.SetInsertPoint(endBB);
   // The subject's PaykanShared* wrapper is released by matchGuard's cleanup
@@ -2329,12 +2466,7 @@ llvm::Value *CodeGen::emitValueMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
   auto *i64Ty = llvm::Type::getInt64Ty(LLVMCtx);
 
   auto *endBB = llvm::BasicBlock::Create(LLVMCtx, kIRMatchEnd, parentFn);
-  auto *wildcardBB = [&]() -> llvm::BasicBlock * {
-    for (ast::MatchArm *arm : node->getArms())
-      if (arm->isWildcard())
-        return llvm::BasicBlock::Create(LLVMCtx, kIRMatchWildcard, parentFn);
-    return nullptr;
-  }();
+  auto *wildcardBB = createMatchWildcardBlock(node, parentFn);
   auto *defaultBB = wildcardBB ? wildcardBB : endBB;
 
   // Pre-allocate a body block for each literal arm.
@@ -2392,32 +2524,10 @@ llvm::Value *CodeGen::emitValueMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
     }
   }
 
-  // Emit literal-arm body blocks.
-  for (const auto &la : litArms) {
-    Builder.SetInsertPoint(la.BodyBB);
-    {
-      ScopeGuard armGuard(*this);
-      for (auto *stmt : la.Arm->getBody()->getStatements())
-        visit(stmt);
-    }
-    if (!Builder.GetInsertBlock()->getTerminator())
-      Builder.CreateBr(endBB);
-  }
-
-  // Emit the wildcard arm body.
-  if (wildcardBB) {
-    Builder.SetInsertPoint(wildcardBB);
-    for (ast::MatchArm *arm : node->getArms()) {
-      if (!arm->isWildcard())
-        continue;
-      ScopeGuard armGuard(*this);
-      for (auto *stmt : arm->getBody()->getStatements())
-        visit(stmt);
-      break;
-    }
-    if (!Builder.GetInsertBlock()->getTerminator())
-      Builder.CreateBr(endBB);
-  }
+  // Emit literal-arm body blocks, then the wildcard arm body.
+  for (const auto &la : litArms)
+    emitMatchArmBody(la.Arm, la.BodyBB, endBB);
+  emitMatchWildcardBody(node, wildcardBB, endBB);
 
   Builder.SetInsertPoint(endBB);
   return nullptr;
@@ -2433,12 +2543,7 @@ llvm::Value *CodeGen::emitEnumMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
       ast::cast<ast::EnumType>(node->getSubject()->getResolvedType());
 
   auto *endBB = llvm::BasicBlock::Create(LLVMCtx, kIRMatchEnd, parentFn);
-  auto *wildcardBB = [&]() -> llvm::BasicBlock * {
-    for (ast::MatchArm *arm : node->getArms())
-      if (arm->isWildcard())
-        return llvm::BasicBlock::Create(LLVMCtx, kIRMatchWildcard, parentFn);
-    return nullptr;
-  }();
+  auto *wildcardBB = createMatchWildcardBlock(node, parentFn);
   auto *defaultBB = wildcardBB ? wildcardBB : endBB;
 
   // Pre-allocate a body block for each variant arm, recording its value.
@@ -2487,32 +2592,10 @@ llvm::Value *CodeGen::emitEnumMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
     }
   }
 
-  // Emit variant-arm body blocks.
-  for (const auto &va : variantArms) {
-    Builder.SetInsertPoint(va.BodyBB);
-    {
-      ScopeGuard armGuard(*this);
-      for (auto *stmt : va.Arm->getBody()->getStatements())
-        visit(stmt);
-    }
-    if (!Builder.GetInsertBlock()->getTerminator())
-      Builder.CreateBr(endBB);
-  }
-
-  // Emit the wildcard arm body.
-  if (wildcardBB) {
-    Builder.SetInsertPoint(wildcardBB);
-    for (ast::MatchArm *arm : node->getArms()) {
-      if (!arm->isWildcard())
-        continue;
-      ScopeGuard armGuard(*this);
-      for (auto *stmt : arm->getBody()->getStatements())
-        visit(stmt);
-      break;
-    }
-    if (!Builder.GetInsertBlock()->getTerminator())
-      Builder.CreateBr(endBB);
-  }
+  // Emit variant-arm body blocks, then the wildcard arm body.
+  for (const auto &va : variantArms)
+    emitMatchArmBody(va.Arm, va.BodyBB, endBB);
+  emitMatchWildcardBody(node, wildcardBB, endBB);
 
   Builder.SetInsertPoint(endBB);
   return nullptr;
@@ -2547,17 +2630,10 @@ llvm::Value *CodeGen::visitFuncDecl(ast::FuncDecl *node) {
       // Class-type params arrive as PaykanShared* (caller retained) — declare
       // as owned so scope cleanup releases them. Non-class params get nullptr
       // AST type.
-      auto *astTy = node->getParams()[i].ParamType;
-      if (astTy) {
-        if (auto *ct = ast::dyn_cast<ast::ClassType>(astTy)) {
-          // An enum-typed param is a plain i64 value, not a ref type: drop the
-          // stub so it is declared as a non-owned primitive below.
-          if (ASTCtx.lookupEnumType(ct->getName()))
-            astTy = nullptr;
-          else if (auto *canonical = ASTCtx.lookupClassType(ct->getName()))
-            astTy = canonical;
-        }
-      }
+      // Canonicalize the parser's stub: an enum-typed param resolves to its
+      // EnumType — a plain i64 value, not a ref type — and is declared as a
+      // non-owned primitive below.
+      auto *astTy = canonicalizeDeclType(node->getParams()[i].ParamType);
       if (astTy && ast::isRefType(astTy))
         CurrentScope->declare(std::string(arg.getName()), alloca, astTy);
       else

@@ -207,5 +207,12 @@ public:
   }
 };
 
+/// Canonical display name for a type: builtin keyword ("int", "float", …),
+/// class or enum name, element name plus "[]" for arrays, and "unknown" for
+/// null or unrecognised types.  The single source of truth shared by Sema
+/// diagnostics, module-export serialisation (SemaImport), and specialized
+/// array-type naming.
+std::string typeName(Type *ty);
+
 } // namespace ast
 } // namespace paykan

@@ -8,6 +8,7 @@
 #include "ASTVisitor.h"
 #include "DiagEngine.h"
 
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/StringSet.h>
 #include <memory>
@@ -70,6 +71,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   struct Scope {
     Scope *Parent = nullptr;
     llvm::StringMap<ast::Type *> Locals;
+    /// Names moved-out of this scope via `mov`.  A moved name may not be read
+    /// again until it is re-assigned (which revives it).
+    llvm::StringSet<> Moved;
 
     explicit Scope(Scope *parent = nullptr);
 
@@ -80,8 +84,6 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// Returns false if the name already exists in this scope.
     bool declare(llvm::StringRef name, ast::Type *ty);
 
-    /// Check if a variable is const (walks scope chain).
-
     /// Insert or update a binding in this scope.
     void set(llvm::StringRef name, ast::Type *ty);
 
@@ -90,9 +92,66 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
     /// Find the innermost scope that contains this name, or nullptr.
     Scope *findOwner(llvm::StringRef name);
+
+    /// Move tracking (operate on the owning scope, walking the chain).
+    /// markMoved / clearMoved are no-ops if the name is unknown.
+    void markMoved(llvm::StringRef name);
+    void clearMoved(llvm::StringRef name);
+    bool isMoved(llvm::StringRef name) const;
   };
 
   Scope *CurrentScope = nullptr;
+
+  // -- Flow-sensitive move tracking -------------------------------------------
+  //
+  // The per-scope `Moved` sets above track the *current* moved-state along the
+  // straight-line path Sema is walking.  Control-flow constructs make that
+  // state path-dependent, so they snapshot and merge it explicitly:
+  //
+  //   * Branches (if/else, match arms): each branch is checked against the
+  //     moved-state at ENTRY to the construct (a `mov` in one branch must not
+  //     poison a sibling).  Afterwards the state is the UNION over all branch
+  //     exit states — a name moved on ANY path counts as moved, unless every
+  //     path (including the implicit skip path of an `if` without `else` or a
+  //     match without a wildcard arm) re-assigned it.
+  //
+  //   * Loops (while): a name owned by a scope OUTSIDE the loop that is still
+  //     moved at the loop back edge would be read-after-consume on the next
+  //     iteration, so it is a compile error unless the body definitely
+  //     re-assigned it before the back edge.  (Codegen nulls the slot on mov;
+  //     iteration 2 would otherwise crash or silently misbehave.)
+  //
+  // A MovedState snapshots the Moved set of every scope on the current chain,
+  // innermost first.  Scopes created inside a branch die with the branch, so
+  // the chain at a construct's entry and at each of its branch exits is
+  // identical and entries correspond positionally.
+  using MovedState =
+      llvm::SmallVector<std::pair<Scope *, llvm::StringSet<>>, 8>;
+
+  /// Snapshot the Moved set of every scope on the current chain.
+  MovedState saveMovedState() const;
+  /// Reset the chain's Moved sets to a previously saved snapshot.
+  void restoreMovedState(const MovedState &st);
+  /// dst |= src, scope by scope (both must snapshot the same chain).
+  static void unionMovedState(MovedState &dst, const MovedState &src);
+
+  /// Implements the branch-merge rule above for any multi-branch construct.
+  /// Usage: construct one merger; wrap each branch in
+  /// beginBranch()/endBranch(); call finish(coversAllPaths) once, where
+  /// coversAllPaths is true iff some branch is guaranteed to run (if/else
+  /// present, match has a wildcard arm).
+  class MovedBranchMerger {
+    Sema &S;
+    MovedState Entry;  // moved-state at construct entry (shared branch input)
+    MovedState Merged; // union of branch exit states accumulated so far
+    bool AnyBranch = false;
+
+  public:
+    explicit MovedBranchMerger(Sema &s);
+    void beginBranch();
+    void endBranch();
+    void finish(bool coversAllPaths);
+  };
 
   /// The expected return type of the current function (nullptr = top-level /
   /// void).
@@ -156,17 +215,13 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
                                      ast::Type *retTy,
                                      const std::vector<ast::Type *> &paramTys);
 
-  // Returns true if the type is a numeric builtin (int or float).
-  static bool isNumeric(ast::Type *ty);
-
   // Structural type equality (pointer equality is insufficient for ArrayType
   // nodes because each make<ArrayType>() call yields a fresh allocation).
   static bool typesEqual(ast::Type *a, ast::Type *b);
 
   // Returns true if a value of type `src` can be assigned to a location of
   // type `dst`.  This includes exact match, int->float promotion, and
-  // ClassType subtyping. When `srcExpr` is provided, expression-form checks
-  // (such as '&' argument usage) are also enforced.
+  // ClassType subtyping.
   bool isAssignable(ast::Type *dst, ast::Type *src) const;
 
   // Returns the lowest common ancestor in the class hierarchy of two class
@@ -253,7 +308,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
         std::string Name;
         std::string ReturnTypeName;
         std::vector<std::string> ParamTypeNames;
-        uint8_t Flags; // ast::MethodDecl::Static / Private bits
+        uint8_t Flags; // ast::MethodDecl::Private bit
       };
       std::vector<FieldInfo> Fields;
       std::vector<MethodInfo> Methods;

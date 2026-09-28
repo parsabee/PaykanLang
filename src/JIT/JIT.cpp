@@ -6,6 +6,7 @@
 #include "Runtime.h"
 
 #include <cassert>
+#include <iterator>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -43,37 +44,28 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanFileRead,      reinterpret_cast<void *>(&PaykanFile_read)},
     {kPaykanFileVtable,    reinterpret_cast<void *>(&PaykanFile_vtable)},
     {kPaykanFileStdin,     reinterpret_cast<void *>(&PaykanFile_Stdin)},
-    // match dispatch looks up "File_vtable" (ClassName + "_vtable"); alias it.
-    {"File_vtable",       reinterpret_cast<void *>(&PaykanFile_vtable)},
 
     {kPaykanErrorNew,      reinterpret_cast<void *>(&PaykanError_new)},
     {kPaykanErrorDestroy,  reinterpret_cast<void *>(&PaykanError_destroy)},
     {kPaykanErrorToString, reinterpret_cast<void *>(&PaykanError_toString)},
     {kPaykanErrorEquals,   reinterpret_cast<void *>(&PaykanError_equals)},
     {kPaykanErrorVtable,   reinterpret_cast<void *>(&PaykanError_vtable)},
-    // match dispatch looks up "Error_vtable"; alias it.
-    {"Error_vtable",       reinterpret_cast<void *>(&PaykanError_vtable)},
 
     {kPaykanObjectNew,       reinterpret_cast<void *>(&PaykanObject_new)},
     {kPaykanObjectToString,  reinterpret_cast<void *>(&PaykanObject_toString)},
     {kPaykanObjectEquals,    reinterpret_cast<void *>(&PaykanObject_equals)},
     {kPaykanObjectNone,      reinterpret_cast<void *>(&PaykanObject_None)},
-    // match dispatch alias for Obj
-    {"Obj_vtable",           reinterpret_cast<void *>(&PaykanObject_vtable)},
 
     {kPaykanIntNew,          reinterpret_cast<void *>(&PaykanInt_new)},
     {kPaykanIntFromStr,      reinterpret_cast<void *>(&PaykanInt_from_str)},
     {kPaykanIntVtable,       reinterpret_cast<void *>(&PaykanInt_vtable)},
-    {"Int_vtable",           reinterpret_cast<void *>(&PaykanInt_vtable)},
 
     {kPaykanFloatNew,        reinterpret_cast<void *>(&PaykanFloat_new)},
     {kPaykanFloatFromStr,    reinterpret_cast<void *>(&PaykanFloat_from_str)},
     {kPaykanFloatVtable,     reinterpret_cast<void *>(&PaykanFloat_vtable)},
-    {"Float_vtable",         reinterpret_cast<void *>(&PaykanFloat_vtable)},
 
     {kPaykanBoolNew,         reinterpret_cast<void *>(&PaykanBool_new)},
     {kPaykanBoolVtable,      reinterpret_cast<void *>(&PaykanBool_vtable)},
-    {"Bool_vtable",          reinterpret_cast<void *>(&PaykanBool_vtable)},
 
     {kPaykanStringNew,       reinterpret_cast<void *>(&PaykanString_new)},
     {kPaykanStringFromInt,   reinterpret_cast<void *>(&PaykanString_from_int)},
@@ -109,8 +101,6 @@ const RuntimeSymbol kRuntimeSymbols[] = {
 
     {kPaykanObjectVtable,    reinterpret_cast<void *>(&PaykanObject_vtable)},
     {kPaykanStringVtable,    reinterpret_cast<void *>(&PaykanString_vtable)},
-    // match dispatch looks up "Str_vtable" (ClassName + "_vtable"); alias it.
-    {"Str_vtable",           reinterpret_cast<void *>(&PaykanString_vtable)},
 
     {kPaykanArrayNew,        reinterpret_cast<void *>(&PaykanArray_new)},
     {kPaykanArrayNewFromData,reinterpret_cast<void *>(&PaykanArray_new_from_data)},
@@ -130,6 +120,24 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanArrayVtable,     reinterpret_cast<void *>(&PaykanArray_vtable)},
     {kPaykanArrayObjVtable,  reinterpret_cast<void *>(&PaykanArray_obj_vtable)},
 };
+
+// Match dispatch and generated vtable references look builtin vtables up as
+// "<PaykanClassName>" + names::kVTableSuffix (e.g. "Str_vtable"); each
+// runtime vtable is therefore also registered under that composed alias.
+struct VTableAlias {
+  const char *ClassName;
+  void *Addr;
+};
+
+const VTableAlias kVTableAliases[] = {
+    {kObj,      reinterpret_cast<void *>(&PaykanObject_vtable)},
+    {kString,   reinterpret_cast<void *>(&PaykanString_vtable)},
+    {kFile,     reinterpret_cast<void *>(&PaykanFile_vtable)},
+    {kError,    reinterpret_cast<void *>(&PaykanError_vtable)},
+    {kIntBox,   reinterpret_cast<void *>(&PaykanInt_vtable)},
+    {kFloatBox, reinterpret_cast<void *>(&PaykanFloat_vtable)},
+    {kBoolBox,  reinterpret_cast<void *>(&PaykanBool_vtable)},
+};
 // clang-format on
 
 } // anonymous namespace
@@ -141,11 +149,21 @@ const RuntimeSymbol kRuntimeSymbols[] = {
 llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
                               std::unique_ptr<llvm::LLVMContext> ctx,
                               const std::vector<std::string> &args) {
+  // Composed "<ClassName>_vtable" alias names (stable std::strings so the
+  // symbol map and the debug drift-check below can both reference them).
+  std::vector<std::string> vtableAliasNames;
+  vtableAliasNames.reserve(std::size(kVTableAliases));
+  for (const auto &alias : kVTableAliases)
+    vtableAliasNames.push_back(std::string(alias.ClassName) +
+                               names::kVTableSuffix);
+
 #ifndef NDEBUG
   {
     std::unordered_set<std::string_view> registered;
     for (const auto &sym : kRuntimeSymbols)
       registered.insert(sym.Name);
+    for (const auto &name : vtableAliasNames)
+      registered.insert(name);
     for (const char *name : names::kCodeGenRequiredSymbols)
       assert(registered.count(name) &&
              "JIT symbol table is missing a symbol required by CodeGen");
@@ -168,6 +186,11 @@ llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
   for (const auto &sym : kRuntimeSymbols) {
     runtimeSyms[jit->mangleAndIntern(sym.Name)] = {
         llvm::orc::ExecutorAddr::fromPtr(sym.Addr),
+        llvm::JITSymbolFlags::Exported};
+  }
+  for (size_t i = 0; i < std::size(kVTableAliases); ++i) {
+    runtimeSyms[jit->mangleAndIntern(vtableAliasNames[i])] = {
+        llvm::orc::ExecutorAddr::fromPtr(kVTableAliases[i].Addr),
         llvm::JITSymbolFlags::Exported};
   }
   if (auto err =

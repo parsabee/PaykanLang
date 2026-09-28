@@ -67,7 +67,15 @@ Two operations maintain the count:
 
 The object is reached the same way regardless of its concrete class because every heap object
 begins with a pointer to its **vtable** — the table of its methods, including `destroy`,
-`toString`, and `equals`. A class instance's layout is `{ vtable pointer, fields… }`.
+`toString`, and `equals` — followed by a pointer back to its box. A class instance's layout is
+`{ vtable pointer, box pointer, fields… }`.
+
+The box is **unique**: each object has exactly one box for its entire lifetime, recorded in its
+header. Whenever a new owning reference to an object is needed — no matter which alias it is
+reached through (`self`, a `match` binding, a field, an array element) — the existing box is
+found through the backpointer and retained, rather than a second box being created. This is
+what makes the reference count a single source of truth and rules out double-frees from
+aliased references.
 
 ---
 
@@ -107,6 +115,107 @@ reference names it:
 You do not write any of these retains and releases — they are emitted by the compiler. The
 guarantee you can rely on is that an object is alive for as long as it is reachable through a live
 reference, and is destroyed promptly once it is not.
+
+---
+
+## Moving with `mov`
+
+`mov <expr>` **transfers ownership** of a value instead of sharing it. It can be applied to a
+local variable or to a temporary (any rvalue):
+
+```pkn
+s: Str = "Hello world";
+t = mov s;      // t takes ownership of the object; s no longer exists here
+println(t);
+```
+
+For a **reference type**, `mov` hands the source's existing reference to the destination **without
+bumping the reference count**, and the source variable is *consumed*: it drops out of the scope, so
+no release is emitted for it at scope exit. This is exactly one retain and one release cheaper than
+an ordinary `t = s` copy, and it expresses intent — the object now lives in `t`, not `s`.
+
+For a **value type** (`int`, `float`, …) `mov` simply forwards the value; there is no reference
+count to manage.
+
+Once a variable has been moved it may not be read again — doing so is a compile-time error:
+
+```pkn
+a: int = 3;
+b = mov a;
+c = a;          // error: use of moved variable 'a'
+```
+
+A moved variable can be brought back to life by **re-assigning** it, after which it is an
+ordinary live variable again:
+
+```pkn
+s: Str = "first";
+t = mov s;
+s = "second";   // revives s
+println(s);     // ok
+```
+
+Only whole local variables and temporaries may be moved. Moving a **member variable**
+(`obj.field`) or an **array element** (`arr[i]`) is rejected, because that would leave a hole in an
+aggregate whose lifetime `mov` cannot account for.
+
+Inside a method, **`self` may not be moved**: `self` is a *borrowed* reference to the receiver —
+the method does not own it, so there is no ownership to transfer. Ordinary **parameters** are
+owned by the callee for the duration of the call and *may* be moved, exactly like locals.
+
+### `mov` across branches
+
+The moved-or-live state of a variable is tracked **per control-flow path**. Each branch of an
+`if`/`else` — and each arm of a `match` — is checked against the state at entry to the construct,
+so a `mov` in one branch never poisons a sibling branch that can only run instead of it:
+
+```pkn
+if (f) {
+  consume(mov s);
+} else {
+  println(s);      // ok — this path did not move s
+}
+```
+
+After the construct the compiler merges paths conservatively: a variable moved on **any** path
+counts as moved, unless **every** path through the construct re-assigned it (for an `if` without
+`else`, or a `match` without a wildcard arm, the implicit not-taken path counts as a path that
+did not re-assign):
+
+```pkn
+if (f) { consume(mov s); }
+println(s);        // error: s may have been moved
+
+t = mov s;
+if (f) { s = "a"; } else { s = "b"; }
+println(s);        // ok — revived on both paths
+```
+
+### `mov` in loops
+
+A loop body (and a loop condition) re-executes, so a variable **declared outside a loop** may not
+be left moved when the loop repeats — on the next iteration it would be read after being
+consumed. This is a compile-time error unless the body re-assigns the variable on every path
+before the loop repeats:
+
+```pkn
+s: Str = "x";
+while (i < 2) {
+  consume(mov s);  // error: s is declared outside the loop and still moved
+  i = i + 1;       //        when the loop repeats
+}
+```
+
+Either re-assign it before the end of the body, or declare it inside the loop (a loop-local
+variable is fresh on every iteration):
+
+```pkn
+while (i < 2) {
+  s: Str = "x";
+  consume(mov s);  // ok
+  i = i + 1;
+}
+```
 
 ---
 

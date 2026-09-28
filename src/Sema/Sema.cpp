@@ -7,8 +7,6 @@
 
 #include <llvm/ADT/SmallPtrSet.h>
 
-#include <functional>
-
 namespace paykan {
 namespace sema {
 
@@ -46,11 +44,82 @@ Sema::Scope *Sema::Scope::findOwner(llvm::StringRef name) {
   return Parent ? Parent->findOwner(name) : nullptr;
 }
 
+void Sema::Scope::markMoved(llvm::StringRef name) {
+  if (auto *owner = findOwner(name))
+    owner->Moved.insert(name);
+}
+
+void Sema::Scope::clearMoved(llvm::StringRef name) {
+  if (auto *owner = findOwner(name))
+    owner->Moved.erase(name);
+}
+
+bool Sema::Scope::isMoved(llvm::StringRef name) const {
+  if (Locals.count(name))
+    return Moved.count(name) != 0;
+  return Parent ? Parent->isMoved(name) : false;
+}
+
 Sema::ScopeGuard::ScopeGuard(Sema &s) : S(s), ScopeObj(s.CurrentScope) {
   S.CurrentScope = &ScopeObj;
 }
 
 Sema::ScopeGuard::~ScopeGuard() { S.CurrentScope = ScopeObj.Parent; }
+
+// -- Flow-sensitive move tracking (see Sema.h for the rule) ------------------
+
+Sema::MovedState Sema::saveMovedState() const {
+  MovedState st;
+  for (Scope *s = CurrentScope; s; s = s->Parent)
+    st.emplace_back(s, s->Moved);
+  return st;
+}
+
+void Sema::restoreMovedState(const MovedState &st) {
+  for (auto &[scope, moved] : st)
+    scope->Moved = moved;
+}
+
+void Sema::unionMovedState(MovedState &dst, const MovedState &src) {
+  assert(dst.size() == src.size() && "snapshots must cover the same chain");
+  for (size_t i = 0; i < dst.size(); ++i) {
+    assert(dst[i].first == src[i].first && "scope chains diverged");
+    for (const auto &name : src[i].second)
+      dst[i].second.insert(name.getKey());
+  }
+}
+
+Sema::MovedBranchMerger::MovedBranchMerger(Sema &s)
+    : S(s), Entry(s.saveMovedState()) {}
+
+void Sema::MovedBranchMerger::beginBranch() { S.restoreMovedState(Entry); }
+
+void Sema::MovedBranchMerger::endBranch() {
+  MovedState exit = S.saveMovedState();
+  // Scopes opened inside the branch and still alive here (a match arm's own
+  // scope wraps the endBranch call) sit innermost-first at the head of the
+  // snapshot.  Drop them: their locals die with the branch, so their
+  // moved-state cannot escape, and the merge must align with Entry's chain.
+  assert(exit.size() >= Entry.size() && "branch closed scopes it did not open");
+  exit.erase(exit.begin(), exit.begin() + (exit.size() - Entry.size()));
+  if (!AnyBranch) {
+    Merged = std::move(exit);
+    AnyBranch = true;
+  } else {
+    unionMovedState(Merged, exit);
+  }
+}
+
+void Sema::MovedBranchMerger::finish(bool coversAllPaths) {
+  // When no branch is guaranteed to run, the entry state survives as the
+  // implicit skip path: a re-assignment inside the branches cannot revive a
+  // previously-moved name, but new moves inside them still count.
+  if (!AnyBranch)
+    Merged = Entry;
+  else if (!coversAllPaths)
+    unionMovedState(Merged, Entry);
+  S.restoreMovedState(Merged);
+}
 
 // -- Helpers -----------------------------------------------------------------
 
@@ -81,29 +150,9 @@ void Sema::note(ast::SourceLocation loc, const std::string &msg) {
 }
 
 std::string Sema::typeName(ast::Type *ty) {
-  if (!ty)
-    return "unknown";
-  if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty)) {
-    switch (bt->getTypeKind()) {
-    case ast::BuiltinType::Int:
-      return names::kTypeInt;
-    case ast::BuiltinType::Float:
-      return names::kTypeFloat;
-    case ast::BuiltinType::Bool:
-      return names::kTypeBool;
-    case ast::BuiltinType::Char:
-      return names::kTypeChar;
-    case ast::BuiltinType::Void:
-      return names::kTypeVoid;
-    }
-  }
-  if (auto *ct = ast::dyn_cast<ast::ClassType>(ty))
-    return ct->getName();
-  if (auto *et = ast::dyn_cast<ast::EnumType>(ty))
-    return et->getName();
-  if (auto *at = ast::dyn_cast<ast::ArrayType>(ty))
-    return typeName(at->getElementType()) + "[]";
-  return "unknown";
+  // Thin forwarder kept for the many diagnostic call sites; the single shared
+  // implementation lives with the type definitions (ASTContext.cpp).
+  return ast::typeName(ty);
 }
 
 // Structural type equality (pointer equality is insufficient for ArrayType
@@ -120,13 +169,6 @@ bool Sema::typesEqual(ast::Type *a, ast::Type *b) {
                       ast::cast<ast::ArrayType>(b)->getElementType());
   // BuiltinType / ClassType: pointer equality is canonical (singletons /
   // interned).
-  return false;
-}
-
-bool Sema::isNumeric(ast::Type *ty) {
-  if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty))
-    return bt->getTypeKind() == ast::BuiltinType::Int ||
-           bt->getTypeKind() == ast::BuiltinType::Float;
   return false;
 }
 
@@ -233,7 +275,60 @@ ast::Type *Sema::ExprChecker::visitStringLiteral(ast::StringLiteral *) {
 ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
   if (node->getName() == names::kStdin)
     return S.Ctx.getFileTy();
+  if (S.CurrentScope && S.CurrentScope->isMoved(node->getName())) {
+    S.error(node->getLocation(),
+            "use of moved variable '" + node->getName() +
+                "'; it was consumed by 'mov' and can only be used again after "
+                "re-assignment");
+    return nullptr;
+  }
   return S.checkIdentLive(node->getName(), node->getLocation());
+}
+
+ast::Type *Sema::ExprChecker::visitMovExpr(ast::MovExpr *node) {
+  ast::Expr *operand = node->getOperand();
+
+  // A member variable or array element may not be moved: moving out of an
+  // aggregate slot would leave a dangling hole whose lifetime `mov` cannot
+  // track.  Only a local variable or a temporary value may be moved.
+  if (ast::isa<ast::MemberAccessExpr>(operand)) {
+    S.error(node->getLocation(),
+            "cannot 'mov' a member variable; move a local variable or a "
+            "temporary value instead");
+    return nullptr;
+  }
+  if (ast::isa<ast::SubscriptExpr>(operand)) {
+    S.error(node->getLocation(),
+            "cannot 'mov' an array element; move a local variable or a "
+            "temporary value instead");
+    return nullptr;
+  }
+
+  // `self` is a borrowed reference to the receiver, not an owned local — the
+  // method does not own it, so there is no ownership to transfer.  (Ordinary
+  // parameters ARE owned by the callee frame and may be moved.)
+  if (auto *id = ast::dyn_cast<ast::Identifier>(operand)) {
+    if (id->getName() == names::kSelf) {
+      S.error(node->getLocation(),
+              "cannot 'mov' 'self'; it is a borrowed reference to the "
+              "receiver, not an owned local variable");
+      return nullptr;
+    }
+  }
+
+  // Type-check the operand first.  For an identifier this also rejects reading
+  // an already-moved variable.
+  ast::Type *ty = visit(operand);
+  if (!ty)
+    return nullptr;
+
+  // Moving a local variable consumes it: forbid any later use until it is
+  // re-assigned.  Any other operand is a temporary that is simply forwarded.
+  if (auto *id = ast::dyn_cast<ast::Identifier>(operand))
+    S.CurrentScope->markMoved(id->getName());
+
+  node->setResolvedType(ty);
+  return ty;
 }
 
 ast::Type *Sema::ExprChecker::visitEnumValueExpr(ast::EnumValueExpr *node) {
@@ -285,6 +380,12 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   if (!lhsTy || !rhsTy)
     return nullptr;
 
+  // Record operand types so CodeGen can distinguish reference-typed equality
+  // (lowered to a virtual `equals` call) from primitive/enum equality without
+  // re-deriving the type.
+  node->getLHS()->setResolvedType(lhsTy);
+  node->getRHS()->setResolvedType(rhsTy);
+
   if (!lhsTy->hasBinaryOp(node->getOpcode(), rhsTy)) {
     S.error(node->getLocation(),
             "operator '" + std::string(node->getOpcodeStr()) +
@@ -296,8 +397,10 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   // Equality requires compatible types.
   if ((node->getOpcode() == ast::BinaryOpcode::Eq ||
        node->getOpcode() == ast::BinaryOpcode::Ne)) {
-    // Same type is always OK.
-    if (lhsTy != rhsTy) {
+    // Same type is always OK.  Structural comparison, not pointer identity:
+    // every ArrayType use site allocates a fresh node, so `int[] == int[]`
+    // must unify structurally (while `int[] == Str[]` stays an error).
+    if (!typesEqual(lhsTy, rhsTy)) {
       // Allow class subtype comparisons (either direction).
       auto *lhsCT = ast::dyn_cast<ast::ClassType>(lhsTy);
       auto *rhsCT = ast::dyn_cast<ast::ClassType>(rhsTy);
@@ -815,6 +918,10 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
     return false;
   }
 
+  // Re-assigning a moved variable revives it (the RHS was already checked
+  // above, so a self-referential RHS like `a = a + 1` still errors).
+  CurrentScope->clearMoved(varName);
+
   // Look up the variable in all enclosing scopes.
   auto *owner = CurrentScope->findOwner(varName);
   if (!owner) {
@@ -890,18 +997,39 @@ bool Sema::visitIfStmt(ast::IfStmt *node) {
   }
 
   bool ok = true;
+  // Each branch sees the moved-state at entry (a `mov` in the then-branch is
+  // on an impossible path for the else-branch); afterwards the state is the
+  // union over branches — plus the fall-through path when there is no else.
+  MovedBranchMerger merger(*this);
   // Type-check the then branch.
+  merger.beginBranch();
   if (!visit(node->getThenBranch()))
     ok = false;
+  merger.endBranch();
   // Type-check the else branch (if present).
   if (node->hasElse()) {
+    merger.beginBranch();
     if (!visit(node->getElseBranch()))
       ok = false;
+    merger.endBranch();
   }
+  merger.finish(/*coversAllPaths=*/node->hasElse());
   return ok;
 }
 
 bool Sema::visitWhileStmt(ast::WhileStmt *node) {
+  // Back-edge soundness rule for `mov`: snapshot the moved-state before the
+  // condition (both the condition and the body re-execute every iteration).
+  // Any name that is (a) owned by a scope OUTSIDE the loop and (b) still
+  // moved when control reaches the back edge would be read-after-consume on
+  // iteration 2 — codegen nulls the slot on mov — so it is a compile error
+  // unless the body definitely re-assigned it before the back edge.  The
+  // check is conservative: the whole-body exit state stands in for the back
+  // edge, so a move that only reaches `break` is also rejected.  Names owned
+  // by scopes INSIDE the body are re-declared fresh each iteration and are
+  // exempt (their scopes are not on the chain in the entry snapshot).
+  MovedState entry = saveMovedState();
+
   // Type-check the condition — must be bool.
   auto *condTy = resolveExprType(node->getCondition());
   if (!condTy)
@@ -916,6 +1044,29 @@ bool Sema::visitWhileStmt(ast::WhileStmt *node) {
   ++LoopDepth;
   bool ok = visit(node->getBody());
   --LoopDepth;
+
+  // Diagnose every name newly moved across the iteration (moved at the back
+  // edge but live at loop entry).
+  MovedState exit = saveMovedState();
+  assert(entry.size() == exit.size() && "snapshots must cover the same chain");
+  for (size_t i = 0; i < exit.size(); ++i) {
+    for (const auto &name : exit[i].second) {
+      if (entry[i].second.count(name.getKey()))
+        continue;
+      error(node->getLocation(),
+            "variable '" + std::string(name.getKey()) +
+                "' is declared outside the loop but consumed by 'mov' inside "
+                "it; it would already be moved on the next iteration — "
+                "re-assign it before the loop repeats or declare it inside "
+                "the loop");
+      ok = false;
+    }
+  }
+
+  // After the loop: the body may run zero times, so a name moved at entry
+  // stays moved even if every iteration re-assigns it (union of both paths).
+  unionMovedState(exit, entry);
+  restoreMovedState(exit);
   return ok;
 }
 
@@ -964,23 +1115,37 @@ bool detail::stmtAlwaysReturns(ast::Stmt *s) {
   if (auto *ms = ast::dyn_cast<ast::MatchStmt>(s)) {
     bool hasWildcard = false;
     unsigned variantArms = 0;
+    bool trueArm = false, falseArm = false; // bool-subject literal coverage
     for (ast::MatchArm *arm : ms->getArms()) {
-      if (arm->isWildcard())
+      if (arm->isWildcard()) {
         hasWildcard = true;
-      else if (!arm->isLiteral())
+      } else if (!arm->isLiteral()) {
         ++variantArms; // an enum/type-name (bare-variant) arm
+      } else if (auto *bl = ast::dyn_cast<ast::BoolLiteral>(
+                     arm->getLiteralPattern())) {
+        if (bl->getValue())
+          trueArm = true;
+        else
+          falseArm = true;
+      }
       if (!detail::blockAlwaysReturns(arm->getBody()->getStatements()))
         return false;
     }
     if (hasWildcard)
       return true;
-    // A wildcard-less enum match is exhaustive iff its arms cover every
-    // variant.  Sema has already validated the arms (visitFuncDecl runs this
-    // analysis only after the body type-checks cleanly), so each variant arm
-    // names a distinct, valid variant — counting them suffices.
-    if (auto *subjTy = ms->getSubject()->getResolvedType())
+    // A wildcard-less match is exhaustive iff its arms cover the whole value
+    // domain of the subject: every variant of an enum subject, or both True
+    // and False literals for a bool subject.  Sema has already validated the
+    // arms (visitFuncDecl runs this analysis only after the body type-checks
+    // cleanly), so each variant arm names a distinct, valid variant —
+    // counting them suffices.
+    if (auto *subjTy = ms->getSubject()->getResolvedType()) {
       if (auto *et = ast::dyn_cast<ast::EnumType>(subjTy))
         return variantArms == et->getNumVariants();
+      if (auto *bt = ast::dyn_cast<ast::BuiltinType>(subjTy))
+        if (bt->getTypeKind() == ast::BuiltinType::Bool)
+          return trueArm && falseArm;
+    }
     return false;
   }
   return false;
@@ -1235,6 +1400,11 @@ bool Sema::checkValueMatch(ast::MatchStmt *node, ast::Type *subjectTy) {
   bool ok = true;
   bool seenWildcard = false;
 
+  // Sibling arms are mutually exclusive: each is checked against the
+  // moved-state at match entry, and the state afterwards is the union over
+  // arms (plus the no-arm-taken path when there is no wildcard).
+  MovedBranchMerger merger(*this);
+
   for (ast::MatchArm *arm : node->getArms()) {
     if (seenWildcard) {
       error(arm->getLocation(),
@@ -1243,6 +1413,7 @@ bool Sema::checkValueMatch(ast::MatchStmt *node, ast::Type *subjectTy) {
       continue;
     }
 
+    merger.beginBranch();
     ScopeGuard armGuard(*this);
 
     if (arm->isWildcard()) {
@@ -1273,8 +1444,10 @@ bool Sema::checkValueMatch(ast::MatchStmt *node, ast::Type *subjectTy) {
     for (auto *stmt : arm->getBody()->getStatements())
       if (!visit(stmt))
         ok = false;
+    merger.endBranch();
   }
 
+  merger.finish(/*coversAllPaths=*/seenWildcard);
   return ok;
 }
 
@@ -1286,6 +1459,9 @@ bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
   bool seenWildcard = false;
   llvm::StringSet<> seenVariants;
 
+  // Per-arm moved-state isolation + union merge (see checkValueMatch).
+  MovedBranchMerger merger(*this);
+
   for (ast::MatchArm *arm : node->getArms()) {
     if (seenWildcard) {
       error(arm->getLocation(),
@@ -1294,6 +1470,7 @@ bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
       continue;
     }
 
+    merger.beginBranch();
     ScopeGuard armGuard(*this);
 
     if (arm->isWildcard()) {
@@ -1329,8 +1506,14 @@ bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
     for (auto *stmt : arm->getBody()->getStatements())
       if (!visit(stmt))
         ok = false;
+    merger.endBranch();
   }
 
+  // NOTE: an enum match covering every variant without a wildcard is
+  // exhaustive at runtime, but the merge stays conservative (the entry state
+  // is kept as a possible path) — reviving a moved name in every arm of a
+  // wildcard-less match does not revive it after the match.
+  merger.finish(/*coversAllPaths=*/seenWildcard);
   return ok;
 }
 
@@ -1377,6 +1560,9 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
   bool ok = true;
   bool seenWildcard = false;
 
+  // Per-arm moved-state isolation + union merge (see checkValueMatch).
+  MovedBranchMerger merger(*this);
+
   for (ast::MatchArm *arm : node->getArms()) {
     if (seenWildcard) {
       error(arm->getLocation(),
@@ -1385,6 +1571,7 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
       continue;
     }
 
+    merger.beginBranch();
     // Open a new scope for each arm (the binding, if any, lives here).
     ScopeGuard armGuard(*this);
 
@@ -1399,6 +1586,7 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
       for (auto *stmt : arm->getBody()->getStatements())
         if (!visit(stmt))
           ok = false;
+      merger.endBranch();
       continue;
     } else {
       // 2. Resolve the arm's type annotation.
@@ -1461,8 +1649,10 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
     for (auto *stmt : arm->getBody()->getStatements())
       if (!visit(stmt))
         ok = false;
+    merger.endBranch();
   }
 
+  merger.finish(/*coversAllPaths=*/seenWildcard);
   return ok;
 }
 

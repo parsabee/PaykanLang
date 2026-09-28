@@ -306,6 +306,17 @@ void ASTPrinter::visitTernaryExpr(TernaryExpr *node) {
   }
 }
 
+void ASTPrinter::visitMovExpr(MovExpr *node) {
+  printIndent();
+  OS << "MovExpr";
+  printLoc(node);
+  OS << "\n";
+  {
+    ChildScope cs(*this, true);
+    visit(node->getOperand());
+  }
+}
+
 void ASTPrinter::visitIdentifier(Identifier *node) {
   printIndent();
   OS << "Identifier";
@@ -450,8 +461,6 @@ void ASTPrinter::visitMethodDecl(MethodDecl *node) {
   OS << "MethodDecl";
   printLoc(node);
   OS << " '" << node->getName() << "'";
-  if (node->isStatic())
-    OS << " static";
   if (node->isPrivate())
     OS << " private";
   OS << "\n";
@@ -572,15 +581,20 @@ void ASTPrinter::visitMatchStmt(MatchStmt *node) {
     bool isLast = (i + 1 == arms.size());
     ChildScope cs(*this, isLast);
     printIndent();
-    OS << (arm->isWildcard() ? "MatchArm wildcard" : "MatchArm");
+    OS << (arm->isWildcard()  ? "MatchArm wildcard"
+           : arm->isLiteral() ? "MatchArm literal"
+                              : "MatchArm");
     if (arm->hasBinding())
       OS << " binding='" << arm->getBinding() << "'";
     OS << "\n";
-    if (!arm->isWildcard()) {
-      {
-        ChildScope cs2(*this, false);
-        visit(arm->getArmType());
-      }
+    // A non-wildcard arm carries either a literal pattern (value arm) or a
+    // matched type (type arm) — never both; a literal arm's ArmType is null.
+    if (arm->isLiteral()) {
+      ChildScope cs2(*this, false);
+      visit(arm->getLiteralPattern());
+    } else if (!arm->isWildcard()) {
+      ChildScope cs2(*this, false);
+      visit(arm->getArmType());
     }
     {
       ChildScope cs2(*this, true);

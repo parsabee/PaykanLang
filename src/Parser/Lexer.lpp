@@ -1,10 +1,6 @@
 %{
 #include <cerrno>
-#include <climits>
-#include <cstdint>
 #include <cstdlib>
-#include <cstring> // strerror
-#include <iostream>
 #include <string>
 #include "AST.h"
 #include "Parser.ypp.h"
@@ -25,9 +21,6 @@
   make_CHAR (const char *text, int len, const yy::parser::location_type& loc);
 %}
 
-true        True
-false       False
-None        None
 id          [_a-zA-Z][_a-zA-Z_0-9]*
 int         [0-9]+
 float       [0-9]+\.[0-9]*([eE][+-]?[0-9]+)?|[0-9]+[eE][+-]?[0-9]+
@@ -49,7 +42,7 @@ comment     \/\/[^\n]*
 %}
 
 {blank}+   loc.step ();
-{comment}+ loc.step();
+{comment}  loc.step();
 \n+        loc.lines (yyleng); loc.step ();
 
 "::"       return yy::parser::make_COLONCOLON(loc);
@@ -79,11 +72,22 @@ comment     \/\/[^\n]*
 ";"        return yy::parser::make_SEMICOLON (loc);
 ","        return yy::parser::make_COMMA     (loc);
 "!"        return yy::parser::make_NOT       (loc);
-"&"        return yy::parser::make_AMP       (loc);
 
-\'([^\\']|\\.)\'  { return make_CHAR(yytext, yyleng, loc); }
+\'([^\\'\n]|\\.)\'  { return make_CHAR(yytext, yyleng, loc); }
 
-\"([^\\\"]|\\.)*\"  { std::string raw(yytext + 1, yyleng - 2);
+  /* A character literal whose closing quote is missing before the end of the
+     line (or file).  Raw newlines are excluded from the pattern above for the
+     same reason as in string literals -- see the comment there. */
+\'([^\\'\n]|\\.)?  { throw yy::parser::syntax_error(loc,
+                       "unterminated character literal"); }
+
+  /* String literals are single-line by design: an embedded newline must be
+     written as the escape \n.  The unescaped-character class excludes '\n'
+     so a literal that reaches end-of-line without its closing quote falls
+     through to the error rule below.  (Letting the pattern swallow raw
+     newlines would also silently skip loc.lines(), shifting the line number
+     of every diagnostic issued after the literal.) */
+\"([^\\\"\n]|\\.)*\"  { std::string raw(yytext + 1, yyleng - 2);
                       std::string s;
                       s.reserve(raw.size());
                       for (size_t i = 0; i < raw.size(); ++i) {
@@ -103,11 +107,20 @@ comment     \/\/[^\n]*
                       }
                       return yy::parser::make_STRING (s, loc); }
 
+  /* A string literal that hits a newline or EOF before its closing quote.
+     The optional trailing backslash also catches a line ending in an escape
+     (e.g. "abc\<newline>) so the whole broken literal is one error token.
+     The newline itself is NOT consumed here; the \n+ rule above still counts
+     it, keeping line numbers correct for every later diagnostic. */
+\"([^\\\"\n]|\\.)*\\?  { throw yy::parser::syntax_error(loc,
+                           "unterminated string literal (string literals "
+                           "cannot span multiple lines; use \\n)"); }
+
 {int}      return make_INT   (yytext, loc);
 {float}    return make_FLOAT (yytext, loc);
-{true}     return yy::parser::make_BOOL  (true,  loc);
-{false}    return yy::parser::make_BOOL  (false, loc);
-{None}     return yy::parser::make_NONE  (loc);
+"True"     return yy::parser::make_BOOL  (true,  loc);
+"False"    return yy::parser::make_BOOL  (false, loc);
+"None"     return yy::parser::make_NONE  (loc);
 "fn"       return yy::parser::make_FN(loc);
 "return"   return yy::parser::make_RETURN(loc);
 "if"       return yy::parser::make_IF(loc);
@@ -121,8 +134,15 @@ comment     \/\/[^\n]*
 "class"    return yy::parser::make_CLASS(loc);
 "enum"     return yy::parser::make_ENUM(loc);
 "match"    return yy::parser::make_MATCH(loc);
+"mov"      return yy::parser::make_MOV(loc);
 "_"        return yy::parser::make_UNDERSCORE(loc);
 {id}       return yy::parser::make_IDENT (yytext, loc);
+
+  /* Catch-all: any byte no earlier rule claims is a lexical error (without
+     this, flex's default action would silently ECHO the byte to stdout and
+     drop it from the token stream). */
+.          { throw yy::parser::syntax_error(loc,
+                 std::string("invalid character '") + yytext + "'"); }
 
 <<EOF>>    return yy::parser::make_YYEOF (loc);
 
@@ -131,9 +151,19 @@ comment     \/\/[^\n]*
 yy::parser::symbol_type
 make_INT (const std::string &s, const yy::parser::location_type& loc)
 {
+  // strtoll saturates on overflow and reports it solely through ERANGE, and
+  // `long long` is exactly 64 bits wide on every supported target, so errno
+  // is the one and only out-of-range signal (an additional value comparison
+  // against INT64_MIN/INT64_MAX would be a compile-time tautology).
+  //
+  // Deliberate edge case: the scanner never sees a negative literal -- `-` is
+  // a separate MINUS token -- so `-9223372036854775808` reaches us as the bare
+  // magnitude 9223372036854775808, which overflows and is rejected here with
+  // "integer is out of range".  INT64_MIN must be written as an expression,
+  // e.g. `-9223372036854775807 - 1`, matching C/C++ practice.
   errno = 0;
-  long long n = strtoll (s.c_str(), NULL, 10);
-  if (errno == ERANGE || n < INT64_MIN || n > INT64_MAX)
+  long long n = strtoll (s.c_str(), nullptr, 10);
+  if (errno == ERANGE)
     throw yy::parser::syntax_error (loc, "integer is out of range: " + s);
   return yy::parser::make_INT (static_cast<long>(n), loc);
 }
@@ -166,7 +196,7 @@ make_CHAR (const char *text, int len, const yy::parser::location_type& loc)
   throw yy::parser::syntax_error(loc, "invalid character literal: " + std::string(text));
 }
 
-void
+bool
 paykan::parser::ParserDriver::Impl::scanBegin()
 {
   errno = 0;
@@ -175,12 +205,14 @@ paykan::parser::ParserDriver::Impl::scanBegin()
     yyin = stdin;
 
   else if (!(yyin = fopen (CurFile.c_str (), "r")))
-  {
-    std::cerr << "cannot open " << CurFile << ": " << strerror (errno) << '\n';
-    exit (EXIT_FAILURE);
-  }
+    // Library code must not terminate the process: report failure to the
+    // caller (parseFile), which emits the diagnostic and fails the parse.
+    // errno is left set for the caller's message.
+    return false;
+
   // Reset scanner state to discard any leftover buffer from a previous parse.
   yyrestart(yyin);
+  return true;
 }
 
 void

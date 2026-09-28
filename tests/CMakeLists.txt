@@ -15,6 +15,7 @@ add_executable(parser_tests
     Parser/ClassTests.cpp
     Parser/ModuleTests.cpp
     Parser/ArrayTests.cpp
+    Parser/MovTests.cpp
 )
 target_include_directories(parser_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -39,6 +40,7 @@ add_executable(sema_tests
     Sema/ModuleTests.cpp
     Sema/ArrayTests.cpp
     Sema/EnumTests.cpp
+    Sema/MovTests.cpp
 )
 target_include_directories(sema_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -68,6 +70,8 @@ add_executable(codegen_tests
     CodeGen/BoxedPrimitiveTests.cpp
     CodeGen/ArgsTests.cpp
     CodeGen/EnumTests.cpp
+    CodeGen/MovTests.cpp
+    CodeGen/OwnershipTests.cpp
 )
 target_include_directories(codegen_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -91,6 +95,7 @@ add_test(NAME CodeGenTests COMMAND codegen_tests)
 # --- Runtime tests ----------------------------------------------------------
 add_executable(runtime_tests
     Runtime/ArrayTests.cpp
+    Runtime/EqualsNullTests.cpp
     Runtime/ObjectTests.cpp
     Runtime/StringTests.cpp
     Runtime/SharedTests.cpp

@@ -25,7 +25,8 @@ for f in samples/sema/arrays/*.pkn; do
 done
 
 # Type-check every sample across all feature directories
-for f in samples/sema/arrays/*.pkn samples/sema/classes/*.pkn samples/sema/match/*.pkn; do
+for f in samples/sema/arrays/*.pkn samples/sema/classes/*.pkn \
+         samples/sema/match/*.pkn samples/sema/enums/*.pkn; do
   paykan --check-only "$f" 2>&1 && echo "OK: $f" || echo "ERR: $f"
 done
 ```

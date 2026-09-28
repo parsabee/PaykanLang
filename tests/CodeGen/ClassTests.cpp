@@ -864,6 +864,116 @@ TEST(Class, DefaultEqualsIsIdentity) {
   EXPECT_EQ(r.StdOut, "True\nFalse\nTrue\nFalse\n");
 }
 
+// `==` on reference types lowers to the virtual `equals` method.  A ref-typed
+// call temporary compared against None must dispatch correctly (and not leak):
+// `process() == None` returns None.equals(None) == True.  Regression: this used
+// to compare a box pointer against the None singleton and was always false.
+TEST(Class, CallTemporaryEqualsNone) {
+  auto r = compileAndRun(R"(
+    fn process() -> Obj { return None; }
+    fn main() -> int {
+      if (process() == None) { println("none"); } else { println("something"); }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "none\n");
+}
+
+TEST(Class, CallTemporaryNotEqualsNone) {
+  auto r = compileAndRun(R"(
+    class Thing { n: int; fn __init__(x: int) { self.n = x; } }
+    fn process() -> Obj { return Thing(5); }
+    fn main() -> int {
+      if (process() != None) { println("something"); } else { println("none"); }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "something\n");
+}
+
+// Two distinct call temporaries are distinct objects under identity `==`.
+TEST(Class, TwoCallTemporariesDistinct) {
+  auto r = compileAndRun(R"(
+    class Thing {}
+    fn make() -> Obj { return Thing(); }
+    fn main() -> int {
+      if (make() == make()) { println("same"); } else { println("diff"); }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "diff\n");
+}
+
+// `==` on Str is value (content) equality, since it lowers to Str.equals.
+// Two distinct string objects with equal content are `==`-equal.
+TEST(Class, StringEqualityIsContent) {
+  auto r = compileAndRun(R"(
+    fn main() -> int {
+      a: Str = "abc";
+      b: Str = "ab" + "c";
+      println(StrBool(a == b));
+      println(StrBool(a != b));
+      println(StrBool(a == "xyz"));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "True\nFalse\nFalse\n");
+}
+
+// `==` dispatches a user `equals` override — including one that matches on its
+// own class type (regression: the class's vtable global was created after its
+// method bodies, so a self-type match referenced an unresolved placeholder).
+TEST(Class, EqualsOperatorUsesOverrideWithSelfMatch) {
+  auto r = compileAndRun(R"(
+    class Money {
+      cents: int;
+      fn __init__(c: int) { self.cents = c; }
+      fn equals(o: Obj) -> bool {
+        match o {
+          m: Money { return self.cents == m.cents; }
+          _        { return False; }
+        }
+      }
+    }
+    fn main() -> int {
+      a: Money = Money(5);
+      b: Money = Money(5);
+      c: Money = Money(9);
+      println(StrBool(a == b));
+      println(StrBool(a == c));
+      println(StrBool(a != c));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "True\nFalse\nTrue\n");
+}
+
+// A method that matches on its own class type links correctly (vtable global
+// must exist before the method body is emitted).
+TEST(Class, MethodMatchesOwnType) {
+  auto r = compileAndRun(R"(
+    class Node {
+      v: int;
+      fn __init__(x: int) { self.v = x; }
+      fn isNode(o: Obj) -> bool {
+        match o { n: Node { return True; } _ { return False; } }
+      }
+    }
+    fn main() -> int {
+      a: Node = Node(1);
+      println(StrBool(a.isNode(a)));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "True\n");
+}
+
 // A user class may override equals; the override is dispatched through the
 // vtable in place of the runtime default.
 TEST(Class, EqualsOverrideDispatched) {

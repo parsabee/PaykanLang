@@ -226,6 +226,22 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   llvm::Value *emitEnumMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
                              llvm::Function *parentFn);
 
+  // -- Match-lowering scaffolding shared by all three modes ------------------
+
+  /// Create the wildcard body block if the match has a wildcard arm, else
+  /// return nullptr (the check chain then falls through to match.end).
+  llvm::BasicBlock *createMatchWildcardBlock(ast::MatchStmt *node,
+                                             llvm::Function *parentFn);
+
+  /// Emit one arm's body statements into `bodyBB` inside a fresh scope, then
+  /// branch to `endBB` unless the body already terminated the block.
+  void emitMatchArmBody(ast::MatchArm *arm, llvm::BasicBlock *bodyBB,
+                        llvm::BasicBlock *endBB);
+
+  /// Emit the wildcard arm's body into `wildcardBB` (no-op when nullptr).
+  void emitMatchWildcardBody(ast::MatchStmt *node, llvm::BasicBlock *wildcardBB,
+                             llvm::BasicBlock *endBB);
+
   /// Emit cleanup (delete / release) for all variables in the given scope.
   void emitScopeCleanup(Scope &scope);
 
@@ -308,6 +324,14 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   /// the input for anything else (including nullptr).
   ast::Type *canonicalizeDeclType(ast::Type *ty);
 
+  /// Resolve the concrete ClassType an RHS expression produces, canonicalized
+  /// against the registry (parser stubs carry no fields/methods), or nullptr
+  /// when the expression has no class-typed resolution.  Shared by the
+  /// variable-binding sites (visitVarDecl / visitAssignStmt /
+  /// emitImplicitVarDecl) that narrow a variable's scope type to the concrete
+  /// RHS class so later method dispatch uses the concrete vtable convention.
+  ast::ClassType *resolveExprClassType(ast::Expr *expr);
+
   /// Create an alloca in the entry block of the current function.
   llvm::AllocaInst *createEntryAlloca(llvm::Function *fn, llvm::StringRef name,
                                       llvm::Type *ty);
@@ -332,6 +356,15 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   void emitRetain(llvm::Value *shared);
   void emitRelease(llvm::Value *shared);
   llvm::Value *emitSharedNew(llvm::Value *raw, llvm::StringRef name = "shared");
+
+  /// Take ownership of `val`, the PaykanShared* just emitted for `expr`
+  /// (exprAlreadyShared(expr) must hold): a freshly produced +1 box (call /
+  /// method call / ternary / array literal / `mov` / call-rooted field read)
+  /// is owned as-is, while a borrowed box (a plain ref-typed field read) is
+  /// retained first — the field slot keeps its own reference.  Stealing the
+  /// borrow instead used to over-release: the new owner's release and the
+  /// field's release together freed the object one time too many.
+  llvm::Value *takeSharedOwnership(ast::Expr *expr, llvm::Value *val);
 
   /// Emit a reference-typed expression and return the *raw* underlying pointer
   /// (PaykanArray* / PaykanString* / PaykanObject*), unwrapping the

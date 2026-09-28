@@ -8,6 +8,7 @@
 // human-readable error message.
 
 #include "Runtime.h"
+#include "RuntimeInternal.h"
 
 #include <stdlib.h>
 
@@ -28,6 +29,7 @@ PaykanObjectVTable PaykanError_vtable = {
 PaykanError *PaykanError_new(const char *msg, int64_t len) {
   PaykanError *e = (PaykanError *)Paykan_malloc(sizeof(PaykanError));
   e->vtable = &PaykanError_vtable;
+  e->shared = NULL; // not yet boxed (unique-box invariant)
   e->message = PaykanString_new(msg, len);
   return e;
 }
@@ -50,9 +52,8 @@ PaykanShared *PaykanError_toString(PaykanObject *self) {
 }
 
 int64_t PaykanError_equals(PaykanObject *self, PaykanObject *other) {
-  // `other` arrives as a PaykanShared box and is consumed by this call.
-  PaykanObject *o = PaykanShared_get((PaykanShared *)other);
-  int64_t result = (self == o);
-  Paykan_release((PaykanShared *)other);
-  return result;
+  // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
+  PaykanObject *o = Paykan_equals_unbox_other(other);
+  int64_t result = o && self == o;
+  return Paykan_equals_consume_other(other, result);
 }

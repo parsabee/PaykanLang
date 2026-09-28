@@ -166,17 +166,26 @@ bool Sema::checkInitFieldsAssigned(ast::ClassType *ct, ast::CompoundStmt *body,
       return {in, false};
     }
     if (auto *ms = ast::dyn_cast<ast::MatchStmt>(s)) {
-      // Determine exhaustiveness: a wildcard arm, or arms covering every enum
-      // variant.  Only an exhaustive match can guarantee assignments.
+      // Determine exhaustiveness: a wildcard arm, arms covering every enum
+      // variant, or both True and False literal arms over a bool subject.
+      // Only an exhaustive match can guarantee assignments.
       bool hasWildcard = false;
       unsigned variantArms = 0;
+      bool trueArm = false, falseArm = false;
       llvm::SmallBitVector out = full;
       bool anyFallThrough = false;
       for (ast::MatchArm *arm : ms->getArms()) {
-        if (arm->isWildcard())
+        if (arm->isWildcard()) {
           hasWildcard = true;
-        else if (!arm->isLiteral())
+        } else if (!arm->isLiteral()) {
           ++variantArms;
+        } else if (auto *bl = ast::dyn_cast<ast::BoolLiteral>(
+                       arm->getLiteralPattern())) {
+          if (bl->getValue())
+            trueArm = true;
+          else
+            falseArm = true;
+        }
         Flow af = analyzeBlock(arm->getBody()->getStatements(), in);
         if (!af.AlwaysReturns) {
           anyFallThrough = true;
@@ -184,10 +193,15 @@ bool Sema::checkInitFieldsAssigned(ast::ClassType *ct, ast::CompoundStmt *body,
         }
       }
       bool exhaustive = hasWildcard;
-      if (!exhaustive)
-        if (auto *subjTy = ms->getSubject()->getResolvedType())
+      if (!exhaustive) {
+        if (auto *subjTy = ms->getSubject()->getResolvedType()) {
           if (auto *et = ast::dyn_cast<ast::EnumType>(subjTy))
             exhaustive = variantArms == et->getNumVariants();
+          else if (auto *bt = ast::dyn_cast<ast::BuiltinType>(subjTy))
+            exhaustive = bt->getTypeKind() == ast::BuiltinType::Bool &&
+                         trueArm && falseArm;
+        }
+      }
       if (!exhaustive)
         return {in, false}; // a non-matching path keeps only the incoming set
       if (!anyFallThrough)
@@ -259,13 +273,11 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
       if (it != localClasses.end()) {
         topoVisit(it->second); // process superclass first
       } else {
-        // Imported base class: must be referenced by its full module path
-        // (e.g. "tmp_import::helper::Adder"), not a bare name or short
-        // qualifier.  A name with no "::" can only be a local class — unless
-        // it is a built-in class type (Obj, Str) which lives in ASTContext.
-        bool hasQualifier = superName.find("::") != std::string::npos;
-        if (!Ctx.lookupClassType(superName) &&
-            (!hasQualifier || !Ctx.lookupClassType(superName))) {
+        // Not declared in this module: the name must resolve through the
+        // ASTContext registry — a built-in class type (Obj, Str) or an
+        // imported class referenced by a registered alias (e.g.
+        // "tmp_import::helper::Adder").
+        if (!Ctx.lookupClassType(superName)) {
           error(cd->getLocation(), "superclass '" + superName + "' of class '" +
                                        cd->getName() + "' is not defined");
           aborted = true;
@@ -374,6 +386,18 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
       std::vector<ast::Type *> paramTys;
       bool paramsOk = true;
       for (auto &p : method->getParams()) {
+        // `self` is the implicit receiver of every method; a parameter of the
+        // same name would silently shadow it in the body scope.
+        if (p.getName() == names::kSelf) {
+          error(method->getLocation(),
+                "'" + std::string(names::kSelf) +
+                    "' cannot be used as a parameter name of method '" +
+                    method->getName() + "' in class '" + cd->getName() +
+                    "'; it is the implicit receiver");
+          paramsOk = false;
+          ok = false;
+          break;
+        }
         auto *pty =
             resolveType(p.ParamType, method->getLocation(),
                         "parameter '" + p.getName() + "' of method '" +

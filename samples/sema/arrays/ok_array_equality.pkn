@@ -1,0 +1,13 @@
+// OK: == / != are defined for arrays of the same element type
+// (lowered to the virtual `equals`, which compares reference identity)
+fn main() -> int {
+  a: int[] = [1, 2];
+  b: int[] = [1, 2];
+  eq: bool = a == b;
+  ne: bool = a != b;
+  s: Str[] = ["x"];
+  t: Str[] = ["x"];
+  seq: bool = s == t;
+  lit: bool = [1, 2] == [1, 2];
+  return 0;
+}

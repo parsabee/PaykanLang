@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/parsabee/PaykanLang/actions/workflows/ci.yml/badge.svg)](https://github.com/parsabee/PaykanLang/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.0.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.1.0--alpha-blue.svg)](CHANGELOG.md)
 
 PaykanLang (`.pkn`) is a high-performance language for building applications on modern,
 heterogeneous machines. The goal is application development across many cores and, 
@@ -13,9 +13,10 @@ a real module system, C interoperability exposed through modules, and automatic 
 counting in place of a garbage collector or manual memory management. PaykanLang aims to 
 provide a safe, ergonomic, performant, and productive interface that compiles to native speed.
 
-This is **v0.0** that lays the foundation. Implemented and tested today: 
-static typing with inference, single-inheritance classes with virtual dispatch,
-ARC, dynamic arrays, a file-based module system, `match` type dispatch, and enums — all
+This is an **early preview** (`0.1.0-alpha`) that lays the foundation. Implemented and tested
+today: static typing with inference, single-inheritance classes with virtual dispatch,
+ARC with `mov` move semantics, value-aware `==` (reference types dispatch to a virtual
+`equals`), dynamic arrays, a file-based module system, `match` type dispatch, and enums — all
 compiled to LLVM IR and JIT-executed. The defining goals — seamless offloading to
 heterogeneous compute units, thread-safe concurrency, C interop through modules, and
 ahead-of-time native binaries — are the road ahead, not yet shipped. See
@@ -59,11 +60,17 @@ cmake --install build --prefix /usr/local
 
 ```sh
 paykan program.pkn              # JIT-execute a source file
+paykan --check-only program.pkn # stop after type-checking (no codegen/JIT)
 paykan --emit-llvm program.pkn  # print the generated LLVM IR
+paykan --dump-ast program.pkn   # print the parsed AST
+paykan --track-heap program.pkn # run, then print heap/leak statistics
+paykan -O2 program.pkn          # set the optimization level (0-3)
 paykan --version                # print the compiler and LLVM versions
 ```
 
-`main`'s return value becomes the process exit code.
+`main`'s return value becomes the process exit code, and extra command-line arguments are
+passed to `main(args: Str[])` (with `args[0]` the source-file path). Source files use the
+`.pkn` extension (`.pk` is also accepted).
 
 ---
 
@@ -103,7 +110,7 @@ To learn PaykanLang:
 - **[`language_reference/`](language_reference/)** — the full reference: language basics,
   functions, enums, classes, arrays, modules, `match` statements, and the memory model.
 - **[`samples/`](samples/)** — runnable `.pkn` programs exercising every feature
-  (`samples/codegen/` has 25 feature demos; see also `imports/`, `sema/`, `leak-check/`).
+  (`samples/codegen/` has 28 feature demos; see also `imports/`, `sema/`, `leak-check/`).
 - **[`example_program/`](example_program/)** — a small end-to-end example (`calc`).
 
 A taste:

@@ -15,8 +15,18 @@ fn name(params) {
 ```
 
 - No function overloading — each name must be unique in the program.
-- Functions must be declared before they are called.
-- `main` must return `int`.
+- Functions may be declared in any order — calling a function that is declared later in the
+  file is fine (forward references are allowed).
+- `main` must return `int`; its return value becomes the process exit code. `main` may
+  optionally take the command-line arguments:
+
+```pkn
+fn main(args: Str[]) -> int {
+  // args[0] is the source-file path; args[1..] are the arguments after it
+  println(args[0]);
+  return 0;
+}
+```
 
 ---
 
@@ -101,7 +111,7 @@ fn fib(n: int) -> int {
 
 | Error | Trigger |
 |-------|---------|
-| Undeclared function | Calling a function not yet declared |
+| Undeclared function | Calling a function that is not declared anywhere in the program |
 | Function redefinition | Two functions with the same name |
 | Argument count mismatch | Wrong number of arguments |
 | Argument type mismatch | Argument type incompatible with parameter type |

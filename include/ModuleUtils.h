@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 
-#ifndef PAYKAN_MODULE_UTILS_H
-#define PAYKAN_MODULE_UTILS_H
+#pragma once
 
 #include "AST.h"
 #include "ASTContext.h" // remapType() calls into ASTContext members
@@ -113,5 +112,3 @@ inline bool isSourceNewer(llvm::StringRef sourcePath,
 
 } // namespace module_utils
 } // namespace paykan
-
-#endif // PAYKAN_MODULE_UTILS_H

@@ -9,6 +9,8 @@
 
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
+#include <llvm/IR/Constants.h>
+#include <llvm/IR/Metadata.h>
 #include <llvm/Support/MemoryBuffer.h>
 
 namespace paykan {
@@ -17,6 +19,24 @@ namespace codegen {
 // ---------------------------------------------------------------------------
 // Static helpers (file-scope)
 // ---------------------------------------------------------------------------
+
+/// ABI version stamped into every cached import module as a module flag.
+/// A cached .bc whose flag is missing (pre-versioning compiler) or different
+/// was generated against an incompatible object layout / calling convention
+/// and must be recompiled, not loaded — linking it would corrupt memory at
+/// runtime.  Bump this whenever generated-code ABI changes.
+///   v2: two-slot object header — PaykanShared* unique-box backpointer added
+///       at struct slot 1, shifting every class field GEP (PAY-1).
+static constexpr uint64_t kPaykanABIVersion = 2;
+static constexpr const char *kABIVersionFlag = "paykan.abi.version";
+
+/// True when `mod` (a freshly parsed cached module) matches the running
+/// compiler's ABI version.
+static bool cachedModuleABIMatches(const llvm::Module &mod) {
+  auto *flag = llvm::mdconst::extract_or_null<llvm::ConstantInt>(
+      mod.getModuleFlag(kABIVersionFlag));
+  return flag && flag->getZExtValue() == kPaykanABIVersion;
+}
 
 /// Declare fn under qualifiedName in mod if not already present.
 static void declareExternAs(llvm::Module *mod, llvm::Function &fn,
@@ -113,7 +133,7 @@ void CodeGen::processImports(ast::TranslationUnit *tu) {
         if (bufOrErr) {
           auto modOrErr =
               llvm::parseBitcodeFile((*bufOrErr)->getMemBufferRef(), LLVMCtx);
-          if (modOrErr) {
+          if (modOrErr && cachedModuleABIMatches(**modOrErr)) {
             auto &cachedMod = *modOrErr;
             llvm::Module *defMod = cachedMod.get();
             addImportAliases(defMod, qualifier, modulePath);
@@ -134,8 +154,13 @@ void CodeGen::processImports(ast::TranslationUnit *tu) {
             }
             continue;
           }
+          if (modOrErr)
+            llvm::consumeError(llvm::Error::success()); // ABI-stale: recompile
+          else
+            llvm::consumeError(modOrErr.takeError());
         }
-        // If loading failed, fall through to recompile.
+        // If loading failed or the cache predates the current ABI version,
+        // fall through to recompile (which rewrites the cache).
       }
 
       // -- Full codegen using the pre-computed SemaContext ------------------
@@ -183,6 +208,11 @@ void CodeGen::processImports(ast::TranslationUnit *tu) {
 
       // -- Write bitcode to cache ------------------------------------------
       {
+        // Stamp the ABI version so a future compiler with a different object
+        // layout refuses this cache instead of linking incompatible code.
+        if (!impMod->getModuleFlag(kABIVersionFlag))
+          impMod->addModuleFlag(llvm::Module::Error, kABIVersionFlag,
+                                kPaykanABIVersion);
         auto parentDir = llvm::sys::path::parent_path(cachePath);
         std::error_code mkdirEc;
         if (!parentDir.empty())

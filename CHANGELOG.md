@@ -5,9 +5,62 @@ All notable changes to PaykanLang are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Move semantics with `mov`.** `mov <expr>` transfers ownership of a local
+  variable, parameter, or temporary without a retain/release pair. Use of a
+  moved variable is a compile error until it is re-assigned, tracked
+  flow-sensitively: a `mov` in one `if`/`match` branch does not poison sibling
+  branches, paths are merged conservatively after the construct, and moving a
+  variable declared outside a loop without re-assigning it before the loop
+  repeats is rejected. `mov self` and moving fields or array elements are
+  compile errors. See `language_reference/08-memory-model.md`.
+- **`==` / `!=` on reference types dispatch to `equals`.** For classes, `Str`,
+  and arrays, `a == b` now calls the virtual `equals` method (and `!=` its
+  negation). `Str` comparison is therefore **content** equality
+  (`"hel" + "lo" == "hello"` is `True`); arrays keep identity comparison via
+  the default `equals`; comparing arrays of different element types is a
+  compile error. Overriding `equals` in a class changes how `==` behaves for it.
+
+### Fixed
+
+- Double-frees when an object was reached through more than one owning alias:
+  using `self` as a value (return/argument/assignment/`mov`), ownership-taking
+  uses of `match` bindings, and array-typed class fields. Fixed by a new
+  unique-box runtime invariant — every heap object records its single
+  reference-count box in its header, and creating an owning reference reuses
+  that box instead of creating a second one.
+- `push` / `pop` called on arbitrary receivers (call results, nested
+  subscripts) no longer hit an internal assertion.
+- `mov` soundness holes: moves in loops of loop-external variables (previously
+  compiled, then crashed on the second iteration), false "moved" errors in
+  sibling branches, and `mov self` (previously accepted) are now handled
+  correctly at compile time.
+- A `match` over both `bool` literals now counts as exhaustive for
+  "always returns" and field-initialisation analysis.
+- Declaring `self` as a method parameter is now a clear compile error instead
+  of a confusing arity error at the call site.
+- Parser diagnostics are now clang-style (caret + source snippet), matching
+  semantic errors; a raw newline inside a string or character literal is
+  rejected with a targeted message (use `\n`); the unused `&` token was
+  removed from the lexer; out-of-range integer literals are reported reliably;
+  an unopenable file no longer calls `exit()` from library code.
+
+### Changed
+
+- Runtime object header grew by 8 bytes: every heap object now carries a
+  backpointer to its reference-count box (the unique-box invariant above).
+- Cached import bitcode is stamped with an ABI version; caches written by a
+  compiler with a different (or missing) ABI stamp are recompiled instead of
+  loaded.
+- Parse errors changed format from yacc-style one-liners to clang-style
+  caret-and-snippet diagnostics.
+
 ## [0.0.0] - 2026-06-28
 
-First tagged preview release. PaykanLang is a statically-typed, object-oriented
+First preview release (not yet tagged in git). PaykanLang is a statically-typed, object-oriented
 language that compiles to LLVM IR and is **JIT-executed**. This release is a
 deliberately small, honest preview; several features are planned for v0.1.
 

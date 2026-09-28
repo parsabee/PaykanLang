@@ -260,7 +260,7 @@ TEST(ArrayEquals, DifferentObjectsAreNotEqual) {
 
 TEST(ArrayVtable, LengthViaVtable) {
   PaykanArray *arr = PaykanArray_new(9);
-  auto *lenFn = (int64_t (*)(PaykanObject *))((void **)arr->vtable)[3];
+  auto *lenFn = (int64_t(*)(PaykanObject *))((void **)arr->vtable)[3];
   EXPECT_EQ(lenFn((PaykanObject *)arr), 9);
   PaykanArray_destroy((PaykanObject *)arr);
 }

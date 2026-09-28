@@ -7,7 +7,6 @@
 #include <cassert>
 #include <concepts>
 #include <cstdint>
-#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -91,6 +90,7 @@ public:
     NK_ArrayLiteralExpr,
     NK_SubscriptExpr,
     NK_EnumValueExpr,
+    NK_MovExpr,
 
     // Types
     NK_BuiltinType,
@@ -178,8 +178,7 @@ public:
   Type *getResolvedType() const { return ResolvedType; }
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_IntegerLiteral &&
-           N->getKind() <= NK_EnumValueExpr;
+    return N->getKind() >= NK_IntegerLiteral && N->getKind() <= NK_MovExpr;
   }
 };
 
@@ -306,7 +305,6 @@ public:
 
   const std::string &getName() const { return *Name; }
   const std::vector<Param> &getParams() const { return Params; }
-  size_t getNumParams() const { return Params.size(); }
   Type *getReturnType() const { return ReturnType; }
   CompoundStmt *getBody() const { return Body; }
 
@@ -501,9 +499,8 @@ public:
 //
 //   TypeName { body }             -- type arm, no variable binding
 //   binding: TypeName { body }    -- type arm, with variable binding
-//   literal : { body }            -- value arm (e.g. "Hello" : { ... }, 42 : {
-//   ... }) _ { body }                    -- wildcard (catch-all), colon
-//   optional
+//   literal { body }              -- value arm (e.g. "Hi" { ... }, 42 { ... })
+//   _ { body }                    -- wildcard (catch-all)
 //
 // An arm is exactly one of: type arm (ArmType != nullptr), value arm
 // (LiteralPattern != nullptr), or wildcard (both nullptr).  ArmType and
@@ -565,7 +562,6 @@ public:
   Expr *getSubject() const { return Subject; }
   std::vector<MatchArm *> &getArms() { return Arms; }
   const std::vector<MatchArm *> &getArms() const { return Arms; }
-  size_t getNumArms() const { return Arms.size(); }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_MatchStmt; }
 };
@@ -837,8 +833,7 @@ class MethodDecl : public Decl {
 public:
   enum Flags : uint8_t {
     None = 0,
-    Static = 1 << 0,
-    Private = 1 << 1,
+    Private = 1 << 0,
   };
 
 private:
@@ -858,16 +853,6 @@ public:
   const std::vector<Type *> &getParamTypes() const { return ParamTypes; }
   size_t getNumParams() const { return ParamTypes.size(); }
 
-  /// Replace the return type (used for forward-reference patching).
-  void setReturnType(Type *ty) { ReturnType = ty; }
-
-  /// Replace a parameter type at index i (used for forward-reference patching).
-  void setParamType(size_t i, Type *ty) {
-    assert(i < ParamTypes.size() && "param index out of range");
-    ParamTypes[i] = ty;
-  }
-
-  bool isStatic() const { return MethodFlags & Static; }
   bool isPrivate() const { return MethodFlags & Private; }
   bool isVirtual() const { return !isPrivate(); }
 
@@ -969,9 +954,6 @@ public:
   // -- Methods --------------------------------------------------------------
 
   void addMethod(MethodDecl *m);
-
-  /// Returns the __init__ MethodDecl if one was declared, or nullptr.
-  MethodDecl *getInitMethod() const { return InitMethod; }
 
   /// Reset the vtable to start with the parent's slots (re-inherit).
   /// Call this after the parent's methods are fully populated.
@@ -1118,7 +1100,15 @@ class ArrayType : public Type {
 
 public:
   ArrayType(SourceLocation loc, Type *elemTy)
-      : Type(NK_ArrayType, loc), ElementType(elemTy) {}
+      : Type(NK_ArrayType, loc), ElementType(elemTy) {
+    // Arrays support == / != (lowered to the virtual `equals`, which compares
+    // reference identity — see PaykanArray_equals).  The mask must live on the
+    // constructor: ArrayType nodes are freshly allocated at every use site
+    // (parser annotations, Sema::resolveType, array literals), so unlike the
+    // ClassType singletons there is no single bootstrap point to patch.
+    addBinaryOp(BinaryOpcode::Eq);
+    addBinaryOp(BinaryOpcode::Ne);
+  }
 
   Type *getElementType() const { return ElementType; }
 
@@ -1185,7 +1175,6 @@ public:
   const std::string &getEnumName() const { return *EnumName; }
   const std::string &getVariantName() const { return *VariantName; }
 
-  EnumType *getResolvedEnum() const { return ResolvedEnum; }
   void setResolvedEnum(EnumType *e) { ResolvedEnum = e; }
   int64_t getValue() const { return Value; }
   void setValue(int64_t v) { Value = v; }
@@ -1255,6 +1244,28 @@ public:
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_SubscriptExpr;
   }
+};
+
+// Move expression:  mov <operand>
+//
+// Transfers ownership of the operand to the consuming context.  When the
+// operand is a local variable, that variable is considered "moved out" — Sema
+// forbids any later use of it, and CodeGen hands the variable's owning
+// reference to the destination without an extra retain (and without a release
+// at scope exit).  When the operand is a temporary (any rvalue), `mov` is a
+// transparent pass-through: the temporary is already an owned value being
+// forwarded.  Only local variables and temporaries may be moved; moving out of
+// an aggregate slot (obj.field / arr[i]) is rejected by Sema.
+class MovExpr : public Expr {
+  Expr *Operand;
+
+public:
+  MovExpr(SourceLocation loc, Expr *operand)
+      : Expr(NK_MovExpr, loc), Operand(operand) {}
+
+  Expr *getOperand() const { return Operand; }
+
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_MovExpr; }
 };
 
 /// Returns true for any type whose values are heap-allocated and

@@ -1,0 +1,26 @@
+// 28 — array == / !=: lowered to the virtual `equals` (reference identity)
+// Exercises: BinaryExpr Eq/Ne on ArrayType operands (Sema structural type
+//            unification + operator mask on ArrayType), the ref-equality →
+//            `equals` lowering for array receivers (PaykanArray_equals), and
+//            != as the negation.  Array `equals` compares reference identity:
+//            an array equals itself and an alias of itself, never a distinct
+//            array — even one with the same contents.
+
+fn main() -> int {
+  a: int[] = [1, 2, 3];
+  b: int[] = [1, 2, 3];
+  c: int[] = a;                       // alias — same underlying object
+
+  println(StrBool(a == a));           // True   (same object)
+  println(StrBool(a == c));           // True   (alias)
+  println(StrBool(a == b));           // False  (distinct object, equal contents)
+  println(StrBool(a != b));           // True
+
+  // Reference-element arrays go through the same identity lowering.
+  s: Str[] = ["x", "y"];
+  t: Str[] = ["x", "y"];
+  println(StrBool(s == s));           // True
+  println(StrBool(s == t));           // False
+
+  return 0;
+}

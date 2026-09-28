@@ -34,6 +34,12 @@ namespace {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+/// Number of pointer slots in the object header shared by every Paykan heap
+/// object (runtime builtins and generated classes alike):
+///   [0] vtable pointer   [1] PaykanShared* unique-box backpointer
+/// Must mirror the header of `struct PaykanObject` in src/Runtime/Runtime.h.
+constexpr unsigned kNumHeaderSlots = 2;
+
 /// Collect all instance fields in layout order: ancestor fields first,
 /// then the class's own fields — mirrors C struct inheritance by composition.
 std::vector<std::pair<std::string, ast::Type *>>
@@ -59,7 +65,10 @@ llvm::StructType *ClassCodeGen::getOrCreateClassStructType(ast::ClassType *ct) {
 
   auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
   std::vector<llvm::Type *> elems;
+  // Object header — must match the runtime's PaykanObject layout exactly,
+  // since raw class pointers are handed to runtime functions:
   elems.push_back(ptrTy); // index 0: vtable pointer
+  elems.push_back(ptrTy); // index 1: PaykanShared* backpointer (unique box)
   for (auto &[name, ty] : getAllFieldsInOrder(ct)) {
     auto *llvmTy = CG.toLLVMType(ty);
     elems.push_back(llvmTy ? llvmTy : ptrTy);
@@ -72,7 +81,8 @@ llvm::StructType *ClassCodeGen::getOrCreateClassStructType(ast::ClassType *ct) {
 
 int ClassCodeGen::getFieldIndex(ast::ClassType *ct,
                                 const std::string &name) const {
-  int idx = 1; // index 0 is the vtable pointer
+  // Fields start after the two-slot object header (vtable, shared).
+  int idx = kNumHeaderSlots;
   for (auto &[fname, fty] : getAllFieldsInOrder(ct)) {
     if (fname == name)
       return idx;
@@ -192,8 +202,11 @@ std::string ClassCodeGen::findConcreteMethodFuncName(ast::ClassType *ct,
       return kPaykanStringEquals;
     if (name == kMethodLength)
       return kPaykanStringLength;
-    if (name == kMethodConcat)
-      return kPaykanStringConcat;
+    // NOTE: no mapping for `concat`.  Str is final, so no user vtable can
+    // inherit its slots and this lookup is unreachable for concat; the Str
+    // vtable itself (String.c) holds PaykanString_concat_inplace, whose
+    // void-return convention differs from PaykanString_concat — mapping the
+    // name here would wire the wrong function type into a vtable slot.
     return "";
   }
   // Builtin File.
@@ -241,6 +254,21 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
   // Ensure the struct type exists before emitting any method bodies
   // (methods may refer to fields of their own class).
   getOrCreateClassStructType(ct);
+
+  // Create the vtable global up-front — as a declaration (no initializer) —
+  // before any method body is emitted.  A `match` on this class inside one of
+  // its own methods takes the address of this global for its type check; if the
+  // global did not yet exist it would synthesize an external placeholder
+  // (`<Class>_vtable`) that later collides with the real definition (renamed
+  // `<Class>_vtable.1`), leaving the placeholder unresolved at link time.  The
+  // vtable size is known from the Sema-built vtable, so the type is fixed here;
+  // the initializer (the concrete function pointers) is filled in at step 3.
+  auto *vtableArrTy = llvm::ArrayType::get(ptrTy, ct->getVTableSize());
+  auto *vtableGlobal = new llvm::GlobalVariable(
+      *CG.Module, vtableArrTy, /*isConstant=*/true,
+      llvm::GlobalValue::ExternalLinkage, /*Initializer=*/nullptr,
+      node->getName() + kVTableSuffix);
+  ClassVTableGlobals[ct] = vtableGlobal;
 
   // -------------------------------------------------------------------------
   // 1. Emit a concrete LLVM function for each method declared in this class.
@@ -370,11 +398,12 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
   // This is stable across modules because the linker resolves addresses.
   auto *methodArrTy = llvm::ArrayType::get(ptrTy, vtableEntries.size());
   auto *methodArrConst = llvm::ConstantArray::get(methodArrTy, vtableEntries);
-  std::string vtableGlobalName = node->getName() + kVTableSuffix;
-  auto *vtableGlobal = new llvm::GlobalVariable(
-      *CG.Module, methodArrTy, /*isConstant=*/true,
-      llvm::GlobalValue::ExternalLinkage, methodArrConst, vtableGlobalName);
-  ClassVTableGlobals[ct] = vtableGlobal;
+  // The global was created (as a declaration) before the method bodies; fill in
+  // its initializer now that the concrete function pointers are known.  The
+  // array type matches (both [getVTableSize() x ptr]).
+  assert(vtableGlobal->getValueType() == methodArrTy &&
+         "vtable global type must match its initializer");
+  vtableGlobal->setInitializer(methodArrConst);
 
   // -------------------------------------------------------------------------
   // 4. Emit the constructor function.
@@ -384,10 +413,15 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
   //
   //    Steps:
   //      a. malloc(sizeof(ClassName_struct))
-  //      b. Store vtable pointer at struct[0]
+  //      b. Store vtable pointer at struct[0], null the shared backpointer
+  //         at struct[1]
   //      c. Zero-initialise all field slots
-  //      d. Call ClassName___init__(rawPtr, initParams) if __init__ exists
-  //      e. Wrap rawPtr in a PaykanShared box and return it
+  //      d. Wrap rawPtr in its unique PaykanShared box (installs the
+  //         backpointer) BEFORE running __init__, so that `self` used as a
+  //         value inside __init__ recovers the caller's box instead of
+  //         creating — and prematurely releasing — a second one
+  //      e. Call ClassName___init__(rawPtr, initParams) if __init__ exists
+  //      f. Return the box (the caller owns the first reference)
   // -------------------------------------------------------------------------
   auto *initMd = ct->findMethod(names::kMethodInit);
   std::vector<llvm::Type *> ctorParamTys;
@@ -434,7 +468,7 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
 
     // a. Allocate raw memory.
     auto *mallocFnTy = llvm::FunctionType::get(ptrTy, {i64Ty}, false);
-    auto *mallocFn = CG.declareFunction(kMalloc, mallocFnTy);
+    auto *mallocFn = CG.declareFunction(kPaykanMalloc, mallocFnTy);
     llvm::DataLayout dl(CG.Module.get());
     auto structSize = dl.getTypeAllocSize(structTy);
     auto *sizeVal = llvm::ConstantInt::get(i64Ty, structSize);
@@ -450,11 +484,19 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
                                                             0, 0, kIRVtablePtr);
     CG.Builder.CreateStore(vtableGEP, vtableSlotPtr);
 
-    // c. Zero-initialise field slots.
+    // Null the shared backpointer (header slot 1) — malloc'd memory is
+    // garbage, and PaykanShared_new reads this slot to decide between
+    // creating a fresh box and acquiring an existing one.
+    auto *sharedSlotPtr =
+        CG.Builder.CreateStructGEP(structTy, rawPtr, 1, kIRSharedSlot);
+    CG.Builder.CreateStore(llvm::ConstantPointerNull::get(ptrTy),
+                           sharedSlotPtr);
+
+    // c. Zero-initialise field slots (fields follow the two header slots).
     auto allFields = getAllFieldsInOrder(ct);
     for (size_t fi = 0; fi < allFields.size(); ++fi) {
       auto *fieldSlot = CG.Builder.CreateStructGEP(
-          structTy, rawPtr, static_cast<unsigned>(fi + 1),
+          structTy, rawPtr, static_cast<unsigned>(fi + kNumHeaderSlots),
           kIRFieldPrefix + allFields[fi].first);
       auto *fty = CG.toLLVMType(allFields[fi].second);
       if (!fty)
@@ -462,7 +504,14 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
       CG.Builder.CreateStore(llvm::Constant::getNullValue(fty), fieldSlot);
     }
 
-    // d. Call __init__ if present.
+    // d. Wrap in PaykanShared BEFORE __init__ runs.  This installs the
+    // object's unique-box backpointer, so ownership-taking uses of `self`
+    // inside __init__ (f(self), field aliasing, …) retain THIS box rather
+    // than boxing the half-constructed object separately and destroying it
+    // when that stray box drops to zero.
+    llvm::Value *shared = CG.emitSharedNew(rawPtr, node->getName() + ".shared");
+
+    // e. Call __init__ if present.
     if (initMd) {
       std::string initFnName = node->getName() + kNameSep + kMethodInit;
       if (auto *initFn = CG.Module->getFunction(initFnName)) {
@@ -473,8 +522,7 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
       }
     }
 
-    // e. Wrap in PaykanShared and return.
-    llvm::Value *shared = CG.emitSharedNew(rawPtr, node->getName() + ".shared");
+    // f. Return the box — the caller owns the first reference.
     CG.Builder.CreateRet(shared);
   }
 
@@ -555,12 +603,13 @@ void ClassCodeGen::emitDestructor(ast::ClassDecl *node, ast::ClassType *ct) {
     llvm::Value *self = fn->getArg(0);
 
     // Release every reference-counted field (Str, Obj, class, array).
+    // Fields follow the two-slot object header (vtable, shared).
     auto allFields = getAllFieldsInOrder(ct);
     for (size_t fi = 0; fi < allFields.size(); ++fi) {
       if (!ast::isRefType(allFields[fi].second))
         continue;
       auto *fieldSlot = CG.Builder.CreateStructGEP(
-          structTy, self, static_cast<unsigned>(fi + 1),
+          structTy, self, static_cast<unsigned>(fi + kNumHeaderSlots),
           kIRFieldPrefix + allFields[fi].first);
       auto *box = CG.Builder.CreateLoad(ptrTy, fieldSlot, allFields[fi].first);
       CG.emitRelease(box); // Paykan_release tolerates null boxes.
@@ -584,12 +633,24 @@ void ClassCodeGen::emitDestructor(ast::ClassDecl *node, ast::ClassType *ct) {
 llvm::Value *ClassCodeGen::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
   auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
 
-  // Evaluate the receiver.
-  // Note: visitIdentifier already unwraps owned class variables (PaykanShared*
-  // -> raw object pointer), so no additional unwrapping is needed here.
-  llvm::Value *objPtr = CG.emitExpr(node->getReceiver());
-  if (!objPtr)
+  // Evaluate the receiver and classify what it produced (a call-rooted
+  // receiver is a fresh +1 box this statement must tear down after the
+  // store), then unwrap to the RAW object pointer.  Identifiers (already
+  // unwrapped by visitIdentifier) and `self` pass through untouched; a nested
+  // ref-typed member access (h.inner.field = v) or call result is unwrapped
+  // from its PaykanShared* box — GEPing into the box itself would silently
+  // overwrite its refCount/object words.
+  llvm::Value *recv = CG.emitExpr(node->getReceiver());
+  if (!recv)
     return nullptr;
+  ExprValue recvOwned = CG.classifyExpr(node->getReceiver(), recv);
+  llvm::Value *objPtr = recv;
+  if (CG.exprAlreadyShared(node->getReceiver()) &&
+      recv->getType()->isPointerTy()) {
+    auto *getFnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
+    objPtr = CG.Builder.CreateCall(
+        CG.declareFunction(kPaykanSharedGet, getFnTy), {recv}, kIRObj);
+  }
 
   // Determine the ClassType of the receiver.
   ast::ClassType *ct = getExprClassType(node->getReceiver());
@@ -612,8 +673,12 @@ llvm::Value *ClassCodeGen::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
       structTy, objPtr, static_cast<unsigned>(fieldIdx),
       kIRFieldPrefix + node->getFieldName());
 
-  if (fieldASTTy && ast::isa<ast::ClassType>(fieldASTTy)) {
-    // Class-typed field: retain the new shared box, conditionally release old.
+  if (fieldASTTy && ast::isRefType(fieldASTTy)) {
+    // Ref-typed field (class OR array): the slot owns a PaykanShared* box —
+    // retain/steal the new box, conditionally release the old one.  Array
+    // fields must take this path too (A4): the destructor and the read path
+    // treat every ref-typed slot as a box, so a plain store of the raw
+    // PaykanArray* here would be read back as a box and double-freed.
     llvm::Value *newShared = nullptr;
 
     // If RHS is an owned identifier, load its shared box and retain — do NOT
@@ -633,8 +698,15 @@ llvm::Value *ClassCodeGen::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
       // Wrap raw string literals into PaykanString* before boxing.
       if (auto *sl = ast::dyn_cast<ast::StringLiteral>(node->getValue()))
         rhs = CG.wrapStringLiteral(rhs, sl->getValue().size());
+      // A raw pointer here may be a fresh temporary (string literal, concat)
+      // OR an alias of an already-boxed object (match-arm binding, `self`,
+      // array element).  PaykanShared_new's acquire semantics (unique-box
+      // invariant, Runtime.h) make both correct: fresh objects get a new box,
+      // aliases yield a +1 on the object's existing box.  An already-shared
+      // RHS goes through takeSharedOwnership, which retains a borrowed
+      // field-read box instead of stealing it.
       newShared = CG.exprAlreadyShared(node->getValue())
-                      ? rhs
+                      ? CG.takeSharedOwnership(node->getValue(), rhs)
                       : CG.emitSharedNew(rhs, kIRFieldShared);
     }
 
@@ -662,6 +734,9 @@ llvm::Value *ClassCodeGen::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
       return nullptr;
     CG.Builder.CreateStore(rhs, fieldSlot);
   }
+  // Tear down an owned (call-rooted) receiver temporary now that the store
+  // is complete.
+  CG.releaseIfOwned(recvOwned);
   return nullptr;
 }
 
@@ -672,14 +747,29 @@ llvm::Value *ClassCodeGen::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
 llvm::Value *ClassCodeGen::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
   auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
 
-  // Evaluate the receiver.
-  llvm::Value *objPtr = CG.emitExpr(node->getReceiver());
-  if (!objPtr)
+  // Evaluate the receiver and classify the ownership of what it produced
+  // BEFORE unwrapping: a call-rooted receiver (e.g. `makeH().a`) hands this
+  // expression a fresh +1 box that must be torn down after the field is read
+  // — mirroring the receiver teardown in visitMethodCallExpr — while a plain
+  // variable / `self` / borrowed field is left untouched.
+  llvm::Value *recv = CG.emitExpr(node->getReceiver());
+  if (!recv)
     return nullptr;
+  ExprValue recvOwned = CG.classifyExpr(node->getReceiver(), recv);
+
+  // Unwrap to the RAW object pointer (see visitMemberAssignStmt: identifiers
+  // and `self` are already raw, a nested ref-typed member access or call
+  // result is unwrapped from its PaykanShared* box — GEPing into the box
+  // would return its refCount/object words instead).
+  llvm::Value *objPtr = recv;
+  if (CG.exprAlreadyShared(node->getReceiver()) &&
+      recv->getType()->isPointerTy()) {
+    auto *getFnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
+    objPtr = CG.Builder.CreateCall(
+        CG.declareFunction(kPaykanSharedGet, getFnTy), {recv}, kIRObj);
+  }
 
   // Determine the ClassType of the receiver.
-  // Note: visitIdentifier already unwraps owned class variables (PaykanShared*
-  // -> raw object pointer), so objPtr is already the raw struct pointer.
   ast::ClassType *ct = getExprClassType(node->getReceiver());
   if (!ct)
     return nullptr;
@@ -696,7 +786,19 @@ llvm::Value *ClassCodeGen::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
   llvm::Value *fieldSlot = CG.Builder.CreateStructGEP(
       structTy, objPtr, static_cast<unsigned>(fieldIdx),
       kIRFieldPrefix + node->getFieldName());
-  return CG.Builder.CreateLoad(fieldLLTy, fieldSlot, node->getFieldName());
+  llvm::Value *fieldVal =
+      CG.Builder.CreateLoad(fieldLLTy, fieldSlot, node->getFieldName());
+
+  // Tear down an owned receiver temporary.  The receiver object dies with its
+  // box, so a ref-typed field value must be RETAINED first to survive the
+  // teardown; exprProducesFreshBox then reports this expression's result as
+  // an owned +1 box, so the consumer releases it exactly once.
+  if (recvOwned.isOwned()) {
+    if (fieldASTTy && ast::isRefType(fieldASTTy))
+      CG.emitRetain(fieldVal);
+    CG.releaseIfOwned(recvOwned);
+  }
+  return fieldVal;
 }
 
 } // namespace codegen

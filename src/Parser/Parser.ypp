@@ -70,7 +70,6 @@
   LSQUARE "["
   RSQUARE "]"
   ARROW "->"
-  AMP   "&"
   AND   "&&"
   OR    "||"
   COLONCOLON "::"
@@ -79,6 +78,7 @@
   CLASS  "class"
   ENUM   "enum"
   MATCH  "match"
+  MOV    "mov"
   UNDERSCORE "_"
   FN     "fn"
   RETURN "return"
@@ -422,6 +422,8 @@ unaryExpression:
       postfixExpression             { $$ = $1; }
     | unaryOperator unaryExpression
                                     { $$ = impl(drv).Ctx.make<UnaryExpr>(loc(@1, @2), $1, $2); }
+    | "mov" unaryExpression
+                                    { $$ = impl(drv).Ctx.make<MovExpr>(loc(@1, @2), $2); }
     ;
 
 multiplicativeExpression:

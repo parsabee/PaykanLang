@@ -4,6 +4,7 @@
 // Paykan runtime — Object base type implementation.
 
 #include "Runtime.h"
+#include "RuntimeInternal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +22,7 @@ PaykanObjectVTable PaykanObject_vtable = {
 PaykanObject *PaykanObject_new(void) {
   PaykanObject *obj = (PaykanObject *)Paykan_malloc(sizeof(PaykanObject));
   obj->vtable = &PaykanObject_vtable;
+  obj->shared = NULL; // not yet boxed (unique-box invariant)
   return obj;
 }
 
@@ -36,13 +38,12 @@ PaykanShared *PaykanObject_toString(PaykanObject *self) {
 }
 
 int64_t PaykanObject_equals(PaykanObject *self, PaykanObject *other) {
-  // `other` is passed as a PaykanShared box (the calling convention for
-  // class-typed method arguments) and is consumed by this call. Unbox it so
-  // identity compares the underlying objects, matching the unboxed `self`.
-  PaykanObject *o = PaykanShared_get((PaykanShared *)other);
-  int64_t result = (self == o);
-  Paykan_release((PaykanShared *)other);
-  return result;
+  // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h);
+  // unbox so identity compares the underlying objects, matching the unboxed
+  // `self`.  A NULL box compares unequal.
+  PaykanObject *o = Paykan_equals_unbox_other(other);
+  int64_t result = o && self == o;
+  return Paykan_equals_consume_other(other, result);
 }
 
 // -- None singleton ----------------------------------------------------------
@@ -60,10 +61,9 @@ static PaykanShared *PaykanNone_toString(PaykanObject *self) {
 }
 
 static int64_t PaykanNone_equals(PaykanObject *self, PaykanObject *other) {
-  PaykanObject *o = PaykanShared_get((PaykanShared *)other);
-  int64_t result = (self == o);
-  Paykan_release((PaykanShared *)other);
-  return result;
+  PaykanObject *o = Paykan_equals_unbox_other(other);
+  int64_t result = o && self == o;
+  return Paykan_equals_consume_other(other, result);
 }
 
 static PaykanObjectVTable PaykanNone_vtable = {
@@ -72,7 +72,9 @@ static PaykanObjectVTable PaykanNone_vtable = {
     .equals = PaykanNone_equals,
 };
 
-PaykanObject PaykanObject_None = {&PaykanNone_vtable};
+// shared starts NULL; boxing None installs a box and Paykan_release clears it
+// again (destroy is a no-op), so the singleton cycles cleanly through boxings.
+PaykanObject PaykanObject_None = {&PaykanNone_vtable, NULL};
 
 // -- Runtime panics ----------------------------------------------------------
 

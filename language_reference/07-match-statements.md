@@ -103,6 +103,10 @@ match x {
 }
 ```
 
+A binding is an ordinary reference to the matched object: it can be passed to functions,
+stored into fields or array slots, and assigned to variables that outlive the `match` — the
+object's lifetime is managed by ARC like any other reference (see `08-memory-model.md`).
+
 The binding is scoped to its arm body. Redeclaring the binding name inside the same body is an
 error:
 

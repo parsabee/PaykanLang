@@ -4,6 +4,7 @@
 // Paykan runtime — String type implementation.
 
 #include "Runtime.h"
+#include "RuntimeInternal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +30,7 @@ PaykanString *PaykanString_new(const char *data, int64_t len) {
   // Cast: the Object-compatible prefix of PaykanStringVTable matches
   // PaykanObjectVTable, so this pointer cast is safe.
   s->vtable = (PaykanObjectVTable *)&PaykanString_vtable;
+  s->shared = NULL; // not yet boxed (unique-box invariant)
   s->len = len;
   s->data = (char *)Paykan_malloc((size_t)len + 1);
   memcpy(s->data, data, (size_t)len);
@@ -86,11 +88,13 @@ PaykanShared *PaykanString_toString(PaykanObject *self) {
 }
 
 int64_t PaykanString_equals(PaykanObject *self, PaykanObject *other) {
-  // `other` arrives as a PaykanShared box and is consumed by this call.
-  PaykanObject *o = PaykanShared_get((PaykanShared *)other);
+  // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
+  PaykanObject *o = Paykan_equals_unbox_other(other);
   PaykanString *lhs = (PaykanString *)self;
   int64_t result;
-  if (o->vtable != (PaykanObjectVTable *)&PaykanString_vtable) {
+  if (!o) {
+    result = 0; // NULL box: equal to nothing
+  } else if (o->vtable != (PaykanObjectVTable *)&PaykanString_vtable) {
     // Not a String — fall back to identity.
     result = (self == o);
   } else {
@@ -98,8 +102,7 @@ int64_t PaykanString_equals(PaykanObject *self, PaykanObject *other) {
     result = lhs->len == rhs->len &&
              memcmp(lhs->data, rhs->data, (size_t)lhs->len) == 0;
   }
-  Paykan_release((PaykanShared *)other);
-  return result;
+  return Paykan_equals_consume_other(other, result);
 }
 
 int64_t PaykanString_length(PaykanObject *self) {
@@ -112,6 +115,7 @@ PaykanObject *PaykanString_concat(PaykanObject *self, PaykanObject *other) {
   int64_t newLen = lhs->len + rhs->len;
   PaykanString *s = (PaykanString *)Paykan_malloc(sizeof(PaykanString));
   s->vtable = (PaykanObjectVTable *)&PaykanString_vtable;
+  s->shared = NULL; // not yet boxed (unique-box invariant)
   s->len = newLen;
   s->data = (char *)Paykan_malloc((size_t)newLen + 1);
   memcpy(s->data, lhs->data, (size_t)lhs->len);
