@@ -11,6 +11,7 @@
 # Supported platforms:
 #   • macOS  ARM64 (Apple Silicon)
 #   • Linux  x86_64
+#   • Linux  AArch64
 # ----------------------------------------------------------------------------
 
 # Fast path: reuse a previously-downloaded copy.
@@ -39,15 +40,21 @@ if(NOT LLVM_FOUND)
                 message(FATAL_ERROR "Only Apple Silicon (ARM64) is supported on macOS. Intel x64 is not supported.")
             endif()
         elseif(UNIX)
+            # Upstream only publishes one glibc build per architecture; the
+            # Ubuntu-22.04 x86_64 build runs on any distro with glibc >= 2.34.
             if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
-                set(LLVM_PLATFORM "x86_64-linux-gnu-ubuntu-18.04")
-                set(LLVM_HASH "SHA256=0019dfc4b32d63c1392aa264aed2253c1e0c2fb09216f8e2cc269bbfb8bb49b5")
+                set(LLVM_PLATFORM "x86_64-linux-gnu-ubuntu-22.04")
+                set(LLVM_HASH "SHA256=884ee67d647d77e58740c1e645649e29ae9e8a6fe87c1376be0f3a30f3cc9ab3")
+            elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+                set(LLVM_PLATFORM "aarch64-linux-gnu")
+                set(LLVM_HASH "SHA256=6dd62762285326f223f40b8e4f2864b5c372de3f7de0731cb7cd55ca5287b75a")
             else()
                 message(FATAL_ERROR
                     "Unsupported Linux architecture: ${CMAKE_SYSTEM_PROCESSOR}.\n"
                     "Supported platforms:\n"
                     "  - macOS ARM64 (Apple Silicon)\n"
-                    "  - Linux x86_64"
+                    "  - Linux x86_64\n"
+                    "  - Linux AArch64"
                 )
             endif()
         else()
@@ -55,7 +62,8 @@ if(NOT LLVM_FOUND)
                 "Unsupported platform: ${CMAKE_SYSTEM_NAME}.\n"
                 "Supported platforms:\n"
                 "  - macOS ARM64 (Apple Silicon)\n"
-                "  - Linux x86_64"
+                "  - Linux x86_64\n"
+                "  - Linux AArch64"
             )
         endif()
 
