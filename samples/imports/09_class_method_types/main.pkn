@@ -1,0 +1,28 @@
+// OK: methods of an imported class whose parameter / return types are other
+// classes, enums, or arrays of classes declared in the same module.
+//
+// The importer rebuilds the module's types from its export record; every
+// type a signature names must resolve to the rebuilt type — regardless of
+// the order the module declared them — so that e.g. `c.pairWith(d)` is typed
+// `lib::Pair` at the call site and not silently `void`.
+
+import shapes::lib;
+
+fn main() -> int {
+  c: lib::Cell = lib::Cell(7);
+  d: lib::Cell = lib::Cell(4);
+
+  p: lib::Pair = c.pairWith(d);         // method taking and returning module classes
+  f: lib::Cell = p.first();             // ... from the class that was declared first
+  k: lib::Kind = f.kindOf();            // method returning a module enum
+  s: lib::Splitter = lib::Splitter();
+  halves: lib::Cell[] = s.split(c);     // method returning an array of a class
+
+  odd: int = 0;
+  if (k == lib::Kind::Odd) { odd = 1; }
+
+  println(StrInt(p.sum()));             // 11
+  println(StrInt(lib::total(halves)));  // 7
+  println(StrInt(odd));                 // 1
+  return 0;
+}
