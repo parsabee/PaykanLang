@@ -179,6 +179,12 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   struct FunctionSig {
     ast::Type *ReturnType = nullptr;
     std::vector<ast::Type *> ParamTypes;
+    /// True for entries not defined by this module: the compiler builtins
+    /// registered in run() (print, StrInt, open, ...) and the qualified
+    /// `mod::fn` entries injected by imports.  Such entries are never
+    /// re-exported, and a user declaration may never replace one.  Because a
+    /// user-declared name never contains the module qualifier, a builtin entry
+    /// found under a plain declared name is always a compiler builtin.
     bool IsBuiltin = false;
   };
 
@@ -192,6 +198,18 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   /// Look up a function signature, or nullptr if unknown.
   const FunctionSig *lookupFunction(llvm::StringRef name) const;
+
+  /// The kind of top-level entity being declared, for checkDeclNameAvailable.
+  enum class DeclKind { Function, Class, Enum };
+
+  /// Top-level declarations — functions, classes (whose constructors are
+  /// called by class name), and enums — share one namespace with the compiler
+  /// builtins: a name identifies exactly one entity.  Returns true if @p name
+  /// is free; otherwise emits a diagnostic at @p loc naming the existing
+  /// entity (builtin function / builtin class / class / enum / function) and
+  /// returns false.
+  bool checkDeclNameAvailable(const std::string &name, ast::SourceLocation loc,
+                              DeclKind kind);
 
   /// RAII helper to push/pop a scope.
   struct ScopeGuard {

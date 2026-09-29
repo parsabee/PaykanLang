@@ -137,6 +137,50 @@ const Sema::FunctionSig *Sema::lookupFunction(llvm::StringRef name) const {
   return it != FunctionTable.end() ? &it->second : nullptr;
 }
 
+bool Sema::checkDeclNameAvailable(const std::string &name,
+                                  ast::SourceLocation loc, DeclKind kind) {
+  // Compiler builtins are registered before any user declaration and must
+  // never be replaced.  Which names are builtin is not spelled out here: a
+  // class is builtin iff the ASTContext bootstrap flagged it
+  // (ClassType::Builtin), and a function iff run() registered it so
+  // (FunctionSig::IsBuiltin).  Classes are checked first so a name that is
+  // both (`Str` is a class and a conversion function) reports as a class.
+  if (auto *ct = Ctx.lookupClassType(name)) {
+    if (ct->isBuiltin())
+      error(loc, "'" + name + "' is a builtin class and cannot be redeclared");
+    else if (kind == DeclKind::Class)
+      // Local classes are checked before any of them is registered, so a
+      // class hit while declaring a class can only come from an import.
+      error(loc, "class '" + name +
+                     "' conflicts with an imported type of the same name");
+    else
+      error(loc, "'" + name + "' is already declared as a class");
+    return false;
+  }
+  if (const auto *sig = lookupFunction(name); sig && sig->IsBuiltin) {
+    error(loc, "'" + name + "' is a builtin function and cannot be redeclared");
+    return false;
+  }
+  if (Ctx.lookupEnumType(name)) {
+    if (kind == DeclKind::Enum)
+      error(loc, "redefinition of enum '" + name + "'");
+    else if (kind == DeclKind::Class)
+      error(loc,
+            "class '" + name + "' conflicts with an enum of the same name");
+    else
+      error(loc, "'" + name + "' is already declared as an enum");
+    return false;
+  }
+  if (lookupFunction(name)) {
+    if (kind == DeclKind::Function)
+      error(loc, "redefinition of function '" + name + "'");
+    else
+      error(loc, "'" + name + "' is already declared as a function");
+    return false;
+  }
+  return true;
+}
+
 void Sema::error(ast::SourceLocation loc, const std::string &msg) {
   Diags.error(loc, msg);
 }
@@ -833,10 +877,18 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
 
   // Forward-declare every free function's signature next, so that any body —
   // a free function OR a class method — may call any module-level function
-  // regardless of the order it is defined.
-  for (auto *fn : node->getFuncDecls())
-    if (!declareFunctionSignature(fn))
+  // regardless of the order it is defined.  A function whose declaration was
+  // rejected (bad signature, or a name taken by a builtin / class / enum) has
+  // no entry of its own; its body is skipped so it is not checked against
+  // whatever entry already owns the name.
+  std::vector<ast::FuncDecl *> declaredFns;
+  declaredFns.reserve(node->getFuncDecls().size());
+  for (auto *fn : node->getFuncDecls()) {
+    if (declareFunctionSignature(fn))
+      declaredFns.push_back(fn);
+    else
       ok = false;
+  }
 
   // Now check class method bodies (they can resolve free functions) …
   if (!node->getClassDecls().empty())
@@ -844,7 +896,7 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
       ok = false;
 
   // … and finally free-function bodies (signatures all registered above).
-  for (auto *fn : node->getFuncDecls())
+  for (auto *fn : declaredFns)
     if (!visitFuncDecl(fn))
       ok = false;
 
@@ -854,19 +906,14 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
 // -- Declarations ------------------------------------------------------------
 
 bool Sema::visitEnumDecl(ast::EnumDecl *node) {
-  // Reject names that collide with a builtin, class, or existing enum.
-  if (Ctx.lookupType(node->getName())) {
-    error(node->getLocation(),
-          "redefinition of type '" + node->getName() + "'");
+  // Reject names that collide with a builtin, class, function, or existing
+  // enum (the primitive type keywords cannot be spelled as identifiers).
+  if (!checkDeclNameAvailable(node->getName(), node->getLocation(),
+                              DeclKind::Enum))
     return false;
-  }
 
   auto *enumTy = Ctx.registerEnumType(node->getName(), node->getLocation());
-  if (!enumTy) {
-    error(node->getLocation(),
-          "redefinition of enum '" + node->getName() + "'");
-    return false;
-  }
+  assert(enumTy && "enum name was checked to be free above");
 
   bool ok = true;
   llvm::StringSet<> seen;
@@ -1152,6 +1199,13 @@ bool detail::stmtAlwaysReturns(ast::Stmt *s) {
 }
 
 bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
+  // The name must not be taken by a builtin, a class (constructor), an enum,
+  // or an earlier function.  Checked first so that the collision — not some
+  // unrelated type error in the signature — is what gets reported.
+  if (!checkDeclNameAvailable(node->getName(), node->getLocation(),
+                              DeclKind::Function))
+    return false;
+
   // Resolve return type.
   ast::Type *retTy = Ctx.getVoidTy();
   if (node->getReturnType()) {
@@ -1172,20 +1226,15 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
   }
 
   // Register the function in the function table.
-  if (lookupFunction(node->getName())) {
-    error(node->getLocation(),
-          "redefinition of function '" + node->getName() + "'");
-    return false;
-  }
   declareFunction(node->getName(), retTy, paramTypes);
   return true;
 }
 
 bool Sema::visitFuncDecl(ast::FuncDecl *node) {
   // The signature was registered by the forward-declaration pass in
-  // visitTranslationUnit.  If it is absent, signature resolution failed earlier
-  // (the error was already reported) — skip the body to avoid duplicate
-  // diagnostics.
+  // visitTranslationUnit, which only visits bodies of successfully declared
+  // functions.  Defensive: if the entry is absent anyway, the error was
+  // already reported — skip the body to avoid duplicate diagnostics.
   if (!lookupFunction(node->getName()))
     return false;
 

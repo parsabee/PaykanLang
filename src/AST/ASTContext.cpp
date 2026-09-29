@@ -33,6 +33,12 @@ ASTContext::ASTContext()
       make<ClassType>(SourceLocation(), intern(names::kFloatBox), nullptr);
   BoolBoxTy =
       make<ClassType>(SourceLocation(), intern(names::kBoolBox), nullptr);
+  // These are the compiler builtins: Sema rejects any user class, enum, or
+  // function that would reuse one of their names.  Flagging them here, at the
+  // single registration site, keeps that knowledge out of Sema.
+  for (ClassType *builtin : {ObjTy, StrTy, ArrayTy, FileTy, ErrorTy, IntBoxTy,
+                             FloatBoxTy, BoolBoxTy})
+    builtin->setBuiltin();
   buildObjectType();
   buildStringType();
   buildArrayType();

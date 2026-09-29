@@ -236,6 +236,7 @@ and the complete set of rules — see `07-match-statements.md`.
 
 | Error | Trigger |
 |-------|---------|
+| Enum name taken | The enum is named like a builtin (`enum Error {…}`, `enum print {…}`), a class, a function, or another enum — top-level names are shared (see `01-language-basics.md`) |
 | Unknown variant | `Enum::Name` where `Name` is not a declared variant |
 | Enum / `int` mismatch | Using an enum value where an `int` is required (or vice versa) |
 | Cross-enum comparison | `==` / `!=` between two different enum types |

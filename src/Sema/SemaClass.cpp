@@ -223,7 +223,11 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
   bool ok = true;
 
   // -------------------------------------------------------------------------
-  // Phase 1: Check for duplicate class names (local + against imports).
+  // Phase 1: Check for duplicate class names (local, and against builtins,
+  //          imports, and enums).  The class name doubles as its constructor
+  //          function (phase 4b), so it must be free in the function table
+  //          too — otherwise `class print {...}` would silently replace the
+  //          builtin `print`.
   // -------------------------------------------------------------------------
   llvm::StringMap<ast::ClassDecl *> localClasses;
   for (auto *cd : classDecls) {
@@ -232,17 +236,9 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
       ok = false;
       continue;
     }
-    if (Ctx.lookupClassType(cd->getName())) {
-      error(cd->getLocation(),
-            "class '" + cd->getName() +
-                "' conflicts with an imported type of the same name");
+    if (!checkDeclNameAvailable(cd->getName(), cd->getLocation(),
+                                DeclKind::Class))
       ok = false;
-    }
-    if (Ctx.lookupEnumType(cd->getName())) {
-      error(cd->getLocation(), "class '" + cd->getName() +
-                                   "' conflicts with an enum of the same name");
-      ok = false;
-    }
   }
   if (!ok)
     return false;
@@ -460,6 +456,10 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
     std::vector<ast::Type *> ctorParams;
     if (initDecl)
       ctorParams = initDecl->getParamTypes();
+    // Phase 1 rejected any class whose name is already a function (builtin or
+    // otherwise), so this registration never overwrites an existing entry.
+    assert(!lookupFunction(cd->getName()) &&
+           "constructor would overwrite a registered function");
     declareFunction(cd->getName(), ct, ctorParams);
   }
 

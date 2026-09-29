@@ -47,6 +47,25 @@ TEST(Enum, NameClashesWithClassRejected) {
   EXPECT_FALSE(r.Ok);
 }
 
+// Enums share the top-level namespace with the builtins.
+TEST(Enum, NameShadowsBuiltinClassRejected) {
+  auto r = semaCheck(withEnums("enum Error { NotFound }", "return 0;"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(
+      r.Diagnostics.find("'Error' is a builtin class and cannot be redeclared"),
+      std::string::npos)
+      << r.Diagnostics;
+}
+
+TEST(Enum, NameShadowsBuiltinFunctionRejected) {
+  auto r = semaCheck(withEnums("enum open { Read, Write }", "return 0;"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find(
+                "'open' is a builtin function and cannot be redeclared"),
+            std::string::npos)
+      << r.Diagnostics;
+}
+
 // --- Variant access ---------------------------------------------------------
 
 TEST(Enum, UnknownVariantRejected) {
