@@ -191,6 +191,37 @@ if (f) { s = "a"; } else { s = "b"; }
 println(s);        // ok — revived on both paths
 ```
 
+The same per-path rule applies to the **ternary expression** `if c then A else B`. The condition
+`c` always runs first, so a `mov` inside it is visible to both `A` and `B` and is definite
+afterwards. `A` and `B` are sibling branches: each is checked against the state after the
+condition, so a `mov` in one never affects the other — moving the *same* variable in both is fine.
+After the expression the paths are merged exactly like an `if`/`else` statement: a variable moved
+in either branch counts as moved.
+
+```pkn
+y = if f then mov s else s;   // ok — the else branch did not move s
+println(y);
+println(s);                   // error: s may have been moved
+
+z = if f then mov s else mov s;
+println(z);                   // ok — exactly one branch ran; s is moved either way
+```
+
+The short-circuit operators **`a && b`** and **`a || b`** evaluate `b` only when `a` does not
+already decide the result, so `b` is a conditional branch that runs *after* `a`. A `mov` in `a` is
+definite and is visible in `b`; a `mov` in `b` may or may not have happened, so it is
+conservatively treated as moved after the expression (the "skip `b`" path is merged in, just like
+an `if` without `else`):
+
+```pkn
+ok = check(mov s) && other(s);  // error: s was moved by the left operand
+ok = f && check(mov s);         // ok on its own …
+println(s);                     // … but: error, s may have been moved
+```
+
+Function-call arguments are evaluated **left to right**, so `f(mov s, s)` is an error: the second
+argument reads `s` after the first consumed it.
+
 ### `mov` in loops
 
 A loop body (and a loop condition) re-executes, so a variable **declared outside a loop** may not

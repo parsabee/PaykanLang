@@ -351,3 +351,341 @@ TEST(Mov, MoveRevivedInOnlyThenBranchRejected) {
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("moved variable 's'"), std::string::npos);
 }
+
+// -- Ternary expression: then/else are sibling branches ----------------------
+
+TEST(Mov, TernaryMoveInThenDoesNotPoisonElse) {
+  // The else branch can only run instead of the then branch, so a `mov` in
+  // the then branch must not be visible there.
+  auto r = semaCheck(R"(
+    fn main() -> int {
+      x: Str = "x";
+      c: bool = True;
+      y = if c then mov x else x;
+      println(y);
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Mov, TernaryMoveInElseDoesNotPoisonThen) {
+  auto r = semaCheck(R"(
+    fn main() -> int {
+      x: Str = "x";
+      c: bool = True;
+      y = if c then x else mov x;
+      println(y);
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Mov, TernaryMoveInBothBranchesOk) {
+  // Moving the same variable on both paths is fine: exactly one path runs.
+  auto r = semaCheck(R"(
+    fn main() -> int {
+      x: Str = "x";
+      c: bool = True;
+      y = if c then mov x else mov x;
+      println(y);
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Mov, TernaryMoveInBothBranchesThenUseRejected) {
+  auto r = semaCheck(R"(
+    fn main() -> int {
+      x: Str = "x";
+      c: bool = True;
+      y = if c then mov x else mov x;
+      println(x);
+      return 0;
+    }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("moved variable 'x'"), std::string::npos);
+}
+
+TEST(Mov, TernaryMoveInOneBranchThenUseRejected) {
+  // Moved on ANY path => moved after the expression (conservative union).
+  auto r = semaCheck(R"(
+    fn main() -> int {
+      x: Str = "x";
+      c: bool = True;
+      y = if c then mov x else x;
+      println(x);
+      return 0;
+    }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("moved variable 'x'"), std::string::npos);
+}
+
+TEST(Mov, TernaryMoveInElseThenUseRejected) {
+  auto r = semaCheck(R"(
+    fn main() -> int {
+      x: Str = "x";
+      c: bool = True;
+      y = if c then x else mov x;
+      println(x);
+      return 0;
+    }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("moved variable 'x'"), std::string::npos);
+}
+
+TEST(Mov, TernaryMoveInConditionVisibleInBothBranches) {
+  // The condition always runs before either branch, so its moves poison both.
+  auto r = semaCheck(R"(
+    fn take(s: Str) -> bool { return True; }
+    fn main() -> int {
+      x: Str = "x";
+      y = if take(mov x) then x else "b";
+      println(y);
+      return 0;
+    }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("moved variable 'x'"), std::string::npos);
+
+  auto r2 = semaCheck(R"(
+    fn take(s: Str) -> bool { return True; }
+    fn main() -> int {
+      x: Str = "x";
+      y = if take(mov x) then "a" else x;
+      println(y);
+      return 0;
+    }
+  )");
+  EXPECT_FALSE(r2.Ok);
+  EXPECT_NE(r2.Diagnostics.find("moved variable 'x'"), std::string::npos);
+}
+
+TEST(Mov, TernaryMoveInConditionStaysMovedAfter) {
+  auto r = semaCheck(R"(
+    fn take(s: Str) -> bool { return True; }
+    fn main() -> int {
+      x: Str = "x";
+      n: int = if take(mov x) then 1 else 2;
+      println(x);
+      return n;
+    }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("moved variable 'x'"), std::string::npos);
+}
+
+TEST(Mov, TernaryNestedBranchesIsolated) {
+  // Nested ternaries: every leaf is its own path from the outer condition.
+  auto r = semaCheck(R"(
+    fn main() -> int {
+      x: Str = "x";
+      a: bool = True;
+      b: bool = False;
+      y = if a then mov x else if b then mov x else x;
+      println(y);
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Mov, TernaryMoveInsideStatementBranchIsolated) {
+  // A ternary move inside one if-branch does not leak into the sibling
+  // statement branch either.
+  auto r = semaCheck(R"(
+    fn main() -> int {
+      x: Str = "x";
+      c: bool = True;
+      if (c) {
+        y = if c then mov x else x;
+        println(y);
+      } else {
+        println(x);
+      }
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+// -- Short-circuit `&&` / `||`: the RHS is a conditional branch ---------------
+
+TEST(Mov, AndMoveInLhsVisibleInRhs) {
+  // The LHS always runs before the RHS.
+  auto r = semaCheck(R"(
+    fn take(s: Str) -> bool { return True; }
+    fn peek(s: Str) -> bool { return True; }
+    fn main() -> int {
+      x: Str = "x";
+      ok: bool = take(mov x) && peek(x);
+      return 0;
+    }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("moved variable 'x'"), std::string::npos);
+}
+
+TEST(Mov, OrMoveInLhsVisibleInRhs) {
+  auto r = semaCheck(R"(
+    fn take(s: Str) -> bool { return False; }
+    fn peek(s: Str) -> bool { return True; }
+    fn main() -> int {
+      x: Str = "x";
+      ok: bool = take(mov x) || peek(x);
+      return 0;
+    }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("moved variable 'x'"), std::string::npos);
+}
+
+TEST(Mov, AndMoveInLhsStaysMovedAfter) {
+  // A move in the LHS is definite.
+  auto r = semaCheck(R"(
+    fn take(s: Str) -> bool { return True; }
+    fn main() -> int {
+      x: Str = "x";
+      c: bool = True;
+      ok: bool = take(mov x) && c;
+      println(x);
+      return 0;
+    }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("moved variable 'x'"), std::string::npos);
+}
+
+TEST(Mov, AndMoveInRhsStaysMovedAfter) {
+  // A move in the RHS may or may not have happened, so it counts as moved.
+  auto r = semaCheck(R"(
+    fn take(s: Str) -> bool { return True; }
+    fn main() -> int {
+      x: Str = "x";
+      c: bool = True;
+      ok: bool = c && take(mov x);
+      println(x);
+      return 0;
+    }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("moved variable 'x'"), std::string::npos);
+}
+
+TEST(Mov, OrMoveInRhsStaysMovedAfter) {
+  auto r = semaCheck(R"(
+    fn take(s: Str) -> bool { return True; }
+    fn main() -> int {
+      x: Str = "x";
+      c: bool = False;
+      ok: bool = c || take(mov x);
+      println(x);
+      return 0;
+    }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("moved variable 'x'"), std::string::npos);
+}
+
+TEST(Mov, AndMoveInRhsNoLaterUseOk) {
+  auto r = semaCheck(R"(
+    fn take(s: Str) -> bool { return True; }
+    fn main() -> int {
+      x: Str = "x";
+      c: bool = True;
+      ok: bool = c && take(mov x);
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Mov, OrMoveInRhsNoLaterUseOk) {
+  auto r = semaCheck(R"(
+    fn take(s: Str) -> bool { return True; }
+    fn main() -> int {
+      x: Str = "x";
+      c: bool = False;
+      ok: bool = c || take(mov x);
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Mov, AndMoveInRhsThenRevivedOk) {
+  // Re-assignment after the expression revives the name as usual.
+  auto r = semaCheck(R"(
+    fn take(s: Str) -> bool { return True; }
+    fn main() -> int {
+      x: Str = "x";
+      c: bool = True;
+      ok: bool = c && take(mov x);
+      x = "again";
+      println(x);
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Mov, AndRhsMoveDoesNotPoisonSiblingTernaryBranch) {
+  // An `&&` inside a ternary's then-branch stays confined to that branch.
+  auto r = semaCheck(R"(
+    fn take(s: Str) -> bool { return True; }
+    fn main() -> int {
+      x: Str = "x";
+      c: bool = True;
+      n: int = if (c && take(mov x)) then 1 else 2;
+      println(x);
+      return n;
+    }
+  )");
+  // The `&&` is in the CONDITION here, so x is moved for both branches and
+  // afterwards.
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("moved variable 'x'"), std::string::npos);
+
+  auto r2 = semaCheck(R"(
+    fn take(s: Str) -> bool { return True; }
+    fn main() -> int {
+      x: Str = "x";
+      c: bool = True;
+      ok: bool = if c then (c && take(mov x)) else take(x);
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(r2.Ok) << r2.Diagnostics;
+}
+
+// -- Call arguments are evaluated left to right ------------------------------
+
+TEST(Mov, MoveThenReuseInSameCallRejected) {
+  auto r = semaCheck(R"(
+    fn two(a: Str, b: Str) { println(a); println(b); }
+    fn main() -> int {
+      x: Str = "x";
+      two(mov x, x);
+      return 0;
+    }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("moved variable 'x'"), std::string::npos);
+}
+
+TEST(Mov, UseThenMoveInSameCallOk) {
+  auto r = semaCheck(R"(
+    fn two(a: Str, b: Str) { println(a); println(b); }
+    fn main() -> int {
+      x: Str = "x";
+      two(x, mov x);
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}

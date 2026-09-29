@@ -376,7 +376,21 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
 
 ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   auto *lhsTy = visit(node->getLHS());
-  auto *rhsTy = visit(node->getRHS());
+  ast::Type *rhsTy = nullptr;
+  if (node->getOpcode() == ast::BinaryOpcode::And ||
+      node->getOpcode() == ast::BinaryOpcode::Or) {
+    // Short-circuit: the RHS runs only on one outcome of the LHS, so it is a
+    // branch whose entry state is the state after the LHS.  Nothing runs
+    // instead of it, so the skip path is the entry state itself: a `mov` in
+    // the RHS is a "maybe" afterwards and therefore counts as moved.
+    MovedBranchMerger merger(S);
+    merger.beginBranch();
+    rhsTy = visit(node->getRHS());
+    merger.endBranch();
+    merger.finish(/*coversAllPaths=*/false);
+  } else {
+    rhsTy = visit(node->getRHS());
+  }
   if (!lhsTy || !rhsTy)
     return nullptr;
 
@@ -733,9 +747,19 @@ ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
 }
 
 ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
+  // The condition always runs first, so its moves are visible to both
+  // branches.  The branches are then siblings exactly like an if/else
+  // statement's: each is checked against the state after the condition, and
+  // the state after the expression is their union (one of them always runs).
   auto *condTy = visit(node->getCondition());
+  MovedBranchMerger merger(S);
+  merger.beginBranch();
   auto *trueTy = visit(node->getTrueExpr());
+  merger.endBranch();
+  merger.beginBranch();
   auto *falseTy = visit(node->getFalseExpr());
+  merger.endBranch();
+  merger.finish(/*coversAllPaths=*/true);
   if (!condTy || !trueTy || !falseTy)
     return nullptr;
 
