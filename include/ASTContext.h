@@ -54,6 +54,12 @@ class ASTContext {
   // types backed by i64; they are NOT class types and live in their own map.
   std::unordered_map<std::string, EnumType *> EnumTypes;
 
+  // Canonical ArrayType per element type (lazily created by getArrayType).
+  // Key: element Type* pointer (canonical within this ASTContext).  Because
+  // the element of a nested array is itself a canonical ArrayType, identity
+  // holds at any nesting depth: `int[][]` resolves to one node everywhere.
+  std::unordered_map<Type *, ArrayType *> ArrayTypes;
+
   // Per-element specialized array ClassTypes (lazily created).
   // Key: element Type* pointer (canonical within this ASTContext).
   std::unordered_map<Type *, ClassType *> SpecializedArrayTypes;
@@ -149,6 +155,13 @@ public:
   ClassType *getFloatBoxTy() const { return FloatBoxTy; }
   ClassType *getBoolBoxTy() const { return BoolBoxTy; }
 
+  /// Return the canonical ArrayType whose elements have type @p elemTy,
+  /// creating it on first use.  @p elemTy must itself be canonical (a builtin
+  /// singleton, a registered ClassType/EnumType, or another canonical
+  /// ArrayType), so that array type identity is pointer identity.  Sema
+  /// resolves every parser-emitted (source-located) ArrayType to this node.
+  ArrayType *getArrayType(Type *elemTy);
+
   /// Return (creating if needed) the specialized ClassType for arrays whose
   /// elements have type @p elemTy.  The returned type is a subtype of ArrayTy
   /// and carries push(elemTy)->void and pop()->elemTy method declarations.
@@ -157,6 +170,13 @@ public:
   /// If @p ct is a specialized array ClassType (e.g. Array<Str>), return its
   /// element type; otherwise return nullptr.
   Type *getSpecializedArrayElemType(ClassType *ct) const;
+
+  /// Read-only view of the specialized array ClassTypes, keyed by element
+  /// type.  Each distinct element type has exactly one entry.
+  const std::unordered_map<Type *, ClassType *> &
+  getSpecializedArrayTypes() const {
+    return SpecializedArrayTypes;
+  }
 
   /// Return the canonical BuiltinType* for a given Kind.
   BuiltinType *getBuiltinType(BuiltinType::Kind k) const;

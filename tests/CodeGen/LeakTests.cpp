@@ -574,3 +574,42 @@ TEST(Leak, CallRootedSubscriptReceiver) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   g.expectNoLeaks("CallRootedSubscriptReceiver");
 }
+
+// ============================================================================
+// Array-typed ternary: both branches must yield a boxed PaykanShared* (the
+// ternary is classified as a fresh +1 box), on the taken and not-taken paths,
+// for primitive and object element arrays, with no leaks.
+// ============================================================================
+
+TEST(Leak, TernaryArrayBranches) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    fn pick(c: bool) -> int {
+      a: int[] = [1, 2, 3];
+      b: int[] = [4, 5];
+      xs: int[] = if c then a else b;
+      xs.push(9);
+      return xs.len();
+    }
+    fn names(c: bool) -> Str {
+      s: Str[] = ["a"];
+      t: Str[] = ["b", "c"];
+      zs: Str[] = if c then s else t;
+      zs = if c then t else s;   // rebind through the assignment path
+      return zs[0];
+    }
+    fn main() -> int {
+      println(StrInt(pick(True)));    // a: 3 + 1 pushed
+      println(StrInt(pick(False)));   // b: 2 + 1 pushed
+      println(names(True));           // t[0]
+      println(names(False));          // s[0]
+      lit: int[] = if False then [1] else [2, 3];
+      println(StrInt(lit.len()));
+      println(StrInt((if True then lit else [7]).len()));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "4\n3\nb\na\n2\n2\n");
+  g.expectNoLeaks("TernaryArrayBranches");
+}

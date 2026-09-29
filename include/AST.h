@@ -1113,9 +1113,10 @@ public:
       : Type(NK_ArrayType, loc), ElementType(elemTy) {
     // Arrays support == / != (lowered to the virtual `equals`, which compares
     // reference identity — see PaykanArray_equals).  The mask must live on the
-    // constructor: ArrayType nodes are freshly allocated at every use site
-    // (parser annotations, Sema::resolveType, array literals), so unlike the
-    // ClassType singletons there is no single bootstrap point to patch.
+    // constructor: besides the canonical per-element instances interned by
+    // ASTContext::getArrayType, the parser allocates a source-located node for
+    // every `T[]` annotation, so unlike the ClassType singletons there is no
+    // single bootstrap point to patch.
     addBinaryOp(BinaryOpcode::Eq);
     addBinaryOp(BinaryOpcode::Ne);
   }
