@@ -5,7 +5,30 @@
 #include "TestUtils.h"
 #include <gtest/gtest.h>
 
+extern "C" {
+#include "Runtime.h"
+}
+
 using namespace paykan::test;
+
+namespace {
+
+// RAII guard: enable tracking allocator before the run, check zero live
+// blocks after (same pattern as LeakTests.cpp).
+struct LeakGuard {
+  LeakGuard() {
+    Paykan_heap_set_tracking(1);
+    Paykan_heap_reset();
+  }
+  ~LeakGuard() { Paykan_heap_set_tracking(0); }
+  void expectNoLeaks(const char *label = "") const {
+    int64_t live = Paykan_heap_live_blocks();
+    EXPECT_EQ(live, 0) << "heap leak in: " << label << " (" << live
+                       << " live blocks)";
+  }
+};
+
+} // namespace
 
 TEST(Mov, PrimitiveForwardsValue) {
   auto r = compileAndRun(R"(
@@ -117,4 +140,211 @@ TEST(Mov, ConditionalMove) {
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "cond\n");
+}
+
+// -- `mov` inside a ternary branch --------------------------------------------
+//
+// Whichever branch runs, the result must own exactly one reference and the
+// source variable must be released exactly once overall: never twice (a
+// double free) and never zero times (a leak).  The un-taken branch is never
+// executed, so it must not release anything either.
+
+TEST(Mov, TernaryMoveTakenBranch) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    fn main() -> int {
+      x: Str = "moved";
+      c: bool = True;
+      y = if c then mov x else x;
+      println(y);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "moved\n");
+  g.expectNoLeaks("TernaryMoveTakenBranch");
+}
+
+TEST(Mov, TernaryMoveUntakenBranch) {
+  // The else branch shares x (retain); x is still owned by its own slot and
+  // released at scope exit, so both y and x drop their reference exactly once.
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    fn main() -> int {
+      x: Str = "shared";
+      c: bool = False;
+      y = if c then mov x else x;
+      println(y);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "shared\n");
+  g.expectNoLeaks("TernaryMoveUntakenBranch");
+}
+
+TEST(Mov, TernaryMoveInElseBranch) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    fn main() -> int {
+      x: Str = "else";
+      c: bool = False;
+      y = if c then x else mov x;
+      println(y);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "else\n");
+  g.expectNoLeaks("TernaryMoveInElseBranch");
+}
+
+TEST(Mov, TernaryMoveInBothBranches) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    fn pick(c: bool) -> Str {
+      x: Str = "both";
+      y = if c then mov x else mov x;
+      return y;
+    }
+    fn main() -> int {
+      println(pick(True));
+      println(pick(False));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "both\nboth\n");
+  g.expectNoLeaks("TernaryMoveInBothBranches");
+}
+
+TEST(Mov, TernaryMoveClassObjectBothWays) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Point { x: int; y: int;
+      fn __init__(a: int, b: int) { self.x = a; self.y = b; }
+      fn sum() -> int { return self.x + self.y; }
+    }
+    fn pick(c: bool) -> int {
+      p: Point = Point(1, 2);
+      q: Point = Point(10, 20);
+      r: Point = if c then mov p else q;
+      return r.sum();
+    }
+    fn main() -> int {
+      println(StrInt(pick(True)));
+      println(StrInt(pick(False)));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "3\n30\n");
+  g.expectNoLeaks("TernaryMoveClassObjectBothWays");
+}
+
+TEST(Mov, TernaryMoveInCondition) {
+  // The condition consumes x on every path; the result is a primitive.
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    fn take(s: Str) -> bool { println(s); return True; }
+    fn main() -> int {
+      x: Str = "cond";
+      n: int = if take(mov x) then 1 else 2;
+      println(StrInt(n));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "cond\n1\n");
+  g.expectNoLeaks("TernaryMoveInCondition");
+}
+
+TEST(Mov, TernaryMoveIntoCallInBranch) {
+  // A primitive-typed ternary whose branch moves a ref var into a call.
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    fn take(s: Str) -> int { println(s); return 1; }
+    fn run(c: bool) -> int {
+      x: Str = "arg";
+      n: int = if c then take(mov x) else 0;
+      return n;
+    }
+    fn main() -> int {
+      println(StrInt(run(True)));
+      println(StrInt(run(False)));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "arg\n1\n0\n");
+  g.expectNoLeaks("TernaryMoveIntoCallInBranch");
+}
+
+// -- `mov` inside the short-circuit RHS of `&&` / `||` -----------------------
+
+TEST(Mov, AndMoveInRhsEvaluatedAndSkipped) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    fn take(s: Str) -> bool { println(s); return True; }
+    fn run(c: bool) -> bool {
+      x: Str = "rhs";
+      ok: bool = c && take(mov x);
+      return ok;
+    }
+    fn main() -> int {
+      println(StrBool(run(True)));
+      println(StrBool(run(False)));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "rhs\nTrue\nFalse\n");
+  g.expectNoLeaks("AndMoveInRhsEvaluatedAndSkipped");
+}
+
+TEST(Mov, OrMoveInRhsEvaluatedAndSkipped) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    fn take(s: Str) -> bool { println(s); return False; }
+    fn run(c: bool) -> bool {
+      x: Str = "rhs";
+      ok: bool = c || take(mov x);
+      return ok;
+    }
+    fn main() -> int {
+      println(StrBool(run(False)));
+      println(StrBool(run(True)));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "rhs\nFalse\nTrue\n");
+  g.expectNoLeaks("OrMoveInRhsEvaluatedAndSkipped");
+}
+
+TEST(Mov, AndMoveInLhsThenRhsRuns) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    fn take(s: Str) -> bool { println(s); return True; }
+    fn main() -> int {
+      x: Str = "lhs";
+      c: bool = True;
+      ok: bool = take(mov x) && c;
+      println(StrBool(ok));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "lhs\nTrue\n");
+  g.expectNoLeaks("AndMoveInLhsThenRhsRuns");
 }

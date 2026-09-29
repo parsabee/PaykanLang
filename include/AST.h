@@ -892,6 +892,11 @@ class ClassType : public Type {
   // When true, no user class may inherit from this type.
   bool Final = false;
 
+  // When true, this type is a compiler builtin (Obj, Str, Array, File, Error,
+  // Int, Float, Bool) registered by the ASTContext bootstrap; user code may
+  // not declare a class, enum, or function with its name.
+  bool Builtin = false;
+
   void rebuildVTableIndex() {
     VTableIndex.clear();
     for (int i = 0, n = static_cast<int>(VTable.size()); i < n; ++i)
@@ -924,6 +929,11 @@ public:
   bool isFinal() const { return Final; }
   /// Mark this type as non-inheritable.
   void setFinal(bool v = true) { Final = v; }
+
+  /// Returns true if this is a compiler-provided class type (see Builtin).
+  bool isBuiltin() const { return Builtin; }
+  /// Mark this type as a compiler builtin.
+  void setBuiltin(bool v = true) { Builtin = v; }
 
   /// Set (or change) the superclass, inheriting its vtable and operator
   /// bitmasks. Used during ASTContext bootstrap to break the Obj/Str cycle.
@@ -1103,9 +1113,10 @@ public:
       : Type(NK_ArrayType, loc), ElementType(elemTy) {
     // Arrays support == / != (lowered to the virtual `equals`, which compares
     // reference identity — see PaykanArray_equals).  The mask must live on the
-    // constructor: ArrayType nodes are freshly allocated at every use site
-    // (parser annotations, Sema::resolveType, array literals), so unlike the
-    // ClassType singletons there is no single bootstrap point to patch.
+    // constructor: besides the canonical per-element instances interned by
+    // ASTContext::getArrayType, the parser allocates a source-located node for
+    // every `T[]` annotation, so unlike the ClassType singletons there is no
+    // single bootstrap point to patch.
     addBinaryOp(BinaryOpcode::Eq);
     addBinaryOp(BinaryOpcode::Ne);
   }

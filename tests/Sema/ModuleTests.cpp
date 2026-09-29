@@ -630,3 +630,44 @@ fn main() -> int {
       << r.Diagnostics;
   std::filesystem::remove_all(tmp);
 }
+
+// ─── OK: a local function never shadows an imported one ─────────────────────
+//
+// Imported functions are only ever reachable through their qualifier, so a
+// local `add` and `math::add` coexist and each call resolves to its own.
+
+TEST(Module, LocalFunctionCoexistsWithImportedQualifiedName) {
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_local_vs_imp").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "math.pkn",
+            "fn add(a: int, b: int) -> int { return a + b; }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import math;
+fn add(a: int) -> int { return a + 1; }
+fn main() -> int { return add(1) + math::add(1, 2); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// ─── ERR: an imported module's classes share the local class namespace ──────
+
+TEST(Module, LocalFunctionNamedLikeImportedClassErr) {
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_ms_fn_vs_impcls").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "shapes.pkn", "class Box { fn __init__() {} }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import shapes;
+fn Box() -> int { return 0; }
+fn main() -> int { return Box(); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("'Box' is already declared as a class"),
+            std::string::npos)
+      << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}

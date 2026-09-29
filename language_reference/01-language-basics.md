@@ -451,3 +451,23 @@ match open("/tmp/data.txt", "r") {
 
 The `File` handle and its methods (`write`, `readln`, `toString`, `equals`) are described
 in the **File built-in class type** section above.
+
+### Builtin Names Are Reserved
+
+Top-level declarations — free functions, classes (a class name is also its constructor),
+and enums — share a single namespace with the builtins, and a name identifies exactly one
+entity. Declaring a function, class, or enum whose name is a builtin function (`print`,
+`println`, `printerr`, `printerrln`, `StrInt`, `StrFloat`, `StrBool`, `StrChar`, `Str`,
+`open`, `IntStr`, `FloatStr`) or a builtin class (`Obj`, `Str`, `Array`, `File`, `Error`,
+`Int`, `Float`, `Bool`) is a compile-time error, reported at the declaration:
+
+```pkn
+class print { fn __init__() {} }   // error: 'print' is a builtin function and cannot be redeclared
+fn open(p: Str) -> int { ... }     // error: 'open' is a builtin function and cannot be redeclared
+enum Error { NotFound }            // error: 'Error' is a builtin class and cannot be redeclared
+```
+
+The same rule applies between user declarations: `fn Point()` next to `class Point` is
+rejected with `'Point' is already declared as a class`, and a function or class cannot
+reuse an enum's name. Only top-level names are reserved — a field, method, parameter, or
+local variable may be called `print` or `open` without affecting the builtin.

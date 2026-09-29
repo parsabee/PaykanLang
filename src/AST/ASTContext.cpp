@@ -33,6 +33,12 @@ ASTContext::ASTContext()
       make<ClassType>(SourceLocation(), intern(names::kFloatBox), nullptr);
   BoolBoxTy =
       make<ClassType>(SourceLocation(), intern(names::kBoolBox), nullptr);
+  // These are the compiler builtins: Sema rejects any user class, enum, or
+  // function that would reuse one of their names.  Flagging them here, at the
+  // single registration site, keeps that knowledge out of Sema.
+  for (ClassType *builtin : {ObjTy, StrTy, ArrayTy, FileTy, ErrorTy, IntBoxTy,
+                             FloatBoxTy, BoolBoxTy})
+    builtin->setBuiltin();
   buildObjectType();
   buildStringType();
   buildArrayType();
@@ -195,6 +201,25 @@ void ASTContext::buildBoxedBoolType() {
       .method(names::kMethodToString, StrTy)
       .method(names::kMethodEquals, BoolTy, {ObjTy})
       .build();
+}
+
+// -- Canonical array types ---------------------------------------------------
+//
+// One ArrayType per (canonical) element type.  The parser still allocates a
+// source-located ArrayType for every `T[]` annotation so diagnostics can point
+// at it, but Sema resolves each one to the instance returned here, so two uses
+// of `int[][]` share a single node and pointer comparison is sufficient.  This
+// also keeps the specialized-class cache below keyed correctly for nested
+// arrays: the element type of `int[][]` is the canonical `int[]` node, so
+// Array<int[]> is built once rather than once per use site.
+//
+ArrayType *ASTContext::getArrayType(Type *elemTy) {
+  auto it = ArrayTypes.find(elemTy);
+  if (it != ArrayTypes.end())
+    return it->second;
+  auto *at = make<ArrayType>(SourceLocation(), elemTy);
+  ArrayTypes[elemTy] = at;
+  return at;
 }
 
 // -- Specialized per-element array types ------------------------------------

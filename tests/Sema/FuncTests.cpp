@@ -55,7 +55,8 @@ TEST(Func, MethodCallsFreeFunction) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// A free function and a class cannot share a name (constructor vs function).
+// A free function and a class cannot share a name (constructor vs function),
+// whichever is declared first.
 TEST(Func, FunctionClassNameCollision) {
   auto r = semaCheck(R"(
     fn Foo() -> int { return 1; }
@@ -63,7 +64,88 @@ TEST(Func, FunctionClassNameCollision) {
     fn main() -> int { return 0; }
   )");
   EXPECT_FALSE(r.Ok);
-  EXPECT_NE(r.Diagnostics.find("redefinition"), std::string::npos);
+  EXPECT_NE(r.Diagnostics.find("'Foo' is already declared as a class"),
+            std::string::npos)
+      << r.Diagnostics;
+
+  r = semaCheck(R"(
+    class Foo { fn __init__() {} }
+    fn Foo() -> int { return 1; }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("'Foo' is already declared as a class"),
+            std::string::npos)
+      << r.Diagnostics;
+}
+
+// ============================================================================
+// Builtin names are reserved: a free function may not redeclare one
+// ============================================================================
+
+// Every builtin function registered by Sema::run(), including those a user
+// might plausibly want to "override".
+TEST(Func, FunctionShadowsBuiltinFunctionRejected) {
+  for (const char *name :
+       {"print", "println", "printerr", "printerrln", "StrInt", "StrFloat",
+        "StrBool", "StrChar", "open", "IntStr", "FloatStr"}) {
+    auto r = semaCheck(std::string("fn ") + name +
+                       "(x: int) -> int { return x; }\n" + wrapMain(""));
+    EXPECT_FALSE(r.Ok) << name;
+    EXPECT_NE(r.Diagnostics.find(std::string("'") + name +
+                                 "' is a builtin function and cannot be "
+                                 "redeclared"),
+              std::string::npos)
+        << r.Diagnostics;
+  }
+}
+
+// The collision is the only diagnostic: the rest of the rejected signature
+// and its body are not checked (neither against the builtin's entry nor on
+// their own), and the builtin keeps its original signature afterwards.
+TEST(Func, FunctionShadowsBuiltinReportsCollisionOnly) {
+  auto r = semaCheck("fn print(x: NoSuchType) { return x + 1; }\n" +
+                     wrapMain("println(\"still one Obj argument\");"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find(
+                "'print' is a builtin function and cannot be redeclared"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find("unknown class type"), std::string::npos)
+      << r.Diagnostics;
+}
+
+TEST(Func, FunctionShadowsBuiltinClassRejected) {
+  for (const char *name : {"Obj", "Str", "File", "Error", "Int"}) {
+    auto r = semaCheck(std::string("fn ") + name + "() -> int { return 0; }\n" +
+                       wrapMain(""));
+    EXPECT_FALSE(r.Ok) << name;
+    EXPECT_NE(
+        r.Diagnostics.find(std::string("'") + name +
+                           "' is a builtin class and cannot be redeclared"),
+        std::string::npos)
+        << r.Diagnostics;
+  }
+}
+
+TEST(Func, FunctionShadowsEnumRejected) {
+  auto r = semaCheck("enum Color { Red }\nfn Color() -> int { return 0; }\n" +
+                     wrapMain(""));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("'Color' is already declared as an enum"),
+            std::string::npos)
+      << r.Diagnostics;
+}
+
+// A name that merely resembles a builtin is fine.
+TEST(Func, FunctionNamedNearBuiltinOk) {
+  auto r = semaCheck(R"(
+    fn print2(x: int) { println(StrInt(x)); }
+    fn Print(x: int) { print2(x); }
+    fn main() -> int { Print(1); return 0; }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
 TEST(Func, ArgumentCountMismatch) {

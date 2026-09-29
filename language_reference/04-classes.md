@@ -239,6 +239,7 @@ match a {
 
 | Error | Trigger |
 |-------|---------|
+| Class name taken | The class is named like a builtin function (`class print`), a builtin class (`class Str`), an enum, or another class — a class name is also its constructor, so top-level names are shared (see `01-language-basics.md`) |
 | Missing field init in `__init__` | `__init__` exits with an uninitialised field on some path |
 | `__super__(…)` not first | Derived `__init__` body does not begin with `__super__(…)` |
 | `__super__(…)` outside `__init__` | `__super__(…)` called in any method other than `__init__` |

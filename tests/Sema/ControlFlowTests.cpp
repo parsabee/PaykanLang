@@ -198,6 +198,44 @@ TEST(ControlFlow, TernaryNestedOk) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
+TEST(ControlFlow, TernaryArrayBranchesOk) {
+  // Array types are canonical per element type, so two int[] branches (from
+  // variables, literals, or nested arrays) unify to one Type*.
+  auto r = semaCheck(wrapMain(R"(
+    c: bool = True;
+    a: int[] = [1, 2];
+    b: int[] = [3];
+    xs: int[] = if c then a else b;
+    ys: int[] = if c then [4] else b;
+    m: int[][] = [[1]];
+    n: int[][] = [[2], [3]];
+    zs: int[][] = if c then m else n;
+    k: int = (if c then a else b)[0];
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(ControlFlow, TernaryArrayMismatchedBranchesRejected) {
+  auto r = semaCheck(wrapMain(R"(
+    c: bool = True;
+    a: int[] = [1];
+    b: Str[] = ["x"];
+    xs: int[] = if c then a else b;
+  )"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("incompatible types"), std::string::npos);
+}
+
+TEST(ControlFlow, TernaryArrayDimensionMismatchRejected) {
+  auto r = semaCheck(wrapMain(R"(
+    c: bool = True;
+    a: int[] = [1];
+    m: int[][] = [[1]];
+    xs: int[] = if c then a else m;
+  )"));
+  EXPECT_FALSE(r.Ok);
+}
+
 // ============================================================================
 // break / continue
 // ============================================================================

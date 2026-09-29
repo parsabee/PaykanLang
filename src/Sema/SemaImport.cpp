@@ -32,7 +32,7 @@ static ast::Type *resolveExportedType(ast::ASTContext &ctx,
     ast::Type *elem = resolveExportedType(ctx, name.substr(0, name.size() - 2));
     if (!elem)
       return nullptr;
-    return ctx.make<ast::ArrayType>(ast::SourceLocation(), elem);
+    return ctx.getArrayType(elem);
   }
   return ctx.lookupType(name);
 }

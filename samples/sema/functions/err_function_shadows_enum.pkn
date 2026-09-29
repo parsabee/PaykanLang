@@ -1,0 +1,10 @@
+// ERROR: top-level names identify exactly one entity — a function cannot reuse an enum name
+enum Mode { Read, Write }
+
+fn Mode() -> int {  // sema error: 'Mode' is already declared as an enum
+  return 0;
+}
+
+fn main() -> int {
+  return 0;
+}

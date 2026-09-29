@@ -1,0 +1,26 @@
+// OK: only top-level names are reserved — fields and methods live in their
+// own per-class namespace, so they may reuse a builtin function name, and the
+// builtin remains callable.
+class Logger {
+  count: int;
+
+  fn __init__() { self.count = 0; }
+
+  fn print(msg: Str) {
+    self.count = self.count + 1;
+    println(msg);
+  }
+}
+
+class Stats {
+  open: int;
+  fn __init__() { self.open = 1; }
+}
+
+fn main() -> int {
+  l: Logger = Logger();
+  l.print("first");
+  print("second\n");
+  s: Stats = Stats();
+  return s.open - 1;
+}
