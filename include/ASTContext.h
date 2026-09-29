@@ -60,6 +60,11 @@ class ASTContext {
   // holds at any nesting depth: `int[][]` resolves to one node everywhere.
   std::unordered_map<Type *, ArrayType *> ArrayTypes;
 
+  // Canonical OptionalType per inner type (lazily created by getOptionalType).
+  // Keyed like ArrayTypes: the inner Type* must be canonical, so `Node?`
+  // resolves to one node everywhere and identity is pointer identity.
+  std::unordered_map<Type *, OptionalType *> OptionalTypes;
+
   // Per-element specialized array ClassTypes (lazily created).
   // Key: element Type* pointer (canonical within this ASTContext).
   std::unordered_map<Type *, ClassType *> SpecializedArrayTypes;
@@ -162,6 +167,12 @@ public:
   /// resolves every parser-emitted (source-located) ArrayType to this node.
   ArrayType *getArrayType(Type *elemTy);
 
+  /// Return the canonical OptionalType wrapping @p innerTy, creating it on
+  /// first use.  @p innerTy must itself be canonical (see getArrayType).
+  /// Sema resolves every parser-emitted (source-located) OptionalType to this
+  /// node.
+  OptionalType *getOptionalType(Type *innerTy);
+
   /// Return (creating if needed) the specialized ClassType for arrays whose
   /// elements have type @p elemTy.  The returned type is a subtype of ArrayTy
   /// and carries push(elemTy)->void and pop()->elemTy method declarations.
@@ -228,9 +239,10 @@ public:
 };
 
 /// Canonical display name for a type: builtin keyword ("int", "float", …),
-/// class or enum name, element name plus "[]" for arrays, and "unknown" for
-/// null or unrecognised types.  The single source of truth shared by Sema
-/// diagnostics, module-export serialisation (SemaImport), and specialized
+/// class or enum name, element name plus "[]" for arrays, inner name plus "?"
+/// for optionals, and "unknown" for null or unrecognised types.  The single
+/// source of truth shared by Sema diagnostics, module-export serialisation
+/// (SemaImport, which parses the "[]" / "?" suffixes back), and specialized
 /// array-type naming.
 std::string typeName(Type *ty);
 

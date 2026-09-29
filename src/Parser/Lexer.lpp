@@ -72,6 +72,7 @@ comment     \/\/[^\n]*
 ";"        return yy::parser::make_SEMICOLON (loc);
 ","        return yy::parser::make_COMMA     (loc);
 "!"        return yy::parser::make_NOT       (loc);
+"?"        return yy::parser::make_QUESTION  (loc);
 
 \'([^\\'\n]|\\.)\'  { return make_CHAR(yytext, yyleng, loc); }
 

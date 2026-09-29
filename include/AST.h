@@ -96,6 +96,7 @@ public:
     NK_BuiltinType,
     NK_ClassType,
     NK_ArrayType,
+    NK_OptionalType,
     NK_EnumType,
 
     // Match arm (child of MatchStmt, not a Stmt itself)
@@ -170,12 +171,20 @@ public:
 // Base for all expressions
 class Expr : public ASTNode {
   Type *ResolvedType = nullptr; // set by Sema after type-checking
+  // Set by Sema when the value undergoes an implicit conversion at its use
+  // site.  Currently the only such conversion is an optional `T?` flowing into
+  // an `Obj` slot: CodeGen must then materialise the `None` singleton for a
+  // null box (see OptionalType).  nullptr = no conversion.
+  Type *CoercedType = nullptr;
 
 public:
   Expr(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
 
   void setResolvedType(Type *ty) { ResolvedType = ty; }
   Type *getResolvedType() const { return ResolvedType; }
+
+  void setCoercedType(Type *ty) { CoercedType = ty; }
+  Type *getCoercedType() const { return CoercedType; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() >= NK_IntegerLiteral && N->getKind() <= NK_MovExpr;
@@ -1126,6 +1135,36 @@ public:
   static bool classof(const ASTNode *N) { return N->getKind() == NK_ArrayType; }
 };
 
+// Optional type: T?  (e.g. Node?, Str?, int[]?)
+//
+// PROTOTYPE (issue #5).  A `T?` holds either a value of the reference type T
+// or `None`.  Only reference types may be optional (Sema rejects `int?` and
+// friends, and nested `T??`), so at runtime a `T?` is the very same
+// PaykanShared* box as a `T`, with a NULL box meaning `None` — no layout
+// change, and every runtime entry point that touches boxes tolerates NULL.
+// Like ArrayType, the parser allocates a source-located node per annotation
+// and Sema resolves it to the canonical instance interned by
+// ASTContext::getOptionalType, so optional types compare by pointer identity.
+class OptionalType : public Type {
+  Type *InnerType;
+
+public:
+  OptionalType(SourceLocation loc, Type *inner)
+      : Type(NK_OptionalType, loc), InnerType(inner) {
+    // The only operators defined on an optional value are == / != (against
+    // `None`, or against another optional of a compatible type).  Everything
+    // else requires unwrapping with `match`.
+    addBinaryOp(BinaryOpcode::Eq);
+    addBinaryOp(BinaryOpcode::Ne);
+  }
+
+  Type *getInnerType() const { return InnerType; }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_OptionalType;
+  }
+};
+
 // Enum type (nominal value type backed by a 64-bit unsigned integer).
 //
 // Each enum is a distinct nominal type.  Variants are assigned implicit
@@ -1280,10 +1319,20 @@ public:
 };
 
 /// Returns true for any type whose values are heap-allocated and
-/// reference-counted at runtime: ClassType and ArrayType.
+/// reference-counted at runtime: ClassType, ArrayType, and OptionalType (an
+/// optional only ever wraps a reference type and shares its representation —
+/// a possibly-NULL PaykanShared* box).
 /// Use this instead of spelling out the `||` condition everywhere.
 inline bool isRefType(const Type *ty) {
-  return ty && (isa<ClassType>(ty) || isa<ArrayType>(ty));
+  return ty &&
+         (isa<ClassType>(ty) || isa<ArrayType>(ty) || isa<OptionalType>(ty));
+}
+
+/// If @p ty is an optional type, return its inner type; otherwise @p ty.
+inline Type *stripOptional(Type *ty) {
+  if (auto *ot = dyn_cast<OptionalType>(ty))
+    return ot->getInnerType();
+  return ty;
 }
 
 } // namespace ast

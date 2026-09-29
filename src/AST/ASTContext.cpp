@@ -222,6 +222,22 @@ ArrayType *ASTContext::getArrayType(Type *elemTy) {
   return at;
 }
 
+// -- Canonical optional types ------------------------------------------------
+//
+// One OptionalType per (canonical) inner type, mirroring getArrayType: the
+// parser's source-located `T?` nodes are resolved by Sema to the instance
+// returned here so that `Node?` in a field, a parameter, and a match subject
+// is one node and compares by pointer.
+//
+OptionalType *ASTContext::getOptionalType(Type *innerTy) {
+  auto it = OptionalTypes.find(innerTy);
+  if (it != OptionalTypes.end())
+    return it->second;
+  auto *ot = make<OptionalType>(SourceLocation(), innerTy);
+  OptionalTypes[innerTy] = ot;
+  return ot;
+}
+
 // -- Specialized per-element array types ------------------------------------
 //
 // Lazily create Array<int>, Array<float>, etc.  Each specialized type is a
@@ -390,6 +406,8 @@ std::string typeName(Type *ty) {
     return et->getName();
   if (auto *at = dyn_cast<ArrayType>(ty))
     return typeName(at->getElementType()) + "[]";
+  if (auto *ot = dyn_cast<OptionalType>(ty))
+    return typeName(ot->getInnerType()) + "?";
   return "unknown";
 }
 

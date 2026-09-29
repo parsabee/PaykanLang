@@ -392,6 +392,15 @@ void ASTPrinter::visitArrayType(ArrayType *node) {
   visit(node->getElementType());
 }
 
+void ASTPrinter::visitOptionalType(OptionalType *node) {
+  printIndent();
+  OS << "OptionalType";
+  printLoc(node);
+  OS << "\n";
+  ChildScope cs(*this, true);
+  visit(node->getInnerType());
+}
+
 void ASTPrinter::visitArrayLiteralExpr(ArrayLiteralExpr *node) {
   printIndent();
   OS << "ArrayLiteralExpr";

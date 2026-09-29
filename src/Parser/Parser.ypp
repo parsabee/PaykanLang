@@ -59,6 +59,7 @@
   EQUAL    "=="
   NOT_EQUAL "!="
   NOT     "!"
+  QUESTION "?"
   COLON   ":"
   DOT     "."
   SEMICOLON ";"
@@ -277,6 +278,21 @@ typeAnnotation: IDENT               { auto *ty = impl(drv).Ctx.lookupType($1);
                                            impl(drv).Ctx.intern($1 + "::" + $3), nullptr);
                                     }
     | typeAnnotation "[" "]"        { $$ = impl(drv).Ctx.make<ArrayType>(loc(@1, @3), $1); }
+    | typeAnnotation "?"            { // Optional type T? (prototype, issue #5).  Only
+                                      // reference types may be optional; the builtin
+                                      // value types are known at parse time and are
+                                      // rejected here (an enum spelled `Color?` is only
+                                      // known to Sema, which rejects it there).
+                                      if (isa<BuiltinType>($1))
+                                        throw yy::parser::syntax_error(@2,
+                                          "optional primitive types are not supported yet ('"
+                                          + typeName($1) + "?')");
+                                      if (isa<OptionalType>($1))
+                                        throw yy::parser::syntax_error(@2,
+                                          "nested optional type '" + typeName($1)
+                                          + "?' is not supported");
+                                      $$ = impl(drv).Ctx.make<OptionalType>(loc(@1, @2), $1);
+                                    }
     ;
 
 varDecl: IDENT ":" typeAnnotation
@@ -334,8 +350,11 @@ matchArm:
 
 // A literal usable as a value-match pattern.  Restricted to bare literal tokens
 // so the grammar stays unambiguous against type arms (which start with IDENT).
+// `None` is accepted so that a match over an optional `T?` subject can name
+// the absent case explicitly (Sema rejects it for every other subject type).
 literalPattern:
       INT                           { $$ = impl(drv).Ctx.make<IntegerLiteral>(loc(@1, @1), $1); }
+    | NONE                          { $$ = impl(drv).Ctx.make<NoneLiteral>(loc(@1, @1)); }
     | FLOAT                         { $$ = impl(drv).Ctx.make<FloatLiteral>(loc(@1, @1), $1); }
     | BOOL                          { $$ = impl(drv).Ctx.make<BoolLiteral>(loc(@1, @1), $1); }
     | CHAR                          { $$ = impl(drv).Ctx.make<CharLiteral>(loc(@1, @1), $1); }
