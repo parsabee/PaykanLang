@@ -60,32 +60,43 @@ inline ast::Type *remapType(ast::Type *ty, ast::ASTContext &ctx) {
 namespace paykan {
 namespace module_utils {
 
-/// Build the bitcode cache path for a resolved source file.
-/// Layout: <cwd>/.paykan_cache/<path-relative-to-projectRoot>.bc
-/// If the resolved path is not under projectRoot, uses the filename only.
+/// Build the bitcode cache path for a resolved (canonical) source file.
+///
+/// Layout: <projectRoot>/.paykan_cache/<path-relative-to-projectRoot>.bc
+///
+/// The cache is anchored to the project root (the main file's directory, the
+/// same root imports are resolved against), never to the current working
+/// directory, so every invocation of a project shares one cache wherever it
+/// is launched from.  A module resolved from outside the project root (e.g.
+/// a stdlib module located through PAYKAN_STDLIB) mirrors its full path,
+/// minus the root directory, under the same cache directory.  An empty
+/// projectRoot means "the current directory" (the driver passes "" for a bare
+/// `paykan main.pkn`), which yields a relative `.paykan_cache/...` path.
 inline llvm::SmallString<256> getCachePath(llvm::StringRef resolvedPath,
                                            llvm::StringRef projectRoot) {
-  // Current working directory. On failure `cwd` is left empty, which yields a
-  // cache path relative to the process root — acceptable for a best-effort
-  // cache location, so the error code is intentionally ignored.
-  llvm::SmallString<256> cwd;
-  (void)llvm::sys::fs::current_path(cwd);
-
-  llvm::SmallString<256> cachePath(cwd);
+  llvm::SmallString<256> cachePath(projectRoot);
   llvm::sys::path::append(cachePath, names::kCacheDir);
 
   // Canonicalize projectRoot so prefix stripping works with resolved paths.
   llvm::SmallString<256> canonRoot;
-  if (llvm::sys::fs::real_path(projectRoot, canonRoot))
+  if (llvm::sys::fs::real_path(projectRoot.empty() ? "." : projectRoot,
+                               canonRoot))
     canonRoot = projectRoot; // fallback
 
-  // Compute relative portion: strip projectRoot prefix.
+  // Compute the portion relative to the project root; the match must end on a
+  // path-component boundary so "<root>2/x.pkn" is not mistaken for "<root>".
   llvm::StringRef rel = resolvedPath;
-  if (rel.starts_with(canonRoot)) {
+  if (!canonRoot.empty() && rel.starts_with(canonRoot) &&
+      (rel.size() == canonRoot.size() ||
+       llvm::sys::path::is_separator(rel[canonRoot.size()]) ||
+       llvm::sys::path::is_separator(canonRoot.back()))) {
     rel = rel.drop_front(canonRoot.size());
-    // Strip leading separator.
-    if (!rel.empty() && llvm::sys::path::is_separator(rel.front()))
+    while (!rel.empty() && llvm::sys::path::is_separator(rel.front()))
       rel = rel.drop_front(1);
+  } else {
+    // Outside the project: mirror the absolute path without its root ("/" or
+    // "C:\") so it stays inside the cache directory.
+    rel = llvm::sys::path::relative_path(rel);
   }
 
   // Append the relative source path, replacing .pkn with .bc.
@@ -95,19 +106,6 @@ inline llvm::SmallString<256> getCachePath(llvm::StringRef resolvedPath,
   }
   llvm::sys::path::replace_extension(cachePath, ".bc");
   return cachePath;
-}
-
-/// Return true if the source file is newer than the cache file,
-/// or if the cache file does not exist.
-inline bool isSourceNewer(llvm::StringRef sourcePath,
-                          llvm::StringRef cachePath) {
-  llvm::sys::fs::file_status srcStat, cacheStat;
-  if (llvm::sys::fs::status(sourcePath, srcStat))
-    return true; // can't stat source — treat as newer
-  if (llvm::sys::fs::status(cachePath, cacheStat))
-    return true; // cache doesn't exist
-  return srcStat.getLastModificationTime() >
-         cacheStat.getLastModificationTime();
 }
 
 } // namespace module_utils

@@ -54,8 +54,8 @@ Given `import a::b::c`, the compiler looks for:
 
 1. `<source-root>/a/b/c.pkn`
 
-The source root is the directory passed to the compiler driver. There is no package registry or
-search path beyond the source root.
+The source root is the directory containing the main file passed to the compiler driver. There
+is no package registry or search path beyond the source root.
 
 ---
 
@@ -121,6 +121,32 @@ s:  segment::Segment = segment::Segment(p1, p2);
 
 Circular imports (`A` imports `B` and `B` imports `A`) are **not supported** and will result
 in a compilation error.
+
+---
+
+## Compilation Cache
+
+Imported modules are compiled to LLVM bitcode once and cached on disk, so a project whose
+modules have not changed only re-generates code for the main file on the next run. The main
+file itself is never cached.
+
+- **Location.** The cache lives in `.paykan_cache/` **under the source root** (the main
+  file's directory), mirroring the module layout: `a/b/c.pkn` is cached as
+  `.paykan_cache/a/b/c.bc`. It does not depend on the directory the compiler is launched
+  from, so `paykan proj/main.pkn` and `cd proj && paykan main.pkn` share one cache. A module
+  resolved from outside the source root (for example a system module located through
+  `PAYKAN_STDLIB`) is cached under the same directory, keyed by its full path.
+- **Validity.** Every entry is stamped with a key derived from the module's **source
+  text**, the keys of **every module it imports** (recursively), and the compiler and
+  generated-code ABI versions. An entry is used only when it was written under exactly the
+  key computed for the current compile. Editing a module therefore invalidates it *and*
+  every module that imports it, directly or transitively — a changed class layout or
+  function signature in `base` never leaks stale code into `mid` or `main`. Timestamps are
+  not used.
+- **Robustness.** Entries are written atomically (to a temporary file that is then renamed
+  into place). An entry that is missing, truncated, corrupt, or produced by a different
+  compiler build is ignored and regenerated. The directory is purely a cache: deleting it
+  at any time is safe and only costs a recompile.
 
 ---
 
