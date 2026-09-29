@@ -239,9 +239,31 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   static bool typesEqual(ast::Type *a, ast::Type *b);
 
   // Returns true if a value of type `src` can be assigned to a location of
-  // type `dst`.  This includes exact match, int->float promotion, and
-  // ClassType subtyping.
+  // type `dst`.  This includes exact match, int->float promotion, ClassType
+  // subtyping, and the optional-type rules (`T` -> `T?`, `S?` -> `T?` when
+  // `S` -> `T`, `T?` -> `Obj`; never `T?` -> `T`).
   bool isAssignable(ast::Type *dst, ast::Type *src) const;
+
+  // Expression-level assignability: isAssignable(dst, srcTy) plus the two
+  // optional-type rules that depend on the expression itself, both of which
+  // are RECORDED on the AST for CodeGen:
+  //   * the `None` literal (statically `Obj`) is assignable to every `T?`;
+  //     its resolved type is rewritten to that `T?` so CodeGen emits a null
+  //     box instead of the boxed `None` singleton;
+  //   * a `T?` value flowing into an `Obj` slot is marked (Expr::CoercedType)
+  //     so CodeGen materialises the `None` singleton for a null box.
+  bool checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src);
+
+  // If `srcTy` is an optional and `dst` is not (the `T?` -> `T` narrowing
+  // that needs a `match`), emit the "cannot use optional ... without
+  // unwrapping" error at @p loc and return true; otherwise return false so the
+  // caller emits its own generic mismatch diagnostic.
+  bool diagnoseOptionalNarrowing(ast::SourceLocation loc, ast::Type *dst,
+                                 ast::Type *srcTy);
+
+  // Emit the unwrap diagnostic for an operation that is not defined on an
+  // optional value (member access, method call, subscript, arithmetic, …).
+  void errorOptionalUnwrap(ast::SourceLocation loc, ast::OptionalType *optTy);
 
   // Returns the lowest common ancestor in the class hierarchy of two class
   // types, or nullptr if they share no common ancestor.
@@ -271,6 +293,17 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   public:
     explicit ExprChecker(Sema &sema) : S(sema) {}
 
+    /// Dispatch to the visitXxx overloads and record the resulting type on
+    /// the node (Expr::ResolvedType).  Every expression therefore carries its
+    /// static type after Sema — CodeGen relies on this for identifiers and
+    /// literals too, e.g. to tell a `T?`-typed operand from a `T` one.
+    ast::Type *visit(ast::Expr *e) {
+      ast::Type *ty = ast::ExprVisitor<ExprChecker, ast::Type *>::visit(e);
+      if (ty)
+        e->setResolvedType(ty);
+      return ty;
+    }
+
 #define EXPR_VISIT(Kind, Name, Cast) ast::Type *visit##Name(ast::Cast *node);
     PAYKAN_EXPR_NODES(EXPR_VISIT)
 #undef EXPR_VISIT
@@ -287,6 +320,12 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // Enum-mode match checking: each non-wildcard arm names a bare variant of the
   // subject enum (parsed as a type-name arm).  No bindings are allowed.
   bool checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy);
+
+  // Optional-mode match checking: the subject is `T?`.  A type arm naming `T`
+  // itself matches every non-None value (and binds it as `T`); a type arm
+  // naming a strict subclass of `T` matches on exact runtime type as in class
+  // mode; a `None` literal arm or `_` covers the absent case.
+  bool checkOptionalMatch(ast::MatchStmt *node, ast::OptionalType *subjectTy);
 
   // -- Import resolution ----------------------------------------------------
 

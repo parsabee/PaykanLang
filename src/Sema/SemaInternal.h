@@ -20,6 +20,13 @@ bool stmtAlwaysReturns(ast::Stmt *s);
 /// Returns true if every path through the list of statements ends in a return.
 bool blockAlwaysReturns(llvm::ArrayRef<ast::Stmt *> stmts);
 
+/// Returns true if the arms of `ms` cover every value of its subject: a
+/// wildcard arm; every variant of an enum subject; both `True` and `False`
+/// for a bool subject; or, for an optional `T?` subject, a `None` arm together
+/// with a type arm naming `T` itself.  Requires the subject's resolved type
+/// and the arms' resolved types (i.e. the match has passed Sema).
+bool matchIsExhaustive(ast::MatchStmt *ms);
+
 } // namespace detail
 } // namespace sema
 } // namespace paykan

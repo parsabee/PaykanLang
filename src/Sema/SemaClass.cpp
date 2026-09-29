@@ -166,43 +166,19 @@ bool Sema::checkInitFieldsAssigned(ast::ClassType *ct, ast::CompoundStmt *body,
       return {in, false};
     }
     if (auto *ms = ast::dyn_cast<ast::MatchStmt>(s)) {
-      // Determine exhaustiveness: a wildcard arm, arms covering every enum
-      // variant, or both True and False literal arms over a bool subject.
-      // Only an exhaustive match can guarantee assignments.
-      bool hasWildcard = false;
-      unsigned variantArms = 0;
-      bool trueArm = false, falseArm = false;
+      // Only an exhaustive match (wildcard arm, every enum variant, both bool
+      // literals, or None + the wrapped type for an optional subject — see
+      // detail::matchIsExhaustive) can guarantee assignments.
       llvm::SmallBitVector out = full;
       bool anyFallThrough = false;
       for (ast::MatchArm *arm : ms->getArms()) {
-        if (arm->isWildcard()) {
-          hasWildcard = true;
-        } else if (!arm->isLiteral()) {
-          ++variantArms;
-        } else if (auto *bl = ast::dyn_cast<ast::BoolLiteral>(
-                       arm->getLiteralPattern())) {
-          if (bl->getValue())
-            trueArm = true;
-          else
-            falseArm = true;
-        }
         Flow af = analyzeBlock(arm->getBody()->getStatements(), in);
         if (!af.AlwaysReturns) {
           anyFallThrough = true;
           out &= af.Assigned;
         }
       }
-      bool exhaustive = hasWildcard;
-      if (!exhaustive) {
-        if (auto *subjTy = ms->getSubject()->getResolvedType()) {
-          if (auto *et = ast::dyn_cast<ast::EnumType>(subjTy))
-            exhaustive = variantArms == et->getNumVariants();
-          else if (auto *bt = ast::dyn_cast<ast::BuiltinType>(subjTy))
-            exhaustive = bt->getTypeKind() == ast::BuiltinType::Bool &&
-                         trueArm && falseArm;
-        }
-      }
-      if (!exhaustive)
+      if (!detail::matchIsExhaustive(ms))
         return {in, false}; // a non-matching path keeps only the incoming set
       if (!anyFallThrough)
         return {full, true}; // every arm returns
@@ -212,7 +188,15 @@ bool Sema::checkInitFieldsAssigned(ast::ClassType *ct, ast::CompoundStmt *body,
     return {in, false};
   };
 
+  // An optional field (`next: Node?`) is implicitly `None` unless __init__
+  // assigns it: the constructor zero-initialises every slot and a NULL box IS
+  // None, so such fields start out definitely assigned.  This is what makes
+  // linked structures ergonomic (prototype decision, see
+  // proposals/optionals.md).
   llvm::SmallBitVector entry(n, false);
+  for (unsigned i = 0; i < n; ++i)
+    if (ast::isa<ast::OptionalType>(fields[i].second))
+      entry.set(i);
   Flow result = analyzeBlock(body->getStatements(), entry);
   if (!result.AlwaysReturns)
     reportMissing(result.Assigned, initLoc);

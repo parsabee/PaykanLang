@@ -22,10 +22,11 @@ namespace sema {
 // resolveExportedType below and is diagnosed by the caller as an unknown type
 // — export reconstruction never silently substitutes Obj or void.
 
-/// Resolve a serialised type name (possibly carrying trailing "[]" array
-/// markers) to a Type* in @p ctx.  Builtins/classes/enums resolve by name;
-/// "T[]" becomes an ArrayType over the resolved element type.  Returns nullptr
-/// if the base name is unknown.
+/// Resolve a serialised type name (possibly carrying trailing "[]" array and
+/// "?" optional markers, in any order: "Str?[]", "int[]?") to a Type* in
+/// @p ctx.  Builtins/classes/enums resolve by name; "T[]" becomes an ArrayType
+/// over the resolved element type and "T?" an OptionalType over the resolved
+/// inner type.  Returns nullptr if the base name is unknown.
 static ast::Type *resolveExportedType(ast::ASTContext &ctx,
                                       const std::string &name) {
   if (name.size() > 2 && name.compare(name.size() - 2, 2, "[]") == 0) {
@@ -33,6 +34,13 @@ static ast::Type *resolveExportedType(ast::ASTContext &ctx,
     if (!elem)
       return nullptr;
     return ctx.getArrayType(elem);
+  }
+  if (name.size() > 1 && name.back() == '?') {
+    ast::Type *inner =
+        resolveExportedType(ctx, name.substr(0, name.size() - 1));
+    if (!inner)
+      return nullptr;
+    return ctx.getOptionalType(inner);
   }
   return ctx.lookupType(name);
 }
