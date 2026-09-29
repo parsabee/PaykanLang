@@ -10,6 +10,7 @@ type-checking (no codegen or JIT execution).
 |------------|---------------------------------------------------|
 | `arrays/`  | Array types, literals, subscript, `len()`, match  |
 | `classes/` | Class declarations, fields, methods, inheritance, `__super__` |
+| `functions/` | Free-function declarations and top-level name collisions |
 | `match/`   | `match` statement — arms, bindings, wildcards     |
 | `enums/`   | `enum` declarations, variant access, equality, enum match |
 
@@ -26,7 +27,8 @@ done
 
 # Type-check every sample across all feature directories
 for f in samples/sema/arrays/*.pkn samples/sema/classes/*.pkn \
-         samples/sema/match/*.pkn samples/sema/enums/*.pkn; do
+         samples/sema/functions/*.pkn samples/sema/match/*.pkn \
+         samples/sema/enums/*.pkn; do
   paykan --check-only "$f" 2>&1 && echo "OK: $f" || echo "ERR: $f"
 done
 ```

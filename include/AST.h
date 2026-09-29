@@ -892,6 +892,11 @@ class ClassType : public Type {
   // When true, no user class may inherit from this type.
   bool Final = false;
 
+  // When true, this type is a compiler builtin (Obj, Str, Array, File, Error,
+  // Int, Float, Bool) registered by the ASTContext bootstrap; user code may
+  // not declare a class, enum, or function with its name.
+  bool Builtin = false;
+
   void rebuildVTableIndex() {
     VTableIndex.clear();
     for (int i = 0, n = static_cast<int>(VTable.size()); i < n; ++i)
@@ -924,6 +929,11 @@ public:
   bool isFinal() const { return Final; }
   /// Mark this type as non-inheritable.
   void setFinal(bool v = true) { Final = v; }
+
+  /// Returns true if this is a compiler-provided class type (see Builtin).
+  bool isBuiltin() const { return Builtin; }
+  /// Mark this type as a compiler builtin.
+  void setBuiltin(bool v = true) { Builtin = v; }
 
   /// Set (or change) the superclass, inheriting its vtable and operator
   /// bitmasks. Used during ASTContext bootstrap to break the Obj/Str cycle.

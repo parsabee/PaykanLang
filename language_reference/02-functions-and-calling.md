@@ -113,6 +113,8 @@ fn fib(n: int) -> int {
 |-------|---------|
 | Undeclared function | Calling a function that is not declared anywhere in the program |
 | Function redefinition | Two functions with the same name |
+| Builtin name reused | A function named like a builtin function or class (`fn print(...)`, `fn Str()`) — see *Builtin Names Are Reserved* in `01-language-basics.md` |
+| Class / enum name reused | A function named like a class (its constructor) or an enum declared in the same program |
 | Argument count mismatch | Wrong number of arguments |
 | Argument type mismatch | Argument type incompatible with parameter type |
 | Non-void return without value | `return;` in non-void function |

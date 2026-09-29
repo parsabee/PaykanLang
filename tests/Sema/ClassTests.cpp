@@ -117,6 +117,73 @@ TEST(Class, DuplicateMethod) {
 }
 
 // ============================================================================
+// Top-level names are shared with the builtins: a class name is also its
+// constructor, so it may not reuse a builtin function, builtin class, or enum.
+// ============================================================================
+
+// Regression: `class print` used to silently replace the builtin `print`.
+TEST(Class, NameShadowsBuiltinFunctionRejected) {
+  auto r = semaCheck(withClasses("class print { fn __init__() {} }",
+                                 "print(\"hi\"); return 0;"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find(
+                "'print' is a builtin function and cannot be redeclared"),
+            std::string::npos)
+      << r.Diagnostics;
+}
+
+TEST(Class, NameShadowsConversionBuiltinRejected) {
+  auto r = semaCheck(withClasses("class StrInt { fn __init__() {} }"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find(
+                "'StrInt' is a builtin function and cannot be redeclared"),
+            std::string::npos)
+      << r.Diagnostics;
+}
+
+TEST(Class, NameShadowsBuiltinClassRejected) {
+  for (const char *name :
+       {"Obj", "Str", "Array", "File", "Error", "Int", "Float", "Bool"}) {
+    auto r = semaCheck(withClasses(std::string("class ") + name + " {}"));
+    EXPECT_FALSE(r.Ok) << name;
+    EXPECT_NE(
+        r.Diagnostics.find(std::string("'") + name +
+                           "' is a builtin class and cannot be redeclared"),
+        std::string::npos)
+        << r.Diagnostics;
+  }
+}
+
+TEST(Class, NameShadowsEnumRejected) {
+  auto r = semaCheck(withClasses("enum Color { Red }\nclass Color {}"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find(
+                "class 'Color' conflicts with an enum of the same name"),
+            std::string::npos)
+      << r.Diagnostics;
+}
+
+// Fields and methods have their own per-class namespace: they may reuse a
+// builtin function name, and the builtin stays callable.
+TEST(Class, MemberNamedLikeBuiltinOk) {
+  auto r = semaCheck(withClasses(R"(
+    class Logger {
+      open: int;
+      fn __init__() { self.open = 0; }
+      fn print(msg: Str) { println(msg); }
+      fn StrInt(n: int) -> Str { return "n"; }
+    }
+  )",
+                                 R"(
+    l: Logger = Logger();
+    l.print("a");
+    print(l.StrInt(l.open) + StrInt(2));
+    return 0;
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+// ============================================================================
 // Unknown types
 // ============================================================================
 
