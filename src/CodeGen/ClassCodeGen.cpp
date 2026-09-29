@@ -120,10 +120,11 @@ llvm::Value *ClassCodeGen::emitIsExactType(llvm::Value *rawObjPtr,
         arrTy, vtableGlobal, 0, 0, kIRVtableExpected + ct->getName());
   } else if (auto *elemTy = CG.ASTCtx.getSpecializedArrayElemType(ct)) {
     // Specialized array type (e.g. Array<Str>): use the runtime vtable.
-    // Value-element arrays (int/float/bool) use PaykanArray_vtable;
+    // Value-element arrays (int/float/bool/enum) use PaykanArray_vtable;
     // object-element arrays (Str[], Point[], ...) use PaykanArray_obj_vtable.
-    bool isObjElem =
-        ast::isa<ast::ClassType>(elemTy) || ast::isa<ast::ArrayType>(elemTy);
+    // Same predicate as array construction (emitArrayLiteralExpr), so the
+    // expected vtable is the one the array was actually created with.
+    bool isObjElem = CG.isObjectElementType(elemTy);
     const char *vtName =
         isObjElem ? names::kPaykanArrayObjVtable : names::kPaykanArrayVtable;
     // Use [0 x ptr] as placeholder — GEP(0,0) is offset zero so the address
@@ -646,11 +647,8 @@ llvm::Value *ClassCodeGen::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
   ExprValue recvOwned = CG.classifyExpr(node->getReceiver(), recv);
   llvm::Value *objPtr = recv;
   if (CG.exprAlreadyShared(node->getReceiver()) &&
-      recv->getType()->isPointerTy()) {
-    auto *getFnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
-    objPtr = CG.Builder.CreateCall(
-        CG.declareFunction(kPaykanSharedGet, getFnTy), {recv}, kIRObj);
-  }
+      recv->getType()->isPointerTy())
+    objPtr = CG.emitSharedGet(recv, kIRObj);
 
   // Determine the ClassType of the receiver.
   ast::ClassType *ct = getExprClassType(node->getReceiver());
@@ -763,11 +761,8 @@ llvm::Value *ClassCodeGen::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
   // would return its refCount/object words instead).
   llvm::Value *objPtr = recv;
   if (CG.exprAlreadyShared(node->getReceiver()) &&
-      recv->getType()->isPointerTy()) {
-    auto *getFnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
-    objPtr = CG.Builder.CreateCall(
-        CG.declareFunction(kPaykanSharedGet, getFnTy), {recv}, kIRObj);
-  }
+      recv->getType()->isPointerTy())
+    objPtr = CG.emitSharedGet(recv, kIRObj);
 
   // Determine the ClassType of the receiver.
   ast::ClassType *ct = getExprClassType(node->getReceiver());

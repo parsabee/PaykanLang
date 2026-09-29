@@ -893,8 +893,9 @@ class ClassType : public Type {
   bool Final = false;
 
   // When true, this type is a compiler builtin (Obj, Str, Array, File, Error,
-  // Int, Float, Bool) registered by the ASTContext bootstrap; user code may
-  // not declare a class, enum, or function with its name.
+  // Int, Float, Bool) registered by the ASTContext bootstrap: its methods are
+  // implemented in the C runtime rather than emitted from user code, and user
+  // code may not declare a class, enum, or function with its name.
   bool Builtin = false;
 
   void rebuildVTableIndex() {
@@ -903,23 +904,26 @@ class ClassType : public Type {
       VTableIndex[VTable[i]->getName()] = i;
   }
 
+  /// Inherit `parent`'s vtable and operator support.  Copying the parent's
+  /// operator bitmasks means that, e.g., every class that descends from Obj
+  /// automatically supports == and !=.
+  void inheritFrom(const ClassType *parent) {
+    VTable = parent->VTable;
+    rebuildVTableIndex();
+    for (int op = 0; op < static_cast<int>(UnaryOpcode::Count); ++op)
+      if (parent->hasUnaryOp(static_cast<UnaryOpcode>(op)))
+        addUnaryOp(static_cast<UnaryOpcode>(op));
+    for (int op = 0; op < static_cast<int>(BinaryOpcode::Count); ++op)
+      if (parent->hasOp(static_cast<BinaryOpcode>(op)))
+        addBinaryOp(static_cast<BinaryOpcode>(op));
+  }
+
 public:
   ClassType(SourceLocation loc, const std::string &internedName,
             ClassType *superClass = nullptr)
       : Type(NK_ClassType, loc), Name(&internedName), SuperClass(superClass) {
-    // Inherit parent vtable and operator support.
-    if (SuperClass) {
-      VTable = SuperClass->VTable;
-      rebuildVTableIndex();
-      // Copy the parent's operator bitmasks so that, e.g., every class
-      // that descends from Obj automatically supports == and !=.
-      for (int op = 0; op < static_cast<int>(UnaryOpcode::Count); ++op)
-        if (SuperClass->hasUnaryOp(static_cast<UnaryOpcode>(op)))
-          addUnaryOp(static_cast<UnaryOpcode>(op));
-      for (int op = 0; op < static_cast<int>(BinaryOpcode::Count); ++op)
-        if (SuperClass->hasOp(static_cast<BinaryOpcode>(op)))
-          addBinaryOp(static_cast<BinaryOpcode>(op));
-    }
+    if (SuperClass)
+      inheritFrom(SuperClass);
   }
 
   const std::string &getName() const { return *Name; }
@@ -939,16 +943,8 @@ public:
   /// bitmasks. Used during ASTContext bootstrap to break the Obj/Str cycle.
   void setSuperClass(ClassType *sc) {
     SuperClass = sc;
-    if (!sc)
-      return;
-    VTable = sc->VTable;
-    rebuildVTableIndex();
-    for (int op = 0; op < static_cast<int>(UnaryOpcode::Count); ++op)
-      if (sc->hasUnaryOp(static_cast<UnaryOpcode>(op)))
-        addUnaryOp(static_cast<UnaryOpcode>(op));
-    for (int op = 0; op < static_cast<int>(BinaryOpcode::Count); ++op)
-      if (sc->hasOp(static_cast<BinaryOpcode>(op)))
-        addBinaryOp(static_cast<BinaryOpcode>(op));
+    if (sc)
+      inheritFrom(sc);
   }
 
   // -- Fields ---------------------------------------------------------------
@@ -960,6 +956,17 @@ public:
     return Fields;
   }
   size_t getNumFields() const { return Fields.size(); }
+
+  /// Look up an instance field by name, searching this class and then each
+  /// ancestor in turn.  Returns the field's type, or nullptr if no class in
+  /// the hierarchy declares it.
+  Type *findField(const std::string &name) const {
+    for (const ClassType *c = this; c; c = c->SuperClass)
+      for (const auto &[fname, fty] : c->Fields)
+        if (fname == name)
+          return fty;
+    return nullptr;
+  }
 
   // -- Methods --------------------------------------------------------------
 

@@ -679,13 +679,9 @@ Sema::ExprChecker::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
   }
 
   // Walk the class hierarchy (this class + all ancestors) for the field.
-  for (auto *c = ct; c; c = c->getSuperClass()) {
-    for (auto &[fname, fty] : c->getFields()) {
-      if (fname == node->getFieldName()) {
-        node->setResolvedType(fty);
-        return fty;
-      }
-    }
+  if (auto *fty = ct->findField(node->getFieldName())) {
+    node->setResolvedType(fty);
+    return fty;
   }
 
   S.error(node->getLocation(), "no field '" + node->getFieldName() +
@@ -1160,40 +1156,45 @@ bool detail::stmtAlwaysReturns(ast::Stmt *s) {
   if (auto *cs = ast::dyn_cast<ast::CompoundStmt>(s))
     return detail::blockAlwaysReturns(cs->getStatements());
   if (auto *ms = ast::dyn_cast<ast::MatchStmt>(s)) {
-    bool hasWildcard = false;
-    unsigned variantArms = 0;
-    bool trueArm = false, falseArm = false; // bool-subject literal coverage
-    for (ast::MatchArm *arm : ms->getArms()) {
-      if (arm->isWildcard()) {
-        hasWildcard = true;
-      } else if (!arm->isLiteral()) {
-        ++variantArms; // an enum/type-name (bare-variant) arm
-      } else if (auto *bl = ast::dyn_cast<ast::BoolLiteral>(
-                     arm->getLiteralPattern())) {
-        if (bl->getValue())
-          trueArm = true;
-        else
-          falseArm = true;
-      }
+    for (ast::MatchArm *arm : ms->getArms())
       if (!detail::blockAlwaysReturns(arm->getBody()->getStatements()))
         return false;
+    return detail::matchIsExhaustive(ms);
+  }
+  return false;
+}
+
+bool detail::matchIsExhaustive(ast::MatchStmt *ms) {
+  bool hasWildcard = false;
+  unsigned variantArms = 0;
+  bool trueArm = false, falseArm = false; // bool-subject literal coverage
+  for (ast::MatchArm *arm : ms->getArms()) {
+    if (arm->isWildcard()) {
+      hasWildcard = true;
+    } else if (!arm->isLiteral()) {
+      ++variantArms; // an enum/type-name (bare-variant) arm
+    } else if (auto *bl =
+                   ast::dyn_cast<ast::BoolLiteral>(arm->getLiteralPattern())) {
+      if (bl->getValue())
+        trueArm = true;
+      else
+        falseArm = true;
     }
-    if (hasWildcard)
-      return true;
-    // A wildcard-less match is exhaustive iff its arms cover the whole value
-    // domain of the subject: every variant of an enum subject, or both True
-    // and False literals for a bool subject.  Sema has already validated the
-    // arms (visitFuncDecl runs this analysis only after the body type-checks
-    // cleanly), so each variant arm names a distinct, valid variant —
-    // counting them suffices.
-    if (auto *subjTy = ms->getSubject()->getResolvedType()) {
-      if (auto *et = ast::dyn_cast<ast::EnumType>(subjTy))
-        return variantArms == et->getNumVariants();
-      if (auto *bt = ast::dyn_cast<ast::BuiltinType>(subjTy))
-        if (bt->getTypeKind() == ast::BuiltinType::Bool)
-          return trueArm && falseArm;
-    }
-    return false;
+  }
+  if (hasWildcard)
+    return true;
+  // A wildcard-less match is exhaustive iff its arms cover the whole value
+  // domain of the subject: every variant of an enum subject, or both True
+  // and False literals for a bool subject.  Sema has already validated the
+  // arms (callers run this analysis only after the body type-checks
+  // cleanly), so each variant arm names a distinct, valid variant —
+  // counting them suffices.
+  if (auto *subjTy = ms->getSubject()->getResolvedType()) {
+    if (auto *et = ast::dyn_cast<ast::EnumType>(subjTy))
+      return variantArms == et->getNumVariants();
+    if (auto *bt = ast::dyn_cast<ast::BuiltinType>(subjTy))
+      if (bt->getTypeKind() == ast::BuiltinType::Bool)
+        return trueArm && falseArm;
   }
   return false;
 }
@@ -1380,18 +1381,7 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
   }
 
   // Look up the field in the class hierarchy.
-  ast::Type *fieldTy = nullptr;
-  for (auto *c = ct; c; c = c->getSuperClass()) {
-    for (auto &[fname, fty] : c->getFields()) {
-      if (fname == node->getFieldName()) {
-        fieldTy = fty;
-        break;
-      }
-    }
-    if (fieldTy)
-      break;
-  }
-
+  ast::Type *fieldTy = ct->findField(node->getFieldName());
   if (!fieldTy) {
     error(node->getLocation(), "no field '" + node->getFieldName() +
                                    "' in class '" + ct->getName() + "'");
