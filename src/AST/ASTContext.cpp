@@ -390,6 +390,18 @@ std::string typeName(Type *ty) {
     return et->getName();
   if (auto *at = dyn_cast<ArrayType>(ty))
     return typeName(at->getElementType()) + "[]";
+  if (auto *tt = dyn_cast<TupleType>(ty)) {
+    // "(int, Str)" — the same spelling the parser accepts, so the serialised
+    // form round-trips through module export (SemaImport::resolveExportedType
+    // parses it back, nesting and trailing "[]" included).
+    std::string s = "(";
+    for (size_t i = 0; i < tt->getArity(); ++i) {
+      if (i)
+        s += ", ";
+      s += typeName(tt->getElementType(i));
+    }
+    return s + ")";
+  }
   return "unknown";
 }
 

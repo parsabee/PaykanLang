@@ -837,6 +837,24 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
   return nullptr;
 }
 
+// -- Tuples (prototype) ------------------------------------------------------
+
+ast::Type *
+Sema::ExprChecker::visitTupleLiteralExpr(ast::TupleLiteralExpr *node) {
+  S.error(node->getLocation(), "tuple literals are not supported yet");
+  return nullptr;
+}
+
+ast::Type *Sema::ExprChecker::visitTupleIndexExpr(ast::TupleIndexExpr *node) {
+  S.error(node->getLocation(), "tuple indexing is not supported yet");
+  return nullptr;
+}
+
+bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
+  error(node->getLocation(), "destructuring is not supported yet");
+  return false;
+}
+
 // -- Entry point -------------------------------------------------------------
 
 SemaContext Sema::run(ast::TranslationUnit *tu) {

@@ -71,7 +71,8 @@ public:
     NK_MemberAssignStmt,
     NK_MatchStmt,
     NK_SubscriptAssignStmt,
-    NK_StmtEnd = NK_SubscriptAssignStmt,
+    NK_DestructureStmt,
+    NK_StmtEnd = NK_DestructureStmt,
 
     // Expressions
     NK_IntegerLiteral,
@@ -91,12 +92,15 @@ public:
     NK_SubscriptExpr,
     NK_EnumValueExpr,
     NK_MovExpr,
+    NK_TupleLiteralExpr,
+    NK_TupleIndexExpr,
 
     // Types
     NK_BuiltinType,
     NK_ClassType,
     NK_ArrayType,
     NK_EnumType,
+    NK_TupleType,
 
     // Match arm (child of MatchStmt, not a Stmt itself)
     NK_MatchArm,
@@ -178,7 +182,8 @@ public:
   Type *getResolvedType() const { return ResolvedType; }
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_IntegerLiteral && N->getKind() <= NK_MovExpr;
+    return N->getKind() >= NK_IntegerLiteral &&
+           N->getKind() <= NK_TupleIndexExpr;
   }
 };
 
@@ -254,7 +259,7 @@ public:
   }
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_BuiltinType && N->getKind() <= NK_EnumType;
+    return N->getKind() >= NK_BuiltinType && N->getKind() <= NK_TupleType;
   }
 };
 
@@ -1279,11 +1284,111 @@ public:
   static bool classof(const ASTNode *N) { return N->getKind() == NK_MovExpr; }
 };
 
+// Tuple type: (T1, T2, ...)  (e.g. (int, Str), (int, (Str, bool))[])
+//
+// A fixed-arity (>= 2), heterogeneous, immutable product type.  Like arrays,
+// a tuple value is a heap-allocated Obj subtype at runtime (see
+// src/Runtime/Tuple.c), so it flows through ARC exactly like a class value.
+// The parser allocates a source-located node per annotation; Sema resolves
+// each one to the canonical instance interned by ASTContext::getTupleType, so
+// resolved tuple types compare by pointer identity.
+class TupleType : public Type {
+  std::vector<Type *> ElementTypes;
+
+public:
+  TupleType(SourceLocation loc, std::vector<Type *> elemTys)
+      : Type(NK_TupleType, loc), ElementTypes(std::move(elemTys)) {
+    // == / != lower to the virtual `equals` (element-wise, see
+    // PaykanTuple_equals).  Set on the constructor for the same reason as
+    // ArrayType: there is no single bootstrap point for parser-emitted nodes.
+    addBinaryOp(BinaryOpcode::Eq);
+    addBinaryOp(BinaryOpcode::Ne);
+  }
+
+  const std::vector<Type *> &getElementTypes() const { return ElementTypes; }
+  size_t getArity() const { return ElementTypes.size(); }
+  Type *getElementType(size_t i) const { return ElementTypes[i]; }
+
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_TupleType; }
+};
+
+// Tuple literal expression: (e1, e2, ...) — always >= 2 elements; a
+// parenthesised single expression is just that expression.
+class TupleLiteralExpr : public Expr {
+  std::vector<Expr *> Elements;
+
+public:
+  TupleLiteralExpr(SourceLocation loc, std::vector<Expr *> elems)
+      : Expr(NK_TupleLiteralExpr, loc), Elements(std::move(elems)) {}
+
+  const std::vector<Expr *> &getElements() const { return Elements; }
+  size_t getNumElements() const { return Elements.size(); }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_TupleLiteralExpr;
+  }
+};
+
+// Tuple element access: t.0, t.1, ...  The index is a compile-time constant
+// (lexed as a single TUPLE_INDEX token, see Lexer.lpp); Sema checks it
+// against the tuple's arity.
+class TupleIndexExpr : public Expr {
+  Expr *Tuple;
+  size_t Index;
+
+public:
+  TupleIndexExpr(SourceLocation loc, Expr *tuple, size_t index)
+      : Expr(NK_TupleIndexExpr, loc), Tuple(tuple), Index(index) {}
+
+  Expr *getTuple() const { return Tuple; }
+  size_t getIndex() const { return Index; }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_TupleIndexExpr;
+  }
+};
+
+// Destructuring statement:  a, b = expr;   a: int, _ = expr;
+//
+// Binds each element of a tuple-valued expression to a target, left to
+// right.  A target is a name (declared on first assignment or re-assigned if
+// already in scope — the same implicit-declaration rule as AssignStmt), a
+// name with an explicit type annotation (always a fresh declaration, like
+// VarDecl), or `_` to skip the element.  At least two targets are required.
+class DestructureStmt : public Stmt {
+public:
+  struct Target {
+    const std::string *Name; // interned; empty string == `_` (skip)
+    Type *DeclType;          // explicit annotation, or nullptr
+    SourceLocation Loc;
+
+    bool isSkip() const { return Name->empty(); }
+    const std::string &getName() const { return *Name; }
+  };
+
+private:
+  std::vector<Target> Targets;
+  Expr *Value;
+
+public:
+  DestructureStmt(SourceLocation loc, std::vector<Target> targets, Expr *value)
+      : Stmt(NK_DestructureStmt, loc), Targets(std::move(targets)),
+        Value(value) {}
+
+  const std::vector<Target> &getTargets() const { return Targets; }
+  size_t getNumTargets() const { return Targets.size(); }
+  Expr *getValue() const { return Value; }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_DestructureStmt;
+  }
+};
+
 /// Returns true for any type whose values are heap-allocated and
-/// reference-counted at runtime: ClassType and ArrayType.
+/// reference-counted at runtime: ClassType, ArrayType and TupleType.
 /// Use this instead of spelling out the `||` condition everywhere.
 inline bool isRefType(const Type *ty) {
-  return ty && (isa<ClassType>(ty) || isa<ArrayType>(ty));
+  return ty && (isa<ClassType>(ty) || isa<ArrayType>(ty) || isa<TupleType>(ty));
 }
 
 } // namespace ast

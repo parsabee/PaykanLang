@@ -2281,6 +2281,21 @@ llvm::Value *CodeGen::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   return nullptr;
 }
 
+// -- Tuples (prototype) ------------------------------------------------------
+
+llvm::Value *
+CodeGen::ExprEmitter::visitTupleLiteralExpr(ast::TupleLiteralExpr *) {
+  return nullptr; // rejected by Sema
+}
+
+llvm::Value *CodeGen::ExprEmitter::visitTupleIndexExpr(ast::TupleIndexExpr *) {
+  return nullptr; // rejected by Sema
+}
+
+llvm::Value *CodeGen::visitDestructureStmt(ast::DestructureStmt *) {
+  return nullptr; // rejected by Sema
+}
+
 // -- Match-lowering scaffolding shared by all three modes --------------------
 
 llvm::BasicBlock *CodeGen::createMatchWildcardBlock(ast::MatchStmt *node,
