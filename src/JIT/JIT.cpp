@@ -149,6 +149,18 @@ const VTableAlias kVTableAliases[] = {
 llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
                               std::unique_ptr<llvm::LLVMContext> ctx,
                               const std::vector<std::string> &args) {
+  // Inspect main's param count before the module is consumed by the JIT.
+  unsigned mainParamCount = 0;
+  if (auto *mainIRFn = module->getFunction("main"))
+    mainParamCount = mainIRFn->arg_size();
+
+  // Take ownership of the module and its context together, before any early
+  // return.  ThreadSafeModule destroys the module before the context; left in
+  // the by-value parameters, their destruction order would follow the
+  // unspecified argument construction order, and a context destroyed first
+  // leaves ~Module() touching freed memory.
+  auto tsm = llvm::orc::ThreadSafeModule(std::move(module), std::move(ctx));
+
   // Composed "<ClassName>_vtable" alias names (stable std::strings so the
   // symbol map and the debug drift-check below can both reference them).
   std::vector<std::string> vtableAliasNames;
@@ -197,13 +209,7 @@ llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
           mainDylib.define(llvm::orc::absoluteSymbols(std::move(runtimeSyms))))
     return std::move(err);
 
-  // Inspect main's param count before the module is consumed by the JIT.
-  unsigned mainParamCount = 0;
-  if (auto *mainIRFn = module->getFunction("main"))
-    mainParamCount = mainIRFn->arg_size();
-
   // Add the module.
-  auto tsm = llvm::orc::ThreadSafeModule(std::move(module), std::move(ctx));
   if (auto err = jit->addIRModule(std::move(tsm)))
     return std::move(err);
 
