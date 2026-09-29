@@ -247,7 +247,7 @@ TEST(Array, ClassElementArrayEqualityOk) {
 }
 
 TEST(Array, ArrayLiteralEqualityOk) {
-  // Fresh ArrayType nodes on both sides must unify structurally.
+  // Both literals resolve to the canonical int[] type.
   auto r = semaCheck(wrapMain(R"(
     eq: bool = [1, 2] == [1, 2];
   )"));
@@ -270,4 +270,215 @@ TEST(Array, ArrayVsScalarEqualityRejected) {
     eq: bool = a == 1;
   )"));
   EXPECT_FALSE(r.Ok);
+}
+
+// ============================================================================
+// Canonical (interned) array types
+// ============================================================================
+
+namespace {
+
+/// Like semaCheck, but keeps the parser driver (and with it the ASTContext)
+/// alive so the caller can inspect the resolved types after analysis.
+struct SemaRun {
+  bool Ok;
+  std::string Diagnostics;
+  std::unique_ptr<paykan::parser::ParserDriver> Driver;
+};
+
+SemaRun semaRun(const std::string &source) {
+  auto [parseOk, driver] = parse(source);
+  if (!parseOk)
+    return {false, "parse error", std::move(driver)};
+  std::string diagStr;
+  llvm::raw_string_ostream diagOS(diagStr);
+  paykan::sema::DiagEngine diag(diagOS);
+  diag.setSourceInfo(driver->getCurrentFile(), &driver->getSourceLines());
+  paykan::sema::Sema sema(driver->getASTContext(), diag, "");
+  auto semaCtx = sema.run(driver->getRoot());
+  return {semaCtx.Ok, diagStr, std::move(driver)};
+}
+
+/// Number of specialized Array<...> ClassTypes registered under @p name.
+size_t countSpecializedArrays(const paykan::ast::ASTContext &ctx,
+                              const std::string &name) {
+  size_t n = 0;
+  for (auto &entry : ctx.getSpecializedArrayTypes())
+    if (entry.second->getName() == name)
+      ++n;
+  return n;
+}
+
+} // namespace
+
+TEST(ArrayCanonical, ContextInternsPerElementType) {
+  paykan::ast::ASTContext ctx;
+  auto *intArr = ctx.getArrayType(ctx.getIntTy());
+  ASSERT_NE(intArr, nullptr);
+  EXPECT_EQ(intArr, ctx.getArrayType(ctx.getIntTy()));
+  EXPECT_EQ(intArr->getElementType(), ctx.getIntTy());
+
+  // Nesting: the element of int[][] is the canonical int[] node, so int[][]
+  // is itself canonical at any depth.
+  auto *intArr2 = ctx.getArrayType(intArr);
+  EXPECT_EQ(intArr2, ctx.getArrayType(ctx.getArrayType(ctx.getIntTy())));
+  EXPECT_EQ(intArr2->getElementType(), intArr);
+  EXPECT_NE(intArr2, intArr);
+  EXPECT_NE(ctx.getArrayType(ctx.getStrTy()), intArr);
+
+  // The specialized class cache keys on the canonical element type, so
+  // Array<int[]> is built exactly once no matter how often it is requested.
+  auto *spec = ctx.getOrCreateSpecializedArrayType(intArr);
+  EXPECT_EQ(spec, ctx.getOrCreateSpecializedArrayType(
+                      ctx.getArrayType(ctx.getIntTy())));
+  EXPECT_EQ(spec->getName(), "Array<int[]>");
+  EXPECT_EQ(countSpecializedArrays(ctx, "Array<int[]>"), 1u);
+  EXPECT_EQ(ctx.lookupClassType("Array<int[]>"), spec);
+}
+
+TEST(ArrayCanonical, NestedAnnotationsResolveToSameType) {
+  // Two field annotations, a method return type, and locals all spell
+  // int[][]; each is a distinct parser node but Sema must resolve every one
+  // to the same canonical Type*.
+  auto r = semaRun(R"(
+    class Grid {
+      a: int[][];
+      b: int[][];
+      fn __init__() {
+        self.a = [];
+        self.b = [[1, 2]];
+        self.a.push([3]);
+        self.b.push([4, 5]);
+      }
+      fn rows() -> int[][] { return self.a; }
+    }
+    fn main() -> int {
+      g: Grid = Grid();
+      x: int[][] = g.rows();
+      y: int[][] = [[6]];
+      x.push([7]);
+      y.push(x[0]);
+      x[0].push(8);
+      y[0].push(9);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.Ok) << r.Diagnostics;
+
+  auto &ctx = r.Driver->getASTContext();
+  auto *grid = ctx.lookupClassType("Grid");
+  ASSERT_NE(grid, nullptr);
+  ASSERT_EQ(grid->getNumFields(), 2u);
+  auto *aTy = grid->getFields()[0].second;
+  auto *bTy = grid->getFields()[1].second;
+  ASSERT_TRUE(paykan::ast::isa<paykan::ast::ArrayType>(aTy));
+  EXPECT_EQ(aTy, bTy);
+
+  auto *rows = grid->findMethod("rows");
+  ASSERT_NE(rows, nullptr);
+  EXPECT_EQ(rows->getReturnType(), aTy);
+
+  // Structure matches the canonical chain int -> int[] -> int[][].
+  auto *intArr = ctx.getArrayType(ctx.getIntTy());
+  EXPECT_EQ(aTy, ctx.getArrayType(intArr));
+  EXPECT_EQ(paykan::ast::cast<paykan::ast::ArrayType>(aTy)->getElementType(),
+            intArr);
+
+  // Every push() on an int[][] receiver went through one Array<int[]> class
+  // (and every push() on an int[] receiver through one Array<int>); the
+  // registry holds exactly one entry per name.
+  EXPECT_EQ(countSpecializedArrays(ctx, "Array<int[]>"), 1u);
+  EXPECT_EQ(countSpecializedArrays(ctx, "Array<int>"), 1u);
+  auto *spec = ctx.lookupClassType("Array<int[]>");
+  ASSERT_NE(spec, nullptr);
+  EXPECT_EQ(ctx.getSpecializedArrayElemType(spec), intArr);
+  EXPECT_EQ(ctx.getOrCreateSpecializedArrayType(intArr), spec);
+}
+
+TEST(ArrayCanonical, MultiDimTypeCheckAssignSubscript) {
+  auto r = semaCheck(wrapMain(R"(
+    a: int[][] = [[1, 2], [3]];
+    b: int[][][] = [[[1]], [[2, 3]]];
+    empty2: int[][] = [];
+    empty3: Str[][][] = [];
+    row: int[] = a[0];
+    v: int = a[1][0];
+    w: int = b[1][0][1];
+    plane: int[][] = b[0];
+    a[0] = [9];
+    a[1][0] = 5;
+    b[0] = a;
+    b[0][0] = [7, 8];
+    b[1][0][0] = 4;
+    a = b[1];
+    a = plane;
+    empty2 = a;
+    a.push([10]);
+    b.push(a);
+    b.push([]);
+    row = a.pop();
+    plane = b.pop();
+    n: int = b[0].len();
+    same: bool = a == b[0];
+    diff: bool = a != plane;
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(ArrayCanonical, MultiDimArrayInSignatures) {
+  auto r = semaCheck(R"(
+    fn transpose(m: int[][]) -> int[][] { return m; }
+    fn depth3(c: int[][][]) -> int[] { return c[0][0]; }
+    fn main() -> int {
+      m: int[][] = [[1, 2], [3, 4]];
+      t: int[][] = transpose(m);
+      t = transpose([[5]]);
+      c: int[][][] = [m, t];
+      first: int[] = depth3(c);
+      first = depth3([[[6]]]);
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(ArrayCanonical, DimensionMismatchRejected) {
+  {
+    auto r = semaCheck(wrapMain(R"(
+      a: int[][] = [[1]];
+      b: int[][][] = [[[1]]];
+      a = b;
+    )"));
+    EXPECT_FALSE(r.Ok);
+  }
+  {
+    auto r = semaCheck(wrapMain(R"(
+      a: int[][] = [[1]];
+      b: int[][][] = [[[1]]];
+      eq: bool = a == b;
+    )"));
+    EXPECT_FALSE(r.Ok);
+    EXPECT_NE(r.Diagnostics.find("mismatched types"), std::string::npos);
+  }
+  {
+    auto r = semaCheck(wrapMain(R"(
+      a: int[][] = [[1]];
+      a.push(1);
+    )"));
+    EXPECT_FALSE(r.Ok);
+  }
+  {
+    auto r = semaCheck(wrapMain(R"(
+      a: int[][] = [[1]];
+      s: Str[][] = [["x"]];
+      a[0] = s[0];
+    )"));
+    EXPECT_FALSE(r.Ok);
+  }
+  {
+    auto r = semaCheck(wrapMain(R"(
+      a: int[][] = [[1], ["x"]];
+    )"));
+    EXPECT_FALSE(r.Ok);
+  }
 }

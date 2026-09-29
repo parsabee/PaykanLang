@@ -155,8 +155,12 @@ std::string Sema::typeName(ast::Type *ty) {
   return ast::typeName(ty);
 }
 
-// Structural type equality (pointer equality is insufficient for ArrayType
-// nodes because each make<ArrayType>() call yields a fresh allocation).
+// Type equality.  Every type Sema compares is canonical -- builtin singletons,
+// registered ClassType/EnumType instances, and ArrayTypes interned per element
+// type by ASTContext::getArrayType -- so pointer identity is the whole test.
+// The structural fallback for arrays guards against a parser-emitted
+// (source-located) ArrayType that reaches a comparison without having been
+// resolved; it never fires for resolved types.
 bool Sema::typesEqual(ast::Type *a, ast::Type *b) {
   if (a == b)
     return true;
@@ -167,8 +171,6 @@ bool Sema::typesEqual(ast::Type *a, ast::Type *b) {
   if (auto *aa = ast::dyn_cast<ast::ArrayType>(a))
     return typesEqual(aa->getElementType(),
                       ast::cast<ast::ArrayType>(b)->getElementType());
-  // BuiltinType / ClassType: pointer equality is canonical (singletons /
-  // interned).
   return false;
 }
 
@@ -226,7 +228,10 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     auto *elemTy = resolveType(at->getElementType(), loc, context + " element");
     if (!elemTy)
       return nullptr;
-    return Ctx.make<ast::ArrayType>(at->getLocation(), elemTy);
+    // The parser's ArrayType carries the annotation's source location; the
+    // resolved type is the context's canonical (interned) instance so that
+    // array types compare by pointer and nested arrays share element nodes.
+    return Ctx.getArrayType(elemTy);
   }
 
   error(loc, context + " has unknown type");
@@ -397,9 +402,8 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   // Equality requires compatible types.
   if ((node->getOpcode() == ast::BinaryOpcode::Eq ||
        node->getOpcode() == ast::BinaryOpcode::Ne)) {
-    // Same type is always OK.  Structural comparison, not pointer identity:
-    // every ArrayType use site allocates a fresh node, so `int[] == int[]`
-    // must unify structurally (while `int[] == Str[]` stays an error).
+    // Same type is always OK (`int[] == int[]` unifies because array types are
+    // canonical per element type, while `int[] == Str[]` stays an error).
     if (!typesEqual(lhsTy, rhsTy)) {
       // Allow class subtype comparisons (either direction).
       auto *lhsCT = ast::dyn_cast<ast::ClassType>(lhsTy);
@@ -655,8 +659,7 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
   // present (e.g. a: int[] = []).  Return ArrayType(void) as a sentinel;
   // isAssignable() treats it as compatible with any array destination.
   if (node->isEmpty()) {
-    auto *arrTy =
-        S.Ctx.make<ast::ArrayType>(node->getLocation(), S.Ctx.getVoidTy());
+    auto *arrTy = S.Ctx.getArrayType(S.Ctx.getVoidTy());
     node->setResolvedType(arrTy);
     return arrTy;
   }
@@ -692,7 +695,7 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
       }
     }
   }
-  auto *arrTy = S.Ctx.make<ast::ArrayType>(node->getLocation(), elemTy);
+  auto *arrTy = S.Ctx.getArrayType(elemTy);
   node->setResolvedType(arrTy);
   return arrTy;
 }

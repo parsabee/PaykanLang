@@ -210,6 +210,35 @@ fn main() -> int {
   EXPECT_EQ(r.StdOut, "0\n5\n7\n");
 }
 
+TEST(RefField, ThreeDimArrayLiteralsAndSubscripts) {
+  // int[][][] spelled at several use sites (annotations, a parameter, a
+  // return type, nested literals) must all agree on one canonical type so the
+  // nested element reads/writes lower consistently at every depth.
+  auto r = compileAndRun(R"(
+fn corner(c: int[][][]) -> int { return c[1][1][1]; }
+fn build() -> int[][][] {
+  cube: int[][][] = [];
+  cube.push([[1, 2], [3, 4]]);
+  cube.push([[5, 6], [7, 8]]);
+  return cube;
+}
+fn main() -> int {
+  c: int[][][] = build();
+  println(StrInt(corner(c)));         // 8
+  c[0][1][0] = 30;
+  plane: int[][] = c[0];
+  println(StrInt(plane[1][0]));       // 30
+  c[1] = [[9]];
+  println(StrInt(c[1][0][0]));        // 9
+  println(StrInt(c.len()));           // 2
+  println(StrInt(c[1].len()));        // 1
+  return 0;
+}
+)");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "8\n30\n9\n2\n1\n");
+}
+
 TEST(RefField, MemberAccessPassedAsClassArg) {
   // Passing a member access (borrowed box) as a class-typed argument to a
   // user method must retain it: the callee consumes (releases) it, and the

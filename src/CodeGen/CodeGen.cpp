@@ -1438,11 +1438,13 @@ llvm::Value *CodeGen::ExprEmitter::visitTernaryExpr(ast::TernaryExpr *node) {
   if (!condVal)
     return nullptr;
 
-  // When the ternary resolves to a class type, each branch must produce a
-  // PaykanShared*.  Use emitAsShared to normalise string literals, owned vars,
-  // None, and call results uniformly.
-  bool isClassResult = node->getResolvedType() &&
-                       ast::isa<ast::ClassType>(node->getResolvedType());
+  // When the ternary resolves to a ref type (class or array), each branch must
+  // produce a PaykanShared*: exprAlreadyShared/exprProducesFreshBox classify a
+  // ref-typed ternary as a fresh +1 box, so both incoming phi values must be
+  // boxed.  Use emitAsShared to normalise string literals, owned vars, None,
+  // array literals, and call results uniformly.
+  bool isClassResult =
+      node->getResolvedType() && ast::isRefType(node->getResolvedType());
 
   auto *parentFn = CG.Builder.GetInsertBlock()->getParent();
   auto *thenBB = llvm::BasicBlock::Create(CG.LLVMCtx, kIRTernThen, parentFn);

@@ -197,6 +197,25 @@ void ASTContext::buildBoxedBoolType() {
       .build();
 }
 
+// -- Canonical array types ---------------------------------------------------
+//
+// One ArrayType per (canonical) element type.  The parser still allocates a
+// source-located ArrayType for every `T[]` annotation so diagnostics can point
+// at it, but Sema resolves each one to the instance returned here, so two uses
+// of `int[][]` share a single node and pointer comparison is sufficient.  This
+// also keeps the specialized-class cache below keyed correctly for nested
+// arrays: the element type of `int[][]` is the canonical `int[]` node, so
+// Array<int[]> is built once rather than once per use site.
+//
+ArrayType *ASTContext::getArrayType(Type *elemTy) {
+  auto it = ArrayTypes.find(elemTy);
+  if (it != ArrayTypes.end())
+    return it->second;
+  auto *at = make<ArrayType>(SourceLocation(), elemTy);
+  ArrayTypes[elemTy] = at;
+  return at;
+}
+
 // -- Specialized per-element array types ------------------------------------
 //
 // Lazily create Array<int>, Array<float>, etc.  Each specialized type is a

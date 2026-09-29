@@ -215,8 +215,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
                                      ast::Type *retTy,
                                      const std::vector<ast::Type *> &paramTys);
 
-  // Structural type equality (pointer equality is insufficient for ArrayType
-  // nodes because each make<ArrayType>() call yields a fresh allocation).
+  // Type equality.  Resolved types are canonical (including ArrayTypes, which
+  // ASTContext interns per element type), so this is pointer identity with a
+  // structural fallback for any unresolved parser ArrayType node.
   static bool typesEqual(ast::Type *a, ast::Type *b);
 
   // Returns true if a value of type `src` can be assigned to a location of
