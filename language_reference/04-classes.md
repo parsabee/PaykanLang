@@ -220,6 +220,14 @@ a: Animal = Dog();   // Dog stored as Animal — valid
 
 ---
 
+## Generics (prototype)
+
+A class may take type parameters — `class Box<T> { v: T; … }` — and is then used
+as `Box<int>`, `Box<Str>`, `Box<Box<int>>`, each of which is an ordinary class
+created for that argument list. See `09-generics.md`.
+
+---
+
 ## Runtime Type Dispatch (`match`)
 
 Use `match` to test and downcast at runtime. See `07-match-statements.md` for full `match` documentation.
