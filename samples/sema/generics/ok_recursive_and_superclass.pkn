@@ -1,0 +1,28 @@
+// OK: a generic class may refer to its own instantiation (`Node<T>`) in a
+// method signature, and may extend a concrete class.
+class Base {
+  n: int;
+  fn __init__(n: int) { self.n = n; }
+  fn num() -> int { return self.n; }
+}
+
+class Wrap<T> : Base {
+  v: T;
+  fn __init__(v: T, n: int) { __super__(n); self.v = v; }
+  fn get() -> T { return self.v; }
+}
+
+class Node<T> {
+  v: T;
+  next: Obj;
+  fn __init__(v: T) { self.v = v; self.next = None; }
+  fn link(n: Node<T>) { self.next = n; }
+}
+
+fn main() -> int {
+  w: Wrap<Str> = Wrap<Str>("a", 5);
+  b: Base = w;
+  a: Node<int> = Node<int>(1);
+  a.link(Node<int>(2));
+  return b.num() + w.num();
+}

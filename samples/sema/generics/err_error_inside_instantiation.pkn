@@ -1,0 +1,14 @@
+// ERROR: bodies are checked per instantiation.  `Adder<int>` is fine, but
+// `Adder<bool>` has no '+' for bool — reported at the template source with a
+// note "in instantiation of 'Adder<bool>' requested here".
+class Adder<T> {
+  v: T;
+  fn __init__(v: T) { self.v = v; }
+  fn twice() -> T { return self.v + self.v; }
+}
+
+fn main() -> int {
+  ok = Adder<int>(1);
+  bad = Adder<bool>(True);
+  return 0;
+}
