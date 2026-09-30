@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Generics (prototype).** Generic classes (`class Box<T> { … }`,
+  `class Pair<K, V> { … }`) and generic free functions
+  (`fn first<T>(xs: T[]) -> T`), implemented by monomorphisation in Sema: each
+  distinct type-argument tuple instantiates the declaration once into an
+  ordinary class/function named `Box<int>`, `Pair<Str, int>`, `first<int>`.
+  Type arguments are accepted in every type position (`Box<int>[]`,
+  `Box<Box<int>>`), on constructor calls (`Box<int>(3)`) and on calls
+  (`first<int>(xs)`); a generic function's type arguments are inferred from
+  the argument types (also through `T[]` and `Box<T>`), as are a generic
+  class's from its `__init__` arguments (`Box(3)`). Bodies are checked per
+  instantiation; an error inside one names it (`in instantiation of
+  'Box<bool>' requested here`). Templates are not exported across modules
+  (`mod::Box<int>` is rejected with "generic types cannot be imported yet");
+  a module's own instantiations are exported as concrete classes. No
+  constraints, variance, defaults or specialisation yet — see
+  `proposals/generics.md` and `language_reference/11-generics.md`.
 - **Optional types `T?` (prototype, issue #5).** Any reference type (a class,
   `Str`, or an array) has an optional form `T?` holding either a `T` or
   `None`. `T` widens to `T?` implicitly; a `T?` never narrows back without a

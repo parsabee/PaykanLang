@@ -1,0 +1,15 @@
+// ERROR: a type parameter may not reuse the name of a type in scope, and a
+// parameter list may not repeat a name.
+class Foo {}
+
+class Bar<Foo> {
+  x: Foo;
+  fn __init__(x: Foo) { self.x = x; }
+}
+
+class Pair<T, T> {
+  a: T;
+  fn __init__(a: T) { self.a = a; }
+}
+
+fn main() -> int { return 0; }

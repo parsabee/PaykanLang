@@ -178,11 +178,28 @@ bool Sema::checkDeclNameAvailable(const std::string &name,
       error(loc, "'" + name + "' is already declared as a function");
     return false;
   }
+  // Generic templates share the namespace: a class name is also its
+  // constructor, and a generic function is called like any other.
+  if (ClassTemplates.count(name)) {
+    error(loc, "'" + name + "' is already declared as a generic class");
+    return false;
+  }
+  if (FuncTemplates.count(name)) {
+    error(loc, "'" + name + "' is already declared as a generic function");
+    return false;
+  }
   return true;
 }
 
 void Sema::error(ast::SourceLocation loc, const std::string &msg) {
   Diags.error(loc, msg);
+  // An error inside an instantiation points at the template's source text
+  // (clones keep their locations); say which instantiation was being checked
+  // and where it was requested, innermost first, like a C++ compiler.
+  for (auto it = InstantiationStack.rbegin(); it != InstantiationStack.rend();
+       ++it)
+    Diags.note(it->RequestLoc,
+               "in instantiation of '" + it->Name + "' requested here");
 }
 
 void Sema::warning(ast::SourceLocation loc, const std::string &msg) {
@@ -357,6 +374,12 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
       return enumTy;
     if (auto *canonical = Ctx.lookupClassType(ct->getName()))
       return canonical;
+    if (ClassTemplates.count(ct->getName())) {
+      error(loc, context + " names generic class '" + ct->getName() +
+                     "' without type arguments (write '" + ct->getName() +
+                     "<...>')");
+      return nullptr;
+    }
     error(loc, context + " has unknown class type '" + ct->getName() + "'");
     return nullptr;
   }
@@ -369,6 +392,23 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     // resolved type is the context's canonical (interned) instance so that
     // array types compare by pointer and nested arrays share element nodes.
     return Ctx.getArrayType(elemTy);
+  }
+
+  if (auto *gt = ast::dyn_cast<ast::GenericType>(ty)) {
+    // Generic type application `Box<int>`: resolve the arguments to canonical
+    // types, then instantiate (or fetch the cached instantiation of) the class
+    // template.  The result is an ordinary ClassType.
+    std::vector<ast::Type *> args;
+    for (size_t i = 0; i < gt->getNumArgs(); ++i) {
+      auto *arg =
+          resolveType(gt->getArgs()[i], loc,
+                      context + " type argument " + std::to_string(i + 1) +
+                          " of '" + gt->getName() + "'");
+      if (!arg)
+        return nullptr;
+      args.push_back(arg);
+    }
+    return instantiateClass(gt->getName(), args, loc);
   }
 
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty)) {
@@ -474,6 +514,14 @@ ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
             "use of moved variable '" + node->getName() +
                 "'; it was consumed by 'mov' and can only be used again after "
                 "re-assignment");
+    return nullptr;
+  }
+  // Inside an instantiation body, a bare type parameter name is a type, not a
+  // value (a local variable of the same name shadows it, as usual).
+  if (S.CurrentTypeParams && S.CurrentTypeParams->count(node->getName()) &&
+      !(S.CurrentScope && S.CurrentScope->lookup(node->getName()))) {
+    S.error(node->getLocation(), "type parameter '" + node->getName() +
+                                     "' cannot be used as a value");
     return nullptr;
   }
   return S.checkIdentLive(node->getName(), node->getLocation());
@@ -778,12 +826,34 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     return S.Ctx.getVoidTy();
   }
 
+  // -- Generic call: instantiate the template and rebind the callee ---------
+  if (node->hasTypeArgs() || S.ClassTemplates.count(node->getCalleeName()) ||
+      S.FuncTemplates.count(node->getCalleeName())) {
+    for (auto *ty : argTypes)
+      if (!ty)
+        return nullptr; // argument errors already reported; cannot infer
+    if (!S.resolveGenericCall(node, argTypes))
+      return nullptr;
+  } else if (S.CurrentTypeParams &&
+             S.CurrentTypeParams->count(node->getCalleeName())) {
+    S.error(node->getLocation(),
+            "type parameter '" + node->getCalleeName() +
+                "' cannot be used as a value (a type parameter cannot be "
+                "constructed)");
+    return nullptr;
+  }
+
   const auto *sig = S.lookupFunction(node->getCalleeName());
   if (!sig) {
     S.error(node->getLocation(),
             "call to undeclared function '" + node->getCalleeName() + "'");
     return nullptr;
   }
+
+  // Record "class A constructs class B" edges for instantiation ordering.
+  if (S.CurrentClassCtx && S.Ctx.lookupClassType(node->getCalleeName()))
+    S.ConstructsEdges[S.CurrentClassCtx->ClassType->getName()].insert(
+        node->getCalleeName());
 
   if (argTypes.size() != sig->ParamTypes.size()) {
     S.error(node->getLocation(),
@@ -1337,6 +1407,12 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
     if (!visitEnumDecl(ed))
       ok = false;
 
+  // Register generic class / function templates by name.  They are not
+  // checked here; every use below instantiates them on demand (resolveType /
+  // resolveGenericCall), so this must precede the first type resolution.
+  if (!registerGenericTemplates(node))
+    ok = false;
+
   // Register class types, fields, method signatures, and constructors first, so
   // that function signatures below can name class types (e.g. a function that
   // takes or returns a class).  Method bodies are deferred (checkClassBodies).
@@ -1368,6 +1444,14 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   for (auto *fn : declaredFns)
     if (!visitFuncDecl(fn))
       ok = false;
+
+  // Bodies of the instantiations requested so far (and of any they request
+  // in turn): checked last, like C++ instantiates at the end of the TU.
+  if (!checkPendingInstantiations())
+    ok = false;
+
+  // Hand the instantiations to CodeGen as ordinary declarations.
+  injectInstantiations(node);
 
   return ok;
 }
@@ -1425,6 +1509,8 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   // Guard: the target name must not shadow a registered type name.
   const auto &varName = node->getVarName();
   if (Ctx.lookupClassType(varName) || Ctx.lookupEnumType(varName) ||
+      ClassTemplates.count(varName) ||
+      (CurrentTypeParams && CurrentTypeParams->count(varName)) ||
       varName == names::kObj || varName == names::kString ||
       varName == names::kFile || varName == names::kTypeInt ||
       varName == names::kTypeBool || varName == names::kTypeFloat ||
@@ -1704,22 +1790,26 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
                               DeclKind::Function))
     return false;
 
-  // Resolve return type.
+  // Resolve return type.  Resolved annotations are written back into the
+  // declaration so CodeGen sees canonical types (never a parser stub or a
+  // generic type application).
   ast::Type *retTy = Ctx.getVoidTy();
   if (node->getReturnType()) {
     retTy = resolveType(node->getReturnType(), node->getLocation(),
                         "function '" + node->getName() + "' return type");
     if (!retTy)
       return false;
+    node->setReturnType(retTy);
   }
 
   // Resolve parameter types.
   std::vector<ast::Type *> paramTypes;
-  for (auto &p : node->getParams()) {
+  for (auto &p : node->getMutableParams()) {
     auto *ty = resolveType(p.ParamType, node->getLocation(),
                            "parameter '" + p.getName() + "'");
     if (!ty)
       return false;
+    p.ParamType = ty;
     paramTypes.push_back(ty);
   }
 
@@ -1737,7 +1827,8 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
     return false;
 
   // Re-resolve the annotations to set up the body scope (resolveType is
-  // idempotent and, for a registered function, is guaranteed to succeed).
+  // idempotent and, for a registered function, is guaranteed to succeed —
+  // declareFunctionSignature already wrote the canonical types back).
   ast::Type *retTy = Ctx.getVoidTy();
   if (node->getReturnType())
     retTy = resolveType(node->getReturnType(), node->getLocation(),
@@ -1791,6 +1882,7 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
       CurrentScope->set(node->getName(), Ctx.getVoidTy());
       return false;
     }
+    node->setType(declTy); // canonical write-back (see VarDecl::setType)
   }
 
   // Check the initializer type.

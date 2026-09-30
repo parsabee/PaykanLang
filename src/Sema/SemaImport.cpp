@@ -34,7 +34,10 @@ namespace sema {
 /// Suffixes apply left to right, mirroring how ast::typeName spells nesting:
 /// "Str?[]" is an array of optional strings, "int[]?" an optional array, and
 /// "(Node?, int)[]?" an optional array of tuples.  A name runs up to the next
-/// ',' or ')' at this nesting level or the next suffix.  Returns nullptr
+/// ',' or ')' at this nesting level or the next suffix.  A generic
+/// instantiation's name carries its type arguments (`Pair<Str, int>`,
+/// `Box<Node?[]>`): everything between its '<' and the matching '>' is part of
+/// the name, which is registered under exactly that spelling.  Returns nullptr
 /// (leaving @p pos wherever it stopped) if the text is malformed or a base
 /// name is unknown in @p ctx.
 static ast::Type *parseExportedType(ast::ASTContext &ctx,
@@ -64,8 +67,23 @@ static ast::Type *parseExportedType(ast::ASTContext &ctx,
   } else {
     size_t start = pos;
     while (pos < text.size() && text[pos] != ',' && text[pos] != ')' &&
-           text[pos] != '[' && text[pos] != '?')
+           text[pos] != '[' && text[pos] != '?') {
+      if (text[pos] == '<') {
+        // Instantiation name: skip to the matching '>'.
+        int depth = 0;
+        do {
+          if (text[pos] == '<')
+            ++depth;
+          else if (text[pos] == '>')
+            --depth;
+          ++pos;
+        } while (pos < text.size() && depth > 0);
+        if (depth != 0)
+          return nullptr;
+        continue;
+      }
       ++pos;
+    }
     if (pos == start)
       return nullptr;
     ty = ctx.lookupType(text.substr(start, pos - start));

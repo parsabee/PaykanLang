@@ -1,0 +1,10 @@
+// ERROR: a type parameter names a type; it cannot be read or constructed.
+fn make<T>(x: T) -> T {
+  y = T;
+  return x;
+}
+
+fn main() -> int {
+  make(1);
+  return 0;
+}

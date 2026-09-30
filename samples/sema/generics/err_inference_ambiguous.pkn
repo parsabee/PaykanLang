@@ -1,0 +1,7 @@
+// ERROR: T is deduced as both int and float — write pick<float>(1, 2.0).
+fn pick<T>(a: T, b: T) -> T { return a; }
+
+fn main() -> int {
+  pick(1, 2.0);
+  return 0;
+}

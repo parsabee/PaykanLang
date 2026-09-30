@@ -1,0 +1,10 @@
+// ERROR: a generic class must be given type arguments in a type position.
+class Box<T> {
+  v: T;
+  fn __init__(v: T) { self.v = v; }
+}
+
+fn main() -> int {
+  b: Box = Box<int>(1);
+  return 0;
+}

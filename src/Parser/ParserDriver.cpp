@@ -67,9 +67,89 @@ void ParserDriver::setDiagEngine(sema::DiagEngine *diag) {
 // -- ParserDriver::Impl ------------------------------------------------------
 
 int ParserDriver::Impl::parse(ParserDriver &drv) {
+  Lookahead.clear();
+  PrevWasIdent = false;
   yy::parser parser(drv);
   parser.set_debug_level(TraceParsing);
   return parser.parse();
 }
 
 } // namespace paykan::parser
+
+// -- yylex wrapper: type-argument disambiguation ------------------------------
+//
+// `IDENT <` is ambiguous with one token of lookahead: `i < n` is a comparison
+// while `first<int>(xs)` opens a type-argument list.  The grammar is LALR(1),
+// so the decision is made here instead, C#-style: on a '<' that directly
+// follows an identifier, scan ahead over the tokens a type-argument list may
+// contain (identifiers, '::', ',', '[', ']', '?' for optional types, '(' ')'
+// for tuple types, nested '<' '>') to the matching '>'; when that '>' is
+// immediately followed by '(' the '<' is delivered as TYPELESS, otherwise as
+// the ordinary LESS.  The scanned tokens are queued and replayed to the
+// parser afterwards, so nothing is lost.
+//
+// A comparison can only be misread when it has exactly the shape of a generic
+// call, `a < b > (c)` -- which the grammar rejects anyway (relational operators
+// do not chain) -- or when two comparisons straddle a comma inside an argument
+// list, `f(a < b, c > (d))`; parenthesising either comparison disambiguates.
+
+namespace {
+
+using symbol_kind = yy::parser::symbol_kind;
+
+yy::parser::symbol_type nextToken(paykan::parser::ParserDriver &drv) {
+  auto &im = paykan::parser::impl(drv);
+  if (!im.Lookahead.empty()) {
+    yy::parser::symbol_type tok(std::move(im.Lookahead.front()));
+    im.Lookahead.pop_front();
+    return tok;
+  }
+  return yylex_raw(drv);
+}
+
+bool isTypeArgToken(symbol_kind::symbol_kind_type k) {
+  return k == symbol_kind::S_IDENT || k == symbol_kind::S_COLONCOLON ||
+         k == symbol_kind::S_COMMA || k == symbol_kind::S_LSQUARE ||
+         k == symbol_kind::S_RSQUARE || k == symbol_kind::S_QUESTION ||
+         k == symbol_kind::S_LPAREN || k == symbol_kind::S_RPAREN;
+}
+
+} // namespace
+
+yy::parser::symbol_type yylex(paykan::parser::ParserDriver &drv) {
+  auto &im = paykan::parser::impl(drv);
+  yy::parser::symbol_type tok = nextToken(drv);
+  const bool afterIdent = im.PrevWasIdent;
+  im.PrevWasIdent = tok.kind() == symbol_kind::S_IDENT;
+  if (tok.kind() != symbol_kind::S_LESS || !afterIdent)
+    return tok;
+
+  // Scan ahead for `... > (`.
+  std::vector<yy::parser::symbol_type> scanned;
+  int depth = 1;
+  bool opensTypeArgs = false;
+  for (;;) {
+    yy::parser::symbol_type t = nextToken(drv);
+    auto k = t.kind();
+    scanned.push_back(std::move(t));
+    if (k == symbol_kind::S_LESS) {
+      ++depth;
+    } else if (k == symbol_kind::S_MORE) {
+      if (--depth == 0) {
+        yy::parser::symbol_type after = nextToken(drv);
+        opensTypeArgs = after.kind() == symbol_kind::S_LPAREN;
+        scanned.push_back(std::move(after));
+        break;
+      }
+    } else if (!isTypeArgToken(k)) {
+      break; // anything else (operators, literals, EOF) ends a type list
+    }
+  }
+  // Replay the scanned tokens after this one, in source order.
+  for (auto it = scanned.rbegin(); it != scanned.rend(); ++it)
+    im.Lookahead.push_front(std::move(*it));
+
+  if (opensTypeArgs)
+    return yy::parser::make_TYPELESS(tok.location);
+  return tok;
+}

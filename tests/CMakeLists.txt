@@ -16,6 +16,7 @@ add_executable(parser_tests
     Parser/ModuleTests.cpp
     Parser/ArrayTests.cpp
     Parser/MovTests.cpp
+    Parser/GenericsTests.cpp
     Parser/OptionalTests.cpp
     Parser/TupleTests.cpp
 )
@@ -45,6 +46,7 @@ add_executable(sema_tests
     Sema/ArrayTests.cpp
     Sema/EnumTests.cpp
     Sema/MovTests.cpp
+    Sema/GenericsTests.cpp
     Sema/OptionalTests.cpp
     Sema/TupleTests.cpp
 )
@@ -79,6 +81,7 @@ add_executable(codegen_tests
     CodeGen/EnumTests.cpp
     CodeGen/MovTests.cpp
     CodeGen/OwnershipTests.cpp
+    CodeGen/GenericsTests.cpp
     CodeGen/OptionalTests.cpp
     CodeGen/TupleTests.cpp
 )
