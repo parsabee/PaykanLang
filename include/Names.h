@@ -150,6 +150,8 @@ inline constexpr const char *kPaykanErrPrintln = "Paykan_printerrln";
 
 // Runtime panics (noreturn)
 inline constexpr const char *kPaykanPanicDivByZero = "Paykan_panic_div_by_zero";
+inline constexpr const char *kPaykanPanicDivOverflow =
+    "Paykan_panic_div_overflow";
 
 // Reference counting
 inline constexpr const char *kPaykanSharedNew = "PaykanShared_new";
@@ -211,6 +213,7 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanSharedGet,
     // Panics
     kPaykanPanicDivByZero,
+    kPaykanPanicDivOverflow,
     // String
     kPaykanStringNew,
     kPaykanStringDestroy,

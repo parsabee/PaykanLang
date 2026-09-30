@@ -1823,6 +1823,31 @@ llvm::Value *CodeGen::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
     CG.Builder.SetInsertPoint(contBB);
   };
 
+  // INT64_MIN / -1 overflows (the quotient 2^63 is not representable): sdiv is
+  // UB for it and x86 raises SIGFPE.  Trap with a runtime panic like the
+  // divide-by-zero case.
+  auto emitIntDivOverflowGuard = [&](llvm::Value *dividend,
+                                     llvm::Value *divisor) {
+    auto *intTy = llvm::cast<llvm::IntegerType>(divisor->getType());
+    auto *isMin = CG.Builder.CreateICmpEQ(
+        dividend, llvm::ConstantInt::get(intTy, llvm::APInt::getSignedMinValue(
+                                                    intTy->getBitWidth())));
+    auto *isNegOne = CG.Builder.CreateICmpEQ(
+        divisor, llvm::ConstantInt::getSigned(intTy, -1));
+    auto *overflows = CG.Builder.CreateAnd(isMin, isNegOne, kIRDivOvfChk);
+    auto *fn = CG.Builder.GetInsertBlock()->getParent();
+    auto *panicBB = llvm::BasicBlock::Create(CG.LLVMCtx, kIRDivOvfPanic, fn);
+    auto *contBB = llvm::BasicBlock::Create(CG.LLVMCtx, kIRDivOvfCont, fn);
+    CG.Builder.CreateCondBr(overflows, panicBB, contBB);
+    CG.Builder.SetInsertPoint(panicBB);
+    auto *panicTy =
+        llvm::FunctionType::get(llvm::Type::getVoidTy(CG.LLVMCtx), false);
+    CG.Builder.CreateCall(CG.declareFunction(kPaykanPanicDivOverflow, panicTy),
+                          {});
+    CG.Builder.CreateUnreachable();
+    CG.Builder.SetInsertPoint(contBB);
+  };
+
   switch (node->getOpcode()) {
   // -- Arithmetic -----------------------------------------------------------
   case ast::BinaryOpcode::Add:
@@ -1872,12 +1897,22 @@ llvm::Value *CodeGen::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
     if (isFloat)
       return CG.Builder.CreateFDiv(lhs, rhs, kIRFDiv);
     emitIntDivByZeroGuard(rhs);
+    emitIntDivOverflowGuard(lhs, rhs);
     return CG.Builder.CreateSDiv(lhs, rhs, kIRSDiv);
-  case ast::BinaryOpcode::Mod:
+  case ast::BinaryOpcode::Mod: {
     if (isFloat)
       return CG.Builder.CreateFRem(lhs, rhs, kIRFMod);
     emitIntDivByZeroGuard(rhs);
-    return CG.Builder.CreateSRem(lhs, rhs, kIRSRem);
+    // x % -1 is 0 for every x, but srem traps for INT64_MIN % -1 just like the
+    // division does.  Rather than panic on a well-defined result, divide by 1
+    // instead of -1 (same remainder, never overflows).
+    auto *isNegOne = CG.Builder.CreateICmpEQ(
+        rhs, llvm::ConstantInt::getSigned(rhs->getType(), -1));
+    auto *safeDivisor = CG.Builder.CreateSelect(
+        isNegOne, llvm::ConstantInt::get(rhs->getType(), 1), rhs,
+        kIRRemSafeDiv);
+    return CG.Builder.CreateSRem(lhs, safeDivisor, kIRSRem);
+  }
 
   // -- Relational -----------------------------------------------------------
   case ast::BinaryOpcode::Lt:

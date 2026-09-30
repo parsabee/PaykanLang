@@ -9,6 +9,7 @@
 #include "Version.h"
 
 #include <array>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -114,6 +115,28 @@ TEST(Driver, IntModByZeroTraps) {
   std::filesystem::remove(src);
   EXPECT_NE(rc, 0);
   EXPECT_NE(out.find("division or modulo by zero"), std::string::npos) << out;
+}
+
+// INT64_MIN / -1 does not fit in an int: a runtime panic, not SIGFPE.
+TEST(Driver, IntDivOverflowTraps) {
+  auto src = writeTmp("fn main() -> int { m: int = -9223372036854775807 - 1; "
+                      "d: int = -1; q: int = m / d; return q; }");
+  auto [rc, out] = run(std::string(kPaykan) + " " + src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_NE(rc, 0);
+  EXPECT_NE(rc, 128 + SIGFPE) << out;
+  EXPECT_NE(out.find("integer overflow in division"), std::string::npos) << out;
+}
+
+// INT64_MIN % -1 is mathematically 0 and must not trap.
+TEST(Driver, IntModMinByNegOneIsZero) {
+  auto src = writeTmp("fn main() -> int { m: int = -9223372036854775807 - 1; "
+                      "d: int = -1; r: int = m % d; println(StrInt(r)); "
+                      "return 7 % d + 3; }");
+  auto [rc, out] = run(std::string(kPaykan) + " " + src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_EQ(rc, 3) << out;
+  EXPECT_EQ(out, "0\n");
 }
 
 TEST(Driver, IntDivNonZeroSucceeds) {

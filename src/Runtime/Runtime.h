@@ -477,6 +477,11 @@ PaykanObject *PaykanShared_get(PaykanShared *shared);
 /// mirroring the runtime abort on out-of-bounds array access.
 PAYKAN_NORETURN void Paykan_panic_div_by_zero(void);
 
+/// Print an integer-overflow diagnostic to stderr and abort the process.
+/// Emitted by CodeGen as the trap target for `INT64_MIN / -1`, whose quotient
+/// is not representable (the hardware divide would raise SIGFPE instead).
+PAYKAN_NORETURN void Paykan_panic_div_overflow(void);
+
 // ============================================================================
 // I/O builtins
 // ============================================================================

@@ -82,3 +82,8 @@ void Paykan_panic_div_by_zero(void) {
   fprintf(stderr, "paykan: integer division or modulo by zero\n");
   abort();
 }
+
+void Paykan_panic_div_overflow(void) {
+  fprintf(stderr, "paykan: integer overflow in division\n");
+  abort();
+}
