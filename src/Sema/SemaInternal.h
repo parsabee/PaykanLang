@@ -20,6 +20,13 @@ bool stmtAlwaysReturns(ast::Stmt *s);
 /// Returns true if every path through the list of statements ends in a return.
 bool blockAlwaysReturns(llvm::ArrayRef<ast::Stmt *> stmts);
 
+/// Returns true if the match's arms cover the whole value domain of its
+/// subject: a wildcard arm, one bare-variant arm per variant of an enum
+/// subject, or both True and False literal arms over a bool subject.  Assumes
+/// Sema has already validated the arms (each variant arm names a distinct,
+/// valid variant), so counting them suffices.
+bool matchIsExhaustive(ast::MatchStmt *ms);
+
 } // namespace detail
 } // namespace sema
 } // namespace paykan

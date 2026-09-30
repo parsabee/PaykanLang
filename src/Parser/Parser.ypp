@@ -164,53 +164,19 @@ topLevelDeclList: %empty            { $$ = TLDeclBag{}; }
 
 importDecl:
       "import" modulePath ";"
-                                    { // Split at last :: to separate base path from module name.
-                                      auto &C = impl(drv).Ctx;
-                                      auto sep = $2.rfind("::");
-                                      std::string base = (sep == std::string::npos) ? "" : $2.substr(0, sep);
-                                      std::string name = (sep == std::string::npos) ? $2 : $2.substr(sep + 2);
-                                      $$ = C.make<ImportDecl>(loc(@1, @3), C.intern(base), false,
-                                           std::vector<ImportDecl::Module>{{&C.intern(name), &C.intern("")}});
-                                    }
+                                    { $$ = paykan::parser::makeSingleImport(impl(drv).Ctx, loc(@1, @3), $2, "", /*isSystem=*/false); }
     | "import" modulePath "as" IDENT ";"
-                                    { auto &C = impl(drv).Ctx;
-                                      auto sep = $2.rfind("::");
-                                      std::string base = (sep == std::string::npos) ? "" : $2.substr(0, sep);
-                                      std::string name = (sep == std::string::npos) ? $2 : $2.substr(sep + 2);
-                                      $$ = C.make<ImportDecl>(loc(@1, @5), C.intern(base), false,
-                                           std::vector<ImportDecl::Module>{{&C.intern(name), &C.intern($4)}});
-                                    }
+                                    { $$ = paykan::parser::makeSingleImport(impl(drv).Ctx, loc(@1, @5), $2, $4, /*isSystem=*/false); }
     | "import" modulePath "::" "{" importedModuleList "}" ";"
-                                    { auto &C = impl(drv).Ctx;
-                                      $$ = C.make<ImportDecl>(loc(@1, @7), C.intern($2), false,
-                                           [&]{ std::vector<ImportDecl::Module> ms; for (auto &p : $5) ms.push_back({&C.intern(p.first), &C.intern(p.second)}); return ms; }());
-                                    }
+                                    { $$ = paykan::parser::makeImportList(impl(drv).Ctx, loc(@1, @7), $2, $5, /*isSystem=*/false); }
     | "import" "::" modulePath ";"
-                                    { auto &C = impl(drv).Ctx;
-                                      auto sep = $3.rfind("::");
-                                      std::string base = (sep == std::string::npos) ? "" : $3.substr(0, sep);
-                                      std::string name = (sep == std::string::npos) ? $3 : $3.substr(sep + 2);
-                                      $$ = C.make<ImportDecl>(loc(@1, @4), C.intern(base), true,
-                                           std::vector<ImportDecl::Module>{{&C.intern(name), &C.intern("")}});
-                                    }
+                                    { $$ = paykan::parser::makeSingleImport(impl(drv).Ctx, loc(@1, @4), $3, "", /*isSystem=*/true); }
     | "import" "::" modulePath "as" IDENT ";"
-                                    { auto &C = impl(drv).Ctx;
-                                      auto sep = $3.rfind("::");
-                                      std::string base = (sep == std::string::npos) ? "" : $3.substr(0, sep);
-                                      std::string name = (sep == std::string::npos) ? $3 : $3.substr(sep + 2);
-                                      $$ = C.make<ImportDecl>(loc(@1, @6), C.intern(base), true,
-                                           std::vector<ImportDecl::Module>{{&C.intern(name), &C.intern($5)}});
-                                    }
+                                    { $$ = paykan::parser::makeSingleImport(impl(drv).Ctx, loc(@1, @6), $3, $5, /*isSystem=*/true); }
     | "import" "::" modulePath "::" "{" importedModuleList "}" ";"
-                                    { auto &C = impl(drv).Ctx;
-                                      $$ = C.make<ImportDecl>(loc(@1, @8), C.intern($3), true,
-                                           [&]{ std::vector<ImportDecl::Module> ms; for (auto &p : $6) ms.push_back({&C.intern(p.first), &C.intern(p.second)}); return ms; }());
-                                    }
+                                    { $$ = paykan::parser::makeImportList(impl(drv).Ctx, loc(@1, @8), $3, $6, /*isSystem=*/true); }
     | "import" "::" "{" importedModuleList "}" ";"
-                                    { auto &C = impl(drv).Ctx;
-                                      $$ = C.make<ImportDecl>(loc(@1, @6), C.intern(""), true,
-                                           [&]{ std::vector<ImportDecl::Module> ms; for (auto &p : $4) ms.push_back({&C.intern(p.first), &C.intern(p.second)}); return ms; }());
-                                    }
+                                    { $$ = paykan::parser::makeImportList(impl(drv).Ctx, loc(@1, @6), "", $4, /*isSystem=*/true); }
     ;
 
 importedModule:
