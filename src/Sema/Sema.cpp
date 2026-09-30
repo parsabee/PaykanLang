@@ -215,6 +215,15 @@ bool Sema::typesEqual(ast::Type *a, ast::Type *b) {
   if (auto *aa = ast::dyn_cast<ast::ArrayType>(a))
     return typesEqual(aa->getElementType(),
                       ast::cast<ast::ArrayType>(b)->getElementType());
+  if (auto *ta = ast::dyn_cast<ast::TupleType>(a)) {
+    auto *tb = ast::cast<ast::TupleType>(b);
+    if (ta->getArity() != tb->getArity())
+      return false;
+    for (size_t i = 0; i < ta->getArity(); ++i)
+      if (!typesEqual(ta->getElementType(i), tb->getElementType(i)))
+        return false;
+    return true;
+  }
   return false;
 }
 
@@ -229,6 +238,32 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
   // Any array type is assignable to Obj (arrays are heap-allocated objects).
   if (dst == Ctx.getObjTy() && ast::isa<ast::ArrayType>(src))
     return true;
+
+  // Tuples: a tuple value is an instance of the builtin `Tuple` class (an Obj
+  // subtype), so it is assignable to `Obj` (and to `Tuple` itself).  Between
+  // tuple types, assignability is element-wise and *representation-
+  // preserving*: primitive elements must match exactly (no int -> float
+  // promotion — the runtime slot holds raw bits and no conversion is
+  // emitted), while reference-typed elements may be covariant
+  // (`(int, Str)` is assignable to `(int, Obj)`) because tuples are
+  // immutable and every reference slot holds a box regardless of its
+  // static type.
+  if (auto *srcTT = ast::dyn_cast<ast::TupleType>(src)) {
+    if (auto *dstCT = ast::dyn_cast<ast::ClassType>(dst))
+      return Ctx.getTupleTy()->isSubtypeOf(dstCT);
+    auto *dstTT = ast::dyn_cast<ast::TupleType>(dst);
+    if (!dstTT || dstTT->getArity() != srcTT->getArity())
+      return false;
+    for (size_t i = 0; i < dstTT->getArity(); ++i) {
+      ast::Type *d = dstTT->getElementType(i);
+      ast::Type *s = srcTT->getElementType(i);
+      if (d == s)
+        continue;
+      if (!ast::isRefType(d) || !ast::isRefType(s) || !isAssignable(d, s))
+        return false;
+    }
+    return true;
+  }
 
   // Array assignability: element types must be compatible.
   if (auto *dstAT = ast::dyn_cast<ast::ArrayType>(dst)) {
@@ -276,6 +311,25 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     // resolved type is the context's canonical (interned) instance so that
     // array types compare by pointer and nested arrays share element nodes.
     return Ctx.getArrayType(elemTy);
+  }
+
+  if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
+    std::vector<ast::Type *> elems;
+    elems.reserve(tt->getArity());
+    for (size_t i = 0; i < tt->getArity(); ++i) {
+      auto *elemTy = resolveType(tt->getElementType(i), loc,
+                                 context + " element " + std::to_string(i));
+      if (!elemTy)
+        return nullptr;
+      if (elemTy == Ctx.getVoidTy()) {
+        error(loc, context + " element " + std::to_string(i) +
+                       " cannot have type 'void'");
+        return nullptr;
+      }
+      elems.push_back(elemTy);
+    }
+    // Same canonicalisation as arrays: the interned per-element-list node.
+    return Ctx.getTupleType(std::move(elems));
   }
 
   error(loc, context + " has unknown type");
@@ -349,6 +403,12 @@ ast::Type *Sema::ExprChecker::visitMovExpr(ast::MovExpr *node) {
   if (ast::isa<ast::SubscriptExpr>(operand)) {
     S.error(node->getLocation(),
             "cannot 'mov' an array element; move a local variable or a "
+            "temporary value instead");
+    return nullptr;
+  }
+  if (ast::isa<ast::TupleIndexExpr>(operand)) {
+    S.error(node->getLocation(),
+            "cannot 'mov' a tuple element; move a local variable or a "
             "temporary value instead");
     return nullptr;
   }
@@ -617,6 +677,10 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   ast::ClassType *ct = nullptr;
   if (auto *at = ast::dyn_cast<ast::ArrayType>(recvTy))
     ct = S.Ctx.getOrCreateSpecializedArrayType(at->getElementType());
+  else if (auto *tt = ast::dyn_cast<ast::TupleType>(recvTy))
+    // Tuples expose only Obj's methods (toString / equals) through their
+    // per-element-list specialization.
+    ct = S.Ctx.getOrCreateSpecializedTupleType(tt);
   else
     ct = ast::dyn_cast<ast::ClassType>(recvTy);
 
@@ -835,6 +899,178 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
                                    typeName(trueTy) + "' and '" +
                                    typeName(falseTy) + "'");
   return nullptr;
+}
+
+// -- Tuples (prototype) ------------------------------------------------------
+
+// A tuple literal's type is the canonical tuple of its element types.  There
+// is no contextual typing: `(1, "a")` is `(int, Str)` even when assigned to a
+// `(int, Obj)` variable (assignability then applies element-wise, see
+// isAssignable).  Elements are checked left to right in one straight-line
+// path, so `mov` state simply flows through them.
+ast::Type *
+Sema::ExprChecker::visitTupleLiteralExpr(ast::TupleLiteralExpr *node) {
+  std::vector<ast::Type *> elemTys;
+  elemTys.reserve(node->getNumElements());
+  bool ok = true;
+  for (size_t i = 0; i < node->getNumElements(); ++i) {
+    ast::Expr *elem = node->getElements()[i];
+    auto *ty = visit(elem);
+    if (!ty) {
+      ok = false;
+      continue;
+    }
+    if (ty == S.Ctx.getVoidTy()) {
+      S.error(elem->getLocation(), "tuple element " + std::to_string(i) +
+                                       " has type 'void' (the expression "
+                                       "produces no value)");
+      ok = false;
+      continue;
+    }
+    // An empty array literal has no element type of its own and nothing
+    // inside a tuple literal can supply one (unlike an annotated variable),
+    // so codegen could not pick the right array representation.
+    if (auto *at = ast::dyn_cast<ast::ArrayType>(ty);
+        at && at->getElementType() == S.Ctx.getVoidTy()) {
+      S.error(elem->getLocation(),
+              "cannot infer element type of empty array literal '[]' inside a "
+              "tuple literal; bind it to an annotated variable first");
+      ok = false;
+      continue;
+    }
+    elemTys.push_back(ty);
+  }
+  if (!ok)
+    return nullptr;
+  auto *tt = S.Ctx.getTupleType(std::move(elemTys));
+  node->setResolvedType(tt);
+  return tt;
+}
+
+ast::Type *Sema::ExprChecker::visitTupleIndexExpr(ast::TupleIndexExpr *node) {
+  auto *recvTy = visit(node->getTuple());
+  if (!recvTy)
+    return nullptr;
+  auto *tt = ast::dyn_cast<ast::TupleType>(recvTy);
+  if (!tt) {
+    S.error(node->getLocation(),
+            "tuple index '." + std::to_string(node->getIndex()) +
+                "' applied to non-tuple type '" + typeName(recvTy) + "'");
+    return nullptr;
+  }
+  if (node->getIndex() >= tt->getArity()) {
+    S.error(node->getLocation(),
+            "tuple index '." + std::to_string(node->getIndex()) +
+                "' is out of range for type '" + typeName(tt) +
+                "' (valid indices are .0 to ." +
+                std::to_string(tt->getArity() - 1) + ")");
+    return nullptr;
+  }
+  // Record the receiver's type too: CodeGen reads it to pick the element
+  // representation without re-deriving the receiver's type.
+  node->getTuple()->setResolvedType(tt);
+  ast::Type *elemTy = tt->getElementType(node->getIndex());
+  node->setResolvedType(elemTy);
+  return elemTy;
+}
+
+// `a, b = e;` — e must be a tuple whose arity equals the number of targets.
+// Each named target follows the binding rule of the corresponding
+// single-variable statement: an annotated target is a fresh declaration
+// (VarDecl rules: no redeclaration in the current scope, initializer
+// assignable to the annotation), a bare name is declared on first use or
+// re-assigned if already visible (AssignStmt rules), and `_` discards the
+// element.
+bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
+  auto *valTy = resolveExprType(node->getValue());
+  if (!valTy)
+    return false;
+
+  auto *tt = ast::dyn_cast<ast::TupleType>(valTy);
+  if (!tt) {
+    error(node->getValue()->getLocation(),
+          "cannot destructure a value of type '" + typeName(valTy) +
+              "'; only tuples can be destructured");
+    return false;
+  }
+  if (tt->getArity() != node->getNumTargets()) {
+    error(node->getLocation(),
+          "cannot destructure a value of type '" + typeName(tt) + "' into " +
+              std::to_string(node->getNumTargets()) + " targets (it has " +
+              std::to_string(tt->getArity()) + " elements)");
+    return false;
+  }
+  // CodeGen extracts the elements from this resolved type.
+  node->getValue()->setResolvedType(tt);
+
+  bool ok = true;
+  llvm::StringSet<> seen;
+  for (size_t i = 0; i < node->getNumTargets(); ++i) {
+    const auto &target = node->getTargets()[i];
+    if (target.isSkip())
+      continue;
+    const std::string &name = target.getName();
+    ast::Type *elemTy = tt->getElementType(i);
+
+    if (!seen.insert(name).second) {
+      error(target.Loc, "duplicate target '" + name + "' in destructuring");
+      ok = false;
+      continue;
+    }
+    // Same guard as visitAssignStmt: a target must not shadow a type name.
+    if (Ctx.lookupClassType(name) || Ctx.lookupEnumType(name) ||
+        name == names::kObj || name == names::kString || name == names::kFile ||
+        name == names::kTypeInt || name == names::kTypeBool ||
+        name == names::kTypeFloat || name == names::kTypeChar ||
+        name == names::kStdin) {
+      error(target.Loc,
+            "'" + name + "' is a type name and cannot be used as a variable");
+      ok = false;
+      continue;
+    }
+
+    if (target.DeclType) {
+      // Annotated target: a fresh declaration in the current scope.
+      if (CurrentScope->contains(name)) {
+        error(target.Loc, "redeclaration of variable '" + name + "'");
+        ok = false;
+        continue;
+      }
+      auto *declTy = resolveType(target.DeclType, target.Loc,
+                                 "destructuring target '" + name + "'");
+      if (!declTy) {
+        ok = false;
+        continue;
+      }
+      if (!isAssignable(declTy, elemTy)) {
+        error(target.Loc, "element " + std::to_string(i) + " of type '" +
+                              typeName(elemTy) +
+                              "' does not match declared type '" +
+                              typeName(declTy) + "' for target '" + name + "'");
+        ok = false;
+        continue;
+      }
+      CurrentScope->declare(name, declTy);
+      continue;
+    }
+
+    // Bare name: re-assignment if visible, implicit declaration otherwise.
+    CurrentScope->clearMoved(name);
+    auto *owner = CurrentScope->findOwner(name);
+    if (!owner) {
+      CurrentScope->set(name, elemTy);
+      continue;
+    }
+    auto *varTy = owner->lookup(name);
+    if (!isAssignable(varTy, elemTy)) {
+      error(target.Loc, "cannot assign element " + std::to_string(i) +
+                            " of type '" + typeName(elemTy) +
+                            "' to variable '" + name + "' of type '" +
+                            typeName(varTy) + "'");
+      ok = false;
+    }
+  }
+  return ok;
 }
 
 // -- Entry point -------------------------------------------------------------
@@ -1397,6 +1633,18 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
   auto *recvTy = resolveExprType(node->getReceiver());
   if (!recvTy)
     return false;
+
+  // `t.0 = v`: the parser hands tuple-index assignment over as a member
+  // assignment whose field name is the index (see Parser.ypp) so that the
+  // rejection is a typed diagnostic.  Prototype tuples are immutable.
+  if (ast::isa<ast::TupleType>(recvTy)) {
+    error(node->getLocation(), "cannot assign to element '." +
+                                   node->getFieldName() + "' of type '" +
+                                   typeName(recvTy) +
+                                   "': tuples are immutable; build a new tuple "
+                                   "instead");
+    return false;
+  }
 
   auto *ct = ast::dyn_cast<ast::ClassType>(recvTy);
   if (!ct) {

@@ -11,7 +11,7 @@ ASTContext::ASTContext()
     : IntTy(nullptr), FloatTy(nullptr), BoolTy(nullptr), CharTy(nullptr),
       VoidTy(nullptr), ObjTy(nullptr), StrTy(nullptr), ArrayTy(nullptr),
       FileTy(nullptr), ErrorTy(nullptr), IntBoxTy(nullptr), FloatBoxTy(nullptr),
-      BoolBoxTy(nullptr) {
+      BoolBoxTy(nullptr), TupleTy(nullptr) {
   // Reserve enough capacity to avoid repeated reallocations during parsing.
   // The bootstrap phase alone creates ~150 nodes; a typical program adds
   // a few hundred more.  512 slots eliminates most reallocation churn.
@@ -33,15 +33,17 @@ ASTContext::ASTContext()
       make<ClassType>(SourceLocation(), intern(names::kFloatBox), nullptr);
   BoolBoxTy =
       make<ClassType>(SourceLocation(), intern(names::kBoolBox), nullptr);
+  TupleTy = make<ClassType>(SourceLocation(), intern(names::kTuple), nullptr);
   // These are the compiler builtins: Sema rejects any user class, enum, or
   // function that would reuse one of their names.  Flagging them here, at the
   // single registration site, keeps that knowledge out of Sema.
   for (ClassType *builtin : {ObjTy, StrTy, ArrayTy, FileTy, ErrorTy, IntBoxTy,
-                             FloatBoxTy, BoolBoxTy})
+                             FloatBoxTy, BoolBoxTy, TupleTy})
     builtin->setBuiltin();
   buildObjectType();
   buildStringType();
   buildArrayType();
+  buildTupleType();
   buildFileType();
   buildErrorType();
   buildBoxedIntType();
@@ -115,6 +117,28 @@ void ASTContext::buildArrayType() {
       .method(names::kMethodToString, StrTy)         // slot 1 — override
       .method(names::kMethodEquals, BoolTy, {ObjTy}) // slot 2 — override
       .method(names::kLen, IntTy)                    // slot 3 — new
+      .build();
+}
+
+// -- Bootstrap Tuple (prototype) --------------------------------------------
+//
+// Tuple is a subtype of Obj; every tuple value `(T1, T2, ...)` is an instance
+// of it at runtime (one generic PaykanTuple object, see Runtime/Tuple.c).  Its
+// vtable mirrors PaykanTuple_vtable:
+//   vtable : [ destroy(override), toString(override), equals(override) ]
+// Tuples are immutable and have no user-visible methods beyond Obj's.  It is
+// final: `Tuple` is not a spellable class name for users either (builtin).
+//
+void ASTContext::buildTupleType() {
+  TupleTy->setSuperClass(ObjTy);
+  TupleTy->setFinal();
+
+  ClassTypeBuilder(*this, TupleTy)
+      .addOp(BinaryOpcode::Eq)
+      .addOp(BinaryOpcode::Ne)
+      .method(names::kMethodDestroy, VoidTy)         // slot 0 — override
+      .method(names::kMethodToString, StrTy)         // slot 1 — override
+      .method(names::kMethodEquals, BoolTy, {ObjTy}) // slot 2 — override
       .build();
 }
 
@@ -249,6 +273,57 @@ ClassType *ASTContext::getOrCreateSpecializedArrayType(Type *elemTy) {
 Type *ASTContext::getSpecializedArrayElemType(ClassType *ct) const {
   auto it = SpecializedArrayElemTypes.find(ct);
   return it != SpecializedArrayElemTypes.end() ? it->second : nullptr;
+}
+
+// -- Canonical tuple types (prototype) ---------------------------------------
+//
+// One TupleType per (canonical) element-type list, exactly like getArrayType:
+// the parser allocates a source-located TupleType for every `(T1, T2)`
+// annotation, Sema resolves each to the instance returned here, and nested
+// tuples share their inner nodes, so resolved tuple types compare by pointer.
+//
+TupleType *ASTContext::getTupleType(std::vector<Type *> elemTys) {
+  auto it = TupleTypes.find(elemTys);
+  if (it != TupleTypes.end())
+    return it->second;
+  auto *tt = make<TupleType>(SourceLocation(), elemTys);
+  TupleTypes[std::move(elemTys)] = tt;
+  return tt;
+}
+
+// -- Specialized per-element-list tuple types -------------------------------
+//
+// Lazily create `Tuple<int, Str>` etc.  Each is a subtype of TupleTy adding no
+// methods; the specialization only gives a tuple-typed receiver a ClassType
+// to resolve `toString` / `equals` against (and `==` / `!=`, which lower to
+// `equals`).  Every specialization shares the single runtime vtable
+// PaykanTuple_vtable — the element kinds live in the object, not the vtable.
+// Flagged builtin so CodeGen dispatches its methods with the runtime ABI.
+//
+ClassType *ASTContext::getOrCreateSpecializedTupleType(TupleType *tt) {
+  auto it = SpecializedTupleTypes.find(tt);
+  if (it != SpecializedTupleTypes.end())
+    return it->second;
+
+  std::string name = std::string(names::kTuple) + "<";
+  for (size_t i = 0; i < tt->getArity(); ++i) {
+    if (i)
+      name += ", ";
+    name += typeName(tt->getElementType(i));
+  }
+  name += ">";
+  auto *specTy = make<ClassType>(SourceLocation(), intern(name), TupleTy);
+  specTy->setBuiltin();
+  specTy->setFinal();
+  ClassTypeBuilder(*this, specTy).build();
+  SpecializedTupleTypes[tt] = specTy;
+  SpecializedTupleElemTypes[specTy] = tt;
+  return specTy;
+}
+
+TupleType *ASTContext::getSpecializedTupleElemType(ClassType *ct) const {
+  auto it = SpecializedTupleElemTypes.find(ct);
+  return it != SpecializedTupleElemTypes.end() ? it->second : nullptr;
 }
 
 // -- ClassTypeBuilder --------------------------------------------------------
@@ -390,6 +465,18 @@ std::string typeName(Type *ty) {
     return et->getName();
   if (auto *at = dyn_cast<ArrayType>(ty))
     return typeName(at->getElementType()) + "[]";
+  if (auto *tt = dyn_cast<TupleType>(ty)) {
+    // "(int, Str)" — the same spelling the parser accepts, so the serialised
+    // form round-trips through module export (SemaImport::resolveExportedType
+    // parses it back, nesting and trailing "[]" included).
+    std::string s = "(";
+    for (size_t i = 0; i < tt->getArity(); ++i) {
+      if (i)
+        s += ", ";
+      s += typeName(tt->getElementType(i));
+    }
+    return s + ")";
+  }
   return "unknown";
 }
 

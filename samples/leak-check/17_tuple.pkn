@@ -1,0 +1,43 @@
+// Isolates: tuple values (prototype) — a literal with a Str element, a tuple
+// returned from a function and destructured, a nested tuple, a tuple stored
+// in an array and in a class field, a call-rooted element read (`mk().0`),
+// element-wise `==`, and `mov` of a tuple.  Every tuple is ONE runtime block
+// (header + slots + kinds) plus its PaykanShared box; reference elements are
+// retained by the tuple and released by PaykanTuple_destroy.
+//
+// Runtime allocation sites: PaykanTuple_new (Tuple.c), PaykanShared (Shared.c),
+// PaykanString_new (String.c), PaykanArray_* (Array.c), object structs.
+//
+// Expected under --track-heap: live blocks : 0.
+
+class Holder {
+  pair: (int, Str);
+  fn __init__(p: (int, Str)) { self.pair = p; }
+  fn get() -> (int, Str) { return self.pair; }
+}
+
+fn mk() -> (Str, int) {
+  return ("tmp", 1);
+}
+
+fn main() -> int {
+  t = (1, "a");                  // literal with a Str element
+  s: Str = t.1;                  // new owner of the element
+  str, n = mk();                 // destructure a returned temporary
+  nested = ((1, "x"), (2.5, t)); // nested tuple sharing t
+  println(nested);
+  println(mk().0);               // call-rooted element read
+  arr: (int, Str)[] = [t, (2, "b")];
+  arr.push(mk_pair());
+  h: Holder = Holder(t);
+  a, b = h.get();
+  println(StrBool(t == (1, "a")));
+  m = mov t;
+  println(m.1 + s + str + b + arr[2].1);
+  println(StrInt(n + a));
+  return 0;
+}
+
+fn mk_pair() -> (int, Str) {
+  return (3, "c");
+}

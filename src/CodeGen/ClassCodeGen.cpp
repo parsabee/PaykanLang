@@ -170,6 +170,8 @@ ast::ClassType *ClassCodeGen::getExprClassType(ast::Expr *expr) const {
     return ast::dyn_cast<ast::ClassType>(ce->getResolvedType());
   if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(expr))
     return ast::dyn_cast<ast::ClassType>(se->getResolvedType());
+  if (auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(expr))
+    return ast::dyn_cast<ast::ClassType>(ti->getResolvedType());
   return nullptr;
 }
 

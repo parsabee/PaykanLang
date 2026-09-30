@@ -349,6 +349,71 @@ extern PaykanArrayVTable PaykanArray_vtable;     // for primitive-element arrays
 extern PaykanArrayVTable PaykanArray_obj_vtable; // for object-element arrays
 
 // ============================================================================
+// Tuple (prototype)
+// ============================================================================
+//
+// Inherits Object; vtable layout is exactly PaykanObjectVTable
+// (destroy / toString / equals).  ONE generic object backs every tuple type
+// `(T1, T2, ...)`: `count` 8-byte slots plus one kind byte per slot telling
+// the runtime how to interpret it.  Primitive elements are stored raw;
+// reference elements (classes, arrays, nested tuples) store a PaykanShared*
+// retained by the tuple.  Tuples are immutable at the language level — the
+// set functions exist so a literal can be filled right after construction.
+//
+// The kind codes are part of the CodeGen <-> runtime ABI; they must match
+// paykan::names::TupleSlotKind in include/Names.h.
+
+typedef enum PaykanTupleKind {
+  PAYKAN_TUPLE_INT = 0,   // int64_t (also enum values)
+  PAYKAN_TUPLE_FLOAT = 1, // IEEE-754 double bits
+  PAYKAN_TUPLE_BOOL = 2,  // int64_t 0 / 1
+  PAYKAN_TUPLE_CHAR = 3,  // int64_t holding one byte
+  PAYKAN_TUPLE_REF = 4,   // PaykanShared* (retained) or NULL
+} PaykanTupleKind;
+
+typedef struct PaykanTuple {
+  PaykanObjectVTable *vtable; // points to PaykanTuple_vtable
+  PaykanShared *shared;       // object header (see PaykanObject)
+  int64_t count;              // number of elements (arity)
+  uint64_t *slots;            // count 8-byte slots, inline after the header
+  uint8_t *kinds;             // count kind bytes, inline after the slots
+  // (slots and kinds point into the same heap block as the header: one
+  // allocation per tuple.  A pointer rather than a flexible array member
+  // because this header is also compiled as C++ with -Wpedantic.)
+} PaykanTuple;
+
+/// Allocate a tuple with `count` zeroed slots; `kinds` (count bytes, copied)
+/// gives each slot's PaykanTupleKind.
+PaykanTuple *PaykanTuple_new(int64_t count, const uint8_t *kinds);
+
+/// Number of elements.  Test-only (the arity is static in generated code).
+int64_t PaykanTuple_count(PaykanTuple *t);
+
+/// Kind of slot `idx`.  Test-only.  Aborts if out of range.
+int64_t PaykanTuple_kind(PaykanTuple *t, int64_t idx);
+
+/// Read the raw 8-byte slot `idx` (the caller reinterprets as int64_t, double
+/// bits, or PaykanShared* — a reference is NOT retained).  Aborts if out of
+/// range.
+int64_t PaykanTuple_get(PaykanTuple *t, int64_t idx);
+
+/// Store raw bits into a value slot.  Aborts on a reference slot.
+void PaykanTuple_set(PaykanTuple *t, int64_t idx, int64_t bits);
+
+/// Store a box into a reference slot: releases the old box (if any) and
+/// retains the new one (the caller keeps its own reference).  Aborts on a
+/// value slot.
+void PaykanTuple_set_obj(PaykanTuple *t, int64_t idx, PaykanShared *value);
+
+// -- Method implementations --------------------------------------------------
+void PaykanTuple_destroy(PaykanObject *self); // releases every REF slot
+PaykanShared *PaykanTuple_toString(PaykanObject *self); // "(1, a)"
+int64_t PaykanTuple_equals(PaykanObject *self, PaykanObject *other);
+
+// Global vtable instance (shared by every tuple type).
+extern PaykanObjectVTable PaykanTuple_vtable;
+
+// ============================================================================
 // Shared — reference-counted wrapper around any PaykanObject
 // ============================================================================
 //

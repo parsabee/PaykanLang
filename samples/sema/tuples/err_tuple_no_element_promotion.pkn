@@ -1,0 +1,7 @@
+// ERROR: initializer of type '(int, int)' does not match declared type '(float, int)'
+// (int -> float promotion does not apply inside tuple elements: the runtime
+// slot holds raw bits and no conversion is emitted).
+fn main() -> int {
+  t: (float, int) = (1, 2);
+  return 0;
+}
