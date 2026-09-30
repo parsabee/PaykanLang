@@ -77,6 +77,7 @@ add_executable(codegen_tests
     CodeGen/EnumTests.cpp
     CodeGen/MovTests.cpp
     CodeGen/OwnershipTests.cpp
+    CodeGen/TupleTests.cpp
 )
 target_include_directories(codegen_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
