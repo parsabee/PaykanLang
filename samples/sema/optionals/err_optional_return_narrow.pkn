@@ -1,0 +1,11 @@
+// Returning a `T?` from a function declared to return `T` needs a match.
+class Node {
+  v: int;
+  fn __init__(x: int) { self.v = x; }
+}
+
+fn first(n: Node?) -> Node {
+  return n;   // error: cannot use optional 'Node?' as 'Node' without unwrapping (use match)
+}
+
+fn main() -> int { return 0; }

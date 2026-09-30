@@ -299,3 +299,50 @@ TEST(Generics, RelationalAgainstGenericCall) {
   ASSERT_NE(call, nullptr);
   EXPECT_TRUE(call->hasTypeArgs());
 }
+
+// ─── type arguments that are tuple / optional types (#4, #5) ────────────────
+
+// The lookahead that tells `f<...>(` from a comparison must scan over the
+// tokens of tuple and optional types too.
+TEST(Generics, TupleAndOptionalTypeArgsOnCalls) {
+  auto [ok, driver] = parse(R"(
+    fn main() -> int { b = Box<(int, Str)>(t); return 0; }
+  )");
+  ASSERT_TRUE(ok);
+  auto *call = firstCall(driver->getRoot());
+  ASSERT_NE(call, nullptr);
+  ASSERT_EQ(call->getTypeArgs().size(), 1u);
+  auto *tt = dyn_cast<TupleType>(call->getTypeArgs()[0]);
+  ASSERT_NE(tt, nullptr);
+  EXPECT_EQ(tt->getArity(), 2u);
+
+  auto [ok2, driver2] = parse(R"(
+    fn main() -> int { m = ident<Node?>(n); return 0; }
+  )");
+  ASSERT_TRUE(ok2);
+  auto *call2 = firstCall(driver2->getRoot());
+  ASSERT_NE(call2, nullptr);
+  ASSERT_EQ(call2->getTypeArgs().size(), 1u);
+  EXPECT_TRUE(isa<OptionalType>(call2->getTypeArgs()[0]));
+
+  auto [ok3, driver3] = parse(R"(
+    fn main() -> int { p = Pair<Node?[], (int, Str)?>(a, b); return 0; }
+  )");
+  ASSERT_TRUE(ok3);
+  auto *call3 = firstCall(driver3->getRoot());
+  ASSERT_NE(call3, nullptr);
+  EXPECT_EQ(call3->getTypeArgs().size(), 2u);
+}
+
+// Comparisons whose right operand is parenthesised are still comparisons.
+TEST(Generics, ParenthesisedComparisonStaysRelational) {
+  auto [ok, driver] = parse(R"(
+    fn main() -> int { b: bool = a < (c + 1); return 0; }
+  )");
+  ASSERT_TRUE(ok);
+  auto *vd = firstVarDecl(driver->getRoot());
+  ASSERT_NE(vd, nullptr);
+  auto *cmp = dyn_cast<BinaryExpr>(vd->getInitExpr());
+  ASSERT_NE(cmp, nullptr);
+  EXPECT_EQ(cmp->getOpcode(), BinaryOpcode::Lt);
+}

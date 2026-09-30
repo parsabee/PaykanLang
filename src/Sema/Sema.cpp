@@ -232,6 +232,18 @@ bool Sema::typesEqual(ast::Type *a, ast::Type *b) {
   if (auto *aa = ast::dyn_cast<ast::ArrayType>(a))
     return typesEqual(aa->getElementType(),
                       ast::cast<ast::ArrayType>(b)->getElementType());
+  if (auto *ao = ast::dyn_cast<ast::OptionalType>(a))
+    return typesEqual(ao->getInnerType(),
+                      ast::cast<ast::OptionalType>(b)->getInnerType());
+  if (auto *ta = ast::dyn_cast<ast::TupleType>(a)) {
+    auto *tb = ast::cast<ast::TupleType>(b);
+    if (ta->getArity() != tb->getArity())
+      return false;
+    for (size_t i = 0; i < ta->getArity(); ++i)
+      if (!typesEqual(ta->getElementType(i), tb->getElementType(i)))
+        return false;
+    return true;
+  }
   return false;
 }
 
@@ -243,9 +255,48 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
   if (dst == Ctx.getFloatTy() && src == Ctx.getIntTy())
     return true;
 
+  // Optional destinations (prototype, issue #5):
+  //   T  -> T?   implicit widening (a present value);
+  //   S? -> T?   when S -> T (covariant in the wrapped type).
+  // The `None` literal is handled by checkAssignable, which sees the
+  // expression; its static type is `Obj`, which is NOT assignable to `T?`.
+  if (auto *dstOT = ast::dyn_cast<ast::OptionalType>(dst))
+    return isAssignable(dstOT->getInnerType(), ast::stripOptional(src));
+
+  // An optional source can only flow into a non-optional slot typed `Obj`,
+  // which may hold `None` today anyway.  `T?` -> `T` requires a `match`.
+  if (ast::isa<ast::OptionalType>(src))
+    return dst == Ctx.getObjTy();
+
   // Any array type is assignable to Obj (arrays are heap-allocated objects).
   if (dst == Ctx.getObjTy() && ast::isa<ast::ArrayType>(src))
     return true;
+
+  // Tuples: a tuple value is an instance of the builtin `Tuple` class (an Obj
+  // subtype), so it is assignable to `Obj` (and to `Tuple` itself).  Between
+  // tuple types, assignability is element-wise and *representation-
+  // preserving*: primitive elements must match exactly (no int -> float
+  // promotion — the runtime slot holds raw bits and no conversion is
+  // emitted), while reference-typed elements may be covariant
+  // (`(int, Str)` is assignable to `(int, Obj)`) because tuples are
+  // immutable and every reference slot holds a box regardless of its
+  // static type.
+  if (auto *srcTT = ast::dyn_cast<ast::TupleType>(src)) {
+    if (auto *dstCT = ast::dyn_cast<ast::ClassType>(dst))
+      return Ctx.getTupleTy()->isSubtypeOf(dstCT);
+    auto *dstTT = ast::dyn_cast<ast::TupleType>(dst);
+    if (!dstTT || dstTT->getArity() != srcTT->getArity())
+      return false;
+    for (size_t i = 0; i < dstTT->getArity(); ++i) {
+      ast::Type *d = dstTT->getElementType(i);
+      ast::Type *s = srcTT->getElementType(i);
+      if (d == s)
+        continue;
+      if (!ast::isRefType(d) || !ast::isRefType(s) || !isAssignable(d, s))
+        return false;
+    }
+    return true;
+  }
 
   // Array assignability: element types must be compatible.
   if (auto *dstAT = ast::dyn_cast<ast::ArrayType>(dst)) {
@@ -264,6 +315,48 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
       return srcCT->isSubtypeOf(dstCT);
 
   return false;
+}
+
+bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
+  // `None` into an optional slot: statically the literal is `Obj` (a design
+  // decision — see proposals/optionals.md), but in this position it denotes
+  // the absent `T?` value.  Record that contextual type on the literal so
+  // CodeGen emits a null box rather than boxing the `None` singleton, which
+  // is how a present `Obj` value spells None.
+  if (ast::isa<ast::NoneLiteral>(src) && ast::isa<ast::OptionalType>(dst)) {
+    src->setResolvedType(dst);
+    return true;
+  }
+  if (!isAssignable(dst, srcTy))
+    return false;
+  // `T?` -> `Obj` (the only non-optional destination an optional may flow
+  // into): CodeGen must turn a null box into the boxed `None` singleton so the
+  // receiving `Obj` slot never holds a NULL box, which no `Obj` consumer
+  // (method dispatch, `match`) expects today.
+  if (ast::isa<ast::OptionalType>(srcTy) && !ast::isa<ast::OptionalType>(dst))
+    src->setCoercedType(dst);
+  return true;
+}
+
+bool Sema::diagnoseOptionalNarrowing(ast::SourceLocation loc, ast::Type *dst,
+                                     ast::Type *srcTy) {
+  auto *srcOT = ast::dyn_cast<ast::OptionalType>(srcTy);
+  if (!srcOT || ast::isa<ast::OptionalType>(dst))
+    return false;
+  // Only report the unwrap hint when unwrapping would actually help, i.e. the
+  // wrapped type itself fits the destination; otherwise it is an ordinary
+  // type mismatch and the generic diagnostic is more accurate.
+  if (!isAssignable(dst, srcOT->getInnerType()))
+    return false;
+  errorOptionalUnwrap(loc, srcOT);
+  return true;
+}
+
+void Sema::errorOptionalUnwrap(ast::SourceLocation loc,
+                               ast::OptionalType *optTy) {
+  error(loc, "cannot use optional '" + typeName(optTy) + "' as '" +
+                 typeName(optTy->getInnerType()) +
+                 "' without unwrapping (use match)");
 }
 
 ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
@@ -316,6 +409,58 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
       args.push_back(arg);
     }
     return instantiateClass(gt->getName(), args, loc);
+  }
+
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty)) {
+    auto *inner = resolveType(ot->getInnerType(), loc, context);
+    if (!inner)
+      return nullptr;
+    // Only reference types may be optional: a `T?` reuses T's PaykanShared*
+    // box with NULL meaning None, and value types have no box.  The parser
+    // already rejects the spelled builtins (`int?`); an enum is only known
+    // here.  Nested optionals are rejected for the same reason (a `T??` would
+    // need a second None to distinguish `None` from `Some(None)`).
+    if (ast::isa<ast::BuiltinType>(inner) || ast::isa<ast::EnumType>(inner)) {
+      error(loc, context + " has type '" + typeName(inner) +
+                     "?': optional primitive types are not supported yet");
+      return nullptr;
+    }
+    if (ast::isa<ast::OptionalType>(inner)) {
+      error(loc, context + " has nested optional type '" + typeName(inner) +
+                     "?', which is not supported");
+      return nullptr;
+    }
+    // An optional tuple would be representable (a tuple is a boxed reference
+    // value), but it could never be unwrapped: `match` rejects tuple type
+    // arms, so the `T` arm that unwraps an optional does not exist for it.
+    // Reject it until tuple patterns land.
+    if (ast::isa<ast::TupleType>(inner)) {
+      error(loc, context + " has type '" + typeName(inner) +
+                     "?': optional tuple types are not supported yet (an "
+                     "optional tuple cannot be unwrapped with match)");
+      return nullptr;
+    }
+    // Resolve to the context's canonical (interned) instance, as for arrays.
+    return Ctx.getOptionalType(inner);
+  }
+
+  if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
+    std::vector<ast::Type *> elems;
+    elems.reserve(tt->getArity());
+    for (size_t i = 0; i < tt->getArity(); ++i) {
+      auto *elemTy = resolveType(tt->getElementType(i), loc,
+                                 context + " element " + std::to_string(i));
+      if (!elemTy)
+        return nullptr;
+      if (elemTy == Ctx.getVoidTy()) {
+        error(loc, context + " element " + std::to_string(i) +
+                       " cannot have type 'void'");
+        return nullptr;
+      }
+      elems.push_back(elemTy);
+    }
+    // Same canonicalisation as arrays: the interned per-element-list node.
+    return Ctx.getTupleType(std::move(elems));
   }
 
   error(loc, context + " has unknown type");
@@ -400,6 +545,12 @@ ast::Type *Sema::ExprChecker::visitMovExpr(ast::MovExpr *node) {
             "temporary value instead");
     return nullptr;
   }
+  if (ast::isa<ast::TupleIndexExpr>(operand)) {
+    S.error(node->getLocation(),
+            "cannot 'mov' a tuple element; move a local variable or a "
+            "temporary value instead");
+    return nullptr;
+  }
 
   // `self` is a borrowed reference to the receiver, not an owned local — the
   // method does not own it, so there is no ownership to transfer.  (Ordinary
@@ -453,6 +604,12 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
   if (!operandTy)
     return nullptr;
 
+  // No unary operator is defined on an optional value; point at `match`.
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(operandTy)) {
+    S.errorOptionalUnwrap(node->getLocation(), ot);
+    return nullptr;
+  }
+
   if (!operandTy->hasUnaryOp(node->getOpcode())) {
     S.error(node->getLocation(), "unary '" + std::string(node->getOpcodeStr()) +
                                      "' is not defined for type '" +
@@ -496,6 +653,51 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   // re-deriving the type.
   node->getLHS()->setResolvedType(lhsTy);
   node->getRHS()->setResolvedType(rhsTy);
+
+  // Optional operands (prototype, issue #5).  The only operators defined on a
+  // `T?` are == and !=, in exactly two forms:
+  //   x == None / None != x   — a null check on the box (CodeGen never
+  //                             dispatches `equals` for this form);
+  //   a == b, both optional   — both None: equal; one None: not equal;
+  //                             otherwise the usual `equals` dispatch.
+  // Anything else needs the value unwrapped with `match`.
+  auto *lhsOpt = ast::dyn_cast<ast::OptionalType>(lhsTy);
+  auto *rhsOpt = ast::dyn_cast<ast::OptionalType>(rhsTy);
+  if (lhsOpt || rhsOpt) {
+    bool isEquality = node->getOpcode() == ast::BinaryOpcode::Eq ||
+                      node->getOpcode() == ast::BinaryOpcode::Ne;
+    if (!isEquality) {
+      S.errorOptionalUnwrap(node->getLocation(), lhsOpt ? lhsOpt : rhsOpt);
+      return nullptr;
+    }
+    if (ast::isa<ast::NoneLiteral>(node->getLHS()) ||
+        ast::isa<ast::NoneLiteral>(node->getRHS()))
+      return S.Ctx.getBoolTy();
+    if (lhsOpt && rhsOpt) {
+      ast::Type *li = lhsOpt->getInnerType();
+      ast::Type *ri = rhsOpt->getInnerType();
+      bool compatible = typesEqual(li, ri);
+      if (!compatible) {
+        auto *lc = ast::dyn_cast<ast::ClassType>(li);
+        auto *rc = ast::dyn_cast<ast::ClassType>(ri);
+        compatible = lc && rc && (lc->isSubtypeOf(rc) || rc->isSubtypeOf(lc));
+      }
+      if (!compatible) {
+        S.error(node->getLocation(),
+                "operands of '" + std::string(node->getOpcodeStr()) +
+                    "' have mismatched types '" + typeName(lhsTy) + "' and '" +
+                    typeName(rhsTy) + "'");
+        return nullptr;
+      }
+      return S.Ctx.getBoolTy();
+    }
+    // Exactly one side is optional and the other is a present value.
+    S.error(node->getLocation(),
+            "cannot compare optional '" + typeName(lhsOpt ? lhsTy : rhsTy) +
+                "' with non-optional '" + typeName(lhsOpt ? rhsTy : lhsTy) +
+                "'; compare against None or unwrap it with match");
+    return nullptr;
+  }
 
   if (!lhsTy->hasBinaryOp(node->getOpcode(), rhsTy)) {
     S.error(node->getLocation(),
@@ -609,8 +811,11 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
       for (size_t i = 0; i < argTypes.size(); ++i) {
         if (!argTypes[i])
           continue;
-        if (!S.isAssignable(expectedParams[i], argTypes[i]))
-          S.error(node->getArguments()[i]->getLocation(),
+        auto *argExpr = node->getArguments()[i];
+        if (!S.checkAssignable(expectedParams[i], argTypes[i], argExpr) &&
+            !S.diagnoseOptionalNarrowing(argExpr->getLocation(),
+                                         expectedParams[i], argTypes[i]))
+          S.error(argExpr->getLocation(),
                   "argument " + std::to_string(i + 1) + " of '" +
                       names::kMethodSuper + "' has type '" +
                       typeName(argTypes[i]) + "', expected '" +
@@ -662,8 +867,11 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   for (size_t i = 0; i < argTypes.size(); ++i) {
     if (!argTypes[i])
       continue; // already reported
-    if (!S.isAssignable(sig->ParamTypes[i], argTypes[i])) {
-      S.error(node->getArguments()[i]->getLocation(),
+    auto *argExpr = node->getArguments()[i];
+    if (!S.checkAssignable(sig->ParamTypes[i], argTypes[i], argExpr) &&
+        !S.diagnoseOptionalNarrowing(argExpr->getLocation(), sig->ParamTypes[i],
+                                     argTypes[i])) {
+      S.error(argExpr->getLocation(),
               "argument " + std::to_string(i + 1) + " of '" +
                   node->getCalleeName() + "' has type '" +
                   typeName(argTypes[i]) + "', expected '" +
@@ -681,12 +889,22 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   if (!recvTy)
     return nullptr;
 
+  // A method cannot be called on an optional receiver (it may be None).
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(recvTy)) {
+    S.errorOptionalUnwrap(node->getLocation(), ot);
+    return nullptr;
+  }
+
   // Resolve the ClassType to look up the method on.
   // Array types dispatch through a per-element specialized ClassType so that
   // push/pop signatures are element-type-aware.
   ast::ClassType *ct = nullptr;
   if (auto *at = ast::dyn_cast<ast::ArrayType>(recvTy))
     ct = S.Ctx.getOrCreateSpecializedArrayType(at->getElementType());
+  else if (auto *tt = ast::dyn_cast<ast::TupleType>(recvTy))
+    // Tuples expose only Obj's methods (toString / equals) through their
+    // per-element-list specialization.
+    ct = S.Ctx.getOrCreateSpecializedTupleType(tt);
   else
     ct = ast::dyn_cast<ast::ClassType>(recvTy);
 
@@ -725,11 +943,14 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     return method->getReturnType();
   }
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
-    auto *argTy = visit(node->getArguments()[i]);
+    auto *argExpr = node->getArguments()[i];
+    auto *argTy = visit(argExpr);
     if (!argTy)
       continue;
-    if (!S.isAssignable(paramTys[i], argTy)) {
-      S.error(node->getArguments()[i]->getLocation(),
+    if (!S.checkAssignable(paramTys[i], argTy, argExpr) &&
+        !S.diagnoseOptionalNarrowing(argExpr->getLocation(), paramTys[i],
+                                     argTy)) {
+      S.error(argExpr->getLocation(),
               "argument " + std::to_string(i + 1) + " of '" +
                   node->getMethodName() + "' has type '" + typeName(argTy) +
                   "', expected '" + typeName(paramTys[i]) + "'");
@@ -758,6 +979,12 @@ Sema::ExprChecker::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
   if (!recvTy)
     return nullptr;
 
+  // A field cannot be read through an optional receiver (it may be None).
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(recvTy)) {
+    S.errorOptionalUnwrap(node->getLocation(), ot);
+    return nullptr;
+  }
+
   auto *ct = ast::dyn_cast<ast::ClassType>(recvTy);
   if (!ct) {
     S.error(node->getLocation(), "member access '." + node->getFieldName() +
@@ -767,13 +994,9 @@ Sema::ExprChecker::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
   }
 
   // Walk the class hierarchy (this class + all ancestors) for the field.
-  for (auto *c = ct; c; c = c->getSuperClass()) {
-    for (auto &[fname, fty] : c->getFields()) {
-      if (fname == node->getFieldName()) {
-        node->setResolvedType(fty);
-        return fty;
-      }
-    }
+  if (auto *fty = ct->findField(node->getFieldName())) {
+    node->setResolvedType(fty);
+    return fty;
   }
 
   S.error(node->getLocation(), "no field '" + node->getFieldName() +
@@ -833,6 +1056,12 @@ ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
   if (!arrayTy)
     return nullptr;
 
+  // An optional array / string cannot be indexed (it may be None).
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(arrayTy)) {
+    S.errorOptionalUnwrap(node->getLocation(), ot);
+    return nullptr;
+  }
+
   // String subscript: str[idx] -> char
   if (arrayTy == S.Ctx.getStrTy()) {
     auto *idxTy = visit(node->getIndex());
@@ -891,6 +1120,47 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
     return trueTy;
   }
 
+  // Optional unification (prototype, issue #5):
+  //   if c then x else None   — `T?` when x is a reference type T (or T?);
+  //   if c then a else b      — `T?` when either side is optional and the
+  //                             wrapped types unify (equal, or class LCA).
+  // A `None` branch is re-typed to the optional result (see checkAssignable)
+  // so CodeGen produces a null box for it.
+  {
+    ast::Expr *trueExpr = node->getTrueExpr();
+    ast::Expr *falseExpr = node->getFalseExpr();
+    bool trueNone = ast::isa<ast::NoneLiteral>(trueExpr);
+    bool falseNone = ast::isa<ast::NoneLiteral>(falseExpr);
+    ast::Type *result = nullptr;
+    if (trueNone != falseNone) {
+      ast::Type *valueTy = trueNone ? falseTy : trueTy;
+      if (ast::isRefType(valueTy))
+        result = ast::isa<ast::OptionalType>(valueTy)
+                     ? valueTy
+                     : S.Ctx.getOptionalType(valueTy);
+    } else if (ast::isa<ast::OptionalType>(trueTy) ||
+               ast::isa<ast::OptionalType>(falseTy)) {
+      ast::Type *a = ast::stripOptional(trueTy);
+      ast::Type *b = ast::stripOptional(falseTy);
+      ast::Type *inner = nullptr;
+      if (typesEqual(a, b))
+        inner = a;
+      else if (auto *ac = ast::dyn_cast<ast::ClassType>(a))
+        if (auto *bc = ast::dyn_cast<ast::ClassType>(b))
+          inner = S.findLowestCommonAncestor(ac, bc);
+      if (inner)
+        result = S.Ctx.getOptionalType(inner);
+    }
+    if (result) {
+      if (trueNone)
+        trueExpr->setResolvedType(result);
+      if (falseNone)
+        falseExpr->setResolvedType(result);
+      node->setResolvedType(result);
+      return result;
+    }
+  }
+
   // For class types, find the lowest common ancestor in the hierarchy.
   auto *trueCT = ast::dyn_cast<ast::ClassType>(trueTy);
   auto *falseCT = ast::dyn_cast<ast::ClassType>(falseTy);
@@ -905,6 +1175,178 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
                                    typeName(trueTy) + "' and '" +
                                    typeName(falseTy) + "'");
   return nullptr;
+}
+
+// -- Tuples (prototype) ------------------------------------------------------
+
+// A tuple literal's type is the canonical tuple of its element types.  There
+// is no contextual typing: `(1, "a")` is `(int, Str)` even when assigned to a
+// `(int, Obj)` variable (assignability then applies element-wise, see
+// isAssignable).  Elements are checked left to right in one straight-line
+// path, so `mov` state simply flows through them.
+ast::Type *
+Sema::ExprChecker::visitTupleLiteralExpr(ast::TupleLiteralExpr *node) {
+  std::vector<ast::Type *> elemTys;
+  elemTys.reserve(node->getNumElements());
+  bool ok = true;
+  for (size_t i = 0; i < node->getNumElements(); ++i) {
+    ast::Expr *elem = node->getElements()[i];
+    auto *ty = visit(elem);
+    if (!ty) {
+      ok = false;
+      continue;
+    }
+    if (ty == S.Ctx.getVoidTy()) {
+      S.error(elem->getLocation(), "tuple element " + std::to_string(i) +
+                                       " has type 'void' (the expression "
+                                       "produces no value)");
+      ok = false;
+      continue;
+    }
+    // An empty array literal has no element type of its own and nothing
+    // inside a tuple literal can supply one (unlike an annotated variable),
+    // so codegen could not pick the right array representation.
+    if (auto *at = ast::dyn_cast<ast::ArrayType>(ty);
+        at && at->getElementType() == S.Ctx.getVoidTy()) {
+      S.error(elem->getLocation(),
+              "cannot infer element type of empty array literal '[]' inside a "
+              "tuple literal; bind it to an annotated variable first");
+      ok = false;
+      continue;
+    }
+    elemTys.push_back(ty);
+  }
+  if (!ok)
+    return nullptr;
+  auto *tt = S.Ctx.getTupleType(std::move(elemTys));
+  node->setResolvedType(tt);
+  return tt;
+}
+
+ast::Type *Sema::ExprChecker::visitTupleIndexExpr(ast::TupleIndexExpr *node) {
+  auto *recvTy = visit(node->getTuple());
+  if (!recvTy)
+    return nullptr;
+  auto *tt = ast::dyn_cast<ast::TupleType>(recvTy);
+  if (!tt) {
+    S.error(node->getLocation(),
+            "tuple index '." + std::to_string(node->getIndex()) +
+                "' applied to non-tuple type '" + typeName(recvTy) + "'");
+    return nullptr;
+  }
+  if (node->getIndex() >= tt->getArity()) {
+    S.error(node->getLocation(),
+            "tuple index '." + std::to_string(node->getIndex()) +
+                "' is out of range for type '" + typeName(tt) +
+                "' (valid indices are .0 to ." +
+                std::to_string(tt->getArity() - 1) + ")");
+    return nullptr;
+  }
+  // Record the receiver's type too: CodeGen reads it to pick the element
+  // representation without re-deriving the receiver's type.
+  node->getTuple()->setResolvedType(tt);
+  ast::Type *elemTy = tt->getElementType(node->getIndex());
+  node->setResolvedType(elemTy);
+  return elemTy;
+}
+
+// `a, b = e;` — e must be a tuple whose arity equals the number of targets.
+// Each named target follows the binding rule of the corresponding
+// single-variable statement: an annotated target is a fresh declaration
+// (VarDecl rules: no redeclaration in the current scope, initializer
+// assignable to the annotation), a bare name is declared on first use or
+// re-assigned if already visible (AssignStmt rules), and `_` discards the
+// element.
+bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
+  auto *valTy = resolveExprType(node->getValue());
+  if (!valTy)
+    return false;
+
+  auto *tt = ast::dyn_cast<ast::TupleType>(valTy);
+  if (!tt) {
+    error(node->getValue()->getLocation(),
+          "cannot destructure a value of type '" + typeName(valTy) +
+              "'; only tuples can be destructured");
+    return false;
+  }
+  if (tt->getArity() != node->getNumTargets()) {
+    error(node->getLocation(),
+          "cannot destructure a value of type '" + typeName(tt) + "' into " +
+              std::to_string(node->getNumTargets()) + " targets (it has " +
+              std::to_string(tt->getArity()) + " elements)");
+    return false;
+  }
+  // CodeGen extracts the elements from this resolved type.
+  node->getValue()->setResolvedType(tt);
+
+  bool ok = true;
+  llvm::StringSet<> seen;
+  for (size_t i = 0; i < node->getNumTargets(); ++i) {
+    const auto &target = node->getTargets()[i];
+    if (target.isSkip())
+      continue;
+    const std::string &name = target.getName();
+    ast::Type *elemTy = tt->getElementType(i);
+
+    if (!seen.insert(name).second) {
+      error(target.Loc, "duplicate target '" + name + "' in destructuring");
+      ok = false;
+      continue;
+    }
+    // Same guard as visitAssignStmt: a target must not shadow a type name.
+    if (Ctx.lookupClassType(name) || Ctx.lookupEnumType(name) ||
+        name == names::kObj || name == names::kString || name == names::kFile ||
+        name == names::kTypeInt || name == names::kTypeBool ||
+        name == names::kTypeFloat || name == names::kTypeChar ||
+        name == names::kStdin) {
+      error(target.Loc,
+            "'" + name + "' is a type name and cannot be used as a variable");
+      ok = false;
+      continue;
+    }
+
+    if (target.DeclType) {
+      // Annotated target: a fresh declaration in the current scope.
+      if (CurrentScope->contains(name)) {
+        error(target.Loc, "redeclaration of variable '" + name + "'");
+        ok = false;
+        continue;
+      }
+      auto *declTy = resolveType(target.DeclType, target.Loc,
+                                 "destructuring target '" + name + "'");
+      if (!declTy) {
+        ok = false;
+        continue;
+      }
+      if (!isAssignable(declTy, elemTy)) {
+        error(target.Loc, "element " + std::to_string(i) + " of type '" +
+                              typeName(elemTy) +
+                              "' does not match declared type '" +
+                              typeName(declTy) + "' for target '" + name + "'");
+        ok = false;
+        continue;
+      }
+      CurrentScope->declare(name, declTy);
+      continue;
+    }
+
+    // Bare name: re-assignment if visible, implicit declaration otherwise.
+    CurrentScope->clearMoved(name);
+    auto *owner = CurrentScope->findOwner(name);
+    if (!owner) {
+      CurrentScope->set(name, elemTy);
+      continue;
+    }
+    auto *varTy = owner->lookup(name);
+    if (!isAssignable(varTy, elemTy)) {
+      error(target.Loc, "cannot assign element " + std::to_string(i) +
+                            " of type '" + typeName(elemTy) +
+                            "' to variable '" + name + "' of type '" +
+                            typeName(varTy) + "'");
+      ok = false;
+    }
+  }
+  return ok;
 }
 
 // -- Entry point -------------------------------------------------------------
@@ -1102,10 +1544,12 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   auto *varTy = owner->lookup(varName);
 
   // Reject empty array literal when the target type can't supply the element
-  // type.
+  // type.  An optional array variable (`xs: Str[]?`) supplies its wrapped
+  // array type.
+  ast::Type *varArrTy = ast::stripOptional(varTy);
   if (auto *at = ast::dyn_cast<ast::ArrayType>(valTy)) {
     if (at->getElementType() == Ctx.getVoidTy() &&
-        !ast::isa<ast::ArrayType>(varTy)) {
+        !ast::isa<ast::ArrayType>(varArrTy)) {
       error(node->getLocation(),
             "cannot infer element type of empty array literal '[]'; "
             "add an explicit type annotation");
@@ -1113,13 +1557,20 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
     }
   }
 
-  if (!isAssignable(varTy, valTy)) {
-    error(node->getLocation(), "cannot assign value of type '" +
-                                   typeName(valTy) + "' to variable '" +
-                                   varName + "' of type '" + typeName(varTy) +
-                                   "'");
+  if (!checkAssignable(varTy, valTy, node->getValue())) {
+    if (!diagnoseOptionalNarrowing(node->getLocation(), varTy, valTy))
+      error(node->getLocation(), "cannot assign value of type '" +
+                                     typeName(valTy) + "' to variable '" +
+                                     varName + "' of type '" + typeName(varTy) +
+                                     "'");
     return false;
   }
+
+  // Propagate the target's array type onto an empty literal (see
+  // visitVarDecl for why CodeGen needs the element type).
+  if (auto *lit = ast::dyn_cast<ast::ArrayLiteralExpr>(node->getValue()))
+    if (lit->isEmpty() && ast::isa<ast::ArrayType>(varArrTy))
+      lit->setResolvedType(varArrTy);
 
   return true;
 }
@@ -1129,10 +1580,14 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
     auto *valTy = resolveExprType(node->getReturnValue());
     if (!valTy)
       return false;
-    if (CurrentReturnType && !isAssignable(CurrentReturnType, valTy)) {
-      error(node->getLocation(), "return value of type '" + typeName(valTy) +
-                                     "' does not match function return type '" +
-                                     typeName(CurrentReturnType) + "'");
+    if (CurrentReturnType &&
+        !checkAssignable(CurrentReturnType, valTy, node->getReturnValue())) {
+      if (!diagnoseOptionalNarrowing(node->getLocation(), CurrentReturnType,
+                                     valTy))
+        error(node->getLocation(),
+              "return value of type '" + typeName(valTy) +
+                  "' does not match function return type '" +
+                  typeName(CurrentReturnType) + "'");
       return false;
     }
     return true;
@@ -1273,41 +1728,57 @@ bool detail::stmtAlwaysReturns(ast::Stmt *s) {
   if (auto *cs = ast::dyn_cast<ast::CompoundStmt>(s))
     return detail::blockAlwaysReturns(cs->getStatements());
   if (auto *ms = ast::dyn_cast<ast::MatchStmt>(s)) {
-    bool hasWildcard = false;
-    unsigned variantArms = 0;
-    bool trueArm = false, falseArm = false; // bool-subject literal coverage
-    for (ast::MatchArm *arm : ms->getArms()) {
-      if (arm->isWildcard()) {
-        hasWildcard = true;
-      } else if (!arm->isLiteral()) {
-        ++variantArms; // an enum/type-name (bare-variant) arm
-      } else if (auto *bl = ast::dyn_cast<ast::BoolLiteral>(
-                     arm->getLiteralPattern())) {
-        if (bl->getValue())
-          trueArm = true;
-        else
-          falseArm = true;
-      }
+    for (ast::MatchArm *arm : ms->getArms())
       if (!detail::blockAlwaysReturns(arm->getBody()->getStatements()))
         return false;
-    }
-    if (hasWildcard)
-      return true;
-    // A wildcard-less match is exhaustive iff its arms cover the whole value
-    // domain of the subject: every variant of an enum subject, or both True
-    // and False literals for a bool subject.  Sema has already validated the
-    // arms (visitFuncDecl runs this analysis only after the body type-checks
-    // cleanly), so each variant arm names a distinct, valid variant —
-    // counting them suffices.
-    if (auto *subjTy = ms->getSubject()->getResolvedType()) {
-      if (auto *et = ast::dyn_cast<ast::EnumType>(subjTy))
-        return variantArms == et->getNumVariants();
-      if (auto *bt = ast::dyn_cast<ast::BuiltinType>(subjTy))
-        if (bt->getTypeKind() == ast::BuiltinType::Bool)
-          return trueArm && falseArm;
-    }
-    return false;
+    return detail::matchIsExhaustive(ms);
   }
+  return false;
+}
+
+bool detail::matchIsExhaustive(ast::MatchStmt *ms) {
+  ast::Type *subjTy = ms->getSubject()->getResolvedType();
+  auto *optTy = ast::dyn_cast<ast::OptionalType>(subjTy); // null-safe
+  bool hasWildcard = false;
+  unsigned variantArms = 0;               // enum-subject variant arms
+  bool trueArm = false, falseArm = false; // bool-subject literal coverage
+  bool noneArm = false, innerArm = false; // optional-subject coverage
+  for (ast::MatchArm *arm : ms->getArms()) {
+    if (arm->isWildcard()) {
+      hasWildcard = true;
+    } else if (!arm->isLiteral()) {
+      ++variantArms; // an enum/type-name (bare-variant) arm
+      // For `T?` the arm naming T itself matches every non-None value.
+      if (optTy && arm->getArmType() == optTy->getInnerType())
+        innerArm = true;
+    } else if (ast::isa<ast::NoneLiteral>(arm->getLiteralPattern())) {
+      noneArm = true;
+    } else if (auto *bl =
+                   ast::dyn_cast<ast::BoolLiteral>(arm->getLiteralPattern())) {
+      if (bl->getValue())
+        trueArm = true;
+      else
+        falseArm = true;
+    }
+  }
+  if (hasWildcard)
+    return true;
+  // A wildcard-less match is exhaustive iff its arms cover the whole value
+  // domain of the subject: every variant of an enum subject, both True and
+  // False literals for a bool subject, or — for an optional subject — the
+  // `None` case plus the wrapped type itself (a strict subclass arm only
+  // covers its exact runtime type).  Sema has already validated the arms
+  // (these analyses run only after the body type-checks cleanly), so each
+  // variant arm names a distinct, valid variant — counting them suffices.
+  if (!subjTy)
+    return false;
+  if (optTy)
+    return noneArm && innerArm;
+  if (auto *et = ast::dyn_cast<ast::EnumType>(subjTy))
+    return variantArms == et->getNumVariants();
+  if (auto *bt = ast::dyn_cast<ast::BuiltinType>(subjTy))
+    if (bt->getTypeKind() == ast::BuiltinType::Bool)
+      return trueArm && falseArm;
   return false;
 }
 
@@ -1428,9 +1899,11 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     if (declTy) {
       // Reject an empty array literal when the declared type cannot supply the
       // element type (e.g. `a: Obj = []` — the element type is uninferable).
+      // An optional array (`xs: Str[]? = []`) supplies its wrapped type.
+      ast::Type *declArrTy = ast::stripOptional(declTy);
       if (auto *at = ast::dyn_cast<ast::ArrayType>(initTy)) {
         if (at->getElementType() == Ctx.getVoidTy() &&
-            !ast::isa<ast::ArrayType>(declTy)) {
+            !ast::isa<ast::ArrayType>(declArrTy)) {
           error(node->getLocation(),
                 "cannot infer element type of empty array literal '[]'; "
                 "add an explicit type annotation");
@@ -1438,11 +1911,12 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
           return false;
         }
       }
-      if (!isAssignable(declTy, initTy)) {
-        error(node->getLocation(), "initializer of type '" + typeName(initTy) +
-                                       "' does not match declared type '" +
-                                       typeName(declTy) + "' for variable '" +
-                                       node->getName() + "'");
+      if (!checkAssignable(declTy, initTy, node->getInitExpr())) {
+        if (!diagnoseOptionalNarrowing(node->getLocation(), declTy, initTy))
+          error(node->getLocation(),
+                "initializer of type '" + typeName(initTy) +
+                    "' does not match declared type '" + typeName(declTy) +
+                    "' for variable '" + node->getName() + "'");
         CurrentScope->set(node->getName(), declTy);
         return false;
       }
@@ -1454,8 +1928,8 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
       // pushed into it later — a leak.
       if (auto *lit =
               ast::dyn_cast<ast::ArrayLiteralExpr>(node->getInitExpr())) {
-        if (lit->isEmpty() && ast::isa<ast::ArrayType>(declTy))
-          lit->setResolvedType(declTy);
+        if (lit->isEmpty() && ast::isa<ast::ArrayType>(declArrTy))
+          lit->setResolvedType(declArrTy);
       }
     } else {
       // Infer type from initializer — but reject bare [] with no annotation.
@@ -1490,6 +1964,24 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
   if (!recvTy)
     return false;
 
+  // A field cannot be assigned through an optional receiver (it may be None).
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(recvTy)) {
+    errorOptionalUnwrap(node->getLocation(), ot);
+    return false;
+  }
+
+  // `t.0 = v`: the parser hands tuple-index assignment over as a member
+  // assignment whose field name is the index (see Parser.ypp) so that the
+  // rejection is a typed diagnostic.  Prototype tuples are immutable.
+  if (ast::isa<ast::TupleType>(recvTy)) {
+    error(node->getLocation(), "cannot assign to element '." +
+                                   node->getFieldName() + "' of type '" +
+                                   typeName(recvTy) +
+                                   "': tuples are immutable; build a new tuple "
+                                   "instead");
+    return false;
+  }
+
   auto *ct = ast::dyn_cast<ast::ClassType>(recvTy);
   if (!ct) {
     error(node->getLocation(), "member assignment '." + node->getFieldName() +
@@ -1499,18 +1991,7 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
   }
 
   // Look up the field in the class hierarchy.
-  ast::Type *fieldTy = nullptr;
-  for (auto *c = ct; c; c = c->getSuperClass()) {
-    for (auto &[fname, fty] : c->getFields()) {
-      if (fname == node->getFieldName()) {
-        fieldTy = fty;
-        break;
-      }
-    }
-    if (fieldTy)
-      break;
-  }
-
+  ast::Type *fieldTy = ct->findField(node->getFieldName());
   if (!fieldTy) {
     error(node->getLocation(), "no field '" + node->getFieldName() +
                                    "' in class '" + ct->getName() + "'");
@@ -1521,10 +2002,11 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
   if (!valTy)
     return false;
 
-  if (!isAssignable(fieldTy, valTy)) {
-    error(node->getLocation(),
-          "cannot assign value of type '" + typeName(valTy) + "' to field '" +
-              node->getFieldName() + "' of type '" + typeName(fieldTy) + "'");
+  if (!checkAssignable(fieldTy, valTy, node->getValue())) {
+    if (!diagnoseOptionalNarrowing(node->getLocation(), fieldTy, valTy))
+      error(node->getLocation(),
+            "cannot assign value of type '" + typeName(valTy) + "' to field '" +
+                node->getFieldName() + "' of type '" + typeName(fieldTy) + "'");
     return false;
   }
 
@@ -1535,6 +2017,11 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   auto *arrTy = resolveExprType(node->getArray());
   if (!arrTy)
     return false;
+  // An optional array cannot be indexed (it may be None).
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(arrTy)) {
+    errorOptionalUnwrap(node->getLocation(), ot);
+    return false;
+  }
   auto *at = ast::dyn_cast<ast::ArrayType>(arrTy);
   if (!at) {
     error(node->getLocation(),
@@ -1549,10 +2036,13 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   auto *valTy = resolveExprType(node->getValue());
   if (!valTy)
     return false;
-  if (!isAssignable(at->getElementType(), valTy)) {
-    error(node->getLocation(), "cannot assign value of type '" +
-                                   typeName(valTy) + "' to array of '" +
-                                   typeName(at->getElementType()) + "'");
+  if (!checkAssignable(at->getElementType(), valTy, node->getValue())) {
+    if (!diagnoseOptionalNarrowing(node->getLocation(), at->getElementType(),
+                                   valTy))
+      error(node->getLocation(), "cannot assign value of type '" +
+                                     typeName(valTy) + "' to array of '" +
+                                     typeName(at->getElementType()) + "'");
+    return false;
   }
   return true;
 }
@@ -1707,6 +2197,11 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
   if (auto *enumTy = ast::dyn_cast<ast::EnumType>(subjectTy))
     return checkEnumMatch(node, enumTy);
 
+  // Optional-mode: the subject is `T?` — `match` is how an optional is
+  // unwrapped (prototype, issue #5).
+  if (auto *optTy = ast::dyn_cast<ast::OptionalType>(subjectTy))
+    return checkOptionalMatch(node, optTy);
+
   // The subject must be a class type — matching on other builtins is not
   // supported.
   auto *subjectCt = ast::dyn_cast<ast::ClassType>(subjectTy);
@@ -1821,6 +2316,121 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
   }
 
   merger.finish(/*coversAllPaths=*/seenWildcard);
+  return ok;
+}
+
+// Optional-mode match: the subject is `T?`.
+//
+//   match maybe {
+//     n: T   { … }   // present: n is the unwrapped T (any runtime subtype)
+//     s: Sub { … }   // present AND exactly of class Sub (a strict subclass)
+//     None   { … }   // absent
+//     _      { … }   // anything not matched above
+//   }
+//
+// The arm naming the wrapped type T is the "present" pattern: it matches
+// every non-None value regardless of runtime subtype (unlike class mode,
+// where a type arm is an exact-type test) — that is what makes it an
+// unwrap.  A strict-subclass arm keeps class-mode exact-type semantics.  The
+// match is exhaustive with `_`, or with both a `None` arm and a T arm.
+bool Sema::checkOptionalMatch(ast::MatchStmt *node,
+                              ast::OptionalType *subjectTy) {
+  ast::Type *inner = subjectTy->getInnerType();
+  auto *innerCt = ast::dyn_cast<ast::ClassType>(inner);
+  auto *innerAt = ast::dyn_cast<ast::ArrayType>(inner);
+  const std::string subjName = typeName(subjectTy);
+
+  bool ok = true;
+  bool seenWildcard = false, seenNone = false, seenInner = false;
+
+  // Per-arm moved-state isolation + union merge (see checkValueMatch).
+  MovedBranchMerger merger(*this);
+
+  for (ast::MatchArm *arm : node->getArms()) {
+    if (seenWildcard) {
+      error(arm->getLocation(),
+            "unreachable arm: wildcard '_' must be the last arm");
+      ok = false;
+      continue;
+    }
+
+    merger.beginBranch();
+    // Open a new scope for each arm (the binding, if any, lives here).
+    ScopeGuard armGuard(*this);
+
+    if (arm->isWildcard()) {
+      seenWildcard = true;
+    } else if (arm->isLiteral()) {
+      if (!ast::isa<ast::NoneLiteral>(arm->getLiteralPattern())) {
+        error(arm->getLocation(),
+              "match on optional '" + subjName +
+                  "' requires type-name arms or 'None', not literal patterns");
+        ok = false;
+      } else if (seenNone) {
+        error(arm->getLocation(),
+              "duplicate 'None' arm in match on '" + subjName + "'");
+        ok = false;
+      } else {
+        seenNone = true;
+      }
+    } else {
+      auto *resolvedArmTy =
+          resolveType(arm->getArmType(), arm->getLocation(), "match arm");
+      arm->setArmType(resolvedArmTy); // write canonical pointer back
+      ast::Type *bindTy = nullptr;
+      if (!resolvedArmTy) {
+        ok = false; // resolveType reported the unknown type
+      } else if (ast::isa<ast::OptionalType>(resolvedArmTy)) {
+        error(arm->getLocation(),
+              "match arm type '" + typeName(resolvedArmTy) +
+                  "' cannot be optional; name '" + typeName(inner) +
+                  "' for the present case and 'None' for the absent case");
+        ok = false;
+      } else if (seenInner) {
+        error(arm->getLocation(),
+              "unreachable arm: the '" + typeName(inner) +
+                  "' arm above already matches every non-None value");
+        ok = false;
+      } else if (innerCt) {
+        auto *armCt = ast::dyn_cast<ast::ClassType>(resolvedArmTy);
+        if (!armCt || !armCt->isSubtypeOf(innerCt)) {
+          error(arm->getLocation(),
+                "type '" + typeName(resolvedArmTy) +
+                    "' is not a subclass of '" + typeName(inner) +
+                    "' (the match subject has type '" + subjName + "')");
+          ok = false;
+        } else {
+          bindTy = armCt;
+        }
+      } else if (innerAt) {
+        if (!typesEqual(resolvedArmTy, innerAt)) {
+          error(arm->getLocation(),
+                "match arm type '" + typeName(resolvedArmTy) +
+                    "' does not match the optional subject type '" + subjName +
+                    "'");
+          ok = false;
+        } else {
+          bindTy = innerAt;
+        }
+      }
+      if (bindTy == inner)
+        seenInner = true;
+      if (arm->hasBinding() && bindTy) {
+        if (!CurrentScope->declare(arm->getBinding(), bindTy)) {
+          error(arm->getLocation(),
+                "redeclaration of '" + arm->getBinding() + "' in match arm");
+          ok = false;
+        }
+      }
+    }
+
+    for (auto *stmt : arm->getBody()->getStatements())
+      if (!visit(stmt))
+        ok = false;
+    merger.endBranch();
+  }
+
+  merger.finish(/*coversAllPaths=*/seenWildcard || (seenNone && seenInner));
   return ok;
 }
 

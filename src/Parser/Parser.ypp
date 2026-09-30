@@ -62,6 +62,7 @@
   EQUAL    "=="
   NOT_EQUAL "!="
   NOT     "!"
+  QUESTION "?"
   COLON   ":"
   DOT     "."
   SEMICOLON ";"
@@ -110,6 +111,8 @@
 %token       NONE
 %token <std::string> STRING
 %token <std::string> IDENT
+// `.N` — a tuple element index (see the tupleindex rule in Lexer.lpp).
+%token <long> TUPLE_INDEX
 
 %type <TranslationUnit *> translationUnit
 %type <Stmt *> statement
@@ -151,6 +154,10 @@
 %type <std::vector<MatchArm *>> matchArmList
 %type <MatchArm *> matchArm
 %type <Expr *> literalPattern
+%type <std::vector<Type *>> tupleTypeElems
+%type <std::vector<Expr *>> tupleExprElems
+%type <DestructureStmt::Target> destructureTarget
+%type <std::vector<DestructureStmt::Target>> destructureTargets
 %%
 
 %start translationUnit;
@@ -177,53 +184,19 @@ topLevelDeclList: %empty            { $$ = TLDeclBag{}; }
 
 importDecl:
       "import" modulePath ";"
-                                    { // Split at last :: to separate base path from module name.
-                                      auto &C = impl(drv).Ctx;
-                                      auto sep = $2.rfind("::");
-                                      std::string base = (sep == std::string::npos) ? "" : $2.substr(0, sep);
-                                      std::string name = (sep == std::string::npos) ? $2 : $2.substr(sep + 2);
-                                      $$ = C.make<ImportDecl>(loc(@1, @3), C.intern(base), false,
-                                           std::vector<ImportDecl::Module>{{&C.intern(name), &C.intern("")}});
-                                    }
+                                    { $$ = paykan::parser::makeSingleImport(impl(drv).Ctx, loc(@1, @3), $2, "", /*isSystem=*/false); }
     | "import" modulePath "as" IDENT ";"
-                                    { auto &C = impl(drv).Ctx;
-                                      auto sep = $2.rfind("::");
-                                      std::string base = (sep == std::string::npos) ? "" : $2.substr(0, sep);
-                                      std::string name = (sep == std::string::npos) ? $2 : $2.substr(sep + 2);
-                                      $$ = C.make<ImportDecl>(loc(@1, @5), C.intern(base), false,
-                                           std::vector<ImportDecl::Module>{{&C.intern(name), &C.intern($4)}});
-                                    }
+                                    { $$ = paykan::parser::makeSingleImport(impl(drv).Ctx, loc(@1, @5), $2, $4, /*isSystem=*/false); }
     | "import" modulePath "::" "{" importedModuleList "}" ";"
-                                    { auto &C = impl(drv).Ctx;
-                                      $$ = C.make<ImportDecl>(loc(@1, @7), C.intern($2), false,
-                                           [&]{ std::vector<ImportDecl::Module> ms; for (auto &p : $5) ms.push_back({&C.intern(p.first), &C.intern(p.second)}); return ms; }());
-                                    }
+                                    { $$ = paykan::parser::makeImportList(impl(drv).Ctx, loc(@1, @7), $2, $5, /*isSystem=*/false); }
     | "import" "::" modulePath ";"
-                                    { auto &C = impl(drv).Ctx;
-                                      auto sep = $3.rfind("::");
-                                      std::string base = (sep == std::string::npos) ? "" : $3.substr(0, sep);
-                                      std::string name = (sep == std::string::npos) ? $3 : $3.substr(sep + 2);
-                                      $$ = C.make<ImportDecl>(loc(@1, @4), C.intern(base), true,
-                                           std::vector<ImportDecl::Module>{{&C.intern(name), &C.intern("")}});
-                                    }
+                                    { $$ = paykan::parser::makeSingleImport(impl(drv).Ctx, loc(@1, @4), $3, "", /*isSystem=*/true); }
     | "import" "::" modulePath "as" IDENT ";"
-                                    { auto &C = impl(drv).Ctx;
-                                      auto sep = $3.rfind("::");
-                                      std::string base = (sep == std::string::npos) ? "" : $3.substr(0, sep);
-                                      std::string name = (sep == std::string::npos) ? $3 : $3.substr(sep + 2);
-                                      $$ = C.make<ImportDecl>(loc(@1, @6), C.intern(base), true,
-                                           std::vector<ImportDecl::Module>{{&C.intern(name), &C.intern($5)}});
-                                    }
+                                    { $$ = paykan::parser::makeSingleImport(impl(drv).Ctx, loc(@1, @6), $3, $5, /*isSystem=*/true); }
     | "import" "::" modulePath "::" "{" importedModuleList "}" ";"
-                                    { auto &C = impl(drv).Ctx;
-                                      $$ = C.make<ImportDecl>(loc(@1, @8), C.intern($3), true,
-                                           [&]{ std::vector<ImportDecl::Module> ms; for (auto &p : $6) ms.push_back({&C.intern(p.first), &C.intern(p.second)}); return ms; }());
-                                    }
+                                    { $$ = paykan::parser::makeImportList(impl(drv).Ctx, loc(@1, @8), $3, $6, /*isSystem=*/true); }
     | "import" "::" "{" importedModuleList "}" ";"
-                                    { auto &C = impl(drv).Ctx;
-                                      $$ = C.make<ImportDecl>(loc(@1, @6), C.intern(""), true,
-                                           [&]{ std::vector<ImportDecl::Module> ms; for (auto &p : $4) ms.push_back({&C.intern(p.first), &C.intern(p.second)}); return ms; }());
-                                    }
+                                    { $$ = paykan::parser::makeImportList(impl(drv).Ctx, loc(@1, @6), "", $4, /*isSystem=*/true); }
     ;
 
 importedModule:
@@ -323,6 +296,34 @@ typeAnnotation: IDENT               { auto *ty = impl(drv).Ctx.lookupType($1);
                                     { $$ = impl(drv).Ctx.make<GenericType>(loc(@1, @6),
                                            impl(drv).Ctx.intern($1 + "::" + $3), std::move($5)); }
     | typeAnnotation "[" "]"        { $$ = impl(drv).Ctx.make<ArrayType>(loc(@1, @3), $1); }
+    | typeAnnotation "?"            { // Optional type T? (prototype, issue #5).  Only
+                                      // reference types may be optional; the builtin
+                                      // value types are known at parse time and are
+                                      // rejected here (an enum spelled `Color?` is only
+                                      // known to Sema, which rejects it there).
+                                      if (isa<BuiltinType>($1))
+                                        throw yy::parser::syntax_error(@2,
+                                          "optional primitive types are not supported yet ('"
+                                          + typeName($1) + "?')");
+                                      if (isa<OptionalType>($1))
+                                        throw yy::parser::syntax_error(@2,
+                                          "nested optional type '" + typeName($1)
+                                          + "?' is not supported");
+                                      $$ = impl(drv).Ctx.make<OptionalType>(loc(@1, @2), $1);
+                                    }
+    | "(" tupleTypeElems ")"        { // Tuple type (T1, T2, ...).  The element list
+                                      // nonterminal starts at two elements, so a
+                                      // 1-tuple type `(int)` is a syntax error rather
+                                      // than a parenthesised type.
+                                      $$ = impl(drv).Ctx.make<TupleType>(loc(@1, @3), std::move($2)); }
+    ;
+
+// Two or more comma-separated types — the body of a tuple type annotation.
+tupleTypeElems:
+      typeAnnotation "," typeAnnotation
+                                    { $$ = std::vector<Type *>{$1, $3}; }
+    | tupleTypeElems "," typeAnnotation
+                                    { $$ = std::move($1); $$.push_back($3); }
     ;
 
 typeArgList:
@@ -350,11 +351,20 @@ statement: ";"                      { $$ = nullptr; }
                                         $$ = impl(drv).Ctx.make<MemberAssignStmt>(loc(@1, @4), ma->getReceiver(), ma->getFieldName(), $3);
                                       } else if (auto *se = dyn_cast<SubscriptExpr>($1)) {
                                         $$ = impl(drv).Ctx.make<SubscriptAssignStmt>(loc(@1, @4), se->getArray(), se->getIndex(), $3);
+                                      } else if (auto *ti = dyn_cast<TupleIndexExpr>($1)) {
+                                        // `t.0 = v` is well-formed syntax but tuples are
+                                        // immutable: hand it to Sema as a member assignment
+                                        // whose "field" is the index so the rejection is a
+                                        // typed diagnostic rather than a parse error.
+                                        $$ = impl(drv).Ctx.make<MemberAssignStmt>(loc(@1, @4), ti->getTuple(),
+                                             impl(drv).Ctx.intern(std::to_string(ti->getIndex())), $3);
                                       } else {
                                         throw yy::parser::syntax_error(@1, "left-hand side of '=' must be an identifier, field access, or subscript");
                                       }
                                     }
     | staticAssignment ";"          { $$ = $1; }
+    | destructureTargets "=" expression ";"
+                                    { $$ = impl(drv).Ctx.make<DestructureStmt>(loc(@1, @4), std::move($1), $3); }
     | "return" expression ";"       { $$ = impl(drv).Ctx.make<ReturnStmt>(loc(@1, @3), $2); }
     | "return" ";"                  { $$ = impl(drv).Ctx.make<ReturnStmt>(loc(@1, @2), nullptr); }
     | block                         { $$ = $1; }
@@ -364,6 +374,24 @@ statement: ";"                      { $$ = nullptr; }
     | "continue" ";"                { $$ = impl(drv).Ctx.make<ContinueStmt>(loc(@1, @2)); }
     | matchStmt                     { $$ = $1; }
     | error ";"                     { $$ = nullptr; yyerrok; }
+    ;
+
+// Destructuring targets: `a, b`, `a: int, _`, ... (two or more).  Unlike the
+// `expression "=" expression` statement, the first target is parsed as a bare
+// IDENT (not an expression), so after IDENT the lookahead alone decides:
+// `,` → destructuring target, `=` / operators → expression / assignment,
+// `:` followed by a type and then `,` → typed target, `=` → staticAssignment.
+destructureTarget:
+      IDENT                         { $$ = DestructureStmt::Target{&impl(drv).Ctx.intern($1), nullptr, loc(@1, @1)}; }
+    | IDENT ":" typeAnnotation      { $$ = DestructureStmt::Target{&impl(drv).Ctx.intern($1), $3, loc(@1, @3)}; }
+    | "_"                           { $$ = DestructureStmt::Target{&impl(drv).Ctx.intern(""), nullptr, loc(@1, @1)}; }
+    ;
+
+destructureTargets:
+      destructureTarget "," destructureTarget
+                                    { $$ = std::vector<DestructureStmt::Target>{std::move($1), std::move($3)}; }
+    | destructureTargets "," destructureTarget
+                                    { $$ = std::move($1); $$.push_back(std::move($3)); }
     ;
 
 matchStmt: "match" expression "{" matchArmList "}"
@@ -386,8 +414,11 @@ matchArm:
 
 // A literal usable as a value-match pattern.  Restricted to bare literal tokens
 // so the grammar stays unambiguous against type arms (which start with IDENT).
+// `None` is accepted so that a match over an optional `T?` subject can name
+// the absent case explicitly (Sema rejects it for every other subject type).
 literalPattern:
       INT                           { $$ = impl(drv).Ctx.make<IntegerLiteral>(loc(@1, @1), $1); }
+    | NONE                          { $$ = impl(drv).Ctx.make<NoneLiteral>(loc(@1, @1)); }
     | FLOAT                         { $$ = impl(drv).Ctx.make<FloatLiteral>(loc(@1, @1), $1); }
     | BOOL                          { $$ = impl(drv).Ctx.make<BoolLiteral>(loc(@1, @1), $1); }
     | CHAR                          { $$ = impl(drv).Ctx.make<CharLiteral>(loc(@1, @1), $1); }
@@ -460,7 +491,18 @@ primaryExpression:
                                            impl(drv).Ctx.intern($1), impl(drv).Ctx.intern($3)); }
     | IDENT                         { $$ = impl(drv).Ctx.make<Identifier>(loc(@1, @1), impl(drv).Ctx.intern($1)); }
     | "(" expression ")"            { $$ = $2; }
+    | "(" tupleExprElems ")"        { // Tuple literal (e1, e2, ...).  Shares the "(" expression
+                                      // prefix with the parenthesised expression above; the
+                                      // next token decides: ")" → plain expression (no
+                                      // 1-tuples), "," → tuple literal.
+                                      $$ = impl(drv).Ctx.make<TupleLiteralExpr>(loc(@1, @3), std::move($2)); }
     | "[" argumentList "]"          { $$ = impl(drv).Ctx.make<ArrayLiteralExpr>(loc(@1, @3), std::move($2)); }
+    ;
+
+// Two or more comma-separated expressions — the body of a tuple literal.
+tupleExprElems:
+      expression "," expression     { $$ = std::vector<Expr *>{$1, $3}; }
+    | tupleExprElems "," expression { $$ = std::move($1); $$.push_back($3); }
     ;
 
 argumentList: %empty                { $$ = std::vector<Expr *>(); }
@@ -476,6 +518,7 @@ postfixExpression:
                                     { $$ = impl(drv).Ctx.make<MemberAccessExpr>(loc(@1, @3), $1, impl(drv).Ctx.intern($3)); }
     | postfixExpression "[" expression "]"
                                     { $$ = impl(drv).Ctx.make<SubscriptExpr>(loc(@1, @4), $1, $3); }
+    | postfixExpression TUPLE_INDEX { $$ = impl(drv).Ctx.make<TupleIndexExpr>(loc(@1, @2), $1, static_cast<size_t>($2)); }
     ;
 
 unaryOperator: "!"                  { $$ = UnaryOpcode::Not; }

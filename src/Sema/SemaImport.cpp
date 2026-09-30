@@ -22,19 +22,97 @@ namespace sema {
 // resolveExportedType below and is diagnosed by the caller as an unknown type
 // — export reconstruction never silently substitutes Obj or void.
 
-/// Resolve a serialised type name (possibly carrying trailing "[]" array
-/// markers) to a Type* in @p ctx.  Builtins/classes/enums resolve by name;
-/// "T[]" becomes an ArrayType over the resolved element type.  Returns nullptr
-/// if the base name is unknown.
+/// Parse one serialised type starting at @p pos in @p text, advancing @p pos
+/// past it.  Grammar (the output language of ast::typeName):
+///
+///   type  := base suffix*
+///   base  := '(' type (', ' type)+ ')'        -- tuple (arity >= 2)
+///          | name                             -- builtin / class / enum
+///   suffix := '[]'                            -- array of the type so far
+///           | '?'                             -- optional of the type so far
+///
+/// Suffixes apply left to right, mirroring how ast::typeName spells nesting:
+/// "Str?[]" is an array of optional strings, "int[]?" an optional array, and
+/// "(Node?, int)[]?" an optional array of tuples.  A name runs up to the next
+/// ',' or ')' at this nesting level or the next suffix.  A generic
+/// instantiation's name carries its type arguments (`Pair<Str, int>`,
+/// `Box<Node?[]>`): everything between its '<' and the matching '>' is part of
+/// the name, which is registered under exactly that spelling.  Returns nullptr
+/// (leaving @p pos wherever it stopped) if the text is malformed or a base
+/// name is unknown in @p ctx.
+static ast::Type *parseExportedType(ast::ASTContext &ctx,
+                                    const std::string &text, size_t &pos) {
+  ast::Type *ty = nullptr;
+  if (pos < text.size() && text[pos] == '(') {
+    ++pos;
+    std::vector<ast::Type *> elems;
+    for (;;) {
+      ast::Type *elem = parseExportedType(ctx, text, pos);
+      if (!elem)
+        return nullptr;
+      elems.push_back(elem);
+      if (text.compare(pos, 2, ", ") == 0) {
+        pos += 2;
+        continue;
+      }
+      if (pos < text.size() && text[pos] == ')') {
+        ++pos;
+        break;
+      }
+      return nullptr;
+    }
+    if (elems.size() < 2)
+      return nullptr;
+    ty = ctx.getTupleType(std::move(elems));
+  } else {
+    size_t start = pos;
+    while (pos < text.size() && text[pos] != ',' && text[pos] != ')' &&
+           text[pos] != '[' && text[pos] != '?') {
+      if (text[pos] == '<') {
+        // Instantiation name: skip to the matching '>'.
+        int depth = 0;
+        do {
+          if (text[pos] == '<')
+            ++depth;
+          else if (text[pos] == '>')
+            --depth;
+          ++pos;
+        } while (pos < text.size() && depth > 0);
+        if (depth != 0)
+          return nullptr;
+        continue;
+      }
+      ++pos;
+    }
+    if (pos == start)
+      return nullptr;
+    ty = ctx.lookupType(text.substr(start, pos - start));
+    if (!ty)
+      return nullptr;
+  }
+  for (;;) {
+    if (text.compare(pos, 2, "[]") == 0) {
+      pos += 2;
+      ty = ctx.getArrayType(ty);
+    } else if (pos < text.size() && text[pos] == '?') {
+      ++pos;
+      ty = ctx.getOptionalType(ty);
+    } else {
+      break;
+    }
+  }
+  return ty;
+}
+
+/// Resolve a serialised type name — a builtin/class/enum name, optionally
+/// wrapped in "[]" array / "?" optional markers and/or "(T1, T2)" tuple
+/// parentheses, nested arbitrarily — to the canonical Type* in @p ctx.
+/// Returns nullptr if any base name is unknown or the text is malformed.
 static ast::Type *resolveExportedType(ast::ASTContext &ctx,
                                       const std::string &name) {
-  if (name.size() > 2 && name.compare(name.size() - 2, 2, "[]") == 0) {
-    ast::Type *elem = resolveExportedType(ctx, name.substr(0, name.size() - 2));
-    if (!elem)
-      return nullptr;
-    return ctx.getArrayType(elem);
-  }
-  return ctx.lookupType(name);
+  size_t pos = 0;
+  ast::Type *ty = parseExportedType(ctx, name, pos);
+  return (ty && pos == name.size()) ? ty : nullptr;
 }
 
 /// True for the class names every ASTContext registers at construction (Obj,
@@ -384,7 +462,12 @@ bool Sema::processImport(ast::ImportDecl *node) {
       // identity.
       if (name != ct->getName())
         continue;
-      if (isBootstrapClassName(name) || modCtx.getSpecializedArrayElemType(ct))
+      // Lazily-created Array<T> / Tuple<T1, T2> specialisations are never
+      // exported either: the importing context rebuilds its own from the
+      // `T[]` / `(T1, T2)` spellings in the signatures that use them.
+      if (isBootstrapClassName(name) ||
+          modCtx.getSpecializedArrayElemType(ct) ||
+          modCtx.getSpecializedTupleElemType(ct))
         continue;
       ModuleInfo::ClassInfo ci;
       ci.Name = name;

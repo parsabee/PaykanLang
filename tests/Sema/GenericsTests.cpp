@@ -564,3 +564,148 @@ fn main() -> int { b = Box<int>(1); return 0; }
       << r2.Diagnostics;
   std::filesystem::remove_all(dir);
 }
+
+// ============================================================================
+// Interaction with tuples (#4) and optionals (#5)
+// ============================================================================
+
+// Tuple and optional types in template signatures and bodies are substituted
+// per instantiation (tuple literals, `.N`, destructuring, `T?`, match arms).
+TEST(GenericsTypes, TupleAndOptionalBodiesInstantiate) {
+  auto r = semaCheck(R"(
+    class Node { v: int; fn __init__(x: int) { self.v = x; } }
+    class Pair<A, B> {
+      p: (A, B);
+      fn __init__(a: A, b: B) { self.p = (a, b); }
+      fn first() -> A { x, _ = self.p; return x; }
+      fn swap() -> (B, A) { return (self.p.1, self.p.0); }
+    }
+    class Slot<T> {
+      v: T?;
+      fn __init__() { }
+      fn get() -> T? { return self.v; }
+    }
+    fn orElse<T>(x: T?, d: T) -> T {
+      match x {
+        v: T { return v; }
+        None { return d; }
+      }
+    }
+    fn main() -> int {
+      q = Pair<Str, int>("a", 1);
+      s: (int, Str) = q.swap();
+      k: Str = q.first();
+      n: Node = orElse(Slot<Node>().get(), Node(0));
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(GenericsTypes, InferenceThroughTuplesAndOptionals) {
+  auto r = semaCheck(R"(
+    class Node { v: int; fn __init__(x: int) { self.v = x; } }
+    fn firstOf<A, B>(p: (A, B)) -> A { return p.0; }
+    fn unwrapOr<T>(x: T?, d: T) -> T {
+      match x {
+        v: T { return v; }
+        _    { return d; }
+      }
+    }
+    fn main() -> int {
+      i: int = firstOf((1, "x"));
+      s: Str = firstOf(("s", 2.5));
+      m: Node? = Node(1);
+      a: Node = unwrapOr(m, Node(2));       // T? against Node?
+      b: Node = unwrapOr(None, Node(3));    // None carries no information
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(GenericsTypes, NoneAloneCannotInferOptionalParam) {
+  auto r = semaCheck(R"(
+    fn wrap<T>(x: T?) -> T? { return x; }
+    fn main() -> int { w = wrap(None); return 0; }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_TRUE(has(r.Diagnostics,
+                  "cannot infer type parameter 'T' of 'wrap' from the call "
+                  "arguments"))
+      << r.Diagnostics;
+}
+
+TEST(GenericsTypes, TupleArityMismatchLeftToArgumentCheck) {
+  auto r = semaCheck(R"(
+    fn firstOf<A, B>(p: (A, B)) -> A { return p.0; }
+    fn main() -> int { x = firstOf<int, Str>((1, "a", 2)); return 0; }
+  )");
+  EXPECT_FALSE(r.Ok);
+}
+
+// A `T?` inside a template is checked per instantiation: with T = int it is
+// the usual optional-primitive error, attributed to the instantiation.
+TEST(GenericsTypes, OptionalOfPrimitiveArgumentIsDiagnosed) {
+  auto r = semaCheck(R"(
+    class Slot<T> { v: T?; fn __init__() { } }
+    fn main() -> int { b = Slot<int>(); return 0; }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_TRUE(has(r.Diagnostics, "has type 'int?': optional primitive types "
+                                 "are not supported yet"))
+      << r.Diagnostics;
+  EXPECT_TRUE(has(r.Diagnostics, "in instantiation of 'Slot<int>'"))
+      << r.Diagnostics;
+
+  // Likewise an optional tuple (not supported yet, see #15).
+  auto r2 = semaCheck(R"(
+    class Slot<T> { v: T?; fn __init__() { } }
+    fn main() -> int { b = Slot<(int, Str)>(); return 0; }
+  )");
+  EXPECT_FALSE(r2.Ok);
+  EXPECT_TRUE(has(r2.Diagnostics, "optional tuple types are not supported yet"))
+      << r2.Diagnostics;
+  EXPECT_TRUE(has(r2.Diagnostics, "in instantiation of 'Slot<(int, Str)>'"))
+      << r2.Diagnostics;
+}
+
+TEST(GenericsTypes, TupleAndOptionalTypeArgs) {
+  auto r = semaCheck(
+      withMain(std::string(kBox) + "class Node { fn __init__() { } }\n",
+               R"(
+    a: Box<(int, Str)> = Box<(int, Str)>((1, "a"));
+    t: (int, Str) = a.get();
+    n: Node? = None;
+    b: Box<Node?> = Box<Node?>(n);
+    c: Box<Node?[]> = Box<Node?[]>([]);
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+// Exported instantiations whose names contain ',' and '[]' round-trip: the
+// import type parser keeps `Pair<Str, int>` / `Box<int[]>` together as names.
+TEST(GenericsTypes, ExportedInstantiationNamesWithCommasAndArrays) {
+  auto dir = std::filesystem::temp_directory_path() / "pkn_sema_generics_names";
+  std::filesystem::remove_all(dir);
+  writeProjectFile(dir, "lib.pkn", R"(
+class Pair<A, B> { a: A; b: B; fn __init__(a: A, b: B) { self.a = a; self.b = b; } fn first() -> A { return self.a; } }
+class Box<T> { v: T; fn __init__(v: T) { self.v = v; } fn get() -> T { return self.v; } }
+fn mkPair() -> Pair<Str, int> { return Pair<Str, int>("k", 1); }
+fn mkBoxArr() -> Box<int[]> { return Box<int[]>([1, 2, 3]); }
+fn mkBoxes() -> (Pair<Str, int>, Box<int[]>?) { b: Box<int[]>? = None; return (mkPair(), b); }
+)");
+  auto p = writeProjectFile(dir, "main.pkn", R"(
+import lib;
+fn main() -> int {
+  s: Str = lib::mkPair().first();
+  n: int = lib::mkBoxArr().get().len();
+  x, y = lib::mkBoxes();
+  k: Str = x.first();
+  return n;
+}
+)");
+  auto r = semaCheckFile(p);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(dir);
+}

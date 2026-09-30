@@ -14,6 +14,8 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Value.h>
 
+#include <llvm/ADT/ArrayRef.h>
+#include <llvm/ADT/STLFunctionalExtras.h>
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/StringSet.h>
@@ -192,6 +194,35 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   /// this instance's own @ref CodeGenedImports for the top-level CodeGen.
   llvm::StringMap<llvm::Module *> *ImportRegistry = nullptr;
 
+  /// Further import-graph state shared, like @ref ImportRegistry, between the
+  /// top-level CodeGen and every nested import CodeGen.
+  struct ImportGraphState {
+    /// Every SemaContext reachable from the top-level one, keyed by resolved
+    /// file path.  Sema analyses each module once per process, so a module's
+    /// context lives under whichever importer loaded it FIRST — not
+    /// necessarily under the module currently being processed — hence a flat
+    /// index rather than a per-importer lookup.
+    llvm::StringMap<const sema::SemaContext *> Contexts;
+    bool Indexed = false;
+    /// Memoised bitcode-cache keys, keyed by resolved file path
+    /// (see importCacheKey).
+    llvm::StringMap<std::string> CacheKeys;
+  };
+  ImportGraphState OwnImportGraph;
+  ImportGraphState *ImportGraph = nullptr;
+
+  /// Find the SemaContext of an imported module, indexing the whole context
+  /// tree on first use.  Returns nullptr if Sema never produced one.
+  const sema::SemaContext *lookupImportContext(llvm::StringRef resolved);
+
+  /// Compute (memoised) the bitcode-cache key of an imported module: a hash of
+  /// its source text, the keys of every module it imports (so any change in a
+  /// transitive dependency invalidates it), the compiler version and the
+  /// generated-code ABI version.  Returns "" if it cannot be determined, in
+  /// which case the cache is neither read nor written for that module.
+  std::string importCacheKey(llvm::StringRef resolved,
+                             const sema::SemaContext &modCtx);
+
   /// Wire up one import site: for every function defined in @p defMod, declare
   /// the qualified name in the current module and add the matching alias to
   /// @p defMod (idempotent).  Used both when a module is freshly generated and
@@ -209,6 +240,28 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   /// fingerprint of the element values).  Avoids duplicate `.arr.data`
   /// globals for identical array literals.
   llvm::StringMap<llvm::GlobalVariable *> InternedArrayData;
+
+  /// Intern table for tuple slot-kind descriptors (keyed by the kind bytes).
+  /// One `[N x i8]` global per distinct tuple element-kind sequence.
+  llvm::StringMap<llvm::GlobalVariable *> InternedTupleKinds;
+
+  // -- Tuples (prototype) ----------------------------------------------------
+
+  /// The runtime slot kind (names::TupleSlotKind) for a tuple element of the
+  /// given static type: reference types are boxed slots, everything else is
+  /// stored raw.
+  unsigned char tupleElementKind(ast::Type *elemTy) const;
+
+  /// Return the (interned) `[N x i8]` constant holding the kind byte of every
+  /// element of @p tt — the descriptor handed to PaykanTuple_new.
+  llvm::GlobalVariable *emitTupleKindsGlobal(ast::TupleType *tt);
+
+  /// Coerce a primitive element value to the raw i64 bits stored in a tuple
+  /// slot (double -> bitcast, i1 / i8 -> zext, i64 unchanged).
+  llvm::Value *toTupleSlotBits(llvm::Value *v);
+
+  /// Reinterpret the raw i64 bits of a primitive tuple slot as @p elemTy.
+  llvm::Value *fromTupleSlotBits(llvm::Value *bits, ast::Type *elemTy);
 
   /// Process imports: codegen each imported module.
   void processImports(ast::TranslationUnit *tu);
@@ -233,6 +286,23 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   llvm::BasicBlock *createMatchWildcardBlock(ast::MatchStmt *node,
                                              llvm::Function *parentFn);
 
+  /// Create the (not yet populated) body block for the arm at index
+  /// `armIdx`, named "match.arm<armIdx>".
+  llvm::BasicBlock *createMatchArmBlock(size_t armIdx,
+                                        llvm::Function *parentFn);
+
+  /// Emit the if-else check chain shared by all three match modes.  For each
+  /// arm i in order, `emitCheck(i)` is invoked at the current insertion point
+  /// and must return the i1 "this arm matches" value; on success control goes
+  /// to `bodyBBs[i]`, otherwise to the next arm's check block (or to
+  /// `defaultBB` after the last arm).  With no arms the current block simply
+  /// branches to `defaultBB`.  Leaves the insertion point in the last check
+  /// block (or unchanged when there are no arms).
+  void emitMatchCheckChain(llvm::ArrayRef<llvm::BasicBlock *> bodyBBs,
+                           llvm::BasicBlock *defaultBB,
+                           llvm::Function *parentFn,
+                           llvm::function_ref<llvm::Value *(size_t)> emitCheck);
+
   /// Emit one arm's body statements into `bodyBB` inside a fresh scope, then
   /// branch to `endBB` unless the body already terminated the block.
   void emitMatchArmBody(ast::MatchArm *arm, llvm::BasicBlock *bodyBB,
@@ -255,8 +325,44 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   void emitLoopScopesCleanup();
 
   /// Emit expr as a PaykanShared* — wraps raw pointers, retains owned vars,
-  /// passes through already-shared call/ternary results.
+  /// passes through already-shared call/ternary results.  Applies the
+  /// optional-type representation rules (see the helpers below): a `None`
+  /// destined for a `T?` slot yields the null box, and a `T?` value destined
+  /// for an `Obj` slot has its null box replaced by the boxed None singleton.
   llvm::Value *emitAsShared(ast::Expr *expr);
+  /// emitAsShared without the optional-type rules (the body of the old
+  /// emitAsShared; kept separate so every caller gets the rules uniformly).
+  llvm::Value *emitAsSharedRaw(ast::Expr *expr);
+
+  // -- Optional types (prototype, issue #5) ----------------------------------
+  //
+  // A `T?` is the same PaykanShared* box as a `T`, with NULL meaning None.
+  // Sema records the two implicit conversions on the AST (see
+  // Sema::checkAssignable) and CodeGen applies them here:
+  //
+  //   * `None` flowing into a `T?` slot: the literal's resolved type is that
+  //     `T?` (isNoneForOptional) and the emitted value is the null box —
+  //     never the boxed `None` singleton, which is how a *present* `Obj`
+  //     spells None.
+  //   * a `T?` flowing into an `Obj` slot (Expr::CoercedType): the value is
+  //     coerced so an `Obj` never holds a NULL box — a null box becomes a +1
+  //     box of the None singleton (emitOptionalToObj), or, on the raw-pointer
+  //     builtin-call path, the singleton's address (emitOptionalToObjRaw).
+
+  /// True when `expr` is the `None` literal in an optional-typed position.
+  static bool isNoneForOptional(ast::Expr *expr);
+  /// If Sema marked `expr` as a `T?` -> `Obj` conversion, return a box that
+  /// is never NULL (phi of `box` and a fresh box of the None singleton);
+  /// otherwise return `box` unchanged.
+  llvm::Value *emitOptionalToObj(ast::Expr *expr, llvm::Value *box);
+  /// Raw-pointer variant of emitOptionalToObj: `raw` is an unboxed
+  /// PaykanObject* that is NULL for None; substitutes the None singleton.
+  llvm::Value *emitOptionalToObjRaw(ast::Expr *expr, llvm::Value *raw);
+  /// Lower `==` / `!=` when at least one operand is optional: a null check
+  /// against the `None` literal, or the two-optional protocol (both None ->
+  /// equal; one None -> not equal; otherwise the virtual `equals`).  Returns
+  /// the i1 "equal" result (the caller negates for `!=`).
+  llvm::Value *emitOptionalEquality(ast::BinaryExpr *node);
 
   /// RAII helper to push/pop a scope.
   struct ScopeGuard {
@@ -356,6 +462,9 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   void emitRetain(llvm::Value *shared);
   void emitRelease(llvm::Value *shared);
   llvm::Value *emitSharedNew(llvm::Value *raw, llvm::StringRef name = "shared");
+  /// Unwrap a PaykanShared* box to its raw object pointer (PaykanShared_get).
+  /// Pure read: neither retains nor releases the box.
+  llvm::Value *emitSharedGet(llvm::Value *shared, const llvm::Twine &name);
 
   /// Take ownership of `val`, the PaykanShared* just emitted for `expr`
   /// (exprAlreadyShared(expr) must hold): a freshly produced +1 box (call /

@@ -41,7 +41,8 @@ namespace ast {
   NODE(NK_ContinueStmt, ContinueStmt, ContinueStmt)                            \
   NODE(NK_MemberAssignStmt, MemberAssignStmt, MemberAssignStmt)                \
   NODE(NK_MatchStmt, MatchStmt, MatchStmt)                                     \
-  NODE(NK_SubscriptAssignStmt, SubscriptAssignStmt, SubscriptAssignStmt)
+  NODE(NK_SubscriptAssignStmt, SubscriptAssignStmt, SubscriptAssignStmt)       \
+  NODE(NK_DestructureStmt, DestructureStmt, DestructureStmt)
 
 #define PAYKAN_EXPR_NODES(NODE)                                                \
   NODE(NK_IntegerLiteral, IntegerLiteral, IntegerLiteral)                      \
@@ -60,13 +61,17 @@ namespace ast {
   NODE(NK_ArrayLiteralExpr, ArrayLiteralExpr, ArrayLiteralExpr)                \
   NODE(NK_SubscriptExpr, SubscriptExpr, SubscriptExpr)                         \
   NODE(NK_EnumValueExpr, EnumValueExpr, EnumValueExpr)                         \
-  NODE(NK_MovExpr, MovExpr, MovExpr)
+  NODE(NK_MovExpr, MovExpr, MovExpr)                                           \
+  NODE(NK_TupleLiteralExpr, TupleLiteralExpr, TupleLiteralExpr)                \
+  NODE(NK_TupleIndexExpr, TupleIndexExpr, TupleIndexExpr)
 
 #define PAYKAN_TYPE_NODES(NODE)                                                \
   NODE(NK_BuiltinType, BuiltinType, BuiltinType)                               \
   NODE(NK_ClassType, ClassType, ClassType)                                     \
   NODE(NK_ArrayType, ArrayType, ArrayType)                                     \
+  NODE(NK_OptionalType, OptionalType, OptionalType)                            \
   NODE(NK_EnumType, EnumType, EnumType)                                        \
+  NODE(NK_TupleType, TupleType, TupleType)                                     \
   NODE(NK_GenericType, GenericType, GenericType)
 
 #define PAYKAN_TOPLEVEL_NODES(NODE)                                            \

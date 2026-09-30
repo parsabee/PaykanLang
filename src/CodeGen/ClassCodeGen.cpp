@@ -120,10 +120,11 @@ llvm::Value *ClassCodeGen::emitIsExactType(llvm::Value *rawObjPtr,
         arrTy, vtableGlobal, 0, 0, kIRVtableExpected + ct->getName());
   } else if (auto *elemTy = CG.ASTCtx.getSpecializedArrayElemType(ct)) {
     // Specialized array type (e.g. Array<Str>): use the runtime vtable.
-    // Value-element arrays (int/float/bool) use PaykanArray_vtable;
+    // Value-element arrays (int/float/bool/enum) use PaykanArray_vtable;
     // object-element arrays (Str[], Point[], ...) use PaykanArray_obj_vtable.
-    bool isObjElem =
-        ast::isa<ast::ClassType>(elemTy) || ast::isa<ast::ArrayType>(elemTy);
+    // Same predicate as array construction (emitArrayLiteralExpr), so the
+    // expected vtable is the one the array was actually created with.
+    bool isObjElem = CG.isObjectElementType(elemTy);
     const char *vtName =
         isObjElem ? names::kPaykanArrayObjVtable : names::kPaykanArrayVtable;
     // Use [0 x ptr] as placeholder — GEP(0,0) is offset zero so the address
@@ -170,6 +171,8 @@ ast::ClassType *ClassCodeGen::getExprClassType(ast::Expr *expr) const {
     return ast::dyn_cast<ast::ClassType>(ce->getResolvedType());
   if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(expr))
     return ast::dyn_cast<ast::ClassType>(se->getResolvedType());
+  if (auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(expr))
+    return ast::dyn_cast<ast::ClassType>(ti->getResolvedType());
   return nullptr;
 }
 
@@ -646,11 +649,8 @@ llvm::Value *ClassCodeGen::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
   ExprValue recvOwned = CG.classifyExpr(node->getReceiver(), recv);
   llvm::Value *objPtr = recv;
   if (CG.exprAlreadyShared(node->getReceiver()) &&
-      recv->getType()->isPointerTy()) {
-    auto *getFnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
-    objPtr = CG.Builder.CreateCall(
-        CG.declareFunction(kPaykanSharedGet, getFnTy), {recv}, kIRObj);
-  }
+      recv->getType()->isPointerTy())
+    objPtr = CG.emitSharedGet(recv, kIRObj);
 
   // Determine the ClassType of the receiver.
   ast::ClassType *ct = getExprClassType(node->getReceiver());
@@ -681,6 +681,10 @@ llvm::Value *ClassCodeGen::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
     // PaykanArray* here would be read back as a box and double-freed.
     llvm::Value *newShared = nullptr;
 
+    // `self.next = None` for an optional field: store the null box.
+    if (CodeGen::isNoneForOptional(node->getValue()))
+      newShared = llvm::ConstantPointerNull::get(ptrTy);
+
     // If RHS is an owned identifier, load its shared box and retain — do NOT
     // call emitExpr which would unwrap it to a raw pointer via visitIdentifier.
     if (auto *rhsId = ast::dyn_cast<ast::Identifier>(node->getValue())) {
@@ -709,6 +713,8 @@ llvm::Value *ClassCodeGen::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
                       ? CG.takeSharedOwnership(node->getValue(), rhs)
                       : CG.emitSharedNew(rhs, kIRFieldShared);
     }
+    // A `T?` value stored into an `Obj` field: never store a NULL box there.
+    newShared = CG.emitOptionalToObj(node->getValue(), newShared);
 
     // Release old value only if it's non-null.
     llvm::Value *old = CG.Builder.CreateLoad(ptrTy, fieldSlot, kIROldField);
@@ -763,11 +769,8 @@ llvm::Value *ClassCodeGen::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
   // would return its refCount/object words instead).
   llvm::Value *objPtr = recv;
   if (CG.exprAlreadyShared(node->getReceiver()) &&
-      recv->getType()->isPointerTy()) {
-    auto *getFnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
-    objPtr = CG.Builder.CreateCall(
-        CG.declareFunction(kPaykanSharedGet, getFnTy), {recv}, kIRObj);
-  }
+      recv->getType()->isPointerTy())
+    objPtr = CG.emitSharedGet(recv, kIRObj);
 
   // Determine the ClassType of the receiver.
   ast::ClassType *ct = getExprClassType(node->getReceiver());

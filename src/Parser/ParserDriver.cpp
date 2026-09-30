@@ -82,10 +82,11 @@ int ParserDriver::Impl::parse(ParserDriver &drv) {
 // while `first<int>(xs)` opens a type-argument list.  The grammar is LALR(1),
 // so the decision is made here instead, C#-style: on a '<' that directly
 // follows an identifier, scan ahead over the tokens a type-argument list may
-// contain (identifiers, '::', ',', '[', ']', nested '<' '>') to the matching
-// '>'; when that '>' is immediately followed by '(' the '<' is delivered as
-// TYPELESS, otherwise as the ordinary LESS.  The scanned tokens are queued and
-// replayed to the parser afterwards, so nothing is lost.
+// contain (identifiers, '::', ',', '[', ']', '?' for optional types, '(' ')'
+// for tuple types, nested '<' '>') to the matching '>'; when that '>' is
+// immediately followed by '(' the '<' is delivered as TYPELESS, otherwise as
+// the ordinary LESS.  The scanned tokens are queued and replayed to the
+// parser afterwards, so nothing is lost.
 //
 // A comparison can only be misread when it has exactly the shape of a generic
 // call, `a < b > (c)` -- which the grammar rejects anyway (relational operators
@@ -109,7 +110,8 @@ yy::parser::symbol_type nextToken(paykan::parser::ParserDriver &drv) {
 bool isTypeArgToken(symbol_kind::symbol_kind_type k) {
   return k == symbol_kind::S_IDENT || k == symbol_kind::S_COLONCOLON ||
          k == symbol_kind::S_COMMA || k == symbol_kind::S_LSQUARE ||
-         k == symbol_kind::S_RSQUARE;
+         k == symbol_kind::S_RSQUARE || k == symbol_kind::S_QUESTION ||
+         k == symbol_kind::S_LPAREN || k == symbol_kind::S_RPAREN;
 }
 
 } // namespace

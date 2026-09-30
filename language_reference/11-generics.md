@@ -109,8 +109,12 @@ unbox(Box<int>(4));       // T = int, found through Box<T>
 first<Str>(words);        // explicit — always allowed
 ```
 
-Inference looks through arrays (`T[]`) and through instantiations
-(`Box<T>`, also when the argument is a subclass of one). It is exact: a
+Inference looks through arrays (`T[]`), tuples (`(A, B)`, element by element),
+optionals (`T?` against a `U?` or a plain `U`) and instantiations (`Box<T>`,
+also when the argument is a subclass of one). A bare `None` argument is typed
+`Obj` and carries no information about `T`: `unwrapOr(None, Node(3))` infers
+`T = Node` from the second argument, but `wrap(None)` alone cannot be inferred
+and needs `wrap<Node>(None)`. It is exact: a
 parameter that appears twice must be deduced as the same type, and no
 promotion or subtyping is applied. When inference is impossible or ambiguous
 the call is an error with a hint to write the arguments explicitly:
@@ -131,8 +135,33 @@ inferred from its `__init__` parameters: `Box(3)` is `Box<int>(3)`.
 ## Type Parameters Are Types
 
 Inside a generic declaration `T` stands for the type argument and nothing
-else. It can be used in annotations, `T[]`, `Box<T>`, and `match` arms, but
-`y = T;` and `T()` are errors ("type parameter 'T' cannot be used as a value").
+else. It can be used in annotations, `T[]`, `Box<T>`, tuple types `(T, int)`,
+optional types `T?`, and `match` arms, but `y = T;` and `T()` are errors
+("type parameter 'T' cannot be used as a value").
+
+Tuples and optionals work inside templates and as type arguments:
+
+```pkn
+class Pair<A, B> {
+  p: (A, B);
+  fn __init__(a: A, b: B) { self.p = (a, b); }
+  fn swap() -> (B, A) { return (self.p.1, self.p.0); }
+}
+fn orElse<T>(x: T?, d: T) -> T {
+  match x {
+    v: T { return v; }
+    None { return d; }
+  }
+}
+b = Box<(int, Str)>((1, "a"));     // tuple type argument
+m = ident<Node?>(n);               // optional type argument
+```
+
+Because each instantiation is checked separately, a `T?` in a template is
+rejected for the instantiations where it is not allowed — `Slot<int>`
+(`int?`: optional primitives are not supported) or `Slot<(int, Str)>`
+(optional tuples are not supported) — with the instantiation named in the
+diagnostic.
 
 ## How Errors Are Reported
 

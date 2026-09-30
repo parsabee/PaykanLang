@@ -1,0 +1,11 @@
+// OK: == / != between tuples of the same type (lowered to the element-wise
+// `equals`), plus the explicit toString / equals methods.
+fn main() -> int {
+  a = (1, "x");
+  b = (1, "x");
+  same: bool = a == b;
+  diff: bool = a != b;
+  viaMethod: bool = a.equals(b);
+  s: Str = a.toString();
+  return 0;
+}

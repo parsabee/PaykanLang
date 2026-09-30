@@ -1,0 +1,27 @@
+// Optional types (prototype): declarations, None, widening, reassignment,
+// optional parameters and returns.
+class Node {
+  v: int;
+  next: Node?;
+  fn __init__(x: int) { self.v = x; }
+}
+
+fn wrap(n: Node) -> Node? { return n; }
+fn pass(n: Node?) -> Node? { return n; }
+
+fn main() -> int {
+  a: Node? = None;
+  b: Node? = Node(1);
+  n: Node = Node(2);
+  c: Node? = n;                // Node widens to Node?
+  a = b;
+  a = None;
+  s: Str? = "text";
+  s = None;
+  d: Node? = wrap(n);
+  e: Node? = pass(None);
+  f = pass(Node(3));           // inferred Node?
+  o: Obj = f;                  // T? -> Obj is allowed
+  println(f);                  // print takes Obj
+  return 0;
+}

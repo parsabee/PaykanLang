@@ -1,0 +1,6 @@
+// `int?` is rejected by the parser: optional primitive types are not
+// supported yet.
+fn main() -> int {
+  x: int? = None;   // error: optional primitive types are not supported yet ('int?')
+  return 0;
+}

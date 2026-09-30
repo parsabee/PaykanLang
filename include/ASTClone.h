@@ -27,6 +27,8 @@ namespace ast {
 //   * ClassType stub whose name is a type parameter  -> the argument type
 //   * ArrayType                                      -> element substituted
 //   * GenericType (Box<T>)                           -> arguments substituted
+//   * OptionalType (T?)                              -> inner type substituted
+//   * TupleType ((T, int))                           -> elements substituted
 //   * anything else (builtin, enum, other class)     -> shared, not copied
 // Source locations are preserved on every cloned node, so a diagnostic inside
 // an instantiation points at the template's source text.

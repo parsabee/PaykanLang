@@ -1,0 +1,7 @@
+// ERROR: operands of '==' have mismatched types '(int, Str)' and '(int, int)'
+fn main() -> int {
+  a = (1, "x");
+  b = (1, 2);
+  eq: bool = a == b;
+  return 0;
+}

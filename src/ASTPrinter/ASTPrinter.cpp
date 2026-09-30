@@ -436,6 +436,76 @@ void ASTPrinter::visitGenericType(GenericType *node) {
   }
 }
 
+void ASTPrinter::visitOptionalType(OptionalType *node) {
+  printIndent();
+  OS << "OptionalType";
+  printLoc(node);
+  OS << "\n";
+  ChildScope cs(*this, true);
+  visit(node->getInnerType());
+}
+
+void ASTPrinter::visitTupleType(TupleType *node) {
+  printIndent();
+  OS << "TupleType";
+  printLoc(node);
+  OS << " " << node->getArity() << " elements\n";
+  for (size_t i = 0; i < node->getArity(); ++i) {
+    ChildScope cs(*this, i + 1 == node->getArity());
+    visit(node->getElementType(i));
+  }
+}
+
+void ASTPrinter::visitTupleLiteralExpr(TupleLiteralExpr *node) {
+  printIndent();
+  OS << "TupleLiteralExpr";
+  printLoc(node);
+  OS << " " << node->getNumElements() << " elements\n";
+  for (size_t i = 0; i < node->getNumElements(); ++i) {
+    ChildScope cs(*this, i + 1 == node->getNumElements());
+    visit(node->getElements()[i]);
+  }
+}
+
+void ASTPrinter::visitTupleIndexExpr(TupleIndexExpr *node) {
+  printIndent();
+  OS << "TupleIndexExpr";
+  printLoc(node);
+  OS << " ." << node->getIndex() << "\n";
+  ChildScope cs(*this, true);
+  visit(node->getTuple());
+}
+
+void ASTPrinter::visitDestructureStmt(DestructureStmt *node) {
+  printIndent();
+  OS << "DestructureStmt";
+  printLoc(node);
+  OS << " targets={";
+  bool first = true;
+  for (const auto &t : node->getTargets()) {
+    if (!first)
+      OS << ", ";
+    OS << (t.isSkip() ? "_" : t.getName());
+    if (t.DeclType)
+      OS << ": type";
+    first = false;
+  }
+  OS << "}\n";
+  // Typed targets print their annotation as children, then the value.
+  std::vector<Type *> declTypes;
+  for (const auto &t : node->getTargets())
+    if (t.DeclType)
+      declTypes.push_back(t.DeclType);
+  for (size_t i = 0; i < declTypes.size(); ++i) {
+    ChildScope cs(*this, false);
+    visit(declTypes[i]);
+  }
+  {
+    ChildScope cs(*this, true);
+    visit(node->getValue());
+  }
+}
+
 void ASTPrinter::visitArrayLiteralExpr(ArrayLiteralExpr *node) {
   printIndent();
   OS << "ArrayLiteralExpr";

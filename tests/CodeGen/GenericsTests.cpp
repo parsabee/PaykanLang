@@ -344,3 +344,109 @@ fn main() -> int { b = gen::mk(); return b.get() + 1; }
   std::filesystem::remove_all(dir);
   g.expectNoLeaks("ExportedInstantiationAcrossModules");
 }
+
+// ============================================================================
+// Interaction with tuples (#4) and optionals (#5)
+// ============================================================================
+
+TEST(GenericsTypes, TupleFieldLiteralIndexAndDestructuring) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Pair<A, B> {
+      p: (A, B);
+      fn __init__(a: A, b: B) { self.p = (a, b); }
+      fn first() -> A { x, _ = self.p; return x; }
+      fn second() -> B { return self.p.1; }
+      fn swap() -> (B, A) { return (self.p.1, self.p.0); }
+    }
+    fn firstOf<A, B>(p: (A, B)) -> A { return p.0; }
+    fn dup<T>(x: T) -> (T, T) { return (x, x); }
+    fn main() -> int {
+      q = Pair<Str, int>("a", 1);
+      println(q.first());
+      println(StrInt(q.second()));
+      println(q.swap());
+      r: Pair<int, Str> = Pair<int, Str>(2, "b");
+      println(r.swap());
+      println(StrInt(firstOf((7, "x"))));
+      a, b = dup("z");
+      println(a + b);
+      println(dup((1, "q")));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "a\n1\n(1, a)\n(b, 2)\n7\nzz\n((1, q), (1, q))\n");
+  g.expectNoLeaks("TupleFieldLiteralIndexAndDestructuring");
+}
+
+TEST(GenericsTypes, OptionalFieldsAndUnwrapInTemplates) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Node { v: int; fn __init__(x: int) { self.v = x; } }
+    class Slot<T> {
+      v: T?;
+      fn __init__() { }
+      fn set(x: T) { self.v = x; }
+      fn get() -> T? { return self.v; }
+    }
+    fn orElse<T>(x: T?, d: T) -> T {
+      match x {
+        v: T { return v; }
+        None { return d; }
+      }
+    }
+    fn ident<T>(x: T) -> T { return x; }
+    fn main() -> int {
+      b = Slot<Node>();
+      println(StrInt(orElse(b.get(), Node(0)).v));
+      b.set(Node(5));
+      println(StrInt(orElse(b.get(), Node(0)).v));
+      println(StrInt(orElse(None, Node(9)).v));
+      s = Slot<Str>();
+      println(orElse(s.get(), "dflt"));
+      n: Node? = None;
+      m = ident<Node?>(n);
+      println(StrBool(m == None));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "0\n5\n9\ndflt\nTrue\n");
+  g.expectNoLeaks("OptionalFieldsAndUnwrapInTemplates");
+}
+
+TEST(GenericsTypes, ExportedInstantiationNamesWithCommasAndArrays) {
+  LeakGuard g;
+  auto dir = std::filesystem::temp_directory_path() / "pkn_cg_generics_names";
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  {
+    std::ofstream lib(dir / "lib.pkn");
+    lib << R"(
+class Pair<A, B> { a: A; b: B; fn __init__(a: A, b: B) { self.a = a; self.b = b; } fn first() -> A { return self.a; } }
+class Box<T> { v: T; fn __init__(v: T) { self.v = v; } fn get() -> T { return self.v; } }
+fn mkPair() -> Pair<Str, int> { return Pair<Str, int>("k", 1); }
+fn mkBoxArr() -> Box<int[]> { return Box<int[]>([1, 2, 3]); }
+)";
+  }
+  auto mainPath = (dir / "main.pkn").string();
+  {
+    std::ofstream mainFile(mainPath);
+    mainFile << R"(
+import lib;
+fn main() -> int {
+  p = lib::mkPair();
+  println(p.first());
+  b = lib::mkBoxArr();
+  return b.get().len();
+}
+)";
+  }
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "k\n");
+  EXPECT_EQ(r.ExitCode, 3);
+  std::filesystem::remove_all(dir);
+  g.expectNoLeaks("ExportedInstantiationNamesWithCommasAndArrays");
+}

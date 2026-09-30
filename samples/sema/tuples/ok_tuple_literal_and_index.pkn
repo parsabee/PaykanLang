@@ -1,0 +1,11 @@
+// OK: tuple literals infer their element types; `.N` reads an element with
+// the precise static type; a parenthesised single expression is not a tuple.
+fn main() -> int {
+  t = (1, "a", True);
+  x: int = t.0;
+  s: Str = t.1;
+  b: bool = t.2;
+  u: (int, Str) = (2, "b");
+  paren: int = (1 + 2) * 3;
+  return x + u.0 + paren;
+}

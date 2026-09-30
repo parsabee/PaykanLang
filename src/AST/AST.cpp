@@ -169,6 +169,25 @@ Type *ASTCloner::cloneType(Type *ty) {
     return Ctx.make<GenericType>(gt->getLocation(), gt->getName(),
                                  std::move(args));
   }
+  if (auto *ot = dyn_cast<OptionalType>(ty)) {
+    Type *inner = cloneType(ot->getInnerType());
+    if (inner == ot->getInnerType())
+      return ty;
+    return Ctx.make<OptionalType>(ot->getLocation(), inner);
+  }
+  if (auto *tt = dyn_cast<TupleType>(ty)) {
+    bool changed = false;
+    std::vector<Type *> elems;
+    elems.reserve(tt->getArity());
+    for (auto *el : tt->getElementTypes()) {
+      Type *c = cloneType(el);
+      changed |= c != el;
+      elems.push_back(c);
+    }
+    if (!changed)
+      return ty;
+    return Ctx.make<TupleType>(tt->getLocation(), std::move(elems));
+  }
   // Builtin and enum types are canonical singletons.
   return ty;
 }
@@ -250,6 +269,18 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
   }
   case ASTNode::NK_MovExpr:
     return Ctx.make<MovExpr>(loc, cloneExpr(cast<MovExpr>(e)->getOperand()));
+  case ASTNode::NK_TupleLiteralExpr: {
+    auto *t = cast<TupleLiteralExpr>(e);
+    std::vector<Expr *> elems;
+    for (auto *el : t->getElements())
+      elems.push_back(cloneExpr(el));
+    return Ctx.make<TupleLiteralExpr>(loc, std::move(elems));
+  }
+  case ASTNode::NK_TupleIndexExpr: {
+    auto *ti = cast<TupleIndexExpr>(e);
+    return Ctx.make<TupleIndexExpr>(loc, cloneExpr(ti->getTuple()),
+                                    ti->getIndex());
+  }
   default:
     break;
   }
@@ -334,6 +365,15 @@ Stmt *ASTCloner::cloneStmt(Stmt *s) {
     return Ctx.make<SubscriptAssignStmt>(loc, cloneExpr(sa->getArray()),
                                          cloneExpr(sa->getIndex()),
                                          cloneExpr(sa->getValue()));
+  }
+  case ASTNode::NK_DestructureStmt: {
+    auto *d = cast<DestructureStmt>(s);
+    std::vector<DestructureStmt::Target> targets;
+    targets.reserve(d->getNumTargets());
+    for (const auto &t : d->getTargets())
+      targets.push_back({t.Name, cloneType(t.DeclType), t.Loc});
+    return Ctx.make<DestructureStmt>(loc, std::move(targets),
+                                     cloneExpr(d->getValue()));
   }
   default:
     break;

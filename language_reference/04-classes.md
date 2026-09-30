@@ -224,7 +224,7 @@ a: Animal = Dog();   // Dog stored as Animal — valid
 
 A class may take type parameters — `class Box<T> { v: T; … }` — and is then used
 as `Box<int>`, `Box<Str>`, `Box<Box<int>>`, each of which is an ordinary class
-created for that argument list. See `09-generics.md`.
+created for that argument list. See `11-generics.md`.
 
 ---
 
