@@ -276,11 +276,15 @@ TEST(Generics, LessThanStaysRelational) {
   ASSERT_TRUE(ok);
   auto *tu = driver->getRoot();
   // No call in main carries type arguments.
-  for (auto *s : tu->getFuncDecls()[0]->getBody()->getStatements())
-    if (auto *ds = dyn_cast<DeclStmt>(s))
-      if (auto *ce =
-              dyn_cast<CallExpr>(cast<VarDecl>(ds->getDecl())->getInitExpr()))
-        EXPECT_FALSE(ce->hasTypeArgs());
+  for (auto *s : tu->getFuncDecls()[0]->getBody()->getStatements()) {
+    auto *ds = dyn_cast<DeclStmt>(s);
+    if (!ds)
+      continue;
+    auto *ce = dyn_cast<CallExpr>(cast<VarDecl>(ds->getDecl())->getInitExpr());
+    if (ce) {
+      EXPECT_FALSE(ce->hasTypeArgs());
+    }
+  }
 }
 
 // `a < f<int>(x)`: the outer '<' is relational, the inner one opens type
