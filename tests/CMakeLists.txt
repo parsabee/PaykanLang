@@ -16,6 +16,7 @@ add_executable(parser_tests
     Parser/ModuleTests.cpp
     Parser/ArrayTests.cpp
     Parser/MovTests.cpp
+    Parser/GenericsTests.cpp
 )
 target_include_directories(parser_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}

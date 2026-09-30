@@ -58,7 +58,9 @@ void ASTPrinter::visitTranslationUnit(TranslationUnit *node) {
   printLoc(node);
   OS << "\n";
   size_t total = node->getImports().size() + node->getEnumDecls().size() +
-                 node->getClassDecls().size() + node->getFuncDecls().size();
+                 node->getClassDecls().size() + node->getFuncDecls().size() +
+                 node->getGenericClassDecls().size() +
+                 node->getGenericFuncDecls().size();
   size_t idx = 0;
   for (auto *imp : node->getImports()) {
     ++idx;
@@ -70,16 +72,37 @@ void ASTPrinter::visitTranslationUnit(TranslationUnit *node) {
     ChildScope cs(*this, idx == total);
     visitEnumDecl(en);
   }
+  for (auto *cls : node->getGenericClassDecls()) {
+    ++idx;
+    ChildScope cs(*this, idx == total);
+    visitClassDecl(cls);
+  }
   for (auto *cls : node->getClassDecls()) {
     ++idx;
     ChildScope cs(*this, idx == total);
     visitClassDecl(cls);
+  }
+  for (auto *fn : node->getGenericFuncDecls()) {
+    ++idx;
+    ChildScope cs(*this, idx == total);
+    visitFuncDecl(fn);
   }
   for (size_t i = 0; i < node->getFuncDecls().size(); ++i) {
     ++idx;
     ChildScope cs(*this, idx == total);
     visitFuncDecl(node->getFuncDecls()[i]);
   }
+}
+
+// Render `<T, U>` for a generic declaration's type parameters.
+static void printTypeParams(llvm::raw_ostream &os,
+                            const std::vector<const std::string *> &params) {
+  if (params.empty())
+    return;
+  os << " <";
+  for (size_t i = 0; i < params.size(); ++i)
+    os << (i ? ", " : "") << *params[i];
+  os << ">";
 }
 
 // -- Statements --------------------------------------------------------------
@@ -328,7 +351,17 @@ void ASTPrinter::visitCallExpr(CallExpr *node) {
   printIndent();
   OS << "CallExpr";
   printLoc(node);
-  OS << " '" << node->getCalleeName() << "'\n";
+  OS << " '" << node->getCalleeName() << "'";
+  if (node->hasTypeArgs())
+    OS << " " << node->getTypeArgs().size() << " type args";
+  OS << "\n";
+  // Explicit type arguments are printed first, then the value arguments.
+  const auto &targs = node->getTypeArgs();
+  const auto &args = node->getArguments();
+  for (size_t i = 0; i < targs.size(); ++i) {
+    ChildScope cs(*this, args.empty() && i + 1 == targs.size());
+    visit(targs[i]);
+  }
   visitChildren(node);
 }
 
@@ -392,6 +425,17 @@ void ASTPrinter::visitArrayType(ArrayType *node) {
   visit(node->getElementType());
 }
 
+void ASTPrinter::visitGenericType(GenericType *node) {
+  printIndent();
+  OS << "GenericType";
+  printLoc(node);
+  OS << " '" << node->getName() << "'\n";
+  for (size_t i = 0; i < node->getNumArgs(); ++i) {
+    ChildScope cs(*this, i + 1 == node->getNumArgs());
+    visit(node->getArgs()[i]);
+  }
+}
+
 void ASTPrinter::visitArrayLiteralExpr(ArrayLiteralExpr *node) {
   printIndent();
   OS << "ArrayLiteralExpr";
@@ -442,6 +486,7 @@ void ASTPrinter::visitFuncDecl(FuncDecl *node) {
   OS << "FuncDecl";
   printLoc(node);
   OS << " '" << node->getName() << "'";
+  printTypeParams(OS, node->getTypeParams());
   if (node->getReturnType())
     OS << " ->";
   OS << "\n";
@@ -471,6 +516,7 @@ void ASTPrinter::visitClassDecl(ClassDecl *node) {
   OS << "ClassDecl";
   printLoc(node);
   OS << " '" << node->getName() << "'";
+  printTypeParams(OS, node->getTypeParams());
   if (node->hasSuperClass())
     OS << " : " << node->getSuperClassName();
   OS << "\n";
