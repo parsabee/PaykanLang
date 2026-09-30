@@ -1,0 +1,6 @@
+// ERROR: cannot 'mov' a tuple element; move a local variable or a temporary value instead
+fn main() -> int {
+  t = ("a", "b");
+  s = mov t.0;
+  return 0;
+}

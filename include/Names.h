@@ -18,6 +18,7 @@ inline constexpr const char *kPush = "push";
 inline constexpr const char *kPop = "pop";
 inline constexpr const char *kOpen = "open";
 inline constexpr const char *kArray = "Array";
+inline constexpr const char *kTuple = "Tuple";
 
 // Built-in class names
 inline constexpr const char *kObj = "Obj";
@@ -100,6 +101,16 @@ inline constexpr const char *kPaykanArrayPop = "PaykanArray_pop";
 inline constexpr const char *kPaykanArrayPopObj = "PaykanArray_pop_obj";
 inline constexpr const char *kPaykanArrayVtable = "PaykanArray_vtable";
 inline constexpr const char *kPaykanArrayObjVtable = "PaykanArray_obj_vtable";
+
+// Tuple (prototype)
+inline constexpr const char *kPaykanTupleNew = "PaykanTuple_new";
+inline constexpr const char *kPaykanTupleSet = "PaykanTuple_set";
+inline constexpr const char *kPaykanTupleSetObj = "PaykanTuple_set_obj";
+inline constexpr const char *kPaykanTupleGet = "PaykanTuple_get";
+inline constexpr const char *kPaykanTupleDestroy = "PaykanTuple_destroy";
+inline constexpr const char *kPaykanTupleToString = "PaykanTuple_toString";
+inline constexpr const char *kPaykanTupleEquals = "PaykanTuple_equals";
+inline constexpr const char *kPaykanTupleVtable = "PaykanTuple_vtable";
 
 // File
 inline constexpr const char *kPaykanFileNew = "PaykanFile_new";

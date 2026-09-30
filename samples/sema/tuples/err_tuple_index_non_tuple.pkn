@@ -1,0 +1,6 @@
+// ERROR: tuple index '.0' applied to non-tuple type 'int'
+fn main() -> int {
+  x: int = 3;
+  y = x.0;
+  return 0;
+}

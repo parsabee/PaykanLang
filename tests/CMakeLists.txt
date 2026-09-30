@@ -44,6 +44,7 @@ add_executable(sema_tests
     Sema/ArrayTests.cpp
     Sema/EnumTests.cpp
     Sema/MovTests.cpp
+    Sema/TupleTests.cpp
 )
 target_include_directories(sema_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}

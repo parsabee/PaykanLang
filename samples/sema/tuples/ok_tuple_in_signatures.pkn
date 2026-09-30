@@ -1,0 +1,23 @@
+// OK: tuples as fields, parameters, return types and array elements; a tuple
+// is assignable to Obj, and reference elements are covariant (`(int, Str)`
+// to `(int, Obj)`) because tuples are immutable.
+class Holder {
+  pair: (int, Str);
+  fn __init__(p: (int, Str)) { self.pair = p; }
+  fn get() -> (int, Str) { return self.pair; }
+  fn first() -> int { return self.pair.0; }
+}
+
+fn swap(p: (int, Str)) -> (Str, int) {
+  return (p.1, p.0);
+}
+
+fn main() -> int {
+  h: Holder = Holder((1, "one"));
+  n, s = h.get();
+  s2, n2 = swap(h.pair);
+  o: Obj = h.pair;
+  wide: (int, Obj) = (1, "s");
+  println(h.pair);
+  return h.first() + n + n2;
+}
