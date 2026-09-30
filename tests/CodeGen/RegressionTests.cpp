@@ -211,3 +211,116 @@ TEST(Regression, InferredArrayTupleOptionalTernary) {
   EXPECT_EQ(r.StdOut, "1116\n2028\n");
   g.expectNoLeaks("InferredArrayTupleOptionalTernary");
 }
+// ============================================================================
+// Array subscript: char elements and temporary (call-rooted) receivers
+// ============================================================================
+
+TEST(Regression, CharArrayElements) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Word {
+      cs: char[];
+      fn __init__() { self.cs = ['h', 'i']; }
+      fn first() -> char { return self.cs[0]; }
+    }
+    fn isA(c: char) -> bool { return c == 'a'; }
+    fn second(cs: char[]) -> char { return cs[1]; }
+    fn main() -> int {
+      cs: char[] = ['a', 'b'];
+      println(StrChar(cs[1]));
+      if (cs[0] == 'a') { println("eq"); }
+      println(StrBool(isA(cs[0])));
+      c: char = cs[1];
+      d = cs[0];
+      println(StrChar(c) + StrChar(d));
+      x = 'k';
+      ds: char[] = [x, 'm'];
+      ds.push('z');
+      ds[0] = 'q';
+      println(StrChar(ds[0]) + StrChar(second(ds)) + StrChar(ds.pop()));
+      println(StrInt(ds.len()));
+      w = Word();
+      println(StrChar(w.first()) + StrChar(w.cs[1]));
+      s: Str = "yo";
+      println(StrChar(s[1]));
+      bs: bool[] = [True, False];
+      bs.push(True);
+      println(StrBool(bs.pop()) + StrBool(bs[1]));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "b\neq\nTrue\nba\nqmz\n2\nhi\no\nTrueFalse\n");
+  g.expectNoLeaks("CharArrayElements");
+}
+
+TEST(Regression, CallRootedObjectSubscript) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Point {
+      x: int;
+      fn __init__(x: int) { self.x = x; }
+      fn get() -> int { return self.x; }
+    }
+    class Holder {
+      items: Point[];
+      fn __init__() { self.items = [Point(7)]; }
+    }
+    fn mk() -> Point[] { return [Point(1), Point(2)]; }
+    fn mks() -> Str[] { return ["a", "b"]; }
+    fn mkn() -> int[][] { return [[1, 2], [3]]; }
+    fn mkh() -> Holder { return Holder(); }
+    fn take(p: Point) -> int { return p.x; }
+    fn ret() -> Point { return mk()[1]; }
+    fn main() -> int {
+      println(StrInt(mk()[0].x));
+      println(StrInt(mk()[1].get()));
+      p = mk()[0];
+      q: Point = mk()[1];
+      println(StrInt(p.x + q.x));
+      q = mk()[0];
+      println(StrInt(q.x));
+      println(StrInt(take(mk()[0])));
+      s = mks()[0];
+      println(s + mks()[1]);
+      println(StrInt(mkn()[0][1]));
+      println(StrInt(mkn()[1].len()));
+      println(StrInt(mkh().items[0].x));
+      println(StrInt(ret().x));
+      ps: Point[] = [mk()[1]];
+      println(StrInt(ps[0].x));
+      match mk()[0] {
+        pp: Point { println(StrInt(pp.x)); }
+      }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "1\n2\n3\n1\n1\nab\n2\n1\n7\n2\n2\n1\n");
+  g.expectNoLeaks("CallRootedObjectSubscript");
+}
+
+TEST(Regression, CallRootedSubscriptAssign) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Point {
+      x: int;
+      fn __init__(x: int) { self.x = x; }
+    }
+    fn mk() -> Point[] { return [Point(1), Point(2)]; }
+    fn mki() -> int[] { return [1, 2]; }
+    fn mkn() -> int[][] { return [[1, 2], [3]]; }
+    fn main() -> int {
+      mk()[0] = Point(9);
+      mki()[1] = 5;
+      mkn()[0] = [5];
+      mkn()[1][0] = 4;
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  g.expectNoLeaks("CallRootedSubscriptAssign");
+}

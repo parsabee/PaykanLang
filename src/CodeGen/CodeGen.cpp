@@ -457,6 +457,14 @@ bool CodeGen::exprAlreadyShared(ast::Expr *expr) const {
   // (borrowed from the tuple), exactly like a ref-typed field read.
   if (auto *e = ast::dyn_cast<ast::TupleIndexExpr>(expr))
     return e->getResolvedType() && ast::isRefType(e->getResolvedType());
+  // SubscriptExpr: an object element is normally read as the raw object,
+  // borrowed from the array.  When the array itself is a fresh temporary
+  // (`mk()[0]`) nothing would keep the element alive, so visitSubscriptExpr
+  // instead retains the element's box, tears the array down and yields that
+  // owned +1 box (the TupleIndexExpr `mk().1` pattern).
+  if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(expr))
+    return isObjectElementType(se->getResolvedType()) &&
+           exprProducesFreshBox(se->getArray());
   // TernaryExpr and MethodCallExpr always produce PaykanShared* when ref-typed.
   if (auto *e = ast::dyn_cast<ast::MethodCallExpr>(expr))
     return e->getResolvedType() && ast::isRefType(e->getResolvedType());
@@ -511,6 +519,10 @@ bool CodeGen::exprProducesFreshBox(ast::Expr *expr) const {
   if (auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(expr))
     return ti->getResolvedType() && ast::isRefType(ti->getResolvedType()) &&
            exprProducesFreshBox(ti->getTuple());
+  // An array element is only ever a box when the array was a temporary, and
+  // then it is an owned +1 (see exprAlreadyShared).
+  if (ast::isa<ast::SubscriptExpr>(expr))
+    return exprAlreadyShared(expr);
   if (auto *mce = ast::dyn_cast<ast::MethodCallExpr>(expr))
     return mce->getResolvedType() && ast::isRefType(mce->getResolvedType());
   if (auto *te = ast::dyn_cast<ast::TernaryExpr>(expr))
@@ -1064,8 +1076,11 @@ llvm::Value *CodeGen::emitAsSharedRaw(ast::Expr *expr) {
     if (auto *id = ast::dyn_cast<ast::Identifier>(se->getArray()))
       isStrReceiver = CurrentScope && CurrentScope->lookupASTType(
                                           id->getName()) == ASTCtx.getStrTy();
+    // A call-rooted element (`mk()[0]`) is already an owned box: it takes the
+    // exprAlreadyShared pass-through below, which also tears the temporary
+    // array down.
     if (!isStrReceiver && se->getResolvedType() &&
-        ast::isRefType(se->getResolvedType())) {
+        ast::isRefType(se->getResolvedType()) && !exprAlreadyShared(se)) {
       auto *i64Ty = llvm::Type::getInt64Ty(LLVMCtx);
       llvm::Value *idx = emitExpr(se->getIndex());
       if (idx->getType()->isIntegerTy(1))
@@ -1499,8 +1514,11 @@ CodeGen::ExprEmitter::emitPrimitiveArrayLiteral(ast::ArrayLiteralExpr *node,
       } else {
         v = CG.Builder.CreateBitCast(v, i64Ty, kIRF64Bits);
       }
-    } else if (v->getType()->isIntegerTy(1))
+    } else if (v->getType()->isIntegerTy() && !v->getType()->isIntegerTy(64)) {
+      // bool (i1) and char (i8) widen to the i64 slot; a constant operand
+      // folds to a ConstantInt.
       v = CG.Builder.CreateZExt(v, i64Ty, kIRBoolExtArr);
+    }
     if (auto *c = llvm::dyn_cast<llvm::Constant>(v))
       elems.push_back(c);
     else {
@@ -1551,10 +1569,7 @@ CodeGen::ExprEmitter::emitPrimitiveArrayLiteral(ast::ArrayLiteralExpr *node,
       return nullptr;
     if (auto *sl = ast::dyn_cast<ast::StringLiteral>(elemExpr))
       v = CG.wrapStringLiteral(v, sl->getValue().size());
-    if (v->getType()->isDoubleTy())
-      v = CG.Builder.CreateBitCast(v, i64Ty, kIRF64Bits);
-    else if (v->getType()->isIntegerTy(1))
-      v = CG.Builder.CreateZExt(v, i64Ty, kIRBoolExtArr);
+    v = CG.toTupleSlotBits(v);
     auto *setFnTy =
         llvm::FunctionType::get(voidTy, {ptrTy, i64Ty, i64Ty}, false);
     CG.Builder.CreateCall(CG.declareFunction(kPaykanArraySet, setFnTy),
@@ -1575,11 +1590,19 @@ CodeGen::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
   if (idx->getType()->isIntegerTy(1))
     idx = CG.Builder.CreateZExt(idx, i64Ty, kIRIdxExt);
 
-  // Determine whether the receiver is a Str (not Str[]).
-  // Sema sets the SubscriptExpr's resolved type to CharTy for Str subscripts,
-  // so this covers both bare identifiers and member-access expressions like
+  // Determine whether the receiver is a Str (not Str[]).  Sema resolves a Str
+  // subscript to CharTy — but a `char[]` subscript resolves to CharTy too, so
+  // tell them apart by the receiver's own type (an identifier's lives in the
+  // scope).  This covers bare identifiers and member-access expressions like
   // self.field[i].
-  bool receiverIsStr = (node->getResolvedType() == CG.ASTCtx.getCharTy());
+  bool receiverIsStr = false;
+  if (node->getResolvedType() == CG.ASTCtx.getCharTy()) {
+    ast::Type *recvTy = node->getArray()->getResolvedType();
+    if (auto *id = ast::dyn_cast<ast::Identifier>(node->getArray());
+        !recvTy && id && CG.CurrentScope)
+      recvTy = CG.CurrentScope->lookupASTType(id->getName());
+    receiverIsStr = !ast::dyn_cast<ast::ArrayType>(recvTy); // null-safe
+  }
 
   // Emit the receiver, classify its ownership (a call-rooted receiver like
   // `makeArr()[0]` hands us a fresh +1 box to tear down once the element is
@@ -1611,38 +1634,30 @@ CodeGen::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
 
   // Reinterpret the 8-byte slot based on the element type.  Primitive/enum
   // elements are copied out of the slot, so a fresh receiver temporary can be
-  // released as soon as the load is done.  An OBJECT element, however, is
-  // returned as a raw alias whose box is owned by the array — releasing a
-  // fresh array here would free the element under the caller, so the fresh
-  // array box is intentionally kept alive (leaked) in that case; a proper fix
-  // needs the element to carry its own ownership (tracked follow-up).
+  // released as soon as the load is done.
   ast::Type *elemTy = node->getResolvedType();
-  if (!elemTy || !CG.isObjectElementType(elemTy)) {
+  if (!CG.isObjectElementType(elemTy)) {
     CG.releaseIfOwned(recvOwned);
     if (!elemTy)
       return raw; // unknown type: return as i64
+    // Same slot encoding as a tuple (int/enum raw, float bits, bool/char
+    // zero-extended).
+    return CG.fromTupleSlotBits(raw, elemTy);
   }
 
-  if (auto *bt = ast::dyn_cast<ast::BuiltinType>(elemTy)) {
-    switch (bt->getTypeKind()) {
-    case ast::BuiltinType::Float:
-      return CG.Builder.CreateBitCast(raw, llvm::Type::getDoubleTy(CG.LLVMCtx),
-                                      kIRElemF64);
-    case ast::BuiltinType::Bool:
-      return CG.Builder.CreateTrunc(raw, llvm::Type::getInt1Ty(CG.LLVMCtx),
-                                    kIRElemBool);
-    case ast::BuiltinType::Int:
-    default:
-      return raw;
-    }
-  }
-  // Enum elements are i64 primitives stored raw — not boxed.
-  if (!CG.isObjectElementType(elemTy))
-    return raw;
-  // ClassType or ArrayType: slot stores a PaykanShared* as bits — convert back,
-  // then unwrap to the raw PaykanObject* (same as visitIdentifier for owned
-  // vars).
+  // Object element: the slot stores a PaykanShared* as bits.
   llvm::Value *shared = CG.Builder.CreateIntToPtr(raw, ptrTy, kIRElemShared);
+  // A temporary array (`mk()[0]`) dies with this expression, so the element
+  // must carry its own reference: retain it before the teardown and hand the
+  // consumer the +1 box (exprAlreadyShared / exprProducesFreshBox report this
+  // shape as an owned box).
+  if (CG.exprAlreadyShared(node)) {
+    CG.emitRetain(shared);
+    CG.releaseIfOwned(recvOwned);
+    return shared;
+  }
+  // Otherwise the element is borrowed from a live array: unwrap it to the raw
+  // PaykanObject* (same as visitIdentifier for owned vars).
   return CG.emitSharedGet(shared, kIRElemObj);
 }
 
@@ -2169,10 +2184,7 @@ llvm::Value *CodeGen::ExprEmitter::emitArrayPush(ast::MethodCallExpr *node,
     llvm::Value *argVal = CG.emitExpr(argExpr);
     if (!argVal)
       return nullptr;
-    if (argVal->getType()->isDoubleTy())
-      argVal = CG.Builder.CreateBitCast(argVal, i64Ty, kIRF64Bits);
-    else if (argVal->getType()->isIntegerTy(1))
-      argVal = CG.Builder.CreateZExt(argVal, i64Ty, kIRBoolExt);
+    argVal = CG.toTupleSlotBits(argVal); // float bits, bool/char widened
     auto *fnTy = llvm::FunctionType::get(voidTy, {ptrTy, i64Ty}, false);
     CG.Builder.CreateCall(CG.declareFunction(kPaykanArrayPush, fnTy),
                           {recv, argVal});
@@ -2198,11 +2210,9 @@ llvm::Value *CodeGen::ExprEmitter::emitArrayPop(llvm::Value *recv,
   auto *fnTy = llvm::FunctionType::get(i64Ty, {ptrTy}, false);
   llvm::Value *raw = CG.Builder.CreateCall(
       CG.declareFunction(kPaykanArrayPop, fnTy), {recv}, kIRMcall);
-  // Reinterpret the 8-byte slot based on the element type.
-  llvm::Type *retLLTy = CG.toLLVMType(elemTy);
-  if (!retLLTy || retLLTy->isIntegerTy(64))
-    return raw;
-  return CG.Builder.CreateBitCast(raw, retLLTy, kIRMcall);
+  // Reinterpret the 8-byte slot based on the element type (a bitcast is only
+  // valid for float; bool and char must be truncated).
+  return CG.fromTupleSlotBits(raw, elemTy);
 }
 
 llvm::Value *
@@ -2470,10 +2480,16 @@ llvm::Value *CodeGen::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   auto *voidTy = llvm::Type::getVoidTy(LLVMCtx);
 
   // Get the raw PaykanArray* (unwrapping the box for member-access fields,
-  // call results, etc. — not just bare identifiers).
-  llvm::Value *arrRaw = emitUnwrappedRef(node->getArray());
-  if (!arrRaw)
+  // call results, etc. — not just bare identifiers).  A call-rooted receiver
+  // (`mk()[0] = v`) is a fresh +1 box this statement must tear down after the
+  // store.
+  llvm::Value *arr = emitExpr(node->getArray());
+  if (!arr)
     return nullptr;
+  ExprValue arrOwned = classifyExpr(node->getArray(), arr);
+  llvm::Value *arrRaw = arr;
+  if (exprAlreadyShared(node->getArray()) && arr->getType()->isPointerTy())
+    arrRaw = emitSharedGet(arr, kIRRecvObj);
 
   // Emit the index.
   llvm::Value *idx = emitExpr(node->getIndex());
@@ -2522,11 +2538,8 @@ llvm::Value *CodeGen::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
     if (!val)
       return nullptr;
 
-    // Promote to i64 storage slot.
-    if (val->getType()->isDoubleTy())
-      val = Builder.CreateBitCast(val, i64Ty);
-    else if (val->getType()->isIntegerTy(1))
-      val = Builder.CreateZExt(val, i64Ty);
+    // Promote to i64 storage slot (float bits, bool/char widened).
+    val = toTupleSlotBits(val);
 
     // PaykanArray_set(arr, idx, i64 value): declare as void(ptr, i64, i64)
     // so the type is consistent with how emitPrimitiveArrayLiteral declares
@@ -2536,6 +2549,7 @@ llvm::Value *CodeGen::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
     Builder.CreateCall(declareFunction(kPaykanArraySet, setFnTy),
                        {arrRaw, idx, val});
   }
+  releaseIfOwned(arrOwned);
   return nullptr;
 }
 
