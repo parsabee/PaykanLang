@@ -38,6 +38,22 @@ inline constexpr const char *kIRMatchWildcard = "match.wildcard";
 inline constexpr const char *kIRMatchArmPfx = "match.arm";
 inline constexpr const char *kIRMatchCheckPfx = "match.check";
 inline constexpr const char *kIRMatchEq = "match.eq";
+inline constexpr const char *kIRMatchNone = "match.none";
+inline constexpr const char *kIRMatchSome = "match.some";
+inline constexpr const char *kIROptNone = "opt.none";
+inline constexpr const char *kIROptSome = "opt.some";
+inline constexpr const char *kIROptMerge = "opt.merge";
+
+// ---------------------------------------------------------------------------
+// Value names (optional types)
+// ---------------------------------------------------------------------------
+
+inline constexpr const char *kIROptIsNone = "opt.isnone";
+inline constexpr const char *kIROptAnyNone = "opt.anynone";
+inline constexpr const char *kIROptBothNone = "opt.bothnone";
+inline constexpr const char *kIROptNoneBox = "opt.none.box";
+inline constexpr const char *kIROptBox = "opt.box";
+inline constexpr const char *kIROptObj = "opt.obj";
 
 // ---------------------------------------------------------------------------
 // Value names (general)

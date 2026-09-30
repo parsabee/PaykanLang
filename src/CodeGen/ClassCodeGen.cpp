@@ -122,8 +122,7 @@ llvm::Value *ClassCodeGen::emitIsExactType(llvm::Value *rawObjPtr,
     // Specialized array type (e.g. Array<Str>): use the runtime vtable.
     // Value-element arrays (int/float/bool) use PaykanArray_vtable;
     // object-element arrays (Str[], Point[], ...) use PaykanArray_obj_vtable.
-    bool isObjElem =
-        ast::isa<ast::ClassType>(elemTy) || ast::isa<ast::ArrayType>(elemTy);
+    bool isObjElem = CG.isObjectElementType(elemTy);
     const char *vtName =
         isObjElem ? names::kPaykanArrayObjVtable : names::kPaykanArrayVtable;
     // Use [0 x ptr] as placeholder — GEP(0,0) is offset zero so the address
@@ -681,6 +680,10 @@ llvm::Value *ClassCodeGen::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
     // PaykanArray* here would be read back as a box and double-freed.
     llvm::Value *newShared = nullptr;
 
+    // `self.next = None` for an optional field: store the null box.
+    if (CodeGen::isNoneForOptional(node->getValue()))
+      newShared = llvm::ConstantPointerNull::get(ptrTy);
+
     // If RHS is an owned identifier, load its shared box and retain — do NOT
     // call emitExpr which would unwrap it to a raw pointer via visitIdentifier.
     if (auto *rhsId = ast::dyn_cast<ast::Identifier>(node->getValue())) {
@@ -709,6 +712,8 @@ llvm::Value *ClassCodeGen::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
                       ? CG.takeSharedOwnership(node->getValue(), rhs)
                       : CG.emitSharedNew(rhs, kIRFieldShared);
     }
+    // A `T?` value stored into an `Obj` field: never store a NULL box there.
+    newShared = CG.emitOptionalToObj(node->getValue(), newShared);
 
     // Release old value only if it's non-null.
     llvm::Value *old = CG.Builder.CreateLoad(ptrTy, fieldSlot, kIROldField);

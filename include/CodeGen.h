@@ -255,8 +255,44 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   void emitLoopScopesCleanup();
 
   /// Emit expr as a PaykanShared* — wraps raw pointers, retains owned vars,
-  /// passes through already-shared call/ternary results.
+  /// passes through already-shared call/ternary results.  Applies the
+  /// optional-type representation rules (see the helpers below): a `None`
+  /// destined for a `T?` slot yields the null box, and a `T?` value destined
+  /// for an `Obj` slot has its null box replaced by the boxed None singleton.
   llvm::Value *emitAsShared(ast::Expr *expr);
+  /// emitAsShared without the optional-type rules (the body of the old
+  /// emitAsShared; kept separate so every caller gets the rules uniformly).
+  llvm::Value *emitAsSharedRaw(ast::Expr *expr);
+
+  // -- Optional types (prototype, issue #5) ----------------------------------
+  //
+  // A `T?` is the same PaykanShared* box as a `T`, with NULL meaning None.
+  // Sema records the two implicit conversions on the AST (see
+  // Sema::checkAssignable) and CodeGen applies them here:
+  //
+  //   * `None` flowing into a `T?` slot: the literal's resolved type is that
+  //     `T?` (isNoneForOptional) and the emitted value is the null box —
+  //     never the boxed `None` singleton, which is how a *present* `Obj`
+  //     spells None.
+  //   * a `T?` flowing into an `Obj` slot (Expr::CoercedType): the value is
+  //     coerced so an `Obj` never holds a NULL box — a null box becomes a +1
+  //     box of the None singleton (emitOptionalToObj), or, on the raw-pointer
+  //     builtin-call path, the singleton's address (emitOptionalToObjRaw).
+
+  /// True when `expr` is the `None` literal in an optional-typed position.
+  static bool isNoneForOptional(ast::Expr *expr);
+  /// If Sema marked `expr` as a `T?` -> `Obj` conversion, return a box that
+  /// is never NULL (phi of `box` and a fresh box of the None singleton);
+  /// otherwise return `box` unchanged.
+  llvm::Value *emitOptionalToObj(ast::Expr *expr, llvm::Value *box);
+  /// Raw-pointer variant of emitOptionalToObj: `raw` is an unboxed
+  /// PaykanObject* that is NULL for None; substitutes the None singleton.
+  llvm::Value *emitOptionalToObjRaw(ast::Expr *expr, llvm::Value *raw);
+  /// Lower `==` / `!=` when at least one operand is optional: a null check
+  /// against the `None` literal, or the two-optional protocol (both None ->
+  /// equal; one None -> not equal; otherwise the virtual `equals`).  Returns
+  /// the i1 "equal" result (the caller negates for `!=`).
+  llvm::Value *emitOptionalEquality(ast::BinaryExpr *node);
 
   /// RAII helper to push/pop a scope.
   struct ScopeGuard {

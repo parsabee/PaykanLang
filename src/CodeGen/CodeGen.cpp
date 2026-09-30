@@ -220,7 +220,10 @@ bool CodeGen::isObjectElementType(ast::Type *elemTy) const {
   // an i64 primitive, not an object slot.
   if (auto *ct = ast::dyn_cast<ast::ClassType>(elemTy))
     return ASTCtx.lookupEnumType(ct->getName()) == nullptr;
-  return ast::isa<ast::ArrayType>(elemTy);
+  // An optional element (`Node?[]`) is a PaykanShared* slot that may be NULL;
+  // every object-array runtime entry point tolerates NULL slots.
+  return ast::isa<ast::ArrayType>(elemTy) ||
+         ast::isa<ast::OptionalType>(elemTy);
 }
 
 ast::Type *CodeGen::canonicalizeDeclType(ast::Type *ty) {
@@ -680,10 +683,18 @@ llvm::Value *CodeGen::emitImplicitVarDecl(llvm::StringRef name,
                                           ast::Expr *rhsExpr,
                                           llvm::Value *val) {
   auto *fn = Builder.GetInsertBlock()->getParent();
+  // An untyped `x = None` declares an `Obj` holding the raw None singleton
+  // (the pre-optional representation, kept unchanged).
   bool isNoneRHS = ast::isa<ast::NoneLiteral>(rhsExpr);
 
-  // Determine the AST class type for the RHS (for isOwned / method dispatch).
-  ast::ClassType *rhsAstTy = resolveExprClassType(rhsExpr);
+  // Determine the AST type for the RHS (for isOwned / method dispatch).  An
+  // optional-typed RHS (`r = find(k)` with `find -> Node?`) keeps its
+  // optional type so the variable's later uses see it as such.
+  ast::Type *rhsAstTy = resolveExprClassType(rhsExpr);
+  if (!rhsAstTy)
+    if (ast::Type *rt = rhsExpr->getResolvedType();
+        rt && ast::isa<ast::OptionalType>(rt))
+      rhsAstTy = rt;
   if (!rhsAstTy && val->getType()->isPointerTy())
     rhsAstTy = ASTCtx.getObjTy(); // conservative fallback
 
@@ -717,7 +728,7 @@ llvm::Value *CodeGen::emitImplicitVarDecl(llvm::StringRef name,
   if (isNoneRHS)
     CurrentScope->declareUnowned(name, alloca, rhsAstTy);
   else
-    CurrentScope->declare(name, alloca, static_cast<ast::Type *>(rhsAstTy));
+    CurrentScope->declare(name, alloca, rhsAstTy);
   return val;
 }
 
@@ -726,6 +737,9 @@ void CodeGen::emitClassVarRebind(llvm::AllocaInst *alloca, ast::Expr *rhsExpr,
   auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
 
   llvm::Value *newBox = nullptr;
+  // `x = None` for an optional variable: the null box.
+  if (isNoneForOptional(rhsExpr))
+    newBox = llvm::ConstantPointerNull::get(ptrTy);
   // RHS is another owned variable — retain its box (share the reference).
   if (auto *ident = ast::dyn_cast<ast::Identifier>(rhsExpr)) {
     if (CurrentScope->isOwned(ident->getName())) {
@@ -754,8 +768,11 @@ void CodeGen::emitClassVarRebind(llvm::AllocaInst *alloca, ast::Expr *rhsExpr,
       // `s = s + x` in a loop).
       newBox = emitSharedNew(val, kIRNewBox);
   }
+  // `T?` into an `Obj` variable: never store a NULL box in an `Obj`.
+  newBox = emitOptionalToObj(rhsExpr, newBox);
 
-  // Release the old box and store the new one.
+  // Release the old box and store the new one.  Paykan_release is null-safe,
+  // so an optional variable currently holding None costs nothing here.
   emitRelease(Builder.CreateLoad(ptrTy, alloca, kIROldBox));
   Builder.CreateStore(newBox, alloca);
 }
@@ -790,18 +807,23 @@ llvm::Value *CodeGen::visitAssignStmt(ast::AssignStmt *node) {
       // Variable was None-initialised (raw ptr) — just box the new value
       // without releasing the old one (it's a singleton, not a shared box).
       llvm::Value *newBox = nullptr;
-      if (exprAlreadyShared(node->getValue()))
+      if (isNoneForOptional(node->getValue()))
+        newBox = llvm::ConstantPointerNull::get(
+            llvm::PointerType::getUnqual(LLVMCtx));
+      else if (exprAlreadyShared(node->getValue()))
         newBox = takeSharedOwnership(node->getValue(), val);
       else
         newBox = emitSharedNew(val, kIRNewBox);
+      newBox = emitOptionalToObj(node->getValue(), newBox);
       Builder.CreateStore(newBox, alloca);
     } else {
       emitClassVarRebind(alloca, node->getValue(), val);
     }
     // Narrow the scope type to the concrete RHS type (enables vtable dispatch
-    // through base-type variables, e.g. `obj: Obj = MyObj(...)`).
+    // through base-type variables, e.g. `obj: Obj = MyObj(...)`).  An
+    // optional variable keeps its optional type: it may become None again.
     ast::ClassType *rhsCT = resolveExprClassType(node->getValue());
-    if (rhsCT)
+    if (rhsCT && !ast::isa<ast::OptionalType>(astTy))
       CurrentScope->updateASTType(node->getVarName(), rhsCT);
     if (wasUnowned)
       CurrentScope->promoteToOwned(
@@ -813,13 +835,150 @@ llvm::Value *CodeGen::visitAssignStmt(ast::AssignStmt *node) {
   return val;
 }
 
+// -- Optional types (prototype, issue #5) ------------------------------------
+
+bool CodeGen::isNoneForOptional(ast::Expr *expr) {
+  // Sema::checkAssignable rewrites the resolved type of a `None` literal that
+  // flows into a `T?` slot to that `T?`; everywhere else it stays `Obj`.
+  return ast::isa<ast::NoneLiteral>(expr) && expr->getResolvedType() &&
+         ast::isa<ast::OptionalType>(expr->getResolvedType());
+}
+
+static bool isOptionalToObjCoercion(ast::Expr *expr) {
+  ast::Type *rt = expr->getResolvedType();
+  return expr->getCoercedType() && rt && ast::isa<ast::OptionalType>(rt) &&
+         !ast::isa<ast::OptionalType>(expr->getCoercedType());
+}
+
+llvm::Value *CodeGen::emitOptionalToObj(ast::Expr *expr, llvm::Value *box) {
+  if (!box || !isOptionalToObjCoercion(expr))
+    return box;
+  auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
+  auto *fn = Builder.GetInsertBlock()->getParent();
+  auto *isNone = Builder.CreateICmpEQ(
+      box, llvm::ConstantPointerNull::get(ptrTy), kIROptIsNone);
+  auto *fromBB = Builder.GetInsertBlock();
+  auto *noneBB = llvm::BasicBlock::Create(LLVMCtx, kIROptNone, fn);
+  auto *mergeBB = llvm::BasicBlock::Create(LLVMCtx, kIROptMerge, fn);
+  Builder.CreateCondBr(isNone, noneBB, mergeBB);
+  // None: hand the `Obj` slot a +1 box of the immortal None singleton — the
+  // exact value `x: Obj = None` produces when it is later boxed.
+  Builder.SetInsertPoint(noneBB);
+  auto *noneGlobal = Module->getOrInsertGlobal(kPaykanObjectNone, ptrTy);
+  llvm::Value *noneBox = emitSharedNew(noneGlobal, kIROptNoneBox);
+  Builder.CreateBr(mergeBB);
+  Builder.SetInsertPoint(mergeBB);
+  auto *phi = Builder.CreatePHI(ptrTy, 2, kIROptBox);
+  phi->addIncoming(box, fromBB);
+  phi->addIncoming(noneBox, noneBB);
+  return phi;
+}
+
+llvm::Value *CodeGen::emitOptionalToObjRaw(ast::Expr *expr, llvm::Value *raw) {
+  if (!raw || !isOptionalToObjCoercion(expr))
+    return raw;
+  auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
+  auto *isNone = Builder.CreateICmpEQ(
+      raw, llvm::ConstantPointerNull::get(ptrTy), kIROptIsNone);
+  auto *noneGlobal = Module->getOrInsertGlobal(kPaykanObjectNone, ptrTy);
+  return Builder.CreateSelect(isNone, noneGlobal, raw, kIROptObj);
+}
+
+llvm::Value *CodeGen::emitOptionalEquality(ast::BinaryExpr *node) {
+  auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
+  auto *i64Ty = llvm::Type::getInt64Ty(LLVMCtx);
+  auto *nullPtr = llvm::ConstantPointerNull::get(ptrTy);
+  ast::Expr *lhs = node->getLHS();
+  ast::Expr *rhs = node->getRHS();
+
+  // `x == None` / `None == x`: a null check.  Every expression form yields a
+  // value that is NULL exactly when the optional is None — an owned variable
+  // or object-array element is unwrapped through the null-safe
+  // PaykanShared_get (a non-NULL box always holds an object), while a call,
+  // field read or ternary yields the box itself.
+  bool lhsNone = ast::isa<ast::NoneLiteral>(lhs);
+  bool rhsNone = ast::isa<ast::NoneLiteral>(rhs);
+  if (lhsNone || rhsNone) {
+    ast::Expr *opt = lhsNone ? rhs : lhs;
+    llvm::Value *v = emitExpr(opt);
+    if (!v)
+      return nullptr;
+    ExprValue ev = classifyExpr(opt, v);
+    llvm::Value *isNone = Builder.CreateICmpEQ(v, nullPtr, kIROptIsNone);
+    releaseIfOwned(ev);
+    return isNone;
+  }
+
+  // Two optionals.  Take +1 boxes of both operands (null-safe), then:
+  //   either None  -> equal iff both None (release both);
+  //   both present -> lhs.equals(rhs) through the vtable (the callee consumes
+  //                   the rhs box, as for every `equals` call), release lhs.
+  llvm::Value *a = emitAsShared(lhs);
+  llvm::Value *b = emitAsShared(rhs);
+  if (!a || !b)
+    return nullptr;
+  auto *aNone = Builder.CreateICmpEQ(a, nullPtr, kIROptIsNone);
+  auto *bNone = Builder.CreateICmpEQ(b, nullPtr, kIROptIsNone);
+  auto *anyNone = Builder.CreateOr(aNone, bNone, kIROptAnyNone);
+  auto *bothNone = Builder.CreateAnd(aNone, bNone, kIROptBothNone);
+
+  auto *fn = Builder.GetInsertBlock()->getParent();
+  auto *noneBB = llvm::BasicBlock::Create(LLVMCtx, kIROptNone, fn);
+  auto *someBB = llvm::BasicBlock::Create(LLVMCtx, kIROptSome, fn);
+  auto *mergeBB = llvm::BasicBlock::Create(LLVMCtx, kIROptMerge, fn);
+  Builder.CreateCondBr(anyNone, noneBB, someBB);
+
+  Builder.SetInsertPoint(noneBB);
+  emitRelease(a);
+  emitRelease(b);
+  Builder.CreateBr(mergeBB);
+
+  Builder.SetInsertPoint(someBB);
+  auto *getFnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
+  llvm::Value *rawA = Builder.CreateCall(
+      declareFunction(kPaykanSharedGet, getFnTy), {a}, kIRLhsObj);
+  int slot = ASTCtx.getObjTy()->getVTableIndex(names::kMethodEquals);
+  assert(slot >= 0 && "Obj must have an equals slot");
+  auto *vtableLoad = Builder.CreateLoad(ptrTy, rawA, kIRVtable);
+  vtableLoad->setMetadata(llvm::LLVMContext::MD_invariant_load,
+                          llvm::MDNode::get(LLVMCtx, {}));
+  llvm::Value *gepIdx[] = {llvm::ConstantInt::get(i64Ty, 0),
+                           llvm::ConstantInt::get(i64Ty, slot)};
+  llvm::Value *slotPtr = Builder.CreateInBoundsGEP(
+      llvm::ArrayType::get(ptrTy, 0), vtableLoad, gepIdx, kIRVtSlot);
+  llvm::Value *fnPtr = Builder.CreateLoad(ptrTy, slotPtr, kIRVfn);
+  auto *eqFnTy = llvm::FunctionType::get(i64Ty, {ptrTy, ptrTy}, false);
+  llvm::Value *eqI64 = Builder.CreateCall(eqFnTy, fnPtr, {rawA, b}, kIRMcall);
+  llvm::Value *eqSome =
+      Builder.CreateICmpNE(eqI64, llvm::ConstantInt::get(i64Ty, 0), kIREQ);
+  emitRelease(a);
+  auto *someEndBB = Builder.GetInsertBlock();
+  Builder.CreateBr(mergeBB);
+
+  Builder.SetInsertPoint(mergeBB);
+  auto *phi = Builder.CreatePHI(llvm::Type::getInt1Ty(LLVMCtx), 2, kIREQ);
+  phi->addIncoming(bothNone, noneBB);
+  phi->addIncoming(eqSome, someEndBB);
+  return phi;
+}
+
+llvm::Value *CodeGen::emitAsShared(ast::Expr *expr) {
+  // `None` into a `T?` slot is the null box (no allocation at all).
+  if (isNoneForOptional(expr))
+    return llvm::ConstantPointerNull::get(
+        llvm::PointerType::getUnqual(LLVMCtx));
+  llvm::Value *box = emitAsSharedRaw(expr);
+  // `T?` into an `Obj` slot: never hand an `Obj` a NULL box.
+  return emitOptionalToObj(expr, box);
+}
+
 // Emit `expr` as a PaykanShared*.  Handles:
 //   - owned identifier  -> retain + return existing shared ptr
 //   - None literal      -> wrap the singleton in a fresh shared (refcount=1)
 //   - string literal    -> PaykanString_new + PaykanShared_new
 //   - call/ternary that already returns PaykanShared* -> pass through
 //   - any other raw pointer -> PaykanShared_new
-llvm::Value *CodeGen::emitAsShared(ast::Expr *expr) {
+llvm::Value *CodeGen::emitAsSharedRaw(ast::Expr *expr) {
   auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
 
   // Owned identifier: retain + return the existing PaykanShared*.
@@ -1022,8 +1181,13 @@ llvm::Value *CodeGen::visitVarDecl(ast::VarDecl *node) {
     // call pass-through, string literal wrapping, and raw->shared boxing.
     // Canonicalize the annotation so an enum stub (a ClassType stub at this
     // point) resolves to its EnumType and is not mistaken for a ref type.
+    // An optional variable (`n: Node? = None`) always holds a PaykanShared*
+    // box (NULL for None) and is owned like any other ref variable — only the
+    // legacy `o: Obj = None` keeps the raw None singleton.
     ast::Type *declTy = canonicalizeDeclType(node->getType());
-    bool isClassDecl = !isNoneInit && declTy && ast::isRefType(declTy);
+    bool declIsOptional = declTy && ast::isa<ast::OptionalType>(declTy);
+    bool isClassDecl =
+        (!isNoneInit || declIsOptional) && declTy && ast::isRefType(declTy);
     if (isClassDecl) {
       initVal = emitAsShared(node->getInitExpr());
       if (!llvmTy)
@@ -1057,14 +1221,16 @@ llvm::Value *CodeGen::visitVarDecl(ast::VarDecl *node) {
   else
     Builder.CreateStore(llvm::Constant::getNullValue(llvmTy), alloca);
 
-  // Pass nullptr for AST type when None-init so the var is NOT marked owned
-  // (it holds a raw PaykanObject* singleton, not a PaykanShared*).
-  bool isNoneVar =
-      node->getInitExpr() && ast::isa<ast::NoneLiteral>(node->getInitExpr());
-
   // Canonicalize ClassType to the registry entry (the parser may have created
   // a stub with no fields before Sema populated the canonical ClassType).
   ast::Type *scopeTy = canonicalizeDeclType(node->getType());
+
+  // A None-initialised NON-optional var is declared unowned (it holds the raw
+  // PaykanObject* singleton, not a PaykanShared*); an optional one holds a
+  // (null) box and is owned.
+  bool isNoneVar = node->getInitExpr() &&
+                   ast::isa<ast::NoneLiteral>(node->getInitExpr()) &&
+                   !(scopeTy && ast::isa<ast::OptionalType>(scopeTy));
   // Narrow the scope type to the concrete RHS type when the declared type is a
   // base class (e.g. `obj: Obj = MyObj(...)`). This ensures method dispatch
   // uses the concrete vtable convention, not the builtin Obj/Str convention.
@@ -1550,6 +1716,17 @@ llvm::Value *CodeGen::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
       node->getOpcode() == ast::BinaryOpcode::Ne) {
     ast::Type *lt = node->getLHS()->getResolvedType();
     ast::Type *rt = node->getRHS()->getResolvedType();
+    // Optional operands never dispatch `equals` on a possibly-NULL receiver:
+    // `x == None` is a null check and `a == b` follows the two-optional
+    // protocol (see emitOptionalEquality).
+    if (ast::isa<ast::OptionalType>(lt) || ast::isa<ast::OptionalType>(rt)) {
+      llvm::Value *eq = CG.emitOptionalEquality(node);
+      if (!eq)
+        return nullptr;
+      if (node->getOpcode() == ast::BinaryOpcode::Ne)
+        eq = CG.Builder.CreateNot(eq, kIRNE);
+      return eq;
+    }
     if (lt && rt && ast::isRefType(lt) && ast::isRefType(rt)) {
       auto *call = CG.ASTCtx.make<ast::MethodCallExpr>(
           node->getLocation(), node->getLHS(),
@@ -1742,6 +1919,11 @@ llvm::Value *CodeGen::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
       v = CG.Builder.CreateCall(CG.declareFunction(kPaykanSharedGet, getFnTy),
                                 {v}, kIRUnboxed);
     }
+    // An optional argument to an `Obj` builtin (`println(maybe)`): the raw
+    // pointer is NULL for None — substitute the None singleton so it prints
+    // as "None" rather than nothing.
+    if (v->getType()->isPointerTy())
+      v = CG.emitOptionalToObjRaw(argExpr, v);
     // Bool (i1) -> i64 coercion when the callee expects i64.
     if (v->getType()->isIntegerTy(1)) {
       auto *i64Ty = llvm::Type::getInt64Ty(CG.LLVMCtx);
@@ -2121,8 +2303,12 @@ CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node) {
     // overridden by a user class, so its `other` argument must use the same
     // boxed-and-consumed ABI regardless of the static receiver type; the
     // runtime `*_equals` implementations unbox and release it to match.
+    // An optional parameter (`n: Node?`) uses the same boxed ABI (the callee
+    // declares it owned; NULL is None).
     bool isClassParam =
-        paramASTTy && ast::isa<ast::ClassType>(paramASTTy) &&
+        paramASTTy &&
+        (ast::isa<ast::ClassType>(paramASTTy) ||
+         ast::isa<ast::OptionalType>(paramASTTy)) &&
         (isUserDefinedMethod || node->getMethodName() == names::kMethodEquals);
 
     if (isClassParam) {
@@ -2357,14 +2543,26 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
     if (ast::isa<ast::EnumType>(subjTy))
       return emitEnumMatch(node, subjRaw, parentFn);
 
+  // Optional-mode (prototype, issue #5): the subject is `T?`.  `subjRaw` is
+  // NULL exactly when it is None (see emitOptionalEquality for why every
+  // subject form guarantees this).  The lowering is the class-mode chain
+  // below with two additions: a leading null test that routes None to the
+  // `None` arm (else the wildcard / match.end), and the arm naming `T`
+  // itself matches unconditionally — it is the "present" pattern, not an
+  // exact-type test — so a strict-subclass arm keeps its vtable check.
+  auto *optTy = ast::dyn_cast<ast::OptionalType>(
+      node->getSubject()->getResolvedType()); // null-safe
+
   // Value-mode: any literal arm means Sema verified this is a primitive/Str
-  // match.  Emit an equality if-else chain instead of vtable dispatch.
+  // match (an optional's only literal arm is `None`, handled here).  Emit an
+  // equality if-else chain instead of vtable dispatch.
   bool valueMode = false;
-  for (ast::MatchArm *arm : node->getArms())
-    if (arm->isLiteral()) {
-      valueMode = true;
-      break;
-    }
+  if (!optTy)
+    for (ast::MatchArm *arm : node->getArms())
+      if (arm->isLiteral()) {
+        valueMode = true;
+        break;
+      }
   if (valueMode)
     return emitValueMatch(node, subjRaw, parentFn);
 
@@ -2373,40 +2571,72 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
   auto *wildcardBB = createMatchWildcardBlock(node, parentFn);
   auto *defaultBB = wildcardBB ? wildcardBB : endBB;
 
+  // 2b. Optional subject: the `None` arm (if any) gets its own body block.
+  ast::MatchArm *noneArm = nullptr;
+  llvm::BasicBlock *noneBB = nullptr;
+  if (optTy)
+    for (ast::MatchArm *arm : node->getArms())
+      if (arm->isLiteral()) {
+        assert(ast::isa<ast::NoneLiteral>(arm->getLiteralPattern()) &&
+               "Sema allows only a None literal arm on an optional subject");
+        noneArm = arm;
+        noneBB = llvm::BasicBlock::Create(LLVMCtx, kIRMatchNone, parentFn);
+      }
+
   // 3. Collect type arms and pre-allocate body blocks.
   struct TypeArm {
-    ast::ClassType *CT;
+    ast::ClassType *CT;  // class whose vtable identifies the arm
+    ast::Type *BindTy;   // scope type of the arm's binding
+    bool MatchesAnySome; // optional subject: the arm names `T` itself
     llvm::BasicBlock *BodyBB;
     size_t ArmIdx;
   };
   std::vector<TypeArm> typeArms;
   for (size_t i = 0; i < node->getArms().size(); ++i) {
     ast::MatchArm *arm = node->getArms()[i];
-    if (arm->isWildcard())
+    if (arm->isWildcard() || arm->isLiteral())
       continue;
     ast::ClassType *armCt = ast::dyn_cast<ast::ClassType>(arm->getArmType());
+    ast::Type *bindTy = armCt;
     // Array-type arms (e.g. int[]) have an ArrayType, not a ClassType.
     // Resolve to the ASTContext's specialized array ClassType so that vtable
     // identity comparison works the same way as class-type arms.
     if (!armCt) {
-      if (auto *at = ast::dyn_cast<ast::ArrayType>(arm->getArmType()))
+      if (auto *at = ast::dyn_cast<ast::ArrayType>(arm->getArmType())) {
         armCt = ASTCtx.getOrCreateSpecializedArrayType(at->getElementType());
+        // An optional array subject binds the array type itself so push/pop
+        // dispatch directly (the specialized class is only a vtable key).
+        bindTy = optTy ? static_cast<ast::Type *>(at) : armCt;
+      }
     }
     assert(armCt && "Sema should have verified arm type exists");
+    bool matchesAnySome = optTy && arm->getArmType() == optTy->getInnerType();
     auto *bodyBB = llvm::BasicBlock::Create(
         LLVMCtx, kIRMatchArmPfx + std::to_string(i), parentFn);
-    typeArms.push_back({armCt, bodyBB, i});
+    typeArms.push_back({armCt, bindTy, matchesAnySome, bodyBB, i});
   }
 
   // 4. Emit an if-else chain comparing the object's vtable pointer against
   //    each arm's vtable global address.  Each class's vtable global has a
   //    unique address in memory — this is a stable, cross-module type identity
   //    that requires no integer ID scheme and works correctly after linking.
+  //    For an optional subject the chain runs only on the non-None path, so
+  //    the vtable loads below never dereference NULL.
+  if (optTy) {
+    auto *isNone = Builder.CreateICmpEQ(
+        subjRaw, llvm::ConstantPointerNull::get(ptrTy), kIROptIsNone);
+    auto *someBB = llvm::BasicBlock::Create(LLVMCtx, kIRMatchSome, parentFn);
+    Builder.CreateCondBr(isNone, noneBB ? noneBB : defaultBB, someBB);
+    Builder.SetInsertPoint(someBB);
+  }
   if (typeArms.empty()) {
     Builder.CreateBr(defaultBB);
   } else {
     for (size_t i = 0; i < typeArms.size(); ++i) {
-      llvm::Value *isMatch = Classes.emitIsExactType(subjRaw, typeArms[i].CT);
+      llvm::Value *isMatch =
+          typeArms[i].MatchesAnySome
+              ? static_cast<llvm::Value *>(llvm::ConstantInt::getTrue(LLVMCtx))
+              : Classes.emitIsExactType(subjRaw, typeArms[i].CT);
       auto *nextBB =
           (i + 1 < typeArms.size())
               ? llvm::BasicBlock::Create(
@@ -2437,9 +2667,9 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
         // existing box via the object-header backpointer.
         if (sharedSubj)
           CurrentScope->declareUnownedWithBacking(arm->getBinding(), alloca,
-                                                  sharedSubj, ta.CT);
+                                                  sharedSubj, ta.BindTy);
         else
-          CurrentScope->declareUnowned(arm->getBinding(), alloca, ta.CT);
+          CurrentScope->declareUnowned(arm->getBinding(), alloca, ta.BindTy);
       }
       for (auto *stmt : arm->getBody()->getStatements())
         visit(stmt);
@@ -2447,6 +2677,10 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
     if (!Builder.GetInsertBlock()->getTerminator())
       Builder.CreateBr(endBB);
   }
+
+  // 5b. Emit the `None` arm body (optional subject only).
+  if (noneBB)
+    emitMatchArmBody(noneArm, noneBB, endBB);
 
   // 6. Emit the wildcard arm body.
   emitMatchWildcardBody(node, wildcardBB, endBB);
