@@ -13,6 +13,7 @@ type-checking (no codegen or JIT execution).
 | `functions/` | Free-function declarations and top-level name collisions |
 | `match/`   | `match` statement — arms, bindings, wildcards     |
 | `enums/`   | `enum` declarations, variant access, equality, enum match |
+| `optionals/` | Optional types `T?` (prototype) — `None`, widening, unwrapping with `match`, optional fields and arrays |
 
 ## Running
 
@@ -28,7 +29,7 @@ done
 # Type-check every sample across all feature directories
 for f in samples/sema/arrays/*.pkn samples/sema/classes/*.pkn \
          samples/sema/functions/*.pkn samples/sema/match/*.pkn \
-         samples/sema/enums/*.pkn; do
+         samples/sema/enums/*.pkn samples/sema/optionals/*.pkn; do
   paykan --check-only "$f" 2>&1 && echo "OK: $f" || echo "ERR: $f"
 done
 ```

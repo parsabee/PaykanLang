@@ -1,0 +1,7 @@
+// Only reference types may be optional; an enum is a value type.
+enum Color { Red, Green }
+
+fn main() -> int {
+  c: Color? = None;   // error: optional primitive types are not supported yet
+  return 0;
+}

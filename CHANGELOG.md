@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Optional types `T?` (prototype, issue #5).** Any reference type (a class,
+  `Str`, or an array) has an optional form `T?` holding either a `T` or
+  `None`. `T` widens to `T?` implicitly; a `T?` never narrows back without a
+  `match`, whose `T` arm binds every present value and whose `None` arm (or
+  `_`) covers the absent case. `x == None` / `x != None` is a null check,
+  two optionals compare with the usual `equals` once both are present, an
+  optional field is implicitly `None` if `__init__` does not assign it, and
+  `T?[]` / `T[]?` are supported. At runtime a `T?` is the same reference-
+  counted box as a `T` with "no box" meaning `None` — no layout change.
+  Optional primitives (`int?`), nested optionals, flow typing, `if let`,
+  `??` and `?.` are not part of the prototype. See
+  `language_reference/09-optionals.md` and `proposals/optionals.md`.
 - **Move semantics with `mov`.** `mov <expr>` transfers ownership of a local
   variable, parameter, or temporary without a retain/release pair. Use of a
   moved variable is a compile error until it is re-assigned, tracked

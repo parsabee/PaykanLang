@@ -1,0 +1,12 @@
+// No method can be called on an optional receiver (it may be None).
+class Node {
+  v: int;
+  fn __init__(x: int) { self.v = x; }
+  fn val() -> int { return self.v; }
+}
+
+fn main() -> int {
+  a: Node? = Node(1);
+  x: int = a.val();   // error: cannot use optional 'Node?' as 'Node' without unwrapping (use match)
+  return x;
+}

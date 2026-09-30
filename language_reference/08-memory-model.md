@@ -276,6 +276,16 @@ rather than an allocation, retaining and releasing it is harmless and it is neve
 `None` is what operations like `readln` yield at end of input, distinguished with `match`
 (see `07-match-statements.md`).
 
+### Optional types (prototype)
+
+A value of optional type `T?` (see `09-optionals.md`) is the **same shared box** as a `T`; the
+absent value is represented by *having no box at all* rather than by the `None` singleton. This
+means an optional costs nothing extra: retaining, releasing, moving or destroying an absent
+`T?` is a no-op, a `None` stored into an optional field or array slot releases the previous
+value and allocates nothing, and `x == None` is a plain null test. When a `T?` is handed to an
+`Obj` slot (for example `println(maybe)`), the compiler substitutes the `None` singleton for an
+absent value so that an `Obj` always refers to an object.
+
 ---
 
 ## Reference Cycles

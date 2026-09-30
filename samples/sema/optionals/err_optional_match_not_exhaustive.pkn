@@ -1,0 +1,14 @@
+// A type arm alone does not cover None: the match is not exhaustive, so the
+// function does not always return a value.
+class Node {
+  v: int;
+  fn __init__(x: int) { self.v = x; }
+}
+
+fn value(n: Node?) -> int {
+  match n {
+    x: Node { return x.v; }
+  }
+}   // error: non-void function 'value' does not always return a value
+
+fn main() -> int { return value(None); }

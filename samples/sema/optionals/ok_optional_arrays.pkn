@@ -1,0 +1,29 @@
+// Optional types (prototype): arrays of optionals (`Node?[]`, None slots) and
+// optional arrays (`int[]?`).
+class Node {
+  v: int;
+  fn __init__(x: int) { self.v = x; }
+}
+
+fn main() -> int {
+  xs: Node?[] = [];
+  xs.push(None);
+  xs.push(Node(1));
+  xs[0] = Node(2);
+  xs[1] = None;
+  e: Node? = xs[0];
+  p: Node? = xs.pop();
+  match xs[0] {
+    n: Node { println(StrInt(n.v)); }
+    None    { println("none"); }
+  }
+
+  ys: int[]? = None;
+  ys = [1, 2];
+  zs: Str[]? = [];             // the empty literal takes the wrapped type
+  match ys {
+    a: int[] { a.push(3); println(StrInt(a.len())); }
+    None     { println("none"); }
+  }
+  return 0;
+}

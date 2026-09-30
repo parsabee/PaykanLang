@@ -1,13 +1,14 @@
 # PaykanLang — Match Statements
 
 `match` is PaykanLang's structured branching construct. It inspects a single subject and runs the
-first arm that applies. Depending on the subject's type, `match` operates in one of three modes:
+first arm that applies. Depending on the subject's type, `match` operates in one of four modes:
 
 | Subject type | Mode | Arms compare against |
 |--------------|------|----------------------|
 | A class type (`Obj`, `File`, a user class, …) | **type mode** | the **runtime class** of the object |
 | An `enum` | **variant mode** | the enum's **variants** |
 | A builtin (`int`, `float`, `bool`, `char`, `Str`) | **value mode** | **literal** values |
+| An optional `T?` (prototype) | **optional mode** | **present** (`T` arm) vs **absent** (`None` arm) |
 
 The mode is chosen by the static type of the subject — you do not select it explicitly.
 
@@ -305,6 +306,32 @@ match f.readln() {
 
 ---
 
+## Optional Mode — unwrapping a `T?` (prototype)
+
+When the subject is an optional type `T?` (see `09-optionals.md`), `match` is the way to get at
+the wrapped value. The arm naming `T` itself matches **every present value** — whatever its
+runtime subclass — and binds it as `T`; a `None` arm (or `_`) covers the absent case:
+
+```pkn
+match find(head, key) {          // find returns Node?
+  n: Node { println(StrInt(n.v)); }
+  None    { println("not found"); }
+}
+```
+
+Two differences from type mode:
+
+- The `T` arm is **not** an exact-type test: a `Leaf` stored in a `Node?` is matched by
+  `n: Node`. An arm naming a strict subclass keeps exact-type semantics and must come before
+  the `T` arm (anything after the `T` arm is unreachable and rejected).
+- A `T` arm alone is **not exhaustive**; `T` together with `None` (or `_`) is, and then the
+  `match` satisfies the "always returns" and field-initialisation analyses.
+
+A `None` arm is only valid on an optional subject — matching on an `Obj` (the `readln` idiom
+above) is unchanged.
+
+---
+
 ## Semantic Checks
 
 | Error | Trigger |
@@ -319,3 +346,5 @@ match f.readln() {
 | Arm body type error | Any type error inside an arm body |
 | Wildcard not last | A `_` arm is followed by another arm |
 | Non-exhaustive match | A `match` leaves cases uncovered where every path must produce a value |
+| `None` arm outside optional mode | A `None` literal arm on a non-optional subject |
+| Unreachable arm after the `T` arm | A type arm follows the `T` arm of an optional-mode `match` |

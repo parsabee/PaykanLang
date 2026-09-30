@@ -1,0 +1,18 @@
+// Optional types (prototype): an optional field is implicitly None when
+// __init__ does not assign it; non-optional fields must still be assigned.
+class Node {
+  v: int;
+  next: Node?;                 // implicitly None
+  fn __init__(x: int) { self.v = x; }
+}
+
+fn main() -> int {
+  n: Node = Node(1);
+  match n.next {
+    x: Node { println("has next"); }
+    None    { println("tail"); }
+  }
+  n.next = Node(2);
+  n.next = None;
+  return 0;
+}

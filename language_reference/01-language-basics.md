@@ -94,6 +94,17 @@ mat: int[][] = [[1, 2], [3, 4]];   // 2D
 
 `None` is an `Obj` literal representing the absence of a value.
 
+### Optional Types (prototype)
+
+Any reference type `T` (a class, `Str`, or an array) has an optional form `T?` that holds either
+a `T` or `None`. A `T` converts to `T?` implicitly; a `T?` is unwrapped with `match`. See
+`09-optionals.md`.
+
+```pkn
+n: Node? = None;
+fn find(head: Node?, key: int) -> Node? { ... }
+```
+
 `File` is a built-in class type representing an open file handle. It extends `Obj` and provides:
 
 | Slot        | Signature                       | Description                                      |
