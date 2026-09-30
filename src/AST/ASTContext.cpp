@@ -34,8 +34,9 @@ ASTContext::ASTContext()
   BoolBoxTy =
       make<ClassType>(SourceLocation(), intern(names::kBoolBox), nullptr);
   // These are the compiler builtins: Sema rejects any user class, enum, or
-  // function that would reuse one of their names.  Flagging them here, at the
-  // single registration site, keeps that knowledge out of Sema.
+  // function that would reuse one of their names, and CodeGen dispatches
+  // their methods to the C runtime.  Flagging them here, at the single
+  // registration site, keeps that knowledge out of both.
   for (ClassType *builtin : {ObjTy, StrTy, ArrayTy, FileTy, ErrorTy, IntBoxTy,
                              FloatBoxTy, BoolBoxTy})
     builtin->setBuiltin();

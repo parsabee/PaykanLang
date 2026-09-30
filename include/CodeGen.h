@@ -14,6 +14,8 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Value.h>
 
+#include <llvm/ADT/ArrayRef.h>
+#include <llvm/ADT/STLFunctionalExtras.h>
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/StringSet.h>
@@ -233,6 +235,23 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   llvm::BasicBlock *createMatchWildcardBlock(ast::MatchStmt *node,
                                              llvm::Function *parentFn);
 
+  /// Create the (not yet populated) body block for the arm at index
+  /// `armIdx`, named "match.arm<armIdx>".
+  llvm::BasicBlock *createMatchArmBlock(size_t armIdx,
+                                        llvm::Function *parentFn);
+
+  /// Emit the if-else check chain shared by all three match modes.  For each
+  /// arm i in order, `emitCheck(i)` is invoked at the current insertion point
+  /// and must return the i1 "this arm matches" value; on success control goes
+  /// to `bodyBBs[i]`, otherwise to the next arm's check block (or to
+  /// `defaultBB` after the last arm).  With no arms the current block simply
+  /// branches to `defaultBB`.  Leaves the insertion point in the last check
+  /// block (or unchanged when there are no arms).
+  void emitMatchCheckChain(llvm::ArrayRef<llvm::BasicBlock *> bodyBBs,
+                           llvm::BasicBlock *defaultBB,
+                           llvm::Function *parentFn,
+                           llvm::function_ref<llvm::Value *(size_t)> emitCheck);
+
   /// Emit one arm's body statements into `bodyBB` inside a fresh scope, then
   /// branch to `endBB` unless the body already terminated the block.
   void emitMatchArmBody(ast::MatchArm *arm, llvm::BasicBlock *bodyBB,
@@ -356,6 +375,9 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   void emitRetain(llvm::Value *shared);
   void emitRelease(llvm::Value *shared);
   llvm::Value *emitSharedNew(llvm::Value *raw, llvm::StringRef name = "shared");
+  /// Unwrap a PaykanShared* box to its raw object pointer (PaykanShared_get).
+  /// Pure read: neither retains nor releases the box.
+  llvm::Value *emitSharedGet(llvm::Value *shared, const llvm::Twine &name);
 
   /// Take ownership of `val`, the PaykanShared* just emitted for `expr`
   /// (exprAlreadyShared(expr) must hold): a freshly produced +1 box (call /
