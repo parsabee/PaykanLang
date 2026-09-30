@@ -2336,17 +2336,16 @@ CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node) {
     ast::Type *paramASTTy = (method && i < method->getParamTypes().size())
                                 ? method->getParamTypes()[i]
                                 : nullptr;
-    // Class-typed arguments are passed as PaykanShared boxes (callee consumes)
-    // for user-defined methods. The builtin `equals` is virtual and may be
-    // overridden by a user class, so its `other` argument must use the same
-    // boxed-and-consumed ABI regardless of the static receiver type; the
-    // runtime `*_equals` implementations unbox and release it to match.
-    // An optional parameter (`n: Node?`) uses the same boxed ABI (the callee
-    // declares it owned; NULL is None).
+    // Ref-typed arguments (class, array, tuple, optional) are passed as
+    // PaykanShared boxes (callee consumes) for user-defined methods: the method
+    // body binds every ref-typed parameter as an owned box and releases it on
+    // scope exit, so the predicate must match that exactly. The builtin
+    // `equals` is virtual and may be overridden by a user class, so its
+    // `other` argument must use the same boxed-and-consumed ABI regardless of
+    // the static receiver type; the runtime `*_equals` implementations unbox
+    // and release it to match.
     bool isClassParam =
-        paramASTTy &&
-        (ast::isa<ast::ClassType>(paramASTTy) ||
-         ast::isa<ast::OptionalType>(paramASTTy)) &&
+        ast::isRefType(paramASTTy) &&
         (isUserDefinedMethod || node->getMethodName() == names::kMethodEquals);
 
     if (isClassParam) {
