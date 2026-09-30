@@ -16,6 +16,8 @@ add_executable(parser_tests
     Parser/ModuleTests.cpp
     Parser/ArrayTests.cpp
     Parser/MovTests.cpp
+    Parser/OptionalTests.cpp
+    Parser/TupleTests.cpp
 )
 target_include_directories(parser_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -26,6 +28,7 @@ target_include_directories(parser_tests SYSTEM
 target_link_libraries(parser_tests
     PRIVATE gtest_main
             paykan_parser
+            paykan_ast_printer
             paykan_compile_options
             ${TEST_LLVM_LIBS}
 )
@@ -42,6 +45,8 @@ add_executable(sema_tests
     Sema/ArrayTests.cpp
     Sema/EnumTests.cpp
     Sema/MovTests.cpp
+    Sema/OptionalTests.cpp
+    Sema/TupleTests.cpp
 )
 target_include_directories(sema_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -74,6 +79,8 @@ add_executable(codegen_tests
     CodeGen/EnumTests.cpp
     CodeGen/MovTests.cpp
     CodeGen/OwnershipTests.cpp
+    CodeGen/OptionalTests.cpp
+    CodeGen/TupleTests.cpp
 )
 target_include_directories(codegen_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -103,6 +110,8 @@ add_executable(runtime_tests
     Runtime/SharedTests.cpp
     Runtime/FileTests.cpp
     Runtime/BoxedPrimitiveTests.cpp
+    Runtime/OptionalNullTests.cpp
+    Runtime/TupleTests.cpp
 )
 target_include_directories(runtime_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}

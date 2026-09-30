@@ -1,0 +1,121 @@
+// 31 — optional types (prototype): a singly linked list built from `Node?`
+// Exercises: `T?` declarations, `None` as the absent value, implicit None for
+//            an unassigned optional field (`next: Node?`), `T` -> `T?` widening,
+//            `x == None` / `x != None` null checks, `match` as the unwrap (a
+//            `Node` arm binds every present value, `None` covers the absent
+//            case), optional parameters and returns, `T?[]` with None slots,
+//            an optional array `int[]?`, and printing an optional.
+//
+// A `T?` is the same reference-counted box as a `T` with NULL meaning None, so
+// the whole list is released through the ordinary destructors (run this with
+// --track-heap to see zero live blocks).
+
+class Node {
+  v: int;
+  next: Node?;                 // implicitly None — no assignment in __init__
+  fn __init__(x: int) { self.v = x; }
+}
+
+// ---- List operations -------------------------------------------------------
+
+fn push_front(head: Node?, v: int) -> Node {
+  n: Node = Node(v);
+  n.next = head;               // Node? field accepts a Node? value
+  return n;
+}
+
+fn find(head: Node?, key: int) -> Node? {
+  cur: Node? = head;
+  while (cur != None) {
+    match cur {
+      n: Node {
+        if (n.v == key) { return n; }   // Node widens to Node?
+        cur = n.next;
+      }
+      None { }
+    }
+  }
+  return None;
+}
+
+fn render(head: Node?) -> Str {
+  out: Str = "[";
+  cur: Node? = head;
+  first: bool = True;
+  while (cur != None) {
+    match cur {
+      n: Node {
+        if (!first) { out = out + ", "; }
+        out = out + StrInt(n.v);
+        first = False;
+        cur = n.next;
+      }
+      None { }
+    }
+  }
+  return out + "]";
+}
+
+fn describe(found: Node?) -> Str {
+  match found {
+    n: Node { return "found " + StrInt(n.v); }
+    None    { return "not found"; }
+  }
+}
+
+// ---- main ------------------------------------------------------------------
+
+fn main() -> int {
+  println("=== build a list ===");
+  head: Node? = None;
+  head = push_front(head, 3);
+  head = push_front(head, 2);
+  head = push_front(head, 1);
+  println(render(head));                     // [1, 2, 3]
+
+  println("=== search ===");
+  println(describe(find(head, 2)));          // found 2
+  println(describe(find(head, 9)));          // not found
+  println(describe(find(None, 1)));          // not found
+
+  println("=== None checks ===");
+  println(StrBool(head == None));            // False
+  println(StrBool(find(head, 9) == None));   // True
+  println(StrBool(find(head, 3) != None));   // True
+
+  println("=== printing an optional ===");
+  maybe: Node? = None;
+  println(maybe);                            // None
+  s: Str? = "text";
+  println(s);                                // text
+
+  println("=== array of optionals ===");
+  slots: Node?[] = [];
+  slots.push(None);
+  slots.push(Node(42));
+  slots[0] = Node(7);
+  slots[1] = None;
+  println(describe(slots[0]));               // found 7
+  println(describe(slots[1]));               // not found
+
+  println("=== optional array ===");
+  nums: int[]? = None;
+  match nums {
+    a: int[] { println(StrInt(a.len())); }
+    None     { println("no numbers"); }      // no numbers
+  }
+  nums = [10, 20];
+  match nums {
+    a: int[] { a.push(30); println(StrInt(a.len())); }   // 3
+    None     { println("no numbers"); }
+  }
+
+  println("=== two optionals ===");
+  a: Str? = "same";
+  b: Str? = "same";
+  c: Str? = None;
+  println(StrBool(a == b));                  // True  (content equality)
+  println(StrBool(a == c));                  // False (one is None)
+  println(StrBool(c == None));               // True
+  return 0;
+}

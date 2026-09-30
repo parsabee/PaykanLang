@@ -1,0 +1,55 @@
+// Isolates: ownership of optional (`T?`) values, which are possibly-NULL
+// PaykanShared boxes.  Every path that touches one must be NULL-safe and
+// balanced: an optional local released at scope exit (present or None), a
+// None-initialised optional field, rebinding an optional between None and a
+// value, `mov` of an optional leaving a NULL slot, a `T?` passed into an `Obj`
+// slot (the None singleton is materialised), a `match` on an optional call
+// result (the subject box is released at match.end), and `T?[]` slots being
+// overwritten with None (releasing the old element) and destroyed with NULLs.
+//
+// Runtime allocation sites: the Node structs + boxes, the strings, the
+// optional array and its buffer.
+//
+// Expected under --track-heap: live blocks : 0.
+
+class Node {
+  v: int;
+  next: Node?;
+  fn __init__(x: int) { self.v = x; }
+}
+
+fn make(c: bool) -> Node? {
+  return if c then Node(1) else None;
+}
+
+fn show(n: Node?) {
+  match n {
+    x: Node { println(StrInt(x.v)); }
+    None    { println("none"); }
+  }
+}
+
+fn main() -> int {
+  a: Node? = None;             // NULL box, released (no-op) at scope exit
+  b: Node? = Node(2);
+  b = None;                    // releases Node(2)
+  b = Node(3);
+  a = b;                       // shares Node(3)
+  c = mov a;                   // a's slot becomes NULL
+  show(c);                     // 3
+  show(make(False));           // none — call temporary, no box to release
+  show(make(True));            // 1 — call temporary released at match.end
+  o: Obj = make(False);        // None singleton boxed for the Obj slot
+  println(o);                  // None
+  head: Node = Node(10);
+  head.next = Node(11);        // field owns the temporary
+  head.next = None;            // releases Node(11)
+  xs: Node?[] = [];
+  xs.push(None);
+  xs.push(Node(20));
+  xs[1] = None;                // releases Node(20)
+  xs.push(Node(21));           // destroyed with the array
+  s: Str? = "str";
+  s = None;                    // releases the string
+  return 0;
+}

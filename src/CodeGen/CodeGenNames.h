@@ -38,6 +38,22 @@ inline constexpr const char *kIRMatchWildcard = "match.wildcard";
 inline constexpr const char *kIRMatchArmPfx = "match.arm";
 inline constexpr const char *kIRMatchCheckPfx = "match.check";
 inline constexpr const char *kIRMatchEq = "match.eq";
+inline constexpr const char *kIRMatchNone = "match.none";
+inline constexpr const char *kIRMatchSome = "match.some";
+inline constexpr const char *kIROptNone = "opt.none";
+inline constexpr const char *kIROptSome = "opt.some";
+inline constexpr const char *kIROptMerge = "opt.merge";
+
+// ---------------------------------------------------------------------------
+// Value names (optional types)
+// ---------------------------------------------------------------------------
+
+inline constexpr const char *kIROptIsNone = "opt.isnone";
+inline constexpr const char *kIROptAnyNone = "opt.anynone";
+inline constexpr const char *kIROptBothNone = "opt.bothnone";
+inline constexpr const char *kIROptNoneBox = "opt.none.box";
+inline constexpr const char *kIROptBox = "opt.box";
+inline constexpr const char *kIROptObj = "opt.obj";
 
 // ---------------------------------------------------------------------------
 // Value names (general)
@@ -101,6 +117,9 @@ inline constexpr const char *kIRElemShared = "elem.shared";
 inline constexpr const char *kIRElemObj = "elem.obj";
 inline constexpr const char *kIRElemF64 = "elem.f64";
 inline constexpr const char *kIRElemBool = "elem.bool";
+inline constexpr const char *kIRElemChar = "elem.char";
+inline constexpr const char *kIRTuple = "tup";
+inline constexpr const char *kIRTupleShared = "tup.shared";
 inline constexpr const char *kIRIdxExt = "idx.ext";
 inline constexpr const char *kIRF64Bits = "f64.bits";
 inline constexpr const char *kIRBoolExtArr = "bool.ext";

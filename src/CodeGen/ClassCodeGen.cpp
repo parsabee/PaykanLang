@@ -171,6 +171,8 @@ ast::ClassType *ClassCodeGen::getExprClassType(ast::Expr *expr) const {
     return ast::dyn_cast<ast::ClassType>(ce->getResolvedType());
   if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(expr))
     return ast::dyn_cast<ast::ClassType>(se->getResolvedType());
+  if (auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(expr))
+    return ast::dyn_cast<ast::ClassType>(ti->getResolvedType());
   return nullptr;
 }
 
@@ -679,6 +681,10 @@ llvm::Value *ClassCodeGen::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
     // PaykanArray* here would be read back as a box and double-freed.
     llvm::Value *newShared = nullptr;
 
+    // `self.next = None` for an optional field: store the null box.
+    if (CodeGen::isNoneForOptional(node->getValue()))
+      newShared = llvm::ConstantPointerNull::get(ptrTy);
+
     // If RHS is an owned identifier, load its shared box and retain — do NOT
     // call emitExpr which would unwrap it to a raw pointer via visitIdentifier.
     if (auto *rhsId = ast::dyn_cast<ast::Identifier>(node->getValue())) {
@@ -707,6 +713,8 @@ llvm::Value *ClassCodeGen::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
                       ? CG.takeSharedOwnership(node->getValue(), rhs)
                       : CG.emitSharedNew(rhs, kIRFieldShared);
     }
+    // A `T?` value stored into an `Obj` field: never store a NULL box there.
+    newShared = CG.emitOptionalToObj(node->getValue(), newShared);
 
     // Release old value only if it's non-null.
     llvm::Value *old = CG.Builder.CreateLoad(ptrTy, fieldSlot, kIROldField);

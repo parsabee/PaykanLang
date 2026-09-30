@@ -1,0 +1,6 @@
+// ERROR: tuple index '.2' is out of range for type '(int, Str)'
+fn main() -> int {
+  t = (1, "a");
+  x = t.2;
+  return 0;
+}

@@ -1,0 +1,12 @@
+// OK: nested tuple types and literals; chained `.N.M` access; arrays of
+// tuples and tuples holding arrays.
+fn main() -> int {
+  t: (int, (Str, bool)) = (1, ("x", True));
+  inner: (Str, bool) = t.1;
+  flag: bool = t.1.1;
+  pairs: (int, Str)[] = [(1, "a"), (2, "b")];
+  second: Str = pairs[1].1;
+  mixed: (int[], Str) = ([1, 2, 3], "nums");
+  first: int = mixed.0[0];
+  return t.0 + first + pairs[0].0;
+}

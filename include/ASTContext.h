@@ -6,6 +6,7 @@
 
 #include "AST.h"
 
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -60,16 +61,37 @@ class ASTContext {
   // holds at any nesting depth: `int[][]` resolves to one node everywhere.
   std::unordered_map<Type *, ArrayType *> ArrayTypes;
 
+  // Canonical OptionalType per inner type (lazily created by getOptionalType).
+  // Keyed like ArrayTypes: the inner Type* must be canonical, so `Node?`
+  // resolves to one node everywhere and identity is pointer identity.
+  std::unordered_map<Type *, OptionalType *> OptionalTypes;
+
   // Per-element specialized array ClassTypes (lazily created).
   // Key: element Type* pointer (canonical within this ASTContext).
   std::unordered_map<Type *, ClassType *> SpecializedArrayTypes;
   // Reverse map for O(1) getSpecializedArrayElemType lookups.
   std::unordered_map<ClassType *, Type *> SpecializedArrayElemTypes;
 
+  // -- Tuples (prototype) ----------------------------------------------------
+  // Canonical base class for every tuple value ("Tuple": Obj subtype whose
+  // vtable mirrors PaykanTuple_vtable — destroy / toString / equals).
+  ClassType *TupleTy;
+  // Canonical TupleType per element-type list (lazily created by
+  // getTupleType).  Key: the element Type* pointers, each canonical, so that
+  // `(int, (Str, bool))` resolves to one node everywhere.
+  std::map<std::vector<Type *>, TupleType *> TupleTypes;
+  // Per-element-list specialized tuple ClassTypes (`Tuple<int, Str>`), keyed
+  // by canonical TupleType*, plus the reverse map.  They subclass TupleTy and
+  // add no methods; they exist so that a tuple receiver has a ClassType for
+  // method lookup / vtable dispatch, mirroring Array<T>.
+  std::unordered_map<TupleType *, ClassType *> SpecializedTupleTypes;
+  std::unordered_map<ClassType *, TupleType *> SpecializedTupleElemTypes;
+
   // -- Bootstrap helpers (called from the constructor) ----------------------
   void buildObjectType();
   void buildStringType();
   void buildArrayType();
+  void buildTupleType();
   void buildFileType();
   void buildErrorType();
   void buildBoxedIntType();
@@ -162,6 +184,12 @@ public:
   /// resolves every parser-emitted (source-located) ArrayType to this node.
   ArrayType *getArrayType(Type *elemTy);
 
+  /// Return the canonical OptionalType wrapping @p innerTy, creating it on
+  /// first use.  @p innerTy must itself be canonical (see getArrayType).
+  /// Sema resolves every parser-emitted (source-located) OptionalType to this
+  /// node.
+  OptionalType *getOptionalType(Type *innerTy);
+
   /// Return (creating if needed) the specialized ClassType for arrays whose
   /// elements have type @p elemTy.  The returned type is a subtype of ArrayTy
   /// and carries push(elemTy)->void and pop()->elemTy method declarations.
@@ -177,6 +205,25 @@ public:
   getSpecializedArrayTypes() const {
     return SpecializedArrayTypes;
   }
+
+  // -- Tuples (prototype) ----------------------------------------------------
+
+  /// The canonical `Tuple` base ClassType (every tuple value is one).
+  ClassType *getTupleTy() const { return TupleTy; }
+
+  /// Return the canonical TupleType with the given element types, creating
+  /// it on first use.  Each element must itself be canonical (see
+  /// getArrayType) so that tuple type identity is pointer identity.
+  TupleType *getTupleType(std::vector<Type *> elemTys);
+
+  /// Return (creating if needed) the specialized ClassType `Tuple<T1, T2>`
+  /// for the canonical tuple type @p tt — a subtype of getTupleTy() used for
+  /// method lookup and vtable dispatch on tuple receivers.
+  ClassType *getOrCreateSpecializedTupleType(TupleType *tt);
+
+  /// If @p ct is a specialized tuple ClassType, return the TupleType it was
+  /// created for; otherwise nullptr.
+  TupleType *getSpecializedTupleElemType(ClassType *ct) const;
 
   /// Return the canonical BuiltinType* for a given Kind.
   BuiltinType *getBuiltinType(BuiltinType::Kind k) const;
@@ -228,9 +275,10 @@ public:
 };
 
 /// Canonical display name for a type: builtin keyword ("int", "float", …),
-/// class or enum name, element name plus "[]" for arrays, and "unknown" for
-/// null or unrecognised types.  The single source of truth shared by Sema
-/// diagnostics, module-export serialisation (SemaImport), and specialized
+/// class or enum name, element name plus "[]" for arrays, inner name plus "?"
+/// for optionals, and "unknown" for null or unrecognised types.  The single
+/// source of truth shared by Sema diagnostics, module-export serialisation
+/// (SemaImport, which parses the "[]" / "?" suffixes back), and specialized
 /// array-type naming.
 std::string typeName(Type *ty);
 

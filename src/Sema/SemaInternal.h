@@ -20,11 +20,12 @@ bool stmtAlwaysReturns(ast::Stmt *s);
 /// Returns true if every path through the list of statements ends in a return.
 bool blockAlwaysReturns(llvm::ArrayRef<ast::Stmt *> stmts);
 
-/// Returns true if the match's arms cover the whole value domain of its
-/// subject: a wildcard arm, one bare-variant arm per variant of an enum
-/// subject, or both True and False literal arms over a bool subject.  Assumes
-/// Sema has already validated the arms (each variant arm names a distinct,
-/// valid variant), so counting them suffices.
+/// Returns true if the arms of `ms` cover every value of its subject: a
+/// wildcard arm; every variant of an enum subject; both `True` and `False`
+/// for a bool subject; or, for an optional `T?` subject, a `None` arm together
+/// with a type arm naming `T` itself.  Requires the subject's resolved type
+/// and the arms' resolved types (i.e. the match has passed Sema), so each
+/// variant arm names a distinct, valid variant and counting them suffices.
 bool matchIsExhaustive(ast::MatchStmt *ms);
 
 } // namespace detail

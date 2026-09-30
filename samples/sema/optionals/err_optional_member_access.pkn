@@ -1,0 +1,10 @@
+// No field can be read through an optional receiver.
+class Node {
+  v: int;
+  fn __init__(x: int) { self.v = x; }
+}
+
+fn main() -> int {
+  a: Node? = Node(1);
+  return a.v;   // error: cannot use optional 'Node?' as 'Node' without unwrapping (use match)
+}

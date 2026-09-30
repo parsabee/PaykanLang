@@ -1,0 +1,25 @@
+// Optional types (prototype): the only operators on an optional are == and !=
+// — against None (a null check) or against another optional of a compatible
+// type (both None -> equal, one None -> not equal, otherwise `equals`).
+class Node {
+  v: int;
+  fn __init__(x: int) { self.v = x; }
+}
+class Leaf : Node {
+  fn __init__(x: int) { __super__(x); }
+}
+
+fn main() -> int {
+  a: Node? = None;
+  b: Node? = Node(1);
+  l: Leaf? = Leaf(2);
+  if (a == None) { println("a is none"); }
+  if (b != None) { println("b is some"); }
+  if (None == a) { println("none == a"); }
+  println(StrBool(a == b));
+  println(StrBool(b == l));    // subtype-compatible optionals
+  s: Str? = "x";
+  t: Str? = "x";
+  println(StrBool(s == t));
+  return 0;
+}
