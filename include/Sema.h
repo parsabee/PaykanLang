@@ -301,7 +301,17 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// returned by run().
   llvm::StringMap<std::shared_ptr<SemaContext>> AccumulatedImportContexts;
 
-  /// Info about an already-analyzed module.
+  /// Defining module (resolved file path) of every class/enum this Sema has
+  /// reconstructed from an import, keyed by canonical type name.  Type names
+  /// are global across the import graph, so reconstructing a type whose name
+  /// is already bound to a type from a different module is an error rather
+  /// than a silent merge of two unrelated types.
+  llvm::StringMap<std::string> ImportedTypeOrigins;
+
+public:
+  /// Info about an already-analyzed module.  Public (with ModuleCache) so
+  /// tests can seed a cache entry and exercise the error paths of export
+  /// reconstruction; production code only touches it in SemaImport.cpp.
   struct ModuleInfo {
     // Functions are stored as serialised name-strings so the cache entry never
     // holds raw Type* pointers into a foreign (potentially destroyed)
@@ -319,6 +329,16 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     struct ClassInfo {
       std::string Name;
       std::string SuperClassName; // "" -> implicit Object root
+      /// True when the class is declared in the module itself.  False for a
+      /// class the module merely reached through its own imports: such a
+      /// class is reconstructed (so the module's signatures that mention it
+      /// resolve, with type identity preserved) but is NOT given the
+      /// importer's qualifier — names are never re-exported transitively.
+      bool IsLocal = true;
+      /// Resolved path of the module that declares the class ("" for
+      /// compiler builtins).  Used to detect two modules exporting different
+      /// classes under one name.
+      std::string OriginPath;
       struct FieldInfo {
         std::string FieldName;
         std::string TypeName;
@@ -339,6 +359,8 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     struct EnumInfo {
       std::string Name;
       std::vector<std::string> Variants;
+      bool IsLocal = true;    // see ClassInfo::IsLocal
+      std::string OriginPath; // see ClassInfo::OriginPath
     };
     std::vector<EnumInfo> ExportedEnums;
   };
@@ -346,6 +368,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// Global cache of already-analyzed modules (keyed by resolved file path).
   static llvm::StringMap<ModuleInfo> ModuleCache;
 
+private:
   /// Resolve a module path to an absolute file path.
   std::string resolveModulePath(const std::string &modulePath, bool isSystem,
                                 ast::SourceLocation loc);

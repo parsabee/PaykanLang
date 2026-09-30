@@ -8,6 +8,8 @@
 #include "ParserDriver.h"
 #include "Sema.h"
 
+#include <algorithm>
+
 namespace paykan {
 namespace sema {
 
@@ -17,8 +19,8 @@ namespace sema {
 
 // Types are serialised by name via the shared ast::typeName (ASTContext.cpp).
 // A name it cannot express ("unknown", never registered) fails
-// resolveExportedType below, and the caller falls back to void/Obj exactly as
-// for any other unresolvable name.
+// resolveExportedType below and is diagnosed by the caller as an unknown type
+// — export reconstruction never silently substitutes Obj or void.
 
 /// Resolve a serialised type name (possibly carrying trailing "[]" array
 /// markers) to a Type* in @p ctx.  Builtins/classes/enums resolve by name;
@@ -35,56 +37,12 @@ static ast::Type *resolveExportedType(ast::ASTContext &ctx,
   return ctx.lookupType(name);
 }
 
-/// Reconstruct a single ClassInfo into a context, guaranteeing type identity.
-static void registerClassInfoInto(
-    const std::string &name, const std::string &superName,
-    const std::vector<std::pair<std::string, std::string>> &fields,
-    const std::vector<std::tuple<std::string, std::string,
-                                 std::vector<std::string>, uint8_t>> &methods,
-    ast::ASTContext &ctx) {
-  if (ctx.lookupClassType(name))
-    return; // already present — pointer identity guaranteed
-
-  ast::ClassType *superClass = nullptr;
-  if (!superName.empty())
-    superClass = ctx.lookupClassType(superName);
-  if (!superClass)
-    superClass = ctx.getObjTy();
-
-  auto builder = ctx.buildClassType(name, superClass);
-  for (auto &[fname, ftname] : fields) {
-    ast::Type *fty = resolveExportedType(ctx, ftname);
-    if (!fty)
-      fty = ctx.getObjTy();
-    builder.field(fname, fty);
-  }
-  for (auto &[mname, retName, paramNames, flags] : methods) {
-    ast::Type *retTy = resolveExportedType(ctx, retName);
-    if (!retTy)
-      retTy = ctx.getVoidTy();
-    std::vector<ast::Type *> params;
-    for (auto &pn : paramNames) {
-      ast::Type *pty = resolveExportedType(ctx, pn);
-      if (!pty)
-        pty = ctx.getObjTy();
-      params.push_back(pty);
-    }
-    builder.method(mname, retTy, std::move(params), flags);
-  }
-  builder.build();
-}
-
-/// Reconstruct a single enum into a context, guaranteeing type identity.
-static void registerEnumInfoInto(const std::string &name,
-                                 const std::vector<std::string> &variants,
-                                 ast::ASTContext &ctx) {
-  if (ctx.lookupEnumType(name))
-    return; // already present — pointer identity guaranteed
-  auto *et = ctx.registerEnumType(name, ast::SourceLocation());
-  if (!et)
-    return;
-  for (auto &v : variants)
-    et->addVariant(ctx.intern(v));
+/// True for the class names every ASTContext registers at construction (Obj,
+/// Str, Array, File, ...).  They are never exported: each context bootstraps
+/// its own copy, so they are always present on the importing side.
+static bool isBootstrapClassName(const std::string &name) {
+  static const ast::ASTContext Probe;
+  return Probe.lookupClassType(name) != nullptr;
 }
 
 // ---------------------------------------------------------------------------
@@ -128,22 +86,6 @@ std::string Sema::resolveModulePath(const std::string &modulePath,
 bool Sema::processImport(ast::ImportDecl *node) {
   const bool isSystem = node->isSystem();
 
-  // Helper: register a cached ClassInfo into an ASTContext.
-  auto applyClassInfo = [&](const ModuleInfo::ClassInfo &ci,
-                            ast::ASTContext &ctx) {
-    std::vector<std::pair<std::string, std::string>> fields;
-    fields.reserve(ci.Fields.size());
-    for (auto &f : ci.Fields)
-      fields.emplace_back(f.FieldName, f.TypeName);
-    std::vector<
-        std::tuple<std::string, std::string, std::vector<std::string>, uint8_t>>
-        methods;
-    methods.reserve(ci.Methods.size());
-    for (auto &m : ci.Methods)
-      methods.emplace_back(m.Name, m.ReturnTypeName, m.ParamTypeNames, m.Flags);
-    registerClassInfoInto(ci.Name, ci.SuperClassName, fields, methods, ctx);
-  };
-
   // Helper: load one module from a resolved path, cache it, inject exports.
   auto loadModule = [&](const std::string &path, const std::string &qualifier,
                         const std::string &fullModulePath,
@@ -154,58 +96,229 @@ bool Sema::processImport(ast::ImportDecl *node) {
       return false;
     }
 
-    // Helpers shared by the cache-hit and fresh-load paths below.  Each
-    // reconstructs one exported entity in the importing context and registers
-    // its qualified names (short qualifier and full module path).
-    auto registerExportedEnum = [&](const ModuleInfo::EnumInfo &ei) {
-      registerEnumInfoInto(ei.Name, ei.Variants, Ctx);
-      if (auto *et = Ctx.lookupEnumType(ei.Name)) {
-        Ctx.addEnumTypeAlias(qualifier + names::kQualSep + ei.Name, et);
-        if (qualifier != fullModulePath)
-          Ctx.addEnumTypeAlias(fullModulePath + names::kQualSep + ei.Name, et);
-      }
+    // -- Reconstruction helpers ---------------------------------------------
+    //
+    // Shared by the cache-hit and fresh-load paths.  They rebuild a module's
+    // exported entities in the importing context (Ctx) and register the
+    // qualified names (short qualifier and full module path) of the entities
+    // the module itself declares.
+    //
+    // Every type name an export mentions must resolve here: the exporting
+    // module type-checked, so each such type is either a builtin, declared by
+    // the module, or reached through the module's own imports — and all of
+    // those are serialised alongside the export.  A name that still fails to
+    // resolve is a compiler bug or a corrupt cache entry, and is reported
+    // against the import site rather than degraded to Obj/void, which would
+    // only surface later as a baffling type mismatch at a call site.
+    const std::string diagPrefix =
+        "import of module '" + fullModulePath + "': ";
+
+    auto resolveOrReport = [&](const std::string &tyName,
+                               const std::string &what) -> ast::Type * {
+      if (auto *ty = resolveExportedType(Ctx, tyName))
+        return ty;
+      error(loc, diagPrefix + what + " has unknown type '" + tyName + "'");
+      return nullptr;
     };
-    auto registerExportedClass = [&](const ModuleInfo::ClassInfo &ci) {
-      applyClassInfo(ci, Ctx);
-      if (auto *ct = Ctx.lookupClassType(ci.Name)) {
-        Ctx.addClassTypeAlias(qualifier + names::kQualSep + ci.Name, ct);
-        if (qualifier != fullModulePath)
-          Ctx.addClassTypeAlias(fullModulePath + names::kQualSep + ci.Name, ct);
+
+    // Type names are global across the import graph (a type is reconstructed
+    // once, by canonical name, so that it keeps a single identity however many
+    // import paths reach it).  Binding a name to a type declared by a
+    // DIFFERENT module would silently merge two unrelated types; reject it.
+    auto checkOrigin = [&](const char *kind, const std::string &name,
+                           const std::string &origin) -> bool {
+      if (origin.empty())
+        return true; // compiler builtin — identical in every context
+      auto it = ImportedTypeOrigins.find(name);
+      if (it == ImportedTypeOrigins.end()) {
+        ImportedTypeOrigins[name] = origin;
+        return true;
       }
+      if (it->second == origin)
+        return true;
+      error(loc, diagPrefix + kind + " '" + name +
+                     "' conflicts with a type of the same name declared by "
+                     "module '" +
+                     it->second + "' (type names are global across imports)");
+      return false;
     };
-    auto injectFnAs = [&](const ModuleInfo::FunctionInfo &fi,
-                          const std::string &name) {
-      if (lookupFunction(name))
-        return;
-      ast::Type *retTy = resolveExportedType(Ctx, fi.ReturnTypeName);
-      if (!retTy)
-        retTy = Ctx.getVoidTy();
-      std::vector<ast::Type *> params;
-      for (auto &pn : fi.ParamTypeNames) {
-        ast::Type *pty = resolveExportedType(Ctx, pn);
-        if (!pty)
-          pty = Ctx.getObjTy();
-        params.push_back(pty);
-      }
-      declareFunction(name, retTy, params, /*isBuiltin=*/true);
-    };
-    auto injectExportedFn = [&](const ModuleInfo::FunctionInfo &fi) {
-      injectFnAs(fi, qualifier + names::kQualSep + fi.Name);
+
+    auto addClassAliases = [&](ast::ClassType *ct, const std::string &name) {
+      Ctx.addClassTypeAlias(qualifier + names::kQualSep + name, ct);
       if (qualifier != fullModulePath)
-        injectFnAs(fi, fullModulePath + names::kQualSep + fi.Name);
+        Ctx.addClassTypeAlias(fullModulePath + names::kQualSep + name, ct);
+    };
+    auto addEnumAliases = [&](ast::EnumType *et, const std::string &name) {
+      Ctx.addEnumTypeAlias(qualifier + names::kQualSep + name, et);
+      if (qualifier != fullModulePath)
+        Ctx.addEnumTypeAlias(fullModulePath + names::kQualSep + name, et);
+    };
+
+    // Reconstruct every exported enum and class.  Returns false (with
+    // diagnostics emitted) if anything failed to resolve.
+    auto registerExportedTypes = [&](const ModuleInfo &info) -> bool {
+      bool ok = true;
+
+      // Enums first: class fields and method signatures may be enum-typed.
+      for (auto &ei : info.ExportedEnums) {
+        if (!checkOrigin("enum", ei.Name, ei.OriginPath)) {
+          ok = false;
+          continue;
+        }
+        auto *et = Ctx.lookupEnumType(ei.Name);
+        if (!et) {
+          if (Ctx.lookupClassType(ei.Name)) {
+            error(loc, diagPrefix + "enum '" + ei.Name +
+                           "' conflicts with a class of the same name "
+                           "already in scope");
+            ok = false;
+            continue;
+          }
+          et = Ctx.registerEnumType(ei.Name, loc);
+          for (auto &v : ei.Variants)
+            et->addVariant(Ctx.intern(v));
+        } // else: already present — pointer identity preserved
+        if (ei.IsLocal)
+          addEnumAliases(et, ei.Name);
+      }
+
+      // Classes, phase 1: pre-register a stub for every class not already
+      // present, superclass before subclass.  All stubs exist before any
+      // signature is resolved, so a method or field may name any class of the
+      // module regardless of the (unordered) serialisation order — this is
+      // the same two-phase scheme checkClassDecls uses for a single file.
+      std::vector<const ModuleInfo::ClassInfo *> pending, created;
+      for (auto &ci : info.ExportedClasses) {
+        if (!checkOrigin("class", ci.Name, ci.OriginPath)) {
+          ok = false;
+          continue;
+        }
+        if (auto *ct = Ctx.lookupClassType(ci.Name)) {
+          // Already present — pointer identity preserved.
+          if (ci.IsLocal)
+            addClassAliases(ct, ci.Name);
+          continue;
+        }
+        if (Ctx.lookupEnumType(ci.Name)) {
+          error(loc, diagPrefix + "class '" + ci.Name +
+                         "' conflicts with an enum of the same name already "
+                         "in scope");
+          ok = false;
+          continue;
+        }
+        pending.push_back(&ci);
+      }
+      for (bool progress = true; progress && !pending.empty();) {
+        progress = false;
+        for (auto it = pending.begin(); it != pending.end();) {
+          const auto &ci = **it;
+          ast::ClassType *super = ci.SuperClassName.empty()
+                                      ? Ctx.getObjTy()
+                                      : Ctx.lookupClassType(ci.SuperClassName);
+          if (!super) {
+            ++it; // superclass not registered yet — retry next round
+            continue;
+          }
+          Ctx.preRegisterClassType(ci.Name, super);
+          created.push_back(&ci);
+          it = pending.erase(it);
+          progress = true;
+        }
+      }
+      for (auto *ci : pending) {
+        error(loc, diagPrefix + "superclass '" + ci->SuperClassName +
+                       "' of class '" + ci->Name + "' is unknown");
+        ok = false;
+      }
+
+      // Classes, phase 2: populate fields and method signatures in creation
+      // order (a superclass is always created — hence populated — before its
+      // subclasses, so the inherited vtable prefix is complete).
+      for (auto *ci : created) {
+        auto *ct = Ctx.lookupClassType(ci->Name);
+        ct->reinheritVTable(ct->getSuperClass());
+        ast::ASTContext::ClassTypeBuilder builder(Ctx, ct);
+        for (auto &f : ci->Fields) {
+          auto *fty =
+              resolveOrReport(f.TypeName, "field '" + f.FieldName +
+                                              "' of class '" + ci->Name + "'");
+          if (!fty) {
+            ok = false;
+            continue;
+          }
+          builder.field(f.FieldName, fty);
+        }
+        for (auto &m : ci->Methods) {
+          const std::string decl = "method '" + ci->Name + "." + m.Name + "'";
+          auto *retTy =
+              resolveOrReport(m.ReturnTypeName, "return type of " + decl);
+          bool sigOk = retTy != nullptr;
+          std::vector<ast::Type *> params;
+          for (size_t i = 0; i < m.ParamTypeNames.size(); ++i) {
+            auto *pty = resolveOrReport(m.ParamTypeNames[i],
+                                        "parameter " + std::to_string(i + 1) +
+                                            " of " + decl);
+            if (pty)
+              params.push_back(pty);
+            else
+              sigOk = false;
+          }
+          if (!sigOk) {
+            ok = false;
+            continue;
+          }
+          builder.method(m.Name, retTy, std::move(params), m.Flags);
+        }
+        builder.build();
+        if (ci->IsLocal)
+          addClassAliases(ct, ci->Name);
+      }
+      return ok;
+    };
+
+    auto injectFnAs = [&](const ModuleInfo::FunctionInfo &fi,
+                          const std::string &name) -> bool {
+      if (lookupFunction(name))
+        return true; // same module already imported under this qualifier
+      const std::string decl = "function '" + fi.Name + "'";
+      auto *retTy =
+          resolveOrReport(fi.ReturnTypeName, "return type of " + decl);
+      bool sigOk = retTy != nullptr;
+      std::vector<ast::Type *> params;
+      for (size_t i = 0; i < fi.ParamTypeNames.size(); ++i) {
+        auto *pty = resolveOrReport(fi.ParamTypeNames[i],
+                                    "parameter " + std::to_string(i + 1) +
+                                        " of " + decl);
+        if (pty)
+          params.push_back(pty);
+        else
+          sigOk = false;
+      }
+      if (!sigOk)
+        return false;
+      declareFunction(name, retTy, std::move(params), /*isBuiltin=*/true);
+      return true;
+    };
+
+    // Inject everything a cached ModuleInfo exports: types first (function
+    // signatures name them), then functions as qualifier::name and
+    // fullModulePath::name.
+    auto injectExports = [&](const ModuleInfo &info) -> bool {
+      bool ok = registerExportedTypes(info);
+      for (auto &fi : info.ExportedFunctions) {
+        if (!injectFnAs(fi, qualifier + names::kQualSep + fi.Name))
+          ok = false;
+        if (qualifier != fullModulePath &&
+            !injectFnAs(fi, fullModulePath + names::kQualSep + fi.Name))
+          ok = false;
+      }
+      return ok;
     };
 
     // Check cache first.
     auto cacheIt = ModuleCache.find(path);
-    if (cacheIt != ModuleCache.end()) {
-      for (auto &ei : cacheIt->second.ExportedEnums)
-        registerExportedEnum(ei);
-      for (auto &ci : cacheIt->second.ExportedClasses)
-        registerExportedClass(ci);
-      for (auto &fi : cacheIt->second.ExportedFunctions)
-        injectExportedFn(fi);
-      return true;
-    }
+    if (cacheIt != ModuleCache.end())
+      return injectExports(cacheIt->second);
 
     // Parse the imported file, with the parser wired to a DiagEngine that
     // carries the imported file's name and source lines — so a syntax error
@@ -246,64 +359,88 @@ bool Sema::processImport(ast::ImportDecl *node) {
       return false;
     }
 
-    // Serialise exported class types.
+    // -- Serialise the module's exports --------------------------------------
+    //
+    // The module's type registry holds (a) the classes/enums it declares,
+    // (b) the ones it reached through its own imports, and (c) compiler
+    // builtins plus lazily-created Array<T> specialisations.  (a) is exported
+    // under the importer's qualifier.  (b) is exported WITHOUT a qualifier —
+    // it must exist in the importing context so the module's signatures that
+    // mention it resolve (with type identity preserved), but names are never
+    // re-exported: to spell such a type the importer imports its defining
+    // module.  (c) is never exported.
     ModuleInfo info;
-    {
-      for (auto &[name, ct] :
-           importDriverPtr->getASTContext().getClassTypes()) {
-        if (name == names::kObj || name == names::kString)
-          continue;
-        // The registry holds each class under its canonical name and again
-        // under any qualified import aliases; serialise only the canonical
-        // entry so a class reached through several import paths keeps one
-        // identity (the same fix applied to enum export).
-        if (name != ct->getName())
-          continue;
-        ModuleInfo::ClassInfo ci;
-        ci.Name = name;
-        if (ct->getSuperClass()) {
-          ci.SuperClassName = ct->getSuperClass()->getName();
-          if (ci.SuperClassName == names::kObj)
-            ci.SuperClassName = "";
-        }
-        for (auto &[fname, fty] : ct->getFields())
-          ci.Fields.push_back({fname, ast::typeName(fty)});
-        for (auto *m : ct->getVTable()) {
-          ModuleInfo::ClassInfo::MethodInfo mi;
-          mi.Name = m->getName();
-          mi.ReturnTypeName = ast::typeName(m->getReturnType());
-          for (auto *pty : m->getParamTypes())
-            mi.ParamTypeNames.push_back(ast::typeName(pty));
-          mi.Flags = static_cast<uint8_t>(
-              m->isPrivate() ? ast::MethodDecl::Private : 0);
-          ci.Methods.push_back(std::move(mi));
-        }
-        info.ExportedClasses.push_back(std::move(ci));
-      }
+    auto &modCtx = importDriverPtr->getASTContext();
+    llvm::StringSet<> localClasses, localEnums;
+    for (auto *cd : importRoot->getClassDecls())
+      localClasses.insert(cd->getName());
+    for (auto *ed : importRoot->getEnumDecls())
+      localEnums.insert(ed->getName());
 
-      // Serialise exported enum types (name + variants in declaration order).
-      // The registry holds each enum under its canonical name and again under
-      // any qualified import aliases; serialise only the canonical entry so the
-      // type is reconstructed once and keeps a single identity.
-      for (auto &[name, et] : importDriverPtr->getASTContext().getEnumTypes()) {
-        if (name != et->getName())
-          continue; // alias key — skip
-        ModuleInfo::EnumInfo ei;
-        ei.Name = name;
-        for (auto *v : et->getVariants())
-          ei.Variants.push_back(*v);
-        info.ExportedEnums.push_back(std::move(ei));
+    for (auto &[name, ct] : modCtx.getClassTypes()) {
+      // The registry holds each class under its canonical name and again
+      // under any qualified import aliases; serialise only the canonical
+      // entry so a class reached through several import paths keeps one
+      // identity.
+      if (name != ct->getName())
+        continue;
+      if (isBootstrapClassName(name) || modCtx.getSpecializedArrayElemType(ct))
+        continue;
+      ModuleInfo::ClassInfo ci;
+      ci.Name = name;
+      ci.IsLocal = localClasses.count(name) != 0;
+      ci.OriginPath =
+          ci.IsLocal ? path : importSema.ImportedTypeOrigins.lookup(name);
+      if (ct->getSuperClass()) {
+        ci.SuperClassName = ct->getSuperClass()->getName();
+        if (ci.SuperClassName == names::kObj)
+          ci.SuperClassName = "";
       }
-
-      // Reconstruct enums first: a class field or method may be enum-typed,
-      // and registerClassInfoInto resolves those names against this context.
-      for (auto &ei : info.ExportedEnums)
-        registerExportedEnum(ei);
-      for (auto &ci : info.ExportedClasses)
-        registerExportedClass(ci);
+      for (auto &[fname, fty] : ct->getFields())
+        ci.Fields.push_back({fname, ast::typeName(fty)});
+      for (auto *m : ct->getVTable()) {
+        ModuleInfo::ClassInfo::MethodInfo mi;
+        mi.Name = m->getName();
+        mi.ReturnTypeName = ast::typeName(m->getReturnType());
+        for (auto *pty : m->getParamTypes())
+          mi.ParamTypeNames.push_back(ast::typeName(pty));
+        mi.Flags =
+            static_cast<uint8_t>(m->isPrivate() ? ast::MethodDecl::Private : 0);
+        ci.Methods.push_back(std::move(mi));
+      }
+      info.ExportedClasses.push_back(std::move(ci));
     }
 
-    // Serialise exported functions.
+    // Enum types: name + variants in declaration order (canonical entries
+    // only, as for classes).
+    for (auto &[name, et] : modCtx.getEnumTypes()) {
+      if (name != et->getName())
+        continue; // alias key — skip
+      ModuleInfo::EnumInfo ei;
+      ei.Name = name;
+      ei.IsLocal = localEnums.count(name) != 0;
+      ei.OriginPath =
+          ei.IsLocal ? path : importSema.ImportedTypeOrigins.lookup(name);
+      for (auto *v : et->getVariants())
+        ei.Variants.push_back(*v);
+      info.ExportedEnums.push_back(std::move(ei));
+    }
+
+    // The registries are unordered maps; sort so reconstruction (and any
+    // diagnostics it emits) is deterministic.
+    auto byLocalThenName = [](const auto &a, const auto &b) {
+      if (a.IsLocal != b.IsLocal)
+        return a.IsLocal;
+      return a.Name < b.Name;
+    };
+    std::sort(info.ExportedClasses.begin(), info.ExportedClasses.end(),
+              byLocalThenName);
+    std::sort(info.ExportedEnums.begin(), info.ExportedEnums.end(),
+              byLocalThenName);
+
+    // Free functions and constructors declared by the module.  Functions the
+    // module itself imported were injected as builtins and are not
+    // re-exported.
     for (auto &[name, sig] : importSema.FunctionTable) {
       if (sig.IsBuiltin)
         continue;
@@ -314,17 +451,17 @@ bool Sema::processImport(ast::ImportDecl *node) {
         fi.ParamTypeNames.push_back(ast::typeName(pty));
       info.ExportedFunctions.push_back(std::move(fi));
     }
-    ModuleCache[path] = std::move(info);
+    std::sort(info.ExportedFunctions.begin(), info.ExportedFunctions.end(),
+              [](const auto &a, const auto &b) { return a.Name < b.Name; });
 
-    // Inject functions as qualifier::name and fullModulePath::name.
-    for (auto &fi : ModuleCache[path].ExportedFunctions)
-      injectExportedFn(fi);
+    ModuleCache[path] = std::move(info);
+    bool ok = injectExports(ModuleCache[path]);
 
     childCtx.OwnedDriver = importDriverPtr;
     childCtx.Root = importRoot;
     AccumulatedImportContexts[path] =
         std::make_shared<SemaContext>(std::move(childCtx));
-    return true;
+    return ok;
   };
 
   bool ok = true;

@@ -38,6 +38,7 @@ add_executable(sema_tests
     Sema/ControlFlowTests.cpp
     Sema/ClassTests.cpp
     Sema/ModuleTests.cpp
+    Sema/ImportTypeTests.cpp
     Sema/ArrayTests.cpp
     Sema/EnumTests.cpp
     Sema/MovTests.cpp
@@ -64,6 +65,7 @@ add_executable(codegen_tests
     CodeGen/ControlFlowTests.cpp
     CodeGen/ClassTests.cpp
     CodeGen/ModuleTests.cpp
+    CodeGen/ImportTypeTests.cpp
     CodeGen/CharTests.cpp
     CodeGen/ArrayTests.cpp
     CodeGen/LeakTests.cpp
