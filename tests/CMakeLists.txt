@@ -106,6 +106,7 @@ add_executable(runtime_tests
     Runtime/SharedTests.cpp
     Runtime/FileTests.cpp
     Runtime/BoxedPrimitiveTests.cpp
+    Runtime/TupleTests.cpp
 )
 target_include_directories(runtime_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}

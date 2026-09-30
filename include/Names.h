@@ -231,6 +231,11 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanArrayPushObj,
     kPaykanArrayPop,
     kPaykanArrayPopObj,
+    // Tuple
+    kPaykanTupleNew,
+    kPaykanTupleSet,
+    kPaykanTupleSetObj,
+    kPaykanTupleGet,
     // File
     kPaykanFileOpen,
     // IO
@@ -246,10 +251,25 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanFloatFromStr,
 };
 
+// -- Tuple slot kinds (CodeGen <-> runtime ABI) ------------------------------
+//
+// One byte per tuple element, emitted by CodeGen as the `kinds` descriptor
+// passed to PaykanTuple_new.  Must match PaykanTupleKind in
+// src/Runtime/Runtime.h (checked by a static_assert in the codegen tests).
+
+enum TupleSlotKind : unsigned char {
+  kTupleSlotInt = 0,   // int64_t (also enum values)
+  kTupleSlotFloat = 1, // double bits
+  kTupleSlotBool = 2,  // int64_t 0 / 1
+  kTupleSlotChar = 3,  // int64_t holding one byte
+  kTupleSlotRef = 4,   // PaykanShared* retained by the tuple
+};
+
 // -- LLVM IR internal names -------------------------------------------------
 
 inline constexpr const char *kStrGlobalName = ".str";
 inline constexpr const char *kInt2FPName = "int2fp";
+inline constexpr const char *kTupleKindsGlobalName = ".tuple.kinds";
 
 } // namespace names
 } // namespace paykan

@@ -210,6 +210,28 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   /// globals for identical array literals.
   llvm::StringMap<llvm::GlobalVariable *> InternedArrayData;
 
+  /// Intern table for tuple slot-kind descriptors (keyed by the kind bytes).
+  /// One `[N x i8]` global per distinct tuple element-kind sequence.
+  llvm::StringMap<llvm::GlobalVariable *> InternedTupleKinds;
+
+  // -- Tuples (prototype) ----------------------------------------------------
+
+  /// The runtime slot kind (names::TupleSlotKind) for a tuple element of the
+  /// given static type: reference types are boxed slots, everything else is
+  /// stored raw.
+  unsigned char tupleElementKind(ast::Type *elemTy) const;
+
+  /// Return the (interned) `[N x i8]` constant holding the kind byte of every
+  /// element of @p tt — the descriptor handed to PaykanTuple_new.
+  llvm::GlobalVariable *emitTupleKindsGlobal(ast::TupleType *tt);
+
+  /// Coerce a primitive element value to the raw i64 bits stored in a tuple
+  /// slot (double -> bitcast, i1 / i8 -> zext, i64 unchanged).
+  llvm::Value *toTupleSlotBits(llvm::Value *v);
+
+  /// Reinterpret the raw i64 bits of a primitive tuple slot as @p elemTy.
+  llvm::Value *fromTupleSlotBits(llvm::Value *bits, ast::Type *elemTy);
+
   /// Process imports: codegen each imported module.
   void processImports(ast::TranslationUnit *tu);
 
