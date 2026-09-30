@@ -8,6 +8,7 @@
 #include "ASTVisitor.h"
 #include "DiagEngine.h"
 
+#include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/StringSet.h>
@@ -443,6 +444,147 @@ private:
   /// before any function or method body is checked, so calls resolve regardless
   /// of the order declarations appear in the module.
   bool declareFunctionSignature(ast::FuncDecl *node);
+
+  /// Phase 4 for one class: resolve field types and method signatures into
+  /// the pre-registered ClassType (superclass must already be populated).
+  bool populateClassType(ast::ClassDecl *cd, ast::ClassType *ct);
+
+  /// Phase 4b for one class: register the constructor function `Name(...)`.
+  void declareConstructor(ast::ClassDecl *cd, ast::ClassType *ct);
+
+  // -- Generics (prototype) --------------------------------------------------
+  //
+  // Generic declarations are templates: they are registered by name here and
+  // never type-checked as such.  Every use with a distinct tuple of canonical
+  // type arguments instantiates the template once (cached by the canonical
+  // name, e.g. `Box<int>`, `Pair<Str, int>`) into an ordinary ClassDecl /
+  // FuncDecl clone with the type parameters substituted (ast::ASTCloner),
+  // which is then registered, checked, and emitted like hand-written code.
+  // Bodies of instantiations are checked from a worklist after all
+  // hand-written bodies (they may trigger further instantiations).
+
+  /// Class and function templates declared by this module, by name.
+  llvm::StringMap<ast::ClassDecl *> ClassTemplates;
+  llvm::StringMap<ast::FuncDecl *> FuncTemplates;
+
+  /// Instantiation caches keyed by canonical instantiation name.  A null
+  /// ClassType* / false records an instantiation that failed, so a repeated
+  /// use neither re-instantiates nor re-reports.
+  llvm::StringMap<ast::ClassType *> ClassInstantiations;
+  llvm::StringMap<bool> FuncInstantiations;
+
+  /// What an instantiated ClassType was made from (for inference through
+  /// `Box<T>` parameters and for diagnostics).
+  struct InstantiationInfo {
+    std::string TemplateName;
+    std::vector<ast::Type *> Args;
+  };
+  llvm::DenseMap<ast::ClassType *, InstantiationInfo> ClassInstantiationInfo;
+
+  /// Instantiations whose bodies still have to be checked.
+  struct PendingInstantiation {
+    ast::ClassDecl *Class = nullptr; // exactly one of Class / Func is set
+    ast::FuncDecl *Func = nullptr;
+    std::string Name;               // canonical instantiation name
+    ast::SourceLocation RequestLoc; // where the instantiation was requested
+    llvm::StringSet<> TypeParams;   // the template's type parameter names
+  };
+  std::vector<PendingInstantiation> PendingInstantiations;
+
+  /// Instantiations in creation order; injected into the TranslationUnit at
+  /// the end of run() so CodeGen emits them.
+  std::vector<ast::ClassDecl *> InstantiatedClassDecls;
+  std::vector<ast::FuncDecl *> InstantiatedFuncDecls;
+
+  /// Active instantiation contexts, outermost first.  Every error reported
+  /// while this is non-empty is followed by a note per frame ("in
+  /// instantiation of 'Box<int>' requested here").
+  struct InstantiationFrame {
+    std::string Name;
+    ast::SourceLocation RequestLoc;
+  };
+  std::vector<InstantiationFrame> InstantiationStack;
+  static constexpr size_t kMaxInstantiationDepth = 16;
+
+  /// Type parameter names of the instantiation whose body is being checked
+  /// (nullptr outside one).  Used to diagnose a type parameter used as a value.
+  const llvm::StringSet<> *CurrentTypeParams = nullptr;
+
+  /// Classes constructed inside each class's method bodies (by name).  Used to
+  /// order instantiated classes for CodeGen: a constructor must be emitted
+  /// before a method that calls it.
+  llvm::StringMap<llvm::StringSet<>> ConstructsEdges;
+
+  /// Register every generic declaration of the module as a template, checking
+  /// its name and type parameter list.
+  bool registerGenericTemplates(ast::TranslationUnit *tu);
+
+  /// Canonical name of an instantiation: `Name<arg1, arg2>`.
+  static std::string instantiationName(const std::string &templateName,
+                                       const std::vector<ast::Type *> &args);
+
+  /// Instantiate class template @p name with canonical @p args, or return the
+  /// cached instantiation.  Registers the class (stub, fields, methods,
+  /// constructor) immediately and queues its bodies.  Returns nullptr after
+  /// reporting an error.
+  ast::ClassType *instantiateClass(const std::string &name,
+                                   const std::vector<ast::Type *> &args,
+                                   ast::SourceLocation loc);
+
+  /// Instantiate function template @p name with canonical @p args, or return
+  /// the cached instantiation.  Returns the instantiation's function name, or
+  /// "" after reporting an error.
+  std::string instantiateFunction(const std::string &name,
+                                  const std::vector<ast::Type *> &args,
+                                  ast::SourceLocation loc);
+
+  /// Names of the module's own concrete classes (set by
+  /// registerGenericTemplates) and of every class whose fields and method
+  /// signatures have been populated so far.  A generic class whose superclass
+  /// is a local class may only be instantiated once that superclass is
+  /// populated (its vtable prefix must be complete).
+  llvm::StringSet<> LocalClassNames;
+  llvm::StringSet<> PopulatedClasses;
+
+  /// A failed unification: type parameter @p Param was deduced as both
+  /// @p First and @p Second.
+  struct InferenceConflict {
+    std::string Param;
+    ast::Type *First = nullptr;
+    ast::Type *Second = nullptr;
+  };
+
+  /// Structural unification of a template parameter type @p pattern (which
+  /// may mention type parameters as ClassType stubs) against a canonical
+  /// argument type @p actual, extending @p bindings.  Returns false, filling
+  /// @p conflict, on a conflicting binding (reported by the caller).  Shapes
+  /// that do not match (e.g. an array pattern against a class argument) are
+  /// not an inference failure: they are left to the ordinary argument check.
+  bool unifyTypes(ast::Type *pattern, ast::Type *actual,
+                  const llvm::StringSet<> &typeParams,
+                  llvm::StringMap<ast::Type *> &bindings,
+                  InferenceConflict &conflict);
+
+  /// Infer the type arguments of a generic call from its argument types.
+  /// @p paramTypes are the template's declared parameter types; on success
+  /// @p out holds one canonical type per type parameter, in order.
+  bool inferTypeArgs(const std::string &templateName,
+                     const std::vector<const std::string *> &typeParams,
+                     const std::vector<ast::Type *> &paramTypes,
+                     const std::vector<ast::Type *> &argTypes,
+                     ast::SourceLocation loc, std::vector<ast::Type *> &out);
+
+  /// Resolve a call whose callee is a template (or carries explicit type
+  /// arguments): instantiate and rewrite the callee name.  Returns false after
+  /// reporting an error.
+  bool resolveGenericCall(ast::CallExpr *node,
+                          const std::vector<ast::Type *> &argTypes);
+
+  /// Check the bodies of every pending instantiation (transitively).
+  bool checkPendingInstantiations();
+
+  /// Append the instantiated declarations to the TranslationUnit.
+  void injectInstantiations(ast::TranslationUnit *tu);
 
 public:
   explicit Sema(ast::ASTContext &ctx, DiagEngine &diags,

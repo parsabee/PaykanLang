@@ -71,7 +71,8 @@ namespace ast {
   NODE(NK_ArrayType, ArrayType, ArrayType)                                     \
   NODE(NK_OptionalType, OptionalType, OptionalType)                            \
   NODE(NK_EnumType, EnumType, EnumType)                                        \
-  NODE(NK_TupleType, TupleType, TupleType)
+  NODE(NK_TupleType, TupleType, TupleType)                                     \
+  NODE(NK_GenericType, GenericType, GenericType)
 
 #define PAYKAN_TOPLEVEL_NODES(NODE)                                            \
   NODE(NK_TranslationUnit, TranslationUnit, TranslationUnit)

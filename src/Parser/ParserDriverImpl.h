@@ -8,11 +8,19 @@
 #include "ASTContext.h"
 #include "Parser.ypp.h"
 #include "ParserDriver.h"
+#include <deque>
 #include <vector>
 
-// Flex needs this macro for our custom driver
-#define YY_DECL yy::parser::symbol_type yylex(paykan::parser::ParserDriver &drv)
+// Flex needs this macro for our custom driver.  The scanner itself is exposed
+// as yylex_raw; the parser calls yylex (ParserDriver.cpp), a thin wrapper that
+// adds the one token of context the LALR(1) grammar cannot express: whether a
+// '<' after an identifier opens a type-argument list (see TYPELESS).
+#define YY_DECL                                                                \
+  yy::parser::symbol_type yylex_raw(paykan::parser::ParserDriver &drv)
 YY_DECL;
+
+/// Parser entry point: yylex_raw plus type-argument disambiguation.
+yy::parser::symbol_type yylex(paykan::parser::ParserDriver &drv);
 
 using namespace paykan::ast;
 
@@ -48,6 +56,12 @@ struct ParserDriver::Impl {
   bool TraceParsing;
   /// Whether to generate scanner debug traces.
   bool TraceScanning;
+
+  /// Tokens already scanned ahead by the yylex wrapper (see ParserDriver.cpp)
+  /// but not yet handed to the parser, in source order.
+  std::deque<yy::parser::symbol_type> Lookahead;
+  /// True when the token most recently handed to the parser was an IDENT.
+  bool PrevWasIdent = false;
 
   explicit Impl(bool TraceParsing, bool TraceScanning)
       : TraceParsing(TraceParsing), TraceScanning(TraceScanning) {}

@@ -102,6 +102,7 @@ public:
     NK_OptionalType,
     NK_EnumType,
     NK_TupleType,
+    NK_GenericType, // must stay the last Type kind (see Type::classof)
 
     // Match arm (child of MatchStmt, not a Stmt itself)
     NK_MatchArm,
@@ -268,7 +269,7 @@ public:
   }
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_BuiltinType && N->getKind() <= NK_TupleType;
+    return N->getKind() >= NK_BuiltinType && N->getKind() <= NK_GenericType;
   }
 };
 
@@ -287,6 +288,10 @@ public:
 
   const std::string &getName() const { return *Name; }
   Type *getType() const { return VarType; }
+  /// Sema writes the canonical (resolved) type back over the parser's
+  /// annotation so later passes never see a source-located stub or an
+  /// unresolved generic type application (GenericType).
+  void setType(Type *ty) { VarType = ty; }
   Expr *getInitExpr() const { return InitExpr; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_VarDecl; }
@@ -304,23 +309,39 @@ struct Param {
 class CompoundStmt;
 
 // Free function declaration:  fn name(params) -> retType { body }
+//
+// A generic function (`fn first<T>(xs: T[]) -> T`) carries its type parameter
+// names in TypeParams.  Such a declaration is a template: Sema never checks it
+// directly but instantiates it per distinct type-argument tuple by cloning it
+// with the type parameters substituted (see ASTClone.h).
 class FuncDecl : public Decl {
 private:
   const std::string *Name; // points into ASTContext::StringPool (stable)
   std::vector<Param> Params;
   Type *ReturnType; // nullptr means void
   CompoundStmt *Body;
+  // Type parameter names (interned); empty for an ordinary function.
+  std::vector<const std::string *> TypeParams;
 
 public:
   FuncDecl(SourceLocation loc, const std::string &internedName,
-           std::vector<Param> params, Type *retTy, CompoundStmt *body)
+           std::vector<Param> params, Type *retTy, CompoundStmt *body,
+           std::vector<const std::string *> typeParams = {})
       : Decl(NK_FuncDecl, loc), Name(&internedName), Params(std::move(params)),
-        ReturnType(retTy), Body(body) {}
+        ReturnType(retTy), Body(body), TypeParams(std::move(typeParams)) {}
 
   const std::string &getName() const { return *Name; }
   const std::vector<Param> &getParams() const { return Params; }
+  /// Mutable access for Sema's canonical-type write-back (see VarDecl).
+  std::vector<Param> &getMutableParams() { return Params; }
   Type *getReturnType() const { return ReturnType; }
+  void setReturnType(Type *ty) { ReturnType = ty; }
   CompoundStmt *getBody() const { return Body; }
+
+  const std::vector<const std::string *> &getTypeParams() const {
+    return TypeParams;
+  }
+  bool isGeneric() const { return !TypeParams.empty(); }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_FuncDecl; }
 };
@@ -730,21 +751,34 @@ inline const std::string &AssignStmt::getVarName() const {
   return LHS->getName();
 }
 
-// Function call expression
+// Function call expression.
+//
+// Also covers constructor calls (`Point(1, 2)`) and, with TypeArgs, explicit
+// generic calls: `first<int>(xs)` / `Box<int>(3)`.  Sema resolves a call to a
+// generic function or class template to a concrete instantiation and rewrites
+// the callee name to the instantiation's canonical name (`first<int>`), so
+// CodeGen only ever sees ordinary calls.
 class CallExpr : public Expr {
 private:
   const std::string *CalleeName; // points into ASTContext::StringPool (stable)
   std::vector<Expr *> Arguments;
+  std::vector<Type *> TypeArgs; // explicit type arguments; empty if none
 
 public:
   CallExpr(SourceLocation loc, const std::string &internedCallee,
-           std::vector<Expr *> args)
+           std::vector<Expr *> args, std::vector<Type *> typeArgs = {})
       : Expr(NK_CallExpr, loc), CalleeName(&internedCallee),
-        Arguments(std::move(args)) {}
+        Arguments(std::move(args)), TypeArgs(std::move(typeArgs)) {}
 
   const std::string &getCalleeName() const { return *CalleeName; }
+  /// Rebind the callee (Sema: generic call -> instantiation name).
+  void setCalleeName(const std::string &internedCallee) {
+    CalleeName = &internedCallee;
+  }
   const std::vector<Expr *> &getArguments() const { return Arguments; }
   size_t getNumArguments() const { return Arguments.size(); }
+  const std::vector<Type *> &getTypeArgs() const { return TypeArgs; }
+  bool hasTypeArgs() const { return !TypeArgs.empty(); }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_CallExpr; }
 };
@@ -1068,20 +1102,28 @@ struct ClassBody {
 // Methods are stored as FuncDecl nodes (fn keyword, full body).
 // The optional superclass is recorded by name; Sema resolves it to a
 // ClassType* and registers the fully-built ClassType in the ASTContext.
+//
+// A generic class (`class Box<T> { ... }`) carries its type parameter names in
+// TypeParams and is a template: Sema registers it separately and instantiates
+// it per distinct type-argument tuple into an ordinary ClassDecl/ClassType
+// named `Box<int>` (see SemaClass.cpp).
 class ClassDecl : public Decl {
 private:
   const std::string *Name; // points into ASTContext::StringPool (stable)
   const std::string *SuperClassName; // interned; "" = no explicit superclass
   std::vector<VarDecl *> Fields;
   std::vector<FuncDecl *> Methods;
+  // Type parameter names (interned); empty for an ordinary class.
+  std::vector<const std::string *> TypeParams;
 
 public:
   ClassDecl(SourceLocation loc, const std::string &internedName,
             const std::string &internedSuperName, std::vector<VarDecl *> fields,
-            std::vector<FuncDecl *> methods)
+            std::vector<FuncDecl *> methods,
+            std::vector<const std::string *> typeParams = {})
       : Decl(NK_ClassDecl, loc), Name(&internedName),
         SuperClassName(&internedSuperName), Fields(std::move(fields)),
-        Methods(std::move(methods)) {}
+        Methods(std::move(methods)), TypeParams(std::move(typeParams)) {}
 
   const std::string &getName() const { return *Name; }
   const std::string &getSuperClassName() const { return *SuperClassName; }
@@ -1092,30 +1134,61 @@ public:
   size_t getNumFields() const { return Fields.size(); }
   size_t getNumMethods() const { return Methods.size(); }
 
+  const std::vector<const std::string *> &getTypeParams() const {
+    return TypeParams;
+  }
+  bool isGeneric() const { return !TypeParams.empty(); }
+
   static bool classof(const ASTNode *N) { return N->getKind() == NK_ClassDecl; }
 };
 
 // Translation unit (top-level container)
+//
+// Generic (template) declarations are kept apart from ordinary ones: every
+// downstream pass that walks ClassDecls / FuncDecls (Sema, CodeGen, module
+// export) sees only concrete declarations.  Sema appends the instantiations it
+// creates to the concrete lists (addFuncDecl / prependClassDecls) so CodeGen
+// emits them exactly like hand-written declarations.
 class TranslationUnit : public ASTNode {
 private:
   std::vector<ImportDecl *> Imports;
   std::vector<ClassDecl *> ClassDecls;
   std::vector<FuncDecl *> FuncDecls;
   std::vector<EnumDecl *> EnumDecls;
+  std::vector<ClassDecl *> GenericClassDecls;
+  std::vector<FuncDecl *> GenericFuncDecls;
 
 public:
   TranslationUnit(SourceLocation loc, std::vector<ImportDecl *> imports,
                   std::vector<ClassDecl *> classes,
                   std::vector<FuncDecl *> funcs,
-                  std::vector<EnumDecl *> enums = {})
+                  std::vector<EnumDecl *> enums = {},
+                  std::vector<ClassDecl *> genericClasses = {},
+                  std::vector<FuncDecl *> genericFuncs = {})
       : ASTNode(NK_TranslationUnit, loc), Imports(std::move(imports)),
         ClassDecls(std::move(classes)), FuncDecls(std::move(funcs)),
-        EnumDecls(std::move(enums)) {}
+        EnumDecls(std::move(enums)),
+        GenericClassDecls(std::move(genericClasses)),
+        GenericFuncDecls(std::move(genericFuncs)) {}
 
   const std::vector<ImportDecl *> &getImports() const { return Imports; }
   const std::vector<ClassDecl *> &getClassDecls() const { return ClassDecls; }
   const std::vector<FuncDecl *> &getFuncDecls() const { return FuncDecls; }
   const std::vector<EnumDecl *> &getEnumDecls() const { return EnumDecls; }
+  const std::vector<ClassDecl *> &getGenericClassDecls() const {
+    return GenericClassDecls;
+  }
+  const std::vector<FuncDecl *> &getGenericFuncDecls() const {
+    return GenericFuncDecls;
+  }
+
+  /// Append an instantiated function (Sema).
+  void addFuncDecl(FuncDecl *fn) { FuncDecls.push_back(fn); }
+  /// Replace the concrete class list (Sema: hand-written classes plus the
+  /// instantiations, ordered for CodeGen — see Sema::injectInstantiations).
+  void setClassDecls(std::vector<ClassDecl *> decls) {
+    ClassDecls = std::move(decls);
+  }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_TranslationUnit;
@@ -1145,6 +1218,31 @@ public:
   Type *getElementType() const { return ElementType; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_ArrayType; }
+};
+
+// Generic type application:  Box<int>, Pair<Str, int>, mod::Box<int>
+//
+// A parser-level reference to a generic class with type arguments.  It is not
+// a type of its own: Sema's resolveType instantiates the named class template
+// with the (resolved) arguments and yields the instantiation's canonical
+// ClassType (`Box<int>`), then writes that ClassType back over the annotation
+// slot that held this node.  CodeGen therefore never sees a GenericType.
+class GenericType : public Type {
+  const std::string *Name; // template name (interned); may be qualified
+  std::vector<Type *> Args;
+
+public:
+  GenericType(SourceLocation loc, const std::string &internedName,
+              std::vector<Type *> args)
+      : Type(NK_GenericType, loc), Name(&internedName), Args(std::move(args)) {}
+
+  const std::string &getName() const { return *Name; }
+  const std::vector<Type *> &getArgs() const { return Args; }
+  size_t getNumArgs() const { return Args.size(); }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_GenericType;
+  }
 };
 
 // Optional type: T?  (e.g. Node?, Str?, int[]?)
