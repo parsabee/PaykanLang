@@ -674,3 +674,100 @@ fn main() -> int {
       << r.Diagnostics;
   std::filesystem::remove_all(tmp);
 }
+
+// ─── interaction with tuples (#4) ───────────────────────────────────────────
+
+TEST(OptionalTuple, TupleWithOptionalElementsOk) {
+  expectOk(std::string(kNodeClass) + R"(
+    fn pick(n: Node?, k: int) -> (Node?, int) { return (n, k); }
+    fn main() -> int {
+      a: Node? = Node(7);
+      t: (Node?, int) = pick(a, 1);
+      u = pick(None, 2);
+      x, k = t;
+      y: Node?, j: int = u;
+      same: bool = t == pick(a, 1);
+      isNone: bool = y == None;
+      ts: (Node?, int)[] = [];
+      ts.push(t);
+      match x {
+        n: Node { k = n.val(); }
+        None    { }
+      }
+      return 0;
+    }
+  )");
+}
+
+TEST(OptionalTuple, DestructuredOptionalElementStillNeedsUnwrap) {
+  expectError(std::string(kNodeClass) + R"(
+    fn pick(n: Node?, k: int) -> (Node?, int) { return (n, k); }
+    fn main() -> int {
+      x, k = pick(None, 1);
+      n: Node = x;
+      return 0;
+    }
+  )",
+              kUnwrapNode);
+}
+
+TEST(OptionalTuple, NoneInTupleLiteralIsObj) {
+  // Known limitation (shared with `[None]`): a tuple literal takes its element
+  // types from the elements, and a bare `None` is typed Obj, so `(None, 1)`
+  // is `(Obj, int)`.  Build the tuple from an optional-typed value instead.
+  expectError(std::string(kNodeClass) +
+                  "fn main() -> int { t: (Node?, int) = (None, 1); return 0; }",
+              "initializer of type '(Obj, int)' does not match declared type "
+              "'(Node?, int)'");
+}
+
+TEST(OptionalTuple, OptionalTupleTypeRejected) {
+  expectError(R"(
+    fn find(k: int) -> (int, Str)? { return None; }
+    fn main() -> int { return 0; }
+  )",
+              "optional tuple types are not supported yet");
+  expectError("fn main() -> int { x: (int, Str)?[] = []; return 0; }",
+              "optional tuple types are not supported yet");
+}
+
+TEST(OptionalTupleModule, TupleAndOptionalSignaturesRoundTrip) {
+  // Serialised spellings mix tuple parentheses with `?` and `[]` suffixes:
+  // "(Node?, int)[]?", "(Node?, Str?)[]", "(Node?, int)".
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_opt_tuple_mod").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib.pkn",
+            "class Node { v: int; fn __init__(x: int) { self.v = x; } }\n"
+            "fn wrap(xs: (Node?, int)[]?) -> (Node?, int)[]? { return xs; }\n"
+            "fn pairs() -> (Node?, Str?)[] { return []; }\n"
+            "fn mk(n: Node?) -> (Node?, int) { return (n, 5); }\n");
+  auto ok = writeFile(tmp, "main.pkn", R"(
+import lib;
+fn main() -> int {
+  a: (lib::Node?, int)[]? = lib::wrap(None);
+  b: (lib::Node?, int)[]? = lib::wrap([]);
+  p: (lib::Node?, Str?)[] = lib::pairs();
+  x, k = lib::mk(None);
+  return k;
+}
+)");
+  auto r = semaCheckFile(ok, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+
+  // The element must still be optional after the round trip.
+  auto bad = writeFile(tmp, "bad.pkn", R"(
+import lib;
+fn main() -> int {
+  x, k = lib::mk(None);
+  n: lib::Node = x;
+  return 0;
+}
+)");
+  auto r2 = semaCheckFile(bad, tmp);
+  EXPECT_FALSE(r2.Ok);
+  EXPECT_NE(r2.Diagnostics.find("cannot use optional 'Node?' as 'Node'"),
+            std::string::npos)
+      << r2.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}

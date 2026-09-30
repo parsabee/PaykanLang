@@ -108,7 +108,8 @@ pre-commit install --hook-type pre-push
 To learn PaykanLang:
 
 - **[`language_reference/`](language_reference/)** — the full reference: language basics,
-  functions, enums, classes, arrays, modules, `match` statements, and the memory model.
+  functions, enums, classes, arrays, modules, `match` statements, the memory model,
+  tuples (prototype), and optional types (prototype).
 - **[`samples/`](samples/)** — runnable `.pkn` programs exercising every feature
   (`samples/codegen/` has 28 feature demos; see also `imports/`, `sema/`, `leak-check/`).
 - **[`example_program/`](example_program/)** — a small end-to-end example (`calc`).

@@ -166,9 +166,11 @@ bool Sema::checkInitFieldsAssigned(ast::ClassType *ct, ast::CompoundStmt *body,
       return {in, false};
     }
     if (auto *ms = ast::dyn_cast<ast::MatchStmt>(s)) {
-      // Only an exhaustive match (wildcard arm, every enum variant, both bool
-      // literals, or None + the wrapped type for an optional subject — see
-      // detail::matchIsExhaustive) can guarantee assignments.
+      // Analyse every arm (so returns within are validated), then apply
+      // exhaustiveness: only an exhaustive match (wildcard arm, every enum
+      // variant, both bool literals, or None + the wrapped type for an
+      // optional subject — see detail::matchIsExhaustive) can guarantee
+      // assignments.
       llvm::SmallBitVector out = full;
       bool anyFallThrough = false;
       for (ast::MatchArm *arm : ms->getArms()) {

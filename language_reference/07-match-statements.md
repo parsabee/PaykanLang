@@ -308,7 +308,7 @@ match f.readln() {
 
 ## Optional Mode — unwrapping a `T?` (prototype)
 
-When the subject is an optional type `T?` (see `09-optionals.md`), `match` is the way to get at
+When the subject is an optional type `T?` (see `10-optionals.md`), `match` is the way to get at
 the wrapped value. The arm naming `T` itself matches **every present value** — whatever its
 runtime subclass — and binds it as `T`; a `None` arm (or `_`) covers the absent case:
 

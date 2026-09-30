@@ -12,8 +12,8 @@ guarantee, not something you write by hand.
 
 - **Value types** (`int`, `float`, `bool`, `char`, `enum`) live on the stack, are copied on
   assignment, and are never reference-counted.
-- **Reference types** (class instances, `Str`, `File`, `Error`, arrays, boxed `Int`/`Float`) live
-  on the heap and are reference-counted.
+- **Reference types** (class instances, `Str`, `File`, `Error`, arrays, tuples, boxed
+  `Int`/`Float`) live on the heap and are reference-counted.
 - Each heap object is owned through a **shared box** holding a strong count and a pointer to the
   object. Copying a reference **retains** (count `+1`); dropping one **releases** (count `-1`).
 - When the count reaches zero the object's **`destroy`** runs — releasing the references it holds
@@ -31,7 +31,7 @@ The category of a type decides how it is stored and whether ARC applies.
 | Category | Types | Storage | On assignment / passing |
 |----------|-------|---------|--------------------------|
 | **Value** | `int`, `float`, `bool`, `char`, `enum` | Stack / register | Copied bit-for-bit; independent thereafter |
-| **Reference** | class instances, `Str`, arrays, `File`, `Error`, boxed `Int`/`Float` | Heap | Reference shared; count adjusted |
+| **Reference** | class instances, `Str`, arrays, tuples, `File`, `Error`, boxed `Int`/`Float` | Heap | Reference shared; count adjusted |
 
 A value type has no identity beyond its bits: assigning one `int` to another produces two
 independent values. A reference type has identity: assigning one variable to another makes both
@@ -278,7 +278,7 @@ rather than an allocation, retaining and releasing it is harmless and it is neve
 
 ### Optional types (prototype)
 
-A value of optional type `T?` (see `09-optionals.md`) is the **same shared box** as a `T`; the
+A value of optional type `T?` (see `10-optionals.md`) is the **same shared box** as a `T`; the
 absent value is represented by *having no box at all* rather than by the `None` singleton. This
 means an optional costs nothing extra: retaining, releasing, moving or destroying an absent
 `T?` is a no-op, a `None` stored into an optional field or array slot releases the previous

@@ -14,6 +14,7 @@ type-checking (no codegen or JIT execution).
 | `match/`   | `match` statement — arms, bindings, wildcards     |
 | `enums/`   | `enum` declarations, variant access, equality, enum match |
 | `optionals/` | Optional types `T?` (prototype) — `None`, widening, unwrapping with `match`, optional fields and arrays |
+| `tuples/`  | Tuple types, literals, `.N` access, destructuring, immutability (prototype) |
 
 ## Running
 
@@ -29,7 +30,8 @@ done
 # Type-check every sample across all feature directories
 for f in samples/sema/arrays/*.pkn samples/sema/classes/*.pkn \
          samples/sema/functions/*.pkn samples/sema/match/*.pkn \
-         samples/sema/enums/*.pkn samples/sema/optionals/*.pkn; do
+         samples/sema/enums/*.pkn samples/sema/optionals/*.pkn \
+         samples/sema/tuples/*.pkn; do
   paykan --check-only "$f" 2>&1 && echo "OK: $f" || echo "ERR: $f"
 done
 ```

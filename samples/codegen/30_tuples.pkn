@@ -1,0 +1,86 @@
+// 30 — tuples (prototype): fixed-arity, heterogeneous, immutable values
+// Exercises: tuple types `(T1, T2)` and literals `(e1, e2)`, element access
+//            `t.0` / `t.1` (compile-time index, `t.0.1` for nesting), tuples
+//            as parameters / return values / fields / array elements,
+//            multiple return with destructuring `q, r = divmod(7, 2);`
+//            (`_` skips an element), element-wise `==` / `!=` (lowered to the
+//            runtime `equals`), and `toString` rendering `(1, a)`.
+// A tuple is a heap object under ARC like a class instance or an array: it is
+// retained when copied, released at scope exit, and transferred by `mov`.
+
+class Point {
+  x: int;
+  y: int;
+  fn __init__(x: int, y: int) { self.x = x; self.y = y; }
+  fn toString() -> Str { return "P(" + StrInt(self.x) + "," + StrInt(self.y) + ")"; }
+}
+
+class Range {
+  bounds: (int, int);                     // a tuple-typed field
+  fn __init__(lo: int, hi: int) { self.bounds = (lo, hi); }
+  fn width() -> int { return self.bounds.1 - self.bounds.0; }
+  fn get() -> (int, int) { return self.bounds; }
+}
+
+fn divmod(a: int, b: int) -> (int, int) {  // multiple return
+  return (a / b, a % b);
+}
+
+fn label(p: Point) -> (Str, Point) {
+  return ("point", p);
+}
+
+fn main() -> int {
+  // Literals and element access.
+  t = (1, "a", 2.5, True);
+  println(t);                             // (1, a, 2.5, True)
+  println(StrInt(t.0));                   // 1
+  println(t.1);                           // a
+  println(StrFloat(t.2));                 // 2.5
+
+  // Multiple return + destructuring.
+  q, r = divmod(7, 2);
+  println(StrInt(q) + " " + StrInt(r));   // 3 1
+  _, rem = divmod(9, 4);                  // `_` skips an element
+  println(StrInt(rem));                   // 1
+  q, r = divmod(20, 6);                   // re-assigns the existing q and r
+  println(StrInt(q) + " " + StrInt(r));   // 3 2
+
+  // Nesting and chained access.
+  nested = ((1, 2), ("x", (3, "y")));
+  println(nested);                        // ((1, 2), (x, (3, y)))
+  println(nested.1.1.1);                  // y
+
+  // Tuples of arrays and arrays of tuples.
+  pairs: (int, Str)[] = [(1, "one"), (2, "two")];
+  pairs.push((3, "three"));
+  println(pairs[2].1);                    // three
+  arrs: (int[], Str) = ([1, 2, 3], "nums");
+  arrs.0.push(4);                         // the array inside is still mutable
+  println(StrInt(arrs.0.len()));          // 4
+
+  // Tuples holding objects, as fields, and returned from methods.
+  name, pt = label(Point(1, 2));
+  println(name + " " + pt.toString());    // point P(1,2)
+  rg: Range = Range(10, 25);
+  println(StrInt(rg.width()));            // 15
+  lo, hi = rg.get();
+  println(StrInt(lo) + ".." + StrInt(hi)); // 10..25
+
+  // Equality is element-wise (Str by content, objects by their `equals`).
+  a = (1, "s");
+  b = (1, "s");
+  println(StrBool(a == b));               // True
+  println(StrBool(a != (2, "s")));        // True
+  println(StrBool(label(pt) == label(pt))); // True  (same Point object)
+
+  // mov transfers the tuple; the source may be re-assigned afterwards.
+  m = mov a;
+  a = (0, "reset");
+  println(m.1 + a.1);                     // sreset
+
+  // Tuples are Obj values: printable, storable as Obj.
+  o: Obj = (q, r);
+  println(o);                             // (3, 2)
+  return 0;
+}

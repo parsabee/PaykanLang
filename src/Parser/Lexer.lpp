@@ -19,11 +19,26 @@
 
   yy::parser::symbol_type
   make_CHAR (const char *text, int len, const yy::parser::location_type& loc);
+
+  yy::parser::symbol_type
+  make_TUPLE_INDEX (const char *text, int len, const yy::parser::location_type& loc);
 %}
 
 id          [_a-zA-Z][_a-zA-Z_0-9]*
 int         [0-9]+
 float       [0-9]+\.[0-9]*([eE][+-]?[0-9]+)?|[0-9]+[eE][+-]?[0-9]+
+  /* Tuple element index: a dot immediately followed by digits (`.0`, `.12`).
+     Resolves the lexical ambiguity between tuple indexing and float literals
+     by longest-match at the DOT: `t.0` is IDENT TUPLE_INDEX(0) because `.0`
+     (2 chars) beats `.` (1 char); a float literal always starts with a digit
+     ({float} above), so `1.5` still lexes as FLOAT because at the `1` the
+     3-char float match beats the 1-char INT match before the dot is ever
+     considered on its own.  The only source sequence that changes meaning is
+     a chain like `t.0.1`, which previously lexed as IDENT DOT FLOAT(0.1) and
+     now lexes as IDENT TUPLE_INDEX(0) TUPLE_INDEX(1) — exactly the nested
+     access we want.  The token is only valid after a postfix expression (see
+     Parser.ypp); anywhere else it is a syntax error, as `.5` already was. */
+tupleindex  \.[0-9]+
 blank       [ \t\r]
 comment     \/\/[^\n]*
 
@@ -68,6 +83,7 @@ comment     \/\/[^\n]*
 "}"        return yy::parser::make_RBRACK    (loc);
 "="        return yy::parser::make_ASSIGN    (loc);
 ":"        return yy::parser::make_COLON     (loc);
+{tupleindex} return make_TUPLE_INDEX(yytext, yyleng, loc);
 "."        return yy::parser::make_DOT       (loc);
 ";"        return yy::parser::make_SEMICOLON (loc);
 ","        return yy::parser::make_COMMA     (loc);
@@ -174,6 +190,23 @@ make_FLOAT (const std::string &s, const yy::parser::location_type& loc)
 {
   double n = strtod (s.c_str(), NULL);
   return yy::parser::make_FLOAT ((double) n, loc);
+}
+
+yy::parser::symbol_type
+make_TUPLE_INDEX (const char *text, int len, const yy::parser::location_type& loc)
+{
+  // text is ".<digits>".  Leading zeros are rejected (`t.00`, `t.01`) so that
+  // every index has exactly one spelling; the bare `.0` is of course fine.
+  std::string digits(text + 1, len - 1);
+  if (digits.size() > 1 && digits[0] == '0')
+    throw yy::parser::syntax_error(
+        loc, "tuple index must not have leading zeros: " + std::string(text));
+  errno = 0;
+  long long n = strtoll(digits.c_str(), nullptr, 10);
+  if (errno == ERANGE)
+    throw yy::parser::syntax_error(loc, "tuple index is out of range: " +
+                                            std::string(text));
+  return yy::parser::make_TUPLE_INDEX(static_cast<long>(n), loc);
 }
 
 yy::parser::symbol_type

@@ -24,7 +24,8 @@ bool blockAlwaysReturns(llvm::ArrayRef<ast::Stmt *> stmts);
 /// wildcard arm; every variant of an enum subject; both `True` and `False`
 /// for a bool subject; or, for an optional `T?` subject, a `None` arm together
 /// with a type arm naming `T` itself.  Requires the subject's resolved type
-/// and the arms' resolved types (i.e. the match has passed Sema).
+/// and the arms' resolved types (i.e. the match has passed Sema), so each
+/// variant arm names a distinct, valid variant and counting them suffices.
 bool matchIsExhaustive(ast::MatchStmt *ms);
 
 } // namespace detail

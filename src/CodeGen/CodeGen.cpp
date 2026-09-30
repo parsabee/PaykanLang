@@ -7,6 +7,7 @@
 #include "Names.h"
 #include "ParserDriver.h"
 
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
@@ -37,7 +38,8 @@ CodeGen::CodeGen(const sema::SemaContext &semaCtx, llvm::LLVMContext &llvmCtx,
     : ASTCtx(*semaCtx.ASTCtx), LLVMCtx(llvmCtx), SemaCtx(semaCtx),
       Module(std::make_unique<llvm::Module>(moduleName, llvmCtx)),
       Builder(llvmCtx), Classes(*this), ProjectRoot(projectRoot),
-      ImportRegistry(importRegistry ? importRegistry : &CodeGenedImports) {}
+      ImportRegistry(importRegistry ? importRegistry : &CodeGenedImports),
+      ImportGraph(&OwnImportGraph) {}
 
 // -- Scope / ScopeGuard ------------------------------------------------------
 
@@ -222,7 +224,7 @@ bool CodeGen::isObjectElementType(ast::Type *elemTy) const {
     return ASTCtx.lookupEnumType(ct->getName()) == nullptr;
   // An optional element (`Node?[]`) is a PaykanShared* slot that may be NULL;
   // every object-array runtime entry point tolerates NULL slots.
-  return ast::isa<ast::ArrayType>(elemTy) ||
+  return ast::isa<ast::ArrayType>(elemTy) || ast::isa<ast::TupleType>(elemTy) ||
          ast::isa<ast::OptionalType>(elemTy);
 }
 
@@ -234,6 +236,31 @@ ast::Type *CodeGen::canonicalizeDeclType(ast::Type *ty) {
       return et;
     if (auto *canonical = ASTCtx.lookupClassType(ct->getName()))
       return canonical;
+  }
+  // A parser-emitted tuple annotation `(T1, T2)` is rebuilt from canonical
+  // element types so it resolves to the ASTContext's interned instance (the
+  // one Sema attached to expressions and keyed the Tuple<...> specialization
+  // on).  Element arrays are canonicalized on the way for the same reason.
+  if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
+    std::vector<ast::Type *> elems;
+    elems.reserve(tt->getArity());
+    for (ast::Type *e : tt->getElementTypes()) {
+      ast::Type *c = canonicalizeDeclType(e);
+      if (auto *at = ast::dyn_cast<ast::ArrayType>(c))
+        c = ASTCtx.getArrayType(canonicalizeDeclType(at->getElementType()));
+      elems.push_back(c);
+    }
+    return ASTCtx.getTupleType(std::move(elems));
+  }
+  // Likewise an optional annotation `T?` resolves to the interned instance
+  // over its canonical inner type, so an optional nested in a tuple (`(Node?,
+  // int)`) or wrapping one (`(int, Str)?`) keeps pointer identity with the
+  // type Sema attached to expressions.
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty)) {
+    ast::Type *inner = canonicalizeDeclType(ot->getInnerType());
+    if (auto *at = ast::dyn_cast<ast::ArrayType>(inner))
+      inner = ASTCtx.getArrayType(canonicalizeDeclType(at->getElementType()));
+    return ASTCtx.getOptionalType(inner);
   }
   return ty;
 }
@@ -248,6 +275,8 @@ ast::ClassType *CodeGen::resolveExprClassType(ast::Expr *expr) {
     resolved = mae->getResolvedType();
   else if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(expr))
     resolved = se->getResolvedType(); // object array element: y = arr[i]
+  else if (auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(expr))
+    resolved = ti->getResolvedType(); // tuple element: y = t.1
   // `mov expr` transfers the operand's value unchanged, so it resolves to the
   // operand's type.
   else if (auto *mv = ast::dyn_cast<ast::MovExpr>(expr))
@@ -313,7 +342,7 @@ llvm::Function *CodeGen::declareFunction(llvm::StringRef name,
         kPaykanStringConcat,     kPaykanArrayNew,       kPaykanArrayNewObj,
         kPaykanArrayNewFromData, kPaykanMalloc,         kPaykanRealloc,
         kPaykanFileNew,          kPaykanFileOpen,       kPaykanErrorNew,
-        kPaykanIntNew,           kPaykanFloatNew,
+        kPaykanIntNew,           kPaykanFloatNew,       kPaykanTupleNew,
     };
     if (kNonNullReturn.count(name))
       fn->addRetAttr(llvm::Attribute::NonNull);
@@ -419,9 +448,15 @@ bool CodeGen::exprAlreadyShared(ast::Expr *expr) const {
         return true;
     return exprAlreadyShared(op);
   }
-  // ArrayLiteralExpr always produces a PaykanShared* wrapping a PaykanArray*.
-  if (ast::isa<ast::ArrayLiteralExpr>(expr))
+  // ArrayLiteralExpr always produces a PaykanShared* wrapping a PaykanArray*;
+  // TupleLiteralExpr likewise wraps a PaykanTuple*.
+  if (ast::isa<ast::ArrayLiteralExpr>(expr) ||
+      ast::isa<ast::TupleLiteralExpr>(expr))
     return true;
+  // TupleIndexExpr: a ref-typed element is read as the box stored in the slot
+  // (borrowed from the tuple), exactly like a ref-typed field read.
+  if (auto *e = ast::dyn_cast<ast::TupleIndexExpr>(expr))
+    return e->getResolvedType() && ast::isRefType(e->getResolvedType());
   // TernaryExpr and MethodCallExpr always produce PaykanShared* when ref-typed.
   if (auto *e = ast::dyn_cast<ast::MethodCallExpr>(expr))
     return e->getResolvedType() && ast::isRefType(e->getResolvedType());
@@ -470,11 +505,18 @@ bool CodeGen::exprProducesFreshBox(ast::Expr *expr) const {
   if (auto *mae = ast::dyn_cast<ast::MemberAccessExpr>(expr))
     return mae->getResolvedType() && ast::isRefType(mae->getResolvedType()) &&
            exprProducesFreshBox(mae->getReceiver());
+  // Same rule for a tuple element: borrowed from the tuple unless the tuple
+  // itself is a fresh temporary (`mk().1`), in which case visitTupleIndexExpr
+  // retains the element before tearing the temporary down.
+  if (auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(expr))
+    return ti->getResolvedType() && ast::isRefType(ti->getResolvedType()) &&
+           exprProducesFreshBox(ti->getTuple());
   if (auto *mce = ast::dyn_cast<ast::MethodCallExpr>(expr))
     return mce->getResolvedType() && ast::isRefType(mce->getResolvedType());
   if (auto *te = ast::dyn_cast<ast::TernaryExpr>(expr))
     return te->getResolvedType() && ast::isRefType(te->getResolvedType());
-  if (ast::isa<ast::ArrayLiteralExpr>(expr))
+  if (ast::isa<ast::ArrayLiteralExpr>(expr) ||
+      ast::isa<ast::TupleLiteralExpr>(expr))
     return true;
   // CallExpr: fresh only for user functions / open() (per exprAlreadyShared).
   if (ast::isa<ast::CallExpr>(expr))
@@ -520,6 +562,14 @@ llvm::Value *CodeGen::emitSharedNew(llvm::Value *raw, llvm::StringRef name) {
                             name);
 }
 
+llvm::Value *CodeGen::emitSharedGet(llvm::Value *shared,
+                                    const llvm::Twine &name) {
+  auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
+  auto *fnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
+  return Builder.CreateCall(declareFunction(kPaykanSharedGet, fnTy), {shared},
+                            name);
+}
+
 llvm::Value *CodeGen::emitUnwrappedRef(ast::Expr *expr, llvm::StringRef name) {
   llvm::Value *val = emitExpr(expr);
   if (!val)
@@ -528,12 +578,8 @@ llvm::Value *CodeGen::emitUnwrappedRef(ast::Expr *expr, llvm::StringRef name) {
   // PaykanShared* box; unwrap it to the raw pointer.  Identifiers and
   // object-element subscripts are already raw (their emitters unwrap), and are
   // not flagged by exprAlreadyShared, so they pass through unchanged.
-  if (exprAlreadyShared(expr)) {
-    auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
-    auto *getFnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
-    val = Builder.CreateCall(declareFunction(kPaykanSharedGet, getFnTy), {val},
-                             name);
-  }
+  if (exprAlreadyShared(expr))
+    val = emitSharedGet(val, name);
   return val;
 }
 
@@ -687,16 +733,23 @@ llvm::Value *CodeGen::emitImplicitVarDecl(llvm::StringRef name,
   // (the pre-optional representation, kept unchanged).
   bool isNoneRHS = ast::isa<ast::NoneLiteral>(rhsExpr);
 
-  // Determine the AST type for the RHS (for isOwned / method dispatch).  An
-  // optional-typed RHS (`r = find(k)` with `find -> Node?`) keeps its
-  // optional type so the variable's later uses see it as such.
+  // Determine the AST type for the RHS (for isOwned / method dispatch).
   ast::Type *rhsAstTy = resolveExprClassType(rhsExpr);
-  if (!rhsAstTy)
-    if (ast::Type *rt = rhsExpr->getResolvedType();
-        rt && ast::isa<ast::OptionalType>(rt))
-      rhsAstTy = rt;
-  if (!rhsAstTy && val->getType()->isPointerTy())
-    rhsAstTy = ASTCtx.getObjTy(); // conservative fallback
+  if (!rhsAstTy && val->getType()->isPointerTy()) {
+    // Not a class: an optional, array or tuple value.  Keep its precise Sema
+    // type (a scope entry typed `Node?` / `(int, Str)` / `int[]` lets later
+    // uses of the variable see it as such and dispatch through the right
+    // table) and fall back to Obj only when nothing recorded a type.  An
+    // optional-typed RHS (`r = find(k)` with `find -> Node?`) always takes
+    // Sema's type; otherwise an identifier uses its scope entry.
+    ast::Type *rt = rhsExpr->getResolvedType();
+    if (!(rt && ast::isa<ast::OptionalType>(rt)))
+      if (auto *id = ast::dyn_cast<ast::Identifier>(rhsExpr))
+        rt = CurrentScope->lookupASTType(id->getName());
+    rhsAstTy = rt && ast::isRefType(rt)
+                   ? canonicalizeDeclType(rt)
+                   : static_cast<ast::Type *>(ASTCtx.getObjTy()); // fallback
+  }
 
   if (!isNoneRHS && val->getType()->isPointerTy() && rhsAstTy) {
     auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
@@ -1031,9 +1084,13 @@ llvm::Value *CodeGen::emitAsSharedRaw(ast::Expr *expr) {
   // acquiring it for a new owner must retain rather than alias the borrow.
   // (takeSharedOwnership skips the retain when the read is call-rooted, e.g.
   // `makeH().a`, and the loaded box is already a fresh +1 for us.)
-  if (auto *mae = ast::dyn_cast<ast::MemberAccessExpr>(expr)) {
-    if (mae->getResolvedType() && ast::isRefType(mae->getResolvedType())) {
-      llvm::Value *box = emitExpr(expr); // loads the field's PaykanShared* box
+  // A ref-typed tuple element (t.1) is read the same way: the slot owns its
+  // box, so a new owner retains it (visitTupleIndexExpr already handed us a
+  // +1 when the tuple was a temporary).
+  if (ast::isa<ast::MemberAccessExpr>(expr) ||
+      ast::isa<ast::TupleIndexExpr>(expr)) {
+    if (expr->getResolvedType() && ast::isRefType(expr->getResolvedType())) {
+      llvm::Value *box = emitExpr(expr); // loads the slot's PaykanShared* box
       return takeSharedOwnership(expr, box);
     }
   }
@@ -1319,12 +1376,8 @@ llvm::Value *CodeGen::ExprEmitter::visitIdentifier(ast::Identifier *node) {
   // Owned class/array vars store a PaykanShared* — unwrap to get the underlying
   // object.
   auto *astTy = CG.CurrentScope->lookupASTType(node->getName());
-  if (ast::isRefType(astTy) && CG.CurrentScope->isOwned(node->getName())) {
-    auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
-    auto *getFnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
-    auto *getFn = CG.declareFunction(kPaykanSharedGet, getFnTy);
-    val = CG.Builder.CreateCall(getFn, {val}, node->getName() + ".obj");
-  }
+  if (ast::isRefType(astTy) && CG.CurrentScope->isOwned(node->getName()))
+    val = CG.emitSharedGet(val, node->getName() + ".obj");
 
   return val;
 }
@@ -1537,12 +1590,8 @@ CodeGen::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
     return nullptr;
   ExprValue recvOwned = CG.classifyExpr(node->getArray(), recv);
   llvm::Value *recvRaw = recv;
-  if (CG.exprAlreadyShared(node->getArray()) &&
-      recv->getType()->isPointerTy()) {
-    auto *unwrapTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
-    recvRaw = CG.Builder.CreateCall(
-        CG.declareFunction(kPaykanSharedGet, unwrapTy), {recv}, "recv.obj");
-  }
+  if (CG.exprAlreadyShared(node->getArray()) && recv->getType()->isPointerTy())
+    recvRaw = CG.emitSharedGet(recv, kIRRecvObj);
 
   // String subscript: str[idx] -> char  (PaykanString_char_at).
   if (receiverIsStr) {
@@ -1594,9 +1643,7 @@ CodeGen::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
   // then unwrap to the raw PaykanObject* (same as visitIdentifier for owned
   // vars).
   llvm::Value *shared = CG.Builder.CreateIntToPtr(raw, ptrTy, kIRElemShared);
-  auto *unwrapFnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
-  return CG.Builder.CreateCall(CG.declareFunction(kPaykanSharedGet, unwrapFnTy),
-                               {shared}, kIRElemObj);
+  return CG.emitSharedGet(shared, kIRElemObj);
 }
 
 llvm::Value *CodeGen::ExprEmitter::visitTernaryExpr(ast::TernaryExpr *node) {
@@ -1795,14 +1842,10 @@ llvm::Value *CodeGen::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
       // Unwrap PaykanShared* -> raw PaykanObject* for any call/method/ternary
       // result used directly as a concat operand.  The captured ExprValue still
       // refers to the box so it can be released after the concat.
-      auto *ptrTy2 = llvm::PointerType::getUnqual(CG.LLVMCtx);
-      auto *getFnTy2 = llvm::FunctionType::get(ptrTy2, {ptrTy2}, false);
       if (CG.exprAlreadyShared(node->getLHS()))
-        lhs = CG.Builder.CreateCall(
-            CG.declareFunction(kPaykanSharedGet, getFnTy2), {lhs}, kIRLhsObj);
+        lhs = CG.emitSharedGet(lhs, kIRLhsObj);
       if (CG.exprAlreadyShared(node->getRHS()))
-        rhs = CG.Builder.CreateCall(
-            CG.declareFunction(kPaykanSharedGet, getFnTy2), {rhs}, kIRRhsObj);
+        rhs = CG.emitSharedGet(rhs, kIRRhsObj);
 
       // String concatenation: call PaykanString_concat(lhs, rhs) -> ptr
       auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
@@ -1913,12 +1956,8 @@ llvm::Value *CodeGen::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
     // (e.g. out()). visitIdentifier already unwraps owned variables; this
     // covers the case where a Str-returning call is used as an argument without
     // an intermediate variable assignment.
-    if (CG.exprAlreadyShared(argExpr) && v->getType()->isPointerTy()) {
-      auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
-      auto *getFnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
-      v = CG.Builder.CreateCall(CG.declareFunction(kPaykanSharedGet, getFnTy),
-                                {v}, kIRUnboxed);
-    }
+    if (CG.exprAlreadyShared(argExpr) && v->getType()->isPointerTy())
+      v = CG.emitSharedGet(v, kIRUnboxed);
     // An optional argument to an `Obj` builtin (`println(maybe)`): the raw
     // pointer is NULL for None — substitute the None singleton so it prints
     // as "None" rather than nothing.
@@ -2161,12 +2200,8 @@ CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node) {
   // dispatch through the raw array reinterpreted as a box (SIGSEGV on
   // `[1, 2] == [1, 2]` and any other literal-receiver method call).
   if (CG.exprAlreadyShared(node->getReceiver()) &&
-      recv->getType()->isPointerTy()) {
-    auto *sharedPtrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
-    auto *getFnTy = llvm::FunctionType::get(sharedPtrTy, {sharedPtrTy}, false);
-    recv = CG.Builder.CreateCall(CG.declareFunction(kPaykanSharedGet, getFnTy),
-                                 {recv}, kIRRecvObj);
-  }
+      recv->getType()->isPointerTy())
+    recv = CG.emitSharedGet(recv, kIRRecvObj);
 
   // Determine the vtable slot index via the AST ClassType.
   // The receiver's Sema type is stored in the scope; we resolve it by visiting
@@ -2245,6 +2280,10 @@ CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node) {
   ast::ClassType *ct = nullptr;
   if (arrTy)
     ct = CG.ASTCtx.getArrayTy();
+  else if (auto *tupTy = ast::dyn_cast<ast::TupleType>(recvASTTy))
+    // toString / equals on a tuple: the specialization shares the Obj-prefix
+    // vtable layout of PaykanTuple_vtable.
+    ct = CG.ASTCtx.getOrCreateSpecializedTupleType(tupTy);
   else
     ct = ast::dyn_cast<ast::ClassType>(recvASTTy);
 
@@ -2287,11 +2326,10 @@ CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node) {
   // builtin method (e.g. File.write("...")).  The callee borrows them, so we
   // tear them down after the call via the unified ownership path (#32).
   std::vector<ExprValue> ownedArgs;
-  bool isUserDefinedMethod =
-      ct && ct != CG.ASTCtx.getObjTy() && ct != CG.ASTCtx.getStrTy() &&
-      ct != CG.ASTCtx.getFileTy() && ct != CG.ASTCtx.getArrayTy() &&
-      ct != CG.ASTCtx.getErrorTy() && ct != CG.ASTCtx.getIntBoxTy() &&
-      ct != CG.ASTCtx.getFloatBoxTy() && ct != CG.ASTCtx.getBoolBoxTy();
+  // Every compiler-provided class (Obj, Str, Array, File, Error, the boxed
+  // primitives, Tuple and its specializations) is flagged builtin at its
+  // registration site; anything else is a user class with the generated ABI.
+  bool isUserDefinedMethod = ct && !ct->isBuiltin();
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     auto *argExpr = node->getArguments()[i];
     // Determine expected param type from the resolved MethodDecl.
@@ -2467,6 +2505,277 @@ llvm::Value *CodeGen::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   return nullptr;
 }
 
+// -- Tuples (prototype) ------------------------------------------------------
+//
+// Representation.  A tuple value is ONE generic runtime object (PaykanTuple,
+// src/Runtime/Tuple.c) boxed in a PaykanShared exactly like a class instance
+// or an array, so it needs no ownership rules of its own: it is declared as an
+// owned ref-typed variable, retained when copied, passed to callees as a +1
+// box, returned as a box, released at scope exit, and moved by `mov`.  The
+// compiler emits no per-tuple-type struct; the element *kinds* (raw vs
+// reference slot, and how to print a raw slot) travel as a tiny constant
+// descriptor handed to PaykanTuple_new, while the static element types stay
+// in the AST for reading slots back with the right reinterpretation.
+//
+// Element ownership mirrors object arrays: PaykanTuple_set_obj retains the
+// stored box (so the +1 temporary from emitAsShared is released right after),
+// and a read (`t.1`) yields the slot's box *borrowed* — a new owner retains it
+// through takeSharedOwnership — unless the tuple itself was a temporary, in
+// which case the element is retained before the temporary is torn down (the
+// MemberAccessExpr pattern, see exprProducesFreshBox).
+
+unsigned char CodeGen::tupleElementKind(ast::Type *elemTy) const {
+  if (isObjectElementType(elemTy))
+    return names::kTupleSlotRef;
+  if (auto *bt = ast::dyn_cast<ast::BuiltinType>(elemTy)) {
+    switch (bt->getTypeKind()) {
+    case ast::BuiltinType::Float:
+      return names::kTupleSlotFloat;
+    case ast::BuiltinType::Bool:
+      return names::kTupleSlotBool;
+    case ast::BuiltinType::Char:
+      return names::kTupleSlotChar;
+    case ast::BuiltinType::Int:
+    case ast::BuiltinType::Void:
+      break;
+    }
+  }
+  return names::kTupleSlotInt; // int and enums
+}
+
+llvm::GlobalVariable *CodeGen::emitTupleKindsGlobal(ast::TupleType *tt) {
+  std::string key;
+  key.reserve(tt->getArity());
+  for (ast::Type *e : tt->getElementTypes())
+    key += static_cast<char>('0' + tupleElementKind(e));
+  auto it = InternedTupleKinds.find(key);
+  if (it != InternedTupleKinds.end())
+    return it->second;
+
+  auto *i8Ty = llvm::Type::getInt8Ty(LLVMCtx);
+  std::vector<llvm::Constant *> bytes;
+  bytes.reserve(key.size());
+  for (char c : key)
+    bytes.push_back(
+        llvm::ConstantInt::get(i8Ty, static_cast<uint8_t>(c - '0')));
+  auto *arrTy = llvm::ArrayType::get(i8Ty, bytes.size());
+  auto *global = new llvm::GlobalVariable(
+      *Module, arrTy, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+      llvm::ConstantArray::get(arrTy, bytes), kTupleKindsGlobalName);
+  global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
+  InternedTupleKinds.insert({key, global});
+  return global;
+}
+
+llvm::Value *CodeGen::toTupleSlotBits(llvm::Value *v) {
+  auto *i64Ty = llvm::Type::getInt64Ty(LLVMCtx);
+  if (v->getType()->isDoubleTy())
+    return Builder.CreateBitCast(v, i64Ty, kIRF64Bits);
+  if (v->getType()->isIntegerTy() && !v->getType()->isIntegerTy(64))
+    return Builder.CreateZExt(v, i64Ty, kIRBoolExt);
+  return v;
+}
+
+llvm::Value *CodeGen::fromTupleSlotBits(llvm::Value *bits, ast::Type *elemTy) {
+  if (auto *bt = ast::dyn_cast<ast::BuiltinType>(elemTy)) {
+    switch (bt->getTypeKind()) {
+    case ast::BuiltinType::Float:
+      return Builder.CreateBitCast(bits, llvm::Type::getDoubleTy(LLVMCtx),
+                                   kIRElemF64);
+    case ast::BuiltinType::Bool:
+      return Builder.CreateTrunc(bits, llvm::Type::getInt1Ty(LLVMCtx),
+                                 kIRElemBool);
+    case ast::BuiltinType::Char:
+      return Builder.CreateTrunc(bits, llvm::Type::getInt8Ty(LLVMCtx),
+                                 kIRElemChar);
+    case ast::BuiltinType::Int:
+    case ast::BuiltinType::Void:
+      break;
+    }
+  }
+  return bits; // int and enums are i64 already
+}
+
+llvm::Value *
+CodeGen::ExprEmitter::visitTupleLiteralExpr(ast::TupleLiteralExpr *node) {
+  auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
+  auto *i64Ty = llvm::Type::getInt64Ty(CG.LLVMCtx);
+  auto *voidTy = llvm::Type::getVoidTy(CG.LLVMCtx);
+
+  auto *tt = ast::dyn_cast<ast::TupleType>(node->getResolvedType());
+  assert(tt && tt->getArity() == node->getNumElements() &&
+         "Sema must resolve every tuple literal to its TupleType");
+
+  // PaykanTuple_new(count, kinds) -> raw PaykanTuple* with zeroed slots.
+  auto *newFnTy = llvm::FunctionType::get(ptrTy, {i64Ty, ptrTy}, false);
+  llvm::Value *tup =
+      CG.Builder.CreateCall(CG.declareFunction(kPaykanTupleNew, newFnTy),
+                            {llvm::ConstantInt::get(i64Ty, tt->getArity()),
+                             CG.emitTupleKindsGlobal(tt)},
+                            kIRTuple);
+
+  auto *setFnTy = llvm::FunctionType::get(voidTy, {ptrTy, i64Ty, i64Ty}, false);
+  auto *setObjFnTy =
+      llvm::FunctionType::get(voidTy, {ptrTy, i64Ty, ptrTy}, false);
+  for (size_t i = 0; i < tt->getArity(); ++i) {
+    ast::Expr *elemExpr = node->getElements()[i];
+    ast::Type *elemTy = tt->getElementType(i);
+    auto *idx = llvm::ConstantInt::get(i64Ty, i);
+    if (CG.isObjectElementType(elemTy)) {
+      // A +1 box for every expression form (owned variable, field, element,
+      // call result, literal, None); set_obj takes its own retain, so the
+      // temporary reference is dropped right after.
+      llvm::Value *box = CG.emitAsShared(elemExpr);
+      if (!box)
+        return nullptr;
+      CG.Builder.CreateCall(CG.declareFunction(kPaykanTupleSetObj, setObjFnTy),
+                            {tup, idx, box});
+      CG.emitRelease(box);
+    } else {
+      llvm::Value *v = visit(elemExpr);
+      if (!v)
+        return nullptr;
+      CG.Builder.CreateCall(CG.declareFunction(kPaykanTupleSet, setFnTy),
+                            {tup, idx, CG.toTupleSlotBits(v)});
+    }
+  }
+  // Box the raw PaykanTuple* — the consumer owns this fresh +1 box.
+  return CG.emitSharedNew(tup, kIRTupleShared);
+}
+
+llvm::Value *
+CodeGen::ExprEmitter::visitTupleIndexExpr(ast::TupleIndexExpr *node) {
+  auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
+  auto *i64Ty = llvm::Type::getInt64Ty(CG.LLVMCtx);
+
+  // Emit the tuple, classify its ownership (a call-rooted tuple such as
+  // `mk().1` is a fresh +1 box this expression must tear down), then unwrap
+  // to the raw PaykanTuple*.  Identifiers and object-element subscripts are
+  // already raw.
+  llvm::Value *recv = CG.emitExpr(node->getTuple());
+  if (!recv)
+    return nullptr;
+  ExprValue recvOwned = CG.classifyExpr(node->getTuple(), recv);
+  llvm::Value *raw = recv;
+  if (CG.exprAlreadyShared(node->getTuple()) &&
+      recv->getType()->isPointerTy()) {
+    auto *getObjTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
+    raw = CG.Builder.CreateCall(CG.declareFunction(kPaykanSharedGet, getObjTy),
+                                {recv}, kIRRecvObj);
+  }
+
+  auto *getFnTy = llvm::FunctionType::get(i64Ty, {ptrTy, i64Ty}, false);
+  llvm::Value *bits = CG.Builder.CreateCall(
+      CG.declareFunction(kPaykanTupleGet, getFnTy),
+      {raw, llvm::ConstantInt::get(i64Ty, node->getIndex())}, kIRElemRaw);
+
+  ast::Type *elemTy = node->getResolvedType();
+  if (!CG.isObjectElementType(elemTy)) {
+    // Primitive element: copied out of the slot, so the temporary tuple (if
+    // any) can die now.
+    CG.releaseIfOwned(recvOwned);
+    return CG.fromTupleSlotBits(bits, elemTy);
+  }
+
+  // Reference element: the slot's PaykanShared* box, borrowed from the tuple
+  // (consumers retain via takeSharedOwnership / classify it as borrowed).  If
+  // the tuple was a temporary, retain the element so it survives the
+  // teardown; exprProducesFreshBox then reports this result as owned.
+  llvm::Value *box = CG.Builder.CreateIntToPtr(bits, ptrTy, kIRElemShared);
+  if (recvOwned.isOwned()) {
+    CG.emitRetain(box);
+    CG.releaseIfOwned(recvOwned);
+  }
+  return box;
+}
+
+// `a, b = e;` — evaluate e once, copy each element out (retaining reference
+// elements, which the new binding then owns), and bind targets with the same
+// rules as visitVarDecl (annotated) / visitAssignStmt (bare name).
+llvm::Value *CodeGen::visitDestructureStmt(ast::DestructureStmt *node) {
+  auto *ptrTy = llvm::PointerType::getUnqual(LLVMCtx);
+  auto *i64Ty = llvm::Type::getInt64Ty(LLVMCtx);
+  auto *fn = Builder.GetInsertBlock()->getParent();
+
+  auto *tt = ast::dyn_cast<ast::TupleType>(node->getValue()->getResolvedType());
+  assert(tt && tt->getArity() == node->getNumTargets() &&
+         "Sema must resolve the destructured value to a matching TupleType");
+
+  llvm::Value *val = emitExpr(node->getValue());
+  if (!val)
+    return nullptr;
+  ExprValue valOwned = classifyExpr(node->getValue(), val);
+  llvm::Value *raw = val;
+  if (exprAlreadyShared(node->getValue()) && val->getType()->isPointerTy()) {
+    auto *getObjTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
+    raw = Builder.CreateCall(declareFunction(kPaykanSharedGet, getObjTy), {val},
+                             kIRRecvObj);
+  }
+
+  auto *getFnTy = llvm::FunctionType::get(i64Ty, {ptrTy, i64Ty}, false);
+  for (size_t i = 0; i < node->getNumTargets(); ++i) {
+    const auto &target = node->getTargets()[i];
+    if (target.isSkip())
+      continue;
+    ast::Type *elemTy = tt->getElementType(i);
+    const std::string &name = target.getName();
+
+    llvm::Value *bits =
+        Builder.CreateCall(declareFunction(kPaykanTupleGet, getFnTy),
+                           {raw, llvm::ConstantInt::get(i64Ty, i)}, kIRElemRaw);
+    llvm::Value *v = nullptr;
+    if (isObjectElementType(elemTy)) {
+      // The binding becomes an owner of the element: +1 on the slot's box.
+      v = Builder.CreateIntToPtr(bits, ptrTy, kIRElemShared);
+      emitRetain(v);
+    } else {
+      v = fromTupleSlotBits(bits, elemTy);
+    }
+
+    // Annotated target, or a bare name not yet in scope: fresh declaration.
+    ast::Type *bindTy = elemTy;
+    Scope *owner = target.DeclType ? nullptr : CurrentScope->findOwner(name);
+    if (!owner) {
+      if (target.DeclType)
+        bindTy = canonicalizeDeclType(target.DeclType);
+      llvm::Type *llvmTy = toLLVMType(bindTy);
+      if (!llvmTy)
+        llvmTy = v->getType();
+      // int -> float promotion into an annotated float target.
+      if (llvmTy->isDoubleTy() && v->getType()->isIntegerTy(64))
+        v = Builder.CreateSIToFP(v, llvmTy, kInt2FPName);
+      auto *alloca = createEntryAlloca(fn, name, llvmTy);
+      Builder.CreateStore(v, alloca);
+      CurrentScope->declare(name, alloca, bindTy);
+      continue;
+    }
+
+    // Re-assignment of an existing variable.
+    auto *alloca = owner->lookup(name);
+    ast::Type *varTy = CurrentScope->lookupASTType(name);
+    if (varTy && ast::isRefType(varTy)) {
+      // Ref-typed variable: drop the old box (unless the variable was
+      // None-initialised and holds an unowned singleton), store the new one.
+      bool wasUnowned = !CurrentScope->isOwned(name);
+      if (!wasUnowned)
+        emitRelease(Builder.CreateLoad(ptrTy, alloca, kIROldBox));
+      Builder.CreateStore(v, alloca);
+      if (wasUnowned)
+        CurrentScope->promoteToOwned(name, elemTy);
+      continue;
+    }
+    llvm::Type *allocaTy = alloca->getAllocatedType();
+    if (allocaTy->isDoubleTy() && v->getType()->isIntegerTy(64))
+      v = Builder.CreateSIToFP(v, allocaTy, kInt2FPName);
+    Builder.CreateStore(v, alloca);
+  }
+
+  // Every element has been copied out (references retained), so a temporary
+  // tuple can die now.
+  releaseIfOwned(valOwned);
+  return nullptr;
+}
+
 // -- Match-lowering scaffolding shared by all three modes --------------------
 
 llvm::BasicBlock *CodeGen::createMatchWildcardBlock(ast::MatchStmt *node,
@@ -2475,6 +2784,33 @@ llvm::BasicBlock *CodeGen::createMatchWildcardBlock(ast::MatchStmt *node,
     if (arm->isWildcard())
       return llvm::BasicBlock::Create(LLVMCtx, kIRMatchWildcard, parentFn);
   return nullptr;
+}
+
+llvm::BasicBlock *CodeGen::createMatchArmBlock(size_t armIdx,
+                                               llvm::Function *parentFn) {
+  return llvm::BasicBlock::Create(
+      LLVMCtx, kIRMatchArmPfx + std::to_string(armIdx), parentFn);
+}
+
+void CodeGen::emitMatchCheckChain(
+    llvm::ArrayRef<llvm::BasicBlock *> bodyBBs, llvm::BasicBlock *defaultBB,
+    llvm::Function *parentFn,
+    llvm::function_ref<llvm::Value *(size_t)> emitCheck) {
+  if (bodyBBs.empty()) {
+    Builder.CreateBr(defaultBB);
+    return;
+  }
+  for (size_t i = 0; i < bodyBBs.size(); ++i) {
+    llvm::Value *isMatch = emitCheck(i);
+    auto *nextBB =
+        (i + 1 < bodyBBs.size())
+            ? llvm::BasicBlock::Create(
+                  LLVMCtx, kIRMatchCheckPfx + std::to_string(i + 1), parentFn)
+            : defaultBB;
+    Builder.CreateCondBr(isMatch, bodyBBs[i], nextBB);
+    if (nextBB != defaultBB)
+      Builder.SetInsertPoint(nextBB);
+  }
 }
 
 void CodeGen::emitMatchArmBody(ast::MatchArm *arm, llvm::BasicBlock *bodyBB,
@@ -2520,9 +2856,7 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
     // ref-typed field read, `match h.a`) must be retained — releasing the
     // field slot's own reference at match.end would free the field under it.
     sharedSubj = takeSharedOwnership(node->getSubject(), subjRaw);
-    auto *getFnTy = llvm::FunctionType::get(ptrTy, {ptrTy}, false);
-    subjRaw = Builder.CreateCall(declareFunction(kPaykanSharedGet, getFnTy),
-                                 {sharedSubj}, kIRSubjObj);
+    subjRaw = emitSharedGet(sharedSubj, kIRSubjObj);
   }
 
   // Open a scope spanning the whole match so the subject box is released on
@@ -2611,9 +2945,8 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
     }
     assert(armCt && "Sema should have verified arm type exists");
     bool matchesAnySome = optTy && arm->getArmType() == optTy->getInnerType();
-    auto *bodyBB = llvm::BasicBlock::Create(
-        LLVMCtx, kIRMatchArmPfx + std::to_string(i), parentFn);
-    typeArms.push_back({armCt, bindTy, matchesAnySome, bodyBB, i});
+    typeArms.push_back(
+        {armCt, bindTy, matchesAnySome, createMatchArmBlock(i, parentFn), i});
   }
 
   // 4. Emit an if-else chain comparing the object's vtable pointer against
@@ -2621,7 +2954,8 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
   //    unique address in memory — this is a stable, cross-module type identity
   //    that requires no integer ID scheme and works correctly after linking.
   //    For an optional subject the chain runs only on the non-None path, so
-  //    the vtable loads below never dereference NULL.
+  //    the vtable loads below never dereference NULL; the arm naming `T`
+  //    itself matches every non-None value unconditionally.
   if (optTy) {
     auto *isNone = Builder.CreateICmpEQ(
         subjRaw, llvm::ConstantPointerNull::get(ptrTy), kIROptIsNone);
@@ -2629,24 +2963,15 @@ llvm::Value *CodeGen::visitMatchStmt(ast::MatchStmt *node) {
     Builder.CreateCondBr(isNone, noneBB ? noneBB : defaultBB, someBB);
     Builder.SetInsertPoint(someBB);
   }
-  if (typeArms.empty()) {
-    Builder.CreateBr(defaultBB);
-  } else {
-    for (size_t i = 0; i < typeArms.size(); ++i) {
-      llvm::Value *isMatch =
-          typeArms[i].MatchesAnySome
-              ? static_cast<llvm::Value *>(llvm::ConstantInt::getTrue(LLVMCtx))
-              : Classes.emitIsExactType(subjRaw, typeArms[i].CT);
-      auto *nextBB =
-          (i + 1 < typeArms.size())
-              ? llvm::BasicBlock::Create(
-                    LLVMCtx, kIRMatchCheckPfx + std::to_string(i + 1), parentFn)
-              : defaultBB;
-      Builder.CreateCondBr(isMatch, typeArms[i].BodyBB, nextBB);
-      if (nextBB != defaultBB)
-        Builder.SetInsertPoint(nextBB);
-    }
-  }
+  llvm::SmallVector<llvm::BasicBlock *, 8> typeBodyBBs;
+  for (const auto &ta : typeArms)
+    typeBodyBBs.push_back(ta.BodyBB);
+  emitMatchCheckChain(typeBodyBBs, defaultBB, parentFn,
+                      [&](size_t i) -> llvm::Value * {
+                        if (typeArms[i].MatchesAnySome)
+                          return llvm::ConstantInt::getTrue(LLVMCtx);
+                        return Classes.emitIsExactType(subjRaw, typeArms[i].CT);
+                      });
 
   // 5. Emit body blocks.
   for (const auto &ta : typeArms) {
@@ -2711,54 +3036,40 @@ llvm::Value *CodeGen::emitValueMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
     llvm::BasicBlock *BodyBB;
   };
   std::vector<LitArm> litArms;
+  llvm::SmallVector<llvm::BasicBlock *, 8> litBodyBBs;
   for (size_t i = 0; i < node->getArms().size(); ++i) {
     ast::MatchArm *arm = node->getArms()[i];
     if (!arm->isLiteral())
       continue;
-    litArms.push_back(
-        {arm, llvm::BasicBlock::Create(
-                  LLVMCtx, kIRMatchArmPfx + std::to_string(i), parentFn)});
+    litArms.push_back({arm, createMatchArmBlock(i, parentFn)});
+    litBodyBBs.push_back(litArms.back().BodyBB);
   }
 
   // Emit the comparison chain.  Each check evaluates the arm's literal,
   // compares it against the subject, and branches to the body block on
   // equality.
-  if (litArms.empty()) {
-    Builder.CreateBr(defaultBB);
-  } else {
-    for (size_t i = 0; i < litArms.size(); ++i) {
-      ast::Expr *lit = litArms[i].Arm->getLiteralPattern();
-      llvm::Value *isEq = nullptr;
-      if (auto *sl = ast::dyn_cast<ast::StringLiteral>(lit)) {
-        // Build a temporary PaykanString* for the literal and compare contents.
-        // PaykanString_equals consumes its `other` argument as a PaykanShared
-        // box (the vtable-equals ABI), so box the literal and let the call
-        // release it — this transfers ownership of the temp into the box.
-        llvm::Value *litStr =
-            wrapStringLiteral(emitExpr(sl), sl->getValue().size());
-        llvm::Value *litBox = emitSharedNew(litStr, kIRMatchEq);
-        auto *eqFnTy = llvm::FunctionType::get(i64Ty, {ptrTy, ptrTy}, false);
-        llvm::Value *eq =
-            Builder.CreateCall(declareFunction(kPaykanStringEquals, eqFnTy),
-                               {subjRaw, litBox}, kIRMatchEq);
-        isEq = Builder.CreateICmpNE(eq, llvm::ConstantInt::get(i64Ty, 0),
-                                    kIRMatchEq);
-      } else if (ast::isa<ast::FloatLiteral>(lit)) {
-        isEq = Builder.CreateFCmpOEQ(subjRaw, emitExpr(lit), kIRMatchEq);
-      } else {
-        // int / bool / char are all integer-typed scalars.
-        isEq = Builder.CreateICmpEQ(subjRaw, emitExpr(lit), kIRMatchEq);
-      }
-      auto *nextBB =
-          (i + 1 < litArms.size())
-              ? llvm::BasicBlock::Create(
-                    LLVMCtx, kIRMatchCheckPfx + std::to_string(i + 1), parentFn)
-              : defaultBB;
-      Builder.CreateCondBr(isEq, litArms[i].BodyBB, nextBB);
-      if (nextBB != defaultBB)
-        Builder.SetInsertPoint(nextBB);
+  emitMatchCheckChain(litBodyBBs, defaultBB, parentFn, [&](size_t i) {
+    ast::Expr *lit = litArms[i].Arm->getLiteralPattern();
+    if (auto *sl = ast::dyn_cast<ast::StringLiteral>(lit)) {
+      // Build a temporary PaykanString* for the literal and compare contents.
+      // PaykanString_equals consumes its `other` argument as a PaykanShared
+      // box (the vtable-equals ABI), so box the literal and let the call
+      // release it — this transfers ownership of the temp into the box.
+      llvm::Value *litStr =
+          wrapStringLiteral(emitExpr(sl), sl->getValue().size());
+      llvm::Value *litBox = emitSharedNew(litStr, kIRMatchEq);
+      auto *eqFnTy = llvm::FunctionType::get(i64Ty, {ptrTy, ptrTy}, false);
+      llvm::Value *eq =
+          Builder.CreateCall(declareFunction(kPaykanStringEquals, eqFnTy),
+                             {subjRaw, litBox}, kIRMatchEq);
+      return Builder.CreateICmpNE(eq, llvm::ConstantInt::get(i64Ty, 0),
+                                  kIRMatchEq);
     }
-  }
+    if (ast::isa<ast::FloatLiteral>(lit))
+      return Builder.CreateFCmpOEQ(subjRaw, emitExpr(lit), kIRMatchEq);
+    // int / bool / char are all integer-typed scalars.
+    return Builder.CreateICmpEQ(subjRaw, emitExpr(lit), kIRMatchEq);
+  });
 
   // Emit literal-arm body blocks, then the wildcard arm body.
   for (const auto &la : litArms)
@@ -2789,6 +3100,7 @@ llvm::Value *CodeGen::emitEnumMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
     int64_t Value;
   };
   std::vector<VariantArm> variantArms;
+  llvm::SmallVector<llvm::BasicBlock *, 8> variantBodyBBs;
   for (size_t i = 0; i < node->getArms().size(); ++i) {
     ast::MatchArm *arm = node->getArms()[i];
     if (arm->isWildcard())
@@ -2800,33 +3112,18 @@ llvm::Value *CodeGen::emitEnumMatch(ast::MatchStmt *node, llvm::Value *subjRaw,
       variant = et->getName();
     int64_t val = enumTy->findVariant(variant);
     assert(val >= 0 && "Sema should have verified the variant exists");
-    variantArms.push_back(
-        {arm,
-         llvm::BasicBlock::Create(LLVMCtx, kIRMatchArmPfx + std::to_string(i),
-                                  parentFn),
-         val});
+    variantArms.push_back({arm, createMatchArmBlock(i, parentFn), val});
+    variantBodyBBs.push_back(variantArms.back().BodyBB);
   }
 
   // Emit the comparison chain.
-  if (variantArms.empty()) {
-    Builder.CreateBr(defaultBB);
-  } else {
-    for (size_t i = 0; i < variantArms.size(); ++i) {
-      llvm::Value *isEq = Builder.CreateICmpEQ(
-          subjRaw,
-          llvm::ConstantInt::get(i64Ty,
-                                 static_cast<uint64_t>(variantArms[i].Value)),
-          kIRMatchEq);
-      auto *nextBB =
-          (i + 1 < variantArms.size())
-              ? llvm::BasicBlock::Create(
-                    LLVMCtx, kIRMatchCheckPfx + std::to_string(i + 1), parentFn)
-              : defaultBB;
-      Builder.CreateCondBr(isEq, variantArms[i].BodyBB, nextBB);
-      if (nextBB != defaultBB)
-        Builder.SetInsertPoint(nextBB);
-    }
-  }
+  emitMatchCheckChain(variantBodyBBs, defaultBB, parentFn, [&](size_t i) {
+    return Builder.CreateICmpEQ(
+        subjRaw,
+        llvm::ConstantInt::get(i64Ty,
+                               static_cast<uint64_t>(variantArms[i].Value)),
+        kIRMatchEq);
+  });
 
   // Emit variant-arm body blocks, then the wildcard arm body.
   for (const auto &va : variantArms)

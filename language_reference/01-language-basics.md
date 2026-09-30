@@ -98,7 +98,7 @@ mat: int[][] = [[1, 2], [3, 4]];   // 2D
 
 Any reference type `T` (a class, `Str`, or an array) has an optional form `T?` that holds either
 a `T` or `None`. A `T` converts to `T?` implicitly; a `T?` is unwrapped with `match`. See
-`09-optionals.md`.
+`10-optionals.md`.
 
 ```pkn
 n: Node? = None;

@@ -1,0 +1,15 @@
+// OK: destructuring declares new variables with the element types, `_`
+// skips an element, an annotated target is a fresh declaration, and a bare
+// name that is already in scope is re-assigned.
+fn divmod(a: int, b: int) -> (int, int) {
+  return (a / b, a % b);
+}
+
+fn main() -> int {
+  q, r = divmod(7, 2);
+  name: Str, _ = ("seven", 7);
+  _, rest = (1, 2.5);
+  q, r = divmod(9, 4);      // re-assigns the existing q and r
+  total: float = q + r + rest;
+  return q + name.len();
+}

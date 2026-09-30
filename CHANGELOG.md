@@ -20,7 +20,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   counted box as a `T` with "no box" meaning `None` — no layout change.
   Optional primitives (`int?`), nested optionals, flow typing, `if let`,
   `??` and `?.` are not part of the prototype. See
-  `language_reference/09-optionals.md` and `proposals/optionals.md`.
+  `language_reference/10-optionals.md` and `proposals/optionals.md`.
+- **Tuples (prototype, #4).** Fixed-arity, heterogeneous, immutable values:
+  types `(int, Str)` (nesting, `(int, Str)[]` and `(int[], Str)` allowed),
+  literals `(1, "a")`, compile-time-checked element access `t.0` / `t.1.0`,
+  multiple return `fn f() -> (int, int)`, and destructuring
+  `q, r = divmod(7, 2);` (`_` skips, `q: int, r: int = ...` annotates).
+  Tuples are `Obj` subtypes under ARC (retain/release/`mov` like any
+  reference value); `==` / `!=` compare element-wise and `toString` renders
+  `(1, a)`. Tuple-typed signatures round-trip through module imports.
+  Not yet: tuples in `match`, nested destructuring, mutation, named elements.
+  See `language_reference/09-tuples.md` and `proposals/tuples.md`.
+
 - **Move semantics with `mov`.** `mov <expr>` transfers ownership of a local
   variable, parameter, or temporary without a retain/release pair. Use of a
   moved variable is a compile error until it is re-assigned, tracked
@@ -52,6 +63,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   correctly at compile time.
 - A `match` over both `bool` literals now counts as exhaustive for
   "always returns" and field-initialisation analysis.
+- The imported-module bitcode cache no longer goes stale or lands in the
+  wrong place: it now lives in `.paykan_cache/` under the project root (the
+  main file's directory) instead of the current working directory, entries
+  are keyed by a content hash of the module plus every module it transitively
+  imports (and the compiler/ABI version) instead of file timestamps — so
+  editing a dependency's class layout or signature recompiles its importers —
+  and entries are written atomically; a corrupt or truncated entry is
+  regenerated instead of being loaded.
 - Declaring `self` as a method parameter is now a clear compile error instead
   of a confusing arity error at the call site.
 - Parser diagnostics are now clang-style (caret + source snippet), matching

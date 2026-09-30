@@ -650,3 +650,78 @@ fn main() -> int {
   std::filesystem::remove_all(tmp);
   g.expectNoLeaks("ImportedOptionalSignatures");
 }
+
+// ============================================================================
+// Interaction with tuples (#4): optional elements are REF slots that may hold
+// NULL; destructuring, equality, printing and arrays must stay leak-free.
+// ============================================================================
+
+TEST(OptionalTuple, TupleWithOptionalElements) {
+  LeakGuard g;
+  auto r = compileAndRun(R"pkn(
+    class Node { v: int; fn __init__(x: int) { self.v = x; } }
+    fn pick(n: Node?, k: int) -> (Node?, int) { return (n, k); }
+    fn show(t: (Node?, int)) -> Str {
+      x, k = t;
+      match x {
+        n: Node { return "some " + StrInt(n.v) + "/" + StrInt(k); }
+        None    { return "none/" + StrInt(k); }
+      }
+    }
+    fn main() -> int {
+      a: Node? = Node(7);
+      b: Node? = None;
+      t: (Node?, int) = pick(a, 1);
+      u = pick(b, 2);
+      println(show(t));
+      println(show(u));
+      println(u);
+      println(StrBool(t == pick(a, 1)));
+      println(StrBool(u == pick(None, 2)));
+      println(StrBool(t == u));
+      y: Node?, j: int = u;
+      println(StrBool(y == None));
+      ts: (Node?, int)[] = [];
+      ts.push(t);
+      ts.push(u);
+      println(StrInt(ts.len()));
+      return 0;
+    }
+  )pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut,
+            "some 7/1\nnone/2\n(None, 2)\nTrue\nTrue\nFalse\nTrue\n2\n");
+  g.expectNoLeaks("TupleWithOptionalElements");
+}
+
+TEST(OptionalTuple, ImportedTupleOfOptionals) {
+  LeakGuard g;
+  auto tmp =
+      (std::filesystem::temp_directory_path() / "pkn_opt_tuple_cg").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib.pkn", R"pkn(
+    class Node { v: int; fn __init__(x: int) { self.v = x; } }
+    fn wrap(xs: (Node?, int)[]?) -> (Node?, int)[]? { return xs; }
+    fn mk(n: Node?) -> (Node?, int) { return (n, 5); }
+  )pkn");
+  auto main = writeFile(tmp, "main.pkn", R"pkn(
+import lib;
+fn main() -> int {
+  a: (lib::Node?, int)[]? = lib::wrap(None);
+  println(StrBool(a == None));
+  x, k = lib::mk(lib::Node(3));
+  match x {
+    n: lib::Node { println(StrInt(n.v + k)); }
+    None         { println("none"); }
+  }
+  y, j = lib::mk(None);
+  println(StrBool(y == None));
+  return 0;
+}
+)pkn");
+  auto r = compileAndRunFile(main);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "True\n8\nTrue\n");
+  std::filesystem::remove_all(tmp);
+  g.expectNoLeaks("ImportedTupleOfOptionals");
+}

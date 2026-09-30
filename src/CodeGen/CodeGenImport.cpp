@@ -6,12 +6,19 @@
 #include "CodeGen.h"
 #include "ModuleUtils.h"
 #include "Names.h"
+#include "Version.h"
 
+#include <llvm/ADT/StringExtras.h>
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
+#include <llvm/Config/llvm-config.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Metadata.h>
+#include <llvm/Support/FileSystem.h>
 #include <llvm/Support/MemoryBuffer.h>
+#include <llvm/Support/Path.h>
+#include <llvm/Support/SHA256.h>
+#include <llvm/Support/raw_ostream.h>
 
 namespace paykan {
 namespace codegen {
@@ -30,12 +37,85 @@ namespace codegen {
 static constexpr uint64_t kPaykanABIVersion = 2;
 static constexpr const char *kABIVersionFlag = "paykan.abi.version";
 
+/// Named metadata carrying the cache key (see CodeGen::importCacheKey) the
+/// cached module was generated under.  Named (not module-flag) metadata so
+/// that linking modules with different keys into the main module merges
+/// rather than conflicts.
+static constexpr const char *kCacheKeyMD = "paykan.cache.key";
+
 /// True when `mod` (a freshly parsed cached module) matches the running
-/// compiler's ABI version.
-static bool cachedModuleABIMatches(const llvm::Module &mod) {
+/// compiler's ABI version and was generated under exactly @p cacheKey.
+static bool cachedModuleIsValid(const llvm::Module &mod,
+                                llvm::StringRef cacheKey) {
   auto *flag = llvm::mdconst::extract_or_null<llvm::ConstantInt>(
       mod.getModuleFlag(kABIVersionFlag));
-  return flag && flag->getZExtValue() == kPaykanABIVersion;
+  if (!flag || flag->getZExtValue() != kPaykanABIVersion)
+    return false;
+  auto *nmd = mod.getNamedMetadata(kCacheKeyMD);
+  if (!nmd || nmd->getNumOperands() != 1 ||
+      nmd->getOperand(0)->getNumOperands() != 1)
+    return false;
+  auto *key = llvm::dyn_cast<llvm::MDString>(nmd->getOperand(0)->getOperand(0));
+  return key && key->getString() == cacheKey;
+}
+
+/// Stamp the ABI version and cache key into a freshly generated import module
+/// before it is written to the cache.
+static void stampCachedModule(llvm::Module &mod, llvm::StringRef cacheKey) {
+  if (!mod.getModuleFlag(kABIVersionFlag))
+    mod.addModuleFlag(llvm::Module::Error, kABIVersionFlag, kPaykanABIVersion);
+  auto *nmd = mod.getOrInsertNamedMetadata(kCacheKeyMD);
+  nmd->clearOperands();
+  auto &ctx = mod.getContext();
+  nmd->addOperand(llvm::MDNode::get(ctx, {llvm::MDString::get(ctx, cacheKey)}));
+}
+
+/// Write @p mod as bitcode to @p cachePath atomically: the bitcode goes to a
+/// uniquely named temporary file in the same directory which is then renamed
+/// over the final path, so a concurrent or interrupted compile can never
+/// observe a partially written cache entry.  Best-effort: any failure simply
+/// leaves the cache entry absent (and removes the temporary file).
+static void writeCacheFile(const llvm::Module &mod, llvm::StringRef cachePath) {
+  auto parentDir = llvm::sys::path::parent_path(cachePath);
+  if (!parentDir.empty() && llvm::sys::fs::create_directories(parentDir))
+    return;
+
+  int fd = -1;
+  llvm::SmallString<256> tmpPath;
+  if (llvm::sys::fs::createUniqueFile(cachePath + ".%%%%%%%%.tmp", fd, tmpPath))
+    return;
+
+  bool written;
+  {
+    llvm::raw_fd_ostream out(fd, /*shouldClose=*/true);
+    llvm::WriteBitcodeToFile(mod, out);
+    out.close();
+    written = !out.has_error();
+    out.clear_error(); // an error left set would abort in the destructor
+  }
+  if (!written || llvm::sys::fs::rename(tmpPath, cachePath))
+    llvm::sys::fs::remove(tmpPath);
+}
+
+/// Resolve an import to the canonical path of its source file, mirroring
+/// Sema::resolveModulePath.  Returns "" if the file does not exist (Sema has
+/// already reported that).
+static std::string resolveImportFile(llvm::StringRef projectRoot, bool isSystem,
+                                     llvm::StringRef modulePath) {
+  llvm::SmallString<256> full;
+  if (isSystem) {
+    const char *env = std::getenv(names::kPaykanStdlibEnv);
+    if (env && env[0]) {
+      full = env;
+    } else {
+      full = projectRoot;
+      llvm::sys::path::append(full, names::kStdlibDir);
+    }
+  } else {
+    full = projectRoot;
+  }
+  llvm::sys::path::append(full, module_utils::modulePathToRelative(modulePath));
+  return module_utils::realPath(full);
 }
 
 /// Declare fn under qualifiedName in mod if not already present.
@@ -84,6 +164,83 @@ void CodeGen::addImportAliases(llvm::Module *defMod,
 }
 
 // ---------------------------------------------------------------------------
+// lookupImportContext / importCacheKey
+// ---------------------------------------------------------------------------
+
+const sema::SemaContext *
+CodeGen::lookupImportContext(llvm::StringRef resolved) {
+  if (!ImportGraph->Indexed) {
+    ImportGraph->Indexed = true;
+    // Depth-first over the SemaContext tree; the first context seen for a path
+    // wins (there is normally exactly one).
+    llvm::SmallVector<const sema::SemaContext *, 16> work{&SemaCtx};
+    while (!work.empty()) {
+      const auto *ctx = work.pop_back_val();
+      for (auto &[path, child] : ctx->ImportedContexts) {
+        if (!child)
+          continue;
+        if (ImportGraph->Contexts.try_emplace(path, child.get()).second)
+          work.push_back(child.get());
+      }
+    }
+  }
+  auto it = ImportGraph->Contexts.find(resolved);
+  return it == ImportGraph->Contexts.end() ? nullptr : it->second;
+}
+
+std::string CodeGen::importCacheKey(llvm::StringRef resolved,
+                                    const sema::SemaContext &modCtx) {
+  auto memo = ImportGraph->CacheKeys.find(resolved);
+  if (memo != ImportGraph->CacheKeys.end())
+    return memo->second;
+  // Placeholder while the dependencies are hashed: Sema rejects import cycles,
+  // but if one ever slipped through this turns infinite recursion into "no
+  // key" (the module is simply not cached).
+  ImportGraph->CacheKeys[resolved] = "";
+
+  std::string key;
+  auto source = llvm::MemoryBuffer::getFile(resolved);
+  if (source && modCtx.Root) {
+    llvm::SHA256 hash;
+    auto add = [&hash](llvm::StringRef s) {
+      hash.update(s);
+      hash.update(llvm::StringRef("\0", 1)); // unambiguous field separator
+    };
+    // Anything that changes the generated code beyond the source text itself:
+    // the compiler and the LLVM it embeds (bitcode format), and the runtime
+    // object layout / calling convention.
+    add("paykan-import-cache");
+    add(kVersion);
+    add(LLVM_VERSION_STRING);
+    add(std::to_string(kPaykanABIVersion));
+    add((*source)->getBuffer());
+
+    bool complete = true;
+    for (auto *imp : modCtx.Root->getImports()) {
+      for (auto &m : imp->getModules()) {
+        std::string depPath =
+            resolveImportFile(ProjectRoot, imp->isSystem(), imp->modulePath(m));
+        const sema::SemaContext *depCtx =
+            depPath.empty() ? nullptr : lookupImportContext(depPath);
+        std::string depKey = depCtx ? importCacheKey(depPath, *depCtx) : "";
+        if (depKey.empty()) {
+          complete = false;
+          break;
+        }
+        add(depKey);
+      }
+      if (!complete)
+        break;
+    }
+    if (complete)
+      key = llvm::toHex(hash.final(), /*LowerCase=*/true);
+  }
+
+  ImportGraph->CacheKeys[resolved] = key;
+  return key;
+}
+
+// ---------------------------------------------------------------------------
 // processImports
 // ---------------------------------------------------------------------------
 
@@ -94,23 +251,8 @@ void CodeGen::processImports(ast::TranslationUnit *tu) {
       std::string qualifier = m.qualifier();
 
       // Resolve the module path to a file (same logic as Sema).
-      auto relPath = module_utils::modulePathToRelative(modulePath);
-
-      llvm::SmallString<256> fullBuf;
-      if (imp->isSystem()) {
-        const char *env = std::getenv(names::kPaykanStdlibEnv);
-        if (env && env[0]) {
-          fullBuf = env;
-        } else {
-          fullBuf = ProjectRoot;
-          llvm::sys::path::append(fullBuf, names::kStdlibDir);
-        }
-      } else {
-        fullBuf = ProjectRoot;
-      }
-      llvm::sys::path::append(fullBuf, relPath);
-
-      std::string resolved = module_utils::realPath(fullBuf);
+      std::string resolved =
+          resolveImportFile(ProjectRoot, imp->isSystem(), modulePath);
       if (resolved.empty())
         continue; // Sema already reported the error.
 
@@ -125,49 +267,55 @@ void CodeGen::processImports(ast::TranslationUnit *tu) {
         continue;
       }
 
+      // Sema's pre-computed context for the module: the import list needed
+      // for the cache key and, on a cache miss, the AST to generate from.
+      const sema::SemaContext *modCtx = lookupImportContext(resolved);
+      if (!modCtx)
+        continue;
+
+      // Records, in the importing context, which qualifier the module's
+      // classes were imported under (method-name lookup for imported classes).
+      auto recordClassQualifiers = [&] {
+        for (auto &[name, _] : modCtx->ASTCtx->getClassTypes()) {
+          if (name == names::kObj || name == names::kString)
+            continue;
+          if (auto *ct = ASTCtx.lookupClassType(name))
+            Classes.ImportedClassQualifiers.try_emplace(ct, qualifier);
+        }
+      };
+
       // -- Bitcode cache check ----------------------------------------------
+      // The key covers the module's source and everything it transitively
+      // imports; an entry is only ever used if it was written under the very
+      // same key.  Anything else (missing, truncated, foreign, or stale)
+      // falls through to a full recompile, which rewrites it.
       auto cachePath = module_utils::getCachePath(resolved, ProjectRoot);
-      if (!module_utils::isSourceNewer(resolved, cachePath)) {
-        // Load cached bitcode.
-        auto bufOrErr = llvm::MemoryBuffer::getFile(cachePath);
-        if (bufOrErr) {
+      std::string cacheKey = importCacheKey(resolved, *modCtx);
+      if (!cacheKey.empty()) {
+        if (auto buf = llvm::MemoryBuffer::getFile(cachePath)) {
           auto modOrErr =
-              llvm::parseBitcodeFile((*bufOrErr)->getMemBufferRef(), LLVMCtx);
-          if (modOrErr && cachedModuleABIMatches(**modOrErr)) {
+              llvm::parseBitcodeFile((*buf)->getMemBufferRef(), LLVMCtx);
+          if (!modOrErr) {
+            llvm::consumeError(modOrErr.takeError()); // corrupt: recompile
+          } else if (cachedModuleIsValid(**modOrErr, cacheKey)) {
             auto &cachedMod = *modOrErr;
             llvm::Module *defMod = cachedMod.get();
             addImportAliases(defMod, qualifier, modulePath);
             (*ImportRegistry)[resolved] = defMod;
             ImportedModules.push_back(std::move(cachedMod));
 
-            auto ctxIt = SemaCtx.ImportedContexts.find(resolved);
-            if (ctxIt != SemaCtx.ImportedContexts.end() && ctxIt->second->Root)
-              processImports(ctxIt->second->Root);
-
-            if (ctxIt != SemaCtx.ImportedContexts.end()) {
-              for (auto &[name, _] : ctxIt->second->ASTCtx->getClassTypes()) {
-                if (name == names::kObj || name == names::kString)
-                  continue;
-                if (auto *ct = ASTCtx.lookupClassType(name))
-                  Classes.ImportedClassQualifiers.try_emplace(ct, qualifier);
-              }
-            }
+            // The cached bitcode only DEFINES this module's own functions; the
+            // modules it imports still have to be loaded or generated.
+            if (modCtx->Root)
+              processImports(modCtx->Root);
+            recordClassQualifiers();
             continue;
           }
-          if (modOrErr)
-            llvm::consumeError(llvm::Error::success()); // ABI-stale: recompile
-          else
-            llvm::consumeError(modOrErr.takeError());
         }
-        // If loading failed or the cache predates the current ABI version,
-        // fall through to recompile (which rewrites the cache).
       }
 
       // -- Full codegen using the pre-computed SemaContext ------------------
-      auto ctxIt = SemaCtx.ImportedContexts.find(resolved);
-      if (ctxIt == SemaCtx.ImportedContexts.end())
-        continue;
-      auto &importedSemaCtx = *ctxIt->second;
+      auto &importedSemaCtx = *modCtx;
 
       // #33 (parallel imported-module codegen) seam:
       //
@@ -195,6 +343,7 @@ void CodeGen::processImports(ast::TranslationUnit *tu) {
       // Until then imports share the parent LLVMCtx and codegen runs serially.
       CodeGen importCG(importedSemaCtx, LLVMCtx, resolved, ProjectRoot,
                        ImportRegistry);
+      importCG.ImportGraph = ImportGraph;
       if (!importCG.run(importedSemaCtx.Root))
         continue;
 
@@ -207,35 +356,19 @@ void CodeGen::processImports(ast::TranslationUnit *tu) {
       (*ImportRegistry)[resolved] = defMod;
 
       // -- Write bitcode to cache ------------------------------------------
-      {
-        // Stamp the ABI version so a future compiler with a different object
-        // layout refuses this cache instead of linking incompatible code.
-        if (!impMod->getModuleFlag(kABIVersionFlag))
-          impMod->addModuleFlag(llvm::Module::Error, kABIVersionFlag,
-                                kPaykanABIVersion);
-        auto parentDir = llvm::sys::path::parent_path(cachePath);
-        std::error_code mkdirEc;
-        if (!parentDir.empty())
-          mkdirEc = llvm::sys::fs::create_directories(parentDir);
-        // Cache is best-effort: only write if the directory is in place.
-        if (!mkdirEc) {
-          std::error_code ec;
-          llvm::raw_fd_ostream cacheOut(cachePath, ec);
-          if (!ec)
-            llvm::WriteBitcodeToFile(*impMod, cacheOut);
-        }
+      // Stamp the ABI version and cache key so a future compiler with a
+      // different object layout, or a later edit anywhere in this module's
+      // import graph, refuses this entry instead of linking incompatible code.
+      if (!cacheKey.empty()) {
+        stampCachedModule(*impMod, cacheKey);
+        writeCacheFile(*impMod, cachePath);
       }
 
       ImportedModules.push_back(std::move(impMod));
       for (auto &mm : importCG.takeImportedModules())
         ImportedModules.push_back(std::move(mm));
 
-      for (auto &[name, _] : importedSemaCtx.ASTCtx->getClassTypes()) {
-        if (name == names::kObj || name == names::kString)
-          continue;
-        if (auto *ct = ASTCtx.lookupClassType(name))
-          Classes.ImportedClassQualifiers.try_emplace(ct, qualifier);
-      }
+      recordClassQualifiers();
     } // for each module in imp->getModules()
   }
 }

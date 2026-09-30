@@ -119,6 +119,15 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanArrayEquals,     reinterpret_cast<void *>(&PaykanArray_equals)},
     {kPaykanArrayVtable,     reinterpret_cast<void *>(&PaykanArray_vtable)},
     {kPaykanArrayObjVtable,  reinterpret_cast<void *>(&PaykanArray_obj_vtable)},
+
+    {kPaykanTupleNew,        reinterpret_cast<void *>(&PaykanTuple_new)},
+    {kPaykanTupleSet,        reinterpret_cast<void *>(&PaykanTuple_set)},
+    {kPaykanTupleSetObj,     reinterpret_cast<void *>(&PaykanTuple_set_obj)},
+    {kPaykanTupleGet,        reinterpret_cast<void *>(&PaykanTuple_get)},
+    {kPaykanTupleDestroy,    reinterpret_cast<void *>(&PaykanTuple_destroy)},
+    {kPaykanTupleToString,   reinterpret_cast<void *>(&PaykanTuple_toString)},
+    {kPaykanTupleEquals,     reinterpret_cast<void *>(&PaykanTuple_equals)},
+    {kPaykanTupleVtable,     reinterpret_cast<void *>(&PaykanTuple_vtable)},
 };
 
 // Match dispatch and generated vtable references look builtin vtables up as
@@ -137,6 +146,7 @@ const VTableAlias kVTableAliases[] = {
     {kIntBox,   reinterpret_cast<void *>(&PaykanInt_vtable)},
     {kFloatBox, reinterpret_cast<void *>(&PaykanFloat_vtable)},
     {kBoolBox,  reinterpret_cast<void *>(&PaykanBool_vtable)},
+    {kTuple,    reinterpret_cast<void *>(&PaykanTuple_vtable)},
 };
 // clang-format on
 
