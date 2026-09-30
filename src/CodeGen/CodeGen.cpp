@@ -38,7 +38,8 @@ CodeGen::CodeGen(const sema::SemaContext &semaCtx, llvm::LLVMContext &llvmCtx,
     : ASTCtx(*semaCtx.ASTCtx), LLVMCtx(llvmCtx), SemaCtx(semaCtx),
       Module(std::make_unique<llvm::Module>(moduleName, llvmCtx)),
       Builder(llvmCtx), Classes(*this), ProjectRoot(projectRoot),
-      ImportRegistry(importRegistry ? importRegistry : &CodeGenedImports) {}
+      ImportRegistry(importRegistry ? importRegistry : &CodeGenedImports),
+      ImportGraph(&OwnImportGraph) {}
 
 // -- Scope / ScopeGuard ------------------------------------------------------
 
