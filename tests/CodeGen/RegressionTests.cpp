@@ -525,3 +525,130 @@ TEST(Regression, SuperArgumentsAreBoxed) {
   EXPECT_EQ(r.StdOut, "literal12\nc!2\nfwd33fwd1\n");
   g.expectNoLeaks("SuperArgumentsAreBoxed");
 }
+// ============================================================================
+// Empty array literals take their element type from the destination
+// ============================================================================
+
+TEST(Regression, PushOntoEmptyArrayFieldFromMethod) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class P {
+      x: int;
+      fn __init__(x: int) { self.x = x; }
+    }
+    class SStack {
+      items: Str[];
+      ps: P[];
+      fn __init__() { self.items = []; self.ps = []; }
+      fn push(v: Str) { self.items.push(v); }
+      fn pushP(p: P) { self.ps.push(p); }
+      fn pop() -> Str { return self.items.pop(); }
+      fn popP() -> P { return self.ps.pop(); }
+    }
+    fn main() -> int {
+      s = SStack();
+      s.push("a");
+      s.push("b" + "c");
+      s.push("d");
+      s.pushP(P(1));
+      q = P(2);
+      s.pushP(q);
+      s.pushP(P(3));
+      println(s.pop());
+      println(StrInt(s.popP().x));
+      println(StrInt(s.items.len()) + " " + StrInt(s.ps.len()));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "d\n3\n2 2\n");
+  g.expectNoLeaks("PushOntoEmptyArrayFieldFromMethod");
+}
+
+// The same program as ArrayTests' RefField.SubscriptObjectArrayField.
+TEST(Regression, SubscriptObjectArrayFieldIsLeakFree) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+class Foo { v: int; fn __init__(x: int){ self.v = x; } }
+class Box {
+  items: Foo[];
+  fn __init__(){ self.items = []; self.items.push(Foo(41)); self.items.push(Foo(42)); }
+  fn second() -> int { return self.items[1].v; }   // subscript a member-access array
+}
+fn main() -> int {
+  b: Box = Box();
+  println(StrInt(b.items[0].v));   // subscript via local receiver
+  println(StrInt(b.second()));     // subscript via self.field inside a method
+  return 0;
+}
+)");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "41\n42\n");
+  g.expectNoLeaks("SubscriptObjectArrayFieldIsLeakFree");
+}
+
+// The same program as ArrayTests' RefField.NestedArrayOfArraysField.
+TEST(Regression, NestedArrayOfArraysFieldIsLeakFree) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+class Grid {
+  rows: int[][];
+  fn __init__() {
+    self.rows = [];
+    i: int = 0;
+    while (i < 3) {
+      row: int[] = [];
+      j: int = 0;
+      while (j < 3) { row.push(i * 3 + j); j = j + 1; }
+      self.rows.push(row);
+      i = i + 1;
+    }
+  }
+  fn at(r: int, c: int) -> int {
+    row: int[] = self.rows[r];   // subscript the outer 2-D field
+    return row[c];
+  }
+}
+fn main() -> int {
+  g: Grid = Grid();
+  println(StrInt(g.at(0, 0)));   // 0
+  println(StrInt(g.at(1, 2)));   // 5
+  println(StrInt(g.at(2, 1)));   // 7
+  return 0;
+}
+)");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "0\n5\n7\n");
+  g.expectNoLeaks("NestedArrayOfArraysFieldIsLeakFree");
+}
+
+TEST(Regression, EmptyArrayArgumentAndReturn) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class P {
+      x: int;
+      fn __init__(x: int) { self.x = x; }
+    }
+    class Bag {
+      fn fill(ps: P[]) -> int { ps.push(P(1)); ps.push(P(2)); return ps.len(); }
+    }
+    fn fill(ss: Str[]) -> int { ss.push("x"); return ss.len(); }
+    fn none() -> P[] { return []; }
+    fn main() -> int {
+      println(StrInt(fill([])));
+      println(StrInt(Bag().fill([])));
+      ps = none();
+      ps.push(P(3));
+      grid: Str[][] = [["a"]];
+      grid[0] = [];
+      grid[0].push("b");
+      println(StrInt(ps.len()) + grid[0][0]);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "1\n2\n1b\n");
+  g.expectNoLeaks("EmptyArrayArgumentAndReturn");
+}

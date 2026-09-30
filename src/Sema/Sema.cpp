@@ -312,6 +312,16 @@ bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
   }
   if (!isAssignable(dst, srcTy))
     return false;
+  // An empty array literal `[]` has no element type of its own (its resolved
+  // type is the ArrayType(void) sentinel).  Record the destination's array
+  // type on it, whatever the destination is — variable, field, element,
+  // argument or return value — so CodeGen builds the right representation: an
+  // empty `Foo[]` built as a primitive array never releases the objects
+  // pushed into it later.
+  if (auto *lit = ast::dyn_cast<ast::ArrayLiteralExpr>(src))
+    if (auto *dstAT = ast::dyn_cast<ast::ArrayType>(ast::stripOptional(dst));
+        dstAT && lit->isEmpty())
+      lit->setResolvedType(dstAT);
   // `T?` -> `Obj` (the only non-optional destination an optional may flow
   // into): CodeGen must turn a null box into the boxed `None` singleton so the
   // receiving `Obj` slot never holds a NULL box, which no `Obj` consumer
