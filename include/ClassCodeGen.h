@@ -76,6 +76,12 @@ public:
   std::string findConcreteMethodFuncName(ast::ClassType *ct,
                                          const std::string &methodName);
 
+  /// Return the IR function `ClassName_methodName` defined by class `ct`
+  /// itself (no inheritance walk), under its imported qualified name if the
+  /// class comes from another module.  Returns nullptr if there is none.
+  llvm::Function *lookupOwnMethodFunction(ast::ClassType *ct,
+                                          const std::string &methodName);
+
   // -------------------------------------------------------------------------
   /// Emit an i1 runtime type-check: load the vtable pointer from rawObjPtr
   /// and compare it against the ClassName_vtable global for ct.
@@ -86,6 +92,14 @@ public:
 
   /// Visitor entry points (called from CodeGen)
   // -------------------------------------------------------------------------
+
+  /// Forward-declare everything a function body may reference by name for
+  /// this class — struct type, vtable global, method functions, destructor
+  /// and constructor — without emitting any body.  Run for every class of the
+  /// module before any body is emitted, so a method can construct its own
+  /// class or a later-declared one, and `__super__` / vtable slots resolve a
+  /// base class declared later in the file.
+  void declareClass(ast::ClassDecl *node);
 
   /// Emit a complete class declaration: method bodies, vtable global,
   /// and constructor function.
@@ -124,6 +138,17 @@ public:
   ast::ClassType *CurrentMethodClassType = nullptr;
 
 private:
+  /// LLVM signature of a method function: `ret (ptr self, params...)`.
+  llvm::FunctionType *getMethodFunctionType(ast::MethodDecl *md);
+
+  /// LLVM signature of a class constructor: `ptr (initParams...)`.
+  llvm::FunctionType *getConstructorFunctionType(ast::ClassType *ct);
+
+  /// Return the function @p name declared by declareClass, declaring it now
+  /// if it does not exist yet.
+  llvm::Function *getOrDeclareFunction(const std::string &name,
+                                       llvm::FunctionType *fnTy);
+
   CodeGen &CG;
 };
 

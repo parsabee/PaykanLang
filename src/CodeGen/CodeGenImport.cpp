@@ -344,8 +344,13 @@ void CodeGen::processImports(ast::TranslationUnit *tu) {
       CodeGen importCG(importedSemaCtx, LLVMCtx, resolved, ProjectRoot,
                        ImportRegistry);
       importCG.ImportGraph = ImportGraph;
-      if (!importCG.run(importedSemaCtx.Root))
+      if (!importCG.run(importedSemaCtx.Root)) {
+        // Carrying on would link the importer against a module that was never
+        // generated (unresolved symbols or a crash at run time).
+        reportInternalError("code generation failed for imported module '" +
+                            resolved + "'");
         continue;
+      }
 
       auto impMod = importCG.takeModule();
       llvm::Module *defMod = impMod.get();

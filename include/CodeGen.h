@@ -179,6 +179,14 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   /// Project root directory for import resolution.
   std::string ProjectRoot;
 
+  /// Set when code generation hit a state Sema should have ruled out (e.g. a
+  /// call whose callee was never declared).  run() then fails instead of
+  /// silently emitting a module with the offending code missing.
+  bool HadInternalError = false;
+
+  /// Print "internal compiler error: <msg>" and fail the current run().
+  void reportInternalError(const llvm::Twine &msg);
+
   /// LLVM modules generated for imported files.
   std::vector<std::unique_ptr<llvm::Module>> ImportedModules;
 

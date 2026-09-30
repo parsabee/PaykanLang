@@ -242,6 +242,101 @@ std::string ClassCodeGen::findConcreteMethodFuncName(ast::ClassType *ct,
   return findConcreteMethodFuncName(ct->getSuperClass(), name);
 }
 
+llvm::Function *
+ClassCodeGen::lookupOwnMethodFunction(ast::ClassType *ct,
+                                      const std::string &methodName) {
+  std::string mangled = ct->getName() + kNameSep + methodName;
+  if (auto *fn = CG.Module->getFunction(mangled))
+    return fn;
+  auto qualIt = ImportedClassQualifiers.find(ct);
+  if (qualIt != ImportedClassQualifiers.end())
+    return CG.Module->getFunction(qualIt->second + kQualSep + mangled);
+  return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Function signatures / forward declarations
+// ---------------------------------------------------------------------------
+
+llvm::FunctionType *ClassCodeGen::getMethodFunctionType(ast::MethodDecl *md) {
+  auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
+  auto *voidTy = llvm::Type::getVoidTy(CG.LLVMCtx);
+  llvm::Type *retTy =
+      md->getReturnType() ? CG.toLLVMType(md->getReturnType()) : voidTy;
+  if (!retTy)
+    retTy = voidTy;
+  std::vector<llvm::Type *> paramTys = {ptrTy}; // self (raw PaykanObject*)
+  for (auto *pty : md->getParamTypes()) {
+    auto *lty = CG.toLLVMType(pty);
+    paramTys.push_back(lty ? lty : ptrTy);
+  }
+  return llvm::FunctionType::get(retTy, paramTys, false);
+}
+
+llvm::FunctionType *
+ClassCodeGen::getConstructorFunctionType(ast::ClassType *ct) {
+  auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
+  std::vector<llvm::Type *> paramTys;
+  if (auto *initMd = ct->findMethod(names::kMethodInit)) {
+    for (auto *pty : initMd->getParamTypes()) {
+      auto *lty = CG.toLLVMType(pty);
+      paramTys.push_back(lty ? lty : ptrTy);
+    }
+  }
+  return llvm::FunctionType::get(ptrTy, paramTys, false);
+}
+
+llvm::Function *ClassCodeGen::getOrDeclareFunction(const std::string &name,
+                                                   llvm::FunctionType *fnTy) {
+  if (auto *fn = CG.Module->getFunction(name)) {
+    assert(fn->getFunctionType() == fnTy &&
+           "class function forward-declared with a different signature");
+    return fn;
+  }
+  return llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage, name,
+                                CG.Module.get());
+}
+
+void ClassCodeGen::declareClass(ast::ClassDecl *node) {
+  auto *ct = CG.ASTCtx.lookupClassType(node->getName());
+  assert(ct && "ClassType must have been registered by Sema");
+  if (ClassVTableGlobals.count(ct))
+    return;
+
+  auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
+  auto *voidTy = llvm::Type::getVoidTy(CG.LLVMCtx);
+
+  // Methods may refer to fields of their own (or a later) class.
+  getOrCreateClassStructType(ct);
+
+  // The vtable global is created as a declaration (no initializer); the
+  // concrete function pointers are filled in by visitClassDecl.  It must exist
+  // before any body is emitted: a `match` on this class takes its address for
+  // the type check, and a missing global would otherwise be synthesized as an
+  // external placeholder (`<Class>_vtable`) that later collides with the real
+  // definition (renamed `<Class>_vtable.1`) and stays unresolved at link time.
+  auto *vtableArrTy = llvm::ArrayType::get(ptrTy, ct->getVTableSize());
+  ClassVTableGlobals[ct] = new llvm::GlobalVariable(
+      *CG.Module, vtableArrTy, /*isConstant=*/true,
+      llvm::GlobalValue::ExternalLinkage, /*Initializer=*/nullptr,
+      node->getName() + kVTableSuffix);
+
+  // Method functions: ClassName_methodName(ptr self, params...).  `destroy`
+  // is the synthetic destructor declared below.
+  for (auto *funcDecl : node->getMethods()) {
+    if (funcDecl->getName() == kMethodDestroy)
+      continue;
+    if (auto *md = ct->findMethod(funcDecl->getName()))
+      getOrDeclareFunction(node->getName() + kNameSep + funcDecl->getName(),
+                           getMethodFunctionType(md));
+  }
+  getOrDeclareFunction(node->getName() + kNameSep + kMethodDestroy,
+                       llvm::FunctionType::get(voidTy, {ptrTy}, false));
+
+  // Constructor: ClassName(initParams...) -> PaykanShared*.
+  getOrDeclareFunction(node->getName(), getConstructorFunctionType(ct));
+}
+
 // ---------------------------------------------------------------------------
 // visitClassDecl
 // ---------------------------------------------------------------------------
@@ -254,24 +349,10 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
   auto *i64Ty = llvm::Type::getInt64Ty(CG.LLVMCtx);
   auto *voidTy = llvm::Type::getVoidTy(CG.LLVMCtx);
 
-  // Ensure the struct type exists before emitting any method bodies
-  // (methods may refer to fields of their own class).
-  getOrCreateClassStructType(ct);
-
-  // Create the vtable global up-front — as a declaration (no initializer) —
-  // before any method body is emitted.  A `match` on this class inside one of
-  // its own methods takes the address of this global for its type check; if the
-  // global did not yet exist it would synthesize an external placeholder
-  // (`<Class>_vtable`) that later collides with the real definition (renamed
-  // `<Class>_vtable.1`), leaving the placeholder unresolved at link time.  The
-  // vtable size is known from the Sema-built vtable, so the type is fixed here;
-  // the initializer (the concrete function pointers) is filled in at step 3.
-  auto *vtableArrTy = llvm::ArrayType::get(ptrTy, ct->getVTableSize());
-  auto *vtableGlobal = new llvm::GlobalVariable(
-      *CG.Module, vtableArrTy, /*isConstant=*/true,
-      llvm::GlobalValue::ExternalLinkage, /*Initializer=*/nullptr,
-      node->getName() + kVTableSuffix);
-  ClassVTableGlobals[ct] = vtableGlobal;
+  // Struct type, vtable global and every function prototype of this class
+  // (normally already declared by the module-wide pre-pass).
+  declareClass(node);
+  llvm::GlobalVariable *vtableGlobal = ClassVTableGlobals.lookup(ct);
 
   // -------------------------------------------------------------------------
   // 1. Emit a concrete LLVM function for each method declared in this class.
@@ -290,21 +371,10 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
     if (!md)
       continue;
 
-    llvm::Type *retTy =
-        md->getReturnType() ? CG.toLLVMType(md->getReturnType()) : voidTy;
-    if (!retTy)
-      retTy = voidTy;
-
-    std::vector<llvm::Type *> paramTys;
-    paramTys.push_back(ptrTy); // self (raw PaykanObject*)
-    for (auto *pty : md->getParamTypes()) {
-      auto *lty = CG.toLLVMType(pty);
-      paramTys.push_back(lty ? lty : ptrTy);
-    }
-    auto *fnTy = llvm::FunctionType::get(retTy, paramTys, false);
-    auto fnName = node->getName() + kNameSep + funcDecl->getName();
-    auto *fn = llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage,
-                                      fnName, CG.Module.get());
+    auto *fn =
+        getOrDeclareFunction(node->getName() + kNameSep + funcDecl->getName(),
+                             getMethodFunctionType(md));
+    llvm::Type *retTy = fn->getReturnType();
 
     // Name the parameters.
     fn->arg_begin()->setName(kSelf);
@@ -427,18 +497,8 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
   //      f. Return the box (the caller owns the first reference)
   // -------------------------------------------------------------------------
   auto *initMd = ct->findMethod(names::kMethodInit);
-  std::vector<llvm::Type *> ctorParamTys;
-  if (initMd) {
-    for (auto *pty : initMd->getParamTypes()) {
-      auto *lty = CG.toLLVMType(pty);
-      ctorParamTys.push_back(lty ? lty : ptrTy);
-    }
-  }
-
-  auto *ctorFnTy = llvm::FunctionType::get(ptrTy, ctorParamTys, false);
   auto *ctorFn =
-      llvm::Function::Create(ctorFnTy, llvm::Function::ExternalLinkage,
-                             node->getName(), CG.Module.get());
+      getOrDeclareFunction(node->getName(), getConstructorFunctionType(ct));
 
   // Name constructor parameters to match __init__.
   if (initMd) {
@@ -514,15 +574,14 @@ llvm::Value *ClassCodeGen::visitClassDecl(ast::ClassDecl *node) {
     // when that stray box drops to zero.
     llvm::Value *shared = CG.emitSharedNew(rawPtr, node->getName() + ".shared");
 
-    // e. Call __init__ if present.
+    // e. Call __init__ if present (declared by declareClass, emitted above).
     if (initMd) {
-      std::string initFnName = node->getName() + kNameSep + kMethodInit;
-      if (auto *initFn = CG.Module->getFunction(initFnName)) {
-        std::vector<llvm::Value *> initArgs = {rawPtr};
-        for (auto &arg : ctorFn->args())
-          initArgs.push_back(&arg);
-        CG.Builder.CreateCall(initFn, initArgs);
-      }
+      llvm::Function *initFn = lookupOwnMethodFunction(ct, kMethodInit);
+      assert(initFn && "__init__ must have been emitted with the class");
+      std::vector<llvm::Value *> initArgs = {rawPtr};
+      for (auto &arg : ctorFn->args())
+        initArgs.push_back(&arg);
+      CG.Builder.CreateCall(initFn, initArgs);
     }
 
     // f. Return the box — the caller owns the first reference.
@@ -552,11 +611,10 @@ void ClassCodeGen::emitDestructor(ast::ClassDecl *node, ast::ClassType *ct) {
 
   auto *structTy = getOrCreateClassStructType(ct);
 
-  // Create the destructor function: void ClassName_destroy(ptr self).
-  auto fnName = node->getName() + kNameSep + kMethodDestroy;
-  auto *fnTy = llvm::FunctionType::get(voidTy, {ptrTy}, false);
-  auto *fn = llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage,
-                                    fnName, CG.Module.get());
+  // The destructor function: void ClassName_destroy(ptr self).
+  auto *fn =
+      getOrDeclareFunction(node->getName() + kNameSep + kMethodDestroy,
+                           llvm::FunctionType::get(voidTy, {ptrTy}, false));
   fn->arg_begin()->setName(kSelf);
 
   // Locate a user-defined `destroy` body to run before field teardown.

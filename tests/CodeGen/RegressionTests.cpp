@@ -7,6 +7,10 @@
 #include "TestUtils.h"
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
+#include <unistd.h>
+
 extern "C" {
 #include "Runtime.h"
 }
@@ -323,4 +327,201 @@ TEST(Regression, CallRootedSubscriptAssign) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.ExitCode, 0);
   g.expectNoLeaks("CallRootedSubscriptAssign");
+}
+// ============================================================================
+// Class functions referenced before their class body is emitted
+// ============================================================================
+
+namespace {
+
+// Write @p content to @p relPath under @p dir (creating directories).
+std::string writeProjectFile(const std::filesystem::path &dir,
+                             const std::string &relPath,
+                             const std::string &content) {
+  auto full = dir / relPath;
+  std::filesystem::create_directories(full.parent_path());
+  std::ofstream ofs(full);
+  ofs << content;
+  return full.string();
+}
+
+// A fresh project directory; Sema caches analysed modules by path, so every
+// test uses its own.
+std::filesystem::path freshProjectDir(const std::string &name) {
+  auto dir = std::filesystem::temp_directory_path() /
+             ("pkn_regression_" + name + "_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  return dir;
+}
+
+} // namespace
+
+TEST(Regression, MethodConstructsOwnAndLaterClass) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Cell {
+      v: int;
+      fn __init__(v: int) { self.v = v; }
+      fn clone() -> Cell { return Cell(self.v + 1); }
+      fn wrap() -> Box { return Box(self.v * 2); }
+    }
+    class Box {
+      n: int;
+      fn __init__(n: int) { self.n = n; }
+      fn cell() -> Cell { return Cell(self.n); }
+    }
+    fn main() -> int {
+      c = Cell(3);
+      d = c.clone();
+      b = c.wrap();
+      println(StrInt(d.v) + " " + StrInt(b.n) + " " + StrInt(b.cell().v));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "4 6 6\n");
+  g.expectNoLeaks("MethodConstructsOwnAndLaterClass");
+}
+
+TEST(Regression, ImportedClassConstructsItself) {
+  auto dir = freshProjectDir("self_ctor");
+  writeProjectFile(dir, "lib/cell.pkn", R"(
+class Cell {
+  v: int;
+  fn __init__(v: int) { self.v = v; }
+  fn clone() -> Cell { return Cell(self.v + 1); }
+}
+)");
+  auto mainPath = writeProjectFile(dir, "main.pkn", R"(
+import lib::cell;
+fn main() -> int {
+  c = cell::Cell(3);
+  d = c.clone();
+  return d.v;
+}
+)");
+  LeakGuard g;
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 4);
+  g.expectNoLeaks("ImportedClassConstructsItself");
+  std::filesystem::remove_all(dir);
+}
+
+TEST(Regression, SubclassDeclaredBeforeBase) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Square : Rect {
+      fn __init__(s: int) { __super__(s, s, "square"); }
+    }
+    class Rect {
+      w: int;
+      h: int;
+      tag: Str;
+      fn __init__(w: int, h: int, tag: Str) {
+        self.w = w;
+        self.h = h;
+        self.tag = tag;
+      }
+      fn area() -> int { return self.w * self.h; }
+    }
+    fn main() -> int {
+      s = Square(4);
+      println(StrInt(s.area()) + " " + s.tag);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "16 square\n");
+  g.expectNoLeaks("SubclassDeclaredBeforeBase");
+}
+
+TEST(Regression, SuperInitOfImportedBase) {
+  auto dir = freshProjectDir("imported_base");
+  writeProjectFile(dir, "shapes/rect.pkn", R"(
+class Rect {
+  w: int;
+  h: int;
+  tag: Str;
+  fn __init__(w: int, h: int, tag: Str) {
+    self.w = w;
+    self.h = h;
+    self.tag = tag;
+  }
+  fn area() -> int { return self.w * self.h; }
+}
+class Unit {
+  n: int;
+  fn __init__() { self.n = 7; }
+}
+)");
+  auto mainPath = writeProjectFile(dir, "main.pkn", R"(
+import shapes::rect;
+class Square : rect::Rect {
+  fn __init__(s: int) { __super__(s, s, "sq"); }
+}
+class One : rect::Unit {
+  fn __init__() { __super__(); }
+}
+fn main() -> int {
+  s = Square(4);
+  o = One();
+  if (s.tag != "sq") { return 1; }
+  return s.area() + o.n;
+}
+)");
+  LeakGuard g;
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 23);
+  g.expectNoLeaks("SuperInitOfImportedBase");
+  std::filesystem::remove_all(dir);
+}
+
+TEST(Regression, SuperArgumentsAreBoxed) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Point {
+      x: int;
+      fn __init__(x: int) { self.x = x; }
+    }
+    class Base {
+      p: Point;
+      name: Str;
+      xs: int[];
+      fn __init__(p: Point, name: Str, xs: int[]) {
+        self.p = p;
+        self.name = name;
+        self.xs = xs;
+      }
+    }
+    class Lit : Base {
+      fn __init__() { __super__(Point(1), "literal", [1, 2]); }
+    }
+    class Cat : Base {
+      fn __init__(n: Str) { __super__(Point(2), n + "!", [3]); }
+    }
+    class Fwd : Base {
+      fn __init__(p: Point, n: Str, xs: int[]) { __super__(p, n, xs); }
+    }
+    fn main() -> int {
+      a = Lit();
+      println(a.name + StrInt(a.p.x) + StrInt(a.xs.len()));
+      b = Cat("c");
+      println(b.name + StrInt(b.p.x));
+      q = Point(3);
+      s: Str = "fwd";
+      ys: int[] = [7];
+      c = Fwd(q, s, ys);
+      println(c.name + StrInt(c.p.x) + StrInt(q.x) + s + StrInt(ys.len()));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "literal12\nc!2\nfwd33fwd1\n");
+  g.expectNoLeaks("SuperArgumentsAreBoxed");
 }

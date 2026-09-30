@@ -432,7 +432,14 @@ bool CodeGen::run(ast::TranslationUnit *tu) {
   bootstrapBuiltins();
   processImports(tu);
   visit(tu);
+  if (HadInternalError)
+    return false;
   return !llvm::verifyModule(*Module, &llvm::errs());
+}
+
+void CodeGen::reportInternalError(const llvm::Twine &msg) {
+  llvm::errs() << "internal compiler error: " << msg << "\n";
+  HadInternalError = true;
 }
 
 /// Returns true when `expr` already produces a PaykanShared* — i.e. the
@@ -700,6 +707,13 @@ llvm::Value *CodeGen::visitTranslationUnit(ast::TranslationUnit *node) {
   // is defined later in the module.
   for (auto *fn : node->getFuncDecls())
     declareFunctionPrototype(fn);
+  // Likewise declare every class's constructor, methods, destructor and vtable
+  // before emitting any class body: a method may construct its own class or a
+  // class declared later in the file, and a subclass may precede its base
+  // (its `__super__` call and inherited vtable slots name the base's
+  // functions).
+  for (auto *cls : node->getClassDecls())
+    Classes.declareClass(cls);
   for (auto *cls : node->getClassDecls())
     visitClassDecl(cls);
   for (auto *fn : node->getFuncDecls())
@@ -2057,56 +2071,65 @@ llvm::Value *CodeGen::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
 
   // -- __super__(args): call parent class __init__ with self ----------------
   if (node->getCalleeName() == kMethodSuper) {
-    if (!CG.Classes.CurrentMethodClassType)
+    ast::ClassType *cls = CG.Classes.CurrentMethodClassType;
+    ast::ClassType *superClass = cls ? cls->getSuperClass() : nullptr;
+    if (!superClass) {
+      CG.reportInternalError("'__super__' outside a subclass method");
       return nullptr;
-    auto *superClass = CG.Classes.CurrentMethodClassType->getSuperClass();
-    if (!superClass)
+    }
+    // A base without its own __init__ has nothing to run (Sema checked that
+    // no arguments were passed).  Otherwise its __init__ was declared up
+    // front (or, for an imported base, under its qualified name) and must be
+    // found: skipping the call would silently leave the base uninitialised.
+    llvm::Function *superFn =
+        CG.Classes.lookupOwnMethodFunction(superClass, names::kMethodInit);
+    if (!superFn) {
+      if (!superClass->findMethod(names::kMethodInit))
+        return nullptr;
+      CG.reportInternalError("no function for '" + superClass->getName() + "." +
+                             names::kMethodInit + "' called by '" +
+                             cls->getName() + "." + names::kMethodSuper + "'");
       return nullptr;
-    std::string superInitName =
-        superClass->getName() + "_" + names::kMethodInit;
-    llvm::Function *superFn = CG.Module->getFunction(superInitName);
-    if (!superFn)
-      return nullptr;
+    }
     // `self` is the raw ptr stored in the unowned "self" alloca.
     auto *selfAlloca = CG.CurrentScope->lookup(kSelf);
-    auto *ptrTy2 = llvm::PointerType::getUnqual(CG.LLVMCtx);
-    auto *selfVal = CG.Builder.CreateLoad(ptrTy2, selfAlloca, kSelf);
+    auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
+    auto *selfVal = CG.Builder.CreateLoad(ptrTy, selfAlloca, kSelf);
     std::vector<llvm::Value *> initArgs = {selfVal};
     for (size_t i = 0; i < node->getNumArguments(); ++i) {
       auto *argExpr = node->getArguments()[i];
-      auto *ptrTy3 = llvm::PointerType::getUnqual(CG.LLVMCtx);
-
-      // Class-typed args must arrive as PaykanShared* (same as user-fn calls).
-      // Check whether the arg is an owned identifier so we load the shared box
-      // directly instead of going through visitIdentifier (which unwraps).
-      bool passedAsShared = false;
-      if (auto *id = ast::dyn_cast<ast::Identifier>(argExpr)) {
-        if (CG.CurrentScope && CG.CurrentScope->isOwned(id->getName())) {
-          auto *argAlloca = CG.CurrentScope->lookup(id->getName());
-          llvm::Value *v =
-              CG.Builder.CreateLoad(ptrTy3, argAlloca, id->getName());
-          CG.emitRetain(v);
-          initArgs.push_back(v);
-          passedAsShared = true;
-        }
-      }
-      if (!passedAsShared) {
-        llvm::Value *v = visit(argExpr);
+      llvm::Type *paramTy = i + 1 < superFn->arg_size()
+                                ? superFn->getArg(i + 1)->getType()
+                                : nullptr;
+      // The base __init__ binds ref-typed parameters as owned boxes and
+      // releases them on exit (callee-consumes ABI), exactly like any user
+      // function: pass a +1 box for every expression form.
+      if (paramTy && paramTy->isPointerTy()) {
+        llvm::Value *v = CG.emitAsShared(argExpr);
         if (!v)
           return nullptr;
-        if (auto *sl = ast::dyn_cast<ast::StringLiteral>(argExpr))
-          v = CG.wrapStringLiteral(v, sl->getValue().size());
         initArgs.push_back(v);
+        continue;
       }
+      llvm::Value *v = visit(argExpr);
+      if (!v)
+        return nullptr;
+      if (v->getType()->isIntegerTy(1) && paramTy && paramTy->isIntegerTy(64))
+        v = CG.Builder.CreateZExt(v, paramTy, kIRBoolExt);
+      initArgs.push_back(v);
     }
     CG.Builder.CreateCall(superFn, initArgs);
     return nullptr;
   }
 
-  // User-defined function — look up in the LLVM module.
+  // User-defined function (or class constructor) — every one is declared
+  // before any body is emitted, so a miss here is a compiler bug.
   llvm::Function *callee = CG.Module->getFunction(node->getCalleeName());
-  if (!callee)
+  if (!callee) {
+    CG.reportInternalError("call to undeclared function '" +
+                           node->getCalleeName() + "'");
     return nullptr;
+  }
 
   std::vector<llvm::Value *> args;
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
