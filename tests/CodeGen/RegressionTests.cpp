@@ -140,3 +140,74 @@ TEST(Regression, MethodEqualsOverrideAndArrayEquals) {
   EXPECT_EQ(r.StdOut, "True\nTrue\nTrue\nFalse\n");
   g.expectNoLeaks("MethodEqualsOverrideAndArrayEquals");
 }
+
+// ============================================================================
+// Inferred-type variables initialised from a ref-typed ternary
+// ============================================================================
+
+TEST(Regression, InferredClassTernaryReceiver) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Point {
+      x: int;
+      y: int;
+      fn __init__(x: int, y: int) { self.x = x; self.y = y; }
+      fn sum() -> int { return self.x + self.y; }
+    }
+    class Animal { fn sound() -> Str { return "..."; } }
+    class Dog : Animal { fn sound() -> Str { return "woof"; } }
+    class Cat : Animal { fn sound() -> Str { return "meow"; } }
+    fn pick(c: bool) -> int {
+      p = Point(1, 2);
+      q = Point(10, 20);
+      r = if c then p else q;
+      return r.sum() + r.x;
+    }
+    fn main() -> int {
+      println(StrInt(pick(True)));
+      println(StrInt(pick(False)));
+      c = False;
+      r = if c then Point(3, 3) else Point(4, 4);
+      println(StrInt(r.sum()));
+      a = if c then Dog() else Cat();
+      println(a.sound());
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "4\n40\n8\nmeow\n");
+  g.expectNoLeaks("InferredClassTernaryReceiver");
+}
+
+TEST(Regression, InferredArrayTupleOptionalTernary) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Point {
+      x: int;
+      fn __init__(x: int) { self.x = x; }
+      fn get() -> int { return self.x; }
+    }
+    fn run(c: bool) -> int {
+      p = Point(1);
+      q = Point(2);
+      ps: Point[] = [p];
+      arr = if c then ps else [q, q];
+      t: (int, Point) = (5, p);
+      tup = if c then t else (6, q);
+      opt = if c then p else None;
+      n = 0;
+      if (opt != None) { n = 100; }
+      return arr.len() * 1000 + arr[0].get() * 10 + tup.1.get() + tup.0 + n;
+    }
+    fn main() -> int {
+      println(StrInt(run(True)));
+      println(StrInt(run(False)));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "1116\n2028\n");
+  g.expectNoLeaks("InferredArrayTupleOptionalTernary");
+}
