@@ -32,6 +32,9 @@ if(PAYKAN_ASAN)
         set(_paykan_asan_flags -fsanitize=address,leak)
         message(STATUS "Sanitizer: AddressSanitizer + LeakSanitizer enabled")
     endif()
+    # Run tests with ASAN_OPTIONS=detect_container_overflow=0: the prebuilt
+    # LLVM is not instrumented, and mixing it with instrumented libc++
+    # containers yields false container-overflow reports (see ci.yml).
     add_compile_options(${_paykan_asan_flags} -fno-omit-frame-pointer)
     add_link_options(${_paykan_asan_flags})
     # Death tests under ASan need threadsafe mode (fork-based death tests are

@@ -89,7 +89,13 @@ jobs:
         env:
           # Apple clang has no LeakSanitizer on arm64 (see SanitizerSetup.cmake);
           # detect_leaks=1 would abort ASan at startup as unsupported.
-          ASAN_OPTIONS: abort_on_error=1:detect_stack_use_after_return=1
+          # detect_container_overflow=0: the prebuilt LLVM libraries are not
+          # instrumented, so their std::vector growth does not update libc++'s
+          # container annotations while our instrumented instantiations of the
+          # same templates check them -- ASan then reports container-overflow
+          # inside LLVM's own static initialisers (DebugCounter::addCounter) at
+          # process start.  See AddressSanitizerContainerOverflow on the wiki.
+          ASAN_OPTIONS: abort_on_error=1:detect_stack_use_after_return=1:detect_container_overflow=0
         run: ctest --test-dir build-asan --output-on-failure --parallel 4
 
   # ---------------------------------------------------------------------------
