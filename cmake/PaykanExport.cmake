@@ -1,0 +1,131 @@
+# PaykanExport.cmake
+# ----------------------------------------------------------------------------
+# Install rules and the `find_package(Paykan)` package, so that a backend or
+# frontend can be written out of tree against the installed interfaces and
+# linked into a custom `paykan` build (docs/writing-a-backend.md).
+#
+# Installed layout (relative to the prefix):
+#   bin/paykan                        the driver with the built-in plugins
+#   lib/libpaykan_*.a                 core (incl. lowering), driver, runtime and plugin libraries
+#   lib/cmake/Paykan/                 PaykanConfig.cmake + exported targets
+#   include/paykan/Runtime.h          the runtime ABI (C)
+#   include/paykan/compiler/          the compiler's headers (AST.h, Sema.h,
+#                                     paykan/Frontend.h, paykan/Backend.h, ...)
+#
+# Exported targets are namespaced Paykan:: and lose their paykan_ prefix:
+# Paykan::backend, Paykan::pir, Paykan::frontend, Paykan::driver, ... plus
+# every built plugin (Paykan::frontend_bison, Paykan::backend_llvm, ...).
+# ----------------------------------------------------------------------------
+
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+set(PAYKAN_INSTALL_CMAKEDIR ${CMAKE_INSTALL_LIBDIR}/cmake/Paykan)
+set(PAYKAN_INSTALL_COMPILER_INCLUDEDIR ${CMAKE_INSTALL_INCLUDEDIR}/paykan/compiler)
+
+# -- What gets exported ---------------------------------------------------------
+set(PAYKAN_EXPORT_TARGETS
+    paykan_compile_options
+    paykan_ast
+    paykan_diag
+    paykan_frontend
+    paykan_ast_printer
+    paykan_sema
+    paykan_pir
+    paykan_backend
+    paykan_lowering
+    paykan_runtime
+    paykan_driver
+)
+get_property(PAYKAN_PLUGIN_TARGETS_LIST GLOBAL PROPERTY PAYKAN_PLUGIN_TARGETS)
+list(APPEND PAYKAN_EXPORT_TARGETS ${PAYKAN_PLUGIN_TARGETS_LIST})
+# The LLVM backend's private dependencies are exported with it.
+foreach(t paykan_codegen paykan_jit)
+    if(TARGET ${t})
+        list(APPEND PAYKAN_EXPORT_TARGETS ${t})
+    endif()
+endforeach()
+
+# Public include directories point into the source/build tree; an installed
+# consumer must see the install location instead.
+foreach(t IN LISTS PAYKAN_EXPORT_TARGETS)
+    string(REGEX REPLACE "^paykan_" "" short ${t})
+    set_target_properties(${t} PROPERTIES EXPORT_NAME ${short})
+
+    get_target_property(incs ${t} INTERFACE_INCLUDE_DIRECTORIES)
+    if(incs)
+        set(rewritten "")
+        foreach(dir IN LISTS incs)
+            if(dir MATCHES "^\\$<")
+                list(APPEND rewritten "${dir}")           # already a genex
+            elseif(dir STREQUAL "${PROJECT_SOURCE_DIR}/src/Runtime")
+                list(APPEND rewritten "$<BUILD_INTERFACE:${dir}>"
+                                      "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/paykan>")
+            else()
+                list(APPEND rewritten "$<BUILD_INTERFACE:${dir}>"
+                                      "$<INSTALL_INTERFACE:${PAYKAN_INSTALL_COMPILER_INCLUDEDIR}>")
+            endif()
+        endforeach()
+        set_target_properties(${t} PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${rewritten}")
+    endif()
+    # LLVM's include directories (SYSTEM, on the backend's private deps) are
+    # resolved through find_dependency(LLVM) in the config file.
+    get_target_property(sysincs ${t} INTERFACE_SYSTEM_INCLUDE_DIRECTORIES)
+    if(sysincs)
+        set(rewritten "")
+        foreach(dir IN LISTS sysincs)
+            list(APPEND rewritten "$<BUILD_INTERFACE:${dir}>")
+        endforeach()
+        set_target_properties(${t} PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${rewritten}")
+    endif()
+endforeach()
+
+# -- Install ------------------------------------------------------------------
+install(TARGETS paykan
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+install(TARGETS ${PAYKAN_EXPORT_TARGETS}
+    EXPORT PaykanTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+install(FILES ${PROJECT_SOURCE_DIR}/src/Runtime/Runtime.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/paykan
+)
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/
+    DESTINATION ${PAYKAN_INSTALL_COMPILER_INCLUDEDIR}
+    FILES_MATCHING PATTERN "*.h"
+)
+install(FILES ${PAYKAN_GENERATED_INCLUDE_DIR}/Version.h
+    DESTINATION ${PAYKAN_INSTALL_COMPILER_INCLUDEDIR}
+)
+install(EXPORT PaykanTargets
+    NAMESPACE Paykan::
+    DESTINATION ${PAYKAN_INSTALL_CMAKEDIR}
+)
+
+# -- Package config -----------------------------------------------------------
+# The plugins built into this installation, as exported names, so a custom
+# driver links them all.
+set(PAYKAN_CONFIG_PLUGINS "")
+foreach(t IN LISTS PAYKAN_PLUGIN_TARGETS_LIST)
+    string(REGEX REPLACE "^paykan_" "" short ${t})
+    list(APPEND PAYKAN_CONFIG_PLUGINS "Paykan::${short}")
+endforeach()
+
+configure_package_config_file(
+    ${PROJECT_SOURCE_DIR}/cmake/PaykanConfig.cmake.in
+    ${CMAKE_BINARY_DIR}/cmake/PaykanConfig.cmake
+    INSTALL_DESTINATION ${PAYKAN_INSTALL_CMAKEDIR}
+)
+write_basic_package_version_file(
+    ${CMAKE_BINARY_DIR}/cmake/PaykanConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMinorVersion
+)
+install(FILES
+    ${CMAKE_BINARY_DIR}/cmake/PaykanConfig.cmake
+    ${CMAKE_BINARY_DIR}/cmake/PaykanConfigVersion.cmake
+    DESTINATION ${PAYKAN_INSTALL_CMAKEDIR}
+)

@@ -198,3 +198,92 @@ jobs:
           name: coverage-lcov
           path: build-cov/coverage/coverage.lcov
           if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # Barebones build: standard C++ only.  No LLVM, no Bison/Flex, no m4, and
+  # nothing downloaded at configure time (GoogleTest is the one exception, for
+  # the tests).  Proves the acceptance criteria of #16: configure downloads
+  # nothing, `paykan` links no third-party library, the full suite passes on
+  # the C backend, and an out-of-tree backend builds against the installed
+  # package.
+  # ---------------------------------------------------------------------------
+  barebones-linux:
+    name: Barebones | Linux x86-64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies (and remove the optional ones)
+        run: |
+          sudo apt-get update && sudo apt-get install -y ninja-build
+          sudo apt-get remove -y bison flex m4 || true
+          ! command -v bison && ! command -v flex && ! command -v m4
+
+      - name: Cache GoogleTest
+        uses: actions/cache@v4
+        with:
+          path: build/third-party/gtest
+          key: gtest-${{ hashFiles('cmake/GTestSetup.cmake') }}
+
+      - name: Configure (recursive-descent frontend, C backend only)
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DPAYKAN_FRONTENDS=recursive-descent -DPAYKAN_BACKENDS=c \
+            2>&1 | tee configure.log
+          # Nothing but GoogleTest may be fetched.
+          ! grep -i "Downloading\|Building Bison\|Building Flex" configure.log
+          test "$(ls build/third-party)" = "gtest"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Check that paykan links no third-party library
+        run: |
+          ldd build/bin/paykan | tee ldd.log
+          ! grep -iv "linux-vdso\|libstdc++\|libgcc_s\|libc\.so\|libm\.so\|ld-linux" ldd.log
+          ! nm -C build/bin/paykan | grep -q "llvm::\|yy::\|yylex"
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --parallel 4
+
+      - name: Install and build the out-of-tree example backend against it
+        run: |
+          cmake --install build --prefix "$PWD/install"
+          cmake -S examples/backends/print-pir -B build-example -G Ninja \
+            -DCMAKE_PREFIX_PATH="$PWD/install"
+          cmake --build build-example
+          build-example/paykan-print-pir --list-backends | grep print-pir
+          build-example/paykan-print-pir --backend=print-pir --emit-source \
+            samples/codegen/01_literals.pkn > example.pir
+          build/bin/paykan --emit-pir samples/codegen/01_literals.pkn > driver.pir
+          diff example.pir driver.pir
+
+  # ---------------------------------------------------------------------------
+  # Frontend differential: both frontends built, every sample and test input
+  # parsed by each and compared (in process and through the driver).
+  # ---------------------------------------------------------------------------
+  frontend-differential-linux:
+    name: Frontend differential | Linux x86-64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Cache third-party dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/third-party
+          key: third-party-linux-x86_64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
+
+      - name: Configure (both frontends)
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            "-DPAYKAN_FRONTENDS=recursive-descent;bison"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Differential and frontend tests
+        run: ctest --test-dir build --output-on-failure --parallel 4 -R "Frontend|Parser|Sema"
