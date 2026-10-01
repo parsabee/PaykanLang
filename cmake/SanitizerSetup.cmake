@@ -16,6 +16,11 @@ option(PAYKAN_ASAN  "Build with AddressSanitizer + LeakSanitizer" OFF)
 option(PAYKAN_UBSAN "Build with UndefinedBehaviorSanitizer"       OFF)
 option(PAYKAN_TSAN  "Build with ThreadSanitizer"                  OFF)
 
+# The sanitizer flags in effect, for code that compiles and links programs
+# against this build's (instrumented) runtime archive at run time -- the C
+# backend passes them to the system C compiler (src/Backends/C).
+set(PAYKAN_SANITIZER_FLAGS "")
+
 if(PAYKAN_ASAN AND PAYKAN_TSAN)
     message(FATAL_ERROR "PAYKAN_ASAN and PAYKAN_TSAN are mutually exclusive.")
 endif()
@@ -37,6 +42,7 @@ if(PAYKAN_ASAN)
     # containers yields false container-overflow reports (see ci.yml).
     add_compile_options(${_paykan_asan_flags} -fno-omit-frame-pointer)
     add_link_options(${_paykan_asan_flags})
+    list(APPEND PAYKAN_SANITIZER_FLAGS ${_paykan_asan_flags})
     # Death tests under ASan need threadsafe mode (fork-based death tests are
     # unreliable under ASan because the child inherits shadow memory state).
     add_compile_definitions(GTEST_HAS_DEATH_TEST=1)
@@ -51,10 +57,12 @@ if(PAYKAN_UBSAN)
     add_compile_options(-fsanitize=undefined -fno-sanitize=vptr
                         -fno-sanitize-recover=all)
     add_link_options(-fsanitize=undefined -fno-sanitize=vptr)
+    list(APPEND PAYKAN_SANITIZER_FLAGS -fsanitize=undefined)
 endif()
 
 if(PAYKAN_TSAN)
     message(STATUS "Sanitizer: ThreadSanitizer enabled")
     add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
     add_link_options(-fsanitize=thread)
+    list(APPEND PAYKAN_SANITIZER_FLAGS -fsanitize=thread)
 endif()

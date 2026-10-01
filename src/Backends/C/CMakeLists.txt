@@ -14,9 +14,13 @@ target_include_directories(paykan_backend_c
 )
 # Where this build tree's runtime lives, so `paykan build` / `run` work
 # without an install step; the install layout is the fallback at run time.
+# A sanitizer build instruments libpaykan_runtime.a, so programs linked
+# against it need the same -fsanitize flags (SanitizerSetup.cmake).
+list(JOIN PAYKAN_SANITIZER_FLAGS " " _paykan_c_sanitizer_flags)
 target_compile_definitions(paykan_backend_c PRIVATE
     PAYKAN_RUNTIME_LIB_PATH="$<TARGET_FILE:paykan_runtime>"
     PAYKAN_RUNTIME_INCLUDE_DIR="${CMAKE_SOURCE_DIR}/src/Runtime"
+    PAYKAN_SANITIZER_FLAGS="${_paykan_c_sanitizer_flags}"
 )
 target_link_libraries(paykan_backend_c
     PUBLIC  paykan_backend
