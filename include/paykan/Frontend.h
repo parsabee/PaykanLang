@@ -52,7 +52,8 @@ class Frontend {
 public:
   virtual ~Frontend() = default;
 
-  /// The name the frontend is registered under ("handwritten", "bison", ...).
+  /// The name the frontend is registered under ("recursive-descent", "bison",
+  /// ...).
   virtual std::string_view name() const = 0;
 
   /// Parse @p source, the full text of @p filename, into @p ctx.
