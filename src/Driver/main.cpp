@@ -10,6 +10,9 @@
 #include "Version.h"
 #include "paykan/Backend.h"
 #include "paykan/Frontend.h"
+#include "paykan/lowering/Lowering.h"
+#include "paykan/pir/Printer.h"
+#include "paykan/pir/Verifier.h"
 
 #include <cstdlib>
 #include <filesystem>
@@ -158,11 +161,25 @@ int main(int argc, char *argv[]) {
   in.InputFilename = opts.InputFilename;
   in.ProjectRoot = projectRoot;
   in.OptLevel = opts.OptLevel;
-  if (backend->consumesPIR()) {
-    // The AST -> PIR lowering lands with the first PIR backend; until then
-    // no built-in backend asks for it.
-    return fail("backend '" + backendName +
-                "' consumes PIR, which this driver cannot produce yet");
+  // -- Lowering -------------------------------------------------------------
+  // Every backend except the legacy AST-based LLVM one reads PIR: lower the
+  // program (the single home of the ownership semantics), verify it, and
+  // hand it over.  --emit-pir prints it instead.
+  paykan::pir::Program program;
+  if (backend->consumesPIR() || opts.EmitPIR) {
+    if (!paykan::lowering::lowerProgram(semaCtx, root, opts.InputFilename,
+                                        projectRoot, program, std::cerr))
+      return fail("lowering to PIR failed");
+    auto errors = paykan::pir::verify(program);
+    if (!errors.empty())
+      return fail("PIR verification failed:\n" +
+                  paykan::pir::formatErrors(errors));
+    if (opts.EmitPIR) {
+      paykan::pir::print(program, std::cout);
+      std::cout.flush();
+      return EXIT_SUCCESS;
+    }
+    in.Program = &program;
   }
   in.Sema = &semaCtx;
   in.TU = root;

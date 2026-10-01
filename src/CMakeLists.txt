@@ -1,7 +1,7 @@
 # src/CMakeLists.txt
 # ----------------------------------------------------------------------------
 # Paykan compiler:
-#   AST/ Diag/ Frontend/ ASTPrinter/ Sema/ PIR/ Backend/
+#   AST/ Diag/ Frontend/ ASTPrinter/ Sema/ PIR/ Backend/ Lowering/
 #                     – the core (standard C++ only)
 #   Frontends/<name>/ – frontend plugins, built when listed in PAYKAN_FRONTENDS
 #   Backends/<name>/  – backend plugins, built when listed in PAYKAN_BACKENDS
@@ -24,6 +24,7 @@ add_subdirectory(ASTPrinter)
 add_subdirectory(PIR)
 add_subdirectory(Sema)
 add_subdirectory(Backend)
+add_subdirectory(Lowering)
 add_subdirectory(Runtime)
 foreach(be IN LISTS PAYKAN_BACKENDS)
     if(be STREQUAL "llvm")

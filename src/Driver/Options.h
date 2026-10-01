@@ -49,6 +49,8 @@ struct Options {
   /// --emit-source: write the backend's source output (C, LLVM IR, ...) to
   /// stdout and stop.  --emit-llvm is --backend=llvm --emit-source.
   bool EmitSource = false;
+  /// --emit-pir: print the verified PIR of the whole program and stop.
+  bool EmitPIR = false;
 
   bool ShowHelp = false;    // --help / -h
   bool ShowVersion = false; // --version / -v

@@ -26,6 +26,8 @@ constexpr Flag kFlags[] = {
      "Print the token stream (frontends that support it)"},
     {"emit-source", &Options::EmitSource,
      "Write the backend's source output (C, LLVM IR, ...) to stdout"},
+    {"emit-pir", &Options::EmitPIR,
+     "Print the program's PIR (the backend-neutral IR) and exit"},
     {"list-frontends", &Options::ListFrontends,
      "List the available frontends and exit"},
     {"list-backends", &Options::ListBackends,
