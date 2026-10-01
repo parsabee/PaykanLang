@@ -17,8 +17,10 @@ namespace {
 // Deepest nesting of blocks, parentheses, brackets and type applications the
 // parser accepts.  Recursive descent uses the native stack, so pathological
 // inputs (a fuzzer's `((((((...`) are rejected with a diagnostic instead of
-// overflowing it.
-constexpr unsigned kMaxNesting = 1000;
+// overflowing it.  One level costs under 2 KiB of stack in an unoptimised
+// build (a few frames per level), so 512 levels stay well inside the 8 MiB
+// main-thread stack even with a sanitizer's larger frames.
+constexpr unsigned kMaxNesting = 512;
 
 /// Build the ImportDecl for `import [::]a::b::name [as alias];`.  The path is
 /// split at its last "::" into the base path ("a::b", empty when there is no

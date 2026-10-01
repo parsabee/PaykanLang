@@ -328,7 +328,7 @@ report several independent errors. The Bison frontend recovers only at
 never handed to Sema.
 
 Nesting (blocks, parentheses, brackets, type applications) deeper than
-1000 levels is rejected with `nesting too deep`, so pathological inputs
+512 levels is rejected with `nesting too deep`, so pathological inputs
 cannot overflow the stack.
 
 ## 10. Known differences and intentional non-copies
