@@ -19,6 +19,7 @@ add_executable(parser_tests
     Parser/GenericsTests.cpp
     Parser/OptionalTests.cpp
     Parser/TupleTests.cpp
+    Parser/GrammarEdgeTests.cpp
 )
 target_include_directories(parser_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
