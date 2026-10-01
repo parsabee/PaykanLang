@@ -47,6 +47,11 @@ cmake -B build
 cmake --build build --parallel
 ```
 
+The frontend (lexer + parser) is pluggable. `-DPAYKAN_FRONTENDS=<list>` selects the
+frontends to build (default: `bison`); the first one listed is the default, and the others
+are selected at run time with `--frontend=<name>` (`--list-frontends` prints them).
+Bison and Flex are downloaded and built only when `bison` is listed.
+
 The `paykan` binary is placed at `build/bin/paykan`. To install it to a prefix (the binary
 statically links the runtime, so it is self-contained for JIT execution):
 

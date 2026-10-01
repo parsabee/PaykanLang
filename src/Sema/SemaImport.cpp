@@ -403,7 +403,7 @@ bool Sema::processImport(ast::ImportDecl *node) {
     // the yacc-style fallback.  Mirrors the wiring in src/Driver/main.cpp:
     // SourceLines lives in the driver and is filled by parseFile before the
     // parser runs, so handing its address over now is safe.
-    auto importDriverPtr = std::make_shared<parser::ParserDriver>();
+    auto importDriverPtr = std::make_shared<parser::ParserDriver>(FrontendName);
     DiagEngine importDiag(Diags.getOS());
     importDiag.setSourceInfo(path, &importDriverPtr->getSourceLines());
     importDriverPtr->setDiagEngine(&importDiag);
@@ -420,7 +420,8 @@ bool Sema::processImport(ast::ImportDecl *node) {
     // the file name the parse recorded).
     importDiag.setSourceInfo(importDriverPtr->getCurrentFile(),
                              &importDriverPtr->getSourceLines());
-    Sema importSema(importDriverPtr->getASTContext(), importDiag, ProjectRoot);
+    Sema importSema(importDriverPtr->getASTContext(), importDiag, ProjectRoot,
+                    FrontendName);
     if (ImportStack)
       ImportStack->insert(path);
     importSema.ImportStack = ImportStack;

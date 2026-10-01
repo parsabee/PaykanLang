@@ -11,9 +11,9 @@
   #include <iostream>
   #include "AST.h"
 
-  namespace paykan::parser
+  namespace paykan::frontend::bison
   {
-    class ParserDriver;
+    class BisonFrontend;
   }
 
   using namespace paykan::ast;
@@ -31,7 +31,7 @@
 }
 
 // The parsing context.
-%param { paykan::parser::ParserDriver& drv }
+%param { paykan::frontend::bison::BisonFrontend& drv }
 %locations
 
 %define parse.trace
@@ -39,8 +39,7 @@
 %define parse.lac full
 
 %code {
-  #include "ParserDriverImpl.h"
-  using paykan::parser::impl;
+  #include "BisonFrontend.h"
 
   // Creates a source location from Bison location tokens
   #define loc(BEGIN_TOK, END_TOK) \
@@ -96,7 +95,7 @@
 
 // A '<' that opens a type-argument list in EXPRESSION position, i.e. the '<'
 // of `first<int>(xs)` / `Box<Str>(v)`.  Plain LESS would be ambiguous with the
-// relational operator (`a < b`); the lexer wrapper in ParserDriver.cpp decides
+// relational operator (`a < b`); the lexer wrapper in BisonFrontend.cpp decides
 // by looking ahead for the closing `>` followed by `(` and emits this token
 // instead.  In type position ('x: Box<int>') the ordinary "<" is unambiguous;
 // typeArgOpen accepts both so a declaration such as `fn first<T>(` -- which
@@ -163,11 +162,11 @@
 %start translationUnit;
 
 translationUnit : topLevelDeclList
-                                    { $$ = impl(drv).Ctx.make<TranslationUnit>(loc(@1, @1),
+                                    { $$ = drv.Ctx->make<TranslationUnit>(loc(@1, @1),
                                            std::move($1.Imports), std::move($1.Classes), std::move($1.Funcs),
                                            std::move($1.Enums), std::move($1.GenericClasses),
                                            std::move($1.GenericFuncs));
-                                      impl(drv).Root = $$;
+                                      drv.Root = $$;
                                     }
 ;
 
@@ -184,19 +183,19 @@ topLevelDeclList: %empty            { $$ = TLDeclBag{}; }
 
 importDecl:
       "import" modulePath ";"
-                                    { $$ = paykan::parser::makeSingleImport(impl(drv).Ctx, loc(@1, @3), $2, "", /*isSystem=*/false); }
+                                    { $$ = paykan::frontend::bison::makeSingleImport(*drv.Ctx, loc(@1, @3), $2, "", /*isSystem=*/false); }
     | "import" modulePath "as" IDENT ";"
-                                    { $$ = paykan::parser::makeSingleImport(impl(drv).Ctx, loc(@1, @5), $2, $4, /*isSystem=*/false); }
+                                    { $$ = paykan::frontend::bison::makeSingleImport(*drv.Ctx, loc(@1, @5), $2, $4, /*isSystem=*/false); }
     | "import" modulePath "::" "{" importedModuleList "}" ";"
-                                    { $$ = paykan::parser::makeImportList(impl(drv).Ctx, loc(@1, @7), $2, $5, /*isSystem=*/false); }
+                                    { $$ = paykan::frontend::bison::makeImportList(*drv.Ctx, loc(@1, @7), $2, $5, /*isSystem=*/false); }
     | "import" "::" modulePath ";"
-                                    { $$ = paykan::parser::makeSingleImport(impl(drv).Ctx, loc(@1, @4), $3, "", /*isSystem=*/true); }
+                                    { $$ = paykan::frontend::bison::makeSingleImport(*drv.Ctx, loc(@1, @4), $3, "", /*isSystem=*/true); }
     | "import" "::" modulePath "as" IDENT ";"
-                                    { $$ = paykan::parser::makeSingleImport(impl(drv).Ctx, loc(@1, @6), $3, $5, /*isSystem=*/true); }
+                                    { $$ = paykan::frontend::bison::makeSingleImport(*drv.Ctx, loc(@1, @6), $3, $5, /*isSystem=*/true); }
     | "import" "::" modulePath "::" "{" importedModuleList "}" ";"
-                                    { $$ = paykan::parser::makeImportList(impl(drv).Ctx, loc(@1, @8), $3, $6, /*isSystem=*/true); }
+                                    { $$ = paykan::frontend::bison::makeImportList(*drv.Ctx, loc(@1, @8), $3, $6, /*isSystem=*/true); }
     | "import" "::" "{" importedModuleList "}" ";"
-                                    { $$ = paykan::parser::makeImportList(impl(drv).Ctx, loc(@1, @6), "", $4, /*isSystem=*/true); }
+                                    { $$ = paykan::frontend::bison::makeImportList(*drv.Ctx, loc(@1, @6), "", $4, /*isSystem=*/true); }
     ;
 
 importedModule:
@@ -217,26 +216,26 @@ modulePath:
 
 classDecl:
       "class" IDENT "{" classMemberList "}"
-                                    { $$ = impl(drv).Ctx.make<ClassDecl>(loc(@1, @5), impl(drv).Ctx.intern($2),
- impl(drv).Ctx.intern(""), std::move($4.Fields), std::move($4.Methods)); }
+                                    { $$ = drv.Ctx->make<ClassDecl>(loc(@1, @5), drv.Ctx->intern($2),
+ drv.Ctx->intern(""), std::move($4.Fields), std::move($4.Methods)); }
     | "class" IDENT ":" modulePath "{" classMemberList "}"
-                                    { $$ = impl(drv).Ctx.make<ClassDecl>(loc(@1, @7), impl(drv).Ctx.intern($2),
- impl(drv).Ctx.intern($4), std::move($6.Fields), std::move($6.Methods)); }
+                                    { $$ = drv.Ctx->make<ClassDecl>(loc(@1, @7), drv.Ctx->intern($2),
+ drv.Ctx->intern($4), std::move($6.Fields), std::move($6.Methods)); }
     // Generic class:  class Box<T> { ... }  /  class Foo<K, V> : Base { ... }
     // (the superclass is a plain class name; a generic superclass is not
     // supported by the prototype).
     | "class" IDENT typeArgOpen typeParamList ">" "{" classMemberList "}"
-                                    { $$ = impl(drv).Ctx.make<ClassDecl>(loc(@1, @8), impl(drv).Ctx.intern($2),
- impl(drv).Ctx.intern(""), std::move($7.Fields), std::move($7.Methods), std::move($4)); }
+                                    { $$ = drv.Ctx->make<ClassDecl>(loc(@1, @8), drv.Ctx->intern($2),
+ drv.Ctx->intern(""), std::move($7.Fields), std::move($7.Methods), std::move($4)); }
     | "class" IDENT typeArgOpen typeParamList ">" ":" modulePath "{" classMemberList "}"
-                                    { $$ = impl(drv).Ctx.make<ClassDecl>(loc(@1, @10), impl(drv).Ctx.intern($2),
- impl(drv).Ctx.intern($7), std::move($9.Fields), std::move($9.Methods), std::move($4)); }
+                                    { $$ = drv.Ctx->make<ClassDecl>(loc(@1, @10), drv.Ctx->intern($2),
+ drv.Ctx->intern($7), std::move($9.Fields), std::move($9.Methods), std::move($4)); }
     ;
 
 // Type parameter names of a generic declaration:  <T>  /  <K, V>
 typeParamList:
-      IDENT                         { $$ = std::vector<const std::string *>{&impl(drv).Ctx.intern($1)}; }
-    | typeParamList "," IDENT       { $$ = std::move($1); $$.push_back(&impl(drv).Ctx.intern($3)); }
+      IDENT                         { $$ = std::vector<const std::string *>{&drv.Ctx->intern($1)}; }
+    | typeParamList "," IDENT       { $$ = std::move($1); $$.push_back(&drv.Ctx->intern($3)); }
     ;
 
 // The '<' opening a type-argument or type-parameter list (see TYPELESS).
@@ -249,19 +248,19 @@ classMemberList: %empty             { $$ = ClassBody{}; }
 
 enumDecl:
       "enum" IDENT "{" enumVariantList "}"
-                                    { $$ = impl(drv).Ctx.make<EnumDecl>(loc(@1, @5),
-                                           impl(drv).Ctx.intern($2), std::move($4)); }
+                                    { $$ = drv.Ctx->make<EnumDecl>(loc(@1, @5),
+                                           drv.Ctx->intern($2), std::move($4)); }
     ;
 
 // Variants are interned-string pointers in declaration order.  A trailing
 // comma after the last variant is permitted.
 enumVariantList:
-      IDENT                         { $$ = std::vector<const std::string *>{&impl(drv).Ctx.intern($1)}; }
-    | enumVariantList "," IDENT     { $$ = std::move($1); $$.push_back(&impl(drv).Ctx.intern($3)); }
+      IDENT                         { $$ = std::vector<const std::string *>{&drv.Ctx->intern($1)}; }
+    | enumVariantList "," IDENT     { $$ = std::move($1); $$.push_back(&drv.Ctx->intern($3)); }
     | enumVariantList ","           { $$ = std::move($1); }
     ;
 
-compoundStmt: %empty                { $$ = impl(drv).Ctx.make<CompoundStmt>(loc(@$, @$)); }
+compoundStmt: %empty                { $$ = drv.Ctx->make<CompoundStmt>(loc(@$, @$)); }
     | compoundStmt statement        { $$ = $1;
                                       if ($2) // can be null (empty stmt ";")
                                         $$->addStatement($2);
@@ -271,11 +270,11 @@ compoundStmt: %empty                { $$ = impl(drv).Ctx.make<CompoundStmt>(loc(
 block: "{" compoundStmt "}"        { $$ = $2; }
     ;
 
-typeAnnotation: IDENT               { auto *ty = impl(drv).Ctx.lookupType($1);
+typeAnnotation: IDENT               { auto *ty = drv.Ctx->lookupType($1);
                                       if (!ty)
                                         // Unknown at parse time — could be a forward-referenced
                                         // class type. Sema's resolveType() will validate it.
-                                        ty = impl(drv).Ctx.make<ClassType>(loc(@1, @1), impl(drv).Ctx.intern($1), nullptr);
+                                        ty = drv.Ctx->make<ClassType>(loc(@1, @1), drv.Ctx->intern($1), nullptr);
                                       $$ = ty;
                                     }
     | modulePath "::" IDENT         { // Qualified type:  module::Type (and the full
@@ -283,19 +282,19 @@ typeAnnotation: IDENT               { auto *ty = impl(drv).Ctx.lookupType($1);
                                       // registered under that exact qualified name as a
                                       // ClassType alias (see SemaImport), so Sema's
                                       // resolveType() resolves it via lookupType().
-                                      $$ = impl(drv).Ctx.make<ClassType>(loc(@1, @3),
-                                           impl(drv).Ctx.intern($1 + "::" + $3), nullptr);
+                                      $$ = drv.Ctx->make<ClassType>(loc(@1, @3),
+                                           drv.Ctx->intern($1 + "::" + $3), nullptr);
                                     }
     // Generic type application:  Box<int>, Pair<Str, int>.  Sema instantiates
     // the class template (resolveType); the qualified form is parsed so that
     // Sema can reject it with a dedicated diagnostic.
     | IDENT typeArgOpen typeArgList ">"
-                                    { $$ = impl(drv).Ctx.make<GenericType>(loc(@1, @4),
-                                           impl(drv).Ctx.intern($1), std::move($3)); }
+                                    { $$ = drv.Ctx->make<GenericType>(loc(@1, @4),
+                                           drv.Ctx->intern($1), std::move($3)); }
     | modulePath "::" IDENT typeArgOpen typeArgList ">"
-                                    { $$ = impl(drv).Ctx.make<GenericType>(loc(@1, @6),
-                                           impl(drv).Ctx.intern($1 + "::" + $3), std::move($5)); }
-    | typeAnnotation "[" "]"        { $$ = impl(drv).Ctx.make<ArrayType>(loc(@1, @3), $1); }
+                                    { $$ = drv.Ctx->make<GenericType>(loc(@1, @6),
+                                           drv.Ctx->intern($1 + "::" + $3), std::move($5)); }
+    | typeAnnotation "[" "]"        { $$ = drv.Ctx->make<ArrayType>(loc(@1, @3), $1); }
     | typeAnnotation "?"            { // Optional type T? (prototype, issue #5).  Only
                                       // reference types may be optional; the builtin
                                       // value types are known at parse time and are
@@ -309,13 +308,13 @@ typeAnnotation: IDENT               { auto *ty = impl(drv).Ctx.lookupType($1);
                                         throw yy::parser::syntax_error(@2,
                                           "nested optional type '" + typeName($1)
                                           + "?' is not supported");
-                                      $$ = impl(drv).Ctx.make<OptionalType>(loc(@1, @2), $1);
+                                      $$ = drv.Ctx->make<OptionalType>(loc(@1, @2), $1);
                                     }
     | "(" tupleTypeElems ")"        { // Tuple type (T1, T2, ...).  The element list
                                       // nonterminal starts at two elements, so a
                                       // 1-tuple type `(int)` is a syntax error rather
                                       // than a parenthesised type.
-                                      $$ = impl(drv).Ctx.make<TupleType>(loc(@1, @3), std::move($2)); }
+                                      $$ = drv.Ctx->make<TupleType>(loc(@1, @3), std::move($2)); }
     ;
 
 // Two or more comma-separated types — the body of a tuple type annotation.
@@ -333,45 +332,45 @@ typeArgList:
     ;
 
 varDecl: IDENT ":" typeAnnotation
-                                    { $$ = impl(drv).Ctx.make<VarDecl>(loc(@1, @3), impl(drv).Ctx.intern($1), $3, nullptr); }
+                                    { $$ = drv.Ctx->make<VarDecl>(loc(@1, @3), drv.Ctx->intern($1), $3, nullptr); }
     ;
 
 staticAssignment: varDecl "=" expression
-                                    { auto *vd = impl(drv).Ctx.make<VarDecl>(
+                                    { auto *vd = drv.Ctx->make<VarDecl>(
                                           loc(@1, @3), $1->getName(), $1->getType(), $3);
-                                      $$ = impl(drv).Ctx.make<DeclStmt>(loc(@1, @3), vd);
+                                      $$ = drv.Ctx->make<DeclStmt>(loc(@1, @3), vd);
                                     }
     ;
 
 statement: ";"                      { $$ = nullptr; }
-    | expression ";"                { $$ = impl(drv).Ctx.make<ExprStmt>(loc(@1, @2), $1); }
+    | expression ";"                { $$ = drv.Ctx->make<ExprStmt>(loc(@1, @2), $1); }
     | expression "=" expression ";" { if (auto *lhs = dyn_cast<Identifier>($1)) {
-                                        $$ = impl(drv).Ctx.make<AssignStmt>(loc(@1, @4), lhs, $3);
+                                        $$ = drv.Ctx->make<AssignStmt>(loc(@1, @4), lhs, $3);
                                       } else if (auto *ma = dyn_cast<MemberAccessExpr>($1)) {
-                                        $$ = impl(drv).Ctx.make<MemberAssignStmt>(loc(@1, @4), ma->getReceiver(), ma->getFieldName(), $3);
+                                        $$ = drv.Ctx->make<MemberAssignStmt>(loc(@1, @4), ma->getReceiver(), ma->getFieldName(), $3);
                                       } else if (auto *se = dyn_cast<SubscriptExpr>($1)) {
-                                        $$ = impl(drv).Ctx.make<SubscriptAssignStmt>(loc(@1, @4), se->getArray(), se->getIndex(), $3);
+                                        $$ = drv.Ctx->make<SubscriptAssignStmt>(loc(@1, @4), se->getArray(), se->getIndex(), $3);
                                       } else if (auto *ti = dyn_cast<TupleIndexExpr>($1)) {
                                         // `t.0 = v` is well-formed syntax but tuples are
                                         // immutable: hand it to Sema as a member assignment
                                         // whose "field" is the index so the rejection is a
                                         // typed diagnostic rather than a parse error.
-                                        $$ = impl(drv).Ctx.make<MemberAssignStmt>(loc(@1, @4), ti->getTuple(),
-                                             impl(drv).Ctx.intern(std::to_string(ti->getIndex())), $3);
+                                        $$ = drv.Ctx->make<MemberAssignStmt>(loc(@1, @4), ti->getTuple(),
+                                             drv.Ctx->intern(std::to_string(ti->getIndex())), $3);
                                       } else {
                                         throw yy::parser::syntax_error(@1, "left-hand side of '=' must be an identifier, field access, or subscript");
                                       }
                                     }
     | staticAssignment ";"          { $$ = $1; }
     | destructureTargets "=" expression ";"
-                                    { $$ = impl(drv).Ctx.make<DestructureStmt>(loc(@1, @4), std::move($1), $3); }
-    | "return" expression ";"       { $$ = impl(drv).Ctx.make<ReturnStmt>(loc(@1, @3), $2); }
-    | "return" ";"                  { $$ = impl(drv).Ctx.make<ReturnStmt>(loc(@1, @2), nullptr); }
+                                    { $$ = drv.Ctx->make<DestructureStmt>(loc(@1, @4), std::move($1), $3); }
+    | "return" expression ";"       { $$ = drv.Ctx->make<ReturnStmt>(loc(@1, @3), $2); }
+    | "return" ";"                  { $$ = drv.Ctx->make<ReturnStmt>(loc(@1, @2), nullptr); }
     | block                         { $$ = $1; }
     | ifStmt                        { $$ = $1; }
     | whileStmt                     { $$ = $1; }
-    | "break" ";"                   { $$ = impl(drv).Ctx.make<BreakStmt>(loc(@1, @2)); }
-    | "continue" ";"                { $$ = impl(drv).Ctx.make<ContinueStmt>(loc(@1, @2)); }
+    | "break" ";"                   { $$ = drv.Ctx->make<BreakStmt>(loc(@1, @2)); }
+    | "continue" ";"                { $$ = drv.Ctx->make<ContinueStmt>(loc(@1, @2)); }
     | matchStmt                     { $$ = $1; }
     | error ";"                     { $$ = nullptr; yyerrok; }
     ;
@@ -382,9 +381,9 @@ statement: ";"                      { $$ = nullptr; }
 // `,` → destructuring target, `=` / operators → expression / assignment,
 // `:` followed by a type and then `,` → typed target, `=` → staticAssignment.
 destructureTarget:
-      IDENT                         { $$ = DestructureStmt::Target{&impl(drv).Ctx.intern($1), nullptr, loc(@1, @1)}; }
-    | IDENT ":" typeAnnotation      { $$ = DestructureStmt::Target{&impl(drv).Ctx.intern($1), $3, loc(@1, @3)}; }
-    | "_"                           { $$ = DestructureStmt::Target{&impl(drv).Ctx.intern(""), nullptr, loc(@1, @1)}; }
+      IDENT                         { $$ = DestructureStmt::Target{&drv.Ctx->intern($1), nullptr, loc(@1, @1)}; }
+    | IDENT ":" typeAnnotation      { $$ = DestructureStmt::Target{&drv.Ctx->intern($1), $3, loc(@1, @3)}; }
+    | "_"                           { $$ = DestructureStmt::Target{&drv.Ctx->intern(""), nullptr, loc(@1, @1)}; }
     ;
 
 destructureTargets:
@@ -395,7 +394,7 @@ destructureTargets:
     ;
 
 matchStmt: "match" expression "{" matchArmList "}"
-                                    { $$ = impl(drv).Ctx.make<MatchStmt>(loc(@1, @5), $2, std::move($4)); }
+                                    { $$ = drv.Ctx->make<MatchStmt>(loc(@1, @5), $2, std::move($4)); }
     ;
 
 matchArmList: matchArm              { $$ = std::vector<MatchArm *>(); $$.push_back($1); }
@@ -404,12 +403,12 @@ matchArmList: matchArm              { $$ = std::vector<MatchArm *>(); $$.push_ba
 
 matchArm:
       typeAnnotation "{" compoundStmt "}"
-                                    { $$ = impl(drv).Ctx.make<MatchArm>(loc(@1, @4), impl(drv).Ctx.intern(""), $1, $3); }
+                                    { $$ = drv.Ctx->make<MatchArm>(loc(@1, @4), drv.Ctx->intern(""), $1, $3); }
     | IDENT ":" typeAnnotation "{" compoundStmt "}"
-                                    { $$ = impl(drv).Ctx.make<MatchArm>(loc(@1, @6), impl(drv).Ctx.intern($1), $3, $5); }
+                                    { $$ = drv.Ctx->make<MatchArm>(loc(@1, @6), drv.Ctx->intern($1), $3, $5); }
     | literalPattern "{" compoundStmt "}"
-                                    { $$ = impl(drv).Ctx.make<MatchArm>(loc(@1, @4), impl(drv).Ctx.intern(""), $1, $3); }
-    | "_" "{" compoundStmt "}"      { $$ = impl(drv).Ctx.make<MatchArm>(loc(@1, @4), impl(drv).Ctx.intern(""), (Type *)nullptr, $3); }
+                                    { $$ = drv.Ctx->make<MatchArm>(loc(@1, @4), drv.Ctx->intern(""), $1, $3); }
+    | "_" "{" compoundStmt "}"      { $$ = drv.Ctx->make<MatchArm>(loc(@1, @4), drv.Ctx->intern(""), (Type *)nullptr, $3); }
     ;
 
 // A literal usable as a value-match pattern.  Restricted to bare literal tokens
@@ -417,15 +416,15 @@ matchArm:
 // `None` is accepted so that a match over an optional `T?` subject can name
 // the absent case explicitly (Sema rejects it for every other subject type).
 literalPattern:
-      INT                           { $$ = impl(drv).Ctx.make<IntegerLiteral>(loc(@1, @1), $1); }
-    | NONE                          { $$ = impl(drv).Ctx.make<NoneLiteral>(loc(@1, @1)); }
-    | FLOAT                         { $$ = impl(drv).Ctx.make<FloatLiteral>(loc(@1, @1), $1); }
-    | BOOL                          { $$ = impl(drv).Ctx.make<BoolLiteral>(loc(@1, @1), $1); }
-    | CHAR                          { $$ = impl(drv).Ctx.make<CharLiteral>(loc(@1, @1), $1); }
-    | STRING                        { $$ = impl(drv).Ctx.make<StringLiteral>(loc(@1, @1), $1); }
+      INT                           { $$ = drv.Ctx->make<IntegerLiteral>(loc(@1, @1), $1); }
+    | NONE                          { $$ = drv.Ctx->make<NoneLiteral>(loc(@1, @1)); }
+    | FLOAT                         { $$ = drv.Ctx->make<FloatLiteral>(loc(@1, @1), $1); }
+    | BOOL                          { $$ = drv.Ctx->make<BoolLiteral>(loc(@1, @1), $1); }
+    | CHAR                          { $$ = drv.Ctx->make<CharLiteral>(loc(@1, @1), $1); }
+    | STRING                        { $$ = drv.Ctx->make<StringLiteral>(loc(@1, @1), $1); }
     ;
 
-param: IDENT ":" typeAnnotation     { $$ = Param{&impl(drv).Ctx.intern($1), $3}; }
+param: IDENT ":" typeAnnotation     { $$ = Param{&drv.Ctx->intern($1), $3}; }
     ;
 
 paramList: %empty                   { $$ = std::vector<Param>(); }
@@ -434,26 +433,26 @@ paramList: %empty                   { $$ = std::vector<Param>(); }
     ;
 
 ifStmt: "if" "(" expression ")" block
-                                    { $$ = impl(drv).Ctx.make<IfStmt>(loc(@1, @5), $3, $5); }
+                                    { $$ = drv.Ctx->make<IfStmt>(loc(@1, @5), $3, $5); }
     | "if" "(" expression ")" block "else" block
-                                    { $$ = impl(drv).Ctx.make<IfStmt>(loc(@1, @7), $3, $5, $7); }
+                                    { $$ = drv.Ctx->make<IfStmt>(loc(@1, @7), $3, $5, $7); }
     | "if" "(" expression ")" block "else" ifStmt
-                                    { $$ = impl(drv).Ctx.make<IfStmt>(loc(@1, @7), $3, $5, $7); }
+                                    { $$ = drv.Ctx->make<IfStmt>(loc(@1, @7), $3, $5, $7); }
     ;
 
 whileStmt: "while" "(" expression ")" block
-                                    { $$ = impl(drv).Ctx.make<WhileStmt>(loc(@1, @5), $3, $5); }
+                                    { $$ = drv.Ctx->make<WhileStmt>(loc(@1, @5), $3, $5); }
     ;
 
 funcDecl: "fn" IDENT "(" paramList ")" "->" typeAnnotation block
-                                    { $$ = impl(drv).Ctx.make<FuncDecl>(loc(@1, @8), impl(drv).Ctx.intern($2), std::move($4), $7, $8); }
+                                    { $$ = drv.Ctx->make<FuncDecl>(loc(@1, @8), drv.Ctx->intern($2), std::move($4), $7, $8); }
     | "fn" IDENT "(" paramList ")" block
-                                    { $$ = impl(drv).Ctx.make<FuncDecl>(loc(@1, @6), impl(drv).Ctx.intern($2), std::move($4), nullptr, $6); }
+                                    { $$ = drv.Ctx->make<FuncDecl>(loc(@1, @6), drv.Ctx->intern($2), std::move($4), nullptr, $6); }
     // Generic function:  fn first<T>(xs: T[]) -> T { ... }
     | "fn" IDENT typeArgOpen typeParamList ">" "(" paramList ")" "->" typeAnnotation block
-                                    { $$ = impl(drv).Ctx.make<FuncDecl>(loc(@1, @11), impl(drv).Ctx.intern($2), std::move($7), $10, $11, std::move($4)); }
+                                    { $$ = drv.Ctx->make<FuncDecl>(loc(@1, @11), drv.Ctx->intern($2), std::move($7), $10, $11, std::move($4)); }
     | "fn" IDENT typeArgOpen typeParamList ">" "(" paramList ")" block
-                                    { $$ = impl(drv).Ctx.make<FuncDecl>(loc(@1, @9), impl(drv).Ctx.intern($2), std::move($7), nullptr, $9, std::move($4)); }
+                                    { $$ = drv.Ctx->make<FuncDecl>(loc(@1, @9), drv.Ctx->intern($2), std::move($7), nullptr, $9, std::move($4)); }
     ;
 
 relationalOperator:
@@ -466,37 +465,37 @@ relationalOperator:
     ;
 
 primaryExpression:
-      INT                           { $$ = impl(drv).Ctx.make<IntegerLiteral>(loc(@1, @1), $1); }
-    | FLOAT                         { $$ = impl(drv).Ctx.make<FloatLiteral>(loc(@1, @1), $1); }
-    | BOOL                          { $$ = impl(drv).Ctx.make<BoolLiteral>(loc(@1, @1), $1); }
-    | CHAR                          { $$ = impl(drv).Ctx.make<CharLiteral>(loc(@1, @1), $1); }
-    | NONE                          { $$ = impl(drv).Ctx.make<NoneLiteral>(loc(@1, @1)); }
-    | STRING                        { $$ = impl(drv).Ctx.make<StringLiteral>(loc(@1, @1), $1); }
-    | IDENT "(" argumentList ")"    { $$ = impl(drv).Ctx.make<CallExpr>(loc(@1, @4), impl(drv).Ctx.intern($1), std::move($3)); }
+      INT                           { $$ = drv.Ctx->make<IntegerLiteral>(loc(@1, @1), $1); }
+    | FLOAT                         { $$ = drv.Ctx->make<FloatLiteral>(loc(@1, @1), $1); }
+    | BOOL                          { $$ = drv.Ctx->make<BoolLiteral>(loc(@1, @1), $1); }
+    | CHAR                          { $$ = drv.Ctx->make<CharLiteral>(loc(@1, @1), $1); }
+    | NONE                          { $$ = drv.Ctx->make<NoneLiteral>(loc(@1, @1)); }
+    | STRING                        { $$ = drv.Ctx->make<StringLiteral>(loc(@1, @1), $1); }
+    | IDENT "(" argumentList ")"    { $$ = drv.Ctx->make<CallExpr>(loc(@1, @4), drv.Ctx->intern($1), std::move($3)); }
     | modulePath "::" IDENT "(" argumentList ")"
-                                    { $$ = impl(drv).Ctx.make<CallExpr>(loc(@1, @6), impl(drv).Ctx.intern($1 + "::" + $3), std::move($5)); }
+                                    { $$ = drv.Ctx->make<CallExpr>(loc(@1, @6), drv.Ctx->intern($1 + "::" + $3), std::move($5)); }
     // Explicit generic call / constructor:  first<int>(xs), Box<Str>("v").
     // Only TYPELESS is accepted here (never a plain "<"): the lexer wrapper
     // has already established that this '<' opens type arguments.
     | IDENT TYPELESS typeArgList ">" "(" argumentList ")"
-                                    { $$ = impl(drv).Ctx.make<CallExpr>(loc(@1, @7), impl(drv).Ctx.intern($1), std::move($6), std::move($3)); }
+                                    { $$ = drv.Ctx->make<CallExpr>(loc(@1, @7), drv.Ctx->intern($1), std::move($6), std::move($3)); }
     | modulePath "::" IDENT TYPELESS typeArgList ">" "(" argumentList ")"
-                                    { $$ = impl(drv).Ctx.make<CallExpr>(loc(@1, @9), impl(drv).Ctx.intern($1 + "::" + $3), std::move($8), std::move($5)); }
+                                    { $$ = drv.Ctx->make<CallExpr>(loc(@1, @9), drv.Ctx->intern($1 + "::" + $3), std::move($8), std::move($5)); }
     | modulePath "::" IDENT         { // Enum variant access:  MyEnum::Variant.
                                       // Shares the `modulePath "::" IDENT` prefix
                                       // with the qualified-call rule above; the
                                       // only decision is shift '(' (call) vs
                                       // reduce here, resolved by 1-token lookahead.
-                                      $$ = impl(drv).Ctx.make<EnumValueExpr>(loc(@1, @3),
-                                           impl(drv).Ctx.intern($1), impl(drv).Ctx.intern($3)); }
-    | IDENT                         { $$ = impl(drv).Ctx.make<Identifier>(loc(@1, @1), impl(drv).Ctx.intern($1)); }
+                                      $$ = drv.Ctx->make<EnumValueExpr>(loc(@1, @3),
+                                           drv.Ctx->intern($1), drv.Ctx->intern($3)); }
+    | IDENT                         { $$ = drv.Ctx->make<Identifier>(loc(@1, @1), drv.Ctx->intern($1)); }
     | "(" expression ")"            { $$ = $2; }
     | "(" tupleExprElems ")"        { // Tuple literal (e1, e2, ...).  Shares the "(" expression
                                       // prefix with the parenthesised expression above; the
                                       // next token decides: ")" → plain expression (no
                                       // 1-tuples), "," → tuple literal.
-                                      $$ = impl(drv).Ctx.make<TupleLiteralExpr>(loc(@1, @3), std::move($2)); }
-    | "[" argumentList "]"          { $$ = impl(drv).Ctx.make<ArrayLiteralExpr>(loc(@1, @3), std::move($2)); }
+                                      $$ = drv.Ctx->make<TupleLiteralExpr>(loc(@1, @3), std::move($2)); }
+    | "[" argumentList "]"          { $$ = drv.Ctx->make<ArrayLiteralExpr>(loc(@1, @3), std::move($2)); }
     ;
 
 // Two or more comma-separated expressions — the body of a tuple literal.
@@ -513,12 +512,12 @@ argumentList: %empty                { $$ = std::vector<Expr *>(); }
 postfixExpression:
       primaryExpression             { $$ = $1; }
     | postfixExpression "." IDENT "(" argumentList ")"
-                                    { $$ = impl(drv).Ctx.make<MethodCallExpr>(loc(@1, @6), $1, impl(drv).Ctx.intern($3), std::move($5)); }
+                                    { $$ = drv.Ctx->make<MethodCallExpr>(loc(@1, @6), $1, drv.Ctx->intern($3), std::move($5)); }
     | postfixExpression "." IDENT
-                                    { $$ = impl(drv).Ctx.make<MemberAccessExpr>(loc(@1, @3), $1, impl(drv).Ctx.intern($3)); }
+                                    { $$ = drv.Ctx->make<MemberAccessExpr>(loc(@1, @3), $1, drv.Ctx->intern($3)); }
     | postfixExpression "[" expression "]"
-                                    { $$ = impl(drv).Ctx.make<SubscriptExpr>(loc(@1, @4), $1, $3); }
-    | postfixExpression TUPLE_INDEX { $$ = impl(drv).Ctx.make<TupleIndexExpr>(loc(@1, @2), $1, static_cast<size_t>($2)); }
+                                    { $$ = drv.Ctx->make<SubscriptExpr>(loc(@1, @4), $1, $3); }
+    | postfixExpression TUPLE_INDEX { $$ = drv.Ctx->make<TupleIndexExpr>(loc(@1, @2), $1, static_cast<size_t>($2)); }
     ;
 
 unaryOperator: "!"                  { $$ = UnaryOpcode::Not; }
@@ -528,51 +527,51 @@ unaryOperator: "!"                  { $$ = UnaryOpcode::Not; }
 unaryExpression:
       postfixExpression             { $$ = $1; }
     | unaryOperator unaryExpression
-                                    { $$ = impl(drv).Ctx.make<UnaryExpr>(loc(@1, @2), $1, $2); }
+                                    { $$ = drv.Ctx->make<UnaryExpr>(loc(@1, @2), $1, $2); }
     | "mov" unaryExpression
-                                    { $$ = impl(drv).Ctx.make<MovExpr>(loc(@1, @2), $2); }
+                                    { $$ = drv.Ctx->make<MovExpr>(loc(@1, @2), $2); }
     ;
 
 multiplicativeExpression:
       unaryExpression               { $$ = $1; }
     | multiplicativeExpression "*" unaryExpression
-                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryOpcode::Mul, $1, $3); }
+                                    { $$ = drv.Ctx->make<BinaryExpr>(loc(@1, @3), BinaryOpcode::Mul, $1, $3); }
     | multiplicativeExpression "/" unaryExpression
-                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryOpcode::Div, $1, $3); }
+                                    { $$ = drv.Ctx->make<BinaryExpr>(loc(@1, @3), BinaryOpcode::Div, $1, $3); }
     | multiplicativeExpression "%" unaryExpression
-                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryOpcode::Mod, $1, $3); }
+                                    { $$ = drv.Ctx->make<BinaryExpr>(loc(@1, @3), BinaryOpcode::Mod, $1, $3); }
     ;
 
 additiveExpression:
       multiplicativeExpression      { $$ = $1; }
     | additiveExpression "+" multiplicativeExpression
-                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryOpcode::Add, $1, $3); }
+                                    { $$ = drv.Ctx->make<BinaryExpr>(loc(@1, @3), BinaryOpcode::Add, $1, $3); }
     | additiveExpression "-" multiplicativeExpression
-                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryOpcode::Sub, $1, $3); }
+                                    { $$ = drv.Ctx->make<BinaryExpr>(loc(@1, @3), BinaryOpcode::Sub, $1, $3); }
     ;
 
 relationalExpression:
       additiveExpression            { $$ = $1; }
     | additiveExpression relationalOperator additiveExpression
-                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), $2, $1, $3); }
+                                    { $$ = drv.Ctx->make<BinaryExpr>(loc(@1, @3), $2, $1, $3); }
     ;
 
 logicalAndExpression:
       relationalExpression          { $$ = $1; }
     | logicalAndExpression "&&" relationalExpression
-                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryOpcode::And, $1, $3); }
+                                    { $$ = drv.Ctx->make<BinaryExpr>(loc(@1, @3), BinaryOpcode::And, $1, $3); }
     ;
 
 logicalOrExpression:
       logicalAndExpression          { $$ = $1; }
     | logicalOrExpression "||" logicalAndExpression
-                                    { $$ = impl(drv).Ctx.make<BinaryExpr>(loc(@1, @3), BinaryOpcode::Or, $1, $3); }
+                                    { $$ = drv.Ctx->make<BinaryExpr>(loc(@1, @3), BinaryOpcode::Or, $1, $3); }
     ;
 
 ternaryExpression:
       logicalOrExpression          { $$ = $1; }
     | "if" logicalOrExpression "then" expression "else" ternaryExpression
-                                    { $$ = impl(drv).Ctx.make<TernaryExpr>(loc(@1, @6), $2, $4, $6); }
+                                    { $$ = drv.Ctx->make<TernaryExpr>(loc(@1, @6), $2, $4, $6); }
     ;
 
 expression: ternaryExpression       { $$ = $1; }
@@ -581,8 +580,8 @@ expression: ternaryExpression       { $$ = $1; }
 %%
 
 void yy::parser::error (const location_type& l, const std::string& m) {
-  ++impl(drv).ErrorCount;
-  if (auto *diags = impl(drv).Diags) {
+  ++drv.ErrorCount;
+  if (auto *diags = drv.Diags) {
     paykan::ast::SourceLocation sloc(l.begin.line, l.begin.column,
                                      l.end.line,   l.end.column);
     diags->error(sloc, m);

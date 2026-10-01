@@ -1,9 +1,12 @@
-# src/Parser/CMakeLists.txt
+# src/Frontends/Bison/CMakeLists.txt
 # ----------------------------------------------------------------------------
-# Builds the paykan_parser static library (Bison parser + Flex lexer + Driver).
+# paykan_frontend_bison -- the Bison/Flex frontend plugin.  Built only when
+# `bison` is listed in PAYKAN_FRONTENDS.
 #
 # This is the ONLY target that compiles with -fexceptions and -frtti, which
-# are required by Bison's lalr1.cc skeleton (throw/catch + typeid).
+# are required by Bison's lalr1.cc skeleton (throw/catch + typeid).  No
+# exception crosses the frontend interface: BisonFrontend::parse catches
+# everything and reports a diagnostic.
 # ----------------------------------------------------------------------------
 
 # -- Generated source paths ---------------------------------------------------
@@ -43,28 +46,26 @@ add_custom_command(
     VERBATIM
 )
 
-# -- Parser library -----------------------------------------------------------
-add_library(paykan_parser STATIC
+# -- Plugin library -----------------------------------------------------------
+add_library(paykan_frontend_bison STATIC
     ${PARSER_CPP}
     ${LEXER_CPP}
-    ParserDriver.cpp
+    BisonFrontend.cpp
 )
 
-target_include_directories(paykan_parser
-    PUBLIC  ${PROJECT_SOURCE_DIR}/include   # AST.h, Driver.h (public API)
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}     # DriverImpl.h (private)
+target_include_directories(paykan_frontend_bison
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}     # BisonFrontend.h (private)
             ${PARSER_GEN_DIR}               # Parser.ypp.h, location.hh (private)
 )
 
-target_link_libraries(paykan_parser
-    PUBLIC  paykan_ast
-            paykan_diag
+target_link_libraries(paykan_frontend_bison
+    PUBLIC  paykan_frontend
 )
 
 # Bison's lalr1.cc uses throw/catch and typeid -- this is the ONLY target
 # that enables RTTI and exceptions.  We set our own flags instead of linking
 # paykan_compile_options (which carries -fno-rtti -fno-exceptions).
-target_compile_options(paykan_parser PRIVATE
+target_compile_options(paykan_frontend_bison PRIVATE
     -Wall -Wextra -Wpedantic -Werror
     -fexceptions -frtti
     $<$<CONFIG:Debug>:-g -O0>
@@ -77,3 +78,5 @@ target_compile_options(paykan_parser PRIVATE
 set_source_files_properties(${PARSER_CPP} PROPERTIES
     COMPILE_OPTIONS "-Wno-unused-but-set-variable"
 )
+
+paykan_add_plugin(paykan_frontend_bison)

@@ -9,6 +9,7 @@
 #include "ParserDriver.h"
 #include "Sema.h"
 #include "Version.h"
+#include "paykan/Frontend.h"
 
 #include "Runtime.h"
 
@@ -42,9 +43,24 @@ int main(int argc, char *argv[]) {
     paykan::driver::printUsage(std::cout, argv[0]);
     return EXIT_SUCCESS;
   }
+  if (opts.ListFrontends) {
+    for (const auto &e : paykan::frontend::Registry::get().entries()) {
+      std::cout << e.Name;
+      if (e.Name == paykan::frontend::defaultFrontend())
+        std::cout << " (default)";
+      std::cout << "\n";
+    }
+    return EXIT_SUCCESS;
+  }
   if (!parsed.Error.empty()) {
     std::cerr << "paykan: " << parsed.Error << ". Try: '" << argv[0]
               << " --help'\n";
+    return EXIT_FAILURE;
+  }
+  if (!opts.Frontend.empty() &&
+      !paykan::frontend::Registry::get().find(opts.Frontend)) {
+    std::cerr << "paykan: unknown frontend '" << opts.Frontend
+              << "' (see --list-frontends)\n";
     return EXIT_FAILURE;
   }
 
@@ -55,9 +71,17 @@ int main(int argc, char *argv[]) {
   // parseFile before the parser runs, so handing its address over now is
   // safe -- the vector itself never moves.
   paykan::sema::DiagEngine diag(std::cerr);
-  paykan::parser::ParserDriver driver(opts.TraceParsing, opts.TraceScanning);
+  paykan::frontend::Options feOpts;
+  feOpts.TraceParsing = opts.TraceParsing;
+  feOpts.TraceScanning = opts.TraceScanning;
+  paykan::parser::ParserDriver driver(opts.Frontend, feOpts);
   diag.setSourceInfo(opts.InputFilename, &driver.getSourceLines());
   driver.setDiagEngine(&diag);
+
+  if (opts.DumpTokens)
+    return driver.dumpTokens(opts.InputFilename, std::cout) == 0 ? EXIT_SUCCESS
+                                                                 : EXIT_FAILURE;
+
   int result = driver.parseFile(opts.InputFilename);
 
   if (result != 0) {
@@ -80,7 +104,8 @@ int main(int argc, char *argv[]) {
   // Sema reuses the DiagEngine constructed above (already carrying the
   // source info for the parsed file), so error counts accumulate across
   // passes and all diagnostics share one output stream.
-  paykan::sema::Sema sema(driver.getASTContext(), diag, projectRoot);
+  paykan::sema::Sema sema(driver.getASTContext(), diag, projectRoot,
+                          driver.getFrontendName());
   auto semaCtx = sema.run(root);
 
   if (!semaCtx)

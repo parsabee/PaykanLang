@@ -10,6 +10,6 @@ add_library(paykan_sema STATIC
 )
 target_link_libraries(paykan_sema
     PUBLIC  paykan_diag
-            paykan_parser
+            paykan_frontend
     PRIVATE paykan_compile_options
 )

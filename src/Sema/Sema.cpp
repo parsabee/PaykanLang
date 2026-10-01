@@ -125,8 +125,9 @@ void Sema::MovedBranchMerger::finish(bool coversAllPaths) {
 // -- Helpers -----------------------------------------------------------------
 
 Sema::Sema(ast::ASTContext &ctx, DiagEngine &diags,
-           const std::string &projectRoot)
-    : Diags(diags), Ctx(ctx), ProjectRoot(projectRoot) {}
+           const std::string &projectRoot, const std::string &frontendName)
+    : Diags(diags), Ctx(ctx), ProjectRoot(projectRoot),
+      FrontendName(frontendName) {}
 
 void Sema::declareFunction(std::string_view name, ast::Type *retTy,
                            std::vector<ast::Type *> paramTys, bool isBuiltin) {

@@ -25,10 +25,11 @@ target_include_directories(parser_tests
 )
 target_link_libraries(parser_tests
     PRIVATE gtest_main
-            paykan_parser
+            paykan_frontend
             paykan_ast_printer
             paykan_compile_options
 )
+paykan_link_plugins(parser_tests)
 add_test(NAME ParserTests COMMAND parser_tests)
 
 # --- Sema tests -------------------------------------------------------------
@@ -52,9 +53,10 @@ target_include_directories(sema_tests
 target_link_libraries(sema_tests
     PRIVATE gtest_main
             paykan_sema
-            paykan_parser
+            paykan_frontend
             paykan_compile_options
 )
+paykan_link_plugins(sema_tests)
 add_test(NAME SemaTests COMMAND sema_tests)
 
 # --- CodeGen / E2E tests ----------------------------------------------------
@@ -90,11 +92,12 @@ target_link_libraries(codegen_tests
             paykan_jit
             paykan_codegen
             paykan_sema
-            paykan_parser
+            paykan_frontend
             paykan_runtime
             paykan_compile_options
             ${TEST_LLVM_LIBS}
 )
+paykan_link_plugins(codegen_tests)
 add_test(NAME CodeGenTests COMMAND codegen_tests)
 
 # --- Runtime tests ----------------------------------------------------------

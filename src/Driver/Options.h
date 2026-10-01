@@ -18,7 +18,12 @@ struct Options {
   /// file, verbatim, including arguments that look like options.
   std::vector<std::string> ProgramArgs;
 
+  /// --frontend=<name>; "" selects the build's default.
+  std::string Frontend;
+  bool ListFrontends = false; // --list-frontends
+
   bool DumpAST = false;       // --dump-ast
+  bool DumpTokens = false;    // --dump-tokens
   bool TraceParsing = false;  // --trace-parser
   bool TraceScanning = false; // --trace-scanner
   bool EmitLLVM = false;      // --emit-llvm
@@ -40,8 +45,9 @@ struct ParseResult {
 
 /// Parse argv.  Options take one or two leading dashes (`--dump-ast` and
 /// `-dump-ast` are the same), `-O<n>` and `-O=<n>` set the optimisation level,
-/// and `--` ends option processing.  The first positional argument is the
-/// source file; everything after it belongs to the program.
+/// `--frontend=<name>` (or `--frontend <name>`) selects the frontend, and
+/// `--` ends option processing.  The first positional argument is the source
+/// file; everything after it belongs to the program.
 ParseResult parseCommandLine(int argc, const char *const *argv);
 
 /// Print the usage text.

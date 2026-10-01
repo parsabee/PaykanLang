@@ -96,6 +96,73 @@ TEST(Driver, ShortVersionFlagMatchesLong) {
 }
 
 // ---------------------------------------------------------------------------
+// --frontend / --list-frontends
+// ---------------------------------------------------------------------------
+
+TEST(Driver, ListFrontendsNamesTheDefault) {
+  auto [rc, out] = run(std::string(kPaykan) + " --list-frontends 2>&1");
+  EXPECT_EQ(rc, 0);
+  // Every build has a default frontend, marked in the listing.
+  EXPECT_NE(out.find(" (default)"), std::string::npos) << out;
+}
+
+TEST(Driver, EveryListedFrontendParses) {
+  auto listed = run(std::string(kPaykan) + " --list-frontends 2>&1");
+  ASSERT_EQ(listed.exitCode, 0);
+  auto src = writeTmp("fn main() -> int { return 0; }");
+  size_t pos = 0;
+  unsigned count = 0;
+  while (pos < listed.out.size()) {
+    size_t eol = listed.out.find('\n', pos);
+    std::string line = listed.out.substr(pos, eol - pos);
+    pos = (eol == std::string::npos) ? listed.out.size() : eol + 1;
+    std::string name = line.substr(0, line.find(' '));
+    if (name.empty())
+      continue;
+    ++count;
+    auto [rc, out] = run(std::string(kPaykan) + " --frontend=" + name +
+                         " --check-only " + src + " 2>&1");
+    EXPECT_EQ(rc, 0) << name << ": " << out;
+    auto spaced = run(std::string(kPaykan) + " --frontend " + name +
+                      " --check-only " + src + " 2>&1");
+    EXPECT_EQ(spaced.exitCode, 0) << name << ": " << spaced.out;
+  }
+  std::filesystem::remove(src);
+  EXPECT_GE(count, 1u);
+}
+
+TEST(Driver, UnknownFrontendIsRejected) {
+  auto src = writeTmp("fn main() -> int { return 0; }");
+  auto [rc, out] = run(std::string(kPaykan) + " --frontend=no-such-frontend " +
+                       src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_NE(rc, 0);
+  EXPECT_NE(out.find("unknown frontend 'no-such-frontend'"), std::string::npos)
+      << out;
+}
+
+TEST(Driver, UnknownOptionIsRejected) {
+  auto src = writeTmp("fn main() -> int { return 0; }");
+  auto [rc, out] =
+      run(std::string(kPaykan) + " --no-such-option " + src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_NE(rc, 0);
+  EXPECT_NE(out.find("unknown command line argument '--no-such-option'"),
+            std::string::npos)
+      << out;
+}
+
+TEST(Driver, ProgramArgumentsFollowTheSourceFile) {
+  // Everything after the source file is the program's, even if it looks
+  // like an option.
+  auto src = writeTmp("fn main(args: Str[]) -> int { return args.len(); }");
+  auto [rc, out] =
+      run(std::string(kPaykan) + " " + src + " --dump-ast -O2 x 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_EQ(rc, 4) << out;
+}
+
+// ---------------------------------------------------------------------------
 // integer divide / modulo by zero trap
 // ---------------------------------------------------------------------------
 
