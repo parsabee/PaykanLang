@@ -138,8 +138,8 @@ fn @helper(%a.1: i64) -> i64 {
 std::string reprint(const std::string &text) {
   ParseError err;
   auto p = parseProgram(text, err);
-  EXPECT_TRUE(p) << err.str();
-  if (!p)
+  EXPECT_TRUE(p.has_value()) << err.str();
+  if (!p.has_value())
     return "";
   return toString(*p);
 }
@@ -161,7 +161,9 @@ TEST(PIR, PrintedProgramIsTheSource) {
 TEST(PIR, SampleProgramVerifies) {
   ParseError err;
   auto p = parseProgram(kProgram, err);
-  ASSERT_TRUE(p) << err.str();
+  ASSERT_TRUE(p.has_value()) << err.str();
+  if (!p.has_value())
+    return;
   auto errors = verify(*p);
   EXPECT_TRUE(errors.empty()) << formatErrors(errors);
 }
@@ -169,7 +171,9 @@ TEST(PIR, SampleProgramVerifies) {
 TEST(PIR, ParserKeepsNamesAndIds) {
   ParseError err;
   auto p = parseProgram(kProgram, err);
-  ASSERT_TRUE(p) << err.str();
+  ASSERT_TRUE(p.has_value()) << err.str();
+  if (!p.has_value())
+    return;
   const Function *main = p->Modules[0].findFunction("main");
   ASSERT_NE(main, nullptr);
   ASSERT_EQ(main->Locals.size(), 3u);
@@ -205,7 +209,9 @@ fn @main() -> i64 {
 )";
   ParseError err;
   auto p = parseProgram(text, err);
-  ASSERT_TRUE(p) << err.str();
+  ASSERT_TRUE(p.has_value()) << err.str();
+  if (!p.has_value())
+    return;
   auto errors = verify(*p);
   EXPECT_TRUE(errors.empty()) << formatErrors(errors);
   std::string printed = toString(*p);
@@ -243,7 +249,7 @@ namespace {
 std::string verifyText(const std::string &text) {
   ParseError err;
   auto p = parseProgram(text, err);
-  if (!p)
+  if (!p.has_value())
     return "PARSE ERROR: " + err.str();
   return formatErrors(verify(*p));
 }
