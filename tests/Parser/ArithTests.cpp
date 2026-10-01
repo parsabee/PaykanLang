@@ -21,7 +21,7 @@ struct DiagParseResult {
 
 DiagParseResult parseWithDiags(const std::string &source) {
   auto path = writeTempFile(source);
-  paykan::parser::ParserDriver driver;
+  paykan::parser::ParserDriver driver(paykan::test::testFrontend());
   std::ostringstream os;
   paykan::sema::DiagEngine diag(os);
   diag.setSourceInfo(path, &driver.getSourceLines());
@@ -349,7 +349,7 @@ TEST(Arith, ParseErrorsRoutedThroughDiagEngine) {
 TEST(Arith, UnopenableFileFailsCleanly) {
   // scanBegin used to exit(EXIT_FAILURE) inside library code; parseFile must
   // instead fail with a diagnostic and a non-zero return.
-  paykan::parser::ParserDriver driver;
+  paykan::parser::ParserDriver driver(paykan::test::testFrontend());
   std::ostringstream os;
   paykan::sema::DiagEngine diag(os);
   driver.setDiagEngine(&diag);

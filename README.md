@@ -48,9 +48,12 @@ cmake --build build --parallel
 ```
 
 The frontend (lexer + parser) is pluggable. `-DPAYKAN_FRONTENDS=<list>` selects the
-frontends to build (default: `bison`); the first one listed is the default, and the others
-are selected at run time with `--frontend=<name>` (`--list-frontends` prints them).
-Bison and Flex are downloaded and built only when `bison` is listed.
+frontends to build (default: `handwritten;bison`); the first one listed is the default, and
+the others are selected at run time with `--frontend=<name>` (`--list-frontends` prints
+them). The handwritten frontend (standard C++ only) is always built; Bison and Flex are
+downloaded and built only when `bison` is listed. Both implement `docs/grammar.md` and must
+produce identical ASTs: `scripts/diff_frontends.py` checks that over every sample, and
+`--dump-tokens` prints a frontend's token stream.
 
 The backend is pluggable too. `-DPAYKAN_BACKENDS=<list>` selects the backends to build
 (default: `llvm`, the LLVM IR / ORC JIT backend; `mlir` is a reserved slot); the first one

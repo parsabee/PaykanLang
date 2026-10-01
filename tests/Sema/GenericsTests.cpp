@@ -484,14 +484,15 @@ std::string writeProjectFile(const std::filesystem::path &dir,
 }
 
 SemaResult semaCheckFile(const std::string &path) {
-  paykan::parser::ParserDriver driver;
+  paykan::parser::ParserDriver driver(paykan::test::testFrontend());
   if (driver.parseFile(path) != 0)
     return {false, "parse error", 1};
   std::ostringstream os;
   paykan::sema::DiagEngine diag(os);
   diag.setSourceInfo(driver.getCurrentFile(), &driver.getSourceLines());
   paykan::sema::Sema sema(driver.getASTContext(), diag,
-                          std::filesystem::path(path).parent_path().string());
+                          std::filesystem::path(path).parent_path().string(),
+                          driver.getFrontendName());
   auto ctx = sema.run(driver.getRoot());
   return {ctx.Ok, os.str(), ctx.ErrorCount};
 }

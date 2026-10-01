@@ -76,10 +76,14 @@ PAYKAN_REGISTER_FRONTEND(bison, "bison",
 // the ordinary LESS.  The scanned tokens are queued and replayed to the
 // parser afterwards, so nothing is lost.
 //
-// A comparison can only be misread when it has exactly the shape of a generic
-// call, `a < b > (c)` -- which the grammar rejects anyway (relational operators
-// do not chain) -- or when two comparisons straddle a comma inside an argument
+// Brackets are matched during the scan: a ')' or ']' that closes a bracket
+// opened before the '<' (`f(a < b, c) > (d)`) cannot belong to a type list
+// and ends the scan, so that call stays a comparison.  A comparison can then
+// only be misread when it has exactly the shape of a generic call,
+// `a < b > (c)` -- which the grammar rejects anyway (relational operators do
+// not chain) -- or when two comparisons straddle a comma inside an argument
 // list, `f(a < b, c > (d))`; parenthesising either comparison disambiguates.
+// docs/grammar.md section 7 specifies the rule both frontends implement.
 
 namespace {
 
@@ -114,6 +118,7 @@ yy::parser::symbol_type yylex(BisonFrontend &drv) {
   // Scan ahead for `... > (`.
   std::vector<yy::parser::symbol_type> scanned;
   int depth = 1;
+  int parens = 0, squares = 0;
   bool opensTypeArgs = false;
   for (;;) {
     yy::parser::symbol_type t = nextToken(drv);
@@ -128,6 +133,16 @@ yy::parser::symbol_type yylex(BisonFrontend &drv) {
         scanned.push_back(std::move(after));
         break;
       }
+    } else if (k == symbol_kind::S_LPAREN) {
+      ++parens;
+    } else if (k == symbol_kind::S_RPAREN) {
+      if (parens-- == 0)
+        break; // closes a bracket opened before the '<': not a type list
+    } else if (k == symbol_kind::S_LSQUARE) {
+      ++squares;
+    } else if (k == symbol_kind::S_RSQUARE) {
+      if (squares-- == 0)
+        break;
     } else if (!isTypeArgToken(k)) {
       break; // anything else (operators, literals, EOF) ends a type list
     }
