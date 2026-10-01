@@ -678,7 +678,11 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
       if (!seen.insert(*p).second) {
         std::string msg = "duplicate type parameter '";
         msg += *p;
-        msg += "' in " + what + " '" + name + "'";
+        msg += "' in ";
+        msg += what;
+        msg += " '";
+        msg += name;
+        msg += "'";
         error(loc, msg);
         pok = false;
         continue;
@@ -687,8 +691,11 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
           ClassTemplates.count(*p)) {
         std::string msg = "type parameter '";
         msg += *p;
-        msg +=
-            "' of " + what + " '" + name + "' shadows a type of the same name";
+        msg += "' of ";
+        msg += what;
+        msg += " '";
+        msg += name;
+        msg += "' shadows a type of the same name";
         error(loc, msg);
         pok = false;
       }
