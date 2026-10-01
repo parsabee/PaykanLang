@@ -10,6 +10,7 @@
 
 #include <llvm/ADT/SmallBitVector.h>
 #include <llvm/ADT/StringMap.h>
+#include <llvm/ADT/Twine.h>
 
 #include <functional>
 #include <unordered_map>
@@ -665,15 +666,17 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
     llvm::StringSet<> seen;
     for (auto *p : params) {
       if (!seen.insert(*p).second) {
-        error(loc, "duplicate type parameter '" + *p + "' in " + what + " '" +
-                       name + "'");
+        error(loc, (llvm::Twine("duplicate type parameter '") + *p + "' in " +
+                    what + " '" + name + "'")
+                       .str());
         pok = false;
         continue;
       }
       if (Ctx.lookupType(*p) || LocalClassNames.count(*p) ||
           ClassTemplates.count(*p)) {
-        error(loc, "type parameter '" + *p + "' of " + what + " '" + name +
-                       "' shadows a type of the same name");
+        error(loc, (llvm::Twine("type parameter '") + *p + "' of " + what +
+                    " '" + name + "' shadows a type of the same name")
+                       .str());
         pok = false;
       }
     }
@@ -880,7 +883,7 @@ std::string Sema::instantiateFunction(const std::string &name,
     return "";
   }
 
-  const std::string instName = instantiationName(name, args);
+  std::string instName = instantiationName(name, args);
   if (auto fIt = FuncInstantiations.find(instName);
       fIt != FuncInstantiations.end())
     return fIt->second ? instName : "";

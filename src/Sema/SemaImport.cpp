@@ -481,7 +481,13 @@ bool Sema::processImport(ast::ImportDecl *node) {
       }
       for (auto &[fname, fty] : ct->getFields())
         ci.Fields.push_back({fname, ast::typeName(fty)});
-      for (auto *m : ct->getVTable()) {
+      // __init__ has no vtable slot but is part of the class's interface: a
+      // subclass in the importing module must call it through `__super__`
+      // with the right arguments (addMethod files it back as the init).
+      std::vector<ast::MethodDecl *> methods = ct->getVTable();
+      if (auto *init = ct->findMethod(names::kMethodInit))
+        methods.push_back(init);
+      for (auto *m : methods) {
         ModuleInfo::ClassInfo::MethodInfo mi;
         mi.Name = m->getName();
         mi.ReturnTypeName = ast::typeName(m->getReturnType());

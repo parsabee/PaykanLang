@@ -31,3 +31,4 @@ points the finger at the specific runtime allocation site that file isolates.
 | `15_match_binding_ownership.pkn` | match-arm binding consumed as arg/var/field     | unique-box acquire (`Shared.c`)      |
 | `16_call_rooted_member_chain.pkn` | `makeH().a` chains + borrowed field acquisition | receiver-box teardown + field retain |
 | `17_tuple.pkn`             | Tuple literals, destructuring, nesting, `mk().0`, `==`, `mov` | `PaykanTuple_new` (`Tuple.c`) + `PaykanShared` |
+| `19_empty_array_literal_sinks.pkn` | `[]` into a field, argument, `push`, return, subscript, nested literal | `PaykanArray_new_obj` vs `PaykanArray_new` (`Array.c`) |

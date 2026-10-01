@@ -34,6 +34,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+// A REF slot stores a PaykanShared* in its 8-byte slot by memcpy of the slot
+// width (never sizeof the pointer variable, which clang-tidy reads as a
+// pointer-to-aggregate mistake); this is what makes the two widths agree.
+_Static_assert(sizeof(PaykanShared *) == sizeof(uint64_t),
+               "a tuple slot must hold a PaykanShared* exactly");
+
 // ============================================================================
 // VTable
 // ============================================================================
@@ -76,7 +82,7 @@ void PaykanTuple_destroy(PaykanObject *self) {
     if (t->kinds[i] != PAYKAN_TUPLE_REF)
       continue;
     PaykanShared *box;
-    memcpy(&box, &t->slots[i], sizeof(box));
+    memcpy(&box, &t->slots[i], sizeof(t->slots[i]));
     if (box)
       Paykan_release(box);
   }
@@ -127,12 +133,12 @@ void PaykanTuple_set_obj(PaykanTuple *t, int64_t idx, PaykanShared *value) {
     abort();
   }
   PaykanShared *old;
-  memcpy(&old, &t->slots[idx], sizeof(old));
+  memcpy(&old, &t->slots[idx], sizeof(t->slots[idx]));
   if (old)
     Paykan_release(old);
   if (value)
     Paykan_retain(value);
-  memcpy(&t->slots[idx], &value, sizeof(value));
+  memcpy(&t->slots[idx], &value, sizeof(t->slots[idx]));
 }
 
 // ============================================================================
@@ -191,7 +197,7 @@ PaykanShared *PaykanTuple_toString(PaykanObject *self) {
     }
     case PAYKAN_TUPLE_REF: {
       PaykanShared *box;
-      memcpy(&box, &bits, sizeof(box));
+      memcpy(&box, &bits, sizeof(bits));
       PaykanObject *obj = PaykanShared_get(box);
       if (!obj) {
         sb_append(&sb, "None", 4);
@@ -212,8 +218,8 @@ PaykanShared *PaykanTuple_toString(PaykanObject *self) {
     }
   }
   sb_append(&sb, ")", 1);
-  PaykanString *out = PaykanString_new(sb.data ? sb.data : "()",
-                                       sb.data ? (int64_t)sb.len : 2);
+  PaykanString *out =
+      PaykanString_new(sb.data ? sb.data : "()", sb.data ? (int64_t)sb.len : 2);
   Paykan_free(sb.data);
   return PaykanShared_new((PaykanObject *)out);
 }
@@ -246,8 +252,8 @@ int64_t PaykanTuple_equals(PaykanObject *self, PaykanObject *other) {
       }
       case PAYKAN_TUPLE_REF: {
         PaykanShared *sa, *sb;
-        memcpy(&sa, &a->slots[i], sizeof(sa));
-        memcpy(&sb, &b->slots[i], sizeof(sb));
+        memcpy(&sa, &a->slots[i], sizeof(a->slots[i]));
+        memcpy(&sb, &b->slots[i], sizeof(b->slots[i]));
         PaykanObject *oa = PaykanShared_get(sa);
         PaykanObject *ob = PaykanShared_get(sb);
         if (!oa || !ob) {

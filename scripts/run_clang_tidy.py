@@ -17,6 +17,12 @@ Usage:
                       When omitted, every first-party .cpp/.c TU in the compile
                       database is linted.
 
+On macOS the vendored clang-tidy is given the SDK from `xcrun --show-sdk-path`
+and the libc++ headers bundled with the vendored LLVM.  If the default SDK is
+newer than that clang supports, point SDKROOT at an older installed one, e.g.
+    SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk \
+        scripts/run_clang_tidy.py
+
 Exits non-zero if clang-tidy reports any finding (WarningsAsErrors: '*').
 """
 from __future__ import annotations
@@ -85,7 +91,11 @@ def main() -> int:
             f"(cmake -B {build_dir})"
         )
 
-    clang_tidy = find_clang_tidy(build_dir)
+    # Absolute paths throughout: clang-tidy runs each TU from the directory
+    # recorded in the compile database (the build dir), so a relative
+    # -isystem/-p would be resolved from there, not from the repository root.
+    build_dir = os.path.abspath(build_dir)
+    clang_tidy = os.path.abspath(find_clang_tidy(build_dir))
     print(f"Using clang-tidy: {clang_tidy}")
 
     if args.files:
@@ -101,10 +111,42 @@ def main() -> int:
         print("No first-party files to lint.")
         return 0
 
+    # The vendored clang-tidy is a plain LLVM build: unlike Apple's clang it
+    # does not locate the macOS SDK on its own, and CMake's compile commands
+    # do not always carry -isysroot (Xcode toolchains on the CI runners do
+    # not), so every <cassert>/<stdio.h> came back "file not found".  Hand it
+    # the SDK explicitly (a later -isysroot overrides any earlier one), and
+    # use the libc++ headers bundled with the vendored LLVM rather than the
+    # SDK's: a newer SDK's libc++ relies on builtins this clang lacks.  The C
+    # headers still come from the SDK, which must itself be one this clang
+    # understands -- set SDKROOT to an older installed SDK if the default one
+    # is too new (xcrun honours it).
+    # Report findings in our own headers only.  .clang-tidy's
+    # HeaderFilterRegex matches any ".../src/..." path, which also catches the
+    # Bison-generated build/src/Parser/Parser.ypp.h; anchoring the filter at
+    # the repository root keeps generated headers out of the gate, as the
+    # generated TUs already are.
+    header_filter = "^" + re.escape(REPO_ROOT) + r"/(src|include)/.*\.h$"
+    extra_args: list[str] = [f"--header-filter={header_filter}"]
+    if sys.platform == "darwin":
+        sdk = subprocess.run(
+            ["xcrun", "--show-sdk-path"], capture_output=True, text=True
+        )
+        if sdk.returncode == 0 and sdk.stdout.strip():
+            extra_args.append(f"--extra-arg=-isysroot{sdk.stdout.strip()}")
+        bundled_libcxx = os.path.join(
+            os.path.dirname(os.path.dirname(clang_tidy)), "include", "c++", "v1"
+        )
+        if os.path.isdir(bundled_libcxx):
+            extra_args += [
+                "--extra-arg=-nostdinc++",
+                f"--extra-arg=-isystem{bundled_libcxx}",
+            ]
+
     print(f"Linting {len(files)} file(s)...")
     status = 0
     for f in files:
-        result = subprocess.run([clang_tidy, "-p", build_dir, f])
+        result = subprocess.run([clang_tidy, "-p", build_dir, *extra_args, f])
         if result.returncode != 0:
             status = 1
 

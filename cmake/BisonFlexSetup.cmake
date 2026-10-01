@@ -24,7 +24,11 @@ endif()
 if(NOT EXISTS ${BISON_INSTALL_DIR}/bin/bison)
     message(STATUS "Building Bison ${BISON_VERSION} from source...")
     ExternalProject_Add(bison_ext
-        URL                        "https://ftp.gnu.org/gnu/bison/bison-${BISON_VERSION}.tar.gz"
+        # Several sources: CMake tries each in turn.  ftp.gnu.org throttles
+        # CI runners and has failed the sanitizer jobs outright.
+        URL                        "https://ftpmirror.gnu.org/gnu/bison/bison-${BISON_VERSION}.tar.gz"
+                                   "https://mirrors.kernel.org/gnu/bison/bison-${BISON_VERSION}.tar.gz"
+                                   "https://ftp.gnu.org/gnu/bison/bison-${BISON_VERSION}.tar.gz"
         URL_HASH                   SHA256=d5d184d421aee15603939973a6b0f372f908edfb24c5bc740697497021ad9458
         PREFIX                     ${THIRD_PARTY_DIR}/bison_build
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE

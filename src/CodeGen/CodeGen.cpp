@@ -432,7 +432,14 @@ bool CodeGen::run(ast::TranslationUnit *tu) {
   bootstrapBuiltins();
   processImports(tu);
   visit(tu);
+  if (HadInternalError)
+    return false;
   return !llvm::verifyModule(*Module, &llvm::errs());
+}
+
+void CodeGen::reportInternalError(const llvm::Twine &msg) {
+  llvm::errs() << "internal compiler error: " << msg << "\n";
+  HadInternalError = true;
 }
 
 /// Returns true when `expr` already produces a PaykanShared* — i.e. the
@@ -457,6 +464,14 @@ bool CodeGen::exprAlreadyShared(ast::Expr *expr) const {
   // (borrowed from the tuple), exactly like a ref-typed field read.
   if (auto *e = ast::dyn_cast<ast::TupleIndexExpr>(expr))
     return e->getResolvedType() && ast::isRefType(e->getResolvedType());
+  // SubscriptExpr: an object element is normally read as the raw object,
+  // borrowed from the array.  When the array itself is a fresh temporary
+  // (`mk()[0]`) nothing would keep the element alive, so visitSubscriptExpr
+  // instead retains the element's box, tears the array down and yields that
+  // owned +1 box (the TupleIndexExpr `mk().1` pattern).
+  if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(expr))
+    return isObjectElementType(se->getResolvedType()) &&
+           exprProducesFreshBox(se->getArray());
   // TernaryExpr and MethodCallExpr always produce PaykanShared* when ref-typed.
   if (auto *e = ast::dyn_cast<ast::MethodCallExpr>(expr))
     return e->getResolvedType() && ast::isRefType(e->getResolvedType());
@@ -511,6 +526,10 @@ bool CodeGen::exprProducesFreshBox(ast::Expr *expr) const {
   if (auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(expr))
     return ti->getResolvedType() && ast::isRefType(ti->getResolvedType()) &&
            exprProducesFreshBox(ti->getTuple());
+  // An array element is only ever a box when the array was a temporary, and
+  // then it is an owned +1 (see exprAlreadyShared).
+  if (ast::isa<ast::SubscriptExpr>(expr))
+    return exprAlreadyShared(expr);
   if (auto *mce = ast::dyn_cast<ast::MethodCallExpr>(expr))
     return mce->getResolvedType() && ast::isRefType(mce->getResolvedType());
   if (auto *te = ast::dyn_cast<ast::TernaryExpr>(expr))
@@ -627,6 +646,13 @@ ExprValue CodeGen::classifyExpr(ast::Expr *expr, llvm::Value *val) const {
   return ExprValue::borrowed(val);
 }
 
+llvm::Value *CodeGen::promoteIntToFloat(llvm::Value *v, ast::Type *targetTy) {
+  if (v && targetTy == ASTCtx.getFloatTy() && v->getType()->isIntegerTy(64))
+    return Builder.CreateSIToFP(v, llvm::Type::getDoubleTy(LLVMCtx),
+                                kInt2FPName);
+  return v;
+}
+
 void CodeGen::releaseIfOwned(const ExprValue &ev) {
   if (!ev.isOwned() || !ev.Val)
     return;
@@ -688,6 +714,13 @@ llvm::Value *CodeGen::visitTranslationUnit(ast::TranslationUnit *node) {
   // is defined later in the module.
   for (auto *fn : node->getFuncDecls())
     declareFunctionPrototype(fn);
+  // Likewise declare every class's constructor, methods, destructor and vtable
+  // before emitting any class body: a method may construct its own class or a
+  // class declared later in the file, and a subclass may precede its base
+  // (its `__super__` call and inherited vtable slots name the base's
+  // functions).
+  for (auto *cls : node->getClassDecls())
+    Classes.declareClass(cls);
   for (auto *cls : node->getClassDecls())
     visitClassDecl(cls);
   for (auto *fn : node->getFuncDecls())
@@ -1064,8 +1097,11 @@ llvm::Value *CodeGen::emitAsSharedRaw(ast::Expr *expr) {
     if (auto *id = ast::dyn_cast<ast::Identifier>(se->getArray()))
       isStrReceiver = CurrentScope && CurrentScope->lookupASTType(
                                           id->getName()) == ASTCtx.getStrTy();
+    // A call-rooted element (`mk()[0]`) is already an owned box: it takes the
+    // exprAlreadyShared pass-through below, which also tears the temporary
+    // array down.
     if (!isStrReceiver && se->getResolvedType() &&
-        ast::isRefType(se->getResolvedType())) {
+        ast::isRefType(se->getResolvedType()) && !exprAlreadyShared(se)) {
       auto *i64Ty = llvm::Type::getInt64Ty(LLVMCtx);
       llvm::Value *idx = emitExpr(se->getIndex());
       if (idx->getType()->isIntegerTy(1))
@@ -1476,6 +1512,13 @@ CodeGen::ExprEmitter::emitPrimitiveArrayLiteral(ast::ArrayLiteralExpr *node,
   auto *i64Ty = llvm::Type::getInt64Ty(CG.LLVMCtx);
   auto *voidTy = llvm::Type::getVoidTy(CG.LLVMCtx);
 
+  // Element type of the slot: a `float[]` literal may still hold int element
+  // expressions (`[1, 2.5]`, or `[1, 2]` retyped by Sema for a float[] slot)
+  // that must be promoted before their bits are stored.
+  ast::Type *elemTy = nullptr;
+  if (auto *at = ast::dyn_cast<ast::ArrayType>(node->getResolvedType()))
+    elemTy = at->getElementType();
+
   // Constant fast path: collect all elements as LLVM constants.
   // If every element is a compile-time constant, emit a single static
   // [N x i64] global and call PaykanArray_new_from_data — one memcpy
@@ -1489,6 +1532,7 @@ CodeGen::ExprEmitter::emitPrimitiveArrayLiteral(ast::ArrayLiteralExpr *node,
       return nullptr;
     if (auto *sl = ast::dyn_cast<ast::StringLiteral>(elemExpr))
       v = CG.wrapStringLiteral(v, sl->getValue().size());
+    v = CG.promoteIntToFloat(v, elemTy); // folds to a ConstantFP for constants
     if (v->getType()->isDoubleTy()) {
       // For a ConstantFP, extract the bit pattern directly so we get a
       // ConstantInt rather than a ConstantExpr(BitCast) — the latter would
@@ -1499,8 +1543,11 @@ CodeGen::ExprEmitter::emitPrimitiveArrayLiteral(ast::ArrayLiteralExpr *node,
       } else {
         v = CG.Builder.CreateBitCast(v, i64Ty, kIRF64Bits);
       }
-    } else if (v->getType()->isIntegerTy(1))
+    } else if (v->getType()->isIntegerTy() && !v->getType()->isIntegerTy(64)) {
+      // bool (i1) and char (i8) widen to the i64 slot; a constant operand
+      // folds to a ConstantInt.
       v = CG.Builder.CreateZExt(v, i64Ty, kIRBoolExtArr);
+    }
     if (auto *c = llvm::dyn_cast<llvm::Constant>(v))
       elems.push_back(c);
     else {
@@ -1551,10 +1598,8 @@ CodeGen::ExprEmitter::emitPrimitiveArrayLiteral(ast::ArrayLiteralExpr *node,
       return nullptr;
     if (auto *sl = ast::dyn_cast<ast::StringLiteral>(elemExpr))
       v = CG.wrapStringLiteral(v, sl->getValue().size());
-    if (v->getType()->isDoubleTy())
-      v = CG.Builder.CreateBitCast(v, i64Ty, kIRF64Bits);
-    else if (v->getType()->isIntegerTy(1))
-      v = CG.Builder.CreateZExt(v, i64Ty, kIRBoolExtArr);
+    v = CG.promoteIntToFloat(v, elemTy);
+    v = CG.toTupleSlotBits(v);
     auto *setFnTy =
         llvm::FunctionType::get(voidTy, {ptrTy, i64Ty, i64Ty}, false);
     CG.Builder.CreateCall(CG.declareFunction(kPaykanArraySet, setFnTy),
@@ -1575,11 +1620,19 @@ CodeGen::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
   if (idx->getType()->isIntegerTy(1))
     idx = CG.Builder.CreateZExt(idx, i64Ty, kIRIdxExt);
 
-  // Determine whether the receiver is a Str (not Str[]).
-  // Sema sets the SubscriptExpr's resolved type to CharTy for Str subscripts,
-  // so this covers both bare identifiers and member-access expressions like
+  // Determine whether the receiver is a Str (not Str[]).  Sema resolves a Str
+  // subscript to CharTy — but a `char[]` subscript resolves to CharTy too, so
+  // tell them apart by the receiver's own type (an identifier's lives in the
+  // scope).  This covers bare identifiers and member-access expressions like
   // self.field[i].
-  bool receiverIsStr = (node->getResolvedType() == CG.ASTCtx.getCharTy());
+  bool receiverIsStr = false;
+  if (node->getResolvedType() == CG.ASTCtx.getCharTy()) {
+    ast::Type *recvTy = node->getArray()->getResolvedType();
+    if (auto *id = ast::dyn_cast<ast::Identifier>(node->getArray());
+        !recvTy && id && CG.CurrentScope)
+      recvTy = CG.CurrentScope->lookupASTType(id->getName());
+    receiverIsStr = !ast::dyn_cast<ast::ArrayType>(recvTy); // null-safe
+  }
 
   // Emit the receiver, classify its ownership (a call-rooted receiver like
   // `makeArr()[0]` hands us a fresh +1 box to tear down once the element is
@@ -1611,38 +1664,30 @@ CodeGen::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
 
   // Reinterpret the 8-byte slot based on the element type.  Primitive/enum
   // elements are copied out of the slot, so a fresh receiver temporary can be
-  // released as soon as the load is done.  An OBJECT element, however, is
-  // returned as a raw alias whose box is owned by the array — releasing a
-  // fresh array here would free the element under the caller, so the fresh
-  // array box is intentionally kept alive (leaked) in that case; a proper fix
-  // needs the element to carry its own ownership (tracked follow-up).
+  // released as soon as the load is done.
   ast::Type *elemTy = node->getResolvedType();
-  if (!elemTy || !CG.isObjectElementType(elemTy)) {
+  if (!CG.isObjectElementType(elemTy)) {
     CG.releaseIfOwned(recvOwned);
     if (!elemTy)
       return raw; // unknown type: return as i64
+    // Same slot encoding as a tuple (int/enum raw, float bits, bool/char
+    // zero-extended).
+    return CG.fromTupleSlotBits(raw, elemTy);
   }
 
-  if (auto *bt = ast::dyn_cast<ast::BuiltinType>(elemTy)) {
-    switch (bt->getTypeKind()) {
-    case ast::BuiltinType::Float:
-      return CG.Builder.CreateBitCast(raw, llvm::Type::getDoubleTy(CG.LLVMCtx),
-                                      kIRElemF64);
-    case ast::BuiltinType::Bool:
-      return CG.Builder.CreateTrunc(raw, llvm::Type::getInt1Ty(CG.LLVMCtx),
-                                    kIRElemBool);
-    case ast::BuiltinType::Int:
-    default:
-      return raw;
-    }
-  }
-  // Enum elements are i64 primitives stored raw — not boxed.
-  if (!CG.isObjectElementType(elemTy))
-    return raw;
-  // ClassType or ArrayType: slot stores a PaykanShared* as bits — convert back,
-  // then unwrap to the raw PaykanObject* (same as visitIdentifier for owned
-  // vars).
+  // Object element: the slot stores a PaykanShared* as bits.
   llvm::Value *shared = CG.Builder.CreateIntToPtr(raw, ptrTy, kIRElemShared);
+  // A temporary array (`mk()[0]`) dies with this expression, so the element
+  // must carry its own reference: retain it before the teardown and hand the
+  // consumer the +1 box (exprAlreadyShared / exprProducesFreshBox report this
+  // shape as an owned box).
+  if (CG.exprAlreadyShared(node)) {
+    CG.emitRetain(shared);
+    CG.releaseIfOwned(recvOwned);
+    return shared;
+  }
+  // Otherwise the element is borrowed from a live array: unwrap it to the raw
+  // PaykanObject* (same as visitIdentifier for owned vars).
   return CG.emitSharedGet(shared, kIRElemObj);
 }
 
@@ -1823,6 +1868,31 @@ llvm::Value *CodeGen::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
     CG.Builder.SetInsertPoint(contBB);
   };
 
+  // INT64_MIN / -1 overflows (the quotient 2^63 is not representable): sdiv is
+  // UB for it and x86 raises SIGFPE.  Trap with a runtime panic like the
+  // divide-by-zero case.
+  auto emitIntDivOverflowGuard = [&](llvm::Value *dividend,
+                                     llvm::Value *divisor) {
+    auto *intTy = llvm::cast<llvm::IntegerType>(divisor->getType());
+    auto *isMin = CG.Builder.CreateICmpEQ(
+        dividend, llvm::ConstantInt::get(intTy, llvm::APInt::getSignedMinValue(
+                                                    intTy->getBitWidth())));
+    auto *isNegOne = CG.Builder.CreateICmpEQ(
+        divisor, llvm::ConstantInt::getSigned(intTy, -1));
+    auto *overflows = CG.Builder.CreateAnd(isMin, isNegOne, kIRDivOvfChk);
+    auto *fn = CG.Builder.GetInsertBlock()->getParent();
+    auto *panicBB = llvm::BasicBlock::Create(CG.LLVMCtx, kIRDivOvfPanic, fn);
+    auto *contBB = llvm::BasicBlock::Create(CG.LLVMCtx, kIRDivOvfCont, fn);
+    CG.Builder.CreateCondBr(overflows, panicBB, contBB);
+    CG.Builder.SetInsertPoint(panicBB);
+    auto *panicTy =
+        llvm::FunctionType::get(llvm::Type::getVoidTy(CG.LLVMCtx), false);
+    CG.Builder.CreateCall(CG.declareFunction(kPaykanPanicDivOverflow, panicTy),
+                          {});
+    CG.Builder.CreateUnreachable();
+    CG.Builder.SetInsertPoint(contBB);
+  };
+
   switch (node->getOpcode()) {
   // -- Arithmetic -----------------------------------------------------------
   case ast::BinaryOpcode::Add:
@@ -1872,12 +1942,22 @@ llvm::Value *CodeGen::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
     if (isFloat)
       return CG.Builder.CreateFDiv(lhs, rhs, kIRFDiv);
     emitIntDivByZeroGuard(rhs);
+    emitIntDivOverflowGuard(lhs, rhs);
     return CG.Builder.CreateSDiv(lhs, rhs, kIRSDiv);
-  case ast::BinaryOpcode::Mod:
+  case ast::BinaryOpcode::Mod: {
     if (isFloat)
       return CG.Builder.CreateFRem(lhs, rhs, kIRFMod);
     emitIntDivByZeroGuard(rhs);
-    return CG.Builder.CreateSRem(lhs, rhs, kIRSRem);
+    // x % -1 is 0 for every x, but srem traps for INT64_MIN % -1 just like the
+    // division does.  Rather than panic on a well-defined result, divide by 1
+    // instead of -1 (same remainder, never overflows).
+    auto *isNegOne = CG.Builder.CreateICmpEQ(
+        rhs, llvm::ConstantInt::getSigned(rhs->getType(), -1));
+    auto *safeDivisor = CG.Builder.CreateSelect(
+        isNegOne, llvm::ConstantInt::get(rhs->getType(), 1), rhs,
+        kIRRemSafeDiv);
+    return CG.Builder.CreateSRem(lhs, safeDivisor, kIRSRem);
+  }
 
   // -- Relational -----------------------------------------------------------
   case ast::BinaryOpcode::Lt:
@@ -2007,56 +2087,65 @@ llvm::Value *CodeGen::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
 
   // -- __super__(args): call parent class __init__ with self ----------------
   if (node->getCalleeName() == kMethodSuper) {
-    if (!CG.Classes.CurrentMethodClassType)
+    ast::ClassType *cls = CG.Classes.CurrentMethodClassType;
+    ast::ClassType *superClass = cls ? cls->getSuperClass() : nullptr;
+    if (!superClass) {
+      CG.reportInternalError("'__super__' outside a subclass method");
       return nullptr;
-    auto *superClass = CG.Classes.CurrentMethodClassType->getSuperClass();
-    if (!superClass)
+    }
+    // A base without its own __init__ has nothing to run (Sema checked that
+    // no arguments were passed).  Otherwise its __init__ was declared up
+    // front (or, for an imported base, under its qualified name) and must be
+    // found: skipping the call would silently leave the base uninitialised.
+    llvm::Function *superFn =
+        CG.Classes.lookupOwnMethodFunction(superClass, names::kMethodInit);
+    if (!superFn) {
+      if (!superClass->findMethod(names::kMethodInit))
+        return nullptr;
+      CG.reportInternalError("no function for '" + superClass->getName() + "." +
+                             names::kMethodInit + "' called by '" +
+                             cls->getName() + "." + names::kMethodSuper + "'");
       return nullptr;
-    std::string superInitName =
-        superClass->getName() + "_" + names::kMethodInit;
-    llvm::Function *superFn = CG.Module->getFunction(superInitName);
-    if (!superFn)
-      return nullptr;
+    }
     // `self` is the raw ptr stored in the unowned "self" alloca.
     auto *selfAlloca = CG.CurrentScope->lookup(kSelf);
-    auto *ptrTy2 = llvm::PointerType::getUnqual(CG.LLVMCtx);
-    auto *selfVal = CG.Builder.CreateLoad(ptrTy2, selfAlloca, kSelf);
+    auto *ptrTy = llvm::PointerType::getUnqual(CG.LLVMCtx);
+    auto *selfVal = CG.Builder.CreateLoad(ptrTy, selfAlloca, kSelf);
     std::vector<llvm::Value *> initArgs = {selfVal};
     for (size_t i = 0; i < node->getNumArguments(); ++i) {
       auto *argExpr = node->getArguments()[i];
-      auto *ptrTy3 = llvm::PointerType::getUnqual(CG.LLVMCtx);
-
-      // Class-typed args must arrive as PaykanShared* (same as user-fn calls).
-      // Check whether the arg is an owned identifier so we load the shared box
-      // directly instead of going through visitIdentifier (which unwraps).
-      bool passedAsShared = false;
-      if (auto *id = ast::dyn_cast<ast::Identifier>(argExpr)) {
-        if (CG.CurrentScope && CG.CurrentScope->isOwned(id->getName())) {
-          auto *argAlloca = CG.CurrentScope->lookup(id->getName());
-          llvm::Value *v =
-              CG.Builder.CreateLoad(ptrTy3, argAlloca, id->getName());
-          CG.emitRetain(v);
-          initArgs.push_back(v);
-          passedAsShared = true;
-        }
-      }
-      if (!passedAsShared) {
-        llvm::Value *v = visit(argExpr);
+      llvm::Type *paramTy = i + 1 < superFn->arg_size()
+                                ? superFn->getArg(i + 1)->getType()
+                                : nullptr;
+      // The base __init__ binds ref-typed parameters as owned boxes and
+      // releases them on exit (callee-consumes ABI), exactly like any user
+      // function: pass a +1 box for every expression form.
+      if (paramTy && paramTy->isPointerTy()) {
+        llvm::Value *v = CG.emitAsShared(argExpr);
         if (!v)
           return nullptr;
-        if (auto *sl = ast::dyn_cast<ast::StringLiteral>(argExpr))
-          v = CG.wrapStringLiteral(v, sl->getValue().size());
         initArgs.push_back(v);
+        continue;
       }
+      llvm::Value *v = visit(argExpr);
+      if (!v)
+        return nullptr;
+      if (v->getType()->isIntegerTy(1) && paramTy && paramTy->isIntegerTy(64))
+        v = CG.Builder.CreateZExt(v, paramTy, kIRBoolExt);
+      initArgs.push_back(v);
     }
     CG.Builder.CreateCall(superFn, initArgs);
     return nullptr;
   }
 
-  // User-defined function — look up in the LLVM module.
+  // User-defined function (or class constructor) — every one is declared
+  // before any body is emitted, so a miss here is a compiler bug.
   llvm::Function *callee = CG.Module->getFunction(node->getCalleeName());
-  if (!callee)
+  if (!callee) {
+    CG.reportInternalError("call to undeclared function '" +
+                           node->getCalleeName() + "'");
     return nullptr;
+  }
 
   std::vector<llvm::Value *> args;
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
@@ -2134,10 +2223,8 @@ llvm::Value *CodeGen::ExprEmitter::emitArrayPush(ast::MethodCallExpr *node,
     llvm::Value *argVal = CG.emitExpr(argExpr);
     if (!argVal)
       return nullptr;
-    if (argVal->getType()->isDoubleTy())
-      argVal = CG.Builder.CreateBitCast(argVal, i64Ty, kIRF64Bits);
-    else if (argVal->getType()->isIntegerTy(1))
-      argVal = CG.Builder.CreateZExt(argVal, i64Ty, kIRBoolExt);
+    argVal = CG.promoteIntToFloat(argVal, elemTy); // xs.push(2) on float[]
+    argVal = CG.toTupleSlotBits(argVal); // float bits, bool/char widened
     auto *fnTy = llvm::FunctionType::get(voidTy, {ptrTy, i64Ty}, false);
     CG.Builder.CreateCall(CG.declareFunction(kPaykanArrayPush, fnTy),
                           {recv, argVal});
@@ -2163,11 +2250,9 @@ llvm::Value *CodeGen::ExprEmitter::emitArrayPop(llvm::Value *recv,
   auto *fnTy = llvm::FunctionType::get(i64Ty, {ptrTy}, false);
   llvm::Value *raw = CG.Builder.CreateCall(
       CG.declareFunction(kPaykanArrayPop, fnTy), {recv}, kIRMcall);
-  // Reinterpret the 8-byte slot based on the element type.
-  llvm::Type *retLLTy = CG.toLLVMType(elemTy);
-  if (!retLLTy || retLLTy->isIntegerTy(64))
-    return raw;
-  return CG.Builder.CreateBitCast(raw, retLLTy, kIRMcall);
+  // Reinterpret the 8-byte slot based on the element type (a bitcast is only
+  // valid for float; bool and char must be truncated).
+  return CG.fromTupleSlotBits(raw, elemTy);
 }
 
 llvm::Value *
@@ -2336,17 +2421,16 @@ CodeGen::ExprEmitter::visitMethodCallExpr(ast::MethodCallExpr *node) {
     ast::Type *paramASTTy = (method && i < method->getParamTypes().size())
                                 ? method->getParamTypes()[i]
                                 : nullptr;
-    // Class-typed arguments are passed as PaykanShared boxes (callee consumes)
-    // for user-defined methods. The builtin `equals` is virtual and may be
-    // overridden by a user class, so its `other` argument must use the same
-    // boxed-and-consumed ABI regardless of the static receiver type; the
-    // runtime `*_equals` implementations unbox and release it to match.
-    // An optional parameter (`n: Node?`) uses the same boxed ABI (the callee
-    // declares it owned; NULL is None).
+    // Ref-typed arguments (class, array, tuple, optional) are passed as
+    // PaykanShared boxes (callee consumes) for user-defined methods: the method
+    // body binds every ref-typed parameter as an owned box and releases it on
+    // scope exit, so the predicate must match that exactly. The builtin
+    // `equals` is virtual and may be overridden by a user class, so its
+    // `other` argument must use the same boxed-and-consumed ABI regardless of
+    // the static receiver type; the runtime `*_equals` implementations unbox
+    // and release it to match.
     bool isClassParam =
-        paramASTTy &&
-        (ast::isa<ast::ClassType>(paramASTTy) ||
-         ast::isa<ast::OptionalType>(paramASTTy)) &&
+        ast::isRefType(paramASTTy) &&
         (isUserDefinedMethod || node->getMethodName() == names::kMethodEquals);
 
     if (isClassParam) {
@@ -2436,10 +2520,16 @@ llvm::Value *CodeGen::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   auto *voidTy = llvm::Type::getVoidTy(LLVMCtx);
 
   // Get the raw PaykanArray* (unwrapping the box for member-access fields,
-  // call results, etc. — not just bare identifiers).
-  llvm::Value *arrRaw = emitUnwrappedRef(node->getArray());
-  if (!arrRaw)
+  // call results, etc. — not just bare identifiers).  A call-rooted receiver
+  // (`mk()[0] = v`) is a fresh +1 box this statement must tear down after the
+  // store.
+  llvm::Value *arr = emitExpr(node->getArray());
+  if (!arr)
     return nullptr;
+  ExprValue arrOwned = classifyExpr(node->getArray(), arr);
+  llvm::Value *arrRaw = arr;
+  if (exprAlreadyShared(node->getArray()) && arr->getType()->isPointerTy())
+    arrRaw = emitSharedGet(arr, kIRRecvObj);
 
   // Emit the index.
   llvm::Value *idx = emitExpr(node->getIndex());
@@ -2488,11 +2578,9 @@ llvm::Value *CodeGen::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
     if (!val)
       return nullptr;
 
-    // Promote to i64 storage slot.
-    if (val->getType()->isDoubleTy())
-      val = Builder.CreateBitCast(val, i64Ty);
-    else if (val->getType()->isIntegerTy(1))
-      val = Builder.CreateZExt(val, i64Ty);
+    val = promoteIntToFloat(val, elemTy);
+    // Promote to i64 storage slot (float bits, bool/char widened).
+    val = toTupleSlotBits(val);
 
     // PaykanArray_set(arr, idx, i64 value): declare as void(ptr, i64, i64)
     // so the type is consistent with how emitPrimitiveArrayLiteral declares
@@ -2502,6 +2590,7 @@ llvm::Value *CodeGen::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
     Builder.CreateCall(declareFunction(kPaykanArraySet, setFnTy),
                        {arrRaw, idx, val});
   }
+  releaseIfOwned(arrOwned);
   return nullptr;
 }
 

@@ -84,6 +84,7 @@ add_executable(codegen_tests
     CodeGen/GenericsTests.cpp
     CodeGen/OptionalTests.cpp
     CodeGen/TupleTests.cpp
+    CodeGen/RegressionTests.cpp
 )
 target_include_directories(codegen_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}

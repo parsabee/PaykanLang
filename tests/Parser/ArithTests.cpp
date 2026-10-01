@@ -343,7 +343,7 @@ TEST(Arith, ParseErrorsRoutedThroughDiagEngine) {
   EXPECT_NE(r.Text.find(":2:"), std::string::npos); // file:line:col header
   EXPECT_NE(r.Text.find("error:"), std::string::npos);
   EXPECT_NE(r.Text.find(" | "), std::string::npos); // snippet gutter
-  EXPECT_NE(r.Text.find("^"), std::string::npos);   // caret marker
+  EXPECT_NE(r.Text.find('^'), std::string::npos);   // caret marker
 }
 
 TEST(Arith, UnopenableFileFailsCleanly) {

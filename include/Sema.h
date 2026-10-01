@@ -255,6 +255,13 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   //     so CodeGen materialises the `None` singleton for a null box.
   bool checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src);
 
+  // Record the destination's array type on an empty array literal `[]` (and
+  // on empty literals nested in a non-empty one) so CodeGen can choose an
+  // object-element array where the elements need releasing.  Called from
+  // checkAssignable, so every typed sink -- declaration, assignment, field
+  // store, call/method/push argument, return, subscript store -- is covered.
+  void adoptArrayLiteralType(ast::Type *dst, ast::Expr *src);
+
   // If `srcTy` is an optional and `dst` is not (the `T?` -> `T` narrowing
   // that needs a `match`), emit the "cannot use optional ... without
   // unwrapping" error at @p loc and return true; otherwise return false so the

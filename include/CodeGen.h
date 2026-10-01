@@ -179,6 +179,14 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   /// Project root directory for import resolution.
   std::string ProjectRoot;
 
+  /// Set when code generation hit a state Sema should have ruled out (e.g. a
+  /// call whose callee was never declared).  run() then fails instead of
+  /// silently emitting a module with the offending code missing.
+  bool HadInternalError = false;
+
+  /// Print "internal compiler error: <msg>" and fail the current run().
+  void reportInternalError(const llvm::Twine &msg);
+
   /// LLVM modules generated for imported files.
   std::vector<std::unique_ptr<llvm::Module>> ImportedModules;
 
@@ -459,6 +467,11 @@ class CodeGen : public ast::ASTVisitor<CodeGen, llvm::Value *> {
   /// whether a box unwrapped for a borrow (e.g. println(call())) must be
   /// released afterwards.
   bool exprProducesFreshBox(ast::Expr *expr) const;
+  /// int -> float promotion into a float-typed slot: when @p targetTy is
+  /// `float` and @p v is an i64, return it converted to double; otherwise @p v
+  /// unchanged.  Used wherever a value enters an array element slot (literal,
+  /// push, subscript store), mirroring the promotion on scalar stores.
+  llvm::Value *promoteIntToFloat(llvm::Value *v, ast::Type *targetTy);
   void emitRetain(llvm::Value *shared);
   void emitRelease(llvm::Value *shared);
   llvm::Value *emitSharedNew(llvm::Value *raw, llvm::StringRef name = "shared");

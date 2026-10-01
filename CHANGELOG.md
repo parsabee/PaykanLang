@@ -65,6 +65,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An empty array literal `[]` stored into a class field, passed as a
+  call/method/`push` argument, returned, stored through a subscript, or nested
+  in another literal was compiled as a primitive-element array regardless of
+  the slot's element type, so the objects later pushed into it were never
+  released (a leak in every `self.items = []` pattern). Sema now adopts the
+  destination's array type at every typed sink, not only declarations.
+- Passing an array or tuple to a user-defined method (`b.take(xs)`,
+  `b.take([1, 2])`) freed the argument twice: the callee owns every
+  reference-typed parameter, but the call site only handed over an owned box
+  for class and optional parameters.
+- Integers flowing into `float[]` element slots (`xs: float[] = [1, 2]`,
+  `xs.push(3)`, `xs[0] = 4`, `[1, 2.5]`) were stored as integer bit patterns
+  and read back as denormal floats; they are now promoted like scalar stores.
+- The import cache key now includes the identity of the compiler binary, so a
+  development build with changed codegen but an unchanged version string no
+  longer serves stale `.paykan_cache` modules compiled by the previous build.
 - Double-frees when an object was reached through more than one owning alias:
   using `self` as a value (return/argument/assignment/`mov`), ownership-taking
   uses of `match` bindings, and array-typed class fields. Fixed by a new

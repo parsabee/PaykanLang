@@ -290,3 +290,46 @@ fn main() -> int {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "99\n");
 }
+
+// ============================================================================
+// int -> float promotion into float[] element slots.  Every scalar store
+// promotes; the element paths (literal, push, subscript store) used to store
+// the integer bit pattern, which read back as a denormal double.
+// ============================================================================
+
+TEST(ArrayPromotion, IntElementsIntoFloatArray) {
+  auto r = compileAndRun(R"(
+    class C {
+      fs: float[];
+      fn __init__() { self.fs = [1, 2]; }
+      fn sum(ys: float[]) -> float { return ys[0] + ys[1]; }
+    }
+    fn total(zs: float[]) -> float { return zs[0] + zs[1]; }
+    fn mk() -> float[] { return [7, 8]; }
+    fn main() -> int {
+      xs: float[] = [1, 2];            // all-int literal into float[]
+      println(StrFloat(xs[0] + xs[1]));
+      ys: float[] = [1, 2.5];          // mixed literal
+      println(StrFloat(ys[0] + ys[1]));
+      n: int = 4;
+      zs: float[] = [n, n + 1];        // non-constant int elements
+      println(StrFloat(zs[0] + zs[1]));
+      xs.push(3);                      // push(int)
+      println(StrFloat(xs[2]));
+      xs[0] = 10;                      // subscript store
+      println(StrFloat(xs[0]));
+      xs = [5, 6];                     // reassignment
+      println(StrFloat(xs[1]));
+      c: C = C();
+      println(StrFloat(c.fs[1]));      // field store
+      println(StrFloat(total([3, 4]))); // function argument
+      println(StrFloat(c.sum([5, 6]))); // method argument
+      println(StrFloat(mk()[1]));      // returned literal
+      grid: float[][] = [[1], [2]];    // nested literals
+      println(StrFloat(grid[0][0] + grid[1][0]));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "3\n3.5\n9\n3\n10\n6\n2\n7\n11\n8\n3\n");
+}

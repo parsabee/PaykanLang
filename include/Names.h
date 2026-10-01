@@ -150,6 +150,8 @@ inline constexpr const char *kPaykanErrPrintln = "Paykan_printerrln";
 
 // Runtime panics (noreturn)
 inline constexpr const char *kPaykanPanicDivByZero = "Paykan_panic_div_by_zero";
+inline constexpr const char *kPaykanPanicDivOverflow =
+    "Paykan_panic_div_overflow";
 
 // Reference counting
 inline constexpr const char *kPaykanSharedNew = "PaykanShared_new";
@@ -197,9 +199,10 @@ inline constexpr const char *kCacheDir = ".paykan_cache";
 // -- JIT sync list ----------------------------------------------------------
 //
 // Every symbol that CodeGen may emit as an ExternalLinkage declaration (via
-// declareFunction, FunctionTable, or getOrInsertGlobal) must appear in this
-// list.  JIT.cpp asserts in debug builds that every name here is present in
-// kRuntimeSymbols, catching Name.h / JIT.cpp drift at startup.
+// declareFunction, FunctionTable, getOrInsertGlobal, or a builtin method
+// resolved into a user-class vtable slot by findConcreteMethodFuncName) must
+// appear in this list.  JIT.cpp asserts in debug builds that every name here
+// is present in kRuntimeSymbols, catching Names.h / JIT.cpp drift at startup.
 //
 inline constexpr const char *kCodeGenRequiredSymbols[] = {
     // Memory / RC
@@ -211,6 +214,7 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanSharedGet,
     // Panics
     kPaykanPanicDivByZero,
+    kPaykanPanicDivOverflow,
     // String
     kPaykanStringNew,
     kPaykanStringDestroy,
@@ -249,6 +253,21 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     // Boxed primitives (from Sema/CodeGen dispatch)
     kPaykanIntFromStr,
     kPaykanFloatFromStr,
+    // Builtin methods inherited into user-class vtable slots
+    kPaykanObjectDestroy,
+    kPaykanObjectToString,
+    kPaykanObjectEquals,
+    kPaykanStringToString,
+    kPaykanStringEquals,
+    kPaykanStringLength,
+    kPaykanFileDestroy,
+    kPaykanFileToString,
+    kPaykanFileEquals,
+    kPaykanFileWrite,
+    kPaykanFileReadln,
+    // Runtime vtables referenced by `is` / match checks
+    kPaykanArrayVtable,
+    kPaykanArrayObjVtable,
 };
 
 // -- Tuple slot kinds (CodeGen <-> runtime ABI) ------------------------------

@@ -74,7 +74,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build-asan/third-party
-          key: third-party-macos-arm64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
+          # Keyed per build directory: the archive stores the path it was saved
+          # from, so a key shared with the build/third-party jobs restores
+          # nothing here and is never saved (the key already exists).
+          key: third-party-macos-arm64-asan-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (ASan)
         run: cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_ASAN=ON
@@ -84,8 +87,15 @@ jobs:
 
       - name: Test
         env:
-          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:detect_stack_use_after_return=1
-          LSAN_OPTIONS: suppressions=${{ github.workspace }}/.lsan_suppressions.txt
+          # Apple clang has no LeakSanitizer on arm64 (see SanitizerSetup.cmake);
+          # detect_leaks=1 would abort ASan at startup as unsupported.
+          # detect_container_overflow=0: the prebuilt LLVM libraries are not
+          # instrumented, so their std::vector growth does not update libc++'s
+          # container annotations while our instrumented instantiations of the
+          # same templates check them -- ASan then reports container-overflow
+          # inside LLVM's own static initialisers (DebugCounter::addCounter) at
+          # process start.  See AddressSanitizerContainerOverflow on the wiki.
+          ASAN_OPTIONS: abort_on_error=1:detect_stack_use_after_return=1:detect_container_overflow=0
         run: ctest --test-dir build-asan --output-on-failure --parallel 4
 
   # ---------------------------------------------------------------------------
@@ -101,7 +111,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build-ubsan/third-party
-          key: third-party-macos-arm64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
+          # Keyed per build directory: the archive stores the path it was saved
+          # from, so a key shared with the build/third-party jobs restores
+          # nothing here and is never saved (the key already exists).
+          key: third-party-macos-arm64-ubsan-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (UBSan)
         run: cmake -B build-ubsan -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_UBSAN=ON
