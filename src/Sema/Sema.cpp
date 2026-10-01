@@ -329,16 +329,7 @@ bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
   }
   if (!isAssignable(dst, srcTy))
     return false;
-  // An empty array literal `[]` has no element type of its own (its resolved
-  // type is the ArrayType(void) sentinel).  Record the destination's array
-  // type on it, whatever the destination is — variable, field, element,
-  // argument or return value — so CodeGen builds the right representation: an
-  // empty `Foo[]` built as a primitive array never releases the objects
-  // pushed into it later.
-  if (auto *lit = ast::dyn_cast<ast::ArrayLiteralExpr>(src))
-    if (auto *dstAT = ast::dyn_cast<ast::ArrayType>(ast::stripOptional(dst));
-        dstAT && lit->isEmpty())
-      lit->setResolvedType(dstAT);
+  adoptArrayLiteralType(dst, src);
   // `T?` -> `Obj` (the only non-optional destination an optional may flow
   // into): CodeGen must turn a null box into the boxed `None` singleton so the
   // receiving `Obj` slot never holds a NULL box, which no `Obj` consumer
@@ -346,6 +337,34 @@ bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
   if (ast::isa<ast::OptionalType>(srcTy) && !ast::isa<ast::OptionalType>(dst))
     src->setCoercedType(dst);
   return true;
+}
+
+void Sema::adoptArrayLiteralType(ast::Type *dst, ast::Expr *src) {
+  auto *lit = ast::dyn_cast<ast::ArrayLiteralExpr>(src);
+  auto *dstAT = ast::dyn_cast<ast::ArrayType>(ast::stripOptional(dst));
+  if (!lit || !dstAT)
+    return;
+  // An empty literal carries the ArrayType(void) sentinel from
+  // visitArrayLiteralExpr; only the destination knows the element type, and
+  // CodeGen needs it to pick an object-element array (whose destructor
+  // releases the elements pushed into it later) over a primitive one.
+  if (lit->isEmpty()) {
+    lit->setResolvedType(dstAT);
+    return;
+  }
+  // `[1, 2]` into a `float[]` slot: the literal unified to `int[]`, which
+  // isAssignable accepts (int -> float), but CodeGen stores whatever the
+  // literal's own element type says.  Retype it so the elements are promoted
+  // to doubles (emitPrimitiveArrayLiteral); left as `int[]`, the integer bit
+  // patterns read back as denormal floats.
+  if (dstAT->getElementType() == Ctx.getFloatTy())
+    if (auto *litAT = ast::dyn_cast<ast::ArrayType>(lit->getResolvedType()))
+      if (litAT->getElementType() == Ctx.getIntTy())
+        lit->setResolvedType(dstAT);
+  // Otherwise a non-empty literal keeps its own unified type; only its empty
+  // nested literals (`[[], []]` into `Str[][]`) still need the destination.
+  for (size_t i = 0; i < lit->getNumElements(); ++i)
+    adoptArrayLiteralType(dstAT->getElementType(), lit->getElements()[i]);
 }
 
 bool Sema::diagnoseOptionalNarrowing(ast::SourceLocation loc, ast::Type *dst,
@@ -1576,12 +1595,6 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
     return false;
   }
 
-  // Propagate the target's array type onto an empty literal (see
-  // visitVarDecl for why CodeGen needs the element type).
-  if (auto *lit = ast::dyn_cast<ast::ArrayLiteralExpr>(node->getValue()))
-    if (lit->isEmpty() && ast::isa<ast::ArrayType>(varArrTy))
-      lit->setResolvedType(varArrTy);
-
   return true;
 }
 
@@ -1929,17 +1942,6 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
                     "' for variable '" + node->getName() + "'");
         CurrentScope->set(node->getName(), declTy);
         return false;
-      }
-
-      // Propagate the declared array type onto an empty array literal `[]`
-      // (whose own resolved type is the ArrayType(void) sentinel).  Without
-      // this, codegen cannot tell an empty `Obj[]` from an empty `int[]` and
-      // emits a primitive array whose destructor never releases the elements
-      // pushed into it later — a leak.
-      if (auto *lit =
-              ast::dyn_cast<ast::ArrayLiteralExpr>(node->getInitExpr())) {
-        if (lit->isEmpty() && ast::isa<ast::ArrayType>(declArrTy))
-          lit->setResolvedType(declArrTy);
       }
     } else {
       // Infer type from initializer — but reject bare [] with no annotation.

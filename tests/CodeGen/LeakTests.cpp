@@ -613,3 +613,96 @@ TEST(Leak, TernaryArrayBranches) {
   EXPECT_EQ(r.StdOut, "4\n3\nb\na\n2\n2\n");
   g.expectNoLeaks("TernaryArrayBranches");
 }
+
+// ============================================================================
+// Empty array literal at every typed sink (samples/leak-check/19).  Sema types
+// `[]` as ArrayType(void) and must adopt the destination's element type at
+// EVERY sink, not just declarations; otherwise CodeGen emits a primitive
+// array whose destructor never releases the objects pushed into it.
+// ============================================================================
+
+TEST(Leak, EmptyArrayLiteralSinks) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Bag {
+      items: Str[];
+      grid: Str[][];
+      fn __init__(seed: Str[]) {
+        self.items = [];          // field store in the constructor
+        self.grid = [[], []];     // nested empty literals
+        self.items.push("ctor");
+        self.grid[0].push("g0");
+        self.grid[1] = [];        // subscript store
+        self.grid[1].push("g1");
+        seed.push("seed");
+      }
+      fn reset() { self.items = []; self.items.push("reset"); }
+      fn take(xs: Str[]) -> int { xs.push("arg"); return xs.len(); }
+    }
+    fn fresh() -> Str[] { return []; }
+    fn fill(xs: Str[]) -> int { xs.push("fn"); return xs.len(); }
+    fn main() -> int {
+      b: Bag = Bag([]);                      // constructor argument
+      println(b.items[0] + b.grid[0][0] + b.grid[1][0]);
+      b.reset();                             // field store in a method
+      println(b.items[0]);
+      b.items = [];                          // field store from outside
+      b.items.push("outside");
+      println(b.items[0]);
+      println(StrInt(fill([])));             // free-function argument
+      println(StrInt(b.take([])));           // method argument
+      f: Str[] = fresh();                    // returned literal
+      f.push("ret");
+      println(f[0]);
+      rows: Str[][] = [];
+      rows.push([]);                         // push argument
+      rows[0].push("pushed");
+      println(rows[0][0]);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "ctorg0g1\nreset\noutside\n1\n1\nret\npushed\n");
+  g.expectNoLeaks("EmptyArrayLiteralSinks");
+}
+
+// ============================================================================
+// Array / tuple arguments to user-defined METHODS.  The method prologue owns
+// every reference-typed parameter and releases it on exit, so the call site
+// must pass a +1 box for arrays and tuples exactly as it does for classes.
+// Before, they took the borrowed-temporary path and were released twice.
+// ============================================================================
+
+TEST(Leak, RefTypedArgsToUserMethods) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Bag {
+      xs: int[];
+      fn __init__() { self.xs = [1, 2]; }
+      fn sum(ys: int[]) -> int { return ys[0] + ys[1]; }
+      fn names(ns: Str[]) -> int { ns.push("m"); return ns.len(); }
+      fn first(t: (int, Str)) -> Str { return t.1; }
+      fn own() -> int { return self.sum(self.xs); }     // field argument
+    }
+    fn mk() -> int[] { return [10, 20]; }
+    fn main() -> int {
+      b: Bag = Bag();
+      v: int[] = [3, 4];
+      println(StrInt(b.sum(v)));                         // local argument
+      println(StrInt(v.len()));                          // local still alive
+      println(StrInt(b.sum([5, 6])));                    // literal argument
+      println(StrInt(b.sum(mk())));                      // call-result argument
+      println(StrInt(b.own()));
+      println(StrInt(b.names([])));                      // empty literal
+      println(StrInt(b.names(["a", "b"])));
+      println(b.first((1, "t")));                        // tuple literal
+      t: (int, Str) = (2, "u");
+      println(b.first(t));                               // tuple local
+      println(b.first(t));                               // still alive
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "7\n2\n11\n30\n3\n1\n3\nt\nu\nu\n");
+  g.expectNoLeaks("RefTypedArgsToUserMethods");
+}

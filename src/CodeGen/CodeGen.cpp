@@ -646,6 +646,13 @@ ExprValue CodeGen::classifyExpr(ast::Expr *expr, llvm::Value *val) const {
   return ExprValue::borrowed(val);
 }
 
+llvm::Value *CodeGen::promoteIntToFloat(llvm::Value *v, ast::Type *targetTy) {
+  if (v && targetTy == ASTCtx.getFloatTy() && v->getType()->isIntegerTy(64))
+    return Builder.CreateSIToFP(v, llvm::Type::getDoubleTy(LLVMCtx),
+                                kInt2FPName);
+  return v;
+}
+
 void CodeGen::releaseIfOwned(const ExprValue &ev) {
   if (!ev.isOwned() || !ev.Val)
     return;
@@ -1505,6 +1512,13 @@ CodeGen::ExprEmitter::emitPrimitiveArrayLiteral(ast::ArrayLiteralExpr *node,
   auto *i64Ty = llvm::Type::getInt64Ty(CG.LLVMCtx);
   auto *voidTy = llvm::Type::getVoidTy(CG.LLVMCtx);
 
+  // Element type of the slot: a `float[]` literal may still hold int element
+  // expressions (`[1, 2.5]`, or `[1, 2]` retyped by Sema for a float[] slot)
+  // that must be promoted before their bits are stored.
+  ast::Type *elemTy = nullptr;
+  if (auto *at = ast::dyn_cast<ast::ArrayType>(node->getResolvedType()))
+    elemTy = at->getElementType();
+
   // Constant fast path: collect all elements as LLVM constants.
   // If every element is a compile-time constant, emit a single static
   // [N x i64] global and call PaykanArray_new_from_data — one memcpy
@@ -1518,6 +1532,7 @@ CodeGen::ExprEmitter::emitPrimitiveArrayLiteral(ast::ArrayLiteralExpr *node,
       return nullptr;
     if (auto *sl = ast::dyn_cast<ast::StringLiteral>(elemExpr))
       v = CG.wrapStringLiteral(v, sl->getValue().size());
+    v = CG.promoteIntToFloat(v, elemTy); // folds to a ConstantFP for constants
     if (v->getType()->isDoubleTy()) {
       // For a ConstantFP, extract the bit pattern directly so we get a
       // ConstantInt rather than a ConstantExpr(BitCast) — the latter would
@@ -1583,6 +1598,7 @@ CodeGen::ExprEmitter::emitPrimitiveArrayLiteral(ast::ArrayLiteralExpr *node,
       return nullptr;
     if (auto *sl = ast::dyn_cast<ast::StringLiteral>(elemExpr))
       v = CG.wrapStringLiteral(v, sl->getValue().size());
+    v = CG.promoteIntToFloat(v, elemTy);
     v = CG.toTupleSlotBits(v);
     auto *setFnTy =
         llvm::FunctionType::get(voidTy, {ptrTy, i64Ty, i64Ty}, false);
@@ -2207,6 +2223,7 @@ llvm::Value *CodeGen::ExprEmitter::emitArrayPush(ast::MethodCallExpr *node,
     llvm::Value *argVal = CG.emitExpr(argExpr);
     if (!argVal)
       return nullptr;
+    argVal = CG.promoteIntToFloat(argVal, elemTy); // xs.push(2) on float[]
     argVal = CG.toTupleSlotBits(argVal); // float bits, bool/char widened
     auto *fnTy = llvm::FunctionType::get(voidTy, {ptrTy, i64Ty}, false);
     CG.Builder.CreateCall(CG.declareFunction(kPaykanArrayPush, fnTy),
@@ -2561,6 +2578,7 @@ llvm::Value *CodeGen::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
     if (!val)
       return nullptr;
 
+    val = promoteIntToFloat(val, elemTy);
     // Promote to i64 storage slot (float bits, bool/char widened).
     val = toTupleSlotBits(val);
 

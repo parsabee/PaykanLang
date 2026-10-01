@@ -1,0 +1,41 @@
+// Isolates: an empty array literal `[]` flowing into every typed sink other
+// than a plain declaration -- a field store, a call argument, a `push`
+// argument, a returned value, a subscript store, and a nested literal.
+// Sema must adopt the destination's element type at each of them so CodeGen
+// builds an object-element array (PaykanArray_new_obj) that releases the
+// strings pushed into it later, instead of a primitive one that never does.
+//
+// Expected under --track-heap: live blocks : 0.
+
+class Bag {
+  items: Str[];
+  grid: Str[][];
+  fn __init__(seed: Str[]) {
+    self.items = [];
+    self.grid = [[], []];
+    self.items.push("ctor");
+    self.grid[0].push("g0");
+    self.grid[1] = [];
+    self.grid[1].push("g1");
+    seed.push("seed");
+  }
+  fn reset() { self.items = []; self.items.push("reset"); }
+  fn take(xs: Str[]) -> int { xs.push("arg"); return xs.len(); }
+}
+
+fn fresh() -> Str[] { return []; }
+fn fill(xs: Str[]) -> int { xs.push("fn"); return xs.len(); }
+
+fn main() -> int {
+  b: Bag = Bag([]);
+  b.reset();
+  b.items = [];
+  b.items.push("outside");
+  n: int = fill([]) + b.take([]);
+  f: Str[] = fresh();
+  f.push("ret");
+  rows: Str[][] = [];
+  rows.push([]);
+  rows[0].push("pushed");
+  return 0;
+}
