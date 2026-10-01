@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Handwritten lexer tests, through the --dump-tokens output (one token per
-// line: `line:col-line:col KIND text`).
+// Recursive-descent frontend lexer tests, through the --dump-tokens output (one
+// token per line: `line:col-line:col KIND text`).
 
-#include "Frontends/Handwritten.h"
+#include "Frontends/RecursiveDescent.h"
 
 #include <gtest/gtest.h>
 
@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-using namespace paykan::frontend::handwritten;
+using namespace paykan::frontend::recursive_descent;
 
 namespace {
 

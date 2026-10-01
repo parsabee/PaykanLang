@@ -10,7 +10,7 @@ is the CI gate for that rule.
 
 Usage:
     scripts/diff_frontends.py --paykan build/bin/paykan [dir ...]
-        [--frontends handwritten,bison]
+        [--frontends recursive-descent,bison]
 
 Exits non-zero when any file differs or a frontend is unavailable.
 """
@@ -48,8 +48,8 @@ def main() -> int:
     ap.add_argument("--paykan", required=True, help="path to the paykan binary")
     ap.add_argument(
         "--frontends",
-        default="handwritten,bison",
-        help="comma-separated pair of frontend names (default: handwritten,bison)",
+        default="recursive-descent,bison",
+        help="comma-separated pair of frontend names (default: recursive-descent,bison)",
     )
     ap.add_argument("dirs", nargs="*", help="directories to scan for .pkn files")
     args = ap.parse_args()

@@ -166,8 +166,9 @@ target_link_libraries(driver_tests
 add_dependencies(driver_tests paykan)
 add_test(NAME DriverTests COMMAND driver_tests)
 
-# --- Frontend tests: handwritten lexer, recovery, fuzz smoke; and the ----------
-# --- differential check of every enabled frontend over the samples corpus ----
+# --- Frontend tests: lexer, recovery, fuzz smoke of the recursive-descent -----
+# --- frontend; and the differential check of every enabled frontend over -----
+# --- the samples corpus
 add_executable(frontend_tests
     Frontend/LexerTests.cpp
     Frontend/RecoveryTests.cpp
@@ -184,7 +185,8 @@ target_link_libraries(frontend_tests
             paykan_ast_printer
             paykan_compile_options
 )
-# paykan_frontend_handwritten (whose public header the lexer/recovery/fuzz
+# paykan_frontend_recursive_descent (whose public header the lexer/recovery/
+# fuzz
 # tests use directly) comes in through the plugin link below.
 paykan_link_plugins(frontend_tests)
 add_test(NAME FrontendTests COMMAND frontend_tests)

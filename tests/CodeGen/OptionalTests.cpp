@@ -595,7 +595,7 @@ static std::string writeFile(const std::string &dir, const std::string &relPath,
 
 TEST(Optional, ImportedOptionalSignatures) {
   LeakGuard g;
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_opt_cg").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_opt_cg").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "list.pkn", R"pkn(
     class Node {
@@ -696,8 +696,7 @@ TEST(OptionalTuple, TupleWithOptionalElements) {
 
 TEST(OptionalTuple, ImportedTupleOfOptionals) {
   LeakGuard g;
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_opt_tuple_cg").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_opt_tuple_cg").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "lib.pkn", R"pkn(
     class Node { v: int; fn __init__(x: int) { self.v = x; } }

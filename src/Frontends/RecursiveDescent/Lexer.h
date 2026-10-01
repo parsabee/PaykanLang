@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Handwritten, reentrant lexer for the Paykan language.
+// Reentrant lexer of the recursive-descent frontend for the Paykan language.
 //
 // Pull-based: the parser calls next() for one token at a time.  The lexer
 // holds no global state, so any number of lexers may run concurrently (one
@@ -17,7 +17,7 @@
 #include <string>
 #include <string_view>
 
-namespace paykan::frontend::handwritten {
+namespace paykan::frontend::recursive_descent {
 
 /// Token kinds.  One enumerator per terminal of docs/grammar.md.
 enum class Tok : uint8_t {
@@ -150,4 +150,4 @@ private:
   void error(size_t startLine, size_t startCol, const std::string &msg);
 };
 
-} // namespace paykan::frontend::handwritten
+} // namespace paykan::frontend::recursive_descent

@@ -348,7 +348,7 @@ std::string writeProjectFile(const std::filesystem::path &dir,
 // A fresh project directory; Sema caches analysed modules by path, so every
 // test uses its own.
 std::filesystem::path freshProjectDir(const std::string &name) {
-  auto dir = std::filesystem::temp_directory_path() /
+  auto dir = paykan::test::tempDir() /
              ("pkn_regression_" + name + "_" + std::to_string(getpid()));
   std::filesystem::remove_all(dir);
   std::filesystem::create_directories(dir);

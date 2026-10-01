@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Public entry points of the handwritten frontend (src/Frontends/Handwritten).
+// Public entry points of the recursive-descent frontend
+// (src/Frontends/RecursiveDescent).
 
 #pragma once
 
@@ -11,7 +12,7 @@
 #include <iosfwd>
 #include <string_view>
 
-namespace paykan::frontend::handwritten {
+namespace paykan::frontend::recursive_descent {
 
 struct ParseOutput {
   /// The parsed unit, owned by the ASTContext.  After errors it is partial
@@ -33,4 +34,4 @@ ParseOutput parseSource(ast::ASTContext &ctx, std::string_view source,
 unsigned dumpTokens(std::string_view source, std::ostream &os,
                     sema::DiagEngine *diags);
 
-} // namespace paykan::frontend::handwritten
+} // namespace paykan::frontend::recursive_descent

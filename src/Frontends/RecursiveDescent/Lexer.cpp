@@ -8,7 +8,7 @@
 #include <string_view>
 #include <utility>
 
-namespace paykan::frontend::handwritten {
+namespace paykan::frontend::recursive_descent {
 
 namespace {
 
@@ -591,4 +591,4 @@ bool Lexer::lexString(size_t start, size_t line, size_t col, Token &out) {
   return false;
 }
 
-} // namespace paykan::frontend::handwritten
+} // namespace paykan::frontend::recursive_descent

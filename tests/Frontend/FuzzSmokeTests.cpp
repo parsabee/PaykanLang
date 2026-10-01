@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 // Parser fuzz smoke test: random and mutated inputs must never crash, hang or
-// leak the handwritten frontend (the ASan/LSan CI job checks the leaks).
+// leak the recursive-descent frontend (the ASan/LSan CI job checks the leaks).
 // Deterministic (fixed seeds) so a failure reproduces.
 
-#include "Frontends/Handwritten.h"
+#include "Frontends/RecursiveDescent.h"
 
 #include <gtest/gtest.h>
 
@@ -19,7 +19,7 @@
 #error "PAYKAN_SAMPLES_DIR must be defined via CMake compile definition"
 #endif
 
-using namespace paykan::frontend::handwritten;
+using namespace paykan::frontend::recursive_descent;
 
 namespace {
 

@@ -1,20 +1,20 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// The handwritten frontend plugin: adapts parseSource/dumpTokens to the
-// frontend interface and registers the plugin as "handwritten".
+// The recursive-descent frontend plugin: adapts parseSource/dumpTokens to the
+// frontend interface and registers the plugin as "recursive-descent".
 
-#include "Frontends/Handwritten.h"
+#include "Frontends/RecursiveDescent.h"
 #include "paykan/Frontend.h"
 
 #include <memory>
 
-namespace paykan::frontend::handwritten {
+namespace paykan::frontend::recursive_descent {
 
 namespace {
 
-class HandwrittenFrontend : public Frontend {
+class RecursiveDescentFrontend : public Frontend {
 public:
-  std::string_view name() const override { return "handwritten"; }
+  std::string_view name() const override { return "recursive-descent"; }
 
   ParseResult parse(std::string_view /*filename*/, std::string_view source,
                     ast::ASTContext &ctx, sema::DiagEngine &diag,
@@ -30,19 +30,19 @@ public:
                   std::ostream &os) override {
     // Lexical errors are printed to stderr by the fallback engine; the dump
     // itself is still complete (bad bytes are skipped), so it succeeds.
-    handwritten::dumpTokens(source, os, nullptr);
+    recursive_descent::dumpTokens(source, os, nullptr);
     return true;
   }
 };
 
-std::unique_ptr<Frontend> createHandwrittenFrontend() {
-  return std::make_unique<HandwrittenFrontend>();
+std::unique_ptr<Frontend> createRecursiveDescentFrontend() {
+  return std::make_unique<RecursiveDescentFrontend>();
 }
 
 } // namespace
 
-} // namespace paykan::frontend::handwritten
+} // namespace paykan::frontend::recursive_descent
 
 PAYKAN_REGISTER_FRONTEND(
-    handwritten, "handwritten",
-    &paykan::frontend::handwritten::createHandwrittenFrontend);
+    recursive_descent, "recursive-descent",
+    &paykan::frontend::recursive_descent::createRecursiveDescentFrontend);

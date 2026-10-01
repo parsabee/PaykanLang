@@ -1,7 +1,7 @@
 # Paykan grammar
 
 This document is the specification of Paykan's concrete syntax. Every
-frontend implements it: the handwritten frontend (`src/Frontends/Handwritten`,
+frontend implements it: the recursive-descent frontend (`src/Frontends/RecursiveDescent`,
 the default) and the Bison/Flex frontend (`src/Frontends/Bison`, optional).
 Both must build exactly the same AST for every input and must accept and
 reject the same inputs; the differential check in CI
@@ -278,12 +278,12 @@ generic call. It is a generic call exactly when a `typeArgList` followed by
 `>` `(` fits at that point (`first<int>(xs)`, `Box<Str>("v")`,
 `lib::Box<int>(1)`); otherwise `<` is the relational operator.
 
-The handwritten frontend decides this by speculatively parsing the type
+The recursive-descent frontend decides this by speculatively parsing the type
 argument list. The Bison frontend approximates it in its scanner (a `<`
 right after an identifier is scanned ahead over type-list tokens to the
 matching `>`; if `(` follows, it opens type arguments). The two agree on
 every input except `f(a < b, c) > (d)`, which the scanner mis-scans and
-the Bison frontend rejects while the handwritten frontend accepts it as a
+the Bison frontend rejects while the recursive-descent frontend accepts it as a
 comparison. Writing `(f(a < b, c)) > (d)` works in both.
 
 ## 8. AST and source locations
@@ -319,7 +319,7 @@ the wording of other syntax errors (`unexpected X; expected Y`) is up to
 each frontend, and the differential check compares ASTs and accept/reject,
 not message text.
 
-The handwritten frontend recovers from a syntax error at the next
+The recursive-descent frontend recovers from a syntax error at the next
 statement boundary (`;`, or the `}` of the enclosing block, matching braces
 on the way), at the next class member (`fn`, `;`, `}`) and at the next
 top-level declaration (`import`, `class`, `enum`, `fn`), so one file can
@@ -334,7 +334,7 @@ cannot overflow the stack.
 ## 10. Known differences and intentional non-copies
 
 The Bison grammar accepts a few forms by accident that this specification
-does not; the handwritten frontend rejects them and the samples never use
+does not; the recursive-descent frontend rejects them and the samples never use
 them:
 
 - A leading comma in an argument list, array literal or parameter list:
