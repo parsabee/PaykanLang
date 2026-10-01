@@ -24,8 +24,7 @@
 namespace paykan {
 
 /// Ordered map from string to V with transparent (string_view) lookup.
-template <typename V>
-using StringMap = std::map<std::string, V, std::less<>>;
+template <typename V> using StringMap = std::map<std::string, V, std::less<>>;
 
 /// Ordered set of strings with transparent (string_view) lookup.
 using StringSet = std::set<std::string, std::less<>>;

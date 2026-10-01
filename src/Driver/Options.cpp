@@ -135,9 +135,9 @@ void printUsage(std::ostream &os, const char *argv0) {
      << "USAGE: " << argv0 << " [options] <source-file> [program arguments]\n\n"
      << "OPTIONS:\n";
   for (const Flag &f : kFlags)
-    os << "  --" << f.Name << std::string(16 - std::string_view(f.Name).size(),
-                                          ' ')
-       << "- " << f.Help << "\n";
+    os << "  --" << f.Name
+       << std::string(16 - std::string_view(f.Name).size(), ' ') << "- "
+       << f.Help << "\n";
   os << "  -O<n>             - Optimization level (0-3)\n"
      << "  --version, -v     - Print the version and exit\n"
      << "  --help, -h        - Print this help and exit\n";

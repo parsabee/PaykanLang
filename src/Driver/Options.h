@@ -18,13 +18,13 @@ struct Options {
   /// file, verbatim, including arguments that look like options.
   std::vector<std::string> ProgramArgs;
 
-  bool DumpAST = false;      // --dump-ast
-  bool TraceParsing = false; // --trace-parser
+  bool DumpAST = false;       // --dump-ast
+  bool TraceParsing = false;  // --trace-parser
   bool TraceScanning = false; // --trace-scanner
-  bool EmitLLVM = false;     // --emit-llvm
-  bool CheckOnly = false;    // --check-only
-  bool TrackHeap = false;    // --track-heap
-  unsigned OptLevel = 0;     // -O<n>
+  bool EmitLLVM = false;      // --emit-llvm
+  bool CheckOnly = false;     // --check-only
+  bool TrackHeap = false;     // --track-heap
+  unsigned OptLevel = 0;      // -O<n>
 
   bool ShowHelp = false;    // --help / -h
   bool ShowVersion = false; // --version / -v
