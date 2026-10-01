@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Error recovery of the handwritten frontend: several independent errors in
-// one file are all reported, at statement, class-member and top-level
+// Error recovery of the recursive-descent frontend: several independent errors
+// in one file are all reported, at statement, class-member and top-level
 // boundaries, and a file with errors always fails.
 
-#include "Frontends/Handwritten.h"
+#include "Frontends/RecursiveDescent.h"
 
 #include <gtest/gtest.h>
 
@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-using namespace paykan::frontend::handwritten;
+using namespace paykan::frontend::recursive_descent;
 
 namespace {
 

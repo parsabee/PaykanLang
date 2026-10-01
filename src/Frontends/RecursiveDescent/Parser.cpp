@@ -8,7 +8,7 @@
 #include <iostream>
 #include <utility>
 
-namespace paykan::frontend::handwritten {
+namespace paykan::frontend::recursive_descent {
 
 using namespace paykan::ast;
 
@@ -1411,4 +1411,4 @@ Expr *Parser::parsePrimary() {
   }
 }
 
-} // namespace paykan::frontend::handwritten
+} // namespace paykan::frontend::recursive_descent

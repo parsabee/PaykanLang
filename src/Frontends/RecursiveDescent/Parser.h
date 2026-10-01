@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Handwritten recursive-descent parser (precedence climbing for expressions)
-// for the Paykan language.  Implements docs/grammar.md and builds the same AST
+// Recursive-descent parser (precedence climbing for expressions) for the
+// Paykan language.  Implements docs/grammar.md and builds the same AST
 // as the Bison frontend, node for node and location for location.
 
 #pragma once
@@ -9,7 +9,7 @@
 #include "AST.h"
 #include "ASTContext.h"
 #include "DiagEngine.h"
-#include "Frontends/Handwritten.h"
+#include "Frontends/RecursiveDescent.h"
 #include "Lexer.h"
 
 #include <cstddef>
@@ -17,7 +17,7 @@
 #include <string_view>
 #include <vector>
 
-namespace paykan::frontend::handwritten {
+namespace paykan::frontend::recursive_descent {
 
 class Parser {
 public:
@@ -127,4 +127,4 @@ private:
   bool tryGenericCallArgs(std::vector<ast::Type *> &out);
 };
 
-} // namespace paykan::frontend::handwritten
+} // namespace paykan::frontend::recursive_descent

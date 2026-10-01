@@ -148,8 +148,8 @@ TEST(Driver, UnknownFrontendIsRejected) {
 TEST(Driver, DumpTokensPrintsTheTokenStream) {
   auto src = writeTmp("fn main() -> int {\n  return 42;\n}\n");
   auto [rc, out] =
-      run(std::string(kPaykan) + " --frontend=handwritten --dump-tokens " +
-          src + " 2>&1");
+      run(std::string(kPaykan) +
+          " --frontend=recursive-descent --dump-tokens " + src + " 2>&1");
   std::filesystem::remove(src);
   EXPECT_EQ(rc, 0) << out;
   EXPECT_NE(out.find("1:1-1:3 KW_FN fn\n"), std::string::npos) << out;
