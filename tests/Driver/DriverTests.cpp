@@ -153,11 +153,21 @@ TEST(Driver, EveryListedFrontendParses) {
     if (name.empty())
       continue;
     ++count;
-    auto [rc, out] = run(std::string(kPaykan) + " --frontend=" + name +
-                         " --check-only " + src + " 2>&1");
+    std::string cmd = kPaykan;
+    cmd += " --frontend=";
+    cmd += name;
+    cmd += " --check-only ";
+    cmd += src;
+    cmd += " 2>&1";
+    auto [rc, out] = run(cmd);
     EXPECT_EQ(rc, 0) << name << ": " << out;
-    auto spaced = run(std::string(kPaykan) + " --frontend " + name +
-                      " --check-only " + src + " 2>&1");
+    std::string spacedCmd = kPaykan;
+    spacedCmd += " --frontend ";
+    spacedCmd += name;
+    spacedCmd += " --check-only ";
+    spacedCmd += src;
+    spacedCmd += " 2>&1";
+    auto spaced = run(spacedCmd);
     EXPECT_EQ(spaced.exitCode, 0) << name << ": " << spaced.out;
   }
   std::filesystem::remove(src);
