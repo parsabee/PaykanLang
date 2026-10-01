@@ -676,15 +676,20 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
     StringSet seen;
     for (auto *p : params) {
       if (!seen.insert(*p).second) {
-        error(loc, "duplicate type parameter '" + *p + "' in " + what + " '" +
-                       name + "'");
+        std::string msg = "duplicate type parameter '";
+        msg += *p;
+        msg += "' in " + what + " '" + name + "'";
+        error(loc, msg);
         pok = false;
         continue;
       }
       if (Ctx.lookupType(*p) || LocalClassNames.count(*p) ||
           ClassTemplates.count(*p)) {
-        error(loc, "type parameter '" + *p + "' of " + what + " '" + name +
-                       "' shadows a type of the same name");
+        std::string msg = "type parameter '";
+        msg += *p;
+        msg +=
+            "' of " + what + " '" + name + "' shadows a type of the same name";
+        error(loc, msg);
         pok = false;
       }
     }
