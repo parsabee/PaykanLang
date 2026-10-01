@@ -26,13 +26,14 @@ struct SemaFileResult {
 
 static SemaFileResult semaCheckFile(const std::string &filePath,
                                     const std::string &projectRoot) {
-  paykan::parser::ParserDriver drv;
+  paykan::parser::ParserDriver drv(paykan::test::testFrontend());
   if (drv.parseFile(filePath) != 0)
     return {false, "parse error"};
   std::ostringstream os;
   paykan::sema::DiagEngine diagEngine(os);
   diagEngine.setSourceInfo(drv.getCurrentFile(), &drv.getSourceLines());
-  paykan::sema::Sema sema(drv.getASTContext(), diagEngine, projectRoot);
+  paykan::sema::Sema sema(drv.getASTContext(), diagEngine, projectRoot,
+                          drv.getFrontendName());
   bool ok = sema.run(drv.getRoot()).Ok;
   return {ok, os.str()};
 }
@@ -221,12 +222,13 @@ TEST(Module, CircularImportErr) {
   std::ofstream(tmp / "a.pkn") << "import b;\nfn fa() -> int { return 1; }\n";
   std::ofstream(tmp / "b.pkn") << "import a;\nfn fb() -> int { return 2; }\n";
 
-  paykan::parser::ParserDriver drv;
+  paykan::parser::ParserDriver drv(paykan::test::testFrontend());
   ASSERT_EQ(drv.parseFile((tmp / "a.pkn").string()), 0);
   std::ostringstream os;
   paykan::sema::DiagEngine diagEngine(os);
   diagEngine.setSourceInfo(drv.getCurrentFile(), &drv.getSourceLines());
-  paykan::sema::Sema sema(drv.getASTContext(), diagEngine, tmp.string());
+  paykan::sema::Sema sema(drv.getASTContext(), diagEngine, tmp.string(),
+                          drv.getFrontendName());
   EXPECT_FALSE(sema.run(drv.getRoot()).Ok);
   EXPECT_NE(os.str().find("circular"), std::string::npos);
   std::filesystem::remove_all(tmp);

@@ -467,13 +467,14 @@ struct SemaFileResult {
 
 static SemaFileResult semaCheckFile(const std::string &filePath,
                                     const std::string &projectRoot) {
-  paykan::parser::ParserDriver drv;
+  paykan::parser::ParserDriver drv(paykan::test::testFrontend());
   if (drv.parseFile(filePath) != 0)
     return {false, "parse error"};
   std::ostringstream os;
   paykan::sema::DiagEngine diagEngine(os);
   diagEngine.setSourceInfo(drv.getCurrentFile(), &drv.getSourceLines());
-  paykan::sema::Sema sema(drv.getASTContext(), diagEngine, projectRoot);
+  paykan::sema::Sema sema(drv.getASTContext(), diagEngine, projectRoot,
+                          drv.getFrontendName());
   bool ok = sema.run(drv.getRoot()).Ok;
   return {ok, os.str()};
 }

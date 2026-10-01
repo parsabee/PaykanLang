@@ -31,7 +31,14 @@ target_link_libraries(parser_tests
             paykan_compile_options
 )
 paykan_link_plugins(parser_tests)
-add_test(NAME ParserTests COMMAND parser_tests)
+# The parser tests run once per enabled frontend; TestUtils.h reads
+# PAYKAN_TEST_FRONTEND to pick the one under test (and compares every
+# parse against the other enabled frontends).
+foreach(fe IN LISTS PAYKAN_FRONTENDS)
+    add_test(NAME ParserTests.${fe} COMMAND parser_tests)
+    set_tests_properties(ParserTests.${fe} PROPERTIES
+        ENVIRONMENT "PAYKAN_TEST_FRONTEND=${fe}")
+endforeach()
 
 # --- Sema tests -------------------------------------------------------------
 add_executable(sema_tests
@@ -55,10 +62,15 @@ target_link_libraries(sema_tests
     PRIVATE gtest_main
             paykan_sema
             paykan_frontend
+            paykan_ast_printer
             paykan_compile_options
 )
 paykan_link_plugins(sema_tests)
-add_test(NAME SemaTests COMMAND sema_tests)
+foreach(fe IN LISTS PAYKAN_FRONTENDS)
+    add_test(NAME SemaTests.${fe} COMMAND sema_tests)
+    set_tests_properties(SemaTests.${fe} PROPERTIES
+        ENVIRONMENT "PAYKAN_TEST_FRONTEND=${fe}")
+endforeach()
 
 # --- CodeGen / E2E tests ----------------------------------------------------
 add_executable(codegen_tests
@@ -94,6 +106,7 @@ target_link_libraries(codegen_tests
             paykan_codegen
             paykan_sema
             paykan_frontend
+            paykan_ast_printer
             paykan_runtime
             paykan_compile_options
             ${TEST_LLVM_LIBS}
@@ -138,18 +151,39 @@ target_link_libraries(driver_tests
 add_dependencies(driver_tests paykan)
 add_test(NAME DriverTests COMMAND driver_tests)
 
-# --- Handwritten frontend tests (lexer, recovery, fuzz smoke) -----------------
+# --- Frontend tests: handwritten lexer, recovery, fuzz smoke; and the ----------
+# --- differential check of every enabled frontend over the samples corpus ----
 add_executable(frontend_tests
     Frontend/LexerTests.cpp
     Frontend/RecoveryTests.cpp
     Frontend/FuzzSmokeTests.cpp
+    Frontend/DifferentialTests.cpp
 )
 target_compile_definitions(frontend_tests
     PRIVATE PAYKAN_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/samples"
+            PAYKAN_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/example_program"
 )
 target_link_libraries(frontend_tests
     PRIVATE gtest_main
-            paykan_frontend_handwritten
+            paykan_frontend
+            paykan_ast_printer
             paykan_compile_options
 )
+# paykan_frontend_handwritten (whose public header the lexer/recovery/fuzz
+# tests use directly) comes in through the plugin link below.
+paykan_link_plugins(frontend_tests)
 add_test(NAME FrontendTests COMMAND frontend_tests)
+
+# The same check through the driver (`paykan --frontend=<name> --dump-ast`),
+# for the first two enabled frontends.
+if(PAYKAN_NUM_FRONTENDS GREATER 1)
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        list(GET PAYKAN_FRONTENDS 0 PAYKAN_DIFF_FE_A)
+        list(GET PAYKAN_FRONTENDS 1 PAYKAN_DIFF_FE_B)
+        add_test(NAME FrontendDifferential
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/diff_frontends.py
+                    --paykan $<TARGET_FILE:paykan>
+                    --frontends ${PAYKAN_DIFF_FE_A},${PAYKAN_DIFF_FE_B})
+    endif()
+endif()

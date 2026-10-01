@@ -141,6 +141,29 @@ TEST(Driver, UnknownFrontendIsRejected) {
       << out;
 }
 
+// ---------------------------------------------------------------------------
+// --dump-tokens
+// ---------------------------------------------------------------------------
+
+TEST(Driver, DumpTokensPrintsTheTokenStream) {
+  auto src = writeTmp("fn main() -> int {\n  return 42;\n}\n");
+  auto [rc, out] =
+      run(std::string(kPaykan) + " --frontend=handwritten --dump-tokens " +
+          src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_EQ(rc, 0) << out;
+  EXPECT_NE(out.find("1:1-1:3 KW_FN fn\n"), std::string::npos) << out;
+  EXPECT_NE(out.find("2:10-2:12 INT 42\n"), std::string::npos) << out;
+  EXPECT_NE(out.find("4:1-4:1 EOF\n"), std::string::npos) << out;
+}
+
+TEST(Driver, DumpTokensFailsOnUnreadableFile) {
+  auto [rc, out] = run(std::string(kPaykan) +
+                       " --dump-tokens /nonexistent/paykan_no_such.pkn 2>&1");
+  EXPECT_NE(rc, 0);
+  EXPECT_NE(out.find("cannot open"), std::string::npos) << out;
+}
+
 TEST(Driver, UnknownOptionIsRejected) {
   auto src = writeTmp("fn main() -> int { return 0; }");
   auto [rc, out] =

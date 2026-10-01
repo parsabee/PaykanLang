@@ -5,8 +5,11 @@
 
 #pragma once
 
+#include "ASTPrinter.h"
 #include "ParserDriver.h"
 #include "Sema.h"
+
+#include <gtest/gtest.h>
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -66,7 +69,31 @@ inline void restoreFd(int fd, int saved) {
   close(saved);
 }
 
+/// The frontend the tests parse with: PAYKAN_TEST_FRONTEND when set (the
+/// per-frontend CTest entries set it), otherwise the build's default.
+inline std::string testFrontend() {
+  if (const char *fe = std::getenv("PAYKAN_TEST_FRONTEND"); fe && *fe)
+    return fe;
+  return std::string(frontend::defaultFrontend());
+}
+
+/// The AST of @p driver printed with ASTPrinter, or "" after a failed parse.
+inline std::string dumpAST(parser::ParserDriver &driver) {
+  if (!driver.getRoot())
+    return "";
+  std::ostringstream os;
+  ast::ASTPrinter printer(os);
+  printer.visit(driver.getRoot());
+  return os.str();
+}
+
 /// Parse source code. Returns {success, driver (moved)}.
+///
+/// Every frontend must build the same AST and accept the same inputs
+/// (docs/grammar.md), so when more than one is built the source is also
+/// parsed with every other registered frontend and the results compared;
+/// a difference fails the calling test.  This makes every test input part
+/// of the differential check.
 struct ParseResult {
   bool Ok;
   std::unique_ptr<parser::ParserDriver> Driver;
@@ -74,8 +101,29 @@ struct ParseResult {
 
 inline ParseResult parse(const std::string &source) {
   auto path = writeTempFile(source);
-  auto driver = std::make_unique<parser::ParserDriver>();
+  std::string primary = testFrontend();
+  auto driver = std::make_unique<parser::ParserDriver>(primary);
   int rc = driver->parseFile(path);
+
+  for (const std::string &other : frontend::Registry::get().names()) {
+    if (other == primary)
+      continue;
+    parser::ParserDriver otherDriver(other);
+    std::ostringstream quiet; // the primary parse already printed them
+    sema::DiagEngine diag(quiet);
+    otherDriver.setDiagEngine(&diag);
+    int otherRc = otherDriver.parseFile(path);
+    EXPECT_EQ(rc == 0, otherRc == 0) << "frontends '" << primary << "' and '"
+                                     << other << "' disagree on accepting:\n"
+                                     << source;
+    if (rc == 0 && otherRc == 0) {
+      EXPECT_EQ(dumpAST(*driver), dumpAST(otherDriver))
+          << "frontends '" << primary << "' and '" << other
+          << "' build different ASTs for:\n"
+          << source;
+    }
+  }
+
   std::filesystem::remove(path);
   return {rc == 0, std::move(driver)};
 }
@@ -95,7 +143,7 @@ inline SemaResult semaCheck(const std::string &source) {
   std::ostringstream diagOS;
   sema::DiagEngine diag(diagOS);
   diag.setSourceInfo(driver->getCurrentFile(), &driver->getSourceLines());
-  sema::Sema sema(driver->getASTContext(), diag, "");
+  sema::Sema sema(driver->getASTContext(), diag, "", driver->getFrontendName());
   auto semaCtx = sema.run(driver->getRoot());
   return {semaCtx.Ok, diagOS.str(), semaCtx.ErrorCount};
 }
