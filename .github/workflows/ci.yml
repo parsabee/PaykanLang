@@ -74,7 +74,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build-asan/third-party
-          key: third-party-macos-arm64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
+          # Keyed per build directory: the archive stores the path it was saved
+          # from, so a key shared with the build/third-party jobs restores
+          # nothing here and is never saved (the key already exists).
+          key: third-party-macos-arm64-asan-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (ASan)
         run: cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_ASAN=ON
@@ -102,7 +105,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build-ubsan/third-party
-          key: third-party-macos-arm64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
+          # Keyed per build directory: the archive stores the path it was saved
+          # from, so a key shared with the build/third-party jobs restores
+          # nothing here and is never saved (the key already exists).
+          key: third-party-macos-arm64-ubsan-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (UBSan)
         run: cmake -B build-ubsan -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_UBSAN=ON
