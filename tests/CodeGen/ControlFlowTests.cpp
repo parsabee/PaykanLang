@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // Codegen tests: if/else, while, logical operators, ternary, break/continue.
 
-#include "TestUtils.h"
+#include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
 
 using namespace paykan::test;

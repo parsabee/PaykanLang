@@ -3,6 +3,9 @@
 
 #include "ASTPrinter.h"
 
+#include <cstdio>
+#include <ostream>
+
 namespace paykan {
 namespace ast {
 
@@ -48,7 +51,7 @@ void ASTPrinter::visitChildren(CallExpr *node) {
 
 // -- Constructor -------------------------------------------------------------
 
-ASTPrinter::ASTPrinter(llvm::raw_ostream &os) : OS(os) {}
+ASTPrinter::ASTPrinter(std::ostream &os) : OS(os) {}
 
 // -- Top-level ---------------------------------------------------------------
 
@@ -95,7 +98,7 @@ void ASTPrinter::visitTranslationUnit(TranslationUnit *node) {
 }
 
 // Render `<T, U>` for a generic declaration's type parameters.
-static void printTypeParams(llvm::raw_ostream &os,
+static void printTypeParams(std::ostream &os,
                             const std::vector<const std::string *> &params) {
   if (params.empty())
     return;
@@ -241,7 +244,11 @@ void ASTPrinter::visitFloatLiteral(FloatLiteral *node) {
   printIndent();
   OS << "FloatLiteral";
   printLoc(node);
-  OS << " " << node->getValue() << "\n";
+  // Exponent form with six fractional digits ("3.140000e+00"): the format
+  // the dump has always used, kept stable for the differential frontend check.
+  char buf[64];
+  std::snprintf(buf, sizeof buf, "%e", node->getValue());
+  OS << " " << buf << "\n";
 }
 
 void ASTPrinter::visitBoolLiteral(BoolLiteral *node) {

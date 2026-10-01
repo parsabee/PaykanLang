@@ -4,6 +4,7 @@
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
+#include <sstream>
 
 using namespace paykan::ast;
 using namespace paykan::test;
@@ -42,11 +43,12 @@ CheckedProgram check(const std::string &source) {
     r.Diagnostics = "parse error";
     return r;
   }
-  llvm::raw_string_ostream os(r.Diagnostics);
+  std::ostringstream os;
   paykan::sema::DiagEngine diag(os);
   diag.setSourceInfo(r.Driver->getCurrentFile(), &r.Driver->getSourceLines());
   paykan::sema::Sema sema(r.Driver->getASTContext(), diag, "");
   r.Ok = (bool)sema.run(r.Driver->getRoot());
+  r.Diagnostics = os.str();
   return r;
 }
 
@@ -485,14 +487,13 @@ SemaResult semaCheckFile(const std::string &path) {
   paykan::parser::ParserDriver driver;
   if (driver.parseFile(path) != 0)
     return {false, "parse error", 1};
-  std::string diagStr;
-  llvm::raw_string_ostream os(diagStr);
+  std::ostringstream os;
   paykan::sema::DiagEngine diag(os);
   diag.setSourceInfo(driver.getCurrentFile(), &driver.getSourceLines());
   paykan::sema::Sema sema(driver.getASTContext(), diag,
                           std::filesystem::path(path).parent_path().string());
   auto ctx = sema.run(driver.getRoot());
-  return {ctx.Ok, diagStr, ctx.ErrorCount};
+  return {ctx.Ok, os.str(), ctx.ErrorCount};
 }
 
 const char *kGenLib = R"(

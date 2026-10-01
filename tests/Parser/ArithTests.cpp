@@ -4,6 +4,7 @@
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
+#include <sstream>
 
 using namespace paykan::test;
 
@@ -21,14 +22,13 @@ struct DiagParseResult {
 DiagParseResult parseWithDiags(const std::string &source) {
   auto path = writeTempFile(source);
   paykan::parser::ParserDriver driver;
-  std::string text;
-  llvm::raw_string_ostream os(text);
+  std::ostringstream os;
   paykan::sema::DiagEngine diag(os);
   diag.setSourceInfo(path, &driver.getSourceLines());
   driver.setDiagEngine(&diag);
   int rc = driver.parseFile(path);
   std::filesystem::remove(path);
-  return {rc == 0, text, diag.getDiagnostics()};
+  return {rc == 0, os.str(), diag.getDiagnostics()};
 }
 
 } // namespace
@@ -350,14 +350,13 @@ TEST(Arith, UnopenableFileFailsCleanly) {
   // scanBegin used to exit(EXIT_FAILURE) inside library code; parseFile must
   // instead fail with a diagnostic and a non-zero return.
   paykan::parser::ParserDriver driver;
-  std::string text;
-  llvm::raw_string_ostream os(text);
+  std::ostringstream os;
   paykan::sema::DiagEngine diag(os);
   driver.setDiagEngine(&diag);
   int rc = driver.parseFile("/nonexistent/paykan_no_such_file.pkn");
   EXPECT_NE(rc, 0);
   EXPECT_EQ(driver.getErrorCount(), 1u);
-  EXPECT_NE(text.find("cannot open"), std::string::npos);
+  EXPECT_NE(os.str().find("cannot open"), std::string::npos);
 }
 
 TEST(Arith, MissingSemicolon) {

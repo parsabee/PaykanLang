@@ -23,15 +23,11 @@ add_executable(parser_tests
 target_include_directories(parser_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 )
-target_include_directories(parser_tests SYSTEM
-    PRIVATE ${LLVM_INCLUDE_DIRS}
-)
 target_link_libraries(parser_tests
     PRIVATE gtest_main
             paykan_parser
             paykan_ast_printer
             paykan_compile_options
-            ${TEST_LLVM_LIBS}
 )
 add_test(NAME ParserTests COMMAND parser_tests)
 
@@ -53,15 +49,11 @@ add_executable(sema_tests
 target_include_directories(sema_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 )
-target_include_directories(sema_tests SYSTEM
-    PRIVATE ${LLVM_INCLUDE_DIRS}
-)
 target_link_libraries(sema_tests
     PRIVATE gtest_main
             paykan_sema
             paykan_parser
             paykan_compile_options
-            ${TEST_LLVM_LIBS}
 )
 add_test(NAME SemaTests COMMAND sema_tests)
 
@@ -134,9 +126,6 @@ add_executable(driver_tests
 )
 target_compile_definitions(driver_tests
     PRIVATE PAYKAN_BIN="$<TARGET_FILE:paykan>"
-)
-target_include_directories(driver_tests SYSTEM
-    PRIVATE ${LLVM_INCLUDE_DIRS}
 )
 target_link_libraries(driver_tests
     PRIVATE gtest_main

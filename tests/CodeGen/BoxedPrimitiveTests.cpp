@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // CodeGen tests: IntStr / FloatStr builtins, match on boxed types, Error paths.
 
-#include "TestUtils.h"
+#include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
 
 using namespace paykan::test;

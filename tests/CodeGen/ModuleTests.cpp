@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // Codegen tests: import / module loading across file boundaries.
 
-#include "TestUtils.h"
+#include "CodeGenTestUtils.h"
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>

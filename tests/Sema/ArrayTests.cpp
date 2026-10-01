@@ -4,6 +4,7 @@
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
+#include <sstream>
 
 using namespace paykan::test;
 
@@ -290,13 +291,12 @@ SemaRun semaRun(const std::string &source) {
   auto [parseOk, driver] = parse(source);
   if (!parseOk)
     return {false, "parse error", std::move(driver)};
-  std::string diagStr;
-  llvm::raw_string_ostream diagOS(diagStr);
+  std::ostringstream diagOS;
   paykan::sema::DiagEngine diag(diagOS);
   diag.setSourceInfo(driver->getCurrentFile(), &driver->getSourceLines());
   paykan::sema::Sema sema(driver->getASTContext(), diag, "");
   auto semaCtx = sema.run(driver->getRoot());
-  return {semaCtx.Ok, diagStr, std::move(driver)};
+  return {semaCtx.Ok, diagOS.str(), std::move(driver)};
 }
 
 /// Number of specialized Array<...> ClassTypes registered under @p name.

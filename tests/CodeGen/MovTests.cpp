@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // Codegen tests: `mov` lowering — value/ownership transfer behavior.
 
-#include "TestUtils.h"
+#include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
 
 extern "C" {

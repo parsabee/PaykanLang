@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // CodeGen tests: char primitive type end-to-end.
 
-#include "TestUtils.h"
+#include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
 
 using namespace paykan::test;

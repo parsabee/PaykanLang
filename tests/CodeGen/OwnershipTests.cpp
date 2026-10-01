@@ -16,7 +16,7 @@
 // double free typically crashes, but a "fixed" path that leaks instead would
 // only be caught by the tracking allocator.
 
-#include "TestUtils.h"
+#include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
 
 extern "C" {

@@ -5,7 +5,8 @@
 #pragma once
 
 #include "ASTVisitor.h"
-#include <llvm/Support/raw_ostream.h>
+
+#include <iosfwd>
 #include <vector>
 
 namespace paykan {
@@ -25,7 +26,7 @@ namespace ast {
 //         `-IntegerLiteral <1:18-1:18> 1
 //
 class ASTPrinter : public ASTVisitor<ASTPrinter, void> {
-  llvm::raw_ostream &OS;
+  std::ostream &OS;
 
   // Characters for drawing the tree.
   static constexpr const char *Pipe = "| ";
@@ -51,7 +52,7 @@ class ASTPrinter : public ASTVisitor<ASTPrinter, void> {
   void visitChildren(MethodCallExpr *node);
 
 public:
-  explicit ASTPrinter(llvm::raw_ostream &os);
+  explicit ASTPrinter(std::ostream &os);
 
   // -- Visitor overrides (generated from X-macros) -------------------------
   // `Cast` is a type name used in a declarator (`Cast *node`) and cannot be

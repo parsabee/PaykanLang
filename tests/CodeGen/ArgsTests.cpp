@@ -3,7 +3,7 @@
 //
 // End-to-end tests for main(args: Str[]) parameter passing.
 
-#include "TestUtils.h"
+#include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
 
 using namespace paykan::test;

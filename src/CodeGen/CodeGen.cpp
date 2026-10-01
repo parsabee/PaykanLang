@@ -14,6 +14,7 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Verifier.h>
+#include <llvm/Linker/Linker.h>
 
 #include <llvm/Passes/PassBuilder.h>
 
@@ -423,6 +424,29 @@ void CodeGen::optimize(llvm::OptimizationLevel level) {
 
   llvm::ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(level);
   MPM.run(*Module, MAM);
+}
+
+void CodeGen::optimize(unsigned level) {
+  static const llvm::OptimizationLevel levels[] = {
+      llvm::OptimizationLevel::O0,
+      llvm::OptimizationLevel::O1,
+      llvm::OptimizationLevel::O2,
+      llvm::OptimizationLevel::O3,
+  };
+  optimize(levels[level < 4 ? level : 3]);
+}
+
+bool CodeGen::verify(std::string &err) const {
+  llvm::raw_string_ostream errStream(err);
+  return !llvm::verifyModule(*Module, &errStream);
+}
+
+bool CodeGen::linkImportedModules() {
+  auto imported = takeImportedModules();
+  for (auto &impMod : imported)
+    if (llvm::Linker::linkModules(*Module, std::move(impMod)))
+      return false;
+  return true;
 }
 
 // -- Entry point -------------------------------------------------------------

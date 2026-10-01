@@ -3,7 +3,7 @@
 // Codegen tests: imported signatures that name other types of the imported
 // module (classes, enums, arrays of classes) and transitively-reached classes.
 
-#include "TestUtils.h"
+#include "CodeGenTestUtils.h"
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>

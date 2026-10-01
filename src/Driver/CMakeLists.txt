@@ -5,7 +5,7 @@
 # ----------------------------------------------------------------------------
 
 # -- paykan – compiler driver -------------------------------------------------
-add_executable(paykan main.cpp)
+add_executable(paykan main.cpp Options.cpp)
 target_include_directories(paykan SYSTEM
     PRIVATE ${LLVM_INCLUDE_DIRS}
 )

@@ -4,7 +4,7 @@
 // Uses the tracking allocator (Paykan_heap_set_tracking /
 // Paykan_heap_live_blocks).
 
-#include "TestUtils.h"
+#include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
 
 extern "C" {

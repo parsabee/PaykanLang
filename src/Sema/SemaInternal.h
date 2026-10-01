@@ -8,7 +8,17 @@
 
 #include "AST.h"
 
-#include <llvm/ADT/ArrayRef.h>
+#include <cassert>
+#include <vector>
+
+/// Marks a point that must never be reached (an exhaustive switch over an
+/// enum has run out of cases).  Asserts in debug builds; in release builds
+/// the compiler may assume the point is unreachable.
+#define PAYKAN_UNREACHABLE(msg)                                                \
+  do {                                                                         \
+    assert(false && (msg));                                                    \
+    __builtin_unreachable();                                                   \
+  } while (0)
 
 namespace paykan {
 namespace sema {
@@ -18,7 +28,7 @@ namespace detail {
 bool stmtAlwaysReturns(ast::Stmt *s);
 
 /// Returns true if every path through the list of statements ends in a return.
-bool blockAlwaysReturns(llvm::ArrayRef<ast::Stmt *> stmts);
+bool blockAlwaysReturns(const std::vector<ast::Stmt *> &stmts);
 
 /// Returns true if the arms of `ms` cover every value of its subject: a
 /// wildcard arm; every variant of an enum subject; both `True` and `False`
