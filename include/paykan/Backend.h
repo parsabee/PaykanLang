@@ -89,6 +89,10 @@ public:
 
   virtual Capabilities capabilities() const = 0;
 
+  /// A one-line description for --version / --list-backends, typically the
+  /// toolchain the backend is built on ("LLVM 17.0.6"); "" for none.
+  virtual std::string describe() const { return {}; }
+
   /// Whether the backend reads Input::Program.  The driver runs the lowering
   /// (and the verifier) only for backends that do.  Legacy AST backends
   /// return false; everything else keeps the default.
@@ -101,9 +105,9 @@ public:
 
   /// Execute the program and return its exit code.  @p args are the
   /// program's arguments, args[0] being the script path.  Only called when
-  /// capabilities().Run is set.
+  /// capabilities().Run is set; the default fails.
   virtual StatusOr<int> run(const Input &in, std::span<const std::string> args,
-                            const RunOptions &opts) = 0;
+                            const RunOptions &opts);
 };
 
 using Registry = plugin::Registry<Backend>;

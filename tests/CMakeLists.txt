@@ -3,9 +3,11 @@
 # Unit tests for the Paykan compiler (Google Test)
 # ----------------------------------------------------------------------------
 
-llvm_map_components_to_libnames(TEST_LLVM_LIBS
-    core support passes orcjit native
-)
+if("llvm" IN_LIST PAYKAN_BACKENDS)
+    llvm_map_components_to_libnames(TEST_LLVM_LIBS
+        core support passes orcjit native
+    )
+endif()
 
 # --- Parser tests -----------------------------------------------------------
 add_executable(parser_tests
@@ -59,7 +61,8 @@ target_link_libraries(sema_tests
 paykan_link_plugins(sema_tests)
 add_test(NAME SemaTests COMMAND sema_tests)
 
-# --- CodeGen / E2E tests ----------------------------------------------------
+# --- CodeGen / E2E tests (the llvm backend) ---------------------------------
+if("llvm" IN_LIST PAYKAN_BACKENDS)
 add_executable(codegen_tests
     CodeGen/ArithTests.cpp
     CodeGen/FuncTests.cpp
@@ -99,6 +102,18 @@ target_link_libraries(codegen_tests
 )
 paykan_link_plugins(codegen_tests)
 add_test(NAME CodeGenTests COMMAND codegen_tests)
+endif()
+
+# --- PIR tests (printer, parser, verifier) ----------------------------------
+add_executable(pir_tests
+    PIR/PIRTests.cpp
+)
+target_link_libraries(pir_tests
+    PRIVATE gtest_main
+            paykan_pir
+            paykan_compile_options
+)
+add_test(NAME PIRTests COMMAND pir_tests)
 
 # --- Runtime tests ----------------------------------------------------------
 add_executable(runtime_tests

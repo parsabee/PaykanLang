@@ -1,9 +1,11 @@
 # src/CMakeLists.txt
 # ----------------------------------------------------------------------------
 # Paykan compiler:
-#   AST/ Diag/ Frontend/ ASTPrinter/ Sema/  – the core (standard C++ only)
+#   AST/ Diag/ Frontend/ ASTPrinter/ Sema/ PIR/ Backend/
+#                     – the core (standard C++ only)
 #   Frontends/<name>/ – frontend plugins, built when listed in PAYKAN_FRONTENDS
-#   CodeGen/ JIT/     – LLVM code generation and JIT
+#   Backends/<name>/  – backend plugins, built when listed in PAYKAN_BACKENDS
+#                       (Backends/LLVM pulls in CodeGen/ and JIT/)
 #   Runtime/          – the C runtime linked into every program
 #   Driver/           – executable entry points (mains for all project binaries)
 # ----------------------------------------------------------------------------
@@ -17,8 +19,15 @@ foreach(fe IN LISTS PAYKAN_FRONTENDS)
     endif()
 endforeach()
 add_subdirectory(ASTPrinter)
+add_subdirectory(PIR)
 add_subdirectory(Sema)
-add_subdirectory(CodeGen)
+add_subdirectory(Backend)
 add_subdirectory(Runtime)
-add_subdirectory(JIT)
+foreach(be IN LISTS PAYKAN_BACKENDS)
+    if(be STREQUAL "llvm")
+        add_subdirectory(Backends/LLVM)
+    elseif(be STREQUAL "mlir")
+        add_subdirectory(Backends/MLIR)
+    endif()
+endforeach()
 add_subdirectory(Driver)

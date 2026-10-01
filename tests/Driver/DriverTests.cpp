@@ -49,6 +49,22 @@ static CmdResult run(const std::string &cmd) {
   return {WEXITSTATUS(rc), out};
 }
 
+// True when the build has a backend that can run programs (an empty
+// PAYKAN_BACKENDS builds a compiler that only parses and checks).
+static bool hasBackend() {
+  static const bool has = [] {
+    auto r = run(std::string(kPaykan) + " --list-backends 2>&1");
+    return r.exitCode == 0 && !r.out.empty();
+  }();
+  return has;
+}
+
+#define REQUIRE_BACKEND()                                                      \
+  do {                                                                         \
+    if (!hasBackend())                                                         \
+      GTEST_SKIP() << "this build has no backend";                             \
+  } while (0)
+
 // ---------------------------------------------------------------------------
 // --check-only
 // ---------------------------------------------------------------------------
@@ -85,7 +101,8 @@ TEST(Driver, VersionFlagPrintsVersion) {
   EXPECT_EQ(rc, 0);
   EXPECT_NE(out.find("PaykanLang"), std::string::npos);
   EXPECT_NE(out.find(paykan::kVersion), std::string::npos);
-  EXPECT_NE(out.find("LLVM"), std::string::npos);
+  // The build's frontends and backends are listed too.
+  EXPECT_NE(out.find("frontend "), std::string::npos) << out;
 }
 
 TEST(Driver, ShortVersionFlagMatchesLong) {
@@ -153,6 +170,7 @@ TEST(Driver, UnknownOptionIsRejected) {
 }
 
 TEST(Driver, ProgramArgumentsFollowTheSourceFile) {
+  REQUIRE_BACKEND();
   // Everything after the source file is the program's, even if it looks
   // like an option.
   auto src = writeTmp("fn main(args: Str[]) -> int { return args.len(); }");
@@ -167,6 +185,7 @@ TEST(Driver, ProgramArgumentsFollowTheSourceFile) {
 // ---------------------------------------------------------------------------
 
 TEST(Driver, IntDivByZeroTraps) {
+  REQUIRE_BACKEND();
   auto src =
       writeTmp("fn main() -> int { z: int = 0; q: int = 7 / z; return q; }");
   auto [rc, out] = run(std::string(kPaykan) + " " + src + " 2>&1");
@@ -176,6 +195,7 @@ TEST(Driver, IntDivByZeroTraps) {
 }
 
 TEST(Driver, IntModByZeroTraps) {
+  REQUIRE_BACKEND();
   auto src =
       writeTmp("fn main() -> int { z: int = 0; r: int = 7 % z; return r; }");
   auto [rc, out] = run(std::string(kPaykan) + " " + src + " 2>&1");
@@ -186,6 +206,7 @@ TEST(Driver, IntModByZeroTraps) {
 
 // INT64_MIN / -1 does not fit in an int: a runtime panic, not SIGFPE.
 TEST(Driver, IntDivOverflowTraps) {
+  REQUIRE_BACKEND();
   auto src = writeTmp("fn main() -> int { m: int = -9223372036854775807 - 1; "
                       "d: int = -1; q: int = m / d; return q; }");
   auto [rc, out] = run(std::string(kPaykan) + " " + src + " 2>&1");
@@ -197,6 +218,7 @@ TEST(Driver, IntDivOverflowTraps) {
 
 // INT64_MIN % -1 is mathematically 0 and must not trap.
 TEST(Driver, IntModMinByNegOneIsZero) {
+  REQUIRE_BACKEND();
   auto src = writeTmp("fn main() -> int { m: int = -9223372036854775807 - 1; "
                       "d: int = -1; r: int = m % d; println(StrInt(r)); "
                       "return 7 % d + 3; }");
@@ -207,6 +229,7 @@ TEST(Driver, IntModMinByNegOneIsZero) {
 }
 
 TEST(Driver, IntDivNonZeroSucceeds) {
+  REQUIRE_BACKEND();
   auto src = writeTmp("fn main() -> int { return 17 / 5; }");
   auto [rc, _] = run(std::string(kPaykan) + " " + src + " 2>&1");
   std::filesystem::remove(src);

@@ -49,13 +49,15 @@ that may be `null`.
 
 ## 2. Values and constants
 
-Instruction results are SSA names `%name` (unique per function; the printer
-suffixes them with a number).  Function parameters are values.  Operands are
-either values or constants:
+Instruction results are SSA names `%name` (unique per function).  The printer
+writes every value as `%name.N` where `N` is its id (`%N` when it has no name);
+hand-written text may use bare `%name`s and the parser numbers them.  Function
+parameters are values.  Operands are either values or constants:
 
 ```
-42        i64        1.5  / 1.0e3   f64     true / false  bool
-'a' / '\n' / '\x41'   char          null    box or obj (typed by context)
+42        i64        1.5  / 1.0e3   f64 (a float literal always has a '.' or an exponent)
+true / false  bool   'a' / '\n' / '\x41'   char
+null box / null obj  a null box or obj (a bare `null` is a box)
 @sym      the address of a module-level symbol (see §4): cstr/data/bytes globals
           are `ptr`, extern objects are `obj`, extern vtables are `ptr`
 ```
@@ -76,7 +78,10 @@ extern fn @add(i64, i64) -> i64 module "lib/math"  ; defined in another PIR modu
 ```
 
 Locals are declared at the top of the function body (the lowering hoists them,
-like LLVM entry-block allocas) and read/written with `load`/`store`.  Every
+like LLVM entry-block allocas) and read/written with `load`/`store`.  Several
+locals may share a name (a match binding gets a twin slot), so the printer
+writes a local as `%name.I` with `I` its index; hand-written text may use any
+spelling as long as declaration and uses agree.  Every
 Paykan variable is a local; `mov` nulls the slot it moves out of, so the
 scope-exit `release` of a moved variable is a release of `null` (the runtime
 accepts it).
@@ -101,7 +106,8 @@ bytes @.tk0   = [0, 4]             ; tuple slot-kind descriptor, PaykanTupleKind
 extern obj    @PaykanObject_None   ; runtime object singletons (`obj`)
 extern vtable @PaykanArray_vtable  ; runtime vtable globals (`ptr`)
 
-class Point : Obj {                ; layout + vtable, see §5
+class Point {                      ; layout + vtable, see §5 (`: Super` names
+                                   ; the superclass; none for a root class)
   field x: i64
   field name: box
   vtable {
@@ -111,7 +117,7 @@ class Point : Obj {                ; layout + vtable, see §5
     move     = @Point_move : (obj, i64, i64) -> void
   }
 }
-extern class Adder : Obj module "helper" { field n: i64 }   ; layout only
+extern class Adder module "helper" { field n: i64 }   ; layout only
 
 fn / extern fn                      ; §3
 ```
@@ -365,6 +371,11 @@ fn @main() -> i64 {
 ```
 
 Comments start with `;` and run to the end of the line.  Identifiers after `@`
-and `%` may contain any character except whitespace, `(`, `)`, `,`, `[`, `]`,
-`{`, `}` and `:` (so `@Box<int>`, `@helper::add` and `@first<int>` are
-valid); a name containing those characters is written quoted: `@"a b"`.
+and `%`, class names and field names may contain any character except
+whitespace, `(`, `)`, `,`, `[`, `]`, `{`, `}`, `:` and `"` (so `@Box<int>` and
+`@first<int>` are valid); a name containing those characters is written quoted:
+`@"helper::add"`, `"helper::Adder".n`.  The printer (`paykan::pir::print`)
+emits exactly this format and the parser (`paykan::pir::parseProgram`) reads
+it back; `paykan::pir::verify` checks §9.  A printed module separates its
+extern declarations from its definitions with blank lines, which the parser
+ignores.

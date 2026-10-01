@@ -26,4 +26,7 @@ std::string toString(const Program &p);
 void print(const Operand &op, std::ostream &os);
 void print(const Signature &sig, std::ostream &os);
 
+/// The mnemonic of an opcode ("add", "field.load", ...).
+const char *opcodeName(Opcode op);
+
 } // namespace paykan::pir
