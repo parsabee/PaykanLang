@@ -212,8 +212,8 @@ PaykanShared *PaykanTuple_toString(PaykanObject *self) {
     }
   }
   sb_append(&sb, ")", 1);
-  PaykanString *out = PaykanString_new(sb.data ? sb.data : "()",
-                                       sb.data ? (int64_t)sb.len : 2);
+  PaykanString *out =
+      PaykanString_new(sb.data ? sb.data : "()", sb.data ? (int64_t)sb.len : 2);
   Paykan_free(sb.data);
   return PaykanShared_new((PaykanObject *)out);
 }

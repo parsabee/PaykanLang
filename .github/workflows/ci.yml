@@ -84,8 +84,9 @@ jobs:
 
       - name: Test
         env:
-          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:detect_stack_use_after_return=1
-          LSAN_OPTIONS: suppressions=${{ github.workspace }}/.lsan_suppressions.txt
+          # Apple clang has no LeakSanitizer on arm64 (see SanitizerSetup.cmake);
+          # detect_leaks=1 would abort ASan at startup as unsupported.
+          ASAN_OPTIONS: abort_on_error=1:detect_stack_use_after_return=1
         run: ctest --test-dir build-asan --output-on-failure --parallel 4
 
   # ---------------------------------------------------------------------------
