@@ -33,6 +33,7 @@ Result parse(const std::string &src) {
 
 std::vector<size_t> errorLines(const Result &r) {
   std::vector<size_t> lines;
+  lines.reserve(r.Diags.size());
   for (const auto &d : r.Diags)
     lines.push_back(d.Loc.getLineStart());
   return lines;
