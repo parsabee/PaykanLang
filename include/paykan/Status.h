@@ -8,7 +8,7 @@
 
 #pragma once
 
-#include <cassert>
+#include <cstdlib>
 #include <optional>
 #include <string>
 #include <utility>
@@ -53,13 +53,16 @@ public:
   bool isOk() const { return Value.has_value(); }
   explicit operator bool() const { return isOk(); }
 
-  /// The value; only when isOk().
+  /// The value; only when isOk().  Asking for the value of an error is a
+  /// bug, so it ends the program rather than returning something.
   T &value() {
-    assert(isOk());
+    if (!Value.has_value())
+      std::abort();
     return *Value;
   }
   const T &value() const {
-    assert(isOk());
+    if (!Value.has_value())
+      std::abort();
     return *Value;
   }
   T &operator*() { return value(); }
