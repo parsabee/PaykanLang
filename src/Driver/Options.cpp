@@ -93,6 +93,7 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
   bool optionsEnded = false;
   bool sawCommand = false;
   bool emitLLVM = false;
+  bool emitC = false;
 
   for (int i = 1; i < argc; ++i) {
     std::string_view arg = argv[i];
@@ -129,6 +130,10 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
     }
     if (name == "emit-llvm") {
       emitLLVM = true;
+      continue;
+    }
+    if (name == "emit-c") {
+      emitC = true;
       continue;
     }
 
@@ -184,6 +189,15 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
     o.Backend = "llvm";
     o.EmitSource = true;
   }
+  if (emitC) {
+    if (!o.Backend.empty() && o.Backend != "c") {
+      r.Error = "--emit-c needs the c backend, but --backend=" + o.Backend +
+                " was given";
+      return r;
+    }
+    o.Backend = "c";
+    o.EmitSource = true;
+  }
   bool infoOnly =
       o.ShowHelp || o.ShowVersion || o.ListFrontends || o.ListBackends;
   if (!infoOnly && o.InputFilename.empty())
@@ -203,6 +217,7 @@ void printUsage(std::ostream &os, const char *argv0) {
        << f.Help << "\n";
   os << "  --emit-llvm       - Emit LLVM IR to stdout (--backend=llvm "
         "--emit-source)\n"
+     << "  --emit-c          - Emit C to stdout (--backend=c --emit-source)\n"
      << "  --frontend=<name> - Parse with the named frontend "
         "(--list-frontends)\n"
      << "  --backend=<name>  - Generate code with the named backend "

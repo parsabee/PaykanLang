@@ -74,8 +74,10 @@ foreach(fe IN LISTS PAYKAN_FRONTENDS)
         ENVIRONMENT "PAYKAN_TEST_FRONTEND=${fe}")
 endforeach()
 
-# --- CodeGen / E2E tests (the llvm backend) ---------------------------------
-if("llvm" IN_LIST PAYKAN_BACKENDS)
+# --- CodeGen / E2E tests (every backend) ------------------------------------
+# One executable; ctest runs it once per backend that can run programs
+# (PAYKAN_TEST_BACKEND selects the one the compile-and-run helpers use, see
+# CodeGenTestUtils.h), so the backends check each other's output.
 add_executable(codegen_tests
     CodeGen/ArithTests.cpp
     CodeGen/FuncTests.cpp
@@ -100,23 +102,36 @@ target_include_directories(codegen_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
             ${CMAKE_SOURCE_DIR}/src/Runtime
 )
-target_include_directories(codegen_tests SYSTEM
-    PRIVATE ${LLVM_INCLUDE_DIRS}
-)
 target_link_libraries(codegen_tests
     PRIVATE gtest_main
-            paykan_jit
-            paykan_codegen
+            paykan_lowering
             paykan_sema
             paykan_frontend
             paykan_ast_printer
             paykan_runtime
             paykan_compile_options
-            ${TEST_LLVM_LIBS}
 )
-paykan_link_plugins(codegen_tests)
-add_test(NAME CodeGenTests COMMAND codegen_tests)
+if("llvm" IN_LIST PAYKAN_BACKENDS)
+    target_include_directories(codegen_tests SYSTEM
+        PRIVATE ${LLVM_INCLUDE_DIRS}
+    )
+    target_compile_definitions(codegen_tests
+        PRIVATE PAYKAN_TEST_HAVE_LLVM=1
+    )
+    target_link_libraries(codegen_tests
+        PRIVATE paykan_jit
+                paykan_codegen
+                ${TEST_LLVM_LIBS}
+    )
 endif()
+paykan_link_plugins(codegen_tests)
+foreach(be IN LISTS PAYKAN_BACKENDS)
+    if(be STREQUAL "llvm" OR be STREQUAL "c")
+        add_test(NAME CodeGenTests.${be} COMMAND codegen_tests)
+        set_tests_properties(CodeGenTests.${be} PROPERTIES
+            ENVIRONMENT "PAYKAN_TEST_BACKEND=${be}")
+    endif()
+endforeach()
 
 # --- PIR tests (printer, parser, verifier) ----------------------------------
 add_executable(pir_tests
@@ -183,7 +198,29 @@ target_link_libraries(driver_tests
             paykan_compile_options
 )
 add_dependencies(driver_tests paykan)
-add_test(NAME DriverTests COMMAND driver_tests)
+# The samples corpus on every backend that runs programs: identical stdout,
+# exit codes and zero live heap blocks (scripts/samples_parity.py).
+set(PAYKAN_SAMPLES_BACKENDS "")
+foreach(be IN LISTS PAYKAN_BACKENDS)
+    if(be STREQUAL "llvm" OR be STREQUAL "c")
+        list(APPEND PAYKAN_SAMPLES_BACKENDS --backend ${be})
+    endif()
+endforeach()
+if(PAYKAN_SAMPLES_BACKENDS)
+    add_test(NAME SamplesParity
+        COMMAND ${CMAKE_COMMAND} -E env python3
+                ${CMAKE_SOURCE_DIR}/scripts/samples_parity.py
+                --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
+endif()
+
+# Once per backend that runs programs (see backendFlag() in DriverTests.cpp).
+foreach(be IN LISTS PAYKAN_BACKENDS)
+    if(be STREQUAL "llvm" OR be STREQUAL "c")
+        add_test(NAME DriverTests.${be} COMMAND driver_tests)
+        set_tests_properties(DriverTests.${be} PROPERTIES
+            ENVIRONMENT "PAYKAN_TEST_BACKEND=${be}")
+    endif()
+endforeach()
 
 # --- Frontend tests: lexer, recovery, fuzz smoke of the recursive-descent -----
 # --- frontend; and the differential check of every enabled frontend over -----

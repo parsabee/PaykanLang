@@ -13,20 +13,6 @@ extern "C" {
 
 using namespace paykan::test;
 
-// RAII guard: enable tracking allocator before test, check zero leaks after.
-struct LeakGuard {
-  LeakGuard() {
-    Paykan_heap_set_tracking(1);
-    Paykan_heap_reset();
-  }
-  ~LeakGuard() { Paykan_heap_set_tracking(0); }
-  void expectNoLeaks(const char *label = "") const {
-    int64_t live = Paykan_heap_live_blocks();
-    EXPECT_EQ(live, 0) << "heap leak in: " << label << " (" << live
-                       << " live blocks)";
-  }
-};
-
 // ============================================================================
 // String literal (samples/leak-check/01)
 // ============================================================================

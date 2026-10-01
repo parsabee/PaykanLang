@@ -65,6 +65,22 @@ static bool hasBackend() {
       GTEST_SKIP() << "this build has no backend";                             \
   } while (0)
 
+// The backend every program-running test uses: PAYKAN_TEST_BACKEND (ctest
+// runs this suite once per backend), or the build's default when unset.
+static std::string testBackend() {
+  const char *env = std::getenv("PAYKAN_TEST_BACKEND");
+  return env && env[0] ? env : "";
+}
+
+// " --backend=<name>" for the test backend, or "" for the default one.
+static std::string backendFlag() {
+  std::string b = testBackend();
+  return b.empty() ? "" : " --backend=" + b;
+}
+
+// The paykan command running programs on the test backend.
+static std::string paykanRun() { return std::string(kPaykan) + backendFlag(); }
+
 // ---------------------------------------------------------------------------
 // --check-only
 // ---------------------------------------------------------------------------
@@ -197,8 +213,7 @@ TEST(Driver, ProgramArgumentsFollowTheSourceFile) {
   // Everything after the source file is the program's, even if it looks
   // like an option.
   auto src = writeTmp("fn main(args: Str[]) -> int { return args.len(); }");
-  auto [rc, out] =
-      run(std::string(kPaykan) + " " + src + " --dump-ast -O2 x 2>&1");
+  auto [rc, out] = run(paykanRun() + " " + src + " --dump-ast -O2 x 2>&1");
   std::filesystem::remove(src);
   EXPECT_EQ(rc, 4) << out;
 }
@@ -211,7 +226,7 @@ TEST(Driver, IntDivByZeroTraps) {
   REQUIRE_BACKEND();
   auto src =
       writeTmp("fn main() -> int { z: int = 0; q: int = 7 / z; return q; }");
-  auto [rc, out] = run(std::string(kPaykan) + " " + src + " 2>&1");
+  auto [rc, out] = run(paykanRun() + " " + src + " 2>&1");
   std::filesystem::remove(src);
   EXPECT_NE(rc, 0);
   EXPECT_NE(out.find("division or modulo by zero"), std::string::npos) << out;
@@ -221,7 +236,7 @@ TEST(Driver, IntModByZeroTraps) {
   REQUIRE_BACKEND();
   auto src =
       writeTmp("fn main() -> int { z: int = 0; r: int = 7 % z; return r; }");
-  auto [rc, out] = run(std::string(kPaykan) + " " + src + " 2>&1");
+  auto [rc, out] = run(paykanRun() + " " + src + " 2>&1");
   std::filesystem::remove(src);
   EXPECT_NE(rc, 0);
   EXPECT_NE(out.find("division or modulo by zero"), std::string::npos) << out;
@@ -232,7 +247,7 @@ TEST(Driver, IntDivOverflowTraps) {
   REQUIRE_BACKEND();
   auto src = writeTmp("fn main() -> int { m: int = -9223372036854775807 - 1; "
                       "d: int = -1; q: int = m / d; return q; }");
-  auto [rc, out] = run(std::string(kPaykan) + " " + src + " 2>&1");
+  auto [rc, out] = run(paykanRun() + " " + src + " 2>&1");
   std::filesystem::remove(src);
   EXPECT_NE(rc, 0);
   EXPECT_NE(rc, 128 + SIGFPE) << out;
@@ -245,7 +260,7 @@ TEST(Driver, IntModMinByNegOneIsZero) {
   auto src = writeTmp("fn main() -> int { m: int = -9223372036854775807 - 1; "
                       "d: int = -1; r: int = m % d; println(StrInt(r)); "
                       "return 7 % d + 3; }");
-  auto [rc, out] = run(std::string(kPaykan) + " " + src + " 2>&1");
+  auto [rc, out] = run(paykanRun() + " " + src + " 2>&1");
   std::filesystem::remove(src);
   EXPECT_EQ(rc, 3) << out;
   EXPECT_EQ(out, "0\n");
@@ -254,7 +269,7 @@ TEST(Driver, IntModMinByNegOneIsZero) {
 TEST(Driver, IntDivNonZeroSucceeds) {
   REQUIRE_BACKEND();
   auto src = writeTmp("fn main() -> int { return 17 / 5; }");
-  auto [rc, _] = run(std::string(kPaykan) + " " + src + " 2>&1");
+  auto [rc, _] = run(paykanRun() + " " + src + " 2>&1");
   std::filesystem::remove(src);
   EXPECT_EQ(rc, 3); // 17 / 5 == 3, returned as the process exit code
 }
@@ -298,7 +313,7 @@ TEST(Driver, OptionalPrimitiveIsRejectedAtParse) {
 }
 
 // ---------------------------------------------------------------------------
-// --emit-pir
+// PIR, the C backend, build, and the object cache
 // ---------------------------------------------------------------------------
 
 TEST(Driver, EmitPirPrintsTheProgram) {
@@ -311,4 +326,86 @@ TEST(Driver, EmitPirPrintsTheProgram) {
   EXPECT_NE(out.find("fn @main() -> i64 {"), std::string::npos) << out;
   EXPECT_NE(out.find("release"), std::string::npos) << out;
   EXPECT_NE(out.find("call @Paykan_println("), std::string::npos) << out;
+}
+
+TEST(Driver, EmitCPrintsCSource) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp("class P { x: int; fn __init__(x: int) { self.x = x; } }"
+                      "fn main() -> int { p = P(3); return p.x; }");
+  auto [rc, out] = run(std::string(kPaykan) + " --emit-c " + src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_EQ(rc, 0) << out;
+  EXPECT_NE(out.find("#include \"Runtime.h\""), std::string::npos) << out;
+  EXPECT_NE(out.find("int main(int argc, char **argv)"), std::string::npos)
+      << out;
+  EXPECT_NE(out.find("PaykanShared *shared;"), std::string::npos) << out;
+}
+
+TEST(Driver, EmitCRejectsAnotherBackend) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp("fn main() -> int { return 0; }");
+  auto [rc, out] =
+      run(std::string(kPaykan) + " --backend=llvm --emit-c " + src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_NE(rc, 0);
+  EXPECT_NE(out.find("--emit-c needs the c backend"), std::string::npos) << out;
+}
+
+// `build` writes an executable that runs on its own, and the C backend reuses
+// the cached object for a module whose generated C is unchanged.
+TEST(Driver, CBackendBuildsAnExecutableAndCachesObjects) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_build_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  auto src = (dir / "prog.pkn").string();
+  {
+    std::ofstream ofs(src);
+    ofs << "fn main(args: Str[]) -> int { println(\"built\"); return "
+           "args.len(); }";
+  }
+  auto exe = (dir / "prog").string();
+  // Options (including -o) come before the source file.
+  auto [rc, out] = run(std::string(kPaykan) + " --backend=c -o " + exe +
+                       " build " + src + " 2>&1");
+  ASSERT_EQ(rc, 0) << out;
+  ASSERT_TRUE(std::filesystem::exists(exe));
+  auto cache = dir / ".paykan_cache" / "prog.pkn.o";
+  ASSERT_TRUE(std::filesystem::exists(cache)) << cache;
+  auto stamp = std::filesystem::last_write_time(cache);
+
+  auto [rc2, out2] = run(exe + " a b 2>&1");
+  EXPECT_EQ(rc2, 3) << out2; // the executable itself plus two arguments
+  EXPECT_EQ(out2, "built\n");
+
+  // A second build leaves the cached object alone.
+  auto [rc3, out3] = run(std::string(kPaykan) + " --backend=c -o " + exe +
+                         " build " + src + " 2>&1");
+  EXPECT_EQ(rc3, 0) << out3;
+  EXPECT_EQ(std::filesystem::last_write_time(cache), stamp);
+
+  // Changing the source regenerates it.
+  {
+    std::ofstream ofs(src);
+    ofs << "fn main() -> int { println(\"rebuilt\"); return 5; }";
+  }
+  auto [rc4, out4] = run(std::string(kPaykan) + " --backend=c -o " + exe +
+                         " build " + src + " 2>&1");
+  EXPECT_EQ(rc4, 0) << out4;
+  auto [rc5, out5] = run(exe + " 2>&1");
+  EXPECT_EQ(rc5, 5) << out5;
+  EXPECT_EQ(out5, "rebuilt\n");
+  std::filesystem::remove_all(dir);
+}
+
+TEST(Driver, CBackendRunForwardsArgumentsAndTracksTheHeap) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp("fn main(args: Str[]) -> int { println(args[1]); "
+                      "return args.len(); }");
+  auto [rc, out] = run(std::string(kPaykan) + " --backend=c --track-heap " +
+                       src + " hello 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_EQ(rc, 2) << out;
+  EXPECT_NE(out.find("hello\n"), std::string::npos) << out;
+  EXPECT_NE(out.find("live blocks       : 0"), std::string::npos) << out;
 }
