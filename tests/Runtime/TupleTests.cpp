@@ -149,7 +149,7 @@ TEST(TupleSetObj, RetainsStoredBoxAndReleasesOld) {
 
   PaykanShared *got;
   int64_t bits = PaykanTuple_get(t, 0);
-  memcpy(&got, &bits, sizeof(got));
+  memcpy(&got, &bits, sizeof(bits));
   EXPECT_EQ(got, a); // get returns the box bits without retaining
   EXPECT_EQ(a->refCount, 2);
 

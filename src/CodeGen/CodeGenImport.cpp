@@ -115,7 +115,8 @@ static void writeCacheFile(const llvm::Module &mod, llvm::StringRef cachePath) {
     out.clear_error(); // an error left set would abort in the destructor
   }
   if (!written || llvm::sys::fs::rename(tmpPath, cachePath))
-    llvm::sys::fs::remove(tmpPath);
+    (void)llvm::sys::fs::remove(
+        tmpPath); // best effort: nothing to do on failure
 }
 
 /// Resolve an import to the canonical path of its source file, mirroring
