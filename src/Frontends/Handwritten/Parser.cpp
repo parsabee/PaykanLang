@@ -141,6 +141,30 @@ ParseOutput parseSource(ASTContext &ctx, std::string_view source,
   return out;
 }
 
+unsigned dumpTokens(std::string_view source, std::ostream &os,
+                    sema::DiagEngine *diags) {
+  unsigned errors = 0;
+  Lexer lex(source, [&](SourceLocation loc, const std::string &msg) {
+    ++errors;
+    if (diags)
+      diags->error(loc, msg);
+    else
+      std::cerr << "error @" << loc.getLineStart() << "."
+                << loc.getColumnStart() << ": " << msg << "\n";
+  });
+  for (;;) {
+    Token t = lex.next();
+    os << t.Loc.getLineStart() << ":" << t.Loc.getColumnStart() << "-"
+       << t.Loc.getLineEnd() << ":" << t.Loc.getColumnEnd() << " "
+       << tokenKindName(t.Kind);
+    if (!t.Text.empty())
+      os << " " << t.Text;
+    os << "\n";
+    if (t.Kind == Tok::Eof)
+      return errors;
+  }
+}
+
 // -- Token stream -------------------------------------------------------------
 
 const Token &Parser::peek(size_t k) {
@@ -188,7 +212,8 @@ bool Parser::enterNesting() {
   return true;
 }
 
-// -- Diagnostics ---------------------------------------------------------------
+// -- Diagnostics
+// ---------------------------------------------------------------
 
 void Parser::error(SourceLocation loc, const std::string &msg) {
   if (Speculating)
@@ -211,7 +236,8 @@ void Parser::errorAtCurrent(const std::string &expected) {
   error(t.Loc, "unexpected " + found + "; " + expected);
 }
 
-// -- Error recovery ------------------------------------------------------------
+// -- Error recovery
+// ------------------------------------------------------------
 //
 // Each level skips to a token that can start its next construct, matching
 // braces on the way so that a broken nested block does not swallow the rest
@@ -302,7 +328,8 @@ void Parser::skipToStatementBoundary() {
   }
 }
 
-// -- Translation unit -----------------------------------------------------------
+// -- Translation unit
+// -----------------------------------------------------------
 
 TranslationUnit *Parser::parseTranslationUnit() {
   std::vector<ImportDecl *> imports;
@@ -355,15 +382,16 @@ TranslationUnit *Parser::parseTranslationUnit() {
     }
   }
 
-  return Ctx.make<TranslationUnit>(loc, std::move(imports), std::move(classes),
-                                   std::move(funcs), std::move(enums),
-                                   std::move(genericClasses),
-                                   std::move(genericFuncs));
+  return Ctx.make<TranslationUnit>(
+      loc, std::move(imports), std::move(classes), std::move(funcs),
+      std::move(enums), std::move(genericClasses), std::move(genericFuncs));
 }
 
-// -- Imports -----------------------------------------------------------------------
+// -- Imports
+// -----------------------------------------------------------------------
 //
-// importDecl ::= "import" "::"? modulePath ( "as" IDENT | "::" "{" list "}" )? ";"
+// importDecl ::= "import" "::"? modulePath ( "as" IDENT | "::" "{" list "}" )?
+// ";"
 //              | "import" "::" "{" list "}" ";"
 
 bool Parser::parseModulePath(std::string &out) {
@@ -444,7 +472,8 @@ ImportDecl *Parser::parseImportDecl() {
   return makeSingleImport(Ctx, span(start), path, "", isSystem);
 }
 
-// -- Classes and enums ---------------------------------------------------------------
+// -- Classes and enums
+// ---------------------------------------------------------------
 //
 // classDecl ::= "class" IDENT ( "<" typeParamList ">" )? ( ":" modulePath )?
 //               "{" classMember* "}"
@@ -562,7 +591,8 @@ EnumDecl *Parser::parseEnumDecl() {
   return Ctx.make<EnumDecl>(span(start), name, std::move(variants));
 }
 
-// -- Functions ------------------------------------------------------------------------
+// -- Functions
+// ------------------------------------------------------------------------
 //
 // funcDecl ::= "fn" IDENT ( "<" typeParamList ">" )? "(" paramList ")"
 //              ( "->" typeAnnotation )? block
@@ -624,7 +654,8 @@ FuncDecl *Parser::parseFuncDecl() {
                             std::move(typeParams));
 }
 
-// -- Blocks and statements ------------------------------------------------------------
+// -- Blocks and statements
+// ------------------------------------------------------------
 
 // The CompoundStmt's location is the empty range right after its `{` (the
 // Bison frontend's location of an empty production); it is not widened by
@@ -736,9 +767,8 @@ bool Parser::parseStatement(Stmt *&out) {
         return false;
       if (at(Tok::Comma)) {
         std::vector<DestructureStmt::Target> targets;
-        targets.push_back(DestructureStmt::Target{&decl->getName(),
-                                                  decl->getType(),
-                                                  decl->getLocation()});
+        targets.push_back(DestructureStmt::Target{
+            &decl->getName(), decl->getType(), decl->getLocation()});
         return parseDestructureStatement(start, std::move(targets), out);
       }
       if (!expect(Tok::Assign, "(a variable declaration needs an initial "
@@ -778,6 +808,14 @@ bool Parser::parseExprOrAssignStatement(Stmt *&out) {
     return true;
   }
 
+  // Check the target before the value so that recovery resumes at this
+  // statement's `;` rather than the next one's.
+  if (!isa<Identifier>(lhs) && !isa<MemberAccessExpr>(lhs) &&
+      !isa<SubscriptExpr>(lhs) && !isa<TupleIndexExpr>(lhs)) {
+    error(start, "left-hand side of '=' must be an identifier, field access, "
+                 "or subscript");
+    return false;
+  }
   Expr *value = parseExpression();
   if (!value)
     return false;
@@ -792,17 +830,13 @@ bool Parser::parseExprOrAssignStatement(Stmt *&out) {
   } else if (auto *se = dyn_cast<SubscriptExpr>(lhs)) {
     out = Ctx.make<SubscriptAssignStmt>(loc, se->getArray(), se->getIndex(),
                                         value);
-  } else if (auto *ti = dyn_cast<TupleIndexExpr>(lhs)) {
+  } else {
     // `t.0 = v` is well-formed syntax but tuples are immutable: hand it to
     // Sema as a member assignment whose "field" is the index so the
     // rejection is a typed diagnostic rather than a parse error.
+    auto *ti = cast<TupleIndexExpr>(lhs);
     out = Ctx.make<MemberAssignStmt>(
-        loc, ti->getTuple(), Ctx.intern(std::to_string(ti->getIndex())),
-        value);
-  } else {
-    error(start, "left-hand side of '=' must be an identifier, field access, "
-                 "or subscript");
-    return false;
+        loc, ti->getTuple(), Ctx.intern(std::to_string(ti->getIndex())), value);
   }
   return true;
 }
@@ -955,7 +989,8 @@ Stmt *Parser::parseMatchStmt() {
   return Ctx.make<MatchStmt>(span(start), subject, std::move(arms));
 }
 
-// matchArm ::= typeAnnotation "{" stmts "}" | IDENT ":" typeAnnotation "{" ... "}"
+// matchArm ::= typeAnnotation "{" stmts "}" | IDENT ":" typeAnnotation "{" ...
+// "}"
 //            | literal "{" stmts "}" | "_" "{" stmts "}"
 MatchArm *Parser::parseMatchArm() {
   SourceLocation start = cur().Loc;
@@ -985,12 +1020,14 @@ MatchArm *Parser::parseMatchArm() {
   return Ctx.make<MatchArm>(span(start), *binding, armType, body);
 }
 
-// -- Types ------------------------------------------------------------------------------
+// -- Types
+// ------------------------------------------------------------------------------
 //
 // typeAnnotation ::= primaryType ( "[" "]" | "?" )*
 // primaryType ::= IDENT | modulePath "::" IDENT
-//               | IDENT "<" typeArgList ">" | modulePath "::" IDENT "<" typeArgList ">"
-//               | "(" typeAnnotation ( "," typeAnnotation )+ ")"
+//               | IDENT "<" typeArgList ">" | modulePath "::" IDENT "<"
+//               typeArgList ">" | "(" typeAnnotation ( "," typeAnnotation )+
+//               ")"
 
 bool Parser::parseTypeArgList(std::vector<Type *> &out) {
   do {
@@ -1091,8 +1128,8 @@ Type *Parser::parseTypeAnnotation() {
         return nullptr;
       }
       if (isa<OptionalType>(ty)) {
-        error(q.Loc, "nested optional type '" + typeName(ty) +
-                         "?' is not supported");
+        error(q.Loc,
+              "nested optional type '" + typeName(ty) + "?' is not supported");
         return nullptr;
       }
       ty = Ctx.make<OptionalType>(span(start), ty);
@@ -1102,7 +1139,8 @@ Type *Parser::parseTypeAnnotation() {
   }
 }
 
-// -- Expressions ---------------------------------------------------------------------
+// -- Expressions
+// ---------------------------------------------------------------------
 
 Expr *Parser::parseExpression() { return parseTernary(); }
 
@@ -1185,8 +1223,7 @@ Expr *Parser::parsePostfix() {
         Token idx = consume();
         std::string digits(idx.Text);
         if (digits.size() > 1 && digits[0] == '0') {
-          error(idx.Loc,
-                "tuple index must not have leading zeros: ." + digits);
+          error(idx.Loc, "tuple index must not have leading zeros: ." + digits);
           return nullptr;
         }
         errno = 0;
@@ -1287,10 +1324,11 @@ bool Parser::tryGenericCallArgs(std::vector<Type *> &out) {
   return ok;
 }
 
-// primary ::= literal | IDENT | IDENT "(" args ")" | IDENT "<" types ">" "(" args ")"
-//           | modulePath "::" IDENT ( "(" args ")" | "<" types ">" "(" args ")" )?
-//           | "(" expression ")" | "(" expression ( "," expression )+ ")"
-//           | "[" args "]"
+// primary ::= literal | IDENT | IDENT "(" args ")" | IDENT "<" types ">" "("
+// args ")"
+//           | modulePath "::" IDENT ( "(" args ")" | "<" types ">" "(" args ")"
+//           )? | "(" expression ")" | "(" expression ( "," expression )+ ")" |
+//           "[" args "]"
 Expr *Parser::parsePrimary() {
   SourceLocation start = cur().Loc;
   if (isLiteralToken(kind()))

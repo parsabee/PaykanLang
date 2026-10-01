@@ -9,6 +9,7 @@
 #include "AST.h"
 #include "ASTContext.h"
 #include "DiagEngine.h"
+#include "Frontends/Handwritten.h"
 #include "Lexer.h"
 
 #include <cstddef>
@@ -96,9 +97,10 @@ private:
   /// Returns false on error.  @p out is null for an empty statement `;`.
   bool parseStatement(ast::Stmt *&out);
   bool parseExprOrAssignStatement(ast::Stmt *&out);
-  bool parseDestructureStatement(ast::SourceLocation start,
-                                 std::vector<ast::DestructureStmt::Target> targets,
-                                 ast::Stmt *&out);
+  bool
+  parseDestructureStatement(ast::SourceLocation start,
+                            std::vector<ast::DestructureStmt::Target> targets,
+                            ast::Stmt *&out);
   bool parseDestructureTarget(ast::DestructureStmt::Target &out);
   ast::Stmt *parseIfStmt();
   ast::Stmt *parseWhileStmt();
@@ -124,13 +126,5 @@ private:
   /// the current token is the `(`; otherwise the position is rewound.
   bool tryGenericCallArgs(std::vector<ast::Type *> &out);
 };
-
-/// Parse @p source into @p ctx.  Returns the root and the number of errors.
-struct ParseOutput {
-  ast::TranslationUnit *Root = nullptr;
-  unsigned ErrorCount = 0;
-};
-ParseOutput parseSource(ast::ASTContext &ctx, std::string_view source,
-                        sema::DiagEngine *diags);
 
 } // namespace paykan::frontend::handwritten

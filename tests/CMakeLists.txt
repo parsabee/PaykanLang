@@ -136,3 +136,19 @@ target_link_libraries(driver_tests
 )
 add_dependencies(driver_tests paykan)
 add_test(NAME DriverTests COMMAND driver_tests)
+
+# --- Handwritten frontend tests (lexer, recovery, fuzz smoke) -----------------
+add_executable(frontend_tests
+    Frontend/LexerTests.cpp
+    Frontend/RecoveryTests.cpp
+    Frontend/FuzzSmokeTests.cpp
+)
+target_compile_definitions(frontend_tests
+    PRIVATE PAYKAN_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/samples"
+)
+target_link_libraries(frontend_tests
+    PRIVATE gtest_main
+            paykan_frontend_handwritten
+            paykan_compile_options
+)
+add_test(NAME FrontendTests COMMAND frontend_tests)
