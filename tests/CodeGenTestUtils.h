@@ -23,11 +23,11 @@
 #include "paykan/lowering/Lowering.h"
 
 #if PAYKAN_TEST_HAVE_LLVM
-#include "CodeGen.h"
 #include "JIT.h"
+#include "PIRToLLVM.h"
+#include "paykan/pir/Verifier.h"
 
 #include <llvm/IR/LLVMContext.h>
-#include <llvm/Linker/Linker.h>
 #include <llvm/Support/Error.h>
 #endif
 
@@ -140,33 +140,35 @@ inline Analysed analyseFile(const std::string &filePath,
 }
 
 #if PAYKAN_TEST_HAVE_LLVM
+/// The LLVM backend: lowering -> PIR -> LLVM IR (through the bitcode cache,
+/// like the driver) -> JIT, in process.
 inline RunResult runLLVM(Analysed &a, const std::vector<std::string> *args,
                          const std::string &projectRoot) {
+  pir::Program program;
+  std::ostringstream errs;
+  if (!lowering::lowerProgram(a.Ctx, a.Driver->getRoot(), a.Path, projectRoot,
+                              program, errs))
+    return {-1, "", "lowering failed: " + errs.str(), false};
+  if (auto verrs = pir::verify(program); !verrs.empty())
+    return {-1, "", "verifier: " + pir::formatErrors(verrs), false};
   auto llvmCtx = std::make_unique<llvm::LLVMContext>();
-  codegen::CodeGen cg(a.Ctx, *llvmCtx, "test", projectRoot);
-  if (!cg.run(a.Driver->getRoot()))
-    return {-1, "", "codegen failed", false};
-  if (!cg.linkImportedModules())
-    return {-1, "", "link failed", false};
-  auto mainModule = cg.takeModule();
+  auto module = backend::llvm_backend::compileProgram(program, *llvmCtx, "test",
+                                                      projectRoot);
+  if (!module)
+    return {-1, "", module.status().message(), false};
 
-  // Capture stdout/stderr via temp files (pipe-free to avoid hang-on-crash).
   auto [savedOut, outPath] = redirectFdToTempFile(STDOUT_FILENO);
   auto [savedErr, errPath] = redirectFdToTempFile(STDERR_FILENO);
-
   auto resultOrErr =
-      args ? jit::runModule(std::move(mainModule), std::move(llvmCtx), *args)
-           : jit::runModule(std::move(mainModule), std::move(llvmCtx));
+      args ? jit::runModule(std::move(*module), std::move(llvmCtx), *args)
+           : jit::runModule(std::move(*module), std::move(llvmCtx));
   fflush(stdout);
   fflush(stderr);
-
   restoreFd(STDOUT_FILENO, savedOut);
   restoreFd(STDERR_FILENO, savedErr);
-
   std::string outStr = drainAndRemoveTempFile(outPath);
   std::string errStr = drainAndRemoveTempFile(errPath);
   lastRunLiveBlocks() = Paykan_heap_live_blocks();
-
   if (!resultOrErr) {
     llvm::consumeError(resultOrErr.takeError());
     return {-1, outStr, errStr, false};

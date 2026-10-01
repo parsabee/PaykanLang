@@ -39,12 +39,10 @@ set(PAYKAN_EXPORT_TARGETS
 )
 get_property(PAYKAN_PLUGIN_TARGETS_LIST GLOBAL PROPERTY PAYKAN_PLUGIN_TARGETS)
 list(APPEND PAYKAN_EXPORT_TARGETS ${PAYKAN_PLUGIN_TARGETS_LIST})
-# The LLVM backend's private dependencies are exported with it.
-foreach(t paykan_codegen paykan_jit)
-    if(TARGET ${t})
-        list(APPEND PAYKAN_EXPORT_TARGETS ${t})
-    endif()
-endforeach()
+# The LLVM backend's private dependency is exported with it.
+if(TARGET paykan_jit)
+    list(APPEND PAYKAN_EXPORT_TARGETS paykan_jit)
+endif()
 
 # Public include directories point into the source/build tree; an installed
 # consumer must see the install location instead.

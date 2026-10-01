@@ -120,9 +120,30 @@ if("llvm" IN_LIST PAYKAN_BACKENDS)
     )
     target_link_libraries(codegen_tests
         PRIVATE paykan_jit
-                paykan_codegen
                 ${TEST_LLVM_LIBS}
     )
+
+# --- PIR -> LLVM translation tests (hand-written PIR, run through the JIT) --
+    add_executable(pir_llvm_tests
+        Backends/PIRLLVMTests.cpp
+    )
+    target_include_directories(pir_llvm_tests
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_include_directories(pir_llvm_tests SYSTEM
+        PRIVATE ${LLVM_INCLUDE_DIRS}
+    )
+    target_link_libraries(pir_llvm_tests
+        PRIVATE gtest_main
+                paykan_jit
+                paykan_pir
+                paykan_frontend
+                paykan_runtime
+                paykan_compile_options
+                ${TEST_LLVM_LIBS}
+    )
+    paykan_link_plugins(pir_llvm_tests)
+    add_test(NAME PIRLLVMTests COMMAND pir_llvm_tests)
 endif()
 paykan_link_plugins(codegen_tests)
 foreach(be IN LISTS PAYKAN_BACKENDS)

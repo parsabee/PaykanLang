@@ -68,7 +68,6 @@ public:
 | `Program` | `const pir::Program *`: every module of the program, main module first, already run through the verifier |
 | `InputFilename`, `ProjectRoot` | the main source file and the directory imports were resolved against (for default output names, caches, diagnostics) |
 | `OptLevel` | `-O<n>`, 0..3; what it means is the backend's choice |
-| `Sema`, `TU` | the typed AST, **legacy only**: set for a backend whose `consumesPIR()` returns `false` (the current `llvm` backend). New backends read `Program` and leave `consumesPIR()` at its default |
 
 A PIR program is a plain data structure
 ([`include/paykan/pir/PIR.h`](../include/paykan/pir/PIR.h)): modules hold

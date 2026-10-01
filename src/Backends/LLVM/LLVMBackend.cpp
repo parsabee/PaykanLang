@@ -1,15 +1,12 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// The `llvm` backend plugin: LLVM IR generation, -O<n> through PassBuilder,
-// --emit-llvm, and in-process execution with the ORC JIT.
-//
-// This wraps the legacy AST code generator (src/CodeGen) and the JIT
-// (src/JIT) unchanged.  It therefore consumes the typed AST, not PIR
-// (consumesPIR() == false); the PIR-based translation replaces it later and
-// the AST path is deleted then (see the migration note in paykan/Backend.h).
+// The `llvm` backend plugin: PIR -> LLVM IR (PIRToLLVM.cpp), -O<n> through
+// PassBuilder, --emit-llvm, and in-process execution with the ORC JIT
+// (src/JIT).  Imported modules are served from the bitcode cache under
+// <project root>/.paykan_cache when their PIR is unchanged.
 
-#include "CodeGen.h"
 #include "JIT.h"
+#include "PIRToLLVM.h"
 #include "Runtime.h"
 #include "paykan/Backend.h"
 
@@ -41,32 +38,25 @@ public:
     return std::string("LLVM ") + LLVM_VERSION_STRING;
   }
 
-  bool consumesPIR() const override { return false; }
-
   Status emit(const Input &in, EmitKind kind, const EmitOptions &,
               std::ostream &out) override {
     if (kind != EmitKind::Source)
       return Status::error("the llvm backend only emits LLVM IR source");
     auto ctx = std::make_unique<llvm::LLVMContext>();
-    std::unique_ptr<codegen::CodeGen> cg;
-    if (Status s = compile(in, *ctx, cg); !s)
-      return s;
+    auto module = compile(in, *ctx);
+    if (!module)
+      return module.status();
     llvm::raw_os_ostream os(out);
-    cg->getModule().print(os, nullptr);
+    (*module)->print(os, nullptr);
     return Status::ok();
   }
 
   StatusOr<int> run(const Input &in, std::span<const std::string> args,
                     const RunOptions &opts) override {
     auto ctx = std::make_unique<llvm::LLVMContext>();
-    std::unique_ptr<codegen::CodeGen> cg;
-    if (Status s = compile(in, *ctx, cg); !s)
-      return s;
-    if (!cg->linkImportedModules())
-      return Status::error("failed to link imported module");
-    auto module = cg->takeModule();
-    cg.reset();
-
+    auto module = compile(in, *ctx);
+    if (!module)
+      return module.status();
     // Select the tracking allocator before any program allocation happens,
     // so that every block is allocated and freed by the same back-end.
     if (opts.TrackHeap) {
@@ -74,7 +64,7 @@ public:
       Paykan_heap_reset();
     }
     std::vector<std::string> progArgs(args.begin(), args.end());
-    auto result = jit::runModule(std::move(module), std::move(ctx), progArgs);
+    auto result = jit::runModule(std::move(*module), std::move(ctx), progArgs);
     if (opts.TrackHeap)
       Paykan_heap_dump();
     if (!result)
@@ -83,23 +73,17 @@ public:
   }
 
 private:
-  /// Generate and optimise the module for @p in.
-  static Status compile(const Input &in, llvm::LLVMContext &ctx,
-                        std::unique_ptr<codegen::CodeGen> &cg) {
-    if (!in.Sema || !in.TU)
-      return Status::error("the llvm backend needs the typed AST");
-    cg = std::make_unique<codegen::CodeGen>(*in.Sema, ctx, in.InputFilename,
-                                            in.ProjectRoot);
-    if (!cg->run(in.TU))
-      return Status::error(
-          "code generation failed (module verification error)");
-    cg->optimize(in.OptLevel);
-#ifndef NDEBUG
-    std::string errMsg;
-    if (!cg->verify(errMsg))
-      return Status::error("LLVM IR verification failed:\n" + errMsg);
-#endif
-    return Status::ok();
+  /// Translate (through the cache) and optimise the program.
+  static StatusOr<std::unique_ptr<llvm::Module>>
+  compile(const Input &in, llvm::LLVMContext &ctx) {
+    if (!in.Program)
+      return Status::error("the llvm backend needs the PIR program");
+    auto module =
+        compileProgram(*in.Program, ctx, in.InputFilename, in.ProjectRoot);
+    if (!module)
+      return module.status();
+    optimizeModule(**module, in.OptLevel);
+    return module;
   }
 };
 
