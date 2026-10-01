@@ -37,6 +37,27 @@ namespace codegen {
 static constexpr uint64_t kPaykanABIVersion = 2;
 static constexpr const char *kABIVersionFlag = "paykan.abi.version";
 
+/// Identity of the running compiler binary -- size and modification time of
+/// the executable -- hashed into every cache key.  kVersion only changes at a
+/// release, so without this a development build with different codegen but
+/// the same version string keeps serving imports compiled by the previous
+/// build (a fixed leak in an imported module "stayed" until .paykan_cache was
+/// deleted by hand).  Empty when the executable cannot be identified, in
+/// which case the key falls back to the version fields alone.
+static llvm::StringRef compilerBuildId() {
+  static const std::string id = [] {
+    std::string exe = llvm::sys::fs::getMainExecutable(
+        nullptr, reinterpret_cast<void *>(&compilerBuildId));
+    llvm::sys::fs::file_status st;
+    if (exe.empty() || llvm::sys::fs::status(exe, st))
+      return std::string();
+    return std::to_string(st.getSize()) + ":" +
+           std::to_string(
+               st.getLastModificationTime().time_since_epoch().count());
+  }();
+  return id;
+}
+
 /// Named metadata carrying the cache key (see CodeGen::importCacheKey) the
 /// cached module was generated under.  Named (not module-flag) metadata so
 /// that linking modules with different keys into the main module merges
@@ -207,10 +228,12 @@ std::string CodeGen::importCacheKey(llvm::StringRef resolved,
       hash.update(llvm::StringRef("\0", 1)); // unambiguous field separator
     };
     // Anything that changes the generated code beyond the source text itself:
-    // the compiler and the LLVM it embeds (bitcode format), and the runtime
-    // object layout / calling convention.
+    // the compiler release, the exact compiler binary (development builds
+    // share a release string), the LLVM it embeds (bitcode format), and the
+    // runtime object layout / calling convention.
     add("paykan-import-cache");
     add(kVersion);
+    add(compilerBuildId());
     add(LLVM_VERSION_STRING);
     add(std::to_string(kPaykanABIVersion));
     add((*source)->getBuffer());
