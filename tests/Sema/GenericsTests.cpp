@@ -505,7 +505,7 @@ fn first<T>(xs: T[]) -> T { return xs[0]; }
 } // namespace
 
 TEST(Generics, ImportedTemplatesAreRejected) {
-  auto dir = std::filesystem::temp_directory_path() / "pkn_sema_generics_imp";
+  auto dir = paykan::test::tempDir() / "pkn_sema_generics_imp";
   std::filesystem::remove_all(dir);
   writeProjectFile(dir, "lib/gen.pkn", kGenLib);
 
@@ -543,7 +543,7 @@ fn main() -> int { x: int = gen::first<int>([1]); return 0; }
 // A module's own instantiation is exported as a concrete class, so a value of
 // that type returned by the module can be used by the importer …
 TEST(Generics, ExportedInstantiationIsUsableAsConcreteClass) {
-  auto dir = std::filesystem::temp_directory_path() / "pkn_sema_generics_exp";
+  auto dir = paykan::test::tempDir() / "pkn_sema_generics_exp";
   std::filesystem::remove_all(dir);
   writeProjectFile(dir, "lib/gen.pkn", kGenLib);
   auto p = writeProjectFile(dir, "main.pkn", R"(
@@ -688,7 +688,7 @@ TEST(GenericsTypes, TupleAndOptionalTypeArgs) {
 // Exported instantiations whose names contain ',' and '[]' round-trip: the
 // import type parser keeps `Pair<Str, int>` / `Box<int[]>` together as names.
 TEST(GenericsTypes, ExportedInstantiationNamesWithCommasAndArrays) {
-  auto dir = std::filesystem::temp_directory_path() / "pkn_sema_generics_names";
+  auto dir = paykan::test::tempDir() / "pkn_sema_generics_names";
   std::filesystem::remove_all(dir);
   writeProjectFile(dir, "lib.pkn", R"(
 class Pair<A, B> { a: A; b: B; fn __init__(a: A, b: B) { self.a = a; self.b = b; } fn first() -> A { return self.a; } }

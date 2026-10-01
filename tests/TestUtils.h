@@ -24,14 +24,27 @@
 
 namespace paykan::test {
 
+/// A scratch directory private to this test process.  The parser and Sema
+/// suites run once per enabled frontend, and CTest may run those processes
+/// concurrently, so tests that create module files under fixed names must
+/// not share /tmp directly.
+inline std::filesystem::path tempDir() {
+  static const std::filesystem::path dir = [] {
+    auto d = std::filesystem::temp_directory_path() /
+             ("paykan_tests_" + std::to_string(getpid()));
+    std::filesystem::create_directories(d);
+    return d;
+  }();
+  return dir;
+}
+
 /// Write source to a temp file, returning its path.
 inline std::string writeTempFile(const std::string &source) {
   // Use a unique name per call (atomic counter + pid for cross-process safety).
   static std::atomic<int> counter{0};
-  auto pathStr = (std::filesystem::temp_directory_path() /
-                  ("paykan_test_" + std::to_string(getpid()) + "_" +
-                   std::to_string(counter++) + ".pkn"))
-                     .string();
+  auto pathStr =
+      (tempDir() / ("paykan_test_" + std::to_string(counter++) + ".pkn"))
+          .string();
   std::ofstream ofs(pathStr);
   ofs << source;
   ofs.close();
@@ -52,10 +65,8 @@ inline std::string drainAndRemoveTempFile(const std::string &path) {
 /// Caller must restore the fd and call drainAndRemoveTempFile when done.
 inline std::pair<int, std::string> redirectFdToTempFile(int fd) {
   static std::atomic<int> cnt{0};
-  auto path = (std::filesystem::temp_directory_path() /
-               ("paykan_cap_" + std::to_string(getpid()) + "_" +
-                std::to_string(cnt++) + ".txt"))
-                  .string();
+  auto path =
+      (tempDir() / ("paykan_cap_" + std::to_string(cnt++) + ".txt")).string();
   int saved = dup(fd);
   int tmp = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
   dup2(tmp, fd);

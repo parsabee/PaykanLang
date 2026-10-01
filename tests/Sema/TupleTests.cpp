@@ -480,7 +480,7 @@ static SemaFileResult semaCheckFile(const std::string &filePath,
 }
 
 TEST(Tuple, ModuleRoundTripOfTupleSignatures) {
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_tuple").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_tuple").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "geo.pkn", R"(
 class Pt { x: int; y: int; fn __init__(x: int, y: int) { self.x = x; self.y = y; } }
@@ -514,8 +514,7 @@ fn main() -> int {
 TEST(Tuple, ModuleRoundTripArityIsChecked) {
   // The imported signature must come back as the precise tuple type, so a
   // wrong-arity destructuring at the import site is still rejected.
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_tuple_err").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_tuple_err").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "geo.pkn",
             "fn divmod(a: int, b: int) -> (int, int) { return (a / b, a % b); "

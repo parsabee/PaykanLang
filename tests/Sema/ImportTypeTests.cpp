@@ -69,7 +69,7 @@ static const char *const kShapesModule =
     "fn mk() -> Zeta { return Zeta(); }\n";
 
 TEST(Module, MethodReturnsModuleLocalClassOk) {
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_mret").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_mret").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "shapes.pkn", kShapesModule);
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -89,8 +89,7 @@ fn main() -> int {
 TEST(Module, MethodParamModuleLocalClassMismatchErr) {
   // The parameter must be typed Zeta (not silently Obj): passing an int is
   // rejected.
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_mparam").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_mparam").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "shapes.pkn", kShapesModule);
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -103,8 +102,7 @@ fn main() -> int { a = shapes::Alpha(); return a.take(3); }
 }
 
 TEST(Module, MethodReturnsChainedModuleLocalClassOk) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_mchain").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_mchain").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "shapes.pkn", kShapesModule);
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -121,8 +119,7 @@ fn main() -> int {
 }
 
 TEST(Module, EnumTypedMemberAndMethodOk) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_enum_member").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_enum_member").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "shapes.pkn", kShapesModule);
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -141,8 +138,7 @@ fn main() -> int {
 }
 
 TEST(Module, ArrayOfModuleLocalClassReturnAndParamOk) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_arr_ret").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_arr_ret").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "shapes.pkn", kShapesModule);
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -187,8 +183,7 @@ static const char *const kMidModule =
     "fn make() -> leaf::Thing { return leaf::made(); }\n";
 
 TEST(Module, TransitiveTypeFlowsThroughSignaturesOk) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_trans_flow").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_trans_flow").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "leaf.pkn", kLeafModule);
   writeFile(tmp, "mid.pkn", kMidModule);
@@ -208,8 +203,7 @@ fn main() -> int {
 }
 
 TEST(Module, TransitiveTypeNotNameableThroughMiddleErr) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_trans_name").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_trans_name").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "leaf.pkn", kLeafModule);
   writeFile(tmp, "mid.pkn", kMidModule);
@@ -230,8 +224,7 @@ fn main() -> int {
 }
 
 TEST(Module, TransitiveFunctionNotReexportedErr) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_trans_fn").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_trans_fn").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "leaf.pkn", kLeafModule);
   writeFile(tmp, "mid.pkn", kMidModule);
@@ -249,8 +242,7 @@ TEST(Module, TransitiveTypeIdentityWithDirectImportOk) {
   // SAME Thing/Mode types that mid's signatures mention.
   for (const char *order :
        {"import mid;\nimport leaf;\n", "import leaf;\nimport mid;\n"}) {
-    auto tmp =
-        (std::filesystem::temp_directory_path() / "pkn_ms_trans_id").string();
+    auto tmp = (paykan::test::tempDir() / "pkn_ms_trans_id").string();
     std::filesystem::remove_all(tmp);
     writeFile(tmp, "leaf.pkn", kLeafModule);
     writeFile(tmp, "mid.pkn", kMidModule);
@@ -273,8 +265,7 @@ fn main() -> int {
 // ─── ERR: two modules exporting different types under one name ──────────────
 
 TEST(Module, SameClassNameFromTwoModulesErr) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_dup_class").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_dup_class").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "list.pkn",
             "class Node { v: int; fn __init__() { self.v = 1; } }\n");
@@ -304,7 +295,7 @@ fn main() -> int { n = tree::Node(); return n.l; }
 // back to void/Obj.
 
 TEST(Module, UnknownExportedTypeErr) {
-  auto tmp = std::filesystem::temp_directory_path() / "pkn_ms_unknown_export";
+  auto tmp = paykan::test::tempDir() / "pkn_ms_unknown_export";
   std::filesystem::remove_all(tmp);
   auto libPath =
       writeFile(tmp.string(), "lib.pkn", "fn real() -> int { return 1; }\n");
