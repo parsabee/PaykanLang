@@ -495,10 +495,14 @@ private:
         expect(in.Args[0], Type::Obj, "receiver of field access");
         const Field *fld = nullptr;
         auto it = MV.Index.Classes.find(in.ClassName);
-        if (it == MV.Index.Classes.end())
+        if (it == MV.Index.Classes.end()) {
           error("field access on unknown class '" + in.ClassName + "'");
-        else if (!(fld = MV.Index.findField(*it->second, in.Field)))
-          error("class '" + in.ClassName + "' has no field '" + in.Field + "'");
+        } else {
+          fld = MV.Index.findField(*it->second, in.Field);
+          if (!fld)
+            error("class '" + in.ClassName + "' has no field '" + in.Field +
+                  "'");
+        }
         if (store) {
           if (fld)
             expect(in.Args[1], fld->Ty, "stored value");
