@@ -175,7 +175,9 @@ unreachable                         ; after a noreturn call (panic)
 ```
 
 Nothing may follow `break`, `continue`, `ret` or `unreachable` in the same
-block.  Instructions (`%r = op ...` when they produce a value):
+block.  An `if` whose `then` and `else` blocks both end that way is itself a
+terminator (nothing may follow it either, and a non-void function may end
+with one); a `while` never is.  Instructions (`%r = op ...` when they produce a value):
 
 **Arithmetic and comparison** (both operands the same type; `i64` or `f64`
 unless stated):
@@ -347,8 +349,10 @@ The verifier rejects a program when:
 * `field.load`/`field.store`/`new`/`vtable.addr` name an unknown class or
   field; a field store has the wrong type;
 * `break`/`continue` appear outside a `while`; a statement follows a
-  terminator in the same block; `ret` carries the wrong type; a non-void
-  function's body can fall off the end;
+  terminator in the same block (a terminator is `break`, `continue`, `ret`,
+  `unreachable`, or an `if` whose two branches both end in one); `ret`
+  carries the wrong type; a non-void function's body can fall off the end
+  (its last statement is not a `ret`, `unreachable` or terminating `if`);
 * a module-level symbol is defined twice, or a vtable entry's signature does not
   match the named function's declaration;
 * `@main` has a signature other than `() -> i64` or `(box) -> i64`.
