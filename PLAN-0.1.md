@@ -1,11 +1,11 @@
 # PaykanLang — Task Plan to 0.1 Release
 
-Derived from `./usp`. The USP for 0.1: a **clean, sequential, simple** language whose
+The USP (unique selling point) for 0.1: a **clean, sequential, simple** language whose
 compiler **generates MLIR** and uses **AI-assisted optimization** to offload/parallelize
 code, cleanly integrated **with safe guardrails that prevent erroneous codegen**, exposed
 through a **universal plugin for AI models** (Claude Code, ChatGPT, …).
 
-The `usp` file defines three checkpoints on the way to 0.1: **alpha**, **beta**, **0.1**.
+The roadmap has three checkpoints on the way to 0.1: **alpha**, **beta**, **0.1**.
 This plan expands each into concrete, dependency-ordered tasks with acceptance criteria.
 
 ---
