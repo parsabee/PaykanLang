@@ -25,6 +25,9 @@
 #ifndef PAYKAN_RUNTIME_INCLUDE_DIR
 #define PAYKAN_RUNTIME_INCLUDE_DIR ""
 #endif
+#ifndef PAYKAN_SANITIZER_FLAGS
+#define PAYKAN_SANITIZER_FLAGS ""
+#endif
 
 namespace paykan::backend_c {
 
@@ -104,6 +107,23 @@ bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
   if (tc.CC.empty()) {
     const char *cc = std::getenv("CC");
     tc.CC = (cc && cc[0]) ? cc : "cc";
+  }
+  // The build tree's runtime archive is sanitizer-instrumented when the
+  // compiler was built with a sanitizer: programs linked against it need
+  // the same flags (compile and link).
+  if (tc.RuntimeLib.empty()) {
+    std::string flags = PAYKAN_SANITIZER_FLAGS;
+    size_t start = 0;
+    while (start < flags.size()) {
+      size_t sp = flags.find(' ', start);
+      std::string f = flags.substr(
+          start, sp == std::string::npos ? std::string::npos : sp - start);
+      if (!f.empty())
+        tc.ExtraFlags.push_back(f);
+      if (sp == std::string::npos)
+        break;
+      start = sp + 1;
+    }
   }
   auto exists = [](const std::string &p) {
     std::error_code ec;
