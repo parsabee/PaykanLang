@@ -28,8 +28,7 @@ namespace {
 using pir::Type;
 using namespace cnames;
 
-// -- C syntax helpers
-// ----------------------------------------------------------
+// -- C syntax helpers ---------------------------------------------------------
 
 /// `(x)`
 std::string paren(const std::string &x) { return kLParen + x + kRParen; }
@@ -90,7 +89,7 @@ std::string declare(const std::string &ty, const std::string &name) {
   return ty + (ty.back() == kPointerStar ? "" : kSpace) + name;
 }
 
-// -- Runtime prototypes (Runtime.h) ------------------------------------------
+// -- Runtime prototypes (Runtime.h) -------------------------------------------
 //
 // The C types of every runtime function the lowering may call, so arguments
 // and results are cast between the PIR types (obj = PaykanObject*, box =
@@ -281,8 +280,7 @@ std::string fmtF64(double v) {
   return s;
 }
 
-// -- The emitter
-// ---------------------------------------------------------------------
+// -- The emitter --------------------------------------------------------------
 
 class Emitter {
   const pir::Program &P;
@@ -521,8 +519,7 @@ class Emitter {
 
   void line(const std::string &s) { O << ind() << s << kNewline; }
 
-  // -- Program-level passes
-  // ---------------------------------------------------------
+  // -- Program-level passes ---------------------------------------------------
 
   void collectSymbols() {
     for (size_t i = 0; i < P.Modules.size(); ++i) {
@@ -597,8 +594,7 @@ class Emitter {
     O << kNewline;
   }
 
-  // -- Translation units
-  // ---------------------------------------------------------
+  // -- Translation units ------------------------------------------------------
   //
   // A translation unit holds a set of modules: every module for `--emit-c`
   // (one readable file), or one module for `build` / `run` (cached per
@@ -787,8 +783,7 @@ class Emitter {
       O << kNewline;
   }
 
-  // -- Functions
-  // ----------------------------------------------------------------------
+  // -- Functions --------------------------------------------------------------
 
   void defineValue(const pir::Value &v) {
     ValueNames[v.Id] = valueName(v);
