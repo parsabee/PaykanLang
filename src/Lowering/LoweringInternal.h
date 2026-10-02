@@ -136,11 +136,6 @@ private:
     std::vector<VarMeta> DeclOrder;
     /// Extra owned boxes released at scope exit (e.g. a match subject).
     std::vector<Val> PendingReleases;
-    /// For unowned arm bindings: the box that backs the raw-object alias.
-    std::unordered_map<std::string, Val> BackingShared;
-    /// For unowned ref-typed bindings: the Box-typed twin slot used once the
-    /// binding is re-assigned (promoted to owned).  See declareUnowned.
-    std::unordered_map<std::string, pir::LocalId> PromotionSlots;
 
     explicit Scope(Scope *parent = nullptr) : Parent(parent) {}
 
@@ -150,15 +145,12 @@ private:
     ast::Type *lookupASTType(const std::string &name) const;
     void updateASTType(const std::string &name, ast::Type *newTy);
     void declare(const std::string &name, pir::LocalId local, ast::Type *astTy);
+    /// A borrowed, never-released raw-object binding.  Only `self` is
+    /// declared this way: the caller owns the object for the whole call, and
+    /// Sema rejects assignments to `self`.  Match-arm bindings are ordinary
+    /// owned variables (see emitTypeArmBody in LoweringMatch.cpp).
     void declareUnowned(const std::string &name, pir::LocalId local,
-                        ast::Type *astTy, pir::LocalId promotionSlot);
-    void declareUnownedWithBacking(const std::string &name, pir::LocalId local,
-                                   Val shared, ast::Type *astTy,
-                                   pir::LocalId promotionSlot);
-    const Val *lookupBackingShared(const std::string &name) const;
-    /// Promote an unowned ref-typed binding to owned: the name is rebound to
-    /// its Box twin slot, which is registered for cleanup.  Returns the slot.
-    pir::LocalId promoteToOwned(const std::string &name, ast::Type *astTy);
+                        ast::Type *astTy);
     Scope *findOwner(const std::string &name);
   };
 

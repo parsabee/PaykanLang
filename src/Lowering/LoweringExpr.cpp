@@ -1034,14 +1034,13 @@ Val ModuleLowering::visitDestructureStmt(ast::DestructureStmt *node) {
     pir::LocalId local = owner->lookup(name);
     ast::Type *varTy = CurrentScope->lookupASTType(name);
     if (varTy && ast::isRefType(varTy)) {
-      bool wasUnowned = !CurrentScope->isOwned(name);
-      if (!wasUnowned) {
-        emitRelease(B.load(local, "old.box"));
-        B.store(local, v);
-      } else {
-        pir::LocalId slot = CurrentScope->promoteToOwned(name, elemTy);
-        B.store(slot, v);
+      if (!CurrentScope->isOwned(name)) {
+        reportInternalError("destructuring into unowned variable '" + name +
+                            "'");
+        continue;
       }
+      emitRelease(B.load(local, "old.box"));
+      B.store(local, v);
       continue;
     }
     Type localTy = B.localType(local);

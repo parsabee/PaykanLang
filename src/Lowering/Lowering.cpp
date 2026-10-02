@@ -179,46 +179,11 @@ void ModuleLowering::Scope::declare(const std::string &name, pir::LocalId local,
 }
 
 void ModuleLowering::Scope::declareUnowned(const std::string &name,
-                                           pir::LocalId local, ast::Type *astTy,
-                                           pir::LocalId promotionSlot) {
+                                           pir::LocalId local,
+                                           ast::Type *astTy) {
   Locals[name] = local;
   if (astTy)
     ASTTypeMap[name] = astTy;
-  PromotionSlots[name] = promotionSlot;
-}
-
-void ModuleLowering::Scope::declareUnownedWithBacking(
-    const std::string &name, pir::LocalId local, Val shared, ast::Type *astTy,
-    pir::LocalId promotionSlot) {
-  declareUnowned(name, local, astTy, promotionSlot);
-  BackingShared[name] = std::move(shared);
-}
-
-const Val *
-ModuleLowering::Scope::lookupBackingShared(const std::string &name) const {
-  auto it = BackingShared.find(name);
-  if (it != BackingShared.end())
-    return &it->second;
-  return Parent ? Parent->lookupBackingShared(name) : nullptr;
-}
-
-pir::LocalId ModuleLowering::Scope::promoteToOwned(const std::string &name,
-                                                   ast::Type *astTy) {
-  if (Locals.count(name)) {
-    auto slotIt = PromotionSlots.find(name);
-    assert(slotIt != PromotionSlots.end() &&
-           "promotion of a binding declared without a promotion slot");
-    pir::LocalId slot = slotIt->second;
-    if (astTy)
-      ASTTypeMap[name] = astTy;
-    Locals[name] = slot;
-    SharedVars.insert(name);
-    DeclOrder.push_back({slot, astTy});
-    BackingShared.erase(name);
-    return slot;
-  }
-  assert(Parent && "promoteToOwned: unknown variable");
-  return Parent->promoteToOwned(name, astTy);
 }
 
 ModuleLowering::Scope *
@@ -868,25 +833,15 @@ Val ModuleLowering::visitAssignStmt(ast::AssignStmt *node) {
 
   auto *astTy = CurrentScope->lookupASTType(node->getVarName());
   if (astTy && ast::isRefType(astTy)) {
-    bool wasUnowned = !CurrentScope->isOwned(node->getVarName());
     ast::ClassType *rhsCT = resolveExprClassType(node->getValue());
-    if (wasUnowned) {
-      // An unowned alias (a match-arm binding) becomes an owner: box the new
-      // value into the binding's promotion slot without releasing anything.
-      Val newBox;
-      if (isNoneForOptional(node->getValue()))
-        newBox = Val::null(Type::Box);
-      else if (exprAlreadyShared(node->getValue()))
-        newBox = takeSharedOwnership(node->getValue(), val);
-      else
-        newBox = emitSharedNew(val, "new.box");
-      newBox = emitOptionalToObj(node->getValue(), newBox);
-      pir::LocalId slot = CurrentScope->promoteToOwned(
-          node->getVarName(), rhsCT ? static_cast<ast::Type *>(rhsCT) : astTy);
-      B.store(slot, newBox);
-    } else {
-      emitClassVarRebind(local, node->getValue(), val);
+    // Every assignable ref-typed variable owns its box (match-arm bindings
+    // included); only `self` is unowned, and Sema rejects assigning to it.
+    if (!CurrentScope->isOwned(node->getVarName())) {
+      reportInternalError("assignment to unowned variable '" +
+                          node->getVarName() + "'");
+      return val;
     }
+    emitClassVarRebind(local, node->getValue(), val);
     // Narrow the scope type to the concrete RHS type (vtable dispatch through
     // base-typed variables).  An optional variable keeps its optional type.
     if (rhsCT && !ast::isa<ast::OptionalType>(astTy))
@@ -1188,14 +1143,6 @@ Val ModuleLowering::emitAsSharedRaw(ast::Expr *expr) {
           B.load(CurrentScope->lookup(id->getName()), id->getName());
       emitRetain(sharedPtr);
       return sharedPtr;
-    }
-    // Unowned arm binding backed by a recorded box: retain + return it.
-    if (declared) {
-      if (const Val *backing =
-              CurrentScope->lookupBackingShared(id->getName())) {
-        emitRetain(*backing);
-        return *backing;
-      }
     }
   }
 
