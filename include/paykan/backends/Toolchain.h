@@ -6,7 +6,8 @@
 // linking objects against libpaykan_runtime.a.  The C backend compiles its
 // generated C with it; the llvm backend links the objects it emits with it.
 //
-// Standard C++ plus POSIX process spawning.
+// Standard C++ plus POSIX, every OS call behind the portability layer in
+// src/Backends/Toolchain/Platform.h (Linux and macOS side by side).
 
 #pragma once
 

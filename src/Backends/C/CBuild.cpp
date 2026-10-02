@@ -7,19 +7,15 @@
 
 #include "Version.h"
 
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
+#include "CNames.h"
+#include "Platform.h"
+#include "ToolchainNames.h"
 
 #include <atomic>
-#include <cerrno>
 #include <cinttypes>
-#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -34,6 +30,8 @@ namespace fs = std::filesystem;
 // (paykan/backends/Toolchain.h).
 using toolchain::spawn;
 using toolchain::TempDir;
+namespace platform = toolchain::platform;
+namespace tcnames = toolchain::tcnames;
 
 namespace {
 
@@ -49,7 +47,7 @@ std::string readFile(const std::string &path) {
 /// concurrent builds sharing a cache never write the same file.
 std::string tempSibling(const std::string &path) {
   static std::atomic<unsigned> counter{0};
-  return path + ".tmp" + std::to_string(getpid()) + "-" +
+  return path + ".tmp" + std::to_string(platform::processId()) + "-" +
          std::to_string(counter++);
 }
 
@@ -133,8 +131,9 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
     return false;
   }
 
-  std::vector<std::string> compileFlags = {"-std=c11", "-w",
-                                           "-I" + tc.RuntimeIncludeDir};
+  std::vector<std::string> compileFlags = {
+      tcnames::kFlagStd, tcnames::kFlagNoWarnings,
+      tcnames::kFlagInclude + tc.RuntimeIncludeDir};
   for (const auto &f : tc.ExtraFlags)
     compileFlags.push_back(f);
   // Everything besides the module's C that its object depends on: the C
@@ -149,7 +148,8 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
     cacheKey += f;
   }
   cacheKey += "\nruntime.h:";
-  cacheKey += fnv1a(readFile(tc.RuntimeIncludeDir + "/Runtime.h"));
+  cacheKey +=
+      fnv1a(readFile(tc.RuntimeIncludeDir + "/" + tcnames::kRuntimeHeader));
   cacheKey += "\npaykan:";
   cacheKey += kVersion;
   cacheKey += '\n';
@@ -175,8 +175,8 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
       std::string base = cacheEntryBase(tc, program.Modules[mi].Name);
       std::error_code dirErr;
       fs::create_directories(fs::path(base).parent_path(), dirErr);
-      cPath = base + ".c";
-      oPath = base + ".o";
+      cPath = base + tcnames::kCExt;
+      oPath = base + tcnames::kObjExt;
       keyPath = base + ".key";
       std::error_code existsErr; // set for a missing entry: not a failure
       cached = !dirErr && readFile(keyPath) == moduleKey &&
@@ -194,8 +194,8 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
       }
     }
     if (cPath.empty()) {
-      cPath = tmp.Path + "/module" + std::to_string(mi) + ".c";
-      oPath = tmp.Path + "/module" + std::to_string(mi) + ".o";
+      cPath = tmp.Path + "/module" + std::to_string(mi) + tcnames::kCExt;
+      oPath = tmp.Path + "/module" + std::to_string(mi) + tcnames::kObjExt;
       std::ofstream out(cPath, std::ios::binary);
       out << text;
       if (!out) {
@@ -205,9 +205,9 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
     }
     if (!cached) {
       std::vector<std::string> args = compileFlags;
-      args.push_back("-c");
+      args.push_back(tcnames::kFlagCompileOnly);
       args.push_back(cPath);
-      args.push_back("-o");
+      args.push_back(tcnames::kFlagOutput);
       args.push_back(oTmp.empty() ? oPath : oTmp);
       int rc = spawn(tc.CC, args, &tc.CC, {}, errs);
       if (rc != 0) {
@@ -252,9 +252,9 @@ int buildAndRun(const pir::Program &program,
   const std::string *argv0 = args.empty() ? nullptr : &args[0];
   std::vector<std::pair<std::string, std::string>> env;
   if (trackHeap)
-    env.emplace_back("PAYKAN_TRACK_HEAP", "1");
+    env.emplace_back(cnames::kEnvTrackHeap, cnames::kEnvOn);
   if (args.empty())
-    env.emplace_back("PAYKAN_NO_ARGS", "1");
+    env.emplace_back(cnames::kEnvNoArgs, cnames::kEnvOn);
   std::fflush(stdout);
   std::fflush(stderr);
   return spawn(exe, progArgs, argv0, env, errs);

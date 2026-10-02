@@ -4,8 +4,9 @@
 // The C backend: translates a PIR program into C11 against the runtime's
 // Runtime.h, and builds / runs it with the system C compiler.
 //
-// Standard C++ only (plus POSIX process spawning in the shared toolchain,
-// paykan/backends/Toolchain.h).
+// Standard C++ only, plus the POSIX calls behind the shared toolchain's
+// portability layer (paykan/backends/Toolchain.h, src/Backends/Toolchain/
+// Platform.h: Linux and macOS).
 
 #pragma once
 

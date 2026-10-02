@@ -46,10 +46,9 @@ message(STATUS "Frontends: ${PAYKAN_FRONTENDS} (default: ${PAYKAN_DEFAULT_FRONTE
 
 # -- Backends -----------------------------------------------------------------
 # `c` is the C backend (part of the core: it needs only a C compiler at run
-# time) and is always built; `llvm` is the LLVM IR / ORC JIT backend; `mlir`
-# is a reserved slot (see src/Backends/MLIR).  The latter two depend on
-# LLVM, which is fetched only when one of them is listed.
-set(PAYKAN_KNOWN_BACKENDS c llvm mlir)
+# time) and is always built; `llvm` is the LLVM IR / ORC JIT backend, which
+# depends on LLVM: LLVM is fetched only when `llvm` is listed.
+set(PAYKAN_KNOWN_BACKENDS c llvm)
 set(PAYKAN_BACKENDS "llvm" CACHE STRING
     "Semicolon-separated list of backends to build (available: ${PAYKAN_KNOWN_BACKENDS}; c is always built)")
 
@@ -68,7 +67,7 @@ if("llvm" IN_LIST PAYKAN_BACKENDS)
     set(PAYKAN_DEFAULT_BACKEND "llvm")
 endif()
 set(PAYKAN_NEEDS_LLVM FALSE)
-if("llvm" IN_LIST PAYKAN_BACKENDS OR "mlir" IN_LIST PAYKAN_BACKENDS)
+if("llvm" IN_LIST PAYKAN_BACKENDS)
     set(PAYKAN_NEEDS_LLVM TRUE)
 endif()
 message(STATUS "Backends: ${PAYKAN_BACKENDS} (default: ${PAYKAN_DEFAULT_BACKEND})")

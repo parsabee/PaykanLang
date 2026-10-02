@@ -6,20 +6,12 @@
 
 #include "paykan/backends/Toolchain.h"
 
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
-#ifdef __APPLE__
-#include <mach-o/dyld.h>
-#endif
+#include "Platform.h"
+#include "ToolchainNames.h"
 
-#include <cerrno>
-#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <filesystem>
 #include <sstream>
 #include <system_error>
@@ -56,46 +48,6 @@ namespace fs = std::filesystem;
 
 namespace {
 
-/// Path of the running executable, or "".  The OS's own answer where there
-/// is one; otherwise the first `paykan` on $PATH.
-std::string executablePath() {
-#if defined(__APPLE__)
-  uint32_t size = 0;
-  _NSGetExecutablePath(nullptr, &size); // sets the size needed
-  std::vector<char> buf(size + 1, '\0');
-  if (_NSGetExecutablePath(buf.data(), &size) == 0) {
-    if (char *real = realpath(buf.data(), nullptr)) {
-      std::string path = real;
-      std::free(real);
-      return path;
-    }
-  }
-#elif defined(__linux__)
-  std::error_code ec;
-  fs::path exe = fs::read_symlink("/proc/self/exe", ec);
-  if (!ec)
-    return exe.string();
-#endif
-  if (const char *pathEnv = std::getenv("PATH")) {
-    std::string dirs = pathEnv;
-    size_t start = 0;
-    while (start <= dirs.size()) {
-      size_t colon = dirs.find(':', start);
-      std::string dir =
-          dirs.substr(start, colon == std::string::npos ? std::string::npos
-                                                        : colon - start);
-      fs::path cand = fs::path(dir.empty() ? "." : dir) / "paykan";
-      std::error_code ec;
-      if (access(cand.c_str(), X_OK) == 0)
-        return fs::canonical(cand, ec).string();
-      if (colon == std::string::npos)
-        break;
-      start = colon + 1;
-    }
-  }
-  return "";
-}
-
 /// Append the space-separated words of @p flags to @p out.
 void appendFlags(const std::string &flags, std::vector<std::string> &out) {
   std::istringstream words(flags);
@@ -108,7 +60,7 @@ void appendFlags(const std::string &flags, std::vector<std::string> &out) {
 
 /// Directory of the running executable, or "".
 std::string executableDir() {
-  std::string exe = executablePath();
+  std::string exe = platform::executablePath();
   return exe.empty() ? "" : fs::path(exe).parent_path().string();
 }
 
@@ -119,46 +71,10 @@ int spawn(const std::string &path, const std::vector<std::string> &args,
           const std::string *argv0,
           const std::vector<std::pair<std::string, std::string>> &extraEnv,
           std::ostream &errs) {
-  pid_t pid = fork();
-  if (pid < 0) {
-    errs << "fork failed: " << std::strerror(errno) << "\n";
-    return -1;
-  }
-  if (pid == 0) {
-    for (const auto &[k, v] : extraEnv)
-      setenv(k.c_str(), v.c_str(), 1);
-    std::vector<char *> cargv;
-    if (argv0)
-      cargv.push_back(const_cast<char *>(argv0->c_str()));
-    for (const auto &a : args)
-      cargv.push_back(const_cast<char *>(a.c_str()));
-    cargv.push_back(nullptr);
-    execvp(path.c_str(), cargv.data());
-    std::fprintf(stderr, "exec of '%s' failed: %s\n", path.c_str(),
-                 std::strerror(errno));
-    _exit(127);
-  }
-  int status = 0;
-  while (waitpid(pid, &status, 0) < 0) {
-    if (errno != EINTR) {
-      errs << "waitpid failed: " << std::strerror(errno) << "\n";
-      return -1;
-    }
-  }
-  if (WIFEXITED(status))
-    return WEXITSTATUS(status);
-  if (WIFSIGNALED(status))
-    return 128 + WTERMSIG(status);
-  return -1;
+  return platform::spawn(path, args, argv0, extraEnv, errs);
 }
 
-TempDir::TempDir() {
-  std::string tmpl = (fs::temp_directory_path() / "paykan-c-XXXXXX").string();
-  std::vector<char> buf(tmpl.begin(), tmpl.end());
-  buf.push_back('\0');
-  if (mkdtemp(buf.data()))
-    Path = buf.data();
-}
+TempDir::TempDir() : Path(platform::makeTempDir("paykan-c-")) {}
 
 TempDir::~TempDir() {
   if (!Path.empty()) {
@@ -169,7 +85,7 @@ TempDir::~TempDir() {
 
 bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
   if (tc.CC.empty()) {
-    const char *cc = std::getenv("CC");
+    const char *cc = std::getenv(tcnames::kEnvCC);
     // A coverage build names the compiler that built the runtime: its
     // profile runtime matches the archive's instrumentation.  It comes with
     // the flags it needs to find the system headers and libraries (the
@@ -181,7 +97,7 @@ bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
       tc.CC = buildCC;
       appendFlags(PAYKAN_DEFAULT_CC_FLAGS, tc.ExtraFlags);
     } else {
-      tc.CC = "cc";
+      tc.CC = tcnames::kDefaultCC;
     }
   }
   // The build tree's runtime archive is sanitizer- or coverage-instrumented
@@ -215,7 +131,7 @@ bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
     candidates.emplace_back(PAYKAN_INSTALLED_RUNTIME_LIB,
                             PAYKAN_INSTALLED_RUNTIME_INCLUDE_DIR);
     for (const auto &[lib, inc] : candidates) {
-      if (exists(lib) && exists(inc + "/Runtime.h")) {
+      if (exists(lib) && exists(inc + "/" + tcnames::kRuntimeHeader)) {
         if (tc.RuntimeLib.empty())
           tc.RuntimeLib = lib;
         if (tc.RuntimeIncludeDir.empty())
@@ -224,7 +140,8 @@ bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
       }
     }
   }
-  if (!exists(tc.RuntimeLib) || !exists(tc.RuntimeIncludeDir + "/Runtime.h")) {
+  if (!exists(tc.RuntimeLib) ||
+      !exists(tc.RuntimeIncludeDir + "/" + tcnames::kRuntimeHeader)) {
     errs << "cannot find the Paykan runtime (libpaykan_runtime.a and "
             "Runtime.h); set PAYKAN_RUNTIME_DIR\n";
     return false;
@@ -239,8 +156,8 @@ bool linkExecutable(const std::vector<std::string> &objects,
   for (const auto &f : tc.ExtraFlags)
     link.push_back(f);
   link.push_back(tc.RuntimeLib);
-  link.push_back("-lm");
-  link.push_back("-o");
+  link.push_back(tcnames::kFlagLibm);
+  link.push_back(tcnames::kFlagOutput);
   link.push_back(outputPath);
   int rc = spawn(tc.CC, link, &tc.CC, {}, errs);
   if (rc != 0) {
