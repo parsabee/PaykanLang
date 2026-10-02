@@ -796,12 +796,10 @@ void ModuleLowering::emitClassVarRebind(pir::LocalId local, ast::Expr *rhsExpr,
   if (!newBox) {
     if (exprAlreadyShared(rhsExpr))
       newBox = takeSharedOwnership(rhsExpr, val);
-    else if (ast::isa<ast::SubscriptExpr>(rhsExpr))
-      // Borrowed array element: emitAsShared retains the stored box.
-      newBox = emitAsShared(rhsExpr);
     else
       // A freshly-produced raw value already computed as `val`: box it (re-
-      // emitting would evaluate the RHS twice).
+      // emitting would evaluate the RHS twice).  A borrowed array element
+      // never gets here: visitAssignStmt acquires it with emitAsShared.
       newBox = emitSharedNew(val, "new.box");
   }
   // `T?` into an `Obj` variable: never store a NULL box in an `Obj`.
@@ -813,6 +811,28 @@ void ModuleLowering::emitClassVarRebind(pir::LocalId local, ast::Expr *rhsExpr,
 }
 
 Val ModuleLowering::visitAssignStmt(ast::AssignStmt *node) {
+  // `x = arr[i]` into an owned ref variable: acquire the element's box
+  // straight from the array.  Evaluating the value first and then again for
+  // the ownership handling would run the array and index expressions twice.
+  if (auto *owner = CurrentScope->findOwner(node->getVarName());
+      owner && CurrentScope->isOwned(node->getVarName()) &&
+      isBorrowedObjectElement(node->getValue())) {
+    auto *astTy = CurrentScope->lookupASTType(node->getVarName());
+    if (astTy && ast::isRefType(astTy)) {
+      ast::Expr *rhsExpr = node->getValue();
+      Val newBox = emitAsShared(rhsExpr);
+      if (!newBox)
+        return newBox;
+      pir::LocalId local = owner->lookup(node->getVarName());
+      emitRelease(B.load(local, "old.box"));
+      B.store(local, newBox);
+      ast::ClassType *rhsCT = resolveExprClassType(rhsExpr);
+      if (rhsCT && !ast::isa<ast::OptionalType>(astTy))
+        CurrentScope->updateASTType(node->getVarName(), rhsCT);
+      return newBox;
+    }
+  }
+
   Val val = emitExpr(node->getValue());
   if (!val)
     return val;
@@ -1134,6 +1154,17 @@ Val ModuleLowering::emitAsShared(ast::Expr *expr) {
   return emitOptionalToObj(expr, box);
 }
 
+bool ModuleLowering::isBorrowedObjectElement(ast::Expr *expr) const {
+  auto *se = ast::dyn_cast<ast::SubscriptExpr>(expr);
+  if (!se || !se->getResolvedType() || !ast::isRefType(se->getResolvedType()))
+    return false;
+  if (auto *id = ast::dyn_cast<ast::Identifier>(se->getArray()))
+    if (CurrentScope &&
+        CurrentScope->lookupASTType(id->getName()) == ASTCtx.getStrTy())
+      return false;
+  return !exprAlreadyShared(se);
+}
+
 Val ModuleLowering::emitAsSharedRaw(ast::Expr *expr) {
   // Owned identifier: retain + return the existing box.
   if (auto *id = ast::dyn_cast<ast::Identifier>(expr)) {
@@ -1147,22 +1178,18 @@ Val ModuleLowering::emitAsSharedRaw(ast::Expr *expr) {
   }
 
   // Object array element (arr[i]) of ref type: the array owns one reference
-  // per slot, so acquiring the element retains the stored box.
-  if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(expr)) {
-    bool isStrReceiver = false;
-    if (auto *id = ast::dyn_cast<ast::Identifier>(se->getArray()))
-      isStrReceiver = CurrentScope && CurrentScope->lookupASTType(
-                                          id->getName()) == ASTCtx.getStrTy();
-    if (!isStrReceiver && se->getResolvedType() &&
-        ast::isRefType(se->getResolvedType()) && !exprAlreadyShared(se)) {
-      Val idx = emitExpr(se->getIndex());
-      idx = coerceBoolToI64(idx, Type::I64);
-      Val arrRaw = emitUnwrappedRef(se->getArray());
-      Val bits = callRuntime(kPaykanArrayGet, {arrRaw, idx}, "elem.raw");
-      Val box = B.cast(bits, Type::Box, "elem.shared");
-      emitRetain(box);
-      return box;
-    }
+  // per slot, so acquiring the element retains the stored box.  The index
+  // and the array are each evaluated once, in the order visitSubscriptExpr
+  // uses (index first).
+  if (isBorrowedObjectElement(expr)) {
+    auto *se = ast::cast<ast::SubscriptExpr>(expr);
+    Val idx = emitExpr(se->getIndex());
+    idx = coerceBoolToI64(idx, Type::I64);
+    Val arrRaw = emitUnwrappedRef(se->getArray());
+    Val bits = callRuntime(kPaykanArrayGet, {arrRaw, idx}, "elem.raw");
+    Val box = B.cast(bits, Type::Box, "elem.shared");
+    emitRetain(box);
+    return box;
   }
 
   // Ref-typed field (obj.field) or tuple element (t.1): the slot owns its

@@ -560,6 +560,63 @@ TEST(Lowering, ObjectArrayLiteralSetsAndReleasesEachElement) {
   EXPECT_EQ(count(m, "release"), 3u) << m;
 }
 
+TEST(Lowering, AssigningAnObjectElementEvaluatesTheIndexOnce) {
+  // Issue #52: `x = arr[idx()]` used to evaluate the subscript once for the
+  // value and again for the ownership handling.
+  auto l = lower(R"(
+    class C { v: int; fn __init__(v: int) { self.v = v; } }
+    fn idx() -> int { println("idx called"); return 0; }
+    fn mk() -> C[] { return [C(3)]; }
+    fn main() -> int {
+      arr: C[] = [C(1), C(2)];
+      x: C = C(9);
+      x = arr[idx()];
+      y: C = arr[idx()];
+      z = arr[idx()];
+      x = mk()[idx()];
+      return x.v + y.v + z.v;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string m = function(l.Text, "main");
+  EXPECT_EQ(count(m, "call @idx()"), 4u) << m;
+  EXPECT_EQ(count(m, "call @mk()"), 1u) << m;
+  EXPECT_EQ(count(m, "call @PaykanArray_get("), 4u) << m;
+  // Each element read by a declared owner retains the stored box once
+  // (x from arr, y, x from the temporary array); z's first assignment
+  // acquires it with a single `box`.
+  EXPECT_EQ(count(m, "retain"), 3u) << m;
+}
+
+TEST(Lowering, SideEffectingReceiversAreEvaluatedOnce) {
+  // The other ownership paths that take a value's box: a call-rooted field
+  // read, `mov` of a temporary, an element passed to a ref parameter and an
+  // element stored into an array slot or a field.
+  auto l = lower(R"(
+    class C { v: int; fn __init__(v: int) { self.v = v; } }
+    class H { c: C; fn __init__(c: C) { self.c = c; } }
+    fn idx() -> int { println("idx"); return 0; }
+    fn mkh() -> H { return H(C(5)); }
+    fn take(c: C) -> int { return c.v; }
+    fn main() -> int {
+      arr: C[] = [C(1), C(2)];
+      x: Obj = C(9);
+      x = mkh().c;
+      w: C = mkh().c;
+      x = mov mkh();
+      arr[idx()] = arr[idx()];
+      n: int = take(arr[idx()]);
+      h: H = H(C(3));
+      h.c = arr[idx()];
+      return n;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string m = function(l.Text, "main");
+  EXPECT_EQ(count(m, "call @mkh()"), 3u) << m;
+  EXPECT_EQ(count(m, "call @idx()"), 4u) << m;
+}
+
 TEST(Lowering, ArrayMatchArmBindingDispatchesThroughTheArrayType) {
   // The binding of an `arr: Str[]` arm has the array type: `len` is a slot
   // of the runtime Array class, not of the specialized `Array<Str>` key.

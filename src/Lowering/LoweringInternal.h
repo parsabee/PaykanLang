@@ -274,6 +274,10 @@ private:
   Val emitUnwrappedRef(ast::Expr *expr, std::string name = "ref.obj");
   Val emitAsShared(ast::Expr *expr);
   Val emitAsSharedRaw(ast::Expr *expr);
+  /// An object array element read that borrows the array's reference
+  /// (`arr[i]` of ref type on a live array): a new owner retains the stored
+  /// box, which emitAsShared does while evaluating the array and index once.
+  bool isBorrowedObjectElement(ast::Expr *expr) const;
 
   // -- String temporaries
   // ----------------------------------------------------------------
