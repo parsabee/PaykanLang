@@ -40,6 +40,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -97,10 +98,13 @@ class TestResult:
         self.name = name
         self.command = command
         self.log = log
+        self.cwd = ""
+        self.env: dict[str, str] = {}  # what the test sets on top of ours
+        self.raw_dir = ""
+        self.raw_listing: list[str] = []
         self.returncode = 0
-        # True/False: the test's command is an instrumented binary that
-        # did/did not write a profile; None: it is not (a script).
-        self.own_profile: bool | None = None
+        self.seconds = 0.0
+        self.problem = ""  # why the run does not count, if it does not
         self.profdata = ""
 
 
@@ -115,42 +119,54 @@ def ctest_tests(build_dir: str) -> list[dict]:
     return [t for t in json.loads(out)["tests"] if t.get("command")]
 
 
+GTEST_RAN = re.compile(r"^\[==========\] (\d+) tests? from .* ran\.")
+
+
 def run_test(
     test: dict, prof_dir: str, bin_dir: str, llvm_profdata: str
 ) -> TestResult:
     """Run one ctest test as ctest would (command, ENVIRONMENT,
-    WORKING_DIRECTORY), every process it starts writing its own profile into
-    a directory of the test's, and merge them into <test>.profdata.
+    WORKING_DIRECTORY, TIMEOUT), every process it starts writing its own
+    profile into a directory of the test's, and merge them into
+    <test>.profdata.
 
     The profiles are named by process id (%p) rather than merged online by
     module signature (%m): the profile runtime overwrites, with only a
     warning on the process's stderr, a pool file whose signature matches
-    but whose layout does not (on macOS that lost most test binaries'
-    profiles), and a per-process file lets the test's own binary be checked
-    for by its pid.  Programs the C backend builds link the instrumented
-    runtime and write profiles too: their runtime counts are real coverage,
-    and their generated code is in no reported object."""
+    but whose layout does not.  Programs the C backend builds link the
+    instrumented runtime and write profiles too: their runtime counts are
+    real coverage, and their generated code is in no reported object.
+
+    All paths are absolute: the test runs in its WORKING_DIRECTORY, where a
+    relative LLVM_PROFILE_FILE would land somewhere else."""
     name = test["name"]
     safe = re.sub(r"[^A-Za-z0-9_.-]", "_", name)
     raw_dir = os.path.join(prof_dir, "raw", safe)
     os.makedirs(raw_dir)
     props = {p["name"]: p["value"] for p in test.get("properties", [])}
-    env = dict(os.environ)
-    for assignment in props.get("ENVIRONMENT", []):
-        key, _, value = assignment.partition("=")
-        env[key] = value
-    env["LLVM_PROFILE_FILE"] = os.path.join(raw_dir, "%p.profraw")
     command = test["command"]
     result = TestResult(name, command, os.path.join(prof_dir, f"{safe}.log"))
+    result.raw_dir = raw_dir
+    result.cwd = props.get("WORKING_DIRECTORY") or os.getcwd()
+    for assignment in props.get("ENVIRONMENT", []):
+        key, _, value = assignment.partition("=")
+        result.env[key] = value
+    result.env["LLVM_PROFILE_FILE"] = os.path.join(raw_dir, "%p.profraw")
     timeout = props.get("TIMEOUT")
+    start = time.monotonic()
     with open(result.log, "w") as fh:
-        proc = subprocess.Popen(
-            command,
-            cwd=props.get("WORKING_DIRECTORY") or None,
-            env=env,
-            stdout=fh,
-            stderr=subprocess.STDOUT,
-        )
+        try:
+            proc = subprocess.Popen(
+                command,
+                cwd=result.cwd,
+                env=dict(os.environ, **result.env),
+                stdout=fh,
+                stderr=subprocess.STDOUT,
+            )
+        except OSError as err:
+            result.returncode = -1
+            result.problem = f"could not start: {err}"
+            return result
         try:
             result.returncode = proc.wait(timeout=float(timeout) if timeout else None)
         except subprocess.TimeoutExpired:
@@ -158,32 +174,64 @@ def run_test(
             proc.wait()
             fh.write(f"\n*** timed out after {timeout}s\n")
             result.returncode = -1
-    if os.path.dirname(os.path.abspath(command[0])) == os.path.abspath(bin_dir):
-        own = os.path.join(raw_dir, f"{proc.pid}.profraw")
-        result.own_profile = os.path.isfile(own) and os.path.getsize(own) > 0
-    raws = sorted(
-        os.path.join(raw_dir, f) for f in os.listdir(raw_dir) if f.endswith(".profraw")
+    result.seconds = time.monotonic() - start
+    if result.returncode != 0:
+        result.problem = f"exit code {result.returncode}"
+    elif os.path.basename(command[0]).endswith("_tests"):
+        # A gtest binary that exits 0 having run nothing (a filter, a wrong
+        # binary) would pass silently.
+        with open(result.log, errors="replace") as fh:
+            ran = [int(m.group(1)) for m in map(GTEST_RAN.match, fh) if m]
+        if not ran or ran[-1] == 0:
+            result.problem = "the gtest binary ran no tests"
+    result.raw_listing = sorted(os.listdir(raw_dir))
+    raws = [
+        os.path.join(raw_dir, f) for f in result.raw_listing if f.endswith(".profraw")
+    ]
+    if not raws:
+        # Every test runs instrumented code; without a profile llvm-cov
+        # would report what only this test runs as never executed.
+        result.problem = result.problem or "it wrote no .profraw file"
+        return result
+    # Merge per test and drop the raw files: a test that runs the driver
+    # hundreds of times would otherwise leave a gigabyte behind.
+    listing = os.path.join(prof_dir, f"{safe}.inputs")
+    with open(listing, "w") as fh:
+        fh.write("\n".join(raws) + "\n")
+    result.profdata = os.path.join(prof_dir, f"{safe}.profdata")
+    subprocess.run(
+        [
+            llvm_profdata,
+            "merge",
+            "-sparse",
+            f"-input-files={listing}",
+            "-o",
+            result.profdata,
+        ],
+        check=True,
     )
-    if raws:
-        # Merge per test and drop the raw files: a test that runs the
-        # driver hundreds of times would otherwise leave a gigabyte behind.
-        listing = os.path.join(prof_dir, f"{safe}.inputs")
-        with open(listing, "w") as fh:
-            fh.write("\n".join(raws) + "\n")
-        result.profdata = os.path.join(prof_dir, f"{safe}.profdata")
-        subprocess.run(
-            [
-                llvm_profdata,
-                "merge",
-                "-sparse",
-                f"-input-files={listing}",
-                "-o",
-                result.profdata,
-            ],
-            check=True,
-        )
-        shutil.rmtree(raw_dir)
+    shutil.rmtree(raw_dir)
     return result
+
+
+def report_problem(r: TestResult) -> None:
+    """Everything needed to diagnose a test run that does not count."""
+    try:
+        with open(r.log, errors="replace") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        lines = []
+    failures = [ln for ln in lines if ln.startswith("[  FAILED  ]")]
+    print(f"--- {r.name}: {r.problem} ({r.seconds:.1f}s)")
+    print(f"command: {' '.join(r.command)}")
+    print(f"cwd:     {r.cwd}")
+    for key, value in r.env.items():
+        print(f"env:     {key}={value}")
+    print(f"raw dir: {r.raw_dir}: {' '.join(r.raw_listing) or '(empty)'}")
+    print(f"output (failures, then last 80 lines; full log: {r.log}):")
+    print("\n".join(failures))
+    print("...")
+    print("\n".join(lines[-80:]))
 
 
 def main() -> int:
@@ -196,7 +244,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    build_dir = args.build_dir
+    build_dir = os.path.abspath(args.build_dir)
     bin_dir = os.path.join(build_dir, "bin")
     if not os.path.isdir(bin_dir):
         sys.exit(
@@ -222,33 +270,22 @@ def main() -> int:
             )
         )
 
-    failed = [r for r in results if r.returncode != 0]
-    for r in failed:
-        # The test output is kept in the log; show the failures and the end
-        # of it so a CI failure can be diagnosed.
-        with open(r.log, errors="replace") as fh:
-            lines = fh.read().splitlines()
-        failures = [ln for ln in lines if ln.startswith("[  FAILED  ]")]
-        print(f"--- {r.name} output (failures, then last 80 lines; full log: {r.log})")
-        print("\n".join(failures))
-        print("...")
-        print("\n".join(lines[-80:]))
-    if failed:
-        names = ", ".join(r.name for r in failed)
-        sys.exit(f"error: test(s) failed under coverage: {names}")
-
-    # Every test binary must have written its own profile, or llvm-cov
-    # reports the code only that binary runs as never executed (a profile
-    # lost to a clobbered or unwritable file fails nothing else).
+    for r in results:
+        print(f"  {r.name}: {r.seconds:.1f}s{', ' + r.problem if r.problem else ''}")
+    bad = [r for r in results if r.problem]
+    for r in bad:
+        report_problem(r)
     ran = {os.path.basename(r.command[0]) for r in results}
     missing = [
-        f"bin/{name} (no test runs it)"
+        name
         for name in sorted(os.listdir(bin_dir))
         if name.endswith("_tests") and name not in ran
     ]
-    no_profile = [r.name for r in results if r.own_profile is False]
-    if missing or no_profile:
-        sys.exit("error: no coverage profile from " + ", ".join(no_profile + missing))
+    if missing:
+        print(f"error: no test runs bin/{', bin/'.join(missing)}", file=sys.stderr)
+    if bad or missing:
+        names = ", ".join(r.name for r in bad)
+        sys.exit(f"error: test run(s) that do not count under coverage: {names}")
 
     objects = instrumented_objects(bin_dir)
     if not objects:
