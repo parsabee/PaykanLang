@@ -121,22 +121,32 @@ const char *cType(Type t) {
   return "void";
 }
 
+/// The C operator of a comparison (integer, pointer and ordered float
+/// compares; a float `ne` is emitted separately).
+const char *cmpOperator(pir::CmpPred pred) {
+  switch (pred) {
+  case pir::CmpPred::Eq:
+    return "==";
+  case pir::CmpPred::Ne:
+    return "!=";
+  case pir::CmpPred::Lt:
+    return "<";
+  case pir::CmpPred::Le:
+    return "<=";
+  case pir::CmpPred::Gt:
+    return ">";
+  case pir::CmpPred::Ge:
+    return ">=";
+  }
+  return "==";
+}
+
 bool isPointerCType(const std::string &c) {
   return c.find('*') != std::string::npos;
 }
 bool isPointerType(Type t) {
   return t == Type::Box || t == Type::Obj || t == Type::Ptr;
 }
-
-const std::set<std::string> kCKeywords = {
-    "auto",     "break",    "case",     "char",   "const",   "continue",
-    "default",  "do",       "double",   "else",   "enum",    "extern",
-    "float",    "for",      "goto",     "if",     "inline",  "int",
-    "long",     "register", "restrict", "return", "short",   "signed",
-    "sizeof",   "static",   "struct",   "switch", "typedef", "union",
-    "unsigned", "void",     "volatile", "while",  "bool",    "true",
-    "false",    "main",     "argc",     "argv",   "NULL",    "INFINITY",
-    "NAN",      "INT64_MIN"};
 
 /// Keep [A-Za-z0-9_]; escape anything else as _XX (hex).
 std::string sanitize(const std::string &s) {
@@ -239,7 +249,9 @@ class Emitter {
   int Indent = 0;
   bool Failed = false;
 
-  std::string ind() const { return std::string(Indent * 2, ' '); }
+  std::string ind() const {
+    return std::string(static_cast<size_t>(Indent) * 2, ' ');
+  }
 
   void fail(const std::string &msg) {
     if (!Failed)
@@ -262,7 +274,10 @@ class Emitter {
     return mod + "\n" + name;
   }
 
-  /// Reserve a unique C symbol for (module, name).
+  /// Reserve a unique C symbol for (module, name).  Every base starts with
+  /// `pk_`, which keeps these apart from C keywords, the C library and the
+  /// runtime (`Paykan*`); the names derived from a class symbol use their
+  /// own prefixes (`pkvt_`, `pknew_`) and the emitter's helpers `pkrt_`.
   void defineSymbol(const pir::Module &m, const std::string &name,
                     const std::string &base) {
     std::string key = symKey(m.Name, name);
@@ -270,7 +285,7 @@ class Emitter {
       return;
     std::string sym = base;
     unsigned n = 1;
-    while (UsedSymbols.count(sym) || findProto(sym) || kCKeywords.count(sym))
+    while (UsedSymbols.count(sym))
       sym = base + "_" + std::to_string(n++);
     UsedSymbols.insert(sym);
     Symbols[key] = sym;
@@ -323,19 +338,31 @@ class Emitter {
     return "struct " + classSymbol(name);
   }
   std::string classVTable(const std::string &name) {
-    return classSymbol(name) + "_vtable";
+    return "pkvt_" + classSymbol(name);
   }
   std::string classNew(const std::string &name) {
-    return classSymbol(name) + "__new";
+    return "pknew_" + classSymbol(name);
   }
 
-  std::string valueName(const pir::Value &v) {
+  /// A PIR value (parameter or instruction result): `v<id>`, plus the
+  /// value's name for readability.  The id is unique in the function and
+  /// ends at the first '_', so these never collide with each other or with
+  /// the `l_` / `l<k>_` locals (see emitFunction).
+  static std::string valueName(const pir::Value &v) {
+    std::string id = "v" + std::to_string(v.Id);
+    if (v.Name.empty())
+      return id;
     std::string nm = v.Name;
     for (char &c : nm)
       if (c == '.')
         c = '_';
-    std::string base = nm.empty() ? "v" : sanitize(nm);
-    return base + "_" + std::to_string(v.Id);
+    return id + "_" + sanitize(nm);
+  }
+
+  /// A class field: `f_<name>`, so a field named after a C macro (`errno`,
+  /// `stdout`, ...) is never expanded.
+  static std::string fieldName(const std::string &name) {
+    return "f_" + sanitize(name);
   }
 
   std::string operand(const pir::Operand &op, Type &ty) {
@@ -493,11 +520,11 @@ class Emitter {
          "#include <stdlib.h>\n"
          "#include <string.h>\n"
          "#include \"Runtime.h\"\n\n"
-         "typedef void (*pk_fn)(void);\n\n"
-         "static inline int64_t pk_f64_bits(double d) {\n"
+         "typedef void (*pkrt_fn)(void);\n\n"
+         "static inline int64_t pkrt_f64_bits(double d) {\n"
          "  int64_t i; memcpy(&i, &d, sizeof i); return i;\n"
          "}\n"
-         "static inline double pk_bits_f64(int64_t i) {\n"
+         "static inline double pkrt_bits_f64(int64_t i) {\n"
          "  double d; memcpy(&d, &i, sizeof d); return d;\n"
          "}\n\n";
   }
@@ -542,7 +569,7 @@ class Emitter {
       O << "  PaykanObjectVTable *vtable;\n  PaykanShared *shared;\n";
       for (const auto &f : c->Fields) {
         std::string ct = cType(f.Ty);
-        O << "  " << ct << (ct.back() == '*' ? "" : " ") << sanitize(f.Name)
+        O << "  " << ct << (ct.back() == '*' ? "" : " ") << fieldName(f.Name)
           << ";\n";
       }
       O << "};\n\n";
@@ -579,19 +606,19 @@ class Emitter {
         if (!d)
           continue;
         if (!inUnit(d->Module)) {
-          O << "extern pk_fn " << classVTable(c.Name) << "[];\n";
+          O << "extern pkrt_fn " << classVTable(c.Name) << "[];\n";
           continue;
         }
         const pir::Class &def = *d->Cls;
         const pir::Module &defMod = P.Modules[d->Module];
-        O << "pk_fn " << classVTable(c.Name) << "["
+        O << "pkrt_fn " << classVTable(c.Name) << "["
           << std::max<size_t>(def.VTable.size(), 1) << "] = {\n";
         for (const auto &e : def.VTable) {
           O << "  ";
           if (e.Target.empty())
             O << "NULL";
           else
-            O << "(pk_fn)" << funcSymbol(defMod, e.Target);
+            O << "(pkrt_fn)" << funcSymbol(defMod, e.Target);
           O << ", /* " << e.Slot << " */\n";
         }
         O << "};\n";
@@ -612,7 +639,7 @@ class Emitter {
           << "  o->vtable = (PaykanObjectVTable *)" << classVTable(c.Name)
           << ";\n  o->shared = NULL;\n";
         for (const auto &f : c.Fields) {
-          O << "  o->" << sanitize(f.Name) << " = ";
+          O << "  o->" << fieldName(f.Name) << " = ";
           switch (f.Ty) {
           case Type::F64:
             O << "0.0";
@@ -676,22 +703,30 @@ class Emitter {
       << signatureC(f.Sig, true, &f.Params) << " {\n";
     Indent = 1;
 
-    // Locals: readable names when unique, suffixed otherwise.
+    // Locals: `l_<name>`, or `l<k>_<name>` for the k-th further local of
+    // the same name (shadowing in nested scopes).  The prefix keeps user
+    // names apart from C keywords, the C library's macros and functions
+    // (`errno`, `fmod`, `int64_t`, ...), the `v<id>` values and the `pk*`
+    // symbols; the digits of `l<k>` end at the first '_', so the scheme
+    // never produces one name twice.
     std::set<std::string> used;
-    for (const auto &p : f.Params)
-      used.insert(valueName(p));
     for (size_t i = 0; i < f.Locals.size(); ++i) {
       std::string base = sanitize(f.Locals[i].Name);
-      std::string nm = base;
-      if (kCKeywords.count(nm) || used.count(nm) || findProto(nm) ||
-          UsedSymbols.count(nm) || nm.rfind("pk_", 0) == 0)
-        nm = base + "_l" + std::to_string(i);
-      while (used.count(nm))
-        nm += "_";
+      std::string nm = "l_" + base;
+      for (unsigned k = 1; used.count(nm); ++k) {
+        nm = "l";
+        nm += std::to_string(k);
+        nm += '_';
+        nm += base;
+      }
       used.insert(nm);
       LocalNames.push_back(nm);
-      std::string ct = cType(f.Locals[i].Ty);
-      line(ct + (ct.back() == '*' ? "" : " ") + nm + ";");
+      std::string decl = cType(f.Locals[i].Ty);
+      if (decl.back() != '*')
+        decl += ' ';
+      decl += nm;
+      decl += ';';
+      line(decl);
     }
     emitBlock(f.Body);
     Indent = 0;
@@ -817,33 +852,12 @@ class Emitter {
       pre = resultPrefix(i);
       Type ta, tb;
       std::string a = operand(i.Args[0], ta), b = operand(i.Args[1], tb);
-      const char *op = "==";
-      switch (i.Pred) {
-      case pir::CmpPred::Eq:
-        op = "==";
-        break;
-      case pir::CmpPred::Ne:
-        op = "!=";
-        break;
-      case pir::CmpPred::Lt:
-        op = "<";
-        break;
-      case pir::CmpPred::Le:
-        op = "<=";
-        break;
-      case pir::CmpPred::Gt:
-        op = ">";
-        break;
-      case pir::CmpPred::Ge:
-        op = ">=";
-        break;
-      }
       if (ta == Type::F64 && i.Pred == pir::CmpPred::Ne) {
         // Ordered "not equal": false for NaN operands (unlike C's !=).
         line(pre + "(" + a + " < " + b + " || " + a + " > " + b + ");");
         return;
       }
-      line(pre + "(" + a + " " + op + " " + b + ");");
+      line(pre + "(" + a + " " + cmpOperator(i.Pred) + " " + b + ");");
       return;
     }
     case Opcode::Select:
@@ -862,9 +876,9 @@ class Emitter {
       Type to = i.CastTo;
       std::string expr;
       if (from == Type::F64 && to == Type::I64)
-        expr = "pk_f64_bits(" + a + ")";
+        expr = "pkrt_f64_bits(" + a + ")";
       else if (from == Type::I64 && to == Type::F64)
-        expr = "pk_bits_f64(" + a + ")";
+        expr = "pkrt_bits_f64(" + a + ")";
       else if (to == Type::Bool)
         expr = "((" + a + " & 1) != 0)";
       else if (to == Type::I64 && from == Type::Char)
@@ -930,7 +944,7 @@ class Emitter {
       if (i.Sig.Params.empty())
         fnTy += "void";
       fnTy += ")";
-      std::string call = "((" + fnTy + ")((pk_fn *)(" + recv + ")->vtable)[" +
+      std::string call = "((" + fnTy + ")((pkrt_fn *)(" + recv + ")->vtable)[" +
                          std::to_string(i.Slot) + "])(";
       for (size_t a = 0; a < i.Args.size(); ++a) {
         if (a)
@@ -969,11 +983,11 @@ class Emitter {
     case Opcode::FieldLoad:
       pre = resultPrefix(i);
       line(pre + "((" + classStruct(i.ClassName) + " *)" + operand(i.Args[0]) +
-           ")->" + sanitize(i.Field) + ";");
+           ")->" + fieldName(i.Field) + ";");
       return;
     case Opcode::FieldStore:
       line("((" + classStruct(i.ClassName) + " *)" + operand(i.Args[0]) +
-           ")->" + sanitize(i.Field) + " = " + operand(i.Args[1]) + ";");
+           ")->" + fieldName(i.Field) + " = " + operand(i.Args[1]) + ";");
       return;
     case Opcode::VTableLoad:
       pre = resultPrefix(i);
