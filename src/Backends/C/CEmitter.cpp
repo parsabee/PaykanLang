@@ -5,7 +5,11 @@
 // every module-defined symbol is mangled with its module so modules never
 // collide, and runtime symbols are used by their C name with the casts
 // Runtime.h's prototypes need.
+//
+// Every piece of C syntax written here (keywords, types, operators,
+// punctuation, escapes, mangling affixes) is a constant from CNames.h.
 
+#include "CNames.h"
 #include "Names.h"
 #include "paykan/backends/c/CBackend.h"
 
@@ -22,6 +26,69 @@ namespace paykan::backend_c {
 namespace {
 
 using pir::Type;
+using namespace cnames;
+
+// -- C syntax helpers
+// ----------------------------------------------------------
+
+/// `(x)`
+std::string paren(const std::string &x) { return kLParen + x + kRParen; }
+
+/// The cast prefix `(ty)`.
+std::string cast(const std::string &ty) { return paren(ty); }
+
+/// `x;`
+std::string stmt(const std::string &x) { return x + kSemi; }
+
+/// `a <op> b`, with a space on each side of the operator.
+std::string binop(const std::string &a, const char *op, const std::string &b) {
+  return a + kSpace + op + kSpace + b;
+}
+
+/// `a, b, ...`
+std::string list(const std::vector<std::string> &items) {
+  std::string s;
+  for (size_t i = 0; i < items.size(); ++i) {
+    if (i)
+      s += kListSep;
+    s += items[i];
+  }
+  return s;
+}
+
+/// `fn(args...)`
+std::string call(const std::string &fn, const std::vector<std::string> &args) {
+  return fn + paren(list(args));
+}
+
+/// `/* text */`
+std::string comment(const std::string &text) {
+  return kCommentOpen + text + kCommentClose;
+}
+
+/// `"text"` (@p text must not need escaping).
+std::string quoted(const std::string &text) { return kQuote + text + kQuote; }
+
+/// `base->field`
+std::string member(const std::string &base, const std::string &field) {
+  return base + kOpArrow + field;
+}
+
+/// `a[i]`
+std::string subscript(const std::string &a, const std::string &i) {
+  return a + kLBracket + i + kRBracket;
+}
+
+/// A pointer type's spelling: `T *`.
+std::string pointerTo(const std::string &ty) { return ty + kSpace + kOpDeref; }
+
+/// `&x`
+std::string addressOf(const std::string &x) { return kOpAddrOf + x; }
+
+/// A declaration `T name` (`T *name` for a pointer type `T *`).
+std::string declare(const std::string &ty, const std::string &name) {
+  return ty + (ty.back() == kPointerStar ? "" : kSpace) + name;
+}
 
 // -- Runtime prototypes (Runtime.h) ------------------------------------------
 //
@@ -35,61 +102,55 @@ struct RuntimeProto {
   std::vector<const char *> Params;
 };
 
-const char *kObjC = "PaykanObject *";
-const char *kBoxC = "PaykanShared *";
-const char *kStrC = "PaykanString *";
-const char *kArrC = "PaykanArray *";
-const char *kTupC = "PaykanTuple *";
-
 const RuntimeProto kRuntimeProtos[] = {
-    {names::kPaykanRetain, "void", {kBoxC}},
-    {names::kPaykanRelease, "void", {kBoxC}},
-    {names::kPaykanSharedNew, kBoxC, {kObjC}},
-    {names::kPaykanSharedGet, kObjC, {kBoxC}},
-    {names::kPaykanMalloc, "void *", {"size_t"}},
-    {names::kPaykanFree, "void", {"void *"}},
-    {names::kPaykanPanicDivByZero, "void", {}},
-    {names::kPaykanPanicDivOverflow, "void", {}},
-    {names::kPaykanStringNew, kStrC, {"const char *", "int64_t"}},
-    {names::kPaykanStringDestroy, "void", {kObjC}},
-    {names::kPaykanStringConcat, kObjC, {kObjC, kObjC}},
-    {names::kPaykanStringCharAt, "int8_t", {kObjC, "int64_t"}},
-    {names::kPaykanStringFromInt, kStrC, {"int64_t"}},
-    {names::kPaykanStringFromFloat, kStrC, {"double"}},
-    {names::kPaykanStringFromBool, kStrC, {"int64_t"}},
-    {names::kPaykanStringFromChar, kStrC, {"int8_t"}},
-    {names::kPaykanStringEquals, "int64_t", {kObjC, kObjC}},
-    {names::kPaykanStringToString, kBoxC, {kObjC}},
-    {names::kPaykanStringLength, "int64_t", {kObjC}},
-    {names::kPaykanArrayNew, kArrC, {"unsigned long"}},
-    {names::kPaykanArrayNewObj, kArrC, {"unsigned long"}},
-    {names::kPaykanArrayNewFromData, kArrC, {"unsigned long", "const void *"}},
-    {names::kPaykanArrayGet, "void *", {kArrC, "unsigned long"}},
-    {names::kPaykanArraySet, "void", {kArrC, "unsigned long", "void *"}},
-    {names::kPaykanArraySetObj, "void", {kArrC, "unsigned long", kBoxC}},
-    {names::kPaykanArrayPush, "void", {kArrC, "void *"}},
-    {names::kPaykanArrayPushObj, "void", {kArrC, kBoxC}},
-    {names::kPaykanArrayPop, "void *", {kArrC}},
-    {names::kPaykanArrayPopObj, kBoxC, {kArrC}},
-    {names::kPaykanTupleNew, kTupC, {"int64_t", "const uint8_t *"}},
-    {names::kPaykanTupleGet, "int64_t", {kTupC, "int64_t"}},
-    {names::kPaykanTupleSet, "void", {kTupC, "int64_t", "int64_t"}},
-    {names::kPaykanTupleSetObj, "void", {kTupC, "int64_t", kBoxC}},
-    {names::kPaykanFileOpen, kBoxC, {kObjC, kObjC}},
-    {names::kPaykanIntFromStr, kBoxC, {kObjC}},
-    {names::kPaykanFloatFromStr, kBoxC, {kObjC}},
-    {names::kPaykanPrint, "void", {kObjC}},
-    {names::kPaykanPrintln, "void", {kObjC}},
-    {names::kPaykanErrPrint, "void", {kObjC}},
-    {names::kPaykanErrPrintln, "void", {kObjC}},
-    {names::kPaykanObjectDestroy, "void", {kObjC}},
-    {names::kPaykanObjectToString, kBoxC, {kObjC}},
-    {names::kPaykanObjectEquals, "int64_t", {kObjC, kObjC}},
-    {names::kPaykanFileDestroy, "void", {kObjC}},
-    {names::kPaykanFileToString, kBoxC, {kObjC}},
-    {names::kPaykanFileEquals, "int64_t", {kObjC, kObjC}},
-    {names::kPaykanFileWrite, "void", {kObjC, kObjC}},
-    {names::kPaykanFileReadln, kBoxC, {kObjC}},
+    {names::kPaykanRetain, kVoid, {kRtBoxPtr}},
+    {names::kPaykanRelease, kVoid, {kRtBoxPtr}},
+    {names::kPaykanSharedNew, kRtBoxPtr, {kRtObjPtr}},
+    {names::kPaykanSharedGet, kRtObjPtr, {kRtBoxPtr}},
+    {names::kPaykanMalloc, kVoidPtr, {kSize}},
+    {names::kPaykanFree, kVoid, {kVoidPtr}},
+    {names::kPaykanPanicDivByZero, kVoid, {}},
+    {names::kPaykanPanicDivOverflow, kVoid, {}},
+    {names::kPaykanStringNew, kRtStrPtr, {kConstCharPtr, kInt64}},
+    {names::kPaykanStringDestroy, kVoid, {kRtObjPtr}},
+    {names::kPaykanStringConcat, kRtObjPtr, {kRtObjPtr, kRtObjPtr}},
+    {names::kPaykanStringCharAt, kInt8, {kRtObjPtr, kInt64}},
+    {names::kPaykanStringFromInt, kRtStrPtr, {kInt64}},
+    {names::kPaykanStringFromFloat, kRtStrPtr, {kDouble}},
+    {names::kPaykanStringFromBool, kRtStrPtr, {kInt64}},
+    {names::kPaykanStringFromChar, kRtStrPtr, {kInt8}},
+    {names::kPaykanStringEquals, kInt64, {kRtObjPtr, kRtObjPtr}},
+    {names::kPaykanStringToString, kRtBoxPtr, {kRtObjPtr}},
+    {names::kPaykanStringLength, kInt64, {kRtObjPtr}},
+    {names::kPaykanArrayNew, kRtArrPtr, {kUnsignedLong}},
+    {names::kPaykanArrayNewObj, kRtArrPtr, {kUnsignedLong}},
+    {names::kPaykanArrayNewFromData, kRtArrPtr, {kUnsignedLong, kConstVoidPtr}},
+    {names::kPaykanArrayGet, kVoidPtr, {kRtArrPtr, kUnsignedLong}},
+    {names::kPaykanArraySet, kVoid, {kRtArrPtr, kUnsignedLong, kVoidPtr}},
+    {names::kPaykanArraySetObj, kVoid, {kRtArrPtr, kUnsignedLong, kRtBoxPtr}},
+    {names::kPaykanArrayPush, kVoid, {kRtArrPtr, kVoidPtr}},
+    {names::kPaykanArrayPushObj, kVoid, {kRtArrPtr, kRtBoxPtr}},
+    {names::kPaykanArrayPop, kVoidPtr, {kRtArrPtr}},
+    {names::kPaykanArrayPopObj, kRtBoxPtr, {kRtArrPtr}},
+    {names::kPaykanTupleNew, kRtTupPtr, {kInt64, kConstUint8Ptr}},
+    {names::kPaykanTupleGet, kInt64, {kRtTupPtr, kInt64}},
+    {names::kPaykanTupleSet, kVoid, {kRtTupPtr, kInt64, kInt64}},
+    {names::kPaykanTupleSetObj, kVoid, {kRtTupPtr, kInt64, kRtBoxPtr}},
+    {names::kPaykanFileOpen, kRtBoxPtr, {kRtObjPtr, kRtObjPtr}},
+    {names::kPaykanIntFromStr, kRtBoxPtr, {kRtObjPtr}},
+    {names::kPaykanFloatFromStr, kRtBoxPtr, {kRtObjPtr}},
+    {names::kPaykanPrint, kVoid, {kRtObjPtr}},
+    {names::kPaykanPrintln, kVoid, {kRtObjPtr}},
+    {names::kPaykanErrPrint, kVoid, {kRtObjPtr}},
+    {names::kPaykanErrPrintln, kVoid, {kRtObjPtr}},
+    {names::kPaykanObjectDestroy, kVoid, {kRtObjPtr}},
+    {names::kPaykanObjectToString, kRtBoxPtr, {kRtObjPtr}},
+    {names::kPaykanObjectEquals, kInt64, {kRtObjPtr, kRtObjPtr}},
+    {names::kPaykanFileDestroy, kVoid, {kRtObjPtr}},
+    {names::kPaykanFileToString, kRtBoxPtr, {kRtObjPtr}},
+    {names::kPaykanFileEquals, kInt64, {kRtObjPtr, kRtObjPtr}},
+    {names::kPaykanFileWrite, kVoid, {kRtObjPtr, kRtObjPtr}},
+    {names::kPaykanFileReadln, kRtBoxPtr, {kRtObjPtr}},
 };
 
 const RuntimeProto *findProto(const std::string &name) {
@@ -102,23 +163,23 @@ const RuntimeProto *findProto(const std::string &name) {
 const char *cType(Type t) {
   switch (t) {
   case Type::Void:
-    return "void";
+    return kVoid;
   case Type::I64:
-    return "int64_t";
+    return kInt64;
   case Type::F64:
-    return "double";
+    return kDouble;
   case Type::Bool:
-    return "bool";
+    return kBool;
   case Type::Char:
-    return "int8_t";
+    return kInt8;
   case Type::Box:
-    return "PaykanShared *";
+    return kRtBoxPtr;
   case Type::Obj:
-    return "PaykanObject *";
+    return kRtObjPtr;
   case Type::Ptr:
-    return "void *";
+    return kVoidPtr;
   }
-  return "void";
+  return kVoid;
 }
 
 /// The C operator of a comparison (integer, pointer and ordered float
@@ -126,23 +187,23 @@ const char *cType(Type t) {
 const char *cmpOperator(pir::CmpPred pred) {
   switch (pred) {
   case pir::CmpPred::Eq:
-    return "==";
+    return kOpEq;
   case pir::CmpPred::Ne:
-    return "!=";
+    return kOpNe;
   case pir::CmpPred::Lt:
-    return "<";
+    return kOpLt;
   case pir::CmpPred::Le:
-    return "<=";
+    return kOpLe;
   case pir::CmpPred::Gt:
-    return ">";
+    return kOpGt;
   case pir::CmpPred::Ge:
-    return ">=";
+    return kOpGe;
   }
-  return "==";
+  return kOpEq;
 }
 
 bool isPointerCType(const std::string &c) {
-  return c.find('*') != std::string::npos;
+  return c.find(kPointerStar) != std::string::npos;
 }
 bool isPointerType(Type t) {
   return t == Type::Box || t == Type::Obj || t == Type::Ptr;
@@ -153,16 +214,16 @@ std::string sanitize(const std::string &s) {
   std::string out;
   out.reserve(s.size());
   for (unsigned char c : s) {
-    if (std::isalnum(c) || c == '_') {
+    if (std::isalnum(c) || c == kIdentUnderscore) {
       out += static_cast<char>(c);
     } else {
       char buf[4];
-      std::snprintf(buf, sizeof buf, "_%02X", c);
+      std::snprintf(buf, sizeof buf, kIdentHexEscapeFormat, c);
       out += buf;
     }
   }
   if (out.empty() || std::isdigit(static_cast<unsigned char>(out[0])))
-    out = "_" + out;
+    out = kIdentLeadPrefix + out;
   return out;
 }
 
@@ -171,30 +232,29 @@ std::string escapeCString(const std::string &s) {
   for (unsigned char c : s) {
     switch (c) {
     case '\\':
-      out += "\\\\";
+      out += kEscBackslash;
       break;
     case '"':
-      out += "\\\"";
+      out += kEscQuote;
       break;
-    case '?': // trigraph-proof
-      out += "\\?";
+    case '?':
+      out += kEscQuestion;
       break;
     case '\n':
-      out += "\\n";
+      out += kEscNewline;
       break;
     case '\t':
-      out += "\\t";
+      out += kEscTab;
       break;
     case '\r':
-      out += "\\r";
+      out += kEscReturn;
       break;
     default:
-      if (c >= 0x20 && c < 0x7f) {
+      if (c >= kPrintableFirst && c < kPrintableEnd) {
         out += static_cast<char>(c);
       } else {
-        // Exactly three octal digits: never swallows a following digit.
         char buf[6];
-        std::snprintf(buf, sizeof buf, "\\%03o", c);
+        std::snprintf(buf, sizeof buf, kEscOctalFormat, c);
         out += buf;
       }
     }
@@ -204,20 +264,20 @@ std::string escapeCString(const std::string &s) {
 
 std::string fmtI64(int64_t v) {
   if (v == INT64_MIN)
-    return "INT64_MIN";
-  return "INT64_C(" + std::to_string(v) + ")";
+    return kInt64Min;
+  return call(kInt64C, {std::to_string(v)});
 }
 
 std::string fmtF64(double v) {
   if (std::isnan(v))
-    return "NAN";
+    return kNan;
   if (std::isinf(v))
-    return v < 0 ? "(-INFINITY)" : "INFINITY";
+    return v < 0 ? paren(kOpNeg + std::string(kInfinity)) : kInfinity;
   char buf[64];
-  std::snprintf(buf, sizeof buf, "%.17g", v);
+  std::snprintf(buf, sizeof buf, kF64Format, v);
   std::string s = buf;
-  if (s.find_first_of(".eE") == std::string::npos)
-    s += ".0";
+  if (s.find_first_of(kF64Marks) == std::string::npos)
+    s += kF64Suffix;
   return s;
 }
 
@@ -250,7 +310,10 @@ class Emitter {
   bool Failed = false;
 
   std::string ind() const {
-    return std::string(static_cast<size_t>(Indent) * 2, ' ');
+    std::string s;
+    for (int i = 0; i < Indent; ++i)
+      s += kIndentUnit;
+    return s;
   }
 
   void fail(const std::string &msg) {
@@ -275,9 +338,10 @@ class Emitter {
   }
 
   /// Reserve a unique C symbol for (module, name).  Every base starts with
-  /// `pk_`, which keeps these apart from C keywords, the C library and the
-  /// runtime (`Paykan*`); the names derived from a class symbol use their
-  /// own prefixes (`pkvt_`, `pknew_`) and the emitter's helpers `pkrt_`.
+  /// kSymbolPrefix (`pk_`), which keeps these apart from C keywords, the C
+  /// library and the runtime (`Paykan*`); the names derived from a class
+  /// symbol use their own prefixes (`pkvt_`, `pknew_`) and the emitter's
+  /// helpers `pkrt_` (CNames.h).
   void defineSymbol(const pir::Module &m, const std::string &name,
                     const std::string &base) {
     std::string key = symKey(m.Name, name);
@@ -286,13 +350,13 @@ class Emitter {
     std::string sym = base;
     unsigned n = 1;
     while (UsedSymbols.count(sym))
-      sym = base + "_" + std::to_string(n++);
+      sym = base + kMangleSep + std::to_string(n++);
     UsedSymbols.insert(sym);
     Symbols[key] = sym;
   }
 
   const std::string &symbolOf(const std::string &mod, const std::string &name) {
-    static const std::string missing = "/*missing*/";
+    static const std::string missing = kMissing;
     auto it = Symbols.find(symKey(mod, name));
     if (it == Symbols.end()) {
       fail("no definition of '" + name + "' in module '" + mod + "'");
@@ -307,7 +371,7 @@ class Emitter {
     if (!fn) {
       fail("function '" + name + "' is not declared in module '" + m.Name +
            "'");
-      return "/*undeclared*/";
+      return kUndeclared;
     }
     if (fn->IsExtern) {
       if (fn->Module.empty())
@@ -332,16 +396,16 @@ class Emitter {
   /// struct is always spelled with its `struct` keyword and never typedef'd.
   std::string classSymbol(const std::string &name) {
     const ClassDef *d = classDef(name);
-    return d ? symbolOf(P.Modules[d->Module].Name, name) : "/*noclass*/";
+    return d ? symbolOf(P.Modules[d->Module].Name, name) : kNoClass;
   }
   std::string classStruct(const std::string &name) {
-    return "struct " + classSymbol(name);
+    return kStruct + std::string(kSpace) + classSymbol(name);
   }
   std::string classVTable(const std::string &name) {
-    return "pkvt_" + classSymbol(name);
+    return kVTablePrefix + classSymbol(name);
   }
   std::string classNew(const std::string &name) {
-    return "pknew_" + classSymbol(name);
+    return kNewPrefix + classSymbol(name);
   }
 
   /// A PIR value (parameter or instruction result): `v<id>`, plus the
@@ -349,20 +413,20 @@ class Emitter {
   /// ends at the first '_', so these never collide with each other or with
   /// the `l_` / `l<k>_` locals (see emitFunction).
   static std::string valueName(const pir::Value &v) {
-    std::string id = "v" + std::to_string(v.Id);
+    std::string id = kValuePrefix + std::to_string(v.Id);
     if (v.Name.empty())
       return id;
     std::string nm = v.Name;
     for (char &c : nm)
-      if (c == '.')
-        c = '_';
-    return id + "_" + sanitize(nm);
+      if (c == kValueNameDot)
+        c = kValueDotReplacement;
+    return id + kMangleSep + sanitize(nm);
   }
 
   /// A class field: `f_<name>`, so a field named after a C macro (`errno`,
   /// `stdout`, ...) is never expanded.
   static std::string fieldName(const std::string &name) {
-    return "f_" + sanitize(name);
+    return kFieldPrefix + sanitize(name);
   }
 
   std::string operand(const pir::Operand &op, Type &ty) {
@@ -371,7 +435,7 @@ class Emitter {
       if (it == ValueNames.end()) {
         fail("use of undefined value %" + std::to_string(*id));
         ty = Type::Void;
-        return "/*undef*/0";
+        return kUndef;
       }
       ty = ValueTypes[*id];
       return it->second;
@@ -386,20 +450,20 @@ class Emitter {
     }
     if (auto *b = std::get_if<bool>(&op.V)) {
       ty = Type::Bool;
-      return *b ? "true" : "false";
+      return *b ? kTrue : kFalse;
     }
     if (auto *c = std::get_if<char>(&op.V)) {
       ty = Type::Char;
-      return "(int8_t)" + std::to_string(static_cast<int>(*c));
+      return cast(kInt8) + std::to_string(static_cast<int>(*c));
     }
     if (auto *n = std::get_if<pir::Operand::Null>(&op.V)) {
       ty = n->Ty;
-      return "NULL";
+      return kNull;
     }
     if (auto *s = std::get_if<pir::SymbolRef>(&op.V))
       return symbolOperand(s->Name, ty);
     ty = Type::Void;
-    return "/*?*/0";
+    return kUnknownOperand;
   }
 
   std::string operand(const pir::Operand &op) {
@@ -411,55 +475,51 @@ class Emitter {
     for (const auto &g : CurMod->CStrs)
       if (g.Name == name) {
         ty = Type::Ptr;
-        return "(void *)" + symbolOf(CurMod->Name, name);
+        return cast(kVoidPtr) + symbolOf(CurMod->Name, name);
       }
     for (const auto &g : CurMod->Datas)
       if (g.Name == name) {
         ty = Type::Ptr;
-        return "(void *)" + symbolOf(CurMod->Name, name);
+        return cast(kVoidPtr) + symbolOf(CurMod->Name, name);
       }
     for (const auto &g : CurMod->Bytes)
       if (g.Name == name) {
         ty = Type::Ptr;
-        return "(void *)" + symbolOf(CurMod->Name, name);
+        return cast(kVoidPtr) + symbolOf(CurMod->Name, name);
       }
     for (const auto &g : CurMod->Externs)
       if (g.Name == name) {
         if (g.K == pir::ExternGlobal::Object) {
           ty = Type::Obj;
-          return "(PaykanObject *)&" + name;
+          return cast(kRtObjPtr) + addressOf(name);
         }
         ty = Type::Ptr;
-        return "(void *)&" + name;
+        return cast(kVoidPtr) + addressOf(name);
       }
     fail("unknown symbol '@" + name + "'");
     ty = Type::Void;
-    return "/*unknown*/0";
+    return kUnknownSymbol;
   }
 
-  /// Cast a PIR-typed C expression to a runtime parameter's C type.
+  /// Cast a PIR-typed C expression to a runtime parameter's C type (through
+  /// intptr_t between integers and pointers).
   static std::string castTo(const std::string &expr, Type from,
                             const std::string &toC) {
     bool toPtr = isPointerCType(toC);
-    if (toPtr && from == Type::I64)
-      return "(" + toC + ")(intptr_t)" + expr;
-    if (!toPtr && isPointerType(from))
-      return "(" + toC + ")(intptr_t)" + expr;
-    if (toC == "bool" || toC == "int64_t" || toC == "double" ||
-        toC == "int8_t" || toC == "unsigned long" || toC == "size_t")
-      return "(" + toC + ")" + expr;
-    return "(" + toC + ")" + expr;
+    if ((toPtr && from == Type::I64) || (!toPtr && isPointerType(from)))
+      return cast(toC) + cast(kIntptr) + expr;
+    return cast(toC) + expr;
   }
 
   static std::string castResult(const std::string &call,
                                 const std::string &fromC, Type to) {
     bool fromPtr = isPointerCType(fromC);
     if (fromPtr && to == Type::I64)
-      return "(int64_t)(intptr_t)" + call;
-    return "(" + std::string(cType(to)) + ")" + call;
+      return cast(kInt64) + cast(kIntptr) + call;
+    return cast(cType(to)) + call;
   }
 
-  void line(const std::string &s) { O << ind() << s << "\n"; }
+  void line(const std::string &s) { O << ind() << s << kNewline; }
 
   // -- Program-level passes
   // ---------------------------------------------------------
@@ -468,7 +528,7 @@ class Emitter {
     for (size_t i = 0; i < P.Modules.size(); ++i) {
       const pir::Module &m = P.Modules[i];
       ModuleIndex[m.Name] = i;
-      std::string stem = moduleStem(m);
+      std::string base = kSymbolPrefix + moduleStem(m);
       for (const auto &c : m.Classes)
         if (!c.IsExtern) {
           if (ClassDefs.count(c.Name)) {
@@ -476,57 +536,65 @@ class Emitter {
             continue;
           }
           ClassDefs[c.Name] = {i, &c};
-          defineSymbol(m, c.Name, "pk_" + stem + "_" + sanitize(c.Name));
+          defineSymbol(m, c.Name, base + kMangleSep + sanitize(c.Name));
         }
       for (const auto &f : m.Functions)
         if (!f.IsExtern)
-          defineSymbol(m, f.Name, "pk_" + stem + "_" + sanitize(f.Name));
+          defineSymbol(m, f.Name, base + kMangleSep + sanitize(f.Name));
       for (const auto &g : m.CStrs)
         defineSymbol(m, g.Name,
-                     "pk_" + stem + "_str" + std::to_string(&g - &m.CStrs[0]));
+                     base + kCStrSuffix + std::to_string(&g - &m.CStrs[0]));
       for (const auto &g : m.Datas)
         defineSymbol(m, g.Name,
-                     "pk_" + stem + "_data" + std::to_string(&g - &m.Datas[0]));
+                     base + kDataSuffix + std::to_string(&g - &m.Datas[0]));
       for (const auto &g : m.Bytes)
         defineSymbol(m, g.Name,
-                     "pk_" + stem + "_kinds" +
-                         std::to_string(&g - &m.Bytes[0]));
+                     base + kBytesSuffix + std::to_string(&g - &m.Bytes[0]));
     }
   }
 
   std::string signatureC(const pir::Signature &sig, bool withNames,
                          const std::vector<pir::Value> *params) {
-    std::string s = "(";
+    std::vector<std::string> ps;
     if (sig.Params.empty())
-      s += "void";
+      ps.emplace_back(kVoid);
     for (size_t i = 0; i < sig.Params.size(); ++i) {
-      if (i)
-        s += ", ";
-      s += cType(sig.Params[i]);
-      if (withNames && params && i < params->size()) {
-        if (!s.empty() && s.back() != '*')
-          s += " ";
-        s += valueName((*params)[i]);
-      }
+      if (withNames && params && i < params->size())
+        ps.push_back(declare(cType(sig.Params[i]), valueName((*params)[i])));
+      else
+        ps.emplace_back(cType(sig.Params[i]));
     }
-    return s + ")";
+    return paren(list(ps));
+  }
+
+  /// `static inline <ret> <name>(<paramTy> <param>) { <ret> <local>;
+  /// memcpy(&<local>, &<param>, sizeof <local>); return <local>; }`: a
+  /// bit-cast helper of the prelude.
+  void emitBitCastHelper(const char *ret, const char *name, const char *paramTy,
+                         const char *param, const char *local) {
+    O << kStatic << kSpace << kInline << kSpace << ret << kSpace << name
+      << paren(declare(paramTy, param)) << kSpace << kLBrace << kNewline
+      << kIndentUnit << stmt(declare(ret, local)) << kSpace
+      << stmt(call(kMemcpy, {addressOf(local), addressOf(param),
+                             kSizeof + std::string(kSpace) + local}))
+      << kSpace << stmt(kReturn + std::string(kSpace) + local) << kNewline
+      << kRBrace << kNewline;
   }
 
   void emitPrelude() {
-    O << "/* Generated by the Paykan C backend. */\n"
-         "#include <math.h>\n"
-         "#include <stdbool.h>\n"
-         "#include <stdint.h>\n"
-         "#include <stdlib.h>\n"
-         "#include <string.h>\n"
-         "#include \"Runtime.h\"\n\n"
-         "typedef void (*pkrt_fn)(void);\n\n"
-         "static inline int64_t pkrt_f64_bits(double d) {\n"
-         "  int64_t i; memcpy(&i, &d, sizeof i); return i;\n"
-         "}\n"
-         "static inline double pkrt_bits_f64(int64_t i) {\n"
-         "  double d; memcpy(&d, &i, sizeof d); return d;\n"
-         "}\n\n";
+    O << comment(kBanner) << kNewline;
+    for (const char *h : {kMathH, kStdboolH, kStdintH, kStdlibH, kStringH})
+      O << kInclude << kSysHeaderOpen << h << kSysHeaderClose << kNewline;
+    O << kInclude << quoted(kRuntimeH) << kNewline << kNewline;
+    // typedef void (*pkrt_fn)(void);
+    O << stmt(kTypedef + std::string(kSpace) + kVoid + kSpace +
+              paren(kOpDeref + std::string(kHelperFnType)) + paren(kVoid))
+      << kNewline << kNewline;
+    emitBitCastHelper(kInt64, kHelperF64Bits, kDouble, kHelperDouble,
+                      kHelperInt);
+    emitBitCastHelper(kDouble, kHelperBitsF64, kInt64, kHelperInt,
+                      kHelperDouble);
+    O << kNewline;
   }
 
   // -- Translation units
@@ -558,21 +626,21 @@ class Emitter {
         if (seen.insert(c.Name).second)
           classes.push_back(&c);
     for (const pir::Class *c : classes)
-      O << classStruct(c->Name) << ";\n";
+      O << stmt(classStruct(c->Name)) << kNewline;
     if (!classes.empty())
-      O << "\n";
+      O << kNewline;
     for (const pir::Class *c : classes) {
-      O << classStruct(c->Name) << " { /* " << c->Name;
+      std::string note = c->Name;
       if (!c->Super.empty())
-        O << " : " << c->Super;
-      O << " */\n";
-      O << "  PaykanObjectVTable *vtable;\n  PaykanShared *shared;\n";
-      for (const auto &f : c->Fields) {
-        std::string ct = cType(f.Ty);
-        O << "  " << ct << (ct.back() == '*' ? "" : " ") << fieldName(f.Name)
-          << ";\n";
-      }
-      O << "};\n\n";
+        note += kSpace + std::string(kSuperNote) + kSpace + c->Super;
+      O << classStruct(c->Name) << kSpace << kLBrace << kSpace << comment(note)
+        << kNewline;
+      O << kIndentUnit << stmt(declare(kRtVTablePtr, kFieldVTable)) << kNewline
+        << kIndentUnit << stmt(declare(kRtBoxPtr, kFieldShared)) << kNewline;
+      for (const auto &f : c->Fields)
+        O << kIndentUnit << stmt(declare(cType(f.Ty), fieldName(f.Name)))
+          << kNewline;
+      O << stmt(kRBrace) << kNewline << kNewline;
     }
   }
 
@@ -587,12 +655,12 @@ class Emitter {
         std::string sym = funcSymbol(m, f.Name);
         if (!seen.insert(sym).second)
           continue;
-        std::string ret = cType(f.Sig.Ret);
-        O << ret << (ret.back() == '*' ? "" : " ") << sym
-          << signatureC(f.Sig, false, nullptr) << ";\n";
+        O << stmt(declare(cType(f.Sig.Ret), sym) +
+                  signatureC(f.Sig, false, nullptr))
+          << kNewline;
       }
     }
-    O << "\n";
+    O << kNewline;
   }
 
   void emitVTables() {
@@ -606,25 +674,33 @@ class Emitter {
         if (!d)
           continue;
         if (!inUnit(d->Module)) {
-          O << "extern pkrt_fn " << classVTable(c.Name) << "[];\n";
+          // extern pkrt_fn pkvt_X[];
+          O << stmt(kExtern + std::string(kSpace) + kHelperFnType + kSpace +
+                    subscript(classVTable(c.Name), ""))
+            << kNewline;
           continue;
         }
         const pir::Class &def = *d->Cls;
         const pir::Module &defMod = P.Modules[d->Module];
-        O << "pkrt_fn " << classVTable(c.Name) << "["
-          << std::max<size_t>(def.VTable.size(), 1) << "] = {\n";
+        // pkrt_fn pkvt_X[n] = {
+        O << binop(kHelperFnType + std::string(kSpace) +
+                       subscript(classVTable(c.Name),
+                                 std::to_string(
+                                     std::max<size_t>(def.VTable.size(), 1))),
+                   kOpAssign, kLBrace)
+          << kNewline;
         for (const auto &e : def.VTable) {
-          O << "  ";
+          O << kIndentUnit;
           if (e.Target.empty())
-            O << "NULL";
+            O << kNull;
           else
-            O << "(pkrt_fn)" << funcSymbol(defMod, e.Target);
-          O << ", /* " << e.Slot << " */\n";
+            O << cast(kHelperFnType) << funcSymbol(defMod, e.Target);
+          O << kListSep << comment(e.Slot) << kNewline;
         }
-        O << "};\n";
+        O << stmt(kRBrace) << kNewline;
       }
     }
-    O << "\n";
+    O << kNewline;
   }
 
   void emitNewHelpers() {
@@ -633,54 +709,82 @@ class Emitter {
         if (c.IsExtern)
           continue;
         std::string s = classStruct(c.Name);
-        O << "static PaykanObject *" << classNew(c.Name) << "(void) {\n"
-          << "  " << s << " *o = (" << s << " *)Paykan_malloc(sizeof(" << s
-          << "));\n"
-          << "  o->vtable = (PaykanObjectVTable *)" << classVTable(c.Name)
-          << ";\n  o->shared = NULL;\n";
+        std::string sPtr = pointerTo(s);
+        // static PaykanObject *pknew_X(void) {
+        O << kStatic << kSpace << declare(kRtObjPtr, classNew(c.Name))
+          << paren(kVoid) << kSpace << kLBrace << kNewline;
+        //   struct X *o = (struct X *)Paykan_malloc(sizeof(struct X));
+        O << kIndentUnit
+          << stmt(binop(declare(sPtr, kNewObj), kOpAssign,
+                        cast(sPtr) +
+                            call(names::kPaykanMalloc, {kSizeof + paren(s)})))
+          << kNewline;
+        O << kIndentUnit
+          << stmt(binop(member(kNewObj, kFieldVTable), kOpAssign,
+                        cast(kRtVTablePtr) + classVTable(c.Name)))
+          << kNewline;
+        O << kIndentUnit
+          << stmt(binop(member(kNewObj, kFieldShared), kOpAssign, kNull))
+          << kNewline;
         for (const auto &f : c.Fields) {
-          O << "  o->" << fieldName(f.Name) << " = ";
+          const char *zero = kZero;
           switch (f.Ty) {
           case Type::F64:
-            O << "0.0";
+            zero = kZeroF64;
             break;
           case Type::Bool:
-            O << "false";
+            zero = kFalse;
             break;
           case Type::Box:
           case Type::Obj:
           case Type::Ptr:
-            O << "NULL";
+            zero = kNull;
             break;
           default:
-            O << "0";
+            break;
           }
-          O << ";\n";
+          O << kIndentUnit
+            << stmt(binop(member(kNewObj, fieldName(f.Name)), kOpAssign, zero))
+            << kNewline;
         }
-        O << "  return (PaykanObject *)o;\n}\n\n";
+        O << kIndentUnit
+          << stmt(kReturn + std::string(kSpace) + cast(kRtObjPtr) + kNewObj)
+          << kNewline << kRBrace << kNewline << kNewline;
       }
   }
 
   void emitGlobals(const pir::Module &m) {
+    // static const <ty> <sym>[<n>] = <init>;
+    auto global = [&](const char *ty, const std::string &sym, size_t n,
+                      const std::string &init) {
+      O << stmt(binop(kStatic + std::string(kSpace) + kConst + kSpace + ty +
+                          kSpace + subscript(sym, std::to_string(n)),
+                      kOpAssign, init))
+        << kNewline;
+    };
     for (const auto &g : m.CStrs)
-      O << "static const char " << symbolOf(m.Name, g.Name) << "["
-        << g.Data.size() + 1 << "] = \"" << escapeCString(g.Data) << "\";\n";
+      global(kChar, symbolOf(m.Name, g.Name), g.Data.size() + 1,
+             quoted(escapeCString(g.Data)));
     for (const auto &g : m.Datas) {
-      O << "static const int64_t " << symbolOf(m.Name, g.Name) << "["
-        << std::max<size_t>(g.Words.size(), 1) << "] = {";
-      for (size_t i = 0; i < g.Words.size(); ++i)
-        O << (i ? ", " : "") << fmtI64(g.Words[i]);
-      O << "};\n";
+      std::vector<std::string> words;
+      words.reserve(g.Words.size());
+      for (int64_t w : g.Words)
+        words.push_back(fmtI64(w));
+      global(kInt64, symbolOf(m.Name, g.Name),
+             std::max<size_t>(g.Words.size(), 1),
+             kLBrace + list(words) + kRBrace);
     }
     for (const auto &g : m.Bytes) {
-      O << "static const uint8_t " << symbolOf(m.Name, g.Name) << "["
-        << std::max<size_t>(g.Bytes.size(), 1) << "] = {";
-      for (size_t i = 0; i < g.Bytes.size(); ++i)
-        O << (i ? ", " : "") << static_cast<int>(g.Bytes[i]);
-      O << "};\n";
+      std::vector<std::string> bytes;
+      bytes.reserve(g.Bytes.size());
+      for (uint8_t b : g.Bytes)
+        bytes.push_back(std::to_string(static_cast<int>(b)));
+      global(kUint8, symbolOf(m.Name, g.Name),
+             std::max<size_t>(g.Bytes.size(), 1),
+             kLBrace + list(bytes) + kRBrace);
     }
     if (!m.CStrs.empty() || !m.Datas.empty() || !m.Bytes.empty())
-      O << "\n";
+      O << kNewline;
   }
 
   // -- Functions
@@ -698,9 +802,8 @@ class Emitter {
     for (const auto &p : f.Params)
       defineValue(p);
 
-    std::string ret = cType(f.Sig.Ret);
-    O << ret << (ret.back() == '*' ? "" : " ") << symbolOf(CurMod->Name, f.Name)
-      << signatureC(f.Sig, true, &f.Params) << " {\n";
+    O << declare(cType(f.Sig.Ret), symbolOf(CurMod->Name, f.Name))
+      << signatureC(f.Sig, true, &f.Params) << kSpace << kLBrace << kNewline;
     Indent = 1;
 
     // Locals: `l_<name>`, or `l<k>_<name>` for the k-th further local of
@@ -712,25 +815,20 @@ class Emitter {
     std::set<std::string> used;
     for (size_t i = 0; i < f.Locals.size(); ++i) {
       std::string base = sanitize(f.Locals[i].Name);
-      std::string nm = "l_" + base;
+      std::string nm = kLocalPrefix + base;
       for (unsigned k = 1; used.count(nm); ++k) {
-        nm = "l";
+        nm = kLocalShadowPrefix;
         nm += std::to_string(k);
-        nm += '_';
+        nm += kLocalShadowSep;
         nm += base;
       }
       used.insert(nm);
       LocalNames.push_back(nm);
-      std::string decl = cType(f.Locals[i].Ty);
-      if (decl.back() != '*')
-        decl += ' ';
-      decl += nm;
-      decl += ';';
-      line(decl);
+      line(stmt(declare(cType(f.Locals[i].Ty), nm)));
     }
     emitBlock(f.Body);
     Indent = 0;
-    O << "}\n\n";
+    O << kRBrace << kNewline << kNewline;
   }
 
   void emitBlock(const pir::Block &b) {
@@ -738,48 +836,60 @@ class Emitter {
       emitStmt(st);
   }
 
+  /// `<head> {`
+  static std::string openBlock(const std::string &head) {
+    return head + kSpace + kLBrace;
+  }
+
+  /// `if (<cond>)`
+  static std::string ifHead(const std::string &cond) {
+    return kIf + std::string(kSpace) + paren(cond);
+  }
+
   void emitStmt(const pir::Stmt &st) {
     if (auto *i = std::get_if<pir::Instr>(&st)) {
       emitInstr(*i);
     } else if (auto *s = std::get_if<pir::If>(&st)) {
       if (s->Then->Stmts.empty() && s->Else && !s->Else->Stmts.empty()) {
-        line("if (!" + operand(s->Cond) + ") {");
+        line(openBlock(ifHead(kOpNot + operand(s->Cond))));
         ++Indent;
         emitBlock(*s->Else);
         --Indent;
-        line("}");
+        line(kRBrace);
         return;
       }
-      line("if (" + operand(s->Cond) + ") {");
+      line(openBlock(ifHead(operand(s->Cond))));
       ++Indent;
       emitBlock(*s->Then);
       --Indent;
       if (s->Else && !s->Else->Stmts.empty()) {
-        line("} else {");
+        line(openBlock(kRBrace + std::string(kSpace) + kElse));
         ++Indent;
         emitBlock(*s->Else);
         --Indent;
       }
-      line("}");
+      line(kRBrace);
     } else if (auto *w = std::get_if<pir::While>(&st)) {
-      line("for (;;) {");
+      // for (;;) { <cond block> if (!(<cond>)) break; <body> }
+      line(openBlock(kFor + std::string(kSpace) +
+                     paren(std::string(kSemi) + kSemi)));
       ++Indent;
       emitBlock(*w->CondBlock);
-      line("if (!(" + operand(w->Cond) + ")) break;");
+      line(ifHead(kOpNot + paren(operand(w->Cond))) + kSpace + stmt(kBreak));
       emitBlock(*w->Body);
       --Indent;
-      line("}");
+      line(kRBrace);
     } else if (std::holds_alternative<pir::Break>(st)) {
-      line("break;");
+      line(stmt(kBreak));
     } else if (std::holds_alternative<pir::Continue>(st)) {
-      line("continue;");
+      line(stmt(kContinue));
     } else if (auto *r = std::get_if<pir::Return>(&st)) {
       if (r->Value)
-        line("return " + operand(*r->Value) + ";");
+        line(stmt(kReturn + std::string(kSpace) + operand(*r->Value)));
       else
-        line("return;");
+        line(stmt(kReturn));
     } else if (std::holds_alternative<pir::Unreachable>(st)) {
-      line("abort(); /* unreachable */");
+      line(stmt(call(kAbort, {})) + kSpace + comment(kUnreachableNote));
     }
   }
 
@@ -787,8 +897,8 @@ class Emitter {
     if (i.Result.Ty == Type::Void)
       return "";
     defineValue(i.Result);
-    std::string ct = cType(i.Result.Ty);
-    return ct + (ct.back() == '*' ? "" : " ") + ValueNames[i.Result.Id] + " = ";
+    return declare(cType(i.Result.Ty), ValueNames[i.Result.Id]) + kSpace +
+           kOpAssign + kSpace;
   }
 
   std::string arith(const char *op, const pir::Instr &i) {
@@ -796,9 +906,10 @@ class Emitter {
     std::string a = operand(i.Args[0], ta);
     std::string b = operand(i.Args[1], tb);
     if (ta == Type::F64)
-      return a + " " + op + " " + b;
+      return binop(a, op, b);
     // Wrapping two's-complement arithmetic (signed overflow is UB in C).
-    return "(int64_t)((uint64_t)" + a + " " + op + " (uint64_t)" + b + ")";
+    return cast(kInt64) +
+           paren(binop(cast(kUint64) + a, op, cast(kUint64) + b));
   }
 
   void emitInstr(const pir::Instr &i) {
@@ -807,21 +918,21 @@ class Emitter {
     switch (i.Op) {
     case Opcode::Add:
       pre = resultPrefix(i);
-      line(pre + arith("+", i) + ";");
+      line(stmt(pre + arith(kOpAdd, i)));
       return;
     case Opcode::Sub:
       pre = resultPrefix(i);
-      line(pre + arith("-", i) + ";");
+      line(stmt(pre + arith(kOpSub, i)));
       return;
     case Opcode::Mul:
       pre = resultPrefix(i);
-      line(pre + arith("*", i) + ";");
+      line(stmt(pre + arith(kOpMul, i)));
       return;
     case Opcode::Div: {
       pre = resultPrefix(i);
       Type ta, tb;
       std::string a = operand(i.Args[0], ta), b = operand(i.Args[1], tb);
-      line(pre + a + " / " + b + ";");
+      line(stmt(pre + binop(a, kOpDiv, b)));
       return;
     }
     case Opcode::Rem: {
@@ -829,9 +940,9 @@ class Emitter {
       Type ta, tb;
       std::string a = operand(i.Args[0], ta), b = operand(i.Args[1], tb);
       if (ta == Type::F64)
-        line(pre + "fmod(" + a + ", " + b + ");");
+        line(stmt(pre + call(kFmod, {a, b})));
       else
-        line(pre + a + " % " + b + ";");
+        line(stmt(pre + binop(a, kOpRem, b)));
       return;
     }
     case Opcode::Neg: {
@@ -839,14 +950,15 @@ class Emitter {
       Type ta;
       std::string a = operand(i.Args[0], ta);
       if (ta == Type::F64)
-        line(pre + "-" + a + ";");
+        line(stmt(pre + kOpNeg + a));
       else
-        line(pre + "(int64_t)(0 - (uint64_t)" + a + ");");
+        line(stmt(pre + cast(kInt64) +
+                  paren(binop(kZero, kOpSub, cast(kUint64) + a))));
       return;
     }
     case Opcode::Not:
       pre = resultPrefix(i);
-      line(pre + "!" + operand(i.Args[0]) + ";");
+      line(stmt(pre + kOpNot + operand(i.Args[0])));
       return;
     case Opcode::Cmp: {
       pre = resultPrefix(i);
@@ -854,20 +966,22 @@ class Emitter {
       std::string a = operand(i.Args[0], ta), b = operand(i.Args[1], tb);
       if (ta == Type::F64 && i.Pred == pir::CmpPred::Ne) {
         // Ordered "not equal": false for NaN operands (unlike C's !=).
-        line(pre + "(" + a + " < " + b + " || " + a + " > " + b + ");");
+        line(stmt(pre +
+                  paren(binop(binop(a, kOpLt, b), kOpOr, binop(a, kOpGt, b)))));
         return;
       }
-      line(pre + "(" + a + " " + cmpOperator(i.Pred) + " " + b + ");");
+      line(stmt(pre + paren(binop(a, cmpOperator(i.Pred), b))));
       return;
     }
     case Opcode::Select:
       pre = resultPrefix(i);
-      line(pre + "(" + operand(i.Args[0]) + " ? " + operand(i.Args[1]) + " : " +
-           operand(i.Args[2]) + ");");
+      line(stmt(pre + paren(binop(binop(operand(i.Args[0]), kOpCondQ,
+                                        operand(i.Args[1])),
+                                  kOpCondColon, operand(i.Args[2])))));
       return;
     case Opcode::IToF:
       pre = resultPrefix(i);
-      line(pre + "(double)" + operand(i.Args[0]) + ";");
+      line(stmt(pre + cast(kDouble) + operand(i.Args[0])));
       return;
     case Opcode::Cast: {
       pre = resultPrefix(i);
@@ -876,24 +990,24 @@ class Emitter {
       Type to = i.CastTo;
       std::string expr;
       if (from == Type::F64 && to == Type::I64)
-        expr = "pkrt_f64_bits(" + a + ")";
+        expr = call(kHelperF64Bits, {a});
       else if (from == Type::I64 && to == Type::F64)
-        expr = "pkrt_bits_f64(" + a + ")";
+        expr = call(kHelperBitsF64, {a});
       else if (to == Type::Bool)
-        expr = "((" + a + " & 1) != 0)";
+        expr = paren(binop(paren(binop(a, kOpBitAnd, kOne)), kOpNe, kZero));
       else if (to == Type::I64 && from == Type::Char)
-        expr = "(int64_t)(uint8_t)" + a;
+        expr = cast(kInt64) + cast(kUint8) + a;
       else if (to == Type::I64 && from == Type::Bool)
-        expr = "(int64_t)" + a;
+        expr = cast(kInt64) + a;
       else if (to == Type::Char)
-        expr = "(int8_t)" + a;
+        expr = cast(kInt8) + a;
       else if (to == Type::I64 && isPointerType(from))
-        expr = "(int64_t)(intptr_t)" + a;
+        expr = cast(kInt64) + cast(kIntptr) + a;
       else if (isPointerType(to) && from == Type::I64)
-        expr = "(" + std::string(cType(to)) + ")(intptr_t)" + a;
+        expr = cast(cType(to)) + cast(kIntptr) + a;
       else
-        expr = "(" + std::string(cType(to)) + ")" + a;
-      line(pre + expr + ";");
+        expr = cast(cType(to)) + a;
+      line(stmt(pre + expr));
       return;
     }
     case Opcode::Call: {
@@ -903,100 +1017,107 @@ class Emitter {
         return;
       }
       pre = resultPrefix(i);
-      std::string call;
+      std::vector<std::string> args;
+      args.reserve(i.Args.size());
+      std::string fn;
       if (callee->IsExtern && callee->Module.empty()) {
         const RuntimeProto *proto = findProto(callee->Name);
         if (!proto) {
           fail("unknown runtime function '" + callee->Name + "'");
           return;
         }
-        call = callee->Name + "(";
+        fn = callee->Name;
         for (size_t a = 0; a < i.Args.size(); ++a) {
           Type ta;
           std::string arg = operand(i.Args[a], ta);
-          if (a)
-            call += ", ";
-          call += a < proto->Params.size() ? castTo(arg, ta, proto->Params[a])
-                                           : arg;
+          args.push_back(a < proto->Params.size()
+                             ? castTo(arg, ta, proto->Params[a])
+                             : arg);
         }
-        call += ")";
+        std::string c = call(fn, args);
         if (callee->Sig.Ret != Type::Void)
-          call = castResult(call, proto->Ret, callee->Sig.Ret);
-      } else {
-        call = funcSymbol(*CurMod, i.Callee) + "(";
-        for (size_t a = 0; a < i.Args.size(); ++a) {
-          if (a)
-            call += ", ";
-          call += operand(i.Args[a]);
-        }
-        call += ")";
+          c = castResult(c, proto->Ret, callee->Sig.Ret);
+        line(stmt(pre + c));
+        return;
       }
-      line(pre + call + ";");
+      fn = funcSymbol(*CurMod, i.Callee);
+      for (const auto &arg : i.Args)
+        args.push_back(operand(arg));
+      line(stmt(pre + call(fn, args)));
       return;
     }
     case Opcode::VCall: {
       pre = resultPrefix(i);
       Type tr;
       std::string recv = operand(i.Args[0], tr);
-      std::string fnTy = std::string(cType(i.Sig.Ret)) + " (*)(";
-      for (size_t p = 0; p < i.Sig.Params.size(); ++p)
-        fnTy += std::string(p ? ", " : "") + cType(i.Sig.Params[p]);
-      if (i.Sig.Params.empty())
-        fnTy += "void";
-      fnTy += ")";
-      std::string call = "((" + fnTy + ")((pkrt_fn *)(" + recv + ")->vtable)[" +
-                         std::to_string(i.Slot) + "])(";
-      for (size_t a = 0; a < i.Args.size(); ++a) {
-        if (a)
-          call += ", ";
-        call += operand(i.Args[a]);
-      }
-      call += ")";
-      std::string comment = i.ClassName.empty()
-                                ? ""
-                                : " /* " + i.ClassName + " slot " +
-                                      std::to_string(i.Slot) + " */";
-      line(pre + call + ";" + comment);
+      // <ret> (*)(<params>)
+      std::vector<std::string> params;
+      params.reserve(i.Sig.Params.size() + 1);
+      for (Type p : i.Sig.Params)
+        params.emplace_back(cType(p));
+      if (params.empty())
+        params.emplace_back(kVoid);
+      std::string fnTy = cType(i.Sig.Ret) + std::string(kSpace) +
+                         paren(kOpDeref) + paren(list(params));
+      // ((<fnTy>)((pkrt_fn *)(<recv>)->vtable)[<slot>])(<args>)
+      std::string slotFn =
+          paren(cast(fnTy) + subscript(paren(cast(pointerTo(kHelperFnType)) +
+                                             member(paren(recv), kFieldVTable)),
+                                       std::to_string(i.Slot)));
+      std::vector<std::string> args;
+      args.reserve(i.Args.size());
+      for (const auto &arg : i.Args)
+        args.push_back(operand(arg));
+      std::string note =
+          i.ClassName.empty()
+              ? ""
+              : kSpace + comment(i.ClassName + kSpace + kSlotNote + kSpace +
+                                 std::to_string(i.Slot));
+      line(stmt(pre + call(slotFn, args)) + note);
       return;
     }
     case Opcode::Retain:
-      line("Paykan_retain(" + operand(i.Args[0]) + ");");
+      line(stmt(call(names::kPaykanRetain, {operand(i.Args[0])})));
       return;
     case Opcode::Release:
-      line("Paykan_release(" + operand(i.Args[0]) + ");");
+      line(stmt(call(names::kPaykanRelease, {operand(i.Args[0])})));
       return;
     case Opcode::Box:
       pre = resultPrefix(i);
-      line(pre + "PaykanShared_new(" + operand(i.Args[0]) + ");");
+      line(stmt(pre + call(names::kPaykanSharedNew, {operand(i.Args[0])})));
       return;
     case Opcode::Unbox:
       pre = resultPrefix(i);
-      line(pre + "PaykanShared_get(" + operand(i.Args[0]) + ");");
+      line(stmt(pre + call(names::kPaykanSharedGet, {operand(i.Args[0])})));
       return;
     case Opcode::New:
       pre = resultPrefix(i);
-      line(pre + classNew(i.ClassName) + "();");
+      line(stmt(pre + call(classNew(i.ClassName), {})));
       return;
     case Opcode::Free:
-      line("Paykan_free(" + operand(i.Args[0]) + ");");
+      line(stmt(call(names::kPaykanFree, {operand(i.Args[0])})));
       return;
     case Opcode::FieldLoad:
       pre = resultPrefix(i);
-      line(pre + "((" + classStruct(i.ClassName) + " *)" + operand(i.Args[0]) +
-           ")->" + fieldName(i.Field) + ";");
+      line(stmt(pre + member(paren(cast(pointerTo(classStruct(i.ClassName))) +
+                                   operand(i.Args[0])),
+                             fieldName(i.Field))));
       return;
     case Opcode::FieldStore:
-      line("((" + classStruct(i.ClassName) + " *)" + operand(i.Args[0]) +
-           ")->" + fieldName(i.Field) + " = " + operand(i.Args[1]) + ";");
+      line(stmt(binop(member(paren(cast(pointerTo(classStruct(i.ClassName))) +
+                                   operand(i.Args[0])),
+                             fieldName(i.Field)),
+                      kOpAssign, operand(i.Args[1]))));
       return;
     case Opcode::VTableLoad:
       pre = resultPrefix(i);
-      line(pre + "(void *)(" + operand(i.Args[0]) + ")->vtable;");
+      line(stmt(pre + cast(kVoidPtr) +
+                member(paren(operand(i.Args[0])), kFieldVTable)));
       return;
     case Opcode::VTableAddr: {
       pre = resultPrefix(i);
       if (!i.ClassName.empty()) {
-        line(pre + "(void *)" + classVTable(i.ClassName) + ";");
+        line(stmt(pre + cast(kVoidPtr) + classVTable(i.ClassName)));
         return;
       }
       // An extern (runtime) vtable global, named by the symbol operand.
@@ -1006,7 +1127,7 @@ class Emitter {
         fail("vtable.addr without a class or a symbol");
         return;
       }
-      line(pre + "(void *)&" + sym->Name + ";");
+      line(stmt(pre + cast(kVoidPtr) + addressOf(sym->Name)));
       return;
     }
     case Opcode::Load:
@@ -1015,51 +1136,81 @@ class Emitter {
         fail("load of an undeclared local");
         return;
       }
-      line(pre + LocalNames[i.Local] + ";");
+      line(stmt(pre + LocalNames[i.Local]));
       return;
     case Opcode::Store:
       if (i.Local >= LocalNames.size()) {
         fail("store to an undeclared local");
         return;
       }
-      line(LocalNames[i.Local] + " = " + operand(i.Args[0]) + ";");
+      line(stmt(binop(LocalNames[i.Local], kOpAssign, operand(i.Args[0]))));
       return;
     }
   }
 
+  /// `getenv("<var>") != NULL`
+  static std::string envSet(const char *var) {
+    return binop(call(kGetenv, {quoted(var)}), kOpNe, kNull);
+  }
+
   void emitMain() {
     const pir::Module &main = P.Modules[0];
-    const pir::Function *mainFn = main.findFunction("main");
+    const pir::Function *mainFn = main.findFunction(kMain);
     if (!mainFn || mainFn->IsExtern) {
       fail("the main module defines no 'main' function");
       return;
     }
     bool takesArgs = mainFn->Sig.Params.size() == 1;
-    O << "int main(int argc, char **argv) {\n"
-         "  int track = getenv(\"PAYKAN_TRACK_HEAP\") != NULL;\n"
-         "  if (track) { Paykan_heap_set_tracking(1); Paykan_heap_reset(); }\n";
+    // int main(int argc, char **argv) {
+    line(openBlock(
+        declare(kInt, kMain) +
+        paren(list({declare(kInt, kArgc), declare(kCharPtrPtr, kArgv)}))));
+    Indent = 1;
+    // int track = getenv("PAYKAN_TRACK_HEAP") != NULL;
+    // if (track) { Paykan_heap_set_tracking(1); Paykan_heap_reset(); }
+    line(stmt(
+        binop(declare(kInt, kMainTrack), kOpAssign, envSet(kEnvTrackHeap))));
+    line(openBlock(ifHead(kMainTrack)) + kSpace +
+         stmt(call(kRtHeapSetTracking, {kOne})) + kSpace +
+         stmt(call(names::kPaykanHeapReset, {})) + kSpace + kRBrace);
     if (takesArgs) {
       // PAYKAN_NO_ARGS: run with an empty argument list (the kernel always
       // supplies an argv[0], so a caller that wants argc == 0 says so).
-      O << "  PaykanArray *args = PaykanArray_new_obj(0);\n"
-           "  if (getenv(\"PAYKAN_NO_ARGS\") != NULL) argc = 0;\n"
-           "  for (int i = 0; i < argc; ++i) {\n"
-           "    PaykanString *s = PaykanString_new(argv[i], "
-           "(int64_t)strlen(argv[i]));\n"
-           "    PaykanShared *b = PaykanShared_new((PaykanObject *)s);\n"
-           "    PaykanArray_push_obj(args, b);\n"
-           "    Paykan_release(b);\n"
-           "  }\n";
+      line(stmt(binop(declare(pointerTo(kRtArray), kMainArgs), kOpAssign,
+                      call(names::kPaykanArrayNewObj, {kZero}))));
+      line(ifHead(envSet(kEnvNoArgs)) + kSpace +
+           stmt(binop(kArgc, kOpAssign, kZero)));
+      // for (int i = 0; i < argc; ++i) {
+      line(openBlock(
+          kFor + std::string(kSpace) +
+          paren(stmt(binop(declare(kInt, kMainIndex), kOpAssign, kZero)) +
+                kSpace + stmt(binop(kMainIndex, kOpLt, kArgc)) + kSpace +
+                kOpPreInc + kMainIndex)));
+      ++Indent;
+      std::string arg = subscript(kArgv, kMainIndex);
+      line(stmt(binop(declare(pointerTo(kRtString), kMainStr), kOpAssign,
+                      call(names::kPaykanStringNew,
+                           {arg, cast(kInt64) + call(kStrlen, {arg})}))));
+      line(stmt(
+          binop(declare(pointerTo(kRtShared), kMainBox), kOpAssign,
+                call(names::kPaykanSharedNew, {cast(kRtObjPtr) + kMainStr}))));
+      line(stmt(call(names::kPaykanArrayPushObj, {kMainArgs, kMainBox})));
+      line(stmt(call(names::kPaykanRelease, {kMainBox})));
+      --Indent;
+      line(kRBrace);
     } else {
-      O << "  (void)argc; (void)argv;\n";
+      line(stmt(cast(kVoid) + kArgc) + kSpace + stmt(cast(kVoid) + kArgv));
     }
-    O << "  int64_t rc = " << symbolOf(main.Name, "main") << "(";
+    std::vector<std::string> mainArgs;
     if (takesArgs)
-      O << "PaykanShared_new((PaykanObject *)args)";
-    O << ");\n"
-         "  if (track) Paykan_heap_dump();\n"
-         "  return (int)rc;\n"
-         "}\n";
+      mainArgs.push_back(
+          call(names::kPaykanSharedNew, {cast(kRtObjPtr) + kMainArgs}));
+    line(stmt(binop(declare(kInt64, kMainRc), kOpAssign,
+                    call(symbolOf(main.Name, kMain), mainArgs))));
+    line(ifHead(kMainTrack) + kSpace + stmt(call(kRtHeapDump, {})));
+    line(stmt(kReturn + std::string(kSpace) + cast(kInt) + kMainRc));
+    Indent = 0;
+    line(kRBrace);
   }
 
 public:
@@ -1081,7 +1232,8 @@ public:
     for (size_t mi : Unit) {
       CurMod = &P.Modules[mi];
       CurModIdx = mi;
-      O << "/* ---- module " << CurMod->Name << " ---- */\n\n";
+      O << kModuleBannerOpen << CurMod->Name << kModuleBannerClose << kNewline
+        << kNewline;
       emitGlobals(*CurMod);
       for (const auto &f : CurMod->Functions)
         if (!f.IsExtern)

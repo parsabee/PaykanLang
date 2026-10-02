@@ -7,6 +7,7 @@
 
 #include "Version.h"
 
+#include "CNames.h"
 #include "Platform.h"
 
 #include <atomic>
@@ -82,7 +83,7 @@ struct TempDir {
 
 bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
   if (tc.CC.empty()) {
-    const char *cc = std::getenv("CC");
+    const char *cc = std::getenv(cnames::kEnvCC);
     // A coverage build names the compiler that built the runtime: its
     // profile runtime matches the archive's instrumentation.  It comes with
     // the flags it needs to find the system headers and libraries (the
@@ -94,7 +95,7 @@ bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
       tc.CC = buildCC;
       appendFlags(PAYKAN_DEFAULT_CC_FLAGS, tc.ExtraFlags);
     } else {
-      tc.CC = "cc";
+      tc.CC = cnames::kDefaultCC;
     }
   }
   // The build tree's runtime archive is sanitizer- or coverage-instrumented
@@ -128,7 +129,7 @@ bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
     candidates.emplace_back(PAYKAN_INSTALLED_RUNTIME_LIB,
                             PAYKAN_INSTALLED_RUNTIME_INCLUDE_DIR);
     for (const auto &[lib, inc] : candidates) {
-      if (exists(lib) && exists(inc + "/Runtime.h")) {
+      if (exists(lib) && exists(inc + "/" + cnames::kRuntimeH)) {
         if (tc.RuntimeLib.empty())
           tc.RuntimeLib = lib;
         if (tc.RuntimeIncludeDir.empty())
@@ -137,7 +138,8 @@ bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
       }
     }
   }
-  if (!exists(tc.RuntimeLib) || !exists(tc.RuntimeIncludeDir + "/Runtime.h")) {
+  if (!exists(tc.RuntimeLib) ||
+      !exists(tc.RuntimeIncludeDir + "/" + cnames::kRuntimeH)) {
     errs << "cannot find the Paykan runtime (libpaykan_runtime.a and "
             "Runtime.h); set PAYKAN_RUNTIME_DIR\n";
     return false;
@@ -243,8 +245,9 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
     return false;
   }
 
-  std::vector<std::string> compileFlags = {"-std=c11", "-w",
-                                           "-I" + tc.RuntimeIncludeDir};
+  std::vector<std::string> compileFlags = {
+      cnames::kFlagStd, cnames::kFlagNoWarnings,
+      cnames::kFlagInclude + tc.RuntimeIncludeDir};
   for (const auto &f : tc.ExtraFlags)
     compileFlags.push_back(f);
   // Everything besides the module's C that its object depends on: the C
@@ -259,7 +262,7 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
     cacheKey += f;
   }
   cacheKey += "\nruntime.h:";
-  cacheKey += fnv1a(readFile(tc.RuntimeIncludeDir + "/Runtime.h"));
+  cacheKey += fnv1a(readFile(tc.RuntimeIncludeDir + "/" + cnames::kRuntimeH));
   cacheKey += "\npaykan:";
   cacheKey += kVersion;
   cacheKey += '\n';
@@ -285,8 +288,8 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
       std::string base = cacheEntryBase(tc, program.Modules[mi].Name);
       std::error_code dirErr;
       fs::create_directories(fs::path(base).parent_path(), dirErr);
-      cPath = base + ".c";
-      oPath = base + ".o";
+      cPath = base + cnames::kCExt;
+      oPath = base + cnames::kObjExt;
       keyPath = base + ".key";
       std::error_code existsErr; // set for a missing entry: not a failure
       cached = !dirErr && readFile(keyPath) == moduleKey &&
@@ -304,8 +307,8 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
       }
     }
     if (cPath.empty()) {
-      cPath = tmp.Path + "/module" + std::to_string(mi) + ".c";
-      oPath = tmp.Path + "/module" + std::to_string(mi) + ".o";
+      cPath = tmp.Path + "/module" + std::to_string(mi) + cnames::kCExt;
+      oPath = tmp.Path + "/module" + std::to_string(mi) + cnames::kObjExt;
       std::ofstream out(cPath, std::ios::binary);
       out << text;
       if (!out) {
@@ -315,9 +318,9 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
     }
     if (!cached) {
       std::vector<std::string> args = compileFlags;
-      args.push_back("-c");
+      args.push_back(cnames::kFlagCompileOnly);
       args.push_back(cPath);
-      args.push_back("-o");
+      args.push_back(cnames::kFlagOutput);
       args.push_back(oTmp.empty() ? oPath : oTmp);
       int rc = platform::spawn(tc.CC, args, &tc.CC, {}, errs);
       if (rc != 0) {
@@ -345,8 +348,8 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
   for (const auto &f : tc.ExtraFlags)
     link.push_back(f);
   link.push_back(tc.RuntimeLib);
-  link.push_back("-lm");
-  link.push_back("-o");
+  link.push_back(cnames::kFlagLibm);
+  link.push_back(cnames::kFlagOutput);
   link.push_back(outputPath);
   int rc = platform::spawn(tc.CC, link, &tc.CC, {}, errs);
   if (rc != 0) {
@@ -374,9 +377,9 @@ int buildAndRun(const pir::Program &program,
   const std::string *argv0 = args.empty() ? nullptr : &args[0];
   std::vector<std::pair<std::string, std::string>> env;
   if (trackHeap)
-    env.emplace_back("PAYKAN_TRACK_HEAP", "1");
+    env.emplace_back(cnames::kEnvTrackHeap, cnames::kEnvOn);
   if (args.empty())
-    env.emplace_back("PAYKAN_NO_ARGS", "1");
+    env.emplace_back(cnames::kEnvNoArgs, cnames::kEnvOn);
   std::fflush(stdout);
   std::fflush(stderr);
   return platform::spawn(exe, progArgs, argv0, env, errs);
