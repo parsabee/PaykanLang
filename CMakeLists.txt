@@ -100,24 +100,12 @@ configure_file(
     ${PAYKAN_GENERATED_INCLUDE_DIR}/Version.h
     @ONLY
 )
-target_include_directories(paykan_compile_options INTERFACE ${PAYKAN_GENERATED_INCLUDE_DIR})
+target_include_directories(paykan_compile_options INTERFACE
+    $<BUILD_INTERFACE:${PAYKAN_GENERATED_INCLUDE_DIR}>)
 
 # -- Subdirectories -----------------------------------------------------------
 add_subdirectory(src)
 add_subdirectory(tests)
 
-# -- Install rules ------------------------------------------------------------
-# Stages the compiler for `cmake --install` and packaging (e.g. Homebrew).
-# The `paykan` binary statically links the runtime, so it is self-contained
-# for JIT execution; the runtime archive and header are also staged for the
-# planned v0.1 ahead-of-time backend.
-include(GNUInstallDirs)
-install(TARGETS paykan
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
-install(TARGETS paykan_runtime
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-)
-install(FILES ${CMAKE_SOURCE_DIR}/src/Runtime/Runtime.h
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/paykan
-)
+# -- Install rules and the find_package(Paykan) package -----------------------
+include(PaykanExport)

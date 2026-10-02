@@ -55,12 +55,16 @@ downloaded and built only when `bison` is listed. Both implement `docs/grammar.m
 produce identical ASTs: `scripts/diff_frontends.py` checks that over every sample, and
 `--dump-tokens` prints a frontend's token stream.
 
-The backend is pluggable too. `-DPAYKAN_BACKENDS=<list>` selects the backends to build
-(default: `llvm`, the LLVM IR / ORC JIT backend); the first one
-listed is the default and `--backend=<name>` selects another (`--list-backends` prints
-them). LLVM is downloaded only when `llvm` is listed; an empty list builds a
-compiler that can parse, check and dump the AST (`--check-only`, `--dump-ast`) but not
-run programs. Every backend consumes the Paykan IR described in [`docs/pir.md`](docs/pir.md).
+The backend is pluggable too. `-DPAYKAN_BACKENDS=<list>` selects the backends to build:
+`c` (the C backend: emits C11, builds with the system C compiler, standard C++ only) is always
+built; `llvm` (LLVM IR / ORC JIT) is optional. The default backend
+is `llvm` when it is listed, `c` otherwise; `--backend=<name>` selects another (`--list-backends`
+prints them). LLVM is downloaded only when `llvm` is listed, so
+`-DPAYKAN_FRONTENDS=recursive-descent -DPAYKAN_BACKENDS=c` is a **barebones build** that needs
+nothing but a C++20 compiler and a C compiler (CI checks that it downloads nothing and links no
+third-party library). Every backend consumes the Paykan IR described in [`docs/pir.md`](docs/pir.md);
+[`docs/writing-a-backend.md`](docs/writing-a-backend.md) explains how to write one, in tree or
+out of tree against `find_package(Paykan)` (see [`examples/backends/print-pir`](examples/backends/print-pir)).
 
 The `paykan` binary is placed at `build/bin/paykan`. To install it to a prefix (the binary
 statically links the runtime, so it is self-contained for JIT execution):
