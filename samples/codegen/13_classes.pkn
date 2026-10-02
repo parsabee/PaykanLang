@@ -3,12 +3,11 @@
 //       method override, class instances as function arguments and returns,
 //       control flow inside methods (if/else, while loop),
 //       base-type variable holding subclass instance (Obj polymorphism)
-// Exercises: visitClassDecl, visitMethodCallExpr (vtable dispatch),
-//            visitMemberAccessExpr, visitMemberAssignStmt,
-//            getOrCreateClassStructType, ClassVTableGlobals,
-//            emitAsShared (class-typed return), PaykanShared ARC,
-//            visitFuncDecl with class-typed params, reinheritVTable,
-//            promoteToOwned (None -> concrete class rebind)
+// Exercises: class lowering (object layout, vtables with inherited and
+//            overridden slots), `vcall` dispatch, field loads and stores,
+//            class-typed parameters and returns boxed in PaykanShared (ARC),
+//            and rebinding a base-type variable to another subclass
+//            instance, which releases the object it owned before.
 
 // ---- Simple class with int fields -----------------------------------------
 
