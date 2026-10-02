@@ -194,6 +194,58 @@ fn @main() -> i64 {
   EXPECT_EQ(r.ExitCode, 1 + 1 + 65);
 }
 
+// f64 `cmp ne` is IEEE's unordered not-equal (fcmp une); the other
+// predicates are ordered (docs/pir.md).
+TEST(PIRLLVM, FloatCmpPredicates) {
+  std::string err;
+  std::string ir = translatePIR(R"(module "t"
+fn @f(%a: f64, %b: f64) -> bool {
+  %ne = cmp ne %a, %b
+  %eq = cmp eq %a, %b
+  %lt = cmp lt %a, %b
+  %le = cmp le %a, %b
+  %gt = cmp gt %a, %b
+  %ge = cmp ge %a, %b
+  %x = select %ne, %eq, %lt
+  %y = select %le, %gt, %ge
+  %z = select %x, %y, %x
+  ret %z
+}
+fn @main() -> i64 {
+  ret 0
+}
+)",
+                                err);
+  ASSERT_FALSE(ir.empty()) << err;
+  for (const char *expected :
+       {"= fcmp une double %a, %b", "= fcmp oeq double %a, %b",
+        "= fcmp olt double %a, %b", "= fcmp ole double %a, %b",
+        "= fcmp ogt double %a, %b", "= fcmp oge double %a, %b"})
+    EXPECT_EQ(linesWith(ir, expected).size(), 1u) << expected << "\n" << ir;
+  EXPECT_TRUE(linesWith(ir, "fcmp one").empty()) << ir;
+}
+
+TEST(PIRLLVM, NaNIsNotEqualToItself) {
+  // inf - inf is a NaN: `ne` is true, `eq` and `lt` are false.
+  auto r = runPIR(R"(module "t"
+fn @main() -> i64 {
+  %inf = mul 1.0e308, 10.0
+  %nan = sub %inf, %inf
+  %ne = cmp ne %nan, %nan
+  %eq = cmp eq %nan, %nan
+  %lt = cmp lt %nan, 1.0
+  %a = select %ne, 1, 0
+  %b = select %eq, 2, 0
+  %c = select %lt, 4, 0
+  %ab = add %a, %b
+  %abc = add %ab, %c
+  ret %abc
+}
+)");
+  ASSERT_TRUE(r.Ok) << r.Err;
+  EXPECT_EQ(r.ExitCode, 1);
+}
+
 TEST(PIRLLVM, ClassesVTablesAndFields) {
   auto r = runPIR(R"(module "t"
 extern fn @PaykanObject_toString(obj) -> box

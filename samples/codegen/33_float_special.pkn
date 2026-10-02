@@ -4,7 +4,27 @@
 // sign bit set when the hardware computes it, but a positive one when a
 // compiler folds it, so printf's own "-nan" made the output backend-dependent.)
 // Exercises: overflow to infinity, inf - inf, 0 * inf, negated NaN, StrFloat,
-//            float comparisons with NaN, tuple formatting of special values.
+//            float comparisons with NaN (IEEE 754: `!=` is true when either
+//            side is NaN, every other comparison is false), tuple formatting
+//            of special values.
+
+// expect-stdout: inf:  inf
+// expect-stdout: -inf: -inf
+// expect-stdout: nan:  nan
+// expect-stdout: nan:  nan
+// expect-stdout: -nan: nan
+// expect-stdout: nan == nan: False
+// expect-stdout: nan != nan: True
+// expect-stdout: nan != 1:   True
+// expect-stdout: 1 != nan:   True
+// expect-stdout: nan != inf: True
+// expect-stdout: nan < 1:    False
+// expect-stdout: nan <= nan: False
+// expect-stdout: nan > 1:    False
+// expect-stdout: nan >= nan: False
+// expect-stdout: inf > big:  True
+// expect-stdout: (nan, inf, -inf)
+// expect-stdout: nan -inf
 
 fn main() -> int {
   big: float = 1.0e308;
@@ -20,7 +40,13 @@ fn main() -> int {
   println("-nan: " + StrFloat(nan3));
   println("nan == nan: " + StrBool(nan1 == nan1));
   println("nan != nan: " + StrBool(nan1 != nan1));
+  println("nan != 1:   " + StrBool(nan1 != 1.0));
+  println("1 != nan:   " + StrBool(1.0 != nan1));
+  println("nan != inf: " + StrBool(nan1 != inf));
   println("nan < 1:    " + StrBool(nan1 < 1.0));
+  println("nan <= nan: " + StrBool(nan1 <= nan1));
+  println("nan > 1:    " + StrBool(nan1 > 1.0));
+  println("nan >= nan: " + StrBool(nan1 >= nan1));
   println("inf > big:  " + StrBool(inf > big));
   t: (float, float, float) = (nan1, inf, ninf);
   println(t);                                  // (nan, inf, -inf)

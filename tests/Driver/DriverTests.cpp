@@ -362,6 +362,41 @@ TEST(Driver, EmitCRejectsAnotherBackend) {
   EXPECT_NE(out.find("--emit-c needs the c backend"), std::string::npos) << out;
 }
 
+// Float `!=` is IEEE's unordered not-equal (true for a NaN operand) and the
+// other comparisons are ordered, identically on every backend built: the LLVM
+// backend emits `fcmp une`, the C backend C's own `!=`.
+TEST(Driver, FloatNotEqualIsUnorderedOnEveryBackend) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp(
+      "fn main() -> int { inf: float = 1.0e308 * 10.0; n: float = inf - inf;"
+      " println(StrBool(n != n) + StrBool(n == n) + StrBool(n < 1.0)"
+      " + StrBool(1.0 != n) + StrBool(1.0 != 1.0)); return 0; }");
+  auto backends = run(std::string(kPaykan) + " --list-backends 2>&1").out;
+  int ran = 0;
+  for (const char *be : {"llvm", "c"}) {
+    if (backends.find(std::string(be) + "\n") == std::string::npos &&
+        backends.find(std::string(be) + " ") == std::string::npos)
+      continue;
+    ++ran;
+    auto [rc, out] =
+        run(std::string(kPaykan) + " --backend=" + be + " " + src + " 2>&1");
+    EXPECT_EQ(rc, 0) << be << ": " << out;
+    EXPECT_EQ(out, "TrueFalseFalseTrueFalse\n") << be;
+    auto [srcRc, code] = run(std::string(kPaykan) + " --backend=" + be +
+                             " --emit-source " + src + " 2>&1");
+    EXPECT_EQ(srcRc, 0) << be << ": " << code;
+    if (std::string(be) == "llvm") {
+      EXPECT_NE(code.find("fcmp une double"), std::string::npos) << code;
+      EXPECT_EQ(code.find("fcmp one"), std::string::npos) << code;
+    } else {
+      EXPECT_NE(code.find("_n != v"), std::string::npos) << code;
+      EXPECT_EQ(code.find(" || "), std::string::npos) << code;
+    }
+  }
+  std::filesystem::remove(src);
+  EXPECT_GT(ran, 0) << backends;
+}
+
 // `build` writes an executable that runs on its own, and the C backend reuses
 // the cached object for a module whose generated C is unchanged.
 TEST(Driver, CBackendBuildsAnExecutableAndCachesObjects) {
