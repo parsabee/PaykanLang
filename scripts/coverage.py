@@ -8,9 +8,11 @@ Prerequisites: configure + build a coverage tree, e.g.
           -DCMAKE_CXX_COMPILER=build/third-party/llvm/bin/clang++
     cmake --build build-cov --parallel
 
-This runs the whole ctest suite instrumented (every process writes a
-.profraw), merges the profiles into a .profdata, and prints a per-file
-line-coverage report restricted to first-party src/ and include/. It also writes an lcov file for CI services.
+This runs every ctest test instrumented (every process it starts, `paykan`
+subprocesses included, writes its own .profraw), checks that each test binary
+wrote a profile, merges the profiles into a .profdata, and prints a per-file
+line-coverage report restricted to first-party src/ and include/. It also
+writes an lcov file for CI services.
 
 llvm-cov's "N functions have mismatched data" warning is expected: it counts
 the empty (hash 0) records clang emits for inline functions a translation unit
@@ -31,6 +33,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
 import re
@@ -77,15 +80,110 @@ def find_tool(tool: str, build_dir: str) -> str:
 
 
 def instrumented_objects(bin_dir: str) -> list[str]:
-    """llvm-cov -object arguments for every executable the build put in
+    """llvm-cov object arguments for every executable the build put in
     bin/: the test binaries (whatever the enabled plugins add) and the
-    `paykan` driver the driver tests and script suites run."""
+    `paykan` driver the driver tests and script suites run.  The first is
+    positional, the rest -object."""
     objects: list[str] = []
     for name in sorted(os.listdir(bin_dir)):
         path = os.path.join(bin_dir, name)
         if os.path.isfile(path) and os.access(path, os.X_OK):
-            objects += ["-object", path]
+            objects += [path] if not objects else ["-object", path]
     return objects
+
+
+class TestResult:
+    def __init__(self, name: str, command: list[str], log: str) -> None:
+        self.name = name
+        self.command = command
+        self.log = log
+        self.returncode = 0
+        # True/False: the test's command is an instrumented binary that
+        # did/did not write a profile; None: it is not (a script).
+        self.own_profile: bool | None = None
+        self.profdata = ""
+
+
+def ctest_tests(build_dir: str) -> list[dict]:
+    """The tests ctest would run, with their command and properties."""
+    out = subprocess.run(
+        ["ctest", "--test-dir", build_dir, "--show-only=json-v1"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    return [t for t in json.loads(out)["tests"] if t.get("command")]
+
+
+def run_test(
+    test: dict, prof_dir: str, bin_dir: str, llvm_profdata: str
+) -> TestResult:
+    """Run one ctest test as ctest would (command, ENVIRONMENT,
+    WORKING_DIRECTORY), every process it starts writing its own profile into
+    a directory of the test's, and merge them into <test>.profdata.
+
+    The profiles are named by process id (%p) rather than merged online by
+    module signature (%m): the profile runtime overwrites, with only a
+    warning on the process's stderr, a pool file whose signature matches
+    but whose layout does not (on macOS that lost most test binaries'
+    profiles), and a per-process file lets the test's own binary be checked
+    for by its pid.  Programs the C backend builds link the instrumented
+    runtime and write profiles too: their runtime counts are real coverage,
+    and their generated code is in no reported object."""
+    name = test["name"]
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", name)
+    raw_dir = os.path.join(prof_dir, "raw", safe)
+    os.makedirs(raw_dir)
+    props = {p["name"]: p["value"] for p in test.get("properties", [])}
+    env = dict(os.environ)
+    for assignment in props.get("ENVIRONMENT", []):
+        key, _, value = assignment.partition("=")
+        env[key] = value
+    env["LLVM_PROFILE_FILE"] = os.path.join(raw_dir, "%p.profraw")
+    command = test["command"]
+    result = TestResult(name, command, os.path.join(prof_dir, f"{safe}.log"))
+    timeout = props.get("TIMEOUT")
+    with open(result.log, "w") as fh:
+        proc = subprocess.Popen(
+            command,
+            cwd=props.get("WORKING_DIRECTORY") or None,
+            env=env,
+            stdout=fh,
+            stderr=subprocess.STDOUT,
+        )
+        try:
+            result.returncode = proc.wait(timeout=float(timeout) if timeout else None)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            fh.write(f"\n*** timed out after {timeout}s\n")
+            result.returncode = -1
+    if os.path.dirname(os.path.abspath(command[0])) == os.path.abspath(bin_dir):
+        own = os.path.join(raw_dir, f"{proc.pid}.profraw")
+        result.own_profile = os.path.isfile(own) and os.path.getsize(own) > 0
+    raws = sorted(
+        os.path.join(raw_dir, f) for f in os.listdir(raw_dir) if f.endswith(".profraw")
+    )
+    if raws:
+        # Merge per test and drop the raw files: a test that runs the
+        # driver hundreds of times would otherwise leave a gigabyte behind.
+        listing = os.path.join(prof_dir, f"{safe}.inputs")
+        with open(listing, "w") as fh:
+            fh.write("\n".join(raws) + "\n")
+        result.profdata = os.path.join(prof_dir, f"{safe}.profdata")
+        subprocess.run(
+            [
+                llvm_profdata,
+                "merge",
+                "-sparse",
+                f"-input-files={listing}",
+                "-o",
+                result.profdata,
+            ],
+            check=True,
+        )
+        shutil.rmtree(raw_dir)
+    return result
 
 
 def main() -> int:
@@ -113,80 +211,56 @@ def main() -> int:
         shutil.rmtree(prof_dir)
     os.makedirs(prof_dir)
 
-    # The whole ctest suite runs instrumented: the gtest binaries, and the
-    # script-driven suites (samples parity, frontend differential) that
-    # exercise lowering and the backends through `paykan` subprocesses.
-    # %m names each profile after its binary's profile signature, and the
-    # processes of one binary merge into it online (under a lock), so the
-    # many `paykan` subprocesses neither clobber each other nor the test
-    # binary that spawned them.  Programs the C backend builds link the
-    # instrumented runtime and write their own profiles too: their runtime
-    # counts are real coverage, and their generated code is in no -object
-    # below, so it is not reported.
-    raw_dir = os.path.join(prof_dir, "raw")
-    os.makedirs(raw_dir)
-    env = dict(
-        os.environ,
-        LLVM_PROFILE_FILE=os.path.join(raw_dir, "%m.profraw"),
-    )
-    log = os.path.join(prof_dir, "ctest.log")
-    print("Running the instrumented test suite (ctest)...")
-    with open(log, "w") as fh:
-        result = subprocess.run(
-            [
-                "ctest",
-                "--test-dir",
-                build_dir,
-                "--output-on-failure",
-                "--parallel",
-                str(os.cpu_count() or 2),
-            ],
-            env=env,
-            stdout=fh,
-            stderr=subprocess.STDOUT,
+    tests = ctest_tests(build_dir)
+    if not tests:
+        sys.exit(f"error: ctest lists no tests in {build_dir}")
+    print(f"Running the {len(tests)} instrumented ctest test(s)...")
+    with concurrent.futures.ThreadPoolExecutor(os.cpu_count() or 2) as pool:
+        results = list(
+            pool.map(
+                lambda t: run_test(t, prof_dir, bin_dir, llvm_profdata), tests
+            )
         )
-    if result.returncode != 0:
-        # The test output is kept in the log; show, per failed test, its
-        # failures and the end of its output (ctest --output-on-failure
-        # prints it after the test's status line) so a CI failure can be
-        # diagnosed.
-        with open(log, errors="replace") as fh:
+
+    failed = [r for r in results if r.returncode != 0]
+    for r in failed:
+        # The test output is kept in the log; show the failures and the end
+        # of it so a CI failure can be diagnosed.
+        with open(r.log, errors="replace") as fh:
             lines = fh.read().splitlines()
-        failures: list[tuple[str, list[str]]] = []
-        for ln in lines:
-            if re.match(r"\s*\d+/\d+ Test\s+#\d+:", ln):
-                if "Passed" not in ln:
-                    failures.append((ln.strip(), []))
-                else:
-                    failures.append(("", []))
-            elif failures:
-                failures[-1][1].append(ln)
-        for status, out in failures:
-            if not status:
-                continue
-            failed = [ln for ln in out if ln.startswith("[  FAILED  ]")]
-            print(f"--- {status} (failures, then last 80 lines; full log: {log})")
-            print("\n".join(failed))
-            print("...")
-            print("\n".join(out[-80:]))
-        print("\n".join(ln for ln in lines if "tests failed" in ln))
-        sys.exit("error: ctest failed under coverage")
+        failures = [ln for ln in lines if ln.startswith("[  FAILED  ]")]
+        print(f"--- {r.name} output (failures, then last 80 lines; full log: {r.log})")
+        print("\n".join(failures))
+        print("...")
+        print("\n".join(lines[-80:]))
+    if failed:
+        names = ", ".join(r.name for r in failed)
+        sys.exit(f"error: test(s) failed under coverage: {names}")
+
+    # Every test binary must have written its own profile, or llvm-cov
+    # reports the code only that binary runs as never executed (a profile
+    # lost to a clobbered or unwritable file fails nothing else).
+    ran = {os.path.basename(r.command[0]) for r in results}
+    missing = [
+        f"bin/{name} (no test runs it)"
+        for name in sorted(os.listdir(bin_dir))
+        if name.endswith("_tests") and name not in ran
+    ]
+    no_profile = [r.name for r in results if r.own_profile is False]
+    if missing or no_profile:
+        sys.exit("error: no coverage profile from " + ", ".join(no_profile + missing))
 
     objects = instrumented_objects(bin_dir)
     if not objects:
         sys.exit(f"error: no executables found in {bin_dir}")
-    raw_files = sorted(
-        os.path.join(raw_dir, f)
-        for f in os.listdir(raw_dir)
-        if f.endswith(".profraw")
-    )
-    if not raw_files:
+    profiles = [r.profdata for r in results if r.profdata]
+    if not profiles:
         sys.exit("error: no .profraw files produced")
 
     merged = os.path.join(prof_dir, "merged.profdata")
-    print(f"Merging {len(raw_files)} profile(s)...")
+    print(f"Merging the profiles of {len(profiles)} test(s)...")
     subprocess.run(
-        [llvm_profdata, "merge", "-sparse", *raw_files, "-o", merged], check=True
+        [llvm_profdata, "merge", "-sparse", *profiles, "-o", merged], check=True
     )
 
     print("\n==================== Coverage report (first-party) ====================")
