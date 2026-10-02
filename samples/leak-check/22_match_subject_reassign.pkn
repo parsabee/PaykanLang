@@ -1,0 +1,32 @@
+// Isolates: the match subject reassigned inside the arm.
+// `x = A()` drops the subject variable's reference to the B while the binding
+// `b` still uses it: the binding keeps the B alive until the end of the arm,
+// then the B is released; the new A is released with `x` at the end of main.
+//
+// Runtime allocation sites: the B and A structs + their PaykanShared boxes,
+// their Str fields, and the concatenated names.
+//
+// Expected under --track-heap: live blocks : 0.
+// expect-stdout: Bbee
+// expect-stdout: Aa
+
+class A {
+  s: Str;
+  fn __init__() { self.s = "a"; }
+  fn name() -> Str { return "A" + self.s; }
+}
+
+class B : A {
+  fn __init__() { __super__(); self.s = "bee"; }
+  fn name() -> Str { return "B" + self.s; }
+}
+
+fn main() -> int {
+  x: A = B();
+  match x {
+    b: B { x = A(); println(b.name()); }
+    _ { println("other"); }
+  }
+  println(x.name());
+  return 0;
+}

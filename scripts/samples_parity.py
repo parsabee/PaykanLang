@@ -5,8 +5,9 @@ Every runnable sample (samples/codegen, samples/leak-check, and each
 samples/imports/<dir>/main.pkn) is run with `--track-heap` on each backend
 named on the command line.  The backends must agree on stdout, on the exit
 code and on the number of live heap blocks (which must be zero), and must
-produce the same stderr apart from the heap statistics.  Printed object
-addresses (`Foo@0x...`) are normalised before comparing.
+produce the same stderr apart from the heap statistics.  A sample with
+`// expect-stdout: <line>` comments must print exactly those lines.  Printed
+object addresses (`Foo@0x...`) are normalised before comparing.
 
 Usage:
     samples_parity.py --paykan build/bin/paykan --backend llvm --backend c
@@ -42,6 +43,17 @@ def samples():
         if main.is_file() and not d.name.startswith("err_"):
             files.append(main)
     return files
+
+
+EXPECT_RE = re.compile(r"^// expect-stdout:(?: (.*))?$", re.M)
+
+
+def expected_stdout(sample):
+    """The output a sample's `// expect-stdout:` lines spell, or None."""
+    lines = EXPECT_RE.findall(sample.read_text())
+    if not lines:
+        return None
+    return "".join(line + "\n" for line in lines)
 
 
 def normalise(p):
@@ -102,6 +114,11 @@ def check(args, outdir):
                 problems.append(f"{b}: no heap report (exit {rc})")
             elif live != 0:
                 problems.append(f"{b}: {live} live blocks")
+        expected = expected_stdout(sample)
+        if expected is not None:
+            for b, (_, out, _, _) in results.items():
+                if out != expected:
+                    problems.append(f"{b}: stdout differs from expect-stdout")
         ref_name = args.backend[0]
         ref = results[ref_name]
         for b in args.backend[1:]:

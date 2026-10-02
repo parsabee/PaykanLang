@@ -1,0 +1,25 @@
+// Isolates: a match-arm binding reassigned on only some paths.
+// The binding starts as an unowned alias of the subject; the assignment in the
+// `if` makes it own a fresh A on that path only.  Where the paths join, the
+// binding must release exactly what it owns: nothing when it still aliases
+// the subject, the new A when it was reassigned.
+//
+// Runtime allocation sites: the matched A struct + its PaykanShared box.
+//
+// Expected under --track-heap: live blocks : 0.
+// expect-stdout: 7
+
+class A { v: int; fn __init__(v: int) { self.v = v; } }
+
+fn main() -> int {
+  o: A? = A(7);
+  k: int = 0;
+  match o {
+    a: A {
+      if (k == 1) { a = A(1); }
+      println(StrInt(a.v));
+    }
+    None { }
+  }
+  return 0;
+}
