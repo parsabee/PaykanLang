@@ -59,6 +59,10 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
   if (exprAlreadyShared(node->getSubject())) {
     sharedSubj = takeSharedOwnership(node->getSubject(), subjRaw);
     subjRaw = emitSharedGet(sharedSubj, "subj.obj");
+  } else if (isTrackedStringTemp(subjRaw)) {
+    // A raw string temporary (e.g. a concatenation): box it so the match owns
+    // it for its whole duration and arm bindings can share it.
+    sharedSubj = emitSharedNew(subjRaw, "subj.box");
   }
 
   // A scope spanning the whole match: the subject box is a pending release
@@ -114,11 +118,14 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
     ast::ClassType *armCt = ast::dyn_cast<ast::ClassType>(arm->getArmType());
     ast::Type *bindTy = armCt;
     // Array-type arms resolve to the specialized array ClassType so vtable
-    // identity comparison works like class arms.
+    // identity comparison works like class arms.  The binding keeps the
+    // array type itself: the specialized class is only a vtable key (it has
+    // no PIR class or slots), and method calls, push/pop and subscripts on
+    // the binding dispatch through the array type.
     if (!armCt) {
       if (auto *at = ast::dyn_cast<ast::ArrayType>(arm->getArmType())) {
         armCt = ASTCtx.getOrCreateSpecializedArrayType(at->getElementType());
-        bindTy = optTy ? static_cast<ast::Type *>(at) : armCt;
+        bindTy = at;
       }
     }
     assert(armCt && "Sema should have verified arm type exists");
@@ -130,20 +137,22 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
     const TypeArm &ta = typeArms[i];
     ScopeGuard armGuard(*this);
     if (ta.Arm->hasBinding()) {
-      // Unowned alias of the subject (its scope owns the reference); the
-      // backing box, when in hand, lets ownership-taking uses retain it.
-      // Its promotion slot (a Box twin, null until the binding is
-      // re-assigned) lets `b = ...` inside the arm make the binding an owner.
-      pir::LocalId local = B.addLocal(ta.Arm->getBinding(), Type::Obj);
-      B.store(local, subjRaw);
-      pir::LocalId twin = B.addLocal(ta.Arm->getBinding() + ".box", Type::Box);
-      B.store(twin, Val::null(Type::Box));
-      if (sharedSubj)
-        CurrentScope->declareUnownedWithBacking(ta.Arm->getBinding(), local,
-                                                sharedSubj, ta.BindTy, twin);
-      else
-        CurrentScope->declareUnowned(ta.Arm->getBinding(), local, ta.BindTy,
-                                     twin);
+      // The binding is an ordinary owned variable holding its own +1
+      // reference to the subject's box, released when the arm's scope exits.
+      // It can therefore be re-assigned, moved or stored like any variable,
+      // and stays valid even if the arm re-assigns the subject itself.
+      // The subject is non-null here: a None subject never reaches a type arm.
+      Val box;
+      if (sharedSubj) {
+        emitRetain(sharedSubj);
+        box = sharedSubj;
+      } else {
+        // PaykanShared_new acquires the object's existing unique box (+1).
+        box = B.box(subjRaw, ta.Arm->getBinding() + ".box");
+      }
+      pir::LocalId local = B.addLocal(ta.Arm->getBinding(), Type::Box);
+      B.store(local, box);
+      CurrentScope->declare(ta.Arm->getBinding(), local, ta.BindTy);
     }
     emitBody(ta.Arm->getBody());
   };

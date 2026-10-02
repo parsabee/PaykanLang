@@ -369,7 +369,7 @@ TEST(Lowering, CallRootedFieldReadRetainsTheFieldAndReleasesTheReceiver) {
 // match
 // ---------------------------------------------------------------------------
 
-TEST(Lowering, ClassMatchComparesVTablesAndBindsAnUnownedAlias) {
+TEST(Lowering, ClassMatchComparesVTablesAndBindsAnOwnedVariable) {
   auto l = lower(R"(
     class A { fn __init__() {} }
     class B : A { fn __init__() { __super__(); } }
@@ -390,10 +390,88 @@ TEST(Lowering, ClassMatchComparesVTablesAndBindsAnUnownedAlias) {
   EXPECT_NE(m.find("vtable.addr A"), std::string::npos) << m;
   // Nested if / else chain with the wildcard in the innermost else.
   EXPECT_EQ(count(m, "if %is."), 2u) << m;
-  // The binding is an obj local; the subject box (a call result) is released
-  // once, at the end of the match.
-  EXPECT_NE(m.find("local %b"), std::string::npos) << m;
-  EXPECT_EQ(count(m, "release"), 1u) << m;
+  // The binding is an owned box local: the arm retains the subject box
+  // (a call result the match owns) and releases it at arm exit; the match
+  // releases the subject itself once, at the end.
+  size_t bLocal = m.find("local %b");
+  ASSERT_NE(bLocal, std::string::npos) << m;
+  EXPECT_NE(m.find(": box", bLocal), std::string::npos) << m;
+  EXPECT_EQ(count(m, "retain"), 1u) << m;
+  EXPECT_EQ(count(m, "release"), 2u) << m;
+}
+
+TEST(Lowering, MatchBindingOnAVariableSubjectAcquiresItsBox) {
+  auto l = lower(R"(
+    class A { v: int; fn __init__(v: int) { self.v = v; } }
+    fn main() -> int {
+      x: A = A(1);
+      match x {
+        a: A { println(StrInt(a.v)); }
+      }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string m = function(l.Text, "main");
+  // The binding acquires the subject's unique box (+1) and owns it, so both
+  // x and a are released: a at arm exit, x at function exit.
+  EXPECT_NE(m.find("= box %"), std::string::npos) << m;
+  EXPECT_EQ(count(m, "release"), 2u) << m;
+}
+
+// A binding re-assigned on only some paths used to be "promoted" to a
+// second slot at lowering time, so the paths that skipped the assignment read
+// a null box (crash), and promotion inside a loop leaked.  The binding is now
+// an ordinary owned variable: re-assignment releases the old box and stores
+// the new one into the same slot, with no twin slot.
+TEST(Lowering, ReassigningAMatchBindingIsAnOrdinaryRebind) {
+  auto l = lower(R"(
+    class A { v: int; fn __init__(v: int) { self.v = v; } }
+    fn main() -> int {
+      o: A? = A(7);
+      k: int = 0;
+      match o {
+        a: A {
+          if (k == 1) { a = A(1); }
+          i: int = 0;
+          while (i < 3) { a = A(i); i = i + 1; }
+          println(StrInt(a.v));
+        }
+        None { }
+      }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string m = function(l.Text, "main");
+  EXPECT_EQ(m.find("local %a.box"), std::string::npos) << m;
+  EXPECT_EQ(count(m, "local %a."), 1u) << m; // exactly one slot for `a`
+}
+
+// Re-assigning the subject inside an arm must not free the object the binding
+// still refers to: the binding holds its own reference.
+TEST(Lowering, ReassigningTheSubjectInsideAnArmKeepsTheBindingAlive) {
+  auto l = lower(R"(
+    class A { fn __init__() {} fn name() -> Str { return "A"; } }
+    class B : A { fn __init__() { __super__(); } fn name() -> Str { return "B"; } }
+    fn main() -> int {
+      x: A = B();
+      match x {
+        b: B { x = A(); println(b.name()); }
+        _ { }
+      }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string m = function(l.Text, "main");
+  // The arm acquires its own reference before the body runs, so the release
+  // of the old x by `x = A()` cannot drop the object to zero.
+  size_t acquire = m.find("= box %");
+  size_t rebind = m.find("call @A(");
+  ASSERT_NE(acquire, std::string::npos) << m;
+  ASSERT_NE(rebind, std::string::npos) << m;
+  EXPECT_LT(acquire, rebind) << m;
 }
 
 TEST(Lowering, OptionalMatchTestsNullBeforeTheVTable) {
@@ -480,6 +558,85 @@ TEST(Lowering, ObjectArrayLiteralSetsAndReleasesEachElement) {
   EXPECT_EQ(count(m, "call @PaykanArray_set_obj("), 2u) << m;
   // set_obj retains: each +1 element box is released, plus xs at scope exit.
   EXPECT_EQ(count(m, "release"), 3u) << m;
+}
+
+TEST(Lowering, AssigningAnObjectElementEvaluatesTheIndexOnce) {
+  // Issue #52: `x = arr[idx()]` used to evaluate the subscript once for the
+  // value and again for the ownership handling.
+  auto l = lower(R"(
+    class C { v: int; fn __init__(v: int) { self.v = v; } }
+    fn idx() -> int { println("idx called"); return 0; }
+    fn mk() -> C[] { return [C(3)]; }
+    fn main() -> int {
+      arr: C[] = [C(1), C(2)];
+      x: C = C(9);
+      x = arr[idx()];
+      y: C = arr[idx()];
+      z = arr[idx()];
+      x = mk()[idx()];
+      return x.v + y.v + z.v;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string m = function(l.Text, "main");
+  EXPECT_EQ(count(m, "call @idx()"), 4u) << m;
+  EXPECT_EQ(count(m, "call @mk()"), 1u) << m;
+  EXPECT_EQ(count(m, "call @PaykanArray_get("), 4u) << m;
+  // Each element read by a declared owner retains the stored box once
+  // (x from arr, y, x from the temporary array); z's first assignment
+  // acquires it with a single `box`.
+  EXPECT_EQ(count(m, "retain"), 3u) << m;
+}
+
+TEST(Lowering, SideEffectingReceiversAreEvaluatedOnce) {
+  // The other ownership paths that take a value's box: a call-rooted field
+  // read, `mov` of a temporary, an element passed to a ref parameter and an
+  // element stored into an array slot or a field.
+  auto l = lower(R"(
+    class C { v: int; fn __init__(v: int) { self.v = v; } }
+    class H { c: C; fn __init__(c: C) { self.c = c; } }
+    fn idx() -> int { println("idx"); return 0; }
+    fn mkh() -> H { return H(C(5)); }
+    fn take(c: C) -> int { return c.v; }
+    fn main() -> int {
+      arr: C[] = [C(1), C(2)];
+      x: Obj = C(9);
+      x = mkh().c;
+      w: C = mkh().c;
+      x = mov mkh();
+      arr[idx()] = arr[idx()];
+      n: int = take(arr[idx()]);
+      h: H = H(C(3));
+      h.c = arr[idx()];
+      return n;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string m = function(l.Text, "main");
+  EXPECT_EQ(count(m, "call @mkh()"), 3u) << m;
+  EXPECT_EQ(count(m, "call @idx()"), 4u) << m;
+}
+
+TEST(Lowering, ArrayMatchArmBindingDispatchesThroughTheArrayType) {
+  // The binding of an `arr: Str[]` arm has the array type: `len` is a slot
+  // of the runtime Array class, not of the specialized `Array<Str>` key.
+  auto l = lower(R"(
+    fn main() -> int {
+      x: Obj = ["hello", "world"];
+      match x {
+        arr: Str[] { arr.push("!"); println(arr[2]); return arr.len(); }
+        _ { }
+      }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string m = function(l.Text, "main");
+  // `len` is a runtime-class slot (explicit signature), not a slot of a
+  // `"Array<Str>"` class item, which would have no slots.
+  EXPECT_NE(m.find(" : (obj) -> i64 [3] ()"), std::string::npos) << m;
+  EXPECT_EQ(m.find(" : \"Array<Str>\" ["), std::string::npos) << m;
+  EXPECT_NE(m.find("call @PaykanArray_push_obj("), std::string::npos) << m;
 }
 
 TEST(Lowering, TupleLiteralUsesAKindsDescriptor) {

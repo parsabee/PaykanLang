@@ -224,6 +224,56 @@ fn @main() -> i64 {
   EXPECT_EQ(reprint(printed), printed);
 }
 
+TEST(PIR, ParserReadsWhatThePrinterWritesForLoweredPrograms) {
+  // Issue #48: a quoted value name with its `.N` index outside the quotes,
+  // a `select` on an extern object singleton (an `obj`), and a runtime
+  // extern (no `module` clause) followed by the next module's header.
+  const char *text = R"(module "main"
+class "Pair<Str, int>" {
+  field k: i64
+  vtable { destroy = @"Pair<Str, int>_destroy" : (obj) -> void }
+}
+
+fn @"Pair<Str, int>_destroy"(%self.1: obj) -> void {
+  free %self.1
+  ret
+}
+
+fn @main() -> i64 {
+  %obj.1 = new "Pair<Str, int>"
+  %"Pair<Str, int>.shared".2 = box %obj.1
+  %"x y".3 = unbox %"Pair<Str, int>.shared".2
+  %c.4 = cmp eq %"x y".3, null obj
+  %o.5 = select %c.4, @PaykanObject_None, %"x y".3
+  call @Paykan_println(%o.5)
+  release %"Pair<Str, int>.shared".2
+  %r.6 = call @helper(1)
+  ret %r.6
+}
+
+extern obj @PaykanObject_None
+extern fn @helper(i64) -> i64 module "lib"
+extern fn @Paykan_println(obj) -> void
+module "lib"
+fn @helper(%a.1: i64) -> i64 {
+  ret %a.1
+}
+)";
+  ParseError err;
+  auto p = parseProgram(text, err);
+  ASSERT_TRUE(p.has_value()) << err.str();
+  if (!p.has_value())
+    return;
+  ASSERT_EQ(p->Modules.size(), 2u);
+  auto errors = verify(*p);
+  EXPECT_TRUE(errors.empty()) << formatErrors(errors);
+  std::string printed = toString(*p);
+  EXPECT_NE(printed.find("%\"Pair<Str, int>.shared\".2 = box %obj.1"),
+            std::string::npos)
+      << printed;
+  EXPECT_EQ(reprint(printed), printed);
+}
+
 TEST(PIR, ParseErrorsCarryPositions) {
   ParseError err;
   EXPECT_FALSE(
