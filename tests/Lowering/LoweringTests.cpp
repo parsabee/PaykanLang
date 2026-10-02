@@ -560,6 +560,28 @@ TEST(Lowering, ObjectArrayLiteralSetsAndReleasesEachElement) {
   EXPECT_EQ(count(m, "release"), 3u) << m;
 }
 
+TEST(Lowering, ArrayMatchArmBindingDispatchesThroughTheArrayType) {
+  // The binding of an `arr: Str[]` arm has the array type: `len` is a slot
+  // of the runtime Array class, not of the specialized `Array<Str>` key.
+  auto l = lower(R"(
+    fn main() -> int {
+      x: Obj = ["hello", "world"];
+      match x {
+        arr: Str[] { arr.push("!"); println(arr[2]); return arr.len(); }
+        _ { }
+      }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string m = function(l.Text, "main");
+  // `len` is a runtime-class slot (explicit signature), not a slot of a
+  // `"Array<Str>"` class item, which would have no slots.
+  EXPECT_NE(m.find(" : (obj) -> i64 [3] ()"), std::string::npos) << m;
+  EXPECT_EQ(m.find(" : \"Array<Str>\" ["), std::string::npos) << m;
+  EXPECT_NE(m.find("call @PaykanArray_push_obj("), std::string::npos) << m;
+}
+
 TEST(Lowering, TupleLiteralUsesAKindsDescriptor) {
   auto l = lower(R"(
     fn main() -> int { t = (1, "s"); return t.0; }

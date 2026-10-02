@@ -232,9 +232,9 @@ private:
       OS << "  ";
   }
 
-  /// Locals print as `%name.index`: several locals may share a name (the
-  /// lowering gives a match binding a twin slot), and the index keeps the
-  /// reference unambiguous.
+  /// Locals print as `%name.index`: several locals may share a name (two
+  /// match arms binding `a`, a name declared in sibling scopes), and the index
+  /// keeps the reference unambiguous.
   void printLocalRef(LocalId id) {
     OS << '%';
     if (id < F.Locals.size()) {
