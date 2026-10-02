@@ -4,7 +4,7 @@
 // in one file are all reported, at statement, class-member and top-level
 // boundaries, and a file with errors always fails.
 
-#include "Frontends/RecursiveDescent.h"
+#include "paykan/frontends/RecursiveDescent.h"
 
 #include <gtest/gtest.h>
 

@@ -4,7 +4,7 @@
 // leak the recursive-descent frontend (the ASan/LSan CI job checks the leaks).
 // Deterministic (fixed seeds) so a failure reproduces.
 
-#include "Frontends/RecursiveDescent.h"
+#include "paykan/frontends/RecursiveDescent.h"
 
 #include <gtest/gtest.h>
 
