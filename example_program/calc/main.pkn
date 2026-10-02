@@ -12,11 +12,45 @@
 //   paykan main.pkn                                # REPL on stdin
 //   printf "x = 5\nx * x\n" | paykan main.pkn
 //
-// REPL commands: :vars  :del <name>  :clear  :help  :quit
+// REPL commands: :vars  :history  :del <name>  :clear  :help  :quit
 
 import calc::parser;
 import calc::hashmap;
 import calc::utils;
+
+// A fixed-capacity ring buffer that keeps the most recent `cap` items, oldest
+// first. It is generic: `Ring<(Str, float)>` below holds the statement history,
+// and any other element type works the same way. (Generic types are not
+// exported across modules yet, so it lives in this module.)
+class Ring<T> {
+  items: T[];
+  cap: int;
+  start: int; // index of the oldest item once the buffer is full
+
+  fn __init__(cap: int) {
+    self.items = [];
+    self.cap = cap;
+    self.start = 0;
+  }
+
+  // Append `x`, overwriting the oldest item when the buffer is full.
+  fn add(x: T) {
+    if (self.items.len() < self.cap) {
+      self.items.push(x);
+    } else {
+      self.items[self.start] = x;
+      self.start = (self.start + 1) % self.cap;
+    }
+  }
+
+  fn len() -> int { return self.items.len(); }
+
+  // The i-th oldest item (0 <= i < len()).
+  fn at(i: int) -> T { return self.items[(self.start + i) % self.items.len()]; }
+}
+
+// How many past statements :history remembers.
+fn historySize() -> int { return 20; }
 
 // Format a result with trailing zeros trimmed.
 fn show(v: float) -> Str {
@@ -31,7 +65,8 @@ fn defineConstants(env: hashmap::HashMap) {
 }
 
 // Evaluate one statement line (an assignment or a bare expression) and print.
-fn evalStatement(src: Str, env: hashmap::HashMap, quiet: bool) {
+fn evalStatement(src: Str, env: hashmap::HashMap,
+                 history: Ring<(Str, float)>, quiet: bool) {
   p: parser::Parser = parser::Parser(src, env);
   target, value = p.parseStatement();
 
@@ -48,6 +83,7 @@ fn evalStatement(src: Str, env: hashmap::HashMap, quiet: bool) {
   }
 
   env.put("ans", value);
+  history.add((src, value));
   match target {
     name: Str {
       env.put(name, value);
@@ -76,6 +112,20 @@ fn listVars(env: hashmap::HashMap) {
   }
 }
 
+// Print the remembered statements, oldest first, numbered from 1.
+fn listHistory(history: Ring<(Str, float)>) {
+  if (history.len() == 0) {
+    println("(no history)");
+    return;
+  }
+  i: int = 0;
+  while (i < history.len()) {
+    src, value = history.at(i);
+    println("  " + StrInt(i + 1) + ": " + src + "  => " + show(value));
+    i = i + 1;
+  }
+}
+
 // Split a `:command arg` line into its command word (between ':' and the
 // first space) and its argument (everything after the spaces that follow).
 fn splitCommand(s: Str) -> (Str, Str) {
@@ -95,7 +145,8 @@ fn splitCommand(s: Str) -> (Str, Str) {
 }
 
 // Run a `:command`. Returns False only for :quit (stop the REPL).
-fn runCommand(s: Str, env: hashmap::HashMap, quiet: bool) -> bool {
+fn runCommand(s: Str, env: hashmap::HashMap, history: Ring<(Str, float)>,
+              quiet: bool) -> bool {
   word, arg = splitCommand(s);
 
   if (word.equals("quit") || word.equals("q") || word.equals("exit")) {
@@ -107,6 +158,10 @@ fn runCommand(s: Str, env: hashmap::HashMap, quiet: bool) -> bool {
   }
   if (word.equals("vars")) {
     listVars(env);
+    return True;
+  }
+  if (word.equals("history")) {
+    listHistory(history);
     return True;
   }
   if (word.equals("clear")) {
@@ -132,22 +187,23 @@ fn runCommand(s: Str, env: hashmap::HashMap, quiet: bool) -> bool {
 }
 
 // Handle one input line. Returns False only when the user asked to quit.
-fn handle(line: Str, env: hashmap::HashMap, quiet: bool) -> bool {
+fn handle(line: Str, env: hashmap::HashMap, history: Ring<(Str, float)>,
+          quiet: bool) -> bool {
   s: Str = utils::stripLine(line);
   if (s.len() == 0) { return True; }
-  if (s[0] == ':') { return runCommand(s, env, quiet); }
-  evalStatement(s, env, quiet);
+  if (s[0] == ':') { return runCommand(s, env, history, quiet); }
+  evalStatement(s, env, history, quiet);
   return True;
 }
 
 // Read-evaluate-print loop over standard input.
-fn repl(env: hashmap::HashMap, quiet: bool) -> int {
+fn repl(env: hashmap::HashMap, history: Ring<(Str, float)>, quiet: bool) -> int {
   if (!quiet) {
     println("calc — arithmetic with variables.  :help for commands, :quit to exit.");
   }
   while (True) {
     match Stdin.readln() {
-      line: Str { if (!handle(line, env, quiet)) { return 0; } }
+      line: Str { if (!handle(line, env, history, quiet)) { return 0; } }
       _ { break; } // None — end of input
     }
   }
@@ -160,6 +216,7 @@ fn printHelp() {
   println("              ans           the last computed result");
   println("              pi, e         predefined constants");
   println("commands:     :vars         list all variables");
+  println("              :history      list recent statements and results");
   println("              :del <name>   delete a variable");
   println("              :clear        remove all variables");
   println("              :help         show this help");
@@ -211,17 +268,18 @@ fn main(args: Str[]) -> int {
 
   env: hashmap::HashMap = hashmap::HashMap();
   defineConstants(env);
+  history: Ring<(Str, float)> = Ring<(Str, float)>(historySize());
 
   // Batch mode: evaluate every collected expression, sharing one environment.
   if (exprs.len() > 0) {
     j: int = 0;
     while (j < exprs.len()) {
-      evalStatement(exprs[j], env, quiet);
+      evalStatement(exprs[j], env, history, quiet);
       j = j + 1;
     }
     return 0;
   }
 
   // Interactive mode.
-  return repl(env, quiet);
+  return repl(env, history, quiet);
 }
