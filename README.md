@@ -56,9 +56,9 @@ produce identical ASTs: `scripts/diff_frontends.py` checks that over every sampl
 `--dump-tokens` prints a frontend's token stream.
 
 The backend is pluggable too. `-DPAYKAN_BACKENDS=<list>` selects the backends to build
-(default: `llvm`, the LLVM IR / ORC JIT backend; `mlir` is a reserved slot); the first one
+(default: `llvm`, the LLVM IR / ORC JIT backend); the first one
 listed is the default and `--backend=<name>` selects another (`--list-backends` prints
-them). LLVM is downloaded only when `llvm` or `mlir` is listed; an empty list builds a
+them). LLVM is downloaded only when `llvm` is listed; an empty list builds a
 compiler that can parse, check and dump the AST (`--check-only`, `--dump-ast`) but not
 run programs. Every backend consumes the Paykan IR described in [`docs/pir.md`](docs/pir.md).
 

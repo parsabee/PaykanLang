@@ -45,27 +45,29 @@ list(LENGTH PAYKAN_FRONTENDS PAYKAN_NUM_FRONTENDS)
 message(STATUS "Frontends: ${PAYKAN_FRONTENDS} (default: ${PAYKAN_DEFAULT_FRONTEND})")
 
 # -- Backends -----------------------------------------------------------------
-# `llvm` is the LLVM IR / ORC JIT backend; `mlir` is a reserved slot (see
-# src/Backends/MLIR).  Both depend on LLVM, which is fetched only when one of
-# them is listed.  An empty list builds a compiler with no backend (it can
-# still parse, check and dump the AST).
-set(PAYKAN_KNOWN_BACKENDS llvm mlir)
+# `c` is the C backend (part of the core: it needs only a C compiler at run
+# time) and is always built; `llvm` is the LLVM IR / ORC JIT backend, which
+# depends on LLVM: LLVM is fetched only when `llvm` is listed.
+set(PAYKAN_KNOWN_BACKENDS c llvm)
 set(PAYKAN_BACKENDS "llvm" CACHE STRING
-    "Semicolon-separated list of backends to build (available: ${PAYKAN_KNOWN_BACKENDS})")
+    "Semicolon-separated list of backends to build (available: ${PAYKAN_KNOWN_BACKENDS}; c is always built)")
 
 foreach(be IN LISTS PAYKAN_BACKENDS)
     if(NOT be IN_LIST PAYKAN_KNOWN_BACKENDS)
         message(FATAL_ERROR "Unknown backend '${be}' in PAYKAN_BACKENDS (available: ${PAYKAN_KNOWN_BACKENDS})")
     endif()
 endforeach()
+if(NOT "c" IN_LIST PAYKAN_BACKENDS)
+    list(APPEND PAYKAN_BACKENDS c)
+endif()
 
-# The default backend is the first one listed ("" when there is none).
-set(PAYKAN_DEFAULT_BACKEND "")
-if(PAYKAN_BACKENDS)
-    list(GET PAYKAN_BACKENDS 0 PAYKAN_DEFAULT_BACKEND)
+# The default backend: `llvm` (the JIT) when it is built, else `c`.
+set(PAYKAN_DEFAULT_BACKEND "c")
+if("llvm" IN_LIST PAYKAN_BACKENDS)
+    set(PAYKAN_DEFAULT_BACKEND "llvm")
 endif()
 set(PAYKAN_NEEDS_LLVM FALSE)
-if("llvm" IN_LIST PAYKAN_BACKENDS OR "mlir" IN_LIST PAYKAN_BACKENDS)
+if("llvm" IN_LIST PAYKAN_BACKENDS)
     set(PAYKAN_NEEDS_LLVM TRUE)
 endif()
 message(STATUS "Backends: ${PAYKAN_BACKENDS} (default: ${PAYKAN_DEFAULT_BACKEND})")

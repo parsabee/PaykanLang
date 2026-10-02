@@ -25,25 +25,6 @@ extern "C" {
 
 using namespace paykan::test;
 
-namespace {
-
-// RAII guard: enable tracking allocator before the run, check zero live
-// blocks after (same pattern as LeakTests.cpp).
-struct LeakGuard {
-  LeakGuard() {
-    Paykan_heap_set_tracking(1);
-    Paykan_heap_reset();
-  }
-  ~LeakGuard() { Paykan_heap_set_tracking(0); }
-  void expectNoLeaks(const char *label = "") const {
-    int64_t live = Paykan_heap_live_blocks();
-    EXPECT_EQ(live, 0) << "heap leak in: " << label << " (" << live
-                       << " live blocks)";
-  }
-};
-
-} // namespace
-
 // ============================================================================
 // A1 — `self` used as a value
 // ============================================================================

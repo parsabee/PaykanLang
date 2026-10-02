@@ -93,12 +93,14 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
   bool optionsEnded = false;
   bool sawCommand = false;
   bool emitLLVM = false;
+  bool emitC = false;
 
   for (int i = 1; i < argc; ++i) {
     std::string_view arg = argv[i];
 
-    // Everything after the source file belongs to the program.
-    if (!o.InputFilename.empty()) {
+    // For `run`, everything after the source file belongs to the program.
+    // `build` has no program arguments, so its options may follow the file.
+    if (!o.InputFilename.empty() && o.Cmd != Command::Build) {
       o.ProgramArgs.emplace_back(arg);
       continue;
     }
@@ -115,6 +117,12 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
         continue;
       }
       sawCommand = true;
+      if (!o.InputFilename.empty()) {
+        r.Error = "unexpected argument '" + std::string(arg) +
+                  "' (`build` takes one source file and no program "
+                  "arguments)";
+        return r;
+      }
       o.InputFilename = std::string(arg);
       continue;
     }
@@ -129,6 +137,10 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
     }
     if (name == "emit-llvm") {
       emitLLVM = true;
+      continue;
+    }
+    if (name == "emit-c") {
+      emitC = true;
       continue;
     }
 
@@ -184,6 +196,15 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
     o.Backend = "llvm";
     o.EmitSource = true;
   }
+  if (emitC) {
+    if (!o.Backend.empty() && o.Backend != "c") {
+      r.Error = "--emit-c needs the c backend, but --backend=" + o.Backend +
+                " was given";
+      return r;
+    }
+    o.Backend = "c";
+    o.EmitSource = true;
+  }
   bool infoOnly =
       o.ShowHelp || o.ShowVersion || o.ListFrontends || o.ListBackends;
   if (!infoOnly && o.InputFilename.empty())
@@ -203,6 +224,7 @@ void printUsage(std::ostream &os, const char *argv0) {
        << f.Help << "\n";
   os << "  --emit-llvm       - Emit LLVM IR to stdout (--backend=llvm "
         "--emit-source)\n"
+     << "  --emit-c          - Emit C to stdout (--backend=c --emit-source)\n"
      << "  --frontend=<name> - Parse with the named frontend "
         "(--list-frontends)\n"
      << "  --backend=<name>  - Generate code with the named backend "
