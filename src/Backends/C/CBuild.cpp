@@ -7,22 +7,13 @@
 
 #include "Version.h"
 
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
-#ifdef __APPLE__
-#include <mach-o/dyld.h>
-#endif
+#include "Platform.h"
 
 #include <atomic>
-#include <cerrno>
 #include <cinttypes>
-#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -60,49 +51,9 @@ namespace fs = std::filesystem;
 
 namespace {
 
-/// Path of the running executable, or "".  The OS's own answer where there
-/// is one; otherwise the first `paykan` on $PATH.
-std::string executablePath() {
-#if defined(__APPLE__)
-  uint32_t size = 0;
-  _NSGetExecutablePath(nullptr, &size); // sets the size needed
-  std::vector<char> buf(size + 1, '\0');
-  if (_NSGetExecutablePath(buf.data(), &size) == 0) {
-    if (char *real = realpath(buf.data(), nullptr)) {
-      std::string path = real;
-      std::free(real);
-      return path;
-    }
-  }
-#elif defined(__linux__)
-  std::error_code ec;
-  fs::path exe = fs::read_symlink("/proc/self/exe", ec);
-  if (!ec)
-    return exe.string();
-#endif
-  if (const char *pathEnv = std::getenv("PATH")) {
-    std::string dirs = pathEnv;
-    size_t start = 0;
-    while (start <= dirs.size()) {
-      size_t colon = dirs.find(':', start);
-      std::string dir =
-          dirs.substr(start, colon == std::string::npos ? std::string::npos
-                                                        : colon - start);
-      fs::path cand = fs::path(dir.empty() ? "." : dir) / "paykan";
-      std::error_code ec;
-      if (access(cand.c_str(), X_OK) == 0)
-        return fs::canonical(cand, ec).string();
-      if (colon == std::string::npos)
-        break;
-      start = colon + 1;
-    }
-  }
-  return "";
-}
-
 /// Directory of the running executable, or "".
 std::string executableDir() {
-  std::string exe = executablePath();
+  std::string exe = platform::executablePath();
   return exe.empty() ? "" : fs::path(exe).parent_path().string();
 }
 
@@ -114,55 +65,11 @@ void appendFlags(const std::string &flags, std::vector<std::string> &out) {
     out.push_back(f);
 }
 
-/// Run @p path with @p args after @p argv0 as the child's argv (no argv at
-/// all when @p argv0 is null, i.e. argc == 0) and @p extraEnv added to the
-/// environment.  Returns the exit status, 128 + signal, or -1.
-int spawn(const std::string &path, const std::vector<std::string> &args,
-          const std::string *argv0,
-          const std::vector<std::pair<std::string, std::string>> &extraEnv,
-          std::ostream &errs) {
-  pid_t pid = fork();
-  if (pid < 0) {
-    errs << "fork failed: " << std::strerror(errno) << "\n";
-    return -1;
-  }
-  if (pid == 0) {
-    for (const auto &[k, v] : extraEnv)
-      setenv(k.c_str(), v.c_str(), 1);
-    std::vector<char *> cargv;
-    if (argv0)
-      cargv.push_back(const_cast<char *>(argv0->c_str()));
-    for (const auto &a : args)
-      cargv.push_back(const_cast<char *>(a.c_str()));
-    cargv.push_back(nullptr);
-    execvp(path.c_str(), cargv.data());
-    std::fprintf(stderr, "exec of '%s' failed: %s\n", path.c_str(),
-                 std::strerror(errno));
-    _exit(127);
-  }
-  int status = 0;
-  while (waitpid(pid, &status, 0) < 0) {
-    if (errno != EINTR) {
-      errs << "waitpid failed: " << std::strerror(errno) << "\n";
-      return -1;
-    }
-  }
-  if (WIFEXITED(status))
-    return WEXITSTATUS(status);
-  if (WIFSIGNALED(status))
-    return 128 + WTERMSIG(status);
-  return -1;
-}
-
+/// A fresh temporary directory, removed with its contents on destruction.
+/// Path is empty when it could not be created.
 struct TempDir {
   std::string Path;
-  TempDir() {
-    std::string tmpl = (fs::temp_directory_path() / "paykan-c-XXXXXX").string();
-    std::vector<char> buf(tmpl.begin(), tmpl.end());
-    buf.push_back('\0');
-    if (mkdtemp(buf.data()))
-      Path = buf.data();
-  }
+  TempDir() : Path(platform::makeTempDir("paykan-c-")) {}
   ~TempDir() {
     if (!Path.empty()) {
       std::error_code ec;
@@ -252,7 +159,7 @@ std::string readFile(const std::string &path) {
 /// concurrent builds sharing a cache never write the same file.
 std::string tempSibling(const std::string &path) {
   static std::atomic<unsigned> counter{0};
-  return path + ".tmp" + std::to_string(getpid()) + "-" +
+  return path + ".tmp" + std::to_string(platform::processId()) + "-" +
          std::to_string(counter++);
 }
 
@@ -412,7 +319,7 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
       args.push_back(cPath);
       args.push_back("-o");
       args.push_back(oTmp.empty() ? oPath : oTmp);
-      int rc = spawn(tc.CC, args, &tc.CC, {}, errs);
+      int rc = platform::spawn(tc.CC, args, &tc.CC, {}, errs);
       if (rc != 0) {
         if (!oTmp.empty()) {
           std::error_code ec;
@@ -441,7 +348,7 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
   link.push_back("-lm");
   link.push_back("-o");
   link.push_back(outputPath);
-  int rc = spawn(tc.CC, link, &tc.CC, {}, errs);
+  int rc = platform::spawn(tc.CC, link, &tc.CC, {}, errs);
   if (rc != 0) {
     errs << "linking failed (" << tc.CC << " exited with " << rc << ")\n";
     return false;
@@ -472,7 +379,7 @@ int buildAndRun(const pir::Program &program,
     env.emplace_back("PAYKAN_NO_ARGS", "1");
   std::fflush(stdout);
   std::fflush(stderr);
-  return spawn(exe, progArgs, argv0, env, errs);
+  return platform::spawn(exe, progArgs, argv0, env, errs);
 }
 
 } // namespace paykan::backend_c
