@@ -11,6 +11,11 @@ addresses (`Foo@0x...`) are normalised before comparing.
 Usage:
     samples_parity.py --paykan build/bin/paykan --backend llvm --backend c
 
+With --build, every sample is instead compiled ahead of time with
+`paykan build --backend=<name>` and the resulting executable is run (with
+PAYKAN_TRACK_HEAP=1, the same arguments and the sample path as argv[0]);
+the same checks apply.
+
 With a single backend the script only checks that every sample runs
 successfully with zero live blocks.
 """
@@ -20,6 +25,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -38,10 +44,7 @@ def samples():
     return files
 
 
-def run(paykan, backend, sample):
-    cmd = [paykan, f"--backend={backend}", "--track-heap", str(sample), "a", "b"]
-    p = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
-                       text=True, errors="replace", cwd=str(ROOT))
+def normalise(p):
     out = ADDR_RE.sub("@ADDR", p.stdout)
     m = LIVE_RE.search(p.stderr)
     live = int(m.group(1)) if m else None
@@ -49,18 +52,50 @@ def run(paykan, backend, sample):
     return p.returncode, out, err, live
 
 
+def run(paykan, backend, sample):
+    cmd = [paykan, f"--backend={backend}", "--track-heap", str(sample), "a", "b"]
+    p = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
+                       text=True, errors="replace", cwd=str(ROOT))
+    return normalise(p)
+
+
+def build_and_run(paykan, backend, sample, outdir):
+    exe = Path(outdir) / f"{backend}-{sample.parent.name}-{sample.stem}"
+    cmd = [paykan, "build", f"--backend={backend}", "-o", str(exe), str(sample)]
+    b = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
+                       text=True, errors="replace", cwd=str(ROOT))
+    if b.returncode != 0:
+        return b.returncode, "", f"build failed:\n{b.stderr}", None
+    env = dict(os.environ, PAYKAN_TRACK_HEAP="1")
+    p = subprocess.run([str(sample), "a", "b"], executable=str(exe),
+                       stdin=subprocess.DEVNULL, capture_output=True,
+                       text=True, errors="replace", cwd=str(ROOT), env=env)
+    return normalise(p)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--paykan", required=True, help="the paykan binary")
     ap.add_argument("--backend", action="append", required=True,
                     help="a backend to run (repeatable)")
+    ap.add_argument("--build", action="store_true",
+                    help="build executables with `paykan build` and run those")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
+    with tempfile.TemporaryDirectory(prefix="paykan-parity-") as outdir:
+        return check(args, outdir)
+
+
+def check(args, outdir):
 
     failures = 0
     for sample in samples():
         rel = sample.relative_to(ROOT)
-        results = {b: run(args.paykan, b, sample) for b in args.backend}
+        if args.build:
+            results = {b: build_and_run(args.paykan, b, sample, outdir)
+                       for b in args.backend}
+        else:
+            results = {b: run(args.paykan, b, sample) for b in args.backend}
         problems = []
         for b, (rc, out, err, live) in results.items():
             if live is None:
@@ -86,7 +121,9 @@ def main():
         elif args.verbose:
             print(f"ok   {rel}")
     total = len(samples())
-    print(f"{total - failures}/{total} samples at parity on {', '.join(args.backend)}")
+    mode = "built" if args.build else "run"
+    print(f"{total - failures}/{total} samples at parity ({mode}) on "
+          f"{', '.join(args.backend)}")
     return 1 if failures else 0
 
 

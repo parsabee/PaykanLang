@@ -5,7 +5,9 @@
 #                     – the core (standard C++ only)
 #   Frontends/<name>/ – frontend plugins, built when listed in PAYKAN_FRONTENDS
 #   Backends/<name>/  – backend plugins, built when listed in PAYKAN_BACKENDS
-#                       (Backends/LLVM pulls in CodeGen/ and JIT/)
+#                       (Backends/LLVM pulls in JIT/)
+#   Backends/Toolchain/ – the system C toolchain / runtime link helpers the
+#                       native backends (C, LLVM) share
 #   Runtime/          – the C runtime linked into every program
 #   Driver/           – executable entry points (mains for all project binaries)
 # ----------------------------------------------------------------------------
@@ -26,6 +28,7 @@ add_subdirectory(Sema)
 add_subdirectory(Backend)
 add_subdirectory(Lowering)
 add_subdirectory(Runtime)
+add_subdirectory(Backends/Toolchain)
 foreach(be IN LISTS PAYKAN_BACKENDS)
     if(be STREQUAL "llvm")
         add_subdirectory(Backends/LLVM)

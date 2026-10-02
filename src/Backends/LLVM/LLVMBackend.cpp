@@ -1,21 +1,28 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 // The `llvm` backend plugin: PIR -> LLVM IR (PIRToLLVM.cpp), -O<n> through
-// PassBuilder, --emit-llvm, and in-process execution with the ORC JIT
-// (src/JIT).  Imported modules are served from the bitcode cache under
-// <project root>/.paykan_cache when their PIR is unchanged.
+// PassBuilder, --emit-llvm, in-process execution with the ORC JIT
+// (src/JIT), and ahead-of-time `build`: a native object for the host
+// (NativeBuild.cpp) linked against libpaykan_runtime.a with the system
+// toolchain the C backend uses too (paykan/backends/Toolchain.h).  Imported
+// modules are served from the bitcode cache under <project root>/.paykan_cache
+// when their PIR is unchanged.
 
 #include "JIT.h"
+#include "NativeBuild.h"
 #include "PIRToLLVM.h"
 #include "Runtime.h"
 #include "paykan/Backend.h"
+#include "paykan/backends/Toolchain.h"
 
 #include <llvm/Config/llvm-config.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/Support/raw_os_ostream.h>
 
+#include <filesystem>
 #include <memory>
 #include <ostream>
+#include <sstream>
 #include <string>
 
 namespace paykan::backend::llvm_backend {
@@ -29,6 +36,8 @@ public:
   Capabilities capabilities() const override {
     Capabilities c;
     c.EmitSource = true;
+    c.EmitObject = true;
+    c.EmitExecutable = true;
     c.Run = true;
     c.SourceExtension = ".ll";
     return c;
@@ -38,17 +47,30 @@ public:
     return std::string("LLVM ") + LLVM_VERSION_STRING;
   }
 
-  Status emit(const Input &in, EmitKind kind, const EmitOptions &,
+  Status emit(const Input &in, EmitKind kind, const EmitOptions &opts,
               std::ostream &out) override {
-    if (kind != EmitKind::Source)
-      return Status::error("the llvm backend only emits LLVM IR source");
     auto ctx = std::make_unique<llvm::LLVMContext>();
-    auto module = compile(in, *ctx);
-    if (!module)
-      return module.status();
-    llvm::raw_os_ostream os(out);
-    (*module)->print(os, nullptr);
-    return Status::ok();
+    switch (kind) {
+    case EmitKind::Source: {
+      auto module = compile(in, *ctx);
+      if (!module)
+        return module.status();
+      llvm::raw_os_ostream os(out);
+      (*module)->print(os, nullptr);
+      return Status::ok();
+    }
+    case EmitKind::Object: {
+      std::string output = opts.OutputPath;
+      if (output.empty())
+        output = defaultOutput(in) + ".o";
+      return emitObject(in, *ctx, output);
+    }
+    case EmitKind::Executable:
+      return buildExecutable(in, *ctx,
+                             opts.OutputPath.empty() ? defaultOutput(in)
+                                                     : opts.OutputPath);
+    }
+    return Status::error("unknown emit kind");
   }
 
   StatusOr<int> run(const Input &in, std::span<const std::string> args,
@@ -73,17 +95,68 @@ public:
   }
 
 private:
+  /// Translate the program (through the cache) without optimising it.
+  static StatusOr<std::unique_ptr<llvm::Module>>
+  translate(const Input &in, llvm::LLVMContext &ctx) {
+    if (!in.Program)
+      return Status::error("the llvm backend needs the PIR program");
+    return compileProgram(*in.Program, ctx, in.InputFilename, in.ProjectRoot);
+  }
+
   /// Translate (through the cache) and optimise the program.
   static StatusOr<std::unique_ptr<llvm::Module>>
   compile(const Input &in, llvm::LLVMContext &ctx) {
-    if (!in.Program)
-      return Status::error("the llvm backend needs the PIR program");
-    auto module =
-        compileProgram(*in.Program, ctx, in.InputFilename, in.ProjectRoot);
+    auto module = translate(in, ctx);
     if (!module)
       return module.status();
     optimizeModule(**module, in.OptLevel);
     return module;
+  }
+
+  /// The default output path of `build`: the input's stem, next to the
+  /// current directory (what the C backend does).
+  static std::string defaultOutput(const Input &in) {
+    std::string output =
+        std::filesystem::path(in.InputFilename).stem().string();
+    return output.empty() ? "a.out" : output;
+  }
+
+  /// The program as a native object for the host: the translated modules
+  /// plus the C entry point, optimised at -O<n> like `run`.
+  static Status emitObject(const Input &in, llvm::LLVMContext &ctx,
+                           const std::string &path) {
+    auto module = translate(in, ctx);
+    if (!module)
+      return module.status();
+    if (Status s = addEntryPoint(**module); !s)
+      return s;
+    auto tm = createHostTargetMachine(in.OptLevel);
+    if (!tm)
+      return tm.status();
+    (*module)->setTargetTriple((*tm)->getTargetTriple().str());
+    (*module)->setDataLayout((*tm)->createDataLayout());
+    optimizeModule(**module, in.OptLevel);
+    return writeObjectFile(**module, **tm, path);
+  }
+
+  /// `build`: the object of emitObject() linked against the runtime with
+  /// the system toolchain (including the sanitizer flags of a sanitizer
+  /// build, whose runtime archive is instrumented).
+  static Status buildExecutable(const Input &in, llvm::LLVMContext &ctx,
+                                const std::string &output) {
+    std::ostringstream errs;
+    toolchain::Toolchain tc;
+    if (!toolchain::resolveToolchain(tc, errs))
+      return Status::error(errs.str());
+    toolchain::TempDir tmp;
+    if (tmp.Path.empty())
+      return Status::error("cannot create a temporary directory");
+    std::string object = tmp.Path + "/program.o";
+    if (Status s = emitObject(in, ctx, object); !s)
+      return s;
+    if (!toolchain::linkExecutable({object}, output, tc, errs))
+      return Status::error(errs.str());
+    return Status::ok();
   }
 };
 

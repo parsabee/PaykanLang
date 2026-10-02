@@ -4,10 +4,12 @@
 // The C backend: translates a PIR program into C11 against the runtime's
 // Runtime.h, and builds / runs it with the system C compiler.
 //
-// Standard C++ only (plus POSIX process spawning in CBuild.cpp).
+// Standard C++ only (plus POSIX process spawning in the shared toolchain,
+// paykan/backends/Toolchain.h).
 
 #pragma once
 
+#include "paykan/backends/Toolchain.h"
 #include "paykan/pir/PIR.h"
 
 #include <ostream>
@@ -28,29 +30,10 @@ bool emitC(const pir::Program &program, std::ostream &out, std::ostream &errs);
 bool emitModuleC(const pir::Program &program, size_t module, std::ostream &out,
                  std::ostream &errs);
 
-/// Where the C compiler and the runtime are.
-struct Toolchain {
-  /// C compiler command; empty means `$CC`, then `cc`.
-  std::string CC;
-  /// Extra flags appended to every compile (e.g. "-O2").
-  std::vector<std::string> ExtraFlags;
-  /// Path of libpaykan_runtime.a and of the directory holding Runtime.h.
-  /// Empty: the paths baked in at build time (then the install layout next
-  /// to the executable, then $PAYKAN_RUNTIME_DIR).
-  std::string RuntimeLib;
-  std::string RuntimeIncludeDir;
-  /// Object cache: one `.c` / `.o` pair per module under this directory
-  /// (`<project root>/.paykan_cache`), reused while the module's generated
-  /// C and the compiler flags are unchanged.  Empty: no cache, everything
-  /// is compiled into the temporary build directory.
-  std::string CacheDir;
-  /// The project root cache entries are named relative to.
-  std::string ProjectRoot;
-};
-
-/// Resolve the defaults of @p tc (compiler and runtime paths).  Returns false
-/// with a message when the runtime cannot be found.
-bool resolveToolchain(Toolchain &tc, std::ostream &errs);
+/// Where the C compiler and the runtime are, and their lookup: shared with
+/// the llvm backend (paykan/backends/Toolchain.h).
+using toolchain::resolveToolchain;
+using toolchain::Toolchain;
 
 /// Emit C, compile and link it into @p outputPath.  @p keepC, when
 /// non-empty, is where the C source is also written.

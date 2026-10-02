@@ -232,6 +232,12 @@ if(PAYKAN_SAMPLES_BACKENDS)
         COMMAND ${CMAKE_COMMAND} -E env python3
                 ${CMAKE_SOURCE_DIR}/scripts/samples_parity.py
                 --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
+    # The same corpus built ahead of time (`paykan build`) and run as
+    # executables.
+    add_test(NAME SamplesParityBuild
+        COMMAND ${CMAKE_COMMAND} -E env python3
+                ${CMAKE_SOURCE_DIR}/scripts/samples_parity.py --build
+                --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
 endif()
 
 # Once per backend that runs programs (see backendFlag() in DriverTests.cpp).

@@ -1,7 +1,8 @@
 # src/Backends/C/CMakeLists.txt
 # ----------------------------------------------------------------------------
 # paykan_backend_c -- the C backend (PIR -> C11, built with the system cc).
-# Part of the core: depends on nothing but the standard library and POSIX.
+# Part of the core: depends on nothing but the standard library and POSIX
+# (the system toolchain helpers live in src/Backends/Toolchain).
 # ----------------------------------------------------------------------------
 
 add_library(paykan_backend_c STATIC
@@ -12,18 +13,9 @@ add_library(paykan_backend_c STATIC
 target_include_directories(paykan_backend_c
     PUBLIC ${CMAKE_SOURCE_DIR}/include
 )
-# Where this build tree's runtime lives, so `paykan build` / `run` work
-# without an install step; the install layout is the fallback at run time.
-# A sanitizer build instruments libpaykan_runtime.a, so programs linked
-# against it need the same -fsanitize flags (SanitizerSetup.cmake).
-list(JOIN PAYKAN_SANITIZER_FLAGS " " _paykan_c_sanitizer_flags)
-target_compile_definitions(paykan_backend_c PRIVATE
-    PAYKAN_RUNTIME_LIB_PATH="$<TARGET_FILE:paykan_runtime>"
-    PAYKAN_RUNTIME_INCLUDE_DIR="${CMAKE_SOURCE_DIR}/src/Runtime"
-    PAYKAN_SANITIZER_FLAGS="${_paykan_c_sanitizer_flags}"
-)
 target_link_libraries(paykan_backend_c
     PUBLIC  paykan_backend
+            paykan_backend_toolchain
     PRIVATE paykan_compile_options
 )
 add_dependencies(paykan_backend_c paykan_runtime)
