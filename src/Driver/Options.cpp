@@ -98,8 +98,9 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
   for (int i = 1; i < argc; ++i) {
     std::string_view arg = argv[i];
 
-    // Everything after the source file belongs to the program.
-    if (!o.InputFilename.empty()) {
+    // For `run`, everything after the source file belongs to the program.
+    // `build` has no program arguments, so its options may follow the file.
+    if (!o.InputFilename.empty() && o.Cmd != Command::Build) {
       o.ProgramArgs.emplace_back(arg);
       continue;
     }
@@ -116,6 +117,12 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
         continue;
       }
       sawCommand = true;
+      if (!o.InputFilename.empty()) {
+        r.Error = "unexpected argument '" + std::string(arg) +
+                  "' (`build` takes one source file and no program "
+                  "arguments)";
+        return r;
+      }
       o.InputFilename = std::string(arg);
       continue;
     }

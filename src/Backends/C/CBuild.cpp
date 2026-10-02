@@ -5,19 +5,28 @@
 
 #include "paykan/backends/c/CBackend.h"
 
+#include "Version.h"
+
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
 
 #include <cerrno>
+#include <cinttypes>
 #include <csignal>
+#include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <system_error>
+#include <vector>
 
 #ifndef PAYKAN_RUNTIME_LIB_PATH
 #define PAYKAN_RUNTIME_LIB_PATH ""
@@ -25,8 +34,20 @@
 #ifndef PAYKAN_RUNTIME_INCLUDE_DIR
 #define PAYKAN_RUNTIME_INCLUDE_DIR ""
 #endif
+#ifndef PAYKAN_INSTALLED_RUNTIME_LIB
+#define PAYKAN_INSTALLED_RUNTIME_LIB ""
+#endif
+#ifndef PAYKAN_INSTALLED_RUNTIME_INCLUDE_DIR
+#define PAYKAN_INSTALLED_RUNTIME_INCLUDE_DIR ""
+#endif
 #ifndef PAYKAN_SANITIZER_FLAGS
 #define PAYKAN_SANITIZER_FLAGS ""
+#endif
+#ifndef PAYKAN_COVERAGE_FLAGS
+#define PAYKAN_COVERAGE_FLAGS ""
+#endif
+#ifndef PAYKAN_DEFAULT_CC
+#define PAYKAN_DEFAULT_CC ""
 #endif
 
 namespace paykan::backend_c {
@@ -35,13 +56,58 @@ namespace fs = std::filesystem;
 
 namespace {
 
-/// Directory of the running executable, or "".
-std::string executableDir() {
+/// Path of the running executable, or "".  The OS's own answer where there
+/// is one; otherwise the first `paykan` on $PATH.
+std::string executablePath() {
+#if defined(__APPLE__)
+  uint32_t size = 0;
+  _NSGetExecutablePath(nullptr, &size); // sets the size needed
+  std::vector<char> buf(size + 1, '\0');
+  if (_NSGetExecutablePath(buf.data(), &size) == 0) {
+    if (char *real = realpath(buf.data(), nullptr)) {
+      std::string path = real;
+      std::free(real);
+      return path;
+    }
+  }
+#elif defined(__linux__)
   std::error_code ec;
   fs::path exe = fs::read_symlink("/proc/self/exe", ec);
-  if (ec)
-    return "";
-  return exe.parent_path().string();
+  if (!ec)
+    return exe.string();
+#endif
+  if (const char *pathEnv = std::getenv("PATH")) {
+    std::string dirs = pathEnv;
+    size_t start = 0;
+    while (start <= dirs.size()) {
+      size_t colon = dirs.find(':', start);
+      std::string dir =
+          dirs.substr(start, colon == std::string::npos ? std::string::npos
+                                                        : colon - start);
+      fs::path cand = fs::path(dir.empty() ? "." : dir) / "paykan";
+      std::error_code ec;
+      if (access(cand.c_str(), X_OK) == 0)
+        return fs::canonical(cand, ec).string();
+      if (colon == std::string::npos)
+        break;
+      start = colon + 1;
+    }
+  }
+  return "";
+}
+
+/// Directory of the running executable, or "".
+std::string executableDir() {
+  std::string exe = executablePath();
+  return exe.empty() ? "" : fs::path(exe).parent_path().string();
+}
+
+/// Append the space-separated words of @p flags to @p out.
+void appendFlags(const std::string &flags, std::vector<std::string> &out) {
+  std::istringstream words(flags);
+  std::string f;
+  while (words >> f)
+    out.push_back(f);
 }
 
 /// Run @p path with @p args after @p argv0 as the child's argv (no argv at
@@ -106,24 +172,17 @@ struct TempDir {
 bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
   if (tc.CC.empty()) {
     const char *cc = std::getenv("CC");
-    tc.CC = (cc && cc[0]) ? cc : "cc";
+    // A coverage build names the compiler that built the runtime: its
+    // profile runtime matches the archive's instrumentation.
+    const char *buildCC = PAYKAN_DEFAULT_CC;
+    tc.CC = (cc && cc[0]) ? cc : buildCC[0] ? buildCC : "cc";
   }
-  // The build tree's runtime archive is sanitizer-instrumented when the
-  // compiler was built with a sanitizer: programs linked against it need
+  // The build tree's runtime archive is sanitizer- or coverage-instrumented
+  // when the compiler was built that way: programs linked against it need
   // the same flags (compile and link).
   if (tc.RuntimeLib.empty()) {
-    std::string flags = PAYKAN_SANITIZER_FLAGS;
-    size_t start = 0;
-    while (start < flags.size()) {
-      size_t sp = flags.find(' ', start);
-      std::string f = flags.substr(
-          start, sp == std::string::npos ? std::string::npos : sp - start);
-      if (!f.empty())
-        tc.ExtraFlags.push_back(f);
-      if (sp == std::string::npos)
-        break;
-      start = sp + 1;
-    }
+    appendFlags(PAYKAN_SANITIZER_FLAGS, tc.ExtraFlags);
+    appendFlags(PAYKAN_COVERAGE_FLAGS, tc.ExtraFlags);
   }
   auto exists = [](const std::string &p) {
     std::error_code ec;
@@ -138,13 +197,16 @@ bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
     if (const char *env = std::getenv("PAYKAN_RUNTIME_DIR"))
       candidates.emplace_back(std::string(env) + "/lib/libpaykan_runtime.a",
                               std::string(env) + "/include/paykan");
-    // 3. the install layout next to the executable
+    // 3. the install layout next to the executable (a relocated install)
     std::string exeDir = executableDir();
     if (!exeDir.empty()) {
       fs::path prefix = fs::path(exeDir).parent_path();
       candidates.emplace_back((prefix / "lib" / "libpaykan_runtime.a").string(),
                               (prefix / "include" / "paykan").string());
     }
+    // 4. the install location configured at build time
+    candidates.emplace_back(PAYKAN_INSTALLED_RUNTIME_LIB,
+                            PAYKAN_INSTALLED_RUNTIME_INCLUDE_DIR);
     for (const auto &[lib, inc] : candidates) {
       if (exists(lib) && exists(inc + "/Runtime.h")) {
         if (tc.RuntimeLib.empty())
@@ -191,6 +253,18 @@ bool writeFileAtomically(const std::string &path, const std::string &text) {
   return !ec;
 }
 
+/// 64-bit FNV-1a of @p data, as 16 hex digits.
+std::string fnv1a(const std::string &data) {
+  uint64_t h = 0xcbf29ce484222325ULL;
+  for (unsigned char c : data) {
+    h ^= c;
+    h *= 0x100000001b3ULL;
+  }
+  char buf[17];
+  std::snprintf(buf, sizeof buf, "%016" PRIx64, h);
+  return buf;
+}
+
 /// The cache entry base path (without extension) of a module.
 std::string cacheEntryBase(const Toolchain &tc, const std::string &moduleName) {
   std::error_code ec;
@@ -235,13 +309,24 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
                                            "-I" + tc.RuntimeIncludeDir};
   for (const auto &f : tc.ExtraFlags)
     compileFlags.push_back(f);
-  std::string flagsId = tc.CC;
-  for (const auto &f : compileFlags)
-    flagsId += " " + f;
-  flagsId += "\n";
+  // Everything besides the module's C that its object depends on: the C
+  // compiler and flags, the runtime header the C includes (its struct
+  // layouts and prototypes are the runtime ABI), and this compiler's
+  // version.  Stored next to each cached object (`.key`).
+  std::string cacheKey = "cc:";
+  cacheKey += tc.CC;
+  for (const auto &f : compileFlags) {
+    cacheKey += ' ';
+    cacheKey += f;
+  }
+  cacheKey += "\nruntime.h:";
+  cacheKey += fnv1a(readFile(tc.RuntimeIncludeDir + "/Runtime.h"));
+  cacheKey += "\npaykan:";
+  cacheKey += kVersion;
+  cacheKey += '\n';
 
   // One translation unit per module; the object is reused from the cache
-  // while the module's generated C and the compiler flags are unchanged.
+  // while the module's generated C and the cache key are unchanged.
   std::vector<std::string> objects;
   for (size_t mi = 0; mi < program.Modules.size(); ++mi) {
     std::ostringstream src;
@@ -259,9 +344,9 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
       oPath = base + ".o";
       std::error_code existsErr; // set for a missing entry: not a failure
       cached = !dirErr && fs::exists(oPath, existsErr) &&
-               readFile(cPath) == text && readFile(base + ".flags") == flagsId;
+               readFile(cPath) == text && readFile(base + ".key") == cacheKey;
       if (!cached && (dirErr || !writeFileAtomically(cPath, text) ||
-                      !writeFileAtomically(base + ".flags", flagsId))) {
+                      !writeFileAtomically(base + ".key", cacheKey))) {
         // Unwritable cache: build this module in the temporary directory.
         cPath.clear();
       }

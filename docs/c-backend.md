@@ -16,10 +16,14 @@ run time, and it is the default backend of a build without the LLVM plugin.
 | `--track-heap` | the program runs with the runtime's tracking allocator and prints the heap statistics to stderr at exit (`live blocks : 0` for a leak-free program) |
 | `-O<n>` | passed to the C compiler as `-O<n>` |
 
-The C compiler is `$CC`, then `cc`.  The runtime (`libpaykan_runtime.a` and
+The C compiler is `$CC`, then `cc` (in a `PAYKAN_COVERAGE` build, the C
+compiler that built the runtime).  The runtime (`libpaykan_runtime.a` and
 `Runtime.h`) is found in this order: the build tree the compiler was built in,
-`$PAYKAN_RUNTIME_DIR/{lib,include/paykan}`, and the install layout next to the
-executable (`../lib`, `../include/paykan`).
+`$PAYKAN_RUNTIME_DIR/{lib,include/paykan}`, the install layout next to the
+executable (`../lib`, `../include/paykan`), and the install location
+configured at build time.  With the build tree's runtime, programs are
+compiled and linked with the build's sanitizer and coverage flags, since the
+archive is instrumented with them.
 
 A program started with `paykan run` sees the script path as `args[0]`
 (`fn main(args: Str[])`), like the JIT backend.  A runtime panic aborts the
@@ -30,12 +34,17 @@ program; `paykan run` then exits with 128 + the signal number.
 * One `struct` per class with the runtime's two-word object header (vtable
   pointer, unique-box backpointer) followed by every field, ancestors first.
   Class, function and global names are mangled as `pk_<module>_<name>` (any
-  character outside `[A-Za-z0-9_]` becomes `_XX`), so modules never collide
-  and generics instantiations (`Box<int>`) are valid identifiers.  Runtime
-  symbols keep their C names.
-* One vtable array per class (`pk_<module>_<Class>_vtable`, an array of
+  character outside `[A-Za-z0-9_]` becomes `_XX`, and a clash gets a `_<n>`
+  suffix), so modules never collide and generics instantiations
+  (`Box<int>`) are valid identifiers.  Runtime symbols keep their C names.
+* One vtable array per class (`pkvt_pk_<module>_<Class>`, an array of
   generic function pointers), whose address is the class's runtime type
   identity (`match`).  Virtual calls index it with the slot number from PIR.
+* Names from the program never reach C unprefixed, so they cannot clash with
+  C keywords, the C library (`errno`, `stdout`, `fmod`, `int64_t`, ...) or
+  generated names: fields are `f_<name>`, PIR locals `l_<name>` (`l<k>_<name>`
+  for the k-th shadowing local of the same name), and PIR values
+  `v<id>_<name>`.
 * Every PIR value is a `const`-free C local declared where it is defined;
   PIR locals are C variables declared at the top of the function.
   Structured PIR maps one-to-one: `if`/`else`, `for (;;)` with the condition
@@ -56,7 +65,8 @@ program; `paykan run` then exits with 128 + the signal number.
 emit one translation unit per PIR module (a module declares what it imports
 as `extern` items, so each unit is self-contained), compile each into
 `<project root>/.paykan_cache/<module>.o`, reuse the object while the
-module's generated C and the compiler flags are unchanged, and link the
+module's generated C and its cache key (the C compiler and flags, a hash of
+`Runtime.h` and the paykan version) are unchanged, and link the
 objects with `libpaykan_runtime.a`.  The output is deterministic for a given
 program.  It assumes an LP64 target (every array and tuple slot is 8 bytes),
 like the runtime itself.

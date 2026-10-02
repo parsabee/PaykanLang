@@ -198,6 +198,9 @@ target_link_libraries(driver_tests
             paykan_compile_options
 )
 add_dependencies(driver_tests paykan)
+if(PAYKAN_COVERAGE)
+    target_compile_definitions(driver_tests PRIVATE PAYKAN_TEST_COVERAGE=1)
+endif()
 # The samples corpus on every backend that runs programs: identical stdout,
 # exit codes and zero live heap blocks (scripts/samples_parity.py).
 set(PAYKAN_SAMPLES_BACKENDS "")
