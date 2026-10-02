@@ -1,0 +1,56 @@
+// 34 — single evaluation: the operands of an object read on an assignment's
+// right-hand side run exactly once (#52).  Assigning an object element or
+// field retains what it reads; that ownership handling must reuse the value
+// already computed instead of evaluating the array, the index or the
+// receiver a second time (each helper below prints when it is called).
+// Exercises: `x = arr[idx()]`, `x = arrs()[1]`, a declaration from an
+//            element, `x = make().c` and an element passed to a call.
+//
+// expect-stdout: idx called
+// expect-stdout: 1
+// expect-stdout: arrs called
+// expect-stdout: 4
+// expect-stdout: idx called
+// expect-stdout: 1
+// expect-stdout: make called
+// expect-stdout: 5
+// expect-stdout: idx called
+// expect-stdout: show 1
+
+class C { v: int; fn __init__(v: int) { self.v = v; } }
+
+class Holder { c: C; fn __init__(v: int) { self.c = C(v); } }
+
+fn idx() -> int {
+  println("idx called");
+  return 0;
+}
+
+fn arrs() -> C[] {
+  println("arrs called");
+  return [C(3), C(4)];
+}
+
+fn make() -> Holder {
+  println("make called");
+  return Holder(5);
+}
+
+fn show(c: C) {
+  println("show " + StrInt(c.v));
+}
+
+fn main() -> int {
+  arr: C[] = [C(1), C(2)];
+  x: C = C(9);
+  x = arr[idx()];
+  println(StrInt(x.v));
+  x = arrs()[1];
+  println(StrInt(x.v));
+  y: C = arr[idx()];
+  println(StrInt(y.v));
+  x = make().c;
+  println(StrInt(x.v));
+  show(arr[idx()]);
+  return 0;
+}
