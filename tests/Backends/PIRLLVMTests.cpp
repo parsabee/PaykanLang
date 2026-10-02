@@ -12,10 +12,12 @@
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/Support/Error.h>
+#include <llvm/Support/raw_ostream.h>
 
 #include <gtest/gtest.h>
 
 #include <cstdio>
+#include <sstream>
 #include <string>
 
 using namespace paykan;
@@ -30,7 +32,7 @@ struct Run {
 };
 
 /// Parse, verify, translate and run a PIR program.
-Run runPIR(const std::string &text, std::vector<std::string> args = {}) {
+Run runPIR(const std::string &text, const std::vector<std::string> &args = {}) {
   Run r;
   pir::ParseError perr;
   auto program = pir::parseProgram(text, perr);
@@ -65,6 +67,38 @@ Run runPIR(const std::string &text, std::vector<std::string> args = {}) {
   r.ExitCode = *result;
   r.Ok = true;
   return r;
+}
+
+/// Parse and translate a PIR program; its LLVM IR as text ("" on failure,
+/// with the reason in @p err).
+std::string translatePIR(const std::string &text, std::string &err) {
+  pir::ParseError perr;
+  auto program = pir::parseProgram(text, perr);
+  if (!program) {
+    err = "parse error: " + perr.str();
+    return "";
+  }
+  llvm::LLVMContext ctx;
+  auto module = backend::llvm_backend::translateProgram(*program, ctx, "t");
+  if (!module) {
+    err = module.status().message();
+    return "";
+  }
+  std::string ir;
+  llvm::raw_string_ostream os(ir);
+  (*module)->print(os, nullptr);
+  return os.str();
+}
+
+/// FileCheck-style: every line of @p ir that contains @p needle.
+std::vector<std::string> linesWith(const std::string &ir,
+                                   const std::string &needle) {
+  std::vector<std::string> out;
+  std::istringstream in(ir);
+  for (std::string line; std::getline(in, line);)
+    if (line.find(needle) != std::string::npos)
+      out.push_back(line);
+  return out;
 }
 
 } // namespace
@@ -205,6 +239,66 @@ fn @main() -> i64 {
 )");
   ASSERT_TRUE(r.Ok) << r.Err;
   EXPECT_EQ(r.ExitCode, 11);
+}
+
+// The optimisation hints the legacy AST code generator emitted: string
+// literals are mergeable (unnamed_addr, align 1) and vtable-pointer loads are
+// invariant, so LLVM can hoist and merge them.
+TEST(PIRLLVM, ConstantsAreMergeableAndVTableLoadsInvariant) {
+  std::string err;
+  std::string ir = translatePIR(R"(module "t"
+cstr @.s = "hi" len 2
+cstr @.t = "hi" len 2
+extern fn @PaykanObject_toString(obj) -> box
+extern fn @PaykanObject_equals(obj, box) -> i64
+
+class C {
+  vtable {
+    destroy = @C_destroy : (obj) -> void
+    toString = @PaykanObject_toString : (obj) -> box
+    equals = @PaykanObject_equals : (obj, box) -> i64
+    get = @C_get : (obj) -> i64
+  }
+}
+
+fn @C_destroy(%self: obj) -> void {
+  free %self
+  ret
+}
+
+fn @C_get(%self: obj) -> i64 {
+  ret 7
+}
+
+fn @main() -> i64 {
+  %o = new C
+  %vt = vtable.load %o
+  %r = vcall %o : C [3] ()
+  free %o
+  ret %r
+}
+)",
+                                err);
+  ASSERT_FALSE(ir.empty()) << err;
+
+  for (const char *name : {"@.s = ", "@.t = "}) {
+    auto defs = linesWith(ir, name);
+    ASSERT_EQ(defs.size(), 1u) << name << "\n" << ir;
+    EXPECT_NE(
+        defs[0].find("private unnamed_addr constant [3 x i8] c\"hi\\00\""),
+        std::string::npos)
+        << defs[0];
+    EXPECT_NE(defs[0].find(", align 1"), std::string::npos) << defs[0];
+  }
+
+  // Both vtable-pointer loads (vtable.load and the one vcall does) carry
+  // !invariant.load; the slot load does not (it is a load from the vtable,
+  // not of the object's header).
+  auto vtLoads = linesWith(ir, "= load ptr, ptr %o");
+  ASSERT_EQ(vtLoads.size(), 2u) << ir;
+  for (const auto &l : vtLoads)
+    EXPECT_NE(l.find("!invariant.load !"), std::string::npos) << l;
+  EXPECT_FALSE(linesWith(ir, "!{}").empty()) << ir;
 }
 
 TEST(PIRLLVM, CrossModuleCallsAndMainArgs) {

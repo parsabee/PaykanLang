@@ -143,6 +143,7 @@ private:
 
   llvm::FunctionType *functionType(const Signature &sig) {
     std::vector<llvm::Type *> params;
+    params.reserve(sig.Params.size());
     for (Type t : sig.Params)
       params.push_back(llvmType(t));
     return llvm::FunctionType::get(llvmType(sig.Ret), params, false);
@@ -170,7 +171,7 @@ private:
   // -- Runtime helpers the ops need even when the module does not declare
   // -- them (first-class ops: new/free/retain/release/box/unbox).
   llvm::FunctionCallee runtimeFn(const char *name, llvm::Type *ret,
-                                 std::vector<llvm::Type *> params) {
+                                 const std::vector<llvm::Type *> &params) {
     return M->getOrInsertFunction(name,
                                   llvm::FunctionType::get(ret, params, false));
   }
@@ -201,31 +202,35 @@ private:
 
   // -- Module-level declarations ---------------------------------------------
 
+  /// A private constant global whose address is not significant (so the
+  /// optimiser and the linker may merge identical ones), aligned to
+  /// @p align: string literals (align 1), array data (8), tuple kind bytes.
+  /// The module owns the global.
+  void defineConstant(llvm::Constant *init, const std::string &name,
+                      llvm::Align align) {
+    // The module owns the global: not a leak.
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+    auto *gv =
+        new llvm::GlobalVariable(*M, init->getType(), true,
+                                 llvm::GlobalValue::PrivateLinkage, init, name);
+    gv->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
+    gv->setAlignment(align);
+  }
+
   void declareModule(const Module &module, bool isMain) {
-    for (const CStrGlobal &g : module.CStrs) {
-      auto *init = llvm::ConstantDataArray::getString(Ctx, g.Data, true);
-      new llvm::GlobalVariable(*M, init->getType(), true,
-                               llvm::GlobalValue::PrivateLinkage, init,
-                               mangle(module, isMain, g.Name));
-    }
-    for (const DataGlobal &g : module.Datas) {
-      auto *init = llvm::ConstantDataArray::get(Ctx, g.Words);
-      new llvm::GlobalVariable(*M, init->getType(), true,
-                               llvm::GlobalValue::PrivateLinkage, init,
-                               mangle(module, isMain, g.Name));
-    }
-    for (const BytesGlobal &g : module.Bytes) {
-      auto *init = llvm::ConstantDataArray::get(Ctx, g.Bytes);
-      new llvm::GlobalVariable(*M, init->getType(), true,
-                               llvm::GlobalValue::PrivateLinkage, init,
-                               mangle(module, isMain, g.Name));
-    }
-    for (const ExternGlobal &g : module.Externs) {
-      if (!M->getNamedGlobal(g.Name))
-        new llvm::GlobalVariable(*M, llvm::Type::getInt8Ty(Ctx), false,
-                                 llvm::GlobalValue::ExternalLinkage, nullptr,
-                                 g.Name);
-    }
+    for (const CStrGlobal &g : module.CStrs)
+      defineConstant(llvm::ConstantDataArray::getString(Ctx, g.Data, true),
+                     mangle(module, isMain, g.Name), llvm::Align(1));
+    for (const DataGlobal &g : module.Datas)
+      defineConstant(llvm::ConstantDataArray::get(Ctx, g.Words),
+                     mangle(module, isMain, g.Name), llvm::Align(8));
+    for (const BytesGlobal &g : module.Bytes)
+      defineConstant(llvm::ConstantDataArray::get(Ctx, g.Bytes),
+                     mangle(module, isMain, g.Name), llvm::Align(1));
+    // Declarations go through getOrInsertGlobal, which creates the global in
+    // the module (that owns it) unless it is already declared.
+    for (const ExternGlobal &g : module.Externs)
+      M->getOrInsertGlobal(g.Name, llvm::Type::getInt8Ty(Ctx));
     for (const Class &c : module.Classes) {
       std::string sym = classSymbol(module, isMain, c.Name);
       classType(sym, c);
@@ -235,9 +240,9 @@ private:
       auto *vtTy = llvm::ArrayType::get(llvm::PointerType::getUnqual(Ctx),
                                         c.IsExtern ? 0 : c.VTable.size());
       if (!M->getNamedGlobal(vtableName(sym)))
-        new llvm::GlobalVariable(*M, vtTy, true,
-                                 llvm::GlobalValue::ExternalLinkage, nullptr,
-                                 vtableName(sym));
+        llvm::cast<llvm::GlobalVariable>(
+            M->getOrInsertGlobal(vtableName(sym), vtTy))
+            ->setConstant(true);
     }
     for (const Function &f : module.Functions) {
       std::string name = functionName(module, isMain, f.Name);
@@ -615,6 +620,7 @@ private:
         return;
       }
       std::vector<llvm::Value *> args;
+      args.reserve(in.Args.size());
       for (const Operand &a : in.Args)
         args.push_back(operand(a));
       setResult(in, B.CreateCall(callee, args));
@@ -625,10 +631,11 @@ private:
       // The vtable pointer is the object's first word; the slot holds the
       // function pointer.
       auto *ptrTy = llvm::PointerType::getUnqual(Ctx);
-      llvm::Value *vt = B.CreateLoad(ptrTy, recv, "vtable");
+      llvm::Value *vt = vtableLoad(recv);
       llvm::Value *slotPtr = B.CreateConstGEP1_64(ptrTy, vt, in.Slot, "slot");
       llvm::Value *fn = B.CreateLoad(ptrTy, slotPtr, "method");
       std::vector<llvm::Value *> args;
+      args.reserve(in.Args.size());
       for (const Operand &a : in.Args)
         args.push_back(operand(a));
       setResult(in, B.CreateCall(functionType(in.Sig), fn, args));
@@ -691,8 +698,7 @@ private:
       break;
     }
     case Opcode::VTableLoad:
-      setResult(in, B.CreateLoad(llvm::PointerType::getUnqual(Ctx),
-                                 operand(in.Args[0])));
+      setResult(in, vtableLoad(operand(in.Args[0])));
       break;
     case Opcode::VTableAddr: {
       if (!in.ClassName.empty()) {
@@ -714,6 +720,17 @@ private:
       B.CreateStore(operand(in.Args[0]), S->Locals[in.Local]);
       break;
     }
+  }
+
+  /// Load an object's vtable pointer (its first word).  The pointer never
+  /// changes after construction, so the load is `!invariant.load`: LLVM may
+  /// hoist it out of loops and merge repeated loads.
+  llvm::Value *vtableLoad(llvm::Value *obj) {
+    llvm::LoadInst *load =
+        B.CreateLoad(llvm::PointerType::getUnqual(Ctx), obj, "vtable");
+    load->setMetadata(llvm::LLVMContext::MD_invariant_load,
+                      llvm::MDNode::get(Ctx, {}));
+    return load;
   }
 
   /// The `cast` table of docs/pir.md §6.
