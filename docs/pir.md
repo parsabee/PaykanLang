@@ -79,17 +79,18 @@ extern fn @add(i64, i64) -> i64 module "lib/math"  ; defined in another PIR modu
 
 Locals are declared at the top of the function body (the lowering hoists them,
 like LLVM entry-block allocas) and read/written with `load`/`store`.  Several
-locals may share a name (a match binding gets a twin slot), so the printer
-writes a local as `%name.I` with `I` its index; hand-written text may use any
-spelling as long as declaration and uses agree.  Every
-Paykan variable is a local; `mov` nulls the slot it moves out of, so the
+locals may share a name (two match arms binding `a`, a name declared in sibling
+scopes), so the printer writes a local as `%name.I` with `I` its index;
+hand-written text may use any spelling as long as declaration and uses agree.
+Every Paykan variable is a local; `mov` nulls the slot it moves out of, so the
 scope-exit `release` of a moved variable is a release of `null` (the runtime
 accepts it).
 
 A function is `extern` when it is defined elsewhere: in the runtime (no
 `module` clause; the name is the C symbol) or in another PIR module of the same
-program (`module "<module name>"`).  Backends may mangle the names of
-module-defined symbols (C needs to: `Box<int>`, `first<int>` and
+program (`module "<module name>"`, written on the declaration's line: a
+`module` on a later line starts the next module).  Backends may mangle the
+names of module-defined symbols (C needs to: `Box<int>`, `first<int>` and
 `helper::add` are not C identifiers) but must leave runtime symbols as they are;
 a `(module, name)` pair must mangle the same way in every module of the
 program.
@@ -378,8 +379,9 @@ Comments start with `;` and run to the end of the line.  Identifiers after `@`
 and `%`, class names and field names may contain any character except
 whitespace, `(`, `)`, `,`, `[`, `]`, `{`, `}`, `:` and `"` (so `@Box<int>` and
 `@first<int>` are valid); a name containing those characters is written quoted:
-`@"helper::add"`, `"helper::Adder".n`.  The printer (`paykan::pir::print`)
-emits exactly this format and the parser (`paykan::pir::parseProgram`) reads
+`@"helper::add"`, `"helper::Adder".n`.  A named value or local keeps its
+`.N` index outside the quotes: `%"Pair<Str, int>.shared".4`.  The printer
+(`paykan::pir::print`) emits exactly this format and the parser (`paykan::pir::parseProgram`) reads
 it back; `paykan::pir::verify` checks §9.  A printed module separates its
 extern declarations from its definitions with blank lines, which the parser
 ignores.

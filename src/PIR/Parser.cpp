@@ -128,6 +128,19 @@ public:
       if (Pos < Text.size() && Text[Pos] == '"') {
         if (!lexString(t.Text))
           return fail(t, "unterminated or malformed quoted name");
+        // A quoted value name keeps its `.N` index outside the quotes
+        // (`%"Pair<Str, int>.shared".4`); fold it into the token so the
+        // text reads like the bare spelling `%name.N`.
+        if (c == '%' && Pos + 1 < Text.size() && Text[Pos] == '.' &&
+            std::isdigit(static_cast<unsigned char>(Text[Pos + 1]))) {
+          t.Text.push_back('.');
+          advance();
+          while (Pos < Text.size() &&
+                 std::isdigit(static_cast<unsigned char>(Text[Pos]))) {
+            t.Text.push_back(Text[Pos]);
+            advance();
+          }
+        }
       } else {
         lexName(t.Text);
       }
@@ -438,6 +451,7 @@ private:
   Lexer Lex;
   ParseError &Err;
   Token Cur;
+  unsigned PrevLine = 0; // line of the token before Cur
 
   // Per-function state.
   Function *CurFn = nullptr;
@@ -453,7 +467,10 @@ private:
     return false;
   }
 
-  void advance() { Cur = Lex.next(); }
+  void advance() {
+    PrevLine = Cur.Line;
+    Cur = Lex.next();
+  }
 
   bool isWord(const char *w) const {
     return Cur.Kind == Tok::Word && Cur.Text == w;
@@ -616,7 +633,9 @@ private:
           f.IsExtern = true;
           if (!parseSymbol(f.Name) || !parseSignature(f.Sig))
             return false;
-          if (isWord("module")) {
+          // The optional `module "<name>"` clause is on the declaration's
+          // line; a `module` on a later line is the next module's header.
+          if (isWord("module") && Cur.Line == PrevLine) {
             advance();
             if (!parseString(f.Module, "a module name"))
               return false;
@@ -1217,9 +1236,12 @@ private:
   // -- Deferred result types -------------------------------------------------
 
   /// The type of an operand inside @p f (values are looked up in the
-  /// function; constants carry their own type).  Void when unknown.
-  static Type operandType(const Function &f, const Operand &op) {
+  /// function; constants carry their own type; a symbol is a `ptr`, except an
+  /// extern object singleton of @p m, which is an `obj`).  Void when unknown.
+  static Type operandType(const Module &m, const Function &f,
+                          const Operand &op) {
     struct V {
+      const Module &M;
       const Function &F;
       Type operator()(ValueId id) const {
         for (const Value &p : F.Params)
@@ -1253,9 +1275,14 @@ private:
       Type operator()(bool) const { return Type::Bool; }
       Type operator()(char) const { return Type::Char; }
       Type operator()(const Operand::Null &n) const { return n.Ty; }
-      Type operator()(const SymbolRef &) const { return Type::Ptr; }
+      Type operator()(const SymbolRef &s) const {
+        for (const ExternGlobal &g : M.Externs)
+          if (g.Name == s.Name)
+            return g.K == ExternGlobal::Object ? Type::Obj : Type::Ptr;
+        return Type::Ptr;
+      }
     };
-    return std::visit(V{f}, op.V);
+    return std::visit(V{m, f}, op.V);
   }
 
   /// Fill in the result types that depend on declarations elsewhere in the
@@ -1298,11 +1325,12 @@ private:
     case Opcode::Rem:
     case Opcode::Neg:
     case Opcode::Not:
-      in.Result.Ty = in.Args.empty() ? Type::Void : operandType(f, in.Args[0]);
+      in.Result.Ty =
+          in.Args.empty() ? Type::Void : operandType(m, f, in.Args[0]);
       break;
     case Opcode::Select:
       in.Result.Ty =
-          in.Args.size() < 3 ? Type::Void : operandType(f, in.Args[1]);
+          in.Args.size() < 3 ? Type::Void : operandType(m, f, in.Args[1]);
       break;
     case Opcode::Call:
       if (const Function *callee = m.findFunction(in.Callee))

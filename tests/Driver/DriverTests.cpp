@@ -306,3 +306,19 @@ TEST(Driver, OptionalPrimitiveIsRejectedAtParse) {
             std::string::npos)
       << out;
 }
+
+// ---------------------------------------------------------------------------
+// --emit-pir
+// ---------------------------------------------------------------------------
+
+TEST(Driver, EmitPirPrintsTheProgram) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp("fn main() -> int { s: Str = \"hi\"; println(s); "
+                      "return 0; }");
+  auto [rc, out] = run(std::string(kPaykan) + " --emit-pir " + src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_EQ(rc, 0) << out;
+  EXPECT_NE(out.find("fn @main() -> i64 {"), std::string::npos) << out;
+  EXPECT_NE(out.find("release"), std::string::npos) << out;
+  EXPECT_NE(out.find("call @Paykan_println("), std::string::npos) << out;
+}

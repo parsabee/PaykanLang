@@ -12,6 +12,7 @@ target_link_libraries(paykan
             paykan_sema
             paykan_frontend
             paykan_backend
+            paykan_lowering
             paykan_pir
             paykan_compile_options
 )
