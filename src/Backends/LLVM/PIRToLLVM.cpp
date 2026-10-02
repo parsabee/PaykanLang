@@ -69,16 +69,28 @@ private:
 
   // -- Names -----------------------------------------------------------------
 
-  /// The LLVM name of a symbol defined by @p module.
+  /// The LLVM name of a symbol defined by @p module.  No program symbol
+  /// keeps its bare name, which could clash with (and, when external,
+  /// interpose) a C library or runtime symbol (`malloc`, `errno`, `stdout`):
+  /// an imported module's are qualified with the module name, the main
+  /// module's with `pk.` ('.' cannot occur in a Paykan identifier).  The
+  /// exceptions are `main`, the program's entry point, and PIR's private
+  /// constants (`.s`, ...), which cannot clash.
   static std::string mangle(const Module &module, bool isMain,
                             const std::string &name) {
-    if (isMain)
+    if (!isMain)
+      return module.Name + "::" + name;
+    if (name == "main" || (!name.empty() && name[0] == '.'))
       return name;
-    return module.Name + "::" + name;
+    return "pk." + name;
   }
 
+  /// The vtable global of a program class (@p className is its mangled
+  /// symbol).  The '.' keeps it apart from every program symbol: a class
+  /// `P` and a function `P_vtable` must not share a name.  (The runtime's
+  /// own vtables are extern globals with their C names.)
   static std::string vtableName(const std::string &className) {
-    return className + names::kVTableSuffix;
+    return className + ".vtable";
   }
 
   const Module *findModule(const std::string &name, bool &isMain) const {
@@ -812,7 +824,8 @@ namespace {
 /// Bumped whenever the generated code's ABI (object layout, calling
 /// conventions) changes, so entries from an older compiler are never linked.
 ///   v3: PIR-based translation.
-constexpr uint64_t kPaykanABIVersion = 3;
+///   v4: the main module's symbols are prefixed (`pk.`).
+constexpr uint64_t kPaykanABIVersion = 4;
 constexpr const char *kABIVersionFlag = "paykan.abi.version";
 constexpr const char *kCacheKeyMD = "paykan.cache.key";
 
