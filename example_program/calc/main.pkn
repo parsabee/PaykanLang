@@ -33,72 +33,70 @@ fn defineConstants(env: hashmap::HashMap) {
 // Evaluate one statement line (an assignment or a bare expression) and print.
 fn evalStatement(src: Str, env: hashmap::HashMap, quiet: bool) {
   p: parser::Parser = parser::Parser(src, env);
-  st: parser::Stmt = p.parseStatement();
+  target, value = p.parseStatement();
 
-  if (p.hasError) {
-    printerrln("error: " + p.errorMsg);
-    return;
+  match p.error {
+    msg: Str {
+      printerrln("error: " + msg);
+      return;
+    }
+    None { }
   }
   if (!p.done()) {
     printerrln("error: unexpected '" + p.rest() + "'");
     return;
   }
 
-  if (st.isAssign) {
-    env.put(st.name, st.value);
-    env.put("ans", st.value);
-    if (quiet) { println(show(st.value)); }
-    else { println(st.name + " = " + show(st.value)); }
-  } else {
-    env.put("ans", st.value);
-    if (quiet) { println(show(st.value)); }
-    else { println(src + " = " + show(st.value)); }
+  env.put("ans", value);
+  match target {
+    name: Str {
+      env.put(name, value);
+      if (quiet) { println(show(value)); }
+      else { println(name + " = " + show(value)); }
+    }
+    None {
+      if (quiet) { println(show(value)); }
+      else { println(src + " = " + show(value)); }
+    }
   }
 }
 
 // List every stored variable.
 fn listVars(env: hashmap::HashMap) {
-  ks: Str[] = env.keys();
-  if (ks.len() == 0) {
+  vars: (Str, float)[] = env.entries();
+  if (vars.len() == 0) {
     println("(no variables)");
     return;
   }
   i: int = 0;
-  while (i < ks.len()) {
-    k: Str = ks[i];
-    println("  " + k + " = " + show(env.get(k)));
+  while (i < vars.len()) {
+    name, value = vars[i];
+    println("  " + name + " = " + show(value));
     i = i + 1;
   }
 }
 
-// The command word of a `:command` line (between ':' and the first space).
-fn cmdWord(s: Str) -> Str {
-  out: Str = "";
+// Split a `:command arg` line into its command word (between ':' and the
+// first space) and its argument (everything after the spaces that follow).
+fn splitCommand(s: Str) -> (Str, Str) {
+  word: Str = "";
   i: int = 1;
   while (i < s.len() && s[i] != ' ') {
-    out = out + StrChar(s[i]);
+    word = word + StrChar(s[i]);
     i = i + 1;
   }
-  return out;
-}
-
-// The argument of a `:command arg` line (everything after the command word).
-fn cmdArg(s: Str) -> Str {
-  i: int = 1;
-  while (i < s.len() && s[i] != ' ') { i = i + 1; } // skip the word
-  while (i < s.len() && s[i] == ' ') { i = i + 1; } // skip the spaces
-  out: Str = "";
+  while (i < s.len() && s[i] == ' ') { i = i + 1; }
+  arg: Str = "";
   while (i < s.len()) {
-    out = out + StrChar(s[i]);
+    arg = arg + StrChar(s[i]);
     i = i + 1;
   }
-  return out;
+  return (word, arg);
 }
 
 // Run a `:command`. Returns False only for :quit (stop the REPL).
 fn runCommand(s: Str, env: hashmap::HashMap, quiet: bool) -> bool {
-  word: Str = cmdWord(s);
-  arg: Str = cmdArg(s);
+  word, arg = splitCommand(s);
 
   if (word.equals("quit") || word.equals("q") || word.equals("exit")) {
     return False;
