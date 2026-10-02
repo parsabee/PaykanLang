@@ -1,0 +1,37 @@
+// Isolates: match-arm bindings reassigned in a loop and then returned, a
+// None arm returning a fresh object, and a binding reassigned and then
+// assigned to itself.  The returned binding hands its (owned) reference to
+// the caller; `a = a` must neither release nor double-retain it.
+//
+// Runtime allocation sites: the A structs + their PaykanShared boxes and
+// their Str fields (literals and "n" + StrInt(i) concatenations).
+//
+// Expected under --track-heap: live blocks : 0.
+// expect-stdout: n2
+// expect-stdout: none
+// expect-stdout: q
+
+class A { s: Str; fn __init__(s: Str) { self.s = s; } }
+
+fn pick(o: A?) -> A {
+  match o {
+    a: A {
+      i: int = 0;
+      while (i < 3) { a = A("n" + StrInt(i)); i = i + 1; }
+      return a;
+    }
+    None { return A("none"); }
+  }
+  return A("x");
+}
+
+fn main() -> int {
+  o: A? = A("z");
+  println(pick(o).s);
+  println(pick(None).s);
+  match o {
+    a: A { a = A("q"); a = a; println(a.s); }
+    None { }
+  }
+  return 0;
+}

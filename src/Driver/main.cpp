@@ -162,27 +162,23 @@ int main(int argc, char *argv[]) {
   in.ProjectRoot = projectRoot;
   in.OptLevel = opts.OptLevel;
   // -- Lowering -------------------------------------------------------------
-  // Every backend except the legacy AST-based LLVM one reads PIR: lower the
-  // program (the single home of the ownership semantics), verify it, and
-  // hand it over.  --emit-pir prints it instead.
+  // Every backend reads PIR: lower the program (the single home of the
+  // ownership semantics), verify it, and hand it over.  --emit-pir prints it
+  // instead.
   paykan::pir::Program program;
-  if (backend->consumesPIR() || opts.EmitPIR) {
-    if (!paykan::lowering::lowerProgram(semaCtx, root, opts.InputFilename,
-                                        projectRoot, program, std::cerr))
-      return fail("lowering to PIR failed");
-    auto errors = paykan::pir::verify(program);
-    if (!errors.empty())
-      return fail("PIR verification failed:\n" +
-                  paykan::pir::formatErrors(errors));
-    if (opts.EmitPIR) {
-      paykan::pir::print(program, std::cout);
-      std::cout.flush();
-      return EXIT_SUCCESS;
-    }
-    in.Program = &program;
+  if (!paykan::lowering::lowerProgram(semaCtx, root, opts.InputFilename,
+                                      projectRoot, program, std::cerr))
+    return fail("lowering to PIR failed");
+  auto errors = paykan::pir::verify(program);
+  if (!errors.empty())
+    return fail("PIR verification failed:\n" +
+                paykan::pir::formatErrors(errors));
+  if (opts.EmitPIR) {
+    paykan::pir::print(program, std::cout);
+    std::cout.flush();
+    return EXIT_SUCCESS;
   }
-  in.Sema = &semaCtx;
-  in.TU = root;
+  in.Program = &program;
 
   if (opts.EmitSource) {
     if (!caps.EmitSource)

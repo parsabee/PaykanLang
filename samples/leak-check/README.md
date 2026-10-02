@@ -12,6 +12,10 @@ Run any sample under the tracking allocator:
 A clean sample dumps `live blocks : 0` at exit. A non-zero live-block count
 points the finger at the specific runtime allocation site that file isolates.
 
+Lines starting with `// expect-stdout:` give a sample's expected output, one
+line each; the samples parity check (`scripts/samples_parity.py`, ctest
+`SamplesParity` / `SamplesParityBuild`) enforces it on every backend.
+
 | File                       | Isolates                                              | Runtime site                         |
 |----------------------------|-------------------------------------------------------|--------------------------------------|
 | `01_string_literal.pkn`    | A single string literal                               | `PaykanString_new` (`String.c`)      |
@@ -32,3 +36,7 @@ points the finger at the specific runtime allocation site that file isolates.
 | `16_call_rooted_member_chain.pkn` | `makeH().a` chains + borrowed field acquisition | receiver-box teardown + field retain |
 | `17_tuple.pkn`             | Tuple literals, destructuring, nesting, `mk().0`, `==`, `mov` | `PaykanTuple_new` (`Tuple.c`) + `PaykanShared` |
 | `19_empty_array_literal_sinks.pkn` | `[]` into a field, argument, `push`, return, subscript, nested literal | `PaykanArray_new_obj` vs `PaykanArray_new` (`Array.c`) |
+| `20_match_binding_reassign_some_paths.pkn` | match-arm binding reassigned on some paths only | binding release at the join (`Shared.c`) |
+| `21_match_binding_reassign_loop.pkn` | match-arm binding reassigned in a loop          | per-iteration release (`Shared.c`)   |
+| `22_match_subject_reassign.pkn` | match subject reassigned inside the arm          | binding keeps the subject alive (`Shared.c`) |
+| `23_match_binding_return_mix.pkn` | binding reassigned in a loop + returned, `a = a` | owned binding returned (`Shared.c`)  |

@@ -12,17 +12,9 @@
 //
 // The interface uses Status / StatusOr (paykan/Status.h), never exceptions
 // and never llvm::Expected: the core is standard C++ only.
-//
-// Migration note: the legacy LLVM backend (src/Backends/LLVM) still generates
-// code straight from the typed AST; it reports consumesPIR() == false and the
-// driver hands it the AST through Input::Sema / Input::TU.  Once the
-// PIR-based LLVM translation lands, those two fields go away and every
-// backend reads Input::Program.
 
 #pragma once
 
-#include "AST.h"
-#include "Sema.h"
 #include "paykan/Registry.h"
 #include "paykan/Status.h"
 #include "paykan/pir/PIR.h"
@@ -55,13 +47,8 @@ struct Input {
   /// The project root imports were resolved against (the main file's
   /// directory; "" for the current directory).
   std::string ProjectRoot;
-  /// The verified PIR of the whole program (main module first).  Null only
-  /// for a backend that does not consume PIR (see Backend::consumesPIR).
+  /// The verified PIR of the whole program (main module first).
   const pir::Program *Program = nullptr;
-  /// The typed AST, for the legacy LLVM backend only (see the migration note
-  /// above).  Null for backends that consume PIR.
-  const sema::SemaContext *Sema = nullptr;
-  ast::TranslationUnit *TU = nullptr;
   /// -O<n>, 0..3.
   unsigned OptLevel = 0;
 };
@@ -92,11 +79,6 @@ public:
   /// A one-line description for --version / --list-backends, typically the
   /// toolchain the backend is built on ("LLVM 17.0.6"); "" for none.
   virtual std::string describe() const { return {}; }
-
-  /// Whether the backend reads Input::Program.  The driver runs the lowering
-  /// (and the verifier) only for backends that do.  Legacy AST backends
-  /// return false; everything else keeps the default.
-  virtual bool consumesPIR() const { return true; }
 
   /// Translate the program into the requested artifact.  Source output is
   /// written to @p out; Object / Executable output to opts.OutputPath.

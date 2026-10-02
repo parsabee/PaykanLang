@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// The C backend's portability layer (see Platform.h).  This is the only file
-// of the backend that includes operating-system headers.
+// The native toolchain's portability layer (see Platform.h).  This is the
+// only file of the backends that includes operating-system headers.
 
 #include "Platform.h"
 
@@ -32,7 +32,7 @@
 #include <filesystem>
 #include <system_error>
 
-namespace paykan::backend_c::platform {
+namespace paykan::toolchain::platform {
 
 namespace fs = std::filesystem;
 
@@ -137,4 +137,4 @@ std::string makeTempDir(const std::string &prefix) {
 
 unsigned long processId() { return static_cast<unsigned long>(getpid()); }
 
-} // namespace paykan::backend_c::platform
+} // namespace paykan::toolchain::platform

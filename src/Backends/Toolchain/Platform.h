@@ -1,11 +1,12 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// The C backend's portability layer: every operating-system API the backend
-// uses (locating the running executable, spawning the C compiler and the
-// built program, creating a temporary directory, the process id) lives
-// behind these few functions, implemented side by side for each supported
-// platform in Platform.cpp.
+// The native toolchain's portability layer: every operating-system API the
+// backends that produce native programs use (locating the running
+// executable, spawning the C compiler / linker and the built program,
+// creating a temporary directory, the process id) lives behind these few
+// functions, implemented side by side for each supported platform in
+// Platform.cpp.  Toolchain.cpp and the C backend's CBuild.cpp are its users.
 //
 // Supported: Linux and macOS.  Other POSIX systems build too, with the
 // documented fallbacks noted on each function.
@@ -17,7 +18,7 @@
 #include <utility>
 #include <vector>
 
-namespace paykan::backend_c::platform {
+namespace paykan::toolchain::platform {
 
 /// Absolute path of the running executable, or "" when it cannot be found.
 ///   macOS: _NSGetExecutablePath, resolved with realpath.
@@ -45,4 +46,4 @@ std::string makeTempDir(const std::string &prefix);
 /// The id of the running process (POSIX getpid on every platform).
 unsigned long processId();
 
-} // namespace paykan::backend_c::platform
+} // namespace paykan::toolchain::platform

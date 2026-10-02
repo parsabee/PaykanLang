@@ -120,9 +120,30 @@ if("llvm" IN_LIST PAYKAN_BACKENDS)
     )
     target_link_libraries(codegen_tests
         PRIVATE paykan_jit
-                paykan_codegen
                 ${TEST_LLVM_LIBS}
     )
+
+# --- PIR -> LLVM translation tests (hand-written PIR, run through the JIT) --
+    add_executable(pir_llvm_tests
+        Backends/PIRLLVMTests.cpp
+    )
+    target_include_directories(pir_llvm_tests
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_include_directories(pir_llvm_tests SYSTEM
+        PRIVATE ${LLVM_INCLUDE_DIRS}
+    )
+    target_link_libraries(pir_llvm_tests
+        PRIVATE gtest_main
+                paykan_jit
+                paykan_pir
+                paykan_frontend
+                paykan_runtime
+                paykan_compile_options
+                ${TEST_LLVM_LIBS}
+    )
+    paykan_link_plugins(pir_llvm_tests)
+    add_test(NAME PIRLLVMTests COMMAND pir_llvm_tests)
 endif()
 paykan_link_plugins(codegen_tests)
 foreach(be IN LISTS PAYKAN_BACKENDS)
@@ -220,6 +241,17 @@ if(PAYKAN_SAMPLES_BACKENDS)
         COMMAND ${CMAKE_COMMAND} -E env python3
                 ${CMAKE_SOURCE_DIR}/scripts/samples_parity.py
                 --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
+    # The same corpus built ahead of time (`paykan build`) and run as
+    # executables.
+    add_test(NAME SamplesParityBuild
+        COMMAND ${CMAKE_COMMAND} -E env python3
+                ${CMAKE_SOURCE_DIR}/scripts/samples_parity.py --build
+                --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
+    # Both compile the same import samples through the same per-project
+    # object / bitcode caches (samples/imports/*/.paykan_cache): one at a
+    # time.
+    set_tests_properties(SamplesParity SamplesParityBuild PROPERTIES
+        RESOURCE_LOCK paykan_samples_cache)
 endif()
 
 # Once per backend that runs programs (see backendFlag() in DriverTests.cpp).

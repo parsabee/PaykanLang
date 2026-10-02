@@ -9,6 +9,7 @@
 
 #include "CNames.h"
 #include "Platform.h"
+#include "ToolchainNames.h"
 
 #include <atomic>
 #include <cinttypes>
@@ -21,131 +22,16 @@
 #include <system_error>
 #include <vector>
 
-#ifndef PAYKAN_RUNTIME_LIB_PATH
-#define PAYKAN_RUNTIME_LIB_PATH ""
-#endif
-#ifndef PAYKAN_RUNTIME_INCLUDE_DIR
-#define PAYKAN_RUNTIME_INCLUDE_DIR ""
-#endif
-#ifndef PAYKAN_INSTALLED_RUNTIME_LIB
-#define PAYKAN_INSTALLED_RUNTIME_LIB ""
-#endif
-#ifndef PAYKAN_INSTALLED_RUNTIME_INCLUDE_DIR
-#define PAYKAN_INSTALLED_RUNTIME_INCLUDE_DIR ""
-#endif
-#ifndef PAYKAN_SANITIZER_FLAGS
-#define PAYKAN_SANITIZER_FLAGS ""
-#endif
-#ifndef PAYKAN_COVERAGE_FLAGS
-#define PAYKAN_COVERAGE_FLAGS ""
-#endif
-#ifndef PAYKAN_DEFAULT_CC
-#define PAYKAN_DEFAULT_CC ""
-#endif
-#ifndef PAYKAN_DEFAULT_CC_FLAGS
-#define PAYKAN_DEFAULT_CC_FLAGS ""
-#endif
-
 namespace paykan::backend_c {
 
 namespace fs = std::filesystem;
 
-namespace {
-
-/// Directory of the running executable, or "".
-std::string executableDir() {
-  std::string exe = platform::executablePath();
-  return exe.empty() ? "" : fs::path(exe).parent_path().string();
-}
-
-/// Append the space-separated words of @p flags to @p out.
-void appendFlags(const std::string &flags, std::vector<std::string> &out) {
-  std::istringstream words(flags);
-  std::string f;
-  while (words >> f)
-    out.push_back(f);
-}
-
-/// A fresh temporary directory, removed with its contents on destruction.
-/// Path is empty when it could not be created.
-struct TempDir {
-  std::string Path;
-  TempDir() : Path(platform::makeTempDir("paykan-c-")) {}
-  ~TempDir() {
-    if (!Path.empty()) {
-      std::error_code ec;
-      fs::remove_all(Path, ec);
-    }
-  }
-};
-
-} // namespace
-
-bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
-  if (tc.CC.empty()) {
-    const char *cc = std::getenv(cnames::kEnvCC);
-    // A coverage build names the compiler that built the runtime: its
-    // profile runtime matches the archive's instrumentation.  It comes with
-    // the flags it needs to find the system headers and libraries (the
-    // macOS SDK for a clang that has no default one).
-    const char *buildCC = PAYKAN_DEFAULT_CC;
-    if (cc && cc[0]) {
-      tc.CC = cc;
-    } else if (buildCC[0]) {
-      tc.CC = buildCC;
-      appendFlags(PAYKAN_DEFAULT_CC_FLAGS, tc.ExtraFlags);
-    } else {
-      tc.CC = cnames::kDefaultCC;
-    }
-  }
-  // The build tree's runtime archive is sanitizer- or coverage-instrumented
-  // when the compiler was built that way: programs linked against it need
-  // the same flags (compile and link).
-  if (tc.RuntimeLib.empty()) {
-    appendFlags(PAYKAN_SANITIZER_FLAGS, tc.ExtraFlags);
-    appendFlags(PAYKAN_COVERAGE_FLAGS, tc.ExtraFlags);
-  }
-  auto exists = [](const std::string &p) {
-    std::error_code ec;
-    return !p.empty() && fs::exists(p, ec);
-  };
-  if (tc.RuntimeLib.empty() || tc.RuntimeIncludeDir.empty()) {
-    std::vector<std::pair<std::string, std::string>> candidates;
-    // 1. the build tree this compiler was built in
-    candidates.emplace_back(PAYKAN_RUNTIME_LIB_PATH,
-                            PAYKAN_RUNTIME_INCLUDE_DIR);
-    // 2. $PAYKAN_RUNTIME_DIR/{lib,include}
-    if (const char *env = std::getenv("PAYKAN_RUNTIME_DIR"))
-      candidates.emplace_back(std::string(env) + "/lib/libpaykan_runtime.a",
-                              std::string(env) + "/include/paykan");
-    // 3. the install layout next to the executable (a relocated install)
-    std::string exeDir = executableDir();
-    if (!exeDir.empty()) {
-      fs::path prefix = fs::path(exeDir).parent_path();
-      candidates.emplace_back((prefix / "lib" / "libpaykan_runtime.a").string(),
-                              (prefix / "include" / "paykan").string());
-    }
-    // 4. the install location configured at build time
-    candidates.emplace_back(PAYKAN_INSTALLED_RUNTIME_LIB,
-                            PAYKAN_INSTALLED_RUNTIME_INCLUDE_DIR);
-    for (const auto &[lib, inc] : candidates) {
-      if (exists(lib) && exists(inc + "/" + cnames::kRuntimeH)) {
-        if (tc.RuntimeLib.empty())
-          tc.RuntimeLib = lib;
-        if (tc.RuntimeIncludeDir.empty())
-          tc.RuntimeIncludeDir = inc;
-        break;
-      }
-    }
-  }
-  if (!exists(tc.RuntimeLib) ||
-      !exists(tc.RuntimeIncludeDir + "/" + cnames::kRuntimeH)) {
-    errs << "cannot find the Paykan runtime (libpaykan_runtime.a and "
-            "Runtime.h); set PAYKAN_RUNTIME_DIR\n";
-    return false;
-  }
-  return true;
-}
+// The process / runtime / link helpers are shared with the llvm backend
+// (paykan/backends/Toolchain.h).
+using toolchain::spawn;
+using toolchain::TempDir;
+namespace platform = toolchain::platform;
+namespace tcnames = toolchain::tcnames;
 
 namespace {
 
@@ -246,8 +132,8 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
   }
 
   std::vector<std::string> compileFlags = {
-      cnames::kFlagStd, cnames::kFlagNoWarnings,
-      cnames::kFlagInclude + tc.RuntimeIncludeDir};
+      tcnames::kFlagStd, tcnames::kFlagNoWarnings,
+      tcnames::kFlagInclude + tc.RuntimeIncludeDir};
   for (const auto &f : tc.ExtraFlags)
     compileFlags.push_back(f);
   // Everything besides the module's C that its object depends on: the C
@@ -262,7 +148,8 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
     cacheKey += f;
   }
   cacheKey += "\nruntime.h:";
-  cacheKey += fnv1a(readFile(tc.RuntimeIncludeDir + "/" + cnames::kRuntimeH));
+  cacheKey +=
+      fnv1a(readFile(tc.RuntimeIncludeDir + "/" + tcnames::kRuntimeHeader));
   cacheKey += "\npaykan:";
   cacheKey += kVersion;
   cacheKey += '\n';
@@ -288,8 +175,8 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
       std::string base = cacheEntryBase(tc, program.Modules[mi].Name);
       std::error_code dirErr;
       fs::create_directories(fs::path(base).parent_path(), dirErr);
-      cPath = base + cnames::kCExt;
-      oPath = base + cnames::kObjExt;
+      cPath = base + tcnames::kCExt;
+      oPath = base + tcnames::kObjExt;
       keyPath = base + ".key";
       std::error_code existsErr; // set for a missing entry: not a failure
       cached = !dirErr && readFile(keyPath) == moduleKey &&
@@ -307,8 +194,8 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
       }
     }
     if (cPath.empty()) {
-      cPath = tmp.Path + "/module" + std::to_string(mi) + cnames::kCExt;
-      oPath = tmp.Path + "/module" + std::to_string(mi) + cnames::kObjExt;
+      cPath = tmp.Path + "/module" + std::to_string(mi) + tcnames::kCExt;
+      oPath = tmp.Path + "/module" + std::to_string(mi) + tcnames::kObjExt;
       std::ofstream out(cPath, std::ios::binary);
       out << text;
       if (!out) {
@@ -318,11 +205,11 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
     }
     if (!cached) {
       std::vector<std::string> args = compileFlags;
-      args.push_back(cnames::kFlagCompileOnly);
+      args.push_back(tcnames::kFlagCompileOnly);
       args.push_back(cPath);
-      args.push_back(cnames::kFlagOutput);
+      args.push_back(tcnames::kFlagOutput);
       args.push_back(oTmp.empty() ? oPath : oTmp);
-      int rc = platform::spawn(tc.CC, args, &tc.CC, {}, errs);
+      int rc = spawn(tc.CC, args, &tc.CC, {}, errs);
       if (rc != 0) {
         if (!oTmp.empty()) {
           std::error_code ec;
@@ -344,19 +231,7 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
     objects.push_back(oPath);
   }
 
-  std::vector<std::string> link = objects;
-  for (const auto &f : tc.ExtraFlags)
-    link.push_back(f);
-  link.push_back(tc.RuntimeLib);
-  link.push_back(cnames::kFlagLibm);
-  link.push_back(cnames::kFlagOutput);
-  link.push_back(outputPath);
-  int rc = platform::spawn(tc.CC, link, &tc.CC, {}, errs);
-  if (rc != 0) {
-    errs << "linking failed (" << tc.CC << " exited with " << rc << ")\n";
-    return false;
-  }
-  return true;
+  return toolchain::linkExecutable(objects, outputPath, tc, errs);
 }
 
 int buildAndRun(const pir::Program &program,
@@ -382,7 +257,7 @@ int buildAndRun(const pir::Program &program,
     env.emplace_back(cnames::kEnvNoArgs, cnames::kEnvOn);
   std::fflush(stdout);
   std::fflush(stderr);
-  return platform::spawn(exe, progArgs, argv0, env, errs);
+  return spawn(exe, progArgs, argv0, env, errs);
 }
 
 } // namespace paykan::backend_c

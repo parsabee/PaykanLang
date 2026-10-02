@@ -18,8 +18,9 @@
 option(PAYKAN_COVERAGE "Build with LLVM source-based code coverage" OFF)
 
 # The coverage flags in effect, for code that compiles and links programs
-# against this build's (instrumented) runtime archive at run time -- the C
-# backend passes them to the C compiler (src/Backends/C).
+# against this build's (instrumented) runtime archive at run time -- the
+# shared native toolchain passes them to the C compiler when the C backend
+# compiles a program and when any backend links one (src/Backends/Toolchain).
 set(PAYKAN_COVERAGE_FLAGS "")
 
 if(PAYKAN_COVERAGE)

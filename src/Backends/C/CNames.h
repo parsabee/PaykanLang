@@ -4,9 +4,9 @@
 // Centralized C-language string constants of the C backend: every C keyword,
 // type name, operator, punctuator, standard-library / macro name, string
 // escape and name-mangling affix the emitter writes (CEmitter.cpp), and the
-// C-compiler command-line flags and environment variables the build uses
-// (CBuild.cpp).  The Paykan runtime's own C symbols (Paykan_retain, ...)
-// are in include/Names.h.
+// environment variables the build sets (CBuild.cpp).  The C compiler's
+// command line is in src/Backends/Toolchain/ToolchainNames.h, the Paykan
+// runtime's own C symbols (Paykan_retain, ...) in include/Names.h.
 
 #pragma once
 
@@ -252,18 +252,5 @@ inline constexpr const char *kNoClass = "/*noclass*/";
 inline constexpr const char *kUndef = "/*undef*/0";
 inline constexpr const char *kUnknownOperand = "/*?*/0";
 inline constexpr const char *kUnknownSymbol = "/*unknown*/0";
-
-// -- C compiler command line (CBuild.cpp) -------------------------------------
-
-inline constexpr const char *kDefaultCC = "cc"; ///< when $CC is unset
-inline constexpr const char *kEnvCC = "CC";
-inline constexpr const char *kFlagStd = "-std=c11";
-inline constexpr const char *kFlagNoWarnings = "-w";
-inline constexpr const char *kFlagInclude = "-I"; ///< -I<dir>
-inline constexpr const char *kFlagCompileOnly = "-c";
-inline constexpr const char *kFlagOutput = "-o";
-inline constexpr const char *kFlagLibm = "-lm";
-inline constexpr const char *kCExt = ".c";
-inline constexpr const char *kObjExt = ".o";
 
 } // namespace paykan::backend_c::cnames

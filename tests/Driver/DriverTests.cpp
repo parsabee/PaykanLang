@@ -445,6 +445,56 @@ TEST(Driver, CBackendBuildsAnExecutableAndCachesObjects) {
   std::filesystem::remove_all(dir);
 }
 
+// `build` on the test backend (each backend that runs programs: the C
+// backend through the system C compiler, the llvm backend through a native
+// object linked against the runtime) gives an executable that behaves like
+// `run`: arguments, exit code, PAYKAN_TRACK_HEAP, at -O0 and -O2.
+TEST(Driver, BuildProducesAStandaloneExecutable) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_build_any_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  auto src = (dir / "prog.pkn").string();
+  {
+    std::ofstream ofs(src);
+    ofs << "class Box { v: int; fn __init__(v: int) { self.v = v; } }"
+           "fn main(args: Str[]) -> int { b = Box(40); println(args[1]); "
+           "return b.v + args.len(); }";
+  }
+  auto buildAndRun = [&](const std::string &opt) {
+    auto exe = (dir / ("prog" + opt)).string();
+    std::filesystem::remove(exe);
+    auto [rc, out] =
+        run(paykanRun() + " " + opt + " -o " + exe + " build " + src + " 2>&1");
+    ASSERT_EQ(rc, 0) << opt << ": " << out;
+    ASSERT_TRUE(std::filesystem::exists(exe)) << opt;
+
+    auto [rc2, out2] = run(exe + " hello 2>&1");
+    EXPECT_EQ(rc2, 42) << opt << ": " << out2; // 40 + argv[0] + "hello"
+    EXPECT_EQ(out2, "hello\n") << opt;
+
+    auto [rc3, out3] = run("PAYKAN_TRACK_HEAP=1 " + exe + " x 2>&1");
+    EXPECT_EQ(rc3, 42) << opt << ": " << out3;
+    EXPECT_NE(out3.find("live blocks       : 0"), std::string::npos)
+        << opt << ": " << out3;
+  };
+  buildAndRun("-O0");
+  buildAndRun("-O2");
+  // A program without arguments, and the default output name (the input's
+  // stem, in the current directory).
+  {
+    std::ofstream ofs(src);
+    ofs << "fn main() -> int { println(\"no args\"); return 7; }";
+  }
+  auto [rc4, out4] = run("cd " + dir.string() + " && " + paykanRun() +
+                         " build " + src + " 2>&1");
+  ASSERT_EQ(rc4, 0) << out4;
+  auto [rc5, out5] = run((dir / "prog").string() + " ignored 2>&1");
+  EXPECT_EQ(rc5, 7) << out5;
+  EXPECT_EQ(out5, "no args\n");
+  std::filesystem::remove_all(dir);
+}
+
 // `build` has no program arguments: options may follow the source file, and
 // a second file is an error rather than silently ignored.
 TEST(Driver, BuildAcceptsOptionsAfterTheSourceFile) {
@@ -473,11 +523,11 @@ TEST(Driver, BuildAcceptsOptionsAfterTheSourceFile) {
   std::filesystem::remove_all(dir);
 }
 
-// A coverage build's runtime archive is instrumented, so the C backend must
-// compile and link programs with the same coverage flags (and a compiler
-// whose profile runtime matches): the program builds, runs and writes its
-// own profile.
-TEST(Driver, CBackendProgramsAreInstrumentedInACoverageBuild) {
+// A coverage build's runtime archive is instrumented, so every backend that
+// builds programs must link them with the same coverage flags (and a
+// compiler whose profile runtime matches; the C backend also compiles the
+// program with them): the program builds, runs and writes its own profile.
+TEST(Driver, ProgramsAreInstrumentedInACoverageBuild) {
 #ifndef PAYKAN_TEST_COVERAGE
   GTEST_SKIP() << "not a PAYKAN_COVERAGE build";
 #else
@@ -488,8 +538,7 @@ TEST(Driver, CBackendProgramsAreInstrumentedInACoverageBuild) {
   auto src = (dir / "cov.pkn").string();
   std::ofstream(src) << "fn main() -> int { println(\"cov\"); return 3; }";
   auto exe = (dir / "cov").string();
-  auto [rc, out] = run(std::string(kPaykan) + " --backend=c -o " + exe +
-                       " build " + src + " 2>&1");
+  auto [rc, out] = run(paykanRun() + " -o " + exe + " build " + src + " 2>&1");
   ASSERT_EQ(rc, 0) << out;
   auto profile = (dir / "cov.profraw").string();
   auto [rc2, out2] = run("LLVM_PROFILE_FILE=" + profile + " " + exe + " 2>&1");

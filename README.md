@@ -57,7 +57,8 @@ produce identical ASTs: `scripts/diff_frontends.py` checks that over every sampl
 
 The backend is pluggable too. `-DPAYKAN_BACKENDS=<list>` selects the backends to build:
 `c` (the C backend: emits C11, builds with the system C compiler, standard C++ only) is always
-built; `llvm` (LLVM IR / ORC JIT) is optional. The default backend
+built; `llvm` (LLVM IR, the ORC JIT for `run`, native objects linked by the system C compiler
+for `build`) is optional. The default backend
 is `llvm` when it is listed, `c` otherwise; `--backend=<name>` selects another (`--list-backends`
 prints them). LLVM is downloaded only when `llvm` is listed, so
 `-DPAYKAN_FRONTENDS=recursive-descent -DPAYKAN_BACKENDS=c` is a **barebones build** that needs
