@@ -16,6 +16,16 @@ using pir::CmpPred;
 using pir::Opcode;
 using pir::Type;
 
+// -- Dispatch
+// -------------------------------------------------------------------
+
+Val ModuleLowering::ExprEmitter::visit(ast::Expr *node) {
+  Val v = ast::ExprVisitor<ExprEmitter, Val>::visit(node);
+  if (!v || !isPrimitiveBoxing(node))
+    return v;
+  return L.emitPrimitiveBox(v, node->getCoercedType());
+}
+
 // -- Literals
 // -------------------------------------------------------------------
 

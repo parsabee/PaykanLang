@@ -237,6 +237,65 @@ TEST(BoxedBool, EqualsSameValue) {
 }
 
 // ============================================================================
+// PaykanChar (the box of a present `char?`) and the *_value accessors
+// ============================================================================
+
+TEST(BoxedChar, NewValueAndVtable) {
+  PaykanChar *c = PaykanChar_new('q');
+  ASSERT_NE(c, nullptr);
+  EXPECT_EQ(c->vtable, &PaykanChar_vtable);
+  EXPECT_EQ(c->shared, nullptr);
+  EXPECT_EQ(PaykanChar_value((PaykanObject *)c), 'q');
+  PaykanChar_destroy((PaykanObject *)c);
+}
+
+TEST(BoxedChar, NegativeByteRoundTrips) {
+  PaykanChar *c = PaykanChar_new((int8_t)-1);
+  EXPECT_EQ(PaykanChar_value((PaykanObject *)c), (int8_t)-1);
+  PaykanChar_destroy((PaykanObject *)c);
+}
+
+TEST(BoxedChar, ToString) {
+  PaykanChar *c = PaykanChar_new('z');
+  PaykanShared *s = PaykanChar_toString((PaykanObject *)c);
+  EXPECT_STREQ(sharedStr(s), "z");
+  Paykan_release(s);
+  PaykanChar_destroy((PaykanObject *)c);
+}
+
+TEST(BoxedChar, EqualsByValueAndType) {
+  PaykanChar *a = PaykanChar_new('a');
+  PaykanChar *b = PaykanChar_new('a');
+  PaykanChar *c = PaykanChar_new('b');
+  PaykanInt *i = PaykanInt_new('a');
+  EXPECT_EQ(
+      paykanTestEquals(PaykanChar_equals, (PaykanObject *)a, (PaykanObject *)b),
+      1);
+  EXPECT_EQ(
+      paykanTestEquals(PaykanChar_equals, (PaykanObject *)a, (PaykanObject *)c),
+      0);
+  EXPECT_EQ(
+      paykanTestEquals(PaykanChar_equals, (PaykanObject *)a, (PaykanObject *)i),
+      0);
+  PaykanChar_destroy((PaykanObject *)a);
+  PaykanChar_destroy((PaykanObject *)b);
+  PaykanChar_destroy((PaykanObject *)c);
+  PaykanInt_destroy((PaykanObject *)i);
+}
+
+TEST(BoxedPrimitiveValue, AccessorsReturnTheStoredValue) {
+  PaykanInt *i = PaykanInt_new(INT64_MIN);
+  PaykanFloat *f = PaykanFloat_new(-0.5);
+  PaykanBool *b = PaykanBool_new(7); // normalised to 1
+  EXPECT_EQ(PaykanInt_value((PaykanObject *)i), INT64_MIN);
+  EXPECT_EQ(PaykanFloat_value((PaykanObject *)f), -0.5);
+  EXPECT_EQ(PaykanBool_value((PaykanObject *)b), 1);
+  PaykanInt_destroy((PaykanObject *)i);
+  PaykanFloat_destroy((PaykanObject *)f);
+  PaykanBool_destroy((PaykanObject *)b);
+}
+
+// ============================================================================
 // PaykanError
 // ============================================================================
 

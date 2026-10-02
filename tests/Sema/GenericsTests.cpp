@@ -647,18 +647,45 @@ TEST(GenericsTypes, TupleArityMismatchLeftToArgumentCheck) {
 }
 
 // A `T?` inside a template is checked per instantiation: with T = int it is
-// the usual optional-primitive error, attributed to the instantiation.
-TEST(GenericsTypes, OptionalOfPrimitiveArgumentIsDiagnosed) {
+// an optional primitive `int?` (#66); with T = an enum or an already
+// optional type it is diagnosed, attributed to the instantiation.
+TEST(GenericsTypes, OptionalOfPrimitiveArgumentIsAccepted) {
   auto r = semaCheck(R"(
-    class Slot<T> { v: T?; fn __init__() { } }
-    fn main() -> int { b = Slot<int>(); return 0; }
+    class Slot<T> {
+      v: T?;
+      fn __init__() { }
+      fn put(x: T) { self.v = x; }
+      fn get() -> T? { return self.v; }
+    }
+    fn main() -> int {
+      b = Slot<int>();
+      b.put(3);
+      match b.get() { n: int { x: int = n + 1; } None { } }
+      return 0;
+    }
   )");
-  EXPECT_FALSE(r.Ok);
-  EXPECT_TRUE(has(r.Diagnostics, "has type 'int?': optional primitive types "
-                                 "are not supported yet"))
-      << r.Diagnostics;
-  EXPECT_TRUE(has(r.Diagnostics, "in instantiation of 'Slot<int>'"))
-      << r.Diagnostics;
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+
+  auto re = semaCheck(R"(
+    enum Color { Red, Green }
+    class Slot<T> { v: T?; fn __init__() { } }
+    fn main() -> int { b = Slot<Color>(); return 0; }
+  )");
+  EXPECT_FALSE(re.Ok);
+  EXPECT_TRUE(has(re.Diagnostics, "has type 'Color?': optional enum types "
+                                  "are not supported yet"))
+      << re.Diagnostics;
+  EXPECT_TRUE(has(re.Diagnostics, "in instantiation of 'Slot<Color>'"))
+      << re.Diagnostics;
+
+  auto rn = semaCheck(R"(
+    class Slot<T> { v: T?; fn __init__() { } }
+    fn main() -> int { b = Slot<int?>(); return 0; }
+  )");
+  EXPECT_FALSE(rn.Ok);
+  EXPECT_TRUE(has(rn.Diagnostics, "nested optional type 'int?"
+                                  "?'"))
+      << rn.Diagnostics;
 
   // Likewise an optional tuple (not supported yet, see #15).
   auto r2 = semaCheck(R"(

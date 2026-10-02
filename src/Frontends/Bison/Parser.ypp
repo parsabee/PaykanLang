@@ -302,15 +302,15 @@ typeAnnotation: IDENT               { auto *ty = drv.Ctx->lookupType($1);
                                     { $$ = drv.Ctx->make<GenericType>(loc(@1, @6),
                                            drv.Ctx->intern($1 + "::" + $3), std::move($5)); }
     | typeAnnotation "[" "]"        { $$ = drv.Ctx->make<ArrayType>(loc(@1, @3), $1); }
-    | typeAnnotation "?"            { // Optional type T? (prototype, issue #5).  Only
-                                      // reference types may be optional; the builtin
-                                      // value types are known at parse time and are
-                                      // rejected here (an enum spelled `Color?` is only
-                                      // known to Sema, which rejects it there).
-                                      if (isa<BuiltinType>($1))
+    | typeAnnotation "?"            { // Optional type T? (prototype, issue #5).  `void`
+                                      // has no value to make optional; the other builtin
+                                      // value types (`int?`, ...) box through the
+                                      // runtime's boxed classes (an enum spelled `Color?`
+                                      // is only known to Sema, which rejects it there).
+                                      auto *bt = dyn_cast<BuiltinType>($1);
+                                      if (bt && bt->getTypeKind() == BuiltinType::Void)
                                         throw yy::parser::syntax_error(@2,
-                                          "optional primitive types are not supported yet ('"
-                                          + typeName($1) + "?')");
+                                          "optional type 'void?' is not supported");
                                       if (isa<OptionalType>($1))
                                         throw yy::parser::syntax_error(@2,
                                           "nested optional type '" + typeName($1)

@@ -61,15 +61,22 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanObjectNone,      reinterpret_cast<void *>(&PaykanObject_None)},
 
     {kPaykanIntNew,          reinterpret_cast<void *>(&PaykanInt_new)},
+    {kPaykanIntValue,        reinterpret_cast<void *>(&PaykanInt_value)},
     {kPaykanIntFromStr,      reinterpret_cast<void *>(&PaykanInt_from_str)},
     {kPaykanIntVtable,       reinterpret_cast<void *>(&PaykanInt_vtable)},
 
     {kPaykanFloatNew,        reinterpret_cast<void *>(&PaykanFloat_new)},
+    {kPaykanFloatValue,      reinterpret_cast<void *>(&PaykanFloat_value)},
     {kPaykanFloatFromStr,    reinterpret_cast<void *>(&PaykanFloat_from_str)},
     {kPaykanFloatVtable,     reinterpret_cast<void *>(&PaykanFloat_vtable)},
 
     {kPaykanBoolNew,         reinterpret_cast<void *>(&PaykanBool_new)},
+    {kPaykanBoolValue,       reinterpret_cast<void *>(&PaykanBool_value)},
     {kPaykanBoolVtable,      reinterpret_cast<void *>(&PaykanBool_vtable)},
+
+    {kPaykanCharNew,         reinterpret_cast<void *>(&PaykanChar_new)},
+    {kPaykanCharValue,       reinterpret_cast<void *>(&PaykanChar_value)},
+    {kPaykanCharVtable,      reinterpret_cast<void *>(&PaykanChar_vtable)},
 
     {kPaykanStringNew,       reinterpret_cast<void *>(&PaykanString_new)},
     {kPaykanStringFromInt,   reinterpret_cast<void *>(&PaykanString_from_int)},
@@ -151,6 +158,7 @@ const VTableAlias kVTableAliases[] = {
     {kIntBox,   reinterpret_cast<void *>(&PaykanInt_vtable)},
     {kFloatBox, reinterpret_cast<void *>(&PaykanFloat_vtable)},
     {kBoolBox,  reinterpret_cast<void *>(&PaykanBool_vtable)},
+    {kCharBox,  reinterpret_cast<void *>(&PaykanChar_vtable)},
     {kTuple,    reinterpret_cast<void *>(&PaykanTuple_vtable)},
 };
 // clang-format on

@@ -11,7 +11,7 @@ ASTContext::ASTContext()
     : IntTy(nullptr), FloatTy(nullptr), BoolTy(nullptr), CharTy(nullptr),
       VoidTy(nullptr), ObjTy(nullptr), StrTy(nullptr), ArrayTy(nullptr),
       FileTy(nullptr), ErrorTy(nullptr), IntBoxTy(nullptr), FloatBoxTy(nullptr),
-      BoolBoxTy(nullptr), TupleTy(nullptr) {
+      BoolBoxTy(nullptr), CharBoxTy(nullptr), TupleTy(nullptr) {
   // Reserve enough capacity to avoid repeated reallocations during parsing.
   // The bootstrap phase alone creates ~150 nodes; a typical program adds
   // a few hundred more.  512 slots eliminates most reallocation churn.
@@ -33,13 +33,15 @@ ASTContext::ASTContext()
       make<ClassType>(SourceLocation(), intern(names::kFloatBox), nullptr);
   BoolBoxTy =
       make<ClassType>(SourceLocation(), intern(names::kBoolBox), nullptr);
+  CharBoxTy =
+      make<ClassType>(SourceLocation(), intern(names::kCharBox), nullptr);
   TupleTy = make<ClassType>(SourceLocation(), intern(names::kTuple), nullptr);
   // These are the compiler builtins: Sema rejects any user class, enum, or
   // function that would reuse one of their names, and CodeGen dispatches
   // their methods to the C runtime.  Flagging them here, at the single
   // registration site, keeps that knowledge out of both.
   for (ClassType *builtin : {ObjTy, StrTy, ArrayTy, FileTy, ErrorTy, IntBoxTy,
-                             FloatBoxTy, BoolBoxTy, TupleTy})
+                             FloatBoxTy, BoolBoxTy, CharBoxTy, TupleTy})
     builtin->setBuiltin();
   buildObjectType();
   buildStringType();
@@ -50,6 +52,7 @@ ASTContext::ASTContext()
   buildBoxedIntType();
   buildBoxedFloatType();
   buildBoxedBoolType();
+  buildBoxedCharType();
 }
 
 // -- Bootstrap Obj ----------------------------------------------------------
@@ -185,12 +188,12 @@ void ASTContext::buildErrorType() {
       .build();
 }
 
-// -- Bootstrap Int / Float / Bool (boxed primitives) -------------------------
+// -- Bootstrap Int / Float / Bool / Char (boxed primitives) ------------------
 //
-// These class types mirror the C runtime's PaykanInt / PaykanFloat / PaykanBool
-// structs.  They inherit Obj and override only the three base vtable slots
-// (destroy / toString / equals).  Marked final so no user class may extend
-// them.
+// These class types mirror the C runtime's PaykanInt / PaykanFloat /
+// PaykanBool / PaykanChar structs (also the boxes of `int?` & co.).  They
+// inherit Obj and override only the three base vtable slots (destroy,
+// toString, equals).  Marked final so no user class may extend them.
 
 void ASTContext::buildBoxedIntType() {
   IntBoxTy->setSuperClass(ObjTy);
@@ -220,6 +223,18 @@ void ASTContext::buildBoxedBoolType() {
   BoolBoxTy->setSuperClass(ObjTy);
   BoolBoxTy->setFinal();
   ClassTypeBuilder(*this, BoolBoxTy)
+      .addOp(BinaryOpcode::Eq)
+      .addOp(BinaryOpcode::Ne)
+      .method(names::kMethodDestroy, VoidTy)
+      .method(names::kMethodToString, StrTy)
+      .method(names::kMethodEquals, BoolTy, {ObjTy})
+      .build();
+}
+
+void ASTContext::buildBoxedCharType() {
+  CharBoxTy->setSuperClass(ObjTy);
+  CharBoxTy->setFinal();
+  ClassTypeBuilder(*this, CharBoxTy)
       .addOp(BinaryOpcode::Eq)
       .addOp(BinaryOpcode::Ne)
       .method(names::kMethodDestroy, VoidTy)

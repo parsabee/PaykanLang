@@ -293,6 +293,17 @@ private:
   // ----------------------------------------------------------------------------
 
   static bool isNoneForOptional(ast::Expr *expr);
+  /// True when Sema marked @p expr (a primitive) for boxing into the
+  /// optional primitive slot it flows into (`int` -> `int?`).
+  static bool isPrimitiveBoxing(const ast::Expr *expr);
+  /// Box the primitive value @p v as the present value of @p optTy (`int?`,
+  /// `float?`, `bool?`, `char?`): a fresh +1 box of the runtime's Int /
+  /// Float / Bool / Char object.
+  Val emitPrimitiveBox(const Val &v, ast::Type *optTy);
+  /// The primitive value held by the boxed Int / Float / Bool / Char object
+  /// @p rawObj (a present `int?` & co.), as a value of type @p innerTy.
+  Val emitPrimitiveUnbox(const Val &rawObj, ast::Type *innerTy,
+                         const std::string &name);
   Val emitOptionalToObj(ast::Expr *expr, const Val &box);
   Val emitOptionalToObjRaw(ast::Expr *expr, const Val &raw);
   Val emitOptionalEquality(ast::BinaryExpr *node);
@@ -333,6 +344,12 @@ private:
   public:
     ModuleLowering &L;
     explicit ExprEmitter(ModuleLowering &l) : L(l) {}
+
+    /// Every expression is emitted through here (it hides the visitor's own
+    /// dispatch), so a primitive that Sema marked for boxing comes out as
+    /// the +1 box its optional primitive slot expects, whichever site
+    /// consumes it.
+    Val visit(ast::Expr *node);
 
     Val emitIdentityCtor(ast::CallExpr *node);
     Val emitBuiltinCall(ast::CallExpr *node);

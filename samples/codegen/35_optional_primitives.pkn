@@ -1,0 +1,156 @@
+// 35 — optional primitives: `int?`, `float?`, `bool?` and `char?` (#66)
+// Exercises: a primitive widening to its optional (`int` -> `int?`, and
+//            `int` -> `float?` after promotion), `None`, `match` with a
+//            primitive arm (the binding is a plain value), `== None` and
+//            equality of two optionals, optional primitive parameters,
+//            returns, fields (implicitly None), array elements and tuple
+//            elements, a ternary producing an `int?`, a generic `T?` with
+//            T = int, and printing an optional through `Obj`.
+//
+// A present value is boxed in the runtime's Int / Float / Bool / Char object
+// (NULL meaning None), so everything is released by the ordinary ARC rules
+// (run with --track-heap to see zero live blocks).
+//
+// expect-stdout: parse 12 -> 12
+// expect-stdout: parse 4x -> None
+// expect-stdout: parse  -> None
+// expect-stdout: mean -> 2.5
+// expect-stdout: mean of nothing -> None
+// expect-stdout: first vowel of 'rhythm' -> None
+// expect-stdout: first vowel of 'paykan' -> a
+// expect-stdout: answered: True
+// expect-stdout: unanswered: None
+// expect-stdout: equal: True
+// expect-stdout: equal to None: False
+// expect-stdout: sparse: 1 None 3
+// expect-stdout: lookup: 1 found
+// expect-stdout: cache: None then 49
+// expect-stdout: even? 4
+// expect-stdout: even? None
+
+// ---- int? as a fallible result ---------------------------------------------
+
+fn digit(c: char) -> int? {
+  if (c < '0' || c > '9') { return None; }
+  return digitValue(c);
+}
+
+fn digitValue(c: char) -> int {
+  digits: Str = "0123456789";
+  i = 0;
+  while (i < 10) {
+    if (digits[i] == c) { return i; }
+    i = i + 1;
+  }
+  return 0;
+}
+
+fn parse(s: Str) -> int? {
+  if (s.len() == 0) { return None; }
+  value = 0;
+  i = 0;
+  while (i < s.len()) {
+    match digit(s[i]) {
+      d: int { value = value * 10 + d; }
+      None   { return None; }
+    }
+    i = i + 1;
+  }
+  return value;
+}
+
+fn show(o: int?) -> Str {
+  match o {
+    n: int { return StrInt(n); }
+    None   { return "None"; }
+  }
+}
+
+// ---- float?, char?, bool? --------------------------------------------------
+
+fn mean(xs: int[]) -> float? {
+  if (xs.len() == 0) { return None; }
+  sum = 0;
+  i = 0;
+  while (i < xs.len()) { sum = sum + xs[i]; i = i + 1; }
+  return sum / (xs.len() * 1.0);
+}
+
+fn firstVowel(s: Str) -> char? {
+  i = 0;
+  while (i < s.len()) {
+    c = s[i];
+    if (c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u') { return c; }
+    i = i + 1;
+  }
+  return None;
+}
+
+class Question {
+  text: Str;
+  answer: bool?;               // implicitly None
+  fn __init__(t: Str) { self.text = t; }
+}
+
+// ---- generics: T? with T = int ---------------------------------------------
+
+class Cache<T> {
+  slot: T?;
+  fn __init__() { }
+  fn get() -> T? { return self.slot; }
+  fn put(v: T) { self.slot = v; }
+}
+
+fn square(n: int) -> int { return n * n; }
+
+fn main() -> int {
+  println("parse 12 -> " + show(parse("12")));
+  println("parse 4x -> " + show(parse("4x")));
+  println("parse  -> " + show(parse("")));
+
+  m = mean([1, 2, 3, 4]);
+  match m { f: float { println("mean -> " + StrFloat(f)); } None { } }
+  empty: int[] = [];
+  print("mean of nothing -> ");
+  println(mean(empty));
+
+  print("first vowel of 'rhythm' -> ");
+  println(firstVowel("rhythm"));
+  print("first vowel of 'paykan' -> ");
+  println(firstVowel("paykan"));
+
+  q = Question("ready?");
+  q.answer = True;
+  print("answered: ");
+  println(q.answer);
+  q2 = Question("later?");
+  print("unanswered: ");
+  println(q2.answer);
+
+  a: int? = 7;
+  b: int? = parse("7");
+  println("equal: " + StrBool(a == b));
+  println("equal to None: " + StrBool(a == None));
+
+  sparse: int?[] = [1, 2, 3];
+  sparse[1] = None;
+  print("sparse: ");
+  print(sparse[0]); print(" "); print(sparse[1]); print(" "); println(sparse[2]);
+
+  p: (int?, Str) = (1, "found");
+  match p.0 { i: int { println("lookup: " + StrInt(i) + " " + p.1); } None { } }
+
+  c = Cache<int>();
+  before = show(c.get());
+  c.put(square(7));
+  println("cache: " + before + " then " + show(c.get()));
+
+  n = 4;
+  while (n < 6) {
+    e = if n % 2 == 0 then n else None;
+    print("even? ");
+    println(e);
+    n = n + 1;
+  }
+  return 0;
+}

@@ -31,7 +31,7 @@ The category of a type decides how it is stored and whether ARC applies.
 | Category | Types | Storage | On assignment / passing |
 |----------|-------|---------|--------------------------|
 | **Value** | `int`, `float`, `bool`, `char`, `enum` | Stack / register | Copied bit-for-bit; independent thereafter |
-| **Reference** | class instances, `Str`, arrays, tuples, `File`, `Error`, boxed `Int`/`Float` | Heap | Reference shared; count adjusted |
+| **Reference** | class instances, `Str`, arrays, tuples, `File`, `Error`, boxed `Int`/`Float`/`Bool`/`Char`, optionals `T?` (incl. `int?`) | Heap | Reference shared; count adjusted |
 
 A value type has no identity beyond its bits: assigning one `int` to another produces two
 independent values. A reference type has identity: assigning one variable to another makes both
@@ -285,6 +285,11 @@ means an optional costs nothing extra: retaining, releasing, moving or destroyin
 value and allocates nothing, and `x == None` is a plain null test. When a `T?` is handed to an
 `Obj` slot (for example `println(maybe)`), the compiler substitutes the `None` singleton for an
 absent value so that an `Obj` always refers to an object.
+
+An optional primitive (`int?`, `float?`, `bool?`, `char?`) follows the same rules. Its present
+value is boxed when it is stored: each `int` that widens to an `int?` allocates one `Int` object
+and its box. Copying an `int?` to another `int?` shares that box. A `match` arm binding the
+`int` copies the value out and owns nothing.
 
 ---
 

@@ -1,0 +1,75 @@
+// Isolates: the boxes of optional primitives (`int?`, `float?`, `bool?`,
+// `char?`, #66).  Every present value is a fresh Int / Float / Bool / Char
+// object in a PaykanShared box: boxing into a local, a parameter, a return
+// value, a field, an array slot and a tuple element; rebinding between a
+// value and None; a box shared by two variables; `mov`; a `match` on a call
+// result (the subject box is released at the end of the match) whose arm
+// binding owns nothing; a `T?` with T = int inside a generic class; and an
+// optional primitive passed into an `Obj` slot.
+//
+// Runtime allocation sites: PaykanInt_new / PaykanFloat_new / PaykanBool_new
+// / PaykanChar_new (Basic.c) + PaykanShared_new (Shared.c), the class
+// instances, the array, the tuple and the strings.
+//
+// Expected under --track-heap: live blocks : 0.
+// expect-stdout: 6
+// expect-stdout: None
+// expect-stdout: 3
+// expect-stdout: x
+// expect-stdout: 2
+
+class Holder {
+  n: int?;
+  f: float?;
+  fn __init__() { }
+}
+
+class Slot<T> {
+  v: T?;
+  fn __init__() { }
+  fn set(x: T) { self.v = x; }
+}
+
+fn twice(o: int?) -> int? {
+  match o {
+    n: int { return n * 2; }
+    None   { return None; }
+  }
+}
+
+fn main() -> int {
+  a: int? = 3;
+  println(twice(a));
+  a = None;
+  println(twice(a));
+  a = 3;
+  b = a;                       // shared box
+  a = None;
+  println(b);
+
+  h = Holder();
+  h.n = 1;
+  h.n = 2;
+  h.f = 0.5;
+  h.f = None;
+
+  xs: int?[] = [1, 2];
+  xs.push(None);
+  xs[0] = 5;
+  xs.pop();
+
+  t: (int?, bool?) = (4, True);
+  c: char? = 'x';
+  o: Obj = c;
+  println(o);
+
+  s = Slot<int>();
+  s.set(1);
+  s.set(2);
+  println(s.v);
+
+  m = mov b;
+  i = 0;
+  while (i < 3) { m = i; i = i + 1; }
+  return 0;
+}

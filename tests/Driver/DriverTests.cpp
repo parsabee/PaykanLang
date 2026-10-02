@@ -313,12 +313,19 @@ TEST(Driver, DumpAstShowsOptionalType) {
   EXPECT_NE(out.find("OptionalType"), std::string::npos) << out;
 }
 
-TEST(Driver, OptionalPrimitiveIsRejectedAtParse) {
+TEST(Driver, OptionalPrimitiveIsAccepted) {
   auto src = writeTmp("fn main() -> int { x: int? = None; return 0; }");
   auto [rc, out] = run(std::string(kPaykan) + " --check-only " + src + " 2>&1");
   std::filesystem::remove(src);
+  EXPECT_EQ(rc, 0) << out;
+}
+
+TEST(Driver, OptionalVoidIsRejectedAtParse) {
+  auto src = writeTmp("fn f() -> void? { } fn main() -> int { return 0; }");
+  auto [rc, out] = run(std::string(kPaykan) + " --check-only " + src + " 2>&1");
+  std::filesystem::remove(src);
   EXPECT_NE(rc, 0);
-  EXPECT_NE(out.find("optional primitive types are not supported yet"),
+  EXPECT_NE(out.find("optional type 'void?' is not supported"),
             std::string::npos)
       << out;
 }

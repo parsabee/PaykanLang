@@ -545,7 +545,7 @@ TEST(Optional, OptionalEnumIsRejected) {
       return 0;
     }
   )",
-              "optional primitive types are not supported yet");
+              "optional enum types are not supported yet");
 }
 
 TEST(Optional, OptionalEnumFieldIsRejected) {
@@ -554,7 +554,7 @@ TEST(Optional, OptionalEnumFieldIsRejected) {
     class P { c: Color?; fn __init__() {} }
     fn main() -> int { return 0; }
   )",
-              "optional primitive types are not supported yet");
+              "optional enum types are not supported yet");
 }
 
 TEST(Optional, UnknownInnerTypeIsRejected) {

@@ -29,6 +29,7 @@ inline constexpr const char *kStdin = "Stdin";
 inline constexpr const char *kIntBox = "Int";
 inline constexpr const char *kFloatBox = "Float";
 inline constexpr const char *kBoolBox = "Bool";
+inline constexpr const char *kCharBox = "Char";
 
 // Built-in method names
 inline constexpr const char *kMethodInit = "__init__";
@@ -125,15 +126,21 @@ inline constexpr const char *kPaykanFileRead = "PaykanFile_read";
 inline constexpr const char *kPaykanFileVtable = "PaykanFile_vtable";
 inline constexpr const char *kPaykanFileStdin = "PaykanFile_Stdin";
 
-// Int / Float / Bool (boxed primitives)
+// Int / Float / Bool / Char (boxed primitives; the boxes of `int?` & co.)
 inline constexpr const char *kPaykanIntNew = "PaykanInt_new";
 inline constexpr const char *kPaykanFloatNew = "PaykanFloat_new";
 inline constexpr const char *kPaykanBoolNew = "PaykanBool_new";
+inline constexpr const char *kPaykanCharNew = "PaykanChar_new";
+inline constexpr const char *kPaykanIntValue = "PaykanInt_value";
+inline constexpr const char *kPaykanFloatValue = "PaykanFloat_value";
+inline constexpr const char *kPaykanBoolValue = "PaykanBool_value";
+inline constexpr const char *kPaykanCharValue = "PaykanChar_value";
 inline constexpr const char *kPaykanIntFromStr = "PaykanInt_from_str";
 inline constexpr const char *kPaykanFloatFromStr = "PaykanFloat_from_str";
 inline constexpr const char *kPaykanIntVtable = "PaykanInt_vtable";
 inline constexpr const char *kPaykanFloatVtable = "PaykanFloat_vtable";
 inline constexpr const char *kPaykanBoolVtable = "PaykanBool_vtable";
+inline constexpr const char *kPaykanCharVtable = "PaykanChar_vtable";
 
 // Error
 inline constexpr const char *kPaykanErrorNew = "PaykanError_new";
@@ -253,6 +260,15 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     // Boxed primitives (from Sema/CodeGen dispatch)
     kPaykanIntFromStr,
     kPaykanFloatFromStr,
+    // Boxes of the optional primitives (`int?` & co.)
+    kPaykanIntNew,
+    kPaykanFloatNew,
+    kPaykanBoolNew,
+    kPaykanCharNew,
+    kPaykanIntValue,
+    kPaykanFloatValue,
+    kPaykanBoolValue,
+    kPaykanCharValue,
     // Builtin methods inherited into user-class vtable slots
     kPaykanObjectDestroy,
     kPaykanObjectToString,
@@ -268,6 +284,10 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     // Runtime vtables referenced by `is` / match checks
     kPaykanArrayVtable,
     kPaykanArrayObjVtable,
+    kPaykanIntVtable,
+    kPaykanFloatVtable,
+    kPaykanBoolVtable,
+    kPaykanCharVtable,
 };
 
 // -- Tuple slot kinds (CodeGen <-> runtime ABI) ------------------------------

@@ -62,6 +62,10 @@ inline constexpr const char *kRtBoxPtr = "PaykanShared *";
 inline constexpr const char *kRtStrPtr = "PaykanString *";
 inline constexpr const char *kRtArrPtr = "PaykanArray *";
 inline constexpr const char *kRtTupPtr = "PaykanTuple *";
+inline constexpr const char *kRtIntPtr = "PaykanInt *";
+inline constexpr const char *kRtFloatPtr = "PaykanFloat *";
+inline constexpr const char *kRtBoolPtr = "PaykanBool *";
+inline constexpr const char *kRtCharPtr = "PaykanChar *";
 inline constexpr const char *kRtVTablePtr = "PaykanObjectVTable *";
 
 // The header fields of every Paykan object struct (PaykanObject's layout).

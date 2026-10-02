@@ -120,7 +120,7 @@ TEST(Recovery, LexicalErrorsDoNotStopTheParse) {
 
 TEST(Recovery, BindingMessagesSurvive) {
   auto r = parse("fn main() -> int {\n"
-                 "  a: int? = None;\n"
+                 "  a: void? = None;\n"
                  "  b: Str?? = None;\n"
                  "  c: Str = t.00;\n"
                  "  f(1) = 2;\n"
@@ -128,8 +128,7 @@ TEST(Recovery, BindingMessagesSurvive) {
                  "  return 0;\n"
                  "}\n");
   EXPECT_EQ(r.Errors, 5u);
-  EXPECT_NE(r.Text.find("optional primitive types are not supported yet "
-                        "('int?')"),
+  EXPECT_NE(r.Text.find("optional type 'void?' is not supported"),
             std::string::npos);
   EXPECT_NE(r.Text.find("nested optional type 'Str?"
                         "?' is not supported"),

@@ -1121,12 +1121,12 @@ Type *Parser::parseTypeAnnotation() {
       ty = Ctx.make<ArrayType>(span(start), ty);
     } else if (at(Tok::Question)) {
       Token q = consume();
-      // Only reference types may be optional; the builtin value types are
-      // known at parse time and rejected here (an enum spelled `Color?` is
-      // only known to Sema, which rejects it there).
-      if (isa<BuiltinType>(ty)) {
-        error(q.Loc, "optional primitive types are not supported yet ('" +
-                         typeName(ty) + "?')");
+      // `void` has no value to make optional; the other builtin value types
+      // (`int?`, ...) box through the runtime's boxed classes (an enum
+      // spelled `Color?` is only known to Sema, which rejects it there).
+      auto *bt = dyn_cast<BuiltinType>(ty);
+      if (bt && bt->getTypeKind() == BuiltinType::Void) {
+        error(q.Loc, "optional type 'void?' is not supported");
         return nullptr;
       }
       if (isa<OptionalType>(ty)) {
