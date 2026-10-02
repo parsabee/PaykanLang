@@ -17,6 +17,11 @@
 
 option(PAYKAN_COVERAGE "Build with LLVM source-based code coverage" OFF)
 
+# The coverage flags in effect, for code that compiles and links programs
+# against this build's (instrumented) runtime archive at run time -- the C
+# backend passes them to the C compiler (src/Backends/C).
+set(PAYKAN_COVERAGE_FLAGS "")
+
 if(PAYKAN_COVERAGE)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         message(FATAL_ERROR
@@ -27,4 +32,5 @@ if(PAYKAN_COVERAGE)
     message(STATUS "Coverage: LLVM source-based coverage enabled")
     add_compile_options(-fprofile-instr-generate -fcoverage-mapping -O0 -g)
     add_link_options(-fprofile-instr-generate -fcoverage-mapping)
+    set(PAYKAN_COVERAGE_FLAGS -fprofile-instr-generate -fcoverage-mapping)
 endif()

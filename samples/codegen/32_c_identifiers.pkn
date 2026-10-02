@@ -1,0 +1,209 @@
+// 32 — identifiers that are special in C: every backend must accept any
+// valid Paykan name.  The C backend once emitted user names unchanged, so these
+// collided with its own generated names (`x_1`, `a_<n>`), with C type names
+// (`int64_t`) and with C library macros and functions (`errno`, `stdout`,
+// `EOF`, `fmod`, `malloc`).
+// Exercises: locals, parameters, fields, methods, functions and classes named
+//            like C / libc identifiers or like the C backend's mangled names.
+
+// Library function names as Paykan functions.
+fn fmod(a: float, b: float) -> float { return 42.0; }
+fn malloc(n: int) -> int { return n + 1; }
+
+// Names that look like mangled / generated ones.
+fn f_5F(x: int) -> int { return x + 100; }
+fn f_(x: int) -> int { return x + 1; }
+
+class Box<T> { v: T; fn __init__(v: T) { self.v = v; } fn get() -> T { return self.v; } }
+class Box_3Cint_3E { w: Str; fn __init__() { self.w = "plain"; } fn get() -> Str { return self.w; } }
+
+// Fields named like C macros and like the object header's members.
+class P {
+  errno: int;
+  stdout: Str;
+  vtable: int;
+  shared: int;
+  fn __init__(e: int) { self.errno = e; self.stdout = "s"; self.vtable = 1; self.shared = 2; }
+  fn EOF() -> int { return self.errno + self.vtable + self.shared; }
+}
+fn P_vtable() -> int { return 9; }
+
+// User locals named like the backend's suffixed names.
+fn suffixes() -> int {
+  x: int = 1;
+  x_0: int = 2;
+  x_1: int = 3;
+  x_2: int = 4;
+  return x + x_0 + x_1 + x_2;
+}
+
+// Many locals `a_<n>` and many values derived from `a`.
+fn manyValues() -> int {
+  a: int = 1;
+  a_0: int = 0;
+  a_1: int = 1;
+  a_2: int = 2;
+  a_3: int = 3;
+  a_4: int = 4;
+  a_5: int = 5;
+  a_6: int = 6;
+  a_7: int = 7;
+  a_8: int = 8;
+  a_9: int = 9;
+  a_10: int = 10;
+  a_11: int = 11;
+  a_12: int = 12;
+  a_13: int = 13;
+  a_14: int = 14;
+  a_15: int = 15;
+  a_16: int = 16;
+  a_17: int = 17;
+  a_18: int = 18;
+  a_19: int = 19;
+  a_20: int = 20;
+  a_21: int = 21;
+  a_22: int = 22;
+  a_23: int = 23;
+  a_24: int = 24;
+  a_25: int = 25;
+  a_26: int = 26;
+  a_27: int = 27;
+  a_28: int = 28;
+  a_29: int = 29;
+  a_30: int = 30;
+  a_31: int = 31;
+  a_32: int = 32;
+  a_33: int = 33;
+  a_34: int = 34;
+  a_35: int = 35;
+  a_36: int = 36;
+  a_37: int = 37;
+  a_38: int = 38;
+  a_39: int = 39;
+  a_40: int = 40;
+  a_41: int = 41;
+  a_42: int = 42;
+  a_43: int = 43;
+  a_44: int = 44;
+  a_45: int = 45;
+  a_46: int = 46;
+  a_47: int = 47;
+  a_48: int = 48;
+  a_49: int = 49;
+  a_50: int = 50;
+  a_51: int = 51;
+  a_52: int = 52;
+  a_53: int = 53;
+  a_54: int = 54;
+  a_55: int = 55;
+  a_56: int = 56;
+  a_57: int = 57;
+  a_58: int = 58;
+  a_59: int = 59;
+  a_60: int = 60;
+  a_61: int = 61;
+  a_62: int = 62;
+  a_63: int = 63;
+  a_64: int = 64;
+  a_65: int = 65;
+  a_66: int = 66;
+  a_67: int = 67;
+  a_68: int = 68;
+  a_69: int = 69;
+  a_70: int = 70;
+  a_71: int = 71;
+  a_72: int = 72;
+  a_73: int = 73;
+  a_74: int = 74;
+  a_75: int = 75;
+  a_76: int = 76;
+  a_77: int = 77;
+  a_78: int = 78;
+  a_79: int = 79;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  a = a + 1;
+  return a + a_3 + a_79;
+}
+
+fn params(int64_t: int, errno: int, l_x: int, v1: int) -> int {
+  return int64_t * 1000 + errno * 100 + l_x * 10 + v1;
+}
+
+fn main() -> int {
+  // C library macros as locals.
+  errno: int = 3;
+  stdout: int = 4;
+  EOF: int = 5;
+  println(StrInt(errno + stdout + EOF));
+
+  // A local hiding a libc function used by float `%`.
+  x: float = 7.5;
+  fmod_: float = 2.0;
+  y: float = x % fmod_;
+  println(StrFloat(y));
+  println(StrFloat(fmod(x, fmod_)));
+  println(StrInt(malloc(1)));
+
+  // A C type name as a variable.
+  int64_t: int = 3;
+  b: int = int64_t + 1;
+  println(StrInt(b));
+
+  println(StrInt(suffixes()));
+  println(StrInt(manyValues()));
+  println(StrInt(params(1, 2, 3, 4)));
+
+  // Shadowing in a nested scope.
+  n: int = 1;
+  if (n == 1) {
+    n: int = 5;
+    println(StrInt(n));
+  }
+  println(StrInt(n));
+
+  bx: Box<int> = Box<int>(5);
+  plain: Box_3Cint_3E = Box_3Cint_3E();
+  println(StrInt(bx.get()) + plain.get() + StrInt(f_5F(1)) + StrInt(f_(1)));
+
+  p: P = P(3);
+  println(StrInt(p.EOF()) + p.stdout + StrInt(P_vtable()));
+  return 0;
+}
