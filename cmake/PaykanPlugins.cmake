@@ -12,6 +12,9 @@
 # Provides:
 #   PAYKAN_FRONTENDS          -- cache list of frontends to build
 #   PAYKAN_DEFAULT_FRONTEND   -- the frontend used when --frontend is absent
+#   PAYKAN_BACKENDS           -- cache list of backends to build
+#   PAYKAN_DEFAULT_BACKEND    -- the backend used when --backend is absent
+#   PAYKAN_NEEDS_LLVM         -- TRUE when a listed backend depends on LLVM
 #   paykan_add_plugin(<target>)
 #   paykan_link_plugins(<target>)
 # ----------------------------------------------------------------------------
@@ -40,6 +43,32 @@ if(NOT "recursive-descent" IN_LIST PAYKAN_FRONTENDS)
 endif()
 list(LENGTH PAYKAN_FRONTENDS PAYKAN_NUM_FRONTENDS)
 message(STATUS "Frontends: ${PAYKAN_FRONTENDS} (default: ${PAYKAN_DEFAULT_FRONTEND})")
+
+# -- Backends -----------------------------------------------------------------
+# `llvm` is the LLVM IR / ORC JIT backend; `mlir` is a reserved slot (see
+# src/Backends/MLIR).  Both depend on LLVM, which is fetched only when one of
+# them is listed.  An empty list builds a compiler with no backend (it can
+# still parse, check and dump the AST).
+set(PAYKAN_KNOWN_BACKENDS llvm mlir)
+set(PAYKAN_BACKENDS "llvm" CACHE STRING
+    "Semicolon-separated list of backends to build (available: ${PAYKAN_KNOWN_BACKENDS})")
+
+foreach(be IN LISTS PAYKAN_BACKENDS)
+    if(NOT be IN_LIST PAYKAN_KNOWN_BACKENDS)
+        message(FATAL_ERROR "Unknown backend '${be}' in PAYKAN_BACKENDS (available: ${PAYKAN_KNOWN_BACKENDS})")
+    endif()
+endforeach()
+
+# The default backend is the first one listed ("" when there is none).
+set(PAYKAN_DEFAULT_BACKEND "")
+if(PAYKAN_BACKENDS)
+    list(GET PAYKAN_BACKENDS 0 PAYKAN_DEFAULT_BACKEND)
+endif()
+set(PAYKAN_NEEDS_LLVM FALSE)
+if("llvm" IN_LIST PAYKAN_BACKENDS OR "mlir" IN_LIST PAYKAN_BACKENDS)
+    set(PAYKAN_NEEDS_LLVM TRUE)
+endif()
+message(STATUS "Backends: ${PAYKAN_BACKENDS} (default: ${PAYKAN_DEFAULT_BACKEND})")
 
 # -- Helpers ------------------------------------------------------------------
 define_property(GLOBAL PROPERTY PAYKAN_PLUGIN_TARGETS

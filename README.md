@@ -55,6 +55,13 @@ downloaded and built only when `bison` is listed. Both implement `docs/grammar.m
 produce identical ASTs: `scripts/diff_frontends.py` checks that over every sample, and
 `--dump-tokens` prints a frontend's token stream.
 
+The backend is pluggable too. `-DPAYKAN_BACKENDS=<list>` selects the backends to build
+(default: `llvm`, the LLVM IR / ORC JIT backend; `mlir` is a reserved slot); the first one
+listed is the default and `--backend=<name>` selects another (`--list-backends` prints
+them). LLVM is downloaded only when `llvm` or `mlir` is listed; an empty list builds a
+compiler that can parse, check and dump the AST (`--check-only`, `--dump-ast`) but not
+run programs. Every backend consumes the Paykan IR described in [`docs/pir.md`](docs/pir.md).
+
 The `paykan` binary is placed at `build/bin/paykan`. To install it to a prefix (the binary
 statically links the runtime, so it is self-contained for JIT execution):
 

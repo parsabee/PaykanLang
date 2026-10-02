@@ -19,14 +19,17 @@ struct Flag {
 
 // Boolean options, in the order --help lists them.
 constexpr Flag kFlags[] = {
+    {"check-only", &Options::CheckOnly,
+     "Run parsing and semantic analysis only (no codegen)"},
     {"dump-ast", &Options::DumpAST, "Print the AST in tree form"},
     {"dump-tokens", &Options::DumpTokens,
      "Print the token stream (frontends that support it)"},
+    {"emit-source", &Options::EmitSource,
+     "Write the backend's source output (C, LLVM IR, ...) to stdout"},
     {"list-frontends", &Options::ListFrontends,
      "List the available frontends and exit"},
-    {"check-only", &Options::CheckOnly,
-     "Run parsing and semantic analysis only (no codegen)"},
-    {"emit-llvm", &Options::EmitLLVM, "Emit LLVM IR to stdout"},
+    {"list-backends", &Options::ListBackends,
+     "List the available backends and exit"},
     {"track-heap", &Options::TrackHeap,
      "Track runtime heap allocations and dump statistics (incl. leaks) at "
      "exit"},
@@ -60,12 +63,34 @@ bool parseLevel(std::string_view text, unsigned &level) {
   return true;
 }
 
+/// `--<key>=<value>` or `--<key> <value>`.  Returns true when @p name is this
+/// option; @p value is then set, or @p error on a missing value.
+bool valueOption(std::string_view name, const char *key, int &i, int argc,
+                 const char *const *argv, std::string &value,
+                 std::string &error) {
+  std::string_view k(key);
+  if (name != k &&
+      !(name.size() > k.size() && name.starts_with(k) && name[k.size()] == '='))
+    return false;
+  std::string_view v = name.substr(k.size());
+  if (!v.empty())
+    v.remove_prefix(1); // '='
+  else if (i + 1 < argc)
+    v = argv[++i];
+  if (v.empty())
+    error = std::string("option '--") + key + "' requires a value";
+  value = std::string(v);
+  return true;
+}
+
 } // namespace
 
 ParseResult parseCommandLine(int argc, const char *const *argv) {
   ParseResult r;
   Options &o = r.Opts;
   bool optionsEnded = false;
+  bool sawCommand = false;
+  bool emitLLVM = false;
 
   for (int i = 1; i < argc; ++i) {
     std::string_view arg = argv[i];
@@ -82,6 +107,12 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
         optionsEnded = true;
         continue;
       }
+      if (!sawCommand && (arg == "run" || arg == "build")) {
+        o.Cmd = arg == "build" ? Command::Build : Command::Run;
+        sawCommand = true;
+        continue;
+      }
+      sawCommand = true;
       o.InputFilename = std::string(arg);
       continue;
     }
@@ -94,19 +125,16 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
       o.ShowVersion = true;
       continue;
     }
+    if (name == "emit-llvm") {
+      emitLLVM = true;
+      continue;
+    }
 
-    // --frontend=<name> and --frontend <name>.
-    if (name == "frontend" || name.starts_with("frontend=")) {
-      std::string_view value = name.substr(std::string_view("frontend").size());
-      if (!value.empty())
-        value.remove_prefix(1); // '='
-      else if (i + 1 < argc)
-        value = argv[++i];
-      if (value.empty()) {
-        r.Error = "option '--frontend' requires a value";
+    if (valueOption(name, "frontend", i, argc, argv, o.Frontend, r.Error) ||
+        valueOption(name, "backend", i, argc, argv, o.Backend, r.Error) ||
+        valueOption(name, "o", i, argc, argv, o.OutputPath, r.Error)) {
+      if (!r.Error.empty())
         return r;
-      }
-      o.Frontend = std::string(value);
       continue;
     }
 
@@ -144,22 +172,40 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
     }
   }
 
-  if (!o.ShowHelp && !o.ShowVersion && !o.ListFrontends &&
-      o.InputFilename.empty())
+  if (emitLLVM) {
+    if (!o.Backend.empty() && o.Backend != "llvm") {
+      r.Error =
+          "--emit-llvm needs the llvm backend, but --backend=" + o.Backend +
+          " was given";
+      return r;
+    }
+    o.Backend = "llvm";
+    o.EmitSource = true;
+  }
+  bool infoOnly =
+      o.ShowHelp || o.ShowVersion || o.ListFrontends || o.ListBackends;
+  if (!infoOnly && o.InputFilename.empty())
     r.Error = "no source file specified";
   return r;
 }
 
 void printUsage(std::ostream &os, const char *argv0) {
   os << "OVERVIEW: Paykan language compiler\n\n"
-     << "USAGE: " << argv0 << " [options] <source-file> [program arguments]\n\n"
+     << "USAGE: " << argv0
+     << " [options] [run] <source-file> [program arguments]\n"
+     << "       " << argv0 << " [options] build <source-file> -o <output>\n\n"
      << "OPTIONS:\n";
   for (const Flag &f : kFlags)
     os << "  --" << f.Name
        << std::string(16 - std::string_view(f.Name).size(), ' ') << "- "
        << f.Help << "\n";
-  os << "  --frontend=<name> - Parse with the named frontend "
+  os << "  --emit-llvm       - Emit LLVM IR to stdout (--backend=llvm "
+        "--emit-source)\n"
+     << "  --frontend=<name> - Parse with the named frontend "
         "(--list-frontends)\n"
+     << "  --backend=<name>  - Generate code with the named backend "
+        "(--list-backends)\n"
+     << "  -o <file>         - Output file of `build`\n"
      << "  -O<n>             - Optimization level (0-3)\n"
      << "  --version, -v     - Print the version and exit\n"
      << "  --help, -h        - Print this help and exit\n";
