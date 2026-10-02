@@ -96,11 +96,22 @@ def main() -> int:
             print(f"warning: {binary} missing, skipping", file=sys.stderr)
             continue
         raw = os.path.join(prof_dir, f"{name}.profraw")
+        log = os.path.join(prof_dir, f"{name}.log")
         env = dict(os.environ, LLVM_PROFILE_FILE=raw)
-        result = subprocess.run(
-            [binary], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
+        with open(log, "w") as fh:
+            result = subprocess.run(
+                [binary], env=env, stdout=fh, stderr=subprocess.STDOUT
+            )
         if result.returncode != 0:
+            # The test output is kept in the log; show the failures and the
+            # end of it so a CI failure can be diagnosed.
+            with open(log, errors="replace") as fh:
+                lines = fh.read().splitlines()
+            failed = [ln for ln in lines if ln.startswith("[  FAILED  ]")]
+            print(f"--- {name} output (failures, then last 80 lines; full log: {log})")
+            print("\n".join(failed))
+            print("...")
+            print("\n".join(lines[-80:]))
             sys.exit(f"error: {name} exited non-zero under coverage")
         raw_files.append(raw)
         objects += ["-object", binary]

@@ -50,6 +50,9 @@
 #ifndef PAYKAN_DEFAULT_CC
 #define PAYKAN_DEFAULT_CC ""
 #endif
+#ifndef PAYKAN_DEFAULT_CC_FLAGS
+#define PAYKAN_DEFAULT_CC_FLAGS ""
+#endif
 
 namespace paykan::backend_c {
 
@@ -174,9 +177,18 @@ bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
   if (tc.CC.empty()) {
     const char *cc = std::getenv("CC");
     // A coverage build names the compiler that built the runtime: its
-    // profile runtime matches the archive's instrumentation.
+    // profile runtime matches the archive's instrumentation.  It comes with
+    // the flags it needs to find the system headers and libraries (the
+    // macOS SDK for a clang that has no default one).
     const char *buildCC = PAYKAN_DEFAULT_CC;
-    tc.CC = (cc && cc[0]) ? cc : buildCC[0] ? buildCC : "cc";
+    if (cc && cc[0]) {
+      tc.CC = cc;
+    } else if (buildCC[0]) {
+      tc.CC = buildCC;
+      appendFlags(PAYKAN_DEFAULT_CC_FLAGS, tc.ExtraFlags);
+    } else {
+      tc.CC = "cc";
+    }
   }
   // The build tree's runtime archive is sanitizer- or coverage-instrumented
   // when the compiler was built that way: programs linked against it need

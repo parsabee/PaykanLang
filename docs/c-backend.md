@@ -17,7 +17,8 @@ run time, and it is the default backend of a build without the LLVM plugin.
 | `-O<n>` | passed to the C compiler as `-O<n>` |
 
 The C compiler is `$CC`, then `cc` (in a `PAYKAN_COVERAGE` build, the C
-compiler that built the runtime).  The runtime (`libpaykan_runtime.a` and
+compiler that built the runtime, with `-isysroot` of the build's SDK on
+macOS).  The runtime (`libpaykan_runtime.a` and
 `Runtime.h`) is found in this order: the build tree the compiler was built in,
 `$PAYKAN_RUNTIME_DIR/{lib,include/paykan}`, the install layout next to the
 executable (`../lib`, `../include/paykan`), and the install location
