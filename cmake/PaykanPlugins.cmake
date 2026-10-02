@@ -17,9 +17,11 @@
 # ----------------------------------------------------------------------------
 
 # -- Frontends ----------------------------------------------------------------
-set(PAYKAN_KNOWN_FRONTENDS bison)
-set(PAYKAN_FRONTENDS "bison" CACHE STRING
-    "Semicolon-separated list of frontends to build (available: ${PAYKAN_KNOWN_FRONTENDS})")
+# `recursive-descent` (standard C++ only) is always built; `bison` is optional and
+# brings the Bison/Flex build with it.
+set(PAYKAN_KNOWN_FRONTENDS recursive-descent bison)
+set(PAYKAN_FRONTENDS "recursive-descent;bison" CACHE STRING
+    "Semicolon-separated list of frontends to build (available: ${PAYKAN_KNOWN_FRONTENDS}); the first one is the default")
 
 if(NOT PAYKAN_FRONTENDS)
     message(FATAL_ERROR "PAYKAN_FRONTENDS must list at least one frontend (available: ${PAYKAN_KNOWN_FRONTENDS})")
@@ -32,6 +34,11 @@ endforeach()
 
 # The default frontend is the first one listed.
 list(GET PAYKAN_FRONTENDS 0 PAYKAN_DEFAULT_FRONTEND)
+# The core frontend is part of every build, whatever the list says.
+if(NOT "recursive-descent" IN_LIST PAYKAN_FRONTENDS)
+    list(APPEND PAYKAN_FRONTENDS recursive-descent)
+endif()
+list(LENGTH PAYKAN_FRONTENDS PAYKAN_NUM_FRONTENDS)
 message(STATUS "Frontends: ${PAYKAN_FRONTENDS} (default: ${PAYKAN_DEFAULT_FRONTEND})")
 
 # -- Helpers ------------------------------------------------------------------

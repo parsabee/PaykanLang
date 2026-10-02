@@ -62,7 +62,7 @@ static int runProjectInChild(const std::string &mainPath,
 // ============================================================================
 
 TEST(Module, ImportBasic) {
-  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_import_test";
+  auto tmpDir = paykan::test::tempDir() / "pkn_import_test";
   std::filesystem::remove_all(tmpDir);
   std::filesystem::create_directories(tmpDir);
 
@@ -83,7 +83,7 @@ fn main() -> int { return helper::add(10, 22); }
 }
 
 TEST(Module, ImportNested) {
-  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_import_nested";
+  auto tmpDir = paykan::test::tempDir() / "pkn_import_nested";
   std::filesystem::remove_all(tmpDir);
   std::filesystem::create_directories(tmpDir);
 
@@ -104,7 +104,7 @@ fn main() -> int { return arith::mul(6, 7); }
 }
 
 TEST(Module, ImportTransitive) {
-  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_import_trans";
+  auto tmpDir = paykan::test::tempDir() / "pkn_import_trans";
   std::filesystem::remove_all(tmpDir);
   std::filesystem::create_directories(tmpDir);
 
@@ -132,7 +132,7 @@ fn main() -> int { return mid::quadruple(5); }
 // A module function whose param type is a ClassType (Str) must be callable
 // across module boundaries with correct type remapping end-to-end.
 TEST(Module, ImportClassTypeRemap) {
-  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_cg_classremap";
+  auto tmpDir = paykan::test::tempDir() / "pkn_cg_classremap";
   std::filesystem::remove_all(tmpDir);
   std::filesystem::create_directories(tmpDir);
 
@@ -158,7 +158,7 @@ fn main() -> int {
 // An imported class used as a qualified type `mod::Type` in a function
 // parameter must compile and run end-to-end.
 TEST(Module, QualifiedTypeParamRuns) {
-  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_cg_qt_param";
+  auto tmpDir = paykan::test::tempDir() / "pkn_cg_qt_param";
   std::filesystem::remove_all(tmpDir);
   std::filesystem::create_directories(tmpDir);
 
@@ -186,7 +186,7 @@ fn main() -> int { p = point::Point(15, 27); return total(p); }
 // An imported class used as a qualified type `mod::Type` for a class field
 // must compile and run end-to-end.
 TEST(Module, QualifiedTypeFieldRuns) {
-  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_cg_qt_field";
+  auto tmpDir = paykan::test::tempDir() / "pkn_cg_qt_field";
   std::filesystem::remove_all(tmpDir);
   std::filesystem::create_directories(tmpDir);
 
@@ -218,7 +218,7 @@ fn main() -> int { b = Box(); return b.total(); }
 // End-to-end: an imported enum used as a qualified type, a variant, an argument
 // to an imported function, and an imported function's return value.
 TEST(Module, ImportEnum) {
-  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_import_enum";
+  auto tmpDir = paykan::test::tempDir() / "pkn_import_enum";
   std::filesystem::remove_all(tmpDir);
   std::filesystem::create_directories(tmpDir);
 
@@ -254,7 +254,7 @@ fn main() -> int {
 // imports `color`.  The shared `color` module must be code-generated exactly
 // once, or linking fails with "symbol multiply defined".
 TEST(Module, ImportDiamond) {
-  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_import_diamond";
+  auto tmpDir = paykan::test::tempDir() / "pkn_import_diamond";
   std::filesystem::remove_all(tmpDir);
   std::filesystem::create_directories(tmpDir);
 
@@ -287,7 +287,7 @@ fn main() -> int { return mid::bumped() + leaf::base(); }
 // stale mid.bc would read the wrong slots (and, without dependency tracking,
 // nothing in mid's own source or mtime changes).
 TEST(Module, CacheInvalidatesOnTransitiveLayoutChange) {
-  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_cache_trans";
+  auto tmpDir = paykan::test::tempDir() / "pkn_cache_trans";
   std::filesystem::remove_all(tmpDir);
   std::filesystem::create_directories(tmpDir);
 
@@ -346,9 +346,9 @@ fn make(a: int, b: int) -> Point { return Point(a, b); }
 // The cache lives under the project root (the main file's directory), not
 // under whatever directory the compiler happens to be launched from.
 TEST(Module, CacheLivesUnderProjectRoot) {
-  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_cache_root";
-  auto cwdA = std::filesystem::temp_directory_path() / "pkn_cache_cwd_a";
-  auto cwdB = std::filesystem::temp_directory_path() / "pkn_cache_cwd_b";
+  auto tmpDir = paykan::test::tempDir() / "pkn_cache_root";
+  auto cwdA = paykan::test::tempDir() / "pkn_cache_cwd_a";
+  auto cwdB = paykan::test::tempDir() / "pkn_cache_cwd_b";
   for (auto &d : {tmpDir, cwdA, cwdB}) {
     std::filesystem::remove_all(d);
     std::filesystem::create_directories(d);
@@ -384,7 +384,7 @@ fn main() -> int { return helper::add(10, 22); }
 // garbage case damages only the LEAF module while its importer's entry stays
 // valid, so the leaf has to be regenerated from underneath a cache hit.
 TEST(Module, CorruptCacheEntryIsRegenerated) {
-  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_cache_corrupt";
+  auto tmpDir = paykan::test::tempDir() / "pkn_cache_corrupt";
   std::filesystem::remove_all(tmpDir);
   std::filesystem::create_directories(tmpDir);
 
@@ -443,7 +443,7 @@ fn main() -> int { return mid::quadruple(5); }
 // `mid` imports it as `leaf`, `main` imports it aliased as `lf`.  Both
 // qualifier aliases must resolve against the single generated module.
 TEST(Module, ImportDiamondDifferentQualifier) {
-  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_import_diamond_q";
+  auto tmpDir = paykan::test::tempDir() / "pkn_import_diamond_q";
   std::filesystem::remove_all(tmpDir);
   std::filesystem::create_directories(tmpDir);
 

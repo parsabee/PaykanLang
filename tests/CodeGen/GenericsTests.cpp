@@ -320,7 +320,7 @@ TEST(Generics, GenericWithConcreteSuperclassVirtualDispatch) {
 // An exported instantiation crosses the module boundary as a concrete class.
 TEST(Generics, ExportedInstantiationAcrossModules) {
   LeakGuard g;
-  auto dir = std::filesystem::temp_directory_path() / "pkn_cg_generics_exp";
+  auto dir = paykan::test::tempDir() / "pkn_cg_generics_exp";
   std::filesystem::remove_all(dir);
   std::filesystem::create_directories(dir / "lib");
   {
@@ -418,7 +418,7 @@ TEST(GenericsTypes, OptionalFieldsAndUnwrapInTemplates) {
 
 TEST(GenericsTypes, ExportedInstantiationNamesWithCommasAndArrays) {
   LeakGuard g;
-  auto dir = std::filesystem::temp_directory_path() / "pkn_cg_generics_names";
+  auto dir = paykan::test::tempDir() / "pkn_cg_generics_names";
   std::filesystem::remove_all(dir);
   std::filesystem::create_directories(dir);
   {

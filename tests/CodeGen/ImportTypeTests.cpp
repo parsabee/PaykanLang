@@ -25,7 +25,7 @@ static std::string writeTempFile(const std::string &dir,
 // same module: the call site must see the real return type (it used to come
 // back as `void` whenever the classes were rebuilt in the wrong order).
 TEST(Module, MethodReturnsModuleLocalClass) {
-  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_cg_method_ret";
+  auto tmpDir = paykan::test::tempDir() / "pkn_cg_method_ret";
   std::filesystem::remove_all(tmpDir);
   std::filesystem::create_directories(tmpDir);
 
@@ -52,7 +52,7 @@ fn main() -> int { b: lib::B = lib::B(); a: lib::A = b.make(); return a.v; }
 // parameters crash at runtime even in a single file — a separate, pre-existing
 // CodeGen ABI bug, not an import issue.)
 TEST(Module, MethodSignaturesWithEnumAndArrayOfLocalClass) {
-  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_cg_method_sig";
+  auto tmpDir = paykan::test::tempDir() / "pkn_cg_method_sig";
   std::filesystem::remove_all(tmpDir);
   std::filesystem::create_directories(tmpDir);
 
@@ -95,7 +95,7 @@ fn main() -> int {
 // class.  The value flows through (and its methods dispatch correctly) even
 // though main never imports `leaf`.
 TEST(Module, TransitiveClassFlowsThroughSignature) {
-  auto tmpDir = std::filesystem::temp_directory_path() / "pkn_cg_trans_class";
+  auto tmpDir = paykan::test::tempDir() / "pkn_cg_trans_class";
   std::filesystem::remove_all(tmpDir);
   std::filesystem::create_directories(tmpDir);
 

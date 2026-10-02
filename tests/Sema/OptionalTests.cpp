@@ -580,13 +580,14 @@ struct SemaFileResult {
 
 static SemaFileResult semaCheckFile(const std::string &filePath,
                                     const std::string &projectRoot) {
-  paykan::parser::ParserDriver drv;
+  paykan::parser::ParserDriver drv(paykan::test::testFrontend());
   if (drv.parseFile(filePath) != 0)
     return {false, "parse error"};
   std::ostringstream os;
   paykan::sema::DiagEngine diagEngine(os);
   diagEngine.setSourceInfo(drv.getCurrentFile(), &drv.getSourceLines());
-  paykan::sema::Sema sema(drv.getASTContext(), diagEngine, projectRoot);
+  paykan::sema::Sema sema(drv.getASTContext(), diagEngine, projectRoot,
+                          drv.getFrontendName());
   bool ok = sema.run(drv.getRoot()).Ok;
   return {ok, os.str()};
 }
@@ -604,7 +605,7 @@ static const char *const kListModule =
     "fn maybeArr(xs: int[]?) -> int[]? { return xs; }\n";
 
 TEST(OptionalModule, ExportedOptionalSignaturesRoundTrip) {
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_opt_mod").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_opt_mod").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "list.pkn", kListModule);
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -636,7 +637,7 @@ fn main() -> int {
 TEST(OptionalModule, ExportedOptionalReturnIsStillOptional) {
   // The imported return type must be `Node?` (not degraded to Node/Obj):
   // narrowing it without a match is the optional-unwrap error.
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_opt_mod2").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_opt_mod2").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "list.pkn", kListModule);
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -656,7 +657,7 @@ fn main() -> int {
 }
 
 TEST(OptionalModule, ExportedOptionalFieldIsStillOptional) {
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_opt_mod3").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_opt_mod3").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "list.pkn", kListModule);
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -734,8 +735,7 @@ TEST(OptionalTuple, OptionalTupleTypeRejected) {
 TEST(OptionalTupleModule, TupleAndOptionalSignaturesRoundTrip) {
   // Serialised spellings mix tuple parentheses with `?` and `[]` suffixes:
   // "(Node?, int)[]?", "(Node?, Str?)[]", "(Node?, int)".
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_opt_tuple_mod").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_opt_tuple_mod").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "lib.pkn",
             "class Node { v: int; fn __init__(x: int) { self.v = x; } }\n"

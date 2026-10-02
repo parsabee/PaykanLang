@@ -26,13 +26,14 @@ struct SemaFileResult {
 
 static SemaFileResult semaCheckFile(const std::string &filePath,
                                     const std::string &projectRoot) {
-  paykan::parser::ParserDriver drv;
+  paykan::parser::ParserDriver drv(paykan::test::testFrontend());
   if (drv.parseFile(filePath) != 0)
     return {false, "parse error"};
   std::ostringstream os;
   paykan::sema::DiagEngine diagEngine(os);
   diagEngine.setSourceInfo(drv.getCurrentFile(), &drv.getSourceLines());
-  paykan::sema::Sema sema(drv.getASTContext(), diagEngine, projectRoot);
+  paykan::sema::Sema sema(drv.getASTContext(), diagEngine, projectRoot,
+                          drv.getFrontendName());
   bool ok = sema.run(drv.getRoot()).Ok;
   return {ok, os.str()};
 }
@@ -40,7 +41,7 @@ static SemaFileResult semaCheckFile(const std::string &filePath,
 // ─── OK: import mod; ────────────────────────────────────────────────────────
 
 TEST(Module, BareImportOk) {
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_bare").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_bare").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "math.pkn",
             "fn add(a: int, b: int) -> int { return a + b; }\n");
@@ -56,8 +57,7 @@ fn main() -> int { return math::add(1, 2); }
 // ─── OK: import path::mod; — short + full qualifier both valid ───────────────
 
 TEST(Module, NestedShortQualifierOk) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_nshort").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_nshort").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "math/arith.pkn",
             "fn mul(a: int, b: int) -> int { return a * b; }\n");
@@ -71,7 +71,7 @@ fn main() -> int { return arith::mul(3, 4); }
 }
 
 TEST(Module, NestedFullQualifierOk) {
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_nfull").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_nfull").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "math/arith.pkn",
             "fn mul(a: int, b: int) -> int { return a * b; }\n");
@@ -87,7 +87,7 @@ fn main() -> int { return math::arith::mul(3, 4); }
 // ─── OK: import path::mod as alias; — alias + full path both valid ───────────
 
 TEST(Module, AliasQualifierOk) {
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_alias").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_alias").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "utils/strings.pkn",
             "fn upper(s: Str) -> int { return 0; }\n");
@@ -101,8 +101,7 @@ fn main() -> int { return str::upper("hi"); }
 }
 
 TEST(Module, AliasFullPathAlsoOk) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_alias_full").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_alias_full").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "utils/strings.pkn",
             "fn upper(s: Str) -> int { return 0; }\n");
@@ -118,7 +117,7 @@ fn main() -> int { return utils::strings::upper("hi"); }
 // ─── OK: import path::{a, b}; ────────────────────────────────────────────────
 
 TEST(Module, SelectiveOk) {
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_sel").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_sel").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "lib/foo.pkn", "fn val() -> int { return 1; }\n");
   writeFile(tmp, "lib/bar.pkn", "fn val() -> int { return 2; }\n");
@@ -134,8 +133,7 @@ fn main() -> int { return foo::val() + bar::val(); }
 // ─── OK: import path::{a as x, b as y}; ─────────────────────────────────────
 
 TEST(Module, SelectiveAliasOk) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_sel_alias").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_sel_alias").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "lib/foo.pkn", "fn val() -> int { return 10; }\n");
   writeFile(tmp, "lib/bar.pkn", "fn val() -> int { return 20; }\n");
@@ -151,8 +149,7 @@ fn main() -> int { return f::val() + b::val(); }
 // ─── OK: import path::{a, b as y}; (mixed) ───────────────────────────────────
 
 TEST(Module, SelectiveMixedAliasOk) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_sel_mix").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_sel_mix").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "lib/foo.pkn", "fn val() -> int { return 5; }\n");
   writeFile(tmp, "lib/bar.pkn", "fn val() -> int { return 7; }\n");
@@ -168,7 +165,7 @@ fn main() -> int { return foo::val() + b::val(); }
 // ─── OK: class inheritance — short, full, alias qualifier ────────────────────
 
 TEST(Module, ClassInheritShortQualOk) {
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_inh_s").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_inh_s").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "shapes/base.pkn",
             "class Shape { fn area() -> int { return 0; } }\n");
@@ -183,7 +180,7 @@ fn main() -> int { return 0; }
 }
 
 TEST(Module, ClassInheritFullQualOk) {
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_inh_f").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_inh_f").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "shapes/base.pkn",
             "class Shape { fn area() -> int { return 0; } }\n");
@@ -198,7 +195,7 @@ fn main() -> int { return 0; }
 }
 
 TEST(Module, ClassInheritAliasOk) {
-  auto tmp = (std::filesystem::temp_directory_path() / "pkn_ms_inh_a").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_inh_a").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "shapes/base.pkn",
             "class Shape { fn area() -> int { return 0; } }\n");
@@ -215,18 +212,19 @@ fn main() -> int { return 0; }
 // ─── OK: circular import detection ──────────────────────────────────────────
 
 TEST(Module, CircularImportErr) {
-  auto tmp = std::filesystem::temp_directory_path() / "pkn_ms_circ";
+  auto tmp = paykan::test::tempDir() / "pkn_ms_circ";
   std::filesystem::remove_all(tmp);
   std::filesystem::create_directories(tmp);
   std::ofstream(tmp / "a.pkn") << "import b;\nfn fa() -> int { return 1; }\n";
   std::ofstream(tmp / "b.pkn") << "import a;\nfn fb() -> int { return 2; }\n";
 
-  paykan::parser::ParserDriver drv;
+  paykan::parser::ParserDriver drv(paykan::test::testFrontend());
   ASSERT_EQ(drv.parseFile((tmp / "a.pkn").string()), 0);
   std::ostringstream os;
   paykan::sema::DiagEngine diagEngine(os);
   diagEngine.setSourceInfo(drv.getCurrentFile(), &drv.getSourceLines());
-  paykan::sema::Sema sema(drv.getASTContext(), diagEngine, tmp.string());
+  paykan::sema::Sema sema(drv.getASTContext(), diagEngine, tmp.string(),
+                          drv.getFrontendName());
   EXPECT_FALSE(sema.run(drv.getRoot()).Ok);
   EXPECT_NE(os.str().find("circular"), std::string::npos);
   std::filesystem::remove_all(tmp);
@@ -235,7 +233,7 @@ TEST(Module, CircularImportErr) {
 // ─── OK: ClassType remapping across import ───────────────────────────────────
 
 TEST(Module, ClassTypeRemapOk) {
-  auto tmp = std::filesystem::temp_directory_path() / "pkn_ms_classremap";
+  auto tmp = paykan::test::tempDir() / "pkn_ms_classremap";
   std::filesystem::remove_all(tmp);
   std::filesystem::create_directories(tmp);
   std::ofstream(tmp / "strmod.pkn") << "fn wrap(s: Str) -> int { return 0; }\n";
@@ -252,7 +250,7 @@ fn main() -> int { s: Str = "hi"; return strmod::wrap(s); }
 // ─── OK: same module imported twice -> same ClassType pointer ────────────────
 
 TEST(Module, ClassTypeIdentityOk) {
-  auto tmp = std::filesystem::temp_directory_path() / "pkn_ms_classid";
+  auto tmp = paykan::test::tempDir() / "pkn_ms_classid";
   std::filesystem::remove_all(tmp);
   std::filesystem::create_directories(tmp);
   std::ofstream(tmp / "strutil.pkn") << "fn id(s: Str) -> int { return 0; }\n";
@@ -274,8 +272,7 @@ fn main() -> int { s: Str = "hello"; modA::useA(s); modB::useB(s); return 0; }
 // ─── ERR cases ──────────────────────────────────────────────────────────────
 
 TEST(Module, ModuleNotFoundErr) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_notfound").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_notfound").string();
   std::filesystem::remove_all(tmp);
   auto main =
       writeFile(tmp, "main.pkn",
@@ -287,8 +284,7 @@ TEST(Module, ModuleNotFoundErr) {
 }
 
 TEST(Module, WrongQualifierErr) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_wrongq").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_wrongq").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "math/arith.pkn",
             "fn add(a: int, b: int) -> int { return a + b; }\n");
@@ -302,8 +298,7 @@ fn main() -> int { return arith::add(1, 2); }
 }
 
 TEST(Module, UndeclaredFnErr) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_undefn").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_undefn").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "math.pkn",
             "fn add(a: int, b: int) -> int { return a + b; }\n");
@@ -317,8 +312,7 @@ fn main() -> int { return math::multiply(2, 3); }
 }
 
 TEST(Module, WrongArgTypeErr) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_wrongarg").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_wrongarg").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "math.pkn",
             "fn add(a: int, b: int) -> int { return a + b; }\n");
@@ -332,8 +326,7 @@ fn main() -> int { return math::add(1.0, 2); }
 }
 
 TEST(Module, ClassInheritBadQualifierErr) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_inh_badq").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_inh_badq").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "shapes/base.pkn", "class Shape {}\n");
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -347,8 +340,7 @@ fn main() -> int { return 0; }
 }
 
 TEST(Module, SelectiveMissingErr) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_sel_miss").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_sel_miss").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "lib/foo.pkn", "fn val() -> int { return 1; }\n");
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -371,8 +363,7 @@ static const char *const kPointModule =
     "}\n";
 
 TEST(Module, QualifiedTypeParamOk) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_qt_param").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_qt_param").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "geometry/point.pkn", kPointModule);
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -386,8 +377,7 @@ fn main() -> int { p = point::Point(3, 4); return show(p); }
 }
 
 TEST(Module, QualifiedTypeVarDeclOk) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_qt_var").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_qt_var").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "geometry/point.pkn", kPointModule);
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -400,8 +390,7 @@ fn main() -> int { p: point::Point = point::Point(3, 4); return p.getX(); }
 }
 
 TEST(Module, QualifiedTypeReturnOk) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_qt_ret").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_qt_ret").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "geometry/point.pkn", kPointModule);
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -415,8 +404,7 @@ fn main() -> int { p = make(); return p.getX(); }
 }
 
 TEST(Module, QualifiedTypeFieldOk) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_qt_field").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_qt_field").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "geometry/point.pkn", kPointModule);
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -434,8 +422,7 @@ fn main() -> int { b = Box(); return b.x(); }
 }
 
 TEST(Module, QualifiedTypeArrayOk) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_qt_arr").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_qt_arr").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "geometry/point.pkn", kPointModule);
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -449,8 +436,7 @@ fn main() -> int { ps: point::Point[] = [point::Point(7, 8)]; return first(ps); 
 }
 
 TEST(Module, QualifiedTypeAliasOk) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_qt_alias").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_qt_alias").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "geometry/point.pkn", kPointModule);
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -466,8 +452,7 @@ fn main() -> int { return show(geo::Point(3, 4)); }
 // ─── ERR: unknown qualified type ─────────────────────────────────────────────
 
 TEST(Module, QualifiedTypeUnknownErr) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_qt_unknown").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_qt_unknown").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "geometry/point.pkn", kPointModule);
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -483,8 +468,7 @@ fn main() -> int { return 0; }
 }
 
 TEST(Module, AliasUnknownCallErr) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_alias_unk").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_alias_unk").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "utils/strings.pkn", "fn trim(s: Str) -> int { return 0; }\n");
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -508,8 +492,7 @@ static const char *const kColorModule =
     "fn favorite() -> Color { return Color::Blue; }\n";
 
 TEST(Module, EnumQualifiedTypeAndVariantOk) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_enum_basic").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_enum_basic").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "pal/color.pkn", kColorModule);
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -526,8 +509,7 @@ fn main() -> int {
 }
 
 TEST(Module, EnumFullPathQualifierOk) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_enum_full").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_enum_full").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "pal/color.pkn", kColorModule);
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -543,8 +525,7 @@ fn main() -> int {
 }
 
 TEST(Module, EnumAliasQualifierOk) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_enum_alias").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_enum_alias").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "pal/color.pkn", kColorModule);
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -561,8 +542,7 @@ fn main() -> int {
 }
 
 TEST(Module, EnumParamAndReturnOk) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_enum_fn").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_enum_fn").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "pal/color.pkn", kColorModule);
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -582,8 +562,7 @@ fn main() -> int {
 // during class reconstruction) and the constructor argument (resolved by
 // qualified name) must be the SAME enum type, or this fails to type-check.
 TEST(Module, EnumAsClassFieldTypeIdentityOk) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_enum_field").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_enum_field").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "pal/color.pkn", kColorModule);
   writeFile(tmp, "pal/widget.pkn", R"(
@@ -612,8 +591,7 @@ fn main() -> int {
 // ─────────────────
 
 TEST(Module, EnumUnknownVariantErr) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_enum_badvar").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_enum_badvar").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "pal/color.pkn", kColorModule);
   auto main = writeFile(tmp, "main.pkn", R"(
@@ -636,8 +614,7 @@ fn main() -> int {
 // local `add` and `math::add` coexist and each call resolves to its own.
 
 TEST(Module, LocalFunctionCoexistsWithImportedQualifiedName) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_local_vs_imp").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_local_vs_imp").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "math.pkn",
             "fn add(a: int, b: int) -> int { return a + b; }\n");
@@ -654,8 +631,7 @@ fn main() -> int { return add(1) + math::add(1, 2); }
 // ─── ERR: an imported module's classes share the local class namespace ──────
 
 TEST(Module, LocalFunctionNamedLikeImportedClassErr) {
-  auto tmp =
-      (std::filesystem::temp_directory_path() / "pkn_ms_fn_vs_impcls").string();
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_fn_vs_impcls").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "shapes.pkn", "class Box { fn __init__() {} }\n");
   auto main = writeFile(tmp, "main.pkn", R"(
