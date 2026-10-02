@@ -102,7 +102,7 @@ void ModuleLowering::processImports(ast::TranslationUnit *tu) {
   for (auto *imp : tu->getImports()) {
     for (auto &m : imp->getModules()) {
       std::string modulePath = imp->modulePath(m);
-      std::string qualifier = m.qualifier();
+      const std::string &qualifier = m.qualifier();
       std::string resolved =
           resolveImportFile(PL.ProjectRoot, imp->isSystem(), modulePath);
       if (resolved.empty())

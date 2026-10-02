@@ -307,7 +307,7 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
       // `self` is a raw object pointer, not ref-counted by the body.
       pir::LocalId selfLocal = B.addLocal(kSelf, Type::Obj);
       B.store(selfLocal, Val(pir::Operand::value(fn->Params[0]), Type::Obj));
-      CurrentScope->declareUnowned(kSelf, selfLocal, ct, UINT32_MAX);
+      CurrentScope->declareUnowned(kSelf, selfLocal, ct);
       for (size_t i = 0; i < funcDecl->getParams().size(); ++i) {
         auto &p = funcDecl->getParams()[i];
         const pir::Value &arg = fn->Params[i + 1];
@@ -373,7 +373,7 @@ void ModuleLowering::emitDestructor(ast::ClassDecl *node, ast::ClassType *ct) {
     ScopeGuard guard(*this);
     pir::LocalId selfLocal = B.addLocal(kSelf, Type::Obj);
     B.store(selfLocal, self);
-    CurrentScope->declareUnowned(kSelf, selfLocal, ct, UINT32_MAX);
+    CurrentScope->declareUnowned(kSelf, selfLocal, ct);
     emitBody(userDestroy->getBody());
   }
   // A top-level `return` in the user body (its scope cleanup already
