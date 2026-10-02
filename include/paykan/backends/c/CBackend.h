@@ -4,7 +4,8 @@
 // The C backend: translates a PIR program into C11 against the runtime's
 // Runtime.h, and builds / runs it with the system C compiler.
 //
-// Standard C++ only (plus POSIX process spawning in CBuild.cpp).
+// Standard C++ only, plus the POSIX calls behind the backend's portability
+// layer (src/Backends/C/Platform.h: Linux and macOS).
 
 #pragma once
 
