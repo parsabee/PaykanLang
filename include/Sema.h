@@ -339,6 +339,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// The directory of the file currently being analyzed.
   std::string ProjectRoot;
 
+  /// The frontend imported modules are parsed with ("" = the default).
+  std::string FrontendName;
+
   /// Files currently being imported (for cycle detection).
   StringSet *ImportStack = nullptr;
 
@@ -593,8 +596,12 @@ private:
   void injectInstantiations(ast::TranslationUnit *tu);
 
 public:
+  /// @p frontendName names the frontend used to parse imported modules; ""
+  /// selects the build's default.  The driver passes the frontend it parsed
+  /// the main file with, so one program is parsed by one frontend.
   explicit Sema(ast::ASTContext &ctx, DiagEngine &diags,
-                const std::string &projectRoot = "");
+                const std::string &projectRoot = "",
+                const std::string &frontendName = "");
 
   // Entry point -- run semantic analysis on a TranslationUnit.
   // Returns a SemaContext whose bool operator is true on success.

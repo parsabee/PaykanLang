@@ -20,6 +20,10 @@ struct Flag {
 // Boolean options, in the order --help lists them.
 constexpr Flag kFlags[] = {
     {"dump-ast", &Options::DumpAST, "Print the AST in tree form"},
+    {"dump-tokens", &Options::DumpTokens,
+     "Print the token stream (frontends that support it)"},
+    {"list-frontends", &Options::ListFrontends,
+     "List the available frontends and exit"},
     {"check-only", &Options::CheckOnly,
      "Run parsing and semantic analysis only (no codegen)"},
     {"emit-llvm", &Options::EmitLLVM, "Emit LLVM IR to stdout"},
@@ -91,6 +95,21 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
       continue;
     }
 
+    // --frontend=<name> and --frontend <name>.
+    if (name == "frontend" || name.starts_with("frontend=")) {
+      std::string_view value = name.substr(std::string_view("frontend").size());
+      if (!value.empty())
+        value.remove_prefix(1); // '='
+      else if (i + 1 < argc)
+        value = argv[++i];
+      if (value.empty()) {
+        r.Error = "option '--frontend' requires a value";
+        return r;
+      }
+      o.Frontend = std::string(value);
+      continue;
+    }
+
     // -O<n>, -O=<n>, and -O <n>.
     if (name.size() >= 1 && name[0] == 'O') {
       std::string_view level = name.substr(1);
@@ -125,7 +144,8 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
     }
   }
 
-  if (!o.ShowHelp && !o.ShowVersion && o.InputFilename.empty())
+  if (!o.ShowHelp && !o.ShowVersion && !o.ListFrontends &&
+      o.InputFilename.empty())
     r.Error = "no source file specified";
   return r;
 }
@@ -138,7 +158,9 @@ void printUsage(std::ostream &os, const char *argv0) {
     os << "  --" << f.Name
        << std::string(16 - std::string_view(f.Name).size(), ' ') << "- "
        << f.Help << "\n";
-  os << "  -O<n>             - Optimization level (0-3)\n"
+  os << "  --frontend=<name> - Parse with the named frontend "
+        "(--list-frontends)\n"
+     << "  -O<n>             - Optimization level (0-3)\n"
      << "  --version, -v     - Print the version and exit\n"
      << "  --help, -h        - Print this help and exit\n";
 }

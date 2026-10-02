@@ -1,80 +1,85 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Parser driver internals (Bison/Flex integration)
+// The Bison/Flex frontend plugin: internals shared by the grammar actions,
+// the scanner and BisonFrontend.cpp.  Private to this library.
 
 #pragma once
 
 #include "AST.h"
 #include "ASTContext.h"
+#include "DiagEngine.h"
 #include "Parser.ypp.h"
-#include "ParserDriver.h"
+#include "paykan/Frontend.h"
+
 #include <deque>
+#include <string>
+#include <string_view>
 #include <vector>
 
+namespace paykan::frontend::bison {
+class BisonFrontend;
+}
+
 // Flex needs this macro for our custom driver.  The scanner itself is exposed
-// as yylex_raw; the parser calls yylex (ParserDriver.cpp), a thin wrapper that
-// adds the one token of context the LALR(1) grammar cannot express: whether a
-// '<' after an identifier opens a type-argument list (see TYPELESS).
+// as yylex_raw; the parser calls yylex (BisonFrontend.cpp), a thin wrapper
+// that adds the one token of context the LALR(1) grammar cannot express:
+// whether a '<' after an identifier opens a type-argument list (see TYPELESS).
 #define YY_DECL                                                                \
-  yy::parser::symbol_type yylex_raw(paykan::parser::ParserDriver &drv)
+  yy::parser::symbol_type yylex_raw(paykan::frontend::bison::BisonFrontend &drv)
 YY_DECL;
 
 /// Parser entry point: yylex_raw plus type-argument disambiguation.
-yy::parser::symbol_type yylex(paykan::parser::ParserDriver &drv);
+yy::parser::symbol_type yylex(paykan::frontend::bison::BisonFrontend &drv);
 
 using namespace paykan::ast;
 
-namespace paykan::parser {
+namespace paykan::frontend::bison {
 
-/// The PIMPL body of ParserDriver.  Holds every field that depends on Bison or
-/// Flex generated types, keeping them out of the public header.
-struct ParserDriver::Impl {
-  friend yy::parser;
+/// The Bison/Flex implementation of the frontend interface.  One parse at a
+/// time per instance; the members are the state the generated parser and
+/// scanner actions reach through `drv`.
+class BisonFrontend : public Frontend {
+public:
+  std::string_view name() const override { return "bison"; }
 
-  /// Arena that owns all AST nodes created during parsing.
-  ASTContext Ctx;
+  ParseResult parse(std::string_view filename, std::string_view source,
+                    ast::ASTContext &ctx, sema::DiagEngine &diag,
+                    const Options &opts) override;
 
-  /// Root of the parsed AST (owned by Ctx).
+  // -- State used by the generated parser and scanner ----------------------
+
+  /// Arena that owns all AST nodes created during parsing (the caller's).
+  ast::ASTContext *Ctx = nullptr;
+
+  /// Root of the parsed AST (owned by *Ctx).
   TranslationUnit *Root = nullptr;
 
   /// The token's location used by the scanner.
   yy::location Location;
 
-  /// The name of the file being parsed.
+  /// The name of the file being parsed (Location points at it).
   std::string CurFile;
-
-  /// Source split by lines for downstream diagnostics.
-  std::vector<std::string> SourceLines;
 
   /// Number of syntax errors encountered during parsing.
   unsigned ErrorCount = 0;
 
-  /// Optional diagnostic engine for routing parser errors.
+  /// Diagnostic engine every syntax error is routed through.
   sema::DiagEngine *Diags = nullptr;
 
-  /// Whether to generate parser debug traces.
-  bool TraceParsing;
-  /// Whether to generate scanner debug traces.
-  bool TraceScanning;
+  /// Whether to generate parser / scanner debug traces.
+  bool TraceParsing = false;
+  bool TraceScanning = false;
 
-  /// Tokens already scanned ahead by the yylex wrapper (see ParserDriver.cpp)
-  /// but not yet handed to the parser, in source order.
+  /// Tokens already scanned ahead by the yylex wrapper (see
+  /// BisonFrontend.cpp) but not yet handed to the parser, in source order.
   std::deque<yy::parser::symbol_type> Lookahead;
   /// True when the token most recently handed to the parser was an IDENT.
   bool PrevWasIdent = false;
 
-  explicit Impl(bool TraceParsing, bool TraceScanning)
-      : TraceParsing(TraceParsing), TraceScanning(TraceScanning) {}
-
-  /// Handling the scanner.  scanBegin returns false when the input file
-  /// cannot be opened (errno is left set); the caller reports the failure.
-  bool scanBegin();
+  /// Scanner setup over @p source (Lexer.lpp) and teardown.
+  void scanBegin(std::string_view source);
   void scanEnd();
-  int parse(ParserDriver &drv);
 };
-
-/// Returns the Impl of a ParserDriver.  Only for use by parser/lexer actions.
-inline ParserDriver::Impl &impl(ParserDriver &drv) { return *drv.PImpl; }
 
 /// Build the ImportDecl for `import [::]a::b::name [as alias];`.  The path is
 /// split at its last "::" into the base path ("a::b", empty when there is no
@@ -103,4 +108,4 @@ makeImportList(ASTContext &C, SourceLocation loc, const std::string &base,
   return C.make<ImportDecl>(loc, C.intern(base), isSystem, std::move(ms));
 }
 
-} // namespace paykan::parser
+} // namespace paykan::frontend::bison

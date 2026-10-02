@@ -54,8 +54,11 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
 include(SanitizerSetup)     # -> PAYKAN_ASAN / PAYKAN_UBSAN / PAYKAN_TSAN options
 include(CoverageSetup)      # -> PAYKAN_COVERAGE option (LLVM source coverage)
+include(PaykanPlugins)      # -> PAYKAN_FRONTENDS, paykan_add_plugin/paykan_link_plugins
 include(LLVMSetup)          # -> paykan_llvm       INTERFACE target
-include(BisonFlexSetup)     # -> bison_ext, flex_ext ExternalProject targets
+if("bison" IN_LIST PAYKAN_FRONTENDS)
+    include(BisonFlexSetup) # -> bison_ext, flex_ext ExternalProject targets
+endif()
 include(GTestSetup)         # -> gtest, gmock       via FetchContent
 
 enable_testing()

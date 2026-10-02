@@ -4,7 +4,7 @@
 #include <string>
 #include "AST.h"
 #include "Parser.ypp.h"
-#include "ParserDriverImpl.h"
+#include "BisonFrontend.h"
 %}
 
 %option noyywrap nounput noinput batch debug
@@ -51,7 +51,7 @@ comment     \/\/[^\n]*
 
 %{
   // A handy shortcut to the location held by the driver.
-  yy::location& loc = paykan::parser::impl(drv).Location;
+  yy::location& loc = drv.Location;
   // Code run each time yylex is called.
   loc.step ();
 %}
@@ -230,28 +230,19 @@ make_CHAR (const char *text, int len, const yy::parser::location_type& loc)
   throw yy::parser::syntax_error(loc, "invalid character literal: " + std::string(text));
 }
 
-bool
-paykan::parser::ParserDriver::Impl::scanBegin()
+void
+paykan::frontend::bison::BisonFrontend::scanBegin(std::string_view source)
 {
-  errno = 0;
   yy_flex_debug = TraceScanning;
-  if (CurFile.empty () || CurFile == "-")
-    yyin = stdin;
-
-  else if (!(yyin = fopen (CurFile.c_str (), "r")))
-    // Library code must not terminate the process: report failure to the
-    // caller (parseFile), which emits the diagnostic and fails the parse.
-    // errno is left set for the caller's message.
-    return false;
-
-  // Reset scanner state to discard any leftover buffer from a previous parse.
-  yyrestart(yyin);
-  return true;
+  // Scan the caller's buffer rather than a FILE*: the driver has already read
+  // the file (and reported it if it could not), and yyin is never touched.
+  // yy_scan_bytes copies the text and makes the buffer current, discarding
+  // any leftover state from a previous parse.
+  yy_scan_bytes(source.data(), static_cast<int>(source.size()));
 }
 
 void
-paykan::parser::ParserDriver::Impl::scanEnd()
+paykan::frontend::bison::BisonFrontend::scanEnd()
 {
-  if (yyin && yyin != stdin)
-    fclose(yyin);
+  yy_delete_buffer(YY_CURRENT_BUFFER);
 }

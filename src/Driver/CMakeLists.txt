@@ -17,9 +17,10 @@ target_link_libraries(paykan
     PRIVATE paykan_ast_printer
             paykan_codegen
             paykan_sema
-            paykan_parser
+            paykan_frontend
             paykan_jit
             paykan_runtime
             paykan_compile_options
             ${DRIVER_LLVM_LIBS}
 )
+paykan_link_plugins(paykan)
