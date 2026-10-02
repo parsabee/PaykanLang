@@ -1,13 +1,15 @@
 # src/Backends/C/CMakeLists.txt
 # ----------------------------------------------------------------------------
 # paykan_backend_c -- the C backend (PIR -> C11, built with the system cc).
-# Part of the core: depends on nothing but the standard library and POSIX.
+# Part of the core: depends on nothing but the standard library and POSIX
+# (every OS call is behind the portability layer in Platform.h).
 # ----------------------------------------------------------------------------
 
 add_library(paykan_backend_c STATIC
     CBackend.cpp
     CEmitter.cpp
     CBuild.cpp
+    Platform.cpp
 )
 target_include_directories(paykan_backend_c
     PUBLIC ${CMAKE_SOURCE_DIR}/include

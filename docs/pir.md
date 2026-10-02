@@ -1,7 +1,7 @@
 # PIR: the Paykan intermediate representation
 
 PIR is the small, backend-neutral IR that sits between Sema's typed AST and
-every backend (C, LLVM, MLIR, out-of-tree).  It is produced by **one** lowering
+every backend (C, LLVM, out-of-tree).  It is produced by **one** lowering
 pass (`src/Lowering`), which is the single home of the ownership rules: by the
 time a backend sees PIR, every `retain`/`release`/`box`/`unbox`, every scope
 cleanup, every `mov`, every `match` dispatch and every vtable is explicit.  A

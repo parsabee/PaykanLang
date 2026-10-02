@@ -57,9 +57,9 @@ produce identical ASTs: `scripts/diff_frontends.py` checks that over every sampl
 
 The backend is pluggable too. `-DPAYKAN_BACKENDS=<list>` selects the backends to build:
 `c` (the C backend: emits C11, builds with the system C compiler, standard C++ only) is always
-built; `llvm` (LLVM IR / ORC JIT) is optional and `mlir` is a reserved slot. The default backend
+built; `llvm` (LLVM IR / ORC JIT) is optional. The default backend
 is `llvm` when it is listed, `c` otherwise; `--backend=<name>` selects another (`--list-backends`
-prints them). LLVM is downloaded only when `llvm` or `mlir` is listed, so
+prints them). LLVM is downloaded only when `llvm` is listed, so
 `-DPAYKAN_FRONTENDS=recursive-descent -DPAYKAN_BACKENDS=c` is a **barebones build** that needs
 nothing but a C++20 compiler and a C compiler (CI checks that it downloads nothing and links no
 third-party library). Every backend consumes the Paykan IR described in [`docs/pir.md`](docs/pir.md);
