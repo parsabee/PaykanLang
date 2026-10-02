@@ -67,8 +67,10 @@ as `extern` items, so each unit is self-contained), compile each into
 `<project root>/.paykan_cache/<module>.o`, reuse the object while the
 module's generated C and its cache key (the C compiler and flags, a hash of
 `Runtime.h` and the paykan version) are unchanged, and link the
-objects with `libpaykan_runtime.a`.  The output is deterministic for a given
-program.  It assumes an LP64 target (every array and tuple slot is 8 bytes),
+objects with `libpaykan_runtime.a`.  Cache files are written to a temporary
+name and renamed into place, the object before its `.key`, so concurrent
+builds that share an import never see a partial entry.  The output is
+deterministic for a given program.  It assumes an LP64 target (every array and tuple slot is 8 bytes),
 like the runtime itself.
 
 ## Parity with the LLVM backend

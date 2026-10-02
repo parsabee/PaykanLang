@@ -15,6 +15,7 @@
 #include <mach-o/dyld.h>
 #endif
 
+#include <atomic>
 #include <cerrno>
 #include <cinttypes>
 #include <csignal>
@@ -235,22 +236,40 @@ std::string readFile(const std::string &path) {
                      std::istreambuf_iterator<char>());
 }
 
+/// A temporary name next to @p path, unique to this process and call, so
+/// concurrent builds sharing a cache never write the same file.
+std::string tempSibling(const std::string &path) {
+  static std::atomic<unsigned> counter{0};
+  return path + ".tmp" + std::to_string(getpid()) + "-" +
+         std::to_string(counter++);
+}
+
+/// Move @p tmp over @p path (atomic within a directory); removes @p tmp on
+/// failure.
+bool renameOver(const std::string &tmp, const std::string &path) {
+  std::error_code ec;
+  fs::rename(tmp, path, ec);
+  if (!ec)
+    return true;
+  fs::remove(tmp, ec);
+  return false;
+}
+
 /// Write @p text to @p path through a temporary file in the same directory
 /// and a rename, so a concurrent or interrupted compile never observes a
 /// partially written entry.
 bool writeFileAtomically(const std::string &path, const std::string &text) {
-  std::string tmp = path + ".tmp" + std::to_string(getpid());
+  std::string tmp = tempSibling(path);
   {
     std::ofstream out(tmp, std::ios::binary);
     out << text;
-    if (!out)
+    if (!out) {
+      std::error_code ec;
+      fs::remove(tmp, ec);
       return false;
+    }
   }
-  std::error_code ec;
-  fs::rename(tmp, path, ec);
-  if (ec)
-    fs::remove(tmp, ec);
-  return !ec;
+  return renameOver(tmp, path);
 }
 
 /// 64-bit FNV-1a of @p data, as 16 hex digits.
@@ -312,7 +331,8 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
   // Everything besides the module's C that its object depends on: the C
   // compiler and flags, the runtime header the C includes (its struct
   // layouts and prototypes are the runtime ABI), and this compiler's
-  // version.  Stored next to each cached object (`.key`).
+  // version.  Stored, with a hash of the module's C, next to each cached
+  // object (`.key`).
   std::string cacheKey = "cc:";
   cacheKey += tc.CC;
   for (const auto &f : compileFlags) {
@@ -334,7 +354,13 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
       return false;
     std::string text = src.str();
 
-    std::string cPath, oPath;
+    // An entry is valid when its `.key` (the cache key plus a hash of the
+    // module's C) matches.  Every file of an entry is replaced by a rename,
+    // and a rebuild drops the old `.key` first and writes the new one only
+    // after the new object, so a concurrent build of the same module (a
+    // shared import) never links a partial or mismatched object.
+    std::string moduleKey = cacheKey + "c:" + fnv1a(text) + '\n';
+    std::string cPath, oPath, keyPath, oTmp;
     bool cached = false;
     if (!tc.CacheDir.empty()) {
       std::string base = cacheEntryBase(tc, program.Modules[mi].Name);
@@ -342,13 +368,20 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
       fs::create_directories(fs::path(base).parent_path(), dirErr);
       cPath = base + ".c";
       oPath = base + ".o";
+      keyPath = base + ".key";
       std::error_code existsErr; // set for a missing entry: not a failure
-      cached = !dirErr && fs::exists(oPath, existsErr) &&
-               readFile(cPath) == text && readFile(base + ".key") == cacheKey;
-      if (!cached && (dirErr || !writeFileAtomically(cPath, text) ||
-                      !writeFileAtomically(base + ".key", cacheKey))) {
-        // Unwritable cache: build this module in the temporary directory.
-        cPath.clear();
+      cached = !dirErr && readFile(keyPath) == moduleKey &&
+               readFile(cPath) == text && fs::exists(oPath, existsErr);
+      if (!cached) {
+        std::error_code rmErr; // a missing key is not a failure
+        if (!dirErr)
+          fs::remove(keyPath, rmErr);
+        if (dirErr || rmErr || !writeFileAtomically(cPath, text)) {
+          // Unwritable cache: build this module in the temporary directory.
+          cPath.clear();
+        } else {
+          oTmp = tempSibling(oPath);
+        }
       }
     }
     if (cPath.empty()) {
@@ -366,12 +399,24 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
       args.push_back("-c");
       args.push_back(cPath);
       args.push_back("-o");
-      args.push_back(oPath);
+      args.push_back(oTmp.empty() ? oPath : oTmp);
       int rc = spawn(tc.CC, args, &tc.CC, {}, errs);
       if (rc != 0) {
+        if (!oTmp.empty()) {
+          std::error_code ec;
+          fs::remove(oTmp, ec);
+        }
         errs << "C compilation of '" << program.Modules[mi].Name << "' failed ("
              << tc.CC << " exited with " << rc << ")\n";
         return false;
+      }
+      if (!oTmp.empty()) {
+        if (!renameOver(oTmp, oPath)) {
+          errs << "cannot write '" << oPath << "'\n";
+          return false;
+        }
+        // Best effort: without a key the entry is rebuilt next time.
+        writeFileAtomically(keyPath, moduleKey);
       }
     }
     objects.push_back(oPath);

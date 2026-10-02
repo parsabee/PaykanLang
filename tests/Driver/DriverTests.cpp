@@ -423,6 +423,12 @@ TEST(Driver, CBackendBuildsAnExecutableAndCachesObjects) {
             std::string::npos)
       << key;
   EXPECT_NE(key.find("\nruntime.h:"), std::string::npos) << key;
+  EXPECT_NE(key.find("\nc:"), std::string::npos) << key;
+  // Entries are written through temporaries renamed into place; none are
+  // left behind.
+  for (const auto &e :
+       std::filesystem::directory_iterator(dir / ".paykan_cache"))
+    EXPECT_EQ(e.path().string().find(".tmp"), std::string::npos) << e.path();
   for (const char *field : {"\npaykan:", "\nruntime.h:"}) {
     std::string stale = key;
     stale.insert(stale.find(field) + std::strlen(field), "old-");
