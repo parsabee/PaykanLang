@@ -10,7 +10,8 @@
 //
 // Buckets are an array of arrays (`Entry[][]`). The table doubles its bucket
 // count when the load factor passes 0.75 and rehashes, keeping lookups O(1)
-// on average.
+// on average. `lookup` returns an optional (`Entry?`): a missing key is
+// `None`, so callers unwrap with `match` instead of pairing has() with get().
 
 // One key/value pair living in a bucket chain.
 class Entry {
@@ -69,42 +70,31 @@ class HashMap {
     return h % self.nbuckets;
   }
 
-  fn has(key: Str) -> bool {
-    chain: Entry[] = self.buckets[self.indexFor(key)];
-    i: int = 0;
-    while (i < chain.len()) {
-      if (chain[i].key.equals(key)) { return True; }
-      i = i + 1;
-    }
-    return False;
-  }
-
-  // Returns the stored value, or 0.0 if absent (callers guard with has()).
-  fn get(key: Str) -> float {
+  // The entry stored under `key`, or None when the key is absent.
+  fn lookup(key: Str) -> Entry? {
     chain: Entry[] = self.buckets[self.indexFor(key)];
     i: int = 0;
     while (i < chain.len()) {
       e: Entry = chain[i];
-      if (e.key.equals(key)) { return e.value; }
+      if (e.key.equals(key)) { return e; }
       i = i + 1;
     }
-    return 0.0;
+    return None;
   }
 
-  // Find-or-append into the right chain. Returns True if a NEW key was added.
+  // Update the entry in place or append a new one. Returns True if a NEW key
+  // was added.
   fn insert(key: Str, value: float) -> bool {
-    chain: Entry[] = self.buckets[self.indexFor(key)];
-    i: int = 0;
-    while (i < chain.len()) {
-      e: Entry = chain[i];
-      if (e.key.equals(key)) {
+    match self.lookup(key) {
+      e: Entry {
         e.value = value; // update in place (Entry is a reference type)
         return False;
       }
-      i = i + 1;
+      None {
+        self.buckets[self.indexFor(key)].push(Entry(key, value));
+        return True;
+      }
     }
-    chain.push(Entry(key, value));
-    return True;
   }
 
   fn put(key: Str, value: float) {
@@ -159,15 +149,16 @@ class HashMap {
     return found;
   }
 
-  // Every key currently stored, in bucket order.
-  fn keys() -> Str[] {
-    out: Str[] = [];
+  // Every (name, value) pair currently stored, in bucket order.
+  fn entries() -> (Str, float)[] {
+    out: (Str, float)[] = [];
     bi: int = 0;
     while (bi < self.buckets.len()) {
       chain: Entry[] = self.buckets[bi];
       j: int = 0;
       while (j < chain.len()) {
-        out.push(chain[j].key);
+        e: Entry = chain[j];
+        out.push((e.key, e.value));
         j = j + 1;
       }
       bi = bi + 1;

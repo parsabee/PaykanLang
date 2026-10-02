@@ -8,11 +8,15 @@
 //   number ::= [0-9]+ ('.' [0-9]+)?
 //   IDENT  ::= [A-Za-z_] [A-Za-z0-9_]*
 //
-// A `factor` may now be a variable name, looked up in the shared environment
+// A `factor` may be a variable name, looked up in the shared environment
 // (a calc::hashmap::HashMap). A leading `IDENT '='` is an assignment; anything
 // else is an expression — so the parser saves its position and backtracks if
-// the `=` does not materialise. Undefined variables set an error flag rather
-// than aborting, so the REPL can report and continue.
+// the `=` does not materialise.
+//
+// Errors are recorded in `error: Str?` (None while parsing succeeds) rather
+// than aborting, so the REPL can report them and continue. parseStatement()
+// returns a tuple `(Str?, float)`: the assigned name, or None for a bare
+// expression, together with the value.
 
 import calc::hashmap;
 
@@ -29,40 +33,21 @@ fn applyOp(op: Op, a: float, b: float) -> float {
   }
 }
 
-// The result of parsing one line: either an assignment (name = value) or a
-// bare expression (value only).
-class Stmt {
-  isAssign: bool;
-  name: Str;
-  value: float;
-  fn __init__(a: bool, n: Str, v: float) {
-    self.isAssign = a;
-    self.name = n;
-    self.value = v;
-  }
-}
-
 class Parser {
   input: Str;
   pos: int;
   env: hashmap::HashMap;
-  hasError: bool;
-  errorMsg: Str;
+  error: Str?;   // the first error, or None
 
   fn __init__(s: Str, env: hashmap::HashMap) {
     self.input = s;
     self.pos = 0;
     self.env = env;
-    self.hasError = False;
-    self.errorMsg = "";
   }
 
   // Record the first error only; later errors are usually cascades.
   fn fail(msg: Str) {
-    if (!self.hasError) {
-      self.hasError = True;
-      self.errorMsg = msg;
-    }
+    if (self.error == None) { self.error = msg; }
   }
 
   fn done() -> bool {
@@ -187,9 +172,13 @@ class Parser {
     }
     if (self.atIsIdentStart()) {
       name: Str = self.parseIdent();
-      if (self.env.has(name)) { return self.env.get(name); }
-      self.fail("undefined variable '" + name + "'");
-      return 0.0;
+      match self.env.lookup(name) {
+        e: hashmap::Entry { return e.value; }
+        None {
+          self.fail("undefined variable '" + name + "'");
+          return 0.0;
+        }
+      }
     }
     if (!self.atIsDigit()) {
       self.fail("expected a number, variable, or '('");
@@ -228,7 +217,7 @@ class Parser {
   // Parse a whole line: an assignment if it begins `IDENT =` (not `==`),
   // otherwise a bare expression. The position is saved so a non-assignment
   // that merely starts with a variable name backtracks cleanly.
-  fn parseStatement() -> Stmt {
+  fn parseStatement() -> (Str?, float) {
     self.skipWs();
     start: int = self.pos;
     if (self.atIsIdentStart()) {
@@ -238,12 +227,14 @@ class Parser {
         self.advance(); // consume '='
         v: float = self.parseExpr();
         self.skipWs();
-        return Stmt(True, name, v);
+        target: Str? = name;
+        return (target, v);
       }
       self.pos = start; // not an assignment — rewind and parse as an expression
     }
     v: float = self.parseExpr();
     self.skipWs();
-    return Stmt(False, "", v);
+    noName: Str? = None;
+    return (noName, v);
   }
 }
