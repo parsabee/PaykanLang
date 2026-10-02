@@ -1,0 +1,29 @@
+// 33 — special float values: StrFloat (and a tuple's string form) spells NaN
+// and the infinities the same way on every backend and platform -- `nan`
+// whatever the NaN's sign bit, `inf` and `-inf`.  (inf - inf is a NaN with the
+// sign bit set when the hardware computes it, but a positive one when a
+// compiler folds it, so printf's own "-nan" made the output backend-dependent.)
+// Exercises: overflow to infinity, inf - inf, 0 * inf, negated NaN, StrFloat,
+//            float comparisons with NaN, tuple formatting of special values.
+
+fn main() -> int {
+  big: float = 1.0e308;
+  inf: float = big * 10.0;
+  ninf: float = 0.0 - inf;
+  nan1: float = inf - inf;
+  nan2: float = 0.0 * inf;
+  nan3: float = 0.0 - nan1;
+  println("inf:  " + StrFloat(inf));
+  println("-inf: " + StrFloat(ninf));
+  println("nan:  " + StrFloat(nan1));
+  println("nan:  " + StrFloat(nan2));
+  println("-nan: " + StrFloat(nan3));
+  println("nan == nan: " + StrBool(nan1 == nan1));
+  println("nan != nan: " + StrBool(nan1 != nan1));
+  println("nan < 1:    " + StrBool(nan1 < 1.0));
+  println("inf > big:  " + StrBool(inf > big));
+  t: (float, float, float) = (nan1, inf, ninf);
+  println(t);                                  // (nan, inf, -inf)
+  println(StrFloat(t.0) + " " + StrFloat(t.2));
+  return 0;
+}

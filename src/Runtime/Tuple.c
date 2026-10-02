@@ -180,7 +180,7 @@ PaykanShared *PaykanTuple_toString(PaykanObject *self) {
     case PAYKAN_TUPLE_FLOAT: {
       double d;
       memcpy(&d, &bits, sizeof(d));
-      n = snprintf(buf, sizeof(buf), "%g", d); // matches StrFloat
+      n = Paykan_format_float(buf, sizeof(buf), d); // matches StrFloat
       sb_append(&sb, buf, (size_t)n);
       break;
     }
