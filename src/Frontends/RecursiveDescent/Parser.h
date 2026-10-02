@@ -9,8 +9,8 @@
 #include "AST.h"
 #include "ASTContext.h"
 #include "DiagEngine.h"
-#include "Frontends/RecursiveDescent.h"
 #include "Lexer.h"
+#include "paykan/frontends/RecursiveDescent.h"
 
 #include <cstddef>
 #include <string>

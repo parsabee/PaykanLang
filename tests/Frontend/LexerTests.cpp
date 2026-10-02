@@ -3,7 +3,7 @@
 // Recursive-descent frontend lexer tests, through the --dump-tokens output (one
 // token per line: `line:col-line:col KIND text`).
 
-#include "Frontends/RecursiveDescent.h"
+#include "paykan/frontends/RecursiveDescent.h"
 
 #include <gtest/gtest.h>
 

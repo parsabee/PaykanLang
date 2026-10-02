@@ -3,8 +3,8 @@
 // The recursive-descent frontend plugin: adapts parseSource/dumpTokens to the
 // frontend interface and registers the plugin as "recursive-descent".
 
-#include "Frontends/RecursiveDescent.h"
 #include "paykan/Frontend.h"
+#include "paykan/frontends/RecursiveDescent.h"
 
 #include <memory>
 
