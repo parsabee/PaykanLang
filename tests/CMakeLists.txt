@@ -165,12 +165,18 @@ target_link_libraries(pir_tests
 )
 add_test(NAME PIRTests COMMAND pir_tests)
 
-# --- Lowering tests (AST -> PIR, checked as printed PIR) ---------------------
+# --- Lowering tests (AST -> PIR, checked as printed PIR; PIR text round trip
+# --- over the samples corpus) ------------------------------------------------
 add_executable(lowering_tests
     Lowering/LoweringTests.cpp
+    Lowering/RoundTripTests.cpp
 )
 target_include_directories(lowering_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_compile_definitions(lowering_tests
+    PRIVATE PAYKAN_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/samples"
+            PAYKAN_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/example_program"
 )
 target_link_libraries(lowering_tests
     PRIVATE gtest_main
@@ -219,6 +225,9 @@ target_link_libraries(driver_tests
             paykan_compile_options
 )
 add_dependencies(driver_tests paykan)
+if(PAYKAN_COVERAGE)
+    target_compile_definitions(driver_tests PRIVATE PAYKAN_TEST_COVERAGE=1)
+endif()
 # The samples corpus on every backend that runs programs: identical stdout,
 # exit codes and zero live heap blocks (scripts/samples_parity.py).
 set(PAYKAN_SAMPLES_BACKENDS "")

@@ -21,6 +21,10 @@ _deps/
 *.dylib
 *.out
 
+# LLVM coverage profiles (instrumented binaries run outside build/)
+*.profraw
+*.profdata
+
 # macOS
 .DS_Store
 .AppleDouble

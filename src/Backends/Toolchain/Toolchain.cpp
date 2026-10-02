@@ -10,14 +10,20 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
 
 #include <cerrno>
 #include <csignal>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <sstream>
 #include <system_error>
+#include <vector>
 
 #ifndef PAYKAN_RUNTIME_LIB_PATH
 #define PAYKAN_RUNTIME_LIB_PATH ""
@@ -25,21 +31,85 @@
 #ifndef PAYKAN_RUNTIME_INCLUDE_DIR
 #define PAYKAN_RUNTIME_INCLUDE_DIR ""
 #endif
+#ifndef PAYKAN_INSTALLED_RUNTIME_LIB
+#define PAYKAN_INSTALLED_RUNTIME_LIB ""
+#endif
+#ifndef PAYKAN_INSTALLED_RUNTIME_INCLUDE_DIR
+#define PAYKAN_INSTALLED_RUNTIME_INCLUDE_DIR ""
+#endif
 #ifndef PAYKAN_SANITIZER_FLAGS
 #define PAYKAN_SANITIZER_FLAGS ""
+#endif
+#ifndef PAYKAN_COVERAGE_FLAGS
+#define PAYKAN_COVERAGE_FLAGS ""
+#endif
+#ifndef PAYKAN_DEFAULT_CC
+#define PAYKAN_DEFAULT_CC ""
+#endif
+#ifndef PAYKAN_DEFAULT_CC_FLAGS
+#define PAYKAN_DEFAULT_CC_FLAGS ""
 #endif
 
 namespace paykan::toolchain {
 
 namespace fs = std::filesystem;
 
-/// Directory of the running executable, or "".
-std::string executableDir() {
+namespace {
+
+/// Path of the running executable, or "".  The OS's own answer where there
+/// is one; otherwise the first `paykan` on $PATH.
+std::string executablePath() {
+#if defined(__APPLE__)
+  uint32_t size = 0;
+  _NSGetExecutablePath(nullptr, &size); // sets the size needed
+  std::vector<char> buf(size + 1, '\0');
+  if (_NSGetExecutablePath(buf.data(), &size) == 0) {
+    if (char *real = realpath(buf.data(), nullptr)) {
+      std::string path = real;
+      std::free(real);
+      return path;
+    }
+  }
+#elif defined(__linux__)
   std::error_code ec;
   fs::path exe = fs::read_symlink("/proc/self/exe", ec);
-  if (ec)
-    return "";
-  return exe.parent_path().string();
+  if (!ec)
+    return exe.string();
+#endif
+  if (const char *pathEnv = std::getenv("PATH")) {
+    std::string dirs = pathEnv;
+    size_t start = 0;
+    while (start <= dirs.size()) {
+      size_t colon = dirs.find(':', start);
+      std::string dir =
+          dirs.substr(start, colon == std::string::npos ? std::string::npos
+                                                        : colon - start);
+      fs::path cand = fs::path(dir.empty() ? "." : dir) / "paykan";
+      std::error_code ec;
+      if (access(cand.c_str(), X_OK) == 0)
+        return fs::canonical(cand, ec).string();
+      if (colon == std::string::npos)
+        break;
+      start = colon + 1;
+    }
+  }
+  return "";
+}
+
+/// Append the space-separated words of @p flags to @p out.
+void appendFlags(const std::string &flags, std::vector<std::string> &out) {
+  std::istringstream words(flags);
+  std::string f;
+  while (words >> f)
+    out.push_back(f);
+}
+
+} // namespace
+
+/// Directory of the running executable, or "".
+std::string executableDir() {
+  std::string exe = executablePath();
+  return exe.empty() ? "" : fs::path(exe).parent_path().string();
 }
 
 /// Run @p path with @p args after @p argv0 as the child's argv (no argv at
@@ -100,24 +170,26 @@ TempDir::~TempDir() {
 bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
   if (tc.CC.empty()) {
     const char *cc = std::getenv("CC");
-    tc.CC = (cc && cc[0]) ? cc : "cc";
-  }
-  // The build tree's runtime archive is sanitizer-instrumented when the
-  // compiler was built with a sanitizer: programs linked against it need
-  // the same flags (compile and link).
-  if (tc.RuntimeLib.empty()) {
-    std::string flags = PAYKAN_SANITIZER_FLAGS;
-    size_t start = 0;
-    while (start < flags.size()) {
-      size_t sp = flags.find(' ', start);
-      std::string f = flags.substr(
-          start, sp == std::string::npos ? std::string::npos : sp - start);
-      if (!f.empty())
-        tc.ExtraFlags.push_back(f);
-      if (sp == std::string::npos)
-        break;
-      start = sp + 1;
+    // A coverage build names the compiler that built the runtime: its
+    // profile runtime matches the archive's instrumentation.  It comes with
+    // the flags it needs to find the system headers and libraries (the
+    // macOS SDK for a clang that has no default one).
+    const char *buildCC = PAYKAN_DEFAULT_CC;
+    if (cc && cc[0]) {
+      tc.CC = cc;
+    } else if (buildCC[0]) {
+      tc.CC = buildCC;
+      appendFlags(PAYKAN_DEFAULT_CC_FLAGS, tc.ExtraFlags);
+    } else {
+      tc.CC = "cc";
     }
+  }
+  // The build tree's runtime archive is sanitizer- or coverage-instrumented
+  // when the compiler was built that way: programs linked against it need
+  // the same flags (the C backend's compile and every backend's link).
+  if (tc.RuntimeLib.empty()) {
+    appendFlags(PAYKAN_SANITIZER_FLAGS, tc.ExtraFlags);
+    appendFlags(PAYKAN_COVERAGE_FLAGS, tc.ExtraFlags);
   }
   auto exists = [](const std::string &p) {
     std::error_code ec;
@@ -132,13 +204,16 @@ bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
     if (const char *env = std::getenv("PAYKAN_RUNTIME_DIR"))
       candidates.emplace_back(std::string(env) + "/lib/libpaykan_runtime.a",
                               std::string(env) + "/include/paykan");
-    // 3. the install layout next to the executable
+    // 3. the install layout next to the executable (a relocated install)
     std::string exeDir = executableDir();
     if (!exeDir.empty()) {
       fs::path prefix = fs::path(exeDir).parent_path();
       candidates.emplace_back((prefix / "lib" / "libpaykan_runtime.a").string(),
                               (prefix / "include" / "paykan").string());
     }
+    // 4. the install location configured at build time
+    candidates.emplace_back(PAYKAN_INSTALLED_RUNTIME_LIB,
+                            PAYKAN_INSTALLED_RUNTIME_INCLUDE_DIR);
     for (const auto &[lib, inc] : candidates) {
       if (exists(lib) && exists(inc + "/Runtime.h")) {
         if (tc.RuntimeLib.empty())

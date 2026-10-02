@@ -140,8 +140,8 @@ private:
   }
 
   /// `build`: the object of emitObject() linked against the runtime with
-  /// the system toolchain (including the sanitizer flags of a sanitizer
-  /// build, whose runtime archive is instrumented).
+  /// the system toolchain (including the sanitizer / coverage flags of a
+  /// sanitizer / coverage build, whose runtime archive is instrumented).
   static Status buildExecutable(const Input &in, llvm::LLVMContext &ctx,
                                 const std::string &output) {
     std::ostringstream errs;

@@ -19,18 +19,20 @@ namespace paykan::toolchain {
 
 /// Where the C compiler and the runtime are.
 struct Toolchain {
-  /// C compiler command; empty means `$CC`, then `cc`.
+  /// C compiler command; empty means `$CC`, then `cc` (in a coverage
+  /// build, the C compiler that built the runtime).
   std::string CC;
   /// Extra flags appended to every compile (e.g. "-O2").
   std::vector<std::string> ExtraFlags;
   /// Path of libpaykan_runtime.a and of the directory holding Runtime.h.
-  /// Empty: the paths baked in at build time (then the install layout next
-  /// to the executable, then $PAYKAN_RUNTIME_DIR).
+  /// Empty: the build tree's runtime, then $PAYKAN_RUNTIME_DIR, then the
+  /// install layout next to the executable, then the install location
+  /// configured at build time.
   std::string RuntimeLib;
   std::string RuntimeIncludeDir;
   /// Object cache: one `.c` / `.o` pair per module under this directory
   /// (`<project root>/.paykan_cache`), reused while the module's generated
-  /// C and the compiler flags are unchanged.  Empty: no cache, everything
+  /// C and its cache key (`.key`) are unchanged.  Empty: no cache, everything
   /// is compiled into the temporary build directory.
   std::string CacheDir;
   /// The project root cache entries are named relative to.
@@ -39,9 +41,9 @@ struct Toolchain {
 
 /// Resolve the defaults of @p tc (compiler and runtime paths).  Returns false
 /// with a message when the runtime cannot be found.  When the runtime is the
-/// build tree's (or installed) one, the sanitizer flags the compiler was
-/// built with are appended to tc.ExtraFlags: that runtime archive is
-/// instrumented, so programs linked against it need them too.
+/// build tree's (or installed) one, the sanitizer and coverage flags the
+/// compiler was built with are appended to tc.ExtraFlags: that runtime
+/// archive is instrumented, so programs linked against it need them too.
 bool resolveToolchain(Toolchain &tc, std::ostream &errs);
 
 /// Directory of the running executable, or "".

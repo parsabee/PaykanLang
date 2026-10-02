@@ -46,7 +46,7 @@ PaykanString *PaykanString_from_int(int64_t value) {
 
 PaykanString *PaykanString_from_float(double value) {
   char buf[64];
-  int n = snprintf(buf, sizeof(buf), "%g", value);
+  int n = Paykan_format_float(buf, sizeof(buf), value);
   return PaykanString_new(buf, n);
 }
 

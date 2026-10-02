@@ -10,6 +10,10 @@
 
 #include "Runtime.h"
 
+#include <math.h>
+#include <stddef.h>
+#include <stdio.h>
+
 // -- equals helpers ----------------------------------------------------------
 //
 // Every `*_equals` implementation shares the same calling convention: `other`
@@ -42,6 +46,21 @@ static inline int64_t Paykan_equals_consume_other(PaykanObject *other,
                                                   int64_t result) {
   Paykan_release((PaykanShared *)other);
   return result;
+}
+
+/// Format a float the way StrFloat prints it ("%g"), with NaN and the
+/// infinities spelled canonically: "nan" (whatever its sign or payload),
+/// "inf" and "-inf".  printf's spelling of these is platform-dependent
+/// ("-nan" for a NaN with the sign bit set on glibc), and whether a NaN has
+/// its sign bit set depends on the hardware and on how it was produced, so
+/// without this the output would differ between backends and platforms.
+/// Returns the length written to @p buf (at most @p size - 1).
+static inline int Paykan_format_float(char *buf, size_t size, double value) {
+  if (isnan(value))
+    return snprintf(buf, size, "nan");
+  if (isinf(value))
+    return snprintf(buf, size, value < 0 ? "-inf" : "inf");
+  return snprintf(buf, size, "%g", value);
 }
 
 #endif // PAYKAN_RUNTIME_INTERNAL_H

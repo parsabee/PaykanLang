@@ -12,6 +12,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -405,6 +406,42 @@ TEST(Driver, CBackendBuildsAnExecutableAndCachesObjects) {
   auto [rc5, out5] = run(exe + " 2>&1");
   EXPECT_EQ(rc5, 5) << out5;
   EXPECT_EQ(out5, "rebuilt\n");
+
+  // The cache key covers the runtime header and the compiler's version: an
+  // object compiled by another paykan, or against another Runtime.h, is
+  // rebuilt even though the module's C is unchanged.  Simulate one by
+  // rewriting the stored key and corrupting the object (reusing it would
+  // fail the link).
+  auto keyPath = dir / ".paykan_cache" / "prog.pkn.key";
+  std::string key;
+  {
+    std::ifstream in(keyPath);
+    key.assign(std::istreambuf_iterator<char>(in),
+               std::istreambuf_iterator<char>());
+  }
+  EXPECT_NE(key.find(std::string("\npaykan:") + paykan::kVersion + "\n"),
+            std::string::npos)
+      << key;
+  EXPECT_NE(key.find("\nruntime.h:"), std::string::npos) << key;
+  EXPECT_NE(key.find("\nc:"), std::string::npos) << key;
+  // Entries are written through temporaries renamed into place; none are
+  // left behind.
+  for (const auto &e :
+       std::filesystem::directory_iterator(dir / ".paykan_cache"))
+    EXPECT_EQ(e.path().string().find(".tmp"), std::string::npos) << e.path();
+  for (const char *field : {"\npaykan:", "\nruntime.h:"}) {
+    std::string stale = key;
+    stale.insert(stale.find(field) + std::strlen(field), "old-");
+    std::ofstream(keyPath) << stale;
+    std::ofstream(cache) << "not an object file";
+    std::string rebuild = kPaykan;
+    rebuild += " --backend=c -o " + exe;
+    rebuild += " build " + src + " 2>&1";
+    auto [rc6, out6] = run(rebuild);
+    EXPECT_EQ(rc6, 0) << field << out6;
+    auto [rc7, out7] = run(exe + " 2>&1");
+    EXPECT_EQ(rc7, 5) << field << out7;
+  }
   std::filesystem::remove_all(dir);
 }
 
@@ -456,6 +493,70 @@ TEST(Driver, BuildProducesAStandaloneExecutable) {
   EXPECT_EQ(rc5, 7) << out5;
   EXPECT_EQ(out5, "no args\n");
   std::filesystem::remove_all(dir);
+}
+
+// `build` has no program arguments: options may follow the source file, and
+// a second file is an error rather than silently ignored.
+TEST(Driver, BuildAcceptsOptionsAfterTheSourceFile) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_build_order_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  auto src = (dir / "order.pkn").string();
+  std::ofstream(src) << "fn main() -> int { println(\"ok\"); return 7; }";
+  // Before and after the source file.
+  for (const std::string &args :
+       {std::string(" --backend=c -o ") + (dir / "before").string() +
+            " build " + src,
+        std::string(" build ") + src + " -o " + (dir / "after").string() +
+            " --backend=c"}) {
+    auto [rc, out] = run(std::string(kPaykan) + args + " 2>&1");
+    EXPECT_EQ(rc, 0) << args << "\n" << out;
+  }
+  for (const char *name : {"before", "after"}) {
+    auto exe = (dir / name).string();
+    ASSERT_TRUE(std::filesystem::exists(exe)) << exe;
+    auto [rc, out] = run(exe + " 2>&1");
+    EXPECT_EQ(rc, 7) << out;
+    EXPECT_EQ(out, "ok\n");
+  }
+  std::filesystem::remove_all(dir);
+}
+
+// A coverage build's runtime archive is instrumented, so every backend that
+// builds programs must link them with the same coverage flags (and a
+// compiler whose profile runtime matches; the C backend also compiles the
+// program with them): the program builds, runs and writes its own profile.
+TEST(Driver, ProgramsAreInstrumentedInACoverageBuild) {
+#ifndef PAYKAN_TEST_COVERAGE
+  GTEST_SKIP() << "not a PAYKAN_COVERAGE build";
+#else
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_cov_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  auto src = (dir / "cov.pkn").string();
+  std::ofstream(src) << "fn main() -> int { println(\"cov\"); return 3; }";
+  auto exe = (dir / "cov").string();
+  auto [rc, out] = run(paykanRun() + " -o " + exe + " build " + src + " 2>&1");
+  ASSERT_EQ(rc, 0) << out;
+  auto profile = (dir / "cov.profraw").string();
+  auto [rc2, out2] = run("LLVM_PROFILE_FILE=" + profile + " " + exe + " 2>&1");
+  EXPECT_EQ(rc2, 3) << out2;
+  EXPECT_EQ(out2, "cov\n");
+  std::error_code ec;
+  EXPECT_GT(std::filesystem::file_size(profile, ec), 0U) << ec.message();
+  std::filesystem::remove_all(dir);
+#endif
+}
+
+TEST(Driver, BuildRejectsAStrayArgument) {
+  auto src = writeTmp("fn main() -> int { return 0; }");
+  auto [rc, out] =
+      run(std::string(kPaykan) + " --backend=c build " + src + " extra 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_NE(rc, 0);
+  EXPECT_NE(out.find("unexpected argument 'extra'"), std::string::npos) << out;
 }
 
 TEST(Driver, CBackendRunForwardsArgumentsAndTracksTheHeap) {
