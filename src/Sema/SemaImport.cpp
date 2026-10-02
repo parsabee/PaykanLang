@@ -9,6 +9,7 @@
 #include "Sema.h"
 
 #include <algorithm>
+#include <filesystem>
 
 namespace paykan {
 namespace sema {
@@ -132,28 +133,25 @@ std::string Sema::resolveModulePath(const std::string &modulePath,
   auto relPath = module_utils::modulePathToRelative(modulePath);
 
   if (isSystem) {
-    llvm::SmallString<256> base;
+    std::filesystem::path base;
     const char *stdlibEnv = std::getenv(names::kPaykanStdlibEnv);
     if (stdlibEnv && stdlibEnv[0])
       base = stdlibEnv;
-    else {
-      base = ProjectRoot;
-      llvm::sys::path::append(base, names::kStdlibDir);
-    }
-    llvm::sys::path::append(base, relPath);
+    else
+      base = module_utils::appendPath(ProjectRoot, names::kStdlibDir);
+    base = module_utils::appendPath(base, relPath);
     if (auto resolved = module_utils::realPath(base); !resolved.empty())
       return resolved;
     error(loc, "system module '" + modulePath + "' not found (tried " +
-                   std::string(base) + ")");
+                   base.string() + ")");
     return "";
   }
 
-  llvm::SmallString<256> full(ProjectRoot);
-  llvm::sys::path::append(full, relPath);
+  std::filesystem::path full = module_utils::appendPath(ProjectRoot, relPath);
   if (auto resolved = module_utils::realPath(full); !resolved.empty())
     return resolved;
-  error(loc, "module '" + modulePath + "' not found (tried " +
-                 std::string(full) + ")");
+  error(loc,
+        "module '" + modulePath + "' not found (tried " + full.string() + ")");
   return "";
 }
 
@@ -449,7 +447,13 @@ bool Sema::processImport(ast::ImportDecl *node) {
     // module.  (c) is never exported.
     ModuleInfo info;
     auto &modCtx = importDriverPtr->getASTContext();
-    llvm::StringSet<> localClasses, localEnums;
+    // Defining module of a type the imported module itself reached through
+    // an import ("" when unknown).
+    auto lookupOrigin = [](const Sema &s, const std::string &name) {
+      auto it = s.ImportedTypeOrigins.find(name);
+      return it == s.ImportedTypeOrigins.end() ? std::string() : it->second;
+    };
+    StringSet localClasses, localEnums;
     for (auto *cd : importRoot->getClassDecls())
       localClasses.insert(cd->getName());
     for (auto *ed : importRoot->getEnumDecls())
@@ -472,8 +476,7 @@ bool Sema::processImport(ast::ImportDecl *node) {
       ModuleInfo::ClassInfo ci;
       ci.Name = name;
       ci.IsLocal = localClasses.count(name) != 0;
-      ci.OriginPath =
-          ci.IsLocal ? path : importSema.ImportedTypeOrigins.lookup(name);
+      ci.OriginPath = ci.IsLocal ? path : lookupOrigin(importSema, name);
       if (ct->getSuperClass()) {
         ci.SuperClassName = ct->getSuperClass()->getName();
         if (ci.SuperClassName == names::kObj)
@@ -508,8 +511,7 @@ bool Sema::processImport(ast::ImportDecl *node) {
       ModuleInfo::EnumInfo ei;
       ei.Name = name;
       ei.IsLocal = localEnums.count(name) != 0;
-      ei.OriginPath =
-          ei.IsLocal ? path : importSema.ImportedTypeOrigins.lookup(name);
+      ei.OriginPath = ei.IsLocal ? path : lookupOrigin(importSema, name);
       for (auto *v : et->getVariants())
         ei.Variants.push_back(*v);
       info.ExportedEnums.push_back(std::move(ei));
@@ -534,7 +536,7 @@ bool Sema::processImport(ast::ImportDecl *node) {
       if (sig.IsBuiltin)
         continue;
       ModuleInfo::FunctionInfo fi;
-      fi.Name = name.str();
+      fi.Name = name;
       fi.ReturnTypeName = ast::typeName(sig.ReturnType);
       for (auto *pty : sig.ParamTypes)
         fi.ParamTypeNames.push_back(ast::typeName(pty));

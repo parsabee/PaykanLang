@@ -8,6 +8,7 @@
 #include "Names.h"
 #include "Version.h"
 
+#include <llvm/ADT/SmallString.h>
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
@@ -19,6 +20,8 @@
 #include <llvm/Support/Path.h>
 #include <llvm/Support/SHA256.h>
 #include <llvm/Support/raw_ostream.h>
+
+#include <filesystem>
 
 namespace paykan {
 namespace codegen {
@@ -122,21 +125,69 @@ static void writeCacheFile(const llvm::Module &mod, llvm::StringRef cachePath) {
 /// Resolve an import to the canonical path of its source file, mirroring
 /// Sema::resolveModulePath.  Returns "" if the file does not exist (Sema has
 /// already reported that).
-static std::string resolveImportFile(llvm::StringRef projectRoot, bool isSystem,
-                                     llvm::StringRef modulePath) {
-  llvm::SmallString<256> full;
+/// Build the bitcode cache path for a resolved (canonical) source file.
+///
+/// Layout: <projectRoot>/.paykan_cache/<path-relative-to-projectRoot>.bc
+///
+/// The cache is anchored to the project root (the main file's directory, the
+/// same root imports are resolved against), never to the current working
+/// directory, so every invocation of a project shares one cache wherever it
+/// is launched from.  A module resolved from outside the project root (e.g.
+/// a stdlib module located through PAYKAN_STDLIB) mirrors its full path,
+/// minus the root directory, under the same cache directory.  An empty
+/// projectRoot means "the current directory" (the driver passes "" for a bare
+/// `paykan main.pkn`), which yields a relative `.paykan_cache/...` path.
+static llvm::SmallString<256> getCachePath(llvm::StringRef resolvedPath,
+                                           llvm::StringRef projectRoot) {
+  llvm::SmallString<256> cachePath(projectRoot);
+  llvm::sys::path::append(cachePath, names::kCacheDir);
+
+  // Canonicalize projectRoot so prefix stripping works with resolved paths.
+  llvm::SmallString<256> canonRoot;
+  if (llvm::sys::fs::real_path(projectRoot.empty() ? "." : projectRoot,
+                               canonRoot))
+    canonRoot = projectRoot; // fallback
+
+  // Compute the portion relative to the project root; the match must end on a
+  // path-component boundary so "<root>2/x.pkn" is not mistaken for "<root>".
+  llvm::StringRef rel = resolvedPath;
+  if (!canonRoot.empty() && rel.starts_with(canonRoot) &&
+      (rel.size() == canonRoot.size() ||
+       llvm::sys::path::is_separator(rel[canonRoot.size()]) ||
+       llvm::sys::path::is_separator(canonRoot.back()))) {
+    rel = rel.drop_front(canonRoot.size());
+    while (!rel.empty() && llvm::sys::path::is_separator(rel.front()))
+      rel = rel.drop_front(1);
+  } else {
+    // Outside the project: mirror the absolute path without its root ("/" or
+    // "C:\") so it stays inside the cache directory.
+    rel = llvm::sys::path::relative_path(rel);
+  }
+
+  // Append the relative source path, replacing .pkn with .bc.
+  for (auto comp = llvm::sys::path::begin(rel), end = llvm::sys::path::end(rel);
+       comp != end; ++comp) {
+    llvm::sys::path::append(cachePath, *comp);
+  }
+  llvm::sys::path::replace_extension(cachePath, ".bc");
+  return cachePath;
+}
+
+static std::string resolveImportFile(const std::string &projectRoot,
+                                     bool isSystem,
+                                     const std::string &modulePath) {
+  std::filesystem::path full;
   if (isSystem) {
     const char *env = std::getenv(names::kPaykanStdlibEnv);
-    if (env && env[0]) {
+    if (env && env[0])
       full = env;
-    } else {
-      full = projectRoot;
-      llvm::sys::path::append(full, names::kStdlibDir);
-    }
+    else
+      full = module_utils::appendPath(projectRoot, names::kStdlibDir);
   } else {
     full = projectRoot;
   }
-  llvm::sys::path::append(full, module_utils::modulePathToRelative(modulePath));
+  full = module_utils::appendPath(
+      full, module_utils::modulePathToRelative(modulePath));
   return module_utils::realPath(full);
 }
 
@@ -313,7 +364,7 @@ void CodeGen::processImports(ast::TranslationUnit *tu) {
       // imports; an entry is only ever used if it was written under the very
       // same key.  Anything else (missing, truncated, foreign, or stale)
       // falls through to a full recompile, which rewrites it.
-      auto cachePath = module_utils::getCachePath(resolved, ProjectRoot);
+      auto cachePath = getCachePath(resolved, ProjectRoot);
       std::string cacheKey = importCacheKey(resolved, *modCtx);
       if (!cacheKey.empty()) {
         if (auto buf = llvm::MemoryBuffer::getFile(cachePath)) {

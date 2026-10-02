@@ -4,7 +4,7 @@
 # ----------------------------------------------------------------------------
 
 llvm_map_components_to_libnames(CODEGEN_LLVM_LIBS
-    core support passes bitreader bitwriter
+    core support passes bitreader bitwriter linker
 )
 
 add_library(paykan_codegen STATIC CodeGen.cpp ClassCodeGen.cpp CodeGenImport.cpp)

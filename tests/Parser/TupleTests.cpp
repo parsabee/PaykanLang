@@ -6,6 +6,7 @@
 #include "ASTPrinter.h"
 #include "TestUtils.h"
 #include <gtest/gtest.h>
+#include <sstream>
 
 using namespace paykan::test;
 
@@ -14,11 +15,10 @@ static std::string dumpAST(const std::string &src) {
   auto [ok, driver] = parse(src);
   if (!ok)
     return "";
-  std::string out;
-  llvm::raw_string_ostream os(out);
+  std::ostringstream os;
   paykan::ast::ASTPrinter printer(os);
   printer.visit(driver->getRoot());
-  return out;
+  return os.str();
 }
 
 // ─── type annotations ───────────────────────────────────────────────────────

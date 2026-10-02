@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // Codegen tests: functions, return values, Str variable/ARC regressions.
 
-#include "TestUtils.h"
+#include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
 
 using namespace paykan::test;

@@ -5,7 +5,7 @@
 // blocks: a `T?` is a possibly-NULL PaykanShared* box, so each path that
 // retains / releases / unwraps it must be NULL-safe and balanced.
 
-#include "TestUtils.h"
+#include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
 
 extern "C" {

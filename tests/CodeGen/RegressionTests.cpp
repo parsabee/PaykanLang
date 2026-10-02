@@ -4,7 +4,7 @@
 // runtime test runs under the tracking allocator and asserts zero live heap
 // blocks, since most of these bugs were ownership imbalances.
 
-#include "TestUtils.h"
+#include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
 
 #include <filesystem>

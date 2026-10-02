@@ -6,33 +6,51 @@
 #include "AST.h"
 #include "ASTContext.h" // remapType() calls into ASTContext members
 
-#include <llvm/ADT/SmallString.h>
-#include <llvm/ADT/SmallVector.h>
-#include <llvm/ADT/StringRef.h>
-#include <llvm/Support/FileSystem.h>
-#include <llvm/Support/Path.h>
+#include <filesystem>
+#include <string>
+#include <string_view>
+#include <system_error>
 
 namespace paykan {
 namespace module_utils {
 
-/// Split a module path on "::" and build a platform-native relative path
-/// using llvm::sys::path::append, then tack on the ".pkn" extension.
-inline llvm::SmallString<128> modulePathToRelative(llvm::StringRef modulePath) {
-  llvm::SmallString<128> relPath;
-  llvm::SmallVector<llvm::StringRef, 4> components;
-  modulePath.split(components, "::", /*MaxSplit=*/-1, /*KeepEmpty=*/false);
-  for (auto &c : components)
-    llvm::sys::path::append(relPath, c);
-  relPath += ".pkn";
-  return relPath;
+/// Append @p component to @p base the way a module path is joined: an empty
+/// base yields the bare component (so an empty project root means "the
+/// current directory"), and the component is always treated as relative.
+inline std::filesystem::path
+appendPath(const std::filesystem::path &base,
+           const std::filesystem::path &component) {
+  if (base.empty())
+    return component;
+  return base / component.relative_path();
+}
+
+/// Split a module path on "::" and build a platform-native relative path,
+/// then tack on the ".pkn" extension.  Empty components are skipped.
+inline std::string modulePathToRelative(std::string_view modulePath) {
+  std::filesystem::path relPath;
+  size_t pos = 0;
+  while (pos <= modulePath.size()) {
+    size_t sep = modulePath.find("::", pos);
+    std::string_view c = modulePath.substr(pos, sep == std::string_view::npos
+                                                    ? std::string_view::npos
+                                                    : sep - pos);
+    if (!c.empty())
+      relPath /= c;
+    if (sep == std::string_view::npos)
+      break;
+    pos = sep + 2;
+  }
+  return relPath.string() + ".pkn";
 }
 
 /// Resolve a path to a real (canonical) path, or return empty on failure.
-inline std::string realPath(const llvm::Twine &path) {
-  llvm::SmallString<256> resolved;
-  if (llvm::sys::fs::real_path(path, resolved))
-    return ""; // real_path returns non-zero on failure
-  return std::string(resolved);
+inline std::string realPath(const std::filesystem::path &path) {
+  std::error_code ec;
+  auto resolved = std::filesystem::canonical(path, ec);
+  if (ec)
+    return "";
+  return resolved.string();
 }
 
 /// Remap a Type* from a foreign ASTContext to the equivalent in ours.
@@ -49,63 +67,6 @@ inline ast::Type *remapType(ast::Type *ty, ast::ASTContext &ctx) {
     return ctx.getObjTy(); // fallback: type not exported — treat as Obj
   }
   return ty;
-}
-
-} // namespace module_utils
-} // namespace paykan
-
-// These depend on Names.h, so include after the basic utilities.
-#include "Names.h"
-
-namespace paykan {
-namespace module_utils {
-
-/// Build the bitcode cache path for a resolved (canonical) source file.
-///
-/// Layout: <projectRoot>/.paykan_cache/<path-relative-to-projectRoot>.bc
-///
-/// The cache is anchored to the project root (the main file's directory, the
-/// same root imports are resolved against), never to the current working
-/// directory, so every invocation of a project shares one cache wherever it
-/// is launched from.  A module resolved from outside the project root (e.g.
-/// a stdlib module located through PAYKAN_STDLIB) mirrors its full path,
-/// minus the root directory, under the same cache directory.  An empty
-/// projectRoot means "the current directory" (the driver passes "" for a bare
-/// `paykan main.pkn`), which yields a relative `.paykan_cache/...` path.
-inline llvm::SmallString<256> getCachePath(llvm::StringRef resolvedPath,
-                                           llvm::StringRef projectRoot) {
-  llvm::SmallString<256> cachePath(projectRoot);
-  llvm::sys::path::append(cachePath, names::kCacheDir);
-
-  // Canonicalize projectRoot so prefix stripping works with resolved paths.
-  llvm::SmallString<256> canonRoot;
-  if (llvm::sys::fs::real_path(projectRoot.empty() ? "." : projectRoot,
-                               canonRoot))
-    canonRoot = projectRoot; // fallback
-
-  // Compute the portion relative to the project root; the match must end on a
-  // path-component boundary so "<root>2/x.pkn" is not mistaken for "<root>".
-  llvm::StringRef rel = resolvedPath;
-  if (!canonRoot.empty() && rel.starts_with(canonRoot) &&
-      (rel.size() == canonRoot.size() ||
-       llvm::sys::path::is_separator(rel[canonRoot.size()]) ||
-       llvm::sys::path::is_separator(canonRoot.back()))) {
-    rel = rel.drop_front(canonRoot.size());
-    while (!rel.empty() && llvm::sys::path::is_separator(rel.front()))
-      rel = rel.drop_front(1);
-  } else {
-    // Outside the project: mirror the absolute path without its root ("/" or
-    // "C:\") so it stays inside the cache directory.
-    rel = llvm::sys::path::relative_path(rel);
-  }
-
-  // Append the relative source path, replacing .pkn with .bc.
-  for (auto comp = llvm::sys::path::begin(rel), end = llvm::sys::path::end(rel);
-       comp != end; ++comp) {
-    llvm::sys::path::append(cachePath, *comp);
-  }
-  llvm::sys::path::replace_extension(cachePath, ".bc");
-  return cachePath;
 }
 
 } // namespace module_utils

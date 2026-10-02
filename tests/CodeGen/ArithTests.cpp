@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // Codegen tests: arithmetic, literals, and string primitives.
 
-#include "TestUtils.h"
+#include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
 
 using namespace paykan::test;

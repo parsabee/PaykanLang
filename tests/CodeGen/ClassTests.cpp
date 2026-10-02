@@ -3,7 +3,7 @@
 // Codegen tests: class layout, constructors, fields, methods, inheritance,
 // and match statement dispatch.
 
-#include "TestUtils.h"
+#include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
 
 using namespace paykan::test;

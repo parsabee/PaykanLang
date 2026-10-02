@@ -5,8 +5,8 @@
 // case checks both the observable output and that the tuple, its box and its
 // reference elements are released exactly once.
 
+#include "CodeGenTestUtils.h"
 #include "Names.h"
-#include "TestUtils.h"
 #include <gtest/gtest.h>
 
 extern "C" {

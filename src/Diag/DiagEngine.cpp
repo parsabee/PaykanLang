@@ -3,9 +3,8 @@
 
 #include "DiagEngine.h"
 
-#include <llvm/Support/raw_ostream.h>
-
 #include <algorithm>
+#include <ostream>
 #include <string>
 
 namespace paykan {

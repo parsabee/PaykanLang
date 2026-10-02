@@ -8,12 +8,24 @@
 #include "Sema.h"
 #include "SemaInternal.h"
 
-#include <llvm/ADT/SmallBitVector.h>
-#include <llvm/ADT/StringMap.h>
-#include <llvm/ADT/Twine.h>
+#include "StringMap.h"
 
 #include <functional>
 #include <unordered_map>
+
+namespace {
+
+/// Definite-assignment bit set: one bit per own field of the class.
+using BitSet = std::vector<bool>;
+
+BitSet bitAnd(const BitSet &a, const BitSet &b) {
+  BitSet out(a.size());
+  for (size_t i = 0; i < a.size(); ++i)
+    out[i] = a[i] && b[i];
+  return out;
+}
+
+} // namespace
 
 namespace paykan {
 namespace sema {
@@ -63,11 +75,11 @@ bool Sema::checkInitFieldsAssigned(ast::ClassType *ct, ast::CompoundStmt *body,
     return true;
 
   // Map each own field name to a bit index.
-  llvm::StringMap<unsigned> fieldIndex;
+  StringMap<unsigned> fieldIndex;
   for (unsigned i = 0; i < fields.size(); ++i)
     fieldIndex[fields[i].first] = i;
   const unsigned n = static_cast<unsigned>(fields.size());
-  const llvm::SmallBitVector full(n, true);
+  const BitSet full(n, true);
 
   // Returns the bit index of `self.<field>` for a member assignment, or -1 if
   // the statement does not assign one of this class's own fields.
@@ -81,14 +93,13 @@ bool Sema::checkInitFieldsAssigned(ast::ClassType *ct, ast::CompoundStmt *body,
 
   // The set of fields left unassigned on a terminating path; bits are reported
   // once (a class-level error per field) to avoid duplicate diagnostics.
-  llvm::SmallBitVector reported(n, false);
+  BitSet reported(n, false);
   bool ok = true;
 
-  auto reportMissing = [&](const llvm::SmallBitVector &assigned,
-                           ast::SourceLocation loc) {
+  auto reportMissing = [&](const BitSet &assigned, ast::SourceLocation loc) {
     for (unsigned i = 0; i < n; ++i) {
-      if (!assigned.test(i) && !reported.test(i)) {
-        reported.set(i);
+      if (!assigned[i] && !reported[i]) {
+        reported[i] = true;
         error(loc, "field '" + fields[i].first + "' of class '" + className +
                        "' is not assigned on every path through '" +
                        names::kMethodInit + "'");
@@ -101,16 +112,16 @@ bool Sema::checkInitFieldsAssigned(ast::ClassType *ct, ast::CompoundStmt *body,
   // assigned along the fall-through path, and whether the path always exits via
   // return (so it never falls through).
   struct Flow {
-    llvm::SmallBitVector Assigned;
+    BitSet Assigned;
     bool AlwaysReturns = false;
   };
 
-  std::function<Flow(ast::Stmt *, const llvm::SmallBitVector &)> analyzeStmt;
-  std::function<Flow(llvm::ArrayRef<ast::Stmt *>, const llvm::SmallBitVector &)>
+  std::function<Flow(ast::Stmt *, const BitSet &)> analyzeStmt;
+  std::function<Flow(const std::vector<ast::Stmt *> &, const BitSet &)>
       analyzeBlock;
 
-  analyzeBlock = [&](llvm::ArrayRef<ast::Stmt *> stmts,
-                     const llvm::SmallBitVector &in) -> Flow {
+  analyzeBlock = [&](const std::vector<ast::Stmt *> &stmts,
+                     const BitSet &in) -> Flow {
     Flow f{in, false};
     for (auto *s : stmts) {
       if (f.AlwaysReturns)
@@ -125,12 +136,12 @@ bool Sema::checkInitFieldsAssigned(ast::ClassType *ct, ast::CompoundStmt *body,
     return f;
   };
 
-  analyzeStmt = [&](ast::Stmt *s, const llvm::SmallBitVector &in) -> Flow {
+  analyzeStmt = [&](ast::Stmt *s, const BitSet &in) -> Flow {
     if (auto *ma = ast::dyn_cast<ast::MemberAssignStmt>(s)) {
-      llvm::SmallBitVector out = in;
+      BitSet out = in;
       int bit = selfFieldBit(ma);
       if (bit >= 0)
-        out.set(static_cast<unsigned>(bit));
+        out[static_cast<unsigned>(bit)] = true;
       return {out, false};
     }
     if (auto *ret = ast::dyn_cast<ast::ReturnStmt>(s)) {
@@ -158,8 +169,7 @@ bool Sema::checkInitFieldsAssigned(ast::ClassType *ct, ast::CompoundStmt *body,
         return {elseF.Assigned, false};
       if (elseF.AlwaysReturns)
         return {thenF.Assigned, false};
-      llvm::SmallBitVector out = thenF.Assigned;
-      out &= elseF.Assigned;
+      BitSet out = bitAnd(thenF.Assigned, elseF.Assigned);
       return {out, false};
     }
     if (auto *ws = ast::dyn_cast<ast::WhileStmt>(s)) {
@@ -174,13 +184,13 @@ bool Sema::checkInitFieldsAssigned(ast::ClassType *ct, ast::CompoundStmt *body,
       // variant, both bool literals, or None + the wrapped type for an
       // optional subject — see detail::matchIsExhaustive) can guarantee
       // assignments.
-      llvm::SmallBitVector out = full;
+      BitSet out = full;
       bool anyFallThrough = false;
       for (ast::MatchArm *arm : ms->getArms()) {
         Flow af = analyzeBlock(arm->getBody()->getStatements(), in);
         if (!af.AlwaysReturns) {
           anyFallThrough = true;
-          out &= af.Assigned;
+          out = bitAnd(out, af.Assigned);
         }
       }
       if (!detail::matchIsExhaustive(ms))
@@ -198,10 +208,10 @@ bool Sema::checkInitFieldsAssigned(ast::ClassType *ct, ast::CompoundStmt *body,
   // None, so such fields start out definitely assigned.  This is what makes
   // linked structures ergonomic (prototype decision, see
   // proposals/optionals.md).
-  llvm::SmallBitVector entry(n, false);
+  BitSet entry(n, false);
   for (unsigned i = 0; i < n; ++i)
     if (ast::isa<ast::OptionalType>(fields[i].second))
-      entry.set(i);
+      entry[i] = true;
   Flow result = analyzeBlock(body->getStatements(), entry);
   if (!result.AlwaysReturns)
     reportMissing(result.Assigned, initLoc);
@@ -218,7 +228,7 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
   //          too — otherwise `class print {...}` would silently replace the
   //          builtin `print`.
   // -------------------------------------------------------------------------
-  llvm::StringMap<ast::ClassDecl *> localClasses;
+  StringMap<ast::ClassDecl *> localClasses;
   for (auto *cd : classDecls) {
     if (!localClasses.try_emplace(cd->getName(), cd).second) {
       error(cd->getLocation(), "redefinition of class '" + cd->getName() + "'");
@@ -236,7 +246,7 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
   // Phase 2: Topological sort (superclass before subclass) + cycle detection.
   // -------------------------------------------------------------------------
   std::vector<ast::ClassDecl *> sorted;
-  llvm::StringMap<uint8_t> color; // 0=white 1=gray(in-progress) 2=black(done)
+  StringMap<uint8_t> color; // 0=white 1=gray(in-progress) 2=black(done)
   bool aborted = false;
 
   std::function<void(ast::ClassDecl *)> topoVisit = [&](ast::ClassDecl *cd) {
@@ -338,7 +348,7 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
     ct->reinheritVTable(super);
 
   // -- fields --
-  llvm::StringSet<> fieldNames;
+  StringSet fieldNames;
   for (auto *field : cd->getFields()) {
     if (!fieldNames.insert(field->getName()).second) {
       error(field->getLocation(), "duplicate field '" + field->getName() +
@@ -371,7 +381,7 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
   }
 
   // -- methods --
-  llvm::StringSet<> methodNames;
+  StringSet methodNames;
   for (auto *method : cd->getMethods()) {
     if (!methodNames.insert(method->getName()).second) {
       error(method->getLocation(), "duplicate method '" + method->getName() +
@@ -663,20 +673,30 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
                              const std::string &what, const std::string &name,
                              ast::SourceLocation loc) -> bool {
     bool pok = true;
-    llvm::StringSet<> seen;
+    StringSet seen;
     for (auto *p : params) {
       if (!seen.insert(*p).second) {
-        error(loc, (llvm::Twine("duplicate type parameter '") + *p + "' in " +
-                    what + " '" + name + "'")
-                       .str());
+        std::string msg = "duplicate type parameter '";
+        msg += *p;
+        msg += "' in ";
+        msg += what;
+        msg += " '";
+        msg += name;
+        msg += "'";
+        error(loc, msg);
         pok = false;
         continue;
       }
       if (Ctx.lookupType(*p) || LocalClassNames.count(*p) ||
           ClassTemplates.count(*p)) {
-        error(loc, (llvm::Twine("type parameter '") + *p + "' of " + what +
-                    " '" + name + "' shadows a type of the same name")
-                       .str());
+        std::string msg = "type parameter '";
+        msg += *p;
+        msg += "' of ";
+        msg += what;
+        msg += " '";
+        msg += name;
+        msg += "' shadows a type of the same name";
+        error(loc, msg);
         pok = false;
       }
     }
@@ -927,8 +947,8 @@ std::string Sema::instantiateFunction(const std::string &name,
 }
 
 bool Sema::unifyTypes(ast::Type *pattern, ast::Type *actual,
-                      const llvm::StringSet<> &typeParams,
-                      llvm::StringMap<ast::Type *> &bindings,
+                      const StringSet &typeParams,
+                      StringMap<ast::Type *> &bindings,
                       InferenceConflict &conflict) {
   if (!pattern || !actual)
     return true;
@@ -1024,11 +1044,11 @@ bool Sema::inferTypeArgs(const std::string &templateName,
                    " argument(s), got " + std::to_string(argTypes.size()));
     return false;
   }
-  llvm::StringSet<> params;
+  StringSet params;
   for (auto *p : typeParams)
     params.insert(*p);
 
-  llvm::StringMap<ast::Type *> bindings;
+  StringMap<ast::Type *> bindings;
   InferenceConflict conflict;
   for (size_t i = 0; i < paramTypes.size(); ++i) {
     if (!unifyTypes(paramTypes[i], argTypes[i], params, bindings, conflict)) {
@@ -1131,7 +1151,7 @@ bool Sema::checkPendingInstantiations() {
   for (size_t i = 0; i < PendingInstantiations.size(); ++i) {
     PendingInstantiation p = PendingInstantiations[i];
     InstantiationStack.push_back({p.Name, p.RequestLoc});
-    const llvm::StringSet<> *savedParams = CurrentTypeParams;
+    const StringSet *savedParams = CurrentTypeParams;
     CurrentTypeParams = &p.TypeParams;
     bool r = p.Class ? visitClassDecl(p.Class) : visitFuncDecl(p.Func);
     CurrentTypeParams = savedParams;
@@ -1162,12 +1182,12 @@ void Sema::injectInstantiations(ast::TranslationUnit *tu) {
   std::vector<ast::ClassDecl *> all = tu->getClassDecls();
   all.insert(all.end(), InstantiatedClassDecls.begin(),
              InstantiatedClassDecls.end());
-  llvm::StringMap<ast::ClassDecl *> byName;
+  StringMap<ast::ClassDecl *> byName;
   for (auto *cd : all)
     byName[cd->getName()] = cd;
 
   std::vector<ast::ClassDecl *> ordered;
-  llvm::StringSet<> done, visiting;
+  StringSet done, visiting;
   std::function<void(ast::ClassDecl *)> place = [&](ast::ClassDecl *cd) {
     if (done.count(cd->getName()) || !visiting.insert(cd->getName()).second)
       return;
@@ -1177,7 +1197,7 @@ void Sema::injectInstantiations(ast::TranslationUnit *tu) {
     if (auto e = ConstructsEdges.find(cd->getName());
         e != ConstructsEdges.end())
       for (const auto &dep : e->second)
-        if (auto d = byName.find(dep.getKey()); d != byName.end())
+        if (auto d = byName.find(dep); d != byName.end())
           place(d->second);
     done.insert(cd->getName());
     ordered.push_back(cd);

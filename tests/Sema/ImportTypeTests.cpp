@@ -6,6 +6,7 @@
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
+#include <sstream>
 
 using namespace paykan::test;
 
@@ -30,13 +31,12 @@ static SemaFileResult semaCheckFile(const std::string &filePath,
   paykan::parser::ParserDriver drv;
   if (drv.parseFile(filePath) != 0)
     return {false, "parse error"};
-  std::string diag;
-  llvm::raw_string_ostream os(diag);
+  std::ostringstream os;
   paykan::sema::DiagEngine diagEngine(os);
   diagEngine.setSourceInfo(drv.getCurrentFile(), &drv.getSourceLines());
   paykan::sema::Sema sema(drv.getASTContext(), diagEngine, projectRoot);
   bool ok = sema.run(drv.getRoot()).Ok;
-  return {ok, diag};
+  return {ok, os.str()};
 }
 
 // ─── OK: exported signatures that name other types of the SAME module ────────

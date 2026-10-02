@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // CodeGen / E2E tests for the `enum` type.
 
-#include "TestUtils.h"
+#include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
 
 using namespace paykan::test;

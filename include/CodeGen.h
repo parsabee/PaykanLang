@@ -589,6 +589,17 @@ public:
   /// Run optimization passes at the given level (O0 = none, O1 = basic, …).
   void optimize(llvm::OptimizationLevel level);
 
+  /// Run optimization passes at -O<level>; levels above 3 are clamped to 3.
+  void optimize(unsigned level);
+
+  /// Verify the generated module.  On failure, returns false and leaves the
+  /// verifier's report in @p err.
+  bool verify(std::string &err) const;
+
+  /// Link every imported module into the main module (after which
+  /// takeImportedModules() returns nothing).  Returns false on failure.
+  bool linkImportedModules();
+
   /// Release ownership of the generated LLVM module.
   std::unique_ptr<llvm::Module> takeModule() { return std::move(Module); }
 

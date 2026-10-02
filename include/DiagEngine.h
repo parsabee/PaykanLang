@@ -6,14 +6,9 @@
 
 #include "AST.h"
 
+#include <iosfwd>
 #include <string>
 #include <vector>
-
-// Forward declaration — callers that need raw_ostream methods must include
-// <llvm/Support/raw_ostream.h> themselves.
-namespace llvm {
-class raw_ostream;
-}
 
 namespace paykan {
 namespace sema {
@@ -35,13 +30,13 @@ struct Diagnostic {
 // from a single point.
 //
 // Usage:
-//   DiagEngine diag(llvm::errs());
+//   DiagEngine diag(std::cerr);
 //   diag.setSourceInfo("foo.pkn", &lines);
 //   diag.error(loc, "undeclared variable 'x'");
 //   if (diag.hasErrors()) { ... }
 //
 class DiagEngine {
-  llvm::raw_ostream &OS;
+  std::ostream &OS;
   std::string SourceName;
   const std::vector<std::string> *SourceLines = nullptr;
   unsigned ErrorCount = 0;
@@ -51,9 +46,9 @@ class DiagEngine {
             const std::string &msg);
 
 public:
-  explicit DiagEngine(llvm::raw_ostream &os) : OS(os) {}
+  explicit DiagEngine(std::ostream &os) : OS(os) {}
 
-  // Non-copyable, non-movable (owns the raw_ostream reference).
+  // Non-copyable, non-movable (owns the stream reference).
   DiagEngine(const DiagEngine &) = delete;
   DiagEngine &operator=(const DiagEngine &) = delete;
 
@@ -72,7 +67,7 @@ public:
   bool hasErrors() const { return ErrorCount > 0; }
   const std::vector<Diagnostic> &getDiagnostics() const { return Diagnostics; }
 
-  llvm::raw_ostream &getOS() { return OS; }
+  std::ostream &getOS() { return OS; }
 };
 
 } // namespace sema

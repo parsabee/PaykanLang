@@ -4,11 +4,7 @@
 # ----------------------------------------------------------------------------
 
 add_library(paykan_ast_printer STATIC ASTPrinter.cpp)
-target_include_directories(paykan_ast_printer SYSTEM
-    PRIVATE ${LLVM_INCLUDE_DIRS}
-)
 target_link_libraries(paykan_ast_printer
-    PUBLIC  paykan_parser
+    PUBLIC  paykan_ast
     PRIVATE paykan_compile_options
-            LLVMSupport
 )

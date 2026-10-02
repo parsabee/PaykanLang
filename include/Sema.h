@@ -8,12 +8,12 @@
 #include "ASTVisitor.h"
 #include "DiagEngine.h"
 
-#include <llvm/ADT/DenseMap.h>
-#include <llvm/ADT/SmallVector.h>
-#include <llvm/ADT/StringMap.h>
-#include <llvm/ADT/StringSet.h>
+#include "StringMap.h"
+
 #include <memory>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace paykan {
@@ -39,7 +39,7 @@ struct SemaContext {
   /// Pre-computed SemaContexts for directly-imported modules, keyed by
   /// resolved file path. Populated by Sema::run() so CodeGen can reuse
   /// them without re-running the Sema pass.
-  llvm::StringMap<std::shared_ptr<SemaContext>> ImportedContexts;
+  StringMap<std::shared_ptr<SemaContext>> ImportedContexts;
 
   explicit operator bool() const { return Ok; }
 };
@@ -55,7 +55,7 @@ struct SemaContext {
 // Statement and declaration visitors return true on success, false on failure.
 //
 // Usage:
-//   DiagEngine diag(llvm::errs());
+//   DiagEngine diag(std::cerr);
 //   diag.setSourceInfo("foo.pkn", &lines);
 //   Sema S(ctx, diag);
 //   bool ok = S.run(translationUnit);
@@ -71,34 +71,34 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// pointer to its enclosing (parent) scope.
   struct Scope {
     Scope *Parent = nullptr;
-    llvm::StringMap<ast::Type *> Locals;
+    StringMap<ast::Type *> Locals;
     /// Names moved-out of this scope via `mov`.  A moved name may not be read
     /// again until it is re-assigned (which revives it).
-    llvm::StringSet<> Moved;
+    StringSet Moved;
 
     explicit Scope(Scope *parent = nullptr);
 
     /// Look up a name, walking the scope chain.
-    ast::Type *lookup(llvm::StringRef name) const;
+    ast::Type *lookup(std::string_view name) const;
 
     /// Declare a name in *this* scope (does not check parent scopes).
     /// Returns false if the name already exists in this scope.
-    bool declare(llvm::StringRef name, ast::Type *ty);
+    bool declare(std::string_view name, ast::Type *ty);
 
     /// Insert or update a binding in this scope.
-    void set(llvm::StringRef name, ast::Type *ty);
+    void set(std::string_view name, ast::Type *ty);
 
     /// Returns true if the name exists in *this* scope (not parents).
-    bool contains(llvm::StringRef name) const;
+    bool contains(std::string_view name) const;
 
     /// Find the innermost scope that contains this name, or nullptr.
-    Scope *findOwner(llvm::StringRef name);
+    Scope *findOwner(std::string_view name);
 
     /// Move tracking (operate on the owning scope, walking the chain).
     /// markMoved / clearMoved are no-ops if the name is unknown.
-    void markMoved(llvm::StringRef name);
-    void clearMoved(llvm::StringRef name);
-    bool isMoved(llvm::StringRef name) const;
+    void markMoved(std::string_view name);
+    void clearMoved(std::string_view name);
+    bool isMoved(std::string_view name) const;
   };
 
   Scope *CurrentScope = nullptr;
@@ -126,8 +126,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // innermost first.  Scopes created inside a branch die with the branch, so
   // the chain at a construct's entry and at each of its branch exits is
   // identical and entries correspond positionally.
-  using MovedState =
-      llvm::SmallVector<std::pair<Scope *, llvm::StringSet<>>, 8>;
+  using MovedState = std::vector<std::pair<Scope *, StringSet>>;
 
   /// Snapshot the Moved set of every scope on the current chain.
   MovedState saveMovedState() const;
@@ -190,15 +189,15 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   };
 
   /// Maps function names to their signatures.
-  llvm::StringMap<FunctionSig> FunctionTable;
+  StringMap<FunctionSig> FunctionTable;
 
   /// Register a function signature.
-  void declareFunction(llvm::StringRef name, ast::Type *retTy,
+  void declareFunction(std::string_view name, ast::Type *retTy,
                        std::vector<ast::Type *> paramTys,
                        bool isBuiltin = false);
 
   /// Look up a function signature, or nullptr if unknown.
-  const FunctionSig *lookupFunction(llvm::StringRef name) const;
+  const FunctionSig *lookupFunction(std::string_view name) const;
 
   /// The kind of top-level entity being declared, for checkDeclNameAvailable.
   enum class DeclKind { Function, Class, Enum };
@@ -287,7 +286,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   // Check that a variable is declared. Returns its type,
   // or nullptr (with error emitted) on failure.
-  ast::Type *checkIdentLive(llvm::StringRef name, ast::SourceLocation loc);
+  ast::Type *checkIdentLive(std::string_view name, ast::SourceLocation loc);
 
   // -- Expression type-checker ----------------------------------------------
   //
@@ -341,19 +340,19 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   std::string ProjectRoot;
 
   /// Files currently being imported (for cycle detection).
-  llvm::StringSet<> *ImportStack = nullptr;
+  StringSet *ImportStack = nullptr;
 
   /// Accumulated SemaContexts for each directly-imported module, keyed by
   /// resolved path. Built by processImport; moved into the SemaContext
   /// returned by run().
-  llvm::StringMap<std::shared_ptr<SemaContext>> AccumulatedImportContexts;
+  StringMap<std::shared_ptr<SemaContext>> AccumulatedImportContexts;
 
   /// Defining module (resolved file path) of every class/enum this Sema has
   /// reconstructed from an import, keyed by canonical type name.  Type names
   /// are global across the import graph, so reconstructing a type whose name
   /// is already bound to a type from a different module is an error rather
   /// than a silent merge of two unrelated types.
-  llvm::StringMap<std::string> ImportedTypeOrigins;
+  StringMap<std::string> ImportedTypeOrigins;
 
 public:
   /// Info about an already-analyzed module.  Public (with ModuleCache) so
@@ -413,7 +412,7 @@ public:
   };
 
   /// Global cache of already-analyzed modules (keyed by resolved file path).
-  static llvm::StringMap<ModuleInfo> ModuleCache;
+  static StringMap<ModuleInfo> ModuleCache;
 
 private:
   /// Resolve a module path to an absolute file path.
@@ -471,14 +470,14 @@ private:
   // hand-written bodies (they may trigger further instantiations).
 
   /// Class and function templates declared by this module, by name.
-  llvm::StringMap<ast::ClassDecl *> ClassTemplates;
-  llvm::StringMap<ast::FuncDecl *> FuncTemplates;
+  StringMap<ast::ClassDecl *> ClassTemplates;
+  StringMap<ast::FuncDecl *> FuncTemplates;
 
   /// Instantiation caches keyed by canonical instantiation name.  A null
   /// ClassType* / false records an instantiation that failed, so a repeated
   /// use neither re-instantiates nor re-reports.
-  llvm::StringMap<ast::ClassType *> ClassInstantiations;
-  llvm::StringMap<bool> FuncInstantiations;
+  StringMap<ast::ClassType *> ClassInstantiations;
+  StringMap<bool> FuncInstantiations;
 
   /// What an instantiated ClassType was made from (for inference through
   /// `Box<T>` parameters and for diagnostics).
@@ -486,7 +485,8 @@ private:
     std::string TemplateName;
     std::vector<ast::Type *> Args;
   };
-  llvm::DenseMap<ast::ClassType *, InstantiationInfo> ClassInstantiationInfo;
+  std::unordered_map<ast::ClassType *, InstantiationInfo>
+      ClassInstantiationInfo;
 
   /// Instantiations whose bodies still have to be checked.
   struct PendingInstantiation {
@@ -494,7 +494,7 @@ private:
     ast::FuncDecl *Func = nullptr;
     std::string Name;               // canonical instantiation name
     ast::SourceLocation RequestLoc; // where the instantiation was requested
-    llvm::StringSet<> TypeParams;   // the template's type parameter names
+    StringSet TypeParams;           // the template's type parameter names
   };
   std::vector<PendingInstantiation> PendingInstantiations;
 
@@ -515,12 +515,12 @@ private:
 
   /// Type parameter names of the instantiation whose body is being checked
   /// (nullptr outside one).  Used to diagnose a type parameter used as a value.
-  const llvm::StringSet<> *CurrentTypeParams = nullptr;
+  const StringSet *CurrentTypeParams = nullptr;
 
   /// Classes constructed inside each class's method bodies (by name).  Used to
   /// order instantiated classes for CodeGen: a constructor must be emitted
   /// before a method that calls it.
-  llvm::StringMap<llvm::StringSet<>> ConstructsEdges;
+  StringMap<StringSet> ConstructsEdges;
 
   /// Register every generic declaration of the module as a template, checking
   /// its name and type parameter list.
@@ -550,8 +550,8 @@ private:
   /// signatures have been populated so far.  A generic class whose superclass
   /// is a local class may only be instantiated once that superclass is
   /// populated (its vtable prefix must be complete).
-  llvm::StringSet<> LocalClassNames;
-  llvm::StringSet<> PopulatedClasses;
+  StringSet LocalClassNames;
+  StringSet PopulatedClasses;
 
   /// A failed unification: type parameter @p Param was deduced as both
   /// @p First and @p Second.
@@ -568,8 +568,7 @@ private:
   /// that do not match (e.g. an array pattern against a class argument) are
   /// not an inference failure: they are left to the ordinary argument check.
   bool unifyTypes(ast::Type *pattern, ast::Type *actual,
-                  const llvm::StringSet<> &typeParams,
-                  llvm::StringMap<ast::Type *> &bindings,
+                  const StringSet &typeParams, StringMap<ast::Type *> &bindings,
                   InferenceConflict &conflict);
 
   /// Infer the type arguments of a generic call from its argument types.

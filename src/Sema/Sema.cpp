@@ -5,56 +5,57 @@
 #include "Names.h"
 #include "SemaInternal.h"
 
-#include <llvm/ADT/SmallPtrSet.h>
+#include <unordered_set>
 
 namespace paykan {
 namespace sema {
 
 // Static module cache.
-llvm::StringMap<Sema::ModuleInfo> Sema::ModuleCache;
+StringMap<Sema::ModuleInfo> Sema::ModuleCache;
 
 // -- Scope / ScopeGuard ------------------------------------------------------
 
 Sema::Scope::Scope(Scope *parent) : Parent(parent) {}
 
-ast::Type *Sema::Scope::lookup(llvm::StringRef name) const {
+ast::Type *Sema::Scope::lookup(std::string_view name) const {
   auto it = Locals.find(name);
   if (it != Locals.end())
     return it->second;
   return Parent ? Parent->lookup(name) : nullptr;
 }
 
-bool Sema::Scope::declare(llvm::StringRef name, ast::Type *ty) {
-  if (!Locals.try_emplace(name, ty).second)
+bool Sema::Scope::declare(std::string_view name, ast::Type *ty) {
+  if (!Locals.try_emplace(std::string(name), ty).second)
     return false;
   return true;
 }
 
-void Sema::Scope::set(llvm::StringRef name, ast::Type *ty) {
-  Locals[name] = ty;
+void Sema::Scope::set(std::string_view name, ast::Type *ty) {
+  Locals[std::string(name)] = ty;
 }
 
-bool Sema::Scope::contains(llvm::StringRef name) const {
+bool Sema::Scope::contains(std::string_view name) const {
   return Locals.count(name);
 }
 
-Sema::Scope *Sema::Scope::findOwner(llvm::StringRef name) {
+Sema::Scope *Sema::Scope::findOwner(std::string_view name) {
   if (Locals.count(name))
     return this;
   return Parent ? Parent->findOwner(name) : nullptr;
 }
 
-void Sema::Scope::markMoved(llvm::StringRef name) {
+void Sema::Scope::markMoved(std::string_view name) {
   if (auto *owner = findOwner(name))
-    owner->Moved.insert(name);
+    owner->Moved.insert(std::string(name));
 }
 
-void Sema::Scope::clearMoved(llvm::StringRef name) {
+void Sema::Scope::clearMoved(std::string_view name) {
   if (auto *owner = findOwner(name))
-    owner->Moved.erase(name);
+    if (auto it = owner->Moved.find(name); it != owner->Moved.end())
+      owner->Moved.erase(it);
 }
 
-bool Sema::Scope::isMoved(llvm::StringRef name) const {
+bool Sema::Scope::isMoved(std::string_view name) const {
   if (Locals.count(name))
     return Moved.count(name) != 0;
   return Parent ? Parent->isMoved(name) : false;
@@ -85,7 +86,7 @@ void Sema::unionMovedState(MovedState &dst, const MovedState &src) {
   for (size_t i = 0; i < dst.size(); ++i) {
     assert(dst[i].first == src[i].first && "scope chains diverged");
     for (const auto &name : src[i].second)
-      dst[i].second.insert(name.getKey());
+      dst[i].second.insert(name);
   }
 }
 
@@ -127,12 +128,12 @@ Sema::Sema(ast::ASTContext &ctx, DiagEngine &diags,
            const std::string &projectRoot)
     : Diags(diags), Ctx(ctx), ProjectRoot(projectRoot) {}
 
-void Sema::declareFunction(llvm::StringRef name, ast::Type *retTy,
+void Sema::declareFunction(std::string_view name, ast::Type *retTy,
                            std::vector<ast::Type *> paramTys, bool isBuiltin) {
-  FunctionTable[name] = {retTy, std::move(paramTys), isBuiltin};
+  FunctionTable[std::string(name)] = {retTy, std::move(paramTys), isBuiltin};
 }
 
-const Sema::FunctionSig *Sema::lookupFunction(llvm::StringRef name) const {
+const Sema::FunctionSig *Sema::lookupFunction(std::string_view name) const {
   auto it = FunctionTable.find(name);
   return it != FunctionTable.end() ? &it->second : nullptr;
 }
@@ -497,7 +498,8 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
 }
 
 // Check that a variable is declared.
-ast::Type *Sema::checkIdentLive(llvm::StringRef name, ast::SourceLocation loc) {
+ast::Type *Sema::checkIdentLive(std::string_view name,
+                                ast::SourceLocation loc) {
   auto *ty = CurrentScope->lookup(name);
   if (!ty) {
     error(loc, "use of undeclared variable '" + std::string(name) + "'");
@@ -654,7 +656,7 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
   case ast::UnaryOpcode::Count:
     break;
   }
-  llvm_unreachable("unknown UnaryOpcode");
+  PAYKAN_UNREACHABLE("unknown UnaryOpcode");
 }
 
 ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
@@ -799,7 +801,7 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   case ast::BinaryOpcode::Count:
     break;
   }
-  llvm_unreachable("unknown BinaryOpcode");
+  PAYKAN_UNREACHABLE("unknown BinaryOpcode");
 }
 
 ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
@@ -993,7 +995,7 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
 // static
 ast::ClassType *Sema::findLowestCommonAncestor(ast::ClassType *a,
                                                ast::ClassType *b) {
-  llvm::SmallPtrSet<ast::ClassType *, 8> aAncestors;
+  std::unordered_set<ast::ClassType *> aAncestors;
   for (auto *c = a; c; c = c->getSuperClass())
     aAncestors.insert(c);
   for (auto *c = b; c; c = c->getSuperClass())
@@ -1309,7 +1311,7 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
   node->getValue()->setResolvedType(tt);
 
   bool ok = true;
-  llvm::StringSet<> seen;
+  StringSet seen;
   for (size_t i = 0; i < node->getNumTargets(); ++i) {
     const auto &target = node->getTargets()[i];
     if (target.isSkip())
@@ -1409,7 +1411,7 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
   declareFunction(names::kFloatStr, Ctx.getObjTy(), {StrTy}, true);
 
   // Process imports before local declarations.
-  llvm::StringSet<> localImportStack;
+  StringSet localImportStack;
   if (!ImportStack)
     ImportStack = &localImportStack;
   for (auto *imp : tu->getImports())
@@ -1498,7 +1500,7 @@ bool Sema::visitEnumDecl(ast::EnumDecl *node) {
   assert(enumTy && "enum name was checked to be free above");
 
   bool ok = true;
-  llvm::StringSet<> seen;
+  StringSet seen;
   for (const auto *variant : node->getVariants()) {
     if (!seen.insert(*variant).second) {
       error(node->getLocation(), "duplicate variant '" + *variant +
@@ -1689,10 +1691,10 @@ bool Sema::visitWhileStmt(ast::WhileStmt *node) {
   assert(entry.size() == exit.size() && "snapshots must cover the same chain");
   for (size_t i = 0; i < exit.size(); ++i) {
     for (const auto &name : exit[i].second) {
-      if (entry[i].second.count(name.getKey()))
+      if (entry[i].second.count(name))
         continue;
       error(node->getLocation(),
-            "variable '" + std::string(name.getKey()) +
+            "variable '" + name +
                 "' is declared outside the loop but consumed by 'mov' inside "
                 "it; it would already be moved on the next iteration — "
                 "re-assign it before the loop repeats or declare it inside "
@@ -1730,7 +1732,7 @@ bool Sema::visitContinueStmt(ast::ContinueStmt *node) {
 /// ReturnStmt.  This is a conservative syntactic check — it catches the common
 /// "missing return" cases without requiring full CFG analysis.
 /// Returns true if `stmt` (a single statement) always returns on every path.
-bool detail::blockAlwaysReturns(llvm::ArrayRef<ast::Stmt *> stmts) {
+bool detail::blockAlwaysReturns(const std::vector<ast::Stmt *> &stmts) {
   if (stmts.empty())
     return false;
   for (int i = (int)stmts.size() - 1; i >= 0; --i)
@@ -2127,7 +2129,7 @@ bool Sema::checkValueMatch(ast::MatchStmt *node, ast::Type *subjectTy) {
 bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
   bool ok = true;
   bool seenWildcard = false;
-  llvm::StringSet<> seenVariants;
+  StringSet seenVariants;
 
   // Per-arm moved-state isolation + union merge (see checkValueMatch).
   MovedBranchMerger merger(*this);

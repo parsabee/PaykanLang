@@ -4,7 +4,7 @@
 // JIT, and every allocation is released (instantiations are ordinary
 // classes, so ARC applies to them unchanged).
 
-#include "TestUtils.h"
+#include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
 
 extern "C" {
