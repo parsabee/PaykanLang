@@ -175,6 +175,17 @@ fn main() -> int {
     False { println("B6: no"); }
   }
 
+  // --- B6b: a literal subject (a constant, but still a value match) ---
+  match "World" {
+    "Hello" { println("B6b: got Hello"); }
+    "World" { println("B6b: got World"); }
+    _       { println("B6b: other"); }
+  }
+  match 3 {
+    3 { println("B6b: three"); }
+    _ { println("B6b: other"); }
+  }
+
   // --- B7: value match inside a helper function ---
   println(classify(0));
   println(classify(1));

@@ -396,6 +396,34 @@ TEST(Lowering, CallRootedFieldReadRetainsTheFieldAndReleasesTheReceiver) {
 // match
 // ---------------------------------------------------------------------------
 
+// #72: a string-literal subject is built as a Str (not passed as its raw C
+// string) and released on every exit of the match.
+TEST(Lowering, StringLiteralMatchSubjectIsAStrReleasedOnEveryExit) {
+  auto l = lower(R"(
+    fn f() -> int {
+      match "s" { "t" { return 1; } _ { return 2; } }
+    }
+    fn main() -> int {
+      match "s" { "t" { println("t"); } _ { println("other"); } }
+      return f();
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error; // the verifier ran
+  std::string m = function(l.Text, "main");
+  // The subject: a Str built from the literal, boxed for the match.
+  size_t subj = m.find("%str.1 = call @PaykanString_new(@.str");
+  size_t box = m.find("%subj.box.2 = box %str.1");
+  size_t eq = m.find("call @PaykanString_equals(%str.1, ");
+  ASSERT_NE(subj, std::string::npos) << m;
+  ASSERT_NE(box, std::string::npos) << m;
+  ASSERT_NE(eq, std::string::npos) << m;
+  EXPECT_LT(subj, box) << m;
+  EXPECT_LT(box, eq) << m;
+  EXPECT_EQ(count(m, "release %subj.box."), 1u) << m;
+  std::string fn = function(l.Text, "f");
+  EXPECT_EQ(count(fn, "release %subj.box."), 2u) << fn; // both returns
+}
+
 TEST(Lowering, ClassMatchComparesVTablesAndBindsAnOwnedVariable) {
   auto l = lower(R"(
     class A { fn __init__() {} }

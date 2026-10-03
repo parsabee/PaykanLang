@@ -147,7 +147,9 @@ treatment.
 ## Value Mode — matching on a builtin value
 
 When the subject is a builtin (`int`, `float`, `bool`, `char`, or `Str`), arms are **literal
-patterns** and the subject is compared by value. The first equal literal wins.
+patterns** and the subject is compared by value. The first equal literal wins. The subject
+can be any expression of a builtin type: a variable, a call, a temporary such as `a + b`, or even
+a literal (`match "s" { … }`).
 
 ```pkn
 n: int = 2;
