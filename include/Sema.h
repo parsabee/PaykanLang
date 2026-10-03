@@ -211,10 +211,12 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   bool checkDeclNameAvailable(const std::string &name, ast::SourceLocation loc,
                               DeclKind kind);
 
-  /// RAII helper to push/pop a scope.
+  /// RAII helper to push/pop a scope.  The scope lives on the heap so that
+  /// CurrentScope never points into a stack frame (GCC's -Wdangling-pointer
+  /// cannot see that the destructor restores CurrentScope).
   struct ScopeGuard {
     Sema &S;
-    Scope ScopeObj;
+    std::unique_ptr<Scope> ScopeObj;
     ScopeGuard(Sema &s);
     ~ScopeGuard();
   };
