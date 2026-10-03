@@ -9,6 +9,7 @@ backend never re-derives any of that; it translates PIR ops one-to-one.
 
 PIR has a textual form (printer + parser, so backend tests need no frontend)
 and a verifier.  The data structures live in `include/paykan/pir/PIR.h`.
+The compiled module file (`.pkm`), which stores PIR in binary form, is designed in [design/pkm.md](design/pkm.md).
 
 Design rules:
 
