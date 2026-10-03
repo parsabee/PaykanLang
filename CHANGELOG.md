@@ -34,9 +34,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   optional field is implicitly `None` if `__init__` does not assign it, and
   `T?[]` / `T[]?` are supported. At runtime a `T?` is the same reference-
   counted box as a `T` with "no box" meaning `None` — no layout change.
-  Optional primitives (`int?`), nested optionals, flow typing, `if let`,
+  Nested optionals, flow typing, `if let`,
   `??` and `?.` are not part of the prototype. See
   `language_reference/10-optionals.md` and `proposals/optionals.md`.
+- **Optional primitives `int?`, `float?`, `bool?`, `char?` (#66).** A
+  primitive widens to its optional implicitly (`x: int? = 5`; an `int` also
+  widens to `float?`), and `None` is the absent value. In `match o { n: int
+  { … } None { … } }` the arm binds a plain `int`. `== None`, equality of two
+  optionals, fields (implicitly `None`), arrays, tuples, parameters, returns,
+  ternaries and generic arguments (`Box<int?>`, and `T?` with `T = int`) all
+  work. A present value is boxed in the runtime's `Int` / `Float` / `Bool` /
+  `Char` object (`Char` is a new boxed class), so it prints and matches as
+  that class in an `Obj` slot. `Enum?` is still rejected, now with "optional
+  enum types are not supported yet". `int?` does not convert to `float?`. See
+  `language_reference/10-optionals.md`.
 - **Tuples (prototype, #4).** Fixed-arity, heterogeneous, immutable values:
   types `(int, Str)` (nesting, `(int, Str)[]` and `(int[], Str)` allowed),
   literals `(1, "a")`, compile-time-checked element access `t.0` / `t.1.0`,

@@ -234,6 +234,8 @@ Val ModuleLowering::emitIsExactType(const Val &rawObjPtr, ast::ClassType *ct) {
     runtimeVT = kPaykanFloatVtable;
   } else if (ct == ASTCtx.getBoolBoxTy()) {
     runtimeVT = kPaykanBoolVtable;
+  } else if (ct == ASTCtx.getCharBoxTy()) {
+    runtimeVT = kPaykanCharVtable;
   } else if (ct == ASTCtx.getTupleTy() ||
              ASTCtx.getSpecializedTupleElemType(ct)) {
     runtimeVT = kPaykanTupleVtable;

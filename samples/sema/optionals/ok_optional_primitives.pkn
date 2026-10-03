@@ -1,0 +1,21 @@
+// Optional primitives: `int?`, `float?`, `bool?`, `char?` widen from their
+// primitive, take None, and unwrap with a primitive match arm.
+fn half(n: int) -> int? {
+  if (n % 2 != 0) { return None; }
+  return n / 2;
+}
+
+fn main() -> int {
+  a: int? = half(4);
+  f: float? = 3;          // int -> float, then boxed
+  b: bool? = None;
+  c: char? = 'c';
+  xs: int?[] = [1, 2];
+  xs.push(None);
+  match a {
+    n: int { println(StrInt(n + 1)); }
+    None   { println("odd"); }
+  }
+  if (b == None && a != None) { println("ok"); }
+  return 0;
+}

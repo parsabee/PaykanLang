@@ -105,6 +105,11 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
         noneArm = arm;
       }
 
+  // An optional primitive (`int?`): its single type arm names the primitive
+  // and always matches a present value.
+  ast::BuiltinType *primInner =
+      optTy ? ast::dyn_cast<ast::BuiltinType>(optTy->getInnerType()) : nullptr;
+
   struct TypeArm {
     ast::ClassType *CT;
     ast::Type *BindTy;
@@ -115,6 +120,10 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
   for (ast::MatchArm *arm : node->getArms()) {
     if (arm->isWildcard() || arm->isLiteral())
       continue;
+    if (primInner) {
+      typeArms.push_back({nullptr, primInner, /*MatchesAnySome=*/true, arm});
+      continue;
+    }
     ast::ClassType *armCt = ast::dyn_cast<ast::ClassType>(arm->getArmType());
     ast::Type *bindTy = armCt;
     // Array-type arms resolve to the specialized array ClassType so vtable
@@ -136,7 +145,16 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
   auto emitTypeArmBody = [&](size_t i) {
     const TypeArm &ta = typeArms[i];
     ScopeGuard armGuard(*this);
-    if (ta.Arm->hasBinding()) {
+    if (ta.Arm->hasBinding() && primInner) {
+      // `n: int` on an `int?`: n is a plain value read out of the box (the
+      // subject keeps the box; the binding owns nothing).
+      Val v = emitPrimitiveUnbox(subjRaw, primInner, ta.Arm->getBinding());
+      if (!v)
+        return;
+      pir::LocalId local = B.addLocal(ta.Arm->getBinding(), v.Ty);
+      B.store(local, v);
+      CurrentScope->declare(ta.Arm->getBinding(), local, primInner);
+    } else if (ta.Arm->hasBinding()) {
       // The binding is an ordinary owned variable holding its own +1
       // reference to the subject's box, released when the arm's scope exits.
       // It can therefore be re-assigned, moved or stored like any variable,

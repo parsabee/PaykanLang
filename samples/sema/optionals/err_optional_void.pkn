@@ -1,0 +1,6 @@
+// `void?` is rejected by the parser: `void` has no value to make optional.
+fn f() -> void? { }   // error: optional type 'void?' is not supported
+
+fn main() -> int {
+  return 0;
+}

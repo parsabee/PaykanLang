@@ -156,11 +156,11 @@ typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
 
 - `T[]` is an array type, `T?` an optional type; the suffixes nest left to
   right (`int[][]`, `Node?[]`, `(int, Str)[]`).
-- `T?` is rejected at parse time when `T` is a builtin value type (`int`,
-  `float`, `bool`, `char`, `void`: `optional primitive types are not
-  supported yet ('int?')`) or already optional (`nested optional type
-  'Str??' is not supported`). An enum spelled `Color?` is only known to
-  Sema, which rejects it there.
+- `T?` is rejected at parse time when `T` is `void` (`optional type 'void?'
+  is not supported`) or already optional (`nested optional type 'Str??' is
+  not supported`). The other builtin value types have optional forms
+  (`int?`, `float?`, `bool?`, `char?`). An enum spelled `Color?` is only
+  known to Sema, which rejects it there.
 - A tuple type has at least two elements; `(int)` is a syntax error (there
   are no parenthesised types).
 - `Box<int>` is a generic type application (a `GenericType` node that Sema

@@ -177,9 +177,11 @@ public:
 class Expr : public ASTNode {
   Type *ResolvedType = nullptr; // set by Sema after type-checking
   // Set by Sema when the value undergoes an implicit conversion at its use
-  // site.  Currently the only such conversion is an optional `T?` flowing into
-  // an `Obj` slot: CodeGen must then materialise the `None` singleton for a
-  // null box (see OptionalType).  nullptr = no conversion.
+  // site.  There are two such conversions: an optional `T?` flowing into an
+  // `Obj` slot (the lowering materialises the `None` singleton for a null
+  // box), and a primitive flowing into an optional primitive slot (`int` ->
+  // `int?`: the coerced type is the optional and the lowering boxes the
+  // value, see needsPrimitiveBoxing).  nullptr = no conversion.
   Type *CoercedType = nullptr;
 
 public:
@@ -1530,8 +1532,10 @@ public:
 
 /// Returns true for any type whose values are heap-allocated and
 /// reference-counted at runtime: ClassType, ArrayType, TupleType, and
-/// OptionalType (an optional only ever wraps a reference type and shares its
-/// representation — a possibly-NULL PaykanShared* box).
+/// OptionalType (a possibly-NULL PaykanShared* box: an optional reference
+/// type shares the wrapped type's box, and an optional primitive `int?`,
+/// `float?`, `bool?` or `char?` boxes its value in the runtime's boxed
+/// `Int` / `Float` / `Bool` / `Char` object).
 /// Use this instead of spelling out the `||` condition everywhere.
 inline bool isRefType(const Type *ty) {
   return ty && (isa<ClassType>(ty) || isa<ArrayType>(ty) ||
@@ -1543,6 +1547,20 @@ inline Type *stripOptional(Type *ty) {
   if (auto *ot = dyn_cast<OptionalType>(ty))
     return ot->getInnerType();
   return ty;
+}
+
+/// Returns true for an optional primitive `int?`, `float?`, `bool?` or
+/// `char?`, whose present value is boxed (see isRefType).
+inline bool isPrimitiveOptional(const Type *ty) {
+  auto *ot = dyn_cast<OptionalType>(ty);
+  return ot && isa<BuiltinType>(ot->getInnerType());
+}
+
+/// Returns true when a value of type @p src stored into a slot of type
+/// @p dst must be boxed first: a plain primitive (`int`) flowing into an
+/// optional primitive (`int?`, or `float?` after int -> float promotion).
+inline bool needsPrimitiveBoxing(const Type *dst, const Type *src) {
+  return isPrimitiveOptional(dst) && src && isa<BuiltinType>(src);
 }
 
 } // namespace ast

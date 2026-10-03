@@ -4,9 +4,9 @@
 > below and the diagnostics may change; see `proposals/optionals.md` for the design, the
 > decisions behind it and what is deliberately left out.
 
-An **optional type** `T?` holds either a value of the reference type `T` or `None`. It is how a
-program says "this may be absent" without giving up the static type: a `next: Node?` field is a
-`Node` or nothing — never a `Str`.
+An **optional type** `T?` holds either a value of type `T` or `None`. It is how a program says
+"this may be absent" without giving up the static type: a `next: Node?` field is a `Node` or
+nothing — never a `Str` — and a `count: int?` is an `int` or nothing.
 
 ```pkn
 class Node {
@@ -37,9 +37,9 @@ fn find(head: Node?, key: int) -> Node? {
 - `T?` is written as a suffix and is allowed in every type position: variables, fields,
   parameters, return types, match arms, array element types (`Node?[]`) and arrays
   themselves (`int[]?`).
-- Only **reference types** can be optional: classes, `Str`, arrays. `int?`, `float?`, `bool?`,
-  `char?` and `Enum?` are rejected ("optional primitive types are not supported yet"), and so is
-  `T??`.
+- Reference types (classes, `Str`, arrays) and the primitives `int`, `float`, `bool` and
+  `char` can be optional (see [Optional Primitives](#optional-primitives)). `Enum?`, `void?`,
+  `T??` and optional tuples are rejected.
 - `None` is the absent value. A `T` converts to `T?` implicitly; a `T?` **never** converts back
   to `T` — unwrap it with `match`.
 - On a `T?` you may: assign it, pass and return it, store it in fields and arrays, `mov` it,
@@ -158,6 +158,52 @@ against `None` or unwrap first.
 
 ---
 
+## Optional Primitives
+
+`int?`, `float?`, `bool?` and `char?` follow the same rules as a reference optional:
+
+```pkn
+fn half(n: int) -> int? {
+  if (n % 2 != 0) { return None; }
+  return n / 2;                      // an int widens to int?
+}
+
+fn show(o: int?) -> Str {
+  match o {
+    n: int { return StrInt(n); }     // n is a plain int
+    None   { return "none"; }
+  }
+}
+```
+
+- A primitive widens to its optional implicitly (`x: int? = 5`). An `int` also widens to
+  `float?`, after the usual `int` -> `float` promotion (`f: float? = 3`).
+- An `int?` does **not** convert to a `float?` (or any other optional). `int[]` is not an
+  `int?[]` either. An array or tuple literal still works where its elements need boxing
+  (`xs: int?[] = [1, 2]`, `p: (int?, Str) = (1, "a")`), but destructuring does not box:
+  `a: int?, s: Str = (1, "a")` is an error.
+- In a `match` on an `int?` subject, the only type arm is `n: int`. It matches every present
+  value and binds `n` to a plain `int`: an ordinary value, owning nothing, which the arm may
+  reassign. Any other arm type is an error, and as for a reference optional, `n: int` plus
+  `None` (or `_`) is exhaustive.
+- `x == None` and `x != None` work. Two optionals of the same primitive compare equal when both
+  are `None`, or when both are present and their values are `==`. For `float?` that means `NaN`
+  is never equal to `NaN`, and `-0.0` equals `0.0`. Comparing an `int?` with a plain `int`
+  (`x == 5`) is an error: unwrap it first.
+- Optional primitives work everywhere a type is written. That includes fields (implicitly
+  `None`), array elements, tuple elements, parameters, returns, ternaries
+  (`if c then 3 else None` is an `int?`) and generic arguments (`Box<int?>`). A `T?` inside a
+  generic class or function instantiated with `T = int` is an `int?`.
+- In an `Obj` slot, a present value is its boxed class: `Int`, `Float`, `Bool` or `Char`. So
+  `println(x)` prints `5` or `None`, and an `Obj` match can name `i: Int { … }`.
+- `Enum?` is not supported yet ("optional enum types are not supported yet"). An enum would box
+  as a bare `Int`, which in an `Obj` slot would print the variant's ordinal rather than its name.
+
+At runtime, a present `int?` is an `Int` box: one heap object, released like any other
+reference. `None` is the null box, as for every optional.
+
+---
+
 ## Optional Fields
 
 A field of type `T?` need not be assigned in `__init__`; it starts as `None`:
@@ -222,8 +268,9 @@ fn pick(c: bool) -> Str? { return if c then "yes" else None; }
 
 ## Memory
 
-A `T?` costs nothing extra: it is the same reference-counted box as a `T`, with "no box" meaning
-`None`. Retaining, releasing, moving and destroying an absent optional are no-ops, and
+A `T?` of a reference type costs nothing extra: it is the same reference-counted box as a `T`,
+with "no box" meaning `None`. A present optional primitive is one boxed `Int` / `Float` /
+`Bool` / `Char` object; `None` allocates nothing. Retaining, releasing, moving and destroying an absent optional are no-ops, and
 `mov` of an optional transfers the reference (or the absence) exactly like `mov` of a `T`. See
 `08-memory-model.md`.
 
@@ -233,7 +280,8 @@ A `T?` costs nothing extra: it is the same reference-counted box as a `T`, with 
 
 | Error | Trigger |
 |-------|---------|
-| `optional primitive types are not supported yet` | `int?`, `float?`, `bool?`, `char?`, `void?`, `Enum?` |
+| `optional enum types are not supported yet` | `Enum?` |
+| `optional type 'void?' is not supported` | `void?` (at parse time, or a type argument `void`) |
 | `nested optional type 'T??' is not supported` | `T??` |
 | `cannot use optional 'T?' as 'T' without unwrapping (use match)` | narrowing on declaration / assignment / return / argument / field or array store; member access, method call, subscript, operator or unary on a `T?` |
 | `cannot compare optional 'T?' with non-optional 'U'; compare against None or unwrap it with match` | `opt == present` |
@@ -244,6 +292,7 @@ A `T?` costs nothing extra: it is the same reference-counted box as a `T`, with 
 | `unreachable arm: the 'T' arm above already matches every non-None value` | a type arm after the `T` arm |
 | `duplicate 'None' arm in match on 'T?'` | two `None` arms |
 | `match arm type 'X[]' does not match the optional subject type 'T[]?'` | wrong array arm on an optional array |
+| `match arm type 'float' does not match the optional subject type 'int?'` | an arm other than the primitive on an optional primitive |
 | `non-void function 'f' does not always return a value` | a `T` arm without `None` / `_` as the last statement of a non-void function |
 
 ---
@@ -251,5 +300,4 @@ A `T?` costs nothing extra: it is the same reference-counted box as a `T`, with 
 ## Not in the prototype
 
 Flow typing (`if (x != None) { x.foo(); }` does not narrow `x`), `if let`, the `??` default
-and `?.` chaining operators, optional primitives, and array-literal typing with `None`
-elements. Each is sketched in `proposals/optionals.md`.
+and `?.` chaining operators, optional enums, and array-literal typing with `None` elements. Each is sketched in `proposals/optionals.md`.

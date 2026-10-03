@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 // Parser tests: optional types `T?` (prototype) in every type position, the
-// `None` match-arm pattern, and the parse-time rejections (`int?`, `T??`).
+// `None` match-arm pattern, optional primitives (`int?`, ...), and the
+// parse-time rejections (`void?`, `T??`).
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -110,21 +111,36 @@ TEST(Optional, ComparisonAgainstNone) {
 
 // ─── parse-time rejections ───────────────────────────────────────────────────
 
-TEST(Optional, OptionalIntRejected) {
+TEST(Optional, OptionalPrimitivesParse) {
+  // Optional primitives (#66) parse in every type position, including a
+  // primitive match arm over an `int?` subject.
   auto [ok, _] = parse(R"(
+    class H { n: int?; fn __init__() {} }
+    fn f(x: float?, b: bool?) -> char? { return None; }
     fn main() -> int {
       x: int? = None;
+      xs: int?[] = [1, 2];
+      t: (int?, Str) = (1, "a");
+      match x {
+        n: int { println("some"); }
+        None   { println("none"); }
+      }
       return 0;
     }
   )");
-  EXPECT_FALSE(ok);
+  EXPECT_TRUE(ok);
 }
 
-TEST(Optional, OptionalFloatBoolCharRejected) {
-  EXPECT_FALSE(parse("fn f(x: float?) {}  fn main() -> int { return 0; }").Ok);
-  EXPECT_FALSE(parse("fn f(x: bool?) {}   fn main() -> int { return 0; }").Ok);
-  EXPECT_FALSE(parse("fn f(x: char?) {}   fn main() -> int { return 0; }").Ok);
+TEST(Optional, OptionalPrimitiveAstShowsOptionalType) {
+  auto r = parse("fn main() -> int { x: int? = 5; return 0; }");
+  ASSERT_TRUE(r.Ok);
+  std::string ast = dumpAST(*r.Driver);
+  EXPECT_NE(ast.find("OptionalType"), std::string::npos) << ast;
+}
+
+TEST(Optional, OptionalVoidRejected) {
   EXPECT_FALSE(parse("fn f() -> void? {}  fn main() -> int { return 0; }").Ok);
+  EXPECT_FALSE(parse("fn f(x: void?) {}   fn main() -> int { return 0; }").Ok);
 }
 
 TEST(Optional, NestedOptionalRejected) {

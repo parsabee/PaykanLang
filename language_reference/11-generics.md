@@ -158,10 +158,12 @@ m = ident<Node?>(n);               // optional type argument
 ```
 
 Because each instantiation is checked separately, a `T?` in a template is
-rejected for the instantiations where it is not allowed — `Slot<int>`
-(`int?`: optional primitives are not supported) or `Slot<(int, Str)>`
-(optional tuples are not supported) — with the instantiation named in the
-diagnostic.
+an optional of whatever `T` is. `Slot<int>` holds an `int?` (an optional
+primitive, see `10-optionals.md`), and `orElse(x, 0)` with `x: int?` works
+as written above. The instantiations where `T?` is not allowed are
+rejected: `Slot<Color>` (optional enums), `Slot<int?>` (a nested `int??`)
+and `Slot<(int, Str)>` (optional tuples). The diagnostic names the
+instantiation.
 
 ## How Errors Are Reported
 

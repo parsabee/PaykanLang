@@ -1,12 +1,13 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// Paykan runtime — boxed primitive types: Int, Float, Bool.
+// Paykan runtime — boxed primitive types: Int, Float, Bool, Char.
 //
 // Each type inherits from Obj (PaykanObject-compatible prefix) and wraps a
 // single primitive value.  These boxed types allow primitives to be stored
 // in Obj-typed variables and passed through the same ARC machinery as any
-// other heap object.
+// other heap object; they are also the boxes of the optional primitives
+// (`int?` holds a PaykanShared* to a PaykanInt, NULL meaning None).
 
 #include "Runtime.h"
 #include "RuntimeInternal.h"
@@ -32,6 +33,10 @@ PaykanInt *PaykanInt_new(int64_t value) {
   obj->shared = NULL; // not yet boxed (unique-box invariant)
   obj->value = value;
   return obj;
+}
+
+int64_t PaykanInt_value(PaykanObject *self) {
+  return ((PaykanInt *)self)->value;
 }
 
 void PaykanInt_destroy(PaykanObject *self) { Paykan_free(self); }
@@ -80,6 +85,10 @@ PaykanFloat *PaykanFloat_new(double value) {
   return obj;
 }
 
+double PaykanFloat_value(PaykanObject *self) {
+  return ((PaykanFloat *)self)->value;
+}
+
 void PaykanFloat_destroy(PaykanObject *self) { Paykan_free(self); }
 
 PaykanShared *PaykanFloat_toString(PaykanObject *self) {
@@ -126,6 +135,10 @@ PaykanBool *PaykanBool_new(int64_t value) {
   return obj;
 }
 
+int64_t PaykanBool_value(PaykanObject *self) {
+  return ((PaykanBool *)self)->value;
+}
+
 void PaykanBool_destroy(PaykanObject *self) { Paykan_free(self); }
 
 PaykanShared *PaykanBool_toString(PaykanObject *self) {
@@ -138,5 +151,42 @@ int64_t PaykanBool_equals(PaykanObject *self, PaykanObject *other) {
   PaykanObject *o = Paykan_equals_unbox_other(other);
   int64_t result = o && o->vtable == &PaykanBool_vtable &&
                    ((PaykanBool *)self)->value == ((PaykanBool *)o)->value;
+  return Paykan_equals_consume_other(other, result);
+}
+
+// ============================================================================
+// Char
+// ============================================================================
+
+PaykanObjectVTable PaykanChar_vtable = {
+    .destroy = PaykanChar_destroy,
+    .toString = PaykanChar_toString,
+    .equals = PaykanChar_equals,
+};
+
+PaykanChar *PaykanChar_new(int8_t value) {
+  PaykanChar *obj = (PaykanChar *)Paykan_malloc(sizeof(PaykanChar));
+  obj->vtable = &PaykanChar_vtable;
+  obj->shared = NULL; // not yet boxed (unique-box invariant)
+  obj->value = value;
+  return obj;
+}
+
+int8_t PaykanChar_value(PaykanObject *self) {
+  return ((PaykanChar *)self)->value;
+}
+
+void PaykanChar_destroy(PaykanObject *self) { Paykan_free(self); }
+
+PaykanShared *PaykanChar_toString(PaykanObject *self) {
+  PaykanChar *obj = (PaykanChar *)self;
+  return PaykanShared_new((PaykanObject *)PaykanString_from_char(obj->value));
+}
+
+int64_t PaykanChar_equals(PaykanObject *self, PaykanObject *other) {
+  // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
+  PaykanObject *o = Paykan_equals_unbox_other(other);
+  int64_t result = o && o->vtable == &PaykanChar_vtable &&
+                   ((PaykanChar *)self)->value == ((PaykanChar *)o)->value;
   return Paykan_equals_consume_other(other, result);
 }

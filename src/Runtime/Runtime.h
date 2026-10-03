@@ -99,6 +99,8 @@ typedef struct PaykanInt {
 } PaykanInt;
 
 PaykanInt *PaykanInt_new(int64_t value);
+/// The value of a boxed Int (the unwrapped `int` of a present `int?`).
+int64_t PaykanInt_value(PaykanObject *self);
 void PaykanInt_destroy(PaykanObject *self);
 PaykanShared *PaykanInt_toString(PaykanObject *self);
 int64_t PaykanInt_equals(PaykanObject *self, PaykanObject *other);
@@ -123,6 +125,8 @@ typedef struct PaykanFloat {
 } PaykanFloat;
 
 PaykanFloat *PaykanFloat_new(double value);
+/// The value of a boxed Float (the unwrapped `float` of a present `float?`).
+double PaykanFloat_value(PaykanObject *self);
 void PaykanFloat_destroy(PaykanObject *self);
 PaykanShared *PaykanFloat_toString(PaykanObject *self);
 int64_t PaykanFloat_equals(PaykanObject *self, PaykanObject *other);
@@ -146,15 +150,38 @@ typedef struct PaykanBool {
   int64_t value;        // 0 = False, 1 = True
 } PaykanBool;
 
-// Test-only constructor: CodeGen never emits a call to this symbol (bools are
-// unboxed i1/i64 values in generated code); kept for the unit tests and
-// JIT-mapped for completeness.
+// Bools are unboxed i1/i64 values in generated code; the lowering boxes one
+// only for a present `bool?`.
 PaykanBool *PaykanBool_new(int64_t value);
+/// The value (0 or 1) of a boxed Bool (the unwrapped `bool` of a `bool?`).
+int64_t PaykanBool_value(PaykanObject *self);
 void PaykanBool_destroy(PaykanObject *self);
 PaykanShared *PaykanBool_toString(PaykanObject *self);
 int64_t PaykanBool_equals(PaykanObject *self, PaykanObject *other);
 
 extern PaykanObjectVTable PaykanBool_vtable;
+
+// ============================================================================
+// Char
+// ============================================================================
+//
+// Boxed character (a signed 8-bit byte, like `char` in generated code).
+// Inherits Object.  Only a present `char?` is boxed.
+
+typedef struct PaykanChar {
+  PaykanObjectVTable *vtable;
+  PaykanShared *shared; // object header (see PaykanObject)
+  int8_t value;
+} PaykanChar;
+
+PaykanChar *PaykanChar_new(int8_t value);
+/// The value of a boxed Char (the unwrapped `char` of a present `char?`).
+int8_t PaykanChar_value(PaykanObject *self);
+void PaykanChar_destroy(PaykanObject *self);
+PaykanShared *PaykanChar_toString(PaykanObject *self);
+int64_t PaykanChar_equals(PaykanObject *self, PaykanObject *other);
+
+extern PaykanObjectVTable PaykanChar_vtable;
 
 // ============================================================================
 // String

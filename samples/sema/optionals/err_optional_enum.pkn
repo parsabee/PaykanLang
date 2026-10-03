@@ -1,0 +1,8 @@
+// An enum cannot be optional yet: it would box as a bare Int and reach `Obj`
+// printing its ordinal.  (`int?`, `float?`, `bool?` and `char?` are fine.)
+enum Color { Red, Green }
+
+fn main() -> int {
+  c: Color? = None;   // error: optional enum types are not supported yet
+  return 0;
+}

@@ -36,9 +36,10 @@ xs: Node?[] = [];        // array of optionals
 ys: int[]? = None;       // optional array
 ```
 
-Only **reference types** may be optional: classes, `Str`, arrays. `int?`, `float?`, `bool?`,
-`char?`, `void?` and `Enum?` are rejected with *"optional primitive types are not supported
-yet"* (the spelled builtins at parse time, enums in Sema). `T??` is rejected as unsupported.
+Reference types (classes, `Str`, arrays) may be optional, and so may the primitives `int`,
+`float`, `bool` and `char` (#66: a present value is boxed, see open question 5). `void?` is
+rejected at parse time, `Enum?` in Sema (*"optional enum types are not supported yet"*), and
+`T??` as unsupported.
 
 `None` is also accepted as a **match-arm pattern** so the absent case can be named.
 
@@ -201,8 +202,17 @@ across modules with type identity preserved.
 4. Should a `None` arm be allowed on an `Obj` subject (matching the singleton)? It would let
    the `readln()` idiom name its absent case; today it is an error to keep `Obj` matching
    unchanged.
-5. Optional primitives need a real representation (a tag word or boxing); the syntax and the
-   diagnostic are reserved.
+5. ~~Optional primitives need a real representation (a tag word or boxing).~~ **Resolved
+   (#66): boxing.** A present `int?` / `float?` / `bool?` / `char?` is the runtime's boxed
+   `Int` / `Float` / `Bool` / `Char` object, in the same nullable `PaykanShared*` box as every
+   other optional. Every existing optional mechanism (ARC, `mov`, `None` fields, `T?[]`,
+   `T?` -> `Obj`) therefore applies unchanged, and `None` allocates nothing. A tag word would
+   avoid the allocation for a present value, but it would need a second representation
+   throughout the lowering, both backends and the tuple/array slot ABI. Sema marks each
+   primitive that flows into an optional primitive slot (`Expr::CoercedType`), and the
+   lowering boxes it. A `match` arm `n: int` reads the value out of the box into a plain local.
+   `int?` -> `float?` is rejected because it would re-box. `Enum?` stays rejected until there
+   is an enum box that can print its variant name.
 
 ---
 
@@ -219,8 +229,9 @@ across modules with type identity preserved.
   `emitOptionalToObj`, with the fallback expression in the null block; typing: `T? ?? T → T`.
 - **`?.` (optional chaining)** — `maybe?.field` needs the result to be `U?` and a null-guarded
   load; composes naturally with the null test above.
-- **Optional primitives** — need a representation; `int?` could box through the existing
-  `Int` class, or carry a tag.
+- **Optional enums** — `Enum?` could box through `Int` like `int?`. But in an `Obj` slot it
+  would print its ordinal and match as an `Int`, so it waits for an enum box that knows its
+  variant names.
 - **`[None]` / mixed array literals** — see open question 3.
 - **`opt == present`** — see open question 2.
 - The `T` arm's "any subtype" rule means an arm order like `n: Node { } l: Leaf { }` is

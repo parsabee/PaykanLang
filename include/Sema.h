@@ -251,7 +251,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   //     its resolved type is rewritten to that `T?` so CodeGen emits a null
   //     box instead of the boxed `None` singleton;
   //   * a `T?` value flowing into an `Obj` slot is marked (Expr::CoercedType)
-  //     so CodeGen materialises the `None` singleton for a null box.
+  //     so CodeGen materialises the `None` singleton for a null box;
+  //   * a primitive flowing into an optional primitive slot (`int` ->
+  //     `int?`) is marked with the optional so the lowering boxes it.
   bool checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src);
 
   // Record the destination's array type on an empty array literal `[]` (and
@@ -260,6 +262,14 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // checkAssignable, so every typed sink -- declaration, assignment, field
   // store, call/method/push argument, return, subscript store -- is covered.
   void adoptArrayLiteralType(ast::Type *dst, ast::Expr *src);
+
+  // An array or tuple literal flowing into a slot whose element type is an
+  // optional primitive (`[1, 2]` into `int?[]`, `(1, "a")` into
+  // `(int?, Str)`): retype the literal to hold the optional at those
+  // positions and mark each such element for boxing (Expr::CoercedType).
+  // Returns the literal's (possibly new) type; @p srcTy otherwise.
+  ast::Type *adoptBoxedLiteralElements(ast::Type *dst, ast::Type *srcTy,
+                                       ast::Expr *src);
 
   // If `srcTy` is an optional and `dst` is not (the `T?` -> `T` narrowing
   // that needs a `match`), emit the "cannot use optional ... without

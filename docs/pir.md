@@ -281,7 +281,12 @@ CodeGen enforced, now in one place.
   `PaykanString_equals` with a boxed literal); enum arms compare `i64`
   constants.  Arm bindings are raw `obj` aliases (unowned).
 * **Optionals**: `None` into a `T?` is `null`; a `T?` into an `Obj` slot is
-  replaced by a +1 box of `@PaykanObject_None` when null.
+  replaced by a +1 box of `@PaykanObject_None` when null.  An optional
+  primitive (`int?`, `float?`, `bool?`, `char?`) boxes a present value: a
+  primitive that Sema marked for an optional primitive slot is lowered as
+  `PaykanInt_new` (etc.) followed by `box`, a fresh +1 box for that slot; a
+  `match` arm binding the primitive reads it with `PaykanInt_value` (etc.)
+  into a plain local.
 * **Division**: integer `div` is preceded by `if %b == 0 { call @Paykan_panic_div_by_zero(); unreachable }`
   and the `INT64_MIN / -1` check; `rem` replaces a `-1` divisor by `1`.
 
@@ -317,6 +322,11 @@ PaykanTuple_set(obj, i64, i64) -> void  PaykanTuple_set_obj(obj, i64, box) -> vo
 ; files / boxed primitives
 PaykanFile_open(obj, obj) -> box
 PaykanInt_from_str(obj) -> box          PaykanFloat_from_str(obj) -> box
+; boxes of the optional primitives (int? / float? / bool? / char?)
+PaykanInt_new(i64) -> obj               PaykanInt_value(obj) -> i64
+PaykanFloat_new(f64) -> obj             PaykanFloat_value(obj) -> f64
+PaykanBool_new(i64) -> obj              PaykanBool_value(obj) -> i64
+PaykanChar_new(char) -> obj             PaykanChar_value(obj) -> char
 ; I/O
 Paykan_print(obj) -> void   Paykan_println(obj) -> void
 Paykan_printerr(obj) -> void   Paykan_printerrln(obj) -> void
@@ -329,6 +339,8 @@ PaykanFile_readln(obj) -> box
 ; globals
 extern obj @PaykanObject_None   extern obj @PaykanFile_Stdin
 extern vtable @PaykanArray_vtable   extern vtable @PaykanArray_obj_vtable
+extern vtable @PaykanInt_vtable     extern vtable @PaykanFloat_vtable
+extern vtable @PaykanBool_vtable    extern vtable @PaykanChar_vtable
 ```
 
 `names::kCodeGenRequiredSymbols` in `include/Names.h` is the authoritative
@@ -337,7 +349,7 @@ list; the LLVM backend's JIT symbol table must cover it and the C backend links
 
 Vtable slot layouts of runtime classes (slot index = position):
 
-* `Obj`, `Error`, `Int`/`Float`/`Bool`, tuples: `destroy, toString, equals`
+* `Obj`, `Error`, `Int`/`Float`/`Bool`/`Char`, tuples: `destroy, toString, equals`
 * `Str`: `destroy, toString, equals, len, concat`
 * `File`: `destroy, toString, equals, write, readln, readbytes, read`
 * arrays: `destroy, toString, equals, len` (`push`/`pop` are direct runtime calls)

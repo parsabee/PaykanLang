@@ -40,3 +40,4 @@ line each; the samples parity check (`scripts/samples_parity.py`, ctest
 | `21_match_binding_reassign_loop.pkn` | match-arm binding reassigned in a loop          | per-iteration release (`Shared.c`)   |
 | `22_match_subject_reassign.pkn` | match subject reassigned inside the arm          | binding keeps the subject alive (`Shared.c`) |
 | `23_match_binding_return_mix.pkn` | binding reassigned in a loop + returned, `a = a` | owned binding returned (`Shared.c`)  |
+| `24_optional_primitives.pkn` | `int?` / `float?` / `bool?` / `char?` boxes in every sink, rebinding, `mov`, `T?` with T = int | `Paykan{Int,Float,Bool,Char}_new` (`Basic.c`) + `PaykanShared` |

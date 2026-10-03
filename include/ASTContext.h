@@ -47,6 +47,7 @@ class ASTContext {
   ClassType *IntBoxTy;
   ClassType *FloatBoxTy;
   ClassType *BoolBoxTy;
+  ClassType *CharBoxTy;
 
   // Registry of all class types, keyed by name.
   std::unordered_map<std::string, ClassType *> ClassTypes;
@@ -97,6 +98,7 @@ class ASTContext {
   void buildBoxedIntType();
   void buildBoxedFloatType();
   void buildBoxedBoolType();
+  void buildBoxedCharType();
 
 public:
   ASTContext();
@@ -176,6 +178,7 @@ public:
   ClassType *getIntBoxTy() const { return IntBoxTy; }
   ClassType *getFloatBoxTy() const { return FloatBoxTy; }
   ClassType *getBoolBoxTy() const { return BoolBoxTy; }
+  ClassType *getCharBoxTy() const { return CharBoxTy; }
 
   /// Return the canonical ArrayType whose elements have type @p elemTy,
   /// creating it on first use.  @p elemTy must itself be canonical (a builtin

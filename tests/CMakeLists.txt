@@ -55,6 +55,7 @@ add_executable(sema_tests
     Sema/MovTests.cpp
     Sema/GenericsTests.cpp
     Sema/OptionalTests.cpp
+    Sema/OptionalPrimitiveTests.cpp
     Sema/TupleTests.cpp
 )
 target_include_directories(sema_tests
@@ -95,6 +96,7 @@ add_executable(codegen_tests
     CodeGen/OwnershipTests.cpp
     CodeGen/GenericsTests.cpp
     CodeGen/OptionalTests.cpp
+    CodeGen/OptionalPrimitiveTests.cpp
     CodeGen/TupleTests.cpp
     CodeGen/RegressionTests.cpp
 )

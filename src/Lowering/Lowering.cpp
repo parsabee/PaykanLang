@@ -68,6 +68,14 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanTupleSetObj, {{kObj, kI64, kBox}, kVoid}},
     {kPaykanFileOpen, {{kObj, kObj}, kBox}},
     {kPaykanIntFromStr, {{kObj}, kBox}},
+    {kPaykanIntNew, {{kI64}, kObj}},
+    {kPaykanFloatNew, {{kF64}, kObj}},
+    {kPaykanBoolNew, {{kI64}, kObj}},
+    {kPaykanCharNew, {{kChr}, kObj}},
+    {kPaykanIntValue, {{kObj}, kI64}},
+    {kPaykanFloatValue, {{kObj}, kF64}},
+    {kPaykanBoolValue, {{kObj}, kI64}},
+    {kPaykanCharValue, {{kObj}, kChr}},
     {kPaykanFloatFromStr, {{kObj}, kBox}},
     {kPaykanPrint, {{kObj}, kVoid}},
     {kPaykanPrintln, {{kObj}, kVoid}},
@@ -528,6 +536,9 @@ Val ModuleLowering::emitExpr(ast::Expr *expr) { return Emitter.visit(expr); }
 // -----------------------------------------------
 
 bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
+  // A primitive boxed for an optional primitive slot: a fresh +1 box.
+  if (isPrimitiveBoxing(expr))
+    return true;
   if (auto *mv = ast::dyn_cast<ast::MovExpr>(expr)) {
     ast::Expr *op = mv->getOperand();
     if (auto *id = ast::dyn_cast<ast::Identifier>(op))
@@ -565,6 +576,8 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
 }
 
 bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
+  if (isPrimitiveBoxing(expr))
+    return true;
   if (auto *mv = ast::dyn_cast<ast::MovExpr>(expr)) {
     ast::Expr *op = mv->getOperand();
     if (auto *id = ast::dyn_cast<ast::Identifier>(op))
@@ -1063,6 +1076,64 @@ Val ModuleLowering::visitFuncDecl(ast::FuncDecl *node) {
 bool ModuleLowering::isNoneForOptional(ast::Expr *expr) {
   return ast::isa<ast::NoneLiteral>(expr) && expr->getResolvedType() &&
          ast::isa<ast::OptionalType>(expr->getResolvedType());
+}
+
+bool ModuleLowering::isPrimitiveBoxing(const ast::Expr *expr) {
+  return ast::needsPrimitiveBoxing(expr->getCoercedType(),
+                                   expr->getResolvedType());
+}
+
+Val ModuleLowering::emitPrimitiveBox(const Val &v, ast::Type *optTy) {
+  auto *inner = ast::cast<ast::BuiltinType>(ast::stripOptional(optTy));
+  const char *ctor = nullptr;
+  Val arg = v;
+  switch (inner->getTypeKind()) {
+  case ast::BuiltinType::Int:
+    ctor = kPaykanIntNew;
+    break;
+  case ast::BuiltinType::Float:
+    ctor = kPaykanFloatNew;
+    arg = promoteIntToFloat(arg, ASTCtx.getFloatTy()); // `float? = 3`
+    break;
+  case ast::BuiltinType::Bool:
+    ctor = kPaykanBoolNew;
+    arg = coerceBoolToI64(arg, Type::I64);
+    break;
+  case ast::BuiltinType::Char:
+    ctor = kPaykanCharNew;
+    break;
+  case ast::BuiltinType::Void:
+    break;
+  }
+  if (!ctor) {
+    reportInternalError("boxing a value of type '" + ast::typeName(inner) +
+                        "'");
+    return Val();
+  }
+  Val raw = callRuntime(ctor, {arg}, "opt.prim");
+  return emitSharedNew(raw, "opt.prim.box");
+}
+
+Val ModuleLowering::emitPrimitiveUnbox(const Val &rawObj, ast::Type *innerTy,
+                                       const std::string &name) {
+  auto *inner = ast::cast<ast::BuiltinType>(innerTy);
+  switch (inner->getTypeKind()) {
+  case ast::BuiltinType::Int:
+    return callRuntime(kPaykanIntValue, {rawObj}, name);
+  case ast::BuiltinType::Float:
+    return callRuntime(kPaykanFloatValue, {rawObj}, name);
+  case ast::BuiltinType::Bool: {
+    Val bits = callRuntime(kPaykanBoolValue, {rawObj}, name);
+    return B.cmp(pir::CmpPred::Ne, bits, Val::i64(0), name);
+  }
+  case ast::BuiltinType::Char:
+    return callRuntime(kPaykanCharValue, {rawObj}, name);
+  case ast::BuiltinType::Void:
+    break;
+  }
+  reportInternalError("unboxing a value of type '" + ast::typeName(inner) +
+                      "'");
+  return Val();
 }
 
 static bool isOptionalToObjCoercion(ast::Expr *expr) {
