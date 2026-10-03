@@ -113,10 +113,18 @@ foreach(t IN LISTS PAYKAN_PLUGIN_TARGETS_LIST)
     list(APPEND PAYKAN_CONFIG_PLUGINS "Paykan::${short}")
 endforeach()
 
+# Where the runtime is installed (relative to the prefix; the config file
+# makes the paths absolute wherever the package ends up), so a driver built
+# against the package finds it there (paykan_add_driver).
+set(PAYKAN_CONFIG_RUNTIME_LIBRARY
+    "${CMAKE_INSTALL_LIBDIR}/${CMAKE_STATIC_LIBRARY_PREFIX}paykan_runtime${CMAKE_STATIC_LIBRARY_SUFFIX}")
+set(PAYKAN_CONFIG_RUNTIME_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/paykan")
+
 configure_package_config_file(
     ${PROJECT_SOURCE_DIR}/cmake/PaykanConfig.cmake.in
     ${CMAKE_BINARY_DIR}/cmake/PaykanConfig.cmake
     INSTALL_DESTINATION ${PAYKAN_INSTALL_CMAKEDIR}
+    PATH_VARS PAYKAN_CONFIG_RUNTIME_LIBRARY PAYKAN_CONFIG_RUNTIME_INCLUDE_DIR
 )
 write_basic_package_version_file(
     ${CMAKE_BINARY_DIR}/cmake/PaykanConfigVersion.cmake

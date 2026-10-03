@@ -3,9 +3,19 @@
 // wrapper. The handle must be closed and freed by ARC destroy at end of scope.
 //
 // Expected under --track-heap: live blocks : 0.
+//
+// args: {tmpdir}
 
-fn main() -> int {
-  match open("/tmp/pkn_leakcheck_write.txt", "w") {
+// The directory the scratch files go in: the first argument (the samples
+// harnesses pass a fresh one per run, `// args: {tmpdir}`, so parallel runs
+// never share a file), else /tmp.
+fn scratchDir(args: Str[]) -> Str {
+  if (args.len() > 1) { return args[1]; }
+  return "/tmp";
+}
+
+fn main(args: Str[]) -> int {
+  match open(scratchDir(args) + "/pkn_leakcheck_write.txt", "w") {
     e: Error { }
     f: File  { f.write("hello"); }
   }

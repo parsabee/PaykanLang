@@ -4,6 +4,16 @@
 //
 // open()   -> Obj : File on success, Error on failure
 // readln() -> Obj : Str  on a line,  None  at EOF
+//
+// args: {tmpdir}
+
+// The directory the scratch files go in: the first argument (the samples
+// harnesses pass a fresh one per run, `// args: {tmpdir}`, so parallel runs
+// never share a file), else /tmp.
+fn scratchDir(args: Str[]) -> Str {
+  if (args.len() > 1) { return args[1]; }
+  return "/tmp";
+}
 
 fn writeSource(path: Str) -> int {
   match open(path, "w") {
@@ -59,9 +69,10 @@ fn printFile(path: Str) -> int {
   return 0;
 }
 
-fn main() -> int {
-  src: Str = "/tmp/paykan_copy_src.txt";
-  dst: Str = "/tmp/paykan_copy_dst.txt";
+fn main(args: Str[]) -> int {
+  dir: Str = scratchDir(args);
+  src: Str = dir + "/paykan_copy_src.txt";
+  dst: Str = dir + "/paykan_copy_dst.txt";
 
   writeSource(src);    // write & close src
   printFile(src);

@@ -234,6 +234,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#112). Debug builds of the compiler now abort with an internal error when
   the identical diagnostic (same location, message and notes) is reported
   twice.
+- The runtime lookup of `paykan run` / `build` no longer prefers a stale
+  build tree over an installed binary's own prefix (#124). The order is now
+  `$PAYKAN_RUNTIME_DIR`, the install prefix around the executable, the build
+  tree (only for binaries inside it, marked by `.paykan-build-tree`), then the
+  configured install prefix. `PaykanConfig.cmake` records the installed
+  runtime (`PAYKAN_RUNTIME_LIBRARY` / `PAYKAN_RUNTIME_INCLUDE_DIR`), and
+  drivers made with `paykan_add_driver` use it, so they work wherever they
+  are built. The samples that write files put them in a directory the
+  harness passes per run (`// args: {tmpdir}`), so parallel runs no longer
+  race on fixed `/tmp` paths.
 
 ### Changed
 
