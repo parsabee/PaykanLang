@@ -19,10 +19,17 @@ same way. It has two halves:
    exported enums, classes (layout, vtable slot order, slot targets,
    constructor/destructor/vtable symbols), and functions (Paykan signature,
    PIR signature, link symbol). It also lists the module's dependencies, each
-   with its canonical name and interface hash. Generic templates go here
-   later; the section kind is reserved now.
+   with its canonical name and interface hash. This section is built from
+   **Sema's view of the module**, not from its PIR, because PIR has erased
+   the Paykan types (`Str`, `Shape` and `T?` are all `box`) and contains no
+   enums or templates.
 2. **Code:** the module's verified PIR in a compact binary encoding. A symbol
    index maps every defined symbol to its record.
+
+**Key decision: cross-module generics.** Importing a generic template from
+another module is rejected today, so it is **new functionality** that the
+`.pkm` has to enable or defer. This proposal defers it to v0.2.0 and
+reserves a `templates` section for it (§2.1, §12).
 
 In v0.1.0 the driver builds a `.pkm` for every imported module on demand into
 `.paykan_cache/` and reads imports **only** from those files. Imports are no
@@ -67,10 +74,24 @@ Facts that shape the design:
   was built in. The C cache copes by keying on the generated C text
   (`CBuild.cpp:187`). Native objects can't go into a `.pkm` until mangling is
   stable (§6).
-- **Generic templates are not importable.** "Generic classes and functions
-  are not exported" (`11-generics.md:189-210`). Only a module's own concrete
-  instantiations (`Box<int>`) are exported, as ordinary classes. v0.1.0
-  therefore needs **no template section**.
+- **Cross-module generics don't exist today; they are new functionality.**
+  "Generic classes and functions are not exported" (`11-generics.md:189-210`).
+  `b = shapes::Box<int>(7)`, with `class Box<T>` in `geometry/shapes.pkn`,
+  is rejected with "error: generic types and functions cannot be imported
+  yet: 'shapes::Box<...>' names a template of another module"
+  (`SemaClass.cpp:1125`; see also `:802`, `:917`), and the error is printed
+  twice. Only a module's own concrete instantiations (`Box<int>`) are
+  exported, as ordinary classes. The `.pkm` design therefore isn't preserving
+  an existing feature here. It has to **decide whether to enable** importable
+  templates, and when. That is one of the key decisions; see §2.1 and §12.
+- **PIR loses source-level types, so the interface can't be derived from
+  PIR.** In PIR, fields and parameters are only `i64`/`f64`/`bool`/`char`/
+  `box`/`obj`/`ptr` (`PIR.h:23-32`): a `Str`, a `Shape` and a `Point?` field
+  are all `box`, and a `float` is `f64`. Enums lower to `i64` and don't
+  appear in PIR at all (`pir.md:44-48`), and templates are never lowered
+  (only their instantiations). Sema needs the Paykan types, so the interface
+  section is produced **from Sema's view** (today's `ModuleInfo` data),
+  alongside the PIR, never reconstructed from the code section.
 - **Ownership conventions are uniform.** Every user-function argument is an
   owned +1 box that the callee releases (`pir.md:287-290`), so v0.1.0 needs
   no per-function convention data. #98 changes this in v0.2.0 (§9).
@@ -115,6 +136,19 @@ Facts that shape the design:
 | Lazy per-symbol loading, JIT hot reload | v0.2.0+ | #25; the symbol index exists from v0.1.0 |
 | Exported header for C FFI | v0.2.0 | #21; generated from the interface |
 | Debug info (source locations of declarations) | later | an optional section |
+
+### 2.1 Key decision: cross-module generics, enable now or defer?
+
+Importing a generic template is new functionality (§1). Today it is
+rejected with an error.
+
+| Option | Pros | Cons |
+|---|---|---|
+| **A. Defer to v0.2.0.** v0.1.0's `.pkm` exports concrete instantiations only (today's behaviour) and reserves the `templates` section kind | keeps v0.1.0 small; no AST serializer; no instantiation-dedup machinery in the driver; the language behaves as it does today | stdlib-style generic containers (`Stack<T>`) can't live in a module yet |
+| B. Enable in v0.1.0 | generic libraries become possible at once | needs the template representation (§12.1), cross-module instantiation ownership and dedup (§12.2), and new Sema paths, all before the tag; this widens a release that already has a long list |
+
+**Recommendation: A.** The format reserves room for templates (§3.4, §12),
+so B arrives as a minor format bump. This is open question 2.
 
 ### Non-goals
 
@@ -269,7 +303,13 @@ today.
 
 **Recommendation: B.**
 
-### 4.4 Is the PIR part of the interface redundant?
+### 4.4 Why the interface holds both Paykan and PIR views
+
+The interface can't be derived from the `code` section: PIR has erased the
+Paykan types and has no enums or templates at all (§1). So the Paykan view
+is primary, and it comes from Sema.
+
+Is the PIR view redundant, then?
 
 The PIR signatures and layouts are derivable from the Paykan types
 (`toPIRType`), but the vtable **targets** are not, and the lowering's
@@ -583,11 +623,15 @@ PRs 1–2 can start now. PR 3 needs #102's canonical names.
 
 ---
 
-## 12. Generics (design now, implement in v0.2.0)
+## 12. Generics: new functionality (design now, implement in v0.2.0)
 
-v0.1.0 doesn't export templates (§1), so nothing here blocks the release.
-The format reserves the `templates` section so that adding it is a minor
-change.
+Cross-module generics don't work today. Importing a template is a Sema
+error (§1). Enabling them is **new language functionality** that the
+`.pkm` makes possible, not something it has to preserve. Under the
+recommendation in §2.1, v0.1.0 doesn't export templates, so nothing here
+blocks the release. The format reserves the `templates` section so that
+adding it is a minor change. This section records the design that would be
+built on it.
 
 ### 12.1 Decision: template representation
 
@@ -634,32 +678,36 @@ A module's own `class Box<T>` keeps today's global-name rule.
 1. **Doc location.** #57's deliverable says `docs/modules.md`; this proposal
    is `docs/design/pkm.md`. Keep it here, or move it there (or make
    `docs/modules.md` the user-facing summary once implemented)?
-2. **v0.1.0 scope.** Is "imports go through `.pkm`, backends and their
+2. **Cross-module generics (key decision, §2.1).** Importing a template is
+   rejected today, so enabling it is new functionality. Defer to v0.2.0
+   (recommended; v0.1.0 exports concrete instantiations only), or enable it
+   in v0.1.0 as part of #57?
+3. **v0.1.0 scope.** Is "imports go through `.pkm`, backends and their
    caches unchanged" (PRs 1–5) enough for #57 in v0.1.0, with native code,
    stable mangling and templates in v0.2.0? Or must the stable mangling /
    cache replacement (PR 6) ship in v0.1.0?
-3. **Binary PIR in v0.1.0.** Is it OK to land the container first with a
+4. **Binary PIR in v0.1.0.** Is it OK to land the container first with a
    text-PIR payload (an encoding byte) and switch to binary before the tag
    if the codec slips? Or is binary a hard requirement for v0.1.0?
-4. **Container.** Custom container (recommended) vs. a native object with a
+5. **Container.** Custom container (recommended) vs. a native object with a
    `.paykan.iface` section, which the issue also lists.
-5. **Transitive types.** Reference-only (recommended; it requires the whole
+6. **Transitive types.** Reference-only (recommended; it requires the whole
    dependency closure to be present) vs. copying them as today?
-6. **Prebuilt modules without source in v0.1.0.** Allow them (a `.pkm` found
+7. **Prebuilt modules without source in v0.1.0.** Allow them (a `.pkm` found
    where the source would be), or require sources until the package manager
    exists?
-7. **Dev-build staleness.** A `.pkm` records `kVersion` only. Should
+8. **Dev-build staleness.** A `.pkm` records `kVersion` only. Should
    development builds also record a configure-time git revision so that two
    builds of `0.1.0-dev` with different codegen don't share caches? (The
    LLVM cache uses the exe mtime, which must not go into a `.pkm`.)
-8. **Pre-pass PIR (#97).** Store canonical pre-pass PIR and rerun the
+9. **Pre-pass PIR (#97).** Store canonical pre-pass PIR and rerun the
    pipeline per build (recommended), or store post-pass PIR per opt level?
-9. **Generics in v0.2.0.** Serialized resolved AST (recommended) vs. source
+10. **Generics in v0.2.0.** Serialized resolved AST (recommended) vs. source
    text vs. template PIR; and the per-instantiation unit for dedup?
-10. **Hash.** SHA-256 in the core (recommended) vs. a 128-bit
+11. **Hash.** SHA-256 in the core (recommended) vs. a 128-bit
     non-cryptographic hash. A `.pkm` hash identifies a module to *other*
     files, so collisions matter more than they do for a private cache.
-11. **Frontend.** Should the `.pkm` record which frontend parsed the module?
+12. **Frontend.** Should the `.pkm` record which frontend parsed the module?
     The two frontends are required to produce identical ASTs, so this
     proposal records nothing.
 
