@@ -214,6 +214,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   variable, ...) reports a follow-on either. A later valid assignment
   re-declares it with the value's type. Calls to a function whose signature
   failed are likewise not reported as calls to an undeclared function.
+- Array `push` / `pop` no longer thrash at the capacity boundary (#95). An
+  array now shrinks only once its length falls to a quarter of its capacity,
+  and then to half the capacity, never to exactly its length; capacity never
+  drops below 8 slots on its own. A push/pop loop at a length of 524,288 went
+  from about 40 s to 15 ms. `--track-heap` also reports the number of
+  reallocations.
 
 ### Changed
 
