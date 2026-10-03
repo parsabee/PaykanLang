@@ -74,7 +74,7 @@ An enum value is never interchangeable with an `int`, even though both are integ
 ```pkn
 enum Color { Red, Green }
 
-x: int = Color::Red;     // error: 'Color' does not match declared type 'int'
+x: int = Color::Red;     // error: initializer of type 'Color' does not match declared type 'int' for variable 'x'
 ```
 
 Two different enums are also incompatible with each other, so a comparison across enum types is
@@ -84,7 +84,7 @@ rejected before it can produce a meaningless answer:
 enum A { X, Y }
 enum B { P, Q }
 
-if (A::X == B::P) { }    // error: mismatched types 'A' and 'B'
+if (A::X == B::P) { }    // error: operands of '==' have mismatched types 'A' and 'B'
 ```
 
 Referencing a variant the enum does not declare is an error:

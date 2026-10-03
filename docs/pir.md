@@ -173,8 +173,9 @@ Constructors and destructors are ordinary functions produced by the lowering:
 `@Point(args...) -> box` allocates with `new`, installs the vtable, nulls the
 backpointer, zeroes the fields, boxes the object (`box`, before `__init__`, so
 `self` inside `__init__` recovers the caller's box) and calls
-`@Point.__init__(obj, args...)`; `@Point.destroy(obj)` runs the user `destroy`
-body, releases every ref-typed field and frees the struct (`free`).  Every
+`@Point.__init__(obj, args...)`; `@Point.destroy(obj)` releases every
+ref-typed field and frees the struct (`free`).  `destroy` is entirely
+compiler-generated: it is final, so a class cannot write or override it.  Every
 method `m` of a class `C` is the function `@C.m(obj self, params...)`.  The
 '.' cannot occur in a Paykan identifier, so these names never clash with a
 program function (`fn Point_move`, `fn Point_destroy`); backends must keep
@@ -313,9 +314,11 @@ CodeGen enforced, now in one place.
   into a plain local.
 * **Conversions** (`Target<Source>(value)`, #64): `Str<…>` calls
   `PaykanString_from_int` & co. (an owned string temporary); `int<Str>` /
-  `float<Str>` call `PaykanInt_from_str` / `PaykanFloat_from_str`, whose
-  result is the `int?` / `float?` box (a fresh +1 box, `null` for an
-  invalid string).  The numeric ones are inline: `int<float>` checks
+  `float<Str>` / `bool<Str>` call `PaykanInt_from_str` /
+  `PaykanFloat_from_str` / `PaykanBool_from_str`, whose result is the
+  `int?` / `float?` / `bool?` box (a fresh +1 box, `null` for an invalid
+  string; `bool<Str>` accepts exactly `"True"` and `"False"`).  The boxed
+  forms `Int<Str>` & co. are the same calls.  The numeric ones are inline: `int<float>` checks
   `cmp ge %f, -2^63` and `cmp lt %f, 2^63` (both false for NaN) and calls
   `@Paykan_panic_float_to_int(%f)` then `unreachable` otherwise, before the
   `ftoi`; `float<int>` is `itof`; `int<bool>` and `int<char>` are `cast`s to
@@ -360,7 +363,7 @@ PaykanTuple_set(obj, i64, i64) -> void  PaykanTuple_set_obj(obj, i64, box) -> vo
 ; files / boxed primitives
 PaykanFile_open(obj, obj) -> box
 PaykanInt_from_str(obj) -> box          PaykanFloat_from_str(obj) -> box
-                                        ; null box (None) for an invalid string
+PaykanBool_from_str(obj) -> box         ; null box (None) for an invalid string
 ; boxes of the optional primitives (int? / float? / bool? / char?)
 PaykanInt_new(i64) -> obj               PaykanInt_value(obj) -> i64
 PaykanFloat_new(f64) -> obj             PaykanFloat_value(obj) -> f64

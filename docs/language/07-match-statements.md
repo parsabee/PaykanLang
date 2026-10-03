@@ -76,11 +76,11 @@ class is an error, as is naming a type that does not exist:
 
 ```pkn
 match a {          // a: Animal
-  Car { }          // error: 'Car' is not a subclass of 'Animal'
+  Car { }          // error: type 'Car' is not a subclass of 'Animal'
 }
 
 match x {          // x: Obj
-  Dragon { }       // error: unknown type 'Dragon' in match arm
+  Dragon { }       // error: match arm has unknown class type 'Dragon'
 }
 ```
 

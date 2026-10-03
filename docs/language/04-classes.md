@@ -108,10 +108,10 @@ class Point {
   fn __init__(x: int, y: int) { self.x = x; self.y = y; }
 }
 
-fn distance(a: Point, b: Point) -> float {
+fn distanceSquared(a: Point, b: Point) -> int {   // statically dispatched
   dx: int = a.x - b.x;
   dy: int = a.y - b.y;
-  return my_sqrt(dx * dx + dy * dy);   // statically dispatched
+  return dx * dx + dy * dy;
 }
 ```
 
