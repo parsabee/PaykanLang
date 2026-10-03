@@ -79,6 +79,7 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanBoolValue, {{kObj}, kI64}},
     {kPaykanCharValue, {{kObj}, kChr}},
     {kPaykanFloatFromStr, {{kObj}, kBox}},
+    {kPaykanBoolFromStr, {{kObj}, kBox}},
     {kPaykanPrint, {{kObj}, kVoid}},
     {kPaykanPrintln, {{kObj}, kVoid}},
     {kPaykanErrPrint, {{kObj}, kVoid}},
@@ -503,6 +504,17 @@ void ModuleLowering::bootstrapBuiltins() {
   reg(kConvStrChar, kPaykanStringFromChar);
   reg(kConvIntStr, kPaykanIntFromStr);
   reg(kConvFloatStr, kPaykanFloatFromStr);
+  reg(kConvBoolStr, kPaykanBoolFromStr);
+  // The boxed forms (#88).  A boxed source is unboxed (emitBuiltinCall,
+  // conversionUnboxer) and formatted like its primitive; a boxed target is
+  // the same parse, whose `int?` & co. box already is the `Int?` & co.
+  reg(kConvStrIntBox, kPaykanStringFromInt);
+  reg(kConvStrFloatBox, kPaykanStringFromFloat);
+  reg(kConvStrBoolBox, kPaykanStringFromBool);
+  reg(kConvStrCharBox, kPaykanStringFromChar);
+  reg(kConvIntBoxStr, kPaykanIntFromStr);
+  reg(kConvFloatBoxStr, kPaykanFloatFromStr);
+  reg(kConvBoolBoxStr, kPaykanBoolFromStr);
   reg(kOpen, kPaykanFileOpen);
   IdentityCtors.insert(kString);
 }
@@ -578,8 +590,8 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
       return false;
     if (FunctionTable.count(ce->getCalleeName()) ||
         IdentityCtors.count(ce->getCalleeName())) {
-      if (ce->getCalleeName() == kOpen || ce->getCalleeName() == kConvIntStr ||
-          ce->getCalleeName() == kConvFloatStr)
+      if (ce->getCalleeName() == kOpen ||
+          isParseConversion(ce->getCalleeName()))
         return true;
       return false;
     }

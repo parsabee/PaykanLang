@@ -33,7 +33,7 @@ class Point {
   }
 
   fn toString() -> Str {
-    return "(" + Str<int>(self.x) + "," + Str<int>(self.y) + ")";
+    return "(" + Str<int>(self.x) + "," + Str(self.y) + ")";
   }
 
   fn sum() -> int {
@@ -199,7 +199,7 @@ class Person {
   name: Str;
   age: int;
   fn __init__(n: Str, a: int) { self.name = n; self.age = a; }
-  fn toString() -> Str { return self.name + " (age " + Str<int>(self.age) + ")"; }
+  fn toString() -> Str { return self.name + " (age " + Str(self.age) + ")"; }
 }
 
 p: Person = Person("Alice", 30);

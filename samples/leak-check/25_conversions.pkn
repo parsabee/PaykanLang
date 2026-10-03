@@ -32,7 +32,7 @@ fn main() -> int {
   line = "";
   i = 0;
   while (i < 5) {
-    line = line + Str<int>(i);
+    line = line + Str(i);
     if (i < 4) { line = line + " "; }
     i = i + 1;
   }
@@ -45,16 +45,16 @@ fn main() -> int {
   println(Str<int>(total));
 
   c = Cell();
-  c.label = Str<float>(2.5);
-  c.value = int<Str>("7");
+  c.label = Str(2.5);
+  c.value = int("7");
   c.value = int<Str>("nope");
-  c.value = int<Str>("7");
+  c.value = int("7");
   println(c.label);
 
   f = float<Str>("1.25");
-  f = float<Str>("bad");
-  n = int<float>(7.9) + int<bool>(False) + int<char>(char<int>(0));
-  println(Str<bool>(bool<int>(n)) + " " + Str<char>(char<int>(97)) + " " +
+  f = float("bad");
+  n = int<float>(7.9) + int(False) + int<char>(char(0));
+  println(Str<bool>(bool<int>(n)) + " " + Str(char(97)) + " " +
           Str<int>(n));
   return 0;
 }

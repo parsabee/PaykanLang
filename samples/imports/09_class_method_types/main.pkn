@@ -22,7 +22,7 @@ fn main() -> int {
   if (k == lib::Kind::Odd) { odd = 1; }
 
   println(Str<int>(p.sum()));             // 11
-  println(Str<int>(lib::total(halves)));  // 7
+  println(Str(lib::total(halves)));  // 7
   println(Str<int>(odd));                 // 1
   return 0;
 }

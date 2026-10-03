@@ -56,7 +56,7 @@ fn describe(o: Obj) -> Str {
 
 fn main() -> int {
   bi: Box<int> = Box<int>(3);                 // explicit type argument
-  println(Str<int>(bi.get()));                  // 3
+  println(Str(bi.get()));                  // 3
   bs = Box<Str>("hello");
   bs.set("world");
   println(bs.get());                          // world
@@ -65,7 +65,7 @@ fn main() -> int {
   println(p.key() + "=" + Str<int>(p.value())); // age=42
 
   bb: Box<Box<int>> = Box<Box<int>>(bi);      // nested instantiation
-  println(Str<int>(bb.get().get()));            // 3
+  println(Str(bb.get().get()));            // 3
 
   s: Stack<Str> = Stack<Str>();
   s.push("a");
@@ -74,13 +74,13 @@ fn main() -> int {
 
   println(Str<int>(first([10, 20])));           // 10   (T inferred as int)
   println(first<Str>(["x", "y"]));            // x    (explicit)
-  println(Str<int>(unbox(Box<int>(7))));        // 7    (T inferred through Box<T>)
+  println(Str(unbox(Box<int>(7))));        // 7    (T inferred through Box<T>)
 
   inferred = Box(5);                          // constructor-argument inference
   println(Str<int>(inferred.get()));            // 5
 
   h: Holder = Holder(40);                     // instantiation as a field type
-  println(Str<int>(h.get().get() + 2));         // 42
+  println(Str(h.get().get() + 2));         // 42
 
   arr: Box<int>[] = [Box<int>(1), Box<int>(2)];
   println(Str<int>(arr[1].get()));              // 2
@@ -89,10 +89,10 @@ fn main() -> int {
   println(describe(bs));                      // Box<Str>
   println(describe(p));                       // something else
 
-  println(Str<bool>(bi == Box<int>(3)));        // True  (== dispatches to equals)
+  println(Str(bi == Box<int>(3)));        // True  (== dispatches to equals)
   println(Str<bool>(bi == Box<int>(4)));        // False
 
   moved: Box<int> = mov bi;                   // ownership transfer
-  println(Str<int>(moved.get()));               // 3
+  println(Str(moved.get()));               // 3
   return 0;
 }

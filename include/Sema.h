@@ -22,6 +22,9 @@ class ParserDriver;
 }
 namespace sema {
 
+/// One specialization of a builtin conversion target (Sema.cpp).
+struct ConversionPair;
+
 /// Result object returned by Sema::run(). Carries the populated ASTContext
 /// and (for imported modules) the owning ParserDriver plus pre-computed child
 /// SemaContexts so CodeGen can consume them without re-running Sema.
@@ -649,15 +652,33 @@ private:
                           const std::vector<ast::Type *> &argTypes);
 
   /// True when @p name is a conversion target (`Str`, `int`, `float`,
-  /// `bool`, `char`), i.e. `name<Source>(value)` is a conversion, or the
-  /// spelled form (`int<float>`) checkConversion rebinds such a call to.
+  /// `bool`, `char`, `Int`, `Float`, `Bool`), i.e. `name<Source>(value)` is
+  /// a conversion, or the spelled form (`int<float>`) checkConversion rebinds
+  /// such a call to.
   static bool isConversionTarget(std::string_view name);
 
-  /// Check a conversion constructor `Target<Source>(value)` (#64): the pair
-  /// must be one of the supported conversions and the argument must have
-  /// exactly the Source type.  Rebinds the callee to the spelled conversion
-  /// (`names::kConvIntFloat`, ...) for the lowering and returns the result
-  /// type, or nullptr after reporting an error.
+  /// True when @p node is a call of the `Str` constructor rather than a
+  /// conversion: `Str(s)` with a `Str` (or `Str?`) argument, or a `Str(...)`
+  /// call whose argument count or argument is already wrong.
+  bool isStrConstruction(ast::CallExpr *node,
+                         const std::vector<ast::Type *> &argTypes) const;
+
+  /// Check a conversion constructor without its type argument, `Target(value)`
+  /// (#88): it picks the specialization whose source is exactly the
+  /// argument's type (`Str(n)` with an `int` is `Str<int>(n)`), or reports
+  /// that there is none.  Rebinds the callee like checkConversion.
+  ast::Type *inferConversion(ast::CallExpr *node,
+                             const std::vector<ast::Type *> &argTypes);
+
+  /// Rebind a checked conversion @p node to @p pair's spelled form and
+  /// return its result type (the optional target for a parse).
+  ast::Type *applyConversion(ast::CallExpr *node, const ConversionPair *pair);
+
+  /// Check a conversion constructor `Target<Source>(value)` (#64, #88): the
+  /// pair must be one of the target's closed set of specializations and the
+  /// argument must have exactly the Source type.  Rebinds the callee to the
+  /// spelled conversion (`names::kConvIntFloat`, ...) for the lowering and
+  /// returns the result type, or nullptr after reporting an error.
   ast::Type *checkConversion(ast::CallExpr *node,
                              const std::vector<ast::Type *> &argTypes);
 

@@ -121,7 +121,7 @@ fn listHistory(history: Ring<(Str, float)>) {
   i: int = 0;
   while (i < history.len()) {
     src, value = history.at(i);
-    println("  " + Str<int>(i + 1) + ": " + src + "  => " + show(value));
+    println("  " + Str(i + 1) + ": " + src + "  => " + show(value));
     i = i + 1;
   }
 }
@@ -138,7 +138,7 @@ fn splitCommand(s: Str) -> (Str, Str) {
   while (i < s.len() && s[i] == ' ') { i = i + 1; }
   arg: Str = "";
   while (i < s.len()) {
-    arg = arg + Str<char>(s[i]);
+    arg = arg + Str(s[i]);
     i = i + 1;
   }
   return (word, arg);

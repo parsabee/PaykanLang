@@ -166,6 +166,16 @@ int64_t PaykanBool_equals(PaykanObject *self, PaykanObject *other) {
   return Paykan_equals_consume_other(other, result);
 }
 
+PaykanShared *PaykanBool_from_str(PaykanObject *str) {
+  PaykanString *s = (PaykanString *)str;
+  // Exactly the spellings `Str<bool>` prints, so the two round-trip.
+  if (s->len == 4 && memcmp(s->data, "True", 4) == 0)
+    return PaykanShared_new((PaykanObject *)PaykanBool_new(1));
+  if (s->len == 5 && memcmp(s->data, "False", 5) == 0)
+    return PaykanShared_new((PaykanObject *)PaykanBool_new(0));
+  return NULL;
+}
+
 // ============================================================================
 // Char
 // ============================================================================

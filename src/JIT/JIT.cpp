@@ -74,6 +74,7 @@ const RuntimeSymbol kRuntimeSymbols[] = {
 
     {kPaykanBoolNew,         reinterpret_cast<void *>(&PaykanBool_new)},
     {kPaykanBoolValue,       reinterpret_cast<void *>(&PaykanBool_value)},
+    {kPaykanBoolFromStr,     reinterpret_cast<void *>(&PaykanBool_from_str)},
     {kPaykanBoolVtable,      reinterpret_cast<void *>(&PaykanBool_vtable)},
 
     {kPaykanCharNew,         reinterpret_cast<void *>(&PaykanChar_new)},

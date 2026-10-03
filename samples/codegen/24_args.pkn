@@ -11,7 +11,7 @@ fn main(args: Str[]) -> int {
   println("argc: " + Str<int>(args.len()));
   i: int = 0;
   while (i < args.len()) {
-    println("  args[" + Str<int>(i) + "] = " + args[i]);
+    println("  args[" + Str(i) + "] = " + args[i]);
     i = i + 1;
   }
   return 0;

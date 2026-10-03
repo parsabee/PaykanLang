@@ -53,7 +53,7 @@ fn main() -> int {
   println("=== move a class object ===");
   p: Point = Point(3, 4);
   q = mov p;
-  println(Str<int>(q.sum()));     // 7
+  println(Str(q.sum()));     // 7
 
   println("=== move into a function argument ===");
   loud: Str = "loud";

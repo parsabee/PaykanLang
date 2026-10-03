@@ -10,9 +10,9 @@ fn main() -> int {
   d: int = 9223372036854775807;   // INT64_MAX
   neg: int = 0 - 2147483648;     // large negative via unary-minus at runtime
   println("int 0:    " + Str<int>(a));
-  println("int 1:    " + Str<int>(b));
+  println("int 1:    " + Str(b));
   println("int 42:   " + Str<int>(c));
-  println("INT64_MAX:" + Str<int>(d));
+  println("INT64_MAX:" + Str(d));
   println("neg large:" + Str<int>(neg));
 
   // ---- Float literals -------------------------------------------------------
@@ -20,15 +20,15 @@ fn main() -> int {
   f1: float = 1.0;
   pi: float = 3.14159;
   neg_f: float = 0.0 - 2.718;
-  println("float 0:  " + Str<float>(f0));
+  println("float 0:  " + Str(f0));
   println("float 1:  " + Str<float>(f1));
-  println("pi:       " + Str<float>(pi));
+  println("pi:       " + Str(pi));
   println("neg float:" + Str<float>(neg_f));
 
   // ---- Bool literals --------------------------------------------------------
   t: bool = True;
   f: bool = False;
-  println("True:     " + Str<bool>(t));
+  println("True:     " + Str(t));
   println("False:    " + Str<bool>(f));
 
   // ---- String literals -------------------------------------------------------

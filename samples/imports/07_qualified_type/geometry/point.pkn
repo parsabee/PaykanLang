@@ -9,6 +9,6 @@ class Point {
   }
   fn sum() -> int { return self.x + self.y; }
   fn toString() -> Str {
-    return "(" + Str<int>(self.x) + "," + Str<int>(self.y) + ")";
+    return "(" + Str<int>(self.x) + "," + Str(self.y) + ")";
   }
 }

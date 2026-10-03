@@ -163,6 +163,12 @@ int64_t PaykanBool_equals(PaykanObject *self, PaykanObject *other);
 
 extern PaykanObjectVTable PaykanBool_vtable;
 
+/// `bool<Str>(s)` / `Bool<Str>(s)`: parse exactly "True" or "False" (the
+/// spellings `Str<bool>` prints; case-sensitive, the whole string).  Returns
+/// the `bool?` result: a PaykanShared* wrapping a fresh PaykanBool, or NULL
+/// (None) for any other string.
+PaykanShared *PaykanBool_from_str(PaykanObject *str);
+
 // ============================================================================
 // Char
 // ============================================================================

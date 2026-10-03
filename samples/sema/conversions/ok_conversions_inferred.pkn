@@ -1,0 +1,19 @@
+// The inferred form `Target(value)` picks the specialization whose source is
+// exactly the argument's type; the result types match the explicit form.
+fn main() -> int {
+  i: int = 1;  f: float = 1.5;  b: bool = True;  c: char = 'c';  s: Str = "12";
+  s1: Str = Str(i);             // Str<int>
+  s2: Str = Str(f);             // Str<float>
+  s3: Str = Str(b) + Str(c);    // Str<bool>, Str<char>
+  s4: Str = Str(s);             // not a conversion: the Str constructor
+  p1: int? = int(s);            // int<Str>
+  p2: float? = float(s);        // float<Str>
+  p3: bool? = bool(s);          // bool<Str>
+  n1: int = int(f);             // int<float>
+  n2: float = float(i);         // float<int>
+  n3: bool = bool(i);           // bool<int>
+  n4: char = char(i);           // char<int>
+  b1: Int? = Int(s);            // Int<Str>
+  match b1 { x: Int { t: Str = Str(x); } None { } }   // Str<Int>
+  return 0;
+}

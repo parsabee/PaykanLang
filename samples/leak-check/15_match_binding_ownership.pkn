@@ -30,7 +30,7 @@ fn main() -> int {
       probe(b);      // consumed argument: retains the subject's box
       c: A = b;      // new owner: shares the same box
       h.a = b;       // field slot: releases old box, retains subject's
-      println(Str<int>(c.x + h.a.x));  // 10
+      println(Str(c.x + h.a.x));  // 10
     }
     _ { println("no"); }
   }

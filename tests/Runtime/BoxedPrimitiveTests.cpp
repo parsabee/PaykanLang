@@ -304,6 +304,37 @@ TEST(BoxedBool, EqualsSameValue) {
   PaykanBool_destroy((PaykanObject *)b);
 }
 
+// `bool<Str>` / `Bool<Str>`: exactly "True" or "False", else None (NULL).
+static PaykanShared *parseBool(const char *text, int64_t len) {
+  PaykanObject *strObj = (PaykanObject *)PaykanString_new(text, len);
+  PaykanShared *result = PaykanBool_from_str(strObj);
+  PaykanString_destroy(strObj);
+  return result;
+}
+
+TEST(BoxedBool, FromStrAcceptsExactlyTrueAndFalse) {
+  PaykanShared *t = parseBool("True", 4);
+  PaykanShared *f = parseBool("False", 5);
+  ASSERT_NE(t, nullptr);
+  ASSERT_NE(f, nullptr);
+  EXPECT_EQ(PaykanShared_get(t)->vtable, &PaykanBool_vtable);
+  EXPECT_EQ(PaykanBool_value(PaykanShared_get(t)), 1);
+  EXPECT_EQ(PaykanBool_value(PaykanShared_get(f)), 0);
+  Paykan_release(t);
+  Paykan_release(f);
+}
+
+TEST(BoxedBool, FromStrRejectsEverythingElse) {
+  EXPECT_EQ(parseBool("", 0), nullptr);
+  EXPECT_EQ(parseBool("true", 4), nullptr);
+  EXPECT_EQ(parseBool("FALSE", 5), nullptr);
+  EXPECT_EQ(parseBool("1", 1), nullptr);
+  EXPECT_EQ(parseBool(" True", 5), nullptr);
+  EXPECT_EQ(parseBool("True ", 5), nullptr);
+  EXPECT_EQ(parseBool("Tru", 3), nullptr);
+  EXPECT_EQ(parseBool("True\0", 5), nullptr); // an embedded NUL is not ignored
+}
+
 // ============================================================================
 // PaykanChar (the box of a present `char?`) and the *_value accessors
 // ============================================================================

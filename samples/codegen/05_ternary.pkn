@@ -16,7 +16,7 @@ fn main() -> int {
   x: int = if True  then 10 else 20;
   y: int = if False then 10 else 20;
   println("True  ->" + Str<int>(x));    // 10
-  println("False ->" + Str<int>(y));    // 20
+  println("False ->" + Str(y));    // 20
 
   println("=== float ternary ===");
   f: float = if 1 < 2 then 1.5 else 2.5;
@@ -24,7 +24,7 @@ fn main() -> int {
 
   println("=== bool ternary ===");
   b: bool = if True then False else True;
-  println("bool ->" + Str<bool>(b));    // False
+  println("bool ->" + Str(b));    // False
 
   println("=== nested ternary ===");
   grade: int = 85;
@@ -36,7 +36,7 @@ fn main() -> int {
 
   println("=== ternary with relational condition ===");
   a: int = 7;
-  println("max(7,3)=" + Str<int>(if a > 3 then a else 3));  // 7
+  println("max(7,3)=" + Str(if a > 3 then a else 3));  // 7
   println("min(7,3)=" + Str<int>(if a < 3 then a else 3));  // 3
 
   println("=== Str ternary (class branches) ===");

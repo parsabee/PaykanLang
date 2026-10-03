@@ -124,9 +124,9 @@ m = mov t;                 // ownership transfer, like any reference value
 ```pkn
 a = (1, "s");
 b = (1, "s");
-println(Str<bool>(a == b));               // True  — element-wise, Str by content
+println(Str(a == b));               // True  — element-wise, Str by content
 println(Str<bool>(a != (2, "s")));        // True
-println(Str<bool>(((1, "x"), 2.5) == ((1, "x"), 2.5)));   // True — nested
+println(Str(((1, "x"), 2.5) == ((1, "x"), 2.5)));   // True — nested
 println(a.toString());                  // (1, s)
 ```
 

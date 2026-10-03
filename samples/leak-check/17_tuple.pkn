@@ -34,7 +34,7 @@ fn main() -> int {
   println(Str<bool>(t == (1, "a")));
   m = mov t;
   println(m.1 + s + str + b + arr[2].1);
-  println(Str<int>(n + a));
+  println(Str(n + a));
   return 0;
 }
 

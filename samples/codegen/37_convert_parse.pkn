@@ -29,20 +29,20 @@ fn main() -> int {
   invalid = 0;
   i = 0;
   while (i < inputs.len()) {
-    match int<Str>(inputs[i]) {
+    match int(inputs[i]) {
       n: int { sum = sum + n; }
       None   { invalid = invalid + 1; }
     }
     i = i + 1;
   }
-  println("sum of the valid numbers: " + Str<int>(sum) + " (" + Str<int>(invalid) +
+  println("sum of the valid numbers: " + Str(sum) + " (" + Str<int>(invalid) +
           " invalid)");
 
   match int<Str>("-9223372036854775808") {
-    n: int { println(Str<int>(n) + " is the smallest int"); }
+    n: int { println(Str(n) + " is the smallest int"); }
     None   { }
   }
-  if (int<Str>("9223372036854775808") == None) {
+  if (int("9223372036854775808") == None) {
     println("9223372036854775808 is not an int");
   }
   println(describe(" 7"));
@@ -66,8 +66,8 @@ fn main() -> int {
   specials: Str[] = ["nan", "inf", "-0"];
   i = 0;
   while (i < specials.len()) {
-    match float<Str>(specials[i]) {
-      f: float { out = out + Str<float>(f); }
+    match float(specials[i]) {
+      f: float { out = out + Str(f); }
       None     { out = out + "?"; }
     }
     if (i < 2) { out = out + " "; }
@@ -75,6 +75,6 @@ fn main() -> int {
   }
   println(out);
   if (float<Str>("1e999") == None) { println("'1e999' is not a float"); }
-  println(int<Str>("12abc"));      // an int? prints as its value or None
+  println(int("12abc"));      // an int? prints as its value or None
   return 0;
 }

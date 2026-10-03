@@ -109,7 +109,7 @@ fn main() -> int {
   println("parse  -> " + show(parse("")));
 
   m = mean([1, 2, 3, 4]);
-  match m { f: float { println("mean -> " + Str<float>(f)); } None { } }
+  match m { f: float { println("mean -> " + Str(f)); } None { } }
   empty: int[] = [];
   print("mean of nothing -> ");
   println(mean(empty));
@@ -130,7 +130,7 @@ fn main() -> int {
   a: int? = 7;
   b: int? = parse("7");
   println("equal: " + Str<bool>(a == b));
-  println("equal to None: " + Str<bool>(a == None));
+  println("equal to None: " + Str(a == None));
 
   sparse: int?[] = [1, 2, 3];
   sparse[1] = None;

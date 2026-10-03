@@ -1,0 +1,91 @@
+// 41 — the boxed conversion specializations and bool<Str> (#88)
+// Exercises: Str<Int> / Str<Float> / Str<Bool> / Str<Char>, which format a
+//            boxed value exactly like the primitive form; Int<Str> /
+//            Float<Str> / Bool<Str>, which parse into the optional box
+//            (`Int?` & co., None for an invalid string); and bool<Str>,
+//            which accepts exactly "True" / "False" and so round-trips
+//            Str<bool>.  Both spellings appear: the inferred `Str(n)` (the
+//            specialization for the argument's exact type) and the explicit
+//            `Str<Int>(n)`.
+//
+// expect-stdout: Int 42 | Float 2.5 | Bool True | Char x
+// expect-stdout: 'yes' is not a Bool
+// expect-stdout: settings: 3 of 5 valid
+// expect-stdout: retries=3 ratio=0.75 verbose=False
+// expect-stdout: 'true' is not a bool
+// expect-stdout: round trip: True False
+// expect-stdout: None
+// expect-stdout: None
+
+fn describe(o: Obj) -> Str {
+  match o {
+    n: Int   { return "Int " + Str<Int>(n); }
+    f: Float { return "Float " + Str(f); }          // Str<Float>
+    b: Bool  { return "Bool " + Str<Bool>(b); }
+    c: Char  { return "Char " + Str(c); }           // Str<Char>
+    _        { return "?"; }
+  }
+}
+
+fn main() -> int {
+  // A present optional primitive is its box; formatted like the primitive.
+  i: int? = 42;
+  f: float? = 2.5;
+  b: bool? = True;
+  c: char? = 'x';
+  println(describe(i) + " | " + describe(f) + " | " + describe(b) + " | " +
+          describe(c));
+
+  // Parsing into the boxes.
+  keys: Str[] = ["retries", "ratio", "verbose", "color", "depth"];
+  vals: Str[] = ["3", "0.75", "False", "yes", "deep"];
+  line = "";
+  valid = 0;
+  k = 0;
+  while (k < keys.len()) {
+    text = "";
+    if (keys[k] == "ratio") {
+      match Float<Str>(vals[k]) { x: Float { text = Str<Float>(x); } None { } }
+    } else if (keys[k] == "verbose" || keys[k] == "color") {
+      match Bool(vals[k]) {                       // Bool<Str>
+        x: Bool { text = Str<Bool>(x); }
+        None    { }
+      }
+      if (text == "") { println("'" + vals[k] + "' is not a Bool"); }
+    } else {
+      match Int(vals[k]) { x: Int { text = Str(x); } None { } }
+    }
+    if (text != "") {
+      valid = valid + 1;
+      if (line != "") { line = line + " "; }
+      line = line + keys[k] + "=" + text;
+    }
+    k = k + 1;
+  }
+  println("settings: " + Str<int>(valid) + " of " + Str<int>(keys.len()) +
+          " valid");
+  println(line);
+
+  // bool<Str> takes exactly the spellings Str<bool> prints.
+  match bool<Str>("true") {
+    v: bool { println("parsed " + Str<bool>(v)); }
+    None    { println("'true' is not a bool"); }
+  }
+  out = "round trip:";
+  flags: bool[] = [True, False];
+  j = 0;
+  while (j < flags.len()) {
+    match bool(Str(flags[j])) {                   // bool<Str>(Str<bool>(...))
+      v: bool { out = out + " " + Str<bool>(v); }
+      None    { out = out + " ?"; }
+    }
+    j = j + 1;
+  }
+  println(out);
+
+  // A failed parse is None.
+  missing: Int? = Int<Str>("4 2");
+  println(missing);
+  println(Bool(""));
+  return 0;
+}

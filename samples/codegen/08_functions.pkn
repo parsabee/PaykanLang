@@ -41,7 +41,7 @@ fn printInt(label: Str, n: int) {
   println(label + Str<int>(n));
 }
 fn printBool(label: Str, b: bool) {
-  println(label + Str<bool>(b));
+  println(label + Str(b));
 }
 
 // ---- Str-returning functions (exercises shared-box return path) -----------

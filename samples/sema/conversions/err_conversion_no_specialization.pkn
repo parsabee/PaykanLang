@@ -1,0 +1,8 @@
+// The inferred form picks the specialization for the argument's exact type;
+// a user class has none.
+class A { fn __init__() { } }
+fn main() -> int {
+  a = A();
+  s = Str(a);   // error: no specialization of 'Str' for 'A'; its specializations are int, float, bool, char, Int, Float, Bool, Char
+  return 0;
+}

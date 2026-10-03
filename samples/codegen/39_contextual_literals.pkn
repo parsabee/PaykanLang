@@ -67,7 +67,7 @@ fn showInts(xs: int?[]) -> Str {
   while (i < xs.len()) {
     if (i > 0) { out = out + " "; }
     match xs[i] {
-      n: int { out = out + Str<int>(n); }
+      n: int { out = out + Str(n); }
       None   { out = out + "None"; }
     }
     i = i + 1;
