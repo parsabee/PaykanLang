@@ -194,6 +194,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A qualified match arm on an enum (`base::Color::Green { … }`) now says to
   use the bare variant name (`'Green'`) instead of claiming it is not a
   variant (#79).
+- A failed declaration reports only its own error (#89). A variable whose
+  first assignment, initializer, type annotation, destructuring or match-arm
+  pattern is in error is still declared, with an internal error type, so its
+  later uses are no longer reported as `use of undeclared variable`, and
+  nothing built on it (a call, an operator, a member access, a derived
+  variable, ...) reports a follow-on either. A later valid assignment
+  re-declares it with the value's type. Calls to a function whose signature
+  failed are likewise not reported as calls to an undeclared function.
 
 ### Changed
 

@@ -1,0 +1,12 @@
+// ERROR: argument of 'Str<int>' has type 'float', expected 'int'
+// The failed declaration of `a` is the only error reported: `a` is still
+// declared (with an internal error type), so its later uses are not reported
+// as "use of undeclared variable 'a'", and neither is anything built on it.
+fn main() -> int {
+  n = 2.5;
+  a = Str<int>(n);
+  println(a);
+  b = a + "!";
+  println(b.len());
+  return 0;
+}

@@ -21,6 +21,7 @@ ASTContext::ASTContext()
   BoolTy = make<BuiltinType>(SourceLocation(), BuiltinType::Bool);
   CharTy = make<BuiltinType>(SourceLocation(), BuiltinType::Char);
   VoidTy = make<BuiltinType>(SourceLocation(), BuiltinType::Void);
+  PoisonTy = make<PoisonType>(SourceLocation());
   // Pre-allocate Obj, Str, Array, File, Error, and boxed primitives so all
   // method signatures are correct from the start.
   ObjTy = make<ClassType>(SourceLocation(), intern(names::kObj), nullptr);
@@ -511,6 +512,10 @@ std::string typeName(Type *ty) {
     }
     return s + ")";
   }
+  // Never shown for a poisoned binder (its uses are not diagnosed); spelled
+  // so that it cannot be mistaken for a source type if it ever is.
+  if (isa<PoisonType>(ty))
+    return "<error>";
   return "unknown";
 }
 

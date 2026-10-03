@@ -621,7 +621,29 @@ ast::Type *Sema::checkIdentLive(std::string_view name,
     error(loc, "use of undeclared variable '" + std::string(name) + "'");
     return nullptr;
   }
+  // A poisoned variable: its declaration failed and was reported there.  The
+  // use is absorbed silently, and so is every expression built on it (each
+  // check already stays quiet for an operand that has no type).
+  if (ast::isa<ast::PoisonType>(ty)) {
+    ++SuppressedFollowOns;
+    return nullptr;
+  }
   return ty;
+}
+
+void Sema::declarePoisoned(Scope *scope, std::string_view name) {
+  scope->set(name, Ctx.getPoisonTy());
+  ++PoisonedBindings;
+}
+
+bool Sema::isTypeNameForVariable(const std::string &name) const {
+  return Ctx.lookupClassType(name) || Ctx.lookupEnumType(name) ||
+         ClassTemplates.count(name) ||
+         (CurrentTypeParams && CurrentTypeParams->count(name)) ||
+         name == names::kObj || name == names::kString ||
+         name == names::kFile || name == names::kTypeInt ||
+         name == names::kTypeBool || name == names::kTypeFloat ||
+         name == names::kTypeChar || name == names::kStdin;
 }
 
 // Visit an expression and return its resolved type (nullptr on error).
@@ -1509,23 +1531,53 @@ ast::Type *Sema::ExprChecker::visitTupleIndexExpr(ast::TupleIndexExpr *node) {
 // re-assigned if already visible (AssignStmt rules), and `_` discards the
 // element.
 bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
+  // After a reported failure (the value is in error, is not a tuple, or has
+  // the wrong arity) the targets are still bound, so their uses are not
+  // reported as undeclared: an annotated target whose type resolves takes that
+  // type, any other new target is poisoned, and a visible variable keeps its
+  // type.
+  auto bindTargetsAfterError = [&]() {
+    StringSet seen;
+    for (const auto &target : node->getTargets()) {
+      if (target.isSkip())
+        continue;
+      const std::string &name = target.getName();
+      if (!seen.insert(name).second || isTypeNameForVariable(name))
+        continue;
+      if (target.DeclType) {
+        if (CurrentScope->contains(name))
+          continue; // a redeclaration: the existing binding stands
+        // An annotation that does not resolve is a separate error of its own.
+        if (auto *declTy = resolveType(target.DeclType, target.Loc,
+                                       "destructuring target '" + name + "'"))
+          CurrentScope->declare(name, declTy);
+        else
+          declarePoisoned(CurrentScope, name);
+        continue;
+      }
+      if (!CurrentScope->findOwner(name))
+        declarePoisoned(CurrentScope, name);
+    }
+    return false;
+  };
+
   auto *valTy = resolveExprType(node->getValue());
   if (!valTy)
-    return false;
+    return bindTargetsAfterError();
 
   auto *tt = ast::dyn_cast<ast::TupleType>(valTy);
   if (!tt) {
     error(node->getValue()->getLocation(),
           "cannot destructure a value of type '" + typeName(valTy) +
               "'; only tuples can be destructured");
-    return false;
+    return bindTargetsAfterError();
   }
   if (tt->getArity() != node->getNumTargets()) {
     error(node->getLocation(),
           "cannot destructure a value of type '" + typeName(tt) + "' into " +
               std::to_string(node->getNumTargets()) + " targets (it has " +
               std::to_string(tt->getArity()) + " elements)");
-    return false;
+    return bindTargetsAfterError();
   }
   // CodeGen extracts the elements from this resolved type.
   node->getValue()->setResolvedType(tt);
@@ -1566,6 +1618,7 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
       auto *declTy = resolveType(target.DeclType, target.Loc,
                                  "destructuring target '" + name + "'");
       if (!declTy) {
+        declarePoisoned(CurrentScope, name);
         ok = false;
         continue;
       }
@@ -1577,6 +1630,8 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
                               typeName(elemTy) +
                               "' does not match declared type '" +
                               typeName(declTy) + "' for target '" + name + "'");
+        // The annotation still types the variable.
+        CurrentScope->declare(name, declTy);
         ok = false;
         continue;
       }
@@ -1592,6 +1647,11 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
       continue;
     }
     auto *varTy = owner->lookup(name);
+    // A poisoned variable is re-declared with the element's type.
+    if (ast::isa<ast::PoisonType>(varTy)) {
+      owner->set(name, elemTy);
+      continue;
+    }
     if (!isAssignable(varTy, elemTy) ||
         ast::needsPrimitiveBoxing(varTy, elemTy)) {
       error(target.Loc, "cannot assign element " + std::to_string(i) +
@@ -1638,6 +1698,14 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
     processImport(imp);
 
   visit(tu);
+  // A binder is poisoned only after its declaration's error was reported, so
+  // a program without errors has none, and the poison type never reaches the
+  // lowering.  Guard that invariant: never hand such a program on.
+  if (PoisonedBindings && !Diags.hasErrors()) {
+    assert(false && "a binder was poisoned without an error being reported");
+    error(tu->getLocation(),
+          "internal compiler error: a declaration failed without a diagnostic");
+  }
   return SemaContext{nullptr,
                      &Ctx,
                      nullptr,
@@ -1945,19 +2013,21 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   ast::Type *expected = nullptr;
   if (auto *existing = CurrentScope->findOwner(node->getVarName()))
     expected = existing->lookup(node->getVarName());
+  if (expected && ast::isa<ast::PoisonType>(expected))
+    expected = nullptr; // a poisoned variable takes the value's own type
   auto *valTy = resolveExprType(node->getValue(), expected);
-  if (!valTy)
+  const auto &varName = node->getVarName();
+  if (!valTy) {
+    // The value's error was reported.  A first assignment still declares the
+    // variable -- poisoned -- so its uses are not reported as undeclared; an
+    // existing variable keeps its type.
+    if (!isTypeNameForVariable(varName) && !CurrentScope->findOwner(varName))
+      declarePoisoned(CurrentScope, varName);
     return false;
+  }
 
   // Guard: the target name must not shadow a registered type name.
-  const auto &varName = node->getVarName();
-  if (Ctx.lookupClassType(varName) || Ctx.lookupEnumType(varName) ||
-      ClassTemplates.count(varName) ||
-      (CurrentTypeParams && CurrentTypeParams->count(varName)) ||
-      varName == names::kObj || varName == names::kString ||
-      varName == names::kFile || varName == names::kTypeInt ||
-      varName == names::kTypeBool || varName == names::kTypeFloat ||
-      varName == names::kTypeChar || varName == names::kStdin) {
+  if (isTypeNameForVariable(varName)) {
     error(node->getLocation(),
           "'" + varName + "' is a type name and cannot be used as a variable");
     return false;
@@ -1977,6 +2047,7 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
         error(node->getLocation(),
               "cannot infer element type of empty array literal '[]'; "
               "add an explicit type annotation");
+        declarePoisoned(CurrentScope, varName);
         return false;
       }
     }
@@ -1985,6 +2056,20 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   }
 
   auto *varTy = owner->lookup(varName);
+
+  // A poisoned variable (its declaration failed) is re-declared by a valid
+  // assignment, with the value's type, in the scope that owns it.
+  if (ast::isa<ast::PoisonType>(varTy)) {
+    if (auto *at = ast::dyn_cast<ast::ArrayType>(valTy);
+        at && at->getElementType() == Ctx.getVoidTy()) {
+      error(node->getLocation(),
+            "cannot infer element type of empty array literal '[]'; "
+            "add an explicit type annotation");
+      return false;
+    }
+    owner->set(varName, valTy);
+    return true;
+  }
 
   // Reject empty array literal when the target type can't supply the element
   // type.  An optional array variable (`xs: Str[]?`) supplies its wrapped
@@ -2234,8 +2319,11 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
   if (node->getReturnType()) {
     retTy = resolveType(node->getReturnType(), node->getLocation(),
                         "function '" + node->getName() + "' return type");
-    if (!retTy)
+    if (!retTy) {
+      // Calls by its name are follow-ons of the reported error (#89).
+      ErroneousNames.insert(node->getName());
       return false;
+    }
     node->setReturnType(retTy);
   }
 
@@ -2244,8 +2332,10 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
   for (auto &p : node->getMutableParams()) {
     auto *ty = resolveType(p.ParamType, node->getLocation(),
                            "parameter '" + p.getName() + "'");
-    if (!ty)
+    if (!ty) {
+      ErroneousNames.insert(node->getName()); // as for the return type
       return false;
+    }
     p.ParamType = ty;
     paramTypes.push_back(ty);
   }
@@ -2316,7 +2406,7 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     declTy = resolveType(node->getType(), node->getLocation(),
                          "variable '" + node->getName() + "'");
     if (!declTy) {
-      CurrentScope->set(node->getName(), Ctx.getVoidTy());
+      declarePoisoned(CurrentScope, node->getName());
       return false;
     }
     node->setType(declTy); // canonical write-back (see VarDecl::setType)
@@ -2333,7 +2423,11 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
         error(node->getLocation(),
               "cannot determine type of initializer for variable '" +
                   node->getName() + "'");
-      CurrentScope->set(node->getName(), declTy ? declTy : Ctx.getVoidTy());
+      // A resolved annotation still types the variable; otherwise poison it.
+      if (declTy)
+        CurrentScope->set(node->getName(), declTy);
+      else
+        declarePoisoned(CurrentScope, node->getName());
       return false;
     }
 
@@ -2368,7 +2462,7 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
           error(node->getLocation(),
                 "cannot infer element type of empty array literal '[]'; "
                 "add an explicit type annotation");
-          CurrentScope->set(node->getName(), Ctx.getVoidTy());
+          declarePoisoned(CurrentScope, node->getName());
           return false;
         }
       }
@@ -2380,7 +2474,7 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     error(node->getLocation(),
           "variable '" + node->getName() +
               "' has no type annotation and no initializer");
-    CurrentScope->set(node->getName(), Ctx.getVoidTy());
+    declarePoisoned(CurrentScope, node->getName());
     return false;
   }
 
@@ -2514,6 +2608,7 @@ bool Sema::checkValueMatch(ast::MatchStmt *node, ast::Type *subjectTy) {
       // binding on a literal arm, but guard anyway.
       if (arm->hasBinding()) {
         error(arm->getLocation(), "value-match arm cannot bind a variable");
+        declarePoisoned(CurrentScope, arm->getBinding());
         ok = false;
       }
       auto *litTy = resolveExprType(arm->getLiteralPattern());
@@ -2575,6 +2670,7 @@ bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
       // The arm's type-name stub carries the variant name.
       if (arm->hasBinding()) {
         error(arm->getLocation(), "enum-match arm cannot bind a variable");
+        declarePoisoned(CurrentScope, arm->getBinding());
         ok = false;
       }
       std::string variant;
@@ -2713,6 +2809,9 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
           error(arm->getLocation(),
                 "match arm type must be a class or array type");
         ok = false;
+        // The binding is still in scope in the body, poisoned.
+        if (arm->hasBinding())
+          declarePoisoned(CurrentScope, arm->getBinding());
         // Still try to visit the body to surface further errors.
       } else if (armAt) {
         // Array arm: the subject must be Obj (arrays are dispatched as Obj
@@ -2871,6 +2970,9 @@ bool Sema::checkOptionalMatch(ast::MatchStmt *node,
       }
       if (bindTy == inner)
         seenInner = true;
+      // An arm in error still binds its name in the body, poisoned.
+      if (arm->hasBinding() && !bindTy)
+        declarePoisoned(CurrentScope, arm->getBinding());
       if (arm->hasBinding() && bindTy) {
         if (!CurrentScope->declare(arm->getBinding(), bindTy)) {
           error(arm->getLocation(),

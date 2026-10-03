@@ -32,6 +32,10 @@ class ASTContext {
   BuiltinType *CharTy;
   BuiltinType *VoidTy;
 
+  // The internal poison type of a binder whose declaration failed (#89); not
+  // a source type (see ast::PoisonType).
+  PoisonType *PoisonTy;
+
   // Canonical class types.
   ClassType *ObjTy;
   ClassType *StrTy;
@@ -168,6 +172,10 @@ public:
   BuiltinType *getBoolTy() const { return BoolTy; }
   BuiltinType *getCharTy() const { return CharTy; }
   BuiltinType *getVoidTy() const { return VoidTy; }
+
+  /// The canonical poison type (see ast::PoisonType).  Sema-internal: it has
+  /// no name, so lookupType never returns it.
+  PoisonType *getPoisonTy() const { return PoisonTy; }
 
   // Canonical class type accessors.
   ClassType *getObjTy() const { return ObjTy; }

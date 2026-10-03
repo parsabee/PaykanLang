@@ -102,6 +102,7 @@ public:
     NK_OptionalType,
     NK_EnumType,
     NK_TupleType,
+    NK_PoisonType,
     NK_GenericType, // must stay the last Type kind (see Type::classof)
 
     // Match arm (child of MatchStmt, not a Stmt itself)
@@ -1456,6 +1457,30 @@ public:
   Type *getElementType(size_t i) const { return ElementTypes[i]; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_TupleType; }
+};
+
+// Poison type: the type of a binder whose declaration failed (#89).
+//
+// When a declaration's initializer, type annotation, or pattern fails, Sema
+// still binds the name -- to this type -- so that later uses of the name do
+// not report a follow-on "use of undeclared variable".  A use of a
+// poison-typed name is absorbed silently: the expression checker yields no
+// type (counting a suppressed follow-on) and every enclosing check already
+// stays quiet for an operand in error.  Only the original error is reported.
+//
+// It is NOT the user-visible class `Error` (ASTContext::getErrorTy, returned
+// by open()): a poisoned variable never type-checks as a valid value.  It has
+// no spelling, so it can never be named in source; it lives only in Sema's
+// symbol table and is never written into the AST, so it cannot reach the
+// lowering (a program with a poisoned binder always has an error).  One
+// canonical instance per ASTContext (ASTContext::getPoisonTy).
+class PoisonType : public Type {
+public:
+  explicit PoisonType(SourceLocation loc) : Type(NK_PoisonType, loc) {}
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_PoisonType;
+  }
 };
 
 // Tuple literal expression: (e1, e2, ...) — always >= 2 elements; a

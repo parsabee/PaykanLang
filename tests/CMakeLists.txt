@@ -59,6 +59,7 @@ add_executable(sema_tests
     Sema/OptionalTests.cpp
     Sema/OptionalPrimitiveTests.cpp
     Sema/TupleTests.cpp
+    Sema/PoisonTests.cpp
 )
 target_include_directories(sema_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}

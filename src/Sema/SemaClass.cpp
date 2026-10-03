@@ -605,7 +605,9 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
     for (auto &p : method->getParams()) {
       auto *pty = resolveType(p.ParamType, method->getLocation(),
                               "parameter '" + p.getName() + "'");
-      paramTys.push_back(pty ? pty : Ctx.getVoidTy());
+      // Unreachable in practice (a class with an unresolvable parameter type
+      // is erroneous and its bodies are skipped); poisoned if it ever is.
+      paramTys.push_back(pty ? pty : Ctx.getPoisonTy());
     }
 
     auto *savedRetTy = CurrentReturnType;
