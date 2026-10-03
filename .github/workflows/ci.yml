@@ -156,6 +156,44 @@ jobs:
         run: ctest --test-dir build --output-on-failure --parallel 4
 
   # ---------------------------------------------------------------------------
+  # Release build + full test suite (Linux x86-64, the default GCC).  GCC's
+  # -O2/-O3 warnings (-Wmaybe-uninitialized, -Wdangling-pointer, ...) only
+  # fire with optimisation on, so the Debug jobs cannot catch what would break
+  # release.yml under -Werror.  The barebones configuration is built in
+  # Release too: its different inlining has surfaced warnings of its own.
+  # ---------------------------------------------------------------------------
+  release-linux:
+    name: Release | Linux x86-64 (GCC)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Cache third-party dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/third-party
+          key: third-party-linux-x86_64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
+
+      - name: Configure (Release, as release.yml)
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --parallel 4
+
+      - name: Build barebones configuration (Release)
+        run: |
+          cmake -B build-bare -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DPAYKAN_FRONTENDS=recursive-descent -DPAYKAN_BACKENDS=c \
+            -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST="$PWD/build/third-party/gtest"
+          cmake --build build-bare --parallel
+
+  # ---------------------------------------------------------------------------
   # Code coverage (LLVM source-based) + floor gate.
   # Builds an instrumented tree with the vendored clang, runs the suite, and
   # fails if total first-party line coverage drops below the floor.

@@ -61,11 +61,12 @@ bool Sema::Scope::isMoved(std::string_view name) const {
   return Parent ? Parent->isMoved(name) : false;
 }
 
-Sema::ScopeGuard::ScopeGuard(Sema &s) : S(s), ScopeObj(s.CurrentScope) {
-  S.CurrentScope = &ScopeObj;
+Sema::ScopeGuard::ScopeGuard(Sema &s)
+    : S(s), ScopeObj(std::make_unique<Scope>(s.CurrentScope)) {
+  S.CurrentScope = ScopeObj.get();
 }
 
-Sema::ScopeGuard::~ScopeGuard() { S.CurrentScope = ScopeObj.Parent; }
+Sema::ScopeGuard::~ScopeGuard() { S.CurrentScope = ScopeObj->Parent; }
 
 // -- Flow-sensitive move tracking (see Sema.h for the rule) ------------------
 
