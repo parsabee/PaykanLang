@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- **The default build is the core; the default backend changes from llvm to
+  c (#123).** A plain `cmake -B build` now builds only the recursive-descent
+  frontend and the c backend and downloads nothing. The LLVM backend and the
+  Bison frontend are opt-in:
+  `"-DPAYKAN_FRONTENDS=recursive-descent;bison" "-DPAYKAN_BACKENDS=llvm;c"`.
+  The default backend is the first one listed (`llvm` with `llvm;c`), and the
+  release tarballs and Homebrew formula ship the core only.
 - **Conversion constructors replace the conversion builtins (#64).**
   `StrInt`, `StrFloat`, `StrBool`, `StrChar`, `IntStr` and `FloatStr` are
   removed. Every conversion is now spelled `Target<Source>(value)`, with the
