@@ -129,6 +129,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`"hel" + "lo" == "hello"` is `True`); arrays keep identity comparison via
   the default `equals`; comparing arrays of different element types is a
   compile error. Overriding `equals` in a class changes how `==` behaves for it.
+- **`-DPAYKAN_BUILD_TESTS=OFF` builds without the test suite (#77, #78).** It
+  skips GoogleTest, so a barebones configure downloads nothing (the default is
+  ON when PaykanLang is the top-level project). With tests on, an installed
+  GoogleTest (`find_package(GTest CONFIG)`) is used before downloading one.
+  The Homebrew formula and the release workflow build with tests off. CI and
+  the release workflow can be run by hand (`workflow_dispatch`); a manual
+  release run is a dry run by default and publishes nothing. JIT errors in the
+  CodeGen test harness are now reported in the test's stderr.
 
 ### Fixed
 
@@ -206,6 +214,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   variable, ...) reports a follow-on either. A later valid assignment
   re-declares it with the value's type. Calls to a function whose signature
   failed are likewise not reported as calls to an undeclared function.
+- Array `push` / `pop` no longer thrash at the capacity boundary (#95). An
+  array now shrinks only once its length falls to a quarter of its capacity,
+  and then to half the capacity, never to exactly its length; capacity never
+  drops below 8 slots on its own. A push/pop loop at a length of 524,288 went
+  from about 40 s to 15 ms. `--track-heap` also reports the number of
+  reallocations.
 
 ### Changed
 
