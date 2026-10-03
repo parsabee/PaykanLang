@@ -194,6 +194,12 @@ unless stated):
 %r = cast %a to T                              ; reinterpret / resize, see table
 ```
 
+On `f64`, `cmp` follows IEEE 754: `ne` is *unordered* (true when either
+operand is NaN; it is exactly `not (eq a, b)`), and `eq`, `lt`, `le`, `gt`,
+`ge` are *ordered* (false when either operand is NaN).  So `x != x` is true
+for a NaN `x`, and every other comparison involving a NaN is false.  These
+are LLVM's `fcmp une` / `oeq olt ole ogt oge` and C's `!= == < <= > >=`.
+
 `cast` pairs: `f64->i64` and `i64->f64` reinterpret the bits (array/tuple
 slots); `bool->i64`, `char->i64` zero-extend; `i64->bool`, `i64->char`
 truncate; `box<->i64`, `obj<->i64`, `ptr<->i64` are pointer/int casts (slot

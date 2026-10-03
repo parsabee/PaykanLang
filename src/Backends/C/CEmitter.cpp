@@ -189,8 +189,9 @@ const char *cType(Type t) {
   return kVoid;
 }
 
-/// The C operator of a comparison (integer, pointer and ordered float
-/// compares; a float `ne` is emitted separately).
+/// The C operator of a comparison.  C's float operators already have PIR's
+/// semantics: `!=` is unordered (true when either operand is NaN), the rest
+/// are ordered.
 const char *cmpOperator(pir::CmpPred pred) {
   switch (pred) {
   case pir::CmpPred::Eq:
@@ -965,14 +966,8 @@ class Emitter {
       return;
     case Opcode::Cmp: {
       pre = resultPrefix(i);
-      Type ta, tb;
-      std::string a = operand(i.Args[0], ta), b = operand(i.Args[1], tb);
-      if (ta == Type::F64 && i.Pred == pir::CmpPred::Ne) {
-        // Ordered "not equal": false for NaN operands (unlike C's !=).
-        line(stmt(pre +
-                  paren(binop(binop(a, kOpLt, b), kOpOr, binop(a, kOpGt, b)))));
-        return;
-      }
+      std::string a = operand(i.Args[0]);
+      std::string b = operand(i.Args[1]);
       line(stmt(pre + paren(binop(a, cmpOperator(i.Pred), b))));
       return;
     }
