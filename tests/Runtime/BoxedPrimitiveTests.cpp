@@ -255,6 +255,29 @@ TEST(BoxedFloat, FromStrRange) {
   }
 }
 
+// A boxed NaN is unequal to everything, itself included (#111): there is no
+// identity shortcut, the values are compared with IEEE `==`.
+TEST(BoxedFloat, NaNIsUnequalEvenToItself) {
+  PaykanFloat *a = PaykanFloat_new(std::nan(""));
+  PaykanFloat *b = PaykanFloat_new(std::nan(""));
+  EXPECT_EQ(paykanTestEquals(PaykanFloat_equals, (PaykanObject *)a,
+                             (PaykanObject *)a),
+            0);
+  EXPECT_EQ(paykanTestEquals(PaykanFloat_equals, (PaykanObject *)a,
+                             (PaykanObject *)b),
+            0);
+  PaykanFloat_destroy((PaykanObject *)a);
+  PaykanFloat_destroy((PaykanObject *)b);
+}
+
+TEST(BoxedFloat, NonNaNIsEqualToItself) {
+  PaykanFloat *a = PaykanFloat_new(1.5);
+  EXPECT_EQ(paykanTestEquals(PaykanFloat_equals, (PaykanObject *)a,
+                             (PaykanObject *)a),
+            1);
+  PaykanFloat_destroy((PaykanObject *)a);
+}
+
 // ============================================================================
 // PaykanBool
 // ============================================================================

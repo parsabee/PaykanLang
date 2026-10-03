@@ -228,9 +228,10 @@ int64_t PaykanTuple_equals(PaykanObject *self, PaykanObject *other) {
   // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
   PaykanObject *o = Paykan_equals_unbox_other(other);
   int64_t result = 0;
-  if (o == self) {
-    result = 1;
-  } else if (o && o->vtable == &PaykanTuple_vtable) {
+  // No identity shortcut (`o == self` -> equal): equality is element-wise
+  // even for one object, so a tuple holding a NaN is unequal to itself, as
+  // the NaN is (IEEE 754, #111).
+  if (o && o->vtable == &PaykanTuple_vtable) {
     PaykanTuple *a = (PaykanTuple *)self;
     PaykanTuple *b = (PaykanTuple *)o;
     // Same arity and the same element kinds (a `(int, Str)` never equals a

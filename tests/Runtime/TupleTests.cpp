@@ -5,6 +5,7 @@
 // per-slot kinds, raw / reference slot access, destroy releasing exactly the
 // reference slots, element-wise equals, and toString rendering.
 
+#include <cmath>
 #include <cstring>
 #include <gtest/gtest.h>
 #include <string>
@@ -270,6 +271,65 @@ TEST(TupleEquals, FloatsCompareByValue) {
   EXPECT_EQ(tupleEq(a, b), 0);
   PaykanTuple_destroy((PaykanObject *)a);
   PaykanTuple_destroy((PaykanObject *)b);
+}
+
+// A tuple holding a NaN is unequal to itself, exactly like the NaN (#111):
+// equality is element-wise even when both sides are the same object.
+TEST(TupleEquals, NaNElementIsUnequalEvenOnTheSameObject) {
+  const uint8_t kinds[2] = {PAYKAN_TUPLE_INT, PAYKAN_TUPLE_FLOAT};
+  PaykanTuple *a = PaykanTuple_new(2, kinds);
+  PaykanTuple *b = PaykanTuple_new(2, kinds);
+  PaykanTuple_set(a, 0, 1);
+  PaykanTuple_set(b, 0, 1);
+  PaykanTuple_set(a, 1, bitsOf(std::nan("")));
+  PaykanTuple_set(b, 1, bitsOf(std::nan("")));
+  EXPECT_EQ(tupleEq(a, a), 0); // same object
+  EXPECT_EQ(tupleEq(a, b), 0); // distinct objects
+  EXPECT_EQ(tupleEq(b, a), 0);
+  // -0.0 == 0.0 under IEEE, so those tuples are equal.
+  PaykanTuple_set(a, 1, bitsOf(-0.0));
+  PaykanTuple_set(b, 1, bitsOf(0.0));
+  EXPECT_EQ(tupleEq(a, b), 1);
+  EXPECT_EQ(tupleEq(a, a), 1);
+  PaykanTuple_destroy((PaykanObject *)a);
+  PaykanTuple_destroy((PaykanObject *)b);
+}
+
+// Without a NaN, a tuple is still equal to itself (by elements now, not by
+// identity), primitives and references alike.
+TEST(TupleEquals, NonNaNTupleIsEqualToItself) {
+  const uint8_t kinds[2] = {PAYKAN_TUPLE_FLOAT, PAYKAN_TUPLE_REF};
+  PaykanTuple *a = PaykanTuple_new(2, kinds);
+  PaykanTuple_set(a, 0, bitsOf(0.5));
+  PaykanShared *s = boxStr("s");
+  PaykanTuple_set_obj(a, 1, s);
+  Paykan_release(s);
+  EXPECT_EQ(tupleEq(a, a), 1);
+  PaykanTuple_destroy((PaykanObject *)a);
+}
+
+// A NaN reached through a reference element -- a nested tuple or a boxed
+// Float (a `float?` element) -- makes the outer tuple unequal to itself too.
+TEST(TupleEquals, NaNInsideReferenceElementIsUnequalOnTheSameObject) {
+  const uint8_t innerKinds[1] = {PAYKAN_TUPLE_FLOAT};
+  PaykanTuple *inner = PaykanTuple_new(1, innerKinds);
+  PaykanTuple_set(inner, 0, bitsOf(std::nan("")));
+  const uint8_t kinds[2] = {PAYKAN_TUPLE_REF, PAYKAN_TUPLE_REF};
+  PaykanTuple *a = PaykanTuple_new(2, kinds);
+  PaykanShared *bi = PaykanShared_new((PaykanObject *)inner);
+  PaykanTuple_set_obj(a, 0, bi);
+  Paykan_release(bi);
+  PaykanShared *bf = PaykanShared_new((PaykanObject *)PaykanFloat_new(2.0));
+  PaykanTuple_set_obj(a, 1, bf);
+  Paykan_release(bf);
+  EXPECT_EQ(tupleEq(a, a), 0); // inner (nan,) != itself
+  PaykanTuple_set(inner, 0, bitsOf(1.0));
+  EXPECT_EQ(tupleEq(a, a), 1);
+  bf = PaykanShared_new((PaykanObject *)PaykanFloat_new(std::nan("")));
+  PaykanTuple_set_obj(a, 1, bf);
+  Paykan_release(bf);          // the slot's old Float(2.0) was released
+  EXPECT_EQ(tupleEq(a, a), 0); // boxed NaN != itself
+  PaykanTuple_destroy((PaykanObject *)a);
 }
 
 TEST(TupleEquals, ArityAndKindMismatchAreUnequal) {

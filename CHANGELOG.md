@@ -138,6 +138,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the slot's element type, so the objects later pushed into it were never
   released (a leak in every `self.items = []` pattern). Sema now adopts the
   destination's array type at every typed sink, not only declarations.
+- A tuple holding a NaN compared equal to itself (#111): `t == t` was `True`
+  and `t != t` `False` when both sides were the same tuple object, because
+  the runtime's tuple `equals` returned "equal" for one object before looking
+  at the elements. Tuple equality is now element-wise in every case, so a NaN
+  element (directly, in a nested tuple, or in a `float?` element) makes a
+  tuple unequal to itself, as IEEE 754 makes the NaN unequal to itself.
+  `float?` already compared its values; arrays keep their reference-identity
+  `==`.
 - Passing an array or tuple to a user-defined method (`b.take(xs)`,
   `b.take([1, 2])`) freed the argument twice: the callee owns every
   reference-typed parameter, but the call site only handed over an owned box
