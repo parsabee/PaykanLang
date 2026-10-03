@@ -156,6 +156,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   module undeclared (#79): the other classes are still declared, the bad
   class is registered as far as it can be, and the follow-on errors on its
   uses are not reported.
+- The recursive-descent frontend reports each syntax error once (#79): no
+  follow-on error right after a lexical error (an unterminated string, an
+  invalid character), one error (with a note at the open `{`) for blocks left
+  unclosed at end of file instead of one per block, and one error for a
+  multi-character literal such as `'ab'`.
 
 ### Changed
 

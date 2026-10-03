@@ -76,7 +76,11 @@ Any other byte is a lexical error (`invalid character 'X'`).
   `1` followed by the identifier `e`.
 - `CHAR` escapes: `\n` `\t` `\r` `\\` `\'` `\0`; any other `\X` is `X`.
   A character literal missing its closing quote before the end of the line
-  or file is an error (`unterminated character literal`).
+  or file is an error (`unterminated character literal`).  With the
+  recursive-descent frontend, a literal holding more than one character
+  before its closing quote (`'ab'`) is one error (`character literal must
+  contain exactly one character ...`); the Bison scanner reports it as
+  unterminated.
 - `STRING` escapes: `\n` `\t` `\r` `\\` `\"` `\0`; any other `\X` is kept
   verbatim as the two characters `\X`. String literals are single-line: a
   raw newline before the closing quote is an error (`unterminated string
