@@ -6,6 +6,7 @@
 #include "SemaInternal.h"
 
 #include <unordered_set>
+#include <utility>
 
 namespace paykan {
 namespace sema {
@@ -342,9 +343,10 @@ bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
     src->setResolvedType(dst);
     return true;
   }
-  // A literal whose elements must be boxed (`[1, 2]` into `int?[]`,
-  // `(1, "a")` into `(int?, Str)`): retype the literal and mark each element.
-  srcTy = adoptBoxedLiteralElements(dst, srcTy, src);
+  // A literal whose elements take the destination's element types (`[1, 2]`
+  // into `int?[]`, `(None, "a")` into `(int?, Str)`, nested literals): retype
+  // the literal and mark each element that is boxed.
+  srcTy = adoptLiteralElements(dst, srcTy, src);
   if (!isAssignable(dst, srcTy))
     return false;
   adoptArrayLiteralType(dst, src);
@@ -362,28 +364,65 @@ bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
   return true;
 }
 
-ast::Type *Sema::adoptBoxedLiteralElements(ast::Type *dst, ast::Type *srcTy,
-                                           ast::Expr *src) {
-  // Only an element whose value must be boxed is touched; the literal's other
-  // elements keep their own types (the usual representation-preserving
-  // rules then decide assignability).
+ast::Type *Sema::adoptLiteralElements(ast::Type *dst, ast::Type *srcTy,
+                                      ast::Expr *src) {
+  // Only an element that needs it is touched; the literal's other elements
+  // keep their own types (the usual representation-preserving rules then
+  // decide assignability).
   auto boxes = [&](ast::Type *d, ast::Type *s) {
     return ast::needsPrimitiveBoxing(d, s) &&
            isAssignable(ast::stripOptional(d), s);
   };
+  // One element flowing into slot type @p d: a nested literal is adopted
+  // recursively, `None` takes an optional slot's type (a null box, as in
+  // checkAssignable), and a primitive is boxed for an optional primitive
+  // slot.  Returns the element's (possibly new) type.
+  auto adoptElement = [&](ast::Type *d, ast::Expr *e) -> ast::Type * {
+    ast::Type *t = e->getResolvedType();
+    if (!t)
+      return t;
+    if (ast::isa<ast::NoneLiteral>(e)) {
+      if (!ast::isa<ast::OptionalType>(d))
+        return t;
+      e->setResolvedType(d);
+      return d;
+    }
+    if (ast::isa<ast::ArrayLiteralExpr>(e) ||
+        ast::isa<ast::TupleLiteralExpr>(e))
+      return adoptLiteralElements(d, t, e);
+    if (!boxes(d, t))
+      return t;
+    e->setCoercedType(d);
+    return d;
+  };
+
   if (auto *lit = ast::dyn_cast<ast::ArrayLiteralExpr>(src)) {
     auto *dstAT = ast::dyn_cast<ast::ArrayType>(ast::stripOptional(dst));
-    auto *litAT = ast::dyn_cast<ast::ArrayType>(srcTy);
-    if (!dstAT || !litAT || lit->isEmpty() ||
-        !boxes(dstAT->getElementType(), litAT->getElementType()))
+    if (!dstAT || lit->isEmpty())
       return srcTy;
-    for (size_t i = 0; i < lit->getNumElements(); ++i)
-      lit->getElements()[i]->setCoercedType(dstAT->getElementType());
+    ast::Type *elemTy = dstAT->getElementType();
+    std::vector<ast::Type *> adopted;
+    adopted.reserve(lit->getNumElements());
+    bool changed = false;
+    for (ast::Expr *e : lit->getElements()) {
+      ast::Type *before = e->getResolvedType();
+      adopted.push_back(adoptElement(elemTy, e));
+      changed = changed || adopted.back() != before;
+    }
+    if (!changed)
+      return srcTy;
+    // The literal now holds the destination's element type: every element
+    // must fit it (and gets any coercion it needs, e.g. `T?` -> `Obj`).
+    for (size_t i = 0; i < adopted.size(); ++i)
+      if (adopted[i] != elemTy &&
+          (!adopted[i] ||
+           !checkAssignable(elemTy, adopted[i], lit->getElements()[i])))
+        return srcTy;
     lit->setResolvedType(dstAT);
     return dstAT;
   }
   if (auto *lit = ast::dyn_cast<ast::TupleLiteralExpr>(src)) {
-    auto *dstTT = ast::dyn_cast<ast::TupleType>(dst);
+    auto *dstTT = ast::dyn_cast<ast::TupleType>(ast::stripOptional(dst));
     auto *litTT = ast::dyn_cast<ast::TupleType>(srcTy);
     if (!dstTT || !litTT || dstTT->getArity() != litTT->getArity() ||
         litTT->getArity() != lit->getNumElements())
@@ -391,10 +430,11 @@ ast::Type *Sema::adoptBoxedLiteralElements(ast::Type *dst, ast::Type *srcTy,
     std::vector<ast::Type *> elems = litTT->getElementTypes();
     bool changed = false;
     for (size_t i = 0; i < elems.size(); ++i) {
-      if (!boxes(dstTT->getElementType(i), elems[i]))
+      ast::Type *t =
+          adoptElement(dstTT->getElementType(i), lit->getElements()[i]);
+      if (!t || t == elems[i])
         continue;
-      lit->getElements()[i]->setCoercedType(dstTT->getElementType(i));
-      elems[i] = dstTT->getElementType(i);
+      elems[i] = t;
       changed = true;
     }
     if (!changed)
@@ -585,6 +625,9 @@ ast::Type *Sema::checkIdentLive(std::string_view name,
 
 // Visit an expression and return its resolved type (nullptr on error).
 ast::Type *Sema::resolveExprType(ast::Expr *expr) { return EC.visit(expr); }
+ast::Type *Sema::resolveExprType(ast::Expr *expr, ast::Type *expected) {
+  return EC.visitExpecting(expr, expected);
+}
 
 // -- ExprVisitor -------------------------------------------------------------
 
@@ -880,10 +923,19 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
 }
 
 ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
-  // Type-check all arguments first.
+  // Type-check all arguments first.  A plain call to a known function gives
+  // each argument its parameter's type as the expected type (a generic call
+  // infers from the arguments, so they come first there).
+  const FunctionSig *known = nullptr;
+  if (!node->hasTypeArgs() && !S.ClassTemplates.count(node->getCalleeName()) &&
+      !S.FuncTemplates.count(node->getCalleeName()))
+    if (const auto *sig = S.lookupFunction(node->getCalleeName());
+        sig && sig->ParamTypes.size() == node->getNumArguments())
+      known = sig;
   std::vector<ast::Type *> argTypes;
-  for (auto *arg : node->getArguments()) {
-    auto *ty = visit(arg);
+  for (size_t i = 0; i < node->getNumArguments(); ++i) {
+    auto *ty = visitExpecting(node->getArguments()[i],
+                              known ? known->ParamTypes[i] : nullptr);
     argTypes.push_back(ty);
   }
 
@@ -1061,7 +1113,7 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   }
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     auto *argExpr = node->getArguments()[i];
-    auto *argTy = visit(argExpr);
+    auto *argTy = visitExpecting(argExpr, paramTys[i]);
     if (!argTy)
       continue;
     if (!S.checkAssignable(paramTys[i], argTy, argExpr) &&
@@ -1123,6 +1175,13 @@ Sema::ExprChecker::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
 
 ast::Type *
 Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
+  // The slot this literal flows into, if known (see visitExpecting).
+  ast::Type *expected = std::exchange(S.LiteralExpectation, nullptr);
+  auto *expectedAT =
+      expected ? ast::dyn_cast<ast::ArrayType>(ast::stripOptional(expected))
+               : nullptr;
+  ast::Type *expectedElem = expectedAT ? expectedAT->getElementType() : nullptr;
+
   // Empty literal [] is valid only where an explicit array type annotation is
   // present (e.g. a: int[] = []).  Return ArrayType(void) as a sentinel;
   // isAssignable() treats it as compatible with any array destination.
@@ -1133,11 +1192,28 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
   }
 
   // Non-empty: resolve all elements and unify to a common element type.
-  ast::Type *elemTy = nullptr;
-  for (size_t i = 0; i < node->getNumElements(); ++i) {
-    auto *ty = visit(node->getElements()[i]);
+  std::vector<ast::Type *> elemTys;
+  elemTys.reserve(node->getNumElements());
+  for (ast::Expr *elem : node->getElements()) {
+    auto *ty = visitExpecting(elem, expectedElem);
     if (!ty)
       return nullptr;
+    elemTys.push_back(ty);
+  }
+  // Elements that disagree but all fit the slot's element type (`int` and
+  // `int?` into `int?[]`, `("a", 1)` and `("b", n)` into `(Str, int?)[]`)
+  // take that type; checkAssignable marks each element's coercion.
+  // Returns the index of the first element that does not fit (or the
+  // element count when all do).
+  auto firstMisfit = [&]() {
+    for (size_t i = 0; i < elemTys.size(); ++i)
+      if (!S.checkAssignable(expectedElem, elemTys[i], node->getElements()[i]))
+        return i;
+    return elemTys.size();
+  };
+  ast::Type *elemTy = nullptr;
+  for (size_t i = 0; i < elemTys.size(); ++i) {
+    auto *ty = elemTys[i];
     if (!elemTy) {
       elemTy = ty;
     } else if (!typesEqual(elemTy, ty)) {
@@ -1155,6 +1231,18 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
             elemTy = lca;
             continue;
           }
+        }
+        if (expectedElem) {
+          size_t bad = firstMisfit();
+          if (bad == elemTys.size()) {
+            elemTy = expectedElem;
+            break;
+          }
+          S.error(node->getElements()[bad]->getLocation(),
+                  "array literal element of type '" + typeName(elemTys[bad]) +
+                      "' does not match the expected element type '" +
+                      typeName(expectedElem) + "'");
+          return nullptr;
         }
         S.error(node->getElements()[i]->getLocation(),
                 "array literal has inconsistent element types: '" +
@@ -1311,12 +1399,22 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
 // path, so `mov` state simply flows through them.
 ast::Type *
 Sema::ExprChecker::visitTupleLiteralExpr(ast::TupleLiteralExpr *node) {
+  // The slot this literal flows into, if known (see visitExpecting): its
+  // element types are the expectations of the elements.  The literal's own
+  // type is still its elements' (checkAssignable adopts the slot's types).
+  ast::Type *expected = std::exchange(S.LiteralExpectation, nullptr);
+  auto *expectedTT =
+      expected ? ast::dyn_cast<ast::TupleType>(ast::stripOptional(expected))
+               : nullptr;
+  if (expectedTT && expectedTT->getArity() != node->getNumElements())
+    expectedTT = nullptr;
   std::vector<ast::Type *> elemTys;
   elemTys.reserve(node->getNumElements());
   bool ok = true;
   for (size_t i = 0; i < node->getNumElements(); ++i) {
     ast::Expr *elem = node->getElements()[i];
-    auto *ty = visit(elem);
+    auto *ty = visitExpecting(elem, expectedTT ? expectedTT->getElementType(i)
+                                               : nullptr);
     if (!ty) {
       ok = false;
       continue;
@@ -1741,7 +1839,11 @@ bool Sema::visitExprStmt(ast::ExprStmt *node) {
 }
 
 bool Sema::visitAssignStmt(ast::AssignStmt *node) {
-  auto *valTy = resolveExprType(node->getValue());
+  // An existing variable's type is the value's expected type.
+  ast::Type *expected = nullptr;
+  if (auto *existing = CurrentScope->findOwner(node->getVarName()))
+    expected = existing->lookup(node->getVarName());
+  auto *valTy = resolveExprType(node->getValue(), expected);
   if (!valTy)
     return false;
 
@@ -1810,7 +1912,7 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
 
 bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
   if (node->getReturnValue()) {
-    auto *valTy = resolveExprType(node->getReturnValue());
+    auto *valTy = resolveExprType(node->getReturnValue(), CurrentReturnType);
     if (!valTy)
       return false;
     if (CurrentReturnType &&
@@ -2120,7 +2222,7 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
 
   // Check the initializer type.
   if (node->getInitExpr()) {
-    auto *initTy = resolveExprType(node->getInitExpr());
+    auto *initTy = resolveExprType(node->getInitExpr(), declTy);
     if (!initTy) {
       error(node->getLocation(),
             "cannot determine type of initializer for variable '" +
@@ -2220,7 +2322,7 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
     return false;
   }
 
-  auto *valTy = resolveExprType(node->getValue());
+  auto *valTy = resolveExprType(node->getValue(), fieldTy);
   if (!valTy)
     return false;
 
@@ -2255,7 +2357,7 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
     error(node->getIndex()->getLocation(),
           "array index must be int, got '" + typeName(idxTy) + "'");
   }
-  auto *valTy = resolveExprType(node->getValue());
+  auto *valTy = resolveExprType(node->getValue(), at->getElementType());
   if (!valTy)
     return false;
   if (!checkAssignable(at->getElementType(), valTy, node->getValue())) {

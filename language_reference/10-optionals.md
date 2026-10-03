@@ -183,7 +183,8 @@ fn show(o: int?) -> Str {
 - An `int?` does **not** convert to a `float?` (or any other optional). `int[]` is not an
   `int?[]` either. An array or tuple literal still works where its elements need boxing
   (`xs: int?[] = [1, 2]`, `p: (int?, Str) = (1, "a")`), but destructuring does not box:
-  `a: int?, s: Str = (1, "a")` is an error.
+  `a: int?, s: Str = (1, "a")` is an error. See [Literals take their destination's
+  types](#literals-take-their-destinations-types) for `None` and mixed elements.
 - In a `match` on an `int?` subject, the only type arm is `n: int`. It matches every present
   value and binds `n` to a plain `int`: an ordinary value, owning nothing, which the arm may
   reassign. Any other arm type is an error, and as for a reference optional, `n: int` plus
@@ -239,8 +240,34 @@ xs[0] = Node(2);
 match xs[1] { n: Node { … } None { … } }
 ```
 
-Note that an array *literal* containing `None` (`[None, n]`) types as `Obj[]`, not `Node?[]`;
-build such arrays with `push` (a known limitation of the prototype).
+An array literal containing `None` takes its destination's element type
+(`xs: Node?[] = [None, n]`). Without a declared destination a bare `None` is `Obj`:
+`xs = [None, Node(1)]` is an `Obj[]`, and `xs = [None, n]` (with `n: Node?`) is an error.
+Annotate the variable, or build the array with `push`.
+
+---
+
+## Literals take their destination's types
+
+An array or tuple literal flowing into a typed slot (a declaration, an assignment to an
+existing variable, an argument, a return, a field or element store, `push`) takes the slot's
+element types where its own elements need them, including in nested literals:
+
+```pkn
+a: (int?, Str) = (None, "a");             // None takes the slot's int?
+b: (Node?, int) = (None, 1);              // ... or Node?
+nb: int? = None;
+tbl: (Str, int?)[] = [("a", 1), ("b", nb), ("c", None)];   // int and int? elements
+nodes: Node?[] = [Node(1), None];
+nested: (Str, (int?, Node?))[] = [("a", (1, None))];
+```
+
+A literal still has to fit: `(None, "a")` is not an `(int, Str)`, and
+`[("a", 1), ("b", nb)]` is not a `(Str, int)[]` ("array literal element of type '(Str, int?)'
+does not match the expected element type '(Str, int)'"). There is no promotion inside a tuple
+literal either (`(1, 2)` is not a `(float, int)`). Where there is no destination, as in
+`t = (None, 1)`, a `None` is `Obj` and the elements of an array literal must agree on their
+own.
 
 ---
 
@@ -302,4 +329,5 @@ with "no box" meaning `None`. A present optional primitive is one boxed `Int` / 
 ## Not in the prototype
 
 Flow typing (`if (x != None) { x.foo(); }` does not narrow `x`), `if let`, the `??` default
-and `?.` chaining operators, optional enums, and array-literal typing with `None` elements. Each is sketched in `proposals/optionals.md`.
+and `?.` chaining operators, optional enums, and typing `None` in a literal that has no
+declared destination (`xs = [None, n]`). Each is sketched in `proposals/optionals.md`.

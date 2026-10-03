@@ -263,13 +263,15 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // store, call/method/push argument, return, subscript store -- is covered.
   void adoptArrayLiteralType(ast::Type *dst, ast::Expr *src);
 
-  // An array or tuple literal flowing into a slot whose element type is an
-  // optional primitive (`[1, 2]` into `int?[]`, `(1, "a")` into
-  // `(int?, Str)`): retype the literal to hold the optional at those
-  // positions and mark each such element for boxing (Expr::CoercedType).
-  // Returns the literal's (possibly new) type; @p srcTy otherwise.
-  ast::Type *adoptBoxedLiteralElements(ast::Type *dst, ast::Type *srcTy,
-                                       ast::Expr *src);
+  // An array or tuple literal flowing into a slot whose element types it
+  // must take: `[1, 2]` into `int?[]` and `(1, "a")` into `(int?, Str)` box
+  // their primitives (Expr::CoercedType), a `None` element takes the slot's
+  // `T?` (`(None, 1)` into `(Node?, int)`), and nested literals are adopted
+  // recursively (`[("a", 1), ("b", n)]` into `(Str, int?)[]`).  The literal
+  // is retyped to hold the destination's types at those positions.  Returns
+  // the literal's (possibly new) type; @p srcTy otherwise.
+  ast::Type *adoptLiteralElements(ast::Type *dst, ast::Type *srcTy,
+                                  ast::Expr *src);
 
   // If `srcTy` is an optional and `dst` is not (the `T?` -> `T` narrowing
   // that needs a `match`), emit the "cannot use optional ... without
@@ -321,6 +323,18 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
       return ty;
     }
 
+    /// visit(@p e) where the value flows into a slot of type @p expected
+    /// (nullptr: unknown).  Only an array or tuple literal uses it: its
+    /// elements are visited against the slot's element types, and an array
+    /// literal whose elements disagree (`[("a", 1), ("b", n)]` with `n:
+    /// int?`) takes the slot's element type when every element fits it.
+    ast::Type *visitExpecting(ast::Expr *e, ast::Type *expected) {
+      if (expected && (ast::isa<ast::ArrayLiteralExpr>(e) ||
+                       ast::isa<ast::TupleLiteralExpr>(e)))
+        S.LiteralExpectation = expected;
+      return visit(e);
+    }
+
 #define EXPR_VISIT(Kind, Name, Cast) ast::Type *visit##Name(ast::Cast *node);
     PAYKAN_EXPR_NODES(EXPR_VISIT)
 #undef EXPR_VISIT
@@ -330,6 +344,13 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   // Visit an expression and return its resolved type (nullptr on error).
   ast::Type *resolveExprType(ast::Expr *expr);
+  // The same for a value flowing into a slot of type @p expected (see
+  // ExprChecker::visitExpecting).
+  ast::Type *resolveExprType(ast::Expr *expr, ast::Type *expected);
+
+  /// The slot type the array / tuple literal about to be visited flows into
+  /// (set by visitExpecting, taken by the literal's visitor).
+  ast::Type *LiteralExpectation = nullptr;
 
   // Value-mode match checking (primitive / Str subject with literal arms).
   bool checkValueMatch(ast::MatchStmt *node, ast::Type *subjectTy);

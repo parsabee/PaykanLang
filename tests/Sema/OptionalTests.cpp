@@ -712,14 +712,90 @@ TEST(OptionalTuple, DestructuredOptionalElementStillNeedsUnwrap) {
               kUnwrapNode);
 }
 
-TEST(OptionalTuple, NoneInTupleLiteralIsObj) {
-  // Known limitation (shared with `[None]`): a tuple literal takes its element
-  // types from the elements, and a bare `None` is typed Obj, so `(None, 1)`
-  // is `(Obj, int)`.  Build the tuple from an optional-typed value instead.
+// #71: a `None` element takes the destination's `T?`, in every typed sink
+// (declaration, assignment, argument, method argument, return, field and
+// subscript store) and in nested literals.
+TEST(OptionalTuple, NoneInTupleLiteralTakesTheSlotsOptional) {
+  expectOk(std::string(kNodeClass) + R"(
+    class Box { p: (Node?, int); fn __init__() { self.p = (None, 0); }
+                fn set(p: (int?, Str)) -> Str { return p.1; } }
+    fn take(p: (int?, Str)) -> Str { return p.1; }
+    fn mk() -> (Node?, int) { return (None, 2); }
+    fn main() -> int {
+      a: (int?, Str) = (None, "a");
+      b: (Node?, int) = (None, 1);
+      b = (None, 3);
+      take((None, "x"));
+      bx = Box();
+      bx.set((None, "y"));
+      bx.p = (None, 4);
+      ps: (Node?, int)[] = [];
+      ps.push((None, 5));
+      ps[0] = (None, 6);
+      n: (Str, (Node?, int?)) = ("n", (None, None));
+      c: (Obj, int) = (None, 1);
+      return 0;
+    }
+  )");
+}
+
+TEST(OptionalTuple, NoneInTupleLiteralStillNeedsAnOptionalSlot) {
+  expectError("fn main() -> int { a: (int, Str) = (None, \"a\"); return 0; }",
+              "initializer of type '(Obj, Str)' does not match declared type "
+              "'(int, Str)'");
   expectError(std::string(kNodeClass) +
-                  "fn main() -> int { t: (Node?, int) = (None, 1); return 0; }",
-              "initializer of type '(Obj, int)' does not match declared type "
+                  "fn main() -> int { b: (Node?, int) = (None, None); "
+                  "return 0; }",
+              "initializer of type '(Obj, Obj)' does not match declared type "
               "'(Node?, int)'");
+  // Without a destination a bare `None` is still `Obj`.
+  expectError(std::string(kNodeClass) +
+                  "fn main() -> int { t = (None, 1); n: Node? = t.0; "
+                  "return 0; }",
+              "does not match declared type 'Node?'");
+}
+
+// #71: an array literal with a declared element type takes it when its
+// elements disagree but every one fits (`int` and `int?`, `("a", 1)` and
+// `("b", n)`, `None` among class instances).
+TEST(OptionalTuple, ArrayLiteralElementsTakeTheDeclaredElementType) {
+  expectOk(std::string(kNodeClass) + R"(
+    fn count(xs: (Str, int?)[]) -> int { return xs.len(); }
+    fn mk(nb: int?) -> (Str, int?)[] { return [("r", nb), ("s", 1)]; }
+    fn main() -> int {
+      nb: int? = None;
+      n: Node? = None;
+      tbl: (Str, int?)[] = [("a", 1), ("b", nb), ("c", 3)];
+      tbl = [("x", nb), ("y", None)];
+      count([("p", 1), ("q", nb)]);
+      tbl.push(("w", None));
+      ints: int?[] = [1, nb, None];
+      nodes: Node?[] = [None, n, Node(1)];
+      grid: int?[][] = [[1], [nb], []];
+      nested: (Str, (int?, Node?))[] = [("a", (1, None)), ("b", (nb, n))];
+      inTuple: (int?[], Str) = ([1, nb], "s");
+      return 0;
+    }
+  )");
+}
+
+TEST(OptionalTuple, ArrayLiteralElementThatDoesNotFitIsReported) {
+  expectError("fn main() -> int { nb: int? = None; "
+              "t: (Str, int?)[] = [(\"a\", 1), (\"b\", nb), (1, 2)]; "
+              "return 0; }",
+              "array literal element of type '(int, int)' does not match the "
+              "expected element type '(Str, int?)'");
+  expectError("fn main() -> int { nb: int? = None; "
+              "t: (Str, int)[] = [(\"a\", 1), (\"b\", nb)]; return 0; }",
+              "array literal element of type '(Str, int?)' does not match "
+              "the expected element type '(Str, int)'");
+  // No destination: the elements must agree on their own.
+  expectError("fn main() -> int { nb: int? = None; "
+              "x = [(1, \"a\"), (nb, \"b\")]; return 0; }",
+              "array literal has inconsistent element types");
+  // No promotion inside a tuple literal, contextual or not.
+  expectError("fn main() -> int { t: (float, int)[] = [(1, 2)]; return 0; }",
+              "does not match declared type '(float, int)[]'");
 }
 
 TEST(OptionalTuple, OptionalTupleTypeRejected) {
