@@ -20,7 +20,7 @@ line each; the samples parity check (`scripts/samples_parity.py`, ctest
 |----------------------------|-------------------------------------------------------|--------------------------------------|
 | `01_string_literal.pkn`    | A single string literal                               | `PaykanString_new` (`String.c`)      |
 | `02_string_concat.pkn`     | `Str + Str` concatenation                             | `PaykanString_concat` (`String.c`)   |
-| `03_str_int.pkn`           | `StrInt` int→`Str` conversion                         | `PaykanString_new` via `IO.c`        |
+| `03_str_int.pkn`           | `Str<int>` int→`Str` conversion                       | `PaykanString_new` via `IO.c`        |
 | `04_array_literal.pkn`     | An `int[]` array literal                              | `PaykanArray_*` (`Array.c`)          |
 | `05_array_push.pkn`        | `push` growth (realloc) on an empty array             | `PaykanArray_push` (`Array.c`)       |
 | `06_array_obj.pkn`         | An `Obj[]` holding a boxed element                    | `PaykanShared` (`Shared.c`)          |
@@ -41,3 +41,4 @@ line each; the samples parity check (`scripts/samples_parity.py`, ctest
 | `22_match_subject_reassign.pkn` | match subject reassigned inside the arm          | binding keeps the subject alive (`Shared.c`) |
 | `23_match_binding_return_mix.pkn` | binding reassigned in a loop + returned, `a = a` | owned binding returned (`Shared.c`)  |
 | `24_optional_primitives.pkn` | `int?` / `float?` / `bool?` / `char?` boxes in every sink, rebinding, `mov`, `T?` with T = int | `Paykan{Int,Float,Bool,Char}_new` (`Basic.c`) + `PaykanShared` |
+| `25_conversions.pkn` | `Str<...>` temporaries, `int<Str>` / `float<Str>` boxes (present and None), numeric conversions | `PaykanString_from_*` (`String.c`), `Paykan{Int,Float}_from_str` (`Basic.c`) |

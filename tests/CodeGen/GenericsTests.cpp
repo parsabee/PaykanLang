@@ -51,7 +51,7 @@ TEST(Generics, BoxIntAndBoxStrCoexist) {
     a: Box<int> = Box<int>(3);
     b: Box<Str> = Box<Str>("s");
     a.set(a.get() * 2);
-    println(StrInt(a.get()));
+    println(Str<int>(a.get()));
     println(b.get());
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -68,12 +68,12 @@ TEST(Generics, PairStrInt) {
       fn __init__(k: K, v: V) { self.k = k; self.v = v; }
       fn key() -> K { return self.k; }
       fn value() -> V { return self.v; }
-      fn toString() -> Str { return self.k + "=" + StrInt(self.v); }
+      fn toString() -> Str { return self.k + "=" + Str<int>(self.v); }
     }
   )",
                                   R"(
     p: Pair<Str, int> = Pair<Str, int>("age", 42);
-    println(p.key() + ":" + StrInt(p.value()));
+    println(p.key() + ":" + Str<int>(p.value()));
     println(p.toString());
     println(p);
   )"));
@@ -87,11 +87,11 @@ TEST(Generics, BoxOfBoxInt) {
   auto r = compileAndRun(withMain(kBox, R"(
     inner: Box<int> = Box<int>(5);
     outer: Box<Box<int>> = Box<Box<int>>(inner);
-    println(StrInt(outer.get().get()));
+    println(Str<int>(outer.get().get()));
     outer.get().set(9);
-    println(StrInt(inner.get()));
+    println(Str<int>(inner.get()));
     fresh = Box<Box<int>>(Box<int>(1));
-    println(StrInt(fresh.get().get()));
+    println(Str<int>(fresh.get().get()));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "5\n9\n1\n");
@@ -119,14 +119,14 @@ TEST(Generics, StackOfStrAndInt) {
     s.push("a");
     s.push("b");
     s.push("c");
-    println(StrInt(s.size()));
+    println(Str<int>(s.size()));
     while (!s.empty()) { println(s.pop()); }
     n: Stack<int> = Stack<int>();
     n.push(1);
     n.push(2);
     total: int = 0;
     while (!n.empty()) { total = total + n.pop(); }
-    println(StrInt(total));
+    println(Str<int>(total));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "3\nc\nb\na\n3\n");
@@ -140,11 +140,11 @@ TEST(Generics, GenericFirstOnIntAndStrArrays) {
     fn last<T>(xs: T[]) -> T { return xs[xs.len() - 1]; }
   )",
                                   R"(
-    println(StrInt(first([10, 20, 30])));
+    println(Str<int>(first([10, 20, 30])));
     println(first(["x", "y"]));
     words: Str[] = ["p", "q", "r"];
     println(last(words));
-    println(StrInt(last<int>([7])));
+    println(Str<int>(last<int>([7])));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "10\nx\nr\n7\n");
@@ -158,7 +158,7 @@ TEST(Generics, GenericFunctionOverInstantiation) {
     fn rebox<T>(b: Box<T>) -> Box<T> { return Box<T>(b.get()); }
   )",
                                   R"(
-    println(StrInt(unbox(Box<int>(4))));
+    println(Str<int>(unbox(Box<int>(4))));
     println(unbox(rebox(Box<Str>("z"))));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -171,7 +171,7 @@ TEST(Generics, MatchOnInstantiation) {
   auto r = compileAndRun(withMain(std::string(kBox) + R"(
     fn describe(o: Obj) -> Str {
       match o {
-        b: Box<int> { return "Box<int> holding " + StrInt(b.get()); }
+        b: Box<int> { return "Box<int> holding " + Str<int>(b.get()); }
         Box<Str> { return "Box<Str>"; }
         _ { return "other"; }
       }
@@ -222,11 +222,11 @@ TEST(Generics, EqualityDispatchesToEquals) {
     a: Box<int> = Box<int>(1);
     b: Box<int> = Box<int>(1);
     c: Box<int> = Box<int>(2);
-    println(StrBool(a == b));
-    println(StrBool(a == c));
-    println(StrBool(a != c));
+    println(Str<bool>(a == b));
+    println(Str<bool>(a == c));
+    println(Str<bool>(a != c));
     s: Box<Str> = Box<Str>("x");
-    println(StrBool(s == Box<Str>("x")));
+    println(Str<bool>(s == Box<Str>("x")));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "True\nFalse\nTrue\nTrue\n");
@@ -248,9 +248,9 @@ TEST(Generics, ArrayOfInstantiationsAndFieldOfInstantiation) {
     total: int = 0;
     i: int = 0;
     while (i < arr.len()) { total = total + arr[i].get(); i = i + 1; }
-    println(StrInt(total));
+    println(Str<int>(total));
     h: Holder = Holder(40);
-    println(StrInt(h.get().get() + 2));
+    println(Str<int>(h.get().get() + 2));
     names: Box<Str>[] = [Box<Str>("n")];
     println(names[0].get());
   )"));
@@ -263,11 +263,11 @@ TEST(Generics, ConstructorInferenceAndInstantiationOfArray) {
   LeakGuard g;
   auto r = compileAndRun(withMain(kBox, R"(
     b = Box(5);
-    println(StrInt(b.get()));
+    println(Str<int>(b.get()));
     s = Box("inferred");
     println(s.get());
     xs: Box<int[]> = Box<int[]>([1, 2, 3]);
-    println(StrInt(xs.get().len()));
+    println(Str<int>(xs.get().len()));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "5\ninferred\n3\n");
@@ -295,7 +295,7 @@ TEST(Generics, GenericWithConcreteSuperclassVirtualDispatch) {
                                   R"(
     w: Wrap<Str> = Wrap<Str>("payload", 5);
     b: Base = w;
-    println(b.name() + " " + StrInt(b.n) + " " + w.get());
+    println(b.name() + " " + Str<int>(b.n) + " " + w.get());
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "wrap 5 payload\n");
@@ -349,11 +349,11 @@ TEST(GenericsTypes, TupleFieldLiteralIndexAndDestructuring) {
     fn main() -> int {
       q = Pair<Str, int>("a", 1);
       println(q.first());
-      println(StrInt(q.second()));
+      println(Str<int>(q.second()));
       println(q.swap());
       r: Pair<int, Str> = Pair<int, Str>(2, "b");
       println(r.swap());
-      println(StrInt(firstOf((7, "x"))));
+      println(Str<int>(firstOf((7, "x"))));
       a, b = dup("z");
       println(a + b);
       println(dup((1, "q")));
@@ -384,15 +384,15 @@ TEST(GenericsTypes, OptionalFieldsAndUnwrapInTemplates) {
     fn ident<T>(x: T) -> T { return x; }
     fn main() -> int {
       b = Slot<Node>();
-      println(StrInt(orElse(b.get(), Node(0)).v));
+      println(Str<int>(orElse(b.get(), Node(0)).v));
       b.set(Node(5));
-      println(StrInt(orElse(b.get(), Node(0)).v));
-      println(StrInt(orElse(None, Node(9)).v));
+      println(Str<int>(orElse(b.get(), Node(0)).v));
+      println(Str<int>(orElse(None, Node(9)).v));
       s = Slot<Str>();
       println(orElse(s.get(), "dflt"));
       n: Node? = None;
       m = ident<Node?>(n);
-      println(StrBool(m == None));
+      println(Str<bool>(m == None));
       return 0;
     }
   )");

@@ -10,9 +10,9 @@ fn main() -> int {
   b: float = 3.14;
   c: bool  = True;
   d: Str   = "hello";
-  println(StrInt(a));    // 42
-  println(StrFloat(b));  // 3.14
-  println(StrBool(c));   // True
+  println(Str<int>(a));    // 42
+  println(Str<float>(b));  // 3.14
+  println(Str<bool>(c));   // True
   println(d);               // hello
 
   println("=== implicit (inferred) declarations ===");
@@ -21,9 +21,9 @@ fn main() -> int {
   y = 2.718;
   z = False;
   w = "world";
-  println(StrInt(x));    // 100
-  println(StrFloat(y));  // 2.718
-  println(StrBool(z));   // False
+  println(Str<int>(x));    // 100
+  println(Str<float>(y));  // 2.718
+  println(Str<bool>(z));   // False
   println(w);               // world
 
   println("=== rebind int ===");
@@ -31,26 +31,26 @@ fn main() -> int {
   v = 2;
   v = v + 10;
   v = v * 3;
-  println(StrInt(v));    // 36
+  println(Str<int>(v));    // 36
 
   println("=== rebind float ===");
   f: float = 0.0;
   f = 1.5;
   f = f + 0.5;
-  println(StrFloat(f));  // 2
+  println(Str<float>(f));  // 2
 
   println("=== rebind bool ===");
   flag: bool = False;
   flag = True;
   flag = !flag;
-  println(StrBool(flag)); // False
+  println(Str<bool>(flag)); // False
 
   println("=== int->float promotion on rebind ===");
   pf: float = 0.0;
   pf = 7;              // int literal assigned to float var -> SIToFP
-  println(StrFloat(pf));  // 7
+  println(Str<float>(pf));  // 7
   pf = pf + 1;         // int 1 promoted
-  println(StrFloat(pf));  // 8
+  println(Str<float>(pf));  // 8
 
   println("=== Str rebind (emitClassVarRebind) ===");
   s: Str = "first";
@@ -71,16 +71,16 @@ fn main() -> int {
   q: int = 2;
   r: int = 3;
   p = p + q + r;
-  println(StrInt(p));    // 6
+  println(Str<int>(p));    // 6
 
   println("=== nested scope variable access ===");
   outer: int = 10;
   if (True) {
     inner: int = 20;
     outer = outer + inner;   // outer accessible from inner scope
-    println(StrInt(outer));   // 30
+    println(Str<int>(outer));   // 30
   }
-  println(StrInt(outer));     // 30 (modified by inner scope)
+  println(Str<int>(outer));     // 30 (modified by inner scope)
 
   println("=== None initialised var ===");
   n: Obj = None;   // None has type Obj, not Str

@@ -46,7 +46,7 @@ TEST(Class, InitStoresIntField) {
   )",
                                  R"(
     c: Counter = Counter(42);
-    println(StrInt(c.count));
+    println(Str<int>(c.count));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "42\n");
@@ -61,7 +61,7 @@ TEST(Class, FieldDefaultZero) {
   )",
                                  R"(
     b: Box = Box();
-    println(StrInt(b.val));
+    println(Str<int>(b.val));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "0\n");
@@ -81,8 +81,8 @@ TEST(Class, FieldReadWrite) {
     p: Point = Point();
     p.x = 3;
     p.y = 7;
-    println(StrInt(p.x));
-    println(StrInt(p.y));
+    println(Str<int>(p.x));
+    println(Str<int>(p.y));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "3\n7\n");
@@ -104,9 +104,9 @@ TEST(Class, MultipleIntFields) {
   )",
                                  R"(
     t: Triple = Triple(1, 2, 3);
-    println(StrInt(t.a));
-    println(StrInt(t.b));
-    println(StrInt(t.c));
+    println(Str<int>(t.a));
+    println(Str<int>(t.b));
+    println(Str<int>(t.c));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "1\n2\n3\n");
@@ -142,7 +142,7 @@ TEST(Class, FieldReassign) {
                                  R"(
     m: Mutable = Mutable(10);
     m.set(99);
-    println(StrInt(m.val));
+    println(Str<int>(m.val));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "99\n");
@@ -161,7 +161,7 @@ TEST(Class, MethodReturnsField) {
   )",
                                  R"(
     f: Foo = Foo(7);
-    println(StrInt(f.get()));
+    println(Str<int>(f.get()));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "7\n");
@@ -179,7 +179,7 @@ TEST(Class, MethodWithParam) {
     a: Acc = Acc();
     a.add(5);
     a.add(3);
-    println(StrInt(a.total));
+    println(Str<int>(a.total));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "8\n");
@@ -197,7 +197,7 @@ TEST(Class, MethodComputed) {
   )",
                                  R"(
     r: Rect = Rect(4, 5);
-    println(StrInt(r.area()));
+    println(Str<int>(r.area()));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "20\n");
@@ -214,8 +214,8 @@ TEST(Class, TwoInstancesIndependent) {
                                  R"(
     a: Val = Val(1);
     b: Val = Val(2);
-    println(StrInt(a.n));
-    println(StrInt(b.n));
+    println(Str<int>(a.n));
+    println(Str<int>(b.n));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "1\n2\n");
@@ -259,8 +259,8 @@ TEST(Class, SubclassOwnField) {
   )",
                                  R"(
     c: Child = Child(3, 4);
-    println(StrInt(c.x));
-    println(StrInt(c.y));
+    println(Str<int>(c.x));
+    println(Str<int>(c.y));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "3\n4\n");
@@ -301,7 +301,7 @@ TEST(Class, SuperInit) {
   )",
                                  R"(
     car: Car = Car(120, "Toyota");
-    println(StrInt(car.speed));
+    println(Str<int>(car.speed));
     println(car.brand);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -324,7 +324,7 @@ TEST(Class, ThreeLevelInheritance) {
   )",
                                  R"(
     c: C = C(99);
-    println(StrInt(c.val));
+    println(Str<int>(c.val));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "99\n");
@@ -344,7 +344,7 @@ TEST(Class, InheritedMethod) {
   )",
                                  R"(
     s: Sub = Sub(6);
-    println(StrInt(s.doubled()));
+    println(Str<int>(s.doubled()));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "12\n");
@@ -360,7 +360,7 @@ TEST(Class, PassToFunction) {
       fn __init__(x: int) { self.v = x; }
     }
     fn show(n: Num) {
-      println(StrInt(n.v));
+      println(Str<int>(n.v));
     }
   )",
                                  R"(
@@ -385,8 +385,8 @@ TEST(Class, ReturnClassFromFunction) {
   )",
                                  R"(
     p: Pair = makePair(3, 7);
-    println(StrInt(p.a));
-    println(StrInt(p.b));
+    println(Str<int>(p.a));
+    println(Str<int>(p.b));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "3\n7\n");
@@ -433,7 +433,7 @@ TEST(Class, MethodWithLoop) {
                                  R"(
     s: Summer = Summer();
     s.sumTo(5);
-    println(StrInt(s.total));
+    println(Str<int>(s.total));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "15\n");
@@ -535,7 +535,7 @@ TEST(MatchCodeGen, BindingIntField) {
                                  R"(
     s: Shape = Rect(4, 5);
     match s {
-      r: Rect { println(StrInt(r.w)); println(StrInt(r.h)); }
+      r: Rect { println(Str<int>(r.w)); println(Str<int>(r.h)); }
       _       { println("other"); }
     }
   )"));
@@ -820,23 +820,25 @@ TEST(MatchCodeGen, BoolValueMatch) {
 // ============================================================================
 
 TEST(Class, MethodCallsFreeFunctionDefinedBefore) {
-  auto r = compileAndRun("fn helper() -> int { return 7; }\n"
-                         "class C {\n"
-                         "  fn __init__() {}\n"
-                         "  fn get() -> int { return helper(); }\n"
-                         "}\n" +
-                         wrapMain("c: C = C();\n  println(StrInt(c.get()));"));
+  auto r =
+      compileAndRun("fn helper() -> int { return 7; }\n"
+                    "class C {\n"
+                    "  fn __init__() {}\n"
+                    "  fn get() -> int { return helper(); }\n"
+                    "}\n" +
+                    wrapMain("c: C = C();\n  println(Str<int>(c.get()));"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "7\n");
 }
 
 TEST(Class, MethodCallsFreeFunctionDefinedAfter) {
-  auto r = compileAndRun("class C {\n"
-                         "  fn __init__() {}\n"
-                         "  fn get() -> int { return helper(); }\n"
-                         "}\n"
-                         "fn helper() -> int { return 42; }\n" +
-                         wrapMain("c: C = C();\n  println(StrInt(c.get()));"));
+  auto r =
+      compileAndRun("class C {\n"
+                    "  fn __init__() {}\n"
+                    "  fn get() -> int { return helper(); }\n"
+                    "}\n"
+                    "fn helper() -> int { return 42; }\n" +
+                    wrapMain("c: C = C();\n  println(Str<int>(c.get()));"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "42\n");
 }
@@ -855,10 +857,10 @@ TEST(Class, DefaultEqualsIsIdentity) {
                                  R"(
     b: Box = Box(5);
     c: Box = Box(5);
-    println(StrBool(b.equals(b)));
-    println(StrBool(b.equals(c)));
-    println(StrBool(b == b));
-    println(StrBool(b == c));
+    println(Str<bool>(b.equals(b)));
+    println(Str<bool>(b.equals(c)));
+    println(Str<bool>(b == b));
+    println(Str<bool>(b == c));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "True\nFalse\nTrue\nFalse\n");
@@ -914,9 +916,9 @@ TEST(Class, StringEqualityIsContent) {
     fn main() -> int {
       a: Str = "abc";
       b: Str = "ab" + "c";
-      println(StrBool(a == b));
-      println(StrBool(a != b));
-      println(StrBool(a == "xyz"));
+      println(Str<bool>(a == b));
+      println(Str<bool>(a != b));
+      println(Str<bool>(a == "xyz"));
       return 0;
     }
   )");
@@ -943,9 +945,9 @@ TEST(Class, EqualsOperatorUsesOverrideWithSelfMatch) {
       a: Money = Money(5);
       b: Money = Money(5);
       c: Money = Money(9);
-      println(StrBool(a == b));
-      println(StrBool(a == c));
-      println(StrBool(a != c));
+      println(Str<bool>(a == b));
+      println(Str<bool>(a == c));
+      println(Str<bool>(a != c));
       return 0;
     }
   )");
@@ -966,7 +968,7 @@ TEST(Class, MethodMatchesOwnType) {
     }
     fn main() -> int {
       a: Node = Node(1);
-      println(StrBool(a.isNode(a)));
+      println(Str<bool>(a.isNode(a)));
       return 0;
     }
   )");
@@ -987,7 +989,7 @@ TEST(Class, EqualsOverrideDispatched) {
                                  R"(
     a: Always = Always(1);
     b: Always = Always(2);
-    println(StrBool(a.equals(b)));
+    println(Str<bool>(a.equals(b)));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "True\n");
@@ -997,10 +999,12 @@ TEST(Class, EqualsOverrideDispatched) {
 // unboxed object): the call passes the binding's backing box, not a fresh wrap.
 TEST(Class, EqualsWithMatchBoundArgument) {
   auto r = compileAndRun(wrapMain(R"(
-    match IntStr("7") {
+    x: Obj = int<Str>("7");
+    y: Obj = int<Str>("7");
+    match x {
       a: Int {
-        match IntStr("7") {
-          b: Int { println(StrBool(a.equals(b))); }
+        match y {
+          b: Int { println(Str<bool>(a.equals(b))); }
           _ {}
         }
       }

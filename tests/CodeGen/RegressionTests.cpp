@@ -30,9 +30,9 @@ TEST(Regression, MethodArrayParam) {
     fn main() -> int {
       b = Bag();
       ys: int[] = [1, 2, 3];
-      println(StrInt(b.take(ys)));
-      println(StrInt(b.take([4, 5])));
-      println(StrInt(ys.len()));
+      println(Str<int>(b.take(ys)));
+      println(Str<int>(b.take([4, 5])));
+      println(Str<int>(ys.len()));
       return 0;
     }
   )");
@@ -61,10 +61,10 @@ TEST(Regression, MethodObjectArrayParam) {
     fn main() -> int {
       b = Bag();
       ps: P[] = [P(1), P(2)];
-      println(StrInt(b.total(ps)));
-      println(StrInt(b.total([P(3), P(4)])));
-      println(StrInt(b.count(["a", "b", "c"])));
-      println(StrInt(ps[1].x));
+      println(Str<int>(b.total(ps)));
+      println(Str<int>(b.total([P(3), P(4)])));
+      println(Str<int>(b.count(["a", "b", "c"])));
+      println(Str<int>(ps[1].x));
       return 0;
     }
   )");
@@ -86,7 +86,7 @@ TEST(Regression, MethodTupleParam) {
       t: (int, Str) = (1, "one");
       println(b.second(t));
       println(b.second((2, "two")));
-      println(StrInt(b.first(t)));
+      println(Str<int>(b.first(t)));
       println(t.1);
       return 0;
     }
@@ -110,10 +110,10 @@ TEST(Regression, MethodEqualsOverrideAndArrayEquals) {
       c = Bag(2);
       ys: int[] = [1, 2, 3];
       zs: int[] = ys;
-      println(StrBool(b == c));
-      println(StrBool(b.equals(c)));
-      println(StrBool(ys == zs));
-      println(StrBool(ys.equals([1, 2, 3])));
+      println(Str<bool>(b == c));
+      println(Str<bool>(b.equals(c)));
+      println(Str<bool>(ys == zs));
+      println(Str<bool>(ys.equals([1, 2, 3])));
       return 0;
     }
   )");
@@ -147,11 +147,11 @@ TEST(Regression, InferredClassTernaryReceiver) {
       return r.sum() + r.x;
     }
     fn main() -> int {
-      println(StrInt(pick(True)));
-      println(StrInt(pick(False)));
+      println(Str<int>(pick(True)));
+      println(Str<int>(pick(False)));
       c = False;
       r = if c then Point(3, 3) else Point(4, 4);
-      println(StrInt(r.sum()));
+      println(Str<int>(r.sum()));
       a = if c then Dog() else Cat();
       println(a.sound());
       return 0;
@@ -184,8 +184,8 @@ TEST(Regression, InferredArrayTupleOptionalTernary) {
       return arr.len() * 1000 + arr[0].get() * 10 + tup.1.get() + tup.0 + n;
     }
     fn main() -> int {
-      println(StrInt(run(True)));
-      println(StrInt(run(False)));
+      println(Str<int>(run(True)));
+      println(Str<int>(run(False)));
       return 0;
     }
   )");
@@ -210,25 +210,25 @@ TEST(Regression, CharArrayElements) {
     fn second(cs: char[]) -> char { return cs[1]; }
     fn main() -> int {
       cs: char[] = ['a', 'b'];
-      println(StrChar(cs[1]));
+      println(Str<char>(cs[1]));
       if (cs[0] == 'a') { println("eq"); }
-      println(StrBool(isA(cs[0])));
+      println(Str<bool>(isA(cs[0])));
       c: char = cs[1];
       d = cs[0];
-      println(StrChar(c) + StrChar(d));
+      println(Str<char>(c) + Str<char>(d));
       x = 'k';
       ds: char[] = [x, 'm'];
       ds.push('z');
       ds[0] = 'q';
-      println(StrChar(ds[0]) + StrChar(second(ds)) + StrChar(ds.pop()));
-      println(StrInt(ds.len()));
+      println(Str<char>(ds[0]) + Str<char>(second(ds)) + Str<char>(ds.pop()));
+      println(Str<int>(ds.len()));
       w = Word();
-      println(StrChar(w.first()) + StrChar(w.cs[1]));
+      println(Str<char>(w.first()) + Str<char>(w.cs[1]));
       s: Str = "yo";
-      println(StrChar(s[1]));
+      println(Str<char>(s[1]));
       bs: bool[] = [True, False];
       bs.push(True);
-      println(StrBool(bs.pop()) + StrBool(bs[1]));
+      println(Str<bool>(bs.pop()) + Str<bool>(bs[1]));
       return 0;
     }
   )");
@@ -257,24 +257,24 @@ TEST(Regression, CallRootedObjectSubscript) {
     fn take(p: Point) -> int { return p.x; }
     fn ret() -> Point { return mk()[1]; }
     fn main() -> int {
-      println(StrInt(mk()[0].x));
-      println(StrInt(mk()[1].get()));
+      println(Str<int>(mk()[0].x));
+      println(Str<int>(mk()[1].get()));
       p = mk()[0];
       q: Point = mk()[1];
-      println(StrInt(p.x + q.x));
+      println(Str<int>(p.x + q.x));
       q = mk()[0];
-      println(StrInt(q.x));
-      println(StrInt(take(mk()[0])));
+      println(Str<int>(q.x));
+      println(Str<int>(take(mk()[0])));
       s = mks()[0];
       println(s + mks()[1]);
-      println(StrInt(mkn()[0][1]));
-      println(StrInt(mkn()[1].len()));
-      println(StrInt(mkh().items[0].x));
-      println(StrInt(ret().x));
+      println(Str<int>(mkn()[0][1]));
+      println(Str<int>(mkn()[1].len()));
+      println(Str<int>(mkh().items[0].x));
+      println(Str<int>(ret().x));
       ps: Point[] = [mk()[1]];
-      println(StrInt(ps[0].x));
+      println(Str<int>(ps[0].x));
       match mk()[0] {
-        pp: Point { println(StrInt(pp.x)); }
+        pp: Point { println(Str<int>(pp.x)); }
       }
       return 0;
     }
@@ -354,7 +354,7 @@ TEST(Regression, MethodConstructsOwnAndLaterClass) {
       c = Cell(3);
       d = c.clone();
       b = c.wrap();
-      println(StrInt(d.v) + " " + StrInt(b.n) + " " + StrInt(b.cell().v));
+      println(Str<int>(d.v) + " " + Str<int>(b.n) + " " + Str<int>(b.cell().v));
       return 0;
     }
   )");
@@ -408,7 +408,7 @@ TEST(Regression, SubclassDeclaredBeforeBase) {
     }
     fn main() -> int {
       s = Square(4);
-      println(StrInt(s.area()) + " " + s.tag);
+      println(Str<int>(s.area()) + " " + s.tag);
       return 0;
     }
   )");
@@ -488,14 +488,14 @@ TEST(Regression, SuperArgumentsAreBoxed) {
     }
     fn main() -> int {
       a = Lit();
-      println(a.name + StrInt(a.p.x) + StrInt(a.xs.len()));
+      println(a.name + Str<int>(a.p.x) + Str<int>(a.xs.len()));
       b = Cat("c");
-      println(b.name + StrInt(b.p.x));
+      println(b.name + Str<int>(b.p.x));
       q = Point(3);
       s: Str = "fwd";
       ys: int[] = [7];
       c = Fwd(q, s, ys);
-      println(c.name + StrInt(c.p.x) + StrInt(q.x) + s + StrInt(ys.len()));
+      println(c.name + Str<int>(c.p.x) + Str<int>(q.x) + s + Str<int>(ys.len()));
       return 0;
     }
   )");
@@ -534,8 +534,8 @@ TEST(Regression, PushOntoEmptyArrayFieldFromMethod) {
       s.pushP(q);
       s.pushP(P(3));
       println(s.pop());
-      println(StrInt(s.popP().x));
-      println(StrInt(s.items.len()) + " " + StrInt(s.ps.len()));
+      println(Str<int>(s.popP().x));
+      println(Str<int>(s.items.len()) + " " + Str<int>(s.ps.len()));
       return 0;
     }
   )");
@@ -557,8 +557,8 @@ class Box {
 }
 fn main() -> int {
   b: Box = Box();
-  println(StrInt(b.items[0].v));   // subscript via local receiver
-  println(StrInt(b.second()));     // subscript via self.field inside a method
+  println(Str<int>(b.items[0].v));   // subscript via local receiver
+  println(Str<int>(b.second()));     // subscript via self.field inside a method
   return 0;
 }
 )");
@@ -591,9 +591,9 @@ class Grid {
 }
 fn main() -> int {
   g: Grid = Grid();
-  println(StrInt(g.at(0, 0)));   // 0
-  println(StrInt(g.at(1, 2)));   // 5
-  println(StrInt(g.at(2, 1)));   // 7
+  println(Str<int>(g.at(0, 0)));   // 0
+  println(Str<int>(g.at(1, 2)));   // 5
+  println(Str<int>(g.at(2, 1)));   // 7
   return 0;
 }
 )");
@@ -615,14 +615,14 @@ TEST(Regression, EmptyArrayArgumentAndReturn) {
     fn fill(ss: Str[]) -> int { ss.push("x"); return ss.len(); }
     fn none() -> P[] { return []; }
     fn main() -> int {
-      println(StrInt(fill([])));
-      println(StrInt(Bag().fill([])));
+      println(Str<int>(fill([])));
+      println(Str<int>(Bag().fill([])));
       ps = none();
       ps.push(P(3));
       grid: Str[][] = [["a"]];
       grid[0] = [];
       grid[0].push("b");
-      println(StrInt(ps.len()) + grid[0][0]);
+      println(Str<int>(ps.len()) + grid[0][0]);
       return 0;
     }
   )");

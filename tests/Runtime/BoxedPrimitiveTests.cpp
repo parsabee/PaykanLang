@@ -101,15 +101,33 @@ TEST(BoxedInt, FromStrValid) {
   PaykanString_destroy(strObj);
 }
 
-TEST(BoxedInt, FromStrInvalid) {
-  PaykanObject *strObj = (PaykanObject *)PaykanString_new("abc", 3);
+// On failure, `int<Str>` is None: a NULL box.
+static PaykanShared *parseInt(const char *text, int64_t len) {
+  PaykanObject *strObj = (PaykanObject *)PaykanString_new(text, len);
   PaykanShared *result = PaykanInt_from_str(strObj);
-  ASSERT_NE(result, nullptr);
-  // On failure returns a PaykanError box.
-  PaykanObject *inner = PaykanShared_get(result);
-  EXPECT_EQ(inner->vtable, &PaykanError_vtable);
-  Paykan_release(result);
   PaykanString_destroy(strObj);
+  return result;
+}
+
+TEST(BoxedInt, FromStrInvalidIsNull) {
+  EXPECT_EQ(parseInt("abc", 3), nullptr);
+  EXPECT_EQ(parseInt("", 0), nullptr);
+  EXPECT_EQ(parseInt("12x", 3), nullptr);
+  EXPECT_EQ(parseInt(" 12", 3), nullptr);    // no leading whitespace
+  EXPECT_EQ(parseInt("12 ", 3), nullptr);    // no trailing whitespace
+  EXPECT_EQ(parseInt("1\0002", 4), nullptr); // an embedded NUL ends the number
+  EXPECT_EQ(parseInt("9223372036854775808", 19), nullptr); // > INT64_MAX
+}
+
+TEST(BoxedInt, FromStrLimits) {
+  PaykanShared *mx = parseInt("9223372036854775807", 19);
+  PaykanShared *mn = parseInt("-9223372036854775808", 20);
+  ASSERT_NE(mx, nullptr);
+  ASSERT_NE(mn, nullptr);
+  EXPECT_EQ(PaykanInt_value(PaykanShared_get(mx)), INT64_MAX);
+  EXPECT_EQ(PaykanInt_value(PaykanShared_get(mn)), INT64_MIN);
+  Paykan_release(mx);
+  Paykan_release(mn);
 }
 
 TEST(BoxedInt, FromStrNegative) {
@@ -178,13 +196,31 @@ TEST(BoxedFloat, FromStrValid) {
   PaykanString_destroy(strObj);
 }
 
-TEST(BoxedFloat, FromStrInvalid) {
-  PaykanObject *strObj = (PaykanObject *)PaykanString_new("xyz", 3);
+static PaykanShared *parseFloat(const char *text, int64_t len) {
+  PaykanObject *strObj = (PaykanObject *)PaykanString_new(text, len);
   PaykanShared *result = PaykanFloat_from_str(strObj);
-  PaykanObject *inner = PaykanShared_get(result);
-  EXPECT_EQ(inner->vtable, &PaykanError_vtable);
-  Paykan_release(result);
   PaykanString_destroy(strObj);
+  return result;
+}
+
+TEST(BoxedFloat, FromStrInvalidIsNull) {
+  EXPECT_EQ(parseFloat("xyz", 3), nullptr);
+  EXPECT_EQ(parseFloat("", 0), nullptr);
+  EXPECT_EQ(parseFloat(" 1.5", 4), nullptr);
+  EXPECT_EQ(parseFloat("1.5 ", 4), nullptr);
+  EXPECT_EQ(parseFloat("1e999", 5), nullptr); // overflows
+}
+
+TEST(BoxedFloat, FromStrSpecialValues) {
+  PaykanShared *n = parseFloat("nan", 3);
+  PaykanShared *i = parseFloat("-inf", 4);
+  ASSERT_NE(n, nullptr);
+  ASSERT_NE(i, nullptr);
+  double nv = PaykanFloat_value(PaykanShared_get(n));
+  EXPECT_NE(nv, nv);
+  EXPECT_EQ(PaykanFloat_value(PaykanShared_get(i)), -1.0 / 0.0);
+  Paykan_release(n);
+  Paykan_release(i);
 }
 
 // ============================================================================

@@ -202,7 +202,7 @@ fn mk() -> Box<int> { return Box<int>(41); }
 // main.pkn
 import lib::gen;
 b = gen::mk();            // b: Box<int>, a class exported by the module
-println(StrInt(b.get()));
+println(Str<int>(b.get()));
 ```
 
   Declaring your own `class Box<T>` and instantiating `Box<int>` in a module

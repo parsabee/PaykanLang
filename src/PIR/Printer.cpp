@@ -484,6 +484,8 @@ const char *opcodeName(Opcode op) {
     return "select";
   case Opcode::IToF:
     return "itof";
+  case Opcode::FToI:
+    return "ftoi";
   case Opcode::Cast:
     return "cast";
   case Opcode::Call:

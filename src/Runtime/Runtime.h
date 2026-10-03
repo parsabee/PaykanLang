@@ -107,9 +107,10 @@ int64_t PaykanInt_equals(PaykanObject *self, PaykanObject *other);
 
 extern PaykanObjectVTable PaykanInt_vtable;
 
-/// Parse a Str as a decimal integer.
-/// Returns a PaykanShared* wrapping a PaykanInt on success,
-/// or a PaykanShared* wrapping a PaykanError on failure.
+/// `int<Str>(s)`: parse a Str as a decimal integer (an optional sign and
+/// digits, the whole string, no surrounding whitespace, within int64).
+/// Returns the `int?` result: a PaykanShared* wrapping a fresh PaykanInt on
+/// success, or NULL (None) for an invalid or out-of-range string.
 PaykanShared *PaykanInt_from_str(PaykanObject *str);
 
 // ============================================================================
@@ -133,9 +134,10 @@ int64_t PaykanFloat_equals(PaykanObject *self, PaykanObject *other);
 
 extern PaykanObjectVTable PaykanFloat_vtable;
 
-/// Parse a Str as a floating-point number.
-/// Returns a PaykanShared* wrapping a PaykanFloat on success,
-/// or a PaykanShared* wrapping a PaykanError on failure.
+/// `float<Str>(s)`: parse a Str as a floating-point number (C `strtod`
+/// syntax, including `nan` and `inf`; the whole string, no leading
+/// whitespace, not overflowing or underflowing).  Returns the `float?`
+/// result: a PaykanShared* wrapping a fresh PaykanFloat, or NULL (None).
 PaykanShared *PaykanFloat_from_str(PaykanObject *str);
 
 // ============================================================================
@@ -508,6 +510,15 @@ PAYKAN_NORETURN void Paykan_panic_div_by_zero(void);
 /// Emitted by CodeGen as the trap target for `INT64_MIN / -1`, whose quotient
 /// is not representable (the hardware divide would raise SIGFPE instead).
 PAYKAN_NORETURN void Paykan_panic_div_overflow(void);
+
+/// Print a diagnostic naming @p value and abort: `int<float>(value)` with a
+/// NaN, an infinity, or a value outside the int64 range (the lowering guards
+/// the conversion and calls this instead of performing it).
+PAYKAN_NORETURN void Paykan_panic_float_to_int(double value);
+
+/// Print a diagnostic naming @p value and abort: `char<int>(value)` outside
+/// the char range 0..255.
+PAYKAN_NORETURN void Paykan_panic_int_to_char(int64_t value);
 
 // ============================================================================
 // I/O builtins

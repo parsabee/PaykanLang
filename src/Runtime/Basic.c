@@ -12,6 +12,7 @@
 #include "Runtime.h"
 #include "RuntimeInternal.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,16 +55,23 @@ int64_t PaykanInt_equals(PaykanObject *self, PaykanObject *other) {
   return Paykan_equals_consume_other(other, result);
 }
 
+/// True when @p s starts with a character strtoll / strtod would skip as
+/// leading whitespace, which `int<Str>` / `float<Str>` reject.
+static int Paykan_starts_with_space(const PaykanString *s) {
+  return s->len > 0 && isspace((unsigned char)s->data[0]);
+}
+
 PaykanShared *PaykanInt_from_str(PaykanObject *str) {
   PaykanString *s = (PaykanString *)str;
+  if (s->len == 0 || Paykan_starts_with_space(s))
+    return NULL;
   char *end;
   errno = 0;
   long long val = strtoll(s->data, &end, 10);
-  if (end == s->data || *end != '\0' || errno != 0) {
-    const char *msg = "IntStr: invalid integer string";
-    return PaykanShared_new(
-        (PaykanObject *)PaykanError_new(msg, (int64_t)strlen(msg)));
-  }
+  // The whole string must be consumed (an embedded NUL ends strtoll early)
+  // and the value must fit (ERANGE).
+  if (end != s->data + s->len || errno != 0)
+    return NULL;
   return PaykanShared_new((PaykanObject *)PaykanInt_new((int64_t)val));
 }
 
@@ -106,14 +114,13 @@ int64_t PaykanFloat_equals(PaykanObject *self, PaykanObject *other) {
 
 PaykanShared *PaykanFloat_from_str(PaykanObject *str) {
   PaykanString *s = (PaykanString *)str;
+  if (s->len == 0 || Paykan_starts_with_space(s))
+    return NULL;
   char *end;
   errno = 0;
   double val = strtod(s->data, &end);
-  if (end == s->data || *end != '\0' || errno != 0) {
-    const char *msg = "FloatStr: invalid float string";
-    return PaykanShared_new(
-        (PaykanObject *)PaykanError_new(msg, (int64_t)strlen(msg)));
-  }
+  if (end != s->data + s->len || errno != 0)
+    return NULL;
   return PaykanShared_new((PaykanObject *)PaykanFloat_new(val));
 }
 

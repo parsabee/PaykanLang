@@ -110,6 +110,7 @@ enum class Opcode : uint8_t {
   Cmp,    // Pred, two operands -> Bool
   Select, // cond, a, b
   IToF,   // i64 -> f64 (numeric)
+  FToI,   // f64 -> i64 (numeric, toward zero; operand must be in range)
   Cast,   // reinterpret / resize to CastTo (see docs/pir.md)
   // calls
   Call,  // Callee = @fn, Args

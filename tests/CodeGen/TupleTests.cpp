@@ -36,10 +36,10 @@ TEST(Tuple, PrimitiveElementsRoundTrip) {
   auto r = compileAndRun(R"(
     fn main() -> int {
       t = (1, 2.5, True, 'c');
-      println(StrInt(t.0));
-      println(StrFloat(t.1));
-      println(StrBool(t.2));
-      println(StrChar(t.3));
+      println(Str<int>(t.0));
+      println(Str<float>(t.1));
+      println(Str<bool>(t.2));
+      println(Str<char>(t.3));
       println(t);
       return t.0 + 41;
     }
@@ -78,8 +78,8 @@ TEST(Tuple, NestedTuples) {
       inner = t.1;
       println(inner.1.0);
       println(t.0.1);
-      println(StrInt(t.0.0 + 1));
-      println(StrBool(t.1.1.1));
+      println(Str<int>(t.0.0 + 1));
+      println(Str<bool>(t.1.1.1));
       return 0;
     }
   )");
@@ -96,7 +96,7 @@ TEST(Tuple, TupleInArrayAndArrayInTuple) {
       pairs.push((3, "three"));
       println(pairs[2].1);
       println(pairs[0]);
-      println(StrInt(pairs.len()));
+      println(Str<int>(pairs.len()));
       p = pairs[1];            // element acquired by a new owner
       println(p.1);
       pairs[0] = (10, "ten");  // set_obj releases the old tuple
@@ -104,8 +104,8 @@ TEST(Tuple, TupleInArrayAndArrayInTuple) {
 
       arrs: (int[], Str) = ([1, 2, 3], "nums");
       arrs.0.push(4);
-      println(StrInt(arrs.0.len()));
-      println(StrInt(arrs.0[3]));
+      println(Str<int>(arrs.0.len()));
+      println(Str<int>(arrs.0[3]));
       println(arrs.1);
       return 0;
     }
@@ -130,17 +130,17 @@ TEST(Tuple, MultipleReturnAndDestructuring) {
     }
     fn main() -> int {
       q, r = divmod(7, 2);
-      println(StrInt(q) + " " + StrInt(r));
+      println(Str<int>(q) + " " + Str<int>(r));
       name, n = named();
       println(name);
       _, only = named();
-      println(StrInt(only));
+      println(Str<int>(only));
       first: Str, _ = named();
       println(first);
       q, r = divmod(9, 4);         // re-assign existing q, r
-      println(StrInt(q) + " " + StrInt(r));
+      println(Str<int>(q) + " " + Str<int>(r));
       f: float, _ = (1, 2);        // int -> float into an annotated target
-      println(StrFloat(f));
+      println(Str<float>(f));
       return q + r + n;
     }
   )");
@@ -158,7 +158,7 @@ TEST(Tuple, DestructureReassignsRefVariables) {
       arr: int[] = [1];
       s, arr = ("new", [4, 5, 6]);   // both old boxes released
       println(s);
-      println(StrInt(arr.len()));
+      println(Str<int>(arr.len()));
       o: Obj = None;
       o, s = ("boxed", "again");      // None-initialised var promoted to owned
       println(o);
@@ -198,9 +198,9 @@ TEST(Tuple, CallRootedIndexTearsDownTemporary) {
     fn mk() -> (Str, int) { return ("tmp", 3); }
     fn main() -> int {
       println(mk().0);              // ref element retained, tuple released
-      println(StrInt(mk().1));      // primitive element copied out
+      println(Str<int>(mk().1));      // primitive element copied out
       n: int = mk().0.len();        // element used as a receiver
-      println(StrInt(n));
+      println(Str<int>(n));
       s = mk().0;                   // element bound to a new owner
       println(s);
       println(("x", "y").1);        // literal receiver
@@ -241,7 +241,7 @@ TEST(Tuple, PassedToFunctionsAndReturnedThrough) {
     fn main() -> int {
       t = (1, "one");
       s, n = swap(t);
-      println(s + StrInt(n));
+      println(s + Str<int>(n));
       u = same(t);
       println(u);
       println(same((2, "two")));
@@ -274,9 +274,9 @@ TEST(Tuple, TupleFieldInClass) {
     fn main() -> int {
       h: Holder = Holder((9, "nine"));
       a, b = h.get();
-      println(StrInt(a) + b);
+      println(Str<int>(a) + b);
       println(h.pair);
-      println(h.pair.1 + StrInt(h.first()));
+      println(h.pair.1 + Str<int>(h.first()));
       println(h.second());
       h.reset();              // old tuple released by the field store
       println(h.pair);
@@ -300,17 +300,17 @@ TEST(Tuple, ClassInstanceElements) {
       y: int;
       fn __init__(x: int, y: int) { self.x = x; self.y = y; }
       fn toString() -> Str {
-        return "P(" + StrInt(self.x) + "," + StrInt(self.y) + ")";
+        return "P(" + Str<int>(self.x) + "," + Str<int>(self.y) + ")";
       }
     }
     fn main() -> int {
       t = ("origin", Point(0, 0));
       println(t);
       println(t.1.toString());
-      println(StrInt(t.1.x));
+      println(Str<int>(t.1.x));
       p: Point = t.1;
       p.x = 7;                  // shared object: visible through the tuple
-      println(StrInt(t.1.x));
+      println(Str<int>(t.1.x));
       return 0;
     }
   )pkn");
@@ -331,20 +331,20 @@ TEST(Tuple, EqualityIsElementWise) {
       a = (1, "s");
       b = (1, "s");
       c = (2, "s");
-      println(StrBool(a == b));         // content-equal Str elements
-      println(StrBool(a != b));
-      println(StrBool(a == c));
-      println(StrBool((1, 2) == (1, 2)));   // two temporaries
-      println(StrBool(a.equals(b)));
+      println(Str<bool>(a == b));         // content-equal Str elements
+      println(Str<bool>(a != b));
+      println(Str<bool>(a == c));
+      println(Str<bool>((1, 2) == (1, 2)));   // two temporaries
+      println(Str<bool>(a.equals(b)));
       n = ((1, "x"), 2.5);
       m = ((1, "x"), 2.5);
-      println(StrBool(n == m));          // nested tuples compare deeply
+      println(Str<bool>(n == m));          // nested tuples compare deeply
       t = Thing();
       p = (t, 1);
       q = (t, 1);
       w = (Thing(), 1);
-      println(StrBool(p == q));          // same object: identity equals
-      println(StrBool(p == w));          // distinct objects
+      println(Str<bool>(p == q));          // same object: identity equals
+      println(Str<bool>(p == w));          // distinct objects
       return 0;
     }
   )");
@@ -380,7 +380,7 @@ TEST(Tuple, EnumElementsAndScopes) {
     fn main() -> int {
       i: int = 0;
       while (i < 3) {
-        t = (Color::Green, "g" + StrInt(i));   // fresh tuple each iteration
+        t = (Color::Green, "g" + Str<int>(i));   // fresh tuple each iteration
         if (t.0 == Color::Green) { println(t.1); }
         i = i + 1;
       }

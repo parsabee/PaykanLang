@@ -42,8 +42,8 @@ class ASTContext {
   // Canonical error type (ClassType inheriting Obj, returned by open() on
   // failure).
   ClassType *ErrorTy;
-  // Boxed primitive types (ClassType inheriting Obj, returned by
-  // IntStr/FloatStr).
+  // Boxed primitive types (ClassType inheriting Obj): the boxes of the
+  // optional primitives, so also what `int<Str>` / `float<Str>` return.
   ClassType *IntBoxTy;
   ClassType *FloatBoxTy;
   ClassType *BoolBoxTy;

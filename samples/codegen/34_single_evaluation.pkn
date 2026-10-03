@@ -37,20 +37,20 @@ fn make() -> Holder {
 }
 
 fn show(c: C) {
-  println("show " + StrInt(c.v));
+  println("show " + Str<int>(c.v));
 }
 
 fn main() -> int {
   arr: C[] = [C(1), C(2)];
   x: C = C(9);
   x = arr[idx()];
-  println(StrInt(x.v));
+  println(Str<int>(x.v));
   x = arrs()[1];
-  println(StrInt(x.v));
+  println(Str<int>(x.v));
   y: C = arr[idx()];
-  println(StrInt(y.v));
+  println(Str<int>(y.v));
   x = make().c;
-  println(StrInt(x.v));
+  println(Str<int>(x.v));
   show(arr[idx()]);
   return 0;
 }

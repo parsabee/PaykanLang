@@ -281,15 +281,15 @@ match open("/tmp/data.txt", "r") {
 }
 ```
 
-### Unboxing parsed primitives
+### Unwrapping parsed primitives
 
-`IntStr` / `FloatStr` return a boxed `Int` / `Float` on success or an `Error` on failure:
+`int<Str>(s)` / `float<Str>(s)` return an `int?` / `float?`: `None` when `s` is not a valid
+number. They are unwrapped in optional mode (below), and the arm binds a plain `int`:
 
 ```pkn
-match IntStr(s) {
-  n: Int     { return "ok: " + n.toString(); }
-  err: Error { return "err: " + err.toString(); }
-  _          { return "?"; }
+match int<Str>(s) {
+  n: int { return "ok: " + Str<int>(n); }
+  None   { return "not a number: " + s; }
 }
 ```
 
@@ -314,7 +314,7 @@ runtime subclass — and binds it as `T`; a `None` arm (or `_`) covers the absen
 
 ```pkn
 match find(head, key) {          // find returns Node?
-  n: Node { println(StrInt(n.v)); }
+  n: Node { println(Str<int>(n.v)); }
   None    { println("not found"); }
 }
 ```

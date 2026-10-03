@@ -51,12 +51,30 @@ inline constexpr const char *kTypeBool = "bool";
 inline constexpr const char *kTypeChar = "char";
 inline constexpr const char *kTypeVoid = "void";
 
-inline constexpr const char *kStrInt = "StrInt";
-inline constexpr const char *kStrFloat = "StrFloat";
-inline constexpr const char *kStrBool = "StrBool";
-inline constexpr const char *kStrChar = "StrChar";
-inline constexpr const char *kIntStr = "IntStr";
-inline constexpr const char *kFloatStr = "FloatStr";
+// Conversion constructors `Target<Source>(value)` (#64).  Sema rebinds a
+// conversion call's callee to its spelled form, which is what the lowering
+// dispatches on.
+inline constexpr const char *kConvStrInt = "Str<int>";
+inline constexpr const char *kConvStrFloat = "Str<float>";
+inline constexpr const char *kConvStrBool = "Str<bool>";
+inline constexpr const char *kConvStrChar = "Str<char>";
+inline constexpr const char *kConvIntStr = "int<Str>";
+inline constexpr const char *kConvFloatStr = "float<Str>";
+inline constexpr const char *kConvIntFloat = "int<float>";
+inline constexpr const char *kConvFloatInt = "float<int>";
+inline constexpr const char *kConvIntBool = "int<bool>";
+inline constexpr const char *kConvBoolInt = "bool<int>";
+inline constexpr const char *kConvIntChar = "int<char>";
+inline constexpr const char *kConvCharInt = "char<int>";
+
+// The conversion builtins that `Target<Source>(value)` replaced (#64); only
+// named by Sema's "was removed" diagnostic.
+inline constexpr const char *kRemovedStrInt = "StrInt";
+inline constexpr const char *kRemovedStrFloat = "StrFloat";
+inline constexpr const char *kRemovedStrBool = "StrBool";
+inline constexpr const char *kRemovedStrChar = "StrChar";
+inline constexpr const char *kRemovedIntStr = "IntStr";
+inline constexpr const char *kRemovedFloatStr = "FloatStr";
 
 // -- Runtime C symbol names -------------------------------------------------
 
@@ -159,6 +177,9 @@ inline constexpr const char *kPaykanErrPrintln = "Paykan_printerrln";
 inline constexpr const char *kPaykanPanicDivByZero = "Paykan_panic_div_by_zero";
 inline constexpr const char *kPaykanPanicDivOverflow =
     "Paykan_panic_div_overflow";
+inline constexpr const char *kPaykanPanicFloatToInt =
+    "Paykan_panic_float_to_int";
+inline constexpr const char *kPaykanPanicIntToChar = "Paykan_panic_int_to_char";
 
 // Reference counting
 inline constexpr const char *kPaykanSharedNew = "PaykanShared_new";
@@ -222,6 +243,8 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     // Panics
     kPaykanPanicDivByZero,
     kPaykanPanicDivOverflow,
+    kPaykanPanicFloatToInt,
+    kPaykanPanicIntToChar,
     // String
     kPaykanStringNew,
     kPaykanStringDestroy,

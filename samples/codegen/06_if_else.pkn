@@ -12,7 +12,7 @@ fn fizzbuzz(n: int) -> Str {
   if (n % 15 == 0) { return "FizzBuzz"; }
   if (n % 3  == 0) { return "Fizz"; }
   if (n % 5  == 0) { return "Buzz"; }
-  return StrInt(n);
+  return Str<int>(n);
 }
 
 fn main() -> int {
@@ -66,9 +66,9 @@ fn main() -> int {
   }
 
   println("=== early return from function ===");
-  println(StrInt(sign(10)));    //  1
-  println(StrInt(sign(0 - 3))); // -1
-  println(StrInt(sign(0)));     //  0
+  println(Str<int>(sign(10)));    //  1
+  println(Str<int>(sign(0 - 3))); // -1
+  println(Str<int>(sign(0)));     //  0
 
   println("=== str vars inside branches (scope cleanup) ===");
   flag: bool = True;

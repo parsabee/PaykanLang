@@ -16,7 +16,7 @@ TEST(Mov, PrimitiveForwardsValue) {
     fn main() -> int {
       a: int = 42;
       b = mov a;
-      println(StrInt(b));
+      println(Str<int>(b));
       return 0;
     }
   )");
@@ -59,7 +59,7 @@ TEST(Mov, MoveClassObject) {
     fn main() -> int {
       p: Point = Point(3, 4);
       q = mov p;
-      println(StrInt(q.sum()));
+      println(Str<int>(q.sum()));
       return 0;
     }
   )");
@@ -217,8 +217,8 @@ TEST(Mov, TernaryMoveClassObjectBothWays) {
       return r.sum();
     }
     fn main() -> int {
-      println(StrInt(pick(True)));
-      println(StrInt(pick(False)));
+      println(Str<int>(pick(True)));
+      println(Str<int>(pick(False)));
       return 0;
     }
   )");
@@ -236,7 +236,7 @@ TEST(Mov, TernaryMoveInCondition) {
     fn main() -> int {
       x: Str = "cond";
       n: int = if take(mov x) then 1 else 2;
-      println(StrInt(n));
+      println(Str<int>(n));
       return 0;
     }
   )");
@@ -257,8 +257,8 @@ TEST(Mov, TernaryMoveIntoCallInBranch) {
       return n;
     }
     fn main() -> int {
-      println(StrInt(run(True)));
-      println(StrInt(run(False)));
+      println(Str<int>(run(True)));
+      println(Str<int>(run(False)));
       return 0;
     }
   )");
@@ -280,8 +280,8 @@ TEST(Mov, AndMoveInRhsEvaluatedAndSkipped) {
       return ok;
     }
     fn main() -> int {
-      println(StrBool(run(True)));
-      println(StrBool(run(False)));
+      println(Str<bool>(run(True)));
+      println(Str<bool>(run(False)));
       return 0;
     }
   )");
@@ -301,8 +301,8 @@ TEST(Mov, OrMoveInRhsEvaluatedAndSkipped) {
       return ok;
     }
     fn main() -> int {
-      println(StrBool(run(False)));
-      println(StrBool(run(True)));
+      println(Str<bool>(run(False)));
+      println(Str<bool>(run(True)));
       return 0;
     }
   )");
@@ -320,7 +320,7 @@ TEST(Mov, AndMoveInLhsThenRhsRuns) {
       x: Str = "lhs";
       c: bool = True;
       ok: bool = take(mov x) && c;
-      println(StrBool(ok));
+      println(Str<bool>(ok));
       return 0;
     }
   )");

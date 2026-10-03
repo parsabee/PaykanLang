@@ -2,18 +2,18 @@
 //
 // char is an 8-bit primitive (i8 in LLVM). char literals use single quotes.
 // Escape sequences supported: \n \t \r \\ \'  \0
-// StrChar(c: char) -> Str converts a char to a one-character string.
+// Str<char>(c: char) -> Str converts a char to a one-character string.
 // Comparison operators ==, !=, <, >, <=, >= are supported.
 
 fn main() -> int {
-  // Basic literal and StrChar conversion
+  // Basic literal and Str<char> conversion
   c: char = 'A';
-  println(StrChar(c));                 // A
+  println(Str<char>(c));                 // A
 
   // Escape sequences
-  println("tab:" + StrChar('\t') + "end");
+  println("tab:" + Str<char>('\t') + "end");
   println("newline before:");
-  println(StrChar('\n') + "newline after");
+  println(Str<char>('\n') + "newline after");
 
   // Comparison
   lo: char = 'a';
@@ -25,7 +25,7 @@ fn main() -> int {
 
   // char in a variable used multiple times
   sep: char = '-';
-  println(StrChar(sep) + StrChar(sep) + StrChar(sep));  // ---
+  println(Str<char>(sep) + Str<char>(sep) + Str<char>(sep));  // ---
 
   return 0;
 }

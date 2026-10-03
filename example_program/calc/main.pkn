@@ -54,7 +54,7 @@ fn historySize() -> int { return 20; }
 
 // Format a result with trailing zeros trimmed.
 fn show(v: float) -> Str {
-  return utils::trimFloat(StrFloat(v));
+  return utils::trimFloat(Str<float>(v));
 }
 
 // Seed the environment with the constants and the `ans` register.
@@ -121,7 +121,7 @@ fn listHistory(history: Ring<(Str, float)>) {
   i: int = 0;
   while (i < history.len()) {
     src, value = history.at(i);
-    println("  " + StrInt(i + 1) + ": " + src + "  => " + show(value));
+    println("  " + Str<int>(i + 1) + ": " + src + "  => " + show(value));
     i = i + 1;
   }
 }
@@ -132,13 +132,13 @@ fn splitCommand(s: Str) -> (Str, Str) {
   word: Str = "";
   i: int = 1;
   while (i < s.len() && s[i] != ' ') {
-    word = word + StrChar(s[i]);
+    word = word + Str<char>(s[i]);
     i = i + 1;
   }
   while (i < s.len() && s[i] == ' ') { i = i + 1; }
   arg: Str = "";
   while (i < s.len()) {
-    arg = arg + StrChar(s[i]);
+    arg = arg + Str<char>(s[i]);
     i = i + 1;
   }
   return (word, arg);

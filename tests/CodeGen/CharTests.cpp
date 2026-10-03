@@ -12,13 +12,13 @@ static std::string wrapMain(const std::string &body) {
 }
 
 // ============================================================================
-// Basic char literals and StrChar conversion
+// Basic char literals and Str<char> conversion
 // ============================================================================
 
 TEST(Char, LiteralAndStrChar) {
   auto r = compileAndRun(wrapMain(R"(
     c: char = 'A';
-    println(StrChar(c));
+    println(Str<char>(c));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "A\n");
@@ -27,7 +27,7 @@ TEST(Char, LiteralAndStrChar) {
 TEST(Char, EscapeNewline) {
   auto r = compileAndRun(wrapMain(R"(
     c: char = '\n';
-    print(StrChar(c));
+    print(Str<char>(c));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "\n");
@@ -36,7 +36,7 @@ TEST(Char, EscapeNewline) {
 TEST(Char, EscapeTab) {
   auto r = compileAndRun(wrapMain(R"(
     c: char = '\t';
-    print("a" + StrChar(c) + "b");
+    print("a" + Str<char>(c) + "b");
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "a\tb");
@@ -45,7 +45,7 @@ TEST(Char, EscapeTab) {
 TEST(Char, EscapeBackslash) {
   auto r = compileAndRun(wrapMain(R"(
     c: char = '\\';
-    println(StrChar(c));
+    println(Str<char>(c));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "\\\n");
@@ -91,7 +91,7 @@ TEST(Char, StringIndexYieldsChar) {
   auto r = compileAndRun(wrapMain(R"(
     s: Str = "hello";
     c: char = s[0];
-    println(StrChar(c));
+    println(Str<char>(c));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "h\n");
@@ -100,7 +100,7 @@ TEST(Char, StringIndexYieldsChar) {
 TEST(Char, StringIndexLastChar) {
   auto r = compileAndRun(wrapMain(R"(
     s: Str = "paykan";
-    println(StrChar(s[5]));
+    println(Str<char>(s[5]));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "n\n");
@@ -120,7 +120,7 @@ TEST(Char, IterateStringViaIndex) {
     s: Str = "hi";
     i: int = 0;
     while (i < s.len()) {
-      print(StrChar(s[i]));
+      print(Str<char>(s[i]));
       i = i + 1;
     }
     println("");
@@ -130,13 +130,13 @@ TEST(Char, IterateStringViaIndex) {
 }
 
 // ============================================================================
-// StrChar usage in string concatenation
+// Str<char> usage in string concatenation
 // ============================================================================
 
 TEST(Char, ConcatChars) {
   auto r = compileAndRun(wrapMain(R"(
     sep: char = '-';
-    println(StrChar(sep) + StrChar(sep) + StrChar(sep));
+    println(Str<char>(sep) + Str<char>(sep) + Str<char>(sep));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "---\n");

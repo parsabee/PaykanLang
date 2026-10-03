@@ -1,29 +1,30 @@
-// Sample 20 — Boxed primitives: IntStr and FloatStr
+// Sample 20 — Parsing with int<Str> / float<Str>, and the boxed primitives
 //
-// IntStr(s: Str) -> Obj  parses a decimal integer string.
-// FloatStr(s: Str) -> Obj  parses a floating-point string.
-// Both return an Int / Float box on success, or an Error on failure.
-// Use match to distinguish the two cases.
+// int<Str>(s: Str) -> int?    parses a decimal integer string.
+// float<Str>(s: Str) -> float?  parses a floating-point string.
+// Both return None for a string that is not a valid number.  Use match to
+// unwrap the result (the arm binds a plain int / float).
+//
+// A present int? / float? is a boxed Int / Float object; handed to an Obj it
+// can be matched as one, and the boxes print and compare by value.
 
 fn tryParseInt(s: Str) -> Str {
-  match IntStr(s) {
-    n: Int     { return "ok: " + n.toString(); }
-    err: Error { return "err: " + err.toString(); }
-    _          { return "?"; }
+  match int<Str>(s) {
+    n: int { return "ok: " + Str<int>(n); }
+    None   { return "invalid: '" + s + "'"; }
   }
 }
 
 fn tryParseFloat(s: Str) -> Str {
-  match FloatStr(s) {
-    f: Float   { return "ok: " + f.toString(); }
-    err: Error { return "err: " + err.toString(); }
-    _          { return "?"; }
+  match float<Str>(s) {
+    f: float { return "ok: " + Str<float>(f); }
+    None     { return "invalid: '" + s + "'"; }
   }
 }
 
 fn main() -> int {
-  // === IntStr ===
-  println("=== IntStr ===");
+  // === int<Str> ===
+  println("=== int<Str> ===");
 
   // valid integers
   println(tryParseInt("0"));
@@ -36,9 +37,10 @@ fn main() -> int {
   println(tryParseInt("12abc"));
   println(tryParseInt(""));
   println(tryParseInt("3.14"));
+  println(tryParseInt("9223372036854775808"));   // INT64_MAX + 1
 
-  // === FloatStr ===
-  println("=== FloatStr ===");
+  // === float<Str> ===
+  println("=== float<Str> ===");
 
   // valid floats
   println(tryParseFloat("0"));
@@ -52,42 +54,40 @@ fn main() -> int {
   println(tryParseFloat("1.2.3"));
   println(tryParseFloat(""));
 
-  // === match in expressions ===
-  println("=== match in expressions ===");
+  // === counting valid inputs ===
+  println("=== counting valid inputs ===");
 
   i: int = 0;
   total = 0;
   inputs: Str[] = ["10", "20", "bad", "30", "nope", "40"];
   while (i < inputs.len()) {
-    match IntStr(inputs[i]) {
-      n: Int { total = total + 1; }
-      _      {}
-    }
+    if (int<Str>(inputs[i]) != None) { total = total + 1; }
     i = i + 1;
   }
-  println("valid ints in list: " + StrInt(total));
+  println("valid ints in list: " + Str<int>(total));
 
-  // === toString and equals on boxed values ===
+  // === the boxes: toString / equals ===
   println("=== toString / equals ===");
 
-  match IntStr("7") {
-    a: Int {
-      match IntStr("7") {
-        b: Int { println(StrBool(a.equals(b))); }
-        _ {}
-      }
-      match IntStr("8") {
-        c: Int { println(StrBool(a.equals(c))); }
-        _ {}
-      }
+  a: Obj = int<Str>("7");
+  b: Obj = int<Str>("7");
+  c: Obj = int<Str>("8");
+  match a {
+    x: Int {
+      println(x.toString());
+      println(Str<bool>(x.equals(b)));
+      println(Str<bool>(x.equals(c)));
     }
     _ {}
   }
+  println(Str<bool>(int<Str>("7") == int<Str>("7")));
 
-  match FloatStr("1.5") {
-    f: Float { println(f.toString()); }
+  f: Obj = float<Str>("1.5");
+  match f {
+    y: Float { println(y.toString()); }
     _ {}
   }
+  println(int<Str>("nope"));
 
   return 0;
 }

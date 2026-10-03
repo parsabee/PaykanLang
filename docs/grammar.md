@@ -247,7 +247,8 @@ postfixOp ::= "." IDENT "(" argumentList? ")"      -- method call
 primary ::= literal
           | IDENT
           | IDENT "(" argumentList? ")"                      -- call / constructor
-          | IDENT "<" typeArgList ">" "(" argumentList? ")"  -- generic call
+          | IDENT "<" typeArgList ">" "(" argumentList? ")"  -- generic call /
+                                                             -- conversion
           | modulePath "::" IDENT                            -- enum variant
           | modulePath "::" IDENT "(" argumentList? ")"      -- qualified call
           | modulePath "::" IDENT "<" typeArgList ">" "(" argumentList? ")"
@@ -285,6 +286,17 @@ matching `>`; if `(` follows, it opens type arguments). The two agree on
 every input except `f(a < b, c) > (d)`, which the scanner mis-scans and
 the Bison frontend rejects while the recursive-descent frontend accepts it as a
 comparison. Writing `(f(a < b, c)) > (d)` works in both.
+
+### Conversion constructors
+
+A conversion `Target<Source>(value)` (`Str<int>(n)`, `int<float>(f)`,
+`int<Str>(s)`, ..., see `language_reference/01-language-basics.md`) is not
+a separate production: it is the generic-call form above. The builtin type
+names `int`, `float`, `bool`, `char` and `void` are ordinary `IDENT`s (they
+are resolved as type names, not reserved by the scanner), so `int<Str>(s)`
+parses exactly like `Box<int>(1)`. Both frontends build a `CallExpr` whose
+callee is the target name, with one type argument and one argument. Sema
+tells a conversion apart from a generic constructor by its callee.
 
 ## 8. AST and source locations
 

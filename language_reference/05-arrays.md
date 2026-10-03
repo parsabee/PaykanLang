@@ -59,7 +59,7 @@ Use the `.len()` method to get the number of elements:
 
 ```pkn
 a: int[] = [1, 2, 3, 4];
-println(StrInt(a.len()));   // 4
+println(Str<int>(a.len()));   // 4
 ```
 
 ---
@@ -68,10 +68,10 @@ println(StrInt(a.len()));   // 4
 
 ```pkn
 a: int[] = [10, 20, 30];
-println(StrInt(a[1]));   // 20
+println(Str<int>(a[1]));   // 20
 
 a[1] = 99;
-println(StrInt(a[1]));   // 99
+println(Str<int>(a[1]));   // 99
 ```
 
 Indices are zero-based. Every access is **bounds-checked at runtime**: an out-of-bounds
@@ -93,7 +93,7 @@ stack.push(1);
 stack.push(2);
 stack.push(3);
 top: int = stack.pop();          // top = 3
-println(StrInt(stack.len()));    // 2
+println(Str<int>(stack.len()));    // 2
 ```
 
 ---
@@ -105,7 +105,7 @@ a: int[] = [1, 2, 3];
 println(a.toString());           // Array@0x…[len=3]
 
 b: int[] = [1, 2, 3];
-println(StrBool(a.equals(b)));   // False  (reference identity, not deep equality)
+println(Str<bool>(a.equals(b)));   // False  (reference identity, not deep equality)
 ```
 
 `toString` currently prints an address-and-length form, `Array@<address>[len=N]` — rendering
@@ -126,7 +126,7 @@ Use `while` with an index variable:
 nums: int[] = [10, 20, 30, 40];
 i: int = 0;
 while (i < nums.len()) {
-  println(StrInt(nums[i]));
+  println(Str<int>(nums[i]));
   i = i + 1;
 }
 ```
@@ -142,7 +142,7 @@ matrix: int[][] = [[1, 2, 3],
                    [4, 5, 6],
                    [7, 8, 9]];
 
-println(StrInt(matrix[1][2]));   // 6
+println(Str<int>(matrix[1][2]));   // 6
 ```
 
 ### Building a 2-D Array Dynamically
@@ -174,7 +174,7 @@ class Point {
   x: int;
   y: int;
   fn __init__(x: int, y: int) { self.x = x; self.y = y; }
-  fn toString() -> Str { return "(" + StrInt(self.x) + "," + StrInt(self.y) + ")"; }
+  fn toString() -> Str { return "(" + Str<int>(self.x) + "," + Str<int>(self.y) + ")"; }
 }
 
 pts: Point[] = [Point(0,0), Point(1,2), Point(-3,4)];

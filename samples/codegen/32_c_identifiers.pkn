@@ -172,38 +172,38 @@ fn main() -> int {
   errno: int = 3;
   stdout: int = 4;
   EOF: int = 5;
-  println(StrInt(errno + stdout + EOF));
+  println(Str<int>(errno + stdout + EOF));
 
   // A local hiding a libc function used by float `%`.
   x: float = 7.5;
   fmod_: float = 2.0;
   y: float = x % fmod_;
-  println(StrFloat(y));
-  println(StrFloat(fmod(x, fmod_)));
-  println(StrInt(malloc(1)));
+  println(Str<float>(y));
+  println(Str<float>(fmod(x, fmod_)));
+  println(Str<int>(malloc(1)));
 
   // A C type name as a variable.
   int64_t: int = 3;
   b: int = int64_t + 1;
-  println(StrInt(b));
+  println(Str<int>(b));
 
-  println(StrInt(suffixes()));
-  println(StrInt(manyValues()));
-  println(StrInt(params(1, 2, 3, 4)));
+  println(Str<int>(suffixes()));
+  println(Str<int>(manyValues()));
+  println(Str<int>(params(1, 2, 3, 4)));
 
   // Shadowing in a nested scope.
   n: int = 1;
   if (n == 1) {
     n: int = 5;
-    println(StrInt(n));
+    println(Str<int>(n));
   }
-  println(StrInt(n));
+  println(Str<int>(n));
 
   bx: Box<int> = Box<int>(5);
   plain: Box_3Cint_3E = Box_3Cint_3E();
-  println(StrInt(bx.get()) + plain.get() + StrInt(f_5F(1)) + StrInt(f_(1)));
+  println(Str<int>(bx.get()) + plain.get() + Str<int>(f_5F(1)) + Str<int>(f_(1)));
 
   p: P = P(3);
-  println(StrInt(p.EOF()) + p.stdout + StrInt(P_vtable()));
+  println(Str<int>(p.EOF()) + p.stdout + Str<int>(P_vtable()));
   return 0;
 }

@@ -48,20 +48,20 @@ TEST(Leak, StringConcat) {
 }
 
 // ============================================================================
-// StrInt conversion (samples/leak-check/03)
+// Str<int> conversion (samples/leak-check/03)
 // ============================================================================
 
-TEST(Leak, StrInt) {
+TEST(Leak, StrOfInt) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     fn main() -> int {
       n: int = 42;
-      s: Str = StrInt(n);
+      s: Str = Str<int>(n);
       return 0;
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  g.expectNoLeaks("StrInt");
+  g.expectNoLeaks("StrOfInt");
 }
 
 // ============================================================================
@@ -327,7 +327,7 @@ TEST(Leak, MethodCallOnCallResultReceiver) {
     fn make() -> Str { return "xyz"; }
     fn main() -> int {
       n: int = make().len();
-      println(StrInt(n));
+      println(Str<int>(n));
       return 0;
     }
   )");
@@ -340,7 +340,7 @@ TEST(Leak, MethodCallOnConcatReceiver) {
   auto r = compileAndRun(R"(
     fn main() -> int {
       n: int = ("a" + "b").len();
-      println(StrInt(n));
+      println(Str<int>(n));
       return 0;
     }
   )");
@@ -354,7 +354,7 @@ TEST(Leak, MethodCallOnMovedReceiver) {
     fn main() -> int {
       s: Str = "receiver";
       n: int = (mov s).len();
-      println(StrInt(n));
+      println(Str<int>(n));
       return 0;
     }
   )");
@@ -367,7 +367,7 @@ TEST(Leak, MethodCallOnStringLiteralReceiver) {
   auto r = compileAndRun(R"(
     fn main() -> int {
       n: int = "abc".len();
-      println(StrInt(n));
+      println(Str<int>(n));
       return 0;
     }
   )");
@@ -444,7 +444,7 @@ TEST(Leak, CallRootedMemberChainAsReceiver) {
     fn makeH() -> H { return H(); }
     fn main() -> int {
       n: int = makeH().a.len();
-      println(StrInt(n));
+      println(Str<int>(n));
       return 0;
     }
   )");
@@ -552,8 +552,8 @@ TEST(Leak, CallRootedSubscriptReceiver) {
     fn main() -> int {
       x: int = makeArr()[0];
       c: char = makeStr()[1];
-      println(StrInt(x));
-      println(StrChar(c));
+      println(Str<int>(x));
+      println(Str<char>(c));
       return 0;
     }
   )");
@@ -585,13 +585,13 @@ TEST(Leak, TernaryArrayBranches) {
       return zs[0];
     }
     fn main() -> int {
-      println(StrInt(pick(True)));    // a: 3 + 1 pushed
-      println(StrInt(pick(False)));   // b: 2 + 1 pushed
+      println(Str<int>(pick(True)));    // a: 3 + 1 pushed
+      println(Str<int>(pick(False)));   // b: 2 + 1 pushed
       println(names(True));           // t[0]
       println(names(False));          // s[0]
       lit: int[] = if False then [1] else [2, 3];
-      println(StrInt(lit.len()));
-      println(StrInt((if True then lit else [7]).len()));
+      println(Str<int>(lit.len()));
+      println(Str<int>((if True then lit else [7]).len()));
       return 0;
     }
   )");
@@ -635,8 +635,8 @@ TEST(Leak, EmptyArrayLiteralSinks) {
       b.items = [];                          // field store from outside
       b.items.push("outside");
       println(b.items[0]);
-      println(StrInt(fill([])));             // free-function argument
-      println(StrInt(b.take([])));           // method argument
+      println(Str<int>(fill([])));             // free-function argument
+      println(Str<int>(b.take([])));           // method argument
       f: Str[] = fresh();                    // returned literal
       f.push("ret");
       println(f[0]);
@@ -674,13 +674,13 @@ TEST(Leak, RefTypedArgsToUserMethods) {
     fn main() -> int {
       b: Bag = Bag();
       v: int[] = [3, 4];
-      println(StrInt(b.sum(v)));                         // local argument
-      println(StrInt(v.len()));                          // local still alive
-      println(StrInt(b.sum([5, 6])));                    // literal argument
-      println(StrInt(b.sum(mk())));                      // call-result argument
-      println(StrInt(b.own()));
-      println(StrInt(b.names([])));                      // empty literal
-      println(StrInt(b.names(["a", "b"])));
+      println(Str<int>(b.sum(v)));                         // local argument
+      println(Str<int>(v.len()));                          // local still alive
+      println(Str<int>(b.sum([5, 6])));                    // literal argument
+      println(Str<int>(b.sum(mk())));                      // call-result argument
+      println(Str<int>(b.own()));
+      println(Str<int>(b.names([])));                      // empty literal
+      println(Str<int>(b.names(["a", "b"])));
       println(b.first((1, "t")));                        // tuple literal
       t: (int, Str) = (2, "u");
       println(b.first(t));                               // tuple local

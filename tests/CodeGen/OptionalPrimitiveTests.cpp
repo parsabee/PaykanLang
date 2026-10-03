@@ -23,16 +23,16 @@ TEST(OptionalPrimitive, EveryPrimitiveSomeAndNone) {
   LeakGuard g;
   auto r = compileAndRun(R"pkn(
     fn si(o: int?) -> Str {
-      match o { n: int { return "int " + StrInt(n); } None { return "no int"; } }
+      match o { n: int { return "int " + Str<int>(n); } None { return "no int"; } }
     }
     fn sf(o: float?) -> Str {
-      match o { f: float { return "float " + StrFloat(f); } None { return "no float"; } }
+      match o { f: float { return "float " + Str<float>(f); } None { return "no float"; } }
     }
     fn sb(o: bool?) -> Str {
-      match o { b: bool { return "bool " + StrBool(b); } None { return "no bool"; } }
+      match o { b: bool { return "bool " + Str<bool>(b); } None { return "no bool"; } }
     }
     fn sc(o: char?) -> Str {
-      match o { c: char { return "char " + StrChar(c); } None { return "no char"; } }
+      match o { c: char { return "char " + Str<char>(c); } None { return "no char"; } }
     }
     fn main() -> int {
       println(si(42));   println(si(None));
@@ -57,7 +57,7 @@ TEST(OptionalPrimitive, IntPromotesIntoFloatOptional) {
   LeakGuard g;
   auto r = compileAndRun(R"pkn(
     fn show(o: float?) -> Str {
-      match o { f: float { return StrFloat(f / 2.0); } None { return "-"; } }
+      match o { f: float { return Str<float>(f / 2.0); } None { return "-"; } }
     }
     fn main() -> int {
       f: float? = 3;
@@ -82,16 +82,16 @@ TEST(OptionalPrimitive, ExtremeValuesRoundTrip) {
     fn main() -> int {
       big: int = 9223372036854775807;
       small: int = -9223372036854775807 - 1;
-      println(StrInt(back(big)));
-      println(StrInt(back(small)));
-      println(StrBool(back(small) == small));
+      println(Str<int>(back(big)));
+      println(Str<int>(back(small)));
+      println(Str<bool>(back(small) == small));
       nan: float = 0.0 / 0.0;
       inf: float = 1.0 / 0.0;
-      println(StrFloat(backf(nan)));
-      println(StrFloat(backf(inf)));
-      println(StrFloat(backf(-inf)));
-      println(StrFloat(backf(-0.0)));
-      println(StrInt(StrChar(backc('~')).len()));
+      println(Str<float>(backf(nan)));
+      println(Str<float>(backf(inf)));
+      println(Str<float>(backf(-inf)));
+      println(Str<float>(backf(-0.0)));
+      println(Str<int>(Str<char>(backc('~')).len()));
       return 0;
     }
   )pkn");
@@ -110,7 +110,7 @@ TEST(OptionalPrimitive, MatchBindingIsAPlainValue) {
         n: int {
           n = n + 5;                 // the binding is an ordinary int
           o = None;                  // the subject box stays alive for the arm
-          println(StrInt(n));
+          println(Str<int>(n));
         }
         None { println("none"); }
       }
@@ -126,7 +126,7 @@ TEST(OptionalPrimitive, MatchBindingIsAPlainValue) {
         }
         i = i + 1;
       }
-      println(StrInt(total));
+      println(Str<int>(total));
       return 0;
     }
   )pkn");
@@ -146,9 +146,9 @@ TEST(OptionalPrimitive, WildcardAndNoneArmsAndEarlyReturn) {
       return 0;
     }
     fn main() -> int {
-      println(StrInt(sign(-4)));
-      println(StrInt(sign(4)));
-      println(StrInt(sign(None)));
+      println(Str<int>(sign(-4)));
+      println(Str<int>(sign(4)));
+      println(Str<int>(sign(None)));
       return 0;
     }
   )pkn");
@@ -166,22 +166,22 @@ TEST(OptionalPrimitive, CompareAgainstNoneAndEachOther) {
   auto r = compileAndRun(R"pkn(
     fn main() -> int {
       a: int? = 5;  b: int? = 5;  c: int? = 6;  n: int? = None;  m: int? = None;
-      println(StrBool(a == None));
-      println(StrBool(None != a));
-      println(StrBool(n == None));
-      println(StrBool(a == b));
-      println(StrBool(a != c));
-      println(StrBool(a == n));
-      println(StrBool(n == m));
+      println(Str<bool>(a == None));
+      println(Str<bool>(None != a));
+      println(Str<bool>(n == None));
+      println(Str<bool>(a == b));
+      println(Str<bool>(a != c));
+      println(Str<bool>(a == n));
+      println(Str<bool>(n == m));
       t: bool? = True;  u: bool? = True;
-      println(StrBool(t == u));
+      println(Str<bool>(t == u));
       x: char? = 'a';  y: char? = 'b';
-      println(StrBool(x == y));
+      println(Str<bool>(x == y));
       z: float? = -0.0;  w: float? = 0.0;
-      println(StrBool(z == w));
+      println(Str<bool>(z == w));
       nan: float = 0.0 / 0.0;
       p: float? = nan;  q: float? = nan;
-      println(StrBool(p == q));
+      println(Str<bool>(p == q));
       return 0;
     }
   )pkn");
@@ -207,12 +207,12 @@ TEST(OptionalPrimitive, ParamsAndReturns) {
     fn main() -> int {
       println(half(10));
       println(half(7));
-      println(StrInt(orZero(pass(half(8)))));
-      println(StrInt(orZero(pass(None))));
+      println(Str<int>(orZero(pass(half(8)))));
+      println(Str<int>(orZero(pass(None))));
       i = 0;
       sum = 0;
       while (i < 20) { sum = sum + orZero(half(i)); i = i + 1; }
-      println(StrInt(sum));
+      println(Str<int>(sum));
       return 0;
     }
   )pkn");
@@ -300,7 +300,7 @@ TEST(OptionalPrimitive, TupleElements) {
       println(a.0); println(a.1);
       println(b.0); println(b.1);
       idx, msg = find(xs, 4);
-      match idx { n: int { println(StrInt(n) + " " + msg); } None { } }
+      match idx { n: int { println(Str<int>(n) + " " + msg); } None { } }
       return 0;
     }
   )pkn");
@@ -395,9 +395,9 @@ TEST(OptionalPrimitive, GenericArgumentsAndOptionalOfTypeParameter) {
       println(s.take());
       println(s.take());
       println(wrap(5));
-      println(StrInt(orElse(wrap(6), 0)));
+      println(Str<int>(orElse(wrap(6), 0)));
       none: char? = None;
-      println(StrChar(orElse(none, '?')));
+      println(Str<char>(orElse(none, '?')));
       return 0;
     }
   )pkn");

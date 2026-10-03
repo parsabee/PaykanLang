@@ -61,7 +61,7 @@ fn main() -> int {
   println("=== mov as a (parenthesised) method receiver ===");
   recv: Str = "receiver";
   len: int = (mov recv).len();
-  println(StrInt(len));                  // 8
+  println(Str<int>(len));                  // 8
 
   println("=== mov directly into println ===");
   d: Str = "direct";

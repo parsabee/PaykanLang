@@ -18,7 +18,7 @@ static std::string wrapMain(const std::string &body) {
 TEST(Arith, IntArithmetic) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = 2 + 3 * 4;
-    println(StrInt(x));
+    println(Str<int>(x));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "14\n");
@@ -27,7 +27,7 @@ TEST(Arith, IntArithmetic) {
 TEST(Arith, FloatArithmetic) {
   auto r = compileAndRun(wrapMain(R"(
     x: float = 1.5 + 2.5;
-    println(StrFloat(x));
+    println(Str<float>(x));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "4\n");
@@ -37,7 +37,7 @@ TEST(Arith, BoolLiterals) {
   auto r = compileAndRun(wrapMain(R"(
     a: bool = True;
     b: bool = False;
-    println(StrBool(a) + StrBool(b));
+    println(Str<bool>(a) + Str<bool>(b));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "TrueFalse\n");
@@ -66,7 +66,7 @@ TEST(Arith, StringConcat) {
 
 TEST(Arith, StringBuiltins) {
   auto r = compileAndRun(wrapMain(R"(
-    println(StrInt(42) + StrFloat(3.14) + StrBool(True));
+    println(Str<int>(42) + Str<float>(3.14) + Str<bool>(True));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "423.14True\n");

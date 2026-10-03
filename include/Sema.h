@@ -180,7 +180,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     ast::Type *ReturnType = nullptr;
     std::vector<ast::Type *> ParamTypes;
     /// True for entries not defined by this module: the compiler builtins
-    /// registered in run() (print, StrInt, open, ...) and the qualified
+    /// registered in run() (print, Str<int>, open, ...) and the qualified
     /// `mod::fn` entries injected by imports.  Such entries are never
     /// re-exported, and a user declaration may never replace one.  Because a
     /// user-declared name never contains the module qualifier, a builtin entry
@@ -598,6 +598,24 @@ private:
   /// reporting an error.
   bool resolveGenericCall(ast::CallExpr *node,
                           const std::vector<ast::Type *> &argTypes);
+
+  /// True when @p name is a conversion target (`Str`, `int`, `float`,
+  /// `bool`, `char`), i.e. `name<Source>(value)` is a conversion, or the
+  /// spelled form (`int<float>`) checkConversion rebinds such a call to.
+  static bool isConversionTarget(std::string_view name);
+
+  /// Check a conversion constructor `Target<Source>(value)` (#64): the pair
+  /// must be one of the supported conversions and the argument must have
+  /// exactly the Source type.  Rebinds the callee to the spelled conversion
+  /// (`names::kConvIntFloat`, ...) for the lowering and returns the result
+  /// type, or nullptr after reporting an error.
+  ast::Type *checkConversion(ast::CallExpr *node,
+                             const std::vector<ast::Type *> &argTypes);
+
+  /// If @p name is one of the removed conversion builtins (`StrInt`, ...),
+  /// report that and what replaces it at @p loc and return true.
+  bool diagnoseRemovedConversion(const std::string &name,
+                                 ast::SourceLocation loc);
 
   /// Check the bodies of every pending instantiation (transitively).
   bool checkPendingInstantiations();

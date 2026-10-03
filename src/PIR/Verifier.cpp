@@ -395,6 +395,12 @@ private:
         expect(in.Args[0], Type::I64, "operand of itof");
         result(in, Type::F64);
         break;
+      case Opcode::FToI:
+        if (!arity(in, 1))
+          break;
+        expect(in.Args[0], Type::F64, "operand of ftoi");
+        result(in, Type::I64);
+        break;
       case Opcode::Cast: {
         if (!arity(in, 1))
           break;

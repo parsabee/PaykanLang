@@ -123,7 +123,7 @@ TEST(Arith, EqualityTypeMismatch) {
 TEST(Arith, OutAcceptsMultipleArgs) {
   auto r = semaCheck(wrapMain(R"(
     a: Str = "hello";
-    println(a + StrInt(42));
+    println(a + Str<int>(42));
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }

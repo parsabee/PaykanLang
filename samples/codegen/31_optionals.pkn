@@ -46,7 +46,7 @@ fn render(head: Node?) -> Str {
     match cur {
       n: Node {
         if (!first) { out = out + ", "; }
-        out = out + StrInt(n.v);
+        out = out + Str<int>(n.v);
         first = False;
         cur = n.next;
       }
@@ -58,7 +58,7 @@ fn render(head: Node?) -> Str {
 
 fn describe(found: Node?) -> Str {
   match found {
-    n: Node { return "found " + StrInt(n.v); }
+    n: Node { return "found " + Str<int>(n.v); }
     None    { return "not found"; }
   }
 }
@@ -79,9 +79,9 @@ fn main() -> int {
   println(describe(find(None, 1)));          // not found
 
   println("=== None checks ===");
-  println(StrBool(head == None));            // False
-  println(StrBool(find(head, 9) == None));   // True
-  println(StrBool(find(head, 3) != None));   // True
+  println(Str<bool>(head == None));            // False
+  println(Str<bool>(find(head, 9) == None));   // True
+  println(Str<bool>(find(head, 3) != None));   // True
 
   println("=== printing an optional ===");
   maybe: Node? = None;
@@ -101,12 +101,12 @@ fn main() -> int {
   println("=== optional array ===");
   nums: int[]? = None;
   match nums {
-    a: int[] { println(StrInt(a.len())); }
+    a: int[] { println(Str<int>(a.len())); }
     None     { println("no numbers"); }      // no numbers
   }
   nums = [10, 20];
   match nums {
-    a: int[] { a.push(30); println(StrInt(a.len())); }   // 3
+    a: int[] { a.push(30); println(Str<int>(a.len())); }   // 3
     None     { println("no numbers"); }
   }
 
@@ -114,8 +114,8 @@ fn main() -> int {
   a: Str? = "same";
   b: Str? = "same";
   c: Str? = None;
-  println(StrBool(a == b));                  // True  (content equality)
-  println(StrBool(a == c));                  // False (one is None)
-  println(StrBool(c == None));               // True
+  println(Str<bool>(a == b));                  // True  (content equality)
+  println(Str<bool>(a == c));                  // False (one is None)
+  println(Str<bool>(c == None));               // True
   return 0;
 }

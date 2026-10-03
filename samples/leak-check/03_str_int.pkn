@@ -1,10 +1,10 @@
-// Isolates: StrInt int->Str conversion.
+// Isolates: Str<int> int->Str conversion.
 // Runtime allocation site: PaykanString_new (String.c), reached via the
-// StrInt builtin in IO.c — allocates the freshly-formatted Str.
+// Str<int> builtin in IO.c — allocates the freshly-formatted Str.
 //
 // Expected under --track-heap: live blocks : 0.
 
 fn main() -> int {
-  s: Str = StrInt(42);
+  s: Str = Str<int>(42);
   return 0;
 }

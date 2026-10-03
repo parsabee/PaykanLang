@@ -38,7 +38,7 @@ fn main() -> int {
   x = makeH().a;         // chain used as a value
   println(x);
   n: int = makeH().a.len(); // chain used as a receiver
-  println(StrInt(n));
+  println(Str<int>(n));
   y = makeO().h.a;       // nested chain
   println(y);
   h: H = H();

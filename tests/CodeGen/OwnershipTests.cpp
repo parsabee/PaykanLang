@@ -42,7 +42,7 @@ TEST(Ownership, ReturnSelf) {
     fn main() -> int {
       b: B = B();
       c: B = b.me();
-      println(StrInt(c.x));
+      println(Str<int>(c.x));
       return 0;
     }
   )");
@@ -64,7 +64,7 @@ TEST(Ownership, ReturnSelfChained) {
     fn main() -> int {
       b: B = B();
       c: B = b.bump().bump().bump();
-      println(StrInt(c.x));
+      println(Str<int>(c.x));
       return 0;
     }
   )");
@@ -83,7 +83,7 @@ TEST(Ownership, PassSelfAsArgument) {
       fn __init__() { self.x = 1; }
       fn send() { probe(self); }
     }
-    fn probe(b: B) { println(StrInt(b.x)); }
+    fn probe(b: B) { println(Str<int>(b.x)); }
     fn main() -> int {
       b: B = B();
       b.send();
@@ -111,8 +111,8 @@ TEST(Ownership, AssignSelfToLocal) {
     fn main() -> int {
       a: A = A();
       n: int = a.grab();
-      println(StrInt(n));
-      println(StrInt(a.x));
+      println(Str<int>(n));
+      println(Str<int>(a.x));
       return 0;
     }
   )");
@@ -135,7 +135,7 @@ TEST(Ownership, MatchBindingPassedOwnedSubject) {
       x: int;
       fn __init__() { self.x = 5; }
     }
-    fn probe(a: A) { println(StrInt(a.x)); }
+    fn probe(a: A) { println(Str<int>(a.x)); }
     fn main() -> int {
       o: Obj = A();
       match o {
@@ -165,7 +165,7 @@ TEST(Ownership, MatchBindingVarDecls) {
         b: A {
           c: A = b;
           d = b;
-          println(StrInt(c.x + d.x));
+          println(Str<int>(c.x + d.x));
         }
         _ { println("no"); }
       }
@@ -192,7 +192,7 @@ TEST(Ownership, MatchBindingCallSubjectImplicitDecl) {
       match make() {
         b: A {
           c = b;
-          println(StrInt(c.x));
+          println(Str<int>(c.x));
         }
         _ { println("no"); }
       }
@@ -225,7 +225,7 @@ TEST(Ownership, MatchBindingMemberAssign) {
         b: A { h.a = b; }
         _ { println("no"); }
       }
-      println(StrInt(h.a.x));
+      println(Str<int>(h.a.x));
       return 0;
     }
   )");
@@ -249,7 +249,7 @@ TEST(Ownership, MatchBindingMov) {
       match o {
         b: A {
           c = mov b;
-          println(StrInt(c.x));
+          println(Str<int>(c.x));
         }
         _ { println("no"); }
       }
@@ -276,7 +276,7 @@ TEST(Ownership, MatchBindingBackedControl) {
       match make() {
         b: A {
           c: A = b;
-          println(StrInt(c.x));
+          println(Str<int>(c.x));
         }
         _ { println("no"); }
       }
@@ -304,8 +304,8 @@ TEST(Ownership, ArrayFieldStoreAndRead) {
     }
     fn main() -> int {
       h: H = H([1, 2, 3]);
-      println(StrInt(h.arr[0]));
-      println(StrInt(h.arr.len()));
+      println(Str<int>(h.arr[0]));
+      println(Str<int>(h.arr.len()));
       return 0;
     }
   )");
@@ -326,7 +326,7 @@ TEST(Ownership, ArrayFieldReassign) {
     fn main() -> int {
       h: H = H([1, 2, 3]);
       h.arr = [7, 8];
-      println(StrInt(h.arr[0] + h.arr.len()));
+      println(Str<int>(h.arr[0] + h.arr.len()));
       return 0;
     }
   )");
@@ -363,7 +363,7 @@ TEST(Ownership, PopOnCallResult) {
     fn makeArr() -> int[] { return [1, 2]; }
     fn main() -> int {
       n: int = makeArr().pop();
-      println(StrInt(n));
+      println(Str<int>(n));
       return 0;
     }
   )");
@@ -381,7 +381,7 @@ TEST(Ownership, PushOnNestedSubscript) {
     fn main() -> int {
       m: int[][] = [[1, 2], [3, 4]];
       m[0].push(9);
-      println(StrInt(m[0].len()));
+      println(Str<int>(m[0].len()));
       return 0;
     }
   )");
@@ -398,7 +398,7 @@ TEST(Ownership, LenOnCallResult) {
   auto r = compileAndRun(R"(
     fn makeArr() -> int[] { return [1, 2, 3]; }
     fn main() -> int {
-      println(StrInt(makeArr().len()));
+      println(Str<int>(makeArr().len()));
       return 0;
     }
   )");
@@ -455,7 +455,7 @@ TEST(Ownership, ImplicitDeclFromObjectArrayElement) {
     fn main() -> int {
       arr: A[] = [A(1), A(2)];
       y = arr[1];
-      println(StrInt(y.x));
+      println(Str<int>(y.x));
       return 0;
     }
   )");
@@ -484,9 +484,9 @@ TEST(Ownership, NestedMemberAccessUnwrapsBox) {
     }
     fn main() -> int {
       h: H = H(A());
-      println(StrInt(h.a.x));
+      println(Str<int>(h.a.x));
       h.a.x = 9;
-      println(StrInt(h.a.x));
+      println(Str<int>(h.a.x));
       return 0;
     }
   )");

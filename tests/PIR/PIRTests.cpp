@@ -158,6 +158,27 @@ TEST(PIR, PrintedProgramIsTheSource) {
   EXPECT_EQ(reprint(kProgram), kProgram);
 }
 
+// `ftoi` (f64 -> i64, toward zero) prints, parses and verifies like `itof`.
+TEST(PIR, FToIRoundTripsAndVerifies) {
+  const char *src = R"(module "m"
+
+fn @main() -> i64 {
+  %f.1 = itof 7
+  %h.2 = mul %f.1, 0.5
+  %i.3 = ftoi %h.2
+  ret %i.3
+}
+)";
+  EXPECT_EQ(reprint(src), src);
+  ParseError err;
+  auto p = parseProgram(src, err);
+  ASSERT_TRUE(p.has_value()) << err.str();
+  if (!p.has_value())
+    return;
+  auto errors = verify(*p);
+  EXPECT_TRUE(errors.empty()) << formatErrors(errors);
+}
+
 TEST(PIR, SampleProgramVerifies) {
   ParseError err;
   auto p = parseProgram(kProgram, err);
@@ -326,9 +347,11 @@ fn @main() -> i64 {
   %b = cmp eq 1, true
   %c = cast 1.5 to bool
   %d = not 1
+  %e = ftoi 3
   ret 1
 }
 )");
+  EXPECT_NE(errs.find("operand of ftoi"), std::string::npos) << errs;
   EXPECT_NE(errs.find("different types"), std::string::npos) << errs;
   EXPECT_NE(errs.find("cmp operands"), std::string::npos) << errs;
   EXPECT_NE(errs.find("cannot cast f64 to bool"), std::string::npos) << errs;

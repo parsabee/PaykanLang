@@ -87,3 +87,21 @@ void Paykan_panic_div_overflow(void) {
   fprintf(stderr, "paykan: integer overflow in division\n");
   abort();
 }
+
+void Paykan_panic_float_to_int(double value) {
+  char buf[64];
+  Paykan_format_float(buf, sizeof(buf), value);
+  fprintf(stderr,
+          "paykan: int<float>(%s): the value is NaN, infinite or outside "
+          "the int range\n",
+          buf);
+  abort();
+}
+
+void Paykan_panic_int_to_char(int64_t value) {
+  fprintf(stderr,
+          "paykan: char<int>(%lld): the value is outside the char range "
+          "0..255\n",
+          (long long)value);
+  abort();
+}

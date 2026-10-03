@@ -51,7 +51,7 @@ can be assigned to an `(int, Obj)`.
 t = (1, "a", 2.5);
 x: int = t.0;
 s: Str = t.1;
-println(StrFloat(t.2));
+println(Str<float>(t.2));
 println(n.1.0);          // "x" — chained access into a nested tuple
 println(mk().0);         // works on any tuple-valued expression
 ```
@@ -122,9 +122,9 @@ m = mov t;                 // ownership transfer, like any reference value
 ```pkn
 a = (1, "s");
 b = (1, "s");
-println(StrBool(a == b));               // True  — element-wise, Str by content
-println(StrBool(a != (2, "s")));        // True
-println(StrBool(((1, "x"), 2.5) == ((1, "x"), 2.5)));   // True — nested
+println(Str<bool>(a == b));               // True  — element-wise, Str by content
+println(Str<bool>(a != (2, "s")));        // True
+println(Str<bool>(((1, "x"), 2.5) == ((1, "x"), 2.5)));   // True — nested
 println(a.toString());                  // (1, s)
 ```
 
