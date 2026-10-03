@@ -134,6 +134,14 @@ file provided by "LLVM"":
 cmake -B build -DCMAKE_PREFIX_PATH=/opt/paykan -DLLVM_DIR=<llvm>/lib/cmake/llvm
 ```
 
+A plain configure of Paykan builds only the core (recursive-descent + c) and
+downloads no LLVM. An installation with the llvm backend comes from a configure
+that passes the full lists,
+`"-DPAYKAN_FRONTENDS=recursive-descent;bison" "-DPAYKAN_BACKENDS=llvm;c"`
+(or at least `llvm` in `PAYKAN_BACKENDS`); that configure downloads LLVM 17
+into `<paykan-build>/third-party/llvm` unless `LLVM_DIR` names one, so
+`<llvm>` above is that directory or the LLVM you passed.
+
 An installation built without the llvm backend needs only `CMAKE_PREFIX_PATH`.
 This lasts while the LLVM backend is in tree; it moves to its own repository at
 v1.0 ([#61](https://github.com/parsabee/PaykanLang/issues/61)).
@@ -142,9 +150,12 @@ v1.0 ([#61](https://github.com/parsabee/PaykanLang/issues/61)).
 `Paykan::pir`, `Paykan::frontend`, `Paykan::sema`, `Paykan::ast`,
 `Paykan::runtime`, `Paykan::driver` and one target per installed plugin
 (`Paykan::backend_c`, `Paykan::frontend_bison`, ...), the variables
-`PAYKAN_BACKENDS` / `PAYKAN_FRONTENDS` / `PAYKAN_PLUGINS`, and
+`PAYKAN_BACKENDS` / `PAYKAN_FRONTENDS` / `PAYKAN_PLUGINS`, the installed
+runtime's location `PAYKAN_RUNTIME_LIBRARY` / `PAYKAN_RUNTIME_INCLUDE_DIR`, and
 `paykan_add_driver(<target> [PLUGINS <libs>...])`, which creates an executable
-from the driver library and links every plugin whole-archive. The compiler's
+from the driver library and links every plugin whole-archive. That driver's
+`run` and `build` use the package's runtime (unless `$PAYKAN_RUNTIME_DIR`
+names another), wherever the executable itself is built or copied. The compiler's
 headers are installed under `include/paykan/compiler` and are on the include
 path of every imported target.
 
@@ -168,14 +179,14 @@ lowering:
 
 paykan::pir::ParseError err;
 auto program = paykan::pir::parseProgram(R"(module "t"
-extern fn @Paykan_println(obj) -> void
+extern fn @$rt.Paykan_println(obj) -> void
 cstr @.s = "hi" len 2
-extern fn @PaykanString_new(ptr, i64) -> obj
-extern fn @PaykanString_destroy(obj) -> void
+extern fn @$rt.PaykanString_new(ptr, i64) -> obj
+extern fn @$rt.PaykanString_destroy(obj) -> void
 fn @main() -> i64 {
-  %s = call @PaykanString_new(@.s, 2)
-  call @Paykan_println(%s)
-  call @PaykanString_destroy(%s)
+  %s = call @$rt.PaykanString_new(@.s, 2)
+  call @$rt.Paykan_println(%s)
+  call @$rt.PaykanString_destroy(%s)
   ret 0
 }
 )", err);
@@ -192,7 +203,9 @@ backend; a new in-tree backend is expected to pass them.
 
 - Translate PIR as it is: do not re-derive ownership, dispatch or layout; the
   lowering is the only place those rules live.
-- Keep runtime symbol names as declared (`extern fn @Paykan_...`); mangle only
+- Link a runtime extern (`extern fn @$rt.Paykan_...`, `extern obj`, `extern
+  vtable`) by its C symbol, the PIR name without `$rt.`
+  (`pir::runtimeSymbol`); mangle only
   module-defined names (`Box<int>`, `helper::add`), consistently across the
   modules of a program (`docs/pir.md` §3). Resolve a module extern through
   its defining module and `Function::linkName()` (its `symbol`), not its

@@ -488,7 +488,7 @@ print("a=" + Str<int>(a) + " b=" + Str(b));
 
 `print` and `println` write to standard output, `printerr` and `printerrln` to standard
 error; stdout is flushed before a runtime panic, so output printed before one is never lost.
-See `samples/codegen/44_printerr.pkn`.
+See `samples/codegen/46_printerr.pkn`.
 
 ### Conversions
 

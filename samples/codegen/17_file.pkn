@@ -2,6 +2,16 @@
 // Exercises: open() returning Obj (File on success, Error on failure),
 //            File.write(), File.readln() returning Obj (Str or None),
 //            File.toString(), File.equals(), destroy on scope exit.
+//
+// args: {tmpdir}
+
+// The directory the scratch files go in: the first argument (the samples
+// harnesses pass a fresh one per run, `// args: {tmpdir}`, so parallel runs
+// never share a file), else /tmp.
+fn scratchDir(args: Str[]) -> Str {
+  if (args.len() > 1) { return args[1]; }
+  return "/tmp";
+}
 
 fn writelines(path: Str) -> int {
   match open(path, "w") {
@@ -55,8 +65,8 @@ fn showEquals(path: Str) {
   }
 }
 
-fn main() -> int {
-  path: Str = "/tmp/paykan_sample_17.txt";
+fn main(args: Str[]) -> int {
+  path: Str = scratchDir(args) + "/paykan_sample_17.txt";
 
   // --- 1. open for writing, write lines ------------------------------------
   println("=== write lines ===");

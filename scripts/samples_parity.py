@@ -9,6 +9,11 @@ produce the same stderr apart from the heap statistics.  A sample with
 `// expect-stdout: <line>` comments must print exactly those lines.  Printed
 object addresses (`Foo@0x...`) are normalised before comparing.
 
+Every sample runs with the arguments `a b`, or with the words of its
+`// args: <word>...` line, where `{tmpdir}` is a fresh, empty directory for
+that run alone (a sample that writes files puts them there, so parallel
+runs of the corpus never share a file).
+
 Usage:
     samples_parity.py --paykan build/bin/paykan --backend llvm --backend c
 
@@ -59,6 +64,25 @@ def expected_stdout(sample):
     return "".join(line + "\n" for line in lines)
 
 
+ARGS_RE = re.compile(r"^// args:(.*)$", re.M)
+DEFAULT_ARGS = ["a", "b"]
+TMPDIR = "{tmpdir}"
+
+
+def sample_args(sample, scratch):
+    """The arguments one run of @p sample gets: DEFAULT_ARGS, or the words of
+    its `// args:` line with `{tmpdir}` replaced by a new directory under
+    @p scratch."""
+    m = ARGS_RE.search(sample.read_text())
+    if not m:
+        return list(DEFAULT_ARGS)
+    words = m.group(1).split()
+    if any(TMPDIR in w for w in words):
+        tmp = tempfile.mkdtemp(prefix=f"{sample.stem}-", dir=scratch)
+        words = [w.replace(TMPDIR, tmp) for w in words]
+    return words
+
+
 def normalise(p):
     out = ADDR_RE.sub("@ADDR", p.stdout)
     m = LIVE_RE.search(p.stderr)
@@ -72,9 +96,9 @@ def opt_flags(opt):
     return [] if opt is None else [f"-O{opt}"]
 
 
-def run(paykan, backend, sample, opt=None):
+def run(paykan, backend, sample, outdir, opt=None):
     cmd = [paykan, f"--backend={backend}", "--track-heap", *opt_flags(opt),
-           str(sample), "a", "b"]
+           str(sample), *sample_args(sample, outdir)]
     p = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
                        text=True, errors="replace", cwd=str(ROOT))
     return normalise(p)
@@ -89,7 +113,8 @@ def build_and_run(paykan, backend, sample, outdir, opt=None):
     if b.returncode != 0:
         return b.returncode, "", f"build failed:\n{b.stderr}", None
     env = dict(os.environ, PAYKAN_TRACK_HEAP="1")
-    p = subprocess.run([str(sample), "a", "b"], executable=str(exe),
+    p = subprocess.run([str(sample), *sample_args(sample, outdir)],
+                       executable=str(exe),
                        stdin=subprocess.DEVNULL, capture_output=True,
                        text=True, errors="replace", cwd=str(ROOT), env=env)
     return normalise(p)
@@ -120,7 +145,7 @@ def check(args, outdir):
                                         args.opt)
                        for b in args.backend}
         else:
-            results = {b: run(args.paykan, b, sample, args.opt)
+            results = {b: run(args.paykan, b, sample, outdir, args.opt)
                        for b in args.backend}
         problems = []
         for b, (rc, out, err, live) in results.items():

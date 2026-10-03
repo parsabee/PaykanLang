@@ -103,6 +103,8 @@ add_executable(codegen_tests
     CodeGen/OptionalPrimitiveTests.cpp
     CodeGen/TupleTests.cpp
     CodeGen/RegressionTests.cpp
+    CodeGen/LiteralObjectTests.cpp
+    CodeGen/RuntimeNameTests.cpp
     CodeGen/HarnessTests.cpp
 )
 target_include_directories(codegen_tests
@@ -199,6 +201,7 @@ add_test(NAME LoweringTests COMMAND lowering_tests)
 # --- Runtime tests ----------------------------------------------------------
 add_executable(runtime_tests
     Runtime/ArrayTests.cpp
+    Runtime/DeferredDestroyTests.cpp
     Runtime/EqualsNullTests.cpp
     Runtime/ObjectTests.cpp
     Runtime/StringTests.cpp
@@ -225,6 +228,7 @@ add_executable(driver_tests
 )
 target_compile_definitions(driver_tests
     PRIVATE PAYKAN_BIN="$<TARGET_FILE:paykan>"
+            PAYKAN_EXPECTED_DEFAULT_BACKEND="${PAYKAN_DEFAULT_BACKEND}"
 )
 target_link_libraries(driver_tests
     PRIVATE gtest_main
@@ -264,6 +268,21 @@ if(PAYKAN_SAMPLES_BACKENDS)
     # time.
     set_tests_properties(SamplesParity SamplesParityBuild SamplesParityO0
         PROPERTIES RESOURCE_LOCK paykan_samples_cache)
+
+    # Where `paykan` finds the runtime (Toolchain.cpp): an installed binary
+    # uses its own prefix even while the build tree exists, $PAYKAN_RUNTIME_DIR
+    # overrides it, and only a binary inside the build tree uses the build
+    # tree's runtime (scripts/runtime_lookup.py).
+    include(GNUInstallDirs)
+    add_test(NAME RuntimeLookup
+        COMMAND ${CMAKE_COMMAND} -E env python3
+                ${CMAKE_SOURCE_DIR}/scripts/runtime_lookup.py
+                --paykan $<TARGET_FILE:paykan>
+                --runtime-lib $<TARGET_FILE:paykan_runtime>
+                --runtime-header ${CMAKE_SOURCE_DIR}/src/Runtime/Runtime.h
+                --build-dir ${CMAKE_BINARY_DIR}
+                --installed-lib ${CMAKE_INSTALL_FULL_LIBDIR}/$<TARGET_FILE_NAME:paykan_runtime>
+                ${PAYKAN_SAMPLES_BACKENDS})
 endif()
 
 # The C backend's output is strict ISO C11 (docs/c-backend.md): every
@@ -342,12 +361,32 @@ if(PAYKAN_NUM_FRONTENDS GREATER 1)
     endif()
 endif()
 
+# A plain configure (only -DPAYKAN_BUILD_TESTS=OFF) is the core build:
+# recursive-descent + c, nothing downloaded, no third-party/ or _deps/
+# (#123).  Configure only, in a scratch directory of its own.  Not in a
+# coverage build: it runs no instrumented code, and scripts/coverage.py
+# requires every test to write a profile.
+if(NOT PAYKAN_COVERAGE)
+    add_test(NAME DefaultConfigure
+        COMMAND ${CMAKE_COMMAND}
+                -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+                -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/default-configure
+                -DGENERATOR=${CMAKE_GENERATOR}
+                -DC_COMPILER=${CMAKE_C_COMPILER}
+                -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/DefaultConfigure.cmake)
+endif()
+
 # --- Documentation: every relative link in the Markdown files resolves -------
 # --- (scripts/check_links.py), and every doc example that states its output --
-# --- prints it (scripts/doc_examples.py)
-add_test(NAME MarkdownLinks
-    COMMAND ${CMAKE_COMMAND} -E env python3
-            ${CMAKE_SOURCE_DIR}/scripts/check_links.py)
+# --- prints it (scripts/doc_examples.py). MarkdownLinks is not in a coverage
+# --- build: it runs no instrumented code, and scripts/coverage.py requires
+# --- every test to write a profile.
+if(NOT PAYKAN_COVERAGE)
+    add_test(NAME MarkdownLinks
+        COMMAND ${CMAKE_COMMAND} -E env python3
+                ${CMAKE_SOURCE_DIR}/scripts/check_links.py)
+endif()
 if(PAYKAN_SAMPLES_BACKENDS)
     add_test(NAME DocExamples
         COMMAND ${CMAKE_COMMAND} -E env python3

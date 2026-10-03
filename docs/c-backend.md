@@ -21,12 +21,16 @@ configure time (`-DPAYKAN_BACKENDS="llvm;c"`).
 The C compiler is `$CC`, then `cc` (in a `PAYKAN_COVERAGE` build, the C
 compiler that built the runtime, with `-isysroot` of the build's SDK on
 macOS).  The runtime (`libpaykan_runtime.a` and
-`Runtime.h`) is found in this order: the build tree the compiler was built in,
-`$PAYKAN_RUNTIME_DIR/{lib,include/paykan}`, the install layout next to the
-executable (`../lib`, `../include/paykan`), and the install location
-configured at build time.  With the build tree's runtime, programs are
-compiled and linked with the build's sanitizer and coverage flags, since the
-archive is instrumented with them.
+`Runtime.h`) is found in this order: `$PAYKAN_RUNTIME_DIR/{lib,include/paykan}`,
+the installed runtime recorded by the package a driver made with
+`paykan_add_driver` was built against, the install layout around the
+executable (`../lib`, `../include/paykan`), the build tree the compiler was
+built in (only for a binary inside that build tree, which a
+`.paykan-build-tree` marker at its top identifies), and the install location
+configured at build time.  So an installed `paykan` uses its own prefix even
+while its build tree still exists.  Programs are compiled and linked with the
+build's sanitizer and coverage flags, since the runtime archive is
+instrumented with them.
 
 A program started with `paykan run` sees the script path as `args[0]`
 (`fn main(args: Str[])`), like the llvm backend.  A runtime panic flushes
@@ -45,8 +49,12 @@ backends.
   character outside `[A-Za-z0-9_]` becomes `_XX`, and a clash gets a `_<n>`
   suffix), so modules never collide and generics instantiations
   (`Box<int>`) and methods (`K.w` is `pk_<module>_K_2Ew`, distinct from a
-  user function `K_2Ew`) are valid identifiers.  Runtime symbols keep their
-  C names.
+  user function `K_2Ew`) are valid identifiers.  A runtime extern is
+  `@$rt.<symbol>` in PIR (`docs/pir.md` §3) and is emitted as its C name
+  `<symbol>`, declared by `Runtime.h`; a program function spelled like a
+  runtime symbol (`fn PaykanString_new`) is an ordinary program function
+  (`pk_<module>_PaykanString_new`), so it neither replaces nor clashes with
+  the runtime's.
 * One vtable per class (`pkvt_pk_<module>_<Class>`), whose address is the
   class's runtime type identity (`match`).  Every vtable, the runtime's
   included, is an array of `PaykanMethod` (`void (*)(void)`, `Runtime.h`):

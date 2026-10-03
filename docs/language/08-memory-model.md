@@ -92,6 +92,17 @@ This is **deterministic**: an object is destroyed at the exact point its last re
 released, in a well-defined order, with no background collector and no pause. A `File`, for
 example, is closed as soon as the last reference to it goes away.
 
+Destruction is **iterative**: deep chains are freed without stack growth. A linked list of a
+million nodes, a deeply nested tree, or arrays and tuples nested inside each other are destroyed
+in constant C stack space, so dropping them cannot overflow the stack. The release that drops the
+last reference destroys its object; every object that `destroy` releases to zero is set aside
+rather than destroyed on the spot, and the same release then destroys the set-aside objects one
+by one until none remain. The order is fixed: a depth-first pre-order walk of the objects that
+die, each object's references taken in field order (index order for an array or a tuple) — the
+order in which a recursive destruction would start them — except that an object's `destroy`
+finishes before the objects it released are destroyed. All of them are destroyed and freed before
+that release returns.
+
 `destroy` is **final**. A class cannot declare its own `destroy`, override it, or call
 `obj.destroy()` explicitly — the compiler owns it entirely (see `04-classes.md`). There is no
 user-defined finalizer; cleanup that must happen at end of life belongs in the fields the object

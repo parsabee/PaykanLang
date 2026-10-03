@@ -347,9 +347,17 @@ report several independent errors. The Bison frontend recovers only at
 `;` inside a block. Any error makes the parse fail; a file with errors is
 never handed to Sema.
 
-Nesting (blocks, parentheses, brackets, type applications) deeper than
-512 levels is rejected with `nesting too deep` by both frontends, so
-pathological inputs cannot overflow the stack.
+Nesting (blocks, parentheses, brackets, type applications, prefix
+operators and conditional expressions) deeper than 512 levels is rejected
+with `nesting too deep` by both frontends, so pathological inputs cannot
+overflow the stack of the parser or of the passes after it.
+
+Both frontends report lexical and syntax errors in source order, and
+locate the common ones alike (a tuple index with leading zeros at its `.`,
+an unclosed `[]` type suffix where the `]` is missing). Beyond that the
+diagnostics are not part of the differential check: each frontend words its
+syntax errors and recovers in its own way, so the location of the first
+error can differ by a token, and the follow-on errors can differ.
 
 ## 10. Known differences and intentional non-copies
 

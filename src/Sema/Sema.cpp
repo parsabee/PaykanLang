@@ -335,6 +335,19 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
 }
 
 bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
+  // `mov` of a temporary forwards it unchanged, so a contextually typed
+  // operand -- `None`, an array or tuple literal -- takes the destination's
+  // type through it exactly as it does without the `mov` (#119).
+  if (auto *mv = ast::dyn_cast<ast::MovExpr>(src)) {
+    ast::Expr *op = mv->getOperand();
+    if (ast::isa<ast::NoneLiteral>(op) || ast::isa<ast::ArrayLiteralExpr>(op) ||
+        ast::isa<ast::TupleLiteralExpr>(op)) {
+      if (!checkAssignable(dst, op->getResolvedType(), op))
+        return false;
+      mv->setResolvedType(op->getResolvedType());
+      return true;
+    }
+  }
   // `None` into an optional slot: statically the literal is `Obj` (a design
   // decision — see docs/language/10-optionals.md), but in this position it
   // denotes the absent `T?` value.  Record that contextual type on the
@@ -517,7 +530,8 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
                      "<...>')");
       return nullptr;
     }
-    error(loc, context + " has unknown class type '" + ct->getName() + "'");
+    if (!isFailedImportUse(ct->getName()))
+      error(loc, context + " has unknown class type '" + ct->getName() + "'");
     return nullptr;
   }
 
@@ -634,6 +648,28 @@ ast::Type *Sema::checkIdentLive(std::string_view name,
 void Sema::declarePoisoned(Scope *scope, std::string_view name) {
   scope->set(name, Ctx.getPoisonTy());
   ++PoisonedBindings;
+}
+
+bool Sema::checkBinderName(const std::string &name, ast::SourceLocation loc) {
+  if (name == names::kStdin) {
+    error(loc,
+          "'" + name + "' is a reserved name and cannot be used as a variable");
+    return false;
+  }
+  if (isTypeNameForVariable(name)) {
+    error(loc,
+          "'" + name + "' is a type name and cannot be used as a variable");
+    return false;
+  }
+  return true;
+}
+
+bool Sema::bindArmName(ast::MatchArm *arm) {
+  if (checkBinderName(arm->getBinding(), arm->getLocation()))
+    return true;
+  // Its uses in the arm's body are follow-ons of the reported error.
+  declarePoisoned(CurrentScope, arm->getBinding());
+  return false;
 }
 
 bool Sema::isTypeNameForVariable(const std::string &name) const {
@@ -754,8 +790,9 @@ ast::Type *Sema::ExprChecker::visitMovExpr(ast::MovExpr *node) {
 ast::Type *Sema::ExprChecker::visitEnumValueExpr(ast::EnumValueExpr *node) {
   auto *enumTy = S.Ctx.lookupEnumType(node->getEnumName());
   if (!enumTy) {
-    S.error(node->getLocation(),
-            "unknown enum type '" + node->getEnumName() + "'");
+    if (!S.isFailedImportUse(node->getEnumName()))
+      S.error(node->getLocation(),
+              "unknown enum type '" + node->getEnumName() + "'");
     return nullptr;
   }
   int64_t idx = enumTy->findVariant(node->getVariantName());
@@ -1057,8 +1094,9 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
       return sig->ReturnType;
     }
   if (!sig) {
-    S.error(node->getLocation(),
-            "call to undeclared function '" + node->getCalleeName() + "'");
+    if (!S.isFailedImportUse(node->getCalleeName()))
+      S.error(node->getLocation(),
+              "call to undeclared function '" + node->getCalleeName() + "'");
     return nullptr;
   }
 
@@ -1596,14 +1634,7 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
       ok = false;
       continue;
     }
-    // Same guard as visitAssignStmt: a target must not shadow a type name.
-    if (Ctx.lookupClassType(name) || Ctx.lookupEnumType(name) ||
-        name == names::kObj || name == names::kString || name == names::kFile ||
-        name == names::kTypeInt || name == names::kTypeBool ||
-        name == names::kTypeFloat || name == names::kTypeChar ||
-        name == names::kStdin) {
-      error(target.Loc,
-            "'" + name + "' is a type name and cannot be used as a variable");
+    if (!checkBinderName(name, target.Loc)) {
       ok = false;
       continue;
     }
@@ -1701,7 +1732,7 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
   // A binder is poisoned only after its declaration's error was reported, so
   // a program without errors has none, and the poison type never reaches the
   // lowering.  Guard that invariant: never hand such a program on.
-  if (PoisonedBindings && !Diags.hasErrors()) {
+  if (PoisonedBindings && !hasErrors()) {
     assert(false && "a binder was poisoned without an error being reported");
     error(tu->getLocation(),
           "internal compiler error: a declaration failed without a diagnostic");
@@ -1709,8 +1740,8 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
   return SemaContext{nullptr,
                      &Ctx,
                      nullptr,
-                     !Diags.hasErrors(),
-                     Diags.getErrorCount(),
+                     !hasErrors(),
+                     getErrorCount(),
                      Diags.getDiagnostics(),
                      std::move(AccumulatedImportContexts)};
 }
@@ -2026,12 +2057,9 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
     return false;
   }
 
-  // Guard: the target name must not shadow a registered type name.
-  if (isTypeNameForVariable(varName)) {
-    error(node->getLocation(),
-          "'" + varName + "' is a type name and cannot be used as a variable");
+  // Guard: the target name must not shadow a type or reserved name.
+  if (!checkBinderName(varName, node->getLocation()))
     return false;
-  }
 
   // Re-assigning a moved variable revives it (the RHS was already checked
   // above, so a self-referential RHS like `a = a + 1` still errors).
@@ -2330,6 +2358,10 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
   // Resolve parameter types.
   std::vector<ast::Type *> paramTypes;
   for (auto &p : node->getMutableParams()) {
+    if (!checkBinderName(p.getName(), node->getLocation())) {
+      ErroneousNames.insert(node->getName()); // as for the return type
+      return false;
+    }
     auto *ty = resolveType(p.ParamType, node->getLocation(),
                            "parameter '" + p.getName() + "'");
     if (!ty) {
@@ -2392,6 +2424,10 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
 }
 
 bool Sema::visitVarDecl(ast::VarDecl *node) {
+  // The name must not shadow a type or reserved name (#126).
+  if (!checkBinderName(node->getName(), node->getLocation()))
+    return false;
+
   // Check for duplicate declaration in the current scope.
   if (CurrentScope->contains(node->getName())) {
     error(node->getLocation(),
@@ -2822,7 +2858,9 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
                     subjectCt->getName() + "'");
           ok = false;
         }
-        if (arm->hasBinding()) {
+        if (arm->hasBinding() && !bindArmName(arm)) {
+          ok = false;
+        } else if (arm->hasBinding()) {
           if (!CurrentScope->declare(arm->getBinding(), armAt)) {
             error(arm->getLocation(),
                   "redeclaration of '" + arm->getBinding() + "' in match arm");
@@ -2842,7 +2880,9 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
         }
 
         // 4. Declare the binding variable with the narrowed (arm) type.
-        if (arm->hasBinding()) {
+        if (arm->hasBinding() && !bindArmName(arm)) {
+          ok = false;
+        } else if (arm->hasBinding()) {
           if (!CurrentScope->declare(arm->getBinding(), armCt)) {
             error(arm->getLocation(),
                   "redeclaration of '" + arm->getBinding() + "' in match arm");
@@ -2973,7 +3013,9 @@ bool Sema::checkOptionalMatch(ast::MatchStmt *node,
       // An arm in error still binds its name in the body, poisoned.
       if (arm->hasBinding() && !bindTy)
         declarePoisoned(CurrentScope, arm->getBinding());
-      if (arm->hasBinding() && bindTy) {
+      if (arm->hasBinding() && bindTy && !bindArmName(arm)) {
+        ok = false;
+      } else if (arm->hasBinding() && bindTy) {
         if (!CurrentScope->declare(arm->getBinding(), bindTy)) {
           error(arm->getLocation(),
                 "redeclaration of '" + arm->getBinding() + "' in match arm");

@@ -293,9 +293,11 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
         // Not declared in this module: the name must resolve through the
         // ASTContext registry — a built-in class type (Obj, Str) or an
         // imported class referenced by a registered alias (e.g.
-        // "tmp_import::helper::Adder").
-        error(cd->getLocation(), "superclass '" + superName + "' of class '" +
-                                     cd->getName() + "' is not defined");
+        // "tmp_import::helper::Adder").  A class of a failed import was
+        // reported with the import.
+        if (!isFailedImportUse(superName))
+          error(cd->getLocation(), "superclass '" + superName + "' of class '" +
+                                       cd->getName() + "' is not defined");
         broken = true;
       }
       if (broken) {
@@ -435,6 +437,11 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
                   "' cannot be used as a parameter name of method '" +
                   method->getName() + "' in class '" + cd->getName() +
                   "'; it is the implicit receiver");
+        paramsOk = false;
+        ok = false;
+        break;
+      }
+      if (!checkBinderName(p.getName(), method->getLocation())) {
         paramsOk = false;
         ok = false;
         break;
@@ -796,6 +803,8 @@ std::string Sema::instantiationName(const std::string &templateName,
 void Sema::errorImportedTemplate(ast::SourceLocation loc,
                                  const std::string &name,
                                  const std::string &msg) {
+  if (isFailedImportUse(name))
+    return; // the import failed, and was reported
   const std::string key = std::to_string(loc.getLineStart()) + ":" +
                           std::to_string(loc.getColumnStart()) + ":" + name;
   if (!ReportedImportedTemplateUses.insert(key).second) {
@@ -872,8 +881,10 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     const auto &superName = clone->getSuperClassName();
     superClass = Ctx.lookupClassType(superName);
     if (!superClass) {
-      error(clone->getLocation(), "superclass '" + superName + "' of class '" +
-                                      instName + "' is not defined");
+      if (!isFailedImportUse(superName))
+        error(clone->getLocation(), "superclass '" + superName +
+                                        "' of class '" + instName +
+                                        "' is not defined");
       ok = false;
     } else if (superClass->isFinal()) {
       error(clone->getLocation(),
@@ -1188,7 +1199,7 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
   // Explicit type arguments on something that is not a template.
   if (lookupFunction(callee) || Ctx.lookupClassType(callee))
     error(loc, "'" + callee + "' is not generic and takes no type arguments");
-  else
+  else if (!isFailedImportUse(callee))
     error(loc, "call to undeclared generic function or class '" + callee + "'");
   return false;
 }

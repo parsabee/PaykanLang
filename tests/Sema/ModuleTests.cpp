@@ -22,6 +22,7 @@ static std::string writeFile(const std::string &dir, const std::string &relPath,
 struct SemaFileResult {
   bool Ok;
   std::string Diagnostics;
+  unsigned ErrorCount = 0;
 };
 
 static SemaFileResult semaCheckFile(const std::string &filePath,
@@ -34,8 +35,8 @@ static SemaFileResult semaCheckFile(const std::string &filePath,
   diagEngine.setSourceInfo(drv.getCurrentFile(), &drv.getSourceLines());
   paykan::sema::Sema sema(drv.getASTContext(), diagEngine, projectRoot,
                           drv.getFrontendName());
-  bool ok = sema.run(drv.getRoot()).Ok;
-  return {ok, os.str()};
+  auto ctx = sema.run(drv.getRoot());
+  return {ctx.Ok, os.str(), ctx.ErrorCount};
 }
 
 // ─── OK: import mod; ────────────────────────────────────────────────────────
@@ -723,5 +724,178 @@ TEST(Module, OneQualifierForTwoModulesErr) {
     auto r = semaCheckFile(main, tmp);
     EXPECT_TRUE(r.Ok) << imports << r.Diagnostics;
   }
+  std::filesystem::remove_all(tmp);
+}
+
+// ─── ERR: a failed import is reported once (#119) ───────────────────────────
+//
+// The import's failure is the one error: uses of its qualifier are poisoned
+// (silent follow-ons, like a poisoned binder's), an imported module's own
+// errors are not repeated at each import on the way up, and modules are named
+// by their canonical module name, files by their path from the source root.
+
+namespace {
+
+// Exactly one error, containing @p expected, and no absolute path.
+void expectOneError(const SemaFileResult &r, const std::string &expected,
+                    const std::string &root) {
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find(" error: ", r.Diagnostics.find(" error: ") + 1),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find(expected), std::string::npos) << r.Diagnostics;
+  // The main file's own name is printed in full; nothing else may be.
+  std::string rest = r.Diagnostics;
+  for (size_t at; (at = rest.find(root + "/main.pkn")) != std::string::npos;)
+    rest.erase(at, root.size() + 9);
+  EXPECT_EQ(rest.find(root), std::string::npos) << r.Diagnostics;
+}
+
+} // namespace
+
+TEST(Module, MissingModuleUsesAreSilent) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_missing").string();
+  std::filesystem::remove_all(tmp);
+  auto main = writeFile(tmp, "main.pkn", R"(
+import lib::nothere;
+class Sub : nothere::Base { }
+fn take(t: nothere::T) -> int { return 0; }
+fn main() -> int {
+  n: int = nothere::f(1);
+  t: nothere::T = nothere::T();
+  u = lib::nothere::g(t, n);
+  c: nothere::Color = nothere::Color::Red;
+  match t { nothere::T { } _ { } }
+  x: Sub = Sub();
+  println(Str(n + take(t)));
+  return lib::nothere::h<int>(2);
+}
+)");
+  expectOneError(semaCheckFile(main, tmp),
+                 "module 'lib::nothere' not found (tried lib/nothere.pkn)",
+                 tmp);
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, MissingModuleDoesNotSilenceOtherNames) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_missing_other").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib/m.pkn", "fn f() -> int { return 1; }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import lib::nothere;
+import lib::m;
+fn main() -> int { return nothere::f() + m::g() + nowhere::h(); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find("'nothere::f'"), std::string::npos)
+      << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("call to undeclared function 'm::g'"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("call to undeclared function 'nowhere::h'"),
+            std::string::npos)
+      << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, MissingSystemModuleIsOneError) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_missing_sys").string();
+  std::filesystem::remove_all(tmp);
+  auto main = writeFile(tmp, "main.pkn", R"(
+import ::nosuchstd;
+fn main() -> int { return nosuchstd::f(); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("system module '::nosuchstd' not found"),
+            std::string::npos)
+      << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, CircularImportIsOneError) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_circ_one").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib/a.pkn", "import lib::b;\nfn fa() -> int { return 1; }\n");
+  writeFile(tmp, "lib/b.pkn",
+            "import lib::c;\nfn fb() -> int { return c::fc(); }\n");
+  writeFile(tmp, "lib/c.pkn",
+            "import lib::a;\nfn fc() -> int { return a::fa(); }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import lib::a;
+fn main() -> int { return a::fa() + a::missing(); }
+)");
+  auto r = semaCheckFile(main, tmp);
+  expectOneError(r, "circular import of module 'lib::a'", tmp);
+  // The error is located in the module that closes the cycle; each import on
+  // the way there adds a note, not an error.
+  EXPECT_NE(r.Diagnostics.find("lib/c.pkn:1:1: error:"), std::string::npos)
+      << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("note: in module 'lib::b' imported here"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("note: in module 'lib::a' imported here"),
+            std::string::npos)
+      << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, ErrorsInAnImportedModuleAreNotRepeated) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_bad_module").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib/bad.pkn", "fn f() -> int { return \"no\"; }\n");
+  writeFile(tmp, "lib/mid.pkn",
+            "import lib::bad;\nfn g() -> int { return bad::f(); }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import lib::mid;
+fn main() -> int { return mid::g(); }
+)");
+  expectOneError(semaCheckFile(main, tmp), "lib/bad.pkn:1:", tmp);
+  // A syntax error in a module, likewise.
+  writeFile(tmp, "lib/bad.pkn", "fn f() -> int { return 1 }\n");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find("failed to parse"), std::string::npos)
+      << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, ModuleThatIsADirectoryErr) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_dir_module").string();
+  std::filesystem::remove_all(tmp);
+  std::filesystem::create_directories(std::filesystem::path(tmp) / "lib" /
+                                      "m.pkn");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import lib::m;
+fn main() -> int { return m::f(); }
+)");
+  expectOneError(semaCheckFile(main, tmp),
+                 "module 'lib::m': 'lib/m.pkn' is a directory, not a source "
+                 "file",
+                 tmp);
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, TypeClashNamesModulesCanonically) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_clash_names").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "data/list.pkn",
+            "class Node { v: int; fn __init__() { self.v = 1; } }\n");
+  writeFile(tmp, "data/tree.pkn",
+            "class Node { l: int; fn __init__() { self.l = 0; } }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import data::list;
+import data::tree as t;
+fn main() -> int { return 0; }
+)");
+  expectOneError(semaCheckFile(main, tmp),
+                 "import of module 'data::tree': class 'Node' conflicts with "
+                 "a type of the same name declared by module 'data::list'",
+                 tmp);
   std::filesystem::remove_all(tmp);
 }

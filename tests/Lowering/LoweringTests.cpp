@@ -103,7 +103,7 @@ TEST(Lowering, OwnedVariablesAreReleasedInReverseOrderAtScopeExit) {
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
   // Each literal: PaykanString_new, boxed into the variable's slot.
-  EXPECT_EQ(count(m, "call @PaykanString_new("), 2u) << m;
+  EXPECT_EQ(count(m, "call @$rt.PaykanString_new("), 2u) << m;
   EXPECT_EQ(count(m, " = box "), 2u) << m;
   // Two releases before `ret`: b (declared last) first, then a.
   size_t relA = m.rfind("release");
@@ -126,9 +126,9 @@ TEST(Lowering, StringTemporaryPassedToBuiltinIsDestroyedAfterTheCall) {
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
-  size_t newStr = m.find("call @PaykanString_new(");
-  size_t println = m.find("call @Paykan_println(");
-  size_t destroy = m.find("call @PaykanString_destroy(");
+  size_t newStr = m.find("call @$rt.PaykanString_new(");
+  size_t println = m.find("call @$rt.Paykan_println(");
+  size_t destroy = m.find("call @$rt.PaykanString_destroy(");
   ASSERT_NE(newStr, std::string::npos) << m;
   ASSERT_NE(println, std::string::npos) << m;
   ASSERT_NE(destroy, std::string::npos) << m;
@@ -149,8 +149,8 @@ TEST(Lowering, ConcatReleasesOwnedOperandsAndTracksTheResult) {
   std::string m = function(l.Text, "main");
   // Literal and Str<int> temporaries are destroyed after the concat; the
   // concat result is boxed into `s` and released at scope exit.
-  EXPECT_EQ(count(m, "call @PaykanString_destroy("), 2u) << m;
-  size_t concat = m.find("call @PaykanString_concat(");
+  EXPECT_EQ(count(m, "call @$rt.PaykanString_destroy("), 2u) << m;
+  size_t concat = m.find("call @$rt.PaykanString_concat(");
   size_t box = m.find(" = box ");
   ASSERT_NE(concat, std::string::npos) << m;
   ASSERT_NE(box, std::string::npos) << m;
@@ -253,8 +253,8 @@ TEST(Lowering, IntegerDivisionIsGuarded) {
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
-  EXPECT_EQ(count(m, "call @Paykan_panic_div_by_zero()"), 2u) << m;
-  EXPECT_EQ(count(m, "call @Paykan_panic_div_overflow()"), 1u) << m;
+  EXPECT_EQ(count(m, "call @$rt.Paykan_panic_div_by_zero()"), 2u) << m;
+  EXPECT_EQ(count(m, "call @$rt.Paykan_panic_div_overflow()"), 1u) << m;
   EXPECT_EQ(count(m, "unreachable"), 3u) << m;
   EXPECT_NE(m.find(" = div "), std::string::npos) << m;
   EXPECT_NE(m.find(" = rem "), std::string::npos) << m;
@@ -321,7 +321,7 @@ TEST(Lowering, ClassItemCarriesFlattenedLayoutAndVTable) {
   EXPECT_NE(t.find("extra = @Derived.extra : (obj) -> i64"), std::string::npos)
       << t;
   // Inherited runtime slots name the runtime implementation.
-  EXPECT_NE(t.find("equals = @PaykanObject_equals : (obj, box) -> i64"),
+  EXPECT_NE(t.find("equals = @$rt.PaykanObject_equals : (obj, box) -> i64"),
             std::string::npos)
       << t;
   // The constructor allocates, boxes BEFORE __init__, and returns the box.
@@ -413,9 +413,9 @@ TEST(Lowering, StringLiteralMatchSubjectIsAStrReleasedOnEveryExit) {
   ASSERT_TRUE(l.Ok) << l.Error; // the verifier ran
   std::string m = function(l.Text, "main");
   // The subject: a Str built from the literal, boxed for the match.
-  size_t subj = m.find("%str.1 = call @PaykanString_new(@.str");
+  size_t subj = m.find("%str.1 = call @$rt.PaykanString_new(@.str");
   size_t box = m.find("%subj.box.2 = box %str.1");
-  size_t eq = m.find("call @PaykanString_equals(%str.1, ");
+  size_t eq = m.find("call @$rt.PaykanString_equals(%str.1, ");
   ASSERT_NE(subj, std::string::npos) << m;
   ASSERT_NE(box, std::string::npos) << m;
   ASSERT_NE(eq, std::string::npos) << m;
@@ -567,7 +567,7 @@ TEST(Lowering, ValueMatchOnStrBoxesTheLiteralForEquals) {
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
-  EXPECT_EQ(count(m, "call @PaykanString_equals("), 2u) << m;
+  EXPECT_EQ(count(m, "call @$rt.PaykanString_equals("), 2u) << m;
   EXPECT_EQ(count(m, " = box "), 3u) << m; // s itself and the two literals
 }
 
@@ -598,7 +598,7 @@ TEST(Lowering, ConstantPrimitiveArrayLiteralUsesADataGlobal) {
   EXPECT_NE(l.Text.find("data @.arr.data0 = [1, 2, 3]"), std::string::npos)
       << l.Text;
   std::string m = function(l.Text, "main");
-  EXPECT_NE(m.find("call @PaykanArray_new_from_data(3, @.arr.data0)"),
+  EXPECT_NE(m.find("call @$rt.PaykanArray_new_from_data(3, @.arr.data0)"),
             std::string::npos)
       << m;
   // len is a vtable slot of the runtime Array class (explicit signature).
@@ -611,8 +611,8 @@ TEST(Lowering, ObjectArrayLiteralSetsAndReleasesEachElement) {
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
-  EXPECT_NE(m.find("call @PaykanArray_new_obj(2)"), std::string::npos) << m;
-  EXPECT_EQ(count(m, "call @PaykanArray_set_obj("), 2u) << m;
+  EXPECT_NE(m.find("call @$rt.PaykanArray_new_obj(2)"), std::string::npos) << m;
+  EXPECT_EQ(count(m, "call @$rt.PaykanArray_set_obj("), 2u) << m;
   // set_obj retains: each +1 element box is released, plus xs at scope exit.
   EXPECT_EQ(count(m, "release"), 3u) << m;
 }
@@ -638,7 +638,7 @@ TEST(Lowering, AssigningAnObjectElementEvaluatesTheIndexOnce) {
   std::string m = function(l.Text, "main");
   EXPECT_EQ(count(m, "call @idx()"), 4u) << m;
   EXPECT_EQ(count(m, "call @mk()"), 1u) << m;
-  EXPECT_EQ(count(m, "call @PaykanArray_get("), 4u) << m;
+  EXPECT_EQ(count(m, "call @$rt.PaykanArray_get("), 4u) << m;
   // Each element read by a declared owner retains the stored box once
   // (x from arr, y, x from the temporary array); z's first assignment
   // acquires it with a single `box`.
@@ -693,7 +693,7 @@ TEST(Lowering, ArrayMatchArmBindingDispatchesThroughTheArrayType) {
   // `"Array<Str>"` class item, which would have no slots.
   EXPECT_NE(m.find(" : (obj) -> i64 [3] ()"), std::string::npos) << m;
   EXPECT_EQ(m.find(" : \"Array<Str>\" ["), std::string::npos) << m;
-  EXPECT_NE(m.find("call @PaykanArray_push_obj("), std::string::npos) << m;
+  EXPECT_NE(m.find("call @$rt.PaykanArray_push_obj("), std::string::npos) << m;
 }
 
 TEST(Lowering, TupleLiteralUsesAKindsDescriptor) {
@@ -704,12 +704,12 @@ TEST(Lowering, TupleLiteralUsesAKindsDescriptor) {
   EXPECT_NE(l.Text.find("bytes @.tuple.kinds0 = [0, 4]"), std::string::npos)
       << l.Text;
   std::string m = function(l.Text, "main");
-  EXPECT_NE(m.find("call @PaykanTuple_new(2, @.tuple.kinds0)"),
+  EXPECT_NE(m.find("call @$rt.PaykanTuple_new(2, @.tuple.kinds0)"),
             std::string::npos)
       << m;
-  EXPECT_NE(m.find("call @PaykanTuple_set("), std::string::npos) << m;
-  EXPECT_NE(m.find("call @PaykanTuple_set_obj("), std::string::npos) << m;
-  EXPECT_NE(m.find("call @PaykanTuple_get("), std::string::npos) << m;
+  EXPECT_NE(m.find("call @$rt.PaykanTuple_set("), std::string::npos) << m;
+  EXPECT_NE(m.find("call @$rt.PaykanTuple_set_obj("), std::string::npos) << m;
+  EXPECT_NE(m.find("call @$rt.PaykanTuple_get("), std::string::npos) << m;
 }
 
 TEST(Lowering, OptionalIntoObjSubstitutesTheNoneSingleton) {
@@ -721,8 +721,8 @@ TEST(Lowering, OptionalIntoObjSubstitutesTheNoneSingleton) {
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
   EXPECT_NE(m.find("cmp eq %"), std::string::npos) << m;
-  EXPECT_NE(m.find("box @PaykanObject_None"), std::string::npos) << m;
-  EXPECT_NE(l.Text.find("extern obj @PaykanObject_None"), std::string::npos)
+  EXPECT_NE(m.find("box @$rt.PaykanObject_None"), std::string::npos) << m;
+  EXPECT_NE(l.Text.find("extern obj @$rt.PaykanObject_None"), std::string::npos)
       << l.Text;
 }
 
@@ -921,6 +921,93 @@ TEST(Lowering, MethodSymbolsCannotClashWithUserFunctions) {
   ASSERT_NE(pm.findFunction("K_w"), nullptr);
 }
 
+// #116: every value use of a string literal is a Str object built by
+// PaykanString_new (a tracked temporary), never the raw `@.strN` C string:
+// as a subscript or method receiver it is destroyed after the borrowing
+// call, and under `mov` it is boxed like any other temporary.
+TEST(Lowering, StringLiteralUsedAsAnObjectIsAStr) {
+  auto l = lower(R"(
+    fn main() -> int {
+      c = "ab"[1];
+      n = "abc".len();
+      v = mov "lit";
+      return n;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error; // the verifier ran
+  std::string m = function(l.Text, "main");
+  EXPECT_EQ(count(m, "call @$rt.PaykanString_new(@.str"), 3u) << m;
+  // No runtime call takes the raw C string other than PaykanString_new.
+  EXPECT_EQ(count(m, "(@.str"), 3u) << m;
+  size_t at = m.find("call @$rt.PaykanString_char_at(%str.");
+  ASSERT_NE(at, std::string::npos) << m;
+  EXPECT_NE(m.find("vcall %str."), std::string::npos) << m; // .len()
+  // The subscript's and the receiver's Strs are destroyed after their use;
+  // the moved one is boxed into `v` (released at scope exit).
+  EXPECT_EQ(count(m, "call @$rt.PaykanString_destroy(%str."), 2u) << m;
+  EXPECT_NE(m.find("= box %str."), std::string::npos) << m;
+}
+
+// #117: runtime externs are `$rt.<C symbol>` in PIR, a name no Paykan
+// identifier can spell, so program functions spelled like runtime symbols
+// are ordinary functions, whatever their signature, and the runtime calls
+// still reach the runtime.  The names survive a print -> parse -> print
+// round trip.
+TEST(Lowering, RuntimeExternsCannotClashWithUserFunctions) {
+  auto l = lower(R"(
+    fn PaykanString_new(x: int) -> int { return x + 1; }
+    fn Paykan_println(s: Str) { print(s); }
+    fn Paykan_panic_div_by_zero() { println("mine"); }
+    fn PaykanObject_None() -> int { return 4; }
+    fn z() -> int { return 0; }
+    fn main() -> int {
+      Paykan_println("x");
+      Paykan_panic_div_by_zero();
+      a: Str? = None;
+      println(a);
+      return PaykanString_new(1) + PaykanObject_None() + 5 / z();
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const pir::Module &m = l.Program.Modules[0];
+  for (const char *name : {"PaykanString_new", "Paykan_println",
+                           "Paykan_panic_div_by_zero", "PaykanObject_None"}) {
+    const pir::Function *fn = m.findFunction(name);
+    ASSERT_NE(fn, nullptr) << name << "\n" << l.Text;
+    EXPECT_FALSE(fn->IsExtern) << name;
+  }
+  EXPECT_EQ(m.findFunction("PaykanString_new")->Sig.Params.size(), 1u);
+  for (const char *name : {"$rt.PaykanString_new", "$rt.Paykan_println",
+                           "$rt.Paykan_panic_div_by_zero"}) {
+    const pir::Function *fn = m.findFunction(name);
+    ASSERT_NE(fn, nullptr) << name << "\n" << l.Text;
+    EXPECT_TRUE(fn->IsExtern) << name;
+    EXPECT_TRUE(fn->Module.empty()) << name;
+    EXPECT_TRUE(pir::isRuntimeName(fn->Name)) << name;
+    EXPECT_EQ(pir::runtimeSymbol(fn->Name), std::string(name).substr(4));
+  }
+  EXPECT_NE(l.Text.find("extern fn @$rt.PaykanString_new(ptr, i64) -> obj"),
+            std::string::npos)
+      << l.Text;
+  EXPECT_NE(l.Text.find("extern obj @$rt.PaykanObject_None"), std::string::npos)
+      << l.Text;
+  std::string mainFn = function(l.Text, "main");
+  EXPECT_EQ(count(mainFn, "call @Paykan_println("), 1u) << mainFn;
+  EXPECT_EQ(count(mainFn, "call @Paykan_panic_div_by_zero()"), 1u) << mainFn;
+  EXPECT_EQ(count(mainFn, "call @$rt.Paykan_panic_div_by_zero()"), 1u)
+      << mainFn;
+  EXPECT_EQ(count(mainFn, "call @PaykanString_new(1)"), 1u) << mainFn;
+  EXPECT_EQ(count(mainFn, "call @$rt.PaykanString_new(@.str"), 1u) << mainFn;
+  EXPECT_EQ(count(mainFn, "@$rt.PaykanObject_None,"), 1u) << mainFn;
+
+  pir::ParseError perr;
+  auto parsed = pir::parseProgram(l.Text, perr);
+  ASSERT_TRUE(parsed) << perr.str();
+  auto errors = pir::verify(*parsed);
+  EXPECT_TRUE(errors.empty()) << pir::formatErrors(errors);
+  EXPECT_EQ(pir::toString(*parsed), l.Text);
+}
+
 // ---------------------------------------------------------------------------
 // Conversion constructors (#64): the semantics are the lowering's
 // ---------------------------------------------------------------------------
@@ -934,7 +1021,7 @@ TEST(Lowering, IntOfFloatGuardsTheRangeBeforeTheFToI) {
   std::string m = function(l.Text, "conv");
   size_t lo = m.find("cmp ge");
   size_t hi = m.find("cmp lt");
-  size_t panic = m.find("call @Paykan_panic_float_to_int(");
+  size_t panic = m.find("call @$rt.Paykan_panic_float_to_int(");
   size_t ftoi = m.find("ftoi");
   ASSERT_NE(lo, std::string::npos) << m;
   ASSERT_NE(hi, std::string::npos) << m;
@@ -953,7 +1040,8 @@ TEST(Lowering, CharOfIntGuardsTheByteRange) {
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "conv");
-  EXPECT_NE(m.find("call @Paykan_panic_int_to_char("), std::string::npos) << m;
+  EXPECT_NE(m.find("call @$rt.Paykan_panic_int_to_char("), std::string::npos)
+      << m;
   EXPECT_NE(m.find("cmp le"), std::string::npos) << m;
   EXPECT_NE(m.find("to char"), std::string::npos) << m;
 }
@@ -971,7 +1059,7 @@ TEST(Lowering, OtherNumericConversionsAreInline) {
   EXPECT_NE(function(l.Text, "b").find("to i64"), std::string::npos) << l.Text;
   EXPECT_NE(function(l.Text, "c").find("cmp ne"), std::string::npos) << l.Text;
   EXPECT_NE(function(l.Text, "d").find("to i64"), std::string::npos) << l.Text;
-  EXPECT_EQ(count(l.Text, "call @Paykan_panic"), 0u) << l.Text;
+  EXPECT_EQ(count(l.Text, "call @$rt.Paykan_panic"), 0u) << l.Text;
 }
 
 TEST(Lowering, ParsesCallTheRuntimeAndReturnAnOptionalBox) {
@@ -982,10 +1070,10 @@ TEST(Lowering, ParsesCallTheRuntimeAndReturnAnOptionalBox) {
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string p = function(l.Text, "p");
-  EXPECT_NE(p.find("call @PaykanInt_from_str("), std::string::npos) << p;
+  EXPECT_NE(p.find("call @$rt.PaykanInt_from_str("), std::string::npos) << p;
   // The fresh box is returned as-is: no extra retain.
   EXPECT_EQ(count(p, "retain"), 0u) << p;
-  EXPECT_NE(function(l.Text, "q").find("call @PaykanFloat_from_str("),
+  EXPECT_NE(function(l.Text, "q").find("call @$rt.PaykanFloat_from_str("),
             std::string::npos)
       << l.Text;
 }
@@ -1001,15 +1089,15 @@ TEST(Lowering, BoxedParsesShareThePrimitiveParse) {
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string p = function(l.Text, "p");
-  EXPECT_NE(p.find("call @PaykanInt_from_str("), std::string::npos) << p;
+  EXPECT_NE(p.find("call @$rt.PaykanInt_from_str("), std::string::npos) << p;
   EXPECT_EQ(count(p, "retain"), 0u) << p;
-  EXPECT_NE(function(l.Text, "q").find("call @PaykanFloat_from_str("),
+  EXPECT_NE(function(l.Text, "q").find("call @$rt.PaykanFloat_from_str("),
             std::string::npos)
       << l.Text;
-  EXPECT_NE(function(l.Text, "r").find("call @PaykanBool_from_str("),
+  EXPECT_NE(function(l.Text, "r").find("call @$rt.PaykanBool_from_str("),
             std::string::npos)
       << l.Text;
-  EXPECT_NE(function(l.Text, "t").find("call @PaykanBool_from_str("),
+  EXPECT_NE(function(l.Text, "t").find("call @$rt.PaykanBool_from_str("),
             std::string::npos)
       << l.Text;
 }
@@ -1024,10 +1112,11 @@ TEST(Lowering, BoxedSourcesUnboxThenFormat) {
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   const char *expected[][3] = {
-      {"a", "call @PaykanInt_value(", "call @PaykanString_from_int("},
-      {"b", "call @PaykanFloat_value(", "call @PaykanString_from_float("},
-      {"c", "call @PaykanBool_value(", "call @PaykanString_from_bool("},
-      {"d", "call @PaykanChar_value(", "call @PaykanString_from_char("},
+      {"a", "call @$rt.PaykanInt_value(", "call @$rt.PaykanString_from_int("},
+      {"b", "call @$rt.PaykanFloat_value(",
+       "call @$rt.PaykanString_from_float("},
+      {"c", "call @$rt.PaykanBool_value(", "call @$rt.PaykanString_from_bool("},
+      {"d", "call @$rt.PaykanChar_value(", "call @$rt.PaykanString_from_char("},
   };
   for (const auto &e : expected) {
     std::string fn = function(l.Text, e[0]);

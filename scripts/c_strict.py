@@ -39,7 +39,6 @@ import samples_parity as sp  # noqa: E402  (shares the corpus and checks)
 ROOT = sp.ROOT
 RUNTIME = ROOT / "src" / "Runtime"
 STRICT_FLAGS = ["-std=c11", "-pedantic-errors", "-Wall", "-Wextra", "-Werror"]
-ARGS = ["a", "b"]
 EXTRA = []  # --cflag
 
 
@@ -61,9 +60,10 @@ def exit_code(rc):
     return 128 - rc if rc < 0 else rc
 
 
-def run_exe(exe, sample):
+def run_exe(exe, sample, outdir):
     env = dict(os.environ, PAYKAN_TRACK_HEAP="1")
-    p = subprocess.run([str(sample)] + ARGS, executable=str(exe),
+    p = subprocess.run([str(sample), *sp.sample_args(sample, outdir)],
+                       executable=str(exe),
                        stdin=subprocess.DEVNULL, capture_output=True,
                        text=True, errors="replace", cwd=str(ROOT), env=env)
     p.returncode = exit_code(p.returncode)
@@ -113,7 +113,7 @@ def check_sample(args, sample, idx, runtimes, wrappers, outdir):
     """[(label, problems)] for one sample."""
     results = []
     ref_p = tool([args.paykan, "--backend=c", "--track-heap", str(sample),
-                  *ARGS])
+                  *sp.sample_args(sample, outdir)])
     ref = sp.normalise(ref_p)
     if ref[3] not in (0, None):  # None: a panic aborts before the report
         return [("reference run", [f"live blocks {ref[3]} (exit {ref[0]})"])]
@@ -130,7 +130,7 @@ def check_sample(args, sample, idx, runtimes, wrappers, outdir):
         if p.returncode != 0:
             results.append((label, ["compile failed:\n" + p.stderr]))
             continue
-        results.append((label, compare(ref, run_exe(exe, sample))))
+        results.append((label, compare(ref, run_exe(exe, sample, outdir))))
     for wi, (cc, wrap) in enumerate(wrappers.items()):
         label = f"build {cc}"
         exe = Path(outdir) / f"s{idx}-build{wi}"
@@ -139,7 +139,7 @@ def check_sample(args, sample, idx, runtimes, wrappers, outdir):
         if p.returncode != 0:
             results.append((label, ["build failed:\n" + p.stderr]))
             continue
-        results.append((label, compare(ref, run_exe(exe, sample))))
+        results.append((label, compare(ref, run_exe(exe, sample, outdir))))
     return results
 
 

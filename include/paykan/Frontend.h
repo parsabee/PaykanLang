@@ -29,6 +29,14 @@
 
 namespace paykan::frontend {
 
+/// Deepest nesting of blocks, parentheses, brackets, type applications,
+/// prefix operators and conditional expressions a frontend accepts
+/// (docs/grammar.md section 9).  Every frontend rejects deeper input with
+/// `nesting too deep (more than kMaxNesting levels)`, so that pathological
+/// input can overflow neither a recursive-descent parser's native stack nor
+/// the recursive passes after parsing (Sema, the AST printer).
+inline constexpr unsigned kMaxNesting = 512;
+
 /// Per-parse options.  A frontend ignores the ones it does not support.
 struct Options {
   /// Debug traces of the parser / scanner, when the frontend has them

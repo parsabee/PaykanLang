@@ -22,7 +22,8 @@ Design rules:
   detail.  LP64 is assumed by the runtime ABI (every array/tuple slot is 8
   bytes), and PIR inherits that assumption.
 * **Runtime by name.**  Anything the runtime does is a `call` to an `extern fn`
-  named by its C symbol (the list below is the ABI).  Only ops that *every*
+  named by its C symbol under the `$rt.` prefix (`@$rt.PaykanString_new`; the
+  list below is the ABI).  Only ops that *every*
   backend wants to map specially (ARC, allocation, vtables, field access) are
   first-class.
 
@@ -80,7 +81,7 @@ fn @name(%p0: T0, %p1: T1) -> R {
   local %x: T          ; mutable slot, function-scoped, uninitialised
   ...statements...
 }
-extern fn @Paykan_retain(box) -> void              ; runtime ABI symbol
+extern fn @$rt.Paykan_retain(box) -> void          ; runtime ABI symbol `Paykan_retain`
 extern fn @add(i64, i64) -> i64 module "lib::math" ; defined in another PIR module
 extern fn @"x::tag"() -> box module "x" symbol @tag ; named `tag` in module "x"
 ```
@@ -95,7 +96,8 @@ scope-exit `release` of a moved variable is a release of `null` (the runtime
 accepts it).
 
 A function is `extern` when it is defined elsewhere: in the runtime (no
-`module` clause; the name is the C symbol) or in another PIR module of the same
+`module` clause; the name is `$rt.` followed by the C symbol, see below) or in
+another PIR module of the same
 program (`module "<module name>"`, written on the declaration's line: a
 `module` on a later line starts the next module).  A module extern may add
 `symbol @<name>` (on the same line): the function's name in its defining
@@ -106,9 +108,20 @@ the importer's own `@tag` are distinct symbols; a function reached through
 several qualifiers is declared once.  Backends link a module extern through
 its `(module, symbol)` pair.  Backends may mangle the
 names of module-defined symbols (C needs to: `Box<int>`, `first<int>` and
-`helper::add` are not C identifiers) but must leave runtime symbols as they are;
-a `(module, name)` pair must mangle the same way in every module of the
+`helper::add` are not C identifiers) but must link a runtime extern by its C
+symbol, the name without `$rt.` (`pir::runtimeSymbol`, `PIR.h`); a
+`(module, name)` pair must mangle the same way in every module of the
 program.
+
+**Runtime names.**  Runtime externs (`extern fn` without a `module`, `extern
+obj`, `extern vtable`), and only they, are named `$rt.<C symbol>`:
+`@$rt.PaykanString_new` is the runtime's `PaykanString_new`.  No Paykan
+identifier can spell `$` or `.`, so the runtime and the program never share a
+PIR name: a program function `fn PaykanString_new(x: int) -> int` is the
+ordinary `@PaykanString_new` (C `pk_<module>_PaykanString_new`, LLVM
+`pk.PaykanString_new`), whatever its signature, and the program's own string
+literals still call `@$rt.PaykanString_new`.  The verifier enforces both
+directions (§9).
 
 ## 4. Module-level items
 
@@ -119,8 +132,8 @@ cstr  @.str0  = "hello\n"  len 6   ; NUL-terminated literal data (`ptr`)
 data  @.arr0  = [1, 2, 3]          ; constant i64 words, primitive array literals (`ptr`)
 bytes @.tk0   = [0, 4]             ; tuple slot-kind descriptor, PaykanTupleKind bytes (`ptr`)
 
-extern obj    @PaykanObject_None   ; runtime object singletons (`obj`)
-extern vtable @PaykanArray_vtable  ; runtime vtable globals (`ptr`)
+extern obj    @$rt.PaykanObject_None   ; runtime object singletons (`obj`)
+extern vtable @$rt.PaykanArray_vtable  ; runtime vtable globals (`ptr`)
 
 class Point {                      ; layout + vtable, see §5 (`: Super` names
                                    ; the superclass; none for a root class)
@@ -128,8 +141,8 @@ class Point {                      ; layout + vtable, see §5 (`: Super` names
   field name: box
   vtable {
     destroy  = @Point.destroy  : (obj) -> void
-    toString = @PaykanObject_toString : (obj) -> box
-    equals   = @PaykanObject_equals   : (obj, box) -> i64
+    toString = @$rt.PaykanObject_toString : (obj) -> box
+    equals   = @$rt.PaykanObject_equals   : (obj, box) -> i64
     move     = @Point.move : (obj, i64, i64) -> void
   }
 }
@@ -258,7 +271,7 @@ free %o              ; Paykan_free of the object struct (destructors only)
 %v = field.load %o, Point.x
 field.store %o, Point.x, %v                    ; plain store: ARC is explicit around it
 %p = vtable.load %o                            ; the object's vtable pointer (ptr)
-%p = vtable.addr Point   |   vtable.addr @PaykanArray_obj_vtable
+%p = vtable.addr Point   |   vtable.addr @$rt.PaykanArray_obj_vtable
 ```
 
 **Locals**
@@ -306,7 +319,7 @@ CodeGen enforced, now in one place.
   `PaykanString_equals` with a boxed literal); enum arms compare `i64`
   constants.  Arm bindings are raw `obj` aliases (unowned).
 * **Optionals**: `None` into a `T?` is `null`; a `T?` into an `Obj` slot is
-  replaced by a +1 box of `@PaykanObject_None` when null.  An optional
+  replaced by a +1 box of `@$rt.PaykanObject_None` when null.  An optional
   primitive (`int?`, `float?`, `bool?`, `char?`) boxes a present value: a
   primitive that Sema marked for an optional primitive slot is lowered as
   `PaykanInt_new` (etc.) followed by `box`, a fresh +1 box for that slot; a
@@ -320,19 +333,21 @@ CodeGen enforced, now in one place.
   string; `bool<Str>` accepts exactly `"True"` and `"False"`).  The boxed
   forms `Int<Str>` & co. are the same calls.  The numeric ones are inline: `int<float>` checks
   `cmp ge %f, -2^63` and `cmp lt %f, 2^63` (both false for NaN) and calls
-  `@Paykan_panic_float_to_int(%f)` then `unreachable` otherwise, before the
+  `@$rt.Paykan_panic_float_to_int(%f)` then `unreachable` otherwise, before the
   `ftoi`; `float<int>` is `itof`; `int<bool>` and `int<char>` are `cast`s to
   `i64` (zero-extending, so a char's code is 0..255); `bool<int>` is
   `cmp ne %n, 0`; `char<int>` panics outside 0..255
-  (`@Paykan_panic_int_to_char`) and maps 128..255 to the same byte's signed
+  (`@$rt.Paykan_panic_int_to_char`) and maps 128..255 to the same byte's signed
   value before the truncating `cast`, so no backend converts an out-of-range
   value.
-* **Division**: integer `div` is preceded by `if %b == 0 { call @Paykan_panic_div_by_zero(); unreachable }`
+* **Division**: integer `div` is preceded by `if %b == 0 { call @$rt.Paykan_panic_div_by_zero(); unreachable }`
   and the `INT64_MIN / -1` check; `rem` replaces a `-1` divisor by `1`.
 
 ## 8. Runtime ABI (extern declarations the lowering may emit)
 
-Signatures in PIR types.  `bool` never appears at the ABI: a Paykan `bool`
+Signatures in PIR types, by C symbol: each is declared under its runtime
+name (`extern fn @$rt.Paykan_free(ptr) -> void`, `extern obj
+@$rt.PaykanObject_None`, §3).  `bool` never appears at the ABI: a Paykan `bool`
 crossing into the runtime is `cast` to `i64` first.
 
 ```
@@ -379,10 +394,10 @@ PaykanFile_destroy(obj) -> void     PaykanFile_toString(obj) -> box
 PaykanFile_equals(obj, box) -> i64  PaykanFile_write(obj, obj) -> void
 PaykanFile_readln(obj) -> box
 ; globals
-extern obj @PaykanObject_None   extern obj @PaykanFile_Stdin
-extern vtable @PaykanArray_vtable   extern vtable @PaykanArray_obj_vtable
-extern vtable @PaykanInt_vtable     extern vtable @PaykanFloat_vtable
-extern vtable @PaykanBool_vtable    extern vtable @PaykanChar_vtable
+extern obj PaykanObject_None     extern obj PaykanFile_Stdin
+extern vtable PaykanArray_vtable  extern vtable PaykanArray_obj_vtable
+extern vtable PaykanInt_vtable    extern vtable PaykanFloat_vtable
+extern vtable PaykanBool_vtable   extern vtable PaykanChar_vtable
 ```
 
 `names::kCodeGenRequiredSymbols` in `include/Names.h` is the authoritative
@@ -416,6 +431,9 @@ The verifier rejects a program when:
   (its last statement is not a `ret`, `unreachable` or terminating `if`);
 * a module-level symbol is defined twice, or a vtable entry's signature does not
   match the named function's declaration;
+* a runtime extern (`extern fn` without a `module`, `extern obj`, `extern
+  vtable`) is not named `$rt.<symbol>`, or anything else (a function, a module
+  extern's `symbol`, a `cstr`/`data`/`bytes` global) is;
 * `@main` has a signature other than `() -> i64` or `(box) -> i64`.
 
 ## 10. Text format summary
@@ -423,14 +441,14 @@ The verifier rejects a program when:
 ```
 module "01"
 cstr @.str0 = "Hello" len 5
-extern fn @PaykanString_new(ptr, i64) -> obj
-extern fn @Paykan_println(obj) -> void
-extern fn @PaykanString_destroy(obj) -> void
+extern fn @$rt.PaykanString_new(ptr, i64) -> obj
+extern fn @$rt.Paykan_println(obj) -> void
+extern fn @$rt.PaykanString_destroy(obj) -> void
 
 fn @main() -> i64 {
-  %s = call @PaykanString_new(@.str0, 5)
-  call @Paykan_println(%s)
-  call @PaykanString_destroy(%s)
+  %s = call @$rt.PaykanString_new(@.str0, 5)
+  call @$rt.Paykan_println(%s)
+  call @$rt.PaykanString_destroy(%s)
   ret 0
 }
 ```

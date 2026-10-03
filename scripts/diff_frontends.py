@@ -5,7 +5,9 @@ Runs `paykan --frontend=<name> --dump-ast` with two frontends over every
 `.pkn` file below the given directories (default: samples/) and reports any
 file for which the two differ in exit status or in the printed AST.  Both frontends must accept the same inputs,
 reject the same inputs and build the same AST (docs/grammar.md); this script
-is the CI gate for that rule.
+is the CI gate for that rule.  Diagnostics are not compared: their wording,
+and the errors after the first (each frontend recovers in its own way), may
+differ between frontends (docs/grammar.md section 9).
 
 Usage:
     scripts/diff_frontends.py --paykan build/bin/paykan [dir ...]

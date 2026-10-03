@@ -319,3 +319,83 @@ TEST(Poison, ColliderDoesNotSilenceTheOriginal) {
             std::string::npos)
       << r.Diagnostics;
 }
+
+// ============================================================================
+// Reserved binder names (#126): every binder rejects `Stdin` and type names
+// with one error, through the same guard.
+// ============================================================================
+
+namespace {
+
+// Exactly one error, @p expected.
+void expectOneBinderError(const std::string &src, const std::string &expected) {
+  auto r = semaCheck(src);
+  EXPECT_FALSE(r.Ok) << src;
+  EXPECT_EQ(r.ErrorCount, 1u) << src << "\n" << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find(expected), std::string::npos) << src << "\n"
+                                                             << r.Diagnostics;
+}
+
+const std::string kStdinMsg =
+    "'Stdin' is a reserved name and cannot be used as a variable";
+const std::string kPointMsg =
+    "'Point' is a type name and cannot be used as a variable";
+const std::string kPoint = "class Point { x: int; fn __init__() { self.x = "
+                           "0; } }\n";
+
+} // namespace
+
+TEST(BinderName, InferredAssignmentRejectsReservedNames) {
+  expectOneBinderError(wrapMain("Stdin = 1;"), kStdinMsg);
+  expectOneBinderError(kPoint + wrapMain("Point = 1;"), kPointMsg);
+}
+
+TEST(BinderName, TypedDeclarationRejectsReservedNames) {
+  // The issue's reproducer.
+  expectOneBinderError(wrapMain("Stdin: File = Stdin;"), kStdinMsg);
+  expectOneBinderError(kPoint + wrapMain("Point: int = 1;"), kPointMsg);
+  expectOneBinderError(wrapMain("Str: int = 1;"),
+                       "'Str' is a type name and cannot be used");
+}
+
+TEST(BinderName, DestructuringTargetsRejectReservedNames) {
+  expectOneBinderError(wrapMain("Stdin, b = (1, 2);"), kStdinMsg);
+  expectOneBinderError(wrapMain("a, Stdin: int = (1, 2);"), kStdinMsg);
+  expectOneBinderError(kPoint + wrapMain("Point: int, b = (1, 2);"), kPointMsg);
+}
+
+TEST(BinderName, FunctionParametersRejectReservedNames) {
+  expectOneBinderError("fn f(Stdin: File) -> int { return 0; }\n" +
+                           wrapMain("n = f(Stdin);"),
+                       kStdinMsg);
+  expectOneBinderError(kPoint + "fn f(Point: int) -> int { return Point; }\n" +
+                           wrapMain("n = f(1);"),
+                       kPointMsg);
+}
+
+TEST(BinderName, MethodParametersRejectReservedNames) {
+  expectOneBinderError("class C { fn m(Stdin: int) -> int { return 0; } }\n" +
+                           wrapMain("c = C(); n = c.m(1);"),
+                       kStdinMsg);
+}
+
+TEST(BinderName, MatchBindingsRejectReservedNames) {
+  expectOneBinderError(
+      wrapMain("o: Obj = \"s\";\n match o { Stdin: Str { println(Stdin); } "
+               "_ { } }"),
+      kStdinMsg);
+  expectOneBinderError(
+      kPoint + wrapMain("o: Obj = Point();\n match o { Point: Point { "
+                        "println(Str(Point.x)); } _ { } }"),
+      kPointMsg);
+  expectOneBinderError(
+      wrapMain("s: Str? = None;\n match s { Stdin: Str { } None { } }"),
+      kStdinMsg);
+}
+
+TEST(BinderName, OrdinaryNamesAreStillAccepted) {
+  auto r = semaCheck(kPoint + "fn f(print: int) -> int { return print; }\n" +
+                     wrapMain("point = Point(); stdin = 1; a, b: int = (1, 2);"
+                              " n = f(a + b);"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}

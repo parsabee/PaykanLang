@@ -115,7 +115,7 @@ private:
     if (!f->IsExtern)
       return mangle(module, isMain, name);
     if (f->Module.empty())
-      return name; // runtime
+      return runtimeSymbol(name); // runtime: its C name
     bool otherIsMain = false;
     if (const Module *other = findModule(f->Module, otherIsMain))
       return mangle(*other, otherIsMain, f->linkName());
@@ -245,7 +245,7 @@ private:
     // Declarations go through getOrInsertGlobal, which creates the global in
     // the module (that owns it) unless it is already declared.
     for (const ExternGlobal &g : module.Externs)
-      M->getOrInsertGlobal(g.Name, llvm::Type::getInt8Ty(Ctx));
+      M->getOrInsertGlobal(runtimeSymbol(g.Name), llvm::Type::getInt8Ty(Ctx));
     for (const Class &c : module.Classes) {
       std::string sym = classSymbol(module, isMain, c.Name);
       classType(sym, c);
@@ -273,8 +273,9 @@ private:
                              const std::string &name) {
     if (auto *g = M->getNamedGlobal(mangle(module, isMain, name)))
       return g;
-    if (auto *g = M->getNamedGlobal(name))
-      return g; // extern obj / vtable
+    if (isRuntimeName(name))
+      if (auto *g = M->getNamedGlobal(runtimeSymbol(name)))
+        return g; // extern obj / vtable
     if (auto *f = M->getFunction(functionName(module, isMain, name)))
       return f;
     return nullptr;

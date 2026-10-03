@@ -18,13 +18,15 @@ generics) are experimental and may change.
 
 ### Breaking changes
 
-- **The default build is the recursive-descent frontend and the C backend
-  (#123).** A plain `cmake -B build` builds only those two and downloads
-  nothing. The LLVM backend, with its JIT, and the Bison frontend are opt-in
-  at configure time: `-DPAYKAN_BACKENDS="llvm;c"`,
-  `-DPAYKAN_FRONTENDS="recursive-descent;bison"`. Without the LLVM backend,
-  `paykan` runs programs with the C backend, which needs a C11 compiler
-  (`cc`, or `$CC`) at run time; `--list-backends` shows the default.
+- **The default build is the core: the recursive-descent frontend and the C
+  backend (#123).** The default backend changes from llvm to c. A plain
+  `cmake -B build` builds only those two and downloads nothing. The LLVM
+  backend, with its JIT, and the Bison frontend are opt-in at configure time:
+  `-DPAYKAN_BACKENDS="llvm;c"`, `-DPAYKAN_FRONTENDS="recursive-descent;bison"`.
+  The default backend is the first one listed (`llvm` with `llvm;c`);
+  `--list-backends` shows it. Without the LLVM backend, `paykan` runs programs
+  with the C backend, which needs a C11 compiler (`cc`, or `$CC`) at run time.
+  The release tarballs and the Homebrew formula ship the core only.
 - **The Bison frontend is an optional plugin (#17, #60).** The hand-written
   recursive-descent frontend (standard C++ only) is the default. The
   Bison/Flex frontend implements the same grammar (`docs/grammar.md`) and
@@ -252,6 +254,23 @@ generics) are experimental and may change.
 - `float` `!=` is IEEE 754's unordered not-equal (#58): `nan != nan` is
   `True` on both backends.
 - The GCC 13 Release build compiles under `-Werror` (#76).
+- A string literal used as an object (`"ab"[1]`, `"abc".len()`, `mov "lit"`
+  in any position, a literal in a tuple, array or optional) is now a `Str`
+  object; it was passed as its raw C string, an internal compiler error
+  (#116). User functions spelled like runtime symbols (`PaykanString_new`,
+  `Paykan_println`, `Paykan_panic_div_by_zero`, ...) no longer replace or
+  clash with the runtime's, which was an internal compiler error or a silent
+  miscompile (#117): runtime externs are now named `$rt.<symbol>` in PIR
+  (`docs/pir.md` §3), a name no Paykan identifier can spell.
+- **Diagnostics and driver (#119, #120, #126).** A failed import (missing,
+  circular, a directory, or a module with errors) is reported once, and uses
+  of its names are not reported again; import messages name modules
+  canonically (`lib::m`) and files from the source root. `''` is one
+  `empty character literal` error. `x: Str? = mov None` is accepted. `-O4`
+  and above are rejected; a directory as the source file is a clean error.
+  The Bison frontend enforces the 512-level nesting limit. `Stdin` and type
+  names are rejected by every binder, including typed declarations and
+  parameters.
 - An empty array literal `[]` stored into a class field, passed as a
   call/method/`push` argument, returned, stored through a subscript, or nested
   in another literal was compiled as a primitive-element array regardless of
@@ -346,6 +365,20 @@ generics) are experimental and may change.
   (#112). Debug builds of the compiler now abort with an internal error when
   the identical diagnostic (same location, message and notes) is reported
   twice.
+- The runtime lookup of `paykan run` / `build` no longer prefers a stale
+  build tree over an installed binary's own prefix (#124). The order is now
+  `$PAYKAN_RUNTIME_DIR`, the install prefix around the executable, the build
+  tree (only for binaries inside it, marked by `.paykan-build-tree`), then the
+  configured install prefix. `PaykanConfig.cmake` records the installed
+  runtime (`PAYKAN_RUNTIME_LIBRARY` / `PAYKAN_RUNTIME_INCLUDE_DIR`), and
+  drivers made with `paykan_add_driver` use it, so they work wherever they
+  are built. The samples that write files put them in a directory the
+  harness passes per run (`// args: {tmpdir}`), so parallel runs no longer
+  race on fixed `/tmp` paths.
+- Dropping a deep chain of objects (a long `Node?` list, a deeply nested tree,
+  arrays and tuples nested inside each other) no longer overflows the C stack
+  (#118). The runtime destroys objects iteratively, in constant stack space
+  (`docs/language/08-memory-model.md`).
 
 ### Changed
 

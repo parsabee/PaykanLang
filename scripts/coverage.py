@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """Produce an LLVM source-based coverage report for PaykanLang.
 
-Prerequisites: configure + build a coverage tree, e.g.
+Prerequisites: a Clang with llvm-profdata / llvm-cov, and a coverage tree.
+The vendored LLVM 17 under build/third-party/llvm is downloaded only by a
+configure that lists the llvm backend; a plain configure (recursive-descent +
+c) does not download it, so pass the full lists, e.g.
 
+    cmake -B build "-DPAYKAN_FRONTENDS=recursive-descent;bison" \\
+          "-DPAYKAN_BACKENDS=llvm;c"
     cmake -B build-cov -DPAYKAN_COVERAGE=ON \\
+          "-DPAYKAN_FRONTENDS=recursive-descent;bison" \\
+          "-DPAYKAN_BACKENDS=llvm;c" \\
           -DCMAKE_C_COMPILER=build/third-party/llvm/bin/clang \\
           -DCMAKE_CXX_COMPILER=build/third-party/llvm/bin/clang++
     cmake --build build-cov --parallel

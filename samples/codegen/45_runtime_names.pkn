@@ -1,0 +1,47 @@
+// 45 — program functions spelled like runtime symbols (#117).  The runtime's
+// functions and globals are `$rt.<symbol>` in PIR (docs/pir.md), a name no
+// Paykan identifier can spell, so these are ordinary program functions: the
+// program calls them like any other, and its own string, print, conversion
+// and division operations still reach the runtime.
+// Exercises: user functions named PaykanString_new, Paykan_println,
+// PaykanString_concat, PaykanObject_None (signatures unlike the runtime's)
+// and Paykan_panic_div_by_zero, Paykan_panic_int_to_char (the runtime's own
+// signatures), next to string literals, concatenation, println, None,
+// division and char<int>, whose runtime guards stay the runtime's.  Run with
+// --track-heap: zero live blocks.
+
+// expect-stdout: hi
+// expect-stdout: PaykanString_new(2) = 3
+// expect-stdout: Paykan_println(6, 7) = 42
+// expect-stdout: PaykanString_concat() = 9
+// expect-stdout: PaykanObject_None() = 4, None
+// expect-stdout: user Paykan_panic_div_by_zero
+// expect-stdout: user Paykan_panic_int_to_char(300)
+// expect-stdout: 10 / 2 = 5
+// expect-stdout: char<int>(65) = A
+
+fn PaykanString_new(x: int) -> int { return x + 1; }
+fn Paykan_println(a: int, b: int) -> int { return a * b; }
+fn PaykanString_concat() -> int { return 9; }
+fn PaykanObject_None() -> int { return 4; }
+fn Paykan_panic_div_by_zero() { println("user Paykan_panic_div_by_zero"); }
+fn Paykan_panic_int_to_char(n: int) {
+  println("user Paykan_panic_int_to_char(" + Str(n) + ")");
+}
+
+fn two() -> int { return 2; }
+
+fn main() -> int {
+  println("hi");
+  println("PaykanString_new(2) = " + Str<int>(PaykanString_new(2)));
+  println("Paykan_println(6, 7) = " + Str<int>(Paykan_println(6, 7)));
+  println("PaykanString_concat() = " + Str<int>(PaykanString_concat()));
+  nothing: Str? = None;
+  print("PaykanObject_None() = " + Str<int>(PaykanObject_None()) + ", ");
+  println(nothing);
+  Paykan_panic_div_by_zero();
+  Paykan_panic_int_to_char(300);
+  println("10 / 2 = " + Str<int>(10 / two()));
+  println("char<int>(65) = " + Str<char>(char<int>(65)));
+  return 0;
+}

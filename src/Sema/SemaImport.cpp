@@ -3,6 +3,7 @@
 //
 // Semantic analysis: import resolution and module caching.
 
+#include "ModuleName.h"
 #include "ModuleUtils.h"
 #include "Names.h"
 #include "ParserDriver.h"
@@ -10,6 +11,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <utility>
 
 namespace paykan {
 namespace sema {
@@ -125,6 +127,41 @@ static bool isBootstrapClassName(const std::string &name) {
 }
 
 // ---------------------------------------------------------------------------
+// Failed imports and diagnostics
+// ---------------------------------------------------------------------------
+
+bool Sema::isFailedImportUse(std::string_view name) {
+  if (FailedImportQualifiers.empty())
+    return false;
+  // The qualifier is everything before the last "::" of the name proper (a
+  // type argument list may hold qualified names of its own).
+  std::string_view base = name.substr(0, name.find('<'));
+  size_t sep = base.rfind(names::kQualSep);
+  if (sep == std::string_view::npos ||
+      !FailedImportQualifiers.count(base.substr(0, sep)))
+    return false;
+  ++SuppressedFollowOns;
+  return true;
+}
+
+std::string Sema::displayPath(const std::filesystem::path &path) const {
+  if (path.is_relative())
+    return path.string();
+  // An empty root is the current directory (see module_utils::appendPath).
+  std::error_code ec;
+  auto root = std::filesystem::weakly_canonical(
+      ProjectRoot.empty() ? std::filesystem::path(".")
+                          : std::filesystem::path(ProjectRoot),
+      ec);
+  if (ec)
+    return path.string();
+  auto rel = path.lexically_relative(root);
+  if (rel.empty() || *rel.begin() == "..")
+    return path.string();
+  return rel.string();
+}
+
+// ---------------------------------------------------------------------------
 // resolveModulePath
 // ---------------------------------------------------------------------------
 
@@ -140,19 +177,41 @@ std::string Sema::resolveModulePath(const std::string &modulePath,
     else
       base = module_utils::appendPath(ProjectRoot, names::kStdlibDir);
     base = module_utils::appendPath(base, relPath);
-    if (auto resolved = module_utils::realPath(base); !resolved.empty())
-      return resolved;
-    error(loc, "system module '" + modulePath + "' not found (tried " +
-                   base.string() + ")");
-    return "";
+    return checkModuleFile(
+        base, displayPath(base),
+        module_name::canonicalImportName(modulePath, /*isSystem=*/true),
+        "system module", loc);
   }
 
   std::filesystem::path full = module_utils::appendPath(ProjectRoot, relPath);
-  if (auto resolved = module_utils::realPath(full); !resolved.empty())
-    return resolved;
-  error(loc,
-        "module '" + modulePath + "' not found (tried " + full.string() + ")");
-  return "";
+  // Shown relative to the source root, like every imported file.
+  return checkModuleFile(
+      full, relPath,
+      module_name::canonicalImportName(modulePath, /*isSystem=*/false),
+      "module", loc);
+}
+
+std::string Sema::checkModuleFile(const std::filesystem::path &file,
+                                  const std::string &shown,
+                                  const std::string &module, const char *kind,
+                                  ast::SourceLocation loc) {
+  std::string resolved = module_utils::realPath(file);
+  if (resolved.empty()) {
+    error(loc, std::string(kind) + " '" + module + "' not found (tried " +
+                   shown + ")");
+    return "";
+  }
+  // `lib/m.pkn/` -- a directory where the module's file should be (#120).
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(resolved, ec)) {
+    error(loc, std::string(kind) + " '" + module + "': '" + shown + "' is " +
+                   (std::filesystem::is_directory(resolved, ec)
+                        ? "a directory"
+                        : "not a regular file") +
+                   ", not a source file");
+    return "";
+  }
+  return resolved;
 }
 
 // ---------------------------------------------------------------------------
@@ -165,10 +224,11 @@ bool Sema::processImport(ast::ImportDecl *node) {
   // Helper: load one module from a resolved path, cache it, inject exports.
   auto loadModule = [&](const std::string &path, const std::string &qualifier,
                         const std::string &fullModulePath,
+                        const std::string &moduleName,
                         ast::SourceLocation loc) -> bool {
     // Cycle detection.
     if (ImportStack && ImportStack->count(path)) {
-      error(loc, "circular import detected for '" + path + "'");
+      error(loc, "circular import of module '" + moduleName + "'");
       return false;
     }
 
@@ -186,8 +246,7 @@ bool Sema::processImport(ast::ImportDecl *node) {
     // resolve is a compiler bug or a corrupt cache entry, and is reported
     // against the import site rather than degraded to Obj/void, which would
     // only surface later as a baffling type mismatch at a call site.
-    const std::string diagPrefix =
-        "import of module '" + fullModulePath + "': ";
+    const std::string diagPrefix = "import of module '" + moduleName + "': ";
 
     auto resolveOrReport = [&](const std::string &tyName,
                                const std::string &what) -> ast::Type * {
@@ -202,20 +261,24 @@ bool Sema::processImport(ast::ImportDecl *node) {
     // import paths reach it).  Binding a name to a type declared by a
     // DIFFERENT module would silently merge two unrelated types; reject it.
     auto checkOrigin = [&](const char *kind, const std::string &name,
-                           const std::string &origin) -> bool {
-      if (origin.empty())
+                           const std::string &originPath,
+                           const std::string &originModule) -> bool {
+      if (originPath.empty())
         return true; // compiler builtin — identical in every context
       auto it = ImportedTypeOrigins.find(name);
       if (it == ImportedTypeOrigins.end()) {
-        ImportedTypeOrigins[name] = origin;
+        ImportedTypeOrigins[name] = {originPath, originModule};
         return true;
       }
-      if (it->second == origin)
+      if (it->second.Path == originPath)
         return true;
+      const std::string &other = it->second.Module.empty()
+                                     ? displayPath(it->second.Path)
+                                     : it->second.Module;
       error(loc, diagPrefix + kind + " '" + name +
                      "' conflicts with a type of the same name declared by "
                      "module '" +
-                     it->second + "' (type names are global across imports)");
+                     other + "' (type names are global across imports)");
       return false;
     };
 
@@ -237,7 +300,7 @@ bool Sema::processImport(ast::ImportDecl *node) {
 
       // Enums first: class fields and method signatures may be enum-typed.
       for (auto &ei : info.ExportedEnums) {
-        if (!checkOrigin("enum", ei.Name, ei.OriginPath)) {
+        if (!checkOrigin("enum", ei.Name, ei.OriginPath, ei.OriginModule)) {
           ok = false;
           continue;
         }
@@ -265,7 +328,7 @@ bool Sema::processImport(ast::ImportDecl *node) {
       // the same two-phase scheme checkClassDecls uses for a single file.
       std::vector<const ModuleInfo::ClassInfo *> pending, created;
       for (auto &ci : info.ExportedClasses) {
-        if (!checkOrigin("class", ci.Name, ci.OriginPath)) {
+        if (!checkOrigin("class", ci.Name, ci.OriginPath, ci.OriginModule)) {
           ok = false;
           continue;
         }
@@ -404,22 +467,35 @@ bool Sema::processImport(ast::ImportDecl *node) {
     // SourceLines lives in the driver and is filled by parseFile before the
     // parser runs, so handing its address over now is safe.
     auto importDriverPtr = std::make_shared<parser::ParserDriver>(FrontendName);
+    // Diagnostics name the module's file by its path from the source root.
     DiagEngine importDiag(Diags.getOS());
-    importDiag.setSourceInfo(path, &importDriverPtr->getSourceLines());
+    importDiag.setSourceInfo(displayPath(path),
+                             &importDriverPtr->getSourceLines());
     importDriverPtr->setDiagEngine(&importDiag);
+    // An imported module's own errors are reported through importDiag, with
+    // its file name and source lines; the import site adds no error of its
+    // own (it would only repeat them, once per importing module on the way
+    // up), just a note pointing at the import that led there.  They still
+    // fail this module (ImportedModuleErrors).
+    auto failedModule = [&](unsigned moduleErrors) {
+      if (moduleErrors == 0) {
+        // Nothing was reported (should not happen): keep the failure visible.
+        error(loc, "errors in imported module '" + moduleName + "'");
+        return false;
+      }
+      ImportedModuleErrors += moduleErrors;
+      Diags.note(loc, "in module '" + moduleName + "' imported here");
+      return false;
+    };
     if (importDriverPtr->parseFile(path) != 0) {
       importDriverPtr->setDiagEngine(nullptr);
-      error(loc, "failed to parse module '" + path + "'");
-      return false;
+      return failedModule(importDiag.getErrorCount());
     }
     // importDiag dies with this call frame but the driver (kept alive in the
     // returned SemaContext) does not — detach it now that parsing is done.
     importDriverPtr->setDiagEngine(nullptr);
 
-    // Run Sema on the imported module, reusing the same engine (re-pointed at
-    // the file name the parse recorded).
-    importDiag.setSourceInfo(importDriverPtr->getCurrentFile(),
-                             &importDriverPtr->getSourceLines());
+    // Run Sema on the imported module, reusing the same engine.
     Sema importSema(importDriverPtr->getASTContext(), importDiag, ProjectRoot,
                     FrontendName);
     if (ImportStack)
@@ -431,10 +507,8 @@ bool Sema::processImport(ast::ImportDecl *node) {
     bool importOk = (bool)childCtx;
     if (ImportStack)
       ImportStack->erase(path);
-    if (!importOk) {
-      error(loc, "errors in imported module '" + path + "'");
-      return false;
-    }
+    if (!importOk)
+      return failedModule(childCtx.ErrorCount);
 
     // -- Serialise the module's exports --------------------------------------
     //
@@ -452,7 +526,7 @@ bool Sema::processImport(ast::ImportDecl *node) {
     // an import ("" when unknown).
     auto lookupOrigin = [](const Sema &s, const std::string &name) {
       auto it = s.ImportedTypeOrigins.find(name);
-      return it == s.ImportedTypeOrigins.end() ? std::string() : it->second;
+      return it == s.ImportedTypeOrigins.end() ? TypeOrigin() : it->second;
     };
     StringSet localClasses, localEnums;
     for (auto *cd : importRoot->getClassDecls())
@@ -477,7 +551,10 @@ bool Sema::processImport(ast::ImportDecl *node) {
       ModuleInfo::ClassInfo ci;
       ci.Name = name;
       ci.IsLocal = localClasses.count(name) != 0;
-      ci.OriginPath = ci.IsLocal ? path : lookupOrigin(importSema, name);
+      TypeOrigin origin = ci.IsLocal ? TypeOrigin{path, moduleName}
+                                     : lookupOrigin(importSema, name);
+      ci.OriginPath = std::move(origin.Path);
+      ci.OriginModule = std::move(origin.Module);
       if (ct->getSuperClass()) {
         ci.SuperClassName = ct->getSuperClass()->getName();
         if (ci.SuperClassName == names::kObj)
@@ -512,7 +589,10 @@ bool Sema::processImport(ast::ImportDecl *node) {
       ModuleInfo::EnumInfo ei;
       ei.Name = name;
       ei.IsLocal = localEnums.count(name) != 0;
-      ei.OriginPath = ei.IsLocal ? path : lookupOrigin(importSema, name);
+      TypeOrigin origin = ei.IsLocal ? TypeOrigin{path, moduleName}
+                                     : lookupOrigin(importSema, name);
+      ei.OriginPath = std::move(origin.Path);
+      ei.OriginModule = std::move(origin.Module);
       for (auto *v : et->getVariants())
         ei.Variants.push_back(*v);
       info.ExportedEnums.push_back(std::move(ei));
@@ -560,10 +640,21 @@ bool Sema::processImport(ast::ImportDecl *node) {
   for (auto &m : node->getModules()) {
     std::string fullPath = node->modulePath(m);
     const std::string &qualifier = m.qualifier();
-    std::string resolved =
-        resolveModulePath(fullPath, isSystem, node->getLocation());
-    if (resolved.empty()) {
+    // The names a failed import binds are poisoned: their uses were reported
+    // with the import (#119).
+    // (A name that already names another module keeps it.)
+    std::string resolved;
+    auto poison = [&] {
+      for (const std::string *name : {&qualifier, &std::as_const(fullPath)}) {
+        auto it = ImportQualifiers.find(*name);
+        if (it == ImportQualifiers.end() || it->second.Resolved == resolved)
+          FailedImportQualifiers.insert(*name);
+      }
       ok = false;
+    };
+    resolved = resolveModulePath(fullPath, isSystem, node->getLocation());
+    if (resolved.empty()) {
+      poison();
       continue;
     }
     // The names this import binds must not already name another module.
@@ -585,8 +676,10 @@ bool Sema::processImport(ast::ImportDecl *node) {
       ok = false;
       continue;
     }
-    if (!loadModule(resolved, qualifier, fullPath, node->getLocation()))
-      ok = false;
+    if (!loadModule(resolved, qualifier, fullPath,
+                    module_name::canonicalImportName(fullPath, isSystem),
+                    node->getLocation()))
+      poison();
   }
   return ok;
 }
