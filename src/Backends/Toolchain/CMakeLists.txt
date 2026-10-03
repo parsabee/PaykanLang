@@ -13,8 +13,10 @@ target_include_directories(paykan_backend_toolchain
     PUBLIC ${CMAKE_SOURCE_DIR}/include
 )
 # Where this build tree's runtime lives, so `paykan build` / `run` work
-# without an install step, and where `cmake --install` puts it; the install
-# layout next to the executable is searched in between at run time.
+# without an install step, and where `cmake --install` puts it (Toolchain.cpp
+# has the lookup order).  The build tree's runtime is used only by binaries
+# inside the build tree: the marker file at its top says so, and an installed
+# binary is never below it.
 # A sanitizer or coverage build instruments libpaykan_runtime.a, so programs
 # linked against it need the same flags (SanitizerSetup.cmake,
 # CoverageSetup.cmake) whichever backend builds them.  Coverage flags are
@@ -45,7 +47,10 @@ if(PAYKAN_COVERAGE_FLAGS)
         endif()
     endif()
 endif()
+file(WRITE ${CMAKE_BINARY_DIR}/.paykan-build-tree
+    "A Paykan build tree: binaries below this directory use its runtime.\n")
 target_compile_definitions(paykan_backend_toolchain PRIVATE
+    PAYKAN_BUILD_TREE_DIR="${CMAKE_BINARY_DIR}"
     PAYKAN_RUNTIME_LIB_PATH="$<TARGET_FILE:paykan_runtime>"
     PAYKAN_RUNTIME_INCLUDE_DIR="${CMAKE_SOURCE_DIR}/src/Runtime"
     PAYKAN_INSTALLED_RUNTIME_LIB="${CMAKE_INSTALL_FULL_LIBDIR}/$<TARGET_FILE_NAME:paykan_runtime>"

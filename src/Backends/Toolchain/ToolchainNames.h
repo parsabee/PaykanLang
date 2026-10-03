@@ -25,5 +25,13 @@ inline constexpr const char *kObjExt = ".o";
 
 /// The runtime header the generated C includes (CNames.h's kRuntimeH).
 inline constexpr const char *kRuntimeHeader = "Runtime.h";
+/// The runtime archive, under `<prefix>/lib`.
+inline constexpr const char *kRuntimeLib = "libpaykan_runtime.a";
+/// Explicit runtime location: `$PAYKAN_RUNTIME_DIR/{lib,include/paykan}`.
+inline constexpr const char *kEnvRuntimeDir = "PAYKAN_RUNTIME_DIR";
+/// The file at the top of a Paykan build tree (written by
+/// src/Backends/Toolchain/CMakeLists.txt): a binary below it uses that build
+/// tree's runtime.
+inline constexpr const char *kBuildTreeMarker = ".paykan-build-tree";
 
 } // namespace paykan::toolchain::tcnames

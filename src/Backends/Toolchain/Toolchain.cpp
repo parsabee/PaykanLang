@@ -15,8 +15,12 @@
 #include <filesystem>
 #include <sstream>
 #include <system_error>
+#include <utility>
 #include <vector>
 
+#ifndef PAYKAN_BUILD_TREE_DIR
+#define PAYKAN_BUILD_TREE_DIR ""
+#endif
 #ifndef PAYKAN_RUNTIME_LIB_PATH
 #define PAYKAN_RUNTIME_LIB_PATH ""
 #endif
@@ -56,7 +60,35 @@ void appendFlags(const std::string &flags, std::vector<std::string> &out) {
     out.push_back(f);
 }
 
+/// The runtime recorded by setPackageRuntime().
+std::pair<std::string, std::string> &packageRuntime() {
+  static std::pair<std::string, std::string> runtime;
+  return runtime;
+}
+
+/// Whether @p exeDir lies inside the build tree this code was compiled in:
+/// the nearest enclosing directory that holds the build-tree marker is that
+/// build tree.  An installed binary is not below a marker, so a build tree
+/// that merely still exists (perhaps stale) is not used for it.
+bool insideBuildTree(const std::string &exeDir) {
+  const std::string buildDir = PAYKAN_BUILD_TREE_DIR;
+  if (exeDir.empty() || buildDir.empty())
+    return false;
+  std::error_code ec;
+  for (fs::path dir = exeDir; !dir.empty(); dir = dir.parent_path()) {
+    if (fs::exists(dir / tcnames::kBuildTreeMarker, ec))
+      return fs::equivalent(dir, buildDir, ec);
+    if (dir == dir.root_path())
+      break;
+  }
+  return false;
+}
+
 } // namespace
+
+void setPackageRuntime(std::string lib, std::string includeDir) {
+  packageRuntime() = {std::move(lib), std::move(includeDir)};
+}
 
 /// Directory of the running executable, or "".
 std::string executableDir() {
@@ -113,21 +145,28 @@ bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
   };
   if (tc.RuntimeLib.empty() || tc.RuntimeIncludeDir.empty()) {
     std::vector<std::pair<std::string, std::string>> candidates;
-    // 1. the build tree this compiler was built in
-    candidates.emplace_back(PAYKAN_RUNTIME_LIB_PATH,
-                            PAYKAN_RUNTIME_INCLUDE_DIR);
-    // 2. $PAYKAN_RUNTIME_DIR/{lib,include}
-    if (const char *env = std::getenv("PAYKAN_RUNTIME_DIR"))
-      candidates.emplace_back(std::string(env) + "/lib/libpaykan_runtime.a",
-                              std::string(env) + "/include/paykan");
-    // 3. the install layout next to the executable (a relocated install)
+    // 1. $PAYKAN_RUNTIME_DIR/{lib,include/paykan}: the explicit override
+    if (const char *env = std::getenv(tcnames::kEnvRuntimeDir); env && env[0])
+      candidates.emplace_back(
+          (fs::path(env) / "lib" / tcnames::kRuntimeLib).string(),
+          (fs::path(env) / "include" / "paykan").string());
+    // 2. the runtime of the installed package an out-of-tree driver was
+    //    built against (paykan_add_driver)
+    if (const auto &[lib, inc] = packageRuntime(); !lib.empty())
+      candidates.emplace_back(lib, inc);
+    // 3. the install layout around the executable (an installed, possibly
+    //    relocated, binary: <prefix>/bin/paykan)
     std::string exeDir = executableDir();
     if (!exeDir.empty()) {
       fs::path prefix = fs::path(exeDir).parent_path();
-      candidates.emplace_back((prefix / "lib" / "libpaykan_runtime.a").string(),
+      candidates.emplace_back((prefix / "lib" / tcnames::kRuntimeLib).string(),
                               (prefix / "include" / "paykan").string());
     }
-    // 4. the install location configured at build time
+    // 4. the build tree this compiler was built in, for a binary inside it
+    if (insideBuildTree(exeDir))
+      candidates.emplace_back(PAYKAN_RUNTIME_LIB_PATH,
+                              PAYKAN_RUNTIME_INCLUDE_DIR);
+    // 5. the install location configured at build time
     candidates.emplace_back(PAYKAN_INSTALLED_RUNTIME_LIB,
                             PAYKAN_INSTALLED_RUNTIME_INCLUDE_DIR);
     for (const auto &[lib, inc] : candidates) {
@@ -143,7 +182,8 @@ bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
   if (!exists(tc.RuntimeLib) ||
       !exists(tc.RuntimeIncludeDir + "/" + tcnames::kRuntimeHeader)) {
     errs << "cannot find the Paykan runtime (libpaykan_runtime.a and "
-            "Runtime.h); set PAYKAN_RUNTIME_DIR\n";
+            "Runtime.h); set "
+         << tcnames::kEnvRuntimeDir << "\n";
     return false;
   }
   return true;

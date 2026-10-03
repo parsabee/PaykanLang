@@ -142,9 +142,12 @@ v1.0 ([#61](https://github.com/parsabee/PaykanLang/issues/61)).
 `Paykan::pir`, `Paykan::frontend`, `Paykan::sema`, `Paykan::ast`,
 `Paykan::runtime`, `Paykan::driver` and one target per installed plugin
 (`Paykan::backend_c`, `Paykan::frontend_bison`, ...), the variables
-`PAYKAN_BACKENDS` / `PAYKAN_FRONTENDS` / `PAYKAN_PLUGINS`, and
+`PAYKAN_BACKENDS` / `PAYKAN_FRONTENDS` / `PAYKAN_PLUGINS`, the installed
+runtime's location `PAYKAN_RUNTIME_LIBRARY` / `PAYKAN_RUNTIME_INCLUDE_DIR`, and
 `paykan_add_driver(<target> [PLUGINS <libs>...])`, which creates an executable
-from the driver library and links every plugin whole-archive. The compiler's
+from the driver library and links every plugin whole-archive. That driver's
+`run` and `build` use the package's runtime (unless `$PAYKAN_RUNTIME_DIR`
+names another), wherever the executable itself is built or copied. The compiler's
 headers are installed under `include/paykan/compiler` and are on the include
 path of every imported target.
 

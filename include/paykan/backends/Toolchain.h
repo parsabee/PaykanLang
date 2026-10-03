@@ -26,9 +26,11 @@ struct Toolchain {
   /// Extra flags appended to every compile (e.g. "-O2").
   std::vector<std::string> ExtraFlags;
   /// Path of libpaykan_runtime.a and of the directory holding Runtime.h.
-  /// Empty: the build tree's runtime, then $PAYKAN_RUNTIME_DIR, then the
-  /// install layout next to the executable, then the install location
-  /// configured at build time.
+  /// Empty: $PAYKAN_RUNTIME_DIR, then the runtime recorded with
+  /// setPackageRuntime(), then the install layout around the executable
+  /// (`<prefix>/bin` -> `<prefix>/lib`, `<prefix>/include/paykan`), then the
+  /// build tree's runtime (only for a binary inside that build tree), then
+  /// the install location configured at build time.
   std::string RuntimeLib;
   std::string RuntimeIncludeDir;
   /// Object cache: one `.c` / `.o` pair per module under this directory
@@ -46,6 +48,14 @@ struct Toolchain {
 /// compiler was built with are appended to tc.ExtraFlags: that runtime
 /// archive is instrumented, so programs linked against it need them too.
 bool resolveToolchain(Toolchain &tc, std::ostream &errs);
+
+/// Record the runtime of the installed Paykan package this program was
+/// built against: resolveToolchain() tries it right after
+/// $PAYKAN_RUNTIME_DIR.  A driver made with `paykan_add_driver`
+/// (PaykanConfig.cmake) calls it at startup with the package's
+/// PAYKAN_RUNTIME_LIBRARY and PAYKAN_RUNTIME_INCLUDE_DIR, so an out-of-tree
+/// driver finds the runtime wherever its own executable lives.
+void setPackageRuntime(std::string lib, std::string includeDir);
 
 /// Directory of the running executable, or "".
 std::string executableDir();

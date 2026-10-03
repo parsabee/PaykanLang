@@ -265,6 +265,21 @@ if(PAYKAN_SAMPLES_BACKENDS)
     # time.
     set_tests_properties(SamplesParity SamplesParityBuild SamplesParityO0
         PROPERTIES RESOURCE_LOCK paykan_samples_cache)
+
+    # Where `paykan` finds the runtime (Toolchain.cpp): an installed binary
+    # uses its own prefix even while the build tree exists, $PAYKAN_RUNTIME_DIR
+    # overrides it, and only a binary inside the build tree uses the build
+    # tree's runtime (scripts/runtime_lookup.py).
+    include(GNUInstallDirs)
+    add_test(NAME RuntimeLookup
+        COMMAND ${CMAKE_COMMAND} -E env python3
+                ${CMAKE_SOURCE_DIR}/scripts/runtime_lookup.py
+                --paykan $<TARGET_FILE:paykan>
+                --runtime-lib $<TARGET_FILE:paykan_runtime>
+                --runtime-header ${CMAKE_SOURCE_DIR}/src/Runtime/Runtime.h
+                --build-dir ${CMAKE_BINARY_DIR}
+                --installed-lib ${CMAKE_INSTALL_FULL_LIBDIR}/$<TARGET_FILE_NAME:paykan_runtime>
+                ${PAYKAN_SAMPLES_BACKENDS})
 endif()
 
 # The C backend's output is strict ISO C11 (docs/c-backend.md): every
