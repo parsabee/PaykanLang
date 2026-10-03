@@ -228,6 +228,7 @@ add_executable(driver_tests
 )
 target_compile_definitions(driver_tests
     PRIVATE PAYKAN_BIN="$<TARGET_FILE:paykan>"
+            PAYKAN_EXPECTED_DEFAULT_BACKEND="${PAYKAN_DEFAULT_BACKEND}"
 )
 target_link_libraries(driver_tests
     PRIVATE gtest_main
@@ -344,4 +345,20 @@ if(PAYKAN_NUM_FRONTENDS GREATER 1)
                     --paykan $<TARGET_FILE:paykan>
                     --frontends ${PAYKAN_DIFF_FE_A},${PAYKAN_DIFF_FE_B})
     endif()
+endif()
+
+# A plain configure (only -DPAYKAN_BUILD_TESTS=OFF) is the core build:
+# recursive-descent + c, nothing downloaded, no third-party/ or _deps/
+# (#123).  Configure only, in a scratch directory of its own.  Not in a
+# coverage build: it runs no instrumented code, and scripts/coverage.py
+# requires every test to write a profile.
+if(NOT PAYKAN_COVERAGE)
+    add_test(NAME DefaultConfigure
+        COMMAND ${CMAKE_COMMAND}
+                -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+                -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/default-configure
+                -DGENERATOR=${CMAKE_GENERATOR}
+                -DC_COMPILER=${CMAKE_C_COMPILER}
+                -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/DefaultConfigure.cmake)
 endif()
