@@ -495,8 +495,7 @@ string spans several `char`s (`"é"[0]` has code `195`). `int<char>` reads the b
 unsigned code `0`..`255`, and `char<int>` is its exact inverse over that range.
 
 > The conversion builtins `StrInt`, `StrFloat`, `StrBool`, `StrChar`, `IntStr` and `FloatStr`
-> were replaced by these constructors. Using an old name is an error that names its
-> replacement: `'StrInt' was removed; use 'Str<int>(x)'`.
+> were replaced by these constructors.
 
 ### File I/O
 

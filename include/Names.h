@@ -67,15 +67,6 @@ inline constexpr const char *kConvBoolInt = "bool<int>";
 inline constexpr const char *kConvIntChar = "int<char>";
 inline constexpr const char *kConvCharInt = "char<int>";
 
-// The conversion builtins that `Target<Source>(value)` replaced (#64); only
-// named by Sema's "was removed" diagnostic.
-inline constexpr const char *kRemovedStrInt = "StrInt";
-inline constexpr const char *kRemovedStrFloat = "StrFloat";
-inline constexpr const char *kRemovedStrBool = "StrBool";
-inline constexpr const char *kRemovedStrChar = "StrChar";
-inline constexpr const char *kRemovedIntStr = "IntStr";
-inline constexpr const char *kRemovedFloatStr = "FloatStr";
-
 // -- Runtime C symbol names -------------------------------------------------
 
 // Object

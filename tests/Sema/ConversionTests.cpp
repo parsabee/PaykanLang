@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // Sema tests: conversion constructors `Target<Source>(value)` (#64) — every
 // supported pair and its result type, unsupported pairs, wrong arity and
-// argument types, and the diagnostics for the removed builtins.
+// argument types, and what became of the removed builtins.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -135,20 +135,12 @@ TEST(Conversion, TargetWithoutSourceType) {
 
 // ─── the removed builtins ───────────────────────────────────────────────────
 
-TEST(Conversion, RemovedBuiltinsNameTheirReplacement) {
+TEST(Conversion, RemovedBuiltinsAreUnknownFunctions) {
+  // No dedicated diagnostic: an old name is just an undeclared function.
   expectError(inMain("s = StrInt(1);"),
-              "'StrInt' was removed; use 'Str<int>(x)'");
-  expectError(inMain("s = StrFloat(1.5);"),
-              "'StrFloat' was removed; use 'Str<float>(x)'");
-  expectError(inMain("s = StrBool(True);"),
-              "'StrBool' was removed; use 'Str<bool>(x)'");
-  expectError(inMain("s = StrChar('c');"),
-              "'StrChar' was removed; use 'Str<char>(x)'");
+              "call to undeclared function 'StrInt'");
   expectError(inMain("o = IntStr(\"1\");"),
-              "'IntStr' was removed; use 'int<Str>(s)', which returns 'int?'");
-  expectError(inMain("o = FloatStr(\"1\");"),
-              "'FloatStr' was removed; use 'float<Str>(s)', which returns "
-              "'float?'");
+              "call to undeclared function 'IntStr'");
 }
 
 TEST(Conversion, RemovedNamesAreOrdinaryIdentifiersAgain) {

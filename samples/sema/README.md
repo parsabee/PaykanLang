@@ -16,7 +16,7 @@ type-checking (no codegen or JIT execution).
 | `generics/` | Generic classes / functions (prototype): instantiation, inference, diagnostics |
 | `optionals/` | Optional types `T?` (prototype) — `None`, widening, unwrapping with `match`, optional fields and arrays |
 | `tuples/`  | Tuple types, literals, `.N` access, destructuring, immutability (prototype) |
-| `conversions/` | Conversion constructors `Target<Source>(value)`: the supported pairs, result types, the removed builtins |
+| `conversions/` | Conversion constructors `Target<Source>(value)`: the supported pairs, result types |
 
 ## Running
 

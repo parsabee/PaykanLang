@@ -1,5 +1,0 @@
-// The old conversion builtins were removed; the error names the replacement.
-fn main() -> int {
-  s = StrInt(42);   // error: 'StrInt' was removed; use 'Str<int>(x)'
-  return 0;
-}

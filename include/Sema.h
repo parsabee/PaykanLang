@@ -612,11 +612,6 @@ private:
   ast::Type *checkConversion(ast::CallExpr *node,
                              const std::vector<ast::Type *> &argTypes);
 
-  /// If @p name is one of the removed conversion builtins (`StrInt`, ...),
-  /// report that and what replaces it at @p loc and return true.
-  bool diagnoseRemovedConversion(const std::string &name,
-                                 ast::SourceLocation loc);
-
   /// Check the bodies of every pending instantiation (transitively).
   bool checkPendingInstantiations();
 

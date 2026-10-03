@@ -955,8 +955,6 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
 
   const auto *sig = S.lookupFunction(node->getCalleeName());
   if (!sig) {
-    if (S.diagnoseRemovedConversion(node->getCalleeName(), node->getLocation()))
-      return nullptr;
     if (S.isConversionTarget(node->getCalleeName())) {
       S.error(node->getLocation(), "a conversion to '" + node->getCalleeName() +
                                        "' names its source type: write '" +
@@ -1553,20 +1551,6 @@ const ConversionPair kConversions[] = {
     {names::kTypeChar, names::kTypeInt, names::kConvCharInt},
 };
 
-struct RemovedConversion {
-  const char *Name;
-  const char *Replacement;
-};
-
-const RemovedConversion kRemovedConversions[] = {
-    {names::kRemovedStrInt, "Str<int>(x)"},
-    {names::kRemovedStrFloat, "Str<float>(x)"},
-    {names::kRemovedStrBool, "Str<bool>(x)"},
-    {names::kRemovedStrChar, "Str<char>(x)"},
-    {names::kRemovedIntStr, "int<Str>(s)', which returns 'int?"},
-    {names::kRemovedFloatStr, "float<Str>(s)', which returns 'float?"},
-};
-
 } // namespace
 
 bool Sema::isConversionTarget(std::string_view name) {
@@ -1574,17 +1558,6 @@ bool Sema::isConversionTarget(std::string_view name) {
     // A call checked once already carries its spelled form (`int<float>`).
     if (name == c.Target || name == c.Spelled)
       return true;
-  return false;
-}
-
-bool Sema::diagnoseRemovedConversion(const std::string &name,
-                                     ast::SourceLocation loc) {
-  for (const auto &r : kRemovedConversions) {
-    if (name != r.Name)
-      continue;
-    error(loc, "'" + name + "' was removed; use '" + r.Replacement + "'");
-    return true;
-  }
   return false;
 }
 

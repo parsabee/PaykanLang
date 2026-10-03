@@ -14,9 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   removed. Every conversion is now spelled `Target<Source>(value)`, with the
   source type always written and the argument required to have exactly that
   type: `Str<int>(n)`, `Str<float>(f)`, `Str<bool>(b)`, `Str<char>(c)`,
-  `int<Str>(s)`, `float<Str>(s)`. Using an old name is an error that names
-  its replacement (`'StrInt' was removed; use 'Str<int>(x)'`), and the old
-  names are no longer reserved. The `Str<…>` formatting is unchanged,
+  `int<Str>(s)`, `float<Str>(s)`. The old names are no longer reserved: a
+  call to one is an ordinary undeclared-function error. The `Str<…>` formatting is unchanged,
   including the canonical `nan` / `inf` / `-inf`.
   - **Parses return optionals.** `int<Str>(s)` returns `int?` and
     `float<Str>(s)` returns `float?`, with `None` for an invalid string. They
