@@ -342,3 +342,29 @@ fn main() -> int { return 0; }
         << r.Diagnostics;
   std::filesystem::remove_all(tmp);
 }
+
+// ─── ERR: a local class clashing with an imported type (#79) ─────────────────
+//
+// Only the clash is reported: the module's other classes stay declared, and a
+// call by the clashing name is not reported again.
+
+TEST(Module, LocalClassClashingWithImportReportedOnce) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_clash_class").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib.pkn", "class K { fn __init__() { } }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import lib;
+class K { }
+class Fine { fn __init__() { } }
+fn main() -> int { k = K(); f = Fine(); return 0; }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("class 'K' conflicts with an imported type of "
+                               "the same name"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find("undeclared"), std::string::npos)
+      << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}

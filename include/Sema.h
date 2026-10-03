@@ -458,6 +458,23 @@ private:
   /// by checkClassDecls and consumed by checkClassBodies.
   std::vector<ast::ClassDecl *> SortedClasses;
 
+  /// Error recovery for rejected class declarations.  A class whose name is
+  /// taken (by a builtin, an import, an enum, or an earlier class) is dropped,
+  /// and its name recorded in ErroneousNames.  A class whose superclass or
+  /// members could not be resolved is still registered (on Obj, if its
+  /// superclass is unusable), so the rest of the module can name it, and
+  /// recorded in ErroneousClasses; its method bodies are not checked.  The
+  /// declaration error is the one reported: calls by an erroneous name and
+  /// member lookups on an erroneous class (or a subclass) report nothing.
+  StringSet ErroneousNames;
+  StringSet ErroneousClasses;
+  /// Errors left unreported as follow-ons of the above, so that a check that
+  /// reports only "if nothing inside was reported" stays quiet for them too.
+  unsigned SuppressedFollowOns = 0;
+
+  /// True if @p ct or one of its superclasses is in ErroneousClasses.
+  bool isErroneousClass(const ast::ClassType *ct) const;
+
   /// Resolve a free function's signature (return + parameter types) and
   /// register it in the function table.  Run as a forward-declaration pass
   /// before any function or method body is checked, so calls resolve regardless

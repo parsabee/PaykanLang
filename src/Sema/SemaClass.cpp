@@ -218,77 +218,98 @@ bool Sema::checkInitFieldsAssigned(ast::ClassType *ct, ast::CompoundStmt *body,
   return ok;
 }
 
+bool Sema::isErroneousClass(const ast::ClassType *ct) const {
+  for (; ct; ct = ct->getSuperClass())
+    if (ErroneousClasses.count(ct->getName()))
+      return true;
+  return false;
+}
+
 bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
   bool ok = true;
+
+  // A rejected class is not allowed to take the rest of the module down with
+  // it: every phase below reports the bad class and carries on with the
+  // others, so the classes that are fine are still declared and only the
+  // real error is reported (see ErroneousNames / ErroneousClasses).
 
   // -------------------------------------------------------------------------
   // Phase 1: Check for duplicate class names (local, and against builtins,
   //          imports, and enums).  The class name doubles as its constructor
   //          function (phase 4b), so it must be free in the function table
   //          too — otherwise `class print {...}` would silently replace the
-  //          builtin `print`.
+  //          builtin `print`.  A class whose name is taken is dropped; the
+  //          name keeps resolving to whatever already owns it.
   // -------------------------------------------------------------------------
-  StringMap<ast::ClassDecl *> localClasses;
+  StringSet seen;
+  StringMap<ast::ClassDecl *> localClasses; // the accepted ones
+  std::vector<ast::ClassDecl *> accepted;
   for (auto *cd : classDecls) {
-    if (!localClasses.try_emplace(cd->getName(), cd).second) {
+    if (!seen.insert(cd->getName()).second) {
       error(cd->getLocation(), "redefinition of class '" + cd->getName() + "'");
       ok = false;
       continue;
     }
     if (!checkDeclNameAvailable(cd->getName(), cd->getLocation(),
-                                DeclKind::Class))
+                                DeclKind::Class)) {
       ok = false;
+      ErroneousNames.insert(cd->getName());
+      continue;
+    }
+    localClasses.try_emplace(cd->getName(), cd);
+    accepted.push_back(cd);
   }
-  if (!ok)
-    return false;
 
   // -------------------------------------------------------------------------
   // Phase 2: Topological sort (superclass before subclass) + cycle detection.
+  //          A class whose superclass is undefined, was dropped in phase 1,
+  //          or closes an inheritance cycle loses its superclass (it is
+  //          registered on Obj in phase 3) and is marked erroneous.
   // -------------------------------------------------------------------------
   std::vector<ast::ClassDecl *> sorted;
   StringMap<uint8_t> color; // 0=white 1=gray(in-progress) 2=black(done)
-  bool aborted = false;
+  StringSet noSuper;
 
   std::function<void(ast::ClassDecl *)> topoVisit = [&](ast::ClassDecl *cd) {
-    if (aborted)
-      return;
-    uint8_t &c = color[cd->getName()];
-    if (c == 2)
-      return; // already processed
-    if (c == 1) {
-      error(cd->getLocation(),
-            "cyclic inheritance involving class '" + cd->getName() + "'");
-      aborted = true;
-      return;
-    }
-    c = 1; // gray — in progress
+    if (color[cd->getName()] != 0)
+      return; // done, or in progress further up (a cycle, reported below)
+    color[cd->getName()] = 1; // gray — in progress
     if (cd->hasSuperClass()) {
       const auto &superName = cd->getSuperClassName();
       auto it = localClasses.find(superName);
+      bool broken = false;
       if (it != localClasses.end()) {
-        topoVisit(it->second); // process superclass first
-      } else {
+        if (color[superName] == 1) {
+          // The superclass is still in progress: this edge closes a cycle.
+          error(it->second->getLocation(),
+                "cyclic inheritance involving class '" + superName + "'");
+          broken = true;
+        } else {
+          topoVisit(it->second); // process superclass first
+        }
+      } else if (ErroneousNames.count(superName)) {
+        broken = true; // the superclass was rejected (already reported)
+      } else if (!Ctx.lookupClassType(superName)) {
         // Not declared in this module: the name must resolve through the
         // ASTContext registry — a built-in class type (Obj, Str) or an
         // imported class referenced by a registered alias (e.g.
         // "tmp_import::helper::Adder").
-        if (!Ctx.lookupClassType(superName)) {
-          error(cd->getLocation(), "superclass '" + superName + "' of class '" +
-                                       cd->getName() + "' is not defined");
-          aborted = true;
-          return;
-        }
+        error(cd->getLocation(), "superclass '" + superName + "' of class '" +
+                                     cd->getName() + "' is not defined");
+        broken = true;
+      }
+      if (broken) {
+        ok = false;
+        noSuper.insert(cd->getName());
+        ErroneousClasses.insert(cd->getName());
       }
     }
-    c = 2; // black — done
+    color[cd->getName()] = 2; // black — done
     sorted.push_back(cd);
   };
 
-  for (auto *cd : classDecls)
+  for (auto *cd : accepted)
     topoVisit(cd);
-
-  if (aborted)
-    return false;
 
   // -------------------------------------------------------------------------
   // Phase 3: Pre-register ClassType stubs so forward field-type references
@@ -296,7 +317,7 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
   // -------------------------------------------------------------------------
   for (auto *cd : sorted) {
     ast::ClassType *superClass = nullptr;
-    if (cd->hasSuperClass()) {
+    if (cd->hasSuperClass() && !noSuper.count(cd->getName())) {
       superClass = Ctx.lookupClassType(cd->getSuperClassName());
       // Non-inheritable (final) classes cannot be subclassed.
       // Currently this covers built-in types like Str; it will also apply
@@ -306,6 +327,7 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
                                      cd->getSuperClassName() +
                                      "': class is final");
         ok = false;
+        ErroneousClasses.insert(cd->getName());
         superClass = nullptr; // fall back to Obj so analysis can continue
       }
     }
@@ -315,17 +337,17 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
   }
 
   // -------------------------------------------------------------------------
-  // Phase 4: Populate field types and method signatures for each class.
+  // Phase 4: Populate field types and method signatures for each class.  A
+  //          member that fails to resolve is left out of the class.
   // -------------------------------------------------------------------------
   for (auto *cd : sorted) {
     auto *ct = Ctx.lookupClassType(cd->getName());
     assert(ct && "ClassType stub must exist after pre-registration");
-    if (!populateClassType(cd, ct))
+    if (!populateClassType(cd, ct)) {
       ok = false;
+      ErroneousClasses.insert(cd->getName());
+    }
   }
-
-  if (!ok)
-    return false;
 
   // -------------------------------------------------------------------------
   // Phase 4b: Register constructor functions so method bodies can call them.
@@ -487,9 +509,14 @@ bool Sema::checkClassBodies() {
   // constructors, and all free functions are registered by now).
   // -------------------------------------------------------------------------
   bool ok = true;
-  for (auto *cd : SortedClasses)
+  for (auto *cd : SortedClasses) {
+    // An erroneous class is incomplete (members that failed to resolve are
+    // missing), so its bodies would only produce follow-on errors.
+    if (ErroneousClasses.count(cd->getName()))
+      continue;
     if (!visitClassDecl(cd))
       ok = false;
+  }
   return ok;
 }
 

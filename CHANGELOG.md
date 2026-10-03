@@ -151,6 +151,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejected with a targeted message (use `\n`); the unused `&` token was
   removed from the lexer; out-of-range integer literals are reported reliably;
   an unopenable file no longer calls `exit()` from library code.
+- One rejected class declaration (a builtin or imported name, an undefined
+  superclass, a bad member type) no longer makes every other class of the
+  module undeclared (#79): the other classes are still declared, the bad
+  class is registered as far as it can be, and the follow-on errors on its
+  uses are not reported.
 
 ### Changed
 
