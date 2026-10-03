@@ -1,0 +1,17 @@
+// Every conversion constructor `Target<Source>(value)` with its result type.
+fn main() -> int {
+  i: int = 1;  f: float = 1.5;  b: bool = True;  c: char = 'c';  s: Str = "12";
+  s1: Str = Str<int>(i);
+  s2: Str = Str<float>(f);
+  s3: Str = Str<bool>(b);
+  s4: Str = Str<char>(c);
+  p1: int? = int<Str>(s);       // None for an invalid string
+  p2: float? = float<Str>(s);
+  n1: int = int<float>(f);
+  n2: float = float<int>(i);
+  n3: int = int<bool>(b);
+  n4: bool = bool<int>(i);
+  n5: int = int<char>(c);
+  n6: char = char<int>(i);
+  return 0;
+}

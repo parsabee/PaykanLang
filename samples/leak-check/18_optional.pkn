@@ -24,7 +24,7 @@ fn make(c: bool) -> Node? {
 
 fn show(n: Node?) {
   match n {
-    x: Node { println(StrInt(x.v)); }
+    x: Node { println(Str<int>(x.v)); }
     None    { println("none"); }
   }
 }

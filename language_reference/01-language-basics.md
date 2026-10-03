@@ -346,7 +346,7 @@ while (i < 10) {
   i = i + 1;
   if (i % 2 != 0) { continue; }   // skip odd
   if (i == 8)     { break; }       // stop at 8
-  println(StrInt(i));              // prints 2 4 6
+  println(Str<int>(i));              // prints 2 4 6
 }
 ```
 
@@ -419,24 +419,83 @@ Paykan has no variadic functions or overloading, so there is no multi-argument
 form: compose pieces with `+` (string concatenation).
 
 ```pkn
-println("x = " + StrInt(x));
-print("a=" + StrInt(a) + " b=" + StrInt(b));
+println("x = " + Str<int>(x));
+print("a=" + Str<int>(a) + " b=" + Str<int>(b));
 ```
 
-### Type-to-String Conversion
+### Conversions
 
-| Function      | Input   | Output                  |
-|---------------|---------|-------------------------|
-| `StrInt(n)`   | `int`   | Integer as string       |
-| `StrFloat(f)` | `float` | Float as string         |
-| `StrBool(b)`  | `bool`  | `"True"` or `"False"`   |
-| `StrChar(c)`  | `char`  | One-character string    |
+Converting between the primitive types and `Str` uses a **conversion constructor**:
+`Target<Source>(value)`. The target and the source are type names: the primitives `int`,
+`float`, `bool` and `char`, and `Str`. You always write the source type, and the argument must
+have exactly that type. There is no implicit `int` -> `float` promotion here, and an optional
+must be unwrapped first.
+
+| Conversion        | From → to          | Result                                                        |
+|-------------------|--------------------|---------------------------------------------------------------|
+| `Str<int>(n)`     | `int` → `Str`      | Decimal digits, with a `-` for negatives: `"42"`, `"-7"`      |
+| `Str<float>(f)`   | `float` → `Str`    | `%g` formatting: `"3.14"`, `"2"`, `"1e+20"`, `"-0"`; `"nan"`, `"inf"`, `"-inf"` |
+| `Str<bool>(b)`    | `bool` → `Str`     | `"True"` or `"False"`                                         |
+| `Str<char>(c)`    | `char` → `Str`     | A one-character string                                        |
+| `int<Str>(s)`     | `Str` → `int?`     | The parsed integer, or `None` (see below)                     |
+| `float<Str>(s)`   | `Str` → `float?`   | The parsed float, or `None` (see below)                       |
+| `int<float>(f)`   | `float` → `int`    | Truncates toward zero; panics on NaN, ±inf or out of range    |
+| `float<int>(n)`   | `int` → `float`    | The nearest `float` (exact up to 2^53)                        |
+| `int<bool>(b)`    | `bool` → `int`     | `1` for `True`, `0` for `False`                               |
+| `bool<int>(n)`    | `int` → `bool`     | `n != 0`                                                      |
+| `int<char>(c)`    | `char` → `int`     | The character's byte code, `0`..`255`                         |
+| `char<int>(n)`    | `int` → `char`     | The character with byte code `n`; panics outside `0`..`255`   |
 
 ```pkn
-println(StrInt(42));      // "42"
-println(StrFloat(3.14));  // "3.14"
-println(StrBool(True));   // "True"
+println(Str<int>(42));            // 42
+println(Str<float>(3.14));        // 3.14
+println(Str<bool>(True));         // True
+n: int = int<float>(-2.9);        // -2
+f: float = float<int>(3) / 2.0;   // 1.5
+code: int = int<char>('a');       // 97
+c: char = char<int>(code + 1);    // 'b'
 ```
+
+Any other pair is a compile-time error that lists the valid sources for that target:
+
+```pkn
+x = int<Node>(n);   // error: no conversion from 'Node' to 'int'; 'int<...>' converts from
+                    //        'Str', 'float', 'bool' or 'char'
+y = int<float>(3);  // error: argument of 'int<float>' has type 'int', expected 'float'
+```
+
+**Parsing.** `int<Str>(s)` and `float<Str>(s)` can fail, so they return an optional: `None`
+when `s` is not a valid number. Unwrap the result with `match` (see `10-optionals.md`):
+
+```pkn
+match int<Str>(line) {
+  n: int { total = total + n; }
+  None   { printerrln("not a number: " + line); }
+}
+```
+
+- `int<Str>` accepts an optional `+` or `-` followed by decimal digits. The digits must make
+  up the whole string, with no surrounding whitespace, and the value must fit in an `int`
+  (`"9223372036854775808"` is `None`).
+- `float<Str>` accepts what C's `strtod` accepts, including exponents and `nan` / `inf`, but
+  again the whole string with no leading or trailing whitespace. A value too large or too
+  small for a `float` (`"1e999"`) is `None`.
+
+**Panics.** `int<float>` of NaN, of an infinity, or of a value outside the `int` range
+(`-2^63` to just under `2^63`) stops the program. So does `char<int>` outside `0`..`255`.
+Both print a message naming the value and abort, like an integer division by zero:
+
+```
+paykan: int<float>(inf): the value is NaN, infinite or outside the int range
+paykan: char<int>(300): the value is outside the char range 0..255
+```
+
+**`char` is a byte.** A `char` is one byte of a `Str`, so a non-ASCII character in a UTF-8
+string spans several `char`s (`"é"[0]` has code `195`). `int<char>` reads the byte as an
+unsigned code `0`..`255`, and `char<int>` is its exact inverse over that range.
+
+> The conversion builtins `StrInt`, `StrFloat`, `StrBool`, `StrChar`, `IntStr` and `FloatStr`
+> were replaced by these constructors.
 
 ### File I/O
 
@@ -468,9 +527,9 @@ in the **File built-in class type** section above.
 Top-level declarations — free functions, classes (a class name is also its constructor),
 and enums — share a single namespace with the builtins, and a name identifies exactly one
 entity. Declaring a function, class, or enum whose name is a builtin function (`print`,
-`println`, `printerr`, `printerrln`, `StrInt`, `StrFloat`, `StrBool`, `StrChar`, `Str`,
-`open`, `IntStr`, `FloatStr`) or a builtin class (`Obj`, `Str`, `Array`, `File`, `Error`,
-`Int`, `Float`, `Bool`) is a compile-time error, reported at the declaration:
+`println`, `printerr`, `printerrln`, `Str`, `open`) or a builtin class (`Obj`, `Str`,
+`Array`, `File`, `Error`, `Int`, `Float`, `Bool`, `Char`) is a compile-time error, reported at
+the declaration:
 
 ```pkn
 class print { fn __init__() {} }   // error: 'print' is a builtin function and cannot be redeclared

@@ -121,7 +121,7 @@ class Parser {
   fn parseIdent() -> Str {
     name: Str = "";
     while (self.atIsIdentChar()) {
-      name = name + StrChar(self.input[self.pos]);
+      name = name + Str<char>(self.input[self.pos]);
       self.advance();
     }
     return name;
@@ -132,7 +132,7 @@ class Parser {
     out: Str = "";
     i: int = self.pos;
     while (i < self.input.len()) {
-      out = out + StrChar(self.input[i]);
+      out = out + Str<char>(self.input[i]);
       i = i + 1;
     }
     return out;

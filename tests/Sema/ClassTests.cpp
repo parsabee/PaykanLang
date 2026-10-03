@@ -132,13 +132,10 @@ TEST(Class, NameShadowsBuiltinFunctionRejected) {
       << r.Diagnostics;
 }
 
-TEST(Class, NameShadowsConversionBuiltinRejected) {
+// The conversion builtins removed by #64 no longer reserve their names.
+TEST(Class, RemovedConversionNamesAreFree) {
   auto r = semaCheck(withClasses("class StrInt { fn __init__() {} }"));
-  EXPECT_FALSE(r.Ok);
-  EXPECT_NE(r.Diagnostics.find(
-                "'StrInt' is a builtin function and cannot be redeclared"),
-            std::string::npos)
-      << r.Diagnostics;
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
 TEST(Class, NameShadowsBuiltinClassRejected) {
@@ -177,7 +174,7 @@ TEST(Class, MemberNamedLikeBuiltinOk) {
                                  R"(
     l: Logger = Logger();
     l.print("a");
-    print(l.StrInt(l.open) + StrInt(2));
+    print(l.StrInt(l.open) + Str<int>(2));
     return 0;
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -755,7 +752,7 @@ TEST(Class, InitMissingFieldRejected) {
       x: int;
       y: int;
       fn __init__(a: int) { self.x = a; }
-      fn toString() -> Str { return StrInt(self.x) + StrInt(self.y); }
+      fn toString() -> Str { return Str<int>(self.x) + Str<int>(self.y); }
     }
     fn main() -> int { return 0; }
   )");

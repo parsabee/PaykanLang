@@ -87,8 +87,7 @@ TEST(Func, FunctionClassNameCollision) {
 // might plausibly want to "override".
 TEST(Func, FunctionShadowsBuiltinFunctionRejected) {
   for (const char *name :
-       {"print", "println", "printerr", "printerrln", "StrInt", "StrFloat",
-        "StrBool", "StrChar", "open", "IntStr", "FloatStr"}) {
+       {"print", "println", "printerr", "printerrln", "open"}) {
     auto r = semaCheck(std::string("fn ") + name +
                        "(x: int) -> int { return x; }\n" + wrapMain(""));
     EXPECT_FALSE(r.Ok) << name;
@@ -141,7 +140,7 @@ TEST(Func, FunctionShadowsEnumRejected) {
 // A name that merely resembles a builtin is fine.
 TEST(Func, FunctionNamedNearBuiltinOk) {
   auto r = semaCheck(R"(
-    fn print2(x: int) { println(StrInt(x)); }
+    fn print2(x: int) { println(Str<int>(x)); }
     fn Print(x: int) { print2(x); }
     fn main() -> int { Print(1); return 0; }
   )");
@@ -192,7 +191,7 @@ TEST(Func, BlockScopeIsolation) {
     {
       x: int = 1;
     }
-    println(StrInt(x));
+    println(Str<int>(x));
   )"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("undeclared"), std::string::npos);
@@ -225,7 +224,7 @@ TEST(Func, PrintlnRejectsMultipleArgs) {
 }
 
 TEST(Func, PrintRejectsMultipleArgs) {
-  auto r = semaCheck(wrapMain(R"(print("a", StrInt(1), "b");)"));
+  auto r = semaCheck(wrapMain(R"(print("a", Str<int>(1), "b");)"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("expects 1 argument"), std::string::npos)
       << r.Diagnostics;

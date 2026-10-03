@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// CodeGen tests: IntStr / FloatStr builtins, match on boxed types, Error paths.
+// CodeGen tests: the fallible parses `int<Str>(s)` -> `int?` and
+// `float<Str>(s)` -> `float?` (#64), and the boxed Int / Float objects a
+// present result is (matched through `Obj`, `equals`, `toString`).
 
 #include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
@@ -11,203 +13,164 @@ static std::string wrapMain(const std::string &body) {
   return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
-// ============================================================================
-// IntStr — valid parses
-// ============================================================================
-
-TEST(IntStr, ParseZero) {
-  auto r = compileAndRun(wrapMain(R"(
-    match IntStr("0") {
-      n: Int { println(n.toString()); }
-      _      { println("error"); }
-    }
-  )"));
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "0\n");
+static const char *const kShowInt = R"(
+fn show(o: int?) -> Str {
+  match o {
+    n: int { return Str<int>(n); }
+    None   { return "None"; }
+  }
 }
+)";
 
-TEST(IntStr, ParsePositive) {
-  auto r = compileAndRun(wrapMain(R"(
-    match IntStr("42") {
-      n: Int { println(n.toString()); }
-      _      { println("error"); }
-    }
-  )"));
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "42\n");
+static const char *const kShowFloat = R"(
+fn show(o: float?) -> Str {
+  match o {
+    f: float { return Str<float>(f); }
+    None     { return "None"; }
+  }
 }
-
-TEST(IntStr, ParseNegative) {
-  auto r = compileAndRun(wrapMain(R"(
-    match IntStr("-99") {
-      n: Int { println(n.toString()); }
-      _      { println("error"); }
-    }
-  )"));
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "-99\n");
-}
+)";
 
 // ============================================================================
-// IntStr — invalid input yields Error
+// int<Str>
 // ============================================================================
 
-TEST(IntStr, ParseAlpha) {
-  auto r = compileAndRun(wrapMain(R"(
-    match IntStr("abc") {
-      n: Int     { println("ok"); }
-      err: Error { println("error"); }
-      _          {}
-    }
+TEST(ParseInt, ValidStrings) {
+  LeakGuard g;
+  auto r = compileAndRun(std::string(kShowInt) + wrapMain(R"(
+    println(show(int<Str>("0")));
+    println(show(int<Str>("42")));
+    println(show(int<Str>("-99")));
+    println(show(int<Str>("+7")));
+    println(show(int<Str>("007")));
+    println(show(int<Str>("9223372036854775807")));
+    println(show(int<Str>("-9223372036854775808")));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "error\n");
+  EXPECT_EQ(r.StdOut, "0\n42\n-99\n7\n7\n9223372036854775807\n"
+                      "-9223372036854775808\n");
+  g.expectNoLeaks("ParseInt.ValidStrings");
 }
 
-TEST(IntStr, ParseEmpty) {
-  auto r = compileAndRun(wrapMain(R"(
-    match IntStr("") {
-      n: Int     { println("ok"); }
-      err: Error { println("error"); }
-      _          {}
-    }
+TEST(ParseInt, InvalidStringsAreNone) {
+  LeakGuard g;
+  auto r = compileAndRun(std::string(kShowInt) + wrapMain(R"(
+    println(show(int<Str>("")));
+    println(show(int<Str>("abc")));
+    println(show(int<Str>("12abc")));
+    println(show(int<Str>("3.14")));
+    println(show(int<Str>(" 12")));
+    println(show(int<Str>("12 ")));
+    println(show(int<Str>("-")));
+    println(show(int<Str>("9223372036854775808")));
+    println(show(int<Str>("-9223372036854775809")));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "error\n");
+  EXPECT_EQ(r.StdOut, "None\nNone\nNone\nNone\nNone\nNone\nNone\nNone\nNone\n");
+  g.expectNoLeaks("ParseInt.InvalidStringsAreNone");
 }
 
-TEST(IntStr, ParseFloat) {
-  // "3.14" is not a valid integer.
-  auto r = compileAndRun(wrapMain(R"(
-    match IntStr("3.14") {
-      n: Int     { println("ok"); }
-      err: Error { println("error"); }
-      _          {}
-    }
-  )"));
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "error\n");
-}
-
-// ============================================================================
-// FloatStr — valid parses
-// ============================================================================
-
-TEST(FloatStr, ParseInteger) {
-  auto r = compileAndRun(wrapMain(R"(
-    match FloatStr("0") {
-      f: Float { println(f.toString()); }
-      _        { println("error"); }
-    }
-  )"));
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "0\n");
-}
-
-TEST(FloatStr, ParseDecimal) {
-  auto r = compileAndRun(wrapMain(R"(
-    match FloatStr("2.5") {
-      f: Float { println(f.toString()); }
-      _        { println("error"); }
-    }
-  )"));
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "2.5\n");
-}
-
-TEST(FloatStr, ParseScientific) {
-  auto r = compileAndRun(wrapMain(R"(
-    match FloatStr("1e2") {
-      f: Float { println(f.toString()); }
-      _        { println("error"); }
-    }
-  )"));
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "100\n");
-}
-
-// ============================================================================
-// FloatStr — invalid input yields Error
-// ============================================================================
-
-TEST(FloatStr, ParseAlpha) {
-  auto r = compileAndRun(wrapMain(R"(
-    match FloatStr("xyz") {
-      f: Float   { println("ok"); }
-      err: Error { println("error"); }
-      _          {}
-    }
-  )"));
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "error\n");
-}
-
-TEST(FloatStr, ParseEmpty) {
-  auto r = compileAndRun(wrapMain(R"(
-    match FloatStr("") {
-      f: Float   { println("ok"); }
-      err: Error { println("error"); }
-      _          {}
-    }
-  )"));
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "error\n");
-}
-
-// ============================================================================
-// equals on boxed values
-// ============================================================================
-
-TEST(BoxedEquals, IntEqualsSameValue) {
-  auto r = compileAndRun(wrapMain(R"(
-    match IntStr("7") {
-      a: Int {
-        match IntStr("7") {
-          b: Int { println(StrBool(a.equals(b))); }
-          _ {}
-        }
-      }
-      _ {}
-    }
-  )"));
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "True\n");
-}
-
-TEST(BoxedEquals, IntNotEqualDifferentValue) {
-  auto r = compileAndRun(wrapMain(R"(
-    match IntStr("3") {
-      a: Int {
-        match IntStr("4") {
-          b: Int { println(StrBool(a.equals(b))); }
-          _ {}
-        }
-      }
-      _ {}
-    }
-  )"));
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "False\n");
-}
-
-// ============================================================================
-// Accumulation with IntStr in a loop
-// ============================================================================
-
-TEST(IntStr, SumValidInList) {
+TEST(ParseInt, ResultIsAnOrdinaryIntOptional) {
+  LeakGuard g;
   auto r = compileAndRun(wrapMain(R"(
     inputs: Str[] = ["10", "bad", "20", "x", "30"];
     total: int = 0;
+    valid: int = 0;
     i: int = 0;
     while (i < inputs.len()) {
-      match IntStr(inputs[i]) {
-        n: Int { total = total + 1; }
-        _      {}
+      v = int<Str>(inputs[i]);            // int?
+      if (v != None) { valid = valid + 1; }
+      match v {
+        n: int { total = total + n; }
+        None   { }
       }
       i = i + 1;
     }
-    println(StrInt(total));
+    println(Str<int>(valid) + " " + Str<int>(total));
+    println(int<Str>("5"));
+    println(int<Str>("five"));
+    println(Str<bool>(int<Str>("5") == int<Str>("05")));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "3\n");
+  EXPECT_EQ(r.StdOut, "3 60\n5\nNone\nTrue\n");
+  g.expectNoLeaks("ParseInt.ResultIsAnOrdinaryIntOptional");
+}
+
+// ============================================================================
+// float<Str>
+// ============================================================================
+
+TEST(ParseFloat, ValidStrings) {
+  LeakGuard g;
+  auto r = compileAndRun(std::string(kShowFloat) + wrapMain(R"(
+    println(show(float<Str>("0")));
+    println(show(float<Str>("2.5")));
+    println(show(float<Str>("-2.718")));
+    println(show(float<Str>("1e2")));
+    println(show(float<Str>("-0.0")));
+    println(show(float<Str>("nan")));
+    println(show(float<Str>("inf")));
+    println(show(float<Str>("-inf")));
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "0\n2.5\n-2.718\n100\n-0\nnan\ninf\n-inf\n");
+  g.expectNoLeaks("ParseFloat.ValidStrings");
+}
+
+TEST(ParseFloat, InvalidStringsAreNone) {
+  LeakGuard g;
+  auto r = compileAndRun(std::string(kShowFloat) + wrapMain(R"(
+    println(show(float<Str>("")));
+    println(show(float<Str>("xyz")));
+    println(show(float<Str>("1.2.3")));
+    println(show(float<Str>(" 1.5")));
+    println(show(float<Str>("1.5 ")));
+    println(show(float<Str>("1e999")));
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "None\nNone\nNone\nNone\nNone\nNone\n");
+  g.expectNoLeaks("ParseFloat.InvalidStringsAreNone");
+}
+
+// ============================================================================
+// The boxes: a present int? / float? is an Int / Float object
+// ============================================================================
+
+TEST(BoxedEquals, IntBoxesThroughObj) {
+  LeakGuard g;
+  auto r = compileAndRun(wrapMain(R"(
+    a: Obj = int<Str>("7");
+    b: Obj = int<Str>("7");
+    c: Obj = int<Str>("8");
+    match a {
+      x: Int {
+        println(x.toString());
+        println(Str<bool>(x.equals(b)));
+        println(Str<bool>(x.equals(c)));
+      }
+      _ { println("not an Int"); }
+    }
+    n: Obj = int<Str>("nope");
+    match n {
+      x: Int { println("Int"); }
+      _      { println(n); }
+    }
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "7\nTrue\nFalse\nNone\n");
+  g.expectNoLeaks("BoxedEquals.IntBoxesThroughObj");
+}
+
+TEST(BoxedEquals, FloatBoxThroughObj) {
+  LeakGuard g;
+  auto r = compileAndRun(wrapMain(R"(
+    f: Obj = float<Str>("1.5");
+    match f {
+      y: Float { println(y.toString()); }
+      _        { println("not a Float"); }
+    }
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "1.5\n");
+  g.expectNoLeaks("BoxedEquals.FloatBoxThroughObj");
 }

@@ -20,9 +20,9 @@ TEST(ArrayAssign, IntArray) {
     arr: int[] = [10, 20, 30];
     arr[0] = 99;
     arr[2] = 42;
-    println(StrInt(arr[0]));
-    println(StrInt(arr[1]));
-    println(StrInt(arr[2]));
+    println(Str<int>(arr[0]));
+    println(Str<int>(arr[1]));
+    println(Str<int>(arr[2]));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "99\n20\n42\n");
@@ -38,7 +38,7 @@ TEST(ArrayAssign, IntArrayLoopOverwrite) {
     }
     i = 0;
     while (i < 5) {
-      println(StrInt(arr[i]));
+      println(Str<int>(arr[i]));
       i = i + 1;
     }
   )"));
@@ -54,9 +54,9 @@ TEST(ArrayAssign, FloatArray) {
   auto r = compileAndRun(wrapMain(R"(
     arr: float[] = [1.0, 2.0, 3.0];
     arr[1] = 9.5;
-    println(StrFloat(arr[0]));
-    println(StrFloat(arr[1]));
-    println(StrFloat(arr[2]));
+    println(Str<float>(arr[0]));
+    println(Str<float>(arr[1]));
+    println(Str<float>(arr[2]));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "1\n9.5\n3\n");
@@ -71,9 +71,9 @@ TEST(ArrayAssign, BoolArray) {
     arr: bool[] = [True, False, True];
     arr[0] = False;
     arr[2] = False;
-    println(StrBool(arr[0]));
-    println(StrBool(arr[1]));
-    println(StrBool(arr[2]));
+    println(Str<bool>(arr[0]));
+    println(Str<bool>(arr[1]));
+    println(Str<bool>(arr[2]));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "False\nFalse\nFalse\n");
@@ -111,11 +111,11 @@ TEST(ArrayAssign, StrArrayMultipleWrites) {
 // ============================================================================
 
 TEST(ArraySubscript, StringIndexRead) {
-  // s[i] on a Str yields a char — wrap with StrChar to print.
+  // s[i] on a Str yields a char — wrap with Str<char> to print.
   auto r = compileAndRun(wrapMain(R"(
     s: Str = "paykan";
-    println(StrChar(s[0]));
-    println(StrChar(s[5]));
+    println(Str<char>(s[0]));
+    println(Str<char>(s[5]));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "p\nn\n");
@@ -124,7 +124,7 @@ TEST(ArraySubscript, StringIndexRead) {
 TEST(ArraySubscript, StringIndexBuildResult) {
   auto r = compileAndRun(wrapMain(R"(
     s: Str = "abcdef";
-    result: Str = StrChar(s[2]) + StrChar(s[1]) + StrChar(s[0]);
+    result: Str = Str<char>(s[2]) + Str<char>(s[1]) + Str<char>(s[0]);
     println(result);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -140,8 +140,8 @@ TEST(ArrayAssign, PushAfterAssign) {
     arr: int[] = [1, 2, 3];
     arr[0] = 10;
     arr.push(99);
-    println(StrInt(arr[0]));
-    println(StrInt(arr.len()));
+    println(Str<int>(arr[0]));
+    println(Str<int>(arr.len()));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "10\n4\n");
@@ -167,8 +167,8 @@ class Box {
 }
 fn main() -> int {
   b: Box = Box();
-  println(StrInt(b.items[0].v));   // subscript via local receiver
-  println(StrInt(b.second()));     // subscript via self.field inside a method
+  println(Str<int>(b.items[0].v));   // subscript via local receiver
+  println(Str<int>(b.second()));     // subscript via self.field inside a method
   return 0;
 }
 )");
@@ -200,9 +200,9 @@ class Grid {
 }
 fn main() -> int {
   g: Grid = Grid();
-  println(StrInt(g.at(0, 0)));   // 0
-  println(StrInt(g.at(1, 2)));   // 5
-  println(StrInt(g.at(2, 1)));   // 7
+  println(Str<int>(g.at(0, 0)));   // 0
+  println(Str<int>(g.at(1, 2)));   // 5
+  println(Str<int>(g.at(2, 1)));   // 7
   return 0;
 }
 )");
@@ -224,14 +224,14 @@ fn build() -> int[][][] {
 }
 fn main() -> int {
   c: int[][][] = build();
-  println(StrInt(corner(c)));         // 8
+  println(Str<int>(corner(c)));         // 8
   c[0][1][0] = 30;
   plane: int[][] = c[0];
-  println(StrInt(plane[1][0]));       // 30
+  println(Str<int>(plane[1][0]));       // 30
   c[1] = [[9]];
-  println(StrInt(c[1][0][0]));        // 9
-  println(StrInt(c.len()));           // 2
-  println(StrInt(c[1].len()));        // 1
+  println(Str<int>(c[1][0][0]));        // 9
+  println(Str<int>(c.len()));           // 2
+  println(Str<int>(c[1].len()));        // 1
   return 0;
 }
 )");
@@ -283,7 +283,7 @@ class Box {
 fn main() -> int {
   b: Box = Box();
   b.set1(Foo(99));
-  println(StrInt(b.get1()));   // 99
+  println(Str<int>(b.get1()));   // 99
   return 0;
 }
 )");
@@ -308,25 +308,25 @@ TEST(ArrayPromotion, IntElementsIntoFloatArray) {
     fn mk() -> float[] { return [7, 8]; }
     fn main() -> int {
       xs: float[] = [1, 2];            // all-int literal into float[]
-      println(StrFloat(xs[0] + xs[1]));
+      println(Str<float>(xs[0] + xs[1]));
       ys: float[] = [1, 2.5];          // mixed literal
-      println(StrFloat(ys[0] + ys[1]));
+      println(Str<float>(ys[0] + ys[1]));
       n: int = 4;
       zs: float[] = [n, n + 1];        // non-constant int elements
-      println(StrFloat(zs[0] + zs[1]));
+      println(Str<float>(zs[0] + zs[1]));
       xs.push(3);                      // push(int)
-      println(StrFloat(xs[2]));
+      println(Str<float>(xs[2]));
       xs[0] = 10;                      // subscript store
-      println(StrFloat(xs[0]));
+      println(Str<float>(xs[0]));
       xs = [5, 6];                     // reassignment
-      println(StrFloat(xs[1]));
+      println(Str<float>(xs[1]));
       c: C = C();
-      println(StrFloat(c.fs[1]));      // field store
-      println(StrFloat(total([3, 4]))); // function argument
-      println(StrFloat(c.sum([5, 6]))); // method argument
-      println(StrFloat(mk()[1]));      // returned literal
+      println(Str<float>(c.fs[1]));      // field store
+      println(Str<float>(total([3, 4]))); // function argument
+      println(Str<float>(c.sum([5, 6]))); // method argument
+      println(Str<float>(mk()[1]));      // returned literal
       grid: float[][] = [[1], [2]];    // nested literals
-      println(StrFloat(grid[0][0] + grid[1][0]));
+      println(Str<float>(grid[0][0] + grid[1][0]));
       return 0;
     }
   )");

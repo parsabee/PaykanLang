@@ -9,8 +9,9 @@ out-of-scope list at the end are the parts still to be decided.
 ## Motivation
 
 PaykanLang has exactly one way to say "there may be no value here": type the slot as `Obj`,
-store `None` (a singleton `Obj`), and `match` on it later. This is what `open()`, `readln()`
-and `IntStr()` do today. It works, but it throws the static type away — a `next: Obj` field of
+store `None` (a singleton `Obj`), and `match` on it later. This is what `open()` and
+`readln()` do today (and what `IntStr()` did, before #64 replaced it by `int<Str>()`
+returning `int?`). It works, but it throws the static type away — a `next: Obj` field of
 a linked list accepts a `Str` as happily as a `Node`, every read needs a `match` that must
 also handle "some other object", and the compiler cannot tell the reader (or itself) that a
 value is *either a `Node` or nothing*.

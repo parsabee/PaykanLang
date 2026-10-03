@@ -623,6 +623,11 @@ private:
       setResult(in, B.CreateSIToFP(operand(in.Args[0]),
                                    llvm::Type::getDoubleTy(Ctx)));
       break;
+    case Opcode::FToI:
+      // The lowering guards the range, so fptosi never yields poison.
+      setResult(
+          in, B.CreateFPToSI(operand(in.Args[0]), llvm::Type::getInt64Ty(Ctx)));
+      break;
     case Opcode::Cast:
       setResult(in, emitCast(operand(in.Args[0]), in.CastTo));
       break;

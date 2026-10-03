@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking changes
+
+- **Conversion constructors replace the conversion builtins (#64).**
+  `StrInt`, `StrFloat`, `StrBool`, `StrChar`, `IntStr` and `FloatStr` are
+  removed. Every conversion is now spelled `Target<Source>(value)`, with the
+  source type always written and the argument required to have exactly that
+  type: `Str<int>(n)`, `Str<float>(f)`, `Str<bool>(b)`, `Str<char>(c)`,
+  `int<Str>(s)`, `float<Str>(s)`. The old names are no longer reserved: a
+  call to one is an ordinary undeclared-function error. The `Str<…>` formatting is unchanged,
+  including the canonical `nan` / `inf` / `-inf`.
+  - **Parses return optionals.** `int<Str>(s)` returns `int?` and
+    `float<Str>(s)` returns `float?`, with `None` for an invalid string. They
+    used to return an `Obj` holding an `Int` / `Float` box or an `Error`.
+    Code that matched on `n: Int { … } err: Error { … }` now matches on
+    `n: int { … } None { … }`.
+  - **Stricter parsing.** Leading whitespace and embedded NUL bytes now make
+    a parse fail (`strtoll` / `strtod` used to skip leading whitespace).
+- **New numeric conversions (#64).** These are defined in the lowering, so
+  both backends behave identically, and none of them is undefined behaviour
+  in the generated C:
+  - `int<float>` truncates toward zero, and panics on NaN, ±inf or a value
+    outside the int64 range.
+  - `float<int>` gives the nearest double.
+  - `int<bool>` gives 1 / 0, and `bool<int>` is `!= 0`.
+  - `int<char>` gives the char's byte code 0..255, and `char<int>` is its
+    inverse, panicking outside 0..255.
+  - Any other pair is an error that lists the valid sources. PIR gains a
+    numeric `ftoi` instruction, which the lowering emits only after the
+    range guard.
+
 ### Added
 
 - **Generics (prototype).** Generic classes (`class Box<T> { … }`,

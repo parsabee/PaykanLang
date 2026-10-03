@@ -61,7 +61,7 @@ fn parse(s: Str) -> int? {
 
 fn show(o: int?) -> Str {
   match o {
-    n: int { return StrInt(n); }
+    n: int { return Str<int>(n); }
     None   { return "None"; }
   }
 }
@@ -109,7 +109,7 @@ fn main() -> int {
   println("parse  -> " + show(parse("")));
 
   m = mean([1, 2, 3, 4]);
-  match m { f: float { println("mean -> " + StrFloat(f)); } None { } }
+  match m { f: float { println("mean -> " + Str<float>(f)); } None { } }
   empty: int[] = [];
   print("mean of nothing -> ");
   println(mean(empty));
@@ -129,8 +129,8 @@ fn main() -> int {
 
   a: int? = 7;
   b: int? = parse("7");
-  println("equal: " + StrBool(a == b));
-  println("equal to None: " + StrBool(a == None));
+  println("equal: " + Str<bool>(a == b));
+  println("equal to None: " + Str<bool>(a == None));
 
   sparse: int?[] = [1, 2, 3];
   sparse[1] = None;
@@ -138,7 +138,7 @@ fn main() -> int {
   print(sparse[0]); print(" "); print(sparse[1]); print(" "); println(sparse[2]);
 
   p: (int?, Str) = (1, "found");
-  match p.0 { i: int { println("lookup: " + StrInt(i) + " " + p.1); } None { } }
+  match p.0 { i: int { println("lookup: " + Str<int>(i) + " " + p.1); } None { } }
 
   c = Cache<int>();
   before = show(c.get());

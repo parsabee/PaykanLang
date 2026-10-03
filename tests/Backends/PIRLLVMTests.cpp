@@ -246,6 +246,20 @@ fn @main() -> i64 {
   EXPECT_EQ(r.ExitCode, 1);
 }
 
+TEST(PIRLLVM, FToITruncatesTowardZero) {
+  auto r = runPIR(R"(module "t"
+fn @main() -> i64 {
+  %a = ftoi 2.9
+  %b = ftoi -2.9
+  %c = mul %a, 10
+  %d = add %c, %b
+  ret %d
+}
+)");
+  ASSERT_TRUE(r.Ok) << r.Err;
+  EXPECT_EQ(r.ExitCode, 18); // 2 * 10 + -2
+}
+
 TEST(PIRLLVM, ClassesVTablesAndFields) {
   auto r = runPIR(R"(module "t"
 extern fn @PaykanObject_toString(obj) -> box

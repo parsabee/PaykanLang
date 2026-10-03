@@ -48,7 +48,7 @@ fn showEquals(path: Str) {
         err2: Error { printerrln("showEquals inner: " + err2.toString()); }
         g: File {
           eq: bool = f.equals(g);
-          println(StrBool(eq));  // False — different handles
+          println(Str<bool>(eq));  // False — different handles
         }
       }
     }

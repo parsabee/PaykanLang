@@ -136,7 +136,7 @@ class Person {
     self.age = a;
   }
   fn toString() -> Str {
-    return self.name + " (age " + StrInt(self.age) + ")";
+    return self.name + " (age " + Str<int>(self.age) + ")";
   }
   fn birthday() {
     self.age = self.age + 1;
@@ -170,7 +170,7 @@ class SportsCar : Car {
 // ---- Functions that take / return class instances -------------------------
 
 fn printCounterValue(c: Counter) {
-  println(StrInt(c.value()));
+  println(Str<int>(c.value()));
 }
 
 fn makeCounter(start: int) -> Counter {
@@ -201,11 +201,11 @@ fn main() -> int {
   c.increment();
   c.increment();
   c.increment();
-  println(StrInt(c.value()));    // 3
+  println(Str<int>(c.value()));    // 3
   c.decrement();
-  println(StrInt(c.value()));    // 2
+  println(Str<int>(c.value()));    // 2
   c.reset();
-  println(StrInt(c.value()));    // 0
+  println(Str<int>(c.value()));    // 0
 
   // --- Counter via helper functions ---
   println("=== Counter via helpers ===");
@@ -224,22 +224,22 @@ fn main() -> int {
   // --- Rectangle ---
   println("=== Rectangle ===");
   r: Rectangle = Rectangle(4, 5);
-  println(StrInt(r.area()));     // 20
-  println(StrInt(r.perimeter())); // 18
+  println(Str<int>(r.area()));     // 20
+  println(Str<int>(r.perimeter())); // 18
   println(r.describe());            // rectangle
 
   // --- Square (3-level inheritance) ---
   println("=== Square ===");
   sq: Square = Square(6);
-  println(StrInt(sq.area()));    // 36
-  println(StrInt(sq.perimeter())); // 24
+  println(Str<int>(sq.area()));    // 36
+  println(Str<int>(sq.perimeter())); // 24
   println(sq.describe());           // square
 
   // --- sumAreas ---
   println("=== sumAreas ===");
   r2 = Rectangle(3, 7);
   sq2 = Square(4);
-  println(StrInt(sumAreas(r2, sq2)));  // 21 + 16 = 37
+  println(Str<int>(sumAreas(r2, sq2)));  // 21 + 16 = 37
 
   // --- Polymorphism: Animal base variable holds Dog / Cat subclass ----------
   println("=== Polymorphism via base type ===");
@@ -270,20 +270,20 @@ fn main() -> int {
   println("=== Vehicle hierarchy ===");
   v: Vehicle = Car(120);
   println(v.kind());                // car
-  println(StrInt(v.topSpeed())); // 120
+  println(Str<int>(v.topSpeed())); // 120
 
   sc = SportsCar(180, 40);
   println(sc.kind());               // sports car
-  println(StrInt(sc.topSpeed())); // 220
+  println(Str<int>(sc.topSpeed())); // 220
 
   // --- Summer (loop inside method) ---
   println("=== Summer ===");
   sm = Summer();
   sm.sumTo(10);
-  println(StrInt(sm.total));     // 55
+  println(Str<int>(sm.total));     // 55
   sm.reset();
   sm.sumTo(4);
-  println(StrInt(sm.total));     // 10
+  println(Str<int>(sm.total));     // 10
 
   // --- Sign (if/else inside method) ---
   println("=== Sign ===");

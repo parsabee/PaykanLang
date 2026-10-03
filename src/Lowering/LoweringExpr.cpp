@@ -546,9 +546,10 @@ Val ModuleLowering::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
     args.push_back(v);
   }
 
-  bool returnsOwnedString =
-      node->getCalleeName() == kStrInt || node->getCalleeName() == kStrFloat ||
-      node->getCalleeName() == kStrBool || node->getCalleeName() == kStrChar;
+  bool returnsOwnedString = node->getCalleeName() == kConvStrInt ||
+                            node->getCalleeName() == kConvStrFloat ||
+                            node->getCalleeName() == kConvStrBool ||
+                            node->getCalleeName() == kConvStrChar;
 
   Val result = L.B.call(info.RuntimeName, sig, args, "call");
   for (const auto &ev : ownedArgs)
@@ -558,7 +559,71 @@ Val ModuleLowering::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
   return result;
 }
 
+// Inline numeric conversions `Target<Source>(value)` (#64).  This is the one
+// place their semantics are defined; both backends inherit it, and nothing
+// here is undefined behaviour in either (the C backend is strict C11):
+//   int<float>  truncates toward zero; NaN, +-inf and values outside int64
+//               panic (Paykan_panic_float_to_int) before the `ftoi`;
+//   float<int>  nearest double (`itof`);
+//   int<bool>   1 / 0;          bool<int>  `!= 0`;
+//   int<char>   the char's byte code 0..255 (`cast` zero-extends);
+//   char<int>   the byte with that code; outside 0..255 panics
+//               (Paykan_panic_int_to_char).
+// Returns an invalid Val when @p node is not a numeric conversion.
+Val ModuleLowering::ExprEmitter::emitConversion(ast::CallExpr *node) {
+  const std::string &name = node->getCalleeName();
+  bool isNumeric = name == kConvIntFloat || name == kConvFloatInt ||
+                   name == kConvIntBool || name == kConvBoolInt ||
+                   name == kConvIntChar || name == kConvCharInt;
+  if (!isNumeric || node->getNumArguments() != 1)
+    return Val();
+  Val v = visit(node->getArguments()[0]);
+  if (!v)
+    return Val();
+  auto panicUnless = [&](const Val &ok, const char *panicFn) {
+    Val bad = L.B.unary(Opcode::Not, ok, "conv.bad");
+    pir::If *s = L.B.openIf(bad, false);
+    L.B.enter(*s->Then);
+    L.callRuntime(panicFn, {v});
+    L.B.emitUnreachable();
+    L.B.leave();
+  };
+  if (name == kConvIntFloat) {
+    // [-2^63, 2^63) is exactly the doubles whose truncation fits in int64;
+    // both compares are ordered, so NaN fails them.
+    Val lo =
+        L.B.cmp(CmpPred::Ge, v, Val::f64(-9223372036854775808.0), "conv.lo");
+    Val hi =
+        L.B.cmp(CmpPred::Lt, v, Val::f64(9223372036854775808.0), "conv.hi");
+    panicUnless(L.B.select(lo, hi, Val::boolean(false), "conv.ok"),
+                kPaykanPanicFloatToInt);
+    return L.B.ftoi(v, "conv.int");
+  }
+  if (name == kConvFloatInt)
+    return L.B.itof(v, "conv.float");
+  if (name == kConvIntBool)
+    return L.coerceBoolToI64(v, Type::I64);
+  if (name == kConvBoolInt)
+    return L.B.cmp(CmpPred::Ne, v, Val::i64(0), "conv.bool");
+  if (name == kConvIntChar)
+    return L.B.cast(v, Type::I64, "conv.code");
+  // char<int>: range-check, then map the code 128..255 to the signed byte
+  // with the same bits before the truncating cast, so the C backend's
+  // `(int8_t)` conversion only ever sees an in-range value.
+  Val lo = L.B.cmp(CmpPred::Ge, v, Val::i64(0), "conv.lo");
+  Val hi = L.B.cmp(CmpPred::Le, v, Val::i64(255), "conv.hi");
+  panicUnless(L.B.select(lo, hi, Val::boolean(false), "conv.ok"),
+              kPaykanPanicIntToChar);
+  Val high = L.B.cmp(CmpPred::Gt, v, Val::i64(127), "conv.high");
+  Val wrapped = L.B.binary(Opcode::Sub, v, Val::i64(256), "conv.wrap");
+  Val byte = L.B.select(high, wrapped, v, "conv.byte");
+  return L.B.cast(byte, Type::Char, "conv.char");
+}
+
 Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
+  if (Val conv = emitConversion(node))
+    return conv;
+
   if (L.IdentityCtors.count(node->getCalleeName()) &&
       node->getNumArguments() == 1)
     return emitIdentityCtor(node);

@@ -1,0 +1,65 @@
+// 38 — numeric conversions: int<float>, float<int>, int<bool>, bool<int>,
+// int<char>, char<int> (#64)
+// Exercises: truncation toward zero, int -> float rounding to the nearest
+// double, booleans as 1 / 0 and `!= 0`, and chars as byte codes 0..255
+// (including the bytes of a UTF-8 character).  The out-of-range cases
+// (NaN / inf / outside int64 for int<float>, outside 0..255 for char<int>)
+// panic; see tests/Driver/DriverTests.cpp.
+//
+// expect-stdout: 2 -2 0 0
+// expect-stdout: 3.5 average of 1..4
+// expect-stdout: 9007199254740993 -> 9007199254740992
+// expect-stdout: passed: 2 of 3
+// expect-stdout: False True True
+// expect-stdout: a=97 0=48
+// expect-stdout: digits: 2026
+// expect-stdout: caesar: Khoor
+// expect-stdout: é is 195 169
+
+fn caesar(s: Str, shift: int) -> Str {
+  out = "";
+  i = 0;
+  while (i < s.len()) {
+    c = int<char>(s[i]);
+    if (c >= int<char>('a') && c <= int<char>('z')) {
+      c = int<char>('a') + (c - int<char>('a') + shift) % 26;
+    } else if (c >= int<char>('A') && c <= int<char>('Z')) {
+      c = int<char>('A') + (c - int<char>('A') + shift) % 26;
+    }
+    out = out + Str<char>(char<int>(c));
+    i = i + 1;
+  }
+  return out;
+}
+
+fn main() -> int {
+  println(Str<int>(int<float>(2.9)) + " " + Str<int>(int<float>(-2.9)) + " " +
+          Str<int>(int<float>(0.4)) + " " + Str<int>(int<float>(-0.0)));
+
+  sum = 1 + 2 + 3 + 4;
+  println(Str<float>(float<int>(sum) / 4.0 + 1.0) + " average of 1..4");
+  odd = 9007199254740993;              // 2^53 + 1 has no exact double
+  println(Str<int>(odd) + " -> " + Str<int>(int<float>(float<int>(odd))));
+
+  checks: bool[] = [1 < 2, 2 < 1, 3 == 3];
+  passed = 0;
+  i = 0;
+  while (i < checks.len()) { passed = passed + int<bool>(checks[i]); i = i + 1; }
+  println("passed: " + Str<int>(passed) + " of " + Str<int>(checks.len()));
+  println(Str<bool>(bool<int>(0)) + " " + Str<bool>(bool<int>(7)) + " " +
+          Str<bool>(bool<int>(-1)));
+
+  println("a=" + Str<int>(int<char>('a')) + " 0=" + Str<int>(int<char>('0')));
+  year = 0;
+  text = "2026";
+  i = 0;
+  while (i < text.len()) {
+    year = year * 10 + (int<char>(text[i]) - int<char>('0'));
+    i = i + 1;
+  }
+  println("digits: " + Str<int>(year));
+  println("caesar: " + caesar("Hello", 3));
+  e = "é";
+  println(e + " is " + Str<int>(int<char>(e[0])) + " " + Str<int>(int<char>(e[1])));
+  return 0;
+}

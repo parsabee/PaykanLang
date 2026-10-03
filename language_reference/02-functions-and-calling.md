@@ -84,7 +84,7 @@ fn clamp(v: int, lo: int, hi: int) -> int {
 
 fn main() -> int {
   writeLine(greet("world"));
-  println(StrInt(clamp(150, 0, 100)));  // 100
+  println(Str<int>(clamp(150, 0, 100)));  // 100
   return 0;
 }
 ```

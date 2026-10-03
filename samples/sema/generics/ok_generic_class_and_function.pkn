@@ -27,7 +27,7 @@ fn unbox<T>(b: Box<T>) -> T { return b.get(); }
 
 fn describe(o: Obj) -> Str {
   match o {
-    b: Box<int> { return StrInt(b.get()); }
+    b: Box<int> { return Str<int>(b.get()); }
     Box<Str>    { return "str"; }
     _           { return "other"; }
   }

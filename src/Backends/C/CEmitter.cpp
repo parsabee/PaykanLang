@@ -110,6 +110,8 @@ const RuntimeProto kRuntimeProtos[] = {
     {names::kPaykanFree, kVoid, {kVoidPtr}},
     {names::kPaykanPanicDivByZero, kVoid, {}},
     {names::kPaykanPanicDivOverflow, kVoid, {}},
+    {names::kPaykanPanicFloatToInt, kVoid, {kDouble}},
+    {names::kPaykanPanicIntToChar, kVoid, {kInt64}},
     {names::kPaykanStringNew, kRtStrPtr, {kConstCharPtr, kInt64}},
     {names::kPaykanStringDestroy, kVoid, {kRtObjPtr}},
     {names::kPaykanStringConcat, kRtObjPtr, {kRtObjPtr, kRtObjPtr}},
@@ -980,6 +982,12 @@ class Emitter {
     case Opcode::IToF:
       pre = resultPrefix(i);
       line(stmt(pre + cast(kDouble) + operand(i.Args[0])));
+      return;
+    case Opcode::FToI:
+      // Truncates toward zero (C11 6.3.1.4); the lowering guards the range,
+      // so the conversion is always defined.
+      pre = resultPrefix(i);
+      line(stmt(pre + cast(kInt64) + operand(i.Args[0])));
       return;
     case Opcode::Cast: {
       pre = resultPrefix(i);

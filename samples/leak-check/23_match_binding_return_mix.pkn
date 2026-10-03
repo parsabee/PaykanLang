@@ -4,7 +4,7 @@
 // the caller; `a = a` must neither release nor double-retain it.
 //
 // Runtime allocation sites: the A structs + their PaykanShared boxes and
-// their Str fields (literals and "n" + StrInt(i) concatenations).
+// their Str fields (literals and "n" + Str<int>(i) concatenations).
 //
 // Expected under --track-heap: live blocks : 0.
 // expect-stdout: n2
@@ -17,7 +17,7 @@ fn pick(o: A?) -> A {
   match o {
     a: A {
       i: int = 0;
-      while (i < 3) { a = A("n" + StrInt(i)); i = i + 1; }
+      while (i < 3) { a = A("n" + Str<int>(i)); i = i + 1; }
       return a;
     }
     None { return A("none"); }

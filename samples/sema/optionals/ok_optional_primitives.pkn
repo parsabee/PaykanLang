@@ -13,7 +13,7 @@ fn main() -> int {
   xs: int?[] = [1, 2];
   xs.push(None);
   match a {
-    n: int { println(StrInt(n + 1)); }
+    n: int { println(Str<int>(n + 1)); }
     None   { println("odd"); }
   }
   if (b == None && a != None) { println("ok"); }

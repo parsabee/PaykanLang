@@ -382,6 +382,7 @@ bool parseOpcodeName(std::string_view s, Opcode &out) {
       {"cmp", Opcode::Cmp},
       {"select", Opcode::Select},
       {"itof", Opcode::IToF},
+      {"ftoi", Opcode::FToI},
       {"cast", Opcode::Cast},
       {"call", Opcode::Call},
       {"vcall", Opcode::VCall},
@@ -1120,6 +1121,11 @@ private:
       if (!parseCommaOperands(in.Args, 1))
         return false;
       resultTy = Type::F64;
+      break;
+    case Opcode::FToI:
+      if (!parseCommaOperands(in.Args, 1))
+        return false;
+      resultTy = Type::I64;
       break;
     case Opcode::Cast:
       if (!parseCommaOperands(in.Args, 1) || !expectWord("to") ||

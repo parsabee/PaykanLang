@@ -7,7 +7,7 @@ fn main() -> int {
   println("=== basic while ===");
   i: int = 0;
   while (i < 5) {
-    println(StrInt(i));
+    println(Str<int>(i));
     i = i + 1;
   }
 
@@ -18,7 +18,7 @@ fn main() -> int {
     sum = sum + n;
     n = n + 1;
   }
-  println("sum 1..100=" + StrInt(sum));   // 5050
+  println("sum 1..100=" + Str<int>(sum));   // 5050
 
   println("=== while never executes ===");
   while (False) {
@@ -32,7 +32,7 @@ fn main() -> int {
     if (count == 5) { break; }
     count = count + 1;
   }
-  println("count=" + StrInt(count));      // 5
+  println("count=" + Str<int>(count));      // 5
 
   println("=== continue skips odd ===");
   evens: int = 0;
@@ -42,7 +42,7 @@ fn main() -> int {
     if (j % 2 != 0) { continue; }
     evens = evens + j;
   }
-  println("sum evens 2..10=" + StrInt(evens));  // 30
+  println("sum evens 2..10=" + Str<int>(evens));  // 30
 
   println("=== nested loops ===");
   total: int = 0;
@@ -55,7 +55,7 @@ fn main() -> int {
     }
     r = r + 1;
   }
-  println("4x4 iterations=" + StrInt(total));  // 16
+  println("4x4 iterations=" + Str<int>(total));  // 16
 
   println("=== break inner loop only ===");
   outer: int = 0;
@@ -69,12 +69,12 @@ fn main() -> int {
     }
     outer = outer + 1;
   }
-  println("3 * 3 inner=" + StrInt(inner_total));  // 9
+  println("3 * 3 inner=" + Str<int>(inner_total));  // 9
 
   println("=== Str var per iteration (scope cleanup) ===");
   k: int = 0;
   while (k < 3) {
-    label: Str = "iter-" + StrInt(k);
+    label: Str = "iter-" + Str<int>(k);
     println(label);
     k = k + 1;
   }
@@ -86,7 +86,7 @@ fn main() -> int {
     a = a + 1;
     b = b - 1;
   }
-  println("a=" + StrInt(a) + " b=" + StrInt(b));  // a=10 b=90
+  println("a=" + Str<int>(a) + " b=" + Str<int>(b));  // a=10 b=90
 
   println("=== countdown with multiple continues ===");
   x: int = 10;
@@ -99,7 +99,7 @@ fn main() -> int {
   }
   // x=0..9: skip multiples of 3 (0,3,6,9) and multiples of 4 (0,4,8)
   // skipped: 0,3,4,6,8,9 => 4 remaining: 1,2,5,7
-  println("non-3/4 count=" + StrInt(out_count));   // 4
+  println("non-3/4 count=" + Str<int>(out_count));   // 4
 
   return 0;
 }

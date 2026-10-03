@@ -352,6 +352,7 @@ private:
     Val visit(ast::Expr *node);
 
     Val emitIdentityCtor(ast::CallExpr *node);
+    Val emitConversion(ast::CallExpr *node);
     Val emitBuiltinCall(ast::CallExpr *node);
     Val emitPrimitiveArrayLiteral(ast::ArrayLiteralExpr *node, size_t len);
     Val emitArrayPush(ast::MethodCallExpr *node, const Val &recv,

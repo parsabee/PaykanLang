@@ -265,11 +265,73 @@ TEST(Driver, IntDivOverflowTraps) {
   EXPECT_NE(out.find("integer overflow in division"), std::string::npos) << out;
 }
 
+// ---------------------------------------------------------------------------
+// conversion panics (#64): int<float> outside int64, char<int> outside 0..255
+// ---------------------------------------------------------------------------
+
+static void expectConversionPanic(const std::string &decl,
+                                  const std::string &conv,
+                                  const std::string &message) {
+  // (Buffered stdout is lost when the panic aborts, so only the absence of
+  // output after the conversion is checked.)
+  auto src = writeTmp("fn main() -> int { " + decl + " " + conv +
+                      " println(\"after\"); return 0; }");
+  auto [rc, out] = run(paykanRun() + " " + src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_NE(rc, 0) << conv << "\n" << out;
+  EXPECT_EQ(out.find("after"), std::string::npos) << out;
+  EXPECT_NE(out.find(message), std::string::npos) << out;
+}
+
+TEST(Driver, IntOfFloatPanicsOnNaNInfinityAndOutOfRange) {
+  REQUIRE_BACKEND();
+  const std::string tail = "): the value is NaN, infinite or outside the int "
+                           "range";
+  expectConversionPanic("z: float = 0.0;", "n = int<float>(z / z);",
+                        "paykan: int<float>(nan" + tail);
+  expectConversionPanic("z: float = 0.0;", "n = int<float>(1.0 / z);",
+                        "paykan: int<float>(inf" + tail);
+  expectConversionPanic("z: float = 0.0;", "n = int<float>(-1.0 / z);",
+                        "paykan: int<float>(-inf" + tail);
+  // 2^63 is the first double past INT64_MAX.
+  expectConversionPanic("f: float = 9223372036854775808.0;",
+                        "n = int<float>(f);",
+                        "paykan: int<float>(9.22337e+18" + tail);
+  expectConversionPanic("f: float = -9223372036854777856.0;",
+                        "n = int<float>(f);",
+                        "paykan: int<float>(-9.22337e+18" + tail);
+}
+
+TEST(Driver, IntOfFloatAcceptsTheInt64Boundaries) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp(
+      "fn main() -> int { lo: float = -9223372036854775808.0; "
+      "hi: float = 9223372036854774784.0; "
+      "println(Str<int>(int<float>(lo))); println(Str<int>(int<float>(hi))); "
+      "return 0; }");
+  auto [rc, out] = run(paykanRun() + " " + src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_EQ(rc, 0) << out;
+  EXPECT_EQ(out, "-9223372036854775808\n9223372036854774784\n");
+}
+
+TEST(Driver, CharOfIntPanicsOutsideTheByteRange) {
+  REQUIRE_BACKEND();
+  const std::string tail = "): the value is outside the char range 0..255";
+  expectConversionPanic("n: int = 256;", "c = char<int>(n);",
+                        "paykan: char<int>(256" + tail);
+  expectConversionPanic("n: int = -1;", "c = char<int>(n);",
+                        "paykan: char<int>(-1" + tail);
+  expectConversionPanic("n: int = -9223372036854775807 - 1;",
+                        "c = char<int>(n);",
+                        "paykan: char<int>(-9223372036854775808" + tail);
+}
+
 // INT64_MIN % -1 is mathematically 0 and must not trap.
 TEST(Driver, IntModMinByNegOneIsZero) {
   REQUIRE_BACKEND();
   auto src = writeTmp("fn main() -> int { m: int = -9223372036854775807 - 1; "
-                      "d: int = -1; r: int = m % d; println(StrInt(r)); "
+                      "d: int = -1; r: int = m % d; println(Str<int>(r)); "
                       "return 7 % d + 3; }");
   auto [rc, out] = run(paykanRun() + " " + src + " 2>&1");
   std::filesystem::remove(src);
@@ -376,8 +438,8 @@ TEST(Driver, FloatNotEqualIsUnorderedOnEveryBackend) {
   REQUIRE_BACKEND();
   auto src = writeTmp(
       "fn main() -> int { inf: float = 1.0e308 * 10.0; n: float = inf - inf;"
-      " println(StrBool(n != n) + StrBool(n == n) + StrBool(n < 1.0)"
-      " + StrBool(1.0 != n) + StrBool(1.0 != 1.0)); return 0; }");
+      " println(Str<bool>(n != n) + Str<bool>(n == n) + Str<bool>(n < 1.0)"
+      " + Str<bool>(1.0 != n) + Str<bool>(1.0 != 1.0)); return 0; }");
   auto backends = run(std::string(kPaykan) + " --list-backends 2>&1").out;
   int ran = 0;
   for (const char *be : {"llvm", "c"}) {

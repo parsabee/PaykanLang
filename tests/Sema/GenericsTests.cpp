@@ -168,7 +168,7 @@ TEST(Generics, MatchOnInstantiationArms) {
   auto r = semaCheck(withMain(std::string(kBox) + R"(
     fn describe(o: Obj) -> Str {
       match o {
-        b: Box<int> { return StrInt(b.get()); }
+        b: Box<int> { return Str<int>(b.get()); }
         Box<Str> { return "str"; }
         _ { return "other"; }
       }

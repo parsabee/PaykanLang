@@ -139,13 +139,13 @@ TEST(Lowering, StringTemporaryPassedToBuiltinIsDestroyedAfterTheCall) {
 TEST(Lowering, ConcatReleasesOwnedOperandsAndTracksTheResult) {
   auto l = lower(R"(
     fn main() -> int {
-      s: Str = "a" + StrInt(1);
+      s: Str = "a" + Str<int>(1);
       return 0;
     }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
-  // Literal and StrInt temporaries are destroyed after the concat; the
+  // Literal and Str<int> temporaries are destroyed after the concat; the
   // concat result is boxed into `s` and released at scope exit.
   EXPECT_EQ(count(m, "call @PaykanString_destroy("), 2u) << m;
   size_t concat = m.find("call @PaykanString_concat(");
@@ -433,7 +433,7 @@ TEST(Lowering, MatchBindingOnAVariableSubjectAcquiresItsBox) {
     fn main() -> int {
       x: A = A(1);
       match x {
-        a: A { println(StrInt(a.v)); }
+        a: A { println(Str<int>(a.v)); }
       }
       return 0;
     }
@@ -462,7 +462,7 @@ TEST(Lowering, ReassigningAMatchBindingIsAnOrdinaryRebind) {
           if (k == 1) { a = A(1); }
           i: int = 0;
           while (i < 3) { a = A(i); i = i + 1; }
-          println(StrInt(a.v));
+          println(Str<int>(a.v));
         }
         None { }
       }
@@ -507,7 +507,7 @@ TEST(Lowering, OptionalMatchTestsNullBeforeTheVTable) {
     fn find(f: bool) -> N? { if (f) { return N(1); } return None; }
     fn main() -> int {
       match find(True) {
-        n: N { println(StrInt(n.v)); }
+        n: N { println(Str<int>(n.v)); }
         None { println("none"); }
       }
       return 0;
@@ -732,4 +732,73 @@ TEST(Lowering, ImportedFunctionsAndClassesAreExternItems) {
   // lib defines the class and its functions once.
   EXPECT_NE(t.find("class Adder {"), std::string::npos) << t;
   EXPECT_NE(t.find("fn @Adder_add("), std::string::npos) << t;
+}
+
+// ---------------------------------------------------------------------------
+// Conversion constructors (#64): the semantics are the lowering's
+// ---------------------------------------------------------------------------
+
+TEST(Lowering, IntOfFloatGuardsTheRangeBeforeTheFToI) {
+  auto l = lower(R"(
+    fn conv(f: float) -> int { return int<float>(f); }
+    fn main() -> int { return conv(2.5); }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string m = function(l.Text, "conv");
+  size_t lo = m.find("cmp ge");
+  size_t hi = m.find("cmp lt");
+  size_t panic = m.find("call @Paykan_panic_float_to_int(");
+  size_t ftoi = m.find("ftoi");
+  ASSERT_NE(lo, std::string::npos) << m;
+  ASSERT_NE(hi, std::string::npos) << m;
+  ASSERT_NE(panic, std::string::npos) << m;
+  ASSERT_NE(ftoi, std::string::npos) << m;
+  EXPECT_NE(m.find("-9.2233720368547758e+18"), std::string::npos) << m;
+  EXPECT_EQ(count(m, "9.2233720368547758e+18"), 2u) << m; // -2^63 and 2^63
+  EXPECT_LT(panic, ftoi) << m;
+  EXPECT_NE(m.find("unreachable"), std::string::npos) << m;
+}
+
+TEST(Lowering, CharOfIntGuardsTheByteRange) {
+  auto l = lower(R"(
+    fn conv(n: int) -> char { return char<int>(n); }
+    fn main() -> int { c = conv(97); return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string m = function(l.Text, "conv");
+  EXPECT_NE(m.find("call @Paykan_panic_int_to_char("), std::string::npos) << m;
+  EXPECT_NE(m.find("cmp le"), std::string::npos) << m;
+  EXPECT_NE(m.find("to char"), std::string::npos) << m;
+}
+
+TEST(Lowering, OtherNumericConversionsAreInline) {
+  auto l = lower(R"(
+    fn a(n: int) -> float { return float<int>(n); }
+    fn b(x: bool) -> int { return int<bool>(x); }
+    fn c(n: int) -> bool { return bool<int>(n); }
+    fn d(x: char) -> int { return int<char>(x); }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  EXPECT_NE(function(l.Text, "a").find("itof"), std::string::npos) << l.Text;
+  EXPECT_NE(function(l.Text, "b").find("to i64"), std::string::npos) << l.Text;
+  EXPECT_NE(function(l.Text, "c").find("cmp ne"), std::string::npos) << l.Text;
+  EXPECT_NE(function(l.Text, "d").find("to i64"), std::string::npos) << l.Text;
+  EXPECT_EQ(count(l.Text, "call @Paykan_panic"), 0u) << l.Text;
+}
+
+TEST(Lowering, ParsesCallTheRuntimeAndReturnAnOptionalBox) {
+  auto l = lower(R"(
+    fn p(s: Str) -> int? { return int<Str>(s); }
+    fn q(s: Str) -> float? { return float<Str>(s); }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string p = function(l.Text, "p");
+  EXPECT_NE(p.find("call @PaykanInt_from_str("), std::string::npos) << p;
+  // The fresh box is returned as-is: no extra retain.
+  EXPECT_EQ(count(p, "retain"), 0u) << p;
+  EXPECT_NE(function(l.Text, "q").find("call @PaykanFloat_from_str("),
+            std::string::npos)
+      << l.Text;
 }

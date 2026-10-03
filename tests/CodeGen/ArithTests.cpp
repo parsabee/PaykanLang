@@ -18,7 +18,7 @@ static std::string wrapMain(const std::string &body) {
 TEST(Arith, IntArithmetic) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = 2 + 3 * 4;
-    println(StrInt(x));
+    println(Str<int>(x));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "14\n");
@@ -27,7 +27,7 @@ TEST(Arith, IntArithmetic) {
 TEST(Arith, FloatArithmetic) {
   auto r = compileAndRun(wrapMain(R"(
     x: float = 1.5 + 2.5;
-    println(StrFloat(x));
+    println(Str<float>(x));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "4\n");
@@ -37,7 +37,7 @@ TEST(Arith, BoolLiterals) {
   auto r = compileAndRun(wrapMain(R"(
     a: bool = True;
     b: bool = False;
-    println(StrBool(a) + StrBool(b));
+    println(Str<bool>(a) + Str<bool>(b));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "TrueFalse\n");
@@ -66,7 +66,7 @@ TEST(Arith, StringConcat) {
 
 TEST(Arith, StringBuiltins) {
   auto r = compileAndRun(wrapMain(R"(
-    println(StrInt(42) + StrFloat(3.14) + StrBool(True));
+    println(Str<int>(42) + Str<float>(3.14) + Str<bool>(True));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "423.14True\n");
@@ -155,12 +155,12 @@ TEST(FloatCompare, NaNNotEqualAsAConditionAndANegation) {
     n: float = inf - inf;
     if (n != n) { println("ne"); } else { println("eq"); }
     b: bool = n != n;
-    println(StrBool(b));
-    println(StrBool(!(n != n)));
-    println(StrBool(!(n == n)));
+    println(Str<bool>(b));
+    println(Str<bool>(!(n != n)));
+    println(Str<bool>(!(n == n)));
     i = 0;
     while (n != n && i < 3) { i = i + 1; }
-    println(StrInt(i));
+    println(Str<int>(i));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.ExitCode, 0);
@@ -175,11 +175,13 @@ TEST(FloatCompare, NaNThroughTupleBoxedFloatAndMatch) {
     // Element-wise tuple equality compares the float slots with ==.
     t1: (float, int) = (n, 1);
     t2: (float, int) = (n, 1);
-    println(StrBool(t1 == t2) + " " + StrBool(t1 != t2));
-    // A boxed Float's equals compares the values with ==.
-    match FloatStr("nan") {
+    println(Str<bool>(t1 == t2) + " " + Str<bool>(t1 != t2));
+    // A boxed Float's equals compares the values with == (a present
+    // `float?` is a Float box; matched as one through `Obj`).
+    o: Obj = float<Str>("nan");
+    match o {
       f: Float {
-        println(StrBool(f == f) + " " + StrBool(f != f));
+        println(Str<bool>(f == f) + " " + Str<bool>(f != f));
       }
       _ { println("no nan"); }
     }

@@ -41,6 +41,8 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanSharedGet, {{kBox}, kObj}},
     {kPaykanPanicDivByZero, {{}, kVoid}},
     {kPaykanPanicDivOverflow, {{}, kVoid}},
+    {kPaykanPanicFloatToInt, {{kF64}, kVoid}},
+    {kPaykanPanicIntToChar, {{kI64}, kVoid}},
     {kPaykanStringNew, {{kPtr, kI64}, kObj}},
     {kPaykanStringDestroy, {{kObj}, kVoid}},
     {kPaykanStringConcat, {{kObj, kObj}, kObj}},
@@ -484,13 +486,15 @@ void ModuleLowering::bootstrapBuiltins() {
   reg(kPrintln, kPaykanPrintln);
   reg(kErrPrint, kPaykanErrPrint);
   reg(kErrPrintln, kPaykanErrPrintln);
-  reg(kStrInt, kPaykanStringFromInt);
-  reg(kStrFloat, kPaykanStringFromFloat);
-  reg(kStrBool, kPaykanStringFromBool);
-  reg(kStrChar, kPaykanStringFromChar);
+  // Conversions with a runtime implementation, by the spelled callee Sema
+  // rebinds them to (the numeric ones are inline, see emitConversion).
+  reg(kConvStrInt, kPaykanStringFromInt);
+  reg(kConvStrFloat, kPaykanStringFromFloat);
+  reg(kConvStrBool, kPaykanStringFromBool);
+  reg(kConvStrChar, kPaykanStringFromChar);
+  reg(kConvIntStr, kPaykanIntFromStr);
+  reg(kConvFloatStr, kPaykanFloatFromStr);
   reg(kOpen, kPaykanFileOpen);
-  reg(kIntStr, kPaykanIntFromStr);
-  reg(kFloatStr, kPaykanFloatFromStr);
   IdentityCtors.insert(kString);
 }
 
@@ -565,8 +569,8 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
       return false;
     if (FunctionTable.count(ce->getCalleeName()) ||
         IdentityCtors.count(ce->getCalleeName())) {
-      if (ce->getCalleeName() == kOpen || ce->getCalleeName() == kIntStr ||
-          ce->getCalleeName() == kFloatStr)
+      if (ce->getCalleeName() == kOpen || ce->getCalleeName() == kConvIntStr ||
+          ce->getCalleeName() == kConvFloatStr)
         return true;
       return false;
     }

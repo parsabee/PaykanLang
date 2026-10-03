@@ -17,7 +17,7 @@ fn main() -> int {
     a: A {
       i: int = 0;
       while (i < 3) { a = A(i); i = i + 1; }
-      println(StrInt(a.v));
+      println(Str<int>(a.v));
     }
     None { }
   }

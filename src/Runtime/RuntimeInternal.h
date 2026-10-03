@@ -48,7 +48,7 @@ static inline int64_t Paykan_equals_consume_other(PaykanObject *other,
   return result;
 }
 
-/// Format a float the way StrFloat prints it ("%g"), with NaN and the
+/// Format a float the way Str<float> prints it ("%g"), with NaN and the
 /// infinities spelled canonically: "nan" (whatever its sign or payload),
 /// "inf" and "-inf".  printf's spelling of these is platform-dependent
 /// ("-nan" for a NaN with the sign bit set on glibc), and whether a NaN has

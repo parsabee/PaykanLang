@@ -9,7 +9,7 @@
 // ---- helpers ---------------------------------------------------------------
 
 fn printBool(b: bool) -> int {
-  println(StrBool(b));
+  println(Str<bool>(b));
   return 0;
 }
 
@@ -20,9 +20,9 @@ fn intArrayAssign() -> int {
   arr: int[] = [10, 20, 30];
   arr[0] = 99;
   arr[2] = 42;
-  println(StrInt(arr[0]));  // 99
-  println(StrInt(arr[1]));  // 20
-  println(StrInt(arr[2]));  // 42
+  println(Str<int>(arr[0]));  // 99
+  println(Str<int>(arr[1]));  // 20
+  println(Str<int>(arr[2]));  // 42
   return 0;
 }
 
@@ -32,9 +32,9 @@ fn floatArrayAssign() -> int {
   println("=== float array assign ===");
   arr: float[] = [1.0, 2.0, 3.0];
   arr[1] = 9.5;
-  println(StrFloat(arr[0]));  // 1.0
-  println(StrFloat(arr[1]));  // 9.5
-  println(StrFloat(arr[2]));  // 3.0
+  println(Str<float>(arr[0]));  // 1.0
+  println(Str<float>(arr[1]));  // 9.5
+  println(Str<float>(arr[2]));  // 3.0
   return 0;
 }
 
@@ -75,7 +75,7 @@ fn loopOverwrite() -> int {
   }
   i = 0;
   while (i < 5) {
-    println(StrInt(arr[i]));  // 0 1 4 9 16
+    println(Str<int>(arr[i]));  // 0 1 4 9 16
     i = i + 1;
   }
   return 0;
@@ -86,9 +86,9 @@ fn loopOverwrite() -> int {
 fn strSubscript() -> int {
   println("=== str subscript ===");
   s: Str = "paykan";
-  println(StrChar(s[0]));  // p (convert char to Str)
-  println(StrChar(s[5]));  // n
-  c: Str = StrChar(s[3]);  // k (convert char to Str)
+  println(Str<char>(s[0]));  // p (convert char to Str)
+  println(Str<char>(s[5]));  // n
+  c: Str = Str<char>(s[3]);  // k (convert char to Str)
   println(c);
   return 0;
 }
@@ -101,7 +101,7 @@ fn iterString() -> int {
   n: int = s.len();
   i: int = 0;
   while (i < n) {
-    println(StrChar(s[i]));  // convert char to Str
+    println(Str<char>(s[i]));  // convert char to Str
     i = i + 1;
   }
   return 0;
@@ -112,7 +112,7 @@ fn iterString() -> int {
 fn reverseFirstThree() -> int {
   println("=== reverse first three ===");
   s: Str = "abcdef";
-  result: Str = StrChar(s[2]) + StrChar(s[1]) + StrChar(s[0]);
+  result: Str = Str<char>(s[2]) + Str<char>(s[1]) + Str<char>(s[0]);
   println(result);  // cba
   return 0;
 }

@@ -1,0 +1,42 @@
+// 36 — conversions to Str: Str<int>, Str<float>, Str<bool>, Str<char> (#64)
+// Exercises: each `Str<Source>(value)` conversion, including the extreme
+//            ints, the canonical spellings of the special floats (`nan`,
+//            `inf`, `-inf`, and `-0` for negative zero) and building a line
+//            from several conversions.
+//
+// expect-stdout: 42 -7 0
+// expect-stdout: -9223372036854775808 9223372036854775807
+// expect-stdout: 3.14 2 0.5 1e+20 -0
+// expect-stdout: nan inf -inf
+// expect-stdout: True False
+// expect-stdout: [a] [Z] [ ]
+// expect-stdout: point(3, -4) visible=True tag=p
+
+class Point {
+  x: int;
+  y: int;
+  fn __init__(x: int, y: int) { self.x = x; self.y = y; }
+  fn toString() -> Str {
+    return "point(" + Str<int>(self.x) + ", " + Str<int>(self.y) + ")";
+  }
+}
+
+fn main() -> int {
+  println(Str<int>(42) + " " + Str<int>(-7) + " " + Str<int>(0));
+  big: int = 9223372036854775807;
+  println(Str<int>(-big - 1) + " " + Str<int>(big));
+
+  z: float = 0.0;
+  println(Str<float>(3.14) + " " + Str<float>(2.0) + " " + Str<float>(0.5) + " " +
+          Str<float>(1e20) + " " + Str<float>(-z));
+  println(Str<float>(z / z) + " " + Str<float>(1.0 / z) + " " + Str<float>(-1.0 / z));
+
+  println(Str<bool>(True) + " " + Str<bool>(1 > 2));
+  word = "aZ ";
+  println("[" + Str<char>(word[0]) + "] [" + Str<char>(word[1]) + "] [" +
+          Str<char>(word[2]) + "]");
+
+  p = Point(3, -4);
+  println(p.toString() + " visible=" + Str<bool>(p.x > 0) + " tag=" + Str<char>('p'));
+  return 0;
+}

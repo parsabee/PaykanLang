@@ -33,7 +33,7 @@ class Point {
   }
 
   fn toString() -> Str {
-    return "(" + StrInt(self.x) + "," + StrInt(self.y) + ")";
+    return "(" + Str<int>(self.x) + "," + Str<int>(self.y) + ")";
   }
 
   fn sum() -> int {
@@ -88,7 +88,7 @@ class Counter {
 
 c: Counter = Counter(0);
 c.increment();
-println(StrInt(c.value()));   // 1
+println(Str<int>(c.value()));   // 1
 ```
 
 There is **no method overloading** — each method name must be unique within a class.
@@ -199,7 +199,7 @@ class Person {
   name: Str;
   age: int;
   fn __init__(n: Str, a: int) { self.name = n; self.age = a; }
-  fn toString() -> Str { return self.name + " (age " + StrInt(self.age) + ")"; }
+  fn toString() -> Str { return self.name + " (age " + Str<int>(self.age) + ")"; }
 }
 
 p: Person = Person("Alice", 30);

@@ -1,9 +1,9 @@
-// 33 — special float values: StrFloat (and a tuple's string form) spells NaN
+// 33 — special float values: Str<float> (and a tuple's string form) spells NaN
 // and the infinities the same way on every backend and platform -- `nan`
 // whatever the NaN's sign bit, `inf` and `-inf`.  (inf - inf is a NaN with the
 // sign bit set when the hardware computes it, but a positive one when a
 // compiler folds it, so printf's own "-nan" made the output backend-dependent.)
-// Exercises: overflow to infinity, inf - inf, 0 * inf, negated NaN, StrFloat,
+// Exercises: overflow to infinity, inf - inf, 0 * inf, negated NaN, Str<float>,
 //            float comparisons with NaN (IEEE 754: `!=` is true when either
 //            side is NaN, every other comparison is false), tuple formatting
 //            of special values.
@@ -33,23 +33,23 @@ fn main() -> int {
   nan1: float = inf - inf;
   nan2: float = 0.0 * inf;
   nan3: float = 0.0 - nan1;
-  println("inf:  " + StrFloat(inf));
-  println("-inf: " + StrFloat(ninf));
-  println("nan:  " + StrFloat(nan1));
-  println("nan:  " + StrFloat(nan2));
-  println("-nan: " + StrFloat(nan3));
-  println("nan == nan: " + StrBool(nan1 == nan1));
-  println("nan != nan: " + StrBool(nan1 != nan1));
-  println("nan != 1:   " + StrBool(nan1 != 1.0));
-  println("1 != nan:   " + StrBool(1.0 != nan1));
-  println("nan != inf: " + StrBool(nan1 != inf));
-  println("nan < 1:    " + StrBool(nan1 < 1.0));
-  println("nan <= nan: " + StrBool(nan1 <= nan1));
-  println("nan > 1:    " + StrBool(nan1 > 1.0));
-  println("nan >= nan: " + StrBool(nan1 >= nan1));
-  println("inf > big:  " + StrBool(inf > big));
+  println("inf:  " + Str<float>(inf));
+  println("-inf: " + Str<float>(ninf));
+  println("nan:  " + Str<float>(nan1));
+  println("nan:  " + Str<float>(nan2));
+  println("-nan: " + Str<float>(nan3));
+  println("nan == nan: " + Str<bool>(nan1 == nan1));
+  println("nan != nan: " + Str<bool>(nan1 != nan1));
+  println("nan != 1:   " + Str<bool>(nan1 != 1.0));
+  println("1 != nan:   " + Str<bool>(1.0 != nan1));
+  println("nan != inf: " + Str<bool>(nan1 != inf));
+  println("nan < 1:    " + Str<bool>(nan1 < 1.0));
+  println("nan <= nan: " + Str<bool>(nan1 <= nan1));
+  println("nan > 1:    " + Str<bool>(nan1 > 1.0));
+  println("nan >= nan: " + Str<bool>(nan1 >= nan1));
+  println("inf > big:  " + Str<bool>(inf > big));
   t: (float, float, float) = (nan1, inf, ninf);
   println(t);                                  // (nan, inf, -inf)
-  println(StrFloat(t.0) + " " + StrFloat(t.2));
+  println(Str<float>(t.0) + " " + Str<float>(t.2));
   return 0;
 }

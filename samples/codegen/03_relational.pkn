@@ -4,44 +4,44 @@
 
 fn main() -> int {
   println("=== int relational ===");
-  println("1<2:  " + StrBool(1 < 2));     // True
-  println("2<1:  " + StrBool(2 < 1));     // False
-  println("3>3:  " + StrBool(3 > 3));     // False
-  println("4>3:  " + StrBool(4 > 3));     // True
-  println("5<=5: " + StrBool(5 <= 5));    // True
-  println("5<=4: " + StrBool(5 <= 4));    // False
-  println("6>=6: " + StrBool(6 >= 6));    // True
-  println("6>=7: " + StrBool(6 >= 7));    // False
-  println("7==7: " + StrBool(7 == 7));    // True
-  println("7==8: " + StrBool(7 == 8));    // False
-  println("9!=9: " + StrBool(9 != 9));    // False
-  println("9!=10:" + StrBool(9 != 10));   // True
+  println("1<2:  " + Str<bool>(1 < 2));     // True
+  println("2<1:  " + Str<bool>(2 < 1));     // False
+  println("3>3:  " + Str<bool>(3 > 3));     // False
+  println("4>3:  " + Str<bool>(4 > 3));     // True
+  println("5<=5: " + Str<bool>(5 <= 5));    // True
+  println("5<=4: " + Str<bool>(5 <= 4));    // False
+  println("6>=6: " + Str<bool>(6 >= 6));    // True
+  println("6>=7: " + Str<bool>(6 >= 7));    // False
+  println("7==7: " + Str<bool>(7 == 7));    // True
+  println("7==8: " + Str<bool>(7 == 8));    // False
+  println("9!=9: " + Str<bool>(9 != 9));    // False
+  println("9!=10:" + Str<bool>(9 != 10));   // True
 
   println("=== float relational ===");
-  println("1.0<2.0:" + StrBool(1.0 < 2.0));  // True
-  println("3.5>3.5:" + StrBool(3.5 > 3.5));  // False
-  println("3.5>=3.5:" + StrBool(3.5 >= 3.5)); // True
-  println("1.5==1.5:" + StrBool(1.5 == 1.5)); // True
-  println("1.5!=2.5:" + StrBool(1.5 != 2.5)); // True
+  println("1.0<2.0:" + Str<bool>(1.0 < 2.0));  // True
+  println("3.5>3.5:" + Str<bool>(3.5 > 3.5));  // False
+  println("3.5>=3.5:" + Str<bool>(3.5 >= 3.5)); // True
+  println("1.5==1.5:" + Str<bool>(1.5 == 1.5)); // True
+  println("1.5!=2.5:" + Str<bool>(1.5 != 2.5)); // True
 
   println("=== float-int mixed (promotion) ===");
-  println("1<1.5:" + StrBool(1 < 1.5));    // True
-  println("2.0==2:" + StrBool(2.0 == 2.0));  // True
-  println("3>2.9:" + StrBool(3 > 2.9));    // True
+  println("1<1.5:" + Str<bool>(1 < 1.5));    // True
+  println("2.0==2:" + Str<bool>(2.0 == 2.0));  // True
+  println("3>2.9:" + Str<bool>(3 > 2.9));    // True
 
   println("=== equality in variables ===");
   a: int = 10;
   b: int = 10;
   c: int = 20;
-  println("a==b:" + StrBool(a == b));        // True
-  println("a==c:" + StrBool(a == c));        // False
-  println("a!=c:" + StrBool(a != c));        // True
+  println("a==b:" + Str<bool>(a == b));        // True
+  println("a==c:" + Str<bool>(a == c));        // False
+  println("a!=c:" + Str<bool>(a != c));        // True
 
   // Comparisons used in assignments
   big: bool = a > 5;
   small: bool = c < 5;
-  println("big:  " + StrBool(big));          // True
-  println("small:" + StrBool(small));        // False
+  println("big:  " + Str<bool>(big));          // True
+  println("small:" + Str<bool>(small));        // False
 
   return 0;
 }

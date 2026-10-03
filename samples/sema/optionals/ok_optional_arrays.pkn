@@ -14,7 +14,7 @@ fn main() -> int {
   e: Node? = xs[0];
   p: Node? = xs.pop();
   match xs[0] {
-    n: Node { println(StrInt(n.v)); }
+    n: Node { println(Str<int>(n.v)); }
     None    { println("none"); }
   }
 
@@ -22,7 +22,7 @@ fn main() -> int {
   ys = [1, 2];
   zs: Str[]? = [];             // the empty literal takes the wrapped type
   match ys {
-    a: int[] { a.push(3); println(StrInt(a.len())); }
+    a: int[] { a.push(3); println(Str<int>(a.len())); }
     None     { println("none"); }
   }
   return 0;

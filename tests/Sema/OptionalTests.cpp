@@ -251,7 +251,7 @@ TEST(Optional, MatchWithBindingAndWildcard) {
   expectOk(withNode(R"(
     a: Node? = Node(1);
     match a {
-      n: Node { println(StrInt(n.val())); }
+      n: Node { println(Str<int>(n.val())); }
       _       { println("none"); }
     }
   )"));
@@ -261,7 +261,7 @@ TEST(Optional, MatchWithNoneArm) {
   expectOk(withNode(R"(
     a: Node? = None;
     match a {
-      n: Node { println(StrInt(n.v)); }
+      n: Node { println(Str<int>(n.v)); }
       None    { println("none"); }
     }
   )"));
@@ -292,7 +292,7 @@ TEST(Optional, MatchOnOptionalArray) {
   expectOk(withNode(R"(
     xs: int[]? = [1, 2, 3];
     match xs {
-      a: int[] { println(StrInt(a.len())); }
+      a: int[] { println(Str<int>(a.len())); }
       None     { println("none"); }
     }
   )"));
@@ -308,7 +308,7 @@ TEST(Optional, MatchOnOptionalFieldAndCallResult) {
         _       { println("tail"); }
       }
       match find(2) {
-        n: Node { println(StrInt(n.v)); }
+        n: Node { println(Str<int>(n.v)); }
         None    { }
       }
       return 0;
@@ -496,7 +496,7 @@ TEST(Optional, ArrayOfOptionals) {
     e: Node? = xs[0];
     p: Node? = xs.pop();
     match xs[0] {
-      n: Node { println(StrInt(n.v)); }
+      n: Node { println(Str<int>(n.v)); }
       None    { }
     }
   )"));
@@ -623,7 +623,7 @@ fn main() -> int {
   a: int[]? = list::maybeArr([1, 2]);
   b: int[]? = list::maybeArr(None);
   match t {
-    x: list::Node { println(StrInt(x.v)); }
+    x: list::Node { println(Str<int>(x.v)); }
     None { println("none"); }
   }
   return 0;

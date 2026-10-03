@@ -23,7 +23,7 @@ TEST(Func, FunctionCallReturn) {
     fn add(a: int, b: int) -> int { return a + b; }
     fn main() -> int {
       x: int = add(3, 4);
-      println(StrInt(x));
+      println(Str<int>(x));
       return 0;
     }
   )");
@@ -195,7 +195,7 @@ TEST(Func, MethodCallPrimitiveReturnUnboxed) {
   auto r = compileAndRun(wrapMain(R"(
     s: Str = "hello";
     n: int = s.len();
-    println(StrInt(n));
+    println(Str<int>(n));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "5\n");

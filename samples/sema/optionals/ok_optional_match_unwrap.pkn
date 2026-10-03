@@ -27,12 +27,12 @@ fn kind(n: Node?) -> Str {
 
 fn main() -> int {
   a: Node? = Leaf(1);
-  println(StrInt(value(a)));
+  println(Str<int>(value(a)));
   println(kind(a));
   match a {                    // unwrap first, then reach into the value
     n: Node {
       match n.next {
-        m: Node { println(StrInt(m.v)); }
+        m: Node { println(Str<int>(m.v)); }
         None    { println("tail"); }
       }
     }

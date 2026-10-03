@@ -31,10 +31,10 @@ fn main() -> int {
   arr.push(mk_pair());
   h: Holder = Holder(t);
   a, b = h.get();
-  println(StrBool(t == (1, "a")));
+  println(Str<bool>(t == (1, "a")));
   m = mov t;
   println(m.1 + s + str + b + arr[2].1);
-  println(StrInt(n + a));
+  println(Str<int>(n + a));
   return 0;
 }
 

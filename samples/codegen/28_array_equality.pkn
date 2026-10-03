@@ -11,16 +11,16 @@ fn main() -> int {
   b: int[] = [1, 2, 3];
   c: int[] = a;                       // alias — same underlying object
 
-  println(StrBool(a == a));           // True   (same object)
-  println(StrBool(a == c));           // True   (alias)
-  println(StrBool(a == b));           // False  (distinct object, equal contents)
-  println(StrBool(a != b));           // True
+  println(Str<bool>(a == a));           // True   (same object)
+  println(Str<bool>(a == c));           // True   (alias)
+  println(Str<bool>(a == b));           // False  (distinct object, equal contents)
+  println(Str<bool>(a != b));           // True
 
   // Reference-element arrays go through the same identity lowering.
   s: Str[] = ["x", "y"];
   t: Str[] = ["x", "y"];
-  println(StrBool(s == s));           // True
-  println(StrBool(s == t));           // False
+  println(Str<bool>(s == s));           // True
+  println(Str<bool>(s == t));           // False
 
   return 0;
 }

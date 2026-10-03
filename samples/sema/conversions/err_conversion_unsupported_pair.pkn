@@ -1,0 +1,5 @@
+// Only the listed pairs exist; the error names the valid sources.
+fn main() -> int {
+  b = bool<float>(1.5);   // error: no conversion from 'float' to 'bool'; 'bool<...>' converts from 'int'
+  return 0;
+}

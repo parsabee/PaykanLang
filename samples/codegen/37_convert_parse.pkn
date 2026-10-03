@@ -1,0 +1,80 @@
+// 37 — parsing with int<Str> and float<Str> (#64)
+// Exercises: `int<Str>(s)` -> `int?` and `float<Str>(s)` -> `float?`, which
+//            are None for an invalid string; unwrapping with `match` (the arm
+//            binds a plain int / float), `!= None`, the int64 limits, what
+//            counts as invalid (whitespace, trailing junk, overflow) and the
+//            special float spellings.
+//
+// expect-stdout: sum of the valid numbers: 60 (2 invalid)
+// expect-stdout: -9223372036854775808 is the smallest int
+// expect-stdout: 9223372036854775808 is not an int
+// expect-stdout: ' 7' is not an int
+// expect-stdout: '7 ' is not an int
+// expect-stdout: '+7' is 7
+// expect-stdout: mean: 2.25
+// expect-stdout: nan inf -0
+// expect-stdout: '1e999' is not a float
+// expect-stdout: None
+
+fn describe(s: Str) -> Str {
+  match int<Str>(s) {
+    n: int { return "'" + s + "' is " + Str<int>(n); }
+    None   { return "'" + s + "' is not an int"; }
+  }
+}
+
+fn main() -> int {
+  inputs: Str[] = ["10", "x", "20", "", "30"];
+  sum = 0;
+  invalid = 0;
+  i = 0;
+  while (i < inputs.len()) {
+    match int<Str>(inputs[i]) {
+      n: int { sum = sum + n; }
+      None   { invalid = invalid + 1; }
+    }
+    i = i + 1;
+  }
+  println("sum of the valid numbers: " + Str<int>(sum) + " (" + Str<int>(invalid) +
+          " invalid)");
+
+  match int<Str>("-9223372036854775808") {
+    n: int { println(Str<int>(n) + " is the smallest int"); }
+    None   { }
+  }
+  if (int<Str>("9223372036854775808") == None) {
+    println("9223372036854775808 is not an int");
+  }
+  println(describe(" 7"));
+  println(describe("7 "));
+  println(describe("+7"));
+
+  readings: Str[] = ["1.5", "2", "bad", "3.25"];
+  total = 0.0;
+  count = 0;
+  i = 0;
+  while (i < readings.len()) {
+    match float<Str>(readings[i]) {
+      f: float { total = total + f; count = count + 1; }
+      None     { }
+    }
+    i = i + 1;
+  }
+  println("mean: " + Str<float>(total / float<int>(count)));
+
+  out = "";
+  specials: Str[] = ["nan", "inf", "-0"];
+  i = 0;
+  while (i < specials.len()) {
+    match float<Str>(specials[i]) {
+      f: float { out = out + Str<float>(f); }
+      None     { out = out + "?"; }
+    }
+    if (i < 2) { out = out + " "; }
+    i = i + 1;
+  }
+  println(out);
+  if (float<Str>("1e999") == None) { println("'1e999' is not a float"); }
+  println(int<Str>("12abc"));      // an int? prints as its value or None
+  return 0;
+}

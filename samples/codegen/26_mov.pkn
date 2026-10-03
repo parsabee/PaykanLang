@@ -38,7 +38,7 @@ fn main() -> int {
   println("=== move a primitive (register forward) ===");
   a: int = 42;
   b = mov a;
-  println(StrInt(b));            // 42
+  println(Str<int>(b));            // 42
   // a is consumed here; reading it would be a compile error.
 
   println("=== move a string (ownership transfer) ===");
@@ -53,7 +53,7 @@ fn main() -> int {
   println("=== move a class object ===");
   p: Point = Point(3, 4);
   q = mov p;
-  println(StrInt(q.sum()));     // 7
+  println(Str<int>(q.sum()));     // 7
 
   println("=== move into a function argument ===");
   loud: Str = "loud";

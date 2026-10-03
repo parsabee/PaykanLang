@@ -68,11 +68,11 @@ fn fizzbuzz(n: int) -> Str {
   if (n % 15 == 0) { return "FizzBuzz"; }
   if (n % 3  == 0) { return "Fizz"; }
   if (n % 5  == 0) { return "Buzz"; }
-  return StrInt(n);
+  return Str<int>(n);
 }
 
 fn tableRow(label: Str, val: int) -> Str {
-  return label + ": " + padLeft(StrInt(val), 6);
+  return label + ": " + padLeft(Str<int>(val), 6);
 }
 
 // ---- main -----------------------------------------------------------------
@@ -93,17 +93,17 @@ fn main() -> int {
   // ---------- Relational & logical -----------------------------------------
   println("\n--- Relational/Logical ---");
   x: int = 7;
-  println("7 in [1,10]: " + StrBool(x >= 1 && x <= 10));  // True
-  println("7 prime:     " + StrBool(isPrime(x)));           // True
-  println("7 even:      " + StrBool(x % 2 == 0));          // False
-  println("!prime(4):   " + StrBool(!isPrime(4)));          // True
+  println("7 in [1,10]: " + Str<bool>(x >= 1 && x <= 10));  // True
+  println("7 prime:     " + Str<bool>(isPrime(x)));           // True
+  println("7 even:      " + Str<bool>(x % 2 == 0));          // False
+  println("!prime(4):   " + Str<bool>(!isPrime(4)));          // True
 
   // ---------- Float ---------------------------------------------------------
   println("\n--- Float ---");
   pi: float = 3.14159;
-  println("pi^2=" + StrFloat(fsquare(pi)));          // ~9.8696
-  println("avg=" + StrFloat(favg(1.0, 3.0)));       // 2
-  println("0.1+0.2=" + StrFloat(0.1 + 0.2));
+  println("pi^2=" + Str<float>(fsquare(pi)));          // ~9.8696
+  println("avg=" + Str<float>(favg(1.0, 3.0)));       // 2
+  println("0.1+0.2=" + Str<float>(0.1 + 0.2));
 
   // ---------- Ternary -------------------------------------------------------
   println("\n--- Ternary ---");
@@ -125,7 +125,7 @@ fn main() -> int {
   println("\n--- Primes up to 30 ---");
   p: int = 2;
   while (p <= 30) {
-    if (isPrime(p)) { println(StrInt(p)); }
+    if (isPrime(p)) { println(Str<int>(p)); }
     p = p + 1;
   }
 
@@ -142,14 +142,14 @@ fn main() -> int {
   world: Str = " World";
   hw: Str = hello + world;
   println(hw);                          // Hello World
-  println(StrInt(hw.len()));      // 11
+  println(Str<int>(hw.len()));      // 11
   println(hw.toString());               // Hello World
 
   // Padded table rows via Str helper
   println("\n--- Padded table ---");
   i: int = 1;
   while (i <= 5) {
-    println(tableRow("item-" + StrInt(i), i * i));
+    println(tableRow("item-" + Str<int>(i), i * i));
     i = i + 1;
   }
 
@@ -157,10 +157,10 @@ fn main() -> int {
   println("\n--- Scope stress ---");
   j: int = 0;
   while (j < 4) {
-    row: Str = "row-" + StrInt(j);
+    row: Str = "row-" + Str<int>(j);
     col: int = 0;
     while (col < 3) {
-      cell: Str = row + "-" + StrInt(col);
+      cell: Str = row + "-" + Str<int>(col);
       println(cell);
       col = col + 1;
     }

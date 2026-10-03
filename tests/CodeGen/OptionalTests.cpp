@@ -64,17 +64,17 @@ TEST(Optional, ClassSomeAndNone) {
       a: Node? = Node(1);
       b: Node? = None;
       match a {
-        n: Node { println(StrInt(n.v)); }
+        n: Node { println(Str<int>(n.v)); }
         None    { println("none"); }
       }
       match b {
-        n: Node { println(StrInt(n.v)); }
+        n: Node { println(Str<int>(n.v)); }
         None    { println("none"); }
       }
       b = a;                 // share
       a = None;
       match b {
-        n: Node { println(StrInt(n.v)); }
+        n: Node { println(Str<int>(n.v)); }
         _       { println("none"); }
       }
       return 0;
@@ -126,13 +126,13 @@ TEST(Optional, LinkedListInsertAndTraverse) {
       head = push_front(head, 3);
       head = push_front(head, 2);
       head = push_front(head, 1);
-      println(StrInt(sum(head)));
+      println(Str<int>(sum(head)));
       match find(head, 2) {
-        n: Node { println("found " + StrInt(n.v)); }
+        n: Node { println("found " + Str<int>(n.v)); }
         None    { println("not found"); }
       }
       match find(head, 9) {
-        n: Node { println("found " + StrInt(n.v)); }
+        n: Node { println("found " + Str<int>(n.v)); }
         None    { println("not found"); }
       }
       // Field left implicitly None by __init__.
@@ -176,19 +176,19 @@ TEST(Optional, CompareAgainstNone) {
     fn main() -> int {
       a: Str? = "x";
       b: Str? = None;
-      println(StrBool(a == None));
-      println(StrBool(a != None));
-      println(StrBool(b == None));
-      println(StrBool(None != b));
-      println(StrBool(make(True) == None));    // call temporary released
-      println(StrBool(make(False) == None));
+      println(Str<bool>(a == None));
+      println(Str<bool>(a != None));
+      println(Str<bool>(b == None));
+      println(Str<bool>(None != b));
+      println(Str<bool>(make(True) == None));    // call temporary released
+      println(Str<bool>(make(False) == None));
       n: Node = Node(5);
-      println(StrBool(n.next == None));        // field read
+      println(Str<bool>(n.next == None));        // field read
       n.next = Node(6);
-      println(StrBool(n.next != None));
+      println(Str<bool>(n.next != None));
       xs: Node?[] = [];
       xs.push(None);
-      println(StrBool(xs[0] == None));         // array element
+      println(Str<bool>(xs[0] == None));         // array element
       return 0;
     }
   )pkn");
@@ -217,18 +217,18 @@ TEST(Optional, CompareTwoOptionals) {
       b: Str? = "ab";
       c: Str? = None;
       d: Str? = None;
-      println(StrBool(a == b));      // content equality via Str.equals
-      println(StrBool(a == c));      // one None
-      println(StrBool(c == d));      // both None
-      println(StrBool(a != c));
-      println(StrBool(c != d));
-      println(StrBool(make(True) == make(True)));   // temporaries
-      println(StrBool(make(False) == make(True)));
+      println(Str<bool>(a == b));      // content equality via Str.equals
+      println(Str<bool>(a == c));      // one None
+      println(Str<bool>(c == d));      // both None
+      println(Str<bool>(a != c));
+      println(Str<bool>(c != d));
+      println(Str<bool>(make(True) == make(True)));   // temporaries
+      println(Str<bool>(make(False) == make(True)));
       p: Pt? = Pt(3);
       q: Pt? = Pt(3);
       n: Pt? = None;
-      println(StrBool(p == q));      // user equals override honoured
-      println(StrBool(p == n));
+      println(Str<bool>(p == q));      // user equals override honoured
+      println(Str<bool>(p == n));
       return 0;
     }
   )pkn");
@@ -289,12 +289,12 @@ TEST(Optional, ParamAndReturnThroughFunctions) {
       }
     }
     fn main() -> int {
-      println(StrInt(unwrapOr(wrap(Node(1)), 0)));
-      println(StrInt(unwrapOr(pass(None), 9)));
-      println(StrInt(unwrapOr(pass(Node(2)), 0)));
-      println(StrInt(unwrapOr(None, 4)));
+      println(Str<int>(unwrapOr(wrap(Node(1)), 0)));
+      println(Str<int>(unwrapOr(pass(None), 9)));
+      println(Str<int>(unwrapOr(pass(Node(2)), 0)));
+      println(Str<int>(unwrapOr(None, 4)));
       n: Node = Node(5);
-      println(StrInt(unwrapOr(n, 0)));    // T widened to T?
+      println(Str<int>(unwrapOr(n, 0)));    // T widened to T?
       return 0;
     }
   )pkn");
@@ -320,15 +320,15 @@ TEST(Optional, MethodWithOptionalParamAndReturn) {
     }
     fn main() -> int {
       l: List = List();
-      println(StrInt(l.firstOr(-1)));
+      println(Str<int>(l.firstOr(-1)));
       l.link(Node(3));
-      println(StrInt(l.firstOr(-1)));
+      println(Str<int>(l.firstOr(-1)));
       match l.first() {
-        n: Node { println(StrInt(n.v)); }
+        n: Node { println(Str<int>(n.v)); }
         None    { println("none"); }
       }
       l.link(None);
-      println(StrInt(l.firstOr(-1)));
+      println(Str<int>(l.firstOr(-1)));
       return 0;
     }
   )pkn");
@@ -359,7 +359,7 @@ TEST(Optional, OptionalIntoObjMaterialisesNone) {
       println(p);
       p = make(True);
       match p {
-        n: Node { println(StrInt(n.v)); }
+        n: Node { println(Str<int>(n.v)); }
         _       { println("other"); }
       }
       show(a);                // argument
@@ -384,8 +384,8 @@ TEST(Optional, SubclassArmThenInnerArm) {
   auto r = compileAndRun(std::string(kNode) + R"pkn(
     fn kind(n: Node?) -> Str {
       match n {
-        l: Leaf { return "leaf " + StrInt(l.v); }
-        x: Node { return "node " + StrInt(x.v); }
+        l: Leaf { return "leaf " + Str<int>(l.v); }
+        x: Node { return "node " + Str<int>(x.v); }
         None    { return "none"; }
       }
     }
@@ -423,8 +423,8 @@ TEST(Optional, OptionalArraySubject) {
       }
     }
     fn main() -> int {
-      println(StrInt(total([1, 2, 3])));
-      println(StrInt(total(None)));
+      println(Str<int>(total([1, 2, 3])));
+      println(Str<int>(total(None)));
       ys: Str[]? = [];
       match ys {
         a: Str[] { a.push("z"); println(a[0]); }
@@ -447,7 +447,7 @@ TEST(Optional, ArrayOfOptionals) {
   auto r = compileAndRun(std::string(kNode) + R"pkn(
     fn show(n: Node?) -> Str {
       match n {
-        x: Node { return StrInt(x.v); }
+        x: Node { return Str<int>(x.v); }
         None    { return "-"; }
       }
     }
@@ -470,7 +470,7 @@ TEST(Optional, ArrayOfOptionals) {
       ss: Str?[] = [];
       ss.push("a");
       ss.push(None);
-      println(StrInt(ss.len()));
+      println(Str<int>(ss.len()));
       return 0;
     }
   )pkn");
@@ -493,10 +493,10 @@ TEST(Optional, TernaryToOptional) {
       c: bool = False;
       d: Str? = if c then "x" else None;
       e: Str? = if c then a else b;
-      println(StrBool(a != None));
-      println(StrBool(b == None));
-      println(StrBool(d == None));
-      println(StrBool(e == None));
+      println(Str<bool>(a != None));
+      println(Str<bool>(b == None));
+      println(Str<bool>(d == None));
+      println(Str<bool>(e == None));
       return 0;
     }
   )pkn");
@@ -528,9 +528,9 @@ TEST(Optional, BreakContinueReturnInsideOptionalMatch) {
       c: Node = Node(9);
       a.next = b;
       b.next = c;
-      println(StrInt(firstOver(a, 4)));
-      println(StrInt(firstOver(a, 20)));
-      println(StrInt(firstOver(None, 0)));
+      println(Str<int>(firstOver(a, 4)));
+      println(Str<int>(firstOver(a, 20)));
+      println(Str<int>(firstOver(None, 0)));
       return 0;
     }
   )pkn");
@@ -557,7 +557,7 @@ TEST(Optional, ObjSubjectMatchUnchanged) {
         s: Str { println(s); }
         _      { println("none"); }
       }
-      println(StrBool(o == None));
+      println(Str<bool>(o == None));
       return 0;
     }
   )pkn");
@@ -613,14 +613,14 @@ fn main() -> int {
   a: list::Node = list::Node(1);
   b: list::Node = list::Node(2);
   a.next = b;
-  println(StrInt(list::count(a)));
-  println(StrInt(list::count(None)));
+  println(Str<int>(list::count(a)));
+  println(Str<int>(list::count(None)));
   match list::find(a, 2) {
-    n: list::Node { println("found " + StrInt(n.v)); }
+    n: list::Node { println("found " + Str<int>(n.v)); }
     None          { println("not found"); }
   }
   match list::find(None, 2) {
-    n: list::Node { println("found " + StrInt(n.v)); }
+    n: list::Node { println("found " + Str<int>(n.v)); }
     None          { println("not found"); }
   }
   match b.tail() {
@@ -650,8 +650,8 @@ TEST(OptionalTuple, TupleWithOptionalElements) {
     fn show(t: (Node?, int)) -> Str {
       x, k = t;
       match x {
-        n: Node { return "some " + StrInt(n.v) + "/" + StrInt(k); }
-        None    { return "none/" + StrInt(k); }
+        n: Node { return "some " + Str<int>(n.v) + "/" + Str<int>(k); }
+        None    { return "none/" + Str<int>(k); }
       }
     }
     fn main() -> int {
@@ -662,15 +662,15 @@ TEST(OptionalTuple, TupleWithOptionalElements) {
       println(show(t));
       println(show(u));
       println(u);
-      println(StrBool(t == pick(a, 1)));
-      println(StrBool(u == pick(None, 2)));
-      println(StrBool(t == u));
+      println(Str<bool>(t == pick(a, 1)));
+      println(Str<bool>(u == pick(None, 2)));
+      println(Str<bool>(t == u));
       y: Node?, j: int = u;
-      println(StrBool(y == None));
+      println(Str<bool>(y == None));
       ts: (Node?, int)[] = [];
       ts.push(t);
       ts.push(u);
-      println(StrInt(ts.len()));
+      println(Str<int>(ts.len()));
       return 0;
     }
   )pkn");
@@ -693,14 +693,14 @@ TEST(OptionalTuple, ImportedTupleOfOptionals) {
 import lib;
 fn main() -> int {
   a: (lib::Node?, int)[]? = lib::wrap(None);
-  println(StrBool(a == None));
+  println(Str<bool>(a == None));
   x, k = lib::mk(lib::Node(3));
   match x {
-    n: lib::Node { println(StrInt(n.v + k)); }
+    n: lib::Node { println(Str<int>(n.v + k)); }
     None         { println("none"); }
   }
   y, j = lib::mk(None);
-  println(StrBool(y == None));
+  println(Str<bool>(y == None));
   return 0;
 }
 )pkn");

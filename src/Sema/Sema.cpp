@@ -932,6 +932,10 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     return S.Ctx.getVoidTy();
   }
 
+  // -- Conversion constructor: Target<Source>(value) (#64) -----------------
+  if (node->hasTypeArgs() && S.isConversionTarget(node->getCalleeName()))
+    return S.checkConversion(node, argTypes);
+
   // -- Generic call: instantiate the template and rebind the callee ---------
   if (node->hasTypeArgs() || S.ClassTemplates.count(node->getCalleeName()) ||
       S.FuncTemplates.count(node->getCalleeName())) {
@@ -951,6 +955,13 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
 
   const auto *sig = S.lookupFunction(node->getCalleeName());
   if (!sig) {
+    if (S.isConversionTarget(node->getCalleeName())) {
+      S.error(node->getLocation(), "a conversion to '" + node->getCalleeName() +
+                                       "' names its source type: write '" +
+                                       node->getCalleeName() +
+                                       "<Source>(value)'");
+      return nullptr;
+    }
     S.error(node->getLocation(),
             "call to undeclared function '" + node->getCalleeName() + "'");
     return nullptr;
@@ -1488,14 +1499,10 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
   // Register type-conversion builtins (take unique builtin types — no ownership
   // check needed).
   auto *StrTy = Ctx.getStrTy();
-  declareFunction(names::kStrInt, StrTy, {Ctx.getIntTy()}, true);
-  declareFunction(names::kStrFloat, StrTy, {Ctx.getFloatTy()}, true);
-  declareFunction(names::kStrBool, StrTy, {Ctx.getBoolTy()}, true);
-  declareFunction(names::kStrChar, StrTy, {Ctx.getCharTy()}, true);
+  // The conversions (`Str<int>(n)`, `int<Str>(s)`, ...) are not functions:
+  // checkConversion handles them (#64).
   declareFunction(names::kString, StrTy, {StrTy}, true);
   declareFunction(names::kOpen, Ctx.getObjTy(), {StrTy, StrTy}, true);
-  declareFunction(names::kIntStr, Ctx.getObjTy(), {StrTy}, true);
-  declareFunction(names::kFloatStr, Ctx.getObjTy(), {StrTy}, true);
 
   // Process imports before local declarations.
   StringSet localImportStack;
@@ -1512,6 +1519,120 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
                      Diags.getErrorCount(),
                      Diags.getDiagnostics(),
                      std::move(AccumulatedImportContexts)};
+}
+
+// -- Conversion constructors (#64) --------------------------------------------
+//
+// `Target<Source>(value)` converts between the primitives and `Str`.  The
+// supported pairs are a fixed list; the source type is always written.  The
+// semantics live in the lowering (Lowering/LoweringExpr.cpp,
+// emitConversion), which both backends inherit.
+
+namespace {
+
+struct ConversionPair {
+  const char *Target;
+  const char *Source;
+  const char *Spelled; // the rebound callee the lowering dispatches on
+};
+
+const ConversionPair kConversions[] = {
+    {names::kString, names::kTypeInt, names::kConvStrInt},
+    {names::kString, names::kTypeFloat, names::kConvStrFloat},
+    {names::kString, names::kTypeBool, names::kConvStrBool},
+    {names::kString, names::kTypeChar, names::kConvStrChar},
+    {names::kTypeInt, names::kString, names::kConvIntStr},
+    {names::kTypeInt, names::kTypeFloat, names::kConvIntFloat},
+    {names::kTypeInt, names::kTypeBool, names::kConvIntBool},
+    {names::kTypeInt, names::kTypeChar, names::kConvIntChar},
+    {names::kTypeFloat, names::kString, names::kConvFloatStr},
+    {names::kTypeFloat, names::kTypeInt, names::kConvFloatInt},
+    {names::kTypeBool, names::kTypeInt, names::kConvBoolInt},
+    {names::kTypeChar, names::kTypeInt, names::kConvCharInt},
+};
+
+} // namespace
+
+bool Sema::isConversionTarget(std::string_view name) {
+  for (const auto &c : kConversions)
+    // A call checked once already carries its spelled form (`int<float>`).
+    if (name == c.Target || name == c.Spelled)
+      return true;
+  return false;
+}
+
+ast::Type *Sema::checkConversion(ast::CallExpr *node,
+                                 const std::vector<ast::Type *> &argTypes) {
+  // The callee is the target (`int`), or its spelled form (`int<float>`) if
+  // this call was checked before.
+  const std::string &callee = node->getCalleeName();
+  const std::string target = callee.substr(0, callee.find('<'));
+  if (node->getTypeArgs().size() != 1) {
+    error(node->getLocation(),
+          "conversion '" + target +
+              "<...>' takes exactly one source type, got " +
+              std::to_string(node->getTypeArgs().size()));
+    return nullptr;
+  }
+  ast::Type *source = resolveType(node->getTypeArgs()[0], node->getLocation(),
+                                  "source type of conversion '" + target + "'");
+  if (!source)
+    return nullptr;
+  const std::string sourceName = typeName(source);
+  const std::string spelled = target + "<" + sourceName + ">";
+
+  const ConversionPair *pair = nullptr;
+  for (const auto &c : kConversions)
+    if (target == c.Target && sourceName == c.Source)
+      pair = &c;
+  if (!pair) {
+    std::string valid;
+    std::vector<const char *> sources;
+    for (const auto &c : kConversions)
+      if (target == c.Target)
+        sources.push_back(c.Source);
+    for (size_t i = 0; i < sources.size(); ++i) {
+      if (i > 0)
+        valid += i + 1 == sources.size() ? " or " : ", ";
+      valid += std::string("'") + sources[i] + "'";
+    }
+    error(node->getLocation(), "no conversion from '" + sourceName + "' to '" +
+                                   target + "'; '" + target +
+                                   "<...>' converts from " + valid);
+    return nullptr;
+  }
+
+  if (argTypes.size() != 1) {
+    error(node->getLocation(), "conversion '" + spelled +
+                                   "' takes exactly one argument, got " +
+                                   std::to_string(argTypes.size()));
+    return nullptr;
+  }
+  ast::Type *argTy = argTypes[0];
+  if (!argTy)
+    return nullptr; // already reported
+  // The source type is written out, so the argument must have exactly that
+  // type: no int -> float promotion, no unwrapping of an optional.
+  if (!typesEqual(argTy, source)) {
+    if (auto *ot = ast::dyn_cast<ast::OptionalType>(argTy);
+        ot && typesEqual(ot->getInnerType(), source)) {
+      errorOptionalUnwrap(node->getArguments()[0]->getLocation(), ot);
+      return nullptr;
+    }
+    error(node->getArguments()[0]->getLocation(),
+          "argument of '" + spelled + "' has type '" + typeName(argTy) +
+              "', expected '" + sourceName + "'");
+    return nullptr;
+  }
+
+  // The result is the target type; a parse (`int<Str>`, `float<Str>`) can
+  // fail, so it returns the optional (None for an invalid string).
+  ast::Type *result = Ctx.lookupType(target);
+  if (source == Ctx.getStrTy())
+    result = Ctx.getOptionalType(result);
+  node->setCalleeName(Ctx.intern(pair->Spelled));
+  node->setResolvedType(result);
+  return result;
 }
 
 // -- Top-level ---------------------------------------------------------------

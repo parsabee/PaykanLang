@@ -1,0 +1,60 @@
+// Isolates: the allocations of the conversion constructors (#64).  Every
+// `Str<...>` result is a fresh Str temporary (destroyed after use, or owned
+// by its variable); a successful `int<Str>` / `float<Str>` is a fresh Int /
+// Float box in an optional, and a failed one allocates nothing; the numeric
+// conversions allocate nothing at all.  Exercised in a loop, as a call
+// argument, a returned value, a field and a match subject.
+//
+// Runtime allocation sites: PaykanString_from_int / _float / _bool / _char
+// (String.c), PaykanInt_from_str / PaykanFloat_from_str (Basic.c) and their
+// PaykanShared boxes, the class instance and the array.
+//
+// Expected under --track-heap: live blocks : 0.
+// expect-stdout: 0 1 2 3 4
+// expect-stdout: 15
+// expect-stdout: 2.5
+// expect-stdout: True a 7
+
+class Cell {
+  label: Str;
+  value: int?;
+  fn __init__() { self.label = Str<int>(0); }
+}
+
+fn parseOr(s: Str, d: int) -> int {
+  match int<Str>(s) {
+    n: int { return n; }
+    None   { return d; }
+  }
+}
+
+fn main() -> int {
+  line = "";
+  i = 0;
+  while (i < 5) {
+    line = line + Str<int>(i);
+    if (i < 4) { line = line + " "; }
+    i = i + 1;
+  }
+  println(line);
+
+  words: Str[] = ["1", "2", "x", "3", "", "4", "5"];
+  total = 0;
+  i = 0;
+  while (i < words.len()) { total = total + parseOr(words[i], 0); i = i + 1; }
+  println(Str<int>(total));
+
+  c = Cell();
+  c.label = Str<float>(2.5);
+  c.value = int<Str>("7");
+  c.value = int<Str>("nope");
+  c.value = int<Str>("7");
+  println(c.label);
+
+  f = float<Str>("1.25");
+  f = float<Str>("bad");
+  n = int<float>(7.9) + int<bool>(False) + int<char>(char<int>(0));
+  println(Str<bool>(bool<int>(n)) + " " + Str<char>(char<int>(97)) + " " +
+          Str<int>(n));
+  return 0;
+}

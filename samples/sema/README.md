@@ -16,6 +16,7 @@ type-checking (no codegen or JIT execution).
 | `generics/` | Generic classes / functions (prototype): instantiation, inference, diagnostics |
 | `optionals/` | Optional types `T?` (prototype) — `None`, widening, unwrapping with `match`, optional fields and arrays |
 | `tuples/`  | Tuple types, literals, `.N` access, destructuring, immutability (prototype) |
+| `conversions/` | Conversion constructors `Target<Source>(value)`: the supported pairs, result types |
 
 ## Running
 
@@ -32,7 +33,8 @@ done
 for f in samples/sema/arrays/*.pkn samples/sema/classes/*.pkn \
          samples/sema/functions/*.pkn samples/sema/match/*.pkn \
          samples/sema/enums/*.pkn samples/sema/generics/*.pkn \
-         samples/sema/optionals/*.pkn samples/sema/tuples/*.pkn; do
+         samples/sema/optionals/*.pkn samples/sema/tuples/*.pkn \
+         samples/sema/conversions/*.pkn; do
   paykan --check-only "$f" 2>&1 && echo "OK: $f" || echo "ERR: $f"
 done
 ```

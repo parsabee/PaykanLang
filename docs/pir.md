@@ -191,6 +191,9 @@ unless stated):
 %r = cmp eq %a, %b | ne | lt | le | gt | ge    ; -> bool; eq/ne also on box/obj/ptr
 %r = select %c, %a, %b                         ; bool ? a : b (no side effects)
 %r = itof %a                                   ; i64 -> f64 (numeric)
+%r = ftoi %a                                   ; f64 -> i64 (numeric, toward zero);
+                                               ; only for %a in [-2^63, 2^63):
+                                               ; the lowering guards the range
 %r = cast %a to T                              ; reinterpret / resize, see table
 ```
 
@@ -270,7 +273,7 @@ CodeGen enforced, now in one place.
   by a retain-or-steal of the new value and the old value is released
   (null-checked); `PaykanArray_set_obj`/`push_obj`/`PaykanTuple_set_obj` retain
   internally, so the +1 temporary passed to them is released afterwards.
-* **Temporaries**: a raw `PaykanString*` produced by a literal, `StrInt` & co.
+* **Temporaries**: a raw `PaykanString*` produced by a literal, `Str<int>` & co.
   or concatenation is destroyed (`PaykanString_destroy`) by the consumer unless
   it is boxed; a fresh box used as a receiver or borrowed argument is released
   after the use.
@@ -287,6 +290,19 @@ CodeGen enforced, now in one place.
   `PaykanInt_new` (etc.) followed by `box`, a fresh +1 box for that slot; a
   `match` arm binding the primitive reads it with `PaykanInt_value` (etc.)
   into a plain local.
+* **Conversions** (`Target<Source>(value)`, #64): `Str<…>` calls
+  `PaykanString_from_int` & co. (an owned string temporary); `int<Str>` /
+  `float<Str>` call `PaykanInt_from_str` / `PaykanFloat_from_str`, whose
+  result is the `int?` / `float?` box (a fresh +1 box, `null` for an
+  invalid string).  The numeric ones are inline: `int<float>` checks
+  `cmp ge %f, -2^63` and `cmp lt %f, 2^63` (both false for NaN) and calls
+  `@Paykan_panic_float_to_int(%f)` then `unreachable` otherwise, before the
+  `ftoi`; `float<int>` is `itof`; `int<bool>` and `int<char>` are `cast`s to
+  `i64` (zero-extending, so a char's code is 0..255); `bool<int>` is
+  `cmp ne %n, 0`; `char<int>` panics outside 0..255
+  (`@Paykan_panic_int_to_char`) and maps 128..255 to the same byte's signed
+  value before the truncating `cast`, so no backend converts an out-of-range
+  value.
 * **Division**: integer `div` is preceded by `if %b == 0 { call @Paykan_panic_div_by_zero(); unreachable }`
   and the `INT64_MIN / -1` check; `rem` replaces a `-1` divisor by `1`.
 
@@ -302,6 +318,7 @@ Paykan_retain(box) -> void       Paykan_release(box) -> void
 PaykanShared_new(obj) -> box     PaykanShared_get(box) -> obj
 ; panics (noreturn)
 Paykan_panic_div_by_zero() -> void      Paykan_panic_div_overflow() -> void
+Paykan_panic_float_to_int(f64) -> void  Paykan_panic_int_to_char(i64) -> void
 ; strings
 PaykanString_new(ptr, i64) -> obj       PaykanString_destroy(obj) -> void
 PaykanString_concat(obj, obj) -> obj    PaykanString_char_at(obj, i64) -> char
@@ -322,6 +339,7 @@ PaykanTuple_set(obj, i64, i64) -> void  PaykanTuple_set_obj(obj, i64, box) -> vo
 ; files / boxed primitives
 PaykanFile_open(obj, obj) -> box
 PaykanInt_from_str(obj) -> box          PaykanFloat_from_str(obj) -> box
+                                        ; null box (None) for an invalid string
 ; boxes of the optional primitives (int? / float? / bool? / char?)
 PaykanInt_new(i64) -> obj               PaykanInt_value(obj) -> i64
 PaykanFloat_new(f64) -> obj             PaykanFloat_value(obj) -> f64

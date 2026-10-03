@@ -231,6 +231,15 @@ public:
     i.Args = {a.Op};
     return emit(std::move(i));
   }
+  /// f64 -> i64, truncating toward zero.  Only defined for operands in
+  /// [-2^63, 2^63): the caller guards NaN, infinities and out-of-range values.
+  Val ftoi(const Val &a, std::string name = "") {
+    Instr i;
+    i.Op = Opcode::FToI;
+    i.Result = newValue(Type::I64, std::move(name));
+    i.Args = {a.Op};
+    return emit(std::move(i));
+  }
   Val cast(const Val &a, Type to, std::string name = "") {
     if (a.Ty == to)
       return a;

@@ -38,10 +38,10 @@ fn average(a: float, b: float) -> float { return (a + b) / 2.0; }
 // ---- Void functions --------------------------------------------------------
 
 fn printInt(label: Str, n: int) {
-  println(label + StrInt(n));
+  println(label + Str<int>(n));
 }
 fn printBool(label: Str, b: bool) {
-  println(label + StrBool(b));
+  println(label + Str<bool>(b));
 }
 
 // ---- Str-returning functions (exercises shared-box return path) -----------
@@ -126,7 +126,7 @@ fn main() -> int {
   printBool("inRange(0,1,10)=", inRange(0, 1, 10));  // False
 
   println("=== float ===");
-  println("avg(3.0,7.0)=" + StrFloat(average(3.0, 7.0)));  // 5
+  println("avg(3.0,7.0)=" + Str<float>(average(3.0, 7.0)));  // 5
 
   println("=== Str-returning ===");
   println(greeting("Paykan"));          // Hello, Paykan!

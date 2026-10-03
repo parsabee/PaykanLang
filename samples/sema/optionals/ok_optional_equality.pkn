@@ -16,10 +16,10 @@ fn main() -> int {
   if (a == None) { println("a is none"); }
   if (b != None) { println("b is some"); }
   if (None == a) { println("none == a"); }
-  println(StrBool(a == b));
-  println(StrBool(b == l));    // subtype-compatible optionals
+  println(Str<bool>(a == b));
+  println(Str<bool>(b == l));    // subtype-compatible optionals
   s: Str? = "x";
   t: Str? = "x";
-  println(StrBool(s == t));
+  println(Str<bool>(s == t));
   return 0;
 }

@@ -23,17 +23,17 @@ fn main() -> int {
         while (j < n) {
           c: char = line[j];
           if (c != '\n') {
-            display = display + StrChar(c);
+            display = display + Str<char>(c);
           }
           j = j + 1;
         }
-        println("  [" + StrInt(i) + "] " + display);
+        println("  [" + Str<int>(i) + "] " + display);
         i = i + 1;
       }
       _ { break; }
     }
   }
-  println("read " + StrInt(i) + " lines");
+  println("read " + Str<int>(i) + " lines");
 
   return 0;
 }
