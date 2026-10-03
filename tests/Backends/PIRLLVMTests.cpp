@@ -121,13 +121,13 @@ fn @main() -> i64 {
 TEST(PIRLLVM, PrintsThroughTheRuntime) {
   auto r = runPIR(R"(module "t"
 cstr @.s = "hello\n" len 6
-extern fn @PaykanString_new(ptr, i64) -> obj
-extern fn @Paykan_print(obj) -> void
-extern fn @PaykanString_destroy(obj) -> void
+extern fn @$rt.PaykanString_new(ptr, i64) -> obj
+extern fn @$rt.Paykan_print(obj) -> void
+extern fn @$rt.PaykanString_destroy(obj) -> void
 fn @main() -> i64 {
-  %s = call @PaykanString_new(@.s, 6)
-  call @Paykan_print(%s)
-  call @PaykanString_destroy(%s)
+  %s = call @$rt.PaykanString_new(@.s, 6)
+  call @$rt.Paykan_print(%s)
+  call @$rt.PaykanString_destroy(%s)
   ret 0
 }
 )");
@@ -262,16 +262,16 @@ fn @main() -> i64 {
 
 TEST(PIRLLVM, ClassesVTablesAndFields) {
   auto r = runPIR(R"(module "t"
-extern fn @PaykanObject_toString(obj) -> box
-extern fn @PaykanObject_equals(obj, box) -> i64
-extern fn @Paykan_release(box) -> void
+extern fn @$rt.PaykanObject_toString(obj) -> box
+extern fn @$rt.PaykanObject_equals(obj, box) -> i64
+extern fn @$rt.Paykan_release(box) -> void
 
 class Counter {
   field n: i64
   vtable {
     destroy = @Counter_destroy : (obj) -> void
-    toString = @PaykanObject_toString : (obj) -> box
-    equals = @PaykanObject_equals : (obj, box) -> i64
+    toString = @$rt.PaykanObject_toString : (obj) -> box
+    equals = @$rt.PaykanObject_equals : (obj, box) -> i64
     bump = @Counter_bump : (obj, i64) -> i64
   }
 }
@@ -315,14 +315,14 @@ TEST(PIRLLVM, ConstantsAreMergeableAndVTableLoadsInvariant) {
   std::string ir = translatePIR(R"(module "t"
 cstr @.s = "hi" len 2
 cstr @.t = "hi" len 2
-extern fn @PaykanObject_toString(obj) -> box
-extern fn @PaykanObject_equals(obj, box) -> i64
+extern fn @$rt.PaykanObject_toString(obj) -> box
+extern fn @$rt.PaykanObject_equals(obj, box) -> i64
 
 class C {
   vtable {
     destroy = @C_destroy : (obj) -> void
-    toString = @PaykanObject_toString : (obj) -> box
-    equals = @PaykanObject_equals : (obj, box) -> i64
+    toString = @$rt.PaykanObject_toString : (obj) -> box
+    equals = @$rt.PaykanObject_equals : (obj, box) -> i64
     get = @C_get : (obj) -> i64
   }
 }
@@ -370,12 +370,12 @@ fn @main() -> i64 {
 TEST(PIRLLVM, CrossModuleCallsAndMainArgs) {
   auto r = runPIR(R"(module "main"
 extern fn @helper(i64) -> i64 module "lib"
-extern fn @Paykan_release(box) -> void
-extern fn @PaykanShared_get(box) -> obj
-extern fn @PaykanArray_length(obj) -> i64
+extern fn @$rt.Paykan_release(box) -> void
+extern fn @$rt.PaykanShared_get(box) -> obj
+extern fn @$rt.PaykanArray_length(obj) -> i64
 fn @main(%args: box) -> i64 {
   %arr = unbox %args
-  %n = call @PaykanArray_length(%arr)
+  %n = call @$rt.PaykanArray_length(%arr)
   %h = call @helper(%n)
   release %args
   ret %h

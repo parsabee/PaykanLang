@@ -103,6 +103,8 @@ add_executable(codegen_tests
     CodeGen/OptionalPrimitiveTests.cpp
     CodeGen/TupleTests.cpp
     CodeGen/RegressionTests.cpp
+    CodeGen/LiteralObjectTests.cpp
+    CodeGen/RuntimeNameTests.cpp
     CodeGen/HarnessTests.cpp
 )
 target_include_directories(codegen_tests

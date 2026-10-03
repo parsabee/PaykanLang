@@ -52,9 +52,12 @@ Val ModuleLowering::ExprEmitter::visitNoneLiteral(ast::NoneLiteral *) {
 }
 
 Val ModuleLowering::ExprEmitter::visitStringLiteral(ast::StringLiteral *node) {
-  // The address of the interned literal data; callers wrap it into a
-  // PaykanString* with wrapStringLiteral.
-  return L.internString(node->getValue());
+  // Every value use of a literal is a fresh PaykanString* over the interned
+  // data: a tracked string temporary, owned like a concatenation's result
+  // (boxed by a new owner, destroyed after a borrowing use).  Only the
+  // runtime-call operand `@.strN` itself is a raw C string.
+  return L.wrapStringLiteral(L.internString(node->getValue()),
+                             node->getValue().size());
 }
 
 Val ModuleLowering::ExprEmitter::visitEnumValueExpr(ast::EnumValueExpr *node) {
@@ -215,8 +218,6 @@ Val ModuleLowering::ExprEmitter::emitPrimitiveArrayLiteral(
     Val v = visit(elemExpr);
     if (!v)
       return Val();
-    if (auto *sl = ast::dyn_cast<ast::StringLiteral>(elemExpr))
-      v = L.wrapStringLiteral(v, sl->getValue().size());
     v = L.promoteIntToFloat(v, elemTy);
     v = L.toSlotBits(v);
     L.callRuntime(kPaykanArraySet, {arr, Val::i64(static_cast<int64_t>(i)), v});
@@ -442,12 +443,8 @@ Val ModuleLowering::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
 
   switch (node->getOpcode()) {
   case ast::BinaryOpcode::Add:
-    if ((lhs.Ty == Type::Box || lhs.Ty == Type::Obj || lhs.Ty == Type::Ptr) &&
-        (rhs.Ty == Type::Box || rhs.Ty == Type::Obj || rhs.Ty == Type::Ptr)) {
-      if (auto *sl = ast::dyn_cast<ast::StringLiteral>(node->getLHS()))
-        lhs = L.wrapStringLiteral(lhs, sl->getValue().size());
-      if (auto *sl = ast::dyn_cast<ast::StringLiteral>(node->getRHS()))
-        rhs = L.wrapStringLiteral(rhs, sl->getValue().size());
+    if ((lhs.Ty == Type::Box || lhs.Ty == Type::Obj) &&
+        (rhs.Ty == Type::Box || rhs.Ty == Type::Obj)) {
       // Classify each operand once; the concat borrows both and returns a
       // brand-new owned string.
       ExprValue lhsEV = L.classifyExpr(node->getLHS(), lhs);
@@ -509,8 +506,6 @@ Val ModuleLowering::ExprEmitter::emitIdentityCtor(ast::CallExpr *node) {
   Val arg = visit(node->getArguments()[0]);
   if (!arg)
     return Val();
-  if (auto *sl = ast::dyn_cast<ast::StringLiteral>(node->getArguments()[0]))
-    arg = L.wrapStringLiteral(arg, sl->getValue().size());
   return arg;
 }
 
@@ -519,7 +514,8 @@ Val ModuleLowering::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
   if (it == L.FunctionTable.end())
     return Val();
   const auto &info = it->second;
-  const pir::Signature &sig = L.declareRuntime(info.RuntimeName);
+  const pir::Function &runtimeFn = L.declareRuntime(info.RuntimeName);
+  const pir::Signature &sig = runtimeFn.Sig;
 
   std::vector<Val> args;
   // Owned argument temporaries the builtin borrows (string temps, fresh
@@ -530,8 +526,6 @@ Val ModuleLowering::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
     Val v = visit(argExpr);
     if (!v)
       return Val();
-    if (auto *sl = ast::dyn_cast<ast::StringLiteral>(argExpr))
-      v = L.wrapStringLiteral(v, sl->getValue().size());
     ExprValue ev = L.classifyExpr(argExpr, v);
     if (ev.isOwned())
       ownedArgs.push_back(ev);
@@ -551,7 +545,7 @@ Val ModuleLowering::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
 
   bool returnsOwnedString = isStrConversion(node->getCalleeName());
 
-  Val result = L.B.call(info.RuntimeName, sig, args, "call");
+  Val result = L.B.call(runtimeFn.Name, sig, args, "call");
   for (const auto &ev : ownedArgs)
     L.releaseIfOwned(ev);
   if (returnsOwnedString)
@@ -723,8 +717,6 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     Val v = visit(arg);
     if (!v)
       return Val();
-    if (auto *sl = ast::dyn_cast<ast::StringLiteral>(arg))
-      v = L.wrapStringLiteral(v, sl->getValue().size());
     if (paramTy == Type::F64 && v.Ty == Type::I64)
       v = L.promoteIntToFloat(v, L.ASTCtx.getFloatTy());
     args.push_back(L.coerceBoolToI64(v, paramTy));
@@ -769,8 +761,6 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   Val recv = visit(node->getReceiver());
   if (!recv)
     return Val();
-  if (auto *sl = ast::dyn_cast<ast::StringLiteral>(node->getReceiver()))
-    recv = L.wrapStringLiteral(recv, sl->getValue().size());
 
   // Classify the receiver BEFORE unwrapping: a fresh temporary receiver is
   // released after the call (the method borrows it).
@@ -871,8 +861,6 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     Val v = visit(argExpr);
     if (!v)
       return Val();
-    if (auto *sl = ast::dyn_cast<ast::StringLiteral>(argExpr))
-      v = L.wrapStringLiteral(v, sl->getValue().size());
     if (ExprValue ev = L.classifyExpr(argExpr, v); ev.isOwned())
       ownedArgs.push_back(ev);
     Type paramTy = i + 1 < sig.Params.size() ? sig.Params[i + 1] : Type::Void;
@@ -947,8 +935,6 @@ Val ModuleLowering::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
     Val val = emitExpr(node->getValue());
     if (!val)
       return Val();
-    if (auto *sl = ast::dyn_cast<ast::StringLiteral>(node->getValue()))
-      val = wrapStringLiteral(val, sl->getValue().size());
     val = promoteIntToFloat(val, elemTy);
     val = toSlotBits(val);
     callRuntime(kPaykanArraySet, {arrRaw, idx, val});

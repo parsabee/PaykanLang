@@ -142,6 +142,36 @@ private:
     for (const ExternGlobal &g : m.Externs)
       define(g.Name, "symbol");
 
+    // Runtime externs, and only they, have `$rt.` names (PIR.h), so the
+    // runtime's symbols and the program's never meet.
+    auto programName = [&](const std::string &name, const char *what) {
+      if (isRuntimeName(name))
+        error(where, std::string(what) + " '@" + name +
+                         "' has a runtime name (only a runtime extern may)");
+    };
+    auto runtimeExternName = [&](const std::string &name, const char *what) {
+      if (!isRuntimeName(name))
+        error(where, std::string(what) + " '@" + name + "' is not named '@" +
+                         std::string(kRuntimePrefix) + "<symbol>'");
+    };
+    for (const Function &f : m.Functions) {
+      if (f.IsExtern && f.Module.empty()) {
+        runtimeExternName(f.Name, "runtime extern function");
+      } else {
+        programName(f.Name, "function");
+        if (!f.Symbol.empty())
+          programName(f.Symbol, "extern function symbol");
+      }
+    }
+    for (const CStrGlobal &g : m.CStrs)
+      programName(g.Name, "cstr global");
+    for (const DataGlobal &g : m.Datas)
+      programName(g.Name, "data global");
+    for (const BytesGlobal &g : m.Bytes)
+      programName(g.Name, "bytes global");
+    for (const ExternGlobal &g : m.Externs)
+      runtimeExternName(g.Name, "extern global");
+
     std::unordered_set<std::string> classes;
     for (const Class &c : m.Classes) {
       if (!classes.insert(c.Name).second)

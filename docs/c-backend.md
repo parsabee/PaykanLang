@@ -43,8 +43,12 @@ backends.
   character outside `[A-Za-z0-9_]` becomes `_XX`, and a clash gets a `_<n>`
   suffix), so modules never collide and generics instantiations
   (`Box<int>`) and methods (`K.w` is `pk_<module>_K_2Ew`, distinct from a
-  user function `K_2Ew`) are valid identifiers.  Runtime symbols keep their
-  C names.
+  user function `K_2Ew`) are valid identifiers.  A runtime extern is
+  `@$rt.<symbol>` in PIR (`docs/pir.md` §3) and is emitted as its C name
+  `<symbol>`, declared by `Runtime.h`; a program function spelled like a
+  runtime symbol (`fn PaykanString_new`) is an ordinary program function
+  (`pk_<module>_PaykanString_new`), so it neither replaces nor clashes with
+  the runtime's.
 * One vtable per class (`pkvt_pk_<module>_<Class>`), whose address is the
   class's runtime type identity (`match`).  Every vtable, the runtime's
   included, is an array of `PaykanMethod` (`void (*)(void)`, `Runtime.h`):

@@ -18,6 +18,7 @@
 #include <fstream>
 #include <iterator>
 #include <regex>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -258,6 +259,60 @@ TEST(Driver, IntModByZeroTraps) {
   std::filesystem::remove(src);
   EXPECT_NE(rc, 0);
   EXPECT_NE(out.find("division or modulo by zero"), std::string::npos) << out;
+}
+
+// #117: a user function spelled like the runtime's panic, with its very
+// signature, is an ordinary function: it runs when called, and a division by
+// zero still reaches the runtime's panic (message, stdout flushed, SIGABRT),
+// on every frontend, with `paykan run` and a built executable.
+TEST(Driver, UserPanicNamedFunctionLeavesTheRuntimePanicAlone) {
+  REQUIRE_BACKEND();
+  auto src =
+      writeTmp("fn Paykan_panic_div_by_zero() { println(\"user fn\"); }\n"
+               "fn z() -> int { return 0; }\n"
+               "fn main() -> int {\n"
+               "  Paykan_panic_div_by_zero();\n"
+               "  println(Str<int>(5 / z()));\n"
+               "  println(\"after\");\n"
+               "  return 0;\n"
+               "}\n");
+  auto exe = src + ".exe";
+  auto listed = run(std::string(kPaykan) + " --list-frontends 2>&1");
+  ASSERT_EQ(listed.exitCode, 0);
+  std::istringstream lines(listed.out);
+  unsigned count = 0;
+  for (std::string line; std::getline(lines, line);) {
+    std::string fe = line.substr(0, line.find(' '));
+    if (fe.empty())
+      continue;
+    ++count;
+    std::string runCmd = paykanRun();
+    runCmd += " --frontend=";
+    runCmd += fe;
+    std::string build = runCmd;
+    build += " -o ";
+    build += exe;
+    build += " build ";
+    build += src;
+    build += " 2>&1";
+    auto [brc, bout] = run(build);
+    ASSERT_EQ(brc, 0) << fe << ": " << bout;
+    std::string runSrc = runCmd;
+    runSrc += " ";
+    runSrc += src;
+    for (const std::string &cmd : {runSrc, exe}) {
+      std::string merged = "exec 3>&1 2>/dev/null; (";
+      merged += cmd;
+      merged += ") 2>&3";
+      auto [rc, both] = run(merged);
+      EXPECT_EQ(rc, 128 + SIGABRT) << fe << ": " << cmd;
+      EXPECT_EQ(both, "user fn\npaykan: integer division or modulo by zero\n")
+          << fe << ": " << cmd;
+    }
+  }
+  EXPECT_GE(count, 1u);
+  std::filesystem::remove(src);
+  std::filesystem::remove(exe);
 }
 
 // INT64_MIN / -1 does not fit in an int: a runtime panic, not SIGFPE.
@@ -581,7 +636,7 @@ TEST(Driver, EmitPirPrintsTheProgram) {
   EXPECT_EQ(rc, 0) << out;
   EXPECT_NE(out.find("fn @main() -> i64 {"), std::string::npos) << out;
   EXPECT_NE(out.find("release"), std::string::npos) << out;
-  EXPECT_NE(out.find("call @Paykan_println("), std::string::npos) << out;
+  EXPECT_NE(out.find("call @$rt.Paykan_println("), std::string::npos) << out;
 }
 
 TEST(Driver, EmitCPrintsCSource) {

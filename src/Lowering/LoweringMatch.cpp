@@ -55,17 +55,13 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
   Val subjRaw = emitExpr(node->getSubject());
   if (!subjRaw)
     return Val();
-  // A string-literal subject evaluates to its C string: build the Str (a
-  // tracked temporary, boxed below like any other string temporary).
-  if (auto *sl = ast::dyn_cast<ast::StringLiteral>(node->getSubject()))
-    subjRaw = wrapStringLiteral(subjRaw, sl->getValue().size());
   Val sharedSubj; // non-null iff we must release at the end
   if (exprAlreadyShared(node->getSubject())) {
     sharedSubj = takeSharedOwnership(node->getSubject(), subjRaw);
     subjRaw = emitSharedGet(sharedSubj, "subj.obj");
   } else if (isTrackedStringTemp(subjRaw)) {
-    // A raw string temporary (e.g. a concatenation): box it so the match owns
-    // it for its whole duration and arm bindings can share it.
+    // A raw string temporary (a literal, a concatenation): box it so the
+    // match owns it for its whole duration and arm bindings can share it.
     sharedSubj = emitSharedNew(subjRaw, "subj.box");
   }
 
@@ -227,7 +223,7 @@ Val ModuleLowering::emitValueMatch(ast::MatchStmt *node, const Val &subjRaw) {
         if (auto *sl = ast::dyn_cast<ast::StringLiteral>(lit)) {
           // PaykanString_equals consumes `other` as a box (the vtable-equals
           // ABI): box the literal and let the call release it.
-          Val litStr = wrapStringLiteral(emitExpr(sl), sl->getValue().size());
+          Val litStr = emitExpr(sl);
           Val litBox = emitSharedNew(litStr, "match.eq");
           Val eq =
               callRuntime(kPaykanStringEquals, {subjRaw, litBox}, "match.eq");
