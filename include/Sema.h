@@ -22,6 +22,9 @@ class ParserDriver;
 }
 namespace sema {
 
+/// One specialization of a builtin conversion target (Sema.cpp).
+struct ConversionPair;
+
 /// Result object returned by Sema::run(). Carries the populated ASTContext
 /// and (for imported modules) the owning ParserDriver plus pre-computed child
 /// SemaContexts so CodeGen can consume them without re-running Sema.
@@ -654,13 +657,22 @@ private:
   /// such a call to.
   static bool isConversionTarget(std::string_view name);
 
-  /// A conversion target called without its specialization (`Str(n)`,
-  /// `int(2.5)`, #88): report a hint naming the specialization to write (the
-  /// argument's type when it is one) or the target's specialization set, and
-  /// return true.  Returns false, reporting nothing, for the `Str(s)` copy
-  /// constructor (a `Str` argument, or a wrong argument count to it).
-  bool diagnoseMissingSpecialization(ast::CallExpr *node,
-                                     const std::vector<ast::Type *> &argTypes);
+  /// True when @p node is a call of the `Str` constructor rather than a
+  /// conversion: `Str(s)` with a `Str` (or `Str?`) argument, or a `Str(...)`
+  /// call whose argument count or argument is already wrong.
+  bool isStrConstruction(ast::CallExpr *node,
+                         const std::vector<ast::Type *> &argTypes) const;
+
+  /// Check a conversion constructor without its type argument, `Target(value)`
+  /// (#88): it picks the specialization whose source is exactly the
+  /// argument's type (`Str(n)` with an `int` is `Str<int>(n)`), or reports
+  /// that there is none.  Rebinds the callee like checkConversion.
+  ast::Type *inferConversion(ast::CallExpr *node,
+                             const std::vector<ast::Type *> &argTypes);
+
+  /// Rebind a checked conversion @p node to @p pair's spelled form and
+  /// return its result type (the optional target for a parse).
+  ast::Type *applyConversion(ast::CallExpr *node, const ConversionPair *pair);
 
   /// Check a conversion constructor `Target<Source>(value)` (#64, #88): the
   /// pair must be one of the target's closed set of specializations and the

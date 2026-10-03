@@ -1,5 +1,5 @@
 // A builtin target has a closed set of specializations; the error names it.
 fn main() -> int {
-  b = bool<float>(1.5);   // error: 'bool' has no specialization for 'float'; its specializations are int, Str
+  b = bool<float>(1.5);   // error: no specialization of 'bool' for 'float'; its specializations are int, Str
   return 0;
 }

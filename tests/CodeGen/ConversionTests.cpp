@@ -322,3 +322,58 @@ TEST(Conversion, BoxedRoundTrips) {
   EXPECT_EQ(r.StdOut, "True\nTrue\nTrue\nNone\n0.1\nFalse\n");
   g.expectNoLeaks("Conversion.BoxedRoundTrips");
 }
+
+// ============================================================================
+// The inferred form Target(value) (#88)
+// ============================================================================
+
+TEST(Conversion, InferredFormMatchesTheExplicitOne) {
+  // Each line prints the inferred and the explicit form side by side.
+  LeakGuard g;
+  auto r = compileAndRun(wrapMain(R"(
+    i = -42;  f = 2.5;  b = 1 < 2;  c = 'q';
+    println(Str(i) + "|" + Str<int>(i));
+    println(Str(f) + "|" + Str<float>(f));
+    println(Str(b) + "|" + Str<bool>(b));
+    println(Str(c) + "|" + Str<char>(c));
+    println(Str(1) + Str(0.5) + Str(False) + Str('!'));
+    println(Str(int(f)) + " " + Str(float(i) / 4.0) + " " + Str(int(b)) +
+            " " + Str(bool(0)) + " " + Str(int(c)) + " " + Str(char(65)));
+    s = "Hello";
+    t: Str = Str(s);
+    println(t);
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "-42|-42\n2.5|2.5\nTrue|True\nq|q\n10.5False!\n"
+                      "2 -10.5 1 False 113 A\nHello\n");
+  g.expectNoLeaks("Conversion.InferredFormMatchesTheExplicitOne");
+}
+
+TEST(Conversion, InferredParsesAndBoxedForms) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    fn show(s: Str) -> Str {
+      out = "";
+      match int(s) { n: int { out = out + "int " + Str(n); } None { out = out + "-"; } }
+      match Float(s) { f: Float { out = out + " Float " + Str(f); } None { out = out + " -"; } }
+      match bool(s) { b: bool { out = out + " bool " + Str(b); } None { out = out + " -"; } }
+      match Bool(s) { b: Bool { out = out + " Bool " + Str(b); } None { out = out + " -"; } }
+      return out;
+    }
+    fn main() -> int {
+      println(show("12"));
+      println(show("1.5"));
+      println(show("True"));
+      println(show("nope"));
+      println(Int("x"));
+      kept: Int? = Int("7");
+      println(kept);
+      println(float("1e999"));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "int 12 Float 12 - -\n- Float 1.5 - -\n"
+                      "- - bool True Bool True\n- - - -\nNone\n7\nNone\n");
+  g.expectNoLeaks("Conversion.InferredParsesAndBoxedForms");
+}

@@ -4,7 +4,9 @@
 //            Float<Str> / Bool<Str>, which parse into the optional box
 //            (`Int?` & co., None for an invalid string); and bool<Str>,
 //            which accepts exactly "True" / "False" and so round-trips
-//            Str<bool>.
+//            Str<bool>.  Both spellings appear: the inferred `Str(n)` (the
+//            specialization for the argument's exact type) and the explicit
+//            `Str<Int>(n)`.
 //
 // expect-stdout: Int 42 | Float 2.5 | Bool True | Char x
 // expect-stdout: 'yes' is not a Bool
@@ -18,9 +20,9 @@
 fn describe(o: Obj) -> Str {
   match o {
     n: Int   { return "Int " + Str<Int>(n); }
-    f: Float { return "Float " + Str<Float>(f); }
+    f: Float { return "Float " + Str(f); }          // Str<Float>
     b: Bool  { return "Bool " + Str<Bool>(b); }
-    c: Char  { return "Char " + Str<Char>(c); }
+    c: Char  { return "Char " + Str(c); }           // Str<Char>
     _        { return "?"; }
   }
 }
@@ -45,13 +47,13 @@ fn main() -> int {
     if (keys[k] == "ratio") {
       match Float<Str>(vals[k]) { x: Float { text = Str<Float>(x); } None { } }
     } else if (keys[k] == "verbose" || keys[k] == "color") {
-      match Bool<Str>(vals[k]) {
+      match Bool(vals[k]) {                       // Bool<Str>
         x: Bool { text = Str<Bool>(x); }
         None    { }
       }
       if (text == "") { println("'" + vals[k] + "' is not a Bool"); }
     } else {
-      match Int<Str>(vals[k]) { x: Int { text = Str<Int>(x); } None { } }
+      match Int(vals[k]) { x: Int { text = Str(x); } None { } }
     }
     if (text != "") {
       valid = valid + 1;
@@ -73,7 +75,7 @@ fn main() -> int {
   flags: bool[] = [True, False];
   j = 0;
   while (j < flags.len()) {
-    match bool<Str>(Str<bool>(flags[j])) {
+    match bool(Str(flags[j])) {                   // bool<Str>(Str<bool>(...))
       v: bool { out = out + " " + Str<bool>(v); }
       None    { out = out + " ?"; }
     }
@@ -84,6 +86,6 @@ fn main() -> int {
   // A failed parse is None.
   missing: Int? = Int<Str>("4 2");
   println(missing);
-  println(Bool<Str>(""));
+  println(Bool(""));
   return 0;
 }

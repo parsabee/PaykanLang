@@ -424,20 +424,33 @@ Paykan has no variadic functions or overloading, so there is no multi-argument
 form: compose pieces with `+` (string concatenation).
 
 ```pkn
-println("x = " + Str<int>(x));
-print("a=" + Str<int>(a) + " b=" + Str<int>(b));
+println("x = " + Str(x));
+print("a=" + Str<int>(a) + " b=" + Str(b));
 ```
 
 ### Conversions
 
 Converting between the primitive types, their boxes and `Str` uses a **conversion
-constructor**: `Target<Source>(value)`. The forms are **specializations of the builtin
-types**: each builtin target has a fixed, closed set of specializations, the only valid
-`Source`s. You always write the source type, and the argument must have exactly that type.
-There is no implicit `int` -> `float` promotion here, no boxing or unboxing, and an optional
-must be unwrapped first.
+constructor**: call the target type with the value, `Target(value)`.
 
-| Target  | Specializations (`Source`)                              | Result                                   |
+```pkn
+n = 42;
+s: Str = Str(n);                  // "42"
+half: float = float(n) / 2.0;     // 21
+match int("17") {                 // a parse can fail: an int?
+  v: int { println(Str(v + 1)); } // 18
+  None   { }
+}
+```
+
+The conversions are **specializations of the builtin types**. Each builtin target has a
+fixed, closed set of them, one for each type it converts *from*. `Target(value)` picks the
+specialization whose source is **exactly** the type of `value`: `Str(n)` with an `int` is
+`Str<int>`, `int(f)` with a `float` is `int<float>`, `int(s)` with a `Str` is `int<Str>`.
+Nothing is widened or unwrapped to find one. An `int` argument does not reach `float`'s
+`Str` specialization, and an `int?` must be unwrapped with `match` first.
+
+| Target  | Specializations (the source types)                      | Result                                   |
 |---------|---------------------------------------------------------|------------------------------------------|
 | `Str`   | `int`, `float`, `bool`, `char`, `Int`, `Float`, `Bool`, `Char` | `Str`                             |
 | `int`   | `Str`; `float`, `bool`, `char`                          | `int?` from `Str`; `int` otherwise       |
@@ -449,8 +462,15 @@ must be unwrapped first.
 | `char`  | `int`                                                   | `char`                                   |
 
 `Char` is not a target: it has no specializations, as there is no `char<Str>` parse to box.
+`Int`, `Float` and `Bool` have no other constructor, so `Int(5)` is an error, not a box:
+`Int`'s only specialization is the parse `Int(s)`. A present `int?` already is an `Int`.
 
-What each one does:
+**The explicit form.** You may also name the specialization: `Target<Source>(value)`, for
+example `Str<int>(n)` or `int<Str>(s)`. It is the same conversion, and it documents the
+source type at the call. The argument must then have exactly that type
+(`Str<float>(3)` is an error, as `3` is an `int`).
+
+What each specialization does:
 
 | Conversion        | From → to          | Result                                                        |
 |-------------------|--------------------|---------------------------------------------------------------|
@@ -471,53 +491,45 @@ What each one does:
 | `char<int>(n)`    | `int` → `char`     | The character with byte code `n`; panics outside `0`..`255`   |
 
 ```pkn
-println(Str<int>(42));            // 42
+println(Str(42));                 // 42
 println(Str<float>(3.14));        // 3.14
-println(Str<bool>(True));         // True
-n: int = int<float>(-2.9);        // -2
+println(Str(True));               // True
+n: int = int(-2.9);               // -2
 f: float = float<int>(3) / 2.0;   // 1.5
-code: int = int<char>('a');       // 97
+code: int = int('a');             // 97
 c: char = char<int>(code + 1);    // 'b'
-match Int<Str>("7") {
-  x: Int { println(Str<Int>(x)); }   // 7
+match Int("7") {
+  x: Int { println(Str(x)); }     // 7 (Str<Int>)
   None   { }
 }
 ```
 
-The boxed sources (`Str<Int>(x)` and the rest) take a present box: an `Int` is never
-`None`, so an `Int?` is unwrapped with `match` first, as with any optional. The boxed
-targets give the optional box rather than the optional primitive: `Int<Str>(s)` is an
-`Int?`, holding the value `int<Str>(s)` would give.
+The boxed sources (`Str(x)` with `x: Int`, and the rest) take a present box: an `Int` is
+never `None`, so an `Int?` is unwrapped with `match` first, as with any optional. The boxed
+targets give the optional box rather than the optional primitive: `Int(s)` is an `Int?`,
+holding the value `int(s)` would give.
 
-**The set is closed.** Any other type argument, a user class included, is a compile-time
-error that names the target's specializations. A class cannot add one; `toString()` is the
-way to turn an object into a `Str`:
+**The set is closed.** When no specialization's source is the argument's type, a user class
+included, the call is a compile-time error that lists the target's specializations. The
+explicit form reports a type argument outside the set the same way. A class cannot add a
+specialization; `toString()` is the way to turn an object into a `Str`:
 
 ```pkn
-s = Str<Point>(p);  // error: 'Str' has no specialization for 'Point'; its specializations
+a = Point();
+s = Str(a);         // error: no specialization of 'Str' for 'Point'; its specializations
                     //        are int, float, bool, char, Int, Float, Bool, Char
-x = int<int>(n);    // error: 'int' has no specialization for 'int'; its specializations
-                    //        are Str, float, bool, char
+o = None;
+t = Str(o);         // error: no specialization of 'Str' for 'Obj'; ...
+x = float(2.5);     // error: no specialization of 'float' for 'float'; its specializations
+                    //        are Str, int
 y = int<float>(3);  // error: argument of 'int<float>' has type 'int', expected 'float'
-```
-
-Calling a target without its specialization is an error that names the one to write, from
-the argument's type, or lists the set when the argument's type is not one of them:
-
-```pkn
-n = 1;
-a = Str(n);         // error: 'Str(...)' needs its specialization: write 'Str<int>(n)'
-b = int(2.5);       // error: 'int(...)' needs its specialization: write 'int<float>(2.5)'
-c = Str(p);         // error: 'Str(...)' needs its specialization: write 'Str<Source>(value)',
-                    //        but 'Str' has no specialization for 'Point'; its
-                    //        specializations are int, float, bool, char, Int, Float, Bool, Char
 ```
 
 `Str(s)` with a `Str` argument is not a conversion: it is the `Str` constructor, and still
 returns the string.
 
-**Parsing.** `int<Str>(s)`, `float<Str>(s)` and `bool<Str>(s)` (and their boxed forms) can
-fail, so they return an optional: `None` when `s` is not a valid value. Unwrap the result
+**Parsing.** `int(s)`, `float(s)` and `bool(s)` with a `Str` (`int<Str>` & co., and their
+boxed forms) can fail, so they return an optional: `None` when `s` is not a valid value. Unwrap the result
 with `match` (see `10-optionals.md`):
 
 ```pkn

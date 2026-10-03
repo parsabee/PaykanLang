@@ -36,25 +36,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Any other pair is an error that lists the valid sources. PIR gains a
     numeric `ftoi` instruction, which the lowering emits only after the
     range guard.
-- **Conversion constructors are a closed set of specializations (#88).**
-  Each builtin target (`Str`, `int`, `Int`, `float`, `Float`, `bool`,
-  `Bool`, `char`) has a fixed set of valid sources, and no other type, a user
-  class included, can be a type argument.
+- **Conversion constructors are a closed set of specializations, and the
+  type argument is optional (#88).** Each builtin target (`Str`, `int`,
+  `Int`, `float`, `Float`, `bool`, `Bool`, `char`) has a fixed set of valid
+  sources, and no other type, a user class included, can be one.
+  - **Inferred form.** `Target(value)` picks the specialization whose source
+    is exactly the argument's type: `Str(n)` with an `int` is `Str<int>(n)`,
+    `int(f)` is `int<float>(f)`, `int(s)` is `int<Str>(s)` (an `int?`). No
+    widening or unwrapping is applied. The explicit `Target<Source>(value)`
+    still works, with the argument required to have exactly that type.
+    `Str(s)` with a `Str` is still the `Str` constructor.
   - **New boxed forms.** `Str<Int>`, `Str<Float>`, `Str<Bool>` and
     `Str<Char>` format a box exactly like the primitive form. `Int<Str>`,
     `Float<Str>` and `Bool<Str>` parse like `int<Str>` & co. and return the
-    optional box (`Int?`, `Float?`, `Bool?`).
+    optional box (`Int?`, `Float?`, `Bool?`). `Int`, `Float` and `Bool` have
+    no other constructor, so `Int(5)` is an error.
   - **`bool<Str>` (new)** returns `bool?`: `True` / `False` for exactly
     `"True"` / `"False"`, the spellings `Str<bool>` prints, and `None` for
     anything else. The runtime gains `PaykanBool_from_str`.
-  - **New diagnostics.** An unlisted pair now reads `'Str' has no
-    specialization for 'Point'; its specializations are int, float, bool,
-    char, Int, Float, Bool, Char`, replacing `no conversion from … to …`. A
-    target called without its specialization gets a direct hint:
-    `Str(n)` with an `int` gives `'Str(...)' needs its specialization: write
-    'Str<int>(n)'`, instead of a misleading argument-type error. `int(2.5)`
-    gets the same wording, replacing `a conversion to 'int' names its source
-    type`. `Str(s)` with a `Str` is still the `Str` constructor.
+  - **New diagnostic.** Both forms now report a missing pair as `no
+    specialization of 'Str' for 'A'; its specializations are int, float,
+    bool, char, Int, Float, Bool, Char`, replacing `no conversion from … to
+    …`. This covers user classes, `Obj` (a bare `None`), optionals and the
+    other builtins. It also replaces `a conversion to 'int' names its source
+    type`, since `int(2.5)` is now valid.
+  - The samples, the example program and the language reference use both
+    forms.
 
 ### Added
 

@@ -1,6 +1,0 @@
-// A conversion target called without its specialization gets a direct hint.
-fn main() -> int {
-  n = 1;
-  s = Str(n);   // error: 'Str(...)' needs its specialization: write 'Str<int>(n)'
-  return 0;
-}
