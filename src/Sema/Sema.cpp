@@ -2407,9 +2407,21 @@ bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
       else if (auto *et = ast::dyn_cast<ast::EnumType>(arm->getArmType()))
         variant = et->getName();
       if (variant.empty() || subjectTy->findVariant(variant) < 0) {
-        error(arm->getLocation(), "'" + variant +
-                                      "' is not a variant of enum '" +
-                                      subjectTy->getName() + "'");
+        // Arms use bare variant names; say so when a qualified name
+        // (`base::Color::Green`) ends in a real variant.
+        auto sep = variant.rfind("::");
+        std::string bare =
+            sep == std::string::npos ? "" : variant.substr(sep + 2);
+        if (!bare.empty() && subjectTy->findVariant(bare) >= 0) {
+          std::string msg = "'" + variant;
+          msg += "' is not a valid match arm; use the bare variant name '";
+          msg += bare + "'";
+          error(arm->getLocation(), msg);
+        } else {
+          error(arm->getLocation(), "'" + variant +
+                                        "' is not a variant of enum '" +
+                                        subjectTy->getName() + "'");
+        }
         ok = false;
       } else if (!seenVariants.insert(variant).second) {
         error(arm->getLocation(),

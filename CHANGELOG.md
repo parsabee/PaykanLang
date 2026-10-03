@@ -165,6 +165,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exit status 134 (128 + `SIGABRT`). The llvm backend's JIT used to let the
   abort kill the compiler process itself; executables from `build` still die
   by `SIGABRT`.
+- A qualified match arm on an enum (`base::Color::Green { … }`) now says to
+  use the bare variant name (`'Green'`) instead of claiming it is not a
+  variant (#79).
 
 ### Changed
 
