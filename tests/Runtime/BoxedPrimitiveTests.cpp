@@ -224,7 +224,7 @@ TEST(BoxedFloat, FromStrSpecialValues) {
   Paykan_release(i);
 }
 
-// The range rule (language_reference/01-language-basics.md): a value that
+// The range rule (docs/language/01-language-basics.md): a value that
 // rounds to a finite float, subnormals included, is accepted; one too large
 // (rounds to +-inf) or too small (nonzero, rounds to 0) is None.  strtod
 // flags subnormal results with ERANGE too, which must not make them None.

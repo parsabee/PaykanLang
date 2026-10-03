@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Check that the C backend's output is strict ISO C11 on every C compiler.
 
-For every runnable program of the samples corpus (samples_parity.py's list
-plus example_program/*/main.pkn) and every compiler named with --cc:
+For every runnable program of the samples corpus (samples_parity.py's list)
+and every compiler named with --cc:
 
 * emit-c: the whole-program `paykan --backend=c --emit-c` output is compiled
   with STRICT_FLAGS at each --opt level, linked with a copy of the runtime
@@ -44,11 +44,7 @@ EXTRA = []  # --cflag
 
 
 def corpus():
-    files = sp.samples()
-    for d in sorted((ROOT / "example_program").iterdir()):
-        if (d / "main.pkn").is_file():
-            files.append(d / "main.pkn")
-    return files
+    return sp.samples()
 
 
 def rel(path):

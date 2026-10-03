@@ -1,4 +1,4 @@
-// ERROR: generic templates cannot be imported yet (language_reference/
+// ERROR: generic templates cannot be imported yet (docs/language/
 // 11-generics.md); `shapes::Box<int>` names a template of another module.
 // Exactly one diagnostic (#112):
 //   main.pkn:11:7: error: generic types and functions cannot be imported yet:

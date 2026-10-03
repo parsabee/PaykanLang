@@ -2,9 +2,8 @@
 """Differential check of the Paykan frontends.
 
 Runs `paykan --frontend=<name> --dump-ast` with two frontends over every
-`.pkn` file below the given directories (default: samples/ and
-example_program/) and reports any file for which the two differ in exit
-status or in the printed AST.  Both frontends must accept the same inputs,
+`.pkn` file below the given directories (default: samples/) and reports any
+file for which the two differ in exit status or in the printed AST.  Both frontends must accept the same inputs,
 reject the same inputs and build the same AST (docs/grammar.md); this script
 is the CI gate for that rule.
 
@@ -57,10 +56,7 @@ def main() -> int:
     names = [n.strip() for n in args.frontends.split(",") if n.strip()]
     if len(names) != 2:
         sys.exit("error: --frontends needs exactly two names")
-    dirs = args.dirs or [
-        os.path.join(REPO_ROOT, "samples"),
-        os.path.join(REPO_ROOT, "example_program"),
-    ]
+    dirs = args.dirs or [os.path.join(REPO_ROOT, "samples")]
 
     listed = subprocess.run(
         [args.paykan, "--list-frontends"], capture_output=True, text=True

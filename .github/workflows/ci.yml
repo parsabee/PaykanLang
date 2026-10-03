@@ -303,7 +303,7 @@ jobs:
       - name: Install and build the out-of-tree example backend against it
         run: |
           cmake --install build --prefix "$PWD/install"
-          cmake -S examples/backends/print-pir -B build-example -G Ninja \
+          cmake -S utils/print-pir -B build-example -G Ninja \
             -DCMAKE_PREFIX_PATH="$PWD/install"
           cmake --build build-example
           build-example/paykan-print-pir --list-backends | grep print-pir
