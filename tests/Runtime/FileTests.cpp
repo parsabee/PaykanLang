@@ -26,9 +26,21 @@ static std::string makeTempFile(const char *content) {
   int fd = mkstemp(path);
   if (fd < 0)
     return "";
-  if (content && *content)
-    write(fd, content, strlen(content));
+  size_t len = content ? strlen(content) : 0;
+  bool ok = true;
+  for (size_t off = 0; off < len;) {
+    ssize_t n = write(fd, content + off, len - off);
+    if (n <= 0) {
+      ok = false;
+      break;
+    }
+    off += static_cast<size_t>(n);
+  }
   close(fd);
+  if (!ok) {
+    std::remove(path);
+    return "";
+  }
   return std::string(path);
 }
 

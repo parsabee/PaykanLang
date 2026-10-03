@@ -566,6 +566,25 @@ bool Sema::processImport(ast::ImportDecl *node) {
       ok = false;
       continue;
     }
+    // The names this import binds must not already name another module.
+    bool clash = false;
+    for (const std::string *name :
+         {&qualifier, static_cast<const std::string *>(&fullPath)}) {
+      auto [it, fresh] = ImportQualifiers.try_emplace(
+          *name, ImportQualifier{resolved, fullPath});
+      if (fresh || it->second.Resolved == resolved)
+        continue;
+      error(node->getLocation(),
+            "import of module '" + fullPath + "': qualifier '" + *name +
+                "' already names module '" + it->second.ModulePath +
+                "' (give one of them an alias with 'as')");
+      clash = true;
+      break;
+    }
+    if (clash) {
+      ok = false;
+      continue;
+    }
     if (!loadModule(resolved, qualifier, fullPath, node->getLocation()))
       ok = false;
   }

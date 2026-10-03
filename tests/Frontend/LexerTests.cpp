@@ -144,6 +144,20 @@ TEST(Lexer, FloatRange) {
       << d.Diags;
 }
 
+TEST(Lexer, MultiCharacterLiteralIsOneError) {
+  // Each whole literal (an escape counts as one character) is one error, and
+  // lexing goes on after its closing quote.
+  auto d = dump("'ab' x '\\n\\'' y");
+  EXPECT_EQ(d.Errors, 2u) << d.Diags;
+  EXPECT_NE(d.Diags.find("1:1: error: character literal must contain exactly "
+                         "one character"),
+            std::string::npos)
+      << d.Diags;
+  ASSERT_EQ(d.Lines.size(), 3u);
+  EXPECT_EQ(d.Lines[0], "1:6-1:7 IDENT x");
+  EXPECT_EQ(d.Lines[1], "1:15-1:16 IDENT y");
+}
+
 TEST(Lexer, IntegerRange) {
   auto d = dump("9223372036854775807 9223372036854775808");
   EXPECT_EQ(d.Errors, 1u);

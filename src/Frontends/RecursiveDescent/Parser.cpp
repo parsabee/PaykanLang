@@ -130,6 +130,10 @@ Parser::Parser(ASTContext &ctx, std::string_view source,
         // while it scans ahead speculatively: report them unconditionally.
         unsigned saved = Speculating;
         Speculating = 0;
+        // The token being lexed now (the next one in the buffer) is the
+        // first one after the bad text, which is dropped (an out-of-range
+        // integer is kept, as 0): a syntax error there is a follow-on.
+        LexErrorToken = Buf.size();
         error(loc, msg);
         Speculating = saved;
       }) {}
@@ -204,6 +208,14 @@ bool Parser::expect(Tok k, const char *context) {
   return false;
 }
 
+bool Parser::expectCloseBrace(const char *context, SourceLocation open) {
+  if (accept(Tok::RBrace))
+    return true;
+  if (errorAtCurrent(std::string("expected '}' ") + context) && Diags)
+    Diags->note(open, "to match this '{'");
+  return false;
+}
+
 bool Parser::enterNesting() {
   if (++Depth > kMaxNesting) {
     error(cur().Loc, "nesting too deep (more than " +
@@ -230,12 +242,23 @@ void Parser::error(SourceLocation loc, const std::string &msg) {
   }
 }
 
-void Parser::errorAtCurrent(const std::string &expected) {
+bool Parser::errorAtCurrent(const std::string &expected) {
+  if (Speculating)
+    return false;
   const Token &t = cur();
+  // Each error recovery resumes at a later token, so a second syntax error
+  // at the same token (an unclosed block at end of file, reported once per
+  // open block) and one right after a lexical error (where the dropped text
+  // left a hole in the token stream) are follow-ons of the first.  The file
+  // has failed already either way.
+  if (Pos == LastSyntaxError || Pos == LexErrorToken)
+    return false;
+  LastSyntaxError = Pos;
   std::string found = describe(t.Kind);
   if (t.Kind == Tok::Ident)
     found += " '" + std::string(t.Text) + "'";
   error(t.Loc, "unexpected " + found + "; " + expected);
+  return true;
 }
 
 // -- Error recovery
@@ -528,6 +551,7 @@ ClassDecl *Parser::parseClassDecl() {
       return nullptr;
   }
 
+  SourceLocation open = cur().Loc;
   if (!expect(Tok::LBrace, "to open the class body"))
     return nullptr;
   if (!enterNesting())
@@ -559,7 +583,7 @@ ClassDecl *Parser::parseClassDecl() {
     skipToMemberBoundary();
   }
   leaveNesting();
-  if (!expect(Tok::RBrace, "to close the class body") || !ok)
+  if (!expectCloseBrace("to close the class body", open) || !ok)
     return nullptr;
   return Ctx.make<ClassDecl>(span(start), name, intern(superName),
                              std::move(body.Fields), std::move(body.Methods),
@@ -675,7 +699,7 @@ CompoundStmt *Parser::parseBlock() {
     return nullptr;
   parseStatementsUntilBrace(block);
   leaveNesting();
-  if (!expect(Tok::RBrace, "to close the block"))
+  if (!expectCloseBrace("to close the block", lbrace.Loc))
     return nullptr;
   return block;
 }
@@ -964,6 +988,7 @@ Stmt *Parser::parseMatchStmt() {
   Expr *subject = parseExpression();
   if (!subject)
     return nullptr;
+  SourceLocation open = cur().Loc;
   if (!expect(Tok::LBrace, "after the match subject"))
     return nullptr;
   if (!enterNesting())
@@ -986,7 +1011,7 @@ Stmt *Parser::parseMatchStmt() {
     skipToMemberBoundary(); // next arm: a `}`-balanced skip is what we need
   }
   leaveNesting();
-  if (!expect(Tok::RBrace, "to close the match") || !ok)
+  if (!expectCloseBrace("to close the match", open) || !ok)
     return nullptr;
   return Ctx.make<MatchStmt>(span(start), subject, std::move(arms));
 }

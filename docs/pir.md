@@ -82,6 +82,7 @@ fn @name(%p0: T0, %p1: T1) -> R {
 }
 extern fn @Paykan_retain(box) -> void              ; runtime ABI symbol
 extern fn @add(i64, i64) -> i64 module "lib/math"  ; defined in another PIR module
+extern fn @"x::tag"() -> box module "x" symbol @tag ; named `tag` in module "x"
 ```
 
 Locals are declared at the top of the function body (the lowering hoists them,
@@ -96,7 +97,14 @@ accepts it).
 A function is `extern` when it is defined elsewhere: in the runtime (no
 `module` clause; the name is the C symbol) or in another PIR module of the same
 program (`module "<module name>"`, written on the declaration's line: a
-`module` on a later line starts the next module).  Backends may mangle the
+`module` on a later line starts the next module).  A module extern may add
+`symbol @<name>` (on the same line): the function's name in its defining
+module, when that differs from the name this module's calls use.  The lowering
+names every function it imports as its call sites qualify it (`@"x::tag"`,
+`@"r::tag"` for `import y as r`) with `symbol @tag`, so two modules' `tag`s and
+the importer's own `@tag` are distinct symbols; a function reached through
+several qualifiers is declared once.  Backends link a module extern through
+its `(module, symbol)` pair.  Backends may mangle the
 names of module-defined symbols (C needs to: `Box<int>`, `first<int>` and
 `helper::add` are not C identifiers) but must leave runtime symbols as they are;
 a `(module, name)` pair must mangle the same way in every module of the

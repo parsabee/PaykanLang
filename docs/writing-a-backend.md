@@ -180,7 +180,9 @@ backend; a new in-tree backend is expected to pass them.
   lowering is the only place those rules live.
 - Keep runtime symbol names as declared (`extern fn @Paykan_...`); mangle only
   module-defined names (`Box<int>`, `helper::add`), consistently across the
-  modules of a program (`docs/pir.md` §3).
+  modules of a program (`docs/pir.md` §3). Resolve a module extern through
+  its defining module and `Function::linkName()` (its `symbol`), not its
+  local name: `@"x::tag"` in the importer is `@tag` in module `x`.
 - Honour `-O<n>` in whatever way fits (`cc -O2`, `PassBuilder`, nothing).
 - Report every failure through `Status`; never `exit()`, never throw.
 - No core change should be needed: a backend lives entirely in its own

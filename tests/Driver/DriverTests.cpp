@@ -9,6 +9,7 @@
 #include "Version.h"
 
 #include <array>
+#include <cerrno>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -16,6 +17,10 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
+
+#include <sys/wait.h>
+#include <unistd.h>
 
 #ifndef PAYKAN_BIN
 #error "PAYKAN_BIN must be defined via CMake compile definition"
@@ -339,6 +344,70 @@ TEST(Driver, IntModMinByNegOneIsZero) {
   EXPECT_EQ(out, "0\n");
 }
 
+// The raw wait status of `argv` (no shell in between, which would turn a
+// death by signal into an exit status), with stdout and stderr discarded.
+static int rawWaitStatus(const std::vector<std::string> &argv) {
+  pid_t pid = fork();
+  if (pid == 0) {
+    if (FILE *null = std::freopen("/dev/null", "w", stdout))
+      dup2(fileno(null), STDERR_FILENO);
+    std::vector<char *> args;
+    args.reserve(argv.size() + 1);
+    for (const auto &a : argv)
+      args.push_back(const_cast<char *>(a.c_str()));
+    args.push_back(nullptr);
+    execv(args[0], args.data());
+    _exit(127);
+  }
+  int status = 0;
+  while (waitpid(pid, &status, 0) < 0)
+    if (errno != EINTR)
+      return -1;
+  return status;
+}
+
+// A runtime panic aborts the program.  `paykan run` reports it the same way
+// on every backend, as the exit status 128 + SIGABRT (the C backend's child
+// process dies by the signal, the JIT turns it into that status), and an
+// executable from `build` dies by SIGABRT on every backend (#79).
+TEST(Driver, PanicExitStatusIsTheSameOnEveryBackend) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_panic_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  auto src = (dir / "panic.pkn").string();
+  {
+    std::ofstream ofs(src);
+    ofs << "fn main() -> int { z: int = 0; return 7 / z; }";
+  }
+  auto backends = run(std::string(kPaykan) + " --list-backends 2>&1").out;
+  int ran = 0;
+  for (const std::string be : {"llvm", "c"}) {
+    if (backends.find(be + "\n") == std::string::npos &&
+        backends.find(be + " ") == std::string::npos)
+      continue;
+    ++ran;
+    int st = rawWaitStatus({kPaykan, "--backend=" + be, src});
+    EXPECT_TRUE(WIFEXITED(st)) << be << ": killed by signal " << WTERMSIG(st);
+    if (WIFEXITED(st)) {
+      EXPECT_EQ(WEXITSTATUS(st), 128 + SIGABRT) << be;
+    }
+
+    auto exe = (dir / ("panic-" + be)).string();
+    std::string build = kPaykan;
+    build += " --backend=" + be;
+    build += " -o " + exe;
+    build += " build " + src + " 2>&1";
+    auto [rc, out] = run(build);
+    ASSERT_EQ(rc, 0) << be << ": " << out;
+    st = rawWaitStatus({exe});
+    EXPECT_TRUE(WIFSIGNALED(st) && WTERMSIG(st) == SIGABRT)
+        << be << ": wait status " << st;
+  }
+  std::filesystem::remove_all(dir);
+  EXPECT_GT(ran, 0) << backends;
+}
+
 TEST(Driver, IntDivNonZeroSucceeds) {
   REQUIRE_BACKEND();
   auto src = writeTmp("fn main() -> int { return 17 / 5; }");
@@ -546,6 +615,70 @@ TEST(Driver, CBackendBuildsAnExecutableAndCachesObjects) {
     auto [rc7, out7] = run(exe + " 2>&1");
     EXPECT_EQ(rc7, 5) << field << out7;
   }
+  std::filesystem::remove_all(dir);
+}
+
+// A cached object that was truncated or corrupted after it was written (disk
+// full, a crash, an outside edit) is detected through the size and hash in
+// its `.key` and rebuilt, instead of failing every later link (#74).
+TEST(Driver, CBackendRebuildsACorruptCachedObject) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_corrupt_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  std::ofstream(dir / "dep.pkn")
+      << "class P { a: int; fn __init__() { self.a = 1; }"
+         " fn get() -> int { return self.a; } }\n"
+         "fn v() -> int { return 1; }\n";
+  std::ofstream(dir / "mid.pkn")
+      << "import dep;\nfn mk() -> dep::P { return dep::P(); }\n";
+  std::ofstream(dir / "main.pkn") << "import mid;\nimport dep;\n"
+                                     "fn main() -> int { p = mid::mk(); "
+                                     "println(Str<int>(p.get() + dep::v()));"
+                                     " return 0; }\n";
+  std::string src = (dir / "main.pkn").string();
+  std::string runCmd = std::string(kPaykan) + " --backend=c " + src + " 2>&1";
+  std::string exe = (dir / "main").string();
+  std::string buildCmd = std::string(kPaykan) + " --backend=c -o " + exe +
+                         " build " + src + " 2>&1";
+  auto [rc, out] = run(runCmd);
+  ASSERT_EQ(rc, 0) << out;
+  ASSERT_EQ(out, "2\n");
+  auto obj = dir / ".paykan_cache" / "dep.pkn.o";
+  ASSERT_TRUE(std::filesystem::exists(obj)) << obj;
+  auto size = std::filesystem::file_size(obj);
+  ASSERT_GT(size, 16u);
+
+  // An intact entry is reused: the object is not rewritten.
+  auto stamp = std::filesystem::last_write_time(obj);
+  auto [rcSame, outSame] = run(runCmd);
+  EXPECT_EQ(rcSame, 0) << outSame;
+  EXPECT_EQ(std::filesystem::last_write_time(obj), stamp);
+
+  // Truncated (the audit's repro), then same-size corruption (only the hash
+  // can tell), for both `run` and `build`.
+  for (const std::string &cmd : {runCmd, buildCmd}) {
+    std::filesystem::resize_file(obj, 10);
+    auto [rc1, out1] = run(cmd);
+    EXPECT_EQ(rc1, 0) << cmd << "\n" << out1;
+    EXPECT_EQ(std::filesystem::file_size(obj), size);
+
+    {
+      std::fstream f(obj, std::ios::in | std::ios::out | std::ios::binary);
+      f.seekp(0);
+      f.write("\0\0\0\0\0\0\0\0", 8); // clobber the ELF / Mach-O magic
+    }
+    EXPECT_EQ(std::filesystem::file_size(obj), size);
+    auto [rc2, out2] = run(cmd);
+    EXPECT_EQ(rc2, 0) << cmd << "\n" << out2;
+  }
+  auto [rcExe, outExe] = run(exe + " 2>&1");
+  EXPECT_EQ(rcExe, 0) << outExe;
+  EXPECT_EQ(outExe, "2\n");
+  auto [rcRun, outRun] = run(runCmd);
+  EXPECT_EQ(rcRun, 0) << outRun;
+  EXPECT_EQ(outRun, "2\n");
   std::filesystem::remove_all(dir);
 }
 

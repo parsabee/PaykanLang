@@ -147,7 +147,9 @@ treatment.
 ## Value Mode — matching on a builtin value
 
 When the subject is a builtin (`int`, `float`, `bool`, `char`, or `Str`), arms are **literal
-patterns** and the subject is compared by value. The first equal literal wins.
+patterns** and the subject is compared by value. The first equal literal wins. The subject
+can be any expression of a builtin type: a variable, a call, a temporary such as `a + b`, or even
+a literal (`match "s" { … }`).
 
 ```pkn
 n: int = 2;
@@ -340,6 +342,7 @@ above) is unchanged.
 | Arm type not a subtype | A type arm names a class that is not the subject type or a subtype of it |
 | Unknown arm type | A type arm names a class that is not declared anywhere |
 | Unknown enum variant | A variant arm names an identifier that is not a variant of the subject enum |
+| Qualified variant arm | A variant arm is written qualified (`base::Color::Green`); arms use the bare variant name (`Green`) |
 | Literal type mismatch | A value arm's literal has a different type than the subject |
 | Type name in value mode | A value-mode `match` has a type-name arm instead of a literal |
 | Binding redeclaration | An arm body redeclares the arm's binding name |

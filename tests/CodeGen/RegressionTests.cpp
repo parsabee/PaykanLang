@@ -631,3 +631,34 @@ TEST(Regression, EmptyArrayArgumentAndReturn) {
   EXPECT_EQ(r.StdOut, "1\n2\n1b\n");
   g.expectNoLeaks("EmptyArrayArgumentAndReturn");
 }
+
+// #72: `match` on a literal subject (string, and the primitive literals) is a
+// plain value match; the string subject is released on every exit.
+TEST(Regression, MatchOnALiteralSubject) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    fn pick() -> int {
+      match "r" { "r" { return 7; } _ { return 0; } }
+    }
+    fn main() -> int {
+      match "s" { "t" { println("t"); } _ { println("other"); } }
+      match "s" { "s" { println("s"); } _ { println("other"); } }
+      match "" { "" { println("empty"); } _ { println("other"); } }
+      match "q" { _ { println("wild"); } }
+      match 3 { 1 { println("1"); } 3 { println("3"); } _ { println("?"); } }
+      match 2.5 { 2.5 { println("2.5"); } _ { println("?"); } }
+      match 'c' { 'c' { println("c"); } _ { println("?"); } }
+      match True { True { println("T"); } False { println("F"); } }
+      i = 0;
+      while (i < 3) {
+        i = i + 1;
+        match "x" { "x" { if (i == 2) { break; } println("x"); } _ { } }
+      }
+      return pick();
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 7);
+  EXPECT_EQ(r.StdOut, "other\ns\nempty\nwild\n3\n2.5\nc\nT\nx\n");
+  g.expectNoLeaks("MatchOnALiteralSubject");
+}

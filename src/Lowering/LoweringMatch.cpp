@@ -55,6 +55,10 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
   Val subjRaw = emitExpr(node->getSubject());
   if (!subjRaw)
     return Val();
+  // A string-literal subject evaluates to its C string: build the Str (a
+  // tracked temporary, boxed below like any other string temporary).
+  if (auto *sl = ast::dyn_cast<ast::StringLiteral>(node->getSubject()))
+    subjRaw = wrapStringLiteral(subjRaw, sl->getValue().size());
   Val sharedSubj; // non-null iff we must release at the end
   if (exprAlreadyShared(node->getSubject())) {
     sharedSubj = takeSharedOwnership(node->getSubject(), subjRaw);

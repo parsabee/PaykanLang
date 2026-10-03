@@ -53,6 +53,9 @@ private:
   bool accept(Tok k);
   /// Consume @p k or report "expected X" (unless speculating) and return false.
   bool expect(Tok k, const char *context = nullptr);
+  /// expect(Tok::RBrace) for a brace opened at @p open; a reported error
+  /// gets a note pointing at the unclosed `{`.
+  bool expectCloseBrace(const char *context, ast::SourceLocation open);
 
   // -- Speculative parsing ----------------------------------------------------
   // While Speculating > 0 no diagnostic is emitted; a failed attempt rewinds
@@ -65,7 +68,14 @@ private:
 
   // -- Diagnostics -----------------------------------------------------------
   void error(ast::SourceLocation loc, const std::string &msg);
-  void errorAtCurrent(const std::string &expected);
+  /// Report "unexpected <current token>; <expected>".  Returns false, and
+  /// reports nothing, when the error would only be a follow-on: the current
+  /// token is the one right after a lexical error (the lexer reported the
+  /// real problem there), or a syntax error was already reported at it.
+  bool errorAtCurrent(const std::string &expected);
+  static constexpr size_t kNoToken = static_cast<size_t>(-1);
+  size_t LexErrorToken = kNoToken;   // Buf index lexed right after an error
+  size_t LastSyntaxError = kNoToken; // Buf index of the last syntax error
   ast::SourceLocation span(ast::SourceLocation from) const {
     return ast::SourceLocation(from.getLineStart(), from.getColumnStart(),
                                PrevEnd.getLineEnd(), PrevEnd.getColumnEnd());

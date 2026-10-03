@@ -524,3 +524,72 @@ fn @helper(%a.1: i64) -> void {
             std::string::npos)
       << errs;
 }
+
+// #70: an extern's `symbol` is its name in the defining module, so the
+// importer can declare two modules' `@tag` (and define its own) side by side.
+TEST(PIRVerifier, ExternSymbolLinksSameNamedFunctionsOfTwoModules) {
+  const char *text = R"(module "main"
+
+extern fn @"x::tag"() -> i64 module "x" symbol @tag
+extern fn @"y::tag"() -> i64 module "y" symbol @tag
+
+fn @tag() -> i64 {
+  ret 1
+}
+
+fn @main() -> i64 {
+  %a.1 = call @"x::tag"()
+  %b.2 = call @"y::tag"()
+  %c.3 = call @tag()
+  %s.4 = add %a.1, %b.2
+  %t.5 = add %s.4, %c.3
+  ret %t.5
+}
+
+module "x"
+
+fn @tag() -> i64 {
+  ret 2
+}
+
+module "y"
+
+fn @tag() -> i64 {
+  ret 3
+}
+)";
+  ParseError err;
+  auto parsed = parseProgram(text, err);
+  ASSERT_TRUE(parsed.has_value()) << err.str();
+  const Program prog = std::move(parsed).value_or(Program{});
+  EXPECT_EQ(formatErrors(verify(prog)), "");
+  const Function *fx = prog.Modules[0].findFunction("x::tag");
+  const Function *own = prog.Modules[0].findFunction("tag");
+  ASSERT_NE(fx, nullptr);
+  ASSERT_NE(own, nullptr);
+  EXPECT_EQ(fx->Symbol, "tag");
+  EXPECT_EQ(fx->linkName(), "tag");
+  EXPECT_EQ(own->linkName(), "tag");
+  EXPECT_EQ(toString(prog), text);
+}
+
+TEST(PIRVerifier, ChecksExternSymbols) {
+  std::string errs = verifyText(R"(module "main"
+extern fn @"x::f"() -> i64 module "x" symbol @nope
+extern fn @Paykan_println(obj) -> void symbol @puts
+fn @main() -> i64 {
+  ret 0
+}
+module "x"
+fn @f() -> i64 {
+  ret 1
+}
+)");
+  EXPECT_NE(errs.find("'@nope' is not defined in module 'x'"),
+            std::string::npos)
+      << errs;
+  EXPECT_NE(errs.find("runtime extern function '@Paykan_println' has a "
+                      "'symbol'"),
+            std::string::npos)
+      << errs;
+}

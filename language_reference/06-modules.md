@@ -18,6 +18,9 @@ replaced by `::` and the `.pkn` extension dropped) is the module's canonical nam
   [Non-Transitivity](#non-transitivity)).
 - Type names are global across a program's import graph: two modules in the same graph cannot
   declare different classes or enums under one name.
+- Function names are not: every module (the main file included) may define its own `tag`,
+  `new` or `helper`, and `x::tag()`, `y::tag()` and a local `tag()` each call their own
+  module's function. One qualifier names one module: two imports cannot both bind `util`.
 
 ---
 
@@ -41,7 +44,10 @@ import utils::math as M;
 result: int = M::add(3, 4);
 ```
 
-Useful for shortening long module paths or avoiding name collisions.
+Useful for shortening long module paths or avoiding name collisions. A qualifier (an alias, a
+plain import's last path segment, or a full module path) names exactly one module, so
+`import a::util; import b::util;` is an error; write `import b::util as bu;` instead. Importing
+the same module under a second qualifier is fine.
 
 ### Deeply Nested Module
 
@@ -180,5 +186,6 @@ file itself is never cached.
 | Module not found | The `.pkn` file corresponding to the module path does not exist |
 | Unresolved name | Qualified name `Mod::name` where `name` is not in `Mod` (including names `Mod` merely imported) |
 | Circular import | Import graph contains a cycle |
+| Conflicting qualifier | Two imports bind the same qualifier (alias, last path segment or full path) to different modules |
 | Conflicting type name | Two modules in the import graph declare different classes/enums under one name, or a file declares a class named like an imported one |
 | Unknown exported type | An import's export record names a type nothing provides (a compiler bug or corrupt cache — reported against the `import`, never silently degraded to `Obj`/`void`) |
