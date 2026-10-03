@@ -187,6 +187,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   invalid character), one error (with a note at the open `{`) for blocks left
   unclosed at end of file instead of one per block, and one error for a
   multi-character literal such as `'ab'`.
+- Output printed before a runtime panic is no longer lost when stdout is not
+  a terminal (#92). A panic now flushes stdout (and every open `File`) before
+  printing its message and aborting, on both backends, in `paykan run` and in executables from `build`;
+  with `2>&1` the output comes before the panic message.
 - A runtime panic ends `paykan run` the same way on both backends (#79): with
   exit status 134 (128 + `SIGABRT`). The llvm backend's JIT used to let the
   abort kill the compiler process itself; executables from `build` still die

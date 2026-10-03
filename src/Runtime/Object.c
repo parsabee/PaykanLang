@@ -6,6 +6,7 @@
 #include "Runtime.h"
 #include "RuntimeInternal.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -78,30 +79,36 @@ PaykanObject PaykanObject_None = {&PaykanNone_vtable, NULL};
 
 // -- Runtime panics ----------------------------------------------------------
 
-void Paykan_panic_div_by_zero(void) {
-  fprintf(stderr, "paykan: integer division or modulo by zero\n");
+void Paykan_runtime_panic(const char *fmt, ...) {
+  va_list ap;
+  fflush(NULL); // stdout, and every File the program is writing
+  fputs("paykan: ", stderr);
+  va_start(ap, fmt);
+  vfprintf(stderr, fmt, ap);
+  va_end(ap);
+  fputc('\n', stderr);
+  fflush(stderr);
   abort();
 }
 
+void Paykan_panic_div_by_zero(void) {
+  Paykan_runtime_panic("integer division or modulo by zero");
+}
+
 void Paykan_panic_div_overflow(void) {
-  fprintf(stderr, "paykan: integer overflow in division\n");
-  abort();
+  Paykan_runtime_panic("integer overflow in division");
 }
 
 void Paykan_panic_float_to_int(double value) {
   char buf[64];
   Paykan_format_float(buf, sizeof(buf), value);
-  fprintf(stderr,
-          "paykan: int<float>(%s): the value is NaN, infinite or outside "
-          "the int range\n",
-          buf);
-  abort();
+  Paykan_runtime_panic(
+      "int<float>(%s): the value is NaN, infinite or outside the int range",
+      buf);
 }
 
 void Paykan_panic_int_to_char(int64_t value) {
-  fprintf(stderr,
-          "paykan: char<int>(%lld): the value is outside the char range "
-          "0..255\n",
-          (long long)value);
-  abort();
+  Paykan_runtime_panic(
+      "char<int>(%lld): the value is outside the char range 0..255",
+      (long long)value);
 }

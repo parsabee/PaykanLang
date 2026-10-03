@@ -63,9 +63,8 @@ PaykanString *PaykanString_from_char(int8_t c) {
 int8_t PaykanString_char_at(PaykanObject *self, int64_t idx) {
   PaykanString *s = (PaykanString *)self;
   if (idx < 0 || idx >= s->len) {
-    fprintf(stderr, "paykan: string index %lld out of bounds (len=%lld)\n",
-            (long long)idx, (long long)s->len);
-    abort();
+    Paykan_runtime_panic("string index %lld out of bounds (len=%lld)",
+                         (long long)idx, (long long)s->len);
   }
   return (int8_t)s->data[idx];
 }
@@ -127,9 +126,8 @@ PaykanObject *PaykanString_concat(PaykanObject *self, PaykanObject *other) {
 PaykanShared *PaykanString_at(PaykanObject *self, int64_t idx) {
   PaykanString *s = (PaykanString *)self;
   if (idx < 0 || idx >= s->len) {
-    fprintf(stderr, "paykan: string index %lld out of bounds (len=%lld)\n",
-            (long long)idx, (long long)s->len);
-    abort();
+    Paykan_runtime_panic("string index %lld out of bounds (len=%lld)",
+                         (long long)idx, (long long)s->len);
   }
   return PaykanShared_new((PaykanObject *)PaykanString_new(s->data + idx, 1));
 }

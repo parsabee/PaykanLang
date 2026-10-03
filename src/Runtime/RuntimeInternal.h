@@ -14,6 +14,27 @@
 #include <stddef.h>
 #include <stdio.h>
 
+// -- panics ------------------------------------------------------------------
+
+#if defined(__GNUC__) || defined(__clang__)
+#define PAYKAN_PRINTF_FORMAT(fmt, args)                                        \
+  __attribute__((format(printf, fmt, args)))
+#else
+#define PAYKAN_PRINTF_FORMAT(fmt, args)
+#endif
+
+/// Abnormal termination for every runtime panic: flush whatever the program
+/// has already written to stdout (and to any open File: every output stream
+/// is flushed), then print the "paykan: <message>\n" diagnostic (@p fmt is a
+/// printf format, without the prefix or the newline) to stderr, flush it, and
+/// abort().  abort() flushes no stdio buffer, and
+/// stdout is fully buffered when it is not a terminal (a pipe or a file), so
+/// without the first flush the output printed before the panic would be lost
+/// -- and flushing it before writing the message keeps the two streams in
+/// program order when they are merged (`2>&1`).
+PAYKAN_NORETURN void Paykan_runtime_panic(const char *fmt, ...)
+    PAYKAN_PRINTF_FORMAT(1, 2);
+
 // -- equals helpers ----------------------------------------------------------
 //
 // Every `*_equals` implementation shares the same calling convention: `other`
