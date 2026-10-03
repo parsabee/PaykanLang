@@ -123,6 +123,7 @@ pir::Module ModuleLowering::takeModule() {
     m.Classes.push_back(std::move(c));
   Funcs.clear();
   FuncByName.clear();
+  ExternByOrigin.clear();
   Classes_.clear();
   ClassByName.clear();
   return m;
@@ -407,21 +408,29 @@ Val ModuleLowering::externVTable(const std::string &name) {
   return Val::symbol(name, Type::Ptr);
 }
 
-pir::Function *
-ModuleLowering::declareExternFrom(const pir::Function &fn,
-                                  const std::string &modulePath) {
-  if (auto it = FuncByName.find(fn.Name); it != FuncByName.end()) {
-    if (!it->second->IsExtern || it->second->Module != modulePath) {
-      reportInternalError("function '" + fn.Name + "' is defined by both '" +
-                          Mod.Name + "' and '" + modulePath + "'");
-      return nullptr;
-    }
+pir::Function *ModuleLowering::declareExternFrom(const pir::Function &fn,
+                                                 const std::string &modulePath,
+                                                 const std::string &localName) {
+  // One declaration per (defining module, symbol), however many qualifiers
+  // (`y::tag`, `r::tag`, `path::to::y::tag`) reach it.
+  std::string key = modulePath + '\n' + fn.Name;
+  if (auto it = ExternByOrigin.find(key); it != ExternByOrigin.end())
     return it->second;
-  }
-  pir::Function *ext = getOrCreateFunction(fn.Name, fn.Sig);
+  // The local name is the one the call sites use: qualified for a function
+  // (so it cannot clash with this module's own `tag` or another module's),
+  // the plain symbol for a class's generated function (class names are
+  // global).  Should it still be taken, any free name will do: calls refer
+  // to the declaration, and backends link through Module + Symbol.
+  std::string name = localName;
+  for (unsigned n = 1; FuncByName.count(name); ++n)
+    name = localName + kExternDupSep + std::to_string(n);
+  pir::Function *ext = getOrCreateFunction(name, fn.Sig);
   ext->IsExtern = true;
   ext->Module = modulePath;
+  if (name != fn.Name)
+    ext->Symbol = fn.Name;
   ext->Params.clear();
+  ExternByOrigin[key] = ext;
   return ext;
 }
 
@@ -437,7 +446,7 @@ pir::Function *ModuleLowering::lookupFunction(const std::string &name) {
   const pir::Function *def = modIt->second->findFunction(imp->second.Plain);
   if (!def || def->IsExtern)
     return nullptr;
-  return declareExternFrom(*def, imp->second.Module);
+  return declareExternFrom(*def, imp->second.Module, name);
 }
 
 pir::Function *ModuleLowering::lookupClassFunction(ast::ClassType *ct,
@@ -453,7 +462,7 @@ pir::Function *ModuleLowering::lookupClassFunction(ast::ClassType *ct,
   const pir::Function *def = modIt->second->findFunction(symbol);
   if (!def || def->IsExtern)
     return nullptr;
-  return declareExternFrom(*def, origin->second);
+  return declareExternFrom(*def, origin->second, symbol);
 }
 
 Val ModuleLowering::internString(const std::string &content) {

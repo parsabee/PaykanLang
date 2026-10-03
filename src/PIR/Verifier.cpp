@@ -186,6 +186,9 @@ private:
       if (f.IsExtern) {
         if (!f.Params.empty() || !f.Locals.empty() || !f.Body.Stmts.empty())
           error(where, "extern function '@" + f.Name + "' has a body");
+        if (!f.Symbol.empty() && f.Module.empty())
+          error(where, "runtime extern function '@" + f.Name +
+                           "' has a 'symbol' (only a module extern may)");
         continue;
       }
       if (f.Params.size() != f.Sig.Params.size()) {
@@ -671,9 +674,9 @@ void verifyProgramLinks(const Program &p, std::vector<VerifyError> &errors) {
                                       "', which is not in the program"});
         continue;
       }
-      const Function *def = it->second->findFunction(f.Name);
+      const Function *def = it->second->findFunction(f.linkName());
       if (!def || def->IsExtern)
-        errors.push_back({m.Name, "extern fn '@" + f.Name +
+        errors.push_back({m.Name, "extern fn '@" + f.linkName() +
                                       "' is not defined in module '" +
                                       f.Module + "'"});
       else if (!(def->Sig == f.Sig))
