@@ -211,8 +211,8 @@ private:
   /// Find a callable function: defined here, or declared extern from the
   /// module that defines it (through ImportedFunctions).  nullptr if unknown.
   pir::Function *lookupFunction(const std::string &name);
-  /// Like lookupFunction for a class's generated function (`C`, `C_m`,
-  /// `C_destroy`): found locally, or declared extern from the module that
+  /// Like lookupFunction for a class's generated function (`C`, `C.m`,
+  /// `C.destroy`): found locally, or declared extern from the module that
   /// defines class @p ct (ProgramLowering::ClassOrigins).
   pir::Function *lookupClassFunction(ast::ClassType *ct,
                                      const std::string &symbol);

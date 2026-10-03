@@ -127,10 +127,10 @@ class Point {                      ; layout + vtable, see §5 (`: Super` names
   field x: i64
   field name: box
   vtable {
-    destroy  = @Point_destroy  : (obj) -> void
+    destroy  = @Point.destroy  : (obj) -> void
     toString = @PaykanObject_toString : (obj) -> box
     equals   = @PaykanObject_equals   : (obj, box) -> i64
-    move     = @Point_move : (obj, i64, i64) -> void
+    move     = @Point.move : (obj, i64, i64) -> void
   }
 }
 extern class Adder module "helper" { field n: i64 }   ; layout only
@@ -173,8 +173,14 @@ Constructors and destructors are ordinary functions produced by the lowering:
 `@Point(args...) -> box` allocates with `new`, installs the vtable, nulls the
 backpointer, zeroes the fields, boxes the object (`box`, before `__init__`, so
 `self` inside `__init__` recovers the caller's box) and calls
-`@Point___init__(obj, args...)`; `@Point_destroy(obj)` runs the user `destroy`
-body, releases every ref-typed field and frees the struct (`free`).
+`@Point.__init__(obj, args...)`; `@Point.destroy(obj)` runs the user `destroy`
+body, releases every ref-typed field and frees the struct (`free`).  Every
+method `m` of a class `C` is the function `@C.m(obj self, params...)`.  The
+'.' cannot occur in a Paykan identifier, so these names never clash with a
+program function (`fn Point_move`, `fn Point_destroy`); backends must keep
+them apart too (the C backend escapes the '.' and uniquifies clashing C
+names; the LLVM backend names a vtable `<class>..vtable`, which no method
+symbol spells).
 
 ## 6. Statements and instructions
 

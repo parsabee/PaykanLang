@@ -1,0 +1,37 @@
+// 42 — methods and functions spelled like the old method mangling (#86)
+// Exercises: a class's methods and destructor are PIR symbols
+//            `<Class>.<method>`, so user functions named `K_w`, `K_destroy`
+//            or `K_vtable` (the old `<Class>_<method>` spelling), and the C
+//            backend's escaped spelling `K_2Ew`, are distinct functions; a
+//            method named `vtable` stays apart from the class's vtable.
+//
+// expect-stdout: 3
+// expect-stdout: user k user d
+// expect-stdout: 10 20 30 2
+
+class K {
+  name: Str;
+  fn __init__(name: Str) { self.name = name; }
+  fn w() -> int { return 1; }
+  fn vtable() -> int { return 10; }
+}
+
+class D : K {
+  fn __init__() { __super__("d"); }
+  fn vtable() -> int { return 20; }
+}
+
+fn K_w() -> int { return 2; }
+fn K_destroy(k: K) -> Str { return "user " + k.name; }
+fn K_vtable() -> int { return 30; }
+fn K_2Ew() -> int { return 2; }
+
+fn main() -> int {
+  k: K = K("k");
+  b: K = D();
+  println(Str<int>(k.w() + K_w()));
+  println(K_destroy(k) + " " + K_destroy(b));
+  println(Str<int>(k.vtable()) + " " + Str<int>(b.vtable()) + " " +
+          Str<int>(K_vtable()) + " " + Str<int>(K_2Ew()));
+  return 0;
+}

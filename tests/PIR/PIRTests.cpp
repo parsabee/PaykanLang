@@ -184,6 +184,76 @@ fn @main() -> i64 {
   EXPECT_TRUE(errors.empty()) << formatErrors(errors);
 }
 
+// #86: the lowering names methods `<Class>.<method>`.  Such symbols print
+// bare (or quoted, when the class name needs it), parse back to the same
+// names, stay distinct from a function spelled `<Class>_<method>`, and do not
+// confuse the `Class.field` operand of field.load.
+TEST(PIR, MethodSymbolsWithDotsRoundTripAndVerify) {
+  const char *src = R"(module "m"
+
+class K {
+  field n: i64
+  vtable {
+    destroy = @K.destroy : (obj) -> void
+    w = @K.w : (obj) -> i64
+  }
+}
+
+class "Pair<Str, int>" {
+  vtable {
+    destroy = @"Pair<Str, int>.destroy" : (obj) -> void
+  }
+}
+
+fn @K.w(%self.1: obj) -> i64 {
+  %n.2 = field.load %self.1, K.n
+  ret %n.2
+}
+
+fn @K_w() -> i64 {
+  ret 2
+}
+
+fn @K.destroy(%self.1: obj) -> void {
+  free %self.1
+  ret
+}
+
+fn @K_destroy(%self.1: obj) -> void {
+  ret
+}
+
+fn @"Pair<Str, int>.destroy"(%self.1: obj) -> void {
+  free %self.1
+  ret
+}
+
+fn @main() -> i64 {
+  %o.1 = new K
+  %a.2 = call @K.w(%o.1)
+  %b.3 = call @K_w()
+  call @K_destroy(%o.1)
+  call @K.destroy(%o.1)
+  %s.4 = add %a.2, %b.3
+  ret %s.4
+}
+)";
+  EXPECT_EQ(reprint(src), src);
+  ParseError err;
+  auto p = parseProgram(src, err);
+  ASSERT_TRUE(p.has_value()) << err.str();
+  if (!p.has_value())
+    return;
+  auto errors = verify(*p);
+  EXPECT_TRUE(errors.empty()) << formatErrors(errors);
+  const Module &m = p->Modules[0];
+  for (const char *name :
+       {"K.w", "K_w", "K.destroy", "K_destroy", "Pair<Str, int>.destroy"})
+    EXPECT_NE(m.findFunction(name), nullptr) << name;
+  ASSERT_EQ(m.Classes.size(), 2u);
+  EXPECT_EQ(m.Classes[0].VTable[1].Target, "K.w");
+}
+
 // Every f64 constant prints in a form the parser reads back to the same bits:
 // subnormals (strtod flags them with ERANGE), the extremes, -0.0 and the
 // infinities.  NaN prints as `nan` and reads back as a NaN (the payload and

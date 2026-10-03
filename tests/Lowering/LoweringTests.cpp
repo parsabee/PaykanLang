@@ -7,6 +7,7 @@
 
 #include "TestUtils.h"
 #include "paykan/lowering/Lowering.h"
+#include "paykan/pir/Parser.h"
 #include "paykan/pir/Printer.h"
 #include "paykan/pir/Verifier.h"
 
@@ -310,13 +311,13 @@ TEST(Lowering, ClassItemCarriesFlattenedLayoutAndVTable) {
       t.find("class Derived : Base {\n  field name: box\n  field n: i64\n"),
       std::string::npos)
       << t;
-  EXPECT_NE(t.find("destroy = @Derived_destroy : (obj) -> void"),
+  EXPECT_NE(t.find("destroy = @Derived.destroy : (obj) -> void"),
             std::string::npos)
       << t;
-  EXPECT_NE(t.find("describe = @Derived_describe : (obj) -> box"),
+  EXPECT_NE(t.find("describe = @Derived.describe : (obj) -> box"),
             std::string::npos)
       << t;
-  EXPECT_NE(t.find("extra = @Derived_extra : (obj) -> i64"), std::string::npos)
+  EXPECT_NE(t.find("extra = @Derived.extra : (obj) -> i64"), std::string::npos)
       << t;
   // Inherited runtime slots name the runtime implementation.
   EXPECT_NE(t.find("equals = @PaykanObject_equals : (obj, box) -> i64"),
@@ -326,17 +327,17 @@ TEST(Lowering, ClassItemCarriesFlattenedLayoutAndVTable) {
   std::string ctor = function(t, "Derived");
   size_t nw = ctor.find(" = new Derived");
   size_t bx = ctor.find(" = box ");
-  size_t init = ctor.find("call @Derived___init__(");
+  size_t init = ctor.find("call @Derived.__init__(");
   ASSERT_NE(nw, std::string::npos) << ctor;
   ASSERT_NE(bx, std::string::npos) << ctor;
   ASSERT_NE(init, std::string::npos) << ctor;
   EXPECT_LT(nw, bx);
   EXPECT_LT(bx, init);
   // __super__ passes a +1 box of the argument.
-  std::string init2 = function(t, "Derived___init__");
-  EXPECT_NE(init2.find("call @Base___init__("), std::string::npos) << init2;
+  std::string init2 = function(t, "Derived.__init__");
+  EXPECT_NE(init2.find("call @Base.__init__("), std::string::npos) << init2;
   // The destructor releases the ref-typed field and frees the struct.
-  std::string dtor = function(t, "Derived_destroy");
+  std::string dtor = function(t, "Derived.destroy");
   EXPECT_NE(dtor.find("field.load %"), std::string::npos) << dtor;
   EXPECT_EQ(count(dtor, "release"), 1u) << dtor;
   EXPECT_NE(dtor.find("free %"), std::string::npos) << dtor;
@@ -763,7 +764,7 @@ TEST(Lowering, ImportedFunctionsAndClassesAreExternItems) {
   EXPECT_NE(m.find("field.load %"), std::string::npos) << m;
   // lib defines the class and its functions once.
   EXPECT_NE(t.find("class Adder {"), std::string::npos) << t;
-  EXPECT_NE(t.find("fn @Adder_add("), std::string::npos) << t;
+  EXPECT_NE(t.find("fn @Adder.add("), std::string::npos) << t;
 }
 
 // #70: functions are module-qualified, so two modules' (and the importer's
@@ -806,6 +807,59 @@ TEST(Lowering, SameNamedFunctionsOfTwoModulesStayDistinct) {
   EXPECT_EQ(count(m, "call @\"x::tag\"("), 1u) << m;
   EXPECT_EQ(count(m, "call @\"r::tag\"("), 2u) << m;
   EXPECT_EQ(count(m, "call @tag("), 1u) << m;
+}
+
+// #86: a class's methods and destructor are `<Class>.<method>`; '.' cannot
+// occur in a Paykan identifier, so user functions spelled like the old
+// `<Class>_<method>` mangling (`K_w`, `K_destroy`) are distinct symbols, and
+// the names survive a print -> parse -> print round trip.
+TEST(Lowering, MethodSymbolsCannotClashWithUserFunctions) {
+  auto l = lower(R"(
+    class K {
+      fn w() -> int { return 1; }
+      fn vtable() -> int { return 4; }
+    }
+    fn K_w() -> int { return 2; }
+    fn K_destroy() -> int { return 3; }
+    fn K_vtable() -> int { return 5; }
+    fn main() -> int {
+      k: K = K();
+      return k.w() + K_w() + K_destroy() + k.vtable() + K_vtable();
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const pir::Module &m = l.Program.Modules[0];
+  for (const char *name :
+       {"K.w", "K.destroy", "K.vtable", "K_w", "K_destroy", "K_vtable"}) {
+    const pir::Function *fn = m.findFunction(name);
+    ASSERT_NE(fn, nullptr) << name << "\n" << l.Text;
+    EXPECT_FALSE(fn->IsExtern) << name;
+  }
+  EXPECT_EQ(m.findFunction("K.w")->Sig.Ret, pir::Type::I64);
+  EXPECT_EQ(m.findFunction("K.destroy")->Sig.Ret, pir::Type::Void);
+  EXPECT_EQ(m.findFunction("K_destroy")->Sig.Ret, pir::Type::I64);
+  // Printed bare (no quoting needed) and in the vtable.
+  EXPECT_NE(l.Text.find("fn @K.w(%self"), std::string::npos) << l.Text;
+  EXPECT_NE(l.Text.find("fn @K.destroy(%self"), std::string::npos) << l.Text;
+  EXPECT_NE(l.Text.find("destroy = @K.destroy : (obj) -> void"),
+            std::string::npos)
+      << l.Text;
+  EXPECT_NE(l.Text.find("w = @K.w : (obj) -> i64"), std::string::npos)
+      << l.Text;
+  std::string mainFn = function(l.Text, "main");
+  EXPECT_EQ(count(mainFn, "call @K_w("), 1u) << mainFn;
+  EXPECT_EQ(count(mainFn, "call @K_destroy("), 1u) << mainFn;
+
+  pir::ParseError perr;
+  auto parsed = pir::parseProgram(l.Text, perr);
+  ASSERT_TRUE(parsed) << perr.str();
+  auto errors = pir::verify(*parsed);
+  EXPECT_TRUE(errors.empty()) << pir::formatErrors(errors);
+  EXPECT_EQ(pir::toString(*parsed), l.Text);
+  const pir::Module &pm = parsed->Modules[0];
+  ASSERT_NE(pm.findFunction("K.w"), nullptr);
+  ASSERT_NE(pm.findFunction("K.destroy"), nullptr);
+  ASSERT_NE(pm.findFunction("K_w"), nullptr);
 }
 
 // ---------------------------------------------------------------------------

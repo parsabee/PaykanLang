@@ -41,7 +41,9 @@ backends.
   Class, function and global names are mangled as `pk_<module>_<name>` (any
   character outside `[A-Za-z0-9_]` becomes `_XX`, and a clash gets a `_<n>`
   suffix), so modules never collide and generics instantiations
-  (`Box<int>`) are valid identifiers.  Runtime symbols keep their C names.
+  (`Box<int>`) and methods (`K.w` is `pk_<module>_K_2Ew`, distinct from a
+  user function `K_2Ew`) are valid identifiers.  Runtime symbols keep their
+  C names.
 * One vtable array per class (`pkvt_pk_<module>_<Class>`, an array of
   generic function pointers), whose address is the class's runtime type
   identity (`match`).  Virtual calls index it with the slot number from PIR.

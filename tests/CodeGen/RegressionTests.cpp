@@ -662,3 +662,104 @@ TEST(Regression, MatchOnALiteralSubject) {
   EXPECT_EQ(r.StdOut, "other\ns\nempty\nwild\n3\n2.5\nc\nT\nx\n");
   g.expectNoLeaks("MatchOnALiteralSubject");
 }
+
+// #86: methods were lowered to `<Class>_<method>`, so a user function spelled
+// that way (`K_w`, `K_destroy`) collided with the method or the generated
+// destructor.  They are now `<Class>.<method>`, which no identifier can spell.
+TEST(Regression, MethodAndUserFunctionWithTheOldMangledName) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class K { fn w() -> int { return 1; } }
+    fn K_w() -> int { return 2; }
+    fn main() -> int { k: K = K(); println(Str<int>(k.w() + K_w())); return 0; }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "3\n");
+  g.expectNoLeaks("MethodAndUserFunctionWithTheOldMangledName");
+}
+
+TEST(Regression, DestructorAndUserFunctionWithTheOldMangledName) {
+  LeakGuard g;
+  // The destructor of K (which releases `name`) and the user `K_destroy`
+  // are distinct; so are a method `vtable` and the class's vtable (LLVM)
+  // and `K_vtable`.
+  auto r = compileAndRun(R"(
+    class K {
+      name: Str;
+      fn __init__(name: Str) { self.name = name; }
+      fn vtable() -> int { return 10; }
+    }
+    class D : K {
+      fn __init__() { __super__("d"); }
+      fn vtable() -> int { return 20; }
+    }
+    fn K_destroy(k: K) -> Str { return "user " + k.name; }
+    fn K_vtable() -> int { return 30; }
+    fn D_vtable() -> int { return 40; }
+    fn main() -> int {
+      k: K = K("k");
+      b: K = D();
+      println(K_destroy(k) + " " + K_destroy(b));
+      println(Str<int>(k.vtable() + b.vtable() + K_vtable() + D_vtable()));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "user k user d\n100\n");
+  g.expectNoLeaks("DestructorAndUserFunctionWithTheOldMangledName");
+}
+
+// The C backend escapes the '.' of `K.w` as `_2E`; a user function named
+// `K_2Ew` sanitizes to the same text and must still get its own C symbol.
+TEST(Regression, MethodAndUserFunctionWithItsCSpelling) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class K { fn w() -> int { return 1; } fn destroy2() -> int { return 4; } }
+    fn K_2Ew() -> int { return 2; }
+    fn K_2Edestroy() -> int { return 8; }
+    fn K_2Edestroy2() -> int { return 16; }
+    fn main() -> int {
+      k: K = K();
+      println(Str<int>(k.w() + K_2Ew() + k.destroy2() + K_2Edestroy() +
+                       K_2Edestroy2()));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "31\n");
+  g.expectNoLeaks("MethodAndUserFunctionWithItsCSpelling");
+}
+
+// An imported class's methods keep their names in the importer, beside the
+// importer's own `Cell_clone`.
+TEST(Regression, ImportedClassMethodAndImporterFunctionWithTheOldName) {
+  auto dir = freshProjectDir("method_mangling");
+  writeProjectFile(dir, "lib/cell.pkn", R"(
+class Cell {
+  v: int;
+  fn __init__(v: int) { self.v = v; }
+  fn clone() -> Cell { return Cell(self.v + 1); }
+}
+)");
+  auto mainPath = writeProjectFile(dir, "main.pkn", R"(
+import lib::cell;
+fn Cell_clone() -> int { return 100; }
+fn Cell_destroy() -> int { return 1000; }
+fn main() -> int {
+  c = cell::Cell(3);
+  d = c.clone();
+  println(Str<int>(d.v + Cell_clone() + Cell_destroy()));
+  return 0;
+}
+)");
+  LeakGuard g;
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "1104\n");
+  g.expectNoLeaks("ImportedClassMethodAndImporterFunctionWithTheOldName");
+  std::filesystem::remove_all(dir);
+}
