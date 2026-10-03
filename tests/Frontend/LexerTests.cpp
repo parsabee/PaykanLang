@@ -133,6 +133,17 @@ TEST(Lexer, UnterminatedLiterals) {
   EXPECT_EQ(d.Lines[d.Lines.size() - 2], "4:1-4:2 IDENT x");
 }
 
+TEST(Lexer, FloatRange) {
+  auto d = dump("5e-324 1e-310 1e999 1e-400 0e-999");
+  EXPECT_EQ(d.Errors, 2u) << d.Diags;
+  EXPECT_NE(d.Diags.find("1:15: error: float is out of range: 1e999"),
+            std::string::npos)
+      << d.Diags;
+  EXPECT_NE(d.Diags.find("1:21: error: float is out of range: 1e-400"),
+            std::string::npos)
+      << d.Diags;
+}
+
 TEST(Lexer, IntegerRange) {
   auto d = dump("9223372036854775807 9223372036854775808");
   EXPECT_EQ(d.Errors, 1u);

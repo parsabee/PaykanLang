@@ -9,6 +9,11 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <limits>
+#include <sstream>
 #include <string>
 
 using namespace paykan::pir;
@@ -177,6 +182,65 @@ fn @main() -> i64 {
     return;
   auto errors = verify(*p);
   EXPECT_TRUE(errors.empty()) << formatErrors(errors);
+}
+
+// Every f64 constant prints in a form the parser reads back to the same bits:
+// subnormals (strtod flags them with ERANGE), the extremes, -0.0 and the
+// infinities.  NaN prints as `nan` and reads back as a NaN (the payload and
+// sign are not part of the format).  Out-of-range text is still rejected.
+TEST(PIR, F64ConstantsRoundTripExactly) {
+  using L = std::numeric_limits<double>;
+  const double values[] = {0.0,
+                           -0.0,
+                           1.0,
+                           0.1,
+                           -2.5,
+                           L::denorm_min(),
+                           -L::denorm_min(),
+                           1e-310,
+                           L::min() / 2,
+                           std::nextafter(L::min(), 0.0),
+                           L::min(),
+                           L::max(),
+                           -L::max(),
+                           L::epsilon(),
+                           L::infinity(),
+                           -L::infinity(),
+                           L::quiet_NaN()};
+  for (double v : values) {
+    std::ostringstream op;
+    print(Operand::f64(v), op);
+    std::string text =
+        "module \"m\"\n\nfn @f() -> f64 {\n  ret " + op.str() + "\n}\n";
+    ParseError err;
+    auto p = parseProgram(text, err);
+    ASSERT_TRUE(p.has_value()) << op.str() << ": " << err.str();
+    if (!p.has_value())
+      continue;
+    EXPECT_EQ(toString(*p), text);
+    const auto &ret =
+        std::get<Return>(p->Modules[0].Functions[0].Body.Stmts.at(0));
+    ASSERT_TRUE(ret.Value.has_value());
+    double back = std::get<double>(ret.Value->V);
+    if (std::isnan(v)) {
+      EXPECT_TRUE(std::isnan(back)) << op.str();
+      continue;
+    }
+    uint64_t a, b;
+    std::memcpy(&a, &v, sizeof a);
+    std::memcpy(&b, &back, sizeof b);
+    EXPECT_EQ(a, b) << op.str();
+  }
+  // Text that is not a finite double (overflow, or a nonzero value that
+  // underflows to zero) stays an error.
+  for (const char *bad : {"1e999", "-1e999", "1e-400"}) {
+    ParseError err;
+    std::string text =
+        std::string("module \"m\"\n\nfn @f() -> f64 {\n  ret ") + bad + "\n}\n";
+    EXPECT_FALSE(parseProgram(text, err)) << bad;
+    EXPECT_NE(err.Message.find("float out of range"), std::string::npos)
+        << bad << ": " << err.str();
+  }
 }
 
 TEST(PIR, SampleProgramVerifies) {

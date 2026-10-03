@@ -62,6 +62,13 @@ null box / null obj  a null box or obj (a bare `null` is a box)
           are `ptr`, extern objects are `obj`, extern vtables are `ptr`
 ```
 
+An `f64` constant is printed with 17 significant digits (`%.17g`, plus `.0`
+when that has neither `.` nor exponent), so it reads back to the same bits;
+that covers subnormals (`4.9406564584124654e-324`) and `-0.0`.  The non-finite
+constants are written `inf`, `-inf` and `nan` (a NaN's sign and payload are
+not kept).  Text naming a value outside the `f64` range (`1e999`, or a
+nonzero value that rounds to zero such as `1e-400`) is a parse error.
+
 A value defined inside a nested block is visible only inside that block (and
 its children): there is no dominance analysis, structure *is* dominance.  To
 carry a value out of a branch, store it into a `local`.

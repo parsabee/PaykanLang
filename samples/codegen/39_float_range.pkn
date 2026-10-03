@@ -1,0 +1,48 @@
+// 39 — the float range at its edges (#73): subnormal literals and their
+// parses, the largest and smallest normal floats, and parses that fall
+// outside the range.
+// Exercises: subnormal constants (they reach the PIR text and both backends'
+// output as constants), float<Str> of subnormals (strtod also flags those
+// with ERANGE), and None for a value too large (would be inf) or too small
+// (nonzero but rounds to zero).  A literal out of range, like `1e999`, is a
+// compile-time error: infinity is computed instead.
+//
+// expect-stdout: tiny: 4.94066e-324 1e-310
+// expect-stdout: halved: 0 doubled: 9.88131e-324
+// expect-stdout: normal: 2.22507e-308 1.79769e+308
+// expect-stdout: parsed: True True
+// expect-stdout: too large: None
+// expect-stdout: too small: None
+// expect-stdout: zero: 0
+// expect-stdout: computed: inf
+
+fn show(o: float?) -> Str {
+  match o {
+    f: float { return Str<float>(f); }
+    None     { return "None"; }
+  }
+}
+
+fn same(s: Str, want: float) -> bool {
+  match float<Str>(s) {
+    f: float { return f == want; }
+    None     { return False; }
+  }
+}
+
+fn main() -> int {
+  least = 5e-324;
+  sub: float = 1e-310;
+  println("tiny: " + Str<float>(least) + " " + Str<float>(sub));
+  println("halved: " + Str<float>(least / 2.0) + " doubled: " +
+          Str<float>(least * 2.0));
+  println("normal: " + Str<float>(2.2250738585072014e-308) + " " +
+          Str<float>(1.7976931348623157e308));
+  println("parsed: " + Str<bool>(same("5e-324", least)) + " " +
+          Str<bool>(same("1e-310", sub)));
+  println("too large: " + show(float<Str>("1e999")));
+  println("too small: " + show(float<Str>("1e-400")));
+  println("zero: " + show(float<Str>("0e-999")));
+  println("computed: " + Str<float>(1.7976931348623157e308 * 10.0));
+  return 0;
+}

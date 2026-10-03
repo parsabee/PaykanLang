@@ -72,8 +72,12 @@ Any other byte is a lexical error (`invalid character 'X'`).
   separate token), so `9223372036854775808` is out of range
   (`integer is out of range: ...`); `INT64_MIN` is written as the expression
   `-9223372036854775807 - 1`.
-- `FLOAT` is converted with `strtod`. `1.` is a float; `1e` is the integer
-  `1` followed by the identifier `e`.
+- `FLOAT` is converted with `strtod` and must denote a finite float:
+  a literal that overflows to infinity (`1e999`) or a nonzero one that
+  underflows to zero (`1e-400`) is an error (`float is out of range: ...`).
+  Subnormal values (`5e-324`) and zero with any exponent (`0e-999`) are
+  fine. `1.` is a float; `1e` is the integer `1` followed by the
+  identifier `e`.
 - `CHAR` escapes: `\n` `\t` `\r` `\\` `\'` `\0`; any other `\X` is `X`.
   A character literal missing its closing quote before the end of the line
   or file is an error (`unterminated character literal`).

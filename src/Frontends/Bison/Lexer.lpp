@@ -1,5 +1,6 @@
 %{
 #include <cerrno>
+#include <cmath>
 #include <cstdlib>
 #include <string>
 #include "AST.h"
@@ -188,7 +189,13 @@ make_INT (const std::string &s, const yy::parser::location_type& loc)
 yy::parser::symbol_type
 make_FLOAT (const std::string &s, const yy::parser::location_type& loc)
 {
+  // Same rule as the recursive-descent lexer: overflow to ±inf, or a
+  // nonzero value underflowing to 0, is an error; a subnormal result (which
+  // strtod also flags with ERANGE) is fine.
+  errno = 0;
   double n = strtod (s.c_str(), NULL);
+  if (errno == ERANGE && (std::isinf(n) || n == 0.0))
+    throw yy::parser::syntax_error (loc, "float is out of range: " + s);
   return yy::parser::make_FLOAT ((double) n, loc);
 }
 

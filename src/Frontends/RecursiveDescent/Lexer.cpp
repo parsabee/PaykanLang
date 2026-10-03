@@ -4,6 +4,7 @@
 #include "Lexer.h"
 
 #include <cerrno>
+#include <cmath>
 #include <cstdlib>
 #include <string_view>
 #include <utility>
@@ -457,7 +458,15 @@ Token Lexer::lexNumber(size_t start, size_t line, size_t col, bool afterDot) {
   Token t = make(isFloat ? Tok::Float : Tok::Int, start, line, col);
   std::string text(t.Text);
   if (isFloat) {
+    // A literal must denote a finite float: one that overflows to ±inf, or
+    // a nonzero one that underflows to 0, is an error.  A subnormal result
+    // is fine although strtod reports ERANGE for it too.
+    errno = 0;
     t.FloatValue = std::strtod(text.c_str(), nullptr);
+    if (errno == ERANGE && (std::isinf(t.FloatValue) || t.FloatValue == 0.0)) {
+      error(line, col, "float is out of range: " + text);
+      t.FloatValue = 0.0;
+    }
     return t;
   }
   // The scanner never sees a sign (`-` is its own token), so INT64_MIN's
