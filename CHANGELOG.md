@@ -36,6 +36,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Any other pair is an error that lists the valid sources. PIR gains a
     numeric `ftoi` instruction, which the lowering emits only after the
     range guard.
+- **Conversion constructors are a closed set of specializations (#88).**
+  Each builtin target (`Str`, `int`, `Int`, `float`, `Float`, `bool`,
+  `Bool`, `char`) has a fixed set of valid sources, and no other type, a user
+  class included, can be a type argument.
+  - **New boxed forms.** `Str<Int>`, `Str<Float>`, `Str<Bool>` and
+    `Str<Char>` format a box exactly like the primitive form. `Int<Str>`,
+    `Float<Str>` and `Bool<Str>` parse like `int<Str>` & co. and return the
+    optional box (`Int?`, `Float?`, `Bool?`).
+  - **`bool<Str>` (new)** returns `bool?`: `True` / `False` for exactly
+    `"True"` / `"False"`, the spellings `Str<bool>` prints, and `None` for
+    anything else. The runtime gains `PaykanBool_from_str`.
+  - **New diagnostics.** An unlisted pair now reads `'Str' has no
+    specialization for 'Point'; its specializations are int, float, bool,
+    char, Int, Float, Bool, Char`, replacing `no conversion from … to …`. A
+    target called without its specialization gets a direct hint:
+    `Str(n)` with an `int` gives `'Str(...)' needs its specialization: write
+    'Str<int>(n)'`, instead of a misleading argument-type error. `int(2.5)`
+    gets the same wording, replacing `a conversion to 'int' names its source
+    type`. `Str(s)` with a `Str` is still the `Str` constructor.
 
 ### Added
 

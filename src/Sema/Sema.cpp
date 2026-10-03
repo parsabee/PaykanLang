@@ -5,6 +5,8 @@
 #include "Names.h"
 #include "SemaInternal.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <unordered_set>
 
 namespace paykan {
@@ -941,6 +943,12 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   if (node->hasTypeArgs() && S.isConversionTarget(node->getCalleeName()))
     return S.checkConversion(node, argTypes);
 
+  // -- A builtin conversion target called without its specialization ---------
+  // (`Str(n)`, `int(2.5)`); `Str(s)` with a `Str` is the copy constructor.
+  if (!node->hasTypeArgs() && S.isConversionTarget(node->getCalleeName()) &&
+      S.diagnoseMissingSpecialization(node, argTypes))
+    return nullptr;
+
   // -- Generic call: instantiate the template and rebind the callee ---------
   if (node->hasTypeArgs() || S.ClassTemplates.count(node->getCalleeName()) ||
       S.FuncTemplates.count(node->getCalleeName())) {
@@ -977,13 +985,6 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
       return sig->ReturnType;
     }
   if (!sig) {
-    if (S.isConversionTarget(node->getCalleeName())) {
-      S.error(node->getLocation(), "a conversion to '" + node->getCalleeName() +
-                                       "' names its source type: write '" +
-                                       node->getCalleeName() +
-                                       "<Source>(value)'");
-      return nullptr;
-    }
     S.error(node->getLocation(),
             "call to undeclared function '" + node->getCalleeName() + "'");
     return nullptr;
@@ -1550,12 +1551,14 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
                      std::move(AccumulatedImportContexts)};
 }
 
-// -- Conversion constructors (#64) --------------------------------------------
+// -- Conversion constructors (#64, #88) ---------------------------------------
 //
-// `Target<Source>(value)` converts between the primitives and `Str`.  The
-// supported pairs are a fixed list; the source type is always written.  The
-// semantics live in the lowering (Lowering/LoweringExpr.cpp,
-// emitConversion), which both backends inherit.
+// `Target<Source>(value)` converts between the primitives, their boxes and
+// `Str`.  Each builtin target has a fixed, closed set of specializations (the
+// valid sources); the source type is always written, and no other type,
+// builtin or user-defined, can be one.  The semantics live in the lowering
+// (Lowering/LoweringExpr.cpp, emitConversion and the runtime table), which
+// both backends inherit.
 
 namespace {
 
@@ -1563,22 +1566,89 @@ struct ConversionPair {
   const char *Target;
   const char *Source;
   const char *Spelled; // the rebound callee the lowering dispatches on
+  bool Parses;         // a parse of a Str: the result is the optional target
 };
 
+// Grouped by target, each group in the order its diagnostics list it.
 const ConversionPair kConversions[] = {
-    {names::kString, names::kTypeInt, names::kConvStrInt},
-    {names::kString, names::kTypeFloat, names::kConvStrFloat},
-    {names::kString, names::kTypeBool, names::kConvStrBool},
-    {names::kString, names::kTypeChar, names::kConvStrChar},
-    {names::kTypeInt, names::kString, names::kConvIntStr},
-    {names::kTypeInt, names::kTypeFloat, names::kConvIntFloat},
-    {names::kTypeInt, names::kTypeBool, names::kConvIntBool},
-    {names::kTypeInt, names::kTypeChar, names::kConvIntChar},
-    {names::kTypeFloat, names::kString, names::kConvFloatStr},
-    {names::kTypeFloat, names::kTypeInt, names::kConvFloatInt},
-    {names::kTypeBool, names::kTypeInt, names::kConvBoolInt},
-    {names::kTypeChar, names::kTypeInt, names::kConvCharInt},
+    {names::kString, names::kTypeInt, names::kConvStrInt, false},
+    {names::kString, names::kTypeFloat, names::kConvStrFloat, false},
+    {names::kString, names::kTypeBool, names::kConvStrBool, false},
+    {names::kString, names::kTypeChar, names::kConvStrChar, false},
+    {names::kString, names::kIntBox, names::kConvStrIntBox, false},
+    {names::kString, names::kFloatBox, names::kConvStrFloatBox, false},
+    {names::kString, names::kBoolBox, names::kConvStrBoolBox, false},
+    {names::kString, names::kCharBox, names::kConvStrCharBox, false},
+    {names::kTypeInt, names::kString, names::kConvIntStr, true},
+    {names::kTypeInt, names::kTypeFloat, names::kConvIntFloat, false},
+    {names::kTypeInt, names::kTypeBool, names::kConvIntBool, false},
+    {names::kTypeInt, names::kTypeChar, names::kConvIntChar, false},
+    {names::kIntBox, names::kString, names::kConvIntBoxStr, true},
+    {names::kTypeFloat, names::kString, names::kConvFloatStr, true},
+    {names::kTypeFloat, names::kTypeInt, names::kConvFloatInt, false},
+    {names::kFloatBox, names::kString, names::kConvFloatBoxStr, true},
+    {names::kTypeBool, names::kTypeInt, names::kConvBoolInt, false},
+    {names::kTypeBool, names::kString, names::kConvBoolStr, true},
+    {names::kBoolBox, names::kString, names::kConvBoolBoxStr, true},
+    {names::kTypeChar, names::kTypeInt, names::kConvCharInt, false},
 };
+
+/// The specialization set of @p target, for a diagnostic: "int, float, ...".
+std::string specializationList(const std::string &target) {
+  std::string list;
+  for (const auto &c : kConversions)
+    if (target == c.Target)
+      list += (list.empty() ? "" : ", ") + std::string(c.Source);
+  return list;
+}
+
+/// The pair `target<source>`, or nullptr when it is not a specialization.
+const ConversionPair *findConversion(const std::string &target,
+                                     const std::string &source) {
+  for (const auto &c : kConversions)
+    if (target == c.Target && source == c.Source)
+      return &c;
+  return nullptr;
+}
+
+/// @p expr spelled as source for a hint, when it is a name or a simple
+/// literal; "value" otherwise.
+std::string spellHintArgument(const ast::Expr *expr) {
+  if (const auto *id = ast::dyn_cast<ast::Identifier>(expr))
+    return id->getName();
+  if (const auto *il = ast::dyn_cast<ast::IntegerLiteral>(expr))
+    return std::to_string(il->getValue());
+  if (const auto *bl = ast::dyn_cast<ast::BoolLiteral>(expr))
+    return bl->getValue() ? "True" : "False";
+  if (const auto *fl = ast::dyn_cast<ast::FloatLiteral>(expr)) {
+    // The shortest spelling that reads back as the same value.
+    char buf[32];
+    for (int prec = 1; prec <= 17; ++prec) {
+      std::snprintf(buf, sizeof(buf), "%.*g", prec, fl->getValue());
+      if (std::strtod(buf, nullptr) == fl->getValue())
+        break;
+    }
+    std::string text = buf;
+    if (text.find_first_not_of("-0123456789") == std::string::npos)
+      text += ".0"; // keep it a float literal
+    return text;
+  }
+  auto plain = [](unsigned char ch) {
+    return ch >= 0x20 && ch < 0x7f && ch != '\\';
+  };
+  if (const auto *cl = ast::dyn_cast<ast::CharLiteral>(expr))
+    if (plain(cl->getValue()) && cl->getValue() != '\'')
+      return std::string("'") + cl->getValue() + "'";
+  if (const auto *sl = ast::dyn_cast<ast::StringLiteral>(expr)) {
+    const std::string &v = sl->getValue();
+    bool simple = v.size() <= 24;
+    for (unsigned char ch : v)
+      simple = simple && plain(ch) && ch != '"';
+    if (simple)
+      return "\"" + v + "\"";
+  }
+  return "value";
+}
 
 } // namespace
 
@@ -1588,6 +1658,37 @@ bool Sema::isConversionTarget(std::string_view name) {
     if (name == c.Target || name == c.Spelled)
       return true;
   return false;
+}
+
+bool Sema::diagnoseMissingSpecialization(
+    ast::CallExpr *node, const std::vector<ast::Type *> &argTypes) {
+  const std::string &target = node->getCalleeName();
+  ast::Type *argTy = argTypes.size() == 1 ? argTypes[0] : nullptr;
+  if (target == names::kString) {
+    // `Str(s)` with a `Str` (or a `Str?`, reported as an unwrap) is the copy
+    // constructor, and a wrong argument count is its arity error.
+    if (argTypes.size() != 1 || !argTy)
+      return false;
+    auto *inner = argTy;
+    if (auto *ot = ast::dyn_cast<ast::OptionalType>(argTy))
+      inner = ot->getInnerType();
+    if (typesEqual(inner, Ctx.getStrTy()))
+      return false;
+  }
+  const std::string head = "'" + target + "(...)' needs its specialization";
+  if (argTy && findConversion(target, typeName(argTy))) {
+    error(node->getLocation(),
+          head + ": write '" + target + "<" + typeName(argTy) + ">(" +
+              spellHintArgument(node->getArguments()[0]) + ")'");
+    return true;
+  }
+  std::string msg = head + ": write '" + target + "<Source>(value)'";
+  if (argTy)
+    msg += ", but '" + target + "' has no specialization for '" +
+           typeName(argTy) + "'";
+  error(node->getLocation(),
+        msg + "; its specializations are " + specializationList(target));
+  return true;
 }
 
 ast::Type *Sema::checkConversion(ast::CallExpr *node,
@@ -1610,24 +1711,13 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
   const std::string sourceName = typeName(source);
   const std::string spelled = target + "<" + sourceName + ">";
 
-  const ConversionPair *pair = nullptr;
-  for (const auto &c : kConversions)
-    if (target == c.Target && sourceName == c.Source)
-      pair = &c;
+  // The specializations are a closed set: any other type argument, a user
+  // class included, is an error (`toString()` stringifies an object).
+  const ConversionPair *pair = findConversion(target, sourceName);
   if (!pair) {
-    std::string valid;
-    std::vector<const char *> sources;
-    for (const auto &c : kConversions)
-      if (target == c.Target)
-        sources.push_back(c.Source);
-    for (size_t i = 0; i < sources.size(); ++i) {
-      if (i > 0)
-        valid += i + 1 == sources.size() ? " or " : ", ";
-      valid += std::string("'") + sources[i] + "'";
-    }
-    error(node->getLocation(), "no conversion from '" + sourceName + "' to '" +
-                                   target + "'; '" + target +
-                                   "<...>' converts from " + valid);
+    error(node->getLocation(), "'" + target + "' has no specialization for '" +
+                                   sourceName + "'; its specializations are " +
+                                   specializationList(target));
     return nullptr;
   }
 
@@ -1641,7 +1731,8 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
   if (!argTy)
     return nullptr; // already reported
   // The source type is written out, so the argument must have exactly that
-  // type: no int -> float promotion, no unwrapping of an optional.
+  // type: no int -> float promotion, no unwrapping of an optional (a boxed
+  // source is never None).
   if (!typesEqual(argTy, source)) {
     if (auto *ot = ast::dyn_cast<ast::OptionalType>(argTy);
         ot && typesEqual(ot->getInnerType(), source)) {
@@ -1654,10 +1745,10 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
     return nullptr;
   }
 
-  // The result is the target type; a parse (`int<Str>`, `float<Str>`) can
+  // The result is the target type; a parse (`int<Str>`, `Int<Str>`, ...) can
   // fail, so it returns the optional (None for an invalid string).
   ast::Type *result = Ctx.lookupType(target);
-  if (source == Ctx.getStrTy())
+  if (pair->Parses)
     result = Ctx.getOptionalType(result);
   node->setCalleeName(Ctx.intern(pair->Spelled));
   node->setResolvedType(result);

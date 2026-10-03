@@ -537,6 +537,9 @@ Val ModuleLowering::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
       ownedArgs.push_back(ev);
     if (L.exprAlreadyShared(argExpr) && v.Ty == Type::Box)
       v = L.emitSharedGet(v, "unboxed");
+    // A boxed conversion source (`Str<Int>(x)`): format the boxed value.
+    if (const char *unbox = conversionUnboxer(node->getCalleeName()))
+      v = L.callRuntime(unbox, {v}, "conv.unboxed");
     // An optional argument to an `Obj` builtin: substitute the None
     // singleton for a null pointer so it prints as "None".
     if (v.Ty == Type::Obj)
@@ -546,10 +549,7 @@ Val ModuleLowering::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
     args.push_back(v);
   }
 
-  bool returnsOwnedString = node->getCalleeName() == kConvStrInt ||
-                            node->getCalleeName() == kConvStrFloat ||
-                            node->getCalleeName() == kConvStrBool ||
-                            node->getCalleeName() == kConvStrChar;
+  bool returnsOwnedString = isStrConversion(node->getCalleeName());
 
   Val result = L.B.call(info.RuntimeName, sig, args, "call");
   for (const auto &ev : ownedArgs)
@@ -557,6 +557,30 @@ Val ModuleLowering::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
   if (returnsOwnedString)
     L.trackStringTemp(result);
   return result;
+}
+
+bool ModuleLowering::isParseConversion(const std::string &callee) {
+  return callee == kConvIntStr || callee == kConvFloatStr ||
+         callee == kConvBoolStr || callee == kConvIntBoxStr ||
+         callee == kConvFloatBoxStr || callee == kConvBoolBoxStr;
+}
+
+bool ModuleLowering::isStrConversion(const std::string &callee) {
+  return callee == kConvStrInt || callee == kConvStrFloat ||
+         callee == kConvStrBool || callee == kConvStrChar ||
+         conversionUnboxer(callee) != nullptr;
+}
+
+const char *ModuleLowering::conversionUnboxer(const std::string &callee) {
+  if (callee == kConvStrIntBox)
+    return kPaykanIntValue;
+  if (callee == kConvStrFloatBox)
+    return kPaykanFloatValue;
+  if (callee == kConvStrBoolBox)
+    return kPaykanBoolValue; // 0 / 1, the i64 PaykanString_from_bool takes
+  if (callee == kConvStrCharBox)
+    return kPaykanCharValue;
+  return nullptr;
 }
 
 // Inline numeric conversions `Target<Source>(value)` (#64).  This is the one

@@ -628,15 +628,24 @@ private:
                           const std::vector<ast::Type *> &argTypes);
 
   /// True when @p name is a conversion target (`Str`, `int`, `float`,
-  /// `bool`, `char`), i.e. `name<Source>(value)` is a conversion, or the
-  /// spelled form (`int<float>`) checkConversion rebinds such a call to.
+  /// `bool`, `char`, `Int`, `Float`, `Bool`), i.e. `name<Source>(value)` is
+  /// a conversion, or the spelled form (`int<float>`) checkConversion rebinds
+  /// such a call to.
   static bool isConversionTarget(std::string_view name);
 
-  /// Check a conversion constructor `Target<Source>(value)` (#64): the pair
-  /// must be one of the supported conversions and the argument must have
-  /// exactly the Source type.  Rebinds the callee to the spelled conversion
-  /// (`names::kConvIntFloat`, ...) for the lowering and returns the result
-  /// type, or nullptr after reporting an error.
+  /// A conversion target called without its specialization (`Str(n)`,
+  /// `int(2.5)`, #88): report a hint naming the specialization to write (the
+  /// argument's type when it is one) or the target's specialization set, and
+  /// return true.  Returns false, reporting nothing, for the `Str(s)` copy
+  /// constructor (a `Str` argument, or a wrong argument count to it).
+  bool diagnoseMissingSpecialization(ast::CallExpr *node,
+                                     const std::vector<ast::Type *> &argTypes);
+
+  /// Check a conversion constructor `Target<Source>(value)` (#64, #88): the
+  /// pair must be one of the target's closed set of specializations and the
+  /// argument must have exactly the Source type.  Rebinds the callee to the
+  /// spelled conversion (`names::kConvIntFloat`, ...) for the lowering and
+  /// returns the result type, or nullptr after reporting an error.
   ast::Type *checkConversion(ast::CallExpr *node,
                              const std::vector<ast::Type *> &argTypes);
 

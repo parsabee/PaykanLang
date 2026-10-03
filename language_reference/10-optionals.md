@@ -176,8 +176,10 @@ fn show(o: int?) -> Str {
 }
 ```
 
-- The parsing conversions return optional primitives: `int<Str>(s)` is an `int?` and
-  `float<Str>(s)` a `float?`, `None` for an invalid string (see `01-language-basics.md`).
+- The parsing conversions return optional primitives: `int<Str>(s)` is an `int?`,
+  `float<Str>(s)` a `float?` and `bool<Str>(s)` a `bool?`, `None` for an invalid string;
+  their boxed forms `Int<Str>(s)` & co. return the optional box `Int?` & co. (see
+  `01-language-basics.md`).
 - A primitive widens to its optional implicitly (`x: int? = 5`). An `int` also widens to
   `float?`, after the usual `int` -> `float` promotion (`f: float? = 3`).
 - An `int?` does **not** convert to a `float?` (or any other optional). `int[]` is not an

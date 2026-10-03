@@ -425,11 +425,27 @@ print("a=" + Str<int>(a) + " b=" + Str<int>(b));
 
 ### Conversions
 
-Converting between the primitive types and `Str` uses a **conversion constructor**:
-`Target<Source>(value)`. The target and the source are type names: the primitives `int`,
-`float`, `bool` and `char`, and `Str`. You always write the source type, and the argument must
-have exactly that type. There is no implicit `int` -> `float` promotion here, and an optional
+Converting between the primitive types, their boxes and `Str` uses a **conversion
+constructor**: `Target<Source>(value)`. The forms are **specializations of the builtin
+types**: each builtin target has a fixed, closed set of specializations, the only valid
+`Source`s. You always write the source type, and the argument must have exactly that type.
+There is no implicit `int` -> `float` promotion here, no boxing or unboxing, and an optional
 must be unwrapped first.
+
+| Target  | Specializations (`Source`)                              | Result                                   |
+|---------|---------------------------------------------------------|------------------------------------------|
+| `Str`   | `int`, `float`, `bool`, `char`, `Int`, `Float`, `Bool`, `Char` | `Str`                             |
+| `int`   | `Str`; `float`, `bool`, `char`                          | `int?` from `Str`; `int` otherwise       |
+| `Int`   | `Str`                                                   | `Int?`                                   |
+| `float` | `Str`; `int`                                            | `float?` from `Str`; `float` from `int`  |
+| `Float` | `Str`                                                   | `Float?`                                 |
+| `bool`  | `int`; `Str`                                            | `bool` from `int`; `bool?` from `Str`    |
+| `Bool`  | `Str`                                                   | `Bool?`                                  |
+| `char`  | `int`                                                   | `char`                                   |
+
+`Char` is not a target: it has no specializations, as there is no `char<Str>` parse to box.
+
+What each one does:
 
 | Conversion        | From → to          | Result                                                        |
 |-------------------|--------------------|---------------------------------------------------------------|
@@ -437,8 +453,11 @@ must be unwrapped first.
 | `Str<float>(f)`   | `float` → `Str`    | `%g` formatting: `"3.14"`, `"2"`, `"1e+20"`, `"-0"`; `"nan"`, `"inf"`, `"-inf"` |
 | `Str<bool>(b)`    | `bool` → `Str`     | `"True"` or `"False"`                                         |
 | `Str<char>(c)`    | `char` → `Str`     | A one-character string                                        |
+| `Str<Int>(x)` … `Str<Char>(x)` | box → `Str` | Exactly what the primitive form gives for the boxed value |
 | `int<Str>(s)`     | `Str` → `int?`     | The parsed integer, or `None` (see below)                     |
 | `float<Str>(s)`   | `Str` → `float?`   | The parsed float, or `None` (see below)                       |
+| `bool<Str>(s)`    | `Str` → `bool?`    | `True` for `"True"`, `False` for `"False"`, else `None`       |
+| `Int<Str>(s)`, `Float<Str>(s)`, `Bool<Str>(s)` | `Str` → `Int?` / `Float?` / `Bool?` | The same parse, as the optional box |
 | `int<float>(f)`   | `float` → `int`    | Truncates toward zero; panics on NaN, ±inf or out of range    |
 | `float<int>(n)`   | `int` → `float`    | The nearest `float` (exact up to 2^53)                        |
 | `int<bool>(b)`    | `bool` → `int`     | `1` for `True`, `0` for `False`                               |
@@ -454,18 +473,47 @@ n: int = int<float>(-2.9);        // -2
 f: float = float<int>(3) / 2.0;   // 1.5
 code: int = int<char>('a');       // 97
 c: char = char<int>(code + 1);    // 'b'
+match Int<Str>("7") {
+  x: Int { println(Str<Int>(x)); }   // 7
+  None   { }
+}
 ```
 
-Any other pair is a compile-time error that lists the valid sources for that target:
+The boxed sources (`Str<Int>(x)` and the rest) take a present box: an `Int` is never
+`None`, so an `Int?` is unwrapped with `match` first, as with any optional. The boxed
+targets give the optional box rather than the optional primitive: `Int<Str>(s)` is an
+`Int?`, holding the value `int<Str>(s)` would give.
+
+**The set is closed.** Any other type argument, a user class included, is a compile-time
+error that names the target's specializations. A class cannot add one; `toString()` is the
+way to turn an object into a `Str`:
 
 ```pkn
-x = int<Node>(n);   // error: no conversion from 'Node' to 'int'; 'int<...>' converts from
-                    //        'Str', 'float', 'bool' or 'char'
+s = Str<Point>(p);  // error: 'Str' has no specialization for 'Point'; its specializations
+                    //        are int, float, bool, char, Int, Float, Bool, Char
+x = int<int>(n);    // error: 'int' has no specialization for 'int'; its specializations
+                    //        are Str, float, bool, char
 y = int<float>(3);  // error: argument of 'int<float>' has type 'int', expected 'float'
 ```
 
-**Parsing.** `int<Str>(s)` and `float<Str>(s)` can fail, so they return an optional: `None`
-when `s` is not a valid number. Unwrap the result with `match` (see `10-optionals.md`):
+Calling a target without its specialization is an error that names the one to write, from
+the argument's type, or lists the set when the argument's type is not one of them:
+
+```pkn
+n = 1;
+a = Str(n);         // error: 'Str(...)' needs its specialization: write 'Str<int>(n)'
+b = int(2.5);       // error: 'int(...)' needs its specialization: write 'int<float>(2.5)'
+c = Str(p);         // error: 'Str(...)' needs its specialization: write 'Str<Source>(value)',
+                    //        but 'Str' has no specialization for 'Point'; its
+                    //        specializations are int, float, bool, char, Int, Float, Bool, Char
+```
+
+`Str(s)` with a `Str` argument is not a conversion: it is the `Str` constructor, and still
+returns the string.
+
+**Parsing.** `int<Str>(s)`, `float<Str>(s)` and `bool<Str>(s)` (and their boxed forms) can
+fail, so they return an optional: `None` when `s` is not a valid value. Unwrap the result
+with `match` (see `10-optionals.md`):
 
 ```pkn
 match int<Str>(line) {
@@ -480,6 +528,9 @@ match int<Str>(line) {
 - `float<Str>` accepts what C's `strtod` accepts, including exponents and `nan` / `inf`, but
   again the whole string with no leading or trailing whitespace. A value too large or too
   small for a `float` (`"1e999"`) is `None`.
+- `bool<Str>` accepts exactly `"True"` and `"False"`, the spellings `Str<bool>` prints, so
+  `bool<Str>(Str<bool>(b))` gives back `b`. Anything else (`"true"`, `"1"`, `" True"`) is
+  `None`.
 
 **Panics.** `int<float>` of NaN, of an infinity, or of a value outside the `int` range
 (`-2^63` to just under `2^63`) stops the program. So does `char<int>` outside `0`..`255`.

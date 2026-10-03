@@ -1,5 +1,5 @@
-// Only the listed pairs exist; the error names the valid sources.
+// A builtin target has a closed set of specializations; the error names it.
 fn main() -> int {
-  b = bool<float>(1.5);   // error: no conversion from 'float' to 'bool'; 'bool<...>' converts from 'int'
+  b = bool<float>(1.5);   // error: 'bool' has no specialization for 'float'; its specializations are int, Str
   return 0;
 }

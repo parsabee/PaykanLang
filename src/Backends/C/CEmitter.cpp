@@ -148,6 +148,7 @@ const RuntimeProto kRuntimeProtos[] = {
     {names::kPaykanBoolValue, kInt64, {kRtObjPtr}},
     {names::kPaykanCharValue, kInt8, {kRtObjPtr}},
     {names::kPaykanFloatFromStr, kRtBoxPtr, {kRtObjPtr}},
+    {names::kPaykanBoolFromStr, kRtBoxPtr, {kRtObjPtr}},
     {names::kPaykanPrint, kVoid, {kRtObjPtr}},
     {names::kPaykanPrintln, kVoid, {kRtObjPtr}},
     {names::kPaykanErrPrint, kVoid, {kRtObjPtr}},

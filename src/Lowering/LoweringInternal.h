@@ -295,6 +295,18 @@ private:
   bool isTrackedStringTemp(const Val &v) const;
   Val wrapStringLiteral(const Val &rawStr, size_t len);
 
+  // -- Conversions (#64, #88), by the spelled callee Sema rebinds them to
+  // -------------------------------------------------------------------------
+
+  /// A parse of a Str (`int<Str>`, `Int<Str>`, `bool<Str>`, ...): returns
+  /// a fresh +1 box, or None.
+  static bool isParseConversion(const std::string &callee);
+  /// A `Str<...>` conversion: returns an owned PaykanString temporary.
+  static bool isStrConversion(const std::string &callee);
+  /// For a boxed source (`Str<Int>` & co.), the accessor that unboxes the
+  /// argument before the primitive formatting; nullptr otherwise.
+  static const char *conversionUnboxer(const std::string &callee);
+
   // -- Optionals
   // ----------------------------------------------------------------------------
 

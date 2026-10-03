@@ -51,9 +51,9 @@ inline constexpr const char *kTypeBool = "bool";
 inline constexpr const char *kTypeChar = "char";
 inline constexpr const char *kTypeVoid = "void";
 
-// Conversion constructors `Target<Source>(value)` (#64).  Sema rebinds a
-// conversion call's callee to its spelled form, which is what the lowering
-// dispatches on.
+// Conversion constructors `Target<Source>(value)` (#64, #88): the closed set
+// of specializations of the builtin types.  Sema rebinds a conversion call's
+// callee to its spelled form, which is what the lowering dispatches on.
 inline constexpr const char *kConvStrInt = "Str<int>";
 inline constexpr const char *kConvStrFloat = "Str<float>";
 inline constexpr const char *kConvStrBool = "Str<bool>";
@@ -66,6 +66,16 @@ inline constexpr const char *kConvIntBool = "int<bool>";
 inline constexpr const char *kConvBoolInt = "bool<int>";
 inline constexpr const char *kConvIntChar = "int<char>";
 inline constexpr const char *kConvCharInt = "char<int>";
+inline constexpr const char *kConvBoolStr = "bool<Str>";
+// The boxed forms (#88): a boxed source formats like its primitive, a boxed
+// target parses into the optional box.
+inline constexpr const char *kConvStrIntBox = "Str<Int>";
+inline constexpr const char *kConvStrFloatBox = "Str<Float>";
+inline constexpr const char *kConvStrBoolBox = "Str<Bool>";
+inline constexpr const char *kConvStrCharBox = "Str<Char>";
+inline constexpr const char *kConvIntBoxStr = "Int<Str>";
+inline constexpr const char *kConvFloatBoxStr = "Float<Str>";
+inline constexpr const char *kConvBoolBoxStr = "Bool<Str>";
 
 // -- Runtime C symbol names -------------------------------------------------
 
@@ -146,6 +156,7 @@ inline constexpr const char *kPaykanBoolValue = "PaykanBool_value";
 inline constexpr const char *kPaykanCharValue = "PaykanChar_value";
 inline constexpr const char *kPaykanIntFromStr = "PaykanInt_from_str";
 inline constexpr const char *kPaykanFloatFromStr = "PaykanFloat_from_str";
+inline constexpr const char *kPaykanBoolFromStr = "PaykanBool_from_str";
 inline constexpr const char *kPaykanIntVtable = "PaykanInt_vtable";
 inline constexpr const char *kPaykanFloatVtable = "PaykanFloat_vtable";
 inline constexpr const char *kPaykanBoolVtable = "PaykanBool_vtable";
@@ -276,6 +287,7 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     // Boxed primitives (from Sema/CodeGen dispatch)
     kPaykanIntFromStr,
     kPaykanFloatFromStr,
+    kPaykanBoolFromStr,
     // Boxes of the optional primitives (`int?` & co.)
     kPaykanIntNew,
     kPaykanFloatNew,
