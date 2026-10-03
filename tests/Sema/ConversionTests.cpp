@@ -137,8 +137,7 @@ TEST(Conversion, TargetWithoutSourceType) {
 
 TEST(Conversion, RemovedBuiltinsAreUnknownFunctions) {
   // No dedicated diagnostic: an old name is just an undeclared function.
-  expectError(inMain("s = StrInt(1);"),
-              "call to undeclared function 'StrInt'");
+  expectError(inMain("s = StrInt(1);"), "call to undeclared function 'StrInt'");
   expectError(inMain("o = IntStr(\"1\");"),
               "call to undeclared function 'IntStr'");
 }
