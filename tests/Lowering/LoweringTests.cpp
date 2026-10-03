@@ -5,6 +5,7 @@
 // produce (docs/pir.md §7).  Behavioural parity with the LLVM backend is
 // covered by the CodeGen suite run on every backend.
 
+#include "ModuleName.h"
 #include "TestUtils.h"
 #include "paykan/lowering/Lowering.h"
 #include "paykan/pir/Parser.h"
@@ -746,14 +747,16 @@ TEST(Lowering, ImportedFunctionsAndClassesAreExternItems) {
   std::filesystem::remove_all(dir);
   ASSERT_TRUE(l.Ok) << l.Error;
   ASSERT_EQ(l.Program.Modules.size(), 2u);
-  EXPECT_EQ(l.Program.Modules[0].Name, "main.pkn");
+  // Modules are named by their canonical module names, not paths (#102).
+  EXPECT_EQ(l.Program.Modules[0].Name, "main");
+  EXPECT_EQ(l.Program.Modules[1].Name, "lib");
   const std::string &t = l.Text;
   // The importer declares what it uses from lib, keyed to lib's module and
   // named as the call sites qualify it; `symbol` is lib's own name for it.
-  EXPECT_NE(t.find("extern fn @\"lib::twice\"(i64) -> i64 module \""),
+  EXPECT_NE(t.find("extern fn @\"lib::twice\"(i64) -> i64 module \"lib\" "
+                   "symbol @twice\n"),
             std::string::npos)
       << t;
-  EXPECT_NE(t.find("\" symbol @twice\n"), std::string::npos) << t;
   EXPECT_NE(t.find("extern fn @\"lib::Adder\"(i64) -> box module \""),
             std::string::npos)
       << t;
@@ -765,6 +768,62 @@ TEST(Lowering, ImportedFunctionsAndClassesAreExternItems) {
   // lib defines the class and its functions once.
   EXPECT_NE(t.find("class Adder {"), std::string::npos) << t;
   EXPECT_NE(t.find("fn @Adder.add("), std::string::npos) << t;
+}
+
+// #102: every module is named by its canonical module name -- the module
+// path, never the file's (absolute) path -- and two modules with the same
+// stem in different directories keep distinct names.  A module imported under
+// two qualifiers is one module.
+TEST(Lowering, ModulesAreNamedByTheirCanonicalModuleName) {
+  auto dir = std::filesystem::temp_directory_path() /
+             ("lowering_canon_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir / "a");
+  std::filesystem::create_directories(dir / "b" / "c");
+  std::ofstream(dir / "a" / "util.pkn") << "fn tag() -> int { return 1; }\n";
+  std::ofstream(dir / "b" / "c" / "util.pkn")
+      << "class K { v: int; fn __init__() { self.v = 2; } }\n"
+         "fn tag() -> int { return 2; }\n";
+  auto l = lower("import a::util; import b::c::util as bu;\n"
+                 "import a::util as again;\n"
+                 "fn main() -> int { k = bu::K();\n"
+                 "  return util::tag() + bu::tag() + again::tag() + k.v; }\n",
+                 dir.string());
+  std::filesystem::remove_all(dir);
+  ASSERT_TRUE(l.Ok) << l.Error;
+  ASSERT_EQ(l.Program.Modules.size(), 3u) << l.Text;
+  EXPECT_EQ(l.Program.Modules[0].Name, "main");
+  EXPECT_EQ(l.Program.Modules[1].Name, "a::util");
+  EXPECT_EQ(l.Program.Modules[2].Name, "b::c::util");
+  EXPECT_EQ(l.Text.find(dir.string()), std::string::npos) << l.Text;
+  EXPECT_EQ(l.Text.find(".pkn"), std::string::npos) << l.Text;
+  const std::string &t = l.Text;
+  EXPECT_NE(t.find("extern fn @\"util::tag\"() -> i64 module \"a::util\" "
+                   "symbol @tag\n"),
+            std::string::npos)
+      << t;
+  EXPECT_NE(t.find("extern fn @\"bu::tag\"() -> i64 module \"b::c::util\" "
+                   "symbol @tag\n"),
+            std::string::npos)
+      << t;
+  EXPECT_NE(t.find("extern class K module \"b::c::util\""), std::string::npos)
+      << t;
+}
+
+TEST(Lowering, CanonicalModuleNameHelpers) {
+  using namespace module_name;
+  EXPECT_EQ(canonicalImportName("geometry::shapes", false), "geometry::shapes");
+  EXPECT_EQ(canonicalImportName("a::::b", false), "a::b");
+  EXPECT_EQ(canonicalImportName("io", true), "::io");
+  EXPECT_EQ(mainModuleName("zoo.pkn"), "zoo");
+  EXPECT_EQ(mainModuleName("../demo/zoo.pkn"), "zoo");
+  EXPECT_EQ(mainModuleName("/abs/demo/zoo.pkn"), "zoo");
+  EXPECT_EQ(mainModuleName("my.prog.pkn"), "my.prog");
+  EXPECT_EQ(mainModuleName("a::b.pkn"), "a__b");
+  EXPECT_EQ(cacheRelativePath("geometry::shapes"),
+            std::filesystem::path("geometry") / "shapes");
+  EXPECT_EQ(cacheRelativePath("zoo"), std::filesystem::path("zoo"));
+  EXPECT_EQ(cacheRelativePath("::io"),
+            std::filesystem::path(kSystemCacheDir) / "io");
 }
 
 // #70: functions are module-qualified, so two modules' (and the importer's

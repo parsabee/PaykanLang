@@ -17,6 +17,9 @@ With --build, every sample is instead compiled ahead of time with
 PAYKAN_TRACK_HEAP=1, the same arguments and the sample path as argv[0]);
 the same checks apply.
 
+-O<n> passes that optimization level; without it the compiler's default
+(-O2) is used.
+
 With a single backend the script only checks that every sample runs
 successfully with zero live blocks.
 """
@@ -64,16 +67,23 @@ def normalise(p):
     return p.returncode, out, err, live
 
 
-def run(paykan, backend, sample):
-    cmd = [paykan, f"--backend={backend}", "--track-heap", str(sample), "a", "b"]
+def opt_flags(opt):
+    """-O<n> when a level was asked for; else the compiler's default."""
+    return [] if opt is None else [f"-O{opt}"]
+
+
+def run(paykan, backend, sample, opt=None):
+    cmd = [paykan, f"--backend={backend}", "--track-heap", *opt_flags(opt),
+           str(sample), "a", "b"]
     p = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
                        text=True, errors="replace", cwd=str(ROOT))
     return normalise(p)
 
 
-def build_and_run(paykan, backend, sample, outdir):
+def build_and_run(paykan, backend, sample, outdir, opt=None):
     exe = Path(outdir) / f"{backend}-{sample.parent.name}-{sample.stem}"
-    cmd = [paykan, "build", f"--backend={backend}", "-o", str(exe), str(sample)]
+    cmd = [paykan, "build", f"--backend={backend}", *opt_flags(opt), "-o",
+           str(exe), str(sample)]
     b = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
                        text=True, errors="replace", cwd=str(ROOT))
     if b.returncode != 0:
@@ -92,6 +102,8 @@ def main():
                     help="a backend to run (repeatable)")
     ap.add_argument("--build", action="store_true",
                     help="build executables with `paykan build` and run those")
+    ap.add_argument("-O", dest="opt", type=int, choices=range(4),
+                    help="optimization level (default: the compiler's, -O2)")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
     with tempfile.TemporaryDirectory(prefix="paykan-parity-") as outdir:
@@ -104,10 +116,12 @@ def check(args, outdir):
     for sample in samples():
         rel = sample.relative_to(ROOT)
         if args.build:
-            results = {b: build_and_run(args.paykan, b, sample, outdir)
+            results = {b: build_and_run(args.paykan, b, sample, outdir,
+                                        args.opt)
                        for b in args.backend}
         else:
-            results = {b: run(args.paykan, b, sample) for b in args.backend}
+            results = {b: run(args.paykan, b, sample, args.opt)
+                       for b in args.backend}
         problems = []
         for b, (rc, out, err, live) in results.items():
             if live is None:
@@ -139,6 +153,8 @@ def check(args, outdir):
             print(f"ok   {rel}")
     total = len(samples())
     mode = "built" if args.build else "run"
+    if args.opt is not None:
+        mode += f", -O{args.opt}"
     print(f"{total - failures}/{total} samples at parity ({mode}) on "
           f"{', '.join(args.backend)}")
     return 1 if failures else 0

@@ -1,0 +1,22 @@
+// OK: modules with the same file stem in different directories (a/util.pkn,
+// b/util.pkn, and c/main.pkn next to the main file main.pkn) are distinct
+// modules, named by their canonical module names (a::util, b::util, c::main)
+// on every backend (issue #102).
+//
+// expect-stdout: a b c
+// expect-stdout: bb 6
+// expect-stdout: main
+
+import a::util;
+import b::util as bu;
+import c::main as cm;
+
+fn tag() -> Str { return "main"; }
+
+fn main() -> int {
+  println(util::tag() + " " + bu::tag() + " " + cm::tag());
+  k: util::Counter = util::Counter(5);
+  println(bu::twice(b::util::tag()) + " " + Str<int>(k.next()));
+  println(tag());
+  return 0;
+}

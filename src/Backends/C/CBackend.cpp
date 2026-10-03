@@ -73,7 +73,6 @@ private:
     tc.ExtraFlags.push_back("-O" +
                             std::to_string(in.OptLevel > 3 ? 3u : in.OptLevel));
     // The object cache lives next to the LLVM backend's bitcode cache.
-    tc.ProjectRoot = in.ProjectRoot;
     tc.CacheDir =
         (std::filesystem::path(in.ProjectRoot) / ".paykan_cache").string();
     return tc;

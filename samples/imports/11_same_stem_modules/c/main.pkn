@@ -1,0 +1,2 @@
+// c::main -- same stem as the main module.
+fn tag() -> Str { return "c"; }

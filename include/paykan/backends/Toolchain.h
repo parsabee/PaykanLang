@@ -35,9 +35,9 @@ struct Toolchain {
   /// (`<project root>/.paykan_cache`), reused while the module's generated
   /// C and its cache key (`.key`) are unchanged.  Empty: no cache, everything
   /// is compiled into the temporary build directory.
+  /// Entries are named after the module's canonical name
+  /// (`geometry::shapes` -> geometry/shapes.{c,o,key}).
   std::string CacheDir;
-  /// The project root cache entries are named relative to.
-  std::string ProjectRoot;
 };
 
 /// Resolve the defaults of @p tc (compiler and runtime paths).  Returns false
