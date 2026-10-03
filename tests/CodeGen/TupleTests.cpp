@@ -391,3 +391,46 @@ TEST(Tuple, EnumElementsAndScopes) {
   EXPECT_EQ(r.StdOut, "g0\ng1\ng2\n");
   g.expectNoLeaks("EnumElementsAndScopes");
 }
+
+// #71: literals take their destination's element types.  A `None` tuple
+// element is the null box of its `T?` slot (so `match` sees None, not a boxed
+// `None` object), and array literals of tuples mixing `int` and `int?` take
+// the declared element type, in every typed sink.
+TEST(Tuple, LiteralsTakeTheDestinationsOptionalElementTypes) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Node { v: int; fn __init__(v: int) { self.v = v; } }
+    class Holder {
+      t: (Str, int?)[];
+      fn __init__() { self.t = []; }
+      fn put(xs: (Str, int?)[]) { self.t = xs; }
+    }
+    fn which(n: Node?) -> Str { match n { x: Node { return "node"; } None { return "none"; } } }
+    fn val(n: int?) -> Str { match n { x: int { return Str<int>(x); } None { return "none"; } } }
+    fn count(xs: (Str, int?)[]) -> int { return xs.len(); }
+    fn mk() -> (Node?, int)[] { return [(None, 1), (Node(2), 2)]; }
+    fn main() -> int {
+      b: (Node?, int) = (None, 1);
+      a: (int?, Str) = (None, "a");
+      println(which(b.0) + " " + val(a.0));
+      ps = mk();
+      println(which(ps[0].0) + " " + which(ps[1].0));
+      nb: int? = None;
+      tbl: (Str, int?)[] = [("a", 1), ("b", nb), ("c", None)];
+      println(val(tbl[0].1) + " " + val(tbl[1].1) + " " + val(tbl[2].1));
+      h = Holder();
+      h.put([("m", 4), ("n", nb)]);
+      h.t[1] = ("o", 5);
+      h.t.push(("p", None));
+      println(val(h.t[0].1) + " " + val(h.t[1].1) + " " + val(h.t[2].1));
+      nodes: Node?[] = [None, Node(1)];
+      println(which(nodes[0]) + " " + which(nodes[1]));
+      return count([("x", 1), ("y", nb), ("z", None)]);
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 3);
+  EXPECT_EQ(r.StdOut, "none none\nnone node\n1 none none\n4 5 none\n"
+                      "none node\n");
+  g.expectNoLeaks("LiteralsTakeTheDestinationsOptionalElementTypes");
+}

@@ -41,7 +41,9 @@ mixed: (int[], Str) = ([1, 2, 3], "nums");
 A literal's type is exactly the tuple of its element types — there is no
 promotion inside a tuple literal, so `t: (float, int) = (1, 2)` is an error
 (write `(1.0, 2)`).  Reference-typed elements are covariant: an `(int, Str)`
-can be assigned to an `(int, Obj)`.
+can be assigned to an `(int, Obj)`.  Where the literal flows into a typed slot,
+its optional elements come from that slot: `p: (Node?, int) = (None, 1)` and
+`ps: (Str, int?)[] = [("a", 1), ("b", None)]` work (see `10-optionals.md`).
 
 ---
 
