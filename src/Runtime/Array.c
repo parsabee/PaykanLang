@@ -41,7 +41,7 @@
 void PaykanArray_destroy(PaykanObject *self);
 void PaykanArray_destroy_obj(PaykanObject *self);
 PaykanShared *PaykanArray_toString(PaykanObject *self);
-int64_t PaykanArray_equals(PaykanObject *self, PaykanObject *other);
+int64_t PaykanArray_equals(PaykanObject *self, PaykanShared *other);
 int64_t PaykanArray_length(PaykanObject *self);
 
 // ============================================================================
@@ -49,19 +49,19 @@ int64_t PaykanArray_length(PaykanObject *self);
 // ============================================================================
 
 // Primitive elements — destroy just frees the buffer.
-PaykanArrayVTable PaykanArray_vtable = {
-    .destroy = PaykanArray_destroy,
-    .toString = PaykanArray_toString,
-    .equals = PaykanArray_equals,
-    .length = PaykanArray_length,
+PaykanMethod PaykanArray_vtable[PAYKAN_ARRAY_SLOTS] = {
+    [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanArray_destroy,
+    [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanArray_toString,
+    [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanArray_equals,
+    [PAYKAN_SLOT_ARRAY_LENGTH] = (PaykanMethod)PaykanArray_length,
 };
 
 // Object elements — destroy releases every PaykanShared* before freeing.
-PaykanArrayVTable PaykanArray_obj_vtable = {
-    .destroy = PaykanArray_destroy_obj,
-    .toString = PaykanArray_toString,
-    .equals = PaykanArray_equals,
-    .length = PaykanArray_length,
+PaykanMethod PaykanArray_obj_vtable[PAYKAN_ARRAY_SLOTS] = {
+    [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanArray_destroy_obj,
+    [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanArray_toString,
+    [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanArray_equals,
+    [PAYKAN_SLOT_ARRAY_LENGTH] = (PaykanMethod)PaykanArray_length,
 };
 
 // ============================================================================
@@ -72,7 +72,7 @@ PaykanArrayVTable PaykanArray_obj_vtable = {
 // values; no reference counting.
 PaykanArray *PaykanArray_new(unsigned long len) {
   PaykanArray *arr = (PaykanArray *)Paykan_malloc(sizeof(PaykanArray));
-  arr->vtable = (PaykanObjectVTable *)&PaykanArray_vtable;
+  arr->vtable = PaykanArray_vtable;
   arr->shared = NULL; // not yet boxed (unique-box invariant)
   arr->len = len;
   arr->cap = len;
@@ -89,7 +89,7 @@ PaykanArray *PaykanArray_new(unsigned long len) {
 // 'data' must point to (len * 8) bytes of packed i64 values.
 PaykanArray *PaykanArray_new_from_data(unsigned long len, const void *data) {
   PaykanArray *arr = (PaykanArray *)Paykan_malloc(sizeof(PaykanArray));
-  arr->vtable = (PaykanObjectVTable *)&PaykanArray_vtable;
+  arr->vtable = PaykanArray_vtable;
   arr->shared = NULL; // not yet boxed (unique-box invariant)
   arr->len = len;
   arr->cap = len;
@@ -106,7 +106,7 @@ PaykanArray *PaykanArray_new_from_data(unsigned long len, const void *data) {
 // counts are managed by PaykanArray_set_obj / PaykanArray_destroy_obj.
 PaykanArray *PaykanArray_new_obj(unsigned long len) {
   PaykanArray *arr = (PaykanArray *)Paykan_malloc(sizeof(PaykanArray));
-  arr->vtable = (PaykanObjectVTable *)&PaykanArray_obj_vtable;
+  arr->vtable = PaykanArray_obj_vtable;
   arr->shared = NULL; // not yet boxed (unique-box invariant)
   arr->len = len;
   arr->cap = len;
@@ -207,7 +207,7 @@ PaykanShared *PaykanArray_toString(PaykanObject *self) {
   return PaykanShared_new((PaykanObject *)PaykanString_new(buf, n));
 }
 
-int64_t PaykanArray_equals(PaykanObject *self, PaykanObject *other) {
+int64_t PaykanArray_equals(PaykanObject *self, PaykanShared *other) {
   // Identity equality — two arrays are equal only if they are the same object.
   // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
   PaykanObject *o = Paykan_equals_unbox_other(other);

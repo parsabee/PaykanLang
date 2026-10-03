@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <regex>
 #include <string>
 #include <vector>
 
@@ -594,6 +595,68 @@ TEST(Driver, EmitCPrintsCSource) {
   EXPECT_NE(out.find("int main(int argc, char **argv)"), std::string::npos)
       << out;
   EXPECT_NE(out.find("PaykanShared *shared;"), std::string::npos) << out;
+}
+
+// Every vtable is an array of PaykanMethod (Runtime.h), read with
+// Paykan_vtable_of and converted to the method's own type at the call: no
+// vtable is accessed through a pointer to another type (#62).
+TEST(Driver, EmitCVTablesArePaykanMethodArrays) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp("class A { fn f() -> int { return 1; } }"
+                      "class B : A { fn f() -> int { return 2; } }"
+                      "fn g(a: A) -> int { return a.f(); }"
+                      "fn main() -> int { return g(B()); }");
+  auto [rc, out] = run(std::string(kPaykan) + " --emit-c " + src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_EQ(rc, 0) << out;
+  EXPECT_NE(out.find("PaykanMethod *vtable;"), std::string::npos) << out;
+  EXPECT_TRUE(
+      std::regex_search(out, std::regex(R"(\nPaykanMethod pkvt_\w+\[)")))
+      << out;
+  EXPECT_NE(out.find("(PaykanMethod)PaykanObject_toString"), std::string::npos)
+      << out;
+  EXPECT_NE(out.find("(int64_t (*)(PaykanObject *))Paykan_vtable_of("),
+            std::string::npos)
+      << out;
+  EXPECT_EQ(out.find("pkrt_fn"), std::string::npos) << out;
+}
+
+// Nothing unused reaches the C (a -Wall -Wextra warning otherwise): no
+// bit-cast helper without a cast, no unread local (`self` here), no binding
+// for a discarded call result, no unreferenced string global, and only the
+// branch taken of an `if` on a literal (#62).
+TEST(Driver, EmitCOmitsUnusedEntities) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp(
+      "class K { fn seven() -> int { return 7; } }"
+      "fn side() -> int { println(\"side\"); return 1; }"
+      "fn main() -> int { side(); k = K(); x: int = if True then 1 else 2;"
+      "  return k.seven() + x; }");
+  auto [rc, out] = run(std::string(kPaykan) + " --emit-c " + src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_EQ(rc, 0) << out;
+  EXPECT_EQ(out.find("pkrt_f64_bits"), std::string::npos) << out;
+  EXPECT_EQ(out.find("pkrt_bits_f64"), std::string::npos) << out;
+  EXPECT_EQ(out.find("l_self"), std::string::npos) << out;
+  EXPECT_NE(out.find("(void)v"), std::string::npos) << out; // unread `self`
+  EXPECT_TRUE(std::regex_search(out, std::regex(R"(\n  \w+_side\(\);)")))
+      << out;
+  EXPECT_EQ(out.find("if (true)"), std::string::npos) << out;
+  EXPECT_EQ(out.find("INT64_C(2)"), std::string::npos) << out;
+}
+
+// The bit-cast helpers are emitted when a cast needs them (a float array
+// stores its elements' bits).
+TEST(Driver, EmitCEmitsBitCastHelpersWhenUsed) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp("fn main() -> int { a: float[] = [1.5];"
+                      "  println(Str<float>(a[0])); return 0; }");
+  auto [rc, out] = run(std::string(kPaykan) + " --emit-c " + src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_EQ(rc, 0) << out;
+  EXPECT_NE(out.find("static inline double pkrt_bits_f64(int64_t i)"),
+            std::string::npos)
+      << out;
 }
 
 TEST(Driver, EmitCRejectsAnotherBackend) {

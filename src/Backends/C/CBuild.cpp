@@ -142,8 +142,10 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
     return false;
   }
 
-  std::vector<std::string> compileFlags = {tcnames::kFlagStd,
-                                           tcnames::kFlagNoWarnings};
+  // No -w: the generated C compiles warning-free (it is checked with
+  // -pedantic-errors -Wall -Wextra -Werror on GCC and Clang, the CStrictC11
+  // ctest), so any warning the C compiler prints is a backend bug to report.
+  std::vector<std::string> compileFlags = {tcnames::kFlagStd};
   for (const auto &f : tc.ExtraFlags)
     compileFlags.push_back(f);
   // Everything besides the module's C that its object depends on: the C

@@ -313,6 +313,41 @@ jobs:
           diff example.pir driver.pir
 
   # ---------------------------------------------------------------------------
+  # Strict C11: the C backend's output for the whole samples corpus compiles
+  # with -std=c11 -pedantic-errors -Wall -Wextra -Werror on GCC and on Clang
+  # (both required here) and runs like `paykan run` (scripts/c_strict.py; the
+  # CStrictC11 ctest runs it with whichever compilers a job has).
+  # ---------------------------------------------------------------------------
+  strict-c11-linux:
+    name: Strict C11 | Linux x86-64 (GCC + Clang)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build gcc clang
+
+      - name: Cache GoogleTest
+        uses: actions/cache@v4
+        with:
+          path: build/third-party/gtest
+          key: gtest-${{ hashFiles('cmake/GTestSetup.cmake') }}
+
+      - name: "Configure (core: recursive-descent frontend, C backend)"
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DPAYKAN_FRONTENDS=recursive-descent -DPAYKAN_BACKENDS=c
+
+      - name: Build
+        run: cmake --build build --parallel --target paykan
+
+      - name: Strict C11 on GCC and Clang
+        run: |
+          gcc --version && clang --version
+          python3 scripts/c_strict.py --paykan build/bin/paykan \
+            --cc gcc --cc clang --build-cc gcc --build-cc clang -v
+
+  # ---------------------------------------------------------------------------
   # Frontend differential: both frontends built, every sample and test input
   # parsed by each and compared (in process and through the driver).
   # ---------------------------------------------------------------------------
