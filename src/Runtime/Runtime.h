@@ -574,11 +574,12 @@ void Paykan_flush(void);
 // they correctly do not affect the counters.
 
 typedef struct PaykanHeapStats {
-  int64_t liveBlocks;  // currently-allocated blocks (alloc - free)
-  int64_t liveBytes;   // currently-allocated payload bytes
-  int64_t totalAllocs; // cumulative successful allocations
-  int64_t totalFrees;  // cumulative frees of non-NULL pointers
-  int64_t peakBytes;   // high-water mark of liveBytes
+  int64_t liveBlocks;    // currently-allocated blocks (alloc - free)
+  int64_t liveBytes;     // currently-allocated payload bytes
+  int64_t totalAllocs;   // cumulative successful allocations
+  int64_t totalFrees;    // cumulative frees of non-NULL pointers
+  int64_t totalReallocs; // cumulative Paykan_realloc calls (incl. NULL ptr)
+  int64_t peakBytes;     // high-water mark of liveBytes
 } PaykanHeapStats;
 
 /// Allocate `size` bytes.  Returns NULL on failure.
@@ -615,6 +616,10 @@ int64_t Paykan_heap_live_blocks(void);
 
 /// Convenience: number of payload bytes currently live.
 int64_t Paykan_heap_live_bytes(void);
+
+/// Number of Paykan_realloc calls since the last reset (e.g. to check that a
+/// container's resize policy is amortised).
+int64_t Paykan_heap_total_reallocs(void);
 
 /// Print the current heap statistics to stderr (a leak warning is appended if
 /// any blocks remain live).  If tracking is disabled, prints a notice instead.
