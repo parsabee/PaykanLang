@@ -21,11 +21,11 @@ binaries) that do; those functions are counted from the real records.
 
 It exits non-zero if total line coverage is below the floor (--min, default 80).
 
-Note on the floor: the project's aspiration is ~100% line coverage. The current
-first-party total is ~82% (the driver entry point and some defensive branches
-are not yet exercised). The floor is set just below that so CI fails on a
-*regression* without blocking the v0.0 release; ratchet it up toward 100% as
-gaps are closed.
+Note on the floor: the project's aspiration is ~100% line coverage. The
+first-party total was ~82% when the floor was set and ~90% at the v0.1.0 audit
+(some defensive branches are still not exercised). The floor stays below that so
+CI fails on a large *regression* without blocking the v0.1 release; ratchet it
+up toward 100% as gaps are closed.
 
 Usage:
     scripts/coverage.py [--build-dir DIR] [--min PERCENT]
