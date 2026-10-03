@@ -6,6 +6,8 @@
 #include "Runtime.h"
 
 #include <cassert>
+#include <csignal>
+#include <cstdlib>
 #include <iterator>
 #include <string>
 #include <unordered_set>
@@ -193,6 +195,35 @@ createObjectLinkingLayer(llvm::orc::ExecutionSession &es,
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
+// Runtime panics
+// ---------------------------------------------------------------------------
+//
+// A runtime panic (division by zero, an index out of bounds, ...) prints its
+// message and calls abort().  The C backend runs the program as a child
+// process and `paykan run` exits with 128 + SIGABRT (134); the JIT runs it
+// in this process, where the abort would kill the compiler itself.  While
+// main runs, SIGABRT is turned into that same exit status, so both backends
+// end `paykan run` alike (docs/c-backend.md).  Like abort(), _Exit flushes
+// no stdio buffer.  A built executable still aborts with SIGABRT.
+
+namespace {
+
+extern "C" void exitOnAbort(int sig) { std::_Exit(128 + sig); }
+
+class AbortAsExitStatus {
+public:
+  AbortAsExitStatus() : Prev(std::signal(SIGABRT, exitOnAbort)) {}
+  ~AbortAsExitStatus() { std::signal(SIGABRT, Prev); }
+  AbortAsExitStatus(const AbortAsExitStatus &) = delete;
+  AbortAsExitStatus &operator=(const AbortAsExitStatus &) = delete;
+
+private:
+  void (*Prev)(int);
+};
+
+} // namespace
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -269,6 +300,8 @@ llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
   auto mainAddr = jit->lookup("main");
   if (!mainAddr)
     return mainAddr.takeError();
+
+  AbortAsExitStatus panicsExit;
 
   if (mainParamCount == 1) {
     // main(args: Str[]) — build a PaykanArray<Str> from the args vector.

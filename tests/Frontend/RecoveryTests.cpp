@@ -107,11 +107,11 @@ TEST(Recovery, MatchArmBoundaries) {
 
 TEST(Recovery, LexicalErrorsDoNotStopTheParse) {
   auto r = parse("fn main() -> int {\n"
-                 "  x: int = 1 @ 2;\n" // 2: '@' then a syntax error at 2
-                 "  y: int = 3;\n"
-                 "  return 0 $;\n" // 4: '$'
+                 "  x: int = 1 @ 2;\n" // 2: '@' (the `2` it strands is not
+                 "  y: int = 3;\n"     //    reported again)
+                 "  return 0 $;\n"     // 4: '$'
                  "}\n");
-  ASSERT_GE(r.Diags.size(), 3u);
+  ASSERT_EQ(r.Diags.size(), 2u) << r.Text;
   EXPECT_NE(r.Diags[0].Message.find("invalid character '@'"),
             std::string::npos);
   EXPECT_EQ(r.Diags[0].Loc.getLineStart(), 2u);
@@ -160,4 +160,58 @@ TEST(Recovery, NoDiagEngineFallsBackToStderr) {
   auto out = parseSource(ctx, "fn main() -> int { return }", nullptr);
   EXPECT_EQ(out.ErrorCount, 1u);
   ASSERT_NE(out.Root, nullptr);
+}
+
+// Each real error is reported once (#79): no follow-on syntax error right
+// after a lexical error, and an unclosed block at end of file is one error
+// (not one per open block), with a note at the brace left open.
+
+TEST(Recovery, NoFollowOnAfterALexicalError) {
+  auto r = parse("fn a() -> int {\n"
+                 "  s = \"unterminated;\n" // 2
+                 "  return 0;\n"
+                 "}\n"
+                 "fn b() -> int {\n"
+                 "  x = 5 @ 3;\n" // 6
+                 "  return 0;\n"
+                 "}\n"
+                 "fn c() -> int {\n"
+                 "  c = 'ab';\n" // 10
+                 "  return 0;\n"
+                 "}\n"
+                 "fn d() -> int {\n"
+                 "  x = 1 +;\n" // 14: still reported
+                 "  return 0;\n"
+                 "}\n");
+  EXPECT_EQ(r.Errors, 4u) << r.Text;
+  EXPECT_EQ(errorLines(r), (std::vector<size_t>{2, 6, 10, 14})) << r.Text;
+  ASSERT_EQ(r.Diags.size(), 4u);
+  EXPECT_NE(r.Diags[0].Message.find("unterminated string literal"),
+            std::string::npos);
+  EXPECT_NE(r.Diags[1].Message.find("invalid character '@'"),
+            std::string::npos);
+  EXPECT_EQ(r.Diags[2].Message, "character literal must contain exactly one "
+                                "character (use a string literal for text)");
+  EXPECT_EQ(r.Diags[3].Message, "unexpected ';'; expected an expression");
+}
+
+TEST(Recovery, UnclosedBlocksAtEndOfFileAreOneError) {
+  auto r = parse("fn main() -> int {\n"
+                 "  while (True) {\n"
+                 "    if (x) {\n"
+                 "  return 0;\n");
+  EXPECT_EQ(r.Errors, 1u) << r.Text;
+  ASSERT_EQ(r.Diags.size(), 2u) << r.Text;
+  EXPECT_EQ(r.Diags[0].Level, paykan::sema::Diagnostic::Error);
+  EXPECT_EQ(r.Diags[0].Message,
+            "unexpected end of file; expected '}' to close the block");
+  EXPECT_EQ(r.Diags[1].Level, paykan::sema::Diagnostic::Note);
+  EXPECT_EQ(r.Diags[1].Message, "to match this '{'");
+  EXPECT_EQ(r.Diags[1].Loc.getLineStart(), 3u); // the innermost open block
+  EXPECT_EQ(r.Diags[1].Loc.getColumnStart(), 12u);
+
+  auto c = parse("class A {\n  fn f() {\n");
+  EXPECT_EQ(c.Errors, 1u) << c.Text;
+  auto m = parse("fn main() -> int { match 1 { _ { \n");
+  EXPECT_EQ(m.Errors, 1u) << m.Text;
 }

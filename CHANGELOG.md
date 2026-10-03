@@ -151,6 +151,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejected with a targeted message (use `\n`); the unused `&` token was
   removed from the lexer; out-of-range integer literals are reported reliably;
   an unopenable file no longer calls `exit()` from library code.
+- One rejected class declaration (a builtin or imported name, an undefined
+  superclass, a bad member type) no longer makes every other class of the
+  module undeclared (#79): the other classes are still declared, the bad
+  class is registered as far as it can be, and the follow-on errors on its
+  uses are not reported.
+- The recursive-descent frontend reports each syntax error once (#79): no
+  follow-on error right after a lexical error (an unterminated string, an
+  invalid character), one error (with a note at the open `{`) for blocks left
+  unclosed at end of file instead of one per block, and one error for a
+  multi-character literal such as `'ab'`.
+- A runtime panic ends `paykan run` the same way on both backends (#79): with
+  exit status 134 (128 + `SIGABRT`). The llvm backend's JIT used to let the
+  abort kill the compiler process itself; executables from `build` still die
+  by `SIGABRT`.
+- A qualified match arm on an enum (`base::Color::Green { … }`) now says to
+  use the bare variant name (`'Green'`) instead of claiming it is not a
+  variant (#79).
 
 ### Changed
 

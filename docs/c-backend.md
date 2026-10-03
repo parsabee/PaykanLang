@@ -28,7 +28,11 @@ archive is instrumented with them.
 
 A program started with `paykan run` sees the script path as `args[0]`
 (`fn main(args: Str[])`), like the JIT backend.  A runtime panic aborts the
-program; `paykan run` then exits with 128 + the signal number.
+program (`SIGABRT`); `paykan run` then exits with 128 + the signal number,
+134, which is also what the llvm backend's `paykan run` exits with (its JIT
+runs the program in the compiler's own process and turns the abort into that
+exit status).  An executable from `build` dies by `SIGABRT` itself, on both
+backends.
 
 ## The generated C
 

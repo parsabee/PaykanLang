@@ -508,6 +508,33 @@ fn main() -> int {
   std::filesystem::remove_all(tmp);
 }
 
+// Match arms use bare variant names, also for an imported enum (#79).
+TEST(Module, EnumQualifiedMatchArmNamesTheBareVariant) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_enum_qual_arm").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "pal/color.pkn", kColorModule);
+  auto main = writeFile(tmp, "main.pkn", R"(
+import pal::color;
+fn main() -> int {
+  c: color::Color = color::Color::Green;
+  match c { color::Color::Green { return 1; } color::Color::Pink { } _ { } }
+  return 0;
+}
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("error: 'color::Color::Green' is not a valid "
+                               "match arm; use the bare variant name 'Green'"),
+            std::string::npos)
+      << r.Diagnostics;
+  // Not a variant at all: the usual message.
+  EXPECT_NE(r.Diagnostics.find("error: 'color::Color::Pink' is not a variant "
+                               "of enum '"),
+            std::string::npos)
+      << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
 TEST(Module, EnumFullPathQualifierOk) {
   auto tmp = (paykan::test::tempDir() / "pkn_ms_enum_full").string();
   std::filesystem::remove_all(tmp);
