@@ -1,4 +1,4 @@
-// 39 — the float range at its edges (#73): subnormal literals and their
+// 40 — the float range at its edges (#73): subnormal literals and their
 // parses, the largest and smallest normal floats, and parses that fall
 // outside the range.
 // Exercises: subnormal constants (they reach the PIR text and both backends'
