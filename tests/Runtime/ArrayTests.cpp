@@ -318,16 +318,16 @@ TEST(ArrayCap, NewObjSetsCapToLen) {
 // --- Push: grow only when full ----------------------------------------------
 
 TEST(ArrayPush, PushIntoRoomDoesNotReallocate) {
-  // Start with len=2, cap=2. First push fills slot 2 and doubles cap to 4.
-  // Second push still fits inside the new cap=4 without another doubling.
-  PaykanArray *arr = PaykanArray_new(2);
+  // Start with len=8, cap=8. First push fills slot 8 and doubles cap to 16.
+  // Second push still fits inside the new cap=16 without another doubling.
+  PaykanArray *arr = PaykanArray_new(8);
   PaykanArray_push(arr, i64vp(10));
-  EXPECT_EQ(arr->len, 3UL);
-  EXPECT_EQ(arr->cap, 4UL); // doubled once
+  EXPECT_EQ(arr->len, 9UL);
+  EXPECT_EQ(arr->cap, 16UL); // doubled once
 
   PaykanArray_push(arr, i64vp(20));
-  EXPECT_EQ(arr->len, 4UL);
-  EXPECT_EQ(arr->cap, 4UL); // no second doubling — still room
+  EXPECT_EQ(arr->len, 10UL);
+  EXPECT_EQ(arr->cap, 16UL); // no second doubling — still room
   PaykanArray_destroy((PaykanObject *)arr);
 }
 
@@ -342,16 +342,34 @@ TEST(ArrayPush, PushOntoEmptyArrayAllocates) {
 }
 
 TEST(ArrayPush, DoublesCapWhenFull) {
+  PaykanArray *arr = PaykanArray_new(8);
+  // cap==8, len==8 -> push must double cap to 16.
+  PaykanArray_push(arr, i64vp(99));
+  EXPECT_EQ(arr->len, 9UL);
+  EXPECT_EQ(arr->cap, 16UL);
+  for (int64_t i = 0; i < 7; ++i)
+    PaykanArray_push(arr, i64vp(i));
+  EXPECT_EQ(arr->cap, 16UL);
+  // cap==16, len==16 -> push must double cap to 32.
+  PaykanArray_push(arr, i64vp(88));
+  EXPECT_EQ(arr->len, 17UL);
+  EXPECT_EQ(arr->cap, 32UL);
+  PaykanArray_destroy((PaykanObject *)arr);
+}
+
+TEST(ArrayPush, GrowthFromSmallCapUsesMinimumCapacity) {
+  // A short exact-capacity array (e.g. a literal) grows straight to the
+  // minimum capacity of 8 rather than 2, 4, 8.
   PaykanArray *arr = PaykanArray_new(1);
-  // cap==1, len==1 -> push must double cap to 2.
   PaykanArray_push(arr, i64vp(99));
   EXPECT_EQ(arr->len, 2UL);
-  EXPECT_EQ(arr->cap, 2UL);
-  // cap==2, len==2 -> push must double cap to 4.
-  PaykanArray_push(arr, i64vp(88));
-  EXPECT_EQ(arr->len, 3UL);
-  EXPECT_EQ(arr->cap, 4UL);
+  EXPECT_EQ(arr->cap, 8UL);
   PaykanArray_destroy((PaykanObject *)arr);
+
+  PaykanArray *empty = PaykanArray_new(0);
+  PaykanArray_push(empty, i64vp(1));
+  EXPECT_EQ(empty->cap, 8UL);
+  PaykanArray_destroy((PaykanObject *)empty);
 }
 
 TEST(ArrayPush, PreservesExistingElements) {
@@ -375,7 +393,15 @@ TEST(ArrayPush, LenIncrementsByOne) {
   PaykanArray_destroy((PaykanObject *)arr);
 }
 
-// --- Pop: shrink when len drops to half of cap ------------------------------
+// --- Pop: shrink with hysteresis (len <= cap/4 -> cap/2, min 8) ------------
+
+// Push n values 0..n-1 onto a fresh empty primitive array.
+static PaykanArray *filled(int64_t n) {
+  PaykanArray *arr = PaykanArray_new(0);
+  for (int64_t i = 0; i < n; ++i)
+    PaykanArray_push(arr, i64vp(i * 10));
+  return arr;
+}
 
 TEST(ArrayPop, ReturnsLastElement) {
   PaykanArray *arr = PaykanArray_new(3);
@@ -395,41 +421,57 @@ TEST(ArrayPop, DecreasesLen) {
   PaykanArray_destroy((PaykanObject *)arr);
 }
 
-TEST(ArrayPop, ShrinksWhenLenHalfOfCap) {
-  // Push until cap=4, len=4. Then pop twice -> len=2 == cap/2 -> shrink to 2.
-  PaykanArray *arr = PaykanArray_new(0);
-  for (int64_t i = 0; i < 4; ++i)
-    PaykanArray_push(arr, i64vp(i));
-  EXPECT_EQ(arr->cap, 4UL);
-  EXPECT_EQ(arr->len, 4UL);
-
-  PaykanArray_pop(arr); // len=3, cap=4 -> no shrink (3 > 4/2)
-  EXPECT_EQ(arr->cap, 4UL);
-
-  PaykanArray_pop(arr); // len=2, cap=4 -> 2 <= 4/2 -> shrink to 2
-  EXPECT_EQ(arr->len, 2UL);
-  EXPECT_EQ(arr->cap, 2UL);
+TEST(ArrayPop, NoShrinkAtHalfOfCap) {
+  // cap=32, len=32.  Popping to len=16 (cap/2) used to shrink to exactly 16;
+  // with hysteresis nothing happens until len <= cap/4.
+  PaykanArray *arr = filled(32);
+  EXPECT_EQ(arr->cap, 32UL);
+  while (arr->len > 9)
+    PaykanArray_pop(arr);
+  EXPECT_EQ(arr->cap, 32UL); // len=9 > 32/4
   PaykanArray_destroy((PaykanObject *)arr);
 }
 
-TEST(ArrayPop, ShrinkToZeroFreesBuffer) {
-  PaykanArray *arr = PaykanArray_new(0);
-  PaykanArray_push(arr, i64vp(5)); // len=1, cap=1
-  PaykanArray_pop(arr);            // len=0 -> shrink: free buffer, cap=0
+TEST(ArrayPop, ShrinksToHalfAtQuarterOfCap) {
+  PaykanArray *arr = filled(32);
+  while (arr->len > 8)
+    PaykanArray_pop(arr);
+  EXPECT_EQ(arr->len, 8UL); // 8 <= 32/4 -> shrink to 16, not to 8
+  EXPECT_EQ(arr->cap, 16UL);
+  // The next push must not grow again.
+  PaykanArray_push(arr, i64vp(1));
+  EXPECT_EQ(arr->cap, 16UL);
+  PaykanArray_destroy((PaykanObject *)arr);
+}
+
+TEST(ArrayPop, NeverShrinksBelowMinimumCapacity) {
+  PaykanArray *arr = filled(64);
+  while (arr->len > 0)
+    PaykanArray_pop(arr);
   EXPECT_EQ(arr->len, 0UL);
-  EXPECT_EQ(arr->cap, 0UL);
-  EXPECT_EQ(arr->data, nullptr);
+  EXPECT_EQ(arr->cap, 8UL);
+  EXPECT_NE(arr->data, nullptr);
+  PaykanArray_destroy((PaykanObject *)arr);
+}
+
+TEST(ArrayPop, SmallExactCapacityIsKept) {
+  // A literal-sized array below the minimum capacity never shrinks.
+  PaykanArray *arr = PaykanArray_new(4);
+  for (int i = 0; i < 4; ++i)
+    PaykanArray_pop(arr);
+  EXPECT_EQ(arr->len, 0UL);
+  EXPECT_EQ(arr->cap, 4UL);
   PaykanArray_destroy((PaykanObject *)arr);
 }
 
 TEST(ArrayPop, RemainingElementsIntact) {
-  PaykanArray *arr = PaykanArray_new(0);
-  for (int64_t i = 0; i < 4; ++i)
-    PaykanArray_push(arr, i64vp(i * 10));
-  PaykanArray_pop(arr); // remove 30
-  PaykanArray_pop(arr); // remove 20 -> shrink
+  PaykanArray *arr = filled(64);
+  while (arr->len > 3)
+    PaykanArray_pop(arr); // shrinks 64 -> 32 -> 16 -> 8 on the way down
+  EXPECT_EQ(arr->cap, 8UL);
   EXPECT_EQ(vpi64(PaykanArray_get(arr, 0)), 0);
   EXPECT_EQ(vpi64(PaykanArray_get(arr, 1)), 10);
+  EXPECT_EQ(vpi64(PaykanArray_get(arr, 2)), 20);
   PaykanArray_destroy((PaykanObject *)arr);
 }
 
@@ -454,14 +496,15 @@ TEST(ArrayPushObj, RetainsElement) {
 
 TEST(ArrayPushObj, DoublesCapWhenFull) {
   PaykanArray *arr = PaykanArray_new_obj(0);
-  PaykanShared *s1 = wrap(PaykanObject_new());
-  PaykanShared *s2 = wrap(PaykanObject_new());
-  PaykanArray_push_obj(arr, s1); // cap->1
-  PaykanArray_push_obj(arr, s2); // cap->2
-  EXPECT_EQ(arr->len, 2UL);
-  EXPECT_EQ(arr->cap, 2UL);
-  Paykan_release(s1);
-  Paykan_release(s2);
+  PaykanShared *elems[9];
+  for (int i = 0; i < 9; ++i) {
+    elems[i] = wrap(PaykanObject_new());
+    PaykanArray_push_obj(arr, elems[i]); // cap 0 -> 8 -> 16
+    EXPECT_EQ(arr->cap, i < 8 ? 8UL : 16UL);
+  }
+  EXPECT_EQ(arr->len, 9UL);
+  for (int i = 0; i < 9; ++i)
+    Paykan_release(elems[i]);
   PaykanArray_destroy_obj((PaykanObject *)arr);
 }
 
@@ -480,28 +523,35 @@ TEST(ArrayPopObj, ReturnsElementAndReleasesSlot) {
   PaykanArray_destroy_obj((PaykanObject *)arr);
 }
 
-TEST(ArrayPopObj, ShrinksWhenLenHalfOfCap) {
+TEST(ArrayPopObj, ShrinksWithHysteresisAndKeepsRefcounts) {
   PaykanArray *arr = PaykanArray_new_obj(0);
-  PaykanShared *elems[4];
-  for (int i = 0; i < 4; ++i) {
+  PaykanShared *elems[32];
+  for (int i = 0; i < 32; ++i) {
     elems[i] = wrap(PaykanObject_new());
     PaykanArray_push_obj(arr, elems[i]);
   }
-  EXPECT_EQ(arr->cap, 4UL);
+  EXPECT_EQ(arr->cap, 32UL);
 
-  // Drop our refs; arr holds the only ones now.
-  for (int i = 0; i < 4; ++i)
+  // Keep our refs on the first 8 (they stay in the array); drop the rest so
+  // the array holds the only ones.
+  for (int i = 8; i < 32; ++i)
     Paykan_release(elems[i]);
 
-  PaykanShared *v3 = PaykanArray_pop_obj(arr);
-  Paykan_release(v3);       // len=3
-  EXPECT_EQ(arr->cap, 4UL); // not yet half
+  while (arr->len > 9)
+    Paykan_release(PaykanArray_pop_obj(arr));
+  EXPECT_EQ(arr->cap, 32UL); // len=9 > 32/4: no shrink yet
 
-  PaykanShared *v2 = PaykanArray_pop_obj(arr);
-  Paykan_release(v2); // len=2 == cap/2 -> shrink
-  EXPECT_EQ(arr->len, 2UL);
-  EXPECT_EQ(arr->cap, 2UL);
+  Paykan_release(PaykanArray_pop_obj(arr)); // len=8 <= 32/4 -> cap 16
+  EXPECT_EQ(arr->len, 8UL);
+  EXPECT_EQ(arr->cap, 16UL);
 
+  // The surviving elements moved with the buffer and are still retained by
+  // the array (our ref + the array's).
+  for (int i = 0; i < 8; ++i) {
+    EXPECT_EQ(PaykanArray_get(arr, (unsigned long)i), (void *)elems[i]);
+    EXPECT_EQ(elems[i]->refCount, 2);
+    Paykan_release(elems[i]);
+  }
   PaykanArray_destroy_obj((PaykanObject *)arr);
 }
 
@@ -525,4 +575,91 @@ TEST(ArrayPushPop, RoundTripPreservesValues) {
 
   EXPECT_EQ(arr->len, 0UL);
   PaykanArray_destroy((PaykanObject *)arr);
+}
+
+// --- Issue #95: push/pop at the capacity boundary must not thrash ----------
+
+// RAII: run a block with the tracking allocator and a zeroed counter set.
+struct TrackingHeap {
+  TrackingHeap() {
+    Paykan_heap_set_tracking(1);
+    Paykan_heap_reset();
+  }
+  ~TrackingHeap() { Paykan_heap_set_tracking(0); }
+};
+
+// Grow to `peak`, pop down to `boundary`, then do `pairs` push/pop pairs.
+// Returns the number of Paykan_realloc calls made by the push/pop pairs.
+static int64_t boundaryReallocs(bool obj, int64_t peak, int64_t boundary,
+                                int64_t pairs) {
+  TrackingHeap heap;
+  PaykanArray *arr = obj ? PaykanArray_new_obj(0) : PaykanArray_new(0);
+  for (int64_t i = 0; i < peak; ++i) {
+    if (obj)
+      PaykanArray_push_obj(arr, nullptr);
+    else
+      PaykanArray_push(arr, i64vp(i));
+  }
+  while ((int64_t)arr->len > boundary) {
+    if (obj)
+      PaykanArray_pop_obj(arr);
+    else
+      PaykanArray_pop(arr);
+  }
+  int64_t before = Paykan_heap_total_reallocs();
+  for (int64_t k = 0; k < pairs; ++k) {
+    if (obj) {
+      PaykanArray_push_obj(arr, nullptr);
+      PaykanArray_pop_obj(arr);
+    } else {
+      PaykanArray_push(arr, i64vp(k));
+      EXPECT_EQ(vpi64(PaykanArray_pop(arr)), k);
+    }
+  }
+  int64_t reallocs = Paykan_heap_total_reallocs() - before;
+  EXPECT_EQ((int64_t)arr->len, boundary);
+  if (obj)
+    PaykanArray_destroy_obj((PaykanObject *)arr);
+  else
+    PaykanArray_destroy((PaykanObject *)arr);
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
+  return reallocs;
+}
+
+TEST(ArrayResizePolicy, BoundaryPushPopDoesNotRealloc) {
+  // The issue's shape, scaled down: peak 1,000,000 -> cap 1,048,576 becomes
+  // peak 1000 -> cap 1024; boundary 524,288 becomes 512 (= cap/2).  Before the
+  // fix every pair cost two reallocs (40,000 here).
+  EXPECT_EQ(boundaryReallocs(false, 1000, 512, 20000), 0);
+  EXPECT_EQ(boundaryReallocs(true, 1000, 512, 20000), 0);
+}
+
+TEST(ArrayResizePolicy, BoundaryAtEveryPowerOfTwoIsBounded) {
+  // Whatever length the array hovers at, a long run of push/pop pairs costs
+  // at most one resize, not one per operation.
+  for (int64_t boundary = 1; boundary <= 4096; boundary *= 2) {
+    for (int64_t delta = -1; delta <= 1; ++delta) {
+      int64_t b = boundary + delta;
+      if (b < 0)
+        continue;
+      EXPECT_LE(boundaryReallocs(false, 3 * boundary, b, 2000), 1)
+          << "boundary " << b;
+    }
+  }
+}
+
+TEST(ArrayResizePolicy, GrowthAndShrinkReallocsAreLogarithmic) {
+  TrackingHeap heap;
+  PaykanArray *arr = PaykanArray_new(0);
+  for (int64_t i = 0; i < 100000; ++i)
+    PaykanArray_push(arr, i64vp(i));
+  // 0 -> 8 -> 16 -> ... -> 131072: 15 resizes.
+  EXPECT_EQ(Paykan_heap_total_reallocs(), 15);
+  while (arr->len > 0)
+    PaykanArray_pop(arr);
+  // 131072 -> ... -> 8: 14 more halvings.
+  EXPECT_EQ(Paykan_heap_total_reallocs(), 29);
+  EXPECT_EQ(arr->cap, 8UL);
+  PaykanArray_destroy((PaykanObject *)arr);
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
 }
