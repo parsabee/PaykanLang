@@ -161,6 +161,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   invalid character), one error (with a note at the open `{`) for blocks left
   unclosed at end of file instead of one per block, and one error for a
   multi-character literal such as `'ab'`.
+- A runtime panic ends `paykan run` the same way on both backends (#79): with
+  exit status 134 (128 + `SIGABRT`). The llvm backend's JIT used to let the
+  abort kill the compiler process itself; executables from `build` still die
+  by `SIGABRT`.
 
 ### Changed
 

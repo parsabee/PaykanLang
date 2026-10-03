@@ -490,6 +490,12 @@ paykan: int<float>(inf): the value is NaN, infinite or outside the int range
 paykan: char<int>(300): the value is outside the char range 0..255
 ```
 
+A panic (these, an integer division by zero, an index out of bounds, `.pop()` on an empty
+array) prints its message to stderr and aborts the program with `SIGABRT`; output still
+buffered on stdout (when it is not a terminal) is lost. `paykan run` (and `paykan prog.pkn`) then exits with status
+`134` (128 + `SIGABRT`) on every backend. An executable made by `paykan build` is the
+program itself, so it dies by `SIGABRT` (a shell shows `$?` as `134` either way).
+
 **`char` is a byte.** A `char` is one byte of a `Str`, so a non-ASCII character in a UTF-8
 string spans several `char`s (`"é"[0]` has code `195`). `int<char>` reads the byte as an
 unsigned code `0`..`255`, and `char<int>` is its exact inverse over that range.

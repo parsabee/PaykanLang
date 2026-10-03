@@ -9,6 +9,7 @@
 #include "Version.h"
 
 #include <array>
+#include <cerrno>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -16,6 +17,10 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
+
+#include <sys/wait.h>
+#include <unistd.h>
 
 #ifndef PAYKAN_BIN
 #error "PAYKAN_BIN must be defined via CMake compile definition"
@@ -337,6 +342,70 @@ TEST(Driver, IntModMinByNegOneIsZero) {
   std::filesystem::remove(src);
   EXPECT_EQ(rc, 3) << out;
   EXPECT_EQ(out, "0\n");
+}
+
+// The raw wait status of `argv` (no shell in between, which would turn a
+// death by signal into an exit status), with stdout and stderr discarded.
+static int rawWaitStatus(const std::vector<std::string> &argv) {
+  pid_t pid = fork();
+  if (pid == 0) {
+    if (FILE *null = std::freopen("/dev/null", "w", stdout))
+      dup2(fileno(null), STDERR_FILENO);
+    std::vector<char *> args;
+    args.reserve(argv.size() + 1);
+    for (const auto &a : argv)
+      args.push_back(const_cast<char *>(a.c_str()));
+    args.push_back(nullptr);
+    execv(args[0], args.data());
+    _exit(127);
+  }
+  int status = 0;
+  while (waitpid(pid, &status, 0) < 0)
+    if (errno != EINTR)
+      return -1;
+  return status;
+}
+
+// A runtime panic aborts the program.  `paykan run` reports it the same way
+// on every backend, as the exit status 128 + SIGABRT (the C backend's child
+// process dies by the signal, the JIT turns it into that status), and an
+// executable from `build` dies by SIGABRT on every backend (#79).
+TEST(Driver, PanicExitStatusIsTheSameOnEveryBackend) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_panic_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  auto src = (dir / "panic.pkn").string();
+  {
+    std::ofstream ofs(src);
+    ofs << "fn main() -> int { z: int = 0; return 7 / z; }";
+  }
+  auto backends = run(std::string(kPaykan) + " --list-backends 2>&1").out;
+  int ran = 0;
+  for (const std::string be : {"llvm", "c"}) {
+    if (backends.find(be + "\n") == std::string::npos &&
+        backends.find(be + " ") == std::string::npos)
+      continue;
+    ++ran;
+    int st = rawWaitStatus({kPaykan, "--backend=" + be, src});
+    EXPECT_TRUE(WIFEXITED(st)) << be << ": killed by signal " << WTERMSIG(st);
+    if (WIFEXITED(st)) {
+      EXPECT_EQ(WEXITSTATUS(st), 128 + SIGABRT) << be;
+    }
+
+    auto exe = (dir / ("panic-" + be)).string();
+    std::string build = kPaykan;
+    build += " --backend=" + be;
+    build += " -o " + exe;
+    build += " build " + src + " 2>&1";
+    auto [rc, out] = run(build);
+    ASSERT_EQ(rc, 0) << be << ": " << out;
+    st = rawWaitStatus({exe});
+    EXPECT_TRUE(WIFSIGNALED(st) && WTERMSIG(st) == SIGABRT)
+        << be << ": wait status " << st;
+  }
+  std::filesystem::remove_all(dir);
+  EXPECT_GT(ran, 0) << backends;
 }
 
 TEST(Driver, IntDivNonZeroSucceeds) {
