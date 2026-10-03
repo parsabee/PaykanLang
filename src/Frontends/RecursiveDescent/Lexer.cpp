@@ -523,6 +523,20 @@ bool Lexer::lexChar(size_t start, size_t line, size_t col, Token &out) {
     out.CharValue = value;
     return true;
   }
+  if (haveChar) {
+    // More characters before a closing quote on the same line (`'ab'`): one
+    // error for the whole literal, rather than two unterminated ones.
+    size_t i = 0;
+    while (Pos + i < Src.size() && peekAt(i) != '\'' && peekAt(i) != '\n')
+      i += (peekAt(i) == '\\' && peekAt(i + 1) != '\n') ? 2 : 1;
+    if (Pos + i < Src.size() && peekAt(i) == '\'') {
+      advance(i + 1);
+      error(line, col,
+            "character literal must contain exactly one character (use a "
+            "string literal for text)");
+      return false;
+    }
+  }
   // The closing quote is missing before the end of the line or file.  Like
   // the Bison frontend, the quote (and the one character after it) is the
   // error token; the newline is left for line tracking.

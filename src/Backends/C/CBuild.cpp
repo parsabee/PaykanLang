@@ -91,6 +91,21 @@ std::string fnv1a(const std::string &data) {
   return buf;
 }
 
+/// The `.key` line recording a cached object's size and hash, or "" when
+/// the object cannot be read.  Checked on every reuse, so an object that was
+/// truncated or corrupted after it was cached (disk full, a crash, an edit
+/// from outside) is rebuilt instead of failing every later link.
+std::string objectStamp(const std::string &path) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in)
+    return "";
+  std::string bytes((std::istreambuf_iterator<char>(in)),
+                    std::istreambuf_iterator<char>());
+  if (in.bad())
+    return "";
+  return "o:" + std::to_string(bytes.size()) + ":" + fnv1a(bytes) + '\n';
+}
+
 /// The cache entry base path (without extension) of a module.
 std::string cacheEntryBase(const Toolchain &tc, const std::string &moduleName) {
   std::error_code ec;
@@ -163,11 +178,12 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
       return false;
     std::string text = src.str();
 
-    // An entry is valid when its `.key` (the cache key plus a hash of the
-    // module's C) matches.  Every file of an entry is replaced by a rename,
-    // and a rebuild drops the old `.key` first and writes the new one only
-    // after the new object, so a concurrent build of the same module (a
-    // shared import) never links a partial or mismatched object.
+    // An entry is valid when its `.key` (the cache key, a hash of the
+    // module's C, and the size and hash of the object) matches.  Every file
+    // of an entry is replaced by a rename, and a rebuild drops the old `.key`
+    // first and writes the new one only after the new object, so a concurrent
+    // build of the same module (a shared import) never links a partial or
+    // mismatched object.
     std::string moduleKey = cacheKey + "c:" + fnv1a(text) + '\n';
     std::string cPath, oPath, keyPath, oTmp;
     bool cached = false;
@@ -179,8 +195,12 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
       oPath = base + tcnames::kObjExt;
       keyPath = base + ".key";
       std::error_code existsErr; // set for a missing entry: not a failure
-      cached = !dirErr && readFile(keyPath) == moduleKey &&
-               readFile(cPath) == text && fs::exists(oPath, existsErr);
+      std::string storedKey = dirErr ? std::string() : readFile(keyPath);
+      if (storedKey.compare(0, moduleKey.size(), moduleKey) == 0 &&
+          readFile(cPath) == text && fs::exists(oPath, existsErr)) {
+        std::string stamp = objectStamp(oPath);
+        cached = !stamp.empty() && storedKey == moduleKey + stamp;
+      }
       if (!cached) {
         std::error_code rmErr; // a missing key is not a failure
         if (!dirErr)
@@ -225,7 +245,9 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
           return false;
         }
         // Best effort: without a key the entry is rebuilt next time.
-        writeFileAtomically(keyPath, moduleKey);
+        std::string stamp = objectStamp(oPath);
+        if (!stamp.empty())
+          writeFileAtomically(keyPath, moduleKey + stamp);
       }
     }
     objects.push_back(oPath);

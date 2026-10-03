@@ -508,6 +508,33 @@ fn main() -> int {
   std::filesystem::remove_all(tmp);
 }
 
+// Match arms use bare variant names, also for an imported enum (#79).
+TEST(Module, EnumQualifiedMatchArmNamesTheBareVariant) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_enum_qual_arm").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "pal/color.pkn", kColorModule);
+  auto main = writeFile(tmp, "main.pkn", R"(
+import pal::color;
+fn main() -> int {
+  c: color::Color = color::Color::Green;
+  match c { color::Color::Green { return 1; } color::Color::Pink { } _ { } }
+  return 0;
+}
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("error: 'color::Color::Green' is not a valid "
+                               "match arm; use the bare variant name 'Green'"),
+            std::string::npos)
+      << r.Diagnostics;
+  // Not a variant at all: the usual message.
+  EXPECT_NE(r.Diagnostics.find("error: 'color::Color::Pink' is not a variant "
+                               "of enum '"),
+            std::string::npos)
+      << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
 TEST(Module, EnumFullPathQualifierOk) {
   auto tmp = (paykan::test::tempDir() / "pkn_ms_enum_full").string();
   std::filesystem::remove_all(tmp);
@@ -644,5 +671,57 @@ fn main() -> int { return Box(); }
   EXPECT_NE(r.Diagnostics.find("'Box' is already declared as a class"),
             std::string::npos)
       << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// ─── #70: same-named functions of two modules; one qualifier, one module ────
+
+TEST(Module, SameNamedFunctionsOfTwoModulesOk) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_dup_fns").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "x.pkn", "fn tag() -> Str { return \"x\"; }\n");
+  writeFile(tmp, "y.pkn", "fn tag() -> int { return 1; }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import x;
+import y as r;
+fn tag() -> bool { return True; }
+fn main() -> int { s: Str = x::tag(); n: int = r::tag() + y::tag(); b: bool = tag(); return n; }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, OneQualifierForTwoModulesErr) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_qual_clash").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "a/util.pkn", "fn f() -> int { return 1; }\n");
+  writeFile(tmp, "b/util.pkn", "fn f() -> Str { return \"b\"; }\n");
+  writeFile(tmp, "util.pkn", "fn f() -> int { return 3; }\n");
+  // Two last segments `util`, two equal aliases, and a qualifier spelled like
+  // another import's full path.
+  for (const char *imports : {"import a::util;\nimport b::util;\n",
+                              "import a::util as u;\nimport b::util as u;\n",
+                              "import util as v;\nimport b::util;\n"}) {
+    auto main =
+        writeFile(tmp, "main.pkn",
+                  std::string(imports) + "fn main() -> int { return 0; }\n");
+    auto r = semaCheckFile(main, tmp);
+    EXPECT_FALSE(r.Ok) << imports;
+    EXPECT_NE(r.Diagnostics.find("already names module"), std::string::npos)
+        << imports << r.Diagnostics;
+  }
+  // A qualifier may name the same module twice, and aliases keep two
+  // `util`s apart.
+  for (const char *imports : {"import util;\nimport util as v;\n",
+                              "import a::util;\nimport a::util;\n",
+                              "import a::util;\nimport b::util as bu;\n",
+                              "import a::util;\nimport b::util as a;\n"}) {
+    auto main =
+        writeFile(tmp, "main.pkn",
+                  std::string(imports) + "fn main() -> int { return 0; }\n");
+    auto r = semaCheckFile(main, tmp);
+    EXPECT_TRUE(r.Ok) << imports << r.Diagnostics;
+  }
   std::filesystem::remove_all(tmp);
 }

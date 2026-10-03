@@ -946,3 +946,100 @@ TEST(Class, InitFieldMissingInOneBoolMatchArmRejected) {
   EXPECT_NE(r.Diagnostics.find("not assigned on every path"),
             std::string::npos);
 }
+
+// ============================================================================
+// Error recovery: a rejected class declaration (#79)
+// ============================================================================
+//
+// One bad class must not make the others undeclared, and uses of the bad
+// class itself are not reported again: only the declaration error is.
+
+static size_t errorCount(const std::string &diags) {
+  size_t n = 0;
+  for (size_t at = diags.find("error:"); at != std::string::npos;
+       at = diags.find("error:", at + 1))
+    ++n;
+  return n;
+}
+
+TEST(ClassRecovery, BuiltinNameClassDoesNotHideOtherClasses) {
+  auto r = semaCheck(withClasses("class A { fn __init__() { } }\n"
+                                 "class Int { }",
+                                 "a = A();\nreturn 0;"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("'Int' is a builtin class and cannot be "
+                               "redeclared"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_EQ(errorCount(r.Diagnostics), 1u) << r.Diagnostics;
+}
+
+TEST(ClassRecovery, NameTakenByEnumReportsEachClassOnce) {
+  auto r = semaCheck(withClasses("enum Color { Red }\n"
+                                 "class Color { }\n"
+                                 "class Color { }\n"
+                                 "class Fine { fn m() -> int { return 1; } }",
+                                 "c = Color();\nf = Fine();\nreturn f.m();"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("class 'Color' conflicts with an enum"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("redefinition of class 'Color'"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_EQ(errorCount(r.Diagnostics), 2u) << r.Diagnostics;
+}
+
+TEST(ClassRecovery, UndefinedSuperclassStillDeclaresTheClass) {
+  // C is registered (on Obj), so constructing it and using its own members
+  // is fine, and an inherited member that may be missing is not reported.
+  auto r = semaCheck(withClasses(
+      "class C : Missing { y: int; fn __init__() { self.y = 1; } }\n"
+      "class D : C { fn __init__() { __super__(); }\n"
+      "  fn get() -> int { return self.y + self.z; } }\n"
+      "class Ok { fn __init__() { } }",
+      "c = C();\nc.y = 4;\nd = D();\nn = d.inherited();\no = Ok();\n"
+      "return d.get();"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("superclass 'Missing' of class 'C' is not "
+                               "defined"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_EQ(errorCount(r.Diagnostics), 1u) << r.Diagnostics;
+}
+
+TEST(ClassRecovery, BadMemberTypeIsReportedOnce) {
+  auto r = semaCheck(
+      withClasses("class A { x: Nope; fn __init__(v: int) { self.x = v; }\n"
+                  "          fn get() -> int { return self.x; } }\n"
+                  "class B : A { fn __init__() { __super__(1); } }\n"
+                  "class E { fn __init__(n: int) { } }",
+                  "a = A(3);\nb = B();\nv: int = a.x + b.get();\ne = E(1, 2);\n"
+                  "return v;"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("field 'x' in class 'A' has unknown class type "
+                               "'Nope'"),
+            std::string::npos)
+      << r.Diagnostics;
+  // A real error in a healthy class is still reported.
+  EXPECT_NE(r.Diagnostics.find("function 'E' expects 1 argument(s), got 2"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_EQ(errorCount(r.Diagnostics), 2u) << r.Diagnostics;
+}
+
+TEST(ClassRecovery, InheritanceCycleIsReportedOnce) {
+  auto r = semaCheck(withClasses("class P : Q { }\n"
+                                 "class Q : P { fn f() -> int { return 1; } }\n"
+                                 "class R : R { }",
+                                 "q = Q();\np = P();\nr = R();\n"
+                                 "return q.f() + p.f();"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("cyclic inheritance involving class 'P'"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("cyclic inheritance involving class 'R'"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_EQ(errorCount(r.Diagnostics), 2u) << r.Diagnostics;
+}

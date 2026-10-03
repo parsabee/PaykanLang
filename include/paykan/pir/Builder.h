@@ -12,6 +12,7 @@
 #include <cassert>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace paykan::pir {
@@ -123,11 +124,21 @@ public:
 
   // -- Raw statement emission ------------------------------------------------
 
+  /// Construct a statement of alternative @p T in place at the end of the
+  /// current block.  Building the variant in place (instead of
+  /// push_back(Stmt(T{...}))) avoids moving a temporary Stmt, whose
+  /// all-alternatives move constructor GCC 13 at -O2+ reports as
+  /// -Wmaybe-uninitialized for the inactive alternatives.
+  template <typename T, typename... Args> T &append(Args &&...args) {
+    return std::get<T>(target().Stmts.emplace_back(
+        std::in_place_type<T>, std::forward<Args>(args)...));
+  }
+
   /// Append an instruction; returns its result (Void-typed Val when none).
   Val emit(Instr instr) {
     Type ty = instr.Result.Ty;
     ValueId id = instr.Result.Id;
-    target().Stmts.push_back(std::move(instr));
+    append<Instr>(std::move(instr));
     if (ty == Type::Void)
       return Val();
     return Val(Operand::value(id), ty);
@@ -135,15 +146,15 @@ public:
 
   void emitBreak() {
     assert(LoopDepth > 0 && "break outside loop");
-    target().Stmts.push_back(Break{});
+    append<Break>();
   }
   void emitContinue() {
     assert(LoopDepth > 0 && "continue outside loop");
-    target().Stmts.push_back(Continue{});
+    append<Continue>();
   }
-  void emitRet(const Val &v) { target().Stmts.push_back(Return{v.Op}); }
-  void emitRetVoid() { target().Stmts.push_back(Return{std::nullopt}); }
-  void emitUnreachable() { target().Stmts.push_back(Unreachable{}); }
+  void emitRet(const Val &v) { append<Return>(Return{v.Op}); }
+  void emitRetVoid() { append<Return>(); }
+  void emitUnreachable() { append<Unreachable>(); }
 
   // -- Structured control flow ------------------------------------------------
   //
@@ -155,26 +166,22 @@ public:
   // dead block and discarded, so the lowering may keep emitting structure.
 
   If *openIf(const Val &cond, bool withElse) {
-    If s;
+    If &s = append<If>();
     s.Cond = cond.Op;
     s.Then = std::make_unique<Block>();
     if (withElse)
       s.Else = std::make_unique<Block>();
-    Block &t = target();
-    t.Stmts.push_back(std::move(s));
-    return &std::get<If>(t.Stmts.back());
+    return &s;
   }
 
   /// Open a while: the caller enters CondBlock, emits the condition, calls
   /// setWhileCond, leaves, then enters Body.
   While *openWhile() {
-    While s;
+    While &s = append<While>();
     s.CondBlock = std::make_unique<Block>();
     s.Body = std::make_unique<Block>();
     s.Cond = Operand::boolean(false);
-    Block &t = target();
-    t.Stmts.push_back(std::move(s));
-    return &std::get<While>(t.Stmts.back());
+    return &s;
   }
   void setWhileCond(While *w, const Val &cond) { w->Cond = cond.Op; }
 

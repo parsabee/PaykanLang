@@ -641,6 +641,13 @@ private:
             if (!parseString(f.Module, "a module name"))
               return false;
           }
+          // `symbol @name`: the defining module's name for it (the verifier
+          // rejects it on a runtime extern).
+          if (isWord("symbol") && Cur.Line == PrevLine) {
+            advance();
+            if (!parseSymbol(f.Symbol))
+              return false;
+          }
           m.Functions.push_back(std::move(f));
         } else if (isWord("class")) {
           advance();

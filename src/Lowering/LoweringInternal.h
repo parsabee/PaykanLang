@@ -112,7 +112,11 @@ private:
   /// Functions in declaration order with stable addresses (the module vector
   /// is filled from this when the module is taken).
   std::deque<pir::Function> Funcs;
+  /// Every function by its PIR name in this module (definitions, runtime
+  /// and module externs).
   std::unordered_map<std::string, pir::Function *> FuncByName;
+  /// Module externs by origin, "<defining module>\n<symbol there>".
+  std::unordered_map<std::string, pir::Function *> ExternByOrigin;
   std::unordered_map<std::string, pir::Class *> ClassByName;
   std::deque<pir::Class> Classes_;
   std::unordered_set<std::string> ExternGlobals;
@@ -212,9 +216,11 @@ private:
   /// defines class @p ct (ProgramLowering::ClassOrigins).
   pir::Function *lookupClassFunction(ast::ClassType *ct,
                                      const std::string &symbol);
-  /// Declare @p fn (defined in module @p modulePath) as extern here.
+  /// Declare @p fn (defined in module @p modulePath) as extern here, named
+  /// @p localName in this module (or a variant of it, if that is taken).
   pir::Function *declareExternFrom(const pir::Function &fn,
-                                   const std::string &modulePath);
+                                   const std::string &modulePath,
+                                   const std::string &localName);
 
   /// Call a runtime function.
   Val callRuntime(const std::string &name, const std::vector<Val> &args,

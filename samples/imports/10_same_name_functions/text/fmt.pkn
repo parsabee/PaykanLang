@@ -1,0 +1,6 @@
+// Same function names as shapes::circle, different signatures.
+import shapes::circle;
+
+fn name() -> Str { return "fmt"; }
+fn describe(n: int) -> Str { return name() + "<" + Str<int>(n) + ">"; }
+fn both(c: circle::Circle) -> Str { return describe(c.r) + "+" + circle::describe(c); }

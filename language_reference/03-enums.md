@@ -202,6 +202,10 @@ match c {            // c: Color, where enum Color { Red, Green }
 }
 ```
 
+Arms always use the bare variant name, also for an imported enum. A qualified arm such as
+`base::Color::Green { }` is an error: `'base::Color::Green' is not a valid match arm; use the
+bare variant name 'Green'`.
+
 ### A state machine
 
 Because an enum can be returned from a function and reassigned, a transition function plus a loop

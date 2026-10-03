@@ -62,11 +62,12 @@ bool Sema::Scope::isMoved(std::string_view name) const {
   return Parent ? Parent->isMoved(name) : false;
 }
 
-Sema::ScopeGuard::ScopeGuard(Sema &s) : S(s), ScopeObj(s.CurrentScope) {
-  S.CurrentScope = &ScopeObj;
+Sema::ScopeGuard::ScopeGuard(Sema &s)
+    : S(s), ScopeObj(std::make_unique<Scope>(s.CurrentScope)) {
+  S.CurrentScope = ScopeObj.get();
 }
 
-Sema::ScopeGuard::~ScopeGuard() { S.CurrentScope = ScopeObj.Parent; }
+Sema::ScopeGuard::~ScopeGuard() { S.CurrentScope = ScopeObj->Parent; }
 
 // -- Flow-sensitive move tracking (see Sema.h for the rule) ------------------
 
@@ -949,6 +950,10 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
       return nullptr;
     }
     auto *superClass = S.CurrentClassCtx->ClassType->getSuperClass();
+    if (superClass && S.isErroneousClass(superClass)) {
+      ++S.SuppressedFollowOns; // its initializer may be missing
+      return nullptr;
+    }
     if (!superClass || superClass == S.Ctx.getObjTy()) {
       S.error(node->getLocation(), std::string("'") + names::kMethodSuper +
                                        "' called in class '" +
@@ -1006,6 +1011,23 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   }
 
   const auto *sig = S.lookupFunction(node->getCalleeName());
+  // A call by the name of a rejected declaration, or to the constructor of
+  // an erroneous class, was already reported at the declaration.  (A builtin
+  // keeps its name, and its calls are checked as usual.)
+  if (S.ErroneousNames.count(node->getCalleeName()) &&
+      !(sig && sig->IsBuiltin)) {
+    ++S.SuppressedFollowOns;
+    return sig ? sig->ReturnType : nullptr;
+  }
+  if (sig && !sig->IsBuiltin)
+    if (auto *ct = S.Ctx.lookupClassType(node->getCalleeName());
+        ct && S.isErroneousClass(ct)) {
+      // Its signature may be incomplete: check no arguments, but keep the
+      // class type flowing so its uses are not reported either.
+      node->setResolvedType(sig->ReturnType);
+      ++S.SuppressedFollowOns;
+      return sig->ReturnType;
+    }
   if (!sig) {
     if (S.isConversionTarget(node->getCalleeName())) {
       S.error(node->getLocation(), "a conversion to '" + node->getCalleeName() +
@@ -1087,6 +1109,10 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   std::string ownerName = ct->getName();
 
   if (!method) {
+    if (S.isErroneousClass(ct)) {
+      ++S.SuppressedFollowOns; // the class declaration was already reported
+      return nullptr;
+    }
     S.error(node->getLocation(), "no method '" + node->getMethodName() +
                                      "' on type '" + ownerName + "'");
     return nullptr;
@@ -1168,8 +1194,11 @@ Sema::ExprChecker::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
     return fty;
   }
 
-  S.error(node->getLocation(), "no field '" + node->getFieldName() +
-                                   "' in class '" + ct->getName() + "'");
+  if (S.isErroneousClass(ct)) // the class declaration was already reported
+    ++S.SuppressedFollowOns;
+  else
+    S.error(node->getLocation(), "no field '" + node->getFieldName() +
+                                     "' in class '" + ct->getName() + "'");
   return nullptr;
 }
 
@@ -2222,11 +2251,15 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
 
   // Check the initializer type.
   if (node->getInitExpr()) {
+    unsigned errorsBefore = Diags.getErrorCount() + SuppressedFollowOns;
     auto *initTy = resolveExprType(node->getInitExpr(), declTy);
     if (!initTy) {
-      error(node->getLocation(),
-            "cannot determine type of initializer for variable '" +
-                node->getName() + "'");
+      // Only when the initializer failed silently: an error inside it (or
+      // one suppressed as a follow-on) already explains the failure.
+      if (Diags.getErrorCount() + SuppressedFollowOns == errorsBefore)
+        error(node->getLocation(),
+              "cannot determine type of initializer for variable '" +
+                  node->getName() + "'");
       CurrentScope->set(node->getName(), declTy ? declTy : Ctx.getVoidTy());
       return false;
     }
@@ -2317,8 +2350,11 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
   // Look up the field in the class hierarchy.
   ast::Type *fieldTy = ct->findField(node->getFieldName());
   if (!fieldTy) {
-    error(node->getLocation(), "no field '" + node->getFieldName() +
-                                   "' in class '" + ct->getName() + "'");
+    if (isErroneousClass(ct)) // the class declaration was already reported
+      ++SuppressedFollowOns;
+    else
+      error(node->getLocation(), "no field '" + node->getFieldName() +
+                                     "' in class '" + ct->getName() + "'");
     return false;
   }
 
@@ -2474,9 +2510,21 @@ bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
       else if (auto *et = ast::dyn_cast<ast::EnumType>(arm->getArmType()))
         variant = et->getName();
       if (variant.empty() || subjectTy->findVariant(variant) < 0) {
-        error(arm->getLocation(), "'" + variant +
-                                      "' is not a variant of enum '" +
-                                      subjectTy->getName() + "'");
+        // Arms use bare variant names; say so when a qualified name
+        // (`base::Color::Green`) ends in a real variant.
+        auto sep = variant.rfind("::");
+        std::string bare =
+            sep == std::string::npos ? "" : variant.substr(sep + 2);
+        if (!bare.empty() && subjectTy->findVariant(bare) >= 0) {
+          std::string msg = "'" + variant;
+          msg += "' is not a valid match arm; use the bare variant name '";
+          msg += bare + "'";
+          error(arm->getLocation(), msg);
+        } else {
+          error(arm->getLocation(), "'" + variant +
+                                        "' is not a variant of enum '" +
+                                        subjectTy->getName() + "'");
+        }
         ok = false;
       } else if (!seenVariants.insert(variant).second) {
         error(arm->getLocation(),

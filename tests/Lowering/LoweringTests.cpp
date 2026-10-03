@@ -396,6 +396,34 @@ TEST(Lowering, CallRootedFieldReadRetainsTheFieldAndReleasesTheReceiver) {
 // match
 // ---------------------------------------------------------------------------
 
+// #72: a string-literal subject is built as a Str (not passed as its raw C
+// string) and released on every exit of the match.
+TEST(Lowering, StringLiteralMatchSubjectIsAStrReleasedOnEveryExit) {
+  auto l = lower(R"(
+    fn f() -> int {
+      match "s" { "t" { return 1; } _ { return 2; } }
+    }
+    fn main() -> int {
+      match "s" { "t" { println("t"); } _ { println("other"); } }
+      return f();
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error; // the verifier ran
+  std::string m = function(l.Text, "main");
+  // The subject: a Str built from the literal, boxed for the match.
+  size_t subj = m.find("%str.1 = call @PaykanString_new(@.str");
+  size_t box = m.find("%subj.box.2 = box %str.1");
+  size_t eq = m.find("call @PaykanString_equals(%str.1, ");
+  ASSERT_NE(subj, std::string::npos) << m;
+  ASSERT_NE(box, std::string::npos) << m;
+  ASSERT_NE(eq, std::string::npos) << m;
+  EXPECT_LT(subj, box) << m;
+  EXPECT_LT(box, eq) << m;
+  EXPECT_EQ(count(m, "release %subj.box."), 1u) << m;
+  std::string fn = function(l.Text, "f");
+  EXPECT_EQ(count(fn, "release %subj.box."), 2u) << fn; // both returns
+}
+
 TEST(Lowering, ClassMatchComparesVTablesAndBindsAnOwnedVariable) {
   auto l = lower(R"(
     class A { fn __init__() {} }
@@ -719,19 +747,65 @@ TEST(Lowering, ImportedFunctionsAndClassesAreExternItems) {
   ASSERT_EQ(l.Program.Modules.size(), 2u);
   EXPECT_EQ(l.Program.Modules[0].Name, "main.pkn");
   const std::string &t = l.Text;
-  // The importer declares what it uses from lib, keyed to lib's module.
-  EXPECT_NE(t.find("extern fn @twice(i64) -> i64 module \""), std::string::npos)
+  // The importer declares what it uses from lib, keyed to lib's module and
+  // named as the call sites qualify it; `symbol` is lib's own name for it.
+  EXPECT_NE(t.find("extern fn @\"lib::twice\"(i64) -> i64 module \""),
+            std::string::npos)
       << t;
-  EXPECT_NE(t.find("extern fn @Adder(i64) -> box module \""), std::string::npos)
+  EXPECT_NE(t.find("\" symbol @twice\n"), std::string::npos) << t;
+  EXPECT_NE(t.find("extern fn @\"lib::Adder\"(i64) -> box module \""),
+            std::string::npos)
       << t;
   EXPECT_NE(t.find("extern class Adder module \""), std::string::npos) << t;
   std::string m = function(t, "main");
-  EXPECT_NE(m.find("call @twice("), std::string::npos) << m;
-  EXPECT_NE(m.find("call @Adder("), std::string::npos) << m;
+  EXPECT_NE(m.find("call @\"lib::twice\"("), std::string::npos) << m;
+  EXPECT_NE(m.find("call @\"lib::Adder\"("), std::string::npos) << m;
   EXPECT_NE(m.find("field.load %"), std::string::npos) << m;
   // lib defines the class and its functions once.
   EXPECT_NE(t.find("class Adder {"), std::string::npos) << t;
   EXPECT_NE(t.find("fn @Adder_add("), std::string::npos) << t;
+}
+
+// #70: functions are module-qualified, so two modules' (and the importer's
+// own) same-named functions are three distinct PIR symbols.
+TEST(Lowering, SameNamedFunctionsOfTwoModulesStayDistinct) {
+  auto dir = std::filesystem::temp_directory_path() /
+             ("lowering_dup_fns_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  {
+    std::ofstream x(dir / "x.pkn");
+    x << "fn tag() -> Str { return \"x\"; }\n";
+    std::ofstream y(dir / "y.pkn");
+    y << "fn tag() -> Str { return \"y\"; }\n";
+  }
+  auto l = lower("import x; import y as r;\n"
+                 "fn tag() -> Str { return \"m\"; }\n"
+                 "fn main() -> int { println(x::tag() + r::tag() + y::tag() "
+                 "+ tag()); return 0; }\n",
+                 dir.string());
+  std::filesystem::remove_all(dir);
+  ASSERT_TRUE(l.Ok) << l.Error;
+  ASSERT_EQ(l.Program.Modules.size(), 3u);
+  const pir::Module &mainMod = l.Program.Modules[0];
+  const pir::Function *own = mainMod.findFunction("tag");
+  ASSERT_NE(own, nullptr);
+  EXPECT_FALSE(own->IsExtern);
+  const pir::Function *fx = mainMod.findFunction("x::tag");
+  const pir::Function *fy = mainMod.findFunction("r::tag");
+  ASSERT_NE(fx, nullptr) << l.Text;
+  ASSERT_NE(fy, nullptr) << l.Text;
+  EXPECT_TRUE(fx->IsExtern && fy->IsExtern);
+  EXPECT_EQ(fx->linkName(), "tag");
+  EXPECT_EQ(fy->linkName(), "tag");
+  EXPECT_NE(fx->Module, fy->Module);
+  EXPECT_EQ(fx->Module, l.Program.Modules[1].Name);
+  EXPECT_EQ(fy->Module, l.Program.Modules[2].Name);
+  // `y::tag` reaches the same function as `r::tag`: one declaration.
+  EXPECT_EQ(mainMod.findFunction("y::tag"), nullptr) << l.Text;
+  std::string m = function(l.Text, "main");
+  EXPECT_EQ(count(m, "call @\"x::tag\"("), 1u) << m;
+  EXPECT_EQ(count(m, "call @\"r::tag\"("), 2u) << m;
+  EXPECT_EQ(count(m, "call @tag("), 1u) << m;
 }
 
 // ---------------------------------------------------------------------------

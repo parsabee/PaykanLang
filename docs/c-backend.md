@@ -28,7 +28,11 @@ archive is instrumented with them.
 
 A program started with `paykan run` sees the script path as `args[0]`
 (`fn main(args: Str[])`), like the JIT backend.  A runtime panic aborts the
-program; `paykan run` then exits with 128 + the signal number.
+program (`SIGABRT`); `paykan run` then exits with 128 + the signal number,
+134, which is also what the llvm backend's `paykan run` exits with (its JIT
+runs the program in the compiler's own process and turns the abort into that
+exit status).  An executable from `build` dies by `SIGABRT` itself, on both
+backends.
 
 ## The generated C
 
@@ -72,7 +76,9 @@ module's generated C and its cache key (the C compiler and flags, a hash of
 `Runtime.h` and the paykan version) are unchanged, and link the
 objects with `libpaykan_runtime.a`.  Cache files are written to a temporary
 name and renamed into place, the object before its `.key`, so concurrent
-builds that share an import never see a partial entry.  The output is
+builds that share an import never see a partial entry.  The `.key` also
+records the object's size and hash, checked on every reuse: an object
+truncated or corrupted after it was cached is rebuilt, not linked.  The output is
 deterministic for a given program.  It assumes an LP64 target (every array and tuple slot is 8 bytes),
 like the runtime itself.
 

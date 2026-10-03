@@ -211,10 +211,12 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   bool checkDeclNameAvailable(const std::string &name, ast::SourceLocation loc,
                               DeclKind kind);
 
-  /// RAII helper to push/pop a scope.
+  /// RAII helper to push/pop a scope.  The scope lives on the heap so that
+  /// CurrentScope never points into a stack frame (GCC's -Wdangling-pointer
+  /// cannot see that the destructor restores CurrentScope).
   struct ScopeGuard {
     Sema &S;
-    Scope ScopeObj;
+    std::unique_ptr<Scope> ScopeObj;
     ScopeGuard(Sema &s);
     ~ScopeGuard();
   };
@@ -388,6 +390,15 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// than a silent merge of two unrelated types.
   StringMap<std::string> ImportedTypeOrigins;
 
+  /// Every module qualifier this file's imports bind (each import's alias or
+  /// last path segment, and its full module path) -> the module it names.
+  /// One qualifier cannot name two modules: `util::f` would be ambiguous.
+  struct ImportQualifier {
+    std::string Resolved;   ///< resolved file path
+    std::string ModulePath; ///< as written, e.g. `a::util`
+  };
+  StringMap<ImportQualifier> ImportQualifiers;
+
 public:
   /// Info about an already-analyzed module.  Public (with ModuleCache) so
   /// tests can seed a cache entry and exercise the error paths of export
@@ -478,6 +489,23 @@ private:
   /// Topologically-sorted class decls (superclass before subclass), populated
   /// by checkClassDecls and consumed by checkClassBodies.
   std::vector<ast::ClassDecl *> SortedClasses;
+
+  /// Error recovery for rejected class declarations.  A class whose name is
+  /// taken (by a builtin, an import, an enum, or an earlier class) is dropped,
+  /// and its name recorded in ErroneousNames.  A class whose superclass or
+  /// members could not be resolved is still registered (on Obj, if its
+  /// superclass is unusable), so the rest of the module can name it, and
+  /// recorded in ErroneousClasses; its method bodies are not checked.  The
+  /// declaration error is the one reported: calls by an erroneous name and
+  /// member lookups on an erroneous class (or a subclass) report nothing.
+  StringSet ErroneousNames;
+  StringSet ErroneousClasses;
+  /// Errors left unreported as follow-ons of the above, so that a check that
+  /// reports only "if nothing inside was reported" stays quiet for them too.
+  unsigned SuppressedFollowOns = 0;
+
+  /// True if @p ct or one of its superclasses is in ErroneousClasses.
+  bool isErroneousClass(const ast::ClassType *ct) const;
 
   /// Resolve a free function's signature (return + parameter types) and
   /// register it in the function table.  Run as a forward-declaration pass

@@ -206,6 +206,8 @@ inline constexpr const char *kSelf = "self"; ///< Receiver parameter in methods
 
 inline constexpr const char *kNameSep =
     "_"; ///< Separator between class and method in mangled names
+inline constexpr const char *kExternDupSep =
+    "."; ///< Suffix separator making a module extern's PIR name unique
 inline constexpr const char *kVTableSuffix =
     "_vtable"; ///< Suffix for vtable global symbols
 inline constexpr const char *kStructSuffix =
