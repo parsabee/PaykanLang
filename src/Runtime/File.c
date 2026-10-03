@@ -3,9 +3,9 @@
 //
 // Paykan runtime — File type implementation.
 //
-// File is a builtin class that inherits Obj.  Its vtable mirrors
-// PaykanObjectVTable (destroy / toString / equals); no File-specific
-// methods exist yet.
+// File is a builtin class that inherits Obj.  Its vtable starts with
+// Object's slots (destroy / toString / equals), followed by the File methods
+// (PAYKAN_SLOT_FILE_*).
 
 #include "Runtime.h"
 #include "RuntimeInternal.h"
@@ -21,7 +21,7 @@
 
 void PaykanFile_destroy(PaykanObject *self);
 PaykanShared *PaykanFile_toString(PaykanObject *self);
-int64_t PaykanFile_equals(PaykanObject *self, PaykanObject *other);
+int64_t PaykanFile_equals(PaykanObject *self, PaykanShared *other);
 void PaykanFile_write(PaykanObject *self, PaykanObject *str);
 PaykanShared *PaykanFile_readln(PaykanObject *self);
 PaykanShared *PaykanFile_readbytes(PaykanObject *self, int64_t n);
@@ -32,14 +32,14 @@ PaykanShared *PaykanFile_open(PaykanObject *path, PaykanObject *mode);
 // VTable
 // ============================================================================
 
-PaykanFileVTable PaykanFile_vtable = {
-    .destroy = PaykanFile_destroy,
-    .toString = PaykanFile_toString,
-    .equals = PaykanFile_equals,
-    .write = PaykanFile_write,
-    .readln = PaykanFile_readln,
-    .readbytes = PaykanFile_readbytes,
-    .read = PaykanFile_read,
+PaykanMethod PaykanFile_vtable[PAYKAN_FILE_SLOTS] = {
+    [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanFile_destroy,
+    [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanFile_toString,
+    [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanFile_equals,
+    [PAYKAN_SLOT_FILE_WRITE] = (PaykanMethod)PaykanFile_write,
+    [PAYKAN_SLOT_FILE_READLN] = (PaykanMethod)PaykanFile_readln,
+    [PAYKAN_SLOT_FILE_READBYTES] = (PaykanMethod)PaykanFile_readbytes,
+    [PAYKAN_SLOT_FILE_READ] = (PaykanMethod)PaykanFile_read,
 };
 
 // ============================================================================
@@ -48,7 +48,7 @@ PaykanFileVTable PaykanFile_vtable = {
 
 PaykanFile *PaykanFile_new(void) {
   PaykanFile *f = (PaykanFile *)Paykan_malloc(sizeof(PaykanFile));
-  f->vtable = (PaykanObjectVTable *)&PaykanFile_vtable;
+  f->vtable = PaykanFile_vtable;
   f->shared = NULL; // not yet boxed (unique-box invariant)
   f->handle = NULL;
   return f;
@@ -87,7 +87,7 @@ PaykanShared *PaykanFile_toString(PaykanObject *self) {
   return PaykanShared_new((PaykanObject *)PaykanString_new(buf, n));
 }
 
-int64_t PaykanFile_equals(PaykanObject *self, PaykanObject *other) {
+int64_t PaykanFile_equals(PaykanObject *self, PaykanShared *other) {
   // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
   PaykanObject *o = Paykan_equals_unbox_other(other);
   int64_t result = o && self == o;
@@ -191,18 +191,18 @@ PaykanShared *PaykanFile_read(PaykanObject *self) {
 
 static void PaykanStdin_destroy(PaykanObject *self) { (void)self; }
 
-static PaykanFileVTable PaykanStdin_vtable = {
-    .destroy = PaykanStdin_destroy,
-    .toString = PaykanFile_toString,
-    .equals = PaykanFile_equals,
-    .write = PaykanFile_write,
-    .readln = PaykanFile_readln,
-    .readbytes = PaykanFile_readbytes,
-    .read = PaykanFile_read,
+static PaykanMethod PaykanStdin_vtable[PAYKAN_FILE_SLOTS] = {
+    [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanStdin_destroy,
+    [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanFile_toString,
+    [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanFile_equals,
+    [PAYKAN_SLOT_FILE_WRITE] = (PaykanMethod)PaykanFile_write,
+    [PAYKAN_SLOT_FILE_READLN] = (PaykanMethod)PaykanFile_readln,
+    [PAYKAN_SLOT_FILE_READBYTES] = (PaykanMethod)PaykanFile_readbytes,
+    [PAYKAN_SLOT_FILE_READ] = (PaykanMethod)PaykanFile_read,
 };
 
 PaykanFile PaykanFile_Stdin = {
-    .vtable = (PaykanObjectVTable *)&PaykanStdin_vtable,
+    .vtable = PaykanStdin_vtable,
     .shared = NULL, // boxed on demand; release re-clears it (immortal destroy)
     .handle = NULL, // set to stdin at startup via __attribute__((constructor))
 };

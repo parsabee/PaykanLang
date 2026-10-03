@@ -44,10 +44,10 @@ _Static_assert(sizeof(PaykanShared *) == sizeof(uint64_t),
 // VTable
 // ============================================================================
 
-PaykanObjectVTable PaykanTuple_vtable = {
-    .destroy = PaykanTuple_destroy,
-    .toString = PaykanTuple_toString,
-    .equals = PaykanTuple_equals,
+PaykanMethod PaykanTuple_vtable[PAYKAN_OBJECT_SLOTS] = {
+    [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanTuple_destroy,
+    [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanTuple_toString,
+    [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanTuple_equals,
 };
 
 // ============================================================================
@@ -64,7 +64,7 @@ PaykanTuple *PaykanTuple_new(int64_t count, const uint8_t *kinds) {
   // zeroed so an early destroy (or a REF slot never set) releases nothing.
   PaykanTuple *t = (PaykanTuple *)Paykan_malloc(sizeof(PaykanTuple) +
                                                 n * sizeof(uint64_t) + n);
-  t->vtable = &PaykanTuple_vtable;
+  t->vtable = PaykanTuple_vtable;
   t->shared = NULL; // not yet boxed (unique-box invariant)
   t->count = count;
   t->slots = (uint64_t *)(t + 1);
@@ -200,7 +200,7 @@ PaykanShared *PaykanTuple_toString(PaykanObject *self) {
         break;
       }
       // Dispatch the element's own toString (a fresh +1 Str box we consume).
-      PaykanShared *s = obj->vtable->toString(obj);
+      PaykanShared *s = Paykan_vcall_toString(obj);
       PaykanString *str = (PaykanString *)PaykanShared_get(s);
       sb_append(&sb, str->data, (size_t)str->len);
       Paykan_release(s);
@@ -224,13 +224,14 @@ PaykanShared *PaykanTuple_toString(PaykanObject *self) {
 // equals — element-wise
 // ============================================================================
 
-int64_t PaykanTuple_equals(PaykanObject *self, PaykanObject *other) {
+int64_t PaykanTuple_equals(PaykanObject *self, PaykanShared *other) {
   // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
   PaykanObject *o = Paykan_equals_unbox_other(other);
   int64_t result = 0;
-  if (o == self) {
-    result = 1;
-  } else if (o && o->vtable == &PaykanTuple_vtable) {
+  // No identity shortcut (`o == self` -> equal): equality is element-wise
+  // even for one object, so a tuple holding a NaN is unequal to itself, as
+  // the NaN is (IEEE 754, #111).
+  if (o && o->vtable == PaykanTuple_vtable) {
     PaykanTuple *a = (PaykanTuple *)self;
     PaykanTuple *b = (PaykanTuple *)o;
     // Same arity and the same element kinds (a `(int, Str)` never equals a
@@ -258,7 +259,7 @@ int64_t PaykanTuple_equals(PaykanObject *self, PaykanObject *other) {
         }
         // The virtual `equals` consumes its argument box: hand it a +1.
         Paykan_retain(sb);
-        result = oa->vtable->equals(oa, (PaykanObject *)sb) != 0;
+        result = Paykan_vcall_equals(oa, sb) != 0;
         break;
       }
       case PAYKAN_TUPLE_INT:

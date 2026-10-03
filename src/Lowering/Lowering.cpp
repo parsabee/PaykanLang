@@ -441,8 +441,8 @@ pir::Function *ModuleLowering::lookupFunction(const std::string &name) {
   auto imp = ImportedFunctions.find(name);
   if (imp == ImportedFunctions.end())
     return nullptr;
-  auto modIt = PL.ByPath.find(imp->second.Module);
-  if (modIt == PL.ByPath.end())
+  auto modIt = PL.ByName.find(imp->second.Module);
+  if (modIt == PL.ByName.end())
     return nullptr;
   const pir::Function *def = modIt->second->findFunction(imp->second.Plain);
   if (!def || def->IsExtern)
@@ -457,8 +457,8 @@ pir::Function *ModuleLowering::lookupClassFunction(ast::ClassType *ct,
   auto origin = PL.ClassOrigins.find(ct->getName());
   if (origin == PL.ClassOrigins.end() || origin->second == Mod.Name)
     return nullptr;
-  auto modIt = PL.ByPath.find(origin->second);
-  if (modIt == PL.ByPath.end())
+  auto modIt = PL.ByName.find(origin->second);
+  if (modIt == PL.ByName.end())
     return nullptr;
   const pir::Function *def = modIt->second->findFunction(symbol);
   if (!def || def->IsExtern)

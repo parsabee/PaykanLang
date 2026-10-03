@@ -16,10 +16,10 @@
 // VTable
 // ============================================================================
 
-PaykanObjectVTable PaykanError_vtable = {
-    .destroy = PaykanError_destroy,
-    .toString = PaykanError_toString,
-    .equals = PaykanError_equals,
+PaykanMethod PaykanError_vtable[PAYKAN_OBJECT_SLOTS] = {
+    [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanError_destroy,
+    [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanError_toString,
+    [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanError_equals,
 };
 
 // ============================================================================
@@ -28,7 +28,7 @@ PaykanObjectVTable PaykanError_vtable = {
 
 PaykanError *PaykanError_new(const char *msg, int64_t len) {
   PaykanError *e = (PaykanError *)Paykan_malloc(sizeof(PaykanError));
-  e->vtable = &PaykanError_vtable;
+  e->vtable = PaykanError_vtable;
   e->shared = NULL; // not yet boxed (unique-box invariant)
   e->message = PaykanString_new(msg, len);
   return e;
@@ -51,7 +51,7 @@ PaykanShared *PaykanError_toString(PaykanObject *self) {
       (PaykanObject *)PaykanString_new(e->message->data, e->message->len));
 }
 
-int64_t PaykanError_equals(PaykanObject *self, PaykanObject *other) {
+int64_t PaykanError_equals(PaykanObject *self, PaykanShared *other) {
   // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
   PaykanObject *o = Paykan_equals_unbox_other(other);
   int64_t result = o && self == o;

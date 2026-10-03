@@ -6,6 +6,7 @@
 
 #include "PIRToLLVM.h"
 
+#include "ModuleName.h"
 #include "Names.h"
 #include "Version.h"
 #include "paykan/pir/Printer.h"
@@ -824,7 +825,7 @@ translateProgram(const Program &program, llvm::LLVMContext &ctx,
 // An imported module's LLVM IR depends only on its PIR text (which spells out
 // every layout and signature it uses from other modules) and on the compiler
 // that translates it, so that text is the cache key.  Entries live under
-// <projectRoot>/.paykan_cache/<module path relative to the root>.bc, stamped
+// <projectRoot>/.paykan_cache/<module name as a path>.bc, stamped
 // with the key; anything that does not parse or carries another key is
 // recompiled and rewritten.
 
@@ -836,7 +837,9 @@ namespace {
 ///   v4: the main module's symbols are prefixed (`pk.`).
 ///   v5: methods are `<Class>.<method>` (was `<Class>_<method>`), vtables
 ///       `<Class>..vtable`.
-constexpr uint64_t kPaykanABIVersion = 5;
+///   v6: imported modules' symbols are prefixed with the canonical module
+///       name (`geometry::shapes::describe`), not the absolute file path.
+constexpr uint64_t kPaykanABIVersion = 6;
 constexpr const char *kABIVersionFlag = "paykan.abi.version";
 constexpr const char *kCacheKeyMD = "paykan.cache.key";
 
@@ -871,34 +874,16 @@ std::string cacheKey(const Module &module) {
   return llvm::toHex(hasher.final());
 }
 
-/// <projectRoot>/.paykan_cache/<path relative to the root>.bc; a module
-/// outside the project mirrors its full path (minus the root directory).
+/// <projectRoot>/.paykan_cache/<module name as a path>.bc
+/// (module_name::cacheRelativePath: `geometry::shapes` is geometry/shapes.bc).
 /// An empty project root means the current directory.
-std::string cachePath(const std::string &resolvedPath,
+std::string cachePath(const std::string &moduleName,
                       const std::string &projectRoot) {
   llvm::SmallString<256> path(projectRoot);
   llvm::sys::path::append(path, names::kCacheDir);
-
-  llvm::SmallString<256> canonRoot;
-  if (llvm::sys::fs::real_path(projectRoot.empty() ? "." : projectRoot,
-                               canonRoot))
-    canonRoot = projectRoot;
-
-  llvm::StringRef rel = resolvedPath;
-  if (!canonRoot.empty() && rel.starts_with(canonRoot) &&
-      (rel.size() == canonRoot.size() ||
-       llvm::sys::path::is_separator(rel[canonRoot.size()]) ||
-       llvm::sys::path::is_separator(canonRoot.back()))) {
-    rel = rel.drop_front(canonRoot.size());
-    while (!rel.empty() && llvm::sys::path::is_separator(rel.front()))
-      rel = rel.drop_front(1);
-  } else {
-    rel = llvm::sys::path::relative_path(rel);
-  }
-  for (auto comp = llvm::sys::path::begin(rel), end = llvm::sys::path::end(rel);
-       comp != end; ++comp)
-    llvm::sys::path::append(path, *comp);
-  llvm::sys::path::replace_extension(path, ".bc");
+  llvm::sys::path::append(
+      path, module_name::cacheRelativePath(moduleName).generic_string());
+  path += ".bc";
   return std::string(path);
 }
 

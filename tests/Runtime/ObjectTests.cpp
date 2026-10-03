@@ -11,6 +11,7 @@ extern "C" {
 }
 
 #include "RuntimeEqualsHelper.h"
+#include "VTableTestHelper.h"
 
 // ============================================================================
 // PaykanObject_new / PaykanObject_destroy
@@ -24,7 +25,7 @@ TEST(ObjectNew, AllocatesObject) {
 
 TEST(ObjectNew, VtableIsObjectVtable) {
   PaykanObject *obj = PaykanObject_new();
-  EXPECT_EQ(obj->vtable, &PaykanObject_vtable);
+  EXPECT_EQ(obj->vtable, PaykanObject_vtable);
   PaykanObject_destroy(obj);
 }
 
@@ -79,9 +80,20 @@ TEST(ObjectEquals, DifferentObjectsAreNotEqual) {
 // Vtable dispatch
 // ============================================================================
 
+// Paykan_vtable_of reads any object's vtable, whatever its struct type.
+TEST(ObjectVtable, VTableOfReadsTheHeader) {
+  PaykanObject *obj = PaykanObject_new();
+  EXPECT_EQ(Paykan_vtable_of(obj), PaykanObject_vtable);
+  PaykanString *s = PaykanString_new("x", 1);
+  EXPECT_EQ(Paykan_vtable_of(s), PaykanString_vtable);
+  EXPECT_EQ(Paykan_vtable_of(&PaykanFile_Stdin), PaykanFile_Stdin.vtable);
+  PaykanString_destroy((PaykanObject *)s);
+  PaykanObject_destroy(obj);
+}
+
 TEST(ObjectVtable, ToStringViaVtable) {
   PaykanObject *obj = PaykanObject_new();
-  PaykanShared *shared = obj->vtable->toString(obj);
+  PaykanShared *shared = vtToString(obj)(obj);
   PaykanString *s = (PaykanString *)PaykanShared_get(shared);
   ASSERT_NE(s, nullptr);
   EXPECT_NE(std::string(s->data).find("Object@"), std::string::npos);
@@ -91,14 +103,14 @@ TEST(ObjectVtable, ToStringViaVtable) {
 
 TEST(ObjectVtable, EqualsViaVtable) {
   PaykanObject *obj = PaykanObject_new();
-  EXPECT_EQ(paykanTestEquals(obj->vtable->equals, obj, obj), 1);
+  EXPECT_EQ(paykanTestEquals(vtEquals(obj), obj, obj), 1);
   PaykanObject_destroy(obj);
 }
 
 TEST(ObjectVtable, DestroyViaVtable) {
   // Should not crash.
   PaykanObject *obj = PaykanObject_new();
-  obj->vtable->destroy(obj);
+  vtDestroy(obj)(obj);
 }
 
 // ============================================================================
@@ -106,7 +118,7 @@ TEST(ObjectVtable, DestroyViaVtable) {
 // ============================================================================
 
 TEST(ObjectNone, ToStringReturnsNone) {
-  PaykanShared *shared = PaykanObject_None.vtable->toString(&PaykanObject_None);
+  PaykanShared *shared = vtToString(&PaykanObject_None)(&PaykanObject_None);
   PaykanString *s = (PaykanString *)PaykanShared_get(shared);
   ASSERT_NE(s, nullptr);
   EXPECT_STREQ(s->data, "None");
@@ -114,19 +126,20 @@ TEST(ObjectNone, ToStringReturnsNone) {
 }
 
 TEST(ObjectNone, EqualsOnlyItself) {
-  EXPECT_EQ(paykanTestEquals(PaykanObject_None.vtable->equals,
-                             &PaykanObject_None, &PaykanObject_None),
+  EXPECT_EQ(paykanTestEquals(vtEquals(&PaykanObject_None), &PaykanObject_None,
+                             &PaykanObject_None),
             1);
   PaykanObject *other = PaykanObject_new();
-  EXPECT_EQ(paykanTestEquals(PaykanObject_None.vtable->equals,
-                             &PaykanObject_None, other),
-            0);
+  EXPECT_EQ(
+      paykanTestEquals(vtEquals(&PaykanObject_None), &PaykanObject_None, other),
+      0);
   PaykanObject_destroy(other);
 }
 
 TEST(ObjectNone, DestroyIsNoOp) {
   // Must not free the immortal singleton.
-  PaykanObject_None.vtable->destroy(&PaykanObject_None);
+  PaykanDestroyFn destroy = vtDestroy(&PaykanObject_None);
+  destroy(&PaykanObject_None);
   // Still accessible after "destroy".
   EXPECT_NE(PaykanObject_None.vtable, nullptr);
 }

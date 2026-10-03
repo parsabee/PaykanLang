@@ -129,6 +129,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`"hel" + "lo" == "hello"` is `True`); arrays keep identity comparison via
   the default `equals`; comparing arrays of different element types is a
   compile error. Overriding `equals` in a class changes how `==` behaves for it.
+- **`-DPAYKAN_BUILD_TESTS=OFF` builds without the test suite (#77, #78).** It
+  skips GoogleTest, so a barebones configure downloads nothing (the default is
+  ON when PaykanLang is the top-level project). With tests on, an installed
+  GoogleTest (`find_package(GTest CONFIG)`) is used before downloading one.
+  The Homebrew formula and the release workflow build with tests off. CI and
+  the release workflow can be run by hand (`workflow_dispatch`); a manual
+  release run is a dry run by default and publishes nothing. JIT errors in the
+  CodeGen test harness are now reported in the test's stderr.
 
 ### Fixed
 
@@ -138,6 +146,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the slot's element type, so the objects later pushed into it were never
   released (a leak in every `self.items = []` pattern). Sema now adopts the
   destination's array type at every typed sink, not only declarations.
+- A tuple holding a NaN compared equal to itself (#111): `t == t` was `True`
+  and `t != t` `False` when both sides were the same tuple object, because
+  the runtime's tuple `equals` returned "equal" for one object before looking
+  at the elements. Tuple equality is now element-wise in every case, so a NaN
+  element (directly, in a nested tuple, or in a `float?` element) makes a
+  tuple unequal to itself, as IEEE 754 makes the NaN unequal to itself.
+  `float?` already compared its values; arrays keep their reference-identity
+  `==`.
 - Passing an array or tuple to a user-defined method (`b.take(xs)`,
   `b.take([1, 2])`) freed the argument twice: the callee owns every
   reference-typed parameter, but the call site only handed over an owned box
@@ -206,6 +222,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   variable, ...) reports a follow-on either. A later valid assignment
   re-declares it with the value's type. Calls to a function whose signature
   failed are likewise not reported as calls to an undeclared function.
+- Array `push` / `pop` no longer thrash at the capacity boundary (#95). An
+  array now shrinks only once its length falls to a quarter of its capacity,
+  and then to half the capacity, never to exactly its length; capacity never
+  drops below 8 slots on its own. A push/pop loop at a length of 524,288 went
+  from about 40 s to 15 ms. `--track-heap` also reports the number of
+  reallocations.
 - A use of another module's generic class or function (`shapes::Box<int>(7)`,
   `x: shapes::Box<int>`, `shapes::first<int>(xs)`, `g::Box<int>(7)`) inside
   a generic body is rejected once, not once per instantiation of that body
@@ -222,6 +244,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loaded.
 - Parse errors changed format from yacc-style one-liners to clang-style
   caret-and-snippet diagnostics.
+- `paykan run` and `paykan build` optimise at `-O2` by default (was `-O0`);
+  pass `-O0` for unoptimised code (#102).
+- The C backend's output is strict ISO C11 (#62): it compiles with
+  `-std=c11 -pedantic-errors -Wall -Wextra -Werror` on GCC and Clang (the
+  new `CStrictC11` ctest and *Strict C11* CI job, over the whole samples
+  corpus), so the C compiler no longer runs with `-w`. Every vtable, the
+  runtime's included, is now an array of `PaykanMethod` slots (`Runtime.h`,
+  `PAYKAN_SLOT_*`) instead of a struct of function pointers, and `Runtime.h`
+  checks the target assumptions (LP64, 8-bit bytes, two's complement,
+  IEEE 754 doubles) with `_Static_assert` (`docs/c-backend.md`).
 
 ## [0.0.0] - 2026-06-28
 

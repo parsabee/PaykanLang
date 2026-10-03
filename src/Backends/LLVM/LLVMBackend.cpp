@@ -100,7 +100,13 @@ private:
   translate(const Input &in, llvm::LLVMContext &ctx) {
     if (!in.Program)
       return Status::error("the llvm backend needs the PIR program");
-    return compileProgram(*in.Program, ctx, in.InputFilename, in.ProjectRoot);
+    if (in.Program->Modules.empty())
+      return Status::error("empty PIR program");
+    // The linked module is named after the main module's canonical name, not
+    // the input path, so --emit-llvm and the objects of `build` do not depend
+    // on the directory the compiler ran in (#102).
+    return compileProgram(*in.Program, ctx, in.Program->Modules.front().Name,
+                          in.ProjectRoot);
   }
 
   /// Translate (through the cache) and optimise the program.

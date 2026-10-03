@@ -103,6 +103,7 @@ static void *tracking_malloc(size_t size) {
 }
 
 static void *tracking_realloc(void *ptr, size_t size) {
+  g_stats.totalReallocs += 1;
   if (!ptr)
     return tracking_malloc(size);
 
@@ -181,6 +182,8 @@ int64_t Paykan_heap_live_blocks(void) { return g_stats.liveBlocks; }
 
 int64_t Paykan_heap_live_bytes(void) { return g_stats.liveBytes; }
 
+int64_t Paykan_heap_total_reallocs(void) { return g_stats.totalReallocs; }
+
 void Paykan_heap_dump(void) {
   if (!g_tracking_enabled) {
     fprintf(stderr, "paykan heap: allocation tracking is disabled "
@@ -191,12 +194,13 @@ void Paykan_heap_dump(void) {
           "paykan heap stats:\n"
           "  total allocations : %lld\n"
           "  total frees       : %lld\n"
+          "  total reallocs    : %lld\n"
           "  live blocks       : %lld\n"
           "  live bytes        : %lld\n"
           "  peak bytes        : %lld\n",
           (long long)g_stats.totalAllocs, (long long)g_stats.totalFrees,
-          (long long)g_stats.liveBlocks, (long long)g_stats.liveBytes,
-          (long long)g_stats.peakBytes);
+          (long long)g_stats.totalReallocs, (long long)g_stats.liveBlocks,
+          (long long)g_stats.liveBytes, (long long)g_stats.peakBytes);
   if (g_stats.liveBlocks != 0)
     fprintf(stderr, "  ** LEAK: %lld block(s) / %lld byte(s) not freed **\n",
             (long long)g_stats.liveBlocks, (long long)g_stats.liveBytes);

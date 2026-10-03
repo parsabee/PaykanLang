@@ -1,0 +1,61 @@
+// 43 — NaN and self-comparison (#111): `==` on a value that holds a NaN is
+// False even when both sides are the same object, because the comparison is
+// IEEE 754 all the way down -- tuples compare element by element, a `float?`
+// compares its present values, and neither checks object identity first.
+// Arrays are the exception by definition: array `==` IS reference identity
+// (05-arrays.md), so a `float[]` equals itself whatever it holds.
+// Exercises: tuple `==` / `!=` / `equals` on the same object with a NaN
+//            element (direct, nested, inside a `float?` element), `float?`
+//            self-comparison, `float[]` self-comparison, and the non-NaN
+//            cases that stay equal to themselves.
+
+// expect-stdout: nan == nan:      False
+// expect-stdout: t == t:          False
+// expect-stdout: t != t:          True
+// expect-stdout: t.equals(t):     False
+// expect-stdout: t == u:          False
+// expect-stdout: alias == t:      False
+// expect-stdout: nested n == n:   False
+// expect-stdout: (int, float?):   False
+// expect-stdout: x == x (float?): False
+// expect-stdout: x != x (float?): True
+// expect-stdout: a == a (float[]): True
+// expect-stdout: a == b (float[]): False
+// expect-stdout: ok == ok:        True
+// expect-stdout: ok != ok:        False
+// expect-stdout: (-0.0) == (0.0): True
+// expect-stdout: y == y (float?): True
+
+fn same(p: (int, float), q: (int, float)) -> bool { return p == q; }
+
+fn main() -> int {
+  nan: float = 0.0 / 0.0;
+  t = (1, nan);
+  u = (1, nan);
+  alias = t;                                   // the same tuple object
+  println("nan == nan:      " + Str(nan == nan));
+  println("t == t:          " + Str(t == t));
+  println("t != t:          " + Str<bool>(t != t));
+  println("t.equals(t):     " + Str(t.equals(t)));
+  println("t == u:          " + Str(t == u));
+  println("alias == t:      " + Str(same(alias, t)));
+  n = ((1, nan), "x");
+  println("nested n == n:   " + Str(n == n));
+  o: (int, float?) = (1, nan);
+  println("(int, float?):   " + Str(o == o));
+  x: float? = nan;
+  println("x == x (float?): " + Str(x == x));
+  println("x != x (float?): " + Str<bool>(x != x));
+  a: float[] = [nan];
+  b: float[] = [nan];
+  println("a == a (float[]): " + Str(a == a));
+  println("a == b (float[]): " + Str(a == b));
+  ok = (1, 2.5, "s");
+  println("ok == ok:        " + Str(ok == ok));
+  println("ok != ok:        " + Str<bool>(ok != ok));
+  z = (-0.0, 1);
+  println("(-0.0) == (0.0): " + Str(z == (0.0, 1)));
+  y: float? = 2.5;
+  println("y == y (float?): " + Str(y == y));
+  return 0;
+}

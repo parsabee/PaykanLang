@@ -15,21 +15,19 @@ void PaykanString_destroy(PaykanObject *self);
 
 // -- VTable ------------------------------------------------------------------
 
-PaykanStringVTable PaykanString_vtable = {
-    .destroy = PaykanString_destroy,
-    .toString = PaykanString_toString,
-    .equals = PaykanString_equals,
-    .length = PaykanString_length,
-    .concat = PaykanString_concat_inplace,
+PaykanMethod PaykanString_vtable[PAYKAN_STRING_SLOTS] = {
+    [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanString_destroy,
+    [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanString_toString,
+    [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanString_equals,
+    [PAYKAN_SLOT_STRING_LENGTH] = (PaykanMethod)PaykanString_length,
+    [PAYKAN_SLOT_STRING_CONCAT] = (PaykanMethod)PaykanString_concat_inplace,
 };
 
 // -- Constructor / Destructor ------------------------------------------------
 
 PaykanString *PaykanString_new(const char *data, int64_t len) {
   PaykanString *s = (PaykanString *)Paykan_malloc(sizeof(PaykanString));
-  // Cast: the Object-compatible prefix of PaykanStringVTable matches
-  // PaykanObjectVTable, so this pointer cast is safe.
-  s->vtable = (PaykanObjectVTable *)&PaykanString_vtable;
+  s->vtable = PaykanString_vtable;
   s->shared = NULL; // not yet boxed (unique-box invariant)
   s->len = len;
   s->data = (char *)Paykan_malloc((size_t)len + 1);
@@ -86,14 +84,14 @@ PaykanShared *PaykanString_toString(PaykanObject *self) {
   return PaykanShared_new((PaykanObject *)PaykanString_new(s->data, s->len));
 }
 
-int64_t PaykanString_equals(PaykanObject *self, PaykanObject *other) {
+int64_t PaykanString_equals(PaykanObject *self, PaykanShared *other) {
   // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
   PaykanObject *o = Paykan_equals_unbox_other(other);
   PaykanString *lhs = (PaykanString *)self;
   int64_t result;
   if (!o) {
     result = 0; // NULL box: equal to nothing
-  } else if (o->vtable != (PaykanObjectVTable *)&PaykanString_vtable) {
+  } else if (o->vtable != PaykanString_vtable) {
     // Not a String — fall back to identity.
     result = (self == o);
   } else {
@@ -113,7 +111,7 @@ PaykanObject *PaykanString_concat(PaykanObject *self, PaykanObject *other) {
   PaykanString *rhs = (PaykanString *)other;
   int64_t newLen = lhs->len + rhs->len;
   PaykanString *s = (PaykanString *)Paykan_malloc(sizeof(PaykanString));
-  s->vtable = (PaykanObjectVTable *)&PaykanString_vtable;
+  s->vtable = PaykanString_vtable;
   s->shared = NULL; // not yet boxed (unique-box invariant)
   s->len = newLen;
   s->data = (char *)Paykan_malloc((size_t)newLen + 1);

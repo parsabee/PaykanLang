@@ -15,11 +15,13 @@ extern "C" {
 #include "Runtime.h"
 }
 
+#include "VTableTestHelper.h"
+
 namespace {
 
 // Call `fn` with a NULL `other` box.  Paykan_release(NULL) is a no-op, so the
 // consumed-argument contract needs no offsetting retain here.
-int64_t equalsWithNullOther(int64_t (*fn)(PaykanObject *, PaykanObject *),
+int64_t equalsWithNullOther(int64_t (*fn)(PaykanObject *, PaykanShared *),
                             PaykanObject *self) {
   return fn(self, nullptr);
 }
@@ -35,7 +37,7 @@ TEST(EqualsNullOther, Object) {
 TEST(EqualsNullOther, NoneSingleton) {
   // None's equals goes through its own static vtable implementation.
   PaykanObject *none = &PaykanObject_None;
-  EXPECT_EQ(equalsWithNullOther(none->vtable->equals, none), 0);
+  EXPECT_EQ(equalsWithNullOther(vtEquals(none), none), 0);
 }
 
 TEST(EqualsNullOther, Int) {

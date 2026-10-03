@@ -3,7 +3,10 @@
 ## What is Paykan?
 
 Paykan (`.pkn`) is a statically-typed clean and simple language.
-It compiles to LLVM IR and is **JIT-executed** (ahead-of-time native compilation is planned for v0.1).
+A program is checked, lowered to a backend-neutral IR (PIR, `docs/pir.md`) and compiled by a
+backend: the **C backend** (emits C11 for the system C compiler) or the optional **LLVM backend**
+(LLVM IR). `paykan run` (or just `paykan prog.pkn`) runs a program, through a JIT with the llvm
+backend; `paykan build prog.pkn -o prog` writes a native executable with either backend.
 Memory lifetimes for objects are managed via automatic reference counting — there is no garbage
 collector.
 
@@ -13,7 +16,7 @@ collector.
 |--------|-------------|
 | **Zero-cost abstractions** | Functions and arrays map directly to machine code with no overhead |
 | **Classes with virtual dispatch** | vtable-based method dispatch, single inheritance, method overriding — class instances are heap-allocated with reference counting |
-| **JIT execution** | Programs are JIT-executed for rapid development (standalone native binaries planned for v0.1) |
+| **Run or build** | `paykan run` executes a program directly for rapid development; `paykan build` produces a standalone native executable |
 
 ---
 
@@ -23,7 +26,8 @@ collector.
   There are no top-level statements.
 - Execution begins at `main`, which must return `int`. Its return value becomes the process
   exit code. `main` may optionally take the command-line arguments as `fn main(args: Str[]) -> int`;
-  `args[0]` is the source-file path and the remaining elements are the arguments after it.
+  `args[0]` is the source-file path under `paykan run` (the executable's path for a program made
+  by `paykan build`) and the remaining elements are the arguments after it.
 - Declarations may appear in **any order** — a function or class may be used before the point
   in the file where it is declared (forward references are allowed).
 - **No function overloading** — each function name must be unique.
@@ -204,6 +208,23 @@ NaN are computed, not written: `1.0e308 * 10.0`, `0.0 * (1.0e308 * 10.0)`.
 
 Result type is `float` if either operand is `float`, otherwise `int`.
 
+**Integer arithmetic** is 64-bit two's complement and behaves the same on every backend:
+
+- `+`, `-`, `*` and unary `-` **wrap** on overflow: `9223372036854775807 + 1` is
+  `-9223372036854775808` (`INT64_MAX + 1 == INT64_MIN`), and `-INT64_MIN` is `INT64_MIN`.
+- `/` truncates toward zero and `%` takes the sign of the dividend: `-7 / 2` is `-3`,
+  `-7 % 2` is `-1`, `7 % -2` is `1`, `7 / -2` is `-3`.
+- `/` or `%` by zero **panics** with `integer division or modulo by zero`.
+- `INT64_MIN / -1` (whose result does not fit) **panics** with `integer overflow in division`;
+  `INT64_MIN % -1` is `0`.
+
+A panic prints `paykan: <message>` to stderr and aborts the program (see the panic notes
+under [Conversions](#conversions)).
+
+**Float arithmetic** is IEEE 754 `double`: `%` is C's `fmod` (`7.5 % 2.0` is `1.5`,
+`-7.5 % 2.0` is `-1.5`), and dividing by zero gives an infinity or NaN rather than panicking
+(`1.0 / 0.0` is `inf`).
+
 ### Unary
 
 | Op  | Meaning     | Type          |
@@ -224,6 +245,13 @@ overrides `equals` to compare by content, so `"ab" == "ab"` is `True`. Arrays do
 override it: array `==` compares reference identity, and both operands must be arrays of the
 **same element type** (`int[] == Str[]` is a compile-time error; see `05-arrays.md`). For
 **value types** (`int`, `float`, `bool`, `char`, enums) `==` compares the values directly.
+
+Float comparisons follow IEEE 754: NaN is unequal to everything, itself included (with `nan`
+a NaN-valued `float` such as `0.0 * (1.0e308 * 10.0)`, `nan == nan` is `False`, `nan != nan` is `True`, and `<`, `>`, `<=`, `>=` with a NaN operand are `False`),
+and `-0.0 == 0.0` is `True`. Tuples compare element by element with the same rule, so two
+tuples holding a NaN (`(1, nan) == (1, nan)`) are unequal, and a tuple holding a NaN is
+unequal to every tuple, itself included (`t == t` is `False`, `t != t` is `True`), consistent
+with float semantics.
 
 ### Logical
 
@@ -560,7 +588,7 @@ paykan: int<float>(inf): the value is NaN, infinite or outside the int range
 paykan: char<int>(300): the value is outside the char range 0..255
 ```
 
-A panic (these, an integer division by zero, an index out of bounds, `.pop()` on an empty
+A panic (these, an integer division by zero or `INT64_MIN / -1`, an index out of bounds, `.pop()` on an empty
 array) flushes the output already printed to stdout, prints its message to stderr and
 aborts the program with `SIGABRT`, so everything printed before the panic reaches a pipe or
 a file too, ahead of the message. `paykan run` (and `paykan prog.pkn`) then exits with status
