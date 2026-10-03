@@ -261,7 +261,7 @@ void ModuleLowering::declareClass(ast::ClassDecl *node) {
   for (auto *md : ct->getVTable())
     cls->VTable.push_back({md->getName(), "", slotSignature(ct, md)});
 
-  // Method functions `Class_method(obj self, params...)`; `destroy` is the
+  // Method functions `Class.method(obj self, params...)`; `destroy` is the
   // synthetic destructor declared below.
   for (auto *funcDecl : node->getMethods()) {
     if (funcDecl->getName() == kMethodDestroy)
@@ -355,7 +355,7 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
   return Val();
 }
 
-// `void Class_destroy(obj self)`: the user `destroy` body (if any), then a
+// `void Class.destroy(obj self)`: the user `destroy` body (if any), then a
 // release of every ref-typed field, then the struct is freed.
 void ModuleLowering::emitDestructor(ast::ClassDecl *node, ast::ClassType *ct) {
   pir::Function *fn =

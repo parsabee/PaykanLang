@@ -215,8 +215,10 @@ inline constexpr const char *kSelf = "self"; ///< Receiver parameter in methods
 
 // -- IR / ABI naming conventions --------------------------------------------
 
-inline constexpr const char *kNameSep =
-    "_"; ///< Separator between class and method in mangled names
+/// Separator between class and method in the PIR names of methods and
+/// destructors (`K.w`, `K.destroy`, `K.__init__`).  '.' cannot occur in a
+/// Paykan identifier, so these never clash with a user function (`fn K_w`).
+inline constexpr const char *kNameSep = ".";
 inline constexpr const char *kExternDupSep =
     "."; ///< Suffix separator making a module extern's PIR name unique
 inline constexpr const char *kVTableSuffix =
