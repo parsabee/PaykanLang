@@ -16,10 +16,13 @@ provide a safe, ergonomic, performant, and productive interface that compiles to
 This is an **early preview** (`0.1.0-alpha`) that lays the foundation. Implemented and tested
 today: static typing with inference, single-inheritance classes with virtual dispatch,
 ARC with `mov` move semantics, value-aware `==` (reference types dispatch to a virtual
-`equals`), dynamic arrays, a file-based module system, `match` type dispatch, and enums — all
-compiled to LLVM IR and JIT-executed. The defining goals — seamless offloading to
-heterogeneous compute units, thread-safe concurrency, C interop through modules, and
-ahead-of-time native binaries — are the road ahead, not yet shipped. See
+`equals`), dynamic arrays, a file-based module system, `match` type dispatch, enums, tuples,
+optionals, generics, and conversion constructors (`Str(n)`, `int<Str>(s)`). Programs are lowered to a
+backend-neutral IR (PIR) and compiled by one of two backends: the C backend (emits C11 and
+builds it with the system C compiler) or the optional LLVM backend (LLVM IR, run in-process by
+a JIT). Either backend can `run` a program directly or `build` a native executable.
+The defining goals — seamless offloading to heterogeneous compute units, thread-safe
+concurrency, and C interop through modules — are the road ahead, not yet shipped. See
 [CHANGELOG.md](CHANGELOG.md) for what's in this release.
 
 ---
@@ -51,7 +54,9 @@ The frontend (lexer + parser) is pluggable. `-DPAYKAN_FRONTENDS=<list>` selects 
 frontends to build (default: `recursive-descent;bison`); the first one listed is the default, and
 the others are selected at run time with `--frontend=<name>` (`--list-frontends` prints
 them). The recursive-descent frontend (standard C++ only) is always built; Bison and Flex are
-downloaded and built only when `bison` is listed. Both implement `docs/grammar.md` and must
+downloaded and built only when `bison` is listed; that from-source build (GNU `configure` and
+`make`) needs GNU `m4` on the `PATH`, which Bison also runs to generate the parser
+(`apt install m4`; macOS ships it with the Command Line Tools). Both implement `docs/grammar.md` and must
 produce identical ASTs: `scripts/diff_frontends.py` checks that over every sample, and
 `--dump-tokens` prints a frontend's token stream.
 
@@ -67,8 +72,9 @@ third-party library). Every backend consumes the Paykan IR described in [`docs/p
 [`docs/writing-a-backend.md`](docs/writing-a-backend.md) explains how to write one, in tree or
 out of tree against `find_package(Paykan)` (see [`examples/backends/print-pir`](examples/backends/print-pir)).
 
-The `paykan` binary is placed at `build/bin/paykan`. To install it to a prefix (the binary
-statically links the runtime, so it is self-contained for JIT execution):
+The `paykan` binary is placed at `build/bin/paykan`. To install it to a prefix (with the
+runtime, `lib/libpaykan_runtime.a` and `include/paykan/Runtime.h`, that `build` and the c
+backend link programs against):
 
 ```sh
 cmake --install build --prefix /usr/local
@@ -79,17 +85,28 @@ cmake --install build --prefix /usr/local
 ## Running
 
 ```sh
-paykan program.pkn              # JIT-execute a source file
-paykan --check-only program.pkn # stop after type-checking (no codegen/JIT)
-paykan --emit-llvm program.pkn  # print the generated LLVM IR
+paykan program.pkn              # run a source file (same as `paykan run program.pkn`)
+paykan build program.pkn -o prog # compile a native executable
+paykan --backend=c program.pkn  # pick a backend (--list-backends prints them)
+paykan --frontend=bison program.pkn # pick a frontend (--list-frontends prints them)
+paykan --check-only program.pkn # stop after type-checking (no codegen)
 paykan --dump-ast program.pkn   # print the parsed AST
+paykan --emit-pir program.pkn   # print the backend-neutral IR (docs/pir.md)
+paykan --emit-source program.pkn # print the backend's output (C or LLVM IR)
+paykan --emit-c program.pkn     # print the generated C (--backend=c --emit-source)
+paykan --emit-llvm program.pkn  # print the LLVM IR (--backend=llvm --emit-source)
 paykan --track-heap program.pkn # run, then print heap/leak statistics
 paykan -O2 program.pkn          # set the optimization level (0-3)
-paykan --version                # print the compiler and LLVM versions
+paykan --version                # print the version and the built frontends and backends
+paykan --help                   # list every option
 ```
 
-`main`'s return value becomes the process exit code, and extra command-line arguments are
-passed to `main(args: Str[])` (with `args[0]` the source-file path). Source files use the
+`run` with the llvm backend executes the program in-process through LLVM's ORC JIT; the c
+backend compiles it with the system C compiler into a temporary directory and runs that.
+`--emit-llvm` and `--emit-c` need their backend to be built in. `main`'s return value becomes
+the process exit code, and extra command-line arguments after the source file are passed to
+`main(args: Str[])` (with `args[0]` the source-file path under `run`, and the executable's path for a
+program made by `build`). Source files use the
 `.pkn` extension (`.pk` is also accepted).
 
 ---
@@ -129,9 +146,11 @@ To learn PaykanLang:
 
 - **[`language_reference/`](language_reference/)** — the full reference: language basics,
   functions, enums, classes, arrays, modules, `match` statements, the memory model,
-  tuples (prototype), and optional types (prototype).
+  tuples (prototype), optional types (prototype), and generics (prototype); the conversion
+  constructors (`Str(n)`, `int<Str>(s)`, ...) are under "Conversions" in
+  [`01-language-basics.md`](language_reference/01-language-basics.md).
 - **[`samples/`](samples/)** — runnable `.pkn` programs exercising every feature
-  (`samples/codegen/` has 28 feature demos; see also `imports/`, `sema/`, `leak-check/`).
+  (`samples/codegen/` has the feature demos; see also `imports/`, `sema/`, `leak-check/`).
 - **[`example_program/`](example_program/)** — a small end-to-end example (`calc`).
 
 A taste:

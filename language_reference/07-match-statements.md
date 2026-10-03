@@ -212,8 +212,12 @@ match x {
 }
 ```
 
-A `match` needs a `_` arm unless it is otherwise exhaustive (all enum variants, or both `bool`
-values).
+`_` is optional. When no arm matches the subject's value, the `match` simply runs no arm and
+execution continues after it, so `match 3 { 1 { … } }`, a type match that leaves some classes
+uncovered, or an enum match naming one variant all compile. A `_` (or full coverage: every enum
+variant, or both `bool` values) is needed only where every path must produce a result, such as
+a `match` that ends a non-`void` function by returning from each arm; without it the function
+is rejected with "does not always return a value".
 
 ---
 

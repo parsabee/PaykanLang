@@ -124,6 +124,20 @@ target_link_libraries(paykan_backend_mine PUBLIC Paykan::backend)
 paykan_add_driver(paykan-mine PLUGINS paykan_backend_mine)
 ```
 
+If the installation includes the llvm backend (`PAYKAN_BACKENDS` lists `llvm`),
+`find_package(Paykan)` also looks up LLVM, because that backend's installed
+library links LLVM's imported targets. Pass the same LLVM the installation was
+built with, or configure fails with "Could not find a package configuration
+file provided by "LLVM"":
+
+```sh
+cmake -B build -DCMAKE_PREFIX_PATH=/opt/paykan -DLLVM_DIR=<llvm>/lib/cmake/llvm
+```
+
+An installation built without the llvm backend needs only `CMAKE_PREFIX_PATH`.
+This lasts while the LLVM backend is in tree; it moves to its own repository at
+v1.0 ([#61](https://github.com/parsabee/PaykanLang/issues/61)).
+
 `find_package(Paykan)` provides the imported targets `Paykan::backend`,
 `Paykan::pir`, `Paykan::frontend`, `Paykan::sema`, `Paykan::ast`,
 `Paykan::runtime`, `Paykan::driver` and one target per installed plugin

@@ -1,4 +1,8 @@
-# Homebrew formula for PaykanLang (JIT-only v0.0 preview).
+# Homebrew formula for PaykanLang.
+#
+# Not yet updated for v0.1.0: it still points at the v0.0.0 tag with a placeholder
+# sha256 (below). Bringing it up to date is a release step of
+# https://github.com/parsabee/PaykanLang/issues/27 (section 5).
 #
 # This file doubles as a tap: a user can install with
 #
