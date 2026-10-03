@@ -32,6 +32,11 @@ public:
 
   unsigned getErrorCount() const { return ErrorCount; }
 
+  static constexpr size_t kNoToken = static_cast<size_t>(-1);
+  /// Report the held-back lexical errors up to token index @p upTo
+  /// (kNoToken: all of them).
+  void flushLexErrors(size_t upTo);
+
 private:
   ast::ASTContext &Ctx;
   sema::DiagEngine *Diags;
@@ -68,13 +73,25 @@ private:
 
   // -- Diagnostics -----------------------------------------------------------
   void error(ast::SourceLocation loc, const std::string &msg);
+  /// Count and emit one error (error() minus the speculation check and the
+  /// flush of pending lexical errors).
+  void report(ast::SourceLocation loc, const std::string &msg);
   /// Report "unexpected <current token>; <expected>".  Returns false, and
   /// reports nothing, when the error would only be a follow-on: the current
   /// token is the one right after a lexical error (the lexer reported the
   /// real problem there), or a syntax error was already reported at it.
   bool errorAtCurrent(const std::string &expected);
-  static constexpr size_t kNoToken = static_cast<size_t>(-1);
-  size_t LexErrorToken = kNoToken;   // Buf index lexed right after an error
+  /// Buf indices lexed right after a lexical error, in order.
+  std::vector<size_t> LexErrorTokens;
+  /// Lexical errors not reported yet, in source order: each is reported when
+  /// the parser reaches its token (Token) or reports an error there or
+  /// later, and every one by the end of the parse.
+  struct PendingLexError {
+    size_t Token;
+    ast::SourceLocation Loc;
+    std::string Msg;
+  };
+  std::vector<PendingLexError> PendingLexErrors;
   size_t LastSyntaxError = kNoToken; // Buf index of the last syntax error
   ast::SourceLocation span(ast::SourceLocation from) const {
     return ast::SourceLocation(from.getLineStart(), from.getColumnStart(),

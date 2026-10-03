@@ -689,3 +689,36 @@ TEST(Mov, UseThenMoveInSameCallOk) {
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
+
+// -- `mov` keeps the contextual type of its operand (#119) -------------------
+
+TEST(Mov, MovNoneIntoAnOptionalSlotOk) {
+  auto r = semaCheck(R"(
+    class Box { s: Str?; fn __init__() { self.s = mov None; } }
+    fn take(s: Str?) -> int { return 0; }
+    fn give() -> int? { return mov None; }
+    fn main() -> int {
+      x: Str? = mov None;
+      x = mov None;
+      n: int? = mov None;
+      xs: Str?[] = mov [None, "a"];
+      t: (int?, Str) = mov (None, "b");
+      b = Box();
+      b.s = mov None;
+      return take(mov None);
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 0u) << r.Diagnostics;
+}
+
+TEST(Mov, MovNoneIntoANonOptionalSlotIsOneError) {
+  auto r = semaCheck(R"(
+    fn main() -> int {
+      x: Str = mov None;
+      return 0;
+    }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+}

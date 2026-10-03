@@ -13,6 +13,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -42,6 +43,37 @@ struct Signature {
     return Params == o.Params && Ret == o.Ret;
   }
 };
+
+// -- Runtime symbols
+// ------------------------------------------------------------
+
+/// A runtime extern (`extern fn` without a module, `extern obj`, `extern
+/// vtable`) has the PIR name kRuntimePrefix + its C symbol
+/// (`@$rt.PaykanString_new`), a name no Paykan identifier can spell.  So the
+/// runtime and the program never share a PIR name: a user function may be
+/// called `PaykanString_new` and stays an ordinary program symbol.  The
+/// backends link a runtime extern by runtimeSymbol(), its C name.
+inline constexpr std::string_view kRuntimePrefix = "$rt.";
+
+/// The PIR name of the runtime C symbol @p symbol.
+inline std::string runtimeName(std::string_view symbol) {
+  std::string name(kRuntimePrefix);
+  name += symbol;
+  return name;
+}
+
+/// True when @p name is a runtime extern's PIR name.
+inline bool isRuntimeName(std::string_view name) {
+  return name.size() > kRuntimePrefix.size() &&
+         name.starts_with(kRuntimePrefix);
+}
+
+/// The C symbol of the runtime extern named @p name (@p name itself when it
+/// is not a runtime name, which the verifier rejects for a runtime extern).
+inline std::string runtimeSymbol(std::string_view name) {
+  return std::string(isRuntimeName(name) ? name.substr(kRuntimePrefix.size())
+                                         : name);
+}
 
 // -- Values and operands
 // -------------------------------------------------------

@@ -50,8 +50,11 @@ bool optionName(std::string_view arg, std::string_view &name) {
   return !name.empty();
 }
 
-/// Parse the digits of an -O level.  Returns false on anything but a small
-/// non-negative integer.
+/// The highest -O level (`--help` and the README document 0..3).
+constexpr unsigned kMaxOptLevel = 3;
+
+/// Parse the digits of an -O level.  Returns false on anything but a
+/// non-negative integer up to kMaxOptLevel (`-O4` .. `-O999` are rejected).
 bool parseLevel(std::string_view text, unsigned &level) {
   if (text.empty() || text.size() > 3)
     return false;
@@ -61,6 +64,8 @@ bool parseLevel(std::string_view text, unsigned &level) {
       return false;
     v = v * 10 + static_cast<unsigned>(c - '0');
   }
+  if (v > kMaxOptLevel)
+    return false;
   level = v;
   return true;
 }

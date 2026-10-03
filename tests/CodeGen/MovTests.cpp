@@ -329,3 +329,33 @@ TEST(Mov, AndMoveInLhsThenRhsRuns) {
   EXPECT_EQ(r.StdOut, "lhs\nTrue\n");
   g.expectNoLeaks("AndMoveInLhsThenRhsRuns");
 }
+
+// `mov None` into an optional slot is the absent value, as `None` is (#119).
+TEST(Mov, MovNoneIsTheAbsentOptional) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Box { s: Str?; fn __init__() { self.s = mov None; } }
+    fn show(s: Str?) {
+      match s { v: Str { println(v); } None { println("none"); } }
+    }
+    fn give() -> int? { return mov None; }
+    fn main() -> int {
+      x: Str? = mov None;
+      show(x);
+      x = "some";
+      show(x);
+      x = mov None;
+      show(x);
+      b = Box();
+      show(b.s);
+      show(mov None);
+      n: int? = give();
+      match n { v: int { println("int"); } None { println("none"); } }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "none\nsome\nnone\nnone\nnone\nnone\n");
+  g.expectNoLeaks("MovNoneIsTheAbsentOptional");
+}

@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include "Parser.h"
+#include "paykan/Frontend.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdlib>
 #include <iostream>
@@ -14,13 +16,12 @@ using namespace paykan::ast;
 
 namespace {
 
-// Deepest nesting of blocks, parentheses, brackets and type applications the
-// parser accepts.  Recursive descent uses the native stack, so pathological
-// inputs (a fuzzer's `((((((...`) are rejected with a diagnostic instead of
-// overflowing it.  One level costs under 2 KiB of stack in an unoptimised
-// build (a few frames per level), so 512 levels stay well inside the 8 MiB
-// main-thread stack even with a sanitizer's larger frames.
-constexpr unsigned kMaxNesting = 512;
+// The nesting limit is frontend::kMaxNesting.  Recursive descent uses the
+// native stack, so pathological inputs (a fuzzer's `((((((...`) are rejected
+// with a diagnostic instead of overflowing it.  One level costs under 2 KiB of
+// stack in an unoptimised build (a few frames per level), so 512 levels stay
+// well inside the 8 MiB main-thread stack even with a sanitizer's larger
+// frames.
 
 /// Build the ImportDecl for `import [::]a::b::name [as alias];`.  The path is
 /// split at its last "::" into the base path ("a::b", empty when there is no
@@ -128,21 +129,30 @@ Parser::Parser(ASTContext &ctx, std::string_view source,
       Lex(source, [this](SourceLocation loc, const std::string &msg) {
         // Lexical errors are real whatever the parser is doing, including
         // while it scans ahead speculatively: report them unconditionally.
-        unsigned saved = Speculating;
-        Speculating = 0;
         // The token being lexed now (the next one in the buffer) is the
         // first one after the bad text, which is dropped (an out-of-range
         // integer is kept, as 0): a syntax error there is a follow-on.
-        LexErrorToken = Buf.size();
-        error(loc, msg);
-        Speculating = saved;
+        // The lexer runs ahead of the parser (lookahead, speculation), so
+        // the error is held until the parser reaches that token, keeping
+        // diagnostics in source order (flushLexErrors).
+        LexErrorTokens.push_back(Buf.size());
+        PendingLexErrors.push_back({Buf.size(), loc, msg});
       }) {}
+
+void Parser::flushLexErrors(size_t upTo) {
+  size_t n = 0;
+  for (; n < PendingLexErrors.size() && PendingLexErrors[n].Token <= upTo; ++n)
+    report(PendingLexErrors[n].Loc, PendingLexErrors[n].Msg);
+  PendingLexErrors.erase(PendingLexErrors.begin(),
+                         PendingLexErrors.begin() + static_cast<long>(n));
+}
 
 ParseOutput parseSource(ASTContext &ctx, std::string_view source,
                         sema::DiagEngine *diags) {
   Parser p(ctx, source, diags);
   ParseOutput out;
   out.Root = p.parseTranslationUnit();
+  p.flushLexErrors(Parser::kNoToken); // whatever the parser did not reach
   out.ErrorCount = p.getErrorCount();
   return out;
 }
@@ -232,6 +242,11 @@ bool Parser::enterNesting() {
 void Parser::error(SourceLocation loc, const std::string &msg) {
   if (Speculating)
     return;
+  flushLexErrors(Pos); // the lexical errors before this point come first
+  report(loc, msg);
+}
+
+void Parser::report(SourceLocation loc, const std::string &msg) {
   ++ErrorCount;
   if (Diags) {
     Diags->error(loc, msg);
@@ -251,7 +266,9 @@ bool Parser::errorAtCurrent(const std::string &expected) {
   // open block) and one right after a lexical error (where the dropped text
   // left a hole in the token stream) are follow-ons of the first.  The file
   // has failed already either way.
-  if (Pos == LastSyntaxError || Pos == LexErrorToken)
+  if (Pos == LastSyntaxError ||
+      std::find(LexErrorTokens.begin(), LexErrorTokens.end(), Pos) !=
+          LexErrorTokens.end())
     return false;
   LastSyntaxError = Pos;
   std::string found = describe(t.Kind);
@@ -1140,9 +1157,12 @@ Type *Parser::parseTypeAnnotation() {
   if (!ty)
     return nullptr;
   for (;;) {
-    if (at(Tok::LBracket) && kind(1) == Tok::RBracket) {
+    if (at(Tok::LBracket)) {
+      // A `[` after a type can only open the `[]` suffix: report the missing
+      // `]` where it is missing (as the Bison grammar does).
       consume();
-      consume();
+      if (!expect(Tok::RBracket, "to close the array type"))
+        return nullptr;
       ty = Ctx.make<ArrayType>(span(start), ty);
     } else if (at(Tok::Question)) {
       Token q = consume();
@@ -1249,14 +1269,17 @@ Expr *Parser::parsePostfix() {
         // rejected so every index has exactly one spelling.
         Token idx = consume();
         std::string digits(idx.Text);
+        // Located at the whole `.N`, the one token the Bison scanner sees.
+        SourceLocation at(dot.Loc.getLineStart(), dot.Loc.getColumnStart(),
+                          idx.Loc.getLineEnd(), idx.Loc.getColumnEnd());
         if (digits.size() > 1 && digits[0] == '0') {
-          error(idx.Loc, "tuple index must not have leading zeros: ." + digits);
+          error(at, "tuple index must not have leading zeros: ." + digits);
           return nullptr;
         }
         errno = 0;
         long long n = std::strtoll(digits.c_str(), nullptr, 10);
         if (errno == ERANGE) {
-          error(idx.Loc, "tuple index is out of range: ." + digits);
+          error(at, "tuple index is out of range: ." + digits);
           return nullptr;
         }
         e = Ctx.make<TupleIndexExpr>(span(start), e, static_cast<size_t>(n));

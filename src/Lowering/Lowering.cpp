@@ -124,6 +124,7 @@ pir::Module ModuleLowering::takeModule() {
     m.Classes.push_back(std::move(c));
   Funcs.clear();
   FuncByName.clear();
+  RuntimeFuncs.clear();
   ExternByOrigin.clear();
   Classes_.clear();
   ClassByName.clear();
@@ -378,35 +379,46 @@ pir::Function *ModuleLowering::getOrCreateFunction(const std::string &name,
   return &fn;
 }
 
-const pir::Signature &ModuleLowering::declareRuntime(const std::string &name) {
-  const RuntimeSig *rs = findRuntimeSig(name);
+const pir::Function &ModuleLowering::declareRuntime(const std::string &symbol) {
+  // Runtime externs have their own table and their own PIR names
+  // (`$rt.<symbol>`, PIR.h), so a program function spelled like a runtime
+  // symbol (`fn PaykanString_new`) is never mistaken for it (#117).
+  if (auto it = RuntimeFuncs.find(symbol); it != RuntimeFuncs.end())
+    return *it->second;
+  const RuntimeSig *rs = findRuntimeSig(symbol);
   assert(rs && "unknown runtime symbol");
-  if (auto it = FuncByName.find(name); it != FuncByName.end())
-    return it->second->Sig;
-  pir::Function *fn = getOrCreateFunction(name, rs->Sig);
-  fn->IsExtern = true;
-  fn->Params.clear();
-  return fn->Sig;
+  Funcs.emplace_back();
+  pir::Function &fn = Funcs.back();
+  fn.Name = pir::runtimeName(symbol);
+  fn.Sig = rs->Sig;
+  fn.IsExtern = true;
+  RuntimeFuncs[symbol] = &fn;
+  return fn;
 }
 
-Val ModuleLowering::callRuntime(const std::string &name,
+Val ModuleLowering::callRuntime(const std::string &symbol,
                                 const std::vector<Val> &args,
                                 std::string resultName) {
-  const pir::Signature &sig = declareRuntime(name);
-  assert(sig.Params.size() == args.size() && "runtime call arity mismatch");
-  return B.call(name, sig, args, std::move(resultName));
+  const pir::Function &fn = declareRuntime(symbol);
+  assert(fn.Sig.Params.size() == args.size() && "runtime call arity mismatch");
+  return B.call(fn.Name, fn.Sig, args, std::move(resultName));
 }
 
-Val ModuleLowering::externObject(const std::string &name) {
+Val ModuleLowering::externGlobal(const std::string &symbol,
+                                 pir::ExternGlobal::Kind kind) {
+  std::string name = pir::runtimeName(symbol);
   if (ExternGlobals.insert(name).second)
-    Mod.Externs.push_back({name, pir::ExternGlobal::Object});
-  return Val::symbol(name, Type::Obj);
+    Mod.Externs.push_back({name, kind});
+  return Val::symbol(name,
+                     kind == pir::ExternGlobal::Object ? Type::Obj : Type::Ptr);
 }
 
-Val ModuleLowering::externVTable(const std::string &name) {
-  if (ExternGlobals.insert(name).second)
-    Mod.Externs.push_back({name, pir::ExternGlobal::VTable});
-  return Val::symbol(name, Type::Ptr);
+Val ModuleLowering::externObject(const std::string &symbol) {
+  return externGlobal(symbol, pir::ExternGlobal::Object);
+}
+
+Val ModuleLowering::externVTable(const std::string &symbol) {
+  return externGlobal(symbol, pir::ExternGlobal::VTable);
 }
 
 pir::Function *ModuleLowering::declareExternFrom(const pir::Function &fn,
@@ -875,9 +887,6 @@ Val ModuleLowering::visitAssignStmt(ast::AssignStmt *node) {
   if (!val)
     return val;
 
-  if (auto *sl = ast::dyn_cast<ast::StringLiteral>(node->getValue()))
-    val = wrapStringLiteral(val, sl->getValue().size());
-
   auto *owner = CurrentScope->findOwner(node->getVarName());
   if (!owner)
     return emitImplicitVarDecl(node->getVarName(), node->getValue(), val);
@@ -995,8 +1004,6 @@ Val ModuleLowering::visitVarDecl(ast::VarDecl *node) {
       initVal = emitAsShared(node->getInitExpr());
     } else {
       initVal = emitExpr(node->getInitExpr());
-      if (auto *sl = ast::dyn_cast<ast::StringLiteral>(node->getInitExpr()))
-        initVal = wrapStringLiteral(initVal, sl->getValue().size());
       if (pirTy == Type::Void)
         pirTy = initVal.Ty;
       if (pirTy == Type::F64 && initVal.Ty == Type::I64)
@@ -1099,6 +1106,9 @@ Val ModuleLowering::visitFuncDecl(ast::FuncDecl *node) {
 // ----------------------------------------------------------------------------------------
 
 bool ModuleLowering::isNoneForOptional(ast::Expr *expr) {
+  // `mov None` forwards the literal (Sema typed it through the `mov`).
+  if (auto *mv = ast::dyn_cast<ast::MovExpr>(expr))
+    expr = mv->getOperand();
   return ast::isa<ast::NoneLiteral>(expr) && expr->getResolvedType() &&
          ast::isa<ast::OptionalType>(expr->getResolvedType());
 }
@@ -1303,11 +1313,9 @@ Val ModuleLowering::emitAsSharedRaw(ast::Expr *expr) {
   if (exprAlreadyShared(expr))
     return emitExpr(expr);
 
-  // Everything else: emit raw, wrap string literals, then box (acquire
-  // semantics cover aliases of already-boxed objects).
+  // Everything else (a string literal is already a Str temporary): emit
+  // raw, then box (acquire semantics cover aliases of already-boxed objects).
   Val val = emitExpr(expr);
-  if (auto *sl = ast::dyn_cast<ast::StringLiteral>(expr))
-    val = wrapStringLiteral(val, sl->getValue().size());
   return emitSharedNew(val);
 }
 

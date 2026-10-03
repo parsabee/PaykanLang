@@ -84,3 +84,174 @@ TEST(GrammarEdge, SubscriptComparisonIsNotAGenericCall) {
   EXPECT_TRUE(
       parse("fn main() -> int { x: bool = xs[a < b] > (d); return 0; }").Ok);
 }
+
+// -- The nesting limit is the same on every frontend (#120) ------------------
+//
+// docs/grammar.md section 9: nesting deeper than 512 levels is rejected with
+// `nesting too deep`.  Each construct is built exactly at the limit (accepted)
+// and one level past it (rejected), counting the function body as a level.
+
+namespace {
+
+std::string repeat(const std::string &s, int n) {
+  std::string out;
+  out.reserve(s.size() * static_cast<size_t>(n));
+  for (int i = 0; i < n; ++i)
+    out += s;
+  return out;
+}
+
+std::string inMain(const std::string &stmts) {
+  return "fn main() -> int { " + stmts + " return 0; }\n";
+}
+
+// Parse @p src with every frontend: true if every one accepts it; false if
+// every one rejects it, first with `nesting too deep`.
+bool parsesOnEveryFrontend(const std::string &src, const std::string &what) {
+  auto path = writeTempFile(src);
+  int accepted = 0, rejected = 0;
+  for (const std::string &fe : paykan::frontend::Registry::get().names()) {
+    paykan::parser::ParserDriver drv(fe);
+    std::ostringstream os;
+    paykan::sema::DiagEngine diag(os);
+    drv.setDiagEngine(&diag);
+    if (drv.parseFile(path) == 0) {
+      ++accepted;
+      continue;
+    }
+    ++rejected;
+    // The first error is the nesting error (recursive descent may report
+    // follow-on errors after it).
+    const std::string text = os.str();
+    EXPECT_EQ(text.find("error: "),
+              text.find("error: nesting too deep (more than 512 levels)"))
+        << fe << ", " << what << ":\n"
+        << text.substr(0, 2000);
+  }
+  std::filesystem::remove(path);
+  EXPECT_TRUE(accepted == 0 || rejected == 0)
+      << "frontends disagree on " << what;
+  return rejected == 0;
+}
+
+// The construct @p make(n) nests n levels inside the function body.
+template <typename F> void expectLimit(const char *what, F make) {
+  EXPECT_TRUE(parsesOnEveryFrontend(make(511), std::string(what) + " x511"));
+  EXPECT_FALSE(parsesOnEveryFrontend(make(512), std::string(what) + " x512"));
+}
+
+} // namespace
+
+TEST(GrammarEdge, NestingLimitIsTheSameOnEveryFrontend) {
+  expectLimit("blocks",
+              [](int n) { return inMain(repeat("{ ", n) + repeat("} ", n)); });
+  expectLimit("if statements", [](int n) {
+    return inMain(repeat("if (a) { ", n) + repeat("} ", n));
+  });
+  expectLimit("parentheses", [](int n) {
+    return inMain("x = " + repeat("(", n) + "1" + repeat(")", n) + ";");
+  });
+  expectLimit("array literals", [](int n) {
+    return inMain("x = " + repeat("[", n) + "1" + repeat("]", n) + ";");
+  });
+  expectLimit("calls", [](int n) {
+    return inMain("x = " + repeat("f(", n) + "1" + repeat(")", n) + ";");
+  });
+  expectLimit("subscripts", [](int n) {
+    return inMain("x = " + repeat("a[", n) + "1" + repeat("]", n) + ";");
+  });
+  expectLimit("prefix operators",
+              [](int n) { return inMain("x = " + repeat("!", n) + "a;"); });
+  expectLimit("unary minus", [](int n) {
+    return inMain("x = a - " + repeat("- ", n) + "a;");
+  });
+  expectLimit("conditionals", [](int n) {
+    return inMain("x = " + repeat("if a then 1 else ", n) + "2;");
+  });
+  expectLimit("nested then-branches", [](int n) {
+    return inMain("x = " + repeat("if a then ", n) + "1" +
+                  repeat(" else 2", n) + ";");
+  });
+  expectLimit("type applications", [](int n) {
+    return inMain("x: " + repeat("B<", n) + "int" + repeat(">", n) + " = 1;");
+  });
+  expectLimit("tuple types", [](int n) {
+    return inMain("x: " + repeat("(int, ", n) + "int" + repeat(")", n) +
+                  " = 1;");
+  });
+  // Mixed: a prefix operator and a parenthesis are a level each.
+  expectLimit("mixed", [](int n) {
+    std::string s = "x = " + repeat("-(", n / 2) + (n % 2 ? "-1" : "1") +
+                    repeat(")", n / 2) + ";";
+    return inMain(s);
+  });
+  // Empty brackets at the limit add no level.
+  EXPECT_TRUE(parsesOnEveryFrontend(
+      inMain(repeat("{ ", 511) + "f(); x: int[] = []; " + repeat("} ", 511)),
+      "empty brackets at the limit"));
+}
+
+TEST(GrammarEdge, PathologicalNestingIsRejectedNotCrashed) {
+  // 100,000 levels used to overflow the stack after a Bison parse.
+  for (const char *open : {"{ ", "(", "-", "if a then "}) {
+    std::string src = "fn main() -> int { ";
+    std::string o(open);
+    if (o == "{ ")
+      src += repeat(o, 100000) + repeat("} ", 100000);
+    else
+      src += "x = " + repeat(o, 100000) + "1;";
+    EXPECT_FALSE(parsesOnEveryFrontend(src + " return 0; }", open));
+  }
+}
+
+// -- Error locations agree where they cheaply can (#120) ---------------------
+
+namespace {
+
+// The diagnostics every frontend prints for @p src, by frontend.
+std::vector<std::string> diagnosticsOfEveryFrontend(const std::string &src) {
+  auto path = writeTempFile(src);
+  std::vector<std::string> out;
+  for (const std::string &fe : paykan::frontend::Registry::get().names()) {
+    paykan::parser::ParserDriver drv(fe);
+    std::ostringstream os;
+    paykan::sema::DiagEngine diag(os);
+    diag.setSourceInfo("t.pkn", nullptr);
+    drv.setDiagEngine(&diag);
+    EXPECT_NE(drv.parseFile(path), 0) << fe;
+    out.push_back(os.str());
+  }
+  std::filesystem::remove(path);
+  return out;
+}
+
+} // namespace
+
+TEST(GrammarEdge, CommonErrorsAreLocatedAlike) {
+  for (const auto &d :
+       diagnosticsOfEveryFrontend("fn main() -> int { x = t.00; return 0; }"))
+    EXPECT_EQ(d.rfind("t.pkn:1:25: error: tuple index must not have leading "
+                      "zeros: .00\n",
+                      0),
+              0u)
+        << d;
+  for (const auto &d : diagnosticsOfEveryFrontend(
+           "class C { items: Str[ cell; }\nfn main() -> int { return 0; }"))
+    EXPECT_EQ(d.rfind("t.pkn:1:23: error: ", 0), 0u) << d;
+  // A lexical error after a syntax error is reported after it, although the
+  // recursive-descent parser lexes it first, while looking ahead for a
+  // generic call: diagnostics come in source order.
+  for (const auto &d : diagnosticsOfEveryFrontend(
+           "fn main() -> int { x = f<int, @>(1) + ; return 0; }")) {
+    EXPECT_NE(d.find("t.pkn:1:31: error: invalid character '@'"),
+              std::string::npos)
+        << d;
+    size_t last = 0;
+    for (size_t at = 0; (at = d.find("t.pkn:1:", at)) != std::string::npos;
+         ++at) {
+      size_t col = std::stoul(d.substr(at + 8));
+      EXPECT_LE(last, col) << d;
+      last = col;
+    }
+  }
+}

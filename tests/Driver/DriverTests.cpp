@@ -8,6 +8,7 @@
 
 #include "Version.h"
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <csignal>
@@ -18,6 +19,7 @@
 #include <fstream>
 #include <iterator>
 #include <regex>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -137,6 +139,58 @@ TEST(Driver, ShortVersionFlagMatchesLong) {
 }
 
 // ---------------------------------------------------------------------------
+// --list-backends: the default is the one the build configured (#123): `c`
+// in a plain configure, else the first backend PAYKAN_BACKENDS lists.
+// ---------------------------------------------------------------------------
+
+#ifndef PAYKAN_EXPECTED_DEFAULT_BACKEND
+#error "PAYKAN_EXPECTED_DEFAULT_BACKEND must be defined via CMake"
+#endif
+
+TEST(Driver, ListBackendsMarksTheConfiguredDefault) {
+  auto [rc, out] = run(std::string(kPaykan) + " --list-backends 2>&1");
+  ASSERT_EQ(rc, 0) << out;
+  const std::string expected = PAYKAN_EXPECTED_DEFAULT_BACKEND;
+  // Exactly one backend is marked, and it is the configured one.
+  size_t mark = out.find(" (default)");
+  ASSERT_NE(mark, std::string::npos) << out;
+  EXPECT_EQ(out.find(" (default)", mark + 1), std::string::npos) << out;
+  // Each line is "<name>[ (default)][: <description>]".
+  std::vector<std::string> names;
+  std::string defaultName;
+  size_t pos = 0;
+  while (pos < out.size()) {
+    size_t eol = out.find('\n', pos);
+    std::string line = out.substr(pos, eol - pos);
+    pos = eol == std::string::npos ? out.size() : eol + 1;
+    std::string name = line.substr(0, line.find_first_of(" :"));
+    names.push_back(name);
+    if (line.compare(name.size(), 10, " (default)") == 0)
+      defaultName = name;
+  }
+  EXPECT_EQ(defaultName, expected) << out;
+  // The c backend is part of every build.
+  EXPECT_NE(std::find(names.begin(), names.end(), "c"), names.end()) << out;
+}
+
+// Without --backend, programs run on the configured default backend.
+TEST(Driver, DefaultBackendRunsPrograms) {
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_defaultbe_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  auto src = (dir / "hi.pkn").string();
+  std::ofstream(src) << "fn main() -> int { println(\"hi\"); return 3; }";
+  auto [rc, out] = run(std::string(kPaykan) + " " + src + " 2>&1");
+  auto [rc2, out2] = run(std::string(kPaykan) + " --backend=" +
+                         PAYKAN_EXPECTED_DEFAULT_BACKEND + " " + src + " 2>&1");
+  std::filesystem::remove_all(dir);
+  EXPECT_EQ(rc, 3) << out;
+  EXPECT_EQ(out, "hi\n");
+  EXPECT_EQ(rc2, rc);
+  EXPECT_EQ(out2, out);
+}
+
+// ---------------------------------------------------------------------------
 // --frontend / --list-frontends
 // ---------------------------------------------------------------------------
 
@@ -226,6 +280,61 @@ TEST(Driver, UnknownOptionIsRejected) {
       << out;
 }
 
+// -O takes 0..3 (#120): anything above is rejected, not clamped or ignored.
+TEST(Driver, OptimizationLevelAboveThreeIsRejected) {
+  auto src = writeTmp("fn main() -> int { return 0; }");
+  for (const char *opt : {"-O4", "-O9", "-O10", "-O999", "-O=4", "-O 4"}) {
+    auto [rc, out] = run(std::string(kPaykan) + " --check-only " + opt + " " +
+                         src + " 2>&1");
+    EXPECT_NE(rc, 0) << opt;
+    EXPECT_NE(out.find("invalid optimization level"), std::string::npos)
+        << opt << ": " << out;
+  }
+  for (const char *opt : {"-O0", "-O1", "-O2", "-O3", "-O=3", "-O 0"}) {
+    auto [rc, out] = run(std::string(kPaykan) + " --check-only " + opt + " " +
+                         src + " 2>&1");
+    EXPECT_EQ(rc, 0) << opt << ": " << out;
+  }
+  std::filesystem::remove(src);
+}
+
+// A directory is not a source file (#120): a clean error, never an uncaught
+// std::ios_base::failure (SIGABRT), whether it is the input or an import.
+TEST(Driver, DirectoryAsSourceFileIsRejected) {
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_test_dir_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir / "src.pkn");
+  for (const char *mode :
+       {" --check-only ", " --dump-ast ", " --dump-tokens ", " "}) {
+    auto [rc, out] =
+        run(std::string(kPaykan) + mode + (dir / "src.pkn").string() + " 2>&1");
+    EXPECT_TRUE(rc == 1 || rc == 2) << mode << rc << ": " << out;
+    EXPECT_NE(out.find("is a directory, not a source file"), std::string::npos)
+        << mode << out;
+  }
+  std::filesystem::remove_all(dir);
+}
+
+TEST(Driver, ImportOfADirectoryIsRejected) {
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_test_dirimport_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir / "lib" / "m.pkn");
+  std::ofstream(dir / "main.pkn")
+      << "import lib::m;\nfn main() -> int { return m::f(); }\n";
+  auto [rc, out] = run(std::string(kPaykan) + " --check-only " +
+                       (dir / "main.pkn").string() + " 2>&1");
+  EXPECT_EQ(rc, 1) << out;
+  EXPECT_NE(out.find("error: module 'lib::m': 'lib/m.pkn' is a directory, not "
+                     "a source file"),
+            std::string::npos)
+      << out;
+  // One error: the use of `m::f` is not reported as well.
+  EXPECT_EQ(out.find("undeclared"), std::string::npos) << out;
+  std::filesystem::remove_all(dir);
+}
+
 TEST(Driver, ProgramArgumentsFollowTheSourceFile) {
   REQUIRE_BACKEND();
   // Everything after the source file is the program's, even if it looks
@@ -258,6 +367,60 @@ TEST(Driver, IntModByZeroTraps) {
   std::filesystem::remove(src);
   EXPECT_NE(rc, 0);
   EXPECT_NE(out.find("division or modulo by zero"), std::string::npos) << out;
+}
+
+// #117: a user function spelled like the runtime's panic, with its very
+// signature, is an ordinary function: it runs when called, and a division by
+// zero still reaches the runtime's panic (message, stdout flushed, SIGABRT),
+// on every frontend, with `paykan run` and a built executable.
+TEST(Driver, UserPanicNamedFunctionLeavesTheRuntimePanicAlone) {
+  REQUIRE_BACKEND();
+  auto src =
+      writeTmp("fn Paykan_panic_div_by_zero() { println(\"user fn\"); }\n"
+               "fn z() -> int { return 0; }\n"
+               "fn main() -> int {\n"
+               "  Paykan_panic_div_by_zero();\n"
+               "  println(Str<int>(5 / z()));\n"
+               "  println(\"after\");\n"
+               "  return 0;\n"
+               "}\n");
+  auto exe = src + ".exe";
+  auto listed = run(std::string(kPaykan) + " --list-frontends 2>&1");
+  ASSERT_EQ(listed.exitCode, 0);
+  std::istringstream lines(listed.out);
+  unsigned count = 0;
+  for (std::string line; std::getline(lines, line);) {
+    std::string fe = line.substr(0, line.find(' '));
+    if (fe.empty())
+      continue;
+    ++count;
+    std::string runCmd = paykanRun();
+    runCmd += " --frontend=";
+    runCmd += fe;
+    std::string build = runCmd;
+    build += " -o ";
+    build += exe;
+    build += " build ";
+    build += src;
+    build += " 2>&1";
+    auto [brc, bout] = run(build);
+    ASSERT_EQ(brc, 0) << fe << ": " << bout;
+    std::string runSrc = runCmd;
+    runSrc += " ";
+    runSrc += src;
+    for (const std::string &cmd : {runSrc, exe}) {
+      std::string merged = "exec 3>&1 2>/dev/null; (";
+      merged += cmd;
+      merged += ") 2>&3";
+      auto [rc, both] = run(merged);
+      EXPECT_EQ(rc, 128 + SIGABRT) << fe << ": " << cmd;
+      EXPECT_EQ(both, "user fn\npaykan: integer division or modulo by zero\n")
+          << fe << ": " << cmd;
+    }
+  }
+  EXPECT_GE(count, 1u);
+  std::filesystem::remove(src);
+  std::filesystem::remove(exe);
 }
 
 // INT64_MIN / -1 does not fit in an int: a runtime panic, not SIGFPE.
@@ -581,7 +744,7 @@ TEST(Driver, EmitPirPrintsTheProgram) {
   EXPECT_EQ(rc, 0) << out;
   EXPECT_NE(out.find("fn @main() -> i64 {"), std::string::npos) << out;
   EXPECT_NE(out.find("release"), std::string::npos) << out;
-  EXPECT_NE(out.find("call @Paykan_println("), std::string::npos) << out;
+  EXPECT_NE(out.find("call @$rt.Paykan_println("), std::string::npos) << out;
 }
 
 TEST(Driver, EmitCPrintsCSource) {
@@ -992,6 +1155,30 @@ std::string slurp(const std::filesystem::path &path) {
                      std::istreambuf_iterator<char>());
 }
 
+/// The C compiler flags recorded in a C backend cache key (its `cc:` line,
+/// "cc:<compiler> <flag> <flag>..."), one token each.  The opt level is
+/// matched as a token, not as the line's suffix: sanitizer and coverage
+/// builds append their own flags after it (#122).
+std::vector<std::string> cacheKeyCompileFlags(const std::string &key) {
+  std::vector<std::string> flags;
+  if (key.rfind("cc:", 0) != 0)
+    return flags;
+  std::string line = key.substr(3, key.find('\n') - 3);
+  size_t pos = line.find(' '); // skip the compiler itself
+  while (pos != std::string::npos) {
+    size_t start = pos + 1;
+    pos = line.find(' ', start);
+    std::string tok = line.substr(start, pos - start);
+    if (!tok.empty())
+      flags.push_back(tok);
+  }
+  return flags;
+}
+
+bool hasFlag(const std::vector<std::string> &flags, const std::string &f) {
+  return std::find(flags.begin(), flags.end(), f) != flags.end();
+}
+
 /// A multi-module project under @p dir: nested modules and two modules with
 /// the same stem in different directories (`a::util`, `b::util`).
 void writeZooProject(const std::filesystem::path &dir) {
@@ -1148,11 +1335,16 @@ TEST(Driver, BuildAndRunDefaultToO2) {
   if (testBackend() == "c") {
     auto key = dir / ".paykan_cache" / "opt.key";
     runWith("");
-    EXPECT_NE(slurp(key).find(" -O2\n"), std::string::npos) << slurp(key);
+    auto flags = cacheKeyCompileFlags(slurp(key));
+    EXPECT_TRUE(hasFlag(flags, "-O2")) << slurp(key);
+    EXPECT_FALSE(hasFlag(flags, "-O0")) << slurp(key);
     runWith("-O0");
-    EXPECT_NE(slurp(key).find(" -O0\n"), std::string::npos) << slurp(key);
+    flags = cacheKeyCompileFlags(slurp(key));
+    EXPECT_TRUE(hasFlag(flags, "-O0")) << slurp(key);
+    EXPECT_FALSE(hasFlag(flags, "-O2")) << slurp(key);
     // The runtime's include directory (an absolute path) is not part of it.
-    EXPECT_EQ(slurp(key).find(" -I"), std::string::npos) << slurp(key);
+    for (const auto &f : flags)
+      EXPECT_NE(f.rfind("-I", 0), 0U) << slurp(key);
   } else {
     runWith("");
     runWith("-O0");
