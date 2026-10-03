@@ -86,7 +86,6 @@ inline constexpr const char *kOpLt = "<";
 inline constexpr const char *kOpLe = "<=";
 inline constexpr const char *kOpGt = ">";
 inline constexpr const char *kOpGe = ">=";
-inline constexpr const char *kOpOr = "||";
 inline constexpr const char *kOpAssign = "=";
 inline constexpr const char *kOpPreInc = "++";
 inline constexpr const char *kOpArrow = "->";
