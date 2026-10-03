@@ -1,0 +1,109 @@
+// 39 — literals typed by their destination (#71)
+// Exercises: `None` inside a tuple literal taking the slot's `T?`
+//            (`(None, "a")` into `(int?, Str)`, `(None, 1)` into
+//            `(Node?, int)`) in a declaration, an argument, a return, a
+//            field store and a push; an array literal of tuples whose
+//            elements mix `int` and `int?` (`[("a", 1), ("b", nb)]` into
+//            `(Str, int?)[]`); `None` among class instances in a `Node?[]`
+//            literal; and nested tuple / array literals.
+//
+// Every `None` is a null box and every present primitive an Int box, so the
+// ordinary ARC rules release everything (run with --track-heap to see zero
+// live blocks).
+//
+// expect-stdout: (None, a)
+// expect-stdout: (None, 1)
+// expect-stdout: take: x
+// expect-stdout: (None, 2)
+// expect-stdout: (a, 1) (b, None) (c, 3)
+// expect-stdout: (a, 1) (b, None) (c, 3) (d, None)
+// expect-stdout: N1 None N3
+// expect-stdout: (a, (1, None)) (b, (None, N4))
+// expect-stdout: (None, 7)
+// expect-stdout: 1 None | None
+
+class Node {
+  v: int;
+  fn __init__(v: int) { self.v = v; }
+  fn toString() -> Str { return "N" + Str<int>(self.v); }
+}
+
+class Slot {
+  p: (Node?, int);
+  fn __init__() { self.p = (None, 0); }
+}
+
+fn take(p: (int?, Str)) -> Str { return "take: " + p.1; }
+fn mk() -> (Node?, int) { return (None, 2); }
+
+fn showPairs(xs: (Str, int?)[]) -> Str {
+  out = "";
+  i = 0;
+  while (i < xs.len()) {
+    if (i > 0) { out = out + " "; }
+    out = out + xs[i].toString();
+    i = i + 1;
+  }
+  return out;
+}
+
+fn showNodes(xs: Node?[]) -> Str {
+  out = "";
+  i = 0;
+  while (i < xs.len()) {
+    if (i > 0) { out = out + " "; }
+    match xs[i] {
+      n: Node { out = out + n.toString(); }
+      None    { out = out + "None"; }
+    }
+    i = i + 1;
+  }
+  return out;
+}
+
+fn showInts(xs: int?[]) -> Str {
+  out = "";
+  i = 0;
+  while (i < xs.len()) {
+    if (i > 0) { out = out + " "; }
+    match xs[i] {
+      n: int { out = out + Str<int>(n); }
+      None   { out = out + "None"; }
+    }
+    i = i + 1;
+  }
+  return out;
+}
+
+fn main() -> int {
+  // `None` in a tuple literal.
+  a: (int?, Str) = (None, "a");
+  b: (Node?, int) = (None, 1);
+  println(a);
+  println(b);
+  println(take((None, "x")));
+  println(mk());
+
+  // An array literal of tuples mixing `int` and `int?` elements.
+  nb: int? = None;
+  tbl: (Str, int?)[] = [("a", 1), ("b", nb), ("c", 3)];
+  println(showPairs(tbl));
+  tbl.push(("d", None));
+  println(showPairs(tbl));
+
+  // `None` among class instances.
+  nodes: Node?[] = [Node(1), None, Node(3)];
+  println(showNodes(nodes));
+
+  // Nested literals.
+  nested: (Str, (int?, Node?))[] = [("a", (1, None)), ("b", (nb, Node(4)))];
+  println(nested[0].toString() + " " + nested[1].toString());
+
+  s = Slot();
+  s.p = (None, 7);
+  println(s.p);
+
+  grid: int?[][] = [[1, nb], [None]];
+  println(showInts(grid[0]) + " | " + showInts(grid[1]));
+  return 0;
+}

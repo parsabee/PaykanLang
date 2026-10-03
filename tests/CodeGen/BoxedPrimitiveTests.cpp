@@ -132,6 +132,37 @@ TEST(ParseFloat, InvalidStringsAreNone) {
   g.expectNoLeaks("ParseFloat.InvalidStringsAreNone");
 }
 
+// Subnormal strings parse (strtod also flags them with ERANGE); a value too
+// large (rounds to +-inf) or too small (nonzero, rounds to 0) is None (#73).
+// Subnormal literals compile on both backends and agree with the parse.
+TEST(ParseFloat, SubnormalsParseAndOutOfRangeIsNone) {
+  LeakGuard g;
+  auto r = compileAndRun(std::string(kShowFloat) + wrapMain(R"(
+    println(show(float<Str>("1e-310")));
+    println(show(float<Str>("5e-324")));
+    println(show(float<Str>("-5e-324")));
+    println(show(float<Str>("2.2250738585072014e-308")));
+    println(show(float<Str>("0e-999")));
+    println(show(float<Str>("1e-400")));
+    println(show(float<Str>("-1e999")));
+    x = 5e-324;
+    y = 1e-310;
+    println(Str<float>(x) + " " + Str<float>(y) + " " + Str<float>(x * 2.0));
+    println(Str<bool>(x > 0.0) + " " + Str<bool>(x / 2.0 == 0.0));
+    match float<Str>("1e-310") {
+      v: float { println(Str<bool>(v == y)); }
+      None { println("None"); }
+    }
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "1e-310\n4.94066e-324\n-4.94066e-324\n2.22507e-308\n0\n"
+                      "None\nNone\n"
+                      "4.94066e-324 1e-310 9.88131e-324\n"
+                      "True True\n"
+                      "True\n");
+  g.expectNoLeaks("ParseFloat.SubnormalsParseAndOutOfRangeIsNone");
+}
+
 // ============================================================================
 // The boxes: a present int? / float? is an Int / Float object
 // ============================================================================

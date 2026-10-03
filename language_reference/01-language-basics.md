@@ -187,6 +187,11 @@ An integer literal must fit in a signed 64-bit integer; a larger one (above
 `17`, so the most negative `int` cannot be written directly — compute it as
 `-9223372036854775807 - 1`.
 
+A float literal must name a finite `float`. One too large (`1e999` would be infinity) or too
+small (`1e-400`: not zero, but rounds to zero) is a compile-time error. Subnormal values
+such as `5e-324` are fine, as is zero written with any exponent (`0e-999`). Infinities and
+NaN are computed, not written: `1.0e308 * 10.0`, `0.0 * (1.0e308 * 10.0)`.
+
 ### Arithmetic
 
 | Op  | Meaning        | Notes                              |
@@ -526,8 +531,10 @@ match int<Str>(line) {
   up the whole string, with no surrounding whitespace, and the value must fit in an `int`
   (`"9223372036854775808"` is `None`).
 - `float<Str>` accepts what C's `strtod` accepts, including exponents and `nan` / `inf`, but
-  again the whole string with no leading or trailing whitespace. A value too large or too
-  small for a `float` (`"1e999"`) is `None`.
+  again the whole string with no leading or trailing whitespace. The range rule is the one
+  for float literals: subnormal values (`"5e-324"`, `"1e-310"`) parse, but a value too
+  large (`"1e999"`, which would be infinity) or too small (`"1e-400"`, not zero but rounding
+  to zero) is `None`. `"inf"` and `"nan"` are spelled out, so they parse.
 - `bool<Str>` accepts exactly `"True"` and `"False"`, the spellings `Str<bool>` prints, so
   `bool<Str>(Str<bool>(b))` gives back `b`. Anything else (`"true"`, `"1"`, `" True"`) is
   `None`.

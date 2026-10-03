@@ -8,6 +8,7 @@
 #include "paykan/pir/Parser.h"
 
 #include <cerrno>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <unordered_map>
@@ -884,7 +885,10 @@ private:
     case Tok::Float: {
       errno = 0;
       double d = std::strtod(Cur.Text.c_str(), nullptr);
-      if (errno == ERANGE)
+      // ERANGE also flags a subnormal result, which is representable (and
+      // printed by the printer); only overflow to ±inf and a nonzero value
+      // that underflows to 0 are out of range.
+      if (errno == ERANGE && (std::isinf(d) || d == 0.0))
         return error("float out of range");
       out = Operand::f64(d);
       advance();
