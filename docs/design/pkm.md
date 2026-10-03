@@ -26,10 +26,17 @@ same way. It has two halves:
 2. **Code:** the module's verified PIR in a compact binary encoding. A symbol
    index maps every defined symbol to its record.
 
+The interface is a **self-contained, separately versioned blob**, and its
+hash covers the blob alone, so other containers can carry it unchanged. The
+section table also reserves an optional `payload` kind (backend name +
+payload format + opaque bytes). Together these let backend-native modules
+(v0.2.0, #106) build on this format without breaking it: the core owns the
+interface blob, and backends own payloads (§4.0, §6.1).
+
 **Key decision: cross-module generics.** Importing a generic template from
 another module is rejected today, so it is **new functionality** that the
 `.pkm` has to enable or defer. This proposal defers it to v0.2.0 and
-reserves a `templates` section for it (§2.1, §12).
+reserves the TMPL part of the interface blob for it (§2.1, §4.0, §12).
 
 In v0.1.0 the driver builds a `.pkm` for every imported module on demand into
 `.paykan_cache/` and reads imports **only** from those files. Imports are no
@@ -130,6 +137,7 @@ Facts that shape the design:
 |---|---|---|
 | Generic templates in the interface | v0.2.0 | §4 |
 | Native objects embedded in, or keyed by, the `.pkm` | v0.2.0 | needs stable mangling; §6 |
+| Backend-native modules and the frontend/backend module protocol | v0.2.0 | #106; v0.1.0 reserves the interface blob and the `payload` kind; §4.0, §6.1 |
 | Prebuilt module distribution and search paths | v0.2.0 | with the package manager / #23; §7 |
 | Per-parameter ownership conventions | v0.2.0 | #98 borrowed parameters; §9 |
 | Post-pass PIR and cross-module inlining | v0.2.0 | #97; §5 |
@@ -144,7 +152,7 @@ rejected with an error.
 
 | Option | Pros | Cons |
 |---|---|---|
-| **A. Defer to v0.2.0.** v0.1.0's `.pkm` exports concrete instantiations only (today's behaviour) and reserves the `templates` section kind | keeps v0.1.0 small; no AST serializer; no instantiation-dedup machinery in the driver; the language behaves as it does today | stdlib-style generic containers (`Stack<T>`) can't live in a module yet |
+| **A. Defer to v0.2.0.** v0.1.0's `.pkm` exports concrete instantiations only (today's behaviour) and reserves the TMPL part of the interface blob | keeps v0.1.0 small; no AST serializer; no instantiation-dedup machinery in the driver; the language behaves as it does today | stdlib-style generic containers (`Stack<T>`) can't live in a module yet |
 | B. Enable in v0.1.0 | generic libraries become possible at once | needs the template representation (§12.1), cross-module instantiation ownership and dedup (§12.2), and new Sema paths, all before the tag; this widens a release that already has a long list |
 
 **Recommendation: A.** The format reserves room for templates (§3.4, §12),
@@ -216,8 +224,8 @@ exist, live next to the `.pkm` rather than inside an object-file wrapper.
 | 112 | 16 | reserved | zero |
 
 The interface hash is **not** in the header. It is the SHA-256 of the
-interface section's bytes, recomputed on load. Storing it would only invite
-disagreement with the section.
+interface blob (§4.0), recomputed on load. Storing it would only invite
+disagreement with the blob.
 
 ### 3.4 Section table
 
@@ -235,23 +243,62 @@ Every section must lie inside the file, and sections must not overlap.
 
 | Kind | Name | Required | v0.1.0 |
 |---|---|---|---|
-| 1 | `strtab` | yes | yes |
-| 2 | `deps` | yes | yes |
-| 3 | `types` (interface type table) | yes | yes |
-| 4 | `iface` (exported decls) | yes | yes |
-| 5 | `code` (binary PIR module) | yes | yes |
-| 6 | `symidx` (symbol → code record) | no | yes |
-| 7 | `templates` | yes when present | reserved (§4) |
-| 8 | `native` (per-target objects or references) | no | reserved (§6) |
-| 9 | `debug` (decl source locations, relative paths) | no | reserved |
+| 1 | `strtab` (strings of the header, `code` and `symidx`) | yes | yes |
+| 2 | `iface`: **exactly the interface blob** (§4.0), byte for byte | yes | yes |
+| 3 | `code` (binary PIR module) | yes | yes |
+| 4 | `symidx` (symbol → code record) | no | yes |
+| 5 | `payload`: backend-native code, as backend name + payload format + opaque bytes (§6.1, #106) | no | reserved; never written by v0.1.0 |
+| 6 | `debug` (decl source locations, relative paths) | no | reserved |
 
-What the interface hash covers: `deps` + `types` + `iface` (+ `templates`),
-which is everything an importer's output can depend on. Changing a function
-body changes `code` but not the interface hash, so importers are not rebuilt.
+The interface hash is the SHA-256 of the `iface` section alone, i.e. of the
+interface blob. That is everything an importer's output can depend on.
+Changing a function body changes `code` but not the interface hash, so
+importers are not rebuilt.
+
+A `payload` section has its own small fixed layout so that the core can
+validate and skip it without knowing the backend:
+
+| Field | Encoding |
+|---|---|
+| backend name | ULEB128 length + UTF-8 (`"c"`, `"llvm"`, a plugin's registered name) |
+| payload format | `u32`, owned and versioned by that backend |
+| payload bytes | ULEB128 length + opaque bytes |
+
+A v0.1.0 reader accepts a file that has `payload` sections and ignores
+them, because the kind is optional. #106 needs nothing else from the
+container.
 
 ---
 
 ## 4. Interface section
+
+### 4.0 The interface blob: a versioned unit of its own
+
+The `iface` section **is** the interface blob. The blob is defined by the
+core as a self-contained byte string, so that it can travel in containers
+other than the `.pkm` without change. #106's backend-native modules carry
+exactly the same bytes (§6.1).
+
+- **Self-contained.** It has its own magic (`PKMI`), its own **interface
+  format version** (`u16` major, `u16` minor, independent of the `.pkm`
+  container version), and its own string table. It never references the
+  file's `strtab` or offsets outside itself.
+- **Contents, in order:** blob header → string table → `deps` (§4.1) →
+  type table (§4.3) → decls (enums, classes, functions) → `templates`
+  (TMPL). TMPL is empty in v0.1.0 (§2.1, §12) but has a fixed place, so
+  adding templates is a minor bump of the interface format, not a
+  container change.
+- **The interface hash** is SHA-256 over the blob's bytes and nothing else.
+  So it is identical whatever container carries the blob: a `.pkm`, or a
+  backend's native module. Staleness (§7.2) and every `deps` record key on it.
+- **One reader.** A single core reader (`pkm::readInterface(span) ->
+  StatusOr<Interface>`) decodes the blob. Sema consumes only its result, so
+  every import is type-checked through the same code path, whichever file
+  the blob came from.
+- **Deterministic encoding.** The writer produces exactly one encoding for a
+  given interface: sorted records, first-use string order, minimal LEB128.
+  So "re-encode and compare" is a valid check, and carriers can be required
+  to keep the blob byte-identical.
 
 ### 4.1 What goes in
 
@@ -334,7 +381,7 @@ These are the options from #57:
 | (c) both: PIR canonical plus optional native objects | best of both | needs (b)'s prerequisites |
 
 **Recommendation: (a) for v0.1.0, (c) in v0.2.0** once mangling is stable.
-The `native` section kind is reserved for it.
+The optional `payload` section kind is reserved for it (§3.4, §6.1, #106).
 
 ### 5.2 Decision: PIR encoding
 
@@ -402,7 +449,7 @@ is verified as a whole before any backend sees it, as today (`main.cpp:168-175`)
 
 | Backend | v0.1.0 | Later |
 |---|---|---|
-| C | unchanged: emits C per module from the PIR; `.o` cache keyed on the generated C (`CBuild.cpp:187`) | with stable, program-independent mangling, key the `.o` on (`.pkm` content hash, cc, flags, `Runtime.h` hash) and skip emitting C for cached modules; optionally record the object in the `native` section |
+| C | unchanged: emits C per module from the PIR; `.o` cache keyed on the generated C (`CBuild.cpp:187`) | with stable, program-independent mangling, key the `.o` on (`.pkm` content hash, cc, flags, `Runtime.h` hash) and skip emitting C for cached modules; optionally store the object as a `payload` (§6.1, #106) |
 | LLVM (in tree until v1.0, #61) | unchanged: per-module bitcode keyed on the PIR text (`PIRToLLVM.cpp:860-871`); the decoded PIR is identical, so entries stay valid | key on the `.pkm` content hash instead of re-printing PIR; drop the exe-mtime build id (`:846-858`) in favour of `kVersion` + ABI |
 | Out-of-tree (#61, `print-pir`, MLIR) | consume `pir::Program`, as now | may also read `.pkm` directly through the exported `paykan_pkm` library (`find_package(Paykan)`, #37); they pin the format major / PIR / ABI they support |
 | JIT (#25) | n/a | load modules lazily through `symidx` |
@@ -412,7 +459,38 @@ them?** It **sits in front** in v0.1.0. Replacing them needs native code in
 the `.pkm` (§5.1), and that needs stable mangling. The issue's line "this
 replaces `.paykan_cache/*.o` and the bitcode cache" becomes the v0.2.0 goal.
 
-Code placement:
+### 6.1 Future: backend-native modules (v0.2.0, #106)
+
+The `.pkm` is the **universal** module: any backend can consume it, but
+each build still translates its PIR (PIR→C plus `cc`, or PIR→LLVM plus
+optimization), and only the backends' private caches skip that work. #106
+lets each backend also import modules in **its own native format**, e.g. an
+object for the C backend or bitcode for the LLVM backend, which the backend
+formats however it likes. The frontend must still be able to import those
+modules for Sema.
+
+The contract that v0.1.0 fixes, and that #106 builds on:
+
+- **The core owns the interface blob** (§4.0). It defines, versions,
+  writes and reads it, and it computes the interface hash.
+- **Backends own payloads.** A backend's native code is an opaque byte
+  string with a backend name and a backend-defined payload format. It
+  travels in the reserved `payload` section (§3.4), or in whatever envelope
+  #106 settles on.
+- **Backends never re-encode the blob.** They store and return it
+  byte-identical, so its hash is the same in every container. Nothing Sema
+  needs may live only in a payload.
+- Sema reads the blob through the one core reader, so a program
+  type-checks identically whether its imports come from source, a `.pkm`
+  or a native module.
+
+Everything else is specified in #106 and deferred to v0.2.0: the
+`ModuleProvider` API, where a native module carries the blob, import
+resolution (native → `.pkm` → source) and the compatibility records. v0.1.0
+writes no payloads and has no protocol code. It only guarantees that the
+blob and the `payload` section kind exist, so #106 needs no format break.
+
+### 6.2 Code placement
 
 - `include/paykan/pkm/` and `src/PKM/` form the `paykan_pkm` library. It
   depends on `paykan_pir` only and defines a neutral `pkm::Interface` struct,
@@ -522,17 +600,18 @@ directory or machine.
 
 ## 9. Versioning and compatibility
 
-The header carries **four independent numbers**, each with one owner:
+There are **five independent numbers** (four in the header, one inside the interface blob), each with one owner:
 
 | Number | Bumped when | Owner |
 |---|---|---|
 | format major.minor | the container or a section encoding changes; minor for additive, optional sections | `paykan_pkm` |
+| interface format major.minor | the interface blob's encoding changes (stored inside the blob, §4.0; minor for e.g. filling TMPL) | `paykan_pkm` |
 | PIR version | PIR types, opcodes or their semantics change | `docs/pir.md` |
 | runtime ABI | object layout, calling or ownership conventions, `Runtime.h` structs change | `kPaykanABIVersion` (moved into the core) |
 | compiler version | each release | `Version.h` |
 
-**Policy before 1.0:** a reader accepts exactly its own format major, PIR
-version and ABI. Anything else is stale (§7.2). Minor versions only add
+**Policy before 1.0:** a reader accepts exactly its own format major,
+interface format major, PIR version and ABI. Anything else is stale (§7.2). Minor versions only add
 optional sections, so a newer minor stays readable. After 1.0 we can promise
 "reads the previous major".
 
@@ -611,15 +690,17 @@ shipped by a third party.
 | 0 | This design doc | — | yes |
 | 1 | Core support: SHA-256, `ByteReader`/`ByteWriter` (LE, LEB128), moving `kPaykanABIVersion` into the core | — | yes |
 | 2 | Binary PIR codec (`paykan/pir/Binary.h`) + corpus round trip + fuzz smoke; `docs/pir.md` gets a "Binary form" section | 1 | yes |
-| 3 | `.pkm` container + `pkm::Interface` + writer/reader + `--emit-pkm` + `--dump-pkm` (still unused by imports) | 2, #102 | yes |
+| 3a | The interface blob (§4.0): `pkm::Interface`, blob writer/reader with its own version and string table, interface hash; round-trip and fuzz tests | 1 | yes |
+| 3b | `.pkm` container (header, section table, `iface` = the blob, `code`, `symidx`; the `payload` kind recognized and skipped) + `--emit-pkm` + `--dump-pkm` (still unused by imports) | 2, 3a, #102 | yes |
 | 4 | Imports via `.pkm`: Sema reconstructs from `pkm::Interface` (replacing `ModuleInfo` and its static cache), the lowering takes decoded modules, the driver does on-demand build and staleness checks | 3 | yes |
 | 5 | Docs: rewrite `06-modules.md` "Compilation Cache" and the `11-generics.md` modules note; CHANGELOG; samples for staleness and corruption | 4 | yes |
-| 6 | Stable, program-independent mangling for both backends; backend caches keyed by `.pkm` hash; optional `native` section | 4, #102 | v0.2.0 |
+| 6 | Stable, program-independent mangling for both backends; backend caches keyed by `.pkm` hash | 4, #102 | v0.2.0 |
+| 6b | Backend-native modules: the `ModuleProvider` protocol, `payload` sections, native-first import resolution (#106) | 3a, 6, #103 | v0.2.0 |
 | 7 | Generic templates in the interface (§12) | 4 | v0.2.0 |
 | 8 | ABI/PIR/format 2 together with #93/#96/#98/#99 | 4 | v0.2.0 |
 | 9 | Search paths, prebuilt stdlib, libraries (#23), header generation (#21), lazy JIT loading (#25) | 6 | v0.2.0+ |
 
-PRs 1–2 can start now. PR 3 needs #102's canonical names.
+PRs 1, 2 and 3a can start now. PR 3b needs #102's canonical names.
 
 ---
 
@@ -629,8 +710,8 @@ Cross-module generics don't work today. Importing a template is a Sema
 error (§1). Enabling them is **new language functionality** that the
 `.pkm` makes possible, not something it has to preserve. Under the
 recommendation in §2.1, v0.1.0 doesn't export templates, so nothing here
-blocks the release. The format reserves the `templates` section so that
-adding it is a minor change. This section records the design that would be
+blocks the release. The interface blob reserves its TMPL part (§4.0) so
+that adding templates is a minor bump of the interface format. This section records the design that would be
 built on it.
 
 ### 12.1 Decision: template representation
@@ -710,6 +791,13 @@ A module's own `class Box<T>` keeps today's global-name rule.
 12. **Frontend.** Should the `.pkm` record which frontend parsed the module?
     The two frontends are required to produce identical ASTs, so this
     proposal records nothing.
+13. **Interface blob as its own unit.** Is it right to make the interface
+    blob self-contained (its own magic, version and string table, a few
+    bytes of duplication versus the file's `strtab`) so that #106's native
+    modules can carry it unchanged?
+14. **The `payload` section kind.** Reserving it inside the `.pkm` leans
+    towards #106's "thin envelope" option (C) without deciding it. Is
+    reserving the kind now, with v0.1.0 readers ignoring it, acceptable?
 
 ---
 
