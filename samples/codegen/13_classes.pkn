@@ -170,7 +170,7 @@ class SportsCar : Car {
 // ---- Functions that take / return class instances -------------------------
 
 fn printCounterValue(c: Counter) {
-  println(Str<int>(c.value()));
+  println(Str(c.value()));
 }
 
 fn makeCounter(start: int) -> Counter {
@@ -203,7 +203,7 @@ fn main() -> int {
   c.increment();
   println(Str<int>(c.value()));    // 3
   c.decrement();
-  println(Str<int>(c.value()));    // 2
+  println(Str(c.value()));    // 2
   c.reset();
   println(Str<int>(c.value()));    // 0
 
@@ -224,14 +224,14 @@ fn main() -> int {
   // --- Rectangle ---
   println("=== Rectangle ===");
   r: Rectangle = Rectangle(4, 5);
-  println(Str<int>(r.area()));     // 20
+  println(Str(r.area()));     // 20
   println(Str<int>(r.perimeter())); // 18
   println(r.describe());            // rectangle
 
   // --- Square (3-level inheritance) ---
   println("=== Square ===");
   sq: Square = Square(6);
-  println(Str<int>(sq.area()));    // 36
+  println(Str(sq.area()));    // 36
   println(Str<int>(sq.perimeter())); // 24
   println(sq.describe());           // square
 
@@ -239,7 +239,7 @@ fn main() -> int {
   println("=== sumAreas ===");
   r2 = Rectangle(3, 7);
   sq2 = Square(4);
-  println(Str<int>(sumAreas(r2, sq2)));  // 21 + 16 = 37
+  println(Str(sumAreas(r2, sq2)));  // 21 + 16 = 37
 
   // --- Polymorphism: Animal base variable holds Dog / Cat subclass ----------
   println("=== Polymorphism via base type ===");
@@ -274,7 +274,7 @@ fn main() -> int {
 
   sc = SportsCar(180, 40);
   println(sc.kind());               // sports car
-  println(Str<int>(sc.topSpeed())); // 220
+  println(Str(sc.topSpeed())); // 220
 
   // --- Summer (loop inside method) ---
   println("=== Summer ===");
@@ -283,7 +283,7 @@ fn main() -> int {
   println(Str<int>(sm.total));     // 55
   sm.reset();
   sm.sumTo(4);
-  println(Str<int>(sm.total));     // 10
+  println(Str(sm.total));     // 10
 
   // --- Sign (if/else inside method) ---
   println("=== Sign ===");

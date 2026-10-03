@@ -16,8 +16,8 @@ fn tryParseInt(s: Str) -> Str {
 }
 
 fn tryParseFloat(s: Str) -> Str {
-  match float<Str>(s) {
-    f: float { return "ok: " + Str<float>(f); }
+  match float(s) {
+    f: float { return "ok: " + Str(f); }
     None     { return "invalid: '" + s + "'"; }
   }
 }
@@ -69,25 +69,25 @@ fn main() -> int {
   // === the boxes: toString / equals ===
   println("=== toString / equals ===");
 
-  a: Obj = int<Str>("7");
+  a: Obj = int("7");
   b: Obj = int<Str>("7");
-  c: Obj = int<Str>("8");
+  c: Obj = int("8");
   match a {
     x: Int {
       println(x.toString());
-      println(Str<bool>(x.equals(b)));
+      println(Str(x.equals(b)));
       println(Str<bool>(x.equals(c)));
     }
     _ {}
   }
-  println(Str<bool>(int<Str>("7") == int<Str>("7")));
+  println(Str(int<Str>("7") == int("7")));
 
   f: Obj = float<Str>("1.5");
   match f {
     y: Float { println(y.toString()); }
     _ {}
   }
-  println(int<Str>("nope"));
+  println(int("nope"));
 
   return 0;
 }

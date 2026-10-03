@@ -27,7 +27,7 @@ fn main() -> int {
           }
           j = j + 1;
         }
-        println("  [" + Str<int>(i) + "] " + display);
+        println("  [" + Str(i) + "] " + display);
         i = i + 1;
       }
       _ { break; }

@@ -170,7 +170,7 @@ fn half(n: int) -> int? {
 
 fn show(o: int?) -> Str {
   match o {
-    n: int { return Str<int>(n); }     // n is a plain int
+    n: int { return Str(n); }     // n is a plain int
     None   { return "none"; }
   }
 }

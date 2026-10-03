@@ -11,7 +11,7 @@ fn main() -> int {
   println(Str<char>(c));                 // A
 
   // Escape sequences
-  println("tab:" + Str<char>('\t') + "end");
+  println("tab:" + Str('\t') + "end");
   println("newline before:");
   println(Str<char>('\n') + "newline after");
 
@@ -25,7 +25,7 @@ fn main() -> int {
 
   // char in a variable used multiple times
   sep: char = '-';
-  println(Str<char>(sep) + Str<char>(sep) + Str<char>(sep));  // ---
+  println(Str(sep) + Str<char>(sep) + Str(sep));  // ---
 
   return 0;
 }

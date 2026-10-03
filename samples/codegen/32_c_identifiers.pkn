@@ -178,18 +178,18 @@ fn main() -> int {
   x: float = 7.5;
   fmod_: float = 2.0;
   y: float = x % fmod_;
-  println(Str<float>(y));
+  println(Str(y));
   println(Str<float>(fmod(x, fmod_)));
-  println(Str<int>(malloc(1)));
+  println(Str(malloc(1)));
 
   // A C type name as a variable.
   int64_t: int = 3;
   b: int = int64_t + 1;
   println(Str<int>(b));
 
-  println(Str<int>(suffixes()));
+  println(Str(suffixes()));
   println(Str<int>(manyValues()));
-  println(Str<int>(params(1, 2, 3, 4)));
+  println(Str(params(1, 2, 3, 4)));
 
   // Shadowing in a nested scope.
   n: int = 1;
@@ -197,13 +197,13 @@ fn main() -> int {
     n: int = 5;
     println(Str<int>(n));
   }
-  println(Str<int>(n));
+  println(Str(n));
 
   bx: Box<int> = Box<int>(5);
   plain: Box_3Cint_3E = Box_3Cint_3E();
-  println(Str<int>(bx.get()) + plain.get() + Str<int>(f_5F(1)) + Str<int>(f_(1)));
+  println(Str<int>(bx.get()) + plain.get() + Str(f_5F(1)) + Str<int>(f_(1)));
 
   p: P = P(3);
-  println(Str<int>(p.EOF()) + p.stdout + Str<int>(P_vtable()));
+  println(Str(p.EOF()) + p.stdout + Str<int>(P_vtable()));
   return 0;
 }

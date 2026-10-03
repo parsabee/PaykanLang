@@ -12,15 +12,15 @@ fn main() -> int {
   c: int[] = a;                       // alias — same underlying object
 
   println(Str<bool>(a == a));           // True   (same object)
-  println(Str<bool>(a == c));           // True   (alias)
+  println(Str(a == c));           // True   (alias)
   println(Str<bool>(a == b));           // False  (distinct object, equal contents)
-  println(Str<bool>(a != b));           // True
+  println(Str(a != b));           // True
 
   // Reference-element arrays go through the same identity lowering.
   s: Str[] = ["x", "y"];
   t: Str[] = ["x", "y"];
   println(Str<bool>(s == s));           // True
-  println(Str<bool>(s == t));           // False
+  println(Str(s == t));           // False
 
   return 0;
 }

@@ -60,7 +60,7 @@ fn main() -> int {
   n: int = t.len();
   println(Str<int>(n));    // 5
   empty: Str = "";
-  println(Str<int>(empty.len()));  // 0
+  println(Str(empty.len()));  // 0
 
   println("=== method: concat() (in-place mutation) ===");
   a: Str = "hello";
@@ -85,7 +85,7 @@ fn main() -> int {
 
   println("=== Str<int> / Str<float> / Str<bool> builtins ===");
   si: Str = Str<int>(255);
-  sf: Str = Str<float>(3.14);
+  sf: Str = Str(3.14);
   sb: Str = Str<bool>(True);
   println(si);              // 255
   println(sf);              // 3.14
@@ -111,7 +111,7 @@ fn main() -> int {
   println("=== Str vars in loop (scope cleanup per iteration) ===");
   i: int = 0;
   while (i < 4) {
-    label: Str = "item-" + Str<int>(i);
+    label: Str = "item-" + Str(i);
     println(label);
     i = i + 1;
   }

@@ -38,7 +38,7 @@ fn stripLine(s: Str) -> Str {
   result: Str = "";
   i: int = 0;
   while (i <= end) {
-    result = result + Str<char>(s[i]);
+    result = result + Str(s[i]);
     i = i + 1;
   }
   return result;

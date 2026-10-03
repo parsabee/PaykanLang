@@ -17,26 +17,26 @@ class Point {
   y: int;
   fn __init__(x: int, y: int) { self.x = x; self.y = y; }
   fn toString() -> Str {
-    return "point(" + Str<int>(self.x) + ", " + Str<int>(self.y) + ")";
+    return "point(" + Str<int>(self.x) + ", " + Str(self.y) + ")";
   }
 }
 
 fn main() -> int {
-  println(Str<int>(42) + " " + Str<int>(-7) + " " + Str<int>(0));
+  println(Str<int>(42) + " " + Str(-7) + " " + Str<int>(0));
   big: int = 9223372036854775807;
-  println(Str<int>(-big - 1) + " " + Str<int>(big));
+  println(Str(-big - 1) + " " + Str<int>(big));
 
   z: float = 0.0;
-  println(Str<float>(3.14) + " " + Str<float>(2.0) + " " + Str<float>(0.5) + " " +
-          Str<float>(1e20) + " " + Str<float>(-z));
-  println(Str<float>(z / z) + " " + Str<float>(1.0 / z) + " " + Str<float>(-1.0 / z));
+  println(Str(3.14) + " " + Str<float>(2.0) + " " + Str(0.5) + " " +
+          Str<float>(1e20) + " " + Str(-z));
+  println(Str<float>(z / z) + " " + Str(1.0 / z) + " " + Str<float>(-1.0 / z));
 
-  println(Str<bool>(True) + " " + Str<bool>(1 > 2));
+  println(Str(True) + " " + Str<bool>(1 > 2));
   word = "aZ ";
-  println("[" + Str<char>(word[0]) + "] [" + Str<char>(word[1]) + "] [" +
-          Str<char>(word[2]) + "]");
+  println("[" + Str(word[0]) + "] [" + Str<char>(word[1]) + "] [" +
+          Str(word[2]) + "]");
 
   p = Point(3, -4);
-  println(p.toString() + " visible=" + Str<bool>(p.x > 0) + " tag=" + Str<char>('p'));
+  println(p.toString() + " visible=" + Str<bool>(p.x > 0) + " tag=" + Str('p'));
   return 0;
 }

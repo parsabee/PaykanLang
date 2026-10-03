@@ -68,7 +68,7 @@ println(Str<int>(a.len()));   // 4
 
 ```pkn
 a: int[] = [10, 20, 30];
-println(Str<int>(a[1]));   // 20
+println(Str(a[1]));   // 20
 
 a[1] = 99;
 println(Str<int>(a[1]));   // 99
@@ -93,7 +93,7 @@ stack.push(1);
 stack.push(2);
 stack.push(3);
 top: int = stack.pop();          // top = 3
-println(Str<int>(stack.len()));    // 2
+println(Str(stack.len()));    // 2
 ```
 
 ---
@@ -126,7 +126,7 @@ Use `while` with an index variable:
 nums: int[] = [10, 20, 30, 40];
 i: int = 0;
 while (i < nums.len()) {
-  println(Str<int>(nums[i]));
+  println(Str(nums[i]));
   i = i + 1;
 }
 ```
@@ -174,7 +174,7 @@ class Point {
   x: int;
   y: int;
   fn __init__(x: int, y: int) { self.x = x; self.y = y; }
-  fn toString() -> Str { return "(" + Str<int>(self.x) + "," + Str<int>(self.y) + ")"; }
+  fn toString() -> Str { return "(" + Str(self.x) + "," + Str<int>(self.y) + ")"; }
 }
 
 pts: Point[] = [Point(0,0), Point(1,2), Point(-3,4)];

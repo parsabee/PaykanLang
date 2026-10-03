@@ -132,7 +132,7 @@ class Parser {
     out: Str = "";
     i: int = self.pos;
     while (i < self.input.len()) {
-      out = out + Str<char>(self.input[i]);
+      out = out + Str(self.input[i]);
       i = i + 1;
     }
     return out;

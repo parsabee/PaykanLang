@@ -11,7 +11,7 @@ fn main() -> int {
   c: bool  = True;
   d: Str   = "hello";
   println(Str<int>(a));    // 42
-  println(Str<float>(b));  // 3.14
+  println(Str(b));  // 3.14
   println(Str<bool>(c));   // True
   println(d);               // hello
 
@@ -21,9 +21,9 @@ fn main() -> int {
   y = 2.718;
   z = False;
   w = "world";
-  println(Str<int>(x));    // 100
+  println(Str(x));    // 100
   println(Str<float>(y));  // 2.718
-  println(Str<bool>(z));   // False
+  println(Str(z));   // False
   println(w);               // world
 
   println("=== rebind int ===");
@@ -37,7 +37,7 @@ fn main() -> int {
   f: float = 0.0;
   f = 1.5;
   f = f + 0.5;
-  println(Str<float>(f));  // 2
+  println(Str(f));  // 2
 
   println("=== rebind bool ===");
   flag: bool = False;
@@ -48,7 +48,7 @@ fn main() -> int {
   println("=== int->float promotion on rebind ===");
   pf: float = 0.0;
   pf = 7;              // int literal assigned to float var -> SIToFP
-  println(Str<float>(pf));  // 7
+  println(Str(pf));  // 7
   pf = pf + 1;         // int 1 promoted
   println(Str<float>(pf));  // 8
 
@@ -71,7 +71,7 @@ fn main() -> int {
   q: int = 2;
   r: int = 3;
   p = p + q + r;
-  println(Str<int>(p));    // 6
+  println(Str(p));    // 6
 
   println("=== nested scope variable access ===");
   outer: int = 10;
@@ -80,7 +80,7 @@ fn main() -> int {
     outer = outer + inner;   // outer accessible from inner scope
     println(Str<int>(outer));   // 30
   }
-  println(Str<int>(outer));     // 30 (modified by inner scope)
+  println(Str(outer));     // 30 (modified by inner scope)
 
   println("=== None initialised var ===");
   n: Obj = None;   // None has type Obj, not Str

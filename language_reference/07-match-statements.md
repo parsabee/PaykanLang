@@ -316,7 +316,7 @@ runtime subclass — and binds it as `T`; a `None` arm (or `_`) covers the absen
 
 ```pkn
 match find(head, key) {          // find returns Node?
-  n: Node { println(Str<int>(n.v)); }
+  n: Node { println(Str(n.v)); }
   None    { println("not found"); }
 }
 ```

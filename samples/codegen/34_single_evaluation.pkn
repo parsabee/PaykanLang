@@ -44,11 +44,11 @@ fn main() -> int {
   arr: C[] = [C(1), C(2)];
   x: C = C(9);
   x = arr[idx()];
-  println(Str<int>(x.v));
+  println(Str(x.v));
   x = arrs()[1];
   println(Str<int>(x.v));
   y: C = arr[idx()];
-  println(Str<int>(y.v));
+  println(Str(y.v));
   x = make().c;
   println(Str<int>(x.v));
   show(arr[idx()]);

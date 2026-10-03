@@ -33,16 +33,16 @@ fn same(s: Str, want: float) -> bool {
 fn main() -> int {
   least = 5e-324;
   sub: float = 1e-310;
-  println("tiny: " + Str<float>(least) + " " + Str<float>(sub));
-  println("halved: " + Str<float>(least / 2.0) + " doubled: " +
+  println("tiny: " + Str(least) + " " + Str<float>(sub));
+  println("halved: " + Str(least / 2.0) + " doubled: " +
           Str<float>(least * 2.0));
-  println("normal: " + Str<float>(2.2250738585072014e-308) + " " +
+  println("normal: " + Str(2.2250738585072014e-308) + " " +
           Str<float>(1.7976931348623157e308));
-  println("parsed: " + Str<bool>(same("5e-324", least)) + " " +
+  println("parsed: " + Str(same("5e-324", least)) + " " +
           Str<bool>(same("1e-310", sub)));
-  println("too large: " + show(float<Str>("1e999")));
+  println("too large: " + show(float("1e999")));
   println("too small: " + show(float<Str>("1e-400")));
-  println("zero: " + show(float<Str>("0e-999")));
-  println("computed: " + Str<float>(1.7976931348623157e308 * 10.0));
+  println("zero: " + show(float("0e-999")));
+  println("computed: " + Str(1.7976931348623157e308 * 10.0));
   return 0;
 }
