@@ -140,6 +140,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Diagnostics and driver (#119, #120, #126).** A failed import (missing,
+  circular, a directory, or a module with errors) is reported once, and uses
+  of its names are not reported again; import messages name modules
+  canonically (`lib::m`) and files from the source root. `''` is one
+  `empty character literal` error. `x: Str? = mov None` is accepted. `-O4`
+  and above are rejected; a directory as the source file is a clean error.
+  The Bison frontend enforces the 512-level nesting limit. `Stdin` and type
+  names are rejected by every binder, including typed declarations and
+  parameters.
 - An empty array literal `[]` stored into a class field, passed as a
   call/method/`push` argument, returned, stored through a subscript, or nested
   in another literal was compiled as a primitive-element array regardless of

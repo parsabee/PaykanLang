@@ -10,6 +10,7 @@
 
 #include "StringMap.h"
 
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -319,8 +320,19 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// guards that no poison type escapes Sema).
   unsigned PoisonedBindings = 0;
 
-  /// True if @p name is a type name, which no variable may be bound to.
+  /// True if @p name is a type name or the reserved `Stdin`, which no
+  /// variable may be bound to.
   bool isTypeNameForVariable(const std::string &name) const;
+
+  /// The guard every binder applies to the name it binds (#126): an inferred
+  /// or typed declaration, a destructuring target, a function or method
+  /// parameter, a match binding.  Reports, at @p loc, a name that cannot
+  /// be a variable (see isTypeNameForVariable) and returns false.
+  bool checkBinderName(const std::string &name, ast::SourceLocation loc);
+
+  /// checkBinderName for a match arm's binding; a rejected binding is bound
+  /// poisoned in the arm's scope.
+  bool bindArmName(ast::MatchArm *arm);
 
   // Check that a variable is declared. Returns its type,
   // or nullptr (with error emitted) on failure.  A poisoned variable yields
@@ -356,8 +368,12 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// literal whose elements disagree (`[("a", 1), ("b", n)]` with `n:
     /// int?`) takes the slot's element type when every element fits it.
     ast::Type *visitExpecting(ast::Expr *e, ast::Type *expected) {
-      if (expected && (ast::isa<ast::ArrayLiteralExpr>(e) ||
-                       ast::isa<ast::TupleLiteralExpr>(e)))
+      // `mov` of a literal forwards it: the literal still sees the slot.
+      ast::Expr *lit = e;
+      if (auto *mv = ast::dyn_cast<ast::MovExpr>(e))
+        lit = mv->getOperand();
+      if (expected && (ast::isa<ast::ArrayLiteralExpr>(lit) ||
+                       ast::isa<ast::TupleLiteralExpr>(lit)))
         S.LiteralExpectation = expected;
       return visit(e);
     }
@@ -408,12 +424,19 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// returned by run().
   StringMap<std::shared_ptr<SemaContext>> AccumulatedImportContexts;
 
-  /// Defining module (resolved file path) of every class/enum this Sema has
-  /// reconstructed from an import, keyed by canonical type name.  Type names
-  /// are global across the import graph, so reconstructing a type whose name
-  /// is already bound to a type from a different module is an error rather
-  /// than a silent merge of two unrelated types.
-  StringMap<std::string> ImportedTypeOrigins;
+  /// The module that declares a type: its resolved file path (the identity)
+  /// and its canonical name (ModuleName.h; what diagnostics show).
+  struct TypeOrigin {
+    std::string Path;
+    std::string Module;
+  };
+
+  /// Defining module of every class/enum this Sema has reconstructed from an
+  /// import, keyed by canonical type name.  Type names are global across the
+  /// import graph, so reconstructing a type whose name is already bound to a
+  /// type from a different module is an error rather than a silent merge of
+  /// two unrelated types.
+  StringMap<TypeOrigin> ImportedTypeOrigins;
 
   /// Every module qualifier this file's imports bind (each import's alias or
   /// last path segment, and its full module path) -> the module it names.
@@ -423,6 +446,27 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     std::string ModulePath; ///< as written, e.g. `a::util`
   };
   StringMap<ImportQualifier> ImportQualifiers;
+
+  /// Qualifiers (alias or last path segment, and the full module path) of the
+  /// imports that failed -- a module that was not found, did not parse, had
+  /// errors of its own or closes an import cycle.  The failure was reported
+  /// once, at the import; a qualified name under one of these qualifiers
+  /// (`m::f`, `m::T`) that does not resolve is a poisoned use (#119): it is
+  /// absorbed silently as a suppressed follow-on (see SuppressedFollowOns).
+  StringSet FailedImportQualifiers;
+
+  /// True (counting a suppressed follow-on) if @p name is a qualified name
+  /// under a failed import's qualifier: its use must not be reported.
+  bool isFailedImportUse(std::string_view name);
+
+  /// Errors reported inside imported modules, through their own DiagEngine
+  /// (with their own file name and source lines) and so not counted by Diags.
+  /// They fail this module too: run() adds them to its error count.
+  unsigned ImportedModuleErrors = 0;
+
+  /// @p path for a diagnostic: relative to ProjectRoot (the source root) when
+  /// it lies under it, as given otherwise.
+  std::string displayPath(const std::filesystem::path &path) const;
 
 public:
   /// Info about an already-analyzed module.  Public (with ModuleCache) so
@@ -455,6 +499,8 @@ public:
       /// compiler builtins).  Used to detect two modules exporting different
       /// classes under one name.
       std::string OriginPath;
+      /// Canonical name of that module (ModuleName.h), for diagnostics.
+      std::string OriginModule;
       struct FieldInfo {
         std::string FieldName;
         std::string TypeName;
@@ -475,8 +521,9 @@ public:
     struct EnumInfo {
       std::string Name;
       std::vector<std::string> Variants;
-      bool IsLocal = true;    // see ClassInfo::IsLocal
-      std::string OriginPath; // see ClassInfo::OriginPath
+      bool IsLocal = true;      // see ClassInfo::IsLocal
+      std::string OriginPath;   // see ClassInfo::OriginPath
+      std::string OriginModule; // see ClassInfo::OriginModule
     };
     std::vector<EnumInfo> ExportedEnums;
   };
@@ -488,6 +535,13 @@ private:
   /// Resolve a module path to an absolute file path.
   std::string resolveModulePath(const std::string &modulePath, bool isSystem,
                                 ast::SourceLocation loc);
+  /// The resolved path of module @p module's file @p file ("" with an error,
+  /// which shows the file as @p shown, if it does not exist or is not a
+  /// regular file).  @p kind is "module" or "system module".
+  std::string checkModuleFile(const std::filesystem::path &file,
+                              const std::string &shown,
+                              const std::string &module, const char *kind,
+                              ast::SourceLocation loc);
 
   /// Process a single import declaration.
   bool processImport(ast::ImportDecl *node);
@@ -737,8 +791,10 @@ public:
   const std::vector<Diagnostic> &getDiagnostics() const {
     return Diags.getDiagnostics();
   }
-  unsigned getErrorCount() const { return Diags.getErrorCount(); }
-  bool hasErrors() const { return Diags.hasErrors(); }
+  unsigned getErrorCount() const {
+    return Diags.getErrorCount() + ImportedModuleErrors;
+  }
+  bool hasErrors() const { return getErrorCount() > 0; }
 
   // -- Visitor overrides ----------------------------------------------------
 

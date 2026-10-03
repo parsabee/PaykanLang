@@ -93,6 +93,10 @@ comment     \/\/[^\n]*
 
 \'([^\\'\n]|\\.)\'  { return make_CHAR(yytext, yyleng, loc); }
 
+  /* `''`: one error for the whole literal, as in the recursive-descent
+     frontend, rather than two unterminated ones. */
+\'\'      { throw yy::parser::syntax_error(loc, "empty character literal"); }
+
   /* A character literal whose closing quote is missing before the end of the
      line (or file).  Raw newlines are excluded from the pattern above for the
      same reason as in string literals -- see the comment there. */

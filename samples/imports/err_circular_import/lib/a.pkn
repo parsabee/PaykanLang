@@ -1,0 +1,3 @@
+import lib::b;
+
+fn fa() -> int { return b::fb() + 1; }

@@ -1,0 +1,15 @@
+// ERROR: module 'lib::nothere' not found (tried lib/nothere.pkn)
+// One error: the uses of the missing module's names below are not reported
+// again (#119).
+import lib::nothere;
+
+class Shape : nothere::Base { }
+
+fn main() -> int {
+  n: int = nothere::f(1);
+  t: nothere::T = nothere::T();
+  c: nothere::Color = nothere::Color::Red;
+  s: Shape = Shape();
+  println(Str(n + lib::nothere::g(t, c, s)));
+  return 0;
+}

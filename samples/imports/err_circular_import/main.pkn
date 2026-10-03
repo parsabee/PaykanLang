@@ -1,0 +1,6 @@
+// ERROR: circular import of module 'lib::a'
+// One error, in lib/b.pkn where the cycle closes, with a note at each import
+// that led there; `a::fa` is not reported as undeclared (#119).
+import lib::a;
+
+fn main() -> int { return a::fa(); }

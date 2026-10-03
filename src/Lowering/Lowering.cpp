@@ -1099,6 +1099,9 @@ Val ModuleLowering::visitFuncDecl(ast::FuncDecl *node) {
 // ----------------------------------------------------------------------------------------
 
 bool ModuleLowering::isNoneForOptional(ast::Expr *expr) {
+  // `mov None` forwards the literal (Sema typed it through the `mov`).
+  if (auto *mv = ast::dyn_cast<ast::MovExpr>(expr))
+    expr = mv->getOperand();
   return ast::isa<ast::NoneLiteral>(expr) && expr->getResolvedType() &&
          ast::isa<ast::OptionalType>(expr->getResolvedType());
 }
