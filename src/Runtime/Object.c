@@ -12,17 +12,17 @@
 
 // -- VTable ------------------------------------------------------------------
 
-PaykanObjectVTable PaykanObject_vtable = {
-    .destroy = PaykanObject_destroy,
-    .toString = PaykanObject_toString,
-    .equals = PaykanObject_equals,
+PaykanMethod PaykanObject_vtable[PAYKAN_OBJECT_SLOTS] = {
+    [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanObject_destroy,
+    [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanObject_toString,
+    [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanObject_equals,
 };
 
 // -- Constructor / Destructor ------------------------------------------------
 
 PaykanObject *PaykanObject_new(void) {
   PaykanObject *obj = (PaykanObject *)Paykan_malloc(sizeof(PaykanObject));
-  obj->vtable = &PaykanObject_vtable;
+  obj->vtable = PaykanObject_vtable;
   obj->shared = NULL; // not yet boxed (unique-box invariant)
   return obj;
 }
@@ -38,7 +38,7 @@ PaykanShared *PaykanObject_toString(PaykanObject *self) {
   return PaykanShared_new((PaykanObject *)PaykanString_new(buf, n));
 }
 
-int64_t PaykanObject_equals(PaykanObject *self, PaykanObject *other) {
+int64_t PaykanObject_equals(PaykanObject *self, PaykanShared *other) {
   // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h);
   // unbox so identity compares the underlying objects, matching the unboxed
   // `self`.  A NULL box compares unequal.
@@ -61,21 +61,21 @@ static PaykanShared *PaykanNone_toString(PaykanObject *self) {
   return PaykanShared_new((PaykanObject *)PaykanString_new("None", 4));
 }
 
-static int64_t PaykanNone_equals(PaykanObject *self, PaykanObject *other) {
+static int64_t PaykanNone_equals(PaykanObject *self, PaykanShared *other) {
   PaykanObject *o = Paykan_equals_unbox_other(other);
   int64_t result = o && self == o;
   return Paykan_equals_consume_other(other, result);
 }
 
-static PaykanObjectVTable PaykanNone_vtable = {
-    .destroy = PaykanNone_destroy,
-    .toString = PaykanNone_toString,
-    .equals = PaykanNone_equals,
+static PaykanMethod PaykanNone_vtable[PAYKAN_OBJECT_SLOTS] = {
+    [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanNone_destroy,
+    [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanNone_toString,
+    [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanNone_equals,
 };
 
 // shared starts NULL; boxing None installs a box and Paykan_release clears it
 // again (destroy is a no-op), so the singleton cycles cleanly through boxings.
-PaykanObject PaykanObject_None = {&PaykanNone_vtable, NULL};
+PaykanObject PaykanObject_None = {PaykanNone_vtable, NULL};
 
 // -- Runtime panics ----------------------------------------------------------
 

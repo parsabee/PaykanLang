@@ -156,7 +156,7 @@ TEST(FileOpen, FailureReturnsError) {
   // open failure: returns an Error object describing the failure.
   EXPECT_NE(obj, nullptr);
   EXPECT_NE(obj, &PaykanObject_None);
-  EXPECT_EQ(obj->vtable, &PaykanError_vtable);
+  EXPECT_EQ(obj->vtable, PaykanError_vtable);
 
   Paykan_release(shared);
   PaykanString_destroy(pathStr);
@@ -518,12 +518,12 @@ TEST(FileRead, ReturnsNoneOnEmptyFile) {
 TEST(FileStdin, SingletonHasCorrectVtable) {
   // Stdin uses a separate vtable (no-op destroy), but file operations must
   // match.
-  auto *vt = (PaykanFileVTable *)PaykanFile_Stdin.vtable;
+  PaykanMethod *vt = PaykanFile_Stdin.vtable;
   ASSERT_NE(vt, nullptr);
-  EXPECT_EQ((void *)vt->read, (void *)PaykanFile_vtable.read);
-  EXPECT_EQ((void *)vt->readln, (void *)PaykanFile_vtable.readln);
-  EXPECT_EQ((void *)vt->readbytes, (void *)PaykanFile_vtable.readbytes);
-  EXPECT_EQ((void *)vt->write, (void *)PaykanFile_vtable.write);
+  EXPECT_NE(vt, PaykanFile_vtable);
+  for (int slot : {PAYKAN_SLOT_FILE_READ, PAYKAN_SLOT_FILE_READLN,
+                   PAYKAN_SLOT_FILE_READBYTES, PAYKAN_SLOT_FILE_WRITE})
+    EXPECT_EQ(vt[slot], PaykanFile_vtable[slot]) << "slot " << slot;
 }
 
 TEST(FileStdin, SingletonHandleIsStdin) {

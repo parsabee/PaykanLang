@@ -216,6 +216,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loaded.
 - Parse errors changed format from yacc-style one-liners to clang-style
   caret-and-snippet diagnostics.
+- The C backend's output is strict ISO C11 (#62): it compiles with
+  `-std=c11 -pedantic-errors -Wall -Wextra -Werror` on GCC and Clang (the
+  new `CStrictC11` ctest and *Strict C11* CI job, over the whole samples
+  corpus), so the C compiler no longer runs with `-w`. Every vtable, the
+  runtime's included, is now an array of `PaykanMethod` slots (`Runtime.h`,
+  `PAYKAN_SLOT_*`) instead of a struct of function pointers, and `Runtime.h`
+  checks the target assumptions (LP64, 8-bit bytes, two's complement,
+  IEEE 754 doubles) with `_Static_assert` (`docs/c-backend.md`).
 
 ## [0.0.0] - 2026-06-28
 

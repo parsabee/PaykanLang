@@ -10,6 +10,7 @@ extern "C" {
 }
 
 #include "RuntimeEqualsHelper.h"
+#include "VTableTestHelper.h"
 
 // ============================================================================
 // Helpers
@@ -260,7 +261,7 @@ TEST(ArrayEquals, DifferentObjectsAreNotEqual) {
 
 TEST(ArrayVtable, LengthViaVtable) {
   PaykanArray *arr = PaykanArray_new(9);
-  auto *lenFn = (int64_t(*)(PaykanObject *))((void **)arr->vtable)[3];
+  auto *lenFn = vtSlot<PaykanLengthFn>(arr, PAYKAN_SLOT_ARRAY_LENGTH);
   EXPECT_EQ(lenFn((PaykanObject *)arr), 9);
   PaykanArray_destroy((PaykanObject *)arr);
 }
@@ -268,7 +269,7 @@ TEST(ArrayVtable, LengthViaVtable) {
 TEST(ArrayVtable, DestroyViaVtable) {
   // Just confirm calling through the vtable doesn't crash.
   PaykanArray *arr = PaykanArray_new(2);
-  arr->vtable->destroy((PaykanObject *)arr);
+  vtDestroy(arr)((PaykanObject *)arr);
   // Reached here without crash — pass.
 }
 

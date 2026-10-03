@@ -14,6 +14,26 @@
 #include <stddef.h>
 #include <stdio.h>
 
+// -- virtual calls -----------------------------------------------------------
+//
+// A vtable slot holds a PaykanMethod; it is converted back to the method's
+// own type (the PAYKAN_SLOT_* comments in Runtime.h) before the call.
+
+static inline void Paykan_vcall_destroy(PaykanObject *self) {
+  ((void (*)(PaykanObject *))Paykan_vtable_of(self)[PAYKAN_SLOT_DESTROY])(self);
+}
+
+static inline PaykanShared *Paykan_vcall_toString(PaykanObject *self) {
+  return ((PaykanShared * (*)(PaykanObject *))
+              Paykan_vtable_of(self)[PAYKAN_SLOT_TO_STRING])(self);
+}
+
+static inline int64_t Paykan_vcall_equals(PaykanObject *self,
+                                          PaykanShared *other) {
+  return ((int64_t(*)(PaykanObject *, PaykanShared *))Paykan_vtable_of(
+      self)[PAYKAN_SLOT_EQUALS])(self, other);
+}
+
 // -- panics ------------------------------------------------------------------
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -45,7 +65,7 @@ PAYKAN_NORETURN void Paykan_runtime_panic(const char *fmt, ...)
 //
 // Usage pattern:
 //
-//   int64_t PaykanFoo_equals(PaykanObject *self, PaykanObject *other) {
+//   int64_t PaykanFoo_equals(PaykanObject *self, PaykanShared *other) {
 //     PaykanObject *o = Paykan_equals_unbox_other(other);
 //     int64_t result = o && <compare self against o>;
 //     return Paykan_equals_consume_other(other, result);
@@ -57,15 +77,15 @@ PAYKAN_NORETURN void Paykan_runtime_panic(const char *fmt, ...)
 /// Unbox the consumed `other` argument of an equals implementation.
 /// Returns the underlying object, or NULL when the box is NULL
 /// (PaykanShared_get is null-safe) — callers must treat NULL as "not equal".
-static inline PaykanObject *Paykan_equals_unbox_other(PaykanObject *other) {
-  return PaykanShared_get((PaykanShared *)other);
+static inline PaykanObject *Paykan_equals_unbox_other(PaykanShared *other) {
+  return PaykanShared_get(other);
 }
 
 /// Epilogue: release the consumed `other` box (null-safe) and pass the
 /// already-computed comparison result through.
-static inline int64_t Paykan_equals_consume_other(PaykanObject *other,
+static inline int64_t Paykan_equals_consume_other(PaykanShared *other,
                                                   int64_t result) {
-  Paykan_release((PaykanShared *)other);
+  Paykan_release(other);
   return result;
 }
 

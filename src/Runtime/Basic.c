@@ -23,15 +23,15 @@
 // Int
 // ============================================================================
 
-PaykanObjectVTable PaykanInt_vtable = {
-    .destroy = PaykanInt_destroy,
-    .toString = PaykanInt_toString,
-    .equals = PaykanInt_equals,
+PaykanMethod PaykanInt_vtable[PAYKAN_OBJECT_SLOTS] = {
+    [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanInt_destroy,
+    [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanInt_toString,
+    [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanInt_equals,
 };
 
 PaykanInt *PaykanInt_new(int64_t value) {
   PaykanInt *obj = (PaykanInt *)Paykan_malloc(sizeof(PaykanInt));
-  obj->vtable = &PaykanInt_vtable;
+  obj->vtable = PaykanInt_vtable;
   obj->shared = NULL; // not yet boxed (unique-box invariant)
   obj->value = value;
   return obj;
@@ -48,10 +48,10 @@ PaykanShared *PaykanInt_toString(PaykanObject *self) {
   return PaykanShared_new((PaykanObject *)PaykanString_from_int(obj->value));
 }
 
-int64_t PaykanInt_equals(PaykanObject *self, PaykanObject *other) {
+int64_t PaykanInt_equals(PaykanObject *self, PaykanShared *other) {
   // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
   PaykanObject *o = Paykan_equals_unbox_other(other);
-  int64_t result = o && o->vtable == &PaykanInt_vtable &&
+  int64_t result = o && o->vtable == PaykanInt_vtable &&
                    ((PaykanInt *)self)->value == ((PaykanInt *)o)->value;
   return Paykan_equals_consume_other(other, result);
 }
@@ -80,15 +80,15 @@ PaykanShared *PaykanInt_from_str(PaykanObject *str) {
 // Float
 // ============================================================================
 
-PaykanObjectVTable PaykanFloat_vtable = {
-    .destroy = PaykanFloat_destroy,
-    .toString = PaykanFloat_toString,
-    .equals = PaykanFloat_equals,
+PaykanMethod PaykanFloat_vtable[PAYKAN_OBJECT_SLOTS] = {
+    [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanFloat_destroy,
+    [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanFloat_toString,
+    [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanFloat_equals,
 };
 
 PaykanFloat *PaykanFloat_new(double value) {
   PaykanFloat *obj = (PaykanFloat *)Paykan_malloc(sizeof(PaykanFloat));
-  obj->vtable = &PaykanFloat_vtable;
+  obj->vtable = PaykanFloat_vtable;
   obj->shared = NULL; // not yet boxed (unique-box invariant)
   obj->value = value;
   return obj;
@@ -105,10 +105,10 @@ PaykanShared *PaykanFloat_toString(PaykanObject *self) {
   return PaykanShared_new((PaykanObject *)PaykanString_from_float(obj->value));
 }
 
-int64_t PaykanFloat_equals(PaykanObject *self, PaykanObject *other) {
+int64_t PaykanFloat_equals(PaykanObject *self, PaykanShared *other) {
   // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
   PaykanObject *o = Paykan_equals_unbox_other(other);
-  int64_t result = o && o->vtable == &PaykanFloat_vtable &&
+  int64_t result = o && o->vtable == PaykanFloat_vtable &&
                    ((PaykanFloat *)self)->value == ((PaykanFloat *)o)->value;
   return Paykan_equals_consume_other(other, result);
 }
@@ -133,15 +133,15 @@ PaykanShared *PaykanFloat_from_str(PaykanObject *str) {
 // Bool
 // ============================================================================
 
-PaykanObjectVTable PaykanBool_vtable = {
-    .destroy = PaykanBool_destroy,
-    .toString = PaykanBool_toString,
-    .equals = PaykanBool_equals,
+PaykanMethod PaykanBool_vtable[PAYKAN_OBJECT_SLOTS] = {
+    [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanBool_destroy,
+    [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanBool_toString,
+    [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanBool_equals,
 };
 
 PaykanBool *PaykanBool_new(int64_t value) {
   PaykanBool *obj = (PaykanBool *)Paykan_malloc(sizeof(PaykanBool));
-  obj->vtable = &PaykanBool_vtable;
+  obj->vtable = PaykanBool_vtable;
   obj->shared = NULL; // not yet boxed (unique-box invariant)
   obj->value = value ? 1 : 0;
   return obj;
@@ -158,10 +158,10 @@ PaykanShared *PaykanBool_toString(PaykanObject *self) {
   return PaykanShared_new((PaykanObject *)PaykanString_from_bool(obj->value));
 }
 
-int64_t PaykanBool_equals(PaykanObject *self, PaykanObject *other) {
+int64_t PaykanBool_equals(PaykanObject *self, PaykanShared *other) {
   // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
   PaykanObject *o = Paykan_equals_unbox_other(other);
-  int64_t result = o && o->vtable == &PaykanBool_vtable &&
+  int64_t result = o && o->vtable == PaykanBool_vtable &&
                    ((PaykanBool *)self)->value == ((PaykanBool *)o)->value;
   return Paykan_equals_consume_other(other, result);
 }
@@ -180,15 +180,15 @@ PaykanShared *PaykanBool_from_str(PaykanObject *str) {
 // Char
 // ============================================================================
 
-PaykanObjectVTable PaykanChar_vtable = {
-    .destroy = PaykanChar_destroy,
-    .toString = PaykanChar_toString,
-    .equals = PaykanChar_equals,
+PaykanMethod PaykanChar_vtable[PAYKAN_OBJECT_SLOTS] = {
+    [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanChar_destroy,
+    [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanChar_toString,
+    [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanChar_equals,
 };
 
 PaykanChar *PaykanChar_new(int8_t value) {
   PaykanChar *obj = (PaykanChar *)Paykan_malloc(sizeof(PaykanChar));
-  obj->vtable = &PaykanChar_vtable;
+  obj->vtable = PaykanChar_vtable;
   obj->shared = NULL; // not yet boxed (unique-box invariant)
   obj->value = value;
   return obj;
@@ -205,10 +205,10 @@ PaykanShared *PaykanChar_toString(PaykanObject *self) {
   return PaykanShared_new((PaykanObject *)PaykanString_from_char(obj->value));
 }
 
-int64_t PaykanChar_equals(PaykanObject *self, PaykanObject *other) {
+int64_t PaykanChar_equals(PaykanObject *self, PaykanShared *other) {
   // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
   PaykanObject *o = Paykan_equals_unbox_other(other);
-  int64_t result = o && o->vtable == &PaykanChar_vtable &&
+  int64_t result = o && o->vtable == PaykanChar_vtable &&
                    ((PaykanChar *)self)->value == ((PaykanChar *)o)->value;
   return Paykan_equals_consume_other(other, result);
 }

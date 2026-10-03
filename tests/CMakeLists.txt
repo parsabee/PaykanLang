@@ -260,6 +260,35 @@ if(PAYKAN_SAMPLES_BACKENDS)
         RESOURCE_LOCK paykan_samples_cache)
 endif()
 
+# The C backend's output is strict ISO C11 (docs/c-backend.md): every
+# sample's C compiles with -std=c11 -pedantic-errors -Wall -Wextra -Werror on
+# every C compiler found (GCC and Clang), at -O0 and -O2, and runs exactly
+# like `paykan --backend=c run` (scripts/c_strict.py).  `paykan build` is
+# checked too, unless the runtime archive is sanitizer- or
+# coverage-instrumented (it then links only with the compiler that built it).
+if("c" IN_LIST PAYKAN_BACKENDS)
+    set(PAYKAN_STRICT_CCS "")
+    find_program(PAYKAN_STRICT_GCC NAMES gcc)
+    find_program(PAYKAN_STRICT_CLANG NAMES clang)
+    foreach(cc IN ITEMS ${PAYKAN_STRICT_GCC} ${PAYKAN_STRICT_CLANG})
+        if(cc)
+            list(APPEND PAYKAN_STRICT_CCS --cc ${cc})
+            if(NOT PAYKAN_SANITIZER_FLAGS AND NOT PAYKAN_COVERAGE_FLAGS)
+                list(APPEND PAYKAN_STRICT_CCS --build-cc ${cc})
+            endif()
+        endif()
+    endforeach()
+    if(PAYKAN_STRICT_CCS)
+        add_test(NAME CStrictC11
+            COMMAND ${CMAKE_COMMAND} -E env python3
+                    ${CMAKE_SOURCE_DIR}/scripts/c_strict.py
+                    --paykan $<TARGET_FILE:paykan> ${PAYKAN_STRICT_CCS})
+        # `paykan build` writes the import samples' object caches.
+        set_tests_properties(CStrictC11 PROPERTIES
+            RESOURCE_LOCK paykan_samples_cache)
+    endif()
+endif()
+
 # Once per backend that runs programs (see backendFlag() in DriverTests.cpp).
 foreach(be IN LISTS PAYKAN_BACKENDS)
     if(be STREQUAL "llvm" OR be STREQUAL "c")
