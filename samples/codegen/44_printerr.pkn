@@ -1,0 +1,36 @@
+// 44 — the print family: print / println write to stdout, printerr /
+// printerrln to stderr. Each takes exactly one Obj and prints its toString;
+// compose longer messages with `+`.
+//
+// Run with `2>/dev/null` to see only stdout, or `>/dev/null` for stderr only.
+//
+// expect-stdout: progress: 1 2 3
+// expect-stdout: done (3 steps)
+// expect-stdout: None
+// expect-stdout: (1, two)
+
+class Step {
+  n: int;
+  fn __init__(n: int) { self.n = n; }
+  fn toString() -> Str { return "step " + Str(self.n); }
+}
+
+fn main() -> int {
+  print("progress:");
+  i: int = 1;
+  while (i <= 3) {
+    print(" " + Str(i));
+    printerr("[log] ");
+    printerrln(Step(i));       // any Obj prints through its toString
+    i = i + 1;
+  }
+  println("");
+  println("done (" + Str(i - 1) + " steps)");
+
+  maybe: Str? = None;
+  println(maybe);              // an absent optional prints None
+  println((1, "two"));         // a tuple prints its elements
+  printerr("printerr adds no newline; ");
+  printerrln("printerrln does");
+  return 0;
+}

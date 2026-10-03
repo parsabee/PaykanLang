@@ -9,6 +9,9 @@ replaced by `::` and the `.pkn` extension dropped) is the module's canonical nam
 
 - `import modulePath;` — bring all public declarations into scope.
 - `import modulePath as Alias;` — bring declarations in under `Alias::name`.
+- `import base::{a, b as c};` — import several modules of one directory at once.
+- `import ::modulePath;` — a system import, looked up in the standard-library directory
+  instead of the source root (no standard library ships yet).
 - Module paths use `::` as a separator, mirroring directory structure.
 - There are no visibility modifiers. Everything declared at the top level of a module is
   importable.
@@ -49,6 +52,25 @@ plain import's last path segment, or a full module path) names exactly one modul
 `import a::util; import b::util;` is an error; write `import b::util as bu;` instead. Importing
 the same module under a second qualifier is fine.
 
+### Selective Import
+
+```pkn
+import lib::{foo, bar};
+import ops::{add as plus, mul as times, sub};
+
+x: int = foo::fooVal() + bar::barVal();
+y: int = plus::add(3, 4) + times::mul(3, 4) + sub::sub(12, 7);
+```
+
+A brace list after a module path imports **several modules** that live under that path, one
+per entry: `import lib::{foo, bar};` is exactly `import lib::foo; import lib::bar;`. Each entry
+may take its own alias (`add as plus` binds `ops/add.pkn` as `plus`);
+an entry without one is qualified by its own name. The entries name modules, not the
+declarations inside them, so the module's functions, classes and enums are still reached
+through the qualifier (`plus::add`). Every listed module must exist; a missing one is reported
+as `module 'lib::bar' not found`. See `samples/imports/04_selective` and
+`05_selective_alias`.
+
 ### Deeply Nested Module
 
 ```pkn
@@ -66,7 +88,19 @@ Given `import a::b::c`, the compiler looks for:
 1. `<source-root>/a/b/c.pkn`
 
 The source root is the directory containing the main file passed to the compiler driver. There
-is no package registry or search path beyond the source root.
+is no package registry, and an ordinary import never searches beyond the source root.
+
+### System Imports
+
+A leading `::` marks a **system** import: `import ::io;` (or `import ::{io, fs};`) looks for
+`io.pkn` in the standard-library directory instead of the source root. That directory is
+`$PAYKAN_STDLIB` when the environment variable is set, and `<source-root>/stdlib` otherwise.
+A system module is otherwise an ordinary module, and it is cached under
+`.paykan_cache/@system/` (see [Compilation Cache](#compilation-cache)).
+
+No standard library ships with PaykanLang yet (it is planned, #113), so a system import only
+finds modules you provide yourself in that directory. The builtins (`println`, `Str`, `File`,
+`open`, `Stdin`, ...) need no import.
 
 ---
 

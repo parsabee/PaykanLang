@@ -200,9 +200,18 @@ fn doubleAll(a: int[]) {
   }
 }
 
-nums: int[] = [1, 2, 3];
-doubleAll(nums);
-println(nums.toString());   // [2, 4, 6]
+fn main() -> int {
+  nums: int[] = [1, 2, 3];
+  doubleAll(nums);
+  println(Str(nums[0]) + " " + Str(nums[1]) + " " + Str(nums[2]));
+  return 0;
+}
+```
+
+Output:
+
+```
+2 4 6
 ```
 
 ---

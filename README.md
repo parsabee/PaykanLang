@@ -13,7 +13,7 @@ a real module system, C interoperability exposed through modules, and automatic 
 counting in place of a garbage collector or manual memory management. PaykanLang aims to 
 provide a safe, ergonomic, performant, and productive interface that compiles to native speed.
 
-This is an **early preview** (`0.1.0-alpha`) that lays the foundation. Implemented and tested
+This is the **alpha of v0.1.0** (`0.1.0-alpha`, a pre-release) that lays the foundation. Implemented and tested
 today: static typing with inference, single-inheritance classes with virtual dispatch,
 ARC with `mov` move semantics, value-aware `==` (reference types dispatch to a virtual
 `equals`), dynamic arrays, a file-based module system, `match` type dispatch, enums, tuples,
@@ -23,11 +23,19 @@ builds it with the system C compiler) or the optional LLVM backend (LLVM IR, run
 a JIT). Either backend can `run` a program directly or `build` a native executable.
 The defining goals — seamless offloading to heterogeneous compute units, thread-safe
 concurrency, and C interop through modules — are the road ahead, not yet shipped. See
-[CHANGELOG.md](CHANGELOG.md) for what's in this release.
+[CHANGELOG.md](CHANGELOG.md) for what's in this release. Features marked **prototype**
+(tuples, optional types and generics) are experimental: implemented and tested, but their
+syntax, rules and diagnostics may change before they are declared stable.
 
 ---
 
 ## Installing
+
+Release builds are published for macOS (Apple Silicon) and Linux (x86_64). Each
+[GitHub Release](https://github.com/parsabee/PaykanLang/releases) carries a tarball per
+platform (with its SHA-256 sum) holding `bin/paykan`, the runtime and its header; unpack it
+anywhere and put its `bin/` on the `PATH`. Programs are compiled with the system C compiler,
+so a C11 compiler (`cc`) must be installed. Or build from source (below).
 
 ### Homebrew (macOS)
 
@@ -41,7 +49,10 @@ paykan --version
 
 ## Building from Source
 
-PaykanLang uses CMake and a pre-built LLVM (vendored under `third-party/llvm`), Bison, and Flex.
+Prerequisites: CMake 3.24 or newer and a C++20 compiler to build PaykanLang, plus a C11
+compiler (`cc`) at run time, which the C backend uses to compile programs. The default build
+needs nothing else (the test suite's GoogleTest aside, see below); the LLVM backend and the
+Bison frontend are opt-in.
 
 ```sh
 git clone https://github.com/parsabee/PaykanLang.git
@@ -51,26 +62,29 @@ cmake --build build --parallel
 ```
 
 The frontend (lexer + parser) is pluggable. `-DPAYKAN_FRONTENDS=<list>` selects the
-frontends to build (default: `recursive-descent;bison`); the first one listed is the default, and
+frontends to build (default: `recursive-descent`); the first one listed is the default, and
 the others are selected at run time with `--frontend=<name>` (`--list-frontends` prints
-them). The recursive-descent frontend (standard C++ only) is always built; Bison and Flex are
-downloaded and built only when `bison` is listed; that from-source build (GNU `configure` and
-`make`) needs GNU `m4` on the `PATH`, which Bison also runs to generate the parser
-(`apt install m4`; macOS ships it with the Command Line Tools). Both implement `docs/grammar.md` and must
+them). The recursive-descent frontend (standard C++ only) is always built. The Bison
+frontend is opt-in (`-DPAYKAN_FRONTENDS="recursive-descent;bison"`) and is moving to a
+separate plugin repository (#60): Bison and Flex are downloaded and built only when `bison`
+is listed; that from-source build (GNU `configure` and `make`) needs GNU `m4` on the `PATH`,
+which Bison also runs to generate the parser (`apt install m4`; macOS ships it with the
+Command Line Tools). Both implement `docs/grammar.md` and must
 produce identical ASTs: `scripts/diff_frontends.py` checks that over every sample, and
 `--dump-tokens` prints a frontend's token stream.
 
 The backend is pluggable too. `-DPAYKAN_BACKENDS=<list>` selects the backends to build:
 `c` (the C backend: emits C11, builds with the system C compiler, standard C++ only) is always
-built; `llvm` (LLVM IR, the ORC JIT for `run`, native objects linked by the system C compiler
-for `build`) is optional. The default backend
-is `llvm` when it is listed, `c` otherwise; `--backend=<name>` selects another (`--list-backends`
-prints them). LLVM is downloaded only when `llvm` is listed, so
-`-DPAYKAN_FRONTENDS=recursive-descent -DPAYKAN_BACKENDS=c` is a **barebones build** that needs
-nothing but a C++20 compiler and a C compiler (CI checks that it downloads nothing and links no
-third-party library). Every backend consumes the Paykan IR described in [`docs/pir.md`](docs/pir.md);
+built and is the default; `llvm` (LLVM IR, the ORC JIT for `run`, native objects linked by the
+system C compiler for `build`) is an in-tree, opt-in backend (`-DPAYKAN_BACKENDS="llvm;c"`).
+`--backend=<name>` selects a backend at run time; `--list-backends` prints them and marks the
+default. LLVM is downloaded only when `llvm` is listed, so the default configure
+(`recursive-descent` + `c`) is a **barebones build** that needs nothing but a C++20 compiler
+and a C compiler (CI checks that it downloads nothing and links no third-party library). The
+full build is `-DPAYKAN_FRONTENDS="recursive-descent;bison" -DPAYKAN_BACKENDS="llvm;c"`.
+Every backend consumes the Paykan IR described in [`docs/pir.md`](docs/pir.md);
 [`docs/writing-a-backend.md`](docs/writing-a-backend.md) explains how to write one, in tree or
-out of tree against `find_package(Paykan)` (see [`examples/backends/print-pir`](examples/backends/print-pir)).
+out of tree against `find_package(Paykan)` (see [`utils/print-pir`](utils/print-pir)).
 
 The test suite needs GoogleTest: an installed one is used if CMake finds it, otherwise it is
 downloaded at configure time. `-DPAYKAN_BUILD_TESTS=OFF` skips the tests and GoogleTest (for
@@ -126,7 +140,8 @@ ctest --test-dir build --output-on-failure
 ## Development Tooling
 
 Quality gates are enforced in CI and available locally via the Python helpers in `scripts/`
-(they use the vendored LLVM 17 tools so results match CI):
+(they prefer the LLVM 17 tools under `build/third-party/llvm`, which a configure with the
+`llvm` backend downloads, so results match CI; otherwise they use the tools on the `PATH`):
 
 ```sh
 python3 scripts/clang_format.py --apply          # format the tree
@@ -148,14 +163,15 @@ pre-commit install --hook-type pre-push
 
 To learn PaykanLang:
 
-- **[`language_reference/`](language_reference/)** — the full reference: language basics,
+- **[`docs/language/`](docs/language/)** — the full reference: language basics,
   functions, enums, classes, arrays, modules, `match` statements, the memory model,
   tuples (prototype), optional types (prototype), and generics (prototype); the conversion
   constructors (`Str(n)`, `int<Str>(s)`, ...) are under "Conversions" in
-  [`01-language-basics.md`](language_reference/01-language-basics.md).
+  [`01-language-basics.md`](docs/language/01-language-basics.md).
 - **[`samples/`](samples/)** — runnable `.pkn` programs exercising every feature
   (`samples/codegen/` has the feature demos; see also `imports/`, `sema/`, `leak-check/`).
-- **[`example_program/`](example_program/)** — a small end-to-end example (`calc`).
+  [`samples/imports/12_calc/`](samples/imports/12_calc/) is a larger multi-module program:
+  an arithmetic calculator with variables, a hash map and a REPL.
 
 A taste:
 
@@ -164,6 +180,12 @@ fn main() -> int {
   println("Hello, world!");
   return 0;
 }
+```
+
+Output:
+
+```
+Hello, world!
 ```
 
 ---

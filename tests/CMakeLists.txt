@@ -183,7 +183,6 @@ target_include_directories(lowering_tests
 )
 target_compile_definitions(lowering_tests
     PRIVATE PAYKAN_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/samples"
-            PAYKAN_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/example_program"
 )
 target_link_libraries(lowering_tests
     PRIVATE gtest_main
@@ -316,7 +315,6 @@ add_executable(frontend_tests
 )
 target_compile_definitions(frontend_tests
     PRIVATE PAYKAN_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/samples"
-            PAYKAN_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/example_program"
 )
 target_link_libraries(frontend_tests
     PRIVATE gtest_main
@@ -342,4 +340,40 @@ if(PAYKAN_NUM_FRONTENDS GREATER 1)
                     --paykan $<TARGET_FILE:paykan>
                     --frontends ${PAYKAN_DIFF_FE_A},${PAYKAN_DIFF_FE_B})
     endif()
+endif()
+
+# --- Documentation: every relative link in the Markdown files resolves -------
+# --- (scripts/check_links.py), and every doc example that states its output --
+# --- prints it (scripts/doc_examples.py)
+add_test(NAME MarkdownLinks
+    COMMAND ${CMAKE_COMMAND} -E env python3
+            ${CMAKE_SOURCE_DIR}/scripts/check_links.py)
+if(PAYKAN_SAMPLES_BACKENDS)
+    add_test(NAME DocExamples
+        COMMAND ${CMAKE_COMMAND} -E env python3
+                ${CMAKE_SOURCE_DIR}/scripts/doc_examples.py
+                --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
+endif()
+
+# --- The out-of-tree plugin path: install this tree, build utils/print-pir ---
+# --- against it with find_package(Paykan) and compare its output with --------
+# --- --emit-pir (tests/OutOfTree/PrintPIR.cmake; CI's install job does the ---
+# --- same). Skipped for instrumented builds, whose installed libraries only --
+# --- link with the instrumentation flags.
+if(NOT PAYKAN_SANITIZER_FLAGS AND NOT PAYKAN_COVERAGE_FLAGS)
+    set(PAYKAN_OOT_ARGS "")
+    if(TARGET paykan_backend_llvm)
+        list(APPEND PAYKAN_OOT_ARGS -DLLVM_DIR=${LLVM_DIR})
+    endif()
+    add_test(NAME PrintPIROutOfTree
+        COMMAND ${CMAKE_COMMAND}
+                -DPAYKAN_BUILD_DIR=${CMAKE_BINARY_DIR}
+                -DPAYKAN_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+                -DPAYKAN_BIN=$<TARGET_FILE:paykan>
+                -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/print-pir-out-of-tree
+                -DGENERATOR=${CMAKE_GENERATOR}
+                -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+                -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+                ${PAYKAN_OOT_ARGS}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/OutOfTree/PrintPIR.cmake)
 endif()

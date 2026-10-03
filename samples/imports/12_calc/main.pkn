@@ -5,14 +5,76 @@
 // built-in `ans`, `pi`, `e`) in later expressions. Variables live in a
 // string-keyed hash map (calc/hashmap.pkn).
 //
+// As a sample, it first replays a short scripted session (`demo` below)
+// through the same code path as the REPL, which ends by defining `a` and `b`;
+// then it handles its command line. The sample harnesses run it as
+// `paykan main.pkn a b`, which evaluates `a` and `b` after the demo.
+//
 // Command line:
 //   paykan main.pkn "3 + 4 * (2 - 1)" "10 / 4"     # evaluate each argument
 //   paykan main.pkn -e "x = 6" -e "x * 7"          # -e flags, shared state
 //   paykan main.pkn -q "1 + 2"                     # quiet: results only
+//   paykan main.pkn --no-demo                      # skip the scripted session
 //   paykan main.pkn                                # REPL on stdin
 //   printf "x = 5\nx * x\n" | paykan main.pkn
 //
 // REPL commands: :vars  :history  :del <name>  :clear  :help  :quit
+//
+// Errors go to stderr; every line below is what the scripted session and
+// `a b` print on stdout.
+//
+// expect-stdout: > 1 + 2 * 3
+// expect-stdout: 1 + 2 * 3 = 7
+// expect-stdout: > (1 + 2) * 3
+// expect-stdout: (1 + 2) * 3 = 9
+// expect-stdout: > x = 6
+// expect-stdout: x = 6
+// expect-stdout: > y = x * 7
+// expect-stdout: y = 42
+// expect-stdout: > (x + y) / 4
+// expect-stdout: (x + y) / 4 = 12
+// expect-stdout: > ans * 2
+// expect-stdout: ans * 2 = 24
+// expect-stdout: > -x + 10 % 4
+// expect-stdout: -x + 10 % 4 = -4
+// expect-stdout: > 2.5 * 2
+// expect-stdout: 2.5 * 2 = 5
+// expect-stdout: > :vars
+// expect-stdout:   e = 2.71828
+// expect-stdout:   x = 6
+// expect-stdout:   pi = 3.14159
+// expect-stdout:   y = 42
+// expect-stdout:   ans = 5
+// expect-stdout: > :history
+// expect-stdout:   1: 1 + 2 * 3  => 7
+// expect-stdout:   2: (1 + 2) * 3  => 9
+// expect-stdout:   3: x = 6  => 6
+// expect-stdout:   4: y = x * 7  => 42
+// expect-stdout:   5: (x + y) / 4  => 12
+// expect-stdout:   6: ans * 2  => 24
+// expect-stdout:   7: -x + 10 % 4  => -4
+// expect-stdout:   8: 2.5 * 2  => 5
+// expect-stdout: > :del y
+// expect-stdout: deleted 'y'
+// expect-stdout: > y + 1
+// expect-stdout: > :del y
+// expect-stdout: > 1 / 0
+// expect-stdout: 1 / 0 = inf
+// expect-stdout: > 3 +
+// expect-stdout: > 4 4
+// expect-stdout: > :frobnicate
+// expect-stdout: > :clear
+// expect-stdout: cleared all variables
+// expect-stdout: > :vars
+// expect-stdout:   e = 2.71828
+// expect-stdout:   pi = 3.14159
+// expect-stdout:   ans = 0
+// expect-stdout: > a = 6
+// expect-stdout: a = 6
+// expect-stdout: > b = a * 7
+// expect-stdout: b = 42
+// expect-stdout: a = 6
+// expect-stdout: b = 42
 
 import calc::parser;
 import calc::hashmap;
@@ -223,6 +285,41 @@ fn printHelp() {
   println("              :quit         exit");
 }
 
+// The scripted session: each line goes through handle(), as if typed at the
+// REPL. It covers expressions, assignment, `ans`, the constants, every
+// command and a few errors, and ends with `a` and `b` defined.
+fn demo(env: hashmap::HashMap, history: Ring<(Str, float)>) {
+  script: Str[] = [
+    "1 + 2 * 3",
+    "(1 + 2) * 3",
+    "x = 6",
+    "y = x * 7",
+    "(x + y) / 4",
+    "ans * 2",
+    "-x + 10 % 4",
+    "2.5 * 2",
+    ":vars",
+    ":history",
+    ":del y",
+    "y + 1",
+    ":del y",
+    "1 / 0",
+    "3 +",
+    "4 4",
+    ":frobnicate",
+    ":clear",
+    ":vars",
+    "a = 6",
+    "b = a * 7"
+  ];
+  i: int = 0;
+  while (i < script.len()) {
+    println("> " + script[i]);
+    handle(script[i], env, history, False);
+    i = i + 1;
+  }
+}
+
 fn printUsage() {
   println("calc - arithmetic calculator with variables");
   println("");
@@ -231,6 +328,7 @@ fn printUsage() {
   println("options:");
   println("  -e, --eval <expr>   evaluate <expr> (may be repeated)");
   println("  -q, --quiet         print only results (no echo, no banner)");
+  println("      --no-demo       skip the scripted demo session");
   println("  -h, --help          show this help");
   println("");
   println("With no expressions, reads one statement per line from stdin.");
@@ -238,6 +336,7 @@ fn printUsage() {
 
 fn main(args: Str[]) -> int {
   quiet: bool = False;
+  runDemo: bool = True;
   exprs: Str[] = [];
 
   // -- command-line parsing: flags, repeatable -e, positional expressions --
@@ -249,6 +348,8 @@ fn main(args: Str[]) -> int {
       return 0;
     } else if (a.equals("-q") || a.equals("--quiet")) {
       quiet = True;
+    } else if (a.equals("--no-demo")) {
+      runDemo = False;
     } else if (a.equals("-e") || a.equals("--eval")) {
       if (i + 1 < args.len()) {
         i = i + 1;
@@ -269,6 +370,7 @@ fn main(args: Str[]) -> int {
   env: hashmap::HashMap = hashmap::HashMap();
   defineConstants(env);
   history: Ring<(Str, float)> = Ring<(Str, float)>(historySize());
+  if (runDemo) { demo(env, history); }
 
   // Batch mode: evaluate every collected expression, sharing one environment.
   if (exprs.len() > 0) {

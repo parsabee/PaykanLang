@@ -13,7 +13,7 @@ a backend is a static library that implements the interface and registers a
 factory under a name. The driver lists the registered backends
 (`paykan --list-backends`) and selects one with `--backend=<name>`.
 
-The example in [`examples/backends/print-pir`](../examples/backends/print-pir)
+The example in [`utils/print-pir`](../utils/print-pir)
 is the smallest complete backend (it prints the PIR it receives); copy it to
 start your own.
 

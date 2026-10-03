@@ -336,10 +336,10 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
 
 bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
   // `None` into an optional slot: statically the literal is `Obj` (a design
-  // decision — see proposals/optionals.md), but in this position it denotes
-  // the absent `T?` value.  Record that contextual type on the literal so
-  // CodeGen emits a null box rather than boxing the `None` singleton, which
-  // is how a present `Obj` value spells None.
+  // decision — see docs/language/10-optionals.md), but in this position it
+  // denotes the absent `T?` value.  Record that contextual type on the
+  // literal so CodeGen emits a null box rather than boxing the `None`
+  // singleton, which is how a present `Obj` value spells None.
   if (ast::isa<ast::NoneLiteral>(src) && ast::isa<ast::OptionalType>(dst)) {
     src->setResolvedType(dst);
     return true;
