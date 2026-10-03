@@ -1,5 +1,12 @@
 # PaykanLang — Task Plan to 0.1 Release
 
+> **Historical — superseded.** This is an early plan, written when the compiler was
+> LLVM/JIT-only. It no longer describes the v0.1.0 release: MLIR code generation, the AI
+> offload/optimization plugin and the alpha/beta/0.1 checkpoints below are not part of it.
+> The current v0.1.0 scope and definition of done are tracked in
+> [#27](https://github.com/parsabee/PaykanLang/issues/27); see [CHANGELOG.md](CHANGELOG.md)
+> for what has shipped. The document is kept for reference only.
+
 The USP (unique selling point) for 0.1: a **clean, sequential, simple** language whose
 compiler **generates MLIR** and uses **AI-assisted optimization** to offload/parallelize
 code, cleanly integrated **with safe guardrails that prevent erroneous codegen**, exposed

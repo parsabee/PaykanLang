@@ -14,7 +14,6 @@ namespace paykan::toolchain::tcnames {
 inline constexpr const char *kEnvCC = "CC";     ///< overrides the compiler
 inline constexpr const char *kDefaultCC = "cc"; ///< when $CC is unset
 inline constexpr const char *kFlagStd = "-std=c11";
-inline constexpr const char *kFlagNoWarnings = "-w";
 inline constexpr const char *kFlagInclude = "-I"; ///< -I<dir>
 inline constexpr const char *kFlagCompileOnly = "-c";
 inline constexpr const char *kFlagOutput = "-o";

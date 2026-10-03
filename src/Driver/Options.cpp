@@ -164,11 +164,13 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
         }
         level = argv[++i];
       }
-      if (!parseLevel(level, o.OptLevel)) {
+      unsigned value = 0;
+      if (!parseLevel(level, value)) {
         r.Error = "invalid optimization level '" + std::string(level) +
                   "' (expected -O0 .. -O3)";
         return r;
       }
+      o.OptLevel = value;
       continue;
     }
 
@@ -230,7 +232,8 @@ void printUsage(std::ostream &os, const char *argv0) {
      << "  --backend=<name>  - Generate code with the named backend "
         "(--list-backends)\n"
      << "  -o <file>         - Output file of `build`\n"
-     << "  -O<n>             - Optimization level (0-3)\n"
+     << "  -O<n>             - Optimization level (0-3, default "
+     << kDefaultOptLevel << "; -O0 for debugging)\n"
      << "  --version, -v     - Print the version and exit\n"
      << "  --help, -h        - Print this help and exit\n";
 }

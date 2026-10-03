@@ -4,6 +4,7 @@
 #
 #   cmake --install <paykan-build> --prefix <prefix>
 #   cmake -B build -DCMAKE_PREFIX_PATH=<prefix> examples/backends/print-pir
+#       [-DLLVM_DIR=<llvm>/lib/cmake/llvm]   # if the installation has the llvm backend
 #   cmake --build build
 #   build/paykan-print-pir --backend=print-pir --emit-source program.pkn
 #

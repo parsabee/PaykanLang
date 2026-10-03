@@ -66,7 +66,11 @@ inline constexpr const char *kRtIntPtr = "PaykanInt *";
 inline constexpr const char *kRtFloatPtr = "PaykanFloat *";
 inline constexpr const char *kRtBoolPtr = "PaykanBool *";
 inline constexpr const char *kRtCharPtr = "PaykanChar *";
-inline constexpr const char *kRtVTablePtr = "PaykanObjectVTable *";
+/// A vtable slot (Runtime.h): the generic function-pointer type every
+/// vtable -- the runtime's and the generated `pkvt_<class>` -- is an array of.
+inline constexpr const char *kRtMethod = "PaykanMethod";
+/// Reads any object's vtable pointer (Runtime.h), whatever its struct type.
+inline constexpr const char *kRtVTableOf = "Paykan_vtable_of";
 
 // The header fields of every Paykan object struct (PaykanObject's layout).
 inline constexpr const char *kFieldVTable = "vtable";
@@ -194,8 +198,7 @@ inline constexpr const char *kBytesSuffix = "_kinds";
 /// `pknew_<class sym>`.
 inline constexpr const char *kVTablePrefix = "pkvt_";
 inline constexpr const char *kNewPrefix = "pknew_";
-/// The emitter's own helpers (prelude).
-inline constexpr const char *kHelperFnType = "pkrt_fn";
+/// The emitter's own helpers (prelude, emitted only when a unit uses them).
 inline constexpr const char *kHelperF64Bits = "pkrt_f64_bits";
 inline constexpr const char *kHelperBitsF64 = "pkrt_bits_f64";
 /// PIR values: `v<id>` or `v<id>_<name>`.

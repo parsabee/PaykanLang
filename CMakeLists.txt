@@ -61,9 +61,15 @@ endif()
 if("bison" IN_LIST PAYKAN_FRONTENDS)
     include(BisonFlexSetup) # -> bison_ext, flex_ext ExternalProject targets
 endif()
-include(GTestSetup)         # -> gtest, gmock       via FetchContent
 
-enable_testing()
+# The test suite (GoogleTest) is built by default only when PaykanLang is the
+# top-level project.  -DPAYKAN_BUILD_TESTS=OFF skips it, and with it the
+# GoogleTest download: packagers and offline builds need no network.
+option(PAYKAN_BUILD_TESTS "Build the test suite (needs GoogleTest)" ${PROJECT_IS_TOP_LEVEL})
+if(PAYKAN_BUILD_TESTS)
+    include(GTestSetup)     # -> gtest, gmock       installed or via FetchContent
+    enable_testing()
+endif()
 
 # -- Project compile options --------------------------------------------------
 # INTERFACE library that carries warnings, RTTI/exception policy, and
@@ -105,7 +111,9 @@ target_include_directories(paykan_compile_options INTERFACE
 
 # -- Subdirectories -----------------------------------------------------------
 add_subdirectory(src)
-add_subdirectory(tests)
+if(PAYKAN_BUILD_TESTS)
+    add_subdirectory(tests)
+endif()
 
 # -- Install rules and the find_package(Paykan) package -----------------------
 include(PaykanExport)

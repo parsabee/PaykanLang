@@ -108,7 +108,7 @@ void ASTContext::buildStringType() {
 
 // -- Bootstrap Array -------------------------------------------------------
 //
-// Array is a subtype of Obj.  Its vtable mirrors PaykanArrayVTable:
+// Array is a subtype of Obj.  Its vtable mirrors Runtime.h's PaykanArray slots:
 //   vtable : [ destroy(override), toString(override), equals(override),
 //              len(new) ]
 //

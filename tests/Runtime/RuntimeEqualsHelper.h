@@ -20,11 +20,11 @@ extern "C" {
 #include "Runtime.h"
 }
 
-inline int64_t paykanTestEquals(int64_t (*fn)(PaykanObject *, PaykanObject *),
+inline int64_t paykanTestEquals(int64_t (*fn)(PaykanObject *, PaykanShared *),
                                 PaykanObject *self, PaykanObject *other) {
   PaykanShared *box = PaykanShared_new(other);
   Paykan_retain(box); // offset the release performed by the callee
-  int64_t result = fn(self, reinterpret_cast<PaykanObject *>(box));
+  int64_t result = fn(self, box);
   // Drop the final reference without destroying `other` (the test owns it):
   // detach the object from the box, then release — refcount hits zero with a
   // null object, so only the shell is freed. Clearing the backpointer keeps

@@ -39,7 +39,7 @@ class ASTContext {
   // Canonical class types.
   ClassType *ObjTy;
   ClassType *StrTy;
-  // Canonical array type (ClassType with vtable matching PaykanArrayVTable).
+  // Canonical array type (ClassType with vtable matching PAYKAN_SLOT_ARRAY_*).
   ClassType *ArrayTy;
   // Canonical file type (ClassType inheriting Obj).
   ClassType *FileTy;

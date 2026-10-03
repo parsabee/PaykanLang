@@ -13,6 +13,8 @@ extern "C" {
 #include "Runtime.h"
 }
 
+#include "VTableTestHelper.h"
+
 // ============================================================================
 // Reference counting and unboxing
 // ============================================================================
@@ -108,12 +110,12 @@ TEST(OptionalNull, DestroyObjArrayWithMixedNullSlots) {
     PaykanArray_set_obj(arr, 1, s);
     Paykan_release(s); // array now sole owner
     // toString / equals never touch the (NULL) elements.
-    PaykanShared *str = arr->vtable->toString((PaykanObject *)arr);
+    PaykanShared *str = vtToString(arr)((PaykanObject *)arr);
     EXPECT_NE(PaykanShared_get(str), nullptr);
     Paykan_release(str);
     PaykanShared *box = PaykanShared_new((PaykanObject *)arr);
     Paykan_retain(box);
-    EXPECT_EQ(arr->vtable->equals((PaykanObject *)arr, (PaykanObject *)box), 1);
+    EXPECT_EQ(vtEquals(arr)((PaykanObject *)arr, box), 1);
     Paykan_release(box); // destroys array: releases slot 1, skips NULLs
   }
   EXPECT_EQ(Paykan_heap_live_blocks(), 0);

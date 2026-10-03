@@ -393,7 +393,7 @@ TEST(TupleEquals, DoesNotLeakOrDoubleFree) {
     // arrives as a +1 box that equals releases.
     PaykanShared *bb = PaykanShared_new((PaykanObject *)b);
     Paykan_retain(bb);
-    EXPECT_EQ(PaykanTuple_equals((PaykanObject *)a, (PaykanObject *)bb), 1);
+    EXPECT_EQ(PaykanTuple_equals((PaykanObject *)a, bb), 1);
     Paykan_release(bb); // destroys b
     PaykanTuple_destroy((PaykanObject *)a);
   }

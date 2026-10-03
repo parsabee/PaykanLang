@@ -35,7 +35,7 @@ TEST(BoxedInt, New) {
 
 TEST(BoxedInt, VtableIsIntVtable) {
   PaykanInt *i = PaykanInt_new(0);
-  EXPECT_EQ(i->vtable, &PaykanInt_vtable);
+  EXPECT_EQ(i->vtable, PaykanInt_vtable);
   PaykanInt_destroy((PaykanObject *)i);
 }
 
@@ -96,7 +96,7 @@ TEST(BoxedInt, FromStrValid) {
   ASSERT_NE(result, nullptr);
   PaykanObject *inner = PaykanShared_get(result);
   ASSERT_NE(inner, nullptr);
-  EXPECT_EQ(inner->vtable, &PaykanInt_vtable);
+  EXPECT_EQ(inner->vtable, PaykanInt_vtable);
   EXPECT_EQ(((PaykanInt *)inner)->value, 42);
   Paykan_release(result);
   PaykanString_destroy(strObj);
@@ -135,7 +135,7 @@ TEST(BoxedInt, FromStrNegative) {
   PaykanObject *strObj = (PaykanObject *)PaykanString_new("-7", 2);
   PaykanShared *result = PaykanInt_from_str(strObj);
   PaykanObject *inner = PaykanShared_get(result);
-  EXPECT_EQ(inner->vtable, &PaykanInt_vtable);
+  EXPECT_EQ(inner->vtable, PaykanInt_vtable);
   EXPECT_EQ(((PaykanInt *)inner)->value, -7);
   Paykan_release(result);
   PaykanString_destroy(strObj);
@@ -154,7 +154,7 @@ TEST(BoxedFloat, New) {
 
 TEST(BoxedFloat, VtableIsFloatVtable) {
   PaykanFloat *f = PaykanFloat_new(0.0);
-  EXPECT_EQ(f->vtable, &PaykanFloat_vtable);
+  EXPECT_EQ(f->vtable, PaykanFloat_vtable);
   PaykanFloat_destroy((PaykanObject *)f);
 }
 
@@ -191,7 +191,7 @@ TEST(BoxedFloat, FromStrValid) {
   PaykanObject *strObj = (PaykanObject *)PaykanString_new("1.5", 3);
   PaykanShared *result = PaykanFloat_from_str(strObj);
   PaykanObject *inner = PaykanShared_get(result);
-  EXPECT_EQ(inner->vtable, &PaykanFloat_vtable);
+  EXPECT_EQ(inner->vtable, PaykanFloat_vtable);
   EXPECT_DOUBLE_EQ(((PaykanFloat *)inner)->value, 1.5);
   Paykan_release(result);
   PaykanString_destroy(strObj);
@@ -297,7 +297,7 @@ TEST(BoxedBool, NewFalse) {
 
 TEST(BoxedBool, VtableIsBoolVtable) {
   PaykanBool *b = PaykanBool_new(1);
-  EXPECT_EQ(b->vtable, &PaykanBool_vtable);
+  EXPECT_EQ(b->vtable, PaykanBool_vtable);
   PaykanBool_destroy((PaykanObject *)b);
 }
 
@@ -340,7 +340,7 @@ TEST(BoxedBool, FromStrAcceptsExactlyTrueAndFalse) {
   PaykanShared *f = parseBool("False", 5);
   ASSERT_NE(t, nullptr);
   ASSERT_NE(f, nullptr);
-  EXPECT_EQ(PaykanShared_get(t)->vtable, &PaykanBool_vtable);
+  EXPECT_EQ(PaykanShared_get(t)->vtable, PaykanBool_vtable);
   EXPECT_EQ(PaykanBool_value(PaykanShared_get(t)), 1);
   EXPECT_EQ(PaykanBool_value(PaykanShared_get(f)), 0);
   Paykan_release(t);
@@ -365,7 +365,7 @@ TEST(BoxedBool, FromStrRejectsEverythingElse) {
 TEST(BoxedChar, NewValueAndVtable) {
   PaykanChar *c = PaykanChar_new('q');
   ASSERT_NE(c, nullptr);
-  EXPECT_EQ(c->vtable, &PaykanChar_vtable);
+  EXPECT_EQ(c->vtable, PaykanChar_vtable);
   EXPECT_EQ(c->shared, nullptr);
   EXPECT_EQ(PaykanChar_value((PaykanObject *)c), 'q');
   PaykanChar_destroy((PaykanObject *)c);
@@ -430,7 +430,7 @@ TEST(BoxedError, New) {
 
 TEST(BoxedError, VtableIsErrorVtable) {
   PaykanError *e = PaykanError_new("err", 3);
-  EXPECT_EQ(e->vtable, &PaykanError_vtable);
+  EXPECT_EQ(e->vtable, PaykanError_vtable);
   PaykanError_destroy((PaykanObject *)e);
 }
 

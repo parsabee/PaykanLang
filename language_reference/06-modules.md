@@ -155,27 +155,35 @@ in a compilation error.
 
 ## Compilation Cache
 
-Imported modules are compiled to LLVM bitcode once and cached on disk, so a project whose
-modules have not changed only re-generates code for the main file on the next run. The main
-file itself is never cached.
+Compiled modules are cached on disk, so a project whose modules have not changed only
+re-generates code for what did change on the next run or build. Both backends keep their
+entries in one directory, `.paykan_cache/`, side by side; each backend reads only its own files.
+
+| Backend | Entries for module `a::b::c` (`a/b/c.pkn`) | Main file |
+|---------|--------------------------------|-----------|
+| llvm | `.paykan_cache/a/b/c.bc` (LLVM bitcode, key stored inside) | never cached |
+| c | `.paykan_cache/a/b/c.c` (generated C), `c.o` (object), `c.key` (key) | cached the same way, by its file stem (`main.c`, ...) |
 
 - **Location.** The cache lives in `.paykan_cache/` **under the source root** (the main
-  file's directory), mirroring the module layout: `a/b/c.pkn` is cached as
-  `.paykan_cache/a/b/c.bc`. It does not depend on the directory the compiler is launched
-  from, so `paykan proj/main.pkn` and `cd proj && paykan main.pkn` share one cache. A module
-  resolved from outside the source root (for example a system module located through
-  `PAYKAN_STDLIB`) is cached under the same directory, keyed by its full path.
-- **Validity.** Every entry is stamped with a key derived from the module's **source
-  text**, the keys of **every module it imports** (recursively), and the compiler and
-  generated-code ABI versions. An entry is used only when it was written under exactly the
-  key computed for the current compile. Editing a module therefore invalidates it *and*
-  every module that imports it, directly or transitively — a changed class layout or
+  file's directory), named by the module's canonical name: `a::b::c` is cached as
+  `.paykan_cache/a/b/c.*`. It does not depend on the directory the compiler is launched
+  from, so `paykan proj/main.pkn` and `cd proj && paykan main.pkn` share one cache. A system
+  module (`import ::io`, located through `PAYKAN_STDLIB`) is cached under
+  `.paykan_cache/@system/`.
+- **Validity.** An entry is used only when it was written under exactly the key computed for
+  the current compile. The llvm backend's key covers the module's PIR (which spells out every
+  class layout and function signature it uses from the modules it imports), the compiler
+  build, the LLVM version and the generated-code ABI version. The c backend's key covers the
+  module's generated C, the C compiler and its flags, a hash of `Runtime.h`, the paykan
+  version, and the size and hash of the cached object. Editing a module therefore
+  invalidates it *and* every module whose code depends on it — a changed class layout or
   function signature in `base` never leaks stale code into `mid` or `main`. Timestamps are
   not used.
 - **Robustness.** Entries are written atomically (to a temporary file that is then renamed
-  into place). An entry that is missing, truncated, corrupt, or produced by a different
-  compiler build is ignored and regenerated. The directory is purely a cache: deleting it
-  at any time is safe and only costs a recompile.
+  into place; the c backend writes the object before its `.key`). An entry that is missing,
+  truncated, corrupt, or written under a different key is ignored and regenerated.
+  The directory is purely a cache: deleting it at any time is safe and only costs a
+  recompile. `docs/c-backend.md` describes the c backend's entries in more detail.
 
 ---
 

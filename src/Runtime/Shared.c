@@ -3,7 +3,7 @@
 //
 // Paykan runtime — Shared (reference-counted) wrapper implementation.
 
-#include "Runtime.h"
+#include "RuntimeInternal.h"
 
 #include <stdlib.h>
 
@@ -45,7 +45,7 @@ void Paykan_release(PaykanShared *shared) {
       // unboxed state instead of leaving a dangling pointer to the freed box.
       if (obj->shared == shared)
         obj->shared = (PaykanShared *)0;
-      obj->vtable->destroy(obj);
+      Paykan_vcall_destroy(obj);
     }
     Paykan_free(shared);
   }

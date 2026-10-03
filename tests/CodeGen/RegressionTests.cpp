@@ -763,3 +763,48 @@ fn main() -> int {
   g.expectNoLeaks("ImportedClassMethodAndImporterFunctionWithTheOldName");
   std::filesystem::remove_all(dir);
 }
+
+// ============================================================================
+// Issue #95: push/pop at the array capacity boundary thrashed (two reallocs
+// per pair).  The issue's repro, scaled down: peak 100,000 (cap 131,072),
+// then 20,000 push/pop pairs at len 65,536 = cap/2.
+// ============================================================================
+
+TEST(Regression, ArrayPushPopAtCapacityBoundary) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Item {}
+    fn main() -> int {
+      xs: int[] = [];
+      os: Item[] = [];
+      i = 0;
+      while (i < 100000) { xs.push(i); os.push(Item()); i = i + 1; }
+      while (xs.len() > 65536) { xs.pop(); os.pop(); }
+      k = 0;
+      sum = 0;
+      while (k < 20000) {
+        xs.push(k);
+        sum = sum + xs.pop();
+        os.push(Item());
+        os.pop();
+        k = k + 1;
+      }
+      println(Str(xs.len()));
+      println(Str(os.len()));
+      println(Str(sum));
+      println(Str(xs[65535]));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "65536\n65536\n199990000\n65535\n");
+  g.expectNoLeaks("array push/pop at capacity boundary");
+  // The JIT runs in process, so the realloc counter is the program's own:
+  // growth to 131,072 is 15 doublings per array, and the boundary loop adds
+  // none (it was 2 x 2 x 20,000 before the fix).  The C backend runs the same
+  // runtime in a child; tests/Runtime/ArrayTests.cpp covers it directly.
+  if (testBackend() == "llvm") {
+    EXPECT_LE(Paykan_heap_total_reallocs(), 100);
+  }
+}

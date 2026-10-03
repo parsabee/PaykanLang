@@ -8,6 +8,11 @@
 //
 // Every piece of C syntax written here (keywords, types, operators,
 // punctuation, escapes, mangling affixes) is a constant from CNames.h.
+//
+// The output is strictly conforming ISO C11 under the target assumptions
+// Runtime.h checks (docs/c-backend.md): no compiler extensions, and nothing
+// a `-std=c11 -pedantic-errors -Wall -Wextra -Werror` build rejects, so
+// nothing is emitted that the unit does not use (CStrictC11 ctest).
 
 #include "CNames.h"
 #include "Names.h"
@@ -17,6 +22,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <unordered_map>
@@ -120,7 +126,7 @@ const RuntimeProto kRuntimeProtos[] = {
     {names::kPaykanStringFromFloat, kRtStrPtr, {kDouble}},
     {names::kPaykanStringFromBool, kRtStrPtr, {kInt64}},
     {names::kPaykanStringFromChar, kRtStrPtr, {kInt8}},
-    {names::kPaykanStringEquals, kInt64, {kRtObjPtr, kRtObjPtr}},
+    {names::kPaykanStringEquals, kInt64, {kRtObjPtr, kRtBoxPtr}},
     {names::kPaykanStringToString, kRtBoxPtr, {kRtObjPtr}},
     {names::kPaykanStringLength, kInt64, {kRtObjPtr}},
     {names::kPaykanArrayNew, kRtArrPtr, {kUnsignedLong}},
@@ -155,10 +161,10 @@ const RuntimeProto kRuntimeProtos[] = {
     {names::kPaykanErrPrintln, kVoid, {kRtObjPtr}},
     {names::kPaykanObjectDestroy, kVoid, {kRtObjPtr}},
     {names::kPaykanObjectToString, kRtBoxPtr, {kRtObjPtr}},
-    {names::kPaykanObjectEquals, kInt64, {kRtObjPtr, kRtObjPtr}},
+    {names::kPaykanObjectEquals, kInt64, {kRtObjPtr, kRtBoxPtr}},
     {names::kPaykanFileDestroy, kVoid, {kRtObjPtr}},
     {names::kPaykanFileToString, kRtBoxPtr, {kRtObjPtr}},
-    {names::kPaykanFileEquals, kInt64, {kRtObjPtr, kRtObjPtr}},
+    {names::kPaykanFileEquals, kInt64, {kRtObjPtr, kRtBoxPtr}},
     {names::kPaykanFileWrite, kVoid, {kRtObjPtr, kRtObjPtr}},
     {names::kPaykanFileReadln, kRtBoxPtr, {kRtObjPtr}},
 };
@@ -292,6 +298,104 @@ std::string fmtF64(double v) {
   return s;
 }
 
+// -- Use analysis -------------------------------------------------------------
+
+/// The value of an `if` whose condition is a literal: only that branch is
+/// emitted, as a plain block.
+const bool *literalCond(const pir::If &s) {
+  return std::get_if<bool>(&s.Cond.V);
+}
+
+/// Calls @p onInstr on every instruction of @p b (nested regions included)
+/// and @p onUse on every operand a non-instruction statement reads (`if` and
+/// loop conditions, returned values).
+template <typename InstrFn, typename UseFn>
+void forEachInstr(const pir::Block &b, InstrFn &onInstr, UseFn &onUse) {
+  for (const auto &st : b.Stmts) {
+    if (const auto *i = std::get_if<pir::Instr>(&st)) {
+      onInstr(*i);
+    } else if (const auto *s = std::get_if<pir::If>(&st)) {
+      onUse(s->Cond);
+      const bool *lit = literalCond(*s);
+      if (!lit || *lit)
+        forEachInstr(*s->Then, onInstr, onUse);
+      if (s->Else && (!lit || !*lit))
+        forEachInstr(*s->Else, onInstr, onUse);
+    } else if (const auto *w = std::get_if<pir::While>(&st)) {
+      forEachInstr(*w->CondBlock, onInstr, onUse);
+      onUse(w->Cond);
+      forEachInstr(*w->Body, onInstr, onUse);
+    } else if (const auto *r = std::get_if<pir::Return>(&st)) {
+      if (r->Value)
+        onUse(*r->Value);
+    }
+  }
+}
+
+/// Whether an instruction must run even when its result is unused.
+bool hasSideEffects(const pir::Instr &i) {
+  using pir::Opcode;
+  switch (i.Op) {
+  case Opcode::Call:
+  case Opcode::VCall:
+  case Opcode::Box:
+  case Opcode::New:
+  case Opcode::Retain:
+  case Opcode::Release:
+  case Opcode::Free:
+  case Opcode::FieldStore:
+    return true;
+  default:
+    return false; // a Store is live while its local is read (FunctionUses)
+  }
+}
+
+/// What a function's C reads, so that nothing unread is emitted (an unread
+/// local or value is a -Wunused-(but-set-)variable warning): the values and
+/// locals still read once dead instructions are dropped.  Dead means a
+/// side-effect-free instruction whose result nothing live reads, or a store
+/// to a local that nothing live loads; dropping one can kill more, so this
+/// iterates to a fixpoint.
+struct FunctionUses {
+  std::set<pir::ValueId> Values;
+  std::vector<bool> Locals;
+
+  bool live(const pir::Instr &i) const {
+    if (i.Op == pir::Opcode::Store)
+      return i.Local < Locals.size() && Locals[i.Local];
+    if (hasSideEffects(i) || i.Result.Ty == Type::Void)
+      return true;
+    return Values.count(i.Result.Id) != 0;
+  }
+
+  explicit FunctionUses(const pir::Function &f) {
+    // Start with everything live, then shrink.
+    bool first = true;
+    for (;;) {
+      std::set<pir::ValueId> values;
+      std::vector<bool> locals(f.Locals.size(), false);
+      auto onUse = [&](const pir::Operand &op) {
+        if (const auto *id = std::get_if<pir::ValueId>(&op.V))
+          values.insert(*id);
+      };
+      auto onInstr = [&](const pir::Instr &i) {
+        if (!first && !live(i))
+          return;
+        if (i.Op == pir::Opcode::Load && i.Local < locals.size())
+          locals[i.Local] = true;
+        for (const auto &a : i.Args)
+          onUse(a);
+      };
+      forEachInstr(f.Body, onInstr, onUse);
+      if (!first && values == Values && locals == Locals)
+        return;
+      Values = std::move(values);
+      Locals = std::move(locals);
+      first = false;
+    }
+  }
+};
+
 // -- The emitter --------------------------------------------------------------
 
 class Emitter {
@@ -310,10 +414,19 @@ class Emitter {
   };
   std::unordered_map<std::string, ClassDef> ClassDefs;
 
+  // What the unit's functions use (scanUnit), so the prelude helpers,
+  // allocators and globals are emitted only when referenced.
+  bool UsesF64Bits = false;
+  bool UsesBitsF64 = false;
+  std::set<std::string> NewClasses;  ///< classes the unit constructs
+  std::set<std::string> UsedGlobals; ///< symKey(module, global)
+
   // Per-function state.
   std::unordered_map<pir::ValueId, std::string> ValueNames;
   std::unordered_map<pir::ValueId, Type> ValueTypes;
   std::vector<std::string> LocalNames;
+  /// What the current function reads (emitFunction).
+  std::unique_ptr<FunctionUses> Uses;
   const pir::Module *CurMod = nullptr;
   size_t CurModIdx = 0;
   int Indent = 0;
@@ -332,14 +445,21 @@ class Emitter {
     Failed = true;
   }
 
+  /// The symbol prefix of module @p m: its canonical name with each "::"
+  /// as kMangleSep (`geometry::shapes` -> geometry_shapes).  Clashes are
+  /// resolved by defineSymbol().
   std::string moduleStem(const pir::Module &m) {
-    std::string stem = m.Name;
-    size_t slash = stem.find_last_of('/');
-    if (slash != std::string::npos)
-      stem = stem.substr(slash + 1);
-    size_t dot = stem.rfind('.');
-    if (dot != std::string::npos && dot > 0)
-      stem = stem.substr(0, dot);
+    std::string stem;
+    const std::string &name = m.Name;
+    for (size_t i = 0; i < name.size(); ++i) {
+      if (name.compare(i, 2, names::kQualSep) == 0) {
+        if (!stem.empty())
+          stem += kMangleSep;
+        ++i;
+        continue;
+      }
+      stem += name[i];
+    }
     return sanitize(stem);
   }
 
@@ -595,15 +715,61 @@ class Emitter {
     for (const char *h : {kMathH, kStdboolH, kStdintH, kStdlibH, kStringH})
       O << kInclude << kSysHeaderOpen << h << kSysHeaderClose << kNewline;
     O << kInclude << quoted(kRuntimeH) << kNewline << kNewline;
-    // typedef void (*pkrt_fn)(void);
-    O << stmt(kTypedef + std::string(kSpace) + kVoid + kSpace +
-              paren(kOpDeref + std::string(kHelperFnType)) + paren(kVoid))
-      << kNewline << kNewline;
-    emitBitCastHelper(kInt64, kHelperF64Bits, kDouble, kHelperDouble,
-                      kHelperInt);
-    emitBitCastHelper(kDouble, kHelperBitsF64, kInt64, kHelperInt,
-                      kHelperDouble);
-    O << kNewline;
+    if (UsesF64Bits)
+      emitBitCastHelper(kInt64, kHelperF64Bits, kDouble, kHelperDouble,
+                        kHelperInt);
+    if (UsesBitsF64)
+      emitBitCastHelper(kDouble, kHelperBitsF64, kInt64, kHelperInt,
+                        kHelperDouble);
+    if (UsesF64Bits || UsesBitsF64)
+      O << kNewline;
+  }
+
+  /// The PIR type of @p op in a function whose values' types are @p types.
+  static Type operandType(const pir::Operand &op,
+                          const std::unordered_map<pir::ValueId, Type> &types) {
+    if (const auto *id = std::get_if<pir::ValueId>(&op.V)) {
+      auto it = types.find(*id);
+      return it == types.end() ? Type::Void : it->second;
+    }
+    if (std::holds_alternative<int64_t>(op.V))
+      return Type::I64;
+    if (std::holds_alternative<double>(op.V))
+      return Type::F64;
+    return Type::Void;
+  }
+
+  /// Record what the unit's functions use (see the members above).
+  void scanUnit() {
+    for (size_t mi : Unit) {
+      const pir::Module &m = P.Modules[mi];
+      for (const auto &f : m.Functions) {
+        if (f.IsExtern)
+          continue;
+        std::unordered_map<pir::ValueId, Type> types;
+        for (const auto &p : f.Params)
+          types[p.Id] = p.Ty;
+        FunctionUses uses(f);
+        auto onUse = [](const pir::Operand &) {};
+        auto onInstr = [&](const pir::Instr &i) {
+          if (i.Result.Ty != Type::Void)
+            types[i.Result.Id] = i.Result.Ty;
+          if (!uses.live(i))
+            return; // not emitted
+          for (const auto &a : i.Args)
+            if (const auto *s = std::get_if<pir::SymbolRef>(&a.V))
+              UsedGlobals.insert(symKey(m.Name, s->Name));
+          if (i.Op == pir::Opcode::New) {
+            NewClasses.insert(i.ClassName);
+          } else if (i.Op == pir::Opcode::Cast && !i.Args.empty()) {
+            Type from = operandType(i.Args[0], types);
+            UsesF64Bits |= from == Type::F64 && i.CastTo == Type::I64;
+            UsesBitsF64 |= from == Type::I64 && i.CastTo == Type::F64;
+          }
+        };
+        forEachInstr(f.Body, onInstr, onUse);
+      }
+    }
   }
 
   // -- Translation units ------------------------------------------------------
@@ -643,8 +809,9 @@ class Emitter {
         note += kSpace + std::string(kSuperNote) + kSpace + c->Super;
       O << classStruct(c->Name) << kSpace << kLBrace << kSpace << comment(note)
         << kNewline;
-      O << kIndentUnit << stmt(declare(kRtVTablePtr, kFieldVTable)) << kNewline
-        << kIndentUnit << stmt(declare(kRtBoxPtr, kFieldShared)) << kNewline;
+      O << kIndentUnit << stmt(declare(pointerTo(kRtMethod), kFieldVTable))
+        << kNewline << kIndentUnit << stmt(declare(kRtBoxPtr, kFieldShared))
+        << kNewline;
       for (const auto &f : c->Fields)
         O << kIndentUnit << stmt(declare(cType(f.Ty), fieldName(f.Name)))
           << kNewline;
@@ -682,16 +849,16 @@ class Emitter {
         if (!d)
           continue;
         if (!inUnit(d->Module)) {
-          // extern pkrt_fn pkvt_X[];
-          O << stmt(kExtern + std::string(kSpace) + kHelperFnType + kSpace +
+          // extern PaykanMethod pkvt_X[];
+          O << stmt(kExtern + std::string(kSpace) + kRtMethod + kSpace +
                     subscript(classVTable(c.Name), ""))
             << kNewline;
           continue;
         }
         const pir::Class &def = *d->Cls;
         const pir::Module &defMod = P.Modules[d->Module];
-        // pkrt_fn pkvt_X[n] = {
-        O << binop(kHelperFnType + std::string(kSpace) +
+        // PaykanMethod pkvt_X[n] = {
+        O << binop(kRtMethod + std::string(kSpace) +
                        subscript(classVTable(c.Name),
                                  std::to_string(
                                      std::max<size_t>(def.VTable.size(), 1))),
@@ -702,9 +869,11 @@ class Emitter {
           if (e.Target.empty())
             O << kNull;
           else
-            O << cast(kHelperFnType) << funcSymbol(defMod, e.Target);
+            O << cast(kRtMethod) << funcSymbol(defMod, e.Target);
           O << kListSep << comment(e.Slot) << kNewline;
         }
+        if (def.VTable.empty()) // C11 has no empty initializer
+          O << kIndentUnit << kNull << kNewline;
         O << stmt(kRBrace) << kNewline;
       }
     }
@@ -714,7 +883,7 @@ class Emitter {
   void emitNewHelpers() {
     for (size_t mi : Unit)
       for (const auto &c : P.Modules[mi].Classes) {
-        if (c.IsExtern)
+        if (c.IsExtern || !NewClasses.count(c.Name))
           continue;
         std::string s = classStruct(c.Name);
         std::string sPtr = pointerTo(s);
@@ -729,7 +898,7 @@ class Emitter {
           << kNewline;
         O << kIndentUnit
           << stmt(binop(member(kNewObj, kFieldVTable), kOpAssign,
-                        cast(kRtVTablePtr) + classVTable(c.Name)))
+                        classVTable(c.Name)))
           << kNewline;
         O << kIndentUnit
           << stmt(binop(member(kNewObj, kFieldShared), kOpAssign, kNull))
@@ -770,28 +939,45 @@ class Emitter {
                       kOpAssign, init))
         << kNewline;
     };
-    for (const auto &g : m.CStrs)
+    // `{0}` for an empty array: C11 has no empty initializer.
+    auto braced = [](const std::vector<std::string> &items) {
+      return kLBrace + (items.empty() ? std::string(kZero) : list(items)) +
+             kRBrace;
+    };
+    auto used = [&](const std::string &name) {
+      return UsedGlobals.count(symKey(m.Name, name)) != 0;
+    };
+    bool any = false;
+    for (const auto &g : m.CStrs) {
+      if (!used(g.Name))
+        continue;
+      any = true;
       global(kChar, symbolOf(m.Name, g.Name), g.Data.size() + 1,
              quoted(escapeCString(g.Data)));
+    }
     for (const auto &g : m.Datas) {
+      if (!used(g.Name))
+        continue;
+      any = true;
       std::vector<std::string> words;
       words.reserve(g.Words.size());
       for (int64_t w : g.Words)
         words.push_back(fmtI64(w));
       global(kInt64, symbolOf(m.Name, g.Name),
-             std::max<size_t>(g.Words.size(), 1),
-             kLBrace + list(words) + kRBrace);
+             std::max<size_t>(g.Words.size(), 1), braced(words));
     }
     for (const auto &g : m.Bytes) {
+      if (!used(g.Name))
+        continue;
+      any = true;
       std::vector<std::string> bytes;
       bytes.reserve(g.Bytes.size());
       for (uint8_t b : g.Bytes)
         bytes.push_back(std::to_string(static_cast<int>(b)));
       global(kUint8, symbolOf(m.Name, g.Name),
-             std::max<size_t>(g.Bytes.size(), 1),
-             kLBrace + list(bytes) + kRBrace);
+             std::max<size_t>(g.Bytes.size(), 1), braced(bytes));
     }
-    if (!m.CStrs.empty() || !m.Datas.empty() || !m.Bytes.empty())
+    if (any)
       O << kNewline;
   }
 
@@ -808,10 +994,15 @@ class Emitter {
     LocalNames.clear();
     for (const auto &p : f.Params)
       defineValue(p);
+    Uses = std::make_unique<FunctionUses>(f);
 
     O << declare(cType(f.Sig.Ret), symbolOf(CurMod->Name, f.Name))
       << signatureC(f.Sig, true, &f.Params) << kSpace << kLBrace << kNewline;
     Indent = 1;
+    // (void)<param>; for a parameter nothing reads (-Wunused-parameter).
+    for (const auto &p : f.Params)
+      if (!Uses->Values.count(p.Id))
+        line(stmt(cast(kVoid) + ValueNames[p.Id]));
 
     // Locals: `l_<name>`, or `l<k>_<name>` for the k-th further local of
     // the same name (shadowing in nested scopes).  The prefix keeps user
@@ -831,9 +1022,12 @@ class Emitter {
       }
       used.insert(nm);
       LocalNames.push_back(nm);
-      line(stmt(declare(cType(f.Locals[i].Ty), nm)));
+      // A local nothing reads is not declared; its stores are dropped.
+      if (Uses->Locals[i])
+        line(stmt(declare(cType(f.Locals[i].Ty), nm)));
     }
     emitBlock(f.Body);
+    Uses.reset();
     Indent = 0;
     O << kRBrace << kNewline << kNewline;
   }
@@ -857,6 +1051,18 @@ class Emitter {
     if (auto *i = std::get_if<pir::Instr>(&st)) {
       emitInstr(*i);
     } else if (auto *s = std::get_if<pir::If>(&st)) {
+      if (const bool *lit = literalCond(*s)) {
+        // `if (true)` / `if (false)`: only the branch taken, as a block.
+        const pir::Block *taken = *lit ? s->Then.get() : s->Else.get();
+        if (taken && !taken->Stmts.empty()) {
+          line(kLBrace);
+          ++Indent;
+          emitBlock(*taken);
+          --Indent;
+          line(kRBrace);
+        }
+        return;
+      }
       if (s->Then->Stmts.empty() && s->Else && !s->Else->Stmts.empty()) {
         line(openBlock(ifHead(kOpNot + operand(s->Cond))));
         ++Indent;
@@ -900,8 +1106,15 @@ class Emitter {
     }
   }
 
+  /// Whether @p i's result is unused (its instruction then runs only for
+  /// its side effects, unbound).
+  bool resultUnused(const pir::Instr &i) const {
+    return i.Result.Ty != Type::Void && !Uses->Values.count(i.Result.Id);
+  }
+
+  /// `<type> <value> = `, or nothing when the result is void or unused.
   std::string resultPrefix(const pir::Instr &i) {
-    if (i.Result.Ty == Type::Void)
+    if (i.Result.Ty == Type::Void || resultUnused(i))
       return "";
     defineValue(i.Result);
     return declare(cType(i.Result.Ty), ValueNames[i.Result.Id]) + kSpace +
@@ -921,6 +1134,8 @@ class Emitter {
 
   void emitInstr(const pir::Instr &i) {
     using pir::Opcode;
+    if (!Uses->live(i))
+      return; // dead: nothing reads its result (FunctionUses)
     std::string pre;
     switch (i.Op) {
     case Opcode::Add:
@@ -1042,7 +1257,7 @@ class Emitter {
                              : arg);
         }
         std::string c = call(fn, args);
-        if (callee->Sig.Ret != Type::Void)
+        if (callee->Sig.Ret != Type::Void && !resultUnused(i))
           c = castResult(c, proto->Ret, callee->Sig.Ret);
         line(stmt(pre + c));
         return;
@@ -1066,11 +1281,12 @@ class Emitter {
         params.emplace_back(kVoid);
       std::string fnTy = cType(i.Sig.Ret) + std::string(kSpace) +
                          paren(kOpDeref) + paren(list(params));
-      // ((<fnTy>)((pkrt_fn *)(<recv>)->vtable)[<slot>])(<args>)
+      // ((<fnTy>)Paykan_vtable_of(<recv>)[<slot>])(<args>): the slot is
+      // read as the PaykanMethod it is, then converted to the method's own
+      // type.
       std::string slotFn =
-          paren(cast(fnTy) + subscript(paren(cast(pointerTo(kHelperFnType)) +
-                                             member(paren(recv), kFieldVTable)),
-                                       std::to_string(i.Slot)));
+          paren(cast(fnTy) +
+                subscript(call(kRtVTableOf, {recv}), std::to_string(i.Slot)));
       std::vector<std::string> args;
       args.reserve(i.Args.size());
       for (const auto &arg : i.Args)
@@ -1118,8 +1334,8 @@ class Emitter {
       return;
     case Opcode::VTableLoad:
       pre = resultPrefix(i);
-      line(stmt(pre + cast(kVoidPtr) +
-                member(paren(operand(i.Args[0])), kFieldVTable)));
+      line(
+          stmt(pre + cast(kVoidPtr) + call(kRtVTableOf, {operand(i.Args[0])})));
       return;
     case Opcode::VTableAddr: {
       pre = resultPrefix(i);
@@ -1231,6 +1447,7 @@ public:
     }
     Unit = std::move(unit);
     collectSymbols();
+    scanUnit();
     emitPrelude();
     emitClassLayouts();
     emitPrototypes();

@@ -308,7 +308,7 @@ scope.
 ## Thread Safety
 
 The reference counting in this release is **not atomic**: it assumes a single thread of execution.
-That is sound for v0.0, which is single-threaded. Thread-safe ARC — counts that can be shared
+That is sound for this release, which is single-threaded. Thread-safe ARC — counts that can be shared
 safely across threads — is part of the language's stated direction toward safe concurrency and
 heterogeneous execution, and is on the roadmap rather than in this release. Do not assume that
 sharing a reference-counted object across threads is safe today.
