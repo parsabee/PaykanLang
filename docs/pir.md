@@ -81,7 +81,7 @@ fn @name(%p0: T0, %p1: T1) -> R {
   ...statements...
 }
 extern fn @Paykan_retain(box) -> void              ; runtime ABI symbol
-extern fn @add(i64, i64) -> i64 module "lib/math"  ; defined in another PIR module
+extern fn @add(i64, i64) -> i64 module "lib::math" ; defined in another PIR module
 extern fn @"x::tag"() -> box module "x" symbol @tag ; named `tag` in module "x"
 ```
 
@@ -113,7 +113,7 @@ program.
 ## 4. Module-level items
 
 ```
-module "<name>"                     ; the resolved source path of the module
+module "<name>"                     ; the canonical module name (`geometry::shapes`; the main module: its file stem)
 
 cstr  @.str0  = "hello\n"  len 6   ; NUL-terminated literal data (`ptr`)
 data  @.arr0  = [1, 2, 3]          ; constant i64 words, primitive array literals (`ptr`)
@@ -418,7 +418,7 @@ The verifier rejects a program when:
 ## 10. Text format summary
 
 ```
-module "samples/codegen/01.pkn"
+module "01"
 cstr @.str0 = "Hello" len 5
 extern fn @PaykanString_new(ptr, i64) -> obj
 extern fn @Paykan_println(obj) -> void

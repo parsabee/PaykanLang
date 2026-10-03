@@ -16,8 +16,9 @@
 #
 # LLVM 17 is the one large dependency; we use Homebrew's llvm@17 and point the
 # build's LLVMSetup fast path at it via -DLLVM_DIR, so no prebuilt LLVM is
-# downloaded during the build. Bison, Flex, and GoogleTest are fetched by the
-# build's own setup modules.
+# downloaded during the build. Bison and Flex are fetched by the build's own
+# setup modules; the test suite (and so GoogleTest) is not built
+# (-DPAYKAN_BUILD_TESTS=OFF).
 #
 # NOTE: `sha256` below is a placeholder. After the v0.0.0 tag exists, set it to
 # the real digest, e.g.:
@@ -38,6 +39,7 @@ class Paykanlang < Formula
     system "cmake", "-S", ".", "-B", "build", "-G", "Ninja",
            "-DCMAKE_BUILD_TYPE=Release",
            "-DLLVM_DIR=#{llvm.opt_prefix}/lib/cmake/llvm",
+           "-DPAYKAN_BUILD_TESTS=OFF",
            *std_cmake_args
     system "cmake", "--build", "build", "--parallel"
     system "cmake", "--install", "build"

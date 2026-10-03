@@ -6,6 +6,8 @@ on:
   # Every pull request, whatever its base: stacked PRs (based on another
   # PR's branch) need CI too.
   pull_request:
+  # Manual runs on any branch (Actions tab -> CI -> "Run workflow").
+  workflow_dispatch:
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -239,11 +241,11 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Barebones build: standard C++ only.  No LLVM, no Bison/Flex, no m4, and
-  # nothing downloaded at configure time (GoogleTest is the one exception, for
-  # the tests).  Proves the acceptance criteria of #16: configure downloads
-  # nothing, `paykan` links no third-party library, the full suite passes on
-  # the C backend, and an out-of-tree backend builds against the installed
-  # package.
+  # nothing downloaded at configure time.  Proves the acceptance criteria of
+  # #16 and #77: with -DPAYKAN_BUILD_TESTS=OFF configure downloads nothing at
+  # all (GoogleTest is fetched only for the test suite), `paykan` links no
+  # third-party library, the full suite passes on the C backend, and an
+  # out-of-tree backend builds against the installed package.
   # ---------------------------------------------------------------------------
   barebones-linux:
     name: Barebones | Linux x86-64
@@ -256,6 +258,20 @@ jobs:
           sudo apt-get update && sudo apt-get install -y ninja-build
           sudo apt-get remove -y bison flex m4 || true
           ! command -v bison && ! command -v flex && ! command -v m4
+
+      # The packager's build (#77): tests off, so not even GoogleTest is fetched.
+      - name: Configure and build with tests off (nothing downloaded)
+        run: |
+          set -o pipefail
+          cmake -B build-notests -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DPAYKAN_FRONTENDS=recursive-descent -DPAYKAN_BACKENDS=c \
+            -DPAYKAN_BUILD_TESTS=OFF 2>&1 | tee configure-notests.log
+          ! grep -i "Downloading\|Fetching\|GTest\|Building Bison\|Building Flex" configure-notests.log
+          test ! -e build-notests/third-party
+          test ! -e build-notests/_deps
+          test ! -e build-notests/CTestTestfile.cmake
+          cmake --build build-notests --parallel
+          build-notests/bin/paykan --version
 
       - name: Cache GoogleTest
         uses: actions/cache@v4
@@ -295,6 +311,41 @@ jobs:
             samples/codegen/01_literals.pkn > example.pir
           build/bin/paykan --emit-pir samples/codegen/01_literals.pkn > driver.pir
           diff example.pir driver.pir
+
+  # ---------------------------------------------------------------------------
+  # Strict C11: the C backend's output for the whole samples corpus compiles
+  # with -std=c11 -pedantic-errors -Wall -Wextra -Werror on GCC and on Clang
+  # (both required here) and runs like `paykan run` (scripts/c_strict.py; the
+  # CStrictC11 ctest runs it with whichever compilers a job has).
+  # ---------------------------------------------------------------------------
+  strict-c11-linux:
+    name: Strict C11 | Linux x86-64 (GCC + Clang)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build gcc clang
+
+      - name: Cache GoogleTest
+        uses: actions/cache@v4
+        with:
+          path: build/third-party/gtest
+          key: gtest-${{ hashFiles('cmake/GTestSetup.cmake') }}
+
+      - name: "Configure (core: recursive-descent frontend, C backend)"
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DPAYKAN_FRONTENDS=recursive-descent -DPAYKAN_BACKENDS=c
+
+      - name: Build
+        run: cmake --build build --parallel --target paykan
+
+      - name: Strict C11 on GCC and Clang
+        run: |
+          gcc --version && clang --version
+          python3 scripts/c_strict.py --paykan build/bin/paykan \
+            --cc gcc --cc clang --build-cc gcc --build-cc clang -v
 
   # ---------------------------------------------------------------------------
   # Frontend differential: both frontends built, every sample and test input

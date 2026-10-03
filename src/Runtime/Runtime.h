@@ -3,12 +3,12 @@
 //
 // Paykan language runtime — C ABI definitions for builtin class types.
 //
-// Every Paykan object begins with a pointer to its class's vtable.
-// The vtable is a flat array of function pointers whose layout mirrors
-// the ClassType::VTable vector built during AST bootstrapping:
+// Every Paykan object begins with a pointer to its class's vtable: an array
+// of PaykanMethod slots (see "Object" below) whose layout mirrors the
+// ClassType::VTable vector built during AST bootstrapping:
 //
-//   Object vtable  : [0] toString  [1] equals
-//   String vtable  : [0] toString  [1] equals  [2] length  [3] concat
+//   Object vtable  : [0] destroy  [1] toString  [2] equals
+//   String vtable  : Object's, then [3] length  [4] concat
 //
 // All runtime functions use C linkage so LLVM IR can reference them
 // directly by name.
@@ -16,9 +16,12 @@
 #ifndef PAYKAN_RUNTIME_H
 #define PAYKAN_RUNTIME_H
 
+#include <float.h>
+#include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,6 +34,48 @@ extern "C" {
 #else
 #define PAYKAN_NORETURN _Noreturn
 #endif
+
+// ============================================================================
+// Target assumptions
+// ============================================================================
+//
+// The runtime, the C backend's generated code (which includes this header)
+// and the LLVM backend all rely on these implementation-defined properties.
+// docs/c-backend.md ("Target assumptions") explains where each one is used.
+// They hold on every supported target (LP64 Linux and macOS); a target that
+// breaks one fails to compile here instead of miscompiling.
+
+#ifdef __cplusplus
+#define PAYKAN_STATIC_ASSERT(cond, msg) static_assert(cond, msg)
+#else
+#define PAYKAN_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
+#endif
+
+#ifndef INTPTR_MAX
+#error "Paykan needs intptr_t (pointers are stored in 8-byte integer slots)"
+#endif
+
+PAYKAN_STATIC_ASSERT(CHAR_BIT == 8, "Paykan needs 8-bit bytes");
+PAYKAN_STATIC_ASSERT(sizeof(void *) == 8 && sizeof(intptr_t) == 8,
+                     "Paykan needs 8-byte pointers (an LP64 target)");
+PAYKAN_STATIC_ASSERT(sizeof(unsigned long) == 8,
+                     "Paykan needs an 8-byte unsigned long (an LP64 target)");
+PAYKAN_STATIC_ASSERT(sizeof(void (*)(void)) == sizeof(void *),
+                     "Paykan needs function pointers the size of a pointer");
+PAYKAN_STATIC_ASSERT(sizeof(double) == 8 && sizeof(int64_t) == sizeof(double),
+                     "Paykan needs an 8-byte double");
+// IEEE 754 binary64 doubles.  __STDC_IEC_559__ (full Annex F conformance) is
+// not required: glibc's compilers define it, Apple's clang does not, and the
+// generated code only relies on the binary64 format, its NaN and infinity.
+PAYKAN_STATIC_ASSERT(FLT_RADIX == 2 && DBL_MANT_DIG == 53 &&
+                         DBL_MAX_EXP == 1024 && DBL_MIN_EXP == -1021,
+                     "Paykan needs IEEE 754 binary64 doubles");
+// Two's complement, and an out-of-range conversion to a signed type wraps
+// modulo 2^N (C11 6.3.1.3p3 leaves it implementation-defined): integer
+// arithmetic is done in uint64_t and converted back to int64_t.
+PAYKAN_STATIC_ASSERT(~0 == -1 && (int64_t)UINT64_MAX == -1 &&
+                         (int64_t)(UINT64_C(1) << 63) == INT64_MIN,
+                     "Paykan needs two's complement, wrapping conversions");
 
 // ============================================================================
 // Forward declarations
@@ -59,16 +104,50 @@ typedef struct PaykanArray PaykanArray;
 // constructors in CodeGen) must initialise `shared` to NULL; PaykanShared_new
 // installs the backpointer and Paykan_release clears it when the box dies.
 
-typedef struct PaykanObjectVTable {
-  void (*destroy)(PaykanObject *self);
-  PaykanShared *(*toString)(PaykanObject *self);
-  int64_t (*equals)(PaykanObject *self, PaykanObject *other);
-} PaykanObjectVTable;
+// A vtable is an array of PaykanMethod, the generic function-pointer type:
+// every slot holds a method converted to `void (*)(void)` and is converted
+// back to the method's own type before the call (C11 6.3.2.3p8 guarantees
+// the round trip).  The runtime's vtables and the generated code's
+// (`pkvt_<class>`, both backends) are all declared this way, so every slot is
+// read through its declared type.  The slot numbers below are shared by
+// every class: a subclass's vtable starts with its superclass's slots.
+typedef void (*PaykanMethod)(void);
+
+enum {
+  // Object (every class)
+  PAYKAN_SLOT_DESTROY = 0,   // void (*)(PaykanObject *self)
+  PAYKAN_SLOT_TO_STRING = 1, // PaykanShared *(*)(PaykanObject *self)
+  PAYKAN_SLOT_EQUALS = 2,    // int64_t (*)(PaykanObject *self, PaykanShared *)
+  PAYKAN_OBJECT_SLOTS = 3,
+  // String
+  PAYKAN_SLOT_STRING_LENGTH = 3, // int64_t (*)(PaykanObject *self)
+  PAYKAN_SLOT_STRING_CONCAT = 4, // void (*)(PaykanObject *self, *other)
+  PAYKAN_STRING_SLOTS = 5,
+  // File
+  PAYKAN_SLOT_FILE_WRITE = 3,     // void (*)(PaykanObject *self, *str)
+  PAYKAN_SLOT_FILE_READLN = 4,    // PaykanShared *(*)(PaykanObject *self)
+  PAYKAN_SLOT_FILE_READBYTES = 5, // PaykanShared *(*)(PaykanObject *, int64_t)
+  PAYKAN_SLOT_FILE_READ = 6,      // PaykanShared *(*)(PaykanObject *self)
+  PAYKAN_FILE_SLOTS = 7,
+  // Array
+  PAYKAN_SLOT_ARRAY_LENGTH = 3, // int64_t (*)(PaykanObject *self)
+  PAYKAN_ARRAY_SLOTS = 4
+};
 
 struct PaykanObject {
-  PaykanObjectVTable *vtable;
+  PaykanMethod *vtable; // this class's vtable (PAYKAN_SLOT_*)
   PaykanShared *shared; // unique-box backpointer (header slot 1)
 };
+
+/// The vtable of any Paykan object, whatever its struct type: the header's
+/// first word, copied out with memcpy so that it is never read through an
+/// lvalue of another struct type (C11 6.5p7).  The generated C reads every
+/// vtable this way.
+static inline PaykanMethod *Paykan_vtable_of(const void *obj) {
+  PaykanMethod *vtable;
+  memcpy(&vtable, obj, sizeof vtable);
+  return vtable;
+}
 
 // Constructor.  Test-only: CodeGen never emits a call to this symbol (user
 // `Obj()` construction goes through the generated class machinery); it is kept
@@ -78,10 +157,10 @@ PaykanObject *PaykanObject_new(void);
 // Default method implementations.
 void PaykanObject_destroy(PaykanObject *self);
 PaykanShared *PaykanObject_toString(PaykanObject *self);
-int64_t PaykanObject_equals(PaykanObject *self, PaykanObject *other);
+int64_t PaykanObject_equals(PaykanObject *self, PaykanShared *other);
 
 // Global vtable instance.
-extern PaykanObjectVTable PaykanObject_vtable;
+extern PaykanMethod PaykanObject_vtable[PAYKAN_OBJECT_SLOTS];
 
 // Singleton None instance — an Obj whose toString returns "None".
 extern PaykanObject PaykanObject_None;
@@ -93,7 +172,7 @@ extern PaykanObject PaykanObject_None;
 // Boxed 64-bit signed integer.  Inherits Object.
 
 typedef struct PaykanInt {
-  PaykanObjectVTable *vtable;
+  PaykanMethod *vtable;
   PaykanShared *shared; // object header (see PaykanObject)
   int64_t value;
 } PaykanInt;
@@ -103,9 +182,9 @@ PaykanInt *PaykanInt_new(int64_t value);
 int64_t PaykanInt_value(PaykanObject *self);
 void PaykanInt_destroy(PaykanObject *self);
 PaykanShared *PaykanInt_toString(PaykanObject *self);
-int64_t PaykanInt_equals(PaykanObject *self, PaykanObject *other);
+int64_t PaykanInt_equals(PaykanObject *self, PaykanShared *other);
 
-extern PaykanObjectVTable PaykanInt_vtable;
+extern PaykanMethod PaykanInt_vtable[PAYKAN_OBJECT_SLOTS];
 
 /// `int<Str>(s)`: parse a Str as a decimal integer (an optional sign and
 /// digits, the whole string, no surrounding whitespace, within int64).
@@ -120,7 +199,7 @@ PaykanShared *PaykanInt_from_str(PaykanObject *str);
 // Boxed 64-bit IEEE 754 double.  Inherits Object.
 
 typedef struct PaykanFloat {
-  PaykanObjectVTable *vtable;
+  PaykanMethod *vtable;
   PaykanShared *shared; // object header (see PaykanObject)
   double value;
 } PaykanFloat;
@@ -130,9 +209,9 @@ PaykanFloat *PaykanFloat_new(double value);
 double PaykanFloat_value(PaykanObject *self);
 void PaykanFloat_destroy(PaykanObject *self);
 PaykanShared *PaykanFloat_toString(PaykanObject *self);
-int64_t PaykanFloat_equals(PaykanObject *self, PaykanObject *other);
+int64_t PaykanFloat_equals(PaykanObject *self, PaykanShared *other);
 
-extern PaykanObjectVTable PaykanFloat_vtable;
+extern PaykanMethod PaykanFloat_vtable[PAYKAN_OBJECT_SLOTS];
 
 /// `float<Str>(s)`: parse a Str as a floating-point number (C `strtod`
 /// syntax, including `nan` and `inf`; the whole string, no leading
@@ -147,7 +226,7 @@ PaykanShared *PaykanFloat_from_str(PaykanObject *str);
 // Boxed boolean (stored as int64_t 0/1).  Inherits Object.
 
 typedef struct PaykanBool {
-  PaykanObjectVTable *vtable;
+  PaykanMethod *vtable;
   PaykanShared *shared; // object header (see PaykanObject)
   int64_t value;        // 0 = False, 1 = True
 } PaykanBool;
@@ -159,9 +238,9 @@ PaykanBool *PaykanBool_new(int64_t value);
 int64_t PaykanBool_value(PaykanObject *self);
 void PaykanBool_destroy(PaykanObject *self);
 PaykanShared *PaykanBool_toString(PaykanObject *self);
-int64_t PaykanBool_equals(PaykanObject *self, PaykanObject *other);
+int64_t PaykanBool_equals(PaykanObject *self, PaykanShared *other);
 
-extern PaykanObjectVTable PaykanBool_vtable;
+extern PaykanMethod PaykanBool_vtable[PAYKAN_OBJECT_SLOTS];
 
 /// `bool<Str>(s)` / `Bool<Str>(s)`: parse exactly "True" or "False" (the
 /// spellings `Str<bool>` prints; case-sensitive, the whole string).  Returns
@@ -177,7 +256,7 @@ PaykanShared *PaykanBool_from_str(PaykanObject *str);
 // Inherits Object.  Only a present `char?` is boxed.
 
 typedef struct PaykanChar {
-  PaykanObjectVTable *vtable;
+  PaykanMethod *vtable;
   PaykanShared *shared; // object header (see PaykanObject)
   int8_t value;
 } PaykanChar;
@@ -187,32 +266,22 @@ PaykanChar *PaykanChar_new(int8_t value);
 int8_t PaykanChar_value(PaykanObject *self);
 void PaykanChar_destroy(PaykanObject *self);
 PaykanShared *PaykanChar_toString(PaykanObject *self);
-int64_t PaykanChar_equals(PaykanObject *self, PaykanObject *other);
+int64_t PaykanChar_equals(PaykanObject *self, PaykanShared *other);
 
-extern PaykanObjectVTable PaykanChar_vtable;
+extern PaykanMethod PaykanChar_vtable[PAYKAN_OBJECT_SLOTS];
 
 // ============================================================================
 // String
 // ============================================================================
 //
-// Inherits Object.  The first two vtable slots match Object's layout;
-// additional slots follow for String-specific methods.
-
-typedef struct PaykanStringVTable {
-  // Inherited (Object-compatible prefix)
-  void (*destroy)(PaykanObject *self);
-  PaykanShared *(*toString)(PaykanObject *self);
-  int64_t (*equals)(PaykanObject *self, PaykanObject *other);
-  // String-specific
-  int64_t (*length)(PaykanObject *self);
-  void (*concat)(PaykanObject *self, PaykanObject *other);
-} PaykanStringVTable;
+// Inherits Object.  The first three vtable slots match Object's layout;
+// String-specific slots follow (PAYKAN_SLOT_STRING_*).
 
 struct PaykanString {
-  PaykanObjectVTable *vtable; // points to PaykanString_vtable (cast-compatible)
-  PaykanShared *shared;       // object header (see PaykanObject)
-  char *data;                 // heap-allocated NUL-terminated buffer
-  int64_t len;                // length in bytes (excludes NUL)
+  PaykanMethod *vtable; // points to PaykanString_vtable
+  PaykanShared *shared; // object header (see PaykanObject)
+  char *data;           // heap-allocated NUL-terminated buffer
+  int64_t len;          // length in bytes (excludes NUL)
 };
 
 // Constructor / destructor.
@@ -226,7 +295,7 @@ int8_t PaykanString_char_at(PaykanObject *self, int64_t idx);
 // Method implementations.
 void PaykanString_destroy(PaykanObject *self);
 PaykanShared *PaykanString_toString(PaykanObject *self);
-int64_t PaykanString_equals(PaykanObject *self, PaykanObject *other);
+int64_t PaykanString_equals(PaykanObject *self, PaykanShared *other);
 int64_t PaykanString_length(PaykanObject *self);
 PaykanObject *PaykanString_concat(PaykanObject *self, PaykanObject *other);
 void PaykanString_concat_inplace(PaykanObject *self, PaykanObject *other);
@@ -235,30 +304,19 @@ void PaykanString_concat_inplace(PaykanObject *self, PaykanObject *other);
 PaykanShared *PaykanString_at(PaykanObject *self, int64_t idx);
 
 // Global vtable instance.
-extern PaykanStringVTable PaykanString_vtable;
+extern PaykanMethod PaykanString_vtable[PAYKAN_STRING_SLOTS];
 
 // ============================================================================
 // File
 // ============================================================================
 //
-// Inherits Object.  Vtable layout matches PaykanObjectVTable exactly
-// (destroy / toString / equals); no File-specific slots yet.
-
-typedef struct PaykanFileVTable {
-  void (*destroy)(PaykanObject *self);
-  PaykanShared *(*toString)(PaykanObject *self);
-  int64_t (*equals)(PaykanObject *self, PaykanObject *other);
-  // File-specific
-  void (*write)(PaykanObject *self, PaykanObject *str);
-  PaykanShared *(*readln)(PaykanObject *self);
-  PaykanShared *(*readbytes)(PaykanObject *self, int64_t n);
-  PaykanShared *(*read)(PaykanObject *self);
-} PaykanFileVTable;
+// Inherits Object.  The first three vtable slots match Object's layout;
+// File-specific slots follow (PAYKAN_SLOT_FILE_*).
 
 typedef struct PaykanFile {
-  PaykanObjectVTable *vtable; // points to PaykanFile_vtable
-  PaykanShared *shared;       // object header (see PaykanObject)
-  FILE *handle;               // underlying C file handle (NULL if closed)
+  PaykanMethod *vtable; // points to PaykanFile_vtable
+  PaykanShared *shared; // object header (see PaykanObject)
+  FILE *handle;         // underlying C file handle (NULL if closed)
 } PaykanFile;
 
 // Constructor / destructor.
@@ -270,14 +328,14 @@ PaykanFile *PaykanFile_new(void);
 PaykanShared *PaykanFile_open(PaykanObject *path, PaykanObject *mode);
 void PaykanFile_destroy(PaykanObject *self);
 PaykanShared *PaykanFile_toString(PaykanObject *self);
-int64_t PaykanFile_equals(PaykanObject *self, PaykanObject *other);
+int64_t PaykanFile_equals(PaykanObject *self, PaykanShared *other);
 void PaykanFile_write(PaykanObject *self, PaykanObject *str);
 PaykanShared *PaykanFile_readln(PaykanObject *self);
 PaykanShared *PaykanFile_readbytes(PaykanObject *self, int64_t n);
 PaykanShared *PaykanFile_read(PaykanObject *self);
 
 // Global vtable instance.
-extern PaykanFileVTable PaykanFile_vtable;
+extern PaykanMethod PaykanFile_vtable[PAYKAN_FILE_SLOTS];
 
 // Stdin singleton — immortal PaykanFile wrapping C's stdin.
 extern PaykanFile PaykanFile_Stdin;
@@ -290,8 +348,8 @@ extern PaykanFile PaykanFile_Stdin;
 // Carries a human-readable message string.
 
 typedef struct PaykanError {
-  PaykanObjectVTable *vtable; // points to PaykanError_vtable
-  PaykanShared *shared;       // object header (see PaykanObject)
+  PaykanMethod *vtable; // points to PaykanError_vtable
+  PaykanShared *shared; // object header (see PaykanObject)
   PaykanString *message;
 } PaykanError;
 
@@ -299,10 +357,10 @@ typedef struct PaykanError {
 PaykanError *PaykanError_new(const char *msg, int64_t len);
 void PaykanError_destroy(PaykanObject *self);
 PaykanShared *PaykanError_toString(PaykanObject *self);
-int64_t PaykanError_equals(PaykanObject *self, PaykanObject *other);
+int64_t PaykanError_equals(PaykanObject *self, PaykanShared *other);
 
 // Global vtable instance.
-extern PaykanObjectVTable PaykanError_vtable;
+extern PaykanMethod PaykanError_vtable[PAYKAN_OBJECT_SLOTS];
 
 // ============================================================================
 // Array
@@ -317,22 +375,13 @@ extern PaykanObjectVTable PaykanError_vtable;
 
 typedef struct PaykanArray PaykanArray;
 
-typedef struct PaykanArrayVTable {
-  // Inherited (Object-compatible prefix)
-  void (*destroy)(PaykanObject *self);
-  PaykanShared *(*toString)(PaykanObject *self);
-  int64_t (*equals)(PaykanObject *self, PaykanObject *other);
-  // Array-specific
-  int64_t (*length)(PaykanObject *self);
-} PaykanArrayVTable;
-
 struct PaykanArray {
-  PaykanObjectVTable *vtable; // PaykanArray_vtable (primitive) or
-                              // PaykanArray_obj_vtable (object)
-  PaykanShared *shared;       // object header (see PaykanObject)
-  void *data;                 // heap-allocated element buffer (8 bytes/slot)
-  unsigned long len;          // number of live elements
-  unsigned long cap;          // allocated capacity (in elements)
+  PaykanMethod *vtable; // PaykanArray_vtable (primitive) or
+                        // PaykanArray_obj_vtable (object)
+  PaykanShared *shared; // object header (see PaykanObject)
+  void *data;           // heap-allocated element buffer (8 bytes/slot)
+  unsigned long len;    // number of live elements
+  unsigned long cap;    // allocated capacity (in elements)
 };
 
 // -- Constructors ------------------------------------------------------------
@@ -363,7 +412,7 @@ void PaykanArray_set_obj(PaykanArray *arr, unsigned long idx,
 void PaykanArray_destroy(PaykanObject *self);
 void PaykanArray_destroy_obj(PaykanObject *self);
 PaykanShared *PaykanArray_toString(PaykanObject *self);
-int64_t PaykanArray_equals(PaykanObject *self, PaykanObject *other);
+int64_t PaykanArray_equals(PaykanObject *self, PaykanShared *other);
 int64_t PaykanArray_length(PaykanObject *self);
 
 /// Append a primitive value to the array (reallocs the backing buffer).
@@ -380,14 +429,16 @@ void *PaykanArray_pop(PaykanArray *arr);
 PaykanShared *PaykanArray_pop_obj(PaykanArray *arr);
 
 // -- VTable instances --------------------------------------------------------
-extern PaykanArrayVTable PaykanArray_vtable;     // for primitive-element arrays
-extern PaykanArrayVTable PaykanArray_obj_vtable; // for object-element arrays
+extern PaykanMethod
+    PaykanArray_vtable[PAYKAN_ARRAY_SLOTS]; // for primitive-element arrays
+extern PaykanMethod
+    PaykanArray_obj_vtable[PAYKAN_ARRAY_SLOTS]; // for object-element arrays
 
 // ============================================================================
 // Tuple (prototype)
 // ============================================================================
 //
-// Inherits Object; vtable layout is exactly PaykanObjectVTable
+// Inherits Object; its vtable has exactly Object's slots
 // (destroy / toString / equals).  ONE generic object backs every tuple type
 // `(T1, T2, ...)`: `count` 8-byte slots plus one kind byte per slot telling
 // the runtime how to interpret it.  Primitive elements are stored raw;
@@ -407,11 +458,11 @@ typedef enum PaykanTupleKind {
 } PaykanTupleKind;
 
 typedef struct PaykanTuple {
-  PaykanObjectVTable *vtable; // points to PaykanTuple_vtable
-  PaykanShared *shared;       // object header (see PaykanObject)
-  int64_t count;              // number of elements (arity)
-  uint64_t *slots;            // count 8-byte slots, inline after the header
-  uint8_t *kinds;             // count kind bytes, inline after the slots
+  PaykanMethod *vtable; // points to PaykanTuple_vtable
+  PaykanShared *shared; // object header (see PaykanObject)
+  int64_t count;        // number of elements (arity)
+  uint64_t *slots;      // count 8-byte slots, inline after the header
+  uint8_t *kinds;       // count kind bytes, inline after the slots
   // (slots and kinds point into the same heap block as the header: one
   // allocation per tuple.  A pointer rather than a flexible array member
   // because this header is also compiled as C++ with -Wpedantic.)
@@ -443,10 +494,10 @@ void PaykanTuple_set_obj(PaykanTuple *t, int64_t idx, PaykanShared *value);
 // -- Method implementations --------------------------------------------------
 void PaykanTuple_destroy(PaykanObject *self); // releases every REF slot
 PaykanShared *PaykanTuple_toString(PaykanObject *self); // "(1, a)"
-int64_t PaykanTuple_equals(PaykanObject *self, PaykanObject *other);
+int64_t PaykanTuple_equals(PaykanObject *self, PaykanShared *other);
 
 // Global vtable instance (shared by every tuple type).
-extern PaykanObjectVTable PaykanTuple_vtable;
+extern PaykanMethod PaykanTuple_vtable[PAYKAN_OBJECT_SLOTS];
 
 // ============================================================================
 // Shared — reference-counted wrapper around any PaykanObject
@@ -574,11 +625,12 @@ void Paykan_flush(void);
 // they correctly do not affect the counters.
 
 typedef struct PaykanHeapStats {
-  int64_t liveBlocks;  // currently-allocated blocks (alloc - free)
-  int64_t liveBytes;   // currently-allocated payload bytes
-  int64_t totalAllocs; // cumulative successful allocations
-  int64_t totalFrees;  // cumulative frees of non-NULL pointers
-  int64_t peakBytes;   // high-water mark of liveBytes
+  int64_t liveBlocks;    // currently-allocated blocks (alloc - free)
+  int64_t liveBytes;     // currently-allocated payload bytes
+  int64_t totalAllocs;   // cumulative successful allocations
+  int64_t totalFrees;    // cumulative frees of non-NULL pointers
+  int64_t totalReallocs; // cumulative Paykan_realloc calls (incl. NULL ptr)
+  int64_t peakBytes;     // high-water mark of liveBytes
 } PaykanHeapStats;
 
 /// Allocate `size` bytes.  Returns NULL on failure.
@@ -616,9 +668,32 @@ int64_t Paykan_heap_live_blocks(void);
 /// Convenience: number of payload bytes currently live.
 int64_t Paykan_heap_live_bytes(void);
 
+/// Number of Paykan_realloc calls since the last reset (e.g. to check that a
+/// container's resize policy is amortised).
+int64_t Paykan_heap_total_reallocs(void);
+
 /// Print the current heap statistics to stderr (a leak warning is appended if
 /// any blocks remain live).  If tracking is disabled, prints a notice instead.
 void Paykan_heap_dump(void);
+
+// Every object struct starts with PaykanObject's header (the vtable, then the
+// box backpointer), so a pointer to it can be converted to and used as a
+// PaykanObject * (docs/c-backend.md, "Target assumptions").
+#define PAYKAN_CHECK_HEADER(T)                                                 \
+  PAYKAN_STATIC_ASSERT(offsetof(T, vtable) == 0 &&                             \
+                           offsetof(T, shared) ==                              \
+                               offsetof(PaykanObject, shared),                 \
+                       #T " must start with the object header")
+PAYKAN_CHECK_HEADER(PaykanInt);
+PAYKAN_CHECK_HEADER(PaykanFloat);
+PAYKAN_CHECK_HEADER(PaykanBool);
+PAYKAN_CHECK_HEADER(PaykanChar);
+PAYKAN_CHECK_HEADER(PaykanString);
+PAYKAN_CHECK_HEADER(PaykanFile);
+PAYKAN_CHECK_HEADER(PaykanError);
+PAYKAN_CHECK_HEADER(PaykanArray);
+PAYKAN_CHECK_HEADER(PaykanTuple);
+#undef PAYKAN_CHECK_HEADER
 
 #ifdef __cplusplus
 }

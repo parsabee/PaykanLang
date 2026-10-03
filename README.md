@@ -72,6 +72,10 @@ third-party library). Every backend consumes the Paykan IR described in [`docs/p
 [`docs/writing-a-backend.md`](docs/writing-a-backend.md) explains how to write one, in tree or
 out of tree against `find_package(Paykan)` (see [`examples/backends/print-pir`](examples/backends/print-pir)).
 
+The test suite needs GoogleTest: an installed one is used if CMake finds it, otherwise it is
+downloaded at configure time. `-DPAYKAN_BUILD_TESTS=OFF` skips the tests and GoogleTest (for
+packagers and offline builds), so the barebones build then downloads nothing at all.
+
 The `paykan` binary is placed at `build/bin/paykan`. To install it to a prefix (with the
 runtime, `lib/libpaykan_runtime.a` and `include/paykan/Runtime.h`, that `build` and the c
 backend link programs against):
@@ -96,7 +100,7 @@ paykan --emit-source program.pkn # print the backend's output (C or LLVM IR)
 paykan --emit-c program.pkn     # print the generated C (--backend=c --emit-source)
 paykan --emit-llvm program.pkn  # print the LLVM IR (--backend=llvm --emit-source)
 paykan --track-heap program.pkn # run, then print heap/leak statistics
-paykan -O2 program.pkn          # set the optimization level (0-3)
+paykan -O0 program.pkn          # set the optimization level (0-3, default -O2)
 paykan --version                # print the version and the built frontends and backends
 paykan --help                   # list every option
 ```

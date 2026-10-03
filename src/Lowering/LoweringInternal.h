@@ -55,8 +55,13 @@ struct ProgramLowering {
   std::ostream &Errs;
   /// Lowered modules in completion order (imports first); stable addresses.
   std::deque<pir::Module> Modules;
+  /// The lowered imports by resolved file path (Sema's identity of a module)
+  /// and by canonical module name (the PIR's).
   std::unordered_map<std::string, pir::Module *> ByPath;
-  /// Class name -> resolved path of the module whose ClassDecl defines it.
+  std::unordered_map<std::string, pir::Module *> ByName;
+  /// Every module name handed out (the main module's included).
+  std::unordered_set<std::string> UsedNames;
+  /// Class name -> name of the module whose ClassDecl defines it.
   std::unordered_map<std::string, std::string> ClassOrigins;
   /// Every SemaContext reachable from Top, keyed by resolved file path.
   std::unordered_map<std::string, const sema::SemaContext *> Contexts;
@@ -67,8 +72,13 @@ struct ProgramLowering {
       : Top(top), ProjectRoot(std::move(projectRoot)), Errs(errs) {}
 
   const sema::SemaContext *lookupImportContext(const std::string &resolved);
-  /// Lower the module at @p resolved (once) and return it.
-  pir::Module *lowerImport(const std::string &resolved);
+  /// Reserve @p name for a module, or `name.2`, `name.3`, ... when another
+  /// module already has it.
+  std::string claimName(const std::string &name);
+  /// Lower the module at @p resolved (once), naming it @p name (its
+  /// canonical module name), and return it.
+  pir::Module *lowerImport(const std::string &resolved,
+                           const std::string &name);
 };
 
 /// Lowers ONE module (translation unit).  Imported modules get their own

@@ -11,6 +11,7 @@ extern "C" {
 }
 
 #include "RuntimeEqualsHelper.h"
+#include "VTableTestHelper.h"
 
 // ============================================================================
 // PaykanString_new
@@ -266,7 +267,7 @@ TEST(StringConcat, ResultIsNulTerminated) {
 
 TEST(StringVtable, ToStringViaVtable) {
   PaykanString *s = PaykanString_new("test", 4);
-  PaykanShared *shared = s->vtable->toString((PaykanObject *)s);
+  PaykanShared *shared = vtToString(s)((PaykanObject *)s);
   PaykanString *copy = (PaykanString *)PaykanShared_get(shared);
   EXPECT_STREQ(copy->data, "test");
   Paykan_release(shared);
@@ -275,14 +276,14 @@ TEST(StringVtable, ToStringViaVtable) {
 
 TEST(StringVtable, LengthViaVtable) {
   PaykanString *s = PaykanString_new("hello", 5);
-  auto *vt = (PaykanStringVTable *)s->vtable;
-  EXPECT_EQ(vt->length((PaykanObject *)s), 5);
+  auto length = vtSlot<PaykanLengthFn>(s, PAYKAN_SLOT_STRING_LENGTH);
+  EXPECT_EQ(length((PaykanObject *)s), 5);
   PaykanString_destroy((PaykanObject *)s);
 }
 
 TEST(StringVtable, DestroyViaVtable) {
   PaykanString *s = PaykanString_new("bye", 3);
-  s->vtable->destroy((PaykanObject *)s);
+  vtDestroy(s)((PaykanObject *)s);
   // Should not crash.
 }
 

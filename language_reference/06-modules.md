@@ -159,17 +159,17 @@ Compiled modules are cached on disk, so a project whose modules have not changed
 re-generates code for what did change on the next run or build. Both backends keep their
 entries in one directory, `.paykan_cache/`, side by side; each backend reads only its own files.
 
-| Backend | Entries for module `a/b/c.pkn` | Main file |
+| Backend | Entries for module `a::b::c` (`a/b/c.pkn`) | Main file |
 |---------|--------------------------------|-----------|
 | llvm | `.paykan_cache/a/b/c.bc` (LLVM bitcode, key stored inside) | never cached |
-| c | `.paykan_cache/a/b/c.pkn.c` (generated C), `c.pkn.o` (object), `c.pkn.key` (key) | cached the same way (`main.pkn.c`, ...) |
+| c | `.paykan_cache/a/b/c.c` (generated C), `c.o` (object), `c.key` (key) | cached the same way, by its file stem (`main.c`, ...) |
 
 - **Location.** The cache lives in `.paykan_cache/` **under the source root** (the main
-  file's directory), mirroring the module layout. It does not depend on the directory the
-  compiler is launched from, so `paykan proj/main.pkn` and `cd proj && paykan main.pkn`
-  share one cache. A module resolved from outside the source root (for example a system
-  module located through `PAYKAN_STDLIB`) is cached under the same directory, keyed by its
-  full path.
+  file's directory), named by the module's canonical name: `a::b::c` is cached as
+  `.paykan_cache/a/b/c.*`. It does not depend on the directory the compiler is launched
+  from, so `paykan proj/main.pkn` and `cd proj && paykan main.pkn` share one cache. A system
+  module (`import ::io`, located through `PAYKAN_STDLIB`) is cached under
+  `.paykan_cache/@system/`.
 - **Validity.** An entry is used only when it was written under exactly the key computed for
   the current compile. The llvm backend's key covers the module's PIR (which spells out every
   class layout and function signature it uses from the modules it imports), the compiler

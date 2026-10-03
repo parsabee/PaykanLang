@@ -3,7 +3,7 @@
 //
 // Paykan runtime — I/O builtins.
 
-#include "Runtime.h"
+#include "RuntimeInternal.h"
 #include <stdio.h>
 
 // ---------------------------------------------------------------------------
@@ -14,7 +14,7 @@
 static void print_object(FILE *stream, PaykanObject *obj) {
   if (!obj)
     return;
-  PaykanShared *shared = obj->vtable->toString(obj);
+  PaykanShared *shared = Paykan_vcall_toString(obj);
   PaykanString *s = (PaykanString *)PaykanShared_get(shared);
   if (s && s->data)
     fwrite(s->data, 1, (size_t)s->len, stream);
