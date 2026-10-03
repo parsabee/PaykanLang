@@ -434,3 +434,41 @@ TEST(Tuple, LiteralsTakeTheDestinationsOptionalElementTypes) {
                       "none node\n");
   g.expectNoLeaks("LiteralsTakeTheDestinationsOptionalElementTypes");
 }
+
+// ============================================================================
+// NaN and self-comparison (#111)
+// ============================================================================
+
+// Tuple equality is element-wise even when both sides are the same object, so
+// a tuple holding a NaN (directly, nested, or in a `float?` element) is
+// unequal to itself, like the NaN.  `float?` behaves the same; `float[]` is
+// reference identity by definition, so it equals itself.  Without a NaN a
+// tuple still equals itself.
+TEST(Tuple, NaNElementMakesATupleUnequalToItself) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    fn main() -> int {
+      nan: float = 0.0 / 0.0;
+      t = (1, nan);
+      u = (1, nan);
+      alias = t;
+      println(Str(t == t) + " " + Str(t != t) + " " + Str(t.equals(t)));
+      println(Str(t == u) + " " + Str(alias == t));
+      n = ((1, nan), "x");
+      o: (int, float?) = (1, nan);
+      println(Str(n == n) + " " + Str(o == o));
+      x: float? = nan;
+      println(Str(x == x) + " " + Str(x != x));
+      a: float[] = [nan];
+      println(Str(a == a));
+      ok = (1, 2.5, "s", (2, 'c'));
+      y: float? = 2.5;
+      println(Str(ok == ok) + " " + Str(ok != ok) + " " + Str(y == y));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "False True False\nFalse False\nFalse False\n"
+                      "False True\nTrue\nTrue False True\n");
+  g.expectNoLeaks("NaNElementMakesATupleUnequalToItself");
+}

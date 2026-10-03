@@ -135,6 +135,20 @@ elements compare by value; reference elements use their own `equals` (so class
 instances compare by identity unless the class overrides `equals`).  Ordering
 operators (`<`, …) are not defined for tuples.
 
+Comparison is element-wise even when both sides are the same tuple object;
+there is no identity shortcut.  So `float` elements follow IEEE 754: a tuple
+holding a NaN (directly, in a nested tuple, or in a `float?` element) is
+unequal to every tuple, itself included, exactly as the NaN is unequal to
+itself, while `-0.0` and `0.0` elements compare equal:
+
+```pkn
+nan = 0.0 / 0.0;
+t = (1, nan);
+println(Str(t == t));               // False — nan != nan
+println(Str(t != t));               // True
+println(Str((1, 2.5) == (1, 2.5))); // True
+```
+
 ---
 
 ## Semantic Checks

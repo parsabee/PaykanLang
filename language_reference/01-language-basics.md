@@ -249,8 +249,9 @@ override it: array `==` compares reference identity, and both operands must be a
 Float comparisons follow IEEE 754: NaN is unequal to everything, itself included (with `nan`
 a NaN-valued `float` such as `0.0 * (1.0e308 * 10.0)`, `nan == nan` is `False`, `nan != nan` is `True`, and `<`, `>`, `<=`, `>=` with a NaN operand are `False`),
 and `-0.0 == 0.0` is `True`. Tuples compare element by element with the same rule, so two
-tuples holding a NaN (`(1, nan) == (1, nan)`) are unequal; a tuple compared with itself
-(`t == t`, one object) is equal, since `equals` checks identity first.
+tuples holding a NaN (`(1, nan) == (1, nan)`) are unequal, and a tuple holding a NaN is
+unequal to every tuple, itself included (`t == t` is `False`, `t != t` is `True`), consistent
+with float semantics.
 
 ### Logical
 
