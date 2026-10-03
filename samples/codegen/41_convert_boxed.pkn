@@ -1,4 +1,4 @@
-// 39 — the boxed conversion specializations and bool<Str> (#88)
+// 41 — the boxed conversion specializations and bool<Str> (#88)
 // Exercises: Str<Int> / Str<Float> / Str<Bool> / Str<Char>, which format a
 //            boxed value exactly like the primitive form; Int<Str> /
 //            Float<Str> / Bool<Str>, which parse into the optional box
