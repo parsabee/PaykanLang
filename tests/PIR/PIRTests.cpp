@@ -25,16 +25,16 @@ const char *const kProgram = R"(module "main"
 cstr @.str0 = "Hello\n" len 6
 data @.d0 = [1, -2, 3]
 bytes @.b0 = [0, 4]
-extern obj @PaykanObject_None
-extern vtable @PaykanArray_vtable
+extern obj @$rt.PaykanObject_None
+extern vtable @$rt.PaykanArray_vtable
 
 class Point {
   field x: i64
   field name: box
   vtable {
     destroy = @Point_destroy : (obj) -> void
-    toString = @PaykanObject_toString : (obj) -> box
-    equals = @PaykanObject_equals : (obj, box) -> i64
+    toString = @$rt.PaykanObject_toString : (obj) -> box
+    equals = @$rt.PaykanObject_equals : (obj, box) -> i64
     area = null : (obj) -> i64
   }
 }
@@ -52,11 +52,11 @@ extern class Adder module "lib" {
   field n: i64
 }
 
-extern fn @PaykanString_new(ptr, i64) -> obj
-extern fn @Paykan_println(obj) -> void
-extern fn @PaykanString_destroy(obj) -> void
-extern fn @PaykanObject_toString(obj) -> box
-extern fn @PaykanObject_equals(obj, box) -> i64
+extern fn @$rt.PaykanString_new(ptr, i64) -> obj
+extern fn @$rt.Paykan_println(obj) -> void
+extern fn @$rt.PaykanString_destroy(obj) -> void
+extern fn @$rt.PaykanObject_toString(obj) -> box
+extern fn @$rt.PaykanObject_equals(obj, box) -> i64
 extern fn @helper(i64) -> i64 module "lib"
 
 fn @Point_destroy(%self.1: obj) -> void {
@@ -70,14 +70,14 @@ fn @main() -> i64 {
   local %i.0: i64
   local %acc.1: box
   local %acc.2: box
-  %s.1 = call @PaykanString_new(@.str0, 6)
-  call @Paykan_println(%s.1)
-  call @PaykanString_destroy(%s.1)
+  %s.1 = call @$rt.PaykanString_new(@.str0, 6)
+  call @$rt.Paykan_println(%s.1)
+  call @$rt.PaykanString_destroy(%s.1)
   %p.2 = new Point
   field.store %p.2, Point.x, 7
   field.store %p.2, Point.name, null box
   %vt.3 = vtable.addr Point
-  %vt2.4 = vtable.addr @PaykanArray_vtable
+  %vt2.4 = vtable.addr @$rt.PaykanArray_vtable
   %vt3.5 = vtable.load %p.2
   %same.6 = cmp eq %vt.3, %vt3.5
   %b.7 = box %p.2
@@ -399,16 +399,16 @@ fn @main() -> i64 {
   %"Pair<Str, int>.shared".2 = box %obj.1
   %"x y".3 = unbox %"Pair<Str, int>.shared".2
   %c.4 = cmp eq %"x y".3, null obj
-  %o.5 = select %c.4, @PaykanObject_None, %"x y".3
-  call @Paykan_println(%o.5)
+  %o.5 = select %c.4, @$rt.PaykanObject_None, %"x y".3
+  call @$rt.Paykan_println(%o.5)
   release %"Pair<Str, int>.shared".2
   %r.6 = call @helper(1)
   ret %r.6
 }
 
-extern obj @PaykanObject_None
+extern obj @$rt.PaykanObject_None
 extern fn @helper(i64) -> i64 module "lib"
-extern fn @Paykan_println(obj) -> void
+extern fn @$rt.Paykan_println(obj) -> void
 module "lib"
 fn @helper(%a.1: i64) -> i64 {
   ret %a.1
@@ -646,7 +646,7 @@ fn @tag() -> i64 {
 TEST(PIRVerifier, ChecksExternSymbols) {
   std::string errs = verifyText(R"(module "main"
 extern fn @"x::f"() -> i64 module "x" symbol @nope
-extern fn @Paykan_println(obj) -> void symbol @puts
+extern fn @$rt.Paykan_println(obj) -> void symbol @puts
 fn @main() -> i64 {
   ret 0
 }
@@ -658,8 +658,72 @@ fn @f() -> i64 {
   EXPECT_NE(errs.find("'@nope' is not defined in module 'x'"),
             std::string::npos)
       << errs;
-  EXPECT_NE(errs.find("runtime extern function '@Paykan_println' has a "
+  EXPECT_NE(errs.find("runtime extern function '@$rt.Paykan_println' has a "
                       "'symbol'"),
             std::string::npos)
       << errs;
+}
+
+// #117: runtime externs, and only they, are named `@$rt.<C symbol>`; a
+// program function may be spelled like a runtime symbol.
+TEST(PIRVerifier, RuntimeExternsHaveRuntimeNames) {
+  std::string errs = verifyText(R"(module "main"
+extern fn @Paykan_println(obj) -> void
+extern obj @PaykanObject_None
+cstr @$rt.s = "x" len 1
+fn @$rt.f() -> i64 {
+  ret 1
+}
+fn @main() -> i64 {
+  ret 0
+}
+)");
+  EXPECT_NE(errs.find("runtime extern function '@Paykan_println' is not named "
+                      "'@$rt.<symbol>'"),
+            std::string::npos)
+      << errs;
+  EXPECT_NE(errs.find("extern global '@PaykanObject_None' is not named "
+                      "'@$rt.<symbol>'"),
+            std::string::npos)
+      << errs;
+  EXPECT_NE(errs.find("cstr global '@$rt.s' has a runtime name"),
+            std::string::npos)
+      << errs;
+  EXPECT_NE(errs.find("function '@$rt.f' has a runtime name"),
+            std::string::npos)
+      << errs;
+
+  // A program function and the runtime extern of the same C symbol live
+  // side by side.
+  std::string text = R"(module "main"
+cstr @.str0 = "hi" len 2
+
+extern fn @$rt.PaykanString_new(ptr, i64) -> obj
+extern fn @$rt.Paykan_println(obj) -> void
+extern fn @$rt.PaykanString_destroy(obj) -> void
+
+fn @PaykanString_new(%x.1: i64) -> i64 {
+  ret %x.1
+}
+
+fn @main() -> i64 {
+  %s.1 = call @$rt.PaykanString_new(@.str0, 2)
+  call @$rt.Paykan_println(%s.1)
+  call @$rt.PaykanString_destroy(%s.1)
+  %r.2 = call @PaykanString_new(0)
+  ret %r.2
+}
+)";
+  EXPECT_EQ(verifyText(text), "");
+  ParseError err;
+  auto p = parseProgram(text, err);
+  ASSERT_TRUE(p.has_value()) << err.str();
+  if (!p.has_value())
+    return;
+  EXPECT_EQ(toString(*p), text);
+  EXPECT_TRUE(isRuntimeName("$rt.Paykan_println"));
+  EXPECT_FALSE(isRuntimeName("Paykan_println"));
+  EXPECT_FALSE(isRuntimeName("$rt."));
+  EXPECT_EQ(runtimeSymbol("$rt.Paykan_println"), "Paykan_println");
+  EXPECT_EQ(runtimeName("Paykan_println"), "$rt.Paykan_println");
 }

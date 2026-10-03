@@ -168,14 +168,14 @@ lowering:
 
 paykan::pir::ParseError err;
 auto program = paykan::pir::parseProgram(R"(module "t"
-extern fn @Paykan_println(obj) -> void
+extern fn @$rt.Paykan_println(obj) -> void
 cstr @.s = "hi" len 2
-extern fn @PaykanString_new(ptr, i64) -> obj
-extern fn @PaykanString_destroy(obj) -> void
+extern fn @$rt.PaykanString_new(ptr, i64) -> obj
+extern fn @$rt.PaykanString_destroy(obj) -> void
 fn @main() -> i64 {
-  %s = call @PaykanString_new(@.s, 2)
-  call @Paykan_println(%s)
-  call @PaykanString_destroy(%s)
+  %s = call @$rt.PaykanString_new(@.s, 2)
+  call @$rt.Paykan_println(%s)
+  call @$rt.PaykanString_destroy(%s)
   ret 0
 }
 )", err);
@@ -192,7 +192,9 @@ backend; a new in-tree backend is expected to pass them.
 
 - Translate PIR as it is: do not re-derive ownership, dispatch or layout; the
   lowering is the only place those rules live.
-- Keep runtime symbol names as declared (`extern fn @Paykan_...`); mangle only
+- Link a runtime extern (`extern fn @$rt.Paykan_...`, `extern obj`, `extern
+  vtable`) by its C symbol, the PIR name without `$rt.`
+  (`pir::runtimeSymbol`); mangle only
   module-defined names (`Box<int>`, `helper::add`), consistently across the
   modules of a program (`docs/pir.md` §3). Resolve a module extern through
   its defining module and `Function::linkName()` (its `symbol`), not its

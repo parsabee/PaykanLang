@@ -93,10 +93,11 @@ struct Analysed {
 };
 
 inline Analysed analyse(const std::string &source,
-                        const std::string &projectRoot) {
+                        const std::string &projectRoot,
+                        const std::string &frontendName = "") {
   Analysed a;
   auto path = writeTempFile(source);
-  a.Driver = std::make_unique<parser::ParserDriver>();
+  a.Driver = std::make_unique<parser::ParserDriver>(frontendName);
   int rc = a.Driver->parseFile(path);
   std::filesystem::remove(path);
   a.Path = path;
@@ -302,6 +303,14 @@ inline RunResult compileAndRunWithArgs(const std::string &source,
                                        const std::string &projectRoot = "") {
   auto a = detail::analyse(source, projectRoot);
   return detail::runAnalysed(a, &args, projectRoot);
+}
+
+/// Like compileAndRun, parsing with the frontend named @p frontendName (one
+/// of frontend::Registry::get().names()) instead of the default one.
+inline RunResult compileAndRunWithFrontend(const std::string &source,
+                                           const std::string &frontendName) {
+  auto a = detail::analyse(source, "", frontendName);
+  return detail::runAnalysed(a, nullptr, "");
 }
 
 /// Compile and run from a .pkn file on disk.

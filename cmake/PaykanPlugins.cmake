@@ -20,10 +20,10 @@
 # ----------------------------------------------------------------------------
 
 # -- Frontends ----------------------------------------------------------------
-# `recursive-descent` (standard C++ only) is always built; `bison` is optional and
-# brings the Bison/Flex build with it.
+# `recursive-descent` (standard C++ only) is always built and is the default;
+# `bison` is opt-in and brings the Bison/Flex build with it (#123).
 set(PAYKAN_KNOWN_FRONTENDS recursive-descent bison)
-set(PAYKAN_FRONTENDS "recursive-descent;bison" CACHE STRING
+set(PAYKAN_FRONTENDS "recursive-descent" CACHE STRING
     "Semicolon-separated list of frontends to build (available: ${PAYKAN_KNOWN_FRONTENDS}); the first one is the default")
 
 if(NOT PAYKAN_FRONTENDS)
@@ -46,11 +46,12 @@ message(STATUS "Frontends: ${PAYKAN_FRONTENDS} (default: ${PAYKAN_DEFAULT_FRONTE
 
 # -- Backends -----------------------------------------------------------------
 # `c` is the C backend (part of the core: it needs only a C compiler at run
-# time) and is always built; `llvm` is the LLVM IR / ORC JIT backend, which
-# depends on LLVM: LLVM is fetched only when `llvm` is listed.
+# time), always built and the default; `llvm` is the LLVM IR / ORC JIT
+# backend, which is opt-in and depends on LLVM: LLVM is fetched only when
+# `llvm` is listed (#123).  So a plain configure downloads nothing.
 set(PAYKAN_KNOWN_BACKENDS c llvm)
-set(PAYKAN_BACKENDS "llvm" CACHE STRING
-    "Semicolon-separated list of backends to build (available: ${PAYKAN_KNOWN_BACKENDS}; c is always built)")
+set(PAYKAN_BACKENDS "c" CACHE STRING
+    "Semicolon-separated list of backends to build (available: ${PAYKAN_KNOWN_BACKENDS}; c is always built); the first one is the default")
 
 foreach(be IN LISTS PAYKAN_BACKENDS)
     if(NOT be IN_LIST PAYKAN_KNOWN_BACKENDS)
@@ -61,11 +62,10 @@ if(NOT "c" IN_LIST PAYKAN_BACKENDS)
     list(APPEND PAYKAN_BACKENDS c)
 endif()
 
-# The default backend: `llvm` (the JIT) when it is built, else `c`.
-set(PAYKAN_DEFAULT_BACKEND "c")
-if("llvm" IN_LIST PAYKAN_BACKENDS)
-    set(PAYKAN_DEFAULT_BACKEND "llvm")
-endif()
+# The default backend is the first one listed, as for frontends: `c` unless
+# the list puts another first (`llvm;c` makes `llvm` the default, `c;llvm`
+# keeps `c`).  `c` is appended above, so the list is never empty here.
+list(GET PAYKAN_BACKENDS 0 PAYKAN_DEFAULT_BACKEND)
 set(PAYKAN_NEEDS_LLVM FALSE)
 if("llvm" IN_LIST PAYKAN_BACKENDS)
     set(PAYKAN_NEEDS_LLVM TRUE)

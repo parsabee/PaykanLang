@@ -1,0 +1,91 @@
+// 44 — string literals used as objects (#116): a literal in any value
+// position is a Str object built from it (like `s = "x"`), never its raw C
+// string, and is released like any other string temporary.
+// Exercises: subscripting a literal (`"ab"[1]`, also as a match subject and a
+// conversion argument), a method call on a literal (`"abc".len()`), `mov` of
+// a literal in every form (binding, typed binding, argument, return value,
+// concatenation operand, field, tuple / array / optional element), and
+// literals as tuple, array and optional elements.  Run with --track-heap:
+// zero live blocks.
+
+// expect-stdout: "ab"[1]:     b
+// expect-stdout: "xyz"[i]:    xyz
+// expect-stdout: match:       newline
+// expect-stdout: Str<char>:   y
+// expect-stdout: len:         3
+// expect-stdout: mov:         lit
+// expect-stdout: println mov: lit
+// expect-stdout: consume mov: 3
+// expect-stdout: typed mov:   typed
+// expect-stdout: concat mov:  litx
+// expect-stdout: return mov:  ret
+// expect-stdout: field mov:   k2 t
+// expect-stdout: tuple:       tup m1m2
+// expect-stdout: array:       zyw q
+// expect-stdout: optional:    opt opt2
+// expect-stdout: int<Str>:    42
+
+class Tagged {
+  name: Str;
+  tag: Str?;
+  fn __init__() { self.name = "k"; self.tag = mov "t"; }
+}
+
+fn consume(s: Str) -> int { return s.len(); }
+fn give() -> Str { return mov "ret"; }
+
+fn main() -> int {
+  c = "ab"[1];
+  println("\"ab\"[1]:     " + Str(c));
+  letters: Str = "";
+  i = 0;
+  while (i < 3) {
+    letters = letters + Str<char>("xyz"[i]);
+    i = i + 1;
+  }
+  println("\"xyz\"[i]:    " + letters);
+  match "a\nb"[1] {
+    '\n' { println("match:       newline"); }
+    _ { println("match:       other"); }
+  }
+  println("Str<char>:   " + Str<char>("xy"[1]));
+  println("len:         " + Str<int>("abc".len()));
+
+  v = mov "lit";
+  println("mov:         " + v);
+  print("println mov: ");
+  println(mov "lit");
+  println("consume mov: " + Str<int>(consume(mov "lit")));
+  s: Str = mov "typed";
+  println("typed mov:   " + s);
+  println("concat mov:  " + (mov "lit" + "x"));
+  println("return mov:  " + give());
+  k = Tagged();
+  k.name = mov "k2";
+  match k.tag {
+    t: Str { println("field mov:   " + k.name + " " + t); }
+    None { println("field mov:   " + k.name + " none"); }
+  }
+
+  t = ("tup", 1);
+  m: (Str, Str) = (mov "m1", "m2");
+  println("tuple:       " + t.0 + " " + m.0 + m.1);
+  a: Str[] = ["x", mov "y"];
+  a[0] = "z";
+  a.push(mov "w");
+  println("array:       " + a[0] + a[1] + a[2] + " " + ["p", "q"][1]);
+  o: Str? = "opt";
+  o2: Str? = mov "opt2";
+  match o {
+    p: Str {
+      match o2 {
+        q: Str { println("optional:    " + p + " " + q); }
+        None { println("optional:    " + p); }
+      }
+    }
+    None { println("optional:    none"); }
+  }
+  print("int<Str>:    ");
+  println(int<Str>("42"));
+  return 0;
+}

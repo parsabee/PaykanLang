@@ -122,9 +122,12 @@ private:
   /// Functions in declaration order with stable addresses (the module vector
   /// is filled from this when the module is taken).
   std::deque<pir::Function> Funcs;
-  /// Every function by its PIR name in this module (definitions, runtime
-  /// and module externs).
+  /// Every program function by its PIR name in this module (definitions and
+  /// module externs).  Runtime externs are not in it (RuntimeFuncs).
   std::unordered_map<std::string, pir::Function *> FuncByName;
+  /// Runtime extern functions declared in this module, by C symbol (their
+  /// PIR name is pir::runtimeName(symbol)).
+  std::unordered_map<std::string, pir::Function *> RuntimeFuncs;
   /// Module externs by origin, "<defining module>\n<symbol there>".
   std::unordered_map<std::string, pir::Function *> ExternByOrigin;
   std::unordered_map<std::string, pir::Class *> ClassByName;
@@ -210,11 +213,13 @@ private:
   // ---------------------------------------------------------------
 
   /// Declare a runtime function by its C symbol (signature from the ABI
-  /// table) and return its signature.
-  const pir::Signature &declareRuntime(const std::string &name);
-  /// Declare an extern object/vtable global and return a Val naming it.
-  Val externObject(const std::string &name);
-  Val externVTable(const std::string &name);
+  /// table) and return the declaration, named `$rt.<symbol>` in PIR.
+  const pir::Function &declareRuntime(const std::string &symbol);
+  /// Declare a runtime extern object/vtable global by its C symbol and
+  /// return a Val naming it (`@$rt.<symbol>`).
+  Val externGlobal(const std::string &symbol, pir::ExternGlobal::Kind kind);
+  Val externObject(const std::string &symbol);
+  Val externVTable(const std::string &symbol);
   /// Get-or-create a module function (body filled in later).
   pir::Function *getOrCreateFunction(const std::string &name,
                                      const pir::Signature &sig);
@@ -232,8 +237,8 @@ private:
                                    const std::string &modulePath,
                                    const std::string &localName);
 
-  /// Call a runtime function.
-  Val callRuntime(const std::string &name, const std::vector<Val> &args,
+  /// Call a runtime function by its C symbol.
+  Val callRuntime(const std::string &symbol, const std::vector<Val> &args,
                   std::string resultName = "");
 
   // -- RAII helpers
