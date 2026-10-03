@@ -32,6 +32,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # no scripts/__pycache__ in the tree
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import samples_parity as sp  # noqa: E402  (shares the corpus and checks)
 
