@@ -301,8 +301,30 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   ast::Type *resolveType(ast::Type *ty, ast::SourceLocation loc,
                          const std::string &context);
 
+  // -- Poisoned binders (#89) -------------------------------------------------
+  //
+  // A binder whose declaration failed (a bad initializer, an unresolvable type
+  // annotation, a failed destructuring, a match arm whose type is in error) is
+  // still bound -- to ASTContext::getPoisonTy() -- so that its uses are not
+  // reported as "use of undeclared variable".  A use of a poisoned name yields
+  // no type and counts a suppressed follow-on (see SuppressedFollowOns), so
+  // every enclosing check stays quiet: only the original error is reported.
+  // A later valid assignment re-binds the name with the value's type.
+
+  /// Bind @p name in @p scope to the poison type (replacing any binding there).
+  /// Only called after the failure was reported.
+  void declarePoisoned(Scope *scope, std::string_view name);
+
+  /// Number of poisoned binders; a successful run must have none (run()
+  /// guards that no poison type escapes Sema).
+  unsigned PoisonedBindings = 0;
+
+  /// True if @p name is a type name, which no variable may be bound to.
+  bool isTypeNameForVariable(const std::string &name) const;
+
   // Check that a variable is declared. Returns its type,
-  // or nullptr (with error emitted) on failure.
+  // or nullptr (with error emitted) on failure.  A poisoned variable yields
+  // nullptr without an error (a suppressed follow-on).
   ast::Type *checkIdentLive(std::string_view name, ast::SourceLocation loc);
 
   // -- Expression type-checker ----------------------------------------------

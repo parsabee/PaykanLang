@@ -463,6 +463,13 @@ void ASTPrinter::visitTupleType(TupleType *node) {
   }
 }
 
+void ASTPrinter::visitPoisonType(PoisonType *node) {
+  printIndent();
+  OS << "PoisonType";
+  printLoc(node);
+  OS << "\n";
+}
+
 void ASTPrinter::visitTupleLiteralExpr(TupleLiteralExpr *node) {
   printIndent();
   OS << "TupleLiteralExpr";
