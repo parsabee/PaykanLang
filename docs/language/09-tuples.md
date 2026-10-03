@@ -1,8 +1,7 @@
 # PaykanLang — Tuples (prototype)
 
-> **Prototype.** Tuples are implemented end-to-end but the feature is still a
-> prototype (issue #4): the surface below is deliberately small and may change.
-> Design notes and open questions live in `proposals/tuples.md`.
+> **Prototype.** Tuples are experimental (issue #4): implemented and tested, but the syntax,
+> the rules and the diagnostics below may change before they are declared stable.
 
 A tuple is a fixed-size, ordered group of values that may have **different
 types**: `(1, "a")` is an `(int, Str)`.  Tuples are the way to return more
@@ -142,11 +141,22 @@ unequal to every tuple, itself included, exactly as the NaN is unequal to
 itself, while `-0.0` and `0.0` elements compare equal:
 
 ```pkn
-nan = 0.0 / 0.0;
-t = (1, nan);
-println(Str(t == t));               // False — nan != nan
-println(Str(t != t));               // True
-println(Str((1, 2.5) == (1, 2.5))); // True
+fn main() -> int {
+  nan = 0.0 / 0.0;
+  t = (1, nan);
+  println(Str(t == t));               // nan != nan
+  println(Str(t != t));
+  println(Str((1, 2.5) == (1, 2.5)));
+  return 0;
+}
+```
+
+Output:
+
+```
+False
+True
+True
 ```
 
 ---
@@ -172,4 +182,20 @@ println(Str((1, 2.5) == (1, 2.5))); // True
 ## Not Yet Supported
 
 Tuples in `match` patterns, nested destructuring, named elements, mutation,
-1-tuples, and spreading a tuple into call arguments.
+1-tuples, and spreading a tuple into call arguments. A `match` arm cannot name a
+tuple type (`(int, int) { … }` is rejected with "match arm type must be a class
+or array type"): every tuple shares one runtime class, so there is no per-type
+identity to test.
+
+---
+
+## Notes
+
+- Every tuple is an instance of the builtin class `Tuple`, an `Obj` subtype. The
+  name is reserved (`class Tuple {}` is an error), and `x: Tuple = (1, 2)`
+  type-checks, but like `Obj` it only offers `toString` and `equals`.
+- `toString` prints the elements without quotes, as `println` does, so
+  `("a, b", 1)` prints as `(a, b, 1)`.
+- At run time a tuple is one heap object holding its elements, released like any
+  other reference: reference elements are retained by the tuple and released when
+  it is destroyed (see `08-memory-model.md`).

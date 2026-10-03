@@ -1,9 +1,10 @@
 # PaykanLang — Generics (prototype)
 
-Generic classes and functions are parameterised by types. This is a
-**prototype**: the surface described here works end to end and is tested, but
-constraints, variance and cross-module templates are not part of it yet. The
-design, alternatives and open questions are in `proposals/generics.md`.
+> **Prototype.** Generics are experimental (issue #2): implemented and tested, but the syntax,
+> the rules and the diagnostics below may change before they are declared stable.
+
+Generic classes and functions are parameterised by types. Constraints, variance
+and cross-module templates are not part of the prototype yet.
 
 ---
 
@@ -13,7 +14,8 @@ design, alternatives and open questions are in `proposals/generics.md`.
   `class Pair<K, V> { … }`, `fn first<T>(xs: T[]) -> T { … }`.
 - Use a generic class by giving it type arguments: `Box<int>`, `Pair<Str, int>`,
   `Box<int>[]`, `Box<Box<int>>`. Each distinct argument list is its own
-  ordinary class named after it (`Box<int>` and `Box<Str>` are unrelated).
+  ordinary class named after it (`Box<int>` and `Box<Str>` are unrelated, and
+  so are `Box<Dog>` and `Box<Animal>`: there is no variance).
 - Construct with the type arguments — `Box<int>(3)` — or let the compiler
   infer them from the `__init__` arguments: `Box(3)`.
 - Call a generic function with explicit arguments, `first<int>(xs)`, or let
@@ -114,7 +116,8 @@ optionals (`T?` against a `U?` or a plain `U`) and instantiations (`Box<T>`,
 also when the argument is a subclass of one). A bare `None` argument is typed
 `Obj` and carries no information about `T`: `unwrapOr(None, Node(3))` infers
 `T = Node` from the second argument, but `wrap(None)` alone cannot be inferred
-and needs `wrap<Node>(None)`. It is exact: a
+and needs `wrap<Node>(None)`; an empty array literal `[]` carries no
+information either. It is exact: a
 parameter that appears twice must be deduced as the same type, and no
 promotion or subtyping is applied. When inference is impossible or ambiguous
 the call is an error with a hint to write the arguments explicitly:
@@ -184,7 +187,11 @@ b = Adder<bool>(True);    // error: operator '+' is not defined for types 'bool'
 A generic declaration that is never instantiated is only parsed, not checked.
 Nested instantiation is bounded: a class that instantiates itself with an
 ever-growing argument (`inner: Bad<Bad<T>>`) stops with "exceeds the maximum
-instantiation depth".
+instantiation depth (16)".
+
+A type parameter used as a `match` arm (`T { … }`) is substituted first and then
+follows the ordinary arm rules, so in an instantiation with `T = int` the arm is
+rejected like any `int` arm.
 
 ## Modules
 
@@ -223,7 +230,7 @@ println(Str<int>(b.get()));
 |-------|---------|
 | Wrong number of type arguments | `Box<int, Str>` for a one-parameter class, `f<int, int>(…)` |
 | Unknown generic | `Nope<int>` with no such class |
-| Type arguments on a non-generic | `f<int>(1)` where `f` is ordinary; `Str<int>` |
+| Type arguments on a non-generic | `f<int>(1)` where `f` is ordinary; `Str<int>` in a type position (`t: Str<int>`) — as an expression, `Str<int>(n)` is a conversion constructor (`01-language-basics.md`) |
 | Missing type arguments | `b: Box = …` for a generic `Box` |
 | Type parameter used as a value | `y = T;`, `T()` inside a generic body |
 | Duplicate / shadowing type parameter | `class P<T, T>`, `class Bar<Foo>` when `Foo` is a type |
@@ -237,5 +244,4 @@ println(Str<int>(b.get()));
 
 Constraints/bounds (`T: Comparable`) and interfaces, variance, default type
 arguments, explicit specialisation, generic methods on non-generic classes,
-generic superclasses, and exporting templates across modules. See
-`proposals/generics.md`.
+generic superclasses, and exporting templates across modules.
