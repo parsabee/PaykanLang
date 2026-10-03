@@ -1,0 +1,24 @@
+// OK: two imported modules, and the main file, each define functions with the
+// same names (`name`, `describe`).  Functions are module-qualified, so each
+// call reaches its own module's function, through the short qualifier, an
+// alias or the full module path (issue #70).
+//
+// expect-stdout: main circle fmt
+// expect-stdout: circle(3) fmt<4> main[5]
+// expect-stdout: fmt<3>+circle(3)
+// expect-stdout: circle fmt
+
+import shapes::circle;
+import text::fmt as f;
+
+fn name() -> Str { return "main"; }
+fn describe(n: int) -> Str { return name() + "[" + Str<int>(n) + "]"; }
+
+fn main() -> int {
+  c = circle::make(3);
+  println(name() + " " + circle::name() + " " + f::name());
+  println(circle::describe(c) + " " + f::describe(4) + " " + describe(5));
+  println(f::both(c));
+  println(shapes::circle::name() + " " + text::fmt::name());
+  return 0;
+}

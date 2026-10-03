@@ -204,6 +204,13 @@ struct Function {
   /// named by Module.  An extern function has no params/locals/body.
   bool IsExtern = false;
   std::string Module;
+  /// For an extern from another PIR module: the function's name in its
+  /// defining module, when that differs from Name (empty: the same).  Calls
+  /// in this module use Name, so two modules' same-named functions (`x::tag`,
+  /// `y::tag`) and a local one can be declared side by side.
+  std::string Symbol;
+  /// The defining module's name for this function (Symbol, or Name).
+  const std::string &linkName() const { return Symbol.empty() ? Name : Symbol; }
   /// Next free ValueId for the builder / parser (ids are dense from 1).
   ValueId NextValueId = 1;
 };

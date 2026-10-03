@@ -385,7 +385,7 @@ class Emitter {
     if (fn->IsExtern) {
       if (fn->Module.empty())
         return fn->Name; // runtime symbol
-      return symbolOf(fn->Module, fn->Name);
+      return symbolOf(fn->Module, fn->linkName());
     }
     return symbolOf(m.Name, fn->Name);
   }

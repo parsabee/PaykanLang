@@ -367,6 +367,15 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// than a silent merge of two unrelated types.
   StringMap<std::string> ImportedTypeOrigins;
 
+  /// Every module qualifier this file's imports bind (each import's alias or
+  /// last path segment, and its full module path) -> the module it names.
+  /// One qualifier cannot name two modules: `util::f` would be ambiguous.
+  struct ImportQualifier {
+    std::string Resolved;   ///< resolved file path
+    std::string ModulePath; ///< as written, e.g. `a::util`
+  };
+  StringMap<ImportQualifier> ImportQualifiers;
+
 public:
   /// Info about an already-analyzed module.  Public (with ModuleCache) so
   /// tests can seed a cache entry and exercise the error paths of export

@@ -405,6 +405,10 @@ void printFunction(const Function &f, std::ostream &os) {
       os << " module ";
       printEscaped(f.Module, os);
     }
+    if (!f.Symbol.empty()) {
+      os << " symbol ";
+      printSymbol(f.Symbol, os);
+    }
     os << "\n";
     return;
   }

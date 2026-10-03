@@ -1,0 +1,11 @@
+// Every module may define its own `name`, `describe` and `new`-style helper:
+// functions are reached through their module's qualifier, so these never clash
+// with text::fmt's (or main's) functions of the same name.
+class Circle {
+  r: int;
+  fn __init__(r: int) { self.r = r; }
+}
+
+fn name() -> Str { return "circle"; }
+fn make(r: int) -> Circle { return Circle(r); }
+fn describe(c: Circle) -> Str { return name() + "(" + Str<int>(c.r) + ")"; }

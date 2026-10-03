@@ -115,8 +115,8 @@ private:
       return name; // runtime
     bool otherIsMain = false;
     if (const Module *other = findModule(f->Module, otherIsMain))
-      return mangle(*other, otherIsMain, name);
-    return name;
+      return mangle(*other, otherIsMain, f->linkName());
+    return f->linkName();
   }
 
   /// LLVM name of class @p name's vtable / struct as seen from @p module.

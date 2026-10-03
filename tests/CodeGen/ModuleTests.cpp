@@ -472,3 +472,42 @@ fn main() -> int { return mid::bumped() + lf::base(); }
 
   std::filesystem::remove_all(tmpDir);
 }
+
+// #70: two imported modules and the main file each define `tag`; every call
+// reaches its own module's function, through a qualifier, an alias or the
+// full module path, and a module calls its own `tag` next to an imported one.
+TEST(Module, SameNamedFunctionsOfSeveralModules) {
+  auto tmpDir = paykan::test::tempDir() / "pkn_import_dup_fns";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+
+  writeTempFile(tmpDir.string(), "x.pkn", R"(
+fn tag() -> Str { return "x"; }
+fn num(n: int) -> int { return n + 1; }
+)");
+  writeTempFile(tmpDir.string(), "lib/y.pkn", R"(
+import x;
+fn tag() -> Str { return "y"; }
+fn num(n: int) -> int { return n * 10; }
+fn both() -> Str { return tag() + x::tag(); }
+)");
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+import x;
+import lib::y as r;
+fn tag() -> Str { return "m"; }
+fn num(n: int) -> int { return n - 1; }
+fn main() -> int {
+  println(x::tag() + r::tag() + lib::y::tag() + tag() + r::both());
+  return x::num(1) + r::num(2) + num(30);
+}
+)");
+
+  LeakGuard g;
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "xyymyx\n");
+  EXPECT_EQ(r.ExitCode, 51); // 2 + 20 + 29
+  g.expectNoLeaks("same-named functions of several modules");
+
+  std::filesystem::remove_all(tmpDir);
+}
