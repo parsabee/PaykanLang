@@ -140,6 +140,32 @@ inline Analysed analyseFile(const std::string &filePath,
 }
 
 #if PAYKAN_TEST_HAVE_LLVM
+/// JIT-run an LLVM module in process, capturing its stdout and stderr.  A JIT
+/// failure (an unresolved symbol, a module the JIT rejects) returns
+/// CompileOk == false with the error's message appended to StdErr, so a
+/// failing test prints the reason instead of an anonymous -1.
+inline RunResult runJITModule(std::unique_ptr<llvm::Module> module,
+                              std::unique_ptr<llvm::LLVMContext> llvmCtx,
+                              const std::vector<std::string> *args) {
+  auto [savedOut, outPath] = redirectFdToTempFile(STDOUT_FILENO);
+  auto [savedErr, errPath] = redirectFdToTempFile(STDERR_FILENO);
+  auto resultOrErr =
+      args ? jit::runModule(std::move(module), std::move(llvmCtx), *args)
+           : jit::runModule(std::move(module), std::move(llvmCtx));
+  fflush(stdout);
+  fflush(stderr);
+  restoreFd(STDOUT_FILENO, savedOut);
+  restoreFd(STDERR_FILENO, savedErr);
+  std::string outStr = drainAndRemoveTempFile(outPath);
+  std::string errStr = drainAndRemoveTempFile(errPath);
+  lastRunLiveBlocks() = Paykan_heap_live_blocks();
+  if (!resultOrErr) {
+    errStr += "JIT: " + llvm::toString(resultOrErr.takeError());
+    return {-1, outStr, errStr, false};
+  }
+  return {*resultOrErr, outStr, errStr, true};
+}
+
 /// The LLVM backend: lowering -> PIR -> LLVM IR (through the bitcode cache,
 /// like the driver) -> JIT, in process.
 inline RunResult runLLVM(Analysed &a, const std::vector<std::string> *args,
@@ -156,24 +182,7 @@ inline RunResult runLLVM(Analysed &a, const std::vector<std::string> *args,
                                                       projectRoot);
   if (!module)
     return {-1, "", module.status().message(), false};
-
-  auto [savedOut, outPath] = redirectFdToTempFile(STDOUT_FILENO);
-  auto [savedErr, errPath] = redirectFdToTempFile(STDERR_FILENO);
-  auto resultOrErr =
-      args ? jit::runModule(std::move(*module), std::move(llvmCtx), *args)
-           : jit::runModule(std::move(*module), std::move(llvmCtx));
-  fflush(stdout);
-  fflush(stderr);
-  restoreFd(STDOUT_FILENO, savedOut);
-  restoreFd(STDERR_FILENO, savedErr);
-  std::string outStr = drainAndRemoveTempFile(outPath);
-  std::string errStr = drainAndRemoveTempFile(errPath);
-  lastRunLiveBlocks() = Paykan_heap_live_blocks();
-  if (!resultOrErr) {
-    llvm::consumeError(resultOrErr.takeError());
-    return {-1, outStr, errStr, false};
-  }
-  return {*resultOrErr, outStr, errStr, true};
+  return runJITModule(std::move(*module), std::move(llvmCtx), args);
 }
 #endif
 
