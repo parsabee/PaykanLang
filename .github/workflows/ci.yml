@@ -6,6 +6,8 @@ on:
   # Every pull request, whatever its base: stacked PRs (based on another
   # PR's branch) need CI too.
   pull_request:
+  # Manual runs on any branch (Actions tab -> CI -> "Run workflow").
+  workflow_dispatch:
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -239,11 +241,11 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Barebones build: standard C++ only.  No LLVM, no Bison/Flex, no m4, and
-  # nothing downloaded at configure time (GoogleTest is the one exception, for
-  # the tests).  Proves the acceptance criteria of #16: configure downloads
-  # nothing, `paykan` links no third-party library, the full suite passes on
-  # the C backend, and an out-of-tree backend builds against the installed
-  # package.
+  # nothing downloaded at configure time.  Proves the acceptance criteria of
+  # #16 and #77: with -DPAYKAN_BUILD_TESTS=OFF configure downloads nothing at
+  # all (GoogleTest is fetched only for the test suite), `paykan` links no
+  # third-party library, the full suite passes on the C backend, and an
+  # out-of-tree backend builds against the installed package.
   # ---------------------------------------------------------------------------
   barebones-linux:
     name: Barebones | Linux x86-64
@@ -256,6 +258,20 @@ jobs:
           sudo apt-get update && sudo apt-get install -y ninja-build
           sudo apt-get remove -y bison flex m4 || true
           ! command -v bison && ! command -v flex && ! command -v m4
+
+      # The packager's build (#77): tests off, so not even GoogleTest is fetched.
+      - name: Configure and build with tests off (nothing downloaded)
+        run: |
+          set -o pipefail
+          cmake -B build-notests -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DPAYKAN_FRONTENDS=recursive-descent -DPAYKAN_BACKENDS=c \
+            -DPAYKAN_BUILD_TESTS=OFF 2>&1 | tee configure-notests.log
+          ! grep -i "Downloading\|Fetching\|GTest\|Building Bison\|Building Flex" configure-notests.log
+          test ! -e build-notests/third-party
+          test ! -e build-notests/_deps
+          test ! -e build-notests/CTestTestfile.cmake
+          cmake --build build-notests --parallel
+          build-notests/bin/paykan --version
 
       - name: Cache GoogleTest
         uses: actions/cache@v4

@@ -129,6 +129,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`"hel" + "lo" == "hello"` is `True`); arrays keep identity comparison via
   the default `equals`; comparing arrays of different element types is a
   compile error. Overriding `equals` in a class changes how `==` behaves for it.
+- **`-DPAYKAN_BUILD_TESTS=OFF` builds without the test suite (#77, #78).** It
+  skips GoogleTest, so a barebones configure downloads nothing (the default is
+  ON when PaykanLang is the top-level project). With tests on, an installed
+  GoogleTest (`find_package(GTest CONFIG)`) is used before downloading one.
+  The Homebrew formula and the release workflow build with tests off. CI and
+  the release workflow can be run by hand (`workflow_dispatch`); a manual
+  release run is a dry run by default and publishes nothing. JIT errors in the
+  CodeGen test harness are now reported in the test's stderr.
 
 ### Fixed
 

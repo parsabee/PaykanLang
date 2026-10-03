@@ -34,6 +34,7 @@ class Paykanlang < Formula
     system "cmake", "-S", ".", "-B", "build", "-G", "Ninja",
            "-DCMAKE_BUILD_TYPE=Release",
            "-DLLVM_DIR=#{llvm.opt_prefix}/lib/cmake/llvm",
+           "-DPAYKAN_BUILD_TESTS=OFF",
            *std_cmake_args
     system "cmake", "--build", "build", "--parallel"
     system "cmake", "--install", "build"
