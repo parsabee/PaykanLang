@@ -568,12 +568,14 @@ private:
       llvm::Value *a = operand(in.Args[0]), *b = operand(in.Args[1]);
       llvm::Value *r = nullptr;
       if (a->getType()->isDoubleTy()) {
+        // IEEE 754: `ne` is unordered (true when either operand is NaN, the
+        // negation of `eq`); every other predicate is ordered (docs/pir.md).
         switch (in.Pred) {
         case CmpPred::Eq:
           r = B.CreateFCmpOEQ(a, b);
           break;
         case CmpPred::Ne:
-          r = B.CreateFCmpONE(a, b);
+          r = B.CreateFCmpUNE(a, b);
           break;
         case CmpPred::Lt:
           r = B.CreateFCmpOLT(a, b);

@@ -51,9 +51,11 @@ program; `paykan run` then exits with 128 + the signal number.
   Structured PIR maps one-to-one: `if`/`else`, `for (;;)` with the condition
   region at the top of the loop (`continue` re-enters it), `break`,
   `return`.
-* Integer arithmetic wraps (it is done in `uint64_t`), `f64 != f64` is the
-  ordered comparison, and `cast` reinterprets bits through `memcpy`, so the
-  generated code has the same semantics as the LLVM backend.
+* Integer arithmetic wraps (it is done in `uint64_t`), float comparisons
+  are C's own operators (`!=` unordered, true for a NaN operand; the rest
+  ordered, as `docs/pir.md` defines `cmp`), and `cast` reinterprets bits
+  through `memcpy`, so the generated code has the same semantics as the
+  LLVM backend.
 * ARC, allocation and freeing are direct runtime calls (`Paykan_retain`,
   `Paykan_release`, `PaykanShared_new`, `PaykanShared_get`, `Paykan_malloc`,
   `Paykan_free`); every other runtime call is cast to the prototype in

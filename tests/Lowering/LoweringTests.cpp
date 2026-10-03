@@ -258,6 +258,33 @@ TEST(Lowering, IntegerDivisionIsGuarded) {
   EXPECT_NE(m.find(" = rem "), std::string::npos) << m;
 }
 
+TEST(Lowering, FloatComparisonsAreSingleCmpInstructions) {
+  // Every float comparison is one `cmp` with the operator's predicate; `!=`
+  // in particular is `cmp ne` (unordered on f64 by definition, docs/pir.md),
+  // not an ordered `lt || gt` expansion or a negated `eq`.
+  auto l = lower(R"(
+    fn f(a: float, b: float) -> int {
+      r = 0;
+      if (a != b) { r = r + 1; }
+      if (a == b) { r = r + 2; }
+      if (a < b) { r = r + 4; }
+      if (a <= b) { r = r + 8; }
+      if (a > b) { r = r + 16; }
+      if (a >= b) { r = r + 32; }
+      return r;
+    }
+    fn main() -> int { return f(1.0, 2.0); }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string f = function(l.Text, "f");
+  for (const char *pred : {"ne", "eq", "lt", "le", "gt", "ge"})
+    EXPECT_EQ(count(f, std::string("= cmp ") + pred + " %a"), 1u)
+        << pred << "\n"
+        << f;
+  EXPECT_EQ(count(f, " = not "), 0u) << f;
+  EXPECT_EQ(count(f, " = cmp "), 6u) << f;
+}
+
 // ---------------------------------------------------------------------------
 // Classes: layout, vtable, constructor, destructor, fields
 // ---------------------------------------------------------------------------
