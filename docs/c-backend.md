@@ -27,7 +27,7 @@ compiled and linked with the build's sanitizer and coverage flags, since the
 archive is instrumented with them.
 
 A program started with `paykan run` sees the script path as `args[0]`
-(`fn main(args: Str[])`), like the JIT backend.  A runtime panic flushes
+(`fn main(args: Str[])`), like the llvm backend.  A runtime panic flushes
 stdout (and every open `File`), prints its message to stderr and aborts the
 program (`SIGABRT`); `paykan run` then exits with 128 + the signal number,
 134, which is also what the llvm backend's `paykan run` exits with (its JIT

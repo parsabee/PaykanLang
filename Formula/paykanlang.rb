@@ -1,4 +1,8 @@
-# Homebrew formula for PaykanLang (JIT-only v0.0 preview).
+# Homebrew formula for PaykanLang.
+#
+# Not yet updated for v0.1.0: it still points at the v0.0.0 tag with a placeholder
+# sha256 (below). Bringing it up to date is a release step of
+# https://github.com/parsabee/PaykanLang/issues/27 (section 5).
 #
 # This file doubles as a tap: a user can install with
 #
@@ -12,8 +16,9 @@
 #
 # LLVM 17 is the one large dependency; we use Homebrew's llvm@17 and point the
 # build's LLVMSetup fast path at it via -DLLVM_DIR, so no prebuilt LLVM is
-# downloaded during the build. Bison, Flex, and GoogleTest are fetched by the
-# build's own setup modules.
+# downloaded during the build. Bison and Flex are fetched by the build's own
+# setup modules; the test suite (and so GoogleTest) is not built
+# (-DPAYKAN_BUILD_TESTS=OFF).
 #
 # NOTE: `sha256` below is a placeholder. After the v0.0.0 tag exists, set it to
 # the real digest, e.g.:
