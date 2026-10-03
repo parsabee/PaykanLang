@@ -4,14 +4,40 @@
 #include "DiagEngine.h"
 
 #include <algorithm>
+#include <cstdlib>
+#include <iostream>
 #include <ostream>
 #include <string>
 
 namespace paykan {
 namespace sema {
 
+void DiagEngine::closeGroup() {
+#ifndef NDEBUG
+  if (!CurrentGroup.empty() && !SeenGroups.insert(CurrentGroup).second) {
+    std::cerr << "internal compiler error: the same diagnostic was reported "
+                 "twice (a construct was resolved and reported more than "
+                 "once):\n"
+              << CurrentGroup;
+    std::abort();
+  }
+#endif
+  CurrentGroup.clear();
+}
+
+DiagEngine::~DiagEngine() { closeGroup(); }
+
 void DiagEngine::emit(Diagnostic::Severity level, ast::SourceLocation loc,
                       const std::string &msg) {
+#ifndef NDEBUG
+  if (level != Diagnostic::Note)
+    closeGroup();
+  CurrentGroup += SourceName + ":" + std::to_string(loc.getLineStart()) + ":" +
+                  std::to_string(loc.getColumnStart()) + "-" +
+                  std::to_string(loc.getLineEnd()) + ":" +
+                  std::to_string(loc.getColumnEnd()) + ": " +
+                  std::to_string(static_cast<int>(level)) + ": " + msg + "\n";
+#endif
   Diagnostics.push_back({level, loc, msg});
   if (level == Diagnostic::Error)
     ++ErrorCount;

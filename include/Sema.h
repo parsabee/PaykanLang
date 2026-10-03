@@ -609,6 +609,17 @@ private:
   /// before a method that calls it.
   StringMap<StringSet> ConstructsEdges;
 
+  /// Report that qualified name @p name (`shapes::Box`, `g::first`) names a
+  /// template of another module, which cannot be imported yet.  The rejection
+  /// does not depend on the type arguments, but a use inside a generic body is
+  /// resolved again for every instantiation (clones keep the template's source
+  /// locations), so it is reported once per use: a repeat at the same location
+  /// only counts a suppressed follow-on (#112).
+  void errorImportedTemplate(ast::SourceLocation loc, const std::string &name,
+                             const std::string &msg);
+  /// The uses errorImportedTemplate has reported ("line:col:name").
+  StringSet ReportedImportedTemplateUses;
+
   /// Register every generic declaration of the module as a template, checking
   /// its name and type parameter list.
   bool registerGenericTemplates(ast::TranslationUnit *tu);

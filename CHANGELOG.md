@@ -206,6 +206,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   variable, ...) reports a follow-on either. A later valid assignment
   re-declares it with the value's type. Calls to a function whose signature
   failed are likewise not reported as calls to an undeclared function.
+- A use of another module's generic class or function (`shapes::Box<int>(7)`,
+  `x: shapes::Box<int>`, `shapes::first<int>(xs)`, `g::Box<int>(7)`) inside
+  a generic body is rejected once, not once per instantiation of that body
+  (#112). Debug builds of the compiler now abort with an internal error when
+  the identical diagnostic (same location, message and notes) is reported
+  twice.
 
 ### Changed
 

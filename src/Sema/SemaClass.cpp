@@ -793,14 +793,28 @@ std::string Sema::instantiationName(const std::string &templateName,
   return s + ">";
 }
 
+void Sema::errorImportedTemplate(ast::SourceLocation loc,
+                                 const std::string &name,
+                                 const std::string &msg) {
+  const std::string key = std::to_string(loc.getLineStart()) + ":" +
+                          std::to_string(loc.getColumnStart()) + ":" + name;
+  if (!ReportedImportedTemplateUses.insert(key).second) {
+    ++SuppressedFollowOns; // the same use, in another instantiation
+    return;
+  }
+  error(loc, msg);
+}
+
 ast::ClassType *Sema::instantiateClass(const std::string &name,
                                        const std::vector<ast::Type *> &args,
                                        ast::SourceLocation loc) {
   auto tIt = ClassTemplates.find(name);
   if (tIt == ClassTemplates.end()) {
     if (name.find(names::kQualSep) != std::string::npos)
-      error(loc, "generic types cannot be imported yet: '" + name +
-                     "<...>' names a generic class of another module");
+      errorImportedTemplate(loc, name,
+                            "generic types cannot be imported yet: '" + name +
+                                "<...>' names a generic class of another "
+                                "module");
     else if (Ctx.lookupClassType(name) || Ctx.lookupEnumType(name))
       error(loc, "'" + name +
                      "' is not a generic class and takes no type "
@@ -914,8 +928,11 @@ std::string Sema::instantiateFunction(const std::string &name,
   auto tIt = FuncTemplates.find(name);
   if (tIt == FuncTemplates.end()) {
     if (name.find(names::kQualSep) != std::string::npos)
-      error(loc, "generic functions cannot be imported yet: '" + name +
-                     "<...>' names a generic function of another module");
+      errorImportedTemplate(loc, name,
+                            "generic functions cannot be imported yet: '" +
+                                name +
+                                "<...>' names a generic function of another "
+                                "module");
     else if (lookupFunction(name))
       error(loc, "'" + name +
                      "' is not a generic function and takes no type "
@@ -1122,8 +1139,11 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
   // Templates are never qualified (they are not exported), so a qualified
   // callee can only get here with explicit type arguments.
   if (callee.find(names::kQualSep) != std::string::npos) {
-    error(loc, "generic types and functions cannot be imported yet: '" +
-                   callee + "<...>' names a template of another module");
+    errorImportedTemplate(loc, callee,
+                          "generic types and functions cannot be imported "
+                          "yet: '" +
+                              callee +
+                              "<...>' names a template of another module");
     return false;
   }
 
