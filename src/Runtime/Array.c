@@ -156,9 +156,8 @@ void PaykanArray_destroy_obj(PaykanObject *self) {
 // For object arrays the caller uses the result as a PaykanShared*.
 void *PaykanArray_get(PaykanArray *arr, unsigned long idx) {
   if (idx >= arr->len) {
-    fprintf(stderr, "paykan: array index %lu out of bounds (len=%lu)\n", idx,
-            arr->len);
-    abort();
+    Paykan_runtime_panic("array index %lu out of bounds (len=%lu)", idx,
+                         arr->len);
   }
   void *val;
   memcpy(&val, (char *)arr->data + idx * PAYKAN_ELEM_SIZE, PAYKAN_ELEM_SIZE);
@@ -172,9 +171,8 @@ void *PaykanArray_get(PaykanArray *arr, unsigned long idx) {
 // Primitive set: plain 8-byte store, no reference counting.
 void PaykanArray_set(PaykanArray *arr, unsigned long idx, void *value) {
   if (idx >= arr->len) {
-    fprintf(stderr, "paykan: array index %lu out of bounds (len=%lu)\n", idx,
-            arr->len);
-    abort();
+    Paykan_runtime_panic("array index %lu out of bounds (len=%lu)", idx,
+                         arr->len);
   }
   memcpy((char *)arr->data + idx * PAYKAN_ELEM_SIZE, &value, PAYKAN_ELEM_SIZE);
 }
@@ -184,9 +182,8 @@ void PaykanArray_set(PaykanArray *arr, unsigned long idx, void *value) {
 void PaykanArray_set_obj(PaykanArray *arr, unsigned long idx,
                          PaykanShared *value) {
   if (idx >= arr->len) {
-    fprintf(stderr, "paykan: array index %lu out of bounds (len=%lu)\n", idx,
-            arr->len);
-    abort();
+    Paykan_runtime_panic("array index %lu out of bounds (len=%lu)", idx,
+                         arr->len);
   }
   void *slot = (char *)arr->data + idx * PAYKAN_ELEM_SIZE;
   PaykanShared *old;
@@ -275,8 +272,7 @@ void PaykanArray_push_obj(PaykanArray *arr, PaykanShared *value) {
 
 void *PaykanArray_pop(PaykanArray *arr) {
   if (arr->len == 0) {
-    fprintf(stderr, "paykan: pop on empty array\n");
-    abort();
+    Paykan_runtime_panic("pop on empty array");
   }
   arr->len -= 1;
   void *val;
@@ -288,8 +284,7 @@ void *PaykanArray_pop(PaykanArray *arr) {
 
 PaykanShared *PaykanArray_pop_obj(PaykanArray *arr) {
   if (arr->len == 0) {
-    fprintf(stderr, "paykan: pop on empty array\n");
-    abort();
+    Paykan_runtime_panic("pop on empty array");
   }
   arr->len -= 1;
   PaykanShared *val;

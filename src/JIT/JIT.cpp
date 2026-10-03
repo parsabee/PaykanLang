@@ -205,7 +205,9 @@ createObjectLinkingLayer(llvm::orc::ExecutionSession &es,
 // in this process, where the abort would kill the compiler itself.  While
 // main runs, SIGABRT is turned into that same exit status, so both backends
 // end `paykan run` alike (docs/c-backend.md).  Like abort(), _Exit flushes
-// no stdio buffer.  A built executable still aborts with SIGABRT.
+// no stdio buffer; the runtime's panic routine (Paykan_runtime_panic) flushes
+// every output stream itself before printing the message.  A built
+// executable still aborts with SIGABRT.
 
 namespace {
 

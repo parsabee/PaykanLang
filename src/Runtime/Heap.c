@@ -26,6 +26,7 @@
 // here and so correctly do not affect the counters.
 
 #include "Runtime.h"
+#include "RuntimeInternal.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -84,9 +85,8 @@ static PaykanHeapHeader *heap_header_of(void *payload) {
   PaykanHeapHeader *h =
       (PaykanHeapHeader *)((char *)payload - PAYKAN_HEAP_HEADER_SIZE);
   if (h->magic != PAYKAN_HEAP_MAGIC) {
-    fprintf(stderr, "paykan: heap corruption or invalid free of pointer %p\n",
-            payload);
-    abort();
+    Paykan_runtime_panic("heap corruption or invalid free of pointer %p",
+                         payload);
   }
   return h;
 }

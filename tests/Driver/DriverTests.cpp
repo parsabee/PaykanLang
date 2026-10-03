@@ -16,6 +16,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -277,8 +278,8 @@ TEST(Driver, IntDivOverflowTraps) {
 static void expectConversionPanic(const std::string &decl,
                                   const std::string &conv,
                                   const std::string &message) {
-  // (Buffered stdout is lost when the panic aborts, so only the absence of
-  // output after the conversion is checked.)
+  // (Nothing printed after the conversion may appear; the output printed
+  // before a panic is covered by PanicFlushesStdoutOnEveryBackend.)
   auto src = writeTmp("fn main() -> int { " + decl + " " + conv +
                       " println(\"after\"); return 0; }");
   auto [rc, out] = run(paykanRun() + " " + src + " 2>&1");
@@ -406,6 +407,111 @@ TEST(Driver, PanicExitStatusIsTheSameOnEveryBackend) {
   }
   std::filesystem::remove_all(dir);
   EXPECT_GT(ran, 0) << backends;
+}
+
+// A panic flushes the program's stdout before printing its message and
+// aborting (#92).  stdout is fully buffered when it is a pipe, and abort()
+// flushes no stdio buffer, so the output printed before the panic used to be
+// lost there (it showed on a terminal).  Checked for every kind of panic, on
+// every backend, for `paykan run` and for executables from `build`: stdout
+// alone through a pipe holds the output, and with stderr merged into the same
+// pipe the output comes before the message.
+TEST(Driver, PanicFlushesStdoutOnEveryBackend) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_panic_flush_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  struct Case {
+    const char *name;
+    const char *body; // statements after the println, ending in the panic
+    const char *message;
+  };
+  const Case cases[] = {
+      {"index", "xs = [1, 2, 3]; println(Str<int>(xs[10]));",
+       "paykan: array index 10 out of bounds (len=3)"},
+      {"store", "xs = [1, 2, 3]; i: int = 5; xs[i] = 4;",
+       "paykan: array index 5 out of bounds (len=3)"},
+      {"pop", "xs: int[] = []; v = xs.pop(); println(Str<int>(v));",
+       "paykan: pop on empty array"},
+      {"strindex", "s: Str = \"ab\"; c = s[7]; println(Str<char>(c));",
+       "paykan: string index 7 out of bounds (len=2)"},
+      {"divzero", "z: int = 0; println(Str<int>(7 / z));",
+       "paykan: integer division or modulo by zero"},
+      {"intfloat",
+       "z: float = 0.0; n = int<float>(1.0 / z); "
+       "println(Str<int>(n));",
+       "paykan: int<float>(inf): the value is NaN, infinite or outside the "
+       "int range"},
+      {"charint", "n: int = 300; c = char<int>(n); println(Str<char>(c));",
+       "paykan: char<int>(300): the value is outside the char range 0..255"},
+  };
+  const std::string before = "first line\nabout to panic...\n";
+  auto backends = run(std::string(kPaykan) + " --list-backends 2>&1").out;
+  int ran = 0;
+  for (const std::string be : {"llvm", "c"}) {
+    if (backends.find(be + "\n") == std::string::npos &&
+        backends.find(be + " ") == std::string::npos)
+      continue;
+    ++ran;
+    for (const auto &c : cases) {
+      auto src = (dir / (std::string(c.name) + ".pkn")).string();
+      {
+        std::ofstream ofs(src);
+        ofs << "fn main() -> int { println(\"first line\"); "
+               "print(\"about to panic...\\n\"); "
+            << c.body << " println(\"after\"); return 0; }";
+      }
+      auto exe = (dir / (std::string(c.name) + "-" + be)).string();
+      std::string runCmd = kPaykan;
+      runCmd += " --backend=" + be;
+      std::string build = runCmd;
+      build += " -o " + exe;
+      build += " build " + src + " 2>&1";
+      auto [brc, bout] = run(build);
+      ASSERT_EQ(brc, 0) << be << " " << c.name << ": " << bout;
+      runCmd += " " + src;
+      // The shell reports the built executable's death by SIGABRT as 134,
+      // like `paykan run`'s own exit status; its own stderr (where it notes
+      // the abort) is discarded, the program's goes where each check says.
+      for (const std::string &cmd : {runCmd, exe}) {
+        std::string what = be;
+        what += " ";
+        what += c.name;
+        auto [rc, out] = run("exec 2>/dev/null; (" + cmd + ")");
+        EXPECT_EQ(rc, 128 + SIGABRT) << what << ": " << cmd;
+        EXPECT_EQ(out, before) << what << ": " << cmd;
+        std::string merged = "exec 3>&1 2>/dev/null; (" + cmd;
+        merged += ") 2>&3";
+        auto [rc2, both] = run(merged);
+        EXPECT_EQ(rc2, 128 + SIGABRT) << what << ": " << cmd;
+        std::string expected = before + c.message;
+        expected += "\n";
+        EXPECT_EQ(both, expected) << what << ": " << cmd;
+      }
+    }
+  }
+  std::filesystem::remove_all(dir);
+  EXPECT_GT(ran, 0) << backends;
+}
+
+// A panic also flushes what the program has written to a File (#92).
+TEST(Driver, PanicFlushesOpenFiles) {
+  REQUIRE_BACKEND();
+  auto out = std::filesystem::temp_directory_path() /
+             ("drv_panic_file_" + std::to_string(getpid()) + ".txt");
+  std::filesystem::remove(out);
+  auto src = writeTmp("fn main() -> int { match open(\"" + out.string() +
+                      "\", \"w\") { err: Error { return 1; } "
+                      "f: File { f.write(\"kept\\n\"); xs = [1]; i: int = 3; "
+                      "println(Str<int>(xs[i])); } } return 0; }");
+  auto [rc, msg] = run(paykanRun() + " " + src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_EQ(rc, 128 + SIGABRT) << msg;
+  std::ifstream ifs(out);
+  std::string content((std::istreambuf_iterator<char>(ifs)),
+                      std::istreambuf_iterator<char>());
+  std::filesystem::remove(out);
+  EXPECT_EQ(content, "kept\n") << msg;
 }
 
 TEST(Driver, IntDivNonZeroSucceeds) {

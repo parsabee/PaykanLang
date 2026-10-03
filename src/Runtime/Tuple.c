@@ -56,8 +56,7 @@ PaykanObjectVTable PaykanTuple_vtable = {
 
 PaykanTuple *PaykanTuple_new(int64_t count, const uint8_t *kinds) {
   if (count < 0) {
-    fprintf(stderr, "paykan: negative tuple arity %lld\n", (long long)count);
-    abort();
+    Paykan_runtime_panic("negative tuple arity %lld", (long long)count);
   }
   size_t n = (size_t)count;
   // Slots follow the fixed header (sizeof(PaykanTuple) is a multiple of 8, so
@@ -95,9 +94,8 @@ void PaykanTuple_destroy(PaykanObject *self) {
 
 static void tuple_check_index(const PaykanTuple *t, int64_t idx) {
   if (idx < 0 || idx >= t->count) {
-    fprintf(stderr, "paykan: tuple index %lld out of bounds (arity=%lld)\n",
-            (long long)idx, (long long)t->count);
-    abort();
+    Paykan_runtime_panic("tuple index %lld out of bounds (arity=%lld)",
+                         (long long)idx, (long long)t->count);
   }
 }
 
@@ -118,9 +116,8 @@ int64_t PaykanTuple_get(PaykanTuple *t, int64_t idx) {
 void PaykanTuple_set(PaykanTuple *t, int64_t idx, int64_t bits) {
   tuple_check_index(t, idx);
   if (t->kinds[idx] == PAYKAN_TUPLE_REF) {
-    fprintf(stderr, "paykan: PaykanTuple_set on reference slot %lld\n",
-            (long long)idx);
-    abort();
+    Paykan_runtime_panic("PaykanTuple_set on reference slot %lld",
+                         (long long)idx);
   }
   memcpy(&t->slots[idx], &bits, sizeof(bits));
 }
@@ -128,9 +125,8 @@ void PaykanTuple_set(PaykanTuple *t, int64_t idx, int64_t bits) {
 void PaykanTuple_set_obj(PaykanTuple *t, int64_t idx, PaykanShared *value) {
   tuple_check_index(t, idx);
   if (t->kinds[idx] != PAYKAN_TUPLE_REF) {
-    fprintf(stderr, "paykan: PaykanTuple_set_obj on value slot %lld\n",
-            (long long)idx);
-    abort();
+    Paykan_runtime_panic("PaykanTuple_set_obj on value slot %lld",
+                         (long long)idx);
   }
   PaykanShared *old;
   memcpy(&old, &t->slots[idx], sizeof(t->slots[idx]));
