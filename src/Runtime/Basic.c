@@ -14,6 +14,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -119,7 +120,11 @@ PaykanShared *PaykanFloat_from_str(PaykanObject *str) {
   char *end;
   errno = 0;
   double val = strtod(s->data, &end);
-  if (end != s->data + s->len || errno != 0)
+  if (end != s->data + s->len)
+    return NULL;
+  // ERANGE flags overflow (±HUGE_VAL), a nonzero value underflowing to 0, and
+  // also a subnormal result, which is representable and accepted.
+  if (errno != 0 && (errno != ERANGE || isinf(val) || val == 0.0))
     return NULL;
   return PaykanShared_new((PaykanObject *)PaykanFloat_new(val));
 }

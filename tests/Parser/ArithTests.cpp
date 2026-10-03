@@ -269,6 +269,39 @@ TEST(Arith, IntLiteralOverflowRejected) {
             std::string::npos);
 }
 
+// A float literal must denote a finite float (#73): overflow to +-inf and a
+// nonzero literal underflowing to 0 are errors, with the same wording on
+// every frontend; subnormal literals (which strtod flags with ERANGE too)
+// and zero written with a huge exponent are fine.
+TEST(Arith, FloatLiteralOutOfRangeRejected) {
+  for (const char *lit : {"1e999", "1.8e308", "1e-400", "2e-324"}) {
+    auto r = parseWithDiags(std::string("fn main() -> int {\n  x: float = ") +
+                            lit + ";\n  return 0;\n}\n");
+    ASSERT_FALSE(r.Ok) << lit;
+    ASSERT_FALSE(r.Diags.empty()) << lit;
+    EXPECT_NE(
+        r.Diags[0].Message.find(std::string("float is out of range: ") + lit),
+        std::string::npos)
+        << lit << ": " << r.Diags[0].Message;
+    EXPECT_EQ(r.Diags[0].Loc.getLineStart(), 2u) << lit;
+  }
+}
+
+TEST(Arith, FloatLiteralSubnormalAccepted) {
+  auto [ok, _] = parse(R"(
+    fn main() -> int {
+      a: float = 5e-324;
+      b: float = 1e-310;
+      c: float = 2.2250738585072014e-308;
+      d: float = 1.7976931348623157e308;
+      e: float = 0e-999;
+      f: float = 0.0e999;
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(ok);
+}
+
 TEST(Arith, IntLiteralMinMagnitudeRejected) {
   // Deliberate: `-` is a separate token, so -9223372036854775808 lexes as
   // MINUS + the bare magnitude, which overflows.  INT64_MIN must be written

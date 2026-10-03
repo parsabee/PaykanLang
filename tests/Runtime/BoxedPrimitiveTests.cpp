@@ -3,6 +3,7 @@
 // Unit tests for boxed primitive runtime types: PaykanInt, PaykanFloat,
 // PaykanBool, and PaykanError.
 
+#include <cmath>
 #include <cstring>
 #include <gtest/gtest.h>
 #include <string>
@@ -221,6 +222,37 @@ TEST(BoxedFloat, FromStrSpecialValues) {
   EXPECT_EQ(PaykanFloat_value(PaykanShared_get(i)), -1.0 / 0.0);
   Paykan_release(n);
   Paykan_release(i);
+}
+
+// The range rule (language_reference/01-language-basics.md): a value that
+// rounds to a finite float, subnormals included, is accepted; one too large
+// (rounds to +-inf) or too small (nonzero, rounds to 0) is None.  strtod
+// flags subnormal results with ERANGE too, which must not make them None.
+TEST(BoxedFloat, FromStrRange) {
+  struct Case {
+    const char *text;
+    double value;
+  } ok[] = {{"1e-310", 1e-310},
+            {"5e-324", 4.9406564584124654e-324},
+            {"-5e-324", -4.9406564584124654e-324},
+            {"4.9406564584124654e-324", 4.9406564584124654e-324},
+            {"2.2250738585072009e-308", 2.2250738585072009e-308},
+            {"2.2250738585072014e-308", 2.2250738585072014e-308},
+            {"1.7976931348623157e308", 1.7976931348623157e308},
+            {"0e-999", 0.0},
+            {"-0.0", -0.0}};
+  for (const auto &c : ok) {
+    PaykanShared *r = parseFloat(c.text, (int64_t)strlen(c.text));
+    ASSERT_NE(r, nullptr) << c.text;
+    double v = PaykanFloat_value(PaykanShared_get(r));
+    EXPECT_EQ(v, c.value) << c.text;
+    EXPECT_EQ(std::signbit(v), std::signbit(c.value)) << c.text;
+    Paykan_release(r);
+  }
+  for (const char *bad :
+       {"1e999", "-1e999", "1.8e308", "1e-400", "-1e-400", "2e-324"}) {
+    EXPECT_EQ(parseFloat(bad, (int64_t)strlen(bad)), nullptr) << bad;
+  }
 }
 
 // ============================================================================
