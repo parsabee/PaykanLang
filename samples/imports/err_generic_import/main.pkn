@@ -1,0 +1,14 @@
+// ERROR: generic templates cannot be imported yet (language_reference/
+// 11-generics.md); `shapes::Box<int>` names a template of another module.
+// Exactly one diagnostic (#112):
+//   main.pkn:11:7: error: generic types and functions cannot be imported yet:
+//   'shapes::Box<...>' names a template of another module
+// `b` is poisoned by the failed declaration, so `b.get()` reports nothing.
+import geometry::shapes;
+
+fn main() -> int {
+  // ERROR: reported once, here
+  b = shapes::Box<int>(7);
+  println(Str(b.get()));
+  return 0;
+}

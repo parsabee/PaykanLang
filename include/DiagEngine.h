@@ -8,6 +8,7 @@
 
 #include <iosfwd>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace paykan {
@@ -45,8 +46,22 @@ class DiagEngine {
   void emit(Diagnostic::Severity level, ast::SourceLocation loc,
             const std::string &msg);
 
+  // Double-report guard (#112), active in debug builds only (the members
+  // exist in every build so the class layout does not depend on NDEBUG).  A
+  // diagnostic group is an error or warning plus the notes that follow it;
+  // reporting a group identical to an earlier one (same file, location,
+  // message and notes) is a compiler bug -- a construct resolved and reported
+  // twice -- so it aborts instead of being silently deduplicated.  The same
+  // error repeated with different notes (e.g. once per template instantiation,
+  // each with its own "in instantiation of" note) is a different group and is
+  // allowed, and so is the same message at another location.
+  std::string CurrentGroup;
+  std::unordered_set<std::string> SeenGroups;
+  void closeGroup();
+
 public:
   explicit DiagEngine(std::ostream &os) : OS(os) {}
+  ~DiagEngine();
 
   // Non-copyable, non-movable (owns the stream reference).
   DiagEngine(const DiagEngine &) = delete;

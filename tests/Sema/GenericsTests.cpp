@@ -540,6 +540,154 @@ fn main() -> int { x: int = gen::first<int>([1]); return 0; }
   std::filesystem::remove_all(dir);
 }
 
+namespace {
+size_t countOf(const std::string &haystack, const std::string &needle) {
+  size_t n = 0;
+  for (size_t pos = haystack.find(needle); pos != std::string::npos;
+       pos = haystack.find(needle, pos + needle.size()))
+    ++n;
+  return n;
+}
+
+// Checks @p body (the importer's source after `import geometry::shapes`
+// header @p importLine) and expects exactly one error, the import rejection.
+void expectSingleImportError(const std::filesystem::path &dir,
+                             const std::string &file,
+                             const std::string &importLine,
+                             const std::string &body) {
+  auto p = writeProjectFile(dir, file, importLine + "\n" + body);
+  auto r = semaCheckFile(p);
+  EXPECT_FALSE(r.Ok) << file;
+  EXPECT_EQ(r.ErrorCount, 1u) << file << ":\n" << r.Diagnostics;
+  EXPECT_EQ(countOf(r.Diagnostics, "cannot be imported yet"), 1u)
+      << file << ":\n"
+      << r.Diagnostics;
+  EXPECT_EQ(countOf(r.Diagnostics, "error:"), 1u) << file << ":\n"
+                                                  << r.Diagnostics;
+}
+
+const char *kShapes = R"(
+class Box<T> { v: T; fn __init__(v: T) { self.v = v; } fn get() -> T { return self.v; } }
+fn first<T>(xs: T[]) -> T { return xs[0]; }
+)";
+} // namespace
+
+// #112: every use of another module's template is reported exactly once, and
+// the failed expression's follow-ons (`b.get()`) stay silent.
+TEST(Generics, ImportedTemplateReportedOncePerUse) {
+  auto dir = paykan::test::tempDir() / "pkn_sema_generics_imp_once";
+  std::filesystem::remove_all(dir);
+  writeProjectFile(dir, "geometry/shapes.pkn", kShapes);
+  const std::string imp = "import geometry::shapes;";
+
+  // Constructor call, then a use of the poisoned variable.
+  expectSingleImportError(dir, "ctor.pkn", imp, R"(
+fn main() -> int {
+  b = shapes::Box<int>(7);
+  println(Str(b.get()));
+  return 0;
+}
+)");
+  // Type annotation.
+  expectSingleImportError(dir, "ann.pkn", imp, R"(
+fn main() -> int {
+  x: shapes::Box<int> = None;
+  println(Str(x.get()));
+  return 0;
+}
+)");
+  // Generic function with explicit type arguments.
+  expectSingleImportError(dir, "fn.pkn", imp, R"(
+fn main() -> int {
+  xs: int[] = [1, 2];
+  y = shapes::first<int>(xs);
+  println(Str(y + 1));
+  return 0;
+}
+)");
+  // Aliased import.
+  expectSingleImportError(dir, "alias.pkn", "import geometry::shapes as g;", R"(
+fn main() -> int {
+  b = g::Box<int>(7);
+  println(Str(b.get()));
+  return 0;
+}
+)");
+
+  // A use inside a generic body is resolved again for every instantiation;
+  // it is still reported once.
+  expectSingleImportError(dir, "gen_ctor.pkn", imp, R"(
+fn g<T>(x: T) -> int { b = shapes::Box<int>(7); return b.get(); }
+fn main() -> int { return g<int>(1) + g<Str>("a"); }
+)");
+  expectSingleImportError(dir, "gen_fn.pkn", imp, R"(
+fn g<T>(x: T) -> int { y = shapes::first<T>([x]); return 0; }
+fn main() -> int { return g<int>(1) + g<Str>("a"); }
+)");
+  expectSingleImportError(dir, "gen_ann.pkn", imp, R"(
+fn g<T>(v: T) -> int { x: shapes::Box<T> = None; return 0; }
+fn main() -> int { return g<int>(1) + g<Str>("a"); }
+)");
+  expectSingleImportError(dir, "gen_alias.pkn", "import geometry::shapes as g;",
+                          R"(
+class W<T> { fn m() -> int { b = g::Box<int>(1); return b.get(); } }
+fn main() -> int { a = W<int>(); c = W<Str>(); return a.m() + c.m(); }
+)");
+
+  // Two uses are two errors.
+  auto p = writeProjectFile(dir, "two.pkn", imp + R"(
+fn main() -> int {
+  a = shapes::Box<int>(1);
+  b = shapes::Box<int>(2);
+  return 0;
+}
+)");
+  auto r = semaCheckFile(p);
+  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
+  EXPECT_EQ(countOf(r.Diagnostics, "cannot be imported yet"), 2u)
+      << r.Diagnostics;
+
+  std::filesystem::remove_all(dir);
+}
+
+// The diagnostic engine's debug-build guard (#112): the same diagnostic group
+// (an error plus its notes) reported twice is an internal error, while the
+// same message with different notes or at another location is not.
+#ifndef NDEBUG
+TEST(Generics, DiagEngineRejectsIdenticalRepeat) {
+  const paykan::ast::SourceLocation a(4, 7, 4, 26);
+  const paykan::ast::SourceLocation b(5, 7, 5, 26);
+  {
+    std::ostringstream os;
+    paykan::sema::DiagEngine diag(os);
+    diag.error(a, "msg");
+    diag.note(b, "in instantiation of 'g<int>' requested here");
+    diag.error(a, "msg"); // other notes: a distinct group
+    diag.note(b, "in instantiation of 'g<Str>' requested here");
+    diag.error(b, "msg");   // another location
+    diag.warning(a, "msg"); // another severity
+    EXPECT_EQ(diag.getErrorCount(), 3u);
+  }
+  EXPECT_DEATH(
+      {
+        std::ostringstream os;
+        paykan::sema::DiagEngine diag(os);
+        diag.error(a, "msg");
+        diag.error(a, "msg");
+        diag.error(b, "next"); // closes the repeated group
+      },
+      "reported twice");
+  EXPECT_DEATH(
+      {
+        std::ostringstream os;
+        paykan::sema::DiagEngine diag(os);
+        diag.error(a, "msg");
+        diag.error(a, "msg");
+      }, // closed by the destructor
+      "reported twice");
+}
+#endif
+
 // A module's own instantiation is exported as a concrete class, so a value of
 // that type returned by the module can be used by the importer …
 TEST(Generics, ExportedInstantiationIsUsableAsConcreteClass) {

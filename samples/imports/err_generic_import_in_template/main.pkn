@@ -1,0 +1,17 @@
+// ERROR: a use of another module's template inside a generic body is
+// rejected once, not once per instantiation (#112).  `wrap` is instantiated
+// as wrap<int> and wrap<Str>, but there is exactly one diagnostic:
+//   main.pkn:10:7: error: generic types and functions cannot be imported yet:
+//   'shapes::Box<...>' names a template of another module
+//   main.pkn:16:10: note: in instantiation of 'wrap<int>' requested here
+import geometry::shapes;
+
+fn wrap<T>(x: T) -> int {
+  b = shapes::Box<T>(x);  // ERROR: reported once
+  println(Str(b.get()));
+  return 0;
+}
+
+fn main() -> int {
+  return wrap<int>(1) + wrap<Str>("a");
+}
