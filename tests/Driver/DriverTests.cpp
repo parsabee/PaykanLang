@@ -626,8 +626,9 @@ TEST(Driver, FloatNotEqualIsUnorderedOnEveryBackend) {
         run(std::string(kPaykan) + " --backend=" + be + " " + src + " 2>&1");
     EXPECT_EQ(rc, 0) << be << ": " << out;
     EXPECT_EQ(out, "TrueFalseFalseTrueFalse\n") << be;
+    // At -O0: the default -O2 folds the comparisons of constants away.
     auto [srcRc, code] = run(std::string(kPaykan) + " --backend=" + be +
-                             " --emit-source " + src + " 2>&1");
+                             " -O0 --emit-source " + src + " 2>&1");
     EXPECT_EQ(srcRc, 0) << be << ": " << code;
     if (std::string(be) == "llvm") {
       EXPECT_NE(code.find("fcmp une double"), std::string::npos) << code;
@@ -660,7 +661,7 @@ TEST(Driver, CBackendBuildsAnExecutableAndCachesObjects) {
                        " build " + src + " 2>&1");
   ASSERT_EQ(rc, 0) << out;
   ASSERT_TRUE(std::filesystem::exists(exe));
-  auto cache = dir / ".paykan_cache" / "prog.pkn.o";
+  auto cache = dir / ".paykan_cache" / "prog.o";
   ASSERT_TRUE(std::filesystem::exists(cache)) << cache;
   auto stamp = std::filesystem::last_write_time(cache);
 
@@ -691,7 +692,7 @@ TEST(Driver, CBackendBuildsAnExecutableAndCachesObjects) {
   // rebuilt even though the module's C is unchanged.  Simulate one by
   // rewriting the stored key and corrupting the object (reusing it would
   // fail the link).
-  auto keyPath = dir / ".paykan_cache" / "prog.pkn.key";
+  auto keyPath = dir / ".paykan_cache" / "prog.key";
   std::string key;
   {
     std::ifstream in(keyPath);
@@ -751,7 +752,7 @@ TEST(Driver, CBackendRebuildsACorruptCachedObject) {
   auto [rc, out] = run(runCmd);
   ASSERT_EQ(rc, 0) << out;
   ASSERT_EQ(out, "2\n");
-  auto obj = dir / ".paykan_cache" / "dep.pkn.o";
+  auto obj = dir / ".paykan_cache" / "dep.o";
   ASSERT_TRUE(std::filesystem::exists(obj)) << obj;
   auto size = std::filesystem::file_size(obj);
   ASSERT_GT(size, 16u);
@@ -912,4 +913,203 @@ TEST(Driver, CBackendRunForwardsArgumentsAndTracksTheHeap) {
   EXPECT_EQ(rc, 2) << out;
   EXPECT_NE(out.find("hello\n"), std::string::npos) << out;
   EXPECT_NE(out.find("live blocks       : 0"), std::string::npos) << out;
+}
+
+// ---------------------------------------------------------------------------
+// Reproducible output (#102): modules are named by their canonical module
+// names, so nothing the compiler produces depends on where the sources live
+// or on the directory it runs in.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::string slurp(const std::filesystem::path &path) {
+  std::ifstream in(path, std::ios::binary);
+  return std::string((std::istreambuf_iterator<char>(in)),
+                     std::istreambuf_iterator<char>());
+}
+
+/// A multi-module project under @p dir: nested modules and two modules with
+/// the same stem in different directories (`a::util`, `b::util`).
+void writeZooProject(const std::filesystem::path &dir) {
+  std::filesystem::create_directories(dir / "geometry");
+  std::filesystem::create_directories(dir / "a");
+  std::filesystem::create_directories(dir / "b");
+  std::ofstream(dir / "geometry" / "shapes.pkn")
+      << "class Rect { w: int; h: int;\n"
+         "  fn __init__(w: int, h: int) { self.w = w; self.h = h; }\n"
+         "  fn area() -> int { return self.w * self.h; } }\n"
+         "fn describe(r: Rect) -> Str { return \"rect\"; }\n";
+  std::ofstream(dir / "a" / "util.pkn") << "fn tag() -> int { return 1; }\n";
+  std::ofstream(dir / "b" / "util.pkn") << "fn tag() -> int { return 2; }\n";
+  std::ofstream(dir / "zoo.pkn")
+      << "import geometry::shapes;\nimport a::util;\nimport b::util as bu;\n"
+         "fn main() -> int { r: shapes::Rect = shapes::Rect(3, 4);\n"
+         "  println(shapes::describe(r)); println(Str<int>(r.area()));\n"
+         "  println(Str<int>(util::tag() * 10 + bu::tag())); return 0; }\n";
+}
+
+} // namespace
+
+TEST(Driver, OutputDoesNotDependOnTheSourceDirectory) {
+  REQUIRE_BACKEND();
+  namespace fs = std::filesystem;
+  auto base =
+      fs::temp_directory_path() / ("drv_repro_" + std::to_string(getpid()));
+  fs::remove_all(base);
+  fs::path one = base / "one" / "proj";
+  fs::path two = base / "two" / "deeper" / "proj";
+  writeZooProject(one);
+  writeZooProject(two);
+
+  // The same program from two directories, invoked as `zoo.pkn` from its
+  // directory, by a relative path from elsewhere and by an absolute path.
+  struct Invocation {
+    fs::path Cwd;
+    std::string File;
+  };
+  const std::vector<Invocation> invocations = {
+      {one, "zoo.pkn"},
+      {two, "zoo.pkn"},
+      {base / "two", "deeper/proj/zoo.pkn"},
+      {"/", (one / "zoo.pkn").string()},
+  };
+  auto inDir = [](const Invocation &inv, const std::string &args) {
+    return run("cd " + inv.Cwd.string() + " && " + paykanRun() + " " + args +
+               " " + inv.File + " 2>&1");
+  };
+  for (const char *flag : {"--emit-pir", "--emit-source"}) {
+    std::string first;
+    for (const Invocation &inv : invocations) {
+      auto [rc, out] = inDir(inv, flag);
+      ASSERT_EQ(rc, 0) << flag << " in " << inv.Cwd << ": " << out;
+      EXPECT_EQ(out.find(base.string()), std::string::npos) << flag << out;
+      EXPECT_EQ(out.find(".pkn"), std::string::npos) << flag << out;
+      if (first.empty())
+        first = out;
+      else
+        EXPECT_EQ(out, first)
+            << flag << " differs in " << inv.Cwd << " for " << inv.File;
+    }
+    if (std::string(flag) == "--emit-pir") {
+      for (const char *m : {"module \"zoo\"\n", "module \"geometry::shapes\"\n",
+                            "module \"a::util\"\n", "module \"b::util\"\n",
+                            "module \"a::util\" symbol @tag\n",
+                            "module \"b::util\" symbol @tag\n"})
+        EXPECT_NE(first.find(m), std::string::npos) << m << "\n" << first;
+      EXPECT_EQ(first.rfind("module \"zoo\"\n", 0), 0u) << first;
+    }
+  }
+
+  // Same-stem modules stay apart when run (and when built, below).
+  for (const Invocation &inv : invocations) {
+    auto [rc, out] = inDir(inv, "--track-heap");
+    EXPECT_EQ(rc, 0) << out;
+    EXPECT_NE(out.find("rect\n12\n12\n"), std::string::npos) << out;
+    EXPECT_NE(out.find("live blocks       : 0"), std::string::npos) << out;
+  }
+
+  // The executables built in the two trees are identical and carry no source
+  // path.  (In an instrumented build the C backend's objects record the
+  // path of their cached C file, under the project; skip it there.)
+  std::vector<std::string> exes;
+  for (const Invocation &inv :
+       {invocations[0], invocations[3], invocations[2]}) {
+    auto exe = (base / ("zoo" + std::to_string(exes.size()))).string();
+    auto [rc, out] = inDir(inv, "-o " + exe + " build");
+    ASSERT_EQ(rc, 0) << out;
+    auto [rc2, out2] = run(exe + " 2>&1");
+    EXPECT_EQ(rc2, 0) << out2;
+    EXPECT_EQ(out2, "rect\n12\n12\n");
+    exes.push_back(slurp(exe));
+  }
+  bool instrumented = false;
+#if defined(PAYKAN_TEST_COVERAGE) || defined(__SANITIZE_ADDRESS__)
+  instrumented = true;
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer) ||                                        \
+    __has_feature(undefined_behavior_sanitizer)
+  instrumented = true;
+#endif
+#endif
+  if (!(instrumented && testBackend() == "c")) {
+    for (const std::string &bytes : exes) {
+      EXPECT_EQ(bytes.find(base.string()), std::string::npos);
+      EXPECT_EQ(bytes.find(".pkn"), std::string::npos);
+      EXPECT_EQ(bytes, exes[0]);
+    }
+  }
+  fs::remove_all(base);
+}
+
+// `paykan build` and `paykan run` optimise at -O2 unless told otherwise
+// (#102); -O0 still turns optimisation off.
+TEST(Driver, BuildAndRunDefaultToO2) {
+  REQUIRE_BACKEND();
+  namespace fs = std::filesystem;
+  auto dir = fs::temp_directory_path() /
+             ("drv_optdefault_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  fs::create_directories(dir);
+  std::ofstream(dir / "lib.pkn")
+      << "fn sq(x: int) -> int { y = x * x; return y; }\n";
+  std::ofstream(dir / "opt.pkn")
+      << "import lib;\n"
+         "fn main() -> int { s = 0; i = 0;\n"
+         "  while (i < 10) { s = s + lib::sq(i); i = i + 1; }\n"
+         "  println(Str<int>(s)); return 0; }\n";
+  std::string src = (dir / "opt.pkn").string();
+
+  // build: the default produces the -O2 executable, not the -O0 one.
+  auto build = [&](const std::string &opt) {
+    auto exe = (dir / ("opt" + opt)).string();
+    auto [rc, out] =
+        run(paykanRun() + " " + opt + " -o " + exe + " build " + src + " 2>&1");
+    EXPECT_EQ(rc, 0) << opt << ": " << out;
+    auto [rc2, out2] = run(exe + " 2>&1");
+    EXPECT_EQ(out2, "285\n") << opt;
+    return slurp(exe);
+  };
+  std::string plain = build("");
+  EXPECT_EQ(plain, build("-O2"));
+  EXPECT_NE(plain, build("-O0"));
+
+  // run: the level reaches the backend -- the C backend's object cache key
+  // records it, the llvm backend's IR (--emit-llvm goes through `run`'s
+  // compile) is the optimised one.
+  auto runWith = [&](const std::string &opt) {
+    auto [rc, out] = run(paykanRun() + " " + opt + " " + src + " 2>&1");
+    EXPECT_EQ(rc, 0) << opt << ": " << out;
+    EXPECT_EQ(out, "285\n") << opt;
+  };
+  if (testBackend() == "c") {
+    auto key = dir / ".paykan_cache" / "opt.key";
+    runWith("");
+    EXPECT_NE(slurp(key).find(" -O2\n"), std::string::npos) << slurp(key);
+    runWith("-O0");
+    EXPECT_NE(slurp(key).find(" -O0\n"), std::string::npos) << slurp(key);
+    // The runtime's include directory (an absolute path) is not part of it.
+    EXPECT_EQ(slurp(key).find(" -I"), std::string::npos) << slurp(key);
+  } else {
+    runWith("");
+    runWith("-O0");
+    auto emit = [&](const std::string &opt) {
+      return run(paykanRun() + " " + opt + " --emit-source " + src + " 2>&1")
+          .out;
+    };
+    std::string ir = emit("");
+    EXPECT_EQ(ir, emit("-O2"));
+    EXPECT_NE(ir, emit("-O0"));
+    EXPECT_EQ(ir.find("alloca"), std::string::npos) << ir;
+    // Cached bitcode is the unoptimised translation (the opt level is
+    // applied to the linked program), so one entry serves every level: a
+    // run at another level reuses it unchanged.
+    auto bc = dir / ".paykan_cache" / "lib.bc";
+    ASSERT_TRUE(fs::exists(bc)) << bc;
+    auto stamp = fs::last_write_time(bc);
+    runWith("-O1");
+    runWith("-O3");
+    EXPECT_EQ(fs::last_write_time(bc), stamp);
+  }
+  fs::remove_all(dir);
 }

@@ -84,7 +84,7 @@ paykan --check-only program.pkn # stop after type-checking (no codegen/JIT)
 paykan --emit-llvm program.pkn  # print the generated LLVM IR
 paykan --dump-ast program.pkn   # print the parsed AST
 paykan --track-heap program.pkn # run, then print heap/leak statistics
-paykan -O2 program.pkn          # set the optimization level (0-3)
+paykan -O0 program.pkn          # set the optimization level (0-3, default -O2)
 paykan --version                # print the compiler and LLVM versions
 ```
 

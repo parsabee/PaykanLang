@@ -216,6 +216,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loaded.
 - Parse errors changed format from yacc-style one-liners to clang-style
   caret-and-snippet diagnostics.
+- `paykan run` and `paykan build` optimise at `-O2` by default (was `-O0`);
+  pass `-O0` for unoptimised code (#102).
 
 ## [0.0.0] - 2026-06-28
 

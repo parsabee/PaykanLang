@@ -5,6 +5,7 @@
 
 #include "paykan/backends/c/CBackend.h"
 
+#include "ModuleName.h"
 #include "Version.h"
 
 #include "CNames.h"
@@ -106,17 +107,12 @@ std::string objectStamp(const std::string &path) {
   return "o:" + std::to_string(bytes.size()) + ":" + fnv1a(bytes) + '\n';
 }
 
-/// The cache entry base path (without extension) of a module.
+/// The cache entry base path (without extension) of module @p moduleName:
+/// its canonical name as a path under the cache directory
+/// (`geometry::shapes` -> <cache>/geometry/shapes).
 std::string cacheEntryBase(const Toolchain &tc, const std::string &moduleName) {
-  std::error_code ec;
-  fs::path root =
-      tc.ProjectRoot.empty() ? fs::current_path(ec) : fs::path(tc.ProjectRoot);
-  root = fs::weakly_canonical(root, ec);
-  fs::path mod = fs::weakly_canonical(moduleName, ec);
-  fs::path rel = mod.lexically_relative(root);
-  if (rel.empty() || rel.native().rfind("..", 0) == 0)
-    rel = mod.relative_path(); // outside the project: mirror the full path
-  return (fs::path(tc.CacheDir) / rel).string();
+  return (fs::path(tc.CacheDir) / module_name::cacheRelativePath(moduleName))
+      .string();
 }
 
 } // namespace
@@ -146,22 +142,24 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
     return false;
   }
 
-  std::vector<std::string> compileFlags = {
-      tcnames::kFlagStd, tcnames::kFlagNoWarnings,
-      tcnames::kFlagInclude + tc.RuntimeIncludeDir};
+  std::vector<std::string> compileFlags = {tcnames::kFlagStd,
+                                           tcnames::kFlagNoWarnings};
   for (const auto &f : tc.ExtraFlags)
     compileFlags.push_back(f);
   // Everything besides the module's C that its object depends on: the C
   // compiler and flags, the runtime header the C includes (its struct
   // layouts and prototypes are the runtime ABI), and this compiler's
   // version.  Stored, with a hash of the module's C, next to each cached
-  // object (`.key`).
+  // object (`.key`).  The runtime's include directory is left out: where the
+  // toolchain is installed does not change the object, the header's content
+  // (hashed below) does (#102).
   std::string cacheKey = "cc:";
   cacheKey += tc.CC;
   for (const auto &f : compileFlags) {
     cacheKey += ' ';
     cacheKey += f;
   }
+  compileFlags.push_back(tcnames::kFlagInclude + tc.RuntimeIncludeDir);
   cacheKey += "\nruntime.h:";
   cacheKey +=
       fnv1a(readFile(tc.RuntimeIncludeDir + "/" + tcnames::kRuntimeHeader));

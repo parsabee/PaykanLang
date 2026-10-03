@@ -253,11 +253,17 @@ if(PAYKAN_SAMPLES_BACKENDS)
         COMMAND ${CMAKE_COMMAND} -E env python3
                 ${CMAKE_SOURCE_DIR}/scripts/samples_parity.py --build
                 --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
-    # Both compile the same import samples through the same per-project
+    # The corpus at -O0 too (the default is -O2), which keeps the
+    # unoptimised code paths of both backends covered.
+    add_test(NAME SamplesParityO0
+        COMMAND ${CMAKE_COMMAND} -E env python3
+                ${CMAKE_SOURCE_DIR}/scripts/samples_parity.py -O 0
+                --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
+    # They compile the same import samples through the same per-project
     # object / bitcode caches (samples/imports/*/.paykan_cache): one at a
     # time.
-    set_tests_properties(SamplesParity SamplesParityBuild PROPERTIES
-        RESOURCE_LOCK paykan_samples_cache)
+    set_tests_properties(SamplesParity SamplesParityBuild SamplesParityO0
+        PROPERTIES RESOURCE_LOCK paykan_samples_cache)
 endif()
 
 # Once per backend that runs programs (see backendFlag() in DriverTests.cpp).

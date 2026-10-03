@@ -5,6 +5,7 @@
 #pragma once
 
 #include <iosfwd>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,12 @@ enum class Command {
   Run,   // `paykan [run] file.pkn args...`: compile and execute (default)
   Build, // `paykan build file.pkn -o out`: compile to an executable
 };
+
+/// The optimisation level of `paykan build` and `paykan run` (and --emit-*)
+/// without -O<n> (#102).  -O2 for `run` too: over the samples corpus it adds
+/// about 5 ms (llvm JIT) and 30 ms (c, cold cache) per program to -O1's
+/// compile time, and the code it runs is up to 2.5x faster.
+inline constexpr unsigned kDefaultOptLevel = 2;
 
 /// Everything the driver reads from the command line.
 struct Options {
@@ -44,7 +51,12 @@ struct Options {
   bool TraceScanning = false; // --trace-scanner
   bool CheckOnly = false;     // --check-only
   bool TrackHeap = false;     // --track-heap
-  unsigned OptLevel = 0;      // -O<n>
+  /// -O<n>; unset means the default (optLevel()).
+  std::optional<unsigned> OptLevel;
+
+  /// The optimisation level the backend gets: -O<n> when given, else
+  /// kDefaultOptLevel.
+  unsigned optLevel() const { return OptLevel.value_or(kDefaultOptLevel); }
 
   /// --emit-source: write the backend's source output (C, LLVM IR, ...) to
   /// stdout and stop.  --emit-llvm is --backend=llvm --emit-source.
