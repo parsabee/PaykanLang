@@ -223,35 +223,57 @@ int64_t PaykanArray_length(PaykanObject *self) {
 // push / pop — dynamic resize operations
 // ============================================================================
 //
-// Growth policy  : when len == cap, double capacity (minimum cap of 1).
-// Shrink policy  : after pop, if len <= cap / 2, reallocate to len.
+// Capacity policy (with hysteresis, so a push/pop pair never reallocates
+// twice; see issue #95):
+//
+//   Growth : when len == cap, double the capacity, but never below
+//            PAYKAN_ARRAY_MIN_CAP.
+//   Shrink : after a pop, only if cap > PAYKAN_ARRAY_MIN_CAP and
+//            len <= cap / 4, halve the capacity (never below
+//            PAYKAN_ARRAY_MIN_CAP, never to exactly len).
+//
+// After a shrink len <= newCap / 2, so the array must double in length before
+// the next growth and halve again before the next shrink: every resize is
+// separated by at least newCap / 4 push/pop operations, which keeps push and
+// pop amortised O(1) even when the length oscillates around a power of two.
+// The array never shrinks on its own below PAYKAN_ARRAY_MIN_CAP slots; an
+// array built with a smaller exact capacity (e.g. a short literal) keeps it.
+//
+// Slots in [len, cap) are never read: get/set are bounds-checked against
+// len, push writes a slot before counting it, and destroy_obj releases only
+// [0, len).  So freshly grown slots are left uninitialised and pop does not
+// clear the slot it vacates.  (The constructors still zero [0, len) because
+// those slots are live and destroy_obj / set_obj read them.)
 // ============================================================================
 
-// Ensure there is room for at least one more element.
-// On growth the new slots are zero-initialised.
-static void array_grow(PaykanArray *arr) {
-  if (arr->len < arr->cap)
-    return; // still room
-  unsigned long newCap = arr->cap == 0 ? 1 : arr->cap * 2;
+#define PAYKAN_ARRAY_MIN_CAP 8UL
+
+static void array_resize(PaykanArray *arr, unsigned long newCap) {
   arr->data = Paykan_realloc(arr->data, newCap * PAYKAN_ELEM_SIZE);
-  // Zero the freshly allocated slots.
-  memset((char *)arr->data + arr->cap * PAYKAN_ELEM_SIZE, 0,
-         (newCap - arr->cap) * PAYKAN_ELEM_SIZE);
+  if (!arr->data)
+    Paykan_runtime_panic("out of memory resizing array to %lu elements",
+                         newCap);
   arr->cap = newCap;
 }
 
-// Shrink allocation to len when len has fallen to at most half of cap.
+// Ensure there is room for at least one more element.
+static void array_grow(PaykanArray *arr) {
+  if (arr->len < arr->cap)
+    return; // still room
+  unsigned long newCap = arr->cap * 2;
+  if (newCap < PAYKAN_ARRAY_MIN_CAP)
+    newCap = PAYKAN_ARRAY_MIN_CAP;
+  array_resize(arr, newCap);
+}
+
+// Halve the allocation once len has fallen to a quarter of cap.
 static void array_maybe_shrink(PaykanArray *arr) {
-  if (arr->cap == 0 || arr->len > arr->cap / 2)
+  if (arr->cap <= PAYKAN_ARRAY_MIN_CAP || arr->len > arr->cap / 4)
     return;
-  if (arr->len == 0) {
-    Paykan_free(arr->data);
-    arr->data = NULL;
-    arr->cap = 0;
-  } else {
-    arr->data = Paykan_realloc(arr->data, arr->len * PAYKAN_ELEM_SIZE);
-    arr->cap = arr->len;
-  }
+  unsigned long newCap = arr->cap / 2;
+  if (newCap < PAYKAN_ARRAY_MIN_CAP)
+    newCap = PAYKAN_ARRAY_MIN_CAP;
+  array_resize(arr, newCap);
 }
 
 void PaykanArray_push(PaykanArray *arr, void *value) {
@@ -290,8 +312,6 @@ PaykanShared *PaykanArray_pop_obj(PaykanArray *arr) {
   PaykanShared *val;
   memcpy(&val, (char *)arr->data + arr->len * PAYKAN_ELEM_SIZE,
          PAYKAN_ELEM_SIZE);
-  // Clear the vacated slot before any potential realloc.
-  memset((char *)arr->data + arr->len * PAYKAN_ELEM_SIZE, 0, PAYKAN_ELEM_SIZE);
   array_maybe_shrink(arr);
   return val;
 }

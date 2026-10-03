@@ -445,14 +445,21 @@ class Emitter {
     Failed = true;
   }
 
+  /// The symbol prefix of module @p m: its canonical name with each "::"
+  /// as kMangleSep (`geometry::shapes` -> geometry_shapes).  Clashes are
+  /// resolved by defineSymbol().
   std::string moduleStem(const pir::Module &m) {
-    std::string stem = m.Name;
-    size_t slash = stem.find_last_of('/');
-    if (slash != std::string::npos)
-      stem = stem.substr(slash + 1);
-    size_t dot = stem.rfind('.');
-    if (dot != std::string::npos && dot > 0)
-      stem = stem.substr(0, dot);
+    std::string stem;
+    const std::string &name = m.Name;
+    for (size_t i = 0; i < name.size(); ++i) {
+      if (name.compare(i, 2, names::kQualSep) == 0) {
+        if (!stem.empty())
+          stem += kMangleSep;
+        ++i;
+        continue;
+      }
+      stem += name[i];
+    }
     return sanitize(stem);
   }
 

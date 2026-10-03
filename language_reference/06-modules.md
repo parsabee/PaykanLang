@@ -162,9 +162,9 @@ file itself is never cached.
 - **Location.** The cache lives in `.paykan_cache/` **under the source root** (the main
   file's directory), mirroring the module layout: `a/b/c.pkn` is cached as
   `.paykan_cache/a/b/c.bc`. It does not depend on the directory the compiler is launched
-  from, so `paykan proj/main.pkn` and `cd proj && paykan main.pkn` share one cache. A module
-  resolved from outside the source root (for example a system module located through
-  `PAYKAN_STDLIB`) is cached under the same directory, keyed by its full path.
+  from, so `paykan proj/main.pkn` and `cd proj && paykan main.pkn` share one cache. A system
+  module (`import ::io`, located through `PAYKAN_STDLIB`) is cached under
+  `.paykan_cache/@system/`.
 - **Validity.** Every entry is stamped with a key derived from the module's **source
   text**, the keys of **every module it imports** (recursively), and the compiler and
   generated-code ABI versions. An entry is used only when it was written under exactly the

@@ -160,7 +160,7 @@ int main(int argc, char *argv[]) {
   paykan::backend::Input in;
   in.InputFilename = opts.InputFilename;
   in.ProjectRoot = projectRoot;
-  in.OptLevel = opts.OptLevel;
+  in.OptLevel = opts.optLevel();
   // -- Lowering -------------------------------------------------------------
   // Every backend reads PIR: lower the program (the single home of the
   // ownership semantics), verify it, and hand it over.  --emit-pir prints it

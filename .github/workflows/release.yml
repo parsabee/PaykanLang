@@ -4,10 +4,22 @@ name: Release
 # every supported platform, stages them with `cmake --install`, packages each
 # staged tree into a tarball, and publishes a GitHub Release with the tarballs
 # (and their SHA-256 sums) attached.
+#
+# It can also be run by hand (Actions tab -> Release -> "Run workflow").  A
+# manual run is a dry run by default: it builds, smoke-tests and packages every
+# platform and uploads the tarballs as workflow artifacts, but publishes no
+# GitHub Release.  Unticking dry_run publishes, and only when the run's ref is
+# a tag.
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: build, smoke-test and package, but publish no GitHub Release"
+        type: boolean
+        default: true
 
 permissions:
   contents: write   # required to create the GitHub Release
@@ -39,8 +51,9 @@ jobs:
           path: build/third-party
           key: third-party-${{ matrix.label }}-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
+      # Only paykan and the runtime are shipped: no test suite, so no GoogleTest.
       - name: Configure (Release)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G "${{ matrix.generator }}"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G "${{ matrix.generator }}" -DPAYKAN_BUILD_TESTS=OFF
 
       - name: Build
         run: cmake --build build --parallel --target paykan paykan_runtime
@@ -60,7 +73,12 @@ jobs:
         id: package
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            # Manual run on a branch: name the tarballs after the commit.
+            VERSION="dryrun-${GITHUB_SHA::7}"
+          fi
           ARCHIVE="paykanlang-${VERSION}-${{ matrix.label }}.tar.gz"
           tar -C stage -czf "${ARCHIVE}" paykanlang
           shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
@@ -77,6 +95,9 @@ jobs:
   release:
     name: Publish GitHub Release
     needs: build
+    # Tag pushes always publish; manual runs only when dry_run is unticked and
+    # the run's ref is a tag.
+    if: github.event_name == 'push' || (!inputs.dry_run && github.ref_type == 'tag')
     runs-on: ubuntu-latest
     steps:
       - name: Download all build artifacts

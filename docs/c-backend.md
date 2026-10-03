@@ -83,7 +83,8 @@ backends.
 `--emit-c` prints the whole program as one file.  `build` and `run` instead
 emit one translation unit per PIR module (a module declares what it imports
 as `extern` items, so each unit is self-contained), compile each into
-`<project root>/.paykan_cache/<module>.o`, reuse the object while the
+`<project root>/.paykan_cache/<module>.o` (`geometry::shapes` is
+`geometry/shapes.o`), reuse the object while the
 module's generated C and its cache key (the C compiler and flags, a hash of
 `Runtime.h` and the paykan version) are unchanged, and link the
 objects with `libpaykan_runtime.a`.  Cache files are written to a temporary
