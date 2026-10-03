@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- **The default build is the core; the default backend changes from llvm to
+  c (#123).** A plain `cmake -B build` now builds only the recursive-descent
+  frontend and the c backend and downloads nothing. The LLVM backend and the
+  Bison frontend are opt-in:
+  `"-DPAYKAN_FRONTENDS=recursive-descent;bison" "-DPAYKAN_BACKENDS=llvm;c"`.
+  The default backend is the first one listed (`llvm` with `llvm;c`), and the
+  release tarballs and Homebrew formula ship the core only.
 - **Conversion constructors replace the conversion builtins (#64).**
   `StrInt`, `StrFloat`, `StrBool`, `StrChar`, `IntStr` and `FloatStr` are
   removed. Every conversion is now spelled `Target<Source>(value)`, with the
@@ -140,6 +147,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A string literal used as an object (`"ab"[1]`, `"abc".len()`, `mov "lit"`
+  in any position, a literal in a tuple, array or optional) is now a `Str`
+  object; it was passed as its raw C string, an internal compiler error
+  (#116). User functions spelled like runtime symbols (`PaykanString_new`,
+  `Paykan_println`, `Paykan_panic_div_by_zero`, ...) no longer replace or
+  clash with the runtime's, which was an internal compiler error or a silent
+  miscompile (#117): runtime externs are now named `$rt.<symbol>` in PIR
+  (`docs/pir.md` §3), a name no Paykan identifier can spell.
 - **Diagnostics and driver (#119, #120, #126).** A failed import (missing,
   circular, a directory, or a module with errors) is reported once, and uses
   of its names are not reported again; import messages name modules

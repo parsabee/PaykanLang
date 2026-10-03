@@ -165,10 +165,8 @@ ModuleLowering::findConcreteMethodFuncName(ast::ClassType *ct,
   if (!ct)
     return "";
   if (ct->isBuiltin()) {
-    if (const char *sym = builtinMethodSymbol(ct, name)) {
-      declareRuntime(sym);
-      return sym;
-    }
+    if (const char *sym = builtinMethodSymbol(ct, name))
+      return declareRuntime(sym).Name;
     return "";
   }
   std::string mangled = ct->getName() + kNameSep + name;
@@ -436,8 +434,6 @@ Val ModuleLowering::lowerMemberAssignStmt(ast::MemberAssignStmt *node) {
       Val rhs = emitExpr(node->getValue());
       if (!rhs)
         return Val();
-      if (auto *sl = ast::dyn_cast<ast::StringLiteral>(node->getValue()))
-        rhs = wrapStringLiteral(rhs, sl->getValue().size());
       newShared = exprAlreadyShared(node->getValue())
                       ? takeSharedOwnership(node->getValue(), rhs)
                       : emitSharedNew(rhs, "field.shared");

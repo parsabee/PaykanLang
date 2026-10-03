@@ -505,7 +505,7 @@ class Emitter {
     }
     if (fn->IsExtern) {
       if (fn->Module.empty())
-        return fn->Name; // runtime symbol
+        return pir::runtimeSymbol(fn->Name); // runtime: its C name
       return symbolOf(fn->Module, fn->linkName());
     }
     return symbolOf(m.Name, fn->Name);
@@ -621,10 +621,10 @@ class Emitter {
       if (g.Name == name) {
         if (g.K == pir::ExternGlobal::Object) {
           ty = Type::Obj;
-          return cast(kRtObjPtr) + addressOf(name);
+          return cast(kRtObjPtr) + addressOf(pir::runtimeSymbol(name));
         }
         ty = Type::Ptr;
-        return cast(kVoidPtr) + addressOf(name);
+        return cast(kVoidPtr) + addressOf(pir::runtimeSymbol(name));
       }
     fail("unknown symbol '@" + name + "'");
     ty = Type::Void;
@@ -1243,12 +1243,12 @@ class Emitter {
       args.reserve(i.Args.size());
       std::string fn;
       if (callee->IsExtern && callee->Module.empty()) {
-        const RuntimeProto *proto = findProto(callee->Name);
+        fn = pir::runtimeSymbol(callee->Name);
+        const RuntimeProto *proto = findProto(fn);
         if (!proto) {
-          fail("unknown runtime function '" + callee->Name + "'");
+          fail("unknown runtime function '" + fn + "'");
           return;
         }
-        fn = callee->Name;
         for (size_t a = 0; a < i.Args.size(); ++a) {
           Type ta;
           std::string arg = operand(i.Args[a], ta);
@@ -1350,7 +1350,8 @@ class Emitter {
         fail("vtable.addr without a class or a symbol");
         return;
       }
-      line(stmt(pre + cast(kVoidPtr) + addressOf(sym->Name)));
+      line(stmt(pre + cast(kVoidPtr) +
+                addressOf(pir::runtimeSymbol(sym->Name))));
       return;
     }
     case Opcode::Load:
