@@ -93,15 +93,28 @@ backends.
 `--emit-c` prints the whole program as one file.  `build` and `run` instead
 emit one translation unit per PIR module (a module declares what it imports
 as `extern` items, so each unit is self-contained), compile each into
-`<project root>/.paykan_cache/<module>.o` (`geometry::shapes` is
-`geometry/shapes.o`), reuse the object while the
+`<project root>/.paykan_cache/<module>.<hash>.o` (`geometry::shapes` is
+`geometry/shapes.<hash>.o`), reuse the object while the
 module's generated C and its cache key (the C compiler and flags, a hash of
 `Runtime.h` and the paykan version) are unchanged, and link the
-objects with `libpaykan_runtime.a`.  Cache files are written to a temporary
+objects with `libpaykan_runtime.a`.  `<hash>` is a 64-bit FNV-1a hash of the
+whole key (which includes a hash of the module's C), and the entry's `.c`,
+`.o` and `.key` all carry it, so builds with different flags (`-O0` and
+`-O2`, a sanitizer) never share a file (#134): a build links only objects
+compiled under its own key, with no window in which a concurrent build can
+swap in one compiled under another, and alternating configurations do not
+rebuild each other's objects.  The `.key` still records the whole key, so a
+hash collision only costs a rebuild.  Cache files are written to a temporary
 name and renamed into place, the object before its `.key`, so concurrent
 builds that share an import never see a partial entry.  The `.key` also
 records the object's size and hash, checked on every reuse: an object
-truncated or corrupted after it was cached is rebuilt, not linked.  The output is
+truncated or corrupted after it was cached is rebuilt, not linked.  Each
+reuse touches the `.key`; when a module gets a new entry, its entries
+beyond the four most recently used are deleted, except any used within the
+last hour (a concurrent build may be about to link it), and so are unhashed
+entries left by older versions (`<module>.{c,o,key}`).
+`scripts/cache_race.py` (the `CacheRace` test) races builds with different
+flags on one project.  The output is
 deterministic for a given program.  The C compiler runs with `-std=c11` and
 the include path only: no `-w`, since the generated code compiles without
 warnings (any warning is a backend bug).

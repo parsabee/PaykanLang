@@ -196,7 +196,7 @@ entries in one directory, `.paykan_cache/`, side by side; each backend reads onl
 | Backend | Entries for module `a::b::c` (`a/b/c.pkn`) | Main file |
 |---------|--------------------------------|-----------|
 | llvm | `.paykan_cache/a/b/c.bc` (LLVM bitcode, key stored inside) | never cached |
-| c | `.paykan_cache/a/b/c.c` (generated C), `c.o` (object), `c.key` (key) | cached the same way, by its file stem (`main.c`, ...) |
+| c | `.paykan_cache/a/b/c.<hash>.c` (generated C), `c.<hash>.o` (object), `c.<hash>.key` (key), one set per key | cached the same way, by its file stem (`main.<hash>.c`, ...) |
 
 - **Location.** The cache lives in `.paykan_cache/` **under the source root** (the main
   file's directory), named by the module's canonical name: `a::b::c` is cached as
@@ -218,6 +218,16 @@ entries in one directory, `.paykan_cache/`, side by side; each backend reads onl
   truncated, corrupt, or written under a different key is ignored and regenerated.
   The directory is purely a cache: deleting it at any time is safe and only costs a
   recompile. `docs/c-backend.md` describes the c backend's entries in more detail.
+- **Concurrent builds.** Several `paykan` processes may share one cache, even with different
+  flags. The c backend names each entry after a hash of its key (`<hash>` above), so builds
+  that differ in anything the key covers (`-O0` and `-O2`, a sanitizer, another C compiler)
+  never touch each other's files: a build only links an object compiled under its own key,
+  and alternating configurations each keep their entry instead of rebuilding every time.
+  A module keeps its four most recently used entries; older ones are removed when it gets a
+  new one, but never one used within the last hour. The llvm backend keeps one `.bc` per
+  module, independent of `-O` (the level is applied after the cached code is loaded); it
+  validates the key stored inside the very bytes it loads, so a concurrent rewrite can only
+  cause a rebuild, never a mismatched link.
 
 ---
 
