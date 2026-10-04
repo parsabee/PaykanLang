@@ -324,6 +324,14 @@ jobs:
             samples/codegen/01_literals.pkn > example.pir
           build/bin/paykan --emit-pir samples/codegen/01_literals.pkn > driver.pir
           diff example.pir driver.pir
+          # With the build tree gone, both drivers find the installed
+          # runtime (#124).
+          rm -rf build build-notests
+          for drv in install/bin/paykan build-example/paykan-print-pir; do
+            $drv --backend=c run samples/codegen/01_literals.pkn > run.out
+            $drv build --backend=c -o prog samples/codegen/01_literals.pkn
+            ./prog | diff run.out -
+          done
 
   # ---------------------------------------------------------------------------
   # Strict C11: the C backend's output for the whole samples corpus compiles

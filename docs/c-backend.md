@@ -19,12 +19,16 @@ run time, and it is the default backend of a build without the LLVM plugin.
 The C compiler is `$CC`, then `cc` (in a `PAYKAN_COVERAGE` build, the C
 compiler that built the runtime, with `-isysroot` of the build's SDK on
 macOS).  The runtime (`libpaykan_runtime.a` and
-`Runtime.h`) is found in this order: the build tree the compiler was built in,
-`$PAYKAN_RUNTIME_DIR/{lib,include/paykan}`, the install layout next to the
-executable (`../lib`, `../include/paykan`), and the install location
-configured at build time.  With the build tree's runtime, programs are
-compiled and linked with the build's sanitizer and coverage flags, since the
-archive is instrumented with them.
+`Runtime.h`) is found in this order: `$PAYKAN_RUNTIME_DIR/{lib,include/paykan}`,
+the installed runtime recorded by the package a driver made with
+`paykan_add_driver` was built against, the install layout around the
+executable (`../lib`, `../include/paykan`), the build tree the compiler was
+built in (only for a binary inside that build tree, which a
+`.paykan-build-tree` marker at its top identifies), and the install location
+configured at build time.  So an installed `paykan` uses its own prefix even
+while its build tree still exists.  Programs are compiled and linked with the
+build's sanitizer and coverage flags, since the runtime archive is
+instrumented with them.
 
 A program started with `paykan run` sees the script path as `args[0]`
 (`fn main(args: Str[])`), like the llvm backend.  A runtime panic flushes
