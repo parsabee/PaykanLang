@@ -33,12 +33,13 @@ struct Toolchain {
   /// the install location configured at build time.
   std::string RuntimeLib;
   std::string RuntimeIncludeDir;
-  /// Object cache: one `.c` / `.o` pair per module under this directory
-  /// (`<project root>/.paykan_cache`), reused while the module's generated
-  /// C and its cache key (`.key`) are unchanged.  Empty: no cache, everything
-  /// is compiled into the temporary build directory.
-  /// Entries are named after the module's canonical name
-  /// (`geometry::shapes` -> geometry/shapes.{c,o,key}).
+  /// Object cache: `.c` / `.o` / `.key` entries per module under this
+  /// directory (`<project root>/.paykan_cache`), reused while the module's
+  /// generated C and its cache key are unchanged.  Empty: no cache,
+  /// everything is compiled into the temporary build directory.
+  /// Entries are named after the module's canonical name and a hash of the
+  /// key (`geometry::shapes` -> geometry/shapes.<hash>.{c,o,key}), so builds
+  /// with different flags never share a file (#134).
   std::string CacheDir;
 };
 

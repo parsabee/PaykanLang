@@ -269,6 +269,17 @@ if(PAYKAN_SAMPLES_BACKENDS)
     set_tests_properties(SamplesParity SamplesParityBuild SamplesParityO0
         PROPERTIES RESOURCE_LOCK paykan_samples_cache)
 
+    # Concurrent builds with different flags (-O0 / -O2, plain / ASan) of one
+    # project never link each other's cached objects (#134).  Not in a
+    # coverage build: its programs must be compiled by the compiler that
+    # built the runtime, which the script's ASan `CC` wrapper is not.
+    if(NOT PAYKAN_COVERAGE)
+        add_test(NAME CacheRace
+            COMMAND ${CMAKE_COMMAND} -E env python3
+                    ${CMAKE_SOURCE_DIR}/scripts/cache_race.py
+                    --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
+    endif()
+
     # Where `paykan` finds the runtime (Toolchain.cpp): an installed binary
     # uses its own prefix even while the build tree exists, $PAYKAN_RUNTIME_DIR
     # overrides it, and only a binary inside the build tree uses the build

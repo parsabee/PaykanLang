@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -19,6 +20,7 @@
 #include <fstream>
 #include <iterator>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -940,6 +942,39 @@ TEST(Driver, FloatNotEqualIsUnorderedOnEveryBackend) {
   EXPECT_GT(ran, 0) << backends;
 }
 
+// The C backend's cache entries of module file stem @p stem in @p dir:
+// `<stem>.<16 hex digits><ext>` (key-addressed, #134), the most recently
+// written first.
+static std::vector<std::filesystem::path>
+cacheEntries(const std::filesystem::path &dir, const std::string &stem,
+             const std::string &ext) {
+  static const std::regex hashed("[0-9a-f]{16}");
+  std::vector<std::filesystem::path> found;
+  std::error_code ec;
+  for (const auto &e : std::filesystem::directory_iterator(dir, ec)) {
+    std::string name = e.path().filename().string();
+    if (name.size() != stem.size() + 17 + ext.size() ||
+        name.compare(0, stem.size() + 1, stem + ".") != 0 ||
+        name.compare(name.size() - ext.size(), ext.size(), ext) != 0 ||
+        !std::regex_match(name.substr(stem.size() + 1, 16), hashed))
+      continue;
+    found.push_back(e.path());
+  }
+  std::sort(found.begin(), found.end(), [](const auto &a, const auto &b) {
+    return std::filesystem::last_write_time(a) >
+           std::filesystem::last_write_time(b);
+  });
+  return found;
+}
+
+// The most recently written of them (empty when there is none).
+static std::filesystem::path cacheEntry(const std::filesystem::path &dir,
+                                        const std::string &stem,
+                                        const std::string &ext) {
+  auto all = cacheEntries(dir, stem, ext);
+  return all.empty() ? std::filesystem::path() : all.front();
+}
+
 // `build` writes an executable that runs on its own, and the C backend reuses
 // the cached object for a module whose generated C is unchanged.
 TEST(Driver, CBackendBuildsAnExecutableAndCachesObjects) {
@@ -959,7 +994,7 @@ TEST(Driver, CBackendBuildsAnExecutableAndCachesObjects) {
                        " build " + src + " 2>&1");
   ASSERT_EQ(rc, 0) << out;
   ASSERT_TRUE(std::filesystem::exists(exe));
-  auto cache = dir / ".paykan_cache" / "prog.o";
+  auto cache = cacheEntry(dir / ".paykan_cache", "prog", ".o");
   ASSERT_TRUE(std::filesystem::exists(cache)) << cache;
   auto stamp = std::filesystem::last_write_time(cache);
 
@@ -990,7 +1025,10 @@ TEST(Driver, CBackendBuildsAnExecutableAndCachesObjects) {
   // rebuilt even though the module's C is unchanged.  Simulate one by
   // rewriting the stored key and corrupting the object (reusing it would
   // fail the link).
-  auto keyPath = dir / ".paykan_cache" / "prog.key";
+  // (The edit gave the module a new entry; the newest is the current one.)
+  cache = cacheEntry(dir / ".paykan_cache", "prog", ".o");
+  auto keyPath = cacheEntry(dir / ".paykan_cache", "prog", ".key");
+  ASSERT_FALSE(keyPath.empty());
   std::string key;
   {
     std::ifstream in(keyPath);
@@ -1050,7 +1088,7 @@ TEST(Driver, CBackendRebuildsACorruptCachedObject) {
   auto [rc, out] = run(runCmd);
   ASSERT_EQ(rc, 0) << out;
   ASSERT_EQ(out, "2\n");
-  auto obj = dir / ".paykan_cache" / "dep.o";
+  auto obj = cacheEntry(dir / ".paykan_cache", "dep", ".o");
   ASSERT_TRUE(std::filesystem::exists(obj)) << obj;
   auto size = std::filesystem::file_size(obj);
   ASSERT_GT(size, 16u);
@@ -1085,6 +1123,88 @@ TEST(Driver, CBackendRebuildsACorruptCachedObject) {
   EXPECT_EQ(rcRun, 0) << outRun;
   EXPECT_EQ(outRun, "2\n");
   std::filesystem::remove_all(dir);
+}
+
+// Key-addressed entries are garbage-collected when a module gets a new one
+// (#134): the four most recently used are kept, and so is any entry used in
+// the last hour, which a concurrent build may be about to link.  Unhashed
+// entries from before #134 go the same way.  Another module's entries, even
+// one whose name starts with this one's, are left alone.
+TEST(Driver, CBackendCollectsStaleCacheEntries) {
+  REQUIRE_BACKEND();
+  namespace fs = std::filesystem;
+  auto dir = fs::temp_directory_path() / ("drv_gc_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  fs::create_directories(dir);
+  auto src = (dir / "m.pkn").string();
+  auto writeProgram = [&](int n) {
+    std::ofstream(src) << "fn main() -> int { println(\"" << n
+                       << "\"); return 0; }\n";
+  };
+  const auto cacheDir = dir / ".paykan_cache";
+  std::string cmd = std::string(kPaykan) + " --backend=c " + src + " 2>&1";
+  auto build = [&](int n) {
+    writeProgram(n);
+    auto [rc, out] = run(cmd);
+    EXPECT_EQ(rc, 0) << out;
+    EXPECT_EQ(out, std::to_string(n) + "\n");
+  };
+  // The entry (its hash) of each of six versions of the module.
+  auto hashes = [&] {
+    std::set<std::string> out;
+    for (const auto &k : cacheEntries(cacheDir, "m", ".key"))
+      out.insert(k.stem().extension().string());
+    return out;
+  };
+  std::vector<std::string> version;
+  for (int n = 0; n < 6; ++n) {
+    auto before = hashes();
+    build(n);
+    auto after = hashes();
+    ASSERT_EQ(after.size(), before.size() + 1);
+    for (const auto &h : after)
+      if (!before.count(h))
+        version.push_back(h);
+  }
+  // Versions 0-3 were last used 2 hours ago (0 the longest), 4 and 5 now.
+  // Add an unhashed entry from before #134 and other modules' entries.
+  auto age = [](const fs::path &f, int minutes) {
+    fs::last_write_time(f, fs::file_time_type::clock::now() -
+                               std::chrono::hours(2) -
+                               std::chrono::minutes(minutes));
+  };
+  for (int n = 0; n < 4; ++n)
+    for (const char *ext : {".c", ".o", ".key"})
+      age(cacheDir / ("m" + version[n] + ext), 10 - n);
+  for (const char *f : {"m.c", "m.o", "m.key", "m.x.0123456789abcdef.o",
+                        "mm.0123456789abcdef.o"}) {
+    std::ofstream(cacheDir / f) << "x";
+    age(cacheDir / f, 60);
+  }
+  // Reusing an entry is a use: version 0 is built again from the cache ...
+  build(0);
+  EXPECT_EQ(hashes().size(), 6u);
+  // ... so when version 6 gets an entry, the four kept are 6, 0, 5 and 4:
+  // 3, 2 and 1 and the unhashed entry are removed, the rest left alone.
+  build(6);
+  auto kept = hashes();
+  EXPECT_EQ(kept.size(), 4u);
+  for (int n : {0, 4, 5})
+    EXPECT_TRUE(kept.count(version[n])) << n;
+  for (int n : {1, 2, 3})
+    for (const char *ext : {".c", ".o", ".key"})
+      EXPECT_FALSE(fs::exists(cacheDir / ("m" + version[n] + ext))) << n << ext;
+  EXPECT_EQ(cacheEntries(cacheDir, "m", ".o").size(), 4u);
+  EXPECT_EQ(cacheEntries(cacheDir, "m", ".c").size(), 4u);
+  for (const char *f : {"m.c", "m.o", "m.key"})
+    EXPECT_FALSE(fs::exists(cacheDir / f)) << f;
+  for (const char *f : {"m.x.0123456789abcdef.o", "mm.0123456789abcdef.o"})
+    EXPECT_TRUE(fs::exists(cacheDir / f)) << f;
+  // Entries used within the last hour are kept beyond the four.
+  for (int n = 7; n < 10; ++n)
+    build(n);
+  EXPECT_EQ(hashes().size(), 7u);
+  fs::remove_all(dir);
 }
 
 // `build` on the test backend (each backend that runs programs: the C
@@ -1405,18 +1525,37 @@ TEST(Driver, BuildAndRunDefaultToO2) {
     EXPECT_EQ(out, "285\n") << opt;
   };
   if (testBackend() == "c") {
-    auto key = dir / ".paykan_cache" / "opt.key";
+    const auto cacheDir = dir / ".paykan_cache";
+    fs::remove_all(cacheDir);
     runWith("");
-    auto flags = cacheKeyCompileFlags(slurp(key));
-    EXPECT_TRUE(hasFlag(flags, "-O2")) << slurp(key);
-    EXPECT_FALSE(hasFlag(flags, "-O0")) << slurp(key);
+    auto o2Key = cacheEntry(cacheDir, "opt", ".key");
+    ASSERT_FALSE(o2Key.empty());
+    auto flags = cacheKeyCompileFlags(slurp(o2Key));
+    EXPECT_TRUE(hasFlag(flags, "-O2")) << slurp(o2Key);
+    EXPECT_FALSE(hasFlag(flags, "-O0")) << slurp(o2Key);
     runWith("-O0");
-    flags = cacheKeyCompileFlags(slurp(key));
-    EXPECT_TRUE(hasFlag(flags, "-O0")) << slurp(key);
-    EXPECT_FALSE(hasFlag(flags, "-O2")) << slurp(key);
+    // Each level has its own entry (#134): -O0 does not replace -O2's.
+    ASSERT_EQ(cacheEntries(cacheDir, "opt", ".key").size(), 2u);
+    auto o0Key = cacheEntry(cacheDir, "opt", ".key");
+    EXPECT_NE(o0Key, o2Key);
+    flags = cacheKeyCompileFlags(slurp(o0Key));
+    EXPECT_TRUE(hasFlag(flags, "-O0")) << slurp(o0Key);
+    EXPECT_FALSE(hasFlag(flags, "-O2")) << slurp(o0Key);
     // The runtime's include directory (an absolute path) is not part of it.
     for (const auto &f : flags)
-      EXPECT_NE(f.rfind("-I", 0), 0U) << slurp(key);
+      EXPECT_NE(f.rfind("-I", 0), 0U) << slurp(o0Key);
+    // Alternating levels reuses both entries: no object is rebuilt.
+    std::vector<std::pair<fs::path, fs::file_time_type>> objects;
+    for (const auto &o : cacheEntries(cacheDir, "opt", ".o"))
+      objects.emplace_back(o, fs::last_write_time(o));
+    for (const auto &o : cacheEntries(cacheDir, "lib", ".o"))
+      objects.emplace_back(o, fs::last_write_time(o));
+    EXPECT_EQ(objects.size(), 4u);
+    runWith("-O2");
+    runWith("-O0");
+    runWith("");
+    for (const auto &[o, t] : objects)
+      EXPECT_EQ(fs::last_write_time(o), t) << o;
   } else {
     runWith("");
     runWith("-O0");

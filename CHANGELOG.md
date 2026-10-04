@@ -90,7 +90,7 @@ generics) are experimental and may change.
   file path, so no absolute path reaches the PIR, the generated C, symbol
   names or cache keys, and builds of one project in two directories are
   identical. Cache entries are named after the module
-  (`.paykan_cache/geometry/shapes.{bc,c,o,key}`, system modules under
+  (`.paykan_cache/geometry/shapes.bc`, `shapes.<hash>.{c,o,key}`, system modules under
   `@system/`), and the generated-code ABI version is 6, so older caches are
   rebuilt. `paykan run` and `paykan build` optimise at `-O2` by default (was
   `-O0`); pass `-O0` for unoptimised code.
@@ -271,6 +271,16 @@ generics) are experimental and may change.
   The Bison frontend enforces the 512-level nesting limit. `Stdin` and type
   names are rejected by every binder, including typed declarations and
   parameters.
+- **Concurrent builds with different flags no longer link each other's
+  objects (#134).** The C backend's cache checked a module's `.key` and
+  linked its `.o` later; a concurrent `paykan` with other flags (a sanitizer,
+  another `-O`) could replace the object in between, and the link failed
+  (`undefined reference to __asan_init`). Entries are now named after a hash
+  of their key (`.paykan_cache/geometry/shapes.<hash>.{c,o,key}`), so
+  different configurations never share a file and alternating `-O0` / `-O2`
+  builds no longer rebuild each other. Each module keeps its four most
+  recently used entries (and any used within the hour); older ones are
+  removed. The llvm backend's `.bc` cache was not affected.
 - **Diagnostics follow-ups (#132).** A module that fails to load is reported
   once per compilation however many import paths reach it (twice from one
   file, or through a diamond); each later import adds a note. `mov None`
