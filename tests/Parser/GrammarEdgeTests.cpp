@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // Grammar corners where frontends have disagreed with docs/grammar.md (see
 // its section 10).  These run on every frontend, out-of-tree ones included
-// (paykan_add_frontend_tests, docs/writing-a-frontend.md).
+// (paykan_add_frontend_tests, docs/writing-a-frontend-plugin.md).
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>

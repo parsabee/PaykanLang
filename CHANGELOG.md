@@ -23,12 +23,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Plugin compatibility check (#103).** Every frontend and backend plugin
+  records the PaykanLang version it was built with:
+  `PAYKAN_REGISTER_FRONTEND` / `PAYKAN_REGISTER_BACKEND` capture
+  `PAYKAN_PLUGIN_BUILD_VERSION` from the installed headers
+  (`paykan/PluginCompat.h`, generated). Each release holds an explicit list of
+  the plugin build versions it accepts, in one place
+  (`cmake/PluginCompat.cmake`), compiled into the core and exported in the
+  CMake package as `PAYKAN_PLUGIN_COMPATIBLE_VERSIONS`. Versions match as
+  exact strings, pre-release label included. The registry checks a plugin at
+  registration and at selection; a plugin not on the list is listed by
+  `--list-frontends` / `--list-backends` as
+  `<name> (incompatible: built with PaykanLang <v>; this paykan <v> accepts
+  <list>)`, is never instantiated, and selecting it with `--frontend=` /
+  `--backend=` fails with exit status 2. `paykan --version` lists the
+  accepted versions and every plugin with its build version and
+  compatibility. The built-in plugins go through the same check.
+- **`paykan_add_frontend_plugin()` / `paykan_add_backend_plugin()`** in the
+  CMake package: they add a plugin library and fail at configure time when
+  the installed Paykan does not accept the version the plugin is built with
+  (by default the installation's own, `PAYKAN_TOOLCHAIN_VERSION`, or the one
+  pinned with `BUILT_WITH <version>`). `utils/print-pir` uses
+  `paykan_add_backend_plugin()`. See `docs/writing-a-backend.md` (section 7)
+  and the new `docs/writing-a-frontend-plugin.md`.
+- This release accepts plugins built with `0.1.0-alpha`. From now on each
+  release's entry states the plugin build versions it accepts.
 - **Test support for out-of-tree frontends (#60).** An installation carries
   the frontend-parameterized parser and Sema suites, the fuzz smoke and
   differential tests and the samples corpus, and `find_package(Paykan)`
   provides `paykan_add_frontend_tests()`, which builds them against a
-  plugin's frontend (`docs/writing-a-frontend.md`).
+  plugin's frontend (`docs/writing-a-frontend-plugin.md`).
   `-DPAYKAN_INSTALL_TEST_SUPPORT=OFF` leaves them out.
+
+### Changed
+
+- **The plugin registration ABI (#103).** `paykan::plugin::Registration`
+  takes a `PluginInfo { Name, Create, BuildVersion }` (plain data, the version
+  a `const char *`), and registry entries carry `BuildVersion`, `Compatible`
+  and `Incompatibility`. `Registry::create()` returns null for an
+  incompatible plugin. Plugins that register through the macros need only a
+  rebuild. The check lives in a new core library, `paykan_plugin`
+  (`Paykan::plugin`), which `Paykan::frontend` and `Paykan::backend` link.
+- `paykan --version` prints one more line (`accepts plugins built with
+  PaykanLang <list>`), and each plugin line now ends in
+  `(built with PaykanLang <v>, compatible)`; a backend's description follows
+  after `: ` instead of in parentheses.
 
 ## [0.1.0-alpha] - 2026-10-03
 

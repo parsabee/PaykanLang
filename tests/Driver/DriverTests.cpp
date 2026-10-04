@@ -141,6 +141,144 @@ TEST(Driver, ShortVersionFlagMatchesLong) {
 }
 
 // ---------------------------------------------------------------------------
+// Plugin compatibility (#103): every plugin records the PaykanLang version it
+// was built with, and paykan accepts only the versions on its list.
+// ---------------------------------------------------------------------------
+
+#ifndef PAYKAN_INCOMPATIBLE_PLUGINS_BIN
+#error "PAYKAN_INCOMPATIBLE_PLUGINS_BIN must be defined via CMake"
+#endif
+#ifndef PAYKAN_TEST_ACCEPTED_VERSIONS
+#error "PAYKAN_TEST_ACCEPTED_VERSIONS must be defined via CMake"
+#endif
+
+// A driver with the build's plugins plus "old-frontend" and "old-backend",
+// built with PaykanLang 0.0.9 (Driver/IncompatiblePlugins.cpp).  Their
+// factories abort, so any instantiation fails the test.
+static const char *kPaykanIncompat = PAYKAN_INCOMPATIBLE_PLUGINS_BIN;
+
+static std::string incompatibleReason() {
+  return std::string(
+             "incompatible: built with PaykanLang 0.0.9; this paykan ") +
+         paykan::kVersion + " accepts " + PAYKAN_TEST_ACCEPTED_VERSIONS;
+}
+
+static std::vector<std::string> lines(const std::string &out) {
+  std::vector<std::string> result;
+  std::istringstream in(out);
+  for (std::string line; std::getline(in, line);)
+    result.push_back(line);
+  return result;
+}
+
+static bool hasLine(const std::string &out, const std::string &line) {
+  auto ls = lines(out);
+  return std::find(ls.begin(), ls.end(), line) != ls.end();
+}
+
+// The built-in plugins go through the same check and are always compatible:
+// --version lists each with the version it was built with.
+TEST(Driver, VersionListsEveryPluginAsCompatible) {
+  auto [rc, out] = run(std::string(kPaykan) + " --version 2>/dev/null");
+  ASSERT_EQ(rc, 0) << out;
+  auto ls = lines(out);
+  ASSERT_GE(ls.size(), 4u) << out;
+  EXPECT_EQ(ls[0], std::string("PaykanLang ") + paykan::kVersion);
+  EXPECT_EQ(ls[1], std::string("accepts plugins built with PaykanLang ") +
+                       PAYKAN_TEST_ACCEPTED_VERSIONS);
+  const std::string compatible = std::string(" (built with PaykanLang ") +
+                                 paykan::kVersion + ", compatible)";
+  unsigned frontends = 0, backends = 0;
+  for (size_t i = 2; i < ls.size(); ++i) {
+    const std::string &l = ls[i];
+    EXPECT_NE(l.find(compatible), std::string::npos) << l;
+    EXPECT_EQ(l.find("incompatible"), std::string::npos) << l;
+    frontends += l.rfind("frontend ", 0) == 0;
+    backends += l.rfind("backend ", 0) == 0;
+  }
+  EXPECT_TRUE(hasLine(out, "frontend recursive-descent" + compatible)) << out;
+  EXPECT_GE(frontends, 1u);
+  EXPECT_GE(backends, 1u);
+  EXPECT_EQ(frontends + backends, ls.size() - 2) << out;
+}
+
+TEST(Driver, VersionMarksAnIncompatiblePlugin) {
+  auto [rc, out] = run(std::string(kPaykanIncompat) + " --version 2>&1");
+  ASSERT_EQ(rc, 0) << out;
+  EXPECT_TRUE(
+      hasLine(out, "frontend old-frontend (" + incompatibleReason() + ")"))
+      << out;
+  EXPECT_TRUE(
+      hasLine(out, "backend old-backend (" + incompatibleReason() + ")"))
+      << out;
+  EXPECT_TRUE(hasLine(out, std::string("frontend recursive-descent (built "
+                                       "with PaykanLang ") +
+                               paykan::kVersion + ", compatible)"))
+      << out;
+}
+
+TEST(Driver, ListingShowsAnIncompatiblePlugin) {
+  auto fe = run(std::string(kPaykanIncompat) + " --list-frontends 2>&1");
+  ASSERT_EQ(fe.exitCode, 0) << fe.out;
+  EXPECT_TRUE(hasLine(fe.out, "old-frontend (" + incompatibleReason() + ")"))
+      << fe.out;
+  // The compatible ones are listed as usual.
+  EXPECT_TRUE(hasLine(fe.out, "recursive-descent (default)")) << fe.out;
+
+  auto be = run(std::string(kPaykanIncompat) + " --list-backends 2>&1");
+  ASSERT_EQ(be.exitCode, 0) << be.out;
+  EXPECT_TRUE(hasLine(be.out, "old-backend (" + incompatibleReason() + ")"))
+      << be.out;
+  auto normal = run(std::string(kPaykan) + " --list-backends 2>&1");
+  for (const std::string &l : lines(normal.out))
+    EXPECT_TRUE(hasLine(be.out, l)) << l << "\n" << be.out;
+  EXPECT_EQ(lines(be.out).size(), lines(normal.out).size() + 1) << be.out;
+}
+
+// Selecting an incompatible plugin fails with exit status 2 and the reason,
+// before anything is parsed or compiled, and never instantiates it.
+TEST(Driver, SelectingAnIncompatiblePluginFails) {
+  auto src = writeTmp("fn main() -> int { return 0; }");
+  for (const std::string kind : {"frontend", "backend"}) {
+    const std::string plugin = "old-" + kind;
+    std::string expected = "paykan: cannot use ";
+    expected += kind;
+    expected += " '" + plugin + "' (";
+    expected += incompatibleReason();
+    expected += ")\n";
+    for (const std::string args :
+         {" --check-only ", " --emit-source ", " --dump-ast ", " "}) {
+      std::string cmd = kPaykanIncompat;
+      cmd += " --" + kind;
+      cmd += "=" + plugin;
+      cmd += args;
+      cmd += src;
+      cmd += " 2>&1";
+      auto [rc, out] = run(cmd);
+      EXPECT_EQ(rc, 2) << cmd << "\n" << out;
+      EXPECT_EQ(out, expected) << cmd;
+    }
+    std::string spaced = kPaykanIncompat;
+    spaced += " --" + kind;
+    spaced += " " + plugin;
+    spaced += " --check-only ";
+    spaced += src;
+    spaced += " 2>&1";
+    auto r = run(spaced);
+    EXPECT_EQ(r.exitCode, 2) << spaced << "\n" << r.out;
+    EXPECT_EQ(r.out, expected) << spaced;
+  }
+  // The compatible plugins of the same driver still work.
+  auto ok =
+      run(std::string(kPaykanIncompat) + " --check-only " + src + " 2>&1");
+  EXPECT_EQ(ok.exitCode, 0) << ok.out;
+  auto okFe = run(std::string(kPaykanIncompat) +
+                  " --frontend=recursive-descent --dump-ast " + src + " 2>&1");
+  EXPECT_EQ(okFe.exitCode, 0) << okFe.out;
+  std::filesystem::remove(src);
+}
+
+// ---------------------------------------------------------------------------
 // --list-backends: the default is the one the build configured, and that is
 // `c` whenever the c backend is built (#27), wherever PAYKAN_BACKENDS lists
 // it: `llvm;c` defaults to c too, and llvm needs --backend=llvm.

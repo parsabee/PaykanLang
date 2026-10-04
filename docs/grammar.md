@@ -3,7 +3,7 @@
 This document is the specification of Paykan's concrete syntax. Every
 frontend implements it: the in-tree recursive-descent frontend
 (`src/Frontends/RecursiveDescent`, the default) and every out-of-tree
-frontend plugin ([writing-a-frontend.md](writing-a-frontend.md)). An
+frontend plugin ([writing-a-frontend-plugin.md](writing-a-frontend-plugin.md)). An
 out-of-tree frontend must follow this specification: it must build exactly
 the same AST as the recursive-descent frontend for every input and must
 accept and reject the same inputs. The parser and Sema suites and the

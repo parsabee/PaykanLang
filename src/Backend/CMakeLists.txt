@@ -18,7 +18,8 @@ target_compile_definitions(paykan_backend
 )
 
 target_link_libraries(paykan_backend
-    PUBLIC  paykan_pir
+    PUBLIC  paykan_plugin
+            paykan_pir
             paykan_sema
     PRIVATE paykan_compile_options
 )

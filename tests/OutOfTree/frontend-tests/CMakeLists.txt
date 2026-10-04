@@ -1,5 +1,5 @@
 # The exported frontend test support, as an out-of-tree frontend uses it
-# (docs/writing-a-frontend.md), run against the installation's own
+# (docs/writing-a-frontend-plugin.md), run against the installation's own
 # recursive-descent frontend: tests/OutOfTree/FrontendTests.cmake configures,
 # builds and runs this project against a scratch install.
 cmake_minimum_required(VERSION 3.24)

@@ -21,11 +21,8 @@ start your own.
 [`language/01-language-basics.md`](language/01-language-basics.md)), the
 plugin interfaces are not yet stable for out-of-tree authors: `Backend.h`,
 `Frontend.h`, the registry and PIR as a plugin sees it may change between
-0.x releases, so build a plugin against the exact Paykan release it will be
-linked with. The plugin API versioning policy is
-[#103](https://github.com/parsabee/PaykanLang/issues/103) (planned: a plugin
-API version that a plugin must match exactly, checked at configure time and
-when `paykan` starts).
+0.x releases. Each release therefore says exactly which plugin builds it
+accepts; see [Plugin compatibility](#7-plugin-compatibility) below.
 
 ## 1. The interface
 
@@ -103,7 +100,10 @@ PAYKAN_REGISTER_BACKEND(mine, "mine", &createMyBackend);
 ```
 
 Registration is static: the macro defines an object whose constructor adds the
-factory to `paykan::backend::Registry` before `main()` runs. Nothing references
+factory to `paykan::backend::Registry` before `main()` runs, together with the
+PaykanLang version the plugin was built with (`PAYKAN_PLUGIN_BUILD_VERSION`
+from the installed headers it is compiled against; see
+[Plugin compatibility](#7-plugin-compatibility)). Nothing references
 that object, so the plugin library must be linked **whole** into the driver;
 the CMake helpers below do that. Frontends register the same way with
 `PAYKAN_REGISTER_FRONTEND` ([`include/paykan/Frontend.h`](../include/paykan/Frontend.h)).
@@ -127,8 +127,9 @@ set(CMAKE_CXX_STANDARD 20)
 
 find_package(Paykan REQUIRED)             # -DCMAKE_PREFIX_PATH=/opt/paykan
 
-add_library(paykan_backend_mine STATIC MyBackend.cpp)
-target_link_libraries(paykan_backend_mine PUBLIC Paykan::backend)
+# A static library linked with Paykan::backend.  Configure fails unless the
+# installed Paykan accepts plugins built with its version (section 7).
+paykan_add_backend_plugin(paykan_backend_mine MyBackend.cpp)
 
 # A `paykan` driver with every plugin of the installation plus this one.
 paykan_add_driver(paykan-mine PLUGINS paykan_backend_mine)
@@ -160,7 +161,11 @@ v1.0 ([#61](https://github.com/parsabee/PaykanLang/issues/61)).
 `Paykan::runtime`, `Paykan::driver` and one target per installed plugin
 (`Paykan::backend_c`, `Paykan::frontend_recursive_descent`, ...), the variables
 `PAYKAN_BACKENDS` / `PAYKAN_FRONTENDS` / `PAYKAN_PLUGINS`, the installed
-runtime's location `PAYKAN_RUNTIME_LIBRARY` / `PAYKAN_RUNTIME_INCLUDE_DIR`, and
+runtime's location `PAYKAN_RUNTIME_LIBRARY` / `PAYKAN_RUNTIME_INCLUDE_DIR`,
+the installation's version `PAYKAN_TOOLCHAIN_VERSION` and the plugin build
+versions it accepts `PAYKAN_PLUGIN_COMPATIBLE_VERSIONS`,
+`paykan_add_backend_plugin(<target> [BUILT_WITH <version>] <sources>...)` and
+`paykan_add_frontend_plugin(...)` (section 7), and
 `paykan_add_driver(<target> [PLUGINS <libs>...])`, which creates an executable
 from the driver library and links every plugin whole-archive. That driver's
 `run` and `build` use the package's runtime (unless `$PAYKAN_RUNTIME_DIR`
@@ -223,3 +228,70 @@ backend; a new in-tree backend is expected to pass them.
 - Report every failure through `Status`; never `exit()`, never throw.
 - No core change should be needed: a backend lives entirely in its own
   library.
+
+## 7. Plugin compatibility
+
+A plugin is compiled against one PaykanLang release's headers and may be
+linked into a `paykan` of another release. Each plugin therefore records the
+PaykanLang version it was **built with**, and each release carries an explicit
+**list of the plugin build versions it accepts**
+([#103](https://github.com/parsabee/PaykanLang/issues/103)).
+
+- **What a plugin records.** `PAYKAN_REGISTER_BACKEND` and
+  `PAYKAN_REGISTER_FRONTEND` pass `PAYKAN_PLUGIN_BUILD_VERSION`, defined by the
+  installed `paykan/PluginCompat.h` (`include/paykan/compiler/paykan/` under
+  the prefix), to the registry along with the name and the factory. Nothing
+  else is needed in the plugin's code.
+- **The list.** It lives in one place,
+  [`cmake/PluginCompat.cmake`](../cmake/PluginCompat.cmake)
+  (`PAYKAN_PLUGIN_COMPATIBLE_VERSIONS`). CMake compiles it into the core and
+  exports it in the package (`PAYKAN_PLUGIN_COMPATIBLE_VERSIONS` after
+  `find_package(Paykan)`).
+- **Matching.** A plugin is compatible if its build version is **exactly**
+  one of the list's entries, compared as strings with any pre-release label
+  included: a list holding `0.1.0-alpha` accepts plugins built with
+  `0.1.0-alpha`, but not `0.1.0`, `0.1.0-beta` or `0.1.1`. There are no ranges
+  and no ordering.
+- **At run time.** The registry checks the build version when the plugin
+  registers and again when it is selected. An incompatible plugin stays
+  registered but is never instantiated:
+
+  ```text
+  $ paykan --list-frontends
+  mine (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.0-alpha accepts 0.1.0-alpha)
+  recursive-descent (default)
+  $ paykan --frontend=mine program.pkn
+  paykan: cannot use frontend 'mine' (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.0-alpha accepts 0.1.0-alpha)
+  $ echo $?
+  2
+  ```
+
+  `paykan --version` prints the accepted versions and every registered
+  plugin with the version it was built with and whether it is compatible;
+  include it in bug reports. The built-in plugins go through the same check
+  and are always compatible: they are built with the release's own version,
+  which must be on its list (configure fails otherwise).
+- **At configure time.** `paykan_add_backend_plugin()` /
+  `paykan_add_frontend_plugin()` fail with a `FATAL_ERROR` when the installed
+  Paykan does not accept the version the plugin is built with:
+
+  ```text
+  Paykan backend plugin 'paykan_backend_mine' is incompatible: built with
+  PaykanLang 0.0.9; the installed PaykanLang 0.1.0-alpha (<prefix>/lib/cmake/Paykan)
+  accepts 0.1.0-alpha
+  ```
+
+  That version is the installation's own (`PAYKAN_TOOLCHAIN_VERSION`) unless
+  the plugin pins the release it is written for with `BUILT_WITH <version>`;
+  [`utils/print-pir`](../utils/print-pir) exposes that as
+  `-DPRINT_PIR_BUILT_WITH=<version>`. Whatever is pinned, the registered build
+  version is that of the headers the plugin is actually compiled against.
+
+**Maintaining the list (each release).** The release's own version
+(`project(... VERSION ...)` plus `PAYKAN_VERSION_PRERELEASE`) must be on it.
+Keep an older version on it only if plugins built with that version still
+work with this release: `Frontend.h`, `Backend.h`, `Registry.h`, the AST and
+`ASTContext` a frontend sees, PIR and the runtime ABI (`Runtime.h`) are
+unchanged since, or changed only compatibly. Drop it when any of them changes
+incompatibly. The CHANGELOG entry of each release states which plugin build
+versions it accepts.

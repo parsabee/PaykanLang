@@ -23,7 +23,7 @@
 # The in-tree frontends: `recursive-descent` (standard C++ only), always
 # built and the default.  Out-of-tree frontends are not listed here: they are
 # built against an installed Paykan (find_package(Paykan)) and linked into a
-# driver of their own with paykan_add_driver (docs/writing-a-frontend.md).
+# driver of their own with paykan_add_driver (docs/writing-a-frontend-plugin.md).
 set(PAYKAN_KNOWN_FRONTENDS recursive-descent)
 set(PAYKAN_FRONTENDS "recursive-descent" CACHE STRING
     "Semicolon-separated list of frontends to build (available: ${PAYKAN_KNOWN_FRONTENDS}); the first one is the default")
@@ -35,7 +35,7 @@ foreach(fe IN LISTS PAYKAN_FRONTENDS)
     if(NOT fe IN_LIST PAYKAN_KNOWN_FRONTENDS)
         message(FATAL_ERROR "Unknown frontend '${fe}' in PAYKAN_FRONTENDS (available: ${PAYKAN_KNOWN_FRONTENDS}). "
                             "PAYKAN_FRONTENDS lists the in-tree frontends only; an out-of-tree frontend is "
-                            "built as a plugin against an installed Paykan (docs/writing-a-frontend.md).")
+                            "built as a plugin against an installed Paykan (docs/writing-a-frontend-plugin.md).")
     endif()
 endforeach()
 

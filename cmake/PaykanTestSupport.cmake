@@ -2,7 +2,7 @@
 # ----------------------------------------------------------------------------
 # Installs the test support for out-of-tree frontends, so that a frontend
 # plugin built against an installed Paykan runs the same suites as the
-# in-tree frontend (docs/writing-a-frontend.md):
+# in-tree frontend (docs/writing-a-frontend-plugin.md):
 #
 #   share/paykan/frontend-tests/      TestUtils.h, Parser/, Sema/ and
 #                                     Frontend/{FuzzSmoke,Differential}Tests.cpp

@@ -1,7 +1,7 @@
 # The exported frontend test support (cmake/PaykanTestSupport.cmake): install
 # this build tree to a scratch prefix, build tests/OutOfTree/frontend-tests
 # against it with find_package(Paykan) and paykan_add_frontend_tests()
-# (docs/writing-a-frontend.md), and run the suites it adds.
+# (docs/writing-a-frontend-plugin.md), and run the suites it adds.
 #
 # Run as a ctest (tests/CMakeLists.txt, FrontendTestsOutOfTree):
 #   cmake -DPAYKAN_BUILD_DIR=... -DPAYKAN_SOURCE_DIR=... -DWORK_DIR=...

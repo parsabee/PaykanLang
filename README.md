@@ -80,7 +80,7 @@ PaykanLang with `find_package(Paykan)`; each produces a `paykan` driver that has
 frontend registered next to the installation's, selected at run time with
 `--frontend=<name>` (`--list-frontends` prints them). Every frontend implements
 [`docs/grammar.md`](docs/grammar.md) and must build the same AST as the recursive-descent
-frontend; [`docs/writing-a-frontend.md`](docs/writing-a-frontend.md) explains how to write
+frontend; [`docs/writing-a-frontend-plugin.md`](docs/writing-a-frontend-plugin.md) explains how to write
 one and how to run PaykanLang's parser and Sema suites against it. The reference example is
 the Bison frontend, [PaykanLang_Bison_Frontend](https://github.com/parsabee/PaykanLang_Bison_Frontend).
 `--dump-tokens` prints a frontend's token stream.
@@ -100,7 +100,11 @@ it downloads nothing and links no third-party library). The full build is
 `-DPAYKAN_BACKENDS="llvm;c"`.
 Every backend consumes the Paykan IR described in [`docs/pir.md`](docs/pir.md);
 [`docs/writing-a-backend.md`](docs/writing-a-backend.md) explains how to write one, in tree or
-out of tree against `find_package(Paykan)` (see [`utils/print-pir`](utils/print-pir)).
+out of tree against `find_package(Paykan)` (see [`utils/print-pir`](utils/print-pir)), and
+[`docs/writing-a-frontend-plugin.md`](docs/writing-a-frontend-plugin.md) does the same for
+frontends. Each release lists the plugin build versions it accepts; a plugin built with another
+version is listed as incompatible and can't be selected
+([plugin compatibility](docs/writing-a-backend.md#7-plugin-compatibility)).
 
 The test suite needs GoogleTest: an installed one is used if CMake finds it, otherwise it is
 downloaded at configure time. `-DPAYKAN_BUILD_TESTS=OFF` skips the tests and GoogleTest (for
@@ -131,7 +135,7 @@ paykan --emit-c program.pkn     # print the generated C (--backend=c --emit-sour
 paykan --emit-llvm program.pkn  # print the LLVM IR (--backend=llvm --emit-source)
 paykan --track-heap program.pkn # run, then print heap/leak statistics
 paykan -O0 program.pkn          # set the optimization level (0-3, default -O2)
-paykan --version                # print the version and the built frontends and backends
+paykan --version                # print the version and every plugin, with its compatibility
 paykan --help                   # list every option
 ```
 

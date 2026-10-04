@@ -103,6 +103,15 @@ configure_file(
     ${PAYKAN_GENERATED_INCLUDE_DIR}/Version.h
     @ONLY
 )
+# The plugin compatibility list (cmake/PluginCompat.cmake) and the version a
+# plugin records as the one it was built with, for the plugin registry
+# (include/paykan/Registry.h) and every plugin compiled against these headers.
+include(PluginCompat)
+configure_file(
+    ${CMAKE_SOURCE_DIR}/include/paykan/PluginCompat.h.in
+    ${PAYKAN_GENERATED_INCLUDE_DIR}/paykan/PluginCompat.h
+    @ONLY
+)
 target_include_directories(paykan_compile_options INTERFACE
     $<BUILD_INTERFACE:${PAYKAN_GENERATED_INCLUDE_DIR}>)
 

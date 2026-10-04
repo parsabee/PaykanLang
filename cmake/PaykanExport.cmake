@@ -13,8 +13,9 @@
 #                                     paykan/Frontend.h, paykan/Backend.h, ...)
 #
 # Exported targets are namespaced Paykan:: and lose their paykan_ prefix:
-# Paykan::backend, Paykan::pir, Paykan::frontend, Paykan::driver, ... plus
-# every built plugin (Paykan::frontend_recursive_descent, Paykan::backend_llvm, ...).
+# Paykan::plugin, Paykan::backend, Paykan::pir, Paykan::frontend,
+# Paykan::driver, ... plus every built plugin (Paykan::frontend_recursive_descent,
+# Paykan::backend_llvm, ...).
 # ----------------------------------------------------------------------------
 
 include(GNUInstallDirs)
@@ -26,6 +27,7 @@ set(PAYKAN_INSTALL_COMPILER_INCLUDEDIR ${CMAKE_INSTALL_INCLUDEDIR}/paykan/compil
 # -- What gets exported ---------------------------------------------------------
 set(PAYKAN_EXPORT_TARGETS
     paykan_compile_options
+    paykan_plugin
     paykan_ast
     paykan_diag
     paykan_frontend
@@ -98,6 +100,9 @@ install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/
 )
 install(FILES ${PAYKAN_GENERATED_INCLUDE_DIR}/Version.h
     DESTINATION ${PAYKAN_INSTALL_COMPILER_INCLUDEDIR}
+)
+install(FILES ${PAYKAN_GENERATED_INCLUDE_DIR}/paykan/PluginCompat.h
+    DESTINATION ${PAYKAN_INSTALL_COMPILER_INCLUDEDIR}/paykan
 )
 install(EXPORT PaykanTargets
     NAMESPACE Paykan::
