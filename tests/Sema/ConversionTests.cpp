@@ -384,3 +384,24 @@ TEST(Conversion, GenericCallsAreStillGenericCalls) {
     }
   )");
 }
+
+// -- `''` is one error on every frontend (#119) -----------------------------
+
+TEST(CharLiteral, EmptyCharLiteralIsOneError) {
+  const std::string src = "fn main() -> int { c = ''; return 0; }\n";
+  auto path = writeTempFile(src);
+  for (const std::string &fe : paykan::frontend::Registry::get().names()) {
+    paykan::parser::ParserDriver drv(fe);
+    std::ostringstream os;
+    paykan::sema::DiagEngine diag(os);
+    diag.setSourceInfo("t.pkn", &drv.getSourceLines());
+    drv.setDiagEngine(&diag);
+    EXPECT_NE(drv.parseFile(path), 0) << fe;
+    EXPECT_EQ(diag.getErrorCount(), 1u) << fe << "\n" << os.str();
+    EXPECT_NE(os.str().find("t.pkn:1:24: error: empty character literal"),
+              std::string::npos)
+        << fe << "\n"
+        << os.str();
+  }
+  std::filesystem::remove(path);
+}

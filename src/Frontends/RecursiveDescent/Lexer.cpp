@@ -521,7 +521,12 @@ bool Lexer::lexChar(size_t start, size_t line, size_t col, Token &out) {
       advance(2);
       haveChar = true;
     }
-  } else if (!atEnd() && cur() != '\'' && cur() != '\n') {
+  } else if (!atEnd() && cur() == '\'') {
+    // `''`: one error for the whole literal (#119), not two unterminated ones.
+    advance();
+    error(line, col, "empty character literal");
+    return false;
+  } else if (!atEnd() && cur() != '\n') {
     value = cur();
     advance();
     haveChar = true;

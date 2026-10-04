@@ -4,11 +4,13 @@
 #include "ParserDriver.h"
 
 #include <cerrno>
+#include <cstdio>
 #include <cstring> // strerror
-#include <fstream>
+#include <filesystem>
 #include <iostream>
-#include <iterator>
+#include <memory>
 #include <sstream>
+#include <system_error>
 
 #ifndef PAYKAN_DEFAULT_FRONTEND
 #error "PAYKAN_DEFAULT_FRONTEND must be defined by the build"
@@ -121,12 +123,25 @@ bool ParserDriver::prepare(const std::string &filename, sema::DiagEngine &diag,
   // Read the whole file; the frontend parses the text.  A file that cannot
   // be opened is a diagnostic with no location (there is no source to point
   // at) and a failed parse; library code never exit()s the process.
+  //
+  // A directory opens fine as an ifstream but its first read throws
+  // std::ios_base::failure, which aborts the exception-free compiler (#120).
+  // So a directory is refused up front, and the file is read with stdio,
+  // whose read errors are reported rather than thrown.
+  std::error_code ec;
+  if (std::filesystem::is_directory(filename, ec))
+    return fail("'" + filename + "' is a directory, not a source file");
   errno = 0;
-  std::ifstream in(filename, std::ios::binary);
+  std::unique_ptr<std::FILE, int (*)(std::FILE *)> in(
+      std::fopen(filename.c_str(), "rb"), &std::fclose);
   if (!in)
     return fail("cannot open '" + filename + "': " + std::strerror(errno));
-  out.Source.assign((std::istreambuf_iterator<char>(in)),
-                    std::istreambuf_iterator<char>());
+  char buf[1 << 16];
+  size_t n;
+  while ((n = std::fread(buf, 1, sizeof buf, in.get())) > 0)
+    out.Source.append(buf, n);
+  if (std::ferror(in.get()))
+    return fail("cannot read '" + filename + "': " + std::strerror(errno));
 
   std::istringstream lines(out.Source);
   std::string line;

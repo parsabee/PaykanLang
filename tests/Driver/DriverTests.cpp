@@ -280,6 +280,61 @@ TEST(Driver, UnknownOptionIsRejected) {
       << out;
 }
 
+// -O takes 0..3 (#120): anything above is rejected, not clamped or ignored.
+TEST(Driver, OptimizationLevelAboveThreeIsRejected) {
+  auto src = writeTmp("fn main() -> int { return 0; }");
+  for (const char *opt : {"-O4", "-O9", "-O10", "-O999", "-O=4", "-O 4"}) {
+    auto [rc, out] = run(std::string(kPaykan) + " --check-only " + opt + " " +
+                         src + " 2>&1");
+    EXPECT_NE(rc, 0) << opt;
+    EXPECT_NE(out.find("invalid optimization level"), std::string::npos)
+        << opt << ": " << out;
+  }
+  for (const char *opt : {"-O0", "-O1", "-O2", "-O3", "-O=3", "-O 0"}) {
+    auto [rc, out] = run(std::string(kPaykan) + " --check-only " + opt + " " +
+                         src + " 2>&1");
+    EXPECT_EQ(rc, 0) << opt << ": " << out;
+  }
+  std::filesystem::remove(src);
+}
+
+// A directory is not a source file (#120): a clean error, never an uncaught
+// std::ios_base::failure (SIGABRT), whether it is the input or an import.
+TEST(Driver, DirectoryAsSourceFileIsRejected) {
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_test_dir_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir / "src.pkn");
+  for (const char *mode :
+       {" --check-only ", " --dump-ast ", " --dump-tokens ", " "}) {
+    auto [rc, out] =
+        run(std::string(kPaykan) + mode + (dir / "src.pkn").string() + " 2>&1");
+    EXPECT_TRUE(rc == 1 || rc == 2) << mode << rc << ": " << out;
+    EXPECT_NE(out.find("is a directory, not a source file"), std::string::npos)
+        << mode << out;
+  }
+  std::filesystem::remove_all(dir);
+}
+
+TEST(Driver, ImportOfADirectoryIsRejected) {
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_test_dirimport_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir / "lib" / "m.pkn");
+  std::ofstream(dir / "main.pkn")
+      << "import lib::m;\nfn main() -> int { return m::f(); }\n";
+  auto [rc, out] = run(std::string(kPaykan) + " --check-only " +
+                       (dir / "main.pkn").string() + " 2>&1");
+  EXPECT_EQ(rc, 1) << out;
+  EXPECT_NE(out.find("error: module 'lib::m': 'lib/m.pkn' is a directory, not "
+                     "a source file"),
+            std::string::npos)
+      << out;
+  // One error: the use of `m::f` is not reported as well.
+  EXPECT_EQ(out.find("undeclared"), std::string::npos) << out;
+  std::filesystem::remove_all(dir);
+}
+
 TEST(Driver, ProgramArgumentsFollowTheSourceFile) {
   REQUIRE_BACKEND();
   // Everything after the source file is the program's, even if it looks

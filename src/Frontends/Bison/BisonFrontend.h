@@ -75,6 +75,40 @@ public:
   std::deque<yy::parser::symbol_type> Lookahead;
   /// True when the token most recently handed to the parser was an IDENT.
   bool PrevWasIdent = false;
+  /// Set by the yylex wrapper for a '<' after an identifier: whether its
+  /// look-ahead scan found the matching '>' (a type-argument list).
+  bool LessIsTypeArgs = false;
+
+  /// The nesting tracker (BisonFrontend.cpp): enforces frontend::kMaxNesting
+  /// over the token stream the parser reads, counting what the
+  /// recursive-descent parser counts.  One NestLevel per open bracket (the
+  /// file itself is the outermost).
+  struct NestLevel {
+    yy::parser::symbol_kind_type Closer; ///< the token that closes it
+    unsigned Weight; ///< 1 for a bracket, 0 for an if/while condition
+    unsigned Prefix; ///< prefix operators of the operand being read
+    /// Conditional expressions open at this level, innermost last: 'c' in
+    /// the condition, 't' in the then-branch, 'e' in the else-branch.
+    std::string Ternaries;
+  };
+  std::vector<NestLevel> Nesting;
+  /// Sum of the levels' Weight + Prefix + Ternaries.size().
+  unsigned NestDepth = 0;
+  /// The kind of the previous token (S_YYEOF before the first), and whether
+  /// it was an `else` of an if statement.
+  yy::parser::symbol_kind_type PrevKind = yy::parser::symbol_kind::S_YYEOF;
+  bool PrevWasStmtElse = false;
+  /// Whether the last `if` began a conditional expression.
+  bool LastIfWasTernary = false;
+  /// Thrown by the yylex wrapper when the input nests too deeply; parse()
+  /// reports it and gives up (Bison's error recovery cannot resynchronise
+  /// inside such a construct).
+  struct NestingTooDeep {
+    yy::location Loc;
+  };
+  /// Account for @p tok, the next token the parser reads; throws
+  /// NestingTooDeep past the limit.
+  void trackNesting(const yy::parser::symbol_type &tok);
 
   /// Scanner setup over @p source (Lexer.lpp) and teardown.
   void scanBegin(std::string_view source);

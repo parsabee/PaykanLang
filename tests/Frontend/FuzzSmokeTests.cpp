@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 // Parser fuzz smoke test: random and mutated inputs must never crash, hang or
-// leak the recursive-descent frontend (the ASan/LSan CI job checks the leaks).
+// leak any enabled frontend (the ASan/LSan CI job checks the leaks).
 // Deterministic (fixed seeds) so a failure reproduces.
 
-#include "paykan/frontends/RecursiveDescent.h"
+#include "paykan/Frontend.h"
 
 #include <gtest/gtest.h>
 
@@ -18,8 +18,6 @@
 #ifndef PAYKAN_SAMPLES_DIR
 #error "PAYKAN_SAMPLES_DIR must be defined via CMake compile definition"
 #endif
-
-using namespace paykan::frontend::recursive_descent;
 
 namespace {
 
@@ -38,14 +36,20 @@ public:
   size_t below(size_t n) { return n ? static_cast<size_t>(next() % n) : 0; }
 };
 
-/// Parse once, discarding diagnostics.  Returns the error count.
-unsigned parseQuietly(const std::string &src) {
-  paykan::ast::ASTContext ctx;
-  std::ostringstream os;
-  paykan::sema::DiagEngine diag(os);
-  auto out = parseSource(ctx, src, &diag);
-  EXPECT_NE(out.Root, nullptr);
-  return out.ErrorCount;
+/// Parse once with every enabled frontend, discarding diagnostics.  A
+/// frontend may fail, but must report why.
+void parseQuietly(const std::string &src) {
+  for (const std::string &name : paykan::frontend::Registry::get().names()) {
+    auto fe = paykan::frontend::Registry::get().create(name);
+    ASSERT_NE(fe, nullptr) << name;
+    paykan::ast::ASTContext ctx;
+    std::ostringstream os;
+    paykan::sema::DiagEngine diag(os);
+    auto out = fe->parse("fuzz.pkn", src, ctx, diag, {});
+    if (!out.Root) {
+      EXPECT_GT(out.ErrorCount, 0u) << name;
+    }
+  }
 }
 
 std::vector<std::string> loadCorpus() {
