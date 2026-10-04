@@ -22,9 +22,10 @@ start your own.
 plugin interfaces are not yet stable for out-of-tree authors: `Backend.h`,
 `Frontend.h`, the registry and PIR as a plugin sees it may change between
 0.x releases, so build a plugin against the exact Paykan release it will be
-linked with. The plugin API versioning policy (a plugin API version a plugin
-must match, checked when it is configured and loaded) is
-[#103](https://github.com/parsabee/PaykanLang/issues/103).
+linked with. The plugin API versioning policy is
+[#103](https://github.com/parsabee/PaykanLang/issues/103) (planned: a plugin
+API version that a plugin must match exactly, checked at configure time and
+when `paykan` starts).
 
 ## 1. The interface
 
