@@ -443,4 +443,7 @@ if(PAYKAN_INSTALL_TEST_SUPPORT AND NOT PAYKAN_SANITIZER_FLAGS
                 -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
                 ${PAYKAN_OOT_FE_ARGS}
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/OutOfTree/FrontendTests.cmake)
+    # Both install this build tree (and write its install_manifest.txt).
+    set_tests_properties(PrintPIROutOfTree FrontendTestsOutOfTree PROPERTIES
+        RESOURCE_LOCK paykan_install)
 endif()
