@@ -1,8 +1,11 @@
 # Homebrew formula for PaykanLang.
 #
-# Not yet updated for v0.1.0: it still points at the v0.0.0 tag with a placeholder
-# sha256 (below). Bringing it up to date is a release step of
-# https://github.com/parsabee/PaykanLang/issues/27 (section 5).
+# TODO(release, #27 section 5.2): `url` and `sha256` below are placeholders. The
+# url still names v0.0.0, a tag that was never created, and the sha256 is all
+# zeros. When the v0.1.0-alpha tag is pushed, point `url` at
+#   https://github.com/parsabee/PaykanLang/archive/refs/tags/v0.1.0-alpha.tar.gz
+# and set `sha256` to that archive's real digest (see the NOTE below). Until
+# then `brew install` fails its checksum.
 #
 # This file doubles as a tap: a user can install with
 #
@@ -10,7 +13,7 @@
 #   brew install parsabee/paykanlang/paykanlang
 #
 # It builds from the source tarball that the release workflow attaches to the
-# v0.0.0 GitHub Release (or the auto-generated source archive for the tag) and
+# tagged GitHub Release (or the auto-generated source archive for the tag) and
 # invokes the project's `cmake --install` rules: the `paykan` binary -> bin/,
 # the runtime archive -> lib/, and Runtime.h -> include/paykan/.
 #
@@ -20,9 +23,9 @@
 # opt-in LLVM backend and Bison frontend are not enabled, and the test suite
 # (and so GoogleTest) is not built (-DPAYKAN_BUILD_TESTS=OFF).
 #
-# NOTE: `sha256` below is a placeholder. After the v0.0.0 tag exists, set it to
-# the real digest, e.g.:
-#   curl -fsSL https://github.com/parsabee/PaykanLang/archive/refs/tags/v0.0.0.tar.gz | shasum -a 256
+# NOTE: `sha256` below is a placeholder. After the tag exists, set it to the
+# real digest of the archive `url` names, e.g.:
+#   curl -fsSL https://github.com/parsabee/PaykanLang/archive/refs/tags/v0.1.0-alpha.tar.gz | shasum -a 256
 class Paykanlang < Formula
   desc "Statically-typed, object-oriented language that compiles via C"
   homepage "https://github.com/parsabee/PaykanLang"

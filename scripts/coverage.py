@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """Produce an LLVM source-based coverage report for PaykanLang.
 
-Prerequisites: configure + build a coverage tree, e.g.
+Prerequisites: a Clang with llvm-profdata / llvm-cov, and a coverage tree.
+The vendored LLVM 17 under build/third-party/llvm is downloaded only by a
+configure that lists the llvm backend; a plain configure (recursive-descent +
+c) does not download it, so pass the full lists, e.g.
 
+    cmake -B build "-DPAYKAN_FRONTENDS=recursive-descent;bison" \\
+          "-DPAYKAN_BACKENDS=llvm;c"
     cmake -B build-cov -DPAYKAN_COVERAGE=ON \\
+          "-DPAYKAN_FRONTENDS=recursive-descent;bison" \\
+          "-DPAYKAN_BACKENDS=llvm;c" \\
           -DCMAKE_C_COMPILER=build/third-party/llvm/bin/clang \\
           -DCMAKE_CXX_COMPILER=build/third-party/llvm/bin/clang++
     cmake --build build-cov --parallel
@@ -21,11 +28,11 @@ binaries) that do; those functions are counted from the real records.
 
 It exits non-zero if total line coverage is below the floor (--min, default 80).
 
-Note on the floor: the project's aspiration is ~100% line coverage. The current
-first-party total is ~82% (the driver entry point and some defensive branches
-are not yet exercised). The floor is set just below that so CI fails on a
-*regression* without blocking the v0.0 release; ratchet it up toward 100% as
-gaps are closed.
+Note on the floor: the project's aspiration is ~100% line coverage. The
+first-party total was ~82% when the floor was set and ~90% at the v0.1.0 audit
+(some defensive branches are still not exercised). The floor stays below that so
+CI fails on a large *regression* without blocking the v0.1 release; ratchet it
+up toward 100% as gaps are closed.
 
 Usage:
     scripts/coverage.py [--build-dir DIR] [--min PERCENT]

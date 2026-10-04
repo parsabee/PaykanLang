@@ -1,6 +1,6 @@
 name: Release
 
-# Triggered by pushing a version tag (e.g. v0.0.0). Builds Release binaries on
+# Triggered by pushing a version tag (e.g. v0.1.0-alpha). Builds Release binaries on
 # every supported platform, stages them with `cmake --install`, packages each
 # staged tree into a tarball, and publishes a GitHub Release with the tarballs
 # (and their SHA-256 sums) attached.

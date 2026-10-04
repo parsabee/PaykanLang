@@ -1,8 +1,7 @@
 # PaykanLang — Optional Types (prototype)
 
-> **Prototype.** Optional types are an experimental feature (issue #5). The syntax, the rules
-> below and the diagnostics may change; see `proposals/optionals.md` for the design, the
-> decisions behind it and what is deliberately left out.
+> **Prototype.** Optional types are experimental (issue #5): implemented and tested, but the syntax,
+> the rules and the diagnostics below may change before they are declared stable.
 
 An **optional type** `T?` holds either a value of type `T` or `None`. It is how a program says
 "this may be absent" without giving up the static type: a `next: Node?` field is a `Node` or
@@ -332,4 +331,9 @@ with "no box" meaning `None`. A present optional primitive is one boxed `Int` / 
 
 Flow typing (`if (x != None) { x.foo(); }` does not narrow `x`), `if let`, the `??` default
 and `?.` chaining operators, optional enums, and typing `None` in a literal that has no
-declared destination (`xs = [None, n]`). Each is sketched in `proposals/optionals.md`.
+declared destination (`xs = [None, n]`).
+
+`None` itself keeps the static type `Obj`: it is accepted wherever a `T?` is expected, but an
+`Obj` variable holding `None` is not (`n: Node? = someObj` is an error even when `someObj` is
+`None` at run time). A `None` arm is accepted only on an optional subject; on an `Obj` subject
+use `_`.

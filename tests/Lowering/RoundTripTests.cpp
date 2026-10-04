@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// PIR text round trip over the whole corpus: every program under samples/ and
-// example_program/ that passes Sema is lowered, verified and printed; the
+// PIR text round trip over the whole corpus: every program under samples/
+// that passes Sema is lowered, verified and printed; the
 // text is parsed back, verified again and re-printed, and the two texts must
 // be identical (docs/pir.md: the printed form is a faithful serialization).
 
@@ -22,9 +22,6 @@
 #ifndef PAYKAN_SAMPLES_DIR
 #error "PAYKAN_SAMPLES_DIR must be defined via CMake compile definition"
 #endif
-#ifndef PAYKAN_EXAMPLES_DIR
-#error "PAYKAN_EXAMPLES_DIR must be defined via CMake compile definition"
-#endif
 
 using namespace paykan;
 
@@ -32,13 +29,10 @@ namespace {
 
 std::vector<std::string> corpus() {
   std::vector<std::string> files;
-  for (const char *dir : {PAYKAN_SAMPLES_DIR, PAYKAN_EXAMPLES_DIR}) {
-    if (!std::filesystem::is_directory(dir))
-      continue;
-    for (const auto &e : std::filesystem::recursive_directory_iterator(dir))
-      if (e.is_regular_file() && e.path().extension() == ".pkn")
-        files.push_back(e.path().string());
-  }
+  for (const auto &e :
+       std::filesystem::recursive_directory_iterator(PAYKAN_SAMPLES_DIR))
+    if (e.is_regular_file() && e.path().extension() == ".pkn")
+      files.push_back(e.path().string());
   std::sort(files.begin(), files.end());
   return files;
 }

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 // Differential check of the enabled frontends: every .pkn file under
-// samples/ and example_program/ must be accepted or rejected by all of them
+// samples/ must be accepted or rejected by all of them
 // alike and, when accepted, yield the same printed AST (docs/grammar.md).
 // With a single frontend built the test only checks that the corpus parses
 // without crashing.
@@ -20,21 +20,15 @@
 #ifndef PAYKAN_SAMPLES_DIR
 #error "PAYKAN_SAMPLES_DIR must be defined via CMake compile definition"
 #endif
-#ifndef PAYKAN_EXAMPLES_DIR
-#error "PAYKAN_EXAMPLES_DIR must be defined via CMake compile definition"
-#endif
 
 namespace {
 
 std::vector<std::string> corpus() {
   std::vector<std::string> files;
-  for (const char *dir : {PAYKAN_SAMPLES_DIR, PAYKAN_EXAMPLES_DIR}) {
-    if (!std::filesystem::is_directory(dir))
-      continue;
-    for (const auto &e : std::filesystem::recursive_directory_iterator(dir))
-      if (e.is_regular_file() && e.path().extension() == ".pkn")
-        files.push_back(e.path().string());
-  }
+  for (const auto &e :
+       std::filesystem::recursive_directory_iterator(PAYKAN_SAMPLES_DIR))
+    if (e.is_regular_file() && e.path().extension() == ".pkn")
+      files.push_back(e.path().string());
   std::sort(files.begin(), files.end());
   return files;
 }

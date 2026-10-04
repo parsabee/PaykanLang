@@ -7,15 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha] - 2026-10-03
+
+The first tagged release, published as a GitHub pre-release. PaykanLang is now
+split into a core, pluggable frontends and pluggable backends around a
+backend-neutral IR (PIR); the default build needs only CMake and a C++20
+compiler, plus a C11 compiler at run time. Fixes found while testing the alpha
+go under `[0.1.0]`. Features marked *prototype* (tuples, optional types,
+generics) are experimental and may change.
+
 ### Breaking changes
 
-- **The default build is the core; the default backend changes from llvm to
-  c (#123).** A plain `cmake -B build` now builds only the recursive-descent
-  frontend and the c backend and downloads nothing. The LLVM backend and the
-  Bison frontend are opt-in:
-  `"-DPAYKAN_FRONTENDS=recursive-descent;bison" "-DPAYKAN_BACKENDS=llvm;c"`.
-  The default backend is the first one listed (`llvm` with `llvm;c`), and the
-  release tarballs and Homebrew formula ship the core only.
+- **The default build is the core: the recursive-descent frontend and the C
+  backend (#123).** The default backend changes from llvm to c. A plain
+  `cmake -B build` builds only those two and downloads nothing. The LLVM
+  backend, with its JIT, and the Bison frontend are opt-in at configure time:
+  `-DPAYKAN_BACKENDS="llvm;c"`, `-DPAYKAN_FRONTENDS="recursive-descent;bison"`.
+  The default backend is the first one listed (`llvm` with `llvm;c`);
+  `--list-backends` shows it. Without the LLVM backend, `paykan` runs programs
+  with the C backend, which needs a C11 compiler (`cc`, or `$CC`) at run time.
+  The release tarballs and the Homebrew formula ship the core only.
+- **The Bison frontend is an optional plugin (#17, #60).** The hand-written
+  recursive-descent frontend (standard C++ only) is the default. The
+  Bison/Flex frontend implements the same grammar (`docs/grammar.md`) and
+  builds the same AST; it is selected with `--frontend=bison` and is moving
+  to its own repository.
 - **Conversion constructors replace the conversion builtins (#64).**
   `StrInt`, `StrFloat`, `StrBool`, `StrChar`, `IntStr` and `FloatStr` are
   removed. Every conversion is now spelled `Target<Source>(value)`, with the
@@ -67,11 +83,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     …`. This covers user classes, `Obj` (a bare `None`), optionals and the
     other builtins. It also replaces `a conversion to 'int' names its source
     type`, since `int(2.5)` is now valid.
-  - The samples, the example program and the language reference use both
-    forms.
+  - The samples and the language reference use both forms.
+- **Modules are named canonically, and `-O2` is the default (#102).** Every
+  module is identified by its canonical module name (`geometry::shapes`,
+  `::io` for a system module; the main module by its file stem), never by its
+  file path, so no absolute path reaches the PIR, the generated C, symbol
+  names or cache keys, and builds of one project in two directories are
+  identical. Cache entries are named after the module
+  (`.paykan_cache/geometry/shapes.{bc,c,o,key}`, system modules under
+  `@system/`), and the generated-code ABI version is 6, so older caches are
+  rebuilt. `paykan run` and `paykan build` optimise at `-O2` by default (was
+  `-O0`); pass `-O0` for unoptimised code.
+- **Builtin names are reserved.** A top-level function, class or enum named
+  like a builtin function (`print`, `println`, `printerr`, `printerrln`,
+  `Str`, `open`) or a builtin class (`Obj`, `Str`, `Array`, `File`, `Error`,
+  `Int`, `Float`, `Bool`, `Char`) is a compile-time error at the
+  declaration (`'print' is a builtin function and cannot be redeclared`). A
+  class silently replaced the builtin of the same name before. One namespace
+  holds every top-level name, so a function, class or enum cannot reuse
+  another's name either. Fields, methods, parameters and locals are not
+  affected.
+- **Method symbols are `<Class>.<method>` (#86).** Methods and destructors
+  were lowered to `<Class>_<method>`, so a user `fn K_w()` next to
+  `class K { fn w() … }` (or `fn K_destroy()`) clashed with the method and
+  failed with an internal error. The `.` cannot occur in a Paykan
+  identifier, so the names can no longer clash; the LLVM backend's vtables
+  are `<class>..vtable`. Code built against the old names, and the
+  bitcode cache, must be rebuilt: the generated-code ABI version was bumped
+  (to 5, and to 6 by #102).
+- **`==` / `!=` on reference types dispatch to `equals`, so `Str ==`
+  compares contents.** For classes, `Str`, and arrays, `a == b` now calls
+  the virtual `equals` method (and `!=` its negation). `Str` comparison is
+  therefore **content** equality (`"hel" + "lo" == "hello"` is `True`; it
+  compared identities before); arrays keep identity comparison via
+  the default `equals`; comparing arrays of different element types is a
+  compile error. Overriding `equals` in a class changes how `==` behaves for it.
 
 ### Added
 
+- **Pluggable frontends (#16, #17).** The frontend (lexer and parser) is a
+  plugin behind an interface (`include/paykan/Frontend.h`) and a registry:
+  `-DPAYKAN_FRONTENDS=<list>` picks the frontends to build,
+  `--frontend=<name>` selects one at run time and `--list-frontends` lists
+  them. The grammar both frontends implement is specified in
+  `docs/grammar.md`; `--dump-tokens` prints a frontend's token stream, and
+  the `FrontendDifferential` ctest (`scripts/diff_frontends.py`) checks that
+  every sample is accepted or rejected alike, with the same AST.
+- **Pluggable backends and PIR (#16, #35, #48).** Programs are lowered from
+  the AST to PIR, the backend-neutral Paykan IR (`docs/pir.md`), in which
+  every type, retain/release, vtable and scope cleanup is explicit; every
+  backend consumes PIR. `--emit-pir` prints it, and its text form parses
+  back (the `PIRRoundTrip` tests round-trip the whole samples corpus).
+  `-DPAYKAN_BACKENDS=<list>` picks the backends to build, `--backend=<name>`
+  selects one and `--list-backends` lists them; `--emit-source` prints a
+  backend's output.
+- **The C backend (#16, #36).** `--backend=c` translates PIR to strict ISO
+  C11 (`docs/c-backend.md`) and compiles it with the system C compiler. It
+  is part of the core: standard C++ only, no third-party library. `run`
+  builds into a temporary directory and runs the program; `--emit-c` prints
+  the C. Imported modules are compiled once and cached
+  (`.paykan_cache/`, keyed by the generated C, the compiler and its flags).
+- **The LLVM backend translates PIR (#38).** The old AST code generator is
+  gone: the llvm backend lowers PIR to LLVM IR and runs it with the ORC JIT
+  (`--emit-llvm` prints it).
+- **`paykan build` (#36, #38).** `paykan build prog.pkn -o prog` compiles a
+  native executable with either backend (the llvm backend emits an object
+  file and links it with the system C compiler). `main`'s return value is
+  the exit code, and `main(args: Str[])` receives the command line.
+- **Out-of-tree plugins (#37).** `cmake --install` installs the interfaces
+  and `find_package(Paykan)`, so a backend or frontend can be built outside
+  the tree and linked into a custom `paykan` (`docs/writing-a-backend.md`).
+  `utils/print-pir` is the smallest complete backend; CI and the
+  `PrintPIROutOfTree` ctest build it against an installation.
+- **Documented: selective imports, `Stdin`, `File.readbytes` / `File.read`
+  and system imports.** These worked before but were not listed:
+  `import lib::{foo, bar as b};` imports several modules of one directory;
+  `Stdin` is a builtin `File` over standard input; `readbytes(n)` and
+  `read()` read `n` bytes or the rest of a file (`None` at the end);
+  `import ::io;` looks a module up in `$PAYKAN_STDLIB` (no standard library
+  ships yet, #113). See `docs/language/01-language-basics.md` and
+  `06-modules.md`.
 - **Generics (prototype).** Generic classes (`class Box<T> { … }`,
   `class Pair<K, V> { … }`) and generic free functions
   (`fn first<T>(xs: T[]) -> T`), implemented by monomorphisation in Sema: each
@@ -87,7 +178,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`mod::Box<int>` is rejected with "generic types cannot be imported yet");
   a module's own instantiations are exported as concrete classes. No
   constraints, variance, defaults or specialisation yet — see
-  `proposals/generics.md` and `language_reference/11-generics.md`.
+  `docs/language/11-generics.md`.
 - **Optional types `T?` (prototype, issue #5).** Any reference type (a class,
   `Str`, or an array) has an optional form `T?` holding either a `T` or
   `None`. `T` widens to `T?` implicitly; a `T?` never narrows back without a
@@ -99,7 +190,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   counted box as a `T` with "no box" meaning `None` — no layout change.
   Nested optionals, flow typing, `if let`,
   `??` and `?.` are not part of the prototype. See
-  `language_reference/10-optionals.md` and `proposals/optionals.md`.
+  `docs/language/10-optionals.md`.
 - **Optional primitives `int?`, `float?`, `bool?`, `char?` (#66).** A
   primitive widens to its optional implicitly (`x: int? = 5`; an `int` also
   widens to `float?`), and `None` is the absent value. In `match o { n: int
@@ -110,7 +201,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Char` object (`Char` is a new boxed class), so it prints and matches as
   that class in an `Obj` slot. `Enum?` is still rejected, now with "optional
   enum types are not supported yet". `int?` does not convert to `float?`. See
-  `language_reference/10-optionals.md`.
+  `docs/language/10-optionals.md`.
 - **Tuples (prototype, #4).** Fixed-arity, heterogeneous, immutable values:
   types `(int, Str)` (nesting, `(int, Str)[]` and `(int[], Str)` allowed),
   literals `(1, "a")`, compile-time-checked element access `t.0` / `t.1.0`,
@@ -120,7 +211,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reference value); `==` / `!=` compare element-wise and `toString` renders
   `(1, a)`. Tuple-typed signatures round-trip through module imports.
   Not yet: tuples in `match`, nested destructuring, mutation, named elements.
-  See `language_reference/09-tuples.md` and `proposals/tuples.md`.
+  See `docs/language/09-tuples.md`.
 
 - **Move semantics with `mov`.** `mov <expr>` transfers ownership of a local
   variable, parameter, or temporary without a retain/release pair. Use of a
@@ -129,13 +220,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   branches, paths are merged conservatively after the construct, and moving a
   variable declared outside a loop without re-assigning it before the loop
   repeats is rejected. `mov self` and moving fields or array elements are
-  compile errors. See `language_reference/08-memory-model.md`.
-- **`==` / `!=` on reference types dispatch to `equals`.** For classes, `Str`,
-  and arrays, `a == b` now calls the virtual `equals` method (and `!=` its
-  negation). `Str` comparison is therefore **content** equality
-  (`"hel" + "lo" == "hello"` is `True`); arrays keep identity comparison via
-  the default `equals`; comparing arrays of different element types is a
-  compile error. Overriding `equals` in a class changes how `==` behaves for it.
+  compile errors. See `docs/language/08-memory-model.md`.
 - **`-DPAYKAN_BUILD_TESTS=OFF` builds without the test suite (#77, #78).** It
   skips GoogleTest, so a barebones configure downloads nothing (the default is
   ON when PaykanLang is the top-level project). With tests on, an installed
@@ -147,6 +232,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Two modules (or the main file and an import) that each define a free
+  function with the same name no longer make the lowering fail with an
+  internal error (#70): `x::tag`, `y::tag` and a local `tag` each call
+  their own module's function. Two imports that bind one qualifier to
+  different modules (`import a::util; import b::util;`) are now an error.
+- A tuple or array literal flowing into a typed slot takes the slot's
+  element types (#71): `(None, "a")` is an `(int?, Str)` and
+  `[("a", 1), ("b", nb)]` a `(Str, int?)[]` where the destination says so.
+- A string literal as a `match` subject (`match "s" { "t" { … } _ { … } }`)
+  failed PIR verification (#72); it is now a `Str` like any other subject.
+- Float range (#73): subnormal values are accepted everywhere (float
+  literals, `float<Str>`, PIR constants), and a float literal that
+  overflows to infinity, or a nonzero one that underflows to zero, is a
+  compile-time error (`float is out of range: <text>`).
+- The C backend rebuilds a cached object that was truncated or corrupted
+  after it was cached (#74), instead of failing every later link until
+  `.paykan_cache` was deleted.
+- A user function named `<Class>_<method>` no longer clashes with that
+  class's method (#86); see *Breaking changes*.
+- `float` `!=` is IEEE 754's unordered not-equal (#58): `nan != nan` is
+  `True` on both backends.
+- The GCC 13 Release build compiles under `-Werror` (#76).
 - A string literal used as an object (`"ab"[1]`, `"abc".len()`, `mov "lit"`
   in any position, a literal in a tuple, array or optional) is now a `Str`
   object; it was passed as its raw C string, an internal compiler error
@@ -268,9 +375,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are built. The samples that write files put them in a directory the
   harness passes per run (`// args: {tmpdir}`), so parallel runs no longer
   race on fixed `/tmp` paths.
+- Dropping a deep chain of objects (a long `Node?` list, a deeply nested tree,
+  arrays and tuples nested inside each other) no longer overflows the C stack
+  (#118). The runtime destroys objects iteratively, in constant stack space
+  (`docs/language/08-memory-model.md`).
 
 ### Changed
 
+- **Repository layout.** The language reference moved from its top-level
+  directory into `docs/language/` (same file names). The example
+  out-of-tree backend moved from `examples/backends/print-pir` to
+  `utils/print-pir`. `example_program/` is gone: its `calc` program is now
+  the multi-module sample `samples/imports/12_calc`, with its expected
+  output, so every harness runs it. `PLAN-0.1.md` (superseded by #27) and
+  `proposals/` were removed; the normative parts of the proposals are in
+  the reference (`docs/language/09-tuples.md`, `10-optionals.md`,
+  `11-generics.md`). New ctests: `MarkdownLinks` (`scripts/check_links.py`)
+  and `DocExamples` (`scripts/doc_examples.py`, which runs every doc example
+  that states its output).
 - Runtime object header grew by 8 bytes: every heap object now carries a
   backpointer to its reference-count box (the unique-box invariant above).
 - Cached import bitcode is stamped with an ABI version; caches written by a
@@ -278,8 +400,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loaded.
 - Parse errors changed format from yacc-style one-liners to clang-style
   caret-and-snippet diagnostics.
-- `paykan run` and `paykan build` optimise at `-O2` by default (was `-O0`);
-  pass `-O0` for unoptimised code (#102).
 - The C backend's output is strict ISO C11 (#62): it compiles with
   `-std=c11 -pedantic-errors -Wall -Wextra -Werror` on GCC and Clang (the
   new `CStrictC11` ctest and *Strict C11* CI job, over the whole samples
@@ -289,11 +409,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checks the target assumptions (LP64, 8-bit bytes, two's complement,
   IEEE 754 doubles) with `_Static_assert` (`docs/c-backend.md`).
 
-## [0.0.0] - 2026-06-28
+## Initial prototype - 2026-06-28
 
-First preview release (not yet tagged in git). PaykanLang is a statically-typed, object-oriented
-language that compiles to LLVM IR and is **JIT-executed**. This release is a
-deliberately small, honest preview; several features are planned for v0.1.
+The first prototype; it was never tagged or released. PaykanLang was a
+statically-typed, object-oriented language that compiled to LLVM IR and was
+**JIT-executed**: deliberately small, with several features planned for v0.1.
 
 ### Added
 
@@ -320,4 +440,5 @@ deliberately small, honest preview; several features are planned for v0.1.
 - The `destroy()` destructor is compiler-generated and final: user classes cannot
   override it, and direct calls are rejected at compile time.
 
-[0.0.0]: https://github.com/parsabee/PaykanLang/releases/tag/v0.0.0
+[Unreleased]: https://github.com/parsabee/PaykanLang/compare/v0.1.0-alpha...HEAD
+[0.1.0-alpha]: https://github.com/parsabee/PaykanLang/releases/tag/v0.1.0-alpha

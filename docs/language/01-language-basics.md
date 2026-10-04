@@ -51,13 +51,13 @@ fn main() -> int {
 
 ### Builtin Types (stack-allocated)
 
-| Type    | LLVM Type | Description                         |
-|---------|-----------|-------------------------------------|
-| `int`   | `i64`     | 64-bit signed integer               |
-| `float` | `double`  | 64-bit IEEE 754 floating-point      |
-| `bool`  | `i1`      | Boolean — literals `True` / `False` |
-| `char`  | `i8`      | Character — literals `'a'`, `'\n'`  |
-| `void`  | `void`    | Function return type only           |
+| Type    | Description                         |
+|---------|-------------------------------------|
+| `int`   | 64-bit signed integer               |
+| `float` | 64-bit IEEE 754 floating-point      |
+| `bool`  | Boolean — literals `True` / `False` |
+| `char`  | 8-bit character — literals `'a'`, `'\n'` |
+| `void`  | Function return type only           |
 
 - `int` -> `float` promotion is implicit when assigning or passing to a `float` parameter.
 
@@ -100,8 +100,8 @@ mat: int[][] = [[1, 2], [3, 4]];   // 2D
 
 ### Optional Types (prototype)
 
-Any reference type `T` (a class, `Str`, or an array) has an optional form `T?` that holds either
-a `T` or `None`. A `T` converts to `T?` implicitly; a `T?` is unwrapped with `match`. See
+Any reference type `T` (a class, `Str`, or an array) and the primitives `int`, `float`, `bool`
+and `char` have an optional form `T?` that holds either a `T` or `None`. A `T` converts to `T?` implicitly; a `T?` is unwrapped with `match`. See
 `10-optionals.md`.
 
 ```pkn
@@ -114,11 +114,41 @@ fn find(head: Node?, key: int) -> Node? { ... }
 | Slot        | Signature                       | Description                                      |
 |-------------|---------------------------------|--------------------------------------------------|
 | `write`     | `fn write(s: Str)`              | Writes `s` to the file                           |
-| `readln`    | `fn readln() -> Obj`            | Returns the next line as `Str`, or `None` at EOF |
+| `readln`    | `fn readln() -> Obj`            | Returns the next line as `Str` (including its `\n`, if any), or `None` at EOF |
+| `readbytes` | `fn readbytes(n: int) -> Obj`   | Returns the next `n` bytes (fewer at the end of the file) as `Str`, or `None` at EOF or when `n <= 0` |
+| `read`      | `fn read() -> Obj`              | Returns everything left in the file as `Str`, or `None` when nothing is left |
 | `toString`  | `fn toString() -> Str`          | Returns a string description of the handle       |
 | `equals`    | `fn equals(other: Obj) -> bool` | Reference identity comparison                    |
 
 The file handle is closed automatically when the `File` object goes out of scope (ARC destroy).
+The read methods return `Obj`, so use `match` to tell a `Str` from `None` (see
+[File I/O](#file-io)).
+
+`Stdin` is a builtin `File` that reads the program's standard input. It needs no `open` and
+offers the same methods (`readln`, `readbytes`, `read`):
+
+```pkn
+fn main() -> int {
+  n: int = 0;
+  while (True) {
+    match Stdin.readln() {
+      line: Str { n = n + 1; }
+      _         { break; }       // None — end of input
+    }
+  }
+  println(Str(n) + " lines");
+  return 0;
+}
+```
+
+Output (with nothing on standard input):
+
+```
+0 lines
+```
+
+`Stdin` cannot be reassigned: `Stdin = x` is an error ("'Stdin' is a type name and cannot be
+used as a variable"). See `samples/codegen/23_stdin.pkn`.
 
 `Error` is a built-in class type returned by operations that can fail (e.g. `open()`). It
 extends `Obj` and provides:
@@ -456,6 +486,10 @@ println("x = " + Str(x));
 print("a=" + Str<int>(a) + " b=" + Str(b));
 ```
 
+`print` and `println` write to standard output, `printerr` and `printerrln` to standard
+error; stdout is flushed before a runtime panic, so output printed before one is never lost.
+See `samples/codegen/46_printerr.pkn`.
+
 ### Conversions
 
 Converting between the primitive types, their boxes and `Str` uses a **conversion
@@ -624,8 +658,8 @@ match open("/tmp/data.txt", "r") {
 }
 ```
 
-The `File` handle and its methods (`write`, `readln`, `toString`, `equals`) are described
-in the **File built-in class type** section above.
+The `File` handle and its methods (`write`, `readln`, `readbytes`, `read`, `toString`,
+`equals`) and the `Stdin` file are described in the **File built-in class type** section above.
 
 ### Builtin Names Are Reserved
 

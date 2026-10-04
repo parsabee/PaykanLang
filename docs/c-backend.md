@@ -2,9 +2,11 @@
 
 The C backend (`--backend=c`) translates a verified PIR program
 (`docs/pir.md`) into one strictly conforming ISO C11 translation unit
-(see [Standard C](#standard-c)) against the runtime's `Runtime.h`, and builds or runs it with the system C compiler.  It is part of
-the core: it depends on nothing but the standard library and a C compiler at
-run time, and it is the default backend of a build without the LLVM plugin.
+(see [Standard C](#standard-c)) against the runtime's `Runtime.h`, and builds
+or runs it with the system C compiler.  It is part of the core: it depends on
+nothing but the standard library and a C compiler at run time, and it is the
+backend of the default build.  The LLVM backend is in tree too, but opt-in at
+configure time (`-DPAYKAN_BACKENDS="llvm;c"`).
 
 ## Commands
 
@@ -119,8 +121,8 @@ and division by zero and `INT64_MIN / -1` are guarded by the lowering before
 they reach C.
 
 The `CStrictC11` ctest (`scripts/c_strict.py`) enforces this over the whole
-samples corpus (`samples/codegen`, `samples/leak-check`,
-`samples/imports/*/main.pkn` and `example_program/`): with every C compiler
+samples corpus (`samples/codegen`, `samples/leak-check` and
+`samples/imports/*/main.pkn`): with every C compiler
 it finds (GCC and Clang), each program's `--emit-c` output and the runtime
 are compiled with `-std=c11 -pedantic-errors -Wall -Wextra -Werror` at `-O0`
 and `-O2`, linked and run, and `paykan build` is run with those flags added

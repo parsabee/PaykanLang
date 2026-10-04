@@ -13,7 +13,7 @@ guarantee, not something you write by hand.
 - **Value types** (`int`, `float`, `bool`, `char`, `enum`) live on the stack, are copied on
   assignment, and are never reference-counted.
 - **Reference types** (class instances, `Str`, `File`, `Error`, arrays, tuples, boxed
-  `Int`/`Float`) live on the heap and are reference-counted.
+  `Int`/`Float`/`Bool`/`Char`, optionals) live on the heap and are reference-counted.
 - Each heap object is owned through a **shared box** holding a strong count and a pointer to the
   object. Copying a reference **retains** (count `+1`); dropping one **releases** (count `-1`).
 - When the count reaches zero the object's **`destroy`** runs — releasing the references it holds

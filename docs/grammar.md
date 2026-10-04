@@ -288,17 +288,17 @@ generic call. It is a generic call exactly when a `typeArgList` followed by
 `lib::Box<int>(1)`); otherwise `<` is the relational operator.
 
 The recursive-descent frontend decides this by speculatively parsing the type
-argument list. The Bison frontend approximates it in its scanner (a `<`
-right after an identifier is scanned ahead over type-list tokens to the
-matching `>`; if `(` follows, it opens type arguments). The two agree on
-every input except `f(a < b, c) > (d)`, which the scanner mis-scans and
-the Bison frontend rejects while the recursive-descent frontend accepts it as a
-comparison. Writing `(f(a < b, c)) > (d)` works in both.
+argument list. The Bison frontend decides it in its scanner (a `<` right
+after an identifier is scanned ahead over type-list tokens to the matching
+`>`; if `(` follows, it opens type arguments). The two agree on every input:
+in `f(a < b, c) > (d)` the `)` closes the call's own parenthesis before any
+`>`, so both read it as a comparison of `f(a < b, c)` with `(d)` and build
+the same AST.
 
 ### Conversion constructors
 
 A conversion `Target<Source>(value)` (`Str<int>(n)`, `int<float>(f)`,
-`int<Str>(s)`, ..., see `language_reference/01-language-basics.md`) is not
+`int<Str>(s)`, ..., see [`language/01-language-basics.md`](language/01-language-basics.md)) is not
 a separate production: it is the generic-call form above. The builtin type
 names `int`, `float`, `bool`, `char` and `void` are ordinary `IDENT`s (they
 are resolved as type names, not reserved by the scanner), so `int<Str>(s)`
@@ -349,7 +349,7 @@ never handed to Sema.
 
 Nesting (blocks, parentheses, brackets, type applications, prefix
 operators and conditional expressions) deeper than 512 levels is rejected
-with `nesting too deep` by every frontend, so pathological inputs cannot
+with `nesting too deep` by both frontends, so pathological inputs cannot
 overflow the stack of the parser or of the passes after it.
 
 Both frontends report lexical and syntax errors in source order, and
@@ -368,5 +368,3 @@ them:
 - A leading comma in an argument list, array literal or parameter list:
   `f(, 1)`, `[, 1]`, `fn f(, a: int)`.
 - Repeated commas in an enum body after the first variant: `enum E { a,, b }`.
-- `f(a < b, c) > (d)` is rejected by the Bison scanner heuristic (see §7)
-  but is a valid comparison.

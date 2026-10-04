@@ -13,7 +13,7 @@ a backend is a static library that implements the interface and registers a
 factory under a name. The driver lists the registered backends
 (`paykan --list-backends`) and selects one with `--backend=<name>`.
 
-The example in [`examples/backends/print-pir`](../examples/backends/print-pir)
+The example in [`utils/print-pir`](../utils/print-pir)
 is the smallest complete backend (it prints the PIR it receives); copy it to
 start your own.
 
@@ -133,6 +133,14 @@ file provided by "LLVM"":
 ```sh
 cmake -B build -DCMAKE_PREFIX_PATH=/opt/paykan -DLLVM_DIR=<llvm>/lib/cmake/llvm
 ```
+
+A plain configure of Paykan builds only the core (recursive-descent + c) and
+downloads no LLVM. An installation with the llvm backend comes from a configure
+that passes the full lists,
+`"-DPAYKAN_FRONTENDS=recursive-descent;bison" "-DPAYKAN_BACKENDS=llvm;c"`
+(or at least `llvm` in `PAYKAN_BACKENDS`); that configure downloads LLVM 17
+into `<paykan-build>/third-party/llvm` unless `LLVM_DIR` names one, so
+`<llvm>` above is that directory or the LLVM you passed.
 
 An installation built without the llvm backend needs only `CMAKE_PREFIX_PATH`.
 This lasts while the LLVM backend is in tree; it moves to its own repository at
