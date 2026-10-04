@@ -202,6 +202,7 @@ add_test(NAME LoweringTests COMMAND lowering_tests)
 # --- Runtime tests ----------------------------------------------------------
 add_executable(runtime_tests
     Runtime/ArrayTests.cpp
+    Runtime/DeferredDestroyTests.cpp
     Runtime/EqualsNullTests.cpp
     Runtime/ObjectTests.cpp
     Runtime/StringTests.cpp

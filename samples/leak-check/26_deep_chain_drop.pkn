@@ -1,0 +1,106 @@
+// Isolates: dropping very deep object graphs (#118).  Destroying an object
+// releases what it holds, so a recursive destroy costs a C stack frame per
+// link and overflowed the stack on long chains.  The runtime destroys
+// iteratively (objects released to zero inside a destroy are deferred and
+// destroyed one by one by the outermost release), so each structure below
+// is freed without stack growth:
+//   * a 1,000,000-node `Node?` linked list (class instances, Str fields);
+//   * a deep, wide tree: a 200,000-node spine whose every node also holds a
+//     three-node subtree and a Node (with its Str);
+//   * a chain of 200,000 nested arrays, each holding a boxed int, a tuple
+//     and the next array;
+//   * a chain of tuples nested 200,000 deep through an `Obj` slot, with an
+//     Error from a failed open() in every 10,000th link.
+//
+// Runtime allocation sites: object structs + PaykanShared (Shared.c),
+// PaykanString_new (String.c), PaykanArray_* (Array.c), PaykanTuple_new
+// (Tuple.c), PaykanInt boxes (Basic.c), PaykanError_new (Error.c).
+//
+// Expected under --track-heap: live blocks : 0.
+
+// expect-stdout: list 1000000
+// expect-stdout: tree 200000
+// expect-stdout: arrays 200000
+// expect-stdout: tuples 200000
+// expect-stdout: done
+
+class Node {
+  v: int;
+  name: Str;
+  next: Node?;
+  fn __init__(v: int) { self.v = v; self.name = "n"; }
+}
+
+class Tree {
+  left: Tree?;
+  right: Tree?;
+  leaves: Node?;
+  fn __init__() { }
+}
+
+fn leaf() -> Tree {
+  t = Tree();
+  t.leaves = Node(0);
+  return t;
+}
+
+fn list(n: int) -> int {
+  head: Node? = None;
+  i = 0;
+  while (i < n) { node = Node(i); node.next = head; head = node; i = i + 1; }
+  return i;                    // head goes out of scope: the whole list drops
+}
+
+fn tree(depth: int) -> int {
+  root: Tree? = None;
+  i = 0;
+  while (i < depth) {
+    t = Tree();
+    side = Tree();
+    side.left = leaf();
+    side.right = leaf();
+    t.left = side;
+    t.right = root;
+    t.leaves = Node(i);
+    root = t;
+    i = i + 1;
+  }
+  return i;
+}
+
+fn arrays(n: int) -> int {
+  prev: Obj = None;
+  i = 0;
+  while (i < n) {
+    b: int? = i;
+    o: Obj[] = [prev];
+    o.push(b);
+    o.push((i, "t"));
+    prev = o;
+    i = i + 1;
+  }
+  return i;
+}
+
+fn tuples(n: int) -> int {
+  prev: Obj = None;
+  i = 0;
+  while (i < n) {
+    e: Obj = None;
+    if (i % 10000 == 0) {
+      e = open("/nonexistent/paykan/leak-check/deep.txt", "r");
+    }
+    prev = (i, prev, e);
+    i = i + 1;
+  }
+  return i;
+}
+
+fn main() -> int {
+  println("list " + Str(list(1000000)));
+  println("tree " + Str(tree(200000)));
+  println("arrays " + Str(arrays(200000)));
+  println("tuples " + Str(tuples(200000)));
+  println("done");
+  return 0;
+}

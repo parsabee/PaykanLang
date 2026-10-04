@@ -548,7 +548,10 @@ void Paykan_retain(PaykanShared *shared);
 /// Decrement the reference count.  Destroys the owned object and frees
 /// the box when it reaches zero, clearing the object's box backpointer
 /// first (so an immortal object — static None / Stdin, whose destroy is a
-/// no-op — is left unboxed rather than dangling).
+/// no-op — is left unboxed rather than dangling).  Destruction is iterative
+/// (Shared.c): an object released to zero inside a destroy is deferred and
+/// destroyed by the outermost release before it returns, so deep chains are
+/// freed in bounded C stack space.
 void Paykan_release(PaykanShared *shared);
 
 /// Convenience: return the underlying object pointer.
