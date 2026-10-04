@@ -12,10 +12,20 @@
 #
 # `cargo build --release` builds the same library (Cargo.toml).
 cmake_minimum_required(VERSION 3.24)
-project(PaykanPIRStatsRust LANGUAGES NONE)
+# C: no C is compiled, but find_package(Paykan) may load LLVM's package
+# (an installation with the llvm backend), whose checks need a C compiler;
+# rustc links the cdylib with the platform's C toolchain anyway.
+project(PaykanPIRStatsRust LANGUAGES C)
 
 find_package(Paykan REQUIRED)
 find_program(RUSTC rustc REQUIRED)
+# A rustup proxy with no default toolchain is found but runs nothing.
+execute_process(COMMAND ${RUSTC} --version
+    RESULT_VARIABLE _rustc_rc OUTPUT_QUIET ERROR_VARIABLE _rustc_err)
+if(NOT _rustc_rc EQUAL 0)
+    message(FATAL_ERROR "${RUSTC} --version failed (${_rustc_rc}); with "
+                        "rustup, run `rustup default stable`:\n${_rustc_err}")
+endif()
 
 # The PaykanLang version the plugin is built with (empty: the installed
 # one); configure fails unless the installation accepts it (#103).

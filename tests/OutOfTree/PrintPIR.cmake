@@ -8,8 +8,10 @@
 #   - after `cmake --install` of the plugin into the installation's plugin
 #     directory, with the plugin's build tree deleted: found by itself.
 # Then the C example frontend (utils/ast-text-frontend), the Rust example
-# backend (utils/pir-stats-rust, when rustc is available: RUSTC), and the
-# advanced static path (tests/OutOfTree/static-driver).
+# backend (utils/pir-stats-rust, when rustc is available, RUSTC, and usable:
+# `rustc --version` succeeds; a rustup proxy with no default toolchain is
+# found but cannot compile anything), and the advanced static path
+# (tests/OutOfTree/static-driver).
 #
 # Run as a ctest (tests/CMakeLists.txt, PrintPIROutOfTree):
 #   cmake -DPAYKAN_BUILD_DIR=... -DPAYKAN_SOURCE_DIR=... -DWORK_DIR=...
@@ -158,7 +160,19 @@ if(NOT STEP_OUTPUT STREQUAL expected_run)
 endif()
 
 # -- pir-stats (Rust) ----------------------------------------------------------
+set(rustc_usable FALSE)
 if(RUSTC)
+    execute_process(COMMAND ${RUSTC} --version
+        RESULT_VARIABLE rustc_rc OUTPUT_VARIABLE rustc_out ERROR_VARIABLE rustc_err)
+    if(rustc_rc EQUAL 0)
+        set(rustc_usable TRUE)
+    else()
+        string(STRIP "${rustc_err}" rustc_err)
+        message(STATUS "${RUSTC} --version failed (${rustc_rc}): the Rust "
+                       "example plugin is not checked\n${rustc_err}")
+    endif()
+endif()
+if(rustc_usable)
     set(build ${WORK_DIR}/pir-stats-rust)
     run_step("configure utils/pir-stats-rust"
         COMMAND ${CMAKE_COMMAND} -S ${PAYKAN_SOURCE_DIR}/utils/pir-stats-rust
@@ -174,7 +188,7 @@ if(RUSTC)
         message(FATAL_ERROR "pir-stats printed:\n${STEP_OUTPUT}")
     endif()
     message(STATUS "pir-stats (Rust) loads into the installed paykan")
-else()
+elseif(NOT RUSTC)
     message(STATUS "rustc not found: the Rust example plugin is not checked")
 endif()
 

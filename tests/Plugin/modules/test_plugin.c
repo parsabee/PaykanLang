@@ -135,8 +135,10 @@ __attribute__((unused)) static int test_emit(void *data, PaykanSession *s,
     return rc;
   }
   if (kind != PAYKAN_EMIT_EXECUTABLE || !host->runtime_library(s) ||
-      !host->runtime_include_dir(s) ||
-      !(inputs[0] = write_program(s, source, sizeof(source))))
+      !host->runtime_include_dir(s))
+    return PAYKAN_ERROR;
+  inputs[0] = write_program(s, source, sizeof(source));
+  if (!inputs[0])
     return PAYKAN_ERROR;
   return host->link_executable(s, inputs, 1, output_path);
 }
@@ -206,7 +208,7 @@ typedef struct FutureBackend {
 #define TP_FUTURE_BACKEND(n)                                                   \
   {                                                                            \
     {.struct_size = sizeof(FutureBackend),                                     \
-     .name = n,                                                                \
+     .name = (n),                                                              \
      .description = "a newer header's backend",                                \
      .capabilities = PAYKAN_BACKEND_EMIT_SOURCE,                               \
      .data = (void *)&host,                                                    \
