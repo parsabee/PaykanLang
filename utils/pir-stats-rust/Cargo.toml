@@ -1,0 +1,13 @@
+# A PaykanLang backend plugin in Rust (see src/lib.rs).  `cargo build
+# --release` produces target/release/libpaykan_backend_pir_stats.so (.dylib
+# on macOS); CMakeLists.txt builds the same file with rustc alone.
+[package]
+name = "paykan_backend_pir_stats"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"

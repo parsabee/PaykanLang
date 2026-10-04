@@ -60,7 +60,10 @@ target_compile_definitions(paykan_backend_toolchain PRIVATE
     PAYKAN_DEFAULT_CC="${_paykan_toolchain_default_cc}"
     PAYKAN_DEFAULT_CC_FLAGS="${_paykan_toolchain_default_cc_flags}"
 )
+# The platform's dynamic loader (dlopen) for the plugin loader: part of libc
+# on macOS and current glibc, libdl on older glibc.
 target_link_libraries(paykan_backend_toolchain
+    PUBLIC  ${CMAKE_DL_LIBS}
     PRIVATE paykan_compile_options
 )
 add_dependencies(paykan_backend_toolchain paykan_runtime)

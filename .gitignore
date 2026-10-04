@@ -48,3 +48,7 @@ compile_commands.json
 
 # TODO
 TODO/
+
+# The Rust example plugin built with cargo.
+utils/pir-stats-rust/target/
+utils/pir-stats-rust/Cargo.lock

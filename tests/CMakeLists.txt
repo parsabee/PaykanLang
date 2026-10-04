@@ -213,6 +213,79 @@ target_link_libraries(plugin_tests
 )
 add_test(NAME PluginTests COMMAND plugin_tests)
 
+# --- The plugin loader (tests/Plugin/LoaderTests.cpp): C plugins built from ---
+# --- tests/Plugin/modules/test_plugin.c, one variant per module, loaded into ---
+# --- the real paykan through every discovery path -------------------------------
+set(PAYKAN_TEST_PLUGIN_DIR ${CMAKE_CURRENT_BINARY_DIR}/plugins)
+set(PAYKAN_TEST_PLUGIN_TARGETS "")
+# paykan_test_plugin(<name> <subdir> [<definition>...]): the module
+# <subdir>/lib<name><suffix> below PAYKAN_TEST_PLUGIN_DIR.
+function(paykan_test_plugin name subdir)
+    set(target paykan_test_plugin_${name})
+    add_library(${target} MODULE Plugin/modules/test_plugin.c)
+    target_link_libraries(${target} PRIVATE paykan_plugin_api)
+    target_compile_definitions(${target} PRIVATE ${ARGN})
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    set_target_properties(${target} PROPERTIES
+        C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF
+        PREFIX "lib" OUTPUT_NAME ${name}
+        SUFFIX "${PAYKAN_TEST_PLUGIN_SUFFIX}"
+        LIBRARY_OUTPUT_DIRECTORY ${PAYKAN_TEST_PLUGIN_DIR}/${subdir})
+    if(PAYKAN_COVERAGE)
+        # Test code: not measured, and no profile runtime of its own.
+        target_compile_options(${target} PRIVATE -fno-profile-instr-generate
+                                                 -fno-coverage-mapping)
+        target_link_options(${target} PRIVATE -fno-profile-instr-generate)
+    endif()
+    set(PAYKAN_TEST_PLUGIN_TARGETS ${PAYKAN_TEST_PLUGIN_TARGETS} ${target} PARENT_SCOPE)
+endfunction()
+if(APPLE)
+    set(PAYKAN_TEST_PLUGIN_SUFFIX ".dylib")
+else()
+    set(PAYKAN_TEST_PLUGIN_SUFFIX ".so")
+endif()
+paykan_test_plugin(good good)
+paykan_test_plugin(old old [=[TP_NAME="test-old"]=] [=[TP_BUILD_VERSION="0.0.9"]=])
+paykan_test_plugin(api api [=[TP_NAME="test-api"]=] TP_API_VERSION=999)
+paykan_test_plugin(null null [=[TP_NAME="test-null"]=] TP_NULL_DESCRIPTOR)
+paykan_test_plugin(noentry noentry [=[TP_NAME="test-noentry"]=] TP_NO_ENTRY_POINT)
+paykan_test_plugin(noemit noemit [=[TP_NAME="test-noemit"]=] TP_NO_EMIT)
+paykan_test_plugin(norun norun [=[TP_NAME="test-norun"]=] TP_NO_RUN)
+paykan_test_plugin(noname noname [=[TP_NAME="test-noname"]=] TP_NO_NAME)
+paykan_test_plugin(twice twice [=[TP_NAME="test-twice"]=] TP_TWICE)
+paykan_test_plugin(none none [=[TP_NAME="test-none"]=] TP_NUM_BACKENDS=0)
+paykan_test_plugin(tiny tiny [=[TP_NAME="test-tiny"]=] TP_PLUGIN_SIZE=4)
+paykan_test_plugin(short short [=[TP_NAME="test-short"]=] TP_PLUGIN_SIZE=16)
+paykan_test_plugin(bshort bshort [=[TP_NAME="test-bshort"]=] TP_BACKEND_SIZE=8)
+paykan_test_plugin(future future [=[TP_NAME="test-future"]=] TP_FUTURE)
+paykan_test_plugin(dup_a dup [=[TP_NAME="dup"]=])
+paykan_test_plugin(dup_b dup [=[TP_NAME="dup"]=])
+paykan_test_plugin(clash clash [=[TP_NAME="c"]=])
+# Not a library at all.
+file(WRITE ${PAYKAN_TEST_PLUGIN_DIR}/corrupt/libcorrupt${PAYKAN_TEST_PLUGIN_SUFFIX}
+    "this is not a shared library\n")
+
+include(GNUInstallDirs)
+file(RELATIVE_PATH PAYKAN_TEST_PLUGIN_DIR_FROM_BINDIR
+    "${CMAKE_INSTALL_FULL_BINDIR}"
+    "${CMAKE_INSTALL_FULL_LIBDIR}/paykan/plugins/${PAYKAN_VERSION}")
+add_executable(plugin_loader_tests Plugin/LoaderTests.cpp)
+target_compile_definitions(plugin_loader_tests PRIVATE
+    PAYKAN_BIN="$<TARGET_FILE:paykan>"
+    PAYKAN_TEST_PLUGIN_DIR="${PAYKAN_TEST_PLUGIN_DIR}"
+    PAYKAN_TEST_PLUGIN_SUFFIX="${PAYKAN_TEST_PLUGIN_SUFFIX}"
+    PAYKAN_TEST_PLUGIN_DIR_FROM_BINDIR="${PAYKAN_TEST_PLUGIN_DIR_FROM_BINDIR}"
+    PAYKAN_TEST_ACCEPTED_VERSIONS="${PAYKAN_TEST_ACCEPTED_VERSIONS}"
+    PAYKAN_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/samples"
+)
+target_link_libraries(plugin_loader_tests
+    PRIVATE gtest_main
+            paykan_plugin_api
+            paykan_compile_options
+)
+add_dependencies(plugin_loader_tests paykan ${PAYKAN_TEST_PLUGIN_TARGETS})
+add_test(NAME PluginLoaderTests COMMAND plugin_loader_tests)
+
 # A driver with every plugin of the build plus a frontend and a backend that
 # claim to be built with a PaykanLang version this one does not accept
 # (Driver/IncompatiblePlugins.cpp), for the driver tests.
@@ -359,8 +432,11 @@ endif()
 foreach(be IN LISTS PAYKAN_BACKENDS)
     if(be STREQUAL "llvm" OR be STREQUAL "c")
         add_test(NAME DriverTests.${be} COMMAND driver_tests)
+        # No plugins from the plugin directories: the listings these tests
+        # check exactly are the build's own (tests/Plugin/LoaderTests.cpp
+        # covers discovery).
         set_tests_properties(DriverTests.${be} PROPERTIES
-            ENVIRONMENT "PAYKAN_TEST_BACKEND=${be}")
+            ENVIRONMENT "PAYKAN_TEST_BACKEND=${be};PAYKAN_NO_PLUGINS=1")
     endif()
 endforeach()
 
@@ -423,26 +499,33 @@ if(PAYKAN_SAMPLES_BACKENDS)
                 --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
 endif()
 
-# --- The out-of-tree plugin path: install this tree, build utils/print-pir ---
-# --- against it with find_package(Paykan) and compare its output with --------
-# --- --emit-pir (tests/OutOfTree/PrintPIR.cmake; CI's install job does the ---
-# --- same). Skipped for instrumented builds, whose installed libraries only --
-# --- link with the instrumentation flags.
+# --- Loadable plugins against an installed PaykanLang: install this tree, ----
+# --- build utils/print-pir (C) and utils/pir-stats-rust (Rust, when rustc ---
+# --- is found) against it with find_package(Paykan) and load them into the --
+# --- INSTALLED paykan via --plugin, $PAYKAN_PLUGIN_PATH and its plugin ------
+# --- directory; print-pir's output must be --emit-pir's ----------------------
+# --- (tests/OutOfTree/PrintPIR.cmake; CI's install job does the same). ------
+# --- Skipped for instrumented builds, whose installed libraries only link ---
+# --- with the instrumentation flags.
 if(NOT PAYKAN_SANITIZER_FLAGS AND NOT PAYKAN_COVERAGE_FLAGS)
     set(PAYKAN_OOT_ARGS "")
     if(TARGET paykan_backend_llvm)
         list(APPEND PAYKAN_OOT_ARGS -DLLVM_DIR=${LLVM_DIR})
     endif()
+    find_program(PAYKAN_RUSTC rustc)
+    set(PAYKAN_OOT_RUST_ARGS "")
+    if(PAYKAN_RUSTC)
+        list(APPEND PAYKAN_OOT_RUST_ARGS -DRUSTC=${PAYKAN_RUSTC})
+    endif()
     add_test(NAME PrintPIROutOfTree
         COMMAND ${CMAKE_COMMAND}
                 -DPAYKAN_BUILD_DIR=${CMAKE_BINARY_DIR}
                 -DPAYKAN_SOURCE_DIR=${CMAKE_SOURCE_DIR}
-                -DPAYKAN_BIN=$<TARGET_FILE:paykan>
                 -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/print-pir-out-of-tree
                 -DGENERATOR=${CMAKE_GENERATOR}
                 -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
                 -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-                ${PAYKAN_OOT_ARGS}
+                ${PAYKAN_OOT_ARGS} ${PAYKAN_OOT_RUST_ARGS}
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/OutOfTree/PrintPIR.cmake)
     # The configure-time plugin compatibility check (#103): utils/print-pir
     # configured against a scratch install, pinned to an accepted and to an

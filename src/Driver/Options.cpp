@@ -32,6 +32,8 @@ constexpr Flag kFlags[] = {
      "List the available frontends and exit"},
     {"list-backends", &Options::ListBackends,
      "List the available backends and exit"},
+    {"no-plugins", &Options::NoPlugins,
+     "Don't search the plugin directories (--plugin files still load)"},
     {"track-heap", &Options::TrackHeap,
      "Track runtime heap allocations and dump statistics (incl. leaks) at "
      "exit"},
@@ -149,6 +151,13 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
       continue;
     }
 
+    if (std::string plugin;
+        valueOption(name, "plugin", i, argc, argv, plugin, r.Error)) {
+      if (!r.Error.empty())
+        return r;
+      o.Plugins.push_back(std::move(plugin));
+      continue;
+    }
     if (valueOption(name, "frontend", i, argc, argv, o.Frontend, r.Error) ||
         valueOption(name, "backend", i, argc, argv, o.Backend, r.Error) ||
         valueOption(name, "o", i, argc, argv, o.OutputPath, r.Error)) {
@@ -236,6 +245,9 @@ void printUsage(std::ostream &os, const char *argv0) {
         "(--list-frontends)\n"
      << "  --backend=<name>  - Generate code with the named backend "
         "(--list-backends)\n"
+     << "  --plugin=<file>   - Load a plugin library (repeatable; see "
+        "--version for\n"
+     << "                      the plugin directories)\n"
      << "  -o <file>         - Output file of `build`\n"
      << "  -O<n>             - Optimization level (0-3, default "
      << kDefaultOptLevel << "; -O0 for debugging)\n"

@@ -330,7 +330,9 @@ jobs:
       - name: Check that paykan links no third-party library
         run: |
           ldd build/bin/paykan | tee ldd.log
-          if grep -iv "linux-vdso\|libstdc++\|libgcc_s\|libc\.so\|libm\.so\|ld-linux" ldd.log; then
+          # (libdl: the dynamic loader, for plugins; part of libc on current
+          # glibc.)
+          if grep -iv "linux-vdso\|libstdc++\|libgcc_s\|libc\.so\|libm\.so\|libdl\.so\|ld-linux" ldd.log; then
             echo "error: paykan links a third-party library (above)"
             exit 1
           fi
@@ -343,25 +345,59 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure --parallel 4
 
-      - name: Install and build the out-of-tree example backend against it
+      # Plugins load into the INSTALLED paykan with no rebuild (#141): the C
+      # and Rust example backends are built against the installation alone,
+      # then loaded with --plugin, from $PAYKAN_PLUGIN_PATH and from the
+      # installation's plugin directory, with PaykanLang's build tree deleted
+      # and its source tree moved away.
+      - name: Load the example plugins into the installed paykan
         run: |
-          cmake --install build --prefix "$PWD/install"
-          cmake -S utils/print-pir -B build-example -G Ninja \
-            -DCMAKE_PREFIX_PATH="$PWD/install"
-          cmake --build build-example
-          build-example/paykan-print-pir --list-backends | grep print-pir
-          build-example/paykan-print-pir --backend=print-pir --emit-source \
-            samples/codegen/01_literals.pkn > example.pir
-          build/bin/paykan --emit-pir samples/codegen/01_literals.pkn > driver.pir
-          diff example.pir driver.pir
-          # With the build tree gone, both drivers find the installed
-          # runtime (#124).
-          rm -rf build build-notests
-          for drv in install/bin/paykan build-example/paykan-print-pir; do
-            $drv --backend=c run samples/codegen/01_literals.pkn > run.out
-            $drv build --backend=c -o prog samples/codegen/01_literals.pkn
-            ./prog | diff run.out -
+          set -euo pipefail
+          prefix="$RUNNER_TEMP/paykan-prefix"
+          ex="$RUNNER_TEMP/examples"
+          cmake --install build --prefix "$prefix"
+          mkdir -p "$ex"
+          cp -R utils/print-pir utils/pir-stats-rust "$ex/"
+          cp samples/codegen/01_literals.pkn "$ex/hello.pkn"
+          rustc --version
+          for p in print-pir pir-stats-rust; do
+            cmake -S "$ex/$p" -B "$ex/build-$p" -G Ninja -DCMAKE_PREFIX_PATH="$prefix"
+            cmake --build "$ex/build-$p"
           done
+          rm -rf build build-notests
+          src="$GITHUB_WORKSPACE"
+          cd "$RUNNER_TEMP"
+          mv "$src" "$src.away"
+          trap 'mv "$src.away" "$src"' EXIT
+          paykan="$prefix/bin/paykan"
+          pp="$ex/build-print-pir/libpaykan_backend_print_pir.so"
+          "$paykan" --emit-pir "$ex/hello.pkn" > driver.pir
+          # 1. --plugin=<file>
+          "$paykan" --no-plugins --plugin="$pp" --list-backends | tee backends.log
+          grep -Fx "print-pir: prints the Paykan IR [$pp]" backends.log
+          "$paykan" --no-plugins --plugin="$pp" --backend=print-pir \
+            --emit-source "$ex/hello.pkn" | diff driver.pir -
+          # 2. $PAYKAN_PLUGIN_PATH
+          PAYKAN_PLUGIN_PATH="$ex/build-print-pir" "$paykan" --backend=print-pir \
+            --emit-source "$ex/hello.pkn" | diff driver.pir -
+          # 3. installed into the plugin directory, the plugin builds gone
+          for p in print-pir pir-stats-rust; do
+            cmake --install "$ex/build-$p"
+            rm -rf "$ex/build-$p"
+          done
+          ls "$prefix"/lib/paykan/plugins/*/
+          "$paykan" --version
+          "$paykan" --backend=print-pir --emit-source "$ex/hello.pkn" | diff driver.pir -
+          "$paykan" --backend=pir-stats --emit-source "$ex/hello.pkn" | tee stats.txt
+          grep -Fx "functions: 1" stats.txt
+          if "$paykan" --no-plugins --list-backends | grep print-pir; then
+            echo "error: --no-plugins still loads the installed plugins"
+            exit 1
+          fi
+          # The installed paykan still finds its runtime (#124).
+          "$paykan" --backend=c run "$ex/hello.pkn" > run.out
+          "$paykan" build --backend=c -o prog "$ex/hello.pkn"
+          ./prog | diff run.out -
 
   # ---------------------------------------------------------------------------
   # Strict C11: the C backend's output for the whole samples corpus compiles

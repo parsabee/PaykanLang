@@ -6,6 +6,8 @@
 #
 # Installed layout (relative to the prefix):
 #   bin/paykan                        the driver with the built-in plugins
+#   lib/paykan/plugins/<version>/     the system plugin directory (empty)
+#   include/paykan/plugin_api.h       the C plugin interface
 #   lib/libpaykan_*.a                 core (incl. lowering), driver, runtime and plugin libraries
 #   lib/cmake/Paykan/                 PaykanConfig.cmake + exported targets
 #   include/paykan/Runtime.h          the runtime ABI (C)
@@ -27,6 +29,7 @@ set(PAYKAN_INSTALL_COMPILER_INCLUDEDIR ${CMAKE_INSTALL_INCLUDEDIR}/paykan/compil
 # -- What gets exported ---------------------------------------------------------
 set(PAYKAN_EXPORT_TARGETS
     paykan_compile_options
+    paykan_plugin_api
     paykan_plugin
     paykan_ast
     paykan_diag
@@ -38,6 +41,7 @@ set(PAYKAN_EXPORT_TARGETS
     paykan_backend_toolchain
     paykan_lowering
     paykan_runtime
+    paykan_plugin_host
     paykan_driver
 )
 get_property(PAYKAN_PLUGIN_TARGETS_LIST GLOBAL PROPERTY PAYKAN_PLUGIN_TARGETS)
@@ -92,8 +96,14 @@ install(TARGETS ${PAYKAN_EXPORT_TARGETS}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 install(FILES ${PROJECT_SOURCE_DIR}/src/Runtime/Runtime.h
+              ${PROJECT_SOURCE_DIR}/include/paykan/plugin_api.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/paykan
 )
+# The system plugin directory, empty: `paykan` loads every plugin in it
+# (include/paykan/PluginLoader.h), and plugin projects install into it
+# (PAYKAN_PLUGIN_INSTALL_DIR, paykan_install_plugin).
+set(PAYKAN_INSTALL_PLUGINDIR ${CMAKE_INSTALL_LIBDIR}/paykan/plugins/${PAYKAN_VERSION})
+install(DIRECTORY DESTINATION ${PAYKAN_INSTALL_PLUGINDIR})
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/
     DESTINATION ${PAYKAN_INSTALL_COMPILER_INCLUDEDIR}
     FILES_MATCHING PATTERN "*.h"
@@ -124,12 +134,15 @@ endforeach()
 set(PAYKAN_CONFIG_RUNTIME_LIBRARY
     "${CMAKE_INSTALL_LIBDIR}/${CMAKE_STATIC_LIBRARY_PREFIX}paykan_runtime${CMAKE_STATIC_LIBRARY_SUFFIX}")
 set(PAYKAN_CONFIG_RUNTIME_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/paykan")
+set(PAYKAN_CONFIG_PLUGIN_INSTALL_DIR "${PAYKAN_INSTALL_PLUGINDIR}")
+set(PAYKAN_CONFIG_EXECUTABLE "${CMAKE_INSTALL_BINDIR}/paykan${CMAKE_EXECUTABLE_SUFFIX}")
 
 configure_package_config_file(
     ${PROJECT_SOURCE_DIR}/cmake/PaykanConfig.cmake.in
     ${CMAKE_BINARY_DIR}/cmake/PaykanConfig.cmake
     INSTALL_DESTINATION ${PAYKAN_INSTALL_CMAKEDIR}
     PATH_VARS PAYKAN_CONFIG_RUNTIME_LIBRARY PAYKAN_CONFIG_RUNTIME_INCLUDE_DIR
+              PAYKAN_CONFIG_PLUGIN_INSTALL_DIR PAYKAN_CONFIG_EXECUTABLE
 )
 write_basic_package_version_file(
     ${CMAKE_BINARY_DIR}/cmake/PaykanConfigVersion.cmake

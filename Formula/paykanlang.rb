@@ -15,14 +15,18 @@
 # It builds from the source tarball that the release workflow attaches to the
 # tagged GitHub Release (or the auto-generated source archive for the tag) and
 # invokes the project's `cmake --install` rules: the `paykan` binary -> bin/,
-# the runtime archive -> lib/, and Runtime.h -> include/paykan/.
+# the runtime archive -> lib/, Runtime.h and the C plugin interface
+# plugin_api.h -> include/paykan/, and the (empty) system plugin directory
+# lib/paykan/plugins/<version>/.
 #
 # It builds the core, like the release tarballs (#27, #123): the
 # recursive-descent frontend and the c backend, which need only a C++20
 # compiler to build and a C compiler at run time. Nothing is downloaded: the
 # opt-in LLVM backend is not enabled, and the test suite (and so GoogleTest)
-# is not built (-DPAYKAN_BUILD_TESTS=OFF). Out-of-tree frontend and backend
-# plugins build against this installation with find_package(Paykan).
+# is not built (-DPAYKAN_BUILD_TESTS=OFF). Backend plugins build against this
+# installation with find_package(Paykan) (or just plugin_api.h) and load into
+# its `paykan` at run time: from --plugin=<file>, $PAYKAN_PLUGIN_PATH,
+# ~/.paykan/plugins/<version>/ or the keg's plugin directory.
 #
 # NOTE: `sha256` below is a placeholder. After the tag exists, set it to the
 # real digest of the archive `url` names, e.g.:

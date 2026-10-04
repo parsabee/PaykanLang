@@ -10,9 +10,11 @@
 #include "Version.h"
 #include "paykan/Backend.h"
 #include "paykan/Frontend.h"
+#include "paykan/PluginLoader.h"
 #include "paykan/lowering/Lowering.h"
 #include "paykan/pir/Printer.h"
 #include "paykan/pir/Verifier.h"
+#include "paykan/plugin_api.h"
 
 #include <cstdlib>
 #include <filesystem>
@@ -25,18 +27,33 @@ using paykan::driver::Options;
 
 namespace {
 
-/// " (built with PaykanLang <v>, compatible)" or " (incompatible: <why>)"
-/// for --version.
+/// " [<file>]" for a loaded plugin, "" for a built-in one.
+template <typename Entry> std::string origin(const Entry &e) {
+  return e.Path.empty() ? std::string() : " [" + e.Path + "]";
+}
+
+/// " (built with PaykanLang <v>, compatible)", " (incompatible: <why>)" or
+/// " (ambiguous: provided by both ...)" for --version.
 template <typename Entry> std::string compatibility(const Entry &e) {
   if (!e.Compatible)
     return " (incompatible: " + e.Incompatibility + ")";
+  if (!e.Conflict.empty())
+    return " (ambiguous: " + e.Conflict + ")";
   return " (built with PaykanLang " + e.BuildVersion + ", compatible)";
 }
 
-/// The version, the plugin build versions it accepts, and every registered
-/// plugin with the version it was built with and whether it is compatible.
-/// An incompatible plugin is never instantiated, so it has no description.
-void printVersion() {
+/// The rejected plugin files, one "rejected plugin <file>: <why>" line each.
+void printRejected(const paykan::plugin::LoadReport &plugins) {
+  for (const auto &f : plugins.Files)
+    if (!f.Error.empty())
+      std::cout << "rejected plugin " << f.Path << ": " << f.Error << "\n";
+}
+
+/// The version, the plugin build versions it accepts, every registered
+/// plugin with the version it was built with and whether it is compatible,
+/// and where plugins are loaded from.  An incompatible plugin is never
+/// instantiated, so it has no description.
+void printVersion(const paykan::plugin::LoadReport &plugins) {
   std::cout << "PaykanLang " << paykan::kVersion << "\n";
   std::cout << "accepts plugins built with PaykanLang";
   const char *sep = " ";
@@ -46,36 +63,72 @@ void printVersion() {
   }
   std::cout << "\n";
   for (const auto &e : paykan::frontend::Registry::get().entries())
-    std::cout << "frontend " << e.Name << compatibility(e) << "\n";
+    std::cout << "frontend " << e.Name << compatibility(e) << origin(e) << "\n";
   for (const auto &e : paykan::backend::Registry::get().entries()) {
     std::cout << "backend " << e.Name << compatibility(e);
     if (e.Compatible)
       if (auto be = paykan::backend::Registry::get().create(e.Name))
         if (std::string d = be->describe(); !d.empty())
           std::cout << ": " << d;
+    std::cout << origin(e) << "\n";
+  }
+  std::cout << "plugin API " << PAYKAN_PLUGIN_API_VERSION << "\n";
+  std::cout << "plugin directories:";
+  if (plugins.DiscoveryDisabled)
+    std::cout << " none searched (--no-plugins or PAYKAN_NO_PLUGINS)";
+  for (const std::string &d : plugins.SearchDirs)
+    std::cout << " " << d;
+  std::cout << "\n";
+  for (const auto &f : plugins.Files) {
+    if (!f.Error.empty())
+      continue;
+    std::cout << "plugin " << f.Path;
+    if (!f.Name.empty())
+      std::cout << " (" << f.Name << (f.Version.empty() ? "" : " ") << f.Version
+                << ")";
+    std::cout << ":";
+    const char *psep = " ";
+    for (const std::string &what : f.Provides) {
+      std::cout << psep << what;
+      psep = ", ";
+    }
     std::cout << "\n";
   }
+  printRejected(plugins);
 }
 
 // --list-frontends / --list-backends: one line per plugin,
-// "<name>[ (default)][: <description>]", or
-// "<name> (incompatible: <why>)" for a plugin this paykan does not accept.
-void listFrontends() {
+// "<name>[ (default)][: <description>][ [<file>]]",
+// "<name> (incompatible: <why>)[ [<file>]]" for a plugin this paykan does
+// not accept, or "<name> (ambiguous: <why>)[ [<file>]]" for a name two
+// plugins provide; then a "rejected plugin <file>: <why>" line for every
+// plugin file that could not be loaded.
+void listFrontends(const paykan::plugin::LoadReport &plugins) {
   for (const auto &e : paykan::frontend::Registry::get().entries()) {
     std::cout << e.Name;
     if (!e.Compatible)
       std::cout << " (incompatible: " << e.Incompatibility << ")";
+    else if (!e.Conflict.empty())
+      std::cout << " (ambiguous: " << e.Conflict << ")";
     else if (e.Name == paykan::frontend::defaultFrontend())
       std::cout << " (default)";
-    std::cout << "\n";
+    if (e.Compatible && e.Conflict.empty() && !e.Description.empty())
+      std::cout << ": " << e.Description;
+    std::cout << origin(e) << "\n";
   }
+  printRejected(plugins);
 }
 
-void listBackends() {
+void listBackends(const paykan::plugin::LoadReport &plugins) {
   for (const auto &e : paykan::backend::Registry::get().entries()) {
     std::cout << e.Name;
     if (!e.Compatible) {
-      std::cout << " (incompatible: " << e.Incompatibility << ")\n";
+      std::cout << " (incompatible: " << e.Incompatibility << ")" << origin(e)
+                << "\n";
+      continue;
+    }
+    if (!e.Conflict.empty()) {
+      std::cout << " (ambiguous: " << e.Conflict << ")" << origin(e) << "\n";
       continue;
     }
     if (e.Name == paykan::backend::defaultBackend())
@@ -83,8 +136,9 @@ void listBackends() {
     if (auto be = paykan::backend::Registry::get().create(e.Name))
       if (std::string d = be->describe(); !d.empty())
         std::cout << ": " << d;
-    std::cout << "\n";
+    std::cout << origin(e) << "\n";
   }
+  printRejected(plugins);
 }
 
 /// A driver (command line / configuration) error.
@@ -99,19 +153,40 @@ int failBackend(const paykan::Status &s) {
   return EXIT_FAILURE;
 }
 
-/// Selecting a plugin this paykan does not accept (#103): exit status 2.
+/// Selecting a plugin this paykan does not accept (#103), an ambiguous
+/// one, or naming a --plugin file that is rejected: exit status 2.
 constexpr int kExitIncompatiblePlugin = 2;
 
 /// Check that the plugin named @p name in @p registry, if there is one, is
-/// compatible.  Returns the failure message ("" when it is fine or unknown).
+/// compatible and unambiguous.  Returns the failure message ("" when it is
+/// fine or unknown).
 template <typename Registry>
 std::string checkCompatible(const Registry &registry, const char *kind,
                             const std::string &name) {
   const auto *e = registry.find(name);
-  if (!e || e->Compatible)
+  if (!e)
     return {};
-  return std::string("cannot use ") + kind + " '" + name +
-         "' (incompatible: " + e->Incompatibility + ")";
+  std::string head = std::string("cannot use ") + kind + " '" + name + "'";
+  if (!e->Compatible)
+    return head + " (incompatible: " + e->Incompatibility + ")" + origin(*e);
+  if (!e->Conflict.empty())
+    return head + " (ambiguous: " + e->Conflict + ")";
+  return {};
+}
+
+/// "unknown <kind> '<name>' (see --list-<kind>s)", noting rejected plugin
+/// files, which may be where the name was meant to come from.
+std::string unknownPlugin(const char *kind, const std::string &name,
+                          const paykan::plugin::LoadReport &plugins) {
+  size_t rejected = 0;
+  for (const auto &f : plugins.Files)
+    rejected += f.Error.empty() ? 0 : 1;
+  std::string msg = std::string("unknown ") + kind + " '" + name +
+                    "' (see --list-" + kind + "s";
+  if (rejected)
+    msg += "; " + std::to_string(rejected) + " plugin file" +
+           (rejected == 1 ? " was" : "s were") + " rejected";
+  return msg + ")";
 }
 
 } // namespace
@@ -119,34 +194,51 @@ std::string checkCompatible(const Registry &registry, const char *kind,
 int main(int argc, char *argv[]) {
   auto parsed = paykan::driver::parseCommandLine(argc, argv);
   const Options &opts = parsed.Opts;
-  if (opts.ShowVersion) {
-    printVersion();
-    return EXIT_SUCCESS;
-  }
-  if (opts.ShowHelp) {
+  if (opts.ShowHelp && !opts.ShowVersion) {
     paykan::driver::printUsage(std::cout, argv[0]);
     return EXIT_SUCCESS;
   }
+  // The plugins: the --plugin files, then the plugin directories
+  // (paykan/PluginLoader.h).  Each is checked before any of its callbacks
+  // can run; what fails is listed below and can't be selected.
+  paykan::plugin::DiscoveryOptions discovery =
+      paykan::plugin::discoveryOptionsFromEnvironment();
+  discovery.ExplicitFiles = opts.Plugins;
+  if (opts.NoPlugins)
+    discovery.DisableDiscovery = true;
+  const paykan::plugin::LoadReport &plugins =
+      paykan::plugin::loadPlugins(discovery);
+  if (opts.ShowVersion) {
+    printVersion(plugins);
+    return EXIT_SUCCESS;
+  }
   if (opts.ListFrontends) {
-    listFrontends();
+    listFrontends(plugins);
     return EXIT_SUCCESS;
   }
   if (opts.ListBackends) {
-    listBackends();
+    listBackends(plugins);
     return EXIT_SUCCESS;
   }
   if (!parsed.Error.empty())
     return fail(parsed.Error + ". Try: '" + argv[0] + " --help'");
+  // A plugin named on the command line must load.
+  for (const auto &f : plugins.Files)
+    if (f.Explicit && !f.Error.empty()) {
+      std::cerr << "paykan: cannot load plugin '" << f.Path << "': " << f.Error
+                << "\n";
+      return kExitIncompatiblePlugin;
+    }
   if (!opts.Frontend.empty() &&
       !paykan::frontend::Registry::get().find(opts.Frontend))
-    return fail("unknown frontend '" + opts.Frontend +
-                "' (see --list-frontends)");
+    return fail(unknownPlugin("frontend", opts.Frontend, plugins));
   if (!opts.Backend.empty() &&
       !paykan::backend::Registry::get().find(opts.Backend))
-    return fail("unknown backend '" + opts.Backend + "' (see --list-backends)");
-  // A plugin built with a version this paykan does not accept is listed but
-  // can't be selected.  The defaults are built-in plugins, always compatible,
-  // but they go through the same check.
+    return fail(unknownPlugin("backend", opts.Backend, plugins));
+  // A plugin built with a version this paykan does not accept, or a name two
+  // plugins provide, is listed but can't be selected.  The defaults are
+  // built-in plugins, always compatible, but they go through the same check
+  // (a loaded plugin may clash with one).
   {
     std::string feName = opts.Frontend.empty()
                              ? std::string(paykan::frontend::defaultFrontend())

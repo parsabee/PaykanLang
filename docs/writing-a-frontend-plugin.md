@@ -11,9 +11,15 @@ is built out of tree against an installed PaykanLang, as below. The reference
 example of an out-of-tree frontend is the Bison/Flex frontend,
 [PaykanLang_Bison_Frontend](https://github.com/parsabee/PaykanLang_Bison_Frontend).
 
-Frontends are plugins in the same way backends are, so most of
-[`writing-a-backend.md`](writing-a-backend.md) applies as is: the installed
-package, linking the plugin whole into a driver with `paykan_add_driver`, and
+**Frontends are not loadable at run time yet.** Backends are
+([`plugins/overview.md`](plugins/overview.md)): a shared library with a C
+interface that the installed `paykan` loads. For a frontend, that interface
+needs an AST interchange format, which is the next step of
+[#141](https://github.com/parsabee/PaykanLang/issues/141). Until then a
+frontend plugin is a static C++ library linked into a driver of its own, the
+advanced path of [`writing-a-backend.md`](writing-a-backend.md) section 4:
+the installed package, linking the plugin whole into a driver with
+`paykan_add_driver`, and
 [plugin compatibility](writing-a-backend.md#7-plugin-compatibility). This page
 covers what differs.
 

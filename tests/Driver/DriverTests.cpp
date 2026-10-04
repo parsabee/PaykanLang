@@ -188,9 +188,15 @@ TEST(Driver, VersionListsEveryPluginAsCompatible) {
                        PAYKAN_TEST_ACCEPTED_VERSIONS);
   const std::string compatible = std::string(" (built with PaykanLang ") +
                                  paykan::kVersion + ", compatible)";
-  unsigned frontends = 0, backends = 0;
+  unsigned frontends = 0, backends = 0, pluginLines = 0;
   for (size_t i = 2; i < ls.size(); ++i) {
     const std::string &l = ls[i];
+    // Then the plugin API and the plugin directories (none searched: the
+    // ctest runs with PAYKAN_NO_PLUGINS=1).
+    if (l.rfind("plugin ", 0) == 0) {
+      ++pluginLines;
+      continue;
+    }
     EXPECT_NE(l.find(compatible), std::string::npos) << l;
     EXPECT_EQ(l.find("incompatible"), std::string::npos) << l;
     frontends += l.rfind("frontend ", 0) == 0;
@@ -199,7 +205,11 @@ TEST(Driver, VersionListsEveryPluginAsCompatible) {
   EXPECT_TRUE(hasLine(out, "frontend recursive-descent" + compatible)) << out;
   EXPECT_GE(frontends, 1u);
   EXPECT_GE(backends, 1u);
-  EXPECT_EQ(frontends + backends, ls.size() - 2) << out;
+  EXPECT_EQ(frontends + backends + pluginLines, ls.size() - 2) << out;
+  EXPECT_TRUE(hasLine(out, "plugin API 1")) << out;
+  EXPECT_TRUE(hasLine(out, "plugin directories: none searched (--no-plugins "
+                           "or PAYKAN_NO_PLUGINS)"))
+      << out;
 }
 
 TEST(Driver, VersionMarksAnIncompatiblePlugin) {

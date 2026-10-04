@@ -1,6 +1,9 @@
 # PaykanConfig.cmake -- find_package(Paykan)
 # ----------------------------------------------------------------------------
-# Imported targets (all static, namespace Paykan::):
+# Imported targets (namespace Paykan::):
+#   Paykan::plugin_api                the C plugin interface
+#                                     (paykan/plugin_api.h, header only): all
+#                                     a loadable plugin compiles against
 #   Paykan::plugin                    the plugin compatibility check
 #   Paykan::ast Paykan::diag Paykan::frontend Paykan::ast_printer Paykan::sema
 #   Paykan::pir Paykan::backend       the compiler core (standard C++ only)
@@ -21,16 +24,38 @@
 #   PAYKAN_PLUGIN_COMPATIBLE_VERSIONS
 #                               the plugin build versions this installation
 #                               accepts (cmake/PluginCompat.cmake; exact match)
+#   PAYKAN_PLUGIN_API_VERSION   the plugin API version of paykan/plugin_api.h
+#   PAYKAN_PLUGIN_INSTALL_DIR   the installation's system plugin directory,
+#                               <prefix>/lib/paykan/plugins/<version>: the
+#                               installed `paykan` loads every plugin in it
+#   PAYKAN_EXECUTABLE           the installed `paykan`
 #
 # Functions:
-#   paykan_add_frontend_plugin(<target> [BUILT_WITH <version>] <source>...)
 #   paykan_add_backend_plugin(<target> [BUILT_WITH <version>] <source>...)
-#       Add a static frontend / backend plugin library <target> linked with
-#       Paykan::frontend / Paykan::backend.  BUILT_WITH is the PaykanLang
-#       version the plugin is built with (default: PAYKAN_TOOLCHAIN_VERSION,
-#       the installation it compiles against); a plugin may pin it to the
-#       version it is written for.  Configure fails with a FATAL_ERROR unless
-#       that version is in PAYKAN_PLUGIN_COMPATIBLE_VERSIONS.
+#       Add a loadable backend plugin <target>: a shared module
+#       (lib<target>.so, .dylib on macOS) with the C interface of
+#       paykan/plugin_api.h, linked with nothing of PaykanLang
+#       (Paykan::plugin_api only provides the header).  Its sources may be C
+#       or C++ (or the module may wrap a library built in another language).
+#       BUILT_WITH is the PaykanLang version the plugin is built with
+#       (default: PAYKAN_TOOLCHAIN_VERSION, the installation it compiles
+#       against); a plugin may pin it to the version it is written for.  It
+#       is defined as PAYKAN_PLUGIN_BUILD_VERSION, which the descriptor
+#       carries for paykan's check at load time.  Configure fails with a
+#       FATAL_ERROR unless that version is in
+#       PAYKAN_PLUGIN_COMPATIBLE_VERSIONS.
+#   paykan_check_plugin_built_with(<kind> <name> <version> <out-var>)
+#       The configure-time version check alone, for a plugin that is not a
+#       CMake library target (a Rust cdylib, say): FATAL_ERROR unless
+#       <version> (empty: PAYKAN_TOOLCHAIN_VERSION) is accepted; sets
+#       <out-var> to the version.
+#   paykan_install_plugin(<target>...)
+#       Install the plugin modules into PAYKAN_PLUGIN_INSTALL_DIR, where the
+#       installed `paykan` finds them (docs/plugins/overview.md).
+#   paykan_add_frontend_plugin(<target> [BUILT_WITH <version>] <source>...)
+#       Add a static frontend plugin library <target> linked with
+#       Paykan::frontend (C++, registered with PAYKAN_REGISTER_FRONTEND) for
+#       a driver of its own (paykan_add_driver).  BUILT_WITH as above.
 #   paykan_add_driver(<target> [PLUGINS <lib>...])
 #       Add an executable <target>: the paykan driver linked with every
 #       installed plugin plus the given ones (static registration needs them
@@ -54,6 +79,9 @@ set_and_check(PAYKAN_RUNTIME_LIBRARY "@PACKAGE_PAYKAN_CONFIG_RUNTIME_LIBRARY@")
 set_and_check(PAYKAN_RUNTIME_INCLUDE_DIR "@PACKAGE_PAYKAN_CONFIG_RUNTIME_INCLUDE_DIR@")
 set(PAYKAN_TOOLCHAIN_VERSION "@PAYKAN_VERSION@")
 set(PAYKAN_PLUGIN_COMPATIBLE_VERSIONS "@PAYKAN_PLUGIN_COMPATIBLE_VERSIONS@")
+set(PAYKAN_PLUGIN_API_VERSION "@PAYKAN_PLUGIN_API_VERSION@")
+set(PAYKAN_PLUGIN_INSTALL_DIR "@PACKAGE_PAYKAN_CONFIG_PLUGIN_INSTALL_DIR@")
+set(PAYKAN_EXECUTABLE "@PACKAGE_PAYKAN_CONFIG_EXECUTABLE@")
 
 if(PAYKAN_NEEDS_LLVM)
     # The llvm backend's libraries reference LLVM's imported targets.
@@ -95,10 +123,9 @@ const struct PackageRuntime {
 endfunction()
 
 # The plugin compatibility check at configure time (#103): the same list a
-# running paykan checks a plugin's build version against.
-# BUILT_WITH is parsed with PARSE_ARGV, so `BUILT_WITH ""` (an unset cache
-# variable, say) keeps its empty value and means the default.
-function(_paykan_add_plugin_library kind target built_with)
+# running paykan checks a plugin's build version against.  Sets
+# <out_var> to the version the plugin is built with.
+function(paykan_check_plugin_built_with kind target built_with out_var)
     if(built_with STREQUAL "")
         set(built_with "${PAYKAN_TOOLCHAIN_VERSION}")
     endif()
@@ -109,23 +136,43 @@ function(_paykan_add_plugin_library kind target built_with)
             "PaykanLang ${built_with}; the installed PaykanLang "
             "${PAYKAN_TOOLCHAIN_VERSION} (${Paykan_DIR}) accepts ${accepted}")
     endif()
-    if(NOT ARGN)
-        message(FATAL_ERROR "paykan_add_${kind}_plugin(${target}): no sources")
+    set(${out_var} "${built_with}" PARENT_SCOPE)
+endfunction()
+
+# BUILT_WITH is parsed with PARSE_ARGV, so `BUILT_WITH ""` (an unset cache
+# variable, say) keeps its empty value and means the default.
+function(paykan_add_backend_plugin target)
+    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "BUILT_WITH" "")
+    paykan_check_plugin_built_with(backend ${target} "${ARG_BUILT_WITH}" built_with)
+    if(NOT ARG_UNPARSED_ARGUMENTS)
+        message(FATAL_ERROR "paykan_add_backend_plugin(${target}): no sources")
     endif()
-    add_library(${target} STATIC ${ARGN})
-    target_link_libraries(${target} PUBLIC Paykan::${kind})
+    # A MODULE: loaded at run time, never linked against.
+    add_library(${target} MODULE ${ARG_UNPARSED_ARGUMENTS})
+    target_link_libraries(${target} PRIVATE Paykan::plugin_api)
+    target_compile_definitions(${target} PRIVATE
+        "PAYKAN_PLUGIN_BUILD_VERSION=\"${built_with}\"")
+    # lib<target>.so on Linux, lib<target>.dylib on macOS (where a CMake
+    # MODULE would otherwise be named .so): the suffix paykan looks for in
+    # the plugin directories.
+    set_target_properties(${target} PROPERTIES PREFIX "lib")
+    if(APPLE)
+        set_target_properties(${target} PROPERTIES SUFFIX ".dylib")
+    endif()
+endfunction()
+
+function(paykan_install_plugin)
+    install(TARGETS ${ARGN} LIBRARY DESTINATION "${PAYKAN_PLUGIN_INSTALL_DIR}")
 endfunction()
 
 function(paykan_add_frontend_plugin target)
     cmake_parse_arguments(PARSE_ARGV 1 ARG "" "BUILT_WITH" "")
-    _paykan_add_plugin_library(frontend ${target} "${ARG_BUILT_WITH}"
-                               ${ARG_UNPARSED_ARGUMENTS})
-endfunction()
-
-function(paykan_add_backend_plugin target)
-    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "BUILT_WITH" "")
-    _paykan_add_plugin_library(backend ${target} "${ARG_BUILT_WITH}"
-                               ${ARG_UNPARSED_ARGUMENTS})
+    paykan_check_plugin_built_with(frontend ${target} "${ARG_BUILT_WITH}" built_with)
+    if(NOT ARG_UNPARSED_ARGUMENTS)
+        message(FATAL_ERROR "paykan_add_frontend_plugin(${target}): no sources")
+    endif()
+    add_library(${target} STATIC ${ARG_UNPARSED_ARGUMENTS})
+    target_link_libraries(${target} PUBLIC Paykan::frontend)
 endfunction()
 
 # paykan_add_frontend_tests(), when the installation carries the test support

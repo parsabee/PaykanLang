@@ -146,3 +146,60 @@ TEST(PluginRegistry, TheFirstRegistrationOfANameWins) {
   EXPECT_TRUE(reg.find("current")->Compatible);
   EXPECT_EQ(reg.entries().size(), 3u);
 }
+
+// -- Loaded plugins: entries the plugin loader registers ----------------------
+
+namespace {
+/// Another interface, so these entries don't disturb the ones above.
+struct LoadedInterface {
+  virtual ~LoadedInterface() = default;
+};
+struct LoadedPlugin : LoadedInterface {};
+using LoadedRegistry = paykan::plugin::Registry<LoadedInterface>;
+} // namespace
+
+TEST(PluginRegistry, LoadedEntriesCarryTheirFileAndCanConflict) {
+  auto &reg = LoadedRegistry::get();
+  int created = 0;
+  LoadedRegistry::Entry e;
+  e.Name = "loaded";
+  e.Create = [&created] {
+    ++created;
+    return std::make_unique<LoadedPlugin>();
+  };
+  e.BuildVersion = PAYKAN_PLUGIN_BUILD_VERSION;
+  e.Compatible = true;
+  e.Path = "/plugins/a.so";
+  e.Description = "from a";
+  ASSERT_TRUE(reg.add(e));
+  EXPECT_FALSE(reg.add(e)); // the name is taken
+  EXPECT_NE(reg.create("loaded"), nullptr);
+  EXPECT_EQ(created, 1);
+  EXPECT_EQ(reg.find("loaded")->Path, "/plugins/a.so");
+  EXPECT_EQ(reg.find("loaded")->Description, "from a");
+
+  // A compatible entry without a factory (an incompatible plugin's, say)
+  // is never created.
+  LoadedRegistry::Entry bare;
+  bare.Name = "bare";
+  bare.Compatible = true;
+  bare.BuildVersion = PAYKAN_PLUGIN_BUILD_VERSION;
+  ASSERT_TRUE(reg.add(bare));
+  EXPECT_EQ(reg.create("bare"), nullptr);
+
+  // A second provider makes the name ambiguous: listed, never created.
+  EXPECT_FALSE(reg.markConflict("missing", "/plugins/x.so"));
+  ASSERT_TRUE(reg.markConflict("loaded", "/plugins/b.so"));
+  EXPECT_EQ(reg.find("loaded")->Conflict,
+            "provided by both /plugins/a.so and /plugins/b.so");
+  ASSERT_TRUE(reg.markConflict("loaded", "/plugins/c.so"));
+  EXPECT_EQ(reg.find("loaded")->Conflict,
+            "provided by both /plugins/a.so and /plugins/b.so and "
+            "/plugins/c.so");
+  EXPECT_EQ(reg.create("loaded"), nullptr);
+  EXPECT_EQ(created, 1);
+  // A built-in one is named as such.
+  ASSERT_TRUE(reg.markConflict("bare", "/plugins/d.so"));
+  EXPECT_EQ(reg.find("bare")->Conflict,
+            "provided by both the built-in plugin and /plugins/d.so");
+}

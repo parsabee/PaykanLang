@@ -1,15 +1,20 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// The native toolchain's portability layer: every operating-system API the
-// backends that produce native programs use (locating the running
-// executable, spawning the C compiler / linker and the built program,
-// creating a temporary directory, the process id) lives behind these few
-// functions, implemented side by side for each supported platform in
-// Platform.cpp.  Toolchain.cpp and the C backend's CBuild.cpp are its users.
+// The compiler's portability layer: every operating-system API the
+// compiler uses beyond standard C++ lives behind these few functions,
+// implemented side by side for each supported platform in Platform.cpp:
+//   - for the backends that produce native programs: locating the running
+//     executable, spawning the C compiler / linker and the built program,
+//     creating a temporary directory, the process id (Toolchain.cpp and the
+//     C backend's CBuild.cpp are the users);
+//   - for the plugin loader (src/PluginHost): loading a shared library and
+//     looking up a symbol in it (the platform's dynamic loader).
 //
 // Supported: Linux and macOS.  Other POSIX systems build too, with the
-// documented fallbacks noted on each function.
+// documented fallbacks noted on each function.  Windows is not supported
+// yet; the dynamic-loading functions have a stub there that fails with a
+// message (LoadLibraryW / GetProcAddress are the planned implementation).
 
 #pragma once
 
@@ -45,5 +50,25 @@ std::string makeTempDir(const std::string &prefix);
 
 /// The id of the running process (POSIX getpid on every platform).
 unsigned long processId();
+
+/// Load the shared library @p path, resolving all its symbols now and
+/// keeping them local to it (they never satisfy another library's
+/// references).  Returns an opaque handle, or null with the loader's message
+/// in @p error.  The library stays loaded until the process exits; there is
+/// no unload.  Loading runs the library's global constructors (and those of
+/// the libraries it depends on): nothing else in it runs until the caller
+/// calls one of its functions.
+///   POSIX: dlopen(path, RTLD_NOW | RTLD_LOCAL); the message is dlerror().
+///   Windows: not supported yet; always fails.
+void *loadLibrary(const std::string &path, std::string &error);
+
+/// The address of the exported symbol @p name in a library returned by
+/// loadLibrary, or null.
+///   POSIX: dlsym.  Windows: not supported yet; always null.
+void *librarySymbol(void *library, const char *name);
+
+/// The file name suffix of a loadable plugin on this platform: ".so" on
+/// Linux and other POSIX systems, ".dylib" on macOS, ".dll" on Windows.
+const char *sharedLibrarySuffix();
 
 } // namespace paykan::toolchain::platform

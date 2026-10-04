@@ -8,6 +8,8 @@
 #                       (Backends/LLVM pulls in JIT/)
 #   Backends/Toolchain/ – the system C toolchain / runtime link helpers the
 #                       native backends (C, LLVM) share
+#   PluginHost/       – loads plugins at run time (the C plugin interface,
+#                       include/paykan/plugin_api.h)
 #   Runtime/          – the C runtime linked into every program
 #   Driver/           – executable entry points (mains for all project binaries)
 # ----------------------------------------------------------------------------
@@ -35,4 +37,5 @@ foreach(be IN LISTS PAYKAN_BACKENDS)
         add_subdirectory(Backends/C)
     endif()
 endforeach()
+add_subdirectory(PluginHost)
 add_subdirectory(Driver)
