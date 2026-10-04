@@ -14,7 +14,8 @@ extern "C" {
 
 /// Slot @p slot of @p obj's vtable as a @p Fn.
 template <typename Fn> Fn vtSlot(const void *obj, int slot) {
-  return reinterpret_cast<Fn>(static_cast<const PaykanObject *>(obj)->vtable[slot]);
+  return reinterpret_cast<Fn>(
+      static_cast<const PaykanObject *>(obj)->vtable[slot]);
 }
 
 using PaykanDestroyFn = void (*)(PaykanObject *);
