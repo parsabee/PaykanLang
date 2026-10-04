@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// Paykan runtime — Tuple type implementation (prototype).
+// Paykan runtime — Tuple type implementation.
 //
 // ONE generic runtime object backs every tuple type `(T1, T2, ...)`: the
 // compiler does not emit a struct per tuple type.  A PaykanTuple is a

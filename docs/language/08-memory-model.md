@@ -287,7 +287,7 @@ rather than an allocation, retaining and releasing it is harmless and it is neve
 `None` is what operations like `readln` yield at end of input, distinguished with `match`
 (see `07-match-statements.md`).
 
-### Optional types (prototype)
+### Optional types
 
 A value of optional type `T?` (see `10-optionals.md`) is the **same shared box** as a `T`; the
 absent value is represented by *having no box at all* rather than by the `None` singleton. This

@@ -1,4 +1,4 @@
-// 29 — generics (prototype): generic classes and functions by monomorphisation
+// 29 — generics: generic classes and functions by monomorphisation
 // Exercises: `class Box<T>` / `class Pair<K, V>` / `class Stack<T>` templates
 //            instantiated per type-argument tuple (Box<int>, Box<Str>,
 //            Box<Box<int>>, Pair<Str, int>, Stack<Str>), a generic free

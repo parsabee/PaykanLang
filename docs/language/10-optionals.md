@@ -1,7 +1,9 @@
-# PaykanLang — Optional Types (prototype)
+# PaykanLang — Optional Types
 
-> **Prototype.** Optional types are experimental (issue #5): implemented and tested, but the syntax,
-> the rules and the diagnostics below may change before they are declared stable.
+> **Stable in v0.1** (issue #5), optional primitives and optional-mode `match` included: the
+> syntax and semantics below are covered by the compatibility promise for the 0.1 series (see
+> `01-language-basics.md`, "Stability"). A present optional primitive is boxed; [#96](https://github.com/parsabee/PaykanLang/issues/96) will
+> change that representation, not the semantics.
 
 An **optional type** `T?` holds either a value of type `T` or `None`. It is how a program says
 "this may be absent" without giving up the static type: a `next: Node?` field is a `Node` or
@@ -327,7 +329,7 @@ with "no box" meaning `None`. A present optional primitive is one boxed `Int` / 
 
 ---
 
-## Not in the prototype
+## Not supported in v0.1
 
 Flow typing (`if (x != None) { x.foo(); }` does not narrow `x`), `if let`, the `??` default
 and `?.` chaining operators, optional enums, and typing `None` in a literal that has no

@@ -1,4 +1,4 @@
-// Isolates: tuple values (prototype) — a literal with a Str element, a tuple
+// Isolates: tuple values — a literal with a Str element, a tuple
 // returned from a function and destructured, a nested tuple, a tuple stored
 // in an array and in a class field, a call-rooted element read (`mk().0`),
 // element-wise `==`, and `mov` of a tuple.  Every tuple is ONE runtime block

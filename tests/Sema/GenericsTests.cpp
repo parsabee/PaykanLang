@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Sema tests: generic classes and functions (monomorphisation prototype).
+// Sema tests: generic classes and functions (monomorphisation).
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>

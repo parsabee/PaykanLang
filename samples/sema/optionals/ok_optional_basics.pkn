@@ -1,4 +1,4 @@
-// Optional types (prototype): declarations, None, widening, reassignment,
+// Optional types: declarations, None, widening, reassignment,
 // optional parameters and returns.
 class Node {
   v: int;

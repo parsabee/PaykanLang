@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// CodeGen / E2E tests for optional types `T?` (prototype, issue #5).  Every
+// CodeGen / E2E tests for optional types `T?` (issue #5).  Every
 // runtime test runs under the tracking allocator and asserts zero live heap
 // blocks: a `T?` is a possibly-NULL PaykanShared* box, so each path that
 // retains / releases / unwraps it must be NULL-safe and balanced.

@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Sema tests: optional types `T?` (prototype, issue #5) — assignability,
+// Sema tests: optional types `T?` (issue #5) — assignability,
 // operations that require unwrapping, equality against None, `match` as the
 // unwrap, exhaustiveness, optional fields, `T?[]`, and module round-trips.
 

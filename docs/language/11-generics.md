@@ -1,10 +1,11 @@
-# PaykanLang — Generics (prototype)
+# PaykanLang — Generics
 
-> **Prototype.** Generics are experimental (issue #2): implemented and tested, but the syntax,
-> the rules and the diagnostics below may change before they are declared stable.
+> **Stable in v0.1** (issue #2): the syntax and semantics below are covered by the
+> compatibility promise for the 0.1 series (see `01-language-basics.md`, "Stability").
+> Importing generics across modules is not supported until v0.2.0 ([#57](https://github.com/parsabee/PaykanLang/issues/57)).
 
 Generic classes and functions are parameterised by types. Constraints, variance
-and cross-module templates are not part of the prototype yet.
+and cross-module templates are not supported in v0.1.
 
 ---
 
@@ -51,7 +52,7 @@ class Pair<K, V> {
 - A parameter may not be repeated (`class P<T, T>`) and may not reuse the name
   of a type in scope (`class Bar<Foo>` when `Foo` is a class, `fn f<Str>`).
 - A generic class may extend a **concrete** class: `class Wrap<T> : Base { … }`.
-  The superclass itself cannot be generic in the prototype.
+  The superclass itself cannot be generic in v0.1.
 - A generic class may mention its own instantiation in signatures
   (`fn link(n: Node<T>)`).
 
@@ -240,8 +241,8 @@ println(Str<int>(b.get()));
 | Instantiation depth exceeded | self-instantiation with a growing argument |
 | Imported generic | `mod::Box<int>` and friends |
 
-## Not in the Prototype
+## Not Supported in v0.1
 
 Constraints/bounds (`T: Comparable`) and interfaces, variance, default type
 arguments, explicit specialisation, generic methods on non-generic classes,
-generic superclasses, and exporting templates across modules.
+generic superclasses, and exporting templates across modules (v0.2.0, [#57](https://github.com/parsabee/PaykanLang/issues/57)).

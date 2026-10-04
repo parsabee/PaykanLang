@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Codegen / E2E tests for tuples (prototype).  Every runtime test runs under
+// Codegen / E2E tests for tuples.  Every runtime test runs under
 // the tracking allocator and asserts zero live heap blocks afterwards, so each
 // case checks both the observable output and that the tuple, its box and its
 // reference elements are released exactly once.

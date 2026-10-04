@@ -23,9 +23,17 @@ builds it with the system C compiler) or the optional LLVM backend (LLVM IR, run
 a JIT). Either backend can `run` a program directly or `build` a native executable.
 The defining goals — seamless offloading to heterogeneous compute units, thread-safe
 concurrency, and C interop through modules — are the road ahead, not yet shipped. See
-[CHANGELOG.md](CHANGELOG.md) for what's in this release. Features marked **prototype**
-(tuples, optional types and generics) are experimental: implemented and tested, but their
-syntax, rules and diagnostics may change before they are declared stable.
+[CHANGELOG.md](CHANGELOG.md) for what's in this release.
+
+**Stability.** Tuples, optional types (optional primitives and `match` on an optional
+included) and generics are **stable in v0.1**: their syntax and semantics as documented in
+[`docs/language/`](docs/language/) are covered by the compatibility promise for the 0.1
+series, so a program that follows the reference keeps its meaning in every 0.1.x release.
+The limitations the reference documents stay: generics cannot be imported across modules
+until v0.2.0 ([#57](https://github.com/parsabee/PaykanLang/issues/57)), and a present optional primitive is boxed ([#96](https://github.com/parsabee/PaykanLang/issues/96) will change that
+representation, not the semantics). Not covered by the promise: the plugin interfaces
+(`include/paykan/Frontend.h`, `Backend.h`, the registry and PIR as an out-of-tree plugin
+sees them) are not yet stable for out-of-tree authors; their versioning policy is [#103](https://github.com/parsabee/PaykanLang/issues/103).
 
 ---
 
@@ -81,8 +89,11 @@ The backend is pluggable too. `-DPAYKAN_BACKENDS=<list>` selects the backends to
 `c` (the C backend: emits C11, builds with the system C compiler, standard C++ only) is always
 built; `llvm` (LLVM IR, the ORC JIT for `run`, native objects linked by the system C compiler
 for `build`) is an in-tree, opt-in backend (`-DPAYKAN_BACKENDS="llvm;c"`). The default backend
-is the first one listed: `c` in the default build, `llvm` with `"llvm;c"`. `--backend=<name>`
-selects another at run time; `--list-backends` prints them and marks the default. LLVM is
+is always `c`, whatever the list's order: with `"llvm;c"`, `--list-backends` shows
+`c (default)` and the llvm backend (and its JIT) is selected with `--backend=llvm`.
+`--backend=<name>` selects a backend at run time; `--list-backends` prints them and marks the
+default. (A configuration without the c backend, which this tree never produces, falls back to
+the first backend listed.) LLVM is
 downloaded only when `llvm` is listed, so the default configure (`recursive-descent` + `c`) is
 a **barebones build** that needs nothing but a C++20 compiler and a C compiler (CI checks that
 it downloads nothing and links no third-party library). The full build is
@@ -124,8 +135,9 @@ paykan --version                # print the version and the built frontends and 
 paykan --help                   # list every option
 ```
 
-`run` with the llvm backend executes the program in-process through LLVM's ORC JIT; the c
-backend compiles it with the system C compiler into a temporary directory and runs that.
+`run` uses the c backend unless `--backend=llvm` is given: the c backend compiles the program
+with the system C compiler into a temporary directory and runs that; `--backend=llvm` executes
+it in-process through LLVM's ORC JIT.
 `--emit-llvm` and `--emit-c` need their backend to be built in. `main`'s return value becomes
 the process exit code, and extra command-line arguments after the source file are passed to
 `main(args: Str[])` (with `args[0]` the source-file path under `run`, and the executable's path for a
@@ -170,7 +182,7 @@ To learn PaykanLang:
 
 - **[`docs/language/`](docs/language/)** — the full reference: language basics,
   functions, enums, classes, arrays, modules, `match` statements, the memory model,
-  tuples (prototype), optional types (prototype), and generics (prototype); the conversion
+  tuples, optional types, and generics; the conversion
   constructors (`Str(n)`, `int<Str>(s)`, ...) are under "Conversions" in
   [`01-language-basics.md`](docs/language/01-language-basics.md).
 - **[`samples/`](samples/)** — runnable `.pkn` programs exercising every feature

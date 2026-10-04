@@ -77,7 +77,7 @@ class ASTContext {
   // Reverse map for O(1) getSpecializedArrayElemType lookups.
   std::unordered_map<ClassType *, Type *> SpecializedArrayElemTypes;
 
-  // -- Tuples (prototype) ----------------------------------------------------
+  // -- Tuples ----------------------------------------------------------------
   // Canonical base class for every tuple value ("Tuple": Obj subtype whose
   // vtable mirrors PaykanTuple_vtable — destroy / toString / equals).
   ClassType *TupleTy;
@@ -217,7 +217,7 @@ public:
     return SpecializedArrayTypes;
   }
 
-  // -- Tuples (prototype) ----------------------------------------------------
+  // -- Tuples ----------------------------------------------------------------
 
   /// The canonical `Tuple` base ClassType (every tuple value is one).
   ClassType *getTupleTy() const { return TupleTy; }

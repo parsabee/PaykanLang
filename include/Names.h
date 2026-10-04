@@ -123,7 +123,7 @@ inline constexpr const char *kPaykanArrayPopObj = "PaykanArray_pop_obj";
 inline constexpr const char *kPaykanArrayVtable = "PaykanArray_vtable";
 inline constexpr const char *kPaykanArrayObjVtable = "PaykanArray_obj_vtable";
 
-// Tuple (prototype)
+// Tuple
 inline constexpr const char *kPaykanTupleNew = "PaykanTuple_new";
 inline constexpr const char *kPaykanTupleSet = "PaykanTuple_set";
 inline constexpr const char *kPaykanTupleSetObj = "PaykanTuple_set_obj";

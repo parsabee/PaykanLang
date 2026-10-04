@@ -260,7 +260,7 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
   if (dst == Ctx.getFloatTy() && src == Ctx.getIntTy())
     return true;
 
-  // Optional destinations (prototype, issue #5):
+  // Optional destinations (issue #5):
   //   T  -> T?   implicit widening (a present value);
   //   S? -> T?   when S -> T (covariant in the wrapped type).
   // The `None` literal is handled by checkAssignable, which sees the
@@ -881,7 +881,7 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   node->getLHS()->setResolvedType(lhsTy);
   node->getRHS()->setResolvedType(rhsTy);
 
-  // Optional operands (prototype, issue #5).  The only operators defined on a
+  // Optional operands (issue #5).  The only operators defined on a
   // `T?` are == and !=, in exactly two forms:
   //   x == None / None != x   — a null check on the box (CodeGen never
   //                             dispatches `equals` for this form);
@@ -1431,7 +1431,7 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
     return trueTy;
   }
 
-  // Optional unification (prototype, issue #5):
+  // Optional unification (issue #5):
   //   if c then x else None   — `T?` when x is a reference type T (or T?);
   //   if c then a else b      — `T?` when either side is optional and the
   //                             wrapped types unify (equal, or class LCA).
@@ -1496,7 +1496,7 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
   return nullptr;
 }
 
-// -- Tuples (prototype) ------------------------------------------------------
+// -- Tuples ------------------------------------------------------------------
 
 // A tuple literal's type is the canonical tuple of its element types.  There
 // is no contextual typing: `(1, "a")` is `(int, Str)` even when assigned to a
@@ -2620,7 +2620,7 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
 
   // `t.0 = v`: the parser hands tuple-index assignment over as a member
   // assignment whose field name is the index (see Parser.ypp) so that the
-  // rejection is a typed diagnostic.  Prototype tuples are immutable.
+  // rejection is a typed diagnostic.  Tuples are immutable.
   if (ast::isa<ast::TupleType>(recvTy)) {
     error(node->getLocation(), "cannot assign to element '." +
                                    node->getFieldName() + "' of type '" +
@@ -2863,7 +2863,7 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
     return checkEnumMatch(node, enumTy);
 
   // Optional-mode: the subject is `T?` — `match` is how an optional is
-  // unwrapped (prototype, issue #5).
+  // unwrapped (issue #5).
   if (auto *optTy = ast::dyn_cast<ast::OptionalType>(subjectTy))
     return checkOptionalMatch(node, optTy);
 

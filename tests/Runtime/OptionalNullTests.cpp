@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// NULL-box tolerance the optional-types prototype (issue #5) relies on: a
+// NULL-box tolerance optional types (issue #5) rely on: a
 // `T?` is a possibly-NULL PaykanShared*, so every runtime entry point that
 // generated code may hand such a box to must accept NULL — reference
 // counting, unboxing, printing, and every object-array operation (NULL

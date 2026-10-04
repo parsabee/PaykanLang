@@ -1,4 +1,4 @@
-// Optional types (prototype): the only operators on an optional are == and !=
+// Optional types: the only operators on an optional are == and !=
 // — against None (a null check) or against another optional of a compatible
 // type (both None -> equal, one None -> not equal, otherwise `equals`).
 class Node {

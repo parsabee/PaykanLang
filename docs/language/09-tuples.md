@@ -1,7 +1,7 @@
-# PaykanLang — Tuples (prototype)
+# PaykanLang — Tuples
 
-> **Prototype.** Tuples are experimental (issue #4): implemented and tested, but the syntax,
-> the rules and the diagnostics below may change before they are declared stable.
+> **Stable in v0.1** (issue #4): the syntax and semantics below are covered by the
+> compatibility promise for the 0.1 series (see `01-language-basics.md`, "Stability").
 
 A tuple is a fixed-size, ordered group of values that may have **different
 types**: `(1, "a")` is an `(int, Str)`.  Tuples are the way to return more

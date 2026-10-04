@@ -220,7 +220,7 @@ a: Animal = Dog();   // Dog stored as Animal — valid
 
 ---
 
-## Generics (prototype)
+## Generics
 
 A class may take type parameters — `class Box<T> { v: T; … }` — and is then used
 as `Box<int>`, `Box<Str>`, `Box<Box<int>>`, each of which is an ordinary class

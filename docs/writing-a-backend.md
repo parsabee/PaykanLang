@@ -17,6 +17,15 @@ The example in [`utils/print-pir`](../utils/print-pir)
 is the smallest complete backend (it prints the PIR it receives); copy it to
 start your own.
 
+**Stability.** Unlike the language (stable in v0.1, see
+[`language/01-language-basics.md`](language/01-language-basics.md)), the
+plugin interfaces are not yet stable for out-of-tree authors: `Backend.h`,
+`Frontend.h`, the registry and PIR as a plugin sees it may change between
+0.x releases, so build a plugin against the exact Paykan release it will be
+linked with. The plugin API versioning policy (a plugin API version a plugin
+must match, checked when it is configured and loaded) is
+[#103](https://github.com/parsabee/PaykanLang/issues/103).
+
 ## 1. The interface
 
 ```cpp

@@ -141,8 +141,9 @@ TEST(Driver, ShortVersionFlagMatchesLong) {
 }
 
 // ---------------------------------------------------------------------------
-// --list-backends: the default is the one the build configured (#123): `c`
-// in a plain configure, else the first backend PAYKAN_BACKENDS lists.
+// --list-backends: the default is the one the build configured, and that is
+// `c` whenever the c backend is built (#27), wherever PAYKAN_BACKENDS lists
+// it: `llvm;c` defaults to c too, and llvm needs --backend=llvm.
 // ---------------------------------------------------------------------------
 
 #ifndef PAYKAN_EXPECTED_DEFAULT_BACKEND
@@ -171,8 +172,40 @@ TEST(Driver, ListBackendsMarksTheConfiguredDefault) {
       defaultName = name;
   }
   EXPECT_EQ(defaultName, expected) << out;
-  // The c backend is part of every build.
+  // The c backend is part of every build, so it is the default.
   EXPECT_NE(std::find(names.begin(), names.end(), "c"), names.end()) << out;
+  EXPECT_EQ(expected, "c");
+  EXPECT_EQ(defaultName, "c") << out;
+  // With the llvm backend built (listed first in the full configuration),
+  // it is listed but not the default.
+  if (std::find(names.begin(), names.end(), "llvm") != names.end()) {
+    EXPECT_EQ(out.find("llvm (default)"), std::string::npos) << out;
+  }
+}
+
+// Without --backend the program goes to the c backend even when the llvm
+// backend is built: --emit-source prints C, not LLVM IR.  --backend=llvm
+// selects the llvm backend (and its JIT for `run`).
+TEST(Driver, DefaultBackendIsCEvenWithLLVM) {
+  auto src = writeTmp("fn main() -> int { println(\"hi\"); return 0; }");
+  auto [rc, code] =
+      run(std::string(kPaykan) + " --emit-source " + src + " 2>&1");
+  EXPECT_EQ(rc, 0) << code;
+  EXPECT_NE(code.find("#include \"Runtime.h\""), std::string::npos) << code;
+  EXPECT_EQ(code.find("ModuleID"), std::string::npos) << code;
+  auto listed = run(std::string(kPaykan) + " --list-backends 2>&1").out;
+  if (listed.rfind("llvm", 0) == 0 ||
+      listed.find("\nllvm") != std::string::npos) {
+    auto [rc2, ir] = run(std::string(kPaykan) +
+                         " --backend=llvm --emit-source " + src + " 2>&1");
+    EXPECT_EQ(rc2, 0) << ir;
+    EXPECT_NE(ir.find("ModuleID"), std::string::npos) << ir;
+    auto [rc3, out3] =
+        run(std::string(kPaykan) + " --backend=llvm " + src + " 2>&1");
+    EXPECT_EQ(rc3, 0) << out3;
+    EXPECT_EQ(out3, "hi\n");
+  }
+  std::filesystem::remove(src);
 }
 
 // Without --backend, programs run on the configured default backend.
