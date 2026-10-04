@@ -105,38 +105,42 @@ static void destroy_dead_box(PaykanShared *box) {
 }
 
 void Paykan_release(PaykanShared *shared) {
-  if (!shared || --shared->refCount > 0)
-    return;
-  PaykanObject *obj = shared->object;
-  if (!obj) {
-    Paykan_free(shared);
-    return;
+  // Keep the common case (the count stays above zero) as the fall-through.
+  // With an early `if (!shared || --refCount > 0) return;` GCC lays that path
+  // out as a taken jump to a distant `ret`, which measurably slows
+  // retain/release-heavy programs; this shape gives `test; jle slow; pop; ret`.
+  if (shared && --shared->refCount <= 0) {
+    PaykanObject *obj = shared->object;
+    if (!obj) {
+      Paykan_free(shared);
+      return;
+    }
+    // Break the object→box backpointer now, before destroy (or before the box
+    // is deferred).  For ordinary objects the memory is about to be freed
+    // anyway; for immortal statics (None, Stdin) whose destroy is a no-op this
+    // returns them to the unboxed state instead of leaving a pointer to a dead
+    // box — so they can be boxed afresh even while the dead box is pending.
+    if (obj->shared == shared)
+      obj->shared = (PaykanShared *)0;
+    if (g_destroying) {
+      // A destroy is running: defer to the outermost release.
+      dead_box_set_next(shared, (PaykanShared *)0);
+      if (g_batch_tail)
+        dead_box_set_next(g_batch_tail, shared);
+      else
+        g_batch_head = shared;
+      g_batch_tail = shared;
+      return;
+    }
+    g_destroying = 1;
+    destroy_dead_box(shared);
+    while (g_pending) {
+      PaykanShared *box = g_pending;
+      g_pending = dead_box_next(box);
+      destroy_dead_box(box);
+    }
+    g_destroying = 0;
   }
-  // Break the object→box backpointer now, before destroy (or before the box
-  // is deferred).  For ordinary objects the memory is about to be freed
-  // anyway; for immortal statics (None, Stdin) whose destroy is a no-op this
-  // returns them to the unboxed state instead of leaving a pointer to a dead
-  // box — so they can be boxed afresh even while the dead box is pending.
-  if (obj->shared == shared)
-    obj->shared = (PaykanShared *)0;
-  if (g_destroying) {
-    // A destroy is running: defer to the outermost release.
-    dead_box_set_next(shared, (PaykanShared *)0);
-    if (g_batch_tail)
-      dead_box_set_next(g_batch_tail, shared);
-    else
-      g_batch_head = shared;
-    g_batch_tail = shared;
-    return;
-  }
-  g_destroying = 1;
-  destroy_dead_box(shared);
-  while (g_pending) {
-    PaykanShared *box = g_pending;
-    g_pending = dead_box_next(box);
-    destroy_dead_box(box);
-  }
-  g_destroying = 0;
 }
 
 // -- Accessor ----------------------------------------------------------------
