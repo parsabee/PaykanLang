@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 // Recursive-descent parser (precedence climbing for expressions) for the
-// Paykan language.  Implements docs/grammar.md and builds the same AST
-// as the Bison frontend, node for node and location for location.
+// Paykan language.  Implements docs/grammar.md; any other frontend must
+// build the same AST, node for node and location for location.
 
 #pragma once
 
@@ -40,7 +40,7 @@ public:
 private:
   ast::ASTContext &Ctx;
   sema::DiagEngine *Diags;
-  Lexer Lex;
+  Lexer TheLexer;
   unsigned ErrorCount = 0;
 
   // -- Token stream with unbounded lookahead and backtracking ---------------

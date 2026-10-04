@@ -147,9 +147,8 @@ cmake -B build -DCMAKE_PREFIX_PATH=/opt/paykan -DLLVM_DIR=<llvm>/lib/cmake/llvm
 
 A plain configure of Paykan builds only the core (recursive-descent + c) and
 downloads no LLVM. An installation with the llvm backend comes from a configure
-that passes the full lists,
-`"-DPAYKAN_FRONTENDS=recursive-descent;bison" "-DPAYKAN_BACKENDS=llvm;c"`
-(or at least `llvm` in `PAYKAN_BACKENDS`); that configure downloads LLVM 17
+that passes the full list,
+`"-DPAYKAN_BACKENDS=llvm;c"`; that configure downloads LLVM 17
 into `<paykan-build>/third-party/llvm` unless `LLVM_DIR` names one, so
 `<llvm>` above is that directory or the LLVM you passed.
 
@@ -160,7 +159,7 @@ v1.0 ([#61](https://github.com/parsabee/PaykanLang/issues/61)).
 `find_package(Paykan)` provides the imported targets `Paykan::backend`,
 `Paykan::pir`, `Paykan::frontend`, `Paykan::sema`, `Paykan::ast`,
 `Paykan::runtime`, `Paykan::driver` and one target per installed plugin
-(`Paykan::backend_c`, `Paykan::frontend_bison`, ...), the variables
+(`Paykan::backend_c`, `Paykan::frontend_recursive_descent`, ...), the variables
 `PAYKAN_BACKENDS` / `PAYKAN_FRONTENDS` / `PAYKAN_PLUGINS`, the installed
 runtime's location `PAYKAN_RUNTIME_LIBRARY` / `PAYKAN_RUNTIME_INCLUDE_DIR`,
 the installation's version `PAYKAN_TOOLCHAIN_VERSION` and the plugin build
@@ -259,10 +258,10 @@ PaykanLang version it was **built with**, and each release carries an explicit
 
   ```text
   $ paykan --list-frontends
-  bison (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.0-alpha accepts 0.1.0-alpha)
+  mine (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.0-alpha accepts 0.1.0-alpha)
   recursive-descent (default)
-  $ paykan --frontend=bison program.pkn
-  paykan: cannot use frontend 'bison' (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.0-alpha accepts 0.1.0-alpha)
+  $ paykan --frontend=mine program.pkn
+  paykan: cannot use frontend 'mine' (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.0-alpha accepts 0.1.0-alpha)
   $ echo $?
   2
   ```

@@ -464,7 +464,7 @@ typedef struct PaykanTuple {
   uint64_t *slots;      // count 8-byte slots, inline after the header
   uint8_t *kinds;       // count kind bytes, inline after the slots
   // (slots and kinds point into the same heap block as the header: one
-  // allocation per tuple.  A pointer rather than a flexible array member
+  // allocation per tuple.  A pointer rather than a trailing unsized array
   // because this header is also compiled as C++ with -Wpedantic.)
 } PaykanTuple;
 

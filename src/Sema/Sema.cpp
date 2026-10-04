@@ -2619,7 +2619,7 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
   }
 
   // `t.0 = v`: the parser hands tuple-index assignment over as a member
-  // assignment whose field name is the index (see Parser.ypp) so that the
+  // assignment whose field name is the index (docs/grammar.md) so that the
   // rejection is a typed diagnostic.  Tuples are immutable.
   if (ast::isa<ast::TupleType>(recvTy)) {
     error(node->getLocation(), "cannot assign to element '." +

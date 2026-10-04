@@ -5,9 +5,7 @@ This is the authoritative lint entry point shared by CI and the pre-commit
 hook. It uses the vendored LLVM 17 clang-tidy (build/third-party/llvm) when
 present, falling back to a clang-tidy on PATH otherwise.
 
-Generated sources (Bison Parser.tab / Flex Lexer.yy) and third-party code are
-excluded: they are not ours to fix and clang-tidy cannot satisfy its checks on
-generated parser tables.
+Third-party code is excluded: it is not ours to fix.
 
 Usage:
     scripts/run_clang_tidy.py [--build-dir DIR] [file ...]
@@ -37,9 +35,7 @@ import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-_EXCLUDE_RE = re.compile(
-    r"(/build/third-party/|Parser\.tab|Lexer\.yy|Parser\.ypp|Lexer\.lpp)"
-)
+_EXCLUDE_RE = re.compile(r"/build/third-party/")
 
 
 def is_excluded(path: str) -> bool:
@@ -122,10 +118,9 @@ def main() -> int:
     # understands -- set SDKROOT to an older installed SDK if the default one
     # is too new (xcrun honours it).
     # Report findings in our own headers only.  .clang-tidy's
-    # HeaderFilterRegex matches any ".../src/..." path, which also catches the
-    # Bison-generated build/src/Parser/Parser.ypp.h; anchoring the filter at
-    # the repository root keeps generated headers out of the gate, as the
-    # generated TUs already are.
+    # HeaderFilterRegex matches any ".../src/..." path, which also catches
+    # headers generated under a build tree; anchoring the filter at the
+    # repository root keeps those out of the gate.
     header_filter = "^" + re.escape(REPO_ROOT) + r"/(src|include)/.*\.h$"
     extra_args: list[str] = [f"--header-filter={header_filter}"]
     if sys.platform == "darwin":

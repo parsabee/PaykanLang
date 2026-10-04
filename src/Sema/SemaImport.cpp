@@ -463,7 +463,7 @@ bool Sema::processImport(ast::ImportDecl *node) {
     // carries the imported file's name and source lines — so a syntax error
     // inside a module prints the same rich source-located format
     // (file:line:col + snippet + caret) as main-file parse errors, instead of
-    // the yacc-style fallback.  Mirrors the wiring in src/Driver/main.cpp:
+    // a bare one-line fallback.  Mirrors the wiring in src/Driver/main.cpp:
     // SourceLines lives in the driver and is filled by parseFile before the
     // parser runs, so handing its address over now is safe.
     auto importDriverPtr = std::make_shared<parser::ParserDriver>(FrontendName);

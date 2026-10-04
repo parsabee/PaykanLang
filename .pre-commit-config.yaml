@@ -22,7 +22,7 @@ repos:
         entry: python3 scripts/clang_format.py
         language: system
         files: \.(c|cpp|h|hpp)$
-        exclude: '(^build/|/third-party/|Parser\.tab|Lexer\.yy)'
+        exclude: '(^build/|/third-party/)'
         pass_filenames: true
 
       # Slower: bug-focused clang-tidy gate, only before push (needs a build).
@@ -31,6 +31,6 @@ repos:
         entry: python3 scripts/run_clang_tidy.py --build-dir build
         language: system
         files: \.(c|cpp)$
-        exclude: '(^build/|/third-party/|Parser\.tab|Lexer\.yy)'
+        exclude: '(^build/|/third-party/)'
         pass_filenames: true
         stages: [pre-push]

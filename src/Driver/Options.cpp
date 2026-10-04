@@ -36,9 +36,9 @@ constexpr Flag kFlags[] = {
      "Track runtime heap allocations and dump statistics (incl. leaks) at "
      "exit"},
     {"trace-parser", &Options::TraceParsing,
-     "Enable Bison parser debug traces"},
+     "Enable the frontend's parser debug traces, if it has them"},
     {"trace-scanner", &Options::TraceScanning,
-     "Enable Flex scanner debug traces"},
+     "Enable the frontend's scanner debug traces, if it has them"},
 };
 
 /// Strip one or two leading dashes; returns false if @p arg is not an option

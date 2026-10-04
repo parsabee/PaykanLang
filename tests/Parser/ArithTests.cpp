@@ -342,7 +342,7 @@ TEST(Arith, AmpersandIsLexicalError) {
 }
 
 TEST(Arith, InvalidCharacterRejected) {
-  // Without the catch-all rule flex would silently ECHO unknown bytes.
+  // A scanner without a catch-all rule could silently skip unknown bytes.
   auto [ok, _] = parse(R"(
     fn main() -> int {
       x: int = 1 @ 2;
@@ -366,7 +366,7 @@ TEST(Arith, UnterminatedCharLiteralRejected) {
 
 TEST(Arith, ParseErrorsRoutedThroughDiagEngine) {
   // With a DiagEngine attached, syntax errors come out in the rich
-  // clang-style format (file:line:col + snippet gutter), not the yacc-style
+  // clang-style format (file:line:col + snippet gutter), not a bare one-line
   // stderr fallback.
   auto r = parseWithDiags("fn main() -> int {\n"
                           "  x: int = ;\n"

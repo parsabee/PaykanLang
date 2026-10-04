@@ -39,8 +39,8 @@ inline constexpr unsigned kMaxNesting = 512;
 
 /// Per-parse options.  A frontend ignores the ones it does not support.
 struct Options {
-  /// Debug traces of the parser / scanner, when the frontend has them
-  /// (Bison's parse.trace and Flex's debug mode).
+  /// Debug traces of the parser / scanner (--trace-parser,
+  /// --trace-scanner), when the frontend has them.
   bool TraceParsing = false;
   bool TraceScanning = false;
 };
@@ -60,8 +60,7 @@ class Frontend {
 public:
   virtual ~Frontend() = default;
 
-  /// The name the frontend is registered under ("recursive-descent", "bison",
-  /// ...).
+  /// The name the frontend is registered under ("recursive-descent", ...).
   virtual std::string_view name() const = 0;
 
   /// Parse @p source, the full text of @p filename, into @p ctx.

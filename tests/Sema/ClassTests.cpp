@@ -852,7 +852,7 @@ TEST(Class, InitNoFieldsNoInitAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Class, InitDerivedOwnFieldOnlyAccepted) {
+TEST(Class, InitDerivedOwnFieldAloneAccepted) {
   // Base fields are covered by __super__; the derived __init__ need only assign
   // its own declared fields.
   auto r = semaCheck(R"(

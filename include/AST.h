@@ -1501,7 +1501,7 @@ public:
 };
 
 // Tuple element access: t.0, t.1, ...  The index is a compile-time constant
-// (lexed as a single TUPLE_INDEX token, see Lexer.lpp); Sema checks it
+// (scanned as one token at the dot, docs/grammar.md); Sema checks it
 // against the tuple's arity.
 class TupleIndexExpr : public Expr {
   Expr *Tuple;

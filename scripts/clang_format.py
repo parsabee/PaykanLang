@@ -2,8 +2,7 @@
 """Check or apply clang-format on PaykanLang's first-party C/C++ sources.
 
 Uses the vendored LLVM 17 clang-format (build/third-party/llvm) when present,
-falling back to a clang-format on PATH. Generated parser/lexer sources and
-third-party code are excluded.
+falling back to a clang-format on PATH. Third-party code is excluded.
 
 Usage:
     scripts/clang_format.py [--apply] [file ...]
@@ -27,7 +26,7 @@ import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-_EXCLUDE_RE = re.compile(r"(/build/|/third-party/|Parser\.tab|Lexer\.yy)")
+_EXCLUDE_RE = re.compile(r"(/build/|/third-party/)")
 _SRC_GLOBS = [
     "src/*.cpp",
     "src/*.c",

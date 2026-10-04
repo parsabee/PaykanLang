@@ -652,8 +652,11 @@ fn main() -> int {
 
 // The diagnostic engine's debug-build guard (#112): the same diagnostic group
 // (an error plus its notes) reported twice is an internal error, while the
-// same message with different notes or at another location is not.
-#ifndef NDEBUG
+// same message with different notes or at another location is not.  The
+// check is an assertion in the library, so it needs a library built with
+// assertions: PAYKAN_TEST_LIBRARY_NDEBUG marks an installed one built
+// without (paykan_add_frontend_tests).
+#if !defined(NDEBUG) && !defined(PAYKAN_TEST_LIBRARY_NDEBUG)
 TEST(Generics, DiagEngineRejectsIdenticalRepeat) {
   const paykan::ast::SourceLocation a(4, 7, 4, 26);
   const paykan::ast::SourceLocation b(5, 7, 5, 26);

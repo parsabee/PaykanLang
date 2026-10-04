@@ -306,7 +306,7 @@ Token Lexer::next() {
     char c = cur();
     if (isDigit(c)) {
       // Digits glued to a preceding `.` are a tuple index (`t.0`, `t.0.1`),
-      // never a number literal: `t.0.1` must not lex the `0.1` as a float.
+      // never a number literal: `t.0.1` must not scan the `0.1` as a float.
       bool afterDot = PrevKind == Tok::Dot && PrevEnd == Pos;
       t = lexNumber(start, line, col, afterDot);
     } else if (isIdentStart(c)) {
@@ -420,7 +420,7 @@ Token Lexer::next() {
 // FLOAT  ::= digit+ "." digit* exponent? | digit+ exponent
 // exponent ::= ("e" | "E") ("+" | "-")? digit+
 //
-// Longest match, as in the Bison frontend: `1.` is a float, `1e` is the
+// Longest match (docs/grammar.md): `1.` is a float, `1e` is the
 // integer 1 followed by the identifier `e`.  After a `.` (afterDot) only the
 // digits are taken; the parser turns them into a tuple index and validates
 // them (no leading zeros, in range) itself.
@@ -551,9 +551,9 @@ bool Lexer::lexChar(size_t start, size_t line, size_t col, Token &out) {
       return false;
     }
   }
-  // The closing quote is missing before the end of the line or file.  Like
-  // the Bison frontend, the quote (and the one character after it) is the
-  // error token; the newline is left for line tracking.
+  // The closing quote is missing before the end of the line or file.  The
+  // quote (and the one character after it) is the error token
+  // (docs/grammar.md); the newline is left for line tracking.
   error(line, col, "unterminated character literal");
   return false;
 }

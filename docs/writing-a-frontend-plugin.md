@@ -5,15 +5,30 @@ into the AST and reports syntax errors. Everything after the AST (Sema, the
 lowering to PIR, the backends) is shared, so frontends differ only in how they
 parse. Every frontend must build exactly the same AST for the same input;
 [`grammar.md`](grammar.md) is the grammar they implement. The built-in
-`recursive-descent` frontend is the reference; the Bison frontend is the first
-frontend shipped as a plugin of its own
-([#60](https://github.com/parsabee/PaykanLang/issues/60)).
+`recursive-descent` frontend is the reference, and the only one in tree:
+`-DPAYKAN_FRONTENDS` lists in-tree frontends only, and every other frontend
+is built out of tree against an installed PaykanLang, as below. The reference
+example of an out-of-tree frontend is the Bison/Flex frontend,
+[PaykanLang_Bison_Frontend](https://github.com/parsabee/PaykanLang_Bison_Frontend).
 
 Frontends are plugins in the same way backends are, so most of
 [`writing-a-backend.md`](writing-a-backend.md) applies as is: the installed
 package, linking the plugin whole into a driver with `paykan_add_driver`, and
 [plugin compatibility](writing-a-backend.md#7-plugin-compatibility). This page
 covers what differs.
+
+## The grammar is the contract
+
+[`grammar.md`](grammar.md) is the specification of the concrete syntax, and
+every frontend must follow it: accept and reject exactly the inputs the
+recursive-descent frontend accepts and rejects, and build exactly the same
+AST, node for node and location for location (`paykan --dump-ast` prints
+it). Diagnostics are the exception: the messages `grammar.md` lists are
+binding, but the wording of other syntax errors and the recovery after the
+first error are up to each frontend (`grammar.md` section 9). When the
+grammar changes, `grammar.md` changes first, then the recursive-descent
+frontend, then every out-of-tree frontend; the test support below makes the
+comparison mechanical.
 
 ## The interface
 
@@ -40,6 +55,8 @@ public:
   escape the call: a frontend built with exceptions catches them all.
 - Input nested deeper than `paykan::frontend::kMaxNesting` is rejected with
   `nesting too deep (more than kMaxNesting levels)`, as every frontend does.
+- `Options` carries `--trace-parser` / `--trace-scanner`, for a frontend
+  that has debug traces.
 
 ## Registration and building
 
@@ -70,10 +87,37 @@ rules and how the list is maintained.
 ## Testing
 
 `paykan --frontend=mine --dump-ast program.pkn` prints the AST.
-`scripts/diff_frontends.py` compares the ASTs of two frontends over the
-samples corpus, which is the check a new frontend is expected to pass:
 
-```sh
-scripts/diff_frontends.py --paykan build-mine/paykan-mine \
-  --frontends recursive-descent,mine
+An installation carries the frontend-parameterized test suites
+(`share/paykan/frontend-tests`: the parser and Sema suites, the fuzz smoke
+test and the in-process differential check) and the samples corpus
+(`share/paykan/samples`, `PAYKAN_SAMPLES_DIR`). `find_package(Paykan)`
+provides `paykan_add_frontend_tests`, which builds them against your
+frontend; you provide GoogleTest:
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(googletest
+    URL "https://github.com/google/googletest/archive/refs/tags/v1.15.2.tar.gz"
+    FIND_PACKAGE_ARGS 1.11 CONFIG NAMES GTest)
+FetchContent_MakeAvailable(googletest)
+
+enable_testing()
+paykan_add_frontend_tests(mine PLUGINS paykan_frontend_mine)
 ```
+
+This adds `ParserTests.mine`, `SemaTests.mine` and `FrontendTests.mine`. Each
+parses with your frontend and also parses every input with the
+installation's recursive-descent frontend, failing on any difference in
+accept/reject or in the AST; `FrontendTests.mine` does the same over the whole
+samples corpus and fuzzes your frontend for crashes and hangs. Also compare
+`--dump-ast` and program output through your driver (`--frontend=mine`
+against the default) over a copy of `PAYKAN_SAMPLES_DIR`, since the import
+samples write caches next to themselves; the reference example above has
+scripts for both.
+
+The suites are those of the installed PaykanLang release, so they check your
+frontend against exactly the grammar that release implements. Run them
+against every release you support, and against PaykanLang's `develop`
+(nightly, for example) to learn about grammar changes early.
+`-DPAYKAN_INSTALL_TEST_SUPPORT=OFF` builds an installation without them.
