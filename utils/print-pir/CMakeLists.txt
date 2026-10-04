@@ -4,6 +4,7 @@
 #
 #   cmake --install <paykan-build> --prefix <prefix>
 #   cmake -B build -DCMAKE_PREFIX_PATH=<prefix> utils/print-pir
+#       [-DPRINT_PIR_BUILT_WITH=<version>]   # pin the PaykanLang version
 #       [-DLLVM_DIR=<llvm>/lib/cmake/llvm]   # if the installation has the llvm backend
 #   cmake --build build
 #   build/paykan-print-pir --backend=print-pir --emit-source program.pkn
@@ -18,11 +19,18 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Paykan REQUIRED)
 
-# The backend: a static library that registers itself (PAYKAN_REGISTER_BACKEND).
-add_library(paykan_backend_print_pir STATIC PrintPIRBackend.cpp)
-target_link_libraries(paykan_backend_print_pir
-    PUBLIC Paykan::backend   # the interface (and, through it, Paykan::pir)
-)
+# The PaykanLang version this plugin is built with.  Empty means the installed
+# one (PAYKAN_TOOLCHAIN_VERSION); set it to pin the version the plugin is
+# written for.  Configure fails if the installed Paykan does not accept it
+# (its PAYKAN_PLUGIN_COMPATIBLE_VERSIONS, docs/writing-a-backend.md).
+set(PRINT_PIR_BUILT_WITH "" CACHE STRING
+    "PaykanLang version print-pir is built with (empty: the installed one)")
+
+# The backend: a static library that registers itself (PAYKAN_REGISTER_BACKEND)
+# and links Paykan::backend (the interface and, through it, Paykan::pir).
+paykan_add_backend_plugin(paykan_backend_print_pir
+    BUILT_WITH "${PRINT_PIR_BUILT_WITH}"
+    PrintPIRBackend.cpp)
 target_compile_options(paykan_backend_print_pir PRIVATE
     -Wall -Wextra -Wpedantic -Werror -fno-rtti -fno-exceptions
 )

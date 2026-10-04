@@ -19,7 +19,8 @@ target_compile_definitions(paykan_frontend
 )
 
 target_link_libraries(paykan_frontend
-    PUBLIC  paykan_ast
+    PUBLIC  paykan_plugin
+            paykan_ast
             paykan_diag
     PRIVATE paykan_compile_options
 )

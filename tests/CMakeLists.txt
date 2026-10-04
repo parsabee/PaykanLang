@@ -198,6 +198,34 @@ target_link_libraries(lowering_tests
 paykan_link_plugins(lowering_tests)
 add_test(NAME LoweringTests COMMAND lowering_tests)
 
+# --- Plugin registry: the compatibility check (#103) -------------------------
+list(JOIN PAYKAN_PLUGIN_COMPATIBLE_VERSIONS ", " PAYKAN_TEST_ACCEPTED_VERSIONS)
+add_executable(plugin_tests
+    Plugin/RegistryTests.cpp
+)
+target_compile_definitions(plugin_tests
+    PRIVATE PAYKAN_TEST_ACCEPTED_VERSIONS="${PAYKAN_TEST_ACCEPTED_VERSIONS}"
+)
+target_link_libraries(plugin_tests
+    PRIVATE gtest_main
+            paykan_plugin
+            paykan_compile_options
+)
+add_test(NAME PluginTests COMMAND plugin_tests)
+
+# A driver with every plugin of the build plus a frontend and a backend that
+# claim to be built with a PaykanLang version this one does not accept
+# (Driver/IncompatiblePlugins.cpp), for the driver tests.
+add_executable(paykan_incompatible_plugins
+    ${CMAKE_SOURCE_DIR}/src/Driver/driver_main.cpp
+    Driver/IncompatiblePlugins.cpp
+)
+target_link_libraries(paykan_incompatible_plugins
+    PRIVATE paykan_driver
+            paykan_compile_options
+)
+paykan_link_plugins(paykan_incompatible_plugins)
+
 # --- Runtime tests ----------------------------------------------------------
 add_executable(runtime_tests
     Runtime/ArrayTests.cpp
@@ -228,13 +256,15 @@ add_executable(driver_tests
 )
 target_compile_definitions(driver_tests
     PRIVATE PAYKAN_BIN="$<TARGET_FILE:paykan>"
+            PAYKAN_INCOMPATIBLE_PLUGINS_BIN="$<TARGET_FILE:paykan_incompatible_plugins>"
+            PAYKAN_TEST_ACCEPTED_VERSIONS="${PAYKAN_TEST_ACCEPTED_VERSIONS}"
             PAYKAN_EXPECTED_DEFAULT_BACKEND="${PAYKAN_DEFAULT_BACKEND}"
 )
 target_link_libraries(driver_tests
     PRIVATE gtest_main
             paykan_compile_options
 )
-add_dependencies(driver_tests paykan)
+add_dependencies(driver_tests paykan paykan_incompatible_plugins)
 if(PAYKAN_COVERAGE)
     target_compile_definitions(driver_tests PRIVATE PAYKAN_TEST_COVERAGE=1)
 endif()
@@ -426,4 +456,19 @@ if(NOT PAYKAN_SANITIZER_FLAGS AND NOT PAYKAN_COVERAGE_FLAGS)
                 -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
                 ${PAYKAN_OOT_ARGS}
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/OutOfTree/PrintPIR.cmake)
+    # The configure-time plugin compatibility check (#103): utils/print-pir
+    # configured against a scratch install, pinned to an accepted and to an
+    # unaccepted PaykanLang version (tests/OutOfTree/PluginCompat.cmake).
+    add_test(NAME PluginCompatOutOfTree
+        COMMAND ${CMAKE_COMMAND}
+                -DPAYKAN_BUILD_DIR=${CMAKE_BINARY_DIR}
+                -DPAYKAN_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+                -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/plugin-compat-out-of-tree
+                -DGENERATOR=${CMAKE_GENERATOR}
+                -DACCEPTED_VERSION=${PAYKAN_VERSION}
+                "-DACCEPTED_LIST=${PAYKAN_TEST_ACCEPTED_VERSIONS}"
+                -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+                -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+                ${PAYKAN_OOT_ARGS}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/OutOfTree/PluginCompat.cmake)
 endif()

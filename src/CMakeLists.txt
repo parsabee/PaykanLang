@@ -1,7 +1,7 @@
 # src/CMakeLists.txt
 # ----------------------------------------------------------------------------
 # Paykan compiler:
-#   AST/ Diag/ Frontend/ ASTPrinter/ Sema/ PIR/ Backend/ Lowering/
+#   Plugin/ AST/ Diag/ Frontend/ ASTPrinter/ Sema/ PIR/ Backend/ Lowering/
 #                     – the core (standard C++ only)
 #   Frontends/<name>/ – frontend plugins, built when listed in PAYKAN_FRONTENDS
 #   Backends/<name>/  – backend plugins, built when listed in PAYKAN_BACKENDS
@@ -12,6 +12,7 @@
 #   Driver/           – executable entry points (mains for all project binaries)
 # ----------------------------------------------------------------------------
 
+add_subdirectory(Plugin)
 add_subdirectory(AST)
 add_subdirectory(Diag)
 add_subdirectory(Frontend)
