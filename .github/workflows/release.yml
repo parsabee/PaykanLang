@@ -10,6 +10,11 @@ name: Release
 # platform and uploads the tarballs as workflow artifacts, but publishes no
 # GitHub Release.  Unticking dry_run publishes, and only when the run's ref is
 # a tag.
+#
+# A tag with a pre-release suffix (v0.1.0-alpha, v1.2.0-rc1: any '-') is
+# published as a GitHub pre-release and never marked "Latest" (#133); a plain
+# version tag (v0.1.0) is a normal release and becomes "Latest".  The "Release
+# plan" job prints that decision on every run, dry runs included.
 on:
   push:
     tags:
@@ -97,9 +102,41 @@ jobs:
             paykanlang-*.tar.gz
             paykanlang-*.tar.gz.sha256
 
+  # How the release is (or, in a dry run, would be) published: the same
+  # expressions the "Create GitHub Release" step passes to
+  # softprops/action-gh-release, shown in the run's summary.
+  plan:
+    name: Release plan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show how the release is published
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          PRERELEASE: ${{ contains(github.ref_name, '-') }}
+          MAKE_LATEST: ${{ !contains(github.ref_name, '-') }}
+          PUBLISH: ${{ github.event_name == 'push' || (!inputs.dry_run && github.ref_type == 'tag') }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Release plan"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| ref | \`${REF_NAME}\` (${REF_TYPE}) |"
+            echo "| publishes a GitHub Release | ${PUBLISH} |"
+            echo "| prerelease | ${PRERELEASE} |"
+            echo "| make_latest | ${MAKE_LATEST} |"
+          } | tee -a "${GITHUB_STEP_SUMMARY}"
+          # A pre-release suffix and "Latest" are mutually exclusive.
+          if [ "${PRERELEASE}" = "${MAKE_LATEST}" ]; then
+            echo "error: prerelease and make_latest must differ"
+            exit 1
+          fi
+
   release:
     name: Publish GitHub Release
-    needs: build
+    needs: [build, plan]
     # Tag pushes always publish; manual runs only when dry_run is unticked and
     # the run's ref is a tag.
     if: github.event_name == 'push' || (!inputs.dry_run && github.ref_type == 'tag')
@@ -116,6 +153,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: PaykanLang ${{ github.ref_name }}
+          # v0.1.0-alpha, v1.2.0-rc1, ...: a pre-release, never "Latest".
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ !contains(github.ref_name, '-') }}
           generate_release_notes: true
           files: |
             dist/paykanlang-*.tar.gz
