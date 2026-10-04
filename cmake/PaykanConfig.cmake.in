@@ -44,7 +44,8 @@
 #       is defined as PAYKAN_PLUGIN_BUILD_VERSION, which the descriptor
 #       carries for paykan's check at load time.  Configure fails with a
 #       FATAL_ERROR unless that version is in
-#       PAYKAN_PLUGIN_COMPATIBLE_VERSIONS.
+#       PAYKAN_PLUGIN_COMPATIBLE_VERSIONS.  The module's symbols are hidden
+#       but for the entry point (PAYKAN_PLUGIN_EXPORT).
 #   paykan_check_plugin_built_with(<kind> <name> <version> <out-var>)
 #       The configure-time version check alone, for a plugin that is not a
 #       CMake library target (a Rust cdylib, say): FATAL_ERROR unless
@@ -151,7 +152,11 @@ function(_paykan_add_plugin_module kind target built_with)
     # lib<target>.so on Linux, lib<target>.dylib on macOS (where a CMake
     # MODULE would otherwise be named .so): the suffix paykan looks for in
     # the plugin directories.
-    set_target_properties(${target} PROPERTIES PREFIX "lib")
+    # Only the entry point (PAYKAN_PLUGIN_EXPORT) is exported: the rest of
+    # the module stays private to it.
+    set_target_properties(${target} PROPERTIES PREFIX "lib"
+        C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON)
     if(APPLE)
         set_target_properties(${target} PROPERTIES SUFFIX ".dylib")
     endif()
