@@ -100,7 +100,11 @@ it downloads nothing and links no third-party library). The full build is
 `-DPAYKAN_FRONTENDS="recursive-descent;bison" -DPAYKAN_BACKENDS="llvm;c"`.
 Every backend consumes the Paykan IR described in [`docs/pir.md`](docs/pir.md);
 [`docs/writing-a-backend.md`](docs/writing-a-backend.md) explains how to write one, in tree or
-out of tree against `find_package(Paykan)` (see [`utils/print-pir`](utils/print-pir)).
+out of tree against `find_package(Paykan)` (see [`utils/print-pir`](utils/print-pir)), and
+[`docs/writing-a-frontend-plugin.md`](docs/writing-a-frontend-plugin.md) does the same for
+frontends. Each release lists the plugin build versions it accepts; a plugin built with another
+version is listed as incompatible and can't be selected
+([plugin compatibility](docs/writing-a-backend.md#7-plugin-compatibility)).
 
 The test suite needs GoogleTest: an installed one is used if CMake finds it, otherwise it is
 downloaded at configure time. `-DPAYKAN_BUILD_TESTS=OFF` skips the tests and GoogleTest (for
@@ -131,7 +135,7 @@ paykan --emit-c program.pkn     # print the generated C (--backend=c --emit-sour
 paykan --emit-llvm program.pkn  # print the LLVM IR (--backend=llvm --emit-source)
 paykan --track-heap program.pkn # run, then print heap/leak statistics
 paykan -O0 program.pkn          # set the optimization level (0-3, default -O2)
-paykan --version                # print the version and the built frontends and backends
+paykan --version                # print the version and every plugin, with its compatibility
 paykan --help                   # list every option
 ```
 

@@ -1,0 +1,29 @@
+// Copyright (c) 2026 Parsa Bagheri
+// SPDX-License-Identifier: MIT
+//
+// Plugin compatibility (#103): the PaykanLang version these headers belong
+// to, which a plugin compiled against them records as the version it was
+// BUILT WITH, and the plugin build versions this release accepts.
+//
+// This file is a template.  CMake writes the result to
+// <build>/generated/include/paykan/PluginCompat.h (installed as
+// include/paykan/compiler/paykan/PluginCompat.h); the list comes from
+// cmake/PluginCompat.cmake, its single source of truth.  Do not edit the
+// generated header.
+//
+// The check itself is in paykan/Registry.h; this header holds only
+// preprocessor definitions.
+
+#pragma once
+
+/// The PaykanLang version of these headers, pre-release label included
+/// ("0.1.0-alpha").  PAYKAN_REGISTER_FRONTEND / PAYKAN_REGISTER_BACKEND
+/// expand it where the plugin registers, so a plugin carries the version of
+/// the headers it was compiled against.
+#define PAYKAN_PLUGIN_BUILD_VERSION "@PAYKAN_VERSION@"
+
+/// The plugin build versions this release accepts, as a C initializer list
+/// of string literals.  Versions match as exact strings.  Only the core uses
+/// it (src/Plugin/PluginCompat.cpp): a running paykan checks its plugins
+/// against its own list, never against the one a plugin was compiled with.
+#define PAYKAN_PLUGIN_COMPATIBLE_VERSIONS @PAYKAN_PLUGIN_COMPATIBLE_VERSIONS_CXX@

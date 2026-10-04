@@ -25,22 +25,47 @@ using paykan::driver::Options;
 
 namespace {
 
+/// " (built with PaykanLang <v>, compatible)" or " (incompatible: <why>)"
+/// for --version.
+template <typename Entry> std::string compatibility(const Entry &e) {
+  if (!e.Compatible)
+    return " (incompatible: " + e.Incompatibility + ")";
+  return " (built with PaykanLang " + e.BuildVersion + ", compatible)";
+}
+
+/// The version, the plugin build versions it accepts, and every registered
+/// plugin with the version it was built with and whether it is compatible.
+/// An incompatible plugin is never instantiated, so it has no description.
 void printVersion() {
   std::cout << "PaykanLang " << paykan::kVersion << "\n";
+  std::cout << "accepts plugins built with PaykanLang";
+  const char *sep = " ";
+  for (const char *v : paykan::plugin::compatibleBuildVersions()) {
+    std::cout << sep << v;
+    sep = ", ";
+  }
+  std::cout << "\n";
   for (const auto &e : paykan::frontend::Registry::get().entries())
-    std::cout << "frontend " << e.Name << "\n";
+    std::cout << "frontend " << e.Name << compatibility(e) << "\n";
   for (const auto &e : paykan::backend::Registry::get().entries()) {
-    std::cout << "backend " << e.Name;
-    if (std::string d = e.Create()->describe(); !d.empty())
-      std::cout << " (" << d << ")";
+    std::cout << "backend " << e.Name << compatibility(e);
+    if (e.Compatible)
+      if (auto be = paykan::backend::Registry::get().create(e.Name))
+        if (std::string d = be->describe(); !d.empty())
+          std::cout << ": " << d;
     std::cout << "\n";
   }
 }
 
+// --list-frontends / --list-backends: one line per plugin,
+// "<name>[ (default)][: <description>]", or
+// "<name> (incompatible: <why>)" for a plugin this paykan does not accept.
 void listFrontends() {
   for (const auto &e : paykan::frontend::Registry::get().entries()) {
     std::cout << e.Name;
-    if (e.Name == paykan::frontend::defaultFrontend())
+    if (!e.Compatible)
+      std::cout << " (incompatible: " << e.Incompatibility << ")";
+    else if (e.Name == paykan::frontend::defaultFrontend())
       std::cout << " (default)";
     std::cout << "\n";
   }
@@ -49,10 +74,15 @@ void listFrontends() {
 void listBackends() {
   for (const auto &e : paykan::backend::Registry::get().entries()) {
     std::cout << e.Name;
+    if (!e.Compatible) {
+      std::cout << " (incompatible: " << e.Incompatibility << ")\n";
+      continue;
+    }
     if (e.Name == paykan::backend::defaultBackend())
       std::cout << " (default)";
-    if (std::string d = e.Create()->describe(); !d.empty())
-      std::cout << ": " << d;
+    if (auto be = paykan::backend::Registry::get().create(e.Name))
+      if (std::string d = be->describe(); !d.empty())
+        std::cout << ": " << d;
     std::cout << "\n";
   }
 }
@@ -67,6 +97,21 @@ int fail(const std::string &msg) {
 int failBackend(const paykan::Status &s) {
   std::cerr << s.message() << "\n";
   return EXIT_FAILURE;
+}
+
+/// Selecting a plugin this paykan does not accept (#103): exit status 2.
+constexpr int kExitIncompatiblePlugin = 2;
+
+/// Check that the plugin named @p name in @p registry, if there is one, is
+/// compatible.  Returns the failure message ("" when it is fine or unknown).
+template <typename Registry>
+std::string checkCompatible(const Registry &registry, const char *kind,
+                            const std::string &name) {
+  const auto *e = registry.find(name);
+  if (!e || e->Compatible)
+    return {};
+  return std::string("cannot use ") + kind + " '" + name +
+         "' (incompatible: " + e->Incompatibility + ")";
 }
 
 } // namespace
@@ -99,6 +144,25 @@ int main(int argc, char *argv[]) {
   if (!opts.Backend.empty() &&
       !paykan::backend::Registry::get().find(opts.Backend))
     return fail("unknown backend '" + opts.Backend + "' (see --list-backends)");
+  // A plugin built with a version this paykan does not accept is listed but
+  // can't be selected.  The defaults are built-in plugins, always compatible,
+  // but they go through the same check.
+  {
+    std::string feName = opts.Frontend.empty()
+                             ? std::string(paykan::frontend::defaultFrontend())
+                             : opts.Frontend;
+    std::string beName = opts.Backend.empty()
+                             ? std::string(paykan::backend::defaultBackend())
+                             : opts.Backend;
+    for (const std::string &msg :
+         {checkCompatible(paykan::frontend::Registry::get(), "frontend",
+                          feName),
+          checkCompatible(paykan::backend::Registry::get(), "backend", beName)})
+      if (!msg.empty()) {
+        std::cerr << "paykan: " << msg << "\n";
+        return kExitIncompatiblePlugin;
+      }
+  }
 
   // -- Frontend -------------------------------------------------------------
   // One DiagEngine shared by every pass, wired into the parser up front so

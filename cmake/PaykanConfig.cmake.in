@@ -1,6 +1,7 @@
 # PaykanConfig.cmake -- find_package(Paykan)
 # ----------------------------------------------------------------------------
 # Imported targets (all static, namespace Paykan::):
+#   Paykan::plugin                    the plugin compatibility check
 #   Paykan::ast Paykan::diag Paykan::frontend Paykan::ast_printer Paykan::sema
 #   Paykan::pir Paykan::backend       the compiler core (standard C++ only)
 #   Paykan::runtime                   the C runtime every backend's output links
@@ -14,8 +15,22 @@
 #   PAYKAN_BACKENDS     the backends this installation was built with
 #   PAYKAN_RUNTIME_LIBRARY      the installed libpaykan_runtime.a
 #   PAYKAN_RUNTIME_INCLUDE_DIR  the directory of the installed Runtime.h
+#   PAYKAN_TOOLCHAIN_VERSION    this installation's version, pre-release label
+#                               included ("0.1.0-alpha"): the version a plugin
+#                               compiled against it records as its build version
+#   PAYKAN_PLUGIN_COMPATIBLE_VERSIONS
+#                               the plugin build versions this installation
+#                               accepts (cmake/PluginCompat.cmake; exact match)
 #
 # Functions:
+#   paykan_add_frontend_plugin(<target> [BUILT_WITH <version>] <source>...)
+#   paykan_add_backend_plugin(<target> [BUILT_WITH <version>] <source>...)
+#       Add a static frontend / backend plugin library <target> linked with
+#       Paykan::frontend / Paykan::backend.  BUILT_WITH is the PaykanLang
+#       version the plugin is built with (default: PAYKAN_TOOLCHAIN_VERSION,
+#       the installation it compiles against); a plugin may pin it to the
+#       version it is written for.  Configure fails with a FATAL_ERROR unless
+#       that version is in PAYKAN_PLUGIN_COMPATIBLE_VERSIONS.
 #   paykan_add_driver(<target> [PLUGINS <lib>...])
 #       Add an executable <target>: the paykan driver linked with every
 #       installed plugin plus the given ones (static registration needs them
@@ -34,6 +49,8 @@ set(PAYKAN_PLUGINS "@PAYKAN_CONFIG_PLUGINS@")
 set(PAYKAN_NEEDS_LLVM @PAYKAN_NEEDS_LLVM@)
 set_and_check(PAYKAN_RUNTIME_LIBRARY "@PACKAGE_PAYKAN_CONFIG_RUNTIME_LIBRARY@")
 set_and_check(PAYKAN_RUNTIME_INCLUDE_DIR "@PACKAGE_PAYKAN_CONFIG_RUNTIME_INCLUDE_DIR@")
+set(PAYKAN_TOOLCHAIN_VERSION "@PAYKAN_VERSION@")
+set(PAYKAN_PLUGIN_COMPATIBLE_VERSIONS "@PAYKAN_PLUGIN_COMPATIBLE_VERSIONS@")
 
 if(PAYKAN_NEEDS_LLVM)
     # The llvm backend's libraries reference LLVM's imported targets.
@@ -72,6 +89,40 @@ const struct PackageRuntime {
     foreach(plugin IN LISTS PAYKAN_PLUGINS ARG_PLUGINS)
         target_link_libraries(${target} PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,${plugin}>")
     endforeach()
+endfunction()
+
+# The plugin compatibility check at configure time (#103): the same list a
+# running paykan checks a plugin's build version against.
+# BUILT_WITH is parsed with PARSE_ARGV, so `BUILT_WITH ""` (an unset cache
+# variable, say) keeps its empty value and means the default.
+function(_paykan_add_plugin_library kind target built_with)
+    if(built_with STREQUAL "")
+        set(built_with "${PAYKAN_TOOLCHAIN_VERSION}")
+    endif()
+    if(NOT built_with IN_LIST PAYKAN_PLUGIN_COMPATIBLE_VERSIONS)
+        list(JOIN PAYKAN_PLUGIN_COMPATIBLE_VERSIONS ", " accepted)
+        message(FATAL_ERROR
+            "Paykan ${kind} plugin '${target}' is incompatible: built with "
+            "PaykanLang ${built_with}; the installed PaykanLang "
+            "${PAYKAN_TOOLCHAIN_VERSION} (${Paykan_DIR}) accepts ${accepted}")
+    endif()
+    if(NOT ARGN)
+        message(FATAL_ERROR "paykan_add_${kind}_plugin(${target}): no sources")
+    endif()
+    add_library(${target} STATIC ${ARGN})
+    target_link_libraries(${target} PUBLIC Paykan::${kind})
+endfunction()
+
+function(paykan_add_frontend_plugin target)
+    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "BUILT_WITH" "")
+    _paykan_add_plugin_library(frontend ${target} "${ARG_BUILT_WITH}"
+                               ${ARG_UNPARSED_ARGUMENTS})
+endfunction()
+
+function(paykan_add_backend_plugin target)
+    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "BUILT_WITH" "")
+    _paykan_add_plugin_library(backend ${target} "${ARG_BUILT_WITH}"
+                               ${ARG_UNPARSED_ARGUMENTS})
 endfunction()
 
 check_required_components(Paykan)

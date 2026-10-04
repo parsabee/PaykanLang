@@ -98,7 +98,12 @@ std::string_view defaultFrontend();
 
 /// Registers a frontend plugin.  @p ID is an identifier unique within the
 /// plugin library, @p NAME the name users select it by, @p FACTORY a
-/// `std::unique_ptr<paykan::frontend::Frontend> (*)()`.
+/// `std::unique_ptr<paykan::frontend::Frontend> (*)()`.  The registration
+/// records PAYKAN_PLUGIN_BUILD_VERSION, the PaykanLang version of the headers
+/// the plugin is compiled against, and the registry accepts the plugin only
+/// if the running paykan lists that version as compatible (paykan/Registry.h).
 #define PAYKAN_REGISTER_FRONTEND(ID, NAME, FACTORY)                            \
   static const ::paykan::plugin::Registration<::paykan::frontend::Frontend>    \
-      paykanFrontendRegistration_##ID(NAME, FACTORY)
+      paykanFrontendRegistration_##ID(                                         \
+          ::paykan::plugin::PluginInfo<::paykan::frontend::Frontend>{          \
+              NAME, FACTORY, PAYKAN_PLUGIN_BUILD_VERSION})

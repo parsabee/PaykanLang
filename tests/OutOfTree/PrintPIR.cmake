@@ -48,6 +48,13 @@ if(NOT STEP_OUTPUT MATCHES "print-pir")
     message(FATAL_ERROR "print-pir is not registered:\n${STEP_OUTPUT}")
 endif()
 
+# The plugin records the PaykanLang version it was built with, and the
+# installation accepts it (#103).
+run_step("paykan-print-pir --version" ${driver} --version)
+if(NOT STEP_OUTPUT MATCHES "\nbackend print-pir \\(built with PaykanLang [^,\n]+, compatible\\)")
+    message(FATAL_ERROR "print-pir is not listed as compatible:\n${STEP_OUTPUT}")
+endif()
+
 set(sample ${PAYKAN_SOURCE_DIR}/samples/codegen/01_literals.pkn)
 run_step("print-pir --emit-source" ${driver} --backend=print-pir --emit-source ${sample})
 set(plugin_pir "${STEP_OUTPUT}")
