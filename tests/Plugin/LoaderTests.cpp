@@ -312,6 +312,9 @@ TEST_F(PluginLoader, SystemDirectoryIsFoundRelativeToTheExecutable) {
   fs::copy_file(kPaykan, bin / "paykan");
   fs::path sys = (bin / PAYKAN_TEST_PLUGIN_DIR_FROM_BINDIR).lexically_normal();
   fs::create_directories(sys);
+  // paykan finds it from its own canonical path (on macOS the temporary
+  // directory, /var/folders/..., is really /private/var/folders/...).
+  sys = fs::canonical(sys);
   fs::copy_file(plugin("good", "good"), sys / ("libgood" + kSuffix));
   auto r = paykan("--list-backends", "", (bin / "paykan").string());
   ASSERT_EQ(r.Code, 0) << r.Err;
