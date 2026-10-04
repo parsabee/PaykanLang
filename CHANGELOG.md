@@ -147,6 +147,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A string literal used as an object (`"ab"[1]`, `"abc".len()`, `mov "lit"`
+  in any position, a literal in a tuple, array or optional) is now a `Str`
+  object; it was passed as its raw C string, an internal compiler error
+  (#116). User functions spelled like runtime symbols (`PaykanString_new`,
+  `Paykan_println`, `Paykan_panic_div_by_zero`, ...) no longer replace or
+  clash with the runtime's, which was an internal compiler error or a silent
+  miscompile (#117): runtime externs are now named `$rt.<symbol>` in PIR
+  (`docs/pir.md` §3), a name no Paykan identifier can spell.
 - An empty array literal `[]` stored into a class field, passed as a
   call/method/`push` argument, returned, stored through a subscript, or nested
   in another literal was compiled as a primitive-element array regardless of
