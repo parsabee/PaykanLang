@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Grammar corners where the Bison grammar used to disagree with
-// docs/grammar.md (see its section 10).  These run on every frontend.
+// Grammar corners where frontends have disagreed with docs/grammar.md (see
+// its section 10).  These run on every frontend, out-of-tree ones included
+// (paykan_add_frontend_tests, docs/writing-a-frontend.md).
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -222,7 +223,8 @@ TEST(GrammarEdge, NestingTooDeepInBlocksIsTheOnlyError) {
 }
 
 TEST(GrammarEdge, PathologicalNestingIsRejectedNotCrashed) {
-  // 100,000 levels used to overflow the stack after a Bison parse.
+  // 100,000 levels used to overflow the stack in the passes after a parse
+  // that kept its own stack on the heap (Sema, the AST printer).
   for (const char *open : {"{ ", "(", "-", "if a then "}) {
     std::string src = "fn main() -> int { ";
     std::string o(open);

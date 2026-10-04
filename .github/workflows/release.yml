@@ -53,9 +53,8 @@ jobs:
       # Only paykan and the runtime are shipped: no test suite, so no GoogleTest.
       # The release ships the core (#27, #123): the recursive-descent frontend
       # and the c backend, which need only a C compiler at run time.  The
-      # opt-in Bison frontend and LLVM backend are not in the tarballs.  The
-      # lists are the defaults, spelled out so the shipped configuration
-      # stays explicit.
+      # opt-in LLVM backend is not in the tarballs.  The lists are the
+      # defaults, spelled out so the shipped configuration stays explicit.
       - name: Configure (Release, core)
         run: >-
           cmake -B build -DCMAKE_BUILD_TYPE=Release -G "${{ matrix.generator }}"

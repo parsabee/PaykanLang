@@ -1,0 +1,95 @@
+# PaykanFrontendTests.cmake -- installed with Paykan, included by
+# PaykanConfig.cmake (find_package(Paykan))
+# ----------------------------------------------------------------------------
+# Test support for out-of-tree frontends (docs/writing-a-frontend.md): the
+# frontend-parameterized parser and Sema suites, the fuzz smoke and
+# differential tests, and the samples corpus of this Paykan installation,
+# built against a plugin's frontend.  Every frontend implements
+# docs/grammar.md and must build the same AST as the recursive-descent
+# frontend; these are the suites that check it.
+#
+# Variables:
+#   PAYKAN_TEST_SUPPORT_DIR  the installed test sources (TestUtils.h,
+#                            Parser/, Sema/, Frontend/)
+#   PAYKAN_SAMPLES_DIR       the installed samples corpus (read-only: copy it
+#                            before running samples that write caches)
+#
+# Functions:
+#   paykan_add_frontend_tests(<frontend-name>
+#       [PLUGINS <lib>...]      the plugin libraries that register the
+#                               frontend (linked whole, with the
+#                               installation's frontends)
+#       [GTEST_MAIN <target>]   GoogleTest's main library (default
+#                               GTest::gtest_main; the caller provides
+#                               GoogleTest, e.g. find_package(GTest) or
+#                               FetchContent)
+#       [PREFIX <name>])        prefix of the test executables (default:
+#                               <frontend-name> with '-' replaced by '_')
+#
+#   adds the executables <prefix>_parser_tests, <prefix>_sema_tests and
+#   <prefix>_frontend_tests, and the tests ParserTests.<frontend-name>,
+#   SemaTests.<frontend-name> and FrontendTests.<frontend-name>.  The suites
+#   parse with <frontend-name> (PAYKAN_TEST_FRONTEND) and compare every
+#   parse with every other frontend linked in, so with the installation's
+#   recursive-descent frontend each test input is also a differential check.
+#   Call enable_testing() first.
+# ----------------------------------------------------------------------------
+
+get_filename_component(PAYKAN_TEST_SUPPORT_DIR
+    "${CMAKE_CURRENT_LIST_DIR}/@PAYKAN_TEST_SUPPORT_RELDIR@" ABSOLUTE)
+get_filename_component(PAYKAN_SAMPLES_DIR
+    "${CMAKE_CURRENT_LIST_DIR}/@PAYKAN_SAMPLES_RELDIR@" ABSOLUTE)
+
+function(paykan_add_frontend_tests frontend)
+    cmake_parse_arguments(ARG "" "GTEST_MAIN;PREFIX" "PLUGINS" ${ARGN})
+    if(NOT ARG_GTEST_MAIN)
+        set(ARG_GTEST_MAIN GTest::gtest_main)
+    endif()
+    if(NOT TARGET ${ARG_GTEST_MAIN})
+        message(FATAL_ERROR "paykan_add_frontend_tests: no GoogleTest target "
+                            "'${ARG_GTEST_MAIN}' (find_package(GTest) or FetchContent "
+                            "it first, or pass GTEST_MAIN)")
+    endif()
+    if(NOT ARG_PREFIX)
+        string(REPLACE "-" "_" ARG_PREFIX "${frontend}")
+    endif()
+
+    # The frontends to link: the installation's (the reference the suites
+    # compare against) and the caller's.
+    set(plugins "")
+    foreach(p IN LISTS PAYKAN_PLUGINS)
+        if(p MATCHES "^Paykan::frontend_")
+            list(APPEND plugins ${p})
+        endif()
+    endforeach()
+    list(APPEND plugins ${ARG_PLUGINS})
+
+    set(dir "${PAYKAN_TEST_SUPPORT_DIR}")
+    file(GLOB parser_sources CONFIGURE_DEPENDS "${dir}/Parser/*.cpp")
+    file(GLOB sema_sources CONFIGURE_DEPENDS "${dir}/Sema/*.cpp")
+    set(frontend_sources "${dir}/Frontend/FuzzSmokeTests.cpp"
+                         "${dir}/Frontend/DifferentialTests.cpp")
+
+    foreach(suite parser sema frontend)
+        set(exe ${ARG_PREFIX}_${suite}_tests)
+        add_executable(${exe} ${${suite}_sources})
+        target_include_directories(${exe} PRIVATE "${dir}")
+        target_link_libraries(${exe} PRIVATE ${ARG_GTEST_MAIN}
+                                             Paykan::frontend
+                                             Paykan::ast_printer
+                                             Paykan::compile_options)
+        foreach(p IN LISTS plugins)
+            target_link_libraries(${exe} PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,${p}>")
+        endforeach()
+    endforeach()
+    target_link_libraries(${ARG_PREFIX}_sema_tests PRIVATE Paykan::sema)
+    target_compile_definitions(${ARG_PREFIX}_frontend_tests PRIVATE
+        PAYKAN_SAMPLES_DIR="${PAYKAN_SAMPLES_DIR}")
+
+    add_test(NAME ParserTests.${frontend} COMMAND ${ARG_PREFIX}_parser_tests)
+    add_test(NAME SemaTests.${frontend} COMMAND ${ARG_PREFIX}_sema_tests)
+    add_test(NAME FrontendTests.${frontend} COMMAND ${ARG_PREFIX}_frontend_tests)
+    set_tests_properties(ParserTests.${frontend} SemaTests.${frontend}
+                         FrontendTests.${frontend}
+        PROPERTIES ENVIRONMENT "PAYKAN_TEST_FRONTEND=${frontend}")
+endfunction()

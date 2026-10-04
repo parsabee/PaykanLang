@@ -20,8 +20,9 @@
 # It builds the core, like the release tarballs (#27, #123): the
 # recursive-descent frontend and the c backend, which need only a C++20
 # compiler to build and a C compiler at run time. Nothing is downloaded: the
-# opt-in LLVM backend and Bison frontend are not enabled, and the test suite
-# (and so GoogleTest) is not built (-DPAYKAN_BUILD_TESTS=OFF).
+# opt-in LLVM backend is not enabled, and the test suite (and so GoogleTest)
+# is not built (-DPAYKAN_BUILD_TESTS=OFF). Out-of-tree frontend and backend
+# plugins build against this installation with find_package(Paykan).
 #
 # NOTE: `sha256` below is a placeholder. After the tag exists, set it to the
 # real digest of the archive `url` names, e.g.:

@@ -14,7 +14,7 @@
 #
 # Exported targets are namespaced Paykan:: and lose their paykan_ prefix:
 # Paykan::backend, Paykan::pir, Paykan::frontend, Paykan::driver, ... plus
-# every built plugin (Paykan::frontend_bison, Paykan::backend_llvm, ...).
+# every built plugin (Paykan::frontend_recursive_descent, Paykan::backend_llvm, ...).
 # ----------------------------------------------------------------------------
 
 include(GNUInstallDirs)

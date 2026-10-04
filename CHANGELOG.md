@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking changes
+
+- **The Bison frontend moved to its own repository (#60).** The Bison/Flex
+  frontend is now the out-of-tree plugin
+  [PaykanLang_Bison_Frontend](https://github.com/parsabee/PaykanLang_Bison_Frontend),
+  built against an installed PaykanLang with `find_package(Paykan)`; it
+  produces a `paykan` driver with `--frontend=bison`. PaykanLang no longer
+  builds or downloads Bison, Flex or m4: `bison` is no longer
+  accepted in `PAYKAN_FRONTENDS` (which lists in-tree frontends only), and
+  the full build is `-DPAYKAN_BACKENDS="llvm;c"`. The frontend differential
+  check (`scripts/diff_frontends.py`, the "Frontend differential" CI job)
+  moved with it. `--trace-parser` / `--trace-scanner` stay, for any
+  frontend that has traces.
+
+### Added
+
+- **Test support for out-of-tree frontends (#60).** An installation carries
+  the frontend-parameterized parser and Sema suites, the fuzz smoke and
+  differential tests and the samples corpus, and `find_package(Paykan)`
+  provides `paykan_add_frontend_tests()`, which builds them against a
+  plugin's frontend (`docs/writing-a-frontend.md`).
+  `-DPAYKAN_INSTALL_TEST_SUPPORT=OFF` leaves them out.
+
 ## [0.1.0-alpha] - 2026-10-03
 
 The first tagged release, published as a GitHub pre-release. PaykanLang is now

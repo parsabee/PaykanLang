@@ -23,6 +23,9 @@
 #       at PAYKAN_RUNTIME_LIBRARY / PAYKAN_RUNTIME_INCLUDE_DIR (after
 #       $PAYKAN_RUNTIME_DIR), wherever its own executable is.
 #       See docs/writing-a-backend.md.
+#   paykan_add_frontend_tests(<frontend> [PLUGINS <lib>...])
+#       The parser, Sema and frontend suites against a frontend plugin
+#       (PaykanFrontendTests.cmake; docs/writing-a-frontend.md).
 # ----------------------------------------------------------------------------
 @PACKAGE_INIT@
 
@@ -73,5 +76,9 @@ const struct PackageRuntime {
         target_link_libraries(${target} PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,${plugin}>")
     endforeach()
 endfunction()
+
+# paykan_add_frontend_tests(), when the installation carries the test support
+# (PaykanFrontendTests.cmake, docs/writing-a-frontend.md).
+include("${CMAKE_CURRENT_LIST_DIR}/PaykanFrontendTests.cmake" OPTIONAL)
 
 check_required_components(Paykan)

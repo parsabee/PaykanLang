@@ -45,7 +45,7 @@ platform (with its SHA-256 sum) holding `bin/paykan`, the runtime and its header
 anywhere and put its `bin/` on the `PATH`. The release builds and the Homebrew formula are the
 core build (the recursive-descent frontend and the C backend). Programs are compiled with the
 system C compiler, so a C11 compiler (`cc`) must be installed. Or build from source (below),
-which also offers the opt-in LLVM backend and Bison frontend.
+which also offers the opt-in LLVM backend.
 
 ### Homebrew (macOS)
 
@@ -61,28 +61,28 @@ paykan --version
 
 Prerequisites: CMake 3.24 or newer and a C++20 compiler to build PaykanLang, plus a C11
 compiler (`cc`) at run time, which the C backend uses to compile programs. The default build
-needs nothing else (the test suite's GoogleTest aside, see below); the LLVM backend and the
-Bison frontend are opt-in.
+needs nothing else (the test suite's GoogleTest aside, see below); the LLVM backend is
+opt-in.
 
 ```sh
 git clone https://github.com/parsabee/PaykanLang.git
 cd PaykanLang
 cmake -B build
 cmake --build build --parallel
-# the full build, with the opt-in Bison frontend and LLVM backend:
-# cmake -B build "-DPAYKAN_FRONTENDS=recursive-descent;bison" "-DPAYKAN_BACKENDS=llvm;c"
+# the full build, with the opt-in LLVM backend:
+# cmake -B build "-DPAYKAN_BACKENDS=llvm;c"
 ```
 
-The frontend (lexer + parser) is pluggable. `-DPAYKAN_FRONTENDS=<list>` selects the
-frontends to build (default: `recursive-descent`); the first one listed is the default, and
-the others are selected at run time with `--frontend=<name>` (`--list-frontends` prints
-them). The recursive-descent frontend (standard C++ only) is always built. The Bison
-frontend is opt-in (`-DPAYKAN_FRONTENDS="recursive-descent;bison"`) and is moving to a
-separate plugin repository (#60): Bison and Flex are downloaded and built only when `bison`
-is listed; that from-source build (GNU `configure` and `make`) needs GNU `m4` on the `PATH`,
-which Bison also runs to generate the parser (`apt install m4`; macOS ships it with the
-Command Line Tools). Both implement `docs/grammar.md` and must
-produce identical ASTs: `scripts/diff_frontends.py` checks that over every sample, and
+The frontend (lexer + parser) is pluggable. `-DPAYKAN_FRONTENDS=<list>` lists the in-tree
+frontends to build; today that is `recursive-descent` (standard C++ only), which is always
+built and is the default. Out-of-tree frontends are plugins built against an installed
+PaykanLang with `find_package(Paykan)`; each produces a `paykan` driver that has its
+frontend registered next to the installation's, selected at run time with
+`--frontend=<name>` (`--list-frontends` prints them). Every frontend implements
+[`docs/grammar.md`](docs/grammar.md) and must build the same AST as the recursive-descent
+frontend; [`docs/writing-a-frontend.md`](docs/writing-a-frontend.md) explains how to write
+one and how to run PaykanLang's parser and Sema suites against it. The reference example is
+the Bison frontend, [PaykanLang_Bison_Frontend](https://github.com/parsabee/PaykanLang_Bison_Frontend).
 `--dump-tokens` prints a frontend's token stream.
 
 The backend is pluggable too. `-DPAYKAN_BACKENDS=<list>` selects the backends to build:
@@ -97,7 +97,7 @@ the first backend listed.) LLVM is
 downloaded only when `llvm` is listed, so the default configure (`recursive-descent` + `c`) is
 a **barebones build** that needs nothing but a C++20 compiler and a C compiler (CI checks that
 it downloads nothing and links no third-party library). The full build is
-`-DPAYKAN_FRONTENDS="recursive-descent;bison" -DPAYKAN_BACKENDS="llvm;c"`.
+`-DPAYKAN_BACKENDS="llvm;c"`.
 Every backend consumes the Paykan IR described in [`docs/pir.md`](docs/pir.md);
 [`docs/writing-a-backend.md`](docs/writing-a-backend.md) explains how to write one, in tree or
 out of tree against `find_package(Paykan)` (see [`utils/print-pir`](utils/print-pir)).
@@ -122,7 +122,7 @@ cmake --install build --prefix /usr/local
 paykan program.pkn              # run a source file (same as `paykan run program.pkn`)
 paykan build program.pkn -o prog # compile a native executable
 paykan --backend=c program.pkn  # pick a backend (--list-backends prints them)
-paykan --frontend=bison program.pkn # pick a frontend (--list-frontends prints them)
+paykan --frontend=NAME program.pkn # pick a frontend (--list-frontends prints them)
 paykan --check-only program.pkn # stop after type-checking (no codegen)
 paykan --dump-ast program.pkn   # print the parsed AST
 paykan --emit-pir program.pkn   # print the backend-neutral IR (docs/pir.md)

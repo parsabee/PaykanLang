@@ -1,13 +1,16 @@
 # Paykan grammar
 
 This document is the specification of Paykan's concrete syntax. Every
-frontend implements it: the recursive-descent frontend (`src/Frontends/RecursiveDescent`,
-the default) and the Bison/Flex frontend (`src/Frontends/Bison`, optional).
-Both must build exactly the same AST for every input and must accept and
-reject the same inputs; the differential check in CI
-(`tests/Frontend/DifferentialTests.cpp` and `scripts/diff_frontends.py`)
-enforces it. When the grammar changes, this file changes first, then both
-frontends.
+frontend implements it: the in-tree recursive-descent frontend
+(`src/Frontends/RecursiveDescent`, the default) and every out-of-tree
+frontend plugin ([writing-a-frontend.md](writing-a-frontend.md)). An
+out-of-tree frontend must follow this specification: it must build exactly
+the same AST as the recursive-descent frontend for every input and must
+accept and reject the same inputs. The parser and Sema suites and the
+differential check (`tests/Frontend/DifferentialTests.cpp`), which a plugin
+runs against its frontend with `paykan_add_frontend_tests`, enforce it.
+When the grammar changes, this file changes first, then the
+recursive-descent frontend; out-of-tree frontends follow.
 
 Notation: EBNF. `"x"` is a literal, `A?` optional, `A*` zero or more, `A+`
 one or more, `A | B` alternatives, `( ... )` grouping. Terminals are in
@@ -83,7 +86,7 @@ Any other byte is a lexical error (`invalid character 'X'`).
   or file is an error (`unterminated character literal`).  With the
   recursive-descent frontend, a literal holding more than one character
   before its closing quote (`'ab'`) is one error (`character literal must
-  contain exactly one character ...`); the Bison scanner reports it as
+  contain exactly one character ...`); another frontend may report it as
   unterminated.
 - `STRING` escapes: `\n` `\t` `\r` `\\` `\"` `\0`; any other `\X` is kept
   verbatim as the two characters `\X`. String literals are single-line: a
@@ -96,8 +99,8 @@ A run of digits immediately after a `.` (no whitespace between) is a tuple
 index, not a number: `t.0.1` is `t` `.` `0` `.` `1`, never `t` `.` `0.1`. A
 tuple index must not have leading zeros (`tuple index must not have leading
 zeros: .00`) and must fit in 64 bits. `t. 0` (whitespace after the dot) is
-a syntax error. The Bison frontend implements the same rule with a
-`TUPLE_INDEX` token (`\.[0-9]+`, longest match at the dot).
+a syntax error. A scanner-generated frontend can implement the rule with
+one tuple-index token (`\.[0-9]+`, longest match at the dot).
 
 ## 2. Translation unit
 
@@ -288,12 +291,12 @@ generic call. It is a generic call exactly when a `typeArgList` followed by
 `lib::Box<int>(1)`); otherwise `<` is the relational operator.
 
 The recursive-descent frontend decides this by speculatively parsing the type
-argument list. The Bison frontend decides it in its scanner (a `<` right
-after an identifier is scanned ahead over type-list tokens to the matching
-`>`; if `(` follows, it opens type arguments). The two agree on every input:
-in `f(a < b, c) > (d)` the `)` closes the call's own parenthesis before any
-`>`, so both read it as a comparison of `f(a < b, c)` with `(d)` and build
-the same AST.
+argument list. An LALR(1) frontend can decide it in its scanner instead: a
+`<` right after an identifier is scanned ahead over type-list tokens to the
+matching `>`, and opens type arguments if `(` follows. Both readings agree on
+every input: in `f(a < b, c) > (d)` the `)` closes the call's own parenthesis
+before any `>`, so it is a comparison of `f(a < b, c)` with `(d)` either
+way, with the same AST.
 
 ### Conversion constructors
 
@@ -302,15 +305,15 @@ A conversion `Target<Source>(value)` (`Str<int>(n)`, `int<float>(f)`,
 a separate production: it is the generic-call form above. The builtin type
 names `int`, `float`, `bool`, `char` and `void` are ordinary `IDENT`s (they
 are resolved as type names, not reserved by the scanner), so `int<Str>(s)`
-parses exactly like `Box<int>(1)`. Both frontends build a `CallExpr` whose
+parses exactly like `Box<int>(1)`. Every frontend builds a `CallExpr` whose
 callee is the target name, with one type argument and one argument. Sema
 tells a conversion apart from a generic constructor by its callee.
 
 ## 8. AST and source locations
 
-Both frontends produce the node kinds in `include/AST.h`. Locations are
+Every frontend produces the node kinds in `include/AST.h`. Locations are
 `<line:col-line:col>` with 1-based lines and columns and an exclusive end
-column, as `--dump-ast` prints them. Rules that both frontends follow:
+column, as `--dump-ast` prints them. Rules that every frontend follows:
 
 - A token's location is its first byte to one past its last byte.
 - A composite node spans from the first byte of its first token to one past
@@ -320,9 +323,9 @@ column, as `--dump-ast` prints them. Rules that both frontends follow:
 - Statement nodes include their terminating `;`; the `VarDecl` inside a
   `DeclStmt` ends with its initializer, and a class field's `VarDecl` ends
   with its type.
-- A `CompoundStmt`'s location is the empty range just after its `{` (the
-  Bison frontend's location of an empty production), regardless of its
-  contents.
+- A `CompoundStmt`'s location is the empty range just after its `{`
+  (the location of an empty production in an LALR parser), regardless of
+  its contents.
 - The `TranslationUnit` spans `1:1` to the end of its last declaration;
   an empty file gives `<1:1-1:1>`.
 - Builtin and bootstrap types resolved at parse time (`int`, `Str`, ...)
@@ -343,27 +346,27 @@ The recursive-descent frontend recovers from a syntax error at the next
 statement boundary (`;`, or the `}` of the enclosing block, matching braces
 on the way), at the next class member (`fn`, `;`, `}`) and at the next
 top-level declaration (`import`, `class`, `enum`, `fn`), so one file can
-report several independent errors. The Bison frontend recovers only at
-`;` inside a block. Any error makes the parse fail; a file with errors is
-never handed to Sema.
+report several independent errors. Another frontend may recover less (for
+example only at `;` inside a block). Any error makes the parse fail; a file
+with errors is never handed to Sema.
 
 Nesting (blocks, parentheses, brackets, type applications, prefix
 operators and conditional expressions) deeper than 512 levels is rejected
-with `nesting too deep` by both frontends, so pathological inputs cannot
+with `nesting too deep` by every frontend, so pathological inputs cannot
 overflow the stack of the parser or of the passes after it.
 
-Both frontends report lexical and syntax errors in source order, and
+Every frontend reports lexical and syntax errors in source order, and
 locate the common ones alike (a tuple index with leading zeros at its `.`,
 an unclosed `[]` type suffix where the `]` is missing). Beyond that the
 diagnostics are not part of the differential check: each frontend words its
 syntax errors and recovers in its own way, so the location of the first
 error can differ by a token, and the follow-on errors can differ.
 
-## 10. Known differences and intentional non-copies
+## 10. Forms that are easy to accept by accident
 
-The Bison grammar accepts a few forms by accident that this specification
-does not; the recursive-descent frontend rejects them and the samples never use
-them:
+A generated grammar can accept a few forms by accident that this
+specification does not. Every frontend must reject them (the
+`GrammarEdge` parser tests check it), and the samples never use them:
 
 - A leading comma in an argument list, array literal or parameter list:
   `f(, 1)`, `[, 1]`, `fn f(, a: int)`.

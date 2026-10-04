@@ -334,9 +334,11 @@ foreach(be IN LISTS PAYKAN_BACKENDS)
     endif()
 endforeach()
 
-# --- Frontend tests: lexer, recovery, fuzz smoke of the recursive-descent -----
+# --- Frontend tests: lexer, recovery and fuzz smoke of the recursive-descent --
 # --- frontend; and the differential check of every enabled frontend over -----
-# --- the samples corpus
+# --- the samples corpus (an out-of-tree frontend runs the fuzz smoke and -----
+# --- differential tests, and the parser and Sema suites, through ------------
+# --- paykan_add_frontend_tests: cmake/PaykanTestSupport.cmake) ---------------
 add_executable(frontend_tests
     Frontend/LexerTests.cpp
     Frontend/RecoveryTests.cpp
@@ -357,20 +359,6 @@ target_link_libraries(frontend_tests
 # tests use directly) comes in through the plugin link below.
 paykan_link_plugins(frontend_tests)
 add_test(NAME FrontendTests COMMAND frontend_tests)
-
-# The same check through the driver (`paykan --frontend=<name> --dump-ast`),
-# for the first two enabled frontends.
-if(PAYKAN_NUM_FRONTENDS GREATER 1)
-    find_package(Python3 COMPONENTS Interpreter)
-    if(Python3_Interpreter_FOUND)
-        list(GET PAYKAN_FRONTENDS 0 PAYKAN_DIFF_FE_A)
-        list(GET PAYKAN_FRONTENDS 1 PAYKAN_DIFF_FE_B)
-        add_test(NAME FrontendDifferential
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/diff_frontends.py
-                    --paykan $<TARGET_FILE:paykan>
-                    --frontends ${PAYKAN_DIFF_FE_A},${PAYKAN_DIFF_FE_B})
-    endif()
-endif()
 
 # A plain configure (only -DPAYKAN_BUILD_TESTS=OFF) is the core build:
 # recursive-descent + c, nothing downloaded, no third-party/ or _deps/
@@ -426,4 +414,33 @@ if(NOT PAYKAN_SANITIZER_FLAGS AND NOT PAYKAN_COVERAGE_FLAGS)
                 -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
                 ${PAYKAN_OOT_ARGS}
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/OutOfTree/PrintPIR.cmake)
+endif()
+
+# --- The exported frontend test support: install this tree, build the -------
+# --- parser, Sema and frontend suites against it with ------------------------
+# --- paykan_add_frontend_tests() for the installation's recursive-descent ---
+# --- frontend and run them (tests/OutOfTree/FrontendTests.cmake), as an -----
+# --- out-of-tree frontend does. Skipped for instrumented builds, like -------
+# --- PrintPIROutOfTree.
+if(PAYKAN_INSTALL_TEST_SUPPORT AND NOT PAYKAN_SANITIZER_FLAGS
+   AND NOT PAYKAN_COVERAGE_FLAGS)
+    set(PAYKAN_OOT_FE_ARGS "")
+    if(TARGET paykan_backend_llvm)
+        list(APPEND PAYKAN_OOT_FE_ARGS -DLLVM_DIR=${LLVM_DIR})
+    endif()
+    if(googletest_SOURCE_DIR)
+        list(APPEND PAYKAN_OOT_FE_ARGS -DGTEST_SOURCE_DIR=${googletest_SOURCE_DIR})
+    elseif(GTest_DIR)
+        list(APPEND PAYKAN_OOT_FE_ARGS -DGTest_DIR=${GTest_DIR})
+    endif()
+    add_test(NAME FrontendTestsOutOfTree
+        COMMAND ${CMAKE_COMMAND}
+                -DPAYKAN_BUILD_DIR=${CMAKE_BINARY_DIR}
+                -DPAYKAN_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+                -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/frontend-tests-out-of-tree
+                -DGENERATOR=${CMAKE_GENERATOR}
+                -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+                -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+                ${PAYKAN_OOT_FE_ARGS}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/OutOfTree/FrontendTests.cmake)
 endif()

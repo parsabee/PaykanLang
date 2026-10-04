@@ -49,7 +49,7 @@ foreach(dir third-party _deps)
         string(APPEND failures "  ${dir}/ was created\n")
     endif()
 endforeach()
-if(log MATCHES "Downloading|LLVM not found|prebuilt LLVM|LLVM installed|Bison|Flex|GTest")
+if(log MATCHES "Downloading|LLVM not found|prebuilt LLVM|LLVM installed|GTest")
     string(APPEND failures "  the log mentions a third-party dependency: '${CMAKE_MATCH_0}'\n")
 endif()
 

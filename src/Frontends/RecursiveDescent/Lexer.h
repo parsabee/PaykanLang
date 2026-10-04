@@ -89,7 +89,7 @@ const char *tokenKindName(Tok k);
 struct Token {
   Tok Kind = Tok::Eof;
   /// Source range: 1-based line/column; the end column is one past the last
-  /// character (the same convention as the Bison frontend, so that AST node
+  /// character (the convention every frontend follows, so that AST node
   /// locations match exactly).
   ast::SourceLocation Loc;
   /// The raw source text of the token (a view into the lexer's buffer).

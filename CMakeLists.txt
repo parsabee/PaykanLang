@@ -31,15 +31,11 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # -- Third-party dependency versions ------------------------------------------
 # Pinned versions; hashes are verified in each Setup module.
 set(LLVM_VERSION  "17.0.6")
-set(BISON_VERSION "3.8")
-set(FLEX_VERSION  "2.6.4")
 set(GTEST_VERSION "1.15.2")
 
 # All third-party artifacts live under <build>/third-party/.
 set(THIRD_PARTY_DIR  ${CMAKE_BINARY_DIR}/third-party)
 set(LLVM_INSTALL_DIR ${THIRD_PARTY_DIR}/llvm)
-set(BISON_INSTALL_DIR ${THIRD_PARTY_DIR}/bison)
-set(FLEX_INSTALL_DIR  ${THIRD_PARTY_DIR}/flex)
 set(GTEST_INSTALL_DIR ${THIRD_PARTY_DIR}/gtest)
 
 # -- Compiler gate ------------------------------------------------------------
@@ -58,14 +54,15 @@ include(PaykanPlugins)      # -> PAYKAN_FRONTENDS / PAYKAN_BACKENDS, plugin help
 if(PAYKAN_NEEDS_LLVM)
     include(LLVMSetup)      # -> paykan_llvm       INTERFACE target
 endif()
-if("bison" IN_LIST PAYKAN_FRONTENDS)
-    include(BisonFlexSetup) # -> bison_ext, flex_ext ExternalProject targets
-endif()
 
 # The test suite (GoogleTest) is built by default only when PaykanLang is the
 # top-level project.  -DPAYKAN_BUILD_TESTS=OFF skips it, and with it the
 # GoogleTest download: packagers and offline builds need no network.
 option(PAYKAN_BUILD_TESTS "Build the test suite (needs GoogleTest)" ${PROJECT_IS_TOP_LEVEL})
+# The frontend test suites and the samples corpus, installed as sources for
+# out-of-tree frontends (cmake/PaykanTestSupport.cmake).
+option(PAYKAN_INSTALL_TEST_SUPPORT
+    "Install the frontend test suites and the samples corpus for out-of-tree frontends" ON)
 if(PAYKAN_BUILD_TESTS)
     include(GTestSetup)     # -> gtest, gmock       installed or via FetchContent
     enable_testing()
@@ -117,3 +114,4 @@ endif()
 
 # -- Install rules and the find_package(Paykan) package -----------------------
 include(PaykanExport)
+include(PaykanTestSupport)  # -> the frontend test suites for out-of-tree frontends

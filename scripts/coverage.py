@@ -4,12 +4,10 @@
 Prerequisites: a Clang with llvm-profdata / llvm-cov, and a coverage tree.
 The vendored LLVM 17 under build/third-party/llvm is downloaded only by a
 configure that lists the llvm backend; a plain configure (recursive-descent +
-c) does not download it, so pass the full lists, e.g.
+c) does not download it, so pass the full list, e.g.
 
-    cmake -B build "-DPAYKAN_FRONTENDS=recursive-descent;bison" \\
-          "-DPAYKAN_BACKENDS=llvm;c"
+    cmake -B build "-DPAYKAN_BACKENDS=llvm;c"
     cmake -B build-cov -DPAYKAN_COVERAGE=ON \\
-          "-DPAYKAN_FRONTENDS=recursive-descent;bison" \\
           "-DPAYKAN_BACKENDS=llvm;c" \\
           -DCMAKE_C_COMPILER=build/third-party/llvm/bin/clang \\
           -DCMAKE_CXX_COMPILER=build/third-party/llvm/bin/clang++
@@ -52,8 +50,7 @@ import time
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 IGNORE_REGEX = (
-    r"(/build/|/build-cov/|/third-party/|Parser\.tab|Lexer\.yy|Parser\.ypp|"
-    r"Lexer\.lpp|/tests/|/googletest/|/googlemock/)"
+    r"(/build/|/build-cov/|/third-party/|/tests/|/googletest/|/googlemock/)"
 )
 
 

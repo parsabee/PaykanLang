@@ -423,8 +423,9 @@ bool parsePredName(std::string_view s, CmpPred &out) {
 
 class Parser {
 public:
-  Parser(std::string_view text, ParseError &err) : Lex(text, err), Err(err) {
-    Cur = Lex.next();
+  Parser(std::string_view text, ParseError &err)
+      : TheLexer(text, err), Err(err) {
+    Cur = TheLexer.next();
   }
 
   bool parseProgram(Program &out) {
@@ -450,7 +451,7 @@ public:
   }
 
 private:
-  Lexer Lex;
+  Lexer TheLexer;
   ParseError &Err;
   Token Cur;
   unsigned PrevLine = 0; // line of the token before Cur
@@ -471,7 +472,7 @@ private:
 
   void advance() {
     PrevLine = Cur.Line;
-    Cur = Lex.next();
+    Cur = TheLexer.next();
   }
 
   bool isWord(const char *w) const {
@@ -972,7 +973,7 @@ private:
     return true;
   }
 
-  /// `Class.field`.  A bare class name and the field lex as one word
+  /// `Class.field`.  A bare class name and the field scan as one word
   /// (`Point.x`, split at the last '.'); a quoted class name is followed by
   /// a '.' token and the field.
   bool parseFieldRef(Instr &in) {

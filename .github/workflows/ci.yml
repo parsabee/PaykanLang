@@ -10,9 +10,9 @@ on:
   workflow_dispatch:
 
 # The default configure is the core build (recursive-descent + c, nothing
-# downloaded, #123).  Jobs that test the opt-in Bison frontend and LLVM
-# backend pass the full lists explicitly:
-#   "-DPAYKAN_FRONTENDS=recursive-descent;bison" "-DPAYKAN_BACKENDS=llvm;c"
+# downloaded, #123).  Jobs that test the opt-in LLVM backend pass the full
+# list explicitly:
+#   "-DPAYKAN_BACKENDS=llvm;c"
 # The default backend is c there too (it always is when c is built); every
 # test that means llvm passes --backend=llvm, and the per-backend suites
 # (CodeGenTests.*, DriverTests.*, SamplesParity*) run on both.
@@ -47,13 +47,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/third-party
-          key: third-party-macos-arm64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
+          key: third-party-macos-arm64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       # Configure + build so compile_commands.json and generated Parser/Lexer
       # headers exist (clang-tidy needs them to parse the TUs).  The full
       # build, so every translation unit is checked.
       - name: Configure (Debug, full)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug "-DPAYKAN_FRONTENDS=recursive-descent;bison" "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
         run: cmake --build build --parallel
@@ -77,10 +77,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/third-party
-          key: third-party-macos-arm64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
+          key: third-party-macos-arm64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (Debug, full)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug "-DPAYKAN_FRONTENDS=recursive-descent;bison" "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
         run: cmake --build build --parallel
@@ -104,10 +104,10 @@ jobs:
           # Keyed per build directory: the archive stores the path it was saved
           # from, so a key shared with the build/third-party jobs restores
           # nothing here and is never saved (the key already exists).
-          key: third-party-macos-arm64-asan-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
+          key: third-party-macos-arm64-asan-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (ASan)
-        run: cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_ASAN=ON "-DPAYKAN_FRONTENDS=recursive-descent;bison" "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_ASAN=ON "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
         run: cmake --build build-asan --parallel
@@ -141,10 +141,10 @@ jobs:
           # Keyed per build directory: the archive stores the path it was saved
           # from, so a key shared with the build/third-party jobs restores
           # nothing here and is never saved (the key already exists).
-          key: third-party-macos-arm64-ubsan-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
+          key: third-party-macos-arm64-ubsan-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (UBSan)
-        run: cmake -B build-ubsan -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_UBSAN=ON "-DPAYKAN_FRONTENDS=recursive-descent;bison" "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build-ubsan -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_UBSAN=ON "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
         run: cmake --build build-ubsan --parallel
@@ -170,10 +170,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/third-party
-          key: third-party-linux-x86_64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
+          key: third-party-linux-x86_64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (Debug, full)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -G Ninja "-DPAYKAN_FRONTENDS=recursive-descent;bison" "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -G Ninja "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
         run: cmake --build build --parallel
@@ -202,10 +202,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/third-party
-          key: third-party-linux-x86_64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
+          key: third-party-linux-x86_64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (Release, full)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja "-DPAYKAN_FRONTENDS=recursive-descent;bison" "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
         run: cmake --build build --parallel
@@ -234,19 +234,19 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/third-party
-          key: third-party-macos-arm64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
+          key: third-party-macos-arm64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       # A full configure populates build/third-party (vendored LLVM + GTest),
       # which the coverage tree below reuses for its clang and gtest source.
       # LLVM is opt-in, so the lists are needed for it to be provisioned.
       - name: Configure base tree (provisions vendored toolchain)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug "-DPAYKAN_FRONTENDS=recursive-descent;bison" "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Configure coverage tree
         run: |
           LLVM="$PWD/build/third-party/llvm"
           cmake -B build-cov -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_COVERAGE=ON \
-            "-DPAYKAN_FRONTENDS=recursive-descent;bison" "-DPAYKAN_BACKENDS=llvm;c" \
+            "-DPAYKAN_BACKENDS=llvm;c" \
             -DCMAKE_C_COMPILER="$LLVM/bin/clang" \
             -DCMAKE_CXX_COMPILER="$LLVM/bin/clang++" \
             -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST="$PWD/build/third-party/gtest"
@@ -266,8 +266,8 @@ jobs:
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
-  # Barebones build: standard C++ only.  No LLVM, no Bison/Flex, no m4, and
-  # nothing downloaded at configure time.  This is the DEFAULT configure (no
+  # Barebones build: standard C++ only.  No LLVM, and nothing downloaded at
+  # configure time.  This is the DEFAULT configure (no
   # PAYKAN_FRONTENDS / PAYKAN_BACKENDS: recursive-descent + c, #123).  Proves
   # the acceptance criteria of #16, #77 and #123: with -DPAYKAN_BUILD_TESTS=OFF
   # configure downloads nothing at all (GoogleTest is fetched only for the
@@ -281,16 +281,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system dependencies (and remove the optional ones)
-        run: |
-          sudo apt-get update && sudo apt-get install -y ninja-build
-          sudo apt-get remove -y bison flex m4 || true
-          for tool in bison flex m4; do
-            if command -v "$tool"; then
-              echo "error: $tool is still installed"
-              exit 1
-            fi
-          done
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
 
       # The packager's build (#77): tests off, so not even GoogleTest is fetched.
       # A plain configure: the defaults are the core (#123).
@@ -303,7 +295,7 @@ jobs:
           grep -F "Backends: c (default: c)" configure-notests.log
           # (`! grep` mid-script would not fail the step: bash -e ignores a
           # negated command, actionlint/shellcheck SC2251.)
-          if grep -i "Downloading\|Fetching\|GTest\|Building Bison\|Building Flex\|prebuilt LLVM\|LLVM not found" configure-notests.log; then
+          if grep -i "Downloading\|Fetching\|GTest\|prebuilt LLVM\|LLVM not found" configure-notests.log; then
             echo "error: the configure with tests off downloaded or built something (above)"
             exit 1
           fi
@@ -326,7 +318,7 @@ jobs:
           set -o pipefail
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug 2>&1 | tee configure.log
           # Nothing but GoogleTest may be fetched.
-          if grep -i "Downloading\|Building Bison\|Building Flex" configure.log; then
+          if grep -i "Downloading" configure.log; then
             echo "error: the default configure downloaded or built more than GoogleTest (above)"
             exit 1
           fi
@@ -343,8 +335,8 @@ jobs:
             exit 1
           fi
           nm -C build/bin/paykan > nm.log
-          if grep "llvm::\|yy::\|yylex" nm.log; then
-            echo "error: paykan contains LLVM or Bison/Flex symbols (above)"
+          if grep "llvm::" nm.log; then
+            echo "error: paykan contains LLVM symbols (above)"
             exit 1
           fi
 
@@ -405,34 +397,3 @@ jobs:
           gcc --version && clang --version
           python3 scripts/c_strict.py --paykan build/bin/paykan \
             --cc gcc --cc clang --build-cc gcc --build-cc clang -v
-
-  # ---------------------------------------------------------------------------
-  # Frontend differential: both frontends built, every sample and test input
-  # parsed by each and compared (in process and through the driver).
-  # ---------------------------------------------------------------------------
-  frontend-differential-linux:
-    name: Frontend differential | Linux x86-64
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
-
-      - name: Cache third-party dependencies
-        uses: actions/cache@v4
-        with:
-          path: build/third-party
-          key: third-party-linux-x86_64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
-
-      # Both frontends; the backend is the default (c): no LLVM needed.
-      - name: Configure (both frontends)
-        run: |
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
-            "-DPAYKAN_FRONTENDS=recursive-descent;bison"
-
-      - name: Build
-        run: cmake --build build --parallel
-
-      - name: Differential and frontend tests
-        run: ctest --test-dir build --output-on-failure --parallel 4 -R "Frontend|Parser|Sema"

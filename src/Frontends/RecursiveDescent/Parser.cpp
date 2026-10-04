@@ -126,7 +126,7 @@ bool isLiteralToken(Tok k) {
 Parser::Parser(ASTContext &ctx, std::string_view source,
                sema::DiagEngine *diags)
     : Ctx(ctx), Diags(diags),
-      Lex(source, [this](SourceLocation loc, const std::string &msg) {
+      TheLexer(source, [this](SourceLocation loc, const std::string &msg) {
         // Lexical errors are real whatever the parser is doing, including
         // while it scans ahead speculatively: report them unconditionally.
         // The token being lexed now (the next one in the buffer) is the
@@ -160,7 +160,7 @@ ParseOutput parseSource(ASTContext &ctx, std::string_view source,
 unsigned dumpTokens(std::string_view source, std::ostream &os,
                     sema::DiagEngine *diags) {
   unsigned errors = 0;
-  Lexer lex(source, [&](SourceLocation loc, const std::string &msg) {
+  Lexer lexer(source, [&](SourceLocation loc, const std::string &msg) {
     ++errors;
     if (diags)
       diags->error(loc, msg);
@@ -169,7 +169,7 @@ unsigned dumpTokens(std::string_view source, std::ostream &os,
                 << loc.getColumnStart() << ": " << msg << "\n";
   });
   for (;;) {
-    Token t = lex.next();
+    Token t = lexer.next();
     os << t.Loc.getLineStart() << ":" << t.Loc.getColumnStart() << "-"
        << t.Loc.getLineEnd() << ":" << t.Loc.getColumnEnd() << " "
        << tokenKindName(t.Kind);
@@ -187,7 +187,7 @@ const Token &Parser::peek(size_t k) {
   while (Pos + k >= Buf.size()) {
     if (!Buf.empty() && Buf.back().Kind == Tok::Eof)
       return Buf.back();
-    Buf.push_back(Lex.next());
+    Buf.push_back(TheLexer.next());
   }
   return Buf[Pos + k];
 }
@@ -709,9 +709,8 @@ FuncDecl *Parser::parseFuncDecl() {
 // -- Blocks and statements
 // ------------------------------------------------------------
 
-// The CompoundStmt's location is the empty range right after its `{` (the
-// Bison frontend's location of an empty production); it is not widened by
-// the statements added to it.
+// The CompoundStmt's location is the empty range right after its `{`
+// (docs/grammar.md); it is not widened by the statements added to it.
 CompoundStmt *Parser::parseBlock() {
   if (!at(Tok::LBrace)) {
     errorAtCurrent("expected '{'");
@@ -1173,7 +1172,7 @@ Type *Parser::parseTypeAnnotation() {
   for (;;) {
     if (at(Tok::LBracket)) {
       // A `[` after a type can only open the `[]` suffix: report the missing
-      // `]` where it is missing (as the Bison grammar does).
+      // `]` where it is missing.
       consume();
       if (!expect(Tok::RBracket, "to close the array type"))
         return nullptr;
@@ -1283,7 +1282,7 @@ Expr *Parser::parsePostfix() {
         // rejected so every index has exactly one spelling.
         Token idx = consume();
         std::string digits(idx.Text);
-        // Located at the whole `.N`, the one token the Bison scanner sees.
+        // Located at the whole `.N`, as if it were one token.
         SourceLocation at(dot.Loc.getLineStart(), dot.Loc.getColumnStart(),
                           idx.Loc.getLineEnd(), idx.Loc.getColumnEnd());
         if (digits.size() > 1 && digits[0] == '0') {
