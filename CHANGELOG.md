@@ -271,6 +271,16 @@ generics) are experimental and may change.
   The Bison frontend enforces the 512-level nesting limit. `Stdin` and type
   names are rejected by every binder, including typed declarations and
   parameters.
+- **Diagnostics follow-ups (#132).** A module that fails to load is reported
+  once per compilation however many import paths reach it (twice from one
+  file, or through a diamond); each later import adds a note. `mov None`
+  inside an array or tuple literal takes the slot's element type
+  (`xs: Str?[] = [mov None]`). Past the nesting limit, the recursive-descent
+  frontend skips the nested block whole and reports nothing more. A missing
+  or ill-typed `main`, or an empty file, is one Sema error with a source
+  location (`program has no entry point 'fn main() -> int'`), on both
+  frontends, instead of a PIR verifier failure; `--check-only` still accepts
+  a module without `main`.
 - An empty array literal `[]` stored into a class field, passed as a
   call/method/`push` argument, returned, stored through a subscript, or nested
   in another literal was compiled as a primitive-element array regardless of

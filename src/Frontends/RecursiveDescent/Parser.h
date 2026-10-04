@@ -105,6 +105,8 @@ private:
   void skipToTopLevelBoundary();
   void skipToMemberBoundary();
   void skipToStatementBoundary();
+  /// Inside a block whose '{' was consumed: skip through its matching '}'.
+  void skipPastMatchingBrace();
 
   // -- Declarations ----------------------------------------------------------
   ast::ImportDecl *parseImportDecl();

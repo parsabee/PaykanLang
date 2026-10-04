@@ -17,6 +17,7 @@ inline constexpr const char *kLen = "len";
 inline constexpr const char *kPush = "push";
 inline constexpr const char *kPop = "pop";
 inline constexpr const char *kOpen = "open";
+inline constexpr const char *kMain = "main"; ///< the program's entry point
 inline constexpr const char *kArray = "Array";
 inline constexpr const char *kTuple = "Tuple";
 

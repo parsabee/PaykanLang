@@ -27,7 +27,9 @@ collector.
 - Execution begins at `main`, which must return `int`. Its return value becomes the process
   exit code. `main` may optionally take the command-line arguments as `fn main(args: Str[]) -> int`;
   `args[0]` is the source-file path under `paykan run` (the executable's path for a program made
-  by `paykan build`) and the remaining elements are the arguments after it.
+  by `paykan build`) and the remaining elements are the arguments after it. A program without
+  one of these two `main`s (an empty file included) is a compile error; `paykan --check-only`
+  also accepts a module without `main`, but still checks a `main` it declares.
 - Declarations may appear in **any order** — a function or class may be used before the point
   in the file where it is declared (forward references are allowed).
 - **No function overloading** — each function name must be unique.

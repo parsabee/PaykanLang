@@ -343,6 +343,15 @@ void Parser::skipToMemberBoundary() {
   }
 }
 
+void Parser::skipPastMatchingBrace() {
+  for (unsigned depth = 1; depth > 0 && !at(Tok::Eof); consume()) {
+    if (at(Tok::LBrace))
+      ++depth;
+    else if (at(Tok::RBrace))
+      --depth;
+  }
+}
+
 void Parser::skipToStatementBoundary() {
   unsigned depth = 0;
   for (;;) {
@@ -712,8 +721,13 @@ CompoundStmt *Parser::parseBlock() {
   SourceLocation after(lbrace.Loc.getLineEnd(), lbrace.Loc.getColumnEnd(),
                        lbrace.Loc.getLineEnd(), lbrace.Loc.getColumnEnd());
   auto *block = Ctx.make<CompoundStmt>(after);
-  if (!enterNesting())
-    return nullptr;
+  if (!enterNesting()) {
+    // The rest of this block is not parsed.  Skip it whole, through its
+    // matching '}', and hand back an empty block: the enclosing block then
+    // resumes after it, so the limit is the only error (#132).
+    skipPastMatchingBrace();
+    return block;
+  }
   parseStatementsUntilBrace(block);
   leaveNesting();
   if (!expectCloseBrace("to close the block", lbrace.Loc))

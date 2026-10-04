@@ -5,6 +5,7 @@
 #include "Names.h"
 #include "SemaInternal.h"
 
+#include <algorithm>
 #include <unordered_set>
 #include <utility>
 
@@ -391,7 +392,7 @@ ast::Type *Sema::adoptLiteralElements(ast::Type *dst, ast::Type *srcTy,
   // recursively, `None` takes an optional slot's type (a null box, as in
   // checkAssignable), and a primitive is boxed for an optional primitive
   // slot.  Returns the element's (possibly new) type.
-  auto adoptElement = [&](ast::Type *d, ast::Expr *e) -> ast::Type * {
+  auto adoptOperand = [&](ast::Type *d, ast::Expr *e) -> ast::Type * {
     ast::Type *t = e->getResolvedType();
     if (!t)
       return t;
@@ -408,6 +409,23 @@ ast::Type *Sema::adoptLiteralElements(ast::Type *dst, ast::Type *srcTy,
       return t;
     e->setCoercedType(d);
     return d;
+  };
+  // `mov` of a temporary forwards it unchanged (see checkAssignable): the
+  // operand takes the slot's type, and the `mov` the operand's (`[mov None]`
+  // into `Str?[]`, #132).
+  auto adoptElement = [&](ast::Type *d, ast::Expr *e) -> ast::Type * {
+    auto *mv = ast::dyn_cast<ast::MovExpr>(e);
+    if (!mv)
+      return adoptOperand(d, e);
+    ast::Expr *op = mv->getOperand();
+    if (!ast::isa<ast::NoneLiteral>(op) &&
+        !ast::isa<ast::ArrayLiteralExpr>(op) &&
+        !ast::isa<ast::TupleLiteralExpr>(op))
+      return adoptOperand(d, e);
+    ast::Type *t = adoptOperand(d, op);
+    if (t)
+      mv->setResolvedType(t);
+    return t;
   };
 
   if (auto *lit = ast::dyn_cast<ast::ArrayLiteralExpr>(src)) {
@@ -1722,9 +1740,11 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
   declareFunction(names::kOpen, Ctx.getObjTy(), {StrTy, StrTy}, true);
 
   // Process imports before local declarations.
-  StringSet localImportStack;
+  StringSet localImportStack, localFailedModules;
   if (!ImportStack)
     ImportStack = &localImportStack;
+  if (!FailedModules)
+    FailedModules = &localFailedModules;
   for (auto *imp : tu->getImports())
     processImport(imp);
 
@@ -1737,13 +1757,20 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
     error(tu->getLocation(),
           "internal compiler error: a declaration failed without a diagnostic");
   }
-  return SemaContext{nullptr,
+  SemaContext result{nullptr,
                      &Ctx,
                      nullptr,
-                     !hasErrors(),
+                     !hasErrors() && RepeatedImportFailures == 0,
                      getErrorCount(),
+                     RepeatedImportFailures != 0,
                      Diags.getDiagnostics(),
                      std::move(AccumulatedImportContexts)};
+  // The sets live in this frame: a Sema is run once.
+  if (ImportStack == &localImportStack)
+    ImportStack = nullptr;
+  if (FailedModules == &localFailedModules)
+    FailedModules = nullptr;
+  return result;
 }
 
 // -- Conversion constructors (#64, #88) ---------------------------------------
@@ -1973,6 +2000,9 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
       ok = false;
   }
 
+  if (!checkEntryPoint(node, declaredFns))
+    ok = false;
+
   // Now check class method bodies (they can resolve free functions) …
   if (!node->getClassDecls().empty())
     if (!checkClassBodies())
@@ -1992,6 +2022,64 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   injectInstantiations(node);
 
   return ok;
+}
+
+// A program's entry point is `fn main() -> int` or `fn main(args: Str[]) ->
+// int` (the lowering's `@main`, which the PIR verifier checks again).  Checked
+// here so the error has a source location on every frontend (#132).
+bool Sema::checkEntryPoint(ast::TranslationUnit *tu,
+                           const std::vector<ast::FuncDecl *> &declaredFns) {
+  if (EntryPointCheck == EntryPoint::None)
+    return true;
+  const std::string expected =
+      "'fn main() -> int' or 'fn main(args: Str[]) -> int'";
+  for (auto *fn : tu->getGenericFuncDecls())
+    if (fn->getName() == names::kMain) {
+      error(fn->getLocation(), "'main' cannot be generic; the program's entry "
+                               "point is " +
+                                   expected);
+      return false;
+    }
+  for (auto *fn : tu->getFuncDecls()) {
+    if (fn->getName() != names::kMain)
+      continue;
+    // A declaration that was rejected was reported already.
+    if (std::find(declaredFns.begin(), declaredFns.end(), fn) ==
+        declaredFns.end())
+      return false;
+    const FunctionSig *sig = lookupFunction(names::kMain);
+    if (!sig)
+      return false;
+    bool params = sig->ParamTypes.empty();
+    if (sig->ParamTypes.size() == 1)
+      if (auto *at = ast::dyn_cast<ast::ArrayType>(sig->ParamTypes[0]))
+        params = at->getElementType() == Ctx.getStrTy();
+    if (sig->ReturnType == Ctx.getIntTy() && params)
+      return true;
+    std::string actual = "fn main(";
+    for (size_t i = 0; i < sig->ParamTypes.size(); ++i) {
+      if (i)
+        actual += ", ";
+      actual += typeName(sig->ParamTypes[i]);
+    }
+    actual += ") -> ";
+    actual += typeName(sig->ReturnType);
+    std::string msg = "the program's entry point must be ";
+    msg += expected;
+    msg += ", not '";
+    msg += actual;
+    msg += "'";
+    error(fn->getLocation(), msg);
+    return false;
+  }
+  if (EntryPointCheck != EntryPoint::Required)
+    return true;
+  // Located at the start of the file (which may be empty), not at whatever
+  // declaration happens to come first.
+  error(ast::SourceLocation(1, 1, 1, 1),
+        "program has no entry point 'fn main() -> int' (or "
+        "'fn main(args: Str[]) -> int')");
+  return false;
 }
 
 // -- Declarations ------------------------------------------------------------

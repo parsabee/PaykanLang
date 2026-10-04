@@ -191,6 +191,36 @@ TEST(GrammarEdge, NestingLimitIsTheSameOnEveryFrontend) {
       "empty brackets at the limit"));
 }
 
+// Past the limit, the nested block is skipped whole: the nesting error is the
+// only one, on every frontend (#132; recursive descent used to resume one
+// '}' early and report the rest of the function at top level).
+TEST(GrammarEdge, NestingTooDeepInBlocksIsTheOnlyError) {
+  const std::string blocks = repeat("{ ", 600) + repeat("} ", 600);
+  for (const std::string &src :
+       {inMain(blocks),
+        inMain(blocks + "x: int = 1; f(x);") + "fn g() -> int { return 1; }\n",
+        inMain("a = True; " + repeat("if (a) { ", 600) + repeat("} ", 600)),
+        inMain("a = True; " + repeat("while (a) { ", 600) + repeat("} ", 600)),
+        "class C { fn m() -> int { " + blocks + " return 0; } }\n" +
+            inMain("")}) {
+    auto path = writeTempFile(src);
+    for (const std::string &fe : paykan::frontend::Registry::get().names()) {
+      paykan::parser::ParserDriver drv(fe);
+      std::ostringstream os;
+      paykan::sema::DiagEngine diag(os);
+      drv.setDiagEngine(&diag);
+      EXPECT_NE(drv.parseFile(path), 0) << fe;
+      EXPECT_EQ(drv.getErrorCount(), 1u) << fe << ":\n" << os.str();
+      EXPECT_NE(os.str().find("error: nesting too deep (more than 512 "
+                              "levels)"),
+                std::string::npos)
+          << fe << ":\n"
+          << os.str();
+    }
+    std::filesystem::remove(path);
+  }
+}
+
 TEST(GrammarEdge, PathologicalNestingIsRejectedNotCrashed) {
   // 100,000 levels used to overflow the stack after a Bison parse.
   for (const char *open : {"{ ", "(", "-", "if a then "}) {

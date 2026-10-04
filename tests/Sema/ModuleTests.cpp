@@ -899,3 +899,130 @@ fn main() -> int { return 0; }
                  tmp);
   std::filesystem::remove_all(tmp);
 }
+
+// -- A failed module is reported once per compilation (#132) -----------------
+//
+// However many import paths reach a module that fails -- not found, or with
+// errors of its own -- its failure is reported where it happens, once; every
+// later import of it adds a note.  The ModuleCache outlives a compilation,
+// but the set of failed modules does not: the next compilation reports the
+// failure again.
+
+namespace {
+
+size_t countOf(const std::string &text, const std::string &what) {
+  size_t n = 0;
+  for (size_t at = text.find(what); at != std::string::npos;
+       at = text.find(what, at + 1))
+    ++n;
+  return n;
+}
+
+} // namespace
+
+TEST(Module, FailedImportReachedTwiceIsReportedOnce) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_failed_twice").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib/a.pkn",
+            "import lib::gone; fn f() -> int { return 1; }\n");
+  auto main = writeFile(tmp, "main.pkn",
+                        "import lib::a; import lib::a as x;\n"
+                        "fn main() -> int { return a::f() + x::f(); }\n");
+  for (int compilation = 0; compilation < 2; ++compilation) {
+    auto r = semaCheckFile(main, tmp);
+    expectOneError(r, "lib/a.pkn:1:1: error: module 'lib::gone' not found",
+                   tmp);
+    EXPECT_EQ(countOf(r.Diagnostics, "not found"), 1u) << r.Diagnostics;
+    EXPECT_NE(r.Diagnostics.find("main.pkn:1:16: note: module 'lib::a' "
+                                 "failed to load; its errors are reported "
+                                 "above"),
+              std::string::npos)
+        << r.Diagnostics;
+  }
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, MissingModuleImportedTwiceInOneFileIsOneError) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_missing_twice").string();
+  std::filesystem::remove_all(tmp);
+  auto main = writeFile(tmp, "main.pkn",
+                        "import lib::gone; import lib::gone as g;\n"
+                        "fn main() -> int { return gone::f() + g::f(); }\n");
+  expectOneError(semaCheckFile(main, tmp), "module 'lib::gone' not found", tmp);
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, FailedImportInADiamondIsReportedOnce) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_failed_diamond").string();
+  std::filesystem::remove_all(tmp);
+  // main -> a -> gone, and main -> b -> a -> gone.
+  writeFile(tmp, "lib/a.pkn",
+            "import lib::gone; fn f() -> int { return 1; }\n");
+  writeFile(tmp, "lib/b.pkn",
+            "import lib::a; fn g() -> int { return a::f(); }\n");
+  auto main = writeFile(tmp, "main.pkn",
+                        "import lib::a; import lib::b;\n"
+                        "fn main() -> int { return a::f() + b::g(); }\n");
+  auto r = semaCheckFile(main, tmp);
+  expectOneError(r, "module 'lib::gone' not found", tmp);
+  // The module that failed only by importing a failed one fails too, quietly.
+  EXPECT_NE(r.Diagnostics.find("lib/b.pkn:1:1: note: module 'lib::a' failed "
+                               "to load"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("note: in module 'lib::b' imported here"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find("errors in imported module"), std::string::npos)
+      << r.Diagnostics;
+  // Reached only through the failed path (main -> b -> a), the same.
+  writeFile(tmp, "main.pkn",
+            "import lib::b; import lib::a;\n"
+            "fn main() -> int { return a::f() + b::g(); }\n");
+  r = semaCheckFile(main, tmp);
+  expectOneError(r, "module 'lib::gone' not found", tmp);
+  std::filesystem::remove_all(tmp);
+}
+
+TEST(Module, ModuleWithErrorsReachedTwiceIsReportedOnce) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_bad_twice").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib/a.pkn", "fn f() -> int { return \"x\"; }\n");
+  writeFile(tmp, "lib/b.pkn",
+            "import lib::a; fn g() -> int { return a::f(); }\n");
+  writeFile(tmp, "lib/c.pkn",
+            "import lib::a; fn h() -> int { return a::f(); }\n");
+  auto main = writeFile(tmp, "main.pkn",
+                        "import lib::b; import lib::c; import lib::a as x;\n"
+                        "fn main() -> int { return b::g() + c::h() + x::f(); "
+                        "}\n");
+  auto r = semaCheckFile(main, tmp);
+  expectOneError(r, "lib/a.pkn:1:17: error: return value of type 'Str'", tmp);
+  // A syntax error in the module, likewise.
+  writeFile(tmp, "lib/a.pkn", "fn f() -> int { return 1 }\n");
+  r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_EQ(countOf(r.Diagnostics, " error: "), 1u) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// A module that imports a failed module does not enter the ModuleCache as a
+// good one: a later compilation that reaches it once the failure is fixed
+// analyses it afresh.
+TEST(Module, ModuleFailedOnlyByItsImportsIsNotCached) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_failed_not_cached").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib/b.pkn",
+            "import lib::a; fn g() -> int { return a::f(); }\n");
+  auto main = writeFile(tmp, "main.pkn",
+                        "import lib::a; import lib::b;\n"
+                        "fn main() -> int { return b::g(); }\n");
+  auto r = semaCheckFile(main, tmp);
+  expectOneError(r, "module 'lib::a' not found", tmp);
+  writeFile(tmp, "lib/a.pkn", "fn f() -> int { return 1; }\n");
+  r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 0u) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}

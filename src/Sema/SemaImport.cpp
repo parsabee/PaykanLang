@@ -477,8 +477,19 @@ bool Sema::processImport(ast::ImportDecl *node) {
     // own (it would only repeat them, once per importing module on the way
     // up), just a note pointing at the import that led there.  They still
     // fail this module (ImportedModuleErrors).
-    auto failedModule = [&](unsigned moduleErrors) {
+    // The module is recorded as failed (see FailedModules): a later import
+    // of it, on any path, adds no second report.
+    auto failedModule = [&](unsigned moduleErrors, bool importsFailedModule) {
+      if (FailedModules)
+        FailedModules->insert(moduleName);
       if (moduleErrors == 0) {
+        if (importsFailedModule) {
+          // It failed only by importing a module whose failure was reported
+          // already: that report covers it too.
+          ++RepeatedImportFailures;
+          Diags.note(loc, "in module '" + moduleName + "' imported here");
+          return false;
+        }
         // Nothing was reported (should not happen): keep the failure visible.
         error(loc, "errors in imported module '" + moduleName + "'");
         return false;
@@ -489,7 +500,7 @@ bool Sema::processImport(ast::ImportDecl *node) {
     };
     if (importDriverPtr->parseFile(path) != 0) {
       importDriverPtr->setDiagEngine(nullptr);
-      return failedModule(importDiag.getErrorCount());
+      return failedModule(importDiag.getErrorCount(), false);
     }
     // importDiag dies with this call frame but the driver (kept alive in the
     // returned SemaContext) does not — detach it now that parsing is done.
@@ -501,6 +512,7 @@ bool Sema::processImport(ast::ImportDecl *node) {
     if (ImportStack)
       ImportStack->insert(path);
     importSema.ImportStack = ImportStack;
+    importSema.FailedModules = FailedModules;
 
     auto *importRoot = importDriverPtr->getRoot();
     auto childCtx = importSema.run(importRoot);
@@ -508,7 +520,7 @@ bool Sema::processImport(ast::ImportDecl *node) {
     if (ImportStack)
       ImportStack->erase(path);
     if (!importOk)
-      return failedModule(childCtx.ErrorCount);
+      return failedModule(childCtx.ErrorCount, childCtx.ImportsFailedModule);
 
     // -- Serialise the module's exports --------------------------------------
     //
@@ -652,8 +664,22 @@ bool Sema::processImport(ast::ImportDecl *node) {
       }
       ok = false;
     };
+    // A module that already failed in this compilation was reported where
+    // it failed; this import adds a note, not the same errors again (#132).
+    const std::string canonical =
+        module_name::canonicalImportName(fullPath, isSystem);
+    if (FailedModules && FailedModules->count(canonical)) {
+      Diags.note(node->getLocation(),
+                 "module '" + canonical +
+                     "' failed to load; its errors are reported above");
+      ++RepeatedImportFailures;
+      poison();
+      continue;
+    }
     resolved = resolveModulePath(fullPath, isSystem, node->getLocation());
     if (resolved.empty()) {
+      if (FailedModules)
+        FailedModules->insert(canonical);
       poison();
       continue;
     }
@@ -676,8 +702,7 @@ bool Sema::processImport(ast::ImportDecl *node) {
       ok = false;
       continue;
     }
-    if (!loadModule(resolved, qualifier, fullPath,
-                    module_name::canonicalImportName(fullPath, isSystem),
+    if (!loadModule(resolved, qualifier, fullPath, canonical,
                     node->getLocation()))
       poison();
   }

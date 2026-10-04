@@ -229,3 +229,110 @@ TEST(Func, PrintRejectsMultipleArgs) {
   EXPECT_NE(r.Diagnostics.find("expects 1 argument"), std::string::npos)
       << r.Diagnostics;
 }
+
+// ============================================================================
+// The program's entry point (#132)
+// ============================================================================
+//
+// A program that is built or run needs `fn main() -> int` (or `fn main(args:
+// Str[]) -> int`).  Sema reports a missing or ill-typed one with a source
+// location, before the PIR verifier would.
+
+namespace {
+
+SemaResult semaCheckProgram(const std::string &source,
+                            paykan::sema::Sema::EntryPoint check =
+                                paykan::sema::Sema::EntryPoint::Required) {
+  auto path = writeTempFile(source);
+  paykan::parser::ParserDriver drv(testFrontend());
+  std::ostringstream os;
+  paykan::sema::DiagEngine diag(os);
+  diag.setSourceInfo("prog.pkn", &drv.getSourceLines());
+  drv.setDiagEngine(&diag);
+  int rc = drv.parseFile(path);
+  std::filesystem::remove(path);
+  if (rc != 0)
+    return {false, "parse error: " + os.str(), drv.getErrorCount()};
+  paykan::sema::Sema sema(drv.getASTContext(), diag, "", drv.getFrontendName());
+  sema.setEntryPointCheck(check);
+  auto ctx = sema.run(drv.getRoot());
+  return {ctx.Ok, os.str(), ctx.ErrorCount};
+}
+
+void expectEntryPointError(const std::string &source,
+                           const std::string &expected) {
+  auto r = semaCheckProgram(source);
+  EXPECT_FALSE(r.Ok) << source;
+  EXPECT_EQ(r.ErrorCount, 1u) << source << "\n" << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find(expected), std::string::npos) << source << "\n"
+                                                             << r.Diagnostics;
+}
+
+} // namespace
+
+TEST(Func, EntryPointSignaturesOk) {
+  for (const char *src : {"fn main() -> int { return 0; }",
+                          "fn main(args: Str[]) -> int { return args.len(); }",
+                          "fn helper() -> int { return 1; }\n"
+                          "fn main() -> int { return helper(); }"}) {
+    auto r = semaCheckProgram(src);
+    EXPECT_TRUE(r.Ok) << src << "\n" << r.Diagnostics;
+    EXPECT_EQ(r.ErrorCount, 0u) << src << "\n" << r.Diagnostics;
+  }
+}
+
+TEST(Func, MissingMainIsOneLocatedError) {
+  const std::string missing =
+      "prog.pkn:1:1: error: program has no entry point 'fn main() -> int' "
+      "(or 'fn main(args: Str[]) -> int')";
+  expectEntryPointError("", missing);
+  expectEntryPointError("// nothing here\n", missing);
+  expectEntryPointError("fn helper() -> int { return 1; }\n", missing);
+  expectEntryPointError("class Main { x: int; }\nfn mainly() -> int { return "
+                        "0; }\n",
+                        missing);
+}
+
+TEST(Func, IllTypedMainIsOneErrorAtItsDeclaration) {
+  const std::string must = "error: the program's entry point must be 'fn "
+                           "main() -> int' or 'fn main(args: Str[]) -> int', "
+                           "not ";
+  expectEntryPointError("fn f() -> int { return 1; }\n"
+                        "fn main() -> Str { return \"x\"; }\n",
+                        "prog.pkn:2:1: " + must + "'fn main() -> Str'");
+  expectEntryPointError("fn main() { }\n", must + "'fn main() -> void'");
+  expectEntryPointError("fn main(n: int) -> int { return n; }\n",
+                        must + "'fn main(int) -> int'");
+  expectEntryPointError("fn main(args: Str[], n: int) -> int { return n; }\n",
+                        must + "'fn main(Str[], int) -> int'");
+  expectEntryPointError("fn main(args: int[]) -> int { return 0; }\n",
+                        must + "'fn main(int[]) -> int'");
+  expectEntryPointError("fn main() -> int? { return 0; }\n",
+                        must + "'fn main() -> int?'");
+  expectEntryPointError("fn main<T>() -> int { return 0; }\n",
+                        "prog.pkn:1:1: error: 'main' cannot be generic");
+}
+
+// A `main` whose declaration is rejected is reported once, for that.
+TEST(Func, RejectedMainDeclarationIsNotReportedAgain) {
+  auto r = semaCheckProgram("fn main() -> Nope { return 0; }\n");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find("entry point"), std::string::npos)
+      << r.Diagnostics;
+}
+
+TEST(Func, EntryPointCheckModes) {
+  using EP = paykan::sema::Sema::EntryPoint;
+  // A module on its own (or imported) needs no `main` ...
+  EXPECT_TRUE(semaCheckProgram("fn f() -> int { return 1; }", EP::None).Ok);
+  EXPECT_TRUE(
+      semaCheckProgram("fn f() -> int { return 1; }", EP::IfDeclared).Ok);
+  // ... and with IfDeclared, a declared one is still checked.
+  EXPECT_TRUE(
+      semaCheckProgram("fn main() -> Str { return \"\"; }", EP::None).Ok);
+  auto r =
+      semaCheckProgram("fn main() -> Str { return \"\"; }", EP::IfDeclared);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+}
