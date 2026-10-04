@@ -49,9 +49,9 @@ jobs:
           path: build/third-party
           key: third-party-macos-arm64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
-      # Configure + build so compile_commands.json and generated Parser/Lexer
-      # headers exist (clang-tidy needs them to parse the TUs).  The full
-      # build, so every translation unit is checked.
+      # Configure + build so compile_commands.json and the generated headers
+      # exist (clang-tidy needs them to parse the TUs).  The full build, so
+      # every translation unit is checked.
       - name: Configure (Debug, full)
         run: cmake -B build -DCMAKE_BUILD_TYPE=Debug "-DPAYKAN_BACKENDS=llvm;c"
 
