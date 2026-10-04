@@ -36,6 +36,22 @@ install(DIRECTORY ${PROJECT_SOURCE_DIR}/samples/
     DESTINATION ${PAYKAN_INSTALL_SAMPLES_DIR}
     PATTERN ".paykan_cache" EXCLUDE)
 
+# Whether the installed libraries are built without assertions (NDEBUG): a
+# test of a library assertion is then skipped, whatever the consumer's own
+# build type.  A multi-config build installs whichever configuration is
+# asked for, so it counts as without.
+if(CMAKE_CONFIGURATION_TYPES)
+    set(PAYKAN_TEST_LIBRARY_NDEBUG TRUE)
+else()
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" build_type)
+    if(build_type STREQUAL "RELEASE"
+       OR "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${build_type}}" MATCHES "-DNDEBUG")
+        set(PAYKAN_TEST_LIBRARY_NDEBUG TRUE)
+    else()
+        set(PAYKAN_TEST_LIBRARY_NDEBUG FALSE)
+    endif()
+endif()
+
 # The installed module finds both directories relative to itself, wherever
 # the installation is moved.
 file(RELATIVE_PATH PAYKAN_TEST_SUPPORT_RELDIR

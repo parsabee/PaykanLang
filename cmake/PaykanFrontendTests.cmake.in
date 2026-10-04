@@ -39,6 +39,8 @@ get_filename_component(PAYKAN_TEST_SUPPORT_DIR
     "${CMAKE_CURRENT_LIST_DIR}/@PAYKAN_TEST_SUPPORT_RELDIR@" ABSOLUTE)
 get_filename_component(PAYKAN_SAMPLES_DIR
     "${CMAKE_CURRENT_LIST_DIR}/@PAYKAN_SAMPLES_RELDIR@" ABSOLUTE)
+# Whether the installed libraries were built without assertions.
+set(_PAYKAN_TEST_LIBRARY_NDEBUG @PAYKAN_TEST_LIBRARY_NDEBUG@)
 
 function(paykan_add_frontend_tests frontend)
     cmake_parse_arguments(ARG "" "GTEST_MAIN;PREFIX" "PLUGINS" ${ARGN})
@@ -81,6 +83,10 @@ function(paykan_add_frontend_tests frontend)
         foreach(p IN LISTS plugins)
             target_link_libraries(${exe} PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,${p}>")
         endforeach()
+        if(_PAYKAN_TEST_LIBRARY_NDEBUG)
+            # Skip the tests of the libraries' assertions.
+            target_compile_definitions(${exe} PRIVATE PAYKAN_TEST_LIBRARY_NDEBUG=1)
+        endif()
     endforeach()
     target_link_libraries(${ARG_PREFIX}_sema_tests PRIVATE Paykan::sema)
     target_compile_definitions(${ARG_PREFIX}_frontend_tests PRIVATE
