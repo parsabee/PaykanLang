@@ -166,6 +166,18 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
+      # The runner's rustup has no default toolchain, so its rustc proxy runs
+      # nothing: give it one, so PrintPIROutOfTree (and, in barebones, the
+      # install check) build and load the Rust example plugin.  Where rustup
+      # is absent the Rust example is skipped (or fails the install check).
+      - name: Set up Rust (stable, minimal)
+        run: |
+          if command -v rustup >/dev/null; then
+            rustup toolchain install stable --profile minimal
+            rustup default stable
+          fi
+          rustc --version || echo "no usable rustc: the Rust example is not built"
+
       - name: Cache third-party dependencies
         uses: actions/cache@v4
         with:
@@ -283,6 +295,18 @@ jobs:
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      # The runner's rustup has no default toolchain, so its rustc proxy runs
+      # nothing: give it one, so PrintPIROutOfTree (and, in barebones, the
+      # install check) build and load the Rust example plugin.  Where rustup
+      # is absent the Rust example is skipped (or fails the install check).
+      - name: Set up Rust (stable, minimal)
+        run: |
+          if command -v rustup >/dev/null; then
+            rustup toolchain install stable --profile minimal
+            rustup default stable
+          fi
+          rustc --version || echo "no usable rustc: the Rust example is not built"
 
       # The packager's build (#77): tests off, so not even GoogleTest is fetched.
       # A plain configure: the defaults are the core (#123).
