@@ -359,3 +359,30 @@ TEST(Mov, MovNoneIsTheAbsentOptional) {
   EXPECT_EQ(r.StdOut, "none\nsome\nnone\nnone\nnone\nnone\n");
   g.expectNoLeaks("MovNoneIsTheAbsentOptional");
 }
+
+// `mov None` inside an array or tuple literal is the absent value of the
+// slot's element type (#132).
+TEST(Mov, MovNoneInsideALiteralIsTheAbsentOptional) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    fn show(s: Str?) {
+      match s { v: Str { println(v); } None { println("none"); } }
+    }
+    fn main() -> int {
+      xs: Str?[] = [mov None, "a"];
+      show(xs[0]);
+      show(xs[1]);
+      t: (Str?, int) = (mov None, 7);
+      show(t.0);
+      println(Str(t.1));
+      n: (int?, Str?)[] = [(mov None, mov None)];
+      match n[0].0 { v: int { println("int"); } None { println("none"); } }
+      show(n[0].1);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "none\na\nnone\n7\nnone\nnone\n");
+  g.expectNoLeaks("MovNoneInsideALiteralIsTheAbsentOptional");
+}

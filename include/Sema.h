@@ -39,6 +39,10 @@ struct SemaContext {
   ast::TranslationUnit *Root = nullptr;
   bool Ok = false;
   unsigned ErrorCount = 0;
+  /// True when the module failed (also) because it imports a module whose
+  /// failure was already reported elsewhere in this compilation (#132): such
+  /// a module can fail with no error of its own.
+  bool ImportsFailedModule = false;
   std::vector<Diagnostic> Diagnostics;
   /// Pre-computed SemaContexts for directly-imported modules, keyed by
   /// resolved file path. Populated by Sema::run() so CodeGen can reuse
@@ -419,6 +423,17 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// Files currently being imported (for cycle detection).
   StringSet *ImportStack = nullptr;
 
+  /// Canonical names (ModuleName.h) of the modules that failed to load in
+  /// this compilation -- not found, not a source file, or with errors of
+  /// their own.  Shared, like ImportStack, by every Sema of one compilation,
+  /// so each failure is reported once however many import paths reach the
+  /// module; a later import of it adds only a note (#132).
+  StringSet *FailedModules = nullptr;
+
+  /// Imports of modules in FailedModules: they fail this module without an
+  /// error of its own (see SemaContext::ImportsFailedModule).
+  unsigned RepeatedImportFailures = 0;
+
   /// Accumulated SemaContexts for each directly-imported module, keyed by
   /// resolved path. Built by processImport; moved into the SemaContext
   /// returned by run().
@@ -783,6 +798,23 @@ public:
                 const std::string &projectRoot = "",
                 const std::string &frontendName = "");
 
+  /// How run() checks the program's entry point, `main` (#132).  A module
+  /// that is imported, or analysed on its own, needs none; a program that is
+  /// built or run needs `fn main() -> int` or `fn main(args: Str[]) -> int`.
+  enum class EntryPoint {
+    None,       ///< no check (the default; imported modules)
+    IfDeclared, ///< a declared `main` must have an entry-point signature
+    Required,   ///< ... and the program must declare one
+  };
+  void setEntryPointCheck(EntryPoint check) { EntryPointCheck = check; }
+
+private:
+  EntryPoint EntryPointCheck = EntryPoint::None;
+  /// The check EntryPointCheck selects, over the main file's declarations.
+  bool checkEntryPoint(ast::TranslationUnit *tu,
+                       const std::vector<ast::FuncDecl *> &declaredFns);
+
+public:
   // Entry point -- run semantic analysis on a TranslationUnit.
   // Returns a SemaContext whose bool operator is true on success.
   SemaContext run(ast::TranslationUnit *tu);

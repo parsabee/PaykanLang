@@ -139,6 +139,11 @@ int main(int argc, char *argv[]) {
   // passes and all diagnostics share one output stream.
   paykan::sema::Sema sema(driver.getASTContext(), diag, projectRoot,
                           driver.getFrontendName());
+  // A program that is built or run needs an entry point; --check-only also
+  // accepts a module without one, but still checks a declared `main`.
+  sema.setEntryPointCheck(opts.CheckOnly
+                              ? paykan::sema::Sema::EntryPoint::IfDeclared
+                              : paykan::sema::Sema::EntryPoint::Required);
   auto semaCtx = sema.run(root);
   if (!semaCtx)
     return EXIT_FAILURE;

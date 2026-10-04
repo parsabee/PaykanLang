@@ -722,3 +722,32 @@ TEST(Mov, MovNoneIntoANonOptionalSlotIsOneError) {
   EXPECT_FALSE(r.Ok);
   EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
 }
+
+// `mov None` inside an array or tuple literal takes the slot's element type,
+// as `None` there does (#132).
+TEST(Mov, MovNoneInsideALiteralTakesTheElementType) {
+  auto r = semaCheck(R"(
+    fn take(xs: Str?[]) -> int { return xs.len(); }
+    fn main() -> int {
+      xs: Str?[] = [mov None];
+      t: (Str?, int) = (mov None, 1);
+      ys: Str?[] = [mov None, "a", None];
+      n: (int?, Str?)[] = [(mov None, mov None), (1, "b")];
+      zs: Str?[][] = [[mov None], mov [mov None]];
+      xs = [mov None, mov None];
+      return take([mov None]);
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 0u) << r.Diagnostics;
+}
+
+TEST(Mov, MovNoneInsideALiteralForANonOptionalSlotIsOneError) {
+  for (const char *decl :
+       {"xs: Str[] = [mov None];", "t: (Str, int) = (mov None, 1);"}) {
+    auto r =
+        semaCheck(std::string("fn main() -> int { ") + decl + " return 0; }");
+    EXPECT_FALSE(r.Ok) << decl;
+    EXPECT_EQ(r.ErrorCount, 1u) << decl << "\n" << r.Diagnostics;
+  }
+}

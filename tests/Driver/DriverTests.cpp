@@ -236,6 +236,78 @@ TEST(Driver, EveryListedFrontendParses) {
   EXPECT_GE(count, 1u);
 }
 
+// The frontends --list-frontends names.
+static std::vector<std::string> listedFrontends() {
+  std::vector<std::string> names;
+  auto listed = run(std::string(kPaykan) + " --list-frontends 2>&1");
+  std::istringstream lines(listed.out);
+  for (std::string line; std::getline(lines, line);)
+    if (auto name = line.substr(0, line.find(' ')); !name.empty())
+      names.push_back(name);
+  return names;
+}
+
+static size_t countErrors(const std::string &out) {
+  size_t n = 0;
+  for (size_t at = out.find(" error: "); at != std::string::npos;
+       at = out.find(" error: ", at + 1))
+    ++n;
+  return n;
+}
+
+// A missing or ill-typed `main` (or an empty file) is one Sema error with a
+// source location, on every frontend -- not a PIR verifier failure (#132).
+// --check-only accepts a module without `main` but still checks a declared
+// one.
+TEST(Driver, EntryPointIsCheckedWithASourceLocation) {
+  auto frontends = listedFrontends();
+  ASSERT_FALSE(frontends.empty());
+  struct Case {
+    std::string Source;
+    std::string Error; // the one error, after the file name
+    int CheckOnlyExit;
+  };
+  const std::string none = ":1:1: error: program has no entry point 'fn "
+                           "main() -> int' (or 'fn main(args: Str[]) -> int')";
+  const std::string must = ":1:1: error: the program's entry point must be "
+                           "'fn main() -> int' or 'fn main(args: Str[]) -> "
+                           "int', not ";
+  const std::vector<Case> cases = {
+      {"", none, 0},
+      {"fn f() -> int { return 1; }\n", none, 0},
+      {"fn main() -> Str { return \"\"; }\n", must + "'fn main() -> Str'", 1},
+      {"fn main(n: int) -> int { return n; }\n", must + "'fn main(int) -> int'",
+       1},
+  };
+  for (const auto &fe : frontends) {
+    const std::string paykan = std::string(kPaykan) + " --frontend=" + fe;
+    for (const auto &c : cases) {
+      auto src = writeTmp(c.Source);
+      std::string expected = src;
+      expected += c.Error;
+      for (const char *mode : {" ", " --emit-pir ", " -o /dev/null build "}) {
+        std::string cmd = paykan;
+        cmd += mode;
+        cmd += src;
+        cmd += " 2>&1";
+        auto [rc, out] = run(cmd);
+        EXPECT_EQ(rc, 1) << cmd << "\n" << out;
+        EXPECT_EQ(countErrors(out), 1u) << cmd << "\n" << out;
+        EXPECT_NE(out.find(expected), std::string::npos) << cmd << "\n" << out;
+        EXPECT_EQ(out.find("PIR verification"), std::string::npos) << out;
+      }
+      std::string cmd = paykan;
+      cmd += " --check-only ";
+      cmd += src;
+      cmd += " 2>&1";
+      auto [rc, out] = run(cmd);
+      EXPECT_EQ(rc, c.CheckOnlyExit) << cmd << "\n" << out;
+      EXPECT_EQ(countErrors(out), c.CheckOnlyExit ? 1u : 0u) << out;
+      std::filesystem::remove(src);
+    }
+  }
+}
+
 TEST(Driver, UnknownFrontendIsRejected) {
   auto src = writeTmp("fn main() -> int { return 0; }");
   auto [rc, out] = run(std::string(kPaykan) + " --frontend=no-such-frontend " +
