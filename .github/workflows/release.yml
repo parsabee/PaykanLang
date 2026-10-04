@@ -45,26 +45,31 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
-      - name: Cache third-party dependencies
-        uses: actions/cache@v4
-        with:
-          path: build/third-party
-          key: third-party-${{ matrix.label }}-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/BisonFlexSetup.cmake', 'cmake/GTestSetup.cmake') }}
-
       # Only paykan and the runtime are shipped: no test suite, so no GoogleTest.
-      - name: Configure (Release)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G "${{ matrix.generator }}" -DPAYKAN_BUILD_TESTS=OFF
+      # The release ships the core (#27, #123): the recursive-descent frontend
+      # and the c backend, which need only a C compiler at run time.  The
+      # opt-in Bison frontend and LLVM backend are not in the tarballs.  The
+      # lists are the defaults, spelled out so the shipped configuration
+      # stays explicit.
+      - name: Configure (Release, core)
+        run: >-
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -G "${{ matrix.generator }}"
+          -DPAYKAN_BUILD_TESTS=OFF
+          -DPAYKAN_FRONTENDS=recursive-descent -DPAYKAN_BACKENDS=c
 
       - name: Build
         run: cmake --build build --parallel --target paykan paykan_runtime
 
       # Sanity-check the release binary actually runs before we publish it.
-      - name: Smoke test (--version + JIT run)
+      - name: Smoke test (--version + C-backend run and build)
         run: |
           set -euo pipefail
           ./build/bin/paykan --version
+          ./build/bin/paykan --list-backends | grep '^c (default)'
           printf 'fn main() -> int {\n  println("Hello from release CI!");\n  return 0;\n}\n' > /tmp/hello.pkn
-          ./build/bin/paykan /tmp/hello.pkn
+          ./build/bin/paykan /tmp/hello.pkn | grep -Fx "Hello from release CI!"
+          ./build/bin/paykan -o /tmp/hello build /tmp/hello.pkn
+          /tmp/hello | grep -Fx "Hello from release CI!"
 
       - name: Stage install tree
         run: cmake --install build --prefix "stage/paykanlang"

@@ -41,17 +41,21 @@ paykan --version
 
 ## Building from Source
 
-PaykanLang uses CMake and a pre-built LLVM (vendored under `third-party/llvm`), Bison, and Flex.
+PaykanLang needs only CMake and a C++20 compiler to build, plus a C compiler at run time. The
+default build is the core (the recursive-descent frontend and the c backend) and downloads
+nothing; the LLVM backend and the Bison frontend are opt-in (below).
 
 ```sh
 git clone https://github.com/parsabee/PaykanLang.git
 cd PaykanLang
 cmake -B build
 cmake --build build --parallel
+# the full build, with the opt-in Bison frontend and LLVM backend:
+# cmake -B build "-DPAYKAN_FRONTENDS=recursive-descent;bison" "-DPAYKAN_BACKENDS=llvm;c"
 ```
 
 The frontend (lexer + parser) is pluggable. `-DPAYKAN_FRONTENDS=<list>` selects the
-frontends to build (default: `recursive-descent;bison`); the first one listed is the default, and
+frontends to build (default: `recursive-descent`); the first one listed is the default, and
 the others are selected at run time with `--frontend=<name>` (`--list-frontends` prints
 them). The recursive-descent frontend (standard C++ only) is always built; Bison and Flex are
 downloaded and built only when `bison` is listed; that from-source build (GNU `configure` and
@@ -63,10 +67,10 @@ produce identical ASTs: `scripts/diff_frontends.py` checks that over every sampl
 The backend is pluggable too. `-DPAYKAN_BACKENDS=<list>` selects the backends to build:
 `c` (the C backend: emits C11, builds with the system C compiler, standard C++ only) is always
 built; `llvm` (LLVM IR, the ORC JIT for `run`, native objects linked by the system C compiler
-for `build`) is optional. The default backend
-is `llvm` when it is listed, `c` otherwise; `--backend=<name>` selects another (`--list-backends`
-prints them). LLVM is downloaded only when `llvm` is listed, so
-`-DPAYKAN_FRONTENDS=recursive-descent -DPAYKAN_BACKENDS=c` is a **barebones build** that needs
+for `build`) is opt-in (default: `c`). The default backend
+is the first one listed (`c` unless the list puts `llvm` first, as `"llvm;c"` does); `--backend=<name>` selects another (`--list-backends`
+prints them). LLVM is downloaded only when `llvm` is listed, so the default configure
+(`-DPAYKAN_FRONTENDS=recursive-descent -DPAYKAN_BACKENDS=c`) is a **barebones build** that needs
 nothing but a C++20 compiler and a C compiler (CI checks that it downloads nothing and links no
 third-party library). Every backend consumes the Paykan IR described in [`docs/pir.md`](docs/pir.md);
 [`docs/writing-a-backend.md`](docs/writing-a-backend.md) explains how to write one, in tree or
