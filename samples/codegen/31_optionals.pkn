@@ -1,4 +1,4 @@
-// 31 — optional types (prototype): a singly linked list built from `Node?`
+// 31 — optional types: a singly linked list built from `Node?`
 // Exercises: `T?` declarations, `None` as the absent value, implicit None for
 //            an unassigned optional field (`next: Node?`), `T` -> `T?` widening,
 //            `x == None` / `x != None` null checks, `match` as the unwrap (a

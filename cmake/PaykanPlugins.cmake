@@ -51,7 +51,7 @@ message(STATUS "Frontends: ${PAYKAN_FRONTENDS} (default: ${PAYKAN_DEFAULT_FRONTE
 # `llvm` is listed (#123).  So a plain configure downloads nothing.
 set(PAYKAN_KNOWN_BACKENDS c llvm)
 set(PAYKAN_BACKENDS "c" CACHE STRING
-    "Semicolon-separated list of backends to build (available: ${PAYKAN_KNOWN_BACKENDS}; c is always built); the first one is the default")
+    "Semicolon-separated list of backends to build (available: ${PAYKAN_KNOWN_BACKENDS}; c is always built and is the default)")
 
 foreach(be IN LISTS PAYKAN_BACKENDS)
     if(NOT be IN_LIST PAYKAN_KNOWN_BACKENDS)
@@ -62,10 +62,16 @@ if(NOT "c" IN_LIST PAYKAN_BACKENDS)
     list(APPEND PAYKAN_BACKENDS c)
 endif()
 
-# The default backend is the first one listed, as for frontends: `c` unless
-# the list puts another first (`llvm;c` makes `llvm` the default, `c;llvm`
-# keeps `c`).  `c` is appended above, so the list is never empty here.
-list(GET PAYKAN_BACKENDS 0 PAYKAN_DEFAULT_BACKEND)
+# The default backend is `c` whenever it is built, wherever the list puts it
+# (`llvm;c` and `c;llvm` both default to `c`; `llvm` is selected with
+# --backend=llvm).  `c` is appended above, so in this tree it always is.  A
+# configuration without `c` (which this file never produces, but a fork or a
+# downstream copy of it might) falls back to the first backend listed.
+if("c" IN_LIST PAYKAN_BACKENDS)
+    set(PAYKAN_DEFAULT_BACKEND c)
+else()
+    list(GET PAYKAN_BACKENDS 0 PAYKAN_DEFAULT_BACKEND)
+endif()
 set(PAYKAN_NEEDS_LLVM FALSE)
 if("llvm" IN_LIST PAYKAN_BACKENDS)
     set(PAYKAN_NEEDS_LLVM TRUE)

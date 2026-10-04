@@ -8,7 +8,7 @@ first arm that applies. Depending on the subject's type, `match` operates in one
 | A class type (`Obj`, `File`, a user class, …) | **type mode** | the **runtime class** of the object |
 | An `enum` | **variant mode** | the enum's **variants** |
 | A builtin (`int`, `float`, `bool`, `char`, `Str`) | **value mode** | **literal** values |
-| An optional `T?` (prototype) | **optional mode** | **present** (`T` arm) vs **absent** (`None` arm) |
+| An optional `T?` | **optional mode** | **present** (`T` arm) vs **absent** (`None` arm) |
 
 The mode is chosen by the static type of the subject — you do not select it explicitly.
 
@@ -312,7 +312,7 @@ match f.readln() {
 
 ---
 
-## Optional Mode — unwrapping a `T?` (prototype)
+## Optional Mode — unwrapping a `T?`
 
 When the subject is an optional type `T?` (see `10-optionals.md`), `match` is the way to get at
 the wrapped value. The arm naming `T` itself matches **every present value** — whatever its

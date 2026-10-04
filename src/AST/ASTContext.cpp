@@ -125,7 +125,7 @@ void ASTContext::buildArrayType() {
       .build();
 }
 
-// -- Bootstrap Tuple (prototype) --------------------------------------------
+// -- Bootstrap Tuple --------------------------------------------------------
 //
 // Tuple is a subtype of Obj; every tuple value `(T1, T2, ...)` is an instance
 // of it at runtime (one generic PaykanTuple object, see Runtime/Tuple.c).  Its
@@ -308,7 +308,7 @@ Type *ASTContext::getSpecializedArrayElemType(ClassType *ct) const {
   return it != SpecializedArrayElemTypes.end() ? it->second : nullptr;
 }
 
-// -- Canonical tuple types (prototype) ---------------------------------------
+// -- Canonical tuple types ---------------------------------------------------
 //
 // One TupleType per (canonical) element-type list, exactly like getArrayType:
 // the parser allocates a source-located TupleType for every `(T1, T2)`

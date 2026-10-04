@@ -1,4 +1,4 @@
-// Optional types (prototype): arrays of optionals (`Node?[]`, None slots) and
+// Optional types: arrays of optionals (`Node?[]`, None slots) and
 // optional arrays (`int[]?`).
 class Node {
   v: int;

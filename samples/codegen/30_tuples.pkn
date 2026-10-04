@@ -1,4 +1,4 @@
-// 30 — tuples (prototype): fixed-arity, heterogeneous, immutable values
+// 30 — tuples: fixed-arity, heterogeneous, immutable values
 // Exercises: tuple types `(T1, T2)` and literals `(e1, e2)`, element access
 //            `t.0` / `t.1` (compile-time index, `t.0.1` for nesting), tuples
 //            as parameters / return values / fields / array elements,

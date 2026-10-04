@@ -5,10 +5,20 @@
 Paykan (`.pkn`) is a statically-typed clean and simple language.
 A program is checked, lowered to a backend-neutral IR (PIR, `docs/pir.md`) and compiled by a
 backend: the **C backend** (emits C11 for the system C compiler) or the optional **LLVM backend**
-(LLVM IR). `paykan run` (or just `paykan prog.pkn`) runs a program, through a JIT with the llvm
-backend; `paykan build prog.pkn -o prog` writes a native executable with either backend.
+(LLVM IR). `paykan run` (or just `paykan prog.pkn`) runs a program; the c backend is the default,
+and `--backend=llvm` runs it through a JIT instead. `paykan build prog.pkn -o prog` writes a
+native executable with either backend.
 Memory lifetimes for objects are managed via automatic reference counting — there is no garbage
 collector.
+
+### Stability
+
+Tuples (`09-tuples.md`), optional types (`10-optionals.md`, optional primitives and
+optional-mode `match` included) and generics (`11-generics.md`) are **stable in v0.1**: the
+syntax and semantics this reference documents for them are covered by the compatibility
+promise for the 0.1 series. The limitations each chapter lists stay limitations; in
+particular generics cannot be imported across modules until v0.2.0 ([#57](https://github.com/parsabee/PaykanLang/issues/57)), and a present
+optional primitive is boxed ([#96](https://github.com/parsabee/PaykanLang/issues/96) changes that representation, not the semantics).
 
 ### Design Pillars
 
@@ -100,7 +110,7 @@ mat: int[][] = [[1, 2], [3, 4]];   // 2D
 
 `None` is an `Obj` literal representing the absence of a value.
 
-### Optional Types (prototype)
+### Optional Types
 
 Any reference type `T` (a class, `Str`, or an array) and the primitives `int`, `float`, `bool`
 and `char` have an optional form `T?` that holds either a `T` or `None`. A `T` converts to `T?` implicitly; a `T?` is unwrapped with `match`. See

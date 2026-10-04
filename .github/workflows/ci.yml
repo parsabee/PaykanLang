@@ -13,7 +13,9 @@ on:
 # downloaded, #123).  Jobs that test the opt-in Bison frontend and LLVM
 # backend pass the full lists explicitly:
 #   "-DPAYKAN_FRONTENDS=recursive-descent;bison" "-DPAYKAN_BACKENDS=llvm;c"
-# (llvm first, so llvm stays the default backend there, as before).
+# The default backend is c there too (it always is when c is built); every
+# test that means llvm passes --backend=llvm, and the per-backend suites
+# (CodeGenTests.*, DriverTests.*, SamplesParity*) run on both.
 jobs:
   # ---------------------------------------------------------------------------
   # Code quality gate: clang-format (check) + clang-tidy (bug-focused).

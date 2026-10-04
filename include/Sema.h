@@ -614,7 +614,7 @@ private:
   /// Phase 4b for one class: register the constructor function `Name(...)`.
   void declareConstructor(ast::ClassDecl *cd, ast::ClassType *ct);
 
-  // -- Generics (prototype) --------------------------------------------------
+  // -- Generics --------------------------------------------------------------
   //
   // Generic declarations are templates: they are registered by name here and
   // never type-checked as such.  Every use with a distinct tuple of canonical

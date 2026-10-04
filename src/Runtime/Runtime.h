@@ -435,7 +435,7 @@ extern PaykanMethod
     PaykanArray_obj_vtable[PAYKAN_ARRAY_SLOTS]; // for object-element arrays
 
 // ============================================================================
-// Tuple (prototype)
+// Tuple
 // ============================================================================
 //
 // Inherits Object; its vtable has exactly Object's slots

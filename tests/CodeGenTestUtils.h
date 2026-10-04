@@ -3,7 +3,7 @@
 // Test utilities that compile and run Paykan programs through a backend.
 //
 // The backend is selected per test process by the PAYKAN_TEST_BACKEND
-// environment variable ("llvm" or "c"; the build's default backend when
+// environment variable ("llvm" or "c"; the build's default backend, c, when
 // unset), so the same CodeGen suite runs once per enabled backend (see
 // tests/CMakeLists.txt) and the backends act as differential oracles for
 // each other: every test asserts the same stdout, exit code and zero live
@@ -65,11 +65,8 @@ inline const std::string &testBackend() {
     const char *env = std::getenv("PAYKAN_TEST_BACKEND");
     if (env && env[0])
       return std::string(env);
-#if PAYKAN_TEST_HAVE_LLVM
-    return std::string("llvm");
-#else
+    // The default backend is c in every build (it is always built).
     return std::string("c");
-#endif
   }();
   return backend;
 }

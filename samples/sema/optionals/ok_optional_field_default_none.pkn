@@ -1,4 +1,4 @@
-// Optional types (prototype): an optional field is implicitly None when
+// Optional types: an optional field is implicitly None when
 // __init__ does not assign it; non-optional fields must still be assigned.
 class Node {
   v: int;

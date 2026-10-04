@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// Unit tests for the PaykanTuple runtime object (prototype): construction with
+// Unit tests for the PaykanTuple runtime object: construction with
 // per-slot kinds, raw / reference slot access, destroy releasing exactly the
 // reference slots, element-wise equals, and toString rendering.
 

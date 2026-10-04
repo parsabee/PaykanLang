@@ -226,7 +226,7 @@ classDecl:
  drv.Ctx->intern($4), std::move($6.Fields), std::move($6.Methods)); }
     // Generic class:  class Box<T> { ... }  /  class Foo<K, V> : Base { ... }
     // (the superclass is a plain class name; a generic superclass is not
-    // supported by the prototype).
+    // supported in v0.1).
     | "class" IDENT typeArgOpen typeParamList ">" "{" classMemberList "}"
                                     { $$ = drv.Ctx->make<ClassDecl>(loc(@1, @8), drv.Ctx->intern($2),
  drv.Ctx->intern(""), std::move($7.Fields), std::move($7.Methods), std::move($4)); }
@@ -302,7 +302,7 @@ typeAnnotation: IDENT               { auto *ty = drv.Ctx->lookupType($1);
                                     { $$ = drv.Ctx->make<GenericType>(loc(@1, @6),
                                            drv.Ctx->intern($1 + "::" + $3), std::move($5)); }
     | typeAnnotation "[" "]"        { $$ = drv.Ctx->make<ArrayType>(loc(@1, @3), $1); }
-    | typeAnnotation "?"            { // Optional type T? (prototype, issue #5).  `void`
+    | typeAnnotation "?"            { // Optional type T? (issue #5).  `void`
                                       // has no value to make optional; the other builtin
                                       // value types (`int?`, ...) box through the
                                       // runtime's boxed classes (an enum spelled `Color?`

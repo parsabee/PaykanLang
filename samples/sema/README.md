@@ -13,9 +13,9 @@ type-checking (no codegen or JIT execution).
 | `functions/` | Free-function declarations and top-level name collisions |
 | `match/`   | `match` statement — arms, bindings, wildcards     |
 | `enums/`   | `enum` declarations, variant access, equality, enum match |
-| `generics/` | Generic classes / functions (prototype): instantiation, inference, diagnostics |
-| `optionals/` | Optional types `T?` (prototype) — `None`, widening, unwrapping with `match`, optional fields and arrays |
-| `tuples/`  | Tuple types, literals, `.N` access, destructuring, immutability (prototype) |
+| `generics/` | Generic classes / functions: instantiation, inference, diagnostics |
+| `optionals/` | Optional types `T?` — `None`, widening, unwrapping with `match`, optional fields and arrays |
+| `tuples/`  | Tuple types, literals, `.N` access, destructuring, immutability |
 | `conversions/` | Conversion constructors `Target<Source>(value)`: the supported pairs, result types |
 
 ## Running

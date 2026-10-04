@@ -13,20 +13,26 @@ The first tagged release, published as a GitHub pre-release. PaykanLang is now
 split into a core, pluggable frontends and pluggable backends around a
 backend-neutral IR (PIR); the default build needs only CMake and a C++20
 compiler, plus a C11 compiler at run time. Fixes found while testing the alpha
-go under `[0.1.0]`. Features marked *prototype* (tuples, optional types,
-generics) are experimental and may change.
+go under `[0.1.0]`. Tuples, optional types (optional primitives and
+optional-mode `match` included) and generics are stable in v0.1 (see "Stable
+in v0.1" under Added).
 
 ### Breaking changes
 
 - **The default build is the core: the recursive-descent frontend and the C
-  backend (#123).** The default backend changes from llvm to c. A plain
-  `cmake -B build` builds only those two and downloads nothing. The LLVM
-  backend, with its JIT, and the Bison frontend are opt-in at configure time:
-  `-DPAYKAN_BACKENDS="llvm;c"`, `-DPAYKAN_FRONTENDS="recursive-descent;bison"`.
-  The default backend is the first one listed (`llvm` with `llvm;c`);
-  `--list-backends` shows it. Without the LLVM backend, `paykan` runs programs
-  with the C backend, which needs a C11 compiler (`cc`, or `$CC`) at run time.
-  The release tarballs and the Homebrew formula ship the core only.
+  backend (#123).** A plain `cmake -B build` builds only those two and
+  downloads nothing. The LLVM backend, with its JIT, and the Bison frontend
+  are opt-in at configure time: `-DPAYKAN_BACKENDS="llvm;c"`,
+  `-DPAYKAN_FRONTENDS="recursive-descent;bison"`. The release tarballs and the
+  Homebrew formula ship the core only.
+- **The default backend is c, in every build (#27).** The default backend
+  changes from llvm to c, and stays c even when the LLVM backend is built:
+  with `-DPAYKAN_BACKENDS="llvm;c"` (in any order) `--list-backends` shows
+  `c (default)`. Running a program through the JIT now needs
+  `--backend=llvm`; without it, `paykan` runs programs with the C backend,
+  which needs a C11 compiler (`cc`, or `$CC`) at run time. A configuration
+  without the c backend (never produced in tree) falls back to the first
+  backend listed. The default frontend stays recursive-descent.
 - **The Bison frontend is an optional plugin (#17, #60).** The hand-written
   recursive-descent frontend (standard C++ only) is the default. The
   Bison/Flex frontend implements the same grammar (`docs/grammar.md`) and
@@ -121,6 +127,15 @@ generics) are experimental and may change.
 
 ### Added
 
+- **Stable in v0.1: tuples, optional types and generics (#27).** They are no
+  longer marked prototype/experimental: their documented syntax and semantics
+  (`docs/language/09-tuples.md`, `10-optionals.md` with optional primitives
+  and optional-mode `match`, `11-generics.md`) are covered by the
+  compatibility promise for the 0.1 series. The documented limitations stay: importing generics
+  across modules is not supported until v0.2.0 (#57), and a present optional
+  primitive is boxed (#96 changes that representation, not the semantics).
+  The plugin interfaces are not yet stable for out-of-tree authors; their
+  versioning policy is #103.
 - **Pluggable frontends (#16, #17).** The frontend (lexer and parser) is a
   plugin behind an interface (`include/paykan/Frontend.h`) and a registry:
   `-DPAYKAN_FRONTENDS=<list>` picks the frontends to build,
@@ -163,7 +178,7 @@ generics) are experimental and may change.
   `import ::io;` looks a module up in `$PAYKAN_STDLIB` (no standard library
   ships yet, #113). See `docs/language/01-language-basics.md` and
   `06-modules.md`.
-- **Generics (prototype).** Generic classes (`class Box<T> { … }`,
+- **Generics.** Generic classes (`class Box<T> { … }`,
   `class Pair<K, V> { … }`) and generic free functions
   (`fn first<T>(xs: T[]) -> T`), implemented by monomorphisation in Sema: each
   distinct type-argument tuple instantiates the declaration once into an
@@ -179,7 +194,7 @@ generics) are experimental and may change.
   a module's own instantiations are exported as concrete classes. No
   constraints, variance, defaults or specialisation yet — see
   `docs/language/11-generics.md`.
-- **Optional types `T?` (prototype, issue #5).** Any reference type (a class,
+- **Optional types `T?` (issue #5).** Any reference type (a class,
   `Str`, or an array) has an optional form `T?` holding either a `T` or
   `None`. `T` widens to `T?` implicitly; a `T?` never narrows back without a
   `match`, whose `T` arm binds every present value and whose `None` arm (or
@@ -189,7 +204,7 @@ generics) are experimental and may change.
   `T?[]` / `T[]?` are supported. At runtime a `T?` is the same reference-
   counted box as a `T` with "no box" meaning `None` — no layout change.
   Nested optionals, flow typing, `if let`,
-  `??` and `?.` are not part of the prototype. See
+  `??` and `?.` are not supported in v0.1. See
   `docs/language/10-optionals.md`.
 - **Optional primitives `int?`, `float?`, `bool?`, `char?` (#66).** A
   primitive widens to its optional implicitly (`x: int? = 5`; an `int` also
@@ -202,7 +217,7 @@ generics) are experimental and may change.
   that class in an `Obj` slot. `Enum?` is still rejected, now with "optional
   enum types are not supported yet". `int?` does not convert to `float?`. See
   `docs/language/10-optionals.md`.
-- **Tuples (prototype, #4).** Fixed-arity, heterogeneous, immutable values:
+- **Tuples (#4).** Fixed-arity, heterogeneous, immutable values:
   types `(int, Str)` (nesting, `(int, Str)[]` and `(int[], Str)` allowed),
   literals `(1, "a")`, compile-time-checked element access `t.0` / `t.1.0`,
   multiple return `fn f() -> (int, int)`, and destructuring

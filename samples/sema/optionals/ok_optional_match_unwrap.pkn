@@ -1,4 +1,4 @@
-// Optional types (prototype): `match` is the unwrap.  A `Node` arm binds
+// Optional types: `match` is the unwrap.  A `Node` arm binds
 // every present value, `None` (or `_`) covers the absent case, and a strict
 // subclass arm matches on exact runtime type.
 class Node {

@@ -1250,11 +1250,11 @@ public:
 
 // Optional type: T?  (e.g. Node?, Str?, int[]?)
 //
-// PROTOTYPE (issue #5).  A `T?` holds either a value of the reference type T
-// or `None`.  Only reference types may be optional (Sema rejects `int?` and
-// friends, and nested `T??`), so at runtime a `T?` is the very same
-// PaykanShared* box as a `T`, with a NULL box meaning `None` — no layout
+// Issue #5.  A `T?` holds either a value of type T or `None`.  For a
+// reference type T (Sema rejects nested `T??`) a `T?` is at runtime the very
+// same PaykanShared* box as a `T`, with a NULL box meaning `None` — no layout
 // change, and every runtime entry point that touches boxes tolerates NULL.
+// An optional primitive (`int?`, #66) is its boxed class (`Int`) or NULL.
 // Like ArrayType, the parser allocates a source-located node per annotation
 // and Sema resolves it to the canonical instance interned by
 // ASTContext::getOptionalType, so optional types compare by pointer identity.

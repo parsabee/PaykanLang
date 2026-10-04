@@ -5,8 +5,9 @@ The C backend (`--backend=c`) translates a verified PIR program
 (see [Standard C](#standard-c)) against the runtime's `Runtime.h`, and builds
 or runs it with the system C compiler.  It is part of the core: it depends on
 nothing but the standard library and a C compiler at run time, and it is the
-backend of the default build.  The LLVM backend is in tree too, but opt-in at
-configure time (`-DPAYKAN_BACKENDS="llvm;c"`).
+default backend of every build that has it (it always is built in tree), so
+`--backend=c` may be omitted.  The LLVM backend is in tree too, but opt-in at
+configure time (`-DPAYKAN_BACKENDS="llvm;c"`) and selected with `--backend=llvm`.
 
 ## Commands
 
