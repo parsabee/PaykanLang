@@ -20,10 +20,26 @@ jobs:
   # Uses the vendored LLVM 17 toolchain so the gate matches local runs exactly.
   # ---------------------------------------------------------------------------
   lint:
-    name: Lint | clang-format + clang-tidy
+    name: Lint | clang-format + clang-tidy + actionlint
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+
+      # The workflows themselves (#133): every actionlint finding fails the
+      # job, including shellcheck's on `run:` scripts -- e.g. SC2251, a
+      # `! cmd` check that bash -e silently ignores.  actionlint skips the
+      # shellcheck pass when shellcheck is missing, so require it.
+      - name: actionlint (workflows, with shellcheck)
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          set -euo pipefail
+          command -v shellcheck || brew install shellcheck
+          shellcheck --version
+          bash <(curl -sSfL "https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash") "${ACTIONLINT_VERSION}" "${RUNNER_TEMP}"
+          "${RUNNER_TEMP}/actionlint" -version
+          "${RUNNER_TEMP}/actionlint" -color -shellcheck "$(command -v shellcheck)"
 
       - name: Cache third-party dependencies
         uses: actions/cache@v4
@@ -267,7 +283,12 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y ninja-build
           sudo apt-get remove -y bison flex m4 || true
-          ! command -v bison && ! command -v flex && ! command -v m4
+          for tool in bison flex m4; do
+            if command -v "$tool"; then
+              echo "error: $tool is still installed"
+              exit 1
+            fi
+          done
 
       # The packager's build (#77): tests off, so not even GoogleTest is fetched.
       # A plain configure: the defaults are the core (#123).
@@ -278,7 +299,12 @@ jobs:
             -DPAYKAN_BUILD_TESTS=OFF 2>&1 | tee configure-notests.log
           grep -F "Frontends: recursive-descent (default: recursive-descent)" configure-notests.log
           grep -F "Backends: c (default: c)" configure-notests.log
-          ! grep -i "Downloading\|Fetching\|GTest\|Building Bison\|Building Flex\|prebuilt LLVM\|LLVM not found" configure-notests.log
+          # (`! grep` mid-script would not fail the step: bash -e ignores a
+          # negated command, actionlint/shellcheck SC2251.)
+          if grep -i "Downloading\|Fetching\|GTest\|Building Bison\|Building Flex\|prebuilt LLVM\|LLVM not found" configure-notests.log; then
+            echo "error: the configure with tests off downloaded or built something (above)"
+            exit 1
+          fi
           test ! -e build-notests/third-party
           test ! -e build-notests/_deps
           test ! -e build-notests/CTestTestfile.cmake
@@ -298,7 +324,10 @@ jobs:
           set -o pipefail
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug 2>&1 | tee configure.log
           # Nothing but GoogleTest may be fetched.
-          ! grep -i "Downloading\|Building Bison\|Building Flex" configure.log
+          if grep -i "Downloading\|Building Bison\|Building Flex" configure.log; then
+            echo "error: the default configure downloaded or built more than GoogleTest (above)"
+            exit 1
+          fi
           test "$(ls build/third-party)" = "gtest"
 
       - name: Build
@@ -307,8 +336,15 @@ jobs:
       - name: Check that paykan links no third-party library
         run: |
           ldd build/bin/paykan | tee ldd.log
-          ! grep -iv "linux-vdso\|libstdc++\|libgcc_s\|libc\.so\|libm\.so\|ld-linux" ldd.log
-          ! nm -C build/bin/paykan | grep -q "llvm::\|yy::\|yylex"
+          if grep -iv "linux-vdso\|libstdc++\|libgcc_s\|libc\.so\|libm\.so\|ld-linux" ldd.log; then
+            echo "error: paykan links a third-party library (above)"
+            exit 1
+          fi
+          nm -C build/bin/paykan > nm.log
+          if grep "llvm::\|yy::\|yylex" nm.log; then
+            echo "error: paykan contains LLVM or Bison/Flex symbols (above)"
+            exit 1
+          fi
 
       - name: Test
         run: ctest --test-dir build --output-on-failure --parallel 4

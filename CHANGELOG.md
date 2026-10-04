@@ -399,6 +399,29 @@ generics) are experimental and may change.
   arrays and tuples nested inside each other) no longer overflows the C stack
   (#118). The runtime destroys objects iteratively, in constant stack space
   (`docs/language/08-memory-model.md`).
+- **Documentation matches the compiler (#121).** The final audit's
+  discrepancies are fixed. README: the build prerequisites and defaults.
+  Language reference: array printing, selective imports
+  (`import a::{b, c as d}`), system imports and `PAYKAN_STDLIB`, `File`'s
+  `readbytes` / `read`, `Stdin`, the boxed types, `Str<int>` as a
+  conversion, and diagnostics quoted as the compiler prints them.
+  `docs/grammar.md`: the comparison-in-arguments case and the nesting limit
+  on every frontend. `docs/pir.md`: `destroy`, `bool<Str>` and
+  `PaykanBool_from_str`. `docs/c-backend.md`: LLVM is an in-tree, opt-in
+  backend. The `MarkdownLinks` and `DocExamples` ctests keep links and
+  stated outputs checked.
+- `Driver.BuildAndRunDefaultToO2` failed in every sanitizer and coverage
+  build (#122), because it expected the C cache key to end in ` -O2`, but
+  instrumented builds append their own flags after the level. The test now
+  parses the key's compile flags and checks for the `-O` token.
+- **Release and CI (#133).** `release.yml` publishes a tag with a
+  pre-release suffix (`v0.1.0-alpha`, `-rc1`) as a GitHub pre-release that
+  is never marked "Latest", and a "Release plan" job shows that decision on
+  every run, dry runs included. The barebones CI checks written as
+  `! grep …` partway through a script never failed, because `bash -e`
+  ignores a negated command; they are now explicit `if …; then exit 1; fi`
+  checks. The Lint job runs actionlint, with shellcheck, and any finding
+  fails it.
 
 ### Changed
 
