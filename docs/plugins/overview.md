@@ -1,10 +1,10 @@
 # Plugins: overview
 
-A **plugin** adds a backend to an installed `paykan` without rebuilding
-PaykanLang. You have PaykanLang x.y.z installed; you write or download a
-backend built for x.y.z; your system's `paykan` loads it at startup and
-`--backend=<name>` selects it like a built-in one
-([#141](https://github.com/parsabee/PaykanLang/issues/141)).
+A **plugin** adds a frontend or a backend to an installed `paykan` without
+rebuilding PaykanLang. You have PaykanLang x.y.z installed; you write or
+download a frontend or backend built for x.y.z; your system's `paykan` loads
+it at startup and `--frontend=<name>` / `--backend=<name>` selects it like a
+built-in one ([#141](https://github.com/parsabee/PaykanLang/issues/141)).
 
 A plugin is a shared library (`.so` on Linux, `.dylib` on macOS) with a
 **C interface**, [`include/paykan/plugin_api.h`](../../include/paykan/plugin_api.h).
@@ -17,12 +17,19 @@ compiler), Rust, Zig, Go with cgo, and so on.
 |---|---|
 | this page | using plugins, and how `paykan` finds and checks them |
 | [`plugin-api.md`](plugin-api.md) | the C interface, field by field |
+| [`ast-format.md`](ast-format.md) | the AST a frontend returns (the AST interchange format) |
 | [`pir-for-backends.md`](pir-for-backends.md) | the program a backend receives (PIR text) |
+| [`../writing-a-frontend-plugin.md`](../writing-a-frontend-plugin.md) | writing a frontend, step by step |
 | [`../writing-a-backend.md`](../writing-a-backend.md) | writing a backend, step by step |
+
+Data crosses the boundary as documented, versioned text: a frontend
+returns the program it parsed in the [AST interchange format](ast-format.md),
+which `paykan` reads, checks and hands to Sema; a backend receives the
+verified program as [PIR text](pir-for-backends.md).
 
 The built-in plugins (the `recursive-descent` frontend, the `c` backend and
 the opt-in in-tree `llvm` backend) are linked into `paykan` and keep their
-in-process C++ interface. Frontends are not loadable yet.
+in-process C++ interface.
 
 ## Using a plugin
 
@@ -40,7 +47,8 @@ mkdir -p ~/.paykan/plugins/0.1.0-alpha
 cp libpaykan_backend_print_pir.so ~/.paykan/plugins/0.1.0-alpha/
 ```
 
-`paykan --list-backends` shows each loaded backend with its file, and
+`paykan --list-frontends` / `--list-backends` show each loaded plugin with
+its file, and
 `paykan --version` prints the plugin directories searched and every plugin
 file with what it provides. Include `paykan --version` in bug reports.
 
@@ -86,7 +94,7 @@ For every candidate file, `paykan`
 2. looks up the one entry point, `paykan_plugin_init`, and calls it with the
    host table. The plugin returns its **descriptor**: the plugin API version
    it was built for, the PaykanLang version it was **built with**, and its
-   backends;
+   frontends and backends;
 3. checks the descriptor before calling anything else in the library:
    - the plugin API version must be one this `paykan` supports
      (`PAYKAN_PLUGIN_API_VERSION`; `paykan --version` prints it);
@@ -94,7 +102,8 @@ For every candidate file, `paykan`
    - the build version must be on this release's compatibility list
      ([#103](https://github.com/parsabee/PaykanLang/issues/103); exact match,
      pre-release label included);
-4. registers each backend under its name, with the file it came from.
+4. registers each frontend and backend under its name, with the file it
+   came from.
 
 **The guarantee.** Before a plugin passes the check, `paykan` runs exactly
 two things of it: what the platform's loader runs when it loads a library
@@ -103,14 +112,16 @@ two things of it: what the platform's loader runs when it loads a library
 returns the static descriptor, and a plugin must not have side-effecting
 global constructors (in C++, no global object whose constructor does more
 than initialise memory; in Rust, none of the `ctor`-style crates). No
-backend callback of a plugin that fails the check is ever called. The tests
+frontend or backend callback of a plugin that fails the check is ever
+called. The tests
 (`tests/Plugin/LoaderTests.cpp`) check this with a plugin whose constructor
 leaves a marker file and whose callbacks would leave another: for a
 rejected plugin, the first exists and the second never does.
 
 ### What happens to a plugin that fails
 
-- **Wrong build version.** Its backends are registered as incompatible:
+- **Wrong build version.** Its frontends and backends are registered as
+  incompatible:
   listed with the reason, never callable. Selecting one exits with status 2:
 
   ```text
@@ -147,8 +158,8 @@ rejected plugin, the first exists and the second never does.
   paykan: cannot use backend 'mine' (ambiguous: provided by both /a/libmine.so and /b/libmine.so)
   ```
 
-  A plugin that takes a built-in name (`c`) makes that name ambiguous too,
-  including as the default backend.
+  A plugin that takes a built-in name (`c`, `recursive-descent`) makes that
+  name ambiguous too, including as the default.
 
 ## Compatibility and stability
 
@@ -158,8 +169,10 @@ rejected plugin, the first exists and the second never does.
   looks past it. So a plugin built against an older header keeps loading into
   a newer `paykan` of the same API version. An incompatible change bumps the
   version.
-- **The program text** a backend receives is PIR text, versioned separately
-  (`PAYKAN_PIR_TEXT_VERSION`, see [`pir-for-backends.md`](pir-for-backends.md)).
+- **The program text** is versioned separately: the AST a frontend returns
+  (`PAYKAN_AST_FORMAT_VERSION`, [`ast-format.md`](ast-format.md)) and the PIR
+  text a backend receives (`PAYKAN_PIR_TEXT_VERSION`,
+  [`pir-for-backends.md`](pir-for-backends.md)).
 - **The build version** list (#103) is the release's statement of which
   plugin builds it accepts; see
   [`writing-a-backend.md` §7](../writing-a-backend.md#7-plugin-compatibility).

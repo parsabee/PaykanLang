@@ -198,6 +198,24 @@ target_link_libraries(lowering_tests
 paykan_link_plugins(lowering_tests)
 add_test(NAME LoweringTests COMMAND lowering_tests)
 
+# --- The AST interchange format: the round trip over the samples corpus and --
+# --- the reader's errors (tests/AST/InterchangeTests.cpp) ----------------------
+add_executable(ast_interchange_tests
+    AST/InterchangeTests.cpp
+)
+target_compile_definitions(ast_interchange_tests
+    PRIVATE PAYKAN_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/samples"
+)
+target_link_libraries(ast_interchange_tests
+    PRIVATE gtest_main
+            paykan_ast_interchange
+            paykan_frontend
+            paykan_ast_printer
+            paykan_compile_options
+)
+paykan_link_plugins(ast_interchange_tests)
+add_test(NAME ASTInterchangeTests COMMAND ast_interchange_tests)
+
 # --- Plugin registry: the compatibility check (#103) -------------------------
 list(JOIN PAYKAN_PLUGIN_COMPATIBLE_VERSIONS ", " PAYKAN_TEST_ACCEPTED_VERSIONS)
 add_executable(plugin_tests
@@ -221,8 +239,16 @@ set(PAYKAN_TEST_PLUGIN_TARGETS "")
 # paykan_test_plugin(<name> <subdir> [<definition>...]): the module
 # <subdir>/lib<name><suffix> below PAYKAN_TEST_PLUGIN_DIR.
 function(paykan_test_plugin name subdir)
+    paykan_test_plugin_from(test_plugin.c ${name} ${subdir} ${ARGN})
+    set(PAYKAN_TEST_PLUGIN_TARGETS ${PAYKAN_TEST_PLUGIN_TARGETS} PARENT_SCOPE)
+endfunction()
+function(paykan_test_frontend name subdir)
+    paykan_test_plugin_from(test_frontend.c ${name} ${subdir} ${ARGN})
+    set(PAYKAN_TEST_PLUGIN_TARGETS ${PAYKAN_TEST_PLUGIN_TARGETS} PARENT_SCOPE)
+endfunction()
+function(paykan_test_plugin_from source name subdir)
     set(target paykan_test_plugin_${name})
-    add_library(${target} MODULE Plugin/modules/test_plugin.c)
+    add_library(${target} MODULE Plugin/modules/${source})
     target_link_libraries(${target} PRIVATE paykan_plugin_api)
     target_compile_definitions(${target} PRIVATE ${ARGN})
     target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
@@ -257,7 +283,14 @@ paykan_test_plugin(none none [=[TP_NAME="test-none"]=] TP_NUM_BACKENDS=0)
 paykan_test_plugin(tiny tiny [=[TP_NAME="test-tiny"]=] TP_PLUGIN_SIZE=4)
 paykan_test_plugin(short short [=[TP_NAME="test-short"]=] TP_PLUGIN_SIZE=16)
 paykan_test_plugin(bshort bshort [=[TP_NAME="test-bshort"]=] TP_BACKEND_SIZE=8)
+paykan_test_plugin(early early [=[TP_NAME="test-early"]=]
+    "TP_PLUGIN_SIZE=offsetof(PaykanPlugin, num_frontends)")
 paykan_test_plugin(future future [=[TP_NAME="test-future"]=] TP_FUTURE)
+paykan_test_frontend(fe fe)
+paykan_test_frontend(fe_old fe_old [=[TP_NAME="test-fe-old"]=] [=[TP_BUILD_VERSION="0.0.9"]=])
+paykan_test_frontend(fe_nofree fe_nofree [=[TP_NAME="test-fe-nofree"]=] TP_NO_FREE)
+paykan_test_frontend(fe_noparse fe_noparse [=[TP_NAME="test-fe-noparse"]=] TP_NO_PARSE)
+paykan_test_frontend(fe_clash fe_clash [=[TP_NAME="recursive-descent"]=])
 paykan_test_plugin(dup_a dup [=[TP_NAME="dup"]=])
 paykan_test_plugin(dup_b dup [=[TP_NAME="dup"]=])
 paykan_test_plugin(clash clash [=[TP_NAME="c"]=])

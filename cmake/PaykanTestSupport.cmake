@@ -5,11 +5,15 @@
 # in-tree frontend (docs/writing-a-frontend-plugin.md):
 #
 #   share/paykan/frontend-tests/      TestUtils.h, Parser/, Sema/ and
-#                                     Frontend/{FuzzSmoke,Differential}Tests.cpp
+#                                     Frontend/{FuzzSmoke,Differential}Tests.cpp,
+#                                     Frontend/LoadTestPlugins.cpp
 #   share/paykan/samples/             the samples corpus
 #   lib/cmake/Paykan/PaykanFrontendTests.cmake
 #                                     paykan_add_frontend_tests(), included
 #                                     by PaykanConfig.cmake
+#   lib/cmake/Paykan/PaykanFrontendCheck.cmake
+#                                     the differential check through the
+#                                     installed paykan
 #
 # Sources only: nothing is compiled here, and GoogleTest is the consumer's.
 # -DPAYKAN_INSTALL_TEST_SUPPORT=OFF (the option is in the top-level
@@ -31,7 +35,10 @@ install(DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Parser ${PROJECT_SOURCE_DIR}/tests
     FILES_MATCHING PATTERN "*.cpp")
 install(FILES ${PROJECT_SOURCE_DIR}/tests/Frontend/FuzzSmokeTests.cpp
               ${PROJECT_SOURCE_DIR}/tests/Frontend/DifferentialTests.cpp
+              ${PROJECT_SOURCE_DIR}/tests/Frontend/LoadTestPlugins.cpp
     DESTINATION ${PAYKAN_INSTALL_TEST_SUPPORT_DIR}/Frontend)
+install(FILES ${PROJECT_SOURCE_DIR}/cmake/PaykanFrontendCheck.cmake
+    DESTINATION ${PAYKAN_INSTALL_CMAKEDIR})
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/samples/
     DESTINATION ${PAYKAN_INSTALL_SAMPLES_DIR}
     PATTERN ".paykan_cache" EXCLUDE)

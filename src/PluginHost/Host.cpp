@@ -43,6 +43,27 @@ void diagnostic(PaykanSession *s, uint32_t level, const char *file,
                 size_t messageSize) {
   if (!s)
     return;
+  if (s->Diag) {
+    // A frontend's: the built-in frontends' format, source snippet and all.
+    // A diagnostic about another file than the one being parsed has no
+    // snippet: its position goes into the message.
+    std::string msg(text(message, messageSize));
+    ast::SourceLocation loc(line, column, line, column);
+    if (file && *file && file != s->InputFile) {
+      msg = std::string(file) + (line ? ":" + std::to_string(line) : "") +
+            (line && column ? ":" + std::to_string(column) : "") + ": " + msg;
+      loc = ast::SourceLocation();
+    }
+    if (level == PAYKAN_DIAG_ERROR) {
+      ++s->DiagErrors;
+      s->Diag->error(loc, msg);
+    } else if (level == PAYKAN_DIAG_WARNING) {
+      s->Diag->warning(loc, msg);
+    } else {
+      s->Diag->note(loc, msg);
+    }
+    return;
+  }
   std::string d =
       formatDiagnostic(*s, level, file, line, column, message, messageSize);
   if (level == PAYKAN_DIAG_ERROR)

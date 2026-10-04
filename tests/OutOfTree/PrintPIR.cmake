@@ -7,8 +7,9 @@
 #     file, compatible, and its output is exactly `paykan --emit-pir`;
 #   - after `cmake --install` of the plugin into the installation's plugin
 #     directory, with the plugin's build tree deleted: found by itself.
-# Then the same for the Rust example (utils/pir-stats-rust), when rustc is
-# available (RUSTC).
+# Then the C example frontend (utils/ast-text-frontend), the Rust example
+# backend (utils/pir-stats-rust, when rustc is available: RUSTC), and the
+# advanced static path (tests/OutOfTree/static-driver).
 #
 # Run as a ctest (tests/CMakeLists.txt, PrintPIROutOfTree):
 #   cmake -DPAYKAN_BUILD_DIR=... -DPAYKAN_SOURCE_DIR=... -DWORK_DIR=...
@@ -123,6 +124,37 @@ run_step("installed paykan --no-plugins --list-backends"
     COMMAND ${paykan} --no-plugins --list-backends)
 if(STEP_OUTPUT MATCHES "print-pir")
     message(FATAL_ERROR "--no-plugins still lists print-pir:\n${STEP_OUTPUT}")
+endif()
+
+# -- ast-text (C frontend) ------------------------------------------------------
+# Built, installed into the plugin directory, its build tree deleted; the
+# installed paykan then runs a program given as `paykan --emit-ast` output,
+# exactly like the source.
+set(build ${WORK_DIR}/ast-text)
+run_step("configure utils/ast-text-frontend"
+    COMMAND ${CMAKE_COMMAND} -S ${PAYKAN_SOURCE_DIR}/utils/ast-text-frontend
+            -B ${build} ${configure_args})
+run_step("build utils/ast-text-frontend" COMMAND ${CMAKE_COMMAND} --build ${build})
+run_step("install utils/ast-text-frontend" COMMAND ${CMAKE_COMMAND} --install ${build})
+file(REMOVE_RECURSE ${build})
+run_step("installed paykan --list-frontends" COMMAND ${paykan} --list-frontends)
+string(FIND "${STEP_OUTPUT}" "ast-text: reads the AST interchange format [${plugin_dir}/libpaykan_frontend_ast_text." at)
+if(at EQUAL -1)
+    message(FATAL_ERROR "ast-text is not listed from the plugin directory:\n${STEP_OUTPUT}")
+endif()
+run_step("paykan --emit-ast" COMMAND ${paykan} --emit-ast ${sample})
+file(WRITE ${WORK_DIR}/01_literals.pkn "${STEP_OUTPUT}")
+run_step("paykan --frontend=ast-text --emit-pir"
+    COMMAND ${paykan} --frontend=ast-text --emit-pir ${WORK_DIR}/01_literals.pkn)
+if(NOT STEP_OUTPUT STREQUAL expected_pir)
+    message(FATAL_ERROR "the program through ast-text differs from the source's")
+endif()
+run_step("paykan run" COMMAND ${paykan} run ${sample})
+set(expected_run "${STEP_OUTPUT}")
+run_step("paykan --frontend=ast-text run"
+    COMMAND ${paykan} --frontend=ast-text run ${WORK_DIR}/01_literals.pkn)
+if(NOT STEP_OUTPUT STREQUAL expected_run)
+    message(FATAL_ERROR "running through ast-text differs:\n${STEP_OUTPUT}")
 endif()
 
 # -- pir-stats (Rust) ----------------------------------------------------------

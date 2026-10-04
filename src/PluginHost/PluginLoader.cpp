@@ -10,6 +10,7 @@
 #include "PluginHost.h"
 
 #include "paykan/Backend.h"
+#include "paykan/Frontend.h"
 #include "paykan/Registry.h"
 #include "paykan/backends/Toolchain.h"
 #include "paykan/plugin_api.h"
@@ -23,6 +24,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #ifndef PAYKAN_PLUGIN_VERSION_DIR
@@ -88,47 +90,115 @@ std::string identity(const std::string &path) {
   return fs::absolute(path, ec).lexically_normal().string();
 }
 
-/// The @p i-th backend of @p p.  The array's stride is the struct_size of
-/// its elements (all equal: one struct, compiled once), which is larger than
-/// this paykan's sizeof(PaykanBackend) when the plugin was built against a
+/// The @p i-th element of a descriptor array.  The array's stride is the
+/// struct_size of its elements (all equal: one struct, compiled once), which
+/// is larger than this paykan's sizeof(T) when the plugin was built against a
 /// newer header of the same plugin API (fields are only ever appended).
-const PaykanBackend &backendAt(const PaykanPlugin &p, size_t i) {
-  const auto *base = reinterpret_cast<const unsigned char *>(p.backends);
-  return *reinterpret_cast<const PaykanBackend *>(
-      base + i * size_t(p.backends[0].struct_size));
+template <typename T> const T &elementAt(const T *array, size_t i) {
+  const auto *base = reinterpret_cast<const unsigned char *>(array);
+  return *reinterpret_cast<const T *>(base + i * size_t(array[0].struct_size));
 }
 
-/// Check the backend descriptors of @p p; "" when they are well-formed.
-std::string checkBackends(const PaykanPlugin &p) {
-  if (p.num_backends && !p.backends)
-    return "the descriptor lists " + std::to_string(p.num_backends) +
-           " backends but no array";
-  if (!p.num_backends)
-    return "it provides no backend";
+/// The plugin's frontends (none when its descriptor predates them).
+std::pair<size_t, const PaykanFrontend *> frontendsOf(const PaykanPlugin &p) {
+  if (!host::pluginHasFrontends(p))
+    return {0, nullptr};
+  return {p.num_frontends, p.frontends};
+}
+
+/// Check one descriptor array of @p kind ("backend", "frontend"): the
+/// stride, the names, and @p checkOne for each element.  "" when it is
+/// well-formed.
+template <typename T, typename Check>
+std::string checkArray(const char *kind, size_t n, const T *array,
+                       size_t minSize, Check checkOne) {
+  if (!n)
+    return "";
+  if (!array)
+    return "the descriptor lists " + std::to_string(n) + " " + kind +
+           "s but no array";
   // The first element's size is the array's stride: check it first.
-  if (uint32_t size = p.backends[0].struct_size; size < host::kMinBackendSize)
-    return "backend #1: its descriptor is " + std::to_string(size) +
-           " bytes, plugin API " + std::to_string(PAYKAN_PLUGIN_API_VERSION) +
-           " needs " + std::to_string(host::kMinBackendSize);
+  if (uint32_t size = array[0].struct_size; size < minSize)
+    return std::string(kind) + " #1: its descriptor is " +
+           std::to_string(size) + " bytes, plugin API " +
+           std::to_string(PAYKAN_PLUGIN_API_VERSION) + " needs " +
+           std::to_string(minSize);
   std::set<std::string_view> seen;
-  for (size_t i = 0; i < p.num_backends; ++i) {
-    std::string which = "backend #" + std::to_string(i + 1);
-    const PaykanBackend &b = backendAt(p, i);
-    if (b.struct_size != p.backends[0].struct_size)
-      return which + ": its descriptor is " + std::to_string(b.struct_size) +
-             " bytes, the first one " +
-             std::to_string(p.backends[0].struct_size);
-    if (!b.name || !*b.name)
+  for (size_t i = 0; i < n; ++i) {
+    std::string which = std::string(kind) + " #" + std::to_string(i + 1);
+    const T &e = elementAt(array, i);
+    if (e.struct_size != array[0].struct_size)
+      return which + ": its descriptor is " + std::to_string(e.struct_size) +
+             " bytes, the first one " + std::to_string(array[0].struct_size);
+    if (!e.name || !*e.name)
       return which + " has no name";
-    which = "backend '" + std::string(b.name) + "'";
-    if (!seen.insert(b.name).second)
+    which = kind;
+    which += " '";
+    which += e.name;
+    which += "'";
+    if (!seen.insert(e.name).second)
       return which + " is listed twice";
-    if (!b.emit)
-      return which + " has no emit callback";
-    if ((b.capabilities & PAYKAN_BACKEND_RUN) && !b.run)
-      return which + " can run programs but has no run callback";
+    if (std::string why = checkOne(e); !why.empty()) {
+      which += " ";
+      return which + why;
+    }
   }
   return "";
+}
+
+/// Check the frontend and backend descriptors of @p p; "" when they are
+/// well-formed.
+std::string checkDescriptors(const PaykanPlugin &p) {
+  auto [numFrontends, frontends] = frontendsOf(p);
+  if (!p.num_backends && !numFrontends)
+    return "it provides no frontend and no backend";
+  std::string why =
+      checkArray("backend", p.num_backends, p.backends, host::kMinBackendSize,
+                 [](const PaykanBackend &b) -> std::string {
+                   if (!b.emit)
+                     return "has no emit callback";
+                   if ((b.capabilities & PAYKAN_BACKEND_RUN) && !b.run)
+                     return "can run programs but has no run callback";
+                   return "";
+                 });
+  if (!why.empty())
+    return why;
+  why = checkArray("frontend", numFrontends, frontends, host::kMinFrontendSize,
+                   [](const PaykanFrontend &f) -> std::string {
+                     return f.parse ? "" : "has no parse callback";
+                   });
+  if (!why.empty())
+    return why;
+  if (numFrontends && !p.free_memory)
+    return "it provides frontends but no free_memory (to release their "
+           "ASTs)";
+  return "";
+}
+
+/// Register the elements of one descriptor array in @p registry; @p make
+/// creates the adapter of one.  A name already taken becomes ambiguous.
+template <typename Registry, typename T, typename Make>
+void registerAll(Registry &registry, const char *kind, size_t n, const T *array,
+                 const PaykanPlugin &p, PluginFile &f, bool compatible,
+                 const std::string &reason, Make make) {
+  for (size_t i = 0; i < n; ++i) {
+    const T *e = &elementAt(array, i);
+    f.Provides.push_back(std::string(kind) + " " + e->name);
+    if (registry.find(e->name)) {
+      registry.markConflict(e->name, f.Path);
+      continue;
+    }
+    typename Registry::Entry entry;
+    entry.Name = e->name;
+    if (compatible)
+      entry.Create = [e, make] { return make(e); };
+    entry.BuildVersion = p.build_version ? p.build_version : "";
+    entry.Compatible = compatible;
+    entry.Incompatibility = reason;
+    entry.Path = f.Path;
+    entry.Description = e->description ? e->description : "";
+    registry.add(std::move(entry));
+  }
 }
 
 /// A library that stays loaded for the life of the process.
@@ -194,7 +264,7 @@ void loadFile(PluginFile &f) {
               " needs " + std::to_string(host::kMinPluginSize);
     return;
   }
-  if (std::string why = checkBackends(*p); !why.empty()) {
+  if (std::string why = checkDescriptors(*p); !why.empty()) {
     f.Error = "invalid descriptor: " + why;
     return;
   }
@@ -202,30 +272,20 @@ void loadFile(PluginFile &f) {
   f.Version = p->version ? p->version : "";
   loadedLibraries().push_back({handle, p});
 
-  // 4. Register.  An incompatible plugin's backends are registered without
-  //    a factory: listed with the reason, never callable.
+  // 4. Register.  An incompatible plugin's frontends and backends are
+  //    registered without a factory: listed with the reason, never callable.
   bool compatible = isCompatibleBuildVersion(p->build_version);
   std::string reason =
       compatible ? "" : incompatibilityReason(p->build_version);
-  auto &registry = backend::Registry::get();
-  for (size_t i = 0; i < p->num_backends; ++i) {
-    const PaykanBackend *b = &backendAt(*p, i);
-    f.Provides.push_back(std::string("backend ") + b->name);
-    if (registry.find(b->name)) {
-      registry.markConflict(b->name, f.Path);
-      continue;
-    }
-    backend::Registry::Entry e;
-    e.Name = b->name;
-    if (compatible)
-      e.Create = [b] { return host::makeBackendAdapter(b); };
-    e.BuildVersion = p->build_version ? p->build_version : "";
-    e.Compatible = compatible;
-    e.Incompatibility = reason;
-    e.Path = f.Path;
-    e.Description = b->description ? b->description : "";
-    registry.add(std::move(e));
-  }
+  auto [numFrontends, frontends] = frontendsOf(*p);
+  registerAll(frontend::Registry::get(), "frontend", numFrontends, frontends,
+              *p, f, compatible, reason, [p](const PaykanFrontend *fe) {
+                return host::makeFrontendAdapter(p, fe);
+              });
+  registerAll(backend::Registry::get(), "backend", p->num_backends, p->backends,
+              *p, f, compatible, reason, [](const PaykanBackend *b) {
+                return host::makeBackendAdapter(b);
+              });
 }
 
 } // namespace

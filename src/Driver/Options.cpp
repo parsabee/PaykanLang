@@ -24,6 +24,8 @@ constexpr Flag kFlags[] = {
     {"dump-ast", &Options::DumpAST, "Print the AST in tree form"},
     {"dump-tokens", &Options::DumpTokens,
      "Print the token stream (frontends that support it)"},
+    {"emit-ast", &Options::EmitAST,
+     "Print the parsed AST in the AST interchange format and exit"},
     {"emit-source", &Options::EmitSource,
      "Write the backend's source output (C, LLVM IR, ...) to stdout"},
     {"emit-pir", &Options::EmitPIR,

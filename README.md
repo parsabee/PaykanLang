@@ -59,8 +59,8 @@ paykan --version
 
 ### Plugins
 
-A backend built for your PaykanLang version plugs into the `paykan` you installed, with no
-rebuild: plugins are shared libraries with a C interface
+A frontend or backend built for your PaykanLang version plugs into the `paykan` you
+installed, with no rebuild: plugins are shared libraries with a C interface
 ([`include/paykan/plugin_api.h`](include/paykan/plugin_api.h)), so they can be written in
 any language that exposes C functions. `paykan` loads the files named with
 `--plugin=<file>`, then every plugin in `$PAYKAN_PLUGIN_PATH`, in
@@ -72,14 +72,20 @@ cp libpaykan_backend_print_pir.so ~/.paykan/plugins/0.1.0-alpha/   # or `cmake -
 paykan --backend=print-pir --emit-source hello.pkn
 paykan --list-backends    # every backend, with the file a plugin came from
 paykan --no-plugins ...   # only the built-in plugins (and --plugin files)
+
+# A frontend: install PaykanLang, install the plugin, select it.
+cmake --install build-bison            # PaykanLang_Bison_Frontend, into the plugin directory
+paykan --frontend=bison program.pkn
 ```
 
 A plugin built for another version, or that fails to load, is listed with the reason and
 can't be selected (exit status 2). [`docs/plugins/overview.md`](docs/plugins/overview.md)
 explains discovery, the checks and what they guarantee;
-[`docs/writing-a-backend.md`](docs/writing-a-backend.md) shows how to write one
-([`utils/print-pir`](utils/print-pir) in C, [`utils/pir-stats-rust`](utils/pir-stats-rust)
-in Rust). Frontends are not loadable yet.
+[`docs/writing-a-backend.md`](docs/writing-a-backend.md) and
+[`docs/writing-a-frontend-plugin.md`](docs/writing-a-frontend-plugin.md) show how to write one
+([`utils/print-pir`](utils/print-pir) and [`utils/ast-text-frontend`](utils/ast-text-frontend)
+in C, [`utils/pir-stats-rust`](utils/pir-stats-rust) in Rust). A frontend returns the program
+in the [AST interchange format](docs/plugins/ast-format.md); a backend receives it as PIR text.
 
 ---
 
@@ -101,10 +107,9 @@ cmake --build build --parallel
 
 The frontend (lexer + parser) is pluggable. `-DPAYKAN_FRONTENDS=<list>` lists the in-tree
 frontends to build; today that is `recursive-descent` (standard C++ only), which is always
-built and is the default. Out-of-tree frontends are plugins built against an installed
-PaykanLang with `find_package(Paykan)`; each produces a `paykan` driver that has its
-frontend registered next to the installation's, selected at run time with
-`--frontend=<name>` (`--list-frontends` prints them). Every frontend implements
+built and is the default. Out-of-tree frontends are plugins that the installed `paykan`
+loads at run time (see [Plugins](#plugins)), selected with `--frontend=<name>`
+(`--list-frontends` prints them). Every frontend implements
 [`docs/grammar.md`](docs/grammar.md) and must build the same AST as the recursive-descent
 frontend; [`docs/writing-a-frontend-plugin.md`](docs/writing-a-frontend-plugin.md) explains how to write
 one and how to run PaykanLang's parser and Sema suites against it. The reference example is
@@ -156,6 +161,7 @@ paykan --backend=c program.pkn  # pick a backend (--list-backends prints them)
 paykan --frontend=NAME program.pkn # pick a frontend (--list-frontends prints them)
 paykan --check-only program.pkn # stop after type-checking (no codegen)
 paykan --dump-ast program.pkn   # print the parsed AST
+paykan --emit-ast program.pkn   # print it in the AST interchange format (docs/plugins/ast-format.md)
 paykan --emit-pir program.pkn   # print the backend-neutral IR (docs/pir.md)
 paykan --emit-source program.pkn # print the backend's output (C or LLVM IR)
 paykan --emit-c program.pkn     # print the generated C (--backend=c --emit-source)

@@ -16,9 +16,9 @@
 #
 # Functions:
 #   paykan_add_frontend_tests(<frontend-name>
-#       [PLUGINS <lib>...]      the plugin libraries that register the
-#                               frontend (linked whole, with the
-#                               installation's frontends)
+#       PLUGIN <target-or-file>  the loadable frontend plugin: a module
+#                               target (paykan_add_frontend_plugin) or the
+#                               path of a plugin file
 #       [GTEST_MAIN <target>]   GoogleTest's main library (default
 #                               GTest::gtest_main; the caller provides
 #                               GoogleTest, e.g. find_package(GTest) or
@@ -28,11 +28,17 @@
 #
 #   adds the executables <prefix>_parser_tests, <prefix>_sema_tests and
 #   <prefix>_frontend_tests, and the tests ParserTests.<frontend-name>,
-#   SemaTests.<frontend-name> and FrontendTests.<frontend-name>.  The suites
-#   parse with <frontend-name> (PAYKAN_TEST_FRONTEND) and compare every
-#   parse with every other frontend linked in, so with the installation's
-#   recursive-descent frontend each test input is also a differential check.
-#   Call enable_testing() first.
+#   SemaTests.<frontend-name> and FrontendTests.<frontend-name>.  Each suite
+#   loads PLUGIN at startup with the installed paykan's own plugin loader
+#   and checks (Frontend/LoadTestPlugins.cpp), so the frontend under test is
+#   the plugin module itself, reached through its C interface and the AST
+#   interchange format.  The suites parse with <frontend-name>
+#   (PAYKAN_TEST_FRONTEND) and compare every parse with the installation's
+#   recursive-descent frontend, so each test input is also a differential
+#   check.  It also adds InstalledPaykan.<frontend-name>, which runs the
+#   INSTALLED paykan (PAYKAN_EXECUTABLE) with only PLUGIN loaded over the
+#   samples corpus and compares every --dump-ast with recursive-descent's
+#   (PaykanFrontendCheck.cmake).  Call enable_testing() first.
 # ----------------------------------------------------------------------------
 
 get_filename_component(PAYKAN_TEST_SUPPORT_DIR
@@ -43,7 +49,16 @@ get_filename_component(PAYKAN_SAMPLES_DIR
 set(_PAYKAN_TEST_LIBRARY_NDEBUG @PAYKAN_TEST_LIBRARY_NDEBUG@)
 
 function(paykan_add_frontend_tests frontend)
-    cmake_parse_arguments(ARG "" "GTEST_MAIN;PREFIX" "PLUGINS" ${ARGN})
+    cmake_parse_arguments(ARG "" "PLUGIN;GTEST_MAIN;PREFIX" "" ${ARGN})
+    if(NOT ARG_PLUGIN)
+        message(FATAL_ERROR "paykan_add_frontend_tests(${frontend}): no PLUGIN "
+                            "(the frontend's module target or plugin file)")
+    endif()
+    if(TARGET ${ARG_PLUGIN})
+        set(plugin_file "$<TARGET_FILE:${ARG_PLUGIN}>")
+    else()
+        get_filename_component(plugin_file "${ARG_PLUGIN}" ABSOLUTE)
+    endif()
     if(NOT ARG_GTEST_MAIN)
         set(ARG_GTEST_MAIN GTest::gtest_main)
     endif()
@@ -56,15 +71,13 @@ function(paykan_add_frontend_tests frontend)
         string(REPLACE "-" "_" ARG_PREFIX "${frontend}")
     endif()
 
-    # The frontends to link: the installation's (the reference the suites
-    # compare against) and the caller's.
-    set(plugins "")
+    # The installation's frontends: the reference the suites compare against.
+    set(reference "")
     foreach(p IN LISTS PAYKAN_PLUGINS)
         if(p MATCHES "^Paykan::frontend_")
-            list(APPEND plugins ${p})
+            list(APPEND reference ${p})
         endif()
     endforeach()
-    list(APPEND plugins ${ARG_PLUGINS})
 
     set(dir "${PAYKAN_TEST_SUPPORT_DIR}")
     file(GLOB parser_sources CONFIGURE_DEPENDS "${dir}/Parser/*.cpp")
@@ -74,15 +87,20 @@ function(paykan_add_frontend_tests frontend)
 
     foreach(suite parser sema frontend)
         set(exe ${ARG_PREFIX}_${suite}_tests)
-        add_executable(${exe} ${${suite}_sources})
+        add_executable(${exe} ${${suite}_sources}
+                              "${dir}/Frontend/LoadTestPlugins.cpp")
         target_include_directories(${exe} PRIVATE "${dir}")
         target_link_libraries(${exe} PRIVATE ${ARG_GTEST_MAIN}
                                              Paykan::frontend
                                              Paykan::ast_printer
+                                             Paykan::plugin_host
                                              Paykan::compile_options)
-        foreach(p IN LISTS plugins)
+        foreach(p IN LISTS reference)
             target_link_libraries(${exe} PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,${p}>")
         endforeach()
+        if(TARGET ${ARG_PLUGIN})
+            add_dependencies(${exe} ${ARG_PLUGIN})
+        endif()
         if(_PAYKAN_TEST_LIBRARY_NDEBUG)
             # Skip the tests of the libraries' assertions.
             target_compile_definitions(${exe} PRIVATE PAYKAN_TEST_LIBRARY_NDEBUG=1)
@@ -97,5 +115,12 @@ function(paykan_add_frontend_tests frontend)
     add_test(NAME FrontendTests.${frontend} COMMAND ${ARG_PREFIX}_frontend_tests)
     set_tests_properties(ParserTests.${frontend} SemaTests.${frontend}
                          FrontendTests.${frontend}
-        PROPERTIES ENVIRONMENT "PAYKAN_TEST_FRONTEND=${frontend}")
+        PROPERTIES ENVIRONMENT
+            "PAYKAN_TEST_FRONTEND=${frontend};PAYKAN_TEST_PLUGINS=${plugin_file}")
+
+    add_test(NAME InstalledPaykan.${frontend}
+        COMMAND ${CMAKE_COMMAND} -DPAYKAN=${PAYKAN_EXECUTABLE}
+                "-DPLUGIN=${plugin_file}" -DFRONTEND=${frontend}
+                -DSAMPLES=${PAYKAN_SAMPLES_DIR}
+                -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PaykanFrontendCheck.cmake")
 endfunction()

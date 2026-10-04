@@ -32,6 +32,7 @@ set(PAYKAN_EXPORT_TARGETS
     paykan_plugin_api
     paykan_plugin
     paykan_ast
+    paykan_ast_interchange
     paykan_diag
     paykan_frontend
     paykan_ast_printer

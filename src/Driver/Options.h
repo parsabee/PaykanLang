@@ -53,6 +53,7 @@ struct Options {
   std::string OutputPath;
 
   bool DumpAST = false;       // --dump-ast
+  bool EmitAST = false;       // --emit-ast: the AST interchange format
   bool DumpTokens = false;    // --dump-tokens
   bool TraceParsing = false;  // --trace-parser
   bool TraceScanning = false; // --trace-scanner
