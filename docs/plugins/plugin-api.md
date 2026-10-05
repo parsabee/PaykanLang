@@ -1,9 +1,11 @@
 # The plugin API (`plugin_api.h`)
 
 [`include/paykan/plugin_api.h`](../../include/paykan/plugin_api.h) is the
-whole interface between `paykan` and a loaded plugin: pure C11, no other
-PaykanLang header, installed as `<prefix>/include/paykan/plugin_api.h`. A
-plugin may also copy it into its own tree; it depends on nothing. This page
+whole interface between `paykan` and a loaded plugin: pure C11, installed as
+`<prefix>/include/paykan/plugin_api.h`. Its only other PaykanLang header is
+the generated `paykan/plugin_api_version.h` installed next to it (it defines
+`PAYKAN_PLUGIN_HEADER_VERSION`), so a plugin that copies the interface into
+its own tree copies both files. This page
 is its reference; the header's comments say the same, closer to the code.
 [`overview.md`](overview.md) explains how plugins are found and checked.
 

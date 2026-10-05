@@ -68,6 +68,7 @@ any language that exposes C functions. `paykan` loads the files named with
 
 ```sh
 paykan --plugin=./libpaykan_backend_print_pir.so --backend=print-pir --emit-source hello.pkn
+mkdir -p ~/.paykan/plugins/0.1.0-alpha
 cp libpaykan_backend_print_pir.so ~/.paykan/plugins/0.1.0-alpha/   # or `cmake --install` it
 paykan --backend=print-pir --emit-source hello.pkn
 paykan --list-backends    # every backend, with the file a plugin came from
@@ -150,7 +151,8 @@ packagers and offline builds), so the barebones build then downloads nothing at 
 
 The `paykan` binary is placed at `build/bin/paykan`. To install it to a prefix (with the
 runtime, `lib/libpaykan_runtime.a` and `include/paykan/Runtime.h`, that `build` and the c
-backend link programs against, the plugin interface `include/paykan/plugin_api.h`, and the
+backend link programs against, the plugin interface `include/paykan/plugin_api.h` (with the
+generated `include/paykan/plugin_api_version.h` it includes), and the
 empty system plugin directory `lib/paykan/plugins/<version>/`):
 
 ```sh
