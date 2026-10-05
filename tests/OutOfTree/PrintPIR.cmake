@@ -166,6 +166,17 @@ if(RUSTC)
         RESULT_VARIABLE rustc_rc OUTPUT_VARIABLE rustc_out ERROR_VARIABLE rustc_err)
     if(rustc_rc EQUAL 0)
         set(rustc_usable TRUE)
+        # The steps run with a scratch $HOME, where a rustup proxy finds no
+        # toolchain: use the toolchain's own rustc, from its sysroot.
+        execute_process(COMMAND ${RUSTC} --print sysroot
+            RESULT_VARIABLE sysroot_rc OUTPUT_VARIABLE sysroot
+            OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+        if(sysroot_rc EQUAL 0)
+            file(GLOB real_rustc "${sysroot}/bin/rustc" "${sysroot}/bin/rustc.exe")
+            if(real_rustc)
+                list(GET real_rustc 0 RUSTC)
+            endif()
+        endif()
     else()
         string(STRIP "${rustc_err}" rustc_err)
         message(STATUS "${RUSTC} --version failed (${rustc_rc}): the Rust "
