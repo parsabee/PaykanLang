@@ -30,6 +30,10 @@ The text form is line-oriented and made for this:
   `extern obj`, `extern vtable` declarations of runtime symbols, `class`
   layouts, and `fn` definitions whose bodies are indented blocks closed by
   `}`.
+- Items come in no particular order, and a symbol may be used above the item
+  that declares it: the printer puts a module's runtime externs (`extern fn
+  @$rt....`) after its functions. Read a whole module before translating it,
+  or emit forward declarations (as the C backend does).
 - Values are `%name.N` (unique per function), symbols `@name`, constants are
   literal (`42`, `1.5`, `true`, `'a'`, `null box`).
 - Control flow is structured (`if`, `while`, `break`, `continue`, `ret`), so

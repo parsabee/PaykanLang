@@ -61,7 +61,7 @@
 #       at PAYKAN_RUNTIME_LIBRARY / PAYKAN_RUNTIME_INCLUDE_DIR (after
 #       $PAYKAN_RUNTIME_DIR), wherever its own executable is.
 #       See docs/writing-a-backend.md.
-#   paykan_add_frontend_tests(<frontend> [PLUGINS <lib>...])
+#   paykan_add_frontend_tests(<frontend> PLUGIN <target-or-file>)
 #       The parser, Sema and frontend suites against a frontend plugin
 #       (PaykanFrontendTests.cmake; docs/writing-a-frontend-plugin.md).
 # ----------------------------------------------------------------------------

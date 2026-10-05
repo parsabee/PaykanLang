@@ -56,11 +56,13 @@ static int my_emit(void *data, PaykanSession *s, const PaykanBackendInput *in,
   /* in->pir / in->pir_size: the verified program as PIR text.
    * kind PAYKAN_EMIT_SOURCE: write with host->write_output(s, ...);
    * PAYKAN_EMIT_EXECUTABLE: write output_path (host->link_executable helps). */
+  return PAYKAN_OK;
 }
 
 static int my_run(void *data, PaykanSession *s, const PaykanBackendInput *in,
                   const PaykanRunRequest *req, int *exit_code) {
   /* build into host->temp_dir(s), then host->run_executable(...) */
+  return PAYKAN_OK;
 }
 
 static const PaykanBackend backends[] = {{
@@ -141,6 +143,10 @@ paykan --plugin=build/libpaykan_backend_mine.so --backend=mine program.pkn   # t
 cmake --install build                                                       # install it
 paykan --backend=mine program.pkn
 ```
+
+Once a copy is installed, `--plugin=build/...` loads a second file that
+provides `mine`, so the name is ambiguous ([`plugins/overview.md`](plugins/overview.md));
+try a rebuilt plugin with `paykan --no-plugins --plugin=build/... --backend=mine`.
 
 The package provides `Paykan::plugin_api` (the header), the installation's
 version `PAYKAN_TOOLCHAIN_VERSION`, the plugin build versions it accepts
