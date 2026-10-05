@@ -32,8 +32,10 @@ series, so a program that follows the reference keeps its meaning in every 0.1.x
 The limitations the reference documents stay: generics cannot be imported across modules
 until v0.2.0 ([#57](https://github.com/parsabee/PaykanLang/issues/57)), and a present optional primitive is boxed ([#96](https://github.com/parsabee/PaykanLang/issues/96) will change that
 representation, not the semantics). Not covered by the promise: the plugin interfaces
-(`include/paykan/Frontend.h`, `Backend.h`, the registry and PIR as an out-of-tree plugin
-sees them) are not yet stable for out-of-tree authors; their versioning policy is [#103](https://github.com/parsabee/PaykanLang/issues/103).
+(the C plugin API `include/paykan/plugin_api.h`, the PIR text a backend plugin receives, and
+the C++ interfaces `Frontend.h`, `Backend.h` and the registry) are versioned but not yet
+stable; see [`docs/plugins/overview.md`](docs/plugins/overview.md) and
+[#103](https://github.com/parsabee/PaykanLang/issues/103).
 
 ---
 
@@ -55,14 +57,44 @@ brew install parsabee/paykanlang/paykanlang
 paykan --version
 ```
 
+### Plugins
+
+A backend built for your PaykanLang version plugs into the `paykan` you installed, with no
+rebuild: plugins are shared libraries with a C interface
+([`include/paykan/plugin_api.h`](include/paykan/plugin_api.h)), so they can be written in
+any language that exposes C functions. `paykan` loads the files named with
+`--plugin=<file>`, then every plugin in `$PAYKAN_PLUGIN_PATH`, in
+`~/.paykan/plugins/<version>/` and in the installation's `lib/paykan/plugins/<version>/`:
+
+```sh
+paykan --plugin=./libpaykan_backend_print_pir.so --backend=print-pir --emit-source hello.pkn
+cp libpaykan_backend_print_pir.so ~/.paykan/plugins/0.1.0-alpha/   # or `cmake --install` it
+paykan --backend=print-pir --emit-source hello.pkn
+paykan --list-backends    # every backend, with the file a plugin came from
+paykan --no-plugins ...   # only the built-in plugins (and --plugin files)
+```
+
+A plugin built for another version, or that fails to load, is listed with the reason and
+can't be selected (exit status 2). [`docs/plugins/overview.md`](docs/plugins/overview.md)
+explains discovery, the checks and what they guarantee;
+[`docs/writing-a-backend.md`](docs/writing-a-backend.md) shows how to write one
+([`src/Backends/PrintPIR`](src/Backends/PrintPIR), in C). Frontends are not loadable yet.
+
 ---
 
 ## Building from Source
 
 Prerequisites: CMake 3.24 or newer and a C++20 compiler to build PaykanLang, plus a C11
 compiler (`cc`) at run time, which the C backend uses to compile programs. The default build
-needs nothing else (the test suite's GoogleTest aside, see below); the LLVM backend is
-opt-in.
+needs nothing else; the LLVM backend is opt-in.
+
+Dependencies are deliberately limited to:
+- standard C and C++ (the compiler and its standard libraries) to build and use PaykanLang;
+- GoogleTest, for the test suite only (found on the system, or fetched);
+- LLVM, for the opt-in `llvm` backend only;
+- Python 3 with its standard library only, for the test and lint scripts in `scripts/`: the
+  system's `python3`, or the one given with `-DPython3_EXECUTABLE=<path>`. Without Python,
+  the script-driven tests are skipped.
 
 ```sh
 git clone https://github.com/parsabee/PaykanLang.git
@@ -99,8 +131,8 @@ a **barebones build** that needs nothing but a C++20 compiler and a C compiler (
 it downloads nothing and links no third-party library). The full build is
 `-DPAYKAN_BACKENDS="llvm;c"`.
 Every backend consumes the Paykan IR described in [`docs/pir.md`](docs/pir.md);
-[`docs/writing-a-backend.md`](docs/writing-a-backend.md) explains how to write one, in tree or
-out of tree against `find_package(Paykan)` (see [`utils/print-pir`](utils/print-pir)), and
+[`docs/writing-a-backend.md`](docs/writing-a-backend.md) explains how to write one, as a
+loadable plugin for an installed `paykan` (see [Plugins](#plugins)) or in tree, and
 [`docs/writing-a-frontend-plugin.md`](docs/writing-a-frontend-plugin.md) does the same for
 frontends. Each release lists the plugin build versions it accepts; a plugin built with another
 version is listed as incompatible and can't be selected
@@ -112,7 +144,8 @@ packagers and offline builds), so the barebones build then downloads nothing at 
 
 The `paykan` binary is placed at `build/bin/paykan`. To install it to a prefix (with the
 runtime, `lib/libpaykan_runtime.a` and `include/paykan/Runtime.h`, that `build` and the c
-backend link programs against):
+backend link programs against, the plugin interface `include/paykan/plugin_api.h`, and the
+empty system plugin directory `lib/paykan/plugins/<version>/`):
 
 ```sh
 cmake --install build --prefix /usr/local
@@ -135,7 +168,8 @@ paykan --emit-c program.pkn     # print the generated C (--backend=c --emit-sour
 paykan --emit-llvm program.pkn  # print the LLVM IR (--backend=llvm --emit-source)
 paykan --track-heap program.pkn # run, then print heap/leak statistics
 paykan -O0 program.pkn          # set the optimization level (0-3, default -O2)
-paykan --version                # print the version and every plugin, with its compatibility
+paykan --plugin=FILE ...        # load a plugin library (repeatable; see Plugins above)
+paykan --version                # print the version, every plugin and the plugin directories
 paykan --help                   # list every option
 ```
 

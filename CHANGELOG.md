@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- **Backend plugins are loadable modules with a C interface (#141).** An
+  out-of-tree backend is no longer a static C++ library linked into a
+  `paykan` driver of its own: it is a shared library (`.so`, `.dylib`) with
+  the pure C11 interface of `include/paykan/plugin_api.h`, which the
+  **installed** `paykan` loads at startup, with no rebuild of PaykanLang. It
+  links nothing of PaykanLang, so it can be written in any language with a C
+  layer (C, C++ with any compiler, Rust, ...). It receives the verified
+  program as PIR text and talks to `paykan` through a host table
+  (diagnostics, output, allocator, log, the runtime's paths, link and run
+  helpers). For plugin authors: `paykan_add_backend_plugin()` now builds such
+  a module (`MODULE`, `lib<target>.so` / `.dylib`) instead of a static
+  library linked with `Paykan::backend`, and a backend written against
+  `Backend.h` must be ported to `plugin_api.h` (see
+  `docs/writing-a-backend.md`). `src/Backends/PrintPIR` is now a plain-C plugin. The
+  static C++ path (`paykan_add_driver`) stays as an advanced option, and the
+  built-in plugins keep their in-process C++ interface. Frontends are not
+  loadable yet (`paykan_add_frontend_plugin()` is unchanged).
+
 - **The Bison frontend moved to its own repository (#60).** The Bison/Flex
   frontend is now the out-of-tree plugin
   [PaykanLang_Bison_Frontend](https://github.com/parsabee/PaykanLang_Bison_Frontend),
@@ -23,6 +41,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Run-time plugin loading (#141).** `paykan` loads plugins from, in order:
+  `--plugin=<file>` (repeatable), each directory of `$PAYKAN_PLUGIN_PATH`,
+  `~/.paykan/plugins/<version>/`, and the installation's
+  `lib/paykan/plugins/<version>/` (found relative to the executable, and
+  installed empty). `--no-plugins` / `PAYKAN_NO_PLUGINS=1` turn the directory
+  search off. Each plugin's descriptor (from its one entry point,
+  `paykan_plugin_init`) is checked before any of its callbacks run: the
+  plugin API version (`PAYKAN_PLUGIN_API_VERSION`, 1), then its build
+  version against the release's list (#103). An incompatible plugin is
+  listed with the reason and its file, and selecting it exits with status 2;
+  a file that can't be loaded, has no entry point or a malformed descriptor
+  is listed as `rejected plugin <file>: <why>` (and stops a compile with
+  status 2 when named with `--plugin`); a name two plugins provide is
+  ambiguous and can't be selected. `--list-backends` and `--version` show
+  each loaded backend's file; `--version` also prints the plugin API version,
+  the plugin directories and every plugin file. The dynamic loader sits
+  behind the portability layer (POSIX `dlopen`; a documented Windows stub).
+  The CMake package adds `Paykan::plugin_api`, `PAYKAN_PLUGIN_API_VERSION`,
+  `PAYKAN_PLUGIN_INSTALL_DIR`, `PAYKAN_EXECUTABLE`,
+  `paykan_install_plugin()` and `paykan_check_plugin_built_with()`.
+  New docs: `docs/plugins/` (overview, the C API, PIR for backends).
 - **Plugin compatibility check (#103).** Every frontend and backend plugin
   records the PaykanLang version it was built with:
   `PAYKAN_REGISTER_FRONTEND` / `PAYKAN_REGISTER_BACKEND` capture
@@ -43,7 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CMake package: they add a plugin library and fail at configure time when
   the installed Paykan does not accept the version the plugin is built with
   (by default the installation's own, `PAYKAN_TOOLCHAIN_VERSION`, or the one
-  pinned with `BUILT_WITH <version>`). `utils/print-pir` uses
+  pinned with `BUILT_WITH <version>`). `src/Backends/PrintPIR` uses
   `paykan_add_backend_plugin()`. See `docs/writing-a-backend.md` (section 7)
   and the new `docs/writing-a-frontend-plugin.md`.
 - This release accepts plugins built with `0.1.0-alpha`. From now on each
@@ -57,6 +96,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Dependencies.** PaykanLang depends only on standard C and C++; GoogleTest
+  (tests), LLVM (the opt-in `llvm` backend) and Python 3's standard library
+  (the scripts) are the only other tools it uses. The script-driven ctests
+  now run with the Python CMake finds (`find_package(Python3)`: the system's,
+  or `-DPython3_EXECUTABLE=<path>`) instead of whatever `python3` is on
+  `PATH`, and are skipped when there is none. The example plugin backend
+  lives in `src/Backends/PrintPIR`.
+
 - **The plugin registration ABI (#103).** `paykan::plugin::Registration`
   takes a `PluginInfo { Name, Create, BuildVersion }` (plain data, the version
   a `const char *`), and registry entries carry `BuildVersion`, `Compatible`
@@ -67,7 +114,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `paykan --version` prints one more line (`accepts plugins built with
   PaykanLang <list>`), and each plugin line now ends in
   `(built with PaykanLang <v>, compatible)`; a backend's description follows
-  after `: ` instead of in parentheses.
+  after `: ` instead of in parentheses. With #141 it also ends with
+  `plugin API <n>`, `plugin directories: ...` and one line per plugin file,
+  and a loaded plugin's lines end in ` [<file>]`.
+- Registry entries (`paykan::plugin::Registry<I>::Entry`) also carry the
+  plugin's `Path`, `Description` and `Conflict`, and their factory is a
+  `std::function` (#141).
 
 ## [0.1.0-alpha] - 2026-10-03
 
@@ -230,7 +282,7 @@ in v0.1" under Added).
 - **Out-of-tree plugins (#37).** `cmake --install` installs the interfaces
   and `find_package(Paykan)`, so a backend or frontend can be built outside
   the tree and linked into a custom `paykan` (`docs/writing-a-backend.md`).
-  `utils/print-pir` is the smallest complete backend; CI and the
+  `src/Backends/PrintPIR` is the smallest complete backend; CI and the
   `PrintPIROutOfTree` ctest build it against an installation.
 - **Documented: selective imports, `Stdin`, `File.readbytes` / `File.read`
   and system imports.** These worked before but were not listed:
@@ -505,7 +557,7 @@ in v0.1" under Added).
 - **Repository layout.** The language reference moved from its top-level
   directory into `docs/language/` (same file names). The example
   out-of-tree backend moved from `examples/backends/print-pir` to
-  `utils/print-pir`. `example_program/` is gone: its `calc` program is now
+  `src/Backends/PrintPIR`. `example_program/` is gone: its `calc` program is now
   the multi-module sample `samples/imports/12_calc`, with its expected
   output, so every harness runs it. `PLAN-0.1.md` (superseded by #27) and
   `proposals/` were removed; the normative parts of the proposals are in

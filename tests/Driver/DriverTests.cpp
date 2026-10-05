@@ -188,9 +188,15 @@ TEST(Driver, VersionListsEveryPluginAsCompatible) {
                        PAYKAN_TEST_ACCEPTED_VERSIONS);
   const std::string compatible = std::string(" (built with PaykanLang ") +
                                  paykan::kVersion + ", compatible)";
-  unsigned frontends = 0, backends = 0;
+  unsigned frontends = 0, backends = 0, pluginLines = 0;
   for (size_t i = 2; i < ls.size(); ++i) {
     const std::string &l = ls[i];
+    // Then the plugin API and the plugin directories (none searched: the
+    // ctest runs with PAYKAN_NO_PLUGINS=1).
+    if (l.rfind("plugin ", 0) == 0) {
+      ++pluginLines;
+      continue;
+    }
     EXPECT_NE(l.find(compatible), std::string::npos) << l;
     EXPECT_EQ(l.find("incompatible"), std::string::npos) << l;
     frontends += l.rfind("frontend ", 0) == 0;
@@ -199,7 +205,11 @@ TEST(Driver, VersionListsEveryPluginAsCompatible) {
   EXPECT_TRUE(hasLine(out, "frontend recursive-descent" + compatible)) << out;
   EXPECT_GE(frontends, 1u);
   EXPECT_GE(backends, 1u);
-  EXPECT_EQ(frontends + backends, ls.size() - 2) << out;
+  EXPECT_EQ(frontends + backends + pluginLines, ls.size() - 2) << out;
+  EXPECT_TRUE(hasLine(out, "plugin API 1")) << out;
+  EXPECT_TRUE(hasLine(out, "plugin directories: none searched (--no-plugins "
+                           "or PAYKAN_NO_PLUGINS)"))
+      << out;
 }
 
 TEST(Driver, VersionMarksAnIncompatiblePlugin) {
@@ -1624,11 +1634,17 @@ TEST(Driver, OutputDoesNotDependOnTheSourceDirectory) {
 
   // The executables built in the two trees are identical and carry no source
   // path.  (In an instrumented build the C backend's objects record the
-  // path of their cached C file, under the project; skip it there.)
+  // path of their cached C file, under the project; skip it there.)  Each is
+  // built under the same file name, in a directory of its own: on macOS the
+  // linker hashes the output's file name into LC_UUID and ad-hoc signs it
+  // with the file name as its identifier, so differently named outputs of
+  // the same program differ.
   std::vector<std::string> exes;
   for (const Invocation &inv :
        {invocations[0], invocations[3], invocations[2]}) {
-    auto exe = (base / ("zoo" + std::to_string(exes.size()))).string();
+    auto outDir = base / ("out" + std::to_string(exes.size()));
+    fs::create_directories(outDir);
+    auto exe = (outDir / "zoo").string();
     auto [rc, out] = inDir(inv, "-o " + exe + " build");
     ASSERT_EQ(rc, 0) << out;
     auto [rc2, out2] = run(exe + " 2>&1");
@@ -1673,9 +1689,13 @@ TEST(Driver, BuildAndRunDefaultToO2) {
          "  println(Str<int>(s)); return 0; }\n";
   std::string src = (dir / "opt.pkn").string();
 
-  // build: the default produces the -O2 executable, not the -O0 one.
+  // build: the default produces the -O2 executable, not the -O0 one.  (Each
+  // under the same file name, in a directory of its own: the name is part of
+  // a macOS executable, its LC_UUID and code signature identifier.)
   auto build = [&](const std::string &opt) {
-    auto exe = (dir / ("opt" + opt)).string();
+    auto outDir = dir / ("out" + opt);
+    fs::create_directories(outDir);
+    auto exe = (outDir / "opt").string();
     auto [rc, out] =
         run(paykanRun() + " " + opt + " -o " + exe + " build " + src + " 2>&1");
     EXPECT_EQ(rc, 0) << opt << ": " << out;

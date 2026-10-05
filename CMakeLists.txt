@@ -112,6 +112,12 @@ configure_file(
     ${PAYKAN_GENERATED_INCLUDE_DIR}/paykan/PluginCompat.h
     @ONLY
 )
+# The C plugin interface's version (paykan/plugin_api.h includes it).
+configure_file(
+    ${CMAKE_SOURCE_DIR}/include/paykan/plugin_api_version.h.in
+    ${PAYKAN_GENERATED_INCLUDE_DIR}/paykan/plugin_api_version.h
+    @ONLY
+)
 target_include_directories(paykan_compile_options INTERFACE
     $<BUILD_INTERFACE:${PAYKAN_GENERATED_INCLUDE_DIR}>)
 

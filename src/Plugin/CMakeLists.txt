@@ -7,6 +7,8 @@
 # and driver gets it.
 # ----------------------------------------------------------------------------
 
+include(GNUInstallDirs)
+
 add_library(paykan_plugin STATIC
     PluginCompat.cpp
 )
@@ -21,3 +23,12 @@ target_include_directories(paykan_plugin
 target_link_libraries(paykan_plugin
     PRIVATE paykan_compile_options
 )
+
+# paykan_plugin_api -- the C plugin interface (include/paykan/plugin_api.h),
+# header only: what a loadable plugin compiles against (and all it needs of
+# PaykanLang).  Exported as Paykan::plugin_api.
+add_library(paykan_plugin_api INTERFACE)
+target_include_directories(paykan_plugin_api INTERFACE
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${PAYKAN_GENERATED_INCLUDE_DIR}>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)

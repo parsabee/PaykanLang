@@ -1,14 +1,18 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// The native toolchain's portability layer (see Platform.h).  This is the
-// only file of the backends that includes operating-system headers.
+// The compiler's portability layer (see Platform.h).  This is the only file
+// of the compiler that includes operating-system headers.
 
 #include "Platform.h"
 
 // -- Platform headers -------------------------------------------------------
 // POSIX (every supported platform): process spawning, mkdtemp, getpid and
-// access.
+// access, and the dynamic loader (dlopen / dlsym; in libc on current glibc
+// and on macOS, libdl on older glibc: CMAKE_DL_LIBS).
+#if !defined(_WIN32)
+#include <dlfcn.h>
+#endif
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -136,5 +140,43 @@ std::string makeTempDir(const std::string &prefix) {
 }
 
 unsigned long processId() { return static_cast<unsigned long>(getpid()); }
+
+#if defined(_WIN32)
+// The Windows stub: plugins are not supported there yet.  The
+// implementation will be LoadLibraryW (with the path converted to UTF-16),
+// GetProcAddress and FormatMessageW for the error.  (The rest of this file
+// is POSIX-only too, so Windows is not a build target yet.)
+void *loadLibrary(const std::string &path, std::string &error) {
+  error = "cannot load '" + path +
+          "': loading plugins is not supported on Windows yet";
+  return nullptr;
+}
+
+void *librarySymbol(void *, const char *) { return nullptr; }
+
+const char *sharedLibrarySuffix() { return ".dll"; }
+#else
+void *loadLibrary(const std::string &path, std::string &error) {
+  dlerror(); // clear a stale message
+  void *handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+  if (!handle) {
+    const char *msg = dlerror();
+    error = msg ? msg : "cannot load the library";
+  }
+  return handle;
+}
+
+void *librarySymbol(void *library, const char *name) {
+  return library ? dlsym(library, name) : nullptr;
+}
+
+const char *sharedLibrarySuffix() {
+#if defined(__APPLE__)
+  return ".dylib";
+#else
+  return ".so";
+#endif
+}
+#endif // _WIN32
 
 } // namespace paykan::toolchain::platform

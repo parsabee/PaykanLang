@@ -33,6 +33,8 @@
 #
 # Provides (after PAYKAN_VERSION is set):
 #   PAYKAN_PLUGIN_COMPATIBLE_VERSIONS  -- the list
+#   PAYKAN_PLUGIN_API_VERSION          -- the C plugin interface's version
+#                                         (include/paykan/plugin_api.h)
 #   PAYKAN_PLUGIN_COMPATIBLE_VERSIONS_CXX -- the list as a C++ initializer
 #                                         ("a", "b") for the generated header
 # ----------------------------------------------------------------------------
@@ -50,6 +52,13 @@ if(NOT PAYKAN_VERSION IN_LIST PAYKAN_PLUGIN_COMPATIBLE_VERSIONS)
         "own plugin compatibility list (${PAYKAN_PLUGIN_COMPATIBLE_VERSIONS}); "
         "add it, since the built-in plugins are built with it")
 endif()
+
+file(STRINGS "${PROJECT_SOURCE_DIR}/include/paykan/plugin_api.h" _paykan_api_line
+    REGEX "^#define PAYKAN_PLUGIN_API_VERSION ")
+if(NOT _paykan_api_line MATCHES "VERSION ([0-9]+)")
+    message(FATAL_ERROR "include/paykan/plugin_api.h: no PAYKAN_PLUGIN_API_VERSION")
+endif()
+set(PAYKAN_PLUGIN_API_VERSION ${CMAKE_MATCH_1})
 
 set(PAYKAN_PLUGIN_COMPATIBLE_VERSIONS_CXX "")
 foreach(v IN LISTS PAYKAN_PLUGIN_COMPATIBLE_VERSIONS)

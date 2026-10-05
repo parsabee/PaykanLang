@@ -438,6 +438,11 @@ The verifier rejects a program when:
 
 ## 10. Text format summary
 
+The text form is also what a loadable backend plugin receives
+([`plugins/pir-for-backends.md`](plugins/pir-for-backends.md)), so it is
+versioned: this is **PIR text version 1** (`PAYKAN_PIR_TEXT_VERSION` in
+`include/paykan/plugin_api.h`), bumped on any incompatible change.
+
 ```
 module "01"
 cstr @.str0 = "Hello" len 5

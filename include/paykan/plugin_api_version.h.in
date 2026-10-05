@@ -1,0 +1,20 @@
+/* Copyright (c) 2026 Parsa Bagheri
+ * SPDX-License-Identifier: MIT
+ *
+ * The PaykanLang version of the plugin API header (paykan/plugin_api.h
+ * includes it).  Pure C, like plugin_api.h.
+ *
+ * This file is a template.  CMake writes the result to
+ * <build>/generated/include/paykan/plugin_api_version.h, from project()'s
+ * version and PAYKAN_VERSION_PRERELEASE, and installs it next to
+ * plugin_api.h.  Do not edit the generated header.
+ */
+
+#ifndef PAYKAN_PLUGIN_API_VERSION_H
+#define PAYKAN_PLUGIN_API_VERSION_H
+
+/* The PaykanLang version this header belongs to, pre-release label
+ * included ("0.1.0-alpha"). */
+#define PAYKAN_PLUGIN_HEADER_VERSION "@PAYKAN_VERSION@"
+
+#endif /* PAYKAN_PLUGIN_API_VERSION_H */

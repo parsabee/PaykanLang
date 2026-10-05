@@ -42,6 +42,13 @@ struct Options {
   std::string Backend;
   bool ListBackends = false; // --list-backends
 
+  /// --plugin=<file> (repeatable): plugin libraries to load, in order,
+  /// before the plugin directories are searched (paykan/PluginLoader.h).
+  std::vector<std::string> Plugins;
+  /// --no-plugins: don't search the plugin directories ($PAYKAN_PLUGIN_PATH,
+  /// the user and system directories); --plugin files are still loaded.
+  bool NoPlugins = false;
+
   /// -o <file>: the output of `build`.
   std::string OutputPath;
 

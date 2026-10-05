@@ -2,13 +2,19 @@
 // SPDX-License-Identifier: MIT
 // Plugin registry shared by frontends and backends.
 //
-// A plugin is a library that implements one of the compiler's interfaces
-// (frontend::Frontend, backend::Backend) and registers a factory under a
-// name.  Registration is static: a plugin library defines one
-// plugin::Registration object (see PAYKAN_REGISTER_FRONTEND and
-// PAYKAN_REGISTER_BACKEND), and the build links the library into the
-// executable whole, so the object's constructor runs before main().  The
-// driver then lists and selects plugins by name (--frontend=, --backend=).
+// A plugin implements one of the compiler's interfaces (frontend::Frontend,
+// backend::Backend) and is registered under a name.  There are two kinds:
+//   - Built-in plugins, linked into paykan.  Registration is static: the
+//     library defines one plugin::Registration object (see
+//     PAYKAN_REGISTER_FRONTEND and PAYKAN_REGISTER_BACKEND), and the build
+//     links the library into the executable whole, so the object's
+//     constructor runs before main().
+//   - Loaded plugins: shared libraries with the C interface of
+//     paykan/plugin_api.h, found and checked at startup by the plugin loader
+//     (paykan/PluginLoader.h), which registers an adapter for each of their
+//     frontends/backends with the file it came from (Entry::Path).
+// The driver then lists and selects plugins by name (--frontend=,
+// --backend=), the same way for both.
 //
 // Nothing here depends on any plugin: the registry is part of the standard
 // C++ core and never includes a plugin header.
@@ -18,6 +24,7 @@
 #include "paykan/PluginCompat.h"
 
 #include <algorithm>
+#include <functional>
 #include <memory>
 #include <span>
 #include <string>
@@ -71,7 +78,7 @@ template <typename Interface> struct PluginInfo {
 template <typename Interface> class Registry {
 public:
   /// Creates a fresh plugin instance.
-  using Factory = std::unique_ptr<Interface> (*)();
+  using Factory = std::function<std::unique_ptr<Interface>()>;
 
   struct Entry {
     std::string Name;
@@ -79,9 +86,18 @@ public:
     /// The PaykanLang version the plugin was built with ("" if it gave none).
     std::string BuildVersion;
     /// Whether this paykan accepts that version.
-    bool Compatible;
-    /// incompatibilityReason() for an incompatible plugin, else "".
+    bool Compatible = false;
+    /// Why an incompatible plugin is not accepted (incompatibilityReason()
+    /// for a build version not on the list), else "".
     std::string Incompatibility;
+    /// The file a loaded plugin came from; "" for a built-in one.
+    std::string Path;
+    /// The description a loaded plugin gives in its descriptor ("" if none).
+    std::string Description;
+    /// Non-empty when a second plugin was registered under the same name:
+    /// "provided by both <first> and <second>".  Such a name can't be
+    /// selected until one of the two is removed.
+    std::string Conflict;
   };
 
   /// The one registry for this interface.
@@ -94,14 +110,22 @@ public:
   /// is registered too, marked as such.  Returns false (and keeps the first
   /// registration) if the name is already taken.
   bool add(const PluginInfo<Interface> &info) {
-    std::string_view name = info.Name ? info.Name : "";
-    if (find(name))
+    Entry e;
+    e.Name = info.Name ? info.Name : "";
+    if (info.Create)
+      e.Create = info.Create;
+    e.BuildVersion = info.BuildVersion ? info.BuildVersion : "";
+    e.Compatible = isCompatibleBuildVersion(info.BuildVersion);
+    if (!e.Compatible)
+      e.Incompatibility = incompatibilityReason(info.BuildVersion);
+    return add(std::move(e));
+  }
+
+  /// Register a complete entry (the plugin loader's path).  Returns false
+  /// (and keeps the first registration) if the name is already taken.
+  bool add(Entry e) {
+    if (find(e.Name))
       return false;
-    bool compatible = isCompatibleBuildVersion(info.BuildVersion);
-    Entry e{std::string(name), info.Create,
-            info.BuildVersion ? info.BuildVersion : "", compatible,
-            compatible ? std::string()
-                       : incompatibilityReason(info.BuildVersion)};
     auto pos = std::lower_bound(
         Entries.begin(), Entries.end(), e,
         [](const Entry &a, const Entry &b) { return a.Name < b.Name; });
@@ -117,12 +141,34 @@ public:
     return nullptr;
   }
 
+  /// Record that a second plugin, from @p otherPath, also provides
+  /// @p name: the name becomes ambiguous (Entry::Conflict) and can't be
+  /// selected.  Returns false if nothing is registered under @p name.
+  bool markConflict(std::string_view name, const std::string &otherPath) {
+    for (Entry &e : Entries) {
+      if (e.Name != name)
+        continue;
+      if (e.Conflict.empty())
+        e.Conflict = "provided by both " + describePath(e.Path) + " and " +
+                     describePath(otherPath);
+      else
+        e.Conflict += " and " + describePath(otherPath);
+      return true;
+    }
+    return false;
+  }
+
+  /// "the built-in plugin" for "", else @p path.
+  static std::string describePath(const std::string &path) {
+    return path.empty() ? std::string("the built-in plugin") : path;
+  }
+
   /// A new instance of the plugin registered under @p name, or nullptr if
-  /// there is none or it is incompatible (its build version is checked again
-  /// here, at selection).
+  /// there is none, it is incompatible (its build version is checked again
+  /// here, at selection) or its name is ambiguous.
   std::unique_ptr<Interface> create(std::string_view name) const {
     const Entry *e = find(name);
-    if (!e || !e->Compatible ||
+    if (!e || !e->Compatible || !e->Conflict.empty() || !e->Create ||
         !isCompatibleBuildVersion(e->BuildVersion.c_str()))
       return nullptr;
     return e->Create();

@@ -7,24 +7,169 @@ so a backend never parses, type-checks or decides ownership: it receives the
 `retain`/`release`, every vtable and every scope cleanup is already explicit,
 and translates it one instruction at a time.
 
-Backends are plugins. The core defines the interface
-([`include/paykan/Backend.h`](../include/paykan/Backend.h)) and a registry;
-a backend is a static library that implements the interface and registers a
-factory under a name. The driver lists the registered backends
-(`paykan --list-backends`) and selects one with `--backend=<name>`.
+Backends are plugins, of two kinds:
 
-The example in [`utils/print-pir`](../utils/print-pir)
-is the smallest complete backend (it prints the PIR it receives); copy it to
-start your own.
+- **Loadable plugins** (sections 1 to 3): a shared library with the C
+  interface of [`include/paykan/plugin_api.h`](../include/paykan/plugin_api.h),
+  written in any language that can export a C function, and loaded at run
+  time by an **installed** `paykan`, with no rebuild of PaykanLang. This is
+  how a backend is written outside PaykanLang. It receives the program as
+  PIR text and talks to `paykan` through a table of host functions.
+- **Built-in plugins** (section 4): C++ classes implementing
+  [`include/paykan/Backend.h`](../include/paykan/Backend.h), linked into
+  `paykan` (`c`, `llvm`). They are part of PaykanLang's source tree; an
+  advanced option links such a static C++ plugin into a `paykan` of its own.
+
+Either way the driver lists the backends (`paykan --list-backends`) and
+selects one with `--backend=<name>`. [`plugins/overview.md`](plugins/overview.md)
+explains how `paykan` finds and checks loadable plugins.
+
+The example in [`src/Backends/PrintPIR`](../src/Backends/PrintPIR) is the smallest
+complete loadable backend, in plain C (it prints the PIR it receives); copy it
+to start your own.
 
 **Stability.** Unlike the language (stable in v0.1, see
 [`language/01-language-basics.md`](language/01-language-basics.md)), the
-plugin interfaces are not yet stable for out-of-tree authors: `Backend.h`,
-`Frontend.h`, the registry and PIR as a plugin sees it may change between
-0.x releases. Each release therefore says exactly which plugin builds it
-accepts; see [Plugin compatibility](#7-plugin-compatibility) below.
+plugin interfaces are not yet stable: `plugin_api.h` (versioned by
+`PAYKAN_PLUGIN_API_VERSION`), the PIR text (`PAYKAN_PIR_TEXT_VERSION`), and
+the C++ interfaces of the built-in plugins may change between 0.x releases.
+Each release therefore says exactly which plugin builds it accepts; see
+[Plugin compatibility](#7-plugin-compatibility) below.
 
-## 1. The interface
+## 1. A loadable backend
+
+A loadable backend is a shared library that exports one function,
+`paykan_plugin_init`, returning a static descriptor: the plugin API version,
+the PaykanLang version the plugin is built with, and its backends, each a
+name, capabilities and two callbacks. The reference is
+[`plugins/plugin-api.md`](plugins/plugin-api.md); in short:
+
+```c
+#include "paykan/plugin_api.h"
+
+static const PaykanHost *host; /* paykan's functions: output, diagnostics, toolchain */
+
+static int my_emit(void *data, PaykanSession *s, const PaykanBackendInput *in,
+                   uint32_t kind, const char *output_path) {
+  /* in->pir / in->pir_size: the verified program as PIR text.
+   * kind PAYKAN_EMIT_SOURCE: write with host->write_output(s, ...);
+   * PAYKAN_EMIT_EXECUTABLE: write output_path (host->link_executable helps). */
+}
+
+static int my_run(void *data, PaykanSession *s, const PaykanBackendInput *in,
+                  const PaykanRunRequest *req, int *exit_code) {
+  /* build into host->temp_dir(s), then host->run_executable(...) */
+}
+
+static const PaykanBackend backends[] = {{
+    .struct_size = sizeof(PaykanBackend),
+    .name = "mine",
+    .description = "built on X 1.2",
+    .capabilities = PAYKAN_BACKEND_EMIT_SOURCE | PAYKAN_BACKEND_EMIT_EXECUTABLE |
+                    PAYKAN_BACKEND_RUN,
+    .source_extension = ".x",
+    .emit = my_emit,
+    .run = my_run,
+}};
+
+static const PaykanPlugin plugin = {
+    .struct_size = sizeof(PaykanPlugin),
+    .api_version = PAYKAN_PLUGIN_API_VERSION,
+    .build_version = PAYKAN_PLUGIN_BUILD_VERSION,
+    .name = "mine", .version = "1.0",
+    .num_backends = 1, .backends = backends,
+};
+
+PAYKAN_PLUGIN_EXPORT const PaykanPlugin *paykan_plugin_init(const PaykanHost *h) {
+  host = h;
+  return &plugin;
+}
+```
+
+- **Capabilities.** `paykan` checks them before calling the backend, so
+  `emit`/`run` only see requests the backend declared.
+- **Errors.** Report them with `host->diagnostic` and return a non-zero
+  status; `paykan` prints the errors as the failure. Nothing may unwind out
+  of a callback (no exception, no panic).
+- **`run`** builds the program and runs it with `host->run_executable`,
+  passing `req->args` (`args[0]` is the script path) and `req->track_heap`
+  (`--track-heap`) on as they are.
+- **The toolchain.** A native backend links its objects (or C sources)
+  against the Paykan runtime with `host->link_executable`; it finds the
+  runtime with `host->runtime_library` / `host->runtime_include_dir`, exactly
+  as the built-in backends do.
+
+## 2. The input
+
+[`plugins/pir-for-backends.md`](plugins/pir-for-backends.md) describes what
+arrives in `PaykanBackendInput`: the program as PIR text (every module, main
+module first, already verified), the input file, the project root and the
+optimisation level. The semantics of every item and instruction, the runtime
+ABI the generated code calls into, and the ownership rules the lowering has
+already applied are in [`pir.md`](pir.md). A backend may rely on everything
+the verifier checks (§9 there). Generated code links `libpaykan_runtime.a`
+and uses `Runtime.h`; the runtime symbols a program may call are the
+`extern fn` declarations of its modules.
+
+## 3. Building and installing it
+
+Install PaykanLang, then build against its package:
+
+```cmake
+cmake_minimum_required(VERSION 3.24)
+project(MyPaykanBackend LANGUAGES C)        # or CXX: any language works
+
+find_package(Paykan REQUIRED)               # -DCMAKE_PREFIX_PATH=<prefix>
+
+# A loadable module, libpaykan_backend_mine.so (.dylib on macOS), that
+# includes paykan/plugin_api.h and links nothing of PaykanLang.  Configure
+# fails unless the installed PaykanLang accepts plugins built with its
+# version (section 7); BUILT_WITH pins it.
+paykan_add_backend_plugin(paykan_backend_mine mine.c)
+
+# `cmake --install` puts it into the installation's plugin directory
+# (PAYKAN_PLUGIN_INSTALL_DIR, <prefix>/lib/paykan/plugins/<version>).
+paykan_install_plugin(paykan_backend_mine)
+```
+
+```sh
+cmake -B build -DCMAKE_PREFIX_PATH=<prefix>
+cmake --build build
+paykan --plugin=build/libpaykan_backend_mine.so --backend=mine program.pkn   # try it
+cmake --install build                                                       # install it
+paykan --backend=mine program.pkn
+```
+
+The package provides `Paykan::plugin_api` (the header), the installation's
+version `PAYKAN_TOOLCHAIN_VERSION`, the plugin build versions it accepts
+`PAYKAN_PLUGIN_COMPATIBLE_VERSIONS`, `PAYKAN_PLUGIN_API_VERSION`,
+`PAYKAN_PLUGIN_INSTALL_DIR`, the installed `PAYKAN_EXECUTABLE`, and the
+functions `paykan_add_backend_plugin(<target> [BUILT_WITH <version>]
+<sources>...)`, `paykan_install_plugin(<target>...)` and
+`paykan_check_plugin_built_with(...)` (the version check alone, for a plugin
+CMake doesn't compile).
+
+Without CMake, compile against the installed header:
+
+```sh
+cc -std=c11 -shared -fPIC -I<prefix>/include -o libpaykan_backend_mine.so mine.c
+```
+
+In Rust, a `cdylib` declares the structs with `#[repr(C)]` and exports
+`paykan_plugin_init` with `#[no_mangle] pub unsafe extern "C"`, and builds
+with its own toolchain (`cargo`); `paykan_check_plugin_built_with()` gives a
+CMake wrapper the version check.
+
+A loadable plugin is independent of the installation's configuration: it
+works the same with a core install (recursive-descent + c) and with one
+that has the llvm backend, and needs no LLVM.
+
+## 4. Built-in backends (C++)
+
+### The C++ interface
+
+The built-in backends implement `Backend.h` in process; a loadable plugin
+never sees these types.
 
 ```cpp
 #include "paykan/Backend.h"
@@ -66,7 +211,7 @@ public:
   ([`include/paykan/Status.h`](../include/paykan/Status.h)). The core is built
   with `-fno-exceptions`; nothing may throw across the interface.
 
-## 2. The input
+### The input
 
 `backend::Input` carries:
 
@@ -90,7 +235,7 @@ Generated code links `libpaykan_runtime.a` and uses `Runtime.h` (installed as
 `include/paykan/Runtime.h`); the runtime symbols a program may call are the
 `extern fn` declarations of its modules.
 
-## 3. Registration
+### Registration
 
 ```cpp
 static std::unique_ptr<paykan::backend::Backend> createMyBackend() {
@@ -108,11 +253,21 @@ that object, so the plugin library must be linked **whole** into the driver;
 the CMake helpers below do that. Frontends register the same way with
 `PAYKAN_REGISTER_FRONTEND` ([`include/paykan/Frontend.h`](../include/paykan/Frontend.h)).
 
-## 4. Building it
+### In tree
 
-### Out of tree
+Add `src/Backends/<Name>/` with a `CMakeLists.txt` that builds the library,
+links `paykan_backend`, and records it with `paykan_add_plugin(<target>)`;
+list the backend in `PAYKAN_KNOWN_BACKENDS` (`cmake/PaykanPlugins.cmake`) and
+add its `add_subdirectory` to the backend loop in `src/CMakeLists.txt`. Every
+executable that calls `paykan_link_plugins()` (the driver and the test
+binaries) then links it whole-archive, and `-DPAYKAN_BACKENDS=...` selects it.
 
-Install Paykan, then build against the package:
+### A static C++ plugin in a driver of its own (advanced)
+
+A C++ backend can also be built out of tree as a static library and linked
+into a custom `paykan` (a single binary, no plugin loading needed). This
+ties the plugin to the C++ interfaces and to the compiler and standard
+library the installation was built with; prefer a loadable plugin.
 
 ```sh
 cmake -B build -DPAYKAN_BACKENDS=c      # or any configuration
@@ -127,9 +282,9 @@ set(CMAKE_CXX_STANDARD 20)
 
 find_package(Paykan REQUIRED)             # -DCMAKE_PREFIX_PATH=/opt/paykan
 
-# A static library linked with Paykan::backend.  Configure fails unless the
-# installed Paykan accepts plugins built with its version (section 7).
-paykan_add_backend_plugin(paykan_backend_mine MyBackend.cpp)
+# A static library that registers itself (PAYKAN_REGISTER_BACKEND).
+add_library(paykan_backend_mine STATIC MyBackend.cpp)
+target_link_libraries(paykan_backend_mine PUBLIC Paykan::backend)
 
 # A `paykan` driver with every plugin of the installation plus this one.
 paykan_add_driver(paykan-mine PLUGINS paykan_backend_mine)
@@ -164,23 +319,14 @@ v1.0 ([#61](https://github.com/parsabee/PaykanLang/issues/61)).
 runtime's location `PAYKAN_RUNTIME_LIBRARY` / `PAYKAN_RUNTIME_INCLUDE_DIR`,
 the installation's version `PAYKAN_TOOLCHAIN_VERSION` and the plugin build
 versions it accepts `PAYKAN_PLUGIN_COMPATIBLE_VERSIONS`,
-`paykan_add_backend_plugin(<target> [BUILT_WITH <version>] <sources>...)` and
-`paykan_add_frontend_plugin(...)` (section 7), and
+`paykan_add_frontend_plugin(<target> [BUILT_WITH <version>] <sources>...)`
+(a static C++ frontend, section 7), and
 `paykan_add_driver(<target> [PLUGINS <libs>...])`, which creates an executable
 from the driver library and links every plugin whole-archive. That driver's
 `run` and `build` use the package's runtime (unless `$PAYKAN_RUNTIME_DIR`
 names another), wherever the executable itself is built or copied. The compiler's
 headers are installed under `include/paykan/compiler` and are on the include
 path of every imported target.
-
-### In tree
-
-Add `src/Backends/<Name>/` with a `CMakeLists.txt` that builds the library,
-links `paykan_backend`, and records it with `paykan_add_plugin(<target>)`;
-list the backend in `PAYKAN_KNOWN_BACKENDS` (`cmake/PaykanPlugins.cmake`) and
-add its `add_subdirectory` to the backend loop in `src/CMakeLists.txt`. Every
-executable that calls `paykan_link_plugins()` (the driver and the test
-binaries) then links it whole-archive, and `-DPAYKAN_BACKENDS=...` selects it.
 
 ## 5. Testing without the frontend
 
@@ -208,8 +354,10 @@ assert(program && paykan::pir::verify(*program).empty());
 // backend.emit({.Program = &*program, ...}, ...)
 ```
 
-`paykan --emit-pir program.pkn` prints the PIR of a real program, and the
-example backend above does the same through the backend path. The parity
+A loadable backend gets the same text: `paykan --emit-pir program.pkn`
+prints the PIR of a real program, and `src/Backends/PrintPIR` returns exactly that
+through the plugin path, so a backend can be tested with saved PIR files and
+with `paykan --plugin=... --backend=mine` on real programs. The parity
 tests under `tests/CodeGen` and the samples corpus run on every enabled
 backend; a new in-tree backend is expected to pass them.
 
@@ -225,23 +373,34 @@ backend; a new in-tree backend is expected to pass them.
   its defining module and `Function::linkName()` (its `symbol`), not its
   local name: `@"x::tag"` in the importer is `@tag` in module `x`.
 - Honour `-O<n>` in whatever way fits (`cc -O2`, `PassBuilder`, nothing).
-- Report every failure through `Status`; never `exit()`, never throw.
+- Report every failure through `host->diagnostic` and a status code (or
+  `Status` in C++); never `exit()`, never let anything unwind out.
+- Keep `paykan_plugin_init` and global constructors free of side effects
+  ([`plugins/overview.md`](plugins/overview.md)).
 - No core change should be needed: a backend lives entirely in its own
   library.
 
 ## 7. Plugin compatibility
 
-A plugin is compiled against one PaykanLang release's headers and may be
-linked into a `paykan` of another release. Each plugin therefore records the
+A plugin is built against one PaykanLang release and may be loaded into (or
+linked into) a `paykan` of another release. Each plugin therefore records the
 PaykanLang version it was **built with**, and each release carries an explicit
 **list of the plugin build versions it accepts**
 ([#103](https://github.com/parsabee/PaykanLang/issues/103)).
 
-- **What a plugin records.** `PAYKAN_REGISTER_BACKEND` and
-  `PAYKAN_REGISTER_FRONTEND` pass `PAYKAN_PLUGIN_BUILD_VERSION`, defined by the
-  installed `paykan/PluginCompat.h` (`include/paykan/compiler/paykan/` under
-  the prefix), to the registry along with the name and the factory. Nothing
-  else is needed in the plugin's code.
+- **What a plugin records.** A loadable plugin puts
+  `PAYKAN_PLUGIN_BUILD_VERSION` in its descriptor's `build_version`:
+  `plugin_api.h`'s own version unless the build defines it
+  (`paykan_add_backend_plugin` defines it as `BUILT_WITH`, or the
+  installation's version). A built-in or static C++ plugin's
+  `PAYKAN_REGISTER_BACKEND` / `PAYKAN_REGISTER_FRONTEND` pass the
+  `PAYKAN_PLUGIN_BUILD_VERSION` of the installed `paykan/PluginCompat.h`
+  (`include/paykan/compiler/paykan/` under the prefix) to the registry along
+  with the name and the factory.
+- **The plugin API version.** A loadable plugin also declares the
+  `PAYKAN_PLUGIN_API_VERSION` it is built for; a `paykan` that does not
+  support it rejects the file (`rejected plugin <file>: built for plugin API
+  N; ...`). It changes only when `plugin_api.h` changes incompatibly.
 - **The list.** It lives in one place,
   [`cmake/PluginCompat.cmake`](../cmake/PluginCompat.cmake)
   (`PAYKAN_PLUGIN_COMPATIBLE_VERSIONS`). CMake compiles it into the core and
@@ -252,16 +411,17 @@ PaykanLang version it was **built with**, and each release carries an explicit
   included: a list holding `0.1.0-alpha` accepts plugins built with
   `0.1.0-alpha`, but not `0.1.0`, `0.1.0-beta` or `0.1.1`. There are no ranges
   and no ordering.
-- **At run time.** The registry checks the build version when the plugin
-  registers and again when it is selected. An incompatible plugin stays
-  registered but is never instantiated:
+- **At run time.** The plugin loader checks a loaded plugin's build version
+  before calling anything but its entry point, and the registry checks it
+  again when the plugin is selected. An incompatible plugin stays registered
+  but is never called:
 
   ```text
-  $ paykan --list-frontends
-  mine (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.0-alpha accepts 0.1.0-alpha)
-  recursive-descent (default)
-  $ paykan --frontend=mine program.pkn
-  paykan: cannot use frontend 'mine' (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.0-alpha accepts 0.1.0-alpha)
+  $ paykan --list-backends
+  c (default)
+  mine (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.0-alpha accepts 0.1.0-alpha) [/home/me/.paykan/plugins/0.1.0-alpha/libmine.so]
+  $ paykan --backend=mine program.pkn
+  paykan: cannot use backend 'mine' (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.0-alpha accepts 0.1.0-alpha) [/home/me/.paykan/plugins/0.1.0-alpha/libmine.so]
   $ echo $?
   2
   ```
@@ -283,15 +443,18 @@ PaykanLang version it was **built with**, and each release carries an explicit
 
   That version is the installation's own (`PAYKAN_TOOLCHAIN_VERSION`) unless
   the plugin pins the release it is written for with `BUILT_WITH <version>`;
-  [`utils/print-pir`](../utils/print-pir) exposes that as
-  `-DPRINT_PIR_BUILT_WITH=<version>`. Whatever is pinned, the registered build
-  version is that of the headers the plugin is actually compiled against.
+  [`src/Backends/PrintPIR`](../src/Backends/PrintPIR) exposes that as
+  `-DPRINT_PIR_BUILT_WITH=<version>`. For a loadable plugin the pinned version
+  is also the one its descriptor declares. (A static C++ frontend's
+  registered build version is always that of the headers it is compiled
+  against.)
 
 **Maintaining the list (each release).** The release's own version
 (`project(... VERSION ...)` plus `PAYKAN_VERSION_PRERELEASE`) must be on it.
 Keep an older version on it only if plugins built with that version still
-work with this release: `Frontend.h`, `Backend.h`, `Registry.h`, the AST and
-`ASTContext` a frontend sees, PIR and the runtime ABI (`Runtime.h`) are
-unchanged since, or changed only compatibly. Drop it when any of them changes
+work with this release: `plugin_api.h` (or its API version is still
+supported), the PIR text, the runtime ABI (`Runtime.h`), and for static C++
+plugins `Frontend.h`, `Backend.h`, `Registry.h` and the AST and `ASTContext`
+a frontend sees, are unchanged since, or changed only compatibly. Drop it when any of them changes
 incompatibly. The CHANGELOG entry of each release states which plugin build
 versions it accepts.
