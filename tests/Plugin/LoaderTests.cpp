@@ -510,6 +510,34 @@ TEST_F(PluginLoader, BrokenFilesAreRejectedWithTheReason) {
     EXPECT_FALSE(ran(name, ".called")) << name;
 }
 
+TEST_F(PluginLoader, TruncatedFileIsRejectedNotACrash) {
+  // An interrupted copy of a good plugin: the file ends inside (or before)
+  // its loadable segments.  dlopen alone maps the missing pages and the
+  // process dies with SIGBUS, in every command, discovery included.
+  std::string good = slurp(plugin("good", "good"));
+  ASSERT_GT(good.size(), 64u);
+  fs::create_directories(Scratch / "trunc");
+  fs::path cut = Scratch / "trunc" / ("libcut" + kSuffix);
+  {
+    std::ofstream out(cut, std::ios::binary);
+    out.write(good.data(), static_cast<std::streamsize>(good.size() / 2));
+  }
+  std::string head = "rejected plugin " + cut.string() + ": cannot load it: ";
+  auto l = paykan("--list-backends",
+                  "PAYKAN_PLUGIN_PATH=" + quote((Scratch / "trunc").string()));
+  ASSERT_EQ(l.Code, 0) << l.Err;
+  bool found = false;
+  for (const std::string &line : lines(l.Out))
+    found |= line.rfind(head, 0) == 0;
+  EXPECT_TRUE(found) << l.Out;
+  auto r = paykan("--no-plugins " + flag("plugin", cut.string()) +
+                  " --check-only " + quote(kSample));
+  EXPECT_EQ(r.Code, 2) << r.Err;
+  EXPECT_EQ(
+      r.Err.rfind("paykan: cannot load plugin '" + cut.string() + "': ", 0), 0u)
+      << r.Err;
+}
+
 TEST_F(PluginLoader, DuplicateNamesAreAmbiguous) {
   std::string a = plugin("dup", "dup_a"), b = plugin("dup", "dup_b");
   std::string conflict = "provided by both " + a + " and " + b;
@@ -534,6 +562,32 @@ TEST_F(PluginLoader, DuplicateNamesAreAmbiguous) {
   EXPECT_TRUE(hasLine(e.Out, "dup (ambiguous: provided by both " + b + " and " +
                                  a + ") [" + b + "]"))
       << e.Out;
+  // The order of the files doesn't matter: an incompatible first provider
+  // doesn't hide the second one.
+  std::string old = plugin("dupold", "dup_old");
+  for (const auto &[first, second] : {std::pair{old, a}, std::pair{a, old}}) {
+    std::string args = "--no-plugins ";
+    args += flag("plugin", first);
+    args += " ";
+    args += flag("plugin", second);
+    std::string both = "provided by both ";
+    both += first;
+    both += " and ";
+    both += second;
+    std::string listed = "dup (ambiguous: ";
+    listed += both;
+    listed += ") [";
+    listed += first;
+    listed += "]";
+    std::string refused = "paykan: cannot use backend 'dup' (ambiguous: ";
+    refused += both;
+    refused += ")\n";
+    auto o = paykan(args + " --list-backends");
+    EXPECT_TRUE(hasLine(o.Out, listed)) << o.Out;
+    auto s = paykan(args + " --backend=dup --emit-source " + quote(kSample));
+    EXPECT_EQ(s.Code, 2);
+    EXPECT_EQ(s.Err, refused);
+  }
 }
 
 TEST_F(PluginLoader, ClashWithABuiltInIsAmbiguous) {

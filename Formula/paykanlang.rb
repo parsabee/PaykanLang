@@ -48,7 +48,7 @@ class Paykanlang < Formula
            "-DPAYKAN_BACKENDS=c",
            "-DPAYKAN_BUILD_TESTS=OFF",
            *std_cmake_args
-    system "cmake", "--build", "build", "--parallel"
+    system "cmake", "--build", "build", "--parallel", ENV.make_jobs.to_s
     system "cmake", "--install", "build"
   end
 

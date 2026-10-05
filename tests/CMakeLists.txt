@@ -293,6 +293,7 @@ paykan_test_frontend(fe_noparse fe_noparse [=[TP_NAME="test-fe-noparse"]=] TP_NO
 paykan_test_frontend(fe_clash fe_clash [=[TP_NAME="recursive-descent"]=])
 paykan_test_plugin(dup_a dup [=[TP_NAME="dup"]=])
 paykan_test_plugin(dup_b dup [=[TP_NAME="dup"]=])
+paykan_test_plugin(dup_old dupold [=[TP_NAME="dup"]=] [=[TP_BUILD_VERSION="0.0.9"]=])
 paykan_test_plugin(clash clash [=[TP_NAME="c"]=])
 # Not a library at all.
 file(WRITE ${PAYKAN_TEST_PLUGIN_DIR}/corrupt/libcorrupt${PAYKAN_TEST_PLUGIN_SUFFIX}

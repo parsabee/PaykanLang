@@ -59,6 +59,9 @@ unsigned long processId();
 /// the libraries it depends on): nothing else in it runs until the caller
 /// calls one of its functions.
 ///   POSIX: dlopen(path, RTLD_NOW | RTLD_LOCAL); the message is dlerror().
+///   On Linux an ELF file whose loadable segments extend past its end (a
+///   truncated file, which dlopen would map and crash on with SIGBUS) is
+///   refused first.
 ///   Windows: not supported yet; always fails.
 void *loadLibrary(const std::string &path, std::string &error);
 

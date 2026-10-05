@@ -107,7 +107,7 @@ Dependencies are deliberately limited to:
 git clone https://github.com/parsabee/PaykanLang.git
 cd PaykanLang
 cmake -B build
-cmake --build build --parallel
+cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
 # the full build, with the opt-in LLVM backend:
 # cmake -B build "-DPAYKAN_BACKENDS=llvm;c"
 ```

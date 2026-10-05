@@ -34,12 +34,14 @@ template <typename Entry> std::string origin(const Entry &e) {
 }
 
 /// " (built with PaykanLang <v>, compatible)", " (incompatible: <why>)" or
-/// " (ambiguous: provided by both ...)" for --version.
+/// " (ambiguous: provided by both ...)" for --version.  A name two files
+/// provide is ambiguous whether or not the first of them is compatible, so
+/// the ambiguity, which names both files, is reported first.
 template <typename Entry> std::string compatibility(const Entry &e) {
-  if (!e.Compatible)
-    return " (incompatible: " + e.Incompatibility + ")";
   if (!e.Conflict.empty())
     return " (ambiguous: " + e.Conflict + ")";
+  if (!e.Compatible)
+    return " (incompatible: " + e.Incompatibility + ")";
   return " (built with PaykanLang " + e.BuildVersion + ", compatible)";
 }
 
@@ -107,10 +109,10 @@ void printVersion(const paykan::plugin::LoadReport &plugins) {
 void listFrontends(const paykan::plugin::LoadReport &plugins) {
   for (const auto &e : paykan::frontend::Registry::get().entries()) {
     std::cout << e.Name;
-    if (!e.Compatible)
-      std::cout << " (incompatible: " << e.Incompatibility << ")";
-    else if (!e.Conflict.empty())
+    if (!e.Conflict.empty())
       std::cout << " (ambiguous: " << e.Conflict << ")";
+    else if (!e.Compatible)
+      std::cout << " (incompatible: " << e.Incompatibility << ")";
     else if (e.Name == paykan::frontend::defaultFrontend())
       std::cout << " (default)";
     if (e.Compatible && e.Conflict.empty() && !e.Description.empty())
@@ -123,13 +125,13 @@ void listFrontends(const paykan::plugin::LoadReport &plugins) {
 void listBackends(const paykan::plugin::LoadReport &plugins) {
   for (const auto &e : paykan::backend::Registry::get().entries()) {
     std::cout << e.Name;
+    if (!e.Conflict.empty()) {
+      std::cout << " (ambiguous: " << e.Conflict << ")" << origin(e) << "\n";
+      continue;
+    }
     if (!e.Compatible) {
       std::cout << " (incompatible: " << e.Incompatibility << ")" << origin(e)
                 << "\n";
-      continue;
-    }
-    if (!e.Conflict.empty()) {
-      std::cout << " (ambiguous: " << e.Conflict << ")" << origin(e) << "\n";
       continue;
     }
     if (e.Name == paykan::backend::defaultBackend())
@@ -168,10 +170,10 @@ std::string checkCompatible(const Registry &registry, const char *kind,
   if (!e)
     return {};
   std::string head = std::string("cannot use ") + kind + " '" + name + "'";
-  if (!e->Compatible)
-    return head + " (incompatible: " + e->Incompatibility + ")" + origin(*e);
   if (!e->Conflict.empty())
     return head + " (ambiguous: " + e->Conflict + ")";
+  if (!e->Compatible)
+    return head + " (incompatible: " + e->Incompatibility + ")" + origin(*e);
   return {};
 }
 

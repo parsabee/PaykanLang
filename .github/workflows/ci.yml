@@ -56,7 +56,7 @@ jobs:
         run: cmake -B build -DCMAKE_BUILD_TYPE=Debug "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
-        run: cmake --build build --parallel
+        run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
 
       - name: clang-format (check)
         run: python3 scripts/clang_format.py
@@ -83,7 +83,7 @@ jobs:
         run: cmake -B build -DCMAKE_BUILD_TYPE=Debug "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
-        run: cmake --build build --parallel
+        run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
 
       - name: Test
         run: ctest --test-dir build --output-on-failure --parallel 4
@@ -110,7 +110,7 @@ jobs:
         run: cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_ASAN=ON "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
-        run: cmake --build build-asan --parallel
+        run: cmake --build build-asan --parallel "$(getconf _NPROCESSORS_ONLN)"
 
       - name: Test
         env:
@@ -147,7 +147,7 @@ jobs:
         run: cmake -B build-ubsan -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_UBSAN=ON "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
-        run: cmake --build build-ubsan --parallel
+        run: cmake --build build-ubsan --parallel "$(getconf _NPROCESSORS_ONLN)"
 
       - name: Test
         env:
@@ -176,7 +176,7 @@ jobs:
         run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -G Ninja "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
-        run: cmake --build build --parallel
+        run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
 
       - name: Test
         run: ctest --test-dir build --output-on-failure --parallel 4
@@ -208,7 +208,7 @@ jobs:
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
-        run: cmake --build build --parallel
+        run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
 
       - name: Test
         run: ctest --test-dir build --output-on-failure --parallel 4
@@ -217,7 +217,7 @@ jobs:
         run: |
           cmake -B build-bare -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST="$PWD/build/third-party/gtest"
-          cmake --build build-bare --parallel
+          cmake --build build-bare --parallel "$(getconf _NPROCESSORS_ONLN)"
 
   # ---------------------------------------------------------------------------
   # Code coverage (LLVM source-based) + floor gate.
@@ -252,7 +252,7 @@ jobs:
             -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST="$PWD/build/third-party/gtest"
 
       - name: Build coverage tree
-        run: cmake --build build-cov --parallel
+        run: cmake --build build-cov --parallel "$(getconf _NPROCESSORS_ONLN)"
 
       - name: Report coverage + enforce floor
         run: python3 scripts/coverage.py --build-dir build-cov
@@ -302,7 +302,7 @@ jobs:
           test ! -e build-notests/third-party
           test ! -e build-notests/_deps
           test ! -e build-notests/CTestTestfile.cmake
-          cmake --build build-notests --parallel
+          cmake --build build-notests --parallel "$(getconf _NPROCESSORS_ONLN)"
           build-notests/bin/paykan --version
           build-notests/bin/paykan --list-backends | tee backends.log
           test "$(cat backends.log)" = "$(grep '^c (default)' backends.log)"
@@ -325,7 +325,7 @@ jobs:
           test "$(ls build/third-party)" = "gtest"
 
       - name: Build
-        run: cmake --build build --parallel
+        run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
 
       - name: Check that paykan links no third-party library
         run: |
@@ -429,7 +429,7 @@ jobs:
             -DPAYKAN_FRONTENDS=recursive-descent -DPAYKAN_BACKENDS=c
 
       - name: Build
-        run: cmake --build build --parallel --target paykan
+        run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)" --target paykan
 
       - name: Strict C11 on GCC and Clang
         run: |
