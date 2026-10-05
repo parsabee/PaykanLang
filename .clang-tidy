@@ -4,13 +4,21 @@
 # defects are enabled, and findings are treated as errors in CI. Stylistic
 # families (readability/modernize/misc namespace & include rules) are
 # intentionally left off so the gate stays low-noise and actionable.
+#
+# clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling is off:
+# in every C11 translation unit (the runtime, the test plugin modules) it
+# flags each memcpy/memset/snprintf and asks for the Annex K *_s functions,
+# which neither glibc nor macOS provides.  It only fired on Linux, where those
+# calls reach the checker by name; macOS's fortified headers turn them into
+# __builtin___*_chk calls it does not match, so CI never saw it.
 Checks: >
   -*,
   bugprone-*,
   performance-*,
   clang-analyzer-*,
   -bugprone-easily-swappable-parameters,
-  -bugprone-narrowing-conversions
+  -bugprone-narrowing-conversions,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling
 
 WarningsAsErrors: '*'
 HeaderFilterRegex: '.*/(src|include)/.*\.h$'

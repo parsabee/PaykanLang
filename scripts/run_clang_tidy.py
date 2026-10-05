@@ -32,6 +32,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -71,6 +72,40 @@ def first_party_tus(compile_db: str) -> list[str]:
             seen.add(f)
             files.append(f)
     return files
+
+
+# Options a GCC-configured tree records in the compile database (LLVM's
+# HandleLLVMOptions adds them for GCC) that clang rejects: an unknown argument
+# is a hard error, and an unknown -W option is one under -Werror.  Either
+# failed every C++ translation unit and, being a compiler error, also kept the
+# static analyzer from running on it.
+_GCC_ONLY_FLAGS = ("-fno-lifetime-dse", "-Wno-class-memaccess")
+_GCC_ONLY_RE = re.compile(
+    r"(?<=\s)(?:" + "|".join(map(re.escape, _GCC_ONLY_FLAGS)) + r")(?=\s|$)"
+)
+
+
+def clang_compile_db_dir(build_dir: str, scratch: str) -> str:
+    """The directory of a compile database clang-tidy accepts: build_dir
+    itself, or, for a GCC-configured tree, a copy in scratch without the
+    GCC-only options."""
+    with open(os.path.join(build_dir, "compile_commands.json")) as fh:
+        db = json.load(fh)
+    changed = False
+    for entry in db:
+        if "arguments" in entry:
+            kept = [a for a in entry["arguments"] if a not in _GCC_ONLY_FLAGS]
+            changed |= len(kept) != len(entry["arguments"])
+            entry["arguments"] = kept
+        else:
+            command = _GCC_ONLY_RE.sub("", entry["command"])
+            changed |= command != entry["command"]
+            entry["command"] = command
+    if not changed:
+        return build_dir
+    with open(os.path.join(scratch, "compile_commands.json"), "w") as fh:
+        json.dump(db, fh)
+    return scratch
 
 
 def main() -> int:
@@ -140,10 +175,12 @@ def main() -> int:
 
     print(f"Linting {len(files)} file(s)...")
     status = 0
-    for f in files:
-        result = subprocess.run([clang_tidy, "-p", build_dir, *extra_args, f])
-        if result.returncode != 0:
-            status = 1
+    with tempfile.TemporaryDirectory(prefix="paykan-tidy-") as scratch:
+        db_dir = clang_compile_db_dir(build_dir, scratch)
+        for f in files:
+            result = subprocess.run([clang_tidy, "-p", db_dir, *extra_args, f])
+            if result.returncode != 0:
+                status = 1
 
     if status:
         print("clang-tidy reported findings.", file=sys.stderr)
