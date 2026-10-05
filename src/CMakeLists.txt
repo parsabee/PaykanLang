@@ -6,7 +6,7 @@
 #                     – the core (standard C++ only)
 #   Frontends/<name>/ – frontend plugins, built when listed in PAYKAN_FRONTENDS
 #   Backends/<name>/  – backend plugins, built when listed in PAYKAN_BACKENDS
-#                       (Backends/LLVM pulls in JIT/)
+#                       (Backends/LLVM/JIT/ is the llvm backend's JIT)
 #   Backends/Toolchain/ – the system C toolchain / runtime link helpers the
 #                       native backends (C, LLVM) share
 #   PluginHost/       – loads plugins at run time (the C plugin interface,

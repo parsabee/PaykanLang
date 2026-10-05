@@ -1,4 +1,4 @@
-# src/JIT/CMakeLists.txt
+# src/Backends/LLVM/JIT/CMakeLists.txt
 # ----------------------------------------------------------------------------
 # paykan_jit – ORC-based JIT execution engine for Paykan
 # ----------------------------------------------------------------------------
@@ -12,7 +12,8 @@ llvm_map_components_to_libnames(JIT_LLVM_LIBS
 
 add_library(paykan_jit STATIC JIT.cpp)
 target_include_directories(paykan_jit
-    PUBLIC ${CMAKE_SOURCE_DIR}/include
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    PRIVATE ${PROJECT_SOURCE_DIR}/include
 )
 target_include_directories(paykan_jit SYSTEM
     PRIVATE ${LLVM_INCLUDE_DIRS}

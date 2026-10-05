@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // The `llvm` backend plugin: PIR -> LLVM IR (PIRToLLVM.cpp), -O<n> through
 // PassBuilder, --emit-llvm, in-process execution with the ORC JIT
-// (src/JIT), and ahead-of-time `build`: a native object for the host
+// (JIT/), and ahead-of-time `build`: a native object for the host
 // (NativeBuild.cpp) linked against libpaykan_runtime.a with the system
 // toolchain the C backend uses too (paykan/backends/Toolchain.h).  Imported
 // modules are served from the bitcode cache under <project root>/.paykan_cache
