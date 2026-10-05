@@ -19,7 +19,8 @@
 #   PAYKAN_RUNTIME_LIBRARY      the installed libpaykan_runtime.a
 #   PAYKAN_RUNTIME_INCLUDE_DIR  the directory of the installed Runtime.h
 #   PAYKAN_TOOLCHAIN_VERSION    this installation's version, pre-release label
-#                               included ("0.1.0-alpha"): the version a plugin
+#                               included (e.g. "1.2.3", or "1.2.3-rc1" for
+#                               a pre-release): the version a plugin
 #                               compiled against it records as its build version
 #   PAYKAN_PLUGIN_COMPATIBLE_VERSIONS
 #                               the plugin build versions this installation

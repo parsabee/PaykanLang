@@ -16,6 +16,8 @@
 #                                     installed paykan
 #
 # Sources only: nothing is compiled here, and GoogleTest is the consumer's.
+# Everything here is in the FrontendTestSupport install component: a plain
+# `cmake --install` installs it, the Debian package (Packaging.cmake) does not.
 # -DPAYKAN_INSTALL_TEST_SUPPORT=OFF (the option is in the top-level
 # CMakeLists.txt) leaves all of it out.  Included after PaykanExport
 # (PAYKAN_INSTALL_CMAKEDIR).
@@ -29,18 +31,23 @@ set(PAYKAN_INSTALL_TEST_SUPPORT_DIR ${CMAKE_INSTALL_DATADIR}/paykan/frontend-tes
 set(PAYKAN_INSTALL_SAMPLES_DIR ${CMAKE_INSTALL_DATADIR}/paykan/samples)
 
 install(FILES ${PROJECT_SOURCE_DIR}/tests/TestUtils.h
-    DESTINATION ${PAYKAN_INSTALL_TEST_SUPPORT_DIR})
+    DESTINATION ${PAYKAN_INSTALL_TEST_SUPPORT_DIR}
+    COMPONENT FrontendTestSupport)
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/tests/Parser ${PROJECT_SOURCE_DIR}/tests/Sema
     DESTINATION ${PAYKAN_INSTALL_TEST_SUPPORT_DIR}
+    COMPONENT FrontendTestSupport
     FILES_MATCHING PATTERN "*.cpp")
 install(FILES ${PROJECT_SOURCE_DIR}/tests/Frontend/FuzzSmokeTests.cpp
               ${PROJECT_SOURCE_DIR}/tests/Frontend/DifferentialTests.cpp
               ${PROJECT_SOURCE_DIR}/tests/Frontend/LoadTestPlugins.cpp
-    DESTINATION ${PAYKAN_INSTALL_TEST_SUPPORT_DIR}/Frontend)
+    DESTINATION ${PAYKAN_INSTALL_TEST_SUPPORT_DIR}/Frontend
+    COMPONENT FrontendTestSupport)
 install(FILES ${PROJECT_SOURCE_DIR}/cmake/PaykanFrontendCheck.cmake
-    DESTINATION ${PAYKAN_INSTALL_CMAKEDIR})
+    DESTINATION ${PAYKAN_INSTALL_CMAKEDIR}
+    COMPONENT FrontendTestSupport)
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/samples/
     DESTINATION ${PAYKAN_INSTALL_SAMPLES_DIR}
+    COMPONENT FrontendTestSupport
     PATTERN ".paykan_cache" EXCLUDE)
 
 # Whether the installed libraries are built without assertions (NDEBUG): a
@@ -68,4 +75,5 @@ file(RELATIVE_PATH PAYKAN_SAMPLES_RELDIR
 configure_file(${PROJECT_SOURCE_DIR}/cmake/PaykanFrontendTests.cmake.in
     ${CMAKE_BINARY_DIR}/cmake/PaykanFrontendTests.cmake @ONLY)
 install(FILES ${CMAKE_BINARY_DIR}/cmake/PaykanFrontendTests.cmake
-    DESTINATION ${PAYKAN_INSTALL_CMAKEDIR})
+    DESTINATION ${PAYKAN_INSTALL_CMAKEDIR}
+    COMPONENT FrontendTestSupport)

@@ -78,10 +78,12 @@ TEST(PluginCompat, VersionsMatchExactly) {
   EXPECT_FALSE(isCompatibleBuildVersion((" " + v).c_str()));
   EXPECT_FALSE(isCompatibleBuildVersion(v.substr(0, v.size() - 1).c_str()));
   if (auto dash = v.find('-'); dash != std::string::npos) {
-    // "0.1.0-alpha" does not accept "0.1.0".
+    // A pre-release ("1.2.3-rc1") does not accept its final release ("1.2.3").
     EXPECT_FALSE(isCompatibleBuildVersion(v.substr(0, dash).c_str()));
   } else {
-    EXPECT_FALSE(isCompatibleBuildVersion((v + "-alpha").c_str()));
+    // A final release ("1.2.3") accepts none of its pre-releases.
+    EXPECT_FALSE(isCompatibleBuildVersion((v + "-rc1").c_str()));
+    EXPECT_FALSE(isCompatibleBuildVersion((v + "-beta").c_str()));
   }
 }
 

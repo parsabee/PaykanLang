@@ -39,12 +39,12 @@ paykan --plugin=./libpaykan_backend_print_pir.so --backend=print-pir --emit-sour
 
 # Install it for everyone using this paykan (the plugin's own build does this
 # with `cmake --install`):
-cp libpaykan_backend_print_pir.so "$(dirname "$(command -v paykan)")/../lib/paykan/plugins/0.1.0-alpha/"
+cp libpaykan_backend_print_pir.so "$(dirname "$(command -v paykan)")/../lib/paykan/plugins/0.1.0/"
 paykan --backend=print-pir --emit-source hello.pkn
 
 # Or just for you:
-mkdir -p ~/.paykan/plugins/0.1.0-alpha
-cp libpaykan_backend_print_pir.so ~/.paykan/plugins/0.1.0-alpha/
+mkdir -p ~/.paykan/plugins/0.1.0
+cp libpaykan_backend_print_pir.so ~/.paykan/plugins/0.1.0/
 ```
 
 `paykan --list-frontends` / `--list-backends` show each loaded plugin with
@@ -55,7 +55,7 @@ file with what it provides. Include `paykan --version` in bug reports.
 ```text
 $ paykan --list-backends
 c (default)
-print-pir: prints the Paykan IR [/usr/local/lib/paykan/plugins/0.1.0-alpha/libpaykan_backend_print_pir.so]
+print-pir: prints the Paykan IR [/usr/local/lib/paykan/plugins/0.1.0/libpaykan_backend_print_pir.so]
 ```
 
 ## Where `paykan` looks
@@ -68,8 +68,9 @@ At startup, in this order:
 4. the system directory `<prefix>/lib/paykan/plugins/<version>/`, found
    relative to the running `paykan` executable (an installation can be moved).
 
-`<version>` is the toolchain's version with its pre-release label
-(`0.1.0-alpha`), so plugins for different installed versions never mix. In a
+`<version>` is the toolchain's version, pre-release label included if it has
+one (e.g. `1.2.3`, `1.2.3-rc1`), so plugins for different installed versions
+never mix. In a
 directory, every file whose name ends in the platform's suffix (`.so`,
 `.dylib`) is loaded, in name order; subdirectories are not searched. A file
 reached twice (the same directory listed twice, a symbolic link) is loaded
@@ -127,9 +128,9 @@ rejected plugin, the first exists and the second never does.
   ```text
   $ paykan --list-backends
   c (default)
-  mine (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.0-alpha accepts 0.1.0-alpha) [/home/me/.paykan/plugins/0.1.0-alpha/libmine.so]
+  mine (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.0 accepts 0.1.0) [/home/me/.paykan/plugins/0.1.0/libmine.so]
   $ paykan --backend=mine program.pkn
-  paykan: cannot use backend 'mine' (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.0-alpha accepts 0.1.0-alpha) [/home/me/.paykan/plugins/0.1.0-alpha/libmine.so]
+  paykan: cannot use backend 'mine' (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.0 accepts 0.1.0) [/home/me/.paykan/plugins/0.1.0/libmine.so]
   $ echo $?
   2
   ```
@@ -140,7 +141,7 @@ rejected plugin, the first exists and the second never does.
   with one line per rejected file:
 
   ```text
-  rejected plugin /home/me/.paykan/plugins/0.1.0-alpha/libold.so: built for plugin API 2; this paykan supports plugin API 1
+  rejected plugin /home/me/.paykan/plugins/0.1.0/libold.so: built for plugin API 2; this paykan supports plugin API 1
   ```
 
   A rejected file named with `--plugin` stops a compile with status 2

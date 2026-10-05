@@ -131,7 +131,7 @@ typedef struct PaykanHost {
   uint32_t struct_size;
   /* PAYKAN_PLUGIN_API_VERSION of the running paykan. */
   uint32_t api_version;
-  /* The running paykan's version ("0.1.0-alpha"). */
+  /* The running paykan's version (e.g. "1.2.3"). */
   const char *toolchain_version;
 
   /* Report a diagnostic.  file may be NULL for the input file of the

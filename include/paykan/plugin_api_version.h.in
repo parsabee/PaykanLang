@@ -14,7 +14,7 @@
 #define PAYKAN_PLUGIN_API_VERSION_H
 
 /* The PaykanLang version this header belongs to, pre-release label
- * included ("0.1.0-alpha"). */
+ * included (e.g. "1.2.3", or "1.2.3-rc1" for a pre-release). */
 #define PAYKAN_PLUGIN_HEADER_VERSION "@PAYKAN_VERSION@"
 
 #endif /* PAYKAN_PLUGIN_API_VERSION_H */

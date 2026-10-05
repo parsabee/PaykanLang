@@ -1,9 +1,10 @@
 name: Release
 
-# Triggered by pushing a version tag (e.g. v0.1.0-alpha). Builds Release binaries on
+# Triggered by pushing a version tag (e.g. v1.2.3). Builds Release binaries on
 # every supported platform, stages them with `cmake --install`, packages each
-# staged tree into a tarball, and publishes a GitHub Release with the tarballs
-# (and their SHA-256 sums) attached.
+# staged tree into a tarball, builds a Debian/Ubuntu package (.deb, Linux) with
+# CPack, and publishes a GitHub Release with the tarballs and the .deb (and
+# their SHA-256 sums) attached.
 #
 # It can also be run by hand (Actions tab -> Release -> "Run workflow").  A
 # manual run is a dry run by default: it builds, smoke-tests and packages every
@@ -11,9 +12,9 @@ name: Release
 # GitHub Release.  Unticking dry_run publishes, and only when the run's ref is
 # a tag.
 #
-# A tag with a pre-release suffix (v0.1.0-alpha, v1.2.0-rc1: any '-') is
+# A tag with a pre-release suffix (v1.2.3-rc1, v1.2.3-beta: any '-') is
 # published as a GitHub pre-release and never marked "Latest" (#133); a plain
-# version tag (v0.1.0) is a normal release and becomes "Latest".  The "Release
+# version tag (v1.2.3) is a normal release and becomes "Latest".  The "Release
 # plan" job prints that decision on every run, dry runs included.
 on:
   push:
@@ -48,7 +49,8 @@ jobs:
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+        # dpkg-dev: dpkg-shlibdeps, which cpack runs for the .deb's Depends.
+        run: sudo apt-get update && sudo apt-get install -y ninja-build dpkg-dev
 
       # Only paykan and the runtime are shipped: no test suite, so no GoogleTest.
       # The release ships the core (#27, #123): the recursive-descent frontend
@@ -75,6 +77,24 @@ jobs:
           ./build/bin/paykan -o /tmp/hello build /tmp/hello.pkn
           /tmp/hello | grep -Fx "Hello from release CI!"
 
+      # The tag must name the version the tree builds: CMakeLists.txt
+      # (project() VERSION plus PAYKAN_VERSION_PRERELEASE) is the only place
+      # that spells it, so it is read back from the built paykan, never
+      # written here.  A tag vX.Y.Z on a tree that builds anything but X.Y.Z
+      # fails before anything is packaged or published.
+      - name: Check the tag matches the built version
+        if: github.ref_type == 'tag'
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          built="$(./build/bin/paykan --version | sed -n '1s/^PaykanLang //p')"
+          if [ "v${built}" != "${REF_NAME}" ]; then
+            echo "error: tag ${REF_NAME} does not match the built version ${built:-<none>} (paykan --version)"
+            exit 1
+          fi
+          echo "tag ${REF_NAME} matches PaykanLang ${built}"
+
       - name: Stage install tree
         run: cmake --install build --prefix "stage/paykanlang"
 
@@ -93,13 +113,54 @@ jobs:
           shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
           echo "archive=${ARCHIVE}" >> "${GITHUB_OUTPUT}"
 
+      # The Debian/Ubuntu package (cmake/Packaging.cmake), from the same core
+      # Release build: paykanlang_<version>_<arch>.deb, installing under /usr.
+      - name: Build the Debian package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          (cd build && cpack -G DEB)
+          mv build/paykanlang_*.deb .
+          for deb in paykanlang_*.deb; do
+            dpkg-deb --info "${deb}"
+            dpkg-deb --contents "${deb}"
+            shasum -a 256 "${deb}" > "${deb}.sha256"
+          done
+
+      # Install the package system-wide and use it as a user would: the
+      # installed /usr/bin/paykan runs and builds a program with the system C
+      # compiler, and a backend plugin built against the /usr installation
+      # (find_package(Paykan)) loads into it.
+      - name: Smoke test the Debian package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          debs=(paykanlang_*.deb)
+          sudo apt-get install -y "./${debs[0]}"
+          work="$(mktemp -d)"
+          cd "${work}"
+          test "$(command -v paykan)" = /usr/bin/paykan
+          paykan --version
+          printf 'fn main() -> int {\n  println("Hello from the .deb!");\n  return 0;\n}\n' > hello.pkn
+          paykan run hello.pkn | grep -Fx "Hello from the .deb!"
+          paykan build -o hello hello.pkn
+          ./hello | grep -Fx "Hello from the .deb!"
+          cmake -S "${GITHUB_WORKSPACE}/src/Backends/PrintPIR" -B print-pir -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build print-pir
+          paykan --plugin=print-pir/libpaykan_backend_print_pir.so --list-backends | grep '^print-pir'
+          paykan --plugin=print-pir/libpaykan_backend_print_pir.so --backend=print-pir --emit-source hello.pkn | grep -F 'Hello from the .deb!'
+          sudo apt-get purge -y paykanlang
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.label }}
+          # The .deb only exists on Linux; a missing pattern is not an error.
           path: |
             paykanlang-*.tar.gz
             paykanlang-*.tar.gz.sha256
+            paykanlang_*.deb
+            paykanlang_*.deb.sha256
 
   # How the release is (or, in a dry run, would be) published: the same
   # expressions the "Create GitHub Release" step passes to
@@ -152,10 +213,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: PaykanLang ${{ github.ref_name }}
-          # v0.1.0-alpha, v1.2.0-rc1, ...: a pre-release, never "Latest".
+          # v1.2.3-rc1, v1.2.3-beta, ...: a pre-release, never "Latest".
           prerelease: ${{ contains(github.ref_name, '-') }}
           make_latest: ${{ !contains(github.ref_name, '-') }}
           generate_release_notes: true
           files: |
             dist/paykanlang-*.tar.gz
             dist/paykanlang-*.tar.gz.sha256
+            dist/paykanlang_*.deb
+            dist/paykanlang_*.deb.sha256

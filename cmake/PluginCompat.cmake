@@ -14,21 +14,21 @@
 # instead (paykan_add_frontend_plugin / paykan_add_backend_plugin).
 #
 # Versions are compared as exact strings, pre-release label included:
-# "0.1.0-alpha" accepts plugins built with "0.1.0-alpha" only, not "0.1.0"
-# or "0.1.0-beta".  There is no range and no ordering; list every accepted
+# "1.2.3" accepts plugins built with "1.2.3" only, not "1.2.3-rc1" or
+# "1.2.4".  There is no range and no ordering; list every accepted older
 # version explicitly.
 #
 # Maintaining the list, once per release (docs/writing-a-backend.md,
 # "Plugin compatibility"):
-#   - The release's own version (project() VERSION plus
-#     PAYKAN_VERSION_PRERELEASE) must be on the list: the built-in plugins are
-#     built with it.  Configure fails otherwise, so a version bump cannot
-#     forget it.
-#   - Keep an older version on the list only when plugins built with it still
-#     work with this release: Frontend.h, Backend.h, Registry.h, the AST and
-#     ASTContext a frontend sees, PIR, and the runtime ABI (Runtime.h)
-#     are unchanged since it, or changed compatibly.  Drop it as soon as one
-#     of them changes incompatibly.
+#   - The release's own version, ${PAYKAN_VERSION} (project() VERSION plus
+#     PAYKAN_VERSION_PRERELEASE), is always on the list, first: the built-in
+#     plugins are built with it.  It is never spelled out here, so a version
+#     bump needs no change to this file.
+#   - Add an older version (a literal, after ${PAYKAN_VERSION}) only when
+#     plugins built with it still work with this release: Frontend.h,
+#     Backend.h, Registry.h, the AST and ASTContext a frontend sees, PIR,
+#     and the runtime ABI (Runtime.h) are unchanged since it, or changed
+#     compatibly.  Drop it as soon as one of them changes incompatibly.
 #   - Say in the CHANGELOG entry of the release which versions it accepts.
 #
 # Provides (after PAYKAN_VERSION is set):
@@ -39,19 +39,14 @@
 #                                         ("a", "b") for the generated header
 # ----------------------------------------------------------------------------
 
-set(PAYKAN_PLUGIN_COMPATIBLE_VERSIONS
-    "0.1.0-alpha"
-)
-
 if(NOT PAYKAN_VERSION)
     message(FATAL_ERROR "PluginCompat.cmake: PAYKAN_VERSION is not set yet")
 endif()
-if(NOT PAYKAN_VERSION IN_LIST PAYKAN_PLUGIN_COMPATIBLE_VERSIONS)
-    message(FATAL_ERROR
-        "cmake/PluginCompat.cmake: PaykanLang ${PAYKAN_VERSION} is not on its "
-        "own plugin compatibility list (${PAYKAN_PLUGIN_COMPATIBLE_VERSIONS}); "
-        "add it, since the built-in plugins are built with it")
-endif()
+
+set(PAYKAN_PLUGIN_COMPATIBLE_VERSIONS
+    "${PAYKAN_VERSION}"
+    # Older versions this release still accepts go here, one per line.
+)
 
 file(STRINGS "${PROJECT_SOURCE_DIR}/include/paykan/plugin_api.h" _paykan_api_line
     REGEX "^#define PAYKAN_PLUGIN_API_VERSION ")
