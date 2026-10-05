@@ -92,7 +92,7 @@ PAYKAN_PLUGIN_EXPORT const PaykanPlugin *paykan_plugin_init(const PaykanHost *h)
   `host->write_output`).
 - Imported modules are parsed with the importing program's frontend.
 
-The smallest complete frontend is [`utils/ast-text-frontend`](../utils/ast-text-frontend):
+The smallest complete frontend is [`src/Frontends/ASTText`](../src/Frontends/ASTText):
 its source language is the AST format itself, so it hands its input back
 unchanged. It is also handy for looking at a frontend's output:
 `paykan --plugin=libpaykan_frontend_ast_text.so --frontend=ast-text out.ast`

@@ -2,7 +2,7 @@
 # Its source language is the AST interchange format itself
 # (docs/plugins/ast-format.md).
 #
-#   cmake -B build -DCMAKE_PREFIX_PATH=<prefix> utils/ast-text-frontend
+#   cmake -B build -DCMAKE_PREFIX_PATH=<prefix> src/Frontends/ASTText
 #   cmake --build build
 #   <prefix>/bin/paykan --emit-ast program.pkn > program.ast
 #   <prefix>/bin/paykan --plugin=build/libpaykan_frontend_ast_text.so \

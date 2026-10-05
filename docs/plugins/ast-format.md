@@ -168,7 +168,7 @@ error: frontend 'mine' returned an invalid AST: 12:7: (frob ...) is not an expre
 ```
 
 The positions are in the AST text, not the source: use `--emit-ast` and a
-frontend that reads the format back (`utils/ast-text-frontend`) to look at
+frontend that reads the format back (`src/Frontends/ASTText`) to look at
 it.
 
 ## 4. Writing a producer

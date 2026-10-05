@@ -10,7 +10,7 @@
  *   TP_NO_PARSE        no parse callback (invalid)
  *
  * Its source language is the AST interchange format: parse returns the
- * source as the AST (like utils/ast-text-frontend), so the tests feed it
+ * source as the AST (like src/Frontends/ASTText), so the tests feed it
  * `paykan --emit-ast` output.  $PAYKAN_TEST_FE_MODE changes what parse does:
  *   errors      two syntax errors, a warning and a note (error_count 2)
  *   other-file  an error about another file

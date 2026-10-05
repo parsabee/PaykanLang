@@ -7,7 +7,7 @@
 #     file, compatible, and its output is exactly `paykan --emit-pir`;
 #   - after `cmake --install` of the plugin into the installation's plugin
 #     directory, with the plugin's build tree deleted: found by itself.
-# Then the C example frontend (utils/ast-text-frontend) and the advanced
+# Then the C example frontend (src/Frontends/ASTText) and the advanced
 # static path (tests/OutOfTree/static-driver).
 #
 # Run as a ctest (tests/CMakeLists.txt, PrintPIROutOfTree):
@@ -130,11 +130,11 @@ endif()
 # installed paykan then runs a program given as `paykan --emit-ast` output,
 # exactly like the source.
 set(build ${WORK_DIR}/ast-text)
-run_step("configure utils/ast-text-frontend"
-    COMMAND ${CMAKE_COMMAND} -S ${PAYKAN_SOURCE_DIR}/utils/ast-text-frontend
+run_step("configure src/Frontends/ASTText"
+    COMMAND ${CMAKE_COMMAND} -S ${PAYKAN_SOURCE_DIR}/src/Frontends/ASTText
             -B ${build} ${configure_args})
-run_step("build utils/ast-text-frontend" COMMAND ${CMAKE_COMMAND} --build ${build})
-run_step("install utils/ast-text-frontend" COMMAND ${CMAKE_COMMAND} --install ${build})
+run_step("build src/Frontends/ASTText" COMMAND ${CMAKE_COMMAND} --build ${build})
+run_step("install src/Frontends/ASTText" COMMAND ${CMAKE_COMMAND} --install ${build})
 file(REMOVE_RECURSE ${build})
 run_step("installed paykan --list-frontends" COMMAND ${paykan} --list-frontends)
 string(FIND "${STEP_OUTPUT}" "ast-text: reads the AST interchange format [${plugin_dir}/libpaykan_frontend_ast_text." at)

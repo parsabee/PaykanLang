@@ -76,7 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   backends).
 - **The AST interchange format (#141)**: its writer and reader in the core
   (`paykan/ast/Interchange.h`, `Paykan::ast_interchange`), `paykan
-  --emit-ast` to print a program in it, and `utils/ast-text-frontend`, a
+  --emit-ast` to print a program in it, and `src/Frontends/ASTText`, a
   plain-C frontend whose source language is the format itself. The writer
   and reader round-trip the AST of every program in the samples corpus.
 - The installed static libraries are built as position-independent code, so

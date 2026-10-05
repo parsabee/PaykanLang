@@ -228,5 +228,5 @@ paykan --plugin=./libmine.so --backend=mine --emit-source program.pkn
 ```
 
 [`src/Backends/PrintPIR`](../../src/Backends/PrintPIR) is this plugin with comments and
-a CMake build. [`utils/ast-text-frontend`](../../utils/ast-text-frontend) is the
+a CMake build. [`src/Frontends/ASTText`](../../src/Frontends/ASTText) is the
 smallest frontend (its source language is the AST format itself).

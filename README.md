@@ -83,7 +83,7 @@ can't be selected (exit status 2). [`docs/plugins/overview.md`](docs/plugins/ove
 explains discovery, the checks and what they guarantee;
 [`docs/writing-a-backend.md`](docs/writing-a-backend.md) and
 [`docs/writing-a-frontend-plugin.md`](docs/writing-a-frontend-plugin.md) show how to write one
-([`src/Backends/PrintPIR`](src/Backends/PrintPIR) and [`utils/ast-text-frontend`](utils/ast-text-frontend),
+([`src/Backends/PrintPIR`](src/Backends/PrintPIR) and [`src/Frontends/ASTText`](src/Frontends/ASTText),
 in C). A frontend returns the program
 in the [AST interchange format](docs/plugins/ast-format.md); a backend receives it as PIR text.
 
