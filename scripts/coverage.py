@@ -11,7 +11,7 @@ c) does not download it, so pass the full list, e.g.
           "-DPAYKAN_BACKENDS=llvm;c" \\
           -DCMAKE_C_COMPILER=build/third-party/llvm/bin/clang \\
           -DCMAKE_CXX_COMPILER=build/third-party/llvm/bin/clang++
-    cmake --build build-cov --parallel
+    cmake --build build-cov --parallel "$(getconf _NPROCESSORS_ONLN)"
 
 This runs every ctest test instrumented (every process it starts, `paykan`
 subprocesses included, writes its own .profraw), checks that each test binary

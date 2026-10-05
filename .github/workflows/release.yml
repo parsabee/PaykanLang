@@ -62,7 +62,7 @@ jobs:
           -DPAYKAN_FRONTENDS=recursive-descent -DPAYKAN_BACKENDS=c
 
       - name: Build
-        run: cmake --build build --parallel --target paykan paykan_runtime
+        run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)" --target paykan paykan_runtime
 
       # Sanity-check the release binary actually runs before we publish it.
       - name: Smoke test (--version + C-backend run and build)

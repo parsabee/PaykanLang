@@ -141,6 +141,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plugin's `Path`, `Description` and `Conflict`, and their factory is a
   `std::function` (#141).
 
+### Fixed
+
+- **A truncated plugin file no longer crashes `paykan`.** A plugin whose file
+  ends inside its loadable segments (an interrupted copy, download or install)
+  was mapped by `dlopen` and killed every command with SIGBUS, `--version`
+  included. On Linux the loader now checks the file's ELF program headers
+  against its size first and lists the file as a rejected plugin.
+- **A name two plugins provide is reported as ambiguous even when the first
+  provider is incompatible.** The listings, `--version` and selection used to
+  report only the first provider's incompatibility.
+- **Bounded build parallelism.** README, CI, the release workflow, the Homebrew
+  formula and the out-of-tree frontend test passed a bare `--parallel`, which
+  with the Makefile generators is an unlimited `make -j`; they now pass the
+  number of processors.
+
 ## [0.1.0-alpha] - 2026-10-03
 
 The first tagged release, published as a GitHub pre-release. PaykanLang is now

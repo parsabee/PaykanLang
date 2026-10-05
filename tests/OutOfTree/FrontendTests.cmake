@@ -51,8 +51,16 @@ foreach(var LLVM_DIR GTest_DIR CMAKE_C_COMPILER CMAKE_CXX_COMPILER)
     endif()
 endforeach()
 run_step("configure tests/OutOfTree/frontend-tests" ${CMAKE_COMMAND} ${configure_args})
+# A bounded number of jobs: with the Makefile generators a bare --parallel
+# is an unlimited `make -j`, dozens of compilers at once (on top of the
+# tests ctest runs in parallel).  $CMAKE_BUILD_PARALLEL_LEVEL wins.
+if(NOT "$ENV{CMAKE_BUILD_PARALLEL_LEVEL}" STREQUAL "")
+    set(jobs "$ENV{CMAKE_BUILD_PARALLEL_LEVEL}")
+else()
+    cmake_host_system_information(RESULT jobs QUERY NUMBER_OF_LOGICAL_CORES)
+endif()
 run_step("build tests/OutOfTree/frontend-tests"
-    ${CMAKE_COMMAND} --build ${build} --parallel)
+    ${CMAKE_COMMAND} --build ${build} --parallel ${jobs})
 run_step("ctest" ${CMAKE_CTEST_COMMAND} --test-dir ${build} --output-on-failure)
 foreach(t ParserTests SemaTests FrontendTests InstalledPaykan)
     if(NOT STEP_OUTPUT MATCHES "${t}\\.rd-plugin[ .]+Passed")

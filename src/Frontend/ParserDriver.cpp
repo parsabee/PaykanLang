@@ -118,14 +118,16 @@ bool ParserDriver::prepare(const std::string &filename, sema::DiagEngine &diag,
 
   // A frontend built with a PaykanLang version this one does not accept is
   // registered but never instantiated (paykan/Registry.h, #103).
+  // Nor is a name two plugins provide (paykan/PluginLoader.h, #141),
+  // whether or not the first of them is compatible: report the ambiguity,
+  // which names both files, first.
   const auto *entry = frontend::Registry::get().find(im.FrontendName);
-  if (entry && !entry->Compatible)
-    return fail("cannot use frontend '" + im.FrontendName +
-                "' (incompatible: " + entry->Incompatibility + ")");
-  // Nor is a name two plugins provide (paykan/PluginLoader.h, #141).
   if (entry && !entry->Conflict.empty())
     return fail("cannot use frontend '" + im.FrontendName +
                 "' (ambiguous: " + entry->Conflict + ")");
+  if (entry && !entry->Compatible)
+    return fail("cannot use frontend '" + im.FrontendName +
+                "' (incompatible: " + entry->Incompatibility + ")");
   out.FE = frontend::Registry::get().create(im.FrontendName);
   if (!out.FE)
     return fail("unknown frontend '" + im.FrontendName + "'");

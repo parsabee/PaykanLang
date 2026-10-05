@@ -22,12 +22,15 @@
 #include <mach-o/dyld.h>
 #elif defined(__linux__)
 // Linux: the executable is the /proc/self/exe symlink, read with
-// std::filesystem::read_symlink (<filesystem>); no further header.
+// std::filesystem::read_symlink (<filesystem>).  <elf.h>: the ELF headers
+// a plugin file is checked against before dlopen (checkElfFile below).
+#include <elf.h>
 #else
 // Other POSIX systems: no executable-path query; executablePath() falls back
 // to the $PATH search.
 #endif
 
+#include <bit>
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -156,7 +159,72 @@ void *librarySymbol(void *, const char *) { return nullptr; }
 
 const char *sharedLibrarySuffix() { return ".dll"; }
 #else
+#if defined(__linux__)
+/// Why the ELF file @p f (@p size bytes) can't be handed to dlopen, or "".
+template <typename Ehdr, typename Phdr>
+std::string checkElfSegments(std::FILE *f, uint64_t size) {
+  Ehdr eh;
+  if (std::fseek(f, 0, SEEK_SET) != 0 || std::fread(&eh, sizeof eh, 1, f) != 1)
+    return "the file is truncated (it ends inside its ELF header)";
+  if (eh.e_phentsize != sizeof(Phdr))
+    return ""; // unusual; dlopen judges it
+  if (uint64_t(eh.e_phoff) + uint64_t(eh.e_phnum) * sizeof(Phdr) > size)
+    return "the file is truncated (it ends inside its program headers)";
+  for (uint64_t i = 0; i < eh.e_phnum; ++i) {
+    Phdr ph;
+    if (std::fseek(f, static_cast<long>(eh.e_phoff + i * sizeof(Phdr)),
+                   SEEK_SET) != 0 ||
+        std::fread(&ph, sizeof ph, 1, f) != 1)
+      return "the file is truncated (it ends inside its program headers)";
+    uint64_t end = uint64_t(ph.p_offset) + uint64_t(ph.p_filesz);
+    if (ph.p_type == PT_LOAD && end > size)
+      return "the file is truncated or corrupt (a loadable segment ends at "
+             "byte " +
+             std::to_string(end) + ", the file has " + std::to_string(size) +
+             ")";
+  }
+  return "";
+}
+
+/// dlopen maps a library's loadable segments without checking that the file
+/// holds them, and the first access to a page past the end of the file
+/// raises SIGBUS: a truncated plugin (an interrupted copy, download or
+/// install) would kill paykan, in every command, before it could report
+/// the file as rejected.  So check the headers against the file's size
+/// first.  "" when the file is complete or isn't a native ELF file (dlopen
+/// then reports what is wrong with it).
+std::string checkElfFile(const std::string &path) {
+  std::error_code ec;
+  uint64_t size = std::filesystem::file_size(path, ec);
+  if (ec)
+    return "";
+  std::FILE *f = std::fopen(path.c_str(), "rb");
+  if (!f)
+    return "";
+  unsigned char ident[EI_NIDENT];
+  std::string why;
+  constexpr unsigned char kNativeData =
+      std::endian::native == std::endian::little ? ELFDATA2LSB : ELFDATA2MSB;
+  if (std::fread(ident, 1, EI_NIDENT, f) == EI_NIDENT &&
+      std::memcmp(ident, ELFMAG, SELFMAG) == 0 &&
+      ident[EI_DATA] == kNativeData) {
+    if (ident[EI_CLASS] == ELFCLASS64)
+      why = checkElfSegments<Elf64_Ehdr, Elf64_Phdr>(f, size);
+    else if (ident[EI_CLASS] == ELFCLASS32)
+      why = checkElfSegments<Elf32_Ehdr, Elf32_Phdr>(f, size);
+  }
+  std::fclose(f);
+  return why;
+}
+#endif
+
 void *loadLibrary(const std::string &path, std::string &error) {
+#if defined(__linux__)
+  if (std::string why = checkElfFile(path); !why.empty()) {
+    error = path + ": " + why;
+    return nullptr;
+  }
+#endif
   dlerror(); // clear a stale message
   void *handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
   if (!handle) {
