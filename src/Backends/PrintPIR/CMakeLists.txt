@@ -3,7 +3,7 @@
 # Build it against an installed PaykanLang (see docs/writing-a-backend.md)
 # and load it into the installed `paykan`, no rebuild of PaykanLang:
 #
-#   cmake -B build -DCMAKE_PREFIX_PATH=<prefix> utils/print-pir
+#   cmake -B build -DCMAKE_PREFIX_PATH=<prefix> src/Backends/PrintPIR
 #       [-DPRINT_PIR_BUILT_WITH=<version>]   # pin the PaykanLang version
 #   cmake --build build
 #   <prefix>/bin/paykan --plugin=build/libpaykan_backend_print_pir.so \

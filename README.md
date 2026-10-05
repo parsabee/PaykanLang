@@ -83,8 +83,8 @@ can't be selected (exit status 2). [`docs/plugins/overview.md`](docs/plugins/ove
 explains discovery, the checks and what they guarantee;
 [`docs/writing-a-backend.md`](docs/writing-a-backend.md) and
 [`docs/writing-a-frontend-plugin.md`](docs/writing-a-frontend-plugin.md) show how to write one
-([`utils/print-pir`](utils/print-pir) and [`utils/ast-text-frontend`](utils/ast-text-frontend)
-in C, [`utils/pir-stats-rust`](utils/pir-stats-rust) in Rust). A frontend returns the program
+([`src/Backends/PrintPIR`](src/Backends/PrintPIR) and [`utils/ast-text-frontend`](utils/ast-text-frontend),
+in C). A frontend returns the program
 in the [AST interchange format](docs/plugins/ast-format.md); a backend receives it as PIR text.
 
 ---
@@ -93,8 +93,15 @@ in the [AST interchange format](docs/plugins/ast-format.md); a backend receives 
 
 Prerequisites: CMake 3.24 or newer and a C++20 compiler to build PaykanLang, plus a C11
 compiler (`cc`) at run time, which the C backend uses to compile programs. The default build
-needs nothing else (the test suite's GoogleTest aside, see below); the LLVM backend is
-opt-in.
+needs nothing else; the LLVM backend is opt-in.
+
+Dependencies are deliberately limited to:
+- standard C and C++ (the compiler and its standard libraries) to build and use PaykanLang;
+- GoogleTest, for the test suite only (found on the system, or fetched);
+- LLVM, for the opt-in `llvm` backend only;
+- Python 3 with its standard library only, for the test and lint scripts in `scripts/`: the
+  system's `python3`, or the one given with `-DPython3_EXECUTABLE=<path>`. Without Python,
+  the script-driven tests are skipped.
 
 ```sh
 git clone https://github.com/parsabee/PaykanLang.git

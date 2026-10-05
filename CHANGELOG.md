@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a module (`MODULE`, `lib<target>.so` / `.dylib`) instead of a static
   library linked with `Paykan::backend`, and a backend written against
   `Backend.h` must be ported to `plugin_api.h` (see
-  `docs/writing-a-backend.md`). `utils/print-pir` is now a plain-C plugin. The
+  `docs/writing-a-backend.md`). `src/Backends/PrintPIR` is now a plain-C plugin. The
   static C++ path (`paykan_add_driver`) stays as an advanced option, and the
   built-in plugins keep their in-process C++ interface.
 - **Frontend plugins are loadable modules too (#141).** A frontend plugin
@@ -71,8 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   behind the portability layer (POSIX `dlopen`; a documented Windows stub).
   The CMake package adds `Paykan::plugin_api`, `PAYKAN_PLUGIN_API_VERSION`,
   `PAYKAN_PLUGIN_INSTALL_DIR`, `PAYKAN_EXECUTABLE`,
-  `paykan_install_plugin()` and `paykan_check_plugin_built_with()`. A Rust
-  example backend, `utils/pir-stats-rust`, builds with `rustc` or `cargo`.
+  `paykan_install_plugin()` and `paykan_check_plugin_built_with()`.
   New docs: `docs/plugins/` (overview, the C API, the AST format, PIR for
   backends).
 - **The AST interchange format (#141)**: its writer and reader in the core
@@ -103,7 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CMake package: they add a plugin library and fail at configure time when
   the installed Paykan does not accept the version the plugin is built with
   (by default the installation's own, `PAYKAN_TOOLCHAIN_VERSION`, or the one
-  pinned with `BUILT_WITH <version>`). `utils/print-pir` uses
+  pinned with `BUILT_WITH <version>`). `src/Backends/PrintPIR` uses
   `paykan_add_backend_plugin()`. See `docs/writing-a-backend.md` (section 7)
   and the new `docs/writing-a-frontend-plugin.md`.
 - This release accepts plugins built with `0.1.0-alpha`. From now on each
@@ -116,6 +115,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-DPAYKAN_INSTALL_TEST_SUPPORT=OFF` leaves them out.
 
 ### Changed
+
+- **Dependencies.** PaykanLang depends only on standard C and C++; GoogleTest
+  (tests), LLVM (the opt-in `llvm` backend) and Python 3's standard library
+  (the scripts) are the only other tools it uses. The script-driven ctests
+  now run with the Python CMake finds (`find_package(Python3)`: the system's,
+  or `-DPython3_EXECUTABLE=<path>`) instead of whatever `python3` is on
+  `PATH`, and are skipped when there is none. The example plugin backend
+  lives in `src/Backends/PrintPIR`.
 
 - **The plugin registration ABI (#103).** `paykan::plugin::Registration`
   takes a `PluginInfo { Name, Create, BuildVersion }` (plain data, the version
@@ -295,7 +302,7 @@ in v0.1" under Added).
 - **Out-of-tree plugins (#37).** `cmake --install` installs the interfaces
   and `find_package(Paykan)`, so a backend or frontend can be built outside
   the tree and linked into a custom `paykan` (`docs/writing-a-backend.md`).
-  `utils/print-pir` is the smallest complete backend; CI and the
+  `src/Backends/PrintPIR` is the smallest complete backend; CI and the
   `PrintPIROutOfTree` ctest build it against an installation.
 - **Documented: selective imports, `Stdin`, `File.readbytes` / `File.read`
   and system imports.** These worked before but were not listed:
@@ -570,7 +577,7 @@ in v0.1" under Added).
 - **Repository layout.** The language reference moved from its top-level
   directory into `docs/language/` (same file names). The example
   out-of-tree backend moved from `examples/backends/print-pir` to
-  `utils/print-pir`. `example_program/` is gone: its `calc` program is now
+  `src/Backends/PrintPIR`. `example_program/` is gone: its `calc` program is now
   the multi-module sample `samples/imports/12_calc`, with its expected
   output, so every harness runs it. `PLAN-0.1.md` (superseded by #27) and
   `proposals/` were removed; the normative parts of the proposals are in

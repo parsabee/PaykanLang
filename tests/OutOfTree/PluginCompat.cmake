@@ -1,5 +1,5 @@
 # The configure-time plugin compatibility check (#103): install this build
-# tree to a scratch prefix and configure utils/print-pir against it, once
+# tree to a scratch prefix and configure src/Backends/PrintPIR against it, once
 # pinned to a PaykanLang version the installation accepts (configure
 # succeeds) and once pinned to one it does not (configure fails with the
 # expected message).  Configure only: PrintPIROutOfTree builds and runs it.
@@ -28,11 +28,11 @@ if(NOT rc EQUAL 0)
     message(FATAL_ERROR "install failed (${rc}):\n${out}\n${err}")
 endif()
 
-# Configure utils/print-pir pinned to <version>; sets CONFIGURE_RC and
+# Configure src/Backends/PrintPIR pinned to <version>; sets CONFIGURE_RC and
 # CONFIGURE_OUTPUT (stdout and stderr, whitespace collapsed: CMake wraps
 # long messages).
 function(configure_print_pir version build)
-    set(args -S ${PAYKAN_SOURCE_DIR}/utils/print-pir -B ${build}
+    set(args -S ${PAYKAN_SOURCE_DIR}/src/Backends/PrintPIR -B ${build}
         -G ${GENERATOR} -DCMAKE_PREFIX_PATH=${prefix}
         -DCMAKE_BUILD_TYPE=Debug -DPRINT_PIR_BUILT_WITH=${version})
     foreach(var LLVM_DIR CMAKE_C_COMPILER CMAKE_CXX_COMPILER)

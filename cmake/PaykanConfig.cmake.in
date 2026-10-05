@@ -48,7 +48,7 @@
 #       but for the entry point (PAYKAN_PLUGIN_EXPORT).
 #   paykan_check_plugin_built_with(<kind> <name> <version> <out-var>)
 #       The configure-time version check alone, for a plugin that is not a
-#       CMake library target (a Rust cdylib, say): FATAL_ERROR unless
+#       CMake library target (built by another toolchain): FATAL_ERROR unless
 #       <version> (empty: PAYKAN_TOOLCHAIN_VERSION) is accepted; sets
 #       <out-var> to the version.
 #   paykan_install_plugin(<target>...)
