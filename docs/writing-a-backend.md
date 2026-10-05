@@ -24,10 +24,9 @@ Either way the driver lists the backends (`paykan --list-backends`) and
 selects one with `--backend=<name>`. [`plugins/overview.md`](plugins/overview.md)
 explains how `paykan` finds and checks loadable plugins.
 
-The example in [`utils/print-pir`](../utils/print-pir) is the smallest
+The example in [`src/Backends/PrintPIR`](../src/Backends/PrintPIR) is the smallest
 complete loadable backend, in plain C (it prints the PIR it receives); copy it
-to start your own. [`utils/pir-stats-rust`](../utils/pir-stats-rust) is the
-same in Rust.
+to start your own.
 
 **Stability.** Unlike the language (stable in v0.1, see
 [`language/01-language-basics.md`](language/01-language-basics.md)), the
@@ -157,9 +156,9 @@ cc -std=c11 -shared -fPIC -I<prefix>/include -o libpaykan_backend_mine.so mine.c
 ```
 
 In Rust, a `cdylib` declares the structs with `#[repr(C)]` and exports
-`paykan_plugin_init` with `#[no_mangle] pub unsafe extern "C"`; see
-[`utils/pir-stats-rust`](../utils/pir-stats-rust), which builds with `cargo`
-or with `rustc` from CMake.
+`paykan_plugin_init` with `#[no_mangle] pub unsafe extern "C"`, and builds
+with its own toolchain (`cargo`); `paykan_check_plugin_built_with()` gives a
+CMake wrapper the version check.
 
 A loadable plugin is independent of the installation's configuration: it
 works the same with a core install (recursive-descent + c) and with one
@@ -356,7 +355,7 @@ assert(program && paykan::pir::verify(*program).empty());
 ```
 
 A loadable backend gets the same text: `paykan --emit-pir program.pkn`
-prints the PIR of a real program, and `utils/print-pir` returns exactly that
+prints the PIR of a real program, and `src/Backends/PrintPIR` returns exactly that
 through the plugin path, so a backend can be tested with saved PIR files and
 with `paykan --plugin=... --backend=mine` on real programs. The parity
 tests under `tests/CodeGen` and the samples corpus run on every enabled
@@ -444,7 +443,7 @@ PaykanLang version it was **built with**, and each release carries an explicit
 
   That version is the installation's own (`PAYKAN_TOOLCHAIN_VERSION`) unless
   the plugin pins the release it is written for with `BUILT_WITH <version>`;
-  [`utils/print-pir`](../utils/print-pir) exposes that as
+  [`src/Backends/PrintPIR`](../src/Backends/PrintPIR) exposes that as
   `-DPRINT_PIR_BUILT_WITH=<version>`. For a loadable plugin the pinned version
   is also the one its descriptor declares. (A static C++ frontend's
   registered build version is always that of the headers it is compiled

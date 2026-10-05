@@ -45,9 +45,8 @@ The runtime library and header a native program links against come from the
 host: `host->runtime_library(session)` and
 `host->runtime_include_dir(session)`.
 
-Two examples read it: [`utils/print-pir`](../../utils/print-pir) (C) writes it
-back out unchanged, and [`utils/pir-stats-rust`](../../utils/pir-stats-rust)
-(Rust) counts its modules, functions and instructions.
+The example [`src/Backends/PrintPIR`](../../src/Backends/PrintPIR) (C) reads it and writes
+it back out unchanged.
 
 ## Stability
 

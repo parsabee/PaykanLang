@@ -32,8 +32,7 @@ These are part of the contract, for every struct and callback below.
 - **No unwinding across the boundary**: no C++ exception, no `longjmp`, no
   Rust panic may leave a callback. A C++ plugin catches everything in each
   callback; a Rust plugin wraps each callback's body in
-  `std::panic::catch_unwind` and returns `PAYKAN_ERROR` on a panic (see
-  [`utils/pir-stats-rust`](../../utils/pir-stats-rust/src/lib.rs)). Building
+  `std::panic::catch_unwind` and returns `PAYKAN_ERROR` on a panic. Building
   the cdylib with `panic = "abort"` is the alternative.
 - **Versioned structs.** Every struct begins with `uint32_t struct_size`, the
   `sizeof` of the struct as its producer compiled it. Within one plugin API
@@ -176,6 +175,5 @@ cc -std=c11 -shared -fPIC -I<prefix>/include -o libmine.so mine.c
 paykan --plugin=./libmine.so --backend=mine --emit-source program.pkn
 ```
 
-[`utils/print-pir`](../../utils/print-pir) is this plugin with comments and
-a CMake build; [`utils/pir-stats-rust`](../../utils/pir-stats-rust) is a Rust
-one.
+[`src/Backends/PrintPIR`](../../src/Backends/PrintPIR) is this plugin with comments and
+a CMake build.

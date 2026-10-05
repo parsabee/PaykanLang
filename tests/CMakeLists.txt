@@ -341,6 +341,23 @@ add_dependencies(driver_tests paykan paykan_incompatible_plugins)
 if(PAYKAN_COVERAGE)
     target_compile_definitions(driver_tests PRIVATE PAYKAN_TEST_COVERAGE=1)
 endif()
+# The script-driven tests (scripts/*.py, standard library only) run with the
+# system's Python 3, or the one given with -DPython3_EXECUTABLE=<path>.
+# Without one they are not registered.
+find_package(Python3 COMPONENTS Interpreter)
+if(NOT Python3_Interpreter_FOUND)
+    message(STATUS "Python 3 not found: the script-driven tests are skipped "
+                   "(set Python3_EXECUTABLE to enable them)")
+endif()
+# paykan_add_python_test(<name> <script> [args...]): a ctest running
+# scripts/<script> with that interpreter.
+function(paykan_add_python_test name script)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME ${name}
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/${script} ${ARGN})
+    endif()
+endfunction()
+
 # The samples corpus on every backend that runs programs: identical stdout,
 # exit codes and zero live heap blocks (scripts/samples_parity.py).
 set(PAYKAN_SAMPLES_BACKENDS "")
@@ -350,36 +367,30 @@ foreach(be IN LISTS PAYKAN_BACKENDS)
     endif()
 endforeach()
 if(PAYKAN_SAMPLES_BACKENDS)
-    add_test(NAME SamplesParity
-        COMMAND ${CMAKE_COMMAND} -E env python3
-                ${CMAKE_SOURCE_DIR}/scripts/samples_parity.py
+    paykan_add_python_test(SamplesParity samples_parity.py
                 --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
     # The same corpus built ahead of time (`paykan build`) and run as
     # executables.
-    add_test(NAME SamplesParityBuild
-        COMMAND ${CMAKE_COMMAND} -E env python3
-                ${CMAKE_SOURCE_DIR}/scripts/samples_parity.py --build
+    paykan_add_python_test(SamplesParityBuild samples_parity.py --build
                 --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
     # The corpus at -O0 too (the default is -O2), which keeps the
     # unoptimised code paths of both backends covered.
-    add_test(NAME SamplesParityO0
-        COMMAND ${CMAKE_COMMAND} -E env python3
-                ${CMAKE_SOURCE_DIR}/scripts/samples_parity.py -O 0
+    paykan_add_python_test(SamplesParityO0 samples_parity.py -O 0
                 --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
     # They compile the same import samples through the same per-project
     # object / bitcode caches (samples/imports/*/.paykan_cache): one at a
     # time.
-    set_tests_properties(SamplesParity SamplesParityBuild SamplesParityO0
-        PROPERTIES RESOURCE_LOCK paykan_samples_cache)
+    if(TEST SamplesParity)
+        set_tests_properties(SamplesParity SamplesParityBuild SamplesParityO0
+            PROPERTIES RESOURCE_LOCK paykan_samples_cache)
+    endif()
 
     # Concurrent builds with different flags (-O0 / -O2, plain / ASan) of one
     # project never link each other's cached objects (#134).  Not in a
     # coverage build: its programs must be compiled by the compiler that
     # built the runtime, which the script's ASan `CC` wrapper is not.
     if(NOT PAYKAN_COVERAGE)
-        add_test(NAME CacheRace
-            COMMAND ${CMAKE_COMMAND} -E env python3
-                    ${CMAKE_SOURCE_DIR}/scripts/cache_race.py
+        paykan_add_python_test(CacheRace cache_race.py
                     --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
     endif()
 
@@ -388,9 +399,7 @@ if(PAYKAN_SAMPLES_BACKENDS)
     # overrides it, and only a binary inside the build tree uses the build
     # tree's runtime (scripts/runtime_lookup.py).
     include(GNUInstallDirs)
-    add_test(NAME RuntimeLookup
-        COMMAND ${CMAKE_COMMAND} -E env python3
-                ${CMAKE_SOURCE_DIR}/scripts/runtime_lookup.py
+    paykan_add_python_test(RuntimeLookup runtime_lookup.py
                 --paykan $<TARGET_FILE:paykan>
                 --runtime-lib $<TARGET_FILE:paykan_runtime>
                 --runtime-header ${CMAKE_SOURCE_DIR}/src/Runtime/Runtime.h
@@ -418,13 +427,13 @@ if("c" IN_LIST PAYKAN_BACKENDS)
         endif()
     endforeach()
     if(PAYKAN_STRICT_CCS)
-        add_test(NAME CStrictC11
-            COMMAND ${CMAKE_COMMAND} -E env python3
-                    ${CMAKE_SOURCE_DIR}/scripts/c_strict.py
+        paykan_add_python_test(CStrictC11 c_strict.py
                     --paykan $<TARGET_FILE:paykan> ${PAYKAN_STRICT_CCS})
         # `paykan build` writes the import samples' object caches.
-        set_tests_properties(CStrictC11 PROPERTIES
-            RESOURCE_LOCK paykan_samples_cache)
+        if(TEST CStrictC11)
+            set_tests_properties(CStrictC11 PROPERTIES
+                RESOURCE_LOCK paykan_samples_cache)
+        endif()
     endif()
 endif()
 
@@ -488,22 +497,17 @@ endif()
 # --- build: it runs no instrumented code, and scripts/coverage.py requires
 # --- every test to write a profile.
 if(NOT PAYKAN_COVERAGE)
-    add_test(NAME MarkdownLinks
-        COMMAND ${CMAKE_COMMAND} -E env python3
-                ${CMAKE_SOURCE_DIR}/scripts/check_links.py)
+    paykan_add_python_test(MarkdownLinks check_links.py)
 endif()
 if(PAYKAN_SAMPLES_BACKENDS)
-    add_test(NAME DocExamples
-        COMMAND ${CMAKE_COMMAND} -E env python3
-                ${CMAKE_SOURCE_DIR}/scripts/doc_examples.py
+    paykan_add_python_test(DocExamples doc_examples.py
                 --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
 endif()
 
 # --- Loadable plugins against an installed PaykanLang: install this tree, ----
-# --- build utils/print-pir (C) and utils/pir-stats-rust (Rust, when rustc ---
-# --- is found) against it with find_package(Paykan) and load them into the --
-# --- INSTALLED paykan via --plugin, $PAYKAN_PLUGIN_PATH and its plugin ------
-# --- directory; print-pir's output must be --emit-pir's ----------------------
+# --- build src/Backends/PrintPIR (C) against it with find_package(Paykan) -
+# --- load it into the INSTALLED paykan via --plugin, $PAYKAN_PLUGIN_PATH ----
+# --- and its plugin directory; its output must be --emit-pir's --------------
 # --- (tests/OutOfTree/PrintPIR.cmake; CI's install job does the same). ------
 # --- Skipped for instrumented builds, whose installed libraries only link ---
 # --- with the instrumentation flags.
@@ -511,11 +515,6 @@ if(NOT PAYKAN_SANITIZER_FLAGS AND NOT PAYKAN_COVERAGE_FLAGS)
     set(PAYKAN_OOT_ARGS "")
     if(TARGET paykan_backend_llvm)
         list(APPEND PAYKAN_OOT_ARGS -DLLVM_DIR=${LLVM_DIR})
-    endif()
-    find_program(PAYKAN_RUSTC rustc)
-    set(PAYKAN_OOT_RUST_ARGS "")
-    if(PAYKAN_RUSTC)
-        list(APPEND PAYKAN_OOT_RUST_ARGS -DRUSTC=${PAYKAN_RUSTC})
     endif()
     add_test(NAME PrintPIROutOfTree
         COMMAND ${CMAKE_COMMAND}
@@ -525,9 +524,9 @@ if(NOT PAYKAN_SANITIZER_FLAGS AND NOT PAYKAN_COVERAGE_FLAGS)
                 -DGENERATOR=${CMAKE_GENERATOR}
                 -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
                 -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-                ${PAYKAN_OOT_ARGS} ${PAYKAN_OOT_RUST_ARGS}
+                ${PAYKAN_OOT_ARGS}
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/OutOfTree/PrintPIR.cmake)
-    # The configure-time plugin compatibility check (#103): utils/print-pir
+    # The configure-time plugin compatibility check (#103): src/Backends/PrintPIR
     # configured against a scratch install, pinned to an accepted and to an
     # unaccepted PaykanLang version (tests/OutOfTree/PluginCompat.cmake).
     add_test(NAME PluginCompatOutOfTree
