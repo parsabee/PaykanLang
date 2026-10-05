@@ -16,9 +16,11 @@
 
 #include "paykan/ast/Interchange.h"
 
+#include <cerrno>
 #include <charconv>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <string>
@@ -410,6 +412,27 @@ private:
     const SExpr &L;
     size_t I = 0;
   };
+
+  /// Parses all of @p text, a decimal floating-point number (the writer's
+  /// "%.17g"), into @p out.  std::strtod rather than std::from_chars: Apple's
+  /// libc++ (Xcode 15) has no floating-point from_chars.  paykan never sets a
+  /// locale, so strtod reads '.' as the writer wrote it.  As the lexer does,
+  /// a value that overflows to +-inf, or a nonzero one that underflows to 0,
+  /// is rejected; a subnormal one (also ERANGE) is not.  Hexadecimal floats,
+  /// which strtod would take, are not the writer's and are rejected too.
+  static bool parseDouble(const std::string &text, double &out) {
+    if (text.empty() || text.find_first_of("xX") != std::string::npos)
+      return false;
+    char *end = nullptr;
+    errno = 0;
+    double d = std::strtod(text.c_str(), &end);
+    if (end != text.c_str() + text.size())
+      return false;
+    if (errno == ERANGE && (std::isinf(d) || d == 0.0))
+      return false;
+    out = d;
+    return true;
+  }
 
   bool integer(const SExpr &e, int64_t &out) {
     const char *first = e.Text.data(), *last = first + e.Text.size();
@@ -954,9 +977,7 @@ private:
                 : (v->Text == "inf" ? std::numeric_limits<double>::infinity()
                                     : -std::numeric_limits<double>::infinity());
       } else {
-        const char *first = v->Text.data(), *last = first + v->Text.size();
-        auto [p, ec] = std::from_chars(first, last, d);
-        if (v->K != SExpr::Number || ec != std::errc() || p != last)
+        if (v->K != SExpr::Number || !parseDouble(v->Text, d))
           return fail(*v, "not a floating-point number: " + v->Text), nullptr;
       }
       out = Ctx.make<FloatLiteral>(loc, d);

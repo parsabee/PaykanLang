@@ -17,6 +17,8 @@
 #include "paykan/ast/Interchange.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -181,6 +183,30 @@ TEST(ASTInterchange, ReadsEveryNode) {
   EXPECT_EQ(dump(tu2), dump(tu));
 }
 
+// Floats read back exactly as written (the writer's %.17g), subnormals and
+// the extremes included.
+TEST(ASTInterchange, ReadsFloatsExactly) {
+  for (double v : {0.1, -2.5, 0.0, -0.0, 5e-324, 2.2250738585072014e-308,
+                   1.7976931348623157e308, -1.7976931348623157e308}) {
+    char buf[64];
+    std::snprintf(buf, sizeof buf, "%.17g", v);
+    std::string text = std::string("(paykan-ast 1 (unit (fn \"f\" "
+                                   "(type-params) (params) _ (block "
+                                   "(expr (float ") +
+                       buf + "))))))";
+    ast::ASTContext ctx;
+    std::string error;
+    ast::TranslationUnit *tu = read(text, ctx, error);
+    ASSERT_NE(tu, nullptr) << buf << ": " << error;
+    auto &stmts = tu->getFuncDecls()[0]->getBody()->getStatements();
+    auto *lit = ast::cast<ast::FloatLiteral>(
+        ast::cast<ast::ExprStmt>(stmts[0])->getExpr());
+    double got = lit->getValue();
+    EXPECT_EQ(got, v) << buf;
+    EXPECT_EQ(std::signbit(got), std::signbit(v)) << buf;
+  }
+}
+
 // Every malformed input is an error with its position.
 TEST(ASTInterchange, RejectsMalformedInput) {
   struct Case {
@@ -307,6 +333,21 @@ TEST(ASTInterchange, RejectsMalformedInput) {
       {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
        "(expr (float 1.5x))))))",
        "1:74: not a floating-point number: 1.5x"},
+      {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
+       "(expr (float 1e999))))))",
+       "1:74: not a floating-point number: 1e999"},
+      {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
+       "(expr (float -1e999))))))",
+       "1:74: not a floating-point number: -1e999"},
+      {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
+       "(expr (float 1e-400))))))",
+       "1:74: not a floating-point number: 1e-400"},
+      {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
+       "(expr (float 0x1p3))))))",
+       "1:74: not a floating-point number: 0x1p3"},
+      {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
+       "(expr (float 1.5e))))))",
+       "1:74: not a floating-point number: 1.5e"},
       {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
        "(expr (int \"1\"))))))",
        "1:72: expected an integer: the value"},
