@@ -122,6 +122,10 @@ bool ParserDriver::prepare(const std::string &filename, sema::DiagEngine &diag,
   if (entry && !entry->Compatible)
     return fail("cannot use frontend '" + im.FrontendName +
                 "' (incompatible: " + entry->Incompatibility + ")");
+  // Nor is a name two plugins provide (paykan/PluginLoader.h, #141).
+  if (entry && !entry->Conflict.empty())
+    return fail("cannot use frontend '" + im.FrontendName +
+                "' (ambiguous: " + entry->Conflict + ")");
   out.FE = frontend::Registry::get().create(im.FrontendName);
   if (!out.FE)
     return fail("unknown frontend '" + im.FrontendName + "'");

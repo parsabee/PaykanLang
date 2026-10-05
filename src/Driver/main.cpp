@@ -11,6 +11,7 @@
 #include "paykan/Backend.h"
 #include "paykan/Frontend.h"
 #include "paykan/PluginLoader.h"
+#include "paykan/ast/Interchange.h"
 #include "paykan/lowering/Lowering.h"
 #include "paykan/pir/Printer.h"
 #include "paykan/pir/Verifier.h"
@@ -284,6 +285,14 @@ int main(int argc, char *argv[]) {
   if (opts.DumpAST) {
     paykan::ast::ASTPrinter printer(std::cout);
     printer.visit(root);
+    return EXIT_SUCCESS;
+  }
+  if (opts.EmitAST) {
+    // What a frontend plugin returns (docs/plugins/ast-format.md).
+    std::string error;
+    if (!paykan::ast::interchange::write(*root, std::cout, error))
+      return fail("cannot write the AST: " + error);
+    std::cout.flush();
     return EXIT_SUCCESS;
   }
 

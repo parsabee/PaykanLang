@@ -1,7 +1,9 @@
 # The exported frontend test support (cmake/PaykanTestSupport.cmake): install
 # this build tree to a scratch prefix, build tests/OutOfTree/frontend-tests
-# against it with find_package(Paykan) and paykan_add_frontend_tests()
-# (docs/writing-a-frontend-plugin.md), and run the suites it adds.
+# (a loadable frontend plugin, rd-plugin) against it with find_package(Paykan)
+# and paykan_add_frontend_tests() (docs/writing-a-frontend-plugin.md), and run
+# the suites it adds: in process with the plugin loaded, and through the
+# installed paykan.
 #
 # Run as a ctest (tests/CMakeLists.txt, FrontendTestsOutOfTree):
 #   cmake -DPAYKAN_BUILD_DIR=... -DPAYKAN_SOURCE_DIR=... -DWORK_DIR=...
@@ -52,9 +54,9 @@ run_step("configure tests/OutOfTree/frontend-tests" ${CMAKE_COMMAND} ${configure
 run_step("build tests/OutOfTree/frontend-tests"
     ${CMAKE_COMMAND} --build ${build} --parallel)
 run_step("ctest" ${CMAKE_CTEST_COMMAND} --test-dir ${build} --output-on-failure)
-foreach(t ParserTests SemaTests FrontendTests)
-    if(NOT STEP_OUTPUT MATCHES "${t}\\.recursive-descent[ .]+Passed")
-        message(FATAL_ERROR "${t}.recursive-descent did not run:\n${STEP_OUTPUT}")
+foreach(t ParserTests SemaTests FrontendTests InstalledPaykan)
+    if(NOT STEP_OUTPUT MATCHES "${t}\\.rd-plugin[ .]+Passed")
+        message(FATAL_ERROR "${t}.rd-plugin did not run:\n${STEP_OUTPUT}")
     endif()
 endforeach()
 

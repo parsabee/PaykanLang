@@ -1,6 +1,7 @@
 # The exported frontend test support, as an out-of-tree frontend uses it
-# (docs/writing-a-frontend-plugin.md), run against the installation's own
-# recursive-descent frontend: tests/OutOfTree/FrontendTests.cmake configures,
+# (docs/writing-a-frontend-plugin.md), run against `rd-plugin`: the
+# installation's recursive-descent parser built into a loadable frontend
+# plugin (RDPlugin.cpp).  tests/OutOfTree/FrontendTests.cmake configures,
 # builds and runs this project against a scratch install.
 cmake_minimum_required(VERSION 3.24)
 project(PaykanFrontendTestsOutOfTree LANGUAGES C CXX)
@@ -22,5 +23,16 @@ FetchContent_Declare(googletest
 set(INSTALL_GTEST OFF)
 FetchContent_MakeAvailable(googletest)
 
+# The plugin: a loadable module with the C interface, which links the
+# installed parser, AST and interchange writer into itself (keeping their
+# symbols private to the module).
+paykan_add_frontend_plugin(paykan_frontend_rd_plugin RDPlugin.cpp)
+target_link_libraries(paykan_frontend_rd_plugin PRIVATE
+    Paykan::frontend_recursive_descent Paykan::ast_interchange
+    Paykan::compile_options)
+if(NOT APPLE)
+    target_link_options(paykan_frontend_rd_plugin PRIVATE "LINKER:--exclude-libs,ALL")
+endif()
+
 enable_testing()
-paykan_add_frontend_tests(recursive-descent)
+paykan_add_frontend_tests(rd-plugin PLUGIN paykan_frontend_rd_plugin)

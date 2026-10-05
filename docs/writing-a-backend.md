@@ -9,8 +9,10 @@ and translates it one instruction at a time.
 
 Backends are plugins, of two kinds:
 
-- **Loadable plugins** (sections 1 to 3): a shared library with the C
-  interface of [`include/paykan/plugin_api.h`](../include/paykan/plugin_api.h),
+- **Loadable plugins** (sections 1 to 3; frontends work the same way,
+  [`writing-a-frontend-plugin.md`](writing-a-frontend-plugin.md)): a shared
+  library with the C interface of
+  [`include/paykan/plugin_api.h`](../include/paykan/plugin_api.h),
   written in any language that can export a C function, and loaded at run
   time by an **installed** `paykan`, with no rebuild of PaykanLang. This is
   how a backend is written outside PaykanLang. It receives the program as
@@ -319,9 +321,7 @@ v1.0 ([#61](https://github.com/parsabee/PaykanLang/issues/61)).
 runtime's location `PAYKAN_RUNTIME_LIBRARY` / `PAYKAN_RUNTIME_INCLUDE_DIR`,
 the installation's version `PAYKAN_TOOLCHAIN_VERSION` and the plugin build
 versions it accepts `PAYKAN_PLUGIN_COMPATIBLE_VERSIONS`,
-`paykan_add_frontend_plugin(<target> [BUILT_WITH <version>] <sources>...)`
-(a static C++ frontend, section 7), and
-`paykan_add_driver(<target> [PLUGINS <libs>...])`, which creates an executable
+and `paykan_add_driver(<target> [PLUGINS <libs>...])`, which creates an executable
 from the driver library and links every plugin whole-archive. That driver's
 `run` and `build` use the package's runtime (unless `$PAYKAN_RUNTIME_DIR`
 names another), wherever the executable itself is built or copied. The compiler's
@@ -445,7 +445,7 @@ PaykanLang version it was **built with**, and each release carries an explicit
   the plugin pins the release it is written for with `BUILT_WITH <version>`;
   [`src/Backends/PrintPIR`](../src/Backends/PrintPIR) exposes that as
   `-DPRINT_PIR_BUILT_WITH=<version>`. For a loadable plugin the pinned version
-  is also the one its descriptor declares. (A static C++ frontend's
+  is also the one its descriptor declares. (A static C++ plugin's
   registered build version is always that of the headers it is compiled
   against.)
 

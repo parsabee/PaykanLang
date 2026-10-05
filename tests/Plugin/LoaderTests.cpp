@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -40,7 +41,9 @@ namespace fs = std::filesystem;
 
 namespace {
 
-constexpr size_t kPluginStructSize = sizeof(PaykanPlugin);
+// The smallest plugin descriptor: up to its backends (the frontend fields
+// were appended after them).
+constexpr size_t kPluginStructSize = offsetof(PaykanPlugin, num_frontends);
 constexpr size_t kBackendStructSize = sizeof(PaykanBackend);
 
 const std::string kPaykan = PAYKAN_BIN;
@@ -219,6 +222,17 @@ TEST_F(PluginLoader, AppendedFieldsAreCompatible) {
   EXPECT_EQ(r.Code, 0) << r.Err;
   auto pir = paykan("--no-plugins --emit-pir " + quote(kSample));
   EXPECT_EQ(r.Out, pir.Out);
+}
+
+// A descriptor that ends before the frontend fields (built against a header
+// that had none) still loads: it has no frontends.
+TEST_F(PluginLoader, DescriptorWithoutFrontendFieldsLoads) {
+  std::string early = plugin("early", "early");
+  auto l = paykan("--no-plugins " + flag("plugin", early) + " --list-backends");
+  ASSERT_EQ(l.Code, 0) << l.Err;
+  EXPECT_TRUE(
+      hasLine(l.Out, "test-early: the loader tests' backend [" + early + "]"))
+      << l.Out;
 }
 
 TEST_F(PluginLoader, BackendBuildsAndRunsThroughTheHost) {
@@ -452,7 +466,8 @@ TEST_F(PluginLoader, BrokenFilesAreRejectedWithTheReason) {
        "invalid descriptor: backend #1 has no name"},
       {plugin("twice", "twice"),
        "invalid descriptor: backend 'test-twice' is listed twice"},
-      {plugin("none", "none"), "invalid descriptor: it provides no backend"},
+      {plugin("none", "none"),
+       "invalid descriptor: it provides no frontend and no backend"},
       {plugin("tiny", "tiny"),
        "its descriptor is 4 bytes, too small to hold a plugin API version"},
       {plugin("short", "short"),
@@ -537,3 +552,241 @@ TEST_F(PluginLoader, ClashWithABuiltInIsAmbiguous) {
 }
 
 } // namespace
+
+// -- Frontends
+// -------------------------------------------------------------------
+//
+// The test frontend (tests/Plugin/modules/test_frontend.c) reads the AST
+// interchange format: it hands its source to paykan unchanged.  So
+// `paykan --emit-ast` of a sample, fed back through it, must give the very
+// same program.
+
+namespace {
+
+class FrontendPlugin : public PluginLoader {
+protected:
+  std::string fe() const { return plugin("fe", "fe"); }
+  /// `paykan --emit-ast @p source` written to @p out.
+  void emitAST(const std::string &source, const fs::path &out) const {
+    auto r = paykan("--no-plugins --emit-ast " + quote(source));
+    ASSERT_EQ(r.Code, 0) << source << r.Err;
+    std::ofstream(out) << r.Out;
+  }
+  std::string withFe(const std::string &args) const {
+    return "--no-plugins " + flag("plugin", fe()) + " --frontend=test-fe " +
+           args;
+  }
+};
+
+} // namespace
+
+TEST_F(FrontendPlugin, ListedWithItsFile) {
+  auto l = paykan("--no-plugins " + flag("plugin", fe()) + " --list-frontends");
+  ASSERT_EQ(l.Code, 0) << l.Err;
+  EXPECT_TRUE(hasLine(l.Out, "recursive-descent (default)")) << l.Out;
+  EXPECT_TRUE(
+      hasLine(l.Out, "test-fe: the loader tests' frontend [" + fe() + "]"))
+      << l.Out;
+  auto v = paykan("--no-plugins " + flag("plugin", fe()) + " --version");
+  EXPECT_TRUE(hasLine(v.Out, std::string("frontend test-fe (built with "
+                                         "PaykanLang ") +
+                                 paykan::kVersion + ", compatible) [" + fe() +
+                                 "]"))
+      << v.Out;
+  EXPECT_TRUE(hasLine(v.Out, "plugin " + fe() +
+                                 " (test-fe-plugin 0.1): frontend test-fe"))
+      << v.Out;
+  EXPECT_FALSE(ran("test-fe", ".called"));
+}
+
+// The whole corpus that needs no imports: --emit-ast through the plugin
+// gives the same AST and the same PIR as the source itself.
+TEST_F(FrontendPlugin, CarriesEverySampleProgram) {
+  unsigned checked = 0;
+  for (const char *dir : {"codegen", "leak-check"}) {
+    for (const auto &e :
+         fs::directory_iterator(std::string(PAYKAN_SAMPLES_DIR) + "/" + dir)) {
+      if (e.path().extension() != ".pkn")
+        continue;
+      std::string src = e.path().string();
+      fs::path ast = Scratch / (e.path().stem().string() + ".pkn");
+      emitAST(src, ast);
+      auto viaPlugin = paykan(withFe("--emit-pir " + quote(ast.string())));
+      auto direct = paykan("--no-plugins --emit-pir " + quote(src));
+      ASSERT_EQ(direct.Code, 0) << src << direct.Err;
+      EXPECT_EQ(viaPlugin.Code, 0) << src << viaPlugin.Err;
+      // The PIR names the module after the file; both files share a stem.
+      EXPECT_EQ(viaPlugin.Out, direct.Out) << src;
+      ++checked;
+    }
+  }
+  EXPECT_GT(checked, 50u);
+  EXPECT_TRUE(ran("test-fe", ".called"));
+}
+
+// Imported modules are parsed with the importing program's frontend.
+TEST_F(FrontendPlugin, ImportsGoThroughThePlugin) {
+  fs::path src = fs::path(PAYKAN_SAMPLES_DIR) / "imports" / "01_bare";
+  fs::path dst = Scratch / "01_bare";
+  fs::create_directories(dst);
+  for (const auto &e : fs::directory_iterator(src))
+    if (e.path().extension() == ".pkn")
+      emitAST(e.path().string(), dst / e.path().filename());
+  auto viaPlugin =
+      paykan(withFe("--emit-pir " + quote((dst / "main.pkn").string())));
+  auto direct =
+      paykan("--no-plugins --emit-pir " + quote((src / "main.pkn").string()));
+  ASSERT_EQ(direct.Code, 0) << direct.Err;
+  EXPECT_EQ(viaPlugin.Code, 0) << viaPlugin.Err;
+  EXPECT_EQ(viaPlugin.Out, direct.Out);
+  auto run = paykan(withFe("run " + quote((dst / "main.pkn").string())));
+  auto runDirect =
+      paykan("--no-plugins run " + quote((src / "main.pkn").string()));
+  EXPECT_EQ(run.Code, runDirect.Code) << run.Err;
+  EXPECT_EQ(run.Out, runDirect.Out);
+}
+
+TEST_F(FrontendPlugin, ParseFailures) {
+  fs::path ast = Scratch / "p.pkn";
+  emitAST(kSample, ast);
+  std::string file = ast.string();
+  auto r = paykan(withFe("--check-only " + quote(file)),
+                  "PAYKAN_TEST_FE_MODE=errors");
+  EXPECT_EQ(r.Code, 1);
+  // Through the built-in frontends' diagnostics: position, snippet, caret.
+  EXPECT_NE(r.Err.find(file + ":1:5: error: unexpected thing"),
+            std::string::npos)
+      << r.Err;
+  EXPECT_NE(r.Err.find("warning: a warning"), std::string::npos) << r.Err;
+  EXPECT_NE(r.Err.find("note: a note"), std::string::npos) << r.Err;
+  EXPECT_NE(r.Err.find(file + ":2:0: error: and another"), std::string::npos)
+      << r.Err;
+  EXPECT_NE(r.Err.find("parsing failed with 2 error(s)"), std::string::npos)
+      << r.Err;
+
+  auto other = paykan(withFe("--check-only " + quote(file)),
+                      "PAYKAN_TEST_FE_MODE=other-file");
+  EXPECT_EQ(other.Code, 1);
+  EXPECT_NE(other.Err.find("error: other.pkn:3:4: in another file"),
+            std::string::npos)
+      << other.Err;
+
+  auto bad = paykan(withFe("--check-only " + quote(file)),
+                    "PAYKAN_TEST_FE_MODE=bad-ast");
+  EXPECT_EQ(bad.Code, 1);
+  EXPECT_NE(bad.Err.find("error: frontend 'test-fe' returned an invalid AST: "
+                         "1:21: (frob ...) is not a top-level declaration "
+                         "(import, enum, class, fn)"),
+            std::string::npos)
+      << bad.Err;
+
+  auto noast = paykan(withFe("--check-only " + quote(file)),
+                      "PAYKAN_TEST_FE_MODE=noast");
+  EXPECT_EQ(noast.Code, 1);
+  EXPECT_NE(noast.Err.find("error: frontend 'test-fe' returned no AST and "
+                           "reported no error"),
+            std::string::npos)
+      << noast.Err;
+
+  auto fail =
+      paykan(withFe("--check-only " + quote(file)), "PAYKAN_TEST_FE_MODE=fail");
+  EXPECT_EQ(fail.Code, 1);
+  EXPECT_NE(fail.Err.find("error: frontend 'test-fe' failed (status 7)"),
+            std::string::npos)
+      << fail.Err;
+
+  auto trace = paykan(withFe("--check-only " + quote(file)),
+                      "PAYKAN_TEST_FE_MODE=trace");
+  EXPECT_EQ(trace.Code, 0) << trace.Err;
+  EXPECT_EQ(trace.Err, "trace: parsing\n");
+}
+
+TEST_F(FrontendPlugin, DumpTokens) {
+  auto r = paykan(withFe("--dump-tokens " + quote(kSample)));
+  EXPECT_EQ(r.Code, 0) << r.Err;
+  EXPECT_EQ(r.Out, "tokens of " + kSample + ": " +
+                       std::to_string(fs::file_size(kSample)) + " bytes\n");
+  auto f = paykan(withFe("--dump-tokens " + quote(kSample)),
+                  "PAYKAN_TEST_FE_MODE=fail");
+  EXPECT_NE(f.Err.find("error: frontend 'test-fe' failed (status 3)"),
+            std::string::npos)
+      << f.Err;
+}
+
+TEST_F(FrontendPlugin, Rejections) {
+  // A wrong build version: listed, exit 2 when selected, never called.
+  std::string old = plugin("fe_old", "fe_old");
+  auto l = paykan("--no-plugins " + flag("plugin", old) + " --list-frontends");
+  EXPECT_TRUE(
+      hasLine(l.Out, "test-fe-old (" + incompatible() + ") [" + old + "]"))
+      << l.Out;
+  auto r = paykan("--no-plugins " + flag("plugin", old) +
+                  " --frontend=test-fe-old --check-only " + quote(kSample));
+  EXPECT_EQ(r.Code, 2);
+  EXPECT_EQ(r.Err, "paykan: cannot use frontend 'test-fe-old' (" +
+                       incompatible() + ") [" + old + "]\n");
+  EXPECT_TRUE(ran("test-fe-old", ".ctor"));
+  EXPECT_FALSE(ran("test-fe-old", ".called"));
+
+  // Malformed descriptors.
+  const std::pair<std::string, std::string> cases[] = {
+      {plugin("fe_nofree", "fe_nofree"),
+       "invalid descriptor: it provides frontends but no free_memory (to "
+       "release their ASTs)"},
+      {plugin("fe_noparse", "fe_noparse"),
+       "invalid descriptor: frontend 'test-fe-noparse' has no parse "
+       "callback"},
+  };
+  for (const auto &[path, why] : cases) {
+    auto c =
+        paykan("--no-plugins " + flag("plugin", path) + " --list-frontends");
+    std::string line = "rejected plugin " + path;
+    line += ": " + why;
+    EXPECT_TRUE(hasLine(c.Out, line)) << c.Out;
+  }
+
+  // A clash with the built-in default frontend: nothing parses until it is
+  // resolved.
+  std::string clash = plugin("fe_clash", "fe_clash");
+  std::string conflict = "provided by both the built-in plugin and " + clash;
+  auto cl =
+      paykan("--no-plugins " + flag("plugin", clash) + " --list-frontends");
+  EXPECT_TRUE(
+      hasLine(cl.Out, "recursive-descent (ambiguous: " + conflict + ")"))
+      << cl.Out;
+  auto cr = paykan("--no-plugins " + flag("plugin", clash) + " --check-only " +
+                   quote(kSample));
+  EXPECT_EQ(cr.Code, 2);
+  EXPECT_EQ(cr.Err, "paykan: cannot use frontend 'recursive-descent' "
+                    "(ambiguous: " +
+                        conflict + ")\n");
+  EXPECT_FALSE(ran("recursive-descent", ".called"));
+}
+
+// A plugin's AST may nest deeper than the built-in frontend's nesting limit
+// allows (up to the format's own limit): Sema and the lowering get through
+// it, and deeper text is refused by the reader.
+TEST_F(FrontendPlugin, DeepASTs) {
+  auto program = [](unsigned unary) {
+    std::string text = "(paykan-ast 1 (unit (fn \"main\" (type-params) "
+                       "(params) (named-type \"int\") (block (return ";
+    for (unsigned i = 0; i < unary; ++i)
+      text += "(unary neg ";
+    text += "(int 1)" + std::string(unary, ')') + ")))))\n";
+    return text;
+  };
+  fs::path deep = Scratch / "deep.pkn";
+  std::ofstream(deep) << program(2040);
+  auto r = paykan(withFe("--emit-pir " + quote(deep.string())));
+  EXPECT_EQ(r.Code, 0) << r.Err.substr(0, 2000);
+  EXPECT_NE(r.Out.find("fn @main() -> i64"), std::string::npos);
+  fs::path tooDeep = Scratch / "too-deep.pkn";
+  std::ofstream(tooDeep) << program(2100);
+  auto t = paykan(withFe("--check-only " + quote(tooDeep.string())));
+  EXPECT_EQ(t.Code, 1);
+  EXPECT_NE(t.Err.find("returned an invalid AST: 1:"), std::string::npos)
+      << t.Err;
+  EXPECT_NE(t.Err.find("nesting too deep (more than 2048 levels)"),
+            std::string::npos)
+      << t.Err;
+}

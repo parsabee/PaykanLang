@@ -22,8 +22,8 @@ These are part of the contract, for every struct and callback below.
 - **Ownership.** Everything `paykan` passes to a callback is **borrowed for
   that call**: copy what you keep. Everything a plugin's descriptors point
   to must stay valid until the process exits (`paykan` never unloads a
-  plugin), so make them static. Memory a plugin returns to `paykan` (no
-  callback of API 1 does) is released with the plugin's own
+  plugin), so make them static. Memory a plugin returns to `paykan` (a
+  frontend's AST) is released with the plugin's own
   `PaykanPlugin.free_memory`, never with `paykan`'s allocator.
 - **Errors** are `int` status codes: `PAYKAN_OK` (0) is success, anything
   else a failure. Explain a failure with `host->diagnostic(...,
@@ -64,13 +64,65 @@ plugin.
 | `api_version` | `uint32_t` | `PAYKAN_PLUGIN_API_VERSION` of the header built with; must be one `paykan` supports |
 | `build_version` | `const char *` | the PaykanLang version the plugin is built with, `PAYKAN_PLUGIN_BUILD_VERSION`; must be on `paykan`'s compatibility list ([#103](https://github.com/parsabee/PaykanLang/issues/103)) |
 | `name`, `version` | `const char *` | the plugin's own name and version for `--version`; may be `NULL` |
-| `free_memory` | `void (*)(void *)` | releases memory the plugin returned to `paykan`; may be `NULL` |
-| `num_backends`, `backends` | `size_t`, `const PaykanBackend *` | the backends it provides (at least one) |
+| `free_memory` | `void (*)(void *)` | releases memory the plugin returned to `paykan` (a frontend's AST); required with frontends |
+| `num_backends`, `backends` | `size_t`, `const PaykanBackend *` | the backends it provides |
+| `num_frontends`, `frontends` | `size_t`, `const PaykanFrontend *` | the frontends it provides. Appended after the backends: a descriptor whose `struct_size` ends before them has none |
+
+A plugin provides at least one frontend or backend. Each array's elements
+all have the same `struct_size`, and `paykan` steps through the array by it,
+so an array of structs from a newer header (with fields appended) reads
+correctly.
 
 `PAYKAN_PLUGIN_BUILD_VERSION` is `PAYKAN_PLUGIN_HEADER_VERSION`, the
 PaykanLang version of the header (generated from the build's version into
 `paykan/plugin_api_version.h`, installed next to `plugin_api.h`), unless the build defines it
 (`paykan_add_backend_plugin(... BUILT_WITH <version>)` does).
+
+## Frontends
+
+```c
+typedef struct PaykanFrontend {
+  uint32_t struct_size;
+  const char *name;        /* --frontend=<name> */
+  const char *description; /* --list-frontends; may be NULL */
+  void *data;              /* passed back to every callback */
+  int (*parse)(void *data, PaykanSession *session,
+               const PaykanFrontendInput *input, PaykanFrontendOutput *output);
+  int (*dump_tokens)(void *data, PaykanSession *session,
+                     const PaykanFrontendInput *input); /* may be NULL */
+} PaykanFrontend;
+```
+
+- **`parse`** (required): parse `input->source` (the text of
+  `input->filename`; don't read the file) and fill `output`:
+  - on success: return `PAYKAN_OK` with `error_count = 0` and `ast` /
+    `ast_size` the program in the
+    [AST interchange format](ast-format.md), in memory `paykan` releases with
+    `free_memory` once it has read it;
+  - on syntax errors: report each with `host->diagnostic` (file `NULL`, the
+    line and column in the source; `paykan` prints them with the source line
+    and a caret, like its own frontend's) and set `error_count`; `ast` may be
+    `NULL`, and is not used;
+  - return an error code when the frontend itself failed.
+
+  `paykan` reads and checks the AST before Sema
+  ([`ast-format.md`](ast-format.md#3-what-the-reader-checks)). Imported
+  modules are parsed with the same frontend.
+- **`dump_tokens`** (optional): `--dump-tokens`, one token per line through
+  `host->write_output`. `NULL` means not supported.
+- **Grammar and limits.** The frontend implements
+  [`../grammar.md`](../grammar.md) and must build exactly the AST the
+  recursive-descent frontend builds; input nested deeper than
+  `input->max_nesting` (512) is rejected with
+  `nesting too deep (more than 512 levels)`.
+
+`PaykanFrontendInput`: `filename`, `source` / `source_size` (NUL-terminated),
+`ast_format_version` (`PAYKAN_AST_FORMAT_VERSION`, the format `paykan`
+reads), `max_nesting`, and `trace_parsing` / `trace_scanning`
+(`--trace-parser` / `--trace-scanner`, for a frontend with debug traces,
+written with `host->write_output`, which goes to standard error during
+`parse`). `PaykanFrontendOutput` is allocated by `paykan`, which sets its
+`struct_size`; the plugin fills `ast`, `ast_size` and `error_count`.
 
 ## Backends
 
@@ -130,8 +182,8 @@ session of the callback that is running and valid only during it.
 | Function | Meaning |
 |---|---|
 | `api_version`, `toolchain_version` | the running `paykan`'s plugin API version and PaykanLang version (fields) |
-| `diagnostic(session, level, file, line, column, message, size)` | report a diagnostic. `level` is `PAYKAN_DIAG_ERROR` / `_WARNING` / `_NOTE`; `file` `NULL` means the input file; `line`/`column` are 1-based, 0 when unknown. Errors become the call's failure message; warnings and notes print at once, as `file:line:col: warning: message` |
-| `write_output(session, data, size)` | append bytes to the output: the `--emit-source` stream, or standard output in `run` |
+| `diagnostic(session, level, file, line, column, message, size)` | report a diagnostic. `level` is `PAYKAN_DIAG_ERROR` / `_WARNING` / `_NOTE`; `file` `NULL` means the input file; `line`/`column` are 1-based, 0 when unknown. In a backend, errors become the call's failure message and warnings and notes print at once, as `file:line:col: warning: message`; in a frontend, every diagnostic prints at once with the source line and a caret |
+| `write_output(session, data, size)` | append bytes to the output: the `--emit-source` stream, standard output in `run`, the token listing in `dump_tokens`, standard error in `parse` |
 | `allocate(size)`, `deallocate(ptr)` | the C library's `malloc` / `free`, for the plugin's own use |
 | `log(level, message, size)` | a line on standard error, `paykan: plugin: <message>`; `PAYKAN_LOG_DEBUG` messages appear only with `PAYKAN_PLUGIN_DEBUG=1` |
 | `runtime_library(session)`, `runtime_include_dir(session)` | the Paykan runtime (`libpaykan_runtime.a`, the directory of `Runtime.h`), found as the built-in backends find it (`$PAYKAN_RUNTIME_DIR`, then the installation); `NULL` with a diagnostic if there is none |
@@ -177,4 +229,5 @@ paykan --plugin=./libmine.so --backend=mine --emit-source program.pkn
 ```
 
 [`src/Backends/PrintPIR`](../../src/Backends/PrintPIR) is this plugin with comments and
-a CMake build.
+a CMake build. [`src/Frontends/ASTText`](../../src/Frontends/ASTText) is the
+smallest frontend (its source language is the AST format itself).

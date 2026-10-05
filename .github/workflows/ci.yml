@@ -346,7 +346,8 @@ jobs:
         run: ctest --test-dir build --output-on-failure --parallel 4
 
       # Plugins load into the INSTALLED paykan with no rebuild (#141): the C
-      # example backend is built against the installation alone,
+      # and the C example backend and frontend are built
+      # against the installation alone,
       # then loaded with --plugin, from $PAYKAN_PLUGIN_PATH and from the
       # installation's plugin directory, with PaykanLang's build tree deleted
       # and its source tree moved away.
@@ -358,8 +359,9 @@ jobs:
           cmake --install build --prefix "$prefix"
           mkdir -p "$ex"
           cp -R src/Backends/PrintPIR "$ex/print-pir"
+          cp -R src/Frontends/ASTText "$ex/ast-text-frontend"
           cp samples/codegen/01_literals.pkn "$ex/hello.pkn"
-          for p in print-pir; do
+          for p in print-pir ast-text-frontend; do
             cmake -S "$ex/$p" -B "$ex/build-$p" -G Ninja -DCMAKE_PREFIX_PATH="$prefix"
             cmake --build "$ex/build-$p"
           done
@@ -380,13 +382,17 @@ jobs:
           PAYKAN_PLUGIN_PATH="$ex/build-print-pir" "$paykan" --backend=print-pir \
             --emit-source "$ex/hello.pkn" | diff driver.pir -
           # 3. installed into the plugin directory, the plugin builds gone
-          for p in print-pir; do
+          for p in print-pir ast-text-frontend; do
             cmake --install "$ex/build-$p"
             rm -rf "$ex/build-$p"
           done
           ls "$prefix"/lib/paykan/plugins/*/
           "$paykan" --version
           "$paykan" --backend=print-pir --emit-source "$ex/hello.pkn" | diff driver.pir -
+          # A program given as an AST, through the frontend plugin.
+          mkdir -p "$ex/ast"
+          "$paykan" --emit-ast "$ex/hello.pkn" > "$ex/ast/hello.pkn"
+          "$paykan" --frontend=ast-text --emit-pir "$ex/ast/hello.pkn" | diff driver.pir -
           if "$paykan" --no-plugins --list-backends | grep print-pir; then
             echo "error: --no-plugins still loads the installed plugins"
             exit 1

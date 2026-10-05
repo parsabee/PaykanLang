@@ -24,8 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Backend.h` must be ported to `plugin_api.h` (see
   `docs/writing-a-backend.md`). `src/Backends/PrintPIR` is now a plain-C plugin. The
   static C++ path (`paykan_add_driver`) stays as an advanced option, and the
-  built-in plugins keep their in-process C++ interface. Frontends are not
-  loadable yet (`paykan_add_frontend_plugin()` is unchanged).
+  built-in plugins keep their in-process C++ interface.
+- **Frontend plugins are loadable modules too (#141).** A frontend plugin
+  receives the source text through the same C interface and returns the
+  program as text in the new, versioned **AST interchange format**
+  (`docs/plugins/ast-format.md`, an S-expression form with source
+  locations), which `paykan` reads, checks and hands to Sema; syntax errors
+  go through the host's diagnostics. `paykan_add_frontend_plugin()` now
+  builds such a module instead of a static library linked with
+  `Paykan::frontend`, and `paykan_add_frontend_tests()` takes the plugin as
+  `PLUGIN <target-or-file>` (instead of `PLUGINS <lib>...`): the suites load
+  it with the installed `paykan`'s loader, and a new
+  `InstalledPaykan.<frontend>` test runs the installed `paykan` with only
+  the plugin loaded over the samples corpus.
 
 - **The Bison frontend moved to its own repository (#60).** The Bison/Flex
   frontend is now the out-of-tree plugin
@@ -61,7 +72,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The CMake package adds `Paykan::plugin_api`, `PAYKAN_PLUGIN_API_VERSION`,
   `PAYKAN_PLUGIN_INSTALL_DIR`, `PAYKAN_EXECUTABLE`,
   `paykan_install_plugin()` and `paykan_check_plugin_built_with()`.
-  New docs: `docs/plugins/` (overview, the C API, PIR for backends).
+  New docs: `docs/plugins/` (overview, the C API, the AST format, PIR for
+  backends).
+- **The AST interchange format (#141)**: its writer and reader in the core
+  (`paykan/ast/Interchange.h`, `Paykan::ast_interchange`), `paykan
+  --emit-ast` to print a program in it, and `src/Frontends/ASTText`, a
+  plain-C frontend whose source language is the format itself. The writer
+  and reader round-trip the AST of every program in the samples corpus.
+- The installed static libraries are built as position-independent code, so
+  a plugin may link them into its module (a C++ frontend reusing the core's
+  AST and writer internally).
 - **Plugin compatibility check (#103).** Every frontend and backend plugin
   records the PaykanLang version it was built with:
   `PAYKAN_REGISTER_FRONTEND` / `PAYKAN_REGISTER_BACKEND` capture

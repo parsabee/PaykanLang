@@ -11,6 +11,10 @@
  * against PaykanLang at all; everything it needs from paykan comes through
  * the PaykanHost table it is handed.
  *
+ * A plugin provides frontends (source text in, the program out as text in
+ * the AST interchange format, docs/plugins/ast-format.md) and backends (the
+ * program in as PIR text, docs/pir.md, and an artifact out).
+ *
  * A plugin is a shared library (.so on Linux, .dylib on macOS) exporting one
  * function:
  *
@@ -81,6 +85,10 @@ extern "C" {
 /* The version of the PIR text form a backend receives (docs/pir.md). */
 #define PAYKAN_PIR_TEXT_VERSION 1
 
+/* The version of the AST interchange format a frontend returns
+ * (docs/plugins/ast-format.md): the number after `paykan-ast`. */
+#define PAYKAN_AST_FORMAT_VERSION 1
+
 /* The name of the entry point, for hosts and tests that look it up. */
 #define PAYKAN_PLUGIN_ENTRY_POINT "paykan_plugin_init"
 
@@ -135,7 +143,9 @@ typedef struct PaykanHost {
                      size_t message_size);
 
   /* Append bytes to the session's output: the stream emit(SOURCE) writes
-   * to, or paykan's standard output in run().  Returns PAYKAN_OK. */
+   * to, paykan's standard output in run(), the token listing in a
+   * frontend's dump_tokens(), and standard error in a frontend's parse()
+   * (for debug traces).  Returns PAYKAN_OK. */
   int (*write_output)(PaykanSession *session, const void *data, size_t size);
 
   /* An allocator for the plugin's own use (the C library's malloc/free).
@@ -235,6 +245,64 @@ typedef struct PaykanBackend {
              int *exit_code);
 } PaykanBackend;
 
+/* -- Frontends ------------------------------------------------------------- */
+
+/* The file a frontend parses. */
+typedef struct PaykanFrontendInput {
+  uint32_t struct_size;
+  /* The file's name, for locations and diagnostics; the frontend does not
+   * read the file. */
+  const char *filename;
+  /* The file's text; NUL-terminated at source[source_size]. */
+  const char *source;
+  size_t source_size;
+  /* PAYKAN_AST_FORMAT_VERSION of the AST paykan reads. */
+  uint32_t ast_format_version;
+  /* The deepest nesting a frontend accepts: input nested deeper is rejected
+   * with "nesting too deep (more than <max_nesting> levels)"
+   * (docs/grammar.md section 9). */
+  uint32_t max_nesting;
+  /* --trace-parser / --trace-scanner, for a frontend with debug traces
+   * (written with host->write_output). */
+  uint32_t trace_parsing;
+  uint32_t trace_scanning;
+} PaykanFrontendInput;
+
+/* What parse() returns.  paykan allocates it and sets struct_size (the
+ * plugin writes only the fields it knows); the plugin fills the rest. */
+typedef struct PaykanFrontendOutput {
+  uint32_t struct_size;
+  /* The program in the AST interchange format: allocated by the plugin,
+   * released by paykan with PaykanPlugin.free_memory once it has read it.
+   * May be NULL when error_count > 0. */
+  char *ast;
+  size_t ast_size;
+  /* The number of syntax errors, each reported with host->diagnostic.  The
+   * parse succeeded iff it returns PAYKAN_OK with error_count == 0 (and then
+   * ast is required); after errors the AST is not used. */
+  uint32_t error_count;
+} PaykanFrontendOutput;
+
+typedef struct PaykanFrontend {
+  uint32_t struct_size;
+  /* The name users select it by (--frontend=<name>). */
+  const char *name;
+  /* One line for --list-frontends and --version; may be NULL. */
+  const char *description;
+  /* Passed back as the first argument of every callback. */
+  void *data;
+  /* Parse input->source into output (see PaykanFrontendOutput).  Returns
+   * PAYKAN_OK, or an error code when the frontend failed (with the reason
+   * reported as a diagnostic). */
+  int (*parse)(void *data, PaykanSession *session,
+               const PaykanFrontendInput *input, PaykanFrontendOutput *output);
+  /* --dump-tokens: write the token stream of input->source with
+   * host->write_output, one token per line.  May be NULL (not supported).
+   * Returns PAYKAN_OK or an error code. */
+  int (*dump_tokens)(void *data, PaykanSession *session,
+                     const PaykanFrontendInput *input);
+} PaykanFrontend;
+
 /* -- The plugin: what paykan_plugin_init returns --------------------------- */
 
 typedef struct PaykanPlugin {
@@ -247,13 +315,18 @@ typedef struct PaykanPlugin {
   /* The plugin's own name and version, for listings; may be NULL. */
   const char *name;
   const char *version;
-  /* Releases memory the plugin returned to paykan; may be NULL when it
-   * returns none. */
+  /* Releases memory the plugin returned to paykan (a frontend's AST);
+   * required with frontends, may be NULL otherwise. */
   void (*free_memory)(void *ptr);
   /* The backends it provides: an array of num_backends PaykanBackend, all
    * with the same struct_size, which paykan steps through the array by. */
   size_t num_backends;
   const PaykanBackend *backends;
+  /* The frontends it provides, likewise.  These two fields were appended
+   * after the backends: a descriptor whose struct_size ends before them has
+   * no frontends.  A plugin provides at least one backend or frontend. */
+  size_t num_frontends;
+  const PaykanFrontend *frontends;
 } PaykanPlugin;
 
 /* The entry point's type. */

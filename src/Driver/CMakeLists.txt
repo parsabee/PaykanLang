@@ -17,6 +17,7 @@ target_link_libraries(paykan_driver
             paykan_lowering
             paykan_pir
             paykan_plugin_host
+            paykan_ast_interchange
     PRIVATE paykan_compile_options
 )
 
