@@ -53,20 +53,6 @@ if(NOT PAYKAN_VERSION IN_LIST PAYKAN_PLUGIN_COMPATIBLE_VERSIONS)
         "add it, since the built-in plugins are built with it")
 endif()
 
-# The C plugin interface carries the version too, as a literal (the header
-# is usable without anything else, so it is not generated): it must say the
-# same as project().
-file(STRINGS "${PROJECT_SOURCE_DIR}/include/paykan/plugin_api.h" _paykan_api_line
-    REGEX "^#define PAYKAN_PLUGIN_HEADER_VERSION ")
-if(NOT _paykan_api_line MATCHES "\"([^\"]*)\"")
-    message(FATAL_ERROR "include/paykan/plugin_api.h: no PAYKAN_PLUGIN_HEADER_VERSION")
-endif()
-if(NOT CMAKE_MATCH_1 STREQUAL PAYKAN_VERSION)
-    message(FATAL_ERROR
-        "include/paykan/plugin_api.h: PAYKAN_PLUGIN_HEADER_VERSION is "
-        "\"${CMAKE_MATCH_1}\" but PaykanLang is ${PAYKAN_VERSION}; update it")
-endif()
-
 file(STRINGS "${PROJECT_SOURCE_DIR}/include/paykan/plugin_api.h" _paykan_api_line
     REGEX "^#define PAYKAN_PLUGIN_API_VERSION ")
 if(NOT _paykan_api_line MATCHES "VERSION ([0-9]+)")

@@ -4,7 +4,8 @@
  * The PaykanLang plugin API: the C interface between `paykan` and a plugin
  * loaded at run time (docs/plugins/plugin-api.md is the reference).
  *
- * Pure C11, no other PaykanLang header needed: a plugin can be written in
+ * Pure C11, needing no other PaykanLang header but the generated
+ * paykan/plugin_api_version.h installed next to it: a plugin can be written in
  * any language that can export a C function and lay out C structs (C, C++
  * with any compiler, Rust, Zig, Go with cgo, ...).  A plugin does not link
  * against PaykanLang at all; everything it needs from paykan comes through
@@ -56,6 +57,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* PAYKAN_PLUGIN_HEADER_VERSION, generated from the build's version and
+ * installed next to this header. */
+#include "paykan/plugin_api_version.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -67,10 +72,6 @@ extern "C" {
  * this one).  It is bumped whenever a struct or callback below changes
  * incompatibly; appending a field is compatible. */
 #define PAYKAN_PLUGIN_API_VERSION 1
-
-/* The PaykanLang version this header belongs to, pre-release label
- * included.  The build checks that it equals the toolchain's version. */
-#define PAYKAN_PLUGIN_HEADER_VERSION "0.1.0-alpha"
 
 /* The PaykanLang version a plugin declares it is built with (#103): the
  * version of this header unless the build says otherwise

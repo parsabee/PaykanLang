@@ -74,7 +74,8 @@ so an array of structs from a newer header (with fields appended) reads
 correctly.
 
 `PAYKAN_PLUGIN_BUILD_VERSION` is `PAYKAN_PLUGIN_HEADER_VERSION`, the
-PaykanLang version of the header, unless the build defines it
+PaykanLang version of the header (generated from the build's version into
+`paykan/plugin_api_version.h`, installed next to `plugin_api.h`), unless the build defines it
 (`paykan_add_backend_plugin(... BUILT_WITH <version>)` does).
 
 ## Frontends

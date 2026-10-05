@@ -30,4 +30,5 @@ target_link_libraries(paykan_plugin
 add_library(paykan_plugin_api INTERFACE)
 target_include_directories(paykan_plugin_api INTERFACE
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${PAYKAN_GENERATED_INCLUDE_DIR}>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)

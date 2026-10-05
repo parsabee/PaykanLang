@@ -7,7 +7,8 @@
 # Installed layout (relative to the prefix):
 #   bin/paykan                        the driver with the built-in plugins
 #   lib/paykan/plugins/<version>/     the system plugin directory (empty)
-#   include/paykan/plugin_api.h       the C plugin interface
+#   include/paykan/plugin_api.h       the C plugin interface (+ the generated
+#                                     plugin_api_version.h it includes)
 #   lib/libpaykan_*.a                 core (incl. lowering), driver, runtime and plugin libraries
 #   lib/cmake/Paykan/                 PaykanConfig.cmake + exported targets
 #   include/paykan/Runtime.h          the runtime ABI (C)
@@ -98,6 +99,7 @@ install(TARGETS ${PAYKAN_EXPORT_TARGETS}
 )
 install(FILES ${PROJECT_SOURCE_DIR}/src/Runtime/Runtime.h
               ${PROJECT_SOURCE_DIR}/include/paykan/plugin_api.h
+              ${PAYKAN_GENERATED_INCLUDE_DIR}/paykan/plugin_api_version.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/paykan
 )
 # The system plugin directory, empty: `paykan` loads every plugin in it
@@ -113,6 +115,7 @@ install(FILES ${PAYKAN_GENERATED_INCLUDE_DIR}/Version.h
     DESTINATION ${PAYKAN_INSTALL_COMPILER_INCLUDEDIR}
 )
 install(FILES ${PAYKAN_GENERATED_INCLUDE_DIR}/paykan/PluginCompat.h
+              ${PAYKAN_GENERATED_INCLUDE_DIR}/paykan/plugin_api_version.h
     DESTINATION ${PAYKAN_INSTALL_COMPILER_INCLUDEDIR}/paykan
 )
 install(EXPORT PaykanTargets
