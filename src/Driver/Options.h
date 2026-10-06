@@ -15,6 +15,13 @@ namespace paykan::driver {
 enum class Command {
   Run,   // `paykan [run] file.pkn args...`: compile and execute (default)
   Build, // `paykan build file.pkn -o out`: compile to an executable
+  Pkm,   // `paykan pkm dump|check file.pkm`: inspect a module file
+};
+
+/// The verb of `paykan pkm`.
+enum class PkmVerb {
+  Dump,  // print the file (pkm::dump) and the PIR text of its CODE
+  Check, // print the verdict against this toolchain; exit 0 when usable
 };
 
 /// The optimisation level of `paykan build` and `paykan run` (and --emit-*)
@@ -49,8 +56,21 @@ struct Options {
   /// the user and system directories); --plugin files are still loaded.
   bool NoPlugins = false;
 
-  /// -o <file>: the output of `build`.
+  /// -o <file>: the output of `build` or `--emit-pkm`.
   std::string OutputPath;
+
+  /// `paykan pkm <verb> <file>`: the verb and the `--section=<name>` of
+  /// `dump` ("" = all).
+  PkmVerb Verb = PkmVerb::Dump;
+  std::string PkmSection;
+
+  /// --module-path=<dir> (repeatable): where prebuilt `.pkm` modules are
+  /// looked for after the source tree, before $PAYKAN_MODULE_PATH.
+  std::vector<std::string> ModulePath;
+  bool EmitPkm = false;        // --emit-pkm: write the module's .pkm, stop
+  bool RebuildModules = false; // --rebuild-modules: ignore cache entries
+  bool NoModuleCache = false;  // --no-module-cache: never read or write it
+  bool Verbose = false;        // --verbose: one line per import on stderr
 
   bool DumpAST = false;       // --dump-ast
   bool EmitAST = false;       // --emit-ast: the AST interchange format
@@ -88,8 +108,9 @@ struct ParseResult {
 /// `-dump-ast` are the same), `-O<n>` and `-O=<n>` set the optimisation level,
 /// `--frontend=<name>` / `--backend=<name>` (or with a space) select the
 /// plugins, `-o <file>` names the output, and `--` ends option processing.
-/// The first positional argument may be a command word (`run`, `build`); the
-/// next is the source file, and everything after it belongs to the program.
+/// The first positional argument may be a command word (`run`, `build`,
+/// `pkm`); the next is the source file (after `pkm`: the verb, then the
+/// module file), and everything after it belongs to the program.
 ParseResult parseCommandLine(int argc, const char *const *argv);
 
 /// Print the usage text.

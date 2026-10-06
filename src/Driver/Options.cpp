@@ -30,12 +30,21 @@ constexpr Flag kFlags[] = {
      "Write the backend's source output (C, LLVM IR, ...) to stdout"},
     {"emit-pir", &Options::EmitPIR,
      "Print the program's PIR (the backend-neutral IR) and exit"},
+    {"emit-pkm", &Options::EmitPkm,
+     "Write the module's .pkm file (-o <file>, or next to the input) and "
+     "exit"},
     {"list-frontends", &Options::ListFrontends,
      "List the available frontends and exit"},
     {"list-backends", &Options::ListBackends,
      "List the available backends and exit"},
     {"no-plugins", &Options::NoPlugins,
      "Don't search the plugin directories (--plugin files still load)"},
+    {"rebuild-modules", &Options::RebuildModules,
+     "Ignore the .pkm module cache entries (they are rewritten)"},
+    {"no-module-cache", &Options::NoModuleCache,
+     "Never read or write the .pkm module cache"},
+    {"verbose", &Options::Verbose,
+     "Report how each imported module was resolved (on stderr)"},
     {"track-heap", &Options::TrackHeap,
      "Track runtime heap allocations and dump statistics (incl. leaks) at "
      "exit"},
@@ -101,6 +110,7 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
   Options &o = r.Opts;
   bool optionsEnded = false;
   bool sawCommand = false;
+  bool sawVerb = false;
   bool emitLLVM = false;
   bool emitC = false;
 
@@ -108,8 +118,9 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
     std::string_view arg = argv[i];
 
     // For `run`, everything after the source file belongs to the program.
-    // `build` has no program arguments, so its options may follow the file.
-    if (!o.InputFilename.empty() && o.Cmd != Command::Build) {
+    // `build`, `pkm` and `--emit-pkm` have no program arguments, so their
+    // options may follow the file.
+    if (!o.InputFilename.empty() && o.Cmd == Command::Run && !o.EmitPkm) {
       o.ProgramArgs.emplace_back(arg);
       continue;
     }
@@ -120,16 +131,31 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
         optionsEnded = true;
         continue;
       }
-      if (!sawCommand && (arg == "run" || arg == "build")) {
-        o.Cmd = arg == "build" ? Command::Build : Command::Run;
+      if (!sawCommand && (arg == "run" || arg == "build" || arg == "pkm")) {
+        o.Cmd = arg == "build" ? Command::Build
+                : arg == "pkm" ? Command::Pkm
+                               : Command::Run;
         sawCommand = true;
         continue;
       }
       sawCommand = true;
+      if (o.Cmd == Command::Pkm && !sawVerb) {
+        sawVerb = true;
+        if (arg == "dump") {
+          o.Verb = PkmVerb::Dump;
+        } else if (arg == "check") {
+          o.Verb = PkmVerb::Check;
+        } else {
+          r.Error = "unknown pkm command '" + std::string(arg) +
+                    "' (expected `dump` or `check`)";
+          return r;
+        }
+        continue;
+      }
       if (!o.InputFilename.empty()) {
-        r.Error = "unexpected argument '" + std::string(arg) +
-                  "' (`build` takes one source file and no program "
-                  "arguments)";
+        r.Error = "unexpected argument '" + std::string(arg) + "' (`" +
+                  (o.Cmd == Command::Pkm ? "pkm" : "build") +
+                  "` takes one file and no program arguments)";
         return r;
       }
       o.InputFilename = std::string(arg);
@@ -160,8 +186,16 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
       o.Plugins.push_back(std::move(plugin));
       continue;
     }
+    if (std::string dir;
+        valueOption(name, "module-path", i, argc, argv, dir, r.Error)) {
+      if (!r.Error.empty())
+        return r;
+      o.ModulePath.push_back(std::move(dir));
+      continue;
+    }
     if (valueOption(name, "frontend", i, argc, argv, o.Frontend, r.Error) ||
         valueOption(name, "backend", i, argc, argv, o.Backend, r.Error) ||
+        valueOption(name, "section", i, argc, argv, o.PkmSection, r.Error) ||
         valueOption(name, "o", i, argc, argv, o.OutputPath, r.Error)) {
       if (!r.Error.empty())
         return r;
@@ -226,7 +260,10 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
   bool infoOnly =
       o.ShowHelp || o.ShowVersion || o.ListFrontends || o.ListBackends;
   if (!infoOnly && o.InputFilename.empty())
-    r.Error = "no source file specified";
+    r.Error = o.Cmd == Command::Pkm
+                  ? (sawVerb ? "no module file specified"
+                             : "no pkm command specified (`dump` or `check`)")
+                  : "no source file specified";
   return r;
 }
 
@@ -234,7 +271,11 @@ void printUsage(std::ostream &os, const char *argv0) {
   os << "OVERVIEW: Paykan language compiler\n\n"
      << "USAGE: " << argv0
      << " [options] [run] <source-file> [program arguments]\n"
-     << "       " << argv0 << " [options] build <source-file> -o <output>\n\n"
+     << "       " << argv0 << " [options] build <source-file> -o <output>\n"
+     << "       " << argv0
+     << " pkm dump <file.pkm> [--section=manifest|sections|iface|symidx|"
+        "code|payloads]\n"
+     << "       " << argv0 << " pkm check <file.pkm>\n\n"
      << "OPTIONS:\n";
   for (const Flag &f : kFlags)
     os << "  --" << f.Name
@@ -250,7 +291,10 @@ void printUsage(std::ostream &os, const char *argv0) {
      << "  --plugin=<file>   - Load a plugin library (repeatable; see "
         "--version for\n"
      << "                      the plugin directories)\n"
-     << "  -o <file>         - Output file of `build`\n"
+     << "  --module-path=<dir> - Look for prebuilt .pkm modules there "
+        "(repeatable;\n"
+     << "                      then $PAYKAN_MODULE_PATH)\n"
+     << "  -o <file>         - Output file of `build` or `--emit-pkm`\n"
      << "  -O<n>             - Optimization level (0-3, default "
      << kDefaultOptLevel << "; -O0 for debugging)\n"
      << "  --version, -v     - Print the version and exit\n"

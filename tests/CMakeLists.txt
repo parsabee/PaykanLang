@@ -417,6 +417,7 @@ paykan_test_suite(driver PAYKAN_TEST_SUITE_driver)
 if(PAYKAN_TEST_SUITE_driver)
 add_executable(driver_tests
     Driver/DriverTests.cpp
+    Driver/PkmTests.cpp
 )
 target_compile_definitions(driver_tests
     PRIVATE PAYKAN_BIN="$<TARGET_FILE:paykan>"
@@ -426,6 +427,7 @@ target_compile_definitions(driver_tests
 )
 target_link_libraries(driver_tests
     PRIVATE gtest_main
+            paykan_pkm
             paykan_compile_options
 )
 add_dependencies(driver_tests paykan paykan_incompatible_plugins)
