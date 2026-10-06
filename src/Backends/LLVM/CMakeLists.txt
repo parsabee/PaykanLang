@@ -1,12 +1,9 @@
-# src/Backends/LLVM/CMakeLists.txt
-# ----------------------------------------------------------------------------
 # paykan_backend_llvm -- the `llvm` backend plugin: PIR -> LLVM IR translation
 # (PIRToLLVM.cpp, with the per-module bitcode cache), the ORC JIT (JIT/)
 # and native object emission for `build` (NativeBuild.cpp, linked with the
 # shared system toolchain, src/Backends/Toolchain) behind the backend
 # interface.  Built only when `llvm` is listed
 # in PAYKAN_BACKENDS; the only consumer of LLVM in the compiler.
-# ----------------------------------------------------------------------------
 
 add_subdirectory(JIT)
 

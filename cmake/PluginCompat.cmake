@@ -1,5 +1,3 @@
-# PluginCompat.cmake
-# ----------------------------------------------------------------------------
 # The plugin compatibility list: the one place that says which plugin builds
 # this PaykanLang release accepts (#103).
 #
@@ -37,7 +35,6 @@
 #                                         (include/paykan/plugin_api.h)
 #   PAYKAN_PLUGIN_COMPATIBLE_VERSIONS_CXX -- the list as a C++ initializer
 #                                         ("a", "b") for the generated header
-# ----------------------------------------------------------------------------
 
 if(NOT PAYKAN_VERSION)
     message(FATAL_ERROR "PluginCompat.cmake: PAYKAN_VERSION is not set yet")

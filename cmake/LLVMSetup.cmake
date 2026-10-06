@@ -1,5 +1,3 @@
-# LLVMSetup.cmake
-# ----------------------------------------------------------------------------
 # Downloads pre-built LLVM binaries on first configure and caches them under
 # ${LLVM_INSTALL_DIR}.  Subsequent configures reuse the cached copy.
 #
@@ -11,7 +9,6 @@
 # Supported platforms:
 #   • macOS  ARM64 (Apple Silicon)
 #   • Linux  x86_64
-# ----------------------------------------------------------------------------
 
 # Fast path: reuse a previously-downloaded copy.
 if(EXISTS ${LLVM_INSTALL_DIR}/lib/cmake/llvm)

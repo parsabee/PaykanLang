@@ -25,9 +25,7 @@ static const char *const kNode = R"pkn(
     }
 )pkn";
 
-// ============================================================================
-// Str? — Some / None through match, println, reassignment
-// ============================================================================
+// -- Str? — Some / None through match, println, reassignment
 
 TEST(Optional, StrSomeAndNone) {
   LeakGuard g;
@@ -85,9 +83,7 @@ TEST(Optional, ClassSomeAndNone) {
   g.expectNoLeaks("ClassSomeAndNone");
 }
 
-// ============================================================================
-// Linked list: optional field, insertion, traversal via match
-// ============================================================================
+// -- Linked list: optional field, insertion, traversal via match
 
 TEST(Optional, LinkedListInsertAndTraverse) {
   LeakGuard g;
@@ -165,9 +161,7 @@ TEST(Optional, OptionalFieldReleasedByDestructor) {
   g.expectNoLeaks("OptionalFieldReleasedByDestructor");
 }
 
-// ============================================================================
-// Equality: x == None / x != None (null check), two optionals
-// ============================================================================
+// -- Equality: x == None / x != None (null check), two optionals
 
 TEST(Optional, CompareAgainstNone) {
   LeakGuard g;
@@ -238,9 +232,7 @@ TEST(Optional, CompareTwoOptionals) {
   g.expectNoLeaks("CompareTwoOptionals");
 }
 
-// ============================================================================
-// mov of an optional (present and None)
-// ============================================================================
+// -- mov of an optional (present and None)
 
 TEST(Optional, MovOptional) {
   LeakGuard g;
@@ -273,9 +265,7 @@ TEST(Optional, MovOptional) {
   g.expectNoLeaks("MovOptional");
 }
 
-// ============================================================================
-// Optional parameters / returns through free functions and methods
-// ============================================================================
+// -- Optional parameters / returns through free functions and methods
 
 TEST(Optional, ParamAndReturnThroughFunctions) {
   LeakGuard g;
@@ -337,9 +327,7 @@ TEST(Optional, MethodWithOptionalParamAndReturn) {
   g.expectNoLeaks("MethodWithOptionalParamAndReturn");
 }
 
-// ============================================================================
-// T? -> Obj coercion: an Obj slot never holds a NULL box
-// ============================================================================
+// -- T? -> Obj coercion: an Obj slot never holds a NULL box
 
 TEST(Optional, OptionalIntoObjMaterialisesNone) {
   LeakGuard g;
@@ -375,9 +363,7 @@ TEST(Optional, OptionalIntoObjMaterialisesNone) {
   g.expectNoLeaks("OptionalIntoObjMaterialisesNone");
 }
 
-// ============================================================================
-// Subclass arm on an optional subject; array subject
-// ============================================================================
+// -- Subclass arm on an optional subject; array subject
 
 TEST(Optional, SubclassArmThenInnerArm) {
   LeakGuard g;
@@ -438,9 +424,7 @@ TEST(Optional, OptionalArraySubject) {
   g.expectNoLeaks("OptionalArraySubject");
 }
 
-// ============================================================================
-// T?[] — arrays with None slots
-// ============================================================================
+// -- T?[] — arrays with None slots
 
 TEST(Optional, ArrayOfOptionals) {
   LeakGuard g;
@@ -479,9 +463,7 @@ TEST(Optional, ArrayOfOptionals) {
   g.expectNoLeaks("ArrayOfOptionals");
 }
 
-// ============================================================================
-// Ternary producing an optional; control flow out of match arms
-// ============================================================================
+// -- Ternary producing an optional; control flow out of match arms
 
 TEST(Optional, TernaryToOptional) {
   LeakGuard g;
@@ -539,9 +521,7 @@ TEST(Optional, BreakContinueReturnInsideOptionalMatch) {
   g.expectNoLeaks("BreakContinueReturnInsideOptionalMatch");
 }
 
-// ============================================================================
-// The existing Obj-subject idiom keeps working and keeps its semantics
-// ============================================================================
+// -- The existing Obj-subject idiom keeps working and keeps its semantics
 
 TEST(Optional, ObjSubjectMatchUnchanged) {
   LeakGuard g;
@@ -566,9 +546,7 @@ TEST(Optional, ObjSubjectMatchUnchanged) {
   g.expectNoLeaks("ObjSubjectMatchUnchanged");
 }
 
-// ============================================================================
-// Modules: optional signatures across an import (codegen + link + run)
-// ============================================================================
+// -- Modules: optional signatures across an import (codegen + link + run)
 
 static std::string writeFile(const std::string &dir, const std::string &relPath,
                              const std::string &content) {
@@ -637,10 +615,8 @@ fn main() -> int {
   g.expectNoLeaks("ImportedOptionalSignatures");
 }
 
-// ============================================================================
 // Interaction with tuples (#4): optional elements are REF slots that may hold
 // NULL; destructuring, equality, printing and arrays must stay leak-free.
-// ============================================================================
 
 TEST(OptionalTuple, TupleWithOptionalElements) {
   LeakGuard g;

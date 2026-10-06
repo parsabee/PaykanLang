@@ -18,9 +18,7 @@ static std::string wrapMain(const std::string &body) {
   return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
-// ============================================================================
-// Str<...>
-// ============================================================================
+// -- Str<...>
 
 TEST(Conversion, StrOfInt) {
   LeakGuard g;
@@ -69,9 +67,7 @@ TEST(Conversion, StrOfBoolAndChar) {
   g.expectNoLeaks("Conversion.StrOfBoolAndChar");
 }
 
-// ============================================================================
-// int <-> float
-// ============================================================================
+// -- int <-> float
 
 TEST(Conversion, IntOfFloatTruncatesTowardZero) {
   LeakGuard g;
@@ -105,9 +101,7 @@ TEST(Conversion, FloatOfIntIsTheNearestDouble) {
   g.expectNoLeaks("Conversion.FloatOfIntIsTheNearestDouble");
 }
 
-// ============================================================================
-// int <-> bool
-// ============================================================================
+// -- int <-> bool
 
 TEST(Conversion, IntOfBoolAndBoolOfInt) {
   LeakGuard g;
@@ -125,9 +119,7 @@ TEST(Conversion, IntOfBoolAndBoolOfInt) {
   g.expectNoLeaks("Conversion.IntOfBoolAndBoolOfInt");
 }
 
-// ============================================================================
-// int <-> char
-// ============================================================================
+// -- int <-> char
 
 TEST(Conversion, IntOfCharIsTheByteCode) {
   LeakGuard g;
@@ -166,9 +158,7 @@ TEST(Conversion, CharOfIntRoundTripsEveryCode) {
   g.expectNoLeaks("Conversion.CharOfIntRoundTripsEveryCode");
 }
 
-// ============================================================================
-// Conversions as ordinary expressions
-// ============================================================================
+// -- Conversions as ordinary expressions
 
 TEST(Conversion, NestedAndInsideOtherExpressions) {
   LeakGuard g;
@@ -191,9 +181,7 @@ TEST(Conversion, NestedAndInsideOtherExpressions) {
   g.expectNoLeaks("Conversion.NestedAndInsideOtherExpressions");
 }
 
-// ============================================================================
-// The boxed forms and bool<Str> (#88)
-// ============================================================================
+// -- The boxed forms and bool<Str> (#88)
 
 TEST(Conversion, StrOfBoxedSourcesFormatsLikeThePrimitive) {
   LeakGuard g;
@@ -323,9 +311,7 @@ TEST(Conversion, BoxedRoundTrips) {
   g.expectNoLeaks("Conversion.BoxedRoundTrips");
 }
 
-// ============================================================================
-// The inferred form Target(value) (#88)
-// ============================================================================
+// -- The inferred form Target(value) (#88)
 
 TEST(Conversion, InferredFormMatchesTheExplicitOne) {
   // Each line prints the inferred and the explicit form side by side.

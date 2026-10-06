@@ -7,7 +7,7 @@
 
 using namespace paykan::test;
 
-// -- Well-formed moves -------------------------------------------------------
+// -- Well-formed moves
 
 TEST(Mov, MovePrimitiveOk) {
   auto r = semaCheck(R"(
@@ -44,7 +44,7 @@ TEST(Mov, MoveTemporaryOk) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// -- Use-after-move errors ---------------------------------------------------
+// -- Use-after-move errors
 
 TEST(Mov, UseAfterMoveRead) {
   auto r = semaCheck(R"(
@@ -84,7 +84,7 @@ TEST(Mov, DoubleMoveRejected) {
   EXPECT_NE(r.Diagnostics.find("moved variable 's'"), std::string::npos);
 }
 
-// -- Revival on re-assignment ------------------------------------------------
+// -- Revival on re-assignment
 
 TEST(Mov, ReassignRevivesVariable) {
   auto r = semaCheck(R"(
@@ -99,7 +99,7 @@ TEST(Mov, ReassignRevivesVariable) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// -- Aggregate-slot moves are rejected ---------------------------------------
+// -- Aggregate-slot moves are rejected
 
 TEST(Mov, MoveMemberVariableRejected) {
   auto r = semaCheck(R"(
@@ -128,7 +128,7 @@ TEST(Mov, MoveArrayElementRejected) {
   EXPECT_NE(r.Diagnostics.find("array element"), std::string::npos);
 }
 
-// -- `mov self` is rejected --------------------------------------------------
+// -- `mov self` is rejected
 
 TEST(Mov, MoveSelfRejected) {
   auto r = semaCheck(R"(
@@ -163,7 +163,7 @@ TEST(Mov, MoveParameterOk) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// -- Loops: back-edge soundness ----------------------------------------------
+// -- Loops: back-edge soundness
 
 TEST(Mov, MoveInLoopDeclaredOutsideRejected) {
   auto r = semaCheck(R"(
@@ -270,7 +270,7 @@ TEST(Mov, MoveBeforeLoopStaysMovedInsideRejected) {
   EXPECT_NE(r.Diagnostics.find("moved variable 's'"), std::string::npos);
 }
 
-// -- Branches: per-path move state -------------------------------------------
+// -- Branches: per-path move state
 
 TEST(Mov, MoveInThenDoesNotPoisonElse) {
   auto r = semaCheck(R"(
@@ -352,7 +352,7 @@ TEST(Mov, MoveRevivedInOnlyThenBranchRejected) {
   EXPECT_NE(r.Diagnostics.find("moved variable 's'"), std::string::npos);
 }
 
-// -- Ternary expression: then/else are sibling branches ----------------------
+// -- Ternary expression: then/else are sibling branches
 
 TEST(Mov, TernaryMoveInThenDoesNotPoisonElse) {
   // The else branch can only run instead of the then branch, so a `mov` in
@@ -514,7 +514,7 @@ TEST(Mov, TernaryMoveInsideStatementBranchIsolated) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// -- Short-circuit `&&` / `||`: the RHS is a conditional branch ---------------
+// -- Short-circuit `&&` / `||`: the RHS is a conditional branch
 
 TEST(Mov, AndMoveInLhsVisibleInRhs) {
   // The LHS always runs before the RHS.
@@ -663,7 +663,7 @@ TEST(Mov, AndRhsMoveDoesNotPoisonSiblingTernaryBranch) {
   EXPECT_TRUE(r2.Ok) << r2.Diagnostics;
 }
 
-// -- Call arguments are evaluated left to right ------------------------------
+// -- Call arguments are evaluated left to right
 
 TEST(Mov, MoveThenReuseInSameCallRejected) {
   auto r = semaCheck(R"(
@@ -690,7 +690,7 @@ TEST(Mov, UseThenMoveInSameCallOk) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// -- `mov` keeps the contextual type of its operand (#119) -------------------
+// -- `mov` keeps the contextual type of its operand (#119)
 
 TEST(Mov, MovNoneIntoAnOptionalSlotOk) {
   auto r = semaCheck(R"(

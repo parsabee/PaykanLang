@@ -1,5 +1,3 @@
-# PaykanTests.cmake
-# ----------------------------------------------------------------------------
 # Which test suites the build includes.  None by default: a plain configure
 # builds only the compiler and downloads nothing.
 #
@@ -22,7 +20,6 @@
 #                                         tests/CMakeLists.txt; <out-var> is
 #                                         TRUE when the build includes it
 #   paykan_check_test_suites()            every suite was declared
-# ----------------------------------------------------------------------------
 
 set(PAYKAN_TEST_SUITES_FILE "${PROJECT_SOURCE_DIR}/tests/suites.json")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS

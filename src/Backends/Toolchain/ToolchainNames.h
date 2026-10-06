@@ -9,7 +9,7 @@
 
 namespace paykan::toolchain::tcnames {
 
-// -- The C compiler / linker --------------------------------------------------
+// -- The C compiler / linker
 
 inline constexpr const char *kEnvCC = "CC";     ///< overrides the compiler
 inline constexpr const char *kDefaultCC = "cc"; ///< when $CC is unset
@@ -21,7 +21,7 @@ inline constexpr const char *kFlagLibm = "-lm";
 inline constexpr const char *kCExt = ".c";
 inline constexpr const char *kObjExt = ".o";
 
-// -- The Paykan runtime -------------------------------------------------------
+// -- The Paykan runtime
 
 /// The runtime header the generated C includes (CNames.h's kRuntimeH).
 inline constexpr const char *kRuntimeHeader = "Runtime.h";

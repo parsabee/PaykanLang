@@ -149,7 +149,7 @@ TEST(PluginRegistry, TheFirstRegistrationOfANameWins) {
   EXPECT_EQ(reg.entries().size(), 3u);
 }
 
-// -- Loaded plugins: entries the plugin loader registers ----------------------
+// -- Loaded plugins: entries the plugin loader registers
 
 namespace {
 /// Another interface, so these entries don't disturb the ones above.

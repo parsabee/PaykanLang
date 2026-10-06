@@ -1,5 +1,3 @@
-# PaykanTestSupport.cmake
-# ----------------------------------------------------------------------------
 # Installs the test support for out-of-tree frontends, so that a frontend
 # plugin built against an installed Paykan runs the same suites as the
 # in-tree frontend (docs/writing-a-frontend-plugin.md):
@@ -21,7 +19,6 @@
 # -DPAYKAN_INSTALL_TEST_SUPPORT=OFF (the option is in the top-level
 # CMakeLists.txt) leaves all of it out.  Included after PaykanExport
 # (PAYKAN_INSTALL_CMAKEDIR).
-# ----------------------------------------------------------------------------
 
 if(NOT PAYKAN_INSTALL_TEST_SUPPORT)
     return()

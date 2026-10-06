@@ -68,7 +68,7 @@ private:
   std::unique_ptr<llvm::Module> M;
   size_t Index;
 
-  // -- Names -----------------------------------------------------------------
+  // -- Names
 
   /// The LLVM name of a symbol defined by @p module.  No program symbol
   /// keeps its bare name, which could clash with (and, when external,
@@ -134,7 +134,7 @@ private:
     return mangle(module, isMain, name);
   }
 
-  // -- Types -----------------------------------------------------------------
+  // -- Types
 
   llvm::Type *llvmType(Type t) {
     switch (t) {
@@ -215,7 +215,7 @@ private:
                      {llvm::PointerType::getUnqual(Ctx)});
   }
 
-  // -- Module-level declarations ---------------------------------------------
+  // -- Module-level declarations
 
   /// A private constant global whose address is not significant (so the
   /// optimiser and the linker may merge identical ones), aligned to
@@ -281,7 +281,7 @@ private:
     return nullptr;
   }
 
-  // -- Definitions -----------------------------------------------------------
+  // -- Definitions
 
   Status defineModule(const Module &module, bool isMain) {
     for (const Class &c : module.Classes) {
@@ -315,7 +315,7 @@ private:
     return Status::ok();
   }
 
-  // -- Function bodies -------------------------------------------------------
+  // -- Function bodies
 
   struct FunctionState {
     const Module *Mod = nullptr;
@@ -497,7 +497,7 @@ private:
     B.SetInsertPoint(exitBB);
   }
 
-  // -- Instructions ----------------------------------------------------------
+  // -- Instructions
 
   const Class *lookupClass(const std::string &name, std::string &symbol) {
     const Class *c = S->Mod->findClass(name);
@@ -821,7 +821,7 @@ translateProgram(const Program &program, llvm::LLVMContext &ctx,
   return linkParts(program, std::move(parts), moduleName);
 }
 
-// -- Bitcode cache -----------------------------------------------------------
+// -- Bitcode cache
 //
 // An imported module's LLVM IR depends only on its PIR text (which spells out
 // every layout and signature it uses from other modules) and on the compiler

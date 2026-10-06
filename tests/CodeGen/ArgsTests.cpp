@@ -8,9 +8,7 @@
 
 using namespace paykan::test;
 
-// ---------------------------------------------------------------------------
-// main(args: Str[]) — program argument passing
-// ---------------------------------------------------------------------------
+// -- main(args: Str[]) — program argument passing
 
 TEST(Args, NoArgVariantStillRuns) {
   auto r = compileAndRun(R"(

@@ -12,9 +12,7 @@ static std::string wrapMain(const std::string &body) {
   return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
-// ============================================================================
-// Array declarations
-// ============================================================================
+// -- Array declarations
 
 TEST(Array, IntArrayLiteral) {
   auto r = semaCheck(wrapMain("a: int[] = [1, 2, 3];"));
@@ -46,9 +44,7 @@ TEST(Array, ObjArrayEmpty) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// ============================================================================
-// Type mismatches
-// ============================================================================
+// -- Type mismatches
 
 TEST(Array, WrongElementType) {
   // Mixing int and Str in a literal should fail type checking.
@@ -72,9 +68,7 @@ TEST(Array, DeclTypeMismatch) {
   EXPECT_FALSE(r.Ok);
 }
 
-// ============================================================================
-// Subscript access
-// ============================================================================
+// -- Subscript access
 
 TEST(Array, IntSubscriptRead) {
   auto r = semaCheck(wrapMain(R"(
@@ -117,9 +111,7 @@ TEST(Array, SubscriptAssignWrongType) {
   EXPECT_FALSE(r.Ok);
 }
 
-// ============================================================================
-// Array in function parameters and return types
-// ============================================================================
+// -- Array in function parameters and return types
 
 TEST(Array, ArrayParam) {
   auto r = semaCheck(R"(
@@ -166,9 +158,7 @@ TEST(Array, WrongArrayParamType) {
   EXPECT_FALSE(r.Ok);
 }
 
-// ============================================================================
-// push / len / pop method type-checking
-// ============================================================================
+// -- push / len / pop method type-checking
 
 TEST(Array, PushCorrectType) {
   auto r = semaCheck(wrapMain(R"(
@@ -186,9 +176,7 @@ TEST(Array, LenReturnsInt) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// ============================================================================
-// Str indexing type
-// ============================================================================
+// -- Str indexing type
 
 TEST(Array, StrIndexIsChar) {
   // Assigning s[i] to Str should fail — the result is char.
@@ -199,9 +187,7 @@ TEST(Array, StrIndexIsChar) {
   EXPECT_FALSE(r.Ok);
 }
 
-// ============================================================================
-// Array equality (== / != lower to the virtual `equals` — identity semantics)
-// ============================================================================
+// -- Array equality: == / != are the virtual `equals`, identity semantics
 
 TEST(Array, IntArrayEqualityOk) {
   auto r = semaCheck(wrapMain(R"(
@@ -273,9 +259,7 @@ TEST(Array, ArrayVsScalarEqualityRejected) {
   EXPECT_FALSE(r.Ok);
 }
 
-// ============================================================================
-// Canonical (interned) array types
-// ============================================================================
+// -- Canonical (interned) array types
 
 namespace {
 

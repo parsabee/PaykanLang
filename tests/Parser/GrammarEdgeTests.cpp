@@ -10,7 +10,7 @@
 using namespace paykan::test;
 using namespace paykan::ast;
 
-// -- Leading commas are syntax errors ----------------------------------------
+// -- Leading commas are syntax errors
 
 TEST(GrammarEdge, LeadingCommaInArgumentListRejected) {
   EXPECT_FALSE(parse("fn main() -> int { f(, 1); return 0; }").Ok);
@@ -42,7 +42,7 @@ TEST(GrammarEdge, RepeatedCommaInEnumRejected) {
   EXPECT_TRUE(parse("enum E { a } fn main() -> int { return 0; }").Ok);
 }
 
-// -- A '<' opens a generic call only when `< types > (` fits ---------------
+// -- A '<' opens a generic call only when `< types > (` fits
 
 TEST(GrammarEdge, ComparisonOfCallResultIsNotAGenericCall) {
   // `f(a < b, c) > (d)`: the ')' closes the call's own parenthesis, so the
@@ -86,7 +86,7 @@ TEST(GrammarEdge, SubscriptComparisonIsNotAGenericCall) {
       parse("fn main() -> int { x: bool = xs[a < b] > (d); return 0; }").Ok);
 }
 
-// -- The nesting limit is the same on every frontend (#120) ------------------
+// -- The nesting limit is the same on every frontend (#120)
 //
 // docs/grammar.md section 9: nesting deeper than 512 levels is rejected with
 // `nesting too deep`.  Each construct is built exactly at the limit (accepted)
@@ -236,7 +236,7 @@ TEST(GrammarEdge, PathologicalNestingIsRejectedNotCrashed) {
   }
 }
 
-// -- Error locations agree where they cheaply can (#120) ---------------------
+// -- Error locations agree where they cheaply can (#120)
 
 namespace {
 

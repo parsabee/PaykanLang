@@ -194,7 +194,7 @@ TEST(Arith, UnknownTypeAccepted) {
   EXPECT_TRUE(ok);
 }
 
-// -- String literal line discipline (B6) -------------------------------------
+// -- String literal line discipline (B6)
 // String literals are single-line: a raw newline before the closing quote is
 // rejected ("unterminated string literal") instead of being swallowed, which
 // previously desynchronized line tracking for every later diagnostic.
@@ -245,7 +245,7 @@ TEST(Arith, LineNumbersCorrectAfterStringLiterals) {
   EXPECT_EQ(r.Diags[0].Loc.getLineStart(), 4u);
 }
 
-// -- Integer literal range (B7) ----------------------------------------------
+// -- Integer literal range (B7)
 
 TEST(Arith, IntLiteralMaxAccepted) {
   auto [ok, _] = parse(R"(
@@ -326,7 +326,7 @@ TEST(Arith, IntLiteralMinAsExpressionAccepted) {
   EXPECT_TRUE(ok);
 }
 
-// -- Lexical errors (C11 + catch-all) ----------------------------------------
+// -- Lexical errors (C11 + catch-all)
 
 TEST(Arith, AmpersandIsLexicalError) {
   // '&' had a dead AMP token no grammar rule consumed; it is now a plain
@@ -362,7 +362,7 @@ TEST(Arith, UnterminatedCharLiteralRejected) {
             std::string::npos);
 }
 
-// -- Driver error plumbing (B9/B10) ------------------------------------------
+// -- Driver error plumbing (B9/B10)
 
 TEST(Arith, ParseErrorsRoutedThroughDiagEngine) {
   // With a DiagEngine attached, syntax errors come out in the rich

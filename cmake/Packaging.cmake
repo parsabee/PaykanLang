@@ -1,5 +1,3 @@
-# Packaging.cmake
-# ----------------------------------------------------------------------------
 # CPack: the Debian/Ubuntu package (`cpack -G DEB` in a configured build tree).
 #
 #   cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -25,7 +23,6 @@
 # backend runs `cc` to compile and link every program.
 #
 # Included last from the top-level CMakeLists.txt, after every install() rule.
-# ----------------------------------------------------------------------------
 
 # The license, at the path Debian policy expects.  EXCLUDE_FROM_ALL: only the
 # package installs it; a plain `cmake --install` does not.

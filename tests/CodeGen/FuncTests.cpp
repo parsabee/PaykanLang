@@ -14,9 +14,7 @@ static std::string withFns(const std::string &fns, const std::string &body) {
   return fns + "\n" + wrapMain(body);
 }
 
-// ============================================================================
-// Functions
-// ============================================================================
+// -- Functions
 
 TEST(Func, FunctionCallReturn) {
   auto r = compileAndRun(R"(
@@ -50,9 +48,7 @@ TEST(Func, StringPassToFunction) {
   EXPECT_EQ(r.StdOut, "hi\n");
 }
 
-// ============================================================================
-// Bug-fix regression tests
-// ============================================================================
+// -- Bug-fix regression tests
 
 // Fix #1 — visitVarDecl must use emitSharedNew (not inline triple).
 // A Str var declared with explicit type annotation must be usable after

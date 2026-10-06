@@ -12,9 +12,7 @@ static std::string withClasses(const std::string &classDefs,
   return classDefs + "\nfn main() -> int {\n" + body + "\n}\n";
 }
 
-// ============================================================================
-// Basic class structure
-// ============================================================================
+// -- Basic class structure
 
 TEST(Class, ClassEmpty) {
   auto r = semaCheck(withClasses("class A {}"));
@@ -68,9 +66,7 @@ TEST(Class, ImplicitObjBaseEqNeq) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// ============================================================================
-// destroy is the compiler-generated destructor: final and not callable
-// ============================================================================
+// -- destroy is the compiler-generated destructor: final and not callable
 
 TEST(Class, DestroyDirectCallRejected) {
   auto r = semaCheck(
@@ -93,9 +89,7 @@ TEST(Class, DestroyOverrideRejected) {
   EXPECT_NE(r.Diagnostics.find("destroy"), std::string::npos) << r.Diagnostics;
 }
 
-// ============================================================================
-// Duplicate definitions
-// ============================================================================
+// -- Duplicate definitions
 
 TEST(Class, DuplicateName) {
   auto r = semaCheck(withClasses("class A {}\nclass A {}"));
@@ -116,10 +110,8 @@ TEST(Class, DuplicateMethod) {
   EXPECT_FALSE(r.Ok);
 }
 
-// ============================================================================
 // Top-level names are shared with the builtins: a class name is also its
 // constructor, so it may not reuse a builtin function, builtin class, or enum.
-// ============================================================================
 
 // Regression: `class print` used to silently replace the builtin `print`.
 TEST(Class, NameShadowsBuiltinFunctionRejected) {
@@ -180,9 +172,7 @@ TEST(Class, MemberNamedLikeBuiltinOk) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// ============================================================================
-// Unknown types
-// ============================================================================
+// -- Unknown types
 
 TEST(Class, FieldUnknownType) {
   auto r = semaCheck(withClasses(R"(
@@ -205,9 +195,7 @@ TEST(Class, MethodUnknownParamType) {
   EXPECT_FALSE(r.Ok);
 }
 
-// ============================================================================
-// Field access & type errors
-// ============================================================================
+// -- Field access & type errors
 
 TEST(Class, WrongFieldAssignType) {
   auto r = semaCheck(withClasses(R"(
@@ -230,9 +218,7 @@ TEST(Class, AssignNonExistentField) {
   EXPECT_FALSE(r.Ok);
 }
 
-// ============================================================================
-// Method return type checks
-// ============================================================================
+// -- Method return type checks
 
 TEST(Class, MethodReturnTypeMismatch) {
   auto r = semaCheck(withClasses(R"(
@@ -248,9 +234,7 @@ TEST(Class, MethodMissingReturn) {
   EXPECT_FALSE(r.Ok);
 }
 
-// ============================================================================
-// Inheritance
-// ============================================================================
+// -- Inheritance
 
 TEST(Class, Inheritance) {
   auto r = semaCheck(withClasses(R"(
@@ -305,9 +289,7 @@ TEST(Class, ForwardReference) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// ============================================================================
-// __super__
-// ============================================================================
+// -- __super__
 
 TEST(Class, SuperCallValid) {
   auto r = semaCheck(withClasses(R"(
@@ -353,9 +335,7 @@ TEST(Class, SuperCallNoSuperclass) {
   EXPECT_FALSE(r.Ok);
 }
 
-// ============================================================================
-// match statement
-// ============================================================================
+// -- match statement
 
 TEST(Class, MatchBasicValid) {
   auto r = semaCheck(R"(
@@ -553,9 +533,7 @@ TEST(Class, MatchMissingWildcardNoFallthrough) {
   EXPECT_FALSE(r.Ok);
 }
 
-// ============================================================================
-// Check 3 — override signature mismatch (strict equality, no covariance)
-// ============================================================================
+// -- Check 3 — override signature mismatch (strict equality, no covariance)
 
 TEST(Class, OverrideReturnTypeMismatchRejected) {
   auto r = semaCheck(R"(
@@ -645,9 +623,7 @@ TEST(Class, OverrideThreeLevelMismatchRejected) {
   EXPECT_FALSE(r.Ok);
 }
 
-// ============================================================================
-// Check 2 — derived __init__ must call __super__() as its first statement
-// ============================================================================
+// -- Check 2 — derived __init__ must call __super__() as its first statement
 
 TEST(Class, SuperRequiredForParameterizedBase) {
   auto r = semaCheck(R"(
@@ -742,9 +718,7 @@ TEST(Class, SuperWithArgsFirstStatementAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// ============================================================================
-// Check 1 — __init__ must definitely assign every field on every path
-// ============================================================================
+// -- Check 1 — __init__ must definitely assign every field on every path
 
 TEST(Class, InitMissingFieldRejected) {
   auto r = semaCheck(R"(
@@ -869,9 +843,7 @@ TEST(Class, InitDerivedOwnFieldAloneAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// ============================================================================
-// `self` as a parameter name is rejected
-// ============================================================================
+// -- `self` as a parameter name is rejected
 
 TEST(Class, SelfParameterNameRejected) {
   auto r = semaCheck(R"(
@@ -901,9 +873,7 @@ TEST(Class, SelfParameterNameInInitRejected) {
             std::string::npos);
 }
 
-// ============================================================================
-// __init__ definite-assignment: bool-exhaustive match
-// ============================================================================
+// -- __init__ definite-assignment: bool-exhaustive match
 
 TEST(Class, InitFieldAssignedInBoolMatchArmsOk) {
   // True + False literal arms over a bool subject cover every value, so a
@@ -947,9 +917,7 @@ TEST(Class, InitFieldMissingInOneBoolMatchArmRejected) {
             std::string::npos);
 }
 
-// ============================================================================
-// Error recovery: a rejected class declaration (#79)
-// ============================================================================
+// -- Error recovery: a rejected class declaration (#79)
 //
 // One bad class must not make the others undeclared, and uses of the bad
 // class itself are not reported again: only the declaration error is.

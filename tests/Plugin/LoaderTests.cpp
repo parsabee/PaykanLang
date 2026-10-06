@@ -162,7 +162,6 @@ std::string flag(const std::string &name, const std::string &value) {
 }
 
 // -- Loading
-// -------------------------------------------------------------------
 
 TEST_F(PluginLoader, ExplicitPluginIsListedWithItsFile) {
   std::string good = plugin("good", "good");
@@ -379,7 +378,6 @@ TEST_F(PluginLoader, HelpMentionsThePluginOptions) {
 }
 
 // -- Rejection
-// -----------------------------------------------------------------
 
 TEST_F(PluginLoader, WrongBuildVersionIsIncompatibleAndNeverCalled) {
   std::string old = plugin("old", "old");
@@ -608,7 +606,6 @@ TEST_F(PluginLoader, ClashWithABuiltInIsAmbiguous) {
 } // namespace
 
 // -- Frontends
-// -------------------------------------------------------------------
 //
 // The test frontend (tests/Plugin/modules/test_frontend.c) reads the AST
 // interchange format: it hands its source to paykan unchanged.  So

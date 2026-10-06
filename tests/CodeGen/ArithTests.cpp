@@ -11,9 +11,7 @@ static std::string wrapMain(const std::string &body) {
   return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
-// ============================================================================
-// Arithmetic
-// ============================================================================
+// -- Arithmetic
 
 TEST(Arith, IntArithmetic) {
   auto r = compileAndRun(wrapMain(R"(
@@ -43,9 +41,7 @@ TEST(Arith, BoolLiterals) {
   EXPECT_EQ(r.StdOut, "TrueFalse\n");
 }
 
-// ============================================================================
-// String primitives
-// ============================================================================
+// -- String primitives
 
 TEST(Arith, StringLiteral) {
   auto r = compileAndRun(wrapMain(R"(println("hello world");)"));
@@ -91,9 +87,7 @@ TEST(Arith, StringReassign) {
   EXPECT_EQ(r.StdOut, "beta\n");
 }
 
-// ============================================================================
-// Float comparisons with NaN (IEEE 754: `!=` is unordered, the rest ordered)
-// ============================================================================
+// -- Float comparisons with NaN (IEEE 754: `!=` is unordered, the rest ordered)
 
 namespace {
 
@@ -197,9 +191,7 @@ TEST(FloatCompare, NaNThroughTupleBoxedFloatAndMatch) {
   g.expectNoLeaks("FloatCompareNaNThroughTupleBoxedFloatAndMatch");
 }
 
-// ============================================================================
-// Return code
-// ============================================================================
+// -- Return code
 
 TEST(Arith, ReturnCode) {
   auto r = compileAndRun("fn main() -> int { return 42; }");

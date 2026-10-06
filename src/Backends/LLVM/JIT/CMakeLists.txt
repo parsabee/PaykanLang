@@ -1,7 +1,4 @@
-# src/Backends/LLVM/JIT/CMakeLists.txt
-# ----------------------------------------------------------------------------
 # paykan_jit – ORC-based JIT execution engine for Paykan
-# ----------------------------------------------------------------------------
 
 llvm_map_components_to_libnames(JIT_LLVM_LIBS
     orcjit

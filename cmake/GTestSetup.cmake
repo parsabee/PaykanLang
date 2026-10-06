@@ -1,5 +1,3 @@
-# GTestSetup.cmake
-# ----------------------------------------------------------------------------
 # Provides GoogleTest for the test suite.  Included only when
 # a selected test suite uses it (cmake/PaykanTests.cmake).
 #
@@ -14,7 +12,6 @@
 #      (once; later configures reuse it).
 #
 # Provides targets:  gtest, gtest_main, gmock, gmock_main
-# ----------------------------------------------------------------------------
 
 include(FetchContent)
 
