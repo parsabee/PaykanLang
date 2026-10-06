@@ -1,9 +1,6 @@
-# src/PIR/CMakeLists.txt
-# ----------------------------------------------------------------------------
 # paykan_pir -- the Paykan IR: data structures (include/paykan/pir/PIR.h),
 # text printer, text parser and verifier.  Standard C++ only; every backend
 # consumes it.
-# ----------------------------------------------------------------------------
 
 add_library(paykan_pir STATIC
     PIR.cpp

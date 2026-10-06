@@ -17,7 +17,7 @@ namespace paykan::lowering {
 using namespace names;
 using pir::Type;
 
-// -- Runtime ABI table (docs/pir.md §8) ---------------------------------------
+// -- Runtime ABI table (docs/pir.md §8)
 
 namespace {
 
@@ -104,7 +104,6 @@ const RuntimeSig *findRuntimeSig(const std::string &name) {
 } // namespace
 
 // -- Constructor
-// -----------------------------------------------------------------
 
 ModuleLowering::ModuleLowering(ProgramLowering &program,
                                const sema::SemaContext &semaCtx,
@@ -137,7 +136,6 @@ void ModuleLowering::reportInternalError(const std::string &msg) {
 }
 
 // -- Scope
-// -----------------------------------------------------------------------
 
 bool ModuleLowering::Scope::hasLocal(const std::string &name) const {
   if (Locals.count(name))
@@ -219,7 +217,6 @@ ModuleLowering::ScopeGuard::~ScopeGuard() {
 }
 
 // -- FunctionStateGuard
-// -------------------------------------------------------------
 
 ModuleLowering::FunctionStateGuard::FunctionStateGuard(
     ModuleLowering &l, pir::Function *fn, ast::Type *retASTType,
@@ -244,7 +241,6 @@ ModuleLowering::FunctionStateGuard::~FunctionStateGuard() {
 }
 
 // -- Type helpers
-// ------------------------------------------------------------------------
 
 Type ModuleLowering::toPIRType(ast::Type *ty) {
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty)) {
@@ -360,7 +356,6 @@ pir::Function *ModuleLowering::declareFunctionPrototype(ast::FuncDecl *node) {
 }
 
 // -- Declarations
-// ---------------------------------------------------------------------------
 
 pir::Function *ModuleLowering::getOrCreateFunction(const std::string &name,
                                                    const pir::Signature &sig) {
@@ -532,7 +527,6 @@ void ModuleLowering::bootstrapBuiltins() {
 }
 
 // -- Entry point
-// ---------------------------------------------------------------------------------
 
 bool ModuleLowering::run(ast::TranslationUnit *tu) {
   CurrentScope = nullptr;
@@ -569,8 +563,7 @@ Val ModuleLowering::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
 
 Val ModuleLowering::emitExpr(ast::Expr *expr) { return Emitter.visit(expr); }
 
-// -- Ownership predicates (ported from CodeGen)
-// -----------------------------------------------
+// -- Ownership predicates
 
 bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
   // A primitive boxed for an optional primitive slot: a fresh +1 box.
@@ -733,8 +726,27 @@ Val ModuleLowering::coerceBoolToI64(const Val &v, Type dest) {
   return v;
 }
 
+Val ModuleLowering::coerceTo(const Val &v, Type dest) {
+  Val out = v;
+  if (dest == Type::F64 && v.Ty == Type::I64)
+    out = promoteIntToFloat(out, ASTCtx.getFloatTy());
+  return coerceBoolToI64(out, dest);
+}
+
+ModuleLowering::Receiver ModuleLowering::emitReceiver(ast::Expr *expr,
+                                                      const std::string &name) {
+  Receiver r;
+  Val recv = emitExpr(expr);
+  if (!recv)
+    return r;
+  r.Owned = classifyExpr(expr, recv);
+  r.Raw = recv;
+  if (exprAlreadyShared(expr) && recv.Ty == Type::Box)
+    r.Raw = emitSharedGet(recv, name);
+  return r;
+}
+
 // -- Scope cleanup
-// -------------------------------------------------------------------------------
 
 void ModuleLowering::emitScopeCleanup(Scope &scope) {
   // Reverse declaration order (LIFO).
@@ -762,7 +774,6 @@ void ModuleLowering::emitLoopScopesCleanup() {
 }
 
 // -- Statements
-// ------------------------------------------------------------------------------------
 
 Val ModuleLowering::visitCompoundStmt(ast::CompoundStmt *node) {
   ScopeGuard guard(*this);
@@ -929,12 +940,8 @@ Val ModuleLowering::visitReturnStmt(ast::ReturnStmt *node) {
       val = emitAsShared(retExpr);
     } else {
       val = emitExpr(retExpr);
-      if (B.function()) {
-        Type retTy = B.function()->Sig.Ret;
-        if (retTy == Type::F64 && val.Ty == Type::I64)
-          val = promoteIntToFloat(val, ASTCtx.getFloatTy());
-        val = coerceBoolToI64(val, retTy);
-      }
+      if (B.function())
+        val = coerceTo(val, B.function()->Sig.Ret);
     }
     emitAllScopesCleanup();
     B.emitRet(val);
@@ -996,9 +1003,9 @@ Val ModuleLowering::visitVarDecl(ast::VarDecl *node) {
   Val initVal;
   if (node->getInitExpr()) {
     // Every ref-typed variable holds an owned box: a class/array/tuple value,
-    // an optional (`None` is the null box), and the legacy `o: Obj = None`,
-    // which boxes the immortal None singleton (acquire semantics; its
-    // destroy is a no-op, so the box is the only allocation).
+    // an optional (`None` is the null box), and `o: Obj = None`, which boxes
+    // the immortal None singleton (acquire semantics; its destroy is a
+    // no-op, so the box is the only allocation).
     bool isClassDecl = declTy && ast::isRefType(declTy);
     if (isClassDecl) {
       initVal = emitAsShared(node->getInitExpr());
@@ -1006,9 +1013,7 @@ Val ModuleLowering::visitVarDecl(ast::VarDecl *node) {
       initVal = emitExpr(node->getInitExpr());
       if (pirTy == Type::Void)
         pirTy = initVal.Ty;
-      if (pirTy == Type::F64 && initVal.Ty == Type::I64)
-        initVal = promoteIntToFloat(initVal, ASTCtx.getFloatTy());
-      initVal = coerceBoolToI64(initVal, pirTy);
+      initVal = coerceTo(initVal, pirTy);
     }
   }
   if (pirTy == Type::Void)
@@ -1103,7 +1108,6 @@ Val ModuleLowering::visitFuncDecl(ast::FuncDecl *node) {
 }
 
 // -- Optionals
-// ----------------------------------------------------------------------------------------
 
 bool ModuleLowering::isNoneForOptional(ast::Expr *expr) {
   // `mov None` forwards the literal (Sema typed it through the `mov`).

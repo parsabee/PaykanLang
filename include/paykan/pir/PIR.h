@@ -19,7 +19,7 @@
 
 namespace paykan::pir {
 
-// -- Types -------------------------------------------------------------------
+// -- Types
 
 enum class Type : uint8_t {
   Void,
@@ -45,7 +45,6 @@ struct Signature {
 };
 
 // -- Runtime symbols
-// ------------------------------------------------------------
 
 /// A runtime extern (`extern fn` without a module, `extern obj`, `extern
 /// vtable`) has the PIR name kRuntimePrefix + its C symbol
@@ -76,7 +75,6 @@ inline std::string runtimeSymbol(std::string_view name) {
 }
 
 // -- Values and operands
-// -------------------------------------------------------
 
 /// An SSA value defined by a parameter or an instruction.  Ids are unique per
 /// function and are what operands refer to; Name is for readability only (the
@@ -128,7 +126,6 @@ struct Operand {
 };
 
 // -- Instructions
-// ----------------------------------------------------------------
 
 enum class Opcode : uint8_t {
   // arithmetic / logic (operands of one type)
@@ -186,7 +183,6 @@ struct Instr {
 };
 
 // -- Structured statements
-// --------------------------------------------------------
 
 struct Block;
 
@@ -218,7 +214,6 @@ struct Block {
 };
 
 // -- Functions
-// -------------------------------------------------------------------
 
 struct Local {
   std::string Name;
@@ -248,7 +243,6 @@ struct Function {
 };
 
 // -- Classes
-// -----------------------------------------------------------------------
 
 struct Field {
   std::string Name;
@@ -273,7 +267,6 @@ struct Class {
 };
 
 // -- Module-level globals
-// ------------------------------------------------------------
 
 struct CStrGlobal {
   std::string Name;

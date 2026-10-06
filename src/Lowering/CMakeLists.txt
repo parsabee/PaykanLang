@@ -1,8 +1,5 @@
-# src/Lowering/CMakeLists.txt
-# ----------------------------------------------------------------------------
 # paykan_lowering -- AST -> PIR lowering (standard C++ only).  The single home
 # of the ownership semantics every backend relies on.
-# ----------------------------------------------------------------------------
 
 add_library(paykan_lowering STATIC
     Lowering.cpp

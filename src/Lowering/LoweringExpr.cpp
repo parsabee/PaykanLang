@@ -17,7 +17,6 @@ using pir::Opcode;
 using pir::Type;
 
 // -- Dispatch
-// -------------------------------------------------------------------
 
 Val ModuleLowering::ExprEmitter::visit(ast::Expr *node) {
   Val v = ast::ExprVisitor<ExprEmitter, Val>::visit(node);
@@ -27,7 +26,6 @@ Val ModuleLowering::ExprEmitter::visit(ast::Expr *node) {
 }
 
 // -- Literals
-// -------------------------------------------------------------------
 
 Val ModuleLowering::ExprEmitter::visitIntegerLiteral(
     ast::IntegerLiteral *node) {
@@ -98,7 +96,6 @@ Val ModuleLowering::ExprEmitter::visitMemberAccessExpr(
 }
 
 // -- Arrays
-// ------------------------------------------------------------------------
 
 Val ModuleLowering::ExprEmitter::visitArrayLiteralExpr(
     ast::ArrayLiteralExpr *node) {
@@ -241,23 +238,19 @@ Val ModuleLowering::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
     receiverIsStr = !ast::dyn_cast<ast::ArrayType>(recvTy); // null-safe
   }
 
-  // Emit the receiver, classify (a call-rooted receiver is a fresh +1 box to
-  // tear down once the element is copied out), then unwrap.
-  Val recv = L.emitExpr(node->getArray());
+  // A call-rooted receiver is torn down once the element is copied out.
+  Receiver recv = L.emitReceiver(node->getArray());
   if (!recv)
     return Val();
-  ExprValue recvOwned = L.classifyExpr(node->getArray(), recv);
-  Val recvRaw = recv;
-  if (L.exprAlreadyShared(node->getArray()) && recv.Ty == Type::Box)
-    recvRaw = L.emitSharedGet(recv, "recv.obj");
+  const ExprValue &recvOwned = recv.Owned;
 
   if (receiverIsStr) {
-    Val ch = L.callRuntime(kPaykanStringCharAt, {recvRaw, idx}, "str.char_at");
+    Val ch = L.callRuntime(kPaykanStringCharAt, {recv.Raw, idx}, "str.char_at");
     L.releaseIfOwned(recvOwned);
     return ch;
   }
 
-  Val raw = L.callRuntime(kPaykanArrayGet, {recvRaw, idx}, "elem.raw");
+  Val raw = L.callRuntime(kPaykanArrayGet, {recv.Raw, idx}, "elem.raw");
   ast::Type *elemTy = node->getResolvedType();
   if (!L.isObjectElementType(elemTy)) {
     L.releaseIfOwned(recvOwned);
@@ -300,18 +293,14 @@ Val ModuleLowering::ExprEmitter::visitTernaryExpr(ast::TernaryExpr *node) {
     // Sema left no type: take the branch's.
     L.B.function()->Locals[tmp].Ty = t.Ty;
   }
-  t = L.promoteIntToFloat(
-      t, L.B.localType(tmp) == Type::F64 ? L.ASTCtx.getFloatTy() : nullptr);
-  L.B.store(tmp, L.coerceBoolToI64(t, L.B.localType(tmp)));
+  L.B.store(tmp, L.coerceTo(t, L.B.localType(tmp)));
   L.B.leave();
   L.B.enter(*s->Else);
   Val f = isClassResult ? L.emitAsShared(node->getFalseExpr())
                         : visit(node->getFalseExpr());
   if (!f)
     return Val();
-  f = L.promoteIntToFloat(
-      f, L.B.localType(tmp) == Type::F64 ? L.ASTCtx.getFloatTy() : nullptr);
-  L.B.store(tmp, L.coerceBoolToI64(f, L.B.localType(tmp)));
+  L.B.store(tmp, L.coerceTo(f, L.B.localType(tmp)));
   L.B.leave();
   return L.B.load(tmp, "tern");
 }
@@ -500,7 +489,6 @@ Val ModuleLowering::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
 }
 
 // -- Calls
-// -------------------------------------------------------------------------------
 
 Val ModuleLowering::ExprEmitter::emitIdentityCtor(ast::CallExpr *node) {
   Val arg = visit(node->getArguments()[0]);
@@ -684,9 +672,7 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
       Val v = visit(argExpr);
       if (!v)
         return Val();
-      if (paramTy == Type::F64 && v.Ty == Type::I64)
-        v = L.promoteIntToFloat(v, L.ASTCtx.getFloatTy());
-      initArgs.push_back(L.coerceBoolToI64(v, paramTy));
+      initArgs.push_back(L.coerceTo(v, paramTy));
     }
     L.B.call(superFn->Name, superFn->Sig, initArgs);
     return Val();
@@ -717,9 +703,7 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     Val v = visit(arg);
     if (!v)
       return Val();
-    if (paramTy == Type::F64 && v.Ty == Type::I64)
-      v = L.promoteIntToFloat(v, L.ASTCtx.getFloatTy());
-    args.push_back(L.coerceBoolToI64(v, paramTy));
+    args.push_back(L.coerceTo(v, paramTy));
   }
   return L.B.call(callee->Name, callee->Sig, args, "call");
 }
@@ -758,15 +742,13 @@ Val ModuleLowering::ExprEmitter::emitArrayPop(const Val &recv,
 
 Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     ast::MethodCallExpr *node) {
-  Val recv = visit(node->getReceiver());
-  if (!recv)
+  // A fresh temporary receiver is released after the call (the method
+  // borrows it).
+  Receiver receiver = L.emitReceiver(node->getReceiver());
+  if (!receiver)
     return Val();
-
-  // Classify the receiver BEFORE unwrapping: a fresh temporary receiver is
-  // released after the call (the method borrows it).
-  ExprValue recvOwned = L.classifyExpr(node->getReceiver(), recv);
-  if (L.exprAlreadyShared(node->getReceiver()) && recv.Ty == Type::Box)
-    recv = L.emitSharedGet(recv, "recv.obj");
+  Val recv = receiver.Raw;
+  const ExprValue &recvOwned = receiver.Owned;
 
   // Resolve the receiver's AST type (identifiers, self, self.field, or the
   // expression's own resolved type).
@@ -868,9 +850,7 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     // raw object.
     if (paramTy == Type::Obj && v.Ty == Type::Box)
       v = L.emitSharedGet(v, "unboxed");
-    if (paramTy == Type::F64 && v.Ty == Type::I64)
-      v = L.promoteIntToFloat(v, L.ASTCtx.getFloatTy());
-    args.push_back(L.coerceBoolToI64(v, paramTy));
+    args.push_back(L.coerceTo(v, paramTy));
   }
 
   // Virtual dispatch through the receiver's vtable.  User classes are named
@@ -897,16 +877,12 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
 }
 
 // -- Subscript assignment
-// --------------------------------------------------------------
 
 Val ModuleLowering::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
-  Val arr = emitExpr(node->getArray());
+  Receiver arr = emitReceiver(node->getArray());
   if (!arr)
     return Val();
-  ExprValue arrOwned = classifyExpr(node->getArray(), arr);
-  Val arrRaw = arr;
-  if (exprAlreadyShared(node->getArray()) && arr.Ty == Type::Box)
-    arrRaw = emitSharedGet(arr, "recv.obj");
+  const Val &arrRaw = arr.Raw;
 
   Val idx = emitExpr(node->getIndex());
   if (!idx)
@@ -939,12 +915,11 @@ Val ModuleLowering::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
     val = toSlotBits(val);
     callRuntime(kPaykanArraySet, {arrRaw, idx, val});
   }
-  releaseIfOwned(arrOwned);
+  releaseIfOwned(arr.Owned);
   return Val();
 }
 
 // -- Tuples
-// --------------------------------------------------------------------------------
 
 unsigned char ModuleLowering::tupleElementKind(ast::Type *elemTy) const {
   if (isObjectElementType(elemTy))
@@ -1042,17 +1017,14 @@ Val ModuleLowering::ExprEmitter::visitTupleLiteralExpr(
 
 Val ModuleLowering::ExprEmitter::visitTupleIndexExpr(
     ast::TupleIndexExpr *node) {
-  Val recv = L.emitExpr(node->getTuple());
+  Receiver recv = L.emitReceiver(node->getTuple());
   if (!recv)
     return Val();
-  ExprValue recvOwned = L.classifyExpr(node->getTuple(), recv);
-  Val raw = recv;
-  if (L.exprAlreadyShared(node->getTuple()) && recv.Ty == Type::Box)
-    raw = L.emitSharedGet(recv, "recv.obj");
+  const ExprValue &recvOwned = recv.Owned;
 
   Val bits = L.callRuntime(
-      kPaykanTupleGet, {raw, Val::i64(static_cast<int64_t>(node->getIndex()))},
-      "elem.raw");
+      kPaykanTupleGet,
+      {recv.Raw, Val::i64(static_cast<int64_t>(node->getIndex()))}, "elem.raw");
   ast::Type *elemTy = node->getResolvedType();
   if (!L.isObjectElementType(elemTy)) {
     L.releaseIfOwned(recvOwned);
@@ -1073,13 +1045,10 @@ Val ModuleLowering::visitDestructureStmt(ast::DestructureStmt *node) {
   assert(tt && tt->getArity() == node->getNumTargets() &&
          "Sema must resolve the destructured value to a matching TupleType");
 
-  Val val = emitExpr(node->getValue());
+  Receiver val = emitReceiver(node->getValue());
   if (!val)
     return Val();
-  ExprValue valOwned = classifyExpr(node->getValue(), val);
-  Val raw = val;
-  if (exprAlreadyShared(node->getValue()) && val.Ty == Type::Box)
-    raw = emitSharedGet(val, "recv.obj");
+  const Val &raw = val.Raw;
 
   for (size_t i = 0; i < node->getNumTargets(); ++i) {
     const auto &target = node->getTargets()[i];
@@ -1107,10 +1076,9 @@ Val ModuleLowering::visitDestructureStmt(ast::DestructureStmt *node) {
       Type pirTy = toPIRType(bindTy);
       if (pirTy == Type::Void)
         pirTy = v.Ty;
-      if (pirTy == Type::F64 && v.Ty == Type::I64)
-        v = promoteIntToFloat(v, ASTCtx.getFloatTy());
+      v = coerceTo(v, pirTy);
       pir::LocalId local = B.addLocal(name, pirTy);
-      B.store(local, coerceBoolToI64(v, pirTy));
+      B.store(local, v);
       CurrentScope->declare(name, local, bindTy);
       continue;
     }
@@ -1128,15 +1096,12 @@ Val ModuleLowering::visitDestructureStmt(ast::DestructureStmt *node) {
       B.store(local, v);
       continue;
     }
-    Type localTy = B.localType(local);
-    if (localTy == Type::F64 && v.Ty == Type::I64)
-      v = promoteIntToFloat(v, ASTCtx.getFloatTy());
-    B.store(local, coerceBoolToI64(v, localTy));
+    B.store(local, coerceTo(v, B.localType(local)));
   }
 
   // Every element has been copied out (references retained): a temporary
   // tuple can die now.
-  releaseIfOwned(valOwned);
+  releaseIfOwned(val.Owned);
   return Val();
 }
 
