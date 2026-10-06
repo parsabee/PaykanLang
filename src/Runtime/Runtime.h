@@ -525,10 +525,11 @@ extern PaykanMethod PaykanTuple_vtable[PAYKAN_OBJECT_SLOTS];
 // raw `self`, because the method ABI passes the unboxed object pointer and the
 // caller's box is unreachable from the callee.  A separate
 // `PaykanShared_from_object` entry point was considered and rejected: the JIT
-// resolves runtime symbols from a fixed table (src/Backends/LLVM/JIT/JIT.cpp), so recovery
-// must ride on the already-registered PaykanShared_new symbol.  With these
-// semantics, "box this raw pointer" is *always* correct: it degenerates to the
-// old behaviour for freshly constructed objects and to a retain for aliases.
+// resolves runtime symbols from a fixed table (src/Backends/LLVM/JIT/JIT.cpp),
+// so recovery must ride on the already-registered PaykanShared_new symbol. With
+// these semantics, "box this raw pointer" is *always* correct: it degenerates
+// to the old behaviour for freshly constructed objects and to a retain for
+// aliases.
 
 typedef struct PaykanShared {
   int64_t refCount;     // strong reference count (starts at 1)
