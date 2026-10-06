@@ -61,7 +61,6 @@ ast::ClassType *ModuleLowering::getExprClassType(ast::Expr *expr) const {
 }
 
 // -- Signatures
-// ------------------------------------------------------------------------
 
 pir::Signature ModuleLowering::methodSignature(ast::MethodDecl *md) {
   // Receiver first.  Runtime methods borrow ref-typed arguments as raw
@@ -119,7 +118,6 @@ pir::Signature ModuleLowering::constructorSignature(ast::ClassType *ct) {
 }
 
 // -- Runtime method symbols
-// --------------------------------------------------------------
 
 const char *ModuleLowering::builtinMethodSymbol(ast::ClassType *ct,
                                                 const std::string &name) {
@@ -182,7 +180,6 @@ ModuleLowering::lookupOwnMethodFunction(ast::ClassType *ct,
 }
 
 // -- Class items
-// -------------------------------------------------------------------------------
 
 pir::Class *ModuleLowering::getOrCreateClass(ast::ClassType *ct) {
   if (auto it = ClassByName.find(ct->getName()); it != ClassByName.end())
@@ -398,18 +395,12 @@ void ModuleLowering::emitDestructor(ast::ClassDecl *node, ast::ClassType *ct) {
 }
 
 // -- Member assignment / access
-// -----------------------------------------------------------------
 
 Val ModuleLowering::lowerMemberAssignStmt(ast::MemberAssignStmt *node) {
-  // Evaluate the receiver, classify it (a call-rooted receiver is torn down
-  // after the store), unwrap to the raw object.
-  Val recv = emitExpr(node->getReceiver());
+  Receiver recv = emitReceiver(node->getReceiver(), "obj");
   if (!recv)
     return Val();
-  ExprValue recvOwned = classifyExpr(node->getReceiver(), recv);
-  Val objPtr = recv;
-  if (exprAlreadyShared(node->getReceiver()) && recv.Ty == Type::Box)
-    objPtr = emitSharedGet(recv, "obj");
+  const Val &objPtr = recv.Raw;
 
   ast::ClassType *ct = getExprClassType(node->getReceiver());
   if (!ct)
@@ -453,26 +444,20 @@ Val ModuleLowering::lowerMemberAssignStmt(ast::MemberAssignStmt *node) {
     Val rhs = emitExpr(node->getValue());
     if (!rhs)
       return Val();
-    Type fieldTy = toPIRType(fieldASTTy);
-    if (fieldTy == Type::F64 && rhs.Ty == Type::I64)
-      rhs = promoteIntToFloat(rhs, ASTCtx.getFloatTy());
     B.fieldStore(objPtr, ct->getName(), node->getFieldName(),
-                 coerceBoolToI64(rhs, fieldTy));
+                 coerceTo(rhs, toPIRType(fieldASTTy)));
   }
-  releaseIfOwned(recvOwned);
+  releaseIfOwned(recv.Owned);
   return Val();
 }
 
 Val ModuleLowering::lowerMemberAccessExpr(ast::MemberAccessExpr *node) {
-  Val recv = emitExpr(node->getReceiver());
-  if (!recv)
-    return Val();
   // A call-rooted receiver (`makeH().a`) is a fresh +1 box torn down after
   // the read; a ref-typed field is retained first so it survives.
-  ExprValue recvOwned = classifyExpr(node->getReceiver(), recv);
-  Val objPtr = recv;
-  if (exprAlreadyShared(node->getReceiver()) && recv.Ty == Type::Box)
-    objPtr = emitSharedGet(recv, "obj");
+  Receiver recv = emitReceiver(node->getReceiver(), "obj");
+  if (!recv)
+    return Val();
+  const Val &objPtr = recv.Raw;
 
   ast::ClassType *ct = getExprClassType(node->getReceiver());
   if (!ct)
@@ -486,10 +471,10 @@ Val ModuleLowering::lowerMemberAccessExpr(ast::MemberAccessExpr *node) {
 
   Val fieldVal = B.fieldLoad(objPtr, ct->getName(), node->getFieldName(),
                              fieldTy, node->getFieldName());
-  if (recvOwned.isOwned()) {
+  if (recv.Owned.isOwned()) {
     if (ast::isRefType(fieldASTTy))
       emitRetain(fieldVal);
-    releaseIfOwned(recvOwned);
+    releaseIfOwned(recv.Owned);
   }
   return fieldVal;
 }
