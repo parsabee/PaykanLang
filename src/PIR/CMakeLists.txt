@@ -1,8 +1,10 @@
 # paykan_pir -- the Paykan IR: data structures (include/paykan/pir/PIR.h),
-# text printer, text parser and verifier.  Standard C++ only; every backend
+# text printer, text parser, verifier and the binary codec of the .pkm CODE
+# section (docs/design/pkm.md §5).  Standard C++ only; every backend
 # consumes it.
 
 add_library(paykan_pir STATIC
+    Binary.cpp
     PIR.cpp
     Printer.cpp
     Parser.cpp

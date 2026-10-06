@@ -182,10 +182,11 @@ if(PAYKAN_TEST_SUITE_pir_llvm AND "llvm" IN_LIST PAYKAN_BACKENDS)
     add_test(NAME PIRLLVMTests COMMAND pir_llvm_tests)
 endif()
 
-# --- PIR tests: printer, parser, verifier (pir) ------------------------------
+# --- PIR tests: printer, parser, verifier, binary codec (pir) ------------------------------
 paykan_test_suite(pir PAYKAN_TEST_SUITE_pir)
 if(PAYKAN_TEST_SUITE_pir)
 add_executable(pir_tests
+    PIR/BinaryTests.cpp
     PIR/PIRTests.cpp
 )
 target_link_libraries(pir_tests

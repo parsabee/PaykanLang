@@ -7,6 +7,8 @@
 
 #include "paykan/pir/Parser.h"
 
+#include "paykan/pir/Codes.h"
+
 #include <cerrno>
 #include <cmath>
 #include <cstdlib>
@@ -358,54 +360,11 @@ private:
 // -- Parser
 
 bool parseTypeName(std::string_view s, Type &out) {
-  static const std::pair<const char *, Type> kTypes[] = {
-      {"void", Type::Void}, {"i64", Type::I64},   {"f64", Type::F64},
-      {"bool", Type::Bool}, {"char", Type::Char}, {"box", Type::Box},
-      {"obj", Type::Obj},   {"ptr", Type::Ptr},
-  };
-  for (const auto &[name, ty] : kTypes)
-    if (s == name) {
-      out = ty;
-      return true;
-    }
-  return false;
+  return typeFromName(s, out);
 }
 
 bool parseOpcodeName(std::string_view s, Opcode &out) {
-  static const std::pair<const char *, Opcode> kOps[] = {
-      {"add", Opcode::Add},
-      {"sub", Opcode::Sub},
-      {"mul", Opcode::Mul},
-      {"div", Opcode::Div},
-      {"rem", Opcode::Rem},
-      {"neg", Opcode::Neg},
-      {"not", Opcode::Not},
-      {"cmp", Opcode::Cmp},
-      {"select", Opcode::Select},
-      {"itof", Opcode::IToF},
-      {"ftoi", Opcode::FToI},
-      {"cast", Opcode::Cast},
-      {"call", Opcode::Call},
-      {"vcall", Opcode::VCall},
-      {"retain", Opcode::Retain},
-      {"release", Opcode::Release},
-      {"box", Opcode::Box},
-      {"unbox", Opcode::Unbox},
-      {"new", Opcode::New},
-      {"free", Opcode::Free},
-      {"field.load", Opcode::FieldLoad},
-      {"field.store", Opcode::FieldStore},
-      {"vtable.load", Opcode::VTableLoad},
-      {"vtable.addr", Opcode::VTableAddr},
-      {"load", Opcode::Load},
-      {"store", Opcode::Store},
-  };
-  for (const auto &[name, op] : kOps)
-    if (s == name) {
-      out = op;
-      return true;
-    }
-  return false;
+  return opcodeFromName(s, out);
 }
 
 bool parsePredName(std::string_view s, CmpPred &out) {

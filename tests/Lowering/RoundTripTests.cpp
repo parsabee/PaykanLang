@@ -1,12 +1,15 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// PIR text round trip over the whole corpus: every program under samples/
-// that passes Sema is lowered, verified and printed; the
-// text is parsed back, verified again and re-printed, and the two texts must
-// be identical (docs/pir.md: the printed form is a faithful serialization).
+// PIR round trips over the whole corpus: every program under samples/ that
+// passes Sema is lowered, verified and printed; the text is parsed back,
+// verified again and re-printed, and the two texts must be identical
+// (docs/pir.md: the printed form is a faithful serialization).  The binary
+// form (docs/design/pkm.md §5) must hold the same two invariants, and its
+// symbol index must slice every function out of the blob.
 
 #include "TestUtils.h"
 #include "paykan/lowering/Lowering.h"
+#include "paykan/pir/Binary.h"
 #include "paykan/pir/Parser.h"
 #include "paykan/pir/Printer.h"
 #include "paykan/pir/Verifier.h"
@@ -14,7 +17,10 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
+#include <iomanip>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -91,6 +97,64 @@ std::string roundTrip(const pir::Program &program) {
   return "";
 }
 
+/// A module holding only @p f, for printing it.
+pir::Module oneFunction(pir::Function f) {
+  pir::Module m;
+  m.Name = "f";
+  m.Functions.push_back(std::move(f));
+  return m;
+}
+
+/// Binary round trip of every module of a verified program (§5.8: the
+/// printed text and the re-encoded bytes are identical, the decoded module
+/// verifies) and a per-function decode through the index.  Adds the text and
+/// binary sizes to @p text / @p bin; returns "" on success.
+std::string binaryRoundTrip(const pir::Program &program, size_t &text,
+                            size_t &bin) {
+  for (const pir::Module &m : program.Modules) {
+    std::string printed = pir::toString(m);
+    std::vector<uint8_t> b = pir::binary::encode(m);
+    text += printed.size();
+    bin += b.size();
+    auto decoded = pir::binary::decode(b);
+    if (!decoded)
+      return m.Name + ": " + decoded.status().message();
+    auto errors = pir::verify(*decoded);
+    if (!errors.empty())
+      return m.Name + ": decoded module: " + pir::formatErrors(errors);
+    if (pir::toString(*decoded) != printed)
+      return m.Name + ": decoded module prints differently";
+    if (pir::binary::encode(*decoded) != b)
+      return m.Name + ": re-encoded bytes differ";
+    auto info = pir::binary::inspect(b);
+    if (!info)
+      return m.Name + ": inspect: " + info.status().message();
+    std::vector<pir::binary::SymbolEntry> index = pir::binary::index(b);
+    pir::Module &dm = decoded.value();
+    size_t functions = 0;
+    for (const pir::binary::SymbolEntry &e : index) {
+      if (e.Kind > 1) // functions and extern functions only
+        continue;
+      ++functions;
+      auto f = pir::binary::decodeFunction(b, *info, e.Offset, e.Length);
+      if (!f)
+        return m.Name + ": @" + e.Name + ": " + f.status().message();
+      auto whole = std::find_if(
+          dm.Functions.begin(), dm.Functions.end(),
+          [&](const pir::Function &g) { return g.Name == e.Name; });
+      if (whole == dm.Functions.end())
+        return m.Name + ": @" + e.Name + " is not in the decoded module";
+      if (pir::toString(oneFunction(std::move(*f))) !=
+          pir::toString(oneFunction(std::move(*whole))))
+        return m.Name + ": @" + e.Name + " decodes differently alone";
+    }
+    if (functions != m.Functions.size())
+      return m.Name + ": the index names " + std::to_string(functions) +
+             " functions, the module has " + std::to_string(m.Functions.size());
+  }
+  return "";
+}
+
 } // namespace
 
 TEST(PIRRoundTrip, EveryCorpusProgramPrintsParsesAndReprintsIdentically) {
@@ -108,4 +172,27 @@ TEST(PIRRoundTrip, EveryCorpusProgramPrintsParsesAndReprintsIdentically) {
   // The corpus has well over a hundred valid programs; a much smaller count
   // means the corpus paths or the frontend setup are broken.
   EXPECT_GT(checked, 100u);
+}
+
+TEST(PIRBinary, Corpus) {
+  size_t checked = 0, text = 0, bin = 0;
+  for (const std::string &path : corpus()) {
+    pir::Program program;
+    std::string error;
+    if (!lowerFile(path, program, error))
+      continue;
+    ++checked;
+    if (error.empty() && pir::verify(program).empty())
+      error = binaryRoundTrip(program, text, bin);
+    EXPECT_TRUE(error.empty()) << path << ": " << error;
+  }
+  EXPECT_GT(checked, 100u);
+  ASSERT_GT(bin, 0u);
+  std::cout << "[ binary PIR ] " << checked << " programs: " << text
+            << " bytes of text, " << bin << " bytes binary (" << std::fixed
+            << std::setprecision(2) << double(text) / double(bin)
+            << "x smaller)\n";
+  // The design's measured ratio is ~3.3x; a drop below 2x means the codec
+  // wastes bytes.
+  EXPECT_GT(double(text) / double(bin), 2.0);
 }
