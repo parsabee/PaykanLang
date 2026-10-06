@@ -16,9 +16,7 @@ extern "C" {
 
 #include "RuntimeEqualsHelper.h"
 
-// ============================================================================
-// Helpers
-// ============================================================================
+// -- Helpers
 
 static int64_t bitsOf(double d) {
   int64_t b;
@@ -60,9 +58,7 @@ static PaykanTuple *makeIntStr(int64_t n, const char *s) {
   return t;
 }
 
-// ============================================================================
-// Construction
-// ============================================================================
+// -- Construction
 
 TEST(TupleNew, CountKindsAndVtable) {
   const uint8_t kinds[3] = {PAYKAN_TUPLE_INT, PAYKAN_TUPLE_REF,
@@ -100,9 +96,7 @@ TEST(TupleNew, SingleHeapBlock) {
   Paykan_heap_set_tracking(0);
 }
 
-// ============================================================================
-// Primitive slots
-// ============================================================================
+// -- Primitive slots
 
 TEST(TupleSetGet, IntFloatBoolChar) {
   const uint8_t kinds[4] = {PAYKAN_TUPLE_INT, PAYKAN_TUPLE_FLOAT,
@@ -135,9 +129,7 @@ TEST(TupleSetGet, KindMismatchDies) {
   PaykanTuple_destroy((PaykanObject *)t);
 }
 
-// ============================================================================
-// Reference slots
-// ============================================================================
+// -- Reference slots
 
 TEST(TupleSetObj, RetainsStoredBoxAndReleasesOld) {
   const uint8_t kinds[2] = {PAYKAN_TUPLE_REF, PAYKAN_TUPLE_REF};
@@ -201,9 +193,7 @@ TEST(TupleDestroy, NestedTupleIsReleased) {
   Paykan_heap_set_tracking(0);
 }
 
-// ============================================================================
-// toString
-// ============================================================================
+// -- toString
 
 TEST(TupleToString, RendersEachKind) {
   const uint8_t kinds[5] = {PAYKAN_TUPLE_INT, PAYKAN_TUPLE_FLOAT,
@@ -241,9 +231,7 @@ TEST(TupleToString, LongRenderingGrowsBuffer) {
   PaykanTuple_destroy((PaykanObject *)t);
 }
 
-// ============================================================================
-// equals
-// ============================================================================
+// -- equals
 
 TEST(TupleEquals, ElementWiseOnPrimitivesAndStrings) {
   PaykanTuple *a = makeIntStr(1, "x");

@@ -9,9 +9,7 @@ extern "C" {
 #include "Runtime.h"
 }
 
-// ============================================================================
-// PaykanShared_new
-// ============================================================================
+// -- PaykanShared_new
 
 TEST(SharedNew, InitialRefCountIsOne) {
   PaykanObject *obj = PaykanObject_new();
@@ -27,9 +25,7 @@ TEST(SharedNew, StoresObject) {
   Paykan_release(s);
 }
 
-// ============================================================================
-// Paykan_retain
-// ============================================================================
+// -- Paykan_retain
 
 TEST(SharedRetain, IncrementsRefCount) {
   PaykanObject *obj = PaykanObject_new();
@@ -58,9 +54,7 @@ TEST(SharedRetain, NullIsNoOp) {
   Paykan_retain(nullptr);
 }
 
-// ============================================================================
-// Paykan_release
-// ============================================================================
+// -- Paykan_release
 
 TEST(SharedRelease, DecrementsRefCount) {
   PaykanObject *obj = PaykanObject_new();
@@ -95,9 +89,7 @@ TEST(SharedRelease, RetainThenReleasePair) {
   Paykan_release(s);
 }
 
-// ============================================================================
-// PaykanShared_get
-// ============================================================================
+// -- PaykanShared_get
 
 TEST(SharedGet, ReturnsWrappedObject) {
   PaykanObject *obj = PaykanObject_new();
@@ -110,9 +102,7 @@ TEST(SharedGet, NullReturnsNull) {
   EXPECT_EQ(PaykanShared_get(nullptr), nullptr);
 }
 
-// ============================================================================
-// Destroy via vtable is called on release-to-zero
-// ============================================================================
+// -- Destroy via vtable is called on release-to-zero
 
 TEST(SharedRelease, CallsVtableDestroy) {
   // Wrap a String — its destroy frees its data buffer.  Running under ASAN

@@ -13,9 +13,7 @@ extern "C" {
 #include "RuntimeEqualsHelper.h"
 #include "VTableTestHelper.h"
 
-// ============================================================================
-// PaykanString_new
-// ============================================================================
+// -- PaykanString_new
 
 TEST(StringNew, StoresDataAndLength) {
   PaykanString *s = PaykanString_new("hello", 5);
@@ -54,9 +52,7 @@ TEST(StringNew, EmbeddedNulBytes) {
   PaykanString_destroy((PaykanObject *)s);
 }
 
-// ============================================================================
-// PaykanString_from_int / from_float / from_bool
-// ============================================================================
+// -- PaykanString_from_int / from_float / from_bool
 
 TEST(StringFromInt, Zero) {
   PaykanString *s = PaykanString_from_int(0);
@@ -108,9 +104,7 @@ TEST(StringFromBool, NonZeroIsTrue) {
   PaykanString_destroy((PaykanObject *)s);
 }
 
-// ============================================================================
-// PaykanString_toString
-// ============================================================================
+// -- PaykanString_toString
 
 TEST(StringToString, ReturnsFreshCopy) {
   PaykanString *s = PaykanString_new("hi", 2);
@@ -131,9 +125,7 @@ TEST(StringToString, CopyIsIndependent) {
   PaykanString_destroy((PaykanObject *)s);
 }
 
-// ============================================================================
-// PaykanString_equals
-// ============================================================================
+// -- PaykanString_equals
 
 TEST(StringEquals, SameContent) {
   PaykanString *a = PaykanString_new("foo", 3);
@@ -184,9 +176,7 @@ TEST(StringEquals, NonStringOtherFallsBackToIdentity) {
   PaykanObject_destroy(obj);
 }
 
-// ============================================================================
-// PaykanString_length
-// ============================================================================
+// -- PaykanString_length
 
 TEST(StringLength, ReturnsLen) {
   PaykanString *s = PaykanString_new("hello", 5);
@@ -200,9 +190,7 @@ TEST(StringLength, EmptyIsZero) {
   PaykanString_destroy((PaykanObject *)s);
 }
 
-// ============================================================================
-// PaykanString_concat
-// ============================================================================
+// -- PaykanString_concat
 
 TEST(StringConcat, TwoStrings) {
   PaykanString *a = PaykanString_new("foo", 3);
@@ -261,9 +249,7 @@ TEST(StringConcat, ResultIsNulTerminated) {
   PaykanString_destroy((PaykanObject *)c);
 }
 
-// ============================================================================
-// Vtable dispatch
-// ============================================================================
+// -- Vtable dispatch
 
 TEST(StringVtable, ToStringViaVtable) {
   PaykanString *s = PaykanString_new("test", 4);
@@ -287,9 +273,7 @@ TEST(StringVtable, DestroyViaVtable) {
   // Should not crash.
 }
 
-// ============================================================================
-// PaykanString_at
-// ============================================================================
+// -- PaykanString_at
 
 TEST(StringAt, FirstChar) {
   PaykanString *s = PaykanString_new("hello", 5);
@@ -362,9 +346,7 @@ TEST(StringAt, NegativeIndexDies) {
   PaykanString_destroy((PaykanObject *)s);
 }
 
-// ============================================================================
-// PaykanString_char_at
-// ============================================================================
+// -- PaykanString_char_at
 
 TEST(StringCharAt, FirstChar) {
   PaykanString *s = PaykanString_new("hello", 5);
@@ -390,9 +372,7 @@ TEST(StringCharAt, SingleChar) {
   PaykanString_destroy((PaykanObject *)s);
 }
 
-// ============================================================================
-// PaykanString_concat_inplace
-// ============================================================================
+// -- PaykanString_concat_inplace
 
 TEST(StringConcatInplace, AppendToEmpty) {
   PaykanString *a = PaykanString_new("", 0);

@@ -9,7 +9,7 @@
 // each other: every test asserts the same stdout, exit code and zero live
 // heap blocks whichever backend ran it.
 //
-//   * llvm: CodeGen + ORC JIT in-process (the legacy path).
+//   * llvm: lowering -> PIR -> LLVM IR -> ORC JIT, in-process.
 //   * c:    lowering -> PIR -> C -> $CC, run as a child process.  The child
 //           runs with the tracking allocator when the test process has it
 //           enabled, and reports its live-block count back through its heap

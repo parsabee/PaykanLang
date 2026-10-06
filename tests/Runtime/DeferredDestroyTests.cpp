@@ -19,7 +19,7 @@ extern "C" {
 
 namespace {
 
-// -- A test object type -------------------------------------------------------
+// -- A test object type
 //
 // TestNode owns up to kMaxKids boxed children; its destroy logs its id, then
 // releases the children in index order (exactly what a compiler-generated
@@ -80,7 +80,7 @@ protected:
   }
 };
 
-// -- Tests --------------------------------------------------------------------
+// -- Tests
 
 TEST_F(DeferredDestroy, SingleObjectIsDestroyedImmediately) {
   PaykanShared *a = makeNode(1, {});

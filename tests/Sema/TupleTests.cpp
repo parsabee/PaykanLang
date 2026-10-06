@@ -14,9 +14,7 @@ static std::string wrapMain(const std::string &body) {
   return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
-// ============================================================================
-// Literals and element types
-// ============================================================================
+// -- Literals and element types
 
 TEST(Tuple, LiteralInferredAndIndexed) {
   auto r = semaCheck(wrapMain(R"(
@@ -99,9 +97,7 @@ TEST(Tuple, EmptyArrayLiteralElementRejected) {
       << r.Diagnostics;
 }
 
-// ============================================================================
-// Immutability
-// ============================================================================
+// -- Immutability
 
 TEST(Tuple, IndexAssignmentRejected) {
   auto r = semaCheck(wrapMain(R"(
@@ -144,9 +140,7 @@ TEST(Tuple, UseAfterMovRejected) {
       << r.Diagnostics;
 }
 
-// ============================================================================
-// Destructuring
-// ============================================================================
+// -- Destructuring
 
 TEST(Tuple, DestructureDeclaresElementTypes) {
   auto r = semaCheck(R"(
@@ -259,9 +253,7 @@ TEST(Tuple, DestructureRevivesMovedVariable) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// ============================================================================
-// Assignability, equality, and tuples in other positions
-// ============================================================================
+// -- Assignability, equality, and tuples in other positions
 
 TEST(Tuple, AssignableToObj) {
   auto r = semaCheck(wrapMain(R"(
@@ -447,9 +439,7 @@ TEST(Tuple, TupleIsReservedBuiltinName) {
       << r.Diagnostics;
 }
 
-// ============================================================================
-// Module round-trip of tuple-typed signatures
-// ============================================================================
+// -- Module round-trip of tuple-typed signatures
 
 static std::string writeFile(const std::string &dir, const std::string &relPath,
                              const std::string &content) {

@@ -248,6 +248,7 @@ Quality gates are enforced in CI and available locally via the Python helpers in
 python3 scripts/clang_format.py --apply          # format the tree
 python3 scripts/run_clang_tidy.py --build-dir build   # bug-focused clang-tidy gate
 python3 scripts/coverage.py --build-dir build-cov     # coverage report + floor gate
+python3 scripts/comment_metrics.py               # comment lines per source file
 ```
 
 Install the pre-commit hooks (clang-format on commit, clang-tidy on push):

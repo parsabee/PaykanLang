@@ -1,5 +1,3 @@
-# SanitizerSetup.cmake
-# ----------------------------------------------------------------------------
 # Adds optional sanitizer build configurations.
 # Include this module in the root CMakeLists.txt after the compiler gate.
 #
@@ -10,7 +8,6 @@
 #
 # Note: ASan and TSan are mutually exclusive — do not combine them.
 # UBSan can be combined with either: -DPAYKAN_ASAN=ON -DPAYKAN_UBSAN=ON
-# ----------------------------------------------------------------------------
 
 option(PAYKAN_ASAN  "Build with AddressSanitizer + LeakSanitizer" OFF)
 option(PAYKAN_UBSAN "Build with UndefinedBehaviorSanitizer"       OFF)

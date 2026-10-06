@@ -15,9 +15,7 @@ static std::string withFns(const std::string &fns, const std::string &body) {
   return fns + "\n" + wrapMain(body);
 }
 
-// ============================================================================
-// Class CodeGen — struct layout, constructor, fields, methods, inheritance
-// ============================================================================
+// -- Class CodeGen — struct layout, constructor, fields, methods, inheritance
 
 // --- Basic instantiation & constructor -------------------------------------
 
@@ -439,9 +437,7 @@ TEST(Class, MethodWithLoop) {
   EXPECT_EQ(r.StdOut, "15\n");
 }
 
-// ============================================================================
-// Match statement
-// ============================================================================
+// -- Match statement
 
 // Shared class hierarchy used across match tests.
 static const std::string kMatchHierarchy = R"(
@@ -740,9 +736,7 @@ TEST(MatchCodeGen, ArmScopeCleanup) {
   EXPECT_EQ(r.StdOut, "cleanup-me\nafter\n");
 }
 
-// ============================================================================
-// Value-mode match (primitive / Str subjects matched against literal patterns)
-// ============================================================================
+// -- Value-mode match (primitive / Str subjects against literal patterns)
 
 // String value match: the literal arm whose content equals the subject fires.
 TEST(MatchCodeGen, StringValueMatch) {
@@ -814,10 +808,8 @@ TEST(MatchCodeGen, BoolValueMatch) {
   EXPECT_EQ(r.StdOut, "no\n");
 }
 
-// ============================================================================
 // A class method may call a module-level free function, regardless of whether
 // the function is defined before or after the class (forward-declared).
-// ============================================================================
 
 TEST(Class, MethodCallsFreeFunctionDefinedBefore) {
   auto r =
@@ -843,9 +835,7 @@ TEST(Class, MethodCallsFreeFunctionDefinedAfter) {
   EXPECT_EQ(r.StdOut, "42\n");
 }
 
-// ============================================================================
-// Default Obj.equals — identity semantics
-// ============================================================================
+// -- Default Obj.equals — identity semantics
 
 // A user class without an equals override uses the inherited identity equals:
 // an object equals itself, and not a distinct object. This must agree with the

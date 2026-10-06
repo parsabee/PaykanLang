@@ -27,9 +27,7 @@ static_assert(int(paykan::names::kTupleSlotChar) == int(PAYKAN_TUPLE_CHAR),
 static_assert(int(paykan::names::kTupleSlotRef) == int(PAYKAN_TUPLE_REF),
               "tuple slot-kind ABI drift");
 
-// ============================================================================
-// Literals, element reads, printing
-// ============================================================================
+// -- Literals, element reads, printing
 
 TEST(Tuple, PrimitiveElementsRoundTrip) {
   LeakGuard g;
@@ -115,9 +113,7 @@ TEST(Tuple, TupleInArrayAndArrayInTuple) {
   g.expectNoLeaks("TupleInArrayAndArrayInTuple");
 }
 
-// ============================================================================
-// Multiple return and destructuring
-// ============================================================================
+// -- Multiple return and destructuring
 
 TEST(Tuple, MultipleReturnAndDestructuring) {
   LeakGuard g;
@@ -188,9 +184,7 @@ TEST(Tuple, DestructureFromVariableAndLiteralKeepsSource) {
   g.expectNoLeaks("DestructureFromVariableAndLiteralKeepsSource");
 }
 
-// ============================================================================
-// Ownership: temporaries, mov, parameters
-// ============================================================================
+// -- Ownership: temporaries, mov, parameters
 
 TEST(Tuple, CallRootedIndexTearsDownTemporary) {
   LeakGuard g;
@@ -256,9 +250,7 @@ TEST(Tuple, PassedToFunctionsAndReturnedThrough) {
   g.expectNoLeaks("PassedToFunctionsAndReturnedThrough");
 }
 
-// ============================================================================
-// Tuples in classes
-// ============================================================================
+// -- Tuples in classes
 
 TEST(Tuple, TupleFieldInClass) {
   LeakGuard g;
@@ -319,9 +311,7 @@ TEST(Tuple, ClassInstanceElements) {
   g.expectNoLeaks("ClassInstanceElements");
 }
 
-// ============================================================================
-// Equality, toString, Obj-typed use
-// ============================================================================
+// -- Equality, toString, Obj-typed use
 
 TEST(Tuple, EqualityIsElementWise) {
   LeakGuard g;
@@ -435,9 +425,7 @@ TEST(Tuple, LiteralsTakeTheDestinationsOptionalElementTypes) {
   g.expectNoLeaks("LiteralsTakeTheDestinationsOptionalElementTypes");
 }
 
-// ============================================================================
-// NaN and self-comparison (#111)
-// ============================================================================
+// -- NaN and self-comparison (#111)
 
 // Tuple equality is element-wise even when both sides are the same object, so
 // a tuple holding a NaN (directly, nested, or in a `float?` element) is

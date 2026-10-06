@@ -11,9 +11,7 @@ static std::string wrapMain(const std::string &body) {
   return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
-// ============================================================================
-// Literals & type-checking
-// ============================================================================
+// -- Literals & type-checking
 
 TEST(Arith, IntLiteral) {
   auto r = semaCheck(wrapMain("x: int = 42;"));
@@ -50,9 +48,7 @@ TEST(Arith, TypeMismatchAssign) {
   EXPECT_FALSE(r.Ok);
 }
 
-// ============================================================================
-// Variable lifecycle
-// ============================================================================
+// -- Variable lifecycle
 
 TEST(Arith, UndeclaredVariable) {
   auto r = semaCheck(wrapMain("println(x);"));
@@ -83,9 +79,7 @@ TEST(Arith, UnknownTypeInVarDecl) {
             std::string::npos);
 }
 
-// ============================================================================
-// Operator type checks
-// ============================================================================
+// -- Operator type checks
 
 TEST(Arith, ArithmeticOnBool) {
   auto r = semaCheck(wrapMain("x: bool = True + False;"));
@@ -116,9 +110,7 @@ TEST(Arith, EqualityTypeMismatch) {
   EXPECT_FALSE(r.Ok);
 }
 
-// ============================================================================
-// Builtins
-// ============================================================================
+// -- Builtins
 
 TEST(Arith, OutAcceptsMultipleArgs) {
   auto r = semaCheck(wrapMain(R"(

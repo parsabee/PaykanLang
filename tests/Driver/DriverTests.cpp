@@ -93,9 +93,7 @@ static std::string backendFlag() {
 // The paykan command running programs on the test backend.
 static std::string paykanRun() { return std::string(kPaykan) + backendFlag(); }
 
-// ---------------------------------------------------------------------------
-// --check-only
-// ---------------------------------------------------------------------------
+// -- The --check-only flag
 
 TEST(Driver, CheckOnlySucceedsOnValidInput) {
   auto src = writeTmp("fn main() -> int { return 0; }");
@@ -120,9 +118,7 @@ TEST(Driver, CheckOnlyFailsOnSemanticError) {
   EXPECT_FALSE(out.empty());
 }
 
-// ---------------------------------------------------------------------------
-// --version / -v
-// ---------------------------------------------------------------------------
+// -- The --version / -v flag
 
 TEST(Driver, VersionFlagPrintsVersion) {
   auto [rc, out] = run(std::string(kPaykan) + " --version 2>&1");
@@ -140,10 +136,8 @@ TEST(Driver, ShortVersionFlagMatchesLong) {
   EXPECT_EQ(shortOut.out, longOut.out);
 }
 
-// ---------------------------------------------------------------------------
 // Plugin compatibility (#103): every plugin records the PaykanLang version it
 // was built with, and paykan accepts only the versions on its list.
-// ---------------------------------------------------------------------------
 
 #ifndef PAYKAN_INCOMPATIBLE_PLUGINS_BIN
 #error "PAYKAN_INCOMPATIBLE_PLUGINS_BIN must be defined via CMake"
@@ -288,11 +282,9 @@ TEST(Driver, SelectingAnIncompatiblePluginFails) {
   std::filesystem::remove(src);
 }
 
-// ---------------------------------------------------------------------------
 // --list-backends: the default is the one the build configured, and that is
 // `c` whenever the c backend is built (#27), wherever PAYKAN_BACKENDS lists
 // it: `llvm;c` defaults to c too, and llvm needs --backend=llvm.
-// ---------------------------------------------------------------------------
 
 #ifndef PAYKAN_EXPECTED_DEFAULT_BACKEND
 #error "PAYKAN_EXPECTED_DEFAULT_BACKEND must be defined via CMake"
@@ -373,9 +365,7 @@ TEST(Driver, DefaultBackendRunsPrograms) {
   EXPECT_EQ(out2, out);
 }
 
-// ---------------------------------------------------------------------------
-// --frontend / --list-frontends
-// ---------------------------------------------------------------------------
+// -- The --frontend / --list-frontends flags
 
 TEST(Driver, ListFrontendsNamesTheDefault) {
   auto [rc, out] = run(std::string(kPaykan) + " --list-frontends 2>&1");
@@ -501,9 +491,7 @@ TEST(Driver, UnknownFrontendIsRejected) {
       << out;
 }
 
-// ---------------------------------------------------------------------------
-// --dump-tokens
-// ---------------------------------------------------------------------------
+// -- The --dump-tokens flag
 
 TEST(Driver, DumpTokensPrintsTheTokenStream) {
   auto src = writeTmp("fn main() -> int {\n  return 42;\n}\n");
@@ -600,9 +588,7 @@ TEST(Driver, ProgramArgumentsFollowTheSourceFile) {
   EXPECT_EQ(rc, 4) << out;
 }
 
-// ---------------------------------------------------------------------------
-// integer divide / modulo by zero trap
-// ---------------------------------------------------------------------------
+// -- integer divide / modulo by zero trap
 
 TEST(Driver, IntDivByZeroTraps) {
   REQUIRE_BACKEND();
@@ -690,9 +676,8 @@ TEST(Driver, IntDivOverflowTraps) {
   EXPECT_NE(out.find("integer overflow in division"), std::string::npos) << out;
 }
 
-// ---------------------------------------------------------------------------
-// conversion panics (#64): int<float> outside int64, char<int> outside 0..255
-// ---------------------------------------------------------------------------
+// -- Conversion panics (#64): int<float> outside int64, char<int> outside
+// 0..255
 
 static void expectConversionPanic(const std::string &decl,
                                   const std::string &conv,
@@ -941,9 +926,7 @@ TEST(Driver, IntDivNonZeroSucceeds) {
   EXPECT_EQ(rc, 3); // 17 / 5 == 3, returned as the process exit code
 }
 
-// ---------------------------------------------------------------------------
-// --dump-ast
-// ---------------------------------------------------------------------------
+// -- The --dump-ast flag
 
 TEST(Driver, DumpAstProducesOutput) {
   auto src = writeTmp("fn main() -> int { return 42; }");
@@ -986,9 +969,7 @@ TEST(Driver, OptionalVoidIsRejectedAtParse) {
       << out;
 }
 
-// ---------------------------------------------------------------------------
-// PIR, the C backend, build, and the object cache
-// ---------------------------------------------------------------------------
+// -- PIR, the C backend, build, and the object cache
 
 TEST(Driver, EmitPirPrintsTheProgram) {
   REQUIRE_BACKEND();
@@ -1514,11 +1495,9 @@ TEST(Driver, CBackendRunForwardsArgumentsAndTracksTheHeap) {
   EXPECT_NE(out.find("live blocks       : 0"), std::string::npos) << out;
 }
 
-// ---------------------------------------------------------------------------
 // Reproducible output (#102): modules are named by their canonical module
 // names, so nothing the compiler produces depends on where the sources live
 // or on the directory it runs in.
-// ---------------------------------------------------------------------------
 
 namespace {
 

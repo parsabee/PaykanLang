@@ -1,5 +1,4 @@
 # PaykanConfig.cmake -- find_package(Paykan)
-# ----------------------------------------------------------------------------
 # Imported targets (namespace Paykan::):
 #   Paykan::plugin_api                the C plugin interface
 #                                     (paykan/plugin_api.h, header only): all
@@ -65,7 +64,6 @@
 #   paykan_add_frontend_tests(<frontend> PLUGIN <target-or-file>)
 #       The parser, Sema and frontend suites against a frontend plugin
 #       (PaykanFrontendTests.cmake; docs/writing-a-frontend-plugin.md).
-# ----------------------------------------------------------------------------
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)

@@ -12,16 +12,12 @@ extern "C" {
 #include "RuntimeEqualsHelper.h"
 #include "VTableTestHelper.h"
 
-// ============================================================================
-// Helpers
-// ============================================================================
+// -- Helpers
 
 // Wrap a raw object in a fresh PaykanShared* (refcount=1).
 static PaykanShared *wrap(PaykanObject *obj) { return PaykanShared_new(obj); }
 
-// ============================================================================
-// PaykanArray_new — primitive arrays
-// ============================================================================
+// -- PaykanArray_new — primitive arrays
 
 TEST(ArrayNew, AllocatesCorrectLength) {
   PaykanArray *arr = PaykanArray_new(5);
@@ -51,9 +47,7 @@ TEST(ArrayNew, VtableIsPrimitive) {
   PaykanArray_destroy((PaykanObject *)arr);
 }
 
-// ============================================================================
-// PaykanArray_new_obj — object arrays
-// ============================================================================
+// -- PaykanArray_new_obj — object arrays
 
 TEST(ArrayNewObj, AllocatesCorrectLength) {
   PaykanArray *arr = PaykanArray_new_obj(3);
@@ -81,9 +75,7 @@ TEST(ArrayNewObj, DataIsZeroInitialised) {
   PaykanArray_destroy_obj((PaykanObject *)arr);
 }
 
-// ============================================================================
-// PaykanArray_set / PaykanArray_get — primitive
-// ============================================================================
+// -- PaykanArray_set / PaykanArray_get — primitive
 
 TEST(ArraySetGet, StoresAndReadsInt) {
   PaykanArray *arr = PaykanArray_new(3);
@@ -127,9 +119,7 @@ TEST(ArraySetGet, SetOutOfBoundsDies) {
   PaykanArray_destroy((PaykanObject *)arr);
 }
 
-// ============================================================================
-// PaykanArray_set_obj — reference counting
-// ============================================================================
+// -- PaykanArray_set_obj — reference counting
 
 TEST(ArraySetObj, RetainsIncomingElement) {
   PaykanArray *arr = PaykanArray_new_obj(1);
@@ -178,9 +168,7 @@ TEST(ArraySetObj, NullValueIsStoredSafely) {
   PaykanArray_destroy_obj((PaykanObject *)arr);
 }
 
-// ============================================================================
-// PaykanArray_destroy_obj — releases all elements
-// ============================================================================
+// -- PaykanArray_destroy_obj — releases all elements
 
 TEST(ArrayDestroyObj, ReleasesAllElements) {
   PaykanArray *arr = PaykanArray_new_obj(3);
@@ -201,9 +189,7 @@ TEST(ArrayDestroyObj, ReleasesAllElements) {
   // If we reach here without crashing / ASAN error, the test passes.
 }
 
-// ============================================================================
-// PaykanArray_length
-// ============================================================================
+// -- PaykanArray_length
 
 TEST(ArrayLength, ReturnsCorrectLen) {
   PaykanArray *arr = PaykanArray_new(7);
@@ -217,9 +203,7 @@ TEST(ArrayLength, ZeroLen) {
   PaykanArray_destroy((PaykanObject *)arr);
 }
 
-// ============================================================================
-// PaykanArray_toString
-// ============================================================================
+// -- PaykanArray_toString
 
 TEST(ArrayToString, ContainsLenAndAddress) {
   PaykanArray *arr = PaykanArray_new(4);
@@ -233,9 +217,7 @@ TEST(ArrayToString, ContainsLenAndAddress) {
   PaykanArray_destroy((PaykanObject *)arr);
 }
 
-// ============================================================================
-// PaykanArray_equals
-// ============================================================================
+// -- PaykanArray_equals
 
 TEST(ArrayEquals, SameObjectIsEqual) {
   PaykanArray *arr = PaykanArray_new(2);
@@ -255,9 +237,7 @@ TEST(ArrayEquals, DifferentObjectsAreNotEqual) {
   PaykanArray_destroy((PaykanObject *)b);
 }
 
-// ============================================================================
-// Vtable virtual dispatch
-// ============================================================================
+// -- Vtable virtual dispatch
 
 TEST(ArrayVtable, LengthViaVtable) {
   PaykanArray *arr = PaykanArray_new(9);
@@ -273,9 +253,7 @@ TEST(ArrayVtable, DestroyViaVtable) {
   // Reached here without crash — pass.
 }
 
-// ============================================================================
-// PaykanArray_push / PaykanArray_pop — capacity management
-// ============================================================================
+// -- PaykanArray_push / PaykanArray_pop — capacity management
 
 // Helper: pack an int64_t into a void* for push.
 static void *i64vp(int64_t v) {
