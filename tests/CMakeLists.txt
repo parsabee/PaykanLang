@@ -139,6 +139,7 @@ if("llvm" IN_LIST PAYKAN_BACKENDS)
     target_include_directories(codegen_tests SYSTEM
         PRIVATE ${LLVM_INCLUDE_DIRS}
     )
+    paykan_llvm_no_werror(codegen_tests)
     target_compile_definitions(codegen_tests
         PRIVATE PAYKAN_TEST_HAVE_LLVM=1
     )
@@ -170,6 +171,7 @@ if(PAYKAN_TEST_SUITE_pir_llvm AND "llvm" IN_LIST PAYKAN_BACKENDS)
     target_include_directories(pir_llvm_tests SYSTEM
         PRIVATE ${LLVM_INCLUDE_DIRS}
     )
+    paykan_llvm_no_werror(pir_llvm_tests)
     target_link_libraries(pir_llvm_tests
         PRIVATE gtest_main
                 paykan_jit

@@ -22,6 +22,7 @@ add_library(paykan_backend_llvm STATIC
 target_include_directories(paykan_backend_llvm SYSTEM
     PRIVATE ${LLVM_INCLUDE_DIRS}
 )
+paykan_llvm_no_werror(paykan_backend_llvm)
 target_include_directories(paykan_backend_llvm
     PUBLIC ${PROJECT_SOURCE_DIR}/src/Backends/LLVM
 )

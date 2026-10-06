@@ -18,6 +18,7 @@ target_include_directories(paykan_jit
 target_include_directories(paykan_jit SYSTEM
     PRIVATE ${LLVM_INCLUDE_DIRS}
 )
+paykan_llvm_no_werror(paykan_jit)
 target_link_libraries(paykan_jit
     PRIVATE paykan_runtime
             paykan_compile_options
