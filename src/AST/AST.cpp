@@ -8,7 +8,7 @@
 namespace paykan {
 namespace ast {
 
-// -- BinaryExpr --------------------------------------------------------------
+// -- BinaryExpr
 
 const char *BinaryExpr::getOpcodeStr() const {
   switch (Op) {
@@ -44,7 +44,7 @@ const char *BinaryExpr::getOpcodeStr() const {
   __builtin_unreachable();
 }
 
-// -- UnaryExpr ---------------------------------------------------------------
+// -- UnaryExpr
 
 const char *UnaryExpr::getOpcodeStr() const {
   switch (Op) {
@@ -58,7 +58,7 @@ const char *UnaryExpr::getOpcodeStr() const {
   __builtin_unreachable();
 }
 
-// -- BuiltinType -------------------------------------------------------------
+// -- BuiltinType
 
 void BuiltinType::initOps() {
   switch (TypeKind) {
@@ -97,7 +97,7 @@ void BuiltinType::initOps() {
   }
 }
 
-// -- ClassType ---------------------------------------------------------------
+// -- ClassType
 
 void ClassType::addMethod(MethodDecl *m) {
   // __init__ is a static constructor helper — it has no vtable slot.
@@ -140,7 +140,7 @@ bool ClassType::isSubtypeOf(const ClassType *other) const {
   return SuperClass ? SuperClass->isSubtypeOf(other) : false;
 }
 
-// -- ASTCloner ---------------------------------------------------------------
+// -- ASTCloner
 
 Type *ASTCloner::cloneType(Type *ty) {
   if (!ty)

@@ -20,8 +20,8 @@ namespace ast {
 // type-checked itself; each instantiation is a fresh deep copy of the
 // declaration in which every type annotation naming a type parameter is
 // replaced by the corresponding type argument.  The copy is then registered
-// and checked by Sema exactly like a hand-written declaration, and emitted by
-// CodeGen without any generics-specific code path.
+// and checked by Sema exactly like a hand-written declaration, and lowered
+// without any generics-specific code path.
 //
 // Substitution rules for a type annotation:
 //   * ClassType stub whose name is a type parameter  -> the argument type

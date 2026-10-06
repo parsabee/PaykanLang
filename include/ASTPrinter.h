@@ -39,6 +39,8 @@ class ASTPrinter : public ASTVisitor<ASTPrinter, void> {
 
   void printIndent();
   void printLoc(const ASTNode *node);
+  /// The indent, @p kind and the location: the start of a node's line.
+  void header(const char *kind, const ASTNode *node);
 
   // RAII helper to manage indentation for children.
   struct ChildScope {
@@ -49,12 +51,11 @@ class ASTPrinter : public ASTVisitor<ASTPrinter, void> {
 
   void visitChildren(CompoundStmt *node);
   void visitChildren(CallExpr *node);
-  void visitChildren(MethodCallExpr *node);
 
 public:
   explicit ASTPrinter(std::ostream &os);
 
-  // -- Visitor overrides (generated from X-macros) -------------------------
+  // -- Visitor overrides (generated from X-macros)
   // `Cast` is a type name used in a declarator (`Cast *node`) and cannot be
   // parenthesized, so the macro-parentheses check is suppressed here.
   // NOLINTNEXTLINE(bugprone-macro-parentheses)
