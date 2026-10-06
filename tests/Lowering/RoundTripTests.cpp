@@ -7,6 +7,7 @@
 // form (docs/design/pkm.md §5) must hold the same two invariants, and its
 // symbol index must slice every function out of the blob.
 
+#include "ModuleName.h"
 #include "TestUtils.h"
 #include "paykan/lowering/Lowering.h"
 #include "paykan/pir/Binary.h"
@@ -70,7 +71,8 @@ bool lowerFile(const std::string &path, pir::Program &program,
   if (!ctx)
     return false;
   std::ostringstream errs;
-  if (!lowering::lowerProgram(ctx, driver.getRoot(), path, root, program,
+  if (!lowering::lowerProgram(ctx, driver.getRoot(),
+                              module_name::mainModuleName(path), root, program,
                               errs)) {
     error = "lowering failed: " + errs.str();
     return true;
