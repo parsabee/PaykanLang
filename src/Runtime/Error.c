@@ -1,30 +1,19 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// Paykan runtime — Error type implementation.
-//
-// Error is a builtin class that inherits Obj.  It is returned by open()
-// when the underlying fopen call fails.  Its toString returns the
-// human-readable error message.
+// Paykan runtime — Error type implementation: what open() returns when
+// fopen fails; toString is the message.
 
 #include "Runtime.h"
 #include "RuntimeInternal.h"
 
 #include <stdlib.h>
 
-// ============================================================================
-// VTable
-// ============================================================================
-
 PaykanMethod PaykanError_vtable[PAYKAN_OBJECT_SLOTS] = {
     [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanError_destroy,
     [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanError_toString,
     [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanError_equals,
 };
-
-// ============================================================================
-// Constructor
-// ============================================================================
 
 PaykanError *PaykanError_new(const char *msg, int64_t len) {
   PaykanError *e = (PaykanError *)Paykan_malloc(sizeof(PaykanError));
@@ -34,10 +23,6 @@ PaykanError *PaykanError_new(const char *msg, int64_t len) {
   return e;
 }
 
-// ============================================================================
-// Method implementations
-// ============================================================================
-
 void PaykanError_destroy(PaykanObject *self) {
   PaykanError *e = (PaykanError *)self;
   PaykanString_destroy((PaykanObject *)e->message);
@@ -46,13 +31,11 @@ void PaykanError_destroy(PaykanObject *self) {
 
 PaykanShared *PaykanError_toString(PaykanObject *self) {
   PaykanError *e = (PaykanError *)self;
-  // Return a new shared wrapper around a copy of the message string.
   return PaykanShared_new(
       (PaykanObject *)PaykanString_new(e->message->data, e->message->len));
 }
 
 int64_t PaykanError_equals(PaykanObject *self, PaykanShared *other) {
-  // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
   PaykanObject *o = Paykan_equals_unbox_other(other);
   int64_t result = o && self == o;
   return Paykan_equals_consume_other(other, result);

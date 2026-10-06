@@ -3,29 +3,11 @@
 //
 // Paykan runtime — Tuple type implementation.
 //
-// ONE generic runtime object backs every tuple type `(T1, T2, ...)`: the
-// compiler does not emit a struct per tuple type.  A PaykanTuple is a
-// fixed-count sequence of 8-byte slots plus a per-slot kind byte that tells
-// the runtime how to interpret each slot (see PaykanTupleKind in Runtime.h):
-//
-//   PAYKAN_TUPLE_INT / BOOL / CHAR  raw int64_t (bool 0/1, char zero-extended)
-//   PAYKAN_TUPLE_FLOAT              raw IEEE-754 double bits
-//   PAYKAN_TUPLE_REF                PaykanShared* (retained by the tuple), or
-//                                   NULL
-//
-// The kinds let a single vtable implement destroy (release exactly the REF
-// slots), equals (compare element-wise, dispatching `equals` on references)
-// and toString (render `(1, a)`), while CodeGen still statically knows every
-// element's type and reads slots with the right reinterpretation.
-//
-// Ownership mirrors object arrays: PaykanTuple_set_obj retains the stored box
-// (the caller keeps its own reference), PaykanTuple_get returns the raw slot
-// bits without retaining, and PaykanTuple_destroy releases every REF slot.
-// Tuples are immutable at the language level; the set functions exist only
-// so a literal can be filled right after construction.
-//
-// The whole object — header, slots and kind bytes — is ONE heap block, so a
-// tuple costs a single allocation (plus its PaykanShared box).
+// One object backs every tuple type (Runtime.h, "Tuple"): the per-slot kind
+// bytes let a single vtable destroy (release the REF slots), compare
+// (element-wise, dispatching `equals` on references) and render (`(1, a)`)
+// a tuple whose element types only the compiler knows.  Header, slots and
+// kind bytes are one heap block.
 
 #include "Runtime.h"
 #include "RuntimeInternal.h"
@@ -34,15 +16,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-// A REF slot stores a PaykanShared* in its 8-byte slot by memcpy of the slot
-// width (never sizeof the pointer variable, which clang-tidy reads as a
-// pointer-to-aggregate mistake); this is what makes the two widths agree.
+// A REF slot is read and written by memcpy of the slot width, so the two
+// widths must agree.
 _Static_assert(sizeof(PaykanShared *) == sizeof(uint64_t),
                "a tuple slot must hold a PaykanShared* exactly");
 
-// ============================================================================
-// VTable
-// ============================================================================
+// -- VTable
 
 PaykanMethod PaykanTuple_vtable[PAYKAN_OBJECT_SLOTS] = {
     [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanTuple_destroy,
@@ -50,9 +29,7 @@ PaykanMethod PaykanTuple_vtable[PAYKAN_OBJECT_SLOTS] = {
     [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanTuple_equals,
 };
 
-// ============================================================================
-// Constructor / destructor
-// ============================================================================
+// -- Constructor / destructor
 
 PaykanTuple *PaykanTuple_new(int64_t count, const uint8_t *kinds) {
   if (count < 0) {
@@ -88,9 +65,7 @@ void PaykanTuple_destroy(PaykanObject *self) {
   Paykan_free(t);
 }
 
-// ============================================================================
-// Element access
-// ============================================================================
+// -- Element access
 
 static void tuple_check_index(const PaykanTuple *t, int64_t idx) {
   if (idx < 0 || idx >= t->count) {
@@ -137,11 +112,9 @@ void PaykanTuple_set_obj(PaykanTuple *t, int64_t idx, PaykanShared *value) {
   memcpy(&t->slots[idx], &value, sizeof(t->slots[idx]));
 }
 
-// ============================================================================
-// toString — "(e0, e1, ...)"
-// ============================================================================
+// -- toString
 
-// Minimal growable byte buffer for building the rendering.
+/// A growable byte buffer for the rendering.
 typedef struct {
   char *data;
   size_t len;
@@ -220,12 +193,9 @@ PaykanShared *PaykanTuple_toString(PaykanObject *self) {
   return PaykanShared_new((PaykanObject *)out);
 }
 
-// ============================================================================
-// equals — element-wise
-// ============================================================================
+// -- equals
 
 int64_t PaykanTuple_equals(PaykanObject *self, PaykanShared *other) {
-  // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
   PaykanObject *o = Paykan_equals_unbox_other(other);
   int64_t result = 0;
   // No identity shortcut (`o == self` -> equal): equality is element-wise
