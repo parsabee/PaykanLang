@@ -4,7 +4,7 @@
 # builds only the compiler and downloads nothing.
 #
 #   -DPAYKAN_BUILD_TESTS="parser;sema"   the named suites (a CMake list)
-#   -DPAYKAN_BUILD_ALL_TESTS=ON          every suite
+#   -DPAYKAN_BUILD_ALL_TESTS=ON          every suite not marked disabled
 #
 # The suites are listed once, in tests/suites.json (name, whether it is built
 # on GoogleTest, what it runs); `scripts/affected_tests.py --list` prints
@@ -31,6 +31,7 @@ file(READ "${PAYKAN_TEST_SUITES_FILE}" _paykan_suites_json)
 string(JSON _paykan_suite_count LENGTH "${_paykan_suites_json}" suites)
 set(PAYKAN_TEST_SUITES "")
 set(PAYKAN_GTEST_SUITES "")
+set(PAYKAN_DISABLED_TEST_SUITES "")
 math(EXPR _paykan_last "${_paykan_suite_count} - 1")
 foreach(i RANGE ${_paykan_last})
     string(JSON suite MEMBER "${_paykan_suites_json}" suites ${i})
@@ -38,6 +39,11 @@ foreach(i RANGE ${_paykan_last})
     string(JSON gtest GET "${_paykan_suites_json}" suites ${suite} gtest)
     if(gtest)
         list(APPEND PAYKAN_GTEST_SUITES ${suite})
+    endif()
+    string(JSON disabled ERROR_VARIABLE _paykan_no_disabled
+           GET "${_paykan_suites_json}" suites ${suite} disabled)
+    if(disabled AND NOT _paykan_no_disabled)
+        list(APPEND PAYKAN_DISABLED_TEST_SUITES ${suite})
     endif()
 endforeach()
 list(JOIN PAYKAN_TEST_SUITES ", " _paykan_known_suites)
@@ -48,6 +54,12 @@ option(PAYKAN_BUILD_ALL_TESTS "Build every test suite" OFF)
 
 if(PAYKAN_BUILD_ALL_TESTS)
     set(PAYKAN_ENABLED_TEST_SUITES ${PAYKAN_TEST_SUITES})
+    if(PAYKAN_DISABLED_TEST_SUITES)
+        list(REMOVE_ITEM PAYKAN_ENABLED_TEST_SUITES ${PAYKAN_DISABLED_TEST_SUITES})
+        list(JOIN PAYKAN_DISABLED_TEST_SUITES ", " _paykan_disabled)
+        message(STATUS "Test suites disabled in tests/suites.json, not built: "
+                       "${_paykan_disabled}")
+    endif()
 elseif(NOT PAYKAN_BUILD_TESTS)
     # "", OFF, NO, FALSE, 0: no tests.
     set(PAYKAN_ENABLED_TEST_SUITES "")
@@ -67,6 +79,10 @@ else()
             message(FATAL_ERROR
                 "PAYKAN_BUILD_TESTS: unknown test suite '${suite}' "
                 "(the suites: ${_paykan_known_suites}).")
+        endif()
+        if(suite IN_LIST PAYKAN_DISABLED_TEST_SUITES)
+            message(STATUS "Test suite '${suite}' is disabled in "
+                           "tests/suites.json; building it because it was named")
         endif()
         list(APPEND PAYKAN_ENABLED_TEST_SUITES ${suite})
     endforeach()

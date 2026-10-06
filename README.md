@@ -227,7 +227,9 @@ ctest --test-dir build --output-on-failure
 ```
 
 The suites are listed in [`tests/suites.json`](tests/suites.json);
-`scripts/affected_tests.py --list` prints them with what each runs. The GoogleTest-based ones need GoogleTest: an installed one if CMake finds it, otherwise one
+`scripts/affected_tests.py --list` prints them with what each runs. Setting a suite's
+`"disabled": true` there leaves it out of `-DPAYKAN_BUILD_ALL_TESTS=ON` and of CI; naming it in
+`-DPAYKAN_BUILD_TESTS` still builds it. The GoogleTest-based ones need GoogleTest: an installed one if CMake finds it, otherwise one
 downloaded at configure time.
 
 `scripts/affected_tests.py --base <commit>` prints the suites a change can affect; CI builds

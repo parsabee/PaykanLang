@@ -10,6 +10,7 @@ Reads the files changed between <base> and <head> (default HEAD) with
 suites those files can affect, as a CMake list (`parser;sema`), or `all`
 when every suite is.  An empty line means no suite is affected (a change to
 the release workflow, say).  --list prints every suite and what it runs.
+A suite marked "disabled" in tests/suites.json is never picked.
 
 The suites and the path rules live in tests/suites.json, the one list that
 CMake (cmake/PaykanTests.cmake) reads too.  The rules are deliberately
@@ -63,6 +64,7 @@ def load(path: str = SUITES_FILE):
 
 
 def affected(paths, suites, rules):
+    """ALL (every suite not disabled), or the affected suites not disabled."""
     selected = set()
     for path in paths:
         hit = next((names for pattern, names in rules
@@ -70,7 +72,8 @@ def affected(paths, suites, rules):
         if hit == ALL:
             return ALL  # an unknown path affects everything
         selected.update(hit)
-    return [s for s in suites if s in selected]
+    return [s for s, info in suites.items()
+            if s in selected and not info.get("disabled", False)]
 
 
 def changed_files(base: str, head: str):
@@ -94,7 +97,8 @@ def main() -> int:
     if args.list:
         width = max(len(name) for name in suites)
         for name, info in suites.items():
-            print(f"{name:<{width}}  {info['description']}")
+            note = " [disabled]" if info.get("disabled", False) else ""
+            print(f"{name:<{width}}  {info['description']}{note}")
         return 0
 
     paths = args.files if args.files is not None else changed_files(args.base, args.head)
