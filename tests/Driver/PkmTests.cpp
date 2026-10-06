@@ -49,7 +49,8 @@ CmdResult run(const std::string &cmd) {
     return {-1, ""};
   while (fgets(buf.data(), buf.size(), fp))
     out += buf.data();
-  return {WEXITSTATUS(pclose(fp)), out};
+  int rc = pclose(fp); // a macro on macOS: needs an lvalue
+  return {WEXITSTATUS(rc), out};
 }
 
 bool hasBackend() {
