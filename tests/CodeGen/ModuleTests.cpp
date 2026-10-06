@@ -57,9 +57,7 @@ static int runProjectInChild(const std::string &mainPath,
   return code >= 254 ? -1 : code;
 }
 
-// ============================================================================
-// Imports
-// ============================================================================
+// -- Imports
 
 TEST(Module, ImportBasic) {
   auto tmpDir = paykan::test::tempDir() / "pkn_import_test";
@@ -278,9 +276,7 @@ fn main() -> int { return mid::bumped() + leaf::base(); }
   std::filesystem::remove_all(tmpDir);
 }
 
-// ============================================================================
-// Bitcode cache
-// ============================================================================
+// -- Bitcode cache
 
 // main -> mid -> base.  Editing base's class layout must invalidate mid's
 // cached bitcode too: mid's code addresses Point's fields by slot index, so a

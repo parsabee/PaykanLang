@@ -31,9 +31,7 @@ fn show(o: float?) -> Str {
 }
 )";
 
-// ============================================================================
-// int<Str>
-// ============================================================================
+// -- int<Str>
 
 TEST(ParseInt, ValidStrings) {
   LeakGuard g;
@@ -96,9 +94,7 @@ TEST(ParseInt, ResultIsAnOrdinaryIntOptional) {
   g.expectNoLeaks("ParseInt.ResultIsAnOrdinaryIntOptional");
 }
 
-// ============================================================================
-// float<Str>
-// ============================================================================
+// -- float<Str>
 
 TEST(ParseFloat, ValidStrings) {
   LeakGuard g;
@@ -163,9 +159,7 @@ TEST(ParseFloat, SubnormalsParseAndOutOfRangeIsNone) {
   g.expectNoLeaks("ParseFloat.SubnormalsParseAndOutOfRangeIsNone");
 }
 
-// ============================================================================
-// The boxes: a present int? / float? is an Int / Float object
-// ============================================================================
+// -- The boxes: a present int? / float? is an Int / Float object
 
 TEST(BoxedEquals, IntBoxesThroughObj) {
   LeakGuard g;

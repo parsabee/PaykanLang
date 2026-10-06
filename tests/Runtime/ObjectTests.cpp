@@ -13,9 +13,7 @@ extern "C" {
 #include "RuntimeEqualsHelper.h"
 #include "VTableTestHelper.h"
 
-// ============================================================================
-// PaykanObject_new / PaykanObject_destroy
-// ============================================================================
+// -- PaykanObject_new / PaykanObject_destroy
 
 TEST(ObjectNew, AllocatesObject) {
   PaykanObject *obj = PaykanObject_new();
@@ -29,9 +27,7 @@ TEST(ObjectNew, VtableIsObjectVtable) {
   PaykanObject_destroy(obj);
 }
 
-// ============================================================================
-// PaykanObject_toString
-// ============================================================================
+// -- PaykanObject_toString
 
 TEST(ObjectToString, ContainsObjectPrefix) {
   PaykanObject *obj = PaykanObject_new();
@@ -58,9 +54,7 @@ TEST(ObjectToString, ReturnsNewStringEachCall) {
   PaykanObject_destroy(obj);
 }
 
-// ============================================================================
-// PaykanObject_equals
-// ============================================================================
+// -- PaykanObject_equals
 
 TEST(ObjectEquals, SameObjectIsEqual) {
   PaykanObject *obj = PaykanObject_new();
@@ -76,9 +70,7 @@ TEST(ObjectEquals, DifferentObjectsAreNotEqual) {
   PaykanObject_destroy(b);
 }
 
-// ============================================================================
-// Vtable dispatch
-// ============================================================================
+// -- Vtable dispatch
 
 // Paykan_vtable_of reads any object's vtable, whatever its struct type.
 TEST(ObjectVtable, VTableOfReadsTheHeader) {
@@ -113,9 +105,7 @@ TEST(ObjectVtable, DestroyViaVtable) {
   vtDestroy(obj)(obj);
 }
 
-// ============================================================================
-// PaykanObject_None singleton
-// ============================================================================
+// -- PaykanObject_None singleton
 
 TEST(ObjectNone, ToStringReturnsNone) {
   PaykanShared *shared = vtToString(&PaykanObject_None)(&PaykanObject_None);

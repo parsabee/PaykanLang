@@ -1,9 +1,6 @@
-# tests/CMakeLists.txt
-# ----------------------------------------------------------------------------
 # The Paykan compiler's tests, in suites (cmake/PaykanTests.cmake): each
 # section below registers one suite, and only when the build includes it
 # (-DPAYKAN_BUILD_TESTS=<suites> or -DPAYKAN_BUILD_ALL_TESTS=ON).
-# ----------------------------------------------------------------------------
 
 
 # The plugin build versions this build accepts, for the plugin, driver and

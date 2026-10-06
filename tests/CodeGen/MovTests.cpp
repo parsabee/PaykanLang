@@ -123,7 +123,7 @@ TEST(Mov, ConditionalMove) {
   EXPECT_EQ(r.StdOut, "cond\n");
 }
 
-// -- `mov` inside a ternary branch --------------------------------------------
+// -- `mov` inside a ternary branch
 //
 // Whichever branch runs, the result must own exactly one reference and the
 // source variable must be released exactly once overall: never twice (a
@@ -268,7 +268,7 @@ TEST(Mov, TernaryMoveIntoCallInBranch) {
   g.expectNoLeaks("TernaryMoveIntoCallInBranch");
 }
 
-// -- `mov` inside the short-circuit RHS of `&&` / `||` -----------------------
+// -- `mov` inside the short-circuit RHS of `&&` / `||`
 
 TEST(Mov, AndMoveInRhsEvaluatedAndSkipped) {
   LeakGuard g;

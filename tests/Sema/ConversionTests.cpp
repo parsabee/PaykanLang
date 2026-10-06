@@ -385,7 +385,7 @@ TEST(Conversion, GenericCallsAreStillGenericCalls) {
   )");
 }
 
-// -- `''` is one error on every frontend (#119) -----------------------------
+// -- `''` is one error on every frontend (#119)
 
 TEST(CharLiteral, EmptyCharLiteralIsOneError) {
   const std::string src = "fn main() -> int { c = ''; return 0; }\n";

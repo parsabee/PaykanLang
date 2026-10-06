@@ -15,9 +15,7 @@ extern "C" {
 
 using namespace paykan::test;
 
-// ============================================================================
-// Declarations, None, printing, match
-// ============================================================================
+// -- Declarations, None, printing, match
 
 TEST(OptionalPrimitive, EveryPrimitiveSomeAndNone) {
   LeakGuard g;
@@ -157,9 +155,7 @@ TEST(OptionalPrimitive, WildcardAndNoneArmsAndEarlyReturn) {
   g.expectNoLeaks("WildcardAndNoneArmsAndEarlyReturn");
 }
 
-// ============================================================================
-// Comparisons
-// ============================================================================
+// -- Comparisons
 
 TEST(OptionalPrimitive, CompareAgainstNoneAndEachOther) {
   LeakGuard g;
@@ -191,9 +187,7 @@ TEST(OptionalPrimitive, CompareAgainstNoneAndEachOther) {
   g.expectNoLeaks("CompareAgainstNoneAndEachOther");
 }
 
-// ============================================================================
-// Sinks: params/returns, fields, arrays, tuples, ternary, mov, Obj
-// ============================================================================
+// -- Sinks: params/returns, fields, arrays, tuples, ternary, mov, Obj
 
 TEST(OptionalPrimitive, ParamsAndReturns) {
   LeakGuard g;
@@ -364,9 +358,7 @@ TEST(OptionalPrimitive, IntoObjAsBoxedClasses) {
   g.expectNoLeaks("IntoObjAsBoxedClasses");
 }
 
-// ============================================================================
-// Generics
-// ============================================================================
+// -- Generics
 
 TEST(OptionalPrimitive, GenericArgumentsAndOptionalOfTypeParameter) {
   LeakGuard g;

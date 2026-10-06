@@ -11,9 +11,7 @@ static std::string wrapMain(const std::string &body) {
   return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
-// ============================================================================
-// Function declaration checks
-// ============================================================================
+// -- Function declaration checks
 
 TEST(Func, UndeclaredFunction) {
   auto r = semaCheck(wrapMain("foo();"));
@@ -79,9 +77,7 @@ TEST(Func, FunctionClassNameCollision) {
       << r.Diagnostics;
 }
 
-// ============================================================================
-// Builtin names are reserved: a free function may not redeclare one
-// ============================================================================
+// -- Builtin names are reserved: a free function may not redeclare one
 
 // Every builtin function registered by Sema::run(), including those a user
 // might plausibly want to "override".
@@ -182,9 +178,7 @@ TEST(Func, ClassTypeAsParam) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// ============================================================================
-// Scoping
-// ============================================================================
+// -- Scoping
 
 TEST(Func, BlockScopeIsolation) {
   auto r = semaCheck(wrapMain(R"(
@@ -207,9 +201,7 @@ TEST(Func, InnerScopeCanAccessOuter) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// ============================================================================
-// The print family is single-argument (no variadic functions / overloading)
-// ============================================================================
+// -- The print family is single-argument (no variadic functions / overloading)
 
 TEST(Func, PrintlnSingleArgOk) {
   auto r = semaCheck(wrapMain(R"(println("hello" + " world");)"));
@@ -230,9 +222,7 @@ TEST(Func, PrintRejectsMultipleArgs) {
       << r.Diagnostics;
 }
 
-// ============================================================================
-// The program's entry point (#132)
-// ============================================================================
+// -- The program's entry point (#132)
 //
 // A program that is built or run needs `fn main() -> int` (or `fn main(args:
 // Str[]) -> int`).  Sema reports a missing or ill-typed one with a source

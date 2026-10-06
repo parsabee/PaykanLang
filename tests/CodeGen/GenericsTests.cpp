@@ -330,9 +330,7 @@ fn main() -> int { b = gen::mk(); return b.get() + 1; }
   g.expectNoLeaks("ExportedInstantiationAcrossModules");
 }
 
-// ============================================================================
-// Interaction with tuples (#4) and optionals (#5)
-// ============================================================================
+// -- Interaction with tuples (#4) and optionals (#5)
 
 TEST(GenericsTypes, TupleFieldLiteralIndexAndDestructuring) {
   LeakGuard g;

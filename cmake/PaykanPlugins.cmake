@@ -1,5 +1,3 @@
-# PaykanPlugins.cmake
-# ----------------------------------------------------------------------------
 # Plugin options and helpers.
 #
 # A plugin (a frontend or a backend) is a static library that registers
@@ -17,7 +15,6 @@
 #   PAYKAN_NEEDS_LLVM         -- TRUE when a listed backend depends on LLVM
 #   paykan_add_plugin(<target>)
 #   paykan_link_plugins(<target>)
-# ----------------------------------------------------------------------------
 
 # -- Frontends ----------------------------------------------------------------
 # The in-tree frontends: `recursive-descent` (standard C++ only), always

@@ -1,5 +1,3 @@
-# CoverageSetup.cmake
-# ----------------------------------------------------------------------------
 # Adds an optional source-based code-coverage build configuration using
 # Clang/LLVM's instrumentation (`-fprofile-instr-generate -fcoverage-mapping`),
 # reported via the vendored `llvm-cov` / `llvm-profdata`.
@@ -8,12 +6,11 @@
 #   cmake -B build-cov -DPAYKAN_BUILD_ALL_TESTS=ON -DPAYKAN_COVERAGE=ON
 #   cmake --build build-cov --parallel "$(getconf _NPROCESSORS_ONLN)"
 #   ctest --test-dir build-cov --output-on-failure   # produces .profraw files
-#   ./scripts/coverage.sh build-cov                   # merges + reports
+#   python3 scripts/coverage.py --build-dir build-cov  # merges + reports
 #
 # Coverage requires Clang (the instrumentation flags and llvm-cov are
 # Clang/LLVM specific). The project targets ~100% line coverage of first-party
-# sources; scripts/coverage.sh enforces a configurable floor.
-# ----------------------------------------------------------------------------
+# sources; scripts/coverage.py enforces a configurable floor.
 
 option(PAYKAN_COVERAGE "Build with LLVM source-based code coverage" OFF)
 

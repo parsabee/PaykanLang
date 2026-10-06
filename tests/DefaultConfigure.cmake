@@ -1,5 +1,4 @@
 # DefaultConfigure.cmake -- the DefaultConfigure ctest (#123).
-# ----------------------------------------------------------------------------
 # Configures the source tree with no options at all (what packagers run; tests
 # are off by default) in a scratch build directory and checks that the
 # defaults are the core: the recursive-descent frontend and the c backend,
@@ -8,7 +7,6 @@
 #
 #   cmake -DSOURCE_DIR=<src> -DBINARY_DIR=<scratch> -DGENERATOR=<gen>
 #         [-DC_COMPILER=<cc>] [-DCXX_COMPILER=<c++>] -P DefaultConfigure.cmake
-# ----------------------------------------------------------------------------
 
 foreach(var SOURCE_DIR BINARY_DIR GENERATOR)
     if(NOT DEFINED ${var})

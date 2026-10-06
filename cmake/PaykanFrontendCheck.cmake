@@ -1,5 +1,4 @@
 # PaykanFrontendCheck.cmake -- installed with Paykan's test support
-# ----------------------------------------------------------------------------
 # The differential check of a frontend plugin through the INSTALLED `paykan`
 # (paykan_add_frontend_tests adds it as InstalledPaykan.<frontend>): with
 # only the plugin loaded (--no-plugins --plugin=<file>), the plugin's

@@ -11,9 +11,7 @@ static std::string wrapMain(const std::string &body) {
   return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
-// ============================================================================
-// Basic char literals and Str<char> conversion
-// ============================================================================
+// -- Basic char literals and Str<char> conversion
 
 TEST(Char, LiteralAndStrChar) {
   auto r = compileAndRun(wrapMain(R"(
@@ -51,9 +49,7 @@ TEST(Char, EscapeBackslash) {
   EXPECT_EQ(r.StdOut, "\\\n");
 }
 
-// ============================================================================
-// Comparison operators
-// ============================================================================
+// -- Comparison operators
 
 TEST(Char, LessThan) {
   auto r = compileAndRun(wrapMain(R"(
@@ -83,9 +79,7 @@ TEST(Char, GreaterThan) {
   EXPECT_EQ(r.StdOut, "true\n");
 }
 
-// ============================================================================
-// String indexing: s[i] -> char
-// ============================================================================
+// -- String indexing: s[i] -> char
 
 TEST(Char, StringIndexYieldsChar) {
   auto r = compileAndRun(wrapMain(R"(
@@ -129,9 +123,7 @@ TEST(Char, IterateStringViaIndex) {
   EXPECT_EQ(r.StdOut, "hi\n");
 }
 
-// ============================================================================
-// Str<char> usage in string concatenation
-// ============================================================================
+// -- Str<char> usage in string concatenation
 
 TEST(Char, ConcatChars) {
   auto r = compileAndRun(wrapMain(R"(
@@ -142,9 +134,7 @@ TEST(Char, ConcatChars) {
   EXPECT_EQ(r.StdOut, "---\n");
 }
 
-// ============================================================================
-// Regression: multi-char literal must be rejected (task #2)
-// ============================================================================
+// -- Regression: multi-char literal must be rejected (task #2)
 
 TEST(Char, MultiCharLiteralIsError) {
   // 'ab' should fail to parse or compile — not silently produce a wrong char.

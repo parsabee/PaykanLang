@@ -1,5 +1,3 @@
-# PaykanExport.cmake
-# ----------------------------------------------------------------------------
 # Install rules and the `find_package(Paykan)` package, so that a backend or
 # frontend can be written out of tree against the installed interfaces and
 # linked into a custom `paykan` build (docs/writing-a-backend.md).
@@ -19,7 +17,6 @@
 # Paykan::plugin, Paykan::backend, Paykan::pir, Paykan::frontend,
 # Paykan::driver, ... plus every built plugin (Paykan::frontend_recursive_descent,
 # Paykan::backend_llvm, ...).
-# ----------------------------------------------------------------------------
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)

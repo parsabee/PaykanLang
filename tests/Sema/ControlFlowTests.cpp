@@ -11,9 +11,7 @@ static std::string wrapMain(const std::string &body) {
   return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
-// ============================================================================
-// if / else
-// ============================================================================
+// -- if / else
 
 TEST(ControlFlow, IfBoolCondition) {
   auto r = semaCheck(wrapMain(R"(
@@ -59,9 +57,7 @@ TEST(ControlFlow, IfStringConditionRejected) {
   EXPECT_NE(r.Diagnostics.find("bool"), std::string::npos);
 }
 
-// ============================================================================
-// while
-// ============================================================================
+// -- while
 
 TEST(ControlFlow, WhileBoolCondition) {
   auto r = semaCheck(wrapMain(R"(
@@ -87,9 +83,7 @@ TEST(ControlFlow, WhileTrueLiteral) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// ============================================================================
-// Logical operators && ||
-// ============================================================================
+// -- Logical operators && ||
 
 TEST(ControlFlow, LogicalAndBool) {
   auto r = semaCheck(wrapMain("a: bool = True && False;"));
@@ -155,9 +149,7 @@ TEST(ControlFlow, LogicalInWhileCondition) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// ============================================================================
-// Ternary expressions
-// ============================================================================
+// -- Ternary expressions
 
 TEST(ControlFlow, TernaryIntBranches) {
   auto r = semaCheck(wrapMain("x: int = if True then 1 else 2;"));
@@ -236,9 +228,7 @@ TEST(ControlFlow, TernaryArrayDimensionMismatchRejected) {
   EXPECT_FALSE(r.Ok);
 }
 
-// ============================================================================
-// break / continue
-// ============================================================================
+// -- break / continue
 
 TEST(ControlFlow, BreakInsideLoop) {
   auto r = semaCheck(wrapMain(R"(
@@ -293,9 +283,7 @@ TEST(ControlFlow, BreakInNestedLoop) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// ============================================================================
-// Return-path analysis: bool-exhaustive match (True + False literal arms)
-// ============================================================================
+// -- Return-path analysis: bool-exhaustive match (True + False literal arms)
 
 TEST(ControlFlow, BoolMatchTrueFalseArmsIsExhaustiveReturn) {
   auto r = semaCheck(R"(

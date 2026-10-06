@@ -14,17 +14,13 @@ extern "C" {
 
 #include "RuntimeEqualsHelper.h"
 
-// ============================================================================
-// Helpers
-// ============================================================================
+// -- Helpers
 
 static const char *sharedStr(PaykanShared *s) {
   return ((PaykanString *)PaykanShared_get(s))->data;
 }
 
-// ============================================================================
-// PaykanInt
-// ============================================================================
+// -- PaykanInt
 
 TEST(BoxedInt, New) {
   PaykanInt *i = PaykanInt_new(42);
@@ -141,9 +137,7 @@ TEST(BoxedInt, FromStrNegative) {
   PaykanString_destroy(strObj);
 }
 
-// ============================================================================
-// PaykanFloat
-// ============================================================================
+// -- PaykanFloat
 
 TEST(BoxedFloat, New) {
   PaykanFloat *f = PaykanFloat_new(3.14);
@@ -278,9 +272,7 @@ TEST(BoxedFloat, NonNaNIsEqualToItself) {
   PaykanFloat_destroy((PaykanObject *)a);
 }
 
-// ============================================================================
-// PaykanBool
-// ============================================================================
+// -- PaykanBool
 
 TEST(BoxedBool, NewTrue) {
   PaykanBool *b = PaykanBool_new(1);
@@ -358,9 +350,7 @@ TEST(BoxedBool, FromStrRejectsEverythingElse) {
   EXPECT_EQ(parseBool("True\0", 5), nullptr); // an embedded NUL is not ignored
 }
 
-// ============================================================================
-// PaykanChar (the box of a present `char?`) and the *_value accessors
-// ============================================================================
+// -- PaykanChar (the box of a present `char?`) and the *_value accessors
 
 TEST(BoxedChar, NewValueAndVtable) {
   PaykanChar *c = PaykanChar_new('q');
@@ -417,9 +407,7 @@ TEST(BoxedPrimitiveValue, AccessorsReturnTheStoredValue) {
   PaykanBool_destroy((PaykanObject *)b);
 }
 
-// ============================================================================
-// PaykanError
-// ============================================================================
+// -- PaykanError
 
 TEST(BoxedError, New) {
   const char *msg = "something went wrong";

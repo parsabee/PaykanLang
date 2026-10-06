@@ -88,9 +88,7 @@ std::string function(const std::string &text, const std::string &name) {
 
 } // namespace
 
-// ---------------------------------------------------------------------------
-// Variables, scope cleanup, strings
-// ---------------------------------------------------------------------------
+// -- Variables, scope cleanup, strings
 
 TEST(Lowering, OwnedVariablesAreReleasedInReverseOrderAtScopeExit) {
   auto l = lower(R"(
@@ -183,9 +181,7 @@ TEST(Lowering, ReturnReleasesEveryScopeAfterEvaluatingTheValue) {
   EXPECT_NE(inner.find("ret %"), std::string::npos) << inner;
 }
 
-// ---------------------------------------------------------------------------
-// mov
-// ---------------------------------------------------------------------------
+// -- mov
 
 TEST(Lowering, MovOfOwnedVariableNullsTheSlotAndSkipsTheRetain) {
   auto l = lower(R"(
@@ -209,9 +205,7 @@ TEST(Lowering, MovOfOwnedVariableNullsTheSlotAndSkipsTheRetain) {
   EXPECT_EQ(count(t, "release"), 1u) << t;
 }
 
-// ---------------------------------------------------------------------------
-// Calls: callee-consumes ABI for user functions, borrow for builtins
-// ---------------------------------------------------------------------------
+// -- Calls: callee-consumes ABI for user functions, borrow for builtins
 
 TEST(Lowering, UserCallRetainsAVariableArgument) {
   auto l = lower(R"(
@@ -287,9 +281,7 @@ TEST(Lowering, FloatComparisonsAreSingleCmpInstructions) {
   EXPECT_EQ(count(f, " = cmp "), 6u) << f;
 }
 
-// ---------------------------------------------------------------------------
-// Classes: layout, vtable, constructor, destructor, fields
-// ---------------------------------------------------------------------------
+// -- Classes: layout, vtable, constructor, destructor, fields
 
 TEST(Lowering, ClassItemCarriesFlattenedLayoutAndVTable) {
   auto l = lower(R"(
@@ -394,9 +386,7 @@ TEST(Lowering, CallRootedFieldReadRetainsTheFieldAndReleasesTheReceiver) {
   EXPECT_EQ(count(m, "retain"), 1u) << m;
 }
 
-// ---------------------------------------------------------------------------
-// match
-// ---------------------------------------------------------------------------
+// -- match
 
 // #72: a string-literal subject is built as a Str (not passed as its raw C
 // string) and released on every exit of the match.
@@ -586,9 +576,7 @@ TEST(Lowering, EnumMatchComparesConstants) {
   EXPECT_EQ(count(m, "release"), 0u) << m;  // no boxes anywhere
 }
 
-// ---------------------------------------------------------------------------
-// Arrays, tuples, optionals
-// ---------------------------------------------------------------------------
+// -- Arrays, tuples, optionals
 
 TEST(Lowering, ConstantPrimitiveArrayLiteralUsesADataGlobal) {
   auto l = lower(R"(
@@ -726,9 +714,7 @@ TEST(Lowering, OptionalIntoObjSubstitutesTheNoneSingleton) {
       << l.Text;
 }
 
-// ---------------------------------------------------------------------------
-// Modules
-// ---------------------------------------------------------------------------
+// -- Modules
 
 TEST(Lowering, ImportedFunctionsAndClassesAreExternItems) {
   auto dir = std::filesystem::temp_directory_path() /
@@ -1008,9 +994,7 @@ TEST(Lowering, RuntimeExternsCannotClashWithUserFunctions) {
   EXPECT_EQ(pir::toString(*parsed), l.Text);
 }
 
-// ---------------------------------------------------------------------------
-// Conversion constructors (#64): the semantics are the lowering's
-// ---------------------------------------------------------------------------
+// -- Conversion constructors (#64): the semantics are the lowering's
 
 TEST(Lowering, IntOfFloatGuardsTheRangeBeforeTheFToI) {
   auto l = lower(R"(
