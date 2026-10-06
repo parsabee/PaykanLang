@@ -8,6 +8,18 @@ link to a Markdown file (or a bare `#fragment`) must match a heading of that
 file, using GitHub's anchor rules.  Links inside fenced code blocks and inline
 code are ignored.
 
+The Markdown files under docs/ are also the pages of the documentation site
+(GitHub Pages builds docs/ with Jekyll; see docs/_config.yml), so for them it
+also checks what would break the site but not GitHub's rendering:
+
+- a link to a directory under docs/ must have an index.md there (the site
+  serves pages, not directory listings);
+- the text must not contain `{{` or `{%`, which Jekyll's Liquid would
+  interpret, even inside code blocks;
+- every page must have its entry (`- scope: { path: <page> }`) in
+  docs/_config.yml, which places it in the site's navigation, and every
+  entry must name an existing page.
+
 Usage:
     scripts/check_links.py [file.md ...]   # default: every tracked *.md
 
@@ -27,6 +39,9 @@ INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
 LINK_RE = re.compile(r"!?\[(?:[^\[\]]|\[[^\]]*\])*\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
 HTML_RE = re.compile(r"""<(?:a|img)\s[^>]*?(?:href|src)=["']([^"']+)["']""", re.I)
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
+DOCS = ROOT / "docs"
+LIQUID_RE = re.compile(r"\{\{|\{%")
+NAV_RE = re.compile(r"^\s*-\s*scope:\s*\{\s*path:\s*\"?([^\s\",}]+)", re.M)
 
 
 def tracked_markdown():
@@ -42,15 +57,19 @@ def tracked_markdown():
                                  for part in p.relative_to(ROOT).parts))
 
 
-def strip_code(text):
-    """The text with fenced code blocks and inline code spans blanked out."""
+def strip_code(text, inline=True):
+    """The text with fenced code blocks (and, with @p inline, inline code
+    spans) blanked out."""
     lines, in_fence = [], False
     for line in text.splitlines():
         if FENCE_RE.match(line):
             in_fence = not in_fence
             lines.append("")
             continue
-        lines.append("" if in_fence else INLINE_CODE_RE.sub("", line))
+        if in_fence:
+            lines.append("")
+        else:
+            lines.append(INLINE_CODE_RE.sub("", line) if inline else line)
     return lines
 
 
@@ -66,7 +85,10 @@ def slug(heading):
 def anchors(path, cache={}):
     if path not in cache:
         seen, result = {}, set()
-        for line in strip_code(path.read_text(encoding="utf-8")):
+        # A heading's code spans are part of its anchor: `## The `x` y` is
+        # #the-x-y.
+        for line in strip_code(path.read_text(encoding="utf-8"),
+                               inline=False):
             m = HEADING_RE.match(line)
             if not m:
                 continue
@@ -78,8 +100,32 @@ def anchors(path, cache={}):
     return cache[path]
 
 
-def check(md):
+def site_pages_in_nav():
+    config = DOCS / "_config.yml"
+    if not config.exists():
+        return None
+    return set(NAV_RE.findall(config.read_text(encoding="utf-8")))
+
+
+def check_site_page(md, nav):
+    """The problems that would only show on the documentation site."""
     problems = []
+    rel = md.relative_to(ROOT)
+    text = md.read_text(encoding="utf-8")
+    for lineno, line in enumerate(text.splitlines(), 1):
+        if LIQUID_RE.search(line):
+            problems.append(f"{rel}:{lineno}: '{{{{' or '{{%' would be read "
+                            "as Liquid by the site's Jekyll build")
+    if nav is not None and md.relative_to(DOCS).as_posix() not in nav:
+        problems.append(f"{rel}: no navigation entry in docs/_config.yml")
+    return problems
+
+
+def check(md, nav=None):
+    problems = []
+    site = DOCS in md.parents
+    if site:
+        problems += check_site_page(md, nav)
     for lineno, line in enumerate(strip_code(md.read_text(encoding="utf-8")), 1):
         targets = LINK_RE.findall(line) + HTML_RE.findall(line)
         for target in targets:
@@ -92,6 +138,11 @@ def check(md):
                 problems.append(f"{where}: no such file")
             elif ROOT not in dest.parents and dest != ROOT:
                 problems.append(f"{where}: points outside the repository")
+            elif site and dest.is_dir() and (dest == DOCS or DOCS in
+                                             dest.parents) \
+                    and not (dest / "index.md").exists():
+                problems.append(f"{where}: a directory of the site without "
+                                "an index.md (link to a page instead)")
             elif frag and dest.suffix == ".md" and frag not in anchors(dest):
                 problems.append(f"{where}: no heading '#{frag}'")
     return problems
@@ -99,7 +150,12 @@ def check(md):
 
 def main(argv):
     files = [Path(a).resolve() for a in argv] or tracked_markdown()
-    problems = [p for md in files for p in check(md)]
+    nav = site_pages_in_nav()
+    problems = [p for md in files for p in check(md, nav)]
+    if not argv and nav is not None:
+        problems += [f"docs/_config.yml: navigation entry '{page}' names no "
+                     "page" for page in sorted(nav)
+                     if page and not (DOCS / page).is_file()]
     for p in problems:
         print(p)
     print(f"{len(files)} Markdown files, {len(problems)} broken links")

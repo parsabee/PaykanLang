@@ -1,0 +1,19 @@
+<!--
+  The pages link to files outside docs/ (sources, samples, headers) with
+  relative paths that work on GitHub.  The site only holds docs/, so point
+  those links at the file on GitHub instead.  Links between pages (`.md`
+  files) are rewritten by jekyll-relative-links and are left alone.
+-->
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    var tree = "https://github.com/parsabee/PaykanLang/blob/develop/";
+    var source = tree + "docs/{{ page.path }}";
+    var links = document.querySelectorAll("#main-content a[href]");
+    for (var i = 0; i < links.length; i++) {
+      var href = links[i].getAttribute("href");
+      if (/^([a-z][a-z0-9+.-]*:|#|\/)/i.test(href)) continue;
+      var url = new URL(href, source);
+      if (url.href.indexOf(tree + "docs/") !== 0) links[i].href = url.href;
+    }
+  });
+</script>

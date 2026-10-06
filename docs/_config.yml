@@ -1,0 +1,146 @@
+# The PaykanLang documentation site, https://parsabee.github.io/PaykanLang/
+#
+# GitHub Pages builds it from this directory with its own Jekyll (the
+# actions/jekyll-build-pages action, see .github/workflows/pages.yml), so the
+# repository holds no Gemfile or other site dependency.  The theme is fetched
+# by GitHub at build time (jekyll-remote-theme), and every plugin below is one
+# GitHub Pages ships.
+#
+# The Markdown files stay plain GitHub Markdown, without front matter: the
+# navigation (title, parent, order) of each page is set under `defaults`
+# below.  A new page shows up in the sidebar once it gets an entry there.
+
+title: PaykanLang
+description: >-
+  A statically typed language with classes, generics and automatic reference
+  counting that compiles to native code.
+url: https://parsabee.github.io
+baseurl: /PaykanLang
+repository: parsabee/PaykanLang
+
+remote_theme: just-the-docs/just-the-docs@v0.12.0
+
+plugins:
+  - jekyll-remote-theme
+  - jekyll-include-cache
+  - jekyll-seo-tag
+  - jekyll-optional-front-matter
+  - jekyll-titles-from-headings
+  - jekyll-relative-links
+
+# `[text](other.md#anchor)` links work on GitHub and on the site.
+relative_links:
+  enabled: true
+  collections: false
+
+markdown: kramdown
+kramdown:
+  input: GFM
+  hard_wrap: false
+highlighter: rouge
+
+search_enabled: true
+heading_anchors: true
+back_to_top: true
+back_to_top_text: Back to top
+aux_links:
+  PaykanLang on GitHub: https://github.com/parsabee/PaykanLang
+gh_edit_link: true
+gh_edit_link_text: Edit this page on GitHub
+gh_edit_repository: https://github.com/parsabee/PaykanLang
+gh_edit_branch: develop
+gh_edit_source: docs
+gh_edit_view_mode: tree
+footer_content: >-
+  PaykanLang is released under the
+  <a href="https://github.com/parsabee/PaykanLang/blob/develop/LICENSE">MIT License</a>.
+
+defaults:
+  - scope: { path: "" }
+    values: { layout: default }
+
+  # Home
+  - scope: { path: index.md }
+    values: { title: Home, nav_order: 1 }
+
+  # The manual
+  - scope: { path: manual/index.md }
+    values: { title: Manual, nav_order: 2 }
+  - scope: { path: manual/01-getting-started.md }
+    values: { title: 1. Getting started, parent: Manual, nav_order: 1 }
+  - scope: { path: manual/02-basics.md }
+    values: { title: 2. Basics, parent: Manual, nav_order: 2 }
+  - scope: { path: manual/03-strings-and-conversions.md }
+    values: { title: 3. Strings and conversions, parent: Manual, nav_order: 3 }
+  - scope: { path: manual/04-classes.md }
+    values: { title: 4. Classes and inheritance, parent: Manual, nav_order: 4 }
+  - scope: { path: manual/05-enums-and-match.md }
+    values: { title: 5. Enums and match, parent: Manual, nav_order: 5 }
+  - scope: { path: manual/06-arrays.md }
+    values: { title: 6. Arrays, parent: Manual, nav_order: 6 }
+  - scope: { path: manual/07-tuples.md }
+    values: { title: 7. Tuples, parent: Manual, nav_order: 7 }
+  - scope: { path: manual/08-optionals.md }
+    values: { title: 8. Optionals and None, parent: Manual, nav_order: 8 }
+  - scope: { path: manual/09-generics.md }
+    values: { title: 9. Generics, parent: Manual, nav_order: 9 }
+  - scope: { path: manual/10-modules.md }
+    values: { title: 10. Modules and imports, parent: Manual, nav_order: 10 }
+  - scope: { path: manual/11-files-and-io.md }
+    values: { title: 11. Files and I/O, parent: Manual, nav_order: 11 }
+  - scope: { path: manual/12-memory.md }
+    values: { title: 12. Memory, parent: Manual, nav_order: 12 }
+  - scope: { path: manual/13-the-paykan-command.md }
+    values: { title: 13. The paykan command, parent: Manual, nav_order: 13 }
+  - scope: { path: manual/14-extending.md }
+    values: { title: 14. Extending PaykanLang, parent: Manual, nav_order: 14 }
+  - scope: { path: manual/15-appendix-calculator.md }
+    values: { title: "Appendix: a calculator", parent: Manual, nav_order: 15 }
+
+  # The language reference
+  - scope: { path: language/index.md }
+    values: { title: Language reference, nav_order: 3 }
+  - scope: { path: language/01-language-basics.md }
+    values: { title: Language basics, parent: Language reference, nav_order: 1 }
+  - scope: { path: language/02-functions-and-calling.md }
+    values: { title: Functions, parent: Language reference, nav_order: 2 }
+  - scope: { path: language/03-enums.md }
+    values: { title: Enums, parent: Language reference, nav_order: 3 }
+  - scope: { path: language/04-classes.md }
+    values: { title: Classes, parent: Language reference, nav_order: 4 }
+  - scope: { path: language/05-arrays.md }
+    values: { title: Arrays, parent: Language reference, nav_order: 5 }
+  - scope: { path: language/06-modules.md }
+    values: { title: Modules, parent: Language reference, nav_order: 6 }
+  - scope: { path: language/07-match-statements.md }
+    values: { title: Match statements, parent: Language reference, nav_order: 7 }
+  - scope: { path: language/08-memory-model.md }
+    values: { title: Memory model, parent: Language reference, nav_order: 8 }
+  - scope: { path: language/09-tuples.md }
+    values: { title: Tuples, parent: Language reference, nav_order: 9 }
+  - scope: { path: language/10-optionals.md }
+    values: { title: Optional types, parent: Language reference, nav_order: 10 }
+  - scope: { path: language/11-generics.md }
+    values: { title: Generics, parent: Language reference, nav_order: 11 }
+  - scope: { path: grammar.md }
+    values: { title: Grammar, parent: Language reference, nav_order: 12 }
+
+  # The implementation: IR, backends, plugins
+  - scope: { path: internals.md }
+    values: { title: Implementation and plugins, nav_order: 4 }
+  - scope: { path: pir.md }
+    values: { title: PIR, parent: Implementation and plugins, nav_order: 1 }
+  - scope: { path: c-backend.md }
+    values: { title: The C backend, parent: Implementation and plugins, nav_order: 2 }
+  - scope: { path: plugins/overview.md }
+    values: { title: Plugins overview, parent: Implementation and plugins, nav_order: 3 }
+  - scope: { path: writing-a-backend.md }
+    values: { title: Writing a backend, parent: Implementation and plugins, nav_order: 4 }
+  - scope: { path: writing-a-frontend-plugin.md }
+    values: { title: Writing a frontend plugin, parent: Implementation and plugins, nav_order: 5 }
+  - scope: { path: plugins/plugin-api.md }
+    values: { title: The plugin API, parent: Implementation and plugins, nav_order: 6 }
+  - scope: { path: plugins/ast-format.md }
+    values: { title: AST interchange format, parent: Implementation and plugins, nav_order: 7 }
+  - scope: { path: plugins/pir-for-backends.md }
+    values: { title: PIR for backend plugins, parent: Implementation and plugins, nav_order: 8 }
