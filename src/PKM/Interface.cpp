@@ -279,7 +279,7 @@ Status Reader::readParts() {
   uint64_t prevEnd = tableEnd;
   for (uint32_t i = 0; i < n; ++i) {
     PartView p;
-    uint64_t offset, size;
+    uint64_t offset = 0, size = 0;
     r.u32(p.Tag);
     r.u32(p.Flags);
     r.u64(offset);

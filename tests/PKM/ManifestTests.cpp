@@ -44,7 +44,8 @@ std::vector<uint8_t> rebuilt(const Manifest &m, uint64_t tag,
     }
   if (!replaced)
     records.emplace_back(tag, value);
-  std::sort(records.begin(), records.end());
+  std::sort(records.begin(), records.end(),
+            [](const auto &a, const auto &b) { return a.first < b.first; });
   ByteWriter w;
   w.bytes(src.data(), 8);
   for (auto &[t, v] : records)

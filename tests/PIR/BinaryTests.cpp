@@ -514,8 +514,8 @@ TEST(PIRBinary, NestingAndStatementLimits) {
     cur->Stmts.push_back(std::move(s));
     cur = next;
   }
-  cur->Stmts.push_back(Return{});
-  f.Body.Stmts.push_back(Return{});
+  cur->Stmts.emplace_back(std::in_place_type<Return>);
+  f.Body.Stmts.emplace_back(std::in_place_type<Return>);
   m.Functions.push_back(std::move(f));
   std::vector<uint8_t> b = binary::encode(m);
   EXPECT_FALSE(binary::decode(b).isOk()); // 601 > 512

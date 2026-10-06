@@ -45,7 +45,7 @@ struct Part {
 std::vector<Part> parts(const std::vector<uint8_t> &b) {
   ByteReader r(b);
   r.skip(12);
-  uint32_t n;
+  uint32_t n = 0;
   EXPECT_TRUE(r.u32(n));
   std::vector<Part> out(n);
   for (Part &p : out)
