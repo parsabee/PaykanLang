@@ -170,8 +170,8 @@ public:
       if (!u8(byte))
         return false;
       if (shift < 64)
-        result |= static_cast<int64_t>(static_cast<uint64_t>(byte & 0x7F)
-                                       << shift);
+        result |=
+            static_cast<int64_t>(static_cast<uint64_t>(byte & 0x7F) << shift);
       shift += 7;
       if (!(byte & 0x80)) {
         if (shift < 64 && (byte & 0x40))
