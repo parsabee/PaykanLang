@@ -174,8 +174,8 @@ public:
             static_cast<int64_t>(static_cast<uint64_t>(byte & 0x7F) << shift);
       shift += 7;
       if (!(byte & 0x80)) {
-        if (shift < 64 && (byte & 0x40))
-          result |= -(static_cast<int64_t>(1) << shift);
+        if (shift < 64 && (byte & 0x40)) // sign-extend, in unsigned arithmetic
+          result |= static_cast<int64_t>(~uint64_t{0} << shift);
         // Minimality: a trailing 0x00 after a byte without 0x40, or a
         // trailing 0x7F after a byte with 0x40, is redundant.
         if (i > 0) {
