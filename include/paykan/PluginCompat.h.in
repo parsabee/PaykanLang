@@ -17,7 +17,7 @@
 #pragma once
 
 /// The PaykanLang version of these headers, pre-release label included
-/// ("0.1.0-alpha").  PAYKAN_REGISTER_FRONTEND / PAYKAN_REGISTER_BACKEND
+/// (e.g. "1.2.3", or "1.2.3-rc1" for a pre-release).  PAYKAN_REGISTER_FRONTEND / PAYKAN_REGISTER_BACKEND
 /// expand it where the plugin registers, so a plugin carries the version of
 /// the headers it was compiled against.
 #define PAYKAN_PLUGIN_BUILD_VERSION "@PAYKAN_VERSION@"

@@ -416,8 +416,8 @@ PaykanLang version it was **built with**, and each release carries an explicit
   `find_package(Paykan)`).
 - **Matching.** A plugin is compatible if its build version is **exactly**
   one of the list's entries, compared as strings with any pre-release label
-  included: a list holding `0.1.0-alpha` accepts plugins built with
-  `0.1.0-alpha`, but not `0.1.0`, `0.1.0-beta` or `0.1.1`. There are no ranges
+  included: a list holding `1.2.3` accepts plugins built with `1.2.3`, but
+  not `1.2.3-rc1`, `1.2.4` or `1.3.0`. There are no ranges
   and no ordering.
 - **At run time.** The plugin loader checks a loaded plugin's build version
   before calling anything but its entry point, and the registry checks it
@@ -427,9 +427,9 @@ PaykanLang version it was **built with**, and each release carries an explicit
   ```text
   $ paykan --list-backends
   c (default)
-  mine (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.0-alpha accepts 0.1.0-alpha) [/home/me/.paykan/plugins/0.1.0-alpha/libmine.so]
+  mine (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.0 accepts 0.1.0) [/home/me/.paykan/plugins/0.1.0/libmine.so]
   $ paykan --backend=mine program.pkn
-  paykan: cannot use backend 'mine' (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.0-alpha accepts 0.1.0-alpha) [/home/me/.paykan/plugins/0.1.0-alpha/libmine.so]
+  paykan: cannot use backend 'mine' (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.0 accepts 0.1.0) [/home/me/.paykan/plugins/0.1.0/libmine.so]
   $ echo $?
   2
   ```
@@ -438,15 +438,15 @@ PaykanLang version it was **built with**, and each release carries an explicit
   plugin with the version it was built with and whether it is compatible;
   include it in bug reports. The built-in plugins go through the same check
   and are always compatible: they are built with the release's own version,
-  which must be on its list (configure fails otherwise).
+  which is always the first entry of its list.
 - **At configure time.** `paykan_add_backend_plugin()` /
   `paykan_add_frontend_plugin()` fail with a `FATAL_ERROR` when the installed
   Paykan does not accept the version the plugin is built with:
 
   ```text
   Paykan backend plugin 'paykan_backend_mine' is incompatible: built with
-  PaykanLang 0.0.9; the installed PaykanLang 0.1.0-alpha (<prefix>/lib/cmake/Paykan)
-  accepts 0.1.0-alpha
+  PaykanLang 0.0.9; the installed PaykanLang 0.1.0 (<prefix>/lib/cmake/Paykan)
+  accepts 0.1.0
   ```
 
   That version is the installation's own (`PAYKAN_TOOLCHAIN_VERSION`) unless
@@ -458,8 +458,10 @@ PaykanLang version it was **built with**, and each release carries an explicit
   against.)
 
 **Maintaining the list (each release).** The release's own version
-(`project(... VERSION ...)` plus `PAYKAN_VERSION_PRERELEASE`) must be on it.
-Keep an older version on it only if plugins built with that version still
+(`project(... VERSION ...)` plus `PAYKAN_VERSION_PRERELEASE` in the top-level
+`CMakeLists.txt`, the one place the version is spelled) is always on it: the
+list starts with `${PAYKAN_VERSION}`, so a version bump needs no change to it.
+Add an older version after it only if plugins built with that version still
 work with this release: `plugin_api.h` (or its API version is still
 supported), the PIR text, the runtime ABI (`Runtime.h`), and for static C++
 plugins `Frontend.h`, `Backend.h`, `Registry.h` and the AST and `ASTContext`

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/parsabee/PaykanLang/actions/workflows/ci.yml/badge.svg)](https://github.com/parsabee/PaykanLang/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.0--alpha-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](CHANGELOG.md)
 
 PaykanLang (`.pkn`) is a high-performance language for building applications on modern,
 heterogeneous machines. The goal is application development across many cores and, 
@@ -13,7 +13,7 @@ a real module system, C interoperability exposed through modules, and automatic 
 counting in place of a garbage collector or manual memory management. PaykanLang aims to 
 provide a safe, ergonomic, performant, and productive interface that compiles to native speed.
 
-This is the **alpha of v0.1.0** (`0.1.0-alpha`, a pre-release) that lays the foundation. Implemented and tested
+This is **v0.1.0**, the first release, which lays the foundation. Implemented and tested
 today: static typing with inference, single-inheritance classes with virtual dispatch,
 ARC with `mov` move semantics, value-aware `==` (reference types dispatch to a virtual
 `equals`), dynamic arrays, a file-based module system, `match` type dispatch, enums, tuples,
@@ -43,11 +43,28 @@ stable; see [`docs/plugins/overview.md`](docs/plugins/overview.md) and
 
 Release builds are published for macOS (Apple Silicon) and Linux (x86_64). Each
 [GitHub Release](https://github.com/parsabee/PaykanLang/releases) carries a tarball per
-platform (with its SHA-256 sum) holding `bin/paykan`, the runtime and its header; unpack it
+platform and a Debian package for Linux (each with its SHA-256 sum). A tarball holds
+`bin/paykan`, the runtime and its header; unpack it
 anywhere and put its `bin/` on the `PATH`. The release builds and the Homebrew formula are the
 core build (the recursive-descent frontend and the C backend). Programs are compiled with the
 system C compiler, so a C11 compiler (`cc`) must be installed. Or build from source (below),
 which also offers the opt-in LLVM backend.
+
+### Debian / Ubuntu (.deb)
+
+Each release also carries a Debian package for Linux x86_64,
+`paykanlang_<version>_amd64.deb` (with its SHA-256 sum). Download it from the
+[release](https://github.com/parsabee/PaykanLang/releases) and install it with apt, which
+also pulls in a C compiler (`gcc`, or `clang`) for the C backend:
+
+```sh
+sudo apt install ./paykanlang_<version>_amd64.deb
+paykan --version
+```
+
+It installs `paykan` in `/usr/bin`, the runtime in `/usr/lib`, its header and the plugin
+headers in `/usr/include/paykan`, the `find_package(Paykan)` package, and the system plugin
+directory `/usr/lib/paykan/plugins/<version>/`. `sudo apt purge paykanlang` removes it.
 
 ### Homebrew (macOS)
 
@@ -68,8 +85,8 @@ any language that exposes C functions. `paykan` loads the files named with
 
 ```sh
 paykan --plugin=./libpaykan_backend_print_pir.so --backend=print-pir --emit-source hello.pkn
-mkdir -p ~/.paykan/plugins/0.1.0-alpha
-cp libpaykan_backend_print_pir.so ~/.paykan/plugins/0.1.0-alpha/   # or `cmake --install` it
+mkdir -p ~/.paykan/plugins/0.1.0
+cp libpaykan_backend_print_pir.so ~/.paykan/plugins/0.1.0/   # or `cmake --install` it
 paykan --backend=print-pir --emit-source hello.pkn
 paykan --list-backends    # every backend, with the file a plugin came from
 paykan --no-plugins ...   # only the built-in plugins (and --plugin files)

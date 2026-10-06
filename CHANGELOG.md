@@ -7,39 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-06
+
+The first tagged release. PaykanLang is now split into a core, pluggable
+frontends and pluggable backends around a backend-neutral IR (PIR); the
+default build needs only CMake and a C++20 compiler, plus a C11 compiler at
+run time. Out-of-tree frontends and backends are loadable modules with a C
+interface that the installed `paykan` loads at startup. Tuples, optional types
+(optional primitives and optional-mode `match` included) and generics are
+stable in v0.1 (see "Stable in v0.1" under Added).
+
 ### Breaking changes
 
-- **Backend plugins are loadable modules with a C interface (#141).** An
-  out-of-tree backend is no longer a static C++ library linked into a
-  `paykan` driver of its own: it is a shared library (`.so`, `.dylib`) with
-  the pure C11 interface of `include/paykan/plugin_api.h`, which the
-  **installed** `paykan` loads at startup, with no rebuild of PaykanLang. It
-  links nothing of PaykanLang, so it can be written in any language with a C
-  layer (C, C++ with any compiler, Rust, ...). It receives the verified
-  program as PIR text and talks to `paykan` through a host table
-  (diagnostics, output, allocator, log, the runtime's paths, link and run
-  helpers). For plugin authors: `paykan_add_backend_plugin()` now builds such
-  a module (`MODULE`, `lib<target>.so` / `.dylib`) instead of a static
-  library linked with `Paykan::backend`, and a backend written against
-  `Backend.h` must be ported to `plugin_api.h` (see
-  `docs/writing-a-backend.md`). `src/Backends/PrintPIR` is now a plain-C plugin. The
-  static C++ path (`paykan_add_driver`) stays as an advanced option, and the
-  built-in plugins keep their in-process C++ interface.
-- **Frontend plugins are loadable modules too (#141).** A frontend plugin
-  receives the source text through the same C interface and returns the
-  program as text in the new, versioned **AST interchange format**
-  (`docs/plugins/ast-format.md`, an S-expression form with source
-  locations), which `paykan` reads, checks and hands to Sema; syntax errors
-  go through the host's diagnostics. `paykan_add_frontend_plugin()` now
-  builds such a module instead of a static library linked with
-  `Paykan::frontend`, and `paykan_add_frontend_tests()` takes the plugin as
-  `PLUGIN <target-or-file>` (instead of `PLUGINS <lib>...`): the suites load
-  it with the installed `paykan`'s loader, and a new
-  `InstalledPaykan.<frontend>` test runs the installed `paykan` with only
-  the plugin loaded over the samples corpus.
-
-- **The Bison frontend moved to its own repository (#60).** The Bison/Flex
-  frontend is now the out-of-tree plugin
+- **The default build is the core: the recursive-descent frontend and the C
+  backend (#123).** A plain `cmake -B build` builds only those two and
+  downloads nothing. The LLVM backend, with its JIT, is opt-in at configure
+  time: `-DPAYKAN_BACKENDS="llvm;c"`. The release tarballs and the Homebrew
+  formula ship the core only.
+- **The default backend is c, in every build (#27).** The default backend
+  changes from llvm to c, and stays c even when the LLVM backend is built:
+  with `-DPAYKAN_BACKENDS="llvm;c"` (in any order) `--list-backends` shows
+  `c (default)`. Running a program through the JIT now needs
+  `--backend=llvm`; without it, `paykan` runs programs with the C backend,
+  which needs a C11 compiler (`cc`, or `$CC`) at run time. A configuration
+  without the c backend (never produced in tree) falls back to the first
+  backend listed. The default frontend stays recursive-descent.
+- **The Bison frontend moved to its own repository (#60).** The hand-written
+  recursive-descent frontend (standard C++ only) is the only in-tree frontend
+  and the default; the Bison/Flex frontend (#17), which implements the same
+  grammar (`docs/grammar.md`) and builds the same AST, is the out-of-tree plugin
   [PaykanLang_Bison_Frontend](https://github.com/parsabee/PaykanLang_Bison_Frontend),
   built against an installed PaykanLang with `find_package(Paykan)`; it
   produces a `paykan` driver with `--frontend=bison`. PaykanLang no longer
@@ -49,144 +45,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   check (`scripts/diff_frontends.py`, the "Frontend differential" CI job)
   moved with it. `--trace-parser` / `--trace-scanner` stay, for any
   frontend that has traces.
-
-### Added
-
-- **Run-time plugin loading (#141).** `paykan` loads plugins from, in order:
-  `--plugin=<file>` (repeatable), each directory of `$PAYKAN_PLUGIN_PATH`,
-  `~/.paykan/plugins/<version>/`, and the installation's
-  `lib/paykan/plugins/<version>/` (found relative to the executable, and
-  installed empty). `--no-plugins` / `PAYKAN_NO_PLUGINS=1` turn the directory
-  search off. Each plugin's descriptor (from its one entry point,
-  `paykan_plugin_init`) is checked before any of its callbacks run: the
-  plugin API version (`PAYKAN_PLUGIN_API_VERSION`, 1), then its build
-  version against the release's list (#103). An incompatible plugin is
-  listed with the reason and its file, and selecting it exits with status 2;
-  a file that can't be loaded, has no entry point or a malformed descriptor
-  is listed as `rejected plugin <file>: <why>` (and stops a compile with
-  status 2 when named with `--plugin`); a name two plugins provide is
-  ambiguous and can't be selected. `--list-backends` and `--version` show
-  each loaded backend's file; `--version` also prints the plugin API version,
-  the plugin directories and every plugin file. The dynamic loader sits
-  behind the portability layer (POSIX `dlopen`; a documented Windows stub).
-  The CMake package adds `Paykan::plugin_api`, `PAYKAN_PLUGIN_API_VERSION`,
-  `PAYKAN_PLUGIN_INSTALL_DIR`, `PAYKAN_EXECUTABLE`,
-  `paykan_install_plugin()` and `paykan_check_plugin_built_with()`.
-  New docs: `docs/plugins/` (overview, the C API, the AST format, PIR for
-  backends).
-- **The AST interchange format (#141)**: its writer and reader in the core
-  (`paykan/ast/Interchange.h`, `Paykan::ast_interchange`), `paykan
-  --emit-ast` to print a program in it, and `src/Frontends/ASTText`, a
-  plain-C frontend whose source language is the format itself. The writer
-  and reader round-trip the AST of every program in the samples corpus.
-- The installed static libraries are built as position-independent code, so
-  a plugin may link them into its module (a C++ frontend reusing the core's
-  AST and writer internally).
-- **Plugin compatibility check (#103).** Every frontend and backend plugin
-  records the PaykanLang version it was built with:
-  `PAYKAN_REGISTER_FRONTEND` / `PAYKAN_REGISTER_BACKEND` capture
-  `PAYKAN_PLUGIN_BUILD_VERSION` from the installed headers
-  (`paykan/PluginCompat.h`, generated). Each release holds an explicit list of
-  the plugin build versions it accepts, in one place
-  (`cmake/PluginCompat.cmake`), compiled into the core and exported in the
-  CMake package as `PAYKAN_PLUGIN_COMPATIBLE_VERSIONS`. Versions match as
-  exact strings, pre-release label included. The registry checks a plugin at
-  registration and at selection; a plugin not on the list is listed by
-  `--list-frontends` / `--list-backends` as
-  `<name> (incompatible: built with PaykanLang <v>; this paykan <v> accepts
-  <list>)`, is never instantiated, and selecting it with `--frontend=` /
-  `--backend=` fails with exit status 2. `paykan --version` lists the
-  accepted versions and every plugin with its build version and
-  compatibility. The built-in plugins go through the same check.
-- **`paykan_add_frontend_plugin()` / `paykan_add_backend_plugin()`** in the
-  CMake package: they add a plugin library and fail at configure time when
-  the installed Paykan does not accept the version the plugin is built with
-  (by default the installation's own, `PAYKAN_TOOLCHAIN_VERSION`, or the one
-  pinned with `BUILT_WITH <version>`). `src/Backends/PrintPIR` uses
-  `paykan_add_backend_plugin()`. See `docs/writing-a-backend.md` (section 7)
-  and the new `docs/writing-a-frontend-plugin.md`.
-- This release accepts plugins built with `0.1.0-alpha`. From now on each
-  release's entry states the plugin build versions it accepts.
-- **Test support for out-of-tree frontends (#60).** An installation carries
-  the frontend-parameterized parser and Sema suites, the fuzz smoke and
-  differential tests and the samples corpus, and `find_package(Paykan)`
-  provides `paykan_add_frontend_tests()`, which builds them against a
-  plugin's frontend (`docs/writing-a-frontend-plugin.md`).
-  `-DPAYKAN_INSTALL_TEST_SUPPORT=OFF` leaves them out.
-
-### Changed
-
-- **Dependencies.** PaykanLang depends only on standard C and C++; GoogleTest
-  (tests), LLVM (the opt-in `llvm` backend) and Python 3's standard library
-  (the scripts) are the only other tools it uses. The script-driven ctests
-  now run with the Python CMake finds (`find_package(Python3)`: the system's,
-  or `-DPython3_EXECUTABLE=<path>`) instead of whatever `python3` is on
-  `PATH`, and are skipped when there is none. The example plugin backend
-  lives in `src/Backends/PrintPIR`.
-
-- **The plugin registration ABI (#103).** `paykan::plugin::Registration`
-  takes a `PluginInfo { Name, Create, BuildVersion }` (plain data, the version
-  a `const char *`), and registry entries carry `BuildVersion`, `Compatible`
-  and `Incompatibility`. `Registry::create()` returns null for an
-  incompatible plugin. Plugins that register through the macros need only a
-  rebuild. The check lives in a new core library, `paykan_plugin`
-  (`Paykan::plugin`), which `Paykan::frontend` and `Paykan::backend` link.
-- `paykan --version` prints one more line (`accepts plugins built with
-  PaykanLang <list>`), and each plugin line now ends in
-  `(built with PaykanLang <v>, compatible)`; a backend's description follows
-  after `: ` instead of in parentheses. With #141 it also ends with
-  `plugin API <n>`, `plugin directories: ...` and one line per plugin file,
-  and a loaded plugin's lines end in ` [<file>]`.
-- Registry entries (`paykan::plugin::Registry<I>::Entry`) also carry the
-  plugin's `Path`, `Description` and `Conflict`, and their factory is a
-  `std::function` (#141).
-
-### Fixed
-
-- **A truncated plugin file no longer crashes `paykan`.** A plugin whose file
-  ends inside its loadable segments (an interrupted copy, download or install)
-  was mapped by `dlopen` and killed every command with SIGBUS, `--version`
-  included. On Linux the loader now checks the file's ELF program headers
-  against its size first and lists the file as a rejected plugin.
-- **A name two plugins provide is reported as ambiguous even when the first
-  provider is incompatible.** The listings, `--version` and selection used to
-  report only the first provider's incompatibility.
-- **Bounded build parallelism.** README, CI, the release workflow, the Homebrew
-  formula and the out-of-tree frontend test passed a bare `--parallel`, which
-  with the Makefile generators is an unlimited `make -j`; they now pass the
-  number of processors.
-
-## [0.1.0-alpha] - 2026-10-03
-
-The first tagged release, published as a GitHub pre-release. PaykanLang is now
-split into a core, pluggable frontends and pluggable backends around a
-backend-neutral IR (PIR); the default build needs only CMake and a C++20
-compiler, plus a C11 compiler at run time. Fixes found while testing the alpha
-go under `[0.1.0]`. Tuples, optional types (optional primitives and
-optional-mode `match` included) and generics are stable in v0.1 (see "Stable
-in v0.1" under Added).
-
-### Breaking changes
-
-- **The default build is the core: the recursive-descent frontend and the C
-  backend (#123).** A plain `cmake -B build` builds only those two and
-  downloads nothing. The LLVM backend, with its JIT, and the Bison frontend
-  are opt-in at configure time: `-DPAYKAN_BACKENDS="llvm;c"`,
-  `-DPAYKAN_FRONTENDS="recursive-descent;bison"`. The release tarballs and the
-  Homebrew formula ship the core only.
-- **The default backend is c, in every build (#27).** The default backend
-  changes from llvm to c, and stays c even when the LLVM backend is built:
-  with `-DPAYKAN_BACKENDS="llvm;c"` (in any order) `--list-backends` shows
-  `c (default)`. Running a program through the JIT now needs
-  `--backend=llvm`; without it, `paykan` runs programs with the C backend,
-  which needs a C11 compiler (`cc`, or `$CC`) at run time. A configuration
-  without the c backend (never produced in tree) falls back to the first
-  backend listed. The default frontend stays recursive-descent.
-- **The Bison frontend is an optional plugin (#17, #60).** The hand-written
-  recursive-descent frontend (standard C++ only) is the default. The
-  Bison/Flex frontend implements the same grammar (`docs/grammar.md`) and
-  builds the same AST; it is selected with `--frontend=bison` and is moving
-  to its own repository.
 - **Conversion constructors replace the conversion builtins (#64).**
   `StrInt`, `StrFloat`, `StrBool`, `StrChar`, `IntStr` and `FloatStr` are
   removed. Every conversion is now spelled `Target<Source>(value)`, with the
@@ -273,9 +131,47 @@ in v0.1" under Added).
   compared identities before); arrays keep identity comparison via
   the default `equals`; comparing arrays of different element types is a
   compile error. Overriding `equals` in a class changes how `==` behaves for it.
+- **Backend plugins are loadable modules with a C interface (#141).** An
+  out-of-tree backend is no longer a static C++ library linked into a
+  `paykan` driver of its own: it is a shared library (`.so`, `.dylib`) with
+  the pure C11 interface of `include/paykan/plugin_api.h`, which the
+  **installed** `paykan` loads at startup, with no rebuild of PaykanLang. It
+  links nothing of PaykanLang, so it can be written in any language with a C
+  layer (C, C++ with any compiler, Rust, ...). It receives the verified
+  program as PIR text and talks to `paykan` through a host table
+  (diagnostics, output, allocator, log, the runtime's paths, link and run
+  helpers). For plugin authors: `paykan_add_backend_plugin()` now builds such
+  a module (`MODULE`, `lib<target>.so` / `.dylib`) instead of a static
+  library linked with `Paykan::backend`, and a backend written against
+  `Backend.h` must be ported to `plugin_api.h` (see
+  `docs/writing-a-backend.md`). `src/Backends/PrintPIR` is now a plain-C plugin. The
+  static C++ path (`paykan_add_driver`) stays as an advanced option, and the
+  built-in plugins keep their in-process C++ interface.
+- **Frontend plugins are loadable modules too (#141).** A frontend plugin
+  receives the source text through the same C interface and returns the
+  program as text in the new, versioned **AST interchange format**
+  (`docs/plugins/ast-format.md`, an S-expression form with source
+  locations), which `paykan` reads, checks and hands to Sema; syntax errors
+  go through the host's diagnostics. `paykan_add_frontend_plugin()` now
+  builds such a module instead of a static library linked with
+  `Paykan::frontend`, and `paykan_add_frontend_tests()` takes the plugin as
+  `PLUGIN <target-or-file>` (instead of `PLUGINS <lib>...`): the suites load
+  it with the installed `paykan`'s loader, and a new
+  `InstalledPaykan.<frontend>` test runs the installed `paykan` with only
+  the plugin loaded over the samples corpus.
 
 ### Added
 
+- **A Debian/Ubuntu package.** Each release carries
+  `paykanlang_<version>_amd64.deb`, built by CPack (`cmake/Packaging.cmake`,
+  `cpack -G DEB`) from the core build and installable with
+  `sudo apt install ./paykanlang_<version>_amd64.deb`; it depends on `gcc` or
+  `clang` for the C backend.
+- **The release tag is checked against the built version.** The version is
+  spelled only in the top-level `CMakeLists.txt` (`project()` plus
+  `PAYKAN_VERSION_PRERELEASE`); the accepted plugin list starts with it, and
+  the release workflow fails when a tag `vX.Y.Z` does not match
+  `paykan --version`.
 - **Stable in v0.1: tuples, optional types and generics (#27).** They are no
   longer marked prototype/experimental: their documented syntax and semantics
   (`docs/language/09-tuples.md`, `10-optionals.md` with optional primitives
@@ -283,16 +179,14 @@ in v0.1" under Added).
   compatibility promise for the 0.1 series. The documented limitations stay: importing generics
   across modules is not supported until v0.2.0 (#57), and a present optional
   primitive is boxed (#96 changes that representation, not the semantics).
-  The plugin interfaces are not yet stable for out-of-tree authors; their
-  versioning policy is #103.
+  Plugins are versioned separately: the C plugin interface by its plugin API
+  version, plugin builds by the release's list of accepted versions (#103).
 - **Pluggable frontends (#16, #17).** The frontend (lexer and parser) is a
   plugin behind an interface (`include/paykan/Frontend.h`) and a registry:
   `-DPAYKAN_FRONTENDS=<list>` picks the frontends to build,
   `--frontend=<name>` selects one at run time and `--list-frontends` lists
-  them. The grammar both frontends implement is specified in
-  `docs/grammar.md`; `--dump-tokens` prints a frontend's token stream, and
-  the `FrontendDifferential` ctest (`scripts/diff_frontends.py`) checks that
-  every sample is accepted or rejected alike, with the same AST.
+  them. The grammar every frontend implements is specified in
+  `docs/grammar.md`, and `--dump-tokens` prints a frontend's token stream.
 - **Pluggable backends and PIR (#16, #35, #48).** Programs are lowered from
   the AST to PIR, the backend-neutral Paykan IR (`docs/pir.md`), in which
   every type, retain/release, vtable and scope cleanup is explicit; every
@@ -393,6 +287,120 @@ in v0.1" under Added).
   the release workflow can be run by hand (`workflow_dispatch`); a manual
   release run is a dry run by default and publishes nothing. JIT errors in the
   CodeGen test harness are now reported in the test's stderr.
+- **Run-time plugin loading (#141).** `paykan` loads plugins from, in order:
+  `--plugin=<file>` (repeatable), each directory of `$PAYKAN_PLUGIN_PATH`,
+  `~/.paykan/plugins/<version>/`, and the installation's
+  `lib/paykan/plugins/<version>/` (found relative to the executable, and
+  installed empty). `--no-plugins` / `PAYKAN_NO_PLUGINS=1` turn the directory
+  search off. Each plugin's descriptor (from its one entry point,
+  `paykan_plugin_init`) is checked before any of its callbacks run: the
+  plugin API version (`PAYKAN_PLUGIN_API_VERSION`, 1), then its build
+  version against the release's list (#103). An incompatible plugin is
+  listed with the reason and its file, and selecting it exits with status 2;
+  a file that can't be loaded, has no entry point or a malformed descriptor
+  is listed as `rejected plugin <file>: <why>` (and stops a compile with
+  status 2 when named with `--plugin`); a name two plugins provide is
+  ambiguous and can't be selected. `--list-backends` and `--version` show
+  each loaded backend's file; `--version` also prints the plugin API version,
+  the plugin directories and every plugin file. The dynamic loader sits
+  behind the portability layer (POSIX `dlopen`; a documented Windows stub).
+  The CMake package adds `Paykan::plugin_api`, `PAYKAN_PLUGIN_API_VERSION`,
+  `PAYKAN_PLUGIN_INSTALL_DIR`, `PAYKAN_EXECUTABLE`,
+  `paykan_install_plugin()` and `paykan_check_plugin_built_with()`.
+  New docs: `docs/plugins/` (overview, the C API, the AST format, PIR for
+  backends).
+- **The AST interchange format (#141)**: its writer and reader in the core
+  (`paykan/ast/Interchange.h`, `Paykan::ast_interchange`), `paykan
+  --emit-ast` to print a program in it, and `src/Frontends/ASTText`, a
+  plain-C frontend whose source language is the format itself. The writer
+  and reader round-trip the AST of every program in the samples corpus.
+- The installed static libraries are built as position-independent code, so
+  a plugin may link them into its module (a C++ frontend reusing the core's
+  AST and writer internally).
+- **Plugin compatibility check (#103).** Every frontend and backend plugin
+  records the PaykanLang version it was built with:
+  `PAYKAN_REGISTER_FRONTEND` / `PAYKAN_REGISTER_BACKEND` capture
+  `PAYKAN_PLUGIN_BUILD_VERSION` from the installed headers
+  (`paykan/PluginCompat.h`, generated). Each release holds an explicit list of
+  the plugin build versions it accepts, in one place
+  (`cmake/PluginCompat.cmake`), compiled into the core and exported in the
+  CMake package as `PAYKAN_PLUGIN_COMPATIBLE_VERSIONS`. Versions match as
+  exact strings, pre-release label included. The registry checks a plugin at
+  registration and at selection; a plugin not on the list is listed by
+  `--list-frontends` / `--list-backends` as
+  `<name> (incompatible: built with PaykanLang <v>; this paykan <v> accepts
+  <list>)`, is never instantiated, and selecting it with `--frontend=` /
+  `--backend=` fails with exit status 2. `paykan --version` lists the
+  accepted versions and every plugin with its build version and
+  compatibility. The built-in plugins go through the same check.
+- **`paykan_add_frontend_plugin()` / `paykan_add_backend_plugin()`** in the
+  CMake package: they add a plugin library and fail at configure time when
+  the installed Paykan does not accept the version the plugin is built with
+  (by default the installation's own, `PAYKAN_TOOLCHAIN_VERSION`, or the one
+  pinned with `BUILT_WITH <version>`). `src/Backends/PrintPIR` uses
+  `paykan_add_backend_plugin()`. See `docs/writing-a-backend.md` (section 7)
+  and the new `docs/writing-a-frontend-plugin.md`.
+- This release accepts plugins built with `0.1.0`. From now on each
+  release's entry states the plugin build versions it accepts.
+- **Test support for out-of-tree frontends (#60).** An installation carries
+  the frontend-parameterized parser and Sema suites, the fuzz smoke and
+  differential tests and the samples corpus, and `find_package(Paykan)`
+  provides `paykan_add_frontend_tests()`, which builds them against a
+  plugin's frontend (`docs/writing-a-frontend-plugin.md`).
+  `-DPAYKAN_INSTALL_TEST_SUPPORT=OFF` leaves them out.
+
+### Changed
+
+- **Repository layout.** The language reference moved from its top-level
+  directory into `docs/language/` (same file names). The example
+  out-of-tree backend moved from `examples/backends/print-pir` to
+  `src/Backends/PrintPIR`. `example_program/` is gone: its `calc` program is now
+  the multi-module sample `samples/imports/12_calc`, with its expected
+  output, so every harness runs it. `PLAN-0.1.md` (superseded by #27) and
+  `proposals/` were removed; the normative parts of the proposals are in
+  the reference (`docs/language/09-tuples.md`, `10-optionals.md`,
+  `11-generics.md`). New ctests: `MarkdownLinks` (`scripts/check_links.py`)
+  and `DocExamples` (`scripts/doc_examples.py`, which runs every doc example
+  that states its output).
+- Runtime object header grew by 8 bytes: every heap object now carries a
+  backpointer to its reference-count box (the unique-box invariant above).
+- Cached import bitcode is stamped with an ABI version; caches written by a
+  compiler with a different (or missing) ABI stamp are recompiled instead of
+  loaded.
+- Parse errors changed format from yacc-style one-liners to clang-style
+  caret-and-snippet diagnostics.
+- The C backend's output is strict ISO C11 (#62): it compiles with
+  `-std=c11 -pedantic-errors -Wall -Wextra -Werror` on GCC and Clang (the
+  new `CStrictC11` ctest and *Strict C11* CI job, over the whole samples
+  corpus), so the C compiler no longer runs with `-w`. Every vtable, the
+  runtime's included, is now an array of `PaykanMethod` slots (`Runtime.h`,
+  `PAYKAN_SLOT_*`) instead of a struct of function pointers, and `Runtime.h`
+  checks the target assumptions (LP64, 8-bit bytes, two's complement,
+  IEEE 754 doubles) with `_Static_assert` (`docs/c-backend.md`).
+- **Dependencies.** PaykanLang depends only on standard C and C++; GoogleTest
+  (tests), LLVM (the opt-in `llvm` backend) and Python 3's standard library
+  (the scripts) are the only other tools it uses. The script-driven ctests
+  now run with the Python CMake finds (`find_package(Python3)`: the system's,
+  or `-DPython3_EXECUTABLE=<path>`) instead of whatever `python3` is on
+  `PATH`, and are skipped when there is none. The example plugin backend
+  lives in `src/Backends/PrintPIR`.
+
+- **The plugin registration ABI (#103).** `paykan::plugin::Registration`
+  takes a `PluginInfo { Name, Create, BuildVersion }` (plain data, the version
+  a `const char *`), and registry entries carry `BuildVersion`, `Compatible`
+  and `Incompatibility`. `Registry::create()` returns null for an
+  incompatible plugin. Plugins that register through the macros need only a
+  rebuild. The check lives in a new core library, `paykan_plugin`
+  (`Paykan::plugin`), which `Paykan::frontend` and `Paykan::backend` link.
+- `paykan --version` prints one more line (`accepts plugins built with
+  PaykanLang <list>`), and each plugin line now ends in
+  `(built with PaykanLang <v>, compatible)`; a backend's description follows
+  after `: ` instead of in parentheses. With #141 it also ends with
+  `plugin API <n>`, `plugin directories: ...` and one line per plugin file,
+  and a loaded plugin's lines end in ` [<file>]`.
+- Registry entries (`paykan::plugin::Registry<I>::Entry`) also carry the
+  plugin's `Path`, `Description` and `Conflict`, and their factory is a
+  `std::function` (#141).
 
 ### Fixed
 
@@ -586,35 +594,18 @@ in v0.1" under Added).
   ignores a negated command; they are now explicit `if …; then exit 1; fi`
   checks. The Lint job runs actionlint, with shellcheck, and any finding
   fails it.
-
-### Changed
-
-- **Repository layout.** The language reference moved from its top-level
-  directory into `docs/language/` (same file names). The example
-  out-of-tree backend moved from `examples/backends/print-pir` to
-  `src/Backends/PrintPIR`. `example_program/` is gone: its `calc` program is now
-  the multi-module sample `samples/imports/12_calc`, with its expected
-  output, so every harness runs it. `PLAN-0.1.md` (superseded by #27) and
-  `proposals/` were removed; the normative parts of the proposals are in
-  the reference (`docs/language/09-tuples.md`, `10-optionals.md`,
-  `11-generics.md`). New ctests: `MarkdownLinks` (`scripts/check_links.py`)
-  and `DocExamples` (`scripts/doc_examples.py`, which runs every doc example
-  that states its output).
-- Runtime object header grew by 8 bytes: every heap object now carries a
-  backpointer to its reference-count box (the unique-box invariant above).
-- Cached import bitcode is stamped with an ABI version; caches written by a
-  compiler with a different (or missing) ABI stamp are recompiled instead of
-  loaded.
-- Parse errors changed format from yacc-style one-liners to clang-style
-  caret-and-snippet diagnostics.
-- The C backend's output is strict ISO C11 (#62): it compiles with
-  `-std=c11 -pedantic-errors -Wall -Wextra -Werror` on GCC and Clang (the
-  new `CStrictC11` ctest and *Strict C11* CI job, over the whole samples
-  corpus), so the C compiler no longer runs with `-w`. Every vtable, the
-  runtime's included, is now an array of `PaykanMethod` slots (`Runtime.h`,
-  `PAYKAN_SLOT_*`) instead of a struct of function pointers, and `Runtime.h`
-  checks the target assumptions (LP64, 8-bit bytes, two's complement,
-  IEEE 754 doubles) with `_Static_assert` (`docs/c-backend.md`).
+- **A truncated plugin file no longer crashes `paykan`.** A plugin whose file
+  ends inside its loadable segments (an interrupted copy, download or install)
+  was mapped by `dlopen` and killed every command with SIGBUS, `--version`
+  included. On Linux the loader now checks the file's ELF program headers
+  against its size first and lists the file as a rejected plugin.
+- **A name two plugins provide is reported as ambiguous even when the first
+  provider is incompatible.** The listings, `--version` and selection used to
+  report only the first provider's incompatibility.
+- **Bounded build parallelism.** README, CI, the release workflow, the Homebrew
+  formula and the out-of-tree frontend test passed a bare `--parallel`, which
+  with the Makefile generators is an unlimited `make -j`; they now pass the
+  number of processors.
 
 ## Initial prototype - 2026-06-28
 
@@ -647,5 +638,5 @@ statically-typed, object-oriented language that compiled to LLVM IR and was
 - The `destroy()` destructor is compiler-generated and final: user classes cannot
   override it, and direct calls are rejected at compile time.
 
-[Unreleased]: https://github.com/parsabee/PaykanLang/compare/v0.1.0-alpha...HEAD
-[0.1.0-alpha]: https://github.com/parsabee/PaykanLang/releases/tag/v0.1.0-alpha
+[Unreleased]: https://github.com/parsabee/PaykanLang/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/parsabee/PaykanLang/releases/tag/v0.1.0

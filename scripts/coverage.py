@@ -27,7 +27,7 @@ binaries) that do; those functions are counted from the real records.
 It exits non-zero if total line coverage is below the floor (--min, default 80).
 
 Note on the floor: the project's aspiration is ~100% line coverage. The
-first-party total was ~82% when the floor was set and ~90% at the v0.1.0 audit
+first-party total was ~82% when the floor was set and ~90% at the audit for the first release
 (some defensive branches are still not exercised). The floor stays below that so
 CI fails on a large *regression* without blocking the v0.1 release; ratchet it
 up toward 100% as gaps are closed.

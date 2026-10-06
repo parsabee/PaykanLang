@@ -6,9 +6,16 @@ project(PaykanLang
     LANGUAGES C CXX
 )
 
-# Pre-release label appended to the dotted version, e.g. "0.1.0-alpha".
-# Leave empty for a final release.
-set(PAYKAN_VERSION_PRERELEASE "alpha")
+# The version's single source of truth: project()'s VERSION above plus this
+# pre-release label make PAYKAN_VERSION (below), and everything else (Version.h,
+# the plugin headers, the accepted plugin list, the plugin directory, the CMake
+# package version, `paykan --version`, the release workflow's tag check) derives
+# from it. Bumping the version is a change to these two lines only.
+#
+# Pre-release label appended to the dotted version as "-<label>" (a label
+# "rc1" makes 1.2.3 into "1.2.3-rc1"). Empty for a final release, whose
+# version is the plain dotted one.
+set(PAYKAN_VERSION_PRERELEASE "")
 
 # -- Language standard --------------------------------------------------------
 set(CMAKE_CXX_STANDARD 20)
@@ -135,3 +142,4 @@ endif()
 # -- Install rules and the find_package(Paykan) package -----------------------
 include(PaykanExport)
 include(PaykanTestSupport)  # -> the frontend test suites for out-of-tree frontends
+include(Packaging)         # -> CPack: the Debian package (cpack -G DEB)

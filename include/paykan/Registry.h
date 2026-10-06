@@ -44,7 +44,7 @@ namespace paykan::plugin {
 // it can't be selected and is never instantiated.  The built-in plugins are
 // built with this paykan's own version, which is always on the list.
 
-/// The version of the running toolchain ("0.1.0-alpha").
+/// The version of the running toolchain (e.g. "1.2.3").
 std::string_view toolchainVersion();
 
 /// The plugin build versions the running toolchain accepts.
@@ -55,7 +55,7 @@ std::span<const char *const> compatibleBuildVersions();
 bool isCompatibleBuildVersion(const char *buildVersion);
 
 /// Why a plugin built with @p buildVersion is not compatible:
-/// "built with PaykanLang 0.0.9; this paykan 0.1.0-alpha accepts 0.1.0-alpha".
+/// "built with PaykanLang 0.0.9; this paykan 1.2.3 accepts 1.2.3".
 std::string incompatibilityReason(const char *buildVersion);
 
 // -- Registration ------------------------------------------------------------
