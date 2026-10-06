@@ -47,6 +47,8 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+          # tests/suites.json must match the build files it is generated from.
+          python3 scripts/gen_test_suites.py --check
           if [ "${EVENT}" = "pull_request" ]; then
             git diff --name-only "${BASE_SHA}" HEAD
             tests="$(python3 scripts/affected_tests.py --base "${BASE_SHA}")"
