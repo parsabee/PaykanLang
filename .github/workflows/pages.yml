@@ -1,0 +1,71 @@
+name: Pages
+
+# The documentation site, https://parsabee.github.io/PaykanLang/: docs/ built
+# by GitHub Pages' own Jekyll (docs/_config.yml) and deployed with the official
+# Pages actions.  Nothing is installed from the repository: the theme is a
+# remote theme that the build fetches, and the plugins are those GitHub Pages
+# ships.
+#
+# One-time setup by a repository admin: Settings -> Pages -> Build and
+# deployment -> Source: "GitHub Actions".  (The workflow's token cannot turn
+# Pages on.)
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "docs/**"
+      - ".github/workflows/pages.yml"
+  # Pull requests build the site (catching Jekyll errors) but do not deploy.
+  pull_request:
+    paths:
+      - "docs/**"
+      - ".github/workflows/pages.yml"
+  # Manual runs (Actions tab -> Pages -> "Run workflow").
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    name: Build the site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Reads the Pages settings, which exist only once Pages is enabled, so
+      # pull requests skip it (docs/_config.yml sets the base URL anyway).
+      - name: Configure Pages
+        if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@v6
+
+      - name: Build with Jekyll
+        uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./docs
+          destination: ./_site
+
+      - name: Upload the site
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ./_site
+
+  deploy:
+    name: Deploy
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    # One deployment at a time; a newer one waits rather than cancelling a
+    # deployment in progress.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

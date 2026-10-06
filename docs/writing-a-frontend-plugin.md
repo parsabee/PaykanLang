@@ -56,13 +56,15 @@ static int my_parse(void *data, PaykanSession *s, const PaykanFrontendInput *in,
 
 static void my_free(void *p) { free(p); }
 
-static const PaykanFrontend frontends[] = {{
-    .struct_size = sizeof(PaykanFrontend),
-    .name = "mine",                  /* --frontend=mine */
-    .description = "my parser",
-    .parse = my_parse,
-    .dump_tokens = NULL,             /* optional: --dump-tokens */
-}};
+static const PaykanFrontend frontends[] = {
+    {
+        .struct_size = sizeof(PaykanFrontend),
+        .name = "mine",                  /* --frontend=mine */
+        .description = "my parser",
+        .parse = my_parse,
+        .dump_tokens = NULL,             /* optional: --dump-tokens */
+    },
+};
 
 static const PaykanPlugin plugin = {
     .struct_size = sizeof(PaykanPlugin),

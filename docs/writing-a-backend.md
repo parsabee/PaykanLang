@@ -65,16 +65,18 @@ static int my_run(void *data, PaykanSession *s, const PaykanBackendInput *in,
   return PAYKAN_OK;
 }
 
-static const PaykanBackend backends[] = {{
-    .struct_size = sizeof(PaykanBackend),
-    .name = "mine",
-    .description = "built on X 1.2",
-    .capabilities = PAYKAN_BACKEND_EMIT_SOURCE | PAYKAN_BACKEND_EMIT_EXECUTABLE |
-                    PAYKAN_BACKEND_RUN,
-    .source_extension = ".x",
-    .emit = my_emit,
-    .run = my_run,
-}};
+static const PaykanBackend backends[] = {
+    {
+        .struct_size = sizeof(PaykanBackend),
+        .name = "mine",
+        .description = "built on X 1.2",
+        .capabilities = PAYKAN_BACKEND_EMIT_SOURCE | PAYKAN_BACKEND_EMIT_EXECUTABLE |
+                        PAYKAN_BACKEND_RUN,
+        .source_extension = ".x",
+        .emit = my_emit,
+        .run = my_run,
+    },
+};
 
 static const PaykanPlugin plugin = {
     .struct_size = sizeof(PaykanPlugin),
