@@ -8,6 +8,7 @@
 
 #include "ModuleName.h"
 #include "Names.h"
+#include "Runtime.h"
 #include "Version.h"
 #include "paykan/pir/Printer.h"
 
@@ -832,15 +833,9 @@ translateProgram(const Program &program, llvm::LLVMContext &ctx,
 
 namespace {
 
-/// Bumped whenever the generated code's ABI (object layout, calling
-/// conventions) changes, so entries from an older compiler are never linked.
-///   v3: PIR-based translation.
-///   v4: the main module's symbols are prefixed (`pk.`).
-///   v5: methods are `<Class>.<method>` (was `<Class>_<method>`), vtables
-///       `<Class>..vtable`.
-///   v6: imported modules' symbols are prefixed with the canonical module
-///       name (`geometry::shapes::describe`), not the absolute file path.
-constexpr uint64_t kPaykanABIVersion = 6;
+/// The runtime ABI version (Runtime.h), stamped into every cached module so
+/// entries from an older compiler are never linked.
+constexpr uint64_t kPaykanABIVersion = kRuntimeABIVersion;
 constexpr const char *kABIVersionFlag = "paykan.abi.version";
 constexpr const char *kCacheKeyMD = "paykan.cache.key";
 
