@@ -1,11 +1,5 @@
 # Homebrew formula for PaykanLang.
 #
-# TODO(release, #27 section 5.2): `url` names the v0.1.0 tag's source archive,
-# but `sha256` is still an all-zeros placeholder: the archive's digest only
-# exists once the v0.1.0 tag has been pushed, so a follow-up change after the
-# release fills it in (see the NOTE below). Until then `brew install` fails its
-# checksum.
-#
 # This file doubles as a tap: a user can install with
 #
 #   brew tap parsabee/paykanlang https://github.com/parsabee/PaykanLang
@@ -27,14 +21,14 @@
 # its `paykan` at run time: from --plugin=<file>, $PAYKAN_PLUGIN_PATH,
 # ~/.paykan/plugins/<version>/ or the keg's plugin directory.
 #
-# NOTE: `sha256` below is a placeholder. After the v0.1.0 tag exists, set it to
-# the real digest of the archive `url` names:
-#   curl -fsSL https://github.com/parsabee/PaykanLang/archive/refs/tags/v0.1.0.tar.gz | shasum -a 256
+# On a new release, point `url` at the new tag and set `sha256` to the digest
+# of that archive:
+#   curl -fsSL https://github.com/parsabee/PaykanLang/archive/refs/tags/vX.Y.Z.tar.gz | shasum -a 256
 class Paykanlang < Formula
   desc "Statically-typed, object-oriented language that compiles via C"
   homepage "https://github.com/parsabee/PaykanLang"
   url "https://github.com/parsabee/PaykanLang/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  sha256 "a68384f54099773b5781503f216641c57813f66a10a59658d4572b3d3f3b613c"
   head "https://github.com/parsabee/PaykanLang.git", branch: "develop"
   license "MIT"
 
