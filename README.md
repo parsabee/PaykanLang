@@ -167,9 +167,8 @@ frontends. Each release lists the plugin build versions it accepts; a plugin bui
 version is listed as incompatible and can't be selected
 ([plugin compatibility](docs/writing-a-backend.md#7-plugin-compatibility)).
 
-The test suite is off by default, so a plain build downloads nothing at all.
-`-DPAYKAN_BUILD_TESTS=ON` builds it; it needs GoogleTest, an installed one if CMake finds it,
-otherwise one downloaded at configure time.
+The tests are off by default, so a plain build downloads nothing at all. See
+[Testing](#testing) to build them.
 
 The `paykan` binary is placed at `build/bin/paykan`. To install it to a prefix (with the
 runtime, `lib/libpaykan_runtime.a` and `include/paykan/Runtime.h`, that `build` and the c
@@ -217,13 +216,24 @@ program made by `build`). Source files use the
 
 ## Testing
 
-The tests are built only with `-DPAYKAN_BUILD_TESTS=ON`:
+The tests are off by default. They come in suites; build the ones you need with
+`-DPAYKAN_BUILD_TESTS=<suites>` (a CMake list), or all of them with `-DPAYKAN_BUILD_ALL_TESTS=ON`:
 
 ```sh
-cmake -B build -DPAYKAN_BUILD_TESTS=ON
+cmake -B build "-DPAYKAN_BUILD_TESTS=parser;sema"   # just these two suites
+cmake -B build -DPAYKAN_BUILD_ALL_TESTS=ON          # every suite
 cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
 ctest --test-dir build --output-on-failure
 ```
+
+The suites: `parser`, `sema`, `codegen`, `pir-llvm`, `pir`, `lowering`, `ast-interchange`,
+`plugin`, `runtime`, `driver`, `frontend`, `samples`, `c-strict`, `docs`, `configure` and
+`out-of-tree` ([`cmake/PaykanTests.cmake`](cmake/PaykanTests.cmake) says what each runs).
+The GoogleTest-based ones need GoogleTest: an installed one if CMake finds it, otherwise one
+downloaded at configure time.
+
+`scripts/affected_tests.py --base <commit>` prints the suites a change can affect; CI builds
+only those on a pull request, and every suite on a push.
 
 ---
 

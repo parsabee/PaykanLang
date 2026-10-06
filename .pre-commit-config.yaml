@@ -9,7 +9,7 @@
 # LLVM 17 clang-format / clang-tidy (build/third-party/llvm) for results that
 # match CI exactly. clang-tidy needs a configured build tree
 # (build/compile_commands.json) with the tests in it; run
-# `cmake -B build -DPAYKAN_BUILD_TESTS=ON` once before pushing.
+# `cmake -B build -DPAYKAN_BUILD_ALL_TESTS=ON` once before pushing.
 #
 # Run manually over the whole repo:
 #   pre-commit run --all-files

@@ -9,10 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The test suite is no longer built by default: a plain `cmake -B build`
-  builds only the compiler and downloads nothing.  Configure with
-  `-DPAYKAN_BUILD_TESTS=ON` to build the tests (and fetch GoogleTest when no
-  installed one is found).
+- The tests are no longer built by default: a plain `cmake -B build` builds
+  only the compiler and downloads nothing.  They are now in suites
+  (`cmake/PaykanTests.cmake`): `-DPAYKAN_BUILD_TESTS=<suites>` builds the
+  named ones (a CMake list, e.g. `"parser;sema"`) and
+  `-DPAYKAN_BUILD_ALL_TESTS=ON` all of them.  `PAYKAN_BUILD_TESTS=ON` is an
+  error that points to `PAYKAN_BUILD_ALL_TESTS`.
+- CI builds and runs only the test suites a pull request can affect
+  (`scripts/affected_tests.py`); pushes still run every suite.
 
 ## [0.1.0] - 2026-10-06
 

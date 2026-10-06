@@ -67,16 +67,19 @@ if(PAYKAN_NEEDS_LLVM)
     include(LLVMSetup)      # -> paykan_llvm       INTERFACE target
 endif()
 
-# The test suite (GoogleTest) is off by default, so a plain configure builds
-# only the compiler and downloads nothing.  -DPAYKAN_BUILD_TESTS=ON builds it
-# (and fetches GoogleTest when no installed one is found).
-option(PAYKAN_BUILD_TESTS "Build the test suite (needs GoogleTest)" OFF)
+# The tests are off by default, so a plain configure builds only the compiler
+# and downloads nothing.  -DPAYKAN_BUILD_TESTS=<suites> builds the named test
+# suites and -DPAYKAN_BUILD_ALL_TESTS=ON all of them; GoogleTest is fetched
+# only when a suite needs it and no installed one is found.
+include(PaykanTests)        # -> PAYKAN_ENABLED_TEST_SUITES, paykan_test_suite_enabled()
 # The frontend test suites and the samples corpus, installed as sources for
 # out-of-tree frontends (cmake/PaykanTestSupport.cmake).
 option(PAYKAN_INSTALL_TEST_SUPPORT
     "Install the frontend test suites and the samples corpus for out-of-tree frontends" ON)
-if(PAYKAN_BUILD_TESTS)
+if(PAYKAN_TESTS_NEED_GTEST)
     include(GTestSetup)     # -> gtest, gmock       installed or via FetchContent
+endif()
+if(PAYKAN_ENABLED_TEST_SUITES)
     enable_testing()
 endif()
 
@@ -135,7 +138,7 @@ target_include_directories(paykan_compile_options INTERFACE
 
 # -- Subdirectories -----------------------------------------------------------
 add_subdirectory(src)
-if(PAYKAN_BUILD_TESTS)
+if(PAYKAN_ENABLED_TEST_SUITES)
     add_subdirectory(tests)
 endif()
 

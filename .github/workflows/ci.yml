@@ -16,7 +16,45 @@ on:
 # The default backend is c there too (it always is when c is built); every
 # test that means llvm passes --backend=llvm, and the per-backend suites
 # (CodeGenTests.*, DriverTests.*, SamplesParity*) run on both.
+#
+# A pull request builds and runs only the test suites its changes can affect
+# (scripts/affected_tests.py, the "changes" job); a push builds them all.
+# Every job passes the result to CMake as $PAYKAN_TESTS_FLAG, one argument:
+# -DPAYKAN_BUILD_TESTS=<suites> or -DPAYKAN_BUILD_ALL_TESTS=ON.
 jobs:
+  changes:
+    name: Affected test suites
+    runs-on: ubuntu-latest
+    outputs:
+      tests: ${{ steps.affected.outputs.tests }}
+      cmake-flag: ${{ steps.affected.outputs.cmake-flag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Pick the test suites
+        id: affected
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT}" = "pull_request" ]; then
+            git diff --name-only "${BASE_SHA}" HEAD
+            tests="$(python3 scripts/affected_tests.py --base "${BASE_SHA}")"
+          else
+            tests=all
+          fi
+          if [ "${tests}" = "all" ]; then
+            flag="-DPAYKAN_BUILD_ALL_TESTS=ON"
+          else
+            flag="-DPAYKAN_BUILD_TESTS=${tests}"
+          fi
+          echo "tests=${tests}" >> "${GITHUB_OUTPUT}"
+          echo "cmake-flag=${flag}" >> "${GITHUB_OUTPUT}"
+          echo "### Test suites: \`${tests:-none}\`" >> "${GITHUB_STEP_SUMMARY}"
+
   # ---------------------------------------------------------------------------
   # Code quality gate: clang-format (check) + clang-tidy (bug-focused).
   # Uses the vendored LLVM 17 toolchain so the gate matches local runs exactly.
@@ -24,6 +62,9 @@ jobs:
   lint:
     name: Lint | clang-format + clang-tidy + actionlint
     runs-on: macos-14
+    needs: changes
+    env:
+      PAYKAN_TESTS_FLAG: ${{ needs.changes.outputs.cmake-flag }}
     steps:
       - uses: actions/checkout@v4
 
@@ -51,9 +92,10 @@ jobs:
 
       # Configure + build so compile_commands.json and the generated headers
       # exist (clang-tidy needs them to parse the TUs).  The full build, so
-      # every translation unit is checked.
+      # every translation unit of the compiler is checked, and the affected
+      # test suites' sources with it.
       - name: Configure (Debug, full)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_BUILD_TESTS=ON "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug "${PAYKAN_TESTS_FLAG}" "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
         run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
@@ -70,6 +112,9 @@ jobs:
   build-test-macos:
     name: Debug | macOS ARM64
     runs-on: macos-14
+    needs: changes
+    env:
+      PAYKAN_TESTS_FLAG: ${{ needs.changes.outputs.cmake-flag }}
     steps:
       - uses: actions/checkout@v4
 
@@ -80,12 +125,13 @@ jobs:
           key: third-party-macos-arm64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (Debug, full)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_BUILD_TESTS=ON "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug "${PAYKAN_TESTS_FLAG}" "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
         run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
 
       - name: Test
+        if: needs.changes.outputs.tests != ''
         run: ctest --test-dir build --output-on-failure --parallel 4
 
   # ---------------------------------------------------------------------------
@@ -94,6 +140,9 @@ jobs:
   asan-macos:
     name: ASan+LSan | macOS ARM64
     runs-on: macos-14
+    needs: changes
+    env:
+      PAYKAN_TESTS_FLAG: ${{ needs.changes.outputs.cmake-flag }}
     steps:
       - uses: actions/checkout@v4
 
@@ -107,12 +156,13 @@ jobs:
           key: third-party-macos-arm64-asan-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (ASan)
-        run: cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_BUILD_TESTS=ON -DPAYKAN_ASAN=ON "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug "${PAYKAN_TESTS_FLAG}" -DPAYKAN_ASAN=ON "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
         run: cmake --build build-asan --parallel "$(getconf _NPROCESSORS_ONLN)"
 
       - name: Test
+        if: needs.changes.outputs.tests != ''
         env:
           # Apple clang has no LeakSanitizer on arm64 (see SanitizerSetup.cmake);
           # detect_leaks=1 would abort ASan at startup as unsupported.
@@ -131,6 +181,9 @@ jobs:
   ubsan-macos:
     name: UBSan | macOS ARM64
     runs-on: macos-14
+    needs: changes
+    env:
+      PAYKAN_TESTS_FLAG: ${{ needs.changes.outputs.cmake-flag }}
     steps:
       - uses: actions/checkout@v4
 
@@ -144,12 +197,13 @@ jobs:
           key: third-party-macos-arm64-ubsan-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (UBSan)
-        run: cmake -B build-ubsan -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_BUILD_TESTS=ON -DPAYKAN_UBSAN=ON "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build-ubsan -DCMAKE_BUILD_TYPE=Debug "${PAYKAN_TESTS_FLAG}" -DPAYKAN_UBSAN=ON "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
         run: cmake --build build-ubsan --parallel "$(getconf _NPROCESSORS_ONLN)"
 
       - name: Test
+        if: needs.changes.outputs.tests != ''
         env:
           UBSAN_OPTIONS: print_stacktrace=1:abort_on_error=1
         run: ctest --test-dir build-ubsan --output-on-failure --parallel 4
@@ -160,6 +214,9 @@ jobs:
   build-test-linux:
     name: Debug | Linux x86-64
     runs-on: ubuntu-latest
+    needs: changes
+    env:
+      PAYKAN_TESTS_FLAG: ${{ needs.changes.outputs.cmake-flag }}
     steps:
       - uses: actions/checkout@v4
 
@@ -173,12 +230,13 @@ jobs:
           key: third-party-linux-x86_64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (Debug, full)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -G Ninja -DPAYKAN_BUILD_TESTS=ON "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -G Ninja "${PAYKAN_TESTS_FLAG}" "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
         run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
 
       - name: Test
+        if: needs.changes.outputs.tests != ''
         run: ctest --test-dir build --output-on-failure --parallel 4
 
   # ---------------------------------------------------------------------------
@@ -192,6 +250,9 @@ jobs:
   release-linux:
     name: Release | Linux x86-64 (GCC)
     runs-on: ubuntu-latest
+    needs: changes
+    env:
+      PAYKAN_TESTS_FLAG: ${{ needs.changes.outputs.cmake-flag }}
     steps:
       - uses: actions/checkout@v4
 
@@ -205,12 +266,13 @@ jobs:
           key: third-party-linux-x86_64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (Release, full)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja -DPAYKAN_BUILD_TESTS=ON "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja "${PAYKAN_TESTS_FLAG}" "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
         run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
 
       - name: Test
+        if: needs.changes.outputs.tests != ''
         run: ctest --test-dir build --output-on-failure --parallel 4
 
       - name: Build the default (core) configuration (Release, as release.yml)
@@ -226,6 +288,9 @@ jobs:
   coverage:
     name: Coverage | macOS ARM64
     runs-on: macos-14
+    needs: changes
+    # The coverage floor is over the whole suite: every suite or none.
+    if: needs.changes.outputs.tests != ''
     steps:
       - uses: actions/checkout@v4
 
@@ -239,12 +304,12 @@ jobs:
       # which the coverage tree below reuses for its clang and gtest source.
       # LLVM is opt-in, so the lists are needed for it to be provisioned.
       - name: Configure base tree (provisions vendored toolchain)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_BUILD_TESTS=ON "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_BUILD_ALL_TESTS=ON "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Configure coverage tree
         run: |
           LLVM="$PWD/build/third-party/llvm"
-          cmake -B build-cov -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_BUILD_TESTS=ON -DPAYKAN_COVERAGE=ON \
+          cmake -B build-cov -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_BUILD_ALL_TESTS=ON -DPAYKAN_COVERAGE=ON \
             "-DPAYKAN_BACKENDS=llvm;c" \
             -DCMAKE_C_COMPILER="$LLVM/bin/clang" \
             -DCMAKE_CXX_COMPILER="$LLVM/bin/clang++" \
@@ -277,6 +342,9 @@ jobs:
   barebones-linux:
     name: Barebones | Linux x86-64
     runs-on: ubuntu-latest
+    needs: changes
+    env:
+      PAYKAN_TESTS_FLAG: ${{ needs.changes.outputs.cmake-flag }}
     steps:
       - uses: actions/checkout@v4
 
@@ -314,13 +382,16 @@ jobs:
       - name: "Configure (default: recursive-descent frontend, C backend only, with tests)"
         run: |
           set -o pipefail
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_BUILD_TESTS=ON 2>&1 | tee configure.log
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug "${PAYKAN_TESTS_FLAG}" 2>&1 | tee configure.log
           # Nothing but GoogleTest may be fetched.
           if grep -i "Downloading" configure.log; then
             echo "error: the default configure downloaded or built more than GoogleTest (above)"
             exit 1
           fi
-          test "$(ls build/third-party)" = "gtest"
+          if [ -d build/third-party ] && [ "$(ls build/third-party)" != "gtest" ]; then
+            echo "error: build/third-party holds more than GoogleTest"
+            exit 1
+          fi
 
       - name: Build
         run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
@@ -341,6 +412,7 @@ jobs:
           fi
 
       - name: Test
+        if: needs.changes.outputs.tests != ''
         run: ctest --test-dir build --output-on-failure --parallel 4
 
       # Plugins load into the INSTALLED paykan with no rebuild (#141): the C
@@ -409,6 +481,8 @@ jobs:
   strict-c11-linux:
     name: Strict C11 | Linux x86-64 (GCC + Clang)
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.tests == 'all' || contains(needs.changes.outputs.tests, 'c-strict')
     steps:
       - uses: actions/checkout@v4
 

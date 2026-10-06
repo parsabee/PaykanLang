@@ -1,7 +1,7 @@
 # GTestSetup.cmake
 # ----------------------------------------------------------------------------
 # Provides GoogleTest for the test suite.  Included only when
-# PAYKAN_BUILD_TESTS is ON (see the top-level CMakeLists.txt).
+# a selected test suite uses it (cmake/PaykanTests.cmake).
 #
 # Resolution order:
 #   1. FETCHCONTENT_SOURCE_DIR_GOOGLETEST=<dir>: build GoogleTest from that
