@@ -53,7 +53,7 @@ jobs:
       # exist (clang-tidy needs them to parse the TUs).  The full build, so
       # every translation unit is checked.
       - name: Configure (Debug, full)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_BUILD_TESTS=ON "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
         run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
@@ -80,7 +80,7 @@ jobs:
           key: third-party-macos-arm64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (Debug, full)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_BUILD_TESTS=ON "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
         run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
@@ -107,7 +107,7 @@ jobs:
           key: third-party-macos-arm64-asan-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (ASan)
-        run: cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_ASAN=ON "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_BUILD_TESTS=ON -DPAYKAN_ASAN=ON "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
         run: cmake --build build-asan --parallel "$(getconf _NPROCESSORS_ONLN)"
@@ -144,7 +144,7 @@ jobs:
           key: third-party-macos-arm64-ubsan-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (UBSan)
-        run: cmake -B build-ubsan -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_UBSAN=ON "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build-ubsan -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_BUILD_TESTS=ON -DPAYKAN_UBSAN=ON "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
         run: cmake --build build-ubsan --parallel "$(getconf _NPROCESSORS_ONLN)"
@@ -173,7 +173,7 @@ jobs:
           key: third-party-linux-x86_64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (Debug, full)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -G Ninja "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -G Ninja -DPAYKAN_BUILD_TESTS=ON "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
         run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
@@ -205,7 +205,7 @@ jobs:
           key: third-party-linux-x86_64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (Release, full)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja -DPAYKAN_BUILD_TESTS=ON "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
         run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
@@ -215,8 +215,7 @@ jobs:
 
       - name: Build the default (core) configuration (Release, as release.yml)
         run: |
-          cmake -B build-bare -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST="$PWD/build/third-party/gtest"
+          cmake -B build-bare -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build-bare --parallel "$(getconf _NPROCESSORS_ONLN)"
 
   # ---------------------------------------------------------------------------
@@ -240,12 +239,12 @@ jobs:
       # which the coverage tree below reuses for its clang and gtest source.
       # LLVM is opt-in, so the lists are needed for it to be provisioned.
       - name: Configure base tree (provisions vendored toolchain)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_BUILD_TESTS=ON "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Configure coverage tree
         run: |
           LLVM="$PWD/build/third-party/llvm"
-          cmake -B build-cov -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_COVERAGE=ON \
+          cmake -B build-cov -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_BUILD_TESTS=ON -DPAYKAN_COVERAGE=ON \
             "-DPAYKAN_BACKENDS=llvm;c" \
             -DCMAKE_C_COMPILER="$LLVM/bin/clang" \
             -DCMAKE_CXX_COMPILER="$LLVM/bin/clang++" \
@@ -269,9 +268,9 @@ jobs:
   # Barebones build: standard C++ only.  No LLVM, and nothing downloaded at
   # configure time.  This is the DEFAULT configure (no
   # PAYKAN_FRONTENDS / PAYKAN_BACKENDS: recursive-descent + c, #123).  Proves
-  # the acceptance criteria of #16, #77 and #123: with -DPAYKAN_BUILD_TESTS=OFF
-  # configure downloads nothing at all (GoogleTest is fetched only for the
-  # test suite), `paykan` links no third-party library, the full suite passes
+  # the acceptance criteria of #16, #77 and #123: a plain configure (tests are
+  # off by default) downloads nothing at all (GoogleTest is fetched only for
+  # the test suite), `paykan` links no third-party library, the full suite passes
   # on the C backend, and an out-of-tree backend builds against the installed
   # package.
   # ---------------------------------------------------------------------------
@@ -284,13 +283,12 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
-      # The packager's build (#77): tests off, so not even GoogleTest is fetched.
-      # A plain configure: the defaults are the core (#123).
-      - name: Configure and build with tests off (nothing downloaded)
+      # The packager's build (#77): a plain configure, so tests are off and not
+      # even GoogleTest is fetched.  The defaults are the core (#123).
+      - name: Configure and build with the defaults (tests off, nothing downloaded)
         run: |
           set -o pipefail
-          cmake -B build-notests -G Ninja -DCMAKE_BUILD_TYPE=Debug \
-            -DPAYKAN_BUILD_TESTS=OFF 2>&1 | tee configure-notests.log
+          cmake -B build-notests -G Ninja -DCMAKE_BUILD_TYPE=Debug 2>&1 | tee configure-notests.log
           grep -F "Frontends: recursive-descent (default: recursive-descent)" configure-notests.log
           grep -F "Backends: c (default: c)" configure-notests.log
           # (`! grep` mid-script would not fail the step: bash -e ignores a
@@ -313,10 +311,10 @@ jobs:
           path: build/third-party/gtest
           key: gtest-${{ hashFiles('cmake/GTestSetup.cmake') }}
 
-      - name: "Configure (default: recursive-descent frontend, C backend only)"
+      - name: "Configure (default: recursive-descent frontend, C backend only, with tests)"
         run: |
           set -o pipefail
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug 2>&1 | tee configure.log
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_BUILD_TESTS=ON 2>&1 | tee configure.log
           # Nothing but GoogleTest may be fetched.
           if grep -i "Downloading" configure.log; then
             echo "error: the default configure downloaded or built more than GoogleTest (above)"

@@ -1,8 +1,8 @@
 # DefaultConfigure.cmake -- the DefaultConfigure ctest (#123).
 # ----------------------------------------------------------------------------
-# Configures the source tree with nothing but -DPAYKAN_BUILD_TESTS=OFF (what
-# release.yml and packagers run) in a scratch build directory and checks that
-# the defaults are the core: the recursive-descent frontend and the c backend,
+# Configures the source tree with no options at all (what packagers run; tests
+# are off by default) in a scratch build directory and checks that the
+# defaults are the core: the recursive-descent frontend and the c backend,
 # with nothing downloaded or built from third-party sources (no third-party/
 # or _deps/ directory).  Configure only: nothing is compiled.
 #
@@ -16,8 +16,7 @@ foreach(var SOURCE_DIR BINARY_DIR GENERATOR)
     endif()
 endforeach()
 
-set(args -S "${SOURCE_DIR}" -B "${BINARY_DIR}" -G "${GENERATOR}"
-         -DPAYKAN_BUILD_TESTS=OFF)
+set(args -S "${SOURCE_DIR}" -B "${BINARY_DIR}" -G "${GENERATOR}")
 # The same compilers as the enclosing build, so the compiler gate sees a
 # supported one; no other setting of the enclosing build is passed on.
 if(C_COMPILER)

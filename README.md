@@ -167,9 +167,9 @@ frontends. Each release lists the plugin build versions it accepts; a plugin bui
 version is listed as incompatible and can't be selected
 ([plugin compatibility](docs/writing-a-backend.md#7-plugin-compatibility)).
 
-The test suite needs GoogleTest: an installed one is used if CMake finds it, otherwise it is
-downloaded at configure time. `-DPAYKAN_BUILD_TESTS=OFF` skips the tests and GoogleTest (for
-packagers and offline builds), so the barebones build then downloads nothing at all.
+The test suite is off by default, so a plain build downloads nothing at all.
+`-DPAYKAN_BUILD_TESTS=ON` builds it; it needs GoogleTest, an installed one if CMake finds it,
+otherwise one downloaded at configure time.
 
 The `paykan` binary is placed at `build/bin/paykan`. To install it to a prefix (with the
 runtime, `lib/libpaykan_runtime.a` and `include/paykan/Runtime.h`, that `build` and the c
@@ -217,7 +217,11 @@ program made by `build`). Source files use the
 
 ## Testing
 
+The tests are built only with `-DPAYKAN_BUILD_TESTS=ON`:
+
 ```sh
+cmake -B build -DPAYKAN_BUILD_TESTS=ON
+cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
 ctest --test-dir build --output-on-failure
 ```
 

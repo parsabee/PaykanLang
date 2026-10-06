@@ -6,8 +6,8 @@ The vendored LLVM 17 under build/third-party/llvm is downloaded only by a
 configure that lists the llvm backend; a plain configure (recursive-descent +
 c) does not download it, so pass the full list, e.g.
 
-    cmake -B build "-DPAYKAN_BACKENDS=llvm;c"
-    cmake -B build-cov -DPAYKAN_COVERAGE=ON \\
+    cmake -B build -DPAYKAN_BUILD_TESTS=ON "-DPAYKAN_BACKENDS=llvm;c"
+    cmake -B build-cov -DPAYKAN_BUILD_TESTS=ON -DPAYKAN_COVERAGE=ON \\
           "-DPAYKAN_BACKENDS=llvm;c" \\
           -DCMAKE_C_COMPILER=build/third-party/llvm/bin/clang \\
           -DCMAKE_CXX_COMPILER=build/third-party/llvm/bin/clang++

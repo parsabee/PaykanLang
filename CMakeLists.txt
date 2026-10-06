@@ -67,10 +67,10 @@ if(PAYKAN_NEEDS_LLVM)
     include(LLVMSetup)      # -> paykan_llvm       INTERFACE target
 endif()
 
-# The test suite (GoogleTest) is built by default only when PaykanLang is the
-# top-level project.  -DPAYKAN_BUILD_TESTS=OFF skips it, and with it the
-# GoogleTest download: packagers and offline builds need no network.
-option(PAYKAN_BUILD_TESTS "Build the test suite (needs GoogleTest)" ${PROJECT_IS_TOP_LEVEL})
+# The test suite (GoogleTest) is off by default, so a plain configure builds
+# only the compiler and downloads nothing.  -DPAYKAN_BUILD_TESTS=ON builds it
+# (and fetches GoogleTest when no installed one is found).
+option(PAYKAN_BUILD_TESTS "Build the test suite (needs GoogleTest)" OFF)
 # The frontend test suites and the samples corpus, installed as sources for
 # out-of-tree frontends (cmake/PaykanTestSupport.cmake).
 option(PAYKAN_INSTALL_TEST_SUPPORT

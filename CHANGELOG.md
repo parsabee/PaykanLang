@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The test suite is no longer built by default: a plain `cmake -B build`
+  builds only the compiler and downloads nothing.  Configure with
+  `-DPAYKAN_BUILD_TESTS=ON` to build the tests (and fetch GoogleTest when no
+  installed one is found).
+
 ## [0.1.0] - 2026-10-06
 
 The first tagged release. PaykanLang is now split into a core, pluggable

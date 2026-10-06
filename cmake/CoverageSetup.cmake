@@ -5,7 +5,7 @@
 # reported via the vendored `llvm-cov` / `llvm-profdata`.
 #
 # Usage:
-#   cmake -B build-cov -DPAYKAN_COVERAGE=ON
+#   cmake -B build-cov -DPAYKAN_BUILD_TESTS=ON -DPAYKAN_COVERAGE=ON
 #   cmake --build build-cov --parallel "$(getconf _NPROCESSORS_ONLN)"
 #   ctest --test-dir build-cov --output-on-failure   # produces .profraw files
 #   ./scripts/coverage.sh build-cov                   # merges + reports

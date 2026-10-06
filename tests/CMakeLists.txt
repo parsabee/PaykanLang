@@ -509,7 +509,7 @@ target_link_libraries(frontend_tests
 paykan_link_plugins(frontend_tests)
 add_test(NAME FrontendTests COMMAND frontend_tests)
 
-# A plain configure (only -DPAYKAN_BUILD_TESTS=OFF) is the core build:
+# A plain configure (no options) is the core build:
 # recursive-descent + c, nothing downloaded, no third-party/ or _deps/
 # (#123).  Configure only, in a scratch directory of its own.  Not in a
 # coverage build: it runs no instrumented code, and scripts/coverage.py

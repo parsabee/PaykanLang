@@ -2,7 +2,7 @@
 # ----------------------------------------------------------------------------
 # CPack: the Debian/Ubuntu package (`cpack -G DEB` in a configured build tree).
 #
-#   cmake -B build -DCMAKE_BUILD_TYPE=Release -DPAYKAN_BUILD_TESTS=OFF
+#   cmake -B build -DCMAKE_BUILD_TYPE=Release
 #   cmake --build build
 #   (cd build && cpack -G DEB)        # -> paykanlang_<version>_<arch>.deb
 #   sudo apt install ./build/paykanlang_<version>_<arch>.deb
