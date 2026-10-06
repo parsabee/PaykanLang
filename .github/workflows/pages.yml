@@ -6,20 +6,30 @@ name: Pages
 # remote theme that the build fetches, and the plugins are those GitHub Pages
 # ships.
 #
-# One-time setup by a repository admin: Settings -> Pages -> Build and
-# deployment -> Source: "GitHub Actions".  (The workflow's token cannot turn
-# Pages on.)
+# The site also carries the apt repository, https://parsabee.github.io/PaykanLang/apt:
+# every published (non-pre-release) release's .deb, indexed and signed by
+# scripts/build_apt_repo.sh.  The Release workflow re-runs this workflow after
+# it publishes, so a new release reaches apt within minutes.
+#
+# One-time setup by a repository admin:
+#   - Settings -> Pages -> Build and deployment -> Source: "GitHub Actions".
+#     (The workflow's token cannot turn Pages on.)
+#   - the apt signing key, an armored GPG secret key without a passphrase, in
+#     the APT_SIGNING_KEY repository secret.  Without it the site deploys
+#     without /apt.
 on:
   push:
     branches: [develop]
     paths:
       - "docs/**"
       - ".github/workflows/pages.yml"
+      - "scripts/build_apt_repo.sh"
   # Pull requests build the site (catching Jekyll errors) but do not deploy.
   pull_request:
     paths:
       - "docs/**"
       - ".github/workflows/pages.yml"
+      - "scripts/build_apt_repo.sh"
   # Manual runs (Actions tab -> Pages -> "Run workflow").
   workflow_dispatch:
 
@@ -46,6 +56,36 @@ jobs:
         with:
           source: ./docs
           destination: ./_site
+
+      # The apt repository, built outside _site (which Jekyll's container
+      # leaves root-owned) and copied in.
+      - name: Build the apt repository
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APT_SIGNING_KEY}" ]; then
+            echo "::warning::APT_SIGNING_KEY is not set; deploying the site without the apt repository"
+            exit 0
+          fi
+          debs="${RUNNER_TEMP}/debs"
+          mkdir -p "${debs}"
+          gh release list --repo "${GITHUB_REPOSITORY}" --exclude-drafts --exclude-pre-releases \
+            --limit 100 --json tagName --jq '.[].tagName' |
+            while read -r tag; do
+              gh release download "${tag}" --repo "${GITHUB_REPOSITORY}" --pattern 'paykanlang_*.deb' --dir "${debs}"
+            done
+          if ! compgen -G "${debs}/*.deb" > /dev/null; then
+            echo "::notice::No release has a .deb yet; deploying the site without the apt repository"
+            exit 0
+          fi
+          export GNUPGHOME="${RUNNER_TEMP}/gnupg"
+          mkdir -m 700 "${GNUPGHOME}"
+          printf '%s\n' "${APT_SIGNING_KEY}" | gpg --batch --import
+          scripts/build_apt_repo.sh "${debs}" "${RUNNER_TEMP}/apt"
+          sudo cp -r "${RUNNER_TEMP}/apt" _site/apt
 
       - name: Upload the site
         uses: actions/upload-pages-artifact@v5

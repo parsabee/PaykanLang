@@ -50,17 +50,22 @@ core build (the recursive-descent frontend and the C backend). Programs are comp
 system C compiler, so a C11 compiler (`cc`) must be installed. Or build from source (below),
 which also offers the opt-in LLVM backend.
 
-### Debian / Ubuntu (.deb)
+### Debian / Ubuntu (apt)
 
-Each release also carries a Debian package for Linux x86_64,
-`paykanlang_<version>_amd64.deb` (with its SHA-256 sum). Download it from the
-[release](https://github.com/parsabee/PaykanLang/releases) and install it with apt, which
-also pulls in a C compiler (`gcc`, or `clang`) for the C backend:
+PaykanLang has an apt repository for Linux x86_64. Add it once, then install (and later
+upgrade) with apt, which also pulls in a C compiler (`gcc`, or `clang`) for the C backend:
 
 ```sh
-sudo apt install ./paykanlang_<version>_amd64.deb
-paykan --version
+curl -fsSL https://parsabee.github.io/PaykanLang/apt/paykanlang.gpg \
+  | sudo tee /usr/share/keyrings/paykanlang.gpg > /dev/null
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/paykanlang.gpg] https://parsabee.github.io/PaykanLang/apt stable main" \
+  | sudo tee /etc/apt/sources.list.d/paykanlang.list
+sudo apt update
+sudo apt install paykanlang
 ```
+
+Each release also carries the package itself, `paykanlang_<version>_amd64.deb` (with its
+SHA-256 sum), for `sudo apt install ./paykanlang_<version>_amd64.deb`.
 
 It installs `paykan` in `/usr/bin`, the runtime in `/usr/lib`, its header and the plugin
 headers in `/usr/include/paykan`, the `find_package(Paykan)` package, and the system plugin
