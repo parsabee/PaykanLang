@@ -1,11 +1,14 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
+//
+// Where a module's source file is: the path an `import` names, under the
+// project root, or under the standard library for a system import.
 
 #pragma once
 
-#include "AST.h"
-#include "ASTContext.h" // remapType() calls into ASTContext members
+#include "Names.h"
 
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -25,8 +28,7 @@ appendPath(const std::filesystem::path &base,
   return base / component.relative_path();
 }
 
-/// Split a module path on "::" and build a platform-native relative path,
-/// then tack on the ".pkn" extension.  Empty components are skipped.
+/// "a::b::c" as the relative path a/b/c.pkn (empty components skipped).
 inline std::string modulePathToRelative(std::string_view modulePath) {
   std::filesystem::path relPath;
   size_t pos = 0;
@@ -44,29 +46,28 @@ inline std::string modulePathToRelative(std::string_view modulePath) {
   return relPath.string() + ".pkn";
 }
 
-/// Resolve a path to a real (canonical) path, or return empty on failure.
+/// The file of module @p modulePath, not checked to exist: under
+/// $PAYKAN_STDLIB (or <projectRoot>/stdlib) for a system import, under
+/// @p projectRoot otherwise.
+inline std::filesystem::path moduleFile(const std::string &projectRoot,
+                                        bool isSystem,
+                                        std::string_view modulePath) {
+  std::filesystem::path base = projectRoot;
+  if (isSystem) {
+    const char *env = std::getenv(names::kPaykanStdlibEnv);
+    base = env && env[0] ? std::filesystem::path(env)
+                         : appendPath(base, names::kStdlibDir);
+  }
+  return appendPath(base, modulePathToRelative(modulePath));
+}
+
+/// The canonical path of @p path, or "" when it does not resolve.
 inline std::string realPath(const std::filesystem::path &path) {
   std::error_code ec;
   auto resolved = std::filesystem::canonical(path, ec);
   if (ec)
     return "";
   return resolved.string();
-}
-
-/// Remap a Type* from a foreign ASTContext to the equivalent in ours.
-inline ast::Type *remapType(ast::Type *ty, ast::ASTContext &ctx) {
-  if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty)) {
-    return ctx.getBuiltinType(bt->getTypeKind());
-  }
-  if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
-    // All class types (including Obj and Str) are always registered in
-    // the ASTContext that owns them.  Look up by name for identity; fall back
-    // to Object only when the type has not been exported yet.
-    if (auto *found = ctx.lookupClassType(ct->getName()))
-      return found;
-    return ctx.getObjTy(); // fallback: type not exported — treat as Obj
-  }
-  return ty;
 }
 
 } // namespace module_utils

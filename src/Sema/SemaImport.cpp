@@ -16,9 +16,7 @@
 namespace paykan {
 namespace sema {
 
-// ---------------------------------------------------------------------------
-// Static helpers (file-scope, not part of the Sema class)
-// ---------------------------------------------------------------------------
+// -- Static helpers (file-scope, not part of the Sema class)
 
 // Types are serialised by name via the shared ast::typeName (ASTContext.cpp).
 // A name it cannot express ("unknown", never registered) fails
@@ -126,9 +124,7 @@ static bool isBootstrapClassName(const std::string &name) {
   return Probe.lookupClassType(name) != nullptr;
 }
 
-// ---------------------------------------------------------------------------
-// Failed imports and diagnostics
-// ---------------------------------------------------------------------------
+// -- Failed imports and diagnostics
 
 bool Sema::isFailedImportUse(std::string_view name) {
   if (FailedImportQualifiers.empty())
@@ -161,34 +157,20 @@ std::string Sema::displayPath(const std::filesystem::path &path) const {
   return rel.string();
 }
 
-// ---------------------------------------------------------------------------
-// resolveModulePath
-// ---------------------------------------------------------------------------
+// -- resolveModulePath
 
 std::string Sema::resolveModulePath(const std::string &modulePath,
                                     bool isSystem, ast::SourceLocation loc) {
-  auto relPath = module_utils::modulePathToRelative(modulePath);
-
-  if (isSystem) {
-    std::filesystem::path base;
-    const char *stdlibEnv = std::getenv(names::kPaykanStdlibEnv);
-    if (stdlibEnv && stdlibEnv[0])
-      base = stdlibEnv;
-    else
-      base = module_utils::appendPath(ProjectRoot, names::kStdlibDir);
-    base = module_utils::appendPath(base, relPath);
-    return checkModuleFile(
-        base, displayPath(base),
-        module_name::canonicalImportName(modulePath, /*isSystem=*/true),
-        "system module", loc);
-  }
-
-  std::filesystem::path full = module_utils::appendPath(ProjectRoot, relPath);
-  // Shown relative to the source root, like every imported file.
-  return checkModuleFile(
-      full, relPath,
-      module_name::canonicalImportName(modulePath, /*isSystem=*/false),
-      "module", loc);
+  std::filesystem::path file =
+      module_utils::moduleFile(ProjectRoot, isSystem, modulePath);
+  // A project module is shown relative to the source root, like every
+  // imported file.
+  return checkModuleFile(file,
+                         isSystem
+                             ? displayPath(file)
+                             : module_utils::modulePathToRelative(modulePath),
+                         module_name::canonicalImportName(modulePath, isSystem),
+                         isSystem ? "system module" : "module", loc);
 }
 
 std::string Sema::checkModuleFile(const std::filesystem::path &file,
@@ -214,9 +196,7 @@ std::string Sema::checkModuleFile(const std::filesystem::path &file,
   return resolved;
 }
 
-// ---------------------------------------------------------------------------
-// processImport
-// ---------------------------------------------------------------------------
+// -- processImport
 
 bool Sema::processImport(ast::ImportDecl *node) {
   const bool isSystem = node->isSystem();
@@ -232,7 +212,7 @@ bool Sema::processImport(ast::ImportDecl *node) {
       return false;
     }
 
-    // -- Reconstruction helpers ---------------------------------------------
+    // -- Reconstruction helpers
     //
     // Shared by the cache-hit and fresh-load paths.  They rebuild a module's
     // exported entities in the importing context (Ctx) and register the
@@ -522,7 +502,7 @@ bool Sema::processImport(ast::ImportDecl *node) {
     if (!importOk)
       return failedModule(childCtx.ErrorCount, childCtx.ImportsFailedModule);
 
-    // -- Serialise the module's exports --------------------------------------
+    // -- Serialise the module's exports
     //
     // The module's type registry holds (a) the classes/enums it declares,
     // (b) the ones it reached through its own imports, and (c) compiler

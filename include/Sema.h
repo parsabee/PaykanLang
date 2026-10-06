@@ -26,9 +26,12 @@ namespace sema {
 /// One specialization of a builtin conversion target (Sema.cpp).
 struct ConversionPair;
 
+/// The display name of a type in diagnostics (ASTContext.cpp).
+using ast::typeName;
+
 /// Result object returned by Sema::run(). Carries the populated ASTContext
 /// and (for imported modules) the owning ParserDriver plus pre-computed child
-/// SemaContexts so CodeGen can consume them without re-running Sema.
+/// SemaContexts so the lowering can consume them without re-running Sema.
 struct SemaContext {
   /// For imported modules: owns the ParserDriver (and thus its ASTContext).
   /// nullptr for top-level contexts where the caller owns the driver.
@@ -45,35 +48,29 @@ struct SemaContext {
   bool ImportsFailedModule = false;
   std::vector<Diagnostic> Diagnostics;
   /// Pre-computed SemaContexts for directly-imported modules, keyed by
-  /// resolved file path. Populated by Sema::run() so CodeGen can reuse
+  /// resolved file path. Populated by Sema::run() so the lowering can reuse
   /// them without re-running the Sema pass.
   StringMap<std::shared_ptr<SemaContext>> ImportedContexts;
 
   explicit operator bool() const { return Ok; }
 };
 
-// Semantic analysis visitor.
+// Semantic analysis: one walk over a parsed translation unit that resolves
+// and checks every name, type, call, class and import, instantiates the
+// generics it uses, and records on the AST (resolved types, rewritten callee
+// names, canonical annotations) what the lowering needs.  Statement and
+// declaration visitors return true on success; every error goes through
+// the DiagEngine.
 //
-// Walks the AST once and checks:
-//   - variable use before declaration
-//   - duplicate variable declarations
-//   - type compatibility in assignments and initializers
-//   - operand types for arithmetic, relational, and unary operators
-//
-// Statement and declaration visitors return true on success, false on failure.
-//
-// Usage:
 //   DiagEngine diag(std::cerr);
 //   diag.setSourceInfo("foo.pkn", &lines);
 //   Sema S(ctx, diag);
 //   bool ok = S.run(translationUnit);
-//   // diag.getDiagnostics() contains all collected errors/warnings.
-//
 class Sema : public ast::ASTVisitor<Sema, bool> {
   DiagEngine &Diags;
   ast::ASTContext &Ctx;
 
-  // -- Scoped symbol table --------------------------------------------------
+  // -- Scoped symbol table
 
   /// A single lexical scope. Each scope has its own local bindings and a
   /// pointer to its enclosing (parent) scope.
@@ -111,7 +108,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   Scope *CurrentScope = nullptr;
 
-  // -- Flow-sensitive move tracking -------------------------------------------
+  // -- Flow-sensitive move tracking
   //
   // The per-scope `Moved` sets above track the *current* moved-state along the
   // straight-line path Sema is walking.  Control-flow constructs make that
@@ -168,7 +165,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// Loop nesting depth (0 = not inside a loop).
   unsigned LoopDepth = 0;
 
-  // -- Class analysis context ----------------------------------------------
+  // -- Class analysis context
   //
   // Populated while visitClassDecl is running; nullptr outside of a class.
   //
@@ -181,7 +178,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   ClassContext *CurrentClassCtx = nullptr;
 
-  // -- Function signature table ---------------------------------------------
+  // -- Function signature table
 
   /// Describes a known function's type signature.
   struct FunctionSig {
@@ -229,13 +226,11 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     ~ScopeGuard();
   };
 
-  // -- Internal helpers -----------------------------------------------------
+  // -- Internal helpers
 
   void error(ast::SourceLocation loc, const std::string &msg);
   void warning(ast::SourceLocation loc, const std::string &msg);
   void note(ast::SourceLocation loc, const std::string &msg);
-
-  static std::string typeName(ast::Type *ty);
 
   // Render a method signature for diagnostics, e.g. "Animal.describe() -> int".
   static std::string signatureString(const ast::ClassType *owner,
@@ -256,18 +251,18 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   // Expression-level assignability: isAssignable(dst, srcTy) plus the two
   // optional-type rules that depend on the expression itself, both of which
-  // are RECORDED on the AST for CodeGen:
+  // are RECORDED on the AST for the lowering:
   //   * the `None` literal (statically `Obj`) is assignable to every `T?`;
-  //     its resolved type is rewritten to that `T?` so CodeGen emits a null
-  //     box instead of the boxed `None` singleton;
+  //     its resolved type is rewritten to that `T?` so the lowering emits a
+  //     null box instead of the boxed `None` singleton;
   //   * a `T?` value flowing into an `Obj` slot is marked (Expr::CoercedType)
-  //     so CodeGen materialises the `None` singleton for a null box;
+  //     so the lowering materialises the `None` singleton for a null box;
   //   * a primitive flowing into an optional primitive slot (`int` ->
   //     `int?`) is marked with the optional so the lowering boxes it.
   bool checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src);
 
   // Record the destination's array type on an empty array literal `[]` (and
-  // on empty literals nested in a non-empty one) so CodeGen can choose an
+  // on empty literals nested in a non-empty one) so the lowering can choose an
   // object-element array where the elements need releasing.  Called from
   // checkAssignable, so every typed sink -- declaration, assignment, field
   // store, call/method/push argument, return, subscript store -- is covered.
@@ -290,6 +285,12 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   bool diagnoseOptionalNarrowing(ast::SourceLocation loc, ast::Type *dst,
                                  ast::Type *srcTy);
 
+  // If @p srcTy is an empty array literal's type (`[]`, no element type of
+  // its own) and @p dst (nullptr: none) cannot supply one -- it is not an
+  // array or an optional array -- report it at @p loc and return true.
+  bool diagnoseEmptyArrayLiteral(ast::SourceLocation loc, ast::Type *dst,
+                                 ast::Type *srcTy);
+
   // Emit the unwrap diagnostic for an operation that is not defined on an
   // optional value (member access, method call, subscript, arithmetic, …).
   void errorOptionalUnwrap(ast::SourceLocation loc, ast::OptionalType *optTy);
@@ -306,7 +307,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   ast::Type *resolveType(ast::Type *ty, ast::SourceLocation loc,
                          const std::string &context);
 
-  // -- Poisoned binders (#89) -------------------------------------------------
+  // -- Poisoned binders (#89)
   //
   // A binder whose declaration failed (a bad initializer, an unresolvable type
   // annotation, a failed destructuring, a match arm whose type is in error) is
@@ -343,7 +344,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // nullptr without an error (a suppressed follow-on).
   ast::Type *checkIdentLive(std::string_view name, ast::SourceLocation loc);
 
-  // -- Expression type-checker ----------------------------------------------
+  // -- Expression type-checker
   //
   // A separate ExprVisitor that walks expression trees and returns the
   // resolved Type* (nullptr on error).  It has access to Sema's symbol table,
@@ -357,7 +358,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
     /// Dispatch to the visitXxx overloads and record the resulting type on
     /// the node (Expr::ResolvedType).  Every expression therefore carries its
-    /// static type after Sema — CodeGen relies on this for identifiers and
+    /// static type after Sema; the lowering relies on this for identifiers and
     /// literals too, e.g. to tell a `T?`-typed operand from a `T` one.
     ast::Type *visit(ast::Expr *e) {
       ast::Type *ty = ast::ExprVisitor<ExprChecker, ast::Type *>::visit(e);
@@ -412,7 +413,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // mode; a `None` literal arm or `_` covers the absent case.
   bool checkOptionalMatch(ast::MatchStmt *node, ast::OptionalType *subjectTy);
 
-  // -- Import resolution ----------------------------------------------------
+  // -- Import resolution
 
   /// The directory of the file currently being analyzed.
   std::string ProjectRoot;
@@ -614,7 +615,7 @@ private:
   /// Phase 4b for one class: register the constructor function `Name(...)`.
   void declareConstructor(ast::ClassDecl *cd, ast::ClassType *ct);
 
-  // -- Generics --------------------------------------------------------------
+  // -- Generics
   //
   // Generic declarations are templates: they are registered by name here and
   // never type-checked as such.  Every use with a distinct tuple of canonical
@@ -655,7 +656,7 @@ private:
   std::vector<PendingInstantiation> PendingInstantiations;
 
   /// Instantiations in creation order; injected into the TranslationUnit at
-  /// the end of run() so CodeGen emits them.
+  /// the end of run() so they are lowered.
   std::vector<ast::ClassDecl *> InstantiatedClassDecls;
   std::vector<ast::FuncDecl *> InstantiatedFuncDecls;
 
@@ -674,8 +675,8 @@ private:
   const StringSet *CurrentTypeParams = nullptr;
 
   /// Classes constructed inside each class's method bodies (by name).  Used to
-  /// order instantiated classes for CodeGen: a constructor must be emitted
-  /// before a method that calls it.
+  /// order instantiated classes for the lowering: a constructor must be
+  /// emitted before a method that calls it.
   StringMap<StringSet> ConstructsEdges;
 
   /// Report that qualified name @p name (`shapes::Box`, `g::first`) names a
@@ -828,7 +829,7 @@ public:
   }
   bool hasErrors() const { return getErrorCount() > 0; }
 
-  // -- Visitor overrides ----------------------------------------------------
+  // -- Visitor overrides
 
 #define SEMA_VISIT(Kind, Name, Cast) bool visit##Name(ast::Cast *node);
   PAYKAN_STMT_NODES(SEMA_VISIT)

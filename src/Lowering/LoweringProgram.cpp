@@ -9,50 +9,13 @@
 
 #include "LoweringInternal.h"
 #include "ModuleName.h"
+#include "ModuleUtils.h"
 #include "Names.h"
 #include "paykan/lowering/Lowering.h"
-
-#include <cstdlib>
-#include <filesystem>
-#include <system_error>
 
 namespace paykan::lowering {
 
 using namespace names;
-
-std::string resolveImportFile(const std::string &projectRoot, bool isSystem,
-                              const std::string &modulePath) {
-  namespace fs = std::filesystem;
-  fs::path full;
-  if (isSystem) {
-    const char *env = std::getenv(kPaykanStdlibEnv);
-    if (env && env[0])
-      full = env;
-    else
-      full = fs::path(projectRoot) / kStdlibDir;
-  } else {
-    full = projectRoot;
-  }
-  // "a::b::c" -> a/b/c.pkn
-  std::string rel;
-  size_t start = 0;
-  while (start <= modulePath.size()) {
-    size_t sep = modulePath.find(kQualSep, start);
-    std::string part = modulePath.substr(
-        start, sep == std::string::npos ? std::string::npos : sep - start);
-    if (!part.empty())
-      full /= part;
-    if (sep == std::string::npos)
-      break;
-    start = sep + 2;
-  }
-  full += ".pkn";
-  std::error_code ec;
-  fs::path canon = fs::canonical(full, ec);
-  if (ec)
-    return "";
-  return canon.string();
-}
 
 const sema::SemaContext *
 ProgramLowering::lookupImportContext(const std::string &resolved) {
@@ -119,8 +82,8 @@ void ModuleLowering::processImports(ast::TranslationUnit *tu) {
     for (auto &m : imp->getModules()) {
       std::string modulePath = imp->modulePath(m);
       const std::string &qualifier = m.qualifier();
-      std::string resolved =
-          resolveImportFile(PL.ProjectRoot, imp->isSystem(), modulePath);
+      std::string resolved = module_utils::realPath(module_utils::moduleFile(
+          PL.ProjectRoot, imp->isSystem(), modulePath));
       if (resolved.empty())
         continue; // Sema already reported the error.
       pir::Module *defMod = PL.lowerImport(
