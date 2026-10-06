@@ -12,9 +12,8 @@
 //     looking up a symbol in it (the platform's dynamic loader).
 //
 // Supported: Linux and macOS.  Other POSIX systems build too, with the
-// documented fallbacks noted on each function.  Windows is not supported
-// yet; the dynamic-loading functions have a stub there that fails with a
-// message (LoadLibraryW / GetProcAddress are the planned implementation).
+// documented fallbacks noted on each function.  Windows is not supported;
+// the dynamic-loading functions have a stub there that fails with a message.
 
 #pragma once
 

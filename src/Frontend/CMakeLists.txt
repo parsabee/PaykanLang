@@ -1,10 +1,7 @@
-# src/Frontend/CMakeLists.txt
-# ----------------------------------------------------------------------------
 # paykan_frontend -- the frontend interface (include/paykan/Frontend.h), the
 # plugin registry (include/paykan/Registry.h) and the ParserDriver facade that
 # parses a file with the selected frontend.  Standard C++ only; it knows no
 # frontend by name except the build's default.
-# ----------------------------------------------------------------------------
 
 add_library(paykan_frontend STATIC
     ParserDriver.cpp

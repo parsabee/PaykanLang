@@ -121,7 +121,7 @@ bool isLiteralToken(Tok k) {
 
 } // namespace
 
-// -- Construction -----------------------------------------------------------
+// -- Construction
 
 Parser::Parser(ASTContext &ctx, std::string_view source,
                sema::DiagEngine *diags)
@@ -181,7 +181,7 @@ unsigned dumpTokens(std::string_view source, std::ostream &os,
   }
 }
 
-// -- Token stream -------------------------------------------------------------
+// -- Token stream
 
 const Token &Parser::peek(size_t k) {
   while (Pos + k >= Buf.size()) {
@@ -237,7 +237,6 @@ bool Parser::enterNesting() {
 }
 
 // -- Diagnostics
-// ---------------------------------------------------------------
 
 void Parser::error(SourceLocation loc, const std::string &msg) {
   if (Speculating)
@@ -279,7 +278,6 @@ bool Parser::errorAtCurrent(const std::string &expected) {
 }
 
 // -- Error recovery
-// ------------------------------------------------------------
 //
 // Each level skips to a token that can start its next construct, matching
 // braces on the way so that a broken nested block does not swallow the rest
@@ -380,7 +378,6 @@ void Parser::skipToStatementBoundary() {
 }
 
 // -- Translation unit
-// -----------------------------------------------------------
 
 TranslationUnit *Parser::parseTranslationUnit() {
   std::vector<ImportDecl *> imports;
@@ -439,7 +436,6 @@ TranslationUnit *Parser::parseTranslationUnit() {
 }
 
 // -- Imports
-// -----------------------------------------------------------------------
 //
 // importDecl ::= "import" "::"? modulePath ( "as" IDENT | "::" "{" list "}" )?
 // ";"
@@ -524,7 +520,6 @@ ImportDecl *Parser::parseImportDecl() {
 }
 
 // -- Classes and enums
-// ---------------------------------------------------------------
 //
 // classDecl ::= "class" IDENT ( "<" typeParamList ">" )? ( ":" modulePath )?
 //               "{" classMember* "}"
@@ -644,7 +639,6 @@ EnumDecl *Parser::parseEnumDecl() {
 }
 
 // -- Functions
-// ------------------------------------------------------------------------
 //
 // funcDecl ::= "fn" IDENT ( "<" typeParamList ">" )? "(" paramList ")"
 //              ( "->" typeAnnotation )? block
@@ -707,7 +701,6 @@ FuncDecl *Parser::parseFuncDecl() {
 }
 
 // -- Blocks and statements
-// ------------------------------------------------------------
 
 // The CompoundStmt's location is the empty range right after its `{`
 // (docs/grammar.md); it is not widened by the statements added to it.
@@ -1078,7 +1071,6 @@ MatchArm *Parser::parseMatchArm() {
 }
 
 // -- Types
-// ------------------------------------------------------------------------------
 //
 // typeAnnotation ::= primaryType ( "[" "]" | "?" )*
 // primaryType ::= IDENT | modulePath "::" IDENT
@@ -1200,7 +1192,6 @@ Type *Parser::parseTypeAnnotation() {
 }
 
 // -- Expressions
-// ---------------------------------------------------------------------
 
 Expr *Parser::parseExpression() { return parseTernary(); }
 

@@ -1,9 +1,6 @@
-# src/Backend/CMakeLists.txt
-# ----------------------------------------------------------------------------
 # paykan_backend -- the backend interface (include/paykan/Backend.h) and its
 # registry.  Standard C++ only; it knows no backend by name except the
 # build's default.
-# ----------------------------------------------------------------------------
 
 add_library(paykan_backend STATIC
     Backend.cpp

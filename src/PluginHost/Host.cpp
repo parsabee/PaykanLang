@@ -101,6 +101,14 @@ void error(PaykanSession *s, const std::string &msg) {
   diagnostic(s, PAYKAN_DIAG_ERROR, nullptr, 0, 0, msg.data(), msg.size());
 }
 
+/// The text of @p errs without its trailing newlines.
+std::string message(const std::ostringstream &errs) {
+  std::string msg = errs.str();
+  while (!msg.empty() && msg.back() == '\n')
+    msg.pop_back();
+  return msg;
+}
+
 /// The session's toolchain, resolved once; null (with a diagnostic) when
 /// the runtime can't be found.
 const toolchain::Toolchain *resolved(PaykanSession *s) {
@@ -112,12 +120,8 @@ const toolchain::Toolchain *resolved(PaykanSession *s) {
         "-O" + std::to_string(s->OptLevel > 3 ? 3u : s->OptLevel));
     std::ostringstream errs;
     s->ToolchainOk = toolchain::resolveToolchain(s->Toolchain, errs);
-    if (!s->ToolchainOk) {
-      std::string msg = errs.str();
-      while (!msg.empty() && msg.back() == '\n')
-        msg.pop_back();
-      error(s, msg);
-    }
+    if (!s->ToolchainOk)
+      error(s, message(errs));
   }
   return s->ToolchainOk ? &s->Toolchain : nullptr;
 }
@@ -152,10 +156,7 @@ int linkExecutable(PaykanSession *s, const char *const *inputs,
   }
   std::ostringstream errs;
   if (!toolchain::linkExecutable(args, outputPath, *tc, errs)) {
-    std::string msg = errs.str();
-    while (!msg.empty() && msg.back() == '\n')
-      msg.pop_back();
-    error(s, msg);
+    error(s, message(errs));
     return PAYKAN_ERROR;
   }
   return PAYKAN_OK;
@@ -183,9 +184,7 @@ int runExecutable(PaykanSession *s, const char *path, const char *const *args,
   std::ostringstream errs;
   int rc = toolchain::spawn(path, rest, numArgs ? &argv0 : nullptr, env, errs);
   if (rc < 0) {
-    std::string msg = errs.str();
-    while (!msg.empty() && msg.back() == '\n')
-      msg.pop_back();
+    std::string msg = message(errs);
     error(s, msg.empty() ? std::string("cannot run '") + path + "'" : msg);
     return PAYKAN_ERROR;
   }

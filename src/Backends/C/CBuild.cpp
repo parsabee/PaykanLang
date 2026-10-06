@@ -119,7 +119,7 @@ std::string cacheEntryBase(const Toolchain &tc, const std::string &moduleName) {
       .string();
 }
 
-// -- Key-addressed entries (#134) ---------------------------------------------
+// -- Key-addressed entries (#134)
 //
 // Each entry is named after a hash of its key (`<base>.<hash>.{c,o,key}`):
 // builds that differ in anything the key covers (C compiler, flags such as

@@ -5,6 +5,7 @@
 // `run`.
 
 #include "paykan/backends/c/CBackend.h"
+#include "Names.h"
 #include "paykan/Backend.h"
 
 #include <filesystem>
@@ -74,7 +75,7 @@ private:
                             std::to_string(in.OptLevel > 3 ? 3u : in.OptLevel));
     // The object cache lives next to the LLVM backend's bitcode cache.
     tc.CacheDir =
-        (std::filesystem::path(in.ProjectRoot) / ".paykan_cache").string();
+        (std::filesystem::path(in.ProjectRoot) / names::kCacheDir).string();
     return tc;
   }
 };

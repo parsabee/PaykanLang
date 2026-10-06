@@ -12,7 +12,7 @@
 
 namespace paykan::backend_c::cnames {
 
-// -- C keywords ---------------------------------------------------------------
+// -- C keywords
 
 inline constexpr const char *kBreak = "break";
 inline constexpr const char *kConst = "const";
@@ -28,9 +28,8 @@ inline constexpr const char *kSizeof = "sizeof";
 inline constexpr const char *kStatic = "static";
 inline constexpr const char *kStruct = "struct";
 inline constexpr const char *kTrue = "true"; ///< <stdbool.h>
-inline constexpr const char *kTypedef = "typedef";
 
-// -- C type names -------------------------------------------------------------
+// -- C type names
 
 inline constexpr const char *kVoid = "void";
 inline constexpr const char *kBool = "bool"; ///< <stdbool.h>
@@ -53,7 +52,6 @@ inline constexpr const char *kConstUint8Ptr = "const uint8_t *";
 inline constexpr const char *kCharPtrPtr = "char **";
 
 // The runtime's C types (Runtime.h) and pointers to them.
-inline constexpr const char *kRtObject = "PaykanObject";
 inline constexpr const char *kRtShared = "PaykanShared";
 inline constexpr const char *kRtString = "PaykanString";
 inline constexpr const char *kRtArray = "PaykanArray";
@@ -76,7 +74,7 @@ inline constexpr const char *kRtVTableOf = "Paykan_vtable_of";
 inline constexpr const char *kFieldVTable = "vtable";
 inline constexpr const char *kFieldShared = "shared";
 
-// -- C operators --------------------------------------------------------------
+// -- C operators
 
 inline constexpr const char *kOpAdd = "+";
 inline constexpr const char *kOpSub = "-";
@@ -100,7 +98,7 @@ inline constexpr const char *kOpArrow = "->";
 inline constexpr const char *kOpCondQ = "?"; ///< `c ? a : b`
 inline constexpr const char *kOpCondColon = ":";
 
-// -- C punctuation ------------------------------------------------------------
+// -- C punctuation
 
 inline constexpr const char *kLParen = "(";
 inline constexpr const char *kRParen = ")";
@@ -109,7 +107,6 @@ inline constexpr const char *kRBrace = "}";
 inline constexpr const char *kLBracket = "[";
 inline constexpr const char *kRBracket = "]";
 inline constexpr const char *kSemi = ";";
-inline constexpr const char *kComma = ",";
 inline constexpr const char *kListSep = ", "; ///< between arguments / items
 inline constexpr const char *kSpace = " ";
 inline constexpr const char *kNewline = "\n";
@@ -122,7 +119,7 @@ inline constexpr const char *kInclude = "#include ";
 inline constexpr const char *kSysHeaderOpen = "<";
 inline constexpr const char *kSysHeaderClose = ">";
 
-// -- Standard headers, macros and functions -----------------------------------
+// -- Standard headers, macros and functions
 
 inline constexpr const char *kMathH = "math.h";
 inline constexpr const char *kStdboolH = "stdbool.h";
@@ -143,7 +140,7 @@ inline constexpr const char *kGetenv = "getenv";
 inline constexpr const char *kMemcpy = "memcpy";
 inline constexpr const char *kStrlen = "strlen";
 
-// -- Literals -----------------------------------------------------------------
+// -- Literals
 
 inline constexpr const char *kZero = "0";
 inline constexpr const char *kOne = "1";
@@ -155,7 +152,7 @@ inline constexpr const char *kF64Marks = ".eE";
 /// ... and gets this suffix to stay a double literal.
 inline constexpr const char *kF64Suffix = ".0";
 
-// -- String-literal escapes (escapeCString) -----------------------------------
+// -- String-literal escapes (escapeCString)
 
 inline constexpr const char *kEscBackslash = "\\\\";
 inline constexpr const char *kEscQuote = "\\\"";
@@ -170,7 +167,7 @@ inline constexpr const char *kEscOctalFormat = "\\%03o";
 inline constexpr unsigned char kPrintableFirst = 0x20;
 inline constexpr unsigned char kPrintableEnd = 0x7f;
 
-// -- Identifier sanitizing (sanitize) -----------------------------------------
+// -- Identifier sanitizing (sanitize)
 
 /// Kept verbatim besides [A-Za-z0-9].
 inline constexpr char kIdentUnderscore = '_';
@@ -179,7 +176,7 @@ inline constexpr const char *kIdentHexEscapeFormat = "_%02X";
 /// Prepended to an identifier that would be empty or start with a digit.
 inline constexpr const char *kIdentLeadPrefix = "_";
 
-// -- Name mangling ------------------------------------------------------------
+// -- Name mangling
 //
 // Every emitted name carries one of these prefixes, which keeps it apart from
 // C keywords, the C library's names and macros (`errno`, `fmod`, `int64_t`,
@@ -213,7 +210,7 @@ inline constexpr const char *kLocalPrefix = "l_";
 inline constexpr const char *kLocalShadowPrefix = "l";
 inline constexpr char kLocalShadowSep = '_';
 
-// -- The generated `main` -----------------------------------------------------
+// -- The generated `main`
 
 inline constexpr const char *kMain = "main"; ///< C entry point and PIR name
 inline constexpr const char *kArgc = "argc";
@@ -233,7 +230,7 @@ inline constexpr const char *kHelperInt = "i";
 inline constexpr const char *kRtHeapSetTracking = "Paykan_heap_set_tracking";
 inline constexpr const char *kRtHeapDump = "Paykan_heap_dump";
 
-// -- Environment variables (generated `main`; set by CBuild.cpp) --------------
+// -- Environment variables (generated `main`; set by CBuild.cpp)
 
 /// Non-empty: track heap blocks and dump the live ones at exit.
 inline constexpr const char *kEnvTrackHeap = "PAYKAN_TRACK_HEAP";
@@ -242,7 +239,7 @@ inline constexpr const char *kEnvNoArgs = "PAYKAN_NO_ARGS";
 /// The value CBuild.cpp sets them to.
 inline constexpr const char *kEnvOn = "1";
 
-// -- Comments -----------------------------------------------------------------
+// -- Comments
 
 inline constexpr const char *kBanner = "Generated by the Paykan C backend.";
 inline constexpr const char *kModuleBannerOpen = "/* ---- module ";

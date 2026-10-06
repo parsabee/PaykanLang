@@ -1,11 +1,8 @@
-# src/Plugin/CMakeLists.txt
-# ----------------------------------------------------------------------------
 # paykan_plugin -- the plugin registry's compatibility check
 # (include/paykan/Registry.h): the running toolchain's version and the plugin
 # build versions it accepts (cmake/PluginCompat.cmake, #103).  Standard C++
 # only.  paykan_frontend and paykan_backend link it publicly, so every plugin
 # and driver gets it.
-# ----------------------------------------------------------------------------
 
 include(GNUInstallDirs)
 
