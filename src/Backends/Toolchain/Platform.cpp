@@ -6,7 +6,7 @@
 
 #include "Platform.h"
 
-// -- Platform headers -------------------------------------------------------
+// -- Platform headers
 // POSIX (every supported platform): process spawning, mkdtemp, getpid and
 // access, and the dynamic loader (dlopen / dlsym; in libc on current glibc
 // and on macOS, libdl on older glibc: CMAKE_DL_LIBS).

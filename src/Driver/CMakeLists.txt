@@ -1,12 +1,9 @@
-# src/Driver/CMakeLists.txt
-# ----------------------------------------------------------------------------
 # The paykan driver.
 #
 # paykan_driver -- the driver as a static library (it defines main()), so an
 #                  out-of-tree plugin can be linked into a custom driver with
 #                  paykan_add_driver() from the installed package.
 # paykan        -- the driver executable with every plugin of this build.
-# ----------------------------------------------------------------------------
 
 add_library(paykan_driver STATIC main.cpp Options.cpp)
 target_link_libraries(paykan_driver

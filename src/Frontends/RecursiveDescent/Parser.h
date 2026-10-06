@@ -43,7 +43,7 @@ private:
   Lexer TheLexer;
   unsigned ErrorCount = 0;
 
-  // -- Token stream with unbounded lookahead and backtracking ---------------
+  // -- Token stream with unbounded lookahead and backtracking
   std::vector<Token> Buf; // tokens scanned so far
   size_t Pos = 0;         // index of the current token in Buf
   // End location of the most recently consumed token; the end of every
@@ -62,7 +62,7 @@ private:
   /// gets a note pointing at the unclosed `{`.
   bool expectCloseBrace(const char *context, ast::SourceLocation open);
 
-  // -- Speculative parsing ----------------------------------------------------
+  // -- Speculative parsing
   // While Speculating > 0 no diagnostic is emitted; a failed attempt rewinds
   // Pos.  Used for the one decision that needs unbounded lookahead:
   // `name < ... > (` (generic call) versus `name < expr` (comparison).
@@ -71,7 +71,7 @@ private:
   bool enterNesting();
   void leaveNesting() { --Depth; }
 
-  // -- Diagnostics -----------------------------------------------------------
+  // -- Diagnostics
   void error(ast::SourceLocation loc, const std::string &msg);
   /// Count and emit one error (error() minus the speculation check and the
   /// flush of pending lexical errors).
@@ -101,14 +101,14 @@ private:
     return Ctx.intern(std::string(s));
   }
 
-  // -- Error recovery ---------------------------------------------------------
+  // -- Error recovery
   void skipToTopLevelBoundary();
   void skipToMemberBoundary();
   void skipToStatementBoundary();
   /// Inside a block whose '{' was consumed: skip through its matching '}'.
   void skipPastMatchingBrace();
 
-  // -- Declarations ----------------------------------------------------------
+  // -- Declarations
   ast::ImportDecl *parseImportDecl();
   bool parseImportedModuleList(
       std::vector<std::pair<std::string, std::string>> &out);
@@ -120,7 +120,7 @@ private:
   bool parseParamList(std::vector<ast::Param> &out);
   ast::VarDecl *parseVarDecl();
 
-  // -- Statements ------------------------------------------------------------
+  // -- Statements
   ast::CompoundStmt *parseBlock();
   void parseStatementsUntilBrace(ast::CompoundStmt *into);
   /// Returns false on error.  @p out is null for an empty statement `;`.
@@ -137,12 +137,12 @@ private:
   ast::MatchArm *parseMatchArm();
   bool ifStartsStatement();
 
-  // -- Types -----------------------------------------------------------------
+  // -- Types
   ast::Type *parseTypeAnnotation();
   ast::Type *parsePrimaryType();
   bool parseTypeArgList(std::vector<ast::Type *> &out);
 
-  // -- Expressions -----------------------------------------------------------
+  // -- Expressions
   ast::Expr *parseExpression();
   ast::Expr *parseTernary();
   ast::Expr *parseBinary(int minPrec);

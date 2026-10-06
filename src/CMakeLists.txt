@@ -1,5 +1,3 @@
-# src/CMakeLists.txt
-# ----------------------------------------------------------------------------
 # Paykan compiler:
 #   Plugin/ AST/ ASTInterchange/ Diag/ Frontend/ ASTPrinter/ Sema/ PIR/
 #   Backend/ Lowering/
@@ -13,7 +11,6 @@
 #                       include/paykan/plugin_api.h)
 #   Runtime/          – the C runtime linked into every program
 #   Driver/           – executable entry points (mains for all project binaries)
-# ----------------------------------------------------------------------------
 
 add_subdirectory(Plugin)
 add_subdirectory(AST)

@@ -1,9 +1,6 @@
-# src/Diag/CMakeLists.txt
-# ----------------------------------------------------------------------------
 # paykan_diag -- central diagnostic engine (shared by parser and sema).
 # Lives below paykan_parser and paykan_sema so both can link it without
 # introducing a circular dependency.
-# ----------------------------------------------------------------------------
 
 add_library(paykan_diag STATIC
     DiagEngine.cpp
