@@ -244,6 +244,7 @@ pre-commit install --hook-type pre-push
 
 To learn PaykanLang:
 
+- **Documentation: [parsabee.github.io/PaykanLang](https://parsabee.github.io/PaykanLang/)** — the manual, a tutorial that builds a real program chapter by chapter ([`docs/manual/`](docs/manual/index.md)), with the reference below.
 - **[`docs/language/`](docs/language/)** — the full reference: language basics,
   functions, enums, classes, arrays, modules, `match` statements, the memory model,
   tuples, optional types, and generics; the conversion

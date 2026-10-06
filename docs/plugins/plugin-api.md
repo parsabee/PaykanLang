@@ -209,9 +209,10 @@ static int emit(void *data, PaykanSession *s, const PaykanBackendInput *in,
   return host->write_output(s, in->pir, in->pir_size);
 }
 
-static const PaykanBackend backends[] = {{
-    .struct_size = sizeof(PaykanBackend), .name = "mine",
-    .capabilities = PAYKAN_BACKEND_EMIT_SOURCE, .emit = emit}};
+static const PaykanBackend backends[] = {
+    {.struct_size = sizeof(PaykanBackend), .name = "mine",
+     .capabilities = PAYKAN_BACKEND_EMIT_SOURCE, .emit = emit},
+};
 
 static const PaykanPlugin plugin = {
     .struct_size = sizeof(PaykanPlugin),
