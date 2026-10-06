@@ -35,6 +35,7 @@ class Paykanlang < Formula
   homepage "https://github.com/parsabee/PaykanLang"
   url "https://github.com/parsabee/PaykanLang/archive/refs/tags/v0.1.0.tar.gz"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  head "https://github.com/parsabee/PaykanLang.git", branch: "develop"
   license "MIT"
 
   depends_on "cmake" => :build
