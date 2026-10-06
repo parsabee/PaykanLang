@@ -10,10 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Forward declarations
-void PaykanString_destroy(PaykanObject *self);
-
-// -- VTable ------------------------------------------------------------------
+// -- VTable
 
 PaykanMethod PaykanString_vtable[PAYKAN_STRING_SLOTS] = {
     [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanString_destroy,
@@ -23,16 +20,22 @@ PaykanMethod PaykanString_vtable[PAYKAN_STRING_SLOTS] = {
     [PAYKAN_SLOT_STRING_CONCAT] = (PaykanMethod)PaykanString_concat_inplace,
 };
 
-// -- Constructor / Destructor ------------------------------------------------
+// -- Constructors
 
-PaykanString *PaykanString_new(const char *data, int64_t len) {
+/// A string of @p len bytes with an uninitialised, NUL-terminated buffer.
+static PaykanString *string_alloc(int64_t len) {
   PaykanString *s = (PaykanString *)Paykan_malloc(sizeof(PaykanString));
   s->vtable = PaykanString_vtable;
   s->shared = NULL; // not yet boxed (unique-box invariant)
   s->len = len;
   s->data = (char *)Paykan_malloc((size_t)len + 1);
-  memcpy(s->data, data, (size_t)len);
   s->data[len] = '\0';
+  return s;
+}
+
+PaykanString *PaykanString_new(const char *data, int64_t len) {
+  PaykanString *s = string_alloc(len);
+  memcpy(s->data, data, (size_t)len);
   return s;
 }
 
@@ -58,13 +61,25 @@ PaykanString *PaykanString_from_char(int8_t c) {
   return PaykanString_new((const char *)&c, 1);
 }
 
-int8_t PaykanString_char_at(PaykanObject *self, int64_t idx) {
-  PaykanString *s = (PaykanString *)self;
+// -- Methods
+
+static void string_check_index(const PaykanString *s, int64_t idx) {
   if (idx < 0 || idx >= s->len) {
     Paykan_runtime_panic("string index %lld out of bounds (len=%lld)",
                          (long long)idx, (long long)s->len);
   }
+}
+
+int8_t PaykanString_char_at(PaykanObject *self, int64_t idx) {
+  PaykanString *s = (PaykanString *)self;
+  string_check_index(s, idx);
   return (int8_t)s->data[idx];
+}
+
+PaykanShared *PaykanString_at(PaykanObject *self, int64_t idx) {
+  PaykanString *s = (PaykanString *)self;
+  string_check_index(s, idx);
+  return PaykanShared_new((PaykanObject *)PaykanString_new(s->data + idx, 1));
 }
 
 void PaykanString_destroy(PaykanObject *self) {
@@ -75,25 +90,20 @@ void PaykanString_destroy(PaykanObject *self) {
   }
 }
 
-// -- Method implementations --------------------------------------------------
-
 PaykanShared *PaykanString_toString(PaykanObject *self) {
-  // Return a fresh copy so the caller takes ownership of an independent
-  // object.
+  // A fresh copy, so the caller owns an independent object.
   PaykanString *s = (PaykanString *)self;
   return PaykanShared_new((PaykanObject *)PaykanString_new(s->data, s->len));
 }
 
 int64_t PaykanString_equals(PaykanObject *self, PaykanShared *other) {
-  // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
   PaykanObject *o = Paykan_equals_unbox_other(other);
   PaykanString *lhs = (PaykanString *)self;
   int64_t result;
   if (!o) {
     result = 0; // NULL box: equal to nothing
   } else if (o->vtable != PaykanString_vtable) {
-    // Not a String — fall back to identity.
-    result = (self == o);
+    result = (self == o); // not a String: identity
   } else {
     PaykanString *rhs = (PaykanString *)o;
     result = lhs->len == rhs->len &&
@@ -109,25 +119,10 @@ int64_t PaykanString_length(PaykanObject *self) {
 PaykanObject *PaykanString_concat(PaykanObject *self, PaykanObject *other) {
   PaykanString *lhs = (PaykanString *)self;
   PaykanString *rhs = (PaykanString *)other;
-  int64_t newLen = lhs->len + rhs->len;
-  PaykanString *s = (PaykanString *)Paykan_malloc(sizeof(PaykanString));
-  s->vtable = PaykanString_vtable;
-  s->shared = NULL; // not yet boxed (unique-box invariant)
-  s->len = newLen;
-  s->data = (char *)Paykan_malloc((size_t)newLen + 1);
+  PaykanString *s = string_alloc(lhs->len + rhs->len);
   memcpy(s->data, lhs->data, (size_t)lhs->len);
   memcpy(s->data + lhs->len, rhs->data, (size_t)rhs->len);
-  s->data[newLen] = '\0';
   return (PaykanObject *)s;
-}
-
-PaykanShared *PaykanString_at(PaykanObject *self, int64_t idx) {
-  PaykanString *s = (PaykanString *)self;
-  if (idx < 0 || idx >= s->len) {
-    Paykan_runtime_panic("string index %lld out of bounds (len=%lld)",
-                         (long long)idx, (long long)s->len);
-  }
-  return PaykanShared_new((PaykanObject *)PaykanString_new(s->data + idx, 1));
 }
 
 void PaykanString_concat_inplace(PaykanObject *self, PaykanObject *other) {

@@ -6,11 +6,8 @@
 #include "RuntimeInternal.h"
 #include <stdio.h>
 
-// ---------------------------------------------------------------------------
-// Common helper — print one object to a stream, converted to a string via its
-// vtable's toString method.  (Paykan has no variadic functions; the print
-// builtins take a single Obj — compose with `+` for multiple pieces.)
-// ---------------------------------------------------------------------------
+/// Print one object to @p stream through its toString.  (The print builtins
+/// take a single Obj: pieces are composed with `+`.)
 static void print_object(FILE *stream, PaykanObject *obj) {
   if (!obj)
     return;

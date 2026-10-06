@@ -1,7 +1,9 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// Paykan language runtime — C ABI definitions for builtin class types.
+// Paykan language runtime — the C ABI of the builtin class types, shared by
+// the runtime, the generated code of both backends (the C backend includes
+// this header) and the JIT's symbol table.
 //
 // Every Paykan object begins with a pointer to its class's vtable: an array
 // of PaykanMethod slots (see "Object" below) whose layout mirrors the
@@ -9,9 +11,6 @@
 //
 //   Object vtable  : [0] destroy  [1] toString  [2] equals
 //   String vtable  : Object's, then [3] length  [4] concat
-//
-// All runtime functions use C linkage so LLVM IR can reference them
-// directly by name.
 
 #ifndef PAYKAN_RUNTIME_H
 #define PAYKAN_RUNTIME_H
@@ -35,9 +34,7 @@ extern "C" {
 #define PAYKAN_NORETURN _Noreturn
 #endif
 
-// ============================================================================
-// Target assumptions
-// ============================================================================
+// -- Target assumptions
 //
 // The runtime, the C backend's generated code (which includes this header)
 // and the LLVM backend all rely on these implementation-defined properties.
@@ -77,18 +74,14 @@ PAYKAN_STATIC_ASSERT(~0 == -1 && (int64_t)UINT64_MAX == -1 &&
                          (int64_t)(UINT64_C(1) << 63) == INT64_MIN,
                      "Paykan needs two's complement, wrapping conversions");
 
-// ============================================================================
-// Forward declarations
-// ============================================================================
+// -- Forward declarations
 
 typedef struct PaykanObject PaykanObject;
 typedef struct PaykanString PaykanString;
 typedef struct PaykanShared PaykanShared;
 typedef struct PaykanArray PaykanArray;
 
-// ============================================================================
-// Object
-// ============================================================================
+// -- Object
 //
 // Root of the class hierarchy.  Every Paykan heap object starts with this
 // two-word header so that a PaykanObject* can always reach the vtable AND its
@@ -100,9 +93,9 @@ typedef struct PaykanArray PaykanArray;
 //                 while the object has never been boxed / is not currently
 //                 boxed.
 //
-// Every constructor (runtime C constructors here, and the generated class
-// constructors in CodeGen) must initialise `shared` to NULL; PaykanShared_new
-// installs the backpointer and Paykan_release clears it when the box dies.
+// Every constructor (the runtime's and the generated class constructors)
+// must initialise `shared` to NULL; PaykanShared_new installs the backpointer
+// and Paykan_release clears it when the box dies.
 
 // A vtable is an array of PaykanMethod, the generic function-pointer type:
 // every slot holds a method converted to `void (*)(void)` and is converted
@@ -149,9 +142,8 @@ static inline PaykanMethod *Paykan_vtable_of(const void *obj) {
   return vtable;
 }
 
-// Constructor.  Test-only: CodeGen never emits a call to this symbol (user
-// `Obj()` construction goes through the generated class machinery); it is kept
-// for the unit tests and remains JIT-mapped for completeness.
+// Constructor.  Test-only: generated code constructs `Obj()` through the
+// class machinery, never through this symbol.
 PaykanObject *PaykanObject_new(void);
 
 // Default method implementations.
@@ -165,9 +157,7 @@ extern PaykanMethod PaykanObject_vtable[PAYKAN_OBJECT_SLOTS];
 // Singleton None instance — an Obj whose toString returns "None".
 extern PaykanObject PaykanObject_None;
 
-// ============================================================================
-// Int
-// ============================================================================
+// -- Int
 //
 // Boxed 64-bit signed integer.  Inherits Object.
 
@@ -192,9 +182,7 @@ extern PaykanMethod PaykanInt_vtable[PAYKAN_OBJECT_SLOTS];
 /// success, or NULL (None) for an invalid or out-of-range string.
 PaykanShared *PaykanInt_from_str(PaykanObject *str);
 
-// ============================================================================
-// Float
-// ============================================================================
+// -- Float
 //
 // Boxed 64-bit IEEE 754 double.  Inherits Object.
 
@@ -219,9 +207,7 @@ extern PaykanMethod PaykanFloat_vtable[PAYKAN_OBJECT_SLOTS];
 /// result: a PaykanShared* wrapping a fresh PaykanFloat, or NULL (None).
 PaykanShared *PaykanFloat_from_str(PaykanObject *str);
 
-// ============================================================================
-// Bool
-// ============================================================================
+// -- Bool
 //
 // Boxed boolean (stored as int64_t 0/1).  Inherits Object.
 
@@ -248,9 +234,7 @@ extern PaykanMethod PaykanBool_vtable[PAYKAN_OBJECT_SLOTS];
 /// (None) for any other string.
 PaykanShared *PaykanBool_from_str(PaykanObject *str);
 
-// ============================================================================
-// Char
-// ============================================================================
+// -- Char
 //
 // Boxed character (a signed 8-bit byte, like `char` in generated code).
 // Inherits Object.  Only a present `char?` is boxed.
@@ -270,9 +254,7 @@ int64_t PaykanChar_equals(PaykanObject *self, PaykanShared *other);
 
 extern PaykanMethod PaykanChar_vtable[PAYKAN_OBJECT_SLOTS];
 
-// ============================================================================
-// String
-// ============================================================================
+// -- String
 //
 // Inherits Object.  The first three vtable slots match Object's layout;
 // String-specific slots follow (PAYKAN_SLOT_STRING_*).
@@ -299,16 +281,13 @@ int64_t PaykanString_equals(PaykanObject *self, PaykanShared *other);
 int64_t PaykanString_length(PaykanObject *self);
 PaykanObject *PaykanString_concat(PaykanObject *self, PaykanObject *other);
 void PaykanString_concat_inplace(PaykanObject *self, PaykanObject *other);
-// Test-only: CodeGen lowers string subscripts through PaykanString_char_at;
-// kept for the unit tests and JIT-mapped for completeness.
+// Test-only: generated code subscripts a Str through PaykanString_char_at.
 PaykanShared *PaykanString_at(PaykanObject *self, int64_t idx);
 
 // Global vtable instance.
 extern PaykanMethod PaykanString_vtable[PAYKAN_STRING_SLOTS];
 
-// ============================================================================
-// File
-// ============================================================================
+// -- File
 //
 // Inherits Object.  The first three vtable slots match Object's layout;
 // File-specific slots follow (PAYKAN_SLOT_FILE_*).
@@ -340,9 +319,7 @@ extern PaykanMethod PaykanFile_vtable[PAYKAN_FILE_SLOTS];
 // Stdin singleton — immortal PaykanFile wrapping C's stdin.
 extern PaykanFile PaykanFile_Stdin;
 
-// ============================================================================
-// Error
-// ============================================================================
+// -- Error
 //
 // Inherits Object.  Returned by open() when fopen fails.
 // Carries a human-readable message string.
@@ -362,9 +339,7 @@ int64_t PaykanError_equals(PaykanObject *self, PaykanShared *other);
 // Global vtable instance.
 extern PaykanMethod PaykanError_vtable[PAYKAN_OBJECT_SLOTS];
 
-// ============================================================================
-// Array
-// ============================================================================
+// -- Array
 //
 // Inherits Object.  The first three vtable slots match Object's layout;
 // additional slots follow for Array-specific methods.
@@ -372,8 +347,6 @@ extern PaykanMethod PaykanError_vtable[PAYKAN_OBJECT_SLOTS];
 // Every element slot is pointer-sized (8 bytes on all supported targets).
 // Primitive elements (int, float, bool) are stored unboxed as int64_t/double;
 // class-type elements store a PaykanShared* (retained by the array).
-
-typedef struct PaykanArray PaykanArray;
 
 struct PaykanArray {
   PaykanMethod *vtable; // PaykanArray_vtable (primitive) or
@@ -384,7 +357,7 @@ struct PaykanArray {
   unsigned long cap;    // allocated capacity (in elements)
 };
 
-// -- Constructors ------------------------------------------------------------
+// -- Constructors
 
 /// Primitive array (int / float / bool): elements stored as raw 8-byte values.
 PaykanArray *PaykanArray_new(unsigned long len);
@@ -394,7 +367,7 @@ PaykanArray *PaykanArray_new_from_data(unsigned long len, const void *data);
 /// set/destroy manage reference counts automatically.
 PaykanArray *PaykanArray_new_obj(unsigned long len);
 
-// -- Element access ----------------------------------------------------------
+// -- Element access
 
 /// Read an 8-byte slot as a void*.
 /// Caller reinterprets as int64_t, double, or PaykanShared* as appropriate.
@@ -408,7 +381,7 @@ void PaykanArray_set(PaykanArray *arr, unsigned long idx, void *value);
 void PaykanArray_set_obj(PaykanArray *arr, unsigned long idx,
                          PaykanShared *value);
 
-// -- Method implementations --------------------------------------------------
+// -- Method implementations
 void PaykanArray_destroy(PaykanObject *self);
 void PaykanArray_destroy_obj(PaykanObject *self);
 PaykanShared *PaykanArray_toString(PaykanObject *self);
@@ -428,15 +401,13 @@ void *PaykanArray_pop(PaykanArray *arr);
 /// is responsible for releasing the returned PaykanShared*).
 PaykanShared *PaykanArray_pop_obj(PaykanArray *arr);
 
-// -- VTable instances --------------------------------------------------------
+// -- VTable instances
 extern PaykanMethod
     PaykanArray_vtable[PAYKAN_ARRAY_SLOTS]; // for primitive-element arrays
 extern PaykanMethod
     PaykanArray_obj_vtable[PAYKAN_ARRAY_SLOTS]; // for object-element arrays
 
-// ============================================================================
-// Tuple
-// ============================================================================
+// -- Tuple
 //
 // Inherits Object; its vtable has exactly Object's slots
 // (destroy / toString / equals).  ONE generic object backs every tuple type
@@ -446,7 +417,7 @@ extern PaykanMethod
 // retained by the tuple.  Tuples are immutable at the language level — the
 // set functions exist so a literal can be filled right after construction.
 //
-// The kind codes are part of the CodeGen <-> runtime ABI; they must match
+// The kind codes are part of the compiler <-> runtime ABI; they must match
 // paykan::names::TupleSlotKind in include/Names.h.
 
 typedef enum PaykanTupleKind {
@@ -491,7 +462,7 @@ void PaykanTuple_set(PaykanTuple *t, int64_t idx, int64_t bits);
 /// value slot.
 void PaykanTuple_set_obj(PaykanTuple *t, int64_t idx, PaykanShared *value);
 
-// -- Method implementations --------------------------------------------------
+// -- Method implementations
 void PaykanTuple_destroy(PaykanObject *self); // releases every REF slot
 PaykanShared *PaykanTuple_toString(PaykanObject *self); // "(1, a)"
 int64_t PaykanTuple_equals(PaykanObject *self, PaykanShared *other);
@@ -499,37 +470,21 @@ int64_t PaykanTuple_equals(PaykanObject *self, PaykanShared *other);
 // Global vtable instance (shared by every tuple type).
 extern PaykanMethod PaykanTuple_vtable[PAYKAN_OBJECT_SLOTS];
 
-// ============================================================================
-// Shared — reference-counted wrapper around any PaykanObject
-// ============================================================================
+// -- Shared: the reference-counted box around a PaykanObject
 //
 // A PaykanShared box holds a strong reference count and a pointer to the
-// owned object.  When the count drops to zero, the owned object is deleted
+// owned object.  When the count drops to zero, the owned object is destroyed
 // and the box itself is freed.
 //
-// -- The unique-box invariant ------------------------------------------------
-//
-// Every live heap object has AT MOST ONE PaykanShared box, and the object's
-// header backpointer (`obj->shared`, slot 1) names it.  Two independent boxes
-// around the same object would each destroy it when their own refcount hits
-// zero — a double free.  That situation used to arise whenever generated code
-// needed ownership of a value it only held as a raw PaykanObject* alias (the
-// raw `self` method parameter, a match-arm binding, an array element) and
-// wrapped it in a *fresh* box.
-//
-// Design decision (PAY-1): the invariant is enforced here, in the runtime, by
-// giving PaykanShared_new "create OR acquire" semantics — if `obj` already has
-// a box, its refcount is bumped and that same box is returned; only an unboxed
-// object gets a fresh box (whose backpointer is installed).  The alternative
-// (plumbing a backing box through every alias site in CodeGen) cannot cover
-// raw `self`, because the method ABI passes the unboxed object pointer and the
-// caller's box is unreachable from the callee.  A separate
-// `PaykanShared_from_object` entry point was considered and rejected: the JIT
-// resolves runtime symbols from a fixed table (src/Backends/LLVM/JIT/JIT.cpp),
-// so recovery must ride on the already-registered PaykanShared_new symbol. With
-// these semantics, "box this raw pointer" is *always* correct: it degenerates
-// to the old behaviour for freshly constructed objects and to a retain for
-// aliases.
+// The unique-box invariant: every live heap object has AT MOST ONE box, and
+// the object's header backpointer (`obj->shared`) names it.  Two boxes
+// around one object would each destroy it when their own count hit zero.
+// The runtime enforces the invariant in PaykanShared_new, which creates OR
+// acquires: an object that already has a box gets that box back, retained.
+// So generated code that holds an object only as a raw PaykanObject* (the
+// `self` parameter, which the method ABI passes unboxed; a match-arm
+// binding; an array element) can always "box this pointer" and get an owned
+// reference to the right box.
 
 typedef struct PaykanShared {
   int64_t refCount;     // strong reference count (starts at 1)
@@ -558,18 +513,14 @@ void Paykan_release(PaykanShared *shared);
 /// Convenience: return the underlying object pointer.
 PaykanObject *PaykanShared_get(PaykanShared *shared);
 
-// ============================================================================
-// Runtime panics
-// ============================================================================
+// -- Runtime panics
 
-/// Print an integer divide-by-zero diagnostic to stderr and abort the process.
-/// Emitted by CodeGen as the trap target for integer `/` and `%` by zero,
-/// mirroring the runtime abort on out-of-bounds array access.
+/// Print a diagnostic and abort: the lowering's trap target for integer `/`
+/// and `%` by zero.
 PAYKAN_NORETURN void Paykan_panic_div_by_zero(void);
 
-/// Print an integer-overflow diagnostic to stderr and abort the process.
-/// Emitted by CodeGen as the trap target for `INT64_MIN / -1`, whose quotient
-/// is not representable (the hardware divide would raise SIGFPE instead).
+/// Print a diagnostic and abort: the trap target for `INT64_MIN / -1`, whose
+/// quotient is not representable (the hardware divide would raise SIGFPE).
 PAYKAN_NORETURN void Paykan_panic_div_overflow(void);
 
 /// Print a diagnostic naming @p value and abort: `int<float>(value)` with a
@@ -581,9 +532,7 @@ PAYKAN_NORETURN void Paykan_panic_float_to_int(double value);
 /// the char range 0..255.
 PAYKAN_NORETURN void Paykan_panic_int_to_char(int64_t value);
 
-// ============================================================================
-// I/O builtins
-// ============================================================================
+// -- I/O builtins
 
 /// Print one object (via toString) to stdout, without a newline.
 void Paykan_print(PaykanObject *obj);
@@ -597,36 +546,26 @@ void Paykan_printerr(PaykanObject *obj);
 /// Print one object (via toString) to stderr, followed by a newline.
 void Paykan_printerrln(PaykanObject *obj);
 
-/// Flush stdout so that prompts appear before blocking reads.
-/// NOTE: not currently wired to a Paykan-level builtin — Sema/CodeGen/JIT do
-/// not register it and no `flush()` exists in the language.  Kept for direct
-/// runtime embedders; exposing a `flush()` builtin is a future language
-/// decision.
+/// Flush stdout.  Not reachable from the language (no `flush()` builtin);
+/// for programs that embed the runtime.
 void Paykan_flush(void);
 
-// ============================================================================
-// Pluggable heap allocator
-// ============================================================================
+// -- Pluggable heap allocator
 //
-// Every heap allocation made by the runtime *and* by JIT/AOT-generated code
-// (object structs are allocated via the `Paykan_malloc` symbol) flows through
-// these functions instead of the C library malloc/free/realloc directly.
-//
-// They dispatch through a function-pointer table with two back-ends:
-//
-//   • passthrough (default) — thin wrappers over libc, zero overhead.
-//   • tracking — counts every live block so a leak check can assert that a
-//     program frees everything it allocates:
+// Every heap allocation of the runtime and of generated code (object structs
+// are allocated through the `Paykan_malloc` symbol) goes through these
+// functions, which dispatch to one of two back-ends: passthrough (libc, the
+// default) or tracking, which counts every live block so a leak check can
+// assert that a program frees everything it allocates:
 //
 //       Paykan_heap_set_tracking(1);
 //       Paykan_heap_reset();
 //       <run program>
 //       assert(Paykan_heap_live_blocks() == 0);   // no leaks
 //
-// The back-end is selected once at start-up (driven by a command-line flag in
-// the driver, or by the test harness).  Immortal singletons (e.g.
-// PaykanObject_None) are statically allocated and never pass through here, so
-// they correctly do not affect the counters.
+// The back-end is selected once at start-up (--track-heap in the driver, or
+// the test harness), before any allocation.  Immortal singletons (None,
+// Stdin) are static and never pass through here.
 
 typedef struct PaykanHeapStats {
   int64_t liveBlocks;    // currently-allocated blocks (alloc - free)
@@ -648,7 +587,7 @@ void *Paykan_realloc(void *ptr, size_t size);
 /// Passing NULL is a no-op.
 void Paykan_free(void *ptr);
 
-// -- Back-end selection ------------------------------------------------------
+// -- Back-end selection
 
 /// Select the allocator back-end.  Pass non-zero to enable the tracking
 /// allocator, zero to use the plain passthrough allocator (the default).
@@ -659,7 +598,7 @@ void Paykan_heap_set_tracking(int enable);
 /// Returns non-zero if the tracking back-end is currently selected.
 int Paykan_heap_tracking_enabled(void);
 
-// -- Test / diagnostic hooks (meaningful only while tracking is enabled) -----
+// -- Test / diagnostic hooks (meaningful only while tracking is enabled)
 
 /// Reset all counters to zero.  Call immediately before running a program
 /// whose allocations you want to measure in isolation.

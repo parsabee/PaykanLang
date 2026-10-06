@@ -1,29 +1,12 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// Paykan runtime — pluggable heap allocator.
-//
-// The whole runtime *and* JIT/AOT-generated code allocate through the public
-// symbols Paykan_malloc / Paykan_realloc / Paykan_free.  Those symbols do not
-// allocate directly; they dispatch through a small function-pointer table that
-// selects one of two back-ends:
-//
-//   • passthrough (default) — thin wrappers over libc malloc/realloc/free.
-//     Zero overhead, no bookkeeping.
-//
-//   • tracking — wraps every block in a header recording its payload size and
-//     a magic word, and maintains live-block / live-byte counters so a leak
-//     check can assert the program freed everything it allocated.
-//
-// The back-end is chosen once at start-up via Paykan_heap_set_tracking(),
-// driven by a command-line flag in the driver (and by the test harness).
-// Because the choice is made before any allocation happens, every pointer is
-// allocated and freed by the same matching back-end, so the size header that
-// the tracking allocator prepends never confuses the passthrough free (and
-// vice versa).  Do NOT toggle the mode while live allocations exist.
-//
-// Statically-allocated singletons (e.g. PaykanObject_None) never pass through
-// here and so correctly do not affect the counters.
+// Paykan runtime — the pluggable heap allocator (Runtime.h, "Pluggable heap
+// allocator").  Paykan_malloc / Paykan_realloc / Paykan_free dispatch through
+// a function-pointer table to the passthrough back-end (plain libc) or the
+// tracking one (a size header before every block, plus live counters).  The
+// mode must not change while blocks are live: a block is freed by the
+// back-end that allocated it.
 
 #include "Runtime.h"
 #include "RuntimeInternal.h"
@@ -33,9 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-// ============================================================================
-// Passthrough back-end (default) — plain libc, no bookkeeping
-// ============================================================================
+// -- Passthrough back-end
 
 static void *passthrough_malloc(size_t size) { return malloc(size); }
 static void *passthrough_realloc(void *p, size_t size) {
@@ -43,15 +24,10 @@ static void *passthrough_realloc(void *p, size_t size) {
 }
 static void passthrough_free(void *p) { free(p); }
 
-// ============================================================================
-// Tracking back-end — size header + live counters
-// ============================================================================
+// -- Tracking back-end
 //
-// Layout in memory:  [ PaykanHeapHeader | ... payload ... ]
-// The pointer returned to the caller points at the payload; the header sits
-// immediately before it.  The header is padded so the payload stays 16-byte
-// aligned, which is enough for any runtime struct (pointers and 8-byte
-// scalars).
+// [ PaykanHeapHeader | payload ]: the caller's pointer is the payload's; the
+// header is padded so the payload stays 16-byte aligned.
 
 #define PAYKAN_HEAP_MAGIC ((uint64_t)0x50414b4e48454150ULL) // "PAKNHEAP"
 
@@ -134,13 +110,7 @@ static void tracking_free(void *ptr) {
   free(h);
 }
 
-// ============================================================================
-// Dispatch table
-// ============================================================================
-//
-// Defaults to the passthrough back-end so that, unless tracking is explicitly
-// requested, the runtime behaves exactly like plain malloc/free with no
-// overhead.
+// -- Dispatch table (the passthrough back-end until tracking is requested)
 
 static void *(*g_malloc)(size_t) = passthrough_malloc;
 static void *(*g_realloc)(void *, size_t) = passthrough_realloc;
@@ -148,17 +118,13 @@ static void (*g_free)(void *) = passthrough_free;
 
 static int g_tracking_enabled = 0;
 
-// ============================================================================
-// Public allocator entry points (called by the runtime and generated code)
-// ============================================================================
+// -- Entry points
 
 void *Paykan_malloc(size_t size) { return g_malloc(size); }
 void *Paykan_realloc(void *ptr, size_t size) { return g_realloc(ptr, size); }
 void Paykan_free(void *ptr) { g_free(ptr); }
 
-// ============================================================================
-// Mode selection / diagnostics
-// ============================================================================
+// -- Mode selection / diagnostics
 
 void Paykan_heap_set_tracking(int enable) {
   if (enable) {
