@@ -49,7 +49,7 @@ private:
   std::ostream &OS;
   unsigned Depth = 0;
 
-  // -- Output primitives -----------------------------------------------------
+  // -- Output primitives
 
   /// Start the list `(<tag>[ @loc]` on a new line at the current depth.
   void open(const char *tag, const ASTNode *loc = nullptr) {
@@ -123,7 +123,7 @@ private:
     return false;
   }
 
-  // -- Declarations ----------------------------------------------------------
+  // -- Declarations
 
   void importDecl(const ImportDecl &d) {
     open("import", &d);
@@ -197,7 +197,7 @@ private:
     close();
   }
 
-  // -- Types -----------------------------------------------------------------
+  // -- Types
 
   void optionalType(const Type *t) {
     if (t)
@@ -250,7 +250,7 @@ private:
     }
   }
 
-  // -- Statements ------------------------------------------------------------
+  // -- Statements
 
   void optionalStmt(const Stmt *s) {
     if (s)
@@ -388,7 +388,7 @@ private:
     }
   }
 
-  // -- Expressions -----------------------------------------------------------
+  // -- Expressions
 
   void optionalExpr(const Expr *e) {
     if (e)

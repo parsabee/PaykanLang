@@ -1,7 +1,4 @@
-# src/AST/CMakeLists.txt
-# ----------------------------------------------------------------------------
 # paykan_ast -- static library for AST node definitions and ASTContext.
-# ----------------------------------------------------------------------------
 
 add_library(paykan_ast STATIC
     AST.cpp

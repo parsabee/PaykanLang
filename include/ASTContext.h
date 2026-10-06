@@ -77,7 +77,7 @@ class ASTContext {
   // Reverse map for O(1) getSpecializedArrayElemType lookups.
   std::unordered_map<ClassType *, Type *> SpecializedArrayElemTypes;
 
-  // -- Tuples ----------------------------------------------------------------
+  // -- Tuples
   // Canonical base class for every tuple value ("Tuple": Obj subtype whose
   // vtable mirrors PaykanTuple_vtable — destroy / toString / equals).
   ClassType *TupleTy;
@@ -92,17 +92,14 @@ class ASTContext {
   std::unordered_map<TupleType *, ClassType *> SpecializedTupleTypes;
   std::unordered_map<ClassType *, TupleType *> SpecializedTupleElemTypes;
 
-  // -- Bootstrap helpers (called from the constructor) ----------------------
+  // -- Bootstrap helpers (called from the constructor)
   void buildObjectType();
   void buildStringType();
   void buildArrayType();
   void buildTupleType();
   void buildFileType();
   void buildErrorType();
-  void buildBoxedIntType();
-  void buildBoxedFloatType();
-  void buildBoxedBoolType();
-  void buildBoxedCharType();
+  void buildBoxedType(ClassType *ty);
 
 public:
   ASTContext();
@@ -125,7 +122,7 @@ public:
     return ptr;
   }
 
-  // -- ClassTypeBuilder ------------------------------------------------------
+  // -- ClassTypeBuilder
   //
   // Fluent API for constructing ClassType nodes with methods, fields, and
   // operators in a declarative style.  Usage:
@@ -148,6 +145,10 @@ public:
 
     /// Add a supported unary operator.
     ClassTypeBuilder &addOp(UnaryOpcode op);
+
+    /// Obj's operators (== !=) and vtable slots (destroy, toString, equals:
+    /// slots 0-2, Runtime.h), which every builtin class starts with.
+    ClassTypeBuilder &objectSlots();
 
     /// Declare a virtual method and add it to the class (updates the vtable).
     ClassTypeBuilder &method(const std::string &name, Type *retTy,
@@ -217,7 +218,7 @@ public:
     return SpecializedArrayTypes;
   }
 
-  // -- Tuples ----------------------------------------------------------------
+  // -- Tuples
 
   /// The canonical `Tuple` base ClassType (every tuple value is one).
   ClassType *getTupleTy() const { return TupleTy; }

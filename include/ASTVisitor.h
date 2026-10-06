@@ -11,7 +11,7 @@
 namespace paykan {
 namespace ast {
 
-// -- X-macro node table ------------------------------------------------------
+// -- X-macro node table
 //
 // Each entry: NODE(Kind, VisitName, CastTo)
 // where:
@@ -93,7 +93,7 @@ namespace ast {
   PAYKAN_NON_EXPR_NODES(NODE)                                                  \
   PAYKAN_EXPR_NODES(NODE)
 
-// -- CRTP AST Visitor --------------------------------------------------------
+// -- CRTP AST Visitor
 //
 // Derive from ASTVisitor<YourClass, ReturnType> and override any visitXxx()
 // method you care about.  Unhandled nodes return RetTy{} by default (or
@@ -128,7 +128,7 @@ protected:
   Derived &derived() { return static_cast<Derived &>(*this); }
 };
 
-// -- CRTP Expression Visitor -------------------------------------------------
+// -- CRTP Expression Visitor
 //
 // Inherits visitXxx defaults from ASTVisitor but provides its own visit()
 // that only dispatches expression nodes.  The entry point accepts Expr*

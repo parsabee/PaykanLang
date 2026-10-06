@@ -12,18 +12,15 @@ ASTContext::ASTContext()
       VoidTy(nullptr), ObjTy(nullptr), StrTy(nullptr), ArrayTy(nullptr),
       FileTy(nullptr), ErrorTy(nullptr), IntBoxTy(nullptr), FloatBoxTy(nullptr),
       BoolBoxTy(nullptr), CharBoxTy(nullptr), TupleTy(nullptr) {
-  // Reserve enough capacity to avoid repeated reallocations during parsing.
-  // The bootstrap phase alone creates ~150 nodes; a typical program adds
-  // a few hundred more.  512 slots eliminates most reallocation churn.
-  Pool.reserve(512);
+  Pool.reserve(512); // the bootstrap alone makes ~150 nodes
   IntTy = make<BuiltinType>(SourceLocation(), BuiltinType::Int);
   FloatTy = make<BuiltinType>(SourceLocation(), BuiltinType::Float);
   BoolTy = make<BuiltinType>(SourceLocation(), BuiltinType::Bool);
   CharTy = make<BuiltinType>(SourceLocation(), BuiltinType::Char);
   VoidTy = make<BuiltinType>(SourceLocation(), BuiltinType::Void);
   PoisonTy = make<PoisonType>(SourceLocation());
-  // Pre-allocate Obj, Str, Array, File, Error, and boxed primitives so all
-  // method signatures are correct from the start.
+  // Every builtin class is allocated before any is populated, so a method
+  // signature can name any of them.
   ObjTy = make<ClassType>(SourceLocation(), intern(names::kObj), nullptr);
   StrTy = make<ClassType>(SourceLocation(), intern(names::kString), nullptr);
   ArrayTy = make<ClassType>(SourceLocation(), intern(names::kArray), nullptr);
@@ -37,10 +34,9 @@ ASTContext::ASTContext()
   CharBoxTy =
       make<ClassType>(SourceLocation(), intern(names::kCharBox), nullptr);
   TupleTy = make<ClassType>(SourceLocation(), intern(names::kTuple), nullptr);
-  // These are the compiler builtins: Sema rejects any user class, enum, or
-  // function that would reuse one of their names, and CodeGen dispatches
-  // their methods to the C runtime.  Flagging them here, at the single
-  // registration site, keeps that knowledge out of both.
+  // The compiler builtins: Sema rejects any user class, enum, or function
+  // that would reuse one of their names, and the lowering dispatches their
+  // methods to the C runtime.
   for (ClassType *builtin : {ObjTy, StrTy, ArrayTy, FileTy, ErrorTy, IntBoxTy,
                              FloatBoxTy, BoolBoxTy, CharBoxTy, TupleTy})
     builtin->setBuiltin();
@@ -50,201 +46,79 @@ ASTContext::ASTContext()
   buildTupleType();
   buildFileType();
   buildErrorType();
-  buildBoxedIntType();
-  buildBoxedFloatType();
-  buildBoxedBoolType();
-  buildBoxedCharType();
+  for (ClassType *box : {IntBoxTy, FloatBoxTy, BoolBoxTy, CharBoxTy})
+    buildBoxedType(box);
 }
 
-// -- Bootstrap Obj ----------------------------------------------------------
+// -- Bootstrap of the builtin classes
 //
-// Obj is the root of the class hierarchy.
-//   operators : == !=
-//   vtable    : [ toString, equals ]
-//
-//
-void ASTContext::buildObjectType() {
-  // ObjTy and StrTy are both pre-allocated before this call, so all
-  // method signatures are correct from the start — no patching required.
-  ClassTypeBuilder(*this, ObjTy)
-      .addOp(BinaryOpcode::Eq)
+// Their vtables mirror the runtime's (Runtime.h, PAYKAN_SLOT_*): Obj's three
+// slots first, then the class's own, in the slot order given there.
+
+ASTContext::ClassTypeBuilder &ASTContext::ClassTypeBuilder::objectSlots() {
+  return addOp(BinaryOpcode::Eq)
       .addOp(BinaryOpcode::Ne)
-      .method(names::kMethodDestroy, VoidTy)         // slot 0
-      .method(names::kMethodToString, StrTy)         // slot 1
-      .method(names::kMethodEquals, BoolTy, {ObjTy}) // slot 2
-      .build();
+      .method(names::kMethodDestroy, Ctx.VoidTy)              // slot 0
+      .method(names::kMethodToString, Ctx.StrTy)              // slot 1
+      .method(names::kMethodEquals, Ctx.BoolTy, {Ctx.ObjTy}); // slot 2
 }
 
-// -- Bootstrap Str ---------------------------------------------------------
-//
-// Str inherits Obj.
-//   operators : + == !=
-//   vtable    : [ toString(override), equals(override),
-//                 length(new), concat(new — mutates self) ]
-//   fields    : _data (void*), _len (int)
-//
+void ASTContext::buildObjectType() {
+  ClassTypeBuilder(*this, ObjTy).objectSlots().build();
+}
+
+// Str is final; concat mutates self.
 void ASTContext::buildStringType() {
-  // StrTy was pre-allocated as an empty shell; wire it up to ObjTy now
-  // (this also inherits Obj's vtable and == / != operators).
   StrTy->setSuperClass(ObjTy);
-
-  // Str is non-inheritable (final). This flag is checked by Sema;
-  // it will be reused for user-defined `final` classes in the future.
   StrTy->setFinal();
-
-  // Populate the pre-allocated shell via ClassTypeBuilder.
-  // All method types are correct from the start — no patching required.
   ClassTypeBuilder(*this, StrTy)
       .addOp(BinaryOpcode::Add)
-      .addOp(BinaryOpcode::Eq)
-      .addOp(BinaryOpcode::Ne)
-      .method(names::kMethodDestroy, VoidTy)         // slot 0 — override
-      .method(names::kMethodToString, StrTy)         // slot 1 — override
-      .method(names::kMethodEquals, BoolTy, {ObjTy}) // slot 2 — override
-      .method(names::kMethodLength, IntTy)           // new
-      .method(names::kMethodConcat, VoidTy, {StrTy}) // new
+      .objectSlots()
+      .method(names::kMethodLength, IntTy)           // slot 3
+      .method(names::kMethodConcat, VoidTy, {StrTy}) // slot 4
       .build();
 }
 
-// -- Bootstrap Array -------------------------------------------------------
-//
-// Array is a subtype of Obj.  Its vtable mirrors Runtime.h's PaykanArray slots:
-//   vtable : [ destroy(override), toString(override), equals(override),
-//              len(new) ]
-//
 void ASTContext::buildArrayType() {
   ArrayTy->setSuperClass(ObjTy);
-
   ClassTypeBuilder(*this, ArrayTy)
-      .addOp(BinaryOpcode::Eq)
-      .addOp(BinaryOpcode::Ne)
-      .method(names::kMethodDestroy, VoidTy)         // slot 0 — override
-      .method(names::kMethodToString, StrTy)         // slot 1 — override
-      .method(names::kMethodEquals, BoolTy, {ObjTy}) // slot 2 — override
-      .method(names::kLen, IntTy)                    // slot 3 — new
+      .objectSlots()
+      .method(names::kLen, IntTy) // slot 3
       .build();
 }
 
-// -- Bootstrap Tuple --------------------------------------------------------
-//
-// Tuple is a subtype of Obj; every tuple value `(T1, T2, ...)` is an instance
-// of it at runtime (one generic PaykanTuple object, see Runtime/Tuple.c).  Its
-// vtable mirrors PaykanTuple_vtable:
-//   vtable : [ destroy(override), toString(override), equals(override) ]
-// Tuples are immutable and have no user-visible methods beyond Obj's.  It is
-// final: `Tuple` is not a spellable class name for users either (builtin).
-//
+// Tuple is the final base class of every tuple value (one runtime object
+// backs them all, Runtime/Tuple.c); it has no methods beyond Obj's.
 void ASTContext::buildTupleType() {
   TupleTy->setSuperClass(ObjTy);
   TupleTy->setFinal();
-
-  ClassTypeBuilder(*this, TupleTy)
-      .addOp(BinaryOpcode::Eq)
-      .addOp(BinaryOpcode::Ne)
-      .method(names::kMethodDestroy, VoidTy)         // slot 0 — override
-      .method(names::kMethodToString, StrTy)         // slot 1 — override
-      .method(names::kMethodEquals, BoolTy, {ObjTy}) // slot 2 — override
-      .build();
+  ClassTypeBuilder(*this, TupleTy).objectSlots().build();
 }
 
-// -- Bootstrap File --------------------------------------------------------
-//
-// File inherits Obj.
-//   operators : == !=
-//   vtable    : [ destroy(override), toString(override), equals(override) ]
-//
 void ASTContext::buildFileType() {
   FileTy->setSuperClass(ObjTy);
-
   ClassTypeBuilder(*this, FileTy)
-      .addOp(BinaryOpcode::Eq)
-      .addOp(BinaryOpcode::Ne)
-      .method(names::kMethodDestroy, VoidTy)         // slot 0 — override
-      .method(names::kMethodToString, StrTy)         // slot 1 — override
-      .method(names::kMethodEquals, BoolTy, {ObjTy}) // slot 2 — override
-      .method(names::kMethodWrite, VoidTy, {StrTy})  // slot 3 — new
-      .method(names::kMethodReadln,
-              ObjTy) // slot 4 — new: Str on success, None at EOF
-      .method(names::kMethodReadBytes, ObjTy,
-              {IntTy})                   // slot 5 — new: read up to n bytes
-      .method(names::kMethodRead, ObjTy) // slot 6 — new: read all remaining
+      .objectSlots()
+      .method(names::kMethodWrite, VoidTy, {StrTy}) // slot 3
+      .method(names::kMethodReadln, ObjTy) // slot 4: Str, or None at EOF
+      .method(names::kMethodReadBytes, ObjTy, {IntTy}) // slot 5: up to n bytes
+      .method(names::kMethodRead, ObjTy)               // slot 6: the rest
       .build();
 }
 
-// -- Bootstrap Error -------------------------------------------------------
-//
-// Error inherits Obj.  Returned by open() when fopen fails.
-//   operators : == !=
-//   vtable    : [ destroy(override), toString(override), equals(override) ]
-//
 void ASTContext::buildErrorType() {
   ErrorTy->setSuperClass(ObjTy);
-
-  ClassTypeBuilder(*this, ErrorTy)
-      .addOp(BinaryOpcode::Eq)
-      .addOp(BinaryOpcode::Ne)
-      .method(names::kMethodDestroy, VoidTy)         // slot 0 — override
-      .method(names::kMethodToString, StrTy)         // slot 1 — override
-      .method(names::kMethodEquals, BoolTy, {ObjTy}) // slot 2 — override
-      .build();
+  ClassTypeBuilder(*this, ErrorTy).objectSlots().build();
 }
 
-// -- Bootstrap Int / Float / Bool / Char (boxed primitives) ------------------
-//
-// These class types mirror the C runtime's PaykanInt / PaykanFloat /
-// PaykanBool / PaykanChar structs (also the boxes of `int?` & co.).  They
-// inherit Obj and override only the three base vtable slots (destroy,
-// toString, equals).  Marked final so no user class may extend them.
-
-void ASTContext::buildBoxedIntType() {
-  IntBoxTy->setSuperClass(ObjTy);
-  IntBoxTy->setFinal();
-  ClassTypeBuilder(*this, IntBoxTy)
-      .addOp(BinaryOpcode::Eq)
-      .addOp(BinaryOpcode::Ne)
-      .method(names::kMethodDestroy, VoidTy)
-      .method(names::kMethodToString, StrTy)
-      .method(names::kMethodEquals, BoolTy, {ObjTy})
-      .build();
+// A boxed primitive (Int, Float, Bool, Char) is final and has Obj's slots.
+void ASTContext::buildBoxedType(ClassType *ty) {
+  ty->setSuperClass(ObjTy);
+  ty->setFinal();
+  ClassTypeBuilder(*this, ty).objectSlots().build();
 }
 
-void ASTContext::buildBoxedFloatType() {
-  FloatBoxTy->setSuperClass(ObjTy);
-  FloatBoxTy->setFinal();
-  ClassTypeBuilder(*this, FloatBoxTy)
-      .addOp(BinaryOpcode::Eq)
-      .addOp(BinaryOpcode::Ne)
-      .method(names::kMethodDestroy, VoidTy)
-      .method(names::kMethodToString, StrTy)
-      .method(names::kMethodEquals, BoolTy, {ObjTy})
-      .build();
-}
-
-void ASTContext::buildBoxedBoolType() {
-  BoolBoxTy->setSuperClass(ObjTy);
-  BoolBoxTy->setFinal();
-  ClassTypeBuilder(*this, BoolBoxTy)
-      .addOp(BinaryOpcode::Eq)
-      .addOp(BinaryOpcode::Ne)
-      .method(names::kMethodDestroy, VoidTy)
-      .method(names::kMethodToString, StrTy)
-      .method(names::kMethodEquals, BoolTy, {ObjTy})
-      .build();
-}
-
-void ASTContext::buildBoxedCharType() {
-  CharBoxTy->setSuperClass(ObjTy);
-  CharBoxTy->setFinal();
-  ClassTypeBuilder(*this, CharBoxTy)
-      .addOp(BinaryOpcode::Eq)
-      .addOp(BinaryOpcode::Ne)
-      .method(names::kMethodDestroy, VoidTy)
-      .method(names::kMethodToString, StrTy)
-      .method(names::kMethodEquals, BoolTy, {ObjTy})
-      .build();
-}
-
-// -- Canonical array types ---------------------------------------------------
+// -- Canonical array types
 //
 // One ArrayType per (canonical) element type.  The parser still allocates a
 // source-located ArrayType for every `T[]` annotation so diagnostics can point
@@ -263,7 +137,7 @@ ArrayType *ASTContext::getArrayType(Type *elemTy) {
   return at;
 }
 
-// -- Canonical optional types ------------------------------------------------
+// -- Canonical optional types
 //
 // One OptionalType per (canonical) inner type, mirroring getArrayType: the
 // parser's source-located `T?` nodes are resolved by Sema to the instance
@@ -279,13 +153,13 @@ OptionalType *ASTContext::getOptionalType(Type *innerTy) {
   return ot;
 }
 
-// -- Specialized per-element array types ------------------------------------
+// -- Specialized per-element array types
 //
 // Lazily create Array<int>, Array<float>, etc.  Each specialized type is a
 // subtype of ArrayTy and adds push(elemTy)->void and pop()->elemTy so that
 // Sema can type-check calls with the correct element type.
-// These types are NOT used for vtable dispatch; CodeGen emits direct calls to
-// PaykanArray_push / PaykanArray_pop for those methods.
+// These types are not used for vtable dispatch: the lowering emits direct
+// calls to PaykanArray_push / PaykanArray_pop for those methods.
 //
 ClassType *ASTContext::getOrCreateSpecializedArrayType(Type *elemTy) {
   auto it = SpecializedArrayTypes.find(elemTy);
@@ -308,7 +182,7 @@ Type *ASTContext::getSpecializedArrayElemType(ClassType *ct) const {
   return it != SpecializedArrayElemTypes.end() ? it->second : nullptr;
 }
 
-// -- Canonical tuple types ---------------------------------------------------
+// -- Canonical tuple types
 //
 // One TupleType per (canonical) element-type list, exactly like getArrayType:
 // the parser allocates a source-located TupleType for every `(T1, T2)`
@@ -324,14 +198,14 @@ TupleType *ASTContext::getTupleType(std::vector<Type *> elemTys) {
   return tt;
 }
 
-// -- Specialized per-element-list tuple types -------------------------------
+// -- Specialized per-element-list tuple types
 //
 // Lazily create `Tuple<int, Str>` etc.  Each is a subtype of TupleTy adding no
 // methods; the specialization only gives a tuple-typed receiver a ClassType
 // to resolve `toString` / `equals` against (and `==` / `!=`, which lower to
 // `equals`).  Every specialization shares the single runtime vtable
 // PaykanTuple_vtable — the element kinds live in the object, not the vtable.
-// Flagged builtin so CodeGen dispatches its methods with the runtime ABI.
+// Flagged builtin so the lowering dispatches its methods with the runtime ABI.
 //
 ClassType *ASTContext::getOrCreateSpecializedTupleType(TupleType *tt) {
   auto it = SpecializedTupleTypes.find(tt);
@@ -359,7 +233,7 @@ TupleType *ASTContext::getSpecializedTupleElemType(ClassType *ct) const {
   return it != SpecializedTupleElemTypes.end() ? it->second : nullptr;
 }
 
-// -- ClassTypeBuilder --------------------------------------------------------
+// -- ClassTypeBuilder
 
 ASTContext::ClassTypeBuilder::ClassTypeBuilder(ASTContext &ctx, ClassType *ty)
     : Ctx(ctx), Ty(ty) {}
@@ -397,7 +271,7 @@ ClassType *ASTContext::ClassTypeBuilder::build() {
   return Ty;
 }
 
-// -- ASTContext --------------------------------------------------------------
+// -- ASTContext
 
 ASTContext::ClassTypeBuilder ASTContext::buildClassType(const std::string &name,
                                                         ClassType *superClass) {

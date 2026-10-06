@@ -39,7 +39,6 @@ std::string ReadError::str() const {
 namespace {
 
 // -- Step 1: the S-expression syntax
-// -------------------------------------------
 
 /// A list or an atom of the text.
 struct SExpr {
@@ -241,7 +240,6 @@ private:
 };
 
 // -- Step 2: the AST
-// -----------------------------------------------------------
 
 /// Thrown-free failure: the first error wins, and everything after it
 /// unwinds by returning null.
@@ -462,7 +460,7 @@ private:
     return SourceLocation(v[0], v[1], v[2], v[3]);
   }
 
-  // -- Declarations ----------------------------------------------------------
+  // -- Declarations
 
   TranslationUnit *unit(const SExpr &e) {
     if (e.K != SExpr::List || e.Text != "unit")
@@ -656,7 +654,7 @@ private:
     return Ctx.make<VarDecl>(loc, *name, ty, init);
   }
 
-  // -- Types -----------------------------------------------------------------
+  // -- Types
 
   Type *type(Fields &f, const char *what) {
     const SExpr *e = f.anyList(what);
@@ -733,7 +731,7 @@ private:
            nullptr;
   }
 
-  // -- Statements ------------------------------------------------------------
+  // -- Statements
 
   CompoundStmt *block(Fields &f, const char *what) {
     const SExpr *e = f.anyList(what);
@@ -917,7 +915,7 @@ private:
     return arm && f.done() ? arm : nullptr;
   }
 
-  // -- Expressions -----------------------------------------------------------
+  // -- Expressions
 
   template <typename T> static T *cast_expr(Expr *e) {
     return e ? cast<T>(e) : nullptr;
