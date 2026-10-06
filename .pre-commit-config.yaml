@@ -2,8 +2,8 @@
 #
 # Install (one-time):
 #   pip install pre-commit        # or: brew install pre-commit
-#   pre-commit install            # clang-format + tests/suites.json on every commit
-#   pre-commit install --hook-type pre-push   # clang-tidy + tests/suites.json before push
+#   pre-commit install            # clang-format on every commit
+#   pre-commit install --hook-type pre-push   # clang-tidy before push
 #
 # The hooks call the project's Python wrappers, which prefer the vendored
 # LLVM 17 clang-format / clang-tidy (build/third-party/llvm) for results that
@@ -35,14 +35,3 @@ repos:
         exclude: '(^build/|/third-party/)'
         pass_filenames: true
         stages: [pre-push]
-
-      # tests/suites.json is generated from the build files
-      # (scripts/gen_test_suites.py): regenerate it whenever they change.  A
-      # regenerated file fails the commit or push; stage it and try again.
-      - id: test-suites
-        name: tests/suites.json (regenerate)
-        entry: python3 scripts/gen_test_suites.py
-        language: system
-        files: '^(src/|tests/|cmake/|scripts/|CMakeLists\.txt$)'
-        pass_filenames: false
-        stages: [pre-commit, pre-push]

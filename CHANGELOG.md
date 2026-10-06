@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The tests are no longer built by default: a plain `cmake -B build` builds
   only the compiler and downloads nothing.  They are now in suites
-  (`paykan_test_suite()` sections of `tests/CMakeLists.txt`; `tests/suites.json` is generated from the build files by `scripts/gen_test_suites.py`): `-DPAYKAN_BUILD_TESTS=<suites>` builds the
+  (listed once, in `tests/suites.json`): `-DPAYKAN_BUILD_TESTS=<suites>` builds the
   named ones (a CMake list, e.g. `"parser;sema"`) and
   `-DPAYKAN_BUILD_ALL_TESTS=ON` all of them.  `PAYKAN_BUILD_TESTS=ON` is an
   error that points to `PAYKAN_BUILD_ALL_TESTS`.

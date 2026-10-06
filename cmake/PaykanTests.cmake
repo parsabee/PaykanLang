@@ -6,13 +6,12 @@
 #   -DPAYKAN_BUILD_TESTS="parser;sema"   the named suites (a CMake list)
 #   -DPAYKAN_BUILD_ALL_TESTS=ON          every suite
 #
-# The suites are declared in tests/CMakeLists.txt, one paykan_test_suite()
-# section each.  scripts/gen_test_suites.py generates tests/suites.json from
-# that (each suite, whether it is built on GoogleTest, its tests) and from the
-# src/ link graph (the rules scripts/affected_tests.py uses to pick the suites
-# a change can affect; CI builds only those).  This file reads the suites
-# from tests/suites.json, because it needs them before tests/CMakeLists.txt
-# runs; configure fails if the two disagree (regenerate the file).
+# The suites are listed once, in tests/suites.json (name, whether it is built
+# on GoogleTest, what it runs); `scripts/affected_tests.py --list` prints
+# them, and the same file holds the rules that script uses to pick the suites
+# a change can affect (CI builds only those).  tests/CMakeLists.txt registers
+# each suite's tests under paykan_test_suite(); configure fails if a suite of
+# the file is never declared there, or one declared there is not in the file.
 #
 # Sets:
 #   PAYKAN_TEST_SUITES            every suite name (the file's order)
@@ -92,7 +91,7 @@ endif()
 function(paykan_test_suite suite out)
     if(NOT suite IN_LIST PAYKAN_TEST_SUITES)
         message(FATAL_ERROR "paykan_test_suite: '${suite}' is not a suite of "
-                            "${PAYKAN_TEST_SUITES_FILE}: run scripts/gen_test_suites.py")
+                            "${PAYKAN_TEST_SUITES_FILE}")
     endif()
     set_property(GLOBAL APPEND PROPERTY PAYKAN_DECLARED_TEST_SUITES ${suite})
     if(suite IN_LIST PAYKAN_ENABLED_TEST_SUITES)
@@ -108,7 +107,7 @@ function(paykan_check_test_suites)
         if(NOT suite IN_LIST declared)
             message(FATAL_ERROR "test suite '${suite}' (${PAYKAN_TEST_SUITES_FILE}) "
                                 "has no paykan_test_suite() section in "
-                                "tests/CMakeLists.txt: run scripts/gen_test_suites.py")
+                                "tests/CMakeLists.txt")
         endif()
     endforeach()
 endfunction()

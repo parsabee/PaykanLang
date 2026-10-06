@@ -11,9 +11,8 @@ suites those files can affect, as a CMake list (`parser;sema`), or `all`
 when every suite is.  An empty line means no suite is affected (a change to
 the release workflow, say).  --list prints every suite and what it runs.
 
-The suites and the path rules live in tests/suites.json, which
-scripts/gen_test_suites.py generates from the build files and CMake
-(cmake/PaykanTests.cmake) reads too.  The rules are deliberately
+The suites and the path rules live in tests/suites.json, the one list that
+CMake (cmake/PaykanTests.cmake) reads too.  The rules are deliberately
 conservative: a file in a library the whole compiler uses (the AST, the
 frontends, the plugin interfaces, the public headers, the build system)
 affects every suite, and a file no rule names does too.
@@ -95,7 +94,7 @@ def main() -> int:
     if args.list:
         width = max(len(name) for name in suites)
         for name, info in suites.items():
-            print(f"{name:<{width}}  {', '.join(info['tests'])}")
+            print(f"{name:<{width}}  {info['description']}")
         return 0
 
     paths = args.files if args.files is not None else changed_files(args.base, args.head)
