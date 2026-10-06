@@ -259,7 +259,7 @@ int main(int argc, char *argv[]) {
       }
   }
 
-  // -- Frontend -------------------------------------------------------------
+  // -- Frontend
   // One DiagEngine shared by every pass, wired into the parser up front so
   // syntax errors come out in the same rich source-located format as sema
   // errors (file:line:col + snippet + caret).  SourceLines lives inside the
@@ -298,7 +298,7 @@ int main(int argc, char *argv[]) {
     return EXIT_SUCCESS;
   }
 
-  // -- Semantic analysis ----------------------------------------------------
+  // -- Semantic analysis
   std::string projectRoot =
       std::filesystem::path(opts.InputFilename).parent_path().string();
   // Sema reuses the DiagEngine constructed above (already carrying the
@@ -317,7 +317,7 @@ int main(int argc, char *argv[]) {
   if (opts.CheckOnly)
     return EXIT_SUCCESS;
 
-  // -- Backend --------------------------------------------------------------
+  // -- Backend
   std::string backendName = opts.Backend.empty()
                                 ? std::string(paykan::backend::defaultBackend())
                                 : opts.Backend;
@@ -333,7 +333,7 @@ int main(int argc, char *argv[]) {
   in.InputFilename = opts.InputFilename;
   in.ProjectRoot = projectRoot;
   in.OptLevel = opts.optLevel();
-  // -- Lowering -------------------------------------------------------------
+  // -- Lowering
   // Every backend reads PIR: lower the program (the single home of the
   // ownership semantics), verify it, and hand it over.  --emit-pir prints it
   // instead.

@@ -7,7 +7,7 @@
 namespace paykan {
 namespace names {
 
-// -- Paykan-level built-in names (visible to user code) ---------------------
+// -- Paykan-level built-in names (visible to user code)
 
 inline constexpr const char *kPrint = "print";
 inline constexpr const char *kPrintln = "println";
@@ -78,7 +78,7 @@ inline constexpr const char *kConvIntBoxStr = "Int<Str>";
 inline constexpr const char *kConvFloatBoxStr = "Float<Str>";
 inline constexpr const char *kConvBoolBoxStr = "Bool<Str>";
 
-// -- Runtime C symbol names -------------------------------------------------
+// -- Runtime C symbol names
 
 // Object
 inline constexpr const char *kPaykanObjectNew = "PaykanObject_new";
@@ -190,9 +190,9 @@ inline constexpr const char *kPaykanSharedGet = "PaykanShared_get";
 inline constexpr const char *kPaykanRetain = "Paykan_retain";
 inline constexpr const char *kPaykanRelease = "Paykan_release";
 
-// Tracking heap allocator.  Object structs emitted by CodeGen are allocated
-// through kPaykanMalloc as well, so JIT/AOT-generated allocations are counted
-// alongside the runtime's own (see src/Runtime/Heap.c).
+// Tracking heap allocator.  Generated code allocates object structs through
+// kPaykanMalloc too, so its allocations are counted with the runtime's own
+// (src/Runtime/Heap.c).
 inline constexpr const char *kPaykanMalloc = "Paykan_malloc";
 inline constexpr const char *kPaykanRealloc = "Paykan_realloc";
 inline constexpr const char *kPaykanFree = "Paykan_free";
@@ -200,21 +200,21 @@ inline constexpr const char *kPaykanHeapReset = "Paykan_heap_reset";
 inline constexpr const char *kPaykanHeapLiveBlocks = "Paykan_heap_live_blocks";
 inline constexpr const char *kPaykanHeapLiveBytes = "Paykan_heap_live_bytes";
 
-// -- Environment variables --------------------------------------------------
+// -- Environment variables
 
 inline constexpr const char *kPaykanStdlibEnv = "PAYKAN_STDLIB";
 
-// -- Module system ----------------------------------------------------------
+// -- Module system
 
 inline constexpr const char *kQualSep = "::"; ///< Module qualifier separator
 inline constexpr const char *kStdlibDir =
     "stdlib"; ///< Standard library subdirectory
 
-// -- Paykan language keywords -----------------------------------------------
+// -- Paykan language keywords
 
 inline constexpr const char *kSelf = "self"; ///< Receiver parameter in methods
 
-// -- IR / ABI naming conventions --------------------------------------------
+// -- IR / ABI naming conventions
 
 /// Separator between class and method in the PIR names of methods and
 /// destructors (`K.w`, `K.destroy`, `K.__init__`).  '.' cannot occur in a
@@ -227,18 +227,16 @@ inline constexpr const char *kVTableSuffix =
 inline constexpr const char *kStructSuffix =
     "_struct"; ///< Suffix for LLVM struct type names
 
-// -- Cache ------------------------------------------------------------------
+// -- Cache
 
 inline constexpr const char *kCacheDir = ".paykan_cache";
 
-// -- JIT sync list ----------------------------------------------------------
+// -- JIT sync list
 //
-// Every symbol that CodeGen may emit as an ExternalLinkage declaration (via
-// declareFunction, FunctionTable, getOrInsertGlobal, or a builtin method
-// resolved into a user-class vtable slot by findConcreteMethodFuncName) must
-// appear in this list.  JIT.cpp asserts in debug builds that every name here
-// is present in kRuntimeSymbols, catching Names.h / JIT.cpp drift at startup.
-//
+// Every runtime symbol the lowering may reference: a function or global it
+// declares as a `$rt.` extern, including a builtin method resolved into a
+// user class's vtable slot.  JIT.cpp asserts in debug builds that every name
+// here is in kRuntimeSymbols, catching Names.h / JIT.cpp drift at startup.
 inline constexpr const char *kCodeGenRequiredSymbols[] = {
     // Memory / RC
     kPaykanMalloc,
@@ -287,7 +285,7 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     // Globals (objects and singletons)
     kPaykanObjectNone,
     kPaykanFileStdin,
-    // Boxed primitives (from Sema/CodeGen dispatch)
+    // Parses into boxed primitives
     kPaykanIntFromStr,
     kPaykanFloatFromStr,
     kPaykanBoolFromStr,
@@ -321,11 +319,11 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanCharVtable,
 };
 
-// -- Tuple slot kinds (CodeGen <-> runtime ABI) ------------------------------
+// -- Tuple slot kinds (compiler <-> runtime ABI)
 //
-// One byte per tuple element, emitted by CodeGen as the `kinds` descriptor
-// passed to PaykanTuple_new.  Must match PaykanTupleKind in
-// src/Runtime/Runtime.h (checked by a static_assert in the codegen tests).
+// One byte per tuple element, emitted by the lowering as the `kinds`
+// descriptor passed to PaykanTuple_new.  Must match PaykanTupleKind in
+// src/Runtime/Runtime.h (a static_assert in the codegen tests checks it).
 
 enum TupleSlotKind : unsigned char {
   kTupleSlotInt = 0,   // int64_t (also enum values)
@@ -335,7 +333,7 @@ enum TupleSlotKind : unsigned char {
   kTupleSlotRef = 4,   // PaykanShared* retained by the tuple
 };
 
-// -- LLVM IR internal names -------------------------------------------------
+// -- Names of lowering-generated globals and values
 
 inline constexpr const char *kStrGlobalName = ".str";
 inline constexpr const char *kInt2FPName = "int2fp";

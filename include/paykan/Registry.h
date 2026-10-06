@@ -33,7 +33,7 @@
 
 namespace paykan::plugin {
 
-// -- Compatibility (#103) ----------------------------------------------------
+// -- Compatibility (#103)
 //
 // Every plugin records the PaykanLang version it was BUILT WITH
 // (PAYKAN_PLUGIN_BUILD_VERSION of the headers it was compiled against; the
@@ -58,7 +58,7 @@ bool isCompatibleBuildVersion(const char *buildVersion);
 /// "built with PaykanLang 0.0.9; this paykan 1.2.3 accepts 1.2.3".
 std::string incompatibilityReason(const char *buildVersion);
 
-// -- Registration ------------------------------------------------------------
+// -- Registration
 
 /// What a plugin registers: plain data, filled in by the PAYKAN_REGISTER_*
 /// macros of the interface headers.

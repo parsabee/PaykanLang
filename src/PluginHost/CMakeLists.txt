@@ -1,5 +1,3 @@
-# src/PluginHost/CMakeLists.txt
-# ----------------------------------------------------------------------------
 # paykan_plugin_host -- loads plugins at run time (include/paykan/PluginLoader.h):
 # discovery (--plugin, $PAYKAN_PLUGIN_PATH, the user and system plugin
 # directories), the version check before any plugin callback runs, and the
@@ -11,7 +9,6 @@
 # Standard C++; the dynamic loader is behind the portability layer
 # (src/Backends/Toolchain/Platform.h).  The plugins themselves link nothing
 # of PaykanLang.
-# ----------------------------------------------------------------------------
 
 include(GNUInstallDirs)
 

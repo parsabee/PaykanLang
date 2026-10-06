@@ -23,9 +23,7 @@
 
 namespace paykan::jit {
 
-// ---------------------------------------------------------------------------
-// Symbol table of runtime functions the JIT must be able to resolve.
-// ---------------------------------------------------------------------------
+// -- Symbol table of the runtime functions and globals the JIT resolves
 
 namespace {
 
@@ -195,9 +193,7 @@ createObjectLinkingLayer(llvm::orc::ExecutionSession &es,
 
 } // anonymous namespace
 
-// ---------------------------------------------------------------------------
-// Runtime panics
-// ---------------------------------------------------------------------------
+// -- Runtime panics
 //
 // A runtime panic (division by zero, an index out of bounds, ...) prints its
 // message and calls abort().  The C backend runs the program as a child
@@ -226,9 +222,7 @@ private:
 
 } // namespace
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
+// -- Public API
 
 llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
                               std::unique_ptr<llvm::LLVMContext> ctx,
@@ -262,7 +256,7 @@ llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
       registered.insert(name);
     for (const char *name : names::kCodeGenRequiredSymbols)
       assert(registered.count(name) &&
-             "JIT symbol table is missing a symbol required by CodeGen");
+             "JIT symbol table is missing a symbol the lowering requires");
   }
 #endif
 

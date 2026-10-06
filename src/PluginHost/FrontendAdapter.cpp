@@ -35,11 +35,7 @@ public:
                               sema::DiagEngine &diag,
                               const frontend::Options &opts) override {
     std::string file(filename), text(source);
-    PaykanSession s;
-    s.Out = &std::cerr; // debug traces
-    s.InputFile = file;
-    s.Owner = owner();
-    s.Diag = &diag;
+    PaykanSession s = session(file, diag, std::cerr); // Out: debug traces
     PaykanFrontendInput in = input(file, text, opts);
     PaykanFrontendOutput out{};
     out.struct_size = sizeof(PaykanFrontendOutput);
@@ -83,11 +79,7 @@ public:
       return false;
     std::string file(filename), text(source);
     sema::DiagEngine diag(std::cerr);
-    PaykanSession s;
-    s.Out = &os;
-    s.InputFile = file;
-    s.Owner = owner();
-    s.Diag = &diag;
+    PaykanSession s = session(file, diag, os);
     PaykanFrontendInput in = input(file, text, frontend::Options());
     int rc = F->dump_tokens(F->data, &s, &in);
     os.flush();
@@ -101,6 +93,18 @@ public:
 private:
   std::string owner() const {
     return "frontend '" + std::string(F->name) + "'";
+  }
+
+  /// The session of one callback on @p file, reporting through @p diag and
+  /// writing to @p out.
+  PaykanSession session(const std::string &file, sema::DiagEngine &diag,
+                        std::ostream &out) const {
+    PaykanSession s;
+    s.Out = &out;
+    s.InputFile = file;
+    s.Owner = owner();
+    s.Diag = &diag;
+    return s;
   }
 
   static PaykanFrontendInput input(const std::string &file,
