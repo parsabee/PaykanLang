@@ -1,11 +1,4 @@
-# src/Runtime/CMakeLists.txt
-# --------------------------------------------------------------------------
-# paykan_runtime — C runtime library for Paykan's builtin class types.
-#
-# This static library is linked into every compiled Paykan program.
-# It provides Object/String constructors, destructors, vtables, and
-# method implementations with C linkage.
-# --------------------------------------------------------------------------
+# paykan_runtime: the C runtime linked into every compiled Paykan program.
 
 add_library(paykan_runtime STATIC
     Object.c
@@ -24,7 +17,7 @@ target_include_directories(paykan_runtime
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-# The runtime is pure C — no RTTI/exception flags needed.
+# Pure C: no RTTI / exception flags.
 target_compile_options(paykan_runtime PRIVATE
     -Wall -Wextra -Wpedantic -Werror
     -std=c11

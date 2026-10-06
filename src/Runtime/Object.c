@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// Paykan runtime — Object base type implementation.
+// Paykan runtime — Object base type implementation, and the runtime panics.
 
 #include "Runtime.h"
 #include "RuntimeInternal.h"
@@ -10,7 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// -- VTable ------------------------------------------------------------------
+// -- VTable
 
 PaykanMethod PaykanObject_vtable[PAYKAN_OBJECT_SLOTS] = {
     [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanObject_destroy,
@@ -18,7 +18,7 @@ PaykanMethod PaykanObject_vtable[PAYKAN_OBJECT_SLOTS] = {
     [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanObject_equals,
 };
 
-// -- Constructor / Destructor ------------------------------------------------
+// -- Constructor / Destructor
 
 PaykanObject *PaykanObject_new(void) {
   PaykanObject *obj = (PaykanObject *)Paykan_malloc(sizeof(PaykanObject));
@@ -29,55 +29,42 @@ PaykanObject *PaykanObject_new(void) {
 
 void PaykanObject_destroy(PaykanObject *self) { Paykan_free(self); }
 
-// -- Default method implementations ------------------------------------------
+// -- Default methods
 
 PaykanShared *PaykanObject_toString(PaykanObject *self) {
-  // Default: "Object@<hex address>"
   char buf[64];
   int n = snprintf(buf, sizeof(buf), "Object@%p", (void *)self);
   return PaykanShared_new((PaykanObject *)PaykanString_new(buf, n));
 }
 
 int64_t PaykanObject_equals(PaykanObject *self, PaykanShared *other) {
-  // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h);
-  // unbox so identity compares the underlying objects, matching the unboxed
-  // `self`.  A NULL box compares unequal.
+  // Identity, compared on the unboxed objects (`self` arrives unboxed); a
+  // NULL box is equal to nothing.
   PaykanObject *o = Paykan_equals_unbox_other(other);
   int64_t result = o && self == o;
   return Paykan_equals_consume_other(other, result);
 }
 
-// -- None singleton ----------------------------------------------------------
-//
-// None is a shared immortal Obj instance.  Its toString returns "None" and
-// its equals always returns 0 (None is only equal to itself via identity).
+// -- None singleton: an immortal Obj whose toString is "None".
 
-static void PaykanNone_destroy(PaykanObject *self) {
-  (void)self; // immortal — never freed
-}
+static void PaykanNone_destroy(PaykanObject *self) { (void)self; }
 
 static PaykanShared *PaykanNone_toString(PaykanObject *self) {
   (void)self;
   return PaykanShared_new((PaykanObject *)PaykanString_new("None", 4));
 }
 
-static int64_t PaykanNone_equals(PaykanObject *self, PaykanShared *other) {
-  PaykanObject *o = Paykan_equals_unbox_other(other);
-  int64_t result = o && self == o;
-  return Paykan_equals_consume_other(other, result);
-}
-
 static PaykanMethod PaykanNone_vtable[PAYKAN_OBJECT_SLOTS] = {
     [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanNone_destroy,
     [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanNone_toString,
-    [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanNone_equals,
+    [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanObject_equals,
 };
 
-// shared starts NULL; boxing None installs a box and Paykan_release clears it
-// again (destroy is a no-op), so the singleton cycles cleanly through boxings.
+// Boxing None installs a box and Paykan_release clears it again (destroy is
+// a no-op), so the singleton cycles cleanly through boxings.
 PaykanObject PaykanObject_None = {PaykanNone_vtable, NULL};
 
-// -- Runtime panics ----------------------------------------------------------
+// -- Runtime panics
 
 void Paykan_runtime_panic(const char *fmt, ...) {
   va_list ap;

@@ -1,13 +1,9 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// Paykan runtime — boxed primitive types: Int, Float, Bool, Char.
-//
-// Each type inherits from Obj (PaykanObject-compatible prefix) and wraps a
-// single primitive value.  These boxed types allow primitives to be stored
-// in Obj-typed variables and passed through the same ARC machinery as any
-// other heap object; they are also the boxes of the optional primitives
-// (`int?` holds a PaykanShared* to a PaykanInt, NULL meaning None).
+// Paykan runtime — the boxed primitives Int, Float, Bool and Char: a
+// primitive in an Obj-typed variable, and the present value of an `int?`,
+// `float?`, `bool?` or `char?` (NULL meaning None).
 
 #include "Runtime.h"
 #include "RuntimeInternal.h"
@@ -19,9 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-// ============================================================================
-// Int
-// ============================================================================
+// -- Int
 
 PaykanMethod PaykanInt_vtable[PAYKAN_OBJECT_SLOTS] = {
     [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanInt_destroy,
@@ -49,7 +43,6 @@ PaykanShared *PaykanInt_toString(PaykanObject *self) {
 }
 
 int64_t PaykanInt_equals(PaykanObject *self, PaykanShared *other) {
-  // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
   PaykanObject *o = Paykan_equals_unbox_other(other);
   int64_t result = o && o->vtable == PaykanInt_vtable &&
                    ((PaykanInt *)self)->value == ((PaykanInt *)o)->value;
@@ -76,9 +69,7 @@ PaykanShared *PaykanInt_from_str(PaykanObject *str) {
   return PaykanShared_new((PaykanObject *)PaykanInt_new((int64_t)val));
 }
 
-// ============================================================================
-// Float
-// ============================================================================
+// -- Float
 
 PaykanMethod PaykanFloat_vtable[PAYKAN_OBJECT_SLOTS] = {
     [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanFloat_destroy,
@@ -106,7 +97,6 @@ PaykanShared *PaykanFloat_toString(PaykanObject *self) {
 }
 
 int64_t PaykanFloat_equals(PaykanObject *self, PaykanShared *other) {
-  // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
   PaykanObject *o = Paykan_equals_unbox_other(other);
   int64_t result = o && o->vtable == PaykanFloat_vtable &&
                    ((PaykanFloat *)self)->value == ((PaykanFloat *)o)->value;
@@ -129,9 +119,7 @@ PaykanShared *PaykanFloat_from_str(PaykanObject *str) {
   return PaykanShared_new((PaykanObject *)PaykanFloat_new(val));
 }
 
-// ============================================================================
-// Bool
-// ============================================================================
+// -- Bool
 
 PaykanMethod PaykanBool_vtable[PAYKAN_OBJECT_SLOTS] = {
     [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanBool_destroy,
@@ -159,7 +147,6 @@ PaykanShared *PaykanBool_toString(PaykanObject *self) {
 }
 
 int64_t PaykanBool_equals(PaykanObject *self, PaykanShared *other) {
-  // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
   PaykanObject *o = Paykan_equals_unbox_other(other);
   int64_t result = o && o->vtable == PaykanBool_vtable &&
                    ((PaykanBool *)self)->value == ((PaykanBool *)o)->value;
@@ -176,9 +163,7 @@ PaykanShared *PaykanBool_from_str(PaykanObject *str) {
   return NULL;
 }
 
-// ============================================================================
-// Char
-// ============================================================================
+// -- Char
 
 PaykanMethod PaykanChar_vtable[PAYKAN_OBJECT_SLOTS] = {
     [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanChar_destroy,
@@ -206,7 +191,6 @@ PaykanShared *PaykanChar_toString(PaykanObject *self) {
 }
 
 int64_t PaykanChar_equals(PaykanObject *self, PaykanShared *other) {
-  // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
   PaykanObject *o = Paykan_equals_unbox_other(other);
   int64_t result = o && o->vtable == PaykanChar_vtable &&
                    ((PaykanChar *)self)->value == ((PaykanChar *)o)->value;

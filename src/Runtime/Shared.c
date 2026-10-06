@@ -8,16 +8,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-// -- Constructor / acquire ---------------------------------------------------
-//
-// PaykanShared_new enforces the unique-box invariant (see Runtime.h): an
-// object that already carries a box gets that SAME box back, retained — never
-// a second, independently-counted box that would double-free the object.
+// -- Create or acquire (the unique-box invariant, Runtime.h)
 
 PaykanShared *PaykanShared_new(PaykanObject *obj) {
   if (obj && obj->shared) {
-    // Acquire: the object is already boxed — hand out another +1 reference to
-    // its unique box.
     ++obj->shared->refCount;
     return obj->shared;
   }
@@ -29,14 +23,14 @@ PaykanShared *PaykanShared_new(PaykanObject *obj) {
   return s;
 }
 
-// -- Reference counting ------------------------------------------------------
+// -- Reference counting
 
 void Paykan_retain(PaykanShared *shared) {
   if (shared)
     ++shared->refCount;
 }
 
-// -- Deferred destruction ----------------------------------------------------
+// -- Deferred destruction
 //
 // Destroying an object releases the references it holds, and a release that
 // drops a count to zero destroys that object in turn.  Done recursively, every
@@ -143,7 +137,7 @@ void Paykan_release(PaykanShared *shared) {
   }
 }
 
-// -- Accessor ----------------------------------------------------------------
+// -- Accessor
 
 PaykanObject *PaykanShared_get(PaykanShared *shared) {
   return shared ? shared->object : (PaykanObject *)0;

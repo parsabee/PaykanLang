@@ -3,27 +3,13 @@
 //
 // Paykan runtime — Array type implementation.
 //
-// There are two concrete array variants that share the same PaykanArray struct
-// layout but have different vtables and helper functions:
-//
-//   Primitive arrays  (int / float / bool elements)
-//     constructor : PaykanArray_new(len)
-//     vtable      : PaykanArray_vtable
-//     set         : PaykanArray_set(arr, idx, value)   — plain memcpy
-//     get         : PaykanArray_get(arr, idx)           — plain memcpy
-//     destroy     : PaykanArray_destroy                 — free buffer + self
-//
-//   Object arrays  (class-type elements stored as PaykanShared*)
-//     constructor : PaykanArray_new_obj(len)
-//     vtable      : PaykanArray_obj_vtable
-//     set         : PaykanArray_set_obj(arr, idx, value) — retain new, release
-//     old get         : PaykanArray_get(arr, idx)            — same plain read
-//     destroy     : PaykanArray_destroy_obj              — release all + free
-//     buffer + self
-//
-// Every element slot is exactly 8 bytes wide regardless of element type.
-// CodeGen selects the right constructor/set/destroy based on the static
-// element type known at compile time.
+// Two variants share the PaykanArray layout and differ in their vtable: a
+// primitive array (int / float / bool elements, PaykanArray_new,
+// PaykanArray_vtable) stores raw 8-byte values, an object array
+// (PaykanArray_new_obj, PaykanArray_obj_vtable) stores PaykanShared* that
+// set_obj / push_obj retain and destroy_obj releases.  Reads are the same
+// plain 8-byte copy for both.  The compiler picks the variant from the
+// static element type.
 
 #include "Runtime.h"
 #include "RuntimeInternal.h"
@@ -34,21 +20,8 @@
 
 #define PAYKAN_ELEM_SIZE 8UL
 
-// ============================================================================
-// Forward declarations
-// ============================================================================
+// -- VTables
 
-void PaykanArray_destroy(PaykanObject *self);
-void PaykanArray_destroy_obj(PaykanObject *self);
-PaykanShared *PaykanArray_toString(PaykanObject *self);
-int64_t PaykanArray_equals(PaykanObject *self, PaykanShared *other);
-int64_t PaykanArray_length(PaykanObject *self);
-
-// ============================================================================
-// VTables
-// ============================================================================
-
-// Primitive elements — destroy just frees the buffer.
 PaykanMethod PaykanArray_vtable[PAYKAN_ARRAY_SLOTS] = {
     [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanArray_destroy,
     [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanArray_toString,
@@ -56,7 +29,6 @@ PaykanMethod PaykanArray_vtable[PAYKAN_ARRAY_SLOTS] = {
     [PAYKAN_SLOT_ARRAY_LENGTH] = (PaykanMethod)PaykanArray_length,
 };
 
-// Object elements — destroy releases every PaykanShared* before freeing.
 PaykanMethod PaykanArray_obj_vtable[PAYKAN_ARRAY_SLOTS] = {
     [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanArray_destroy_obj,
     [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanArray_toString,
@@ -64,128 +36,69 @@ PaykanMethod PaykanArray_obj_vtable[PAYKAN_ARRAY_SLOTS] = {
     [PAYKAN_SLOT_ARRAY_LENGTH] = (PaykanMethod)PaykanArray_length,
 };
 
-// ============================================================================
-// Constructors
-// ============================================================================
+// -- Constructors
 
-// Primitive array (int / float / bool): elements are stored as raw 8-byte
-// values; no reference counting.
+/// An array of @p len elements copied from @p data, or zeroed when @p data
+/// is NULL (so every object slot starts as a NULL box).
+static PaykanArray *array_alloc(PaykanMethod *vtable, unsigned long len,
+                                const void *data) {
+  PaykanArray *arr = (PaykanArray *)Paykan_malloc(sizeof(PaykanArray));
+  arr->vtable = vtable;
+  arr->shared = NULL; // not yet boxed (unique-box invariant)
+  arr->len = len;
+  arr->cap = len;
+  arr->data = NULL;
+  if (len > 0) {
+    arr->data = Paykan_malloc(len * PAYKAN_ELEM_SIZE);
+    if (data)
+      memcpy(arr->data, data, len * PAYKAN_ELEM_SIZE);
+    else
+      memset(arr->data, 0, len * PAYKAN_ELEM_SIZE);
+  }
+  return arr;
+}
+
 PaykanArray *PaykanArray_new(unsigned long len) {
-  PaykanArray *arr = (PaykanArray *)Paykan_malloc(sizeof(PaykanArray));
-  arr->vtable = PaykanArray_vtable;
-  arr->shared = NULL; // not yet boxed (unique-box invariant)
-  arr->len = len;
-  arr->cap = len;
-  if (len > 0) {
-    arr->data = Paykan_malloc(len * PAYKAN_ELEM_SIZE);
-    memset(arr->data, 0, len * PAYKAN_ELEM_SIZE);
-  } else {
-    arr->data = NULL;
-  }
-  return arr;
+  return array_alloc(PaykanArray_vtable, len, NULL);
 }
 
-// Primitive array from a compile-time constant data buffer (e.g. a literal).
-// 'data' must point to (len * 8) bytes of packed i64 values.
 PaykanArray *PaykanArray_new_from_data(unsigned long len, const void *data) {
-  PaykanArray *arr = (PaykanArray *)Paykan_malloc(sizeof(PaykanArray));
-  arr->vtable = PaykanArray_vtable;
-  arr->shared = NULL; // not yet boxed (unique-box invariant)
-  arr->len = len;
-  arr->cap = len;
-  if (len > 0) {
-    arr->data = Paykan_malloc(len * PAYKAN_ELEM_SIZE);
-    memcpy(arr->data, data, len * PAYKAN_ELEM_SIZE);
-  } else {
-    arr->data = NULL;
-  }
-  return arr;
+  return array_alloc(PaykanArray_vtable, len, data);
 }
 
-// Object array (class-type elements stored as PaykanShared*): reference
-// counts are managed by PaykanArray_set_obj / PaykanArray_destroy_obj.
 PaykanArray *PaykanArray_new_obj(unsigned long len) {
-  PaykanArray *arr = (PaykanArray *)Paykan_malloc(sizeof(PaykanArray));
-  arr->vtable = PaykanArray_obj_vtable;
-  arr->shared = NULL; // not yet boxed (unique-box invariant)
-  arr->len = len;
-  arr->cap = len;
-  if (len > 0) {
-    arr->data = Paykan_malloc(len * PAYKAN_ELEM_SIZE);
-    // Zero-init so every slot starts as NULL (no accidental release on first
-    // set).
-    memset(arr->data, 0, len * PAYKAN_ELEM_SIZE);
-  } else {
-    arr->data = NULL;
-  }
-  return arr;
+  return array_alloc(PaykanArray_obj_vtable, len, NULL);
 }
 
-// ============================================================================
-// Destructors
-// ============================================================================
+// -- Element access
 
-// Primitive destructor: just free the buffer and the array itself.
-void PaykanArray_destroy(PaykanObject *self) {
-  PaykanArray *arr = (PaykanArray *)self;
-  Paykan_free(arr->data);
-  Paykan_free(arr);
+static void *array_slot(const PaykanArray *arr, unsigned long idx) {
+  return (char *)arr->data + idx * PAYKAN_ELEM_SIZE;
 }
 
-// Object destructor: release every non-null PaykanShared* slot, then free.
-void PaykanArray_destroy_obj(PaykanObject *self) {
-  PaykanArray *arr = (PaykanArray *)self;
-  if (arr->data) {
-    for (unsigned long i = 0; i < arr->len; ++i) {
-      PaykanShared *elem;
-      memcpy(&elem, (char *)arr->data + i * PAYKAN_ELEM_SIZE, PAYKAN_ELEM_SIZE);
-      if (elem)
-        Paykan_release(elem);
-    }
-  }
-  Paykan_free(arr->data);
-  Paykan_free(arr);
-}
-
-// ============================================================================
-// Element access — get (shared by both variants)
-// ============================================================================
-
-// Read an 8-byte slot as a void*.
-// For primitive arrays the caller reinterprets the bits as int64_t or double.
-// For object arrays the caller uses the result as a PaykanShared*.
-void *PaykanArray_get(PaykanArray *arr, unsigned long idx) {
+static void array_check_index(const PaykanArray *arr, unsigned long idx) {
   if (idx >= arr->len) {
     Paykan_runtime_panic("array index %lu out of bounds (len=%lu)", idx,
                          arr->len);
   }
+}
+
+void *PaykanArray_get(PaykanArray *arr, unsigned long idx) {
+  array_check_index(arr, idx);
   void *val;
-  memcpy(&val, (char *)arr->data + idx * PAYKAN_ELEM_SIZE, PAYKAN_ELEM_SIZE);
+  memcpy(&val, array_slot(arr, idx), PAYKAN_ELEM_SIZE);
   return val;
 }
 
-// ============================================================================
-// Element write — two variants
-// ============================================================================
-
-// Primitive set: plain 8-byte store, no reference counting.
 void PaykanArray_set(PaykanArray *arr, unsigned long idx, void *value) {
-  if (idx >= arr->len) {
-    Paykan_runtime_panic("array index %lu out of bounds (len=%lu)", idx,
-                         arr->len);
-  }
-  memcpy((char *)arr->data + idx * PAYKAN_ELEM_SIZE, &value, PAYKAN_ELEM_SIZE);
+  array_check_index(arr, idx);
+  memcpy(array_slot(arr, idx), &value, PAYKAN_ELEM_SIZE);
 }
 
-// Object set: release the old PaykanShared* in the slot (if any), retain the
-// incoming one, then store it.
 void PaykanArray_set_obj(PaykanArray *arr, unsigned long idx,
                          PaykanShared *value) {
-  if (idx >= arr->len) {
-    Paykan_runtime_panic("array index %lu out of bounds (len=%lu)", idx,
-                         arr->len);
-  }
-  void *slot = (char *)arr->data + idx * PAYKAN_ELEM_SIZE;
+  array_check_index(arr, idx);
+  void *slot = array_slot(arr, idx);
   PaykanShared *old;
   memcpy(&old, slot, PAYKAN_ELEM_SIZE);
   if (old)
@@ -195,9 +108,27 @@ void PaykanArray_set_obj(PaykanArray *arr, unsigned long idx,
   memcpy(slot, &value, PAYKAN_ELEM_SIZE);
 }
 
-// ============================================================================
-// Method implementations (shared by both variants)
-// ============================================================================
+// -- Methods
+
+void PaykanArray_destroy(PaykanObject *self) {
+  PaykanArray *arr = (PaykanArray *)self;
+  Paykan_free(arr->data);
+  Paykan_free(arr);
+}
+
+void PaykanArray_destroy_obj(PaykanObject *self) {
+  PaykanArray *arr = (PaykanArray *)self;
+  if (arr->data) {
+    for (unsigned long i = 0; i < arr->len; ++i) {
+      PaykanShared *elem;
+      memcpy(&elem, array_slot(arr, i), PAYKAN_ELEM_SIZE);
+      if (elem)
+        Paykan_release(elem);
+    }
+  }
+  Paykan_free(arr->data);
+  Paykan_free(arr);
+}
 
 PaykanShared *PaykanArray_toString(PaykanObject *self) {
   PaykanArray *arr = (PaykanArray *)self;
@@ -208,8 +139,7 @@ PaykanShared *PaykanArray_toString(PaykanObject *self) {
 }
 
 int64_t PaykanArray_equals(PaykanObject *self, PaykanShared *other) {
-  // Identity equality — two arrays are equal only if they are the same object.
-  // `other` arrives as a consumed PaykanShared box (see RuntimeInternal.h).
+  // Identity: two arrays are equal only when they are the same object.
   PaykanObject *o = Paykan_equals_unbox_other(other);
   int64_t result = o && self == o;
   return Paykan_equals_consume_other(other, result);
@@ -219,9 +149,7 @@ int64_t PaykanArray_length(PaykanObject *self) {
   return (int64_t)((PaykanArray *)self)->len;
 }
 
-// ============================================================================
-// push / pop — dynamic resize operations
-// ============================================================================
+// -- push / pop
 //
 // Capacity policy (with hysteresis, so a push/pop pair never reallocates
 // twice; see issue #95):
@@ -244,7 +172,6 @@ int64_t PaykanArray_length(PaykanObject *self) {
 // [0, len).  So freshly grown slots are left uninitialised and pop does not
 // clear the slot it vacates.  (The constructors still zero [0, len) because
 // those slots are live and destroy_obj / set_obj read them.)
-// ============================================================================
 
 #define PAYKAN_ARRAY_MIN_CAP 8UL
 
@@ -256,17 +183,17 @@ static void array_resize(PaykanArray *arr, unsigned long newCap) {
   arr->cap = newCap;
 }
 
-// Ensure there is room for at least one more element.
+/// Make room for one more element.
 static void array_grow(PaykanArray *arr) {
   if (arr->len < arr->cap)
-    return; // still room
+    return;
   unsigned long newCap = arr->cap * 2;
   if (newCap < PAYKAN_ARRAY_MIN_CAP)
     newCap = PAYKAN_ARRAY_MIN_CAP;
   array_resize(arr, newCap);
 }
 
-// Halve the allocation once len has fallen to a quarter of cap.
+/// Halve the allocation once len has fallen to a quarter of cap.
 static void array_maybe_shrink(PaykanArray *arr) {
   if (arr->cap <= PAYKAN_ARRAY_MIN_CAP || arr->len > arr->cap / 4)
     return;
@@ -278,18 +205,14 @@ static void array_maybe_shrink(PaykanArray *arr) {
 
 void PaykanArray_push(PaykanArray *arr, void *value) {
   array_grow(arr);
-  memcpy((char *)arr->data + arr->len * PAYKAN_ELEM_SIZE, &value,
-         PAYKAN_ELEM_SIZE);
+  memcpy(array_slot(arr, arr->len), &value, PAYKAN_ELEM_SIZE);
   arr->len += 1;
 }
 
 void PaykanArray_push_obj(PaykanArray *arr, PaykanShared *value) {
-  array_grow(arr);
   if (value)
     Paykan_retain(value);
-  memcpy((char *)arr->data + arr->len * PAYKAN_ELEM_SIZE, &value,
-         PAYKAN_ELEM_SIZE);
-  arr->len += 1;
+  PaykanArray_push(arr, value);
 }
 
 void *PaykanArray_pop(PaykanArray *arr) {
@@ -298,20 +221,11 @@ void *PaykanArray_pop(PaykanArray *arr) {
   }
   arr->len -= 1;
   void *val;
-  memcpy(&val, (char *)arr->data + arr->len * PAYKAN_ELEM_SIZE,
-         PAYKAN_ELEM_SIZE);
+  memcpy(&val, array_slot(arr, arr->len), PAYKAN_ELEM_SIZE);
   array_maybe_shrink(arr);
   return val;
 }
 
 PaykanShared *PaykanArray_pop_obj(PaykanArray *arr) {
-  if (arr->len == 0) {
-    Paykan_runtime_panic("pop on empty array");
-  }
-  arr->len -= 1;
-  PaykanShared *val;
-  memcpy(&val, (char *)arr->data + arr->len * PAYKAN_ELEM_SIZE,
-         PAYKAN_ELEM_SIZE);
-  array_maybe_shrink(arr);
-  return val;
+  return (PaykanShared *)PaykanArray_pop(arr);
 }
