@@ -122,7 +122,7 @@ public:
   }
   Type localType(LocalId id) const { return Fn->Locals[id].Ty; }
 
-  // -- Raw statement emission ------------------------------------------------
+  // -- Raw statement emission
 
   /// Construct a statement of alternative @p T in place at the end of the
   /// current block.  Building the variant in place (instead of
@@ -156,7 +156,7 @@ public:
   void emitRetVoid() { append<Return>(); }
   void emitUnreachable() { append<Unreachable>(); }
 
-  // -- Structured control flow ------------------------------------------------
+  // -- Structured control flow
   //
   //   If *s = openIf(cond, /*withElse=*/true);
   //   enter(*s->Then); ... leave();
@@ -200,7 +200,6 @@ public:
   }
 
   // -- Instruction helpers
-  // ------------------------------------------------------
 
   Val binary(Opcode op, const Val &a, const Val &b, std::string name = "") {
     Instr i;

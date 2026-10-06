@@ -250,11 +250,7 @@ private:
 
   void printArgs(const std::vector<Operand> &args, size_t from) {
     OS << '(';
-    for (size_t i = from; i < args.size(); ++i) {
-      if (i > from)
-        OS << ", ";
-      printOperand(args[i]);
-    }
+    printOperandList(args, from);
     OS << ')';
   }
 

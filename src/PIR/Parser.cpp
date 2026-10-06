@@ -23,7 +23,7 @@ std::string ParseError::str() const {
 
 namespace {
 
-// -- Lexer -------------------------------------------------------------------
+// -- Lexer
 
 enum class Tok {
   End,
@@ -355,7 +355,7 @@ private:
   }
 };
 
-// -- Parser ------------------------------------------------------------------
+// -- Parser
 
 bool parseTypeName(std::string_view s, Type &out) {
   static const std::pair<const char *, Type> kTypes[] = {
@@ -560,7 +560,7 @@ private:
     return parseType(sig.Ret);
   }
 
-  // -- Module items ----------------------------------------------------------
+  // -- Module items
 
   bool parseModule(Module &m) {
     if (!expectWord("module"))
@@ -731,7 +731,7 @@ private:
     return true;
   }
 
-  // -- Functions -------------------------------------------------------------
+  // -- Functions
 
   /// `%name.N` -> (name, N); `%N` -> ("", N); `%name` -> (name, 0 = assign).
   static void splitValueRef(const std::string &text, std::string &name,
@@ -1251,7 +1251,7 @@ private:
     return true;
   }
 
-  // -- Deferred result types -------------------------------------------------
+  // -- Deferred result types
 
   /// The type of an operand inside @p f (values are looked up in the
   /// function; constants carry their own type; a symbol is a `ptr`, except an

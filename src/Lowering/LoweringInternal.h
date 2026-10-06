@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// Internal declarations of the AST -> PIR lowering.  The structure mirrors
-// the former LLVM CodeGen (src/CodeGen) deliberately: the ownership rules it
-// encoded are ported here function by function, and the names are kept so the
-// two can be compared.  See docs/pir.md §7 for the rules themselves.
+// Internal declarations of the AST -> PIR lowering, the single home of the
+// ownership rules (docs/pir.md §7): what every expression's value is
+// (borrowed or owned), where retains, releases and string-temporary
+// teardowns go, and how scopes are cleaned up.
 
 #pragma once
 
@@ -28,10 +28,10 @@ namespace paykan::lowering {
 
 using pir::Val;
 
-/// Ownership classification of an emitted expression value (see the former
-/// codegen::ExprValue): Borrowed values are left alone by the consumer, Owned
-/// ones are torn down by it (a tracked raw string temporary with
-/// PaykanString_destroy, a fresh +1 box with Paykan_release).
+/// Ownership classification of an emitted expression value: Borrowed values
+/// are left alone by the consumer, Owned ones are torn down by it (a tracked
+/// raw string temporary with PaykanString_destroy, a fresh +1 box with
+/// Paykan_release).
 struct ExprValue {
   enum class Ownership { Borrowed, Owned };
   Val V;
@@ -95,7 +95,6 @@ public:
   pir::Module takeModule();
 
   // -- Visitor overrides
-  // --------------------------------------------------------
 #define LW_VISIT(Kind, Name, Cast) Val visit##Name(ast::Cast *node);
   PAYKAN_STMT_NODES(LW_VISIT)
   PAYKAN_DECL_NODES(LW_VISIT)
@@ -137,7 +136,6 @@ private:
   pir::Builder B;
 
   // -- Scoped symbol table (name -> local slot)
-  // ---------------------------------
 
   struct Scope {
     Scope *Parent = nullptr;
@@ -185,7 +183,6 @@ private:
   std::vector<LoopContext> LoopStack;
 
   // -- Builtin function table (Paykan name -> runtime symbol)
-  // --------------------
 
   struct FunctionInfo {
     const char *RuntimeName;
@@ -199,7 +196,6 @@ private:
   void reportInternalError(const std::string &msg);
 
   // -- Module-level interning
-  // -------------------------------------------------------
 
   std::unordered_map<std::string, std::string>
       InternedStrings; // content -> @sym
@@ -210,7 +206,6 @@ private:
   Val internString(const std::string &content);
 
   // -- Declarations
-  // ---------------------------------------------------------------
 
   /// Declare a runtime function by its C symbol (signature from the ABI
   /// table) and return the declaration, named `$rt.<symbol>` in PIR.
@@ -242,7 +237,6 @@ private:
                   std::string resultName = "");
 
   // -- RAII helpers
-  // ------------------------------------------------------------------
 
   struct ScopeGuard {
     ModuleLowering &L;
@@ -267,7 +261,6 @@ private:
   };
 
   // -- Type helpers
-  // ---------------------------------------------------------------------
 
   pir::Type toPIRType(ast::Type *ty);
   bool isObjectElementType(ast::Type *elemTy) const;
@@ -276,8 +269,7 @@ private:
   pir::Signature functionSignature(ast::FuncDecl *node);
   pir::Function *declareFunctionPrototype(ast::FuncDecl *node);
 
-  // -- Ownership predicates (ported verbatim)
-  // ---------------------------------------------
+  // -- Ownership predicates
 
   bool exprAlreadyShared(ast::Expr *expr) const;
   bool exprProducesFreshBox(ast::Expr *expr) const;
@@ -287,6 +279,21 @@ private:
   Val promoteIntToFloat(const Val &v, ast::Type *targetTy);
   /// bool -> i64 when the destination is i64 (runtime ABI, user i64 params).
   Val coerceBoolToI64(const Val &v, pir::Type dest);
+  /// @p v as the PIR type @p dest of the slot it flows into: int -> float
+  /// promotion and bool -> i64, the conversions Sema's assignability allows.
+  Val coerceTo(const Val &v, pir::Type dest);
+
+  /// The receiver of a method call, field access, subscript or tuple index:
+  /// its emitted value with its ownership (a call-rooted receiver is a fresh
+  /// +1 box to tear down after the use) and the raw object it unwraps to.
+  struct Receiver {
+    ExprValue Owned;
+    Val Raw;
+    explicit operator bool() const { return static_cast<bool>(Raw); }
+  };
+  /// Emit @p expr as a receiver; the unwrapped object is named @p name.
+  /// Raw is void when the expression failed.
+  Receiver emitReceiver(ast::Expr *expr, const std::string &name = "recv.obj");
 
   void emitRetain(const Val &shared) { B.retain(shared); }
   void emitRelease(const Val &shared) { B.release(shared); }
@@ -301,7 +308,6 @@ private:
   bool isBorrowedObjectElement(ast::Expr *expr) const;
 
   // -- String temporaries
-  // ----------------------------------------------------------------
 
   std::unordered_set<pir::ValueId> OwnedStringTemps;
   void trackStringTemp(const Val &v);
@@ -311,7 +317,6 @@ private:
   Val wrapStringLiteral(const Val &rawStr, size_t len);
 
   // -- Conversions (#64, #88), by the spelled callee Sema rebinds them to
-  // -------------------------------------------------------------------------
 
   /// A parse of a Str (`int<Str>`, `Int<Str>`, `bool<Str>`, ...): returns
   /// a fresh +1 box, or None.
@@ -323,7 +328,6 @@ private:
   static const char *conversionUnboxer(const std::string &callee);
 
   // -- Optionals
-  // ----------------------------------------------------------------------------
 
   static bool isNoneForOptional(ast::Expr *expr);
   /// True when Sema marked @p expr (a primitive) for boxing into the
@@ -342,7 +346,6 @@ private:
   Val emitOptionalEquality(ast::BinaryExpr *node);
 
   // -- Statements
-  // -------------------------------------------------------------------------------
 
   void emitScopeCleanup(Scope &scope);
   void emitAllScopesCleanup();
@@ -363,7 +366,6 @@ private:
   ast::MatchArm *findWildcardArm(ast::MatchStmt *node);
 
   // -- Tuples
-  // -----------------------------------------------------------------------------------
 
   unsigned char tupleElementKind(ast::Type *elemTy) const;
   Val emitTupleKindsGlobal(ast::TupleType *tt);
@@ -371,7 +373,6 @@ private:
   Val fromSlotBits(const Val &bits, ast::Type *elemTy);
 
   // -- Expressions
-  // ----------------------------------------------------------------------------------
 
   class ExprEmitter : public ast::ExprVisitor<ExprEmitter, Val> {
   public:
@@ -402,7 +403,6 @@ private:
   Val emitExpr(ast::Expr *expr);
 
   // -- Classes (LoweringClass.cpp)
-  // ----------------------------------------------------------------
 
   /// The pir::Class for @p ct (declared locally or as extern), creating it.
   pir::Class *getOrCreateClass(ast::ClassType *ct);

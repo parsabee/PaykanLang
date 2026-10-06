@@ -244,7 +244,7 @@ private:
     }
   }
 
-  // -- Function bodies -------------------------------------------------------
+  // -- Function bodies
 
   class FunctionVerifier {
   public:
