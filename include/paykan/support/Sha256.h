@@ -80,7 +80,7 @@ private:
         0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
         0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
     uint32_t w[64];
-    for (int i = 0; i < 16; ++i)
+    for (size_t i = 0; i < 16; ++i)
       w[i] = (uint32_t(p[i * 4]) << 24) | (uint32_t(p[i * 4 + 1]) << 16) |
              (uint32_t(p[i * 4 + 2]) << 8) | uint32_t(p[i * 4 + 3]);
     for (int i = 16; i < 64; ++i) {

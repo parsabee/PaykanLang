@@ -295,6 +295,7 @@ void Writer::add(uint32_t kind, uint32_t flags, std::vector<uint8_t> bytes) {
 
 StatusOr<std::vector<uint8_t>> Writer::finish() const {
   std::vector<const Pending *> order;
+  order.reserve(Pendings.size());
   for (const Pending &p : Pendings)
     order.push_back(&p);
   // Stable: instances of one kind keep their insertion order.

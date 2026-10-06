@@ -72,8 +72,9 @@ const char *tagName(uint64_t tag) {
     return "opt_pipeline";
   case TAttributes:
     return "attributes";
+  default:
+    return nullptr;
   }
-  return nullptr;
 }
 
 /// Appends one record: tag, length, the bytes @p body wrote.

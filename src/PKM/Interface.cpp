@@ -55,6 +55,7 @@ struct PartBytes {
 template <typename T>
 std::vector<const T *> sortedByName(const std::vector<T> &v) {
   std::vector<const T *> out;
+  out.reserve(v.size());
   for (const T &x : v)
     out.push_back(&x);
   std::stable_sort(out.begin(), out.end(),
@@ -79,6 +80,7 @@ std::vector<uint8_t> writeInterface(const Interface &iface) {
   // MODS: this module, then dependencies sorted by canonical name.
   ByteWriter mods;
   std::vector<const ModuleRef *> deps;
+  deps.reserve(iface.Mods.size());
   for (const ModuleRef &m : iface.Mods)
     deps.push_back(&m);
   std::stable_sort(deps.begin(), deps.end(),
@@ -226,7 +228,7 @@ private:
     if (!detail::readCount(r, n, 2))
       return failAt(part, r);
     for (uint64_t i = 0; i < n; ++i) {
-      uint64_t tag, len;
+      uint64_t tag = 0, len = 0;
       if (!r.uleb(tag) || !r.uleb(len) || len > r.remaining())
         return failAt(part, r);
       ByteReader v = r.sub(static_cast<size_t>(len));

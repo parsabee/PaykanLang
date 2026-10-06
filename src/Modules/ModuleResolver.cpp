@@ -211,18 +211,29 @@ ModuleResolver::resolvePrebuilt(const std::string &canonical,
       continue;
     Resolution r = load(canonical, c, pkm::Policy::Prebuilt, {});
     std::string shown = relativeToRoot(c);
+    std::string line = "module ";
+    line += canonical;
+    line += ": prebuilt ";
+    line += shown;
+    line += ' ';
     if (r.Outcome == Resolution::Kind::Loaded) {
-      log("module " + canonical + ": prebuilt " + shown + " usable");
+      log(line + "usable");
       return r;
     }
     if (r.Outcome == Resolution::Kind::NeedDependency)
       return r;
     // The first prebuilt file found decides: a rejected one is an error,
     // not a reason to look further (§8.2).
-    log("module " + canonical + ": prebuilt " + shown + " " + r.Message);
+    log(line + r.Message);
     failed(canonical);
-    r.Message = "module '" + canonical + "' (" + shown + ") " + r.Message +
-                ". Rebuild it from source.";
+    std::string msg = "module '";
+    msg += canonical;
+    msg += "' (";
+    msg += shown;
+    msg += ") ";
+    msg += r.Message;
+    msg += ". Rebuild it from source.";
+    r.Message = std::move(msg);
     return r;
   }
   failed(canonical);
@@ -390,14 +401,17 @@ ModuleResolver::loadCode(const std::string &canonical) const {
   const Entry &e = *it->second;
   std::string shown =
       "module '" + canonical + "' (" + displayPath(canonical) + ")";
+  if (!e.File)
+    return Status::error(shown + ": no module file is open");
   StatusOr<pir::Module> mod =
       pir::binary::decode(e.File->section(pkm::Kind::Code));
   if (!mod)
     return Status::error(shown +
                          ": CODE does not decode: " + mod.status().message());
-  if ((*mod).Name != canonical)
-    return Status::error(shown + ": CODE names module '" + (*mod).Name + "'");
-  if (auto errors = pir::verify(*mod); !errors.empty())
+  const pir::Module &decoded = mod.value();
+  if (decoded.Name != canonical)
+    return Status::error(shown + ": CODE names module '" + decoded.Name + "'");
+  if (auto errors = pir::verify(decoded); !errors.empty())
     return Status::error(shown + ": CODE does not verify:\n" +
                          pir::formatErrors(errors));
   return mod;

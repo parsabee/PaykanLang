@@ -206,7 +206,7 @@ public:
   }
   /// `uleb` length + bytes, into a string (UTF-8 is not validated here).
   bool str(std::string &out, uint64_t maxLen = UINT32_MAX) {
-    uint64_t n;
+    uint64_t n = 0;
     if (!uleb(n, maxLen))
       return false;
     std::span<const uint8_t> b;
@@ -219,6 +219,7 @@ public:
   /// before any allocation when the remaining bytes cannot hold them.
   bool count(uint64_t &n, size_t minBytesPerElem = 1) {
     size_t start = Pos;
+    n = 0;
     if (!uleb(n))
       return false;
     if (minBytesPerElem && n > remaining() / minBytesPerElem)
