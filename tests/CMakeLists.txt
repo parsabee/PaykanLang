@@ -196,6 +196,23 @@ target_link_libraries(pir_tests
 add_test(NAME PIRTests COMMAND pir_tests)
 endif()
 
+# --- .pkm module file tests: container, manifest, interface, dump (pkm) ------
+paykan_test_suite(pkm PAYKAN_TEST_SUITE_pkm)
+if(PAYKAN_TEST_SUITE_pkm)
+add_executable(pkm_tests
+    PKM/ContainerTests.cpp
+    PKM/ManifestTests.cpp
+    PKM/InterfaceTests.cpp
+    PKM/DumpTests.cpp
+)
+target_link_libraries(pkm_tests
+    PRIVATE gtest_main
+            paykan_pkm
+            paykan_compile_options
+)
+add_test(NAME PKMTests COMMAND pkm_tests)
+endif()
+
 # --- Lowering tests (AST -> PIR, checked as printed PIR; PIR text round trip
 # --- over the samples corpus) (lowering) -------------------------------------
 paykan_test_suite(lowering PAYKAN_TEST_SUITE_lowering)
