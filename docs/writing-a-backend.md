@@ -427,9 +427,9 @@ PaykanLang version it was **built with**, and each release carries an explicit
   ```text
   $ paykan --list-backends
   c (default)
-  mine (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.0 accepts 0.1.0) [/home/me/.paykan/plugins/0.1.0/libmine.so]
+  mine (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.1 accepts 0.1.1, 0.1.0) [/home/me/.paykan/plugins/0.1.1/libmine.so]
   $ paykan --backend=mine program.pkn
-  paykan: cannot use backend 'mine' (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.0 accepts 0.1.0) [/home/me/.paykan/plugins/0.1.0/libmine.so]
+  paykan: cannot use backend 'mine' (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.1 accepts 0.1.1, 0.1.0) [/home/me/.paykan/plugins/0.1.1/libmine.so]
   $ echo $?
   2
   ```
@@ -445,8 +445,8 @@ PaykanLang version it was **built with**, and each release carries an explicit
 
   ```text
   Paykan backend plugin 'paykan_backend_mine' is incompatible: built with
-  PaykanLang 0.0.9; the installed PaykanLang 0.1.0 (<prefix>/lib/cmake/Paykan)
-  accepts 0.1.0
+  PaykanLang 0.0.9; the installed PaykanLang 0.1.1 (<prefix>/lib/cmake/Paykan)
+  accepts 0.1.1, 0.1.0
   ```
 
   That version is the installation's own (`PAYKAN_TOOLCHAIN_VERSION`) unless

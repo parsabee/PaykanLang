@@ -83,8 +83,13 @@ set(PAYKAN_PLUGIN_INSTALL_DIR "@PACKAGE_PAYKAN_CONFIG_PLUGIN_INSTALL_DIR@")
 set(PAYKAN_EXECUTABLE "@PACKAGE_PAYKAN_CONFIG_EXECUTABLE@")
 
 if(PAYKAN_NEEDS_LLVM)
-    # The llvm backend's libraries reference LLVM's imported targets.
-    find_dependency(LLVM CONFIG)
+    # The llvm backend's libraries reference LLVM's libraries.  Only a
+    # consumer that links them (paykan_add_driver with the llvm backend)
+    # needs LLVM, so it is looked for, not required: a backend or frontend
+    # plugin built against this package (Paykan::plugin_api) builds without
+    # LLVM installed.  Pass -DLLVM_DIR=<llvm>/lib/cmake/llvm to link the
+    # llvm backend into a driver.
+    find_package(LLVM CONFIG QUIET)
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/PaykanTargets.cmake")

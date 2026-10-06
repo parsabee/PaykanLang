@@ -46,6 +46,7 @@ endif()
 set(PAYKAN_PLUGIN_COMPATIBLE_VERSIONS
     "${PAYKAN_VERSION}"
     # Older versions this release still accepts go here, one per line.
+    "0.1.0"   # no plugin interface changed in 0.1.1
 )
 
 file(STRINGS "${PROJECT_SOURCE_DIR}/include/paykan/plugin_api.h" _paykan_api_line

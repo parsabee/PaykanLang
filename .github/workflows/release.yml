@@ -54,29 +54,33 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ninja-build dpkg-dev
 
       # Only paykan and the runtime are shipped: no test suite, so no GoogleTest.
-      # The release ships the core (#27, #123): the recursive-descent frontend
-      # and the c backend, which need only a C compiler at run time.  The
-      # opt-in LLVM backend is not in the tarballs.  The lists are the
-      # defaults, spelled out so the shipped configuration stays explicit.
-      - name: Configure (Release, core)
+      # The release ships the recursive-descent frontend and both backends:
+      # c (the default, which needs only a C compiler at run time) and llvm
+      # (--backend=llvm: the ORC JIT for `run`, native objects for `build`).
+      # LLVM is downloaded at configure time (cmake/LLVMSetup.cmake) and
+      # linked statically into paykan, so the installed paykan needs no LLVM.
+      - name: Configure (Release, recursive-descent + c + llvm)
         run: >-
           cmake -B build -DCMAKE_BUILD_TYPE=Release -G "${{ matrix.generator }}"
           -DPAYKAN_BUILD_TESTS=OFF
-          -DPAYKAN_FRONTENDS=recursive-descent -DPAYKAN_BACKENDS=c
+          -DPAYKAN_FRONTENDS=recursive-descent "-DPAYKAN_BACKENDS=llvm;c"
 
       - name: Build
         run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)" --target paykan paykan_runtime
 
       # Sanity-check the release binary actually runs before we publish it.
-      - name: Smoke test (--version + C-backend run and build)
+      - name: Smoke test (--version + run and build on both backends)
         run: |
           set -euo pipefail
           ./build/bin/paykan --version
           ./build/bin/paykan --list-backends | grep '^c (default)'
+          ./build/bin/paykan --list-backends | grep '^llvm'
           printf 'fn main() -> int {\n  println("Hello from release CI!");\n  return 0;\n}\n' > /tmp/hello.pkn
-          ./build/bin/paykan /tmp/hello.pkn | grep -Fx "Hello from release CI!"
-          ./build/bin/paykan -o /tmp/hello build /tmp/hello.pkn
-          /tmp/hello | grep -Fx "Hello from release CI!"
+          for be in c llvm; do
+            ./build/bin/paykan --backend="${be}" /tmp/hello.pkn | grep -Fx "Hello from release CI!"
+            ./build/bin/paykan --backend="${be}" -o "/tmp/hello-${be}" build /tmp/hello.pkn
+            "/tmp/hello-${be}" | grep -Fx "Hello from release CI!"
+          done
 
       # The tag must name the version the tree builds: CMakeLists.txt
       # (project() VERSION plus PAYKAN_VERSION_PRERELEASE) is the only place
@@ -114,7 +118,7 @@ jobs:
           shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
           echo "archive=${ARCHIVE}" >> "${GITHUB_OUTPUT}"
 
-      # The Debian/Ubuntu package (cmake/Packaging.cmake), from the same core
+      # The Debian/Ubuntu package (cmake/Packaging.cmake), from the same
       # Release build: paykanlang_<version>_<arch>.deb, installing under /usr.
       - name: Build the Debian package (Linux)
         if: runner.os == 'Linux'
@@ -143,9 +147,11 @@ jobs:
           test "$(command -v paykan)" = /usr/bin/paykan
           paykan --version
           printf 'fn main() -> int {\n  println("Hello from the .deb!");\n  return 0;\n}\n' > hello.pkn
-          paykan run hello.pkn | grep -Fx "Hello from the .deb!"
-          paykan build -o hello hello.pkn
-          ./hello | grep -Fx "Hello from the .deb!"
+          for be in c llvm; do
+            paykan --backend="${be}" run hello.pkn | grep -Fx "Hello from the .deb!"
+            paykan --backend="${be}" build -o "hello-${be}" hello.pkn
+            "./hello-${be}" | grep -Fx "Hello from the .deb!"
+          done
           cmake -S "${GITHUB_WORKSPACE}/src/Backends/PrintPIR" -B print-pir -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build print-pir
           paykan --plugin=print-pir/libpaykan_backend_print_pir.so --list-backends | grep '^print-pir'
