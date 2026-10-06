@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-06
+
+A patch release of 0.1.0.  It accepts plugins built with 0.1.1 and 0.1.0:
+no plugin interface changed.
+
+### Added
+
+- The release tarballs (Linux x86-64, macOS arm64) and the Debian package
+  ship the llvm backend next to the c backend: `--backend=llvm` runs
+  programs with the ORC JIT and builds them as native objects.  LLVM is
+  linked into `paykan` statically, so nothing else is needed at run time.
+  The c backend stays the default.  The Homebrew formula still builds the
+  core (c only).
+
+### Fixed
+
+- The llvm backend builds with GCC 15 (#163): libstdc++ 15 warns on LLVM
+  17's `<ciso646>` include in C++20, which `-Werror` made fatal.  The
+  targets that include LLVM headers no longer turn warnings into errors;
+  the move to LLVM 20 (#164) removes the warning itself.
+- `find_package(Paykan)` no longer requires LLVM when the installed
+  PaykanLang has the llvm backend: only a driver that links the llvm
+  backend (`paykan_add_driver`) needs it, so plugins build against the
+  Debian package without LLVM installed.
+- The Homebrew formula has the real checksum of the release's source
+  archive (#161).
+
 ### Changed
 
 - The tests are no longer built by default: a plain `cmake -B build` builds
@@ -649,5 +676,6 @@ statically-typed, object-oriented language that compiled to LLVM IR and was
 - The `destroy()` destructor is compiler-generated and final: user classes cannot
   override it, and direct calls are rejected at compile time.
 
-[Unreleased]: https://github.com/parsabee/PaykanLang/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/parsabee/PaykanLang/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/parsabee/PaykanLang/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/parsabee/PaykanLang/releases/tag/v0.1.0

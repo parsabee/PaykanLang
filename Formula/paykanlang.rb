@@ -12,8 +12,8 @@
 # plugin_api.h -> include/paykan/, and the (empty) system plugin directory
 # lib/paykan/plugins/<version>/.
 #
-# It builds the core, like the release tarballs (#27, #123): the
-# recursive-descent frontend and the c backend, which need only a C++20
+# It builds the core (#27, #123): the recursive-descent frontend and the c
+# backend, which need only a C++20
 # compiler to build and a C compiler at run time. Nothing is downloaded: the
 # opt-in LLVM backend is not enabled, and the test suite (and so GoogleTest)
 # is not built (-DPAYKAN_BUILD_TESTS=OFF). Backend plugins build against this

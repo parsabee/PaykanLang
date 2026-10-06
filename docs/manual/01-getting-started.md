@@ -59,8 +59,9 @@ $ brew install parsabee/paykanlang/paykanlang
 $ paykan --version
 ```
 
-The release tarballs and the Homebrew formula contain the core compiler: the default
-frontend and the C backend.
+The release tarballs and the Debian package contain both backends: the C backend (the
+default) and the LLVM backend, selected with `--backend=llvm`. The Homebrew formula
+builds the core compiler: the default frontend and the C backend.
 
 ### From source
 
