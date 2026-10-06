@@ -15,7 +15,7 @@ namespace sema {
 // Static module cache.
 StringMap<Sema::ModuleInfo> Sema::ModuleCache;
 
-// -- Scope / ScopeGuard ------------------------------------------------------
+// -- Scope / ScopeGuard
 
 Sema::Scope::Scope(Scope *parent) : Parent(parent) {}
 
@@ -70,7 +70,7 @@ Sema::ScopeGuard::ScopeGuard(Sema &s)
 
 Sema::ScopeGuard::~ScopeGuard() { S.CurrentScope = ScopeObj->Parent; }
 
-// -- Flow-sensitive move tracking (see Sema.h for the rule) ------------------
+// -- Flow-sensitive move tracking (see Sema.h for the rule)
 
 Sema::MovedState Sema::saveMovedState() const {
   MovedState st;
@@ -125,7 +125,7 @@ void Sema::MovedBranchMerger::finish(bool coversAllPaths) {
   S.restoreMovedState(Merged);
 }
 
-// -- Helpers -----------------------------------------------------------------
+// -- Helpers
 
 Sema::Sema(ast::ASTContext &ctx, DiagEngine &diags,
            const std::string &projectRoot, const std::string &frontendName)
@@ -213,12 +213,6 @@ void Sema::warning(ast::SourceLocation loc, const std::string &msg) {
 
 void Sema::note(ast::SourceLocation loc, const std::string &msg) {
   Diags.note(loc, msg);
-}
-
-std::string Sema::typeName(ast::Type *ty) {
-  // Thin forwarder kept for the many diagnostic call sites; the single shared
-  // implementation lives with the type definitions (ASTContext.cpp).
-  return ast::typeName(ty);
 }
 
 // Type equality.  Every type Sema compares is canonical -- builtin singletons,
@@ -352,7 +346,7 @@ bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
   // `None` into an optional slot: statically the literal is `Obj` (a design
   // decision — see docs/language/10-optionals.md), but in this position it
   // denotes the absent `T?` value.  Record that contextual type on the
-  // literal so CodeGen emits a null box rather than boxing the `None`
+  // literal so the lowering emits a null box rather than boxing the `None`
   // singleton, which is how a present `Obj` value spells None.
   if (ast::isa<ast::NoneLiteral>(src) && ast::isa<ast::OptionalType>(dst)) {
     src->setResolvedType(dst);
@@ -371,8 +365,8 @@ bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
     return true;
   }
   // `T?` -> `Obj` (the only non-optional destination an optional may flow
-  // into): CodeGen must turn a null box into the boxed `None` singleton so the
-  // receiving `Obj` slot never holds a NULL box, which no `Obj` consumer
+  // into): the lowering must turn a null box into the boxed `None` singleton so
+  // the receiving `Obj` slot never holds a NULL box, which no `Obj` consumer
   // (method dispatch, `match`) expects today.
   if (ast::isa<ast::OptionalType>(srcTy) && !ast::isa<ast::OptionalType>(dst))
     src->setCoercedType(dst);
@@ -485,14 +479,14 @@ void Sema::adoptArrayLiteralType(ast::Type *dst, ast::Expr *src) {
     return;
   // An empty literal carries the ArrayType(void) sentinel from
   // visitArrayLiteralExpr; only the destination knows the element type, and
-  // CodeGen needs it to pick an object-element array (whose destructor
+  // the lowering needs it to pick an object-element array (whose destructor
   // releases the elements pushed into it later) over a primitive one.
   if (lit->isEmpty()) {
     lit->setResolvedType(dstAT);
     return;
   }
   // `[1, 2]` into a `float[]` slot: the literal unified to `int[]`, which
-  // isAssignable accepts (int -> float), but CodeGen stores whatever the
+  // isAssignable accepts (int -> float), but the lowering stores whatever the
   // literal's own element type says.  Retype it so the elements are promoted
   // to doubles (emitPrimitiveArrayLiteral); left as `int[]`, the integer bit
   // patterns read back as denormal floats.
@@ -517,6 +511,18 @@ bool Sema::diagnoseOptionalNarrowing(ast::SourceLocation loc, ast::Type *dst,
   if (!isAssignable(dst, srcOT->getInnerType()))
     return false;
   errorOptionalUnwrap(loc, srcOT);
+  return true;
+}
+
+bool Sema::diagnoseEmptyArrayLiteral(ast::SourceLocation loc, ast::Type *dst,
+                                     ast::Type *srcTy) {
+  auto *at = ast::dyn_cast<ast::ArrayType>(srcTy);
+  if (!at || at->getElementType() != Ctx.getVoidTy())
+    return false;
+  if (dst && ast::isa<ast::ArrayType>(ast::stripOptional(dst)))
+    return false;
+  error(loc, "cannot infer element type of empty array literal '[]'; "
+             "add an explicit type annotation");
   return true;
 }
 
@@ -706,7 +712,7 @@ ast::Type *Sema::resolveExprType(ast::Expr *expr, ast::Type *expected) {
   return EC.visitExpecting(expr, expected);
 }
 
-// -- ExprVisitor -------------------------------------------------------------
+// -- ExprVisitor
 
 ast::Type *Sema::ExprChecker::visitIntegerLiteral(ast::IntegerLiteral *) {
   return S.Ctx.getIntTy();
@@ -875,15 +881,15 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   if (!lhsTy || !rhsTy)
     return nullptr;
 
-  // Record operand types so CodeGen can distinguish reference-typed equality
-  // (lowered to a virtual `equals` call) from primitive/enum equality without
-  // re-deriving the type.
+  // Record operand types so the lowering can distinguish reference-typed
+  // equality (lowered to a virtual `equals` call) from primitive/enum equality
+  // without re-deriving the type.
   node->getLHS()->setResolvedType(lhsTy);
   node->getRHS()->setResolvedType(rhsTy);
 
   // Optional operands (issue #5).  The only operators defined on a
   // `T?` are == and !=, in exactly two forms:
-  //   x == None / None != x   — a null check on the box (CodeGen never
+  //   x == None / None != x   — a null check on the box (the lowering never
   //                             dispatches `equals` for this form);
   //   a == b, both optional   — both None: equal; one None: not equal;
   //                             otherwise the usual `equals` dispatch.
@@ -1017,7 +1023,7 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     argTypes.push_back(ty);
   }
 
-  // -- __super__(args): superclass initializer call -------------------------
+  // -- __super__(args): superclass initializer call
   if (node->getCalleeName() == names::kMethodSuper) {
     if (!S.CurrentClassCtx ||
         S.CurrentClassCtx->MethodName != names::kMethodInit) {
@@ -1066,17 +1072,17 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     return S.Ctx.getVoidTy();
   }
 
-  // -- Conversion constructor: Target<Source>(value) (#64) -----------------
+  // -- Conversion constructor: Target<Source>(value) (#64)
   if (node->hasTypeArgs() && S.isConversionTarget(node->getCalleeName()))
     return S.checkConversion(node, argTypes);
 
-  // -- Inferred conversion: Target(value) picks Target<typeof value> (#88) ---
+  // -- Inferred conversion: Target(value) picks Target<typeof value> (#88)
   // `Str(s)` with a `Str` is the `Str` constructor, not a conversion.
   if (!node->hasTypeArgs() && S.isConversionTarget(node->getCalleeName()) &&
       !S.isStrConstruction(node, argTypes))
     return S.inferConversion(node, argTypes);
 
-  // -- Generic call: instantiate the template and rebind the callee ---------
+  // -- Generic call: instantiate the template and rebind the callee
   if (node->hasTypeArgs() || S.ClassTemplates.count(node->getCalleeName()) ||
       S.FuncTemplates.count(node->getCalleeName())) {
     for (auto *ty : argTypes)
@@ -1436,7 +1442,7 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
   //   if c then a else b      — `T?` when either side is optional and the
   //                             wrapped types unify (equal, or class LCA).
   // A `None` branch is re-typed to the optional result (see checkAssignable)
-  // so CodeGen produces a null box for it.
+  // so the lowering produces a null box for it.
   {
     ast::Expr *trueExpr = node->getTrueExpr();
     ast::Expr *falseExpr = node->getFalseExpr();
@@ -1496,7 +1502,7 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
   return nullptr;
 }
 
-// -- Tuples ------------------------------------------------------------------
+// -- Tuples
 
 // A tuple literal's type is the canonical tuple of its element types.  There
 // is no contextual typing: `(1, "a")` is `(int, Str)` even when assigned to a
@@ -1571,7 +1577,7 @@ ast::Type *Sema::ExprChecker::visitTupleIndexExpr(ast::TupleIndexExpr *node) {
                 std::to_string(tt->getArity() - 1) + ")");
     return nullptr;
   }
-  // Record the receiver's type too: CodeGen reads it to pick the element
+  // Record the receiver's type too: the lowering reads it to pick the element
   // representation without re-deriving the receiver's type.
   node->getTuple()->setResolvedType(tt);
   ast::Type *elemTy = tt->getElementType(node->getIndex());
@@ -1635,7 +1641,7 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
               std::to_string(tt->getArity()) + " elements)");
     return bindTargetsAfterError();
   }
-  // CodeGen extracts the elements from this resolved type.
+  // The lowering extracts the elements from this resolved type.
   node->getValue()->setResolvedType(tt);
 
   bool ok = true;
@@ -1713,7 +1719,7 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
   return ok;
 }
 
-// -- Entry point -------------------------------------------------------------
+// -- Entry point
 
 SemaContext Sema::run(ast::TranslationUnit *tu) {
   CurrentScope = nullptr;
@@ -1773,7 +1779,7 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
   return result;
 }
 
-// -- Conversion constructors (#64, #88) ---------------------------------------
+// -- Conversion constructors (#64, #88)
 //
 // `Target<Source>(value)` converts between the primitives, their boxes and
 // `Str`.  Each builtin target has a fixed, closed set of specializations (the
@@ -1961,7 +1967,7 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
   return applyConversion(node, pair);
 }
 
-// -- Top-level ---------------------------------------------------------------
+// -- Top-level
 
 bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   bool ok = true;
@@ -2018,7 +2024,7 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   if (!checkPendingInstantiations())
     ok = false;
 
-  // Hand the instantiations to CodeGen as ordinary declarations.
+  // Hand the instantiations to the lowering as ordinary declarations.
   injectInstantiations(node);
 
   return ok;
@@ -2082,7 +2088,7 @@ bool Sema::checkEntryPoint(ast::TranslationUnit *tu,
   return false;
 }
 
-// -- Declarations ------------------------------------------------------------
+// -- Declarations
 
 bool Sema::visitEnumDecl(ast::EnumDecl *node) {
   // Reject names that collide with a builtin, class, function, or existing
@@ -2108,7 +2114,7 @@ bool Sema::visitEnumDecl(ast::EnumDecl *node) {
   return ok;
 }
 
-// -- Statements --------------------------------------------------------------
+// -- Statements
 
 bool Sema::visitCompoundStmt(ast::CompoundStmt *node) {
   ScopeGuard guard(*this);
@@ -2156,16 +2162,10 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   // Look up the variable in all enclosing scopes.
   auto *owner = CurrentScope->findOwner(varName);
   if (!owner) {
-    // First assignment — declare in the current scope.
-    // An empty array literal without an explicit type annotation is ambiguous.
-    if (auto *at = ast::dyn_cast<ast::ArrayType>(valTy)) {
-      if (at->getElementType() == Ctx.getVoidTy()) {
-        error(node->getLocation(),
-              "cannot infer element type of empty array literal '[]'; "
-              "add an explicit type annotation");
-        declarePoisoned(CurrentScope, varName);
-        return false;
-      }
+    // First assignment: declare in the current scope.
+    if (diagnoseEmptyArrayLiteral(node->getLocation(), nullptr, valTy)) {
+      declarePoisoned(CurrentScope, varName);
+      return false;
     }
     CurrentScope->set(varName, valTy);
     return true;
@@ -2176,30 +2176,14 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   // A poisoned variable (its declaration failed) is re-declared by a valid
   // assignment, with the value's type, in the scope that owns it.
   if (ast::isa<ast::PoisonType>(varTy)) {
-    if (auto *at = ast::dyn_cast<ast::ArrayType>(valTy);
-        at && at->getElementType() == Ctx.getVoidTy()) {
-      error(node->getLocation(),
-            "cannot infer element type of empty array literal '[]'; "
-            "add an explicit type annotation");
+    if (diagnoseEmptyArrayLiteral(node->getLocation(), nullptr, valTy))
       return false;
-    }
     owner->set(varName, valTy);
     return true;
   }
 
-  // Reject empty array literal when the target type can't supply the element
-  // type.  An optional array variable (`xs: Str[]?`) supplies its wrapped
-  // array type.
-  ast::Type *varArrTy = ast::stripOptional(varTy);
-  if (auto *at = ast::dyn_cast<ast::ArrayType>(valTy)) {
-    if (at->getElementType() == Ctx.getVoidTy() &&
-        !ast::isa<ast::ArrayType>(varArrTy)) {
-      error(node->getLocation(),
-            "cannot infer element type of empty array literal '[]'; "
-            "add an explicit type annotation");
-      return false;
-    }
-  }
+  if (diagnoseEmptyArrayLiteral(node->getLocation(), varTy, valTy))
+    return false;
 
   if (!checkAssignable(varTy, valTy, node->getValue())) {
     if (!diagnoseOptionalNarrowing(node->getLocation(), varTy, valTy))
@@ -2339,12 +2323,11 @@ bool Sema::visitContinueStmt(ast::ContinueStmt *node) {
   return true;
 }
 
-// -- Declarations ------------------------------------------------------------
+// -- Declarations
 
 /// Returns true if every control-flow path through `stmts` ends in a
-/// ReturnStmt.  This is a conservative syntactic check — it catches the common
-/// "missing return" cases without requiring full CFG analysis.
-/// Returns true if `stmt` (a single statement) always returns on every path.
+/// ReturnStmt: a conservative syntactic check that catches the common
+/// "missing return" cases without a CFG.
 bool detail::blockAlwaysReturns(const std::vector<ast::Stmt *> &stmts) {
   if (stmts.empty())
     return false;
@@ -2429,7 +2412,7 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
     return false;
 
   // Resolve return type.  Resolved annotations are written back into the
-  // declaration so CodeGen sees canonical types (never a parser stub or a
+  // declaration so the lowering sees canonical types (never a parser stub or a
   // generic type application).
   ast::Type *retTy = Ctx.getVoidTy();
   if (node->getReturnType()) {
@@ -2556,19 +2539,9 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     }
 
     if (declTy) {
-      // Reject an empty array literal when the declared type cannot supply the
-      // element type (e.g. `a: Obj = []` — the element type is uninferable).
-      // An optional array (`xs: Str[]? = []`) supplies its wrapped type.
-      ast::Type *declArrTy = ast::stripOptional(declTy);
-      if (auto *at = ast::dyn_cast<ast::ArrayType>(initTy)) {
-        if (at->getElementType() == Ctx.getVoidTy() &&
-            !ast::isa<ast::ArrayType>(declArrTy)) {
-          error(node->getLocation(),
-                "cannot infer element type of empty array literal '[]'; "
-                "add an explicit type annotation");
-          CurrentScope->set(node->getName(), declTy);
-          return false;
-        }
+      if (diagnoseEmptyArrayLiteral(node->getLocation(), declTy, initTy)) {
+        CurrentScope->set(node->getName(), declTy);
+        return false;
       }
       if (!checkAssignable(declTy, initTy, node->getInitExpr())) {
         if (!diagnoseOptionalNarrowing(node->getLocation(), declTy, initTy))
@@ -2580,15 +2553,9 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
         return false;
       }
     } else {
-      // Infer type from initializer — but reject bare [] with no annotation.
-      if (auto *at = ast::dyn_cast<ast::ArrayType>(initTy)) {
-        if (at->getElementType() == Ctx.getVoidTy()) {
-          error(node->getLocation(),
-                "cannot infer element type of empty array literal '[]'; "
-                "add an explicit type annotation");
-          declarePoisoned(CurrentScope, node->getName());
-          return false;
-        }
+      if (diagnoseEmptyArrayLiteral(node->getLocation(), nullptr, initTy)) {
+        declarePoisoned(CurrentScope, node->getName());
+        return false;
       }
       declTy = initTy;
     }
@@ -2844,7 +2811,7 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
   auto *subjectTy = resolveExprType(node->getSubject());
   if (!subjectTy)
     return false;
-  // Record the subject type so CodeGen can pick the right lowering (in
+  // Record the subject type so the lowering can pick the right form (in
   // particular, distinguish an enum subject from a class subject).
   node->getSubject()->setResolvedType(subjectTy);
 
