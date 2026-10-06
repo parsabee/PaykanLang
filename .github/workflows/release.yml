@@ -29,6 +29,7 @@ on:
 
 permissions:
   contents: write   # required to create the GitHub Release
+  actions: write    # re-runs the Pages workflow, which publishes the apt repository
 
 jobs:
   build:
@@ -222,3 +223,12 @@ jobs:
             dist/paykanlang-*.tar.gz.sha256
             dist/paykanlang_*.deb
             dist/paykanlang_*.deb.sha256
+
+      # Rebuild the documentation site, which carries the apt repository, so
+      # the new .deb reaches `apt install paykanlang` (a release published
+      # with this token does not trigger other workflows by itself).
+      - name: Refresh the apt repository
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --repo "${GITHUB_REPOSITORY}" --ref develop

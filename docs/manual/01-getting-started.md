@@ -32,15 +32,22 @@ $ paykan --version
 
 `paykan` finds its runtime relative to its own location, so keep the directory together.
 
-### From the Debian package
+### With apt (Debian and Ubuntu)
 
-On Debian, Ubuntu and their derivatives (x86_64), download the `.deb` from the release and
-install it with `apt`:
+On Debian, Ubuntu and their derivatives (x86_64), add the PaykanLang apt repository once,
+then install with `apt`:
 
 ```sh
-$ sudo apt install ./paykanlang_<version>_amd64.deb
-$ paykan --version
+$ curl -fsSL https://parsabee.github.io/PaykanLang/apt/paykanlang.gpg \
+  | sudo tee /usr/share/keyrings/paykanlang.gpg > /dev/null
+$ echo "deb [arch=amd64 signed-by=/usr/share/keyrings/paykanlang.gpg] https://parsabee.github.io/PaykanLang/apt stable main" \
+  | sudo tee /etc/apt/sources.list.d/paykanlang.list
+$ sudo apt update
+$ sudo apt install paykanlang
 ```
+
+`sudo apt upgrade` picks up new releases. Each release also carries the `.deb` itself, which
+`sudo apt install ./paykanlang_<version>_amd64.deb` installs directly.
 
 ### With Homebrew (macOS)
 
