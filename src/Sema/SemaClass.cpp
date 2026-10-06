@@ -30,9 +30,7 @@ BitSet bitAnd(const BitSet &a, const BitSet &b) {
 namespace paykan {
 namespace sema {
 
-// ---------------------------------------------------------------------------
-// Phase helpers — class declaration checking
-// ---------------------------------------------------------------------------
+// -- Phase helpers — class declaration checking
 
 namespace {
 
@@ -62,9 +60,7 @@ std::string Sema::signatureString(const ast::ClassType *owner,
   return s;
 }
 
-// ---------------------------------------------------------------------------
-// Definite-assignment analysis for __init__ (Check 1)
-// ---------------------------------------------------------------------------
+// -- Definite-assignment analysis for __init__ (Check 1)
 
 bool Sema::checkInitFieldsAssigned(ast::ClassType *ct, ast::CompoundStmt *body,
                                    ast::SourceLocation initLoc,
@@ -233,14 +229,12 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
   // others, so the classes that are fine are still declared and only the
   // real error is reported (see ErroneousNames / ErroneousClasses).
 
-  // -------------------------------------------------------------------------
   // Phase 1: Check for duplicate class names (local, and against builtins,
   //          imports, and enums).  The class name doubles as its constructor
   //          function (phase 4b), so it must be free in the function table
   //          too — otherwise `class print {...}` would silently replace the
   //          builtin `print`.  A class whose name is taken is dropped; the
   //          name keeps resolving to whatever already owns it.
-  // -------------------------------------------------------------------------
   StringSet seen;
   StringMap<ast::ClassDecl *> localClasses; // the accepted ones
   std::vector<ast::ClassDecl *> accepted;
@@ -260,12 +254,10 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
     accepted.push_back(cd);
   }
 
-  // -------------------------------------------------------------------------
   // Phase 2: Topological sort (superclass before subclass) + cycle detection.
   //          A class whose superclass is undefined, was dropped in phase 1,
   //          or closes an inheritance cycle loses its superclass (it is
   //          registered on Obj in phase 3) and is marked erroneous.
-  // -------------------------------------------------------------------------
   std::vector<ast::ClassDecl *> sorted;
   StringMap<uint8_t> color; // 0=white 1=gray(in-progress) 2=black(done)
   StringSet noSuper;
@@ -313,10 +305,8 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
   for (auto *cd : accepted)
     topoVisit(cd);
 
-  // -------------------------------------------------------------------------
   // Phase 3: Pre-register ClassType stubs so forward field-type references
   //          within this module resolve correctly.
-  // -------------------------------------------------------------------------
   for (auto *cd : sorted) {
     ast::ClassType *superClass = nullptr;
     if (cd->hasSuperClass() && !noSuper.count(cd->getName())) {
@@ -338,10 +328,8 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
     Ctx.preRegisterClassType(cd->getName(), superClass);
   }
 
-  // -------------------------------------------------------------------------
   // Phase 4: Populate field types and method signatures for each class.  A
   //          member that fails to resolve is left out of the class.
-  // -------------------------------------------------------------------------
   for (auto *cd : sorted) {
     auto *ct = Ctx.lookupClassType(cd->getName());
     assert(ct && "ClassType stub must exist after pre-registration");
@@ -351,9 +339,7 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Phase 4b: Register constructor functions so method bodies can call them.
-  // -------------------------------------------------------------------------
+  // -- Phase 4b: Register constructor functions so method bodies can call them.
   for (auto *cd : sorted)
     declareConstructor(cd, Ctx.lookupClassType(cd->getName()));
 
@@ -400,7 +386,7 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       ok = false;
       continue;
     }
-    field->setType(fty); // canonical write-back for CodeGen
+    field->setType(fty); // canonical write-back for the lowering
     ct->addField(field->getName(), fty);
   }
 
@@ -461,7 +447,7 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
     if (!paramsOk)
       continue;
 
-    // -- override signature check -------------------------------------------
+    // -- override signature check
     // If this method overrides a base-class method (same name found by
     // walking up the inheritance chain), the override must have an identical
     // signature: same parameter types and return type.  Strict equality is
@@ -511,10 +497,8 @@ void Sema::declareConstructor(ast::ClassDecl *cd, ast::ClassType *ct) {
 }
 
 bool Sema::checkClassBodies() {
-  // -------------------------------------------------------------------------
   // Phase 5: Type-check method bodies (class types, fields, method signatures,
   // constructors, and all free functions are registered by now).
-  // -------------------------------------------------------------------------
   bool ok = true;
   for (auto *cd : SortedClasses) {
     // An erroneous class is incomplete (members that failed to resolve are
@@ -527,9 +511,7 @@ bool Sema::checkClassBodies() {
   return ok;
 }
 
-// ---------------------------------------------------------------------------
-// visitMethodDecl / visitClassDecl
-// ---------------------------------------------------------------------------
+// -- visitMethodDecl / visitClassDecl
 
 bool Sema::visitMethodDecl(ast::MethodDecl *) {
   // MethodDecl nodes are not produced by the parser; nothing to do.
@@ -681,9 +663,7 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
   return ok;
 }
 
-// ===========================================================================
-// Generics: templates, instantiation, type-argument inference
-// ===========================================================================
+// -- Generics: templates, instantiation, type-argument inference
 //
 // See the comment block in Sema.h ("Generics") and
 // docs/language/11-generics.md for the design.  In short: a generic declaration
@@ -692,7 +672,7 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
 // the type parameters substituted (ast::ASTCloner), registers the clone under
 // its canonical name (`Box<int>`) exactly like a hand-written class/function,
 // and queues its bodies for checking.  Instantiations are ordinary ClassTypes /
-// functions afterwards, so CodeGen and the module exporter need no
+// functions afterwards, so the lowering and the module exporter need no
 // generics-specific paths.
 
 bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
@@ -1227,7 +1207,7 @@ void Sema::injectInstantiations(ast::TranslationUnit *tu) {
   if (InstantiatedClassDecls.empty() && InstantiatedFuncDecls.empty())
     return;
 
-  // CodeGen emits classes in list order and resolves the functions a class
+  // The lowering emits classes in list order and resolves the functions a class
   // needs by name at the point of use: a constructor (`B()` in a method of A)
   // and a superclass's `__init__` / vtable slots (`__super__(...)`, inherited
   // methods) must already exist when the class that uses them is emitted.

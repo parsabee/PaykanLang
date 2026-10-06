@@ -1,7 +1,4 @@
-# src/Sema/CMakeLists.txt
-# ----------------------------------------------------------------------------
 # paykan_sema -- static library for semantic analysis.
-# ----------------------------------------------------------------------------
 
 add_library(paykan_sema STATIC
     Sema.cpp

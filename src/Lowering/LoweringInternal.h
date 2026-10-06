@@ -429,9 +429,4 @@ private:
   const char *builtinMethodSymbol(ast::ClassType *ct, const std::string &name);
 };
 
-/// Resolve an import to the canonical path of its source file (mirrors
-/// Sema::resolveModulePath).  Empty if it does not exist.
-std::string resolveImportFile(const std::string &projectRoot, bool isSystem,
-                              const std::string &modulePath);
-
 } // namespace paykan::lowering
