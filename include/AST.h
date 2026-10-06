@@ -132,7 +132,7 @@ concept ASTNodeType =
       { T::classof(n) } -> std::same_as<bool>;
     };
 
-// -- LLVM-style RTTI free functions ------------------------------------------
+// -- LLVM-style RTTI free functions
 
 template <ASTNodeType T> bool isa(const ASTNode *n) { return T::classof(n); }
 
@@ -200,7 +200,7 @@ public:
   }
 };
 
-// -- Operator enums (at namespace scope so Type can reference them) ----------
+// -- Operator enums (at namespace scope so Type can reference them)
 
 enum class UnaryOpcode {
   Neg, // -
@@ -760,7 +760,7 @@ inline const std::string &AssignStmt::getVarName() const {
 // generic calls: `first<int>(xs)` / `Box<int>(3)`.  Sema resolves a call to a
 // generic function or class template to a concrete instantiation and rewrites
 // the callee name to the instantiation's canonical name (`first<int>`), so
-// CodeGen only ever sees ordinary calls.
+// the lowering only ever sees ordinary calls.
 class CallExpr : public Expr {
 private:
   const std::string *CalleeName; // points into ASTContext::StringPool (stable)
@@ -998,7 +998,7 @@ public:
       inheritFrom(sc);
   }
 
-  // -- Fields ---------------------------------------------------------------
+  // -- Fields
 
   void addField(const std::string &name, Type *ty) {
     Fields.emplace_back(name, ty);
@@ -1019,7 +1019,7 @@ public:
     return nullptr;
   }
 
-  // -- Methods --------------------------------------------------------------
+  // -- Methods
 
   void addMethod(MethodDecl *m);
 
@@ -1046,12 +1046,11 @@ public:
   static bool classof(const ASTNode *N) { return N->getKind() == NK_ClassType; }
 };
 
-// Import declaration
-//   import path::module;                      — SelectedNames empty, Alias
-//   empty import path::{a, b};                      — SelectedNames = {a, b},
-//   Alias empty import path::module as alias;             — SelectedNames
-//   empty, Alias = "alias" import ::system_module;                   — IsSystem
-//   true
+// Import declaration:
+//   import path::module;            one Module, Alias empty
+//   import path::{a, b};            two Modules
+//   import path::module as alias;   Alias = "alias"
+//   import ::system_module;         IsSystem
 class ImportDecl : public Decl {
 public:
   /// A single module being imported, with an optional alias.
@@ -1148,10 +1147,10 @@ public:
 // Translation unit (top-level container)
 //
 // Generic (template) declarations are kept apart from ordinary ones: every
-// downstream pass that walks ClassDecls / FuncDecls (Sema, CodeGen, module
-// export) sees only concrete declarations.  Sema appends the instantiations it
-// creates to the concrete lists (addFuncDecl / prependClassDecls) so CodeGen
-// emits them exactly like hand-written declarations.
+// downstream pass that walks ClassDecls / FuncDecls (Sema, the lowering,
+// module export) sees only concrete declarations.  Sema appends the
+// instantiations it creates to the concrete lists (addFuncDecl /
+// setClassDecls) so they are lowered exactly like hand-written declarations.
 class TranslationUnit : public ASTNode {
 private:
   std::vector<ImportDecl *> Imports;
@@ -1188,7 +1187,7 @@ public:
   /// Append an instantiated function (Sema).
   void addFuncDecl(FuncDecl *fn) { FuncDecls.push_back(fn); }
   /// Replace the concrete class list (Sema: hand-written classes plus the
-  /// instantiations, ordered for CodeGen — see Sema::injectInstantiations).
+  /// instantiations, ordered for the lowering; see Sema::injectInstantiations).
   void setClassDecls(std::vector<ClassDecl *> decls) {
     ClassDecls = std::move(decls);
   }
@@ -1229,7 +1228,7 @@ public:
 // a type of its own: Sema's resolveType instantiates the named class template
 // with the (resolved) arguments and yields the instantiation's canonical
 // ClassType (`Box<int>`), then writes that ClassType back over the annotation
-// slot that held this node.  CodeGen therefore never sees a GenericType.
+// slot that held this node.  The lowering therefore never sees a GenericType.
 class GenericType : public Type {
   const std::string *Name; // template name (interned); may be qualified
   std::vector<Type *> Args;
@@ -1413,7 +1412,7 @@ public:
 //
 // Transfers ownership of the operand to the consuming context.  When the
 // operand is a local variable, that variable is considered "moved out" — Sema
-// forbids any later use of it, and CodeGen hands the variable's owning
+// forbids any later use of it, and the lowering hands the variable's owning
 // reference to the destination without an extra retain (and without a release
 // at scope exit).  When the operand is a temporary (any rvalue), `mov` is a
 // transparent pass-through: the temporary is already an owned value being

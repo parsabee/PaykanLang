@@ -9,7 +9,7 @@
 namespace paykan {
 namespace ast {
 
-// -- Private helpers ---------------------------------------------------------
+// -- Private helpers
 
 void ASTPrinter::printIndent() {
   for (unsigned i = 0; i < LastChild.size(); ++i) {
@@ -25,6 +25,12 @@ void ASTPrinter::printLoc(const ASTNode *node) {
   if (loc.isValid())
     OS << " <" << loc.getLineStart() << ":" << loc.getColumnStart() << "-"
        << loc.getLineEnd() << ":" << loc.getColumnEnd() << ">";
+}
+
+void ASTPrinter::header(const char *kind, const ASTNode *node) {
+  printIndent();
+  OS << kind;
+  printLoc(node);
 }
 
 ASTPrinter::ChildScope::ChildScope(ASTPrinter &p, bool isLast) : P(p) {
@@ -49,16 +55,14 @@ void ASTPrinter::visitChildren(CallExpr *node) {
   }
 }
 
-// -- Constructor -------------------------------------------------------------
+// -- Constructor
 
 ASTPrinter::ASTPrinter(std::ostream &os) : OS(os) {}
 
-// -- Top-level ---------------------------------------------------------------
+// -- Top-level
 
 void ASTPrinter::visitTranslationUnit(TranslationUnit *node) {
-  printIndent();
-  OS << "TranslationUnit";
-  printLoc(node);
+  header("TranslationUnit", node);
   OS << "\n";
   size_t total = node->getImports().size() + node->getEnumDecls().size() +
                  node->getClassDecls().size() + node->getFuncDecls().size() +
@@ -108,20 +112,16 @@ static void printTypeParams(std::ostream &os,
   os << ">";
 }
 
-// -- Statements --------------------------------------------------------------
+// -- Statements
 
 void ASTPrinter::visitCompoundStmt(CompoundStmt *node) {
-  printIndent();
-  OS << "CompoundStmt";
-  printLoc(node);
+  header("CompoundStmt", node);
   OS << "\n";
   visitChildren(node);
 }
 
 void ASTPrinter::visitReturnStmt(ReturnStmt *node) {
-  printIndent();
-  OS << "ReturnStmt";
-  printLoc(node);
+  header("ReturnStmt", node);
   OS << "\n";
   if (node->getReturnValue()) {
     ChildScope cs(*this, true);
@@ -130,9 +130,7 @@ void ASTPrinter::visitReturnStmt(ReturnStmt *node) {
 }
 
 void ASTPrinter::visitAssignStmt(AssignStmt *node) {
-  printIndent();
-  OS << "AssignStmt";
-  printLoc(node);
+  header("AssignStmt", node);
   OS << " '" << node->getVarName() << "'\n";
   {
     ChildScope cs(*this, true);
@@ -141,9 +139,7 @@ void ASTPrinter::visitAssignStmt(AssignStmt *node) {
 }
 
 void ASTPrinter::visitDeclStmt(DeclStmt *node) {
-  printIndent();
-  OS << "DeclStmt";
-  printLoc(node);
+  header("DeclStmt", node);
   OS << "\n";
   {
     ChildScope cs(*this, true);
@@ -152,9 +148,7 @@ void ASTPrinter::visitDeclStmt(DeclStmt *node) {
 }
 
 void ASTPrinter::visitExprStmt(ExprStmt *node) {
-  printIndent();
-  OS << "ExprStmt";
-  printLoc(node);
+  header("ExprStmt", node);
   OS << "\n";
   {
     ChildScope cs(*this, true);
@@ -163,12 +157,10 @@ void ASTPrinter::visitExprStmt(ExprStmt *node) {
 }
 
 void ASTPrinter::visitIfStmt(IfStmt *node) {
-  printIndent();
-  OS << "IfStmt";
-  printLoc(node);
+  header("IfStmt", node);
   OS << "\n";
   {
-    ChildScope cs(*this, !node->hasElse() && true);
+    ChildScope cs(*this, !node->hasElse());
     OS << "  "; // condition label
     visit(node->getCondition());
   }
@@ -183,9 +175,7 @@ void ASTPrinter::visitIfStmt(IfStmt *node) {
 }
 
 void ASTPrinter::visitWhileStmt(WhileStmt *node) {
-  printIndent();
-  OS << "WhileStmt";
-  printLoc(node);
+  header("WhileStmt", node);
   OS << "\n";
   {
     ChildScope cs(*this, false);
@@ -198,25 +188,19 @@ void ASTPrinter::visitWhileStmt(WhileStmt *node) {
 }
 
 void ASTPrinter::visitBreakStmt(BreakStmt *node) {
-  printIndent();
-  OS << "BreakStmt";
-  printLoc(node);
+  header("BreakStmt", node);
   OS << "\n";
 }
 
 void ASTPrinter::visitContinueStmt(ContinueStmt *node) {
-  printIndent();
-  OS << "ContinueStmt";
-  printLoc(node);
+  header("ContinueStmt", node);
   OS << "\n";
 }
 
-// -- Declarations ------------------------------------------------------------
+// -- Declarations
 
 void ASTPrinter::visitVarDecl(VarDecl *node) {
-  printIndent();
-  OS << "VarDecl";
-  printLoc(node);
+  header("VarDecl", node);
   OS << " '" << node->getName() << "'";
   if (node->getType())
     OS << " type";
@@ -231,19 +215,15 @@ void ASTPrinter::visitVarDecl(VarDecl *node) {
   }
 }
 
-// -- Expressions -------------------------------------------------------------
+// -- Expressions
 
 void ASTPrinter::visitIntegerLiteral(IntegerLiteral *node) {
-  printIndent();
-  OS << "IntegerLiteral";
-  printLoc(node);
+  header("IntegerLiteral", node);
   OS << " " << node->getValue() << "\n";
 }
 
 void ASTPrinter::visitFloatLiteral(FloatLiteral *node) {
-  printIndent();
-  OS << "FloatLiteral";
-  printLoc(node);
+  header("FloatLiteral", node);
   // Exponent form with six fractional digits ("3.140000e+00"): the format
   // the dump has always used, kept stable for the differential frontend check.
   char buf[64];
@@ -252,16 +232,12 @@ void ASTPrinter::visitFloatLiteral(FloatLiteral *node) {
 }
 
 void ASTPrinter::visitBoolLiteral(BoolLiteral *node) {
-  printIndent();
-  OS << "BoolLiteral";
-  printLoc(node);
+  header("BoolLiteral", node);
   OS << " " << (node->getValue() ? "true" : "false") << "\n";
 }
 
 void ASTPrinter::visitCharLiteral(CharLiteral *node) {
-  printIndent();
-  OS << "CharLiteral";
-  printLoc(node);
+  header("CharLiteral", node);
   char c = node->getValue();
   if (c == '\n')
     OS << " '\\n'\n";
@@ -278,23 +254,17 @@ void ASTPrinter::visitCharLiteral(CharLiteral *node) {
 }
 
 void ASTPrinter::visitNoneLiteral(NoneLiteral *node) {
-  printIndent();
-  OS << "NoneLiteral";
-  printLoc(node);
+  header("NoneLiteral", node);
   OS << " None\n";
 }
 
 void ASTPrinter::visitStringLiteral(StringLiteral *node) {
-  printIndent();
-  OS << "StringLiteral";
-  printLoc(node);
+  header("StringLiteral", node);
   OS << " \"" << node->getValue() << "\"\n";
 }
 
 void ASTPrinter::visitUnaryExpr(UnaryExpr *node) {
-  printIndent();
-  OS << "UnaryExpr";
-  printLoc(node);
+  header("UnaryExpr", node);
   OS << " '" << node->getOpcodeStr() << "'\n";
   {
     ChildScope cs(*this, true);
@@ -303,9 +273,7 @@ void ASTPrinter::visitUnaryExpr(UnaryExpr *node) {
 }
 
 void ASTPrinter::visitBinaryExpr(BinaryExpr *node) {
-  printIndent();
-  OS << "BinaryExpr";
-  printLoc(node);
+  header("BinaryExpr", node);
   OS << " '" << node->getOpcodeStr() << "'\n";
   {
     ChildScope cs(*this, false);
@@ -318,9 +286,7 @@ void ASTPrinter::visitBinaryExpr(BinaryExpr *node) {
 }
 
 void ASTPrinter::visitTernaryExpr(TernaryExpr *node) {
-  printIndent();
-  OS << "TernaryExpr";
-  printLoc(node);
+  header("TernaryExpr", node);
   OS << "\n";
   {
     ChildScope cs(*this, false);
@@ -337,9 +303,7 @@ void ASTPrinter::visitTernaryExpr(TernaryExpr *node) {
 }
 
 void ASTPrinter::visitMovExpr(MovExpr *node) {
-  printIndent();
-  OS << "MovExpr";
-  printLoc(node);
+  header("MovExpr", node);
   OS << "\n";
   {
     ChildScope cs(*this, true);
@@ -348,16 +312,12 @@ void ASTPrinter::visitMovExpr(MovExpr *node) {
 }
 
 void ASTPrinter::visitIdentifier(Identifier *node) {
-  printIndent();
-  OS << "Identifier";
-  printLoc(node);
+  header("Identifier", node);
   OS << " '" << node->getName() << "'\n";
 }
 
 void ASTPrinter::visitCallExpr(CallExpr *node) {
-  printIndent();
-  OS << "CallExpr";
-  printLoc(node);
+  header("CallExpr", node);
   OS << " '" << node->getCalleeName() << "'";
   if (node->hasTypeArgs())
     OS << " " << node->getTypeArgs().size() << " type args";
@@ -373,9 +333,7 @@ void ASTPrinter::visitCallExpr(CallExpr *node) {
 }
 
 void ASTPrinter::visitMethodCallExpr(MethodCallExpr *node) {
-  printIndent();
-  OS << "MethodCallExpr";
-  printLoc(node);
+  header("MethodCallExpr", node);
   OS << " '" << node->getMethodName() << "'\n";
   {
     ChildScope cs(*this, node->getNumArguments() == 0);
@@ -387,12 +345,10 @@ void ASTPrinter::visitMethodCallExpr(MethodCallExpr *node) {
   }
 }
 
-// -- Types -------------------------------------------------------------------
+// -- Types
 
 void ASTPrinter::visitBuiltinType(BuiltinType *node) {
-  printIndent();
-  OS << "BuiltinType";
-  printLoc(node);
+  header("BuiltinType", node);
   switch (node->getTypeKind()) {
   case BuiltinType::Int:
     OS << " 'int'";
@@ -414,9 +370,7 @@ void ASTPrinter::visitBuiltinType(BuiltinType *node) {
 }
 
 void ASTPrinter::visitClassType(ClassType *node) {
-  printIndent();
-  OS << "ClassType";
-  printLoc(node);
+  header("ClassType", node);
   OS << " '" << node->getName() << "'";
   if (node->getSuperClass())
     OS << " : '" << node->getSuperClass()->getName() << "'";
@@ -424,18 +378,14 @@ void ASTPrinter::visitClassType(ClassType *node) {
 }
 
 void ASTPrinter::visitArrayType(ArrayType *node) {
-  printIndent();
-  OS << "ArrayType";
-  printLoc(node);
+  header("ArrayType", node);
   OS << "\n";
   ChildScope cs(*this, true);
   visit(node->getElementType());
 }
 
 void ASTPrinter::visitGenericType(GenericType *node) {
-  printIndent();
-  OS << "GenericType";
-  printLoc(node);
+  header("GenericType", node);
   OS << " '" << node->getName() << "'\n";
   for (size_t i = 0; i < node->getNumArgs(); ++i) {
     ChildScope cs(*this, i + 1 == node->getNumArgs());
@@ -444,18 +394,14 @@ void ASTPrinter::visitGenericType(GenericType *node) {
 }
 
 void ASTPrinter::visitOptionalType(OptionalType *node) {
-  printIndent();
-  OS << "OptionalType";
-  printLoc(node);
+  header("OptionalType", node);
   OS << "\n";
   ChildScope cs(*this, true);
   visit(node->getInnerType());
 }
 
 void ASTPrinter::visitTupleType(TupleType *node) {
-  printIndent();
-  OS << "TupleType";
-  printLoc(node);
+  header("TupleType", node);
   OS << " " << node->getArity() << " elements\n";
   for (size_t i = 0; i < node->getArity(); ++i) {
     ChildScope cs(*this, i + 1 == node->getArity());
@@ -464,16 +410,12 @@ void ASTPrinter::visitTupleType(TupleType *node) {
 }
 
 void ASTPrinter::visitPoisonType(PoisonType *node) {
-  printIndent();
-  OS << "PoisonType";
-  printLoc(node);
+  header("PoisonType", node);
   OS << "\n";
 }
 
 void ASTPrinter::visitTupleLiteralExpr(TupleLiteralExpr *node) {
-  printIndent();
-  OS << "TupleLiteralExpr";
-  printLoc(node);
+  header("TupleLiteralExpr", node);
   OS << " " << node->getNumElements() << " elements\n";
   for (size_t i = 0; i < node->getNumElements(); ++i) {
     ChildScope cs(*this, i + 1 == node->getNumElements());
@@ -482,18 +424,14 @@ void ASTPrinter::visitTupleLiteralExpr(TupleLiteralExpr *node) {
 }
 
 void ASTPrinter::visitTupleIndexExpr(TupleIndexExpr *node) {
-  printIndent();
-  OS << "TupleIndexExpr";
-  printLoc(node);
+  header("TupleIndexExpr", node);
   OS << " ." << node->getIndex() << "\n";
   ChildScope cs(*this, true);
   visit(node->getTuple());
 }
 
 void ASTPrinter::visitDestructureStmt(DestructureStmt *node) {
-  printIndent();
-  OS << "DestructureStmt";
-  printLoc(node);
+  header("DestructureStmt", node);
   OS << " targets={";
   bool first = true;
   for (const auto &t : node->getTargets()) {
@@ -521,9 +459,7 @@ void ASTPrinter::visitDestructureStmt(DestructureStmt *node) {
 }
 
 void ASTPrinter::visitArrayLiteralExpr(ArrayLiteralExpr *node) {
-  printIndent();
-  OS << "ArrayLiteralExpr";
-  printLoc(node);
+  header("ArrayLiteralExpr", node);
   OS << " " << node->getNumElements() << " elements\n";
   for (size_t i = 0; i < node->getNumElements(); ++i) {
     ChildScope cs(*this, i + 1 == node->getNumElements());
@@ -532,9 +468,7 @@ void ASTPrinter::visitArrayLiteralExpr(ArrayLiteralExpr *node) {
 }
 
 void ASTPrinter::visitSubscriptAssignStmt(SubscriptAssignStmt *node) {
-  printIndent();
-  OS << "SubscriptAssignStmt";
-  printLoc(node);
+  header("SubscriptAssignStmt", node);
   OS << "\n";
   {
     ChildScope cs(*this, false);
@@ -551,9 +485,7 @@ void ASTPrinter::visitSubscriptAssignStmt(SubscriptAssignStmt *node) {
 }
 
 void ASTPrinter::visitSubscriptExpr(SubscriptExpr *node) {
-  printIndent();
-  OS << "SubscriptExpr";
-  printLoc(node);
+  header("SubscriptExpr", node);
   OS << "\n";
   {
     ChildScope cs(*this, false);
@@ -566,15 +498,12 @@ void ASTPrinter::visitSubscriptExpr(SubscriptExpr *node) {
 }
 
 void ASTPrinter::visitFuncDecl(FuncDecl *node) {
-  printIndent();
-  OS << "FuncDecl";
-  printLoc(node);
+  header("FuncDecl", node);
   OS << " '" << node->getName() << "'";
   printTypeParams(OS, node->getTypeParams());
   if (node->getReturnType())
     OS << " ->";
   OS << "\n";
-  // Print params and body as children.
   if (node->getReturnType()) {
     ChildScope cs(*this, false);
     visit(node->getReturnType());
@@ -586,9 +515,7 @@ void ASTPrinter::visitFuncDecl(FuncDecl *node) {
 }
 
 void ASTPrinter::visitMethodDecl(MethodDecl *node) {
-  printIndent();
-  OS << "MethodDecl";
-  printLoc(node);
+  header("MethodDecl", node);
   OS << " '" << node->getName() << "'";
   if (node->isPrivate())
     OS << " private";
@@ -596,9 +523,7 @@ void ASTPrinter::visitMethodDecl(MethodDecl *node) {
 }
 
 void ASTPrinter::visitClassDecl(ClassDecl *node) {
-  printIndent();
-  OS << "ClassDecl";
-  printLoc(node);
+  header("ClassDecl", node);
   OS << " '" << node->getName() << "'";
   printTypeParams(OS, node->getTypeParams());
   if (node->hasSuperClass())
@@ -619,9 +544,7 @@ void ASTPrinter::visitClassDecl(ClassDecl *node) {
 }
 
 void ASTPrinter::visitEnumDecl(EnumDecl *node) {
-  printIndent();
-  OS << "EnumDecl";
-  printLoc(node);
+  header("EnumDecl", node);
   OS << " '" << node->getName() << "' {";
   bool first = true;
   for (const auto *v : node->getVariants()) {
@@ -634,16 +557,12 @@ void ASTPrinter::visitEnumDecl(EnumDecl *node) {
 }
 
 void ASTPrinter::visitEnumType(EnumType *node) {
-  printIndent();
-  OS << "EnumType";
-  printLoc(node);
+  header("EnumType", node);
   OS << " '" << node->getName() << "'\n";
 }
 
 void ASTPrinter::visitEnumValueExpr(EnumValueExpr *node) {
-  printIndent();
-  OS << "EnumValueExpr";
-  printLoc(node);
+  header("EnumValueExpr", node);
   OS << " '" << node->getEnumName() << "::" << node->getVariantName() << "'\n";
 }
 
@@ -672,9 +591,7 @@ void ASTPrinter::visitMemberAccessExpr(MemberAccessExpr *node) {
 }
 
 void ASTPrinter::visitImportDecl(ImportDecl *node) {
-  printIndent();
-  OS << "ImportDecl";
-  printLoc(node);
+  header("ImportDecl", node);
   OS << (node->isSystem() ? " system" : " user");
   if (!node->getBasePath().empty())
     OS << " base='" << node->getBasePath() << "'";
@@ -697,9 +614,7 @@ void ASTPrinter::visitMatchArm(MatchArm *) {
 }
 
 void ASTPrinter::visitMatchStmt(MatchStmt *node) {
-  printIndent();
-  OS << "MatchStmt";
-  printLoc(node);
+  header("MatchStmt", node);
   OS << "\n";
   {
     ChildScope cs(*this, false);
