@@ -85,10 +85,14 @@ p: polygon::Polygon = polygon::Polygon(5, 10.0);
 
 Given `import a::b::c`, the compiler looks for:
 
-1. `<source-root>/a/b/c.pkn`
+1. `<source-root>/a/b/c.pkn`, the module's source;
+2. when there is no source, a prebuilt module file: `<source-root>/a/b/c.pkm`, then
+   `a/b/c.pkm` under each `--module-path=<dir>` directory and each directory of
+   `$PAYKAN_MODULE_PATH` (see [Module Files](#module-files)).
 
 The source root is the directory containing the main file passed to the compiler driver. There
-is no package registry, and an ordinary import never searches beyond the source root.
+is no package registry, and an ordinary import never searches beyond the source root and the
+module path.
 
 ### System Imports
 
@@ -96,7 +100,7 @@ A leading `::` marks a **system** import: `import ::io;` (or `import ::{io, fs};
 `io.pkn` in the standard-library directory instead of the source root. That directory is
 `$PAYKAN_STDLIB` when the environment variable is set, and `<source-root>/stdlib` otherwise.
 A system module is otherwise an ordinary module, and it is cached under
-`.paykan_cache/@system/` (see [Compilation Cache](#compilation-cache)).
+`.paykan_cache/@system/` (see [Module Files](#module-files)).
 
 No standard library ships with PaykanLang yet (it is planned, #113), so a system import only
 finds modules you provide yourself in that directory. The builtins (`println`, `Str`, `File`,
@@ -187,47 +191,58 @@ in a compilation error.
 
 ---
 
-## Compilation Cache
+## Module Files
 
-Compiled modules are cached on disk, so a project whose modules have not changed only
-re-generates code for what did change on the next run or build. Both backends keep their
-entries in one directory, `.paykan_cache/`, side by side; each backend reads only its own files.
+A compiled module is a **`.pkm` module file**: the module's interface (what the type checker
+needs to check a module that imports it), its PIR (the backend-neutral intermediate
+representation both backends generate code from), a symbol index, and a manifest recording
+which `paykan` produced it, the source it was built from (size and SHA-256) and the interface
+hash of every module it imports. The file carries no backend-specific code, no paths and no
+timestamps: the same source always produces the same bytes, and one file serves the c
+backend and the llvm backend alike. `paykan pkm dump <file>` prints a file,
+`paykan pkm check <file>` says whether this `paykan` can use it, and `paykan --emit-pkm`
+writes one ([The `paykan` command](../manual/13-the-paykan-command.md)).
 
-| Backend | Entries for module `a::b::c` (`a/b/c.pkn`) | Main file |
-|---------|--------------------------------|-----------|
-| llvm | `.paykan_cache/a/b/c.bc` (LLVM bitcode, key stored inside) | never cached |
-| c | `.paykan_cache/a/b/c.<hash>.c` (generated C), `c.<hash>.o` (object), `c.<hash>.key` (key), one set per key | cached the same way, by its file stem (`main.<hash>.c`, ...) |
+Module files reach a program in two ways.
 
-- **Location.** The cache lives in `.paykan_cache/` **under the source root** (the main
-  file's directory), named by the module's canonical name: `a::b::c` is cached as
-  `.paykan_cache/a/b/c.*`. It does not depend on the directory the compiler is launched
-  from, so `paykan proj/main.pkn` and `cd proj && paykan main.pkn` share one cache. A system
-  module (`import ::io`, located through `PAYKAN_STDLIB`) is cached under
-  `.paykan_cache/@system/`.
-- **Validity.** An entry is used only when it was written under exactly the key computed for
-  the current compile. The llvm backend's key covers the module's PIR (which spells out every
-  class layout and function signature it uses from the modules it imports), the compiler
-  build, the LLVM version and the generated-code ABI version. The c backend's key covers the
-  module's generated C, the C compiler and its flags, a hash of `Runtime.h`, the paykan
-  version, and the size and hash of the cached object. Editing a module therefore
-  invalidates it *and* every module whose code depends on it — a changed class layout or
-  function signature in `base` never leaks stale code into `mid` or `main`. Timestamps are
-  not used.
+### The compilation cache
+
+Compiling a program writes the `.pkm` of every module it imports to `.paykan_cache/` under
+the source root, named by the module's canonical name: `a::b::c` is cached as
+`.paykan_cache/a/b/c.pkm`, a system module under `.paykan_cache/@system/`. The location does
+not depend on the directory the compiler is launched from, so `paykan proj/main.pkn` and
+`cd proj && paykan main.pkn` share one cache. The main file is never cached.
+
+- **Validity.** An entry is used only when it was written by this very `paykan` (version and
+  format numbers), from exactly the current source (size and hash, never timestamps), and
+  against the current interface of every module it imports. Editing a function body
+  therefore rebuilds that module only; changing a class or a function signature also
+  rebuilds the modules that import it, and theirs only if their own interface changed.
+  `--verbose` prints, for every import, which file was used or why an entry was not.
 - **Robustness.** Entries are written atomically (to a temporary file that is then renamed
-  into place; the c backend writes the object before its `.key`). An entry that is missing,
-  truncated, corrupt, or written under a different key is ignored and regenerated.
-  The directory is purely a cache: deleting it at any time is safe and only costs a
-  recompile. `docs/c-backend.md` describes the c backend's entries in more detail.
-- **Concurrent builds.** Several `paykan` processes may share one cache, even with different
-  flags. The c backend names each entry after a hash of its key (`<hash>` above), so builds
-  that differ in anything the key covers (`-O0` and `-O2`, a sanitizer, another C compiler)
-  never touch each other's files: a build only links an object compiled under its own key,
-  and alternating configurations each keep their entry instead of rebuilding every time.
-  A module keeps its four most recently used entries; older ones are removed when it gets a
-  new one, but never one used within the last hour. The llvm backend keeps one `.bc` per
-  module, independent of `-O` (the level is applied after the cached code is loaded); it
-  validates the key stored inside the very bytes it loads, so a concurrent rewrite can only
-  cause a rebuild, never a mismatched link.
+  into place), and only after the whole program verified. An entry that is missing,
+  truncated, corrupt or out of date is rebuilt. `--rebuild-modules` rebuilds every entry;
+  `--no-module-cache` neither reads nor writes them. The directory is purely a cache:
+  deleting it at any time is safe and only costs a recompile.
+- **The backends' caches.** Each backend still keeps its own generated-code entries beside the
+  module files (the llvm backend's `a/b/c.bc`; the c backend's `c.<hash>.c`, `.o` and `.key`,
+  one set per key, and the main file's too), validated by their own keys and shared between
+  concurrent builds as before. They are the native translation of the PIR a module file
+  holds; a later release folds them into the module file.
+
+### Prebuilt modules
+
+Where an import's source is not found, a `.pkm` of the module is used instead: first where
+the source would be (`a/b/c.pkm` for `a/b/c.pkn`), then under each `--module-path=<dir>`
+directory and each `:`-separated directory of `$PAYKAN_MODULE_PATH`. A source file is always
+authoritative when it exists. A prebuilt module is type-checked against from its interface
+and compiled from its PIR, so the program builds and runs identically on either backend
+without the source (see [`samples/imports/13_pkm`](../../samples/imports/13_pkm/README.md)).
+
+A prebuilt file is used only when this `paykan` can: a file written for another PIR or
+runtime ABI version, or built against another interface of a module it imports, is an error
+naming what differs (`module 'a::b' (lib/a/b.pkm) was compiled by paykan 0.1.1 (pkm 1.0,
+interface 1.0, PIR 1, runtime ABI 6); ... Rebuild it from source.`), never a silent mismatch.
 
 ---
 

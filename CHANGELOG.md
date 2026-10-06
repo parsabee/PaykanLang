@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Imported modules are compiled to `.pkm` module files (docs/design/pkm.md, prototype of
+  phase A): the module's interface, its PIR and a manifest, portable across backends.
+  A program's imports are cached as `.paykan_cache/<module>.pkm` and reused while the
+  source, the toolchain and the interfaces of the module's own imports are unchanged
+  (a body edit rebuilds one module, a signature edit its importers); where no source is
+  found, a prebuilt `.pkm` next to it, under `--module-path=<dir>` or `$PAYKAN_MODULE_PATH`
+  is loaded instead, and the program builds and runs identically on the c and llvm
+  backends from it.  New: `--emit-pkm [-o f.pkm]`, `--module-path=<dir>`,
+  `--rebuild-modules`, `--no-module-cache`, `--verbose`, and the `paykan pkm dump|check`
+  command.  The backends' own caches stay beside the module files for now.
+  `samples/imports/13_pkm` walks through it.  Libraries `paykan_pkm` (the file format) and
+  `paykan_modules` (the resolver); the runtime ABI version moved to
+  `PAYKAN_RUNTIME_ABI_VERSION` in `Runtime.h`.
+
 ## [0.1.1] - 2026-10-06
 
 A patch release of 0.1.0.  It accepts plugins built with 0.1.1 and 0.1.0:
