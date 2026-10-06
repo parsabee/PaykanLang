@@ -1,6 +1,6 @@
 # Paykan compiler:
 #   Plugin/ AST/ ASTInterchange/ Diag/ Frontend/ ASTPrinter/ Sema/ PIR/
-#   Backend/ Lowering/
+#   PKM/ Modules/ Backend/ Lowering/
 #                     – the core (standard C++ only)
 #   Frontends/<name>/ – frontend plugins, built when listed in PAYKAN_FRONTENDS
 #   Backends/<name>/  – backend plugins, built when listed in PAYKAN_BACKENDS
@@ -25,6 +25,7 @@ endforeach()
 add_subdirectory(ASTPrinter)
 add_subdirectory(PIR)
 add_subdirectory(PKM)
+add_subdirectory(Modules)
 add_subdirectory(Sema)
 add_subdirectory(Backend)
 add_subdirectory(Lowering)
