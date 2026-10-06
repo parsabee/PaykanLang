@@ -113,6 +113,16 @@ include(HandleLLVMOptions)    # Applies LLVM-recommended compiler flags
 # Scoped alternative to global include_directories() / add_definitions().
 # Link only the targets that actually need LLVM headers & definitions.
 add_library(paykan_llvm INTERFACE)
+
+# paykan_llvm_no_werror(<target>...): warnings are not errors in <target>.
+# For the targets that include LLVM headers (the llvm backend and its JIT,
+# and the tests that use them): the project is C++20, and LLVM 17's headers,
+# C++17 code, draw warnings there that our code can't fix, e.g. libstdc++
+# 15's #warning on the <ciso646> include in llvm/Support/Threading.h.  The
+# warnings are still printed.
+function(paykan_llvm_no_werror)
+    set_target_properties(${ARGN} PROPERTIES PAYKAN_NO_WERROR ON)
+endfunction()
 target_include_directories(paykan_llvm INTERFACE ${LLVM_INCLUDE_DIRS})
 separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
 target_compile_definitions(paykan_llvm INTERFACE ${LLVM_DEFINITIONS_LIST})

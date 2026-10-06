@@ -89,7 +89,10 @@ endif()
 #   target_link_libraries(<target> PRIVATE paykan_compile_options)
 add_library(paykan_compile_options INTERFACE)
 target_compile_options(paykan_compile_options INTERFACE
-    -Wall -Wextra -Wpedantic -Werror
+    -Wall -Wextra -Wpedantic
+    # Warnings are errors, except in a target that sets PAYKAN_NO_WERROR (the
+    # targets that include LLVM headers: cmake/LLVMSetup.cmake).
+    $<$<NOT:$<BOOL:$<TARGET_PROPERTY:PAYKAN_NO_WERROR>>>:-Werror>
     -fno-rtti -fno-exceptions
 )
 target_compile_options(paykan_compile_options INTERFACE
