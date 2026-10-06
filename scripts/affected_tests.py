@@ -3,19 +3,19 @@
 
     scripts/affected_tests.py --base <commit> [--head <commit>]
     scripts/affected_tests.py --files <path>...
+    scripts/affected_tests.py --list
 
 Reads the files changed between <base> and <head> (default HEAD) with
 `git diff --name-only`, or takes them from --files, and prints the test
-suites (cmake/PaykanTests.cmake) those files can affect, as a CMake list
-(`parser;sema`), or `all` when every suite is.  An empty line means no
-suite is affected (a change to the release workflow, say).
+suites those files can affect, as a CMake list (`parser;sema`), or `all`
+when every suite is.  An empty line means no suite is affected (a change to
+the release workflow, say).  --list prints every suite and what it runs.
 
-The rules are deliberately conservative: a file in a library the whole
-compiler uses (the AST, the frontends, the plugin interfaces, the public
-headers, the build system) affects every suite, and a file no rule names
-does too.  Everything that runs the `paykan` binary end to end (the
-codegen, driver, plugin, samples, c-strict, docs and out-of-tree suites)
-depends on every stage of the pipeline.
+The suites and the path rules live in tests/suites.json, the one list that
+CMake (cmake/PaykanTests.cmake) reads too.  The rules are deliberately
+conservative: a file in a library the whole compiler uses (the AST, the
+frontends, the plugin interfaces, the public headers, the build system)
+affects every suite, and a file no rule names does too.
 
 CI (.github/workflows/ci.yml) builds only these suites on a pull request,
 and every suite on a push.
@@ -23,113 +23,54 @@ and every suite on a push.
 
 import argparse
 import fnmatch
+import json
+import os
 import subprocess
 import sys
 
-SUITES = [
-    "parser", "sema", "codegen", "pir-llvm", "pir", "lowering",
-    "ast-interchange", "plugin", "runtime", "driver", "frontend", "samples",
-    "c-strict", "docs", "configure", "out-of-tree",
-]
-
+SUITES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "..", "tests", "suites.json")
 ALL = "all"
 
-# The suites that run the paykan binary (or the whole pipeline) end to end.
-E2E = ["codegen", "driver", "plugin", "samples", "c-strict", "docs", "out-of-tree"]
 
-# (pattern, suites): the first pattern a path matches decides.  `*` matches
-# across directories (fnmatch), so "src/Sema/*" covers the whole subtree.
-RULES = [
-    # The test harness itself.
-    ("scripts/affected_tests.py", ALL),
-    (".github/workflows/ci.yml", ALL),
-    ("tests/CMakeLists.txt", ALL),
-    ("cmake/PaykanTests.cmake", ALL),
-    ("cmake/GTestSetup.cmake", ALL),
+def load(path: str = SUITES_FILE):
+    """The suites (in order) and the rules, with groups expanded."""
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    suites = data["suites"]
+    groups = data.get("groups", {})
 
-    # Tests, by suite.
-    ("tests/Parser/*", ["parser"]),
-    ("tests/Sema/*", ["sema"]),
-    ("tests/CodeGen/*", ["codegen"]),
-    ("tests/CodeGenTestUtils.h", ["codegen"]),
-    ("tests/Backends/*", ["pir-llvm"]),
-    ("tests/PIR/*", ["pir"]),
-    ("tests/Lowering/*", ["lowering"]),
-    ("tests/AST/*", ["ast-interchange"]),
-    ("tests/Plugin/*", ["plugin"]),
-    ("tests/Runtime/*", ["runtime"]),
-    ("tests/Driver/*", ["driver"]),
-    ("tests/Frontend/*", ["frontend", "out-of-tree"]),
-    ("tests/OutOfTree/*", ["out-of-tree"]),
-    ("tests/DefaultConfigure.cmake", ["configure"]),
-    ("tests/*", ALL),  # shared helpers (TestUtils.h, ...)
+    def expand(names, where):
+        out = []
+        for name in names:
+            if name.startswith("@"):
+                if name[1:] not in groups:
+                    sys.exit(f"error: {path}: unknown group '{name}' in {where}")
+                out.extend(expand(groups[name[1:]], f"group '{name}'"))
+            elif name in suites:
+                out.append(name)
+            else:
+                sys.exit(f"error: {path}: unknown suite '{name}' in {where}")
+        return out
 
-    # The compiler, by stage.
-    ("src/Sema/*", ["sema", "lowering"] + E2E),
-    ("src/Lowering/*", ["lowering", "pir-llvm"] + E2E),
-    ("src/PIR/*", ["pir", "lowering", "pir-llvm"] + E2E),
-    ("src/ASTInterchange/*", ["ast-interchange", "driver", "plugin", "out-of-tree"]),
-    ("src/Runtime/*", ["runtime", "pir-llvm"] + E2E),
-    ("src/Backends/LLVM/*", ["pir-llvm"] + E2E),
-    ("src/Backends/C/*", E2E),
-    ("src/Backends/Toolchain/*", E2E),
-    ("src/Backend/*", ["pir-llvm"] + E2E),
-    ("src/Driver/*", E2E),
-    # The example plugins, built against an installation.
-    ("src/Backends/PrintPIR/*", ["out-of-tree"]),
-    ("src/Frontends/ASTText/*", ["out-of-tree"]),
-    # Everything else in src/ and include/ (AST, Diag, the frontends, the
-    # plugin interfaces and host, ...) is used by every suite.
-    ("src/*", ALL),
-    ("include/*", ALL),
-
-    # Inputs of the script-driven suites.
-    ("samples/*", ["samples", "c-strict", "docs", "lowering", "ast-interchange",
-                   "frontend", "plugin", "out-of-tree"]),
-    ("scripts/samples_parity.py", ["samples"]),
-    ("scripts/cache_race.py", ["samples"]),
-    ("scripts/runtime_lookup.py", ["samples"]),
-    ("scripts/c_strict.py", ["c-strict"]),
-    ("scripts/check_links.py", ["docs"]),
-    ("scripts/doc_examples.py", ["docs"]),
-    ("docs/*", ["docs"]),
-    ("*.md", ["docs"]),
-    ("cmake/PaykanTestSupport.cmake", ["frontend", "out-of-tree"]),
-
-    # Not covered by any test suite (CI's lint and release jobs check them).
-    ("scripts/clang_format.py", []),
-    ("scripts/run_clang_tidy.py", []),
-    ("scripts/coverage.py", []),
-    ("scripts/build_apt_repo.sh", []),
-    (".github/*", []),
-    ("Formula/*", []),
-    (".clang-format", []),
-    (".clang-tidy", ALL),  # clang-tidy checks the test sources too
-    (".pre-commit-config.yaml", []),
-    (".gitignore", []),
-    ("LICENSE", []),
-
-    # The build system.
-    ("cmake/*", ALL),
-    ("CMakeLists.txt", ALL),
-]
+    rules = []
+    for pattern, names in data["rules"]:
+        if names == ALL:
+            rules.append((pattern, ALL))
+        else:
+            rules.append((pattern, expand(names, f"the rule for '{pattern}'")))
+    return suites, rules
 
 
-def suites_for(path: str):
-    for pattern, suites in RULES:
-        if fnmatch.fnmatchcase(path, pattern):
-            return suites
-    return ALL  # unknown: assume it affects everything
-
-
-def affected(paths):
+def affected(paths, suites, rules):
     selected = set()
     for path in paths:
-        suites = suites_for(path)
-        if suites == ALL:
-            return ALL
-        selected.update(suites)
-    return [s for s in SUITES if s in selected]
+        hit = next((names for pattern, names in rules
+                    if fnmatch.fnmatchcase(path, pattern)), ALL)
+        if hit == ALL:
+            return ALL  # an unknown path affects everything
+        selected.update(hit)
+    return [s for s in suites if s in selected]
 
 
 def changed_files(base: str, head: str):
@@ -145,11 +86,19 @@ def main() -> int:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--base", help="the commit to diff against")
     group.add_argument("--files", nargs="*", help="the changed files")
+    group.add_argument("--list", action="store_true", help="list the suites")
     parser.add_argument("--head", default="HEAD", help="default: HEAD")
     args = parser.parse_args()
 
+    suites, rules = load()
+    if args.list:
+        width = max(len(name) for name in suites)
+        for name, info in suites.items():
+            print(f"{name:<{width}}  {info['description']}")
+        return 0
+
     paths = args.files if args.files is not None else changed_files(args.base, args.head)
-    result = affected(paths)
+    result = affected(paths, suites, rules)
     print(ALL if result == ALL else ";".join(result))
     return 0
 

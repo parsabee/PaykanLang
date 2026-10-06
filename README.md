@@ -226,10 +226,8 @@ cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
 ctest --test-dir build --output-on-failure
 ```
 
-The suites: `parser`, `sema`, `codegen`, `pir-llvm`, `pir`, `lowering`, `ast-interchange`,
-`plugin`, `runtime`, `driver`, `frontend`, `samples`, `c-strict`, `docs`, `configure` and
-`out-of-tree` ([`cmake/PaykanTests.cmake`](cmake/PaykanTests.cmake) says what each runs).
-The GoogleTest-based ones need GoogleTest: an installed one if CMake finds it, otherwise one
+The suites are listed in [`tests/suites.json`](tests/suites.json);
+`scripts/affected_tests.py --list` prints them with what each runs. The GoogleTest-based ones need GoogleTest: an installed one if CMake finds it, otherwise one
 downloaded at configure time.
 
 `scripts/affected_tests.py --base <commit>` prints the suites a change can affect; CI builds

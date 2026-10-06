@@ -5,11 +5,6 @@
 # (-DPAYKAN_BUILD_TESTS=<suites> or -DPAYKAN_BUILD_ALL_TESTS=ON).
 # ----------------------------------------------------------------------------
 
-# PAYKAN_TEST_SUITE_<suite> (pir-llvm -> pir_llvm, ...): whether it is built.
-foreach(suite IN LISTS PAYKAN_TEST_SUITES)
-    string(MAKE_C_IDENTIFIER "${suite}" id)
-    paykan_test_suite_enabled(${suite} PAYKAN_TEST_SUITE_${id})
-endforeach()
 
 # The plugin build versions this build accepts, for the plugin, driver and
 # out-of-tree suites.
@@ -22,6 +17,7 @@ if("llvm" IN_LIST PAYKAN_BACKENDS)
 endif()
 
 # --- Parser tests (parser) ---------------------------------------------------
+paykan_test_suite(parser PAYKAN_TEST_SUITE_parser)
 if(PAYKAN_TEST_SUITE_parser)
 add_executable(parser_tests
     Parser/ArithTests.cpp
@@ -58,6 +54,7 @@ endforeach()
 endif()
 
 # --- Sema tests (sema) -------------------------------------------------------
+paykan_test_suite(sema PAYKAN_TEST_SUITE_sema)
 if(PAYKAN_TEST_SUITE_sema)
 add_executable(sema_tests
     Sema/ArithTests.cpp
@@ -95,6 +92,7 @@ endforeach()
 endif()
 
 # --- CodeGen / E2E tests, every backend (codegen) ----------------------------
+paykan_test_suite(codegen PAYKAN_TEST_SUITE_codegen)
 if(PAYKAN_TEST_SUITE_codegen)
 # One executable; ctest runs it once per backend that can run programs
 # (PAYKAN_TEST_BACKEND selects the one the compile-and-run helpers use, see
@@ -161,6 +159,7 @@ endif()
 
 # --- PIR -> LLVM translation tests: hand-written PIR, run through the JIT ----
 # --- (pir-llvm) ---------------------------------------------------------------
+paykan_test_suite(pir-llvm PAYKAN_TEST_SUITE_pir_llvm)
 if(PAYKAN_TEST_SUITE_pir_llvm AND "llvm" IN_LIST PAYKAN_BACKENDS)
     add_executable(pir_llvm_tests
         Backends/PIRLLVMTests.cpp
@@ -185,6 +184,7 @@ if(PAYKAN_TEST_SUITE_pir_llvm AND "llvm" IN_LIST PAYKAN_BACKENDS)
 endif()
 
 # --- PIR tests: printer, parser, verifier (pir) ------------------------------
+paykan_test_suite(pir PAYKAN_TEST_SUITE_pir)
 if(PAYKAN_TEST_SUITE_pir)
 add_executable(pir_tests
     PIR/PIRTests.cpp
@@ -199,6 +199,7 @@ endif()
 
 # --- Lowering tests (AST -> PIR, checked as printed PIR; PIR text round trip
 # --- over the samples corpus) (lowering) -------------------------------------
+paykan_test_suite(lowering PAYKAN_TEST_SUITE_lowering)
 if(PAYKAN_TEST_SUITE_lowering)
 add_executable(lowering_tests
     Lowering/LoweringTests.cpp
@@ -225,6 +226,7 @@ endif()
 
 # --- The AST interchange format: the round trip over the samples corpus and --
 # --- the reader's errors, tests/AST/InterchangeTests.cpp (ast-interchange) ----
+paykan_test_suite(ast-interchange PAYKAN_TEST_SUITE_ast_interchange)
 if(PAYKAN_TEST_SUITE_ast_interchange)
 add_executable(ast_interchange_tests
     AST/InterchangeTests.cpp
@@ -244,6 +246,7 @@ add_test(NAME ASTInterchangeTests COMMAND ast_interchange_tests)
 endif()
 
 # --- Plugin registry: the compatibility check, #103 (plugin) ------------------
+paykan_test_suite(plugin PAYKAN_TEST_SUITE_plugin)
 if(PAYKAN_TEST_SUITE_plugin)
 add_executable(plugin_tests
     Plugin/RegistryTests.cpp
@@ -351,6 +354,7 @@ endif()
 # A driver with every plugin of the build plus a frontend and a backend that
 # claim to be built with a PaykanLang version this one does not accept
 # (Driver/IncompatiblePlugins.cpp), for the driver tests (driver).
+paykan_test_suite(driver PAYKAN_TEST_SUITE_driver)
 if(PAYKAN_TEST_SUITE_driver)
 add_executable(paykan_incompatible_plugins
     ${CMAKE_SOURCE_DIR}/src/Driver/driver_main.cpp
@@ -364,6 +368,7 @@ paykan_link_plugins(paykan_incompatible_plugins)
 endif()
 
 # --- Runtime tests (runtime) -------------------------------------------------
+paykan_test_suite(runtime PAYKAN_TEST_SUITE_runtime)
 if(PAYKAN_TEST_SUITE_runtime)
 add_executable(runtime_tests
     Runtime/ArrayTests.cpp
@@ -390,6 +395,7 @@ add_test(NAME RuntimeTests COMMAND runtime_tests)
 endif()
 
 # --- Driver smoke tests: --check-only, --dump-ast (driver) -------------------
+paykan_test_suite(driver PAYKAN_TEST_SUITE_driver)
 if(PAYKAN_TEST_SUITE_driver)
 add_executable(driver_tests
     Driver/DriverTests.cpp
@@ -446,6 +452,7 @@ foreach(be IN LISTS PAYKAN_BACKENDS)
         list(APPEND PAYKAN_SAMPLES_BACKENDS --backend ${be})
     endif()
 endforeach()
+paykan_test_suite(samples PAYKAN_TEST_SUITE_samples)
 if(PAYKAN_TEST_SUITE_samples AND PAYKAN_SAMPLES_BACKENDS)
     paykan_add_python_test(SamplesParity samples_parity.py
                 --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
@@ -495,6 +502,7 @@ endif()
 # checked too, unless the runtime archive is sanitizer- or
 # coverage-instrumented (it then links only with the compiler that built it).
 # (c-strict)
+paykan_test_suite(c-strict PAYKAN_TEST_SUITE_c_strict)
 if(PAYKAN_TEST_SUITE_c_strict AND "c" IN_LIST PAYKAN_BACKENDS)
     set(PAYKAN_STRICT_CCS "")
     find_program(PAYKAN_STRICT_GCC NAMES gcc)
@@ -523,6 +531,7 @@ endif()
 # --- the samples corpus (an out-of-tree frontend runs the fuzz smoke and -----
 # --- differential tests, and the parser and Sema suites, through ------------
 # --- paykan_add_frontend_tests: cmake/PaykanTestSupport.cmake) (frontend) ----
+paykan_test_suite(frontend PAYKAN_TEST_SUITE_frontend)
 if(PAYKAN_TEST_SUITE_frontend)
 add_executable(frontend_tests
     Frontend/LexerTests.cpp
@@ -551,6 +560,7 @@ endif()
 # (#123).  Configure only, in a scratch directory of its own.  Not in a
 # coverage build: it runs no instrumented code, and scripts/coverage.py
 # requires every test to write a profile.  (configure)
+paykan_test_suite(configure PAYKAN_TEST_SUITE_configure)
 if(PAYKAN_TEST_SUITE_configure AND NOT PAYKAN_COVERAGE)
     add_test(NAME DefaultConfigure
         COMMAND ${CMAKE_COMMAND}
@@ -567,9 +577,11 @@ endif()
 # --- prints it (scripts/doc_examples.py). MarkdownLinks is not in a coverage
 # --- build: it runs no instrumented code, and scripts/coverage.py requires
 # --- every test to write a profile. (docs)
+paykan_test_suite(docs PAYKAN_TEST_SUITE_docs)
 if(PAYKAN_TEST_SUITE_docs AND NOT PAYKAN_COVERAGE)
     paykan_add_python_test(MarkdownLinks check_links.py)
 endif()
+paykan_test_suite(docs PAYKAN_TEST_SUITE_docs)
 if(PAYKAN_TEST_SUITE_docs AND PAYKAN_SAMPLES_BACKENDS)
     paykan_add_python_test(DocExamples doc_examples.py
                 --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
@@ -582,6 +594,7 @@ endif()
 # --- (tests/OutOfTree/PrintPIR.cmake; CI's install job does the same). ------
 # --- Skipped for instrumented builds, whose installed libraries only link ---
 # --- with the instrumentation flags. (out-of-tree)
+paykan_test_suite(out-of-tree PAYKAN_TEST_SUITE_out_of_tree)
 if(PAYKAN_TEST_SUITE_out_of_tree AND NOT PAYKAN_SANITIZER_FLAGS
    AND NOT PAYKAN_COVERAGE_FLAGS)
     set(PAYKAN_OOT_ARGS "")
@@ -621,6 +634,7 @@ endif()
 # --- frontend and run them (tests/OutOfTree/FrontendTests.cmake), as an -----
 # --- out-of-tree frontend does. Skipped for instrumented builds, like -------
 # --- PrintPIROutOfTree.
+paykan_test_suite(out-of-tree PAYKAN_TEST_SUITE_out_of_tree)
 if(PAYKAN_TEST_SUITE_out_of_tree AND PAYKAN_INSTALL_TEST_SUPPORT
    AND NOT PAYKAN_SANITIZER_FLAGS AND NOT PAYKAN_COVERAGE_FLAGS)
     set(PAYKAN_OOT_FE_ARGS "")
@@ -647,3 +661,6 @@ if(PAYKAN_TEST_SUITE_out_of_tree AND PAYKAN_INSTALL_TEST_SUPPORT
                          FrontendTestsOutOfTree PROPERTIES
         RESOURCE_LOCK paykan_install)
 endif()
+
+# Every suite of tests/suites.json has a section above.
+paykan_check_test_suites()
