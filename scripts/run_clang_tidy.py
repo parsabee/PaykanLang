@@ -119,7 +119,7 @@ def main() -> int:
     if not os.path.isfile(compile_db):
         sys.exit(
             f"error: {compile_db} not found; configure CMake first "
-            f"(cmake -B {build_dir})"
+            f"(cmake -B {build_dir} -DPAYKAN_BUILD_ALL_TESTS=ON)"
         )
 
     # Absolute paths throughout: clang-tidy runs each TU from the directory

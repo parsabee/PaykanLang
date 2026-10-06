@@ -4,9 +4,9 @@
 # Include this module in the root CMakeLists.txt after the compiler gate.
 #
 # Usage:
-#   cmake -B build-asan  -DPAYKAN_ASAN=ON
-#   cmake -B build-ubsan -DPAYKAN_UBSAN=ON
-#   cmake -B build-tsan  -DPAYKAN_TSAN=ON
+#   cmake -B build-asan  -DPAYKAN_BUILD_ALL_TESTS=ON -DPAYKAN_ASAN=ON
+#   cmake -B build-ubsan -DPAYKAN_BUILD_ALL_TESTS=ON -DPAYKAN_UBSAN=ON
+#   cmake -B build-tsan  -DPAYKAN_BUILD_ALL_TESTS=ON -DPAYKAN_TSAN=ON
 #
 # Note: ASan and TSan are mutually exclusive — do not combine them.
 # UBSan can be combined with either: -DPAYKAN_ASAN=ON -DPAYKAN_UBSAN=ON

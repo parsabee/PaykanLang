@@ -75,10 +75,10 @@ $ cmake --build build --parallel
 $ build/bin/paykan --version
 ```
 
-The default build needs nothing else. It also builds the test suite, which needs GoogleTest
-and downloads it when CMake does not find one installed; configure with
-`-DPAYKAN_BUILD_TESTS=OFF` to skip the tests. To install the compiler and its runtime under a
-prefix:
+The default build needs nothing else and downloads nothing. It does not build the tests;
+configure with `-DPAYKAN_BUILD_ALL_TESTS=ON` to build them all, or name the suites you want
+with `-DPAYKAN_BUILD_TESTS=<suites>` (the README's Testing section lists them). To install
+the compiler and its runtime under a prefix:
 
 ```sh
 $ cmake --install build --prefix /usr/local
