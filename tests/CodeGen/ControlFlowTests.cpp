@@ -11,9 +11,7 @@ static std::string wrapMain(const std::string &body) {
   return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
-// ============================================================================
-// if / else
-// ============================================================================
+// -- if / else
 
 TEST(ControlFlow, IfTrue) {
   auto r = compileAndRun(wrapMain(R"(
@@ -129,9 +127,7 @@ TEST(ControlFlow, IfWithReturn) {
   EXPECT_EQ(r.StdOut, "1\n-1\n0\n");
 }
 
-// ============================================================================
-// while
-// ============================================================================
+// -- while
 
 TEST(ControlFlow, WhileCountUp) {
   auto r = compileAndRun(wrapMain(R"(
@@ -202,9 +198,7 @@ TEST(ControlFlow, NestedWhile) {
   EXPECT_EQ(r.StdOut, "9\n");
 }
 
-// ============================================================================
-// Logical operators && ||
-// ============================================================================
+// -- Logical operators && ||
 
 TEST(ControlFlow, LogicalAndTrueTrue) {
   auto r = compileAndRun(wrapMain(R"(
@@ -322,9 +316,7 @@ TEST(ControlFlow, LogicalNot) {
   EXPECT_EQ(r.StdOut, "False\nTrue\n");
 }
 
-// ============================================================================
-// Ternary expressions
-// ============================================================================
+// -- Ternary expressions
 
 TEST(ControlFlow, TernaryTrueBranch) {
   auto r = compileAndRun(wrapMain(R"(
@@ -372,9 +364,7 @@ TEST(ControlFlow, TernaryBoolResult) {
   EXPECT_EQ(r.StdOut, "False\n");
 }
 
-// ============================================================================
-// break / continue
-// ============================================================================
+// -- break / continue
 
 TEST(ControlFlow, BreakExitsLoop) {
   auto r = compileAndRun(wrapMain(R"(

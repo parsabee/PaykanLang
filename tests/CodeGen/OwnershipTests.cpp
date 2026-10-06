@@ -25,9 +25,7 @@ extern "C" {
 
 using namespace paykan::test;
 
-// ============================================================================
-// A1 — `self` used as a value
-// ============================================================================
+// -- A1 — `self` used as a value
 
 // Returning `self` from a method must hand out a +1 on the object's existing
 // box, not wrap the raw receiver in a second box (double free on scope exit).
@@ -122,9 +120,7 @@ TEST(Ownership, AssignSelfToLocal) {
   g.expectNoLeaks("AssignSelfToLocal");
 }
 
-// ============================================================================
-// A2 — match-arm bindings with ownership-taking consumers
-// ============================================================================
+// -- A2 — match-arm bindings with ownership-taking consumers
 
 // Binding whose subject is a plain owned variable (no recorded backing box):
 // passing it to a consuming callee must recover the subject's box.
@@ -289,9 +285,7 @@ TEST(Ownership, MatchBindingBackedControl) {
   g.expectNoLeaks("MatchBindingBackedControl");
 }
 
-// ============================================================================
-// A4 — array-typed class fields
-// ============================================================================
+// -- A4 — array-typed class fields
 
 // An array field must be stored as a retained box: the destructor releases
 // the slot as a box, so a raw store would be a use-after-free / double free.
@@ -336,9 +330,7 @@ TEST(Ownership, ArrayFieldReassign) {
   g.expectNoLeaks("ArrayFieldReassign");
 }
 
-// ============================================================================
-// A5 — push/pop/length/equality on non-identifier receivers
-// ============================================================================
+// -- A5 — push/pop/length/equality on non-identifier receivers
 
 // push on a call-result receiver: the receiver type comes from the resolved
 // expression type, and the fresh receiver box is released after the call.
@@ -465,9 +457,7 @@ TEST(Ownership, ImplicitDeclFromObjectArrayElement) {
   g.expectNoLeaks("ImplicitDeclFromObjectArrayElement");
 }
 
-// ============================================================================
-// Nested member access (surfaced by A2's member-assign repro)
-// ============================================================================
+// -- Nested member access (surfaced by A2's member-assign repro)
 
 // h.a.x must unwrap the intermediate field's box before GEPing — reading a
 // "field" out of the PaykanShared box returns its refCount/object words.
@@ -496,9 +486,7 @@ TEST(Ownership, NestedMemberAccessUnwrapsBox) {
   g.expectNoLeaks("NestedMemberAccessUnwrapsBox");
 }
 
-// ============================================================================
-// B8 — vtable-convention narrowing through `mov` on assignment
-// ============================================================================
+// -- B8 — vtable-convention narrowing through `mov` on assignment
 
 // `y = mov derived` on a base-typed variable must narrow the scope type to
 // the concrete class so later method calls dispatch with the derived
@@ -528,9 +516,7 @@ TEST(Ownership, MovNarrowsAssignedBaseVar) {
   g.expectNoLeaks("MovNarrowsAssignedBaseVar");
 }
 
-// ============================================================================
-// Unique-box invariant at the runtime level
-// ============================================================================
+// -- Unique-box invariant at the runtime level
 
 // Boxing the same object twice yields the SAME box with a bumped refcount —
 // the invariant that makes every raw-alias boxing site safe.

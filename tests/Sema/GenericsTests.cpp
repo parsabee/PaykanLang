@@ -54,9 +54,7 @@ CheckedProgram check(const std::string &source) {
 
 } // namespace
 
-// ============================================================================
-// Instantiation identity and registration
-// ============================================================================
+// -- Instantiation identity and registration
 
 // Two uses of `Box<int>` resolve to one ClassType (cached per canonical
 // argument tuple, like Array<T>), and the annotation slots are rewritten to it.
@@ -228,9 +226,7 @@ TEST(Generics, UninstantiatedTemplateBodyIsNotChecked) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// ============================================================================
-// Diagnostics
-// ============================================================================
+// -- Diagnostics
 
 TEST(Generics, ArityErrorOnType) {
   auto r = semaCheck(withMain(kBox, "b: Box<int, Str> = Box<int>(1);"));
@@ -402,9 +398,7 @@ TEST(Generics, WrongConstructorArgumentNamesInstantiation) {
       << r.Diagnostics;
 }
 
-// ============================================================================
-// Type-argument inference for generic functions
-// ============================================================================
+// -- Type-argument inference for generic functions
 
 TEST(Generics, InferenceFromPlainArrayAndBoxParams) {
   auto r = semaCheck(withMain(std::string(kBox) + R"(
@@ -469,9 +463,7 @@ TEST(Generics, ConstructorArgumentInference) {
       << r2.Diagnostics;
 }
 
-// ============================================================================
-// Imports
-// ============================================================================
+// -- Imports
 
 namespace {
 std::string writeProjectFile(const std::filesystem::path &dir,
@@ -718,9 +710,7 @@ fn main() -> int { b = Box<int>(1); return 0; }
   std::filesystem::remove_all(dir);
 }
 
-// ============================================================================
-// Interaction with tuples (#4) and optionals (#5)
-// ============================================================================
+// -- Interaction with tuples (#4) and optionals (#5)
 
 // Tuple and optional types in template signatures and bodies are substituted
 // per instantiation (tuple literals, `.N`, destructuring, `T?`, match arms).

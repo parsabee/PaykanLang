@@ -11,9 +11,7 @@ static std::string wrapMain(const std::string &body) {
   return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
-// ============================================================================
-// int[] subscript assignment
-// ============================================================================
+// -- int[] subscript assignment
 
 TEST(ArrayAssign, IntArray) {
   auto r = compileAndRun(wrapMain(R"(
@@ -46,9 +44,7 @@ TEST(ArrayAssign, IntArrayLoopOverwrite) {
   EXPECT_EQ(r.StdOut, "0\n1\n4\n9\n16\n");
 }
 
-// ============================================================================
-// float[] subscript assignment
-// ============================================================================
+// -- float[] subscript assignment
 
 TEST(ArrayAssign, FloatArray) {
   auto r = compileAndRun(wrapMain(R"(
@@ -62,9 +58,7 @@ TEST(ArrayAssign, FloatArray) {
   EXPECT_EQ(r.StdOut, "1\n9.5\n3\n");
 }
 
-// ============================================================================
-// bool[] subscript assignment
-// ============================================================================
+// -- bool[] subscript assignment
 
 TEST(ArrayAssign, BoolArray) {
   auto r = compileAndRun(wrapMain(R"(
@@ -79,9 +73,7 @@ TEST(ArrayAssign, BoolArray) {
   EXPECT_EQ(r.StdOut, "False\nFalse\nFalse\n");
 }
 
-// ============================================================================
-// Str[] subscript assignment
-// ============================================================================
+// -- Str[] subscript assignment
 
 TEST(ArrayAssign, StrArray) {
   auto r = compileAndRun(wrapMain(R"(
@@ -106,9 +98,7 @@ TEST(ArrayAssign, StrArrayMultipleWrites) {
   EXPECT_EQ(r.StdOut, "second\n");
 }
 
-// ============================================================================
-// String subscript read: s[i] -> Str (single char string)
-// ============================================================================
+// -- String subscript read: s[i] -> Str (single char string)
 
 TEST(ArraySubscript, StringIndexRead) {
   // s[i] on a Str yields a char — wrap with Str<char> to print.
@@ -131,9 +121,7 @@ TEST(ArraySubscript, StringIndexBuildResult) {
   EXPECT_EQ(r.StdOut, "cba\n");
 }
 
-// ============================================================================
-// push/pop still work after subscript assign
-// ============================================================================
+// -- push/pop still work after subscript assign
 
 TEST(ArrayAssign, PushAfterAssign) {
   auto r = compileAndRun(wrapMain(R"(
@@ -147,7 +135,6 @@ TEST(ArrayAssign, PushAfterAssign) {
   EXPECT_EQ(r.StdOut, "10\n4\n");
 }
 
-// ============================================================================
 // Reference-typed arrays reached through a member access / call (regression).
 //
 // Subscripting or passing an array that comes from a member access
@@ -155,7 +142,6 @@ TEST(ArrayAssign, PushAfterAssign) {
 // PaykanShared* box to the raw PaykanArray* first.  These used to read
 // length/data from the box struct (len=0 traps, garbage elements) or
 // over-release the object.
-// ============================================================================
 
 TEST(RefField, SubscriptObjectArrayField) {
   auto r = compileAndRun(R"(
@@ -291,11 +277,9 @@ fn main() -> int {
   EXPECT_EQ(r.StdOut, "99\n");
 }
 
-// ============================================================================
 // int -> float promotion into float[] element slots.  Every scalar store
 // promotes; the element paths (literal, push, subscript store) used to store
 // the integer bit pattern, which read back as a denormal double.
-// ============================================================================
 
 TEST(ArrayPromotion, IntElementsIntoFloatArray) {
   auto r = compileAndRun(R"(

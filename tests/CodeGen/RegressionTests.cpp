@@ -17,9 +17,7 @@ extern "C" {
 
 using namespace paykan::test;
 
-// ============================================================================
-// Ref-typed (array / tuple) parameters of user methods
-// ============================================================================
+// -- Ref-typed (array / tuple) parameters of user methods
 
 TEST(Regression, MethodArrayParam) {
   LeakGuard g;
@@ -124,9 +122,7 @@ TEST(Regression, MethodEqualsOverrideAndArrayEquals) {
   g.expectNoLeaks("MethodEqualsOverrideAndArrayEquals");
 }
 
-// ============================================================================
-// Inferred-type variables initialised from a ref-typed ternary
-// ============================================================================
+// -- Inferred-type variables initialised from a ref-typed ternary
 
 TEST(Regression, InferredClassTernaryReceiver) {
   LeakGuard g;
@@ -194,9 +190,7 @@ TEST(Regression, InferredArrayTupleOptionalTernary) {
   EXPECT_EQ(r.StdOut, "1116\n2028\n");
   g.expectNoLeaks("InferredArrayTupleOptionalTernary");
 }
-// ============================================================================
-// Array subscript: char elements and temporary (call-rooted) receivers
-// ============================================================================
+// -- Array subscript: char elements and temporary (call-rooted) receivers
 
 TEST(Regression, CharArrayElements) {
   LeakGuard g;
@@ -307,9 +301,7 @@ TEST(Regression, CallRootedSubscriptAssign) {
   EXPECT_EQ(r.ExitCode, 0);
   g.expectNoLeaks("CallRootedSubscriptAssign");
 }
-// ============================================================================
-// Class functions referenced before their class body is emitted
-// ============================================================================
+// -- Class functions referenced before their class body is emitted
 
 namespace {
 
@@ -504,9 +496,7 @@ TEST(Regression, SuperArgumentsAreBoxed) {
   EXPECT_EQ(r.StdOut, "literal12\nc!2\nfwd33fwd1\n");
   g.expectNoLeaks("SuperArgumentsAreBoxed");
 }
-// ============================================================================
-// Empty array literals take their element type from the destination
-// ============================================================================
+// -- Empty array literals take their element type from the destination
 
 TEST(Regression, PushOntoEmptyArrayFieldFromMethod) {
   LeakGuard g;
@@ -764,11 +754,9 @@ fn main() -> int {
   std::filesystem::remove_all(dir);
 }
 
-// ============================================================================
 // Issue #95: push/pop at the array capacity boundary thrashed (two reallocs
 // per pair).  The issue's repro, scaled down: peak 100,000 (cap 131,072),
 // then 20,000 push/pop pairs at len 65,536 = cap/2.
-// ============================================================================
 
 TEST(Regression, ArrayPushPopAtCapacityBoundary) {
   LeakGuard g;

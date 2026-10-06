@@ -1,6 +1,5 @@
 # PaykanFrontendTests.cmake -- installed with Paykan, included by
 # PaykanConfig.cmake (find_package(Paykan))
-# ----------------------------------------------------------------------------
 # Test support for out-of-tree frontends (docs/writing-a-frontend-plugin.md): the
 # frontend-parameterized parser and Sema suites, the fuzz smoke and
 # differential tests, and the samples corpus of this Paykan installation,
@@ -39,7 +38,6 @@
 #   INSTALLED paykan (PAYKAN_EXECUTABLE) with only PLUGIN loaded over the
 #   samples corpus and compares every --dump-ast with recursive-descent's
 #   (PaykanFrontendCheck.cmake).  Call enable_testing() first.
-# ----------------------------------------------------------------------------
 
 get_filename_component(PAYKAN_TEST_SUPPORT_DIR
     "${CMAKE_CURRENT_LIST_DIR}/@PAYKAN_TEST_SUPPORT_RELDIR@" ABSOLUTE)

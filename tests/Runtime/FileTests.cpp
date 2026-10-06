@@ -15,9 +15,7 @@ extern "C" {
 
 #include "RuntimeEqualsHelper.h"
 
-// ============================================================================
-// Helpers
-// ============================================================================
+// -- Helpers
 
 // Create a temporary file, write content into it, rewind, and return the path.
 // The caller is responsible for removing the file with std::remove().
@@ -48,9 +46,7 @@ static PaykanObject *strObj(const char *s) {
   return (PaykanObject *)PaykanString_new(s, (int64_t)strlen(s));
 }
 
-// ============================================================================
-// PaykanFile_new
-// ============================================================================
+// -- PaykanFile_new
 
 TEST(FileNew, AllocatesWithNullHandle) {
   PaykanFile *f = PaykanFile_new();
@@ -65,9 +61,7 @@ TEST(FileNew, VtableIsFileVtable) {
   PaykanFile_destroy((PaykanObject *)f);
 }
 
-// ============================================================================
-// PaykanFile_destroy
-// ============================================================================
+// -- PaykanFile_destroy
 
 TEST(FileDestroy, ClosesOpenHandle) {
   // Open a real file, then destroy — fclose should be called without crashing.
@@ -86,9 +80,7 @@ TEST(FileDestroy, NullHandleIsHarmless) {
   PaykanFile_destroy((PaykanObject *)f); // must not crash
 }
 
-// ============================================================================
-// PaykanFile_toString
-// ============================================================================
+// -- PaykanFile_toString
 
 TEST(FileToString, ContainsFilePrefix) {
   PaykanFile *f = PaykanFile_new();
@@ -100,9 +92,7 @@ TEST(FileToString, ContainsFilePrefix) {
   PaykanFile_destroy((PaykanObject *)f);
 }
 
-// ============================================================================
-// PaykanFile_equals
-// ============================================================================
+// -- PaykanFile_equals
 
 TEST(FileEquals, SameObjectIsEqual) {
   PaykanFile *f = PaykanFile_new();
@@ -122,9 +112,7 @@ TEST(FileEquals, DifferentObjectsAreNotEqual) {
   PaykanFile_destroy((PaykanObject *)b);
 }
 
-// ============================================================================
-// PaykanFile_open
-// ============================================================================
+// -- PaykanFile_open
 
 TEST(FileOpen, SuccessReturnsFile) {
   std::string path = makeTempFile("");
@@ -181,9 +169,7 @@ TEST(FileOpen, OpenForWrite) {
   std::remove(path);
 }
 
-// ============================================================================
-// PaykanFile_write
-// ============================================================================
+// -- PaykanFile_write
 
 TEST(FileWrite, WritesContentToFile) {
   char path[] = "/tmp/paykan_file_write2_XXXXXX";
@@ -238,9 +224,7 @@ TEST(FileWrite, EmptyStringIsHarmless) {
   std::remove(path);
 }
 
-// ============================================================================
-// PaykanFile_readln
-// ============================================================================
+// -- PaykanFile_readln
 
 TEST(FileReadln, ReadsSingleLine) {
   std::string path = makeTempFile("hello\nworld\n");
@@ -354,9 +338,7 @@ TEST(FileReadln, LongLineTriggersBufferGrowth) {
   std::remove(path.c_str());
 }
 
-// ============================================================================
-// write + readln round-trip
-// ============================================================================
+// -- write + readln round-trip
 
 TEST(FileRoundTrip, WriteAndReadBack) {
   char path[] = "/tmp/paykan_roundtrip_XXXXXX";
@@ -410,9 +392,7 @@ TEST(FileRoundTrip, WriteAndReadBack) {
   std::remove(path);
 }
 
-// ============================================================================
-// PaykanFile_readbytes
-// ============================================================================
+// -- PaykanFile_readbytes
 
 TEST(FileReadbytes, ReadsUpToN) {
   std::string path = makeTempFile("hello world");
@@ -470,9 +450,7 @@ TEST(FileReadbytes, ReturnsNoneAtEOF) {
   std::remove(path.c_str());
 }
 
-// ============================================================================
-// PaykanFile_read
-// ============================================================================
+// -- PaykanFile_read
 
 TEST(FileRead, ReadsEntireFile) {
   std::string path = makeTempFile("line1\nline2\n");
@@ -511,9 +489,7 @@ TEST(FileRead, ReturnsNoneOnEmptyFile) {
   std::remove(path.c_str());
 }
 
-// ============================================================================
-// PaykanFile_Stdin singleton safety
-// ============================================================================
+// -- PaykanFile_Stdin singleton safety
 
 TEST(FileStdin, SingletonHasCorrectVtable) {
   // Stdin uses a separate vtable (no-op destroy), but file operations must

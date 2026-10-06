@@ -900,7 +900,7 @@ fn main() -> int { return 0; }
   std::filesystem::remove_all(tmp);
 }
 
-// -- A failed module is reported once per compilation (#132) -----------------
+// -- A failed module is reported once per compilation (#132)
 //
 // However many import paths reach a module that fails -- not found, or with
 // errors of its own -- its failure is reported where it happens, once; every

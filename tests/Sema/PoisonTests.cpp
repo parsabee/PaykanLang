@@ -39,9 +39,7 @@ void expectOnly(const std::string &src, const std::string &expected) {
 
 } // namespace
 
-// ============================================================================
-// Inferred declarations: `a = <bad>`
-// ============================================================================
+// -- Inferred declarations: `a = <bad>`
 
 // The issue's reproducer.
 TEST(Poison, FailedFirstAssignmentReportsOnlyTheRealError) {
@@ -122,9 +120,7 @@ TEST(Poison, UninferableEmptyArrayPoisonsTheVariable) {
              "cannot infer element type of empty array literal");
 }
 
-// ============================================================================
-// Recovery
-// ============================================================================
+// -- Recovery
 
 // A later valid assignment re-declares the variable with the value's type.
 TEST(Poison, ValidReassignmentRedeclaresTheVariable) {
@@ -165,9 +161,7 @@ TEST(Poison, FailedReassignmentOfAHealthyVariableKeepsItsType) {
       << r.Diagnostics;
 }
 
-// ============================================================================
-// Genuinely undeclared names
-// ============================================================================
+// -- Genuinely undeclared names
 
 TEST(Poison, UndeclaredVariableIsStillReported) {
   auto r = semaCheck(wrapMain("println(nope);"));
@@ -198,9 +192,7 @@ TEST(Poison, PoisonDoesNotOutliveItsScope) {
       << r.Diagnostics;
 }
 
-// ============================================================================
-// Typed declarations: `x: T = <bad>`
-// ============================================================================
+// -- Typed declarations: `x: T = <bad>`
 
 TEST(Poison, UnknownDeclaredTypePoisonsTheVariable) {
   expectOnly(wrapMain("x: Foo = 1;\n println(x);\n y = x + 1;\n"
@@ -226,9 +218,7 @@ TEST(Poison, ResolvedDeclaredTypeIsKeptAfterABadInitializer) {
   EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
 }
 
-// ============================================================================
-// Destructuring
-// ============================================================================
+// -- Destructuring
 
 TEST(Poison, FailedDestructuringBindsBothTargets) {
   // The value is in error.
@@ -273,9 +263,7 @@ TEST(Poison, DestructuringRedeclaresAPoisonedVariable) {
       kBadMsg);
 }
 
-// ============================================================================
-// Other binders
-// ============================================================================
+// -- Other binders
 
 TEST(Poison, MatchArmWithUnknownTypeBindsItsName) {
   expectOnly("class A { }\n" +
@@ -320,10 +308,8 @@ TEST(Poison, ColliderDoesNotSilenceTheOriginal) {
       << r.Diagnostics;
 }
 
-// ============================================================================
 // Reserved binder names (#126): every binder rejects `Stdin` and type names
 // with one error, through the same guard.
-// ============================================================================
 
 namespace {
 

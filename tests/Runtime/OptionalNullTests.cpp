@@ -15,9 +15,7 @@ extern "C" {
 
 #include "VTableTestHelper.h"
 
-// ============================================================================
-// Reference counting and unboxing
-// ============================================================================
+// -- Reference counting and unboxing
 
 TEST(OptionalNull, RetainReleaseGetTolerateNull) {
   Paykan_retain(nullptr);
@@ -33,9 +31,7 @@ TEST(OptionalNull, PrintTolerateNull) {
   Paykan_printerrln(nullptr);
 }
 
-// ============================================================================
-// Object arrays with NULL slots (T?[])
-// ============================================================================
+// -- Object arrays with NULL slots (T?[])
 
 TEST(OptionalNull, ArrayNewObjSlotsStartNull) {
   Paykan_heap_set_tracking(1);
@@ -122,10 +118,8 @@ TEST(OptionalNull, DestroyObjArrayWithMixedNullSlots) {
   Paykan_heap_set_tracking(0);
 }
 
-// ============================================================================
 // `equals` with a NULL `other` box (the two-optional protocol never calls
 // equals with NULL, but the runtime convention is documented as tolerant)
-// ============================================================================
 
 TEST(OptionalNull, EqualsWithNullOtherIsFalse) {
   PaykanObject *o = PaykanObject_new();
