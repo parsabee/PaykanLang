@@ -140,7 +140,6 @@ TEST(ASTInterchange, ReadsEveryNode) {
         (expr (ternary (ident "c") (array) (array (int 1))))
         (expr (subscript (ident "a") (binary add (int 1) (int 2))))
         (expr (enum-value "Color" "Red"))
-        (expr (mov (ident "x")))
         (expr (tuple-index (ident "t") 1))
         (return _)))))
 )";
@@ -398,6 +397,18 @@ TEST(ASTInterchange, NestingIsBounded) {
   EXPECT_EQ(read(nested(ic::kMaxDepth + 10), ctx, error), nullptr);
   EXPECT_NE(error.find("nesting too deep (more than 2048 levels)"),
             std::string::npos)
+      << error;
+}
+
+TEST(Interchange, MovIsRemoved) {
+  // `mov` is retired (#145): an out-of-tree frontend still emitting it gets
+  // the same diagnostic as the built-in parser.
+  const std::string text = "(paykan-ast 1 (unit (fn \"f\" (type-params) "
+                           "(params) _ (block (expr (mov (ident \"x\")))))))";
+  ast::ASTContext ctx;
+  std::string error;
+  EXPECT_EQ(read(text, ctx, error), nullptr);
+  EXPECT_NE(error.find("'mov' was removed in v0.2.0"), std::string::npos)
       << error;
 }
 

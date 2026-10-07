@@ -14,6 +14,7 @@
 // a ReadError with a position, never an assertion; nesting is bounded
 // (kMaxDepth), and so is every recursion here.
 
+#include "paykan/Frontend.h"
 #include "paykan/ast/Interchange.h"
 
 #include <cerrno>
@@ -1085,10 +1086,8 @@ private:
         return nullptr;
       out = Ctx.make<EnumValueExpr>(loc, *en, *v);
     } else if (t == "mov") {
-      // Retired (#145): read as the operand itself.
-      out = expr(f, "the moved value");
-      if (!out)
-        return nullptr;
+      return fail(e, "(mov ...): " + std::string(frontend::kMovRemoved)),
+             nullptr;
     } else if (t == "tuple") {
       std::vector<Expr *> elems;
       if (!exprs(f, elems))

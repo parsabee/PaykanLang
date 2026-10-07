@@ -1,12 +1,11 @@
-// 26 — mov: ownership-transfer move expression
-// Exercises: MovExpr lowering (ExprEmitter::visitMovExpr),
-//            primitive register forwarding, object box transfer with the
-//            source alloca nulled (no extra retain, no scope-exit release),
-//            move of a temporary, move into a call argument, move out of a
-//            return, and re-assignment reviving a moved variable.
+// 26 — ownership transfer: handing a reference on
+// Exercises: primitive copies, sharing a string and a class object, a
+//            temporary stored in a variable, an argument passed through a
+//            function and back out of its return, re-assignment after a
+//            hand-off, and a hand-off inside a branch.
 //
-// `mov <expr>` transfers ownership instead of copying/sharing.  A moved local
-// variable is consumed: it may not be read again until re-assigned.
+// These are the places `mov` marked by hand before it was retired (#145).
+// Each now shares the reference; the output is unchanged.
 
 // ---- Helpers ---------------------------------------------------------------
 
@@ -14,10 +13,9 @@ fn shout(s: Str) -> Str {
   return s + "!";
 }
 
-// Moves its parameter straight back out — the caller's argument reference is
-// forwarded through without an extra retain/release round-trip.
+// Hands its parameter straight back out.
 fn relay(s: Str) -> Str {
-  return mov s;
+  return s;
 }
 
 class Point {
@@ -35,46 +33,45 @@ class Point {
 // ---- main ------------------------------------------------------------------
 
 fn main() -> int {
-  println("=== move a primitive (register forward) ===");
+  println("=== copy a primitive ===");
   a: int = 42;
-  b = mov a;
-  println(Str<int>(b));            // 42
-  // a is consumed here; reading it would be a compile error.
+  b = a;
+  println(Str<int>(b));         // 42
 
-  println("=== move a string (ownership transfer) ===");
+  println("=== share a string ===");
   s: Str = "Hello world";
-  t = mov s;
+  t = s;
   println(t);                   // Hello world
 
-  println("=== move a temporary into a variable ===");
-  u = mov shout("made");
+  println("=== store a temporary in a variable ===");
+  u = shout("made");
   println(u);                   // made!
 
-  println("=== move a class object ===");
+  println("=== share a class object ===");
   p: Point = Point(3, 4);
-  q = mov p;
-  println(Str(q.sum()));     // 7
+  q = p;
+  println(Str(q.sum()));        // 7
 
-  println("=== move into a function argument ===");
+  println("=== pass to a function argument ===");
   loud: Str = "loud";
-  println(shout(mov loud));     // loud!
+  println(shout(loud));         // loud!
 
-  println("=== move out of a function return ===");
+  println("=== pass through a function return ===");
   out: Str = relay("relayed");
   println(out);                 // relayed
 
-  println("=== re-assignment revives a moved variable ===");
+  println("=== re-assign after a hand-off ===");
   name: Str = "first";
-  taken = mov name;
-  name = "second";              // revives name
+  taken = name;
+  name = "second";
   println(taken);               // first
   println(name);                // second
 
-  println("=== conditional move (branch-safe cleanup) ===");
+  println("=== hand-off inside a branch ===");
   msg: Str = "conditional";
   if (True) {
-    moved = mov msg;
-    println(moved);             // conditional
+    kept = msg;
+    println(kept);              // conditional
   }
 
   return 0;

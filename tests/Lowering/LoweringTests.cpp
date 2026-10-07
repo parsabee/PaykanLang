@@ -181,30 +181,6 @@ TEST(Lowering, ReturnReleasesEveryScopeAfterEvaluatingTheValue) {
   EXPECT_NE(inner.find("ret %"), std::string::npos) << inner;
 }
 
-// -- mov
-
-TEST(Lowering, MovOfOwnedVariableIsAPlainSharedRead) {
-  // `mov` is retired (#145): the argument is retained like any shared read
-  // and the slot keeps its box until scope exit.  Eliding this pair is the
-  // last-use pass's job (#186).
-  auto l = lower(R"(
-    fn take(s: Str) { println(s); }
-    fn main() -> int {
-      s: Str = "x";
-      take(mov s);
-      return 0;
-    }
-  )");
-  ASSERT_TRUE(l.Ok) << l.Error;
-  std::string m = function(l.Text, "main");
-  EXPECT_EQ(count(m, "null box"), 0u) << m;
-  EXPECT_EQ(count(m, "retain"), 1u) << m;
-  EXPECT_EQ(count(m, "release"), 1u) << m;
-  // The callee owns its parameter and releases it.
-  std::string t = function(l.Text, "take");
-  EXPECT_EQ(count(t, "release"), 1u) << t;
-}
-
 // -- Calls: callee-consumes ABI for user functions, borrow for builtins
 
 TEST(Lowering, UserCallRetainsAVariableArgument) {

@@ -1240,7 +1240,7 @@ Expr *Parser::parseBinary(int minPrec) {
   }
 }
 
-// unary ::= ( "!" | "-" | "mov" ) unary | postfix
+// unary ::= ( "!" | "-" ) unary | postfix   ("mov" is reserved: an error)
 Expr *Parser::parseUnary() {
   if (at(Tok::Not) || at(Tok::Minus) || at(Tok::KwMov)) {
     if (!enterNesting())
@@ -1250,10 +1250,12 @@ Expr *Parser::parseUnary() {
     leaveNesting();
     if (!operand)
       return nullptr;
-    // `mov` is being retired (#145): ownership transfers are inferred, so
-    // the keyword no longer changes anything and parses as its operand.
-    if (op.Kind == Tok::KwMov)
+    // `mov` is retired (#145).  The operand still parses, so the removal is
+    // the only diagnostic.
+    if (op.Kind == Tok::KwMov) {
+      error(op.Loc, std::string(kMovRemoved));
       return operand;
+    }
     return Ctx.make<UnaryExpr>(
         span(op.Loc), op.Kind == Tok::Not ? UnaryOpcode::Not : UnaryOpcode::Neg,
         operand);

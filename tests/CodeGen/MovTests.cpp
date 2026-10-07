@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Codegen tests: `mov` lowering — value/ownership transfer behavior.
+// Codegen tests: handing a reference on in the positions `mov` used to mark
+// (retired in #145).  Output and leak balance must hold without the keyword.
 
 #include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
@@ -15,7 +16,7 @@ TEST(Mov, PrimitiveForwardsValue) {
   auto r = compileAndRun(R"(
     fn main() -> int {
       a: int = 42;
-      b = mov a;
+      b = a;
       println(Str<int>(b));
       return 0;
     }
@@ -28,7 +29,7 @@ TEST(Mov, StringOwnershipTransfer) {
   auto r = compileAndRun(R"(
     fn main() -> int {
       s: Str = "Hello world";
-      t = mov s;
+      t = s;
       println(t);
       return 0;
     }
@@ -41,7 +42,7 @@ TEST(Mov, MoveTemporaryIntoVariable) {
   auto r = compileAndRun(R"(
     fn make() -> Str { return "made"; }
     fn main() -> int {
-      t = mov make();
+      t = make();
       println(t);
       return 0;
     }
@@ -58,7 +59,7 @@ TEST(Mov, MoveClassObject) {
     }
     fn main() -> int {
       p: Point = Point(3, 4);
-      q = mov p;
+      q = p;
       println(Str<int>(q.sum()));
       return 0;
     }
@@ -71,7 +72,7 @@ TEST(Mov, MoveThenRevive) {
   auto r = compileAndRun(R"(
     fn main() -> int {
       s: Str = "first";
-      t = mov s;
+      t = s;
       s = "second";
       println(t);
       println(s);
@@ -87,7 +88,7 @@ TEST(Mov, MoveIntoFunctionArgument) {
     fn shout(s: Str) { println(s); }
     fn main() -> int {
       s: Str = "loud";
-      shout(mov s);
+      shout(s);
       return 0;
     }
   )");
@@ -97,7 +98,7 @@ TEST(Mov, MoveIntoFunctionArgument) {
 
 TEST(Mov, MoveOutOfFunctionReturn) {
   auto r = compileAndRun(R"(
-    fn passthrough(s: Str) -> Str { return mov s; }
+    fn passthrough(s: Str) -> Str { return s; }
     fn main() -> int {
       out: Str = passthrough("relayed");
       println(out);
@@ -113,7 +114,7 @@ TEST(Mov, ConditionalMove) {
     fn main() -> int {
       s: Str = "cond";
       if (True) {
-        t = mov s;
+        t = s;
         println(t);
       }
       return 0;
@@ -123,7 +124,7 @@ TEST(Mov, ConditionalMove) {
   EXPECT_EQ(r.StdOut, "cond\n");
 }
 
-// -- `mov` inside a ternary branch
+// -- A hand-off inside a ternary branch
 //
 // Whichever branch runs, the result must own exactly one reference and the
 // source variable must be released exactly once overall: never twice (a
@@ -136,7 +137,7 @@ TEST(Mov, TernaryMoveTakenBranch) {
     fn main() -> int {
       x: Str = "moved";
       c: bool = True;
-      y = if c then mov x else x;
+      y = if c then x else x;
       println(y);
       return 0;
     }
@@ -155,7 +156,7 @@ TEST(Mov, TernaryMoveUntakenBranch) {
     fn main() -> int {
       x: Str = "shared";
       c: bool = False;
-      y = if c then mov x else x;
+      y = if c then x else x;
       println(y);
       return 0;
     }
@@ -172,7 +173,7 @@ TEST(Mov, TernaryMoveInElseBranch) {
     fn main() -> int {
       x: Str = "else";
       c: bool = False;
-      y = if c then x else mov x;
+      y = if c then x else x;
       println(y);
       return 0;
     }
@@ -188,7 +189,7 @@ TEST(Mov, TernaryMoveInBothBranches) {
   auto r = compileAndRun(R"(
     fn pick(c: bool) -> Str {
       x: Str = "both";
-      y = if c then mov x else mov x;
+      y = if c then x else x;
       return y;
     }
     fn main() -> int {
@@ -213,7 +214,7 @@ TEST(Mov, TernaryMoveClassObjectBothWays) {
     fn pick(c: bool) -> int {
       p: Point = Point(1, 2);
       q: Point = Point(10, 20);
-      r: Point = if c then mov p else q;
+      r: Point = if c then p else q;
       return r.sum();
     }
     fn main() -> int {
@@ -229,13 +230,13 @@ TEST(Mov, TernaryMoveClassObjectBothWays) {
 }
 
 TEST(Mov, TernaryMoveInCondition) {
-  // The condition consumes x on every path; the result is a primitive.
+  // The condition hands x on, on every path; the result is a primitive.
   LeakGuard g;
   auto r = compileAndRun(R"(
     fn take(s: Str) -> bool { println(s); return True; }
     fn main() -> int {
       x: Str = "cond";
-      n: int = if take(mov x) then 1 else 2;
+      n: int = if take(x) then 1 else 2;
       println(Str<int>(n));
       return 0;
     }
@@ -247,13 +248,13 @@ TEST(Mov, TernaryMoveInCondition) {
 }
 
 TEST(Mov, TernaryMoveIntoCallInBranch) {
-  // A primitive-typed ternary whose branch moves a ref var into a call.
+  // A primitive-typed ternary whose branch hands a ref var to a call.
   LeakGuard g;
   auto r = compileAndRun(R"(
     fn take(s: Str) -> int { println(s); return 1; }
     fn run(c: bool) -> int {
       x: Str = "arg";
-      n: int = if c then take(mov x) else 0;
+      n: int = if c then take(x) else 0;
       return n;
     }
     fn main() -> int {
@@ -268,7 +269,7 @@ TEST(Mov, TernaryMoveIntoCallInBranch) {
   g.expectNoLeaks("TernaryMoveIntoCallInBranch");
 }
 
-// -- `mov` inside the short-circuit RHS of `&&` / `||`
+// -- A hand-off inside the short-circuit RHS of `&&` / `||`
 
 TEST(Mov, AndMoveInRhsEvaluatedAndSkipped) {
   LeakGuard g;
@@ -276,7 +277,7 @@ TEST(Mov, AndMoveInRhsEvaluatedAndSkipped) {
     fn take(s: Str) -> bool { println(s); return True; }
     fn run(c: bool) -> bool {
       x: Str = "rhs";
-      ok: bool = c && take(mov x);
+      ok: bool = c && take(x);
       return ok;
     }
     fn main() -> int {
@@ -297,7 +298,7 @@ TEST(Mov, OrMoveInRhsEvaluatedAndSkipped) {
     fn take(s: Str) -> bool { println(s); return False; }
     fn run(c: bool) -> bool {
       x: Str = "rhs";
-      ok: bool = c || take(mov x);
+      ok: bool = c || take(x);
       return ok;
     }
     fn main() -> int {
@@ -319,7 +320,7 @@ TEST(Mov, AndMoveInLhsThenRhsRuns) {
     fn main() -> int {
       x: Str = "lhs";
       c: bool = True;
-      ok: bool = take(mov x) && c;
+      ok: bool = take(x) && c;
       println(Str<bool>(ok));
       return 0;
     }
@@ -330,25 +331,25 @@ TEST(Mov, AndMoveInLhsThenRhsRuns) {
   g.expectNoLeaks("AndMoveInLhsThenRhsRuns");
 }
 
-// `mov None` into an optional slot is the absent value, as `None` is (#119).
+// `None` where `mov None` was is still the absent optional (#119).
 TEST(Mov, MovNoneIsTheAbsentOptional) {
   LeakGuard g;
   auto r = compileAndRun(R"(
-    class Box { s: Str?; fn __init__() { self.s = mov None; } }
+    class Box { s: Str?; fn __init__() { self.s = None; } }
     fn show(s: Str?) {
       match s { v: Str { println(v); } None { println("none"); } }
     }
-    fn give() -> int? { return mov None; }
+    fn give() -> int? { return None; }
     fn main() -> int {
-      x: Str? = mov None;
+      x: Str? = None;
       show(x);
       x = "some";
       show(x);
-      x = mov None;
+      x = None;
       show(x);
       b = Box();
       show(b.s);
-      show(mov None);
+      show(None);
       n: int? = give();
       match n { v: int { println("int"); } None { println("none"); } }
       return 0;
@@ -360,7 +361,7 @@ TEST(Mov, MovNoneIsTheAbsentOptional) {
   g.expectNoLeaks("MovNoneIsTheAbsentOptional");
 }
 
-// `mov None` inside an array or tuple literal is the absent value of the
+// `None` inside a literal, where `mov None` was, is the absent value of the
 // slot's element type (#132).
 TEST(Mov, MovNoneInsideALiteralIsTheAbsentOptional) {
   LeakGuard g;
@@ -369,13 +370,13 @@ TEST(Mov, MovNoneInsideALiteralIsTheAbsentOptional) {
       match s { v: Str { println(v); } None { println("none"); } }
     }
     fn main() -> int {
-      xs: Str?[] = [mov None, "a"];
+      xs: Str?[] = [None, "a"];
       show(xs[0]);
       show(xs[1]);
-      t: (Str?, int) = (mov None, 7);
+      t: (Str?, int) = (None, 7);
       show(t.0);
       println(Str(t.1));
-      n: (int?, Str?)[] = [(mov None, mov None)];
+      n: (int?, Str?)[] = [(None, None)];
       match n[0].0 { v: int { println("int"); } None { println("none"); } }
       show(n[0].1);
       return 0;

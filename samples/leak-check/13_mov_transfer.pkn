@@ -1,20 +1,19 @@
-// Isolates: `mov` ownership transfer must neither leak nor double-free.
-// A moved reference variable hands its box to the destination without an extra
-// retain, and the consumed source is dropped from scope cleanup (its nulled
-// alloca releases harmlessly). The destination — and a subsequently revived
-// source — are the only references that release, so the counts stay balanced.
+// Isolates: handing a reference on and re-assigning the source must neither
+// leak nor double-free.  `t = s` shares the string (the `mov` site before
+// #145 retired it); re-assigning `s` releases its share, and `t` releases the
+// other at scope exit, so the counts stay balanced.
 //
 // Runtime allocation sites: two PaykanString_new + their PaykanShared boxes
-// (the moved-out string, and the string that revives the source).
+// (the shared string, and the one re-assigned to the source).
 //
 // Expected under --track-heap: live blocks : 0.
 
 fn main() -> int {
   s: Str = "moved";
-  t = mov s;        // s consumed; t now owns the string
+  t = s;            // t shares the string
   println(t);
 
-  s = "revived";    // s comes back to life with a fresh string
+  s = "revived";    // s gets a fresh string
   println(s);
 
   return 0;
