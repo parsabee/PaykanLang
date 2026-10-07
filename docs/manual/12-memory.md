@@ -123,63 +123,9 @@ not back, never form cycles and need no care.
 
 ## Moving with `mov`
 
-Assigning a reference shares the object and increments its count. When the source variable
-is not needed any more, `mov` transfers the reference instead: `t = mov s;` hands `s`'s
-reference to `t` without touching the count, and **consumes** `s`. The compiler then rejects
-any use of `s` until it is assigned again:
-
-```pkn
-fn consume(s: Str) { println("got " + s); }
-
-fn main() -> int {
-  s = "hello";
-  consume(mov s);
-  println(s);
-  return 0;
-}
-```
-
-Error:
-
-```
-error: use of moved variable 's'; it was consumed by 'mov' and can only be used again after re-assignment
-```
-
-Assigning a new value brings a moved variable back:
-
-```pkn
-fn consume(s: Str) { println("got " + s); }
-
-fn main() -> int {
-  s = "first";
-  consume(mov s);
-  s = "second";          // s is usable again
-  t = mov s;
-  println(t);
-  return 0;
-}
-```
-
-Output:
-
-```
-got first
-second
-```
-
-`mov` saves one increment and one decrement, and documents that ownership passes on. It is
-never required for correctness. The rules:
-
-- Only a whole local variable, a parameter or a temporary can be moved, not a field
-  (`mov obj.field`), an array element (`mov xs[i]`) or `self`.
-- On a value type such as `int`, `mov` just copies the value, but the variable is still
-  consumed.
-- The compiler tracks moves per path. Moving in one branch of an `if` does not affect the
-  other branch, but after the `if` the variable counts as moved unless every path
-  re-assigned it.
-- A variable declared outside a loop cannot be left moved at the end of the loop body,
-  since the next iteration would use it. Re-assign it in the body, or declare it inside the
-  loop.
+Earlier releases had a `mov` keyword that handed a reference on without touching its count.
+It is being retired: `mov s` now means the same as `s`, and the compiler will infer
+ownership transfers on its own. New code should not use it.
 
 ## Threads
 

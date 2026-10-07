@@ -176,14 +176,13 @@ TEST(Generics, MatchOnInstantiationArms) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Generics, MovOfInstantiation) {
+TEST(Generics, MovOfInstantiationAccepted) {
   auto r = semaCheck(withMain(kBox, R"(
     a: Box<int> = Box<int>(1);
     b: Box<int> = mov a;
     c: int = a.get();
   )"));
-  EXPECT_FALSE(r.Ok);
-  EXPECT_TRUE(has(r.Diagnostics, "use of moved variable 'a'")) << r.Diagnostics;
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
 TEST(Generics, RecursiveInstantiationInFieldIsFine) {

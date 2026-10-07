@@ -1085,10 +1085,10 @@ private:
         return nullptr;
       out = Ctx.make<EnumValueExpr>(loc, *en, *v);
     } else if (t == "mov") {
-      Expr *x = expr(f, "the moved value");
-      if (!x)
+      // Retired (#145): read as the operand itself.
+      out = expr(f, "the moved value");
+      if (!out)
         return nullptr;
-      out = Ctx.make<MovExpr>(loc, x);
     } else if (t == "tuple") {
       std::vector<Expr *> elems;
       if (!exprs(f, elems))

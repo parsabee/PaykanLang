@@ -81,9 +81,6 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   struct Scope {
     Scope *Parent = nullptr;
     StringMap<ast::Type *> Locals;
-    /// Names moved-out of this scope via `mov`.  A moved name may not be read
-    /// again until it is re-assigned (which revives it).
-    StringSet Moved;
 
     explicit Scope(Scope *parent = nullptr);
 
@@ -102,65 +99,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
     /// Find the innermost scope that contains this name, or nullptr.
     Scope *findOwner(std::string_view name);
-
-    /// Move tracking (operate on the owning scope, walking the chain).
-    /// markMoved / clearMoved are no-ops if the name is unknown.
-    void markMoved(std::string_view name);
-    void clearMoved(std::string_view name);
-    bool isMoved(std::string_view name) const;
   };
 
   Scope *CurrentScope = nullptr;
-
-  // -- Flow-sensitive move tracking
-  //
-  // The per-scope `Moved` sets above track the *current* moved-state along the
-  // straight-line path Sema is walking.  Control-flow constructs make that
-  // state path-dependent, so they snapshot and merge it explicitly:
-  //
-  //   * Branches (if/else, match arms): each branch is checked against the
-  //     moved-state at ENTRY to the construct (a `mov` in one branch must not
-  //     poison a sibling).  Afterwards the state is the UNION over all branch
-  //     exit states — a name moved on ANY path counts as moved, unless every
-  //     path (including the implicit skip path of an `if` without `else` or a
-  //     match without a wildcard arm) re-assigned it.
-  //
-  //   * Loops (while): a name owned by a scope OUTSIDE the loop that is still
-  //     moved at the loop back edge would be read-after-consume on the next
-  //     iteration, so it is a compile error unless the body definitely
-  //     re-assigned it before the back edge.  (Codegen nulls the slot on mov;
-  //     iteration 2 would otherwise crash or silently misbehave.)
-  //
-  // A MovedState snapshots the Moved set of every scope on the current chain,
-  // innermost first.  Scopes created inside a branch die with the branch, so
-  // the chain at a construct's entry and at each of its branch exits is
-  // identical and entries correspond positionally.
-  using MovedState = std::vector<std::pair<Scope *, StringSet>>;
-
-  /// Snapshot the Moved set of every scope on the current chain.
-  MovedState saveMovedState() const;
-  /// Reset the chain's Moved sets to a previously saved snapshot.
-  void restoreMovedState(const MovedState &st);
-  /// dst |= src, scope by scope (both must snapshot the same chain).
-  static void unionMovedState(MovedState &dst, const MovedState &src);
-
-  /// Implements the branch-merge rule above for any multi-branch construct.
-  /// Usage: construct one merger; wrap each branch in
-  /// beginBranch()/endBranch(); call finish(coversAllPaths) once, where
-  /// coversAllPaths is true iff some branch is guaranteed to run (if/else
-  /// present, match has a wildcard arm).
-  class MovedBranchMerger {
-    Sema &S;
-    MovedState Entry;  // moved-state at construct entry (shared branch input)
-    MovedState Merged; // union of branch exit states accumulated so far
-    bool AnyBranch = false;
-
-  public:
-    explicit MovedBranchMerger(Sema &s);
-    void beginBranch();
-    void endBranch();
-    void finish(bool coversAllPaths);
-  };
 
   /// The expected return type of the current function (nullptr = top-level /
   /// void).

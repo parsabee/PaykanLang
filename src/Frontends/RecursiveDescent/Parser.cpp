@@ -1250,8 +1250,10 @@ Expr *Parser::parseUnary() {
     leaveNesting();
     if (!operand)
       return nullptr;
+    // `mov` is being retired (#145): ownership transfers are inferred, so
+    // the keyword no longer changes anything and parses as its operand.
     if (op.Kind == Tok::KwMov)
-      return Ctx.make<MovExpr>(span(op.Loc), operand);
+      return operand;
     return Ctx.make<UnaryExpr>(
         span(op.Loc), op.Kind == Tok::Not ? UnaryOpcode::Not : UnaryOpcode::Neg,
         operand);
