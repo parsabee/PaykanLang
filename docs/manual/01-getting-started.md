@@ -34,20 +34,16 @@ $ paykan --version
 
 ### With apt (Debian and Ubuntu)
 
-On Debian, Ubuntu and their derivatives (x86_64), add the PaykanLang apt repository once,
-then install with `apt`:
+On Debian, Ubuntu and their derivatives (x86_64), download the `.deb` from the
+[latest release](https://github.com/parsabee/PaykanLang/releases/latest) and install it with
+`apt`:
 
 ```sh
-$ curl -fsSL https://parsabee.github.io/PaykanLang/apt/paykanlang.gpg \
-  | sudo tee /usr/share/keyrings/paykanlang.gpg > /dev/null
-$ echo "deb [arch=amd64 signed-by=/usr/share/keyrings/paykanlang.gpg] https://parsabee.github.io/PaykanLang/apt stable main" \
-  | sudo tee /etc/apt/sources.list.d/paykanlang.list
-$ sudo apt update
-$ sudo apt install paykanlang
+$ curl -fLO https://github.com/parsabee/PaykanLang/releases/download/v0.1.1/paykanlang_0.1.1_amd64.deb
+$ sudo apt install ./paykanlang_0.1.1_amd64.deb
 ```
 
-`sudo apt upgrade` picks up new releases. Each release also carries the `.deb` itself, which
-`sudo apt install ./paykanlang_<version>_amd64.deb` installs directly.
+Replace `0.1.1` with the release you want; to upgrade, install a newer release's `.deb` the same way.
 
 ### With Homebrew (macOS)
 
