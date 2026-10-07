@@ -1,0 +1,28 @@
+// OK: a program whose import is served through a `.pkm` module file.
+//
+// Running this program writes `.paykan_cache/geometry/shapes.pkm`, the
+// compiled form of `geometry/shapes.pkn` (its interface for the type
+// checker and its PIR for the backends), and reuses it while the source is
+// unchanged.  `paykan --emit-pkm geometry/shapes.pkn` writes the same file
+// next to the source, and the program builds and runs from it on either
+// backend when `geometry/shapes.pkn` is gone.  README.md walks through it.
+//
+// expect-stdout: rect of area 12
+// expect-stdout: rect of area 25
+// expect-stdout: 37
+// expect-stdout: flat
+// expect-stdout: solid
+
+import geometry::shapes;
+
+fn main() -> int {
+  r: shapes::Rect = shapes::Rect(3, 4);
+  s: shapes::Square = shapes::Square(5);
+  println(r.describe());
+  println(s.describe());
+  all: shapes::Shape[] = [r, s];
+  println(Str<int>(shapes::total(all)));
+  println(shapes::kindName(r.kind()));
+  println(shapes::kindName(s.kind()));
+  return 0;
+}

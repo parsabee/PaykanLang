@@ -34,6 +34,8 @@ set(PAYKAN_EXPORT_TARGETS
     paykan_diag
     paykan_frontend
     paykan_ast_printer
+    paykan_pkm
+    paykan_modules
     paykan_sema
     paykan_pir
     paykan_backend

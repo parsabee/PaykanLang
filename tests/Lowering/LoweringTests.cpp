@@ -50,7 +50,7 @@ Lowered lower(const std::string &source, const std::string &projectRoot = "") {
     return l;
   }
   std::ostringstream errs;
-  if (!lowering::lowerProgram(ctx, driver->getRoot(), "main.pkn", projectRoot,
+  if (!lowering::lowerProgram(ctx, driver->getRoot(), "main", projectRoot,
                               l.Program, errs)) {
     l.Error = "lowering failed: " + errs.str();
     return l;

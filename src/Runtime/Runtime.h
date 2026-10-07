@@ -34,6 +34,20 @@ extern "C" {
 #define PAYKAN_NORETURN _Noreturn
 #endif
 
+// -- Runtime ABI version
+//
+// Bumped whenever the generated code's ABI (object layout, vtable slots,
+// calling conventions, symbol naming) changes, so code compiled against an
+// older runtime is never linked or loaded: both backends' caches and every
+// .pkm module file record it (docs/design/pkm.md §2.2, tag 0x09).
+//   v3: PIR-based translation.
+//   v4: the main module's symbols are prefixed (`pk.`).
+//   v5: methods are `<Class>.<method>` (was `<Class>_<method>`), vtables
+//       `<Class>..vtable`.
+//   v6: imported modules' symbols are prefixed with the canonical module
+//       name (`geometry::shapes::describe`), not the absolute file path.
+#define PAYKAN_RUNTIME_ABI_VERSION 6
+
 // -- Target assumptions
 //
 // The runtime, the C backend's generated code (which includes this header)
@@ -640,6 +654,12 @@ PAYKAN_CHECK_HEADER(PaykanTuple);
 
 #ifdef __cplusplus
 }
+
+namespace paykan {
+/// PAYKAN_RUNTIME_ABI_VERSION for C++ callers (the backends, the .pkm host
+/// identity).
+inline constexpr uint32_t kRuntimeABIVersion = PAYKAN_RUNTIME_ABI_VERSION;
+} // namespace paykan
 #endif
 
 #endif // PAYKAN_RUNTIME_H

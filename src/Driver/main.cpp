@@ -4,6 +4,8 @@
 
 #include "ASTPrinter.h"
 #include "DiagEngine.h"
+#include "ModuleName.h"
+#include "Names.h"
 #include "Options.h"
 #include "ParserDriver.h"
 #include "Sema.h"
@@ -13,8 +15,12 @@
 #include "paykan/PluginLoader.h"
 #include "paykan/ast/Interchange.h"
 #include "paykan/lowering/Lowering.h"
+#include "paykan/modules/ModuleResolver.h"
+#include "paykan/pir/Binary.h"
 #include "paykan/pir/Printer.h"
 #include "paykan/pir/Verifier.h"
+#include "paykan/pkm/Dump.h"
+#include "paykan/pkm/File.h"
 #include "paykan/plugin_api.h"
 
 #include <cstdlib>
@@ -25,6 +31,7 @@
 
 using paykan::driver::Command;
 using paykan::driver::Options;
+using paykan::driver::PkmVerb;
 
 namespace {
 
@@ -192,6 +199,139 @@ std::string unknownPlugin(const char *kind, const std::string &name,
   return msg + ")";
 }
 
+// -- `paykan pkm`
+
+/// `pkm dump f.pkm [--section=...]`: the stable dump (pkm::dump) and, for
+/// the whole file or `--section=code`, the PIR text of CODE.  `pkm check
+/// f.pkm`: the verdict against this toolchain (docs/design/pkm.md §8.2) and
+/// whether IFACE and CODE decode; exit status 0 when the file is usable.
+int pkmTool(const Options &opts) {
+  namespace pkm = paykan::pkm;
+  const std::string &path = opts.InputFilename;
+  auto bytes = pkm::readFileBytes(path);
+  if (!bytes)
+    return fail(bytes.status().message());
+  pkm::Error err;
+  auto file = pkm::File::read(*bytes, {}, &err);
+  if (!file)
+    return fail(path + ": " + err.str());
+  auto codeText = [&](std::ostream &os) -> bool {
+    auto code = (*file).section(pkm::Kind::Code);
+    if (code.empty())
+      return true;
+    auto mod = paykan::pir::binary::decode(code);
+    if (!mod) {
+      std::cerr << "paykan: " << path
+                << ": CODE does not decode: " << mod.status().message() << "\n";
+      return false;
+    }
+    if (auto errors = paykan::pir::verify(*mod); !errors.empty()) {
+      std::cerr << "paykan: " << path << ": CODE does not verify:\n"
+                << paykan::pir::formatErrors(errors);
+      return false;
+    }
+    paykan::pir::print(*mod, os);
+    return true;
+  };
+  if (opts.Verb == PkmVerb::Check) {
+    pkm::Verdict v = pkm::checkCompatibility(
+        (*file).manifest(), paykan::modules::ModuleResolver::hostIdentity(),
+        pkm::Policy::Prebuilt);
+    bool ok = v.Outcome == pkm::Verdict::Kind::Usable;
+    std::cout << path << ": "
+              << (ok ? "usable"
+                     : (v.Outcome == pkm::Verdict::Kind::Stale ? "stale: "
+                                                               : "rejected: ") +
+                           v.Message)
+              << "\n";
+    auto iface = pkm::readInterface((*file).section(pkm::Kind::Iface),
+                                    (*file).manifest().Module);
+    if (!iface) {
+      std::cerr << "paykan: " << path
+                << ": IFACE does not decode: " << iface.status().message()
+                << "\n";
+      ok = false;
+    }
+    std::ostream nowhere(nullptr);
+    if (!codeText(nowhere))
+      ok = false;
+    return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+  }
+  pkm::DumpOptions dopts;
+  using S = pkm::DumpOptions::Section;
+  const std::string &sec = opts.PkmSection;
+  bool codeOnly = sec == "code";
+  if (sec.empty() || sec == "all")
+    dopts.Which = S::All;
+  else if (sec == "manifest")
+    dopts.Which = S::Manifest;
+  else if (sec == "sections")
+    dopts.Which = S::Sections;
+  else if (sec == "iface")
+    dopts.Which = S::Iface;
+  else if (sec == "symidx")
+    dopts.Which = S::SymIdx;
+  else if (sec == "payloads")
+    dopts.Which = S::Payloads;
+  else if (!codeOnly)
+    return fail("unknown section '" + sec +
+                "' (expected manifest, sections, iface, code, symidx, "
+                "payloads or all)");
+  if (!codeOnly)
+    pkm::dump(*file, std::cout, dopts);
+  bool ok = true;
+  if (codeOnly || dopts.Which == S::All) {
+    if (!codeOnly && !(*file).section(pkm::Kind::Code).empty())
+      std::cout << "pir:\n";
+    ok = codeText(std::cout);
+  }
+  std::cout.flush();
+  return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
+/// The canonical name of the main module and the root its imports are
+/// resolved against.  Normally the file's stem and its directory.  For
+/// `--emit-pkm` of a module given by a relative path inside the project
+/// (`geometry/shapes.pkn`, run from the project root), the module is named
+/// by that path (`geometry::shapes`) and the root is the current directory,
+/// so the file is what an importer of `geometry::shapes` expects.
+void mainModuleIdentity(const Options &opts, std::string &name,
+                        std::string &projectRoot) {
+  std::filesystem::path input(opts.InputFilename);
+  name = paykan::module_name::mainModuleName(opts.InputFilename);
+  projectRoot = input.parent_path().string();
+  if (!opts.EmitPkm || input.is_absolute() || !input.has_parent_path())
+    return;
+  std::string nested;
+  for (const auto &c : input.parent_path()) {
+    std::string part = c.string();
+    if (part == "." || part == ".." || part.empty() ||
+        part.find("::") != std::string::npos)
+      return;
+    nested += part + "::";
+  }
+  name = nested + name;
+  projectRoot = "";
+}
+
+/// The --module-path directories, then $PAYKAN_MODULE_PATH's.
+std::vector<std::string> modulePath(const Options &opts) {
+  std::vector<std::string> dirs = opts.ModulePath;
+  if (const char *env = std::getenv(paykan::names::kPaykanModulePathEnv)) {
+    std::string_view rest(env);
+    while (!rest.empty()) {
+      size_t sep = rest.find(':');
+      std::string_view dir = rest.substr(0, sep);
+      if (!dir.empty())
+        dirs.emplace_back(dir);
+      if (sep == std::string_view::npos)
+        break;
+      rest.remove_prefix(sep + 1);
+    }
+  }
+  return dirs;
+}
+
 } // namespace
 
 int main(int argc, char *argv[]) {
@@ -200,6 +340,11 @@ int main(int argc, char *argv[]) {
   if (opts.ShowHelp && !opts.ShowVersion) {
     paykan::driver::printUsage(std::cout, argv[0]);
     return EXIT_SUCCESS;
+  }
+  if (opts.Cmd == Command::Pkm) {
+    if (!parsed.Error.empty())
+      return fail(parsed.Error + ". Try: '" + argv[0] + " --help'");
+    return pkmTool(opts);
   }
   // The plugins: the --plugin files, then the plugin directories
   // (paykan/PluginLoader.h).  Each is checked before any of its callbacks
@@ -299,16 +444,30 @@ int main(int argc, char *argv[]) {
   }
 
   // -- Semantic analysis
-  std::string projectRoot =
-      std::filesystem::path(opts.InputFilename).parent_path().string();
+  std::string mainName, projectRoot;
+  mainModuleIdentity(opts, mainName, projectRoot);
+  // Imports go through the resolver: a source module's `.pkm` cache entry
+  // under <root>/.paykan_cache when it is fresh, a prebuilt `.pkm` when
+  // there is no source, the source otherwise (docs/design/pkm.md §8).
+  paykan::modules::ResolverOptions resolverOpts;
+  resolverOpts.ProjectRoot = projectRoot;
+  resolverOpts.FrontendName = driver.getFrontendName();
+  resolverOpts.ModulePath = modulePath(opts);
+  resolverOpts.ReadCache = !opts.RebuildModules && !opts.NoModuleCache;
+  resolverOpts.WriteCache = !opts.NoModuleCache;
+  resolverOpts.Verbose = opts.Verbose ? &std::cerr : nullptr;
+  paykan::modules::ModuleResolver resolver(
+      resolverOpts, paykan::modules::ModuleResolver::hostIdentity());
   // Sema reuses the DiagEngine constructed above (already carrying the
   // source info for the parsed file), so error counts accumulate across
   // passes and all diagnostics share one output stream.
   paykan::sema::Sema sema(driver.getASTContext(), diag, projectRoot,
                           driver.getFrontendName());
-  // A program that is built or run needs an entry point; --check-only also
-  // accepts a module without one, but still checks a declared `main`.
-  sema.setEntryPointCheck(opts.CheckOnly
+  sema.setResolver(&resolver);
+  // A program that is built or run needs an entry point; --check-only and
+  // --emit-pkm also accept a module without one, but still check a declared
+  // `main`.
+  sema.setEntryPointCheck(opts.CheckOnly || opts.EmitPkm
                               ? paykan::sema::Sema::EntryPoint::IfDeclared
                               : paykan::sema::Sema::EntryPoint::Required);
   auto semaCtx = sema.run(root);
@@ -338,13 +497,41 @@ int main(int argc, char *argv[]) {
   // ownership semantics), verify it, and hand it over.  --emit-pir prints it
   // instead.
   paykan::pir::Program program;
-  if (!paykan::lowering::lowerProgram(semaCtx, root, opts.InputFilename,
-                                      projectRoot, program, std::cerr))
+  if (!paykan::lowering::lowerProgram(semaCtx, root, mainName, projectRoot,
+                                      program, std::cerr, &resolver))
     return fail("lowering to PIR failed");
   auto errors = paykan::pir::verify(program);
+  if (opts.EmitPkm) {
+    // A library module has no entry point; everything else about the
+    // program (its own modules, the links between them) must still hold.
+    std::erase_if(errors, [](const paykan::pir::VerifyError &e) {
+      return e.Message == "main module defines no '@main'";
+    });
+  }
   if (!errors.empty())
     return fail("PIR verification failed:\n" +
                 paykan::pir::formatErrors(errors));
+  // The whole program verified: the modules built from source this run get
+  // their cache entries now, never before.
+  resolver.writeCache(program);
+  if (opts.EmitPkm) {
+    std::filesystem::path out = opts.OutputPath.empty()
+                                    ? std::filesystem::path(opts.InputFilename)
+                                          .replace_extension(".pkm")
+                                    : std::filesystem::path(opts.OutputPath);
+    std::vector<std::string> deps;
+    for (auto *imp : root->getImports())
+      for (auto &m : imp->getModules())
+        deps.push_back(paykan::module_name::canonicalImportName(
+            imp->modulePath(m), imp->isSystem()));
+    paykan::Status s = resolver.writeModuleFile(
+        out, mainName,
+        paykan::sema::Sema::toInterface(sema.exportModuleInfo(root, mainName)),
+        std::move(deps), opts.InputFilename, program.Modules.front());
+    if (!s)
+      return fail("cannot write " + out.string() + ": " + s.message());
+    return EXIT_SUCCESS;
+  }
   if (opts.EmitPIR) {
     paykan::pir::print(program, std::cout);
     std::cout.flush();

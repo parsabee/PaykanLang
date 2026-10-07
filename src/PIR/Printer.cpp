@@ -5,6 +5,8 @@
 
 #include "paykan/pir/Printer.h"
 
+#include "paykan/pir/Codes.h"
+
 #include <cmath>
 #include <cstdio>
 #include <ostream>
@@ -462,63 +464,7 @@ void printClass(const Class &c, std::ostream &os) {
 
 } // namespace
 
-const char *opcodeName(Opcode op) {
-  switch (op) {
-  case Opcode::Add:
-    return "add";
-  case Opcode::Sub:
-    return "sub";
-  case Opcode::Mul:
-    return "mul";
-  case Opcode::Div:
-    return "div";
-  case Opcode::Rem:
-    return "rem";
-  case Opcode::Neg:
-    return "neg";
-  case Opcode::Not:
-    return "not";
-  case Opcode::Cmp:
-    return "cmp";
-  case Opcode::Select:
-    return "select";
-  case Opcode::IToF:
-    return "itof";
-  case Opcode::FToI:
-    return "ftoi";
-  case Opcode::Cast:
-    return "cast";
-  case Opcode::Call:
-    return "call";
-  case Opcode::VCall:
-    return "vcall";
-  case Opcode::Retain:
-    return "retain";
-  case Opcode::Release:
-    return "release";
-  case Opcode::Box:
-    return "box";
-  case Opcode::Unbox:
-    return "unbox";
-  case Opcode::New:
-    return "new";
-  case Opcode::Free:
-    return "free";
-  case Opcode::FieldLoad:
-    return "field.load";
-  case Opcode::FieldStore:
-    return "field.store";
-  case Opcode::VTableLoad:
-    return "vtable.load";
-  case Opcode::VTableAddr:
-    return "vtable.addr";
-  case Opcode::Load:
-    return "load";
-  case Opcode::Store:
-    return "store";
-  }
-  return "?";
-}
+const char *opcodeName(Opcode op) { return opcodeEntry(op).Name; }
 
 void print(const Signature &sig, std::ostream &os) {
   os << '(';

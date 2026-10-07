@@ -69,6 +69,7 @@ add_executable(sema_tests
     Sema/OptionalPrimitiveTests.cpp
     Sema/TupleTests.cpp
     Sema/PoisonTests.cpp
+    Sema/InterfaceConversionTests.cpp
 )
 target_include_directories(sema_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -182,10 +183,11 @@ if(PAYKAN_TEST_SUITE_pir_llvm AND "llvm" IN_LIST PAYKAN_BACKENDS)
     add_test(NAME PIRLLVMTests COMMAND pir_llvm_tests)
 endif()
 
-# --- PIR tests: printer, parser, verifier (pir) ------------------------------
+# --- PIR tests: printer, parser, verifier, binary codec (pir) ------------------------------
 paykan_test_suite(pir PAYKAN_TEST_SUITE_pir)
 if(PAYKAN_TEST_SUITE_pir)
 add_executable(pir_tests
+    PIR/BinaryTests.cpp
     PIR/PIRTests.cpp
 )
 target_link_libraries(pir_tests
@@ -194,6 +196,23 @@ target_link_libraries(pir_tests
             paykan_compile_options
 )
 add_test(NAME PIRTests COMMAND pir_tests)
+endif()
+
+# --- .pkm module file tests: container, manifest, interface, dump (pkm) ------
+paykan_test_suite(pkm PAYKAN_TEST_SUITE_pkm)
+if(PAYKAN_TEST_SUITE_pkm)
+add_executable(pkm_tests
+    PKM/ContainerTests.cpp
+    PKM/ManifestTests.cpp
+    PKM/InterfaceTests.cpp
+    PKM/DumpTests.cpp
+)
+target_link_libraries(pkm_tests
+    PRIVATE gtest_main
+            paykan_pkm
+            paykan_compile_options
+)
+add_test(NAME PKMTests COMMAND pkm_tests)
 endif()
 
 # --- Lowering tests (AST -> PIR, checked as printed PIR; PIR text round trip
@@ -398,6 +417,7 @@ paykan_test_suite(driver PAYKAN_TEST_SUITE_driver)
 if(PAYKAN_TEST_SUITE_driver)
 add_executable(driver_tests
     Driver/DriverTests.cpp
+    Driver/PkmTests.cpp
 )
 target_compile_definitions(driver_tests
     PRIVATE PAYKAN_BIN="$<TARGET_FILE:paykan>"
@@ -407,6 +427,7 @@ target_compile_definitions(driver_tests
 )
 target_link_libraries(driver_tests
     PRIVATE gtest_main
+            paykan_pkm
             paykan_compile_options
 )
 add_dependencies(driver_tests paykan paykan_incompatible_plugins)

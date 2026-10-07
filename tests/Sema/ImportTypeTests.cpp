@@ -305,14 +305,14 @@ TEST(Module, UnknownExportedTypeErr) {
   info.ExportedFunctions.push_back({"ghost", "Ghost", {"int", "Phantom[]"}});
   paykan::sema::Sema::ModuleInfo::ClassInfo ci;
   ci.Name = "Holder";
-  ci.OriginPath = key;
+  ci.OriginModule = "lib";
   ci.Fields.push_back({"f", "Spectre"});
   ci.Methods.push_back({"m", "Wraith", {"Shade"}, 0});
   info.ExportedClasses.push_back(std::move(ci));
   paykan::sema::Sema::ModuleInfo::ClassInfo orphan;
   orphan.Name = "Orphan";
   orphan.SuperClassName = "Nowhere";
-  orphan.OriginPath = key;
+  orphan.OriginModule = "lib";
   info.ExportedClasses.push_back(std::move(orphan));
   paykan::sema::Sema::ModuleCache[key] = std::move(info);
 

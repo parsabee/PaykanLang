@@ -7,8 +7,9 @@ time a backend sees PIR, every `retain`/`release`/`box`/`unbox`, every scope
 cleanup, every `mov`, every `match` dispatch and every vtable is explicit.  A
 backend never re-derives any of that; it translates PIR ops one-to-one.
 
-PIR has a textual form (printer + parser, so backend tests need no frontend)
-and a verifier.  The data structures live in `include/paykan/pir/PIR.h`.
+PIR has a textual form (printer + parser, so backend tests need no frontend),
+a binary form for module files (§11) and a verifier.  The data structures
+live in `include/paykan/pir/PIR.h`.
 
 Design rules:
 
@@ -468,3 +469,38 @@ whitespace, `(`, `)`, `,`, `[`, `]`, `{`, `}`, `:` and `"` (so `@Box<int>` and
 it back; `paykan::pir::verify` checks §9.  A printed module separates its
 extern declarations from its definitions with blank lines, which the parser
 ignores.
+
+## 11. Binary form
+
+A module also has a binary encoding, the `CODE` section of a `.pkm` module
+file: `paykan::pir::binary::encode` / `decode` in
+`include/paykan/pir/Binary.h`.  It is a one-to-one encoding of the in-memory
+form, not of the text, so a decoded module goes through the same verifier
+and backends and `print(decode(encode(m))) == print(m)` byte for byte.  The
+format is specified in [`design/pkm.md`](design/pkm.md) §5 (layout, type and
+opcode codes, records, determinism) and §6.1 (the symbol index); in short:
+
+- **Layout.** Magic `PIRB`, codec version (1.0), PIR version
+  (`pir::kPIRVersion`, `include/paykan/pir/Version.h`; the same number as
+  `PAYKAN_PIR_TEXT_VERSION`), flags, a string table, the module name, then
+  the item tables in the printer's order (extern globals, cstrs, datas,
+  bytes, classes, functions; two reserved tables are empty today), and the
+  trailer `BRIP`.  Integers are minimal LEB128, `f64` constants are their
+  raw bits (a NaN payload and `-0.0` survive, which the text form does not
+  guarantee), and every name is an index into the string table.
+- **Codes.** Types and opcodes are written as the fixed codes of
+  `include/paykan/pir/Codes.h`, the one table that also holds the mnemonics
+  of §10, never as the C++ enumerator's value; a reader rejects a code it
+  does not know.
+- **Functions** are length-prefixed records, so a reader can skip or decode
+  one function on its own (`decodeFunction`), and the symbol index
+  (`index`, `encodeSymbolIndex`) lists every record with its offset, length
+  and SHA-256.
+- **Determinism.** One module has one encoding: strings are interned in
+  first-use order, reserved fields are zero, and `encode(decode(b)) == b`
+  for every blob a reader accepts.  `EncodeOptions::StripNames` drops value
+  and local names (flag bit 0); symbols keep theirs.
+- **Reading is not verifying.**  `decode` checks the framing (bounds,
+  versions, reserved codes and bits, slack bytes, nesting depth) and
+  nothing else; run `paykan::pir::verify` on the result as on a parsed
+  module.

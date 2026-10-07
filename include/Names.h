@@ -203,6 +203,9 @@ inline constexpr const char *kPaykanHeapLiveBytes = "Paykan_heap_live_bytes";
 // -- Environment variables
 
 inline constexpr const char *kPaykanStdlibEnv = "PAYKAN_STDLIB";
+/// `:`-separated directories of prebuilt `.pkm` modules, searched after the
+/// --module-path directories.
+inline constexpr const char *kPaykanModulePathEnv = "PAYKAN_MODULE_PATH";
 
 // -- Module system
 

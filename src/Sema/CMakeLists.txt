@@ -8,5 +8,6 @@ add_library(paykan_sema STATIC
 target_link_libraries(paykan_sema
     PUBLIC  paykan_diag
             paykan_frontend
+            paykan_modules
     PRIVATE paykan_compile_options
 )

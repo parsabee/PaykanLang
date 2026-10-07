@@ -9,6 +9,7 @@
 #include "DiagEngine.h"
 
 #include "StringMap.h"
+#include "paykan/pkm/Interface.h"
 
 #include <filesystem>
 #include <memory>
@@ -20,6 +21,9 @@
 namespace paykan {
 namespace parser {
 class ParserDriver;
+}
+namespace modules {
+class ModuleResolver;
 }
 namespace sema {
 
@@ -47,9 +51,9 @@ struct SemaContext {
   /// a module can fail with no error of its own.
   bool ImportsFailedModule = false;
   std::vector<Diagnostic> Diagnostics;
-  /// Pre-computed SemaContexts for directly-imported modules, keyed by
-  /// resolved file path. Populated by Sema::run() so the lowering can reuse
-  /// them without re-running the Sema pass.
+  /// Pre-computed SemaContexts for the modules this Sema built from source,
+  /// keyed by canonical module name (ModuleName.h). Populated by Sema::run()
+  /// so the lowering can reuse them without re-running the Sema pass.
   StringMap<std::shared_ptr<SemaContext>> ImportedContexts;
 
   explicit operator bool() const { return Ok; }
@@ -421,7 +425,8 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// The frontend imported modules are parsed with ("" = the default).
   std::string FrontendName;
 
-  /// Files currently being imported (for cycle detection).
+  /// Canonical names of the modules currently being imported (for cycle
+  /// detection).
   StringSet *ImportStack = nullptr;
 
   /// Canonical names (ModuleName.h) of the modules that failed to load in
@@ -435,30 +440,23 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// error of its own (see SemaContext::ImportsFailedModule).
   unsigned RepeatedImportFailures = 0;
 
-  /// Accumulated SemaContexts for each directly-imported module, keyed by
-  /// resolved path. Built by processImport; moved into the SemaContext
-  /// returned by run().
+  /// Accumulated SemaContexts for each module built from source by this
+  /// Sema, keyed by canonical name. Built by processImport; moved into the
+  /// SemaContext returned by run().
   StringMap<std::shared_ptr<SemaContext>> AccumulatedImportContexts;
 
-  /// The module that declares a type: its resolved file path (the identity)
-  /// and its canonical name (ModuleName.h; what diagnostics show).
-  struct TypeOrigin {
-    std::string Path;
-    std::string Module;
-  };
-
-  /// Defining module of every class/enum this Sema has reconstructed from an
-  /// import, keyed by canonical type name.  Type names are global across the
-  /// import graph, so reconstructing a type whose name is already bound to a
-  /// type from a different module is an error rather than a silent merge of
-  /// two unrelated types.
-  StringMap<TypeOrigin> ImportedTypeOrigins;
+  /// Defining module (canonical name, ModuleName.h) of every class/enum this
+  /// Sema has reconstructed from an import, keyed by canonical type name.
+  /// Type names are global across the import graph, so reconstructing a type
+  /// whose name is already bound to a type from a different module is an
+  /// error rather than a silent merge of two unrelated types.
+  StringMap<std::string> ImportedTypeOrigins;
 
   /// Every module qualifier this file's imports bind (each import's alias or
   /// last path segment, and its full module path) -> the module it names.
   /// One qualifier cannot name two modules: `util::f` would be ambiguous.
   struct ImportQualifier {
-    std::string Resolved;   ///< resolved file path
+    std::string Module;     ///< canonical module name
     std::string ModulePath; ///< as written, e.g. `a::util`
   };
   StringMap<ImportQualifier> ImportQualifiers;
@@ -484,6 +482,11 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// it lies under it, as given otherwise.
   std::string displayPath(const std::filesystem::path &path) const;
 
+  /// Where imports come from when the driver set one (setResolver): source
+  /// files, cache entries or prebuilt `.pkm` files.  Without it every import
+  /// is parsed from its source file.
+  modules::ModuleResolver *Resolver = nullptr;
+
 public:
   /// Info about an already-analyzed module.  Public (with ModuleCache) so
   /// tests can seed a cache entry and exercise the error paths of export
@@ -496,6 +499,7 @@ public:
       std::string Name;
       std::string ReturnTypeName;
       std::vector<std::string> ParamTypeNames;
+      bool operator==(const FunctionInfo &) const = default;
     };
     std::vector<FunctionInfo> ExportedFunctions;
 
@@ -511,24 +515,26 @@ public:
       /// resolve, with type identity preserved) but is NOT given the
       /// importer's qualifier — names are never re-exported transitively.
       bool IsLocal = true;
-      /// Resolved path of the module that declares the class ("" for
-      /// compiler builtins).  Used to detect two modules exporting different
-      /// classes under one name.
-      std::string OriginPath;
-      /// Canonical name of that module (ModuleName.h), for diagnostics.
+      /// Canonical name (ModuleName.h) of the module that declares the
+      /// class ("" for compiler builtins): the module's identity, used to
+      /// detect two modules exporting different classes under one name, and
+      /// what diagnostics show.
       std::string OriginModule;
       struct FieldInfo {
         std::string FieldName;
         std::string TypeName;
+        bool operator==(const FieldInfo &) const = default;
       };
       struct MethodInfo {
         std::string Name;
         std::string ReturnTypeName;
         std::vector<std::string> ParamTypeNames;
-        uint8_t Flags; // ast::MethodDecl::Private bit
+        uint8_t Flags = 0; // ast::MethodDecl::Private bit
+        bool operator==(const MethodInfo &) const = default;
       };
       std::vector<FieldInfo> Fields;
       std::vector<MethodInfo> Methods;
+      bool operator==(const ClassInfo &) const = default;
     };
     std::vector<ClassInfo> ExportedClasses;
 
@@ -538,14 +544,35 @@ public:
       std::string Name;
       std::vector<std::string> Variants;
       bool IsLocal = true;      // see ClassInfo::IsLocal
-      std::string OriginPath;   // see ClassInfo::OriginPath
       std::string OriginModule; // see ClassInfo::OriginModule
+      bool operator==(const EnumInfo &) const = default;
     };
     std::vector<EnumInfo> ExportedEnums;
+    bool operator==(const ModuleInfo &) const = default;
   };
 
-  /// Global cache of already-analyzed modules (keyed by resolved file path).
+  /// Global cache of already-analyzed modules, keyed by the resolved path
+  /// of the file they came from (a source, or a .pkm).
   static StringMap<ModuleInfo> ModuleCache;
+
+  /// The exports of the module this Sema analysed (after run()): what an
+  /// importer sees, in the module's own terms.  @p moduleName is its
+  /// canonical name.
+  ModuleInfo exportModuleInfo(ast::TranslationUnit *tu,
+                              const std::string &moduleName) const;
+
+  /// ModuleInfo as the IFACE records of a .pkm (pkm::Interface), and back.
+  /// The two are the same declarations field for field; the Interface's
+  /// module name, dependencies and display file are the resolver's to fill.
+  /// fromInterface orders the declarations as exportModuleInfo does, so a
+  /// module loaded from a file is injected exactly like one built in
+  /// process.
+  static pkm::Interface toInterface(const ModuleInfo &info);
+  static ModuleInfo fromInterface(const pkm::Interface &iface);
+
+  /// Set the resolver imports go through (the driver's).  Child Semas
+  /// inherit it.
+  void setResolver(modules::ModuleResolver *resolver) { Resolver = resolver; }
 
 private:
   /// Resolve a module path to an absolute file path.
@@ -558,6 +585,32 @@ private:
                               const std::string &shown,
                               const std::string &module, const char *kind,
                               ast::SourceLocation loc);
+
+  /// Where a module was found: its source file, or the interface loaded
+  /// from a `.pkm` by the resolver.
+  struct LocatedModule {
+    std::string Path;                      ///< source file, or the .pkm
+    const pkm::Interface *Iface = nullptr; ///< set when loaded from a .pkm
+  };
+  /// Locate module @p canonical (an import of @p modulePath): through the
+  /// resolver when there is one (resolving the dependencies a cache entry
+  /// needs first), from the source tree otherwise.  Reports a module that
+  /// cannot be found or used and returns false.
+  bool locateModule(const std::string &canonical, bool isSystem,
+                    const std::string &modulePath, ast::SourceLocation loc,
+                    LocatedModule &out);
+  /// The exports of module @p canonical: from ModuleCache, from the
+  /// interface @p located holds, or by parsing and analysing its source.
+  /// Returns nullptr after reporting the failure.
+  const ModuleInfo *loadModule(const std::string &canonical,
+                               const LocatedModule &located,
+                               ast::SourceLocation loc);
+  /// Make a module's exports visible under @p qualifier (and
+  /// @p fullModulePath): reconstruct its types in Ctx and declare its
+  /// functions.  Returns false after reporting a failure.
+  bool injectModule(const ModuleInfo &info, const std::string &qualifier,
+                    const std::string &fullModulePath,
+                    const std::string &moduleName, ast::SourceLocation loc);
 
   /// Process a single import declaration.
   bool processImport(ast::ImportDecl *node);

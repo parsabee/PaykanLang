@@ -8,6 +8,8 @@ commands and every option, the two backends, and the compilation cache.
 ```text
 paykan [options] [run] <source-file> [program arguments]
 paykan [options] build <source-file> [-o <output>]
+paykan pkm dump <file.pkm> [--section=<name>]
+paykan pkm check <file.pkm>
 ```
 
 - **`run`** (the default, so `paykan prog.pkn` is the same as `paykan run prog.pkn`)
@@ -17,6 +19,10 @@ paykan [options] build <source-file> [-o <output>]
 - **`build`** compiles the program into a native executable named by `-o`, or after the
   source file without its extension. `build` takes no program arguments, so its options may
   also come after the file.
+- **`pkm`** inspects a module file (see [Module Files](../language/06-modules.md#module-files)): `dump`
+  prints it (`--section=manifest|sections|iface|code|symidx|payloads` prints one part;
+  `code` is exactly the module's PIR text), `check` prints whether this `paykan` can use it
+  and exits with 0 when it can.
 
 The source file is the program's **main file**. Its directory is the source root from which
 imports are resolved (see [Modules](10-modules.md)).
@@ -36,6 +42,11 @@ option prints a message suggesting `--help`, and also exits with 1.
 | `--frontend=<name>` | the parser to read the source with; the built-in one, `recursive-descent`, is the default |
 | `--track-heap` | run with heap tracking and print the allocation statistics to standard error at exit ([Memory](12-memory.md)) |
 | `--check-only` | parse and type-check, then stop: no code is generated and nothing runs. It also accepts a module that has no `main`, which makes it handy for checking a library module on its own |
+| `--emit-pkm` | compile one module and write its `.pkm` module file to `-o <file>`, or next to the source, then stop. The module may have no `main`. Like `build`, it takes no program arguments, so `-o` may follow the file |
+| `--module-path=<dir>` | a directory of prebuilt `.pkm` modules, searched for an import whose source is not found (repeatable; then the `:`-separated `$PAYKAN_MODULE_PATH`) |
+| `--rebuild-modules` | ignore the `.pkm` cache entries of the imported modules (they are rewritten) |
+| `--no-module-cache` | neither read nor write `.pkm` cache entries |
+| `--verbose` | print one line per imported module on standard error: where it came from (its source, a cache entry, a prebuilt file) and why a cache entry was not used |
 | `--` | ends `paykan`'s options: a file name starting with `-` can follow |
 
 ### Looking inside the compiler
@@ -118,22 +129,25 @@ programs against. An installed `paykan` finds it next to itself (`../lib` and
 
 ## The compilation cache
 
-Compiling a program writes a `.paykan_cache/` directory in the source root. Each module's
-compiled form is cached there under a key that covers the module's code, the code of what it
-uses from the modules it imports, the compiler, the C compiler and the options. On the next
-run, unchanged modules are taken from the cache and only the rest is recompiled, so editing
-`main.pkn` in a large project does not recompile every library module, while a change to a
-class does recompile every module that uses it.
+Compiling a program writes a `.paykan_cache/` directory in the source root. Each imported
+module's compiled form is cached there as a `.pkm` module file (`a::b` under
+`.paykan_cache/a/b.pkm`): its interface for the type checker and its PIR for the backends,
+with a manifest recording the compiler that wrote it, the source it was built from and the
+interface of every module it imports. On the next run an entry is used when all of those
+are unchanged and the rest is recompiled, so editing `main.pkn` in a large project does not
+recompile every library module, editing a function body recompiles one module, and changing
+a class or a signature also recompiles the modules that use it. Each backend keeps its own
+generated-code cache beside the `.pkm` entries.
 
 The cache is safe to share and to delete:
 
 - Several `paykan` processes may use one cache at the same time, even with different
   options or backends.
-- An entry that is missing, damaged or written under another key is simply rebuilt.
+- An entry that is missing, damaged or out of date is simply rebuilt (`--verbose` says why).
 - Deleting `.paykan_cache/` costs only a recompile, so add it to your `.gitignore`.
 
-[Modules](../language/06-modules.md#compilation-cache) in the reference describes the cache
-entries in detail.
+[Modules](../language/06-modules.md#module-files) in the reference describes the module
+files, the cache and prebuilt modules in detail.
 
 ## Environment variables
 
@@ -142,6 +156,7 @@ entries in detail.
 | `CC` | the C compiler the c backend uses (default `cc`) |
 | `PAYKAN_RUNTIME_DIR` | where to find the runtime (`lib/` and `include/paykan/` under it) |
 | `PAYKAN_STDLIB` | the directory of system imports, `import ::name;` ([Modules](10-modules.md)) |
+| `PAYKAN_MODULE_PATH` | `:`-separated directories of prebuilt `.pkm` modules, searched after the `--module-path` directories |
 | `PAYKAN_PLUGIN_PATH` | more directories to load plugins from, separated by `:` |
 
 Next: [Extending PaykanLang](14-extending.md).

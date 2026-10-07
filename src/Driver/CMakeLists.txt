@@ -12,6 +12,8 @@ target_link_libraries(paykan_driver
             paykan_frontend
             paykan_backend
             paykan_lowering
+            paykan_modules
+            paykan_pkm
             paykan_pir
             paykan_plugin_host
             paykan_ast_interchange

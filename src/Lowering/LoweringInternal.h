@@ -11,6 +11,7 @@
 #include "ASTContext.h"
 #include "ASTVisitor.h"
 #include "Sema.h"
+#include "paykan/modules/ModuleResolver.h"
 #include "paykan/pir/Builder.h"
 #include "paykan/pir/PIR.h"
 
@@ -53,32 +54,36 @@ struct ProgramLowering {
   const sema::SemaContext &Top;
   std::string ProjectRoot;
   std::ostream &Errs;
+  /// The driver's resolver, or nullptr: a module it loaded from a `.pkm`
+  /// is decoded, not lowered.
+  modules::ModuleResolver *Resolver;
   /// Lowered modules in completion order (imports first); stable addresses.
   std::deque<pir::Module> Modules;
-  /// The lowered imports by resolved file path (Sema's identity of a module)
-  /// and by canonical module name (the PIR's).
-  std::unordered_map<std::string, pir::Module *> ByPath;
+  /// The imports by canonical module name (Sema's identity of a module;
+  /// nullptr while one is being lowered) and by the name the PIR gives them
+  /// (claimName).
+  std::unordered_map<std::string, pir::Module *> ByCanonical;
   std::unordered_map<std::string, pir::Module *> ByName;
   /// Every module name handed out (the main module's included).
   std::unordered_set<std::string> UsedNames;
   /// Class name -> name of the module whose ClassDecl defines it.
   std::unordered_map<std::string, std::string> ClassOrigins;
-  /// Every SemaContext reachable from Top, keyed by resolved file path.
+  /// Every SemaContext reachable from Top, keyed by canonical module name.
   std::unordered_map<std::string, const sema::SemaContext *> Contexts;
   bool Indexed = false;
 
   ProgramLowering(const sema::SemaContext &top, std::string projectRoot,
-                  std::ostream &errs)
-      : Top(top), ProjectRoot(std::move(projectRoot)), Errs(errs) {}
+                  std::ostream &errs, modules::ModuleResolver *resolver)
+      : Top(top), ProjectRoot(std::move(projectRoot)), Errs(errs),
+        Resolver(resolver) {}
 
-  const sema::SemaContext *lookupImportContext(const std::string &resolved);
+  const sema::SemaContext *lookupImportContext(const std::string &canonical);
   /// Reserve @p name for a module, or `name.2`, `name.3`, ... when another
   /// module already has it.
   std::string claimName(const std::string &name);
-  /// Lower the module at @p resolved (once), naming it @p name (its
-  /// canonical module name), and return it.
-  pir::Module *lowerImport(const std::string &resolved,
-                           const std::string &name);
+  /// Lower (or, when the resolver loaded it from a `.pkm`, decode) the
+  /// module of canonical name @p name once, and return it.
+  pir::Module *lowerImport(const std::string &name);
 };
 
 /// Lowers ONE module (translation unit).  Imported modules get their own
