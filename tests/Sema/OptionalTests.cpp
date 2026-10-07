@@ -114,11 +114,11 @@ TEST(Optional, ParamAndReturn) {
   )");
 }
 
-TEST(Optional, MovOfOptional) {
+TEST(Optional, CopyOfOptional) {
   expectOk(withNode(R"(
     a: Node? = Node(1);
-    b = mov a;
-    c: Node? = mov b;
+    b = a;
+    c: Node? = b;
   )"));
 }
 

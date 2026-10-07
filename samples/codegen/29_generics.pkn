@@ -5,7 +5,7 @@
 //            function `first<T>` with explicit and inferred type arguments,
 //            constructor-argument inference (`Box(5)`), an instantiation as a
 //            field / parameter / return / array element type, `match` on an
-//            instantiation, `mov` of an instantiation, and `==` via `equals`.
+//            instantiation, an instantiation copied into a new local, and `==` via `equals`.
 
 class Box<T> {
   v: T;
@@ -92,7 +92,7 @@ fn main() -> int {
   println(Str(bi == Box<int>(3)));        // True  (== dispatches to equals)
   println(Str<bool>(bi == Box<int>(4)));        // False
 
-  moved: Box<int> = mov bi;                   // ownership transfer
-  println(Str(moved.get()));               // 3
+  shared: Box<int> = bi;                      // shares the box
+  println(Str(shared.get()));               // 3
   return 0;
 }

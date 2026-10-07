@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 // String literals used as objects (#116): a literal in any value position (a
-// subscript or method receiver, under `mov`, as a match subject, a
+// subscript or method receiver, as a match subject, a
 // conversion argument, a tuple / array element, an optional) is a Str object
 // built from the literal, never its raw C string, and is released like any
 // other string temporary.  Each program runs with every frontend on the
@@ -62,18 +62,18 @@ TEST(LiteralObject, SubscriptAsMatchSubjectAndConversionArgument) {
                             "newline\ny\nlit\n42\n");
 }
 
-TEST(LiteralObject, MovOfALiteral) {
-  expectRunsOnEveryFrontend("Mov", R"(
+TEST(LiteralObject, LiteralInEveryValuePosition) {
+  expectRunsOnEveryFrontend("Positions", R"(
     fn consume(s: Str) -> int { return s.len(); }
-    fn give() -> Str { return mov "ret"; }
+    fn give() -> Str { return "ret"; }
     fn main() -> int {
-      v = mov "lit";
+      v = "lit";
       println(v);
-      println(mov "lit");
-      println(Str<int>(consume(mov "lit")));
-      s: Str = mov "typed";
+      println("lit");
+      println(Str<int>(consume("lit")));
+      s: Str = "typed";
       println(s);
-      println(mov "lit" + "x");
+      println("lit" + "x");
       println(give());
       return 0;
     }
@@ -104,16 +104,16 @@ TEST(LiteralObject, TupleArrayAndOptionalElements) {
       t = ("tup", 1);
       println(t.0);
       println(first(("arg", 2)));
-      m: (Str, Str) = (mov "m1", "m2");
+      m: (Str, Str) = ("m1", "m2");
       println(m.0 + m.1);
-      a: Str[] = ["x", mov "y"];
+      a: Str[] = ["x", "y"];
       a[0] = "z";
-      a.push(mov "w");
+      a.push("w");
       println(a[0] + a[1] + a[2]);
       println(["p", "q"][1]);
       o: Str? = "opt";
       println(o);
-      o2: Str? = mov "opt2";
+      o2: Str? = "opt2";
       println(o2);
       match opt(True) { v: Str { println(v); } None { println("none"); } }
       match opt(False) { v: Str { println(v); } None { println("none"); } }
@@ -128,13 +128,13 @@ TEST(LiteralObject, ExpressionStatementAndFields) {
     class K {
       name: Str;
       tag: Str?;
-      fn __init__() { self.name = "k"; self.tag = mov "t"; }
+      fn __init__() { self.name = "k"; self.tag = "t"; }
     }
     fn main() -> int {
       "unused";
       "ab"[0];
       k = K();
-      k.name = mov "k2";
+      k.name = "k2";
       println(k.name);
       println(k.tag);
       return 0;

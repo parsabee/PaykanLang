@@ -187,7 +187,7 @@ TEST(OptionalPrimitive, CompareAgainstNoneAndEachOther) {
   g.expectNoLeaks("CompareAgainstNoneAndEachOther");
 }
 
-// -- Sinks: params/returns, fields, arrays, tuples, ternary, mov, Obj
+// -- Sinks: params/returns, fields, arrays, tuples, ternary, copies, Obj
 
 TEST(OptionalPrimitive, ParamsAndReturns) {
   LeakGuard g;
@@ -303,7 +303,7 @@ TEST(OptionalPrimitive, TupleElements) {
   g.expectNoLeaks("TupleElements");
 }
 
-TEST(OptionalPrimitive, TernaryMovAndReassignment) {
+TEST(OptionalPrimitive, TernaryCopyAndReassignment) {
   LeakGuard g;
   auto r = compileAndRun(R"pkn(
     fn main() -> int {
@@ -316,7 +316,7 @@ TEST(OptionalPrimitive, TernaryMovAndReassignment) {
       a: int? = 1;
       b = if a == None then 5 else a;           // int?: mixes int and int?
       println(b);
-      m = mov a;
+      m = a;
       println(m);
       x: int? = 1;
       y: int? = x;                              // shares x's box
@@ -328,7 +328,7 @@ TEST(OptionalPrimitive, TernaryMovAndReassignment) {
   )pkn");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "0\nNone\n2\nNone\n1\n1\n1\n2\n");
-  g.expectNoLeaks("TernaryMovAndReassignment");
+  g.expectNoLeaks("TernaryCopyAndReassignment");
 }
 
 TEST(OptionalPrimitive, IntoObjAsBoxedClasses) {

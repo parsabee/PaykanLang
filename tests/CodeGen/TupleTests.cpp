@@ -184,7 +184,7 @@ TEST(Tuple, DestructureFromVariableAndLiteralKeepsSource) {
   g.expectNoLeaks("DestructureFromVariableAndLiteralKeepsSource");
 }
 
-// -- Ownership: temporaries, mov, parameters
+// -- Ownership: temporaries, copies, parameters
 
 TEST(Tuple, CallRootedIndexTearsDownTemporary) {
   LeakGuard g;
@@ -206,17 +206,17 @@ TEST(Tuple, CallRootedIndexTearsDownTemporary) {
   g.expectNoLeaks("CallRootedIndexTearsDownTemporary");
 }
 
-TEST(Tuple, MovTransfersTheTuple) {
+TEST(Tuple, TupleCopiedAndPassed) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     fn take(p: (Str, int)) -> Str { return p.0; }
     fn main() -> int {
       t = ("moved", 1);
-      u = mov t;
+      u = t;
       println(u.0);
-      println(take(mov u));       // moved into a parameter, released there
+      println(take(u));       // moved into a parameter, released there
       v = ("again", 2);
-      w: (Str, int) = mov v;
+      w: (Str, int) = v;
       v = ("revived", 3);
       println(w.0 + v.0);
       return 0;
@@ -224,7 +224,7 @@ TEST(Tuple, MovTransfersTheTuple) {
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "moved\nmoved\nagainrevived\n");
-  g.expectNoLeaks("MovTransfersTheTuple");
+  g.expectNoLeaks("TupleCopiedAndPassed");
 }
 
 TEST(Tuple, PassedToFunctionsAndReturnedThrough) {

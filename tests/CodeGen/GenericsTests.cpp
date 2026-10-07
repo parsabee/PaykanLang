@@ -187,20 +187,20 @@ TEST(Generics, MatchOnInstantiation) {
   g.expectNoLeaks("MatchOnInstantiation");
 }
 
-TEST(Generics, MovOfInstantiation) {
+TEST(Generics, InstantiationTransfer) {
   LeakGuard g;
   auto r = compileAndRun(withMain(std::string(kBox) + R"(
     fn consume(b: Box<Str>) -> Str { return b.get(); }
   )",
                                   R"(
     a: Box<Str> = Box<Str>("moved");
-    b: Box<Str> = mov a;
+    b: Box<Str> = a;
     println(b.get());
-    println(consume(mov b));
+    println(consume(b));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "moved\nmoved\n");
-  g.expectNoLeaks("MovOfInstantiation");
+  g.expectNoLeaks("InstantiationTransfer");
 }
 
 TEST(Generics, EqualityDispatchesToEquals) {

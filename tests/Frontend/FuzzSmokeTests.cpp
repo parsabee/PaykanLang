@@ -77,7 +77,7 @@ std::vector<std::string> loadCorpus() {
       match x { Box<int> { } y: Str { } 1 { } "s" { } None { } _ { } }
       if (a < 2 && !b) { a = if a then 1 else 2; } else if (a == 3) { } else { }
       while (True) { break; continue; }
-      xs: int[] = [1, 2, 3]; xs[0] = mov a; p.0.len(); c: Color = Color::Red;
+      xs: int[] = [1, 2, 3]; xs[0] = a; p.0.len(); c: Color = Color::Red;
       return first<int>(xs) + Box<Str>("v").get().len();
     }
   )");

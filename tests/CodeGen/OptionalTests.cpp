@@ -232,9 +232,9 @@ TEST(Optional, CompareTwoOptionals) {
   g.expectNoLeaks("CompareTwoOptionals");
 }
 
-// -- mov of an optional (present and None)
+// -- An optional copied, relayed and reassigned (present and None)
 
-TEST(Optional, MovOptional) {
+TEST(Optional, OptionalCopiedAndRelayed) {
   LeakGuard g;
   auto r = compileAndRun(R"pkn(
     fn describe(s: Str?) -> Str {
@@ -243,26 +243,26 @@ TEST(Optional, MovOptional) {
         None   { return "none"; }
       }
     }
-    fn relay(s: Str?) -> Str? { return mov s; }
+    fn relay(s: Str?) -> Str? { return s; }
     fn main() -> int {
       a: Str? = "moved";
-      b = mov a;
+      b = a;
       println(describe(b));
       a = "revived";
       println(describe(a));
       n: Str? = None;
-      m = mov n;                  // moving None leaves a NULL slot behind
+      m = n;                      // copying None copies a NULL slot
       println(describe(m));
-      println(describe(relay(mov b)));
+      println(describe(relay(b)));
       println(describe(relay(None)));
-      c: Str? = mov a;
+      c: Str? = a;
       println(describe(c));
       return 0;
     }
   )pkn");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "moved\nrevived\nnone\nmoved\nnone\nrevived\n");
-  g.expectNoLeaks("MovOptional");
+  g.expectNoLeaks("OptionalCopiedAndRelayed");
 }
 
 // -- Optional parameters / returns through free functions and methods
