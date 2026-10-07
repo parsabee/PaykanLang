@@ -12,6 +12,7 @@
 #include "paykan/pkm/Interface.h"
 
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -916,6 +917,49 @@ private:
   bool checkFieldKind(const ast::VarDecl *field, ast::Type *ty);
   /// A value-type result is `-> own T` (or `-> T`), never `-> mut T`.
   bool checkResultKind(const ast::FuncDecl *fn, ast::Type *retTy);
+
+  // -- Ownership prototype: `mv` and use after move
+  //
+  // A conservative moved set: moved on any path is moved after the fork
+  // (if / else, ternary, match arms; a branch that always returns adds
+  // nothing).  An assignment clears it.
+
+  /// The moved variables, (owning scope, name) -> where `mv` took them.
+  using MovedSet =
+      std::map<std::pair<const Scope *, std::string>, ast::SourceLocation>;
+  MovedSet Moved;
+  /// The branches of a fork: each starts from the state at start(), and
+  /// finish() leaves the union of their end states.
+  struct MoveFork {
+    Sema &S;
+    MovedSet Before, Merged;
+    bool Started = false;
+    bool PrevReturns = false; ///< the match arm in progress always returns
+    explicit MoveFork(Sema &s) : S(s) {}
+    void start() {
+      Before = S.Moved;
+      Started = true;
+    }
+    /// A branch ended; @p returns: it always returns (its state is dropped).
+    void branchEnd(bool returns);
+    void finish() { S.Moved = std::move(Merged); }
+  };
+  /// The match whose arms are being checked (enterMatchArm).
+  MoveFork *CurrentArms = nullptr;
+  /// A match arm's body is about to be checked.
+  void enterMatchArm(const ast::MatchArm *arm);
+  /// The rules of `mv x`; marks `x` moved.
+  bool checkMove(const ast::MoveExpr *mv);
+  /// Error if variable @p name was moved.
+  bool checkNotMoved(const std::string &name, ast::SourceLocation loc);
+  /// @p name was assigned: it is no longer moved.
+  void clearMoved(const std::string &name);
+  /// End of a loop whose moved set was @p before at its start: a variable
+  /// of an outer scope moved in the loop is an error.
+  void checkLoopMoves(const MovedSet &before);
+  /// visitMatchStmt without the moved-set fork of its arms.
+  bool checkMatchStmt(ast::MatchStmt *node);
+  static bool stmtAlwaysReturns(ast::Stmt *stmt);
   EntryPoint EntryPointCheck = EntryPoint::None;
   /// The check EntryPointCheck selects, over the main file's declarations.
   bool checkEntryPoint(ast::TranslationUnit *tu,

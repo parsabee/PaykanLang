@@ -51,7 +51,11 @@ Sema::ScopeGuard::ScopeGuard(Sema &s)
   S.CurrentScope = ScopeObj.get();
 }
 
-Sema::ScopeGuard::~ScopeGuard() { S.CurrentScope = ScopeObj->Parent; }
+Sema::ScopeGuard::~ScopeGuard() {
+  S.CurrentScope = ScopeObj->Parent;
+  for (auto it = S.Moved.begin(); it != S.Moved.end();)
+    it = it->first.first == ScopeObj.get() ? S.Moved.erase(it) : std::next(it);
+}
 
 // -- Helpers
 
@@ -647,6 +651,8 @@ ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
                                      "' cannot be used as a value");
     return nullptr;
   }
+  if (S.Ownership && !S.checkNotMoved(node->getName(), node->getLocation()))
+    return nullptr;
   return S.checkIdentLive(node->getName(), node->getLocation());
 }
 
@@ -1244,8 +1250,13 @@ ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
 
 ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
   auto *condTy = visit(node->getCondition());
+  MoveFork fork(S);
+  fork.start();
   auto *trueTy = visit(node->getTrueExpr());
+  fork.branchEnd(false);
   auto *falseTy = visit(node->getFalseExpr());
+  fork.branchEnd(false);
+  fork.finish();
   if (!condTy || !trueTy || !falseTy)
     return nullptr;
 
@@ -1391,7 +1402,8 @@ ast::Type *Sema::ExprChecker::visitCopyExpr(ast::CopyExpr *node) {
 ast::Type *Sema::ExprChecker::visitMoveExpr(ast::MoveExpr *node) {
   if (!S.requireOwnership(node->getLocation(), "mv"))
     return nullptr;
-  return visit(node->getOperand());
+  auto *ty = visit(node->getOperand());
+  return ty && S.checkMove(node) ? ty : nullptr;
 }
 
 bool Sema::requireOwnership(ast::SourceLocation loc, const char *what) {
@@ -1564,6 +1576,8 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
       ok = false;
       continue;
     }
+    if (Ownership)
+      clearMoved(name);
     auto *varTy = owner->lookup(name);
     // A poisoned variable is re-declared with the element's type.
     if (ast::isa<ast::PoisonType>(varTy)) {
@@ -2054,6 +2068,7 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   }
 
   if (Ownership) {
+    clearMoved(varName);
     ast::Qualifier q = varKind(varName).Qual;
     if (!checkReassignable(varName, node->getLocation()))
       return false;
@@ -2109,16 +2124,22 @@ bool Sema::visitIfStmt(ast::IfStmt *node) {
   }
 
   bool ok = true;
+  MoveFork fork(*this);
+  fork.start();
   // Type-check the then branch.
   if (!visit(node->getThenBranch()))
     ok = false;
+  fork.branchEnd(stmtAlwaysReturns(node->getThenBranch()));
   // Type-check the else branch (if present).
   if (node->hasElse() && !visit(node->getElseBranch()))
     ok = false;
+  fork.branchEnd(node->hasElse() && stmtAlwaysReturns(node->getElseBranch()));
+  fork.finish();
   return ok;
 }
 
 bool Sema::visitWhileStmt(ast::WhileStmt *node) {
+  MovedSet before = Moved;
   // Type-check the condition — must be bool.
   auto *condTy = resolveExprType(node->getCondition());
   if (!condTy)
@@ -2133,6 +2154,8 @@ bool Sema::visitWhileStmt(ast::WhileStmt *node) {
   ++LoopDepth;
   bool ok = visit(node->getBody());
   --LoopDepth;
+  if (Ownership)
+    checkLoopMoves(before);
   return ok;
 }
 
@@ -2592,6 +2615,8 @@ bool Sema::checkValueMatch(ast::MatchStmt *node, ast::Type *subjectTy) {
       ok = false;
     }
 
+    enterMatchArm(arm);
+
     for (auto *stmt : arm->getBody()->getStatements())
       if (!visit(stmt))
         ok = false;
@@ -2661,6 +2686,8 @@ bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
       }
     }
 
+    enterMatchArm(arm);
+
     for (auto *stmt : arm->getBody()->getStatements())
       if (!visit(stmt))
         ok = false;
@@ -2669,7 +2696,7 @@ bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
   return ok;
 }
 
-bool Sema::visitMatchStmt(ast::MatchStmt *node) {
+bool Sema::checkMatchStmt(ast::MatchStmt *node) {
   auto *subjectTy = resolveExprType(node->getSubject());
   if (!subjectTy)
     return false;
@@ -2736,6 +2763,7 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
             "match on a class subject of type '" + subjectCt->getName() +
                 "' requires type-name arms, not literal patterns");
       ok = false;
+      enterMatchArm(arm);
       for (auto *stmt : arm->getBody()->getStatements())
         if (!visit(stmt))
           ok = false;
@@ -2805,6 +2833,7 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
     }
 
     // 5. Recursively type-check the arm body.
+    enterMatchArm(arm);
     for (auto *stmt : arm->getBody()->getStatements())
       if (!visit(stmt))
         ok = false;
@@ -2929,6 +2958,8 @@ bool Sema::checkOptionalMatch(ast::MatchStmt *node,
         }
       }
     }
+
+    enterMatchArm(arm);
 
     for (auto *stmt : arm->getBody()->getStatements())
       if (!visit(stmt))

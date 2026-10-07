@@ -7,6 +7,7 @@
 
 #include "Names.h"
 #include "Sema.h"
+#include "SemaInternal.h"
 
 namespace paykan {
 namespace sema {
@@ -376,6 +377,97 @@ bool Sema::checkResultKind(const ast::FuncDecl *fn, ast::Type *retTy) {
   error(fn->getLocation(),
         "a value type result must be '-> own " + typeName(retTy) + "'");
   return false;
+}
+
+// -- `mv` and use after move
+
+bool Sema::stmtAlwaysReturns(ast::Stmt *stmt) {
+  if (auto *c = ast::dyn_cast<ast::CompoundStmt>(stmt))
+    return detail::blockAlwaysReturns(c->getStatements());
+  return detail::blockAlwaysReturns({stmt});
+}
+
+void Sema::MoveFork::branchEnd(bool returns) {
+  if (!returns)
+    Merged.insert(S.Moved.begin(), S.Moved.end());
+  S.Moved = Before;
+}
+
+void Sema::enterMatchArm(const ast::MatchArm *arm) {
+  if (!CurrentArms)
+    return;
+  if (CurrentArms->Started)
+    CurrentArms->branchEnd(CurrentArms->PrevReturns);
+  else
+    CurrentArms->start();
+  CurrentArms->PrevReturns =
+      detail::blockAlwaysReturns(arm->getBody()->getStatements());
+}
+
+bool Sema::visitMatchStmt(ast::MatchStmt *node) {
+  MoveFork arms(*this);
+  MoveFork *saved = CurrentArms;
+  CurrentArms = &arms;
+  bool ok = checkMatchStmt(node);
+  CurrentArms = saved;
+  if (arms.Started) {
+    arms.branchEnd(arms.PrevReturns);
+    arms.branchEnd(false); // no arm taken
+    arms.finish();
+  }
+  return ok;
+}
+
+bool Sema::checkMove(const ast::MoveExpr *mv) {
+  const ast::Expr *op = mv->getOperand();
+  const auto *id = ast::dyn_cast<ast::Identifier>(op);
+  std::string msg;
+  if (id ? id->getName() == names::kSelf
+         : ast::isa<ast::MemberAccessExpr>(op) ||
+               ast::isa<ast::SubscriptExpr>(op) ||
+               ast::isa<ast::TupleIndexExpr>(op))
+    msg = "cannot move out of a field/element/self";
+  else if (id && varKind(id->getName()).Let)
+    msg = "cannot move from 'let' '" + id->getName() + "'";
+  else if (!id || varKind(id->getName()).Qual != ast::Qualifier::Own)
+    msg = "'mv' needs an 'own' local or parameter";
+  if (!msg.empty()) {
+    error(mv->getLocation(), msg);
+    return false;
+  }
+  if (const Scope *owner = CurrentScope->findOwner(id->getName()))
+    Moved[{owner, id->getName()}] = mv->getLocation();
+  return true;
+}
+
+bool Sema::checkNotMoved(const std::string &name, ast::SourceLocation loc) {
+  const Scope *owner = CurrentScope->findOwner(name);
+  auto it = owner ? Moved.find({owner, name}) : Moved.end();
+  if (it == Moved.end())
+    return true;
+  error(loc, "'" + name + "' was moved (line " +
+                 std::to_string(it->second.getLineStart()) + ")");
+  return false;
+}
+
+void Sema::clearMoved(const std::string &name) {
+  if (const Scope *owner = CurrentScope->findOwner(name))
+    Moved.erase({owner, name});
+}
+
+void Sema::checkLoopMoves(const MovedSet &before) {
+  for (auto it = Moved.begin(); it != Moved.end();) {
+    auto b = before.find(it->first);
+    if (b != before.end() &&
+        b->second.getLineStart() == it->second.getLineStart() &&
+        b->second.getColumnStart() == it->second.getColumnStart()) {
+      ++it;
+      continue;
+    }
+    error(it->second, "'" + it->first.second + "' is moved inside the loop");
+    it = Moved.erase(it);
+  }
+  Moved.insert(before.begin(), before.end()); // the loop may not run
 }
 
 } // namespace sema

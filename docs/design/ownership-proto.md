@@ -27,6 +27,9 @@ has exactly one *kind*. The default is the **view**, which has no keyword.
 - **`mv x`** hands over what the local or parameter `x` holds, with no retain
   or copy; `x` cannot be used again until it is assigned. Only locals and
   parameters can be moved: never a field, an element or `self`.
+  The check is conservative: moved on any branch (if / else, ternary, match
+  arm) is moved after it, unless that branch always returns, and a loop
+  that moves an outer variable must assign it again before the body ends.
 - **Permission only narrows:** own -> mut -> view. Giving `mut` access to
   something reached through a view is an error. Through a view nothing inside
   the object can change (fields, elements); through `own`/`mut` access, an

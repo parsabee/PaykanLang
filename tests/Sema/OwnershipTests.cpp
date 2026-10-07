@@ -45,7 +45,7 @@ fn main() -> int {
   let q: own P = cp p;
   s: Str = q.name();
   k: own int = 1;
-  return mv k - cp k;
+  return cp k - mv k;
 })"),
                    /*ownership=*/true);
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -360,6 +360,103 @@ TEST(Ownership, FieldAndResultKinds) {
                                   "}\nfn f(n: int) -> int { return n; }\n"
                                   "fn g(n: int) -> own int { return cp n; }" +
                                   tail),
+                   /*ownership=*/true);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+// -- `mv` and use after move
+
+TEST(Ownership, MvNeedsAnOwnLocalOrParameter) {
+  const std::pair<const char *, const char *> cases[] = {
+      {"a: own = mv w;", "'mv' needs an 'own' local or parameter"},
+      {"a: own = mv make();", "'mv' needs an 'own' local or parameter"},
+      {"let l: own = Q(\"l\"); a: own = mv l;", "cannot move from 'let' 'l'"},
+      {"a: own = mv q.s;", "cannot move out of a field/element/self"},
+      {"a: own = mv xs[0];", "cannot move out of a field/element/self"},
+  };
+  for (const auto &[body, msg] : cases)
+    expectOwnershipError(transferMain(body), msg);
+  expectOwnershipError("class C { fn f(self) -> own C { return mv self; } }\n"
+                       "fn main() -> int { return 0; }",
+                       "cannot move out of a field/element/self");
+  expectOwnershipError("fn f(s: Str) -> own Str { return mv s; }\n"
+                       "fn main() -> int { return 0; }",
+                       "'mv' needs an 'own' local or parameter");
+}
+
+TEST(Ownership, UseAfterMove) {
+  const std::pair<const char *, const char *> cases[] = {
+      {"a: own = mv q;\nb = q.s;", "'q' was moved (line 16)"},
+      {"a: own = mv q;\nb: own = mv q;", "'q' was moved (line 16)"},
+      {"take(mv q);\nq.s = \"x\";", "'q' was moved (line 16)"},
+      // moved on any path of an if / else, a ternary or a match arm
+      {"if (1 > 0) { take(mv q); }\nb = q;", "'q' was moved (line 16)"},
+      {"if (1 > 0) { } else { take(mv q); }\nb = q;",
+       "'q' was moved (line 16)"},
+      {"a: own = if 1 > 0 then mv q else Q(\"t\");\nb = q;",
+       "'q' was moved (line 16)"},
+      {"match 1 { 1 { take(mv q); } _ { } }\nb = q;",
+       "'q' was moved (line 16)"},
+      // a loop that moves an outer variable must give it a new value
+      {"while (1 > 0) { take(mv q); }", "'q' is moved inside the loop"},
+      {"while (1 > 0) { if (1 > 0) { take(mv q); } }",
+       "'q' is moved inside the loop"},
+  };
+  for (const auto &[body, msg] : cases)
+    expectOwnershipError(transferMain(body), msg);
+}
+
+TEST(Ownership, AssignmentEndsAMove) {
+  const char *bodies[] = {
+      "take(mv q); q = Q(\"b\"); b = q.s;",
+      "if (1 > 0) { take(mv q); q = make(); } b = q;",
+      "while (1 > 0) { take(mv q); q = make(); } b = q;",
+      "while (1 > 0) { r: own = make(); take(mv r); } b = q;",
+      "if (1 > 0) { take(mv q); return 1; } b = q;",
+      "match 1 { 1 { take(mv q); return 1; } _ { } } b = q;",
+      "a: own Q = make(); take(mv q); q, a = (Q(\"x\"), make()); b = q;",
+      "k: own int = 1; j: own int = mv k; k = 2; return k + j;",
+  };
+  for (const char *body : bodies) {
+    auto r = semaRun(parseOwnership(transferMain(body)), /*ownership=*/true);
+    EXPECT_TRUE(r.Ok) << body << "\n" << r.Diagnostics;
+  }
+  // A parameter can be moved; a variable shadowing a moved one is new.
+  auto r = semaRun(
+      parseOwnership("fn f(q: own Str) -> own Str { r: own = mv q; if (1 > 0) "
+                     "{ q: own = \"n\"; return mv q; } return mv r; }\n"
+                     "fn main() -> int { return 0; }"),
+      /*ownership=*/true);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Ownership, SpecExampleChecks) {
+  auto r = semaRun(parseOwnership(R"(
+class Person {
+  name: own Str;
+  fn __init__(self: mut, n: own Str) { self.name = mv n; }
+  fn rename(self: mut, n: own Str) { self.name = mv n; }
+}
+class Team {
+  members: own Person[];
+  lead: mut Person;
+  fn __init__(self: mut, l: mut Person) { self.members = []; self.lead = l; }
+  fn add(self: mut, p: own Person) { self.members.push(mv p); }
+  fn leader(self) -> Person { return self.lead; }
+}
+fn bump(n: mut int) { n = n + 1; }
+fn main() -> int {
+  ana: own = Person("Ana");
+  t: own = Team(ana);
+  t.add(Person("Bo"));
+  t.add(cp ana);
+  u: own = cp t;
+  u.lead.rename("Ann");
+  w: own = mv t;
+  k: own int = 1;
+  bump(k);
+  return 0;
+})"),
                    /*ownership=*/true);
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
