@@ -470,6 +470,8 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
     if (method->getName() != names::kMethodInit) {
       if (auto *super = ct->getSuperClass()) {
         if (auto *baseMethod = super->findMethod(method->getName())) {
+          if (Ownership && !checkSelfQualifier(method, baseMethod))
+            ok = false;
           const auto &baseParams = baseMethod->getParamTypes();
           bool sigMatches = typesEqual(baseMethod->getReturnType(), retTy) &&
                             baseParams.size() == paramTys.size();
@@ -619,7 +621,9 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
     }
 
     auto *savedRetTy = CurrentReturnType;
+    auto savedResultQual = CurrentResultQual;
     CurrentReturnType = retTy;
+    CurrentResultQual = method->getResultQualifier();
     {
       ScopeGuard guard(*this);
       CurrentScope->declare(names::kSelf, ct);
@@ -678,6 +682,7 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
       }
     }
     CurrentReturnType = savedRetTy;
+    CurrentResultQual = savedResultQual;
   }
 
   CurrentClassCtx = savedClassCtx;

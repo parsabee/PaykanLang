@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // The ownership prototype's access checks (docs/design/ownership-proto.md):
 // the kinds of variables, the access of expressions, changing operations,
-// `let` and the `self` qualifiers.  Only run with
+// `mut` narrowing, `let` and the `self` qualifiers.  Only run with
 // Sema::setOwnership(true).
 
 #include "Names.h"
@@ -19,7 +19,21 @@ std::string readOnlyName(const std::string &blame) {
                        : "read-only '" + blame + "'";
 }
 
+/// How a `self` of kind @p q is written: `self`, `self: mut`.
+std::string selfText(ast::Qualifier q) {
+  return q == ast::Qualifier::View
+             ? std::string(names::kSelf)
+             : std::string(names::kSelf) + ": " + ast::qualifierName(q);
+}
+
 } // namespace
+
+bool Sema::isSharedType(const ast::Type *ty) {
+  if (const auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
+    ty = ot->getInnerType();
+  return ty && (ast::isa<ast::ClassType>(ty) || ast::isa<ast::ArrayType>(ty) ||
+                ast::isa<ast::TupleType>(ty));
+}
 
 ast::Qualifier Sema::fieldQualifier(const ast::ClassType *ct,
                                     const std::string &field) const {
@@ -50,6 +64,23 @@ ast::Qualifier Sema::selfQualifier(const ast::FuncDecl *method) {
     return ast::Qualifier::Mut;
   return method->hasExplicitSelf() ? method->getSelfQualifier()
                                    : ast::Qualifier::View;
+}
+
+const ast::FuncDecl *Sema::calleeDecl(const ast::CallExpr *call) const {
+  const std::string &name = call->getCalleeName();
+  const ast::ClassType *ct = nullptr;
+  if (name == names::kMethodSuper) {
+    ct =
+        CurrentClassCtx ? CurrentClassCtx->ClassType->getSuperClass() : nullptr;
+  } else if (const auto *sig = lookupFunction(name); sig && sig->Decl) {
+    return sig->Decl;
+  } else {
+    ct = Ctx.lookupClassType(name);
+  }
+  if (!ct)
+    return nullptr;
+  auto it = MethodSources.find(ct->findMethod(names::kMethodInit));
+  return it == MethodSources.end() ? nullptr : it->second;
 }
 
 void Sema::declareOwnershipParams(const ast::FuncDecl *fn, bool isMethod) {
@@ -140,6 +171,53 @@ bool Sema::requireChangeable(const ast::Expr *obj, const std::string &what,
   return false;
 }
 
+bool Sema::checkMutSource(ast::Type *dst, const ast::Expr *src,
+                          ast::SourceLocation loc) {
+  if (!isSharedType(dst))
+    return true;
+  Access a = accessOf(src);
+  if (a.Changeable)
+    return true;
+  error(loc, "cannot give 'mut' access to an object reached through " +
+                 readOnlyName(a.Blame));
+  return false;
+}
+
+bool Sema::checkMutArgs(const ast::FuncDecl *fn,
+                        const std::vector<ast::Expr *> &args,
+                        const std::string &callee) {
+  if (!fn)
+    return true;
+  bool ok = true;
+  const auto &params = fn->getParams();
+  for (size_t i = 0; i < params.size() && i < args.size(); ++i) {
+    const ast::Param &p = params[i];
+    const ast::Expr *arg = args[i];
+    if (p.Qual != ast::Qualifier::Mut || !arg->getResolvedType())
+      continue;
+    if (isSharedType(p.ParamType)) {
+      ok &= checkMutSource(p.ParamType, arg, arg->getLocation());
+      continue;
+    }
+    // A `mut` value parameter is the caller's storage (inout): a changeable
+    // variable, field or element.
+    if (!ast::isa<ast::Identifier>(arg) &&
+        !ast::isa<ast::MemberAccessExpr>(arg) &&
+        !ast::isa<ast::SubscriptExpr>(arg)) {
+      error(arg->getLocation(), "argument " + std::to_string(i + 1) + " of '" +
+                                    callee +
+                                    "' must be a variable, field or "
+                                    "element: parameter '" +
+                                    p.getName() + "' is 'mut'");
+      ok = false;
+      continue;
+    }
+    ok &= requireChangeable(arg, "'mut' parameter '" + p.getName() + "'",
+                            arg->getLocation());
+  }
+  return ok;
+}
+
 bool Sema::checkMethodCallAccess(const ast::MethodCallExpr *call,
                                  ast::Type *recvTy,
                                  const ast::MethodDecl *method) {
@@ -154,8 +232,22 @@ bool Sema::checkMethodCallAccess(const ast::MethodCallExpr *call,
     what = "a file with '" + name + "'";
   else if (fn && selfQualifier(fn) == ast::Qualifier::Mut)
     what = "an object with '" + name + "'";
-  return what.empty() ||
-         requireChangeable(call->getReceiver(), what, call->getLocation());
+  bool ok = what.empty() ||
+            requireChangeable(call->getReceiver(), what, call->getLocation());
+  return checkMutArgs(fn, call->getArguments(), name) && ok;
+}
+
+bool Sema::checkSelfQualifier(const ast::FuncDecl *method,
+                              const ast::MethodDecl *base) {
+  auto it = MethodSources.find(base);
+  if (it == MethodSources.end())
+    return true; // a builtin method: its `self` is a view
+  ast::Qualifier want = selfQualifier(it->second);
+  if (selfQualifier(method) == want)
+    return true;
+  error(method->getLocation(), "override of '" + method->getName() +
+                                   "' must keep '" + selfText(want) + "'");
+  return false;
 }
 
 } // namespace sema

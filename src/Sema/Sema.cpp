@@ -894,6 +894,9 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
       }
     }
     S.CurrentClassCtx->SuperInitCalled = true;
+    if (S.Ownership)
+      S.checkMutArgs(S.calleeDecl(node), node->getArguments(),
+                     node->getCalleeName());
     return S.Ctx.getVoidTy();
   }
 
@@ -978,6 +981,9 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     }
   }
 
+  if (S.Ownership)
+    S.checkMutArgs(S.calleeDecl(node), node->getArguments(),
+                   node->getCalleeName());
   node->setResolvedType(sig->ReturnType);
   return sig->ReturnType;
 }
@@ -2044,7 +2050,11 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
     return false;
   }
 
-  return !Ownership || checkReassignable(varName, node->getLocation());
+  if (Ownership)
+    return checkReassignable(varName, node->getLocation()) &&
+           (varKind(varName).Qual != ast::Qualifier::Mut ||
+            checkMutSource(varTy, node->getValue(), node->getLocation()));
+  return true;
 }
 
 bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
@@ -2062,6 +2072,9 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
                   typeName(CurrentReturnType) + "'");
       return false;
     }
+    if (Ownership && CurrentResultQual == ast::Qualifier::Mut)
+      return checkMutSource(CurrentReturnType, node->getReturnValue(),
+                            node->getLocation());
     return true;
   }
   // void return
@@ -2276,7 +2289,9 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
 
   // Type-check the body in a new scope with params.
   auto *savedRetTy = CurrentReturnType;
+  auto savedResultQual = CurrentResultQual;
   CurrentReturnType = retTy;
+  CurrentResultQual = node->getResultQualifier();
   {
     ScopeGuard guard(*this);
     for (size_t i = 0; i < node->getParams().size(); ++i)
@@ -2288,6 +2303,7 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
       if (!visit(stmt))
         ok = false;
     CurrentReturnType = savedRetTy;
+    CurrentResultQual = savedResultQual;
     if (!ok)
       return false;
     // Non-void functions must always return a value on every path.
@@ -2387,6 +2403,15 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
 
   // Register the variable in the current scope.
   CurrentScope->declare(node->getName(), declTy);
+  if (Ownership && node->getQualifier() == ast::Qualifier::Mut) {
+    // `mut` on a value-type local changes nothing: the value is its own.
+    if (!isSharedType(declTy))
+      warning(node->getLocation(), "'mut' has no effect on local '" +
+                                       node->getName() + "' of value type '" +
+                                       typeName(declTy) + "'");
+    else if (node->getInitExpr())
+      return checkMutSource(declTy, node->getInitExpr(), node->getLocation());
+  }
   return true;
 }
 
@@ -2444,9 +2469,15 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
     return false;
   }
 
-  return !Ownership || requireChangeable(node->getReceiver(),
-                                         "field '" + node->getFieldName() + "'",
-                                         node->getLocation());
+  if (Ownership) {
+    bool ok = requireChangeable(node->getReceiver(),
+                                "field '" + node->getFieldName() + "'",
+                                node->getLocation());
+    if (fieldQualifier(ct, node->getFieldName()) == ast::Qualifier::Mut)
+      ok &= checkMutSource(fieldTy, node->getValue(), node->getLocation());
+    return ok;
+  }
+  return true;
 }
 
 bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {

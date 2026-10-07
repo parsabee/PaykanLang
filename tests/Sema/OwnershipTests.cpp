@@ -125,9 +125,46 @@ TEST(Ownership, ChangingThroughAViewIsAnError) {
        "cannot change an array with 'push' through read-only 'q'"},
       {"f = Stdin; g = f; g.write(\"a\");",
        "cannot change a file with 'write' through read-only 'g'"},
+      {"i = 1; bump(i);",
+       "cannot change 'mut' parameter 'n' through read-only 'i'"},
+      {"bump(1);",
+       "argument 1 of 'bump' must be a variable, field or element: parameter "
+       "'n' is 'mut'"},
   };
   for (const auto &[body, msg] : cases)
     expectOwnershipError(kPrelude + std::string(body) + "\nreturn 0;\n}", msg);
+}
+
+TEST(Ownership, MutAccessOnlyNarrows) {
+  const std::string through =
+      "cannot give 'mut' access to an object reached through ";
+  const std::pair<const char *, std::string> cases[] = {
+      {"p: own = P([]); fill(p.v);", through + "read-only 'p.v'"},
+      {"p: own = P([]); q = p; m: mut = q.m;", through + "read-only 'q'"},
+      {"p: own = P([]); m: mut Str[] = p.m; m = p.v;",
+       through + "read-only 'p.v'"},
+      {"p: own = P([]); q: own = P(p.v);", through + "read-only 'p.v'"},
+      {"p: own = P([]); p.m = p.view();", through + "a read-only value"},
+  };
+  for (const auto &[body, msg] : cases)
+    expectOwnershipError(kPrelude + std::string(body) + "\nreturn 0;\n}", msg);
+  expectOwnershipError("fn f(a: Str[]) -> mut Str[] { return a; }\n"
+                       "fn main() -> int { return 0; }",
+                       through + "read-only 'a'");
+  // `mut` parameters of __init__ (constructor and __super__) and methods.
+  const std::string a = "class A {\n  fn __init__(a: mut Str[]) { }\n"
+                        "  fn put(self, a: mut Str[]) { }\n}\n";
+  expectOwnershipError(a + "class B : A { fn __init__(a: Str[]) { "
+                           "__super__(a); } }\nfn main() -> int { return 0; }",
+                       through + "read-only 'a'");
+  expectOwnershipError(a + "fn main() -> int { b: own Str[] = []; v = b; "
+                           "A(b).put(v); return 0; }",
+                       through + "read-only 'v'");
+  auto r = semaRun(parseOwnership("fn f(a: mut Str[]) -> mut Str[] {\n"
+                                  "  a.push(\"x\"); a[0] = \"y\"; return a;\n"
+                                  "}\nfn main() -> int { return 0; }"),
+                   /*ownership=*/true);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
 TEST(Ownership, ParametersAreViewsByDefault) {
@@ -148,6 +185,17 @@ TEST(Ownership, LetCannotBeReassigned) {
                      "x = 3; } return x; }"),
       /*ownership=*/true);
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Ownership, MutOnAValueLocalIsAWarning) {
+  auto r = semaRun(parseOwnership("fn main() -> int { x: mut = 1; return x; }"),
+                   /*ownership=*/true);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_NE(
+      r.Diagnostics.find(
+          "warning: 'mut' has no effect on local 'x' of value type 'int'"),
+      std::string::npos)
+      << r.Diagnostics;
 }
 
 TEST(Ownership, SelfQualifiers) {
@@ -171,6 +219,23 @@ TEST(Ownership, SelfQualifiers) {
 }
 fn main() -> int { c: own = C(); c.b(); return c.x; })")),
                    /*ownership=*/true);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Ownership, OverridesKeepTheSelfQualifier) {
+  auto src = [](const char *base, const char *derived) {
+    return std::string("class A { fn m(") + base +
+           ") { } }\nclass B : A { fn m(" + derived +
+           ") { } }\nfn main() -> int { return 0; }";
+  };
+  expectOwnershipError(src("self: mut", "self"),
+                       "override of 'm' must keep 'self: mut'");
+  expectOwnershipError(src("", "self: mut"),
+                       "override of 'm' must keep 'self'");
+  auto r = semaRun(parseOwnership(src("self: mut", "self: mut")),
+                   /*ownership=*/true);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  r = semaRun(parseOwnership(src("", "self")), /*ownership=*/true);
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 

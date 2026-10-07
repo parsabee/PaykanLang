@@ -843,6 +843,9 @@ private:
     std::string Path;
   };
   Access accessOf(const ast::Expr *e);
+  /// True for the types the deep rules apply to: classes, `Str`, arrays,
+  /// tuples, `Obj` and their optionals (not int, float, bool, char, enums).
+  static bool isSharedType(const ast::Type *ty);
 
   /// Qualifiers of class fields that are not views, keyed "Class.field".
   StringMap<ast::Qualifier> FieldQuals;
@@ -850,6 +853,8 @@ private:
   /// qualifiers); builtin methods have none.
   std::unordered_map<const ast::MethodDecl *, const ast::FuncDecl *>
       MethodSources;
+  /// The result qualifier of the function or method being checked.
+  ast::Qualifier CurrentResultQual = ast::Qualifier::View;
 
   /// The qualifier of field @p field of @p ct or a superclass.
   ast::Qualifier fieldQualifier(const ast::ClassType *ct,
@@ -860,15 +865,29 @@ private:
   void setVarKind(std::string_view name, ast::Qualifier q, bool isLet = false);
   /// The kind of `self` in @p method.
   static ast::Qualifier selfQualifier(const ast::FuncDecl *method);
+  /// The declaration a call's callee resolves to (a function, or the
+  /// constructor's `__init__`); nullptr when it has none.
+  const ast::FuncDecl *calleeDecl(const ast::CallExpr *call) const;
 
   /// Error unless variable @p name may be reassigned (it is not `let`).
   bool checkReassignable(const std::string &name, ast::SourceLocation loc);
   /// Rule "changing needs own or mut": error unless @p obj is changeable.
   bool requireChangeable(const ast::Expr *obj, const std::string &what,
                          ast::SourceLocation loc);
+  /// Rule "permission only narrows": @p src flows into a `mut` slot of type
+  /// @p dst; error if it is reached through a view (shared types only).
+  bool checkMutSource(ast::Type *dst, const ast::Expr *src,
+                      ast::SourceLocation loc);
+  /// The `mut` parameters of @p fn (nullptr: none) against @p args.
+  bool checkMutArgs(const ast::FuncDecl *fn,
+                    const std::vector<ast::Expr *> &args,
+                    const std::string &callee);
   /// A method call: a changing method needs a changeable receiver.
   bool checkMethodCallAccess(const ast::MethodCallExpr *call, ast::Type *recvTy,
                              const ast::MethodDecl *method);
+  /// The method's `self` qualifier against @p base's (override rule).
+  bool checkSelfQualifier(const ast::FuncDecl *method,
+                          const ast::MethodDecl *base);
   /// Record the kinds of @p fn's parameters, and of `self` in a method, in
   /// the current scope.
   void declareOwnershipParams(const ast::FuncDecl *fn, bool isMethod);
