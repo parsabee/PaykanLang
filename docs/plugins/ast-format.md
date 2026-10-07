@@ -81,9 +81,19 @@ or more.
 | `(module NAME ALIAS)` | one imported module; `ALIAS` is a string, `""` for none (`import m as x` has `(module "m" "x")`; `import a::{m, n}` has two) |
 | `(enum LOC NAME NAME...)` | `enum E { A, B }`: the name, then the variants |
 | `(class LOC NAME SUPER (type-params NAME...) (fields VAR...) (methods FN...))` | a class. `SUPER` is the superclass's name or `""`; a generic class has type parameters. Each field is a `var` with a type and no initialiser |
-| `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? BLOCK)` | a function or method; the `TYPE` is the return type, `_` for none |
-| `(param NAME TYPE)` | one parameter |
-| `(var LOC NAME TYPE? EXPR?)` | a variable or field declaration: `x: int = 1` is `(var "x" (named-type "int") (int 1))` |
+| `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? BLOCK QUAL? SELF?)` | a function or method; the `TYPE` is the return type, `_` for none |
+| `(param NAME TYPE QUAL?)` | one parameter |
+| `(var LOC NAME TYPE? EXPR? QUAL? (let)?)` | a variable or field declaration: `x: int = 1` is `(var "x" (named-type "int") (int 1))` |
+
+The optional trailing items belong to the ownership prototype
+(`--ownership`, docs/design/ownership-proto.md) and are left out when they
+do not apply, so a document without them reads as before:
+
+| Item | Meaning |
+|---|---|
+| `(qual own)`, `(qual mut)` | the qualifier of a variable, field, parameter or (on a `fn`) the result: `x: own T`, `-> mut T`; none is a view |
+| `(self QUALIFIER)` | a method that declares `self` explicitly: `(self view)` for `fn m(self)`, `(self mut)` for `fn m(self: mut)` |
+| `(let)` | `let x = e;` |
 
 ### Types
 
@@ -133,6 +143,7 @@ to resolve, which reports unknown names.
 | `(none LOC)` | `None` |
 | `(ident LOC NAME)` | a name |
 | `(unary LOC OP EXPR)` | `OP` is `neg` (`-`) or `not` (`!`) |
+| `(cp LOC EXPR)`, `(mv LOC EXPR)` | `cp e`, `mv x` (ownership prototype) |
 | `(binary LOC OP EXPR EXPR)` | `OP` is one of `add sub mul div mod lt gt le ge eq ne and or` |
 | `(ternary LOC EXPR EXPR EXPR)` | `c ? a : b` |
 | `(call LOC NAME (type-args TYPE...) EXPR...)` | `f(a, b)`, `first<int>(xs)`, `Point(1, 2)`, `m::f(x)` (the qualified name as one string) |

@@ -799,7 +799,19 @@ public:
   };
   void setEntryPointCheck(EntryPoint check) { EntryPointCheck = check; }
 
+  /// The ownership prototype (--ownership, docs/design/ownership-proto.md).
+  /// Off, any qualifier, `let`, `cp`, `mv` or explicit `self` in the AST is
+  /// an error; imported modules are parsed and checked with the same setting.
+  void setOwnership(bool on) { Ownership = on; }
+  bool ownership() const { return Ownership; }
+
 private:
+  bool Ownership = false;
+  /// True when the ownership prototype is on; otherwise reports
+  /// `'<what>' needs --ownership (prototype)` at @p loc and returns false.
+  bool requireOwnership(ast::SourceLocation loc, const char *what);
+  /// requireOwnership for the qualifiers and explicit `self` of @p fn.
+  bool checkOwnershipSyntax(const ast::FuncDecl *fn);
   EntryPoint EntryPointCheck = EntryPoint::None;
   /// The check EntryPointCheck selects, over the main file's declarations.
   bool checkEntryPoint(ast::TranslationUnit *tu,

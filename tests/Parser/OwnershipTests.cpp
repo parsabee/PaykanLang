@@ -52,6 +52,11 @@ fn main() -> int {
   EXPECT_TRUE(ast::isa<ast::CopyExpr>(local(fn, 4)->getInitExpr()));
   auto *f = ast::cast<ast::AssignStmt>(fn->getBody()->getStatements()[5]);
   EXPECT_TRUE(ast::isa<ast::MoveExpr>(f->getValue()));
+
+  std::string dump = dumpAST(*driver);
+  EXPECT_NE(dump.find("'d' let own type"), std::string::npos) << dump;
+  EXPECT_NE(dump.find("CopyExpr"), std::string::npos) << dump;
+  EXPECT_NE(dump.find("MoveExpr"), std::string::npos) << dump;
 }
 
 TEST(Ownership, FieldsParametersResultsAndSelf) {

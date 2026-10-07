@@ -360,6 +360,12 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
   // -- fields --
   StringSet fieldNames;
   for (auto *field : cd->getFields()) {
+    if (field->getQualifier() != ast::Qualifier::View &&
+        !requireOwnership(field->getLocation(),
+                          ast::qualifierName(field->getQualifier()))) {
+      ok = false;
+      continue;
+    }
     if (!fieldNames.insert(field->getName()).second) {
       error(field->getLocation(), "duplicate field '" + field->getName() +
                                       "' in class '" + cd->getName() + "'");
@@ -558,6 +564,10 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
 
   for (auto *method : node->getMethods()) {
     classCtx.MethodName = method->getName();
+    if (!checkOwnershipSyntax(method)) {
+      ok = false;
+      continue;
+    }
 
     // `destroy` is the compiler-generated destructor: it is emitted for every
     // class (releasing fields and freeing the object) and is final. User

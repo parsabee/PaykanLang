@@ -389,6 +389,35 @@ private:
       return e;
     }
 
+    /// An optional trailing `(<tag>)` item (the ownership prototype's
+    /// `(let)`); true when it is there (consumed).
+    bool flag(const char *tag) {
+      if (atEnd() || L.Items[I].K != SExpr::List || L.Items[I].Text != tag)
+        return false;
+      if (!L.Items[I].Items.empty())
+        B.fail(L.Items[I], std::string("(") + tag + ") takes no fields");
+      ++I;
+      return true;
+    }
+
+    /// An optional trailing `(<tag> view|mut|own)` item (a qualifier of the
+    /// ownership prototype) into @p out; false only on a malformed one.
+    bool qualifier(const char *tag, Qualifier &out, bool *present = nullptr) {
+      if (atEnd() || L.Items[I].K != SExpr::List || L.Items[I].Text != tag)
+        return true;
+      const SExpr &q = L.Items[I++];
+      if (present)
+        *present = true;
+      const SExpr *v = q.Items.size() == 1 ? &q.Items[0] : nullptr;
+      for (Qualifier k : {Qualifier::View, Qualifier::Mut, Qualifier::Own})
+        if (v && v->K == SExpr::Symbol && v->Text == qualifierName(k)) {
+          out = k;
+          return true;
+        }
+      B.fail(q, std::string("expected (") + tag + " view|mut|own)");
+      return false;
+    }
+
     /// Fail unless every field was read.
     bool done() {
       if (!atEnd()) {
@@ -615,9 +644,10 @@ private:
       Fields pf(*this, p);
       const std::string *pname = pf.name("the parameter's name");
       Type *pty = pname ? type(pf, "the parameter's type") : nullptr;
-      if (!pty || !pf.done())
+      Qualifier pq = Qualifier::View;
+      if (!pty || !pf.qualifier("qual", pq) || !pf.done())
         return nullptr;
-      params.push_back({pname, pty});
+      params.push_back({pname, pty, pq});
     }
     Type *ret = nullptr;
     if (!f.absent()) {
@@ -626,10 +656,17 @@ private:
         return nullptr;
     }
     CompoundStmt *body = block(f, "the function's body");
-    if (!body || !f.done())
+    Qualifier rq = Qualifier::View, sq = Qualifier::View;
+    bool explicitSelf = false;
+    if (!body || !f.qualifier("qual", rq) ||
+        !f.qualifier("self", sq, &explicitSelf) || !f.done())
       return nullptr;
-    return Ctx.make<FuncDecl>(loc, *name, std::move(params), ret, body,
-                              std::move(tparams));
+    auto *fn = Ctx.make<FuncDecl>(loc, *name, std::move(params), ret, body,
+                                  std::move(tparams));
+    fn->setResultQualifier(rq);
+    if (explicitSelf)
+      fn->setExplicitSelf(sq);
+    return fn;
   }
 
   VarDecl *varDecl(const SExpr &e) {
@@ -650,9 +687,16 @@ private:
       if (!init)
         return nullptr;
     }
+    Qualifier q = Qualifier::View;
+    if (!f.qualifier("qual", q))
+      return nullptr;
+    bool let = f.flag("let");
     if (!f.done())
       return nullptr;
-    return Ctx.make<VarDecl>(loc, *name, ty, init);
+    auto *vd = Ctx.make<VarDecl>(loc, *name, ty, init);
+    vd->setQualifier(q);
+    vd->setLet(let);
+    return vd;
   }
 
   // -- Types
@@ -1000,6 +1044,12 @@ private:
       if (!v)
         return nullptr;
       out = Ctx.make<StringLiteral>(loc, *v);
+    } else if (t == "cp" || t == "mv") {
+      Expr *x = expr(f, "the operand");
+      if (!x)
+        return nullptr;
+      out = t == "cp" ? static_cast<Expr *>(Ctx.make<CopyExpr>(loc, x))
+                      : Ctx.make<MoveExpr>(loc, x);
     } else if (t == "unary") {
       const SExpr *op = f.symbol("the operator (neg or not)");
       if (!op)

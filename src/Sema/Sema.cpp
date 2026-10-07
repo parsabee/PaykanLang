@@ -1375,11 +1375,36 @@ Sema::ExprChecker::visitTupleLiteralExpr(ast::TupleLiteralExpr *node) {
 // `cp e` and `mv x` (ownership prototype): typed as their operand for now;
 // their rules come with the ownership checks.
 ast::Type *Sema::ExprChecker::visitCopyExpr(ast::CopyExpr *node) {
+  if (!S.requireOwnership(node->getLocation(), "cp"))
+    return nullptr;
   return visit(node->getOperand());
 }
 
 ast::Type *Sema::ExprChecker::visitMoveExpr(ast::MoveExpr *node) {
+  if (!S.requireOwnership(node->getLocation(), "mv"))
+    return nullptr;
   return visit(node->getOperand());
+}
+
+bool Sema::requireOwnership(ast::SourceLocation loc, const char *what) {
+  if (Ownership)
+    return true;
+  error(loc, std::string("'") + what + "' needs --ownership (prototype)");
+  return false;
+}
+
+bool Sema::checkOwnershipSyntax(const ast::FuncDecl *fn) {
+  if (Ownership)
+    return true;
+  if (fn->hasExplicitSelf())
+    return requireOwnership(fn->getLocation(), "self");
+  if (fn->getResultQualifier() != ast::Qualifier::View)
+    return requireOwnership(fn->getLocation(),
+                            ast::qualifierName(fn->getResultQualifier()));
+  for (const ast::Param &p : fn->getParams())
+    if (p.Qual != ast::Qualifier::View)
+      return requireOwnership(fn->getLocation(), ast::qualifierName(p.Qual));
+  return true;
 }
 
 ast::Type *Sema::ExprChecker::visitTupleIndexExpr(ast::TupleIndexExpr *node) {
@@ -2226,7 +2251,7 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
   // visitTranslationUnit, which only visits bodies of successfully declared
   // functions.  Defensive: if the entry is absent anyway, the error was
   // already reported — skip the body to avoid duplicate diagnostics.
-  if (!lookupFunction(node->getName()))
+  if (!lookupFunction(node->getName()) || !checkOwnershipSyntax(node))
     return false;
 
   // Re-resolve the annotations to set up the body scope (resolveType is
@@ -2268,6 +2293,12 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
 }
 
 bool Sema::visitVarDecl(ast::VarDecl *node) {
+  if ((node->isLet() && !requireOwnership(node->getLocation(), "let")) ||
+      (node->getQualifier() != ast::Qualifier::View &&
+       !requireOwnership(node->getLocation(),
+                         ast::qualifierName(node->getQualifier()))))
+    return false;
+
   // The name must not shadow a type or reserved name (#126).
   if (!checkBinderName(node->getName(), node->getLocation()))
     return false;

@@ -104,6 +104,15 @@ private:
     OS << "\"";
   }
   void sym(const char *s) { OS << " " << s; }
+  /// `(<tag> <qualifier>)`, written only for an `own` / `mut` one (the
+  /// ownership prototype's optional trailing items).
+  void qualifier(const char *tag, Qualifier q) {
+    if (q == Qualifier::View)
+      return;
+    open(tag);
+    sym(qualifierName(q));
+    close();
+  }
   void none() { OS << " _"; }
 
   void fail(const std::string &why) {
@@ -178,6 +187,7 @@ private:
       open("param");
       str(p.getName());
       type(p.ParamType);
+      qualifier("qual", p.Qual);
       close();
     }
     close();
@@ -186,6 +196,12 @@ private:
       stmt(d.getBody());
     else
       fail("function '" + d.getName() + "' has no body");
+    qualifier("qual", d.getResultQualifier());
+    if (d.hasExplicitSelf()) {
+      open("self");
+      sym(qualifierName(d.getSelfQualifier()));
+      close();
+    }
     close();
   }
 
@@ -194,6 +210,11 @@ private:
     str(d.getName());
     optionalType(d.getType());
     optionalExpr(d.getInitExpr());
+    qualifier("qual", d.getQualifier());
+    if (d.isLet()) {
+      open("let");
+      close();
+    }
     close();
   }
 
@@ -490,6 +511,16 @@ private:
     case ASTNode::NK_StringLiteral:
       open("string", e);
       str(cast<StringLiteral>(e)->getValue());
+      close();
+      return;
+    case ASTNode::NK_CopyExpr:
+      open("cp", e);
+      expr(cast<CopyExpr>(e)->getOperand());
+      close();
+      return;
+    case ASTNode::NK_MoveExpr:
+      open("mv", e);
+      expr(cast<MoveExpr>(e)->getOperand());
       close();
       return;
     case ASTNode::NK_UnaryExpr: {

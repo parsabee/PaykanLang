@@ -400,6 +400,40 @@ TEST(ASTInterchange, NestingIsBounded) {
       << error;
 }
 
+// The ownership prototype's qualifiers, `let`, `cp` / `mv` and explicit
+// `self` survive a round trip; documents without them read as before.
+TEST(ASTInterchange, RoundTripsOwnershipSyntax) {
+  frontend::Options opts;
+  opts.Ownership = true;
+  parser::ParserDriver driver("recursive-descent", opts);
+  auto path = std::filesystem::temp_directory_path() /
+              ("paykan_ownership_" + std::to_string(::getpid()) + ".pkn");
+  {
+    std::ofstream(path) << "class P { n: own Str; l: mut P?;\n"
+                           "  fn m(self: mut, s: own Str) -> own Str {\n"
+                           "    let a: own = cp s; return mv a; } }\n"
+                           "fn f(p: mut P) -> mut P { return p; }\n";
+  }
+  ASSERT_EQ(driver.parseFile(path.string()), 0);
+  std::filesystem::remove(path);
+  std::string text = write(*driver.getRoot());
+  for (const char *item :
+       {"(qual own)", "(qual mut)", "(self mut)", "(let)", "(cp @", "(mv @"})
+    EXPECT_NE(text.find(item), std::string::npos) << item << "\n" << text;
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *back = read(text, ctx, error);
+  ASSERT_NE(back, nullptr) << error << "\n" << text;
+  EXPECT_EQ(dump(back), dump(driver.getRoot()));
+  EXPECT_EQ(write(*back), text);
+  EXPECT_EQ(read("(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ "
+                 "(block) (qual shared))))",
+                 ctx, error),
+            nullptr);
+  EXPECT_NE(error.find("expected (qual view|mut|own)"), std::string::npos)
+      << error;
+}
+
 TEST(Interchange, MovIsRemoved) {
   // `mov` is retired (#145): an out-of-tree frontend still emitting it gets
   // the same diagnostic as the built-in parser.

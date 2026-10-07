@@ -202,6 +202,10 @@ void ASTPrinter::visitContinueStmt(ContinueStmt *node) {
 void ASTPrinter::visitVarDecl(VarDecl *node) {
   header("VarDecl", node);
   OS << " '" << node->getName() << "'";
+  if (node->isLet())
+    OS << " let";
+  if (node->getQualifier() != Qualifier::View)
+    OS << " " << qualifierName(node->getQualifier());
   if (node->getType())
     OS << " type";
   OS << "\n";
@@ -506,8 +510,17 @@ void ASTPrinter::visitFuncDecl(FuncDecl *node) {
   header("FuncDecl", node);
   OS << " '" << node->getName() << "'";
   printTypeParams(OS, node->getTypeParams());
+  // Ownership prototype: an explicit self and the parameters' and result's
+  // qualifiers (views print nothing).
+  if (node->hasExplicitSelf())
+    OS << " self(" << qualifierName(node->getSelfQualifier()) << ")";
+  for (const Param &p : node->getParams())
+    if (p.Qual != Qualifier::View)
+      OS << " '" << p.getName() << "' " << qualifierName(p.Qual);
   if (node->getReturnType())
     OS << " ->";
+  if (node->getResultQualifier() != Qualifier::View)
+    OS << " " << qualifierName(node->getResultQualifier());
   OS << "\n";
   if (node->getReturnType()) {
     ChildScope cs(*this, false);

@@ -450,7 +450,10 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
   // a bare one-line fallback.  Mirrors the wiring in src/Driver/main.cpp:
   // SourceLines lives in the driver and is filled by parseFile before the
   // parser runs, so handing its address over now is safe.
-  auto importDriverPtr = std::make_shared<parser::ParserDriver>(FrontendName);
+  frontend::Options importOpts;
+  importOpts.Ownership = Ownership;
+  auto importDriverPtr =
+      std::make_shared<parser::ParserDriver>(FrontendName, importOpts);
   // Diagnostics name the module's file by its path from the source root.
   DiagEngine importDiag(Diags.getOS());
   importDiag.setSourceInfo(displayPath(path),
@@ -501,6 +504,7 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
   importSema.ImportStack = ImportStack;
   importSema.FailedModules = FailedModules;
   importSema.Resolver = Resolver;
+  importSema.Ownership = Ownership;
 
   auto *importRoot = importDriverPtr->getRoot();
   auto childCtx = importSema.run(importRoot);
