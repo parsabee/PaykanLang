@@ -502,14 +502,15 @@ INST { tmpl { Mod; Str }; uleb n; Ty args[n]; u8 form (1 SPECIALISED, 2 ERASED, 
 
 Rules:
 
-- **A template is `ERASABLE` iff every type parameter is bounded** (#147:
-  erased code may only use what the bounds promise; an unbounded body may
-  mean different things for different `T`). For every exported erasable
-  template the module writes one `ERASED` record with the canonical erased
-  arguments and `provided = 0`: the erased copy is in its `CODE`, compiled
-  once. Unbounded templates are still exportable; every instantiation of
-  them, class arguments included, is specialised. **Open question 2** (the
-  owner may prefer #147's stricter "only bounded templates export").
+- **Every exported template ships an erased copy** (owner's decision,
+  open question 2): the module writes one `ERASED` record with the canonical
+  erased arguments and `provided = 0`, and the erased copy is in its `CODE`,
+  compiled once with each parameter at its bound, `Obj` when it has none
+  (#147: erased code may only use what the bound promises). Class-type
+  arguments always use that copy; value-type arguments are specialised from
+  the AST. A body that needs more of an unbounded `T` than `Obj` offers is
+  reported at export until it declares a bound; phase D1 settles the exact
+  rule.
 - **A module compiles into its own `CODE` only instantiations of its own
   templates** (those it uses itself, `provided = 0`). Every instantiation of
   a *foreign* template, whoever requests it, is a **synthetic unit** owned
@@ -1456,18 +1457,24 @@ everywhere.
 
 ## 15. Open questions for the owner
 
-1. **Generics: the "shipped PIR" reading.** #57/#160 say importers
-   specialise "from the shipped PIR". This design ships the erased copy as
-   PIR and the template as name-resolved AST; value specialisations are
-   re-lowered by the importer's program (§4.1). Confirm.
-2. **Unbounded templates:** exportable but always specialised (proposed), or
-   #147's stricter "only bounded templates export"?
+1. ~~Generics: the "shipped PIR" reading.~~ **Decided (owner, PR #179
+   review):** the erased copy ships as PIR, the template as name-resolved
+   AST; value specialisations are re-lowered by the importer's program
+   (§4.1).
+2. ~~Unbounded templates.~~ **Decided (owner):** the same for unbounded
+   templates: every exported template ships both the type-erased PIR copy
+   and the resolved AST; class-type arguments use the erased PIR, value-type
+   arguments use the AST. So `ERASABLE` is not "all parameters bounded"
+   (§4.5): the erased copy is compiled with each parameter at its bound,
+   `Obj` when it has none, and a template whose body needs more of an
+   unbounded `T` than `Obj` offers is reported at export until it declares a
+   bound (#147). Phase D1 settles the exact rule.
 3. **Instantiation spelling:** drop the space after commas
    (`Pair<int,Node>`) in `Sema::instantiationName` so PIR names, mangled
    names and `INST` keys share one canonical form? Must be fixed before any
    `.pkm` is distributed.
-4. **Text PIR syntax** for linkage and attributes in the same PR as the
-   codec (proposed yes, so `--emit-pir` stays complete).
+4. ~~Text PIR syntax~~ **Decided (owner):** yes. This is PIR text only
+   (`--emit-pir` and `pkm dump`), never Paykan language syntax.
 5. **Defaults:** `--write-payloads=on` for cached modules; `--emit-pkm`
    portable unless `--with-payload`. Confirm.
 6. **Pre-release build id:** git revision at configure time, falling back
