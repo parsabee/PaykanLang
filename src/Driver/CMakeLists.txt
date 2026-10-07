@@ -5,7 +5,7 @@
 #                  paykan_add_driver() from the installed package.
 # paykan        -- the driver executable with every plugin of this build.
 
-add_library(paykan_driver STATIC main.cpp Options.cpp)
+add_library(paykan_driver STATIC main.cpp Options.cpp Fmt.cpp)
 target_link_libraries(paykan_driver
     PUBLIC  paykan_ast_printer
             paykan_sema
@@ -17,6 +17,7 @@ target_link_libraries(paykan_driver
             paykan_pir
             paykan_plugin_host
             paykan_ast_interchange
+            paykan_format
     PRIVATE paykan_compile_options
 )
 

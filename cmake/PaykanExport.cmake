@@ -33,6 +33,8 @@ set(PAYKAN_EXPORT_TARGETS
     paykan_ast_interchange
     paykan_diag
     paykan_frontend
+    paykan_lexer_recursive_descent
+    paykan_format
     paykan_ast_printer
     paykan_pkm
     paykan_modules

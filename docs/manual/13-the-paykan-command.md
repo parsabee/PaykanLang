@@ -10,6 +10,7 @@ paykan [options] [run] <source-file> [program arguments]
 paykan [options] build <source-file> [-o <output>]
 paykan pkm dump <file.pkm> [--section=<name>]
 paykan pkm check <file.pkm>
+paykan fmt [--write | --check] [<file.pkn> | <directory> | -]...
 ```
 
 - **`run`** (the default, so `paykan prog.pkn` is the same as `paykan run prog.pkn`)
@@ -23,6 +24,7 @@ paykan pkm check <file.pkm>
   prints it (`--section=manifest|sections|iface|code|symidx|payloads` prints one part;
   `code` is exactly the module's PIR text), `check` prints whether this `paykan` can use it
   and exits with 0 when it can.
+- **`fmt`** formats source files (see [Formatting](#formatting) below).
 
 The source file is the program's **main file**. Its directory is the source root from which
 imports are resolved (see [Modules](10-modules.md)).
@@ -98,6 +100,42 @@ fn @main() -> i64 {
 | `--no-plugins` | do not search the plugin directories (files named with `--plugin` still load) |
 
 [Extending PaykanLang](14-extending.md) explains plugins.
+
+## Formatting
+
+`paykan fmt` lays a source file out in two columns: code on the left, and on the right,
+from column 46, either a comment or the body of a short function.
+
+```text
+class Range {
+  bounds: (int, int);                        // a tuple-typed field
+  fn __init__(lo: int, hi: int)              { self.bounds = (lo, hi); }
+  fn width() -> int                          { return self.bounds.1 - self.bounds.0; }
+  fn toString() -> Str {
+    return "[" + Str(self.bounds.0) + ", " + Str(self.bounds.1) + "] of width " + Str(self.width());
+  }
+}
+```
+
+- A comment after code starts at column 46, or two spaces after code that reaches past it.
+  A comment on a line of its own stays where it is.
+- A function or method collapses onto one line, signature on the left and `{ body }` at
+  column 46, when its body has no nested block and no comment and the line fits in 100
+  columns. A comment after its header or its closing brace moves to the line above. A
+  function written on one line that does not fit becomes a block, one statement per line.
+- Nothing else changes: code is never re-wrapped or re-spaced, so the formatter keeps every
+  token and comment, in order. It removes trailing whitespace and ends the file with one
+  newline.
+
+| Option | Effect |
+|--------|--------|
+| (none) | print the formatted file to standard output; with no file, or `-`, it formats standard input |
+| `--write` | rewrite every file that changes |
+| `--check` | list the files that are not formatted, and exit with 1 if there are any |
+
+A directory stands for the `.pkn` files below it, so `paykan fmt --write .` formats a whole
+project. A file with a lexical error is reported (`file:line:col: error: ...`) and left as
+it is.
 
 ## Backends
 

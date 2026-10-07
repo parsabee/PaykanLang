@@ -462,6 +462,13 @@ function(paykan_add_python_test name script)
     endif()
 endfunction()
 
+# The samples corpus is formatted (`paykan fmt --check`) (samples).
+paykan_test_suite(samples PAYKAN_TEST_SUITE_samples)
+if(PAYKAN_TEST_SUITE_samples)
+    add_test(NAME SamplesFormatted
+             COMMAND paykan fmt --check ${CMAKE_SOURCE_DIR}/samples)
+endif()
+
 # The samples corpus on every backend that runs programs: identical stdout,
 # exit codes and zero live heap blocks (scripts/samples_parity.py) (samples).
 set(PAYKAN_SAMPLES_BACKENDS "")
@@ -556,6 +563,7 @@ add_executable(frontend_tests
     Frontend/RecoveryTests.cpp
     Frontend/FuzzSmokeTests.cpp
     Frontend/DifferentialTests.cpp
+    Frontend/FormatTests.cpp
 )
 target_compile_definitions(frontend_tests
     PRIVATE PAYKAN_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/samples"
@@ -564,6 +572,7 @@ target_link_libraries(frontend_tests
     PRIVATE gtest_main
             paykan_frontend
             paykan_ast_printer
+            paykan_format
             paykan_compile_options
 )
 # paykan_frontend_recursive_descent (whose public header the lexer/recovery/

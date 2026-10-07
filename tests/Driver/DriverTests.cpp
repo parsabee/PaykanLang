@@ -512,6 +512,94 @@ TEST(Driver, DumpTokensFailsOnUnreadableFile) {
   EXPECT_NE(out.find("cannot open"), std::string::npos) << out;
 }
 
+// -- paykan fmt (the layout itself is tested in tests/Frontend/FormatTests)
+
+static const char *kUnformatted = "fn f() -> int {\n  return 1;\n}\n"
+                                  "x = 1; // one\n";
+// `fn f() -> int` and `x = 1;` padded to column 46.
+static const std::string kFormatted = "fn f() -> int" + std::string(32, ' ') +
+                                      "{ return 1; }\n" + "x = 1;" +
+                                      std::string(39, ' ') + "// one\n";
+
+static std::string readFile(const std::string &path) {
+  std::ifstream in(path);
+  std::stringstream s;
+  s << in.rdbuf();
+  return s.str();
+}
+
+TEST(Driver, FmtPrintsTheFormattedFile) {
+  auto src = writeTmp(kUnformatted);
+  auto [rc, out] = run(std::string(kPaykan) + " fmt " + src + " 2>&1");
+  EXPECT_EQ(rc, 0) << out;
+  EXPECT_EQ(out, kFormatted);
+  EXPECT_EQ(readFile(src), kUnformatted); // printing leaves the file alone
+  std::filesystem::remove(src);
+}
+
+TEST(Driver, FmtReadsStandardInput) {
+  auto src = writeTmp(kUnformatted);
+  auto [rc, out] = run(std::string(kPaykan) + " fmt - < " + src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_EQ(rc, 0) << out;
+  EXPECT_EQ(out, kFormatted);
+}
+
+TEST(Driver, FmtCheckListsUnformattedFilesAndFails) {
+  auto bad = writeTmp(kUnformatted);
+  auto good = writeTmp(kFormatted);
+  auto [rc, out] =
+      run(std::string(kPaykan) + " fmt --check " + bad + " " + good + " 2>&1");
+  EXPECT_EQ(rc, 1) << out;
+  EXPECT_EQ(out, bad + ": not formatted\n");
+  auto [rc2, out2] =
+      run(std::string(kPaykan) + " fmt --check " + good + " 2>&1");
+  EXPECT_EQ(rc2, 0) << out2;
+  EXPECT_EQ(out2, "");
+  std::filesystem::remove(bad);
+  std::filesystem::remove(good);
+}
+
+TEST(Driver, FmtWriteRewritesFilesBelowADirectory) {
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_fmt_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir / "sub");
+  std::ofstream(dir / "a.pkn") << kUnformatted;
+  std::ofstream(dir / "sub" / "b.pkn") << kUnformatted;
+  std::ofstream(dir / "notes.txt") << kUnformatted;
+  auto [rc, out] =
+      run(std::string(kPaykan) + " fmt --write " + dir.string() + " 2>&1");
+  EXPECT_EQ(rc, 0) << out;
+  EXPECT_EQ(out, "");
+  EXPECT_EQ(readFile((dir / "a.pkn").string()), kFormatted);
+  EXPECT_EQ(readFile((dir / "sub" / "b.pkn").string()), kFormatted);
+  EXPECT_EQ(readFile((dir / "notes.txt").string()), kUnformatted);
+  std::filesystem::remove_all(dir);
+}
+
+TEST(Driver, FmtReportsALexicalErrorAndLeavesTheFile) {
+  const char *src = "fn main() -> int {\n  x = 1 # 2;\n}\n";
+  auto path = writeTmp(src);
+  auto [rc, out] = run(std::string(kPaykan) + " fmt --write " + path + " 2>&1");
+  EXPECT_EQ(rc, 1) << out;
+  EXPECT_NE(out.find(path + ":2:9: error: invalid character '#'"),
+            std::string::npos)
+      << out;
+  EXPECT_EQ(readFile(path), src);
+  std::filesystem::remove(path);
+}
+
+TEST(Driver, FmtRejectsBadArguments) {
+  auto [rc, out] =
+      run(std::string(kPaykan) + " fmt --write --check x.pkn 2>&1");
+  EXPECT_EQ(rc, 1) << out;
+  EXPECT_NE(out.find("cannot be combined"), std::string::npos) << out;
+  auto [rc2, out2] = run(std::string(kPaykan) + " fmt --frobnicate 2>&1");
+  EXPECT_EQ(rc2, 1) << out2;
+  EXPECT_NE(out2.find("unknown fmt option '--frobnicate'"), std::string::npos)
+      << out2;
+}
+
 TEST(Driver, UnknownOptionIsRejected) {
   auto src = writeTmp("fn main() -> int { return 0; }");
   auto [rc, out] =

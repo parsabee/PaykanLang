@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `paykan_modules` (the resolver); the runtime ABI version moved to
   `PAYKAN_RUNTIME_ABI_VERSION` in `Runtime.h`.
 
+- `paykan fmt`, the source formatter: code on the left, and trailing comments and the
+  bodies of short functions in a right-hand column from column 46.  `--write` rewrites
+  files, `--check` lists unformatted ones (exit 1), a directory stands for its `.pkn` files
+  and `-` for standard input.  It keeps every token and comment.  The samples are formatted
+  with it, and the `samples` test suite checks they stay that way (`SamplesFormatted`).
+  The recursive-descent lexer is now a library of its own (`paykan_lexer_recursive_descent`),
+  shared by the parser and the formatter (`paykan_format`).
+
 ### Removed
 
 - The `mov` keyword (#145).  Using it is now an error: `'mov' was removed in v0.2.0;

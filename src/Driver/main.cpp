@@ -4,6 +4,7 @@
 
 #include "ASTPrinter.h"
 #include "DiagEngine.h"
+#include "Fmt.h"
 #include "ModuleName.h"
 #include "Names.h"
 #include "Options.h"
@@ -27,6 +28,7 @@
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using paykan::driver::Command;
@@ -335,6 +337,8 @@ std::vector<std::string> modulePath(const Options &opts) {
 } // namespace
 
 int main(int argc, char *argv[]) {
+  if (argc >= 2 && std::string_view(argv[1]) == "fmt")
+    return paykan::driver::fmtTool(argc, argv);
   auto parsed = paykan::driver::parseCommandLine(argc, argv);
   const Options &opts = parsed.Opts;
   if (opts.ShowHelp && !opts.ShowVersion) {
