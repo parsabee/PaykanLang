@@ -179,7 +179,7 @@ TEST(Generics, MatchOnInstantiationArms) {
 TEST(Generics, MovOfInstantiationAccepted) {
   auto r = semaCheck(withMain(kBox, R"(
     a: Box<int> = Box<int>(1);
-    b: Box<int> = mov a;
+    b: Box<int> = a;
     c: int = a.get();
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;

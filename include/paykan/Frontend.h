@@ -37,6 +37,11 @@ namespace paykan::frontend {
 /// the recursive passes after parsing (Sema, the AST printer).
 inline constexpr unsigned kMaxNesting = 512;
 
+/// The diagnostic every frontend reports at a `mov` keyword (#145).  `mov`
+/// stays reserved; the operand after it still parses.
+inline constexpr std::string_view kMovRemoved =
+    "'mov' was removed in v0.2.0; ownership transfers are inferred";
+
 /// Per-parse options.  A frontend ignores the ones it does not support.
 struct Options {
   /// Debug traces of the parser / scanner (--trace-parser,

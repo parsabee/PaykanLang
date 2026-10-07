@@ -5,7 +5,7 @@
 //
 // The vtable `equals` slot receives its `other` argument as a consumed
 // PaykanShared box (see src/Runtime/RuntimeInternal.h).  That box can be NULL
-// — e.g. the null hole a `mov` leaves behind in a variable slot — and every
+// — e.g. an absent optional, which is a null box — and every
 // implementation must treat a NULL box as "equal to nothing" (identity: NULL
 // equals nothing) and return 0 instead of dereferencing it.
 

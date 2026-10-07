@@ -1,21 +1,21 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Sema tests: `mov` is retired (#145) and parses as its operand, so every
-// former move-checking program here now type-checks.  They stay as the shapes
-// the last-use ownership pass (#186) must handle.
+// Sema tests: programs that `mov` used to reject or constrain (retired in
+// #145) all type-check now.  Each test name records the old move it stood
+// for; the programs stay as the shapes the last-use pass (#186) must handle.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
 
 using namespace paykan::test;
 
-// -- Well-formed moves
+// -- Plain hand-offs
 
 TEST(Mov, MovePrimitiveOk) {
   auto r = semaCheck(R"(
     fn main() -> int {
       a: int = 3;
-      b = mov a;
+      b = a;
       return b;
     }
   )");
@@ -26,7 +26,7 @@ TEST(Mov, MoveStringOk) {
   auto r = semaCheck(R"(
     fn main() -> int {
       s: Str = "hi";
-      t = mov s;
+      t = s;
       println(t);
       return 0;
     }
@@ -38,7 +38,7 @@ TEST(Mov, MoveTemporaryOk) {
   auto r = semaCheck(R"(
     fn make() -> Str { return "x"; }
     fn main() -> int {
-      t = mov make();
+      t = make();
       println(t);
       return 0;
     }
@@ -46,13 +46,13 @@ TEST(Mov, MoveTemporaryOk) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// -- Use after a former move
+// -- Use after a hand-off
 
 TEST(Mov, UseAfterMoveReadAccepted) {
   auto r = semaCheck(R"(
     fn main() -> int {
       a: int = 3;
-      b = mov a;
+      b = a;
       c = a;
       return c;
     }
@@ -64,7 +64,7 @@ TEST(Mov, UseAfterMoveInExprAccepted) {
   auto r = semaCheck(R"(
     fn main() -> int {
       a: int = 3;
-      b = mov a;
+      b = a;
       return a + 1;
     }
   )");
@@ -75,21 +75,21 @@ TEST(Mov, DoubleMoveAccepted) {
   auto r = semaCheck(R"(
     fn main() -> int {
       s: Str = "hi";
-      t = mov s;
-      u = mov s;
+      t = s;
+      u = s;
       return 0;
     }
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// -- Revival on re-assignment
+// -- Re-assignment after a hand-off
 
 TEST(Mov, ReassignRevivesVariable) {
   auto r = semaCheck(R"(
     fn main() -> int {
       s: Str = "hi";
-      t = mov s;
+      t = s;
       s = "again";
       println(s);
       return 0;
@@ -107,7 +107,7 @@ TEST(Mov, MoveMemberVariableAccepted) {
     }
     fn main() -> int {
       b: Box = Box("hi");
-      x = mov b.v;
+      x = b.v;
       return 0;
     }
   )");
@@ -118,14 +118,14 @@ TEST(Mov, MoveArrayElementAccepted) {
   auto r = semaCheck(R"(
     fn main() -> int {
       a: int[] = [1, 2, 3];
-      x = mov a[0];
+      x = a[0];
       return 0;
     }
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// -- `mov self`
+// -- `self` and parameters
 
 TEST(Mov, MoveSelfAccepted) {
   auto r = semaCheck(R"(
@@ -133,7 +133,7 @@ TEST(Mov, MoveSelfAccepted) {
       x: int;
       fn __init__() { self.x = 7; }
       fn grab() -> int {
-        y = mov self;
+        y = self;
         return 0;
       }
     }
@@ -146,11 +146,9 @@ TEST(Mov, MoveSelfAccepted) {
 }
 
 TEST(Mov, MoveParameterOk) {
-  // Ordinary parameters are owned by the callee frame and may be moved
-  // (unlike `self`, which is a borrowed reference).
   auto r = semaCheck(R"(
     fn consume(s: Str) { println(s); }
-    fn pass(s: Str) { consume(mov s); }
+    fn pass(s: Str) { consume(s); }
     fn main() -> int {
       pass("hi");
       return 0;
@@ -168,7 +166,7 @@ TEST(Mov, MoveInLoopDeclaredOutsideAccepted) {
       s: Str = "x";
       i: int = 0;
       while (i < 2) {
-        consume(mov s);
+        consume(s);
         i = i + 1;
       }
       return 0;
@@ -178,12 +176,11 @@ TEST(Mov, MoveInLoopDeclaredOutsideAccepted) {
 }
 
 TEST(Mov, MoveInLoopConditionAccepted) {
-  // The condition also re-executes every iteration.
   auto r = semaCheck(R"(
     fn check(s: Str) -> bool { return False; }
     fn main() -> int {
       s: Str = "x";
-      while (check(mov s)) {
+      while (check(s)) {
         println("body");
       }
       return 0;
@@ -199,7 +196,7 @@ TEST(Mov, MoveInLoopReassignedBeforeBackEdgeOk) {
       s: Str = "x";
       i: int = 0;
       while (i < 2) {
-        consume(mov s);
+        consume(s);
         s = "again";
         i = i + 1;
       }
@@ -211,15 +208,13 @@ TEST(Mov, MoveInLoopReassignedBeforeBackEdgeOk) {
 }
 
 TEST(Mov, MoveInLoopReassignedOnlySomePathsAccepted) {
-  // The re-assignment is conditional, so the back edge may still see the
-  // variable moved.
   auto r = semaCheck(R"(
     fn consume(s: Str) { println(s); }
     fn main() -> int {
       s: Str = "x";
       i: int = 0;
       while (i < 2) {
-        consume(mov s);
+        consume(s);
         if (i > 0) { s = "again"; }
         i = i + 1;
       }
@@ -230,14 +225,13 @@ TEST(Mov, MoveInLoopReassignedOnlySomePathsAccepted) {
 }
 
 TEST(Mov, MoveInLoopDeclaredInsideOk) {
-  // A loop-local variable is re-declared fresh on every iteration.
   auto r = semaCheck(R"(
     fn consume(s: Str) { println(s); }
     fn main() -> int {
       i: int = 0;
       while (i < 2) {
         s: Str = "x";
-        consume(mov s);
+        consume(s);
         i = i + 1;
       }
       return 0;
@@ -250,7 +244,7 @@ TEST(Mov, MoveBeforeLoopStaysMovedInsideAccepted) {
   auto r = semaCheck(R"(
     fn main() -> int {
       s: Str = "x";
-      t = mov s;
+      t = s;
       i: int = 0;
       while (i < 2) {
         println(s);
@@ -271,7 +265,7 @@ TEST(Mov, MoveInThenDoesNotPoisonElse) {
       s: Str = "x";
       f: bool = True;
       if (f) {
-        consume(mov s);
+        consume(s);
       } else {
         println(s);
       }
@@ -288,7 +282,7 @@ TEST(Mov, MoveInMatchArmDoesNotPoisonSiblingArm) {
       s: Str = "x";
       n: int = 1;
       match n {
-        1 { consume(mov s); }
+        1 { consume(s); }
         _ { println(s); }
       }
       return 0;
@@ -298,13 +292,12 @@ TEST(Mov, MoveInMatchArmDoesNotPoisonSiblingArm) {
 }
 
 TEST(Mov, MoveInBranchStillMovedAfterConstructAccepted) {
-  // Moved on ANY path => moved after the construct (conservative union).
   auto r = semaCheck(R"(
     fn consume(s: Str) { println(s); }
     fn main() -> int {
       s: Str = "x";
       f: bool = True;
-      if (f) { consume(mov s); }
+      if (f) { consume(s); }
       println(s);
       return 0;
     }
@@ -313,11 +306,10 @@ TEST(Mov, MoveInBranchStillMovedAfterConstructAccepted) {
 }
 
 TEST(Mov, MoveRevivedInBothBranchesOk) {
-  // If BOTH branches of an if/else re-assign, the union is revived.
   auto r = semaCheck(R"(
     fn main() -> int {
       s: Str = "x";
-      t = mov s;
+      t = s;
       f: bool = True;
       if (f) { s = "a"; } else { s = "b"; }
       println(s);
@@ -328,11 +320,10 @@ TEST(Mov, MoveRevivedInBothBranchesOk) {
 }
 
 TEST(Mov, MoveRevivedInOnlyThenBranchAccepted) {
-  // Without an else, the skip path keeps the variable moved.
   auto r = semaCheck(R"(
     fn main() -> int {
       s: Str = "x";
-      t = mov s;
+      t = s;
       f: bool = True;
       if (f) { s = "a"; }
       println(s);
@@ -342,16 +333,14 @@ TEST(Mov, MoveRevivedInOnlyThenBranchAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// -- Ternary expression: then/else are sibling branches
+// -- Ternary expression
 
 TEST(Mov, TernaryMoveInThenDoesNotPoisonElse) {
-  // The else branch can only run instead of the then branch, so a `mov` in
-  // the then branch must not be visible there.
   auto r = semaCheck(R"(
     fn main() -> int {
       x: Str = "x";
       c: bool = True;
-      y = if c then mov x else x;
+      y = if c then x else x;
       println(y);
       return 0;
     }
@@ -364,7 +353,7 @@ TEST(Mov, TernaryMoveInElseDoesNotPoisonThen) {
     fn main() -> int {
       x: Str = "x";
       c: bool = True;
-      y = if c then x else mov x;
+      y = if c then x else x;
       println(y);
       return 0;
     }
@@ -373,12 +362,11 @@ TEST(Mov, TernaryMoveInElseDoesNotPoisonThen) {
 }
 
 TEST(Mov, TernaryMoveInBothBranchesOk) {
-  // Moving the same variable on both paths is fine: exactly one path runs.
   auto r = semaCheck(R"(
     fn main() -> int {
       x: Str = "x";
       c: bool = True;
-      y = if c then mov x else mov x;
+      y = if c then x else x;
       println(y);
       return 0;
     }
@@ -391,7 +379,7 @@ TEST(Mov, TernaryMoveInBothBranchesThenUseAccepted) {
     fn main() -> int {
       x: Str = "x";
       c: bool = True;
-      y = if c then mov x else mov x;
+      y = if c then x else x;
       println(x);
       return 0;
     }
@@ -400,12 +388,11 @@ TEST(Mov, TernaryMoveInBothBranchesThenUseAccepted) {
 }
 
 TEST(Mov, TernaryMoveInOneBranchThenUseAccepted) {
-  // Moved on ANY path => moved after the expression (conservative union).
   auto r = semaCheck(R"(
     fn main() -> int {
       x: Str = "x";
       c: bool = True;
-      y = if c then mov x else x;
+      y = if c then x else x;
       println(x);
       return 0;
     }
@@ -418,7 +405,7 @@ TEST(Mov, TernaryMoveInElseThenUseAccepted) {
     fn main() -> int {
       x: Str = "x";
       c: bool = True;
-      y = if c then x else mov x;
+      y = if c then x else x;
       println(x);
       return 0;
     }
@@ -427,12 +414,11 @@ TEST(Mov, TernaryMoveInElseThenUseAccepted) {
 }
 
 TEST(Mov, TernaryMoveInConditionVisibleInBothBranchesAccepted) {
-  // The condition always runs before either branch, so its moves poison both.
   auto r = semaCheck(R"(
     fn take(s: Str) -> bool { return True; }
     fn main() -> int {
       x: Str = "x";
-      y = if take(mov x) then x else "b";
+      y = if take(x) then x else "b";
       println(y);
       return 0;
     }
@@ -443,7 +429,7 @@ TEST(Mov, TernaryMoveInConditionVisibleInBothBranchesAccepted) {
     fn take(s: Str) -> bool { return True; }
     fn main() -> int {
       x: Str = "x";
-      y = if take(mov x) then "a" else x;
+      y = if take(x) then "a" else x;
       println(y);
       return 0;
     }
@@ -456,7 +442,7 @@ TEST(Mov, TernaryMoveInConditionStaysMovedAfterAccepted) {
     fn take(s: Str) -> bool { return True; }
     fn main() -> int {
       x: Str = "x";
-      n: int = if take(mov x) then 1 else 2;
+      n: int = if take(x) then 1 else 2;
       println(x);
       return n;
     }
@@ -465,13 +451,12 @@ TEST(Mov, TernaryMoveInConditionStaysMovedAfterAccepted) {
 }
 
 TEST(Mov, TernaryNestedBranchesIsolated) {
-  // Nested ternaries: every leaf is its own path from the outer condition.
   auto r = semaCheck(R"(
     fn main() -> int {
       x: Str = "x";
       a: bool = True;
       b: bool = False;
-      y = if a then mov x else if b then mov x else x;
+      y = if a then x else if b then x else x;
       println(y);
       return 0;
     }
@@ -480,14 +465,12 @@ TEST(Mov, TernaryNestedBranchesIsolated) {
 }
 
 TEST(Mov, TernaryMoveInsideStatementBranchIsolated) {
-  // A ternary move inside one if-branch does not leak into the sibling
-  // statement branch either.
   auto r = semaCheck(R"(
     fn main() -> int {
       x: Str = "x";
       c: bool = True;
       if (c) {
-        y = if c then mov x else x;
+        y = if c then x else x;
         println(y);
       } else {
         println(x);
@@ -501,13 +484,12 @@ TEST(Mov, TernaryMoveInsideStatementBranchIsolated) {
 // -- Short-circuit `&&` / `||`
 
 TEST(Mov, AndMoveInLhsVisibleInRhsAccepted) {
-  // The LHS always runs before the RHS.
   auto r = semaCheck(R"(
     fn take(s: Str) -> bool { return True; }
     fn peek(s: Str) -> bool { return True; }
     fn main() -> int {
       x: Str = "x";
-      ok: bool = take(mov x) && peek(x);
+      ok: bool = take(x) && peek(x);
       return 0;
     }
   )");
@@ -520,7 +502,7 @@ TEST(Mov, OrMoveInLhsVisibleInRhsAccepted) {
     fn peek(s: Str) -> bool { return True; }
     fn main() -> int {
       x: Str = "x";
-      ok: bool = take(mov x) || peek(x);
+      ok: bool = take(x) || peek(x);
       return 0;
     }
   )");
@@ -528,13 +510,12 @@ TEST(Mov, OrMoveInLhsVisibleInRhsAccepted) {
 }
 
 TEST(Mov, AndMoveInLhsStaysMovedAfterAccepted) {
-  // A move in the LHS is definite.
   auto r = semaCheck(R"(
     fn take(s: Str) -> bool { return True; }
     fn main() -> int {
       x: Str = "x";
       c: bool = True;
-      ok: bool = take(mov x) && c;
+      ok: bool = take(x) && c;
       println(x);
       return 0;
     }
@@ -543,13 +524,12 @@ TEST(Mov, AndMoveInLhsStaysMovedAfterAccepted) {
 }
 
 TEST(Mov, AndMoveInRhsStaysMovedAfterAccepted) {
-  // A move in the RHS may or may not have happened, so it counts as moved.
   auto r = semaCheck(R"(
     fn take(s: Str) -> bool { return True; }
     fn main() -> int {
       x: Str = "x";
       c: bool = True;
-      ok: bool = c && take(mov x);
+      ok: bool = c && take(x);
       println(x);
       return 0;
     }
@@ -563,7 +543,7 @@ TEST(Mov, OrMoveInRhsStaysMovedAfterAccepted) {
     fn main() -> int {
       x: Str = "x";
       c: bool = False;
-      ok: bool = c || take(mov x);
+      ok: bool = c || take(x);
       println(x);
       return 0;
     }
@@ -577,7 +557,7 @@ TEST(Mov, AndMoveInRhsNoLaterUseOk) {
     fn main() -> int {
       x: Str = "x";
       c: bool = True;
-      ok: bool = c && take(mov x);
+      ok: bool = c && take(x);
       return 0;
     }
   )");
@@ -590,7 +570,7 @@ TEST(Mov, OrMoveInRhsNoLaterUseOk) {
     fn main() -> int {
       x: Str = "x";
       c: bool = False;
-      ok: bool = c || take(mov x);
+      ok: bool = c || take(x);
       return 0;
     }
   )");
@@ -598,13 +578,12 @@ TEST(Mov, OrMoveInRhsNoLaterUseOk) {
 }
 
 TEST(Mov, AndMoveInRhsThenRevivedOk) {
-  // Re-assignment after the expression revives the name as usual.
   auto r = semaCheck(R"(
     fn take(s: Str) -> bool { return True; }
     fn main() -> int {
       x: Str = "x";
       c: bool = True;
-      ok: bool = c && take(mov x);
+      ok: bool = c && take(x);
       x = "again";
       println(x);
       return 0;
@@ -614,19 +593,16 @@ TEST(Mov, AndMoveInRhsThenRevivedOk) {
 }
 
 TEST(Mov, AndRhsMoveDoesNotPoisonSiblingTernaryBranchAccepted) {
-  // An `&&` inside a ternary's then-branch stays confined to that branch.
   auto r = semaCheck(R"(
     fn take(s: Str) -> bool { return True; }
     fn main() -> int {
       x: Str = "x";
       c: bool = True;
-      n: int = if (c && take(mov x)) then 1 else 2;
+      n: int = if (c && take(x)) then 1 else 2;
       println(x);
       return n;
     }
   )");
-  // The `&&` is in the CONDITION here, so x is moved for both branches and
-  // afterwards.
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 
   auto r2 = semaCheck(R"(
@@ -634,7 +610,7 @@ TEST(Mov, AndRhsMoveDoesNotPoisonSiblingTernaryBranchAccepted) {
     fn main() -> int {
       x: Str = "x";
       c: bool = True;
-      ok: bool = if c then (c && take(mov x)) else take(x);
+      ok: bool = if c then (c && take(x)) else take(x);
       return 0;
     }
   )");
@@ -648,7 +624,7 @@ TEST(Mov, MoveThenReuseInSameCallAccepted) {
     fn two(a: Str, b: Str) { println(a); println(b); }
     fn main() -> int {
       x: Str = "x";
-      two(mov x, x);
+      two(x, x);
       return 0;
     }
   )");
@@ -660,29 +636,29 @@ TEST(Mov, UseThenMoveInSameCallOk) {
     fn two(a: Str, b: Str) { println(a); println(b); }
     fn main() -> int {
       x: Str = "x";
-      two(x, mov x);
+      two(x, x);
       return 0;
     }
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// -- `mov` keeps the contextual type of its operand (#119)
+// -- `None` where `mov None` was: still contextually typed (#119)
 
 TEST(Mov, MovNoneIntoAnOptionalSlotOk) {
   auto r = semaCheck(R"(
-    class Box { s: Str?; fn __init__() { self.s = mov None; } }
+    class Box { s: Str?; fn __init__() { self.s = None; } }
     fn take(s: Str?) -> int { return 0; }
-    fn give() -> int? { return mov None; }
+    fn give() -> int? { return None; }
     fn main() -> int {
-      x: Str? = mov None;
-      x = mov None;
-      n: int? = mov None;
-      xs: Str?[] = mov [None, "a"];
-      t: (int?, Str) = mov (None, "b");
+      x: Str? = None;
+      x = None;
+      n: int? = None;
+      xs: Str?[] = [None, "a"];
+      t: (int?, Str) = (None, "b");
       b = Box();
-      b.s = mov None;
-      return take(mov None);
+      b.s = None;
+      return take(None);
     }
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -692,7 +668,7 @@ TEST(Mov, MovNoneIntoAnOptionalSlotOk) {
 TEST(Mov, MovNoneIntoANonOptionalSlotIsOneError) {
   auto r = semaCheck(R"(
     fn main() -> int {
-      x: Str = mov None;
+      x: Str = None;
       return 0;
     }
   )");
@@ -700,19 +676,19 @@ TEST(Mov, MovNoneIntoANonOptionalSlotIsOneError) {
   EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
 }
 
-// `mov None` inside an array or tuple literal takes the slot's element type,
-// as `None` there does (#132).
+// `None` inside an array or tuple literal, where `mov None` was, takes the
+// slot's element type (#132).
 TEST(Mov, MovNoneInsideALiteralTakesTheElementType) {
   auto r = semaCheck(R"(
     fn take(xs: Str?[]) -> int { return xs.len(); }
     fn main() -> int {
-      xs: Str?[] = [mov None];
-      t: (Str?, int) = (mov None, 1);
-      ys: Str?[] = [mov None, "a", None];
-      n: (int?, Str?)[] = [(mov None, mov None), (1, "b")];
-      zs: Str?[][] = [[mov None], mov [mov None]];
-      xs = [mov None, mov None];
-      return take([mov None]);
+      xs: Str?[] = [None];
+      t: (Str?, int) = (None, 1);
+      ys: Str?[] = [None, "a", None];
+      n: (int?, Str?)[] = [(None, None), (1, "b")];
+      zs: Str?[][] = [[None], [None]];
+      xs = [None, None];
+      return take([None]);
     }
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -721,7 +697,7 @@ TEST(Mov, MovNoneInsideALiteralTakesTheElementType) {
 
 TEST(Mov, MovNoneInsideALiteralForANonOptionalSlotIsOneError) {
   for (const char *decl :
-       {"xs: Str[] = [mov None];", "t: (Str, int) = (mov None, 1);"}) {
+       {"xs: Str[] = [None];", "t: (Str, int) = (None, 1);"}) {
     auto r =
         semaCheck(std::string("fn main() -> int { ") + decl + " return 0; }");
     EXPECT_FALSE(r.Ok) << decl;

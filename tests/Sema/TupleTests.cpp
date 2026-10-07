@@ -112,7 +112,7 @@ TEST(Tuple, IndexAssignmentRejected) {
 TEST(Tuple, MovOfElementAccepted) {
   auto r = semaCheck(wrapMain(R"(
     t = ("a", "b");
-    s = mov t.0;
+    s = t.0;
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -120,7 +120,7 @@ TEST(Tuple, MovOfElementAccepted) {
 TEST(Tuple, WholeTupleCanBeMoved) {
   auto r = semaCheck(wrapMain(R"(
     t = (1, "a");
-    u = mov t;
+    u = t;
     x: int = u.0;
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -129,7 +129,7 @@ TEST(Tuple, WholeTupleCanBeMoved) {
 TEST(Tuple, UseAfterMovAccepted) {
   auto r = semaCheck(wrapMain(R"(
     t = (1, "a");
-    u = mov t;
+    u = t;
     x: int = t.0;
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -241,7 +241,7 @@ TEST(Tuple, DestructureDuplicateTarget) {
 TEST(Tuple, DestructureRevivesMovedVariable) {
   auto r = semaCheck(wrapMain(R"(
     s: Str = "a";
-    t = mov s;
+    t = s;
     s, n = ("b", 1);
     println(s);
   )"));
