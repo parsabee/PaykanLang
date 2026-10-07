@@ -1060,6 +1060,8 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     }
   }
 
+  if (S.Ownership)
+    S.checkMethodCallAccess(node, recvTy, method);
   node->setResolvedType(method->getReturnType());
   return method->getReturnType();
 }
@@ -1547,6 +1549,10 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
     auto *owner = CurrentScope->findOwner(name);
     if (!owner) {
       CurrentScope->set(name, elemTy);
+      continue;
+    }
+    if (Ownership && !checkReassignable(name, target.Loc)) {
+      ok = false;
       continue;
     }
     auto *varTy = owner->lookup(name);
@@ -2038,7 +2044,7 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
     return false;
   }
 
-  return true;
+  return !Ownership || checkReassignable(varName, node->getLocation());
 }
 
 bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
@@ -2243,6 +2249,7 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
 
   // Register the function in the function table.
   declareFunction(node->getName(), retTy, paramTypes);
+  FunctionTable[node->getName()].Decl = node;
   return true;
 }
 
@@ -2274,6 +2281,8 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
     ScopeGuard guard(*this);
     for (size_t i = 0; i < node->getParams().size(); ++i)
       CurrentScope->declare(node->getParams()[i].getName(), paramTypes[i]);
+    if (Ownership)
+      declareOwnershipParams(node, /*isMethod=*/false);
     bool ok = true;
     for (auto *stmt : node->getBody()->getStatements())
       if (!visit(stmt))
@@ -2309,6 +2318,8 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
           "redeclaration of variable '" + node->getName() + "'");
     return false;
   }
+  if (Ownership)
+    setVarKind(node->getName(), node->getQualifier(), node->isLet());
 
   // Resolve the declared type.
   ast::Type *declTy = nullptr;
@@ -2433,7 +2444,9 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
     return false;
   }
 
-  return true;
+  return !Ownership || requireChangeable(node->getReceiver(),
+                                         "field '" + node->getFieldName() + "'",
+                                         node->getLocation());
 }
 
 bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
@@ -2467,7 +2480,8 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
                                      typeName(at->getElementType()) + "'");
     return false;
   }
-  return true;
+  return !Ownership ||
+         requireChangeable(node->getArray(), "an element", node->getLocation());
 }
 
 bool Sema::visitImportDecl(ast::ImportDecl *) {

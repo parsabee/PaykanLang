@@ -394,6 +394,9 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
     }
     field->setType(fty); // canonical write-back for the lowering
     ct->addField(field->getName(), fty);
+    if (field->getQualifier() != ast::Qualifier::View)
+      FieldQuals[ct->getName() + "." + field->getName()] =
+          field->getQualifier();
   }
 
   // -- methods --
@@ -452,6 +455,11 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
     }
     if (!paramsOk)
       continue;
+    if (Ownership && method->hasExplicitSelf() &&
+        method->getSelfQualifier() == ast::Qualifier::Own) {
+      error(method->getLocation(), "'self: own' is not supported");
+      ok = false;
+    }
 
     // -- override signature check
     // If this method overrides a base-class method (same name found by
@@ -485,6 +493,7 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
     auto *mdecl = Ctx.make<ast::MethodDecl>(
         method->getLocation(), method->getName(), retTy, std::move(paramTys));
     ct->addMethod(mdecl);
+    MethodSources[mdecl] = method;
   }
   PopulatedClasses.insert(cd->getName());
   return ok;
@@ -616,6 +625,8 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
       CurrentScope->declare(names::kSelf, ct);
       for (size_t i = 0; i < method->getParams().size(); ++i)
         CurrentScope->declare(method->getParams()[i].getName(), paramTys[i]);
+      if (Ownership)
+        declareOwnershipParams(method, /*isMethod=*/true);
 
       bool bodyOk = true;
       for (auto *stmt : method->getBody()->getStatements())

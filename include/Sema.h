@@ -78,6 +78,12 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   /// A single lexical scope. Each scope has its own local bindings and a
   /// pointer to its enclosing (parent) scope.
+  /// Ownership prototype: how a variable was declared (`x: mut T`, `let x`).
+  struct VarKind {
+    ast::Qualifier Qual = ast::Qualifier::View;
+    bool Let = false;
+  };
+
   struct Scope {
     Scope *Parent = nullptr;
     StringMap<ast::Type *> Locals;
@@ -99,6 +105,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
     /// Find the innermost scope that contains this name, or nullptr.
     Scope *findOwner(std::string_view name);
+
+    /// Ownership prototype: the kind and `let` of the variables declared in
+    /// this scope that are not plain views (absent: a reassignable view).
+    StringMap<VarKind> Kinds;
   };
 
   Scope *CurrentScope = nullptr;
@@ -136,6 +146,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// user-declared name never contains the module qualifier, a builtin entry
     /// found under a plain declared name is always a compiler builtin.
     bool IsBuiltin = false;
+    /// The user function's declaration (its qualifiers); nullptr for
+    /// builtins, constructors and imported functions.
+    const ast::FuncDecl *Decl = nullptr;
   };
 
   /// Maps function names to their signatures.
@@ -812,6 +825,53 @@ private:
   bool requireOwnership(ast::SourceLocation loc, const char *what);
   /// requireOwnership for the qualifiers and explicit `self` of @p fn.
   bool checkOwnershipSyntax(const ast::FuncDecl *fn);
+
+  // -- Ownership prototype: access checks (SemaOwnership.cpp)
+  //
+  // Every variable in scope has a kind (Scope::Kinds; self: View, its
+  // explicit qualifier, or Mut in __init__).  An expression reaches its
+  // object either changeably (own / mut access, or a fresh value) or
+  // read-only (through a view); changing operations and `mut` sinks need
+  // changeable access.  The deep rules apply to shared (class) types only.
+
+  /// How an expression reaches its object.
+  struct Access {
+    bool Changeable = true; ///< own / mut access, or a fresh value
+    /// Read-only: what it is reached through ("" = a read-only value).
+    std::string Blame;
+    /// The variable or field path it names (`t`, `t.lead`); "" otherwise.
+    std::string Path;
+  };
+  Access accessOf(const ast::Expr *e);
+
+  /// Qualifiers of class fields that are not views, keyed "Class.field".
+  StringMap<ast::Qualifier> FieldQuals;
+  /// The declaration of each user method (its self / parameter / result
+  /// qualifiers); builtin methods have none.
+  std::unordered_map<const ast::MethodDecl *, const ast::FuncDecl *>
+      MethodSources;
+
+  /// The qualifier of field @p field of @p ct or a superclass.
+  ast::Qualifier fieldQualifier(const ast::ClassType *ct,
+                                const std::string &field) const;
+  /// The kind of variable @p name in scope.
+  VarKind varKind(std::string_view name) const;
+  /// Record the kind of @p name, just declared in the current scope.
+  void setVarKind(std::string_view name, ast::Qualifier q, bool isLet = false);
+  /// The kind of `self` in @p method.
+  static ast::Qualifier selfQualifier(const ast::FuncDecl *method);
+
+  /// Error unless variable @p name may be reassigned (it is not `let`).
+  bool checkReassignable(const std::string &name, ast::SourceLocation loc);
+  /// Rule "changing needs own or mut": error unless @p obj is changeable.
+  bool requireChangeable(const ast::Expr *obj, const std::string &what,
+                         ast::SourceLocation loc);
+  /// A method call: a changing method needs a changeable receiver.
+  bool checkMethodCallAccess(const ast::MethodCallExpr *call, ast::Type *recvTy,
+                             const ast::MethodDecl *method);
+  /// Record the kinds of @p fn's parameters, and of `self` in a method, in
+  /// the current scope.
+  void declareOwnershipParams(const ast::FuncDecl *fn, bool isMethod);
   EntryPoint EntryPointCheck = EntryPoint::None;
   /// The check EntryPointCheck selects, over the main file's declarations.
   bool checkEntryPoint(ast::TranslationUnit *tu,
