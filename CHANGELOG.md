@@ -32,6 +32,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lands, each former `mov` costs one retain/release pair.  The use-after-move,
   loop back-edge and "cannot 'mov' ..." diagnostics went with it.  `mov` stays reserved.
 
+### Fixed
+
+- On macOS, programs are compiled and linked for the deployment target the
+  runtime was built for.  CMake 4 builds the runtime for the host's macOS
+  version, which can be newer than the system `cc`'s default; `ld` then
+  warned on every link ("built for newer 'macOS' version") and the warning
+  ended up in the program's stderr.
+
 ## [0.1.1] - 2026-10-06
 
 A patch release of 0.1.0.  It accepts plugins built with 0.1.1 and 0.1.0:
