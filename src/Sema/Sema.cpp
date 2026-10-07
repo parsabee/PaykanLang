@@ -895,8 +895,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     }
     S.CurrentClassCtx->SuperInitCalled = true;
     if (S.Ownership)
-      S.checkMutArgs(S.calleeDecl(node), node->getArguments(),
-                     node->getCalleeName());
+      S.checkArgKinds(S.calleeDecl(node), node->getArguments(),
+                      node->getCalleeName());
     return S.Ctx.getVoidTy();
   }
 
@@ -982,8 +982,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   }
 
   if (S.Ownership)
-    S.checkMutArgs(S.calleeDecl(node), node->getArguments(),
-                   node->getCalleeName());
+    S.checkArgKinds(S.calleeDecl(node), node->getArguments(),
+                    node->getCalleeName());
   node->setResolvedType(sig->ReturnType);
   return sig->ReturnType;
 }
@@ -1380,12 +1380,12 @@ Sema::ExprChecker::visitTupleLiteralExpr(ast::TupleLiteralExpr *node) {
   return tt;
 }
 
-// `cp e` and `mv x` (ownership prototype): typed as their operand for now;
-// their rules come with the ownership checks.
+// `cp e` and `mv x` (ownership prototype): typed as their operand.
 ast::Type *Sema::ExprChecker::visitCopyExpr(ast::CopyExpr *node) {
   if (!S.requireOwnership(node->getLocation(), "cp"))
     return nullptr;
-  return visit(node->getOperand());
+  auto *ty = visit(node->getOperand());
+  return ty && S.checkCopyOperand(node->getOperand(), ty) ? ty : nullptr;
 }
 
 ast::Type *Sema::ExprChecker::visitMoveExpr(ast::MoveExpr *node) {
@@ -1557,7 +1557,10 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
       CurrentScope->set(name, elemTy);
       continue;
     }
-    if (Ownership && !checkReassignable(name, target.Loc)) {
+    if (Ownership && (!checkReassignable(name, target.Loc) ||
+                      (varKind(name).Qual == ast::Qualifier::Own &&
+                       !checkOwnSource(destructureSource(node, i),
+                                       "local '" + name + "'", target.Loc)))) {
       ok = false;
       continue;
     }
@@ -2050,10 +2053,16 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
     return false;
   }
 
-  if (Ownership)
-    return checkReassignable(varName, node->getLocation()) &&
-           (varKind(varName).Qual != ast::Qualifier::Mut ||
-            checkMutSource(varTy, node->getValue(), node->getLocation()));
+  if (Ownership) {
+    ast::Qualifier q = varKind(varName).Qual;
+    if (!checkReassignable(varName, node->getLocation()))
+      return false;
+    if (q == ast::Qualifier::Own)
+      return checkOwnSource(node->getValue(), "local '" + varName + "'",
+                            node->getLocation());
+    return q != ast::Qualifier::Mut ||
+           checkMutSource(varTy, node->getValue(), node->getLocation());
+  }
   return true;
 }
 
@@ -2074,6 +2083,9 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
     }
     if (Ownership && CurrentResultQual == ast::Qualifier::Mut)
       return checkMutSource(CurrentReturnType, node->getReturnValue(),
+                            node->getLocation());
+    if (Ownership && CurrentResultQual == ast::Qualifier::Own)
+      return checkOwnSource(node->getReturnValue(), "result",
                             node->getLocation());
     return true;
   }
@@ -2286,6 +2298,8 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
   for (auto &p : node->getParams())
     paramTypes.push_back(resolveType(p.ParamType, node->getLocation(),
                                      "parameter '" + p.getName() + "'"));
+  if (Ownership && retTy && !checkResultKind(node, retTy))
+    return false;
 
   // Type-check the body in a new scope with params.
   auto *savedRetTy = CurrentReturnType;
@@ -2412,6 +2426,11 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     else if (node->getInitExpr())
       return checkMutSource(declTy, node->getInitExpr(), node->getLocation());
   }
+  if (Ownership && node->getQualifier() == ast::Qualifier::Own &&
+      node->getInitExpr())
+    return checkOwnSource(node->getInitExpr(),
+                          "local '" + node->getName() + "'",
+                          node->getLocation());
   return true;
 }
 
@@ -2473,8 +2492,13 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
     bool ok = requireChangeable(node->getReceiver(),
                                 "field '" + node->getFieldName() + "'",
                                 node->getLocation());
-    if (fieldQualifier(ct, node->getFieldName()) == ast::Qualifier::Mut)
+    ast::Qualifier q = fieldQualifier(ct, node->getFieldName());
+    if (q == ast::Qualifier::Mut)
       ok &= checkMutSource(fieldTy, node->getValue(), node->getLocation());
+    else if (q == ast::Qualifier::Own)
+      ok &= checkOwnSource(node->getValue(),
+                           "field '" + node->getFieldName() + "'",
+                           node->getLocation());
     return ok;
   }
   return true;
@@ -2511,8 +2535,14 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
                                      typeName(at->getElementType()) + "'");
     return false;
   }
-  return !Ownership ||
-         requireChangeable(node->getArray(), "an element", node->getLocation());
+  if (!Ownership)
+    return true;
+  bool ok =
+      requireChangeable(node->getArray(), "an element", node->getLocation());
+  if (isOwnSlot(node->getArray()))
+    ok &= checkOwnSource(node->getValue(), elementTarget(node->getArray()),
+                         node->getLocation());
+  return ok;
 }
 
 bool Sema::visitImportDecl(ast::ImportDecl *) {

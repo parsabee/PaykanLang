@@ -15,8 +15,11 @@ has exactly one *kind*. The default is the **view**, which has no keyword.
 | value type (`int`, `float`, `bool`, `char`, enums) | read-only value; may not escape (return it or store it only as `own`) | **parameter only:** the caller's storage, changed in place (inout) | its own copy |
 | passing / assigning into it | implicit | implicit | **`cp e`** (deep clone), **`mv x`** (hand over), or a fresh value |
 
-- **Fresh values** need neither keyword: constructor calls, array / string /
-  numeric literals, results of functions declared `-> own T`, and `cp e`.
+- **Fresh values** need neither keyword: constructor calls, literals
+  (array, string, numeric, char, bool, tuple), builtin calls, operator
+  results, results of functions declared `-> own T`, and `cp e`. A
+  value-type expression that is not a variable, field or element is fresh.
+  The elements of an `own T[]` are `own` (`xs.push(p)` needs a fresh `p`).
 - **`cp e`** deep-clones: a class object's `own` fields are cloned
   recursively, its view and `mut` fields are shared (copied as links). A `Str`
   is copied, an array is copied and its elements cloned when they are owned.
@@ -31,7 +34,9 @@ has exactly one *kind*. The default is the **view**, which has no keyword.
 - **Fields:** `own` any type; view or `mut` of class types. A value-type field
   without `own` is an error (`add 'own'`).
 - **Results:** `-> own T` (any type), `-> T` (view, class types), `-> mut T`
-  (class types). Returning a value-type view is an error.
+  (class types). `-> mut T` of a value type is an error; `-> T` of a value
+  type means `-> own T` (a value is copied out), so `fn main() -> int`
+  stays as it is.
 - **`self`:** written as an optional first parameter of a method,
   `fn m(self)` (view), `fn m(self: mut)` or `fn m(self: mut Self)`. Without
   it the method's `self` is a view. `__init__`'s `self` is always `mut`.

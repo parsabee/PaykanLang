@@ -878,10 +878,10 @@ private:
   /// @p dst; error if it is reached through a view (shared types only).
   bool checkMutSource(ast::Type *dst, const ast::Expr *src,
                       ast::SourceLocation loc);
-  /// The `mut` parameters of @p fn (nullptr: none) against @p args.
-  bool checkMutArgs(const ast::FuncDecl *fn,
-                    const std::vector<ast::Expr *> &args,
-                    const std::string &callee);
+  /// The `mut` and `own` parameters of @p fn (nullptr: none) against @p args.
+  bool checkArgKinds(const ast::FuncDecl *fn,
+                     const std::vector<ast::Expr *> &args,
+                     const std::string &callee);
   /// A method call: a changing method needs a changeable receiver.
   bool checkMethodCallAccess(const ast::MethodCallExpr *call, ast::Type *recvTy,
                              const ast::MethodDecl *method);
@@ -891,6 +891,31 @@ private:
   /// Record the kinds of @p fn's parameters, and of `self` in a method, in
   /// the current scope.
   void declareOwnershipParams(const ast::FuncDecl *fn, bool isMethod);
+
+  // -- Ownership prototype: transfer (`own` needs `cp`, `mv` or fresh)
+
+  /// A fresh value: a constructor, literal, operator, builtin, `cp`, `mv`,
+  /// a `-> own` call, or a value-type expression that is not a variable,
+  /// field or element.
+  bool isFresh(const ast::Expr *e);
+  /// True when @p e names an `own` slot: an own variable or field, or an
+  /// element of one (the elements of an `own T[]` are owned).
+  bool isOwnSlot(const ast::Expr *e) const;
+  /// What target @p i of a destructuring takes: a tuple literal's element,
+  /// or the whole tuple.
+  static const ast::Expr *destructureSource(const ast::DestructureStmt *d,
+                                            size_t i);
+  /// "element of 'xs'", the target of a store into array @p array.
+  static std::string elementTarget(const ast::Expr *array);
+  /// Error unless @p src may initialize the `own` @p target ("local 'x'").
+  bool checkOwnSource(const ast::Expr *src, const std::string &target,
+                      ast::SourceLocation loc);
+  /// `cp e`: error unless @p ty (the operand's type) can be cloned.
+  bool checkCopyOperand(const ast::Expr *operand, ast::Type *ty);
+  /// A value-type field must be `own`.
+  bool checkFieldKind(const ast::VarDecl *field, ast::Type *ty);
+  /// A value-type result is `-> own T` (or `-> T`), never `-> mut T`.
+  bool checkResultKind(const ast::FuncDecl *fn, ast::Type *retTy);
   EntryPoint EntryPointCheck = EntryPoint::None;
   /// The check EntryPointCheck selects, over the main file's declarations.
   bool checkEntryPoint(ast::TranslationUnit *tu,

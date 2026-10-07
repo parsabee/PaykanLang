@@ -26,6 +26,26 @@ std::string selfText(ast::Qualifier q) {
              : std::string(names::kSelf) + ": " + ast::qualifierName(q);
 }
 
+/// How an expression is shown in a diagnostic: `x`, `t.lead`, `xs[...]`,
+/// `f(...)`, `t.leader()`; "the value" for anything else.
+std::string exprText(const ast::Expr *e) {
+  auto args = [](size_t n) { return n ? "(...)" : "()"; };
+  if (const auto *id = ast::dyn_cast<ast::Identifier>(e))
+    return id->getName();
+  if (const auto *m = ast::dyn_cast<ast::MemberAccessExpr>(e))
+    return exprText(m->getReceiver()) + "." + m->getFieldName();
+  if (const auto *s = ast::dyn_cast<ast::SubscriptExpr>(e))
+    return exprText(s->getArray()) + "[...]";
+  if (const auto *t = ast::dyn_cast<ast::TupleIndexExpr>(e))
+    return exprText(t->getTuple()) + "." + std::to_string(t->getIndex());
+  if (const auto *c = ast::dyn_cast<ast::CallExpr>(e))
+    return c->getCalleeName() + args(c->getArguments().size());
+  if (const auto *mc = ast::dyn_cast<ast::MethodCallExpr>(e))
+    return exprText(mc->getReceiver()) + "." + mc->getMethodName() +
+           args(mc->getArguments().size());
+  return "the value";
+}
+
 } // namespace
 
 bool Sema::isSharedType(const ast::Type *ty) {
@@ -183,9 +203,9 @@ bool Sema::checkMutSource(ast::Type *dst, const ast::Expr *src,
   return false;
 }
 
-bool Sema::checkMutArgs(const ast::FuncDecl *fn,
-                        const std::vector<ast::Expr *> &args,
-                        const std::string &callee) {
+bool Sema::checkArgKinds(const ast::FuncDecl *fn,
+                         const std::vector<ast::Expr *> &args,
+                         const std::string &callee) {
   if (!fn)
     return true;
   bool ok = true;
@@ -193,6 +213,11 @@ bool Sema::checkMutArgs(const ast::FuncDecl *fn,
   for (size_t i = 0; i < params.size() && i < args.size(); ++i) {
     const ast::Param &p = params[i];
     const ast::Expr *arg = args[i];
+    if (p.Qual == ast::Qualifier::Own) {
+      ok &= checkOwnSource(arg, "parameter '" + p.getName() + "'",
+                           arg->getLocation());
+      continue;
+    }
     if (p.Qual != ast::Qualifier::Mut || !arg->getResolvedType())
       continue;
     if (isSharedType(p.ParamType)) {
@@ -234,7 +259,12 @@ bool Sema::checkMethodCallAccess(const ast::MethodCallExpr *call,
     what = "an object with '" + name + "'";
   bool ok = what.empty() ||
             requireChangeable(call->getReceiver(), what, call->getLocation());
-  return checkMutArgs(fn, call->getArguments(), name) && ok;
+  if (name == names::kPush && ast::isa<ast::ArrayType>(recvTy) &&
+      call->getArguments().size() == 1 && isOwnSlot(call->getReceiver()))
+    ok &= checkOwnSource(call->getArguments()[0],
+                         elementTarget(call->getReceiver()),
+                         call->getArguments()[0]->getLocation());
+  return checkArgKinds(fn, call->getArguments(), name) && ok;
 }
 
 bool Sema::checkSelfQualifier(const ast::FuncDecl *method,
@@ -247,6 +277,104 @@ bool Sema::checkSelfQualifier(const ast::FuncDecl *method,
     return true;
   error(method->getLocation(), "override of '" + method->getName() +
                                    "' must keep '" + selfText(want) + "'");
+  return false;
+}
+
+// -- Ownership transfer: `own` needs `cp`, `mv` or a fresh value
+
+bool Sema::isFresh(const ast::Expr *e) {
+  if (ast::isa<ast::CopyExpr>(e) || ast::isa<ast::MoveExpr>(e) ||
+      ast::isa<ast::IntegerLiteral>(e) || ast::isa<ast::FloatLiteral>(e) ||
+      ast::isa<ast::BoolLiteral>(e) || ast::isa<ast::CharLiteral>(e) ||
+      ast::isa<ast::NoneLiteral>(e) || ast::isa<ast::StringLiteral>(e) ||
+      ast::isa<ast::ArrayLiteralExpr>(e) ||
+      ast::isa<ast::TupleLiteralExpr>(e) || ast::isa<ast::UnaryExpr>(e) ||
+      ast::isa<ast::BinaryExpr>(e))
+    return true;
+  // A value is copied out of anything but a variable, field or element.
+  bool place =
+      ast::isa<ast::Identifier>(e) || ast::isa<ast::MemberAccessExpr>(e) ||
+      ast::isa<ast::SubscriptExpr>(e) || ast::isa<ast::TupleIndexExpr>(e);
+  if (!place && e->getResolvedType() && !isSharedType(e->getResolvedType()))
+    return true;
+  if (const auto *t = ast::dyn_cast<ast::TernaryExpr>(e))
+    return isFresh(t->getTrueExpr()) && isFresh(t->getFalseExpr());
+  // Constructors, builtins and imported functions (no declaration) give new
+  // values; a user function or method only with `-> own T`.
+  if (const auto *c = ast::dyn_cast<ast::CallExpr>(e)) {
+    const auto *sig = lookupFunction(c->getCalleeName());
+    return !sig || !sig->Decl ||
+           sig->Decl->getResultQualifier() == ast::Qualifier::Own;
+  }
+  if (const auto *mc = ast::dyn_cast<ast::MethodCallExpr>(e)) {
+    const auto *ct =
+        ast::dyn_cast<ast::ClassType>(mc->getReceiver()->getResolvedType());
+    auto it = ct ? MethodSources.find(ct->findMethod(mc->getMethodName()))
+                 : MethodSources.end();
+    return it == MethodSources.end() ||
+           it->second->getResultQualifier() == ast::Qualifier::Own;
+  }
+  return false;
+}
+
+bool Sema::isOwnSlot(const ast::Expr *e) const {
+  if (const auto *id = ast::dyn_cast<ast::Identifier>(e))
+    return varKind(id->getName()).Qual == ast::Qualifier::Own;
+  if (const auto *m = ast::dyn_cast<ast::MemberAccessExpr>(e)) {
+    const auto *ct =
+        ast::dyn_cast<ast::ClassType>(m->getReceiver()->getResolvedType());
+    return ct && fieldQualifier(ct, m->getFieldName()) == ast::Qualifier::Own;
+  }
+  if (const auto *s = ast::dyn_cast<ast::SubscriptExpr>(e))
+    return isOwnSlot(s->getArray());
+  if (const auto *t = ast::dyn_cast<ast::TupleIndexExpr>(e))
+    return isOwnSlot(t->getTuple());
+  return false;
+}
+
+const ast::Expr *Sema::destructureSource(const ast::DestructureStmt *d,
+                                         size_t i) {
+  const auto *t = ast::dyn_cast<ast::TupleLiteralExpr>(d->getValue());
+  return t ? t->getElements()[i] : d->getValue();
+}
+
+std::string Sema::elementTarget(const ast::Expr *array) {
+  return "element of '" + exprText(array) + "'";
+}
+
+bool Sema::checkOwnSource(const ast::Expr *src, const std::string &target,
+                          ast::SourceLocation loc) {
+  if (isFresh(src))
+    return true;
+  error(loc, "'own' " + target + " needs 'cp' or 'mv': '" + exprText(src) +
+                 "' is not fresh");
+  return false;
+}
+
+bool Sema::checkCopyOperand(const ast::Expr *operand, ast::Type *ty) {
+  if (ty != Ctx.getVoidTy() && ty != Ctx.getFileTy())
+    return true;
+  error(operand->getLocation(),
+        "cannot 'cp' a value of type '" + typeName(ty) + "'");
+  return false;
+}
+
+bool Sema::checkFieldKind(const ast::VarDecl *field, ast::Type *ty) {
+  if (isSharedType(ty) || field->getQualifier() == ast::Qualifier::Own)
+    return true;
+  error(field->getLocation(), "field '" + field->getName() +
+                                  "' of value type '" + typeName(ty) +
+                                  "' must be 'own'");
+  return false;
+}
+
+bool Sema::checkResultKind(const ast::FuncDecl *fn, ast::Type *retTy) {
+  // `-> T` of a value type is `-> own T`: a value is always copied out.
+  if (fn->getResultQualifier() != ast::Qualifier::Mut ||
+      retTy == Ctx.getVoidTy() || isSharedType(retTy))
+    return true;
+  error(fn->getLocation(),
+        "a value type result must be '-> own " + typeName(retTy) + "'");
   return false;
 }
 

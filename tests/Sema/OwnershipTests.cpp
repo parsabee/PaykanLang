@@ -63,7 +63,7 @@ class P {
   m: mut Str[];
   v: Str[];
   fn __init__(a: mut Str[]) { self.xs = [0]; self.m = a; self.v = a; }
-  fn set(self: mut, k: int) { self.xs[0] = k; }
+  fn set(self: mut, k: int) { self.xs[0] = cp k; }
   fn view(self) -> Str[] { return self.m; }
   fn grab(self: mut) -> mut Str[] { return self.m; }
 }
@@ -245,5 +245,121 @@ TEST(Ownership, ChecksNeedTheFlag) {
                          "\n  fn set() { self.x = 1; }\n}\nfn f(a: Str[]) { "
                          "a.push(\"x\"); a[0] = \"y\"; }\nfn main() -> int { c "
                          "= C(); c.set(); c.x = 2; return 0; }"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+// -- Transfer: `own` needs `cp`, `mv` or a fresh value
+
+namespace {
+
+// Each case is the body of main after this prelude.
+const char *kTransfer = R"(
+class Q {
+  s: own Str;
+  ps: own Q[];
+  v: Q[];
+  fn __init__(s: own Str) { self.s = mv s; self.ps = []; self.v = []; }
+  fn view(self) -> Str { return self.s; }
+  fn copy(self) -> own Str { return cp self.s; }
+}
+fn take(q: own Q) { }
+fn make() -> own Q { return Q("m"); }
+fn main() -> int {
+  q: own = Q("a");
+  w = q;
+  xs: own Str[] = [];
+)";
+
+std::string transferMain(const std::string &body) {
+  return kTransfer + body + "\nreturn 0;\n}";
+}
+
+} // namespace
+
+TEST(Ownership, FreshValuesNeedNoKeyword) {
+  const char *bodies[] = {
+      "a: own = Q(\"b\"); b: own = make(); c: own Str = q.copy();",
+      "d: own = [1, 2]; e: own = (1, \"x\"); f: own = \"s\" + \"t\";",
+      "g: own = cp w; h: own = mv q; take(Q(\"c\")); take(cp w);",
+      "k: own int = 1 + 2; k = xs.len(); m: own = Str(3); m = cp w.s;",
+      "xs.push(\"x\"); xs.push(cp w.s); xs[0] = q.copy(); q.ps.push(make());",
+      "q.s = \"t\"; q.s = w.view() + \"\";",
+      "n: own = if 1 > 0 then Q(\"x\") else make();",
+  };
+  for (const char *body : bodies) {
+    auto r = semaRun(parseOwnership(transferMain(body)), /*ownership=*/true);
+    EXPECT_TRUE(r.Ok) << body << "\n" << r.Diagnostics;
+  }
+}
+
+TEST(Ownership, OwnNeedsCpOrMv) {
+  const std::pair<const char *, const char *> cases[] = {
+      {"a: own = w;", "'own' local 'a' needs 'cp' or 'mv': 'w' is not fresh"},
+      {"a: own Q = make(); a = w;",
+       "'own' local 'a' needs 'cp' or 'mv': 'w' is not fresh"},
+      {"s: own = q.view();",
+       "'own' local 's' needs 'cp' or 'mv': 'q.view()' is not fresh"},
+      {"take(w);", "'own' parameter 'q' needs 'cp' or 'mv': 'w' is not fresh"},
+      {"q.s = w.s;", "'own' field 's' needs 'cp' or 'mv': 'w.s' is not fresh"},
+      {"xs.push(w.s);",
+       "'own' element of 'xs' needs 'cp' or 'mv': 'w.s' is not fresh"},
+      {"q.ps.push(w);",
+       "'own' element of 'q.ps' needs 'cp' or 'mv': 'w' is not fresh"},
+      {"xs[0] = w.s;",
+       "'own' element of 'xs' needs 'cp' or 'mv': 'w.s' is not fresh"},
+      {"i = 1; k: own int = i;",
+       "'own' local 'k' needs 'cp' or 'mv': 'i' is not fresh"},
+      {"a: own Q = make(); a, b = (w, 1);",
+       "'own' local 'a' needs 'cp' or 'mv': 'w' is not fresh"},
+  };
+  for (const auto &[body, msg] : cases)
+    expectOwnershipError(transferMain(body), msg);
+  expectOwnershipError("fn f(s: Str) -> own Str { return s; }\n"
+                       "fn main() -> int { return 0; }",
+                       "'own' result needs 'cp' or 'mv': 's' is not fresh");
+  // A view of a value escapes into an own field only as a copy.
+  expectOwnershipError("class C {\n  n: own int;\n  fn __init__(n: int) { "
+                       "self.n = n; }\n}\nfn main() -> int { return 0; }",
+                       "'own' field 'n' needs 'cp' or 'mv': 'n' is not fresh");
+  // Elements of a view or `mut` array are not owned: a link is stored.
+  auto r = semaRun(parseOwnership(transferMain("q.v.push(w);") +
+                                  "\nfn put(a: mut Q[], q: Q) { a.push(q); }"),
+                   /*ownership=*/true);
+  EXPECT_FALSE(r.Ok); // q.v is a view field: read-only
+  r = semaRun(parseOwnership(transferMain("") +
+                             "\nfn put(a: mut Q[], q: Q) { a.push(q); }"),
+              /*ownership=*/true);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Ownership, CpNeedsACloneableValue) {
+  expectOwnershipError("fn main() -> int { f: own = cp Stdin; return 0; }",
+                       "cannot 'cp' a value of type 'File'");
+  auto r = semaRun(
+      parseOwnership("class C {\n  n: own int;\n  fn __init__() { self.n = 0; }"
+                     "\n  fn twin(self) -> own C { return cp self; }\n}\n"
+                     "fn main() -> int { c: own = C(); d: own = cp c.twin(); "
+                     "t: own = cp (1, \"a\"); return cp c.n; }"),
+      /*ownership=*/true);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Ownership, FieldAndResultKinds) {
+  const std::string tail = "\nfn main() -> int { return 0; }";
+  expectOwnershipError("class C { n: int; }" + tail,
+                       "field 'n' of value type 'int' must be 'own'");
+  expectOwnershipError("class C { b: mut bool?; }" + tail,
+                       "field 'b' of value type 'bool?' must be 'own'");
+  expectOwnershipError("fn f(n: mut int) -> mut int { return n; }" + tail,
+                       "a value type result must be '-> own int'");
+  expectOwnershipError("class C { fn f(self) -> mut float { return 1.0; } }" +
+                           tail,
+                       "a value type result must be '-> own float'");
+  // `-> int` is `-> own int`: the value is copied out.
+  auto r = semaRun(parseOwnership("class C { n: own int; s: Str; m: mut C?; "
+                                  "}\nfn f(n: int) -> int { return n; }\n"
+                                  "fn g(n: int) -> own int { return cp n; }" +
+                                  tail),
+                   /*ownership=*/true);
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }

@@ -393,6 +393,9 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       continue;
     }
     field->setType(fty); // canonical write-back for the lowering
+    if (Ownership && !ClassInstantiationInfo.count(ct) &&
+        !checkFieldKind(field, fty))
+      ok = false;
     ct->addField(field->getName(), fty);
     if (field->getQualifier() != ast::Qualifier::View)
       FieldQuals[ct->getName() + "." + field->getName()] =
@@ -618,6 +621,10 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
       // Unreachable in practice (a class with an unresolvable parameter type
       // is erroneous and its bodies are skipped); poisoned if it ever is.
       paramTys.push_back(pty ? pty : Ctx.getPoisonTy());
+    }
+    if (Ownership && retTy && !checkResultKind(method, retTy)) {
+      ok = false;
+      continue;
     }
 
     auto *savedRetTy = CurrentReturnType;
