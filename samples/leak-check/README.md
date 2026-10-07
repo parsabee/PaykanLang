@@ -30,7 +30,6 @@ line each; the samples parity check (`scripts/samples_parity.py`, ctest
 | `10_error_open.pkn`        | `Error` from a failed `open`                          | `PaykanError_new` (`Error.c`)        |
 | `11_file_write.pkn`        | `File` from a successful `open` + `write`             | `PaykanFile_new` (`File.c`)          |
 | `12_file_readln.pkn`       | `readln` line buffer                                  | `PaykanFile_readln` (`File.c`)       |
-| `13_ownership_transfer.pkn` | shared hand-off + re-assigned source                | `PaykanString_new` + `PaykanShared`  |
 | `14_self_return_chain.pkn` | `self` returned (chained) out of a method             | unique-box acquire (`Shared.c`)      |
 | `15_match_binding_ownership.pkn` | match-arm binding consumed as arg/var/field     | unique-box acquire (`Shared.c`)      |
 | `16_call_rooted_member_chain.pkn` | `makeH().a` chains + borrowed field acquisition | receiver-box teardown + field retain |
