@@ -51,22 +51,19 @@ in statically so nothing else needs installing. The Homebrew formula builds the 
 recursive-descent frontend and the C backend). Programs are compiled with the system C
 compiler, so a C11 compiler (`cc`) must be installed. Or build from source (below).
 
-### Debian / Ubuntu (apt)
+### Debian / Ubuntu
 
-PaykanLang has an apt repository for Linux x86_64. Add it once, then install (and later
-upgrade) with apt, which also pulls in a C compiler (`gcc`, or `clang`) for the C backend:
+Download the Debian package for Linux x86_64 from the
+[latest release](https://github.com/parsabee/PaykanLang/releases/latest) and install it with
+apt, which also pulls in a C compiler (`gcc`, or `clang`) for the C backend:
 
 ```sh
-curl -fsSL https://parsabee.github.io/PaykanLang/apt/paykanlang.gpg \
-  | sudo tee /usr/share/keyrings/paykanlang.gpg > /dev/null
-echo "deb [arch=amd64 signed-by=/usr/share/keyrings/paykanlang.gpg] https://parsabee.github.io/PaykanLang/apt stable main" \
-  | sudo tee /etc/apt/sources.list.d/paykanlang.list
-sudo apt update
-sudo apt install paykanlang
+curl -fLO https://github.com/parsabee/PaykanLang/releases/download/v0.1.1/paykanlang_0.1.1_amd64.deb
+sudo apt install ./paykanlang_0.1.1_amd64.deb
 ```
 
-Each release also carries the package itself, `paykanlang_<version>_amd64.deb` (with its
-SHA-256 sum), for `sudo apt install ./paykanlang_<version>_amd64.deb`.
+Each release's `.deb` sits beside its SHA-256 sum (`paykanlang_<version>_amd64.deb.sha256`);
+replace `0.1.1` with the release you want.
 
 It installs `paykan` in `/usr/bin`, the runtime in `/usr/lib`, its header and the plugin
 headers in `/usr/include/paykan`, the `find_package(Paykan)` package, and the system plugin
