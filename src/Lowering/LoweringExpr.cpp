@@ -999,6 +999,20 @@ Val ModuleLowering::ExprEmitter::visitTupleLiteralExpr(
   return L.emitSharedNew(tup, "tup.shared");
 }
 
+// `cp e` and `mv x` (ownership prototype): until their lowering lands they
+// are their operand, a reference taken as a new share (exprAlreadyShared).
+Val ModuleLowering::ExprEmitter::visitCopyExpr(ast::CopyExpr *node) {
+  ast::Type *ty = node->getResolvedType();
+  return ty && ast::isRefType(ty) ? L.emitAsShared(node->getOperand())
+                                  : L.emitExpr(node->getOperand());
+}
+
+Val ModuleLowering::ExprEmitter::visitMoveExpr(ast::MoveExpr *node) {
+  ast::Type *ty = node->getResolvedType();
+  return ty && ast::isRefType(ty) ? L.emitAsShared(node->getOperand())
+                                  : L.emitExpr(node->getOperand());
+}
+
 Val ModuleLowering::ExprEmitter::visitTupleIndexExpr(
     ast::TupleIndexExpr *node) {
   Receiver recv = L.emitReceiver(node->getTuple());

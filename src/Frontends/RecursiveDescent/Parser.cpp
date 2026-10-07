@@ -124,20 +124,23 @@ bool isLiteralToken(Tok k) {
 // -- Construction
 
 Parser::Parser(ASTContext &ctx, std::string_view source,
-               sema::DiagEngine *diags)
-    : Ctx(ctx), Diags(diags),
-      TheLexer(source, [this](SourceLocation loc, const std::string &msg) {
-        // Lexical errors are real whatever the parser is doing, including
-        // while it scans ahead speculatively: report them unconditionally.
-        // The token being lexed now (the next one in the buffer) is the
-        // first one after the bad text, which is dropped (an out-of-range
-        // integer is kept, as 0): a syntax error there is a follow-on.
-        // The lexer runs ahead of the parser (lookahead, speculation), so
-        // the error is held until the parser reaches that token, keeping
-        // diagnostics in source order (flushLexErrors).
-        LexErrorTokens.push_back(Buf.size());
-        PendingLexErrors.push_back({Buf.size(), loc, msg});
-      }) {}
+               sema::DiagEngine *diags, bool ownership)
+    : Ctx(ctx), Diags(diags), Ownership(ownership),
+      TheLexer(
+          source,
+          [this](SourceLocation loc, const std::string &msg) {
+            // Lexical errors are real whatever the parser is doing, including
+            // while it scans ahead speculatively: report them unconditionally.
+            // The token being lexed now (the next one in the buffer) is the
+            // first one after the bad text, which is dropped (an out-of-range
+            // integer is kept, as 0): a syntax error there is a follow-on.
+            // The lexer runs ahead of the parser (lookahead, speculation), so
+            // the error is held until the parser reaches that token, keeping
+            // diagnostics in source order (flushLexErrors).
+            LexErrorTokens.push_back(Buf.size());
+            PendingLexErrors.push_back({Buf.size(), loc, msg});
+          },
+          ownership) {}
 
 void Parser::flushLexErrors(size_t upTo) {
   size_t n = 0;
@@ -148,8 +151,8 @@ void Parser::flushLexErrors(size_t upTo) {
 }
 
 ParseOutput parseSource(ASTContext &ctx, std::string_view source,
-                        sema::DiagEngine *diags) {
-  Parser p(ctx, source, diags);
+                        sema::DiagEngine *diags, bool ownership) {
+  Parser p(ctx, source, diags, ownership);
   ParseOutput out;
   out.Root = p.parseTranslationUnit();
   p.flushLexErrors(Parser::kNoToken); // whatever the parser did not reach
@@ -536,7 +539,14 @@ bool Parser::parseTypeParamList(std::vector<const std::string *> &out) {
   return true;
 }
 
-VarDecl *Parser::parseVarDecl() {
+bool Parser::parseQualifier(Qualifier &out) {
+  if (!at(Tok::KwOwn) && !at(Tok::KwMut))
+    return false;
+  out = consume().Kind == Tok::KwOwn ? Qualifier::Own : Qualifier::Mut;
+  return true;
+}
+
+VarDecl *Parser::parseVarDecl(bool local) {
   SourceLocation start = cur().Loc;
   if (!at(Tok::Ident)) {
     errorAtCurrent("expected a name");
@@ -545,10 +555,17 @@ VarDecl *Parser::parseVarDecl() {
   const std::string &name = intern(consume().Text);
   if (!expect(Tok::Colon, "after the name (a declaration needs a type)"))
     return nullptr;
-  Type *ty = parseTypeAnnotation();
-  if (!ty)
-    return nullptr;
-  return Ctx.make<VarDecl>(span(start), name, ty, nullptr);
+  Qualifier qual = Qualifier::View;
+  Type *ty = nullptr;
+  // `x: own = e;`: only an initialized local may leave the type off.
+  if (!parseQualifier(qual) || !local || !at(Tok::Assign)) {
+    ty = parseTypeAnnotation();
+    if (!ty)
+      return nullptr;
+  }
+  auto *vd = Ctx.make<VarDecl>(span(start), name, ty, nullptr);
+  vd->setQualifier(qual);
+  return vd;
 }
 
 ClassDecl *Parser::parseClassDecl() {
@@ -583,7 +600,7 @@ ClassDecl *Parser::parseClassDecl() {
   while (!at(Tok::RBrace) && !at(Tok::Eof)) {
     size_t before = Pos;
     if (at(Tok::KwFn)) {
-      if (auto *m = parseFuncDecl()) {
+      if (auto *m = parseFuncDecl(/*isMethod=*/true)) {
         body.Methods.push_back(m);
         continue;
       }
@@ -644,6 +661,8 @@ EnumDecl *Parser::parseEnumDecl() {
 //              ( "->" typeAnnotation )? block
 // paramList ::= ( param ( "," param )* )?
 // param ::= IDENT ":" typeAnnotation
+// With the ownership prototype a qualifier may precede each annotation (the
+// result's too), and a method may start its parameters with `self`.
 
 bool Parser::parseParamList(std::vector<Param> &out) {
   if (at(Tok::RParen))
@@ -656,15 +675,35 @@ bool Parser::parseParamList(std::vector<Param> &out) {
     const std::string &name = intern(consume().Text);
     if (!expect(Tok::Colon, "after the parameter name"))
       return false;
+    Qualifier qual = Qualifier::View;
+    parseQualifier(qual);
     Type *ty = parseTypeAnnotation();
     if (!ty)
       return false;
-    out.push_back(Param{&name, ty});
+    out.push_back(Param{&name, ty, qual});
   } while (accept(Tok::Comma));
   return true;
 }
 
-FuncDecl *Parser::parseFuncDecl() {
+// selfParam ::= "self" ( ":" ( qualifier "Self"? | "Self" ) )?
+bool Parser::parseExplicitSelf(Qualifier &out) {
+  consume(); // "self"
+  out = Qualifier::View;
+  if (!accept(Tok::Colon))
+    return true;
+  bool qualified = parseQualifier(out);
+  if (at(Tok::Ident) && cur().Text == "Self") {
+    consume();
+    return true;
+  }
+  if (!qualified) {
+    errorAtCurrent("expected 'mut', 'own' or 'Self' after 'self:'");
+    return false;
+  }
+  return true;
+}
+
+FuncDecl *Parser::parseFuncDecl(bool isMethod) {
   SourceLocation start = consume().Loc; // "fn"
   if (!at(Tok::Ident)) {
     errorAtCurrent("expected a function name after 'fn'");
@@ -681,13 +720,22 @@ FuncDecl *Parser::parseFuncDecl() {
 
   if (!expect(Tok::LParen, "after the function name"))
     return nullptr;
+  bool explicitSelf =
+      isMethod && Ownership && at(Tok::Ident) && cur().Text == "self";
+  Qualifier selfQual = Qualifier::View;
+  if (explicitSelf &&
+      (!parseExplicitSelf(selfQual) ||
+       (!at(Tok::RParen) && !expect(Tok::Comma, "after 'self'"))))
+    return nullptr;
   std::vector<Param> params;
   if (!parseParamList(params) ||
       !expect(Tok::RParen, "to close the parameter list"))
     return nullptr;
 
   Type *retTy = nullptr;
+  Qualifier retQual = Qualifier::View;
   if (accept(Tok::Arrow)) {
+    parseQualifier(retQual);
     retTy = parseTypeAnnotation();
     if (!retTy)
       return nullptr;
@@ -696,8 +744,12 @@ FuncDecl *Parser::parseFuncDecl() {
   CompoundStmt *body = parseBlock();
   if (!body)
     return nullptr;
-  return Ctx.make<FuncDecl>(span(start), name, std::move(params), retTy, body,
-                            std::move(typeParams));
+  auto *fn = Ctx.make<FuncDecl>(span(start), name, std::move(params), retTy,
+                                body, std::move(typeParams));
+  fn->setResultQualifier(retQual);
+  if (explicitSelf)
+    fn->setExplicitSelf(selfQual);
+  return fn;
 }
 
 // -- Blocks and statements
@@ -804,6 +856,22 @@ bool Parser::parseStatement(Stmt *&out) {
   case Tok::Underscore:
     return parseDestructureStatement(start, {}, out);
 
+  case Tok::KwLet: { // let ::= "let" IDENT ( ":" qualifier? type? )? "=" ...
+    consume();
+    if (!at(Tok::Ident)) {
+      errorAtCurrent("expected a variable name after 'let'");
+      return false;
+    }
+    VarDecl *decl = nullptr;
+    if (kind(1) == Tok::Colon) {
+      decl = parseVarDecl(/*local=*/true);
+    } else {
+      Token n = consume();
+      decl = Ctx.make<VarDecl>(n.Loc, intern(n.Text), nullptr, nullptr);
+    }
+    return decl && finishLocalDecl(start, decl, /*let=*/true, out);
+  }
+
   case Tok::Ident: {
     // After a leading name the next token decides: `,` starts a
     // destructuring statement, `:` a typed declaration (which may itself be
@@ -811,30 +879,16 @@ bool Parser::parseStatement(Stmt *&out) {
     if (kind(1) == Tok::Comma)
       return parseDestructureStatement(start, {}, out);
     if (kind(1) == Tok::Colon) {
-      VarDecl *decl = parseVarDecl();
+      VarDecl *decl = parseVarDecl(/*local=*/true);
       if (!decl)
         return false;
-      if (at(Tok::Comma)) {
+      if (at(Tok::Comma) && decl->getQualifier() == Qualifier::View) {
         std::vector<DestructureStmt::Target> targets;
         targets.push_back(DestructureStmt::Target{
             &decl->getName(), decl->getType(), decl->getLocation()});
         return parseDestructureStatement(start, std::move(targets), out);
       }
-      if (!expect(Tok::Assign, "(a variable declaration needs an initial "
-                               "value)"))
-        return false;
-      Expr *init = parseExpression();
-      if (!init)
-        return false;
-      // The declaration spans name through initializer; the `;` is only part
-      // of the statement.
-      auto *vd = Ctx.make<VarDecl>(span(start), decl->getName(),
-                                   decl->getType(), init);
-      auto *ds = Ctx.make<DeclStmt>(span(start), vd);
-      if (!expect(Tok::Semi, "after the declaration"))
-        return false;
-      out = ds;
-      return true;
+      return finishLocalDecl(start, decl, /*let=*/false, out);
     }
     return parseExprOrAssignStatement(out);
   }
@@ -842,6 +896,26 @@ bool Parser::parseStatement(Stmt *&out) {
   default:
     return parseExprOrAssignStatement(out);
   }
+}
+
+bool Parser::finishLocalDecl(SourceLocation start, VarDecl *decl, bool let,
+                             Stmt *&out) {
+  if (!expect(Tok::Assign, "(a variable declaration needs an initial value)"))
+    return false;
+  Expr *init = parseExpression();
+  if (!init)
+    return false;
+  // The declaration spans name (or `let`) through initializer; the `;` is
+  // only part of the statement.
+  auto *vd =
+      Ctx.make<VarDecl>(span(start), decl->getName(), decl->getType(), init);
+  vd->setQualifier(decl->getQualifier());
+  vd->setLet(let);
+  auto *ds = Ctx.make<DeclStmt>(span(start), vd);
+  if (!expect(Tok::Semi, "after the declaration"))
+    return false;
+  out = ds;
+  return true;
 }
 
 bool Parser::parseExprOrAssignStatement(Stmt *&out) {
@@ -1240,9 +1314,12 @@ Expr *Parser::parseBinary(int minPrec) {
   }
 }
 
-// unary ::= ( "!" | "-" ) unary | postfix   ("mov" is reserved: an error)
+// unary ::= ( "!" | "-" | "cp" | "mv" ) unary | postfix
+// ("mov" is reserved: an error; "cp" and "mv" only with the ownership
+// prototype, which makes them keywords)
 Expr *Parser::parseUnary() {
-  if (at(Tok::Not) || at(Tok::Minus) || at(Tok::KwMov)) {
+  if (at(Tok::Not) || at(Tok::Minus) || at(Tok::KwMov) || at(Tok::KwCp) ||
+      at(Tok::KwMv)) {
     if (!enterNesting())
       return nullptr;
     Token op = consume();
@@ -1256,6 +1333,10 @@ Expr *Parser::parseUnary() {
       error(op.Loc, std::string(kMovRemoved));
       return operand;
     }
+    if (op.Kind == Tok::KwCp)
+      return Ctx.make<CopyExpr>(span(op.Loc), operand);
+    if (op.Kind == Tok::KwMv)
+      return Ctx.make<MoveExpr>(span(op.Loc), operand);
     return Ctx.make<UnaryExpr>(
         span(op.Loc), op.Kind == Tok::Not ? UnaryOpcode::Not : UnaryOpcode::Neg,
         operand);

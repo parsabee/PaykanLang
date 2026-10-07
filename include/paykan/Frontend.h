@@ -48,6 +48,9 @@ struct Options {
   /// --trace-scanner), when the frontend has them.
   bool TraceParsing = false;
   bool TraceScanning = false;
+  /// The ownership prototype (--ownership, docs/design/ownership-proto.md):
+  /// `own`, `mut`, `let`, `cp` and `mv` are keywords.  Off, they are names.
+  bool Ownership = false;
 };
 
 /// Result of parsing one source file.

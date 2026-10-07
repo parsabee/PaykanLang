@@ -1372,6 +1372,16 @@ Sema::ExprChecker::visitTupleLiteralExpr(ast::TupleLiteralExpr *node) {
   return tt;
 }
 
+// `cp e` and `mv x` (ownership prototype): typed as their operand for now;
+// their rules come with the ownership checks.
+ast::Type *Sema::ExprChecker::visitCopyExpr(ast::CopyExpr *node) {
+  return visit(node->getOperand());
+}
+
+ast::Type *Sema::ExprChecker::visitMoveExpr(ast::MoveExpr *node) {
+  return visit(node->getOperand());
+}
+
 ast::Type *Sema::ExprChecker::visitTupleIndexExpr(ast::TupleIndexExpr *node) {
   auto *recvTy = visit(node->getTuple());
   if (!recvTy)
@@ -2321,6 +2331,7 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
         return false;
       }
       declTy = initTy;
+      node->setType(declTy); // `x: own = e`, `let x = e`: the inferred type
     }
   }
 

@@ -22,9 +22,10 @@ namespace paykan::frontend::recursive_descent {
 class Parser {
 public:
   /// @p source must outlive the parser (tokens view into it).  Diagnostics
-  /// go through @p diags when given, otherwise to stderr.
-  Parser(ast::ASTContext &ctx, std::string_view source,
-         sema::DiagEngine *diags);
+  /// go through @p diags when given, otherwise to stderr.  @p ownership
+  /// enables the ownership prototype's syntax (Options::Ownership).
+  Parser(ast::ASTContext &ctx, std::string_view source, sema::DiagEngine *diags,
+         bool ownership = false);
 
   /// Parse a whole translation unit.  Always returns a TranslationUnit (a
   /// partial one after errors); check getErrorCount() for success.
@@ -40,6 +41,7 @@ public:
 private:
   ast::ASTContext &Ctx;
   sema::DiagEngine *Diags;
+  bool Ownership;
   Lexer TheLexer;
   unsigned ErrorCount = 0;
 
@@ -115,10 +117,21 @@ private:
   bool parseModulePath(std::string &out);
   ast::ClassDecl *parseClassDecl();
   ast::EnumDecl *parseEnumDecl();
-  ast::FuncDecl *parseFuncDecl();
+  ast::FuncDecl *parseFuncDecl(bool isMethod = false);
+  /// A method's explicit `self` parameter: `self`, `self: mut`,
+  /// `self: mut Self`, ...  Consumes `self` and what follows it.
+  bool parseExplicitSelf(ast::Qualifier &out);
+  /// Consume an `own` / `mut` qualifier into @p out, if there is one.
+  bool parseQualifier(ast::Qualifier &out);
   bool parseTypeParamList(std::vector<const std::string *> &out);
   bool parseParamList(std::vector<ast::Param> &out);
-  ast::VarDecl *parseVarDecl();
+  /// `name: qualifier? type`; for a @p local the type may be left off after
+  /// a qualifier (`x: own = e`).
+  ast::VarDecl *parseVarDecl(bool local = false);
+  /// The rest of a local declaration after its name and annotation:
+  /// `= init ;`.
+  bool finishLocalDecl(ast::SourceLocation start, ast::VarDecl *decl, bool let,
+                       ast::Stmt *&out);
 
   // -- Statements
   ast::CompoundStmt *parseBlock();

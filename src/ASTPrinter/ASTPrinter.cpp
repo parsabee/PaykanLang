@@ -414,6 +414,20 @@ void ASTPrinter::visitTupleLiteralExpr(TupleLiteralExpr *node) {
   }
 }
 
+void ASTPrinter::visitCopyExpr(CopyExpr *node) {
+  header("CopyExpr", node);
+  OS << "\n";
+  ChildScope cs(*this, true);
+  visit(node->getOperand());
+}
+
+void ASTPrinter::visitMoveExpr(MoveExpr *node) {
+  header("MoveExpr", node);
+  OS << "\n";
+  ChildScope cs(*this, true);
+  visit(node->getOperand());
+}
+
 void ASTPrinter::visitTupleIndexExpr(TupleIndexExpr *node) {
   header("TupleIndexExpr", node);
   OS << " ." << node->getIndex() << "\n";

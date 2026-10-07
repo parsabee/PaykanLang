@@ -414,6 +414,7 @@ int main(int argc, char *argv[]) {
   paykan::frontend::Options feOpts;
   feOpts.TraceParsing = opts.TraceParsing;
   feOpts.TraceScanning = opts.TraceScanning;
+  feOpts.Ownership = opts.Ownership;
   paykan::parser::ParserDriver driver(opts.Frontend, feOpts);
   diag.setSourceInfo(opts.InputFilename, &driver.getSourceLines());
   driver.setDiagEngine(&diag);

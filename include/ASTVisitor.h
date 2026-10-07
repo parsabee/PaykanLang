@@ -62,7 +62,9 @@ namespace ast {
   NODE(NK_SubscriptExpr, SubscriptExpr, SubscriptExpr)                         \
   NODE(NK_EnumValueExpr, EnumValueExpr, EnumValueExpr)                         \
   NODE(NK_TupleLiteralExpr, TupleLiteralExpr, TupleLiteralExpr)                \
-  NODE(NK_TupleIndexExpr, TupleIndexExpr, TupleIndexExpr)
+  NODE(NK_TupleIndexExpr, TupleIndexExpr, TupleIndexExpr)                      \
+  NODE(NK_CopyExpr, CopyExpr, CopyExpr)                                        \
+  NODE(NK_MoveExpr, MoveExpr, MoveExpr)
 
 #define PAYKAN_TYPE_NODES(NODE)                                                \
   NODE(NK_BuiltinType, BuiltinType, BuiltinType)                               \

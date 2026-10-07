@@ -570,8 +570,9 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
   if (ast::isa<ast::ArrayLiteralExpr>(expr) ||
       ast::isa<ast::TupleLiteralExpr>(expr))
     return true;
-  if (auto *e = ast::dyn_cast<ast::TupleIndexExpr>(expr))
-    return e->getResolvedType() && ast::isRefType(e->getResolvedType());
+  if (ast::isa<ast::CopyExpr>(expr) || ast::isa<ast::MoveExpr>(expr) ||
+      ast::isa<ast::TupleIndexExpr>(expr))
+    return expr->getResolvedType() && ast::isRefType(expr->getResolvedType());
   if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(expr))
     return isObjectElementType(se->getResolvedType()) &&
            exprProducesFreshBox(se->getArray());
@@ -614,6 +615,8 @@ bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
   if (ast::isa<ast::ArrayLiteralExpr>(expr) ||
       ast::isa<ast::TupleLiteralExpr>(expr))
     return true;
+  if (ast::isa<ast::CopyExpr>(expr) || ast::isa<ast::MoveExpr>(expr))
+    return exprAlreadyShared(expr);
   if (ast::isa<ast::CallExpr>(expr))
     return exprAlreadyShared(expr);
   return false;

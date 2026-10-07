@@ -24,9 +24,10 @@ struct ParseOutput {
 
 /// Parse @p source (the full text of one file) into @p ctx.  Diagnostics go
 /// through @p diags when given, otherwise to stderr.  Reentrant: no state
-/// outlives the call except the nodes created in @p ctx.
+/// outlives the call except the nodes created in @p ctx.  @p ownership
+/// enables the ownership prototype's syntax (frontend::Options::Ownership).
 ParseOutput parseSource(ast::ASTContext &ctx, std::string_view source,
-                        sema::DiagEngine *diags);
+                        sema::DiagEngine *diags, bool ownership = false);
 
 /// Print the token stream of @p source, one token per line, as
 /// `line:col-line:col KIND text` (the --dump-tokens format).  Lexical errors

@@ -93,6 +93,8 @@ public:
     NK_EnumValueExpr,
     NK_TupleLiteralExpr,
     NK_TupleIndexExpr,
+    NK_CopyExpr, // `cp e` (ownership prototype)
+    NK_MoveExpr, // `mv e` (ownership prototype)
 
     // Types
     NK_BuiltinType,
@@ -194,8 +196,7 @@ public:
   Type *getCoercedType() const { return CoercedType; }
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_IntegerLiteral &&
-           N->getKind() <= NK_TupleIndexExpr;
+    return N->getKind() >= NK_IntegerLiteral && N->getKind() <= NK_MoveExpr;
   }
 };
 
@@ -275,12 +276,23 @@ public:
   }
 };
 
+// The kind of a declared thing in the ownership prototype
+// (docs/design/ownership-proto.md): a view (no keyword, the default), `mut`
+// or `own`.  Only the recursive-descent frontend with Options::Ownership (or
+// the AST interchange) produces anything but View.
+enum class Qualifier : uint8_t { View, Mut, Own };
+
+/// The keyword of @p q: "view" (not a keyword), "mut" or "own".
+const char *qualifierName(Qualifier q);
+
 // Variable declaration with explicit type (x: int = 10)
 class VarDecl : public Decl {
 private:
   const std::string *Name; // points into ASTContext::StringPool (stable)
   Type *VarType;
   Expr *InitExpr;
+  Qualifier Qual = Qualifier::View; // `x: own T`, `x: mut = e`
+  bool Let = false;                 // `let x = e;`
 
 public:
   VarDecl(SourceLocation loc, const std::string &internedName, Type *type,
@@ -296,6 +308,11 @@ public:
   void setType(Type *ty) { VarType = ty; }
   Expr *getInitExpr() const { return InitExpr; }
 
+  Qualifier getQualifier() const { return Qual; }
+  void setQualifier(Qualifier q) { Qual = q; }
+  bool isLet() const { return Let; }
+  void setLet(bool let) { Let = let; }
+
   static bool classof(const ASTNode *N) { return N->getKind() == NK_VarDecl; }
 };
 
@@ -303,6 +320,7 @@ public:
 struct Param {
   const std::string *Name; // points into ASTContext::StringPool (stable)
   Type *ParamType;
+  Qualifier Qual = Qualifier::View; // `p: own T`, `p: mut T`
 
   const std::string &getName() const { return *Name; }
 };
@@ -324,6 +342,11 @@ private:
   CompoundStmt *Body;
   // Type parameter names (interned); empty for an ordinary function.
   std::vector<const std::string *> TypeParams;
+  // Ownership prototype: the result's qualifier (`-> own T`) and a method's
+  // explicit `self` parameter (`fn m(self: mut)`), which is not in Params.
+  Qualifier ResultQual = Qualifier::View;
+  Qualifier SelfQual = Qualifier::View;
+  bool ExplicitSelf = false;
 
 public:
   FuncDecl(SourceLocation loc, const std::string &internedName,
@@ -344,6 +367,16 @@ public:
     return TypeParams;
   }
   bool isGeneric() const { return !TypeParams.empty(); }
+
+  Qualifier getResultQualifier() const { return ResultQual; }
+  void setResultQualifier(Qualifier q) { ResultQual = q; }
+  bool hasExplicitSelf() const { return ExplicitSelf; }
+  Qualifier getSelfQualifier() const { return SelfQual; }
+  /// Mark the method as declaring `self` explicitly, with qualifier @p q.
+  void setExplicitSelf(Qualifier q) {
+    ExplicitSelf = true;
+    SelfQual = q;
+  }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_FuncDecl; }
 };
@@ -1494,6 +1527,23 @@ public:
     return N->getKind() == NK_TupleIndexExpr;
   }
 };
+
+// `cp e` (CopyExpr) and `mv x` (MoveExpr) of the ownership prototype
+// (docs/design/ownership-proto.md): a deep clone of the operand's value, and
+// the hand-over of what a local or parameter holds.
+template <ASTNode::NodeKind K> class OwnershipExpr : public Expr {
+  Expr *Operand;
+
+public:
+  OwnershipExpr(SourceLocation loc, Expr *operand)
+      : Expr(K, loc), Operand(operand) {}
+
+  Expr *getOperand() const { return Operand; }
+
+  static bool classof(const ASTNode *N) { return N->getKind() == K; }
+};
+using CopyExpr = OwnershipExpr<ASTNode::NK_CopyExpr>;
+using MoveExpr = OwnershipExpr<ASTNode::NK_MoveExpr>;
 
 // Destructuring statement:  a, b = expr;   a: int, _ = expr;
 //

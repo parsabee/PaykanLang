@@ -46,6 +46,12 @@ enum class Tok : uint8_t {
   KwTrue,
   KwFalse,
   KwNone,
+  // Keywords of the ownership prototype (Options::Ownership only)
+  KwOwn,
+  KwMut,
+  KwLet,
+  KwCp,
+  KwMv,
   Underscore, // `_` (destructuring skip / match wildcard); `_x` is an Ident
   // Punctuation and operators
   Assign,     // =
@@ -113,7 +119,9 @@ public:
   using ErrorHandler =
       std::function<void(ast::SourceLocation, const std::string &)>;
 
-  Lexer(std::string_view source, ErrorHandler onError);
+  /// @p ownership makes `own`, `mut`, `let`, `cp` and `mv` keywords (the
+  /// ownership prototype, Options::Ownership); otherwise they are names.
+  Lexer(std::string_view source, ErrorHandler onError, bool ownership = false);
 
   /// Scan and return the next token.  Lexical errors are reported through
   /// the handler and the offending text is skipped; the scan then continues,
@@ -126,6 +134,7 @@ private:
   size_t Line = 1;
   size_t Col = 1;
   ErrorHandler OnError;
+  bool Ownership = false;
   /// Kind and end offset of the previously returned token, which decide
   /// whether a run of digits is a tuple index (`t.0`) or a number literal.
   Tok PrevKind = Tok::Eof;

@@ -44,6 +44,18 @@ const char *BinaryExpr::getOpcodeStr() const {
   __builtin_unreachable();
 }
 
+const char *qualifierName(Qualifier q) {
+  switch (q) {
+  case Qualifier::Mut:
+    return "mut";
+  case Qualifier::Own:
+    return "own";
+  case Qualifier::View:
+    break;
+  }
+  return "view";
+}
+
 // -- UnaryExpr
 
 const char *UnaryExpr::getOpcodeStr() const {
@@ -213,6 +225,10 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
     auto *u = cast<UnaryExpr>(e);
     return Ctx.make<UnaryExpr>(loc, u->getOpcode(), cloneExpr(u->getOperand()));
   }
+  case ASTNode::NK_CopyExpr:
+    return Ctx.make<CopyExpr>(loc, cloneExpr(cast<CopyExpr>(e)->getOperand()));
+  case ASTNode::NK_MoveExpr:
+    return Ctx.make<MoveExpr>(loc, cloneExpr(cast<MoveExpr>(e)->getOperand()));
   case ASTNode::NK_BinaryExpr: {
     auto *b = cast<BinaryExpr>(e);
     return Ctx.make<BinaryExpr>(loc, b->getOpcode(), cloneExpr(b->getLHS()),
@@ -317,6 +333,8 @@ Stmt *ASTCloner::cloneStmt(Stmt *s) {
     auto *nvd = Ctx.make<VarDecl>(vd->getLocation(), vd->getName(),
                                   cloneType(vd->getType()),
                                   cloneExpr(vd->getInitExpr()));
+    nvd->setQualifier(vd->getQualifier());
+    nvd->setLet(vd->isLet());
     return Ctx.make<DeclStmt>(loc, nvd);
   }
   case ASTNode::NK_ExprStmt:
@@ -384,18 +402,24 @@ FuncDecl *ASTCloner::cloneFuncDecl(FuncDecl *fn, const std::string &newName) {
   std::vector<Param> params;
   params.reserve(fn->getParams().size());
   for (auto &p : fn->getParams())
-    params.push_back(Param{p.Name, cloneType(p.ParamType)});
-  return Ctx.make<FuncDecl>(fn->getLocation(), Ctx.intern(newName),
-                            std::move(params), cloneType(fn->getReturnType()),
-                            cloneCompound(fn->getBody()));
+    params.push_back(Param{p.Name, cloneType(p.ParamType), p.Qual});
+  auto *clone = Ctx.make<FuncDecl>(
+      fn->getLocation(), Ctx.intern(newName), std::move(params),
+      cloneType(fn->getReturnType()), cloneCompound(fn->getBody()));
+  clone->setResultQualifier(fn->getResultQualifier());
+  if (fn->hasExplicitSelf())
+    clone->setExplicitSelf(fn->getSelfQualifier());
+  return clone;
 }
 
 ClassDecl *ASTCloner::cloneClassDecl(ClassDecl *cd,
                                      const std::string &newName) {
   std::vector<VarDecl *> fields;
-  for (auto *f : cd->getFields())
+  for (auto *f : cd->getFields()) {
     fields.push_back(Ctx.make<VarDecl>(f->getLocation(), f->getName(),
                                        cloneType(f->getType()), nullptr));
+    fields.back()->setQualifier(f->getQualifier());
+  }
   std::vector<FuncDecl *> methods;
   for (auto *m : cd->getMethods())
     methods.push_back(cloneFuncDecl(m, m->getName()));
