@@ -189,33 +189,11 @@ bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
   return true;
 }
 
-bool compileNativeSource(const std::string &source, const std::string &object,
-                         const Toolchain &tc,
-                         const std::vector<std::string> &extraFlags,
-                         std::ostream &errs) {
-  std::vector<std::string> args = {tcnames::kFlagStd};
-  for (const auto &f : tc.ExtraFlags)
-    args.push_back(f);
-  for (const auto &f : extraFlags)
-    args.push_back(f);
-  args.push_back(tcnames::kFlagInclude + tc.RuntimeIncludeDir);
-  args.push_back(tcnames::kFlagCompileOnly);
-  args.push_back(source);
-  args.push_back(tcnames::kFlagOutput);
-  args.push_back(object);
-  int rc = spawn(tc.CC, args, &tc.CC, {}, errs);
-  if (rc != 0) {
-    errs << "C compilation of '" << source << "' failed (" << tc.CC
-         << " exited with " << rc << ")\n";
-    return false;
-  }
-  return true;
-}
-
 bool linkExecutable(const std::vector<std::string> &objects,
                     const std::string &outputPath, const Toolchain &tc,
                     std::ostream &errs) {
   std::vector<std::string> link = objects;
+  link.insert(link.end(), tc.ExtraObjects.begin(), tc.ExtraObjects.end());
   for (const auto &f : tc.ExtraFlags)
     link.push_back(f);
   link.push_back(tc.RuntimeLib);

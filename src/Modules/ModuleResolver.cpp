@@ -414,12 +414,6 @@ ModuleResolver::loadCode(const std::string &canonical) const {
   if (auto errors = pir::verify(decoded); !errors.empty())
     return Status::error(shown + ": CODE does not verify:\n" +
                          pir::formatErrors(errors));
-  // A module file does not carry native code yet (#198).
-  for (const pir::Function &f : decoded.Functions)
-    if (f.IsExtern && pir::isNativeName(f.Name))
-      return Status::error(shown + ": has native functions, which a .pkm "
-                                   "file cannot carry yet; build it from "
-                                   "source");
   return mod;
 }
 
@@ -491,10 +485,6 @@ void ModuleResolver::writeCache(const pir::Program &program) {
                      [&](const pir::Module &m) { return m.Name == name; });
     if (mod == program.Modules.end())
       continue;
-    if (!mod->NativeSource.empty()) {
-      log("module " + name + ": has native code, not cached");
-      continue; // a .pkm cannot carry it yet (#198)
-    }
     std::filesystem::path path = cachePath(name);
     StatusOr<std::vector<uint8_t>> bytes =
         encodeFile(name, entry->Iface, entry->Deps, entry->SourceBytes, *mod);
@@ -525,10 +515,6 @@ Status ModuleResolver::writeModuleFile(const std::filesystem::path &out,
       ref.IfaceHash = it->second->IfaceHash;
     iface.Mods.push_back(std::move(ref));
   }
-  if (!module.NativeSource.empty())
-    return Status::error("module '" + canonical +
-                         "' has native functions, which a .pkm file cannot "
-                         "carry yet (#198)");
   StatusOr<std::vector<uint8_t>> sourceBytes = pkm::readFileBytes(source);
   if (!sourceBytes)
     return sourceBytes.status();

@@ -2,12 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "Sema.h"
-#include "ModuleUtils.h"
 #include "Names.h"
 #include "SemaInternal.h"
 
 #include <algorithm>
-#include <filesystem>
 #include <unordered_set>
 #include <utility>
 
@@ -1786,23 +1784,6 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
 
 bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   bool ok = true;
-
-  // A module's `native fn` bodies are its sibling C file (#198).
-  if (node->hasNativeFunctions() && !node->getSourcePath().empty()) {
-    std::filesystem::path c =
-        module_utils::nativeSourceFor(node->getSourcePath());
-    std::error_code ec;
-    if (!std::filesystem::is_regular_file(c, ec)) {
-      for (auto *fn : node->getFuncDecls())
-        if (fn->isNative()) {
-          error(fn->getLocation(),
-                "native function '" + fn->getName() + "' needs its C source '" +
-                    c.filename().string() + "' next to this file");
-          break;
-        }
-      ok = false;
-    }
-  }
 
   // Register enum types first so that class fields, parameters, and variable
   // declarations can reference them by name during the passes that follow.

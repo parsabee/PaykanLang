@@ -25,6 +25,9 @@ struct Toolchain {
   std::string CC;
   /// Extra flags appended to every compile (e.g. "-O2").
   std::vector<std::string> ExtraFlags;
+  /// Object files or archives linked into every executable: the objects
+  /// defining a program's native functions (--object, #198).
+  std::vector<std::string> ExtraObjects;
   /// Path of libpaykan_runtime.a and of the directory holding Runtime.h.
   /// Empty: $PAYKAN_RUNTIME_DIR, then the runtime recorded with
   /// setPackageRuntime(), then the install layout around the executable
@@ -78,15 +81,6 @@ struct TempDir {
   TempDir(const TempDir &) = delete;
   TempDir &operator=(const TempDir &) = delete;
 };
-
-/// Compile the C file @p source -- a module's native code (#198), written
-/// against Runtime.h -- into the object @p object with tc.CC, `-std=c11`,
-/// tc.ExtraFlags and @p extraFlags (`-fPIC` for the JIT).  @p tc must have
-/// been resolved (resolveToolchain).
-bool compileNativeSource(const std::string &source, const std::string &object,
-                         const Toolchain &tc,
-                         const std::vector<std::string> &extraFlags,
-                         std::ostream &errs);
 
 /// Link @p objects with tc.ExtraFlags against the runtime (and libm) into
 /// the executable @p outputPath, with tc.CC as the linker driver.  @p tc

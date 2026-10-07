@@ -112,12 +112,6 @@ struct ParseResult {
 
 inline ParseResult parse(const std::string &source) {
   auto path = writeTempFile(source);
-  // A `native fn` needs its C file next to the source (#198); these tests
-  // never link it, so an empty one does.  It stays in the scratch directory:
-  // Sema checks for it after parse() returns.
-  auto nativeC = std::filesystem::path(path).replace_extension(".c");
-  if (source.find("native fn") != std::string::npos)
-    std::ofstream(nativeC).flush();
   std::string primary = testFrontend();
   auto driver = std::make_unique<parser::ParserDriver>(primary);
   int rc = driver->parseFile(path);

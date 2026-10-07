@@ -1,7 +1,12 @@
 // 14_native — calling C from a module with `native fn` (#198).
 //
-// text.pkn declares functions whose bodies are in text.c; `paykan` compiles
-// that file and links it on every backend.  Callers see ordinary functions.
+// text.pkn declares functions whose bodies are in text.c.  Build the object
+// yourself and link it with --object (the sample harnesses do this):
+//
+//   cc -std=c11 -fPIC -I<paykan include dir> -c text.c -o text.o
+//   paykan --object=text.o main.pkn
+//
+// Callers see ordinary functions.
 
 import text;
 

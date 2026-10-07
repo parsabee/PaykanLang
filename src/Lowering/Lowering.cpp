@@ -7,12 +7,10 @@
 // driver in LoweringProgram.cpp.
 
 #include "LoweringInternal.h"
-#include "ModuleUtils.h"
 #include "Names.h"
 
 #include <cassert>
 #include <cstring>
-#include <filesystem>
 
 namespace paykan::lowering {
 
@@ -530,12 +528,6 @@ void ModuleLowering::bootstrapBuiltins() {
 
 bool ModuleLowering::run(ast::TranslationUnit *tu) {
   CurrentScope = nullptr;
-  if (tu->hasNativeFunctions() && !tu->getSourcePath().empty()) {
-    std::error_code ec;
-    std::filesystem::path c = std::filesystem::absolute(
-        module_utils::nativeSourceFor(tu->getSourcePath()), ec);
-    Mod.NativeSource = ec ? std::string() : c.string();
-  }
   bootstrapBuiltins();
   processImports(tu);
   visit(tu);

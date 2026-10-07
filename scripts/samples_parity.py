@@ -83,6 +83,29 @@ def sample_args(sample, scratch):
     return words
 
 
+_OBJECTS = {}
+
+
+def object_flags(sample, scratch):
+    """`--object=...` for an imports sample with C files (#198): paykan does
+    not build native code, so the harness compiles them, as a user would."""
+    if sample.parent.parent.name != "imports":
+        return []
+    sources = sorted(sample.parent.glob("*.c"))
+    if not sources:
+        return []
+    if sample not in _OBJECTS:
+        objs = []
+        for src in sources:
+            obj = Path(tempfile.mkdtemp(dir=scratch)) / (src.stem + ".o")
+            subprocess.run([os.environ.get("CC", "cc"), "-std=c11", "-fPIC",
+                            "-I", str(ROOT / "src" / "Runtime"), "-c",
+                            str(src), "-o", str(obj)], check=True)
+            objs.append(str(obj))
+        _OBJECTS[sample] = ["--object=" + ",".join(objs)]
+    return _OBJECTS[sample]
+
+
 def normalise(p):
     out = ADDR_RE.sub("@ADDR", p.stdout)
     m = LIVE_RE.search(p.stderr)
@@ -98,7 +121,8 @@ def opt_flags(opt):
 
 def run(paykan, backend, sample, outdir, opt=None):
     cmd = [paykan, f"--backend={backend}", "--track-heap", *opt_flags(opt),
-           str(sample), *sample_args(sample, outdir)]
+           *object_flags(sample, outdir), str(sample),
+           *sample_args(sample, outdir)]
     p = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
                        text=True, errors="replace", cwd=str(ROOT))
     return normalise(p)
@@ -106,8 +130,8 @@ def run(paykan, backend, sample, outdir, opt=None):
 
 def build_and_run(paykan, backend, sample, outdir, opt=None):
     exe = Path(outdir) / f"{backend}-{sample.parent.name}-{sample.stem}"
-    cmd = [paykan, "build", f"--backend={backend}", *opt_flags(opt), "-o",
-           str(exe), str(sample)]
+    cmd = [paykan, "build", f"--backend={backend}", *opt_flags(opt),
+           *object_flags(sample, outdir), "-o", str(exe), str(sample)]
     b = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
                        text=True, errors="replace", cwd=str(ROOT))
     if b.returncode != 0:

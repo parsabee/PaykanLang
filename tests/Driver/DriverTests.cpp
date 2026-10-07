@@ -1064,16 +1064,50 @@ TEST(Driver, EmitCPrototypesNativeFunctions) {
   auto src = writeTmp("native fn put(fd: int, s: Str) -> int = \"pk_put\";"
                       "native fn get() -> Str? = \"pk_get\";"
                       "fn main() -> int { s = get(); return put(1, \"x\"); }");
-  auto c = std::filesystem::path(src).replace_extension(".c");
-  std::ofstream(c).flush(); // the C file must exist; --emit-c does not build it
   auto [rc, out] = run(std::string(kPaykan) + " --emit-c " + src + " 2>&1");
   std::filesystem::remove(src);
-  std::filesystem::remove(c);
   EXPECT_EQ(rc, 0) << out;
   EXPECT_NE(out.find("int64_t pk_put(int64_t, PaykanObject *);"),
             std::string::npos)
       << out;
   EXPECT_NE(out.find("PaykanShared *pk_get(void);"), std::string::npos) << out;
+}
+
+// --object=a.o,b.o links every listed object (#198): each defines one
+// native function here, built by the test as a user would.
+TEST(Driver, ObjectListLinksEveryNativeObject) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_native_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  std::ofstream(dir / "a.c")
+      << "#include <stdint.h>\n"
+         "int64_t drv_twice(int64_t x) { return 2 * x; }\n";
+  std::ofstream(dir / "b.c")
+      << "#include <stdint.h>\n"
+         "int64_t drv_plus1(int64_t x) { return x + 1; }\n";
+  for (const char *stem : {"a", "b"}) {
+    auto cc = run("cc -std=c11 -fPIC -c " + (dir / stem).string() + ".c -o " +
+                  (dir / stem).string() + ".o 2>&1");
+    ASSERT_EQ(cc.exitCode, 0) << cc.out;
+  }
+  std::ofstream(dir / "main.pkn")
+      << "native fn twice(x: int) -> int = \"drv_twice\";\n"
+         "native fn plus1(x: int) -> int = \"drv_plus1\";\n"
+         "fn main() -> int { println(Str<int>(plus1(twice(20)))); return 0; "
+         "}\n";
+  std::string objects = " --object=" + (dir / "a.o").string() + "," +
+                        (dir / "b.o").string() + " ";
+  auto r = run(std::string(kPaykan) + backendFlag() + objects +
+               (dir / "main.pkn").string() + " 2>&1");
+  EXPECT_EQ(r.exitCode, 0) << r.out;
+  EXPECT_EQ(r.out, "41\n");
+  // Without b.o, drv_plus1 is undefined: the link fails.
+  auto missing = run(std::string(kPaykan) + backendFlag() +
+                     " --object=" + (dir / "a.o").string() + " " +
+                     (dir / "main.pkn").string() + " 2>&1");
+  EXPECT_NE(missing.exitCode, 0) << missing.out;
+  std::filesystem::remove_all(dir);
 }
 
 TEST(Driver, EmitCRejectsAnotherBackend) {

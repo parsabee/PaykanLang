@@ -321,11 +321,6 @@ struct Module {
   std::vector<ExternGlobal> Externs;
   std::vector<Class> Classes;
   std::vector<Function> Functions;
-  /// The C file defining this module's `$c.` externs (#198), an absolute
-  /// path; empty when it has none.  The backends compile and link it.  Not
-  /// part of the text or binary form yet: a module with native code is
-  /// always built from source.
-  std::string NativeSource;
 
   const Function *findFunction(const std::string &name) const;
   const Class *findClass(const std::string &name) const;

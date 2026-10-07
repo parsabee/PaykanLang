@@ -1,6 +1,6 @@
-// text — string helpers whose bodies are C (text.c, next to this file).
-// A `native fn` names the C function; the compiler builds text.c with the
-// program and links it (#198).
+// text — string helpers whose bodies are C (text.c).
+// A `native fn` names the C function.  paykan does not build C: compile
+// text.c into an object and pass it with --object (#198).
 
 native fn upper(s: Str) -> Str = "sample_text_upper";
 native fn count(s: Str, c: char) -> int = "sample_text_count";

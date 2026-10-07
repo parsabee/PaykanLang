@@ -19,8 +19,9 @@ namespace paykan::jit {
 /// The module is consumed (moved into the JIT).
 /// @param args  Arguments forwarded to the Paykan main function as Str[].
 ///              args[0] should be the script path (like argv[0] for scripts).
-/// @param nativeObjects  Object files of the program's native C (#198),
-///              linked into the JIT with the module.
+/// @param nativeObjects  Object files defining the program's native
+///              functions (--object, #198; position-independent), linked
+///              into the JIT with the module.
 /// Returns the exit code from main(), or an Error on failure.
 llvm::Expected<int>
 runModule(std::unique_ptr<llvm::Module> module,

@@ -112,8 +112,9 @@ def wrapper(cc, outdir, index):
 def check_sample(args, sample, idx, runtimes, wrappers, outdir):
     """[(label, problems)] for one sample."""
     results = []
-    ref_p = tool([args.paykan, "--backend=c", "--track-heap", str(sample),
-                  *sp.sample_args(sample, outdir)])
+    objects = sp.object_flags(sample, outdir)
+    ref_p = tool([args.paykan, "--backend=c", "--track-heap", *objects,
+                  str(sample), *sp.sample_args(sample, outdir)])
     ref = sp.normalise(ref_p)
     if ref[3] not in (0, None):  # None: a panic aborts before the report
         return [("reference run", [f"live blocks {ref[3]} (exit {ref[0]})"])]
@@ -122,8 +123,8 @@ def check_sample(args, sample, idx, runtimes, wrappers, outdir):
         return [("emit-c", [emitted.stderr.strip()])]
     c_file = Path(outdir) / f"s{idx}.c"
     c_file.write_text(emitted.stdout)
-    # A sample's modules' native C (#198) sits next to them and is held to
-    # the same flags.
+    # A sample's native C (#198) is held to the same flags, compiled with the
+    # generated C.
     natives = [str(c) for c in sorted(sample.parent.glob("*.c"))
                if sample.parent.parent.name == "imports"]
     for ri, ((cc, opt), objs) in enumerate(runtimes.items()):
@@ -138,8 +139,8 @@ def check_sample(args, sample, idx, runtimes, wrappers, outdir):
     for wi, (cc, wrap) in enumerate(wrappers.items()):
         label = f"build {cc}"
         exe = Path(outdir) / f"s{idx}-build{wi}"
-        p = tool([args.paykan, "build", "--backend=c", "-o", str(exe),
-                  str(sample)], env=dict(os.environ, CC=wrap))
+        p = tool([args.paykan, "build", "--backend=c", *objects, "-o",
+                  str(exe), str(sample)], env=dict(os.environ, CC=wrap))
         if p.returncode != 0:
             results.append((label, ["build failed:\n" + p.stderr]))
             continue

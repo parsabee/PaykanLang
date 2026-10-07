@@ -130,19 +130,22 @@ convention:
 
 A native function cannot be generic, cannot be a method, and cannot be `main`.
 
-The C functions of a module are in the C file next to it, with the same stem:
-`text.pkn` declares them and `text.c` defines them.  A module that declares a
-`native fn` without that file is an error.  `paykan` compiles the file with
-the system C compiler (`$CC`, else `cc`) as C11 against `Runtime.h` and links
-it into the program, on every backend (the llvm backend's `run` loads it into
-the JIT, so it needs a C compiler too).  The C code may call the C library and
-the runtime functions compiled code uses (`PaykanString_new`,
-`PaykanShared_new`, `Paykan_retain`, `Paykan_release`, ...), and read a
-`PaykanString`'s `data` and `len` directly.  See `samples/imports/14_native`.
+`paykan` does not build native code: you compile it however you like (any
+compiler, flags or language that produces C-ABI symbols) and pass the objects
+or archives with `--object`, a comma-separated list:
 
-A module with native code is always built from source: it is not written to
-the module cache, and `--emit-pkm` refuses it, because a `.pkm` file does not
-carry native code yet.
+```sh
+cc -std=c11 -fPIC -I<paykan include dir> -c text.c -o text.o
+paykan --object=text.o,more.o main.pkn          # run (JIT or C backend)
+paykan build --object=text.o main.pkn -o main   # an executable
+```
+
+Every backend links the objects; the llvm backend's `run` loads them into the
+JIT, so build them position-independent (`-fPIC`).  There, the C code may call
+the C library and the runtime functions compiled code uses
+(`PaykanString_new`, `PaykanShared_new`, `Paykan_retain`, `Paykan_release`,
+...); a built executable can call any runtime function.  A `PaykanString`'s
+`data` and `len` may be read directly.  See `samples/imports/14_native`.
 
 ---
 
