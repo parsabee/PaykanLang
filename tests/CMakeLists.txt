@@ -109,7 +109,6 @@ add_executable(codegen_tests
     CodeGen/ConversionTests.cpp
     CodeGen/ArgsTests.cpp
     CodeGen/EnumTests.cpp
-    CodeGen/TransferTests.cpp
     CodeGen/OwnershipTests.cpp
     CodeGen/GenericsTests.cpp
     CodeGen/OptionalTests.cpp

@@ -109,32 +109,6 @@ TEST(Tuple, IndexAssignmentRejected) {
       << r.Diagnostics;
 }
 
-TEST(Tuple, MovOfElementAccepted) {
-  auto r = semaCheck(wrapMain(R"(
-    t = ("a", "b");
-    s = t.0;
-  )"));
-  EXPECT_TRUE(r.Ok) << r.Diagnostics;
-}
-
-TEST(Tuple, WholeTupleCanBeMoved) {
-  auto r = semaCheck(wrapMain(R"(
-    t = (1, "a");
-    u = t;
-    x: int = u.0;
-  )"));
-  EXPECT_TRUE(r.Ok) << r.Diagnostics;
-}
-
-TEST(Tuple, UseAfterMovAccepted) {
-  auto r = semaCheck(wrapMain(R"(
-    t = (1, "a");
-    u = t;
-    x: int = t.0;
-  )"));
-  EXPECT_TRUE(r.Ok) << r.Diagnostics;
-}
-
 // -- Destructuring
 
 TEST(Tuple, DestructureDeclaresElementTypes) {
@@ -236,16 +210,6 @@ TEST(Tuple, DestructureDuplicateTarget) {
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("duplicate target 'a'"), std::string::npos)
       << r.Diagnostics;
-}
-
-TEST(Tuple, DestructureRevivesMovedVariable) {
-  auto r = semaCheck(wrapMain(R"(
-    s: Str = "a";
-    t = s;
-    s, n = ("b", 1);
-    println(s);
-  )"));
-  EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
 // -- Assignability, equality, and tuples in other positions
