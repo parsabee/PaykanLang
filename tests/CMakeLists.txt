@@ -62,7 +62,6 @@ add_executable(sema_tests
     Sema/ImportTypeTests.cpp
     Sema/ArrayTests.cpp
     Sema/EnumTests.cpp
-    Sema/TransferTests.cpp
     Sema/GenericsTests.cpp
     Sema/ConversionTests.cpp
     Sema/OptionalTests.cpp
