@@ -2,7 +2,7 @@
 // PaykanShared boxes.  Every path that touches one must be NULL-safe and
 // balanced: an optional local released at scope exit (present or None), a
 // None-initialised optional field, rebinding an optional between None and a
-// value, `mov` of an optional leaving a NULL slot, a `T?` passed into an `Obj`
+// value, an optional copied between locals, a `T?` passed into an `Obj`
 // slot (the None singleton is materialised), a `match` on an optional call
 // result (the subject box is released at match.end), and `T?[]` slots being
 // overwritten with None (releasing the old element) and destroyed with NULLs.
@@ -35,7 +35,7 @@ fn main() -> int {
   b = None;                    // releases Node(2)
   b = Node(3);
   a = b;                       // shares Node(3)
-  c = mov a;                   // a's slot becomes NULL
+  c = a;                       // shares Node(3) again
   show(c);                     // 3
   show(make(False));           // none — call temporary, no box to release
   show(make(True));            // 1 — call temporary released at match.end

@@ -1,7 +1,7 @@
 // Isolates: tuple values — a literal with a Str element, a tuple
 // returned from a function and destructured, a nested tuple, a tuple stored
 // in an array and in a class field, a call-rooted element read (`mk().0`),
-// element-wise `==`, and `mov` of a tuple.  Every tuple is ONE runtime block
+// element-wise `==`, and a tuple copied between locals.  Every tuple is ONE runtime block
 // (header + slots + kinds) plus its PaykanShared box; reference elements are
 // retained by the tuple and released by PaykanTuple_destroy.
 //
@@ -32,7 +32,7 @@ fn main() -> int {
   h: Holder = Holder(t);
   a, b = h.get();
   println(Str<bool>(t == (1, "a")));
-  m = mov t;
+  m = t;
   println(m.1 + s + str + b + arr[2].1);
   println(Str(n + a));
   return 0;

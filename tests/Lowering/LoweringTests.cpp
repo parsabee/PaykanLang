@@ -635,8 +635,8 @@ TEST(Lowering, AssigningAnObjectElementEvaluatesTheIndexOnce) {
 
 TEST(Lowering, SideEffectingReceiversAreEvaluatedOnce) {
   // The other ownership paths that take a value's box: a call-rooted field
-  // read, `mov` of a temporary, an element passed to a ref parameter and an
-  // element stored into an array slot or a field.
+  // read, a call result assigned to a variable, an element passed to a ref
+  // parameter and an element stored into an array slot or a field.
   auto l = lower(R"(
     class C { v: int; fn __init__(v: int) { self.v = v; } }
     class H { c: C; fn __init__(c: C) { self.c = c; } }
@@ -648,7 +648,7 @@ TEST(Lowering, SideEffectingReceiversAreEvaluatedOnce) {
       x: Obj = C(9);
       x = mkh().c;
       w: C = mkh().c;
-      x = mov mkh();
+      x = mkh();
       arr[idx()] = arr[idx()];
       n: int = take(arr[idx()]);
       h: H = H(C(3));
@@ -910,13 +910,13 @@ TEST(Lowering, MethodSymbolsCannotClashWithUserFunctions) {
 // #116: every value use of a string literal is a Str object built by
 // PaykanString_new (a tracked temporary), never the raw `@.strN` C string:
 // as a subscript or method receiver it is destroyed after the borrowing
-// call, and under `mov` it is boxed like any other temporary.
+// call, and bound to a variable it is boxed like any other temporary.
 TEST(Lowering, StringLiteralUsedAsAnObjectIsAStr) {
   auto l = lower(R"(
     fn main() -> int {
       c = "ab"[1];
       n = "abc".len();
-      v = mov "lit";
+      v = "lit";
       return n;
     }
   )");
@@ -929,7 +929,7 @@ TEST(Lowering, StringLiteralUsedAsAnObjectIsAStr) {
   ASSERT_NE(at, std::string::npos) << m;
   EXPECT_NE(m.find("vcall %str."), std::string::npos) << m; // .len()
   // The subscript's and the receiver's Strs are destroyed after their use;
-  // the moved one is boxed into `v` (released at scope exit).
+  // the bound one is boxed into `v` (released at scope exit).
   EXPECT_EQ(count(m, "call @$rt.PaykanString_destroy(%str."), 2u) << m;
   EXPECT_NE(m.find("= box %str."), std::string::npos) << m;
 }

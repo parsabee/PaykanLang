@@ -211,23 +211,24 @@ TEST(Leak, EarlyReturn) {
   g.expectNoLeaks("EarlyReturn");
 }
 
-// -- mov: ownership transfer must neither leak nor double-free
+// -- Ownership transfer between locals, parameters and returns: no leak, no
+// double free
 
-TEST(Leak, MovStringTransfer) {
+TEST(Leak, StringTransfer) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     fn main() -> int {
       s: Str = "Hello world";
-      t = mov s;
+      t = s;
       println(t);
       return 0;
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  g.expectNoLeaks("MovStringTransfer");
+  g.expectNoLeaks("StringTransfer");
 }
 
-TEST(Leak, MovClassObject) {
+TEST(Leak, ClassObjectTransfer) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class Box { v: Str;
@@ -235,21 +236,21 @@ TEST(Leak, MovClassObject) {
     }
     fn main() -> int {
       b: Box = Box("payload");
-      c = mov b;
+      c = b;
       println(c.v);
       return 0;
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  g.expectNoLeaks("MovClassObject");
+  g.expectNoLeaks("ClassObjectTransfer");
 }
 
-TEST(Leak, MovThenRevive) {
+TEST(Leak, TransferThenReassign) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     fn main() -> int {
       s: Str = "first";
-      t = mov s;
+      t = s;
       s = "second";
       println(t);
       println(s);
@@ -257,29 +258,29 @@ TEST(Leak, MovThenRevive) {
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  g.expectNoLeaks("MovThenRevive");
+  g.expectNoLeaks("TransferThenReassign");
 }
 
-TEST(Leak, MovConditional) {
+TEST(Leak, ConditionalTransfer) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     fn main() -> int {
       s: Str = "cond";
       if (True) {
-        t = mov s;
+        t = s;
         println(t);
       }
       return 0;
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  g.expectNoLeaks("MovConditional");
+  g.expectNoLeaks("ConditionalTransfer");
 }
 
-TEST(Leak, MovIntoReturn) {
+TEST(Leak, ParameterIntoReturn) {
   LeakGuard g;
   auto r = compileAndRun(R"(
-    fn passthrough(s: Str) -> Str { return mov s; }
+    fn passthrough(s: Str) -> Str { return s; }
     fn main() -> int {
       out: Str = passthrough("relayed");
       println(out);
@@ -287,11 +288,11 @@ TEST(Leak, MovIntoReturn) {
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  g.expectNoLeaks("MovIntoReturn");
+  g.expectNoLeaks("ParameterIntoReturn");
 }
 
 // Method call on a freshly-owned temporary receiver must not leak the receiver
-// (regression: the receiver teardown was missing; `mov` surfaced it).
+// (regression: the receiver teardown was missing).
 
 TEST(Leak, MethodCallOnCallResultReceiver) {
   LeakGuard g;
@@ -320,18 +321,18 @@ TEST(Leak, MethodCallOnConcatReceiver) {
   g.expectNoLeaks("MethodCallOnConcatReceiver");
 }
 
-TEST(Leak, MethodCallOnMovedReceiver) {
+TEST(Leak, MethodCallOnParenthesizedReceiver) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     fn main() -> int {
       s: Str = "receiver";
-      n: int = (mov s).len();
+      n: int = (s).len();
       println(Str<int>(n));
       return 0;
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  g.expectNoLeaks("MethodCallOnMovedReceiver");
+  g.expectNoLeaks("MethodCallOnParenthesizedReceiver");
 }
 
 TEST(Leak, MethodCallOnStringLiteralReceiver) {

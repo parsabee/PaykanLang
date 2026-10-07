@@ -6,7 +6,7 @@
 //            (`_` skips an element), element-wise `==` / `!=` (lowered to the
 //            runtime `equals`), and `toString` rendering `(1, a)`.
 // A tuple is a heap object under ARC like a class instance or an array: it is
-// retained when copied, released at scope exit, and transferred by `mov`.
+// retained when copied and released at scope exit.
 
 class Point {
   x: int;
@@ -74,8 +74,8 @@ fn main() -> int {
   println(Str<bool>(a != (2, "s")));        // True
   println(Str(label(pt) == label(pt))); // True  (same Point object)
 
-  // mov transfers the tuple; the source may be re-assigned afterwards.
-  m = mov a;
+  // A copy shares the tuple; re-assigning the source leaves the copy intact.
+  m = a;
   a = (0, "reset");
   println(m.1 + a.1);                     // sreset
 

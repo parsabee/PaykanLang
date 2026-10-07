@@ -91,7 +91,7 @@ TEST(Poison, EveryUseOfAPoisonedVariableIsSilent) {
       "u = [a, a]; println(u);",           // array element
       "s = Str(a); println(s);",           // inferred conversion
       "s = Str<int>(a); println(s);",      // explicit conversion
-      "m = mov a; println(m);",            // mov
+      "m = a; println(m);",                // copy
       "match a { _ { println(\"m\"); } }", // match subject
       "o: Obj = a; println(o);",           // typed declaration
       "e: Error = a; println(e);",         // not the user-visible `Error` class

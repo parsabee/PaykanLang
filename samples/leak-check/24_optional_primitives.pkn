@@ -2,7 +2,7 @@
 // `char?`, #66).  Every present value is a fresh Int / Float / Bool / Char
 // object in a PaykanShared box: boxing into a local, a parameter, a return
 // value, a field, an array slot and a tuple element; rebinding between a
-// value and None; a box shared by two variables; `mov`; a `match` on a call
+// value and None; a box shared by two variables; a copy into a new local; a `match` on a call
 // result (the subject box is released at the end of the match) whose arm
 // binding owns nothing; a `T?` with T = int inside a generic class; and an
 // optional primitive passed into an `Obj` slot.
@@ -68,7 +68,7 @@ fn main() -> int {
   s.set(2);
   println(s.v);
 
-  m = mov b;
+  m = b;
   i = 0;
   while (i < 3) { m = i; i = i + 1; }
   return 0;

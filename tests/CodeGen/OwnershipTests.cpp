@@ -10,7 +10,7 @@
 //   A2  match-arm bindings used with ownership-taking consumers
 //   A4  array-typed class fields stored as boxes, not raw pointers
 //   A5  push/pop and equality on receivers that are not bare identifiers
-//   B8  vtable-convention narrowing through `mov` on assignment
+//   B8  vtable-convention narrowing on assignment
 //
 // Each test asserts BOTH correct output/exit and zero live heap blocks — a
 // double free typically crashes, but a "fixed" path that leaks instead would
@@ -231,9 +231,9 @@ TEST(Ownership, MatchBindingMemberAssign) {
   g.expectNoLeaks("MatchBindingMemberAssign");
 }
 
-// `mov` of an unowned binding degenerates to a retain of the subject's box —
-// never a fresh box around the raw alias.
-TEST(Ownership, MatchBindingMov) {
+// Copying an unowned binding retains the subject's box — never a fresh box
+// around the raw alias.
+TEST(Ownership, MatchBindingCopied) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class A {
@@ -244,7 +244,7 @@ TEST(Ownership, MatchBindingMov) {
       o: Obj = A();
       match o {
         b: A {
-          c = mov b;
+          c = b;
           println(Str<int>(c.x));
         }
         _ { println("no"); }
@@ -255,7 +255,7 @@ TEST(Ownership, MatchBindingMov) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.ExitCode, 0);
   EXPECT_EQ(r.StdOut, "5\n");
-  g.expectNoLeaks("MatchBindingMov");
+  g.expectNoLeaks("MatchBindingCopied");
 }
 
 // Control: the recorded-backing fast path (call-result subject + explicit
@@ -486,12 +486,12 @@ TEST(Ownership, NestedMemberAccessUnwrapsBox) {
   g.expectNoLeaks("NestedMemberAccessUnwrapsBox");
 }
 
-// -- B8 — vtable-convention narrowing through `mov` on assignment
+// -- B8 — vtable-convention narrowing on assignment
 
-// `y = mov derived` on a base-typed variable must narrow the scope type to
+// `y = derived` on a base-typed variable must narrow the scope type to
 // the concrete class so later method calls dispatch with the derived
 // vtable convention (same as the implicit-declaration path).
-TEST(Ownership, MovNarrowsAssignedBaseVar) {
+TEST(Ownership, AssignNarrowsBaseVar) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class Animal {
@@ -505,7 +505,7 @@ TEST(Ownership, MovNarrowsAssignedBaseVar) {
     fn main() -> int {
       d: Dog = Dog();
       a: Animal = Animal();
-      a = mov d;
+      a = d;
       println(a.speak());
       return 0;
     }
@@ -513,7 +513,7 @@ TEST(Ownership, MovNarrowsAssignedBaseVar) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.ExitCode, 0);
   EXPECT_EQ(r.StdOut, "woof\n");
-  g.expectNoLeaks("MovNarrowsAssignedBaseVar");
+  g.expectNoLeaks("AssignNarrowsBaseVar");
 }
 
 // -- Unique-box invariant at the runtime level
