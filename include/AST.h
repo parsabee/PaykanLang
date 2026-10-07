@@ -91,7 +91,6 @@ public:
     NK_ArrayLiteralExpr,
     NK_SubscriptExpr,
     NK_EnumValueExpr,
-    NK_MovExpr,
     NK_TupleLiteralExpr,
     NK_TupleIndexExpr,
 
@@ -1406,28 +1405,6 @@ public:
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_SubscriptExpr;
   }
-};
-
-// Move expression:  mov <operand>
-//
-// Transfers ownership of the operand to the consuming context.  When the
-// operand is a local variable, that variable is considered "moved out" — Sema
-// forbids any later use of it, and the lowering hands the variable's owning
-// reference to the destination without an extra retain (and without a release
-// at scope exit).  When the operand is a temporary (any rvalue), `mov` is a
-// transparent pass-through: the temporary is already an owned value being
-// forwarded.  Only local variables and temporaries may be moved; moving out of
-// an aggregate slot (obj.field / arr[i]) is rejected by Sema.
-class MovExpr : public Expr {
-  Expr *Operand;
-
-public:
-  MovExpr(SourceLocation loc, Expr *operand)
-      : Expr(NK_MovExpr, loc), Operand(operand) {}
-
-  Expr *getOperand() const { return Operand; }
-
-  static bool classof(const ASTNode *N) { return N->getKind() == NK_MovExpr; }
 };
 
 // Tuple type: (T1, T2, ...)  (e.g. (int, Str), (int, (Str, bool))[])

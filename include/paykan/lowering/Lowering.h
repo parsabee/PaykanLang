@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 //
 // AST -> PIR lowering: the single home of Paykan's ownership semantics
-// (ARC placement, scope cleanup, `mov`, `match` dispatch, vtables).  Every
+// (ARC placement, scope cleanup, `match` dispatch, vtables).  Every
 // backend consumes the pir::Program this produces; none re-derives ownership.
 //
 // Standard C++ only.

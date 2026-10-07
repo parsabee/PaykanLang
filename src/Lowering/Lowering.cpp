@@ -321,8 +321,6 @@ ast::ClassType *ModuleLowering::resolveExprClassType(ast::Expr *expr) {
     resolved = se->getResolvedType();
   else if (auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(expr))
     resolved = ti->getResolvedType();
-  else if (auto *mv = ast::dyn_cast<ast::MovExpr>(expr))
-    resolved = mv->getResolvedType();
   else if (auto *id = ast::dyn_cast<ast::Identifier>(expr))
     resolved =
         CurrentScope ? CurrentScope->lookupASTType(id->getName()) : nullptr;
@@ -569,13 +567,6 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
   // A primitive boxed for an optional primitive slot: a fresh +1 box.
   if (isPrimitiveBoxing(expr))
     return true;
-  if (auto *mv = ast::dyn_cast<ast::MovExpr>(expr)) {
-    ast::Expr *op = mv->getOperand();
-    if (auto *id = ast::dyn_cast<ast::Identifier>(op))
-      if (CurrentScope && CurrentScope->isOwned(id->getName()))
-        return true;
-    return exprAlreadyShared(op);
-  }
   if (ast::isa<ast::ArrayLiteralExpr>(expr) ||
       ast::isa<ast::TupleLiteralExpr>(expr))
     return true;
@@ -608,13 +599,6 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
 bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
   if (isPrimitiveBoxing(expr))
     return true;
-  if (auto *mv = ast::dyn_cast<ast::MovExpr>(expr)) {
-    ast::Expr *op = mv->getOperand();
-    if (auto *id = ast::dyn_cast<ast::Identifier>(op))
-      if (CurrentScope && CurrentScope->isOwned(id->getName()))
-        return true;
-    return exprProducesFreshBox(op);
-  }
   if (auto *mae = ast::dyn_cast<ast::MemberAccessExpr>(expr))
     return mae->getResolvedType() && ast::isRefType(mae->getResolvedType()) &&
            exprProducesFreshBox(mae->getReceiver());
@@ -1110,9 +1094,6 @@ Val ModuleLowering::visitFuncDecl(ast::FuncDecl *node) {
 // -- Optionals
 
 bool ModuleLowering::isNoneForOptional(ast::Expr *expr) {
-  // `mov None` forwards the literal (Sema typed it through the `mov`).
-  if (auto *mv = ast::dyn_cast<ast::MovExpr>(expr))
-    expr = mv->getOperand();
   return ast::isa<ast::NoneLiteral>(expr) && expr->getResolvedType() &&
          ast::isa<ast::OptionalType>(expr->getResolvedType());
 }

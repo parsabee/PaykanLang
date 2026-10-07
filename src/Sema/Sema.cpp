@@ -258,19 +258,6 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
 }
 
 bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
-  // `mov` of a temporary forwards it unchanged, so a contextually typed
-  // operand -- `None`, an array or tuple literal -- takes the destination's
-  // type through it exactly as it does without the `mov` (#119).
-  if (auto *mv = ast::dyn_cast<ast::MovExpr>(src)) {
-    ast::Expr *op = mv->getOperand();
-    if (ast::isa<ast::NoneLiteral>(op) || ast::isa<ast::ArrayLiteralExpr>(op) ||
-        ast::isa<ast::TupleLiteralExpr>(op)) {
-      if (!checkAssignable(dst, op->getResolvedType(), op))
-        return false;
-      mv->setResolvedType(op->getResolvedType());
-      return true;
-    }
-  }
   // `None` into an optional slot: statically the literal is `Obj` (a design
   // decision — see docs/language/10-optionals.md), but in this position it
   // denotes the absent `T?` value.  Record that contextual type on the
@@ -333,24 +320,6 @@ ast::Type *Sema::adoptLiteralElements(ast::Type *dst, ast::Type *srcTy,
     return d;
   };
 
-  // `mov` of a temporary forwards it unchanged (see checkAssignable): the
-  // operand takes the slot's type, and the `mov` the operand's (`[mov None]`
-  // into `Str?[]`, #132).
-  auto adoptElement = [&](ast::Type *d, ast::Expr *e) -> ast::Type * {
-    auto *mv = ast::dyn_cast<ast::MovExpr>(e);
-    if (!mv)
-      return adoptOperand(d, e);
-    ast::Expr *op = mv->getOperand();
-    if (!ast::isa<ast::NoneLiteral>(op) &&
-        !ast::isa<ast::ArrayLiteralExpr>(op) &&
-        !ast::isa<ast::TupleLiteralExpr>(op))
-      return adoptOperand(d, e);
-    ast::Type *t = adoptOperand(d, op);
-    if (t)
-      mv->setResolvedType(t);
-    return t;
-  };
-
   if (auto *lit = ast::dyn_cast<ast::ArrayLiteralExpr>(src)) {
     auto *dstAT = ast::dyn_cast<ast::ArrayType>(ast::stripOptional(dst));
     if (!dstAT || lit->isEmpty())
@@ -361,7 +330,7 @@ ast::Type *Sema::adoptLiteralElements(ast::Type *dst, ast::Type *srcTy,
     bool changed = false;
     for (ast::Expr *e : lit->getElements()) {
       ast::Type *before = e->getResolvedType();
-      adopted.push_back(adoptElement(elemTy, e));
+      adopted.push_back(adoptOperand(elemTy, e));
       changed = changed || adopted.back() != before;
     }
     if (!changed)
@@ -386,7 +355,7 @@ ast::Type *Sema::adoptLiteralElements(ast::Type *dst, ast::Type *srcTy,
     bool changed = false;
     for (size_t i = 0; i < elems.size(); ++i) {
       ast::Type *t =
-          adoptElement(dstTT->getElementType(i), lit->getElements()[i]);
+          adoptOperand(dstTT->getElementType(i), lit->getElements()[i]);
       if (!t || t == elems[i])
         continue;
       elems[i] = t;
@@ -679,15 +648,6 @@ ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
     return nullptr;
   }
   return S.checkIdentLive(node->getName(), node->getLocation());
-}
-
-ast::Type *Sema::ExprChecker::visitMovExpr(ast::MovExpr *node) {
-  // `mov` is retired (#145): it no longer consumes anything and simply
-  // forwards its operand.
-  ast::Type *ty = visit(node->getOperand());
-  if (ty)
-    node->setResolvedType(ty);
-  return ty;
 }
 
 ast::Type *Sema::ExprChecker::visitEnumValueExpr(ast::EnumValueExpr *node) {

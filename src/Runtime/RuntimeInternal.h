@@ -56,7 +56,7 @@ PAYKAN_NORETURN void Paykan_runtime_panic(const char *fmt, ...)
 //
 // Every `*_equals` has the same calling convention: `other` arrives as a
 // PaykanShared box (the convention for class-typed arguments) that the call
-// CONSUMES, and may be NULL (the hole a `mov` leaves behind), which is equal
+// CONSUMES, and may be NULL (an absent optional is a null box), which is equal
 // to nothing.  So an implementation is
 //
 //   int64_t PaykanFoo_equals(PaykanObject *self, PaykanShared *other) {
