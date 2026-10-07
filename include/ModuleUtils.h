@@ -17,6 +17,14 @@
 namespace paykan {
 namespace module_utils {
 
+/// The C file holding the bodies of a module's `native fn`s (#198): the
+/// module's source with the extension `.c` (`io.pkn` -> `io.c`).
+inline std::filesystem::path nativeSourceFor(const std::filesystem::path &pkn) {
+  std::filesystem::path c = pkn;
+  c.replace_extension(".c");
+  return c;
+}
+
 /// Append @p component to @p base the way a module path is joined: an empty
 /// base yields the bare component (so an empty project root means "the
 /// current directory"), and the component is always treated as relative.

@@ -129,7 +129,20 @@ convention:
 | `Str?`, `Obj?` result | `PaykanShared *` | owned (+1); `NULL` is `None` |
 
 A native function cannot be generic, cannot be a method, and cannot be `main`.
-Building and linking the C file next to a module is a separate step (#198).
+
+The C functions of a module are in the C file next to it, with the same stem:
+`text.pkn` declares them and `text.c` defines them.  A module that declares a
+`native fn` without that file is an error.  `paykan` compiles the file with
+the system C compiler (`$CC`, else `cc`) as C11 against `Runtime.h` and links
+it into the program, on every backend (the llvm backend's `run` loads it into
+the JIT, so it needs a C compiler too).  The C code may call the C library and
+the runtime functions compiled code uses (`PaykanString_new`,
+`PaykanShared_new`, `Paykan_retain`, `Paykan_release`, ...), and read a
+`PaykanString`'s `data` and `len` directly.  See `samples/imports/14_native`.
+
+A module with native code is always built from source: it is not written to
+the module cache, and `--emit-pkm` refuses it, because a `.pkm` file does not
+carry native code yet.
 
 ---
 

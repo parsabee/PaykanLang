@@ -27,7 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `char`, `Str` and `Obj` cross by the runtime builtins' convention (`Str?` and
   `Obj?` as a result).  `native` is a reserved word.  In PIR the C function is
   a module-less `extern fn @$c.<symbol>`; both backends declare it from its
-  signature.  Compiling and linking the C sources is not part of this change.
+  signature.  The C functions are in the module's sibling `.c` file
+  (`text.pkn` -> `text.c`), which `paykan` compiles against `Runtime.h` and
+  links on both backends (the llvm JIT loads the object); a module with native
+  code is not cached and cannot be written with `--emit-pkm` yet.  Sample:
+  `samples/imports/14_native`.
 
 ### Removed
 

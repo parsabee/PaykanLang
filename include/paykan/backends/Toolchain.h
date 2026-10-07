@@ -79,6 +79,15 @@ struct TempDir {
   TempDir &operator=(const TempDir &) = delete;
 };
 
+/// Compile the C file @p source -- a module's native code (#198), written
+/// against Runtime.h -- into the object @p object with tc.CC, `-std=c11`,
+/// tc.ExtraFlags and @p extraFlags (`-fPIC` for the JIT).  @p tc must have
+/// been resolved (resolveToolchain).
+bool compileNativeSource(const std::string &source, const std::string &object,
+                         const Toolchain &tc,
+                         const std::vector<std::string> &extraFlags,
+                         std::ostream &errs);
+
 /// Link @p objects with tc.ExtraFlags against the runtime (and libm) into
 /// the executable @p outputPath, with tc.CC as the linker driver.  @p tc
 /// must have been resolved (resolveToolchain).

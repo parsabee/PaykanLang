@@ -1,0 +1,10 @@
+// text — string helpers whose bodies are C (text.c, next to this file).
+// A `native fn` names the C function; the compiler builds text.c with the
+// program and links it (#198).
+
+native fn upper(s: Str) -> Str = "sample_text_upper";
+native fn count(s: Str, c: char) -> int = "sample_text_count";
+native fn find(s: Str, needle: Str) -> Str? = "sample_text_find";
+
+// Ordinary Paykan code can wrap native functions like any others.
+fn shout(s: Str) -> Str { return upper(s) + "!"; }

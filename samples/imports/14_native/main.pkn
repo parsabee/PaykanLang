@@ -1,0 +1,27 @@
+// 14_native — calling C from a module with `native fn` (#198).
+//
+// text.pkn declares functions whose bodies are in text.c; `paykan` compiles
+// that file and links it on every backend.  Callers see ordinary functions.
+
+import text;
+
+fn show(r: Str?) {
+  match r {
+    s: Str { println("found: " + s); }
+    None { println("not found"); }
+  }
+}
+
+fn main() -> int {
+  println(text::upper("hello, native"));
+  println(text::shout("loud"));
+  println(Str<int>(text::count("banana", 'a')));
+  show(text::find("needle in a haystack", "in a"));
+  show(text::find("haystack", "needle"));
+  return 0;
+}
+// expect-stdout: HELLO, NATIVE
+// expect-stdout: LOUD!
+// expect-stdout: 3
+// expect-stdout: found: in a haystack
+// expect-stdout: not found

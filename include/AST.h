@@ -1167,6 +1167,8 @@ private:
   std::vector<EnumDecl *> EnumDecls;
   std::vector<ClassDecl *> GenericClassDecls;
   std::vector<FuncDecl *> GenericFuncDecls;
+  // The file this unit was parsed from (ParserDriver), "" when unknown.
+  std::string SourcePath;
 
 public:
   TranslationUnit(SourceLocation loc, std::vector<ImportDecl *> imports,
@@ -1190,6 +1192,17 @@ public:
   }
   const std::vector<FuncDecl *> &getGenericFuncDecls() const {
     return GenericFuncDecls;
+  }
+
+  const std::string &getSourcePath() const { return SourcePath; }
+  void setSourcePath(std::string path) { SourcePath = std::move(path); }
+
+  /// True when the unit declares a `native fn` (#198).
+  bool hasNativeFunctions() const {
+    for (const FuncDecl *fn : FuncDecls)
+      if (fn->isNative())
+        return true;
+    return false;
   }
 
   /// Append an instantiated function (Sema).

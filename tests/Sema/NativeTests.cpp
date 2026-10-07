@@ -5,6 +5,9 @@
 #include "TestUtils.h"
 #include <gtest/gtest.h>
 
+#include <fstream>
+#include <sstream>
+
 using namespace paykan::test;
 
 TEST(Native, BoundaryTypesAreAccepted) {
@@ -58,4 +61,25 @@ TEST(Native, MainCannotBeNative) {
   EXPECT_NE(r.Diagnostics.find("'main' cannot be a native function"),
             std::string::npos)
       << r.Diagnostics;
+}
+
+// The bodies of a module's native functions are its sibling C file; without
+// it the module is an error, at its first native function.
+TEST(Native, TheCFileMustExist) {
+  auto path = paykan::test::tempDir() / "native_without_c.pkn";
+  std::ofstream(path) << "fn helper() -> int { return 1; }\n"
+                         "native fn put(s: Str) = \"pk_put\";\n"
+                         "fn main() -> int { return 0; }\n";
+  paykan::parser::ParserDriver drv(testFrontend());
+  ASSERT_EQ(drv.parseFile(path.string()), 0);
+  std::ostringstream os;
+  paykan::sema::DiagEngine diag(os);
+  diag.setSourceInfo(drv.getCurrentFile(), &drv.getSourceLines());
+  paykan::sema::Sema sema(drv.getASTContext(), diag, "", drv.getFrontendName());
+  EXPECT_FALSE(sema.run(drv.getRoot()).Ok);
+  EXPECT_NE(os.str().find(":2:1: error: native function 'put' needs its C "
+                          "source 'native_without_c.c' next to this file"),
+            std::string::npos)
+      << os.str();
+  std::filesystem::remove(path);
 }

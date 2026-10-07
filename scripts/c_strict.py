@@ -122,11 +122,15 @@ def check_sample(args, sample, idx, runtimes, wrappers, outdir):
         return [("emit-c", [emitted.stderr.strip()])]
     c_file = Path(outdir) / f"s{idx}.c"
     c_file.write_text(emitted.stdout)
+    # A sample's modules' native C (#198) sits next to them and is held to
+    # the same flags.
+    natives = [str(c) for c in sorted(sample.parent.glob("*.c"))
+               if sample.parent.parent.name == "imports"]
     for ri, ((cc, opt), objs) in enumerate(runtimes.items()):
         label = f"emit-c {cc} {opt}"
         exe = Path(outdir) / f"s{idx}-rt{ri}"
         p = tool([cc, *STRICT_FLAGS, *EXTRA, opt, "-I", str(RUNTIME),
-                  str(c_file), *objs, "-lm", "-o", str(exe)])
+                  str(c_file), *natives, *objs, "-lm", "-o", str(exe)])
         if p.returncode != 0:
             results.append((label, ["compile failed:\n" + p.stderr]))
             continue

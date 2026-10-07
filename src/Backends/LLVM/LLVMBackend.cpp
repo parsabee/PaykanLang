@@ -85,8 +85,32 @@ public:
       Paykan_heap_set_tracking(1);
       Paykan_heap_reset();
     }
+    // The modules' native C (#198), compiled position-independent for the
+    // JIT with the system C compiler; the temporary directory outlives the
+    // run.
+    std::unique_ptr<toolchain::TempDir> tmp;
+    toolchain::Toolchain tc;
+    std::vector<std::string> natives;
+    for (size_t mi = 0; mi < in.Program->Modules.size(); ++mi) {
+      const std::string &src = in.Program->Modules[mi].NativeSource;
+      if (src.empty())
+        continue;
+      std::ostringstream errs;
+      if (!tmp) {
+        tmp = std::make_unique<toolchain::TempDir>();
+        if (tmp->Path.empty())
+          return Status::error("cannot create a temporary directory");
+        if (!toolchain::resolveToolchain(tc, errs))
+          return Status::error(errs.str());
+      }
+      natives.push_back(tmp->Path + "/native" + std::to_string(mi) + ".o");
+      if (!toolchain::compileNativeSource(src, natives.back(), tc, {"-fPIC"},
+                                          errs))
+        return Status::error(errs.str());
+    }
     std::vector<std::string> progArgs(args.begin(), args.end());
-    auto result = jit::runModule(std::move(*module), std::move(ctx), progArgs);
+    auto result =
+        jit::runModule(std::move(*module), std::move(ctx), progArgs, natives);
     if (opts.TrackHeap)
       Paykan_heap_dump();
     if (!result)
@@ -160,7 +184,17 @@ private:
     std::string object = tmp.Path + "/program.o";
     if (Status s = emitObject(in, ctx, object); !s)
       return s;
-    if (!toolchain::linkExecutable({object}, output, tc, errs))
+    std::vector<std::string> objects = {object};
+    // The modules' native C (#198).
+    for (size_t mi = 0; mi < in.Program->Modules.size(); ++mi) {
+      const std::string &src = in.Program->Modules[mi].NativeSource;
+      if (src.empty())
+        continue;
+      objects.push_back(tmp.Path + "/native" + std::to_string(mi) + ".o");
+      if (!toolchain::compileNativeSource(src, objects.back(), tc, {}, errs))
+        return Status::error(errs.str());
+    }
+    if (!toolchain::linkExecutable(objects, output, tc, errs))
       return Status::error(errs.str());
     return Status::ok();
   }

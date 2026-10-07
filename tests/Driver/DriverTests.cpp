@@ -1064,8 +1064,11 @@ TEST(Driver, EmitCPrototypesNativeFunctions) {
   auto src = writeTmp("native fn put(fd: int, s: Str) -> int = \"pk_put\";"
                       "native fn get() -> Str? = \"pk_get\";"
                       "fn main() -> int { s = get(); return put(1, \"x\"); }");
+  auto c = std::filesystem::path(src).replace_extension(".c");
+  std::ofstream(c).flush(); // the C file must exist; --emit-c does not build it
   auto [rc, out] = run(std::string(kPaykan) + " --emit-c " + src + " 2>&1");
   std::filesystem::remove(src);
+  std::filesystem::remove(c);
   EXPECT_EQ(rc, 0) << out;
   EXPECT_NE(out.find("int64_t pk_put(int64_t, PaykanObject *);"),
             std::string::npos)

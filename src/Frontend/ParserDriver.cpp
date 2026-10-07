@@ -79,6 +79,8 @@ int ParserDriver::parseFile(const std::string &filename) {
       p.FE->parse(filename, p.Source, im.Ctx, diag, im.Opts);
   im.Root = r.Root;
   im.ErrorCount = r.ErrorCount;
+  if (im.Root)
+    im.Root->setSourcePath(filename);
   return (im.Root == nullptr || im.ErrorCount > 0) ? 1 : 0;
 }
 

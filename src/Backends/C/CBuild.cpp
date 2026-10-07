@@ -355,6 +355,18 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
     objects.push_back(oPath);
   }
 
+  // The modules' native C (#198), linked with the generated C.  Not cached.
+  for (size_t mi = 0; mi < program.Modules.size(); ++mi) {
+    if (program.Modules[mi].NativeSource.empty())
+      continue;
+    std::string oPath =
+        tmp.Path + "/native" + std::to_string(mi) + tcnames::kObjExt;
+    if (!toolchain::compileNativeSource(program.Modules[mi].NativeSource, oPath,
+                                        tc, {}, errs))
+      return false;
+    objects.push_back(oPath);
+  }
+
   return toolchain::linkExecutable(objects, outputPath, tc, errs);
 }
 
