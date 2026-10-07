@@ -22,14 +22,14 @@ enum Direction {
   North,
   East,
   South,
-  West,        // trailing comma allowed
+  West,                                      // trailing comma allowed
 }
 
 enum Suit { Hearts, Diamonds, Clubs, Spades }
 
 enum Light { Red, Yellow, Green }
 
-enum Signal { Only }   // single-variant enum
+enum Signal { Only }                         // single-variant enum
 
 // --- Functions over enums --------------------------------------------------
 
@@ -90,11 +90,11 @@ fn signalName(s: Signal) -> Str {
 
 class Player {
   facing: Direction;
-  fn __init__(d: Direction) { self.facing = d; }
+  fn __init__(d: Direction)                  { self.facing = d; }
   // Methods may call module-level free functions (defined anywhere in the file)
   // and pass/return enum values through them.
-  fn turnAround() { self.facing = opposite(self.facing); }
-  fn report() -> Str { return dirName(self.facing); }
+  fn turnAround()                            { self.facing = opposite(self.facing); }
+  fn report() -> Str                         { return dirName(self.facing); }
 }
 
 fn main() -> int {
@@ -109,7 +109,7 @@ fn main() -> int {
   probe: Direction = Direction::South;       // index 2
   if (probe == Direction::North) { println("0"); }
   if (probe == Direction::East)  { println("1"); }
-  if (probe == Direction::South) { println("2"); } // prints
+  if (probe == Direction::South) { println("2"); }  // prints
   if (probe == Direction::West)  { println("3"); }
 
   // 3. Equality / inequality (same enum only).

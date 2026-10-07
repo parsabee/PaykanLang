@@ -18,7 +18,7 @@ fn main() -> int {
     sum = sum + n;
     n = n + 1;
   }
-  println("sum 1..100=" + Str(sum));   // 5050
+  println("sum 1..100=" + Str(sum));         // 5050
 
   println("=== while never executes ===");
   while (False) {
@@ -32,7 +32,7 @@ fn main() -> int {
     if (count == 5) { break; }
     count = count + 1;
   }
-  println("count=" + Str<int>(count));      // 5
+  println("count=" + Str<int>(count));       // 5
 
   println("=== continue skips odd ===");
   evens: int = 0;
@@ -99,7 +99,7 @@ fn main() -> int {
   }
   // x=0..9: skip multiples of 3 (0,3,6,9) and multiples of 4 (0,4,8)
   // skipped: 0,3,4,6,8,9 => 4 remaining: 1,2,5,7
-  println("non-3/4 count=" + Str(out_count));   // 4
+  println("non-3/4 count=" + Str(out_count));  // 4
 
   return 0;
 }

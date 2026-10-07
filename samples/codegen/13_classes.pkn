@@ -14,21 +14,11 @@
 class Counter {
   count: int;
 
-  fn __init__(start: int) {
-    self.count = start;
-  }
-  fn increment() {
-    self.count = self.count + 1;
-  }
-  fn decrement() {
-    self.count = self.count - 1;
-  }
-  fn reset() {
-    self.count = 0;
-  }
-  fn value() -> int {
-    return self.count;
-  }
+  fn __init__(start: int)                    { self.count = start; }
+  fn increment()                             { self.count = self.count + 1; }
+  fn decrement()                             { self.count = self.count - 1; }
+  fn reset()                                 { self.count = 0; }
+  fn value() -> int                          { return self.count; }
 }
 
 // ---- Class with a Str field -----------------------------------------------
@@ -36,62 +26,51 @@ class Counter {
 class Greeter {
   name: Str;
 
-  fn __init__(n: Str) {
-    self.name = n;
-  }
-  fn greet() -> Str {
-    return "Hello, " + self.name + "!";
-  }
-  fn rename(n: Str) {
-    self.name = n;
-  }
+  fn __init__(n: Str)                        { self.name = n; }
+  fn greet() -> Str                          { return "Hello, " + self.name + "!"; }
+  fn rename(n: Str)                          { self.name = n; }
 }
 
 // ---- Inheritance: Shape / Rectangle / Square ------------------------------
 
 class Shape {
-  fn area() -> int { return 0; }
-  fn perimeter() -> int { return 0; }
-  fn describe() -> Str { return "shape"; }
+  fn area() -> int                           { return 0; }
+  fn perimeter() -> int                      { return 0; }
+  fn describe() -> Str                       { return "shape"; }
 }
 
 class Rectangle : Shape {
   w: int;
   h: int;
 
-  fn __init__(width: int, height: int) {
-    self.w = width;
-    self.h = height;
-  }
-  fn area() -> int { return self.w * self.h; }
-  fn perimeter() -> int { return 2 * (self.w + self.h); }
-  fn describe() -> Str { return "rectangle"; }
+  fn __init__(width: int, height: int)       { self.w = width; self.h = height; }
+  fn area() -> int                           { return self.w * self.h; }
+  fn perimeter() -> int                      { return 2 * (self.w + self.h); }
+  fn describe() -> Str                       { return "rectangle"; }
 }
 
 class Square : Rectangle {
-  fn __init__(side: int) {
-    __super__(side, side);
-  }
-  fn describe() -> Str { return "square"; }
+  fn __init__(side: int)                     { __super__(side, side); }
+  fn describe() -> Str                       { return "square"; }
 }
 
 // ---- Inheritance: Animal / Dog / Cat  (inherited method, overrides) -------
 
 class Animal {
-  fn __init__() {}
-  fn sound() -> Str { return "..."; }
-  fn isAnimal() -> int { return 1; }
-  fn describe() -> Str { return "animal: " + self.sound(); }
+  fn __init__()                              {}
+  fn sound() -> Str                          { return "..."; }
+  fn isAnimal() -> int                       { return 1; }
+  fn describe() -> Str                       { return "animal: " + self.sound(); }
 }
 
 class Dog : Animal {
-  fn __init__() { __super__(); }
-  fn sound() -> Str { return "woof"; }
+  fn __init__()                              { __super__(); }
+  fn sound() -> Str                          { return "woof"; }
 }
 
 class Cat : Animal {
-  fn __init__() { __super__(); }
-  fn sound() -> Str { return "meow"; }
+  fn __init__()                              { __super__(); }
+  fn sound() -> Str                          { return "meow"; }
 }
 
 // ---- Accumulator using a while loop inside a method ----------------------
@@ -99,7 +78,7 @@ class Cat : Animal {
 class Summer {
   total: int;
 
-  fn __init__() { self.total = 0; }
+  fn __init__()                              { self.total = 0; }
 
   fn sumTo(n: int) {
     i: int = 1;
@@ -108,7 +87,7 @@ class Summer {
       i = i + 1;
     }
   }
-  fn reset() { self.total = 0; }
+  fn reset()                                 { self.total = 0; }
 }
 
 // ---- Sign detector using if/else inside a method -------------------------
@@ -131,63 +110,45 @@ class Person {
   name: Str;
   age: int;
 
-  fn __init__(n: Str, a: int) {
-    self.name = n;
-    self.age = a;
-  }
+  fn __init__(n: Str, a: int)                { self.name = n; self.age = a; }
   fn toString() -> Str {
     return self.name + " (age " + Str<int>(self.age) + ")";
   }
-  fn birthday() {
-    self.age = self.age + 1;
-  }
+  fn birthday()                              { self.age = self.age + 1; }
 }
 
 // ---- Three-level inheritance: Vehicle / Car / SportsCar -------------------
 
 class Vehicle {
   speed: int;
-  fn __init__(s: int) { self.speed = s; }
-  fn kind() -> Str { return "vehicle"; }
-  fn topSpeed() -> int { return self.speed; }
+  fn __init__(s: int)                        { self.speed = s; }
+  fn kind() -> Str                           { return "vehicle"; }
+  fn topSpeed() -> int                       { return self.speed; }
 }
 
 class Car : Vehicle {
-  fn __init__(s: int) { __super__(s); }
-  fn kind() -> Str { return "car"; }
+  fn __init__(s: int)                        { __super__(s); }
+  fn kind() -> Str                           { return "car"; }
 }
 
 class SportsCar : Car {
   boost: int;
-  fn __init__(s: int, b: int) {
-    __super__(s);
-    self.boost = b;
-  }
-  fn kind() -> Str { return "sports car"; }
-  fn topSpeed() -> int { return self.speed + self.boost; }
+  fn __init__(s: int, b: int)                { __super__(s); self.boost = b; }
+  fn kind() -> Str                           { return "sports car"; }
+  fn topSpeed() -> int                       { return self.speed + self.boost; }
 }
 
 // ---- Functions that take / return class instances -------------------------
 
-fn printCounterValue(c: Counter) {
-  println(Str(c.value()));
-}
+fn printCounterValue(c: Counter)             { println(Str(c.value())); }
 
-fn makeCounter(start: int) -> Counter {
-  return Counter(start);
-}
+fn makeCounter(start: int) -> Counter        { return Counter(start); }
 
-fn sumAreas(r: Rectangle, s: Square) -> int {
-  return r.area() + s.area();
-}
+fn sumAreas(r: Rectangle, s: Square) -> int  { return r.area() + s.area(); }
 
-fn describePerson(p: Person) {
-  println(p.toString());
-}
+fn describePerson(p: Person)                 { println(p.toString()); }
 
-fn makeAdult(n: Str) -> Person {
-  return Person(n, 18);
-}
+fn makeAdult(n: Str) -> Person               { return Person(n, 18); }
 
 // ===========================================================================
 // main
@@ -201,96 +162,96 @@ fn main() -> int {
   c.increment();
   c.increment();
   c.increment();
-  println(Str<int>(c.value()));    // 3
+  println(Str<int>(c.value()));              // 3
   c.decrement();
-  println(Str(c.value()));    // 2
+  println(Str(c.value()));                   // 2
   c.reset();
-  println(Str<int>(c.value()));    // 0
+  println(Str<int>(c.value()));              // 0
 
   // --- Counter via helper functions ---
   println("=== Counter via helpers ===");
   c2: Counter = makeCounter(10);
-  printCounterValue(c2);        // 10
+  printCounterValue(c2);                     // 10
   c2.increment();
-  printCounterValue(c2);        // 11
+  printCounterValue(c2);                     // 11
 
   // --- Greeter with field mutation ---
   println("=== Greeter ===");
   g: Greeter = Greeter("World");
-  println(g.greet());               // Hello, World!
+  println(g.greet());                        // Hello, World!
   g.rename("PaykanLang");
-  println(g.greet());               // Hello, PaykanLang!
+  println(g.greet());                        // Hello, PaykanLang!
 
   // --- Rectangle ---
   println("=== Rectangle ===");
   r: Rectangle = Rectangle(4, 5);
-  println(Str(r.area()));     // 20
-  println(Str<int>(r.perimeter())); // 18
-  println(r.describe());            // rectangle
+  println(Str(r.area()));                    // 20
+  println(Str<int>(r.perimeter()));          // 18
+  println(r.describe());                     // rectangle
 
   // --- Square (3-level inheritance) ---
   println("=== Square ===");
   sq: Square = Square(6);
-  println(Str(sq.area()));    // 36
-  println(Str<int>(sq.perimeter())); // 24
-  println(sq.describe());           // square
+  println(Str(sq.area()));                   // 36
+  println(Str<int>(sq.perimeter()));         // 24
+  println(sq.describe());                    // square
 
   // --- sumAreas ---
   println("=== sumAreas ===");
   r2 = Rectangle(3, 7);
   sq2 = Square(4);
-  println(Str(sumAreas(r2, sq2)));  // 21 + 16 = 37
+  println(Str(sumAreas(r2, sq2)));           // 21 + 16 = 37
 
   // --- Polymorphism: Animal base variable holds Dog / Cat subclass ----------
   println("=== Polymorphism via base type ===");
   a: Animal = Dog();
-  println(a.sound());               // woof
+  println(a.sound());                        // woof
   a = Cat();
-  println(a.sound());               // meow
+  println(a.sound());                        // meow
 
   // --- Inherited method calls through base variable ---
   println("=== Animal describe (inherited + override) ===");
   d: Animal = Dog();
-  println(d.describe());            // animal: woof
+  println(d.describe());                     // animal: woof
   cat: Animal = Cat();
-  println(cat.describe());          // animal: meow
+  println(cat.describe());                   // animal: meow
 
   // --- Person (mixed fields, method, Str return) ---
   println("=== Person ===");
   p: Person = Person("Alice", 29);
-  println(p.toString());            // Alice (age 29)
+  println(p.toString());                     // Alice (age 29)
   p.birthday();
-  println(p.toString());            // Alice (age 30)
-  describePerson(p);            // Alice (age 30)
+  println(p.toString());                     // Alice (age 30)
+  describePerson(p);                         // Alice (age 30)
 
   adult = makeAdult("Bob");
-  println(adult.toString());        // Bob (age 18)
+  println(adult.toString());                 // Bob (age 18)
 
   // --- Vehicle hierarchy ---
   println("=== Vehicle hierarchy ===");
   v: Vehicle = Car(120);
-  println(v.kind());                // car
-  println(Str<int>(v.topSpeed())); // 120
+  println(v.kind());                         // car
+  println(Str<int>(v.topSpeed()));           // 120
 
   sc = SportsCar(180, 40);
-  println(sc.kind());               // sports car
-  println(Str(sc.topSpeed())); // 220
+  println(sc.kind());                        // sports car
+  println(Str(sc.topSpeed()));               // 220
 
   // --- Summer (loop inside method) ---
   println("=== Summer ===");
   sm = Summer();
   sm.sumTo(10);
-  println(Str<int>(sm.total));     // 55
+  println(Str<int>(sm.total));               // 55
   sm.reset();
   sm.sumTo(4);
-  println(Str(sm.total));     // 10
+  println(Str(sm.total));                    // 10
 
   // --- Sign (if/else inside method) ---
   println("=== Sign ===");
   sg = Sign();
-  println(sg.of(7));                // positive
-  println(sg.of(-3));               // negative
-  println(sg.of(0));                // zero
+  println(sg.of(7));                         // positive
+  println(sg.of(-3));                        // negative
+  println(sg.of(0));                         // zero
 
   return 0;
 }

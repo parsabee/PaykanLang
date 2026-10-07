@@ -4,26 +4,26 @@
 // and inferred function type arguments.
 class Box<T> {
   v: T;
-  fn __init__(v: T) { self.v = v; }
-  fn get() -> T { return self.v; }
+  fn __init__(v: T)                          { self.v = v; }
+  fn get() -> T                              { return self.v; }
 }
 
 class Pair<K, V> {
   k: K;
   v: V;
-  fn __init__(k: K, v: V) { self.k = k; self.v = v; }
-  fn key() -> K { return self.k; }
+  fn __init__(k: K, v: V)                    { self.k = k; self.v = v; }
+  fn key() -> K                              { return self.k; }
 }
 
 class Holder {
   b: Box<int>;
   ps: Pair<Str, int>[];
-  fn __init__() { self.b = Box<int>(1); self.ps = []; }
-  fn get() -> Box<int> { return self.b; }
+  fn __init__()                              { self.b = Box<int>(1); self.ps = []; }
+  fn get() -> Box<int>                       { return self.b; }
 }
 
-fn first<T>(xs: T[]) -> T { return xs[0]; }
-fn unbox<T>(b: Box<T>) -> T { return b.get(); }
+fn first<T>(xs: T[]) -> T                    { return xs[0]; }
+fn unbox<T>(b: Box<T>) -> T                  { return b.get(); }
 
 fn describe(o: Obj) -> Str {
   match o {

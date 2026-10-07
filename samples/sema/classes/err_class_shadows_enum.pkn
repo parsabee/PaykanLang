@@ -1,7 +1,5 @@
 // ERROR: classes and enums share the top-level type namespace
 enum Color { Red, Green }
-class Color {}  // sema error: class 'Color' conflicts with an enum of the same name
+class Color {}                               // sema error: class 'Color' conflicts with an enum of the same name
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

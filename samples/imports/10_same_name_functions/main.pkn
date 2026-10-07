@@ -11,8 +11,8 @@
 import shapes::circle;
 import text::fmt as f;
 
-fn name() -> Str { return "main"; }
-fn describe(n: int) -> Str { return name() + "[" + Str<int>(n) + "]"; }
+fn name() -> Str                             { return "main"; }
+fn describe(n: int) -> Str                   { return name() + "[" + Str<int>(n) + "]"; }
 
 fn main() -> int {
   c = circle::make(3);

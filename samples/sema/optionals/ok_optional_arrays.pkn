@@ -2,7 +2,7 @@
 // optional arrays (`int[]?`).
 class Node {
   v: int;
-  fn __init__(x: int) { self.v = x; }
+  fn __init__(x: int)                        { self.v = x; }
 }
 
 fn main() -> int {
@@ -20,7 +20,7 @@ fn main() -> int {
 
   ys: int[]? = None;
   ys = [1, 2];
-  zs: Str[]? = [];             // the empty literal takes the wrapped type
+  zs: Str[]? = [];                           // the empty literal takes the wrapped type
   match ys {
     a: int[] { a.push(3); println(Str<int>(a.len())); }
     None     { println("none"); }

@@ -5,7 +5,7 @@
 import math::arith;
 
 fn main() -> int {
-  a: int = arith::mul(6, 7);         // short qualifier
-  b: int = math::arith::div(42, 2);  // full qualifier
-  return a - b;  // 42 - 21 = 21
+  a: int = arith::mul(6, 7);                 // short qualifier
+  b: int = math::arith::div(42, 2);          // full qualifier
+  return a - b;                              // 42 - 21 = 21
 }

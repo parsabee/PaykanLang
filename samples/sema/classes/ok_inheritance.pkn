@@ -2,32 +2,19 @@
 class Animal {
   name: Str;
 
-  fn __init__(n: Str) {
-    self.name = n;
-  }
+  fn __init__(n: Str)                        { self.name = n; }
 
-  fn getName() -> Str {
-    return self.name;
-  }
+  fn getName() -> Str                        { return self.name; }
 }
 
 class Dog : Animal {
   breed: Str;
 
-  fn __init__(n: Str, b: Str) {
-    __super__(n);
-    self.breed = b;
-  }
+  fn __init__(n: Str, b: Str)                { __super__(n); self.breed = b; }
 
-  fn getBreed() -> Str {
-    return self.breed;
-  }
+  fn getBreed() -> Str                       { return self.breed; }
 
-  fn describe() -> Str {
-    return self.name;
-  }
+  fn describe() -> Str                       { return self.name; }
 }
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

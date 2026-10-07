@@ -6,9 +6,7 @@ class Bad {
     self.x = a;
     // missing: self.y = ...
   }
-  fn toString() -> Str { return Str<int>(self.x) + "," + Str<int>(self.y); }
+  fn toString() -> Str                       { return Str<int>(self.x) + "," + Str<int>(self.y); }
 }
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

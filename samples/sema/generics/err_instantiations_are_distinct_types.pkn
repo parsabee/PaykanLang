@@ -1,10 +1,7 @@
 // ERROR: Box<int> and Box<Str> are unrelated classes.
 class Box<T> {
   v: T;
-  fn __init__(v: T) { self.v = v; }
+  fn __init__(v: T)                          { self.v = v; }
 }
 
-fn main() -> int {
-  a: Box<int> = Box<Str>("x");
-  return 0;
-}
+fn main() -> int                             { a: Box<int> = Box<Str>("x"); return 0; }

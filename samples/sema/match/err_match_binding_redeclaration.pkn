@@ -5,7 +5,7 @@ fn main() -> int {
   x: Obj = Dog();
   match x {
     d: Dog {
-      d: int = 1;   // sema error: redeclaration of 'd'
+      d: int = 1;                            // sema error: redeclaration of 'd'
     }
   }
   return 0;

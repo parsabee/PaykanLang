@@ -8,7 +8,7 @@
 fn main() -> int {
   // Basic literal and Str<char> conversion
   c: char = 'A';
-  println(Str<char>(c));                 // A
+  println(Str<char>(c));                     // A
 
   // Escape sequences
   println("tab:" + Str('\t') + "end");

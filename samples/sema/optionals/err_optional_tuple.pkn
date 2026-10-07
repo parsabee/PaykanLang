@@ -1,9 +1,6 @@
 // An optional tuple could never be unwrapped (match has no tuple type arms
 // yet), so `(T1, T2)?` is rejected until tuple patterns land.
-fn find(k: int) -> (int, Str)? {   // error: optional tuple types are not supported yet
-  return None;
-}
+// error: optional tuple types are not supported yet
+fn find(k: int) -> (int, Str)?               { return None; }
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

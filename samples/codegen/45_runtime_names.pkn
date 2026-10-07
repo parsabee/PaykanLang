@@ -20,16 +20,16 @@
 // expect-stdout: 10 / 2 = 5
 // expect-stdout: char<int>(65) = A
 
-fn PaykanString_new(x: int) -> int { return x + 1; }
-fn Paykan_println(a: int, b: int) -> int { return a * b; }
-fn PaykanString_concat() -> int { return 9; }
-fn PaykanObject_None() -> int { return 4; }
-fn Paykan_panic_div_by_zero() { println("user Paykan_panic_div_by_zero"); }
+fn PaykanString_new(x: int) -> int           { return x + 1; }
+fn Paykan_println(a: int, b: int) -> int     { return a * b; }
+fn PaykanString_concat() -> int              { return 9; }
+fn PaykanObject_None() -> int                { return 4; }
+fn Paykan_panic_div_by_zero()                { println("user Paykan_panic_div_by_zero"); }
 fn Paykan_panic_int_to_char(n: int) {
   println("user Paykan_panic_int_to_char(" + Str(n) + ")");
 }
 
-fn two() -> int { return 2; }
+fn two() -> int                              { return 2; }
 
 fn main() -> int {
   println("hi");

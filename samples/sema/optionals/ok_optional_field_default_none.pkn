@@ -2,8 +2,8 @@
 // __init__ does not assign it; non-optional fields must still be assigned.
 class Node {
   v: int;
-  next: Node?;                 // implicitly None
-  fn __init__(x: int) { self.v = x; }
+  next: Node?;                               // implicitly None
+  fn __init__(x: int)                        { self.v = x; }
 }
 
 fn main() -> int {

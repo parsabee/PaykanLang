@@ -2,7 +2,7 @@
 // its base declares one — otherwise the base initializer never runs.
 class Base {
   val: int;
-  fn __init__(v: int) { self.val = v; }
+  fn __init__(v: int)                        { self.val = v; }
 }
 
 class Derived : Base {
@@ -10,6 +10,4 @@ class Derived : Base {
   // no __init__ declared at all
 }
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

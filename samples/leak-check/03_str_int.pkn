@@ -4,7 +4,4 @@
 //
 // Expected under --track-heap: live blocks : 0.
 
-fn main() -> int {
-  s: Str = Str<int>(42);
-  return 0;
-}
+fn main() -> int                             { s: Str = Str<int>(42); return 0; }

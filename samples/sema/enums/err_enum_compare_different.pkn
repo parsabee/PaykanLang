@@ -4,6 +4,6 @@ enum A { X, Y }
 enum B { P, Q }
 
 fn main() -> int {
-  if (A::X == B::P) { }   // sema error: mismatched types 'A' and 'B'
+  if (A::X == B::P) { }                      // sema error: mismatched types 'A' and 'B'
   return 0;
 }

@@ -1,5 +1,5 @@
 // ERROR: Obj annotation cannot supply the element type for []
 fn main() -> int {
-  a: Obj = [];  // sema error: cannot infer element type
+  a: Obj = [];                               // sema error: cannot infer element type
   return 0;
 }

@@ -1,4 +1,4 @@
 // ERROR: module file does not exist
 import does_not_exist;
 
-fn main() -> int { return 0; }
+fn main() -> int                             { return 0; }

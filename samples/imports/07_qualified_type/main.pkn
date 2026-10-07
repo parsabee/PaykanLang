@@ -13,18 +13,15 @@ import geometry::point;
 // Qualified type as a class field.
 class Box {
   origin: point::Point;
-  fn __init__(p: point::Point) { self.origin = p; }
-  fn total() -> int { return self.origin.sum(); }
+  fn __init__(p: point::Point)               { self.origin = p; }
+  fn total() -> int                          { return self.origin.sum(); }
 }
 
 // Qualified type as a parameter type.
-fn describe(p: point::Point) -> int {
-  println(p.toString());
-  return p.sum();
-}
+fn describe(p: point::Point) -> int          { println(p.toString()); return p.sum(); }
 
 // Qualified type as a return type (full path form).
-fn origin() -> geometry::point::Point { return point::Point(0, 0); }
+fn origin() -> geometry::point::Point        { return point::Point(0, 0); }
 
 fn main() -> int {
   // Qualified type as a variable annotation.
@@ -32,5 +29,5 @@ fn main() -> int {
   b = Box(p);
   o = origin();
   println(o.toString());
-  return describe(p) + b.total();  // 42 + 42 = 84
+  return describe(p) + b.total();            // 42 + 42 = 84
 }

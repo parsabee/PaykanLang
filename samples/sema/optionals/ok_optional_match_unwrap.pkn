@@ -4,14 +4,14 @@
 class Node {
   v: int;
   next: Node?;
-  fn __init__(x: int) { self.v = x; }
+  fn __init__(x: int)                        { self.v = x; }
 }
 class Leaf : Node {
-  fn __init__(x: int) { __super__(x); }
+  fn __init__(x: int)                        { __super__(x); }
 }
 
 fn value(n: Node?) -> int {
-  match n {                    // exhaustive: Node arm + None arm
+  match n {                                  // exhaustive: Node arm + None arm
     x: Node { return x.v; }
     None    { return -1; }
   }
@@ -29,7 +29,7 @@ fn main() -> int {
   a: Node? = Leaf(1);
   println(Str<int>(value(a)));
   println(kind(a));
-  match a {                    // unwrap first, then reach into the value
+  match a {                                  // unwrap first, then reach into the value
     n: Node {
       match n.next {
         m: Node { println(Str<int>(m.v)); }

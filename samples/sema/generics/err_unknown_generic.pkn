@@ -1,5 +1,2 @@
 // ERROR: no generic class named 'Nope' exists.
-fn main() -> int {
-  b: Nope<int> = None;
-  return 0;
-}
+fn main() -> int                             { b: Nope<int> = None; return 0; }

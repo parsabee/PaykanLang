@@ -7,11 +7,9 @@
 import geometry::shapes;
 
 fn wrap<T>(x: T) -> int {
-  b = shapes::Box<T>(x);  // ERROR: reported once
+  b = shapes::Box<T>(x);                     // ERROR: reported once
   println(Str(b.get()));
   return 0;
 }
 
-fn main() -> int {
-  return wrap<int>(1) + wrap<Str>("a");
-}
+fn main() -> int                             { return wrap<int>(1) + wrap<Str>("a"); }

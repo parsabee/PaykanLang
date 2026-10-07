@@ -1,6 +1,6 @@
 // Module: geometry/shapes
 class Box<T> {
   v: T;
-  fn __init__(v: T) { self.v = v; }
-  fn get() -> T { return self.v; }
+  fn __init__(v: T)                          { self.v = v; }
+  fn get() -> T                              { return self.v; }
 }

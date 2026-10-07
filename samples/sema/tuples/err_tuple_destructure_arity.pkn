@@ -1,5 +1,2 @@
 // ERROR: cannot destructure a value of type '(int, int)' into 3 targets (it has 2 elements)
-fn main() -> int {
-  a, b, c = (1, 2);
-  return 0;
-}
+fn main() -> int                             { a, b, c = (1, 2); return 0; }

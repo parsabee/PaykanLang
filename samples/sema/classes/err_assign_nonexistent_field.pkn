@@ -1,10 +1,8 @@
 // ERROR: assigning to a field that does not exist on the class
 class A {
   fn bad() {
-    self.nosuchfield = 42;  // no field 'nosuchfield' in class 'A'
+    self.nosuchfield = 42;                   // no field 'nosuchfield' in class 'A'
   }
 }
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

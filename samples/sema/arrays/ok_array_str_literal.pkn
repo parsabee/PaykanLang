@@ -1,5 +1,2 @@
 // OK: Str[] declared and initialised
-fn main() -> int {
-  words: Str[] = ["hello", "world"];
-  return 0;
-}
+fn main() -> int                             { words: Str[] = ["hello", "world"]; return 0; }

@@ -1,15 +1,14 @@
 // ERROR: an override must have the same parameter and return types as the
 // base method (strict equality — no covariance).
 class Animal {
-  fn __init__() {}
-  fn describe() -> int { return 1; }
+  fn __init__()                              {}
+  fn describe() -> int                       { return 1; }
 }
 
 class Dog : Animal {
-  fn __init__() { __super__(); }
-  fn describe() -> Str { return "dog"; }  // return type mismatch
+  fn __init__()                              { __super__(); }
+  // return type mismatch
+  fn describe() -> Str                       { return "dog"; }
 }
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

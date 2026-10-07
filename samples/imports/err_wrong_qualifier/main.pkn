@@ -6,5 +6,5 @@
 import utils::math as m;
 
 fn main() -> int {
-  return math::add(1, 2);  // ERROR: 'math::add' undeclared — use 'm::add'
+  return math::add(1, 2);                    // ERROR: 'math::add' undeclared — use 'm::add'
 }

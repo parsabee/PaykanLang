@@ -1,5 +1,5 @@
 // int<Str> can fail, so it returns an int? that must be unwrapped.
 fn main() -> int {
-  n: int = int<Str>("12");   // error: cannot use optional 'int?' as 'int' without unwrapping (use match)
+  n: int = int<Str>("12");                   // error: cannot use optional 'int?' as 'int' without unwrapping (use match)
   return 0;
 }

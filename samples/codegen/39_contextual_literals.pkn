@@ -24,17 +24,17 @@
 
 class Node {
   v: int;
-  fn __init__(v: int) { self.v = v; }
-  fn toString() -> Str { return "N" + Str<int>(self.v); }
+  fn __init__(v: int)                        { self.v = v; }
+  fn toString() -> Str                       { return "N" + Str<int>(self.v); }
 }
 
 class Slot {
   p: (Node?, int);
-  fn __init__() { self.p = (None, 0); }
+  fn __init__()                              { self.p = (None, 0); }
 }
 
-fn take(p: (int?, Str)) -> Str { return "take: " + p.1; }
-fn mk() -> (Node?, int) { return (None, 2); }
+fn take(p: (int?, Str)) -> Str               { return "take: " + p.1; }
+fn mk() -> (Node?, int)                      { return (None, 2); }
 
 fn showPairs(xs: (Str, int?)[]) -> Str {
   out = "";

@@ -1,8 +1,5 @@
 // ERROR: T does not appear in any parameter, so it cannot be inferred —
 // write make<int>().
-fn make<T>() -> int { return 1; }
+fn make<T>() -> int                          { return 1; }
 
-fn main() -> int {
-  make();
-  return 0;
-}
+fn main() -> int                             { make(); return 0; }

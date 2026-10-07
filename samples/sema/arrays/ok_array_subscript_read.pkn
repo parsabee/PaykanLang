@@ -1,6 +1,2 @@
 // OK: subscript reads an element; the result type matches the element type
-fn main() -> int {
-  a: int[] = [10, 20, 30];
-  x: int = a[0];
-  return 0;
-}
+fn main() -> int                             { a: int[] = [10, 20, 30]; x: int = a[0]; return 0; }

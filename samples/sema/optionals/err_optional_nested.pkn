@@ -1,5 +1,5 @@
 // `T??` is rejected by the parser: nested optionals are not supported.
 fn main() -> int {
-  s: Str?? = None;   // error: nested optional type 'Str??' is not supported
+  s: Str?? = None;                           // error: nested optional type 'Str??' is not supported
   return 0;
 }

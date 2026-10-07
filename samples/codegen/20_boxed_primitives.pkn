@@ -30,14 +30,14 @@ fn main() -> int {
   println(tryParseInt("0"));
   println(tryParseInt("42"));
   println(tryParseInt("-99"));
-  println(tryParseInt("9223372036854775807"));   // INT64_MAX
+  println(tryParseInt("9223372036854775807"));  // INT64_MAX
 
   // invalid inputs
   println(tryParseInt("abc"));
   println(tryParseInt("12abc"));
   println(tryParseInt(""));
   println(tryParseInt("3.14"));
-  println(tryParseInt("9223372036854775808"));   // INT64_MAX + 1
+  println(tryParseInt("9223372036854775808"));  // INT64_MAX + 1
 
   // === float<Str> ===
   println("=== float<Str> ===");

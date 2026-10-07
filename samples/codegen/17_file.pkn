@@ -45,7 +45,7 @@ fn showToString(path: Str) {
     err: Error { printerrln("showToString: " + err.toString()); }
     f: File {
       s: Str = f.toString();
-      println(s);   // File@0x...
+      println(s);                            // File@0x...
     }
   }
 }
@@ -58,7 +58,7 @@ fn showEquals(path: Str) {
         err2: Error { printerrln("showEquals inner: " + err2.toString()); }
         g: File {
           eq: bool = f.equals(g);
-          println(Str<bool>(eq));  // False — different handles
+          println(Str<bool>(eq));            // False — different handles
         }
       }
     }

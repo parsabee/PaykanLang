@@ -2,11 +2,11 @@
 // `Obj` does not (it might be anything but a Node).
 class Node {
   v: int;
-  fn __init__(x: int) { self.v = x; }
+  fn __init__(x: int)                        { self.v = x; }
 }
 
 fn main() -> int {
   o: Obj = Node(1);
-  n: Node? = o;   // error: initializer of type 'Obj' does not match declared type 'Node?'
+  n: Node? = o;                              // error: initializer of type 'Obj' does not match declared type 'Node?'
   return 0;
 }

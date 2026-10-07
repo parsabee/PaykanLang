@@ -1,10 +1,8 @@
 // ERROR: method return type does not match declared return type
 class A {
   fn getFlag() -> int {
-    return True;  // bool is not assignable to int
+    return True;                             // bool is not assignable to int
   }
 }
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

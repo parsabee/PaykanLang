@@ -1,10 +1,8 @@
 // ERROR: __super__ called outside of __init__
 class A {
   fn doSomething() {
-    __super__();  // only valid inside __init__
+    __super__();                             // only valid inside __init__
   }
 }
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

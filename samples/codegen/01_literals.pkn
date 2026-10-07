@@ -7,8 +7,8 @@ fn main() -> int {
   a: int = 0;
   b: int = 1;
   c: int = 42;
-  d: int = 9223372036854775807;   // INT64_MAX
-  neg: int = 0 - 2147483648;     // large negative via unary-minus at runtime
+  d: int = 9223372036854775807;              // INT64_MAX
+  neg: int = 0 - 2147483648;                 // large negative via unary-minus at runtime
   println("int 0:    " + Str<int>(a));
   println("int 1:    " + Str(b));
   println("int 42:   " + Str<int>(c));

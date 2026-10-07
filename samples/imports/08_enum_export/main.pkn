@@ -10,16 +10,16 @@
 import pal::color;
 
 // Qualified enum type as a parameter type.
-fn describe(c: color::Color) -> Str { return color::name(c); }
+fn describe(c: color::Color) -> Str          { return color::name(c); }
 
 fn main() -> int {
   // Qualified enum type as a variable annotation + variant access.
   c: color::Color = color::Color::Green;
-  println(describe(c));                       // green
+  println(describe(c));                      // green
 
   // Imported function returning an enum.
   f: color::Color = color::favorite();
-  println(color::name(f));                    // blue
+  println(color::name(f));                   // blue
 
   // Equality against an imported variant (same enum only).
   if (c == color::Color::Green) { println("is green"); }

@@ -75,6 +75,6 @@ fn main() -> int {
   }
   println(out);
   if (float<Str>("1e999") == None) { println("'1e999' is not a float"); }
-  println(int("12abc"));      // an int? prints as its value or None
+  println(int("12abc"));                     // an int? prints as its value or None
   return 0;
 }

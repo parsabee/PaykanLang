@@ -5,7 +5,7 @@ fn main() -> int {
   x: Obj = Dog();
   match x {
     Dog {
-      y: int = 3.14;   // sema error: cannot assign float to int
+      y: int = 3.14;                         // sema error: cannot assign float to int
     }
   }
   return 0;

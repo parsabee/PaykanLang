@@ -71,10 +71,7 @@ chains:
 class Entry {
   key: Str;
   value: float;
-  fn __init__(k: Str, v: float) {
-    self.key = k;
-    self.value = v;
-  }
+  fn __init__(k: Str, v: float)              { self.key = k; self.value = v; }
 }
 // ...
 class HashMap {
@@ -130,7 +127,7 @@ table in place:
   fn insert(key: Str, value: float) -> bool {
     match self.lookup(key) {
       e: Entry {
-        e.value = value; // update in place (Entry is a reference type)
+        e.value = value;                     // update in place (Entry is a reference type)
         return False;
       }
       None {
@@ -198,13 +195,9 @@ class Parser {
   input: Str;
   pos: int;
   env: hashmap::HashMap;
-  error: Str?;   // the first error, or None
+  error: Str?;                               // the first error, or None
 
-  fn __init__(s: Str, env: hashmap::HashMap) {
-    self.input = s;
-    self.pos = 0;
-    self.env = env;
-  }
+  fn __init__(s: Str, env: hashmap::HashMap)  { self.input = s; self.pos = 0; self.env = env; }
 
   // Record the first error only; later errors are usually cascades.
   fn fail(msg: Str) {
@@ -265,13 +258,13 @@ its type, since a bare `None` in a tuple literal with no declared destination wo
       name: Str = self.parseIdent();
       self.skipWs();
       if (self.atAssign()) {
-        self.advance(); // consume '='
+        self.advance();                      // consume '='
         v: float = self.parseExpr();
         self.skipWs();
         target: Str? = name;
         return (target, v);
       }
-      self.pos = start; // not an assignment — rewind and parse as an expression
+      self.pos = start;                      // not an assignment — rewind and parse as an expression
     }
     v: float = self.parseExpr();
     self.skipWs();
@@ -293,13 +286,9 @@ another module yet:
 class Ring<T> {
   items: T[];
   cap: int;
-  start: int; // index of the oldest item once the buffer is full
+  start: int;                                // index of the oldest item once the buffer is full
 
-  fn __init__(cap: int) {
-    self.items = [];
-    self.cap = cap;
-    self.start = 0;
-  }
+  fn __init__(cap: int)                      { self.items = []; self.cap = cap; self.start = 0; }
 
   // Append `x`, overwriting the oldest item when the buffer is full.
   fn add(x: T) {
@@ -372,7 +361,7 @@ The interactive loop is the standard-input idiom from [Files and I/O](11-files-a
   while (True) {
     match Stdin.readln() {
       line: Str { if (!handle(line, env, history, quiet)) { return 0; } }
-      _ { break; } // None — end of input
+      _ { break; }                           // None — end of input
     }
   }
 ```

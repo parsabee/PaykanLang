@@ -5,6 +5,6 @@ fn main() -> int {
     arr: int[] { }
     _ { }
   }
-  n: int = arr.len();  // sema error: use of undeclared variable 'arr'
+  n: int = arr.len();                        // sema error: use of undeclared variable 'arr'
   return 0;
 }

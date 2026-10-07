@@ -18,7 +18,7 @@
 class Cell {
   label: Str;
   value: int?;
-  fn __init__() { self.label = Str<int>(0); }
+  fn __init__()                              { self.label = Str<int>(0); }
 }
 
 fn parseOr(s: Str, d: int) -> int {

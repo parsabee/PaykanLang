@@ -1,8 +1,5 @@
 // ERROR: builtin functions cannot be redeclared
-fn println(x: int) {  // sema error: 'println' is a builtin function and cannot be redeclared
-}
+// sema error: 'println' is a builtin function and cannot be redeclared
+fn println(x: int)                           {}
 
-fn main() -> int {
-  println(1);
-  return 0;
-}
+fn main() -> int                             { println(1); return 0; }

@@ -20,9 +20,9 @@
 fn describe(o: Obj) -> Str {
   match o {
     n: Int   { return "Int " + Str<Int>(n); }
-    f: Float { return "Float " + Str(f); }          // Str<Float>
+    f: Float { return "Float " + Str(f); }   // Str<Float>
     b: Bool  { return "Bool " + Str<Bool>(b); }
-    c: Char  { return "Char " + Str(c); }           // Str<Char>
+    c: Char  { return "Char " + Str(c); }    // Str<Char>
     _        { return "?"; }
   }
 }
@@ -47,7 +47,7 @@ fn main() -> int {
     if (keys[k] == "ratio") {
       match Float<Str>(vals[k]) { x: Float { text = Str<Float>(x); } None { } }
     } else if (keys[k] == "verbose" || keys[k] == "color") {
-      match Bool(vals[k]) {                       // Bool<Str>
+      match Bool(vals[k]) {                  // Bool<Str>
         x: Bool { text = Str<Bool>(x); }
         None    { }
       }
@@ -75,7 +75,7 @@ fn main() -> int {
   flags: bool[] = [True, False];
   j = 0;
   while (j < flags.len()) {
-    match bool(Str(flags[j])) {                   // bool<Str>(Str<bool>(...))
+    match bool(Str(flags[j])) {              // bool<Str>(Str<bool>(...))
       v: bool { out = out + " " + Str<bool>(v); }
       None    { out = out + " ?"; }
     }

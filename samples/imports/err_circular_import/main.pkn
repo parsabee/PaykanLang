@@ -3,4 +3,4 @@
 // that led there; `a::fa` is not reported as undeclared (#119).
 import lib::a;
 
-fn main() -> int { return a::fa(); }
+fn main() -> int                             { return a::fa(); }

@@ -4,59 +4,59 @@
 
 fn main() -> int {
   println("=== AND truth table ===");
-  println("T&&T=" + Str<bool>(True  && True));   // True
-  println("T&&F=" + Str(True  && False));  // False
-  println("F&&T=" + Str<bool>(False && True));   // False
-  println("F&&F=" + Str(False && False));  // False
+  println("T&&T=" + Str<bool>(True  && True));  // True
+  println("T&&F=" + Str(True  && False));    // False
+  println("F&&T=" + Str<bool>(False && True));  // False
+  println("F&&F=" + Str(False && False));    // False
 
   println("=== OR truth table ===");
-  println("T||T=" + Str<bool>(True  || True));   // True
-  println("T||F=" + Str(True  || False));  // True
-  println("F||T=" + Str<bool>(False || True));   // True
-  println("F||F=" + Str(False || False));  // False
+  println("T||T=" + Str<bool>(True  || True));  // True
+  println("T||F=" + Str(True  || False));    // True
+  println("F||T=" + Str<bool>(False || True));  // True
+  println("F||F=" + Str(False || False));    // False
 
   println("=== NOT ===");
-  println("!T=" + Str<bool>(!True));            // False
-  println("!F=" + Str(!False));           // True
-  println("!!T=" + Str<bool>(!!True));           // True
+  println("!T=" + Str<bool>(!True));         // False
+  println("!F=" + Str(!False));              // True
+  println("!!T=" + Str<bool>(!!True));       // True
 
   println("=== short-circuit && ===");
   // The side effect counter verifies RHS is skipped when LHS is False.
   counter: int = 0;
-  flag: bool = False && (counter == 0);  // RHS never executed
-  println("F&&(c==0)=" + Str(flag));   // False
+  flag: bool = False && (counter == 0);      // RHS never executed
+  println("F&&(c==0)=" + Str(flag));         // False
   // counter stays 0 whether or not RHS ran (no side-effect possible in
   // this language without a call), but the path still exercises the
   // correct codegen branch structure.
 
   println("=== short-circuit || ===");
-  flag2: bool = True || False;           // RHS skipped
+  flag2: bool = True || False;               // RHS skipped
   println("T||F=" + Str<bool>(flag2));       // True
 
   println("=== precedence && before || ===");
   // && binds tighter than ||
-  a: bool = True || False && False;     // True || (False && False) = True || F = True
-  b: bool = False && True || True;      // (False && True) || True = False || True = True
-  c: bool = False && True || False;     // (False && True) || False = False
-  println("T||F&&F=" + Str(a));      // True
-  println("F&&T||T=" + Str<bool>(b));      // True
-  println("F&&T||F=" + Str(c));      // False
+  a: bool = True || False && False;          // True || (False && False) = True || F = True
+  b: bool = False && True || True;           // (False && True) || True = False || True = True
+  c: bool = False && True || False;          // (False && True) || False = False
+  println("T||F&&F=" + Str(a));              // True
+  println("F&&T||T=" + Str<bool>(b));        // True
+  println("F&&T||F=" + Str(c));              // False
 
   println("=== unary negation (int) ===");
   x: int = 5;
   neg_x: int = 0 - x;
-  println("-5=" + Str<int>(neg_x));   // -5
-  println("-(3+2)=" + Str(0 - (3 + 2)));  // -5
+  println("-5=" + Str<int>(neg_x));          // -5
+  println("-(3+2)=" + Str(0 - (3 + 2)));     // -5
 
   println("=== unary negation (float) ===");
-  println("-3.14=" + Str<float>(0.0 - 3.14));     // -3.14
+  println("-3.14=" + Str<float>(0.0 - 3.14));  // -3.14
 
   println("=== combined ===");
   v: int = 7;
   result: bool = v > 0 && v < 10 && v != 5;
   println("7 in (0,10) and !=5:" + Str(result));  // True
   result2: bool = v < 0 || v > 5 && v < 10;
-  println("7<0 or in (5,10):" + Str<bool>(result2)); // True
+  println("7<0 or in (5,10):" + Str<bool>(result2));  // True
 
   return 0;
 }

@@ -26,13 +26,13 @@
 // expect-stdout: (-0.0) == (0.0): True
 // expect-stdout: y == y (float?): True
 
-fn same(p: (int, float), q: (int, float)) -> bool { return p == q; }
+fn same(p: (int, float), q: (int, float)) -> bool  { return p == q; }
 
 fn main() -> int {
   nan: float = 0.0 / 0.0;
   t = (1, nan);
   u = (1, nan);
-  alias = t;                                   // the same tuple object
+  alias = t;                                 // the same tuple object
   println("nan == nan:      " + Str(nan == nan));
   println("t == t:          " + Str(t == t));
   println("t != t:          " + Str<bool>(t != t));

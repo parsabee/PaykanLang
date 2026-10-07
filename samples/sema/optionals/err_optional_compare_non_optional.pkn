@@ -1,12 +1,12 @@
 // An optional may only be compared against None or another optional.
 class Node {
   v: int;
-  fn __init__(x: int) { self.v = x; }
+  fn __init__(x: int)                        { self.v = x; }
 }
 
 fn main() -> int {
   a: Node? = None;
   n: Node = Node(1);
-  if (a == n) { return 1; }   // error: cannot compare optional 'Node?' with non-optional 'Node'
+  if (a == n) { return 1; }                  // error: cannot compare optional 'Node?' with non-optional 'Node'
   return 0;
 }

@@ -1,5 +1,2 @@
 // ERROR: cannot destructure a value of type 'int'; only tuples can be destructured
-fn main() -> int {
-  a, b = 42;
-  return 0;
-}
+fn main() -> int                             { a, b = 42; return 0; }

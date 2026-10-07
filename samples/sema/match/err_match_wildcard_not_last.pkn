@@ -5,7 +5,7 @@ fn main() -> int {
   x: Obj = Dog();
   match x {
     _ { }
-    Dog { }   // sema error: unreachable arm after wildcard
+    Dog { }                                  // sema error: unreachable arm after wildcard
   }
   return 0;
 }

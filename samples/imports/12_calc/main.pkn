@@ -87,13 +87,9 @@ import calc::utils;
 class Ring<T> {
   items: T[];
   cap: int;
-  start: int; // index of the oldest item once the buffer is full
+  start: int;                                // index of the oldest item once the buffer is full
 
-  fn __init__(cap: int) {
-    self.items = [];
-    self.cap = cap;
-    self.start = 0;
-  }
+  fn __init__(cap: int)                      { self.items = []; self.cap = cap; self.start = 0; }
 
   // Append `x`, overwriting the oldest item when the buffer is full.
   fn add(x: T) {
@@ -105,19 +101,19 @@ class Ring<T> {
     }
   }
 
-  fn len() -> int { return self.items.len(); }
+  fn len() -> int                            { return self.items.len(); }
 
   // The i-th oldest item (0 <= i < len()).
-  fn at(i: int) -> T { return self.items[(self.start + i) % self.items.len()]; }
+  fn at(i: int) -> T {
+    return self.items[(self.start + i) % self.items.len()];
+  }
 }
 
 // How many past statements :history remembers.
-fn historySize() -> int { return 20; }
+fn historySize() -> int                      { return 20; }
 
 // Format a result with trailing zeros trimmed.
-fn show(v: float) -> Str {
-  return utils::trimFloat(Str<float>(v));
-}
+fn show(v: float) -> Str                     { return utils::trimFloat(Str<float>(v)); }
 
 // Seed the environment with the constants and the `ans` register.
 fn defineConstants(env: hashmap::HashMap) {
@@ -266,7 +262,7 @@ fn repl(env: hashmap::HashMap, history: Ring<(Str, float)>, quiet: bool) -> int 
   while (True) {
     match Stdin.readln() {
       line: Str { if (!handle(line, env, history, quiet)) { return 0; } }
-      _ { break; } // None — end of input
+      _ { break; }                           // None — end of input
     }
   }
   return 0;
@@ -362,7 +358,7 @@ fn main(args: Str[]) -> int {
       printerrln("error: unknown option '" + a + "' (try -h)");
       return 2;
     } else {
-      exprs.push(a); // a positional argument is an expression
+      exprs.push(a);                         // a positional argument is an expression
     }
     i = i + 1;
   }

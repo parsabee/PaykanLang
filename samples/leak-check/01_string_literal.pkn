@@ -5,7 +5,4 @@
 // Expected under --track-heap: live blocks : 0 (the Str is released when it
 // falls out of scope at the end of main).
 
-fn main() -> int {
-  s: Str = "hello";
-  return 0;
-}
+fn main() -> int                             { s: Str = "hello"; return 0; }

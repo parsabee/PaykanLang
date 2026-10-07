@@ -5,10 +5,7 @@
 // Expected under --track-heap: live blocks : 0 (destroy runs at end of scope).
 
 class Box {
-  fn __init__() {}
+  fn __init__()                              {}
 }
 
-fn main() -> int {
-  b: Box = Box();
-  return 0;
-}
+fn main() -> int                             { b: Box = Box(); return 0; }

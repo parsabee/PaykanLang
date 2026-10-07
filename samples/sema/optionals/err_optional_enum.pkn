@@ -3,6 +3,6 @@
 enum Color { Red, Green }
 
 fn main() -> int {
-  c: Color? = None;   // error: optional enum types are not supported yet
+  c: Color? = None;                          // error: optional enum types are not supported yet
   return 0;
 }

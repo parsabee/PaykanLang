@@ -1,8 +1,6 @@
 // ERROR: method parameter has an unknown type
 class A {
-  fn foo(x: NoSuchType) {}
+  fn foo(x: NoSuchType)                      {}
 }
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

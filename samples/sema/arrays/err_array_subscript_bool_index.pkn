@@ -1,6 +1,6 @@
 // ERROR: array index must be int — bool is not allowed
 fn main() -> int {
   a: int[] = [1, 2, 3];
-  x: int = a[True];  // sema error: array index must be 'int', got 'bool'
+  x: int = a[True];                          // sema error: array index must be 'int', got 'bool'
   return 0;
 }

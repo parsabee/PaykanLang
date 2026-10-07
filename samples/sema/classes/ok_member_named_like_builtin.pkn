@@ -4,17 +4,14 @@
 class Logger {
   count: int;
 
-  fn __init__() { self.count = 0; }
+  fn __init__()                              { self.count = 0; }
 
-  fn print(msg: Str) {
-    self.count = self.count + 1;
-    println(msg);
-  }
+  fn print(msg: Str)                         { self.count = self.count + 1; println(msg); }
 }
 
 class Stats {
   open: int;
-  fn __init__() { self.open = 1; }
+  fn __init__()                              { self.open = 1; }
 }
 
 fn main() -> int {

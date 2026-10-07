@@ -11,8 +11,8 @@
 
 class Step {
   n: int;
-  fn __init__(n: int) { self.n = n; }
-  fn toString() -> Str { return "step " + Str(self.n); }
+  fn __init__(n: int)                        { self.n = n; }
+  fn toString() -> Str                       { return "step " + Str(self.n); }
 }
 
 fn main() -> int {
@@ -21,15 +21,15 @@ fn main() -> int {
   while (i <= 3) {
     print(" " + Str(i));
     printerr("[log] ");
-    printerrln(Step(i));       // any Obj prints through its toString
+    printerrln(Step(i));                     // any Obj prints through its toString
     i = i + 1;
   }
   println("");
   println("done (" + Str(i - 1) + " steps)");
 
   maybe: Str? = None;
-  println(maybe);              // an absent optional prints None
-  println((1, "two"));         // a tuple prints its elements
+  println(maybe);                            // an absent optional prints None
+  println((1, "two"));                       // a tuple prints its elements
   printerr("printerr adds no newline; ");
   printerrln("printerrln does");
   return 0;

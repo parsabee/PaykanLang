@@ -2,18 +2,13 @@
 // no arguments — but it is still required as the first statement of a derived
 // __init__ whenever the base declares an __init__ at all.
 class Base {
-  fn __init__() {}
+  fn __init__()                              {}
 }
 
 class Child : Base {
   x: int;
 
-  fn __init__(x: int) {
-    __super__();
-    self.x = x;
-  }
+  fn __init__(x: int)                        { __super__(); self.x = x; }
 }
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

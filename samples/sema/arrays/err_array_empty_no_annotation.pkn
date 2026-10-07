@@ -1,5 +1,5 @@
 // ERROR: bare [] with no type annotation — element type is uninferable
 fn main() -> int {
-  a = [];  // sema error: cannot infer element type
+  a = [];                                    // sema error: cannot infer element type
   return 0;
 }

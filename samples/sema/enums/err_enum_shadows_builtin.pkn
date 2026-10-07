@@ -1,6 +1,4 @@
 // ERROR: builtin names are reserved for enums as well
-enum Error { NotFound, Denied }  // sema error: 'Error' is a builtin class and cannot be redeclared
+enum Error { NotFound, Denied }              // sema error: 'Error' is a builtin class and cannot be redeclared
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

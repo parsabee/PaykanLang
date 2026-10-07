@@ -4,7 +4,7 @@ class Dog {}
 fn main() -> int {
   x: Obj = Dog();
   match x {
-    Dragon { }   // sema error: unknown type 'Dragon' in match arm
+    Dragon { }                               // sema error: unknown type 'Dragon' in match arm
   }
   return 0;
 }

@@ -3,10 +3,8 @@ class A {
   x: int;
 
   fn bad() -> int {
-    return self.y;  // no field 'y' in class 'A'
+    return self.y;                           // no field 'y' in class 'A'
   }
 }
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

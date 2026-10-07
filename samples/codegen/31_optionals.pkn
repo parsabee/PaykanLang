@@ -12,15 +12,15 @@
 
 class Node {
   v: int;
-  next: Node?;                 // implicitly None — no assignment in __init__
-  fn __init__(x: int) { self.v = x; }
+  next: Node?;                               // implicitly None — no assignment in __init__
+  fn __init__(x: int)                        { self.v = x; }
 }
 
 // ---- List operations -------------------------------------------------------
 
 fn push_front(head: Node?, v: int) -> Node {
   n: Node = Node(v);
-  n.next = head;               // Node? field accepts a Node? value
+  n.next = head;                             // Node? field accepts a Node? value
   return n;
 }
 
@@ -29,7 +29,7 @@ fn find(head: Node?, key: int) -> Node? {
   while (cur != None) {
     match cur {
       n: Node {
-        if (n.v == key) { return n; }   // Node widens to Node?
+        if (n.v == key) { return n; }        // Node widens to Node?
         cur = n.next;
       }
       None { }
@@ -79,9 +79,9 @@ fn main() -> int {
   println(describe(find(None, 1)));          // not found
 
   println("=== None checks ===");
-  println(Str<bool>(head == None));            // False
-  println(Str(find(head, 9) == None));   // True
-  println(Str<bool>(find(head, 3) != None));   // True
+  println(Str<bool>(head == None));          // False
+  println(Str(find(head, 9) == None));       // True
+  println(Str<bool>(find(head, 3) != None));  // True
 
   println("=== printing an optional ===");
   maybe: Node? = None;
@@ -106,7 +106,7 @@ fn main() -> int {
   }
   nums = [10, 20];
   match nums {
-    a: int[] { a.push(30); println(Str<int>(a.len())); }   // 3
+    a: int[] { a.push(30); println(Str<int>(a.len())); }  // 3
     None     { println("no numbers"); }
   }
 
@@ -114,8 +114,8 @@ fn main() -> int {
   a: Str? = "same";
   b: Str? = "same";
   c: Str? = None;
-  println(Str(a == b));                  // True  (content equality)
-  println(Str<bool>(a == c));                  // False (one is None)
-  println(Str(c == None));               // True
+  println(Str(a == b));                      // True  (content equality)
+  println(Str<bool>(a == c));                // False (one is None)
+  println(Str(c == None));                   // True
   return 0;
 }

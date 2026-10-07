@@ -3,6 +3,6 @@
 enum Color { Red, Green }
 
 fn main() -> int {
-  x: int = Color::Red;   // sema error: 'Color' does not match declared type 'int'
+  x: int = Color::Red;                       // sema error: 'Color' does not match declared type 'int'
   return 0;
 }

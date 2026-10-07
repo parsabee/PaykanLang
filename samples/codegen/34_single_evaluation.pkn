@@ -21,24 +21,13 @@ class C { v: int; fn __init__(v: int) { self.v = v; } }
 
 class Holder { c: C; fn __init__(v: int) { self.c = C(v); } }
 
-fn idx() -> int {
-  println("idx called");
-  return 0;
-}
+fn idx() -> int                              { println("idx called"); return 0; }
 
-fn arrs() -> C[] {
-  println("arrs called");
-  return [C(3), C(4)];
-}
+fn arrs() -> C[]                             { println("arrs called"); return [C(3), C(4)]; }
 
-fn make() -> Holder {
-  println("make called");
-  return Holder(5);
-}
+fn make() -> Holder                          { println("make called"); return Holder(5); }
 
-fn show(c: C) {
-  println("show " + Str<int>(c.v));
-}
+fn show(c: C)                                { println("show " + Str<int>(c.v)); }
 
 fn main() -> int {
   arr: C[] = [C(1), C(2)];

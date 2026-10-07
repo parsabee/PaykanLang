@@ -9,9 +9,9 @@
 
 class Box<T> {
   v: T;
-  fn __init__(v: T) { self.v = v; }
-  fn get() -> T { return self.v; }
-  fn set(v: T) { self.v = v; }
+  fn __init__(v: T)                          { self.v = v; }
+  fn get() -> T                              { return self.v; }
+  fn set(v: T)                               { self.v = v; }
   fn equals(other: Obj) -> bool {
     match other {
       o: Box<T> { return o.get() == self.v; }
@@ -23,28 +23,28 @@ class Box<T> {
 class Pair<K, V> {
   k: K;
   v: V;
-  fn __init__(k: K, v: V) { self.k = k; self.v = v; }
-  fn key() -> K { return self.k; }
-  fn value() -> V { return self.v; }
+  fn __init__(k: K, v: V)                    { self.k = k; self.v = v; }
+  fn key() -> K                              { return self.k; }
+  fn value() -> V                            { return self.v; }
 }
 
 class Stack<T> {
   items: T[];
-  fn __init__() { self.items = []; }
-  fn push(v: T) { self.items.push(v); }
-  fn pop() -> T { return self.items.pop(); }
-  fn empty() -> bool { return self.items.len() == 0; }
+  fn __init__()                              { self.items = []; }
+  fn push(v: T)                              { self.items.push(v); }
+  fn pop() -> T                              { return self.items.pop(); }
+  fn empty() -> bool                         { return self.items.len() == 0; }
 }
 
 class Holder {
   b: Box<int>;
-  fn __init__(n: int) { self.b = Box<int>(n); }
-  fn get() -> Box<int> { return self.b; }
+  fn __init__(n: int)                        { self.b = Box<int>(n); }
+  fn get() -> Box<int>                       { return self.b; }
 }
 
-fn first<T>(xs: T[]) -> T { return xs[0]; }
+fn first<T>(xs: T[]) -> T                    { return xs[0]; }
 
-fn unbox<T>(b: Box<T>) -> T { return b.get(); }
+fn unbox<T>(b: Box<T>) -> T                  { return b.get(); }
 
 fn describe(o: Obj) -> Str {
   match o {
@@ -55,44 +55,44 @@ fn describe(o: Obj) -> Str {
 }
 
 fn main() -> int {
-  bi: Box<int> = Box<int>(3);                 // explicit type argument
-  println(Str(bi.get()));                  // 3
+  bi: Box<int> = Box<int>(3);                // explicit type argument
+  println(Str(bi.get()));                    // 3
   bs = Box<Str>("hello");
   bs.set("world");
-  println(bs.get());                          // world
+  println(bs.get());                         // world
 
   p: Pair<Str, int> = Pair<Str, int>("age", 42);
-  println(p.key() + "=" + Str<int>(p.value())); // age=42
+  println(p.key() + "=" + Str<int>(p.value()));  // age=42
 
-  bb: Box<Box<int>> = Box<Box<int>>(bi);      // nested instantiation
-  println(Str(bb.get().get()));            // 3
+  bb: Box<Box<int>> = Box<Box<int>>(bi);     // nested instantiation
+  println(Str(bb.get().get()));              // 3
 
   s: Stack<Str> = Stack<Str>();
   s.push("a");
   s.push("b");
-  while (!s.empty()) { println(s.pop()); }    // b, a
+  while (!s.empty()) { println(s.pop()); }   // b, a
 
-  println(Str<int>(first([10, 20])));           // 10   (T inferred as int)
-  println(first<Str>(["x", "y"]));            // x    (explicit)
-  println(Str(unbox(Box<int>(7))));        // 7    (T inferred through Box<T>)
+  println(Str<int>(first([10, 20])));        // 10   (T inferred as int)
+  println(first<Str>(["x", "y"]));           // x    (explicit)
+  println(Str(unbox(Box<int>(7))));          // 7    (T inferred through Box<T>)
 
-  inferred = Box(5);                          // constructor-argument inference
-  println(Str<int>(inferred.get()));            // 5
+  inferred = Box(5);                         // constructor-argument inference
+  println(Str<int>(inferred.get()));         // 5
 
-  h: Holder = Holder(40);                     // instantiation as a field type
-  println(Str(h.get().get() + 2));         // 42
+  h: Holder = Holder(40);                    // instantiation as a field type
+  println(Str(h.get().get() + 2));           // 42
 
   arr: Box<int>[] = [Box<int>(1), Box<int>(2)];
-  println(Str<int>(arr[1].get()));              // 2
+  println(Str<int>(arr[1].get()));           // 2
 
-  println(describe(bi));                      // Box<int> holding 3
-  println(describe(bs));                      // Box<Str>
-  println(describe(p));                       // something else
+  println(describe(bi));                     // Box<int> holding 3
+  println(describe(bs));                     // Box<Str>
+  println(describe(p));                      // something else
 
-  println(Str(bi == Box<int>(3)));        // True  (== dispatches to equals)
-  println(Str<bool>(bi == Box<int>(4)));        // False
+  println(Str(bi == Box<int>(3)));           // True  (== dispatches to equals)
+  println(Str<bool>(bi == Box<int>(4)));     // False
 
-  shared: Box<int> = bi;                      // shares the box
-  println(Str(shared.get()));               // 3
+  shared: Box<int> = bi;                     // shares the box
+  println(Str(shared.get()));                // 3
   return 0;
 }

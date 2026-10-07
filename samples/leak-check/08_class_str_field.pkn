@@ -8,12 +8,7 @@
 class Named {
   name: Str;
 
-  fn __init__(n: Str) {
-    self.name = n;
-  }
+  fn __init__(n: Str)                        { self.name = n; }
 }
 
-fn main() -> int {
-  x: Named = Named("hi");
-  return 0;
-}
+fn main() -> int                             { x: Named = Named("hi"); return 0; }

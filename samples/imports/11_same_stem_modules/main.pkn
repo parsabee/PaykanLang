@@ -11,7 +11,7 @@ import a::util;
 import b::util as bu;
 import c::main as cm;
 
-fn tag() -> Str { return "main"; }
+fn tag() -> Str                              { return "main"; }
 
 fn main() -> int {
   println(util::tag() + " " + bu::tag() + " " + cm::tag());

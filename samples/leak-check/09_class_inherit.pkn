@@ -5,16 +5,11 @@
 // Expected under --track-heap: live blocks : 0.
 
 class Base {
-  fn __init__() {}
+  fn __init__()                              {}
 }
 
 class Derived : Base {
-  fn __init__() {
-    __super__();
-  }
+  fn __init__()                              { __super__(); }
 }
 
-fn main() -> int {
-  d: Derived = Derived();
-  return 0;
-}
+fn main() -> int                             { d: Derived = Derived(); return 0; }

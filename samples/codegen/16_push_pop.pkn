@@ -5,25 +5,25 @@ fn main() -> int {
     a.push(10);
     a.push(20);
     a.push(30);
-    println(Str<int>(a.len()));   // 3
+    println(Str<int>(a.len()));              // 3
     v = a.pop();
-    println(Str(v));         // 30
-    println(Str<int>(a.len()));   // 2
+    println(Str(v));                         // 30
+    println(Str<int>(a.len()));              // 2
 
     // === float array ===
     fs: float[] = [];
     fs.push(1.5);
     fs.push(2.5);
-    println(Str(fs.len()));  // 2
+    println(Str(fs.len()));                  // 2
     f = fs.pop();
-    println(Str<float>(f));       // 2.500000
-    println(Str(fs.len()));  // 1
+    println(Str<float>(f));                  // 2.500000
+    println(Str(fs.len()));                  // 1
 
     // === push onto non-empty literal ===
     nums: int[] = [1, 2, 3];
     nums.push(4);
-    println(Str<int>(nums.len())); // 4
-    println(Str(nums[3]));    // 4
+    println(Str<int>(nums.len()));           // 4
+    println(Str(nums[3]));                   // 4
 
 
     objs: Obj[] = [];
@@ -33,4 +33,3 @@ fn main() -> int {
 
     return 0;
 }
-

@@ -12,16 +12,13 @@
 
 class Counter {
   n: int;
-  fn __init__() { self.n = 0; }
-  fn bump() -> Counter {
-    self.n = self.n + 1;
-    return self;
-  }
+  fn __init__()                              { self.n = 0; }
+  fn bump() -> Counter                       { self.n = self.n + 1; return self; }
 }
 
 fn main() -> int {
   a: Counter = Counter();
-  c: Counter = a.bump().bump().bump();  // each hop retains the same box
-  println(Str<int>(c.n));                 // 3
+  c: Counter = a.bump().bump().bump();       // each hop retains the same box
+  println(Str<int>(c.n));                    // 3
   return 0;
 }

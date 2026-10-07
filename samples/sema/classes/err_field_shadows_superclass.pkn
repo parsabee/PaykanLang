@@ -4,9 +4,7 @@ class Animal {
 }
 
 class Dog : Animal {
-  name: Str;  // shadows 'name' from Animal
+  name: Str;                                 // shadows 'name' from Animal
 }
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

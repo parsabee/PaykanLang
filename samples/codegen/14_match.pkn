@@ -19,28 +19,28 @@
 // ===========================================================================
 
 class Animal {
-  fn __init__() {}
-  fn speak() -> Str { return "..."; }
+  fn __init__()                              {}
+  fn speak() -> Str                          { return "..."; }
 }
 
 class Dog : Animal {
-  fn __init__() { __super__(); }
-  fn speak() -> Str { return "Woof"; }
+  fn __init__()                              { __super__(); }
+  fn speak() -> Str                          { return "Woof"; }
 }
 
 class Cat : Animal {
-  fn __init__() { __super__(); }
-  fn speak() -> Str { return "Meow"; }
+  fn __init__()                              { __super__(); }
+  fn speak() -> Str                          { return "Meow"; }
 }
 
 class Bird : Animal {
-  fn __init__() { __super__(); }
-  fn speak() -> Str { return "Tweet"; }
+  fn __init__()                              { __super__(); }
+  fn speak() -> Str                          { return "Tweet"; }
 }
 
 class Labrador : Dog {
   name: Str;
-  fn __init__() { __super__(); self.name = "Rex"; }
+  fn __init__()                              { __super__(); self.name = "Rex"; }
 }
 
 // match inside a helper function (type mode), used as the function's value.

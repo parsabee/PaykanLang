@@ -1,18 +1,18 @@
 // OK: overrides keep the base signature; toString/equals overrides of the Obj
 // root with their correct signatures are valid.
 class Animal {
-  fn __init__() {}
-  fn describe() -> int { return 1; }
-  fn toString() -> Str { return "animal"; }
-  fn equals(other: Obj) -> bool { return True; }
+  fn __init__()                              {}
+  fn describe() -> int                       { return 1; }
+  fn toString() -> Str                       { return "animal"; }
+  fn equals(other: Obj) -> bool              { return True; }
 }
 
 class Dog : Animal {
-  fn __init__() { __super__(); }
-  fn describe() -> int { return 2; }       // matching signature
-  fn toString() -> Str { return "dog"; }   // valid Obj override
+  fn __init__()                              { __super__(); }
+  // matching signature
+  fn describe() -> int                       { return 2; }
+  // valid Obj override
+  fn toString() -> Str                       { return "dog"; }
 }
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

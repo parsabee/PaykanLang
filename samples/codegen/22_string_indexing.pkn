@@ -41,8 +41,8 @@ fn isPalindrome(s: Str) -> bool {
 fn main() -> int {
   // Basic indexing
   word: Str = "hello";
-  println(Str(word[0]));   // h
-  println(Str<char>(word[4]));   // o
+  println(Str(word[0]));                     // h
+  println(Str<char>(word[4]));               // o
 
   // Round-trip: index then Str<char>
   i: int = 0;
@@ -50,22 +50,22 @@ fn main() -> int {
     print(Str(word[i]));
     i = i + 1;
   }
-  println("");   // newline
+  println("");                               // newline
 
   // Count occurrences of a char
   sentence: Str = "the quick brown fox jumps over the lazy dog";
-  println("'e' count: " + Str<int>(countChar(sentence, 'e')));   // 3
-  println("'o' count: " + Str(countChar(sentence, 'o')));   // 4
+  println("'e' count: " + Str<int>(countChar(sentence, 'e')));  // 3
+  println("'o' count: " + Str(countChar(sentence, 'o')));  // 4
 
   // Reverse a string
-  println(reverseStr("abcde"));   // edcba
-  println(reverseStr("racecar")); // racecar
+  println(reverseStr("abcde"));              // edcba
+  println(reverseStr("racecar"));            // racecar
 
   // Palindrome check
   println(Str<bool>(isPalindrome("racecar")));  // True
-  println(Str(isPalindrome("hello")));    // False
-  println(Str<bool>(isPalindrome("a")));        // True
-  println(Str(isPalindrome("")));         // True
+  println(Str(isPalindrome("hello")));       // False
+  println(Str<bool>(isPalindrome("a")));     // True
+  println(Str(isPalindrome("")));            // True
 
   // Comparison between indexed chars
   s: Str = "az";

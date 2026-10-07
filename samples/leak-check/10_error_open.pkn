@@ -8,7 +8,7 @@ fn func1() {
   match open("/nonexistent/paykan/leak-check/path.txt", "r") {
     e: Error { }
     f: File  { }
-  } 
+  }
 }
 
 fn func2() {
@@ -19,8 +19,4 @@ fn func2() {
   }
 }
 
-fn main() -> int {
-  func1();
-  func2();
-  return 0;
-}
+fn main() -> int                             { func1(); func2(); return 0; }

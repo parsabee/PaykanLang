@@ -2,13 +2,13 @@
 // function does not always return a value.
 class Node {
   v: int;
-  fn __init__(x: int) { self.v = x; }
+  fn __init__(x: int)                        { self.v = x; }
 }
 
 fn value(n: Node?) -> int {
   match n {
     x: Node { return x.v; }
   }
-}   // error: non-void function 'value' does not always return a value
+}                                            // error: non-void function 'value' does not always return a value
 
-fn main() -> int { return value(None); }
+fn main() -> int                             { return value(None); }

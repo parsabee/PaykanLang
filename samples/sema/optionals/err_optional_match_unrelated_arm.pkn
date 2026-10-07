@@ -1,13 +1,13 @@
 // A type arm on a `Node?` subject must name Node or a subclass of it.
 class Node {
   v: int;
-  fn __init__(x: int) { self.v = x; }
+  fn __init__(x: int)                        { self.v = x; }
 }
 
 fn main() -> int {
   a: Node? = None;
   match a {
-    s: Str { }   // error: type 'Str' is not a subclass of 'Node' (the match subject has type 'Node?')
+    s: Str { }                               // error: type 'Str' is not a subclass of 'Node' (the match subject has type 'Node?')
     _      { }
   }
   return 0;

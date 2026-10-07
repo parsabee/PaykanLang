@@ -5,7 +5,7 @@ fn main() -> int {
   s2: Str = Str<float>(f);
   s3: Str = Str<bool>(b);
   s4: Str = Str<char>(c);
-  p1: int? = int<Str>(s);       // None for an invalid string
+  p1: int? = int<Str>(s);                    // None for an invalid string
   p2: float? = float<Str>(s);
   n1: int = int<float>(f);
   n2: float = float<int>(i);
@@ -13,7 +13,7 @@ fn main() -> int {
   n4: bool = bool<int>(i);
   n5: int = int<char>(c);
   n6: char = char<int>(i);
-  q1: bool? = bool<Str>(s);     // exactly "True" / "False"
+  q1: bool? = bool<Str>(s);                  // exactly "True" / "False"
   // The boxed forms: a boxed source formats like its primitive, a boxed
   // target parses into the optional box.
   b1: Int? = Int<Str>(s);

@@ -4,7 +4,7 @@
 import utils::strings as str;
 
 fn main() -> int {
-  x: int = str::len("hello");            // via alias
-  y: int = utils::strings::len("world"); // via full path
-  return x + y;  // 0 + 0 = 0
+  x: int = str::len("hello");                // via alias
+  y: int = utils::strings::len("world");     // via full path
+  return x + y;                              // 0 + 0 = 0
 }

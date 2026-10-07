@@ -1,5 +1,5 @@
 // ERROR: len() called with no arguments
 fn main() -> int {
-  n: int = len();  // sema error: 'len' expects 1 argument, got 0
+  n: int = len();                            // sema error: 'len' expects 1 argument, got 0
   return 0;
 }

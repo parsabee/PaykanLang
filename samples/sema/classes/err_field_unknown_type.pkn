@@ -3,6 +3,4 @@ class A {
   data: NoSuchType;
 }
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

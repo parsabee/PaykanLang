@@ -1,11 +1,11 @@
 // A `T?` never converts to `T` implicitly; unwrap it with `match`.
 class Node {
   v: int;
-  fn __init__(x: int) { self.v = x; }
+  fn __init__(x: int)                        { self.v = x; }
 }
 
 fn main() -> int {
   a: Node? = None;
-  b: Node = a;   // error: cannot use optional 'Node?' as 'Node' without unwrapping (use match)
+  b: Node = a;                               // error: cannot use optional 'Node?' as 'Node' without unwrapping (use match)
   return 0;
 }

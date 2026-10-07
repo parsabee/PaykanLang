@@ -3,5 +3,5 @@
 import lib::{foo, bar};
 
 fn main() -> int {
-  return foo::fooVal() + bar::barVal();  // 10 + 32 = 42
+  return foo::fooVal() + bar::barVal();      // 10 + 32 = 42
 }

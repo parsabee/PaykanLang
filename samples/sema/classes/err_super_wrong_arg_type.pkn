@@ -1,14 +1,12 @@
 // ERROR: __super__ called with wrong argument type
 class Animal {
-  fn __init__(x: int) {}
+  fn __init__(x: int)                        {}
 }
 
 class Dog : Animal {
   fn __init__() {
-    __super__(True);  // bool is not assignable to int
+    __super__(True);                         // bool is not assignable to int
   }
 }
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

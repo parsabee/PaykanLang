@@ -1,7 +1,4 @@
 // ERROR: tuple element 0 has type 'void' (the expression produces no value)
-fn nothing() {}
+fn nothing()                                 {}
 
-fn main() -> int {
-  t = (nothing(), 1);
-  return 0;
-}
+fn main() -> int                             { t = (nothing(), 1); return 0; }

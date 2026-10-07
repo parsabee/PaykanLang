@@ -1,10 +1,6 @@
 // ERROR: method return type is unknown
 class A {
-  fn foo() -> NoSuchType {
-    return 0;
-  }
+  fn foo() -> NoSuchType                     { return 0; }
 }
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

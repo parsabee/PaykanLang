@@ -28,27 +28,23 @@ class Node {
   v: int;
   name: Str;
   next: Node?;
-  fn __init__(v: int) { self.v = v; self.name = "n"; }
+  fn __init__(v: int)                        { self.v = v; self.name = "n"; }
 }
 
 class Tree {
   left: Tree?;
   right: Tree?;
   leaves: Node?;
-  fn __init__() { }
+  fn __init__()                              {}
 }
 
-fn leaf() -> Tree {
-  t = Tree();
-  t.leaves = Node(0);
-  return t;
-}
+fn leaf() -> Tree                            { t = Tree(); t.leaves = Node(0); return t; }
 
 fn list(n: int) -> int {
   head: Node? = None;
   i = 0;
   while (i < n) { node = Node(i); node.next = head; head = node; i = i + 1; }
-  return i;                    // head goes out of scope: the whole list drops
+  return i;                                  // head goes out of scope: the whole list drops
 }
 
 fn tree(depth: int) -> int {

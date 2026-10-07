@@ -1,5 +1,5 @@
 // The argument must have exactly the written source type (no promotion).
 fn main() -> int {
-  n = int<float>(3);   // error: argument of 'int<float>' has type 'int', expected 'float'
+  n = int<float>(3);                         // error: argument of 'int<float>' has type 'int', expected 'float'
   return 0;
 }

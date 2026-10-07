@@ -8,9 +8,9 @@ fn innerWork(flag: bool) -> Str {
   prefix: Str = "result";
   if (flag) {
     suffix: Str = "-yes";
-    return prefix + suffix;   // emitAllScopesCleanup releases prefix+suffix
+    return prefix + suffix;                  // emitAllScopesCleanup releases prefix+suffix
   }
-  return prefix + "-no";      // emitAllScopesCleanup releases only prefix
+  return prefix + "-no";                     // emitAllScopesCleanup releases only prefix
 }
 
 fn multiReturn(n: int) -> int {
@@ -29,11 +29,11 @@ fn main() -> int {
     s1: Str = "inner1";
     if (True) {
       s2: Str = "inner2";
-      println(s2);        // inner2  — s2 released when this block ends
+      println(s2);                           // inner2  — s2 released when this block ends
     }
-    println(s1);          // inner1  — s1 released when if block ends
+    println(s1);                             // inner1  — s1 released when if block ends
   }
-  println(s0);            // outer   — s0 released at function end
+  println(s0);                               // outer   — s0 released at function end
 
   println("=== loop iteration scopes ===");
   // Each iteration creates a fresh Str; scope cleanup runs per iteration.
@@ -45,16 +45,16 @@ fn main() -> int {
     i = i + 1;
   }
   // "0".."4" each have length 1  ->  total = 5
-  println(Str(total));   // 5
+  println(Str(total));                       // 5
 
   println("=== early return cleanup ===");
-  println(innerWork(True));    // result-yes
-  println(innerWork(False));   // result-no
+  println(innerWork(True));                  // result-yes
+  println(innerWork(False));                 // result-no
 
   println("=== multi-level early return ===");
-  println(Str<int>(multiReturn(0 - 5)));  // -1
-  println(Str(multiReturn(0)));      //  0
-  println(Str<int>(multiReturn(3)));      //  6
+  println(Str<int>(multiReturn(0 - 5)));     // -1
+  println(Str(multiReturn(0)));              //  0
+  println(Str<int>(multiReturn(3)));         //  6
 
   println("=== deeply nested scopes ===");
   // 4 levels of if-nesting each with a Str var; all must be cleaned up.
@@ -65,13 +65,13 @@ fn main() -> int {
       level2: Str = "L2";
       if (True) {
         level3: Str = "L3";
-        println(level3);    // L3
+        println(level3);                     // L3
       }
-      println(level2);      // L2
+      println(level2);                       // L2
     }
-    println(level1);        // L1
+    println(level1);                         // L1
   }
-  println(level0);          // L0
+  println(level0);                           // L0
 
   println("=== Str scope across reassign ===");
   // Rebinding releases the old box and installs a new one; original string
@@ -79,7 +79,7 @@ fn main() -> int {
   r: Str = "first";
   r = "second";
   r = "third";
-  println(r);               // third
+  println(r);                                // third
 
   println("=== scope stress: many short-lived Strs ===");
   j: int = 0;

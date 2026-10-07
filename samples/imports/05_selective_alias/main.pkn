@@ -5,8 +5,8 @@
 import ops::{add as plus, mul as times, sub};
 
 fn main() -> int {
-  a: int = plus::add(3, 4);   // 7
-  b: int = times::mul(3, 4);  // 12
-  c: int = sub::sub(12, 7);   // 5
-  return a + b + c;            // 7 + 12 + 5 = 24
+  a: int = plus::add(3, 4);                  // 7
+  b: int = times::mul(3, 4);                 // 12
+  c: int = sub::sub(12, 7);                  // 5
+  return a + b + c;                          // 7 + 12 + 5 = 24
 }

@@ -74,12 +74,10 @@ fn main(args: Str[]) -> int {
   src: Str = dir + "/paykan_copy_src.txt";
   dst: Str = dir + "/paykan_copy_dst.txt";
 
-  writeSource(src);    // write & close src
+  writeSource(src);                          // write & close src
   printFile(src);
-  copyFile(src, dst);  // copy src -> dst, close both
-  printFile(dst);      // read & print dst
+  copyFile(src, dst);                        // copy src -> dst, close both
+  printFile(dst);                            // read & print dst
 
   return 0;
 }
-
-

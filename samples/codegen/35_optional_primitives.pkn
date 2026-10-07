@@ -88,20 +88,20 @@ fn firstVowel(s: Str) -> char? {
 
 class Question {
   text: Str;
-  answer: bool?;               // implicitly None
-  fn __init__(t: Str) { self.text = t; }
+  answer: bool?;                             // implicitly None
+  fn __init__(t: Str)                        { self.text = t; }
 }
 
 // ---- generics: T? with T = int ---------------------------------------------
 
 class Cache<T> {
   slot: T?;
-  fn __init__() { }
-  fn get() -> T? { return self.slot; }
-  fn put(v: T) { self.slot = v; }
+  fn __init__()                              {}
+  fn get() -> T?                             { return self.slot; }
+  fn put(v: T)                               { self.slot = v; }
 }
 
-fn square(n: int) -> int { return n * n; }
+fn square(n: int) -> int                     { return n * n; }
 
 fn main() -> int {
   println("parse 12 -> " + show(parse("12")));

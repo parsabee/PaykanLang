@@ -1,10 +1,4 @@
 // OK: array type as a function parameter
-fn sum(nums: int[]) -> int {
-  return 0;
-}
+fn sum(nums: int[]) -> int                   { return 0; }
 
-fn main() -> int {
-  a: int[] = [1, 2, 3];
-  sum(a);
-  return 0;
-}
+fn main() -> int                             { a: int[] = [1, 2, 3]; sum(a); return 0; }

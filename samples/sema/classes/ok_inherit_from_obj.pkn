@@ -1,6 +1,4 @@
 // OK: inheriting from Obj explicitly is allowed
 class A: Obj {}
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

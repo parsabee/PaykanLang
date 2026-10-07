@@ -1,2 +1,2 @@
 // Module: lib/foo
-fn fooVal() -> int { return 10; }
+fn fooVal() -> int                           { return 10; }

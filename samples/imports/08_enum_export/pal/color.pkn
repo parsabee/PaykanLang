@@ -9,4 +9,4 @@ fn name(c: Color) -> Str {
   }
 }
 
-fn favorite() -> Color { return Color::Blue; }
+fn favorite() -> Color                       { return Color::Blue; }

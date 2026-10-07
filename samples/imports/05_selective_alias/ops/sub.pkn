@@ -1,2 +1,2 @@
 // Module: ops/sub
-fn sub(a: int, b: int) -> int { return a - b; }
+fn sub(a: int, b: int) -> int                { return a - b; }

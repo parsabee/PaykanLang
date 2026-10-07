@@ -27,11 +27,11 @@
 class Tagged {
   name: Str;
   tag: Str?;
-  fn __init__() { self.name = "k"; self.tag = "t"; }
+  fn __init__()                              { self.name = "k"; self.tag = "t"; }
 }
 
-fn consume(s: Str) -> int { return s.len(); }
-fn give() -> Str { return "ret"; }
+fn consume(s: Str) -> int                    { return s.len(); }
+fn give() -> Str                             { return "ret"; }
 
 fn main() -> int {
   c = "ab"[1];

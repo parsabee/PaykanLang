@@ -19,12 +19,12 @@ class Bag {
     self.grid[1].push("g1");
     seed.push("seed");
   }
-  fn reset() { self.items = []; self.items.push("reset"); }
-  fn take(xs: Str[]) -> int { xs.push("arg"); return xs.len(); }
+  fn reset()                                 { self.items = []; self.items.push("reset"); }
+  fn take(xs: Str[]) -> int                  { xs.push("arg"); return xs.len(); }
 }
 
-fn fresh() -> Str[] { return []; }
-fn fill(xs: Str[]) -> int { xs.push("fn"); return xs.len(); }
+fn fresh() -> Str[]                          { return []; }
+fn fill(xs: Str[]) -> int                    { xs.push("fn"); return xs.len(); }
 
 fn main() -> int {
   b: Bag = Bag([]);

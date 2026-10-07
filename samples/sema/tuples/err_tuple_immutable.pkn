@@ -1,6 +1,2 @@
 // ERROR: cannot assign to element '.0' of type '(int, int)': tuples are immutable
-fn main() -> int {
-  t = (1, 2);
-  t.0 = 5;
-  return 0;
-}
+fn main() -> int                             { t = (1, 2); t.0 = 5; return 0; }

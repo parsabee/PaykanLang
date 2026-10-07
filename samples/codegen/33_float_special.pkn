@@ -49,7 +49,7 @@ fn main() -> int {
   println("nan >= nan: " + Str(nan1 >= nan1));
   println("inf > big:  " + Str<bool>(inf > big));
   t: (float, float, float) = (nan1, inf, ninf);
-  println(t);                                  // (nan, inf, -inf)
+  println(t);                                // (nan, inf, -inf)
   println(Str(t.0) + " " + Str<float>(t.2));
   return 0;
 }

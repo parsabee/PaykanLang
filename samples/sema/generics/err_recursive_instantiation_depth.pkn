@@ -2,10 +2,7 @@
 // — the instantiation depth guard stops the expansion.
 class Bad<T> {
   inner: Bad<Bad<T>>;
-  fn __init__() {}
+  fn __init__()                              {}
 }
 
-fn main() -> int {
-  b: Bad<int> = Bad<int>();
-  return 0;
-}
+fn main() -> int                             { b: Bad<int> = Bad<int>(); return 0; }

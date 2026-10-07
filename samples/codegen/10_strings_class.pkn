@@ -9,9 +9,7 @@
 
 // ---- Helpers that pass/return Str ----------------------------------------
 
-fn shprintln(s: Str) -> Str {
-  return s + "!!!";
-}
+fn shprintln(s: Str) -> Str                  { return s + "!!!"; }
 fn repeat(s: Str, n: int) -> Str {
   acc: Str = "";
   i: int = 0;
@@ -21,84 +19,82 @@ fn repeat(s: Str, n: int) -> Str {
   }
   return acc;
 }
-fn longerOf(a: Str, b: Str) -> Str {
-  return if a.len() >= b.len() then a else b;
-}
+fn longerOf(a: Str, b: Str) -> Str           { return if a.len() >= b.len() then a else b; }
 
 // ---- main -----------------------------------------------------------------
 
 fn main() -> int {
   println("=== basic Str VarDecl ===");
   s: Str = "hello";
-  println(s);               // hello
+  println(s);                                // hello
 
   println("=== Str rebind from literal ===");
   s = "world";
-  println(s);               // world
+  println(s);                                // world
 
   println("=== Str rebind from concat expr ===");
   s = "foo" + "bar";
-  println(s);               // foobar
+  println(s);                                // foobar
 
   println("=== Str rebind from function call (no double-box) ===");
   s = shprintln("hi");
-  println(s);               // hi!!!
+  println(s);                                // hi!!!
 
   println("=== implicit Str decl from function call ===");
   implicit_s = shprintln("bye");
-  println(implicit_s);      // bye!!!
+  println(implicit_s);                       // bye!!!
 
   println("=== Str rebind from ternary (no double-box) ===");
   flag: bool = True;
   s = if flag then "yes" else "no";
-  println(s);               // yes
+  println(s);                                // yes
   s = if !flag then "yes" else "no";
-  println(s);               // no
+  println(s);                                // no
 
   println("=== method: length() ===");
   t: Str = "hello";
   n: int = t.len();
-  println(Str<int>(n));    // 5
+  println(Str<int>(n));                      // 5
   empty: Str = "";
-  println(Str(empty.len()));  // 0
+  println(Str(empty.len()));                 // 0
 
   println("=== method: concat() (in-place mutation) ===");
   a: Str = "hello";
   b: Str = " world";
   a.concat(b);
-  println(a);               // hello world
+  println(a);                                // hello world
   // concat more
   a2: Str = "hello";
   a2.concat(" !!");
-  println(a2);              // hello !!
+  println(a2);                               // hello !!
 
   println("=== method: toString() (class-typed return) ===");
   e: Str = "paykan";
   f: Str = e.toString();
-  println(f);               // paykan
+  println(f);                                // paykan
 
   println("=== string + operator ===");
   g: Str = "abc" + "def";
-  println(g);               // abcdef
+  println(g);                                // abcdef
   g = g + g;
-  println(g);               // abcdefabcdef
+  println(g);                                // abcdefabcdef
 
   println("=== Str<int> / Str<float> / Str<bool> builtins ===");
   si: Str = Str<int>(255);
   sf: Str = Str(3.14);
   sb: Str = Str<bool>(True);
-  println(si);              // 255
-  println(sf);              // 3.14
-  println(sb);              // True
+  println(si);                               // 255
+  println(sf);                               // 3.14
+  println(sb);                               // True
 
   println("=== Str passed to function ===");
   base: Str = "hi";
-  println(shprintln(base));     // hi!!!
-  println(repeat("ab", 4)); // abababab
+  println(shprintln(base));                  // hi!!!
+  println(repeat("ab", 4));                  // abababab
 
   println("=== Str returned and used immediately ===");
   println(longerOf("short", "much longer string"));  // much longer string
-  println(longerOf("equal!", "equal!"));             // equal!
+  println(longerOf("equal!", "equal!"));     // equal!
 
   println("=== many Str vars same scope (stress refcount) ===");
   v0: Str = "s0";
@@ -106,7 +102,7 @@ fn main() -> int {
   v2: Str = "s2";
   v3: Str = "s3";
   v4: Str = "s4";
-  println(v0 + v1 + v2 + v3 + v4);   // s0s1s2s3s4
+  println(v0 + v1 + v2 + v3 + v4);           // s0s1s2s3s4
 
   println("=== Str vars in loop (scope cleanup per iteration) ===");
   i: int = 0;

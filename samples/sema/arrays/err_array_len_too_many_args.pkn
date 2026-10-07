@@ -1,6 +1,6 @@
 // ERROR: len() called with too many arguments
 fn main() -> int {
   a: int[] = [1, 2, 3];
-  n: int = len(a, a);  // sema error: 'len' expects 1 argument, got 2
+  n: int = len(a, a);                        // sema error: 'len' expects 1 argument, got 2
   return 0;
 }

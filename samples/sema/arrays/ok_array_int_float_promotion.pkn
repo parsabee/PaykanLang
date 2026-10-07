@@ -1,5 +1,5 @@
 // OK: mixed int/float literal is promoted to float[]
 fn main() -> int {
-  a = [1, 2.0, 3];  // inferred float[]
+  a = [1, 2.0, 3];                           // inferred float[]
   return 0;
 }

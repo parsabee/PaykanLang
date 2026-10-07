@@ -1,3 +1,3 @@
 // b::util -- same stem as a::util.
-fn tag() -> Str { return "b"; }
-fn twice(s: Str) -> Str { return s + s; }
+fn tag() -> Str                              { return "b"; }
+fn twice(s: Str) -> Str                      { return s + s; }

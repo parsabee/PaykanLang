@@ -1,13 +1,10 @@
 // ERROR: a class name is also its constructor, so a free function cannot share it
-fn Point() -> int {  // sema error: 'Point' is already declared as a class
-  return 0;
-}
+// sema error: 'Point' is already declared as a class
+fn Point() -> int                            { return 0; }
 
 class Point {
   x: int;
-  fn __init__(x: int) { self.x = x; }
+  fn __init__(x: int)                        { self.x = x; }
 }
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

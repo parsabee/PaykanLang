@@ -8,22 +8,22 @@
 class Pair {
   a: Cell;
   b: Cell;
-  fn __init__(a: Cell, b: Cell) { self.a = a; self.b = b; }
-  fn first() -> Cell { return self.a; }
-  fn sum() -> int { return self.a.v + self.b.v; }
+  fn __init__(a: Cell, b: Cell)              { self.a = a; self.b = b; }
+  fn first() -> Cell                         { return self.a; }
+  fn sum() -> int                            { return self.a.v + self.b.v; }
 }
 
 class Cell {
   v: int;
   kind: Kind;
   fn __init__(v: int) { self.v = v; self.kind = Kind::Even; if (v % 2 != 0) { self.kind = Kind::Odd; } }
-  fn kindOf() -> Kind { return self.kind; }
-  fn pairWith(o: Cell) -> Pair { return Pair(self, o); }
+  fn kindOf() -> Kind                        { return self.kind; }
+  fn pairWith(o: Cell) -> Pair               { return Pair(self, o); }
 }
 
 class Splitter {
-  fn __init__() {}
-  fn split(c: Cell) -> Cell[] { return [Cell(c.v / 2), Cell(c.v - c.v / 2)]; }
+  fn __init__()                              {}
+  fn split(c: Cell) -> Cell[]                { return [Cell(c.v / 2), Cell(c.v - c.v / 2)]; }
 }
 
 enum Kind { Even, Odd }

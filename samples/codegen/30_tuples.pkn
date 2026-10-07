@@ -11,76 +11,75 @@
 class Point {
   x: int;
   y: int;
-  fn __init__(x: int, y: int) { self.x = x; self.y = y; }
-  fn toString() -> Str { return "P(" + Str<int>(self.x) + "," + Str(self.y) + ")"; }
+  fn __init__(x: int, y: int)                { self.x = x; self.y = y; }
+  fn toString() -> Str {
+    return "P(" + Str<int>(self.x) + "," + Str(self.y) + ")";
+  }
 }
 
 class Range {
-  bounds: (int, int);                     // a tuple-typed field
-  fn __init__(lo: int, hi: int) { self.bounds = (lo, hi); }
-  fn width() -> int { return self.bounds.1 - self.bounds.0; }
-  fn get() -> (int, int) { return self.bounds; }
+  bounds: (int, int);                        // a tuple-typed field
+  fn __init__(lo: int, hi: int)              { self.bounds = (lo, hi); }
+  fn width() -> int                          { return self.bounds.1 - self.bounds.0; }
+  fn get() -> (int, int)                     { return self.bounds; }
 }
 
-fn divmod(a: int, b: int) -> (int, int) {  // multiple return
-  return (a / b, a % b);
-}
+// multiple return
+fn divmod(a: int, b: int) -> (int, int)      { return (a / b, a % b); }
 
-fn label(p: Point) -> (Str, Point) {
-  return ("point", p);
-}
+fn label(p: Point) -> (Str, Point)           { return ("point", p); }
 
 fn main() -> int {
   // Literals and element access.
   t = (1, "a", 2.5, True);
-  println(t);                             // (1, a, 2.5, True)
-  println(Str<int>(t.0));                   // 1
-  println(t.1);                           // a
-  println(Str(t.2));                 // 2.5
+  println(t);                                // (1, a, 2.5, True)
+  println(Str<int>(t.0));                    // 1
+  println(t.1);                              // a
+  println(Str(t.2));                         // 2.5
 
   // Multiple return + destructuring.
   q, r = divmod(7, 2);
-  println(Str<int>(q) + " " + Str(r));   // 3 1
-  _, rem = divmod(9, 4);                  // `_` skips an element
-  println(Str<int>(rem));                   // 1
-  q, r = divmod(20, 6);                   // re-assigns the existing q and r
-  println(Str(q) + " " + Str<int>(r));   // 3 2
+  println(Str<int>(q) + " " + Str(r));       // 3 1
+  _, rem = divmod(9, 4);                     // `_` skips an element
+  println(Str<int>(rem));                    // 1
+  q, r = divmod(20, 6);                      // re-assigns the existing q and r
+  println(Str(q) + " " + Str<int>(r));       // 3 2
 
   // Nesting and chained access.
   nested = ((1, 2), ("x", (3, "y")));
-  println(nested);                        // ((1, 2), (x, (3, y)))
-  println(nested.1.1.1);                  // y
+  println(nested);                           // ((1, 2), (x, (3, y)))
+  println(nested.1.1.1);                     // y
 
   // Tuples of arrays and arrays of tuples.
   pairs: (int, Str)[] = [(1, "one"), (2, "two")];
   pairs.push((3, "three"));
-  println(pairs[2].1);                    // three
+  println(pairs[2].1);                       // three
   arrs: (int[], Str) = ([1, 2, 3], "nums");
-  arrs.0.push(4);                         // the array inside is still mutable
-  println(Str(arrs.0.len()));          // 4
+  arrs.0.push(4);                            // the array inside is still mutable
+  println(Str(arrs.0.len()));                // 4
 
   // Tuples holding objects, as fields, and returned from methods.
   name, pt = label(Point(1, 2));
-  println(name + " " + pt.toString());    // point P(1,2)
+  println(name + " " + pt.toString());       // point P(1,2)
   rg: Range = Range(10, 25);
-  println(Str<int>(rg.width()));            // 15
+  println(Str<int>(rg.width()));             // 15
   lo, hi = rg.get();
-  println(Str(lo) + ".." + Str<int>(hi)); // 10..25
+  println(Str(lo) + ".." + Str<int>(hi));    // 10..25
 
   // Equality is element-wise (Str by content, objects by their `equals`).
   a = (1, "s");
   b = (1, "s");
-  println(Str(a == b));               // True
-  println(Str<bool>(a != (2, "s")));        // True
-  println(Str(label(pt) == label(pt))); // True  (same Point object)
+  println(Str(a == b));                      // True
+  println(Str<bool>(a != (2, "s")));         // True
+  println(Str(label(pt) == label(pt)));      // True  (same Point object)
 
   // A copy shares the tuple; re-assigning the source leaves the copy intact.
   m = a;
   a = (0, "reset");
-  println(m.1 + a.1);                     // sreset
+  println(m.1 + a.1);                        // sreset
 
   // Tuples are Obj values: printable, storable as Obj.
   o: Obj = (q, r);
-  println(o);                             // (3, 2)
+  println(o);                                // (3, 2)
   return 0;
 }

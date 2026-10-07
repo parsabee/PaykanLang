@@ -12,25 +12,25 @@
 
 class A {
   x: int;
-  fn __init__() { self.x = 5; }
+  fn __init__()                              { self.x = 5; }
 }
 
 class Holder {
   a: A;
-  fn __init__(a0: A) { self.a = a0; }
+  fn __init__(a0: A)                         { self.a = a0; }
 }
 
-fn probe(a: A) { println(Str<int>(a.x)); }
+fn probe(a: A)                               { println(Str<int>(a.x)); }
 
 fn main() -> int {
   o: Obj = A();
   h: Holder = Holder(A());
   match o {
     b: A {
-      probe(b);      // consumed argument: retains the subject's box
-      c: A = b;      // new owner: shares the same box
-      h.a = b;       // field slot: releases old box, retains subject's
-      println(Str(c.x + h.a.x));  // 10
+      probe(b);                              // consumed argument: retains the subject's box
+      c: A = b;                              // new owner: shares the same box
+      h.a = b;                               // field slot: releases old box, retains subject's
+      println(Str(c.x + h.a.x));             // 10
     }
     _ { println("no"); }
   }

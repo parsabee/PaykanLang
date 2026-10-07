@@ -17,10 +17,7 @@
 class Entry {
   key: Str;
   value: float;
-  fn __init__(k: Str, v: float) {
-    self.key = k;
-    self.value = v;
-  }
+  fn __init__(k: Str, v: float)              { self.key = k; self.value = v; }
 }
 
 // Ordinal of a character: its 1-based index in a reference alphabet, or 0 for
@@ -87,7 +84,7 @@ class HashMap {
   fn insert(key: Str, value: float) -> bool {
     match self.lookup(key) {
       e: Entry {
-        e.value = value; // update in place (Entry is a reference type)
+        e.value = value;                     // update in place (Entry is a reference type)
         return False;
       }
       None {
@@ -117,7 +114,7 @@ class HashMap {
       j: int = 0;
       while (j < chain.len()) {
         e: Entry = chain[j];
-        self.insert(e.key, e.value); // size already counted; just redistribute
+        self.insert(e.key, e.value);         // size already counted; just redistribute
         j = j + 1;
       }
       bi = bi + 1;
@@ -166,7 +163,7 @@ class HashMap {
     return out;
   }
 
-  fn count() -> int { return self.size; }
+  fn count() -> int                          { return self.size; }
 
   // Drop all entries and shrink back to the initial bucket count.
   fn clear() {

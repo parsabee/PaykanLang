@@ -1,8 +1,5 @@
 // ERROR: builtin class names are reserved in the function namespace too
-fn File(path: Str) -> int {  // sema error: 'File' is a builtin class and cannot be redeclared
-  return 0;
-}
+// sema error: 'File' is a builtin class and cannot be redeclared
+fn File(path: Str) -> int                    { return 0; }
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

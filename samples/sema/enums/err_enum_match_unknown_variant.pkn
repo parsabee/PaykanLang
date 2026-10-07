@@ -7,7 +7,7 @@ fn main() -> int {
   match c {
     Red   { }
     Green { }
-    Blue  { }   // sema error: 'Blue' is not a variant of enum 'Color'
+    Blue  { }                                // sema error: 'Blue' is not a variant of enum 'Color'
     _     { }
   }
   return 0;

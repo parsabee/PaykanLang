@@ -2,7 +2,7 @@
 fn main() -> int {
   s: Str = "hello";
   match s {
-    int[] { }  // sema error: array match arm requires an 'Obj' subject, got 'Str'
+    int[] { }                                // sema error: array match arm requires an 'Obj' subject, got 'Str'
     _     { }
   }
   return 0;

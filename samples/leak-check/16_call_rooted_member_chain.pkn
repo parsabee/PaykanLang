@@ -13,36 +13,28 @@
 class H {
   a: Str;
 
-  fn __init__() {
-    self.a = "hello";
-  }
+  fn __init__()                              { self.a = "hello"; }
 }
 
 class O {
   h: H;
 
-  fn __init__() {
-    self.h = H();
-  }
+  fn __init__()                              { self.h = H(); }
 }
 
-fn makeH() -> H {
-  return H();
-}
+fn makeH() -> H                              { return H(); }
 
-fn makeO() -> O {
-  return O();
-}
+fn makeO() -> O                              { return O(); }
 
 fn main() -> int {
-  x = makeH().a;         // chain used as a value
+  x = makeH().a;                             // chain used as a value
   println(x);
-  n: int = makeH().a.len(); // chain used as a receiver
+  n: int = makeH().a.len();                  // chain used as a receiver
   println(Str<int>(n));
-  y = makeO().h.a;       // nested chain
+  y = makeO().h.a;                           // nested chain
   println(y);
   h: H = H();
-  z = h.a;               // borrowed field read acquired by a new owner
+  z = h.a;                                   // borrowed field read acquired by a new owner
   println(z);
   return 0;
 }

@@ -1,9 +1,6 @@
 // ERROR: a class name doubles as its constructor, so it may not reuse a builtin function name
-class print {  // sema error: 'print' is a builtin function and cannot be redeclared
-  fn __init__() {}
+class print {                                // sema error: 'print' is a builtin function and cannot be redeclared
+  fn __init__()                              {}
 }
 
-fn main() -> int {
-  print("hello");
-  return 0;
-}
+fn main() -> int                             { print("hello"); return 0; }

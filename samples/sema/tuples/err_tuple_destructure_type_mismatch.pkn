@@ -1,5 +1,2 @@
 // ERROR: element 0 of type 'int' does not match declared type 'Str' for target 'a'
-fn main() -> int {
-  a: Str, b: int = (1, 2);
-  return 0;
-}
+fn main() -> int                             { a: Str, b: int = (1, 2); return 0; }

@@ -4,12 +4,12 @@ class Foo {}
 
 class Bar<Foo> {
   x: Foo;
-  fn __init__(x: Foo) { self.x = x; }
+  fn __init__(x: Foo)                        { self.x = x; }
 }
 
 class Pair<T, T> {
   a: T;
-  fn __init__(a: T) { self.a = a; }
+  fn __init__(a: T)                          { self.a = a; }
 }
 
-fn main() -> int { return 0; }
+fn main() -> int                             { return 0; }

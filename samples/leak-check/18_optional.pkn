@@ -15,12 +15,10 @@
 class Node {
   v: int;
   next: Node?;
-  fn __init__(x: int) { self.v = x; }
+  fn __init__(x: int)                        { self.v = x; }
 }
 
-fn make(c: bool) -> Node? {
-  return if c then Node(1) else None;
-}
+fn make(c: bool) -> Node?                    { return if c then Node(1) else None; }
 
 fn show(n: Node?) {
   match n {
@@ -30,26 +28,26 @@ fn show(n: Node?) {
 }
 
 fn main() -> int {
-  a: Node? = None;             // NULL box, released (no-op) at scope exit
+  a: Node? = None;                           // NULL box, released (no-op) at scope exit
   b: Node? = Node(2);
-  b = None;                    // releases Node(2)
+  b = None;                                  // releases Node(2)
   b = Node(3);
-  a = b;                       // shares Node(3)
-  c = a;                       // shares Node(3) again
-  show(c);                     // 3
-  show(make(False));           // none — call temporary, no box to release
-  show(make(True));            // 1 — call temporary released at match.end
-  o: Obj = make(False);        // None singleton boxed for the Obj slot
-  println(o);                  // None
+  a = b;                                     // shares Node(3)
+  c = a;                                     // shares Node(3) again
+  show(c);                                   // 3
+  show(make(False));                         // none — call temporary, no box to release
+  show(make(True));                          // 1 — call temporary released at match.end
+  o: Obj = make(False);                      // None singleton boxed for the Obj slot
+  println(o);                                // None
   head: Node = Node(10);
-  head.next = Node(11);        // field owns the temporary
-  head.next = None;            // releases Node(11)
+  head.next = Node(11);                      // field owns the temporary
+  head.next = None;                          // releases Node(11)
   xs: Node?[] = [];
   xs.push(None);
   xs.push(Node(20));
-  xs[1] = None;                // releases Node(20)
-  xs.push(Node(21));           // destroyed with the array
+  xs[1] = None;                              // releases Node(20)
+  xs.push(Node(21));                         // destroyed with the array
   s: Str? = "str";
-  s = None;                    // releases the string
+  s = None;                                  // releases the string
   return 0;
 }

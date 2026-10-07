@@ -3,6 +3,6 @@
 //   "shapes::Shape" uses only the base path prefix — not a valid qualifier
 import shapes::base;
 
-class Circle : shapes::Shape {}  // ERROR: 'shapes::Shape' is not defined
+class Circle : shapes::Shape {}              // ERROR: 'shapes::Shape' is not defined
 
-fn main() -> int { return 0; }
+fn main() -> int                             { return 0; }

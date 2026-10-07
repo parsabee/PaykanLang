@@ -3,7 +3,7 @@ fn main() -> int {
   n: int = 2;
   match n {
     1 { }
-    "two" { }   // sema error: Str literal does not match int subject
+    "two" { }                                // sema error: Str literal does not match int subject
     _ { }
   }
   return 0;

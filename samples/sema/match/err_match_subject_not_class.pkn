@@ -4,7 +4,7 @@ class Animal {}
 fn main() -> int {
   x: int = 42;
   match x {
-    Animal { }   // sema error: value-match requires literal patterns, not type names
+    Animal { }                               // sema error: value-match requires literal patterns, not type names
     _ { }
   }
   return 0;

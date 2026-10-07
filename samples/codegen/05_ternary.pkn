@@ -7,24 +7,22 @@ fn classify(n: int) -> Str {
   return if n > 0 then "positive" else if n < 0 then "negative" else "zero";
 }
 
-fn pickStr(flag: bool, a: Str, b: Str) -> Str {
-  return if flag then a else b;
-}
+fn pickStr(flag: bool, a: Str, b: Str) -> Str  { return if flag then a else b; }
 
 fn main() -> int {
   println("=== int ternary ===");
   x: int = if True  then 10 else 20;
   y: int = if False then 10 else 20;
-  println("True  ->" + Str<int>(x));    // 10
-  println("False ->" + Str(y));    // 20
+  println("True  ->" + Str<int>(x));         // 10
+  println("False ->" + Str(y));              // 20
 
   println("=== float ternary ===");
   f: float = if 1 < 2 then 1.5 else 2.5;
-  println("1<2 ->" + Str<float>(f));    // 1.5
+  println("1<2 ->" + Str<float>(f));         // 1.5
 
   println("=== bool ternary ===");
   b: bool = if True then False else True;
-  println("bool ->" + Str(b));    // False
+  println("bool ->" + Str(b));               // False
 
   println("=== nested ternary ===");
   grade: int = 85;
@@ -44,28 +42,28 @@ fn main() -> int {
   // calls emitAsShared on each branch.
   cond: bool = True;
   s: Str = if cond then "yes" else "no";
-  println(s);           // yes
+  println(s);                                // yes
   s = if !cond then "yes" else "no";
-  println(s);           // no
+  println(s);                                // no
 
   println("=== Str ternary rebind (double-box regression) ===");
   // Assigning a ternary-Str to an existing variable must not double-box.
   t: Str = "initial";
   t = if True then "replaced" else "original";
-  println(t);           // replaced
+  println(t);                                // replaced
 
   println("=== ternary in function return ===");
-  println(classify(5));    // positive
-  println(classify(0 - 3));// negative
-  println(classify(0));    // zero
+  println(classify(5));                      // positive
+  println(classify(0 - 3));                  // negative
+  println(classify(0));                      // zero
 
   println("=== ternary with owned Str variables as branches ===");
   p: Str = "alpha";
   q: Str = "beta";
   r: Str = pickStr(True,  p, q);
-  println(r);           // alpha
+  println(r);                                // alpha
   r = pickStr(False, p, q);
-  println(r);           // beta
+  println(r);                                // beta
 
   return 0;
 }

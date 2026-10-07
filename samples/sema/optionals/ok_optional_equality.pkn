@@ -3,10 +3,10 @@
 // type (both None -> equal, one None -> not equal, otherwise `equals`).
 class Node {
   v: int;
-  fn __init__(x: int) { self.v = x; }
+  fn __init__(x: int)                        { self.v = x; }
 }
 class Leaf : Node {
-  fn __init__(x: int) { __super__(x); }
+  fn __init__(x: int)                        { __super__(x); }
 }
 
 fn main() -> int {
@@ -17,7 +17,7 @@ fn main() -> int {
   if (b != None) { println("b is some"); }
   if (None == a) { println("none == a"); }
   println(Str<bool>(a == b));
-  println(Str<bool>(b == l));    // subtype-compatible optionals
+  println(Str<bool>(b == l));                // subtype-compatible optionals
   s: Str? = "x";
   t: Str? = "x";
   println(Str<bool>(s == t));

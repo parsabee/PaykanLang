@@ -12,21 +12,19 @@
 
 class Holder {
   pair: (int, Str);
-  fn __init__(p: (int, Str)) { self.pair = p; }
-  fn get() -> (int, Str) { return self.pair; }
+  fn __init__(p: (int, Str))                 { self.pair = p; }
+  fn get() -> (int, Str)                     { return self.pair; }
 }
 
-fn mk() -> (Str, int) {
-  return ("tmp", 1);
-}
+fn mk() -> (Str, int)                        { return ("tmp", 1); }
 
 fn main() -> int {
-  t = (1, "a");                  // literal with a Str element
-  s: Str = t.1;                  // new owner of the element
-  str, n = mk();                 // destructure a returned temporary
-  nested = ((1, "x"), (2.5, t)); // nested tuple sharing t
+  t = (1, "a");                              // literal with a Str element
+  s: Str = t.1;                              // new owner of the element
+  str, n = mk();                             // destructure a returned temporary
+  nested = ((1, "x"), (2.5, t));             // nested tuple sharing t
   println(nested);
-  println(mk().0);               // call-rooted element read
+  println(mk().0);                           // call-rooted element read
   arr: (int, Str)[] = [t, (2, "b")];
   arr.push(mk_pair());
   h: Holder = Holder(t);
@@ -38,6 +36,4 @@ fn main() -> int {
   return 0;
 }
 
-fn mk_pair() -> (int, Str) {
-  return (3, "c");
-}
+fn mk_pair() -> (int, Str)                   { return (3, "c"); }

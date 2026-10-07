@@ -3,10 +3,8 @@ class A {
   x: int;
 
   fn setX(v: float) {
-    self.x = v;  // cannot assign float to int field
+    self.x = v;                              // cannot assign float to int field
   }
 }
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

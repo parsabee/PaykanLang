@@ -2,15 +2,11 @@
 class Dog : Animal {
   breed: Str;
 
-  fn getAnimalName() -> Str {
-    return self.name;
-  }
+  fn getAnimalName() -> Str                  { return self.name; }
 }
 
 class Animal {
   name: Str;
 }
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }

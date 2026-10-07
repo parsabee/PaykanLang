@@ -12,17 +12,17 @@ fn main() -> int {
   c: lib::Cell = lib::Cell(7);
   d: lib::Cell = lib::Cell(4);
 
-  p: lib::Pair = c.pairWith(d);         // method taking and returning module classes
-  f: lib::Cell = p.first();             // ... from the class that was declared first
-  k: lib::Kind = f.kindOf();            // method returning a module enum
+  p: lib::Pair = c.pairWith(d);              // method taking and returning module classes
+  f: lib::Cell = p.first();                  // ... from the class that was declared first
+  k: lib::Kind = f.kindOf();                 // method returning a module enum
   s: lib::Splitter = lib::Splitter();
-  halves: lib::Cell[] = s.split(c);     // method returning an array of a class
+  halves: lib::Cell[] = s.split(c);          // method returning an array of a class
 
   odd: int = 0;
   if (k == lib::Kind::Odd) { odd = 1; }
 
-  println(Str<int>(p.sum()));             // 11
-  println(Str(lib::total(halves)));  // 7
-  println(Str<int>(odd));                 // 1
+  println(Str<int>(p.sum()));                // 11
+  println(Str(lib::total(halves)));          // 7
+  println(Str<int>(odd));                    // 1
   return 0;
 }

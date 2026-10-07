@@ -3,9 +3,7 @@
 class Animal {
   name: Str;
 
-  fn __init__(n: Str) {
-    self.name = n;
-  }
+  fn __init__(n: Str)                        { self.name = n; }
 }
 
 class Dog : Animal {
@@ -17,6 +15,4 @@ class Dog : Animal {
   }
 }
 
-fn main() -> int {
-  return 0;
-}
+fn main() -> int                             { return 0; }
