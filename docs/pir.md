@@ -4,7 +4,7 @@ PIR is the small, backend-neutral IR that sits between Sema's typed AST and
 every backend (C, LLVM, out-of-tree).  It is produced by **one** lowering
 pass (`src/Lowering`), which is the single home of the ownership rules: by the
 time a backend sees PIR, every `retain`/`release`/`box`/`unbox`, every scope
-cleanup, every `mov`, every `match` dispatch and every vtable is explicit.  A
+cleanup, every `match` dispatch and every vtable is explicit.  A
 backend never re-derives any of that; it translates PIR ops one-to-one.
 
 PIR has a textual form (printer + parser, so backend tests need no frontend),
@@ -92,9 +92,8 @@ like LLVM entry-block allocas) and read/written with `load`/`store`.  Several
 locals may share a name (two match arms binding `a`, a name declared in sibling
 scopes), so the printer writes a local as `%name.I` with `I` its index;
 hand-written text may use any spelling as long as declaration and uses agree.
-Every Paykan variable is a local; `mov` nulls the slot it moves out of, so the
-scope-exit `release` of a moved variable is a release of `null` (the runtime
-accepts it).
+Every Paykan variable is a local.  A slot can hold `null` (an absent optional),
+so `release` of a null box is a no-op in the runtime.
 
 A function is `extern` when it is defined elsewhere: in the runtime (no
 `module` clause; the name is `$rt.` followed by the C symbol, see below) or in
@@ -289,16 +288,14 @@ CodeGen enforced, now in one place.
 
 * **Variables** hold `box` values and own one reference.  Declaring a variable
   from an expression yields an owned box: a fresh +1 box (call, method call,
-  ternary, array/tuple literal, `mov` of an owned variable, call-rooted field or
-  element read) is stored as-is; a borrowed box (plain field read, tuple
-  element, array element, another variable) is `retain`ed first; a raw object
+  ternary, array/tuple literal, call-rooted field or element read) is stored
+  as-is; a borrowed box (plain field read, tuple element, array element,
+  another variable) is `retain`ed first; a raw object
   (string literal, concat result, `self`, a match-arm binding) is `box`ed, which
   creates the object's unique box or acquires the existing one.
 * **Scope exit** releases the scope's owned variables in reverse declaration
   order, then any pending temporaries (a match subject), on every path:
   fall-through, `ret` (all scopes), `break`/`continue` (scopes inside the loop).
-* **`mov x`** of an owned variable loads the box, stores `null` into the slot
-  and hands the box to the consumer without a retain.
 * **Arguments** to user functions/methods, `__super__` and the virtual `equals`
   are owned (+1) boxes that the callee releases on exit (callee-consumes).
   Arguments to runtime builtins are borrowed; temporaries are released after the

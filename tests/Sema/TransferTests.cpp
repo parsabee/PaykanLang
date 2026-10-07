@@ -11,7 +11,7 @@ using namespace paykan::test;
 
 // -- Plain hand-offs
 
-TEST(Mov, MovePrimitiveOk) {
+TEST(Transfer, MovePrimitiveOk) {
   auto r = semaCheck(R"(
     fn main() -> int {
       a: int = 3;
@@ -22,7 +22,7 @@ TEST(Mov, MovePrimitiveOk) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, MoveStringOk) {
+TEST(Transfer, MoveStringOk) {
   auto r = semaCheck(R"(
     fn main() -> int {
       s: Str = "hi";
@@ -34,7 +34,7 @@ TEST(Mov, MoveStringOk) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, MoveTemporaryOk) {
+TEST(Transfer, MoveTemporaryOk) {
   auto r = semaCheck(R"(
     fn make() -> Str { return "x"; }
     fn main() -> int {
@@ -48,7 +48,7 @@ TEST(Mov, MoveTemporaryOk) {
 
 // -- Use after a hand-off
 
-TEST(Mov, UseAfterMoveReadAccepted) {
+TEST(Transfer, UseAfterMoveReadAccepted) {
   auto r = semaCheck(R"(
     fn main() -> int {
       a: int = 3;
@@ -60,7 +60,7 @@ TEST(Mov, UseAfterMoveReadAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, UseAfterMoveInExprAccepted) {
+TEST(Transfer, UseAfterMoveInExprAccepted) {
   auto r = semaCheck(R"(
     fn main() -> int {
       a: int = 3;
@@ -71,7 +71,7 @@ TEST(Mov, UseAfterMoveInExprAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, DoubleMoveAccepted) {
+TEST(Transfer, DoubleMoveAccepted) {
   auto r = semaCheck(R"(
     fn main() -> int {
       s: Str = "hi";
@@ -85,7 +85,7 @@ TEST(Mov, DoubleMoveAccepted) {
 
 // -- Re-assignment after a hand-off
 
-TEST(Mov, ReassignRevivesVariable) {
+TEST(Transfer, ReassignRevivesVariable) {
   auto r = semaCheck(R"(
     fn main() -> int {
       s: Str = "hi";
@@ -100,7 +100,7 @@ TEST(Mov, ReassignRevivesVariable) {
 
 // -- Aggregate-slot operands
 
-TEST(Mov, MoveMemberVariableAccepted) {
+TEST(Transfer, MoveMemberVariableAccepted) {
   auto r = semaCheck(R"(
     class Box { v: Str;
       fn __init__(s: Str) { self.v = s; }
@@ -114,7 +114,7 @@ TEST(Mov, MoveMemberVariableAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, MoveArrayElementAccepted) {
+TEST(Transfer, MoveArrayElementAccepted) {
   auto r = semaCheck(R"(
     fn main() -> int {
       a: int[] = [1, 2, 3];
@@ -127,7 +127,7 @@ TEST(Mov, MoveArrayElementAccepted) {
 
 // -- `self` and parameters
 
-TEST(Mov, MoveSelfAccepted) {
+TEST(Transfer, MoveSelfAccepted) {
   auto r = semaCheck(R"(
     class A {
       x: int;
@@ -145,7 +145,7 @@ TEST(Mov, MoveSelfAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, MoveParameterOk) {
+TEST(Transfer, MoveParameterOk) {
   auto r = semaCheck(R"(
     fn consume(s: Str) { println(s); }
     fn pass(s: Str) { consume(s); }
@@ -159,7 +159,7 @@ TEST(Mov, MoveParameterOk) {
 
 // -- Loops
 
-TEST(Mov, MoveInLoopDeclaredOutsideAccepted) {
+TEST(Transfer, MoveInLoopDeclaredOutsideAccepted) {
   auto r = semaCheck(R"(
     fn consume(s: Str) { println(s); }
     fn main() -> int {
@@ -175,7 +175,7 @@ TEST(Mov, MoveInLoopDeclaredOutsideAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, MoveInLoopConditionAccepted) {
+TEST(Transfer, MoveInLoopConditionAccepted) {
   auto r = semaCheck(R"(
     fn check(s: Str) -> bool { return False; }
     fn main() -> int {
@@ -189,7 +189,7 @@ TEST(Mov, MoveInLoopConditionAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, MoveInLoopReassignedBeforeBackEdgeOk) {
+TEST(Transfer, MoveInLoopReassignedBeforeBackEdgeOk) {
   auto r = semaCheck(R"(
     fn consume(s: Str) { println(s); }
     fn main() -> int {
@@ -207,7 +207,7 @@ TEST(Mov, MoveInLoopReassignedBeforeBackEdgeOk) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, MoveInLoopReassignedOnlySomePathsAccepted) {
+TEST(Transfer, MoveInLoopReassignedOnlySomePathsAccepted) {
   auto r = semaCheck(R"(
     fn consume(s: Str) { println(s); }
     fn main() -> int {
@@ -224,7 +224,7 @@ TEST(Mov, MoveInLoopReassignedOnlySomePathsAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, MoveInLoopDeclaredInsideOk) {
+TEST(Transfer, MoveInLoopDeclaredInsideOk) {
   auto r = semaCheck(R"(
     fn consume(s: Str) { println(s); }
     fn main() -> int {
@@ -240,7 +240,7 @@ TEST(Mov, MoveInLoopDeclaredInsideOk) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, MoveBeforeLoopStaysMovedInsideAccepted) {
+TEST(Transfer, MoveBeforeLoopStaysMovedInsideAccepted) {
   auto r = semaCheck(R"(
     fn main() -> int {
       s: Str = "x";
@@ -258,7 +258,7 @@ TEST(Mov, MoveBeforeLoopStaysMovedInsideAccepted) {
 
 // -- Branches
 
-TEST(Mov, MoveInThenDoesNotPoisonElse) {
+TEST(Transfer, MoveInThenDoesNotPoisonElse) {
   auto r = semaCheck(R"(
     fn consume(s: Str) { println(s); }
     fn main() -> int {
@@ -275,7 +275,7 @@ TEST(Mov, MoveInThenDoesNotPoisonElse) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, MoveInMatchArmDoesNotPoisonSiblingArm) {
+TEST(Transfer, MoveInMatchArmDoesNotPoisonSiblingArm) {
   auto r = semaCheck(R"(
     fn consume(s: Str) { println(s); }
     fn main() -> int {
@@ -291,7 +291,7 @@ TEST(Mov, MoveInMatchArmDoesNotPoisonSiblingArm) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, MoveInBranchStillMovedAfterConstructAccepted) {
+TEST(Transfer, MoveInBranchStillMovedAfterConstructAccepted) {
   auto r = semaCheck(R"(
     fn consume(s: Str) { println(s); }
     fn main() -> int {
@@ -305,7 +305,7 @@ TEST(Mov, MoveInBranchStillMovedAfterConstructAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, MoveRevivedInBothBranchesOk) {
+TEST(Transfer, MoveRevivedInBothBranchesOk) {
   auto r = semaCheck(R"(
     fn main() -> int {
       s: Str = "x";
@@ -319,7 +319,7 @@ TEST(Mov, MoveRevivedInBothBranchesOk) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, MoveRevivedInOnlyThenBranchAccepted) {
+TEST(Transfer, MoveRevivedInOnlyThenBranchAccepted) {
   auto r = semaCheck(R"(
     fn main() -> int {
       s: Str = "x";
@@ -335,7 +335,7 @@ TEST(Mov, MoveRevivedInOnlyThenBranchAccepted) {
 
 // -- Ternary expression
 
-TEST(Mov, TernaryMoveInThenDoesNotPoisonElse) {
+TEST(Transfer, TernaryMoveInThenDoesNotPoisonElse) {
   auto r = semaCheck(R"(
     fn main() -> int {
       x: Str = "x";
@@ -348,7 +348,7 @@ TEST(Mov, TernaryMoveInThenDoesNotPoisonElse) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, TernaryMoveInElseDoesNotPoisonThen) {
+TEST(Transfer, TernaryMoveInElseDoesNotPoisonThen) {
   auto r = semaCheck(R"(
     fn main() -> int {
       x: Str = "x";
@@ -361,7 +361,7 @@ TEST(Mov, TernaryMoveInElseDoesNotPoisonThen) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, TernaryMoveInBothBranchesOk) {
+TEST(Transfer, TernaryMoveInBothBranchesOk) {
   auto r = semaCheck(R"(
     fn main() -> int {
       x: Str = "x";
@@ -374,7 +374,7 @@ TEST(Mov, TernaryMoveInBothBranchesOk) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, TernaryMoveInBothBranchesThenUseAccepted) {
+TEST(Transfer, TernaryMoveInBothBranchesThenUseAccepted) {
   auto r = semaCheck(R"(
     fn main() -> int {
       x: Str = "x";
@@ -387,7 +387,7 @@ TEST(Mov, TernaryMoveInBothBranchesThenUseAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, TernaryMoveInOneBranchThenUseAccepted) {
+TEST(Transfer, TernaryMoveInOneBranchThenUseAccepted) {
   auto r = semaCheck(R"(
     fn main() -> int {
       x: Str = "x";
@@ -400,7 +400,7 @@ TEST(Mov, TernaryMoveInOneBranchThenUseAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, TernaryMoveInElseThenUseAccepted) {
+TEST(Transfer, TernaryMoveInElseThenUseAccepted) {
   auto r = semaCheck(R"(
     fn main() -> int {
       x: Str = "x";
@@ -413,7 +413,7 @@ TEST(Mov, TernaryMoveInElseThenUseAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, TernaryMoveInConditionVisibleInBothBranchesAccepted) {
+TEST(Transfer, TernaryMoveInConditionVisibleInBothBranchesAccepted) {
   auto r = semaCheck(R"(
     fn take(s: Str) -> bool { return True; }
     fn main() -> int {
@@ -437,7 +437,7 @@ TEST(Mov, TernaryMoveInConditionVisibleInBothBranchesAccepted) {
   EXPECT_TRUE(r2.Ok) << r2.Diagnostics;
 }
 
-TEST(Mov, TernaryMoveInConditionStaysMovedAfterAccepted) {
+TEST(Transfer, TernaryMoveInConditionStaysMovedAfterAccepted) {
   auto r = semaCheck(R"(
     fn take(s: Str) -> bool { return True; }
     fn main() -> int {
@@ -450,7 +450,7 @@ TEST(Mov, TernaryMoveInConditionStaysMovedAfterAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, TernaryNestedBranchesIsolated) {
+TEST(Transfer, TernaryNestedBranchesIsolated) {
   auto r = semaCheck(R"(
     fn main() -> int {
       x: Str = "x";
@@ -464,7 +464,7 @@ TEST(Mov, TernaryNestedBranchesIsolated) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, TernaryMoveInsideStatementBranchIsolated) {
+TEST(Transfer, TernaryMoveInsideStatementBranchIsolated) {
   auto r = semaCheck(R"(
     fn main() -> int {
       x: Str = "x";
@@ -483,7 +483,7 @@ TEST(Mov, TernaryMoveInsideStatementBranchIsolated) {
 
 // -- Short-circuit `&&` / `||`
 
-TEST(Mov, AndMoveInLhsVisibleInRhsAccepted) {
+TEST(Transfer, AndMoveInLhsVisibleInRhsAccepted) {
   auto r = semaCheck(R"(
     fn take(s: Str) -> bool { return True; }
     fn peek(s: Str) -> bool { return True; }
@@ -496,7 +496,7 @@ TEST(Mov, AndMoveInLhsVisibleInRhsAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, OrMoveInLhsVisibleInRhsAccepted) {
+TEST(Transfer, OrMoveInLhsVisibleInRhsAccepted) {
   auto r = semaCheck(R"(
     fn take(s: Str) -> bool { return False; }
     fn peek(s: Str) -> bool { return True; }
@@ -509,7 +509,7 @@ TEST(Mov, OrMoveInLhsVisibleInRhsAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, AndMoveInLhsStaysMovedAfterAccepted) {
+TEST(Transfer, AndMoveInLhsStaysMovedAfterAccepted) {
   auto r = semaCheck(R"(
     fn take(s: Str) -> bool { return True; }
     fn main() -> int {
@@ -523,7 +523,7 @@ TEST(Mov, AndMoveInLhsStaysMovedAfterAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, AndMoveInRhsStaysMovedAfterAccepted) {
+TEST(Transfer, AndMoveInRhsStaysMovedAfterAccepted) {
   auto r = semaCheck(R"(
     fn take(s: Str) -> bool { return True; }
     fn main() -> int {
@@ -537,7 +537,7 @@ TEST(Mov, AndMoveInRhsStaysMovedAfterAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, OrMoveInRhsStaysMovedAfterAccepted) {
+TEST(Transfer, OrMoveInRhsStaysMovedAfterAccepted) {
   auto r = semaCheck(R"(
     fn take(s: Str) -> bool { return True; }
     fn main() -> int {
@@ -551,7 +551,7 @@ TEST(Mov, OrMoveInRhsStaysMovedAfterAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, AndMoveInRhsNoLaterUseOk) {
+TEST(Transfer, AndMoveInRhsNoLaterUseOk) {
   auto r = semaCheck(R"(
     fn take(s: Str) -> bool { return True; }
     fn main() -> int {
@@ -564,7 +564,7 @@ TEST(Mov, AndMoveInRhsNoLaterUseOk) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, OrMoveInRhsNoLaterUseOk) {
+TEST(Transfer, OrMoveInRhsNoLaterUseOk) {
   auto r = semaCheck(R"(
     fn take(s: Str) -> bool { return True; }
     fn main() -> int {
@@ -577,7 +577,7 @@ TEST(Mov, OrMoveInRhsNoLaterUseOk) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, AndMoveInRhsThenRevivedOk) {
+TEST(Transfer, AndMoveInRhsThenRevivedOk) {
   auto r = semaCheck(R"(
     fn take(s: Str) -> bool { return True; }
     fn main() -> int {
@@ -592,7 +592,7 @@ TEST(Mov, AndMoveInRhsThenRevivedOk) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, AndRhsMoveDoesNotPoisonSiblingTernaryBranchAccepted) {
+TEST(Transfer, AndRhsMoveDoesNotPoisonSiblingTernaryBranchAccepted) {
   auto r = semaCheck(R"(
     fn take(s: Str) -> bool { return True; }
     fn main() -> int {
@@ -619,7 +619,7 @@ TEST(Mov, AndRhsMoveDoesNotPoisonSiblingTernaryBranchAccepted) {
 
 // -- Call arguments are evaluated left to right
 
-TEST(Mov, MoveThenReuseInSameCallAccepted) {
+TEST(Transfer, MoveThenReuseInSameCallAccepted) {
   auto r = semaCheck(R"(
     fn two(a: Str, b: Str) { println(a); println(b); }
     fn main() -> int {
@@ -631,7 +631,7 @@ TEST(Mov, MoveThenReuseInSameCallAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Mov, UseThenMoveInSameCallOk) {
+TEST(Transfer, UseThenMoveInSameCallOk) {
   auto r = semaCheck(R"(
     fn two(a: Str, b: Str) { println(a); println(b); }
     fn main() -> int {
@@ -645,7 +645,7 @@ TEST(Mov, UseThenMoveInSameCallOk) {
 
 // -- `None` where `mov None` was: still contextually typed (#119)
 
-TEST(Mov, MovNoneIntoAnOptionalSlotOk) {
+TEST(Transfer, MovNoneIntoAnOptionalSlotOk) {
   auto r = semaCheck(R"(
     class Box { s: Str?; fn __init__() { self.s = None; } }
     fn take(s: Str?) -> int { return 0; }
@@ -665,7 +665,7 @@ TEST(Mov, MovNoneIntoAnOptionalSlotOk) {
   EXPECT_EQ(r.ErrorCount, 0u) << r.Diagnostics;
 }
 
-TEST(Mov, MovNoneIntoANonOptionalSlotIsOneError) {
+TEST(Transfer, MovNoneIntoANonOptionalSlotIsOneError) {
   auto r = semaCheck(R"(
     fn main() -> int {
       x: Str = None;
@@ -678,7 +678,7 @@ TEST(Mov, MovNoneIntoANonOptionalSlotIsOneError) {
 
 // `None` inside an array or tuple literal, where `mov None` was, takes the
 // slot's element type (#132).
-TEST(Mov, MovNoneInsideALiteralTakesTheElementType) {
+TEST(Transfer, MovNoneInsideALiteralTakesTheElementType) {
   auto r = semaCheck(R"(
     fn take(xs: Str?[]) -> int { return xs.len(); }
     fn main() -> int {
@@ -695,7 +695,7 @@ TEST(Mov, MovNoneInsideALiteralTakesTheElementType) {
   EXPECT_EQ(r.ErrorCount, 0u) << r.Diagnostics;
 }
 
-TEST(Mov, MovNoneInsideALiteralForANonOptionalSlotIsOneError) {
+TEST(Transfer, MovNoneInsideALiteralForANonOptionalSlotIsOneError) {
   for (const char *decl :
        {"xs: Str[] = [None];", "t: (Str, int) = (None, 1);"}) {
     auto r =

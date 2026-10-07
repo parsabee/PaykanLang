@@ -15,7 +15,7 @@ provide a safe, ergonomic, performant, and productive interface that compiles to
 
 This is **v0.1.1**, a patch release of v0.1.0, the first release, which lays the foundation.
 Implemented and tested today: static typing with inference, single-inheritance classes with virtual dispatch,
-ARC with `mov` move semantics, value-aware `==` (reference types dispatch to a virtual
+ARC, value-aware `==` (reference types dispatch to a virtual
 `equals`), dynamic arrays, a file-based module system, `match` type dispatch, enums, tuples,
 optionals, generics, and conversion constructors (`Str(n)`, `int<Str>(s)`). Programs are lowered to a
 backend-neutral IR (PIR) and compiled by one of two backends: the C backend (emits C11 and

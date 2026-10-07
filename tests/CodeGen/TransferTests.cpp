@@ -12,7 +12,7 @@ extern "C" {
 
 using namespace paykan::test;
 
-TEST(Mov, PrimitiveForwardsValue) {
+TEST(Transfer, PrimitiveForwardsValue) {
   auto r = compileAndRun(R"(
     fn main() -> int {
       a: int = 42;
@@ -25,7 +25,7 @@ TEST(Mov, PrimitiveForwardsValue) {
   EXPECT_EQ(r.StdOut, "42\n");
 }
 
-TEST(Mov, StringOwnershipTransfer) {
+TEST(Transfer, StringOwnershipTransfer) {
   auto r = compileAndRun(R"(
     fn main() -> int {
       s: Str = "Hello world";
@@ -38,7 +38,7 @@ TEST(Mov, StringOwnershipTransfer) {
   EXPECT_EQ(r.StdOut, "Hello world\n");
 }
 
-TEST(Mov, MoveTemporaryIntoVariable) {
+TEST(Transfer, MoveTemporaryIntoVariable) {
   auto r = compileAndRun(R"(
     fn make() -> Str { return "made"; }
     fn main() -> int {
@@ -51,7 +51,7 @@ TEST(Mov, MoveTemporaryIntoVariable) {
   EXPECT_EQ(r.StdOut, "made\n");
 }
 
-TEST(Mov, MoveClassObject) {
+TEST(Transfer, MoveClassObject) {
   auto r = compileAndRun(R"(
     class Point { x: int; y: int;
       fn __init__(a: int, b: int) { self.x = a; self.y = b; }
@@ -68,7 +68,7 @@ TEST(Mov, MoveClassObject) {
   EXPECT_EQ(r.StdOut, "7\n");
 }
 
-TEST(Mov, MoveThenRevive) {
+TEST(Transfer, MoveThenRevive) {
   auto r = compileAndRun(R"(
     fn main() -> int {
       s: Str = "first";
@@ -83,7 +83,7 @@ TEST(Mov, MoveThenRevive) {
   EXPECT_EQ(r.StdOut, "first\nsecond\n");
 }
 
-TEST(Mov, MoveIntoFunctionArgument) {
+TEST(Transfer, MoveIntoFunctionArgument) {
   auto r = compileAndRun(R"(
     fn shout(s: Str) { println(s); }
     fn main() -> int {
@@ -96,7 +96,7 @@ TEST(Mov, MoveIntoFunctionArgument) {
   EXPECT_EQ(r.StdOut, "loud\n");
 }
 
-TEST(Mov, MoveOutOfFunctionReturn) {
+TEST(Transfer, MoveOutOfFunctionReturn) {
   auto r = compileAndRun(R"(
     fn passthrough(s: Str) -> Str { return s; }
     fn main() -> int {
@@ -109,7 +109,7 @@ TEST(Mov, MoveOutOfFunctionReturn) {
   EXPECT_EQ(r.StdOut, "relayed\n");
 }
 
-TEST(Mov, ConditionalMove) {
+TEST(Transfer, ConditionalMove) {
   auto r = compileAndRun(R"(
     fn main() -> int {
       s: Str = "cond";
@@ -131,7 +131,7 @@ TEST(Mov, ConditionalMove) {
 // double free) and never zero times (a leak).  The un-taken branch is never
 // executed, so it must not release anything either.
 
-TEST(Mov, TernaryMoveTakenBranch) {
+TEST(Transfer, TernaryMoveTakenBranch) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     fn main() -> int {
@@ -148,7 +148,7 @@ TEST(Mov, TernaryMoveTakenBranch) {
   g.expectNoLeaks("TernaryMoveTakenBranch");
 }
 
-TEST(Mov, TernaryMoveUntakenBranch) {
+TEST(Transfer, TernaryMoveUntakenBranch) {
   // The else branch shares x (retain); x is still owned by its own slot and
   // released at scope exit, so both y and x drop their reference exactly once.
   LeakGuard g;
@@ -167,7 +167,7 @@ TEST(Mov, TernaryMoveUntakenBranch) {
   g.expectNoLeaks("TernaryMoveUntakenBranch");
 }
 
-TEST(Mov, TernaryMoveInElseBranch) {
+TEST(Transfer, TernaryMoveInElseBranch) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     fn main() -> int {
@@ -184,7 +184,7 @@ TEST(Mov, TernaryMoveInElseBranch) {
   g.expectNoLeaks("TernaryMoveInElseBranch");
 }
 
-TEST(Mov, TernaryMoveInBothBranches) {
+TEST(Transfer, TernaryMoveInBothBranches) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     fn pick(c: bool) -> Str {
@@ -204,7 +204,7 @@ TEST(Mov, TernaryMoveInBothBranches) {
   g.expectNoLeaks("TernaryMoveInBothBranches");
 }
 
-TEST(Mov, TernaryMoveClassObjectBothWays) {
+TEST(Transfer, TernaryMoveClassObjectBothWays) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class Point { x: int; y: int;
@@ -229,7 +229,7 @@ TEST(Mov, TernaryMoveClassObjectBothWays) {
   g.expectNoLeaks("TernaryMoveClassObjectBothWays");
 }
 
-TEST(Mov, TernaryMoveInCondition) {
+TEST(Transfer, TernaryMoveInCondition) {
   // The condition hands x on, on every path; the result is a primitive.
   LeakGuard g;
   auto r = compileAndRun(R"(
@@ -247,7 +247,7 @@ TEST(Mov, TernaryMoveInCondition) {
   g.expectNoLeaks("TernaryMoveInCondition");
 }
 
-TEST(Mov, TernaryMoveIntoCallInBranch) {
+TEST(Transfer, TernaryMoveIntoCallInBranch) {
   // A primitive-typed ternary whose branch hands a ref var to a call.
   LeakGuard g;
   auto r = compileAndRun(R"(
@@ -271,7 +271,7 @@ TEST(Mov, TernaryMoveIntoCallInBranch) {
 
 // -- A hand-off inside the short-circuit RHS of `&&` / `||`
 
-TEST(Mov, AndMoveInRhsEvaluatedAndSkipped) {
+TEST(Transfer, AndMoveInRhsEvaluatedAndSkipped) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     fn take(s: Str) -> bool { println(s); return True; }
@@ -292,7 +292,7 @@ TEST(Mov, AndMoveInRhsEvaluatedAndSkipped) {
   g.expectNoLeaks("AndMoveInRhsEvaluatedAndSkipped");
 }
 
-TEST(Mov, OrMoveInRhsEvaluatedAndSkipped) {
+TEST(Transfer, OrMoveInRhsEvaluatedAndSkipped) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     fn take(s: Str) -> bool { println(s); return False; }
@@ -313,7 +313,7 @@ TEST(Mov, OrMoveInRhsEvaluatedAndSkipped) {
   g.expectNoLeaks("OrMoveInRhsEvaluatedAndSkipped");
 }
 
-TEST(Mov, AndMoveInLhsThenRhsRuns) {
+TEST(Transfer, AndMoveInLhsThenRhsRuns) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     fn take(s: Str) -> bool { println(s); return True; }
@@ -332,7 +332,7 @@ TEST(Mov, AndMoveInLhsThenRhsRuns) {
 }
 
 // `None` where `mov None` was is still the absent optional (#119).
-TEST(Mov, MovNoneIsTheAbsentOptional) {
+TEST(Transfer, MovNoneIsTheAbsentOptional) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class Box { s: Str?; fn __init__() { self.s = None; } }
@@ -363,7 +363,7 @@ TEST(Mov, MovNoneIsTheAbsentOptional) {
 
 // `None` inside a literal, where `mov None` was, is the absent value of the
 // slot's element type (#132).
-TEST(Mov, MovNoneInsideALiteralIsTheAbsentOptional) {
+TEST(Transfer, MovNoneInsideALiteralIsTheAbsentOptional) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     fn show(s: Str?) {

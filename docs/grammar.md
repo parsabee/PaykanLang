@@ -247,7 +247,7 @@ relational     ::= additive ( relOp additive )?
 relOp          ::= "<" | ">" | "<=" | ">=" | "==" | "!="
 additive       ::= multiplicative ( ( "+" | "-" ) multiplicative )*
 multiplicative ::= unary ( ( "*" | "/" | "%" ) unary )*
-unary          ::= ( "!" | "-" | "mov" ) unary | postfix
+unary          ::= ( "!" | "-" ) unary | postfix
 
 postfix ::= primary postfixOp*
 postfixOp ::= "." IDENT "(" argumentList? ")"      -- method call
@@ -271,13 +271,16 @@ argumentList ::= expression ( "," expression )*
 ```
 
 Precedence, lowest to highest: ternary; `||`; `&&`; relational; `+ -`;
-`* / %`; unary `! - mov`; postfix. Binary operators are left-associative
+`* / %`; unary `! -`; postfix. Binary operators are left-associative
 except the relational operators, which do not associate: `a < b < c` is a
 syntax error (parenthesise one comparison). The condition of a ternary is
 a `logicalOr`, so a nested ternary there needs parentheses; the `else`
 branch may be another ternary without them.
 
-`mov` is a unary operator: `mov a + b` is `(mov a) + b`.
+`mov` is reserved but no longer part of the grammar (removed in v0.2.0).
+A frontend reports `'mov' was removed in v0.2.0; ownership transfers are
+inferred` (`frontend::kMovRemoved`) once per use and keeps parsing the
+operand after it, so that is the only error.
 
 A parenthesised expression is just the inner expression (no node is
 created); `(a)` is a 1-tuple nowhere. A tuple literal has at least two
