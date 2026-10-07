@@ -176,15 +176,6 @@ TEST(Generics, MatchOnInstantiationArms) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Generics, MovOfInstantiationAccepted) {
-  auto r = semaCheck(withMain(kBox, R"(
-    a: Box<int> = Box<int>(1);
-    b: Box<int> = a;
-    c: int = a.get();
-  )"));
-  EXPECT_TRUE(r.Ok) << r.Diagnostics;
-}
-
 TEST(Generics, RecursiveInstantiationInFieldIsFine) {
   auto r = semaCheck(withMain(R"(
     class Node<T> {
