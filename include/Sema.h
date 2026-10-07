@@ -56,6 +56,9 @@ struct SemaContext {
   /// keyed by canonical module name (ModuleName.h). Populated by Sema::run()
   /// so the lowering can reuse them without re-running the Sema pass.
   StringMap<std::shared_ptr<SemaContext>> ImportedContexts;
+  /// The ownership prototype was on (--ownership): the lowering emits the
+  /// clone functions `cp` needs (docs/design/ownership-proto.md).
+  bool Ownership = false;
 
   explicit operator bool() const { return Ok; }
 };

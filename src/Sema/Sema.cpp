@@ -1647,7 +1647,8 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
                      getErrorCount(),
                      RepeatedImportFailures != 0,
                      Diags.getDiagnostics(),
-                     std::move(AccumulatedImportContexts)};
+                     std::move(AccumulatedImportContexts),
+                     Ownership};
   // The sets live in this frame: a Sema is run once.
   if (ImportStack == &localImportStack)
     ImportStack = nullptr;

@@ -432,6 +432,19 @@ private:
   Val lowerMemberAccessExpr(ast::MemberAccessExpr *node);
   /// Runtime symbol implementing @p name for the builtin class @p ct, or "".
   const char *builtinMethodSymbol(ast::ClassType *ct, const std::string &name);
+
+  // -- Ownership prototype: `cp` (LoweringClone.cpp)
+
+  /// The module's `cp` dispatcher `@.clone(box) -> box`, declared on first
+  /// use; emitCloneDispatcher gives it its body once every class is known.
+  pir::Function *CloneDispatcher = nullptr;
+  pir::Function *cloneDispatcher();
+  void emitCloneDispatcher();
+  /// A deep clone of the box @p box (borrowed): a fresh +1 box, null for null.
+  Val emitCloneCall(const Val &box);
+  /// `C.$clone(obj) -> box` and `C.$copy(obj src, obj dst)` (--ownership).
+  void declareCloneFunctions(ast::ClassDecl *node);
+  void emitCloneFunctions(ast::ClassDecl *node, ast::ClassType *ct);
 };
 
 } // namespace paykan::lowering

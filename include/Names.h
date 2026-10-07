@@ -133,6 +133,12 @@ inline constexpr const char *kPaykanTupleToString = "PaykanTuple_toString";
 inline constexpr const char *kPaykanTupleEquals = "PaykanTuple_equals";
 inline constexpr const char *kPaykanTupleVtable = "PaykanTuple_vtable";
 
+// Clone (`cp`, ownership prototype)
+inline constexpr const char *kPaykanCloneShallow = "Paykan_clone_shallow";
+inline constexpr const char *kPaykanCloneSlots = "Paykan_clone_slots";
+inline constexpr const char *kPaykanCloneSlotGet = "Paykan_clone_slot_get";
+inline constexpr const char *kPaykanCloneSlotSet = "Paykan_clone_slot_set";
+
 // File
 inline constexpr const char *kPaykanFileNew = "PaykanFile_new";
 inline constexpr const char *kPaykanFileOpen = "PaykanFile_open";
@@ -278,6 +284,11 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanTupleSet,
     kPaykanTupleSetObj,
     kPaykanTupleGet,
+    // Clone
+    kPaykanCloneShallow,
+    kPaykanCloneSlots,
+    kPaykanCloneSlotGet,
+    kPaykanCloneSlotSet,
     // File
     kPaykanFileOpen,
     // IO

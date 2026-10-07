@@ -373,6 +373,9 @@ PaykanArray_pop(obj) -> i64             PaykanArray_pop_obj(obj) -> box
 ; tuples
 PaykanTuple_new(i64, ptr) -> obj        PaykanTuple_get(obj, i64) -> i64
 PaykanTuple_set(obj, i64, i64) -> void  PaykanTuple_set_obj(obj, i64, box) -> void
+; `cp` (ownership prototype): shallow copy, then deep-clone each ref slot
+Paykan_clone_shallow(obj) -> box       Paykan_clone_slots(obj) -> i64
+Paykan_clone_slot_get(obj, i64) -> box Paykan_clone_slot_set(obj, i64, box) -> void
 ; files / boxed primitives
 PaykanFile_open(obj, obj) -> box
 PaykanInt_from_str(obj) -> box          PaykanFloat_from_str(obj) -> box

@@ -91,10 +91,13 @@ struct Analysed {
 
 inline Analysed analyse(const std::string &source,
                         const std::string &projectRoot,
-                        const std::string &frontendName = "") {
+                        const std::string &frontendName = "",
+                        bool ownership = false) {
   Analysed a;
   auto path = writeTempFile(source);
-  a.Driver = std::make_unique<parser::ParserDriver>(frontendName);
+  frontend::Options opts;
+  opts.Ownership = ownership;
+  a.Driver = std::make_unique<parser::ParserDriver>(frontendName, opts);
   int rc = a.Driver->parseFile(path);
   std::filesystem::remove(path);
   a.Path = path;
@@ -106,6 +109,7 @@ inline Analysed analyse(const std::string &source,
   sema::DiagEngine diag(diagOS);
   diag.setSourceInfo(a.Driver->getCurrentFile(), &a.Driver->getSourceLines());
   sema::Sema sema(a.Driver->getASTContext(), diag, projectRoot);
+  sema.setOwnership(ownership);
   a.Ctx = sema.run(a.Driver->getRoot());
   if (!a.Ctx) {
     a.Failure = {-1, "", diagOS.str(), false};
@@ -307,6 +311,13 @@ inline RunResult compileAndRunWithArgs(const std::string &source,
 inline RunResult compileAndRunWithFrontend(const std::string &source,
                                            const std::string &frontendName) {
   auto a = detail::analyse(source, "", frontendName);
+  return detail::runAnalysed(a, nullptr, "");
+}
+
+/// Like compileAndRun with the ownership prototype on (`--ownership`,
+/// docs/design/ownership-proto.md): its syntax, checks and lowering.
+inline RunResult compileAndRunOwnership(const std::string &source) {
+  auto a = detail::analyse(source, "", "recursive-descent", true);
   return detail::runAnalysed(a, nullptr, "");
 }
 

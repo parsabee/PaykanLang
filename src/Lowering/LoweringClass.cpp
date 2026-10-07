@@ -270,6 +270,7 @@ void ModuleLowering::declareClass(ast::ClassDecl *node) {
         fn->Params[i + 1].Name = funcDecl->getParams()[i].getName();
     }
   }
+  declareCloneFunctions(node);
   pir::Function *dtor = getOrCreateFunction(
       node->getName() + kNameSep + kMethodDestroy, {{Type::Obj}, Type::Void});
   dtor->Params[0].Name = kSelf;
@@ -321,8 +322,10 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
     emitImplicitReturn(fn->Sig);
   }
 
-  // 2. The synthetic destructor (so the destroy slot names it).
+  // 2. The synthetic destructor (so the destroy slot names it), and the
+  //    clone functions of `cp`.
   emitDestructor(node, ct);
+  emitCloneFunctions(node, ct);
 
   // 3. Vtable targets: the most-derived concrete function per slot.
   const auto &vtable = ct->getVTable();

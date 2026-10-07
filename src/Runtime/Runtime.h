@@ -527,6 +527,29 @@ void Paykan_release(PaykanShared *shared);
 /// Convenience: return the underlying object pointer.
 PaykanObject *PaykanShared_get(PaykanShared *shared);
 
+// -- Clone (`cp`, the ownership prototype: docs/design/ownership-proto.md)
+//
+// The generated `cp` dispatcher (src/Lowering/LoweringClone.cpp) clones user
+// classes itself; any other object it copies shallowly, then replaces each
+// reference slot of the copy with a deep clone.
+
+/// A +1 box of a shallow copy of @p obj: a new Str with the same bytes, a new
+/// array or tuple whose reference slots share (retain) the original's boxes.
+/// Immutable objects (boxed primitives, None, Obj, File, Error) are shared:
+/// their own box, retained.  Panics on any other (user class) object.
+PaykanShared *Paykan_clone_shallow(PaykanObject *obj);
+
+/// The number of reference slots Paykan_clone_slot_get reads: an object
+/// array's length, a tuple's arity, otherwise 0.
+int64_t Paykan_clone_slots(PaykanObject *obj);
+
+/// The box in reference slot @p idx (borrowed), or NULL for a value slot.
+PaykanShared *Paykan_clone_slot_get(PaykanObject *obj, int64_t idx);
+
+/// Store @p value into reference slot @p idx, releasing the old box and
+/// retaining the new one (the caller keeps its reference).
+void Paykan_clone_slot_set(PaykanObject *obj, int64_t idx, PaykanShared *value);
+
 // -- Runtime panics
 
 /// Print a diagnostic and abort: the lowering's trap target for integer `/`

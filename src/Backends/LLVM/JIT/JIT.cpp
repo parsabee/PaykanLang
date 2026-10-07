@@ -143,6 +143,11 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanTupleToString,   reinterpret_cast<void *>(&PaykanTuple_toString)},
     {kPaykanTupleEquals,     reinterpret_cast<void *>(&PaykanTuple_equals)},
     {kPaykanTupleVtable,     reinterpret_cast<void *>(&PaykanTuple_vtable)},
+
+    {kPaykanCloneShallow,    reinterpret_cast<void *>(&Paykan_clone_shallow)},
+    {kPaykanCloneSlots,      reinterpret_cast<void *>(&Paykan_clone_slots)},
+    {kPaykanCloneSlotGet,    reinterpret_cast<void *>(&Paykan_clone_slot_get)},
+    {kPaykanCloneSlotSet,    reinterpret_cast<void *>(&Paykan_clone_slot_set)},
 };
 
 // Match dispatch and generated vtable references look builtin vtables up as

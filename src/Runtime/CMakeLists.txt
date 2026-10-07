@@ -6,6 +6,7 @@ add_library(paykan_runtime STATIC
     String.c
     Array.c
     Tuple.c
+    Clone.c
     File.c
     Error.c
     Shared.c

@@ -68,6 +68,10 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanTupleGet, {{kObj, kI64}, kI64}},
     {kPaykanTupleSet, {{kObj, kI64, kI64}, kVoid}},
     {kPaykanTupleSetObj, {{kObj, kI64, kBox}, kVoid}},
+    {kPaykanCloneShallow, {{kObj}, kBox}},
+    {kPaykanCloneSlots, {{kObj}, kI64}},
+    {kPaykanCloneSlotGet, {{kObj, kI64}, kBox}},
+    {kPaykanCloneSlotSet, {{kObj, kI64, kBox}, kVoid}},
     {kPaykanFileOpen, {{kObj, kObj}, kBox}},
     {kPaykanIntFromStr, {{kObj}, kBox}},
     {kPaykanIntNew, {{kI64}, kObj}},
@@ -531,6 +535,7 @@ bool ModuleLowering::run(ast::TranslationUnit *tu) {
   bootstrapBuiltins();
   processImports(tu);
   visit(tu);
+  emitCloneDispatcher();
   return !HadInternalError;
 }
 
