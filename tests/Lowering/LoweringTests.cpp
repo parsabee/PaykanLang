@@ -183,7 +183,10 @@ TEST(Lowering, ReturnReleasesEveryScopeAfterEvaluatingTheValue) {
 
 // -- mov
 
-TEST(Lowering, MovOfOwnedVariableNullsTheSlotAndSkipsTheRetain) {
+TEST(Lowering, MovOfOwnedVariableIsAPlainSharedRead) {
+  // `mov` is retired (#145): the argument is retained like any shared read
+  // and the slot keeps its box until scope exit.  Eliding this pair is the
+  // last-use pass's job (#186).
   auto l = lower(R"(
     fn take(s: Str) { println(s); }
     fn main() -> int {
@@ -194,11 +197,8 @@ TEST(Lowering, MovOfOwnedVariableNullsTheSlotAndSkipsTheRetain) {
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
-  // The slot is nulled right after its box is loaded for the call.
-  EXPECT_NE(m.find("store %s"), std::string::npos) << m;
-  EXPECT_EQ(count(m, "null box"), 1u) << m;
-  EXPECT_EQ(count(m, "retain"), 0u) << m;
-  // Scope exit still releases the (now null) slot: exactly one release.
+  EXPECT_EQ(count(m, "null box"), 0u) << m;
+  EXPECT_EQ(count(m, "retain"), 1u) << m;
   EXPECT_EQ(count(m, "release"), 1u) << m;
   // The callee owns its parameter and releases it.
   std::string t = function(l.Text, "take");

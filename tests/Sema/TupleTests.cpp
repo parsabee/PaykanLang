@@ -109,15 +109,12 @@ TEST(Tuple, IndexAssignmentRejected) {
       << r.Diagnostics;
 }
 
-TEST(Tuple, MovOfElementRejected) {
+TEST(Tuple, MovOfElementAccepted) {
   auto r = semaCheck(wrapMain(R"(
     t = ("a", "b");
     s = mov t.0;
   )"));
-  EXPECT_FALSE(r.Ok);
-  EXPECT_NE(r.Diagnostics.find("cannot 'mov' a tuple element"),
-            std::string::npos)
-      << r.Diagnostics;
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
 TEST(Tuple, WholeTupleCanBeMoved) {
@@ -129,15 +126,13 @@ TEST(Tuple, WholeTupleCanBeMoved) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-TEST(Tuple, UseAfterMovRejected) {
+TEST(Tuple, UseAfterMovAccepted) {
   auto r = semaCheck(wrapMain(R"(
     t = (1, "a");
     u = mov t;
     x: int = t.0;
   )"));
-  EXPECT_FALSE(r.Ok);
-  EXPECT_NE(r.Diagnostics.find("use of moved variable 't'"), std::string::npos)
-      << r.Diagnostics;
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
 // -- Destructuring
