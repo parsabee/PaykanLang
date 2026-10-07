@@ -573,11 +573,6 @@ private:
       close();
       return;
     }
-    case ASTNode::NK_MovExpr:
-      open("mov", e);
-      expr(cast<MovExpr>(e)->getOperand());
-      close();
-      return;
     case ASTNode::NK_TupleLiteralExpr:
       open("tuple", e);
       exprs(cast<TupleLiteralExpr>(e)->getElements());

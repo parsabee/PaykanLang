@@ -302,15 +302,6 @@ void ASTPrinter::visitTernaryExpr(TernaryExpr *node) {
   }
 }
 
-void ASTPrinter::visitMovExpr(MovExpr *node) {
-  header("MovExpr", node);
-  OS << "\n";
-  {
-    ChildScope cs(*this, true);
-    visit(node->getOperand());
-  }
-}
-
 void ASTPrinter::visitIdentifier(Identifier *node) {
   header("Identifier", node);
   OS << " '" << node->getName() << "'\n";

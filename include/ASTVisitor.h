@@ -61,7 +61,6 @@ namespace ast {
   NODE(NK_ArrayLiteralExpr, ArrayLiteralExpr, ArrayLiteralExpr)                \
   NODE(NK_SubscriptExpr, SubscriptExpr, SubscriptExpr)                         \
   NODE(NK_EnumValueExpr, EnumValueExpr, EnumValueExpr)                         \
-  NODE(NK_MovExpr, MovExpr, MovExpr)                                           \
   NODE(NK_TupleLiteralExpr, TupleLiteralExpr, TupleLiteralExpr)                \
   NODE(NK_TupleIndexExpr, TupleIndexExpr, TupleIndexExpr)
 

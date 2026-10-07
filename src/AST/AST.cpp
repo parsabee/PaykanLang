@@ -267,8 +267,6 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
     return Ctx.make<EnumValueExpr>(loc, ev->getEnumName(),
                                    ev->getVariantName());
   }
-  case ASTNode::NK_MovExpr:
-    return Ctx.make<MovExpr>(loc, cloneExpr(cast<MovExpr>(e)->getOperand()));
   case ASTNode::NK_TupleLiteralExpr: {
     auto *t = cast<TupleLiteralExpr>(e);
     std::vector<Expr *> elems;

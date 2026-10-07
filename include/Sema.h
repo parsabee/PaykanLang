@@ -318,12 +318,8 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// literal whose elements disagree (`[("a", 1), ("b", n)]` with `n:
     /// int?`) takes the slot's element type when every element fits it.
     ast::Type *visitExpecting(ast::Expr *e, ast::Type *expected) {
-      // `mov` of a literal forwards it: the literal still sees the slot.
-      ast::Expr *lit = e;
-      if (auto *mv = ast::dyn_cast<ast::MovExpr>(e))
-        lit = mv->getOperand();
-      if (expected && (ast::isa<ast::ArrayLiteralExpr>(lit) ||
-                       ast::isa<ast::TupleLiteralExpr>(lit)))
+      if (expected && (ast::isa<ast::ArrayLiteralExpr>(e) ||
+                       ast::isa<ast::TupleLiteralExpr>(e)))
         S.LiteralExpectation = expected;
       return visit(e);
     }

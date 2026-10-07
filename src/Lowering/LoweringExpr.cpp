@@ -74,22 +74,6 @@ Val ModuleLowering::ExprEmitter::visitIdentifier(ast::Identifier *node) {
   return val;
 }
 
-Val ModuleLowering::ExprEmitter::visitMovExpr(ast::MovExpr *node) {
-  ast::Expr *op = node->getOperand();
-  // Owned ref-typed variable: transfer its box.  Null the slot so scope
-  // cleanup releases nothing for it (release is null-safe on every path).
-  if (auto *id = ast::dyn_cast<ast::Identifier>(op)) {
-    if (L.CurrentScope->isOwned(id->getName())) {
-      pir::LocalId local = L.CurrentScope->lookup(id->getName());
-      Val box = L.B.load(local, id->getName());
-      L.B.store(local, Val::null(Type::Box));
-      return box;
-    }
-  }
-  // Primitive variable or any temporary: a transparent forward.
-  return L.emitExpr(op);
-}
-
 Val ModuleLowering::ExprEmitter::visitMemberAccessExpr(
     ast::MemberAccessExpr *node) {
   return L.lowerMemberAccessExpr(node);
