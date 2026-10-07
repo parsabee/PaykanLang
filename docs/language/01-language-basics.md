@@ -318,30 +318,17 @@ result: int = if x > 0 then x else 0 - x;
 label: Str = if score >= 90 then "A" else if score >= 80 then "B" else "C";
 ```
 
-### Move (`mov`)
+### `mov` (removed)
 
-`mov <expr>` transfers ownership of a value rather than copying/sharing it. It applies to a local
-variable or a temporary. Moving a variable **consumes** it — the variable may not be used again
-until it is re-assigned:
-
-```pkn
-a: int = 3;
-b = mov a;        // b takes a's value; a is consumed
-// c = a;         // error: use of moved variable 'a'
-
-s: Str = "hi";
-t = mov s;        // t takes ownership of the string with no extra retain/release
-```
-
-A member variable (`obj.field`) or array element (`arr[i]`) cannot be moved. `mov` binds like a
-unary prefix operator. See `08-memory-model.md` for how moves interact with reference counting.
+`mov` was removed in v0.2.0 and is a reserved word: write `t = s`, not `t = mov s`. Ownership
+transfers are inferred by the compiler; see `08-memory-model.md`.
 
 ### Operator Precedence (highest -> lowest)
 
 | Level | Operators                              | Associativity  |
 |-------|----------------------------------------|----------------|
 | 1     | postfix: `.method()`, `.field`, `[i]`  | Left           |
-| 2     | `!`, `-` (unary), `mov`                | Right (prefix) |
+| 2     | `!`, `-` (unary)                       | Right (prefix) |
 | 3     | `*`, `/`, `%`                          | Left           |
 | 4     | `+`, `-`                               | Left           |
 | 5     | `<`, `>`, `<=`, `>=`, `==`, `!=`       | **Non-associative** |

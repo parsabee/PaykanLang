@@ -15,7 +15,7 @@ instead; its chapters link here for the details.
 6. [Modules](06-modules.md): import forms, path resolution, non-transitivity and the
    compilation cache.
 7. [Match statements](07-match-statements.md): type, variant, value and optional mode.
-8. [Memory model](08-memory-model.md): reference counting, destruction and `mov`.
+8. [Memory model](08-memory-model.md): reference counting, destruction and ownership transfers.
 9. [Tuples](09-tuples.md): tuple types, element access and destructuring.
 10. [Optional types](10-optionals.md): `T?`, `None` and unwrapping.
 11. [Generics](11-generics.md): generic classes and functions, and inference.

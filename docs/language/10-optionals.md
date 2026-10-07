@@ -43,7 +43,7 @@ fn find(head: Node?, key: int) -> Node? {
   `T??` and optional tuples are rejected.
 - `None` is the absent value. A `T` converts to `T?` implicitly; a `T?` **never** converts back
   to `T` — unwrap it with `match`.
-- On a `T?` you may: assign it, pass and return it, store it in fields and arrays, `mov` it,
+- On a `T?` you may: assign it, pass and return it, store it in fields and arrays,
   compare it with `==`/`!=` against `None` or another optional, and `match` on it. Everything
   else (fields, methods, subscripts, `+`, `toString()`) needs a `match` first.
 - A field of type `T?` is `None` unless `__init__` assigns it.
@@ -302,8 +302,7 @@ fn pick(c: bool) -> Str? { return if c then "yes" else None; }
 
 A `T?` of a reference type costs nothing extra: it is the same reference-counted box as a `T`,
 with "no box" meaning `None`. A present optional primitive is one boxed `Int` / `Float` /
-`Bool` / `Char` object; `None` allocates nothing. Retaining, releasing, moving and destroying an absent optional are no-ops, and
-`mov` of an optional transfers the reference (or the absence) exactly like `mov` of a `T`. See
+`Bool` / `Char` object; `None` allocates nothing. Retaining, releasing and destroying an absent optional are no-ops. See
 `08-memory-model.md`.
 
 ---

@@ -3,8 +3,7 @@
 PaykanLang has no garbage collector and no `free`. Memory is managed by **automatic
 reference counting** (ARC): the compiler counts the references to each object, and frees
 the object the moment the count drops to zero. This chapter explains what that means for
-your programs, how to check them for leaks, the one kind of leak ARC cannot prevent, and
-the `mov` operator.
+your programs, how to check them for leaks, and the one kind of leak ARC cannot prevent.
 
 ## Values and references
 
@@ -121,11 +120,16 @@ This version ends with `live blocks : 0`. Structures where links only point one 
 as a list where each node refers to the next, or a tree where parents refer to children but
 not back, never form cycles and need no care.
 
-## Moving with `mov`
+## No `mov`
 
 Earlier releases had a `mov` keyword that handed a reference on without touching its count.
-It is being retired: `mov s` now means the same as `s`, and the compiler will infer
-ownership transfers on its own. New code should not use it.
+It was removed in v0.2.0, and using it is an error:
+
+```
+error: 'mov' was removed in v0.2.0; ownership transfers are inferred
+```
+
+Write `t = s` instead of `t = mov s`. The output and the freed objects are the same.
 
 ## Threads
 

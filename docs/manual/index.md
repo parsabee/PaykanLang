@@ -31,7 +31,7 @@ features first with small programs and then puts them to work on `tasks`.
 10. [Modules and imports](10-modules.md): projects with several files.
 11. [Files and I/O](11-files-and-io.md): reading and writing files, command-line arguments
     and standard input.
-12. [Memory](12-memory.md): reference counting, `mov`, `--track-heap` and reference cycles.
+12. [Memory](12-memory.md): reference counting, `--track-heap` and reference cycles.
 13. [The `paykan` command](13-the-paykan-command.md): every option, the backends and the
     compilation cache.
 14. [Extending PaykanLang](14-extending.md): frontend and backend plugins.

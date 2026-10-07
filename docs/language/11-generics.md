@@ -97,8 +97,8 @@ match o {
 ```
 
 `Box<int>` is a real class: it has fields, virtual methods, a constructor and
-a destructor, and it takes part in `match`, `==`/`equals`, arrays, `mov` and
-module export exactly like a hand-written class.
+a destructor, and it takes part in `match`, `==`/`equals`, arrays and module
+export exactly like a hand-written class.
 
 ## Inference
 

@@ -62,7 +62,7 @@ add_executable(sema_tests
     Sema/ImportTypeTests.cpp
     Sema/ArrayTests.cpp
     Sema/EnumTests.cpp
-    Sema/MovTests.cpp
+    Sema/TransferTests.cpp
     Sema/GenericsTests.cpp
     Sema/ConversionTests.cpp
     Sema/OptionalTests.cpp
@@ -109,7 +109,7 @@ add_executable(codegen_tests
     CodeGen/ConversionTests.cpp
     CodeGen/ArgsTests.cpp
     CodeGen/EnumTests.cpp
-    CodeGen/MovTests.cpp
+    CodeGen/TransferTests.cpp
     CodeGen/OwnershipTests.cpp
     CodeGen/GenericsTests.cpp
     CodeGen/OptionalTests.cpp

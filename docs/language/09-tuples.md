@@ -113,7 +113,7 @@ fn swap(p: (int, Str)) -> (Str, int) { return (p.1, p.0); }  // parameter + retu
 
 o: Obj = (1, 2);           // any tuple is an Obj
 println(o);                // (1, 2)
-m = mov t;                 // ownership transfer, like any reference value
+m = t;                     // shares the tuple, like any reference value
 ```
 
 ---
@@ -167,7 +167,7 @@ True
 |-------|---------|
 | Index out of range | `t.2` on a 2-tuple |
 | Index on non-tuple | `x.0` where `x` is not a tuple |
-| Immutable | `t.0 = v`, `mov t.0` |
+| Immutable | `t.0 = v` |
 | Arity mismatch | `a, b, c = (1, 2)`; `f((1, 2, 3))` where `f` takes `(int, Str)` |
 | Not a tuple | `a, b = 42` |
 | Target type mismatch | `a: Str, b: int = (1, 2)` |

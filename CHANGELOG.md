@@ -23,6 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `paykan_modules` (the resolver); the runtime ABI version moved to
   `PAYKAN_RUNTIME_ABI_VERSION` in `Runtime.h`.
 
+### Removed
+
+- The `mov` keyword (#145).  Using it is now an error: `'mov' was removed in v0.2.0;
+  ownership transfers are inferred` (also from the AST interchange reader for a
+  `(mov ...)` node).  Drop the keyword: `t = mov s` becomes `t = s`, with the same output
+  and the same objects freed; `s` simply stays readable.  Until the last-use pass (#186)
+  lands, each former `mov` costs one retain/release pair.  The use-after-move,
+  loop back-edge and "cannot 'mov' ..." diagnostics went with it.  `mov` stays reserved.
+
 ## [0.1.1] - 2026-10-06
 
 A patch release of 0.1.0.  It accepts plugins built with 0.1.1 and 0.1.0:

@@ -143,7 +143,6 @@ to resolve, which reports unknown names.
 | `(tuple LOC EXPR EXPR EXPR...)` | `(a, b)`, at least two |
 | `(tuple-index LOC EXPR INT)` | `t.0` |
 | `(enum-value LOC NAME NAME)` | `Color::Red`: the enum's name (qualified if spelled so) and the variant |
-| `(mov LOC EXPR)` | `mov x` |
 
 Parentheses in the source are not nodes: `(a + b) * c` is
 `(binary mul (binary add (ident "a") (ident "b")) (ident "c"))`.

@@ -129,135 +129,24 @@ reference, and is destroyed promptly once it is not.
 
 ---
 
-## Moving with `mov`
+## Ownership transfers
 
-`mov <expr>` **transfers ownership** of a value instead of sharing it. It can be applied to a
-local variable or to a temporary (any rvalue):
+Assigning or passing a reference shares the object: `t = s` retains it, and `s` and `t` are
+both live until their scopes end. There is no way to *consume* a variable by hand. Where a
+variable is not read again after it is handed on, the hand-off can become a transfer — the
+reference moves to the destination without a retain, and the source is not released at scope
+exit. That is an optimization the compiler makes, never something a program has to spell out
+(the last-use pass, [#186](https://github.com/parsabee/PaykanLang/issues/186)).
 
-```pkn
-s: Str = "Hello world";
-t = mov s;      // t takes ownership of the object; s no longer exists here
-println(t);
+Earlier releases had a `mov` keyword for this. It was removed in v0.2.0: `mov` is still a
+reserved word, and using it is an error:
+
+```
+error: 'mov' was removed in v0.2.0; ownership transfers are inferred
 ```
 
-For a **reference type**, `mov` hands the source's existing reference to the destination **without
-bumping the reference count**, and the source variable is *consumed*: it drops out of the scope, so
-no release is emitted for it at scope exit. This is exactly one retain and one release cheaper than
-an ordinary `t = s` copy, and it expresses intent — the object now lives in `t`, not `s`.
-
-For a **value type** (`int`, `float`, …) `mov` simply forwards the value; there is no reference
-count to manage.
-
-Once a variable has been moved it may not be read again — doing so is a compile-time error:
-
-```pkn
-a: int = 3;
-b = mov a;
-c = a;          // error: use of moved variable 'a'
-```
-
-A moved variable can be brought back to life by **re-assigning** it, after which it is an
-ordinary live variable again:
-
-```pkn
-s: Str = "first";
-t = mov s;
-s = "second";   // revives s
-println(s);     // ok
-```
-
-Only whole local variables and temporaries may be moved. Moving a **member variable**
-(`obj.field`) or an **array element** (`arr[i]`) is rejected, because that would leave a hole in an
-aggregate whose lifetime `mov` cannot account for.
-
-Inside a method, **`self` may not be moved**: `self` is a *borrowed* reference to the receiver —
-the method does not own it, so there is no ownership to transfer. Ordinary **parameters** are
-owned by the callee for the duration of the call and *may* be moved, exactly like locals.
-
-### `mov` across branches
-
-The moved-or-live state of a variable is tracked **per control-flow path**. Each branch of an
-`if`/`else` — and each arm of a `match` — is checked against the state at entry to the construct,
-so a `mov` in one branch never poisons a sibling branch that can only run instead of it:
-
-```pkn
-if (f) {
-  consume(mov s);
-} else {
-  println(s);      // ok — this path did not move s
-}
-```
-
-After the construct the compiler merges paths conservatively: a variable moved on **any** path
-counts as moved, unless **every** path through the construct re-assigned it (for an `if` without
-`else`, or a `match` without a wildcard arm, the implicit not-taken path counts as a path that
-did not re-assign):
-
-```pkn
-if (f) { consume(mov s); }
-println(s);        // error: s may have been moved
-
-t = mov s;
-if (f) { s = "a"; } else { s = "b"; }
-println(s);        // ok — revived on both paths
-```
-
-The same per-path rule applies to the **ternary expression** `if c then A else B`. The condition
-`c` always runs first, so a `mov` inside it is visible to both `A` and `B` and is definite
-afterwards. `A` and `B` are sibling branches: each is checked against the state after the
-condition, so a `mov` in one never affects the other — moving the *same* variable in both is fine.
-After the expression the paths are merged exactly like an `if`/`else` statement: a variable moved
-in either branch counts as moved.
-
-```pkn
-y = if f then mov s else s;   // ok — the else branch did not move s
-println(y);
-println(s);                   // error: s may have been moved
-
-z = if f then mov s else mov s;
-println(z);                   // ok — exactly one branch ran; s is moved either way
-```
-
-The short-circuit operators **`a && b`** and **`a || b`** evaluate `b` only when `a` does not
-already decide the result, so `b` is a conditional branch that runs *after* `a`. A `mov` in `a` is
-definite and is visible in `b`; a `mov` in `b` may or may not have happened, so it is
-conservatively treated as moved after the expression (the "skip `b`" path is merged in, just like
-an `if` without `else`):
-
-```pkn
-ok = check(mov s) && other(s);  // error: s was moved by the left operand
-ok = f && check(mov s);         // ok on its own …
-println(s);                     // … but: error, s may have been moved
-```
-
-Function-call arguments are evaluated **left to right**, so `f(mov s, s)` is an error: the second
-argument reads `s` after the first consumed it.
-
-### `mov` in loops
-
-A loop body (and a loop condition) re-executes, so a variable **declared outside a loop** may not
-be left moved when the loop repeats — on the next iteration it would be read after being
-consumed. This is a compile-time error unless the body re-assigns the variable on every path
-before the loop repeats:
-
-```pkn
-s: Str = "x";
-while (i < 2) {
-  consume(mov s);  // error: s is declared outside the loop and still moved
-  i = i + 1;       //        when the loop repeats
-}
-```
-
-Either re-assign it before the end of the body, or declare it inside the loop (a loop-local
-variable is fresh on every iteration):
-
-```pkn
-while (i < 2) {
-  s: Str = "x";
-  consume(mov s);  // ok
-  i = i + 1;
-}
-```
+Drop the keyword: `t = mov s;` becomes `t = s;`. The program prints the same output and frees
+the same objects. The variable `s` simply stays readable afterwards.
 
 ---
 
