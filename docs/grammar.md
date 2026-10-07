@@ -52,8 +52,8 @@ STRING   ::= '"' ( [^\\"\n] | "\\" [^\n] )* '"'
 Keywords (reserved; never identifiers):
 
 ```
-import  as  class  enum  match  mov  fn  return  if  then  else  while
-break  continue  True  False  None  _
+import  as  class  enum  match  mov  fn  native  return  if  then  else
+while  break  continue  True  False  None  _
 ```
 
 `_` alone is the `UNDERSCORE` token (destructuring skip, match wildcard);
@@ -106,7 +106,8 @@ one tuple-index token (`\.[0-9]+`, longest match at the dot).
 
 ```
 translationUnit ::= topLevelDecl*
-topLevelDecl    ::= importDecl | classDecl | funcDecl | enumDecl
+topLevelDecl    ::= importDecl | classDecl | funcDecl | nativeFuncDecl
+                  | enumDecl
 ```
 
 Declarations may appear in any order. The AST keeps them in four lists
@@ -142,6 +143,8 @@ enumDecl    ::= "enum" IDENT "{" IDENT ( "," IDENT )* ","? "}"
 
 funcDecl    ::= "fn" IDENT typeParams? "(" paramList? ")"
                 ( "->" typeAnnotation )? block
+nativeFuncDecl ::= "native" "fn" IDENT "(" paramList? ")"
+                   ( "->" typeAnnotation )? "=" STRING ";"   -- the C symbol
 paramList   ::= param ( "," param )*
 param       ::= IDENT ":" typeAnnotation
 

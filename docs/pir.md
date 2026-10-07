@@ -123,6 +123,16 @@ ordinary `@PaykanString_new` (C `pk_<module>_PaykanString_new`, LLVM
 literals still call `@$rt.PaykanString_new`.  The verifier enforces both
 directions (§9).
 
+**Native names.**  The C function a `native fn` calls (#198) is a module-less
+extern named `$c.<C symbol>`: `native fn put(fd: int, s: Str) -> int =
+"pk_put"` declares `extern fn @$c.pk_put(i64, obj) -> i64`.  Its signature is
+not the runtime's, so backends declare it from the PIR signature (C:
+`int64_t pk_put(int64_t, PaykanObject *);`) and link it by the name without
+`$c.` (`pir::externCSymbol`).  The `native fn` itself is an ordinary function
+`@put` whose body unboxes each reference parameter (borrowed by the C call),
+calls `@$c.pk_put`, releases its parameters and returns the result; a
+reference result is the C function's owned box.
+
 ## 4. Module-level items
 
 ```
@@ -430,8 +440,9 @@ The verifier rejects a program when:
 * a module-level symbol is defined twice, or a vtable entry's signature does not
   match the named function's declaration;
 * a runtime extern (`extern fn` without a `module`, `extern obj`, `extern
-  vtable`) is not named `$rt.<symbol>`, or anything else (a function, a module
-  extern's `symbol`, a `cstr`/`data`/`bytes` global) is;
+  vtable`) is not named `$rt.<symbol>` (a module-less `extern fn` may instead
+  be a native `$c.<symbol>`), or anything else (a function, a module extern's
+  `symbol`, a `cstr`/`data`/`bytes` global) has either name;
 * `@main` has a signature other than `() -> i64` or `(box) -> i64`.
 
 ## 10. Text format summary

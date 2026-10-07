@@ -1058,6 +1058,21 @@ TEST(Driver, EmitCEmitsBitCastHelpersWhenUsed) {
       << out;
 }
 
+// A `native fn`'s C symbol is prototyped from its PIR signature (#198).
+TEST(Driver, EmitCPrototypesNativeFunctions) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp("native fn put(fd: int, s: Str) -> int = \"pk_put\";"
+                      "native fn get() -> Str? = \"pk_get\";"
+                      "fn main() -> int { s = get(); return put(1, \"x\"); }");
+  auto [rc, out] = run(std::string(kPaykan) + " --emit-c " + src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_EQ(rc, 0) << out;
+  EXPECT_NE(out.find("int64_t pk_put(int64_t, PaykanObject *);"),
+            std::string::npos)
+      << out;
+  EXPECT_NE(out.find("PaykanShared *pk_get(void);"), std::string::npos) << out;
+}
+
 TEST(Driver, EmitCRejectsAnotherBackend) {
   REQUIRE_BACKEND();
   auto src = writeTmp("fn main() -> int { return 0; }");

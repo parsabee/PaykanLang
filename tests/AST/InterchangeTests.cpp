@@ -412,6 +412,36 @@ TEST(Interchange, MovIsRemoved) {
       << error;
 }
 
+// A `native fn` (#198) carries (native "symbol") where the body goes.
+TEST(Interchange, NativeFunctionRoundTrips) {
+  const std::string text = "(paykan-ast 1\n"
+                           "  (unit\n"
+                           "    (fn \"put\"\n"
+                           "      (type-params)\n"
+                           "      (params\n"
+                           "        (param \"s\"\n"
+                           "          (named-type \"Str\")))\n"
+                           "      (named-type \"int\")\n"
+                           "      (native \"pk_put\"))))\n";
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *tu = read(text, ctx, error);
+  ASSERT_NE(tu, nullptr) << error;
+  auto *fn = tu->getFuncDecls()[0];
+  EXPECT_TRUE(fn->isNative());
+  EXPECT_EQ(fn->getNativeSymbol(), "pk_put");
+  EXPECT_EQ(fn->getBody(), nullptr);
+  EXPECT_EQ(write(*tu), text);
+
+  EXPECT_EQ(read("(paykan-ast 1 (unit (fn \"f\" (type-params \"T\") (params) "
+                 "_ (native \"pk_f\"))))",
+                 ctx, error),
+            nullptr);
+  EXPECT_NE(error.find("a native function cannot be generic"),
+            std::string::npos)
+      << error;
+}
+
 // A tree deeper than the format allows is refused, without recursing
 // through all of it.
 TEST(ASTInterchange, WriteRefusesTooDeepATree) {

@@ -27,15 +27,25 @@ struct Keyword {
 // Keywords in docs/grammar.md.  `_` on its own is the UNDERSCORE token; any
 // longer identifier starting with `_` is an ordinary identifier.
 constexpr Keyword kKeywords[] = {
-    {"import", Tok::KwImport}, {"as", Tok::KwAs},
-    {"class", Tok::KwClass},   {"enum", Tok::KwEnum},
-    {"match", Tok::KwMatch},   {"mov", Tok::KwMov},
-    {"fn", Tok::KwFn},         {"return", Tok::KwReturn},
-    {"if", Tok::KwIf},         {"then", Tok::KwThen},
-    {"else", Tok::KwElse},     {"while", Tok::KwWhile},
-    {"break", Tok::KwBreak},   {"continue", Tok::KwContinue},
-    {"True", Tok::KwTrue},     {"False", Tok::KwFalse},
-    {"None", Tok::KwNone},     {"_", Tok::Underscore},
+    {"import", Tok::KwImport},
+    {"as", Tok::KwAs},
+    {"class", Tok::KwClass},
+    {"enum", Tok::KwEnum},
+    {"match", Tok::KwMatch},
+    {"mov", Tok::KwMov},
+    {"fn", Tok::KwFn},
+    {"native", Tok::KwNative},
+    {"return", Tok::KwReturn},
+    {"if", Tok::KwIf},
+    {"then", Tok::KwThen},
+    {"else", Tok::KwElse},
+    {"while", Tok::KwWhile},
+    {"break", Tok::KwBreak},
+    {"continue", Tok::KwContinue},
+    {"True", Tok::KwTrue},
+    {"False", Tok::KwFalse},
+    {"None", Tok::KwNone},
+    {"_", Tok::Underscore},
 };
 
 } // namespace
@@ -68,6 +78,8 @@ const char *describe(Tok k) {
     return "'mov'";
   case Tok::KwFn:
     return "'fn'";
+  case Tok::KwNative:
+    return "'native'";
   case Tok::KwReturn:
     return "'return'";
   case Tok::KwIf:
@@ -178,6 +190,8 @@ const char *tokenKindName(Tok k) {
     return "KW_MOV";
   case Tok::KwFn:
     return "KW_FN";
+  case Tok::KwNative:
+    return "KW_NATIVE";
   case Tok::KwReturn:
     return "KW_RETURN";
   case Tok::KwIf:

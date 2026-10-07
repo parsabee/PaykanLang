@@ -492,14 +492,16 @@ void ASTPrinter::visitFuncDecl(FuncDecl *node) {
   header("FuncDecl", node);
   OS << " '" << node->getName() << "'";
   printTypeParams(OS, node->getTypeParams());
+  if (node->isNative())
+    OS << " native '" << node->getNativeSymbol() << "'";
   if (node->getReturnType())
     OS << " ->";
   OS << "\n";
   if (node->getReturnType()) {
-    ChildScope cs(*this, false);
+    ChildScope cs(*this, !node->getBody());
     visit(node->getReturnType());
   }
-  {
+  if (node->getBody()) {
     ChildScope cs(*this, true);
     visit(node->getBody());
   }

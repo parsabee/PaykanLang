@@ -2206,9 +2206,53 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
     paramTypes.push_back(ty);
   }
 
+  if (node->isNative() && !checkNativeSignature(node, retTy, paramTypes)) {
+    ErroneousNames.insert(node->getName());
+    return false;
+  }
+
   // Register the function in the function table.
   declareFunction(node->getName(), retTy, paramTypes);
   return true;
+}
+
+// A `native fn` (#198) crosses into C with the runtime builtins' convention,
+// which only covers scalars, `Str` and `Obj` (and, as a result, `Str?` and
+// `Obj?`: a null box is None).
+bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
+                                const std::vector<ast::Type *> &paramTypes) {
+  auto scalarOrRef = [&](ast::Type *t) {
+    if (t == Ctx.getStrTy() || t == Ctx.getObjTy())
+      return true;
+    auto *bt = ast::dyn_cast<ast::BuiltinType>(t);
+    return bt && t != Ctx.getVoidTy();
+  };
+  bool ok = true;
+  auto reject = [&](ast::Type *t, const std::string &what) {
+    error(node->getLocation(),
+          "native function '" + node->getName() + "': " + what + " '" +
+              typeName(t) +
+              "' cannot cross into C (int, float, bool, char, Str and Obj "
+              "can; Str? and Obj? as a result)");
+    ok = false;
+  };
+  for (size_t i = 0; i < paramTypes.size(); ++i)
+    if (!scalarOrRef(paramTypes[i]))
+      reject(paramTypes[i],
+             "parameter '" + node->getParams()[i].getName() + "' of type");
+  ast::Type *ret = retTy;
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(retTy))
+    ret = ot->getInnerType() == Ctx.getStrTy() ||
+                  ot->getInnerType() == Ctx.getObjTy()
+              ? ot->getInnerType()
+              : retTy;
+  if (ret != Ctx.getVoidTy() && !scalarOrRef(ret))
+    reject(retTy, "result type");
+  if (node->getName() == names::kMain) {
+    error(node->getLocation(), "'main' cannot be a native function");
+    ok = false;
+  }
+  return ok;
 }
 
 bool Sema::visitFuncDecl(ast::FuncDecl *node) {
@@ -2218,6 +2262,8 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
   // already reported — skip the body to avoid duplicate diagnostics.
   if (!lookupFunction(node->getName()))
     return false;
+  if (node->isNative())
+    return true; // the body is C (#198)
 
   // Re-resolve the annotations to set up the body scope (resolveType is
   // idempotent and, for a registered function, is guaranteed to succeed —

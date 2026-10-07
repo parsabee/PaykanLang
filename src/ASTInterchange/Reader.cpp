@@ -379,6 +379,13 @@ private:
       return e;
     }
 
+    /// The next field if it is a list tagged @p tag (consumed), else null.
+    const SExpr *optionalList(const char *tag) {
+      if (atEnd() || L.Items[I].K != SExpr::List || L.Items[I].Text != tag)
+        return nullptr;
+      return &L.Items[I++];
+    }
+
     /// The next field, which must be a list (any tag).
     const SExpr *anyList(const char *what) {
       const SExpr *e = next(what);
@@ -624,6 +631,19 @@ private:
       ret = type(f, "the return type or _");
       if (!ret)
         return nullptr;
+    }
+    // A `native fn` has (native "symbol") where the body goes (#198).
+    if (const SExpr *nl = f.optionalList("native")) {
+      Fields nf(*this, *nl);
+      const std::string *symbol = nf.name("the C symbol");
+      if (!symbol || !nf.done() || !f.done())
+        return nullptr;
+      if (!tparams.empty())
+        return fail(e, "a native function cannot be generic"), nullptr;
+      auto *fn =
+          Ctx.make<FuncDecl>(loc, *name, std::move(params), ret, nullptr);
+      fn->setNativeSymbol(*symbol);
+      return fn;
     }
     CompoundStmt *body = block(f, "the function's body");
     if (!body || !f.done())

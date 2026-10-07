@@ -361,6 +361,7 @@ private:
                           const Val &val);
   void emitBody(ast::CompoundStmt *body);
   void emitImplicitReturn(const pir::Signature &sig);
+  void emitNativeBody(ast::FuncDecl *node, const pir::Function &fn);
   Val emitValueMatch(ast::MatchStmt *node, const Val &subjRaw);
   Val emitEnumMatch(ast::MatchStmt *node, const Val &subjRaw);
   /// Emit `if (check0) body0 else if (check1) body1 ... else default`.

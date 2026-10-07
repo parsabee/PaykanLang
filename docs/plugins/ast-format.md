@@ -82,6 +82,7 @@ or more.
 | `(enum LOC NAME NAME...)` | `enum E { A, B }`: the name, then the variants |
 | `(class LOC NAME SUPER (type-params NAME...) (fields VAR...) (methods FN...))` | a class. `SUPER` is the superclass's name or `""`; a generic class has type parameters. Each field is a `var` with a type and no initialiser |
 | `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? BLOCK)` | a function or method; the `TYPE` is the return type, `_` for none |
+| `(fn LOC NAME (type-params) (params PARAM...) TYPE? (native STRING))` | a `native fn` (#198): the C symbol in place of the body; never generic |
 | `(param NAME TYPE)` | one parameter |
 | `(var LOC NAME TYPE? EXPR?)` | a variable or field declaration: `x: int = 1` is `(var "x" (named-type "int") (int 1))` |
 

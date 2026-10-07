@@ -182,10 +182,15 @@ private:
     }
     close();
     optionalType(d.getReturnType());
-    if (d.getBody())
+    if (d.isNative()) {
+      open("native");
+      str(d.getNativeSymbol());
+      close();
+    } else if (d.getBody()) {
       stmt(d.getBody());
-    else
+    } else {
       fail("function '" + d.getName() + "' has no body");
+    }
     close();
   }
 

@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `samples/imports/13_pkm` walks through it.  Libraries `paykan_pkm` (the file format) and
   `paykan_modules` (the resolver); the runtime ABI version moved to
   `PAYKAN_RUNTIME_ABI_VERSION` in `Runtime.h`.
+- `native fn name(params) -> T = "c_symbol";` declares a function whose body is
+  a C function written against the runtime ABI (#198): `int`, `float`, `bool`,
+  `char`, `Str` and `Obj` cross by the runtime builtins' convention (`Str?` and
+  `Obj?` as a result).  `native` is a reserved word.  In PIR the C function is
+  a module-less `extern fn @$c.<symbol>`; both backends declare it from its
+  signature.  Compiling and linking the C sources is not part of this change.
 
 ### Removed
 

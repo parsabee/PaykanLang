@@ -324,6 +324,9 @@ private:
   CompoundStmt *Body;
   // Type parameter names (interned); empty for an ordinary function.
   std::vector<const std::string *> TypeParams;
+  // The C symbol of a `native fn` (interned), which has no Body; nullptr for
+  // an ordinary function (#198).
+  const std::string *NativeSymbol = nullptr;
 
 public:
   FuncDecl(SourceLocation loc, const std::string &internedName,
@@ -344,6 +347,12 @@ public:
     return TypeParams;
   }
   bool isGeneric() const { return !TypeParams.empty(); }
+
+  bool isNative() const { return NativeSymbol != nullptr; }
+  const std::string &getNativeSymbol() const { return *NativeSymbol; }
+  void setNativeSymbol(const std::string &internedSymbol) {
+    NativeSymbol = &internedSymbol;
+  }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_FuncDecl; }
 };
