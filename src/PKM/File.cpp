@@ -60,8 +60,8 @@ std::optional<Error> readImpl(std::span<const uint8_t> bytes,
     return fail(ErrorCode::NotAPkm, "not a .pkm file (bad magic)");
   ByteReader r(bytes);
   r.skip(8);
-  uint32_t headerSize, count, entrySize;
-  uint64_t tableOffset;
+  uint32_t headerSize = 0, count = 0, entrySize = 0;
+  uint64_t tableOffset = 0;
   r.u16(major);
   r.u16(minor);
   r.u32(headerSize);

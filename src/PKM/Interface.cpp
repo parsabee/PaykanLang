@@ -264,7 +264,7 @@ private:
 Status Reader::readParts() {
   ByteReader r(Blob);
   std::span<const uint8_t> magic;
-  uint16_t major, minor;
+  uint16_t major = 0, minor = 0;
   uint32_t n;
   if (!r.bytes(4, magic) || !r.u16(major) || !r.u16(minor) || !r.u32(Flags) ||
       !r.u32(n))

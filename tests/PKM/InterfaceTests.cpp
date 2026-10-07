@@ -57,7 +57,7 @@ std::vector<Part> parts(const std::vector<uint8_t> &b) {
 /// Rebuilds a blob from parts, so a test can replace one part's bytes.
 std::vector<uint8_t>
 rebuild(const std::vector<uint8_t> &src,
-        std::vector<std::pair<Part, std::vector<uint8_t>>> replaced) {
+        const std::vector<std::pair<Part, std::vector<uint8_t>>> &replaced) {
   ByteWriter w;
   w.bytes(src.data(), 12);
   w.u32(static_cast<uint32_t>(replaced.size()));
@@ -87,11 +87,11 @@ partsWithBytes(const std::vector<uint8_t> &b) {
 
 /// The blob with part @p tag's bytes replaced.
 std::vector<uint8_t> withPart(const std::vector<uint8_t> &b, uint32_t tag,
-                              std::vector<uint8_t> bytes) {
+                              const std::vector<uint8_t> &bytes) {
   auto ps = partsWithBytes(b);
   for (auto &[p, v] : ps)
     if (p.Tag == tag)
-      v = std::move(bytes);
+      v = bytes;
   return rebuild(b, ps);
 }
 

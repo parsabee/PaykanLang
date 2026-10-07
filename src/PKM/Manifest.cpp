@@ -243,7 +243,7 @@ StatusOr<Manifest> decodeManifest(std::span<const uint8_t> bytes) {
     return Status::error("manifest larger than 1 MiB");
   ByteReader r(bytes);
   std::span<const uint8_t> magic;
-  uint16_t major, minor;
+  uint16_t major = 0, minor = 0;
   if (!r.bytes(4, magic) || !r.u16(major) || !r.u16(minor))
     return Status::error("truncated manifest header");
   if (std::memcmp(magic.data(), "PKMM", 4) != 0)
