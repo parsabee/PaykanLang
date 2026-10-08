@@ -126,6 +126,7 @@ private:
   /// Returns false on error.  @p out is null for an empty statement `;`.
   bool parseStatement(ast::Stmt *&out);
   bool parseExprOrAssignStatement(ast::Stmt *&out);
+  bool parseLetDecl(ast::Stmt *&out);
   bool
   parseDestructureStatement(ast::SourceLocation start,
                             std::vector<ast::DestructureStmt::Target> targets,

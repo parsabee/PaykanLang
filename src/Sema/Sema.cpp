@@ -1514,6 +1514,10 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
       CurrentScope->set(name, elemTy);
       continue;
     }
+    if (!checkReassignable(name, target.Loc)) {
+      ok = false;
+      continue;
+    }
     auto *varTy = owner->lookup(name);
     // A poisoned variable is re-declared with the element's type.
     if (ast::isa<ast::PoisonType>(varTy)) {
@@ -1966,6 +1970,23 @@ bool Sema::visitExprStmt(ast::ExprStmt *node) {
   return resolveExprType(node->getExpr()) != nullptr;
 }
 
+Sema::VarKind Sema::varKind(std::string_view name) const {
+  for (const Scope *s = CurrentScope; s; s = s->Parent) {
+    if (!s->contains(name))
+      continue;
+    auto it = s->Kinds.find(name);
+    return it == s->Kinds.end() ? VarKind::Plain : it->second;
+  }
+  return VarKind::Plain;
+}
+
+bool Sema::checkReassignable(const std::string &name, ast::SourceLocation loc) {
+  if (varKind(name) != VarKind::Let)
+    return true;
+  error(loc, "'" + name + "' is declared with 'let' and cannot be reassigned");
+  return false;
+}
+
 bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   // An existing variable's type is the value's expected type.
   ast::Type *expected = nullptr;
@@ -2000,6 +2021,8 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
     return true;
   }
 
+  if (!checkReassignable(varName, node->getLocation()))
+    return false;
   auto *varTy = owner->lookup(varName);
 
   // A poisoned variable (its declaration failed) is re-declared by a valid
@@ -2288,6 +2311,8 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
           "redeclaration of variable '" + node->getName() + "'");
     return false;
   }
+  if (node->isLet())
+    CurrentScope->Kinds[node->getName()] = VarKind::Let;
 
   // Resolve the declared type.
   ast::Type *declTy = nullptr;
@@ -2352,7 +2377,10 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     return false;
   }
 
-  // Register the variable in the current scope.
+  // Register the variable in the current scope.  An inferred type (`let x =
+  // e;`) is written back like an annotation's, for the lowering.
+  if (!node->getType())
+    node->setType(declTy);
   CurrentScope->declare(node->getName(), declTy);
   return true;
 }

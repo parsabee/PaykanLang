@@ -199,6 +199,10 @@ private:
     str(d.getName());
     optionalType(d.getType());
     optionalExpr(d.getInitExpr());
+    if (d.isLet()) {
+      open("let");
+      close();
+    }
     close();
   }
 

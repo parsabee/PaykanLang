@@ -37,6 +37,7 @@ constexpr Keyword kKeywords[] = {
     {"True", Tok::KwTrue},     {"False", Tok::KwFalse},
     {"None", Tok::KwNone},     {"_", Tok::Underscore},
     {"view", Tok::KwView},     {"inout", Tok::KwInout},
+    {"let", Tok::KwLet},
 };
 
 } // namespace
@@ -93,6 +94,8 @@ const char *describe(Tok k) {
     return "'view'";
   case Tok::KwInout:
     return "'inout'";
+  case Tok::KwLet:
+    return "'let'";
   case Tok::Underscore:
     return "'_'";
   case Tok::Assign:
@@ -207,6 +210,8 @@ const char *tokenKindName(Tok k) {
     return "KW_VIEW";
   case Tok::KwInout:
     return "KW_INOUT";
+  case Tok::KwLet:
+    return "KW_LET";
   case Tok::Underscore:
     return "UNDERSCORE";
   case Tok::Assign:

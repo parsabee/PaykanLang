@@ -92,6 +92,41 @@ inner x = 10
 outer x = 2
 ```
 
+A variable declared with `let` keeps its first value: assigning to it again is an error. It
+always has an initial value, and its type can be left out as usual:
+
+```pkn
+fn main() -> int {
+  let rate = 3;
+  let label: Str = "rate";
+  println(label + " = " + Str(rate));
+  return 0;
+}
+```
+
+Output:
+
+```
+rate = 3
+```
+
+```pkn
+fn main() -> int {
+  let rate = 3;
+  rate = 4;
+  return 0;
+}
+```
+
+Error:
+
+```
+error: 'rate' is declared with 'let' and cannot be reassigned
+```
+
+`let` is for local variables only (not parameters or fields). It fixes the variable, not
+the object it refers to: `let p = Point(1, 2);` can still be followed by `p.x = 5;`.
+
 ## Types
 
 These are the built-in value types:

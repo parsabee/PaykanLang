@@ -587,6 +587,8 @@ private:
         return nullptr;
       if (vd->getInitExpr() || !vd->getType())
         return fail(v, "a field has a type and no initialiser"), nullptr;
+      if (vd->isLet())
+        return fail(v, "a field cannot be declared with let"), nullptr;
       fields.push_back(vd);
     }
     const SExpr *ml = f.list("methods");
@@ -675,9 +677,17 @@ private:
       if (!init)
         return nullptr;
     }
+    // `let x = e;` carries a trailing (let), and has an initialiser.
+    const SExpr *let = f.optionalList("let");
+    if (let && !let->Items.empty())
+      return fail(*let, "(let) takes no fields"), nullptr;
+    if (let && !init)
+      return fail(*let, "a let declaration has an initialiser"), nullptr;
     if (!f.done())
       return nullptr;
-    return Ctx.make<VarDecl>(loc, *name, ty, init);
+    auto *vd = Ctx.make<VarDecl>(loc, *name, ty, init);
+    vd->setLet(let != nullptr);
+    return vd;
   }
 
   // -- Types

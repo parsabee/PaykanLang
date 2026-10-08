@@ -30,6 +30,7 @@ add_executable(parser_tests
     Parser/TupleTests.cpp
     Parser/GrammarEdgeTests.cpp
     Parser/ParamModeTests.cpp
+    Parser/LetTests.cpp
 )
 target_include_directories(parser_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -71,6 +72,7 @@ add_executable(sema_tests
     Sema/PoisonTests.cpp
     Sema/InterfaceConversionTests.cpp
     Sema/ParamModeTests.cpp
+    Sema/LetTests.cpp
 )
 target_include_directories(sema_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -120,6 +122,7 @@ add_executable(codegen_tests
     CodeGen/RuntimeNameTests.cpp
     CodeGen/HarnessTests.cpp
     CodeGen/ParamModeTests.cpp
+    CodeGen/LetTests.cpp
 )
 target_include_directories(codegen_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}

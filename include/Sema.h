@@ -76,11 +76,17 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   // -- Scoped symbol table
 
+  /// What restricts a variable beyond its type: nothing, or `let` (it cannot
+  /// be reassigned).
+  enum class VarKind : uint8_t { Plain, Let };
+
   /// A single lexical scope. Each scope has its own local bindings and a
   /// pointer to its enclosing (parent) scope.
   struct Scope {
     Scope *Parent = nullptr;
     StringMap<ast::Type *> Locals;
+    /// The kind of each variable bound here that is not Plain.
+    StringMap<VarKind> Kinds;
 
     explicit Scope(Scope *parent = nullptr);
 
@@ -102,6 +108,11 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   };
 
   Scope *CurrentScope = nullptr;
+
+  /// The kind of variable @p name where it is bound (innermost first).
+  VarKind varKind(std::string_view name) const;
+  /// Error at @p loc (and false) unless variable @p name may be assigned.
+  bool checkReassignable(const std::string &name, ast::SourceLocation loc);
 
   /// The expected return type of the current function (nullptr = top-level /
   /// void).

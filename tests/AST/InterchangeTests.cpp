@@ -443,6 +443,54 @@ TEST(ASTInterchange, ParamModes) {
   }
 }
 
+// A `let` local is a `var` with a trailing `(let)`.
+TEST(ASTInterchange, LetLocals) {
+  const std::string text = "(paykan-ast 1 (unit (fn \"f\" (type-params) "
+                           "(params) _ (block (decl (var \"n\" _ (int 1) "
+                           "(let))) (decl (var \"m\" (named-type \"int\") "
+                           "(int 2)))))))";
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *tu = read(text, ctx, error);
+  ASSERT_NE(tu, nullptr) << error;
+  std::string d = dump(tu);
+  EXPECT_NE(d.find("VarDecl 'n' let\n"), std::string::npos) << d;
+  EXPECT_NE(d.find("VarDecl 'm' type\n"), std::string::npos) << d;
+  std::string written = write(*tu);
+  EXPECT_NE(
+      written.find("(var \"n\" _\n            (int 1)\n            (let)))"),
+      std::string::npos)
+      << written;
+  ast::ASTContext ctx2;
+  ast::TranslationUnit *back = read(written, ctx2, error);
+  ASSERT_NE(back, nullptr) << error;
+  EXPECT_EQ(dump(back), d);
+
+  struct Case {
+    const char *Var;
+    const char *Error;
+  };
+  for (const Case &c :
+       {Case{"(var \"n\" _ (int 1) (let x))", "(let) takes no fields"},
+        Case{"(var \"n\" (named-type \"int\") _ (let))",
+             "a let declaration has an initialiser"},
+        Case{"(var \"n\" _ (int 1) (let) (let))",
+             "unexpected field in (var ...)"}}) {
+    std::string doc = "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) "
+                      "_ (block (decl " +
+                      std::string(c.Var) + ")))))";
+    EXPECT_EQ(read(doc, ctx, error), nullptr) << c.Var;
+    EXPECT_NE(error.find(c.Error), std::string::npos) << c.Var << ": " << error;
+  }
+  std::string field = "(paykan-ast 1 (unit (class \"C\" \"\" (type-params) "
+                      "(fields (var \"n\" (named-type \"int\") _ (let))) "
+                      "(methods))))";
+  EXPECT_EQ(read(field, ctx, error), nullptr);
+  EXPECT_NE(error.find("a let declaration has an initialiser"),
+            std::string::npos)
+      << error;
+}
+
 TEST(Interchange, MovIsRemoved) {
   // `mov` is retired (#145): an out-of-tree frontend still emitting it gets
   // the same diagnostic as the built-in parser.
