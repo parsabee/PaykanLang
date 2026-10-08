@@ -17,6 +17,7 @@
 #include "paykan/ast/Interchange.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -398,6 +399,48 @@ TEST(ASTInterchange, NestingIsBounded) {
   EXPECT_NE(error.find("nesting too deep (more than 2048 levels)"),
             std::string::npos)
       << error;
+}
+
+// A parameter's mode is the optional `(qual view)` / `(qual inout)` item.
+TEST(ASTInterchange, ParamModes) {
+  parser::ParserDriver driver("recursive-descent");
+  auto path =
+      std::filesystem::temp_directory_path() /
+      ("paykan_interchange_modes_" + std::to_string(::getpid()) + ".pkn");
+  {
+    std::ofstream(path) << "fn bump(inout n: int, view by: int, k: int) { }\n"
+                           "class C { fn __init__(view n: int) { } }\n";
+  }
+  ASSERT_EQ(driver.parseFile(path.string()), 0);
+  std::filesystem::remove(path);
+  std::string text = write(*driver.getRoot());
+  std::string flat; // one line: every run of whitespace is one space
+  for (char c : text)
+    if (!std::isspace(static_cast<unsigned char>(c)))
+      flat += c;
+    else if (!flat.empty() && flat.back() != ' ')
+      flat += ' ';
+  for (const char *param : {"(param \"n\" (named-type \"int\") (qual inout))",
+                            "(param \"by\" (named-type \"int\") (qual view))",
+                            "(param \"k\" (named-type \"int\"))"})
+    EXPECT_NE(flat.find(param), std::string::npos) << param << "\n" << text;
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *back = read(text, ctx, error);
+  ASSERT_NE(back, nullptr) << error;
+  EXPECT_EQ(dump(back), dump(driver.getRoot()));
+  EXPECT_EQ(write(*back), text);
+
+  for (const char *bad : {"(qual)", "(qual frob)", "(qual view inout)",
+                          "(qual \"view\")", "(qual let)"}) {
+    std::string doc = "(paykan-ast 1 (unit (fn \"f\" (type-params) (params "
+                      "(param \"n\" (named-type \"int\") " +
+                      std::string(bad) + ")) _ (block))))";
+    EXPECT_EQ(read(doc, ctx, error), nullptr) << bad;
+    EXPECT_NE(error.find("expected (qual view) or (qual inout)"),
+              std::string::npos)
+        << bad << ": " << error;
+  }
 }
 
 TEST(Interchange, MovIsRemoved) {

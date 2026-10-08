@@ -273,7 +273,11 @@ bool Parser::errorAtCurrent(const std::string &expected) {
   std::string found = describe(t.Kind);
   if (t.Kind == Tok::Ident)
     found += " '" + std::string(t.Text) + "'";
-  error(t.Loc, "unexpected " + found + "; " + expected);
+  std::string hint;
+  if (t.Kind == Tok::KwView || t.Kind == Tok::KwInout)
+    hint = " (" + found + " only marks a parameter: 'fn f(" +
+           std::string(t.Text) + " x: int)')";
+  error(t.Loc, "unexpected " + found + "; " + expected + hint);
   return true;
 }
 
@@ -643,12 +647,17 @@ EnumDecl *Parser::parseEnumDecl() {
 // funcDecl ::= "fn" IDENT ( "<" typeParamList ">" )? "(" paramList ")"
 //              ( "->" typeAnnotation )? block
 // paramList ::= ( param ( "," param )* )?
-// param ::= IDENT ":" typeAnnotation
+// param ::= ( "view" | "inout" )? IDENT ":" typeAnnotation
 
 bool Parser::parseParamList(std::vector<Param> &out) {
   if (at(Tok::RParen))
     return true;
   do {
+    ParamMode mode = ParamMode::Value;
+    if (accept(Tok::KwView))
+      mode = ParamMode::View;
+    else if (accept(Tok::KwInout))
+      mode = ParamMode::Inout;
     if (!at(Tok::Ident)) {
       errorAtCurrent("expected a parameter name");
       return false;
@@ -659,7 +668,7 @@ bool Parser::parseParamList(std::vector<Param> &out) {
     Type *ty = parseTypeAnnotation();
     if (!ty)
       return false;
-    out.push_back(Param{&name, ty});
+    out.push_back(Param{&name, ty, mode});
   } while (accept(Tok::Comma));
   return true;
 }

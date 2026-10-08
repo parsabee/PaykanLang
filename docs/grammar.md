@@ -53,7 +53,7 @@ Keywords (reserved; never identifiers):
 
 ```
 import  as  class  enum  match  mov  fn  return  if  then  else  while
-break  continue  True  False  None  _
+break  continue  True  False  None  _  view  inout
 ```
 
 `_` alone is the `UNDERSCORE` token (destructuring skip, match wildcard);
@@ -143,7 +143,7 @@ enumDecl    ::= "enum" IDENT "{" IDENT ( "," IDENT )* ","? "}"
 funcDecl    ::= "fn" IDENT typeParams? "(" paramList? ")"
                 ( "->" typeAnnotation )? block
 paramList   ::= param ( "," param )*
-param       ::= IDENT ":" typeAnnotation
+param       ::= ( "view" | "inout" )? IDENT ":" typeAnnotation
 
 varDecl     ::= IDENT ":" typeAnnotation
 ```
@@ -152,6 +152,14 @@ An enum needs at least one variant; a single trailing comma is permitted.
 A class or function with `typeParams` is generic (a template that Sema
 instantiates); the superclass of a generic class is a plain class name.
 Methods are `funcDecl`s inside a class body.
+
+A parameter may start with its mode, `view` or `inout`
+([language/02-functions-and-calling.md](language/02-functions-and-calling.md)):
+`fn bump(inout n: int)`, `fn __init__(view start: int)`.  The keywords are
+reserved and appear nowhere else: `view` or `inout` in any other position (a
+statement, a type, a field, after the parameter's name) is a syntax error.
+The AST records the mode on the parameter (`Param::Mode`); whether it is
+allowed there (the parameter's type, an override) is Sema's job.
 
 ## 5. Types
 

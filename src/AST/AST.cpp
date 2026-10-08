@@ -44,6 +44,18 @@ const char *BinaryExpr::getOpcodeStr() const {
   __builtin_unreachable();
 }
 
+const char *paramModeName(ParamMode m) {
+  switch (m) {
+  case ParamMode::View:
+    return "view";
+  case ParamMode::Inout:
+    return "inout";
+  case ParamMode::Value:
+    break;
+  }
+  return "";
+}
+
 // -- UnaryExpr
 
 const char *UnaryExpr::getOpcodeStr() const {
@@ -384,7 +396,7 @@ FuncDecl *ASTCloner::cloneFuncDecl(FuncDecl *fn, const std::string &newName) {
   std::vector<Param> params;
   params.reserve(fn->getParams().size());
   for (auto &p : fn->getParams())
-    params.push_back(Param{p.Name, cloneType(p.ParamType)});
+    params.push_back(Param{p.Name, cloneType(p.ParamType), p.Mode});
   return Ctx.make<FuncDecl>(fn->getLocation(), Ctx.intern(newName),
                             std::move(params), cloneType(fn->getReturnType()),
                             cloneCompound(fn->getBody()));

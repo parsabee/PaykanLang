@@ -29,6 +29,7 @@ add_executable(parser_tests
     Parser/OptionalTests.cpp
     Parser/TupleTests.cpp
     Parser/GrammarEdgeTests.cpp
+    Parser/ParamModeTests.cpp
 )
 target_include_directories(parser_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -69,6 +70,7 @@ add_executable(sema_tests
     Sema/TupleTests.cpp
     Sema/PoisonTests.cpp
     Sema/InterfaceConversionTests.cpp
+    Sema/ParamModeTests.cpp
 )
 target_include_directories(sema_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}

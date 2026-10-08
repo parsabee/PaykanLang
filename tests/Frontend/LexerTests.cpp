@@ -73,6 +73,15 @@ TEST(Lexer, KeywordVersusIdentifier) {
   EXPECT_EQ(d.Lines[6], "1:25-1:29 KW_NONE None");
 }
 
+TEST(Lexer, ParamModeKeywords) {
+  auto d = dump("view inout viewer _inout");
+  ASSERT_EQ(d.Lines.size(), 5u);
+  EXPECT_EQ(d.Lines[0], "1:1-1:5 KW_VIEW view");
+  EXPECT_EQ(d.Lines[1], "1:6-1:11 KW_INOUT inout");
+  EXPECT_EQ(d.Lines[2], "1:12-1:18 IDENT viewer");
+  EXPECT_EQ(d.Lines[3], "1:19-1:25 IDENT _inout");
+}
+
 TEST(Lexer, NumberLiterals) {
   auto d = dump("1 1.5 1. 1e5 1.e5 1E+2 2e-3 1e 1.5e");
   std::vector<std::string> expected = {
