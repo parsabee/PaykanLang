@@ -173,6 +173,48 @@ fn @main() -> i64 {
   EXPECT_EQ(r.ExitCode, 6);
 }
 
+// local.addr hands a callee the alloca of a scalar local, which it reads
+// and writes in place with ptr.load / ptr.store (inout parameters).
+TEST(PIRLLVM, LocalAddressesAreInoutArguments) {
+  auto r = runPIR(R"(module "t"
+fn @bump(%n: ptr, %f: ptr, %b: ptr) -> void {
+  %v = ptr.load i64, %n
+  %w = add %v, 1
+  ptr.store %n, %w
+  %x = ptr.load f64, %f
+  %y = mul %x, 2.0
+  ptr.store %f, %y
+  %c = ptr.load bool, %b
+  %d = not %c
+  ptr.store %b, %d
+  ret
+}
+fn @main() -> i64 {
+  local %k: i64
+  local %g: f64
+  local %t: bool
+  store %k, 1
+  store %g, 1.5
+  store %t, false
+  %pk = local.addr %k
+  %pg = local.addr %g
+  %pt = local.addr %t
+  call @bump(%pk, %pg, %pt)
+  call @bump(%pk, %pg, %pt)
+  %k2 = load %k
+  %g2 = load %g
+  %t2 = load %t
+  %gi = ftoi %g2
+  %s = add %k2, %gi
+  %ti = select %t2, 100, 0
+  %out = add %s, %ti
+  ret %out
+}
+)");
+  ASSERT_TRUE(r.Ok) << r.Err;
+  EXPECT_EQ(r.ExitCode, 3 + 6);
+}
+
 TEST(PIRLLVM, FloatsSelectAndCasts) {
   auto r = runPIR(R"(module "t"
 fn @main() -> i64 {

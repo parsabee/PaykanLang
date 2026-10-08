@@ -743,6 +743,15 @@ private:
     case Opcode::Store:
       B.CreateStore(operand(in.Args[0]), S->Locals[in.Local]);
       break;
+    case Opcode::LocalAddr:
+      setResult(in, S->Locals[in.Local]);
+      break;
+    case Opcode::PtrLoad:
+      setResult(in, B.CreateLoad(llvmType(in.Result.Ty), operand(in.Args[0])));
+      break;
+    case Opcode::PtrStore:
+      B.CreateStore(operand(in.Args[1]), operand(in.Args[0]));
+      break;
     }
   }
 

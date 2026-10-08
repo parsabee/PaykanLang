@@ -38,6 +38,11 @@ std::string sigStr(const Signature &sig) {
 }
 
 bool isNumeric(Type t) { return t == Type::I64 || t == Type::F64; }
+/// The types a local.addr / ptr.load / ptr.store may address: the scalars
+/// and a box (an optional's slot).
+bool isAddressable(Type t) {
+  return isNumeric(t) || t == Type::Bool || t == Type::Char || t == Type::Box;
+}
 bool isPointerLike(Type t) {
   return t == Type::Box || t == Type::Obj || t == Type::Ptr;
 }
@@ -591,6 +596,33 @@ private:
           expect(in.Args[0], F.Locals[in.Local].Ty, "stored value");
         result(in, Type::Void);
         break;
+      case Opcode::LocalAddr:
+        arity(in, 0);
+        if (in.Local >= F.Locals.size())
+          error("local.addr of undeclared local " + std::to_string(in.Local));
+        else if (!isAddressable(F.Locals[in.Local].Ty))
+          error("local.addr of a local of type " +
+                std::string(typeName(F.Locals[in.Local].Ty)));
+        result(in, Type::Ptr);
+        break;
+      case Opcode::PtrLoad:
+        if (!arity(in, 1))
+          break;
+        expect(in.Args[0], Type::Ptr, "address of ptr.load");
+        if (in.Result.Id != kNoValue && !isAddressable(in.Result.Ty))
+          error("ptr.load of " + std::string(typeName(in.Result.Ty)));
+        result(in, in.Result.Id == kNoValue ? Type::I64 : in.Result.Ty);
+        break;
+      case Opcode::PtrStore: {
+        if (!arity(in, 2))
+          break;
+        expect(in.Args[0], Type::Ptr, "address of ptr.store");
+        Type t = typeOf(in.Args[1]);
+        if (t != Type::Void && !isAddressable(t))
+          error("ptr.store of " + std::string(typeName(t)));
+        result(in, Type::Void);
+        break;
+      }
       }
     }
 

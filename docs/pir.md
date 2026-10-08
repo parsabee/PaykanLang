@@ -279,7 +279,22 @@ field.store %o, Point.x, %v                    ; plain store: ARC is explicit ar
 ```
 %v = load %x
 store %x, %v
+%p = local.addr %x                             ; the address of %x (ptr)
+%v = ptr.load i64, %p                          ; the i64 at %p
+ptr.store %p, %v                               ; store %v at %p
 ```
+
+`local.addr` takes the address of a scalar (`i64`, `f64`, `bool`, `char`)
+or `box` local; `ptr.load` and `ptr.store` read and write a value of the
+named type through it.  Like `store`, `ptr.store` does no ARC: for a box
+the lowering releases the old one and keeps the new one's reference.  The
+ownership prototype's `inout` value parameters (a scalar or an optional)
+are `ptr` parameters that receive such an address: the callee reads and
+writes the caller's local in place.  An address is valid until the
+function that declared the local returns, and it is only ever passed down
+to callees, never stored in a field or a slot; it must be read and written
+with the local's type (the verifier cannot check that).  These ops are
+emitted only under `--ownership`.
 
 ## 7. What the lowering makes explicit (the ownership rules)
 
@@ -417,6 +432,8 @@ The verifier rejects a program when:
   a `local` is loaded/stored with the wrong type or used without a declaration;
 * an instruction's operand types do not match the op (arithmetic type mismatch,
   `cmp` on different types, a disallowed `cast` pair, non-`bool` condition);
+  `local.addr` names a local that is not a scalar or a `box`, or `ptr.load` /
+  `ptr.store` take a non-`ptr` address or a value that is neither;
 * a `call` names an undeclared function or passes the wrong arity/types; a
   `vcall` slot is out of range of the named class's vtable or the argument list
   does not match the slot's signature;

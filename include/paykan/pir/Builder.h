@@ -381,6 +381,30 @@ public:
     i.Args = {v.Op};
     emit(std::move(i));
   }
+
+  /// `local.addr %x`: the address of a scalar local (an inout argument).
+  Val localAddr(LocalId local, std::string name = "") {
+    Instr i;
+    i.Op = Opcode::LocalAddr;
+    i.Local = local;
+    i.Result = newValue(Type::Ptr, std::move(name));
+    return emit(std::move(i));
+  }
+  /// `ptr.load T, %p`: the @p ty value at the address @p ptr.
+  Val ptrLoad(const Val &ptr, Type ty, std::string name = "") {
+    Instr i;
+    i.Op = Opcode::PtrLoad;
+    i.Args = {ptr.Op};
+    i.Result = newValue(ty, std::move(name));
+    return emit(std::move(i));
+  }
+  /// `ptr.store %p, %v`
+  void ptrStore(const Val &ptr, const Val &v) {
+    Instr i;
+    i.Op = Opcode::PtrStore;
+    i.Args = {ptr.Op, v.Op};
+    emit(std::move(i));
+  }
 };
 
 } // namespace paykan::pir
