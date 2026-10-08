@@ -69,16 +69,18 @@ inline Interface sampleInterface() {
   i.Module = "geometry::shapes";
   i.Mods.push_back({"geometry::vec", false, hashOf("vec iface"), {}});
   i.Mods.push_back({"::io", true, hashOf("io iface"), {}});
-  i.Functions.push_back({"area", "float", {"Shape"}});
-  i.Functions.push_back({"Shape", "Shape", {"int", "int"}});
+  i.Functions.push_back({"area", "float", {"Shape"}, {}});
+  // The constructor's and __init__'s second parameter is `view h: int`.
+  ModeRecs viewH{{kModeValue, kModeView}, {"w", "h"}};
+  i.Functions.push_back({"Shape", "Shape", {"int", "int"}, viewH});
   ClassRec shape;
   shape.Name = "Shape";
   shape.SuperClassName = "";
   shape.OriginModule = "geometry::shapes";
   shape.Fields = {{"w", "int"}, {"h", "int"}};
-  shape.Methods = {{"area", "float", {}, 0},
-                   {"__scale", "void", {"float"}, 1},
-                   {"__init__", "void", {"int", "int"}, 0}};
+  shape.Methods = {{"area", "float", {}, 0, {}},
+                   {"__scale", "void", {"float"}, 1, {{kModeInout}, {"by"}}},
+                   {"__init__", "void", {"int", "int"}, 0, viewH}};
   ClassRec vec;
   vec.Name = "Vec";
   vec.SuperClassName = "Shape";

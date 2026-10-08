@@ -5,9 +5,35 @@
 #include "TestUtils.h"
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
+
 using namespace paykan::test;
 
 namespace {
+
+/// Write @p content to @p dir / @p name; its path.
+std::string writeModule(const std::filesystem::path &dir,
+                        const std::string &name, const std::string &content) {
+  std::filesystem::create_directories(dir);
+  std::ofstream(dir / name) << content;
+  return (dir / name).string();
+}
+
+/// Sema over the file @p path, importing from its directory.
+SemaResult semaCheckPath(const std::string &path) {
+  paykan::parser::ParserDriver drv(testFrontend());
+  if (drv.parseFile(path) != 0)
+    return {false, "parse error", 1};
+  std::ostringstream os;
+  paykan::sema::DiagEngine diag(os);
+  diag.setSourceInfo(drv.getCurrentFile(), &drv.getSourceLines());
+  paykan::sema::Sema sema(drv.getASTContext(), diag,
+                          std::filesystem::path(path).parent_path().string(),
+                          drv.getFrontendName());
+  auto ctx = sema.run(drv.getRoot());
+  return {ctx.Ok, os.str(), ctx.ErrorCount};
+}
 
 /// Expect @p r to have failed with each of @p diags (`line:col: error: ...`).
 void expectErrors(const SemaResult &r,
@@ -189,4 +215,68 @@ TEST(ParamMode, InoutIsNotSupportedYet) {
   expectErrors(r, {":2:5: error: 'inout' parameters are not supported yet",
                    ":3:5: error: 'inout' parameters are not supported yet",
                    ":4:15: error: 'inout' parameters are not supported yet"});
+}
+
+// Modes travel with a module's exports: an override in another module keeps
+// them, and calls into it are checked like local ones.
+TEST(ParamMode, ModesAcrossModules) {
+  auto dir = tempDir() / "param_modes_modules";
+  std::filesystem::remove_all(dir);
+  writeModule(dir, "base.pkn",
+              "class Counter { n: int;\n"
+              "  fn add(view k: int) -> int { return k; } }\n"
+              "fn twice(view n: int) -> int { return n * 2; }\n");
+  auto r = semaCheckPath(writeModule(dir, "main.pkn", R"(import base;
+class Sub : base::Counter { fn add(k: int) -> int { return k; } }
+fn main() -> int { return base::twice(3); })"));
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  expectErrors(r, {":2:29: error: override of 'add' must keep 'view' on "
+                   "parameter 'k'"});
+
+  // `inout` across modules, through a module whose exports carry them (a
+  // module of this stage cannot declare one yet).
+  auto lib = writeModule(dir, "lib.pkn", "fn real() -> int { return 1; }\n");
+  using paykan::ast::ParamMode;
+  using Info = paykan::sema::Sema::ModuleInfo;
+  const paykan::ast::ParamModes inoutN{{ParamMode::Inout}, {"n"}};
+  Info info;
+  info.ExportedFunctions = {{"bump", "void", {"int"}, inoutN},
+                            {"Box", "Box", {"int"}, inoutN}};
+  Info::ClassInfo box;
+  box.Name = "Box";
+  box.OriginModule = "lib";
+  box.Fields = {{"v", "int"}};
+  box.Methods = {{"put", "void", {"int"}, 0, inoutN},
+                 {"__init__", "void", {"int"}, 0, inoutN}};
+  info.ExportedClasses = {box};
+  auto key = std::filesystem::canonical(lib).string();
+  paykan::sema::Sema::ModuleCache[key] = info;
+  r = semaCheckPath(writeModule(dir, "uses.pkn", R"(import lib;
+class Mine : lib::Box { fn __init__(view n: int) { __super__(n); } }
+class Other : lib::Box {
+  fn put(n: int) { }
+}
+fn main() -> int {
+  let k = 1;
+  lib::bump(k);
+  b = lib::Box(2);
+  b.put(b.v + 1);
+  x = 1;
+  lib::bump(x);
+  b.put(b.v);
+  return 0;
+})"));
+  paykan::sema::Sema::ModuleCache.erase(key);
+  EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
+  expectErrors(
+      r, {":2:62: error: 'view' parameter 'n' cannot be passed to 'inout' "
+          "parameter 'n'",
+          ":4:3: error: override of 'put' must keep 'inout' on parameter 'n'",
+          ":8:13: error: 'k' is declared with 'let' and cannot be passed to "
+          "'inout' parameter 'n'",
+          ":9:16: error: argument 1 of 'lib::Box' must be a variable or a "
+          "field: parameter 'n' is 'inout'",
+          ":10:9: error: argument 1 of 'put' must be a variable or a field: "
+          "parameter 'n' is 'inout'"});
+  std::filesystem::remove_all(dir);
 }

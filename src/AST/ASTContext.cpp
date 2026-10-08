@@ -252,10 +252,11 @@ ASTContext::ClassTypeBuilder::addOp(UnaryOpcode op) {
 
 ASTContext::ClassTypeBuilder &
 ASTContext::ClassTypeBuilder::method(const std::string &name, Type *retTy,
-                                     std::vector<Type *> params,
-                                     uint8_t flags) {
+                                     std::vector<Type *> params, uint8_t flags,
+                                     ParamModes modes) {
   auto *m = Ctx.make<MethodDecl>(SourceLocation(), Ctx.intern(name), retTy,
                                  std::move(params), flags);
+  m->setParamModes(std::move(modes));
   Ty->addMethod(m);
   return *this;
 }

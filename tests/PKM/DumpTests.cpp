@@ -23,18 +23,18 @@ std::string dumpOf(const std::vector<uint8_t> &b, DumpOptions opts = {}) {
 }
 
 const char *const kGolden =
-    R"(pkm 1.0, 6 sections, table sha256 d5d88a6dd8fca423
-iface_hash b941837c1ce30969fc0b3b62d51ce1420309a6d68958c0d6cb69982b448d2cdc
+    R"(pkm 1.0, 6 sections, table sha256 09bfb88906cfd1e4
+iface_hash c94aa3c8dbef5152bd326b4f25b626b7daa1bd60f57632fae0cec606187d4525
 tmpl_hash 0000000000000000000000000000000000000000000000000000000000000000
 code_hash 31635559fa224a2c41eac6c6a0ecf6e9b08ee0747deaf38cbf2f08365f54f4c6
-module_hash 265b6785a489d1a82dd6ce1d22a3e22a42a48b7dd31e875ff473ec935aa2b705
+module_hash 75559d67acf6ce5f0799ed395f88da996cbd0e4934ef851bf1f7fe14e8188eaf
 sections:
   #0 MANIFEST flags REQUIRED offset 0x1c0 size 430 sha256 cd1968da24a98197
-  #1 IFACE flags REQUIRED offset 0x370 size 584 sha256 b941837c1ce30969
-  #2 CODE flags REQUIRED offset 0x5b8 size 21 sha256 31635559fa224a2c
-  #3 SYMIDX flags - offset 0x5d0 size 6 sha256 12643e6ba7fdc1f1
-  #4 PAYLOAD flags INSTANCED offset 0x5d8 size 11 sha256 18e9d2416680ac3c
-  #5 PAYLOAD flags INSTANCED offset 0x5e8 size 19 sha256 6d8555986ae05822
+  #1 IFACE flags REQUIRED offset 0x370 size 592 sha256 c94aa3c8dbef5152
+  #2 CODE flags REQUIRED offset 0x5c0 size 21 sha256 31635559fa224a2c
+  #3 SYMIDX flags - offset 0x5d8 size 6 sha256 12643e6ba7fdc1f1
+  #4 PAYLOAD flags INSTANCED offset 0x5e0 size 11 sha256 18e9d2416680ac3c
+  #5 PAYLOAD flags INSTANCED offset 0x5f0 size 19 sha256 6d8555986ae05822
 manifest:
   module geometry::shapes
   contents 0x1 (HAS_CODE)
@@ -64,10 +64,10 @@ iface:
     field w: int
     field h: int
     method area() -> float flags 0x0
-    method __scale(float) -> void flags 0x1
-    method __init__(int, int) -> void flags 0x0
+    method __scale(inout float) -> void flags 0x1
+    method __init__(int, view int) -> void flags 0x0
   class Vec super "Shape" [imported from "geometry::vec"]
-  func Shape(int, int) -> Shape
+  func Shape(int, view int) -> Shape
   func area(Shape) -> float
 tmpl: absent
 code: 21 B, sha256 31635559fa224a2c41eac6c6a0ecf6e9b08ee0747deaf38cbf2f08365f54f4c6

@@ -20,9 +20,10 @@ inline constexpr uint16_t kFormatMinor = 0;
 /// MANIFEST section format (§2.1).
 inline constexpr uint16_t kManifestMajor = 1;
 inline constexpr uint16_t kManifestMinor = 0;
-/// IFACE blob format (§3.2).
+/// IFACE blob format (§3.2).  Minor 1 appends the parameter modes (`view`,
+/// `inout`) to the FUNC and CLASS records.
 inline constexpr uint16_t kIfaceMajor = 1;
-inline constexpr uint16_t kIfaceMinor = 0;
+inline constexpr uint16_t kIfaceMinor = 1;
 
 /// Section kinds (§1.4).  Bits 8-15 are the class: 0x00 header, 0x01 sema,
 /// 0x02 binary, 0x7F private (never written or required by paykan).

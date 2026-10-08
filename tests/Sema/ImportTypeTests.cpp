@@ -302,12 +302,13 @@ TEST(Module, UnknownExportedTypeErr) {
   auto key = std::filesystem::canonical(libPath).string();
 
   paykan::sema::Sema::ModuleInfo info;
-  info.ExportedFunctions.push_back({"ghost", "Ghost", {"int", "Phantom[]"}});
+  info.ExportedFunctions.push_back(
+      {"ghost", "Ghost", {"int", "Phantom[]"}, {}});
   paykan::sema::Sema::ModuleInfo::ClassInfo ci;
   ci.Name = "Holder";
   ci.OriginModule = "lib";
   ci.Fields.push_back({"f", "Spectre"});
-  ci.Methods.push_back({"m", "Wraith", {"Shade"}, 0});
+  ci.Methods.push_back({"m", "Wraith", {"Shade"}, 0, {}});
   info.ExportedClasses.push_back(std::move(ci));
   paykan::sema::Sema::ModuleInfo::ClassInfo orphan;
   orphan.Name = "Orphan";
