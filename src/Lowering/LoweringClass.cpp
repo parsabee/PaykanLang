@@ -69,8 +69,8 @@ pir::Signature ModuleLowering::methodSignature(ast::MethodDecl *md) {
   // argument as a box.
   pir::Signature sig;
   sig.Params.push_back(Type::Obj);
-  for (auto *pty : md->getParamTypes()) {
-    Type t = toPIRType(canonicalizeDeclType(pty));
+  for (size_t i = 0; i < md->getNumParams(); ++i) {
+    Type t = paramType(md->getParamTypes()[i], md->getParamQualifier(i));
     if (t == Type::Void)
       t = Type::Box;
     sig.Params.push_back(t);
@@ -109,8 +109,9 @@ pir::Signature ModuleLowering::slotSignature(ast::ClassType *ct,
 pir::Signature ModuleLowering::constructorSignature(ast::ClassType *ct) {
   pir::Signature sig;
   if (auto *initMd = ct->findMethod(kMethodInit))
-    for (auto *pty : initMd->getParamTypes()) {
-      Type t = toPIRType(canonicalizeDeclType(pty));
+    for (size_t i = 0; i < initMd->getNumParams(); ++i) {
+      Type t =
+          paramType(initMd->getParamTypes()[i], initMd->getParamQualifier(i));
       sig.Params.push_back(t == Type::Void ? Type::Box : t);
     }
   sig.Ret = Type::Box;
@@ -311,7 +312,11 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
         auto *pty = md->getParamTypes()[i];
         pir::LocalId local = B.addLocal(p.getName(), arg.Ty);
         B.store(local, Val(pir::Operand::value(arg), arg.Ty));
-        if (ast::isRefType(pty))
+        // An `inout` value parameter's local holds a ptr: its type says
+        // what it points to.
+        if (arg.Ty == Type::Ptr)
+          CurrentScope->declareInout(p.getName(), local, pty);
+        else if (ast::isRefType(pty))
           CurrentScope->declare(p.getName(), local, pty);
         else
           CurrentScope->declare(p.getName(), local, nullptr);
@@ -416,8 +421,7 @@ Val ModuleLowering::lowerMemberAssignStmt(ast::MemberAssignStmt *node) {
       newShared = Val::null(Type::Box);
     if (auto *rhsId = ast::dyn_cast<ast::Identifier>(node->getValue())) {
       if (CurrentScope && CurrentScope->isOwned(rhsId->getName())) {
-        newShared =
-            B.load(CurrentScope->lookup(rhsId->getName()), rhsId->getName());
+        newShared = loadVarBox(rhsId->getName());
         emitRetain(newShared);
       }
     }

@@ -67,8 +67,11 @@ Val ModuleLowering::ExprEmitter::visitIdentifier(ast::Identifier *node) {
     return L.externObject(kPaykanFileStdin);
   pir::LocalId local = L.CurrentScope->lookup(node->getName());
   Val val = L.B.load(local, node->getName());
-  // Owned ref vars store a box — unwrap to the underlying object.
   auto *astTy = L.CurrentScope->lookupASTType(node->getName());
+  // An `inout` parameter: read the caller's storage.
+  if (val.Ty == Type::Ptr)
+    val = L.B.ptrLoad(val, L.toPIRType(astTy), node->getName());
+  // Owned ref vars store a box — unwrap to the underlying object.
   if (ast::isRefType(astTy) && L.CurrentScope->isOwned(node->getName()))
     val = L.emitSharedGet(val, node->getName() + ".obj");
   return val;
@@ -640,11 +643,19 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     }
     Val selfVal = L.B.load(L.CurrentScope->lookup(kSelf), kSelf);
     std::vector<Val> initArgs = {selfVal};
+    WriteBacks after;
     for (size_t i = 0; i < node->getNumArguments(); ++i) {
       auto *argExpr = node->getArguments()[i];
       Type paramTy = i + 1 < superFn->Sig.Params.size()
                          ? superFn->Sig.Params[i + 1]
                          : Type::Void;
+      if (paramTy == Type::Ptr) {
+        Val p = L.emitInoutArg(argExpr, after);
+        if (!p)
+          return Val();
+        initArgs.push_back(p);
+        continue;
+      }
       // The base __init__ consumes ref-typed parameters: pass a +1 box.
       if (paramTy == Type::Box) {
         Val v = L.emitAsShared(argExpr);
@@ -659,6 +670,8 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
       initArgs.push_back(L.coerceTo(v, paramTy));
     }
     L.B.call(superFn->Name, superFn->Sig, initArgs);
+    for (auto &writeBack : after)
+      writeBack();
     return Val();
   }
 
@@ -672,10 +685,18 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
   }
 
   std::vector<Val> args;
+  WriteBacks after;
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     auto *arg = node->getArguments()[i];
     Type paramTy =
         i < callee->Sig.Params.size() ? callee->Sig.Params[i] : Type::Void;
+    if (paramTy == Type::Ptr) {
+      Val p = L.emitInoutArg(arg, after);
+      if (!p)
+        return Val();
+      args.push_back(p);
+      continue;
+    }
     if (paramTy == Type::Box) {
       // Callee-consumes ABI: a +1 box for every expression form.
       Val v = L.emitAsShared(arg);
@@ -689,7 +710,10 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
       return Val();
     args.push_back(L.coerceTo(v, paramTy));
   }
-  return L.B.call(callee->Name, callee->Sig, args, "call");
+  Val result = L.B.call(callee->Name, callee->Sig, args, "call");
+  for (auto &writeBack : after)
+    writeBack();
+  return result;
 }
 
 Val ModuleLowering::ExprEmitter::emitArrayPush(ast::MethodCallExpr *node,
@@ -807,8 +831,16 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   bool isUserDefinedMethod = ct && !ct->isBuiltin();
   std::vector<Val> args;
   std::vector<ExprValue> ownedArgs;
+  WriteBacks after;
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     auto *argExpr = node->getArguments()[i];
+    if (i + 1 < sig.Params.size() && sig.Params[i + 1] == Type::Ptr) {
+      Val p = L.emitInoutArg(argExpr, after);
+      if (!p)
+        return Val();
+      args.push_back(p);
+      continue;
+    }
     ast::Type *paramASTTy = (method && i < method->getParamTypes().size())
                                 ? method->getParamTypes()[i]
                                 : nullptr;
@@ -848,6 +880,8 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     className = ct->getName();
   Val result = L.B.vcall(recv, className, static_cast<uint32_t>(vtableIdx), sig,
                          args, "mcall");
+  for (auto &writeBack : after)
+    writeBack();
   for (const auto &ev : ownedArgs)
     L.releaseIfOwned(ev);
   L.releaseIfOwned(recvOwned);
@@ -1076,11 +1110,13 @@ Val ModuleLowering::visitDestructureStmt(ast::DestructureStmt *node) {
                             "'");
         continue;
       }
-      emitRelease(B.load(local, "old.box"));
-      B.store(local, v);
+      storeVarBox(local, v);
       continue;
     }
-    B.store(local, coerceTo(v, B.localType(local)));
+    if (B.localType(local) == Type::Ptr)
+      emitInoutStore(local, name, v);
+    else
+      B.store(local, coerceTo(v, B.localType(local)));
   }
 
   // Every element has been copied out (references retained): a temporary
