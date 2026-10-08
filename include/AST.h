@@ -275,12 +275,22 @@ public:
   }
 };
 
+// The qualifier of a value-type parameter in the ownership prototype
+// (docs/design/ownership-proto.md): none (the parameter's own copy), `view`
+// (read-only) or `inout` (the caller's storage).  Only the recursive-descent
+// frontend with Options::Ownership (or the AST interchange) produces one.
+enum class Qualifier : uint8_t { None, View, Inout };
+
+/// The keyword of @p q: "view" or "inout" ("" for None).
+const char *qualifierName(Qualifier q);
+
 // Variable declaration with explicit type (x: int = 10)
 class VarDecl : public Decl {
 private:
   const std::string *Name; // points into ASTContext::StringPool (stable)
   Type *VarType;
   Expr *InitExpr;
+  bool Let = false; // `let x = e;` (ownership prototype)
 
 public:
   VarDecl(SourceLocation loc, const std::string &internedName, Type *type,
@@ -296,6 +306,9 @@ public:
   void setType(Type *ty) { VarType = ty; }
   Expr *getInitExpr() const { return InitExpr; }
 
+  bool isLet() const { return Let; }
+  void setLet(bool let) { Let = let; }
+
   static bool classof(const ASTNode *N) { return N->getKind() == NK_VarDecl; }
 };
 
@@ -303,6 +316,7 @@ public:
 struct Param {
   const std::string *Name; // points into ASTContext::StringPool (stable)
   Type *ParamType;
+  Qualifier Qual = Qualifier::None; // `view p: int`, `inout p: int`
 
   const std::string &getName() const { return *Name; }
 };

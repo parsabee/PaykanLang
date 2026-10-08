@@ -79,6 +79,7 @@ struct Options {
   bool TraceScanning = false; // --trace-scanner
   bool CheckOnly = false;     // --check-only
   bool TrackHeap = false;     // --track-heap
+  bool Ownership = false;     // --ownership (prototype)
   /// -O<n>; unset means the default (optLevel()).
   std::optional<unsigned> OptLevel;
 

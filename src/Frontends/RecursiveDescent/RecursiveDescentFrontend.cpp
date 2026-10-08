@@ -18,8 +18,8 @@ public:
 
   ParseResult parse(std::string_view /*filename*/, std::string_view source,
                     ast::ASTContext &ctx, sema::DiagEngine &diag,
-                    const Options & /*opts*/) override {
-    ParseOutput out = parseSource(ctx, source, &diag);
+                    const Options &opts) override {
+    ParseOutput out = parseSource(ctx, source, &diag, opts.Ownership);
     ParseResult r;
     r.Root = out.Root;
     r.ErrorCount = out.ErrorCount;

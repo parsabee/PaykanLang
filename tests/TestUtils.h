@@ -139,6 +139,20 @@ inline ParseResult parse(const std::string &source) {
   return {rc == 0, std::move(driver)};
 }
 
+/// Parse @p source with the ownership prototype's syntax
+/// (frontend::Options::Ownership, docs/design/ownership-proto.md).  Only the
+/// recursive-descent frontend has it, so nothing is compared.
+inline ParseResult parseOwnership(const std::string &source) {
+  auto path = writeTempFile(source);
+  frontend::Options opts;
+  opts.Ownership = true;
+  auto driver =
+      std::make_unique<parser::ParserDriver>("recursive-descent", opts);
+  int rc = driver->parseFile(path);
+  std::filesystem::remove(path);
+  return {rc == 0, std::move(driver)};
+}
+
 /// Run semantic analysis on source. Returns {ok, errorMessages}.
 struct SemaResult {
   bool Ok;

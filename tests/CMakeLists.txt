@@ -24,6 +24,7 @@ add_executable(parser_tests
     Parser/ModuleTests.cpp
     Parser/ArrayTests.cpp
     Parser/MovTests.cpp
+    Parser/OwnershipTests.cpp
     Parser/GenericsTests.cpp
     Parser/ConversionTests.cpp
     Parser/OptionalTests.cpp

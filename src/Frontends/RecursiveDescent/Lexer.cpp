@@ -38,6 +38,13 @@ constexpr Keyword kKeywords[] = {
     {"None", Tok::KwNone},     {"_", Tok::Underscore},
 };
 
+// The ownership prototype's keywords (docs/design/ownership-proto.md).
+constexpr Keyword kOwnershipKeywords[] = {
+    {"view", Tok::KwView},
+    {"inout", Tok::KwInout},
+    {"let", Tok::KwLet},
+};
+
 } // namespace
 
 const char *describe(Tok k) {
@@ -88,6 +95,12 @@ const char *describe(Tok k) {
     return "'False'";
   case Tok::KwNone:
     return "'None'";
+  case Tok::KwView:
+    return "'view'";
+  case Tok::KwInout:
+    return "'inout'";
+  case Tok::KwLet:
+    return "'let'";
   case Tok::Underscore:
     return "'_'";
   case Tok::Assign:
@@ -198,6 +211,12 @@ const char *tokenKindName(Tok k) {
     return "KW_FALSE";
   case Tok::KwNone:
     return "KW_NONE";
+  case Tok::KwView:
+    return "KW_VIEW";
+  case Tok::KwInout:
+    return "KW_INOUT";
+  case Tok::KwLet:
+    return "KW_LET";
   case Tok::Underscore:
     return "UNDERSCORE";
   case Tok::Assign:
@@ -260,8 +279,8 @@ const char *tokenKindName(Tok k) {
   return "UNKNOWN";
 }
 
-Lexer::Lexer(std::string_view source, ErrorHandler onError)
-    : Src(source), OnError(std::move(onError)) {}
+Lexer::Lexer(std::string_view source, ErrorHandler onError, bool ownership)
+    : Src(source), OnError(std::move(onError)), Ownership(ownership) {}
 
 void Lexer::error(size_t startLine, size_t startCol, const std::string &msg) {
   if (OnError)
@@ -489,6 +508,10 @@ Token Lexer::lexIdentOrKeyword(size_t start, size_t line, size_t col) {
   for (const auto &kw : kKeywords)
     if (kw.Spelling == text)
       return make(kw.Kind, start, line, col);
+  if (Ownership)
+    for (const auto &kw : kOwnershipKeywords)
+      if (kw.Spelling == text)
+        return make(kw.Kind, start, line, col);
   return make(Tok::Ident, start, line, col);
 }
 

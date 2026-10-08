@@ -202,6 +202,8 @@ void ASTPrinter::visitContinueStmt(ContinueStmt *node) {
 void ASTPrinter::visitVarDecl(VarDecl *node) {
   header("VarDecl", node);
   OS << " '" << node->getName() << "'";
+  if (node->isLet())
+    OS << " let";
   if (node->getType())
     OS << " type";
   OS << "\n";
@@ -492,6 +494,10 @@ void ASTPrinter::visitFuncDecl(FuncDecl *node) {
   header("FuncDecl", node);
   OS << " '" << node->getName() << "'";
   printTypeParams(OS, node->getTypeParams());
+  // Ownership prototype: the parameters' qualifiers (`'n' inout`).
+  for (const Param &p : node->getParams())
+    if (p.Qual != Qualifier::None)
+      OS << " '" << p.getName() << "' " << qualifierName(p.Qual);
   if (node->getReturnType())
     OS << " ->";
   OS << "\n";
