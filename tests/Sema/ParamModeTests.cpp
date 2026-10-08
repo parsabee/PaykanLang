@@ -145,8 +145,8 @@ fn main() -> int { return 0; })");
                    "parameter 'k'"});
 }
 
-// The arguments of an `inout` parameter: a variable of exactly its type, not
-// a `view` parameter or a `let` local.  (A field cannot be passed yet.)
+// The arguments of an `inout` parameter: a variable or a field of exactly
+// its type, not a `view` parameter or a `let` local.
 TEST(ParamMode, InoutArguments) {
   auto r = semaCheck(R"(class C {
   n: int;
@@ -192,15 +192,54 @@ fn main() -> int { return 0; })");
        "'n' yet",
        ":20:7: error: a character of a string cannot be passed to 'inout' "
        "parameter 'c'",
-       ":24:8: error: a field cannot be passed to 'inout' parameter 'n' yet",
        ":25:10: error: 'k' is declared with 'let' and cannot be passed to "
        "'inout' parameter 'n'",
        ":26:8: error: argument 1 of 'bump' has type 'Str', expected 'int'"});
-  EXPECT_EQ(r.ErrorCount, 10u) << r.Diagnostics;
-  // Plain and `inout` parameters and variables are accepted.
-  for (const char *line : {":21:", ":22:", ":23:"})
+  EXPECT_EQ(r.ErrorCount, 9u) << r.Diagnostics;
+  // Plain and `inout` parameters, variables and fields are accepted.
+  for (const char *line : {":21:", ":22:", ":23:", ":24:"})
     EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
                                                            << r.Diagnostics;
+}
+
+// Exclusivity: one call cannot pass the same variable, or the same chain of
+// fields on one, to two `inout` parameters.  Other places, which might be the
+// same storage at run time, are accepted.
+TEST(ParamMode, InoutArgumentsAreExclusive) {
+  auto r = semaCheck(R"(class P {
+  x: int; y: int; next: P?;
+  fn __init__() { self.x = 0; self.y = 0; self.next = None; }
+  fn same() { swap(self.x, self.x); }
+  fn other(q: P) { swap(self.x, q.x); }
+}
+class Box { p: P; fn __init__() { self.p = P(); } }
+fn swap(inout a: int, inout b: int) { t = a; a = b; b = t; }
+fn three(inout a: int, inout b: int, c: int) { }
+fn main() -> int {
+  k = 1;
+  j = 2;
+  swap(k, k);
+  three(k, j, k);
+  p = P();
+  q = p;
+  b = Box();
+  swap(p.x, p.x);
+  swap(b.p.x, b.p.x);
+  swap(p.x, p.y);
+  swap(p.x, q.x);
+  swap(b.p.x, p.x);
+  swap(k, p.x);
+  return 0;
+})");
+  EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
+  expectErrors(r, {":4:28: error: 'self.x' is passed to two 'inout' "
+                   "parameters ('a' and 'b')",
+                   ":13:11: error: 'k' is passed to two 'inout' parameters "
+                   "('a' and 'b')",
+                   ":18:13: error: 'p.x' is passed to two 'inout' parameters "
+                   "('a' and 'b')",
+                   ":19:15: error: 'b.p.x' is passed to two 'inout' "
+                   "parameters ('a' and 'b')"});
 }
 
 // Modes travel with a module's exports: an override in another module keeps

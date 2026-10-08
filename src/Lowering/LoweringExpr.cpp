@@ -643,13 +643,14 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     }
     Val selfVal = L.B.load(L.CurrentScope->lookup(kSelf), kSelf);
     std::vector<Val> initArgs = {selfVal};
+    std::vector<Val> keep;
     for (size_t i = 0; i < node->getNumArguments(); ++i) {
       auto *argExpr = node->getArguments()[i];
       Type paramTy = i + 1 < superFn->Sig.Params.size()
                          ? superFn->Sig.Params[i + 1]
                          : Type::Void;
       if (paramTy == Type::Ptr) { // `inout`: the argument's address
-        Val p = L.emitInoutArg(argExpr);
+        Val p = L.emitInoutArg(argExpr, keep);
         if (!p)
           return Val();
         initArgs.push_back(p);
@@ -669,6 +670,7 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
       initArgs.push_back(L.coerceTo(v, paramTy));
     }
     L.B.call(superFn->Name, superFn->Sig, initArgs);
+    L.releaseAfterCall(keep);
     return Val();
   }
 
@@ -682,12 +684,13 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
   }
 
   std::vector<Val> args;
+  std::vector<Val> keep;
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     auto *arg = node->getArguments()[i];
     Type paramTy =
         i < callee->Sig.Params.size() ? callee->Sig.Params[i] : Type::Void;
     if (paramTy == Type::Ptr) { // `inout`: the argument's address
-      Val p = L.emitInoutArg(arg);
+      Val p = L.emitInoutArg(arg, keep);
       if (!p)
         return Val();
       args.push_back(p);
@@ -706,7 +709,9 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
       return Val();
     args.push_back(L.coerceTo(v, paramTy));
   }
-  return L.B.call(callee->Name, callee->Sig, args, "call");
+  Val result = L.B.call(callee->Name, callee->Sig, args, "call");
+  L.releaseAfterCall(keep);
+  return result;
 }
 
 Val ModuleLowering::ExprEmitter::emitArrayPush(ast::MethodCallExpr *node,
@@ -824,10 +829,12 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   bool isUserDefinedMethod = ct && !ct->isBuiltin();
   std::vector<Val> args;
   std::vector<ExprValue> ownedArgs;
+  std::vector<Val> keep;
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     auto *argExpr = node->getArguments()[i];
     if (i + 1 < sig.Params.size() && sig.Params[i + 1] == Type::Ptr) {
-      Val p = L.emitInoutArg(argExpr); // `inout`: the argument's address
+      // `inout`: the argument's address
+      Val p = L.emitInoutArg(argExpr, keep);
       if (!p)
         return Val();
       args.push_back(p);
@@ -875,6 +882,7 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     return Val();
   Val result = L.B.vcall(recv, className, static_cast<uint32_t>(vtableIdx), sig,
                          args, "mcall");
+  L.releaseAfterCall(keep);
   for (const auto &ev : ownedArgs)
     L.releaseIfOwned(ev);
   L.releaseIfOwned(recvOwned);

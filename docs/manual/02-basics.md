@@ -347,6 +347,35 @@ Some rules to know:
   objects are passed by reference: a function receives the same object as its caller (more
   in [Classes](04-classes.md) and [Memory](12-memory.md)).
 
+A parameter of type `int`, `float`, `bool`, `char` or an enum can say how it is passed. An
+`inout` parameter is the caller's variable (or a field of an object): the function changes
+it in place. A `view` parameter is a copy the function cannot assign to. The call looks the
+same either way:
+
+```pkn
+fn addTax(inout price: float, view rate: float) {
+  price = price + price * rate;
+}
+
+fn main() -> int {
+  price = 20.0;
+  addTax(price, 0.5);
+  println("price = " + Str(price));
+  return 0;
+}
+```
+
+Output:
+
+```
+price = 30
+```
+
+An `inout` argument must be a variable or a field of exactly the parameter's type: `addTax(20.0,
+0.5)` is an error, and so is passing the same variable to two `inout` parameters of one
+call. The full rules are in
+[the language reference](../language/02-functions-and-calling.md#parameter-modes-view-and-inout).
+
 ```pkn
 fn fib(n: int) -> int {
   if (n < 2) { return n; }

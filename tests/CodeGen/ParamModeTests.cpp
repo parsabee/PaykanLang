@@ -207,3 +207,49 @@ TEST(ParamMode, InoutParametersOfMethodsAndConstructors) {
   EXPECT_EQ(r.StdOut, "18 0 5 11\n");
   guard.expectNoLeaks("inout methods");
 }
+
+// A field passed to an `inout` parameter is the object's own storage, by
+// address: the callee's writes are seen at once through any reference to
+// the object, `self.f` and chains work, and an object the call might lose
+// (a chain, a call's result, an array element) is kept alive for the call.
+TEST(ParamMode, InoutFieldsArePassedByAddress) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(
+    class Inner { n: int; fn __init__() { self.n = 0; } }
+    class Holder {
+      inner: Inner; total: int; f: float;
+      fn __init__() { self.inner = Inner(); self.total = 0; self.f = 0.5; }
+      fn addTo(inout t: int) { t = t + 1; }
+      fn selfBump() { bump(self.total); self.addTo(self.total); }
+    }
+    fn bump(inout n: int) { n = n + 1; }
+    fn watch(inout t: int, h: Holder) {
+      t = t + 1;
+      println("seen " + Str(h.total));
+      t = t + 1;
+    }
+    fn replace(inout n: int, h: Holder) { h.inner = Inner(); n = 99; }
+    fn make() -> Holder { return Holder(); }
+    fn twice(inout x: float) { x = x * 2; }
+    fn main() -> int {
+      h = Holder();
+      bump(h.total);
+      watch(h.total, h);
+      h.selfBump();
+      bump(h.inner.n);
+      replace(h.inner.n, h);
+      bump(make().total);
+      hs = [Holder(), Holder()];
+      bump(hs[1].total);
+      twice(h.f);
+      let p = Holder();
+      bump(p.total);
+      println(Str(h.total) + " " + Str(h.inner.n) + " " + Str(hs[1].total) +
+              " " + Str(h.f) + " " + Str(p.total));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "seen 2\n5 0 1 1 1\n");
+  guard.expectNoLeaks("inout fields");
+}

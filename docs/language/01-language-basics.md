@@ -225,7 +225,10 @@ limit = 11;              // error: 'limit' is declared with 'let' and cannot be 
 `let` applies to local declarations only: not to parameters, fields or destructuring
 (`let a, b = t;` is a syntax error). It fixes the variable, not the object it refers to: the
 fields of an object held in a `let` variable can still be changed, and an array's elements
-too. Like any variable, an inner block may declare its own variable with the same name.
+too. A `let` variable cannot be passed to an `inout` parameter
+([Parameter modes](02-functions-and-calling.md#parameter-modes-view-and-inout)), only to a
+plain or `view` one. Like any variable, an inner block may declare its own variable with the
+same name.
 
 ---
 
