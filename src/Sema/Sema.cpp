@@ -62,7 +62,8 @@ Sema::Sema(ast::ASTContext &ctx, DiagEngine &diags,
 
 void Sema::declareFunction(std::string_view name, ast::Type *retTy,
                            std::vector<ast::Type *> paramTys, bool isBuiltin) {
-  FunctionTable[std::string(name)] = {retTy, std::move(paramTys), isBuiltin};
+  FunctionTable[std::string(name)] = {
+      retTy, std::move(paramTys), isBuiltin, {}};
 }
 
 const Sema::FunctionSig *Sema::lookupFunction(std::string_view name) const {
