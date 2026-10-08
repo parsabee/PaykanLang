@@ -1,0 +1,69 @@
+// Values (int, float, bool, char, enums) are each variable's own copy.  A
+// parameter may say `view` (read-only) or `inout` (the caller's storage,
+// changed in place); the call is not marked.  A field or an array element
+// can be an inout argument: it is copied in and written back after the call.
+// Run with: paykan --ownership samples/ownership/02_view_inout.pkn
+
+enum Light { Red, Green }
+
+class Score {
+  points: int;
+  history: int[];
+  fn __init__() { self.points = 10; self.history = [0, 0]; }
+  fn add(inout to: int, view k: int) { to = to + k; }
+}
+
+fn bump(inout n: int) { n = n + 1; }
+
+fn twice(inout n: int) {      // an inout parameter is passed on
+  bump(n);
+  bump(n);
+}
+
+fn swap(inout a: int, inout b: int) {
+  t = a;
+  a = b;
+  b = t;
+}
+
+fn toggle(inout l: Light) {
+  if (l == Light::Red) { l = Light::Green; } else { l = Light::Red; }
+}
+
+fn scale(inout x: float, view by: float) { x = x * by; }
+
+fn describe(view n: int) -> Str {   // read-only; reading it gives a copy
+  m = n;                            // m may change, n may not
+  m = m * 100;
+  return Str<int>(n) + " (x100 = " + Str<int>(m) + ")";
+}
+
+fn main() -> int {
+  k = 1;
+  bump(k);
+  twice(k);
+  println("k = " + Str<int>(k));
+  x = 7;
+  swap(k, x);
+  println("k = " + Str<int>(k) + ", x = " + Str<int>(x));
+  s = Score();
+  bump(s.points);             // a field argument
+  s.add(s.history[1], 5);     // an element argument
+  s.add(k, s.points);         // view k: any int value
+  println("points = " + Str<int>(s.points) + ", history[1] = " +
+          Str<int>(s.history[1]) + ", k = " + Str<int>(k));
+  light = Light::Red;
+  toggle(light);
+  f = 1.5;
+  scale(f, 4.0);
+  println("green " + Str<bool>(light == Light::Green) + ", f = " +
+          Str<float>(f));
+  println(describe(x));
+  return 0;
+}
+
+// expect-stdout: k = 4
+// expect-stdout: k = 7, x = 4
+// expect-stdout: points = 11, history[1] = 5, k = 18
+// expect-stdout: green True, f = 6
+// expect-stdout: 4 (x100 = 400)

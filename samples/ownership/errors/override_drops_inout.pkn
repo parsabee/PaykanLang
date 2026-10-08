@@ -1,0 +1,7 @@
+// An override keeps each parameter's `view` / `inout`: `inout` decides how
+// the argument is passed.
+class Score { fn add(inout to: int, k: int) { to = to + k; } }
+class Double : Score { fn add(to: int, k: int) { } }
+fn main() -> int { return 0; }
+
+// expect-error: 4:24: error: override of 'add' must keep 'inout' on parameter 'to'

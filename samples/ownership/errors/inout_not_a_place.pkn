@@ -1,0 +1,6 @@
+// An `inout` argument is the caller's storage: a variable, field or element,
+// not a literal or another expression.
+fn bump(inout n: int) { n = n + 1; }
+fn main() -> int { k = 1; bump(k + 1); return k; }
+
+// expect-error: 4:32: error: argument 1 of 'bump' must be a variable, field or element: parameter 'n' is 'inout'

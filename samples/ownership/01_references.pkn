@@ -1,0 +1,48 @@
+// References (classes, Str, arrays, tuples, Obj and their optionals) take no
+// qualifiers.  Passing or assigning one shares the object, and the object
+// can be changed through any reference: Paykan as it is without the flag.
+// Run with: paykan --ownership samples/ownership/01_references.pkn
+
+class Counter {
+  n: int;
+  fn __init__() { self.n = 0; }
+  fn tick() { self.n = self.n + 1; }
+}
+
+class Team {
+  members: Str[];
+  score: Counter;
+  fn __init__(c: Counter) { self.members = []; self.score = c; }
+  fn add(name: Str) { self.members.push(name); }
+}
+
+fn tickTwice(c: Counter) {    // the caller's counter, not a copy
+  c.tick();
+  c.tick();
+}
+
+fn shout(s: Str) { s.concat("!"); }   // changes the caller's string
+
+fn main() -> int {
+  a = Counter();
+  b = a;                      // the same counter
+  tickTwice(b);
+  a.tick();
+  println("a " + Str<int>(a.n) + ", b " + Str<int>(b.n));
+  t = Team(a);                // the team shares a
+  t.score.tick();
+  println("a " + Str<int>(a.n));
+  name = "Ana";
+  t.add(name);
+  shout(name);                // the team's member is the same string
+  println(t.members[0]);
+  xs = t.members;             // the same array
+  xs.push("Bo");
+  println(Str<int>(t.members.len()) + " members");
+  return 0;
+}
+
+// expect-stdout: a 3, b 3
+// expect-stdout: a 4
+// expect-stdout: Ana!
+// expect-stdout: 2 members

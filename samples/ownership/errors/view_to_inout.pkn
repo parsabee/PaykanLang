@@ -1,0 +1,7 @@
+// A `view` parameter cannot be handed to an `inout` parameter, which would
+// change it.
+fn bump(inout x: int) { x = x + 1; }
+fn peek(view n: int) { bump(n); }
+fn main() -> int { peek(1); return 0; }
+
+// expect-error: 4:29: error: 'view' parameter 'n' cannot be passed to 'inout' parameter 'x'

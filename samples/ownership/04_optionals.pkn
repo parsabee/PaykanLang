@@ -1,0 +1,65 @@
+// Optionals are values: a value and a flag (for a class, just a pointer).
+// An `inout` optional is the caller's slot: the callee can set it to a
+// value, to None, or to another object.  A `view` optional is read-only.
+// Run with: paykan --ownership samples/ownership/04_optionals.pkn
+
+class Node {
+  name: Str;
+  fn __init__(n: Str) { self.name = n; }
+}
+
+class Cache {
+  hits: int?;
+  last: Node?;
+  fn __init__() { self.hits = None; self.last = None; }
+}
+
+fn count(inout hits: int?) {      // None the first time
+  match hits {
+    n: int { hits = n + 1; }
+    None   { hits = 1; }
+  }
+}
+
+fn replace(inout slot: Node?, name: Str) { slot = Node(name); }
+
+fn clear(inout slot: Node?) { slot = None; }
+
+fn hitsText(view hits: int?) -> Str {
+  match hits {
+    n: int { return Str<int>(n); }
+    None   { return "none"; }
+  }
+}
+
+fn nodeText(view n: Node?) -> Str {
+  match n {
+    v: Node { return v.name; }
+    None    { return "none"; }
+  }
+}
+
+fn main() -> int {
+  hits: int? = None;
+  println("hits " + hitsText(hits));
+  count(hits);
+  count(hits);
+  println("hits " + hitsText(hits));
+  a: Node? = Node("a");
+  keep = a;                   // another reference to node a
+  replace(a, "b");            // a's slot holds node b; keep is still a
+  println(nodeText(a) + " " + nodeText(keep));
+  clear(keep);
+  println(nodeText(a) + " " + nodeText(keep));
+  c = Cache();
+  count(c.hits);              // field arguments: copied in and out
+  replace(c.last, "c");
+  println("cache " + hitsText(c.hits) + " " + nodeText(c.last));
+  return 0;
+}
+
+// expect-stdout: hits none
+// expect-stdout: hits 2
+// expect-stdout: b a
+// expect-stdout: b none
+// expect-stdout: cache 1 c

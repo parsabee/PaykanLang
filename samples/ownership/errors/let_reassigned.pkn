@@ -1,0 +1,4 @@
+// A `let` local cannot be reassigned.
+fn main() -> int { let n = 1; n = 2; return n; }
+
+// expect-error: 2:31: error: 'n' is declared with 'let' and cannot be reassigned
