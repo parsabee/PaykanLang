@@ -282,10 +282,10 @@ IfaceBlob
 | 7 | `DIAG` | no | display file name (project-relative) and per-declaration positions for "declared here" notes (§8.6) |
 
 Minor 1 adds parameter modes (`view`, `inout`) to the string-typed records
-the prototype writes today (`include/paykan/pkm/Interface.h`): `uleb n,
-(u8 mode, Str name)[n]` after a `FUNC` record's signature, and one such list
-per method after a `CLASS` record's methods, written only when a parameter
-has a mode (mode 0 by value, 1 `view`, 2 `inout`; `n` is 0 or the number of
+written today (`include/paykan/pkm/Interface.h`): `uleb n, (u8 mode, Str
+name)[n]` after a `FUNC` record's signature, and one such list per method
+after a `CLASS` record's methods, written only when a parameter has a mode
+(mode 0 by value, 1 `view`, 2 `inout`; `n` is 0 or the number of
 parameters).  A 1.0 record reads as having no modes; a 1.0 reader skips
 them, but the manifest's `iface_minor` already turns such a reader away.
 
