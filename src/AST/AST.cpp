@@ -56,6 +56,19 @@ const char *paramModeName(ParamMode m) {
   return "";
 }
 
+ParamModes paramModes(const std::vector<Param> &params) {
+  ParamModes out;
+  for (const Param &p : params)
+    if (p.Mode != ParamMode::Value) {
+      for (const Param &each : params) {
+        out.Modes.push_back(each.Mode);
+        out.Names.push_back(each.getName());
+      }
+      break;
+    }
+  return out;
+}
+
 // -- UnaryExpr
 
 const char *UnaryExpr::getOpcodeStr() const {
