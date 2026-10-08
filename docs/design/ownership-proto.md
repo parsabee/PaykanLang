@@ -7,14 +7,17 @@ Nothing here is a commitment; it exists to try the model end to end.
 
 | | **references** | **values** |
 |---|---|---|
-| types | classes, `Str`, arrays, tuples, `Obj`, `File` / `Error`, every optional | `int`, `float`, `bool`, `char`, enums |
+| types | classes, `Str`, arrays, tuples, `Obj`, `File` / `Error` | `int`, `float`, `bool`, `char`, enums, every optional `T?` |
 | passing / assigning | shares the object (ARC) | copies the value |
 | changing | through any reference | only the variable's own copy |
 | qualifiers | none, anywhere | on parameters only: `view x: int`, `inout x: int` |
 
 - **References** behave exactly as Paykan does without the flag: no
-  read-only references, nothing to mark.  An optional of a value (`int?`)
-  is boxed, so it is a reference here too.
+  read-only references, nothing to mark.
+- **Optionals are values**: a value and a flag (for a class, `Counter?`,
+  just a pointer).  Copying a `Counter?` copies the pointer: the object it
+  names is still shared.  `inout c: Counter?` is the caller's slot: the
+  callee can set it to None, to a new value or to another object.
 - **`view x: int`** is a read-only parameter: it cannot be assigned or
   passed to an `inout` parameter.  Reading it gives a copy, which may be
   stored or returned freely.
@@ -24,8 +27,8 @@ Nothing here is a commitment; it exists to try the model end to end.
   literal or another expression.  An `inout` parameter can be passed on to
   another `inout` parameter.
 - `view` or `inout` on a reference type is an error (`'inout' applies only
-  to value types (int, float, bool, char, enums); 'Counter' is a
-  reference`); on a local, field or result it is a syntax error.  An
+  to value types (int, float, bool, char, enums and optionals); 'Counter'
+  is a reference`); on a local, field or result it is a syntax error.  An
   override keeps each parameter's `view` / `inout`.
 - **`let x = e;`** (or `let x: T = e;`) declares a local that cannot be
   reassigned.  It says nothing about changing the object it refers to.
@@ -82,13 +85,15 @@ fn main() -> int {
    `let`, AST, `--ownership`.  Parser tests.
 2. Printer, AST interchange, and the Sema gate (the syntax needs
    `--ownership`).
-3. Sema: `view`, `inout` and `let` rules, value types only, overrides.
-   Sema tests.
-4. PIR address ops `local.addr`, `ptr.load`, `ptr.store` on both backends.
-5. Lowering: an `inout` int, float, bool, char or enum parameter is a PIR
-   `ptr`; a caller passes `local.addr` of a variable, an `inout` parameter
-   passes its pointer on, and a field or element goes through a temporary
-   written back after the call.  CodeGen tests on both backends.
+3. Sema: `view`, `inout` and `let` rules, value types (optionals
+   included) only, overrides.  Sema tests.
+4. PIR address ops `local.addr`, `ptr.load`, `ptr.store` (of a scalar or a
+   box) on both backends.
+5. Lowering: an `inout` int, float, bool, char, enum or optional parameter
+   is a PIR `ptr`; a caller passes `local.addr` of a variable, an `inout`
+   parameter passes its pointer on, and a field or element goes through a
+   temporary written back after the call.  An optional's slot owns its box:
+   a store releases the old one.  CodeGen tests on both backends.
 6. Samples (`samples/ownership/`), error cases and the demo script
    (`scripts/ownership_demo.py`, the `OwnershipSamples` ctest).
 
@@ -102,6 +107,7 @@ are rejected, each with the diagnostic in its `// expect-error:` line.
 cmake --build build -j16
 build/bin/paykan --ownership samples/ownership/01_references.pkn
 build/bin/paykan --ownership --backend=llvm --track-heap samples/ownership/02_view_inout.pkn
+build/bin/paykan --ownership samples/ownership/04_optionals.pkn
 build/bin/paykan --ownership --check-only samples/ownership/errors/view_to_inout.pkn
 # every sample on both backends, then every error case, as a transcript
 python3 scripts/ownership_demo.py --paykan build/bin/paykan --demo
@@ -118,9 +124,10 @@ ownership keywords on.
 
 Works, on the C and LLVM backends: references shared without qualifiers;
 `view` and `inout` parameters of functions, methods and constructors
-(including `__super__`) for int, float, bool, char and enums; `inout`
-arguments from variables, `inout` parameters, fields and array elements;
-`let`; the override rule.
+(including `__super__`) for int, float, bool, char, enums and optionals
+(an `inout` optional rebinds the caller's slot, with its reference counts);
+`inout` arguments from variables, `inout` parameters, fields and array
+elements; `let`; the override rule.
 
 Known gaps:
 
@@ -137,5 +144,8 @@ Known gaps:
   called with their own PIR signature, so they get the address.
 - Generics with qualifiers are out of scope: a qualified parameter of a
   generic is checked per instantiation.
+- An optional is still a box at runtime: `int?` is not unboxed into a value
+  and a flag.  A box is immutable, so value semantics hold; unboxing is a
+  separate, compiler-wide change.
 - The PIR version is not bumped for the new address ops (`local.addr`,
   `ptr.load`, `ptr.store`).
