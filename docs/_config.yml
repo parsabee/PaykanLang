@@ -146,3 +146,5 @@ defaults:
     values: { title: PIR for backend plugins, parent: Implementation and plugins, nav_order: 8 }
   - scope: { path: design/pkm.md }
     values: { title: "Design: the .pkm module file", parent: Implementation and plugins, nav_order: 9 }
+  - scope: { path: design/ownership-proto.md }
+    values: { title: "Design: ownership qualifiers (prototype)", parent: Implementation and plugins, nav_order: 10 }

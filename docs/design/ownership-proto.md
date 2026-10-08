@@ -1,107 +1,141 @@
-# Ownership qualifiers: `own`, `mut` and views (prototype)
+# Ownership qualifiers: `view`, `inout` and `let` (prototype)
 
 Status: **prototype** on branch `proto/ownership`, behind `--ownership`.
 Nothing here is a commitment; it exists to try the model end to end.
 
 ## The model
 
-Every declared thing (local, parameter, `self`, field, function result)
-has exactly one *kind*. The default is the **view**, which has no keyword.
+| | **references** | **values** |
+|---|---|---|
+| types | classes, `Str`, arrays, tuples, `Obj`, `File` / `Error`, every optional | `int`, `float`, `bool`, `char`, enums |
+| passing / assigning | shares the object (ARC) | copies the value |
+| changing | through any reference | only the variable's own copy |
+| qualifiers | none, anywhere | on parameters only: `view x: int`, `inout x: int` |
 
-| | **view** (default) | **`mut`** | **`own`** |
-|---|---|---|---|
-| change the object / value through it | no | yes (its contents; never which object the caller holds) | yes |
-| class type (classes, `Str`, arrays, tuples, `Obj`, their optionals) | shared ARC reference; may escape (be returned, kept in a local, stored in a view field) | shared ARC reference; may escape and be stored in a `mut` field | the owner |
-| value type (`int`, `float`, `bool`, `char`, enums) | read-only value; may not escape (return it or store it only as `own`) | **parameter only:** the caller's storage, changed in place (inout) | its own copy |
-| passing / assigning into it | implicit | implicit | **`cp e`** (deep clone), **`mv x`** (hand over), or a fresh value |
-
-- **Fresh values** need neither keyword: constructor calls, array / string /
-  numeric literals, results of functions declared `-> own T`, and `cp e`.
-- **`cp e`** deep-clones: a class object's `own` fields are cloned
-  recursively, its view and `mut` fields are shared (copied as links). A `Str`
-  is copied, an array is copied and its elements cloned when they are owned.
-  A value is copied.
-- **`mv x`** hands over what the local or parameter `x` holds, with no retain
-  or copy; `x` cannot be used again until it is assigned. Only locals and
-  parameters can be moved: never a field, an element or `self`.
-- **Permission only narrows:** own -> mut -> view. Giving `mut` access to
-  something reached through a view is an error. Through a view nothing inside
-  the object can change (fields, elements); through `own`/`mut` access, an
-  `own` field is changeable, a `mut` field is changeable, a view field is not.
-- **Fields:** `own` any type; view or `mut` of class types. A value-type field
-  without `own` is an error (`add 'own'`).
-- **Results:** `-> own T` (any type), `-> T` (view, class types), `-> mut T`
-  (class types). Returning a value-type view is an error.
-- **`self`:** written as an optional first parameter of a method,
-  `fn m(self)` (view), `fn m(self: mut)` or `fn m(self: mut Self)`. Without
-  it the method's `self` is a view. `__init__`'s `self` is always `mut`.
-  `self: own` is rejected.
-- **`let`** only on a local declaration with an initializer: the variable
-  cannot be reassigned (or moved from). It says nothing about changing.
-- **Changing operations** need `own` or `mut` access to the object: assigning
-  a field, element assignment, `push`, `pop`, calling a `self: mut` method,
-  passing to a `mut` parameter.
-- **Calls are never marked** for view and `mut` parameters; `own` parameters
-  need `cp`, `mv` or a fresh value.
-- **No qualifier with the type left off** (`x = e;`) declares a view; write
-  `x: own = e;` or `x: mut = e;` for the others. A view bound to a fresh value
-  keeps it alive until the end of the scope.
+- **References** behave exactly as Paykan does without the flag: no
+  read-only references, nothing to mark.  An optional of a value (`int?`)
+  is boxed, so it is a reference here too.
+- **`view x: int`** is a read-only parameter: it cannot be assigned or
+  passed to an `inout` parameter.  Reading it gives a copy, which may be
+  stored or returned freely.
+- **`inout x: int`** is the caller's storage, changed in place.  The call is
+  not marked.  The argument is a changeable variable, field or array element
+  of exactly the parameter's type: not a `let` local, a `view` parameter, a
+  literal or another expression.  An `inout` parameter can be passed on to
+  another `inout` parameter.
+- `view` or `inout` on a reference type is an error (`'inout' applies only
+  to value types (int, float, bool, char, enums); 'Counter' is a
+  reference`); on a local, field or result it is a syntax error.  An
+  override keeps each parameter's `view` / `inout`.
+- **`let x = e;`** (or `let x: T = e;`) declares a local that cannot be
+  reassigned.  It says nothing about changing the object it refers to.
+- Under `--ownership` the keywords `view`, `inout` and `let` are reserved.
 
 ### Example
 
 ```pkn
-class Person {
-  name: own Str;
-  fn __init__(self: mut, n: own Str) { self.name = mv n; }
-  fn rename(self: mut, n: own Str) { self.name = mv n; }
+class Counter {
+  n: int;
+  fn __init__() { self.n = 0; }
+  fn tick() { self.n = self.n + 1; }
 }
 
-class Team {
-  members: own Person[];   // owned: cloned by cp
-  lead: mut Person;        // a changeable link: shared by cp
-  fn __init__(self: mut, l: mut Person) { self.members = []; self.lead = l; }
-  fn add(self: mut, p: own Person) { self.members.push(mv p); }
-  fn leader(self) -> Person { return self.lead; }   // a view escapes
-}
+fn tickTwice(c: Counter) { c.tick(); c.tick(); }   // shared: the caller's
 
-fn bump(n: mut int) { n = n + 1; }
+fn bump(inout n: int) { n = n + 1; }               // the caller's int
+
+fn report(view n: int) -> Str {                    // read-only
+  m = n;                                           // a copy: may change
+  m = m * 10;
+  return Str<int>(n) + " -> " + Str<int>(m);
+}
 
 fn main() -> int {
-  ana: own = Person("Ana");
-  t: own = Team(ana);          // ana -> mut parameter: implicit, shared
-  t.add(Person("Bo"));         // fresh -> own: implicit
-  t.add(cp ana);               // explicit deep clone
-  u: own = cp t;               // new members, same lead
-  u.lead.rename("Ann");        // t's lead is Ann too (shared link)
-  w: own = mv t;               // t unusable until reassigned
-  k: own int = 1;
-  bump(k);                     // k == 2
+  a = Counter();
+  b = a;                 // the same counter
+  tickTwice(b);          // a.n == 2
+  bump(a.n);             // a field: a.n == 3
+  let k = a.n;           // k cannot be reassigned or passed to inout
+  x = k;
+  bump(x);               // x == 4
+  println(report(x));    // 4 -> 40
   return 0;
 }
 ```
 
 ## Prototype scope
 
-- Opt-in: `paykan --ownership`. Without it nothing changes: the new keywords
-  are not reserved and the checks do not run. The frontend option
-  (`frontend::Options`) enables the keywords `own`, `mut`, `let`, `cp`, `mv`;
-  Sema runs the checks; the lowering implements `cp`, `mv` and `mut` value
-  parameters. Every existing test and sample is unchanged.
-- Recursive-descent frontend only; the AST interchange carries the new nodes.
-- Not in the prototype: closures, generics with qualifiers, `match`-binding
-  qualifiers beyond the default view, cross-module checks of qualifiers in
-  `.pkm` interfaces (modules are checked from source).
+- Opt-in: `paykan --ownership`.  Without it nothing changes: the keywords
+  are not reserved and a qualifier or `let` that reaches Sema (from the AST
+  interchange) is an error.  The frontend option (`frontend::Options`)
+  enables the keywords, Sema runs the checks, and the lowering passes
+  `inout` parameters by address.  Every existing test and sample is
+  unchanged.
+- Recursive-descent frontend only; the AST interchange carries
+  `(qual view|inout)` on a parameter and `(let)` on a local.
+- Not in the prototype: generics with qualifiers, qualifiers in `.pkm`
+  interfaces, an exclusivity check.
 
-## Plan (stacked PRs against `proto/ownership`, about 500 changed lines each)
+## Plan (stacked PRs against `proto/ownership`, at most about 500 changed lines each)
 
-1. Syntax: keywords under the option, qualifiers in every declared position,
-   `let`, `cp` / `mv` expressions, explicit `self`, AST, printer,
-   interchange, `--ownership`. Parser tests.
-2. Sema: access (view / `mut` / `own`), changing operations, deep rules,
-   `self` qualifiers, `let`. Sema tests.
-3. Sema: ownership transfer (`own` needs `cp` / `mv` / fresh), `mv` rules and
-   use after move, field and result kind rules. Sema tests.
-4. Lowering: `cp` (deep clone, per-class clone functions, `Str` and array
-   clones) and `mv` (transfer, slot cleared). CodeGen tests on both backends.
-5. Lowering: `mut` value parameters (address of the caller's storage).
-6. Samples (`samples/ownership/`), a walkthrough, and the demo script.
+1. Syntax: the keywords under the option, `view` / `inout` parameters,
+   `let`, AST, `--ownership`.  Parser tests.
+2. Printer, AST interchange, and the Sema gate (the syntax needs
+   `--ownership`).
+3. Sema: `view`, `inout` and `let` rules, value types only, overrides.
+   Sema tests.
+4. PIR address ops `local.addr`, `ptr.load`, `ptr.store` on both backends.
+5. Lowering: an `inout` int, float, bool, char or enum parameter is a PIR
+   `ptr`; a caller passes `local.addr` of a variable, an `inout` parameter
+   passes its pointer on, and a field or element goes through a temporary
+   written back after the call.  CodeGen tests on both backends.
+6. Samples (`samples/ownership/`), error cases and the demo script
+   (`scripts/ownership_demo.py`, the `OwnershipSamples` ctest).
+
+## Try it
+
+The samples in `samples/ownership/` run with `--ownership`; each says what
+it shows and prints its results.  The ones in `samples/ownership/errors/`
+are rejected, each with the diagnostic in its `// expect-error:` line.
+
+```sh
+cmake --build build -j16
+build/bin/paykan --ownership samples/ownership/01_references.pkn
+build/bin/paykan --ownership --backend=llvm --track-heap samples/ownership/02_view_inout.pkn
+build/bin/paykan --ownership --check-only samples/ownership/errors/view_to_inout.pkn
+# every sample on both backends, then every error case, as a transcript
+python3 scripts/ownership_demo.py --paykan build/bin/paykan --demo
+```
+
+Without `--demo` the script is the `OwnershipSamples` ctest: the expected
+output, zero live heap blocks and identical output on the C and LLVM
+backends, and each error case's exact diagnostic.  The regular samples
+harnesses (`samples_parity.py`, `c_strict.py`) do not read
+`samples/ownership`; the AST interchange round trip parses it with the
+ownership keywords on.
+
+## Status
+
+Works, on the C and LLVM backends: references shared without qualifiers;
+`view` and `inout` parameters of functions, methods and constructors
+(including `__super__`) for int, float, bool, char and enums; `inout`
+arguments from variables, `inout` parameters, fields and array elements;
+`let`; the override rule.
+
+Known gaps:
+
+- No exclusivity check: two `inout` parameters may name the same variable
+  (`swap(k, k)` is accepted).
+- A field or element `inout` argument is copy-in / copy-out through a
+  temporary, so the callee sees the old value if it reaches the same field
+  another way (through `self`) before it returns, and the write-back then
+  overwrites what it stored there.
+- Qualifiers are not in `.pkm` interfaces (or a module's exported
+  interface): calls into another module's functions are not checked, and a
+  method of another module's class with an `inout` parameter is called as if
+  it took the value, which is wrong code.  Functions of another module are
+  called with their own PIR signature, so they get the address.
+- Generics with qualifiers are out of scope: a qualified parameter of a
+  generic is checked per instantiation.
+- The PIR version is not bumped for the new address ops (`local.addr`,
+  `ptr.load`, `ptr.store`).
