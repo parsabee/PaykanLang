@@ -75,8 +75,9 @@ fn @main() -> i64 {
   free %o
   %gi = ftoi %g2
   %fi = ftoi %f2
-  %c2 = cast %ch2 to i64
-  %tb = select %t2, 100, 0
+  %ci2 = cast %ch2 to i64
+  %c2 = sub %ci2, 97
+  %tb = select %t2, 10, 0
   %s1 = add %k2, %n2
   %s2 = add %s1, %gi
   %s3 = add %s2, %fi
@@ -86,8 +87,9 @@ fn @main() -> i64 {
 }
 )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  // k 2 + n 41 + g 3 + f 1 + 'c' 99 + t false 0
-  EXPECT_EQ(r.ExitCode, 146) << r.StdErr;
+  // k 2 + n 41 + g 3 + f 1 + 'c' - 'a' 2 + t false 0.  The sum stays below
+  // 128: the C backend's runner reads a higher exit status as a signal.
+  EXPECT_EQ(r.ExitCode, 49) << r.StdErr;
   guard.expectNoLeaks("address ops");
 }
 
