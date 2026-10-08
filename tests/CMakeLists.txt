@@ -485,6 +485,11 @@ if(PAYKAN_TEST_SUITE_samples AND PAYKAN_SAMPLES_BACKENDS)
     # unoptimised code paths of both backends covered.
     paykan_add_python_test(SamplesParityO0 samples_parity.py -O 0
                 --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
+    # The ownership prototype's samples (samples/ownership, --ownership):
+    # expected output, zero live blocks, backend parity, and each error case's
+    # diagnostic (scripts/ownership_demo.py).
+    paykan_add_python_test(OwnershipSamples ownership_demo.py
+                --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
     # They compile the same import samples through the same per-project
     # object / bitcode caches (samples/imports/*/.paykan_cache): one at a
     # time.

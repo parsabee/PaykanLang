@@ -1,0 +1,5 @@
+// A `view` parameter is read-only: it cannot be assigned.
+fn reset(view n: int) -> int { n = 0; return n; }
+fn main() -> int { return reset(5); }
+
+// expect-error: 2:32: error: cannot assign to 'view' parameter 'n'

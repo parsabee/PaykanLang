@@ -1,0 +1,26 @@
+// `let` declares a local that cannot be reassigned.  It says nothing about
+// changing: a `let` reference still reaches an object that can change.
+// Run with: paykan --ownership samples/ownership/03_let.pkn
+
+class Box {
+  items: Str[];
+  fn __init__() { self.items = []; }
+  fn put(s: Str) { self.items.push(s); }
+}
+
+fn half(view n: int) -> int { return n / 2; }
+
+fn main() -> int {
+  let limit = 4;              // a constant
+  let b = Box();              // always the same box ...
+  i = 0;
+  while (i < half(limit)) {
+    b.put("item" + Str<int>(i));   // ... but its contents change
+    i = i + 1;
+  }
+  let first: Str = b.items[0];
+  println(Str<int>(b.items.len()) + " items, first " + first);
+  return 0;
+}
+
+// expect-stdout: 2 items, first item0

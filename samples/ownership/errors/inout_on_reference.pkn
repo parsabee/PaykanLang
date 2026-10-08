@@ -1,0 +1,7 @@
+// `view` and `inout` apply to value types only (optionals included): a
+// plain reference is always shared.
+class Counter { n: int; fn __init__() { self.n = 0; } }
+fn reset(inout c: Counter) { c.n = 0; }
+fn main() -> int { c = Counter(); reset(c); return 0; }
+
+// expect-error: 4:1: error: 'inout' applies only to value types (int, float, bool, char, enums and optionals); 'Counter' is a reference

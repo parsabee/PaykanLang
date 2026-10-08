@@ -1,0 +1,5 @@
+// A `let` local cannot be reassigned, so it cannot be passed to `inout`.
+fn bump(inout n: int) { n = n + 1; }
+fn main() -> int { let k = 1; bump(k); return k; }
+
+// expect-error: 3:36: error: 'k' is declared with 'let' and cannot be passed to 'inout' parameter 'n'

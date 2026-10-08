@@ -1,0 +1,6 @@
+// An `inout` argument has exactly the parameter's type: the callee writes
+// the caller's storage, so an int cannot become a float on the way.
+fn scale(inout x: float, by: float) { x = x * by; }
+fn main() -> int { k = 2; scale(k, 1.5); return k; }
+
+// expect-error: 4:33: error: argument 1 of 'scale' has type 'int', but 'inout' parameter 'x' has type 'float'
