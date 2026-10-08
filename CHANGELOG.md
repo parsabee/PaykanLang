@@ -23,6 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `paykan_modules` (the resolver); the runtime ABI version moved to
   `PAYKAN_RUNTIME_ABI_VERSION` in `Runtime.h`.
 
+### Changed
+
+- PIR version 2 (`pir::kPIRVersion`, `PAYKAN_PIR_TEXT_VERSION`): four address
+  instructions, `local.addr`, `field.addr`, `ptr.load` and `ptr.store`
+  (docs/pir.md §6), which `inout` parameters will lower to.  Only scalar
+  (`i64`, `f64`, `bool`, `char`) slots have addresses.  A backend plugin must
+  handle them; a `.pkm` written with PIR 1 is rebuilt from its source, and a
+  prebuilt one is rejected.
+
 ### Removed
 
 - The `mov` keyword (#145).  Using it is now an error: `'mov' was removed in v0.2.0;

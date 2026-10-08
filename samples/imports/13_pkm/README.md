@@ -50,7 +50,7 @@ manifest:
   module geometry::shapes
   contents 0x1 (HAS_CODE)
   core "0.1.1" ...
-  format_versions iface 1.0 tmpl 0 pir 1 code_encoding 2 debug 0
+  format_versions iface 1.0 tmpl 0 pir 2 code_encoding 2 debug 0
   runtime_abi 6
   ...
 iface:

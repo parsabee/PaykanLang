@@ -1034,8 +1034,9 @@ private:
     if (Cur.Kind != Tok::Word)
       return false;
     static const char *const kStmtWords[] = {
-        "if",   "while", "break",  "continue", "ret",  "unreachable", "cond",
-        "call", "vcall", "retain", "release",  "free", "field.store", "store"};
+        "if",          "while", "break",       "continue", "ret",
+        "unreachable", "cond",  "call",        "vcall",    "retain",
+        "release",     "free",  "field.store", "store",    "ptr.store"};
     for (const char *w : kStmtWords)
       if (Cur.Text == w)
         return true;
@@ -1197,6 +1198,28 @@ private:
       in.Args.push_back(v);
       break;
     }
+    case Opcode::LocalAddr:
+      if (!parseLocalRef(in.Local))
+        return false;
+      resultTy = Type::Ptr;
+      break;
+    case Opcode::FieldAddr:
+      if (!parseCommaOperands(in.Args, 1) || !expect(Tok::Comma, "','") ||
+          !parseFieldRef(in))
+        return false;
+      resultTy = Type::Ptr;
+      break;
+    case Opcode::PtrLoad:
+      if (!parseType(resultTy) || !expect(Tok::Comma, "','") ||
+          !parseCommaOperands(in.Args, 1))
+        return false;
+      if (resultTy == Type::Void)
+        return error("ptr.load of void");
+      break;
+    case Opcode::PtrStore:
+      if (!parseCommaOperands(in.Args, 2))
+        return false;
+      break;
     }
 
     if (hasResult) {

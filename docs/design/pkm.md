@@ -190,7 +190,7 @@ G = gating (a mismatch yields a verdict), I = informational.
 | `0x01` | `module` | `str` | G | canonical module name; must equal the name the importer resolved |
 | `0x03` | `contents` | `u32` bitset | G | bit 0 `HAS_CODE`, 1 `HAS_TEMPLATES`, 2 `HAS_MAIN`, 3 `SYSTEM` (name starts with `::`), 4 `HAS_STATIC_INIT` (#170 lazily initialised storage), 5 `EXPORTS_C` (#21). Must agree with the section table |
 | `0x05` | `core` | `{str version; u32 major, minor, patch; str prerelease; str build}` | G | the PaykanLang that produced the file (`include/Version.h.in`). `build` is `""` for a release; for a pre-release it is the configure-time git revision, else a hash of the configure-time source listing (`PAYKAN_BUILD_ID`, new; never an executable size/mtime) |
-| `0x07` | `format_versions` | `{u32 iface_major, iface_minor, tmpl_version, pir_version, code_encoding, debug_version}` | G | `pir_version` = `pir::kPIRVersion` (new core constant, 1 today; `PAYKAN_PIR_TEXT_VERSION` is defined from it so text, binary and manifest agree by construction). `code_encoding`: 0 none, 1 PIR text (development escape hatch only), 2 binary PIR v1 |
+| `0x07` | `format_versions` | `{u32 iface_major, iface_minor, tmpl_version, pir_version, code_encoding, debug_version}` | G | `pir_version` = `pir::kPIRVersion` (new core constant, 2 today; `PAYKAN_PIR_TEXT_VERSION` is defined from it so text, binary and manifest agree by construction). `code_encoding`: 0 none, 1 PIR text (development escape hatch only), 2 binary PIR v1 |
 | `0x09` | `runtime_abi` | `u32` | G | `PAYKAN_RUNTIME_ABI_VERSION`, moved from `src/Backends/LLVM/PIRToLLVM.cpp:843` (`kPaykanABIVersion = 6`) into `src/Runtime/Runtime.h` with a C++ alias `paykan::kRuntimeABIVersion` (#153 asks for exactly this). Becomes 7 with §9's mangling |
 | `0x0B` | `target` | `{u8 pointer_size, slot_size, endianness, int_width, float_width}` | G | the abstract target PIR assumes: `8, 8, 1, 64, 64` (`Runtime.h` LP64 LE asserts). Not a triple: PIR and interface are the same for every LP64 LE triple; the triple belongs to a payload |
 | `0x0D` | `deps` | `list<Dep>` | G | direct imports only, sorted by canonical name; §2.3 |
@@ -645,7 +645,10 @@ InstrRec := u8 opcode ; uleb result id (0 = none) ; [type result type ; str resu
 | 26–29 | reserved #96 (`some none is_some unwrap`) | | |
 | 30, 31 | reserved #99 (`weak.load weak.store`) | | |
 | 32, 33 | reserved #170 (`global.load global.store`) | | |
-| 34–255 | reserved | | |
+| 34 | `local.addr` | `uleb` local | 0 |
+| 35 | `field.addr` | `str` class; `str` field | 1 |
+| 36, 37 | `ptr.load ptr.store` | — (the loaded type is the result's) | 1 / 2 |
+| 38–255 | reserved | | |
 
 Unused `Instr` extras are not written; a decoded `Instr` has the defaults
 of `PIR.h`, as the text parser produces, so round-trip equality holds. An

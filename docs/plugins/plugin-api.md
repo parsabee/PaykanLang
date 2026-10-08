@@ -169,7 +169,7 @@ or an earlier plugin becomes ambiguous ([`overview.md`](overview.md)).
 | `input_filename` | the main source file, as given on the command line |
 | `project_root` | the directory imports were resolved against (`""` for the current one) |
 | `pir`, `pir_size` | the verified program as PIR text ([`pir-for-backends.md`](pir-for-backends.md)) |
-| `pir_text_version` | `PAYKAN_PIR_TEXT_VERSION` of that text (1) |
+| `pir_text_version` | `PAYKAN_PIR_TEXT_VERSION` of that text (2) |
 | `opt_level` | `-O<n>`, 0..3 |
 
 `PaykanRunRequest`: `args` / `num_args`, the program's arguments with

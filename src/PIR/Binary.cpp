@@ -261,11 +261,13 @@ private:
       break;
     case Opcode::FieldLoad:
     case Opcode::FieldStore:
+    case Opcode::FieldAddr:
       str(in.ClassName);
       str(in.Field);
       break;
     case Opcode::Load:
     case Opcode::Store:
+    case Opcode::LocalAddr:
       W.uleb(in.Local);
       break;
     default:
@@ -638,11 +640,13 @@ private:
       break;
     case Opcode::FieldLoad:
     case Opcode::FieldStore:
+    case Opcode::FieldAddr:
       if (!str(in.ClassName) || !str(in.Field))
         return false;
       break;
     case Opcode::Load:
     case Opcode::Store:
+    case Opcode::LocalAddr:
       if (!R.uleb32(in.Local))
         return false;
       break;

@@ -743,6 +743,25 @@ private:
     case Opcode::Store:
       B.CreateStore(operand(in.Args[0]), S->Locals[in.Local]);
       break;
+    case Opcode::LocalAddr:
+      // The local's alloca: it stays in memory once its address is taken.
+      setResult(in, S->Locals[in.Local]);
+      break;
+    case Opcode::FieldAddr: {
+      const Class *c;
+      const Field *fld;
+      llvm::Value *p = fieldPtr(in, c, fld);
+      if (!p)
+        return;
+      setResult(in, p);
+      break;
+    }
+    case Opcode::PtrLoad:
+      setResult(in, B.CreateLoad(llvmType(in.Result.Ty), operand(in.Args[0])));
+      break;
+    case Opcode::PtrStore:
+      B.CreateStore(operand(in.Args[1]), operand(in.Args[0]));
+      break;
     }
   }
 
