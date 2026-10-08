@@ -456,6 +456,8 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
     if (method->getName() != names::kMethodInit) {
       if (auto *super = ct->getSuperClass()) {
         if (auto *baseMethod = super->findMethod(method->getName())) {
+          if (Ownership && !checkOverrideQualifiers(method, baseMethod))
+            ok = false;
           const auto &baseParams = baseMethod->getParamTypes();
           bool sigMatches = typesEqual(baseMethod->getReturnType(), retTy) &&
                             baseParams.size() == paramTys.size();
@@ -478,7 +480,12 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
 
     auto *mdecl = Ctx.make<ast::MethodDecl>(
         method->getLocation(), method->getName(), retTy, std::move(paramTys));
+    std::vector<ast::Qualifier> quals;
+    for (const ast::Param &p : method->getParams())
+      quals.push_back(p.Qual);
+    mdecl->setParamQualifiers(std::move(quals));
     ct->addMethod(mdecl);
+    MethodSources[mdecl] = method;
   }
   PopulatedClasses.insert(cd->getName());
   return ok;
@@ -602,6 +609,10 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
       // is erroneous and its bodies are skipped); poisoned if it ever is.
       paramTys.push_back(pty ? pty : Ctx.getPoisonTy());
     }
+    if (Ownership && !checkParamQualifiers(method, paramTys)) {
+      ok = false;
+      continue;
+    }
 
     auto *savedRetTy = CurrentReturnType;
     CurrentReturnType = retTy;
@@ -610,6 +621,8 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
       CurrentScope->declare(names::kSelf, ct);
       for (size_t i = 0; i < method->getParams().size(); ++i)
         CurrentScope->declare(method->getParams()[i].getName(), paramTys[i]);
+      if (Ownership)
+        declareQualifiedParams(method);
 
       bool bodyOk = true;
       for (auto *stmt : method->getBody()->getStatements())

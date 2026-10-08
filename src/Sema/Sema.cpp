@@ -894,6 +894,9 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
       }
     }
     S.CurrentClassCtx->SuperInitCalled = true;
+    if (S.Ownership)
+      S.checkInoutArgs(S.calleeDecl(node), node->getArguments(),
+                       node->getCalleeName());
     return S.Ctx.getVoidTy();
   }
 
@@ -978,6 +981,9 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     }
   }
 
+  if (S.Ownership)
+    S.checkInoutArgs(S.calleeDecl(node), node->getArguments(),
+                     node->getCalleeName());
   node->setResolvedType(sig->ReturnType);
   return sig->ReturnType;
 }
@@ -1060,6 +1066,8 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     }
   }
 
+  if (S.Ownership)
+    S.checkMethodInoutArgs(node, method);
   node->setResolvedType(method->getReturnType());
   return method->getReturnType();
 }
@@ -1512,6 +1520,10 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
     auto *owner = CurrentScope->findOwner(name);
     if (!owner) {
       CurrentScope->set(name, elemTy);
+      continue;
+    }
+    if (Ownership && !checkReassignable(name, target.Loc)) {
+      ok = false;
       continue;
     }
     auto *varTy = owner->lookup(name);
@@ -1980,6 +1992,8 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
     return true;
   }
 
+  if (Ownership && !checkReassignable(varName, node->getLocation()))
+    return false;
   auto *varTy = owner->lookup(varName);
 
   // A poisoned variable (its declaration failed) is re-declared by a valid
@@ -2208,6 +2222,7 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
 
   // Register the function in the function table.
   declareFunction(node->getName(), retTy, paramTypes);
+  FunctionTable[node->getName()].Decl = node;
   return true;
 }
 
@@ -2231,6 +2246,8 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
   for (auto &p : node->getParams())
     paramTypes.push_back(resolveType(p.ParamType, node->getLocation(),
                                      "parameter '" + p.getName() + "'"));
+  if (Ownership && !checkParamQualifiers(node, paramTypes))
+    return false;
 
   // Type-check the body in a new scope with params.
   auto *savedRetTy = CurrentReturnType;
@@ -2239,6 +2256,8 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
     ScopeGuard guard(*this);
     for (size_t i = 0; i < node->getParams().size(); ++i)
       CurrentScope->declare(node->getParams()[i].getName(), paramTypes[i]);
+    if (Ownership)
+      declareQualifiedParams(node);
     bool ok = true;
     for (auto *stmt : node->getBody()->getStatements())
       if (!visit(stmt))
@@ -2271,6 +2290,8 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
           "redeclaration of variable '" + node->getName() + "'");
     return false;
   }
+  if (node->isLet())
+    setVarKind(node->getName(), ast::Qualifier::None, /*isLet=*/true);
 
   // Resolve the declared type.
   ast::Type *declTy = nullptr;
