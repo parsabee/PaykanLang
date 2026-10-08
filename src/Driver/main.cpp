@@ -465,6 +465,7 @@ int main(int argc, char *argv[]) {
   paykan::sema::Sema sema(driver.getASTContext(), diag, projectRoot,
                           driver.getFrontendName());
   sema.setResolver(&resolver);
+  sema.setOwnership(opts.Ownership);
   // A program that is built or run needs an entry point; --check-only and
   // --emit-pkm also accept a module without one, but still check a declared
   // `main`.

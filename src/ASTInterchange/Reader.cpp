@@ -389,6 +389,34 @@ private:
       return e;
     }
 
+    /// An optional trailing `(<tag>)` item (the ownership prototype's
+    /// `(let)`); true when it is there (consumed).
+    bool flag(const char *tag) {
+      if (atEnd() || L.Items[I].K != SExpr::List || L.Items[I].Text != tag)
+        return false;
+      if (!L.Items[I].Items.empty())
+        B.fail(L.Items[I], std::string("(") + tag + ") takes no fields");
+      ++I;
+      return true;
+    }
+
+    /// An optional trailing `(qual view|inout)` item (a parameter's
+    /// qualifier in the ownership prototype) into @p out; false only on a
+    /// malformed one.
+    bool qualifier(Qualifier &out) {
+      if (atEnd() || L.Items[I].K != SExpr::List || L.Items[I].Text != "qual")
+        return true;
+      const SExpr &q = L.Items[I++];
+      const SExpr *v = q.Items.size() == 1 ? &q.Items[0] : nullptr;
+      for (Qualifier k : {Qualifier::View, Qualifier::Inout})
+        if (v && v->K == SExpr::Symbol && v->Text == qualifierName(k)) {
+          out = k;
+          return true;
+        }
+      B.fail(q, "expected (qual view|inout)");
+      return false;
+    }
+
     /// Fail unless every field was read.
     bool done() {
       if (!atEnd()) {
@@ -615,9 +643,10 @@ private:
       Fields pf(*this, p);
       const std::string *pname = pf.name("the parameter's name");
       Type *pty = pname ? type(pf, "the parameter's type") : nullptr;
-      if (!pty || !pf.done())
+      Qualifier pq = Qualifier::None;
+      if (!pty || !pf.qualifier(pq) || !pf.done())
         return nullptr;
-      params.push_back({pname, pty});
+      params.push_back({pname, pty, pq});
     }
     Type *ret = nullptr;
     if (!f.absent()) {
@@ -650,9 +679,12 @@ private:
       if (!init)
         return nullptr;
     }
+    bool let = f.flag("let");
     if (!f.done())
       return nullptr;
-    return Ctx.make<VarDecl>(loc, *name, ty, init);
+    auto *vd = Ctx.make<VarDecl>(loc, *name, ty, init);
+    vd->setLet(let);
+    return vd;
   }
 
   // -- Types

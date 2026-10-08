@@ -2216,7 +2216,7 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
   // visitTranslationUnit, which only visits bodies of successfully declared
   // functions.  Defensive: if the entry is absent anyway, the error was
   // already reported — skip the body to avoid duplicate diagnostics.
-  if (!lookupFunction(node->getName()))
+  if (!lookupFunction(node->getName()) || !checkOwnershipSyntax(node))
     return false;
 
   // Re-resolve the annotations to set up the body scope (resolveType is
@@ -2258,6 +2258,9 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
 }
 
 bool Sema::visitVarDecl(ast::VarDecl *node) {
+  if (node->isLet() && !requireOwnership(node->getLocation(), "let"))
+    return false;
+
   // The name must not shadow a type or reserved name (#126).
   if (!checkBinderName(node->getName(), node->getLocation()))
     return false;
@@ -2321,6 +2324,7 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
         return false;
       }
       declTy = initTy;
+      node->setType(declTy); // `let x = e`: the inferred type
     }
   }
 
