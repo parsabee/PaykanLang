@@ -130,3 +130,80 @@ TEST(ParamMode, ViewParametersArePassedByValue) {
   EXPECT_EQ(r.StdOut, "9 3 green! 5 3\n");
   guard.expectNoLeaks("view parameters");
 }
+
+// -- `inout` parameters
+
+// An `inout` parameter is the caller's variable: every value type, passing
+// on, a swap, destructuring into it, a read back after a write, a loop, a
+// template's ordinary parameter.
+TEST(ParamMode, InoutParametersChangeTheCallersVariables) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(
+    enum Color { Red, Green, Blue }
+    fn bump(inout n: int) { n = n + 1; }
+    fn twice(inout n: int) { bump(n); bump(n); }
+    fn swap(inout a: int, inout b: int) { t = a; a = b; b = t; }
+    fn scale(inout x: float, view by: float) { x = x * by; }
+    fn flip(inout b: bool) { b = !b; }
+    fn next(inout c: char) { c = char(int(c) + 1); }
+    fn cycle(inout c: Color) {
+      match c {
+        Red { c = Color::Green; }
+        Green { c = Color::Blue; }
+        Blue { c = Color::Red; }
+      }
+    }
+    fn split(inout lo: int, inout hi: int, v: int) { lo, hi = (v / 10, v % 10); }
+    fn readBack(inout n: int) -> int { n = 41; return n + 1; }
+    fn count<T>(xs: T[], inout total: int) { total = total + xs.len(); }
+    fn main() -> int {
+      k = 1; bump(k); twice(k);
+      a = 1; b = 2; swap(a, b);
+      x = 1.5; scale(x, 3);
+      f = False; flip(f);
+      ch = 'a'; next(ch);
+      c = Color::Blue; cycle(c);
+      lo = 0; hi = 0; split(lo, hi, 47);
+      r = 0; s = readBack(r);
+      i = 0; total = 0;
+      while (i < 3) { count([1, 2], total); i = i + 1; }
+      println(Str(k) + " " + Str(a) + Str(b) + " " + Str(x) + " " + Str(f) +
+              " " + Str(ch) + " " + Str(c == Color::Red) + " " + Str(lo) +
+              Str(hi) + " " + Str(r) + " " + Str(s) + " " + Str(total));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "4 21 4.5 True b True 47 41 42 6\n");
+  guard.expectNoLeaks("inout parameters");
+}
+
+// Methods, constructors, `__super__` and overrides take `inout` parameters
+// too; a virtual call reaches the override's address-taking slot.
+TEST(ParamMode, InoutParametersOfMethodsAndConstructors) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(
+    class Counter {
+      n: int;
+      fn __init__(inout start: int) { self.n = start; start = 0; }
+      fn take(inout to: int) { to = to + self.n; }
+    }
+    class Twice : Counter {
+      fn __init__(inout s: int) { __super__(s); s = 7; }
+      fn take(inout to: int) { to = to + 2 * self.n; }
+    }
+    fn main() -> int {
+      st = 5;
+      c: Counter = Twice(st);
+      acc = 1;
+      c.take(acc);
+      plain = Counter(acc);
+      plain.take(st);
+      println(Str(st) + " " + Str(acc) + " " + Str(c.n) + " " + Str(plain.n));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "18 0 5 11\n");
+  guard.expectNoLeaks("inout methods");
+}

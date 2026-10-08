@@ -536,7 +536,9 @@ TEST(Pkm, HelpDocumentsTheFlags) {
 
 namespace {
 
-/// `view` parameters in `base`, used and overridden by `main`.
+/// `view` and `inout` parameters in `base`, used and overridden by `main`:
+/// a function, a constructor, a method of an imported class called on it
+/// directly and through an override.
 struct ModesProject {
   fs::path Dir;
   explicit ModesProject(const std::string &name) {
@@ -547,18 +549,32 @@ struct ModesProject {
               "class Counter { n: int;\n"
               "  fn __init__(view start: int) { self.n = start; }\n"
               "  fn add(view k: int) -> int { self.n = self.n + k;\n"
-              "    return self.n; } }\n"
-              "fn twice(view n: int) -> int { return n * 2; }\n");
-    writeFile(Dir / "main.pkn",
-              "import base;\n"
-              "class Fast : base::Counter {\n"
-              "  fn __init__(view s: int) { __super__(s); }\n"
-              "  fn add(view k: int) -> int { self.n = self.n + 10 * k;\n"
-              "    return self.n; } }\n"
-              "fn main() -> int {\n"
-              "  c: base::Counter = Fast(1);\n"
-              "  println(Str(c.add(2)) + \" \" + Str(base::twice(3)));\n"
-              "  return 0;\n}\n");
+              "    return self.n; }\n"
+              "  fn take(inout to: int) { to = to + self.n; } }\n"
+              "class Cell { v: int;\n"
+              "  fn __init__(inout v: int) { self.v = v; v = 0; } }\n"
+              "fn twice(view n: int) -> int { return n * 2; }\n"
+              "fn bump(inout n: int) { n = n + 1; }\n");
+    writeFile(
+        Dir / "main.pkn",
+        "import base;\n"
+        "class Fast : base::Counter {\n"
+        "  fn __init__(view s: int) { __super__(s); }\n"
+        "  fn add(view k: int) -> int { self.n = self.n + 10 * k;\n"
+        "    return self.n; }\n"
+        "  fn take(inout to: int) { to = to * 100; } }\n"
+        "fn main() -> int {\n"
+        "  c: base::Counter = Fast(1);\n"
+        "  plain = base::Counter(5);\n"
+        "  k = 2;\n"
+        "  base::bump(k);\n"
+        "  plain.take(k);\n"
+        "  j = 3;\n"
+        "  c.take(j);\n"
+        "  cell = base::Cell(k);\n"
+        "  println(Str(c.add(2)) + \" \" + Str(base::twice(3)) + \" \" +\n"
+        "          Str(k) + \" \" + Str(j) + \" \" + Str(cell.v));\n"
+        "  return 0;\n}\n");
     writeFile(Dir / "bad.pkn", "import base;\n"
                                "class Slow : base::Counter {\n"
                                "  fn __init__(s: int) { __super__(s); }\n"
@@ -571,12 +587,14 @@ struct ModesProject {
   }
 };
 
-const char *kModesExpected = "21 6\n";
+const char *kModesExpected = "21 6 0 300 8\n";
 
 } // namespace
 
 // The modes survive the source import, the cache entry and a prebuilt file:
-// calls and overrides are checked against them.
+// calls and overrides are checked against them, and an `inout` argument is
+// passed by address into the other module (also to a method of one of its
+// classes, which an importer that dropped the mode would call with a value).
 TEST(Pkm, ParamModesAcrossModules) {
   REQUIRE_BACKEND();
   ModesProject p("view");
@@ -611,8 +629,10 @@ TEST(Pkm, ParamModesAcrossModules) {
 
   auto dump = p.paykan("pkm dump --section=iface base.pkm");
   for (const char *sig :
-       {"func twice(view int) -> int", "func Counter(view int) -> Counter",
+       {"func twice(view int) -> int", "func bump(inout int) -> void",
+        "func Counter(view int) -> Counter", "func Cell(inout int) -> Cell",
         "method add(view int) -> int flags 0x0",
+        "method take(inout int) -> void flags 0x0",
         "method __init__(view int) -> void flags 0x0"})
     EXPECT_TRUE(contains(dump.out, sig)) << sig << "\n" << dump.out;
   auto manifest = p.paykan("pkm dump --section=manifest base.pkm");

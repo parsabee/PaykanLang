@@ -69,8 +69,8 @@ pir::Signature ModuleLowering::methodSignature(ast::MethodDecl *md) {
   // argument as a box.
   pir::Signature sig;
   sig.Params.push_back(Type::Obj);
-  for (auto *pty : md->getParamTypes()) {
-    Type t = toPIRType(canonicalizeDeclType(pty));
+  for (size_t i = 0; i < md->getNumParams(); ++i) {
+    Type t = paramPIRType(md->getParamTypes()[i], md->getParamModes().mode(i));
     if (t == Type::Void)
       t = Type::Box;
     sig.Params.push_back(t);
@@ -109,8 +109,9 @@ pir::Signature ModuleLowering::slotSignature(ast::ClassType *ct,
 pir::Signature ModuleLowering::constructorSignature(ast::ClassType *ct) {
   pir::Signature sig;
   if (auto *initMd = ct->findMethod(kMethodInit))
-    for (auto *pty : initMd->getParamTypes()) {
-      Type t = toPIRType(canonicalizeDeclType(pty));
+    for (size_t i = 0; i < initMd->getNumParams(); ++i) {
+      Type t = paramPIRType(initMd->getParamTypes()[i],
+                            initMd->getParamModes().mode(i));
       sig.Params.push_back(t == Type::Void ? Type::Box : t);
     }
   sig.Ret = Type::Box;
@@ -305,17 +306,9 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
       pir::LocalId selfLocal = B.addLocal(kSelf, Type::Obj);
       B.store(selfLocal, Val(pir::Operand::value(fn->Params[0]), Type::Obj));
       CurrentScope->declareUnowned(kSelf, selfLocal, ct);
-      for (size_t i = 0; i < funcDecl->getParams().size(); ++i) {
-        auto &p = funcDecl->getParams()[i];
-        const pir::Value &arg = fn->Params[i + 1];
-        auto *pty = md->getParamTypes()[i];
-        pir::LocalId local = B.addLocal(p.getName(), arg.Ty);
-        B.store(local, Val(pir::Operand::value(arg), arg.Ty));
-        if (ast::isRefType(pty))
-          CurrentScope->declare(p.getName(), local, pty);
-        else
-          CurrentScope->declare(p.getName(), local, nullptr);
-      }
+      for (size_t i = 0; i < funcDecl->getParams().size(); ++i)
+        declareParam(funcDecl->getParams()[i].getName(), fn->Params[i + 1],
+                     md->getParamTypes()[i]);
       emitBody(funcDecl->getBody());
     }
     emitImplicitReturn(fn->Sig);

@@ -338,7 +338,7 @@ pir::Signature ModuleLowering::functionSignature(ast::FuncDecl *node) {
   ast::Type *retAstTy = canonicalizeDeclType(node->getReturnType());
   sig.Ret = retAstTy ? toPIRType(retAstTy) : Type::Void;
   for (auto &p : node->getParams())
-    sig.Params.push_back(toPIRType(canonicalizeDeclType(p.ParamType)));
+    sig.Params.push_back(paramPIRType(p.ParamType, p.Mode));
   return sig;
 }
 
@@ -911,6 +911,8 @@ Val ModuleLowering::visitAssignStmt(ast::AssignStmt *node) {
     return val;
   }
 
+  if (storeInout(node->getVarName(), local, val))
+    return val;
   val = coerceBoolToI64(val, localTy);
   B.store(local, val);
   return val;
@@ -1072,19 +1074,9 @@ Val ModuleLowering::visitFuncDecl(ast::FuncDecl *node) {
   FunctionStateGuard fnState(*this, fn, retAstTy, /*methodClassTy=*/nullptr);
   {
     ScopeGuard guard(*this);
-    for (size_t i = 0; i < fn->Params.size(); ++i) {
-      const pir::Value &arg = fn->Params[i];
-      const std::string &pname = node->getParams()[i].getName();
-      pir::LocalId local = B.addLocal(pname, arg.Ty);
-      B.store(local, Val(pir::Operand::value(arg), arg.Ty));
-      // Ref-typed params arrive as owned +1 boxes: declare as owned so scope
-      // cleanup releases them.
-      auto *astTy = canonicalizeDeclType(node->getParams()[i].ParamType);
-      if (astTy && ast::isRefType(astTy))
-        CurrentScope->declare(pname, local, astTy);
-      else
-        CurrentScope->declare(pname, local, nullptr);
-    }
+    for (size_t i = 0; i < fn->Params.size(); ++i)
+      declareParam(node->getParams()[i].getName(), fn->Params[i],
+                   canonicalizeDeclType(node->getParams()[i].ParamType));
     emitBody(node->getBody());
   }
   emitImplicitReturn(fn->Sig);
