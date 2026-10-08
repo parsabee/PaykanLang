@@ -44,6 +44,18 @@ const char *BinaryExpr::getOpcodeStr() const {
   __builtin_unreachable();
 }
 
+const char *qualifierName(Qualifier q) {
+  switch (q) {
+  case Qualifier::View:
+    return "view";
+  case Qualifier::Inout:
+    return "inout";
+  case Qualifier::None:
+    break;
+  }
+  return "";
+}
+
 // -- UnaryExpr
 
 const char *UnaryExpr::getOpcodeStr() const {
@@ -317,6 +329,7 @@ Stmt *ASTCloner::cloneStmt(Stmt *s) {
     auto *nvd = Ctx.make<VarDecl>(vd->getLocation(), vd->getName(),
                                   cloneType(vd->getType()),
                                   cloneExpr(vd->getInitExpr()));
+    nvd->setLet(vd->isLet());
     return Ctx.make<DeclStmt>(loc, nvd);
   }
   case ASTNode::NK_ExprStmt:
@@ -384,7 +397,7 @@ FuncDecl *ASTCloner::cloneFuncDecl(FuncDecl *fn, const std::string &newName) {
   std::vector<Param> params;
   params.reserve(fn->getParams().size());
   for (auto &p : fn->getParams())
-    params.push_back(Param{p.Name, cloneType(p.ParamType)});
+    params.push_back(Param{p.Name, cloneType(p.ParamType), p.Qual});
   return Ctx.make<FuncDecl>(fn->getLocation(), Ctx.intern(newName),
                             std::move(params), cloneType(fn->getReturnType()),
                             cloneCompound(fn->getBody()));

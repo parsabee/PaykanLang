@@ -22,9 +22,10 @@ namespace paykan::frontend::recursive_descent {
 class Parser {
 public:
   /// @p source must outlive the parser (tokens view into it).  Diagnostics
-  /// go through @p diags when given, otherwise to stderr.
-  Parser(ast::ASTContext &ctx, std::string_view source,
-         sema::DiagEngine *diags);
+  /// go through @p diags when given, otherwise to stderr.  @p ownership
+  /// enables the ownership prototype's syntax (Options::Ownership).
+  Parser(ast::ASTContext &ctx, std::string_view source, sema::DiagEngine *diags,
+         bool ownership = false);
 
   /// Parse a whole translation unit.  Always returns a TranslationUnit (a
   /// partial one after errors); check getErrorCount() for success.
@@ -116,9 +117,16 @@ private:
   ast::ClassDecl *parseClassDecl();
   ast::EnumDecl *parseEnumDecl();
   ast::FuncDecl *parseFuncDecl();
+  /// At `view` / `inout` outside a parameter list: report that they apply
+  /// only to parameters and return true.
+  bool rejectQualifier();
   bool parseTypeParamList(std::vector<const std::string *> &out);
   bool parseParamList(std::vector<ast::Param> &out);
   ast::VarDecl *parseVarDecl();
+  /// The rest of a local declaration after its name and annotation:
+  /// `= init ;`.
+  bool finishLocalDecl(ast::SourceLocation start, ast::VarDecl *decl, bool let,
+                       ast::Stmt *&out);
 
   // -- Statements
   ast::CompoundStmt *parseBlock();

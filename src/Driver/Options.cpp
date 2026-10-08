@@ -37,6 +37,9 @@ constexpr Flag kFlags[] = {
      "List the available frontends and exit"},
     {"list-backends", &Options::ListBackends,
      "List the available backends and exit"},
+    {"ownership", &Options::Ownership,
+     "Enable the ownership prototype: view and inout value parameters and "
+     "let (docs/design/ownership-proto.md)"},
     {"no-plugins", &Options::NoPlugins,
      "Don't search the plugin directories (--plugin files still load)"},
     {"rebuild-modules", &Options::RebuildModules,
