@@ -189,6 +189,13 @@ void ModuleLowering::Scope::declare(const std::string &name, pir::LocalId local,
   }
 }
 
+void ModuleLowering::Scope::declareInout(const std::string &name,
+                                         pir::LocalId local, ast::Type *astTy) {
+  declareUnowned(name, local, astTy);
+  if (ast::isRefType(astTy))
+    SharedVars.insert(name);
+}
+
 void ModuleLowering::Scope::declareUnowned(const std::string &name,
                                            pir::LocalId local,
                                            ast::Type *astTy) {
@@ -338,7 +345,7 @@ pir::Signature ModuleLowering::functionSignature(ast::FuncDecl *node) {
   ast::Type *retAstTy = canonicalizeDeclType(node->getReturnType());
   sig.Ret = retAstTy ? toPIRType(retAstTy) : Type::Void;
   for (auto &p : node->getParams())
-    sig.Params.push_back(toPIRType(canonicalizeDeclType(p.ParamType)));
+    sig.Params.push_back(paramType(p.ParamType, p.Qual));
   return sig;
 }
 
@@ -809,7 +816,7 @@ Val ModuleLowering::emitImplicitVarDecl(const std::string &name,
                id && CurrentScope->isOwned(id->getName())) {
       // Owned identifier: visitIdentifier already unwrapped it; load the box
       // directly from the slot and retain it.
-      val = B.load(CurrentScope->lookup(id->getName()), id->getName());
+      val = loadVarBox(id->getName());
       emitRetain(val);
     } else {
       // Raw value — box it.  A fresh temporary gets its first box; an alias
@@ -834,7 +841,7 @@ void ModuleLowering::emitClassVarRebind(pir::LocalId local, ast::Expr *rhsExpr,
   // RHS is another owned variable — retain its box (share the reference).
   if (auto *ident = ast::dyn_cast<ast::Identifier>(rhsExpr)) {
     if (CurrentScope->isOwned(ident->getName())) {
-      newBox = B.load(CurrentScope->lookup(ident->getName()), ident->getName());
+      newBox = loadVarBox(ident->getName());
       emitRetain(newBox);
     }
   }
@@ -851,8 +858,7 @@ void ModuleLowering::emitClassVarRebind(pir::LocalId local, ast::Expr *rhsExpr,
   newBox = emitOptionalToObj(rhsExpr, newBox);
 
   // Release the old box (null-safe) and store the new one.
-  emitRelease(B.load(local, "old.box"));
-  B.store(local, newBox);
+  storeVarBox(local, newBox);
 }
 
 Val ModuleLowering::visitAssignStmt(ast::AssignStmt *node) {
@@ -868,9 +874,7 @@ Val ModuleLowering::visitAssignStmt(ast::AssignStmt *node) {
       Val newBox = emitAsShared(rhsExpr);
       if (!newBox)
         return newBox;
-      pir::LocalId local = owner->lookup(node->getVarName());
-      emitRelease(B.load(local, "old.box"));
-      B.store(local, newBox);
+      storeVarBox(owner->lookup(node->getVarName()), newBox);
       ast::ClassType *rhsCT = resolveExprClassType(rhsExpr);
       if (rhsCT && !ast::isa<ast::OptionalType>(astTy))
         CurrentScope->updateASTType(node->getVarName(), rhsCT);
@@ -888,12 +892,16 @@ Val ModuleLowering::visitAssignStmt(ast::AssignStmt *node) {
 
   pir::LocalId local = owner->lookup(node->getVarName());
   Type localTy = B.localType(local);
+  auto *astTy = CurrentScope->lookupASTType(node->getVarName());
+  if (localTy == Type::Ptr && !ast::isRefType(astTy)) {
+    emitInoutStore(local, node->getVarName(), val);
+    return val;
+  }
 
   // Implicit int -> float promotion.
   if (localTy == Type::F64 && val.Ty == Type::I64)
     val = promoteIntToFloat(val, ASTCtx.getFloatTy());
 
-  auto *astTy = CurrentScope->lookupASTType(node->getVarName());
   if (astTy && ast::isRefType(astTy)) {
     ast::ClassType *rhsCT = resolveExprClassType(node->getValue());
     // Every assignable ref-typed variable owns its box (match-arm bindings
@@ -1078,9 +1086,11 @@ Val ModuleLowering::visitFuncDecl(ast::FuncDecl *node) {
       pir::LocalId local = B.addLocal(pname, arg.Ty);
       B.store(local, Val(pir::Operand::value(arg), arg.Ty));
       // Ref-typed params arrive as owned +1 boxes: declare as owned so scope
-      // cleanup releases them.
+      // cleanup releases them.  An `inout` parameter holds a ptr.
       auto *astTy = canonicalizeDeclType(node->getParams()[i].ParamType);
-      if (astTy && ast::isRefType(astTy))
+      if (arg.Ty == Type::Ptr)
+        CurrentScope->declareInout(pname, local, astTy);
+      else if (astTy && ast::isRefType(astTy))
         CurrentScope->declare(pname, local, astTy);
       else
         CurrentScope->declare(pname, local, nullptr);
@@ -1261,8 +1271,7 @@ Val ModuleLowering::emitAsSharedRaw(ast::Expr *expr) {
   if (auto *id = ast::dyn_cast<ast::Identifier>(expr)) {
     bool declared = CurrentScope->hasLocal(id->getName());
     if (declared && CurrentScope->isOwned(id->getName())) {
-      Val sharedPtr =
-          B.load(CurrentScope->lookup(id->getName()), id->getName());
+      Val sharedPtr = loadVarBox(id->getName());
       emitRetain(sharedPtr);
       return sharedPtr;
     }

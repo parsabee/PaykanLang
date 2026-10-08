@@ -171,6 +171,11 @@ private:
     /// owned variables (see emitTypeArmBody in LoweringMatch.cpp).
     void declareUnowned(const std::string &name, pir::LocalId local,
                         ast::Type *astTy);
+    /// An `inout` parameter, whose local holds the caller's storage's
+    /// address: an optional's box is owned by the caller's slot, so the
+    /// parameter is used like an owned variable but never released.
+    void declareInout(const std::string &name, pir::LocalId local,
+                      ast::Type *astTy);
     Scope *findOwner(const std::string &name);
   };
 
@@ -432,6 +437,29 @@ private:
   Val lowerMemberAccessExpr(ast::MemberAccessExpr *node);
   /// Runtime symbol implementing @p name for the builtin class @p ct, or "".
   const char *builtinMethodSymbol(ast::ClassType *ct, const std::string &name);
+
+  // -- Ownership prototype: `inout` value parameters (LoweringInout.cpp)
+
+  /// The PIR type of a parameter of type @p ty with qualifier @p q: an
+  /// `inout` value (int, float, bool, char, an enum, an optional) is a `ptr`
+  /// to the caller's storage; anything else is toPIRType's.
+  pir::Type paramType(ast::Type *ty, ast::Qualifier q);
+  /// What runs right after a call: the write-backs of its inout temporaries.
+  using WriteBacks = std::vector<std::function<void()>>;
+  /// The address passed for the inout argument @p arg: a variable's local,
+  /// or the address an `inout` parameter holds; a field or an element is
+  /// copied into a temporary whose value @p after writes back.
+  Val emitInoutArg(ast::Expr *arg, WriteBacks &after);
+  /// `name = v` for an `inout` parameter, whose local @p local holds the
+  /// address of the caller's storage.
+  void emitInoutStore(pir::LocalId local, const std::string &name,
+                      const Val &v);
+  /// The box that owned ref variable @p name holds (borrowed), read through
+  /// the pointer of an `inout` optional parameter.
+  Val loadVarBox(const std::string &name);
+  /// Store the +1 box @p box into ref variable slot @p local (through its
+  /// pointer for an `inout` optional), releasing the box it held.
+  void storeVarBox(pir::LocalId local, const Val &box);
 };
 
 } // namespace paykan::lowering
