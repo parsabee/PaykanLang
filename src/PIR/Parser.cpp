@@ -1197,6 +1197,20 @@ private:
       in.Args.push_back(v);
       break;
     }
+    case Opcode::LocalAddr:
+      if (!parseLocalRef(in.Local))
+        return false;
+      resultTy = Type::Ptr;
+      break;
+    case Opcode::PtrLoad:
+      if (!parseType(resultTy) || !expect(Tok::Comma, "','") ||
+          !parseCommaOperands(in.Args, 1))
+        return false;
+      break;
+    case Opcode::PtrStore:
+      if (!parseCommaOperands(in.Args, 2))
+        return false;
+      break;
     }
 
     if (hasResult) {

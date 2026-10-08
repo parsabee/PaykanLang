@@ -52,7 +52,11 @@ inline constexpr OpcodeEntry kOpcodeTable[] = {
     {Opcode::Load, 24, "load"},
     {Opcode::Store, 25, "store"},
     // 26-29 reserved (#96 some/none/is_some/unwrap), 30-31 (#99 weak.load/
-    // weak.store), 32-33 (#170 global.load/global.store), 34-255 reserved.
+    // weak.store), 32-33 (#170 global.load/global.store).
+    {Opcode::LocalAddr, 34, "local.addr"},
+    {Opcode::PtrLoad, 35, "ptr.load"},
+    {Opcode::PtrStore, 36, "ptr.store"},
+    // 37-255 reserved.
 };
 
 struct TypeEntry {
@@ -92,7 +96,8 @@ template <typename T, size_t N> constexpr bool rowsUnique(const T (&table)[N]) {
 // The enumerators are dense from 0, so a complete table has exactly one row
 // per enumerator up to the last one.  Adding an enumerator without a row
 // fails here or in the exhaustive switch of tests/PIR/BinaryTests.cpp.
-static_assert(std::size(kOpcodeTable) == static_cast<size_t>(Opcode::Store) + 1,
+static_assert(std::size(kOpcodeTable) ==
+                  static_cast<size_t>(Opcode::PtrStore) + 1,
               "every Opcode needs a row in kOpcodeTable");
 static_assert(std::size(kTypeTable) == static_cast<size_t>(Type::Ptr) + 1,
               "every Type needs a row in kTypeTable");

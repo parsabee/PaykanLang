@@ -266,6 +266,7 @@ private:
       break;
     case Opcode::Load:
     case Opcode::Store:
+    case Opcode::LocalAddr:
       W.uleb(in.Local);
       break;
     default:
@@ -643,6 +644,7 @@ private:
       break;
     case Opcode::Load:
     case Opcode::Store:
+    case Opcode::LocalAddr:
       if (!R.uleb32(in.Local))
         return false;
       break;

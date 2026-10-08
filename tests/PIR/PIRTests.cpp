@@ -223,7 +223,7 @@ TEST(PIR, ParserKeepsNamesAndIds) {
   EXPECT_EQ(first->Result.Name, "s");
   EXPECT_EQ(first->Result.Id, 1u);
   EXPECT_EQ(first->Result.Ty, Type::Obj); // from the callee's declaration
-  EXPECT_EQ(main->NextValueId, 28u);
+  EXPECT_EQ(main->NextValueId, 29u);
 }
 
 TEST(PIR, ParserAcceptsHandWrittenNames) {
@@ -372,6 +372,37 @@ fn @main() -> i64 {
   EXPECT_NE(errs.find("cmp operands"), std::string::npos) << errs;
   EXPECT_NE(errs.find("cannot cast f64 to bool"), std::string::npos) << errs;
   EXPECT_NE(errs.find("operand of not"), std::string::npos) << errs;
+}
+
+TEST(PIRVerifier, ChecksAddressOps) {
+  std::string errs = verifyText(R"(module "m"
+fn @main() -> i64 {
+  local %o.0: obj
+  local %i.1: i64
+  local %b.2: box
+  %p = local.addr %o.0
+  %q = local.addr %i.1
+  %v = ptr.load obj, %q
+  ptr.store 1, 2
+  ptr.store %q, null obj
+  %w = ptr.load i64, %q
+  ptr.store %q, %w
+  %r = local.addr %b.2
+  %x = ptr.load box, %r
+  ptr.store %r, %x
+  ret %w
+}
+)");
+  EXPECT_NE(errs.find("local.addr of a local of type obj"), std::string::npos)
+      << errs;
+  EXPECT_NE(errs.find("ptr.load of obj"), std::string::npos) << errs;
+  EXPECT_NE(errs.find("address of ptr.store"), std::string::npos) << errs;
+  EXPECT_NE(errs.find("ptr.store of obj"), std::string::npos) << errs;
+  // Scalars and a box (an optional's slot) are addressable.
+  EXPECT_EQ(errs.find("ptr.load of i64"), std::string::npos) << errs;
+  EXPECT_EQ(errs.find("of type box"), std::string::npos) << errs;
+  EXPECT_EQ(errs.find("ptr.load of box"), std::string::npos) << errs;
+  EXPECT_EQ(errs.find("ptr.store of box"), std::string::npos) << errs;
 }
 
 TEST(PIRVerifier, RejectsBadControlFlow) {
