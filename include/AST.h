@@ -905,6 +905,7 @@ private:
   Type *ReturnType;
   std::vector<Type *> ParamTypes;
   uint8_t MethodFlags;
+  std::vector<Qualifier> ParamQuals; // ownership prototype: `inout n: int`
 
 public:
   MethodDecl(SourceLocation loc, const std::string &internedName, Type *retTy,
@@ -916,6 +917,13 @@ public:
   Type *getReturnType() const { return ReturnType; }
   const std::vector<Type *> &getParamTypes() const { return ParamTypes; }
   size_t getNumParams() const { return ParamTypes.size(); }
+  /// The qualifier of parameter @p i (None when none was recorded).
+  Qualifier getParamQualifier(size_t i) const {
+    return i < ParamQuals.size() ? ParamQuals[i] : Qualifier::None;
+  }
+  void setParamQualifiers(std::vector<Qualifier> quals) {
+    ParamQuals = std::move(quals);
+  }
 
   bool isPrivate() const { return MethodFlags & Private; }
   bool isVirtual() const { return !isPrivate(); }

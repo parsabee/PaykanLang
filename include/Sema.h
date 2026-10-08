@@ -76,6 +76,13 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   // -- Scoped symbol table
 
+  /// Ownership prototype: how a variable was declared (`inout n: int`,
+  /// `let x = e`).
+  struct VarKind {
+    ast::Qualifier Qual = ast::Qualifier::None;
+    bool Let = false;
+  };
+
   /// A single lexical scope. Each scope has its own local bindings and a
   /// pointer to its enclosing (parent) scope.
   struct Scope {
@@ -99,6 +106,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
     /// Find the innermost scope that contains this name, or nullptr.
     Scope *findOwner(std::string_view name);
+
+    /// Ownership prototype: the `view` / `inout` parameters and `let`
+    /// locals declared in this scope (absent: an ordinary variable).
+    StringMap<VarKind> Kinds;
   };
 
   Scope *CurrentScope = nullptr;
@@ -136,6 +147,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// user-declared name never contains the module qualifier, a builtin entry
     /// found under a plain declared name is always a compiler builtin.
     bool IsBuiltin = false;
+    /// The user function's declaration (its parameters' qualifiers); nullptr
+    /// for builtins, constructors and imported functions.
+    const ast::FuncDecl *Decl = nullptr;
   };
 
   /// Maps function names to their signatures.
@@ -812,6 +826,45 @@ private:
   bool requireOwnership(ast::SourceLocation loc, const char *what);
   /// requireOwnership for the parameter qualifiers of @p fn.
   bool checkOwnershipSyntax(const ast::FuncDecl *fn);
+
+  // -- Ownership prototype: `view` / `inout` parameters and `let`
+  //    (SemaOwnership.cpp)
+
+  /// The declaration of each user method (its parameters' names and
+  /// qualifiers); builtin and imported methods have none.
+  std::unordered_map<const ast::MethodDecl *, const ast::FuncDecl *>
+      MethodSources;
+  /// True for int, float, bool, char, enums and every optional (a value and
+  /// a flag), the types `view` and `inout` apply to; anything else (classes,
+  /// Str, arrays, tuples, Obj) is a reference.
+  static bool isValueType(const ast::Type *ty);
+  /// Error for a `view` / `inout` parameter of @p fn whose type (in
+  /// @p paramTys) is a reference.
+  bool checkParamQualifiers(const ast::FuncDecl *fn,
+                            const std::vector<ast::Type *> &paramTys);
+  /// Record the `view` / `inout` parameters of @p fn in the current scope.
+  void declareQualifiedParams(const ast::FuncDecl *fn);
+  /// The kind of variable @p name in scope.
+  VarKind varKind(std::string_view name) const;
+  /// Record the kind of @p name, declared in the current scope.
+  void setVarKind(std::string_view name, ast::Qualifier q, bool isLet = false);
+  /// The declaration a call's callee resolves to (a function, or the
+  /// constructor's `__init__`); nullptr when it has none.
+  const ast::FuncDecl *calleeDecl(const ast::CallExpr *call) const;
+  /// Error unless variable @p name may be assigned: not `let`, not a `view`
+  /// parameter.
+  bool checkReassignable(const std::string &name, ast::SourceLocation loc);
+  /// The arguments of the `inout` parameters of @p fn (nullptr: none): a
+  /// changeable variable, field or element of exactly the parameter's type.
+  bool checkInoutArgs(const ast::FuncDecl *fn,
+                      const std::vector<ast::Expr *> &args,
+                      const std::string &callee);
+  /// checkInoutArgs for a call of the user method @p method.
+  bool checkMethodInoutArgs(const ast::MethodCallExpr *call,
+                            const ast::MethodDecl *method);
+  /// An override keeps each parameter's `view` / `inout` of @p base.
+  bool checkOverrideQualifiers(const ast::FuncDecl *method,
+                               const ast::MethodDecl *base);
 
   EntryPoint EntryPointCheck = EntryPoint::None;
   /// The check EntryPointCheck selects, over the main file's declarations.
