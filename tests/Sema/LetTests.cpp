@@ -26,9 +26,8 @@ TEST(Let, CannotBeReassigned) {
                            "cannot be reassigned",
                            ":7:5: error: 'n' is declared with 'let' and "
                            "cannot be reassigned"})
-    EXPECT_NE(r.Diagnostics.find(diag), std::string::npos)
-        << diag << "\n"
-        << r.Diagnostics;
+    EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
+                                                           << r.Diagnostics;
 }
 
 // A `let` local is otherwise an ordinary variable: it takes its
@@ -61,12 +60,14 @@ TEST(Let, IsAnOrdinaryLocalOtherwise) {
   return 0;
 })");
   EXPECT_FALSE(r.Ok);
-  EXPECT_NE(r.Diagnostics.find(":3:3: error: initializer of type 'Str' does "
-                               "not match declared type 'int' for variable 't'"),
-            std::string::npos)
+  EXPECT_NE(
+      r.Diagnostics.find(":3:3: error: initializer of type 'Str' does "
+                         "not match declared type 'int' for variable 't'"),
+      std::string::npos)
       << r.Diagnostics;
-  EXPECT_NE(r.Diagnostics.find(":4:3: error: initializer of type 'Str' does "
-                               "not match declared type 'int' for variable 'u'"),
-            std::string::npos)
+  EXPECT_NE(
+      r.Diagnostics.find(":4:3: error: initializer of type 'Str' does "
+                         "not match declared type 'int' for variable 'u'"),
+      std::string::npos)
       << r.Diagnostics;
 }

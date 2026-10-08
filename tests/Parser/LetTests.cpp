@@ -18,8 +18,7 @@ TEST(Let, DeclaresALocal) {
   // The declaration starts at `let` and ends with its initializer, like a
   // typed declaration's.
   EXPECT_NE(ast.find("DeclStmt <2:3-2:12>"), std::string::npos) << ast;
-  EXPECT_NE(ast.find("VarDecl <2:3-2:12> 'n' let\n"), std::string::npos)
-      << ast;
+  EXPECT_NE(ast.find("VarDecl <2:3-2:12> 'n' let\n"), std::string::npos) << ast;
   EXPECT_NE(ast.find("VarDecl <3:3-3:20> 's' let type\n"), std::string::npos)
       << ast;
 }
