@@ -160,8 +160,9 @@ struct SemaResult {
   unsigned ErrorCount;
 };
 
-inline SemaResult semaCheck(const std::string &source) {
-  auto [parseOk, driver] = parse(source);
+/// Sema over a parse (Sema::setOwnership(@p ownership)).
+inline SemaResult semaRun(ParseResult parsed, bool ownership = false) {
+  auto &[parseOk, driver] = parsed;
   if (!parseOk)
     return {false, "parse error", 1};
 
@@ -169,8 +170,13 @@ inline SemaResult semaCheck(const std::string &source) {
   sema::DiagEngine diag(diagOS);
   diag.setSourceInfo(driver->getCurrentFile(), &driver->getSourceLines());
   sema::Sema sema(driver->getASTContext(), diag, "", driver->getFrontendName());
+  sema.setOwnership(ownership);
   auto semaCtx = sema.run(driver->getRoot());
   return {semaCtx.Ok, diagOS.str(), semaCtx.ErrorCount};
+}
+
+inline SemaResult semaCheck(const std::string &source) {
+  return semaRun(parse(source));
 }
 
 } // namespace paykan::test

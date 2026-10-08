@@ -178,6 +178,11 @@ private:
       open("param");
       str(p.getName());
       type(p.ParamType);
+      if (p.Qual != Qualifier::None) { // ownership prototype: `inout x: int`
+        open("qual");
+        sym(qualifierName(p.Qual));
+        close();
+      }
       close();
     }
     close();
@@ -194,6 +199,10 @@ private:
     str(d.getName());
     optionalType(d.getType());
     optionalExpr(d.getInitExpr());
+    if (d.isLet()) {
+      open("let");
+      close();
+    }
     close();
   }
 

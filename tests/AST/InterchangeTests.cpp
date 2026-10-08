@@ -70,7 +70,12 @@ std::vector<std::filesystem::path> corpus() {
 TEST(ASTInterchange, RoundTripsTheSamplesCorpus) {
   unsigned roundTripped = 0;
   for (const auto &file : corpus()) {
-    parser::ParserDriver driver("recursive-descent");
+    // samples/ownership needs the prototype's keywords (--ownership).
+    frontend::Options opts;
+    opts.Ownership =
+        *std::filesystem::relative(file, PAYKAN_SAMPLES_DIR).begin() ==
+        "ownership";
+    parser::ParserDriver driver("recursive-descent", opts);
     std::ostringstream quiet;
     sema::DiagEngine diag(quiet);
     driver.setDiagEngine(&diag);
@@ -397,6 +402,41 @@ TEST(ASTInterchange, NestingIsBounded) {
   EXPECT_EQ(read(nested(ic::kMaxDepth + 10), ctx, error), nullptr);
   EXPECT_NE(error.find("nesting too deep (more than 2048 levels)"),
             std::string::npos)
+      << error;
+}
+
+// The ownership prototype's `view` / `inout` parameters and `let` survive a
+// round trip; documents without them read as before.
+TEST(ASTInterchange, RoundTripsOwnershipSyntax) {
+  frontend::Options opts;
+  opts.Ownership = true;
+  parser::ParserDriver driver("recursive-descent", opts);
+  auto path = std::filesystem::temp_directory_path() /
+              ("paykan_ownership_" + std::to_string(::getpid()) + ".pkn");
+  {
+    std::ofstream(path) << "class P { n: int;\n"
+                           "  fn m(inout k: int, view s: int) -> int {\n"
+                           "    let a = k; return a; } }\n"
+                           "fn f(view n: int) -> int { let b: int = n; "
+                           "return b; }\n";
+  }
+  ASSERT_EQ(driver.parseFile(path.string()), 0);
+  std::filesystem::remove(path);
+  std::string text = write(*driver.getRoot());
+  for (const char *item : {"(qual inout)", "(qual view)", "(let)"})
+    EXPECT_NE(text.find(item), std::string::npos) << item << "\n" << text;
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *back = read(text, ctx, error);
+  ASSERT_NE(back, nullptr) << error << "\n" << text;
+  EXPECT_EQ(dump(back), dump(driver.getRoot()));
+  EXPECT_EQ(write(*back), text);
+  EXPECT_EQ(read("(paykan-ast 1 (unit (fn \"f\" (type-params) (params "
+                 "(param \"n\" (named-type \"int\") (qual mut))) _ "
+                 "(block))))",
+                 ctx, error),
+            nullptr);
+  EXPECT_NE(error.find("expected (qual view|inout)"), std::string::npos)
       << error;
 }
 

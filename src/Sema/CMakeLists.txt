@@ -4,6 +4,7 @@ add_library(paykan_sema STATIC
     Sema.cpp
     SemaClass.cpp
     SemaImport.cpp
+    SemaOwnership.cpp
 )
 target_link_libraries(paykan_sema
     PUBLIC  paykan_diag
