@@ -18,8 +18,8 @@ class Point {
 class Range {
   bounds: (int, int);                     // a tuple-typed field
   fn __init__(lo: int, hi: int) { self.bounds = (lo, hi); }
-  fn width() -> int { return self.bounds.1 - self.bounds.0; }
-  fn get() -> (int, int) { return self.bounds; }
+  view fn width() -> int { return self.bounds.1 - self.bounds.0; }
+  view fn get() -> (int, int) { return self.bounds; }
 }
 
 fn divmod(a: int, b: int) -> (int, int) {  // multiple return

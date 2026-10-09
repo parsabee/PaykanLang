@@ -1886,6 +1886,9 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   // Hand the instantiations to the lowering as ordinary declarations.
   injectInstantiations(node);
 
+  // The suggestions need every body checked, and are noise next to errors.
+  if (ok && !hasErrors())
+    warnMissingViewFns();
   return ok;
 }
 

@@ -44,7 +44,7 @@ fn opposite(d: Direction) -> Direction {
 }
 
 // Exhaustive match (no wildcard) mapping an enum to a Str.
-fn dirName(d: Direction) -> Str {
+fn dirName(d: view Direction) -> Str {
   match d {
     North { return "North"; }
     East  { return "East"; }
@@ -94,7 +94,7 @@ class Player {
   // Methods may call module-level free functions (defined anywhere in the file)
   // and pass/return enum values through them.
   fn turnAround() { self.facing = opposite(self.facing); }
-  fn report() -> Str { return dirName(self.facing); }
+  view fn report() -> Str { return dirName(self.facing); }
 }
 
 fn main() -> int {

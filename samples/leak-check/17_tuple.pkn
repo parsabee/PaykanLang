@@ -13,7 +13,7 @@
 class Holder {
   pair: (int, Str);
   fn __init__(p: (int, Str)) { self.pair = p; }
-  fn get() -> (int, Str) { return self.pair; }
+  view fn get() -> (int, Str) { return self.pair; }
 }
 
 fn mk() -> (Str, int) {

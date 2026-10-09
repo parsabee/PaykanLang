@@ -14,7 +14,7 @@ import geometry::point;
 class Box {
   origin: point::Point;
   fn __init__(p: point::Point) { self.origin = p; }
-  fn total() -> int { return self.origin.sum(); }
+  view fn total() -> int { return self.origin.sum(); }
 }
 
 // Qualified type as a parameter type.

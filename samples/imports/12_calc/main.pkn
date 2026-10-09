@@ -105,10 +105,10 @@ class Ring<T> {
     }
   }
 
-  fn len() -> int { return self.items.len(); }
+  view fn len() -> int { return self.items.len(); }
 
   // The i-th oldest item (0 <= i < len()).
-  fn at(i: int) -> T { return self.items[(self.start + i) % self.items.len()]; }
+  view fn at(i: int) -> T { return self.items[(self.start + i) % self.items.len()]; }
 }
 
 // How many past statements :history remembers.

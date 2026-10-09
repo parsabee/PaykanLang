@@ -1,8 +1,9 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 // Sema tests: `view fn` methods.  A method may change `self` unless it is a
-// `view fn`, where `self` is read-only, and only a `view fn` may be called on
-// a `view`.
+// `view fn`, where `self` is read-only; only a `view fn` may be called on a
+// `view`, and a method that never changes `self` but is not one gets a
+// warning.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -184,6 +185,57 @@ fn main() -> int { return show(Counter(), Fast()); }
   EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
   expectAll(r, {":14:3: error: 'f' is a 'view' parameter; 'tick' is not a "
                 "'view fn'"});
+}
+
+// The warning: a method that never changes `self` and is not a `view fn`.  A
+// method calling only such methods on `self` gets it too, in the same
+// compile; a method with an override that changes `self` does not, nor one
+// passing part of `self` to a parameter that is not `view`, and a generic
+// class's method gets one warning, not one per instance.
+TEST(ViewFn, WarnsWhenSelfNeverChanges) {
+  auto r = semaCheck(R"(class Shape {
+  w: int;
+  fn __init__() { self.w = 2; }
+  fn area() -> int { return self.w * self.w; }
+  fn twice() -> int { return 2 * self.area(); }
+  fn grow() { self.w = self.w + 1; }
+  fn grown() -> int { self.grow(); return self.w; }
+  fn hook() -> int { return 0; }
+  view fn done() -> int { return self.w; } fn sized() -> int { return twiceOf(self.w); }
+}
+class Square : Shape {
+  fn __init__() { __super__(); }
+  fn hook() -> int { self.w = 0; return 1; }
+}
+class Box<T> { v: T; fn __init__(v: T) { self.v = v; } fn get() -> T { return self.v; } }
+fn main() -> int {
+  b = Box<int>(1);
+  c = Box<Str>("a");
+  return Shape().twice() + b.get() + c.get().len();
+}
+fn twiceOf(n: int) -> int { return 2 * n; }
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  const char *kSuffix = "never changes 'self': make it a 'view fn'";
+  EXPECT_NE(r.Diagnostics.find(":4:3: warning: 'area' never changes 'self': "
+                               "make it a 'view fn' so 'view' parameters can "
+                               "call it"),
+            std::string::npos)
+      << r.Diagnostics;
+  for (const char *loc : {":4:3: warning: 'area' ", ":5:3: warning: 'twice' ",
+                          ":15:56: warning: 'get' "})
+    EXPECT_NE(r.Diagnostics.find(std::string(loc) + kSuffix), std::string::npos)
+        << loc << "\n"
+        << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find("'get' never"),
+            r.Diagnostics.rfind("'get' never"))
+      << r.Diagnostics;
+  for (const char *quiet :
+       {"'grow'", "'grown'", "'hook'", "'done'", "'sized'", "'__init__'"})
+    EXPECT_EQ(r.Diagnostics.find(std::string("warning: ") + quiet),
+              std::string::npos)
+        << quiet << "\n"
+        << r.Diagnostics;
 }
 
 // A module's `view fn` markers are part of its interface: overrides in the

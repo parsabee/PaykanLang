@@ -12,13 +12,13 @@
 class K {
   name: Str;
   fn __init__(name: Str) { self.name = name; }
-  fn w() -> int { return 1; }
-  fn vtable() -> int { return 10; }
+  view fn w() -> int { return 1; }
+  view fn vtable() -> int { return 10; }
 }
 
 class D : K {
   fn __init__() { __super__("d"); }
-  fn vtable() -> int { return 20; }
+  view fn vtable() -> int { return 20; }
 }
 
 fn K_w() -> int { return 2; }

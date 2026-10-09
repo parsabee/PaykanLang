@@ -18,8 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   function in the AST interchange format carries it as a trailing `(qual view)`.  In a
   `view fn`, `self` and everything reached through it is read-only, as through a `view`
   parameter (`'self' is read-only in 'view fn get'; cannot assign to its field 'n'`),
-  though part of `self` may still be returned.  `samples/codegen/48_view_fn.pkn` shows
-  them.
+  though part of `self` may still be returned.  A method that never changes `self` but
+  is not a `view fn` gets a warning (`'area' never changes 'self': make it a 'view fn' so
+  'view' parameters can call it`), worked out across a method's overrides and its calls
+  on `self`; the samples and the manual mark theirs.  `samples/codegen/48_view_fn.pkn`
+  shows them.
 - Local borrows (docs/language/01-language-basics.md, "Local borrows"): a local declared
   with a mode where the type goes, `v: view = k + 1;` or `w: view float = k;`, the type
   inferred when left off.  A `view` local reads its initializer, which may be any

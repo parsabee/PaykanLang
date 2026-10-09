@@ -1,6 +1,6 @@
 // Module: shapes/base
 // Exported base class for cross-module inheritance examples.
 class Shape {
-  fn area() -> int { return 0; }
-  fn perimeter() -> int { return 0; }
+  view fn area() -> int { return 0; }
+  view fn perimeter() -> int { return 0; }
 }

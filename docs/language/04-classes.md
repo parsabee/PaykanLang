@@ -129,6 +129,13 @@ not. A `let` local only cannot be reassigned: any method can be called on what i
 - A module's `view fn` markers are part of its interface, whether it is imported from
   source or from a `.pkm` file.
 
+A method that never changes `self` but is not a `view fn` gets a warning, so that `view`
+parameters can call it: `'value' never changes 'self': make it a 'view fn' so 'view'
+parameters can call it`. A method counts as changing `self` when it does one of the
+things a `view fn` cannot, or calls on `self` a method that does; a method with an
+override that changes `self` gets no warning, and neither does its override. The warning
+is not given while the program has errors.
+
 ### Static Dispatch via Free Functions
 
 There is no per-method opt-out for virtual dispatch. For static dispatch (e.g. hot

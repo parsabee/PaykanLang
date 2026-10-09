@@ -290,7 +290,7 @@ class TaskList {
     return True;
   }
 
-  fn pending() -> int {
+  view fn pending() -> int {
     count = 0;
     i = 0;
     while (i < self.tasks.len()) {
@@ -300,7 +300,7 @@ class TaskList {
     return count;
   }
 
-  fn show() {
+  view fn show() {
     i = 0;
     while (i < self.tasks.len()) {
       println(Str(i + 1) + ". " + self.tasks[i].toString());

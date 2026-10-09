@@ -621,7 +621,15 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
         CurrentScope->declare(method->getParams()[i].getName(), paramTys[i]);
       declareParamKinds(method);
 
+      // What the body does to `self`, for warnMissingViewFns.
+      if (method->getName() != names::kMethodInit) {
+        CurrentMethodUse = &MethodUses.emplace_back();
+        CurrentMethodUse->Class = ct;
+        CurrentMethodUse->Decl = method;
+      }
+
       bool bodyOk = visitBody(method->getBody()->getStatements());
+      CurrentMethodUse = nullptr;
 
       if (!bodyOk) {
         ok = false;

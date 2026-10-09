@@ -14,12 +14,12 @@ import shapes::base;
 
 // Using short qualifier
 class Circle : base::Shape {
-  fn area() -> int { return 1; }
+  view fn area() -> int { return 1; }
 }
 
 // Using full path qualifier
 class Triangle : shapes::base::Shape {
-  fn area() -> int { return 3; }
+  view fn area() -> int { return 3; }
 }
 
 fn main() -> int {
