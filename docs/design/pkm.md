@@ -267,7 +267,7 @@ UTF-8.
 
 ```
 IfaceBlob
-  "PKMI"  u16 major(=1)  u16 minor(=1)  u32 flags(bit0 has TMPL section; bit1 system)
+  "PKMI"  u16 major(=1)  u16 minor(=0)  u32 flags(bit0 has TMPL section; bit1 system)
   u32 n_parts ; parts[n] { u32 tag; u32 flags(bit0 required); u64 offset; u64 size }   offsets blob-relative, 8-aligned
   parts in table order
 ```
@@ -281,13 +281,13 @@ IfaceBlob
 | 5 | `INST` | yes | instantiations provided and requested (§4.5) |
 | 7 | `DIAG` | no | display file name (project-relative) and per-declaration positions for "declared here" notes (§8.6) |
 
-Minor 1 adds parameter modes (`view`, `inout`) to the string-typed records
+Parameter modes (`view`, `inout`) are appended to the string-typed records
 written today (`include/paykan/pkm/Interface.h`): `uleb n, (u8 mode, Str
 name)[n]` after a `FUNC` record's signature, and one such list per method
 after a `CLASS` record's methods, written only when a parameter has a mode
 (mode 0 by value, 1 `view`, 2 `inout`; `n` is 0 or the number of
-parameters).  A 1.0 record reads as having no modes; a 1.0 reader skips
-them, but the manifest's `iface_minor` already turns such a reader away.
+parameters).  A record without them reads as having no modes.  The
+interface minor version is bumped for them at the next release.
 
 Every part but `STRS` is `uleb count` then records `uleb tag, uleb len,
 payload[len]`. A reader parses the fields it knows and ignores trailing

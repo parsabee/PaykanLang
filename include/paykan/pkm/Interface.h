@@ -61,7 +61,7 @@ inline constexpr uint8_t kModeInout = 2;
 
 /// The modes of a signature's parameters (ast::ParamModes): one per
 /// parameter with its name, or none when every parameter is by value.
-/// Interface format 1.1 appends them to the FUNC and CLASS records.
+/// They are appended to the FUNC and CLASS records.
 struct ModeRecs {
   std::vector<uint8_t> Modes;
   std::vector<std::string> Names;

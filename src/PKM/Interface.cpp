@@ -5,8 +5,7 @@
 // prototype form: the part table and record framing are the design's, the
 // DECLS payloads carry ModuleInfo's type-name strings.  Every record is
 // read through a sub-reader bounded to its length; known fields are read,
-// trailing bytes are ignored (a later minor may append fields, as 1.1
-// appended the parameter modes).
+// trailing bytes are ignored (a later minor may append fields).
 
 #include "paykan/pkm/Interface.h"
 
@@ -72,7 +71,7 @@ void writeSig(ByteWriter &v, StringTable &strs, const std::string &ret,
     v.uleb(strs.intern(p));
 }
 
-/// `uleb n, (u8 mode, Str name)[n]`: a signature's parameter modes (1.1).
+/// `uleb n, (u8 mode, Str name)[n]`: a signature's parameter modes.
 void writeModes(ByteWriter &v, StringTable &strs, const ModeRecs &m) {
   v.uleb(m.Modes.size());
   for (size_t i = 0; i < m.Modes.size(); ++i) {
@@ -143,7 +142,7 @@ std::vector<uint8_t> writeInterface(const Interface &iface) {
         v.u8(m.Flags);
         modes |= !m.Modes.Modes.empty();
       }
-      // 1.1: every method's modes, after the methods, when one has any.
+      // Every method's modes, after the methods, when one has any.
       if (modes)
         for (const ClassRec::Method &m : c->Methods)
           writeModes(v, strs, m.Modes);
@@ -152,7 +151,7 @@ std::vector<uint8_t> writeInterface(const Interface &iface) {
     record(decls, static_cast<uint64_t>(DeclTag::Func), [&](ByteWriter &v) {
       v.uleb(strs.intern(f->Name));
       writeSig(v, strs, f->ReturnTypeName, f->ParamTypeNames);
-      if (!f->Modes.Modes.empty()) // 1.1
+      if (!f->Modes.Modes.empty())
         writeModes(v, strs, f->Modes);
     });
 
@@ -237,7 +236,7 @@ private:
         return false;
     return true;
   }
-  /// A signature's parameter modes (1.1) for its @p params parameters: none
+  /// A signature's parameter modes for its @p params parameters: none
   /// or one per parameter, each a known mode.
   bool modes(ByteReader &r, size_t params, ModeRecs &out) {
     uint64_t n;
@@ -447,7 +446,7 @@ Status Reader::readDecls(Interface &out) {
             if (!str(v, m.Name) || !str(v, m.ReturnTypeName) ||
                 !strList(v, m.ParamTypeNames) || !v.u8(m.Flags))
               return true;
-          if (v.remaining() > 0) // 1.1: every method's modes
+          if (v.remaining() > 0) // every method's modes
             for (ClassRec::Method &m : c.Methods)
               if (!modes(v, m.ParamTypeNames.size(), m.Modes))
                 return true;
@@ -459,7 +458,7 @@ Status Reader::readDecls(Interface &out) {
           FuncRec f;
           if (str(v, f.Name) && str(v, f.ReturnTypeName) &&
               strList(v, f.ParamTypeNames) &&
-              (v.remaining() == 0 || // 1.1: the modes
+              (v.remaining() == 0 || // the modes
                modes(v, f.ParamTypeNames.size(), f.Modes)) &&
               ordered(tag, f.Name))
             out.Functions.push_back(std::move(f));
