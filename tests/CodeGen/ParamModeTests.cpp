@@ -92,3 +92,43 @@ fn @main() -> i64 {
   EXPECT_EQ(r.ExitCode, 49) << r.StdErr;
   guard.expectNoLeaks("address ops");
 }
+
+// -- `view` parameters
+
+// A `view` parameter is a read-only copy: of every value type, on a
+// function, a constructor, a method, an override and a template's ordinary
+// parameter, with any argument of its type.
+TEST(ParamMode, ViewParametersArePassedByValue) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(
+    enum Color { Red, Green }
+    class Counter {
+      n: int;
+      fn __init__(view start: int) { self.n = start; }
+      fn add(view k: int) -> int { self.n = self.n + k; return self.n; }
+    }
+    class Twice : Counter {
+      fn __init__(view s: int) { __super__(s); }
+      fn add(view k: int) -> int { self.n = self.n + 2 * k; return self.n; }
+    }
+    fn scale(view x: float, view by: float) -> float { y = x * by; return y; }
+    fn name(view c: Color, view loud: bool, view end: char) -> Str {
+      s = "red";
+      if (c == Color::Green) { s = "green"; }
+      if (loud) { s = s + Str(end); }
+      return s;
+    }
+    fn at<T>(xs: T[], view i: int) -> T { return xs[i]; }
+    fn main() -> int {
+      let k = 3;
+      c: Counter = Twice(k);
+      println(Str(c.add(k)) + " " + Str(scale(1.5, 2)) + " " +
+              name(Color::Green, True, '!') + " " + Str(at([4, 5], 1)) +
+              " " + Str(k));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "9 3 green! 5 3\n");
+  guard.expectNoLeaks("view parameters");
+}

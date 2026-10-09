@@ -62,7 +62,8 @@ Sema::Sema(ast::ASTContext &ctx, DiagEngine &diags,
 
 void Sema::declareFunction(std::string_view name, ast::Type *retTy,
                            std::vector<ast::Type *> paramTys, bool isBuiltin) {
-  FunctionTable[std::string(name)] = {retTy, std::move(paramTys), isBuiltin};
+  FunctionTable[std::string(name)] = {
+      retTy, std::move(paramTys), isBuiltin, {}};
 }
 
 const Sema::FunctionSig *Sema::lookupFunction(std::string_view name) const {
@@ -893,6 +894,9 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
                       typeName(expectedParams[i]) + "'");
       }
     }
+    if (superInit && argTypes.size() == expectedParams.size())
+      S.checkInoutArgs(superInit->getParamModes(), expectedParams,
+                       node->getArguments(), names::kMethodSuper);
     S.CurrentClassCtx->SuperInitCalled = true;
     return S.Ctx.getVoidTy();
   }
@@ -977,6 +981,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
                   typeName(sig->ParamTypes[i]) + "'");
     }
   }
+  S.checkInoutArgs(sig->Modes, sig->ParamTypes, node->getArguments(),
+                   node->getCalleeName());
 
   node->setResolvedType(sig->ReturnType);
   return sig->ReturnType;
@@ -1059,6 +1065,8 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                   "', expected '" + typeName(paramTys[i]) + "'");
     }
   }
+  S.checkInoutArgs(method->getParamModes(), paramTys, node->getArguments(),
+                   node->getMethodName());
 
   node->setResolvedType(method->getReturnType());
   return method->getReturnType();
@@ -1786,28 +1794,8 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
 
 // -- Top-level
 
-bool Sema::rejectParamModes(ast::TranslationUnit *tu) {
-  bool ok = true;
-  auto check = [&](const ast::FuncDecl *fn) {
-    for (const ast::Param &p : fn->getParams())
-      if (p.Mode != ast::ParamMode::Value) {
-        error(fn->getLocation(), std::string("'") + ast::paramModeName(p.Mode) +
-                                     "' parameters are not supported yet");
-        ok = false;
-      }
-  };
-  for (auto *fns : {&tu->getFuncDecls(), &tu->getGenericFuncDecls()})
-    for (auto *fn : *fns)
-      check(fn);
-  for (auto *cds : {&tu->getClassDecls(), &tu->getGenericClassDecls()})
-    for (auto *cd : *cds)
-      for (auto *m : cd->getMethods())
-        check(m);
-  return ok;
-}
-
 bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
-  bool ok = rejectParamModes(node);
+  bool ok = rejectInoutParams(node);
 
   // Register enum types first so that class fields, parameters, and variable
   // declarations can reference them by name during the passes that follow.
@@ -1981,10 +1969,19 @@ Sema::VarKind Sema::varKind(std::string_view name) const {
 }
 
 bool Sema::checkReassignable(const std::string &name, ast::SourceLocation loc) {
-  if (varKind(name) != VarKind::Let)
-    return true;
-  error(loc, "'" + name + "' is declared with 'let' and cannot be reassigned");
-  return false;
+  switch (varKind(name)) {
+  case VarKind::Let:
+    error(loc,
+          "'" + name + "' is declared with 'let' and cannot be reassigned");
+    return false;
+  case VarKind::View:
+    error(loc, "cannot assign to 'view' parameter '" + name + "'");
+    return false;
+  case VarKind::Plain:
+  case VarKind::Inout:
+    break;
+  }
+  return true;
 }
 
 bool Sema::visitAssignStmt(ast::AssignStmt *node) {
@@ -2251,6 +2248,7 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
 
   // Register the function in the function table.
   declareFunction(node->getName(), retTy, paramTypes);
+  FunctionTable[node->getName()].Modes = ast::paramModes(node->getParams());
   return true;
 }
 
@@ -2274,6 +2272,7 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
   for (auto &p : node->getParams())
     paramTypes.push_back(resolveType(p.ParamType, node->getLocation(),
                                      "parameter '" + p.getName() + "'"));
+  bool modesOk = checkParamModeTypes(node, paramTypes);
 
   // Type-check the body in a new scope with params.
   auto *savedRetTy = CurrentReturnType;
@@ -2282,7 +2281,8 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
     ScopeGuard guard(*this);
     for (size_t i = 0; i < node->getParams().size(); ++i)
       CurrentScope->declare(node->getParams()[i].getName(), paramTypes[i]);
-    bool ok = true;
+    declareParamKinds(node);
+    bool ok = modesOk;
     for (auto *stmt : node->getBody()->getStatements())
       if (!visit(stmt))
         ok = false;

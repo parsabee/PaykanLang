@@ -33,7 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `view` and `inout` are reserved words: they start a parameter
   (`fn bump(inout n: int)`, docs/grammar.md §4) and are a syntax error
-  anywhere else.  Sema does not accept parameter modes yet.
+  anywhere else.  A `view` parameter (of type int, float, bool, char or an
+  enum) is a read-only copy: assigning to it is an error, and an override
+  keeps every parameter's mode.  `inout` parameters are checked but not
+  supported yet.
 - PIR: four address instructions, `local.addr`, `field.addr`, `ptr.load` and
   `ptr.store` (docs/pir.md §6), which `inout` parameters will lower to.  Only
   scalar (`i64`, `f64`, `bool`, `char`) slots have addresses.  A backend plugin

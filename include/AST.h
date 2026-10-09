@@ -321,6 +321,26 @@ struct Param {
   const std::string &getName() const { return *Name; }
 };
 
+/// The modes of a callee's parameters, with their names for diagnostics.
+/// Empty when every parameter is passed by value, as a callee's whose
+/// declaration is not at hand (a builtin) is.
+struct ParamModes {
+  std::vector<ParamMode> Modes;
+  std::vector<std::string> Names;
+
+  bool empty() const { return Modes.empty(); }
+  ParamMode mode(size_t i) const {
+    return i < Modes.size() ? Modes[i] : ParamMode::Value;
+  }
+  std::string name(size_t i) const {
+    return i < Names.size() ? Names[i] : std::string();
+  }
+  bool operator==(const ParamModes &) const = default;
+};
+
+/// The modes of @p params (empty when none has one).
+ParamModes paramModes(const std::vector<Param> &params);
+
 // Forward declaration for FuncDecl body.
 class CompoundStmt;
 
@@ -905,6 +925,7 @@ private:
   Type *ReturnType;
   std::vector<Type *> ParamTypes;
   uint8_t MethodFlags;
+  ParamModes Modes; // `inout n: int`
 
 public:
   MethodDecl(SourceLocation loc, const std::string &internedName, Type *retTy,
@@ -916,6 +937,8 @@ public:
   Type *getReturnType() const { return ReturnType; }
   const std::vector<Type *> &getParamTypes() const { return ParamTypes; }
   size_t getNumParams() const { return ParamTypes.size(); }
+  const ParamModes &getParamModes() const { return Modes; }
+  void setParamModes(ParamModes modes) { Modes = std::move(modes); }
 
   bool isPrivate() const { return MethodFlags & Private; }
   bool isVirtual() const { return !isPrivate(); }

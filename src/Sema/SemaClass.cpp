@@ -456,6 +456,8 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
     if (method->getName() != names::kMethodInit) {
       if (auto *super = ct->getSuperClass()) {
         if (auto *baseMethod = super->findMethod(method->getName())) {
+          if (!checkOverrideModes(method, baseMethod))
+            ok = false;
           const auto &baseParams = baseMethod->getParamTypes();
           bool sigMatches = typesEqual(baseMethod->getReturnType(), retTy) &&
                             baseParams.size() == paramTys.size();
@@ -478,6 +480,7 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
 
     auto *mdecl = Ctx.make<ast::MethodDecl>(
         method->getLocation(), method->getName(), retTy, std::move(paramTys));
+    mdecl->setParamModes(ast::paramModes(method->getParams()));
     ct->addMethod(mdecl);
   }
   PopulatedClasses.insert(cd->getName());
@@ -494,6 +497,8 @@ void Sema::declareConstructor(ast::ClassDecl *cd, ast::ClassType *ct) {
   assert(!lookupFunction(cd->getName()) &&
          "constructor would overwrite a registered function");
   declareFunction(cd->getName(), ct, ctorParams);
+  if (initDecl)
+    FunctionTable[cd->getName()].Modes = initDecl->getParamModes();
 }
 
 bool Sema::checkClassBodies() {
@@ -598,6 +603,8 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
       // is erroneous and its bodies are skipped); poisoned if it ever is.
       paramTys.push_back(pty ? pty : Ctx.getPoisonTy());
     }
+    if (!checkParamModeTypes(method, paramTys))
+      ok = false;
 
     auto *savedRetTy = CurrentReturnType;
     CurrentReturnType = retTy;
@@ -606,6 +613,7 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
       CurrentScope->declare(names::kSelf, ct);
       for (size_t i = 0; i < method->getParams().size(); ++i)
         CurrentScope->declare(method->getParams()[i].getName(), paramTys[i]);
+      declareParamKinds(method);
 
       bool bodyOk = true;
       for (auto *stmt : method->getBody()->getStatements())
@@ -736,6 +744,15 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
       ok = false;
       continue;
     }
+    bool modesOk = true;
+    for (auto *m : cd->getMethods())
+      modesOk &= checkTemplateParamModes(m, cd->getTypeParams());
+    if (!modesOk) {
+      // Its uses are follow-ons of the reported error.
+      ErroneousNames.insert(cd->getName());
+      ok = false;
+      continue;
+    }
     ClassTemplates[cd->getName()] = cd;
   }
 
@@ -753,6 +770,11 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
     }
     if (!checkTypeParams(fn->getTypeParams(), "generic function", fn->getName(),
                          fn->getLocation())) {
+      ok = false;
+      continue;
+    }
+    if (!checkTemplateParamModes(fn, fn->getTypeParams())) {
+      ErroneousNames.insert(fn->getName()); // as for a generic class
       ok = false;
       continue;
     }
@@ -799,7 +821,9 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
                                        ast::SourceLocation loc) {
   auto tIt = ClassTemplates.find(name);
   if (tIt == ClassTemplates.end()) {
-    if (name.find(names::kQualSep) != std::string::npos)
+    if (ErroneousNames.count(name))
+      ++SuppressedFollowOns; // a template rejected at its declaration
+    else if (name.find(names::kQualSep) != std::string::npos)
       errorImportedTemplate(loc, name,
                             "generic types cannot be imported yet: '" + name +
                                 "<...>' names a generic class of another "
@@ -918,7 +942,9 @@ std::string Sema::instantiateFunction(const std::string &name,
                                       ast::SourceLocation loc) {
   auto tIt = FuncTemplates.find(name);
   if (tIt == FuncTemplates.end()) {
-    if (name.find(names::kQualSep) != std::string::npos)
+    if (ErroneousNames.count(name))
+      ++SuppressedFollowOns; // a template rejected at its declaration
+    else if (name.find(names::kQualSep) != std::string::npos)
       errorImportedTemplate(loc, name,
                             "generic functions cannot be imported yet: '" +
                                 name +
@@ -1179,6 +1205,8 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
   // Explicit type arguments on something that is not a template.
   if (lookupFunction(callee) || Ctx.lookupClassType(callee))
     error(loc, "'" + callee + "' is not generic and takes no type arguments");
+  else if (ErroneousNames.count(callee))
+    ++SuppressedFollowOns; // a template rejected at its declaration
   else if (!isFailedImportUse(callee))
     error(loc, "call to undeclared generic function or class '" + callee + "'");
   return false;
