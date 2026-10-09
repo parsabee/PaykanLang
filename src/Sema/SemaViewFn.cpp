@@ -5,10 +5,16 @@
 // may change `self` unless it is a `view fn`, and only a `view fn` may be
 // called on a `view` parameter (of any type) or on `self` inside a `view
 // fn`.  Nothing reached through one of those may be assigned or passed to an
-// `inout` parameter either.  While classes are references the check follows
-// the name: a copy of the reference in another variable can change the
-// object.  A `let` local only cannot be reassigned: what it holds can change,
-// but the variable itself is not passed to `inout`.
+// `inout` parameter either.
+//
+// While objects, strings and arrays are references, a copy of one would
+// change the original, so a `view` stays one: it can only be passed on to a
+// `view` parameter, a `view` that shares what it holds is never stored, a
+// `view` parameter is never returned, and a `match` arm's name for a `view`
+// is one too.  A method may return part of `self`, which its caller does not
+// see as a `view` yet (#216's `-> view T`).  A `let` local only cannot be
+// reassigned: what it holds can change, but the variable itself is not passed
+// to `inout`.
 
 #include "Names.h"
 #include "Sema.h"
@@ -62,9 +68,88 @@ std::string Sema::frozenPlace(const ast::Expr *e) {
   }
   // A `let` local is not here: only the variable is fixed, not what it holds
   // (`p.x = 1`, `p.tick()`), and checkInoutArgs keeps it from `inout`.
-  if (varKind(name) == VarKind::View)
+  switch (varKind(name)) {
+  case VarKind::View:
     return "'" + name + "' is a 'view' parameter";
+  case VarKind::ViewBinding:
+    return "'" + name + "' is bound to a 'view'";
+  case VarKind::Plain:
+  case VarKind::Let:
+  case VarKind::Inout:
+    break;
+  }
   return "";
+}
+
+bool Sema::sharesStorage(const ast::Type *ty) {
+  if (!ty || ast::isa<ast::PoisonType>(ty) || ast::isa<ast::EnumType>(ty) ||
+      ast::isa<ast::BuiltinType>(ty))
+    return false;
+  if (const auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
+    return sharesStorage(ot->getInnerType());
+  return true;
+}
+
+std::string Sema::viewOf(const ast::Expr *e) {
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e)) {
+    std::string why = viewOf(te->getTrueExpr());
+    return why.empty() ? viewOf(te->getFalseExpr()) : why;
+  }
+  return frozenPlace(e);
+}
+
+bool Sema::checkViewArgs(const ast::ParamModes &modes,
+                         const std::vector<ast::Expr *> &args,
+                         const std::string &callee) {
+  bool ok = true;
+  for (size_t i = 0; i < args.size(); ++i) {
+    // An `inout` parameter takes no `view` either (checkInoutArgs).  An
+    // argument of the wrong type was reported by the call's own check.
+    if (modes.mode(i) != ast::ParamMode::Value || !args[i]->getResolvedType())
+      continue;
+    std::string msg = viewOf(args[i]);
+    if (msg.empty())
+      continue;
+    msg += "; it can only be passed to a 'view' parameter, and parameter ";
+    msg += std::to_string(i + 1);
+    msg += " of '";
+    msg += callee;
+    msg += "' is not one";
+    error(args[i]->getLocation(), msg);
+    ok = false;
+  }
+  return ok;
+}
+
+bool Sema::checkViewNotStored(const ast::Expr *e, const ast::Type *ty) {
+  // A value type is copied, and the copy is the holder's own.
+  if (!sharesStorage(ty))
+    return true;
+  std::string msg = viewOf(e);
+  if (msg.empty())
+    return true;
+  msg += "; it cannot be stored, only read or passed to a 'view' parameter";
+  error(e->getLocation(), msg);
+  return false;
+}
+
+bool Sema::checkViewNotReturned(const ast::Expr *e, const ast::Type *ty) {
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e))
+    return checkViewNotReturned(te->getTrueExpr(), ty) &&
+           checkViewNotReturned(te->getFalseExpr(), ty);
+  if (!sharesStorage(ty))
+    return true;
+  // Part of `self` may be returned by any method; a `view` parameter belongs
+  // to the caller and stays there.
+  const ast::Identifier *root = rootVariable(e);
+  if (!root || root->getName() == names::kSelf)
+    return true;
+  std::string msg = frozenPlace(e);
+  if (msg.empty())
+    return true;
+  msg += "; it cannot be returned";
+  error(e->getLocation(), msg);
+  return false;
 }
 
 bool Sema::checkChangeable(const ast::Expr *e, const std::string &what,

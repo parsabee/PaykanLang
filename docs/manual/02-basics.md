@@ -351,8 +351,8 @@ A parameter of any type can say how it is passed. An `inout` parameter is the ca
 variable (or a field of an object): the function changes it in place, and assigning an object
 to it gives the caller that object. A `view` parameter is read-only: the function cannot
 assign to it, nor change the object, string or array it holds (only
-[`view fn` methods](04-classes.md#methods-that-only-read-view-fn) can be called on it). The
-call looks the same either way:
+[`view fn` methods](04-classes.md#methods-that-only-read-view-fn) can be called on it), and
+it can only be passed on to other `view` parameters. The call looks the same either way:
 
 ```pkn
 fn addTax(price: inout float, rate: view float) {

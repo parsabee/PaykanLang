@@ -149,8 +149,9 @@ fn main() -> int {
 
 // The warning: a method that never changes `self` and is not a `view fn`.  A
 // method calling only such methods on `self` gets it too, in the same
-// compile; a method with an override that changes `self` does not, and a
-// generic class's method gets one warning, not one per instance.
+// compile; a method with an override that changes `self` does not, nor one
+// passing part of `self` to a parameter that is not `view`, and a generic
+// class's method gets one warning, not one per instance.
 TEST(ViewFn, WarnsWhenSelfNeverChanges) {
   auto r = semaCheck(R"(class Shape {
   w: int;
@@ -160,7 +161,7 @@ TEST(ViewFn, WarnsWhenSelfNeverChanges) {
   fn grow() { self.w = self.w + 1; }
   fn grown() -> int { self.grow(); return self.w; }
   fn hook() -> int { return 0; }
-  view fn done() -> int { return self.w; }
+  view fn done() -> int { return self.w; } fn sized() -> int { return twiceOf(self.w); }
 }
 class Square : Shape {
   fn __init__() { __super__(); }
@@ -172,6 +173,7 @@ fn main() -> int {
   c = Box<Str>("a");
   return Shape().twice() + b.get() + c.get().len();
 }
+fn twiceOf(n: int) -> int { return 2 * n; }
 )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
   const char *kSuffix = "never changes 'self': make it a 'view fn'";
@@ -189,7 +191,7 @@ fn main() -> int {
             r.Diagnostics.rfind("'get' never"))
       << r.Diagnostics;
   for (const char *quiet :
-       {"'grow'", "'grown'", "'hook'", "'done'", "'__init__'"})
+       {"'grow'", "'grown'", "'hook'", "'done'", "'sized'", "'__init__'"})
     EXPECT_EQ(r.Diagnostics.find(std::string("warning: ") + quiet),
               std::string::npos)
         << quiet << "\n"

@@ -93,7 +93,7 @@ fn f(o: view int?, xs: inout int[], t: view (int, int), b: view Obj) { }
 fn reset(c: inout Counter, s: inout Str) { c = Counter(s); s = "new"; }
 fn first<T>(x: view T) -> T { return x; }
 fn swap<T>(a: inout T, b: inout T) { t = a; a = b; b = t; }
-class Box<T> { v: T; fn __init__(v: view T) { self.v = v; } }
+class Box<T> { n: int; fn __init__(v: view T) { self.n = 1; } }
 fn main() -> int {
   c = Counter("ab");
   s = "x";
@@ -106,7 +106,7 @@ fn main() -> int {
   i = 1;
   j = 2;
   swap(i, j);
-  return first(1) + first<int>(2) + Box<Str>("v").v.len() + c.put(c);
+  return first(1) + first<int>(2) + Box<Str>("v").n + c.put(c);
 })");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -147,6 +147,84 @@ fn main() -> int { return 0; })");
           "'inout' parameter 'c'",
           ":16:8: error: 'c' is a 'view' parameter; it cannot be passed to "
           "'inout' parameter 'n'"});
+}
+
+// A `view` stays one: it can only be passed on to a `view` parameter,
+// whatever its type, and one that shares what it holds (an object, string,
+// array, tuple or optional) is never stored -- assigned, put in an array or
+// tuple, pushed -- nor returned.  A `match` arm's name for it is a `view`.
+// `self` in a `view fn` is one too.  A value type is copied when it is
+// stored, and builtins such as `println` and `equals` only read.
+TEST(ParamMode, ViewOnlyPassesToView) {
+  auto r = semaCheck(R"(class Counter {
+  n: int;
+  fn __init__() { self.n = 0; }
+  fn tick() { self.n = self.n + 1; }
+  view fn count() -> int { return self.n; }
+  view fn show() { report(self); }
+}
+class Holder { c: Counter; fn __init__(c: view Counter) { self.c = c; } }
+fn report(c: Counter) { c.tick(); }
+fn look(c: view Counter) -> int { return c.count(); }
+fn bump(n: int) -> int { return n + 1; }
+fn pick(c: view Counter) -> Counter { return c; }
+fn uses(c: view Counter, n: view int, flag: view bool) -> int {
+  report(c);
+  d = c;
+  e: Counter = c;
+  xs = [c];
+  t = (c, 1);
+  ys: Counter[] = [];
+  ys.push(c);
+  h = Holder(c);
+  h.c = c;
+  f = if flag then c else Counter();
+  match c {
+    k: Counter { k.tick(); k = Counter(); }
+  }
+  bump(c.n);
+  bump(n);
+  println(c);
+  m = n;
+  ints: int[] = [];
+  ints.push(n);
+  c.equals(c);
+  return look(c) + bump(m) + bump(n + 1);
+}
+fn main() -> int { return 0; })");
+  const std::string kPass =
+      "it can only be passed to a 'view' parameter, and parameter 1 of ";
+  const std::string kStore =
+      "'c' is a 'view' parameter; it cannot be stored, only read or passed "
+      "to a 'view' parameter";
+  for (const std::string &diag :
+       {":6:27: error: 'self' is read-only in 'view fn show'; " + kPass +
+            "'report' is not one",
+        ":8:68: " + std::string("error: ") + kStore,
+        std::string(":12:46: error: 'c' is a 'view' parameter; it cannot be "
+                    "returned"),
+        ":14:10: error: 'c' is a 'view' parameter; " + kPass +
+            "'report' is not one",
+        ":15:7: error: " + kStore, ":16:16: error: " + kStore,
+        ":17:9: error: " + kStore, ":18:8: error: " + kStore,
+        ":20:11: error: " + kStore, ":22:9: error: " + kStore,
+        ":23:7: error: " + kStore,
+        std::string(":25:18: error: 'k' is bound to a 'view'; 'tick' is not a "
+                    "'view fn'"),
+        std::string(":25:28: error: cannot assign to 'k': it is bound to a "
+                    "'view'"),
+        ":27:8: error: 'c' is a 'view' parameter; " + kPass +
+            "'bump' is not one",
+        ":28:8: error: 'n' is a 'view' parameter; " + kPass +
+            "'bump' is not one"})
+    EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
+                                                           << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 15u) << r.Diagnostics;
+  // Passing on to a `view` parameter, copying a value type, and builtins.
+  for (const char *line :
+       {":21:", ":29:", ":30:", ":31:", ":32:", ":33:", ":34:"})
+    EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
+                                                           << r.Diagnostics;
 }
 
 // The arguments of an `inout` parameter of a class type: a variable or field

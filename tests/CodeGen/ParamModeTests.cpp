@@ -134,7 +134,8 @@ TEST(ParamMode, ViewParametersArePassedByValue) {
 }
 
 // A `view` parameter of an object, string, array or type parameter shares
-// what it was given, like a parameter without a mode, and reads it.
+// what it was given, like a parameter without a mode; it reads it and passes
+// it on to other `view` parameters.
 TEST(ParamMode, ViewParametersOfReferenceTypes) {
   LeakGuard guard;
   auto r = compileAndRun(R"(
@@ -148,19 +149,21 @@ TEST(ParamMode, ViewParametersOfReferenceTypes) {
     fn sum(c: view Counter, xs: view int[], s: view Str) -> int {
       return c.get() + xs.len() + s.len() + xs[0];
     }
-    fn same<T>(x: view T) -> T { return x; }
+    fn passOn(c: view Counter, xs: view int[]) -> int {
+      return sum(c, xs, "ab");
+    }
+    fn size<T>(xs: view T[]) -> int { return xs.len(); }
     fn main() -> int {
       c = Counter(30);
       c.tick();
-      d = same(c);
-      d.tick();
       println(Str(sum(c, [1, 2], "abc")) + " " + Str(sum(Fast(4), [5], "")) +
-              " " + same("s") + Str(same(c).get()));
+              " " + Str(passOn(c, [7])) + " " + Str(size(["a", "b"])) +
+              Str(size([c, c, c])));
       return 0;
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "38 10 s32\n");
+  EXPECT_EQ(r.StdOut, "37 10 41 23\n");
   guard.expectNoLeaks("view reference parameters");
 }
 

@@ -103,7 +103,10 @@ read-only in its body: through `self` it cannot
 - assign a field or an element (`self.n = 1`, `self.xs[0] = 1`);
 - call a method that is not a `view fn` (`self.tick()`, `self.xs.push(1)`,
   `self.child.tick()`);
-- pass `self`'s fields to an `inout` parameter (`bump(self.n)`).
+- pass `self`'s fields to an `inout` parameter (`bump(self.n)`);
+- pass `self` or its fields to a parameter that is not `view`, or store `self` or a
+  reference reached through it ([A `view` stays a
+  `view`](02-functions-and-calling.md#a-view-stays-a-view)).
 
 Each is an error that names the method: `'self' is read-only in 'view fn value'; 'tick' is
 not a 'view fn'`. Other objects can change as usual.

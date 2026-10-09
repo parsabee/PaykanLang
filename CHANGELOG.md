@@ -24,7 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parameters included).  The mode is written where the type goes: `fn bump(n: inout int)`,
   `fn scale(x: inout float, by: view float)`, `fn show(c: view Counter)`, called as
   `bump(k)`.  A `view` parameter is read-only, and so is what it holds: no field or element
-  write and only `view fn` methods through it.  An `inout` parameter is its caller's
+  write and only `view fn` methods through it.  A `view` stays one: it can only be passed
+  on to a `view` parameter (the builtins only read, `push` aside), one that shares what it
+  holds is never stored or returned, and a `match` arm's name for one is a `view` too; the
+  same holds for `self` in a `view fn`, which may still return part of `self`.  An `inout`
+  parameter is its caller's
   storage, passed by address so every write reaches the caller at once: a local variable,
   a parameter (an `inout` one passes its address on) or a field of an object (`obj.f`,
   `self.f`, `a.b.f`; by real address, never copied in and out, with the object kept alive

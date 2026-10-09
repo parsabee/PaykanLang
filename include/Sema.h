@@ -80,7 +80,8 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// What restricts a variable beyond its type: nothing, `let` (it cannot be
   /// reassigned), or a parameter mode: `view` (it cannot be changed) or
   /// `inout` (it is the caller's storage).
-  enum class VarKind : uint8_t { Plain, Let, View, Inout };
+  /// ViewBinding: a `match` arm's name for (part of) a `view`.
+  enum class VarKind : uint8_t { Plain, Let, View, ViewBinding, Inout };
 
   /// A single lexical scope. Each scope has its own local bindings and a
   /// pointer to its enclosing (parent) scope.
@@ -618,6 +619,29 @@ private:
   /// After every body is checked: warn about each method, with its
   /// overrides, that never changes `self` but is not a `view fn`.
   void warnMissingViewFns();
+
+  /// Whether a value of type @p ty shares what it holds when it is copied
+  /// (an object, string, array or tuple, or an optional of one), so that a
+  /// copy of a `view` of it could change it.
+  static bool sharesStorage(const ast::Type *ty);
+  /// Why @p e is a `view` (frozenPlace, or a conditional with such a
+  /// branch), as the start of a diagnostic; "" when it is not.
+  std::string viewOf(const ast::Expr *e);
+  /// A `view` can only be passed on to a `view` parameter: each of @p args
+  /// against the parameters' @p modes of a call of @p callee.
+  bool checkViewArgs(const ast::ParamModes &modes,
+                     const std::vector<ast::Expr *> &args,
+                     const std::string &callee);
+  /// @p e, of type @p ty, is being stored (assigned, put in an array or
+  /// tuple, pushed): not a `view` that shares what it holds.
+  bool checkViewNotStored(const ast::Expr *e, const ast::Type *ty);
+  /// @p e, of type @p ty, is being returned: not (part of) a `view`
+  /// parameter that shares what it holds.  A method may return part of
+  /// `self`, a `view fn` included.
+  bool checkViewNotReturned(const ast::Expr *e, const ast::Type *ty);
+  /// While a `match` arm binds a name: whether the subject is a `view`, so
+  /// that the name is one too.
+  bool MatchSubjectIsView = false;
 
   /// The arguments @p args of a call of @p callee whose parameters have the
   /// modes @p modes and the types @p paramTys: an `inout` parameter takes a

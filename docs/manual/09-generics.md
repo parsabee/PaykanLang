@@ -14,7 +14,7 @@ class Pair<A, B> {
   first: A;
   second: B;
   fn __init__(a: A, b: B) { self.first = a; self.second = b; }
-  view fn swap() -> Pair<B, A> { return Pair<B, A>(self.second, self.first); }
+  fn swap() -> Pair<B, A> { return Pair<B, A>(self.second, self.first); }
 }
 
 fn main() -> int {

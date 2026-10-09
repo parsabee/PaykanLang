@@ -91,9 +91,9 @@ passed to 'inout' parameter 'n'`). It is passed like a parameter without a mode,
 argument of its type will do: a literal, an expression, a `let` local, an object of a
 subclass.
 
-A `view` parameter of a value type is a copy, which may be stored or returned freely. One
-of an object, string, array, tuple or optional shares what the caller passed, but the
-function cannot change it through the parameter:
+A `view` parameter of a value type is a copy, which may be assigned to a variable or
+returned. One of an object, string, array, tuple or optional shares what the caller
+passed, but the function cannot change it through the parameter:
 
 - no assignment to a field or an element (`'c' is a 'view' parameter; cannot assign to
   its field 'n'`, `'xs' is a 'view' parameter; cannot assign to its elements`);
@@ -129,8 +129,27 @@ Output:
 ticks 1
 ```
 
-The check follows the parameter's name: another reference to the same object, such as a
-plain parameter it was also passed as, can still change it.
+#### A `view` stays a `view`
+
+A `view` can only be passed on to another `view` parameter, whatever its type, so no
+function it reaches can change it. With `fn report(c: Counter)`, `report(c)` is an error:
+`'c' is a 'view' parameter; it can only be passed to a 'view' parameter, and parameter 1 of
+'report' is not one`. The fix is to make that parameter `view` too. The builtin functions
+only read (`println(c)`, `Str(n)`), and so do the builtin methods, except `push`.
+
+A `view` of an object, string, array, tuple or optional shares what it holds, so it is
+never stored or returned, where another name could change it later. Assigning it to a
+variable, a field or an element, putting it in an array or tuple, `push` and `return` are
+errors: `'c' is a 'view' parameter; it cannot be stored, only read or passed to a 'view'
+parameter`, `'c' is a 'view' parameter; it cannot be returned`. A `view` of a value type is
+copied when it is assigned (`m = n`), and the copy is the variable's own.
+
+A `match` arm's name for a `view` is a `view` too: in `match c { k: Fast { k.tick(); } }`,
+`k.tick()` is an error, `'k' is bound to a 'view'; 'tick' is not a 'view fn'`.
+
+`self` in a `view fn` follows the same rules, except that a method may return part of
+`self`. Its caller does not yet see that result as a `view`; a `-> view T` result is
+planned for it.
 
 ### `inout`: the caller's storage
 
@@ -335,5 +354,6 @@ fn fib(n: int) -> int {
 | Non-void return without value | `return;` in non-void function |
 | Return type mismatch | Returned expression type ≠ declared return type |
 | Write to a `view` parameter | Assigning or destructuring into it, assigning to a field or element of what it holds, or calling a method on it that is not a `view fn` |
+| A `view` passed on or kept | Passing it to a parameter that is not `view`; storing or returning one that shares what it holds |
 | Bad `inout` argument | Not a variable or field, not exactly the parameter's type, `self`, a `let` local, something reached through a `view` parameter, an array element, a string's character, or the same place twice in one call |
 | Override changes a mode | An override that drops, adds or changes a parameter's `view`/`inout` |

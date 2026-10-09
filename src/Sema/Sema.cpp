@@ -588,8 +588,11 @@ bool Sema::checkBinderName(const std::string &name, ast::SourceLocation loc) {
 }
 
 bool Sema::bindArmName(ast::MatchArm *arm) {
-  if (checkBinderName(arm->getBinding(), arm->getLocation()))
+  if (checkBinderName(arm->getBinding(), arm->getLocation())) {
+    if (MatchSubjectIsView)
+      CurrentScope->Kinds[arm->getBinding()] = VarKind::ViewBinding;
     return true;
+  }
   // Its uses in the arm's body are follow-ons of the reported error.
   declarePoisoned(CurrentScope, arm->getBinding());
   return false;
@@ -894,9 +897,12 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
                       typeName(expectedParams[i]) + "'");
       }
     }
-    if (superInit && argTypes.size() == expectedParams.size())
+    if (superInit && argTypes.size() == expectedParams.size()) {
       S.checkInoutArgs(superInit->getParamModes(), expectedParams,
                        node->getArguments(), names::kMethodSuper);
+      S.checkViewArgs(superInit->getParamModes(), node->getArguments(),
+                      names::kMethodSuper);
+    }
     S.CurrentClassCtx->SuperInitCalled = true;
     return S.Ctx.getVoidTy();
   }
@@ -983,6 +989,7 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   }
   S.checkInoutArgs(sig->Modes, sig->ParamTypes, node->getArguments(),
                    node->getCalleeName());
+  S.checkViewArgs(sig->Modes, node->getArguments(), node->getCalleeName());
 
   node->setResolvedType(sig->ReturnType);
   return sig->ReturnType;
@@ -1070,6 +1077,16 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   }
   S.checkInoutArgs(method->getParamModes(), paramTys, node->getArguments(),
                    node->getMethodName());
+  // A builtin method reads its arguments, but `push` keeps one; `equals`,
+  // like `==`, only compares.
+  if (ct->isBuiltin() || ast::isa<ast::ArrayType>(recvTy)) {
+    if (node->getMethodName() == names::kPush && node->getNumArguments() == 1)
+      S.checkViewNotStored(node->getArguments()[0],
+                           node->getArguments()[0]->getResolvedType());
+  } else if (node->getMethodName() != names::kMethodEquals) {
+    S.checkViewArgs(method->getParamModes(), node->getArguments(),
+                    node->getMethodName());
+  }
 
   node->setResolvedType(method->getReturnType());
   return method->getReturnType();
@@ -1146,6 +1163,7 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
     auto *ty = visitExpecting(elem, expectedElem);
     if (!ty)
       return nullptr;
+    S.checkViewNotStored(elem, ty);
     elemTys.push_back(ty);
   }
   // Elements that disagree but all fit the slot's element type (`int` and
@@ -1363,6 +1381,7 @@ Sema::ExprChecker::visitTupleLiteralExpr(ast::TupleLiteralExpr *node) {
       ok = false;
       continue;
     }
+    S.checkViewNotStored(elem, ty);
     // An empty array literal has no element type of its own and nothing
     // inside a tuple literal can supply one (unlike an annotated variable),
     // so codegen could not pick the right array representation.
@@ -1469,7 +1488,10 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
   // The lowering extracts the elements from this resolved type.
   node->getValue()->setResolvedType(tt);
 
+  // Each element is stored in its target.
   bool ok = true;
+  for (size_t i = 0; i < tt->getArity() && ok; ++i)
+    ok = checkViewNotStored(node->getValue(), tt->getElementType(i));
   StringSet seen;
   for (size_t i = 0; i < node->getNumTargets(); ++i) {
     const auto &target = node->getTargets()[i];
@@ -1572,6 +1594,14 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
   // checkConversion handles them (#64).
   declareFunction(names::kString, StrTy, {StrTy}, true);
   declareFunction(names::kOpen, Ctx.getObjTy(), {StrTy, StrTy}, true);
+  // They only read their arguments, which are `view` parameters, so a `view`
+  // can be printed (checkViewArgs).
+  for (const char *fn : {names::kPrint, names::kPrintln, names::kErrPrint,
+                         names::kErrPrintln, names::kString, names::kOpen}) {
+    FunctionSig &sig = FunctionTable[fn];
+    sig.Modes.Modes.assign(sig.ParamTypes.size(), ast::ParamMode::View);
+    sig.Modes.Names.assign(sig.ParamTypes.size(), "value");
+  }
 
   // Process imports before local declarations.
   StringSet localImportStack, localFailedModules;
@@ -1983,6 +2013,9 @@ bool Sema::checkReassignable(const std::string &name, ast::SourceLocation loc) {
   case VarKind::View:
     error(loc, "cannot assign to 'view' parameter '" + name + "'");
     return false;
+  case VarKind::ViewBinding:
+    error(loc, "cannot assign to '" + name + "': it is bound to a 'view'");
+    return false;
   case VarKind::Plain:
   case VarKind::Inout:
     break;
@@ -2011,6 +2044,8 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   // Guard: the target name must not shadow a type or reserved name.
   if (!checkBinderName(varName, node->getLocation()))
     return false;
+  // The variable is still declared after this error.
+  const bool viewOk = checkViewNotStored(node->getValue(), valTy);
 
   // Look up the variable in all enclosing scopes.
   auto *owner = CurrentScope->findOwner(varName);
@@ -2021,7 +2056,7 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
       return false;
     }
     CurrentScope->set(varName, valTy);
-    return true;
+    return viewOk;
   }
 
   if (!checkReassignable(varName, node->getLocation()))
@@ -2034,7 +2069,7 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
     if (diagnoseEmptyArrayLiteral(node->getLocation(), nullptr, valTy))
       return false;
     owner->set(varName, valTy);
-    return true;
+    return viewOk;
   }
 
   if (diagnoseEmptyArrayLiteral(node->getLocation(), varTy, valTy))
@@ -2049,7 +2084,7 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
     return false;
   }
 
-  return true;
+  return viewOk;
 }
 
 bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
@@ -2067,7 +2102,7 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
                   typeName(CurrentReturnType) + "'");
       return false;
     }
-    return true;
+    return checkViewNotReturned(node->getReturnValue(), valTy);
   }
   // void return
   if (CurrentReturnType && CurrentReturnType != Ctx.getVoidTy()) {
@@ -2333,6 +2368,7 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   }
 
   // Check the initializer type.
+  bool viewOk = true;
   if (node->getInitExpr()) {
     unsigned errorsBefore = Diags.getErrorCount() + SuppressedFollowOns;
     auto *initTy = resolveExprType(node->getInitExpr(), declTy);
@@ -2351,6 +2387,8 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
       return false;
     }
 
+    // The variable is still declared after this error.
+    viewOk = checkViewNotStored(node->getInitExpr(), initTy);
     if (declTy) {
       if (diagnoseEmptyArrayLiteral(node->getLocation(), declTy, initTy)) {
         CurrentScope->set(node->getName(), declTy);
@@ -2387,7 +2425,7 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   if (!node->getType())
     node->setType(declTy);
   CurrentScope->declare(node->getName(), declTy);
-  return true;
+  return viewOk;
 }
 
 bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
@@ -2450,7 +2488,7 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
     return false;
   }
 
-  return true;
+  return checkViewNotStored(node->getValue(), valTy);
 }
 
 bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
@@ -2487,7 +2525,7 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
                                      typeName(at->getElementType()) + "'");
     return false;
   }
-  return true;
+  return checkViewNotStored(node->getValue(), valTy);
 }
 
 bool Sema::visitImportDecl(ast::ImportDecl *) {
@@ -2618,6 +2656,15 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
   auto *subjectTy = resolveExprType(node->getSubject());
   if (!subjectTy)
     return false;
+  // An arm's name for a `view` that shares what it holds is a `view` too,
+  // for this match only (a nested one decides its own).
+  struct RestoreView {
+    bool &Flag;
+    bool Outer;
+    ~RestoreView() { Flag = Outer; }
+  } restoreView{MatchSubjectIsView, MatchSubjectIsView};
+  MatchSubjectIsView =
+      sharesStorage(subjectTy) && !viewOf(node->getSubject()).empty();
   // Record the subject type so the lowering can pick the right form (in
   // particular, distinguish an enum subject from a class subject).
   node->getSubject()->setResolvedType(subjectTy);
