@@ -70,7 +70,7 @@ inline Interface sampleInterface() {
   i.Mods.push_back({"geometry::vec", false, hashOf("vec iface"), {}});
   i.Mods.push_back({"::io", true, hashOf("io iface"), {}});
   i.Functions.push_back({"area", "float", {"Shape"}, {}});
-  // The constructor's and __init__'s second parameter is `view h: int`.
+  // The constructor's and __init__'s second parameter is `h: view int`.
   ModeRecs viewH{{kModeValue, kModeView}, {"w", "h"}};
   i.Functions.push_back({"Shape", "Shape", {"int", "int"}, viewH});
   ClassRec shape;

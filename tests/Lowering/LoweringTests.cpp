@@ -238,8 +238,8 @@ TEST(Lowering, UserCallRetainsAVariableArgument) {
 // own `inout` parameter on, and a `view` parameter is an ordinary value.
 TEST(Lowering, InoutParameterIsAPointer) {
   auto l = lower(R"(
-    fn bump(inout n: int, view by: int) { n = n + by; }
-    fn twice(inout n: int) { bump(n, 1); bump(n, 1); }
+    fn bump(n: inout int, by: view int) { n = n + by; }
+    fn twice(n: inout int) { bump(n, 1); bump(n, 1); }
     fn main() -> int {
       k = 1;
       twice(k);
@@ -259,6 +259,36 @@ TEST(Lowering, InoutParameterIsAPointer) {
   std::string m = function(l.Text, "main");
   EXPECT_NE(m.find(" = local.addr %k"), std::string::npos) << m;
   EXPECT_EQ(count(m, "ptr."), 0u) << m;
+}
+
+// A field is passed by its address.  A variable's object stays alive for the
+// call on its own; any other receiver is retained for the call and released
+// right after it.
+TEST(Lowering, InoutFieldIsPassedByAddress) {
+  auto l = lower(R"(
+    class Inner { n: int; fn __init__() { self.n = 0; } }
+    class Holder { inner: Inner; fn __init__() { self.inner = Inner(); } }
+    fn bump(n: inout int) { n = n + 1; }
+    fn main() -> int {
+      i = Inner();
+      bump(i.n);
+      h = Holder();
+      bump(h.inner.n);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string m = function(l.Text, "main");
+  EXPECT_EQ(count(m, " = field.addr "), 2u) << m;
+  EXPECT_EQ(count(m, ", Inner.n"), 2u) << m;
+  size_t first = m.find("call @bump(");
+  size_t second = m.find("call @bump(", first + 1);
+  ASSERT_NE(second, std::string::npos) << m;
+  // `i` needs no retain; the chain's Inner is retained for its call and
+  // released after it.
+  EXPECT_EQ(count(m.substr(0, first), "retain "), 0u) << m;
+  EXPECT_EQ(count(m.substr(first, second - first), "retain "), 1u) << m;
+  EXPECT_NE(m.find("release ", second), std::string::npos) << m;
 }
 
 TEST(Lowering, FreshCallResultIsStoredWithoutRetain) {

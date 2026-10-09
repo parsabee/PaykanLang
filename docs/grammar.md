@@ -146,7 +146,7 @@ funcDecl    ::= "fn" IDENT typeParams? "(" paramList? ")"
 nativeFuncDecl ::= "native" "fn" IDENT "(" paramList? ")"
                    ( "->" typeAnnotation )? "=" STRING ";"   -- the C symbol
 paramList   ::= param ( "," param )*
-param       ::= ( "view" | "inout" )? IDENT ":" typeAnnotation
+param       ::= IDENT ":" ( "view" | "inout" )? typeAnnotation
 
 varDecl     ::= IDENT ":" typeAnnotation
 ```
@@ -156,11 +156,12 @@ A class or function with `typeParams` is generic (a template that Sema
 instantiates); the superclass of a generic class is a plain class name.
 Methods are `funcDecl`s inside a class body.
 
-A parameter may start with its mode, `view` or `inout`
+A parameter's type may start with its mode, `view` or `inout`
 ([language/02-functions-and-calling.md](language/02-functions-and-calling.md)):
-`fn bump(inout n: int)`, `fn __init__(view start: int)`.  The keywords are
+`fn bump(n: inout int)`, `fn __init__(start: view int)`.  The keywords are
 reserved and appear nowhere else: `view` or `inout` in any other position (a
-statement, a type, a field, after the parameter's name) is a syntax error.
+statement, a local's or a field's type, before the parameter's name) is a
+syntax error; before the name, the error shows the parameter rewritten.
 The AST records the mode on the parameter (`Param::Mode`); whether it is
 allowed there (the parameter's type, an override) is Sema's job.
 

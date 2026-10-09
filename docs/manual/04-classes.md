@@ -156,7 +156,7 @@ Things to know about inheritance:
   base class whose methods are meant to be overridden simply provides a default body, as
   `Animal.sound` does.
 - An override must have exactly the same parameter and return types as the method it
-  overrides.
+  overrides, and the same parameter modes (`view`, `inout`, [Basics](02-basics.md#functions)).
 - `__super__(...)` can only be called in `__init__`. An overriding method cannot call the
   base class's version of itself, so put shared logic in a separate method (like `speak`
   above) or a free function.

@@ -3,14 +3,30 @@
 // The rules of `view` and `inout` parameters
 // (docs/language/02-functions-and-calling.md, "Parameter modes"): the types
 // a mode applies to, overrides, and the arguments an `inout` parameter
-// takes.  Assignments to a `view` parameter are checked with `let` locals'
-// (Sema::checkReassignable).
+// takes, none of them twice in one call.  Assignments to a `view` parameter
+// are checked with `let` locals' (Sema::checkReassignable).
 
 #include "Names.h"
 #include "Sema.h"
 
 namespace paykan {
 namespace sema {
+
+namespace {
+
+/// The storage @p e names when it is a variable or a chain of fields on one
+/// (`k`, `self.n`, `a.b.n`); "" for anything else.
+std::string placePath(const ast::Expr *e) {
+  if (const auto *id = ast::dyn_cast<ast::Identifier>(e))
+    return id->getName();
+  const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e);
+  if (!ma)
+    return "";
+  std::string base = placePath(ma->getReceiver());
+  return base.empty() ? "" : base + "." + ma->getFieldName();
+}
+
+} // namespace
 
 bool Sema::isValueType(const ast::Type *ty) {
   if (ast::isa<ast::EnumType>(ty))
@@ -90,6 +106,11 @@ bool Sema::checkInoutArgs(const ast::ParamModes &modes,
                           const std::vector<ast::Expr *> &args,
                           const std::string &callee) {
   bool ok = true;
+  // Exclusivity: each place passed to an `inout` parameter of the call, and
+  // its parameter.  The same variable, or the same chain of fields on one,
+  // twice is an error; different chains that might reach the same object at
+  // run time (`a.n` and `b.n`) are not checked.
+  StringMap<size_t> places;
   for (size_t i = 0; i < args.size() && i < paramTys.size(); ++i) {
     ast::Expr *arg = args[i];
     ast::Type *argTy = arg->getResolvedType();
@@ -109,8 +130,6 @@ bool Sema::checkInoutArgs(const ast::ParamModes &modes,
     } else if (!id && !ast::isa<ast::MemberAccessExpr>(arg)) {
       msg = argN + " must be a variable or a field: parameter '" +
             modes.name(i) + "' is 'inout'";
-    } else if (!id) {
-      msg = "a field cannot be passed to " + param + " yet";
     } else if (!typesEqual(argTy, paramTys[i])) {
       // The callee reads and writes the storage as the parameter's type, so
       // no conversion (int -> float) can happen on the way.
@@ -122,6 +141,11 @@ bool Sema::checkInoutArgs(const ast::ParamModes &modes,
     } else if (id && varKind(id->getName()) == VarKind::Let) {
       msg = "'" + id->getName() +
             "' is declared with 'let' and cannot be passed to " + param;
+    } else if (std::string path = placePath(arg); !path.empty()) {
+      auto [it, first] = places.try_emplace(path, i);
+      if (!first)
+        msg = "'" + path + "' is passed to two 'inout' parameters ('" +
+              modes.name(it->second) + "' and '" + modes.name(i) + "')";
     }
     if (!msg.empty()) {
       error(arg->getLocation(), msg);

@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `view` and `inout` parameters (docs/language/02-functions-and-calling.md, "Parameter
+  modes"), on functions, methods and constructors, for `int`, `float`, `bool`, `char` and
+  enum parameters.  The mode is written where the type goes: `fn bump(n: inout int)`,
+  `fn scale(x: inout float, by: view float)`, called as `bump(k)`.  A `view` parameter is
+  a read-only copy.  An `inout` parameter is its caller's storage, passed by address so
+  every write reaches the caller at once: a local variable, a parameter (an `inout` one
+  passes its address on) or a field of an object (`obj.f`, `self.f`, `a.b.f`; by real
+  address, never copied in and out, with the object kept alive for the call), of exactly
+  the parameter's type.  A literal or other expression, a `view` parameter, a `let` local,
+  an array element (not yet) or a string's character is an error, and so is the same
+  variable or field path passed to two `inout` parameters of one call.  A mode does not
+  apply to a type parameter yet; an override keeps every parameter's mode; modes are part
+  of a module's interface.  `view` and `inout` are reserved words, a syntax error anywhere
+  but before a parameter's type; written before the name (`inout n: int`), the error shows
+  the fix.  In the AST interchange format a parameter carries `(qual view)` or
+  `(qual inout)`.  `samples/codegen/47_inout_view.pkn` shows them.
+
 - `let` local declarations: `let n = 3;` and `let s: Str = "a";` declare a variable
   that cannot be reassigned (`'n' is declared with 'let' and cannot be reassigned`),
   neither by assignment nor by destructuring.  `let` needs an initializer and applies to
@@ -37,21 +54,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `view` and `inout` are reserved words: they start a parameter
-  (`fn bump(inout n: int)`, docs/grammar.md §4) and are a syntax error
-  anywhere else.  A `view` parameter (of type int, float, bool, char or an
-  enum) is a read-only copy: assigning to it is an error, and an override
-  keeps every parameter's mode.  An `inout` parameter is its caller's
-  variable, passed by address (PIR `local.addr`): the argument is a local
-  variable or a parameter of exactly its type.  A field cannot be passed to
-  one yet.
-- `.pkm` interface format 1.1: a function's, a method's and a constructor's
-  parameter modes (`view`, `inout`) are part of a module's interface, so calls
-  and overrides in another module are checked against them, whether the module
-  is imported from source, from the cache or from a prebuilt file.  An older
-  `paykan` rejects (prebuilt) or rebuilds (cache) a 1.1 file.
+- `.pkm` interfaces carry a function's, a method's and a constructor's
+  parameter modes (`view`, `inout`), so calls and overrides in another module
+  are checked against them, whether the module is imported from source, from
+  the cache or from a prebuilt file.
 - PIR: four address instructions, `local.addr`, `field.addr`, `ptr.load` and
-  `ptr.store` (docs/pir.md §6), which `inout` parameters will lower to.  Only
+  `ptr.store` (docs/pir.md §6), which `inout` parameters lower to.  Only
   scalar (`i64`, `f64`, `bool`, `char`) slots have addresses.  A backend plugin
   must handle them.
 

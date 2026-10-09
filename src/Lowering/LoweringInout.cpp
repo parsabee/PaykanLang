@@ -8,10 +8,13 @@
 // the address of its caller's storage.  The callee keeps the address in the
 // parameter's local and reads and writes through it (ptr.load / ptr.store),
 // so every write reaches the caller at once.  A caller passes a variable's
-// `local.addr`, or, for one of its own `inout` parameters, the address it
-// was given.  Sema has checked that each argument is such a place, of
-// exactly the parameter's type.  A `view` parameter is passed by value like
-// any other.
+// `local.addr`, for one of its own `inout` parameters the address it was
+// given, and for a field of an object the field's real address
+// (`field.addr`, never a copy).  Objects do not move, so a field's address
+// is valid as long as its object lives, and the caller keeps the object
+// alive for the call.  Sema has checked that each argument is such a place,
+// of exactly the parameter's type, and that no place is passed twice.  A
+// `view` parameter is passed by value like any other.
 
 #include "LoweringInternal.h"
 
@@ -63,16 +66,48 @@ bool ModuleLowering::storeInout(const std::string &name, pir::LocalId local,
   return true;
 }
 
-Val ModuleLowering::emitInoutArg(ast::Expr *arg) {
+Val ModuleLowering::emitInoutArg(ast::Expr *arg, std::vector<Val> &keep) {
+  if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(arg)) {
+    ast::Expr *recvExpr = ma->getReceiver();
+    ast::ClassType *ct = getExprClassType(recvExpr);
+    if (!ct) {
+      reportInternalError("an 'inout' field of a non-class receiver");
+      return Val();
+    }
+    Val obj;
+    if (ast::isa<ast::Identifier>(recvExpr)) {
+      // A variable, or `self`: it holds the object for the whole call (the
+      // callee cannot reassign the caller's variables).
+      obj = emitExpr(recvExpr);
+    } else {
+      // Anything else (a chain `a.b.f`, a call, an element) may lose its
+      // object during the call: the caller keeps a reference of its own.
+      Val box = emitAsShared(recvExpr);
+      if (!box)
+        return Val();
+      keep.push_back(box);
+      obj = emitSharedGet(box, "inout.obj");
+    }
+    if (!obj)
+      return Val();
+    getOrCreateClass(ct);
+    return B.fieldAddr(obj, ct->getName(), ma->getFieldName(),
+                       ma->getFieldName() + ".addr");
+  }
   auto *id = ast::dyn_cast<ast::Identifier>(arg);
   if (!id || !CurrentScope->hasLocal(id->getName())) {
-    reportInternalError("an 'inout' argument is not a variable");
+    reportInternalError("an 'inout' argument is not a variable or a field");
     return Val();
   }
   pir::LocalId local = CurrentScope->lookup(id->getName());
   if (CurrentScope->inoutType(id->getName()) != Type::Void)
     return B.load(local, id->getName() + ".addr"); // passed on
   return B.localAddr(local, id->getName() + ".addr");
+}
+
+void ModuleLowering::releaseAfterCall(const std::vector<Val> &keep) {
+  for (const Val &box : keep)
+    emitRelease(box);
 }
 
 bool ModuleLowering::checkImportedSlot(ast::ClassType *ct, uint32_t slot,

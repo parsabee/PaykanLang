@@ -54,9 +54,9 @@ TEST(Native, OtherTypesCannotCross) {
 
 TEST(Native, ParametersCannotHaveModes) {
   for (const char *decl : {
-           "native fn f(view n: int) -> int = \"pk_f\";",
-           "native fn f(view s: Str) -> int = \"pk_f\";",
-           "native fn f(inout n: int) = \"pk_f\";",
+           "native fn f(n: view int) -> int = \"pk_f\";",
+           "native fn f(s: view Str) -> int = \"pk_f\";",
+           "native fn f(n: inout int) = \"pk_f\";",
        }) {
     auto r = semaCheck(std::string(decl) + "\nfn main() -> int { return 0; }");
     EXPECT_FALSE(r.Ok) << decl;
