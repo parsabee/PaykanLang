@@ -117,6 +117,7 @@ add_executable(codegen_tests
     CodeGen/LiteralObjectTests.cpp
     CodeGen/RuntimeNameTests.cpp
     CodeGen/HarnessTests.cpp
+    CodeGen/ParamModeTests.cpp
 )
 target_include_directories(codegen_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}

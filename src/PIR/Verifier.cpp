@@ -38,6 +38,10 @@ std::string sigStr(const Signature &sig) {
 }
 
 bool isNumeric(Type t) { return t == Type::I64 || t == Type::F64; }
+/// The types an address (local.addr, field.addr) may point to.
+bool isScalar(Type t) {
+  return isNumeric(t) || t == Type::Bool || t == Type::Char;
+}
 bool isPointerLike(Type t) {
   return t == Type::Box || t == Type::Obj || t == Type::Ptr;
 }
@@ -591,6 +595,55 @@ private:
           expect(in.Args[0], F.Locals[in.Local].Ty, "stored value");
         result(in, Type::Void);
         break;
+      case Opcode::LocalAddr:
+        arity(in, 0);
+        if (in.Local >= F.Locals.size())
+          error("local.addr of undeclared local " + std::to_string(in.Local));
+        else if (!isScalar(F.Locals[in.Local].Ty))
+          error("local.addr of a local of type " +
+                std::string(typeName(F.Locals[in.Local].Ty)) +
+                " (only i64, f64, bool and char slots have addresses)");
+        result(in, Type::Ptr);
+        break;
+      case Opcode::FieldAddr: {
+        if (!arity(in, 1))
+          break;
+        expect(in.Args[0], Type::Obj, "receiver of field.addr");
+        auto it = MV.Index.Classes.find(in.ClassName);
+        const Field *fld = it == MV.Index.Classes.end()
+                               ? nullptr
+                               : MV.Index.findField(*it->second, in.Field);
+        if (it == MV.Index.Classes.end())
+          error("field.addr on unknown class '" + in.ClassName + "'");
+        else if (!fld)
+          error("class '" + in.ClassName + "' has no field '" + in.Field + "'");
+        else if (!isScalar(fld->Ty))
+          error("field.addr of a field of type " +
+                std::string(typeName(fld->Ty)) +
+                " (only i64, f64, bool and char slots have addresses)");
+        result(in, Type::Ptr);
+        break;
+      }
+      case Opcode::PtrLoad:
+        if (!arity(in, 1))
+          break;
+        expect(in.Args[0], Type::Ptr, "address of ptr.load");
+        if (!isScalar(in.Result.Ty))
+          error("ptr.load of " + std::string(typeName(in.Result.Ty)) +
+                " (only i64, f64, bool and char)");
+        result(in, in.Result.Ty);
+        break;
+      case Opcode::PtrStore: {
+        if (!arity(in, 2))
+          break;
+        expect(in.Args[0], Type::Ptr, "address of ptr.store");
+        Type t = typeOf(in.Args[1]);
+        if (t != Type::Void && !isScalar(t))
+          error("ptr.store of " + std::string(typeName(t)) +
+                " (only i64, f64, bool and char)");
+        result(in, Type::Void);
+        break;
+      }
       }
     }
 

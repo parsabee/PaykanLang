@@ -183,6 +183,10 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
     case Opcode::VTableAddr:
     case Opcode::Load:
     case Opcode::Store:
+    case Opcode::LocalAddr:
+    case Opcode::FieldAddr:
+    case Opcode::PtrLoad:
+    case Opcode::PtrStore:
       check(e.Id);
     }
   }
@@ -205,8 +209,10 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
   // Reserved codes decode to nothing.
   Opcode op;
   Type ty;
-  for (unsigned c = 26; c < 256; ++c)
-    EXPECT_FALSE(opcodeFromCode(static_cast<uint8_t>(c), op)) << c;
+  for (unsigned c = 26; c < 256; ++c) {
+    bool used = c >= 34 && c <= 37; // local.addr field.addr ptr.load ptr.store
+    EXPECT_EQ(opcodeFromCode(static_cast<uint8_t>(c), op), used) << c;
+  }
   for (unsigned c = 8; c < 256; ++c)
     EXPECT_FALSE(typeFromCode(static_cast<uint8_t>(c), ty)) << c;
 }
@@ -463,7 +469,7 @@ TEST(PIRBinary, RejectsReservedCodesAndSlack) {
     b[retType] = code;
     EXPECT_FALSE(binary::decode(b).isOk()) << "type code " << int(code);
   }
-  for (uint8_t code : {26, 30, 32, 34, 255}) {
+  for (uint8_t code : {26, 30, 32, 38, 255}) {
     std::vector<uint8_t> b = good;
     b[opcode] = code;
     EXPECT_FALSE(binary::decode(b).isOk()) << "opcode " << int(code);
