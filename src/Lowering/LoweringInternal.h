@@ -455,8 +455,13 @@ private:
   /// `inout` parameter, through its address; false for any other variable.
   bool storeInout(const std::string &name, pir::LocalId local, const Val &v);
   /// The address passed for the `inout` argument @p arg: a variable's
-  /// `local.addr`, or the address an `inout` parameter holds.
-  Val emitInoutArg(ast::Expr *arg);
+  /// `local.addr`, the address an `inout` parameter holds, or a field's
+  /// `field.addr`.  A +1 box the caller keeps for the duration of the call
+  /// (a field's object that no variable holds) goes to @p keep, for
+  /// releaseAfterCall.
+  Val emitInoutArg(ast::Expr *arg, std::vector<Val> &keep);
+  /// Release the boxes emitInoutArg kept for a call that has returned.
+  void releaseAfterCall(const std::vector<Val> &keep);
   /// For a call of a method of @p ct, a class defined in another module:
   /// an internal error unless @p sig is the signature of vtable slot
   /// @p slot there (so no caller passes a value where an address is due).

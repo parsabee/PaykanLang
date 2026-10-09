@@ -231,6 +231,36 @@ TEST(Lowering, InoutParameterIsAPointer) {
   EXPECT_EQ(count(m, "ptr."), 0u) << m;
 }
 
+// A field is passed by its address.  A variable's object stays alive for the
+// call on its own; any other receiver is retained for the call and released
+// right after it.
+TEST(Lowering, InoutFieldIsPassedByAddress) {
+  auto l = lower(R"(
+    class Inner { n: int; fn __init__() { self.n = 0; } }
+    class Holder { inner: Inner; fn __init__() { self.inner = Inner(); } }
+    fn bump(inout n: int) { n = n + 1; }
+    fn main() -> int {
+      i = Inner();
+      bump(i.n);
+      h = Holder();
+      bump(h.inner.n);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string m = function(l.Text, "main");
+  EXPECT_EQ(count(m, " = field.addr "), 2u) << m;
+  EXPECT_EQ(count(m, ", Inner.n"), 2u) << m;
+  size_t first = m.find("call @bump(");
+  size_t second = m.find("call @bump(", first + 1);
+  ASSERT_NE(second, std::string::npos) << m;
+  // `i` needs no retain; the chain's Inner is retained for its call and
+  // released after it.
+  EXPECT_EQ(count(m.substr(0, first), "retain "), 0u) << m;
+  EXPECT_EQ(count(m.substr(first, second - first), "retain "), 1u) << m;
+  EXPECT_NE(m.find("release ", second), std::string::npos) << m;
+}
+
 TEST(Lowering, FreshCallResultIsStoredWithoutRetain) {
   auto l = lower(R"(
     fn mk() -> Str { return "x"; }

@@ -591,7 +591,8 @@ private:
   /// The arguments @p args of a call of @p callee whose parameters have the
   /// modes @p modes and the types @p paramTys: an `inout` parameter takes a
   /// variable or a field of exactly its type, never a `view` parameter or a
-  /// `let` local.  Arguments of the wrong type were reported already.
+  /// `let` local, and no two take the same one.  Arguments of the wrong
+  /// type were reported already.
   bool checkInoutArgs(const ast::ParamModes &modes,
                       const std::vector<ast::Type *> &paramTys,
                       const std::vector<ast::Expr *> &args,
