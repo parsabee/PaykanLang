@@ -47,19 +47,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `.pkm` interface format 1.1: a function's, a method's and a constructor's
-  parameter modes (`view`, `inout`) are part of a module's interface, so calls
-  and overrides in another module are checked against them, whether the module
-  is imported from source, from the cache or from a prebuilt file.  An older
-  `paykan` rejects (prebuilt) or rebuilds (cache) a 1.1 file.
-- PIR version 2 (`pir::kPIRVersion`, `PAYKAN_PIR_TEXT_VERSION`): four address
-  instructions, `local.addr`, `field.addr`, `ptr.load` and `ptr.store`
-  (docs/pir.md §6), which `inout` parameters lower to.  Only scalar
-  (`i64`, `f64`, `bool`, `char`) slots have addresses.  A backend plugin must
-  handle them; a `.pkm` written with PIR 1 is rebuilt from its source, and a
-  prebuilt one is rejected.
+- `.pkm` interfaces carry a function's, a method's and a constructor's
+  parameter modes (`view`, `inout`), so calls and overrides in another module
+  are checked against them, whether the module is imported from source, from
+  the cache or from a prebuilt file.
 - PIR: four address instructions, `local.addr`, `field.addr`, `ptr.load` and
-  `ptr.store` (docs/pir.md §6), which `inout` parameters will lower to.  Only
+  `ptr.store` (docs/pir.md §6), which `inout` parameters lower to.  Only
   scalar (`i64`, `f64`, `bool`, `char`) slots have addresses.  A backend plugin
   must handle them.
 
