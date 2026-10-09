@@ -571,6 +571,7 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
 
   for (auto *method : node->getMethods()) {
     classCtx.MethodName = method->getName();
+    classCtx.ViewMethod = method->isView();
 
     // `destroy` is the compiler-generated destructor: it is emitted for every
     // class (releasing fields and freeing the object) and is final. User

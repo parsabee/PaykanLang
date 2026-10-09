@@ -2,15 +2,17 @@
 // SPDX-License-Identifier: MIT
 // What cannot change through a `view`
 // (docs/language/02-functions-and-calling.md, "A `view` stays a `view`"): a
-// `view` parameter, a `view` local and a `match` arm's name for either, and
-// everything reached through them.  None of those may be assigned, have a field
-// or element assigned, be passed to an `inout` parameter or have a method
-// called on it that is not a `view fn`.
+// `view` parameter, a `view` local and a `match` arm's name for either,
+// `self` in a `view fn` (docs/language/04-classes.md, "Methods that don't
+// change self"), and everything reached through them.  None of those may be
+// assigned, have a field or element assigned, be passed to an `inout` parameter
+// or have a method called on it that is not a `view fn`.
 //
 // While objects, strings and arrays are references, a copy of one would
 // change the original, so a `view` stays one: it can only be passed on to a
 // `view` parameter, a `view` that shares what it holds is never stored, a
-// `view` is never returned, and a `match` arm's name for a `view` is one too.
+// `view` is never returned (part of `self` may be, by any method), and a
+// `match` arm's name for a `view` is one too.
 
 #include "Names.h"
 #include "Sema.h"
@@ -36,6 +38,10 @@ std::string Sema::frozenPlace(const ast::Expr *e, bool borrows) {
   if (!root)
     return "";
   const std::string &name = root->getName();
+  if (name == names::kSelf && CurrentClassCtx && CurrentClassCtx->ViewMethod &&
+      !CurrentClassCtx->MethodName.empty())
+    return "'self' is read-only in 'view fn " + CurrentClassCtx->MethodName +
+           "'";
   switch (varKind(name)) {
   case VarKind::View:
     return "'" + name + "' is a 'view' parameter";
@@ -125,7 +131,15 @@ bool Sema::checkViewNotStored(const ast::Expr *e, const ast::Type *ty) {
 }
 
 bool Sema::checkViewNotReturned(const ast::Expr *e, const ast::Type *ty) {
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e))
+    return checkViewNotReturned(te->getTrueExpr(), ty) &&
+           checkViewNotReturned(te->getFalseExpr(), ty);
   if (!sharesStorage(ty))
+    return true;
+  // Any method may return part of `self`, a `view fn` too: its caller sees
+  // it as its own (#216 plans `-> view T`).  A `view` belongs to the caller.
+  const ast::Identifier *root = placeRoot(e);
+  if (root && root->getName() == names::kSelf)
     return true;
   std::string msg = viewOf(e);
   if (msg.empty())
