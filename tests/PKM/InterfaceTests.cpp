@@ -133,6 +133,34 @@ TEST(Interface, RoundTrip) {
   EXPECT_EQ(*back, s);
 }
 
+// The parameter modes follow a FUNC record's signature and a CLASS record's
+// methods, and only when one has any, so a module without them has the
+// records it had before, and an older file reads as having none.
+TEST(Interface, ParamModes) {
+  Interface i = sortedSample();
+  ASSERT_EQ(i.Functions[0].Name, "Shape");
+  ASSERT_EQ(i.Classes[0].Methods[1].Name, "__scale");
+  ASSERT_FALSE(i.Functions[0].Modes.Modes.empty());
+  Interface plain = i;
+  plain.Functions[0].Modes = {};
+  for (ClassRec::Method &m : plain.Classes[0].Methods)
+    m.Modes = {};
+  StatusOr<Interface> back =
+      readInterface(writeInterface(plain), "geometry::shapes");
+  ASSERT_TRUE(back) << back.status().message();
+  EXPECT_EQ(*back, plain);
+  EXPECT_LT(writeInterface(plain).size(), writeInterface(i).size());
+
+  Interface bad = i;
+  bad.Functions[0].Modes.Modes[1] = 3;
+  EXPECT_NE(readError(writeInterface(bad)).find("unknown parameter mode 3"),
+            std::string::npos);
+  bad = i;
+  bad.Classes[0].Methods[1].Modes = {{kModeView, kModeView}, {"a", "b"}};
+  EXPECT_NE(readError(writeInterface(bad)).find("modes for 2 of 1 parameters"),
+            std::string::npos);
+}
+
 TEST(Interface, Deterministic) {
   EXPECT_EQ(writeInterface(sampleInterface()),
             writeInterface(sampleInterface()));

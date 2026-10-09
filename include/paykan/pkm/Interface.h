@@ -54,11 +54,26 @@ struct ModuleRef {
   bool operator==(const ModuleRef &) const = default;
 };
 
+/// A parameter's mode (ast::ParamMode's values).
+inline constexpr uint8_t kModeValue = 0;
+inline constexpr uint8_t kModeView = 1;
+inline constexpr uint8_t kModeInout = 2;
+
+/// The modes of a signature's parameters (ast::ParamModes): one per
+/// parameter with its name, or none when every parameter is by value.
+/// They are appended to the FUNC and CLASS records.
+struct ModeRecs {
+  std::vector<uint8_t> Modes;
+  std::vector<std::string> Names;
+  bool operator==(const ModeRecs &) const = default;
+};
+
 /// ModuleInfo::FunctionInfo.
 struct FuncRec {
   std::string Name;
   std::string ReturnTypeName;
   std::vector<std::string> ParamTypeNames;
+  ModeRecs Modes;
   bool operator==(const FuncRec &) const = default;
 };
 
@@ -75,6 +90,7 @@ struct ClassRec {
     std::string ReturnTypeName;
     std::vector<std::string> ParamTypeNames;
     uint8_t Flags = 0; ///< ast::MethodDecl flags (Private bit)
+    ModeRecs Modes;
     bool operator==(const Method &) const = default;
   };
   std::string Name;

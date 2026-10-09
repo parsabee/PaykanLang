@@ -153,7 +153,8 @@ public:
     /// Declare a virtual method and add it to the class (updates the vtable).
     ClassTypeBuilder &method(const std::string &name, Type *retTy,
                              std::vector<Type *> params = {},
-                             uint8_t flags = MethodDecl::None);
+                             uint8_t flags = MethodDecl::None,
+                             ParamModes modes = {});
 
     /// Add an instance field.
     ClassTypeBuilder &field(const std::string &name, Type *ty);

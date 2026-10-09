@@ -1795,7 +1795,7 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
 // -- Top-level
 
 bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
-  bool ok = rejectInoutParams(node);
+  bool ok = true;
 
   // Register enum types first so that class fields, parameters, and variable
   // declarations can reference them by name during the passes that follow.

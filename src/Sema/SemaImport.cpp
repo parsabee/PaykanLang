@@ -281,6 +281,7 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
         mi.ParamTypeNames.push_back(ast::typeName(pty));
       mi.Flags =
           static_cast<uint8_t>(m->isPrivate() ? ast::MethodDecl::Private : 0);
+      mi.Modes = m->getParamModes();
       ci.Methods.push_back(std::move(mi));
     }
     info.ExportedClasses.push_back(std::move(ci));
@@ -311,16 +312,43 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     fi.ReturnTypeName = ast::typeName(sig.ReturnType);
     for (auto *pty : sig.ParamTypes)
       fi.ParamTypeNames.push_back(ast::typeName(pty));
+    fi.Modes = sig.Modes;
     info.ExportedFunctions.push_back(std::move(fi));
   }
   sortModuleInfo(info);
   return info;
 }
 
+// The IFACE records' parameter modes (pkm::kMode*, a byte per parameter,
+// with the names) are ast::ParamMode's values.
+static_assert(static_cast<uint8_t>(ast::ParamMode::Value) == pkm::kModeValue &&
+                  static_cast<uint8_t>(ast::ParamMode::View) ==
+                      pkm::kModeView &&
+                  static_cast<uint8_t>(ast::ParamMode::Inout) ==
+                      pkm::kModeInout,
+              "the IFACE parameter mode bytes are ast::ParamMode's values");
+
+static pkm::ModeRecs toModeRecs(const ast::ParamModes &modes) {
+  pkm::ModeRecs out;
+  for (ast::ParamMode m : modes.Modes)
+    out.Modes.push_back(static_cast<uint8_t>(m));
+  out.Names = modes.Names;
+  return out;
+}
+
+static ast::ParamModes fromModeRecs(const pkm::ModeRecs &recs) {
+  ast::ParamModes out;
+  for (uint8_t m : recs.Modes)
+    out.Modes.push_back(static_cast<ast::ParamMode>(m));
+  out.Names = recs.Names;
+  return out;
+}
+
 pkm::Interface Sema::toInterface(const ModuleInfo &info) {
   pkm::Interface iface;
   for (auto &fi : info.ExportedFunctions)
-    iface.Functions.push_back({fi.Name, fi.ReturnTypeName, fi.ParamTypeNames});
+    iface.Functions.push_back(
+        {fi.Name, fi.ReturnTypeName, fi.ParamTypeNames, toModeRecs(fi.Modes)});
   for (auto &ci : info.ExportedClasses) {
     pkm::ClassRec cr;
     cr.Name = ci.Name;
@@ -330,8 +358,8 @@ pkm::Interface Sema::toInterface(const ModuleInfo &info) {
     for (auto &f : ci.Fields)
       cr.Fields.push_back({f.FieldName, f.TypeName});
     for (auto &m : ci.Methods)
-      cr.Methods.push_back(
-          {m.Name, m.ReturnTypeName, m.ParamTypeNames, m.Flags});
+      cr.Methods.push_back({m.Name, m.ReturnTypeName, m.ParamTypeNames, m.Flags,
+                            toModeRecs(m.Modes)});
     iface.Classes.push_back(std::move(cr));
   }
   for (auto &ei : info.ExportedEnums)
@@ -342,8 +370,9 @@ pkm::Interface Sema::toInterface(const ModuleInfo &info) {
 Sema::ModuleInfo Sema::fromInterface(const pkm::Interface &iface) {
   ModuleInfo info;
   for (auto &fr : iface.Functions)
-    info.ExportedFunctions.push_back(
-        {fr.Name, fr.ReturnTypeName, fr.ParamTypeNames});
+    info.ExportedFunctions.push_back({fr.Name, fr.ReturnTypeName,
+                                      fr.ParamTypeNames,
+                                      fromModeRecs(fr.Modes)});
   for (auto &cr : iface.Classes) {
     ModuleInfo::ClassInfo ci;
     ci.Name = cr.Name;
@@ -353,8 +382,8 @@ Sema::ModuleInfo Sema::fromInterface(const pkm::Interface &iface) {
     for (auto &f : cr.Fields)
       ci.Fields.push_back({f.FieldName, f.TypeName});
     for (auto &m : cr.Methods)
-      ci.Methods.push_back(
-          {m.Name, m.ReturnTypeName, m.ParamTypeNames, m.Flags});
+      ci.Methods.push_back({m.Name, m.ReturnTypeName, m.ParamTypeNames, m.Flags,
+                            fromModeRecs(m.Modes)});
     info.ExportedClasses.push_back(std::move(ci));
   }
   for (auto &er : iface.Enums)
@@ -697,7 +726,7 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
           ok = false;
           continue;
         }
-        builder.method(m.Name, retTy, std::move(params), m.Flags);
+        builder.method(m.Name, retTy, std::move(params), m.Flags, m.Modes);
       }
       builder.build();
       if (ci->IsLocal)
@@ -726,6 +755,7 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
     if (!sigOk)
       return false;
     declareFunction(name, retTy, std::move(params), /*isBuiltin=*/true);
+    FunctionTable[name].Modes = fi.Modes;
     return true;
   };
 

@@ -5,9 +5,35 @@
 #include "TestUtils.h"
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
+
 using namespace paykan::test;
 
 namespace {
+
+/// Write @p content to @p dir / @p name; its path.
+std::string writeModule(const std::filesystem::path &dir,
+                        const std::string &name, const std::string &content) {
+  std::filesystem::create_directories(dir);
+  std::ofstream(dir / name) << content;
+  return (dir / name).string();
+}
+
+/// Sema over the file @p path, importing from its directory.
+SemaResult semaCheckPath(const std::string &path) {
+  paykan::parser::ParserDriver drv(testFrontend());
+  if (drv.parseFile(path) != 0)
+    return {false, "parse error", 1};
+  std::ostringstream os;
+  paykan::sema::DiagEngine diag(os);
+  diag.setSourceInfo(drv.getCurrentFile(), &drv.getSourceLines());
+  paykan::sema::Sema sema(drv.getASTContext(), diag,
+                          std::filesystem::path(path).parent_path().string(),
+                          drv.getFrontendName());
+  auto ctx = sema.run(drv.getRoot());
+  return {ctx.Ok, os.str(), ctx.ErrorCount};
+}
 
 /// Expect @p r to have failed with each of @p diags (`line:col: error: ...`).
 void expectErrors(const SemaResult &r,
@@ -119,9 +145,8 @@ fn main() -> int { return 0; })");
                    "parameter 'k'"});
 }
 
-// The arguments of an `inout` parameter: a variable or a field of exactly
-// its type, not a `view` parameter or a `let` local.  (`inout` parameters
-// are not lowered yet, so their declarations are errors too.)
+// The arguments of an `inout` parameter: a variable of exactly its type, not
+// a `view` parameter or a `let` local.  (A field cannot be passed yet.)
 TEST(ParamMode, InoutArguments) {
   auto r = semaCheck(R"(class C {
   n: int;
@@ -167,26 +192,77 @@ fn main() -> int { return 0; })");
        "'n' yet",
        ":20:7: error: a character of a string cannot be passed to 'inout' "
        "parameter 'c'",
+       ":24:8: error: a field cannot be passed to 'inout' parameter 'n' yet",
        ":25:10: error: 'k' is declared with 'let' and cannot be passed to "
        "'inout' parameter 'n'",
        ":26:8: error: argument 1 of 'bump' has type 'Str', expected 'int'"});
-  // Plain and `inout` parameters, variables and fields are accepted.
-  for (const char *line : {":21:", ":22:", ":23:", ":24:"})
+  EXPECT_EQ(r.ErrorCount, 10u) << r.Diagnostics;
+  // Plain and `inout` parameters and variables are accepted.
+  for (const char *line : {":21:", ":22:", ":23:"})
     EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
                                                            << r.Diagnostics;
 }
 
-// Checked, but not lowered yet: every `inout` parameter is an error, in
-// functions, methods, constructors and generic templates alike.
-TEST(ParamMode, InoutIsNotSupportedYet) {
-  auto r = semaCheck(R"(
-    fn bump(inout n: int) { }
-    fn second<T>(xs: T[], inout i: int) { }
-    class C { fn __init__(inout n: int) { } }
-    fn main() -> int { return 0; }
-  )");
-  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
-  expectErrors(r, {":2:5: error: 'inout' parameters are not supported yet",
-                   ":3:5: error: 'inout' parameters are not supported yet",
-                   ":4:15: error: 'inout' parameters are not supported yet"});
+// Modes travel with a module's exports: an override in another module keeps
+// them, and calls into it are checked like local ones.
+TEST(ParamMode, ModesAcrossModules) {
+  auto dir = tempDir() / "param_modes_modules";
+  std::filesystem::remove_all(dir);
+  writeModule(dir, "base.pkn",
+              "class Counter { n: int;\n"
+              "  fn add(view k: int) -> int { return k; } }\n"
+              "fn twice(view n: int) -> int { return n * 2; }\n");
+  auto r = semaCheckPath(writeModule(dir, "main.pkn", R"(import base;
+class Sub : base::Counter { fn add(k: int) -> int { return k; } }
+fn main() -> int { return base::twice(3); })"));
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  expectErrors(r, {":2:29: error: override of 'add' must keep 'view' on "
+                   "parameter 'k'"});
+
+  // `inout` across modules, through a module cache entry whose exports carry
+  // them.
+  auto lib = writeModule(dir, "lib.pkn", "fn real() -> int { return 1; }\n");
+  using paykan::ast::ParamMode;
+  using Info = paykan::sema::Sema::ModuleInfo;
+  const paykan::ast::ParamModes inoutN{{ParamMode::Inout}, {"n"}};
+  Info info;
+  info.ExportedFunctions = {{"bump", "void", {"int"}, inoutN},
+                            {"Box", "Box", {"int"}, inoutN}};
+  Info::ClassInfo box;
+  box.Name = "Box";
+  box.OriginModule = "lib";
+  box.Fields = {{"v", "int"}};
+  box.Methods = {{"put", "void", {"int"}, 0, inoutN},
+                 {"__init__", "void", {"int"}, 0, inoutN}};
+  info.ExportedClasses = {box};
+  auto key = std::filesystem::canonical(lib).string();
+  paykan::sema::Sema::ModuleCache[key] = info;
+  r = semaCheckPath(writeModule(dir, "uses.pkn", R"(import lib;
+class Mine : lib::Box { fn __init__(view n: int) { __super__(n); } }
+class Other : lib::Box {
+  fn put(n: int) { }
+}
+fn main() -> int {
+  let k = 1;
+  lib::bump(k);
+  b = lib::Box(2);
+  b.put(b.v + 1);
+  x = 1;
+  lib::bump(x);
+  b.put(x);
+  return 0;
+})"));
+  paykan::sema::Sema::ModuleCache.erase(key);
+  EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
+  expectErrors(
+      r, {":2:62: error: 'view' parameter 'n' cannot be passed to 'inout' "
+          "parameter 'n'",
+          ":4:3: error: override of 'put' must keep 'inout' on parameter 'n'",
+          ":8:13: error: 'k' is declared with 'let' and cannot be passed to "
+          "'inout' parameter 'n'",
+          ":9:16: error: argument 1 of 'lib::Box' must be a variable or a "
+          "field: parameter 'n' is 'inout'",
+          ":10:9: error: argument 1 of 'put' must be a variable or a field: "
+          "parameter 'n' is 'inout'"});
+  std::filesystem::remove_all(dir);
 }
