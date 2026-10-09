@@ -24,7 +24,7 @@ class Stats {
     self.hits = 0;
     self.last = 0;
   }
-  fn record(view value: int) {
+  fn record(value: view int) {
     bump(self.hits);   // a field of `self`, by address
     self.last = value;
   }
@@ -33,12 +33,12 @@ class Stats {
 class Meter {
   stats: Stats;
   step: int;
-  fn __init__(inout start: int) {
+  fn __init__(start: inout int) {
     self.stats = Stats();
     self.step = start;
     start = 0;         // the caller's variable
   }
-  fn add(inout total: int, view times: int) {
+  fn add(total: inout int, times: view int) {
     i = 0;
     while (i < times) {
       total = total + self.step;
@@ -47,20 +47,20 @@ class Meter {
   }
 }
 
-fn bump(inout n: int) { n = n + 1; }
+fn bump(n: inout int) { n = n + 1; }
 
-fn bumpTwice(inout n: int) {
+fn bumpTwice(n: inout int) {
   bump(n);             // an inout parameter passes its address on
   bump(n);
 }
 
-fn swap(inout a: int, inout b: int) {
+fn swap(a: inout int, b: inout int) {
   t = a;
   a = b;
   b = t;
 }
 
-fn advance(inout light: Light) {
+fn advance(light: inout Light) {
   match light {
     Red { light = Light::Green; }
     Green { light = Light::Yellow; }
@@ -68,7 +68,7 @@ fn advance(inout light: Light) {
   }
 }
 
-fn scale(inout x: float, view by: float) { x = x * by; }
+fn scale(x: inout float, by: view float) { x = x * by; }
 
 fn main() -> int {
   k = 1;

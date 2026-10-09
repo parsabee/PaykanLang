@@ -104,21 +104,21 @@ TEST(ParamMode, ViewParametersArePassedByValue) {
     enum Color { Red, Green }
     class Counter {
       n: int;
-      fn __init__(view start: int) { self.n = start; }
-      fn add(view k: int) -> int { self.n = self.n + k; return self.n; }
+      fn __init__(start: view int) { self.n = start; }
+      fn add(k: view int) -> int { self.n = self.n + k; return self.n; }
     }
     class Twice : Counter {
-      fn __init__(view s: int) { __super__(s); }
-      fn add(view k: int) -> int { self.n = self.n + 2 * k; return self.n; }
+      fn __init__(s: view int) { __super__(s); }
+      fn add(k: view int) -> int { self.n = self.n + 2 * k; return self.n; }
     }
-    fn scale(view x: float, view by: float) -> float { y = x * by; return y; }
-    fn name(view c: Color, view loud: bool, view end: char) -> Str {
+    fn scale(x: view float, by: view float) -> float { y = x * by; return y; }
+    fn name(c: view Color, loud: view bool, end: view char) -> Str {
       s = "red";
       if (c == Color::Green) { s = "green"; }
       if (loud) { s = s + Str(end); }
       return s;
     }
-    fn at<T>(xs: T[], view i: int) -> T { return xs[i]; }
+    fn at<T>(xs: T[], i: view int) -> T { return xs[i]; }
     fn main() -> int {
       let k = 3;
       c: Counter = Twice(k);
@@ -142,22 +142,22 @@ TEST(ParamMode, InoutParametersChangeTheCallersVariables) {
   LeakGuard guard;
   auto r = compileAndRun(R"(
     enum Color { Red, Green, Blue }
-    fn bump(inout n: int) { n = n + 1; }
-    fn twice(inout n: int) { bump(n); bump(n); }
-    fn swap(inout a: int, inout b: int) { t = a; a = b; b = t; }
-    fn scale(inout x: float, view by: float) { x = x * by; }
-    fn flip(inout b: bool) { b = !b; }
-    fn next(inout c: char) { c = char(int(c) + 1); }
-    fn cycle(inout c: Color) {
+    fn bump(n: inout int) { n = n + 1; }
+    fn twice(n: inout int) { bump(n); bump(n); }
+    fn swap(a: inout int, b: inout int) { t = a; a = b; b = t; }
+    fn scale(x: inout float, by: view float) { x = x * by; }
+    fn flip(b: inout bool) { b = !b; }
+    fn next(c: inout char) { c = char(int(c) + 1); }
+    fn cycle(c: inout Color) {
       match c {
         Red { c = Color::Green; }
         Green { c = Color::Blue; }
         Blue { c = Color::Red; }
       }
     }
-    fn split(inout lo: int, inout hi: int, v: int) { lo, hi = (v / 10, v % 10); }
-    fn readBack(inout n: int) -> int { n = 41; return n + 1; }
-    fn count<T>(xs: T[], inout total: int) { total = total + xs.len(); }
+    fn split(lo: inout int, hi: inout int, v: int) { lo, hi = (v / 10, v % 10); }
+    fn readBack(n: inout int) -> int { n = 41; return n + 1; }
+    fn count<T>(xs: T[], total: inout int) { total = total + xs.len(); }
     fn main() -> int {
       k = 1; bump(k); twice(k);
       a = 1; b = 2; swap(a, b);
@@ -187,12 +187,12 @@ TEST(ParamMode, InoutParametersOfMethodsAndConstructors) {
   auto r = compileAndRun(R"(
     class Counter {
       n: int;
-      fn __init__(inout start: int) { self.n = start; start = 0; }
-      fn take(inout to: int) { to = to + self.n; }
+      fn __init__(start: inout int) { self.n = start; start = 0; }
+      fn take(to: inout int) { to = to + self.n; }
     }
     class Twice : Counter {
-      fn __init__(inout s: int) { __super__(s); s = 7; }
-      fn take(inout to: int) { to = to + 2 * self.n; }
+      fn __init__(s: inout int) { __super__(s); s = 7; }
+      fn take(to: inout int) { to = to + 2 * self.n; }
     }
     fn main() -> int {
       st = 5;
@@ -221,18 +221,18 @@ TEST(ParamMode, InoutFieldsArePassedByAddress) {
     class Holder {
       inner: Inner; total: int; f: float;
       fn __init__() { self.inner = Inner(); self.total = 0; self.f = 0.5; }
-      fn addTo(inout t: int) { t = t + 1; }
+      fn addTo(t: inout int) { t = t + 1; }
       fn selfBump() { bump(self.total); self.addTo(self.total); }
     }
-    fn bump(inout n: int) { n = n + 1; }
-    fn watch(inout t: int, h: Holder) {
+    fn bump(n: inout int) { n = n + 1; }
+    fn watch(t: inout int, h: Holder) {
       t = t + 1;
       println("seen " + Str(h.total));
       t = t + 1;
     }
-    fn replace(inout n: int, h: Holder) { h.inner = Inner(); n = 99; }
+    fn replace(n: inout int, h: Holder) { h.inner = Inner(); n = 99; }
     fn make() -> Holder { return Holder(); }
-    fn twice(inout x: float) { x = x * 2; }
+    fn twice(x: inout float) { x = x * 2; }
     fn main() -> int {
       h = Holder();
       bump(h.total);

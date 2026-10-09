@@ -208,8 +208,8 @@ TEST(Lowering, UserCallRetainsAVariableArgument) {
 // own `inout` parameter on, and a `view` parameter is an ordinary value.
 TEST(Lowering, InoutParameterIsAPointer) {
   auto l = lower(R"(
-    fn bump(inout n: int, view by: int) { n = n + by; }
-    fn twice(inout n: int) { bump(n, 1); bump(n, 1); }
+    fn bump(n: inout int, by: view int) { n = n + by; }
+    fn twice(n: inout int) { bump(n, 1); bump(n, 1); }
     fn main() -> int {
       k = 1;
       twice(k);
@@ -238,7 +238,7 @@ TEST(Lowering, InoutFieldIsPassedByAddress) {
   auto l = lower(R"(
     class Inner { n: int; fn __init__() { self.n = 0; } }
     class Holder { inner: Inner; fn __init__() { self.inner = Inner(); } }
-    fn bump(inout n: int) { n = n + 1; }
+    fn bump(n: inout int) { n = n + 1; }
     fn main() -> int {
       i = Inner();
       bump(i.n);

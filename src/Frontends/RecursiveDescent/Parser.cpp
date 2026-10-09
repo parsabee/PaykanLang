@@ -275,8 +275,9 @@ bool Parser::errorAtCurrent(const std::string &expected) {
     found += " '" + std::string(t.Text) + "'";
   std::string hint;
   if (t.Kind == Tok::KwView || t.Kind == Tok::KwInout)
-    hint = " (" + found + " only marks a parameter: 'fn f(" +
-           std::string(t.Text) + " x: int)')";
+    hint = " (" + found +
+           " only marks a parameter's type: 'fn f(x: " + std::string(t.Text) +
+           " int)')";
   else if (t.Kind == Tok::KwLet)
     hint = " ('let' only starts a local declaration: 'let x = 1;')";
   error(t.Loc, "unexpected " + found + "; " + expected + hint);
@@ -649,17 +650,16 @@ EnumDecl *Parser::parseEnumDecl() {
 // funcDecl ::= "fn" IDENT ( "<" typeParamList ">" )? "(" paramList ")"
 //              ( "->" typeAnnotation )? block
 // paramList ::= ( param ( "," param )* )?
-// param ::= ( "view" | "inout" )? IDENT ":" typeAnnotation
+// param ::= IDENT ":" ( "view" | "inout" )? typeAnnotation
 
 bool Parser::parseParamList(std::vector<Param> &out) {
   if (at(Tok::RParen))
     return true;
   do {
-    ParamMode mode = ParamMode::Value;
-    if (accept(Tok::KwView))
-      mode = ParamMode::View;
-    else if (accept(Tok::KwInout))
-      mode = ParamMode::Inout;
+    if (at(Tok::KwView) || at(Tok::KwInout)) {
+      prefixModeError();
+      return false;
+    }
     if (!at(Tok::Ident)) {
       errorAtCurrent("expected a parameter name");
       return false;
@@ -667,12 +667,36 @@ bool Parser::parseParamList(std::vector<Param> &out) {
     const std::string &name = intern(consume().Text);
     if (!expect(Tok::Colon, "after the parameter name"))
       return false;
+    ParamMode mode = ParamMode::Value;
+    if (accept(Tok::KwView))
+      mode = ParamMode::View;
+    else if (accept(Tok::KwInout))
+      mode = ParamMode::Inout;
     Type *ty = parseTypeAnnotation();
     if (!ty)
       return false;
     out.push_back(Param{&name, ty, mode});
   } while (accept(Tok::Comma));
   return true;
+}
+
+// `inout n: int`, with the mode before the name: say where it goes.  Reads
+// the rest of the parameter when it can, to show the whole fix.
+void Parser::prefixModeError() {
+  Token modeTok = consume();
+  std::string mode(modeTok.Text);
+  std::string fix = "x: " + mode + " int";
+  if (at(Tok::Ident) && kind(1) == Tok::Colon) {
+    std::string name(consume().Text);
+    consume();     // ":"
+    ++Speculating; // a bad type is not reported on its own
+    Type *ty = parseTypeAnnotation();
+    --Speculating;
+    fix = name + ": " + mode + " " + (ty ? typeName(ty) : "T");
+  }
+  error(modeTok.Loc, "'" + mode +
+                         "' goes after the colon, before the type: write '" +
+                         fix + "'");
 }
 
 FuncDecl *Parser::parseFuncDecl() {

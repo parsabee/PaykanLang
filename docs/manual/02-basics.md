@@ -353,7 +353,7 @@ it in place. A `view` parameter is a copy the function cannot assign to. The cal
 same either way:
 
 ```pkn
-fn addTax(inout price: float, view rate: float) {
+fn addTax(price: inout float, rate: view float) {
   price = price + price * rate;
 }
 

@@ -9,20 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `view` and `inout` parameters (docs/language/02-functions-and-calling.md,
-  "Parameter modes"), on functions, methods and constructors, for `int`, `float`, `bool`,
-  `char` and enum parameters: `fn bump(inout n: int)`, `fn scale(inout x: float, view
-  by: float)`, called as `bump(k)`.  A `view` parameter is a read-only copy.  An `inout`
-  parameter is its caller's storage, passed by address so every write reaches the caller
-  at once: a local variable, a parameter (an `inout` one passes its address on) or a
-  field of an object (`obj.f`, `self.f`, `a.b.f`; by real address, never copied in and
-  out, with the object kept alive for the call), of exactly the parameter's type.  A
-  literal or other expression, a `view` parameter, a `let` local, an array element (not
-  yet) or a string's character is an error, and so is the same variable or field path
-  passed to two `inout` parameters of one call.  A mode does not apply to a type
-  parameter yet; an override keeps every parameter's mode; modes are part of a module's
-  interface.  `view` and `inout` are reserved words, a syntax error anywhere but before a
-  parameter's name.  In the AST interchange format a parameter carries `(qual view)` or
+- `view` and `inout` parameters (docs/language/02-functions-and-calling.md, "Parameter
+  modes"), on functions, methods and constructors, for `int`, `float`, `bool`, `char` and
+  enum parameters.  The mode is written where the type goes: `fn bump(n: inout int)`,
+  `fn scale(x: inout float, by: view float)`, called as `bump(k)`.  A `view` parameter is
+  a read-only copy.  An `inout` parameter is its caller's storage, passed by address so
+  every write reaches the caller at once: a local variable, a parameter (an `inout` one
+  passes its address on) or a field of an object (`obj.f`, `self.f`, `a.b.f`; by real
+  address, never copied in and out, with the object kept alive for the call), of exactly
+  the parameter's type.  A literal or other expression, a `view` parameter, a `let` local,
+  an array element (not yet) or a string's character is an error, and so is the same
+  variable or field path passed to two `inout` parameters of one call.  A mode does not
+  apply to a type parameter yet; an override keeps every parameter's mode; modes are part
+  of a module's interface.  `view` and `inout` are reserved words, a syntax error anywhere
+  but before a parameter's type; written before the name (`inout n: int`), the error shows
+  the fix.  In the AST interchange format a parameter carries `(qual view)` or
   `(qual inout)`.  `samples/codegen/47_inout_view.pkn` shows them.
 
 - `let` local declarations: `let n = 3;` and `let s: Str = "a";` declare a variable

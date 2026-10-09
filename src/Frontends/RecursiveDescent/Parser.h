@@ -118,6 +118,7 @@ private:
   ast::FuncDecl *parseFuncDecl();
   bool parseTypeParamList(std::vector<const std::string *> &out);
   bool parseParamList(std::vector<ast::Param> &out);
+  void prefixModeError();
   ast::VarDecl *parseVarDecl();
 
   // -- Statements

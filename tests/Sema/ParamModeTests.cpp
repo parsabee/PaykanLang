@@ -53,11 +53,11 @@ TEST(ParamMode, ViewParameters) {
     enum Color { Red, Green }
     class Counter {
       n: int;
-      fn __init__(view start: int) { self.n = start; }
-      fn add(view k: int, view c: Color) -> int { self.n = self.n + k; return k; }
+      fn __init__(start: view int) { self.n = start; }
+      fn add(k: view int, c: view Color) -> int { self.n = self.n + k; return k; }
     }
-    fn twice(view x: float) -> float { y = x; y = y * 2; return y; }
-    fn pass(view x: int) -> int { return x + x; }
+    fn twice(x: view float) -> float { y = x; y = y * 2; return y; }
+    fn pass(x: view int) -> int { return x + x; }
     fn main() -> int {
       let k = 2;
       t = twice(k);
@@ -68,7 +68,7 @@ TEST(ParamMode, ViewParameters) {
   )");
   EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
 
-  auto r = semaCheck(R"(fn f(view x: int) {
+  auto r = semaCheck(R"(fn f(x: view int) {
   x = 1;
   x, y = (2, 3);
   { x = 4; }
@@ -84,10 +84,10 @@ fn main() -> int { return 0; })");
 // Only int, float, bool, char and enum parameters take a mode.
 TEST(ParamMode, ModesApplyOnlyToValueTypes) {
   auto r = semaCheck(R"(class Counter {
-  fn __init__(view s: Str) { }
-  fn put(view c: Counter) { }
+  fn __init__(s: view Str) { }
+  fn put(c: view Counter) { }
 }
-fn f(view o: int?, view xs: int[], view t: (int, int), view b: Obj) { }
+fn f(o: view int?, xs: view int[], t: view (int, int), b: view Obj) { }
 fn main() -> int { return 0; })");
   EXPECT_EQ(r.ErrorCount, 6u) << r.Diagnostics;
   const char *const kRule = "' applies only to int, float, bool, char and enum "
@@ -109,9 +109,9 @@ fn main() -> int { return 0; })");
 // Not on a type parameter, for now: the template is rejected, and its uses
 // are follow-ons.  A mode on a value-type parameter of a template is fine.
 TEST(ParamMode, ModesOnTypeParametersAreRejected) {
-  auto r = semaCheck(R"(fn first<T>(view x: T) { }
-class Box<T> { fn put(view v: T) { } }
-fn second<T>(xs: T[], view i: int) -> T { return xs[i]; }
+  auto r = semaCheck(R"(fn first<T>(x: view T) { }
+class Box<T> { fn put(v: view T) { } }
+fn second<T>(xs: T[], i: view int) -> T { return xs[i]; }
 fn main() -> int {
   first(1);
   first<int>(2);
@@ -128,14 +128,14 @@ fn main() -> int {
 // An override keeps every parameter's mode.
 TEST(ParamMode, OverridesKeepModes) {
   auto r = semaCheck(R"(class Base {
-  fn a(view k: int) { }
+  fn a(k: view int) { }
   fn b(k: int) { }
-  fn c(view k: int, j: int) { }
+  fn c(k: view int, j: int) { }
 }
 class Sub : Base {
   fn a(k: int) { }
-  fn b(view k: int) { }
-  fn c(view k: int, j: int) { }
+  fn b(k: view int) { }
+  fn c(k: view int, j: int) { }
 }
 fn main() -> int { return 0; })");
   EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
@@ -150,12 +150,12 @@ fn main() -> int { return 0; })");
 TEST(ParamMode, InoutArguments) {
   auto r = semaCheck(R"(class C {
   n: int;
-  fn __init__(inout n: int) { self.n = n; }
-  fn add(inout to: float) { }
+  fn __init__(n: inout int) { self.n = n; }
+  fn add(to: inout float) { }
 }
-fn bump(inout n: int) { n = n + 1; }
-fn put(inout c: char) { }
-fn take(view v: int, p: int, inout q: int) {
+fn bump(n: inout int) { n = n + 1; }
+fn put(c: inout char) { }
+fn take(v: view int, p: int, q: inout int) {
   let k = 1;
   x = 2;
   c = C(x);
@@ -213,8 +213,8 @@ TEST(ParamMode, InoutArgumentsAreExclusive) {
   fn other(q: P) { swap(self.x, q.x); }
 }
 class Box { p: P; fn __init__() { self.p = P(); } }
-fn swap(inout a: int, inout b: int) { t = a; a = b; b = t; }
-fn three(inout a: int, inout b: int, c: int) { }
+fn swap(a: inout int, b: inout int) { t = a; a = b; b = t; }
+fn three(a: inout int, b: inout int, c: int) { }
 fn main() -> int {
   k = 1;
   j = 2;
@@ -249,8 +249,8 @@ TEST(ParamMode, ModesAcrossModules) {
   std::filesystem::remove_all(dir);
   writeModule(dir, "base.pkn",
               "class Counter { n: int;\n"
-              "  fn add(view k: int) -> int { return k; } }\n"
-              "fn twice(view n: int) -> int { return n * 2; }\n");
+              "  fn add(k: view int) -> int { return k; } }\n"
+              "fn twice(n: view int) -> int { return n * 2; }\n");
   auto r = semaCheckPath(writeModule(dir, "main.pkn", R"(import base;
 class Sub : base::Counter { fn add(k: int) -> int { return k; } }
 fn main() -> int { return base::twice(3); })"));
@@ -277,7 +277,7 @@ fn main() -> int { return base::twice(3); })"));
   auto key = std::filesystem::canonical(lib).string();
   paykan::sema::Sema::ModuleCache[key] = info;
   r = semaCheckPath(writeModule(dir, "uses.pkn", R"(import lib;
-class Mine : lib::Box { fn __init__(view n: int) { __super__(n); } }
+class Mine : lib::Box { fn __init__(n: view int) { __super__(n); } }
 class Other : lib::Box {
   fn put(n: int) { }
 }
