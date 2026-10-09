@@ -129,6 +129,7 @@ convention:
 | `Str?`, `Obj?` result | `PaykanShared *` | owned (+1); `NULL` is `None` |
 
 A native function cannot be generic, cannot be a method, and cannot be `main`.
+Its parameters are copies: `view` and `inout` don't apply to it yet (#21).
 Building and linking the C file next to a module is a separate step (#198).
 
 ---

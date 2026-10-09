@@ -2259,7 +2259,8 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
 
 // A `native fn` (#198) crosses into C with the runtime builtins' convention,
 // which only covers scalars, `Str` and `Obj` (and, as a result, `Str?` and
-// `Obj?`: a null box is None).
+// `Obj?`: a null box is None).  Its parameters are copies: a `view` or
+// `inout` one would need a pointer convention C does not have yet (#21).
 bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
                                 const std::vector<ast::Type *> &paramTypes) {
   auto scalarOrRef = [&](ast::Type *t) {
@@ -2281,6 +2282,14 @@ bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
     if (!scalarOrRef(paramTypes[i]))
       reject(paramTypes[i],
              "parameter '" + node->getParams()[i].getName() + "' of type");
+  for (const ast::Param &p : node->getParams())
+    if (p.Mode != ast::ParamMode::Value) {
+      error(node->getLocation(),
+            "native function '" + node->getName() + "': parameter '" +
+                p.getName() + "' cannot be '" + ast::paramModeName(p.Mode) +
+                "'; a native function's parameters are copies");
+      ok = false;
+    }
   ast::Type *ret = retTy;
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(retTy))
     ret = ot->getInnerType() == Ctx.getStrTy() ||
