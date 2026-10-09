@@ -594,9 +594,13 @@ private:
   /// Record the kinds of @p fn's `view` / `inout` parameters, just declared
   /// in the current scope.
   void declareParamKinds(const ast::FuncDecl *fn);
-  /// The rules of the local borrow @p node (`x: view = e;`), just declared
-  /// in the current scope: records a `view` local's kind.
+  /// The rules of the local borrow @p node (`x: view = e;`, `x: inout =
+  /// k;`), just declared in the current scope: records its kind.
   bool checkLocalBorrow(const ast::VarDecl *node);
+  /// Why the place @p place cannot be @p use ("passed to 'inout' parameter
+  /// 'n'", "named by 'inout' local 'x'"): an array element (not yet), a
+  /// string's character, `self`, a `let` local or a `view`; "" when it can.
+  std::string inoutPlaceError(const ast::Expr *place, const std::string &use);
 
   // -- What cannot change through a `view` (SemaViews.cpp)
 

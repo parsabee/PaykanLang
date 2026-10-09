@@ -15,8 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   expression: a copy of a value type, the same object, string or array otherwise.  It
   cannot be assigned, destructured into or passed to an `inout` parameter, nothing reached
   through it can be assigned, and only the methods that only read (`toString`, `equals`,
-  `len`, `length`, and overrides of them) can be called on it.  `inout` locals (`x: inout
-  = place;`) are not supported yet.  A local borrow needs an initializer, is never `let` and
+  `len`, `length`, and overrides of them) can be called on it.  An `inout` local (`x:
+  inout = k;`, `t: inout = self.total;`) is another name for a variable or a field, of any
+  type: assigning to it writes there, and it passes its address on to an `inout`
+  parameter.  It names a place as an `inout` argument does (not an expression, an array
+  element yet, a string's character, `self`, a `let` local or a `view`), of exactly its
+  type, and keeps a field's object alive while it can be used.  In PIR, box slots now have
+  addresses (`local.addr`, `field.addr`, `ptr.load`, `ptr.store`).  A local borrow needs an initializer, is never `let` and
   is not a destructuring target; written before the name (`view x = e;`) the error shows
   the fix.  In the AST interchange format a local borrow carries `(qual view)` or
   `(qual inout)`.

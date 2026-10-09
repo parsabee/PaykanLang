@@ -2388,9 +2388,9 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
       return false;
     }
 
-    // The variable is still declared after this error.  A `view` local may
-    // hold a `view`.
-    if (node->getMode() != ast::ParamMode::View)
+    // The variable is still declared after this error.  A local borrow may
+    // name a `view` (checkLocalBorrow).
+    if (node->getMode() == ast::ParamMode::Value)
       viewOk = checkViewNotStored(node->getInitExpr(), initTy);
     if (declTy) {
       if (diagnoseEmptyArrayLiteral(node->getLocation(), declTy, initTy)) {
