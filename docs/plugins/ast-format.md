@@ -81,7 +81,7 @@ or more.
 | `(module NAME ALIAS)` | one imported module; `ALIAS` is a string, `""` for none (`import m as x` has `(module "m" "x")`; `import a::{m, n}` has two) |
 | `(enum LOC NAME NAME...)` | `enum E { A, B }`: the name, then the variants |
 | `(class LOC NAME SUPER (type-params NAME...) (fields VAR...) (methods FN...))` | a class. `SUPER` is the superclass's name or `""`; a generic class has type parameters. Each field is a `var` with a type and no initialiser |
-| `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? BLOCK)` | a function or method; the `TYPE` is the return type, `_` for none |
+| `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? BLOCK QUAL?)` | a function or method; the `TYPE` is the return type, `_` for none. A `view fn` ends with `(qual view)` |
 | `(param NAME TYPE QUAL?)` | one parameter; `QUAL` is its mode, `(qual view)` or `(qual inout)`, absent for an ordinary (by-value) parameter: `n: inout int` is `(param "n" (named-type "int") (qual inout))` |
 | `(var LOC NAME TYPE? EXPR? LET?)` | a variable or field declaration: `x: int = 1` is `(var "x" (named-type "int") (int 1))`. `LET` is `(let)` for a `let` local, which has an initialiser and is never a field: `let n = 1;` is `(var "n" _ (int 1) (let))` |
 

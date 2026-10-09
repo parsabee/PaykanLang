@@ -101,7 +101,7 @@ TEST(Regression, MethodEqualsOverrideAndArrayEquals) {
     class Bag {
       n: int;
       fn __init__(n: int) { self.n = n; }
-      fn equals(o: Obj) -> bool { return True; }
+      view fn equals(o: Obj) -> bool { return True; }
     }
     fn main() -> int {
       b = Bag(1);

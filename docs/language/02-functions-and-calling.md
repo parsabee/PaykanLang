@@ -87,7 +87,7 @@ implicit `self`, which never takes a mode.
 
 A `view` parameter cannot be changed: it cannot be assigned or be a destructuring target
 (`cannot assign to 'view' parameter 'x'`), and it cannot be passed to an `inout`
-parameter (`'view' parameter 'x' cannot be passed to 'inout' parameter 'n'`). Reading it
+parameter (`'x' is a 'view' parameter; it cannot be passed to 'inout' parameter 'n'`). Reading it
 gives a copy, which may be stored or returned freely. It is passed by value, so any
 argument of its type will do: a literal, an expression, a `let` local.
 
@@ -97,11 +97,12 @@ An `inout` parameter refers to its caller's storage: every write to it changes t
 caller's variable or field at once, not when the call returns. The argument must be one
 of:
 
-- a local variable (not a `let` one: `'k' is declared with 'let' and cannot be passed to
-  'inout' parameter 'n'`);
+- a local variable (not a `let` one: `'k' is 'let'; it cannot be passed to 'inout'
+  parameter 'n'`);
 - a plain (by-value) parameter;
 - another `inout` parameter, whose address is passed on;
-- a field of an object: `obj.f`, `self.f`, or a chain such as `a.b.f`.
+- a field of an object: `obj.f`, `self.f`, or a chain such as `a.b.f` (not one reached
+  through a `let` local, or through `self` in a `view fn`).
 
 It must have exactly the parameter's type: an `int` variable does not go to an
 `x: inout float` (`argument 1 of 'scale' has type 'int', but 'inout' parameter 'x' has
@@ -110,7 +111,7 @@ type 'float'`). Anything else is an error:
 | Argument | Error |
 |---|---|
 | a literal or another expression (`bump(3)`, `bump(k + 1)`) | `argument 1 of 'bump' must be a variable or a field: parameter 'n' is 'inout'` |
-| a `view` parameter | `'view' parameter 'v' cannot be passed to 'inout' parameter 'n'` |
+| a `view` parameter | `'v' is a 'view' parameter; it cannot be passed to 'inout' parameter 'n'` |
 | an array element (`bump(xs[0])`) | `an array element cannot be passed to 'inout' parameter 'n' yet` |
 | a character of a string (`next(s[0])`) | `a character of a string cannot be passed to 'inout' parameter 'c'` |
 

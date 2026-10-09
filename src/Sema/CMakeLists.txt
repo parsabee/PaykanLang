@@ -5,6 +5,7 @@ add_library(paykan_sema STATIC
     SemaClass.cpp
     SemaImport.cpp
     SemaParamModes.cpp
+    SemaViewFn.cpp
 )
 target_link_libraries(paykan_sema
     PUBLIC  paykan_diag

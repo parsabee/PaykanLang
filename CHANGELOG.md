@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `view fn` methods (docs/language/04-classes.md, "Methods that don't change self"): a
+  method may change `self` unless it is written `view fn`, in which `self` is read-only (no
+  field or element write, no call of a method that is not a `view fn`, no `inout`
+  argument through it).  Only a `view fn` can be called on a `let` local.  `__init__` and
+  free functions cannot be one, an override keeps the marker of the method it overrides,
+  and the marker is part of a module's interface (the `.pkm` method flags, bit `0x2`).  The
+  builtin `toString`, `equals` and `len` are `view fn`s, so an override of `toString` or
+  `equals` must be written `view fn`.  A method that never changes `self` but is not a
+  `view fn` gets a warning.  In the AST interchange format a `view fn` ends with
+  `(qual view)`.  `samples/codegen/48_view_fn.pkn` shows them.
+- A `let` local's value cannot change: its fields and elements cannot be assigned, only
+  its `view fn` methods can be called (not `push` or `pop`), and nothing reached through
+  it can be passed to an `inout` parameter.
 - `view` and `inout` parameters (docs/language/02-functions-and-calling.md, "Parameter
   modes"), on functions, methods and constructors, for `int`, `float`, `bool`, `char` and
   enum parameters.  The mode is written where the type goes: `fn bump(n: inout int)`,

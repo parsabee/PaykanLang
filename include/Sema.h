@@ -11,6 +11,7 @@
 #include "StringMap.h"
 #include "paykan/pkm/Interface.h"
 
+#include <deque>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -131,9 +132,23 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     std::string MethodName;    // method currently being checked (empty = none)
     bool SuperInitRequired = false; // __init__ must call __super__
     bool SuperInitCalled = false;   // __super__ has been called
+    bool ViewMethod = false;        // the method is a `view fn`
   };
 
   ClassContext *CurrentClassCtx = nullptr;
+
+  /// What a method body does to `self`, for the warning on a method that
+  /// never changes it but is not a `view fn` (SemaViewFn.cpp).
+  struct MethodUse {
+    ast::ClassType *Class = nullptr;
+    const ast::FuncDecl *Decl = nullptr;
+    bool ChangesSelf = false; // writes `self`, or calls a changing method on
+                              // something reached through it
+    std::vector<std::string> SelfCalls; // `self.m()` of a non-`view fn` m
+  };
+  std::deque<MethodUse> MethodUses; // stable addresses: see below
+  /// The use being recorded: the method body being checked (null outside).
+  MethodUse *CurrentMethodUse = nullptr;
 
   // -- Function signature table
 
@@ -588,10 +603,37 @@ private:
   /// An override @p method keeps each parameter's mode of @p base.
   bool checkOverrideModes(const ast::FuncDecl *method,
                           const ast::MethodDecl *base);
+
+  // -- `view fn` methods, and values that cannot change (SemaViewFn.cpp)
+
+  /// Why the place @p e (a variable, or fields and elements reached from
+  /// one) cannot be changed here, as the start of a diagnostic: "'c' is
+  /// 'let'", "'self' is read-only in 'view fn area'", "'n' is a 'view'
+  /// parameter"; "" when it can.  A place reached through `self` in a method
+  /// that may change it records that the method changes `self`.
+  std::string frozenPlace(const ast::Expr *e);
+  /// Error at @p loc (and false) when the place @p e cannot be changed;
+  /// @p what ends the diagnostic ("cannot assign to its field 'n'").
+  bool checkChangeable(const ast::Expr *e, const std::string &what,
+                       ast::SourceLocation loc);
+  /// A call of @p method on the receiver of @p call: unless it is a
+  /// `view fn`, the call changes the receiver.
+  bool checkMethodReceiver(const ast::MethodCallExpr *call,
+                           const ast::MethodDecl *method);
+  /// The `view fn` marker of the class method @p method: not on `__init__`,
+  /// and as on @p base, the method it overrides (null for none).
+  bool checkViewFnDecl(const ast::FuncDecl *method,
+                       const ast::MethodDecl *base);
+  /// Error for each free function of @p tu declared `view fn`.
+  bool rejectFreeViewFns(ast::TranslationUnit *tu);
+  /// After every body is checked: warn about each method, with its
+  /// overrides, that never changes `self` but is not a `view fn`.
+  void warnMissingViewFns();
+
   /// The arguments @p args of a call of @p callee whose parameters have the
   /// modes @p modes and the types @p paramTys: an `inout` parameter takes a
-  /// variable or a field of exactly its type, never a `view` parameter or a
-  /// `let` local, and no two take the same one.  Arguments of the wrong
+  /// variable or a field of exactly its type, never one that cannot change
+  /// (frozenPlace), and no two take the same one.  Arguments of the wrong
   /// type were reported already.
   bool checkInoutArgs(const ast::ParamModes &modes,
                       const std::vector<ast::Type *> &paramTys,

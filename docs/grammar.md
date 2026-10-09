@@ -140,7 +140,7 @@ typeParams  ::= "<" IDENT ( "," IDENT )* ">"
 
 enumDecl    ::= "enum" IDENT "{" IDENT ( "," IDENT )* ","? "}"
 
-funcDecl    ::= "fn" IDENT typeParams? "(" paramList? ")"
+funcDecl    ::= "view"? "fn" IDENT typeParams? "(" paramList? ")"
                 ( "->" typeAnnotation )? block
 paramList   ::= param ( "," param )*
 param       ::= IDENT ":" ( "view" | "inout" )? typeAnnotation
@@ -151,7 +151,9 @@ varDecl     ::= IDENT ":" typeAnnotation
 An enum needs at least one variant; a single trailing comma is permitted.
 A class or function with `typeParams` is generic (a template that Sema
 instantiates); the superclass of a generic class is a plain class name.
-Methods are `funcDecl`s inside a class body.
+Methods are `funcDecl`s inside a class body.  `view fn` marks a method that
+does not change `self` ([language/04-classes.md](language/04-classes.md));
+on a free function it is a semantic error, not a syntax error.
 
 A parameter's type may start with its mode, `view` or `inout`
 ([language/02-functions-and-calling.md](language/02-functions-and-calling.md)):

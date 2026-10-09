@@ -104,8 +104,8 @@ mat: int[][] = [[1, 2], [3, 4]];   // 2D
 
 | Slot       | Signature                       | Default              |
 |------------|---------------------------------|----------------------|
-| `toString` | `fn toString() -> Str`          | Returns `Object@<address>` (a per-class name is planned) |
-| `equals`   | `fn equals(other: Obj) -> bool` | Identity comparison  |
+| `toString` | `view fn toString() -> Str`          | Returns `Object@<address>` (a per-class name is planned) |
+| `equals`   | `view fn equals(other: Obj) -> bool` | Identity comparison  |
 | `destroy`  | (compiler-generated)            | Destructor — final, runs on last release |
 
 `None` is an `Obj` literal representing the absence of a value.
@@ -129,8 +129,8 @@ fn find(head: Node?, key: int) -> Node? { ... }
 | `readln`    | `fn readln() -> Obj`            | Returns the next line as `Str` (including its `\n`, if any), or `None` at EOF |
 | `readbytes` | `fn readbytes(n: int) -> Obj`   | Returns the next `n` bytes (fewer at the end of the file) as `Str`, or `None` at EOF or when `n <= 0` |
 | `read`      | `fn read() -> Obj`              | Returns everything left in the file as `Str`, or `None` when nothing is left |
-| `toString`  | `fn toString() -> Str`          | Returns a string description of the handle       |
-| `equals`    | `fn equals(other: Obj) -> bool` | Reference identity comparison                    |
+| `toString`  | `view fn toString() -> Str`          | Returns a string description of the handle       |
+| `equals`    | `view fn equals(other: Obj) -> bool` | Reference identity comparison                    |
 
 The file handle is closed automatically when the `File` object goes out of scope (ARC destroy).
 The read methods return `Obj`, so use `match` to tell a `Str` from `None` (see
@@ -167,8 +167,8 @@ extends `Obj` and provides:
 
 | Slot        | Signature                       | Description                    |
 |-------------|---------------------------------|--------------------------------|
-| `toString`  | `fn toString() -> Str`          | Returns the error message      |
-| `equals`    | `fn equals(other: Obj) -> bool` | Reference identity comparison  |
+| `toString`  | `view fn toString() -> Str`          | Returns the error message      |
+| `equals`    | `view fn equals(other: Obj) -> bool` | Reference identity comparison  |
 
 ### Enum Types (distinct nominal value types)
 
@@ -223,12 +223,23 @@ limit = 11;              // error: 'limit' is declared with 'let' and cannot be 
 ```
 
 `let` applies to local declarations only: not to parameters, fields or destructuring
-(`let a, b = t;` is a syntax error). It fixes the variable, not the object it refers to: the
-fields of an object held in a `let` variable can still be changed, and an array's elements
-too. A `let` variable cannot be passed to an `inout` parameter
-([Parameter modes](02-functions-and-calling.md#parameter-modes-view-and-inout)), only to a
-plain or `view` one. Like any variable, an inner block may declare its own variable with the
-same name.
+(`let a, b = t;` is a syntax error). A `let` variable's value cannot change either: its
+fields and elements cannot be assigned, only its `view fn` methods can be called (so not
+`push` or `pop`, see [Classes](04-classes.md#methods-that-dont-change-self)), and neither
+it nor anything reached through it can be passed to an `inout` parameter
+([Parameter modes](02-functions-and-calling.md#parameter-modes-view-and-inout)):
+
+```pkn
+let p = Point(1, 2);
+let xs = [1, 2];
+p.x = 3;                 // error: 'p' is 'let'; cannot assign to its field 'x'
+xs.push(3);              // error: 'xs' is 'let'; 'push' is not a 'view fn'
+n = xs.len() + p.x;      // fine: reads, and 'len' is a 'view fn'
+```
+
+While classes and arrays are references, the check follows the name: another variable
+holding the same object can still change it. Like any variable, an inner block may declare
+its own variable with the same name.
 
 ---
 

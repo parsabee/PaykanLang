@@ -154,7 +154,7 @@ class Task {
     self.priority = priority;
   }
 
-  fn toString() -> Str {
+  view fn toString() -> Str {
     box = if self.done then "[x] " else "[ ] ";
     marker = if self.priority == Priority::High then " !" else "";
     return box + self.title + marker;
@@ -218,7 +218,7 @@ class TaskList {
     return True;
   }
 
-  fn pending() -> int {
+  view fn pending() -> int {
     count = 0;
     i = 0;
     while (i < self.tasks.len()) {
@@ -228,7 +228,7 @@ class TaskList {
     return count;
   }
 
-  fn show() {
+  view fn show() {
     i = 0;
     while (i < self.tasks.len()) {
       println(Str(i + 1) + ". " + self.tasks[i].toString());

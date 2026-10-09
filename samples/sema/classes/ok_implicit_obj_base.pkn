@@ -10,7 +10,7 @@ fn neq(a: A, b: A) -> bool {
   return a != b;
 }
 
-fn toString(a: A) -> Str {
+view fn toString(a: A) -> Str {
   return a.toString();
 }
 

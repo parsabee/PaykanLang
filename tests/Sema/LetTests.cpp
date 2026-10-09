@@ -42,9 +42,10 @@ TEST(Let, IsAnOrdinaryLocalOtherwise) {
       let f: float = 2;
       let p = Point(1);
       let xs = [1, 2];
-      p.x = n;
-      xs[0] = p.x;
-      xs.push(n);
+      q = Point(p.x);
+      q.x = n;
+      ys = [xs[0], xs.len()];
+      ys.push(n);
       { n: int = 4; n = 5; }
       i = 0;
       while (i < 2) { let k = i; i = i + k + 1; }
@@ -70,4 +71,40 @@ TEST(Let, IsAnOrdinaryLocalOtherwise) {
                          "not match declared type 'int' for variable 'u'"),
       std::string::npos)
       << r.Diagnostics;
+}
+
+// A `let` local's value cannot change either: no field or element writes, no
+// call of a method that is not a `view fn` (`push` included), no `inout`
+// argument reached through it.  A `view fn` can be called.
+TEST(Let, ValueCannotChange) {
+  auto r = semaCheck(R"(class Point {
+  x: int;
+  fn __init__(x: int) { self.x = x; }
+  fn move(dx: int) { self.x = self.x + dx; }
+  view fn at() -> int { return self.x; }
+}
+fn bump(n: inout int) { n = n + 1; }
+fn main() -> int {
+  let p = Point(1);
+  let xs = [1, 2];
+  p.x = 2;
+  xs[0] = 3;
+  xs.push(4);
+  p.move(1);
+  bump(p.x);
+  return p.at() + xs.len();
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  for (const char *diag : {
+           ":11:3: error: 'p' is 'let'; cannot assign to its field 'x'",
+           ":12:3: error: 'xs' is 'let'; cannot assign to its elements",
+           ":13:3: error: 'xs' is 'let'; 'push' is not a 'view fn'",
+           ":14:3: error: 'p' is 'let'; 'move' is not a 'view fn'",
+           ":15:8: error: 'p' is 'let'; it cannot be passed to 'inout' "
+           "parameter 'n'",
+       })
+    EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
+                                                           << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find(":16:"), std::string::npos) << r.Diagnostics;
 }

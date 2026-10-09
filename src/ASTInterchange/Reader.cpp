@@ -637,10 +637,22 @@ private:
         return nullptr;
     }
     CompoundStmt *body = block(f, "the function's body");
-    if (!body || !f.done())
+    if (!body)
       return nullptr;
-    return Ctx.make<FuncDecl>(loc, *name, std::move(params), ret, body,
-                              std::move(tparams));
+    // A `view fn` ends with `(qual view)`.
+    bool view = false;
+    if (const SExpr *q = f.optionalList("qual")) {
+      const SExpr *v = q->Items.size() == 1 ? &q->Items[0] : nullptr;
+      if (!v || v->K != SExpr::Symbol || v->Text != "view")
+        return fail(*q, "expected (qual view)"), nullptr;
+      view = true;
+    }
+    if (!f.done())
+      return nullptr;
+    auto *fn = Ctx.make<FuncDecl>(loc, *name, std::move(params), ret, body,
+                                  std::move(tparams));
+    fn->setView(view);
+    return fn;
   }
 
   /// A parameter's optional trailing `(qual view)` / `(qual inout)` into

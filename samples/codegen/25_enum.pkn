@@ -94,7 +94,7 @@ class Player {
   // Methods may call module-level free functions (defined anywhere in the file)
   // and pass/return enum values through them.
   fn turnAround() { self.facing = opposite(self.facing); }
-  fn report() -> Str { return dirName(self.facing); }
+  view fn report() -> Str { return dirName(self.facing); }
 }
 
 fn main() -> int {

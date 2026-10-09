@@ -14,7 +14,7 @@ class Pair<A, B> {
   first: A;
   second: B;
   fn __init__(a: A, b: B) { self.first = a; self.second = b; }
-  fn swap() -> Pair<B, A> { return Pair<B, A>(self.second, self.first); }
+  view fn swap() -> Pair<B, A> { return Pair<B, A>(self.second, self.first); }
 }
 
 fn main() -> int {
@@ -142,7 +142,7 @@ class Stack<T> {
     if (self.items.len() == 0) { return None; }
     return self.items.pop();
   }
-  fn size() -> int { return self.items.len(); }
+  view fn size() -> int { return self.items.len(); }
 }
 
 class Task {
@@ -179,7 +179,7 @@ class TaskList {
     }
   }
 
-  fn titles() -> Str {
+  view fn titles() -> Str {
     out = "";
     i = 0;
     while (i < self.tasks.len()) {

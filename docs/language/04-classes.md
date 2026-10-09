@@ -32,7 +32,7 @@ class Point {
     self.y = py;
   }
 
-  fn toString() -> Str {
+  view fn toString() -> Str {
     return "(" + Str<int>(self.x) + "," + Str(self.y) + ")";
   }
 
@@ -81,9 +81,9 @@ Every method declared inside a class is **virtual** — dispatched through the v
 class Counter {
   count: int;
 
-  fn __init__(start: int) { self.count = start; }
-  fn increment()          { self.count = self.count + 1; }
-  fn value() -> int       { return self.count; }
+  fn __init__(start: int)    { self.count = start; }
+  fn increment()             { self.count = self.count + 1; }
+  view fn value() -> int     { return self.count; }
 }
 
 c: Counter = Counter(0);
@@ -94,6 +94,41 @@ println(Str<int>(c.value()));   // 1
 There is **no method overloading** — each method name must be unique within a class.
 This also means a class has **exactly one `__init__`**; multiple constructors with
 different parameter lists are not supported.
+
+### Methods that don't change self
+
+A method may change `self`. A method that does not is written `view fn`, and `self` is
+read-only in its body: through `self` it cannot
+
+- assign a field or an element (`self.n = 1`, `self.xs[0] = 1`);
+- call a method that is not a `view fn` (`self.tick()`, `self.xs.push(1)`,
+  `self.child.tick()`);
+- pass `self`'s fields to an `inout` parameter (`bump(self.n)`).
+
+Each is an error that names the method: `'self' is read-only in 'view fn value'; 'tick' is
+not a 'view fn'`. Other objects can change as usual.
+
+Only a `view fn` can be called on a `let` local (and, once `view` applies to classes, on
+a `view` parameter): `'c' is 'let'; 'increment' is not a 'view fn'`. The builtin methods
+that only read are `view fn`s: `toString`, `equals`, `len`; `push`, `pop`, `concat` and
+the `File` methods are not.
+
+- `__init__` cannot be a `view fn`: it sets up `self`.
+- An override keeps the marker of the method it overrides, both ways:
+  `override of 'toString' must be a 'view fn', like the method it overrides`, and
+  `override of 'tick' cannot be a 'view fn': the method it overrides may change 'self'`.
+  So an override of `toString` or `equals` is a `view fn`.
+- Only a method can be one: `only a method can be a 'view fn': 'f' is a free function,
+  with no 'self'`.
+- A module's `view fn` markers are part of its interface, whether it is imported from
+  source or from a `.pkm` file.
+
+A method that never changes `self` but is not a `view fn` gets a warning, so that `let`
+values and `view` borrows can call it: `'value' never changes 'self': make it a 'view
+fn' so 'let' values and 'view' borrows can call it`. A method counts as changing `self`
+when it does one of the things above, or calls on `self` a method that does; a method
+with an override that changes `self` gets no warning, and neither does its override. The
+warning is not given while the program has errors.
 
 ### Static Dispatch via Free Functions
 
@@ -182,8 +217,8 @@ Every class transitively extends `Obj`. `Obj` defines:
 
 | Slot       | Signature                       | Default                      |
 |------------|---------------------------------|------------------------------|
-| `toString` | `fn toString() -> Str`          | Returns `Object@<address>` (a per-class name is planned) |
-| `equals`   | `fn equals(other: Obj) -> bool` | Identity (pointer) comparison |
+| `toString` | `view fn toString() -> Str`          | Returns `Object@<address>` (a per-class name is planned) |
+| `equals`   | `view fn equals(other: Obj) -> bool` | Identity (pointer) comparison |
 | `destroy`  | (compiler-generated)            | Frees the object             |
 
 Override `toString` and `equals` in your class to customise behaviour. `destroy` is generated
@@ -200,7 +235,7 @@ class Person {
   name: Str;
   age: int;
   fn __init__(n: Str, a: int) { self.name = n; self.age = a; }
-  fn toString() -> Str { return self.name + " (age " + Str(self.age) + ")"; }
+  view fn toString() -> Str { return self.name + " (age " + Str(self.age) + ")"; }
 }
 
 p: Person = Person("Alice", 30);
@@ -256,5 +291,9 @@ match a {
 | Override of `destroy` | A class declares its own `fn destroy()` |
 | Override signature mismatch | Override has a different parameter or return type than the base method |
 | Override changes a parameter mode | Override drops, adds or changes a parameter's `view` / `inout` |
+| Override changes `view fn` | Override of a `view fn` is not one, or an override of another method is one |
+| `self` changed in a `view fn` | A `view fn` assigns `self`'s fields or elements, calls a method on `self` that is not a `view fn`, or passes them to `inout` |
+| A `let` value changed | Field or element assignment, call of a method that is not a `view fn`, or `inout` argument reached through a `let` local |
+| `view fn __init__` or a free `view fn` | `__init__` sets up `self`; a free function has no `self` |
 | Multiple bases | More than one `:` clause |
 | `self` in parameter list | Writing `self` as an explicit method parameter |

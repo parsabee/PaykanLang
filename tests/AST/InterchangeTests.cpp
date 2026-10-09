@@ -401,6 +401,42 @@ TEST(ASTInterchange, NestingIsBounded) {
       << error;
 }
 
+// A `view fn` ends with `(qual view)`; nothing else qualifies a function.
+TEST(ASTInterchange, ViewFn) {
+  parser::ParserDriver driver("recursive-descent");
+  auto path =
+      std::filesystem::temp_directory_path() /
+      ("paykan_interchange_view_" + std::to_string(::getpid()) + ".pkn");
+  {
+    std::ofstream(path) << "class C { n: int;\n"
+                           "  view fn get() -> int { return self.n; }\n"
+                           "  fn set() { self.n = 1; } }\n";
+  }
+  ASSERT_EQ(driver.parseFile(path.string()), 0);
+  std::filesystem::remove(path);
+  std::string text = write(*driver.getRoot());
+  EXPECT_EQ(text.find("(qual view)"), text.rfind("(qual view)")) << text;
+  EXPECT_NE(text.find("(qual view)"), std::string::npos) << text;
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *back = read(text, ctx, error);
+  ASSERT_NE(back, nullptr) << error;
+  const auto &methods = back->getClassDecls()[0]->getMethods();
+  EXPECT_TRUE(methods[0]->isView());
+  EXPECT_FALSE(methods[1]->isView());
+  EXPECT_EQ(dump(back), dump(driver.getRoot()));
+  EXPECT_EQ(write(*back), text);
+
+  for (const char *bad : {"(qual inout)", "(qual)", "(qual frob)"}) {
+    std::string doc = "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ "
+                      "(block) " +
+                      std::string(bad) + ")))";
+    EXPECT_EQ(read(doc, ctx, error), nullptr) << bad;
+    EXPECT_NE(error.find("expected (qual view)"), std::string::npos)
+        << bad << ": " << error;
+  }
+}
+
 // A parameter's mode is the optional `(qual view)` / `(qual inout)` item.
 TEST(ASTInterchange, ParamModes) {
   parser::ParserDriver driver("recursive-descent");

@@ -478,8 +478,16 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       }
     }
 
+    // `view fn`: not on __init__, and kept by an override.
+    const ast::MethodDecl *overridden = nullptr;
+    if (method->getName() != names::kMethodInit && ct->getSuperClass())
+      overridden = ct->getSuperClass()->findMethod(method->getName());
+    if (!checkViewFnDecl(method, overridden))
+      ok = false;
+
     auto *mdecl = Ctx.make<ast::MethodDecl>(
-        method->getLocation(), method->getName(), retTy, std::move(paramTys));
+        method->getLocation(), method->getName(), retTy, std::move(paramTys),
+        method->isView() ? ast::MethodDecl::View : ast::MethodDecl::None);
     mdecl->setParamModes(ast::paramModes(method->getParams()));
     ct->addMethod(mdecl);
   }
@@ -563,6 +571,7 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
 
   for (auto *method : node->getMethods()) {
     classCtx.MethodName = method->getName();
+    classCtx.ViewMethod = method->isView();
 
     // `destroy` is the compiler-generated destructor: it is emitted for every
     // class (releasing fields and freeing the object) and is final. User
@@ -615,10 +624,17 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
         CurrentScope->declare(method->getParams()[i].getName(), paramTys[i]);
       declareParamKinds(method);
 
+      // What the body does to `self`, for warnMissingViewFns.
+      if (method->getName() != names::kMethodInit) {
+        MethodUses.push_back({ct, method});
+        CurrentMethodUse = &MethodUses.back();
+      }
+
       bool bodyOk = true;
       for (auto *stmt : method->getBody()->getStatements())
         if (!visit(stmt))
           bodyOk = false;
+      CurrentMethodUse = nullptr;
 
       if (!bodyOk) {
         ok = false;

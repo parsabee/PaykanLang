@@ -135,12 +135,10 @@ bool Sema::checkInoutArgs(const ast::ParamModes &modes,
       // no conversion (int -> float) can happen on the way.
       msg = argN + " has type '" + typeName(argTy) + "', but ";
       msg += param + " has type '" + typeName(paramTys[i]) + "'";
-    } else if (id && varKind(id->getName()) == VarKind::View) {
-      msg = "'view' parameter '" + id->getName() + "' cannot be passed to " +
-            param;
-    } else if (id && varKind(id->getName()) == VarKind::Let) {
-      msg = "'" + id->getName() +
-            "' is declared with 'let' and cannot be passed to " + param;
+    } else if (std::string why = frozenPlace(arg); !why.empty()) {
+      msg = std::move(why);
+      msg += "; it cannot be passed to ";
+      msg += param;
     } else if (std::string path = placePath(arg); !path.empty()) {
       auto [it, first] = places.try_emplace(path, i);
       if (!first)

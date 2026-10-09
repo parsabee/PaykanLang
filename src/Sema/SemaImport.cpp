@@ -280,7 +280,8 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
       for (auto *pty : m->getParamTypes())
         mi.ParamTypeNames.push_back(ast::typeName(pty));
       mi.Flags =
-          static_cast<uint8_t>(m->isPrivate() ? ast::MethodDecl::Private : 0);
+          static_cast<uint8_t>((m->isPrivate() ? ast::MethodDecl::Private : 0) |
+                               (m->isView() ? ast::MethodDecl::View : 0));
       mi.Modes = m->getParamModes();
       ci.Methods.push_back(std::move(mi));
     }

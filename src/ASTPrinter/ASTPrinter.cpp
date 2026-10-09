@@ -492,6 +492,8 @@ void ASTPrinter::visitSubscriptExpr(SubscriptExpr *node) {
 
 void ASTPrinter::visitFuncDecl(FuncDecl *node) {
   header("FuncDecl", node);
+  if (node->isView())
+    OS << " view"; // `view fn`, as written
   OS << " '" << node->getName() << "'";
   printTypeParams(OS, node->getTypeParams());
   // Parameters are not printed, except the mode of one that has it.
@@ -516,6 +518,8 @@ void ASTPrinter::visitMethodDecl(MethodDecl *node) {
   OS << " '" << node->getName() << "'";
   if (node->isPrivate())
     OS << " private";
+  if (node->isView())
+    OS << " view";
   OS << "\n";
 }
 

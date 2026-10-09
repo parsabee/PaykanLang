@@ -1234,7 +1234,7 @@ TEST(Driver, CBackendRebuildsACorruptCachedObject) {
   std::filesystem::create_directories(dir);
   std::ofstream(dir / "dep.pkn")
       << "class P { a: int; fn __init__() { self.a = 1; }"
-         " fn get() -> int { return self.a; } }\n"
+         " view fn get() -> int { return self.a; } }\n"
          "fn v() -> int { return 1; }\n";
   std::ofstream(dir / "mid.pkn")
       << "import dep;\nfn mk() -> dep::P { return dep::P(); }\n";
@@ -1540,7 +1540,7 @@ void writeZooProject(const std::filesystem::path &dir) {
   std::ofstream(dir / "geometry" / "shapes.pkn")
       << "class Rect { w: int; h: int;\n"
          "  fn __init__(w: int, h: int) { self.w = w; self.h = h; }\n"
-         "  fn area() -> int { return self.w * self.h; } }\n"
+         "  view fn area() -> int { return self.w * self.h; } }\n"
          "fn describe(r: Rect) -> Str { return \"rect\"; }\n";
   std::ofstream(dir / "a" / "util.pkn") << "fn tag() -> int { return 1; }\n";
   std::ofstream(dir / "b" / "util.pkn") << "fn tag() -> int { return 2; }\n";

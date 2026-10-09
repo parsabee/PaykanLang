@@ -178,9 +178,10 @@ fn take(v: view int, p: int, q: inout int) {
 fn main() -> int { return 0; })");
   expectErrors(
       r,
-      {":12:8: error: 'view' parameter 'v' cannot be passed to 'inout' "
+      {":12:8: error: 'v' is a 'view' parameter; it cannot be passed to "
+       "'inout' "
        "parameter 'n'",
-       ":13:8: error: 'k' is declared with 'let' and cannot be passed to "
+       ":13:8: error: 'k' is 'let'; it cannot be passed to "
        "'inout' parameter 'n'",
        ":14:8: error: argument 1 of 'bump' must be a variable or a field: "
        "parameter 'n' is 'inout'",
@@ -192,7 +193,7 @@ fn main() -> int { return 0; })");
        "'n' yet",
        ":20:7: error: a character of a string cannot be passed to 'inout' "
        "parameter 'c'",
-       ":25:10: error: 'k' is declared with 'let' and cannot be passed to "
+       ":25:10: error: 'k' is 'let'; it cannot be passed to "
        "'inout' parameter 'n'",
        ":26:8: error: argument 1 of 'bump' has type 'Str', expected 'int'"});
   EXPECT_EQ(r.ErrorCount, 9u) << r.Diagnostics;
@@ -294,10 +295,11 @@ fn main() -> int {
   paykan::sema::Sema::ModuleCache.erase(key);
   EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
   expectErrors(
-      r, {":2:62: error: 'view' parameter 'n' cannot be passed to 'inout' "
+      r, {":2:62: error: 'n' is a 'view' parameter; it cannot be passed to "
+          "'inout' "
           "parameter 'n'",
           ":4:3: error: override of 'put' must keep 'inout' on parameter 'n'",
-          ":8:13: error: 'k' is declared with 'let' and cannot be passed to "
+          ":8:13: error: 'k' is 'let'; it cannot be passed to "
           "'inout' parameter 'n'",
           ":9:16: error: argument 1 of 'lib::Box' must be a variable or a "
           "field: parameter 'n' is 'inout'",

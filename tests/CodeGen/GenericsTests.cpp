@@ -68,7 +68,7 @@ TEST(Generics, PairStrInt) {
       fn __init__(k: K, v: V) { self.k = k; self.v = v; }
       fn key() -> K { return self.k; }
       fn value() -> V { return self.v; }
-      fn toString() -> Str { return self.k + "=" + Str<int>(self.v); }
+      view fn toString() -> Str { return self.k + "=" + Str<int>(self.v); }
     }
   )",
                                   R"(
@@ -210,7 +210,7 @@ TEST(Generics, EqualityDispatchesToEquals) {
       v: T;
       fn __init__(v: T) { self.v = v; }
       fn get() -> T { return self.v; }
-      fn equals(other: Obj) -> bool {
+      view fn equals(other: Obj) -> bool {
         match other {
           o: Box<T> { return o.get() == self.v; }
           _ { return False; }

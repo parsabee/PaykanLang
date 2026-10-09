@@ -13,12 +13,12 @@
 class A {
   s: Str;
   fn __init__() { self.s = "a"; }
-  fn name() -> Str { return "A" + self.s; }
+  view fn name() -> Str { return "A" + self.s; }
 }
 
 class B : A {
   fn __init__() { __super__(); self.s = "bee"; }
-  fn name() -> Str { return "B" + self.s; }
+  view fn name() -> Str { return "B" + self.s; }
 }
 
 fn main() -> int {

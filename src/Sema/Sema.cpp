@@ -1042,6 +1042,9 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     return method->getReturnType();
   }
 
+  // Only a `view fn` may be called on what cannot change.
+  S.checkMethodReceiver(node, method);
+
   // Type-check arguments (receiver is implicit — not in getArguments()).
   const auto &paramTys = method->getParamTypes();
   if (node->getNumArguments() != paramTys.size()) {
@@ -1795,7 +1798,7 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
 // -- Top-level
 
 bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
-  bool ok = true;
+  bool ok = rejectFreeViewFns(node);
 
   // Register enum types first so that class fields, parameters, and variable
   // declarations can reference them by name during the passes that follow.
@@ -1852,6 +1855,9 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   // Hand the instantiations to the lowering as ordinary declarations.
   injectInstantiations(node);
 
+  // The suggestions need every body checked, and are noise next to errors.
+  if (ok && !hasErrors())
+    warnMissingViewFns();
   return ok;
 }
 
@@ -2427,6 +2433,12 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
     return false;
   }
 
+  if (!checkChangeable(node->getReceiver(),
+                       "cannot assign to its field '" + node->getFieldName() +
+                           "'",
+                       node->getLocation()))
+    return false;
+
   auto *valTy = resolveExprType(node->getValue(), fieldTy);
   if (!valTy)
     return false;
@@ -2462,6 +2474,9 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
     error(node->getIndex()->getLocation(),
           "array index must be int, got '" + typeName(idxTy) + "'");
   }
+  if (!checkChangeable(node->getArray(), "cannot assign to its elements",
+                       node->getLocation()))
+    return false;
   auto *valTy = resolveExprType(node->getValue(), at->getElementType());
   if (!valTy)
     return false;

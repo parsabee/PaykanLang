@@ -244,7 +244,7 @@ TEST(ParamMode, InoutFieldsArePassedByAddress) {
       hs = [Holder(), Holder()];
       bump(hs[1].total);
       twice(h.f);
-      let p = Holder();
+      p = Holder();
       bump(p.total);
       println(Str(h.total) + " " + Str(h.inner.n) + " " + Str(hs[1].total) +
               " " + Str(h.f) + " " + Str(p.total));

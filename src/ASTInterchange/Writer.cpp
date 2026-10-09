@@ -191,6 +191,11 @@ private:
       stmt(d.getBody());
     else
       fail("function '" + d.getName() + "' has no body");
+    if (d.isView()) {
+      open("qual");
+      sym("view");
+      close();
+    }
     close();
   }
 

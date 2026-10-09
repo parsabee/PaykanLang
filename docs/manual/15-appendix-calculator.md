@@ -109,7 +109,7 @@ than a special value:
 
 ```pkn
 // from: samples/imports/12_calc/calc/hashmap.pkn
-  fn lookup(key: Str) -> Entry? {
+  view fn lookup(key: Str) -> Entry? {
     chain: Entry[] = self.buckets[self.indexFor(key)];
     i: int = 0;
     while (i < chain.len()) {
@@ -151,7 +151,7 @@ command:
 
 ```pkn
 // from: samples/imports/12_calc/calc/hashmap.pkn
-  fn entries() -> (Str, float)[] {
+  view fn entries() -> (Str, float)[] {
     out: (Str, float)[] = [];
     bi: int = 0;
     while (bi < self.buckets.len()) {

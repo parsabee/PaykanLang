@@ -25,7 +25,7 @@ class Counter {
     self.count = self.count + 1;
   }
 
-  fn report() -> Str {
+  view fn report() -> Str {
     return self.name + ": " + Str(self.count);
   }
 }
@@ -59,6 +59,65 @@ Create an object by calling the class name with the constructor's arguments, as 
   no overloading. A class without fields may leave out `__init__`.
 - There are no access modifiers: every field and method is public.
 - By convention class names are `UpperCamelCase`.
+
+## Methods that only read: `view fn`
+
+A method may change its object. A method that only reads it is written `view fn`, and the
+compiler holds it to that: inside it, `self` is read-only. Only `view fn` methods can be
+called on a `let` variable, whose value cannot change:
+
+```pkn
+class Account {
+  balance: int;
+  fn __init__(start: int) { self.balance = start; }
+  fn deposit(amount: int) { self.balance = self.balance + amount; }
+  view fn report() -> Str { return "balance " + Str(self.balance); }
+}
+
+fn main() -> int {
+  a = Account(10);
+  a.deposit(5);
+  let snapshot = a;
+  println(snapshot.report());
+  return 0;
+}
+```
+
+Output:
+
+```
+balance 15
+```
+
+Calling `deposit` on `snapshot`, or changing `self` inside `report`, is an error that names
+what to fix:
+
+```pkn
+class Account {
+  balance: int;
+  fn __init__(start: int) { self.balance = start; }
+  fn deposit(amount: int) { self.balance = self.balance + amount; }
+  view fn report() -> Str { self.balance = 0; return "empty"; }
+}
+
+fn main() -> int {
+  let a = Account(10);
+  a.deposit(5);
+  return 0;
+}
+```
+
+Error:
+
+```
+error: 'self' is read-only in 'view fn report'; cannot assign to its field 'balance'
+error: 'a' is 'let'; 'deposit' is not a 'view fn'
+```
+
+The compiler warns about a method that never changes its object but is not a `view fn`,
+so mark such methods as you write them. An override keeps the marker of the method it
+overrides, so `toString` and `equals` are always `view fn`s. The details are in
+[the language reference](../language/04-classes.md#methods-that-dont-change-self).
 
 ## Objects are references
 
@@ -109,13 +168,13 @@ statement:
 class Animal {
   name: Str;
   fn __init__(name: Str) { self.name = name; }
-  fn sound() -> Str { return "..."; }
-  fn speak() -> Str { return self.name + " says " + self.sound(); }
+  view fn sound() -> Str { return "..."; }
+  view fn speak() -> Str { return self.name + " says " + self.sound(); }
 }
 
 class Dog : Animal {
   fn __init__(name: Str) { __super__(name); }
-  fn sound() -> Str { return "woof"; }
+  view fn sound() -> Str { return "woof"; }
 }
 
 class Cat : Animal {
@@ -124,7 +183,7 @@ class Cat : Animal {
     __super__(name);
     self.lives = 9;
   }
-  fn sound() -> Str { return "meow"; }
+  view fn sound() -> Str { return "meow"; }
 }
 
 fn main() -> int {
@@ -168,9 +227,9 @@ Things to know about inheritance:
 Every class extends `Obj`, the root of the class hierarchy, directly or indirectly. `Obj`
 provides two methods that your classes can override:
 
-- `fn toString() -> Str`, used by `print` and `println` to print an object. The default
+- `view fn toString() -> Str`, used by `print` and `println` to print an object. The default
   prints `Object@` and an address.
-- `fn equals(other: Obj) -> bool`, used by `==` and `!=`. The default compares identity: two
+- `view fn equals(other: Obj) -> bool`, used by `==` and `!=`. The default compares identity: two
   separately created objects are unequal even if their fields are the same.
 
 Overriding `toString` makes objects printable, and overriding `equals` gives them value
@@ -183,11 +242,11 @@ class Point {
   y: int;
   fn __init__(x: int, y: int) { self.x = x; self.y = y; }
 
-  fn toString() -> Str {
+  view fn toString() -> Str {
     return "(" + Str(self.x) + ", " + Str(self.y) + ")";
   }
 
-  fn equals(other: Obj) -> bool {
+  view fn equals(other: Obj) -> bool {
     match other {
       p: Point { return self.x == p.x && self.y == p.y; }
       _        { return False; }
@@ -282,11 +341,11 @@ class Task {
 
   fn complete() { self.done = True; }
 
-  fn checkbox() -> Str {
+  view fn checkbox() -> Str {
     return if self.done then "[x]" else "[ ]";
   }
 
-  fn toString() -> Str {
+  view fn toString() -> Str {
     return self.checkbox() + " " + self.title;
   }
 }
@@ -299,7 +358,7 @@ class DeadlineTask : Task {
     self.due = due;
   }
 
-  fn toString() -> Str {
+  view fn toString() -> Str {
     return self.checkbox() + " " + self.title + " (due " + self.due + ")";
   }
 }

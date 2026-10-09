@@ -358,6 +358,7 @@ private:
   CompoundStmt *Body;
   // Type parameter names (interned); empty for an ordinary function.
   std::vector<const std::string *> TypeParams;
+  bool View = false; // `view fn`: a method that does not change `self`
 
 public:
   FuncDecl(SourceLocation loc, const std::string &internedName,
@@ -378,6 +379,11 @@ public:
     return TypeParams;
   }
   bool isGeneric() const { return !TypeParams.empty(); }
+
+  /// Declared `view fn`: a method whose body does not change `self`
+  /// (docs/language/04-classes.md, "Methods that don't change self").
+  bool isView() const { return View; }
+  void setView(bool view) { View = view; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_FuncDecl; }
 };
@@ -918,6 +924,7 @@ public:
   enum Flags : uint8_t {
     None = 0,
     Private = 1 << 0,
+    View = 1 << 1, // `view fn`: does not change `self`
   };
 
 private:
@@ -942,6 +949,7 @@ public:
 
   bool isPrivate() const { return MethodFlags & Private; }
   bool isVirtual() const { return !isPrivate(); }
+  bool isView() const { return MethodFlags & View; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_MethodDecl;
