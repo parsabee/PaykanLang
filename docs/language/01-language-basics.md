@@ -333,6 +333,9 @@ target), and is never `let`: `let x: view = e;` is an error, `a local borrow can
 'let'`. Written before the name, `view x = e;`, the mode is a syntax error that shows the
 fix: `'view' goes after the colon, before the type: write 'x: view = ...'`.
 
+A `match` arm's binding can borrow the subject in the same way, `d: view Dog { … }`
+([Borrowing the subject](07-match-statements.md#borrowing-the-subject)).
+
 ---
 
 ## Expressions & Operators

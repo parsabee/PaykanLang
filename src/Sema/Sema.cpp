@@ -588,8 +588,15 @@ bool Sema::checkBinderName(const std::string &name, ast::SourceLocation loc) {
 }
 
 bool Sema::bindArmName(ast::MatchArm *arm) {
-  if (checkBinderName(arm->getBinding(), arm->getLocation())) {
-    if (MatchSubjectIsView)
+  if (arm->getMode() == ast::ParamMode::Inout) {
+    error(arm->getLocation(), "an 'inout' arm is not supported yet: write '" +
+                                  arm->getBinding() + ": view' or bind '" +
+                                  arm->getBinding() + "' without a mode");
+  } else if (checkBinderName(arm->getBinding(), arm->getLocation())) {
+    // `n: view T` is a `view` local of the subject, whatever the subject is.
+    if (arm->getMode() == ast::ParamMode::View)
+      CurrentScope->Kinds[arm->getBinding()] = VarKind::ViewLocal;
+    else if (MatchSubjectIsView)
       CurrentScope->Kinds[arm->getBinding()] = VarKind::ViewBinding;
     return true;
   }
@@ -2798,7 +2805,7 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
     }
 
     // 5. Recursively type-check the arm body.
-    if (!visitStatements(arm->getBody()->getStatements()))
+    if (!visitArmBody(arm, node->getSubject()))
       ok = false;
   }
 
@@ -2922,7 +2929,7 @@ bool Sema::checkOptionalMatch(ast::MatchStmt *node,
       }
     }
 
-    if (!visitStatements(arm->getBody()->getStatements()))
+    if (!visitArmBody(arm, node->getSubject()))
       ok = false;
   }
 

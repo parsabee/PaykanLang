@@ -8,7 +8,9 @@
 // uses it is one statement, so the borrow stays live for the whole loop.
 //
 // A borrow of a borrow (`y: inout = x;` with `x: inout = k;`) borrows what
-// that one names too, so `k` stays borrowed while `y` is live.
+// that one names too, so `k` stays borrowed while `y` is live.  A `match`
+// arm's `n: view T` borrows the subject in the same way, from the start of
+// the arm.
 
 #include "Sema.h"
 
@@ -164,7 +166,8 @@ bool Sema::visitStatements(const std::vector<ast::Stmt *> &stmts) {
             if (mentions(stmts[j], vd->getName()))
               end = j;
           if (end > i)
-            startBorrow(vd, &stmts, end);
+            startBorrow(vd->getInitExpr(), vd->getName(),
+                        vd->getMode() == ast::ParamMode::Inout, &stmts, end);
         }
     // Borrows whose last use was this statement end here.
     std::erase_if(Borrows, [&](const Borrow &b) {
@@ -183,22 +186,39 @@ bool Sema::visitBody(const std::vector<ast::Stmt *> &stmts) {
   return ok;
 }
 
-void Sema::startBorrow(const ast::VarDecl *vd,
-                       const std::vector<ast::Stmt *> *block, size_t end) {
-  const ast::Identifier *root = placeRoot(vd->getInitExpr());
+void Sema::startBorrow(const ast::Expr *place, const std::string &by,
+                       bool inout, const std::vector<ast::Stmt *> *block,
+                       size_t end) {
+  const ast::Identifier *root = placeRoot(place);
   if (!root)
     return; // a `view` of an expression borrows nothing
   const std::string &name = root->getName();
   const Scope *owner = CurrentScope ? CurrentScope->findOwner(name) : nullptr;
   if (!owner)
     return;
-  const bool inout = vd->getMode() == ast::ParamMode::Inout;
-  std::vector<Borrow> added{{name, owner, vd->getName(), inout, block, end}};
+  std::vector<Borrow> added{{name, owner, by, inout, block, end}};
   // A borrow of a borrow borrows what that one names too.
   for (const Borrow &b : Borrows)
     if (b.By == name)
-      added.push_back({b.Root, b.RootScope, vd->getName(), inout, block, end});
+      added.push_back({b.Root, b.RootScope, by, inout, block, end});
   Borrows.insert(Borrows.end(), added.begin(), added.end());
+}
+
+bool Sema::visitArmBody(const ast::MatchArm *arm, const ast::Expr *subject) {
+  const auto &stmts = arm->getBody()->getStatements();
+  if (arm->hasBinding() && arm->getMode() != ast::ParamMode::Value) {
+    // `n: view T` borrows the subject from the arm's start to n's last use.
+    size_t uses = 0;
+    for (size_t j = 0; j < stmts.size(); ++j)
+      if (mentions(stmts[j], arm->getBinding()))
+        uses = j + 1;
+    if (uses > 0)
+      startBorrow(subject, arm->getBinding(),
+                  arm->getMode() == ast::ParamMode::Inout, &stmts, uses - 1);
+  }
+  bool ok = visitStatements(stmts);
+  std::erase_if(Borrows, [&](const Borrow &b) { return b.Block == &stmts; });
+  return ok;
 }
 
 const Sema::Borrow *Sema::activeBorrow(const std::string &name,

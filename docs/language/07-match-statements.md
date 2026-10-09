@@ -22,6 +22,8 @@ The mode is chosen by the static type of the subject — you do not select it ex
 - Arm patterns:
   - `TypeName { … }` — type/variant pattern, no binding.
   - `name: TypeName { … }` — type pattern that **binds** the narrowed object to `name`.
+  - `name: view TypeName { … }` — the binding is a read-only borrow of the subject
+    ([Borrowing the subject](#borrowing-the-subject)).
   - `literal { … }` — value pattern (`int`, `float`, `bool`, `char`, or `Str` literal).
   - `_ { … }` — wildcard catch-all.
 - The first matching arm wins; remaining arms are not considered.
@@ -119,7 +121,37 @@ match x {
 }
 ```
 
-Bindings are available only on type/variant arms — value-pattern arms and `_` do not bind.
+Bindings are available only on type arms — value-pattern arms, enum-variant arms and `_` do
+not bind.
+
+### Borrowing the subject
+
+A binding may borrow the subject instead, written with a mode where the type goes, as for a
+[local borrow](01-language-basics.md#local-borrows): `name: view TypeName { … }`. The binding
+is then a `view` local of the subject, whatever the subject is:
+
+- nothing changes through it: no field or element write, only `view fn` calls, no `inout`
+  argument (`'d' is a 'view' local; 'tick' is not a 'view fn'`);
+- it can only be passed on to a `view` parameter, and if it shares what it holds (an
+  object, string or array) it is never stored or returned;
+- it cannot be assigned (`cannot assign to 'view' local 'd'`);
+- while it is live, from the start of the arm to its last use there, the variable the
+  subject starts from cannot change (`'a' is viewed by 'view' local 'd' until 'd' is last
+  used; 'tick' is not a 'view fn'`).
+
+```pkn
+fn describe(a: Animal) -> Str {
+  match a {
+    d: view Dog { return "a dog, " + d.name; }
+    _ { return "an animal"; }
+  }
+}
+```
+
+The mode goes after the colon: `view d: Dog { }` is a syntax error that shows the fix,
+`d: view Dog`. A binding of a `view` subject is a `view` even without the mode
+([A `view` stays a `view`](02-functions-and-calling.md#a-view-stays-a-view)). An `inout`
+arm, `name: inout TypeName`, is reserved and is an error for now.
 
 ---
 
@@ -350,6 +382,7 @@ above) is unchanged.
 | Literal type mismatch | A value arm's literal has a different type than the subject |
 | Type name in value mode | A value-mode `match` has a type-name arm instead of a literal |
 | Binding redeclaration | An arm body redeclares the arm's binding name |
+| `view` binding changed or passed on | A `name: view T` binding is assigned, written through, passed to a parameter that is not `view`, or stored; or the subject's variable changes while it is live |
 | Arm body type error | Any type error inside an arm body |
 | Wildcard not last | A `_` arm is followed by another arm |
 | Non-exhaustive match | A `match` leaves cases uncovered where every path must produce a value |

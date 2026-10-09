@@ -651,3 +651,54 @@ fn main() -> int {
     EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
                                                            << r.Diagnostics;
 }
+
+// A `match` arm's `n: view T` is a `view` local of the subject, whatever the
+// subject is: nothing changes through it, it passes on only to `view`
+// parameters, and the subject's variable cannot change until its last use.
+// `inout` arms are not supported yet.
+TEST(LocalBorrow, ViewArms) {
+  auto r = semaCheck(R"(class Animal {
+  n: int;
+  fn __init__() { self.n = 0; }
+  fn tick() { self.n = self.n + 1; }
+  view fn get() -> int { return self.n; }
+}
+class Dog : Animal { fn __init__() { __super__(); } }
+fn keep(a: Animal) { }
+fn show(a: view Animal) { }
+fn main() -> int {
+  a: Animal = Dog();
+  match a {
+    d: view Dog {
+      d.tick();
+      d.n = 2;
+      keep(d);
+      show(d);
+      a.tick();
+      println(Str(d.get()));
+      a.tick();
+    }
+    _ { }
+  }
+  o: Animal? = a;
+  match o {
+    x: view Animal { x = Animal(); }
+    None { }
+  }
+  match a { y: inout Dog { } _ { } }
+  return 0;
+})");
+  expectErrors(
+      r, {":14:7: error: 'd' is a 'view' local; 'tick' is not a 'view fn'",
+          ":15:7: error: 'd' is a 'view' local; cannot assign to its field 'n'",
+          ":16:12: error: 'd' is a 'view' local; it can only be passed to a "
+          "'view' parameter, and parameter 1 of 'keep' is not one",
+          ":18:7: error: 'a' is viewed by 'view' local 'd' until 'd' is last "
+          "used; 'tick' is not a 'view fn'",
+          ":26:22: error: cannot assign to 'view' local 'x'",
+          ":29:13: error: an 'inout' arm is not supported yet: write 'y: view' "
+          "or bind 'y' without a mode"});
+  EXPECT_EQ(r.ErrorCount, 6u) << r.Diagnostics;
+  // After the binding's last use the subject can change again.
+  EXPECT_EQ(r.Diagnostics.find(":20:"), std::string::npos) << r.Diagnostics;
+}

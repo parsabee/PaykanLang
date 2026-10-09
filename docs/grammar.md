@@ -159,7 +159,8 @@ A parameter's type may start with its mode, `view` or `inout`
 ([language/02-functions-and-calling.md](language/02-functions-and-calling.md)):
 `fn bump(n: inout int)`, `fn __init__(start: view int)`.  The keywords are
 reserved: besides a parameter's type, they only start a local borrow's type
-(`borrowDecl`, below), and `view` a `view fn`.  In any other position (a
+or a `match` binding's type (`borrowDecl` and `matchArm`, below), and `view`
+a `view fn`.  In any other position (a
 statement, a field's type, before the parameter's name) they are a syntax
 error; before the name, the error shows the parameter rewritten.
 The AST records the mode on the parameter (`Param::Mode`); whether it is
@@ -226,7 +227,7 @@ destructureTarget  ::= IDENT | IDENT ":" typeAnnotation | "_"
 
 matchStmt ::= "match" expression "{" matchArm+ "}"
 matchArm  ::= typeAnnotation block
-            | IDENT ":" typeAnnotation block
+            | IDENT ":" ( "view" | "inout" )? typeAnnotation block
             | literal block
             | "_" block
 literal   ::= INT | FLOAT | BOOL | CHAR | STRING | NONE
@@ -257,6 +258,8 @@ literal   ::= INT | FLOAT | BOOL | CHAR | STRING | NONE
   chains nest in the AST).
 - Match arms: a wildcard `_`, a literal pattern (bare literal tokens only,
   so `-1` is not a pattern), a type with an optional binding, in any order.
+  A binding may borrow the subject, `n: view T` (`MatchArm::getMode`); with
+  the mode before the name (`view n: T`) the syntax error shows the fix.
   `None` is accepted as a pattern so that a match over an optional can name
   the absent case.
 

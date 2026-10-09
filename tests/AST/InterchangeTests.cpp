@@ -565,6 +565,43 @@ TEST(ASTInterchange, LocalBorrows) {
   }
 }
 
+// A `match` arm's mode is a `(qual view)` / `(qual inout)` after its type.
+TEST(ASTInterchange, MatchArmModes) {
+  const std::string text =
+      "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
+      "(match (ident \"a\") (type-arm \"d\" (named-type \"Dog\") (qual "
+      "view) (block)) (type-arm \"c\" (named-type \"Cat\") (qual inout) "
+      "(block)) (wildcard-arm \"\" (block)))))))";
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *tu = read(text, ctx, error);
+  ASSERT_NE(tu, nullptr) << error;
+  std::string d = dump(tu);
+  EXPECT_NE(d.find("MatchArm binding='d' view\n"), std::string::npos) << d;
+  EXPECT_NE(d.find("MatchArm binding='c' inout\n"), std::string::npos) << d;
+  std::string written = write(*tu);
+  ast::ASTContext ctx2;
+  ast::TranslationUnit *back = read(written, ctx2, error);
+  ASSERT_NE(back, nullptr) << error;
+  EXPECT_EQ(dump(back), d);
+
+  struct Case {
+    const char *Arm;
+    const char *Error;
+  };
+  for (const Case &c :
+       {Case{"(type-arm \"\" (named-type \"Dog\") (qual view) (block))",
+             "an arm without a binding has no mode"},
+        Case{"(type-arm \"d\" (named-type \"Dog\") (qual mut) (block))",
+             "expected (qual view) or (qual inout)"}}) {
+    std::string doc = "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) "
+                      "_ (block (match (ident \"a\") " +
+                      std::string(c.Arm) + ")))))";
+    EXPECT_EQ(read(doc, ctx, error), nullptr) << c.Arm;
+    EXPECT_NE(error.find(c.Error), std::string::npos) << c.Arm << ": " << error;
+  }
+}
+
 TEST(Interchange, MovIsRemoved) {
   // `mov` is retired (#145): an out-of-tree frontend still emitting it gets
   // the same diagnostic as the built-in parser.

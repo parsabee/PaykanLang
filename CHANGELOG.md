@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `match` arms that borrow the subject (docs/language/07-match-statements.md, "Borrowing
+  the subject"): `d: view Dog { … }` binds `d` as a `view` local of the subject, whatever
+  the subject is, so nothing changes through it and it passes on only to `view`
+  parameters; the variable the subject starts from cannot change until `d`'s last use in
+  the arm.  `d: inout Dog` is reserved (an error for now).  With the mode before the name
+  (`view d: Dog`) the syntax error shows the fix.  In the AST interchange format the arm
+  carries `(qual view)` after its type.
 - `view fn` (docs/language/04-classes.md, "Methods that don't change self"): a method
   declared `view fn len() -> int` does not change `self`, and is the only kind of method
   that can be called on a `view` (`'c' is a 'view' parameter; 'tick' is not a 'view fn'`).

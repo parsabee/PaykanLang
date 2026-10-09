@@ -200,3 +200,45 @@ TEST(ViewFn, MarksAMethod) {
                       "does not change 'self': 'view fn len()')"),
             std::string::npos);
 }
+
+// A `match` arm's binding may borrow the subject, `n: view T` or
+// `n: inout T`; written before the name, the mode's error shows the fix.
+TEST(MatchArm, Modes) {
+  auto [ok, driver] = parse(R"(fn main() -> int {
+  match a {
+    d: view Dog { }
+    c: inout Cat { }
+    b: Bird { }
+    _ { }
+  }
+  return 0;
+})");
+  ASSERT_TRUE(ok);
+  namespace ast = paykan::ast;
+  const auto *match = ast::cast<ast::MatchStmt>(
+      driver->getRoot()->getFuncDecls()[0]->getBody()->getStatements()[0]);
+  const auto &arms = match->getArms();
+  EXPECT_EQ(arms[0]->getMode(), ast::ParamMode::View);
+  EXPECT_EQ(arms[1]->getMode(), ast::ParamMode::Inout);
+  EXPECT_EQ(arms[2]->getMode(), ast::ParamMode::Value);
+  std::string dump = dumpAST(*driver);
+  for (const char *arm :
+       {"MatchArm binding='d' view\n", "MatchArm binding='c' inout\n",
+        "MatchArm binding='b'\n"})
+    EXPECT_NE(dump.find(arm), std::string::npos) << arm << "\n" << dump;
+
+  if (testFrontend() != "recursive-descent")
+    return;
+  const char *const cases[][2] = {
+      {"view d: Dog { }", "'view' goes after the colon, before the type: "
+                          "write 'd: view Dog'"},
+      {"inout d: Dog[] { }", "'inout' goes after the colon, before the type: "
+                             "write 'd: inout Dog[]'"},
+  };
+  for (const auto &c : cases) {
+    std::string src = std::string("fn main() -> int {\n  match a {\n    ") +
+                      c[0] + "\n  }\n  return 0;\n}";
+    std::string errs = parseErrors(src);
+    EXPECT_NE(errs.find(c[1]), std::string::npos) << src << "\n" << errs;
+  }
+}
