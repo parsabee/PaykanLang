@@ -626,8 +626,9 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
 
       // What the body does to `self`, for warnMissingViewFns.
       if (method->getName() != names::kMethodInit) {
-        MethodUses.push_back({ct, method});
-        CurrentMethodUse = &MethodUses.back();
+        CurrentMethodUse = &MethodUses.emplace_back();
+        CurrentMethodUse->Class = ct;
+        CurrentMethodUse->Decl = method;
       }
 
       bool bodyOk = true;
