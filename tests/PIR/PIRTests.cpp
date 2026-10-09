@@ -223,7 +223,7 @@ TEST(PIR, ParserKeepsNamesAndIds) {
   EXPECT_EQ(first->Result.Name, "s");
   EXPECT_EQ(first->Result.Id, 1u);
   EXPECT_EQ(first->Result.Ty, Type::Obj); // from the callee's declaration
-  EXPECT_EQ(main->NextValueId, 28u);
+  EXPECT_EQ(main->NextValueId, 30u);
 }
 
 TEST(PIR, ParserAcceptsHandWrittenNames) {
@@ -372,6 +372,58 @@ fn @main() -> i64 {
   EXPECT_NE(errs.find("cmp operands"), std::string::npos) << errs;
   EXPECT_NE(errs.find("cannot cast f64 to bool"), std::string::npos) << errs;
   EXPECT_NE(errs.find("operand of not"), std::string::npos) << errs;
+}
+
+// Only scalar slots have addresses, and an address is read and written as a
+// scalar.
+TEST(PIRVerifier, ChecksAddressOps) {
+  std::string errs = verifyText(R"(module "m"
+class C {
+  field n: i64
+  field b: box
+  vtable {
+    destroy = @C.destroy : (obj) -> void
+  }
+}
+fn @C.destroy(%self: obj) -> void {
+  ret
+}
+fn @main() -> i64 {
+  local %i: i64
+  local %o: box
+  %o2 = new C
+  %p = local.addr %o
+  %q = local.addr %i
+  %r = field.addr %o2, C.b
+  %s = field.addr %o2, C.m
+  %t = field.addr %q, C.n
+  %u = field.addr %o2, C.n
+  %v = ptr.load box, %q
+  %w = ptr.load i64, %o2
+  ptr.store 1, 2
+  ptr.store %q, null box
+  %x = ptr.load f64, %u
+  ptr.store %u, %x
+  ret 0
+}
+)");
+  for (const char *e :
+       {"local.addr of a local of type box",
+        "field.addr of a field of type box", "class 'C' has no field 'm'",
+        "receiver of field.addr %3 has type ptr", "ptr.load of box",
+        "address of ptr.load %1 has type obj", "address of ptr.store 1",
+        "ptr.store of box"})
+    EXPECT_NE(errs.find(e), std::string::npos) << e << "\n" << errs;
+  // The verifier does not know what an address points to: a well-typed
+  // ptr.load / ptr.store through it is accepted.
+  EXPECT_EQ(errs.find("ptr.load of f64"), std::string::npos) << errs;
+  EXPECT_EQ(errs.find("ptr.store of f64"), std::string::npos) << errs;
+
+  ParseError err;
+  EXPECT_FALSE(parseProgram("module \"m\"\nfn @f(%p: ptr) -> void {\n"
+                            "  ptr.load i64, %p\n  ret\n}\n",
+                            err));
+  EXPECT_NE(err.Message.find("no '%result ='"), std::string::npos) << err.str();
 }
 
 TEST(PIRVerifier, RejectsBadControlFlow) {

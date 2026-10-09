@@ -552,6 +552,11 @@ private:
   /// Process a single import declaration.
   bool processImport(ast::ImportDecl *node);
 
+  /// `view` and `inout` parameters parse, but nothing checks or lowers them
+  /// yet: report every one, in every function and method of @p tu (generic
+  /// ones too), as not supported.
+  bool rejectParamModes(ast::TranslationUnit *tu);
+
   /// Register classes: names, hierarchy, field types, method signatures, and
   /// constructors (phases 1–4b).  Method bodies are deferred to
   /// checkClassBodies() so that free functions can be forward-declared in

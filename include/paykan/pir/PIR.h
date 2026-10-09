@@ -183,6 +183,11 @@ enum class Opcode : uint8_t {
   // locals
   Load,  // Local -> type
   Store, // Local, value
+  // addresses of scalar slots (`inout` parameters, docs/pir.md §6)
+  LocalAddr, // Local -> ptr
+  FieldAddr, // obj, ClassName.Field -> ptr
+  PtrLoad,   // ptr -> Result.Ty (i64 f64 bool char)
+  PtrStore,  // ptr, value
 };
 
 enum class CmpPred : uint8_t { Eq, Ne, Lt, Le, Gt, Ge };
@@ -200,11 +205,11 @@ struct Instr {
   CmpPred Pred = CmpPred::Eq; // Cmp
   Type CastTo = Type::Void;   // Cast
   std::string Callee;         // Call: function symbol
-  std::string ClassName; // VCall / New / FieldLoad / FieldStore / VTableAddr
-  std::string Field;     // FieldLoad / FieldStore
-  uint32_t Slot = 0;     // VCall
-  Signature Sig;         // VCall: the slot's signature
-  LocalId Local = 0;     // Load / Store
+  std::string ClassName;      // VCall / New / Field* / VTableAddr
+  std::string Field;          // FieldLoad / FieldStore / FieldAddr
+  uint32_t Slot = 0;          // VCall
+  Signature Sig;              // VCall: the slot's signature
+  LocalId Local = 0;          // Load / Store / LocalAddr
 };
 
 // -- Structured statements

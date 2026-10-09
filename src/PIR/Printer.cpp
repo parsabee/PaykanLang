@@ -303,6 +303,7 @@ private:
       break;
     case Opcode::FieldLoad:
     case Opcode::FieldStore:
+    case Opcode::FieldAddr:
       OS << ' ';
       if (!in.Args.empty())
         printOperand(in.Args[0]);
@@ -323,8 +324,13 @@ private:
         printOperand(in.Args[0]);
       break;
     case Opcode::Load:
+    case Opcode::LocalAddr:
       OS << ' ';
       printLocalRef(in.Local);
+      break;
+    case Opcode::PtrLoad:
+      OS << ' ' << typeName(in.Result.Ty) << ", ";
+      printOperandList(in.Args);
       break;
     case Opcode::Store:
       OS << ' ';

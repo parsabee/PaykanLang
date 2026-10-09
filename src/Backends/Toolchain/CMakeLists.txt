@@ -44,6 +44,16 @@ if(PAYKAN_COVERAGE_FLAGS)
         endif()
     endif()
 endif()
+# On macOS the runtime archive is built for CMAKE_OSX_DEPLOYMENT_TARGET (CMake
+# 4 defaults it to the host's version, which can be newer than the system
+# cc's default).  Programs linked against the archive target the same
+# version, or ld warns on every link ("built for newer 'macOS' version") and
+# the warning lands in the program's stderr.
+set(_paykan_toolchain_runtime_target_flags "")
+if(APPLE AND CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(_paykan_toolchain_runtime_target_flags
+        "-mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+endif()
 file(WRITE ${CMAKE_BINARY_DIR}/.paykan-build-tree
     "A Paykan build tree: binaries below this directory use its runtime.\n")
 target_compile_definitions(paykan_backend_toolchain PRIVATE
@@ -54,6 +64,7 @@ target_compile_definitions(paykan_backend_toolchain PRIVATE
     PAYKAN_INSTALLED_RUNTIME_INCLUDE_DIR="${CMAKE_INSTALL_FULL_INCLUDEDIR}/paykan"
     PAYKAN_SANITIZER_FLAGS="${_paykan_toolchain_sanitizer_flags}"
     PAYKAN_COVERAGE_FLAGS="${_paykan_toolchain_coverage_flags}"
+    PAYKAN_RUNTIME_TARGET_FLAGS="${_paykan_toolchain_runtime_target_flags}"
     PAYKAN_DEFAULT_CC="${_paykan_toolchain_default_cc}"
     PAYKAN_DEFAULT_CC_FLAGS="${_paykan_toolchain_default_cc_flags}"
 )

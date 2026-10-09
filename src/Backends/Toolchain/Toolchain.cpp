@@ -39,6 +39,9 @@
 #ifndef PAYKAN_COVERAGE_FLAGS
 #define PAYKAN_COVERAGE_FLAGS ""
 #endif
+#ifndef PAYKAN_RUNTIME_TARGET_FLAGS
+#define PAYKAN_RUNTIME_TARGET_FLAGS ""
+#endif
 #ifndef PAYKAN_DEFAULT_CC
 #define PAYKAN_DEFAULT_CC ""
 #endif
@@ -133,11 +136,13 @@ bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
     }
   }
   // The build tree's runtime archive is sanitizer- or coverage-instrumented
-  // when the compiler was built that way: programs linked against it need
-  // the same flags (the C backend's compile and every backend's link).
+  // when the compiler was built that way, and on macOS built for the build's
+  // deployment target: programs linked against it need the same flags (the C
+  // backend's compile and every backend's link).
   if (tc.RuntimeLib.empty()) {
     appendFlags(PAYKAN_SANITIZER_FLAGS, tc.ExtraFlags);
     appendFlags(PAYKAN_COVERAGE_FLAGS, tc.ExtraFlags);
+    appendFlags(PAYKAN_RUNTIME_TARGET_FLAGS, tc.ExtraFlags);
   }
   auto exists = [](const std::string &p) {
     std::error_code ec;

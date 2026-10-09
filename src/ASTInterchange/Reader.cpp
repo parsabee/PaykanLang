@@ -306,6 +306,14 @@ private:
       return &L.Items[I++];
     }
 
+    /// The next field if it is a list tagged @p tag (consumed), else null:
+    /// an optional trailing item.
+    const SExpr *optionalList(const char *tag) {
+      if (atEnd() || L.Items[I].K != SExpr::List || L.Items[I].Text != tag)
+        return nullptr;
+      return &L.Items[I++];
+    }
+
     /// The next field if it is `_` (consumed), else false.
     bool absent() {
       if (!atEnd() && L.Items[I].K == SExpr::Symbol && L.Items[I].Text == "_") {
@@ -377,13 +385,6 @@ private:
         return nullptr;
       }
       return e;
-    }
-
-    /// The next field if it is a list tagged @p tag (consumed), else null.
-    const SExpr *optionalList(const char *tag) {
-      if (atEnd() || L.Items[I].K != SExpr::List || L.Items[I].Text != tag)
-        return nullptr;
-      return &L.Items[I++];
     }
 
     /// The next field, which must be a list (any tag).
@@ -622,9 +623,10 @@ private:
       Fields pf(*this, p);
       const std::string *pname = pf.name("the parameter's name");
       Type *pty = pname ? type(pf, "the parameter's type") : nullptr;
-      if (!pty || !pf.done())
+      ParamMode mode = ParamMode::Value;
+      if (!pty || !paramMode(pf, mode) || !pf.done())
         return nullptr;
-      params.push_back({pname, pty});
+      params.push_back({pname, pty, mode});
     }
     Type *ret = nullptr;
     if (!f.absent()) {
@@ -650,6 +652,22 @@ private:
       return nullptr;
     return Ctx.make<FuncDecl>(loc, *name, std::move(params), ret, body,
                               std::move(tparams));
+  }
+
+  /// A parameter's optional trailing `(qual view)` / `(qual inout)` into
+  /// @p out; false (after failing) for any other `(qual ...)`.
+  bool paramMode(Fields &f, ParamMode &out) {
+    const SExpr *q = f.optionalList("qual");
+    if (!q)
+      return true;
+    const SExpr *v = q->Items.size() == 1 ? &q->Items[0] : nullptr;
+    for (ParamMode m : {ParamMode::View, ParamMode::Inout})
+      if (v && v->K == SExpr::Symbol && v->Text == paramModeName(m)) {
+        out = m;
+        return true;
+      }
+    fail(*q, "expected (qual view) or (qual inout)");
+    return false;
   }
 
   VarDecl *varDecl(const SExpr &e) {

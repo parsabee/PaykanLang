@@ -381,6 +381,41 @@ public:
     i.Args = {v.Op};
     emit(std::move(i));
   }
+
+  /// `local.addr %x`: the address of a scalar local.
+  Val localAddr(LocalId local, std::string name = "") {
+    Instr i;
+    i.Op = Opcode::LocalAddr;
+    i.Local = local;
+    i.Result = newValue(Type::Ptr, std::move(name));
+    return emit(std::move(i));
+  }
+  /// `field.addr %o, Class.field`: the address of a scalar field.
+  Val fieldAddr(const Val &obj, const std::string &className,
+                const std::string &field, std::string name = "") {
+    Instr i;
+    i.Op = Opcode::FieldAddr;
+    i.ClassName = className;
+    i.Field = field;
+    i.Result = newValue(Type::Ptr, std::move(name));
+    i.Args = {obj.Op};
+    return emit(std::move(i));
+  }
+  /// `ptr.load T, %p`: the @p ty value at the address @p ptr.
+  Val ptrLoad(const Val &ptr, Type ty, std::string name = "") {
+    Instr i;
+    i.Op = Opcode::PtrLoad;
+    i.Result = newValue(ty, std::move(name));
+    i.Args = {ptr.Op};
+    return emit(std::move(i));
+  }
+  /// `ptr.store %p, %v`
+  void ptrStore(const Val &ptr, const Val &v) {
+    Instr i;
+    i.Op = Opcode::PtrStore;
+    i.Args = {ptr.Op, v.Op};
+    emit(std::move(i));
+  }
 };
 
 } // namespace paykan::pir

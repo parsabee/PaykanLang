@@ -178,6 +178,11 @@ private:
       open("param");
       str(p.getName());
       type(p.ParamType);
+      if (p.Mode != ParamMode::Value) {
+        open("qual");
+        sym(paramModeName(p.Mode));
+        close();
+      }
       close();
     }
     close();
