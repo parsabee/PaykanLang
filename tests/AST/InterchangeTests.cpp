@@ -491,6 +491,44 @@ TEST(ASTInterchange, LetLocals) {
       << error;
 }
 
+// A local borrow is a `var` with a trailing `(qual view)` or
+// `(qual inout)`, and an initialiser.
+TEST(ASTInterchange, LocalBorrows) {
+  const std::string text =
+      "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
+      "(decl (var \"v\" _ (int 1) (qual view))) (decl (var \"i\" "
+      "(named-type \"int\") (ident \"v\") (qual inout)))))))";
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *tu = read(text, ctx, error);
+  ASSERT_NE(tu, nullptr) << error;
+  std::string d = dump(tu);
+  EXPECT_NE(d.find("VarDecl 'v' view\n"), std::string::npos) << d;
+  EXPECT_NE(d.find("VarDecl 'i' inout type\n"), std::string::npos) << d;
+  std::string written = write(*tu);
+  ast::ASTContext ctx2;
+  ast::TranslationUnit *back = read(written, ctx2, error);
+  ASSERT_NE(back, nullptr) << error;
+  EXPECT_EQ(dump(back), d);
+
+  struct Case {
+    const char *Var;
+    const char *Error;
+  };
+  for (const Case &c : {Case{"(var \"n\" (named-type \"int\") _ (qual view))",
+                             "a local borrow has an initialiser"},
+                        Case{"(var \"n\" _ (int 1) (qual view) (let))",
+                             "a local borrow cannot be let"},
+                        Case{"(var \"n\" _ (int 1) (qual mut))",
+                             "expected (qual view) or (qual inout)"}}) {
+    std::string doc = "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) "
+                      "_ (block (decl " +
+                      std::string(c.Var) + ")))))";
+    EXPECT_EQ(read(doc, ctx, error), nullptr) << c.Var;
+    EXPECT_NE(error.find(c.Error), std::string::npos) << c.Var << ": " << error;
+  }
+}
+
 TEST(Interchange, MovIsRemoved) {
   // `mov` is retired (#145): an out-of-tree frontend still emitting it gets
   // the same diagnostic as the built-in parser.

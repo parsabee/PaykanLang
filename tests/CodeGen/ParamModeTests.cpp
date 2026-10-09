@@ -255,3 +255,28 @@ TEST(ParamMode, InoutFieldsArePassedByAddress) {
   EXPECT_EQ(r.StdOut, "seen 2\n5 0 1 1 1\n");
   guard.expectNoLeaks("inout fields");
 }
+
+// -- Local borrows
+
+// A `view` local holds a copy of its initializer, of every value type, with
+// its type inferred or written.
+TEST(LocalBorrow, ViewLocalsOfValueTypes) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(
+    enum Color { Red, Green }
+    fn main() -> int {
+      k = 3;
+      v: view = k + 1;
+      w: view float = k;
+      c: view Color = Color::Green;
+      b: view = v > 2;
+      ch: view char = 'z';
+      println(Str(v) + " " + Str(w) + " " + Str(c == Color::Green) + " " +
+              Str(b) + " " + Str(ch));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "4 3 True True z\n");
+  guard.expectNoLeaks("view locals");
+}

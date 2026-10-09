@@ -643,8 +643,9 @@ private:
                               std::move(tparams));
   }
 
-  /// A parameter's optional trailing `(qual view)` / `(qual inout)` into
-  /// @p out; false (after failing) for any other `(qual ...)`.
+  /// A parameter's or a local borrow's optional `(qual view)` /
+  /// `(qual inout)` into @p out; false (after failing) for any other
+  /// `(qual ...)`.
   bool paramMode(Fields &f, ParamMode &out) {
     const SExpr *q = f.optionalList("qual");
     if (!q)
@@ -677,16 +678,26 @@ private:
       if (!init)
         return nullptr;
     }
-    // `let x = e;` carries a trailing (let), and has an initialiser.
+    // A local borrow (`x: view = e;`) carries (qual view) or (qual inout),
+    // and `let x = e;` a trailing (let); each has an initialiser.
+    ParamMode mode = ParamMode::Value;
+    if (!paramMode(f, mode))
+      return nullptr;
+    const bool borrow = mode != ParamMode::Value;
+    if (borrow && !init)
+      return fail(e, "a local borrow has an initialiser"), nullptr;
     const SExpr *let = f.optionalList("let");
     if (let && !let->Items.empty())
       return fail(*let, "(let) takes no fields"), nullptr;
     if (let && !init)
       return fail(*let, "a let declaration has an initialiser"), nullptr;
+    if (let && borrow)
+      return fail(*let, "a local borrow cannot be let"), nullptr;
     if (!f.done())
       return nullptr;
     auto *vd = Ctx.make<VarDecl>(loc, *name, ty, init);
     vd->setLet(let != nullptr);
+    vd->setMode(mode);
     return vd;
   }
 

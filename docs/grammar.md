@@ -202,6 +202,7 @@ statement ::= ";"
             | expression "=" expression ";"
             | varDecl "=" expression ";"
             | letDecl
+            | borrowDecl
             | destructureTargets "=" expression ";"
             | "return" expression? ";"
             | block
@@ -212,6 +213,7 @@ statement ::= ";"
             | matchStmt
 
 letDecl   ::= "let" IDENT ( ":" typeAnnotation )? "=" expression ";"
+borrowDecl ::= IDENT ":" ( "view" | "inout" ) typeAnnotation? "=" expression ";"
 
 ifStmt    ::= "if" "(" expression ")" block ( "else" ( block | ifStmt ) )?
 whileStmt ::= "while" "(" expression ")" block
@@ -241,6 +243,10 @@ literal   ::= INT | FLOAT | BOOL | CHAR | STRING | NONE
   The `VarDecl` and its `DeclStmt` start at `let`.  `let` starts nothing
   else: a parameter, a field, a type, a destructuring (`let a, b = t;`) or a
   `let` without an initializer is a syntax error.
+- `borrowDecl` declares a local borrow (`VarDecl::getMode`); its type, when
+  not written, is its initializer's.  It needs an initializer, is never
+  `let` (`let x: view = e;`) and is not a destructuring target.  With the
+  mode before the name (`view x = e;`) the syntax error shows the fix.
 - A statement that starts with `if` is an if-statement when the
   parenthesised condition is followed by `{`; otherwise it is an expression
   statement whose expression is a ternary (`if c then a else b;`).

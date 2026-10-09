@@ -277,12 +277,22 @@ public:
 
 // Variable declaration with explicit type (x: int = 10), or a `let` local
 // (let x = 10;), which cannot be reassigned.
+// How a parameter or a local is held
+// (docs/language/02-functions-and-calling.md, "Parameter modes"): by value (the
+// default), `view` (read-only) or `inout` (another name for the caller's
+// storage, or for a place).
+enum class ParamMode : uint8_t { Value, View, Inout };
+
+/// The keyword of @p m: "view" or "inout" ("" for Value).
+const char *paramModeName(ParamMode m);
+
 class VarDecl : public Decl {
 private:
   const std::string *Name; // points into ASTContext::StringPool (stable)
   Type *VarType;
   Expr *InitExpr;
   bool Let = false;
+  ParamMode Mode = ParamMode::Value; // `x: view = e;`, `x: inout = p;`
 
 public:
   VarDecl(SourceLocation loc, const std::string &internedName, Type *type,
@@ -302,15 +312,13 @@ public:
   bool isLet() const { return Let; }
   void setLet(bool let) { Let = let; }
 
+  /// A local borrow (docs/language/01-language-basics.md, "Local borrows"):
+  /// `view` or `inout`; Value for any other declaration.
+  ParamMode getMode() const { return Mode; }
+  void setMode(ParamMode mode) { Mode = mode; }
+
   static bool classof(const ASTNode *N) { return N->getKind() == NK_VarDecl; }
 };
-
-// How a parameter is passed (docs/language/02-functions-and-calling.md): by
-// value (the default), `view` (read-only) or `inout` (the caller's storage).
-enum class ParamMode : uint8_t { Value, View, Inout };
-
-/// The keyword of @p m: "view" or "inout" ("" for Value).
-const char *paramModeName(ParamMode m);
 
 // A single function parameter.
 struct Param {

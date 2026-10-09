@@ -1977,6 +1977,9 @@ bool Sema::checkReassignable(const std::string &name, ast::SourceLocation loc) {
   case VarKind::View:
     error(loc, "cannot assign to 'view' parameter '" + name + "'");
     return false;
+  case VarKind::ViewLocal:
+    error(loc, "cannot assign to 'view' local '" + name + "'");
+    return false;
   case VarKind::Plain:
   case VarKind::Inout:
     break;
@@ -2382,7 +2385,7 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   if (!node->getType())
     node->setType(declTy);
   CurrentScope->declare(node->getName(), declTy);
-  return true;
+  return checkLocalBorrow(node, declTy);
 }
 
 bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
