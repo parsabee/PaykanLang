@@ -451,6 +451,7 @@ public:
       std::string Name;
       std::string ReturnTypeName;
       std::vector<std::string> ParamTypeNames;
+      ast::ParamModes Modes; // `inout n: int`
       bool operator==(const FunctionInfo &) const = default;
     };
     std::vector<FunctionInfo> ExportedFunctions;
@@ -481,7 +482,8 @@ public:
         std::string Name;
         std::string ReturnTypeName;
         std::vector<std::string> ParamTypeNames;
-        uint8_t Flags = 0; // ast::MethodDecl::Private bit
+        uint8_t Flags = 0;     // ast::MethodDecl::Private bit
+        ast::ParamModes Modes; // `inout n: int`
         bool operator==(const MethodInfo &) const = default;
       };
       std::vector<FieldInfo> Fields;

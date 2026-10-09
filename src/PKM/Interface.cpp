@@ -71,6 +71,15 @@ void writeSig(ByteWriter &v, StringTable &strs, const std::string &ret,
     v.uleb(strs.intern(p));
 }
 
+/// `uleb n, (u8 mode, Str name)[n]`: a signature's parameter modes.
+void writeModes(ByteWriter &v, StringTable &strs, const ModeRecs &m) {
+  v.uleb(m.Modes.size());
+  for (size_t i = 0; i < m.Modes.size(); ++i) {
+    v.u8(m.Modes[i]);
+    v.uleb(strs.intern(i < m.Names.size() ? m.Names[i] : ""));
+  }
+}
+
 } // namespace
 
 std::vector<uint8_t> writeInterface(const Interface &iface) {
@@ -126,16 +135,24 @@ std::vector<uint8_t> writeInterface(const Interface &iface) {
         v.uleb(strs.intern(f.TypeName));
       }
       v.uleb(c->Methods.size());
+      bool modes = false;
       for (const ClassRec::Method &m : c->Methods) {
         v.uleb(strs.intern(m.Name));
         writeSig(v, strs, m.ReturnTypeName, m.ParamTypeNames);
         v.u8(m.Flags);
+        modes |= !m.Modes.Modes.empty();
       }
+      // Every method's modes, after the methods, when one has any.
+      if (modes)
+        for (const ClassRec::Method &m : c->Methods)
+          writeModes(v, strs, m.Modes);
     });
   for (const FuncRec *f : sortedByName(iface.Functions))
     record(decls, static_cast<uint64_t>(DeclTag::Func), [&](ByteWriter &v) {
       v.uleb(strs.intern(f->Name));
       writeSig(v, strs, f->ReturnTypeName, f->ParamTypeNames);
+      if (!f->Modes.Modes.empty())
+        writeModes(v, strs, f->Modes);
     });
 
   ByteWriter inst;
@@ -217,6 +234,25 @@ private:
     for (std::string &s : out)
       if (!str(r, s))
         return false;
+    return true;
+  }
+  /// A signature's parameter modes for its @p params parameters: none
+  /// or one per parameter, each a known mode.
+  bool modes(ByteReader &r, size_t params, ModeRecs &out) {
+    uint64_t n;
+    if (!detail::readCount(r, n, 2))
+      return false;
+    if (n != 0 && n != params)
+      return r.fail("modes for " + std::to_string(n) + " of " +
+                    std::to_string(params) + " parameters");
+    out.Modes.resize(static_cast<size_t>(n));
+    out.Names.resize(static_cast<size_t>(n));
+    for (size_t i = 0; i < out.Modes.size(); ++i) {
+      if (!r.u8(out.Modes[i]) || !str(r, out.Names[i]))
+        return false;
+      if (out.Modes[i] > kModeInout)
+        return r.fail("unknown parameter mode " + std::to_string(out.Modes[i]));
+    }
     return true;
   }
   /// `uleb count` then records; @p body gets (tag, payload reader) for a
@@ -410,6 +446,10 @@ Status Reader::readDecls(Interface &out) {
             if (!str(v, m.Name) || !str(v, m.ReturnTypeName) ||
                 !strList(v, m.ParamTypeNames) || !v.u8(m.Flags))
               return true;
+          if (v.remaining() > 0) // every method's modes
+            for (ClassRec::Method &m : c.Methods)
+              if (!modes(v, m.ParamTypeNames.size(), m.Modes))
+                return true;
           if (ordered(tag, c.Name))
             out.Classes.push_back(std::move(c));
           return true;
@@ -417,7 +457,10 @@ Status Reader::readDecls(Interface &out) {
         case DeclTag::Func: {
           FuncRec f;
           if (str(v, f.Name) && str(v, f.ReturnTypeName) &&
-              strList(v, f.ParamTypeNames) && ordered(tag, f.Name))
+              strList(v, f.ParamTypeNames) &&
+              (v.remaining() == 0 || // the modes
+               modes(v, f.ParamTypeNames.size(), f.Modes)) &&
+              ordered(tag, f.Name))
             out.Functions.push_back(std::move(f));
           return true;
         }
