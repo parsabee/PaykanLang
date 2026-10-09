@@ -291,7 +291,7 @@ TEST(Tuple, ClassInstanceElements) {
       x: int;
       y: int;
       fn __init__(x: int, y: int) { self.x = x; self.y = y; }
-      fn toString() -> Str {
+      view fn toString() -> Str {
         return "P(" + Str<int>(self.x) + "," + Str<int>(self.y) + ")";
       }
     }

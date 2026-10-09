@@ -278,7 +278,11 @@ bool Parser::errorAtCurrent(const std::string &expected) {
     hint = " (" + found +
            " only marks the type of a parameter or a local: 'fn f(x: " +
            std::string(t.Text) + " int)', 'y: " + std::string(t.Text) +
-           " = x;')";
+           " = x;'" +
+           (t.Kind == Tok::KwView
+                ? "; or a method that does not change 'self': 'view fn len()'"
+                : "") +
+           ")";
   else if (t.Kind == Tok::KwLet)
     hint = " ('let' only starts a local declaration: 'let x = 1;')";
   error(t.Loc, "unexpected " + found + "; " + expected + hint);
@@ -297,6 +301,10 @@ void Parser::skipToTopLevelBoundary() {
     switch (kind()) {
     case Tok::Eof:
       return;
+    case Tok::KwView:
+      if (depth == 0 && kind(1) == Tok::KwFn)
+        return;
+      break;
     case Tok::KwFn:
     case Tok::KwClass:
     case Tok::KwEnum:
@@ -324,6 +332,10 @@ void Parser::skipToMemberBoundary() {
     switch (kind()) {
     case Tok::Eof:
       return;
+    case Tok::KwView:
+      if (depth == 0 && kind(1) == Tok::KwFn)
+        return;
+      break;
     case Tok::KwFn:
       if (depth == 0)
         return;
@@ -412,6 +424,14 @@ TranslationUnit *Parser::parseTranslationUnit() {
       else
         ok = false;
       break;
+    case Tok::KwView:
+      if (kind(1) != Tok::KwFn) {
+        errorAtCurrent("expected 'import', 'class', 'enum' or 'fn' at top "
+                       "level");
+        ok = false;
+        break;
+      }
+      [[fallthrough]]; // `view fn`: Sema says only a method can be one
     case Tok::KwFn:
       if (auto *d = parseFuncDecl())
         (d->isGeneric() ? genericFuncs : funcs).push_back(d);
@@ -590,7 +610,7 @@ ClassDecl *Parser::parseClassDecl() {
   bool ok = true;
   while (!at(Tok::RBrace) && !at(Tok::Eof)) {
     size_t before = Pos;
-    if (at(Tok::KwFn)) {
+    if (at(Tok::KwFn) || (at(Tok::KwView) && kind(1) == Tok::KwFn)) {
       if (auto *m = parseFuncDecl()) {
         body.Methods.push_back(m);
         continue;
@@ -648,7 +668,7 @@ EnumDecl *Parser::parseEnumDecl() {
 
 // -- Functions
 //
-// funcDecl ::= "fn" IDENT ( "<" typeParamList ">" )? "(" paramList ")"
+// funcDecl ::= "view"? "fn" IDENT ( "<" typeParamList ">" )? "(" paramList ")"
 //              ( "->" typeAnnotation )? block
 // paramList ::= ( param ( "," param )* )?
 // param ::= IDENT ":" ( "view" | "inout" )? typeAnnotation
@@ -701,7 +721,9 @@ void Parser::prefixModeError() {
 }
 
 FuncDecl *Parser::parseFuncDecl() {
-  SourceLocation start = consume().Loc; // "fn"
+  SourceLocation start = cur().Loc;
+  bool view = accept(Tok::KwView); // `view fn` (only a method; see Sema)
+  consume();                       // "fn"
   if (!at(Tok::Ident)) {
     errorAtCurrent("expected a function name after 'fn'");
     return nullptr;
@@ -732,8 +754,10 @@ FuncDecl *Parser::parseFuncDecl() {
   CompoundStmt *body = parseBlock();
   if (!body)
     return nullptr;
-  return Ctx.make<FuncDecl>(span(start), name, std::move(params), retTy, body,
-                            std::move(typeParams));
+  auto *fn = Ctx.make<FuncDecl>(span(start), name, std::move(params), retTy,
+                                body, std::move(typeParams));
+  fn->setView(view);
+  return fn;
 }
 
 // -- Blocks and statements

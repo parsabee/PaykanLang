@@ -1050,8 +1050,8 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     return method->getReturnType();
   }
 
-  // Only a method that only reads may be called on a `view`.
-  S.checkMethodReceiver(node, ct, method);
+  // Only a `view fn` may be called on a `view`.
+  S.checkMethodReceiver(node, method);
 
   // Type-check arguments (receiver is implicit — not in getArguments()).
   const auto &paramTys = method->getParamTypes();
@@ -1829,7 +1829,7 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
 // -- Top-level
 
 bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
-  bool ok = true;
+  bool ok = rejectFreeViewFns(node);
 
   // Register enum types first so that class fields, parameters, and variable
   // declarations can reference them by name during the passes that follow.

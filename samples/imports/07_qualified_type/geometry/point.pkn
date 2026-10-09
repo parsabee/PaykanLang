@@ -8,7 +8,7 @@ class Point {
     self.y = y;
   }
   fn sum() -> int { return self.x + self.y; }
-  fn toString() -> Str {
+  view fn toString() -> Str {
     return "(" + Str<int>(self.x) + "," + Str(self.y) + ")";
   }
 }

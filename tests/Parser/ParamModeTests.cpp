@@ -163,3 +163,40 @@ TEST(LocalBorrow, Errors) {
     EXPECT_NE(errs.find(c[1]), std::string::npos) << src << "\n" << errs;
   }
 }
+
+// `view fn` marks a method that does not change `self`.  A free `view fn`
+// parses (Sema rejects it); `view` before anything but `fn` at the top level
+// is a syntax error.
+TEST(ViewFn, MarksAMethod) {
+  auto [ok, driver] = parse(R"(
+    class C {
+      n: int;
+      view fn get() -> int { return self.n; }
+      fn set(v: int) { self.n = v; }
+    }
+    view fn free() { }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(ok);
+  const auto &methods = driver->getRoot()->getClassDecls()[0]->getMethods();
+  EXPECT_TRUE(methods[0]->isView());
+  EXPECT_FALSE(methods[1]->isView());
+  EXPECT_TRUE(driver->getRoot()->getFuncDecls()[0]->isView());
+  std::string ast = dumpAST(*driver);
+  EXPECT_NE(ast.find("FuncDecl <4:7-4:46> view 'get' ->\n"), std::string::npos)
+      << ast;
+
+  for (const char *src : {"view class C { }\nfn main() -> int { return 0; }",
+                          "class C { view n: int; }\nfn main() -> int { "
+                          "return 0; }"}) {
+    auto [bad, _] = parse(src);
+    EXPECT_FALSE(bad) << src;
+  }
+  if (testFrontend() != "recursive-descent")
+    return;
+  EXPECT_NE(parseErrors("fn main() -> int { return view; }")
+                .find("('view' only marks the type of a parameter or a local: "
+                      "'fn f(x: view int)', 'y: view = x;'; or a method that "
+                      "does not change 'self': 'view fn len()')"),
+            std::string::npos);
+}

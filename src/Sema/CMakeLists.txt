@@ -5,6 +5,7 @@ add_library(paykan_sema STATIC
     SemaClass.cpp
     SemaImport.cpp
     SemaParamModes.cpp
+    SemaViewFn.cpp
     SemaViews.cpp
     SemaBorrows.cpp
 )

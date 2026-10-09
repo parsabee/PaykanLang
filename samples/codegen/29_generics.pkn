@@ -12,7 +12,7 @@ class Box<T> {
   fn __init__(v: T) { self.v = v; }
   fn get() -> T { return self.v; }
   fn set(v: T) { self.v = v; }
-  fn equals(other: Obj) -> bool {
+  view fn equals(other: Obj) -> bool {
     match other {
       o: Box<T> { return o.get() == self.v; }
       _ { return False; }

@@ -73,6 +73,7 @@ add_executable(sema_tests
     Sema/InterfaceConversionTests.cpp
     Sema/ParamModeTests.cpp
     Sema/LetTests.cpp
+    Sema/ViewFnTests.cpp
 )
 target_include_directories(sema_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}

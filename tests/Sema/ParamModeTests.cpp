@@ -112,8 +112,8 @@ fn main() -> int {
 }
 
 // What a `view` parameter holds cannot change through it, whatever its type:
-// no field or element write, no call of a method that may change it (`push`
-// included), no `inout` argument.  Reads and the methods that only read are
+// no field or element write, no call of a method that is not a `view fn`
+// (`push` included), no `inout` argument.  Reads and `view fn` calls are
 // fine.
 TEST(ParamMode, ViewReferenceParameters) {
   auto r = semaCheck(R"(class Counter {
@@ -137,10 +137,10 @@ fn look(c: view Counter, s: view Str, xs: view int[]) -> int {
 fn main() -> int { return 0; })");
   EXPECT_EQ(r.ErrorCount, 7u) << r.Diagnostics;
   expectErrors(
-      r, {":9:3: error: 'c' is a 'view' parameter; 'tick' may change it",
+      r, {":9:3: error: 'c' is a 'view' parameter; 'tick' is not a 'view fn'",
           ":10:3: error: 'c' is a 'view' parameter; cannot assign to its "
           "field 'n'",
-          ":11:3: error: 'xs' is a 'view' parameter; 'push' may change it",
+          ":11:3: error: 'xs' is a 'view' parameter; 'push' is not a 'view fn'",
           ":12:3: error: 'xs' is a 'view' parameter; cannot assign to its "
           "elements",
           ":13:3: error: cannot assign to 'view' parameter 's'",
@@ -456,15 +456,15 @@ fn main() -> int {
 }
 
 // Nothing reached through a `view` local of an object, string or array can
-// change: no field or element write, no `inout` argument, and only the
-// methods that only read (`toString`, an override of it, `len`) can be called
-// on it.  A `match` arm's name for it is a `view` too.
+// change: no field or element write, no `inout` argument, and only a
+// `view fn` (`toString`, an override of it, `len`) can be called on it.  A
+// `match` arm's name for it is a `view` too.
 TEST(LocalBorrow, ViewOfReferenceTypes) {
   auto r = semaCheck(R"(class Counter {
   n: int;
   fn __init__() { self.n = 0; }
   fn tick() { self.n = self.n + 1; }
-  fn toString() -> Str { return "c" + Str(self.n); }
+  view fn toString() -> Str { return "c" + Str(self.n); }
 }
 fn bump(n: inout int) { n = n + 1; }
 fn main() -> int {
@@ -483,15 +483,15 @@ fn main() -> int {
 })");
   EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
   expectErrors(
-      r, {":10:3: error: 'v' is a 'view' local; 'tick' may change it",
+      r, {":10:3: error: 'v' is a 'view' local; 'tick' is not a 'view fn'",
           ":11:3: error: 'v' is a 'view' local; cannot assign to its field 'n'",
           ":12:8: error: 'v' is a 'view' local; it cannot be passed to "
           "'inout' parameter 'n'",
-          ":14:3: error: 's' is a 'view' local; 'concat' may change it",
-          ":16:3: error: 'a' is a 'view' local; 'push' may change it",
+          ":14:3: error: 's' is a 'view' local; 'concat' is not a 'view fn'",
+          ":16:3: error: 'a' is a 'view' local; 'push' is not a 'view fn'",
           ":17:3: error: 'a' is a 'view' local; cannot assign to its "
           "elements",
-          ":18:26: error: 'x' is bound to a 'view'; 'tick' may change it",
+          ":18:26: error: 'x' is bound to a 'view'; 'tick' is not a 'view fn'",
           ":18:36: error: cannot assign to 'x': it is bound to a "
           "'view'"});
 }
@@ -630,7 +630,7 @@ fn main() -> int {
   for (const std::string &diag :
        {std::string(":12:7: error: 'k' is borrowed by 'inout' local 'x' until "
                     "'x' is last used"),
-        ":17:3: " + kViewed + "'tick' may change it",
+        ":17:3: " + kViewed + "'tick' is not a 'view fn'",
         ":18:3: " + kViewed + "cannot assign to its field 'n'",
         ":19:3: " + kViewed + "it cannot be assigned",
         ":20:10: " + kViewed +

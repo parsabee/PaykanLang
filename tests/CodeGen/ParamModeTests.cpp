@@ -396,7 +396,7 @@ TEST(LocalBorrow, ViewLocalsOfReferenceTypes) {
     class Counter {
       n: int;
       fn __init__(n: int) { self.n = n; }
-      fn toString() -> Str { return "counter " + Str(self.n); }
+      view fn toString() -> Str { return "counter " + Str(self.n); }
     }
     class Fast : Counter { fn __init__(n: int) { __super__(n); } }
     fn main() -> int {

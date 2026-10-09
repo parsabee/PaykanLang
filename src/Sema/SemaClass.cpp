@@ -478,8 +478,16 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       }
     }
 
+    // `view fn`: not on __init__, and kept by an override.
+    const ast::MethodDecl *overridden = nullptr;
+    if (method->getName() != names::kMethodInit && ct->getSuperClass())
+      overridden = ct->getSuperClass()->findMethod(method->getName());
+    if (!checkViewFnDecl(method, overridden))
+      ok = false;
+
     auto *mdecl = Ctx.make<ast::MethodDecl>(
-        method->getLocation(), method->getName(), retTy, std::move(paramTys));
+        method->getLocation(), method->getName(), retTy, std::move(paramTys),
+        method->isView() ? ast::MethodDecl::View : ast::MethodDecl::None);
     mdecl->setParamModes(ast::paramModes(method->getParams()));
     ct->addMethod(mdecl);
   }

@@ -605,8 +605,8 @@ TEST(Class, OverrideToStringAndEqualsAccepted) {
     class Person {
       name: Str;
       fn __init__(n: Str) { self.name = n; }
-      fn toString() -> Str { return self.name; }
-      fn equals(other: Obj) -> bool { return True; }
+      view fn toString() -> Str { return self.name; }
+      view fn equals(other: Obj) -> bool { return True; }
     }
     fn main() -> int { return 0; }
   )");
@@ -726,7 +726,7 @@ TEST(Class, InitMissingFieldRejected) {
       x: int;
       y: int;
       fn __init__(a: int) { self.x = a; }
-      fn toString() -> Str { return Str<int>(self.x) + Str<int>(self.y); }
+      view fn toString() -> Str { return Str<int>(self.x) + Str<int>(self.y); }
     }
     fn main() -> int { return 0; }
   )");
