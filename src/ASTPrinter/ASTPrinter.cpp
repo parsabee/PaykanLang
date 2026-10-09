@@ -202,6 +202,8 @@ void ASTPrinter::visitContinueStmt(ContinueStmt *node) {
 void ASTPrinter::visitVarDecl(VarDecl *node) {
   header("VarDecl", node);
   OS << " '" << node->getName() << "'";
+  if (node->isLet())
+    OS << " let";
   if (node->getType())
     OS << " type";
   OS << "\n";

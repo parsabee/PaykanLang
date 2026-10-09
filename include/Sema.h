@@ -76,11 +76,18 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   // -- Scoped symbol table
 
+  /// What restricts a variable beyond its type: nothing, `let` (it cannot be
+  /// reassigned), or a parameter mode: `view` (it cannot be changed) or
+  /// `inout` (it is the caller's storage).
+  enum class VarKind : uint8_t { Plain, Let, View, Inout };
+
   /// A single lexical scope. Each scope has its own local bindings and a
   /// pointer to its enclosing (parent) scope.
   struct Scope {
     Scope *Parent = nullptr;
     StringMap<ast::Type *> Locals;
+    /// The kind of each variable bound here that is not Plain.
+    StringMap<VarKind> Kinds;
 
     explicit Scope(Scope *parent = nullptr);
 
@@ -102,6 +109,11 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   };
 
   Scope *CurrentScope = nullptr;
+
+  /// The kind of variable @p name where it is bound (innermost first).
+  VarKind varKind(std::string_view name) const;
+  /// Error at @p loc (and false) unless variable @p name may be assigned.
+  bool checkReassignable(const std::string &name, ast::SourceLocation loc);
 
   /// The expected return type of the current function (nullptr = top-level /
   /// void).
@@ -136,6 +148,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// user-declared name never contains the module qualifier, a builtin entry
     /// found under a plain declared name is always a compiler builtin.
     bool IsBuiltin = false;
+    /// The parameters' modes: a user function's, or a constructor's
+    /// `__init__`'s.
+    ast::ParamModes Modes;
   };
 
   /// Maps function names to their signatures.
@@ -552,10 +567,36 @@ private:
   /// Process a single import declaration.
   bool processImport(ast::ImportDecl *node);
 
-  /// `view` and `inout` parameters parse, but nothing checks or lowers them
-  /// yet: report every one, in every function and method of @p tu (generic
-  /// ones too), as not supported.
-  bool rejectParamModes(ast::TranslationUnit *tu);
+  // -- `view` and `inout` parameters (SemaParamModes.cpp)
+
+  /// `inout` parameters are checked but not lowered yet: report every one,
+  /// in every function and method of @p tu (generic ones too).
+  bool rejectInoutParams(ast::TranslationUnit *tu);
+  /// True for the types a parameter mode applies to: int, float, bool, char
+  /// and enums.
+  static bool isValueType(const ast::Type *ty);
+  /// Error for each `view` / `inout` parameter of @p fn whose type (in
+  /// @p paramTys) is not a value type.
+  bool checkParamModeTypes(const ast::FuncDecl *fn,
+                           const std::vector<ast::Type *> &paramTys);
+  /// Error for each `view` / `inout` parameter of the template @p fn whose
+  /// type is one of its @p typeParams.
+  bool checkTemplateParamModes(const ast::FuncDecl *fn,
+                               const std::vector<const std::string *> &tps);
+  /// Record the kinds of @p fn's `view` / `inout` parameters, just declared
+  /// in the current scope.
+  void declareParamKinds(const ast::FuncDecl *fn);
+  /// An override @p method keeps each parameter's mode of @p base.
+  bool checkOverrideModes(const ast::FuncDecl *method,
+                          const ast::MethodDecl *base);
+  /// The arguments @p args of a call of @p callee whose parameters have the
+  /// modes @p modes and the types @p paramTys: an `inout` parameter takes a
+  /// variable or a field of exactly its type, never a `view` parameter or a
+  /// `let` local.  Arguments of the wrong type were reported already.
+  bool checkInoutArgs(const ast::ParamModes &modes,
+                      const std::vector<ast::Type *> &paramTys,
+                      const std::vector<ast::Expr *> &args,
+                      const std::string &callee);
 
   /// Register classes: names, hierarchy, field types, method signatures, and
   /// constructors (phases 1–4b).  Method bodies are deferred to

@@ -53,7 +53,7 @@ Keywords (reserved; never identifiers):
 
 ```
 import  as  class  enum  match  mov  fn  native  return  if  then  else
-while  break  continue  True  False  None  _  view  inout
+while  break  continue  True  False  None  _  view  inout  let
 ```
 
 `_` alone is the `UNDERSCORE` token (destructuring skip, match wildcard);
@@ -203,6 +203,7 @@ statement ::= ";"
             | expression ";"
             | expression "=" expression ";"
             | varDecl "=" expression ";"
+            | letDecl
             | destructureTargets "=" expression ";"
             | "return" expression? ";"
             | block
@@ -211,6 +212,8 @@ statement ::= ";"
             | "break" ";"
             | "continue" ";"
             | matchStmt
+
+letDecl   ::= "let" IDENT ( ":" typeAnnotation )? "=" expression ";"
 
 ifStmt    ::= "if" "(" expression ")" block ( "else" ( block | ifStmt ) )?
 whileStmt ::= "while" "(" expression ")" block
@@ -235,6 +238,11 @@ literal   ::= INT | FLOAT | BOOL | CHAR | STRING | NONE
   field access, or subscript`.
 - `varDecl "=" expression` is a declaration with an initializer; a bare
   `x: int;` is not a statement.
+- `letDecl` declares one local that cannot be reassigned
+  (`VarDecl::isLet`); its type, when not written, is its initializer's.
+  The `VarDecl` and its `DeclStmt` start at `let`.  `let` starts nothing
+  else: a parameter, a field, a type, a destructuring (`let a, b = t;`) or a
+  `let` without an initializer is a syntax error.
 - A statement that starts with `if` is an if-statement when the
   parenthesised condition is followed by `{`; otherwise it is an expression
   statement whose expression is a ternary (`if c then a else b;`).

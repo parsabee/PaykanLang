@@ -84,7 +84,7 @@ or more.
 | `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? BLOCK)` | a function or method; the `TYPE` is the return type, `_` for none |
 | `(fn LOC NAME (type-params) (params PARAM...) TYPE? (native STRING))` | a `native fn` (#198): the C symbol in place of the body; never generic |
 | `(param NAME TYPE QUAL?)` | one parameter; `QUAL` is its mode, `(qual view)` or `(qual inout)`, absent for an ordinary (by-value) parameter: `inout n: int` is `(param "n" (named-type "int") (qual inout))` |
-| `(var LOC NAME TYPE? EXPR?)` | a variable or field declaration: `x: int = 1` is `(var "x" (named-type "int") (int 1))` |
+| `(var LOC NAME TYPE? EXPR? LET?)` | a variable or field declaration: `x: int = 1` is `(var "x" (named-type "int") (int 1))`. `LET` is `(let)` for a `let` local, which has an initialiser and is never a field: `let n = 1;` is `(var "n" _ (int 1) (let))` |
 
 ### Types
 
@@ -191,7 +191,7 @@ it.
 field removed, renamed or changed in meaning, or a node a reader must handle
 added (a new language construct). Within one version the format does not
 change, except for optional trailing items that only new constructs use: a
-parameter's `(qual ...)`. They keep the version, because every document that
+parameter's `(qual ...)` and a local's `(let)`. They keep the version, because every document that
 was valid stays valid and means the same, and a reader that predates an item
 rejects a document that uses it (an unexpected field) instead of misreading
 it. The core's tests write and read back the AST of every program in the

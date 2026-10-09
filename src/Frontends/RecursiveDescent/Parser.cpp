@@ -277,6 +277,8 @@ bool Parser::errorAtCurrent(const std::string &expected) {
   if (t.Kind == Tok::KwView || t.Kind == Tok::KwInout)
     hint = " (" + found + " only marks a parameter: 'fn f(" +
            std::string(t.Text) + " x: int)')";
+  else if (t.Kind == Tok::KwLet)
+    hint = " ('let' only starts a local declaration: 'let x = 1;')";
   error(t.Loc, "unexpected " + found + "; " + expected + hint);
   return true;
 }
@@ -784,9 +786,9 @@ void Parser::parseStatementsUntilBrace(CompoundStmt *into) {
 }
 
 // statement ::= ";" | expression ";" | expression "=" expression ";"
-//             | varDecl "=" expression ";" | destructure | "return" expr? ";"
-//             | block | ifStmt | whileStmt | "break" ";" | "continue" ";"
-//             | matchStmt
+//             | varDecl "=" expression ";" | letDecl | destructure
+//             | "return" expr? ";" | block | ifStmt | whileStmt | "break" ";"
+//             | "continue" ";" | matchStmt
 bool Parser::parseStatement(Stmt *&out) {
   out = nullptr;
   SourceLocation start = cur().Loc;
@@ -845,6 +847,9 @@ bool Parser::parseStatement(Stmt *&out) {
   case Tok::Underscore:
     return parseDestructureStatement(start, {}, out);
 
+  case Tok::KwLet:
+    return parseLetDecl(out);
+
   case Tok::Ident: {
     // After a leading name the next token decides: `,` starts a
     // destructuring statement, `:` a typed declaration (which may itself be
@@ -883,6 +888,41 @@ bool Parser::parseStatement(Stmt *&out) {
   default:
     return parseExprOrAssignStatement(out);
   }
+}
+
+// letDecl ::= "let" IDENT ( ":" typeAnnotation )? "=" expression ";"
+bool Parser::parseLetDecl(Stmt *&out) {
+  SourceLocation start = consume().Loc; // "let"
+  if (!at(Tok::Ident)) {
+    errorAtCurrent("expected a variable name after 'let'");
+    return false;
+  }
+  const std::string &name = intern(consume().Text);
+  Type *ty = nullptr;
+  if (accept(Tok::Colon)) {
+    ty = parseTypeAnnotation();
+    if (!ty)
+      return false;
+  }
+  if (at(Tok::Comma)) {
+    error(cur().Loc, "'let' declares one variable; destructuring with 'let' "
+                     "is not supported yet");
+    return false;
+  }
+  if (!expect(Tok::Assign, "(a 'let' declaration needs an initial value)"))
+    return false;
+  Expr *init = parseExpression();
+  if (!init)
+    return false;
+  // Like a typed declaration, the VarDecl ends with its initializer and the
+  // `;` is only part of the statement; both start at `let`.
+  auto *vd = Ctx.make<VarDecl>(span(start), name, ty, init);
+  vd->setLet(true);
+  auto *ds = Ctx.make<DeclStmt>(span(start), vd);
+  if (!expect(Tok::Semi, "after the declaration"))
+    return false;
+  out = ds;
+  return true;
 }
 
 bool Parser::parseExprOrAssignStatement(Stmt *&out) {
