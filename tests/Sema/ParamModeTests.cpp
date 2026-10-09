@@ -145,9 +145,8 @@ fn main() -> int { return 0; })");
                    "parameter 'k'"});
 }
 
-// The arguments of an `inout` parameter: a variable or a field of exactly
-// its type, not a `view` parameter or a `let` local.  (`inout` parameters
-// are not lowered yet, so their declarations are errors too.)
+// The arguments of an `inout` parameter: a variable of exactly its type, not
+// a `view` parameter or a `let` local.  (A field cannot be passed yet.)
 TEST(ParamMode, InoutArguments) {
   auto r = semaCheck(R"(class C {
   n: int;
@@ -193,28 +192,15 @@ fn main() -> int { return 0; })");
        "'n' yet",
        ":20:7: error: a character of a string cannot be passed to 'inout' "
        "parameter 'c'",
+       ":24:8: error: a field cannot be passed to 'inout' parameter 'n' yet",
        ":25:10: error: 'k' is declared with 'let' and cannot be passed to "
        "'inout' parameter 'n'",
        ":26:8: error: argument 1 of 'bump' has type 'Str', expected 'int'"});
-  // Plain and `inout` parameters, variables and fields are accepted.
-  for (const char *line : {":21:", ":22:", ":23:", ":24:"})
+  EXPECT_EQ(r.ErrorCount, 10u) << r.Diagnostics;
+  // Plain and `inout` parameters and variables are accepted.
+  for (const char *line : {":21:", ":22:", ":23:"})
     EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
                                                            << r.Diagnostics;
-}
-
-// Checked, but not lowered yet: every `inout` parameter is an error, in
-// functions, methods, constructors and generic templates alike.
-TEST(ParamMode, InoutIsNotSupportedYet) {
-  auto r = semaCheck(R"(
-    fn bump(inout n: int) { }
-    fn second<T>(xs: T[], inout i: int) { }
-    class C { fn __init__(inout n: int) { } }
-    fn main() -> int { return 0; }
-  )");
-  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
-  expectErrors(r, {":2:5: error: 'inout' parameters are not supported yet",
-                   ":3:5: error: 'inout' parameters are not supported yet",
-                   ":4:15: error: 'inout' parameters are not supported yet"});
 }
 
 // Modes travel with a module's exports: an override in another module keeps
@@ -233,8 +219,8 @@ fn main() -> int { return base::twice(3); })"));
   expectErrors(r, {":2:29: error: override of 'add' must keep 'view' on "
                    "parameter 'k'"});
 
-  // `inout` across modules, through a module whose exports carry them (a
-  // module of this stage cannot declare one yet).
+  // `inout` across modules, through a module cache entry whose exports carry
+  // them.
   auto lib = writeModule(dir, "lib.pkn", "fn real() -> int { return 1; }\n");
   using paykan::ast::ParamMode;
   using Info = paykan::sema::Sema::ModuleInfo;
@@ -263,7 +249,7 @@ fn main() -> int {
   b.put(b.v + 1);
   x = 1;
   lib::bump(x);
-  b.put(b.v);
+  b.put(x);
   return 0;
 })"));
   paykan::sema::Sema::ModuleCache.erase(key);

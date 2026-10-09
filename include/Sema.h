@@ -571,9 +571,6 @@ private:
 
   // -- `view` and `inout` parameters (SemaParamModes.cpp)
 
-  /// `inout` parameters are checked but not lowered yet: report every one,
-  /// in every function and method of @p tu (generic ones too).
-  bool rejectInoutParams(ast::TranslationUnit *tu);
   /// True for the types a parameter mode applies to: int, float, bool, char
   /// and enums.
   static bool isValueType(const ast::Type *ty);

@@ -12,25 +12,6 @@
 namespace paykan {
 namespace sema {
 
-bool Sema::rejectInoutParams(ast::TranslationUnit *tu) {
-  bool ok = true;
-  auto check = [&](const ast::FuncDecl *fn) {
-    for (const ast::Param &p : fn->getParams())
-      if (p.Mode == ast::ParamMode::Inout) {
-        error(fn->getLocation(), "'inout' parameters are not supported yet");
-        ok = false;
-      }
-  };
-  for (auto *fns : {&tu->getFuncDecls(), &tu->getGenericFuncDecls()})
-    for (auto *fn : *fns)
-      check(fn);
-  for (auto *cds : {&tu->getClassDecls(), &tu->getGenericClassDecls()})
-    for (auto *cd : *cds)
-      for (auto *m : cd->getMethods())
-        check(m);
-  return ok;
-}
-
 bool Sema::isValueType(const ast::Type *ty) {
   if (ast::isa<ast::EnumType>(ty))
     return true;
@@ -128,6 +109,8 @@ bool Sema::checkInoutArgs(const ast::ParamModes &modes,
     } else if (!id && !ast::isa<ast::MemberAccessExpr>(arg)) {
       msg = argN + " must be a variable or a field: parameter '" +
             modes.name(i) + "' is 'inout'";
+    } else if (!id) {
+      msg = "a field cannot be passed to " + param + " yet";
     } else if (!typesEqual(argTy, paramTys[i])) {
       // The callee reads and writes the storage as the parameter's type, so
       // no conversion (int -> float) can happen on the way.

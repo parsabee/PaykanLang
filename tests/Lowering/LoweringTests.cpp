@@ -203,6 +203,34 @@ TEST(Lowering, UserCallRetainsAVariableArgument) {
   EXPECT_NE(m.find("local %n"), std::string::npos) << m;
 }
 
+// An `inout` parameter is a `ptr` to the caller's storage: the callee reads
+// and writes through it, a caller passes a variable's address or passes its
+// own `inout` parameter on, and a `view` parameter is an ordinary value.
+TEST(Lowering, InoutParameterIsAPointer) {
+  auto l = lower(R"(
+    fn bump(inout n: int, view by: int) { n = n + by; }
+    fn twice(inout n: int) { bump(n, 1); bump(n, 1); }
+    fn main() -> int {
+      k = 1;
+      twice(k);
+      return k;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string bump = function(l.Text, "bump");
+  EXPECT_NE(bump.find("fn @bump(%n.1: ptr, %by.2: i64) -> void"),
+            std::string::npos)
+      << bump;
+  EXPECT_EQ(count(bump, " = ptr.load i64, "), 1u) << bump;
+  EXPECT_EQ(count(bump, "ptr.store "), 1u) << bump;
+  std::string twice = function(l.Text, "twice");
+  EXPECT_EQ(count(twice, "local.addr"), 0u) << twice; // passed on
+  EXPECT_EQ(count(twice, "call @bump("), 2u) << twice;
+  std::string m = function(l.Text, "main");
+  EXPECT_NE(m.find(" = local.addr %k"), std::string::npos) << m;
+  EXPECT_EQ(count(m, "ptr."), 0u) << m;
+}
+
 TEST(Lowering, FreshCallResultIsStoredWithoutRetain) {
   auto l = lower(R"(
     fn mk() -> Str { return "x"; }
