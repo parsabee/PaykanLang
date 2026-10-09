@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `let` local declarations: `let n = 3;` and `let s: Str = "a";` declare a variable
+  that cannot be reassigned (`'n' is declared with 'let' and cannot be reassigned`),
+  neither by assignment nor by destructuring.  `let` needs an initializer and applies to
+  local declarations only; it fixes the variable, not the object it refers to.  `let` is
+  a reserved word now.  In the AST interchange format a `let` local carries `(let)`.
+
 - Imported modules are compiled to `.pkm` module files (docs/design/pkm.md, prototype of
   phase A): the module's interface, its PIR and a manifest, portable across backends.
   A program's imports are cached as `.paykan_cache/<module>.pkm` and reused while the
@@ -36,7 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `view` and `inout` are reserved words: they start a parameter
   (`fn bump(inout n: int)`, docs/grammar.md §4) and are a syntax error
-  anywhere else.  Sema does not accept parameter modes yet.
+  anywhere else.  A `view` parameter (of type int, float, bool, char or an
+  enum) is a read-only copy: assigning to it is an error, and an override
+  keeps every parameter's mode.  `inout` parameters are checked but not
+  supported yet.
 - PIR: four address instructions, `local.addr`, `field.addr`, `ptr.load` and
   `ptr.store` (docs/pir.md §6), which `inout` parameters will lower to.  Only
   scalar (`i64`, `f64`, `bool`, `char`) slots have addresses.  A backend plugin

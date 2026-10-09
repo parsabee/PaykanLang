@@ -52,6 +52,21 @@ TEST(Native, OtherTypesCannotCross) {
   }
 }
 
+TEST(Native, ParametersCannotHaveModes) {
+  for (const char *decl : {
+           "native fn f(view n: int) -> int = \"pk_f\";",
+           "native fn f(view s: Str) -> int = \"pk_f\";",
+           "native fn f(inout n: int) = \"pk_f\";",
+       }) {
+    auto r = semaCheck(std::string(decl) + "\nfn main() -> int { return 0; }");
+    EXPECT_FALSE(r.Ok) << decl;
+    EXPECT_NE(r.Diagnostics.find("a native function's parameters are copies"),
+              std::string::npos)
+        << decl << "\n"
+        << r.Diagnostics;
+  }
+}
+
 TEST(Native, MainCannotBeNative) {
   auto r = semaCheck("native fn main() -> int = \"pk_main\";");
   EXPECT_FALSE(r.Ok);

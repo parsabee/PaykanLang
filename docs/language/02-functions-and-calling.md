@@ -129,6 +129,7 @@ convention:
 | `Str?`, `Obj?` result | `PaykanShared *` | owned (+1); `NULL` is `None` |
 
 A native function cannot be generic, cannot be a method, and cannot be `main`.
+Its parameters are copies: `view` and `inout` don't apply to it yet (#21).
 
 `paykan` does not build native code: you compile it however you like (any
 compiler, flags or language that produces C-ABI symbols) and pass the objects
