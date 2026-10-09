@@ -547,22 +547,22 @@ struct ModesProject {
     fs::remove_all(Dir);
     writeFile(Dir / "base.pkn",
               "class Counter { n: int;\n"
-              "  fn __init__(view start: int) { self.n = start; }\n"
-              "  fn add(view k: int) -> int { self.n = self.n + k;\n"
+              "  fn __init__(start: view int) { self.n = start; }\n"
+              "  fn add(k: view int) -> int { self.n = self.n + k;\n"
               "    return self.n; }\n"
-              "  fn take(inout to: int) { to = to + self.n; } }\n"
+              "  fn take(to: inout int) { to = to + self.n; } }\n"
               "class Cell { v: int;\n"
-              "  fn __init__(inout v: int) { self.v = v; v = 0; } }\n"
-              "fn twice(view n: int) -> int { return n * 2; }\n"
-              "fn bump(inout n: int) { n = n + 1; }\n");
+              "  fn __init__(v: inout int) { self.v = v; v = 0; } }\n"
+              "fn twice(n: view int) -> int { return n * 2; }\n"
+              "fn bump(n: inout int) { n = n + 1; }\n");
     writeFile(
         Dir / "main.pkn",
         "import base;\n"
         "class Fast : base::Counter {\n"
-        "  fn __init__(view s: int) { __super__(s); }\n"
-        "  fn add(view k: int) -> int { self.n = self.n + 10 * k;\n"
+        "  fn __init__(s: view int) { __super__(s); }\n"
+        "  fn add(k: view int) -> int { self.n = self.n + 10 * k;\n"
         "    return self.n; }\n"
-        "  fn take(inout to: int) { to = to * 100; } }\n"
+        "  fn take(to: inout int) { to = to * 100; } }\n"
         "fn main() -> int {\n"
         "  c: base::Counter = Fast(1);\n"
         "  plain = base::Counter(5);\n"

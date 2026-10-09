@@ -316,7 +316,7 @@ const char *paramModeName(ParamMode m);
 struct Param {
   const std::string *Name; // points into ASTContext::StringPool (stable)
   Type *ParamType;
-  ParamMode Mode = ParamMode::Value; // `view x: int`, `inout x: int`
+  ParamMode Mode = ParamMode::Value; // `x: view int`, `x: inout int`
 
   const std::string &getName() const { return *Name; }
 };
@@ -934,7 +934,7 @@ private:
   Type *ReturnType;
   std::vector<Type *> ParamTypes;
   uint8_t MethodFlags;
-  ParamModes Modes; // `inout n: int`
+  ParamModes Modes; // `n: inout int`
 
 public:
   MethodDecl(SourceLocation loc, const std::string &internedName, Type *retTy,

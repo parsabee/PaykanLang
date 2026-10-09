@@ -408,8 +408,8 @@ TEST(ASTInterchange, ParamModes) {
       std::filesystem::temp_directory_path() /
       ("paykan_interchange_modes_" + std::to_string(::getpid()) + ".pkn");
   {
-    std::ofstream(path) << "fn bump(inout n: int, view by: int, k: int) { }\n"
-                           "class C { fn __init__(view n: int) { } }\n";
+    std::ofstream(path) << "fn bump(n: inout int, by: view int, k: int) { }\n"
+                           "class C { fn __init__(n: view int) { } }\n";
   }
   ASSERT_EQ(driver.parseFile(path.string()), 0);
   std::filesystem::remove(path);

@@ -1,0 +1,108 @@
+// 47 — parameter modes and `let`.  A `view` parameter is a read-only copy;
+// an `inout` parameter is its caller's variable or field, passed by address,
+// so the callee's writes reach the caller at once.  Both apply to int,
+// float, bool, char and enum parameters (docs/language/02-functions-and-
+// calling.md, "Parameter modes").  A `let` local cannot be reassigned.
+// Exercises: inout locals and parameters (passed on), fields of a variable,
+// of `self` and of a chain, a swap, an enum, a float, a constructor and a
+// method with inout parameters, view arguments of every kind.  Run with
+// --track-heap: zero live blocks.
+
+// expect-stdout: k = 3
+// expect-stdout: a = 2, b = 1
+// expect-stdout: light = Green, x = 4.5
+// expect-stdout: hits = 2, total = 12
+// expect-stdout: stats: 4 hits, last 30; meter: 2 hits
+// expect-stdout: start = 0, step = 3
+
+enum Light { Red, Green, Yellow }
+
+class Stats {
+  hits: int;
+  last: int;
+  fn __init__() {
+    self.hits = 0;
+    self.last = 0;
+  }
+  fn record(value: view int) {
+    bump(self.hits);   // a field of `self`, by address
+    self.last = value;
+  }
+}
+
+class Meter {
+  stats: Stats;
+  step: int;
+  fn __init__(start: inout int) {
+    self.stats = Stats();
+    self.step = start;
+    start = 0;         // the caller's variable
+  }
+  fn add(total: inout int, times: view int) {
+    i = 0;
+    while (i < times) {
+      total = total + self.step;
+      i = i + 1;
+    }
+  }
+}
+
+fn bump(n: inout int) { n = n + 1; }
+
+fn bumpTwice(n: inout int) {
+  bump(n);             // an inout parameter passes its address on
+  bump(n);
+}
+
+fn swap(a: inout int, b: inout int) {
+  t = a;
+  a = b;
+  b = t;
+}
+
+fn advance(light: inout Light) {
+  match light {
+    Red { light = Light::Green; }
+    Green { light = Light::Yellow; }
+    Yellow { light = Light::Red; }
+  }
+}
+
+fn scale(x: inout float, by: view float) { x = x * by; }
+
+fn main() -> int {
+  k = 1;
+  bumpTwice(k);
+  println("k = " + Str(k));
+
+  a = 1;
+  b = 2;
+  swap(a, b);
+  println("a = " + Str(a) + ", b = " + Str(b));
+
+  light = Light::Red;
+  advance(light);
+  x = 1.5;
+  let factor = 3;      // a `let` local: a view argument, never an inout one
+  scale(x, factor);
+  println("light = " + (if light == Light::Green then "Green" else "?") +
+          ", x = " + Str(x));
+
+  stats = Stats();
+  stats.record(10);
+  stats.record(k * 10);
+  total = 0;
+  start = 3;
+  m = Meter(start);
+  m.add(total, 4);
+  println("hits = " + Str(stats.hits) + ", total = " + Str(total));
+
+  bump(m.stats.hits);  // a field of a chain
+  m.stats.record(30);
+  bump(stats.hits);
+  bump(stats.hits);
+  println("stats: " + Str(stats.hits) + " hits, last " + Str(stats.last) +
+          "; meter: " + Str(m.stats.hits) + " hits");
+  println("start = " + Str(start) + ", step = " + Str(m.step));
+  return 0;
+}

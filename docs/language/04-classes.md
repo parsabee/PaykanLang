@@ -146,7 +146,8 @@ println(d.sound());   // woof  (virtual dispatch)
   required in the body.
 - `__super__(…)` may only be called inside `__init__`.
 - A method with the same name as a base method is an **override**. The override must have the
-  same signature.
+  same signature, and keep each parameter's mode (`view`, `inout`; see
+  [Parameter modes](02-functions-and-calling.md#parameter-modes-view-and-inout)).
 
 ### Three-Level Inheritance
 
@@ -254,5 +255,6 @@ match a {
 | Direct call to `destroy` | User code calls `obj.destroy()` explicitly |
 | Override of `destroy` | A class declares its own `fn destroy()` |
 | Override signature mismatch | Override has a different parameter or return type than the base method |
+| Override changes a parameter mode | Override drops, adds or changes a parameter's `view` / `inout` |
 | Multiple bases | More than one `:` clause |
 | `self` in parameter list | Writing `self` as an explicit method parameter |

@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Parser tests: `view` and `inout` parameters.  The keywords may start a
-// parameter of a function, a method or a constructor, and nothing else.
+// Parser tests: `view` and `inout` parameters.  The keywords may mark the
+// type of a parameter of a function, a method or a constructor (`n: inout
+// int`), and nothing else.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -28,11 +29,11 @@ std::string parseErrors(const std::string &source) {
 
 TEST(ParamMode, ModesOnFunctionsMethodsAndConstructors) {
   auto [ok, driver] = parse(R"(
-    fn scale(inout x: float, view by: float, n: int) { }
+    fn scale(x: inout float, by: view float, n: int) { }
     class Counter {
       n: int;
-      fn __init__(view start: int) { self.n = start; }
-      fn add(inout to: int, view k: int) -> int { return k; }
+      fn __init__(start: view int) { self.n = start; }
+      fn add(to: inout int, k: view int) -> int { return k; }
     }
     fn main() -> int { return 0; }
   )");
@@ -52,21 +53,21 @@ TEST(ParamMode, ModesOnFunctionsMethodsAndConstructors) {
   EXPECT_EQ(params[2].Mode, paykan::ast::ParamMode::Value);
 }
 
-// `view` and `inout` are reserved, and only start a parameter.  There is no
-// call-site marking.
-TEST(ParamMode, KeywordsOnlyStartAParameter) {
+// `view` and `inout` are reserved, and only mark a parameter's type.  There
+// is no call-site marking.
+TEST(ParamMode, KeywordsOnlyMarkAParameterType) {
   const char *const cases[] = {
       "fn main() -> int { inout x = 1; return 0; }",
       "fn main() -> int { view: int = 1; return 0; }",
       "fn main() -> int { x: inout int = 1; return 0; }",
-      "fn bump(inout n: int) { }\nfn main() -> int { bump(inout k); }",
-      "fn f(x: inout int) { }\nfn main() -> int { return 0; }",
+      "fn bump(n: inout int) { }\nfn main() -> int { bump(inout k); }",
       "fn f(x: int inout) { }\nfn main() -> int { return 0; }",
-      "fn f(inout view x: int) { }\nfn main() -> int { return 0; }",
+      "fn f(x: inout view int) { }\nfn main() -> int { return 0; }",
       "fn f() -> inout int { return 0; }\nfn main() -> int { return 0; }",
       "fn inout() { }\nfn main() -> int { return 0; }",
       "fn f(view: int) { }\nfn main() -> int { return 0; }",
       "class C { inout n: int; }\nfn main() -> int { return 0; }",
+      "class C { n: inout int; }\nfn main() -> int { return 0; }",
       "class C { n: int; }\nfn main() -> int { return C().view; }",
   };
   for (const char *src : cases) {
@@ -78,13 +79,40 @@ TEST(ParamMode, KeywordsOnlyStartAParameter) {
   EXPECT_NE(
       parseErrors(cases[0]).find(
           "error: unexpected 'inout'; expected an expression ('inout' only "
-          "marks a parameter: 'fn f(inout x: int)')"),
+          "marks a parameter's type: 'fn f(x: inout int)')"),
       std::string::npos);
   EXPECT_NE(parseErrors(cases[2]).find("error: unexpected 'inout'; expected a "
-                                       "type ('inout' only marks a parameter"),
+                                       "type ('inout' only marks a "
+                                       "parameter's type"),
             std::string::npos);
-  EXPECT_NE(parseErrors(cases[10]).find("unexpected 'inout'; expected a field "
-                                        "('name: Type;') or a method ('fn') "
-                                        "in the class body ('inout' only"),
+  EXPECT_NE(parseErrors(cases[9]).find("unexpected 'inout'; expected a field "
+                                       "('name: Type;') or a method ('fn') "
+                                       "in the class body ('inout' only"),
             std::string::npos);
+}
+
+// The mode goes after the colon.  Written before the name, the error shows
+// the parameter rewritten.
+TEST(ParamMode, ModeBeforeTheNameShowsTheFix) {
+  const char *const cases[][2] = {
+      {"fn f(inout x: int) { }", "write 'x: inout int'"},
+      {"fn f(n: int, view p: Point) { }", "write 'p: view Point'"},
+      {"fn f(view xs: int[]) { }", "write 'xs: view int[]'"},
+      {"class C { fn __init__(inout s: int) { } }", "write 's: inout int'"},
+      {"fn f(inout) { }", "write 'x: inout int'"},
+  };
+  for (const auto &c : cases) {
+    std::string src = std::string("class Point { x: int; }\n") + c[0] +
+                      "\nfn main() -> int { return 0; }";
+    auto [ok, _] = parse(src);
+    EXPECT_FALSE(ok) << src;
+    if (testFrontend() != "recursive-descent")
+      continue;
+    std::string errs = parseErrors(src);
+    EXPECT_NE(errs.find("goes after the colon, before the type: " +
+                        std::string(c[1])),
+              std::string::npos)
+        << src << "\n"
+        << errs;
+  }
 }

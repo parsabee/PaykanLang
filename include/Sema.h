@@ -451,7 +451,7 @@ public:
       std::string Name;
       std::string ReturnTypeName;
       std::vector<std::string> ParamTypeNames;
-      ast::ParamModes Modes; // `inout n: int`
+      ast::ParamModes Modes; // `n: inout int`
       bool operator==(const FunctionInfo &) const = default;
     };
     std::vector<FunctionInfo> ExportedFunctions;
@@ -483,7 +483,7 @@ public:
         std::string ReturnTypeName;
         std::vector<std::string> ParamTypeNames;
         uint8_t Flags = 0;     // ast::MethodDecl::Private bit
-        ast::ParamModes Modes; // `inout n: int`
+        ast::ParamModes Modes; // `n: inout int`
         bool operator==(const MethodInfo &) const = default;
       };
       std::vector<FieldInfo> Fields;
@@ -591,7 +591,8 @@ private:
   /// The arguments @p args of a call of @p callee whose parameters have the
   /// modes @p modes and the types @p paramTys: an `inout` parameter takes a
   /// variable or a field of exactly its type, never a `view` parameter or a
-  /// `let` local.  Arguments of the wrong type were reported already.
+  /// `let` local, and no two take the same one.  Arguments of the wrong
+  /// type were reported already.
   bool checkInoutArgs(const ast::ParamModes &modes,
                       const std::vector<ast::Type *> &paramTys,
                       const std::vector<ast::Expr *> &args,
