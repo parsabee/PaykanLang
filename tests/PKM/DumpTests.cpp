@@ -23,14 +23,14 @@ std::string dumpOf(const std::vector<uint8_t> &b, DumpOptions opts = {}) {
 }
 
 const char *const kGolden =
-    R"(pkm 1.0, 6 sections, table sha256 09bfb88906cfd1e4
-iface_hash c94aa3c8dbef5152bd326b4f25b626b7daa1bd60f57632fae0cec606187d4525
+    R"(pkm 1.0, 6 sections, table sha256 df226d6fd8f8c92b
+iface_hash 78e86f3f87b718d456935059b9cf235da1e0fc4eac4f922db2c6bdeb0972a839
 tmpl_hash 0000000000000000000000000000000000000000000000000000000000000000
 code_hash 31635559fa224a2c41eac6c6a0ecf6e9b08ee0747deaf38cbf2f08365f54f4c6
-module_hash 75559d67acf6ce5f0799ed395f88da996cbd0e4934ef851bf1f7fe14e8188eaf
+module_hash 074d48f462f246653790c0bfe03f2da568f9a54b107c150297be5b5083390ad5
 sections:
   #0 MANIFEST flags REQUIRED offset 0x1c0 size 430 sha256 cd1968da24a98197
-  #1 IFACE flags REQUIRED offset 0x370 size 592 sha256 c94aa3c8dbef5152
+  #1 IFACE flags REQUIRED offset 0x370 size 592 sha256 78e86f3f87b718d4
   #2 CODE flags REQUIRED offset 0x5c0 size 21 sha256 31635559fa224a2c
   #3 SYMIDX flags - offset 0x5d8 size 6 sha256 12643e6ba7fdc1f1
   #4 PAYLOAD flags INSTANCED offset 0x5e0 size 11 sha256 18e9d2416680ac3c

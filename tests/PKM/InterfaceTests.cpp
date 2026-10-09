@@ -98,7 +98,7 @@ std::vector<uint8_t> withPart(const std::vector<uint8_t> &b, uint32_t tag,
 TEST(Interface, RoundTrip) {
   Interface i = sampleInterface();
   std::vector<uint8_t> b = writeInterface(i);
-  EXPECT_EQ(std::memcmp(b.data(), "PKMI\x01\x00\x01\x00", 8), 0);
+  EXPECT_EQ(std::memcmp(b.data(), "PKMI\x01\x00\x00\x00", 8), 0);
   std::vector<Part> ps = parts(b);
   ASSERT_EQ(ps.size(), 6u);
   std::vector<uint32_t> tags, flags;
@@ -133,9 +133,9 @@ TEST(Interface, RoundTrip) {
   EXPECT_EQ(*back, s);
 }
 
-// Format 1.1: the parameter modes follow a FUNC record's signature and a
-// CLASS record's methods, and only when one has any, so a module without
-// them has 1.0's records and a 1.0 file reads as having none.
+// The parameter modes follow a FUNC record's signature and a CLASS record's
+// methods, and only when one has any, so a module without them has the
+// records it had before, and an older file reads as having none.
 TEST(Interface, ParamModes) {
   Interface i = sortedSample();
   ASSERT_EQ(i.Functions[0].Name, "Shape");
@@ -175,7 +175,7 @@ TEST(Interface, Framing) {
     EXPECT_NE(readError(b).find("magic"), std::string::npos);
     b = good;
     b[4] = 2;
-    EXPECT_NE(readError(b).find("interface format 2.1"), std::string::npos);
+    EXPECT_NE(readError(b).find("interface format 2.0"), std::string::npos);
     b = good;
     b[6] = 3; // newer minor accepted
     EXPECT_TRUE(readInterface(b, "geometry::shapes"));
