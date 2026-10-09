@@ -1782,8 +1782,28 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
 
 // -- Top-level
 
-bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
+bool Sema::rejectParamModes(ast::TranslationUnit *tu) {
   bool ok = true;
+  auto check = [&](const ast::FuncDecl *fn) {
+    for (const ast::Param &p : fn->getParams())
+      if (p.Mode != ast::ParamMode::Value) {
+        error(fn->getLocation(), std::string("'") + ast::paramModeName(p.Mode) +
+                                     "' parameters are not supported yet");
+        ok = false;
+      }
+  };
+  for (auto *fns : {&tu->getFuncDecls(), &tu->getGenericFuncDecls()})
+    for (auto *fn : *fns)
+      check(fn);
+  for (auto *cds : {&tu->getClassDecls(), &tu->getGenericClassDecls()})
+    for (auto *cd : *cds)
+      for (auto *m : cd->getMethods())
+        check(m);
+  return ok;
+}
+
+bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
+  bool ok = rejectParamModes(node);
 
   // Register enum types first so that class fields, parameters, and variable
   // declarations can reference them by name during the passes that follow.

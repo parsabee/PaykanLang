@@ -82,7 +82,7 @@ or more.
 | `(enum LOC NAME NAME...)` | `enum E { A, B }`: the name, then the variants |
 | `(class LOC NAME SUPER (type-params NAME...) (fields VAR...) (methods FN...))` | a class. `SUPER` is the superclass's name or `""`; a generic class has type parameters. Each field is a `var` with a type and no initialiser |
 | `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? BLOCK)` | a function or method; the `TYPE` is the return type, `_` for none |
-| `(param NAME TYPE)` | one parameter |
+| `(param NAME TYPE QUAL?)` | one parameter; `QUAL` is its mode, `(qual view)` or `(qual inout)`, absent for an ordinary (by-value) parameter: `inout n: int` is `(param "n" (named-type "int") (qual inout))` |
 | `(var LOC NAME TYPE? EXPR?)` | a variable or field declaration: `x: int = 1` is `(var "x" (named-type "int") (int 1))` |
 
 ### Types
@@ -189,6 +189,10 @@ it.
 `PAYKAN_AST_FORMAT_VERSION` is bumped on any incompatible change: a node or
 field removed, renamed or changed in meaning, or a node a reader must handle
 added (a new language construct). Within one version the format does not
-change. The core's tests write and read back the AST of every program in the
+change, except for optional trailing items that only new constructs use: a
+parameter's `(qual ...)`. They keep the version, because every document that
+was valid stays valid and means the same, and a reader that predates an item
+rejects a document that uses it (an unexpected field) instead of misreading
+it. The core's tests write and read back the AST of every program in the
 samples corpus and check that the result is identical
 (`tests/AST/InterchangeTests.cpp`).

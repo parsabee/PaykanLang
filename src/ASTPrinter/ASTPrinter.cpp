@@ -492,6 +492,10 @@ void ASTPrinter::visitFuncDecl(FuncDecl *node) {
   header("FuncDecl", node);
   OS << " '" << node->getName() << "'";
   printTypeParams(OS, node->getTypeParams());
+  // Parameters are not printed, except the mode of one that has it.
+  for (const Param &p : node->getParams())
+    if (p.Mode != ParamMode::Value)
+      OS << ' ' << paramModeName(p.Mode) << " '" << p.getName() << "'";
   if (node->getReturnType())
     OS << " ->";
   OS << "\n";
