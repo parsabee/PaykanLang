@@ -4,17 +4,23 @@
 // AST -> PIR lowering: `inout` parameters
 // (docs/language/02-functions-and-calling.md, "Parameter modes").
 //
-// An `inout` parameter (int, float, bool, char or an enum) is a PIR `ptr`:
-// the address of its caller's storage.  The callee keeps the address in the
-// parameter's local and reads and writes through it (ptr.load / ptr.store),
-// so every write reaches the caller at once.  A caller passes a variable's
-// `local.addr`, for one of its own `inout` parameters the address it was
-// given, and for a field of an object the field's real address
-// (`field.addr`, never a copy).  Objects do not move, so a field's address
-// is valid as long as its object lives, and the caller keeps the object
-// alive for the call.  Sema has checked that each argument is such a place,
-// of exactly the parameter's type, and that no place is passed twice.  A
-// `view` parameter is passed by value like any other.
+// An `inout` parameter, of any type, is a PIR `ptr`: the address of its
+// caller's storage.  The callee keeps the address in the parameter's local
+// and reads and writes through it (ptr.load / ptr.store), so every write
+// reaches the caller at once.  A caller passes a variable's `local.addr`,
+// for one of its own `inout` parameters the address it was given, and for a
+// field of an object the field's real address (`field.addr`, never a copy).
+// Objects do not move, so a field's address is valid as long as its object
+// lives, and the caller keeps the object alive for the call.  Sema has
+// checked that each argument is such a place, of exactly the parameter's
+// type, and that no place is passed twice.
+//
+// For a reference type the storage holds a box, and the parameter is a
+// mutable reference to it, not a share of it: passing it retains nothing
+// and the callee releases nothing at its end.  Reading it borrows the box,
+// as reading a variable does; assigning it replaces the caller's box like
+// an assignment to the caller's variable (release the old, store the new).
+// A `view` parameter is passed by value like any other.
 
 #include "LoweringInternal.h"
 
@@ -23,10 +29,12 @@ namespace paykan::lowering {
 using pir::Type;
 
 void ModuleLowering::Scope::declareInout(const std::string &name,
-                                         pir::LocalId local,
-                                         pir::Type pointee) {
+                                         pir::LocalId local, pir::Type pointee,
+                                         ast::Type *astTy) {
   Locals[name] = local;
   InoutVars[name] = pointee;
+  if (astTy)
+    ASTTypeMap[name] = astTy;
 }
 
 pir::Type ModuleLowering::Scope::inoutType(const std::string &name) const {
@@ -50,7 +58,8 @@ void ModuleLowering::declareParam(const std::string &name,
   // scope cleanup releases them.
   if (arg.Ty == Type::Ptr)
     CurrentScope->declareInout(name, local,
-                               toPIRType(canonicalizeDeclType(astTy)));
+                               toPIRType(canonicalizeDeclType(astTy)),
+                               canonicalizeDeclType(astTy));
   else if (astTy && ast::isRefType(astTy))
     CurrentScope->declare(name, local, astTy);
   else
@@ -64,6 +73,30 @@ bool ModuleLowering::storeInout(const std::string &name, pir::LocalId local,
     return false;
   B.ptrStore(B.load(local, name + ".addr"), coerceTo(v, pointee));
   return true;
+}
+
+bool ModuleLowering::holdsBox(const std::string &name) const {
+  return CurrentScope->isOwned(name) ||
+         CurrentScope->inoutType(name) == Type::Box;
+}
+
+Val ModuleLowering::loadVarBox(const std::string &name) {
+  Val slot = B.load(CurrentScope->lookup(name), name);
+  if (CurrentScope->inoutType(name) == Type::Box)
+    return B.ptrLoad(slot, Type::Box, name);
+  return slot;
+}
+
+void ModuleLowering::storeVarBox(const std::string &name, const Val &newBox) {
+  pir::LocalId local = CurrentScope->lookup(name);
+  if (CurrentScope->inoutType(name) == Type::Box) {
+    Val addr = B.load(local, name + ".addr");
+    emitRelease(B.ptrLoad(addr, Type::Box, "old.box"));
+    B.ptrStore(addr, newBox);
+    return;
+  }
+  emitRelease(B.load(local, "old.box"));
+  B.store(local, newBox);
 }
 
 Val ModuleLowering::emitInoutArg(ast::Expr *arg, std::vector<Val> &keep) {

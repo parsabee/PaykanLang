@@ -1,13 +1,14 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// `view fn` methods, and the values that cannot change
+// `view fn` methods, and the places that cannot change
 // (docs/language/04-classes.md, "Methods that don't change self"): a method
 // may change `self` unless it is a `view fn`, and only a `view fn` may be
-// called on a `let` local, on a `view` parameter, or on `self` inside a
-// `view fn`.  Nothing reached through one of those may be assigned or passed
-// to an `inout` parameter either.  While classes are references the check
-// follows the name: another variable holding the same object can still
-// change it.
+// called on a `view` parameter (of any type) or on `self` inside a `view
+// fn`.  Nothing reached through one of those may be assigned or passed to an
+// `inout` parameter either.  While classes are references the check follows
+// the name: a copy of the reference in another variable can change the
+// object.  A `let` local only cannot be reassigned: what it holds can change,
+// but the variable itself is not passed to `inout`.
 
 #include "Names.h"
 #include "Sema.h"
@@ -59,15 +60,10 @@ std::string Sema::frozenPlace(const ast::Expr *e) {
       CurrentMethodUse->ChangesSelf = true;
     return "";
   }
-  switch (varKind(name)) {
-  case VarKind::Let:
-    return "'" + name + "' is 'let'";
-  case VarKind::View:
+  // A `let` local is not here: only the variable is fixed, not what it holds
+  // (`p.x = 1`, `p.tick()`), and checkInoutArgs keeps it from `inout`.
+  if (varKind(name) == VarKind::View)
     return "'" + name + "' is a 'view' parameter";
-  case VarKind::Plain:
-  case VarKind::Inout:
-    break;
-  }
   return "";
 }
 
@@ -188,7 +184,7 @@ void Sema::warnMissingViewFns() {
       warning(loc, "'" + family.second +
                        "' never changes 'self': make it a 'view fn'" +
                        (overridden ? " (and its overrides)" : "") +
-                       " so 'let' values and 'view' borrows can call it");
+                       " so 'view' parameters can call it");
     }
   }
 }

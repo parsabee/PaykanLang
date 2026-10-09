@@ -641,7 +641,7 @@ TEST(Pkm, ParamModesAcrossModules) {
 }
 
 // A `view fn` keeps its marker in a prebuilt module (flag 0x2): an importer
-// can call it on a `let` value, but not a method that may change `self`.
+// calls it, and an override of it there must be a `view fn` too.
 TEST(Pkm, ViewFnAcrossModules) {
   REQUIRE_BACKEND();
   auto dir =
@@ -657,10 +657,10 @@ TEST(Pkm, ViewFnAcrossModules) {
                               "  println(Str(p.get()));\n"
                               "  return 0;\n}\n");
   writeFile(dir / "bad.pkn", "import base;\n"
-                             "fn main() -> int {\n"
-                             "  let p = base::P();\n"
-                             "  p.set(1);\n"
-                             "  return 0;\n}\n");
+                             "class Q : base::P {\n"
+                             "  fn __init__() { __super__(); }\n"
+                             "  fn get() -> int { return 1; } }\n"
+                             "fn main() -> int { return 0; }\n");
   auto paykan = [&](const std::string &args) {
     return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
   };
@@ -671,8 +671,8 @@ TEST(Pkm, ViewFnAcrossModules) {
   EXPECT_TRUE(contains(ok.out, "4\n")) << ok.out;
   auto bad = paykan("--check-only bad.pkn");
   EXPECT_NE(bad.exitCode, 0);
-  EXPECT_TRUE(contains(bad.out, "bad.pkn:4:3: error: 'p' is 'let'; 'set' is "
-                                "not a 'view fn'"))
+  EXPECT_TRUE(contains(bad.out, "bad.pkn:4:3: error: override of 'get' must be "
+                                "a 'view fn', like the method it overrides"))
       << bad.out;
   auto dump = paykan("pkm dump --section=iface base.pkm");
   EXPECT_TRUE(contains(dump.out, "method get() -> int flags 0x2")) << dump.out;

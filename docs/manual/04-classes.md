@@ -63,8 +63,9 @@ Create an object by calling the class name with the constructor's arguments, as 
 ## Methods that only read: `view fn`
 
 A method may change its object. A method that only reads it is written `view fn`, and the
-compiler holds it to that: inside it, `self` is read-only. Only `view fn` methods can be
-called on a `let` variable, whose value cannot change:
+compiler holds it to that: inside it, `self` is read-only. A `view` parameter (see
+[Basics](02-basics.md#functions)) promises the caller that the function will not change what it
+was given, so only `view fn` methods can be called on one:
 
 ```pkn
 class Account {
@@ -74,11 +75,14 @@ class Account {
   view fn report() -> Str { return "balance " + Str(self.balance); }
 }
 
+fn show(a: view Account) {
+  println(a.report());
+}
+
 fn main() -> int {
   a = Account(10);
   a.deposit(5);
-  let snapshot = a;
-  println(snapshot.report());
+  show(a);
   return 0;
 }
 ```
@@ -89,7 +93,7 @@ Output:
 balance 15
 ```
 
-Calling `deposit` on `snapshot`, or changing `self` inside `report`, is an error that names
+Calling `deposit` in `show`, or changing `self` inside `report`, is an error that names
 what to fix:
 
 ```pkn
@@ -100,9 +104,12 @@ class Account {
   view fn report() -> Str { self.balance = 0; return "empty"; }
 }
 
-fn main() -> int {
-  let a = Account(10);
+fn show(a: view Account) {
   a.deposit(5);
+}
+
+fn main() -> int {
+  show(Account(10));
   return 0;
 }
 ```
@@ -111,7 +118,7 @@ Error:
 
 ```
 error: 'self' is read-only in 'view fn report'; cannot assign to its field 'balance'
-error: 'a' is 'let'; 'deposit' is not a 'view fn'
+error: 'a' is a 'view' parameter; 'deposit' is not a 'view fn'
 ```
 
 The compiler warns about a method that never changes its object but is not a `view fn`,

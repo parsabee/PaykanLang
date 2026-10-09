@@ -586,17 +586,6 @@ private:
 
   // -- `view` and `inout` parameters (SemaParamModes.cpp)
 
-  /// True for the types a parameter mode applies to: int, float, bool, char
-  /// and enums.
-  static bool isValueType(const ast::Type *ty);
-  /// Error for each `view` / `inout` parameter of @p fn whose type (in
-  /// @p paramTys) is not a value type.
-  bool checkParamModeTypes(const ast::FuncDecl *fn,
-                           const std::vector<ast::Type *> &paramTys);
-  /// Error for each `view` / `inout` parameter of the template @p fn whose
-  /// type is one of its @p typeParams.
-  bool checkTemplateParamModes(const ast::FuncDecl *fn,
-                               const std::vector<const std::string *> &tps);
   /// Record the kinds of @p fn's `view` / `inout` parameters, just declared
   /// in the current scope.
   void declareParamKinds(const ast::FuncDecl *fn);
@@ -607,9 +596,9 @@ private:
   // -- `view fn` methods, and values that cannot change (SemaViewFn.cpp)
 
   /// Why the place @p e (a variable, or fields and elements reached from
-  /// one) cannot be changed here, as the start of a diagnostic: "'c' is
-  /// 'let'", "'self' is read-only in 'view fn area'", "'n' is a 'view'
-  /// parameter"; "" when it can.  A place reached through `self` in a method
+  /// one) cannot be changed here, as the start of a diagnostic: "'self' is
+  /// read-only in 'view fn area'", "'n' is a 'view' parameter"; "" when it
+  /// can.  A place reached through `self` in a method
   /// that may change it records that the method changes `self`.
   std::string frozenPlace(const ast::Expr *e);
   /// Error at @p loc (and false) when the place @p e cannot be changed;

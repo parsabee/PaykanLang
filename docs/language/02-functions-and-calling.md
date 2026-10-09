@@ -51,9 +51,8 @@ The caller's variable is unaffected.
 
 ## Parameter modes: view and inout
 
-A parameter of a value type (`int`, `float`, `bool`, `char` or an enum) may have a mode,
-`view` or `inout`, written where the type goes: `n: inout int`. A parameter without one is
-passed by value, as above.
+A parameter of any type may have a mode, `view` or `inout`, written where the type goes:
+`n: inout int`, `c: view Counter`. A parameter without one is passed as above.
 
 ```pkn
 fn bump(n: inout int) {
@@ -85,28 +84,99 @@ implicit `self`, which never takes a mode.
 
 ### `view`: read-only
 
-A `view` parameter cannot be changed: it cannot be assigned or be a destructuring target
-(`cannot assign to 'view' parameter 'x'`), and it cannot be passed to an `inout`
-parameter (`'x' is a 'view' parameter; it cannot be passed to 'inout' parameter 'n'`). Reading it
-gives a copy, which may be stored or returned freely. It is passed by value, so any
-argument of its type will do: a literal, an expression, a `let` local.
+A `view` parameter cannot be changed, and neither can anything reached through it. It
+cannot be assigned or be a destructuring target (`cannot assign to 'view' parameter 'x'`),
+and it cannot be passed to an `inout` parameter (`'x' is a 'view' parameter; it cannot be
+passed to 'inout' parameter 'n'`). It is passed like a parameter without a mode, so any
+argument of its type will do: a literal, an expression, a `let` local, an object of a
+subclass.
+
+A `view` parameter of a value type is a copy, which may be stored or returned freely. One
+of an object, string, array, tuple or optional shares what the caller passed, but the
+function cannot change it through the parameter:
+
+- no assignment to a field or an element (`'c' is a 'view' parameter; cannot assign to
+  its field 'n'`, `'xs' is a 'view' parameter; cannot assign to its elements`);
+- no field or element passed to an `inout` parameter;
+- only `view fn` methods may be called on it (`'c' is a 'view' parameter; 'tick' is not a
+  'view fn'`): the class's own [`view fn`s](04-classes.md#methods-that-dont-change-self)
+  and the builtin ones that only read (`toString`, `equals`, `len`, `length`; not `push`
+  or `concat`).
+
+```pkn
+class Counter {
+  n: int;
+  fn __init__() { self.n = 0; }
+  fn tick() { self.n = self.n + 1; }
+  view fn get() -> int { return self.n; }
+}
+
+fn show(c: view Counter, label: view Str) {
+  println(label + " " + Str(c.get()));
+}
+
+fn main() -> int {
+  c = Counter();
+  c.tick();
+  show(c, "ticks");
+  return 0;
+}
+```
+
+Output:
+
+```
+ticks 1
+```
+
+The check follows the parameter's name: another reference to the same object, such as a
+plain parameter it was also passed as, can still change it.
 
 ### `inout`: the caller's storage
 
 An `inout` parameter refers to its caller's storage: every write to it changes the
-caller's variable or field at once, not when the call returns. The argument must be one
-of:
+caller's variable or field at once, not when the call returns. For an object, string,
+array, tuple or optional, the parameter is the caller's variable itself, not another
+reference to what it holds: passing it shares nothing, and assigning to it replaces what
+the caller's variable holds.
+
+```pkn
+fn swap(a: inout Str, b: inout Str) {
+  t = a;
+  a = b;
+  b = t;
+}
+
+fn main() -> int {
+  x = "left";
+  y = "right";
+  swap(x, y);
+  println(x + " " + y);
+  return 0;
+}
+```
+
+Output:
+
+```
+right left
+```
+
+The argument must be one of:
 
 - a local variable (not a `let` one: `'k' is 'let'; it cannot be passed to 'inout'
   parameter 'n'`);
 - a plain (by-value) parameter;
 - another `inout` parameter, whose address is passed on;
-- a field of an object: `obj.f`, `self.f`, or a chain such as `a.b.f` (not one reached
-  through a `let` local, or through `self` in a `view fn`).
+- a field of an object: `obj.f`, `self.f`, or a chain such as `a.b.f`, including one of
+  the object a `let` local holds (not one reached through a `view` parameter, or through
+  `self` in a `view fn`).
 
 It must have exactly the parameter's type: an `int` variable does not go to an
 `x: inout float` (`argument 1 of 'scale' has type 'int', but 'inout' parameter 'x' has
-type 'float'`). Anything else is an error:
+type 'float'`), and a `Fast` variable does not go to a `c: inout Counter` even when `Fast`
+is a subclass of `Counter`, since the function could store another kind of `Counter` in
+it. Anything else is an error:
 
 | Argument | Error |
 |---|---|
@@ -114,6 +184,7 @@ type 'float'`). Anything else is an error:
 | a `view` parameter | `'v' is a 'view' parameter; it cannot be passed to 'inout' parameter 'n'` |
 | an array element (`bump(xs[0])`) | `an array element cannot be passed to 'inout' parameter 'n' yet` |
 | a character of a string (`next(s[0])`) | `a character of a string cannot be passed to 'inout' parameter 'c'` |
+| `self` (`reset(self)`) | `'self' cannot be passed to 'inout' parameter 'c': the method would no longer know its object` |
 
 A field is passed by its real address, never copied in and out, so the callee's writes
 are visible through every reference to the object during the call. The caller keeps the
@@ -177,13 +248,8 @@ accepted, and the callee then sees one storage through both parameters.
 
 ### Where modes apply
 
-- Only to `int`, `float`, `bool`, `char` and enum parameters: anything else is an error
-  naming the type, `'inout' applies only to int, float, bool, char and enum parameters;
-  'Counter' is not a value type`. Strings, arrays, tuples, optionals, objects and `Obj`
-  are references already (see above).
-- Not to a type parameter, for now: `fn f<T>(x: inout T)` is an error (`'inout' does not
-  apply to type parameter 'T' yet`). A generic function's other parameters may have
-  modes.
+- To a parameter of any type: value types, strings, arrays, tuples, optionals, objects,
+  `Obj`, and type parameters (`fn swap<T>(a: inout T, b: inout T)`).
 - An override keeps every parameter's mode (`override of 'add' must keep 'inout' on
   parameter 'to'`, `override of 'add' must not add 'view' to parameter 'k'`).
 - Across modules: a module's exported functions, constructors and methods keep their
@@ -268,7 +334,6 @@ fn fib(n: int) -> int {
 | Argument type mismatch | Argument type incompatible with parameter type |
 | Non-void return without value | `return;` in non-void function |
 | Return type mismatch | Returned expression type ≠ declared return type |
-| Parameter mode on a non-value type | `view`/`inout` on a parameter that is not `int`, `float`, `bool`, `char` or an enum, or on a type parameter |
-| Write to a `view` parameter | Assigning or destructuring into it |
-| Bad `inout` argument | Not a variable or field, not exactly the parameter's type, a `view` parameter or `let` local, an array element, a string's character, or the same place twice in one call |
+| Write to a `view` parameter | Assigning or destructuring into it, assigning to a field or element of what it holds, or calling a method on it that is not a `view fn` |
+| Bad `inout` argument | Not a variable or field, not exactly the parameter's type, `self`, a `let` local, something reached through a `view` parameter, an array element, a string's character, or the same place twice in one call |
 | Override changes a mode | An override that drops, adds or changes a parameter's `view`/`inout` |

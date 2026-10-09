@@ -12,29 +12,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `view fn` methods (docs/language/04-classes.md, "Methods that don't change self"): a
   method may change `self` unless it is written `view fn`, in which `self` is read-only (no
   field or element write, no call of a method that is not a `view fn`, no `inout`
-  argument through it).  Only a `view fn` can be called on a `let` local.  `__init__` and
+  argument through it).  Only a `view fn` can be called on a `view` parameter.  `__init__` and
   free functions cannot be one, an override keeps the marker of the method it overrides,
   and the marker is part of a module's interface (the `.pkm` method flags, bit `0x2`).  The
   builtin `toString`, `equals` and `len` are `view fn`s, so an override of `toString` or
   `equals` must be written `view fn`.  A method that never changes `self` but is not a
   `view fn` gets a warning.  In the AST interchange format a `view fn` ends with
   `(qual view)`.  `samples/codegen/48_view_fn.pkn` shows them.
-- A `let` local's value cannot change: its fields and elements cannot be assigned, only
-  its `view fn` methods can be called (not `push` or `pop`), and nothing reached through
-  it can be passed to an `inout` parameter.
 - `view` and `inout` parameters (docs/language/02-functions-and-calling.md, "Parameter
-  modes"), on functions, methods and constructors, for `int`, `float`, `bool`, `char` and
-  enum parameters.  The mode is written where the type goes: `fn bump(n: inout int)`,
-  `fn scale(x: inout float, by: view float)`, called as `bump(k)`.  A `view` parameter is
-  a read-only copy.  An `inout` parameter is its caller's storage, passed by address so
-  every write reaches the caller at once: a local variable, a parameter (an `inout` one
-  passes its address on) or a field of an object (`obj.f`, `self.f`, `a.b.f`; by real
-  address, never copied in and out, with the object kept alive for the call), of exactly
-  the parameter's type.  A literal or other expression, a `view` parameter, a `let` local,
-  an array element (not yet) or a string's character is an error, and so is the same
-  variable or field path passed to two `inout` parameters of one call.  A mode does not
-  apply to a type parameter yet; an override keeps every parameter's mode; modes are part
-  of a module's interface.  `view` and `inout` are reserved words, a syntax error anywhere
+  modes"), on functions, methods and constructors, for parameters of any type (type
+  parameters included).  The mode is written where the type goes: `fn bump(n: inout int)`,
+  `fn scale(x: inout float, by: view float)`, `fn show(c: view Counter)`, called as
+  `bump(k)`.  A `view` parameter is read-only, and so is what it holds: no field or element
+  write and only `view fn` methods through it.  An `inout` parameter is its caller's
+  storage, passed by address so every write reaches the caller at once: a local variable,
+  a parameter (an `inout` one passes its address on) or a field of an object (`obj.f`,
+  `self.f`, `a.b.f`; by real address, never copied in and out, with the object kept alive
+  for the call), of exactly the parameter's type (a subclass variable is not a base-class
+  `inout` argument).  An `inout` parameter of a reference type is the caller's variable,
+  not a second reference: passing it neither retains nor releases, and assigning to it
+  replaces what the caller's variable holds.  A literal or other expression, `self`, a
+  `view` parameter or anything reached through one, a `let` local, an array element (not
+  yet) or a string's character is an error, and so is the same variable or field path
+  passed to two `inout` parameters of one call.  An override keeps every parameter's
+  mode; modes are part of a module's interface.  `view` and `inout` are reserved words, a syntax error anywhere
   but before a parameter's type; written before the name (`inout n: int`), the error shows
   the fix.  In the AST interchange format a parameter carries `(qual view)` or
   `(qual inout)`.  `samples/codegen/47_inout_view.pkn` shows them.

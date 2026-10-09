@@ -174,9 +174,10 @@ private:
     /// owned variables (see emitTypeArmBody in LoweringMatch.cpp).
     void declareUnowned(const std::string &name, pir::LocalId local,
                         ast::Type *astTy);
-    /// An `inout` parameter, whose local holds the address of a @p pointee.
+    /// An `inout` parameter of type @p astTy, whose local holds the address
+    /// of a @p pointee: the caller's storage, never owned here.
     void declareInout(const std::string &name, pir::LocalId local,
-                      pir::Type pointee);
+                      pir::Type pointee, ast::Type *astTy);
     /// The type an `inout` parameter @p name points to; Void for any other
     /// variable.
     pir::Type inoutType(const std::string &name) const;
@@ -366,7 +367,7 @@ private:
   void emitLoopScopesCleanup();
   Val emitImplicitVarDecl(const std::string &name, ast::Expr *rhsExpr,
                           const Val &val);
-  void emitClassVarRebind(pir::LocalId local, ast::Expr *rhsExpr,
+  void emitClassVarRebind(const std::string &name, ast::Expr *rhsExpr,
                           const Val &val);
   void emitBody(ast::CompoundStmt *body);
   void emitImplicitReturn(const pir::Signature &sig);
@@ -454,6 +455,15 @@ private:
   /// Store @p v into variable @p name (local @p local) when it is an
   /// `inout` parameter, through its address; false for any other variable.
   bool storeInout(const std::string &name, pir::LocalId local, const Val &v);
+  /// True when variable @p name's storage holds a box: an owned reference
+  /// variable's own slot, or the caller's slot an `inout` reference
+  /// parameter points to.
+  bool holdsBox(const std::string &name) const;
+  /// The box in variable @p name's storage, borrowed (holdsBox).
+  Val loadVarBox(const std::string &name);
+  /// Put the +1 box @p newBox in variable @p name's storage (holdsBox),
+  /// releasing the box it held.
+  void storeVarBox(const std::string &name, const Val &newBox);
   /// The address passed for the `inout` argument @p arg: a variable's
   /// `local.addr`, the address an `inout` parameter holds, or a field's
   /// `field.addr`.  A +1 box the caller keeps for the duration of the call

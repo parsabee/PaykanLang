@@ -81,48 +81,107 @@ fn main() -> int { return 0; })");
                    ":4:5: error: cannot assign to 'view' parameter 'x'"});
 }
 
-// Only int, float, bool, char and enum parameters take a mode.
-TEST(ParamMode, ModesApplyOnlyToValueTypes) {
+// Every type takes a mode: classes, strings, optionals, arrays, tuples, `Obj`
+// and type parameters as well as int, float, bool, char and enum.
+TEST(ParamMode, ModesApplyToEveryType) {
   auto r = semaCheck(R"(class Counter {
-  fn __init__(s: view Str) { }
-  fn put(c: view Counter) { }
+  n: int;
+  fn __init__(s: view Str) { self.n = s.len(); }
+  fn put(c: view Counter) -> int { return c.n; }
 }
-fn f(o: view int?, xs: view int[], t: view (int, int), b: view Obj) { }
-fn main() -> int { return 0; })");
-  EXPECT_EQ(r.ErrorCount, 6u) << r.Diagnostics;
-  const char *const kRule = "' applies only to int, float, bool, char and enum "
-                            "parameters; '";
-  for (const std::string &diag :
-       {":2:3: error: 'view" + std::string(kRule) + "Str' is not a value type",
-        ":3:3: error: 'view" + std::string(kRule) +
-            "Counter' is not a value type",
-        ":5:1: error: 'view" + std::string(kRule) + "int?' is not a value type",
-        ":5:1: error: 'view" + std::string(kRule) +
-            "int[]' is not a value type",
-        ":5:1: error: 'view" + std::string(kRule) +
-            "(int, int)' is not a value type",
-        ":5:1: error: 'view" + std::string(kRule) + "Obj' is not a value type"})
-    EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
-                                                           << r.Diagnostics;
+fn f(o: view int?, xs: inout int[], t: view (int, int), b: view Obj) { }
+fn reset(c: inout Counter, s: inout Str) { c = Counter(s); s = "new"; }
+fn first<T>(x: view T) -> T { return x; }
+fn swap<T>(a: inout T, b: inout T) { t = a; a = b; b = t; }
+class Box<T> { v: T; fn __init__(v: view T) { self.v = v; } }
+fn main() -> int {
+  c = Counter("ab");
+  s = "x";
+  xs = [1];
+  reset(c, s);
+  f(None, xs, (1, 2), c);
+  a = "a";
+  b = "b";
+  swap(a, b);
+  i = 1;
+  j = 2;
+  swap(i, j);
+  return first(1) + first<int>(2) + Box<Str>("v").v.len() + c.put(c);
+})");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// Not on a type parameter, for now: the template is rejected, and its uses
-// are follow-ons.  A mode on a value-type parameter of a template is fine.
-TEST(ParamMode, ModesOnTypeParametersAreRejected) {
-  auto r = semaCheck(R"(fn first<T>(x: view T) { }
-class Box<T> { fn put(v: view T) { } }
-fn second<T>(xs: T[], i: view int) -> T { return xs[i]; }
+// What a `view` parameter holds cannot change through it, whatever its type:
+// no field or element write, no call of a method that is not a `view fn`
+// (`push` included), no `inout` argument.  `view fn`s and reads are fine.
+TEST(ParamMode, ViewReferenceParameters) {
+  auto r = semaCheck(R"(class Counter {
+  n: int;
+  fn __init__() { self.n = 0; }
+  fn tick() { self.n = self.n + 1; }
+  view fn get() -> int { return self.n; }
+}
+fn reset(c: inout Counter) { c = Counter(); }
+fn bump(n: inout int) { n = n + 1; }
+fn look(c: view Counter, s: view Str, xs: view int[]) -> int {
+  c.tick();
+  c.n = 2;
+  xs.push(1);
+  xs[0] = 1;
+  s = "x";
+  reset(c);
+  bump(c.n);
+  return c.get() + c.n + s.len() + xs.len() + xs[0];
+}
+fn main() -> int { return 0; })");
+  EXPECT_EQ(r.ErrorCount, 7u) << r.Diagnostics;
+  expectErrors(
+      r, {":10:3: error: 'c' is a 'view' parameter; 'tick' is not a 'view fn'",
+          ":11:3: error: 'c' is a 'view' parameter; cannot assign to its "
+          "field 'n'",
+          ":12:3: error: 'xs' is a 'view' parameter; 'push' is not a 'view fn'",
+          ":13:3: error: 'xs' is a 'view' parameter; cannot assign to its "
+          "elements",
+          ":14:3: error: cannot assign to 'view' parameter 's'",
+          ":15:9: error: 'c' is a 'view' parameter; it cannot be passed to "
+          "'inout' parameter 'c'",
+          ":16:8: error: 'c' is a 'view' parameter; it cannot be passed to "
+          "'inout' parameter 'n'"});
+}
+
+// The arguments of an `inout` parameter of a class type: a variable or field
+// of exactly that class, so a subclass variable cannot be given another
+// subclass; not `self`, and not a `let` local, though a field of what one
+// holds can be.
+TEST(ParamMode, InoutReferenceArguments) {
+  auto r = semaCheck(R"(class Counter {
+  n: int;
+  fn __init__() { self.n = 0; }
+  fn me() { reset(self); }
+}
+class Fast : Counter { fn __init__() { __super__(); } }
+class Holder { c: Counter; fn __init__() { self.c = Counter(); } }
+fn reset(c: inout Counter) { c = Counter(); }
 fn main() -> int {
-  first(1);
-  first<int>(2);
-  b = Box<int>();
-  return second([1, 2], 1);
+  let k = Counter();
+  k.n = 3;
+  reset(k);
+  let h = Holder();
+  reset(h.c);
+  f = Fast();
+  reset(f);
+  g: Counter = Fast();
+  reset(g);
+  return 0;
 })");
-  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
-  expectErrors(r,
-               {":1:1: error: 'view' does not apply to type parameter 'T' yet",
-                ":2:16: error: 'view' does not apply to type parameter 'T' "
-                "yet"});
+  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
+  expectErrors(
+      r, {":4:19: error: 'self' cannot be passed to 'inout' parameter 'c': the "
+          "method would no longer know its object",
+          ":12:9: error: 'k' is 'let'; it cannot be passed to 'inout' "
+          "parameter 'c'",
+          ":16:9: error: argument 1 of 'reset' has type 'Fast', but 'inout' "
+          "parameter 'c' has type 'Counter'"});
 }
 
 // An override keeps every parameter's mode.

@@ -292,16 +292,21 @@ ptr.store %p, %v                               ; store %v at %p
 
 An `inout` parameter is a `ptr` parameter: the caller passes the address of
 its storage, and the callee reads and writes it in place with `ptr.load` and
-`ptr.store`.  Only scalar slots have addresses: `local.addr` takes an `i64`,
-`f64`, `bool` or `char` local, `field.addr` a field of one of those types,
-and `ptr.load` / `ptr.store` read and write those types.  The verifier cannot
+`ptr.store`.  Scalar and box slots have addresses: `local.addr` takes an
+`i64`, `f64`, `bool`, `char` or `box` local, `field.addr` a field of one of
+those types (every field type), and `ptr.load` / `ptr.store` read and write
+those types.  The verifier cannot
 know what an address points to, so the lowering always reads and writes it
 with the slot's own type.  A local's address is valid until its function
 returns; a field's address while its object is alive, which the caller
 guarantees by keeping the object retained for the duration of the call.  The
 lowering only passes an address down to a callee, which keeps it in a `ptr`
 local; it is never stored in a field or an array or tuple slot.  Like `store`
-and `field.store`, `ptr.store` does no ARC.
+and `field.store`, `ptr.store` does no ARC.  An `inout` parameter of a
+reference type is the address of the caller's `box` slot, not a reference of
+its own: the call neither retains nor releases, and an assignment through it
+releases the box it loads from the slot before storing the new one, just as an
+assignment to the caller's variable would.
 
 ## 7. What the lowering makes explicit (the ownership rules)
 

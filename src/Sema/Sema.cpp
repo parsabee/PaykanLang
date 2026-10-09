@@ -2278,7 +2278,6 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
   for (auto &p : node->getParams())
     paramTypes.push_back(resolveType(p.ParamType, node->getLocation(),
                                      "parameter '" + p.getName() + "'"));
-  bool modesOk = checkParamModeTypes(node, paramTypes);
 
   // Type-check the body in a new scope with params.
   auto *savedRetTy = CurrentReturnType;
@@ -2288,7 +2287,7 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
     for (size_t i = 0; i < node->getParams().size(); ++i)
       CurrentScope->declare(node->getParams()[i].getName(), paramTypes[i]);
     declareParamKinds(node);
-    bool ok = modesOk;
+    bool ok = true;
     for (auto *stmt : node->getBody()->getStatements())
       if (!visit(stmt))
         ok = false;

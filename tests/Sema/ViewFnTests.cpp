@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 // Sema tests: `view fn` methods.  A method may change `self` unless it is a
-// `view fn`; only a `view fn` may be called on a `let` local or on `self`
-// inside a `view fn`, and a method that never changes `self` but is not one
-// gets a warning.
+// `view fn`; only a `view fn` may be called on a `view` parameter or on
+// `self` inside a `view fn`, and a method that never changes `self` but is
+// not one gets a warning.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -124,9 +124,9 @@ fn main() -> int { return 0; }
             });
 }
 
-// A `let` local can call `view fn` methods, its own and the builtins'
-// (`toString`, `len`), and no others.
-TEST(ViewFn, LetCallsOnlyViewFns) {
+// `let` only fixes the variable: any method can be called on what it holds,
+// its own and the builtins', `view fn` or not.
+TEST(ViewFn, LetCanCallAnyMethod) {
   auto r = semaCheck(R"(class Counter {
   n: int;
   fn __init__() { self.n = 0; }
@@ -137,15 +137,14 @@ fn main() -> int {
   let c = Counter();
   let s = "abc";
   let xs = [1, 2];
-  println(c.toString() + s.toString());
   c.tick();
   s.concat("d");
+  xs.push(3);
+  println(c.toString() + s.toString());
   return c.get() + s.len() + xs.len();
 }
 )");
-  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
-  expectAll(r, {":12:3: error: 'c' is 'let'; 'tick' is not a 'view fn'",
-                ":13:3: error: 's' is 'let'; 'concat' is not a 'view fn'"});
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
 // The warning: a method that never changes `self` and is not a `view fn`.  A
@@ -175,9 +174,12 @@ fn main() -> int {
 }
 )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
-  const char *kSuffix =
-      "never changes 'self': make it a 'view fn' so 'let' values and 'view' "
-      "borrows can call it";
+  const char *kSuffix = "never changes 'self': make it a 'view fn'";
+  EXPECT_NE(r.Diagnostics.find(":4:3: warning: 'area' never changes 'self': "
+                               "make it a 'view fn' so 'view' parameters can "
+                               "call it"),
+            std::string::npos)
+      << r.Diagnostics;
   for (const char *loc : {":4:3: warning: 'area' ", ":5:3: warning: 'twice' ",
                           ":15:56: warning: 'get' "})
     EXPECT_NE(r.Diagnostics.find(std::string(loc) + kSuffix), std::string::npos)
@@ -194,8 +196,8 @@ fn main() -> int {
         << r.Diagnostics;
 }
 
-// A module's `view fn` markers are part of its interface: calls on a `let`
-// and overrides in the importer are checked against them.
+// A module's `view fn` markers are part of its interface: overrides in the
+// importer are checked against them.
 TEST(ViewFn, AcrossModules) {
   auto dir = tempDir() / "view_fn_modules";
   std::filesystem::remove_all(dir);
@@ -211,9 +213,8 @@ fn main() -> int {
   p.set(2);
   return p.get();
 })"));
-  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
   expectAll(r, {":2:52: error: override of 'get' must be a 'view fn', like "
-                "the method it overrides",
-                ":5:3: error: 'p' is 'let'; 'set' is not a 'view fn'"});
+                "the method it overrides"});
   std::filesystem::remove_all(dir);
 }

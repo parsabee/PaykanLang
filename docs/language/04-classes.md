@@ -108,10 +108,11 @@ read-only in its body: through `self` it cannot
 Each is an error that names the method: `'self' is read-only in 'view fn value'; 'tick' is
 not a 'view fn'`. Other objects can change as usual.
 
-Only a `view fn` can be called on a `let` local (and, once `view` applies to classes, on
-a `view` parameter): `'c' is 'let'; 'increment' is not a 'view fn'`. The builtin methods
-that only read are `view fn`s: `toString`, `equals`, `len`; `push`, `pop`, `concat` and
-the `File` methods are not.
+Only a `view fn` can be called on a `view` parameter
+([Functions](02-functions-and-calling.md#view-read-only)): `'c' is a 'view' parameter;
+'increment' is not a 'view fn'`. The builtin methods that only read are `view fn`s:
+`toString`, `equals`, `len`, `length`; `push`, `pop`, `concat` and the `File` methods are
+not. A `let` local only cannot be reassigned: any method can be called on what it holds.
 
 - `__init__` cannot be a `view fn`: it sets up `self`.
 - An override keeps the marker of the method it overrides, both ways:
@@ -123,9 +124,9 @@ the `File` methods are not.
 - A module's `view fn` markers are part of its interface, whether it is imported from
   source or from a `.pkm` file.
 
-A method that never changes `self` but is not a `view fn` gets a warning, so that `let`
-values and `view` borrows can call it: `'value' never changes 'self': make it a 'view
-fn' so 'let' values and 'view' borrows can call it`. A method counts as changing `self`
+A method that never changes `self` but is not a `view fn` gets a warning, so that `view`
+parameters can call it: `'value' never changes 'self': make it a 'view fn' so 'view'
+parameters can call it`. A method counts as changing `self`
 when it does one of the things above, or calls on `self` a method that does; a method
 with an override that changes `self` gets no warning, and neither does its override. The
 warning is not given while the program has errors.
@@ -293,7 +294,7 @@ match a {
 | Override changes a parameter mode | Override drops, adds or changes a parameter's `view` / `inout` |
 | Override changes `view fn` | Override of a `view fn` is not one, or an override of another method is one |
 | `self` changed in a `view fn` | A `view fn` assigns `self`'s fields or elements, calls a method on `self` that is not a `view fn`, or passes them to `inout` |
-| A `let` value changed | Field or element assignment, call of a method that is not a `view fn`, or `inout` argument reached through a `let` local |
+| A `view` parameter's object changed | Field or element assignment, call of a method that is not a `view fn`, or `inout` argument reached through a `view` parameter |
 | `view fn __init__` or a free `view fn` | `__init__` sets up `self`; a free function has no `self` |
 | Multiple bases | More than one `:` clause |
 | `self` in parameter list | Writing `self` as an explicit method parameter |

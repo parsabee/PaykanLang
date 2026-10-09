@@ -1,11 +1,12 @@
 // 48 — `view fn` methods.  A method may change `self` unless it is a
 // `view fn`, which only reads it (docs/language/04-classes.md, "Methods
 // that don't change self").  Only `view fn` methods can be called on a
-// `let` value, and an override keeps its parent's marker.
+// `view` parameter, and an override keeps its parent's marker.
 // Exercises: a class with changing and reading methods, a subclass
-// overriding both kinds, a `view fn` calling another one on `self`, calls on
-// `let` locals and through a base-class reference, the builtin `view fn`s
-// (toString, len), a generic class.  Run with --track-heap: zero live blocks.
+// overriding both kinds, a `view fn` calling another one on `self`, calls
+// through a `view` parameter and a base-class reference, any method on a
+// `let` local, the builtin `view fn`s (toString, len), a generic class.  Run
+// with --track-heap: zero live blocks.
 
 // expect-stdout: counter: 3 ticks, double 6
 // expect-stdout: fast: 20 ticks, double 40
@@ -32,7 +33,7 @@ class Box<T> {
   view fn get() -> T { return self.value; }
 }
 
-fn report(c: Counter) {
+fn report(c: view Counter) {
   println(c.describe() + ": " + Str(c.count()) + " ticks, double " +
           Str(c.double()));
 }
@@ -41,8 +42,8 @@ fn main() -> int {
   c = Counter();
   c.tick();
   c.tick();
-  c.tick();
   let done = c;
+  done.tick();
   report(done);
 
   f: Counter = Fast();
