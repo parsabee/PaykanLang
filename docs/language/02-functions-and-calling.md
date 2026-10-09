@@ -135,7 +135,8 @@ A `view` can only be passed on to another `view` parameter, whatever its type, s
 function it reaches can change it. With `fn report(c: Counter)`, `report(c)` is an error:
 `'c' is a 'view' parameter; it can only be passed to a 'view' parameter, and parameter 1 of
 'report' is not one`. The fix is to make that parameter `view` too. The builtin functions
-only read (`println(c)`, `Str(n)`), and so do the builtin methods, except `push`.
+only read (`println(c)`, `Str(n)`), and so do the builtin methods, except `push`. `Str(s)`
+with a `Str` returns `s` itself, so it takes no `view`.
 
 A `view` of an object, string, array, tuple or optional shares what it holds, so it is
 never stored or returned, where another name could change it later. Assigning it to a
