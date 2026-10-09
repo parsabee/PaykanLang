@@ -12,7 +12,7 @@ your backend will get.
 | Field | Meaning |
 |---|---|
 | `pir`, `pir_size` | the whole program: every module, main module first, already lowered and run through the verifier; UTF-8, NUL-terminated at `pir[pir_size]` |
-| `pir_text_version` | the version of the text form, `PAYKAN_PIR_TEXT_VERSION` (2) |
+| `pir_text_version` | the version of the text form, `PAYKAN_PIR_TEXT_VERSION` |
 | `input_filename`, `project_root` | the main source file and the directory imports were resolved against |
 | `opt_level` | `-O<n>`, 0..3; what it means is the backend's choice |
 

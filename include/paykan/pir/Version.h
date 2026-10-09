@@ -12,7 +12,6 @@
 
 namespace paykan::pir {
 
-// 2: local.addr, field.addr, ptr.load, ptr.store (`inout` parameters).
-inline constexpr uint32_t kPIRVersion = 2;
+inline constexpr uint32_t kPIRVersion = 1;
 
 } // namespace paykan::pir
