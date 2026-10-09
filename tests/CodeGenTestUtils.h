@@ -21,11 +21,12 @@
 
 #include "paykan/backends/c/CBackend.h"
 #include "paykan/lowering/Lowering.h"
+#include "paykan/pir/Parser.h"
+#include "paykan/pir/Verifier.h"
 
 #if PAYKAN_TEST_HAVE_LLVM
 #include "JIT.h"
 #include "PIRToLLVM.h"
-#include "paykan/pir/Verifier.h"
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/Support/Error.h>
@@ -166,13 +167,9 @@ inline RunResult runJITModule(std::unique_ptr<llvm::Module> module,
 
 /// The LLVM backend: lowering -> PIR -> LLVM IR (through the bitcode cache,
 /// like the driver) -> JIT, in process.
-inline RunResult runLLVM(Analysed &a, const std::vector<std::string> *args,
-                         const std::string &projectRoot) {
-  pir::Program program;
-  std::ostringstream errs;
-  if (!lowering::lowerProgram(a.Ctx, a.Driver->getRoot(), a.Path, projectRoot,
-                              program, errs))
-    return {-1, "", "lowering failed: " + errs.str(), false};
+inline RunResult runProgramLLVM(const pir::Program &program,
+                                const std::vector<std::string> *args,
+                                const std::string &projectRoot) {
   if (auto verrs = pir::verify(program); !verrs.empty())
     return {-1, "", "verifier: " + pir::formatErrors(verrs), false};
   auto llvmCtx = std::make_unique<llvm::LLVMContext>();
@@ -181,6 +178,16 @@ inline RunResult runLLVM(Analysed &a, const std::vector<std::string> *args,
   if (!module)
     return {-1, "", module.status().message(), false};
   return runJITModule(std::move(*module), std::move(llvmCtx), args);
+}
+
+inline RunResult runLLVM(Analysed &a, const std::vector<std::string> *args,
+                         const std::string &projectRoot) {
+  pir::Program program;
+  std::ostringstream errs;
+  if (!lowering::lowerProgram(a.Ctx, a.Driver->getRoot(), a.Path, projectRoot,
+                              program, errs))
+    return {-1, "", "lowering failed: " + errs.str(), false};
+  return runProgramLLVM(program, args, projectRoot);
 }
 #endif
 
@@ -207,20 +214,11 @@ inline int64_t extractHeapReport(std::string &err) {
   return live;
 }
 
-inline RunResult runC(Analysed &a, const std::vector<std::string> *args,
-                      const std::string &projectRoot) {
-  pir::Program program;
+/// Build @p program with the C backend and run it with @p argv.
+inline RunResult runProgramC(const pir::Program &program,
+                             const std::vector<std::string> &argv) {
   std::ostringstream errs;
-  if (!lowering::lowerProgram(a.Ctx, a.Driver->getRoot(), a.Path, projectRoot,
-                              program, errs))
-    return {-1, "", "lowering failed: " + errs.str(), false};
-
   bool track = Paykan_heap_tracking_enabled() != 0;
-  std::vector<std::string> argv;
-  if (args)
-    argv = *args;
-  else
-    argv.push_back(a.Path);
 
   auto [savedOut, outPath] = redirectFdToTempFile(STDOUT_FILENO);
   auto [savedErr, errPath] = redirectFdToTempFile(STDERR_FILENO);
@@ -247,6 +245,16 @@ inline RunResult runC(Analysed &a, const std::vector<std::string> *args,
   int64_t live = extractHeapReport(errStr);
   lastRunLiveBlocks() = track ? (live < 0 ? -1 : live) : 0;
   return {rc, outStr, errStr, true};
+}
+
+inline RunResult runC(Analysed &a, const std::vector<std::string> *args,
+                      const std::string &projectRoot) {
+  pir::Program program;
+  std::ostringstream errs;
+  if (!lowering::lowerProgram(a.Ctx, a.Driver->getRoot(), a.Path, projectRoot,
+                              program, errs))
+    return {-1, "", "lowering failed: " + errs.str(), false};
+  return runProgramC(program, args ? *args : std::vector<std::string>{a.Path});
 }
 
 inline RunResult runAnalysed(Analysed &a, const std::vector<std::string> *args,
@@ -308,6 +316,22 @@ inline RunResult compileAndRunWithFrontend(const std::string &source,
                                            const std::string &frontendName) {
   auto a = detail::analyse(source, "", frontendName);
   return detail::runAnalysed(a, nullptr, "");
+}
+
+/// Parse the hand-written PIR program @p text and run it through the test
+/// backend, verified as the driver verifies a lowered program.
+inline RunResult compileAndRunPIR(const std::string &text) {
+  pir::ParseError err;
+  auto program = pir::parseProgram(text, err);
+  if (!program)
+    return {-1, "", "PIR parse error: " + err.str(), false};
+#if PAYKAN_TEST_HAVE_LLVM
+  if (testBackend() == "llvm")
+    return detail::runProgramLLVM(*program, nullptr, "");
+#endif
+  if (auto verrs = pir::verify(*program); !verrs.empty())
+    return {-1, "", "verifier: " + pir::formatErrors(verrs), false};
+  return detail::runProgramC(*program, {"program.pir"});
 }
 
 /// Compile and run from a .pkn file on disk.

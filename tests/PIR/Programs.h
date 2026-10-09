@@ -52,6 +52,13 @@ fn @Point_destroy(%self.1: obj) -> void {
   ret
 }
 
+fn @bump(%n.1: ptr, %on.2: bool) -> void {
+  %v.3 = ptr.load i64, %n.1
+  %w.4 = add %v.3, 1
+  ptr.store %n.1, %w.4
+  ret
+}
+
 fn @main() -> i64 {
   local %i.0: i64
   local %acc.1: box
@@ -100,6 +107,10 @@ fn @main() -> i64 {
   %h.25 = call @helper(%g.18)
   %sel.26 = select %nb.20, %h.25, %area.23
   %o.27 = unbox %b.7
+  %pi.28 = local.addr %i.0
+  %px.29 = field.addr %p.2, Point.x
+  call @bump(%pi.28, true)
+  call @bump(%px.29, false)
   release %b.7
   if %nb.20 {
     unreachable

@@ -291,6 +291,28 @@ field.store %o, Point.x, %v                    ; plain store: ARC is explicit ar
 store %x, %v
 ```
 
+**Addresses** (`inout` parameters)
+
+```
+%p = local.addr %x                             ; the address of local %x (ptr)
+%p = field.addr %o, Point.x                    ; the address of a field of %o (ptr)
+%v = ptr.load i64, %p                          ; the i64 at %p
+ptr.store %p, %v                               ; store %v at %p
+```
+
+An `inout` parameter is a `ptr` parameter: the caller passes the address of
+its storage, and the callee reads and writes it in place with `ptr.load` and
+`ptr.store`.  Only scalar slots have addresses: `local.addr` takes an `i64`,
+`f64`, `bool` or `char` local, `field.addr` a field of one of those types,
+and `ptr.load` / `ptr.store` read and write those types.  The verifier cannot
+know what an address points to, so the lowering always reads and writes it
+with the slot's own type.  A local's address is valid until its function
+returns; a field's address while its object is alive, which the caller
+guarantees by keeping the object retained for the duration of the call.  The
+lowering only passes an address down to a callee, which keeps it in a `ptr`
+local; it is never stored in a field or an array or tuple slot.  Like `store`
+and `field.store`, `ptr.store` does no ARC.
+
 ## 7. What the lowering makes explicit (the ownership rules)
 
 This is the contract backends rely on.  It is the same set of rules the LLVM
@@ -430,8 +452,11 @@ The verifier rejects a program when:
 * a `call` names an undeclared function or passes the wrong arity/types; a
   `vcall` slot is out of range of the named class's vtable or the argument list
   does not match the slot's signature;
-* `field.load`/`field.store`/`new`/`vtable.addr` name an unknown class or
-  field; a field store has the wrong type;
+* `field.load`/`field.store`/`field.addr`/`new`/`vtable.addr` name an
+  unknown class or field; a field store has the wrong type;
+* `local.addr` or `field.addr` takes the address of a slot that is not `i64`,
+  `f64`, `bool` or `char`; `ptr.load`/`ptr.store` take an address that is not
+  a `ptr`, or read or write a value of another type;
 * `break`/`continue` appear outside a `while`; a statement follows a
   terminator in the same block (a terminator is `break`, `continue`, `ret`,
   `unreachable`, or an `if` whose two branches both end in one); `ret`

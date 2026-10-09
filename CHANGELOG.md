@@ -29,6 +29,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a module-less `extern fn @$c.<symbol>`; both backends declare it from its
   signature.  Compiling and linking the C sources is not part of this change.
 
+### Changed
+
+- `view` and `inout` are reserved words: they start a parameter
+  (`fn bump(inout n: int)`, docs/grammar.md §4) and are a syntax error
+  anywhere else.  Sema does not accept parameter modes yet.
+- PIR: four address instructions, `local.addr`, `field.addr`, `ptr.load` and
+  `ptr.store` (docs/pir.md §6), which `inout` parameters will lower to.  Only
+  scalar (`i64`, `f64`, `bool`, `char`) slots have addresses.  A backend plugin
+  must handle them.
+
 ### Removed
 
 - The `mov` keyword (#145).  Using it is now an error: `'mov' was removed in v0.2.0;
@@ -37,6 +47,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the same objects freed; `s` simply stays readable.  Until the last-use pass (#186)
   lands, each former `mov` costs one retain/release pair.  The use-after-move,
   loop back-edge and "cannot 'mov' ..." diagnostics went with it.  `mov` stays reserved.
+
+### Fixed
+
+- On macOS, programs are compiled and linked for the deployment target the
+  runtime was built for.  CMake 4 builds the runtime for the host's macOS
+  version, which can be newer than the system `cc`'s default; `ld` then
+  warned on every link ("built for newer 'macOS' version") and the warning
+  ended up in the program's stderr.
 
 ## [0.1.1] - 2026-10-06
 

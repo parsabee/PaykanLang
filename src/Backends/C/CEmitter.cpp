@@ -344,6 +344,7 @@ bool hasSideEffects(const pir::Instr &i) {
   case Opcode::Release:
   case Opcode::Free:
   case Opcode::FieldStore:
+  case Opcode::PtrStore:
     return true;
   default:
     return false; // a Store is live while its local is read (FunctionUses)
@@ -381,7 +382,9 @@ struct FunctionUses {
       auto onInstr = [&](const pir::Instr &i) {
         if (!first && !live(i))
           return;
-        if (i.Op == pir::Opcode::Load && i.Local < locals.size())
+        // A local whose address is taken is read through it.
+        if ((i.Op == pir::Opcode::Load || i.Op == pir::Opcode::LocalAddr) &&
+            i.Local < locals.size())
           locals[i.Local] = true;
         for (const auto &a : i.Args)
           onUse(a);
@@ -1370,7 +1373,38 @@ class Emitter {
       }
       line(stmt(binop(LocalNames[i.Local], kOpAssign, operand(i.Args[0]))));
       return;
+    case Opcode::LocalAddr:
+      pre = resultPrefix(i);
+      if (i.Local >= LocalNames.size()) {
+        fail("local.addr of an undeclared local");
+        return;
+      }
+      line(stmt(pre + cast(kVoidPtr) + addressOf(LocalNames[i.Local])));
+      return;
+    case Opcode::FieldAddr:
+      pre = resultPrefix(i);
+      line(stmt(
+          pre + cast(kVoidPtr) +
+          addressOf(member(paren(cast(pointerTo(classStruct(i.ClassName))) +
+                                 operand(i.Args[0])),
+                           fieldName(i.Field)))));
+      return;
+    case Opcode::PtrLoad:
+      pre = resultPrefix(i);
+      line(stmt(pre + deref(i.Args[0], i.Result.Ty)));
+      return;
+    case Opcode::PtrStore: {
+      Type t;
+      std::string v = operand(i.Args[1], t);
+      line(stmt(binop(deref(i.Args[0], t), kOpAssign, v)));
+      return;
     }
+    }
+  }
+
+  /// `*(T *)p`: the @p t value at the address @p p.
+  std::string deref(const pir::Operand &p, Type t) {
+    return kOpDeref + paren(cast(pointerTo(cType(t))) + operand(p));
   }
 
   /// `getenv("<var>") != NULL`
