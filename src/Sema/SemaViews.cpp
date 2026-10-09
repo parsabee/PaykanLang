@@ -18,11 +18,7 @@
 namespace paykan {
 namespace sema {
 
-namespace {
-
-/// The variable a place starts from: `c` for `c`, `c.a.n`, `c.xs[i]` and
-/// `c.t.0`; null when the place starts from anything else (a call).
-const ast::Identifier *rootVariable(const ast::Expr *e) {
+const ast::Identifier *Sema::placeRoot(const ast::Expr *e) {
   for (;;) {
     if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e))
       e = ma->getReceiver();
@@ -35,10 +31,8 @@ const ast::Identifier *rootVariable(const ast::Expr *e) {
   }
 }
 
-} // namespace
-
-std::string Sema::frozenPlace(const ast::Expr *e) {
-  const ast::Identifier *root = rootVariable(e);
+std::string Sema::frozenPlace(const ast::Expr *e, bool borrows) {
+  const ast::Identifier *root = placeRoot(e);
   if (!root)
     return "";
   const std::string &name = root->getName();
@@ -54,7 +48,7 @@ std::string Sema::frozenPlace(const ast::Expr *e) {
   case VarKind::Inout:
     break;
   }
-  return "";
+  return borrows ? viewedBy(name) : "";
 }
 
 bool Sema::checkChangeable(const ast::Expr *e, const std::string &what,
@@ -98,12 +92,12 @@ bool Sema::sharesStorage(const ast::Type *ty) {
   return true;
 }
 
-std::string Sema::viewOf(const ast::Expr *e) {
+std::string Sema::viewOf(const ast::Expr *e, bool borrows) {
   if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e)) {
-    std::string why = viewOf(te->getTrueExpr());
-    return why.empty() ? viewOf(te->getFalseExpr()) : why;
+    std::string why = viewOf(te->getTrueExpr(), borrows);
+    return why.empty() ? viewOf(te->getFalseExpr(), borrows) : why;
   }
-  return frozenPlace(e);
+  return frozenPlace(e, borrows);
 }
 
 bool Sema::checkViewArgs(const ast::ParamModes &modes,
@@ -115,7 +109,10 @@ bool Sema::checkViewArgs(const ast::ParamModes &modes,
     // argument of the wrong type was reported by the call's own check.
     if (modes.mode(i) != ast::ParamMode::Value || !args[i]->getResolvedType())
       continue;
-    std::string msg = viewOf(args[i]);
+    // A viewed variable of a value type is passed as a copy, which cannot
+    // change it.
+    std::string msg =
+        viewOf(args[i], sharesStorage(args[i]->getResolvedType()));
     if (msg.empty())
       continue;
     msg += "; it can only be passed to a 'view' parameter, and parameter ";

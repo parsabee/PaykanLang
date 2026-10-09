@@ -651,6 +651,7 @@ ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
                                      "' cannot be used as a value");
     return nullptr;
   }
+  S.checkNotBorrowed(node->getName(), node->getLocation());
   return S.checkIdentLive(node->getName(), node->getLocation());
 }
 
@@ -1976,12 +1977,7 @@ bool Sema::visitEnumDecl(ast::EnumDecl *node) {
 
 bool Sema::visitCompoundStmt(ast::CompoundStmt *node) {
   ScopeGuard guard(*this);
-  bool ok = true;
-  for (auto *stmt : node->getStatements()) {
-    if (!visit(stmt))
-      ok = false;
-  }
-  return ok;
+  return visitStatements(node->getStatements());
 }
 
 bool Sema::visitDeclStmt(ast::DeclStmt *node) { return visit(node->getDecl()); }
@@ -2002,6 +1998,12 @@ Sema::VarKind Sema::varKind(std::string_view name) const {
 }
 
 bool Sema::checkReassignable(const std::string &name, ast::SourceLocation loc) {
+  if (!checkNotBorrowed(name, loc))
+    return false;
+  if (std::string why = viewedBy(name); !why.empty()) {
+    error(loc, why + "; it cannot be assigned");
+    return false;
+  }
   switch (varKind(name)) {
   case VarKind::Let:
     error(loc,
@@ -2324,9 +2326,8 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
       CurrentScope->declare(node->getParams()[i].getName(), paramTypes[i]);
     declareParamKinds(node);
     bool ok = modesOk;
-    for (auto *stmt : node->getBody()->getStatements())
-      if (!visit(stmt))
-        ok = false;
+    if (!visitBody(node->getBody()->getStatements()))
+      ok = false;
     CurrentReturnType = savedRetTy;
     if (!ok)
       return false;
@@ -2578,9 +2579,8 @@ bool Sema::checkValueMatch(ast::MatchStmt *node, ast::Type *subjectTy) {
       ok = false;
     }
 
-    for (auto *stmt : arm->getBody()->getStatements())
-      if (!visit(stmt))
-        ok = false;
+    if (!visitStatements(arm->getBody()->getStatements()))
+      ok = false;
   }
 
   return ok;
@@ -2647,9 +2647,8 @@ bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
       }
     }
 
-    for (auto *stmt : arm->getBody()->getStatements())
-      if (!visit(stmt))
-        ok = false;
+    if (!visitStatements(arm->getBody()->getStatements()))
+      ok = false;
   }
 
   return ok;
@@ -2731,9 +2730,8 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
             "match on a class subject of type '" + subjectCt->getName() +
                 "' requires type-name arms, not literal patterns");
       ok = false;
-      for (auto *stmt : arm->getBody()->getStatements())
-        if (!visit(stmt))
-          ok = false;
+      if (!visitStatements(arm->getBody()->getStatements()))
+        ok = false;
       continue;
     } else {
       // 2. Resolve the arm's type annotation.
@@ -2800,9 +2798,8 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
     }
 
     // 5. Recursively type-check the arm body.
-    for (auto *stmt : arm->getBody()->getStatements())
-      if (!visit(stmt))
-        ok = false;
+    if (!visitStatements(arm->getBody()->getStatements()))
+      ok = false;
   }
 
   return ok;
@@ -2925,9 +2922,8 @@ bool Sema::checkOptionalMatch(ast::MatchStmt *node,
       }
     }
 
-    for (auto *stmt : arm->getBody()->getStatements())
-      if (!visit(stmt))
-        ok = false;
+    if (!visitStatements(arm->getBody()->getStatements()))
+      ok = false;
   }
 
   return ok;

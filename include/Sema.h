@@ -13,9 +13,11 @@
 
 #include <filesystem>
 #include <memory>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace paykan {
@@ -607,7 +609,9 @@ private:
   /// Why the place @p e (a variable, or fields and elements reached from
   /// one) cannot be changed here, as the start of a diagnostic: "'n' is a
   /// 'view' parameter"; "" when it can.
-  std::string frozenPlace(const ast::Expr *e);
+  /// With @p borrows, a variable viewed by a live `view` local cannot
+  /// change either.
+  std::string frozenPlace(const ast::Expr *e, bool borrows = true);
   /// Error at @p loc (and false) when the place @p e cannot be changed;
   /// @p what ends the diagnostic ("cannot assign to its field 'n'").
   bool checkChangeable(const ast::Expr *e, const std::string &what,
@@ -625,7 +629,7 @@ private:
   static bool sharesStorage(const ast::Type *ty);
   /// Why @p e is a `view` (frozenPlace, or a conditional with such a
   /// branch), as the start of a diagnostic; "" when it is not.
-  std::string viewOf(const ast::Expr *e);
+  std::string viewOf(const ast::Expr *e, bool borrows = true);
   /// A `view` can only be passed on to a `view` parameter: each of @p args
   /// against the parameters' @p modes of a call of @p callee.
   bool checkViewArgs(const ast::ParamModes &modes,
@@ -640,6 +644,42 @@ private:
   /// While a `match` arm binds a name: whether the subject is a `view`, so
   /// that the name is one too.
   bool MatchSubjectIsView = false;
+  /// The variable a place starts from: `c` for `c`, `c.a.n`, `c.xs[i]` and
+  /// `c.t.0`; null for anything else (a call).
+  static const ast::Identifier *placeRoot(const ast::Expr *e);
+
+  // -- Exclusivity of local borrows (SemaBorrows.cpp)
+
+  /// A live local borrow: `By` names (`inout`) or views `Root`, declared in
+  /// `RootScope`, until statement `End` of `Block`.
+  struct Borrow {
+    std::string Root;
+    const Scope *RootScope;
+    std::string By;
+    bool Inout;
+    const std::vector<ast::Stmt *> *Block;
+    size_t End;
+  };
+  std::vector<Borrow> Borrows;
+  /// The (variable, line) pairs reported by checkNotBorrowed.
+  std::set<std::pair<std::string, unsigned>> BorrowedUsesReported;
+  /// Check @p stmts in order, starting each local borrow after its
+  /// declaration and ending it after its last use there.
+  bool visitStatements(const std::vector<ast::Stmt *> &stmts);
+  /// A function or method body: visitStatements, without the borrows of
+  /// whatever is being checked around it.
+  bool visitBody(const std::vector<ast::Stmt *> &stmts);
+  /// Start the borrow @p vd makes, live until statement @p end of @p block.
+  void startBorrow(const ast::VarDecl *vd,
+                   const std::vector<ast::Stmt *> *block, size_t end);
+  /// The live borrow (`inout` or `view`) of the variable @p name, or null.
+  const Borrow *activeBorrow(const std::string &name, bool inout) const;
+  /// Error at @p loc (and false) when variable @p name is named by a live
+  /// `inout` local, and so cannot be used.
+  bool checkNotBorrowed(const std::string &name, ast::SourceLocation loc);
+  /// Why variable @p name cannot change while a `view` local of it is live,
+  /// as the start of a diagnostic; "" when none is.
+  std::string viewedBy(const std::string &name) const;
   /// An override @p method keeps each parameter's mode of @p base.
   bool checkOverrideModes(const ast::FuncDecl *method,
                           const ast::MethodDecl *base);
