@@ -531,3 +531,111 @@ TEST(Pkm, HelpDocumentsTheFlags) {
         "--no-module-cache", "--verbose", "pkm dump", "pkm check"})
     EXPECT_TRUE(contains(r.out, flag)) << flag << "\n" << r.out;
 }
+
+// -- Parameter modes across modules
+
+namespace {
+
+/// `view` and `inout` parameters in `base`, used and overridden by `main`:
+/// a function, a constructor, a method of an imported class called on it
+/// directly and through an override.
+struct ModesProject {
+  fs::path Dir;
+  explicit ModesProject(const std::string &name) {
+    Dir = fs::temp_directory_path() /
+          ("pkm_modes_" + name + "_" + std::to_string(getpid()));
+    fs::remove_all(Dir);
+    writeFile(Dir / "base.pkn",
+              "class Counter { n: int;\n"
+              "  fn __init__(view start: int) { self.n = start; }\n"
+              "  fn add(view k: int) -> int { self.n = self.n + k;\n"
+              "    return self.n; }\n"
+              "  fn take(inout to: int) { to = to + self.n; } }\n"
+              "class Cell { v: int;\n"
+              "  fn __init__(inout v: int) { self.v = v; v = 0; } }\n"
+              "fn twice(view n: int) -> int { return n * 2; }\n"
+              "fn bump(inout n: int) { n = n + 1; }\n");
+    writeFile(
+        Dir / "main.pkn",
+        "import base;\n"
+        "class Fast : base::Counter {\n"
+        "  fn __init__(view s: int) { __super__(s); }\n"
+        "  fn add(view k: int) -> int { self.n = self.n + 10 * k;\n"
+        "    return self.n; }\n"
+        "  fn take(inout to: int) { to = to * 100; } }\n"
+        "fn main() -> int {\n"
+        "  c: base::Counter = Fast(1);\n"
+        "  plain = base::Counter(5);\n"
+        "  k = 2;\n"
+        "  base::bump(k);\n"
+        "  plain.take(k);\n"
+        "  j = 3;\n"
+        "  c.take(j);\n"
+        "  cell = base::Cell(k);\n"
+        "  println(Str(c.add(2)) + \" \" + Str(base::twice(3)) + \" \" +\n"
+        "          Str(k) + \" \" + Str(j) + \" \" + Str(cell.v));\n"
+        "  return 0;\n}\n");
+    writeFile(Dir / "bad.pkn", "import base;\n"
+                               "class Slow : base::Counter {\n"
+                               "  fn __init__(s: int) { __super__(s); }\n"
+                               "  fn add(k: int) -> int { return k; } }\n"
+                               "fn main() -> int { return 0; }\n");
+  }
+  ~ModesProject() { fs::remove_all(Dir); }
+  CmdResult paykan(const std::string &args) const {
+    return run("cd " + Dir.string() + " && " + paykanCmd() + " " + args);
+  }
+};
+
+const char *kModesExpected = "21 6 0 300 8\n";
+
+} // namespace
+
+// The modes survive the source import, the cache entry and a prebuilt file:
+// calls and overrides are checked against them, and an `inout` argument is
+// passed by address into the other module (also to a method of one of its
+// classes, which an importer that dropped the mode would call with a value).
+TEST(Pkm, ParamModesAcrossModules) {
+  REQUIRE_BACKEND();
+  ModesProject p("view");
+  auto src = p.paykan("--track-heap main.pkn");
+  ASSERT_EQ(src.exitCode, 0) << src.out;
+  EXPECT_TRUE(contains(src.out, kModesExpected)) << src.out;
+  EXPECT_TRUE(contains(src.out, "live blocks       : 0")) << src.out;
+  auto cached = p.paykan("--verbose main.pkn");
+  ASSERT_EQ(cached.exitCode, 0) << cached.out;
+  EXPECT_TRUE(contains(cached.out, "module base: cache .paykan_cache/base.pkm "
+                                   "usable"))
+      << cached.out;
+  EXPECT_TRUE(contains(cached.out, kModesExpected)) << cached.out;
+  const char *kOverride =
+      "bad.pkn:4:3: error: override of 'add' must keep 'view' on parameter 'k'";
+  auto bad = p.paykan("--check-only bad.pkn");
+  EXPECT_NE(bad.exitCode, 0);
+  EXPECT_TRUE(contains(bad.out, kOverride)) << bad.out;
+
+  ASSERT_EQ(p.paykan("--emit-pkm base.pkn").exitCode, 0);
+  fs::remove(p.Dir / "base.pkn");
+  fs::remove_all(p.Dir / ".paykan_cache");
+  auto pkm = p.paykan("--track-heap --verbose main.pkn");
+  ASSERT_EQ(pkm.exitCode, 0) << pkm.out;
+  EXPECT_TRUE(contains(pkm.out, "module base: prebuilt base.pkm usable"))
+      << pkm.out;
+  EXPECT_TRUE(contains(pkm.out, kModesExpected)) << pkm.out;
+  EXPECT_TRUE(contains(pkm.out, "live blocks       : 0")) << pkm.out;
+  bad = p.paykan("--check-only bad.pkn");
+  EXPECT_NE(bad.exitCode, 0);
+  EXPECT_TRUE(contains(bad.out, kOverride)) << bad.out;
+
+  auto dump = p.paykan("pkm dump --section=iface base.pkm");
+  for (const char *sig :
+       {"func twice(view int) -> int", "func bump(inout int) -> void",
+        "func Counter(view int) -> Counter", "func Cell(inout int) -> Cell",
+        "method add(view int) -> int flags 0x0",
+        "method take(inout int) -> void flags 0x0",
+        "method __init__(view int) -> void flags 0x0"})
+    EXPECT_TRUE(contains(dump.out, sig)) << sig << "\n" << dump.out;
+  auto manifest = p.paykan("pkm dump --section=manifest base.pkm");
+  EXPECT_TRUE(contains(manifest.out, "format_versions iface 1.0"))
+      << manifest.out;
+}

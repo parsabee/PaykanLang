@@ -67,6 +67,9 @@ Val ModuleLowering::ExprEmitter::visitIdentifier(ast::Identifier *node) {
     return L.externObject(kPaykanFileStdin);
   pir::LocalId local = L.CurrentScope->lookup(node->getName());
   Val val = L.B.load(local, node->getName());
+  // An `inout` parameter: read the caller's storage.
+  if (Type t = L.CurrentScope->inoutType(node->getName()); t != Type::Void)
+    return L.B.ptrLoad(val, t, node->getName());
   // Owned ref vars store a box — unwrap to the underlying object.
   auto *astTy = L.CurrentScope->lookupASTType(node->getName());
   if (ast::isRefType(astTy) && L.CurrentScope->isOwned(node->getName()))
@@ -645,6 +648,13 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
       Type paramTy = i + 1 < superFn->Sig.Params.size()
                          ? superFn->Sig.Params[i + 1]
                          : Type::Void;
+      if (paramTy == Type::Ptr) { // `inout`: the argument's address
+        Val p = L.emitInoutArg(argExpr);
+        if (!p)
+          return Val();
+        initArgs.push_back(p);
+        continue;
+      }
       // The base __init__ consumes ref-typed parameters: pass a +1 box.
       if (paramTy == Type::Box) {
         Val v = L.emitAsShared(argExpr);
@@ -676,6 +686,13 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     auto *arg = node->getArguments()[i];
     Type paramTy =
         i < callee->Sig.Params.size() ? callee->Sig.Params[i] : Type::Void;
+    if (paramTy == Type::Ptr) { // `inout`: the argument's address
+      Val p = L.emitInoutArg(arg);
+      if (!p)
+        return Val();
+      args.push_back(p);
+      continue;
+    }
     if (paramTy == Type::Box) {
       // Callee-consumes ABI: a +1 box for every expression form.
       Val v = L.emitAsShared(arg);
@@ -809,6 +826,13 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   std::vector<ExprValue> ownedArgs;
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     auto *argExpr = node->getArguments()[i];
+    if (i + 1 < sig.Params.size() && sig.Params[i + 1] == Type::Ptr) {
+      Val p = L.emitInoutArg(argExpr); // `inout`: the argument's address
+      if (!p)
+        return Val();
+      args.push_back(p);
+      continue;
+    }
     ast::Type *paramASTTy = (method && i < method->getParamTypes().size())
                                 ? method->getParamTypes()[i]
                                 : nullptr;
@@ -846,6 +870,9 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   std::string className;
   if (isUserDefinedMethod && !L.getOrCreateClass(ct)->IsExtern)
     className = ct->getName();
+  else if (isUserDefinedMethod &&
+           !L.checkImportedSlot(ct, static_cast<uint32_t>(vtableIdx), sig))
+    return Val();
   Val result = L.B.vcall(recv, className, static_cast<uint32_t>(vtableIdx), sig,
                          args, "mcall");
   for (const auto &ev : ownedArgs)
@@ -1080,7 +1107,8 @@ Val ModuleLowering::visitDestructureStmt(ast::DestructureStmt *node) {
       B.store(local, v);
       continue;
     }
-    B.store(local, coerceTo(v, B.localType(local)));
+    if (!storeInout(name, local, v))
+      B.store(local, coerceTo(v, B.localType(local)));
   }
 
   // Every element has been copied out (references retained): a temporary

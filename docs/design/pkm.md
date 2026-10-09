@@ -281,6 +281,14 @@ IfaceBlob
 | 5 | `INST` | yes | instantiations provided and requested (§4.5) |
 | 7 | `DIAG` | no | display file name (project-relative) and per-declaration positions for "declared here" notes (§8.6) |
 
+Parameter modes (`view`, `inout`) are appended to the string-typed records
+written today (`include/paykan/pkm/Interface.h`): `uleb n, (u8 mode, Str
+name)[n]` after a `FUNC` record's signature, and one such list per method
+after a `CLASS` record's methods, written only when a parameter has a mode
+(mode 0 by value, 1 `view`, 2 `inout`; `n` is 0 or the number of
+parameters).  A record without them reads as having no modes.  The
+interface minor version is bumped for them at the next release.
+
 Every part but `STRS` is `uleb count` then records `uleb tag, uleb len,
 payload[len]`. A reader parses the fields it knows and ignores trailing
 payload bytes (a later minor may append fields) but never reads past `len`.

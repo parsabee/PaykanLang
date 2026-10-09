@@ -154,6 +154,9 @@ private:
     };
     /// Owned variables declared in this scope, in declaration order.
     std::vector<VarMeta> DeclOrder;
+    /// `inout` parameters declared in this scope: their local holds the
+    /// address of the caller's storage, of this type.
+    std::unordered_map<std::string, pir::Type> InoutVars;
     /// Extra owned boxes released at scope exit (e.g. a match subject).
     std::vector<Val> PendingReleases;
 
@@ -171,6 +174,12 @@ private:
     /// owned variables (see emitTypeArmBody in LoweringMatch.cpp).
     void declareUnowned(const std::string &name, pir::LocalId local,
                         ast::Type *astTy);
+    /// An `inout` parameter, whose local holds the address of a @p pointee.
+    void declareInout(const std::string &name, pir::LocalId local,
+                      pir::Type pointee);
+    /// The type an `inout` parameter @p name points to; Void for any other
+    /// variable.
+    pir::Type inoutType(const std::string &name) const;
     Scope *findOwner(const std::string &name);
   };
 
@@ -433,6 +442,27 @@ private:
   Val lowerMemberAccessExpr(ast::MemberAccessExpr *node);
   /// Runtime symbol implementing @p name for the builtin class @p ct, or "".
   const char *builtinMethodSymbol(ast::ClassType *ct, const std::string &name);
+
+  // -- `inout` parameters (LoweringInout.cpp)
+
+  /// The PIR type of a parameter of type @p ty and mode @p mode: `ptr` for
+  /// `inout`, toPIRType's otherwise.
+  pir::Type paramPIRType(ast::Type *ty, ast::ParamMode mode);
+  /// Declare parameter @p name of a function being emitted, whose value is
+  /// @p arg and type @p astTy, in the current scope.
+  void declareParam(const std::string &name, const pir::Value &arg,
+                    ast::Type *astTy);
+  /// Store @p v into variable @p name (local @p local) when it is an
+  /// `inout` parameter, through its address; false for any other variable.
+  bool storeInout(const std::string &name, pir::LocalId local, const Val &v);
+  /// The address passed for the `inout` argument @p arg: a variable's
+  /// `local.addr`, or the address an `inout` parameter holds.
+  Val emitInoutArg(ast::Expr *arg);
+  /// For a call of a method of @p ct, a class defined in another module:
+  /// an internal error unless @p sig is the signature of vtable slot
+  /// @p slot there (so no caller passes a value where an address is due).
+  bool checkImportedSlot(ast::ClassType *ct, uint32_t slot,
+                         const pir::Signature &sig);
 };
 
 } // namespace paykan::lowering

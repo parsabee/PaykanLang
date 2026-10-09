@@ -20,9 +20,13 @@ Sema::ModuleInfo sampleInfo() {
   shape.Name = "Shape";
   shape.OriginModule = "geometry::shapes";
   shape.Fields = {{"w", "int"}, {"h", "int"}};
-  shape.Methods = {{"area", "float", {}, 0},
-                   {"__scale", "void", {"float"}, 1},
-                   {"__init__", "void", {"int", "int"}, 0}};
+  using paykan::ast::ParamMode;
+  const paykan::ast::ParamModes viewH{{ParamMode::Value, ParamMode::View},
+                                      {"w", "h"}};
+  shape.Methods = {
+      {"area", "float", {}, 0, {}},
+      {"__scale", "void", {"float"}, 1, {{ParamMode::Inout}, {"by"}}},
+      {"__init__", "void", {"int", "int"}, 0, viewH}};
   Sema::ModuleInfo::ClassInfo vec;
   vec.Name = "Vec";
   vec.SuperClassName = "Shape";
@@ -30,8 +34,8 @@ Sema::ModuleInfo sampleInfo() {
   vec.OriginModule = "geometry::vec";
   info.ExportedClasses = {shape, vec};
   info.ExportedEnums = {{"Color", {"Red", "Green"}, true, "geometry::shapes"}};
-  info.ExportedFunctions = {{"Shape", "Shape", {"int", "int"}},
-                            {"area", "float", {"Shape"}}};
+  info.ExportedFunctions = {{"Shape", "Shape", {"int", "int"}, viewH},
+                            {"area", "float", {"Shape"}, {}}};
   return info;
 }
 
@@ -40,6 +44,10 @@ TEST(InterfaceConversion, RoundTripIsExact) {
   paykan::pkm::Interface iface = Sema::toInterface(info);
   EXPECT_EQ(iface.Classes.size(), 2u);
   EXPECT_EQ(iface.Classes[0].Methods[1].Flags, 1);
+  EXPECT_EQ(iface.Classes[0].Methods[1].Modes.Modes,
+            std::vector<uint8_t>{paykan::pkm::kModeInout});
+  EXPECT_EQ(iface.Functions[0].Modes.Names,
+            (std::vector<std::string>{"w", "h"}));
   EXPECT_EQ(iface.Enums[0].Variants,
             (std::vector<std::string>{"Red", "Green"}));
   EXPECT_EQ(Sema::fromInterface(iface), info);
