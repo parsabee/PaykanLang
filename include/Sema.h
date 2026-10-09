@@ -79,8 +79,16 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// What restricts a variable beyond its type: nothing, `let` (it cannot be
   /// reassigned), or a parameter mode: `view` (it cannot be changed) or
   /// `inout` (it is the caller's storage).
-  /// View is a `view` parameter, ViewLocal a `view` local.
-  enum class VarKind : uint8_t { Plain, Let, View, ViewLocal, Inout };
+  /// View is a `view` parameter, ViewLocal a `view` local, ViewBinding a
+  /// `match` arm's name for (part of) a `view`.
+  enum class VarKind : uint8_t {
+    Plain,
+    Let,
+    View,
+    ViewLocal,
+    ViewBinding,
+    Inout
+  };
 
   /// A single lexical scope. Each scope has its own local bindings and a
   /// pointer to its enclosing (parent) scope.
@@ -587,8 +595,47 @@ private:
   /// in the current scope.
   void declareParamKinds(const ast::FuncDecl *fn);
   /// The rules of the local borrow @p node (`x: view = e;`), just declared
-  /// in the current scope with type @p ty: records a `view` local's kind.
-  bool checkLocalBorrow(const ast::VarDecl *node, ast::Type *ty);
+  /// in the current scope: records a `view` local's kind.
+  bool checkLocalBorrow(const ast::VarDecl *node);
+
+  // -- What cannot change through a `view` (SemaViews.cpp)
+
+  /// Why the place @p e (a variable, or fields and elements reached from
+  /// one) cannot be changed here, as the start of a diagnostic: "'n' is a
+  /// 'view' parameter"; "" when it can.
+  std::string frozenPlace(const ast::Expr *e);
+  /// Error at @p loc (and false) when the place @p e cannot be changed;
+  /// @p what ends the diagnostic ("cannot assign to its field 'n'").
+  bool checkChangeable(const ast::Expr *e, const std::string &what,
+                       ast::SourceLocation loc);
+  /// Whether @p method of class @p ct only reads its object: it is marked
+  /// so, or overrides a method that is.
+  static bool readsOnly(ast::ClassType *ct, const ast::MethodDecl *method);
+  /// A call of @p method (of class @p ct) on the receiver of @p call: unless
+  /// it only reads, the receiver must be changeable.
+  bool checkMethodReceiver(const ast::MethodCallExpr *call, ast::ClassType *ct,
+                           const ast::MethodDecl *method);
+  /// Whether a value of type @p ty shares what it holds when it is copied
+  /// (an object, string, array or tuple, or an optional of one), so that a
+  /// copy of a `view` of it could change it.
+  static bool sharesStorage(const ast::Type *ty);
+  /// Why @p e is a `view` (frozenPlace, or a conditional with such a
+  /// branch), as the start of a diagnostic; "" when it is not.
+  std::string viewOf(const ast::Expr *e);
+  /// A `view` can only be passed on to a `view` parameter: each of @p args
+  /// against the parameters' @p modes of a call of @p callee.
+  bool checkViewArgs(const ast::ParamModes &modes,
+                     const std::vector<ast::Expr *> &args,
+                     const std::string &callee);
+  /// @p e, of type @p ty, is being stored (assigned, put in an array or
+  /// tuple, pushed): not a `view` that shares what it holds.
+  bool checkViewNotStored(const ast::Expr *e, const ast::Type *ty);
+  /// @p e, of type @p ty, is being returned: not a `view` that shares what
+  /// it holds.
+  bool checkViewNotReturned(const ast::Expr *e, const ast::Type *ty);
+  /// While a `match` arm binds a name: whether the subject is a `view`, so
+  /// that the name is one too.
+  bool MatchSubjectIsView = false;
   /// An override @p method keeps each parameter's mode of @p base.
   bool checkOverrideModes(const ast::FuncDecl *method,
                           const ast::MethodDecl *base);

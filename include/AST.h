@@ -926,6 +926,7 @@ public:
   enum Flags : uint8_t {
     None = 0,
     Private = 1 << 0,
+    View = 1 << 1, // only reads its object (the builtin `toString`, `len`)
   };
 
 private:
@@ -950,6 +951,8 @@ public:
 
   bool isPrivate() const { return MethodFlags & Private; }
   bool isVirtual() const { return !isPrivate(); }
+  /// Only reads its object, so it can be called through a `view`.
+  bool isView() const { return MethodFlags & View; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_MethodDecl;

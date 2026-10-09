@@ -254,8 +254,13 @@ Output:
 
 A `view` local is read-only: it cannot be assigned or be a destructuring target (`cannot
 assign to 'view' local 'v'`), and it cannot be passed to an `inout` parameter. Its
-initializer may be any expression of its type; the local holds a copy of it. For now a
-`view` local has a value type (`int`, `float`, `bool`, `char` or an enum).
+initializer may be any expression. A `view` local of a value type holds a copy of it; one
+of an object, string or array holds the same object, string or array, which cannot be
+changed through it: no field or element write, and only the methods that only read
+(`toString`, `equals`, `len`, `length`) can be called on it (`'v' is a 'view' local; 'tick'
+may change it`). A `view` local stays one: it can only be passed on to a `view` parameter,
+and is never stored or returned
+([A `view` stays a `view`](02-functions-and-calling.md#a-view-stays-a-view)).
 
 An `inout` local, `x: inout = place;`, is another name for a variable or a field. It is
 not supported yet (`an 'inout' local ('x') is not supported yet`).

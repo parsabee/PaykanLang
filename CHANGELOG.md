@@ -11,13 +11,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Local borrows (docs/language/01-language-basics.md, "Local borrows"): a local declared
   with a mode where the type goes, `v: view = k + 1;` or `w: view float = k;`, the type
-  inferred when left off.  A `view` local is a read-only copy of its initializer, which may
-  be any expression of a value type: it cannot be assigned, destructured into or passed to
-  an `inout` parameter.  `view` locals of other types, and `inout` locals (`x: inout =
-  place;`), are not supported yet.  A local borrow needs an initializer, is never `let` and
+  inferred when left off.  A `view` local reads its initializer, which may be any
+  expression: a copy of a value type, the same object, string or array otherwise.  It
+  cannot be assigned, destructured into or passed to an `inout` parameter, nothing reached
+  through it can be assigned, and only the methods that only read (`toString`, `equals`,
+  `len`, `length`, and overrides of them) can be called on it.  `inout` locals (`x: inout
+  = place;`) are not supported yet.  A local borrow needs an initializer, is never `let` and
   is not a destructuring target; written before the name (`view x = e;`) the error shows
   the fix.  In the AST interchange format a local borrow carries `(qual view)` or
   `(qual inout)`.
+- A `view` stays a `view` (docs/language/02-functions-and-calling.md): a `view` parameter
+  or local can only be passed on to a `view` parameter, whatever its type (`print`,
+  `println` and `open` take `view` parameters; the builtin methods read their arguments,
+  except `push`; `Str(s)` returns `s` itself and takes none).  One that shares what it
+  holds is never stored (assigned, put in an array or tuple, destructured, pushed) or
+  returned, and a `match` arm's name for one is a `view` too.  Passing a `view` to an
+  `inout` parameter now reads `'v' is a 'view' parameter; it cannot be passed to 'inout'
+  parameter 'n'`.
 - `view` and `inout` parameters (docs/language/02-functions-and-calling.md, "Parameter
   modes"), on functions, methods and constructors, for `int`, `float`, `bool`, `char` and
   enum parameters.  The mode is written where the type goes: `fn bump(n: inout int)`,

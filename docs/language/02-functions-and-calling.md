@@ -87,9 +87,29 @@ implicit `self`, which never takes a mode.
 
 A `view` parameter cannot be changed: it cannot be assigned or be a destructuring target
 (`cannot assign to 'view' parameter 'x'`), and it cannot be passed to an `inout`
-parameter (`'view' parameter 'x' cannot be passed to 'inout' parameter 'n'`). Reading it
-gives a copy, which may be stored or returned freely. It is passed by value, so any
-argument of its type will do: a literal, an expression, a `let` local.
+parameter (`'x' is a 'view' parameter; it cannot be passed to 'inout' parameter 'n'`).
+Reading it gives a copy, which may be assigned to a variable or returned. It is passed by
+value, so any argument of its type will do: a literal, an expression, a `let` local.
+
+#### A `view` stays a `view`
+
+A `view`, a parameter or a [local](01-language-basics.md#local-borrows), can only be passed
+on to another `view` parameter, whatever its type, so no function it reaches can change
+it. With `fn twice(n: int)`, `twice(v)` is an error: `'v' is a 'view' local; it can only
+be passed to a 'view' parameter, and parameter 1 of 'twice' is not one`. The fix is to make
+that parameter `view` too. The builtin functions only read (`println(v)`), and so do the
+builtin methods, except `push`. `Str(s)` with a `Str` returns `s` itself, so it takes no
+`view`.
+
+A `view` of an object, string, array, tuple or optional shares what it holds, so it is
+never stored or returned, where another name could change it later. Assigning it to a
+variable, a field or an element, putting it in an array or tuple, `push` and `return` are
+errors: `'v' is a 'view' local; it cannot be stored, only read or passed to a 'view'
+parameter`, `'v' is a 'view' local; it cannot be returned`. A `view` of a value type is
+copied when it is assigned (`m = n`), and the copy is the variable's own.
+
+A `match` arm's name for a `view` is a `view` too: in `match v { k: Fast { k.tick(); } }`,
+`k.tick()` is an error, `'k' is bound to a 'view'; 'tick' may change it`.
 
 ### `inout`: the caller's storage
 
@@ -110,7 +130,7 @@ type 'float'`). Anything else is an error:
 | Argument | Error |
 |---|---|
 | a literal or another expression (`bump(3)`, `bump(k + 1)`) | `argument 1 of 'bump' must be a variable or a field: parameter 'n' is 'inout'` |
-| a `view` parameter | `'view' parameter 'v' cannot be passed to 'inout' parameter 'n'` |
+| a `view` parameter | `'v' is a 'view' parameter; it cannot be passed to 'inout' parameter 'n'` |
 | an array element (`bump(xs[0])`) | `an array element cannot be passed to 'inout' parameter 'n' yet` |
 | a character of a string (`next(s[0])`) | `a character of a string cannot be passed to 'inout' parameter 'c'` |
 
@@ -269,5 +289,6 @@ fn fib(n: int) -> int {
 | Return type mismatch | Returned expression type ≠ declared return type |
 | Parameter mode on a non-value type | `view`/`inout` on a parameter that is not `int`, `float`, `bool`, `char` or an enum, or on a type parameter |
 | Write to a `view` parameter | Assigning or destructuring into it |
+| A `view` changed, passed on or kept | Writing a field or element of what it holds, calling a method on it that may change it, passing it to a parameter that is not `view`, or storing or returning one that shares what it holds |
 | Bad `inout` argument | Not a variable or field, not exactly the parameter's type, a `view` parameter or `let` local, an array element, a string's character, or the same place twice in one call |
 | Override changes a mode | An override that drops, adds or changes a parameter's `view`/`inout` |
