@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `let` local declarations: `let n = 3;` and `let s: Str = "a";` declare a variable
+  that cannot be reassigned (`'n' is declared with 'let' and cannot be reassigned`),
+  neither by assignment nor by destructuring.  `let` needs an initializer and applies to
+  local declarations only; it fixes the variable, not the object it refers to.  `let` is
+  a reserved word now.  In the AST interchange format a `let` local carries `(let)`.
+
 - Imported modules are compiled to `.pkm` module files (docs/design/pkm.md, prototype of
   phase A): the module's interface, its PIR and a manifest, portable across backends.
   A program's imports are cached as `.paykan_cache/<module>.pkm` and reused while the

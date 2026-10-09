@@ -213,6 +213,20 @@ msg2 = "world";   // inferred Str
 n: Obj = None;
 ```
 
+A variable declared with `let` cannot be reassigned. It needs an initializer, and its type
+annotation may be omitted like any other:
+
+```pkn
+let limit = 10;          // inferred int
+let name: Str = "Ada";
+limit = 11;              // error: 'limit' is declared with 'let' and cannot be reassigned
+```
+
+`let` applies to local declarations only: not to parameters, fields or destructuring
+(`let a, b = t;` is a syntax error). It fixes the variable, not the object it refers to: the
+fields of an object held in a `let` variable can still be changed, and an array's elements
+too. Like any variable, an inner block may declare its own variable with the same name.
+
 ---
 
 ## Expressions & Operators
@@ -347,6 +361,7 @@ errors — parenthesize instead, e.g. `(1 < 2) == True`.
 expression;                          // expression statement
 name: Type = expression;             // variable declaration with type
 name = expression;                   // variable declaration, inferred type
+let name = expression;               // a variable that cannot be reassigned
 variable = expression;               // assignment
 obj.field = expression;              // field assignment
 arr[i] = expression;                 // subscript assignment

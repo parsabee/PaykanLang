@@ -275,12 +275,14 @@ public:
   }
 };
 
-// Variable declaration with explicit type (x: int = 10)
+// Variable declaration with explicit type (x: int = 10), or a `let` local
+// (let x = 10;), which cannot be reassigned.
 class VarDecl : public Decl {
 private:
   const std::string *Name; // points into ASTContext::StringPool (stable)
   Type *VarType;
   Expr *InitExpr;
+  bool Let = false;
 
 public:
   VarDecl(SourceLocation loc, const std::string &internedName, Type *type,
@@ -295,6 +297,10 @@ public:
   /// unresolved generic type application (GenericType).
   void setType(Type *ty) { VarType = ty; }
   Expr *getInitExpr() const { return InitExpr; }
+
+  /// Declared with `let`: the variable cannot be reassigned.
+  bool isLet() const { return Let; }
+  void setLet(bool let) { Let = let; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_VarDecl; }
 };

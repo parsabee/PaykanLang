@@ -329,6 +329,7 @@ Stmt *ASTCloner::cloneStmt(Stmt *s) {
     auto *nvd = Ctx.make<VarDecl>(vd->getLocation(), vd->getName(),
                                   cloneType(vd->getType()),
                                   cloneExpr(vd->getInitExpr()));
+    nvd->setLet(vd->isLet());
     return Ctx.make<DeclStmt>(loc, nvd);
   }
   case ASTNode::NK_ExprStmt:
