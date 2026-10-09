@@ -22,8 +22,8 @@ The mode is chosen by the static type of the subject — you do not select it ex
 - Arm patterns:
   - `TypeName { … }` — type/variant pattern, no binding.
   - `name: TypeName { … }` — type pattern that **binds** the narrowed object to `name`.
-  - `name: view TypeName { … }` — the binding is a read-only borrow of the subject
-    ([Borrowing the subject](#borrowing-the-subject)).
+  - `name: view TypeName { … }` / `name: inout TypeName { … }` — the binding borrows the
+    subject, read-only or as its storage ([Borrowing the subject](#borrowing-the-subject)).
   - `literal { … }` — value pattern (`int`, `float`, `bool`, `char`, or `Str` literal).
   - `_ { … }` — wildcard catch-all.
 - The first matching arm wins; remaining arms are not considered.
@@ -127,8 +127,10 @@ not bind.
 ### Borrowing the subject
 
 A binding may borrow the subject instead, written with a mode where the type goes, as for a
-[local borrow](01-language-basics.md#local-borrows): `name: view TypeName { … }`. The binding
-is then a `view` local of the subject, whatever the subject is:
+[local borrow](01-language-basics.md#local-borrows): `name: view TypeName { … }` or
+`name: inout TypeName { … }`.
+
+With `view`, the binding is a `view` local of the subject, whatever the subject is:
 
 - nothing changes through it: no field or element write, only `view fn` calls, no `inout`
   argument (`'d' is a 'view' local; 'tick' is not a 'view fn'`);
@@ -148,10 +150,45 @@ fn describe(a: Animal) -> Str {
 }
 ```
 
+With `inout`, the binding is the subject's storage, like an `inout` local of it: assigning
+to it writes the matched variable or field.
+
+```pkn
+class Animal { n: int; fn __init__(n: int) { self.n = n; } }
+class Dog : Animal { fn __init__(n: int) { __super__(n); } }
+
+fn main() -> int {
+  a: Animal = Dog(1);
+  match a {
+    d: inout Dog { d = Dog(d.n + 1); }   // a now holds the new Dog
+    _ { }
+  }
+  println(Str(a.n));
+  return 0;
+}
+```
+
+Output:
+
+```
+2
+```
+
+- The subject must be a place an `inout` argument could be: a variable or a field, not an
+  expression (`'inout' arm 'd' needs a variable or a field to match on`), `self`, a `let`
+  local or a `view` (`'v' is a 'view' parameter; it cannot be bound by 'inout' arm 'd'`).
+- What is assigned to the binding has its type, `Dog`, which the subject's storage can
+  hold: `d = Animal(1)` is an error.
+- While the binding is live, from the start of the arm to its last use there, the variable
+  the subject starts from cannot be used except through it (`'a' is borrowed by 'inout'
+  local 'd' until 'd' is last used`).
+- The `match` keeps the object it matched until it ends, so the arm can replace it.
+- A primitive inside an optional (`n: inout int` on an `int?`) cannot be changed this way
+  yet.
+
 The mode goes after the colon: `view d: Dog { }` is a syntax error that shows the fix,
 `d: view Dog`. A binding of a `view` subject is a `view` even without the mode
-([A `view` stays a `view`](02-functions-and-calling.md#a-view-stays-a-view)). An `inout`
-arm, `name: inout TypeName`, is reserved and is an error for now.
+([A `view` stays a `view`](02-functions-and-calling.md#a-view-stays-a-view)).
 
 ---
 
@@ -383,6 +420,7 @@ above) is unchanged.
 | Type name in value mode | A value-mode `match` has a type-name arm instead of a literal |
 | Binding redeclaration | An arm body redeclares the arm's binding name |
 | `view` binding changed or passed on | A `name: view T` binding is assigned, written through, passed to a parameter that is not `view`, or stored; or the subject's variable changes while it is live |
+| `inout` binding of something else | A `name: inout T` arm's subject is not a variable or a field, is `self`, a `let` local or a `view`, or is an optional primitive; or the subject's variable is used while the binding is live |
 | Arm body type error | Any type error inside an arm body |
 | Wildcard not last | A `_` arm is followed by another arm |
 | Non-exhaustive match | A `match` leaves cases uncovered where every path must produce a value |

@@ -514,3 +514,61 @@ TEST(LocalBorrow, ViewArms) {
   EXPECT_EQ(r.StdOut, "8\nhi2\n14\n");
   guard.expectNoLeaks("view arms");
 }
+
+// A `match` arm's `n: inout T` writes through to the subject: a variable
+// (another reference to the old object keeps it), a field, an optional, and
+// an `inout` parameter passed on.  The match keeps the object it matched
+// until it ends.
+TEST(LocalBorrow, InoutArmsWriteThrough) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(
+    class Animal {
+      n: int;
+      fn __init__(n: int) { self.n = n; }
+      fn tick() { self.n = self.n + 1; }
+      view fn get() -> int { return self.n; }
+    }
+    class Dog : Animal { fn __init__(n: int) { __super__(n); } }
+    class Home { pet: Animal; fn __init__() { self.pet = Dog(1); } }
+    fn adopt(p: inout Animal) {
+      match p {
+        d: inout Dog { d = Dog(d.get() + 30); }
+        _ { }
+      }
+    }
+    fn main() -> int {
+      a: Animal = Dog(5);
+      keep = a;
+      match a {
+        d: inout Dog {
+          d.tick();
+          d = Dog(10);
+          d.tick();
+          print(Str(d.get()) + " ");
+        }
+        _ { }
+      }
+      print(Str(a.get()) + " " + Str(keep.get()) + " ");
+      h = Home();
+      match h.pet {
+        d: inout Dog { d = Dog(42); }
+        _ { }
+      }
+      o: Animal? = Animal(3);
+      match o {
+        x: inout Animal { x = Dog(7); }
+        None { }
+      }
+      match o {
+        y: Dog { print("dog" + Str(y.get()) + " "); }
+        _ { }
+      }
+      adopt(a);
+      println(Str(h.pet.get()) + " " + Str(a.get()));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "11 11 6 dog7 42 41\n");
+  guard.expectNoLeaks("inout arms");
+}

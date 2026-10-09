@@ -18,7 +18,9 @@
 //
 // An `inout` local (`x: inout = k;`) is a `ptr` local holding the address of
 // what it names, the same way; a hidden owned local keeps a field's object
-// alive for as long as the local can be used.
+// alive for as long as the local can be used.  A `match` arm's `n: inout T`
+// is one for the subject (docs/language/07-match-statements.md, "Borrowing
+// the subject").
 //
 // For a reference type the storage holds a box, and the `inout` is a mutable
 // reference to it, not a share of it: it retains nothing and releases
@@ -145,12 +147,17 @@ Val ModuleLowering::emitInoutArg(ast::Expr *arg, std::vector<Val> &keep,
 }
 
 Val ModuleLowering::emitInoutLocal(ast::VarDecl *node) {
-  const std::string &name = node->getName();
-  ast::Type *astTy = canonicalizeDeclType(node->getType());
+  emitInoutBinding(node->getName(), node->getInitExpr(),
+                   canonicalizeDeclType(node->getType()));
+  return Val();
+}
+
+void ModuleLowering::emitInoutBinding(const std::string &name, ast::Expr *place,
+                                      ast::Type *astTy) {
   std::vector<Val> keep;
-  Val addr = emitInoutArg(node->getInitExpr(), keep, /*keepObject=*/true);
+  Val addr = emitInoutArg(place, keep, /*keepObject=*/true);
   if (!addr)
-    return Val();
+    return;
   // A field's object stays alive as long as the borrow can be used: a hidden
   // owned local holds it, released with the scope.
   for (const Val &box : keep) {
@@ -161,7 +168,6 @@ Val ModuleLowering::emitInoutLocal(ast::VarDecl *node) {
   pir::LocalId local = B.addLocal(name, Type::Ptr);
   B.store(local, addr);
   CurrentScope->declareInout(name, local, toPIRType(astTy), astTy);
-  return Val();
 }
 
 void ModuleLowering::releaseAfterCall(const std::vector<Val> &keep) {
