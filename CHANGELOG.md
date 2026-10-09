@@ -39,17 +39,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `inout` parameter now reads `'v' is a 'view' parameter; it cannot be passed to 'inout'
   parameter 'n'`.
 - `view` and `inout` parameters (docs/language/02-functions-and-calling.md, "Parameter
-  modes"), on functions, methods and constructors, for `int`, `float`, `bool`, `char` and
-  enum parameters.  The mode is written where the type goes: `fn bump(n: inout int)`,
-  `fn scale(x: inout float, by: view float)`, called as `bump(k)`.  A `view` parameter is
-  a read-only copy.  An `inout` parameter is its caller's storage, passed by address so
+  modes"), on functions, methods and constructors, for parameters of any type (type
+  parameters included).  The mode is written where the type goes: `fn bump(n: inout int)`,
+  `fn scale(x: inout float, by: view float)`, `fn show(c: view Counter)`, called as
+  `bump(k)`.  A `view` parameter is read-only, and so is what it holds: no field or
+  element write and only the methods that only read through it.  An `inout` parameter is
+  its caller's storage, passed by address so
   every write reaches the caller at once: a local variable, a parameter (an `inout` one
   passes its address on) or a field of an object (`obj.f`, `self.f`, `a.b.f`; by real
   address, never copied in and out, with the object kept alive for the call), of exactly
-  the parameter's type.  A literal or other expression, a `view` parameter, a `let` local,
-  an array element (not yet) or a string's character is an error, and so is the same
-  variable or field path passed to two `inout` parameters of one call.  A mode does not
-  apply to a type parameter yet; an override keeps every parameter's mode; modes are part
+  the parameter's type (a subclass variable is not a base-class `inout` argument).  An
+  `inout` parameter of a reference type is the caller's variable, not a second
+  reference: passing it neither retains nor releases, and assigning to it replaces what
+  the caller's variable holds.  A literal or other expression, `self`, a `view` parameter
+  or anything reached through one, a `let` local, an array element (not yet) or a
+  string's character is an error, and so is the same variable or field path passed to two
+  `inout` parameters of one call.  An override keeps every parameter's mode; modes are part
   of a module's interface.  `view` and `inout` are reserved words, a syntax error anywhere
   but before a parameter's type; written before the name (`inout n: int`), the error shows
   the fix.  In the AST interchange format a parameter carries `(qual view)` or

@@ -51,9 +51,8 @@ The caller's variable is unaffected.
 
 ## Parameter modes: view and inout
 
-A parameter of a value type (`int`, `float`, `bool`, `char` or an enum) may have a mode,
-`view` or `inout`, written where the type goes: `n: inout int`. A parameter without one is
-passed by value, as above.
+A parameter of any type may have a mode, `view` or `inout`, written where the type goes:
+`n: inout int`, `c: view Counter`. A parameter without one is passed as above.
 
 ```pkn
 fn bump(n: inout int) {
@@ -88,8 +87,41 @@ implicit `self`, which never takes a mode.
 A `view` parameter cannot be changed: it cannot be assigned or be a destructuring target
 (`cannot assign to 'view' parameter 'x'`), and it cannot be passed to an `inout`
 parameter (`'x' is a 'view' parameter; it cannot be passed to 'inout' parameter 'n'`).
-Reading it gives a copy, which may be assigned to a variable or returned. It is passed by
-value, so any argument of its type will do: a literal, an expression, a `let` local.
+It is passed like a parameter without a mode, so any argument of its type will do: a
+literal, an expression, a `let` local, an object of a subclass.
+
+A `view` parameter of a value type is a copy, which may be assigned to a variable or
+returned. One of an object, string, array, tuple or optional shares what the caller
+passed, but the function cannot change it through the parameter: no assignment to a field
+or an element (`'c' is a 'view' parameter; cannot assign to its field 'n'`), no field or
+element passed to an `inout` parameter, and only the methods that only read can be called
+on it (`toString`, `equals`, `len`, `length`; `'c' is a 'view' parameter; 'tick' may change
+it`).
+
+```pkn
+class Counter {
+  n: int;
+  fn __init__() { self.n = 0; }
+  fn tick() { self.n = self.n + 1; }
+}
+
+fn show(c: view Counter, label: view Str) {
+  println(label + " " + Str(c.n));
+}
+
+fn main() -> int {
+  c = Counter();
+  c.tick();
+  show(c, "ticks");
+  return 0;
+}
+```
+
+Output:
+
+```
+ticks 1
+```
 
 #### A `view` stays a `view`
 
@@ -114,8 +146,34 @@ A `match` arm's name for a `view` is a `view` too: in `match v { k: Fast { k.tic
 ### `inout`: the caller's storage
 
 An `inout` parameter refers to its caller's storage: every write to it changes the
-caller's variable or field at once, not when the call returns. The argument must be one
-of:
+caller's variable or field at once, not when the call returns. For an object, string,
+array, tuple or optional, the parameter is the caller's variable itself, not another
+reference to what it holds: passing it shares nothing, and assigning to it replaces what
+the caller's variable holds.
+
+```pkn
+fn swap(a: inout Str, b: inout Str) {
+  t = a;
+  a = b;
+  b = t;
+}
+
+fn main() -> int {
+  x = "left";
+  y = "right";
+  swap(x, y);
+  println(x + " " + y);
+  return 0;
+}
+```
+
+Output:
+
+```
+right left
+```
+
+The argument must be one of:
 
 - a local variable (not a `let` one: `'k' is declared with 'let' and cannot be passed to
   'inout' parameter 'n'`);
@@ -125,7 +183,9 @@ of:
 
 It must have exactly the parameter's type: an `int` variable does not go to an
 `x: inout float` (`argument 1 of 'scale' has type 'int', but 'inout' parameter 'x' has
-type 'float'`). Anything else is an error:
+type 'float'`), and a `Fast` variable does not go to a `c: inout Counter` even when `Fast`
+is a subclass of `Counter`, since the function could store another kind of `Counter` in
+it. Anything else is an error:
 
 | Argument | Error |
 |---|---|
@@ -133,6 +193,7 @@ type 'float'`). Anything else is an error:
 | a `view` parameter | `'v' is a 'view' parameter; it cannot be passed to 'inout' parameter 'n'` |
 | an array element (`bump(xs[0])`) | `an array element cannot be passed to 'inout' parameter 'n' yet` |
 | a character of a string (`next(s[0])`) | `a character of a string cannot be passed to 'inout' parameter 'c'` |
+| `self` (`reset(self)`) | `'self' cannot be passed to 'inout' parameter 'c': the method would no longer know its object` |
 
 A field is passed by its real address, never copied in and out, so the callee's writes
 are visible through every reference to the object during the call. The caller keeps the
@@ -196,13 +257,8 @@ accepted, and the callee then sees one storage through both parameters.
 
 ### Where modes apply
 
-- Only to `int`, `float`, `bool`, `char` and enum parameters: anything else is an error
-  naming the type, `'inout' applies only to int, float, bool, char and enum parameters;
-  'Counter' is not a value type`. Strings, arrays, tuples, optionals, objects and `Obj`
-  are references already (see above).
-- Not to a type parameter, for now: `fn f<T>(x: inout T)` is an error (`'inout' does not
-  apply to type parameter 'T' yet`). A generic function's other parameters may have
-  modes.
+- To a parameter of any type: value types, strings, arrays, tuples, optionals, objects,
+  `Obj`, and type parameters (`fn swap<T>(a: inout T, b: inout T)`).
 - An override keeps every parameter's mode (`override of 'add' must keep 'inout' on
   parameter 'to'`, `override of 'add' must not add 'view' to parameter 'k'`).
 - Across modules: a module's exported functions, constructors and methods keep their
@@ -287,7 +343,6 @@ fn fib(n: int) -> int {
 | Argument type mismatch | Argument type incompatible with parameter type |
 | Non-void return without value | `return;` in non-void function |
 | Return type mismatch | Returned expression type ≠ declared return type |
-| Parameter mode on a non-value type | `view`/`inout` on a parameter that is not `int`, `float`, `bool`, `char` or an enum, or on a type parameter |
 | Write to a `view` parameter | Assigning or destructuring into it |
 | A `view` changed, passed on or kept | Writing a field or element of what it holds, calling a method on it that may change it, passing it to a parameter that is not `view`, or storing or returning one that shares what it holds |
 | Bad `inout` argument | Not a variable or field, not exactly the parameter's type, a `view` parameter or `let` local, an array element, a string's character, or the same place twice in one call |

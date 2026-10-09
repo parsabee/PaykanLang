@@ -256,6 +256,112 @@ TEST(ParamMode, InoutFieldsArePassedByAddress) {
   guard.expectNoLeaks("inout fields");
 }
 
+// A `view` parameter of an object, string, array or type parameter shares
+// what it was given, like a parameter without a mode; it reads it and passes
+// it on to other `view` parameters.
+TEST(ParamMode, ViewParametersOfReferenceTypes) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(
+    class Counter {
+      n: int;
+      fn __init__(n: int) { self.n = n; }
+      fn tick() { self.n = self.n + 1; }
+    }
+    class Fast : Counter { fn __init__(n: int) { __super__(n); } }
+    fn sum(c: view Counter, xs: view int[], s: view Str) -> int {
+      return c.n + xs.len() + s.len() + xs[0];
+    }
+    fn passOn(c: view Counter, xs: view int[]) -> int {
+      return sum(c, xs, "ab");
+    }
+    fn size<T>(xs: view T[]) -> int { return xs.len(); }
+    fn main() -> int {
+      c = Counter(30);
+      c.tick();
+      println(Str(sum(c, [1, 2], "abc")) + " " + Str(sum(Fast(4), [5], "")) +
+              " " + Str(passOn(c, [7])) + " " + Str(size(["a", "b"])) +
+              Str(size([c, c, c])));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "37 10 41 23\n");
+  guard.expectNoLeaks("view reference parameters");
+}
+
+// An `inout` parameter of a reference type is the caller's variable itself:
+// assigning to it replaces what the caller holds (releasing the old value,
+// with nothing retained for the call), through a field, passing on, a
+// method's virtual slot, a template, destructuring and self-assignment; its
+// value can be returned and kept, and another reference to the old object
+// keeps that object alive.
+TEST(ParamMode, InoutParametersOfReferenceTypes) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(
+    class Counter {
+      n: int;
+      fn __init__(n: int) { self.n = n; }
+      fn tick() { self.n = self.n + 1; }
+      fn adopt(c: inout Counter) { c = Counter(self.n); }
+    }
+    class Fast : Counter {
+      fn __init__(n: int) { __super__(n); }
+      fn adopt(c: inout Counter) { c = Fast(10 * self.n); }
+    }
+    class Holder { c: Counter; fn __init__() { self.c = Counter(100); } }
+    fn same(c: inout Counter) { c = c; c.tick(); }
+    fn keep(c: inout Counter) -> Counter { return c; }
+    fn pass(c: inout Counter) { same(c); reset(c); }
+    fn reset(c: inout Counter) { c = Counter(50); }
+    fn swap<T>(a: inout T, b: inout T) { t = a; a = b; b = t; }
+    fn flip(a: inout Str, b: inout Str) { a, b = (b, a); }
+    fn clear(o: inout Counter?) { o = None; }
+    fn fill(o: inout Counter?) { o = Counter(5); }
+    fn pair(t: inout (int, Str)) { t = (t.0 + 1, t.1 + "?"); }
+    fn grow(xs: inout int[]) { xs.push(7); xs = [xs.len(), 9]; }
+    fn seen(c: inout Counter, other: Counter) -> int {
+      c = Counter(0);
+      return other.n;
+    }
+    fn main() -> int {
+      x = Counter(1);
+      same(x);
+      k = keep(x);
+      pass(x);
+      f: Counter = Fast(3);
+      f.adopt(x);
+      a = "a"; b = "b";
+      swap(a, b);
+      flip(a, b);
+      i = 1; j = 2;
+      swap(i, j);
+      p = Counter(7); q = Counter(8);
+      swap(p, q);
+      o: Counter? = Counter(3);
+      clear(o);
+      fill(o);
+      t = (1, "t");
+      pair(t);
+      xs = [1];
+      grow(xs);
+      y = Counter(4);
+      z = y;
+      w = seen(y, z);
+      h = Holder();
+      reset(h.c);
+      swap(h.c, p);
+      println(Str(k.n) + " " + Str(x.n) + " " + a + b + " " + Str(i) +
+              Str(j) + " " + Str(p.n) + Str(q.n) + " " + Str(o != None) +
+              " " + Str(t.0) + t.1 + " " + Str(xs[0]) + Str(xs[1]) + " " +
+              Str(w) + Str(y.n) + " " + Str(h.c.n));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "3 30 ab 21 507 True 2t? 29 40 8\n");
+  guard.expectNoLeaks("inout reference parameters");
+}
+
 // -- Local borrows
 
 // A `view` local holds a copy of its initializer, of every value type, with

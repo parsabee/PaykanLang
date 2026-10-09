@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// The rules of `view` and `inout` parameters
-// (docs/language/02-functions-and-calling.md, "Parameter modes"): the types
-// a mode applies to, overrides, and the arguments an `inout` parameter
-// takes, none of them twice in one call; and of local borrows
+// The rules of `view` and `inout` parameters, of any type
+// (docs/language/02-functions-and-calling.md, "Parameter modes"): overrides,
+// and the arguments an `inout` parameter takes, none of them twice in one
+// call; and of local borrows
 // (docs/language/01-language-basics.md, "Local borrows").  Assignments to a
 // `view` parameter or local are checked with `let` locals'
 // (Sema::checkReassignable).
@@ -29,50 +29,6 @@ std::string placePath(const ast::Expr *e) {
 }
 
 } // namespace
-
-bool Sema::isValueType(const ast::Type *ty) {
-  if (ast::isa<ast::EnumType>(ty))
-    return true;
-  const auto *bt = ast::dyn_cast<ast::BuiltinType>(ty);
-  return bt && bt->getTypeKind() != ast::BuiltinType::Void;
-}
-
-bool Sema::checkParamModeTypes(const ast::FuncDecl *fn,
-                               const std::vector<ast::Type *> &paramTys) {
-  bool ok = true;
-  const auto &params = fn->getParams();
-  for (size_t i = 0; i < params.size() && i < paramTys.size(); ++i) {
-    ast::Type *ty = paramTys[i];
-    if (params[i].Mode == ast::ParamMode::Value || !ty ||
-        ast::isa<ast::PoisonType>(ty) || isValueType(ty))
-      continue;
-    error(fn->getLocation(), std::string("'") +
-                                 ast::paramModeName(params[i].Mode) +
-                                 "' applies only to int, float, bool, char "
-                                 "and enum parameters; '" +
-                                 typeName(ty) + "' is not a value type");
-    ok = false;
-  }
-  return ok;
-}
-
-bool Sema::checkTemplateParamModes(
-    const ast::FuncDecl *fn, const std::vector<const std::string *> &tps) {
-  bool ok = true;
-  for (const ast::Param &p : fn->getParams()) {
-    const auto *ct = ast::dyn_cast<ast::ClassType>(p.ParamType);
-    if (p.Mode == ast::ParamMode::Value || !ct)
-      continue;
-    for (const std::string *tp : tps)
-      if (ct->getName() == *tp) {
-        error(fn->getLocation(), std::string("'") + ast::paramModeName(p.Mode) +
-                                     "' does not apply to type parameter '" +
-                                     *tp + "' yet");
-        ok = false;
-      }
-  }
-  return ok;
-}
 
 void Sema::declareParamKinds(const ast::FuncDecl *fn) {
   for (const ast::Param &p : fn->getParams())
@@ -189,7 +145,8 @@ bool Sema::checkInoutArgs(const ast::ParamModes &modes,
             modes.name(i) + "' is 'inout'";
     } else if (!typesEqual(argTy, paramTys[i])) {
       // The callee reads and writes the storage as the parameter's type, so
-      // no conversion (int -> float) can happen on the way.
+      // no conversion can happen on the way: not int -> float, and not a
+      // subclass to its base (the callee could store another subclass).
       msg = argN + " has type '" + typeName(argTy) + "', but ";
       msg += param + " has type '" + typeName(paramTys[i]) + "'";
     } else if (std::string why = inoutPlaceError(arg, "passed to " + param);
