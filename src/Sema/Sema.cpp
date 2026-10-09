@@ -1595,9 +1595,9 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
   declareFunction(names::kString, StrTy, {StrTy}, true);
   declareFunction(names::kOpen, Ctx.getObjTy(), {StrTy, StrTy}, true);
   // They only read their arguments, which are `view` parameters, so a `view`
-  // can be printed (checkViewArgs).
+  // can be printed (checkViewArgs).  Not `Str(s)`, which returns `s` itself.
   for (const char *fn : {names::kPrint, names::kPrintln, names::kErrPrint,
-                         names::kErrPrintln, names::kString, names::kOpen}) {
+                         names::kErrPrintln, names::kOpen}) {
     FunctionSig &sig = FunctionTable[fn];
     sig.Modes.Modes.assign(sig.ParamTypes.size(), ast::ParamMode::View);
     sig.Modes.Names.assign(sig.ParamTypes.size(), "value");

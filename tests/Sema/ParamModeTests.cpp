@@ -227,6 +227,21 @@ fn main() -> int { return 0; })");
                                                            << r.Diagnostics;
 }
 
+// `Str(s)` with a `Str` returns `s` itself, so it takes no `view`: the result
+// could change it.  Printing one only reads it.
+TEST(ParamMode, StrOfAViewIsNotACopy) {
+  auto r = semaCheck(R"(fn shout(s: view Str) {
+  println(s);
+  t = Str(s);
+  t.concat("!");
+}
+fn main() -> int { return 0; })");
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  expectErrors(r, {":3:11: error: 's' is a 'view' parameter; it can only be "
+                   "passed to a 'view' parameter, and parameter 1 of 'Str' is "
+                   "not one"});
+}
+
 // The arguments of an `inout` parameter of a class type: a variable or field
 // of exactly that class, so a subclass variable cannot be given another
 // subclass; not `self`, and not a `let` local, though a field of what one

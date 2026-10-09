@@ -18,7 +18,7 @@ class Cell {
   kind: Kind;
   fn __init__(v: int) { self.v = v; self.kind = Kind::Even; if (v % 2 != 0) { self.kind = Kind::Odd; } }
   view fn kindOf() -> Kind { return self.kind; }
-  view fn pairWith(o: Cell) -> Pair { return Pair(self, o); }
+  fn pairWith(o: Cell) -> Pair { return Pair(self, o); }
 }
 
 class Splitter {
