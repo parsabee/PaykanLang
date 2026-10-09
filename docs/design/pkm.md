@@ -190,7 +190,7 @@ G = gating (a mismatch yields a verdict), I = informational.
 | `0x01` | `module` | `str` | G | canonical module name; must equal the name the importer resolved |
 | `0x03` | `contents` | `u32` bitset | G | bit 0 `HAS_CODE`, 1 `HAS_TEMPLATES`, 2 `HAS_MAIN`, 3 `SYSTEM` (name starts with `::`), 4 `HAS_STATIC_INIT` (#170 lazily initialised storage), 5 `EXPORTS_C` (#21). Must agree with the section table |
 | `0x05` | `core` | `{str version; u32 major, minor, patch; str prerelease; str build}` | G | the PaykanLang that produced the file (`include/Version.h.in`). `build` is `""` for a release; for a pre-release it is the configure-time git revision, else a hash of the configure-time source listing (`PAYKAN_BUILD_ID`, new; never an executable size/mtime) |
-| `0x07` | `format_versions` | `{u32 iface_major, iface_minor, tmpl_version, pir_version, code_encoding, debug_version}` | G | `pir_version` = `pir::kPIRVersion` (new core constant, 2 today; `PAYKAN_PIR_TEXT_VERSION` is defined from it so text, binary and manifest agree by construction). `code_encoding`: 0 none, 1 PIR text (development escape hatch only), 2 binary PIR v1 |
+| `0x07` | `format_versions` | `{u32 iface_major, iface_minor, tmpl_version, pir_version, code_encoding, debug_version}` | G | `pir_version` = `pir::kPIRVersion` (new core constant; `PAYKAN_PIR_TEXT_VERSION` is defined from it so text, binary and manifest agree by construction). `code_encoding`: 0 none, 1 PIR text (development escape hatch only), 2 binary PIR v1 |
 | `0x09` | `runtime_abi` | `u32` | G | `PAYKAN_RUNTIME_ABI_VERSION`, moved from `src/Backends/LLVM/PIRToLLVM.cpp:843` (`kPaykanABIVersion = 6`) into `src/Runtime/Runtime.h` with a C++ alias `paykan::kRuntimeABIVersion` (#153 asks for exactly this). Becomes 7 with §9's mangling |
 | `0x0B` | `target` | `{u8 pointer_size, slot_size, endianness, int_width, float_width}` | G | the abstract target PIR assumes: `8, 8, 1, 64, 64` (`Runtime.h` LP64 LE asserts). Not a triple: PIR and interface are the same for every LP64 LE triple; the triple belongs to a payload |
 | `0x0D` | `deps` | `list<Dep>` | G | direct imports only, sorted by canonical name; §2.3 |
@@ -267,7 +267,7 @@ UTF-8.
 
 ```
 IfaceBlob
-  "PKMI"  u16 major(=1)  u16 minor(=1)  u32 flags(bit0 has TMPL section; bit1 system)
+  "PKMI"  u16 major(=1)  u16 minor(=0)  u32 flags(bit0 has TMPL section; bit1 system)
   u32 n_parts ; parts[n] { u32 tag; u32 flags(bit0 required); u64 offset; u64 size }   offsets blob-relative, 8-aligned
   parts in table order
 ```
@@ -281,13 +281,13 @@ IfaceBlob
 | 5 | `INST` | yes | instantiations provided and requested (§4.5) |
 | 7 | `DIAG` | no | display file name (project-relative) and per-declaration positions for "declared here" notes (§8.6) |
 
-Minor 1 adds parameter modes (`view`, `inout`) to the string-typed records
+Parameter modes (`view`, `inout`) are appended to the string-typed records
 written today (`include/paykan/pkm/Interface.h`): `uleb n, (u8 mode, Str
 name)[n]` after a `FUNC` record's signature, and one such list per method
 after a `CLASS` record's methods, written only when a parameter has a mode
 (mode 0 by value, 1 `view`, 2 `inout`; `n` is 0 or the number of
-parameters).  A 1.0 record reads as having no modes; a 1.0 reader skips
-them, but the manifest's `iface_minor` already turns such a reader away.
+parameters).  A record without them reads as having no modes.  The
+interface minor version is bumped for them at the next release.
 
 Every part but `STRS` is `uleb count` then records `uleb tag, uleb len,
 payload[len]`. A reader parses the fields it knows and ignores trailing

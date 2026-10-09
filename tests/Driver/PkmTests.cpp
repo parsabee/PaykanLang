@@ -636,6 +636,6 @@ TEST(Pkm, ParamModesAcrossModules) {
         "method __init__(view int) -> void flags 0x0"})
     EXPECT_TRUE(contains(dump.out, sig)) << sig << "\n" << dump.out;
   auto manifest = p.paykan("pkm dump --section=manifest base.pkm");
-  EXPECT_TRUE(contains(manifest.out, "format_versions iface 1.1"))
+  EXPECT_TRUE(contains(manifest.out, "format_versions iface 1.0"))
       << manifest.out;
 }

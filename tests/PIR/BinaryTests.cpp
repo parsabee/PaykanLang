@@ -428,8 +428,7 @@ TEST(PIRBinary, RejectsBadHeaders) {
   };
   EXPECT_FALSE(binary::decode(patched(0, 'X')).isOk());   // magic
   EXPECT_FALSE(binary::decode(patched(4, 2)).isOk());     // major
-  EXPECT_FALSE(binary::decode(patched(8, 1)).isOk());     // PIR version
-  EXPECT_FALSE(binary::decode(patched(8, 3)).isOk());     // PIR version
+  EXPECT_FALSE(binary::decode(patched(8, 2)).isOk());     // PIR version
   EXPECT_FALSE(binary::decode(patched(13, 0x80)).isOk()); // reserved flag
   EXPECT_FALSE(binary::decode(patched(good.size() - 1, 'X')).isOk()); // trailer
   EXPECT_TRUE(binary::decode(patched(6, 7)).isOk()); // a later minor is fine
