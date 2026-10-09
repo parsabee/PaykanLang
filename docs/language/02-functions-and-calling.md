@@ -51,15 +51,16 @@ The caller's variable is unaffected.
 
 ## Parameter modes: view and inout
 
-A parameter of a value type (`int`, `float`, `bool`, `char` or an enum) may start with a
-mode, `view` or `inout`. A parameter without one is passed by value, as above.
+A parameter of a value type (`int`, `float`, `bool`, `char` or an enum) may have a mode,
+`view` or `inout`, written where the type goes: `n: inout int`. A parameter without one is
+passed by value, as above.
 
 ```pkn
-fn bump(inout n: int) {
+fn bump(n: inout int) {
   n = n + 1;
 }
 
-fn scale(inout x: float, view by: float) {
+fn scale(x: inout float, by: view float) {
   x = x * by;
 }
 
@@ -103,7 +104,7 @@ of:
 - a field of an object: `obj.f`, `self.f`, or a chain such as `a.b.f`.
 
 It must have exactly the parameter's type: an `int` variable does not go to an
-`inout x: float` (`argument 1 of 'scale' has type 'int', but 'inout' parameter 'x' has
+`x: inout float` (`argument 1 of 'scale' has type 'int', but 'inout' parameter 'x' has
 type 'float'`). Anything else is an error:
 
 | Argument | Error |
@@ -124,7 +125,7 @@ class Counter {
   fn __init__() { self.hits = 0; }
 }
 
-fn hit(inout n: int, c: Counter) {
+fn hit(n: inout int, c: Counter) {
   n = n + 1;
   println("seen " + Str(c.hits));  // the write is already visible
 }
@@ -150,7 +151,7 @@ One call cannot pass the same storage to two `inout` parameters: the same variab
 the same chain of fields on the same variable (`a.x` and `a.x`, `self.n` and `self.n`).
 
 ```pkn
-fn swap(inout a: int, inout b: int) {
+fn swap(a: inout int, b: inout int) {
   t = a;
   a = b;
   b = t;
@@ -179,7 +180,7 @@ accepted, and the callee then sees one storage through both parameters.
   naming the type, `'inout' applies only to int, float, bool, char and enum parameters;
   'Counter' is not a value type`. Strings, arrays, tuples, optionals, objects and `Obj`
   are references already (see above).
-- Not to a type parameter, for now: `fn f<T>(inout x: T)` is an error (`'inout' does not
+- Not to a type parameter, for now: `fn f<T>(x: inout T)` is an error (`'inout' does not
   apply to type parameter 'T' yet`). A generic function's other parameters may have
   modes.
 - An override keeps every parameter's mode (`override of 'add' must keep 'inout' on
@@ -190,7 +191,9 @@ accepted, and the callee then sees one storage through both parameters.
 - Functions are not values in Paykan (only calls name them), so a mode is always known
   where the function is called.
 
-`view` and `inout` are reserved words and may appear only before a parameter's name.
+`view` and `inout` are reserved words and may appear only before a parameter's type.
+Written before the name, as in `inout n: int`, they are a syntax error that shows the
+fix: `'inout' goes after the colon, before the type: write 'n: inout int'`.
 
 ---
 
