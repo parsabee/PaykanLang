@@ -343,6 +343,7 @@ Stmt *ASTCloner::cloneStmt(Stmt *s) {
                                   cloneType(vd->getType()),
                                   cloneExpr(vd->getInitExpr()));
     nvd->setLet(vd->isLet());
+    nvd->setMode(vd->getMode());
     return Ctx.make<DeclStmt>(loc, nvd);
   }
   case ASTNode::NK_ExprStmt:

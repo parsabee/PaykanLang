@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Parser tests: `view` and `inout` parameters.  The keywords may mark the
-// type of a parameter of a function, a method or a constructor (`n: inout
-// int`), and nothing else.
+// Parser tests: `view` and `inout` parameters and locals.  The keywords may
+// mark the type of a parameter of a function, a method or a constructor
+// (`n: inout int`) or of a local borrow (`x: view = e;`), and nothing else.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -53,13 +53,13 @@ TEST(ParamMode, ModesOnFunctionsMethodsAndConstructors) {
   EXPECT_EQ(params[2].Mode, paykan::ast::ParamMode::Value);
 }
 
-// `view` and `inout` are reserved, and only mark a parameter's type.  There
-// is no call-site marking.
+// `view` and `inout` are reserved, and only mark the type of a parameter or
+// a local.  There is no call-site marking.
 TEST(ParamMode, KeywordsOnlyMarkAParameterType) {
   const char *const cases[] = {
-      "fn main() -> int { inout x = 1; return 0; }",
+      "fn main() -> int { return inout; }",
       "fn main() -> int { view: int = 1; return 0; }",
-      "fn main() -> int { x: inout int = 1; return 0; }",
+      "fn main() -> int { x: int = inout 1; return 0; }",
       "fn bump(n: inout int) { }\nfn main() -> int { bump(inout k); }",
       "fn f(x: int inout) { }\nfn main() -> int { return 0; }",
       "fn f(x: inout view int) { }\nfn main() -> int { return 0; }",
@@ -76,14 +76,14 @@ TEST(ParamMode, KeywordsOnlyMarkAParameterType) {
   }
   if (testFrontend() != "recursive-descent")
     return; // the wording of a syntax error is the frontend's
-  EXPECT_NE(
-      parseErrors(cases[0]).find(
-          "error: unexpected 'inout'; expected an expression ('inout' only "
-          "marks a parameter's type: 'fn f(x: inout int)')"),
-      std::string::npos);
-  EXPECT_NE(parseErrors(cases[2]).find("error: unexpected 'inout'; expected a "
-                                       "type ('inout' only marks a "
-                                       "parameter's type"),
+  EXPECT_NE(parseErrors(cases[0]).find(
+                "error: unexpected 'inout'; expected an expression ('inout' "
+                "only marks the type of a parameter or a local: 'fn f(x: "
+                "inout int)', 'y: inout = x;')"),
+            std::string::npos);
+  EXPECT_NE(parseErrors(cases[10]).find("error: unexpected 'inout'; expected "
+                                        "a type ('inout' only marks the type "
+                                        "of a parameter or a local"),
             std::string::npos);
   EXPECT_NE(parseErrors(cases[9]).find("unexpected 'inout'; expected a field "
                                        "('name: Type;') or a method ('fn') "
@@ -114,5 +114,52 @@ TEST(ParamMode, ModeBeforeTheNameShowsTheFix) {
               std::string::npos)
         << src << "\n"
         << errs;
+  }
+}
+
+// -- Local borrows
+
+// `x: view = e;` and `x: inout = p;`, with the type left off or written.
+TEST(LocalBorrow, Declarations) {
+  auto [ok, driver] = parse(R"(fn main() -> int {
+  k = 1;
+  v: view = k + 1;
+  w: view int = k;
+  i: inout = k;
+  j: inout int = k;
+  return 0;
+})");
+  ASSERT_TRUE(ok);
+  std::string ast = dumpAST(*driver);
+  for (const char *decl :
+       {"VarDecl <3:3-3:18> 'v' view\n", "VarDecl <4:3-4:18> 'w' view type\n",
+        "VarDecl <5:3-5:15> 'i' inout\n",
+        "VarDecl <6:3-6:19> 'j' inout type\n"})
+    EXPECT_NE(ast.find(decl), std::string::npos) << decl << "\n" << ast;
+}
+
+// A local borrow needs an initial value, is one variable, and is not `let`;
+// written before the name, the mode's error shows the fix.
+TEST(LocalBorrow, Errors) {
+  const char *const cases[][2] = {
+      {"x: view;", "(a 'view' local needs an initial value)"},
+      {"x: inout int;", "(a 'inout' local needs an initial value)"},
+      {"a: view int, b = (1, 2);", "a destructuring target cannot be 'view'"},
+      {"let x: view = 1;", "a local borrow cannot be 'let': a 'view' local "
+                           "always names what it was given"},
+      {"view x = 1;", "'view' goes after the colon, before the type: write "
+                      "'x: view = ...'"},
+      {"inout x: float = y;", "'inout' goes after the colon, before the "
+                              "type: write 'x: inout float = ...'"},
+  };
+  for (const auto &c : cases) {
+    std::string src = std::string("fn main() -> int {\n  y = 1.0;\n  ") + c[0] +
+                      "\n  return 0;\n}";
+    auto [ok, _] = parse(src);
+    EXPECT_FALSE(ok) << src;
+    if (testFrontend() != "recursive-descent")
+      continue;
+    std::string errs = parseErrors(src);
+    EXPECT_NE(errs.find(c[1]), std::string::npos) << src << "\n" << errs;
   }
 }

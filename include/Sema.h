@@ -79,7 +79,8 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// What restricts a variable beyond its type: nothing, `let` (it cannot be
   /// reassigned), or a parameter mode: `view` (it cannot be changed) or
   /// `inout` (it is the caller's storage).
-  enum class VarKind : uint8_t { Plain, Let, View, Inout };
+  /// View is a `view` parameter, ViewLocal a `view` local.
+  enum class VarKind : uint8_t { Plain, Let, View, ViewLocal, Inout };
 
   /// A single lexical scope. Each scope has its own local bindings and a
   /// pointer to its enclosing (parent) scope.
@@ -585,6 +586,9 @@ private:
   /// Record the kinds of @p fn's `view` / `inout` parameters, just declared
   /// in the current scope.
   void declareParamKinds(const ast::FuncDecl *fn);
+  /// The rules of the local borrow @p node (`x: view = e;`), just declared
+  /// in the current scope with type @p ty: records a `view` local's kind.
+  bool checkLocalBorrow(const ast::VarDecl *node, ast::Type *ty);
   /// An override @p method keeps each parameter's mode of @p base.
   bool checkOverrideModes(const ast::FuncDecl *method,
                           const ast::MethodDecl *base);

@@ -276,8 +276,9 @@ bool Parser::errorAtCurrent(const std::string &expected) {
   std::string hint;
   if (t.Kind == Tok::KwView || t.Kind == Tok::KwInout)
     hint = " (" + found +
-           " only marks a parameter's type: 'fn f(x: " + std::string(t.Text) +
-           " int)')";
+           " only marks the type of a parameter or a local: 'fn f(x: " +
+           std::string(t.Text) + " int)', 'y: " + std::string(t.Text) +
+           " = x;')";
   else if (t.Kind == Tok::KwLet)
     hint = " ('let' only starts a local declaration: 'let x = 1;')";
   error(t.Loc, "unexpected " + found + "; " + expected + hint);
@@ -842,12 +843,26 @@ bool Parser::parseStatement(Stmt *&out) {
   case Tok::KwLet:
     return parseLetDecl(out);
 
+  case Tok::KwView:
+  case Tok::KwInout:
+    // `view x = e;`, with the mode before the name.
+    if (kind(1) == Tok::Ident &&
+        (kind(2) == Tok::Assign || kind(2) == Tok::Colon)) {
+      prefixBorrowError();
+      return false;
+    }
+    return parseExprOrAssignStatement(out);
+
   case Tok::Ident: {
     // After a leading name the next token decides: `,` starts a
     // destructuring statement, `:` a typed declaration (which may itself be
-    // the first destructuring target), anything else an expression.
+    // the first destructuring target) or, with `view` / `inout` after it, a
+    // local borrow, anything else an expression.
     if (kind(1) == Tok::Comma)
       return parseDestructureStatement(start, {}, out);
+    if (kind(1) == Tok::Colon &&
+        (kind(2) == Tok::KwView || kind(2) == Tok::KwInout))
+      return parseBorrowDecl(out);
     if (kind(1) == Tok::Colon) {
       VarDecl *decl = parseVarDecl();
       if (!decl)
@@ -882,6 +897,59 @@ bool Parser::parseStatement(Stmt *&out) {
   }
 }
 
+// borrowDecl ::= IDENT ":" ( "view" | "inout" ) typeAnnotation? "="
+//                expression ";"
+bool Parser::parseBorrowDecl(Stmt *&out) {
+  SourceLocation start = cur().Loc;
+  const std::string &name = intern(consume().Text);
+  consume(); // ":"
+  ParamMode mode =
+      consume().Kind == Tok::KwView ? ParamMode::View : ParamMode::Inout;
+  Type *ty = nullptr;
+  if (!at(Tok::Assign) && !at(Tok::Semi)) {
+    ty = parseTypeAnnotation();
+    if (!ty)
+      return false;
+  }
+  if (at(Tok::Comma)) {
+    error(cur().Loc, std::string("a destructuring target cannot be '") +
+                         paramModeName(mode) + "'");
+    return false;
+  }
+  const std::string needsInit = std::string("(a '") + paramModeName(mode) +
+                                "' local needs an initial value)";
+  if (!expect(Tok::Assign, needsInit.c_str()))
+    return false;
+  Expr *init = parseExpression();
+  if (!init)
+    return false;
+  auto *vd = Ctx.make<VarDecl>(span(start), name, ty, init);
+  vd->setMode(mode);
+  auto *ds = Ctx.make<DeclStmt>(span(start), vd);
+  if (!expect(Tok::Semi, "after the declaration"))
+    return false;
+  out = ds;
+  return true;
+}
+
+// `view x = e;` or `inout x: int = e;`, with the mode before the name: say
+// where it goes.
+void Parser::prefixBorrowError() {
+  Token modeTok = consume();
+  std::string mode(modeTok.Text);
+  std::string name(consume().Text);
+  std::string fix = name + ": " + mode;
+  if (accept(Tok::Colon)) {
+    ++Speculating; // a bad type is not reported on its own
+    Type *ty = parseTypeAnnotation();
+    --Speculating;
+    fix += " " + (ty ? typeName(ty) : std::string("T"));
+  }
+  error(modeTok.Loc, "'" + mode +
+                         "' goes after the colon, before the type: write '" +
+                         fix + " = ...'");
+}
+
 // letDecl ::= "let" IDENT ( ":" typeAnnotation )? "=" expression ";"
 bool Parser::parseLetDecl(Stmt *&out) {
   SourceLocation start = consume().Loc; // "let"
@@ -892,6 +960,12 @@ bool Parser::parseLetDecl(Stmt *&out) {
   const std::string &name = intern(consume().Text);
   Type *ty = nullptr;
   if (accept(Tok::Colon)) {
+    if (at(Tok::KwView) || at(Tok::KwInout)) {
+      error(cur().Loc, "a local borrow cannot be 'let': a '" +
+                           std::string(cur().Text) +
+                           "' local always names what it was given");
+      return false;
+    }
     ty = parseTypeAnnotation();
     if (!ty)
       return false;

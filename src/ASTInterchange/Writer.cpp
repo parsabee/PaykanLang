@@ -199,6 +199,11 @@ private:
     str(d.getName());
     optionalType(d.getType());
     optionalExpr(d.getInitExpr());
+    if (d.getMode() != ParamMode::Value) {
+      open("qual");
+      sym(paramModeName(d.getMode()));
+      close();
+    }
     if (d.isLet()) {
       open("let");
       close();

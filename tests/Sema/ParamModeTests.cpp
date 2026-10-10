@@ -305,3 +305,45 @@ fn main() -> int {
           "parameter 'n' is 'inout'"});
   std::filesystem::remove_all(dir);
 }
+
+// -- Local borrows
+
+// A `view` local is a read-only copy of any expression of a value type:
+// with its type inferred or written, it cannot be assigned, destructured
+// into or passed to an `inout` parameter.  Other types and `inout` locals
+// are not supported yet.
+TEST(LocalBorrow, ViewLocals) {
+  auto ok = semaCheck(R"(
+    enum Color { Red, Green }
+    fn twice(n: int) -> int { return 2 * n; }
+    fn main() -> int {
+      k = 3;
+      v: view = k + 1;
+      w: view float = k;
+      c: view Color = Color::Green;
+      return twice(v) + int(w);
+    }
+  )");
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
+
+  auto r = semaCheck(R"(fn bump(n: inout int) { n = n + 1; }
+fn main() -> int {
+  k = 3;
+  v: view = k;
+  v = 4;
+  v, z = (1, 2);
+  bump(v);
+  s: view = "x";
+  i: inout = k;
+  return 0;
+})");
+  EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
+  expectErrors(
+      r, {":5:3: error: cannot assign to 'view' local 'v'",
+          ":6:3: error: cannot assign to 'view' local 'v'",
+          ":7:8: error: 'view' local 'v' cannot be passed to 'inout' "
+          "parameter 'n'",
+          ":8:3: error: a 'view' local of type 'Str' is not supported yet: "
+          "only int, float, bool, char and enum",
+          ":9:3: error: an 'inout' local ('i') is not supported yet"});
+}

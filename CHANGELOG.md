@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Local borrows (docs/language/01-language-basics.md, "Local borrows"): a local declared
+  with a mode where the type goes, `v: view = k + 1;` or `w: view float = k;`, the type
+  inferred when left off.  A `view` local is a read-only copy of its initializer, which may
+  be any expression of a value type: it cannot be assigned, destructured into or passed to
+  an `inout` parameter.  `view` locals of other types, and `inout` locals (`x: inout =
+  place;`), are not supported yet.  A local borrow needs an initializer, is never `let` and
+  is not a destructuring target; written before the name (`view x = e;`) the error shows
+  the fix.  In the AST interchange format a local borrow carries `(qual view)` or
+  `(qual inout)`.
 - `view` and `inout` parameters (docs/language/02-functions-and-calling.md, "Parameter
   modes"), on functions, methods and constructors, for `int`, `float`, `bool`, `char` and
   enum parameters.  The mode is written where the type goes: `fn bump(n: inout int)`,

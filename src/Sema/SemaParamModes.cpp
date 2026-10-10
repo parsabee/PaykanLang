@@ -3,8 +3,10 @@
 // The rules of `view` and `inout` parameters
 // (docs/language/02-functions-and-calling.md, "Parameter modes"): the types
 // a mode applies to, overrides, and the arguments an `inout` parameter
-// takes, none of them twice in one call.  Assignments to a `view` parameter
-// are checked with `let` locals' (Sema::checkReassignable).
+// takes, none of them twice in one call; and of local borrows
+// (docs/language/01-language-basics.md, "Local borrows").  Assignments to a
+// `view` parameter or local are checked with `let` locals'
+// (Sema::checkReassignable).
 
 #include "Names.h"
 #include "Sema.h"
@@ -79,6 +81,29 @@ void Sema::declareParamKinds(const ast::FuncDecl *fn) {
           p.Mode == ast::ParamMode::View ? VarKind::View : VarKind::Inout;
 }
 
+bool Sema::checkLocalBorrow(const ast::VarDecl *node, ast::Type *ty) {
+  const std::string &name = node->getName();
+  switch (node->getMode()) {
+  case ast::ParamMode::Value:
+    return true;
+  case ast::ParamMode::View:
+    // A `view` local is a read-only copy of its initializer, which may be any
+    // expression.
+    CurrentScope->Kinds[name] = VarKind::ViewLocal;
+    if (isValueType(ty) || ast::isa<ast::PoisonType>(ty))
+      return true;
+    error(node->getLocation(),
+          "a 'view' local of type '" + typeName(ty) +
+              "' is not supported yet: only int, float, bool, char and enum");
+    return false;
+  case ast::ParamMode::Inout:
+    error(node->getLocation(),
+          "an 'inout' local ('" + name + "') is not supported yet");
+    return false;
+  }
+  return true;
+}
+
 bool Sema::checkOverrideModes(const ast::FuncDecl *method,
                               const ast::MethodDecl *base) {
   // The mode decides how the argument is passed (`inout`: by address) and
@@ -135,9 +160,12 @@ bool Sema::checkInoutArgs(const ast::ParamModes &modes,
       // no conversion (int -> float) can happen on the way.
       msg = argN + " has type '" + typeName(argTy) + "', but ";
       msg += param + " has type '" + typeName(paramTys[i]) + "'";
-    } else if (id && varKind(id->getName()) == VarKind::View) {
-      msg = "'view' parameter '" + id->getName() + "' cannot be passed to " +
-            param;
+    } else if (id && (varKind(id->getName()) == VarKind::View ||
+                      varKind(id->getName()) == VarKind::ViewLocal)) {
+      msg = std::string(varKind(id->getName()) == VarKind::View
+                            ? "'view' parameter '"
+                            : "'view' local '") +
+            id->getName() + "' cannot be passed to " + param;
     } else if (id && varKind(id->getName()) == VarKind::Let) {
       msg = "'" + id->getName() +
             "' is declared with 'let' and cannot be passed to " + param;

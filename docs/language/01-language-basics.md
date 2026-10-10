@@ -230,6 +230,41 @@ too. A `let` variable cannot be passed to an `inout` parameter
 plain or `view` one. Like any variable, an inner block may declare its own variable with the
 same name.
 
+### Local borrows
+
+A local can be declared with a mode, `view` or `inout`, written where the type goes, as for
+a [parameter](02-functions-and-calling.md#parameter-modes-view-and-inout). The type may be
+left off; it is the initializer's:
+
+```pkn
+fn main() -> int {
+  k = 3;
+  v: view = k + 1;     // a read-only local
+  w: view float = k;
+  println(Str(v) + " " + Str(w));
+  return 0;
+}
+```
+
+Output:
+
+```
+4 3
+```
+
+A `view` local is read-only: it cannot be assigned or be a destructuring target (`cannot
+assign to 'view' local 'v'`), and it cannot be passed to an `inout` parameter. Its
+initializer may be any expression of its type; the local holds a copy of it. For now a
+`view` local has a value type (`int`, `float`, `bool`, `char` or an enum).
+
+An `inout` local, `x: inout = place;`, is another name for a variable or a field. It is
+not supported yet (`an 'inout' local ('x') is not supported yet`).
+
+A local borrow always has an initializer, declares one variable (not a destructuring
+target), and is never `let`: `let x: view = e;` is an error, `a local borrow cannot be
+'let'`. Written before the name, `view x = e;`, the mode is a syntax error that shows the
+fix: `'view' goes after the colon, before the type: write 'x: view = ...'`.
+
 ---
 
 ## Expressions & Operators
