@@ -310,7 +310,7 @@ fn main() -> int {
 
 // A `view` local reads any expression, with its type inferred or written:
 // it cannot be assigned, destructured into or passed to an `inout`
-// parameter.  `inout` locals are not supported yet.
+// parameter.
 TEST(LocalBorrow, ViewLocals) {
   auto ok = semaCheck(R"(
     enum Color { Red, Green }
@@ -333,16 +333,66 @@ fn main() -> int {
   v, z = (1, 2);
   bump(v);
   s: view = "x";
-  i: inout = k;
   return 0;
 })");
-  EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
   expectErrors(
       r, {":5:3: error: cannot assign to 'view' local 'v'",
           ":6:3: error: cannot assign to 'view' local 'v'",
           ":7:8: error: 'v' is a 'view' local; it cannot be passed to 'inout' "
-          "parameter 'n'",
-          ":9:3: error: an 'inout' local ('i') is not supported yet"});
+          "parameter 'n'"});
+}
+
+// An `inout` local names a variable or a field (of a `let` local's object
+// too) of exactly its type: not an expression, an array element (not yet), a
+// string's character, `self`, a `let` local or anything reached through a
+// `view`.
+TEST(LocalBorrow, InoutLocals) {
+  auto r = semaCheck(R"(class Counter {
+  n: int;
+  fn __init__() { self.n = 0; }
+  fn me() { m: inout = self; t: inout = self.n; t = 1; }
+}
+class Fast : Counter { fn __init__() { __super__(); } }
+fn bump(n: inout int) { n = n + 1; }
+fn main() -> int {
+  k = 1;
+  a: inout = k + 1;
+  xs = [1];
+  b: inout = xs[0];
+  s = "ab";
+  c: inout = s[0];
+  let l = 2;
+  d: inout = l;
+  v: view = Counter();
+  e: inout = v.n;
+  f: inout float = k;
+  fast = Fast();
+  g: inout Counter = fast;
+  let lc = Counter();
+  h: inout = lc.n;
+  i: inout int = k;
+  i = 3;
+  bump(i);
+  return 0;
+})");
+  EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
+  expectErrors(
+      r, {":4:24: error: 'self' cannot be named by 'inout' local 'm': the "
+          "method would no longer know its object",
+          ":10:14: error: 'inout' local 'a' must name a variable or a field",
+          ":12:14: error: an array element cannot be named by 'inout' local "
+          "'b' yet",
+          ":14:14: error: a character of a string cannot be named by 'inout' "
+          "local 'c'",
+          ":16:14: error: 'l' is declared with 'let' and cannot be named by "
+          "'inout' local 'd'",
+          ":18:14: error: 'v' is a 'view' local; it cannot be named by "
+          "'inout' local 'e'",
+          ":19:20: error: 'inout' local 'f' has type 'float', but what it "
+          "names has type 'int'",
+          ":21:22: error: 'inout' local 'g' has type 'Counter', but what it "
+          "names has type 'Fast'"});
 }
 
 // Nothing reached through a `view` local of an object, string or array can

@@ -311,3 +311,63 @@ TEST(LocalBorrow, ViewLocalsOfReferenceTypes) {
   EXPECT_EQ(r.StdOut, "counter 3\ncounter 3 abc3 7 True fast 3\n");
   guard.expectNoLeaks("view reference locals");
 }
+
+// An `inout` local is another name for a variable or a field, of every
+// type: assigning to it writes there (an object, string, array or optional
+// is replaced, the old one released), and it passes its address on to an
+// `inout` parameter.  A field's object stays alive while the local can be
+// used.
+TEST(LocalBorrow, InoutLocalsWriteThrough) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(
+    class Counter {
+      n: int;
+      fn __init__(n: int) { self.n = n; }
+      fn get() -> int { return self.n; }
+    }
+    class Holder {
+      c: Counter; total: int;
+      fn __init__() { self.c = Counter(100); self.total = 0; }
+      fn addTo(k: int) { t: inout = self.total; t = t + k; }
+    }
+    fn bump(n: inout int) { n = n + 1; }
+    fn make() -> Holder { return Holder(); }
+    fn main() -> int {
+      k = 1;
+      x: inout = k;
+      x = x + 10;
+      bump(x);
+      f = 1.5;
+      g: inout float = f;
+      g = g * 2;
+      s = "hi";
+      t: inout = s;
+      t = t + "!";
+      c = Counter(1);
+      cc: inout = c;
+      cc = Counter(7);
+      h = Holder();
+      hc: inout = h.c;
+      hc = Counter(9);
+      ht: inout = h.total;
+      ht = 5;
+      h.addTo(3);
+      xs = [1, 2];
+      ys: inout = xs;
+      ys.push(3);
+      ys = [ys.len(), 8];
+      o: Counter? = None;
+      oo: inout = o;
+      oo = Counter(4);
+      m: inout = make().total;
+      m = m + 1;
+      println(Str(k) + " " + Str(f) + " " + s + " " + Str(c.get()) + " " +
+              Str(h.c.get()) + " " + Str(h.total) + " " + Str(xs[0]) +
+              Str(xs[1]) + " " + Str(o != None) + " " + Str(m));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "12 3 hi! 7 9 8 38 True 1\n");
+  guard.expectNoLeaks("inout locals");
+}

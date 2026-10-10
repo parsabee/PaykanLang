@@ -262,8 +262,41 @@ may change it`). A `view` local stays one: it can only be passed on to a `view` 
 and is never stored or returned
 ([A `view` stays a `view`](02-functions-and-calling.md#a-view-stays-a-view)).
 
-An `inout` local, `x: inout = place;`, is another name for a variable or a field. It is
-not supported yet (`an 'inout' local ('x') is not supported yet`).
+An `inout` local, `x: inout = place;`, is another name for a variable or a field: reading
+it reads there, and assigning to it writes there, of any type (an object, string or array is
+replaced, as by an assignment to the variable). It can be passed on to an `inout`
+parameter:
+
+```pkn
+class Account {
+  balance: int;
+  fn __init__() { self.balance = 0; }
+}
+
+fn main() -> int {
+  a = Account();
+  b: inout = a.balance;
+  b = b + 10;
+  names = ["x"];
+  n: inout = names;
+  n = ["y", "z"];
+  println(Str(a.balance) + " " + Str(names.len()));
+  return 0;
+}
+```
+
+Output:
+
+```
+10 2
+```
+
+What it names follows the rules of an
+[`inout` argument](02-functions-and-calling.md#inout-the-callers-storage): a variable or a
+field, also of the object a `let` local holds, of exactly the local's type (`'inout' local
+'f' has type 'float', but what it names has type 'int'`). An expression, an array element
+(not yet), a string's character, `self`, a `let` local and anything reached through a
+`view` are errors. An object whose field it names stays alive while the local can be used.
 
 A local borrow always has an initializer, declares one variable (not a destructuring
 target), and is never `let`: `let x: view = e;` is an error, `a local borrow cannot be
