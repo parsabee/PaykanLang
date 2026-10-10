@@ -437,6 +437,34 @@ TEST(ASTInterchange, ViewFn) {
   }
 }
 
+// A borrowed result is a `(qual view)` / `(qual inout)` after the return
+// type, which it needs.
+TEST(ASTInterchange, BorrowedResults) {
+  const std::string text =
+      "(paykan-ast 1 (unit (fn \"f\" (type-params) (params (param \"a\" "
+      "(named-type \"Str\") (qual view))) (named-type \"Str\") (qual view) "
+      "(block))))";
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *tu = read(text, ctx, error);
+  ASSERT_NE(tu, nullptr) << error;
+  EXPECT_EQ(tu->getFuncDecls()[0]->getResultMode(), ast::ParamMode::View);
+  std::string written = write(*tu);
+  // The parameter's and the result's.
+  EXPECT_NE(written.find("(qual view)"), written.rfind("(qual view)"))
+      << written;
+  ast::ASTContext ctx2;
+  ast::TranslationUnit *back = read(written, ctx2, error);
+  ASSERT_NE(back, nullptr) << error;
+  EXPECT_EQ(dump(back), dump(tu));
+
+  const std::string bad = "(paykan-ast 1 (unit (fn \"f\" (type-params) "
+                          "(params) _ (qual view) (block))))";
+  EXPECT_EQ(read(bad, ctx, error), nullptr);
+  EXPECT_NE(error.find("a borrowed result needs a type"), std::string::npos)
+      << error;
+}
+
 // A parameter's mode is the optional `(qual view)` / `(qual inout)` item.
 TEST(ASTInterchange, ParamModes) {
   parser::ParserDriver driver("recursive-descent");

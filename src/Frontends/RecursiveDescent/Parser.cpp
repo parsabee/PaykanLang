@@ -669,7 +669,7 @@ EnumDecl *Parser::parseEnumDecl() {
 // -- Functions
 //
 // funcDecl ::= "view"? "fn" IDENT ( "<" typeParamList ">" )? "(" paramList ")"
-//              ( "->" typeAnnotation )? block
+//              ( "->" ( "view" | "inout" )? typeAnnotation )? block
 // paramList ::= ( param ( "," param )* )?
 // param ::= IDENT ":" ( "view" | "inout" )? typeAnnotation
 
@@ -745,7 +745,12 @@ FuncDecl *Parser::parseFuncDecl() {
     return nullptr;
 
   Type *retTy = nullptr;
+  ParamMode resultMode = ParamMode::Value;
   if (accept(Tok::Arrow)) {
+    // `-> view T`: a borrowed result (whether it may be one is Sema's).
+    if (at(Tok::KwView) || at(Tok::KwInout))
+      resultMode =
+          consume().Kind == Tok::KwView ? ParamMode::View : ParamMode::Inout;
     retTy = parseTypeAnnotation();
     if (!retTy)
       return nullptr;
@@ -757,6 +762,7 @@ FuncDecl *Parser::parseFuncDecl() {
   auto *fn = Ctx.make<FuncDecl>(span(start), name, std::move(params), retTy,
                                 body, std::move(typeParams));
   fn->setView(view);
+  fn->setResultMode(resultMode);
   return fn;
 }
 

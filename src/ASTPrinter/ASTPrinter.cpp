@@ -504,6 +504,8 @@ void ASTPrinter::visitFuncDecl(FuncDecl *node) {
       OS << ' ' << paramModeName(p.Mode) << " '" << p.getName() << "'";
   if (node->getReturnType())
     OS << " ->";
+  if (node->getResultMode() != ParamMode::Value)
+    OS << ' ' << paramModeName(node->getResultMode());
   OS << "\n";
   if (node->getReturnType()) {
     ChildScope cs(*this, false);

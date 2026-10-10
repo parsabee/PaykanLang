@@ -141,7 +141,7 @@ typeParams  ::= "<" IDENT ( "," IDENT )* ">"
 enumDecl    ::= "enum" IDENT "{" IDENT ( "," IDENT )* ","? "}"
 
 funcDecl    ::= "view"? "fn" IDENT typeParams? "(" paramList? ")"
-                ( "->" typeAnnotation )? block
+                ( "->" ( "view" | "inout" )? typeAnnotation )? block
 paramList   ::= param ( "," param )*
 param       ::= IDENT ":" ( "view" | "inout" )? typeAnnotation
 
@@ -158,9 +158,10 @@ on a free function it is a semantic error, not a syntax error.
 A parameter's type may start with its mode, `view` or `inout`
 ([language/02-functions-and-calling.md](language/02-functions-and-calling.md)):
 `fn bump(n: inout int)`, `fn __init__(start: view int)`.  The keywords are
-reserved: besides a parameter's type, they only start a local borrow's type
-or a `match` binding's type (`borrowDecl` and `matchArm`, below), and `view`
-a `view fn`.  In any other position (a
+reserved: besides a parameter's type, they only start a result's type
+(`-> view T`), a local borrow's type or a `match` binding's type
+(`borrowDecl` and `matchArm`, below), and `view` a `view fn`.  In any other
+position (a
 statement, a field's type, before the parameter's name) they are a syntax
 error; before the name, the error shows the parameter rewritten.
 The AST records the mode on the parameter (`Param::Mode`); whether it is

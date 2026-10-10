@@ -484,11 +484,15 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       overridden = ct->getSuperClass()->findMethod(method->getName());
     if (!checkViewFnDecl(method, overridden))
       ok = false;
+    if (!checkResultDecl(method, /*method=*/true))
+      ok = false;
 
     auto *mdecl = Ctx.make<ast::MethodDecl>(
         method->getLocation(), method->getName(), retTy, std::move(paramTys),
         method->isView() ? ast::MethodDecl::View : ast::MethodDecl::None);
-    mdecl->setParamModes(ast::paramModes(method->getParams()));
+    ast::ParamModes modes = ast::paramModes(method->getParams());
+    modes.Result = method->getResultMode();
+    mdecl->setParamModes(std::move(modes));
     ct->addMethod(mdecl);
   }
   PopulatedClasses.insert(cd->getName());
@@ -613,6 +617,7 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
       paramTys.push_back(pty ? pty : Ctx.getPoisonTy());
     }
     auto *savedRetTy = CurrentReturnType;
+    const ResultContext savedResult = CurrentResult;
     CurrentReturnType = retTy;
     {
       ScopeGuard guard(*this);
@@ -676,6 +681,7 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
       }
     }
     CurrentReturnType = savedRetTy;
+    CurrentResult = savedResult;
   }
 
   CurrentClassCtx = savedClassCtx;

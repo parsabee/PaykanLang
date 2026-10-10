@@ -1017,6 +1017,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   S.checkInoutArgs(sig->Modes, sig->ParamTypes, node->getArguments(),
                    node->getCalleeName());
   S.checkViewArgs(sig->Modes, node->getArguments(), node->getCalleeName());
+  S.noteBorrowResult(node, node->getCalleeName(), sig->Modes,
+                     node->getArguments(), nullptr);
 
   node->setResolvedType(sig->ReturnType);
   return sig->ReturnType;
@@ -1114,6 +1116,8 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     S.checkViewArgs(method->getParamModes(), node->getArguments(),
                     node->getMethodName());
   }
+  S.noteBorrowResult(node, node->getMethodName(), method->getParamModes(),
+                     node->getArguments(), node->getReceiver());
 
   node->setResolvedType(method->getReturnType());
   return method->getReturnType();
@@ -2133,6 +2137,14 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
                   typeName(CurrentReturnType) + "'");
       return false;
     }
+    // A borrowed result is a borrow of what the function was given.
+    if (CurrentResult.Mode != ast::ParamMode::Value) {
+      std::string why = borrowedResultError(node->getReturnValue());
+      if (why.empty())
+        return true;
+      error(node->getReturnValue()->getLocation(), why);
+      return false;
+    }
     return checkViewNotReturned(node->getReturnValue(), valTy);
   }
   // void return
@@ -2320,8 +2332,10 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
 
   // Register the function in the function table.
   declareFunction(node->getName(), retTy, paramTypes);
-  FunctionTable[node->getName()].Modes = ast::paramModes(node->getParams());
-  return true;
+  ast::ParamModes &modes = FunctionTable[node->getName()].Modes;
+  modes = ast::paramModes(node->getParams());
+  modes.Result = node->getResultMode();
+  return checkResultDecl(node, /*method=*/false);
 }
 
 bool Sema::visitFuncDecl(ast::FuncDecl *node) {
@@ -2347,6 +2361,7 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
 
   // Type-check the body in a new scope with params.
   auto *savedRetTy = CurrentReturnType;
+  const ResultContext savedResult = CurrentResult;
   CurrentReturnType = retTy;
   {
     ScopeGuard guard(*this);
@@ -2355,6 +2370,7 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
     declareParamKinds(node);
     bool ok = visitBody(node->getBody()->getStatements());
     CurrentReturnType = savedRetTy;
+    CurrentResult = savedResult;
     if (!ok)
       return false;
     // Non-void functions must always return a value on every path.

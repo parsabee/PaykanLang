@@ -130,6 +130,15 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// The expected return type of the current function (nullptr = top-level /
   /// void).
   ast::Type *CurrentReturnType = nullptr;
+  /// How the current function returns its result, and the function and the
+  /// scope of its parameters (and `self`), which a borrowed result must come
+  /// from.
+  struct ResultContext {
+    ast::ParamMode Mode = ast::ParamMode::Value;
+    const ast::FuncDecl *Fn = nullptr;
+    const Scope *Params = nullptr;
+  };
+  ResultContext CurrentResult;
 
   /// Loop nesting depth (0 = not inside a loop).
   unsigned LoopDepth = 0;
@@ -601,7 +610,7 @@ private:
   // -- `view` and `inout` parameters (SemaParamModes.cpp)
 
   /// Record the kinds of @p fn's `view` / `inout` parameters, just declared
-  /// in the current scope.
+  /// in the current scope, and how it returns its result (CurrentResult).
   void declareParamKinds(const ast::FuncDecl *fn);
   /// The rules of the local borrow @p node (`x: view = e;`, `x: inout =
   /// k;`), just declared in the current scope: records its kind.
@@ -652,6 +661,34 @@ private:
   /// The variable a place starts from: `c` for `c`, `c.a.n`, `c.xs[i]` and
   /// `c.t.0`; null for anything else (a call).
   static const ast::Identifier *placeRoot(const ast::Expr *e);
+  /// What a place starts from: the variable, or the call, under its fields,
+  /// elements and tuple slots.
+  static const ast::Expr *placeBase(const ast::Expr *e);
+
+  // -- Borrowed results (SemaResults.cpp)
+
+  /// A call whose result is a borrow (`-> view T`) of what it was given:
+  /// its receiver and the arguments to its `view` / `inout` parameters.
+  struct BorrowResult {
+    std::string Callee;
+    ast::ParamMode Mode = ast::ParamMode::View;
+    std::vector<const ast::Expr *> From;
+  };
+  std::unordered_map<const ast::Expr *, BorrowResult> BorrowResults;
+  /// The result-mode rules of the declaration of @p fn (a method when
+  /// @p method): `main` returns a copy, and `inout` results are not yet.
+  bool checkResultDecl(const ast::FuncDecl *fn, bool method);
+  /// Record that @p call, of @p callee with @p modes, returns a borrow of
+  /// @p receiver (or null) and its borrowed @p args.
+  void noteBorrowResult(const ast::Expr *call, const std::string &callee,
+                        const ast::ParamModes &modes,
+                        const std::vector<ast::Expr *> &args,
+                        const ast::Expr *receiver);
+  /// The borrowed result the place @p e is part of, or null.
+  const BorrowResult *borrowResultOf(const ast::Expr *e) const;
+  /// Why @p e cannot be returned as the current function's `view` result;
+  /// "" when it is part of `self` or of a `view` / `inout` parameter.
+  std::string borrowedResultError(const ast::Expr *e);
 
   // -- Where a `view fn` may be declared (SemaViewFn.cpp)
 

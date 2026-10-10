@@ -187,6 +187,11 @@ private:
     }
     close();
     optionalType(d.getReturnType());
+    if (d.getResultMode() != ParamMode::Value) {
+      open("qual");
+      sym(paramModeName(d.getResultMode()));
+      close();
+    }
     if (d.getBody())
       stmt(d.getBody());
     else
