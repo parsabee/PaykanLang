@@ -60,11 +60,13 @@ inline constexpr uint8_t kModeView = 1;
 inline constexpr uint8_t kModeInout = 2;
 
 /// The modes of a signature's parameters (ast::ParamModes): one per
-/// parameter with its name, or none when every parameter is by value.
+/// parameter with its name, or none when every parameter is by value, and
+/// how the result is returned (a copy, or a `view` / `inout` borrow).
 /// They are appended to the FUNC and CLASS records.
 struct ModeRecs {
   std::vector<uint8_t> Modes;
   std::vector<std::string> Names;
+  uint8_t Result = kModeValue;
   bool operator==(const ModeRecs &) const = default;
 };
 

@@ -53,8 +53,8 @@ TEST(ParamMode, ModesOnFunctionsMethodsAndConstructors) {
   EXPECT_EQ(params[2].Mode, paykan::ast::ParamMode::Value);
 }
 
-// `view` and `inout` are reserved, and only mark the type of a parameter or
-// a local.  There is no call-site marking.
+// `view` and `inout` are reserved, and only mark the type of a parameter, a
+// local or a result.  There is no call-site marking.
 TEST(ParamMode, KeywordsOnlyMarkAParameterType) {
   const char *const cases[] = {
       "fn main() -> int { return inout; }",
@@ -63,7 +63,7 @@ TEST(ParamMode, KeywordsOnlyMarkAParameterType) {
       "fn bump(n: inout int) { }\nfn main() -> int { bump(inout k); }",
       "fn f(x: int inout) { }\nfn main() -> int { return 0; }",
       "fn f(x: inout view int) { }\nfn main() -> int { return 0; }",
-      "fn f() -> inout int { return 0; }\nfn main() -> int { return 0; }",
+      "fn f() -> int inout { return 0; }\nfn main() -> int { return 0; }",
       "fn inout() { }\nfn main() -> int { return 0; }",
       "fn f(view: int) { }\nfn main() -> int { return 0; }",
       "class C { inout n: int; }\nfn main() -> int { return 0; }",
@@ -241,4 +241,24 @@ TEST(MatchArm, Modes) {
     std::string errs = parseErrors(src);
     EXPECT_NE(errs.find(c[1]), std::string::npos) << src << "\n" << errs;
   }
+}
+
+// A result may be a borrow, written where its type goes: `-> view T` or
+// `-> inout T`.
+TEST(BorrowedResult, Syntax) {
+  auto [ok, driver] = parse(R"(fn f(a: view Str) -> view Str { return a; }
+fn g(n: inout int) -> inout int { return n; }
+fn h() -> int { return 0; }
+fn main() -> int { return 0; }
+)");
+  ASSERT_TRUE(ok);
+  namespace ast = paykan::ast;
+  const auto &fns = driver->getRoot()->getFuncDecls();
+  EXPECT_EQ(fns[0]->getResultMode(), ast::ParamMode::View);
+  EXPECT_EQ(fns[1]->getResultMode(), ast::ParamMode::Inout);
+  EXPECT_EQ(fns[2]->getResultMode(), ast::ParamMode::Value);
+  std::string dump = dumpAST(*driver);
+  for (const char *fn :
+       {"'f' view 'a' -> view\n", "'g' inout 'n' -> inout\n", "'h' ->\n"})
+    EXPECT_NE(dump.find(fn), std::string::npos) << fn << "\n" << dump;
 }

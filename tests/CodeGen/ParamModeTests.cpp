@@ -572,3 +572,86 @@ TEST(LocalBorrow, InoutArmsWriteThrough) {
   EXPECT_EQ(r.StdOut, "11 11 6 dog7 42 41\n");
   guard.expectNoLeaks("inout arms");
 }
+
+// A borrowed result is returned like any other: part of `self` (a field, an
+// element) or of a `view` parameter, read by its caller, bound to a `view`
+// local and passed on to a `view` parameter.
+TEST(BorrowedResult, ViewResultsAreRead) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(
+    class Counter {
+      n: int;
+      fn __init__(n: int) { self.n = n; }
+      view fn get() -> int { return self.n; }
+    }
+    class Box {
+      c: Counter; xs: int[];
+      fn __init__() { self.c = Counter(4); self.xs = [7, 8]; }
+      view fn peek() -> view Counter { return self.c; }
+      view fn first() -> view int { return self.xs[0]; }
+    }
+    fn longer(a: view Str, b: view Str) -> view Str {
+      return if a.len() > b.len() then a else b;
+    }
+    fn show(c: view Counter) -> int { return c.get(); }
+    fn main() -> int {
+      b = Box();
+      v: view = b.peek();
+      k = b.first();
+      s = "hello";
+      println(longer(s, "hi") + " " + Str(v.get() + show(b.peek()) + k));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "hello 15\n");
+  guard.expectNoLeaks("view results");
+}
+
+// An `inout` result is the storage it names: bound to an `inout` local,
+// passed on to an `inout` parameter, written through, a method called on it
+// and read; a field of `self` (an object and an int) and a conditional of
+// two `inout` parameters.
+TEST(BorrowedResult, InoutResultsWriteThrough) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(
+    class Counter {
+      n: int;
+      fn __init__(n: int) { self.n = n; }
+      fn tick() { self.n = self.n + 1; }
+      view fn get() -> int { return self.n; }
+    }
+    class Box {
+      c: Counter; k: int;
+      fn __init__() { self.c = Counter(1); self.k = 3; }
+      fn counter() -> inout Counter { return self.c; }
+      fn num() -> inout int { return self.k; }
+    }
+    fn pick(a: inout int, b: inout int, first: bool) -> inout int {
+      return if first then a else b;
+    }
+    fn bump(n: inout int) { n = n + 1; }
+    fn main() -> int {
+      b = Box();
+      x: inout = b.num();
+      x = x + 10;
+      b.counter().tick();
+      c: inout = b.counter();
+      c = Counter(40);
+      c.tick();
+      bump(b.num());
+      i = 1;
+      j = 2;
+      p: inout = pick(i, j, False);
+      p = 20;
+      bump(pick(i, j, True));
+      y = b.num() + b.counter().get();
+      println(Str(b.k) + " " + Str(b.c.get()) + " " + Str(i) + " " + Str(j) +
+              " " + Str(y));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "14 41 2 20 55\n");
+  guard.expectNoLeaks("inout results");
+}

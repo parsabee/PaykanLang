@@ -290,6 +290,113 @@ fn nothing() {
 - `return;` in a non-void function is a compile-time error.
 - Every control-flow path in a non-void function must end with a `return`.
 
+### Borrowed results
+
+A function or method can return a borrow instead of a copy, with the mode where the result's
+type goes: `-> view T` or `-> inout T`. The result is part of what the function was given as
+a borrow, so it needs no annotation saying where it comes from:
+
+```pkn
+class Counter {
+  n: int;
+  fn __init__(n: int) { self.n = n; }
+  view fn get() -> int { return self.n; }
+}
+
+class Box {
+  c: Counter;
+  fn __init__() { self.c = Counter(4); }
+  view fn peek() -> view Counter { return self.c; }
+}
+
+fn longer(a: view Str, b: view Str) -> view Str {
+  return if a.len() > b.len() then a else b;
+}
+
+fn main() -> int {
+  b = Box();
+  v: view = b.peek();
+  println(longer("hello", "hi") + " " + Str(v.get()));
+  return 0;
+}
+```
+
+Output:
+
+```
+hello 4
+```
+
+- What a `-> view T` function returns must be part of `self` or of a `view` or `inout`
+  parameter: the parameter itself, a field or an element reached from it, or the borrowed
+  result of another call that borrows only those. A new value, a copy parameter or a local
+  is an error: `'d' is a copy: a 'view' result must be part of 'self' or of a 'view' or
+  'inout' parameter`.
+- The caller sees the result as a `view` ([A `view` stays a `view`](#a-view-stays-a-view)):
+  it can be read, passed on to a `view` parameter or bound to a `view` local, and a value
+  type can be copied out (`k = b.num();`); nothing changes through it and one that shares
+  what it holds is never stored (`the result of 'peek' is a 'view'; 'tick' is not a 'view
+  fn'`).
+- A borrowed result borrows what its call borrowed: the receiver and every argument passed
+  to a `view` or `inout` parameter. While a `view` local of it (or a `match` arm's
+  `n: view T`) is live, those variables cannot change, as for any
+  [local borrow](01-language-basics.md#local-borrows): with `w: view = longer(s, t);`,
+  `t = "bye";` is `'t' is viewed by 'view' local 'w' until 'w' is last used; it cannot be
+  assigned`. Both arguments are borrowed, though only one comes back; a value type can be
+  copied out instead.
+- How a function returns its result is part of a module's interface, imported from source
+  or from a `.pkm` file.
+- `main` returns a copy. An override returns its result the way the method it overrides
+  does.
+
+`-> inout T` returns the storage of part of `self` or of an `inout` parameter, as an `inout`
+local names it: the caller writes through it.
+
+```pkn
+class Box {
+  k: int;
+  fn __init__() { self.k = 3; }
+  fn num() -> inout int { return self.k; }
+}
+
+fn pick(a: inout int, b: inout int, first: bool) -> inout int {
+  return if first then a else b;
+}
+
+fn bump(n: inout int) { n = n + 1; }
+
+fn main() -> int {
+  b = Box();
+  x: inout = b.num();
+  x = x + 10;      // writes b.k
+  bump(b.num());   // passed on as b.k's storage
+  i = 1;
+  j = 2;
+  p: inout = pick(i, j, False);
+  p = 20;          // writes j
+  println(Str(b.k) + " " + Str(i) + " " + Str(j));
+  return 0;
+}
+```
+
+Output:
+
+```
+14 1 20
+```
+
+- What it returns is a place an `inout` argument could be: part of `self` (not `self`
+  itself) or of an `inout` parameter, not a `view`, a copy or a local, not an array element
+  yet, of exactly the result's type (`an 'inout' result has type 'Animal', but what it
+  returns has type 'Dog'`). A `view fn` cannot return one.
+- The caller binds it to an `inout` local, passes it on to an `inout` parameter, calls a
+  method on it or reads it (`y = b.num() + 1;` copies). It borrows the receiver and the
+  arguments to the call's `inout` parameters, as an `inout` local of them would: while a
+  local of it is live, they cannot be used (`'b' is borrowed by 'inout' local 'x' until 'x'
+  is last used`).
+- The receiver of a method returning `inout` is a variable or a field, which outlives the
+  call: `Box().num()` is an error.
+
 ---
 
 ## Examples
@@ -354,7 +461,7 @@ convention:
 | `Str?`, `Obj?` result | `PaykanShared *` | owned (+1); `NULL` is `None` |
 
 A native function cannot be generic, cannot be a method, and cannot be `main`.
-Its parameters are copies: `view` and `inout` don't apply to it yet (#21).
+Its parameters and its result are copies: `view` and `inout` don't apply to them yet (#21).
 Building and linking the C file next to a module is a separate step (#198).
 
 ---
@@ -374,4 +481,6 @@ Building and linking the C file next to a module is a separate step (#198).
 | Write to a `view` parameter | Assigning or destructuring into it |
 | A `view` changed, passed on or kept | Writing a field or element of what it holds, calling a method on it that is not a `view fn`, passing it to a parameter that is not `view`, or storing or returning one that shares what it holds |
 | Bad `inout` argument | Not a variable or field, not exactly the parameter's type, a `view` parameter or `let` local, an array element, a string's character, or the same place twice in one call |
-| Override changes a mode | An override that drops, adds or changes a parameter's `view`/`inout` |
+| Override changes a mode | An override that drops, adds or changes a parameter's `view`/`inout`, or returns a borrow where the method it overrides returns a copy (or the other way) |
+| A `view` result of something else | A `-> view T` function returns a new value, a copy parameter or a local, not part of `self` or of a `view` / `inout` parameter |
+| An `inout` result of something else | A `-> inout T` function returns what an `inout` argument could not be, or what is not part of `self` or of an `inout` parameter, or another type; a `view fn` returns `inout`; the receiver of a method returning `inout` is not a variable or a field |

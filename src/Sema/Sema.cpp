@@ -1017,6 +1017,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   S.checkInoutArgs(sig->Modes, sig->ParamTypes, node->getArguments(),
                    node->getCalleeName());
   S.checkViewArgs(sig->Modes, node->getArguments(), node->getCalleeName());
+  S.noteBorrowResult(node, node->getCalleeName(), sig->Modes,
+                     node->getArguments(), nullptr);
 
   node->setResolvedType(sig->ReturnType);
   return sig->ReturnType;
@@ -1114,6 +1116,16 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     S.checkViewArgs(method->getParamModes(), node->getArguments(),
                     node->getMethodName());
   }
+  S.noteBorrowResult(node, node->getMethodName(), method->getParamModes(),
+                     node->getArguments(), node->getReceiver());
+  // An `inout` result is part of the receiver, which must outlive the call.
+  if (method->getParamModes().Result == ast::ParamMode::Inout &&
+      !S.placeRoot(node->getReceiver()) &&
+      !S.isInoutResult(S.placeBase(node->getReceiver())))
+    S.error(node->getReceiver()->getLocation(),
+            "the receiver of '" + node->getMethodName() +
+                "' must be a variable or a field: its 'inout' result is part "
+                "of it");
 
   node->setResolvedType(method->getReturnType());
   return method->getReturnType();
@@ -2133,6 +2145,20 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
                   typeName(CurrentReturnType) + "'");
       return false;
     }
+    // A borrowed result is a borrow of what the function was given.
+    if (CurrentResult.Mode != ast::ParamMode::Value) {
+      std::string why = borrowedResultError(node->getReturnValue());
+      // The caller writes the storage as the result's type, so no
+      // conversion can happen (not a subclass to its base).
+      if (why.empty() && CurrentResult.Mode == ast::ParamMode::Inout &&
+          !typesEqual(valTy, CurrentReturnType))
+        why = "an 'inout' result has type '" + typeName(CurrentReturnType) +
+              "', but what it returns has type '" + typeName(valTy) + "'";
+      if (why.empty())
+        return true;
+      error(node->getReturnValue()->getLocation(), why);
+      return false;
+    }
     return checkViewNotReturned(node->getReturnValue(), valTy);
   }
   // void return
@@ -2325,14 +2351,17 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
 
   // Register the function in the function table.
   declareFunction(node->getName(), retTy, paramTypes);
-  FunctionTable[node->getName()].Modes = ast::paramModes(node->getParams());
-  return true;
+  ast::ParamModes &modes = FunctionTable[node->getName()].Modes;
+  modes = ast::paramModes(node->getParams());
+  modes.Result = node->getResultMode();
+  return checkResultDecl(node, /*method=*/false);
 }
 
 // A `native fn` (#198) crosses into C with the runtime builtins' convention,
 // which only covers scalars, `Str` and `Obj` (and, as a result, `Str?` and
-// `Obj?`: a null box is None).  Its parameters are copies: a `view` or
-// `inout` one would need a pointer convention C does not have yet (#21).
+// `Obj?`: a null box is None).  Its parameters and result are copies: a
+// `view` or `inout` one would need a pointer convention C does not have yet
+// (#21).
 bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
                                 const std::vector<ast::Type *> &paramTypes) {
   auto scalarOrRef = [&](ast::Type *t) {
@@ -2362,6 +2391,13 @@ bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
                 "'; a native function's parameters are copies");
       ok = false;
     }
+  if (node->getResultMode() != ast::ParamMode::Value) {
+    error(node->getLocation(), "native function '" + node->getName() +
+                                   "' cannot return '" +
+                                   ast::paramModeName(node->getResultMode()) +
+                                   "'; a native function returns a copy");
+    ok = false;
+  }
   ast::Type *ret = retTy;
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(retTy))
     ret = ot->getInnerType() == Ctx.getStrTy() ||
@@ -2402,6 +2438,7 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
 
   // Type-check the body in a new scope with params.
   auto *savedRetTy = CurrentReturnType;
+  const ResultContext savedResult = CurrentResult;
   CurrentReturnType = retTy;
   {
     ScopeGuard guard(*this);
@@ -2410,6 +2447,7 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
     declareParamKinds(node);
     bool ok = visitBody(node->getBody()->getStatements());
     CurrentReturnType = savedRetTy;
+    CurrentResult = savedResult;
     if (!ok)
       return false;
     // Non-void functions must always return a value on every path.

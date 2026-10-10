@@ -67,6 +67,20 @@ TEST(Native, ParametersCannotHaveModes) {
   }
 }
 
+TEST(Native, ResultIsACopy) {
+  for (const char *decl : {
+           "native fn f() -> view Str = \"pk_f\";",
+           "native fn f() -> inout int = \"pk_f\";",
+       }) {
+    auto r = semaCheck(std::string(decl) + "\nfn main() -> int { return 0; }");
+    EXPECT_FALSE(r.Ok) << decl;
+    EXPECT_NE(r.Diagnostics.find("a native function returns a copy"),
+              std::string::npos)
+        << decl << "\n"
+        << r.Diagnostics;
+  }
+}
+
 TEST(Native, MainCannotBeNative) {
   auto r = semaCheck("native fn main() -> int = \"pk_main\";");
   EXPECT_FALSE(r.Ok);

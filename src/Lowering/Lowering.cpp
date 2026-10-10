@@ -337,6 +337,8 @@ pir::Signature ModuleLowering::functionSignature(ast::FuncDecl *node) {
   pir::Signature sig;
   ast::Type *retAstTy = canonicalizeDeclType(node->getReturnType());
   sig.Ret = retAstTy ? toPIRType(retAstTy) : Type::Void;
+  if (node->getResultMode() == ast::ParamMode::Inout)
+    sig.Ret = Type::Ptr; // the address of the storage it names
   for (auto &p : node->getParams())
     sig.Params.push_back(paramPIRType(p.ParamType, p.Mode));
   return sig;
@@ -920,7 +922,10 @@ Val ModuleLowering::visitReturnStmt(ast::ReturnStmt *node) {
   if (node->getReturnValue()) {
     auto *retExpr = node->getReturnValue();
     Val val;
-    if (CurrentFuncReturnASTType && ast::isRefType(CurrentFuncReturnASTType)) {
+    if (B.function() && B.function()->Sig.Ret == Type::Ptr) {
+      val = emitPlaceAddress(retExpr); // an `inout` result
+    } else if (CurrentFuncReturnASTType &&
+               ast::isRefType(CurrentFuncReturnASTType)) {
       val = emitAsShared(retExpr);
     } else {
       val = emitExpr(retExpr);
