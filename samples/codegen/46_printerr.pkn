@@ -12,7 +12,7 @@
 class Step {
   n: int;
   fn __init__(n: int) { self.n = n; }
-  fn toString() -> Str { return "step " + Str(self.n); }
+  view fn toString() -> Str { return "step " + Str(self.n); }
 }
 
 fn main() -> int {

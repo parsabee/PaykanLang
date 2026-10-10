@@ -100,7 +100,7 @@ class Person {
   email: Str?;
   fn __init__(name: Str) { self.name = name; }
 
-  fn contact() -> Str {
+  view fn contact() -> Str {
     match self.email {
       e: Str { return self.name + " <" + e + ">"; }
       None   { return self.name + " (no email)"; }
@@ -200,7 +200,7 @@ class Task {
     self.done = False;
   }
 
-  fn toString() -> Str {
+  view fn toString() -> Str {
     text = (if self.done then "[x] " else "[ ] ") + self.title;
     match self.due {
       d: Str { return text + " (due " + d + ")"; }
@@ -214,7 +214,7 @@ class TaskList {
   fn __init__() { self.tasks = []; }
   fn add(title: Str) { self.tasks.push(Task(title)); }
 
-  fn find(title: Str) -> Task? {
+  view fn find(title: Str) -> Task? {
     i = 0;
     while (i < self.tasks.len()) {
       if (self.tasks[i].title == title) { return self.tasks[i]; }

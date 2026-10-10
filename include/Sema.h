@@ -11,11 +11,14 @@
 #include "StringMap.h"
 #include "paykan/pkm/Interface.h"
 
+#include <deque>
 #include <filesystem>
 #include <memory>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace paykan {
@@ -79,7 +82,16 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// What restricts a variable beyond its type: nothing, `let` (it cannot be
   /// reassigned), or a parameter mode: `view` (it cannot be changed) or
   /// `inout` (it is the caller's storage).
-  enum class VarKind : uint8_t { Plain, Let, View, Inout };
+  /// View is a `view` parameter, ViewLocal a `view` local, ViewBinding a
+  /// `match` arm's name for (part of) a `view`.
+  enum class VarKind : uint8_t {
+    Plain,
+    Let,
+    View,
+    ViewLocal,
+    ViewBinding,
+    Inout
+  };
 
   /// A single lexical scope. Each scope has its own local bindings and a
   /// pointer to its enclosing (parent) scope.
@@ -129,11 +141,25 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   struct ClassContext {
     ast::ClassType *ClassType; // the type being checked
     std::string MethodName;    // method currently being checked (empty = none)
+    bool ViewMethod = false;   // it is a `view fn`: `self` is read-only
     bool SuperInitRequired = false; // __init__ must call __super__
     bool SuperInitCalled = false;   // __super__ has been called
   };
 
   ClassContext *CurrentClassCtx = nullptr;
+
+  /// What a method body does to `self`, for the warning on a method that
+  /// never changes it but is not a `view fn` (SemaViewFn.cpp).
+  struct MethodUse {
+    ast::ClassType *Class = nullptr;
+    const ast::FuncDecl *Decl = nullptr;
+    bool ChangesSelf = false; // writes `self`, or calls a changing method on
+                              // something reached through it
+    std::vector<std::string> SelfCalls; // `self.m()` of a non-`view fn` m
+  };
+  std::deque<MethodUse> MethodUses; // stable addresses for CurrentMethodUse
+  /// The use being recorded: the method body being checked (null outside).
+  MethodUse *CurrentMethodUse = nullptr;
 
   // -- Function signature table
 
@@ -295,9 +321,12 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// be a variable (see isTypeNameForVariable) and returns false.
   bool checkBinderName(const std::string &name, ast::SourceLocation loc);
 
-  /// checkBinderName for a match arm's binding; a rejected binding is bound
+  /// checkBinderName for a match arm's binding (of type @p bindTy), and its
+  /// kind: `n: view T` is a `view` local, `n: inout T` the storage of
+  /// @p subject, which must be a place.  A rejected binding is bound
   /// poisoned in the arm's scope.
-  bool bindArmName(ast::MatchArm *arm);
+  bool bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
+                   ast::Type *bindTy);
 
   // Check that a variable is declared. Returns its type,
   // or nullptr (with error emitted) on failure.  A poisoned variable yields
@@ -571,20 +600,108 @@ private:
 
   // -- `view` and `inout` parameters (SemaParamModes.cpp)
 
-  /// True for the types a parameter mode applies to: int, float, bool, char
-  /// and enums.
-  static bool isValueType(const ast::Type *ty);
-  /// Error for each `view` / `inout` parameter of @p fn whose type (in
-  /// @p paramTys) is not a value type.
-  bool checkParamModeTypes(const ast::FuncDecl *fn,
-                           const std::vector<ast::Type *> &paramTys);
-  /// Error for each `view` / `inout` parameter of the template @p fn whose
-  /// type is one of its @p typeParams.
-  bool checkTemplateParamModes(const ast::FuncDecl *fn,
-                               const std::vector<const std::string *> &tps);
   /// Record the kinds of @p fn's `view` / `inout` parameters, just declared
   /// in the current scope.
   void declareParamKinds(const ast::FuncDecl *fn);
+  /// The rules of the local borrow @p node (`x: view = e;`, `x: inout =
+  /// k;`), just declared in the current scope: records its kind.
+  bool checkLocalBorrow(const ast::VarDecl *node);
+  /// Why the place @p place cannot be @p use ("passed to 'inout' parameter
+  /// 'n'", "named by 'inout' local 'x'"): an array element (not yet), a
+  /// string's character, `self`, a `let` local or a `view`; "" when it can.
+  std::string inoutPlaceError(const ast::Expr *place, const std::string &use);
+
+  // -- What cannot change through a `view` (SemaViews.cpp)
+
+  /// Why the place @p e (a variable, or fields and elements reached from
+  /// one) cannot be changed here, as the start of a diagnostic: "'n' is a
+  /// 'view' parameter", "'self' is read-only in 'view fn get'"; "" when it
+  /// can.
+  /// With @p borrows, a variable viewed by a live `view` local cannot
+  /// change either.
+  std::string frozenPlace(const ast::Expr *e, bool borrows = true);
+  /// Error at @p loc (and false) when the place @p e cannot be changed;
+  /// @p what ends the diagnostic ("cannot assign to its field 'n'").
+  bool checkChangeable(const ast::Expr *e, const std::string &what,
+                       ast::SourceLocation loc);
+  /// A call of @p method on the receiver of @p call: unless it is a `view
+  /// fn`, the receiver must be changeable.
+  bool checkMethodReceiver(const ast::MethodCallExpr *call,
+                           const ast::MethodDecl *method);
+  /// Whether a value of type @p ty shares what it holds when it is copied
+  /// (an object, string, array or tuple, or an optional of one), so that a
+  /// copy of a `view` of it could change it.
+  static bool sharesStorage(const ast::Type *ty);
+  /// Why @p e is a `view` (frozenPlace, or a conditional with such a
+  /// branch), as the start of a diagnostic; "" when it is not.
+  std::string viewOf(const ast::Expr *e, bool borrows = true);
+  /// A `view` can only be passed on to a `view` parameter: each of @p args
+  /// against the parameters' @p modes of a call of @p callee.
+  bool checkViewArgs(const ast::ParamModes &modes,
+                     const std::vector<ast::Expr *> &args,
+                     const std::string &callee);
+  /// @p e, of type @p ty, is being stored (assigned, put in an array or
+  /// tuple, pushed): not a `view` that shares what it holds.
+  bool checkViewNotStored(const ast::Expr *e, const ast::Type *ty);
+  /// @p e, of type @p ty, is being returned: not a `view` that shares what
+  /// it holds, though part of `self` may be.
+  bool checkViewNotReturned(const ast::Expr *e, const ast::Type *ty);
+  /// While a `match` arm binds a name: whether the subject is a `view`, so
+  /// that the name is one too.
+  bool MatchSubjectIsView = false;
+  /// The variable a place starts from: `c` for `c`, `c.a.n`, `c.xs[i]` and
+  /// `c.t.0`; null for anything else (a call).
+  static const ast::Identifier *placeRoot(const ast::Expr *e);
+
+  // -- Where a `view fn` may be declared (SemaViewFn.cpp)
+
+  /// The `view fn` rules of class method @p method, overriding @p base (null
+  /// when it overrides nothing): `__init__` is never one, and an override is
+  /// one exactly when @p base is.
+  bool checkViewFnDecl(const ast::FuncDecl *method,
+                       const ast::MethodDecl *base);
+  /// Only a method can be a `view fn`: error on each free one in @p tu.
+  bool rejectFreeViewFns(ast::TranslationUnit *tu);
+  /// After every body is checked: warn about each method, with its
+  /// overrides, that never changes `self` but is not a `view fn`.
+  void warnMissingViewFns();
+
+  // -- Exclusivity of local borrows (SemaBorrows.cpp)
+
+  /// A live local borrow: `By` names (`inout`) or views `Root`, declared in
+  /// `RootScope`, until statement `End` of `Block`.
+  struct Borrow {
+    std::string Root;
+    const Scope *RootScope;
+    std::string By;
+    bool Inout;
+    const std::vector<ast::Stmt *> *Block;
+    size_t End;
+  };
+  std::vector<Borrow> Borrows;
+  /// The (variable, line) pairs reported by checkNotBorrowed.
+  std::set<std::pair<std::string, unsigned>> BorrowedUsesReported;
+  /// Check @p stmts in order, starting each local borrow after its
+  /// declaration and ending it after its last use there.
+  bool visitStatements(const std::vector<ast::Stmt *> &stmts);
+  /// A function or method body: visitStatements, without the borrows of
+  /// whatever is being checked around it.
+  bool visitBody(const std::vector<ast::Stmt *> &stmts);
+  /// Start the borrow of the place @p place by @p by (a local borrow, a
+  /// `match` arm's binding), live until statement @p end of @p block.
+  void startBorrow(const ast::Expr *place, const std::string &by, bool inout,
+                   const std::vector<ast::Stmt *> *block, size_t end);
+  /// Check the body of @p arm, a match over @p subject, its binding
+  /// borrowing the subject when it is `n: view T`.
+  bool visitArmBody(const ast::MatchArm *arm, const ast::Expr *subject);
+  /// The live borrow (`inout` or `view`) of the variable @p name, or null.
+  const Borrow *activeBorrow(const std::string &name, bool inout) const;
+  /// Error at @p loc (and false) when variable @p name is named by a live
+  /// `inout` local, and so cannot be used.
+  bool checkNotBorrowed(const std::string &name, ast::SourceLocation loc);
+  /// Why variable @p name cannot change while a `view` local of it is live,
+  /// as the start of a diagnostic; "" when none is.
+  std::string viewedBy(const std::string &name) const;
   /// An override @p method keeps each parameter's mode of @p base.
   bool checkOverrideModes(const ast::FuncDecl *method,
                           const ast::MethodDecl *base);

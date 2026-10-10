@@ -20,7 +20,7 @@ class Bag {
     seed.push("seed");
   }
   fn reset() { self.items = []; self.items.push("reset"); }
-  fn take(xs: Str[]) -> int { xs.push("arg"); return xs.len(); }
+  view fn take(xs: Str[]) -> int { xs.push("arg"); return xs.len(); }
 }
 
 fn fresh() -> Str[] { return []; }

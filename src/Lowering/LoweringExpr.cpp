@@ -67,9 +67,12 @@ Val ModuleLowering::ExprEmitter::visitIdentifier(ast::Identifier *node) {
     return L.externObject(kPaykanFileStdin);
   pir::LocalId local = L.CurrentScope->lookup(node->getName());
   Val val = L.B.load(local, node->getName());
-  // An `inout` parameter: read the caller's storage.
-  if (Type t = L.CurrentScope->inoutType(node->getName()); t != Type::Void)
-    return L.B.ptrLoad(val, t, node->getName());
+  // An `inout` parameter: read the caller's storage (a box: borrowed, and
+  // unwrapped like an owned variable's).
+  if (Type t = L.CurrentScope->inoutType(node->getName()); t != Type::Void) {
+    Val v = L.B.ptrLoad(val, t, node->getName());
+    return t == Type::Box ? L.emitSharedGet(v, node->getName() + ".obj") : v;
+  }
   // Owned ref vars store a box — unwrap to the underlying object.
   auto *astTy = L.CurrentScope->lookupASTType(node->getName());
   if (ast::isRefType(astTy) && L.CurrentScope->isOwned(node->getName()))
@@ -1106,13 +1109,12 @@ Val ModuleLowering::visitDestructureStmt(ast::DestructureStmt *node) {
     pir::LocalId local = owner->lookup(name);
     ast::Type *varTy = CurrentScope->lookupASTType(name);
     if (varTy && ast::isRefType(varTy)) {
-      if (!CurrentScope->isOwned(name)) {
+      if (!holdsBox(name)) {
         reportInternalError("destructuring into unowned variable '" + name +
                             "'");
         continue;
       }
-      emitRelease(B.load(local, "old.box"));
-      B.store(local, v);
+      storeVarBox(name, v);
       continue;
     }
     if (!storeInout(name, local, v))

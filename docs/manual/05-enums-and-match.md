@@ -204,7 +204,7 @@ class Task {
 
   fn complete() { self.done = True; }
 
-  fn toString() -> Str {
+  view fn toString() -> Str {
     box = if self.done then "[x]" else "[ ]";
     marker = if self.priority == Priority::High then " !" else "";
     return box + " " + self.title + marker;

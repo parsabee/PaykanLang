@@ -204,6 +204,8 @@ void ASTPrinter::visitVarDecl(VarDecl *node) {
   OS << " '" << node->getName() << "'";
   if (node->isLet())
     OS << " let";
+  if (node->getMode() != ParamMode::Value)
+    OS << " " << paramModeName(node->getMode());
   if (node->getType())
     OS << " type";
   OS << "\n";
@@ -492,6 +494,8 @@ void ASTPrinter::visitSubscriptExpr(SubscriptExpr *node) {
 
 void ASTPrinter::visitFuncDecl(FuncDecl *node) {
   header("FuncDecl", node);
+  if (node->isView())
+    OS << " view"; // `view fn`, as written
   OS << " '" << node->getName() << "'";
   printTypeParams(OS, node->getTypeParams());
   if (node->isNative())
@@ -518,6 +522,8 @@ void ASTPrinter::visitMethodDecl(MethodDecl *node) {
   OS << " '" << node->getName() << "'";
   if (node->isPrivate())
     OS << " private";
+  if (node->isView())
+    OS << " view";
   OS << "\n";
 }
 
@@ -630,6 +636,8 @@ void ASTPrinter::visitMatchStmt(MatchStmt *node) {
                               : "MatchArm");
     if (arm->hasBinding())
       OS << " binding='" << arm->getBinding() << "'";
+    if (arm->getMode() != ParamMode::Value)
+      OS << " " << paramModeName(arm->getMode());
     OS << "\n";
     // A non-wildcard arm carries either a literal pattern (value arm) or a
     // matched type (type arm) — never both; a literal arm's ArmType is null.

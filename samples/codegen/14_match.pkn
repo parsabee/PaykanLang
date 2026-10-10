@@ -20,22 +20,22 @@
 
 class Animal {
   fn __init__() {}
-  fn speak() -> Str { return "..."; }
+  view fn speak() -> Str { return "..."; }
 }
 
 class Dog : Animal {
   fn __init__() { __super__(); }
-  fn speak() -> Str { return "Woof"; }
+  view fn speak() -> Str { return "Woof"; }
 }
 
 class Cat : Animal {
   fn __init__() { __super__(); }
-  fn speak() -> Str { return "Meow"; }
+  view fn speak() -> Str { return "Meow"; }
 }
 
 class Bird : Animal {
   fn __init__() { __super__(); }
-  fn speak() -> Str { return "Tweet"; }
+  view fn speak() -> Str { return "Tweet"; }
 }
 
 class Labrador : Dog {

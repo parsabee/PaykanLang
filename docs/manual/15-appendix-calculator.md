@@ -105,7 +105,8 @@ which is the safe order: the compiler does not stop a method called earlier from
 field that is not set yet.
 
 Looking a key up returns an **optional**, `Entry?`, so a missing variable is `None` rather
-than a special value:
+than a special value. `lookup` changes nothing, but it is not a `view fn`: the entry it
+returns is the one stored in the table, and `insert` changes it.
 
 ```pkn
 // from: samples/imports/12_calc/calc/hashmap.pkn
@@ -147,7 +148,7 @@ after it. Keys are compared with `e.key.equals(key)`, which compares contents ju
 content.)
 
 `entries` returns every variable as an array of tuples, `(Str, float)[]`, for the `:vars`
-command:
+command. It is not a `view fn` either, since the tuples share the stored names:
 
 ```pkn
 // from: samples/imports/12_calc/calc/hashmap.pkn

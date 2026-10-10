@@ -639,3 +639,44 @@ TEST(Pkm, ParamModesAcrossModules) {
   EXPECT_TRUE(contains(manifest.out, "format_versions iface 1.0"))
       << manifest.out;
 }
+
+// A `view fn` keeps its marker in a prebuilt module (flag 0x2): an importer
+// calls it, and an override of it there must be a `view fn` too.
+TEST(Pkm, ViewFnAcrossModules) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_viewfn_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "base.pkn", "class P { n: int;\n"
+                              "  fn __init__() { self.n = 4; }\n"
+                              "  view fn get() -> int { return self.n; }\n"
+                              "  fn set(v: int) { self.n = v; } }\n");
+  writeFile(dir / "main.pkn", "import base;\n"
+                              "fn main() -> int {\n"
+                              "  let p = base::P();\n"
+                              "  println(Str(p.get()));\n"
+                              "  return 0;\n}\n");
+  writeFile(dir / "bad.pkn", "import base;\n"
+                             "class Q : base::P {\n"
+                             "  fn __init__() { __super__(); }\n"
+                             "  fn get() -> int { return 1; } }\n"
+                             "fn main() -> int { return 0; }\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  ASSERT_EQ(paykan("--emit-pkm base.pkn").exitCode, 0);
+  fs::remove(dir / "base.pkn");
+  auto ok = paykan("main.pkn");
+  ASSERT_EQ(ok.exitCode, 0) << ok.out;
+  EXPECT_TRUE(contains(ok.out, "4\n")) << ok.out;
+  auto bad = paykan("--check-only bad.pkn");
+  EXPECT_NE(bad.exitCode, 0);
+  EXPECT_TRUE(contains(bad.out, "bad.pkn:4:3: error: override of 'get' must be "
+                                "a 'view fn', like the method it overrides"))
+      << bad.out;
+  auto dump = paykan("pkm dump --section=iface base.pkm");
+  EXPECT_TRUE(contains(dump.out, "method get() -> int flags 0x2")) << dump.out;
+  EXPECT_TRUE(contains(dump.out, "method set(int) -> void flags 0x0"))
+      << dump.out;
+  fs::remove_all(dir);
+}

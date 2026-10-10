@@ -478,8 +478,16 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       }
     }
 
+    // `view fn`: not on __init__, and kept by an override.
+    const ast::MethodDecl *overridden = nullptr;
+    if (method->getName() != names::kMethodInit && ct->getSuperClass())
+      overridden = ct->getSuperClass()->findMethod(method->getName());
+    if (!checkViewFnDecl(method, overridden))
+      ok = false;
+
     auto *mdecl = Ctx.make<ast::MethodDecl>(
-        method->getLocation(), method->getName(), retTy, std::move(paramTys));
+        method->getLocation(), method->getName(), retTy, std::move(paramTys),
+        method->isView() ? ast::MethodDecl::View : ast::MethodDecl::None);
     mdecl->setParamModes(ast::paramModes(method->getParams()));
     ct->addMethod(mdecl);
   }
@@ -563,6 +571,7 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
 
   for (auto *method : node->getMethods()) {
     classCtx.MethodName = method->getName();
+    classCtx.ViewMethod = method->isView();
 
     // `destroy` is the compiler-generated destructor: it is emitted for every
     // class (releasing fields and freeing the object) and is final. User
@@ -603,9 +612,6 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
       // is erroneous and its bodies are skipped); poisoned if it ever is.
       paramTys.push_back(pty ? pty : Ctx.getPoisonTy());
     }
-    if (!checkParamModeTypes(method, paramTys))
-      ok = false;
-
     auto *savedRetTy = CurrentReturnType;
     CurrentReturnType = retTy;
     {
@@ -615,10 +621,15 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
         CurrentScope->declare(method->getParams()[i].getName(), paramTys[i]);
       declareParamKinds(method);
 
-      bool bodyOk = true;
-      for (auto *stmt : method->getBody()->getStatements())
-        if (!visit(stmt))
-          bodyOk = false;
+      // What the body does to `self`, for warnMissingViewFns.
+      if (method->getName() != names::kMethodInit) {
+        CurrentMethodUse = &MethodUses.emplace_back();
+        CurrentMethodUse->Class = ct;
+        CurrentMethodUse->Decl = method;
+      }
+
+      bool bodyOk = visitBody(method->getBody()->getStatements());
+      CurrentMethodUse = nullptr;
 
       if (!bodyOk) {
         ok = false;
@@ -744,15 +755,6 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
       ok = false;
       continue;
     }
-    bool modesOk = true;
-    for (auto *m : cd->getMethods())
-      modesOk &= checkTemplateParamModes(m, cd->getTypeParams());
-    if (!modesOk) {
-      // Its uses are follow-ons of the reported error.
-      ErroneousNames.insert(cd->getName());
-      ok = false;
-      continue;
-    }
     ClassTemplates[cd->getName()] = cd;
   }
 
@@ -770,11 +772,6 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
     }
     if (!checkTypeParams(fn->getTypeParams(), "generic function", fn->getName(),
                          fn->getLocation())) {
-      ok = false;
-      continue;
-    }
-    if (!checkTemplateParamModes(fn, fn->getTypeParams())) {
-      ErroneousNames.insert(fn->getName()); // as for a generic class
       ok = false;
       continue;
     }

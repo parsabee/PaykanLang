@@ -587,9 +587,38 @@ bool Sema::checkBinderName(const std::string &name, ast::SourceLocation loc) {
   return true;
 }
 
-bool Sema::bindArmName(ast::MatchArm *arm) {
-  if (checkBinderName(arm->getBinding(), arm->getLocation()))
+bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
+                       ast::Type *bindTy) {
+  const std::string &name = arm->getBinding();
+  std::string msg;
+  if (!checkBinderName(name, arm->getLocation())) {
+    // Reported.
+  } else if (arm->getMode() == ast::ParamMode::Inout) {
+    // `n: inout T` is another name for the subject's storage, as an `inout`
+    // local is for what it names; a T written through it fits there.
+    const std::string what = "'inout' arm '" + name + "'";
+    if (!ast::isa<ast::Identifier>(subject) &&
+        !ast::isa<ast::MemberAccessExpr>(subject) &&
+        !ast::isa<ast::SubscriptExpr>(subject))
+      msg = what + " needs a variable or a field to match on";
+    else if (ast::isa<ast::BuiltinType>(bindTy))
+      msg = what + " cannot change the '" + typeName(bindTy) +
+            "' inside an optional yet";
+    else
+      msg = inoutPlaceError(subject, "bound by " + what);
+    if (msg.empty()) {
+      CurrentScope->Kinds[name] = VarKind::Inout;
+      return true;
+    }
+    error(subject->getLocation(), msg);
+  } else {
+    // `n: view T` is a `view` local of the subject, whatever the subject is.
+    if (arm->getMode() == ast::ParamMode::View)
+      CurrentScope->Kinds[name] = VarKind::ViewLocal;
+    else if (MatchSubjectIsView)
+      CurrentScope->Kinds[name] = VarKind::ViewBinding;
     return true;
+  }
   // Its uses in the arm's body are follow-ons of the reported error.
   declarePoisoned(CurrentScope, arm->getBinding());
   return false;
@@ -648,6 +677,7 @@ ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
                                      "' cannot be used as a value");
     return nullptr;
   }
+  S.checkNotBorrowed(node->getName(), node->getLocation());
   return S.checkIdentLive(node->getName(), node->getLocation());
 }
 
@@ -894,9 +924,12 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
                       typeName(expectedParams[i]) + "'");
       }
     }
-    if (superInit && argTypes.size() == expectedParams.size())
+    if (superInit && argTypes.size() == expectedParams.size()) {
       S.checkInoutArgs(superInit->getParamModes(), expectedParams,
                        node->getArguments(), names::kMethodSuper);
+      S.checkViewArgs(superInit->getParamModes(), node->getArguments(),
+                      names::kMethodSuper);
+    }
     S.CurrentClassCtx->SuperInitCalled = true;
     return S.Ctx.getVoidTy();
   }
@@ -983,6 +1016,7 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   }
   S.checkInoutArgs(sig->Modes, sig->ParamTypes, node->getArguments(),
                    node->getCalleeName());
+  S.checkViewArgs(sig->Modes, node->getArguments(), node->getCalleeName());
 
   node->setResolvedType(sig->ReturnType);
   return sig->ReturnType;
@@ -1042,6 +1076,9 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     return method->getReturnType();
   }
 
+  // Only a `view fn` may be called on a `view`.
+  S.checkMethodReceiver(node, method);
+
   // Type-check arguments (receiver is implicit — not in getArguments()).
   const auto &paramTys = method->getParamTypes();
   if (node->getNumArguments() != paramTys.size()) {
@@ -1067,6 +1104,16 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   }
   S.checkInoutArgs(method->getParamModes(), paramTys, node->getArguments(),
                    node->getMethodName());
+  // A builtin method reads its arguments, but `push` keeps one; `equals`,
+  // like `==`, only compares.
+  if (ct->isBuiltin() || ast::isa<ast::ArrayType>(recvTy)) {
+    if (node->getMethodName() == names::kPush && node->getNumArguments() == 1)
+      S.checkViewNotStored(node->getArguments()[0],
+                           node->getArguments()[0]->getResolvedType());
+  } else if (node->getMethodName() != names::kMethodEquals) {
+    S.checkViewArgs(method->getParamModes(), node->getArguments(),
+                    node->getMethodName());
+  }
 
   node->setResolvedType(method->getReturnType());
   return method->getReturnType();
@@ -1143,6 +1190,7 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
     auto *ty = visitExpecting(elem, expectedElem);
     if (!ty)
       return nullptr;
+    S.checkViewNotStored(elem, ty);
     elemTys.push_back(ty);
   }
   // Elements that disagree but all fit the slot's element type (`int` and
@@ -1360,6 +1408,7 @@ Sema::ExprChecker::visitTupleLiteralExpr(ast::TupleLiteralExpr *node) {
       ok = false;
       continue;
     }
+    S.checkViewNotStored(elem, ty);
     // An empty array literal has no element type of its own and nothing
     // inside a tuple literal can supply one (unlike an annotated variable),
     // so codegen could not pick the right array representation.
@@ -1466,7 +1515,10 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
   // The lowering extracts the elements from this resolved type.
   node->getValue()->setResolvedType(tt);
 
+  // Each element is stored in its target.
   bool ok = true;
+  for (size_t i = 0; i < tt->getArity() && ok; ++i)
+    ok = checkViewNotStored(node->getValue(), tt->getElementType(i));
   StringSet seen;
   for (size_t i = 0; i < node->getNumTargets(); ++i) {
     const auto &target = node->getTargets()[i];
@@ -1569,6 +1621,14 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
   // checkConversion handles them (#64).
   declareFunction(names::kString, StrTy, {StrTy}, true);
   declareFunction(names::kOpen, Ctx.getObjTy(), {StrTy, StrTy}, true);
+  // They only read their arguments, which are `view` parameters, so a `view`
+  // can be printed (checkViewArgs).  Not `Str(s)`, which returns `s` itself.
+  for (const char *fn : {names::kPrint, names::kPrintln, names::kErrPrint,
+                         names::kErrPrintln, names::kOpen}) {
+    FunctionSig &sig = FunctionTable[fn];
+    sig.Modes.Modes.assign(sig.ParamTypes.size(), ast::ParamMode::View);
+    sig.Modes.Names.assign(sig.ParamTypes.size(), "value");
+  }
 
   // Process imports before local declarations.
   StringSet localImportStack, localFailedModules;
@@ -1795,7 +1855,7 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
 // -- Top-level
 
 bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
-  bool ok = true;
+  bool ok = rejectFreeViewFns(node);
 
   // Register enum types first so that class fields, parameters, and variable
   // declarations can reference them by name during the passes that follow.
@@ -1852,6 +1912,9 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   // Hand the instantiations to the lowering as ordinary declarations.
   injectInstantiations(node);
 
+  // The suggestions need every body checked, and are noise next to errors.
+  if (ok && !hasErrors())
+    warnMissingViewFns();
   return ok;
 }
 
@@ -1943,12 +2006,7 @@ bool Sema::visitEnumDecl(ast::EnumDecl *node) {
 
 bool Sema::visitCompoundStmt(ast::CompoundStmt *node) {
   ScopeGuard guard(*this);
-  bool ok = true;
-  for (auto *stmt : node->getStatements()) {
-    if (!visit(stmt))
-      ok = false;
-  }
-  return ok;
+  return visitStatements(node->getStatements());
 }
 
 bool Sema::visitDeclStmt(ast::DeclStmt *node) { return visit(node->getDecl()); }
@@ -1969,6 +2027,12 @@ Sema::VarKind Sema::varKind(std::string_view name) const {
 }
 
 bool Sema::checkReassignable(const std::string &name, ast::SourceLocation loc) {
+  if (!checkNotBorrowed(name, loc))
+    return false;
+  if (std::string why = viewedBy(name); !why.empty()) {
+    error(loc, why + "; it cannot be assigned");
+    return false;
+  }
   switch (varKind(name)) {
   case VarKind::Let:
     error(loc,
@@ -1976,6 +2040,12 @@ bool Sema::checkReassignable(const std::string &name, ast::SourceLocation loc) {
     return false;
   case VarKind::View:
     error(loc, "cannot assign to 'view' parameter '" + name + "'");
+    return false;
+  case VarKind::ViewLocal:
+    error(loc, "cannot assign to 'view' local '" + name + "'");
+    return false;
+  case VarKind::ViewBinding:
+    error(loc, "cannot assign to '" + name + "': it is bound to a 'view'");
     return false;
   case VarKind::Plain:
   case VarKind::Inout:
@@ -2005,6 +2075,8 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   // Guard: the target name must not shadow a type or reserved name.
   if (!checkBinderName(varName, node->getLocation()))
     return false;
+  // The variable is still declared after this error.
+  const bool viewOk = checkViewNotStored(node->getValue(), valTy);
 
   // Look up the variable in all enclosing scopes.
   auto *owner = CurrentScope->findOwner(varName);
@@ -2015,7 +2087,7 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
       return false;
     }
     CurrentScope->set(varName, valTy);
-    return true;
+    return viewOk;
   }
 
   if (!checkReassignable(varName, node->getLocation()))
@@ -2028,7 +2100,7 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
     if (diagnoseEmptyArrayLiteral(node->getLocation(), nullptr, valTy))
       return false;
     owner->set(varName, valTy);
-    return true;
+    return viewOk;
   }
 
   if (diagnoseEmptyArrayLiteral(node->getLocation(), varTy, valTy))
@@ -2043,7 +2115,7 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
     return false;
   }
 
-  return true;
+  return viewOk;
 }
 
 bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
@@ -2061,7 +2133,7 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
                   typeName(CurrentReturnType) + "'");
       return false;
     }
-    return true;
+    return checkViewNotReturned(node->getReturnValue(), valTy);
   }
   // void return
   if (CurrentReturnType && CurrentReturnType != Ctx.getVoidTy()) {
@@ -2327,7 +2399,6 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
   for (auto &p : node->getParams())
     paramTypes.push_back(resolveType(p.ParamType, node->getLocation(),
                                      "parameter '" + p.getName() + "'"));
-  bool modesOk = checkParamModeTypes(node, paramTypes);
 
   // Type-check the body in a new scope with params.
   auto *savedRetTy = CurrentReturnType;
@@ -2337,10 +2408,7 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
     for (size_t i = 0; i < node->getParams().size(); ++i)
       CurrentScope->declare(node->getParams()[i].getName(), paramTypes[i]);
     declareParamKinds(node);
-    bool ok = modesOk;
-    for (auto *stmt : node->getBody()->getStatements())
-      if (!visit(stmt))
-        ok = false;
+    bool ok = visitBody(node->getBody()->getStatements());
     CurrentReturnType = savedRetTy;
     if (!ok)
       return false;
@@ -2383,6 +2451,7 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   }
 
   // Check the initializer type.
+  bool viewOk = true;
   if (node->getInitExpr()) {
     unsigned errorsBefore = Diags.getErrorCount() + SuppressedFollowOns;
     auto *initTy = resolveExprType(node->getInitExpr(), declTy);
@@ -2401,6 +2470,10 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
       return false;
     }
 
+    // The variable is still declared after this error.  A local borrow may
+    // name a `view` (checkLocalBorrow).
+    if (node->getMode() == ast::ParamMode::Value)
+      viewOk = checkViewNotStored(node->getInitExpr(), initTy);
     if (declTy) {
       if (diagnoseEmptyArrayLiteral(node->getLocation(), declTy, initTy)) {
         CurrentScope->set(node->getName(), declTy);
@@ -2437,7 +2510,7 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   if (!node->getType())
     node->setType(declTy);
   CurrentScope->declare(node->getName(), declTy);
-  return true;
+  return checkLocalBorrow(node) && viewOk;
 }
 
 bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
@@ -2482,6 +2555,12 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
     return false;
   }
 
+  if (!checkChangeable(node->getReceiver(),
+                       "cannot assign to its field '" + node->getFieldName() +
+                           "'",
+                       node->getLocation()))
+    return false;
+
   auto *valTy = resolveExprType(node->getValue(), fieldTy);
   if (!valTy)
     return false;
@@ -2494,7 +2573,7 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
     return false;
   }
 
-  return true;
+  return checkViewNotStored(node->getValue(), valTy);
 }
 
 bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
@@ -2517,6 +2596,9 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
     error(node->getIndex()->getLocation(),
           "array index must be int, got '" + typeName(idxTy) + "'");
   }
+  if (!checkChangeable(node->getArray(), "cannot assign to its elements",
+                       node->getLocation()))
+    return false;
   auto *valTy = resolveExprType(node->getValue(), at->getElementType());
   if (!valTy)
     return false;
@@ -2528,7 +2610,7 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
                                      typeName(at->getElementType()) + "'");
     return false;
   }
-  return true;
+  return checkViewNotStored(node->getValue(), valTy);
 }
 
 bool Sema::visitImportDecl(ast::ImportDecl *) {
@@ -2578,9 +2660,8 @@ bool Sema::checkValueMatch(ast::MatchStmt *node, ast::Type *subjectTy) {
       ok = false;
     }
 
-    for (auto *stmt : arm->getBody()->getStatements())
-      if (!visit(stmt))
-        ok = false;
+    if (!visitStatements(arm->getBody()->getStatements()))
+      ok = false;
   }
 
   return ok;
@@ -2647,9 +2728,8 @@ bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
       }
     }
 
-    for (auto *stmt : arm->getBody()->getStatements())
-      if (!visit(stmt))
-        ok = false;
+    if (!visitStatements(arm->getBody()->getStatements()))
+      ok = false;
   }
 
   return ok;
@@ -2659,6 +2739,15 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
   auto *subjectTy = resolveExprType(node->getSubject());
   if (!subjectTy)
     return false;
+  // An arm's name for a `view` that shares what it holds is a `view` too,
+  // for this match only (a nested one decides its own).
+  struct RestoreView {
+    bool &Flag;
+    bool Outer;
+    ~RestoreView() { Flag = Outer; }
+  } restoreView{MatchSubjectIsView, MatchSubjectIsView};
+  MatchSubjectIsView =
+      sharesStorage(subjectTy) && !viewOf(node->getSubject()).empty();
   // Record the subject type so the lowering can pick the right form (in
   // particular, distinguish an enum subject from a class subject).
   node->getSubject()->setResolvedType(subjectTy);
@@ -2722,9 +2811,8 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
             "match on a class subject of type '" + subjectCt->getName() +
                 "' requires type-name arms, not literal patterns");
       ok = false;
-      for (auto *stmt : arm->getBody()->getStatements())
-        if (!visit(stmt))
-          ok = false;
+      if (!visitStatements(arm->getBody()->getStatements()))
+        ok = false;
       continue;
     } else {
       // 2. Resolve the arm's type annotation.
@@ -2756,7 +2844,7 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
                     subjectCt->getName() + "'");
           ok = false;
         }
-        if (arm->hasBinding() && !bindArmName(arm)) {
+        if (arm->hasBinding() && !bindArmName(arm, node->getSubject(), armAt)) {
           ok = false;
         } else if (arm->hasBinding()) {
           if (!CurrentScope->declare(arm->getBinding(), armAt)) {
@@ -2778,7 +2866,7 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
         }
 
         // 4. Declare the binding variable with the narrowed (arm) type.
-        if (arm->hasBinding() && !bindArmName(arm)) {
+        if (arm->hasBinding() && !bindArmName(arm, node->getSubject(), armCt)) {
           ok = false;
         } else if (arm->hasBinding()) {
           if (!CurrentScope->declare(arm->getBinding(), armCt)) {
@@ -2791,9 +2879,8 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
     }
 
     // 5. Recursively type-check the arm body.
-    for (auto *stmt : arm->getBody()->getStatements())
-      if (!visit(stmt))
-        ok = false;
+    if (!visitArmBody(arm, node->getSubject()))
+      ok = false;
   }
 
   return ok;
@@ -2905,7 +2992,8 @@ bool Sema::checkOptionalMatch(ast::MatchStmt *node,
       // An arm in error still binds its name in the body, poisoned.
       if (arm->hasBinding() && !bindTy)
         declarePoisoned(CurrentScope, arm->getBinding());
-      if (arm->hasBinding() && bindTy && !bindArmName(arm)) {
+      if (arm->hasBinding() && bindTy &&
+          !bindArmName(arm, node->getSubject(), bindTy)) {
         ok = false;
       } else if (arm->hasBinding() && bindTy) {
         if (!CurrentScope->declare(arm->getBinding(), bindTy)) {
@@ -2916,9 +3004,8 @@ bool Sema::checkOptionalMatch(ast::MatchStmt *node,
       }
     }
 
-    for (auto *stmt : arm->getBody()->getStatements())
-      if (!visit(stmt))
-        ok = false;
+    if (!visitArmBody(arm, node->getSubject()))
+      ok = false;
   }
 
   return ok;

@@ -59,7 +59,7 @@ class HashMap {
   }
 
   // djb2 over the key's character ordinals, folded into the bucket range.
-  fn indexFor(key: Str) -> int {
+  view fn indexFor(key: Str) -> int {
     h: int = 5381;
     i: int = 0;
     while (i < key.len()) {
@@ -70,7 +70,8 @@ class HashMap {
     return h % self.nbuckets;
   }
 
-  // The entry stored under `key`, or None when the key is absent.
+  // The entry stored under `key`, or None when the key is absent.  Not a
+  // `view fn`: the entry it returns can be changed (insert does).
   fn lookup(key: Str) -> Entry? {
     chain: Entry[] = self.buckets[self.indexFor(key)];
     i: int = 0;
@@ -149,7 +150,8 @@ class HashMap {
     return found;
   }
 
-  // Every (name, value) pair currently stored, in bucket order.
+  // Every (name, value) pair currently stored, in bucket order.  Not a
+  // `view fn`: the pairs share the stored names.
   fn entries() -> (Str, float)[] {
     out: (Str, float)[] = [];
     bi: int = 0;
@@ -166,7 +168,7 @@ class HashMap {
     return out;
   }
 
-  fn count() -> int { return self.size; }
+  view fn count() -> int { return self.size; }
 
   // Drop all entries and shrink back to the initial bucket count.
   fn clear() {

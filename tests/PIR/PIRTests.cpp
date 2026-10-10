@@ -374,8 +374,8 @@ fn @main() -> i64 {
   EXPECT_NE(errs.find("operand of not"), std::string::npos) << errs;
 }
 
-// Only scalar slots have addresses, and an address is read and written as a
-// scalar.
+// Scalar and box slots have addresses (an `inout` parameter is the address
+// of the caller's slot), and an address is read and written as one of those.
 TEST(PIRVerifier, ChecksAddressOps) {
   std::string errs = verifyText(R"(module "m"
 class C {
@@ -391,29 +391,36 @@ fn @C.destroy(%self: obj) -> void {
 fn @main() -> i64 {
   local %i: i64
   local %o: box
+  local %d: ptr
   %o2 = new C
   %p = local.addr %o
   %q = local.addr %i
+  %a = local.addr %d
   %r = field.addr %o2, C.b
   %s = field.addr %o2, C.m
   %t = field.addr %q, C.n
   %u = field.addr %o2, C.n
-  %v = ptr.load box, %q
+  %v = ptr.load obj, %q
   %w = ptr.load i64, %o2
   ptr.store 1, 2
-  ptr.store %q, null box
+  ptr.store %q, %o2
   %x = ptr.load f64, %u
   ptr.store %u, %x
+  %y = ptr.load box, %p
+  ptr.store %r, null box
   ret 0
 }
 )");
   for (const char *e :
-       {"local.addr of a local of type box",
-        "field.addr of a field of type box", "class 'C' has no field 'm'",
-        "receiver of field.addr %3 has type ptr", "ptr.load of box",
+       {"local.addr of a local of type ptr", "class 'C' has no field 'm'",
+        "receiver of field.addr %3 has type ptr", "ptr.load of obj",
         "address of ptr.load %1 has type obj", "address of ptr.store 1",
-        "ptr.store of box"})
+        "ptr.store of obj"})
     EXPECT_NE(errs.find(e), std::string::npos) << e << "\n" << errs;
+  // Box slots have addresses.
+  EXPECT_EQ(errs.find("of type box"), std::string::npos) << errs;
+  EXPECT_EQ(errs.find("ptr.load of box"), std::string::npos) << errs;
+  EXPECT_EQ(errs.find("ptr.store of box"), std::string::npos) << errs;
   // The verifier does not know what an address points to: a well-typed
   // ptr.load / ptr.store through it is accepted.
   EXPECT_EQ(errs.find("ptr.load of f64"), std::string::npos) << errs;

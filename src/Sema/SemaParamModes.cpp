@@ -1,10 +1,12 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// The rules of `view` and `inout` parameters
-// (docs/language/02-functions-and-calling.md, "Parameter modes"): the types
-// a mode applies to, overrides, and the arguments an `inout` parameter
-// takes, none of them twice in one call.  Assignments to a `view` parameter
-// are checked with `let` locals' (Sema::checkReassignable).
+// The rules of `view` and `inout` parameters, of any type
+// (docs/language/02-functions-and-calling.md, "Parameter modes"): overrides,
+// and the arguments an `inout` parameter takes, none of them twice in one
+// call; and of local borrows
+// (docs/language/01-language-basics.md, "Local borrows").  Assignments to a
+// `view` parameter or local are checked with `let` locals'
+// (Sema::checkReassignable).
 
 #include "Names.h"
 #include "Sema.h"
@@ -28,55 +30,68 @@ std::string placePath(const ast::Expr *e) {
 
 } // namespace
 
-bool Sema::isValueType(const ast::Type *ty) {
-  if (ast::isa<ast::EnumType>(ty))
-    return true;
-  const auto *bt = ast::dyn_cast<ast::BuiltinType>(ty);
-  return bt && bt->getTypeKind() != ast::BuiltinType::Void;
-}
-
-bool Sema::checkParamModeTypes(const ast::FuncDecl *fn,
-                               const std::vector<ast::Type *> &paramTys) {
-  bool ok = true;
-  const auto &params = fn->getParams();
-  for (size_t i = 0; i < params.size() && i < paramTys.size(); ++i) {
-    ast::Type *ty = paramTys[i];
-    if (params[i].Mode == ast::ParamMode::Value || !ty ||
-        ast::isa<ast::PoisonType>(ty) || isValueType(ty))
-      continue;
-    error(fn->getLocation(), std::string("'") +
-                                 ast::paramModeName(params[i].Mode) +
-                                 "' applies only to int, float, bool, char "
-                                 "and enum parameters; '" +
-                                 typeName(ty) + "' is not a value type");
-    ok = false;
-  }
-  return ok;
-}
-
-bool Sema::checkTemplateParamModes(
-    const ast::FuncDecl *fn, const std::vector<const std::string *> &tps) {
-  bool ok = true;
-  for (const ast::Param &p : fn->getParams()) {
-    const auto *ct = ast::dyn_cast<ast::ClassType>(p.ParamType);
-    if (p.Mode == ast::ParamMode::Value || !ct)
-      continue;
-    for (const std::string *tp : tps)
-      if (ct->getName() == *tp) {
-        error(fn->getLocation(), std::string("'") + ast::paramModeName(p.Mode) +
-                                     "' does not apply to type parameter '" +
-                                     *tp + "' yet");
-        ok = false;
-      }
-  }
-  return ok;
-}
-
 void Sema::declareParamKinds(const ast::FuncDecl *fn) {
   for (const ast::Param &p : fn->getParams())
     if (p.Mode != ast::ParamMode::Value)
       CurrentScope->Kinds[p.getName()] =
           p.Mode == ast::ParamMode::View ? VarKind::View : VarKind::Inout;
+}
+
+std::string Sema::inoutPlaceError(const ast::Expr *place,
+                                  const std::string &use) {
+  if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(place))
+    return ast::isa<ast::ArrayType>(se->getArray()->getResolvedType())
+               ? "an array element cannot be " + use + " yet"
+               : "a character of a string cannot be " + use;
+  const auto *id = ast::dyn_cast<ast::Identifier>(place);
+  if (id && id->getName() == names::kSelf)
+    return "'self' cannot be " + use +
+           ": the method would no longer know its object";
+  if (id && varKind(id->getName()) == VarKind::Let)
+    // It could be reassigned through the other name.
+    return "'" + id->getName() + "' is declared with 'let' and cannot be " +
+           use;
+  std::string why = frozenPlace(place);
+  if (!why.empty())
+    why += "; it cannot be " + use;
+  return why;
+}
+
+bool Sema::checkLocalBorrow(const ast::VarDecl *node) {
+  const std::string &name = node->getName();
+  switch (node->getMode()) {
+  case ast::ParamMode::Value:
+    return true;
+  case ast::ParamMode::View:
+    // A `view` local reads its initializer, which may be any expression: a
+    // copy of a value type, the same object, string or array otherwise.
+    CurrentScope->Kinds[name] = VarKind::ViewLocal;
+    return true;
+  case ast::ParamMode::Inout:
+    break;
+  }
+  // An `inout` local is another name for a variable or a field, of exactly
+  // its type: an assignment to it writes there.
+  const ast::Expr *place = node->getInitExpr();
+  const std::string local = "'inout' local '" + name + "'";
+  ast::Type *placeTy = place ? place->getResolvedType() : nullptr;
+  std::string msg;
+  if (!placeTy || !node->getType())
+    return false; // the initializer's error was reported
+  if (!ast::isa<ast::Identifier>(place) &&
+      !ast::isa<ast::MemberAccessExpr>(place) &&
+      !ast::isa<ast::SubscriptExpr>(place))
+    msg = local + " must name a variable or a field";
+  else if (!typesEqual(placeTy, node->getType()))
+    msg = local + " has type '" + typeName(node->getType()) +
+          "', but what it names has type '" + typeName(placeTy) + "'";
+  else
+    msg = inoutPlaceError(place, "named by " + local);
+  CurrentScope->Kinds[name] = VarKind::Inout;
+  if (msg.empty())
+    return true;
+  error(place->getLocation(), msg);
+  return false;
 }
 
 bool Sema::checkOverrideModes(const ast::FuncDecl *method,
@@ -121,26 +136,22 @@ bool Sema::checkInoutArgs(const ast::ParamModes &modes,
     const std::string param = "'inout' parameter '" + modes.name(i) + "'";
     const std::string argN =
         "argument " + std::to_string(i + 1) + " of '" + callee + "'";
-    const auto *id = ast::dyn_cast<ast::Identifier>(arg);
     std::string msg;
-    if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(arg)) {
-      msg = ast::isa<ast::ArrayType>(se->getArray()->getResolvedType())
-                ? "an array element cannot be passed to " + param + " yet"
-                : "a character of a string cannot be passed to " + param;
-    } else if (!id && !ast::isa<ast::MemberAccessExpr>(arg)) {
+    if (ast::isa<ast::SubscriptExpr>(arg)) {
+      msg = inoutPlaceError(arg, "passed to " + param);
+    } else if (!ast::isa<ast::Identifier>(arg) &&
+               !ast::isa<ast::MemberAccessExpr>(arg)) {
       msg = argN + " must be a variable or a field: parameter '" +
             modes.name(i) + "' is 'inout'";
     } else if (!typesEqual(argTy, paramTys[i])) {
       // The callee reads and writes the storage as the parameter's type, so
-      // no conversion (int -> float) can happen on the way.
+      // no conversion can happen on the way: not int -> float, and not a
+      // subclass to its base (the callee could store another subclass).
       msg = argN + " has type '" + typeName(argTy) + "', but ";
       msg += param + " has type '" + typeName(paramTys[i]) + "'";
-    } else if (id && varKind(id->getName()) == VarKind::View) {
-      msg = "'view' parameter '" + id->getName() + "' cannot be passed to " +
-            param;
-    } else if (id && varKind(id->getName()) == VarKind::Let) {
-      msg = "'" + id->getName() +
-            "' is declared with 'let' and cannot be passed to " + param;
+    } else if (std::string why = inoutPlaceError(arg, "passed to " + param);
+               !why.empty()) {
+      msg = std::move(why);
     } else if (std::string path = placePath(arg); !path.empty()) {
       auto [it, first] = places.try_emplace(path, i);
       if (!first)

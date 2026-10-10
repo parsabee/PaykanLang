@@ -196,6 +196,11 @@ private:
     } else {
       fail("function '" + d.getName() + "' has no body");
     }
+    if (d.isView()) {
+      open("qual");
+      sym("view");
+      close();
+    }
     close();
   }
 
@@ -204,6 +209,11 @@ private:
     str(d.getName());
     optionalType(d.getType());
     optionalExpr(d.getInitExpr());
+    if (d.getMode() != ParamMode::Value) {
+      open("qual");
+      sym(paramModeName(d.getMode()));
+      close();
+    }
     if (d.isLet()) {
       open("let");
       close();
@@ -367,6 +377,11 @@ private:
           open("type-arm", arm);
           str(arm->getBinding());
           type(arm->getArmType());
+          if (arm->getMode() != ParamMode::Value) {
+            open("qual");
+            sym(paramModeName(arm->getMode()));
+            close();
+          }
         } else if (arm->getLiteralPattern()) {
           open("value-arm", arm);
           str(arm->getBinding());

@@ -1,7 +1,7 @@
 // OK: explicit inheritance chain — all classes are subtypes of Obj.
 // A subclass instance is assignable wherever a superclass type is expected.
 class Shape {
-  fn area() -> int {
+  view fn area() -> int {
     return 0;
   }
 }
@@ -13,7 +13,7 @@ class Circle : Shape {
     self.radius = r;
   }
 
-  fn area() -> int {
+  view fn area() -> int {
     return self.radius;
   }
 }

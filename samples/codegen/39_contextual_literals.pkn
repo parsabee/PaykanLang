@@ -25,7 +25,7 @@
 class Node {
   v: int;
   fn __init__(v: int) { self.v = v; }
-  fn toString() -> Str { return "N" + Str<int>(self.v); }
+  view fn toString() -> Str { return "N" + Str<int>(self.v); }
 }
 
 class Slot {

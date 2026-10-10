@@ -53,14 +53,17 @@ ASTContext::ASTContext()
 // -- Bootstrap of the builtin classes
 //
 // Their vtables mirror the runtime's (Runtime.h, PAYKAN_SLOT_*): Obj's three
-// slots first, then the class's own, in the slot order given there.
+// slots first, then the class's own, in the slot order given there.  The
+// methods that only read are marked View, callable through a `view`.
 
 ASTContext::ClassTypeBuilder &ASTContext::ClassTypeBuilder::objectSlots() {
   return addOp(BinaryOpcode::Eq)
       .addOp(BinaryOpcode::Ne)
-      .method(names::kMethodDestroy, Ctx.VoidTy)              // slot 0
-      .method(names::kMethodToString, Ctx.StrTy)              // slot 1
-      .method(names::kMethodEquals, Ctx.BoolTy, {Ctx.ObjTy}); // slot 2
+      .method(names::kMethodDestroy, Ctx.VoidTy) // slot 0
+      .method(names::kMethodToString, Ctx.StrTy, {},
+              MethodDecl::View) // slot 1
+      .method(names::kMethodEquals, Ctx.BoolTy, {Ctx.ObjTy},
+              MethodDecl::View); // slot 2
 }
 
 void ASTContext::buildObjectType() {
@@ -74,8 +77,8 @@ void ASTContext::buildStringType() {
   ClassTypeBuilder(*this, StrTy)
       .addOp(BinaryOpcode::Add)
       .objectSlots()
-      .method(names::kMethodLength, IntTy)           // slot 3
-      .method(names::kMethodConcat, VoidTy, {StrTy}) // slot 4
+      .method(names::kMethodLength, IntTy, {}, MethodDecl::View) // slot 3
+      .method(names::kMethodConcat, VoidTy, {StrTy})             // slot 4
       .build();
 }
 
@@ -83,7 +86,7 @@ void ASTContext::buildArrayType() {
   ArrayTy->setSuperClass(ObjTy);
   ClassTypeBuilder(*this, ArrayTy)
       .objectSlots()
-      .method(names::kLen, IntTy) // slot 3
+      .method(names::kLen, IntTy, {}, MethodDecl::View) // slot 3
       .build();
 }
 

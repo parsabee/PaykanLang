@@ -1,0 +1,59 @@
+// 48 — `view fn` methods.  A method may change `self` unless it is a
+// `view fn`, where `self` is read-only (docs/language/04-classes.md,
+// "Methods that don't change self").  Only `view fn` methods can be called
+// on a `view` parameter, and an override keeps its parent's marker.
+// Exercises: a class with changing and reading methods, a subclass
+// overriding both kinds, a `view fn` calling another one on `self`, calls
+// through a `view` parameter and a base-class reference, any method on a
+// `let` local, the builtin `view fn`s (toString, len), a generic class.  Run
+// with --track-heap: zero live blocks.
+
+// expect-stdout: counter: 3 ticks, double 6
+// expect-stdout: fast: 20 ticks, double 40
+// expect-stdout: box 7, names 2, printable True
+
+class Counter {
+  ticks: int;
+  fn __init__() { self.ticks = 0; }
+  fn tick() { self.ticks = self.ticks + 1; }
+  view fn count() -> int { return self.ticks; }
+  view fn double() -> int { return 2 * self.count(); }
+  view fn describe() -> Str { return "counter"; }
+}
+
+class Fast : Counter {
+  fn __init__() { __super__(); }
+  fn tick() { self.ticks = self.ticks + 10; }
+  view fn describe() -> Str { return "fast"; }
+}
+
+class Box<T> {
+  value: T;
+  fn __init__(value: T) { self.value = value; }
+  view fn get() -> T { return self.value; }
+}
+
+fn report(c: view Counter) {
+  println(c.describe() + ": " + Str(c.count()) + " ticks, double " +
+          Str(c.double()));
+}
+
+fn main() -> int {
+  c = Counter();
+  c.tick();
+  c.tick();
+  let done = c;
+  done.tick();
+  report(done);
+
+  f: Counter = Fast();
+  f.tick();
+  f.tick();
+  report(f);
+
+  let box = Box<int>(7);
+  let names = ["a", "b"];
+  println("box " + Str(box.get()) + ", names " + Str(names.len()) +
+          ", printable " + Str(names.toString().len() > 0));
+  return 0;
+}

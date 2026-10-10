@@ -119,6 +119,8 @@ private:
   bool parseTypeParamList(std::vector<const std::string *> &out);
   bool parseParamList(std::vector<ast::Param> &out);
   void prefixModeError();
+  void prefixBorrowError();
+  bool parseBorrowDecl(ast::Stmt *&out);
   ast::VarDecl *parseVarDecl();
 
   // -- Statements

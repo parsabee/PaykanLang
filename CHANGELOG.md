@@ -9,18 +9,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `match` arms that borrow the subject (docs/language/07-match-statements.md, "Borrowing
+  the subject"): `d: view Dog { … }` binds `d` as a `view` local of the subject, whatever
+  the subject is, so nothing changes through it and it passes on only to `view`
+  parameters; the variable the subject starts from cannot change until `d`'s last use in
+  the arm.  `d: inout Dog { … }` binds `d` as the subject's storage, like an `inout` local:
+  assigning to it writes the matched variable or field (a variable, a field, an optional,
+  an `inout` parameter; not an expression, `self`, a `let` local, a `view` or a primitive
+  inside an optional yet), and the subject's variable cannot be used until `d`'s last
+  use.  With the mode before the name (`view d: Dog`) the syntax error shows the fix.  In
+  the AST interchange format the arm carries `(qual view)` or `(qual inout)` after its
+  type.
+- `view fn` (docs/language/04-classes.md, "Methods that don't change self"): a method
+  declared `view fn len() -> int` does not change `self`, and is the only kind of method
+  that can be called on a `view` (`'c' is a 'view' parameter; 'tick' is not a 'view fn'`).
+  `toString`, `equals`, `len` and `length` are `view fn`s.  An override is a `view fn`
+  exactly when the method it overrides is one; `__init__` and a free function never are.
+  The marker is part of a module's interface (method flag `0x2` in a `.pkm`), and a
+  function in the AST interchange format carries it as a trailing `(qual view)`.  In a
+  `view fn`, `self` and everything reached through it is read-only, as through a `view`
+  parameter (`'self' is read-only in 'view fn get'; cannot assign to its field 'n'`),
+  though part of `self` may still be returned.  A method that never changes `self` but
+  is not a `view fn` gets a warning (`'area' never changes 'self': make it a 'view fn' so
+  'view' parameters can call it`), worked out across a method's overrides and its calls
+  on `self`; the samples and the manual mark theirs.  `samples/codegen/48_view_fn.pkn`
+  shows them.
+- Local borrows (docs/language/01-language-basics.md, "Local borrows"): a local declared
+  with a mode where the type goes, `v: view = k + 1;` or `w: view float = k;`, the type
+  inferred when left off.  A `view` local reads its initializer, which may be any
+  expression: a copy of a value type, the same object, string or array otherwise.  It
+  cannot be assigned, destructured into or passed to an `inout` parameter, nothing reached
+  through it can be assigned, and only a `view fn` (`toString`, `equals`, `len`,
+  `length`, or a method declared one) can be called on it.  An `inout` local (`x:
+  inout = k;`, `t: inout = self.total;`) is another name for a variable or a field, of any
+  type: assigning to it writes there, and it passes its address on to an `inout`
+  parameter.  It names a place as an `inout` argument does (not an expression, an array
+  element yet, a string's character, `self`, a `let` local or a `view`), of exactly its
+  type, and keeps a field's object alive while it can be used.  In PIR, box slots now have
+  addresses (`local.addr`, `field.addr`, `ptr.load`, `ptr.store`).  A local borrow of a
+  variable is exclusive while it is live, from its declaration to its last use in its
+  block (a loop that uses it keeps it live): the variable an `inout` local names cannot be
+  used (`'k' is borrowed by 'inout' local 'x' until 'x' is last used`), and one a `view`
+  local reads cannot change (`'c' is viewed by 'view' local 'v' until 'v' is last used;
+  'tick' is not a 'view fn'`).  A borrow of a borrow keeps the first variable borrowed.
+  A local borrow needs an initializer, is never `let` and is not a destructuring target; written before the name (`view x = e;`) the error shows
+  the fix.  In the AST interchange format a local borrow carries `(qual view)` or
+  `(qual inout)`.
+- A `view` stays a `view` (docs/language/02-functions-and-calling.md): a `view` parameter
+  or local can only be passed on to a `view` parameter, whatever its type (`print`,
+  `println` and `open` take `view` parameters; the builtin methods read their arguments,
+  except `push`; `Str(s)` returns `s` itself and takes none).  One that shares what it
+  holds is never stored (assigned, put in an array or tuple, destructured, pushed) or
+  returned, and a `match` arm's name for one is a `view` too.  Passing a `view` to an
+  `inout` parameter now reads `'v' is a 'view' parameter; it cannot be passed to 'inout'
+  parameter 'n'`.
 - `view` and `inout` parameters (docs/language/02-functions-and-calling.md, "Parameter
-  modes"), on functions, methods and constructors, for `int`, `float`, `bool`, `char` and
-  enum parameters.  The mode is written where the type goes: `fn bump(n: inout int)`,
-  `fn scale(x: inout float, by: view float)`, called as `bump(k)`.  A `view` parameter is
-  a read-only copy.  An `inout` parameter is its caller's storage, passed by address so
+  modes"), on functions, methods and constructors, for parameters of any type (type
+  parameters included).  The mode is written where the type goes: `fn bump(n: inout int)`,
+  `fn scale(x: inout float, by: view float)`, `fn show(c: view Counter)`, called as
+  `bump(k)`.  A `view` parameter is read-only, and so is what it holds: no field or
+  element write and only `view fn` calls through it.  An `inout` parameter is
+  its caller's storage, passed by address so
   every write reaches the caller at once: a local variable, a parameter (an `inout` one
   passes its address on) or a field of an object (`obj.f`, `self.f`, `a.b.f`; by real
   address, never copied in and out, with the object kept alive for the call), of exactly
-  the parameter's type.  A literal or other expression, a `view` parameter, a `let` local,
-  an array element (not yet) or a string's character is an error, and so is the same
-  variable or field path passed to two `inout` parameters of one call.  A mode does not
-  apply to a type parameter yet; an override keeps every parameter's mode; modes are part
+  the parameter's type (a subclass variable is not a base-class `inout` argument).  An
+  `inout` parameter of a reference type is the caller's variable, not a second
+  reference: passing it neither retains nor releases, and assigning to it replaces what
+  the caller's variable holds.  A literal or other expression, `self`, a `view` parameter
+  or anything reached through one, a `let` local, an array element (not yet) or a
+  string's character is an error, and so is the same variable or field path passed to two
+  `inout` parameters of one call.  An override keeps every parameter's mode; modes are part
   of a module's interface.  `view` and `inout` are reserved words, a syntax error anywhere
   but before a parameter's type; written before the name (`inout n: int`), the error shows
   the fix.  In the AST interchange format a parameter carries `(qual view)` or
@@ -57,6 +116,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- An override of `toString` or `equals` is declared `view fn` (`view fn toString() -> Str`),
+  like the `Obj` methods it overrides: a plain `fn` override is an error.
 - `.pkm` interfaces carry a function's, a method's and a constructor's
   parameter modes (`view`, `inout`), so calls and overrides in another module
   are checked against them, whether the module is imported from source, from

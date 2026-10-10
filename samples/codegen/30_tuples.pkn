@@ -12,14 +12,14 @@ class Point {
   x: int;
   y: int;
   fn __init__(x: int, y: int) { self.x = x; self.y = y; }
-  fn toString() -> Str { return "P(" + Str<int>(self.x) + "," + Str(self.y) + ")"; }
+  view fn toString() -> Str { return "P(" + Str<int>(self.x) + "," + Str(self.y) + ")"; }
 }
 
 class Range {
   bounds: (int, int);                     // a tuple-typed field
   fn __init__(lo: int, hi: int) { self.bounds = (lo, hi); }
-  fn width() -> int { return self.bounds.1 - self.bounds.0; }
-  fn get() -> (int, int) { return self.bounds; }
+  view fn width() -> int { return self.bounds.1 - self.bounds.0; }
+  view fn get() -> (int, int) { return self.bounds; }
 }
 
 fn divmod(a: int, b: int) -> (int, int) {  // multiple return
