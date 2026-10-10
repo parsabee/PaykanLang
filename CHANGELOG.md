@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Borrowed results (docs/language/02-functions-and-calling.md, "Borrowed results"): a
+  function or method declared `-> view T` returns a borrow of part of `self` or of a
+  `view` or `inout` parameter, never a new value, a copy parameter or a local (`'d' is a
+  copy: a 'view' result must be part of 'self' or of a 'view' or 'inout' parameter`).  The
+  caller sees the result as a `view`: it is read, passed on to `view` parameters or bound
+  to a `view` local, and a value type can be copied out (`the result of 'peek' is a
+  'view'; 'tick' is not a 'view fn'`).  An override keeps how the method it overrides
+  returns; `main` returns a copy, and `-> inout T` is reserved.  In the AST interchange
+  format the result's mode is a `(qual view)` after the return type.
 - `match` arms that borrow the subject (docs/language/07-match-statements.md, "Borrowing
   the subject"): `d: view Dog { … }` binds `d` as a `view` local of the subject, whatever
   the subject is, so nothing changes through it and it passes on only to `view`

@@ -335,6 +335,10 @@ struct Param {
 struct ParamModes {
   std::vector<ParamMode> Modes;
   std::vector<std::string> Names;
+  /// How the result is returned: a copy, or a borrow (`-> view T`) of what
+  /// the function was given as one (docs/language/02-functions-and-calling.md,
+  /// "Borrowed results").
+  ParamMode Result = ParamMode::Value;
 
   bool empty() const { return Modes.empty(); }
   ParamMode mode(size_t i) const {
@@ -367,6 +371,7 @@ private:
   // Type parameter names (interned); empty for an ordinary function.
   std::vector<const std::string *> TypeParams;
   bool View = false; // `view fn`: a method that does not change `self`
+  ParamMode ResultMode = ParamMode::Value; // `-> view T`
 
 public:
   FuncDecl(SourceLocation loc, const std::string &internedName,
@@ -392,6 +397,11 @@ public:
   /// (docs/language/04-classes.md, "Methods that don't change self").
   bool isView() const { return View; }
   void setView(bool view) { View = view; }
+
+  /// `-> view T` (or `-> inout T`): the result is a borrow of what the
+  /// function was given as one; Value for a copy.
+  ParamMode getResultMode() const { return ResultMode; }
+  void setResultMode(ParamMode mode) { ResultMode = mode; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_FuncDecl; }
 };

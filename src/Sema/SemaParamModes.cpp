@@ -31,6 +31,7 @@ std::string placePath(const ast::Expr *e) {
 } // namespace
 
 void Sema::declareParamKinds(const ast::FuncDecl *fn) {
+  CurrentResult = {fn->getResultMode(), fn, CurrentScope};
   for (const ast::Param &p : fn->getParams())
     if (p.Mode != ast::ParamMode::Value)
       CurrentScope->Kinds[p.getName()] =
@@ -111,6 +112,19 @@ bool Sema::checkOverrideModes(const ast::FuncDecl *method,
                : std::string("keep '") + ast::paramModeName(want) + "' on";
     error(method->getLocation(),
           msg + " parameter '" + params[i].getName() + "'");
+    ok = false;
+  }
+  // So is how the result is returned (a borrow is not a copy).
+  ast::ParamMode want = base->getParamModes().Result;
+  if (method->getResultMode() != want) {
+    error(method->getLocation(),
+          want == ast::ParamMode::Value
+              ? "override of '" + method->getName() +
+                    "' cannot return a borrow: the method it overrides "
+                    "returns a copy"
+              : "override of '" + method->getName() + "' must return '" +
+                    ast::paramModeName(want) +
+                    "', like the method it overrides");
     ok = false;
   }
   return ok;

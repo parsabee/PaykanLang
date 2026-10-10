@@ -636,6 +636,12 @@ private:
       if (!ret)
         return nullptr;
     }
+    // A borrowed result (`-> view T`) is a `(qual ...)` after its type.
+    ParamMode resultMode = ParamMode::Value;
+    if (!paramMode(f, resultMode))
+      return nullptr;
+    if (resultMode != ParamMode::Value && !ret)
+      return fail(e, "a borrowed result needs a type"), nullptr;
     CompoundStmt *body = block(f, "the function's body");
     if (!body)
       return nullptr;
@@ -652,6 +658,7 @@ private:
     auto *fn = Ctx.make<FuncDecl>(loc, *name, std::move(params), ret, body,
                                   std::move(tparams));
     fn->setView(view);
+    fn->setResultMode(resultMode);
     return fn;
   }
 

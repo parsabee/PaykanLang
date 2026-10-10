@@ -290,6 +290,56 @@ fn nothing() {
 - `return;` in a non-void function is a compile-time error.
 - Every control-flow path in a non-void function must end with a `return`.
 
+### Borrowed results
+
+A function or method can return a borrow instead of a copy, with the mode where the result's
+type goes: `-> view T`. The result is part of what the function was given as a borrow, so it
+needs no annotation saying where it comes from:
+
+```pkn
+class Counter {
+  n: int;
+  fn __init__(n: int) { self.n = n; }
+  view fn get() -> int { return self.n; }
+}
+
+class Box {
+  c: Counter;
+  fn __init__() { self.c = Counter(4); }
+  view fn peek() -> view Counter { return self.c; }
+}
+
+fn longer(a: view Str, b: view Str) -> view Str {
+  return if a.len() > b.len() then a else b;
+}
+
+fn main() -> int {
+  b = Box();
+  v: view = b.peek();
+  println(longer("hello", "hi") + " " + Str(v.get()));
+  return 0;
+}
+```
+
+Output:
+
+```
+hello 4
+```
+
+- What a `-> view T` function returns must be part of `self` or of a `view` or `inout`
+  parameter: the parameter itself, a field or an element reached from it, or the borrowed
+  result of another call that borrows only those. A new value, a copy parameter or a local
+  is an error: `'d' is a copy: a 'view' result must be part of 'self' or of a 'view' or
+  'inout' parameter`.
+- The caller sees the result as a `view` ([A `view` stays a `view`](#a-view-stays-a-view)):
+  it can be read, passed on to a `view` parameter or bound to a `view` local, and a value
+  type can be copied out (`k = b.num();`); nothing changes through it and one that shares
+  what it holds is never stored (`the result of 'peek' is a 'view'; 'tick' is not a 'view
+  fn'`).
+- `main` returns a copy. An override returns its result the way the method it overrides
+  does. `-> inout T` is reserved and is an error for now.
+
 ---
 
 ## Examples
@@ -347,4 +397,5 @@ fn fib(n: int) -> int {
 | Write to a `view` parameter | Assigning or destructuring into it |
 | A `view` changed, passed on or kept | Writing a field or element of what it holds, calling a method on it that is not a `view fn`, passing it to a parameter that is not `view`, or storing or returning one that shares what it holds |
 | Bad `inout` argument | Not a variable or field, not exactly the parameter's type, a `view` parameter or `let` local, an array element, a string's character, or the same place twice in one call |
-| Override changes a mode | An override that drops, adds or changes a parameter's `view`/`inout` |
+| Override changes a mode | An override that drops, adds or changes a parameter's `view`/`inout`, or returns a borrow where the method it overrides returns a copy (or the other way) |
+| A `view` result of something else | A `-> view T` function returns a new value, a copy parameter or a local, not part of `self` or of a `view` / `inout` parameter |

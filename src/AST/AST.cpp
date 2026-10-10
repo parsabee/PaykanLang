@@ -417,6 +417,7 @@ FuncDecl *ASTCloner::cloneFuncDecl(FuncDecl *fn, const std::string &newName) {
       fn->getLocation(), Ctx.intern(newName), std::move(params),
       cloneType(fn->getReturnType()), cloneCompound(fn->getBody()));
   clone->setView(fn->isView());
+  clone->setResultMode(fn->getResultMode());
   return clone;
 }
 
