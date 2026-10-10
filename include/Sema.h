@@ -321,9 +321,12 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// be a variable (see isTypeNameForVariable) and returns false.
   bool checkBinderName(const std::string &name, ast::SourceLocation loc);
 
-  /// checkBinderName for a match arm's binding, and its kind (`n: view T` is
-  /// a `view` local); a rejected binding is bound poisoned in the arm's scope.
-  bool bindArmName(ast::MatchArm *arm);
+  /// checkBinderName for a match arm's binding (of type @p bindTy), and its
+  /// kind: `n: view T` is a `view` local, `n: inout T` the storage of
+  /// @p subject, which must be a place.  A rejected binding is bound
+  /// poisoned in the arm's scope.
+  bool bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
+                   ast::Type *bindTy);
 
   // Check that a variable is declared. Returns its type,
   // or nullptr (with error emitted) on failure.  A poisoned variable yields

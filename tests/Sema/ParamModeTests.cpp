@@ -655,7 +655,6 @@ fn main() -> int {
 // A `match` arm's `n: view T` is a `view` local of the subject, whatever the
 // subject is: nothing changes through it, it passes on only to `view`
 // parameters, and the subject's variable cannot change until its last use.
-// `inout` arms are not supported yet.
 TEST(LocalBorrow, ViewArms) {
   auto r = semaCheck(R"(class Animal {
   n: int;
@@ -685,7 +684,6 @@ fn main() -> int {
     x: view Animal { x = Animal(); }
     None { }
   }
-  match a { y: inout Dog { } _ { } }
   return 0;
 })");
   expectErrors(
@@ -695,10 +693,70 @@ fn main() -> int {
           "'view' parameter, and parameter 1 of 'keep' is not one",
           ":18:7: error: 'a' is viewed by 'view' local 'd' until 'd' is last "
           "used; 'tick' is not a 'view fn'",
-          ":26:22: error: cannot assign to 'view' local 'x'",
-          ":29:13: error: an 'inout' arm is not supported yet: write 'y: view' "
-          "or bind 'y' without a mode"});
-  EXPECT_EQ(r.ErrorCount, 6u) << r.Diagnostics;
+          ":26:22: error: cannot assign to 'view' local 'x'"});
+  EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
   // After the binding's last use the subject can change again.
   EXPECT_EQ(r.Diagnostics.find(":20:"), std::string::npos) << r.Diagnostics;
+}
+
+// A `match` arm's `n: inout T` is the subject's storage: the subject must be
+// a variable or a field that an `inout` argument could be (not an
+// expression, `self`, a `let` local or a `view`), not a primitive inside an
+// optional yet, and while n is live the subject's variable cannot be used.
+// What is assigned to n has n's type, which fits the subject.
+TEST(LocalBorrow, InoutArms) {
+  auto r = semaCheck(R"(class Animal {
+  n: int;
+  fn __init__(n: int) { self.n = n; }
+  fn tick() { self.n = self.n + 1; }
+}
+class Dog : Animal { fn __init__(n: int) { __super__(n); } }
+fn make() -> Animal { return Dog(1); }
+fn look(v: view Animal) {
+  match v { d: inout Dog { } _ { } }
+}
+class Box {
+  a: Animal;
+  fn __init__() { self.a = Dog(2); }
+  fn swap() { match self { b: inout Box { } _ { } } }
+  view fn peek() { match self.a { d: inout Dog { } _ { } } }
+}
+fn main() -> int {
+  match make() { d: inout Dog { } _ { } }
+  let fixed: Animal = Dog(3);
+  match fixed { d: inout Dog { } _ { } }
+  n: int? = 4;
+  match n { k: inout int { k = 5; } None { } }
+  a: Animal = Dog(5);
+  match a {
+    d: inout Dog {
+      a.tick();
+      d = Animal(1);
+      d.tick();
+      a.tick();
+    }
+    _ { }
+  }
+  return 0;
+})");
+  expectErrors(
+      r,
+      {":9:9: error: 'v' is a 'view' parameter; it cannot be bound by 'inout' "
+       "arm 'd'",
+       ":14:21: error: 'self' cannot be bound by 'inout' arm 'b': the method "
+       "would no longer know its object",
+       ":15:26: error: 'self' is read-only in 'view fn peek'; it cannot be "
+       "bound by 'inout' arm 'd'",
+       ":18:9: error: 'inout' arm 'd' needs a variable or a field to match on",
+       ":20:9: error: 'fixed' is declared with 'let' and cannot be bound by "
+       "'inout' arm 'd'",
+       ":22:9: error: 'inout' arm 'k' cannot change the 'int' inside an "
+       "optional yet",
+       ":26:7: error: 'a' is borrowed by 'inout' local 'd' until 'd' is last "
+       "used",
+       ":27:7: error: cannot assign value of type 'Animal' to variable 'd' of "
+       "type 'Dog'"});
+  EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
+  // After d's last use the subject can be used again.
+  EXPECT_EQ(r.Diagnostics.find(":29:"), std::string::npos) << r.Diagnostics;
 }

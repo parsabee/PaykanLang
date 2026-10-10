@@ -258,7 +258,8 @@ literal   ::= INT | FLOAT | BOOL | CHAR | STRING | NONE
   chains nest in the AST).
 - Match arms: a wildcard `_`, a literal pattern (bare literal tokens only,
   so `-1` is not a pattern), a type with an optional binding, in any order.
-  A binding may borrow the subject, `n: view T` (`MatchArm::getMode`); with
+  A binding may borrow the subject, `n: view T` or `n: inout T`
+  (`MatchArm::getMode`); with
   the mode before the name (`view n: T`) the syntax error shows the fix.
   `None` is accepted as a pattern so that a match over an optional can name
   the absent case.

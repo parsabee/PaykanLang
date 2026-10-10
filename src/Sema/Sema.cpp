@@ -587,17 +587,36 @@ bool Sema::checkBinderName(const std::string &name, ast::SourceLocation loc) {
   return true;
 }
 
-bool Sema::bindArmName(ast::MatchArm *arm) {
-  if (arm->getMode() == ast::ParamMode::Inout) {
-    error(arm->getLocation(), "an 'inout' arm is not supported yet: write '" +
-                                  arm->getBinding() + ": view' or bind '" +
-                                  arm->getBinding() + "' without a mode");
-  } else if (checkBinderName(arm->getBinding(), arm->getLocation())) {
+bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
+                       ast::Type *bindTy) {
+  const std::string &name = arm->getBinding();
+  std::string msg;
+  if (!checkBinderName(name, arm->getLocation())) {
+    // Reported.
+  } else if (arm->getMode() == ast::ParamMode::Inout) {
+    // `n: inout T` is another name for the subject's storage, as an `inout`
+    // local is for what it names; a T written through it fits there.
+    const std::string what = "'inout' arm '" + name + "'";
+    if (!ast::isa<ast::Identifier>(subject) &&
+        !ast::isa<ast::MemberAccessExpr>(subject) &&
+        !ast::isa<ast::SubscriptExpr>(subject))
+      msg = what + " needs a variable or a field to match on";
+    else if (ast::isa<ast::BuiltinType>(bindTy))
+      msg = what + " cannot change the '" + typeName(bindTy) +
+            "' inside an optional yet";
+    else
+      msg = inoutPlaceError(subject, "bound by " + what);
+    if (msg.empty()) {
+      CurrentScope->Kinds[name] = VarKind::Inout;
+      return true;
+    }
+    error(subject->getLocation(), msg);
+  } else {
     // `n: view T` is a `view` local of the subject, whatever the subject is.
     if (arm->getMode() == ast::ParamMode::View)
-      CurrentScope->Kinds[arm->getBinding()] = VarKind::ViewLocal;
+      CurrentScope->Kinds[name] = VarKind::ViewLocal;
     else if (MatchSubjectIsView)
-      CurrentScope->Kinds[arm->getBinding()] = VarKind::ViewBinding;
+      CurrentScope->Kinds[name] = VarKind::ViewBinding;
     return true;
   }
   // Its uses in the arm's body are follow-ons of the reported error.
@@ -2770,7 +2789,7 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
                     subjectCt->getName() + "'");
           ok = false;
         }
-        if (arm->hasBinding() && !bindArmName(arm)) {
+        if (arm->hasBinding() && !bindArmName(arm, node->getSubject(), armAt)) {
           ok = false;
         } else if (arm->hasBinding()) {
           if (!CurrentScope->declare(arm->getBinding(), armAt)) {
@@ -2792,7 +2811,7 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
         }
 
         // 4. Declare the binding variable with the narrowed (arm) type.
-        if (arm->hasBinding() && !bindArmName(arm)) {
+        if (arm->hasBinding() && !bindArmName(arm, node->getSubject(), armCt)) {
           ok = false;
         } else if (arm->hasBinding()) {
           if (!CurrentScope->declare(arm->getBinding(), armCt)) {
@@ -2918,7 +2937,8 @@ bool Sema::checkOptionalMatch(ast::MatchStmt *node,
       // An arm in error still binds its name in the body, poisoned.
       if (arm->hasBinding() && !bindTy)
         declarePoisoned(CurrentScope, arm->getBinding());
-      if (arm->hasBinding() && bindTy && !bindArmName(arm)) {
+      if (arm->hasBinding() && bindTy &&
+          !bindArmName(arm, node->getSubject(), bindTy)) {
         ok = false;
       } else if (arm->hasBinding() && bindTy) {
         if (!CurrentScope->declare(arm->getBinding(), bindTy)) {
