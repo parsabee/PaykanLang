@@ -334,6 +334,7 @@ static pkm::ModeRecs toModeRecs(const ast::ParamModes &modes) {
   for (ast::ParamMode m : modes.Modes)
     out.Modes.push_back(static_cast<uint8_t>(m));
   out.Names = modes.Names;
+  out.Result = static_cast<uint8_t>(modes.Result);
   return out;
 }
 
@@ -342,6 +343,7 @@ static ast::ParamModes fromModeRecs(const pkm::ModeRecs &recs) {
   for (uint8_t m : recs.Modes)
     out.Modes.push_back(static_cast<ast::ParamMode>(m));
   out.Names = recs.Names;
+  out.Result = static_cast<ast::ParamMode>(recs.Result);
   return out;
 }
 

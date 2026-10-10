@@ -337,6 +337,15 @@ hello 4
   type can be copied out (`k = b.num();`); nothing changes through it and one that shares
   what it holds is never stored (`the result of 'peek' is a 'view'; 'tick' is not a 'view
   fn'`).
+- A borrowed result borrows what its call borrowed: the receiver and every argument passed
+  to a `view` or `inout` parameter. While a `view` local of it (or a `match` arm's
+  `n: view T`) is live, those variables cannot change, as for any
+  [local borrow](01-language-basics.md#local-borrows): with `w: view = longer(s, t);`,
+  `t = "bye";` is `'t' is viewed by 'view' local 'w' until 'w' is last used; it cannot be
+  assigned`. Both arguments are borrowed, though only one comes back; a value type can be
+  copied out instead.
+- How a function returns its result is part of a module's interface, imported from source
+  or from a `.pkm` file.
 - `main` returns a copy. An override returns its result the way the method it overrides
   does. `-> inout T` is reserved and is an error for now.
 

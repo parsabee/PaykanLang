@@ -10,7 +10,9 @@
 // A borrow of a borrow (`y: inout = x;` with `x: inout = k;`) borrows what
 // that one names too, so `k` stays borrowed while `y` is live.  A `match`
 // arm's `n: view T` borrows the subject in the same way, from the start of
-// the arm.
+// the arm, and a borrow of a call's borrowed result (`v: view = b.peek();`)
+// borrows what the call borrowed: its receiver and the arguments to its
+// `view` / `inout` parameters.
 
 #include "Sema.h"
 
@@ -189,6 +191,12 @@ bool Sema::visitBody(const std::vector<ast::Stmt *> &stmts) {
 void Sema::startBorrow(const ast::Expr *place, const std::string &by,
                        bool inout, const std::vector<ast::Stmt *> *block,
                        size_t end) {
+  // A borrowed result borrows what its call borrowed.
+  if (const BorrowResult *r = borrowResultOf(place)) {
+    for (const ast::Expr *from : r->From)
+      startBorrow(from, by, inout, block, end);
+    return;
+  }
   const ast::Identifier *root = placeRoot(place);
   if (!root)
     return; // a `view` of an expression borrows nothing
