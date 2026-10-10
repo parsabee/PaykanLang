@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 // Sema tests: `view fn` methods.  A method may change `self` unless it is a
-// `view fn`, and only a `view fn` may be called on a `view`.
+// `view fn`, where `self` is read-only, and only a `view fn` may be called on
+// a `view`.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -43,6 +44,65 @@ void expectAll(const SemaResult &r, std::initializer_list<const char *> diags) {
 }
 
 } // namespace
+
+// In a `view fn`, `self` and everything reached through it is read-only: no
+// field or element write, no call of a method that is not a `view fn`
+// (`push` included), no `inout` argument, and a `view` of it stays one.  Part
+// of `self` may still be returned, and other objects can change.
+TEST(ViewFn, SelfIsReadOnly) {
+  auto r = semaCheck(R"(class Child {
+  k: int;
+  fn __init__() { self.k = 0; }
+  fn tick() { self.k = self.k + 1; }
+}
+class Counter {
+  n: int; c: Child; xs: int[];
+  fn __init__() { self.n = 0; self.c = Child(); self.xs = [1]; }
+  fn tick() { self.n = self.n + 1; }
+  view fn a() { self.n = 1; }
+  view fn b() { self.tick(); }
+  view fn c2() { bump(self.n); }
+  view fn d() { self.c.tick(); }
+  view fn e() { self.xs.push(1); }
+  view fn f() { self.xs[0] = 2; }
+  view fn g() { keep(self.c); }
+  view fn h() { o = self.c; }
+  view fn i() { t: inout = self.n; }
+  view fn child() -> Child { return self.c; }
+  view fn ok() -> int {
+    o = Child();
+    o.tick();
+    return self.n + self.xs.len() + self.c.k;
+  }
+}
+fn bump(n: inout int) { n = n + 1; }
+fn keep(c: Child) { }
+fn main() -> int { return 0; }
+)");
+  EXPECT_EQ(r.ErrorCount, 9u) << r.Diagnostics;
+  expectAll(r, {
+                   ":10:17: error: 'self' is read-only in 'view fn a'; cannot "
+                   "assign to its field 'n'",
+                   ":11:17: error: 'self' is read-only in 'view fn b'; 'tick' "
+                   "is not a 'view fn'",
+                   ":12:23: error: 'self' is read-only in 'view fn c2'; it "
+                   "cannot be passed to 'inout' parameter 'n'",
+                   ":13:17: error: 'self' is read-only in 'view fn d'; 'tick' "
+                   "is not a 'view fn'",
+                   ":14:17: error: 'self' is read-only in 'view fn e'; 'push' "
+                   "is not a 'view fn'",
+                   ":15:17: error: 'self' is read-only in 'view fn f'; cannot "
+                   "assign to its elements",
+                   ":16:22: error: 'self' is read-only in 'view fn g'; it can "
+                   "only be passed to a 'view' parameter, and parameter 1 of "
+                   "'keep' is not one",
+                   ":17:21: error: 'self' is read-only in 'view fn h'; it "
+                   "cannot be stored, only read or passed to a 'view' "
+                   "parameter",
+                   ":18:28: error: 'self' is read-only in 'view fn i'; it "
+                   "cannot be named by 'inout' local 't'",
+               });
+}
 
 // Only a method is a `view fn`, never `__init__`, and an override keeps the
 // marker of the method it overrides.

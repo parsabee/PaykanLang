@@ -60,6 +60,71 @@ Create an object by calling the class name with the constructor's arguments, as 
 - There are no access modifiers: every field and method is public.
 - By convention class names are `UpperCamelCase`.
 
+## Methods that only read: `view fn`
+
+A method may change its object. A method that only reads it is written `view fn`, and the
+compiler holds it to that: inside it, `self` is read-only. A `view` parameter (see
+[Basics](02-basics.md#functions)) promises the caller that the function will not change what it
+was given, so only `view fn` methods can be called on one:
+
+```pkn
+class Account {
+  balance: int;
+  fn __init__(start: int) { self.balance = start; }
+  fn deposit(amount: int) { self.balance = self.balance + amount; }
+  view fn report() -> Str { return "balance " + Str(self.balance); }
+}
+
+fn show(a: view Account) {
+  println(a.report());
+}
+
+fn main() -> int {
+  a = Account(10);
+  a.deposit(5);
+  show(a);
+  return 0;
+}
+```
+
+Output:
+
+```
+balance 15
+```
+
+Calling `deposit` in `show`, or changing `self` inside `report`, is an error that names
+what to fix:
+
+```pkn
+class Account {
+  balance: int;
+  fn __init__(start: int) { self.balance = start; }
+  fn deposit(amount: int) { self.balance = self.balance + amount; }
+  view fn report() -> Str { self.balance = 0; return "empty"; }
+}
+
+fn show(a: view Account) {
+  a.deposit(5);
+}
+
+fn main() -> int {
+  show(Account(10));
+  return 0;
+}
+```
+
+Error:
+
+```
+error: 'self' is read-only in 'view fn report'; cannot assign to its field 'balance'
+error: 'a' is a 'view' parameter; 'deposit' is not a 'view fn'
+```
+
+An override keeps the marker of the method it overrides, so `toString` and `equals` are
+always `view fn`s. The details are in
+[the language reference](../language/04-classes.md#methods-that-dont-change-self).
+
 ## Objects are references
 
 Objects live on the heap, and a variable holds a **reference** to one. Assigning an object
@@ -282,7 +347,7 @@ class Task {
 
   fn complete() { self.done = True; }
 
-  fn checkbox() -> Str {
+  view fn checkbox() -> Str {
     return if self.done then "[x]" else "[ ]";
   }
 

@@ -140,6 +140,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   struct ClassContext {
     ast::ClassType *ClassType; // the type being checked
     std::string MethodName;    // method currently being checked (empty = none)
+    bool ViewMethod = false;   // it is a `view fn`: `self` is read-only
     bool SuperInitRequired = false; // __init__ must call __super__
     bool SuperInitCalled = false;   // __super__ has been called
   };
@@ -597,7 +598,8 @@ private:
 
   /// Why the place @p e (a variable, or fields and elements reached from
   /// one) cannot be changed here, as the start of a diagnostic: "'n' is a
-  /// 'view' parameter"; "" when it can.
+  /// 'view' parameter", "'self' is read-only in 'view fn get'"; "" when it
+  /// can.
   /// With @p borrows, a variable viewed by a live `view` local cannot
   /// change either.
   std::string frozenPlace(const ast::Expr *e, bool borrows = true);
@@ -625,7 +627,7 @@ private:
   /// tuple, pushed): not a `view` that shares what it holds.
   bool checkViewNotStored(const ast::Expr *e, const ast::Type *ty);
   /// @p e, of type @p ty, is being returned: not a `view` that shares what
-  /// it holds.
+  /// it holds, though part of `self` may be.
   bool checkViewNotReturned(const ast::Expr *e, const ast::Type *ty);
   /// While a `match` arm binds a name: whether the subject is a `view`, so
   /// that the name is one too.

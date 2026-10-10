@@ -98,7 +98,22 @@ different parameter lists are not supported.
 ### Methods that don't change self
 
 A method may change `self`. One that does not is written `view fn`, like `value` above,
-and only a `view fn` can be called on a `view`, a parameter or a local
+and `self` is read-only in its body: through `self` it cannot
+
+- assign a field or an element (`self.n = 1`, `self.xs[0] = 1`);
+- call a method that is not a `view fn` (`self.tick()`, `self.xs.push(1)`,
+  `self.child.tick()`);
+- pass `self`'s fields to an `inout` parameter (`bump(self.n)`) or name one with an
+  `inout` local;
+- pass `self` or its fields to a parameter that is not `view`, or store `self` or a
+  reference reached through it ([A `view` stays a
+  `view`](02-functions-and-calling.md#a-view-stays-a-view)).
+
+Each is an error that names the method: `'self' is read-only in 'view fn value'; 'tick' is
+not a 'view fn'`. Other objects can change as usual, and any method, a `view fn` too, may
+return part of `self` (its caller does not see it as a `view` yet).
+
+Only a `view fn` can be called on a `view`, a parameter or a local
 ([Functions](02-functions-and-calling.md#view-read-only)): `'c' is a 'view' parameter;
 'increment' is not a 'view fn'`. The builtin methods that only read are `view fn`s:
 `toString`, `equals`, `len`, `length`; `push`, `pop`, `concat` and the `File` methods are
@@ -277,5 +292,6 @@ match a {
 | Override changes a parameter mode | Override drops, adds or changes a parameter's `view` / `inout` |
 | Override changes `view fn` | Override of a `view fn` is not one, or an override of another method is one |
 | `view fn __init__` or a free `view fn` | `__init__` sets up `self`; a free function has no `self` |
+| `self` changed in a `view fn` | A `view fn` assigns `self`'s fields or elements, calls a method on `self` that is not a `view fn`, passes them to `inout`, or passes on or stores a reference reached through `self` |
 | Multiple bases | More than one `:` clause |
 | `self` in parameter list | Writing `self` as an explicit method parameter |

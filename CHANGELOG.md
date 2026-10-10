@@ -15,7 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `toString`, `equals`, `len` and `length` are `view fn`s.  An override is a `view fn`
   exactly when the method it overrides is one; `__init__` and a free function never are.
   The marker is part of a module's interface (method flag `0x2` in a `.pkm`), and a
-  function in the AST interchange format carries it as a trailing `(qual view)`.
+  function in the AST interchange format carries it as a trailing `(qual view)`.  In a
+  `view fn`, `self` and everything reached through it is read-only, as through a `view`
+  parameter (`'self' is read-only in 'view fn get'; cannot assign to its field 'n'`),
+  though part of `self` may still be returned.  `samples/codegen/48_view_fn.pkn` shows
+  them.
 - Local borrows (docs/language/01-language-basics.md, "Local borrows"): a local declared
   with a mode where the type goes, `v: view = k + 1;` or `w: view float = k;`, the type
   inferred when left off.  A `view` local reads its initializer, which may be any
