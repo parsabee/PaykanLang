@@ -582,17 +582,6 @@ private:
 
   // -- `view` and `inout` parameters (SemaParamModes.cpp)
 
-  /// True for the types a parameter mode applies to: int, float, bool, char
-  /// and enums.
-  static bool isValueType(const ast::Type *ty);
-  /// Error for each `view` / `inout` parameter of @p fn whose type (in
-  /// @p paramTys) is not a value type.
-  bool checkParamModeTypes(const ast::FuncDecl *fn,
-                           const std::vector<ast::Type *> &paramTys);
-  /// Error for each `view` / `inout` parameter of the template @p fn whose
-  /// type is one of its @p typeParams.
-  bool checkTemplateParamModes(const ast::FuncDecl *fn,
-                               const std::vector<const std::string *> &tps);
   /// Record the kinds of @p fn's `view` / `inout` parameters, just declared
   /// in the current scope.
   void declareParamKinds(const ast::FuncDecl *fn);

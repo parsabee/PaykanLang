@@ -347,10 +347,11 @@ Some rules to know:
   objects are passed by reference: a function receives the same object as its caller (more
   in [Classes](04-classes.md) and [Memory](12-memory.md)).
 
-A parameter of type `int`, `float`, `bool`, `char` or an enum can say how it is passed. An
-`inout` parameter is the caller's variable (or a field of an object): the function changes
-it in place. A `view` parameter is a copy the function cannot assign to. The call looks the
-same either way:
+A parameter of any type can say how it is passed. An `inout` parameter is the caller's
+variable (or a field of an object): the function changes it in place, and assigning an object
+to it gives the caller that object. A `view` parameter is read-only: the function cannot
+assign to it, nor change the object, string or array it holds, and it can only be passed on
+to other `view` parameters. The call looks the same either way:
 
 ```pkn
 fn addTax(price: inout float, rate: view float) {

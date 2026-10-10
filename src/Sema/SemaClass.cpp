@@ -603,9 +603,6 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
       // is erroneous and its bodies are skipped); poisoned if it ever is.
       paramTys.push_back(pty ? pty : Ctx.getPoisonTy());
     }
-    if (!checkParamModeTypes(method, paramTys))
-      ok = false;
-
     auto *savedRetTy = CurrentReturnType;
     CurrentReturnType = retTy;
     {
@@ -741,15 +738,6 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
       ok = false;
       continue;
     }
-    bool modesOk = true;
-    for (auto *m : cd->getMethods())
-      modesOk &= checkTemplateParamModes(m, cd->getTypeParams());
-    if (!modesOk) {
-      // Its uses are follow-ons of the reported error.
-      ErroneousNames.insert(cd->getName());
-      ok = false;
-      continue;
-    }
     ClassTemplates[cd->getName()] = cd;
   }
 
@@ -767,11 +755,6 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
     }
     if (!checkTypeParams(fn->getTypeParams(), "generic function", fn->getName(),
                          fn->getLocation())) {
-      ok = false;
-      continue;
-    }
-    if (!checkTemplateParamModes(fn, fn->getTypeParams())) {
-      ErroneousNames.insert(fn->getName()); // as for a generic class
       ok = false;
       continue;
     }
