@@ -8,6 +8,7 @@
 
 #include <cassert>
 #include <cstring>
+#include <utility>
 
 namespace paykan::lowering {
 
@@ -617,6 +618,8 @@ Val ModuleLowering::ExprEmitter::emitConversion(ast::CallExpr *node) {
 }
 
 Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
+  // Wanted as an address only by this call, not by the arguments' calls.
+  const bool wantAddress = std::exchange(WantAddress, false);
   if (Val conv = emitConversion(node))
     return conv;
 
@@ -714,6 +717,8 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
   }
   Val result = L.B.call(callee->Name, callee->Sig, args, "call");
   L.releaseAfterCall(keep);
+  if (result && result.Ty == Type::Ptr && !wantAddress) // an `inout` result
+    return L.loadInoutResult(result, node->getResolvedType());
   return result;
 }
 
@@ -751,6 +756,7 @@ Val ModuleLowering::ExprEmitter::emitArrayPop(const Val &recv,
 
 Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     ast::MethodCallExpr *node) {
+  const bool wantAddress = std::exchange(WantAddress, false);
   // A fresh temporary receiver is released after the call (the method
   // borrows it).
   Receiver receiver = L.emitReceiver(node->getReceiver());
@@ -895,6 +901,8 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
       L.toPIRType(L.canonicalizeDeclType(method->getReturnType())) ==
           Type::Bool)
     result = L.B.cmp(CmpPred::Ne, result, Val::i64(0), "eq");
+  if (result && result.Ty == Type::Ptr && !wantAddress) // an `inout` result
+    return L.loadInoutResult(result, node->getResolvedType());
   return result;
 }
 

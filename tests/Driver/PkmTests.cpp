@@ -682,7 +682,8 @@ TEST(Pkm, ViewFnAcrossModules) {
 }
 
 // A borrowed result keeps its mode in a prebuilt module: the dump shows it,
-// and an importer sees the result as a `view`.
+// an importer sees a `view` result as a `view` and writes through an
+// `inout` one.
 TEST(Pkm, BorrowedResultsAcrossModules) {
   REQUIRE_BACKEND();
   auto dir =
@@ -695,12 +696,15 @@ TEST(Pkm, BorrowedResultsAcrossModules) {
             "  view fn get() -> int { return self.n; } }\n"
             "class Box { c: Counter;\n"
             "  fn __init__() { self.c = Counter(); }\n"
-            "  view fn peek() -> view Counter { return self.c; } }\n"
+            "  view fn peek() -> view Counter { return self.c; }\n"
+            "  fn count() -> inout int { return self.c.n; } }\n"
             "fn longer(a: view Str, b: view Str) -> view Str {\n"
             "  return if a.len() > b.len() then a else b; }\n");
   writeFile(dir / "main.pkn", "import base;\n"
                               "fn main() -> int {\n"
                               "  b = base::Box();\n"
+                              "  n: inout = b.count();\n"
+                              "  n = n + 2;\n"
                               "  v: view = b.peek();\n"
                               "  println(base::longer(\"ab\", \"c\") + "
                               "Str(v.get()));\n"
@@ -717,7 +721,7 @@ TEST(Pkm, BorrowedResultsAcrossModules) {
   fs::remove(dir / "base.pkn");
   auto ok = paykan("main.pkn");
   ASSERT_EQ(ok.exitCode, 0) << ok.out;
-  EXPECT_TRUE(contains(ok.out, "ab5\n")) << ok.out;
+  EXPECT_TRUE(contains(ok.out, "ab7\n")) << ok.out;
   auto bad = paykan("--check-only bad.pkn");
   EXPECT_NE(bad.exitCode, 0);
   EXPECT_TRUE(contains(bad.out, "bad.pkn:4:3: error: the result of 'peek' is "
@@ -725,6 +729,8 @@ TEST(Pkm, BorrowedResultsAcrossModules) {
       << bad.out;
   auto dump = paykan("pkm dump --section=iface base.pkm");
   EXPECT_TRUE(contains(dump.out, "method peek() -> view Counter flags 0x2"))
+      << dump.out;
+  EXPECT_TRUE(contains(dump.out, "method count() -> inout int flags 0x0"))
       << dump.out;
   EXPECT_TRUE(contains(dump.out, "func longer(view Str, view Str) -> view Str"))
       << dump.out;

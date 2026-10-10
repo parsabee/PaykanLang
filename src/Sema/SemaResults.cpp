@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: MIT
 // Borrowed results (docs/language/02-functions-and-calling.md, "Borrowed
 // results"): `-> view T` returns a borrow of what the function was given as
-// one, `self` or a `view` / `inout` parameter, never a new value.  A call's
-// borrowed result is a `view`, so what a caller may do with it follows the
-// rules of a `view` local.
+// one, `self` or a `view` / `inout` parameter, never a new value, and
+// `-> inout T` the storage of part of `self` or of an `inout` parameter.  A
+// call's `view` result is a `view`, so what a caller may do with it follows
+// the rules of a `view` local; an `inout` result is a place, as an `inout`
+// local's is.
 
 #include "Names.h"
 #include "Sema.h"
@@ -17,9 +19,13 @@ bool Sema::checkResultDecl(const ast::FuncDecl *fn, bool method) {
   case ast::ParamMode::Value:
     return true;
   case ast::ParamMode::Inout:
-    error(fn->getLocation(), "an 'inout' result is not supported yet: '" +
-                                 fn->getName() + "' can return a 'view'");
-    return false;
+    if (fn->isView()) {
+      error(fn->getLocation(), "'view fn " + fn->getName() +
+                                   "' cannot return 'inout': it does not "
+                                   "change 'self'");
+      return false;
+    }
+    break;
   case ast::ParamMode::View:
     break;
   }
@@ -42,9 +48,17 @@ void Sema::noteBorrowResult(const ast::Expr *call, const std::string &callee,
   r.From.clear();
   if (receiver)
     r.From.push_back(receiver);
+  // An `inout` result can only be part of an `inout` argument.
   for (size_t i = 0; i < args.size(); ++i)
-    if (modes.mode(i) != ast::ParamMode::Value)
+    if (modes.mode(i) == ast::ParamMode::Inout ||
+        (modes.mode(i) == ast::ParamMode::View &&
+         modes.Result == ast::ParamMode::View))
       r.From.push_back(args[i]);
+}
+
+bool Sema::isInoutResult(const ast::Expr *e) const {
+  auto it = BorrowResults.find(e);
+  return it != BorrowResults.end() && it->second.Mode == ast::ParamMode::Inout;
 }
 
 const Sema::BorrowResult *Sema::borrowResultOf(const ast::Expr *e) const {
@@ -57,15 +71,26 @@ std::string Sema::borrowedResultError(const ast::Expr *e) {
     std::string why = borrowedResultError(te->getTrueExpr());
     return why.empty() ? borrowedResultError(te->getFalseExpr()) : why;
   }
-  const std::string what = "a 'view' result must be part of 'self' or of a "
-                           "'view' or 'inout' parameter";
+  const bool inout = CurrentResult.Mode == ast::ParamMode::Inout;
+  const std::string what =
+      inout ? "an 'inout' result must be part of 'self' or of an 'inout' "
+              "parameter"
+            : "a 'view' result must be part of 'self' or of a 'view' or "
+              "'inout' parameter";
   // A borrow of what a call borrowed: each of those must be ours to lend.
   if (const BorrowResult *r = borrowResultOf(e)) {
+    if (inout && r->Mode != ast::ParamMode::Inout)
+      return "the result of '" + r->Callee +
+             "' is a 'view'; it cannot be returned 'inout'";
     for (const ast::Expr *from : r->From)
       if (std::string why = borrowedResultError(from); !why.empty())
         return why;
     return "";
   }
+  // The storage an `inout` result names is an `inout` argument's.
+  if (inout)
+    if (std::string why = inoutPlaceError(e, "returned 'inout'"); !why.empty())
+      return why;
   const auto *id = ast::dyn_cast<ast::Identifier>(placeBase(e));
   if (!id)
     return what + ", not a new value";
@@ -76,8 +101,8 @@ std::string Sema::borrowedResultError(const ast::Expr *e) {
     param |= p.getName() == name;
   if (!owner || owner != CurrentResult.Params || !param)
     return "'" + name + "' is a local: " + what;
-  if (name == names::kSelf || varKind(name) == VarKind::View ||
-      varKind(name) == VarKind::Inout)
+  if (name == names::kSelf || varKind(name) == VarKind::Inout ||
+      (!inout && varKind(name) == VarKind::View))
     return "";
   return "'" + name + "' is a copy: " + what;
 }
