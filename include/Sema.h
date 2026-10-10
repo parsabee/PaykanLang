@@ -162,8 +162,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   struct MethodUse {
     ast::ClassType *Class = nullptr;
     const ast::FuncDecl *Decl = nullptr;
-    bool ChangesSelf = false; // writes `self`, or calls a changing method on
-                              // something reached through it
+    bool ChangesSelf = false; // writes `self`, calls a changing method on
+                              // something reached through it, or returns
+                              // part of it for its caller to change
     std::vector<std::string> SelfCalls; // `self.m()` of a non-`view fn` m
   };
   std::deque<MethodUse> MethodUses; // stable addresses for CurrentMethodUse

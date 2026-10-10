@@ -10,9 +10,9 @@
 //
 // While objects, strings and arrays are references, a copy of one would
 // change the original, so a `view` stays one: it can only be passed on to a
-// `view` parameter, a `view` that shares what it holds is never stored, a
-// `view` is never returned (part of `self` may be, by any method), and a
-// `match` arm's name for a `view` is one too.
+// `view` parameter, a `view` that shares what it holds is never stored nor
+// returned except as a `view` (`-> view T`, which part of `self` is in a
+// `view fn`), and a `match` arm's name for a `view` is one too.
 
 #include "Names.h"
 #include "Sema.h"
@@ -157,11 +157,34 @@ bool Sema::checkViewNotReturned(const ast::Expr *e, const ast::Type *ty) {
            checkViewNotReturned(te->getFalseExpr(), ty);
   if (!sharesStorage(ty))
     return true;
-  // Any method may return part of `self`, a `view fn` too: its caller sees
-  // it as its own (#216 plans `-> view T`).  A `view` belongs to the caller.
+  // Part of `self` is a `view` in a `view fn`, so it is returned as one
+  // (`-> view T`): as a copy, its caller could change it.  Another method
+  // may return it, and so hands out a way to change `self`.  A `view`
+  // belongs to the caller.
   const ast::Identifier *root = placeRoot(e);
-  if (root && root->getName() == names::kSelf)
-    return true;
+  if (root && root->getName() == names::kSelf && CurrentClassCtx &&
+      !CurrentClassCtx->MethodName.empty()) {
+    if (!CurrentClassCtx->ViewMethod) {
+      if (CurrentMethodUse)
+        CurrentMethodUse->ChangesSelf = true;
+      return true;
+    }
+    const std::string &name = CurrentClassCtx->MethodName;
+    std::string msg = "'self' is read-only in 'view fn " + name +
+                      "', so part of it can only be returned as a 'view'";
+    // An override returns its result as the method it overrides does.  An
+    // instance of a generic class (`Box<Str>`) knows the result's type only
+    // with its parameters substituted.
+    const ast::ClassType *cls = CurrentClassCtx->ClassType;
+    if (cls->getSuperClass() && cls->getSuperClass()->findMethod(name))
+      msg += "; the method it overrides returns a copy, so return a new value";
+    else if (cls->getName().find('<') != std::string::npos)
+      msg += ": write 'view' before its result type";
+    else
+      msg += ": write '-> view " + typeName(CurrentReturnType) + "'";
+    error(e->getLocation(), msg);
+    return false;
+  }
   std::string msg = viewOf(e);
   if (msg.empty())
     return true;

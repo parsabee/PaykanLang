@@ -13,7 +13,7 @@
 class Holder {
   pair: (int, Str);
   fn __init__(p: (int, Str)) { self.pair = p; }
-  view fn get() -> (int, Str) { return self.pair; }
+  view fn get() -> view (int, Str) { return self.pair; }
 }
 
 fn mk() -> (Str, int) {
@@ -30,11 +30,11 @@ fn main() -> int {
   arr: (int, Str)[] = [t, (2, "b")];
   arr.push(mk_pair());
   h: Holder = Holder(t);
-  a, b = h.get();
+  pair: view = h.get();         // a 'view' of h.pair
   println(Str<bool>(t == (1, "a")));
   m = t;
-  println(m.1 + s + str + b + arr[2].1);
-  println(Str(n + a));
+  println(m.1 + s + str + pair.1 + arr[2].1);
+  println(Str(n + pair.0));
   return 0;
 }
 

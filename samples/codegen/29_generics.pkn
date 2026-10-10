@@ -10,7 +10,7 @@
 class Box<T> {
   v: T;
   fn __init__(v: T) { self.v = v; }
-  view fn get() -> T { return self.v; }
+  view fn get() -> view T { return self.v; }
   fn set(v: T) { self.v = v; }
   view fn equals(other: Obj) -> bool {
     match other {
@@ -24,7 +24,7 @@ class Pair<K, V> {
   k: K;
   v: V;
   fn __init__(k: K, v: V) { self.k = k; self.v = v; }
-  view fn key() -> K { return self.k; }
+  view fn key() -> view K { return self.k; }
   view fn value() -> V { return self.v; }
 }
 
@@ -39,7 +39,7 @@ class Stack<T> {
 class Holder {
   b: Box<int>;
   fn __init__(n: int) { self.b = Box<int>(n); }
-  view fn get() -> Box<int> { return self.b; }
+  view fn get() -> view Box<int> { return self.b; }
 }
 
 fn first<T>(xs: T[]) -> T { return xs[0]; }

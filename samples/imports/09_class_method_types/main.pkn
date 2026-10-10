@@ -13,7 +13,7 @@ fn main() -> int {
   d: lib::Cell = lib::Cell(4);
 
   p: lib::Pair = c.pairWith(d);         // method taking and returning module classes
-  f: lib::Cell = p.first();             // ... from the class that was declared first
+  f: view lib::Cell = p.first();        // ... from the class that was declared first, as a 'view'
   k: lib::Kind = f.kindOf();            // method returning a module enum
   s: lib::Splitter = lib::Splitter();
   halves: lib::Cell[] = s.split(c);     // method returning an array of a class

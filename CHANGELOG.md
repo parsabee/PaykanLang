@@ -122,6 +122,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A `view fn` returns part of `self` that is an object, string, array, tuple or optional as
+  a `view`, `-> view T` (docs/language/04-classes.md, "Methods that don't change self"):
+  returned as a copy, its caller could change it.  `view fn name() -> Str { return
+  self.name; }` is now an error, `'self' is read-only in 'view fn name', so part of it can
+  only be returned as a 'view': write '-> view Str'`; a field of a value type is still
+  returned as a copy.  A method that is not a `view fn` and returns part of `self` no longer
+  gets the warning that it never changes `self`.
 - An override of `toString` or `equals` is declared `view fn` (`view fn toString() -> Str`),
   like the `Obj` methods it overrides: a plain `fn` override is an error.
 - `.pkm` interfaces carry a function's, a method's and a constructor's

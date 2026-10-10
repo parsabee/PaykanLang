@@ -337,6 +337,11 @@ hello 4
   type can be copied out (`k = b.num();`); nothing changes through it and one that shares
   what it holds is never stored (`the result of 'peek' is a 'view'; 'tick' is not a 'view
   fn'`).
+- In a `view fn`, part of `self` that shares what it holds is a `view`, so it is returned
+  as one: `view fn name() -> view Str { return self.name; }`. As a copy it is an error,
+  `'self' is read-only in 'view fn name', so part of it can only be returned as a 'view':
+  write '-> view Str'` ([Methods that don't change
+  self](04-classes.md#methods-that-dont-change-self)).
 - A borrowed result borrows what its call borrowed: the receiver and every argument passed
   to a `view` or `inout` parameter. While a `view` local of it (or a `match` arm's
   `n: view T`) is live, those variables cannot change, as for any

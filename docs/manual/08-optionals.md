@@ -187,7 +187,8 @@ True
 
 Two changes to `tasks`. A deadline becomes an optional field instead of a subclass, so any
 task can get one later. And `TaskList.find` looks a task up by its title, returning `None`
-when there is none, which lets the caller decide what to do:
+when there is none, which lets the caller decide what to do. It isn't a `view fn`, because
+the caller may change the task it returns:
 
 ```pkn
 class Task {
@@ -214,7 +215,7 @@ class TaskList {
   fn __init__() { self.tasks = []; }
   fn add(title: Str) { self.tasks.push(Task(title)); }
 
-  view fn find(title: Str) -> Task? {
+  fn find(title: Str) -> Task? {
     i = 0;
     while (i < self.tasks.len()) {
       if (self.tasks[i].title == title) { return self.tasks[i]; }
