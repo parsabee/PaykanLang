@@ -9,7 +9,7 @@ class Pair {
   a: Cell;
   b: Cell;
   fn __init__(a: Cell, b: Cell) { self.a = a; self.b = b; }
-  view fn first() -> Cell { return self.a; }
+  view fn first() -> view Cell { return self.a; }
   view fn sum() -> int { return self.a.v + self.b.v; }
 }
 

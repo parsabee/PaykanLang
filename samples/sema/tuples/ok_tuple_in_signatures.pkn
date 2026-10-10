@@ -4,7 +4,7 @@
 class Holder {
   pair: (int, Str);
   fn __init__(p: (int, Str)) { self.pair = p; }
-  view fn get() -> (int, Str) { return self.pair; }
+  view fn get() -> view (int, Str) { return self.pair; }
   view fn first() -> int { return self.pair.0; }
 }
 
@@ -14,7 +14,7 @@ fn swap(p: (int, Str)) -> (Str, int) {
 
 fn main() -> int {
   h: Holder = Holder((1, "one"));
-  n, s = h.get();
+  n = h.get().0;
   s2, n2 = swap(h.pair);
   o: Obj = h.pair;
   wide: (int, Obj) = (1, "s");

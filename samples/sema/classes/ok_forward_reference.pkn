@@ -2,7 +2,7 @@
 class Dog : Animal {
   breed: Str;
 
-  view fn getAnimalName() -> Str {
+  view fn getAnimalName() -> view Str {
     return self.name;
   }
 }

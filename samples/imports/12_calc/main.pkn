@@ -108,7 +108,7 @@ class Ring<T> {
   view fn len() -> int { return self.items.len(); }
 
   // The i-th oldest item (0 <= i < len()).
-  view fn at(i: int) -> T { return self.items[(self.start + i) % self.items.len()]; }
+  view fn at(i: int) -> view T { return self.items[(self.start + i) % self.items.len()]; }
 }
 
 // How many past statements :history remembers.
@@ -182,8 +182,9 @@ fn listHistory(history: Ring<(Str, float)>) {
   }
   i: int = 0;
   while (i < history.len()) {
-    src, value = history.at(i);
-    println("  " + Str(i + 1) + ": " + src + "  => " + show(value));
+    entry: view = history.at(i);   // (source, value)
+    value = entry.1;
+    println("  " + Str(i + 1) + ": " + entry.0 + "  => " + show(value));
     i = i + 1;
   }
 }

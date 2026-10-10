@@ -110,8 +110,16 @@ and `self` is read-only in its body: through `self` it cannot
   `view`](02-functions-and-calling.md#a-view-stays-a-view)).
 
 Each is an error that names the method: `'self' is read-only in 'view fn value'; 'tick' is
-not a 'view fn'`. Other objects can change as usual, and any method, a `view fn` too, may
-return part of `self` (its caller does not see it as a `view` yet).
+not a 'view fn'`. Other objects can change as usual.
+
+Part of `self` that is an object, string, array, tuple or optional is a `view` in a
+`view fn`, so the method returns it as one, `-> view T`
+([Borrowed results](02-functions-and-calling.md#borrowed-results)), and its caller cannot
+change it. `view fn name() -> Str { return self.name; }` is an error: `'self' is read-only
+in 'view fn name', so part of it can only be returned as a 'view': write '-> view Str'`. A
+field of a value type is returned as a copy (`view fn count() -> int`). An override of a
+method that returns a copy, such as `toString`, returns a new value instead. A method that
+is not a `view fn` may return part of `self` for its caller to change.
 
 Only a `view fn` can be called on a `view`, a parameter or a local
 ([Functions](02-functions-and-calling.md#view-read-only)): `'c' is a 'view' parameter;
@@ -132,7 +140,8 @@ not. A `let` local only cannot be reassigned: any method can be called on what i
 A method that never changes `self` but is not a `view fn` gets a warning, so that `view`
 parameters can call it: `'value' never changes 'self': make it a 'view fn' so 'view'
 parameters can call it`. A method counts as changing `self` when it does one of the
-things a `view fn` cannot, or calls on `self` a method that does; a method with an
+things a `view fn` cannot (returning part of `self` for its caller to change is one), or
+calls on `self` a method that does; a method with an
 override that changes `self` gets no warning, and neither does its override. The warning
 is not given while the program has errors.
 

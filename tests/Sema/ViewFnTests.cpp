@@ -48,8 +48,8 @@ void expectAll(const SemaResult &r, std::initializer_list<const char *> diags) {
 
 // In a `view fn`, `self` and everything reached through it is read-only: no
 // field or element write, no call of a method that is not a `view fn`
-// (`push` included), no `inout` argument, and a `view` of it stays one.  Part
-// of `self` may still be returned, and other objects can change.
+// (`push` included), no `inout` argument, and a `view` of it stays one, also
+// when returned (`-> view T`).  Other objects can change.
 TEST(ViewFn, SelfIsReadOnly) {
   auto r = semaCheck(R"(class Child {
   k: int;
@@ -80,7 +80,7 @@ fn bump(n: inout int) { n = n + 1; }
 fn keep(c: Child) { }
 fn main() -> int { return 0; }
 )");
-  EXPECT_EQ(r.ErrorCount, 9u) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 10u) << r.Diagnostics;
   expectAll(r, {
                    ":10:17: error: 'self' is read-only in 'view fn a'; cannot "
                    "assign to its field 'n'",
@@ -102,6 +102,9 @@ fn main() -> int { return 0; }
                    "parameter",
                    ":18:28: error: 'self' is read-only in 'view fn i'; it "
                    "cannot be named by 'inout' local 't'",
+                   ":19:37: error: 'self' is read-only in 'view fn child', so "
+                   "part of it can only be returned as a 'view': write '-> "
+                   "view Child'",
                });
 }
 

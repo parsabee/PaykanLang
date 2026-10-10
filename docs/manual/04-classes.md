@@ -123,7 +123,12 @@ error: 'a' is a 'view' parameter; 'deposit' is not a 'view fn'
 
 The compiler warns about a method that never changes its object but is not a `view fn`,
 so mark such methods as you write them. An override keeps the marker of the method it
-overrides, so `toString` and `equals` are always `view fn`s. The details are in
+overrides, so `toString` and `equals` are always `view fn`s.
+
+A `view fn` that returns part of its object, such as a `Str` field, says so with
+`-> view Str`: the caller gets a `view` of it, which it can read but not change or keep. A
+method that hands back part of its object for the caller to change is not a `view fn`. The
+details are in
 [the language reference](../language/04-classes.md#methods-that-dont-change-self).
 
 ## Objects are references

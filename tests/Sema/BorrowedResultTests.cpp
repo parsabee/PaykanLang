@@ -154,6 +154,67 @@ fn main() -> view int { return 0; }
   EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
 }
 
+// In a `view fn`, part of `self` that shares what it holds is a `view`, so
+// it is returned as one, `-> view T`; a value type is copied.  Another
+// method returns part of `self` for its caller to change, so it is not one
+// that never changes `self`.
+TEST(BorrowedResult, ViewFnReturnsAView) {
+  auto r = semaCheck(R"(class Counter { n: int; fn __init__() { self.n = 0; } }
+class Box<T> {
+  v: T;
+  fn __init__(v: T) { self.v = v; }
+  view fn get() -> T { return self.v; }
+}
+class Named {
+  name: Str; c: Counter; n: int;
+  fn __init__() { self.name = "a"; self.c = Counter(); self.n = 1; }
+  view fn getName() -> Str { return self.name; }
+  view fn pick(f: bool) -> Counter { return if f then self.c else Counter(); }
+  view fn me() -> Named { return self; }
+  view fn toString() -> Str { return self.name; }
+  view fn peek() -> view Counter { return self.c; }
+  view fn num() -> int { return self.n; }
+  view fn label() -> Str { return self.name + "!"; }
+  fn grab() -> Counter { return self.c; }
+}
+fn main() -> int {
+  b = Box<Str>("s");
+  i = Box<int>(1);
+  return i.get();
+}
+)");
+  expectErrors(
+      r, {":5:31: error: 'self' is read-only in 'view fn get', so part of it "
+          "can only be returned as a 'view': write 'view' before its result "
+          "type",
+          ":10:37: error: 'self' is read-only in 'view fn getName', so part "
+          "of it can only be returned as a 'view': write '-> view Str'",
+          ":11:55: error: 'self' is read-only in 'view fn pick', so part of "
+          "it can only be returned as a 'view': write '-> view Counter'",
+          ":12:34: error: 'self' is read-only in 'view fn me', so part of it "
+          "can only be returned as a 'view': write '-> view Named'",
+          ":13:38: error: 'self' is read-only in 'view fn toString', so part "
+          "of it can only be returned as a 'view'; the method it overrides "
+          "returns a copy, so return a new value"});
+  EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
+
+  r = semaCheck(R"(class Counter { n: int; fn __init__() { self.n = 0; } }
+class Box {
+  c: Counter; n: int;
+  fn __init__() { self.c = Counter(); self.n = 1; }
+  fn grab() -> Counter { return self.c; }
+  fn num() -> int { return self.n; }
+}
+fn main() -> int { return 0; }
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find("'grab' never changes"), std::string::npos)
+      << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find(":6:3: warning: 'num' never changes 'self'"),
+            std::string::npos)
+      << r.Diagnostics;
+}
+
 // A `view` local of a borrowed result views what the call borrowed (its
 // receiver and the arguments to its `view` / `inout` parameters) until the
 // local's last use, and so does a `match` arm's `n: view T` of one.

@@ -605,7 +605,7 @@ TEST(Class, OverrideToStringAndEqualsAccepted) {
     class Person {
       name: Str;
       fn __init__(n: Str) { self.name = n; }
-      view fn toString() -> Str { return self.name; }
+      view fn toString() -> Str { return "Person " + self.name; }
       view fn equals(other: Obj) -> bool { return True; }
     }
     fn main() -> int { return 0; }

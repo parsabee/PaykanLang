@@ -5,25 +5,25 @@
 class Box<T> {
   v: T;
   fn __init__(v: T) { self.v = v; }
-  view fn get() -> T { return self.v; }
+  view fn get() -> view T { return self.v; }
 }
 
 class Pair<K, V> {
   k: K;
   v: V;
   fn __init__(k: K, v: V) { self.k = k; self.v = v; }
-  view fn key() -> K { return self.k; }
+  view fn key() -> view K { return self.k; }
 }
 
 class Holder {
   b: Box<int>;
   ps: Pair<Str, int>[];
   fn __init__() { self.b = Box<int>(1); self.ps = []; }
-  view fn get() -> Box<int> { return self.b; }
+  view fn get() -> view Box<int> { return self.b; }
 }
 
 fn first<T>(xs: T[]) -> T { return xs[0]; }
-fn unbox<T>(b: Box<T>) -> T { return b.get(); }
+fn unbox<T>(b: view Box<T>) -> T { return b.get(); }
 
 fn describe(o: Obj) -> Str {
   match o {
@@ -36,9 +36,9 @@ fn describe(o: Obj) -> Str {
 fn main() -> int {
   h: Holder = Holder();
   n: int = unbox(h.get());
-  m: int = unbox<int>(Box<Box<int>>(h.get()).get());
+  m: int = unbox<int>(Box<Box<int>>(Box<int>(1)).get());
   arr: Box<int>[] = [Box<int>(1), Box<int>(2)];
-  k: Str = Pair<Str, int>("a", 1).key();
+  k: view Str = Pair<Str, int>("a", 1).key();
   s: Str = first(["x"]);
   i: int = first<int>([3]);
   inferred = Box(5);

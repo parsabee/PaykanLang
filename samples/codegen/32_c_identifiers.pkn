@@ -15,7 +15,7 @@ fn f_5F(x: int) -> int { return x + 100; }
 fn f_(x: int) -> int { return x + 1; }
 
 class Box<T> { v: T; fn __init__(v: T) { self.v = v; } view fn get() -> T { return self.v; } }
-class Box_3Cint_3E { w: Str; fn __init__() { self.w = "plain"; } view fn get() -> Str { return self.w; } }
+class Box_3Cint_3E { w: Str; fn __init__() { self.w = "plain"; } view fn get() -> view Str { return self.w; } }
 
 // Fields named like C macros and like the object header's members.
 class P {
