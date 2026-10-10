@@ -198,6 +198,7 @@ bool linkExecutable(const std::vector<std::string> &objects,
                     const std::string &outputPath, const Toolchain &tc,
                     std::ostream &errs) {
   std::vector<std::string> link = objects;
+  link.insert(link.end(), tc.ExtraObjects.begin(), tc.ExtraObjects.end());
   for (const auto &f : tc.ExtraFlags)
     link.push_back(f);
   link.push_back(tc.RuntimeLib);

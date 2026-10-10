@@ -462,7 +462,23 @@ convention:
 
 A native function cannot be generic, cannot be a method, and cannot be `main`.
 Its parameters and its result are copies: `view` and `inout` don't apply to them yet (#21).
-Building and linking the C file next to a module is a separate step (#198).
+
+`paykan` does not build native code: you compile it however you like (any
+compiler, flags or language that produces C-ABI symbols) and pass the objects
+or archives with `--object`, a comma-separated list:
+
+```sh
+cc -std=c11 -fPIC -I<paykan include dir> -c text.c -o text.o
+paykan --object=text.o,more.o main.pkn          # run (JIT or C backend)
+paykan build --object=text.o main.pkn -o main   # an executable
+```
+
+Every backend links the objects; the llvm backend's `run` loads them into the
+JIT, so build them position-independent (`-fPIC`).  There, the C code may call
+the C library and the runtime functions compiled code uses
+(`PaykanString_new`, `PaykanShared_new`, `Paykan_retain`, `Paykan_release`,
+...); a built executable can call any runtime function.  A `PaykanString`'s
+`data` and `len` may be read directly.  See `samples/imports/14_native`.
 
 ---
 

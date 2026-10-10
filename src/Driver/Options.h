@@ -67,6 +67,9 @@ struct Options {
   /// --module-path=<dir> (repeatable): where prebuilt `.pkm` modules are
   /// looked for after the source tree, before $PAYKAN_MODULE_PATH.
   std::vector<std::string> ModulePath;
+  /// --object=<file>[,<file>...] (repeatable): objects or archives defining
+  /// the program's native functions (#198), linked by every native backend.
+  std::vector<std::string> Objects;
   bool EmitPkm = false;        // --emit-pkm: write the module's .pkm, stop
   bool RebuildModules = false; // --rebuild-modules: ignore cache entries
   bool NoModuleCache = false;  // --no-module-cache: never read or write it
