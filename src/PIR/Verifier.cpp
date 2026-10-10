@@ -148,11 +148,15 @@ private:
       define(g.Name, "symbol");
 
     // Runtime externs, and only they, have `$rt.` names (PIR.h), so the
-    // runtime's symbols and the program's never meet.
+    // runtime's symbols and the program's never meet; native C externs (#198)
+    // likewise have `$c.` names.
     auto programName = [&](const std::string &name, const char *what) {
       if (isRuntimeName(name))
         error(where, std::string(what) + " '@" + name +
                          "' has a runtime name (only a runtime extern may)");
+      if (isNativeName(name))
+        error(where, std::string(what) + " '@" + name +
+                         "' has a native name (only a native extern may)");
     };
     auto runtimeExternName = [&](const std::string &name, const char *what) {
       if (!isRuntimeName(name))
@@ -161,7 +165,8 @@ private:
     };
     for (const Function &f : m.Functions) {
       if (f.IsExtern && f.Module.empty()) {
-        runtimeExternName(f.Name, "runtime extern function");
+        if (!isNativeName(f.Name))
+          runtimeExternName(f.Name, "runtime extern function");
       } else {
         programName(f.Name, "function");
         if (!f.Symbol.empty())

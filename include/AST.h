@@ -370,6 +370,9 @@ private:
   CompoundStmt *Body;
   // Type parameter names (interned); empty for an ordinary function.
   std::vector<const std::string *> TypeParams;
+  // The C symbol of a `native fn` (interned), which has no Body; nullptr for
+  // an ordinary function (#198).
+  const std::string *NativeSymbol = nullptr;
   bool View = false; // `view fn`: a method that does not change `self`
   ParamMode ResultMode = ParamMode::Value; // `-> view T`
 
@@ -392,6 +395,12 @@ public:
     return TypeParams;
   }
   bool isGeneric() const { return !TypeParams.empty(); }
+
+  bool isNative() const { return NativeSymbol != nullptr; }
+  const std::string &getNativeSymbol() const { return *NativeSymbol; }
+  void setNativeSymbol(const std::string &internedSymbol) {
+    NativeSymbol = &internedSymbol;
+  }
 
   /// Declared `view fn`: a method whose body does not change `self`
   /// (docs/language/04-classes.md, "Methods that don't change self").

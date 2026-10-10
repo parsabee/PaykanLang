@@ -439,6 +439,33 @@ fn fib(n: int) -> int {
 
 ---
 
+## Native Functions
+
+A `native fn` declares a function whose body is a C function, written against
+the Paykan runtime (`Runtime.h`).  It is how a library implements what Paykan
+cannot express itself, such as the standard library's file I/O (#198):
+
+```pkn
+native fn __io_write(fd: int, s: Str) -> int = "paykan_io_write";
+```
+
+The string is the C symbol.  The rest of the program calls the function like
+any other.  Only these types can cross into C, with the runtime's own
+convention:
+
+| Paykan | C | Notes |
+|--------|---|-------|
+| `int`, `float`, `bool`, `char` | `int64_t`, `double`, `bool`, `int8_t` | by value |
+| `Str`, `Obj` parameter | `PaykanObject *` | borrowed for the call; the C code must not keep it without a retain |
+| `Str`, `Obj` result | `PaykanShared *` | owned (+1); never `NULL` |
+| `Str?`, `Obj?` result | `PaykanShared *` | owned (+1); `NULL` is `None` |
+
+A native function cannot be generic, cannot be a method, and cannot be `main`.
+Its parameters and its result are copies: `view` and `inout` don't apply to them yet (#21).
+Building and linking the C file next to a module is a separate step (#198).
+
+---
+
 ## Semantic Checks
 
 | Error | Trigger |

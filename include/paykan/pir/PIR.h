@@ -74,6 +74,31 @@ inline std::string runtimeSymbol(std::string_view name) {
                                          : name);
 }
 
+/// A native C function a `native fn` calls (#198) is a module-less extern
+/// named kNativePrefix + its C symbol (`@$c.paykan_io_write`).  Unlike a
+/// runtime extern its signature is not the runtime's: the backends declare
+/// it from its PIR signature.
+inline constexpr std::string_view kNativePrefix = "$c.";
+
+/// The PIR name of the native C symbol @p symbol.
+inline std::string nativeName(std::string_view symbol) {
+  std::string name(kNativePrefix);
+  name += symbol;
+  return name;
+}
+
+/// True when @p name is a native extern's PIR name.
+inline bool isNativeName(std::string_view name) {
+  return name.size() > kNativePrefix.size() && name.starts_with(kNativePrefix);
+}
+
+/// The C symbol of a module-less extern, runtime or native.
+inline std::string externCSymbol(std::string_view name) {
+  if (isNativeName(name))
+    return std::string(name.substr(kNativePrefix.size()));
+  return runtimeSymbol(name);
+}
+
 // -- Values and operands
 
 /// An SSA value defined by a parameter or an instruction.  Ids are unique per
