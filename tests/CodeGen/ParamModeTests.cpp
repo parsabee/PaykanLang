@@ -280,3 +280,34 @@ TEST(LocalBorrow, ViewLocalsOfValueTypes) {
   EXPECT_EQ(r.StdOut, "4 3 True True z\n");
   guard.expectNoLeaks("view locals");
 }
+
+// A `view` local of an object, string or array shares what it was given and
+// reads it: its fields and elements, `toString` (an override included), `len`,
+// a `match` arm's name for it, and printing it.
+TEST(LocalBorrow, ViewLocalsOfReferenceTypes) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(
+    class Counter {
+      n: int;
+      fn __init__(n: int) { self.n = n; }
+      fn toString() -> Str { return "counter " + Str(self.n); }
+    }
+    class Fast : Counter { fn __init__(n: int) { __super__(n); } }
+    fn main() -> int {
+      c: Counter = Fast(3);
+      v: view = c;
+      s: view = "abc";
+      xs: view int[] = [4, 5];
+      o: view Counter? = c;
+      kind = "plain";
+      match v { f: Fast { kind = "fast " + Str(f.n); } _ { } }
+      println(v);
+      println(v.toString() + " " + s + Str(s.len()) + " " +
+              Str(xs.len() + xs[1]) + " " + Str(o != None) + " " + kind);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "counter 3\ncounter 3 abc3 7 True fast 3\n");
+  guard.expectNoLeaks("view reference locals");
+}

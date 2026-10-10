@@ -178,8 +178,8 @@ fn take(v: view int, p: int, q: inout int) {
 fn main() -> int { return 0; })");
   expectErrors(
       r,
-      {":12:8: error: 'view' parameter 'v' cannot be passed to 'inout' "
-       "parameter 'n'",
+      {":12:8: error: 'v' is a 'view' parameter; it cannot be passed to "
+       "'inout' parameter 'n'",
        ":13:8: error: 'k' is declared with 'let' and cannot be passed to "
        "'inout' parameter 'n'",
        ":14:8: error: argument 1 of 'bump' must be a variable or a field: "
@@ -294,8 +294,8 @@ fn main() -> int {
   paykan::sema::Sema::ModuleCache.erase(key);
   EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
   expectErrors(
-      r, {":2:62: error: 'view' parameter 'n' cannot be passed to 'inout' "
-          "parameter 'n'",
+      r, {":2:62: error: 'n' is a 'view' parameter; it cannot be passed to "
+          "'inout' parameter 'n'",
           ":4:3: error: override of 'put' must keep 'inout' on parameter 'n'",
           ":8:13: error: 'k' is declared with 'let' and cannot be passed to "
           "'inout' parameter 'n'",
@@ -308,14 +308,13 @@ fn main() -> int {
 
 // -- Local borrows
 
-// A `view` local is a read-only copy of any expression of a value type:
-// with its type inferred or written, it cannot be assigned, destructured
-// into or passed to an `inout` parameter.  Other types and `inout` locals
-// are not supported yet.
+// A `view` local reads any expression, with its type inferred or written:
+// it cannot be assigned, destructured into or passed to an `inout`
+// parameter.  `inout` locals are not supported yet.
 TEST(LocalBorrow, ViewLocals) {
   auto ok = semaCheck(R"(
     enum Color { Red, Green }
-    fn twice(n: int) -> int { return 2 * n; }
+    fn twice(n: view int) -> int { return 2 * n; }
     fn main() -> int {
       k = 3;
       v: view = k + 1;
@@ -337,13 +336,133 @@ fn main() -> int {
   i: inout = k;
   return 0;
 })");
-  EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
   expectErrors(
       r, {":5:3: error: cannot assign to 'view' local 'v'",
           ":6:3: error: cannot assign to 'view' local 'v'",
-          ":7:8: error: 'view' local 'v' cannot be passed to 'inout' "
+          ":7:8: error: 'v' is a 'view' local; it cannot be passed to 'inout' "
           "parameter 'n'",
-          ":8:3: error: a 'view' local of type 'Str' is not supported yet: "
-          "only int, float, bool, char and enum",
           ":9:3: error: an 'inout' local ('i') is not supported yet"});
+}
+
+// Nothing reached through a `view` local of an object, string or array can
+// change: no field or element write, no `inout` argument, and only the
+// methods that only read (`toString`, an override of it, `len`) can be called
+// on it.  A `match` arm's name for it is a `view` too.
+TEST(LocalBorrow, ViewOfReferenceTypes) {
+  auto r = semaCheck(R"(class Counter {
+  n: int;
+  fn __init__() { self.n = 0; }
+  fn tick() { self.n = self.n + 1; }
+  fn toString() -> Str { return "c" + Str(self.n); }
+}
+fn bump(n: inout int) { n = n + 1; }
+fn main() -> int {
+  v: view = Counter();
+  v.tick();
+  v.n = 2;
+  bump(v.n);
+  s: view = "abc";
+  s.concat("d");
+  a: view = [1, 2];
+  a.push(3);
+  a[0] = 5;
+  match v { x: Counter { x.tick(); x = Counter(); } }
+  println(v.toString() + s + Str(s.len() + a.len() + a[0] + v.n));
+  return 0;
+})");
+  EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
+  expectErrors(
+      r, {":10:3: error: 'v' is a 'view' local; 'tick' may change it",
+          ":11:3: error: 'v' is a 'view' local; cannot assign to its field 'n'",
+          ":12:8: error: 'v' is a 'view' local; it cannot be passed to "
+          "'inout' parameter 'n'",
+          ":14:3: error: 's' is a 'view' local; 'concat' may change it",
+          ":16:3: error: 'a' is a 'view' local; 'push' may change it",
+          ":17:3: error: 'a' is a 'view' local; cannot assign to its "
+          "elements",
+          ":18:26: error: 'x' is bound to a 'view'; 'tick' may change it",
+          ":18:36: error: cannot assign to 'x': it is bound to a "
+          "'view'"});
+}
+
+// A `view` stays one: it can only be passed on to a `view` parameter,
+// whatever its type, and one that shares what it holds (an object, string,
+// array, tuple or optional) is never stored (assigned, put in an array or
+// tuple, pushed) nor returned.  The builtin functions only read, but
+// `Str(s)` returns `s` itself; a value type is copied when it is assigned.
+TEST(LocalBorrow, AViewStaysAView) {
+  auto r = semaCheck(R"(class Counter { n: int; fn __init__() { self.n = 0; } }
+class Holder { c: Counter; fn __init__(c: Counter) { self.c = c; } }
+fn report(c: Counter) { }
+fn twice(n: int) -> int { return 2 * n; }
+fn look(n: view int) -> int { return n; }
+fn pick(c: Counter) -> Counter {
+  v: view = c;
+  return v;
+}
+fn main() -> int {
+  v: view = Counter();
+  k: view = 3;
+  report(v);
+  d = v;
+  e: Counter = v;
+  xs = [v];
+  t = (v, 1);
+  ys: Counter[] = [];
+  ys.push(v);
+  h = Holder(v);
+  h.c = v;
+  flag = True;
+  f = if flag then v else Counter();
+  twice(k);
+  twice(v.n);
+  s: view = "s";
+  u = Str(s);
+  println(v);
+  m = k;
+  ints: int[] = [];
+  ints.push(k);
+  return look(k) + look(v.n) + twice(m) + twice(k + 1);
+})");
+  const std::string kStore =
+      "'v' is a 'view' local; it cannot be stored, only read or passed to a "
+      "'view' parameter";
+  const std::string kPass =
+      "it can only be passed to a 'view' parameter, and parameter 1 of '";
+  for (const std::string &diag :
+       {std::string(":8:10: error: 'v' is a 'view' local; it cannot be "
+                    "returned"),
+        ":13:10: error: 'v' is a 'view' local; " + kPass + "report' is not one",
+        ":14:7: error: " + kStore, ":15:16: error: " + kStore,
+        ":16:9: error: " + kStore, ":17:8: error: " + kStore,
+        ":19:11: error: " + kStore,
+        ":20:14: error: 'v' is a 'view' local; " + kPass + "Holder' is not one",
+        ":21:9: error: " + kStore, ":23:7: error: " + kStore,
+        ":24:9: error: 'k' is a 'view' local; " + kPass + "twice' is not one",
+        ":25:9: error: 'v' is a 'view' local; " + kPass + "twice' is not one",
+        ":27:11: error: 's' is a 'view' local; " + kPass + "Str' is not one"})
+    EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
+                                                           << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 13u) << r.Diagnostics;
+  for (const char *line : {":28:", ":29:", ":30:", ":31:", ":32:"})
+    EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
+                                                           << r.Diagnostics;
+}
+
+// A `view` parameter stays one too: it can only be passed on to a `view`
+// parameter.
+TEST(ParamMode, ViewParametersOnlyPassToView) {
+  auto r = semaCheck(R"(fn twice(n: int) -> int { return 2 * n; }
+fn look(n: view int) -> int { return n; }
+fn f(n: view int) -> int {
+  println(Str(n));
+  m = n;
+  return twice(n) + look(n) + twice(m);
+}
+fn main() -> int { return f(1); })");
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  expectErrors(r, {":6:16: error: 'n' is a 'view' parameter; it can only be "
+                   "passed to a 'view' parameter, and parameter 1 of 'twice' "
+                   "is not one"});
 }
