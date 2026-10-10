@@ -401,6 +401,42 @@ TEST(ASTInterchange, NestingIsBounded) {
       << error;
 }
 
+// A `view fn` ends with `(qual view)`; nothing else qualifies a function.
+TEST(ASTInterchange, ViewFn) {
+  parser::ParserDriver driver("recursive-descent");
+  auto path =
+      std::filesystem::temp_directory_path() /
+      ("paykan_interchange_view_" + std::to_string(::getpid()) + ".pkn");
+  {
+    std::ofstream(path) << "class C { n: int;\n"
+                           "  view fn get() -> int { return self.n; }\n"
+                           "  fn set() { self.n = 1; } }\n";
+  }
+  ASSERT_EQ(driver.parseFile(path.string()), 0);
+  std::filesystem::remove(path);
+  std::string text = write(*driver.getRoot());
+  EXPECT_EQ(text.find("(qual view)"), text.rfind("(qual view)")) << text;
+  EXPECT_NE(text.find("(qual view)"), std::string::npos) << text;
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *back = read(text, ctx, error);
+  ASSERT_NE(back, nullptr) << error;
+  const auto &methods = back->getClassDecls()[0]->getMethods();
+  EXPECT_TRUE(methods[0]->isView());
+  EXPECT_FALSE(methods[1]->isView());
+  EXPECT_EQ(dump(back), dump(driver.getRoot()));
+  EXPECT_EQ(write(*back), text);
+
+  for (const char *bad : {"(qual inout)", "(qual)", "(qual frob)"}) {
+    std::string doc = "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ "
+                      "(block) " +
+                      std::string(bad) + ")))";
+    EXPECT_EQ(read(doc, ctx, error), nullptr) << bad;
+    EXPECT_NE(error.find("expected (qual view)"), std::string::npos)
+        << bad << ": " << error;
+  }
+}
+
 // A parameter's mode is the optional `(qual view)` / `(qual inout)` item.
 TEST(ASTInterchange, ParamModes) {
   parser::ParserDriver driver("recursive-descent");
@@ -489,6 +525,81 @@ TEST(ASTInterchange, LetLocals) {
   EXPECT_NE(error.find("a let declaration has an initialiser"),
             std::string::npos)
       << error;
+}
+
+// A local borrow is a `var` with a trailing `(qual view)` or
+// `(qual inout)`, and an initialiser.
+TEST(ASTInterchange, LocalBorrows) {
+  const std::string text =
+      "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
+      "(decl (var \"v\" _ (int 1) (qual view))) (decl (var \"i\" "
+      "(named-type \"int\") (ident \"v\") (qual inout)))))))";
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *tu = read(text, ctx, error);
+  ASSERT_NE(tu, nullptr) << error;
+  std::string d = dump(tu);
+  EXPECT_NE(d.find("VarDecl 'v' view\n"), std::string::npos) << d;
+  EXPECT_NE(d.find("VarDecl 'i' inout type\n"), std::string::npos) << d;
+  std::string written = write(*tu);
+  ast::ASTContext ctx2;
+  ast::TranslationUnit *back = read(written, ctx2, error);
+  ASSERT_NE(back, nullptr) << error;
+  EXPECT_EQ(dump(back), d);
+
+  struct Case {
+    const char *Var;
+    const char *Error;
+  };
+  for (const Case &c : {Case{"(var \"n\" (named-type \"int\") _ (qual view))",
+                             "a local borrow has an initialiser"},
+                        Case{"(var \"n\" _ (int 1) (qual view) (let))",
+                             "a local borrow cannot be let"},
+                        Case{"(var \"n\" _ (int 1) (qual mut))",
+                             "expected (qual view) or (qual inout)"}}) {
+    std::string doc = "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) "
+                      "_ (block (decl " +
+                      std::string(c.Var) + ")))))";
+    EXPECT_EQ(read(doc, ctx, error), nullptr) << c.Var;
+    EXPECT_NE(error.find(c.Error), std::string::npos) << c.Var << ": " << error;
+  }
+}
+
+// A `match` arm's mode is a `(qual view)` / `(qual inout)` after its type.
+TEST(ASTInterchange, MatchArmModes) {
+  const std::string text =
+      "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
+      "(match (ident \"a\") (type-arm \"d\" (named-type \"Dog\") (qual "
+      "view) (block)) (type-arm \"c\" (named-type \"Cat\") (qual inout) "
+      "(block)) (wildcard-arm \"\" (block)))))))";
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *tu = read(text, ctx, error);
+  ASSERT_NE(tu, nullptr) << error;
+  std::string d = dump(tu);
+  EXPECT_NE(d.find("MatchArm binding='d' view\n"), std::string::npos) << d;
+  EXPECT_NE(d.find("MatchArm binding='c' inout\n"), std::string::npos) << d;
+  std::string written = write(*tu);
+  ast::ASTContext ctx2;
+  ast::TranslationUnit *back = read(written, ctx2, error);
+  ASSERT_NE(back, nullptr) << error;
+  EXPECT_EQ(dump(back), d);
+
+  struct Case {
+    const char *Arm;
+    const char *Error;
+  };
+  for (const Case &c :
+       {Case{"(type-arm \"\" (named-type \"Dog\") (qual view) (block))",
+             "an arm without a binding has no mode"},
+        Case{"(type-arm \"d\" (named-type \"Dog\") (qual mut) (block))",
+             "expected (qual view) or (qual inout)"}}) {
+    std::string doc = "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) "
+                      "_ (block (match (ident \"a\") " +
+                      std::string(c.Arm) + ")))))";
+    EXPECT_EQ(read(doc, ctx, error), nullptr) << c.Arm;
+    EXPECT_NE(error.find(c.Error), std::string::npos) << c.Arm << ": " << error;
+  }
 }
 
 TEST(Interchange, MovIsRemoved) {

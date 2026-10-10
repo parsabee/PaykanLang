@@ -81,10 +81,10 @@ or more.
 | `(module NAME ALIAS)` | one imported module; `ALIAS` is a string, `""` for none (`import m as x` has `(module "m" "x")`; `import a::{m, n}` has two) |
 | `(enum LOC NAME NAME...)` | `enum E { A, B }`: the name, then the variants |
 | `(class LOC NAME SUPER (type-params NAME...) (fields VAR...) (methods FN...))` | a class. `SUPER` is the superclass's name or `""`; a generic class has type parameters. Each field is a `var` with a type and no initialiser |
-| `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? BLOCK)` | a function or method; the `TYPE` is the return type, `_` for none |
+| `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? BLOCK QUAL?)` | a function or method; the `TYPE` is the return type, `_` for none. A `view fn` ends with `(qual view)` |
 | `(fn LOC NAME (type-params) (params PARAM...) TYPE? (native STRING))` | a `native fn` (#198): the C symbol in place of the body; never generic |
 | `(param NAME TYPE QUAL?)` | one parameter; `QUAL` is its mode, `(qual view)` or `(qual inout)`, absent for an ordinary (by-value) parameter: `n: inout int` is `(param "n" (named-type "int") (qual inout))` |
-| `(var LOC NAME TYPE? EXPR? LET?)` | a variable or field declaration: `x: int = 1` is `(var "x" (named-type "int") (int 1))`. `LET` is `(let)` for a `let` local, which has an initialiser and is never a field: `let n = 1;` is `(var "n" _ (int 1) (let))` |
+| `(var LOC NAME TYPE? EXPR? MODE? LET?)` | a variable or field declaration: `x: int = 1` is `(var "x" (named-type "int") (int 1))`. `MODE` is `(qual view)` or `(qual inout)` for a local borrow, which has an initialiser and is never a field or `let`: `v: view = k;` is `(var "v" _ (ident "k") (qual view))`. `LET` is `(let)` for a `let` local, which has an initialiser and is never a field: `let n = 1;` is `(var "n" _ (int 1) (let))` |
 
 ### Types
 
@@ -118,7 +118,7 @@ to resolve, which reports unknown names.
 | `(while LOC EXPR BLOCK)` | |
 | `(break LOC)`, `(continue LOC)` | |
 | `(match LOC EXPR ARM...)` | `match e { ... }` |
-| `(type-arm LOC STR TYPE BLOCK)` | `b: T { ... }`; the binding `STR` is `""` for `T { ... }` |
+| `(type-arm LOC STR TYPE QUAL? BLOCK)` | `b: T { ... }`; the binding `STR` is `""` for `T { ... }`. `QUAL` is a binding's mode, `(qual view)` for `b: view T { ... }` or `(qual inout)`, and needs a binding |
 | `(value-arm LOC STR EXPR BLOCK)` | `42 { ... }`, `"hi" { ... }`; binding as above |
 | `(wildcard-arm LOC STR BLOCK)` | `_ { ... }` |
 
@@ -191,7 +191,7 @@ it.
 field removed, renamed or changed in meaning, or a node a reader must handle
 added (a new language construct). Within one version the format does not
 change, except for optional trailing items that only new constructs use: a
-parameter's `(qual ...)` and a local's `(let)`. They keep the version, because every document that
+parameter's or a local borrow's `(qual ...)` and a local's `(let)`. They keep the version, because every document that
 was valid stays valid and means the same, and a reader that predates an item
 rejects a document that uses it (an unexpected field) instead of misreading
 it. The core's tests write and read back the AST of every program in the

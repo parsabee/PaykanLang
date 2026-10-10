@@ -2,15 +2,15 @@
 // root with their correct signatures are valid.
 class Animal {
   fn __init__() {}
-  fn describe() -> int { return 1; }
-  fn toString() -> Str { return "animal"; }
-  fn equals(other: Obj) -> bool { return True; }
+  view fn describe() -> int { return 1; }
+  view fn toString() -> Str { return "animal"; }
+  view fn equals(other: Obj) -> bool { return True; }
 }
 
 class Dog : Animal {
   fn __init__() { __super__(); }
-  fn describe() -> int { return 2; }       // matching signature
-  fn toString() -> Str { return "dog"; }   // valid Obj override
+  view fn describe() -> int { return 2; }       // matching signature
+  view fn toString() -> Str { return "dog"; }   // valid Obj override
 }
 
 fn main() -> int {

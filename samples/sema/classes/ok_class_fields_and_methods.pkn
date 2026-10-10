@@ -8,11 +8,11 @@ class Point {
     self.y = y;
   }
 
-  fn getX() -> int {
+  view fn getX() -> int {
     return self.x;
   }
 
-  fn getY() -> int {
+  view fn getY() -> int {
     return self.y;
   }
 }

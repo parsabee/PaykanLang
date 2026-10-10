@@ -650,14 +650,27 @@ private:
       return fn;
     }
     CompoundStmt *body = block(f, "the function's body");
-    if (!body || !f.done())
+    if (!body)
       return nullptr;
-    return Ctx.make<FuncDecl>(loc, *name, std::move(params), ret, body,
-                              std::move(tparams));
+    // A `view fn` ends with `(qual view)`.
+    bool view = false;
+    if (const SExpr *q = f.optionalList("qual")) {
+      const SExpr *v = q->Items.size() == 1 ? &q->Items[0] : nullptr;
+      if (!v || v->K != SExpr::Symbol || v->Text != "view")
+        return fail(*q, "expected (qual view)"), nullptr;
+      view = true;
+    }
+    if (!f.done())
+      return nullptr;
+    auto *fn = Ctx.make<FuncDecl>(loc, *name, std::move(params), ret, body,
+                                  std::move(tparams));
+    fn->setView(view);
+    return fn;
   }
 
-  /// A parameter's optional trailing `(qual view)` / `(qual inout)` into
-  /// @p out; false (after failing) for any other `(qual ...)`.
+  /// A parameter's or a local borrow's optional `(qual view)` /
+  /// `(qual inout)` into @p out; false (after failing) for any other
+  /// `(qual ...)`.
   bool paramMode(Fields &f, ParamMode &out) {
     const SExpr *q = f.optionalList("qual");
     if (!q)
@@ -690,16 +703,26 @@ private:
       if (!init)
         return nullptr;
     }
-    // `let x = e;` carries a trailing (let), and has an initialiser.
+    // A local borrow (`x: view = e;`) carries (qual view) or (qual inout),
+    // and `let x = e;` a trailing (let); each has an initialiser.
+    ParamMode mode = ParamMode::Value;
+    if (!paramMode(f, mode))
+      return nullptr;
+    const bool borrow = mode != ParamMode::Value;
+    if (borrow && !init)
+      return fail(e, "a local borrow has an initialiser"), nullptr;
     const SExpr *let = f.optionalList("let");
     if (let && !let->Items.empty())
       return fail(*let, "(let) takes no fields"), nullptr;
     if (let && !init)
       return fail(*let, "a let declaration has an initialiser"), nullptr;
+    if (let && borrow)
+      return fail(*let, "a local borrow cannot be let"), nullptr;
     if (!f.done())
       return nullptr;
     auto *vd = Ctx.make<VarDecl>(loc, *name, ty, init);
     vd->setLet(let != nullptr);
+    vd->setMode(mode);
     return vd;
   }
 
@@ -942,9 +965,16 @@ private:
     MatchArm *arm = nullptr;
     if (e.Text == "type-arm") {
       Type *ty = type(f, "the matched type");
+      ParamMode mode = ParamMode::Value;
+      if (ty && !paramMode(f, mode))
+        return nullptr;
+      if (mode != ParamMode::Value && binding->empty())
+        return fail(e, "an arm without a binding has no mode"), nullptr;
       CompoundStmt *body = ty ? block(f, "the arm's body") : nullptr;
-      if (body)
+      if (body) {
         arm = Ctx.make<MatchArm>(loc, *binding, ty, body);
+        arm->setMode(mode);
+      }
     } else if (e.Text == "value-arm") {
       Expr *pattern = expr(f, "the matched value");
       CompoundStmt *body = pattern ? block(f, "the arm's body") : nullptr;

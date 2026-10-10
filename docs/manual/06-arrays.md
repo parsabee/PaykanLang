@@ -183,7 +183,7 @@ class Task {
   title: Str;
   done: bool;
   fn __init__(title: Str) { self.title = title; self.done = False; }
-  fn toString() -> Str {
+  view fn toString() -> Str {
     return (if self.done then "[x] " else "[ ] ") + self.title;
   }
 }
@@ -202,7 +202,7 @@ class TaskList {
     return True;
   }
 
-  fn pending() -> int {
+  view fn pending() -> int {
     count = 0;
     i = 0;
     while (i < self.tasks.len()) {
@@ -225,7 +225,7 @@ class TaskList {
     return removed;
   }
 
-  fn show() {
+  view fn show() {
     i = 0;
     while (i < self.tasks.len()) {
       println(Str(i + 1) + ". " + self.tasks[i].toString());

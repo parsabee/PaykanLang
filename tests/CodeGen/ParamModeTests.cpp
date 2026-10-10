@@ -255,3 +255,320 @@ TEST(ParamMode, InoutFieldsArePassedByAddress) {
   EXPECT_EQ(r.StdOut, "seen 2\n5 0 1 1 1\n");
   guard.expectNoLeaks("inout fields");
 }
+
+// A `view` parameter of an object, string, array or type parameter shares
+// what it was given, like a parameter without a mode; it reads it and passes
+// it on to other `view` parameters.
+TEST(ParamMode, ViewParametersOfReferenceTypes) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(
+    class Counter {
+      n: int;
+      fn __init__(n: int) { self.n = n; }
+      fn tick() { self.n = self.n + 1; }
+    }
+    class Fast : Counter { fn __init__(n: int) { __super__(n); } }
+    fn sum(c: view Counter, xs: view int[], s: view Str) -> int {
+      return c.n + xs.len() + s.len() + xs[0];
+    }
+    fn passOn(c: view Counter, xs: view int[]) -> int {
+      return sum(c, xs, "ab");
+    }
+    fn size<T>(xs: view T[]) -> int { return xs.len(); }
+    fn main() -> int {
+      c = Counter(30);
+      c.tick();
+      println(Str(sum(c, [1, 2], "abc")) + " " + Str(sum(Fast(4), [5], "")) +
+              " " + Str(passOn(c, [7])) + " " + Str(size(["a", "b"])) +
+              Str(size([c, c, c])));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "37 10 41 23\n");
+  guard.expectNoLeaks("view reference parameters");
+}
+
+// An `inout` parameter of a reference type is the caller's variable itself:
+// assigning to it replaces what the caller holds (releasing the old value,
+// with nothing retained for the call), through a field, passing on, a
+// method's virtual slot, a template, destructuring and self-assignment; its
+// value can be returned and kept, and another reference to the old object
+// keeps that object alive.
+TEST(ParamMode, InoutParametersOfReferenceTypes) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(
+    class Counter {
+      n: int;
+      fn __init__(n: int) { self.n = n; }
+      fn tick() { self.n = self.n + 1; }
+      fn adopt(c: inout Counter) { c = Counter(self.n); }
+    }
+    class Fast : Counter {
+      fn __init__(n: int) { __super__(n); }
+      fn adopt(c: inout Counter) { c = Fast(10 * self.n); }
+    }
+    class Holder { c: Counter; fn __init__() { self.c = Counter(100); } }
+    fn same(c: inout Counter) { c = c; c.tick(); }
+    fn keep(c: inout Counter) -> Counter { return c; }
+    fn pass(c: inout Counter) { same(c); reset(c); }
+    fn reset(c: inout Counter) { c = Counter(50); }
+    fn swap<T>(a: inout T, b: inout T) { t = a; a = b; b = t; }
+    fn flip(a: inout Str, b: inout Str) { a, b = (b, a); }
+    fn clear(o: inout Counter?) { o = None; }
+    fn fill(o: inout Counter?) { o = Counter(5); }
+    fn pair(t: inout (int, Str)) { t = (t.0 + 1, t.1 + "?"); }
+    fn grow(xs: inout int[]) { xs.push(7); xs = [xs.len(), 9]; }
+    fn seen(c: inout Counter, other: Counter) -> int {
+      c = Counter(0);
+      return other.n;
+    }
+    fn main() -> int {
+      x = Counter(1);
+      same(x);
+      k = keep(x);
+      pass(x);
+      f: Counter = Fast(3);
+      f.adopt(x);
+      a = "a"; b = "b";
+      swap(a, b);
+      flip(a, b);
+      i = 1; j = 2;
+      swap(i, j);
+      p = Counter(7); q = Counter(8);
+      swap(p, q);
+      o: Counter? = Counter(3);
+      clear(o);
+      fill(o);
+      t = (1, "t");
+      pair(t);
+      xs = [1];
+      grow(xs);
+      y = Counter(4);
+      z = y;
+      w = seen(y, z);
+      h = Holder();
+      reset(h.c);
+      swap(h.c, p);
+      println(Str(k.n) + " " + Str(x.n) + " " + a + b + " " + Str(i) +
+              Str(j) + " " + Str(p.n) + Str(q.n) + " " + Str(o != None) +
+              " " + Str(t.0) + t.1 + " " + Str(xs[0]) + Str(xs[1]) + " " +
+              Str(w) + Str(y.n) + " " + Str(h.c.n));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "3 30 ab 21 507 True 2t? 29 40 8\n");
+  guard.expectNoLeaks("inout reference parameters");
+}
+
+// -- Local borrows
+
+// A `view` local holds a copy of its initializer, of every value type, with
+// its type inferred or written.
+TEST(LocalBorrow, ViewLocalsOfValueTypes) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(
+    enum Color { Red, Green }
+    fn main() -> int {
+      k = 3;
+      v: view = k + 1;
+      w: view float = k;
+      c: view Color = Color::Green;
+      b: view = v > 2;
+      ch: view char = 'z';
+      println(Str(v) + " " + Str(w) + " " + Str(c == Color::Green) + " " +
+              Str(b) + " " + Str(ch));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "4 3 True True z\n");
+  guard.expectNoLeaks("view locals");
+}
+
+// A `view` local of an object, string or array shares what it was given and
+// reads it: its fields and elements, `toString` (an override included), `len`,
+// a `match` arm's name for it, and printing it.
+TEST(LocalBorrow, ViewLocalsOfReferenceTypes) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(
+    class Counter {
+      n: int;
+      fn __init__(n: int) { self.n = n; }
+      view fn toString() -> Str { return "counter " + Str(self.n); }
+    }
+    class Fast : Counter { fn __init__(n: int) { __super__(n); } }
+    fn main() -> int {
+      c: Counter = Fast(3);
+      v: view = c;
+      s: view = "abc";
+      xs: view int[] = [4, 5];
+      o: view Counter? = c;
+      kind = "plain";
+      match v { f: Fast { kind = "fast " + Str(f.n); } _ { } }
+      println(v);
+      println(v.toString() + " " + s + Str(s.len()) + " " +
+              Str(xs.len() + xs[1]) + " " + Str(o != None) + " " + kind);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "counter 3\ncounter 3 abc3 7 True fast 3\n");
+  guard.expectNoLeaks("view reference locals");
+}
+
+// An `inout` local is another name for a variable or a field, of every
+// type: assigning to it writes there (an object, string, array or optional
+// is replaced, the old one released), and it passes its address on to an
+// `inout` parameter.  A field's object stays alive while the local can be
+// used.
+TEST(LocalBorrow, InoutLocalsWriteThrough) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(
+    class Counter {
+      n: int;
+      fn __init__(n: int) { self.n = n; }
+      fn get() -> int { return self.n; }
+    }
+    class Holder {
+      c: Counter; total: int;
+      fn __init__() { self.c = Counter(100); self.total = 0; }
+      fn addTo(k: int) { t: inout = self.total; t = t + k; }
+    }
+    fn bump(n: inout int) { n = n + 1; }
+    fn make() -> Holder { return Holder(); }
+    fn main() -> int {
+      k = 1;
+      x: inout = k;
+      x = x + 10;
+      bump(x);
+      f = 1.5;
+      g: inout float = f;
+      g = g * 2;
+      s = "hi";
+      t: inout = s;
+      t = t + "!";
+      c = Counter(1);
+      cc: inout = c;
+      cc = Counter(7);
+      h = Holder();
+      hc: inout = h.c;
+      hc = Counter(9);
+      ht: inout = h.total;
+      ht = 5;
+      h.addTo(3);
+      xs = [1, 2];
+      ys: inout = xs;
+      ys.push(3);
+      ys = [ys.len(), 8];
+      o: Counter? = None;
+      oo: inout = o;
+      oo = Counter(4);
+      m: inout = make().total;
+      m = m + 1;
+      println(Str(k) + " " + Str(f) + " " + s + " " + Str(c.get()) + " " +
+              Str(h.c.get()) + " " + Str(h.total) + " " + Str(xs[0]) +
+              Str(xs[1]) + " " + Str(o != None) + " " + Str(m));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "12 3 hi! 7 9 8 38 True 1\n");
+  guard.expectNoLeaks("inout locals");
+}
+
+// A `match` arm's `n: view T` reads the subject as a plain binding would:
+// an object (passed on to a `view` parameter), a string and a primitive
+// unwrapped from optionals.
+TEST(LocalBorrow, ViewArms) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(
+    class Animal {
+      n: int;
+      fn __init__() { self.n = 4; }
+      view fn get() -> int { return self.n; }
+    }
+    class Dog : Animal { fn __init__() { __super__(); } }
+    fn show(a: view Animal) -> int { return a.get(); }
+    fn main() -> int {
+      a: Animal = Dog();
+      match a {
+        d: view Dog { println(Str(d.get() + show(d))); }
+        _ { }
+      }
+      o: Str? = "hi";
+      match o {
+        s: view Str { println(s + Str(s.len())); }
+        None { }
+      }
+      n: int? = 7;
+      match n {
+        k: view int { println(Str(k * 2)); }
+        None { }
+      }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "8\nhi2\n14\n");
+  guard.expectNoLeaks("view arms");
+}
+
+// A `match` arm's `n: inout T` writes through to the subject: a variable
+// (another reference to the old object keeps it), a field, an optional, and
+// an `inout` parameter passed on.  The match keeps the object it matched
+// until it ends.
+TEST(LocalBorrow, InoutArmsWriteThrough) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(
+    class Animal {
+      n: int;
+      fn __init__(n: int) { self.n = n; }
+      fn tick() { self.n = self.n + 1; }
+      view fn get() -> int { return self.n; }
+    }
+    class Dog : Animal { fn __init__(n: int) { __super__(n); } }
+    class Home { pet: Animal; fn __init__() { self.pet = Dog(1); } }
+    fn adopt(p: inout Animal) {
+      match p {
+        d: inout Dog { d = Dog(d.get() + 30); }
+        _ { }
+      }
+    }
+    fn main() -> int {
+      a: Animal = Dog(5);
+      keep = a;
+      match a {
+        d: inout Dog {
+          d.tick();
+          d = Dog(10);
+          d.tick();
+          print(Str(d.get()) + " ");
+        }
+        _ { }
+      }
+      print(Str(a.get()) + " " + Str(keep.get()) + " ");
+      h = Home();
+      match h.pet {
+        d: inout Dog { d = Dog(42); }
+        _ { }
+      }
+      o: Animal? = Animal(3);
+      match o {
+        x: inout Animal { x = Dog(7); }
+        None { }
+      }
+      match o {
+        y: Dog { print("dog" + Str(y.get()) + " "); }
+        _ { }
+      }
+      adopt(a);
+      println(Str(h.pet.get()) + " " + Str(a.get()));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "11 11 6 dog7 42 41\n");
+  guard.expectNoLeaks("inout arms");
+}

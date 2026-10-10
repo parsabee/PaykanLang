@@ -408,9 +408,8 @@ Val ModuleLowering::lowerMemberAssignStmt(ast::MemberAssignStmt *node) {
     if (isNoneForOptional(node->getValue()))
       newShared = Val::null(Type::Box);
     if (auto *rhsId = ast::dyn_cast<ast::Identifier>(node->getValue())) {
-      if (CurrentScope && CurrentScope->isOwned(rhsId->getName())) {
-        newShared =
-            B.load(CurrentScope->lookup(rhsId->getName()), rhsId->getName());
+      if (CurrentScope && holdsBox(rhsId->getName())) {
+        newShared = loadVarBox(rhsId->getName());
         emitRetain(newShared);
       }
     }

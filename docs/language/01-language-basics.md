@@ -230,6 +230,112 @@ too. A `let` variable cannot be passed to an `inout` parameter
 plain or `view` one. Like any variable, an inner block may declare its own variable with the
 same name.
 
+### Local borrows
+
+A local can be declared with a mode, `view` or `inout`, written where the type goes, as for
+a [parameter](02-functions-and-calling.md#parameter-modes-view-and-inout). The type may be
+left off; it is the initializer's:
+
+```pkn
+fn main() -> int {
+  k = 3;
+  v: view = k + 1;     // a read-only local
+  w: view float = k;
+  println(Str(v) + " " + Str(w));
+  return 0;
+}
+```
+
+Output:
+
+```
+4 3
+```
+
+A `view` local is read-only: it cannot be assigned or be a destructuring target (`cannot
+assign to 'view' local 'v'`), and it cannot be passed to an `inout` parameter. Its
+initializer may be any expression. A `view` local of a value type holds a copy of it; one
+of an object, string or array holds the same object, string or array, which cannot be
+changed through it: no field or element write, and only a `view fn`
+([Methods that don't change `self`](04-classes.md#methods-that-dont-change-self)), such as
+`toString`, `equals`, `len` or `length`, can be called on it (`'v' is a 'view' local;
+'tick' is not a 'view fn'`). A `view` local stays one: it can only be passed on to a `view` parameter,
+and is never stored or returned
+([A `view` stays a `view`](02-functions-and-calling.md#a-view-stays-a-view)).
+
+An `inout` local, `x: inout = place;`, is another name for a variable or a field: reading
+it reads there, and assigning to it writes there, of any type (an object, string or array is
+replaced, as by an assignment to the variable). It can be passed on to an `inout`
+parameter:
+
+```pkn
+class Account {
+  balance: int;
+  fn __init__() { self.balance = 0; }
+}
+
+fn main() -> int {
+  a = Account();
+  b: inout = a.balance;
+  b = b + 10;
+  names = ["x"];
+  n: inout = names;
+  n = ["y", "z"];
+  println(Str(a.balance) + " " + Str(names.len()));
+  return 0;
+}
+```
+
+Output:
+
+```
+10 2
+```
+
+What it names follows the rules of an
+[`inout` argument](02-functions-and-calling.md#inout-the-callers-storage): a variable or a
+field, also of the object a `let` local holds, of exactly the local's type (`'inout' local
+'f' has type 'float', but what it names has type 'int'`). An expression, an array element
+(not yet), a string's character, `self`, a `let` local and anything reached through a
+`view` are errors. An object whose field it names stays alive while the local can be used.
+
+A local borrow of a variable (or of a field or element reached from one) is exclusive while
+it is live, from its declaration to the last statement of its block that uses it; a loop
+that uses it keeps it live for the whole loop:
+
+- while an `inout` local is live, the variable it names cannot be used except through it:
+  `'k' is borrowed by 'inout' local 'x' until 'x' is last used`;
+- while a `view` local of a variable is live, the variable cannot change, as if it were a
+  `view` itself: `'c' is viewed by 'view' local 'v' until 'v' is last used; 'tick' may
+  change it`. A variable of a value type can still be read and passed on as a copy.
+
+```pkn
+fn main() -> int {
+  k = 1;
+  x: inout = k;
+  x = 5;               // the last use of x
+  println(Str(k));     // fine: x is no longer live
+  return 0;
+}
+```
+
+Output:
+
+```
+5
+```
+
+A borrow of a borrow (`y: inout = x;` with `x: inout = k;`) keeps `k` borrowed while `y` is
+live. A `view` local of an expression (`v: view = k + 1;`) borrows nothing.
+
+A local borrow always has an initializer, declares one variable (not a destructuring
+target), and is never `let`: `let x: view = e;` is an error, `a local borrow cannot be
+'let'`. Written before the name, `view x = e;`, the mode is a syntax error that shows the
+fix: `'view' goes after the colon, before the type: write 'x: view = ...'`.
+
+A `match` arm's binding can borrow the subject in the same way, `d: view Dog { … }` or
+`d: inout Dog { … }` ([Borrowing the subject](07-match-statements.md#borrowing-the-subject)).
+
 ---
 
 ## Expressions & Operators

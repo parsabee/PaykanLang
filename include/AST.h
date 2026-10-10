@@ -277,12 +277,22 @@ public:
 
 // Variable declaration with explicit type (x: int = 10), or a `let` local
 // (let x = 10;), which cannot be reassigned.
+// How a parameter or a local is held
+// (docs/language/02-functions-and-calling.md, "Parameter modes"): by value (the
+// default), `view` (read-only) or `inout` (another name for the caller's
+// storage, or for a place).
+enum class ParamMode : uint8_t { Value, View, Inout };
+
+/// The keyword of @p m: "view" or "inout" ("" for Value).
+const char *paramModeName(ParamMode m);
+
 class VarDecl : public Decl {
 private:
   const std::string *Name; // points into ASTContext::StringPool (stable)
   Type *VarType;
   Expr *InitExpr;
   bool Let = false;
+  ParamMode Mode = ParamMode::Value; // `x: view = e;`, `x: inout = p;`
 
 public:
   VarDecl(SourceLocation loc, const std::string &internedName, Type *type,
@@ -302,15 +312,13 @@ public:
   bool isLet() const { return Let; }
   void setLet(bool let) { Let = let; }
 
+  /// A local borrow (docs/language/01-language-basics.md, "Local borrows"):
+  /// `view` or `inout`; Value for any other declaration.
+  ParamMode getMode() const { return Mode; }
+  void setMode(ParamMode mode) { Mode = mode; }
+
   static bool classof(const ASTNode *N) { return N->getKind() == NK_VarDecl; }
 };
-
-// How a parameter is passed (docs/language/02-functions-and-calling.md): by
-// value (the default), `view` (read-only) or `inout` (the caller's storage).
-enum class ParamMode : uint8_t { Value, View, Inout };
-
-/// The keyword of @p m: "view" or "inout" ("" for Value).
-const char *paramModeName(ParamMode m);
 
 // A single function parameter.
 struct Param {
@@ -361,6 +369,7 @@ private:
   // The C symbol of a `native fn` (interned), which has no Body; nullptr for
   // an ordinary function (#198).
   const std::string *NativeSymbol = nullptr;
+  bool View = false; // `view fn`: a method that does not change `self`
 
 public:
   FuncDecl(SourceLocation loc, const std::string &internedName,
@@ -387,6 +396,11 @@ public:
   void setNativeSymbol(const std::string &internedSymbol) {
     NativeSymbol = &internedSymbol;
   }
+
+  /// Declared `view fn`: a method whose body does not change `self`
+  /// (docs/language/04-classes.md, "Methods that don't change self").
+  bool isView() const { return View; }
+  void setView(bool view) { View = view; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_FuncDecl; }
 };
@@ -579,6 +593,8 @@ public:
 //
 //   TypeName { body }             -- type arm, no variable binding
 //   binding: TypeName { body }    -- type arm, with variable binding
+//   binding: view TypeName { }    -- type arm whose binding borrows the
+//                                    subject (`view` or `inout`)
 //   literal { body }              -- value arm (e.g. "Hi" { ... }, 42 { ... })
 //   _ { body }                    -- wildcard (catch-all)
 //
@@ -592,6 +608,7 @@ class MatchArm : public ASTNode {
   Expr *LiteralPattern; // value arm: the literal to compare against; nullptr
                         // otherwise
   CompoundStmt *Body;
+  ParamMode Mode = ParamMode::Value; // a binding's borrow of the subject
 
 public:
   // Type arm (or wildcard when armType == nullptr).
@@ -616,6 +633,10 @@ public:
   void setArmType(Type *t) { ArmType = t; }
   Expr *getLiteralPattern() const { return LiteralPattern; }
   CompoundStmt *getBody() const { return Body; }
+  /// `n: view T` or `n: inout T`: how the binding holds the subject
+  /// (docs/language/07-match-statements.md, "Borrowing the subject").
+  ParamMode getMode() const { return Mode; }
+  void setMode(ParamMode mode) { Mode = mode; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_MatchArm; }
 };
@@ -927,6 +948,7 @@ public:
   enum Flags : uint8_t {
     None = 0,
     Private = 1 << 0,
+    View = 1 << 1, // `view fn`: does not change `self`
   };
 
 private:
@@ -951,6 +973,8 @@ public:
 
   bool isPrivate() const { return MethodFlags & Private; }
   bool isVirtual() const { return !isPrivate(); }
+  /// Only reads its object, so it can be called through a `view`.
+  bool isView() const { return MethodFlags & View; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_MethodDecl;

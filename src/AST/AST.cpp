@@ -343,6 +343,7 @@ Stmt *ASTCloner::cloneStmt(Stmt *s) {
                                   cloneType(vd->getType()),
                                   cloneExpr(vd->getInitExpr()));
     nvd->setLet(vd->isLet());
+    nvd->setMode(vd->getMode());
     return Ctx.make<DeclStmt>(loc, nvd);
   }
   case ASTNode::NK_ExprStmt:
@@ -380,6 +381,7 @@ Stmt *ASTCloner::cloneStmt(Stmt *s) {
       else
         arms.push_back(Ctx.make<MatchArm>(arm->getLocation(), arm->getBinding(),
                                           cloneType(arm->getArmType()), body));
+      arms.back()->setMode(arm->getMode());
     }
     return Ctx.make<MatchStmt>(loc, cloneExpr(m->getSubject()),
                                std::move(arms));
@@ -411,9 +413,11 @@ FuncDecl *ASTCloner::cloneFuncDecl(FuncDecl *fn, const std::string &newName) {
   params.reserve(fn->getParams().size());
   for (auto &p : fn->getParams())
     params.push_back(Param{p.Name, cloneType(p.ParamType), p.Mode});
-  return Ctx.make<FuncDecl>(fn->getLocation(), Ctx.intern(newName),
-                            std::move(params), cloneType(fn->getReturnType()),
-                            cloneCompound(fn->getBody()));
+  auto *clone = Ctx.make<FuncDecl>(
+      fn->getLocation(), Ctx.intern(newName), std::move(params),
+      cloneType(fn->getReturnType()), cloneCompound(fn->getBody()));
+  clone->setView(fn->isView());
+  return clone;
 }
 
 ClassDecl *ASTCloner::cloneClassDecl(ClassDecl *cd,

@@ -141,7 +141,7 @@ typeParams  ::= "<" IDENT ( "," IDENT )* ">"
 
 enumDecl    ::= "enum" IDENT "{" IDENT ( "," IDENT )* ","? "}"
 
-funcDecl    ::= "fn" IDENT typeParams? "(" paramList? ")"
+funcDecl    ::= "view"? "fn" IDENT typeParams? "(" paramList? ")"
                 ( "->" typeAnnotation )? block
 nativeFuncDecl ::= "native" "fn" IDENT "(" paramList? ")"
                    ( "->" typeAnnotation )? "=" STRING ";"   -- the C symbol
@@ -154,14 +154,18 @@ varDecl     ::= IDENT ":" typeAnnotation
 An enum needs at least one variant; a single trailing comma is permitted.
 A class or function with `typeParams` is generic (a template that Sema
 instantiates); the superclass of a generic class is a plain class name.
-Methods are `funcDecl`s inside a class body.
+Methods are `funcDecl`s inside a class body.  `view fn` marks a method that
+does not change `self` ([language/04-classes.md](language/04-classes.md));
+on a free function it is a semantic error, not a syntax error.
 
 A parameter's type may start with its mode, `view` or `inout`
 ([language/02-functions-and-calling.md](language/02-functions-and-calling.md)):
 `fn bump(n: inout int)`, `fn __init__(start: view int)`.  The keywords are
-reserved and appear nowhere else: `view` or `inout` in any other position (a
-statement, a local's or a field's type, before the parameter's name) is a
-syntax error; before the name, the error shows the parameter rewritten.
+reserved: besides a parameter's type, they only start a local borrow's type
+or a `match` binding's type (`borrowDecl` and `matchArm`, below), and `view`
+a `view fn`.  In any other position (a
+statement, a field's type, before the parameter's name) they are a syntax
+error; before the name, the error shows the parameter rewritten.
 The AST records the mode on the parameter (`Param::Mode`); whether it is
 allowed there (the parameter's type, an override) is Sema's job.
 
@@ -205,6 +209,7 @@ statement ::= ";"
             | expression "=" expression ";"
             | varDecl "=" expression ";"
             | letDecl
+            | borrowDecl
             | destructureTargets "=" expression ";"
             | "return" expression? ";"
             | block
@@ -215,6 +220,7 @@ statement ::= ";"
             | matchStmt
 
 letDecl   ::= "let" IDENT ( ":" typeAnnotation )? "=" expression ";"
+borrowDecl ::= IDENT ":" ( "view" | "inout" ) typeAnnotation? "=" expression ";"
 
 ifStmt    ::= "if" "(" expression ")" block ( "else" ( block | ifStmt ) )?
 whileStmt ::= "while" "(" expression ")" block
@@ -224,7 +230,7 @@ destructureTarget  ::= IDENT | IDENT ":" typeAnnotation | "_"
 
 matchStmt ::= "match" expression "{" matchArm+ "}"
 matchArm  ::= typeAnnotation block
-            | IDENT ":" typeAnnotation block
+            | IDENT ":" ( "view" | "inout" )? typeAnnotation block
             | literal block
             | "_" block
 literal   ::= INT | FLOAT | BOOL | CHAR | STRING | NONE
@@ -244,6 +250,10 @@ literal   ::= INT | FLOAT | BOOL | CHAR | STRING | NONE
   The `VarDecl` and its `DeclStmt` start at `let`.  `let` starts nothing
   else: a parameter, a field, a type, a destructuring (`let a, b = t;`) or a
   `let` without an initializer is a syntax error.
+- `borrowDecl` declares a local borrow (`VarDecl::getMode`); its type, when
+  not written, is its initializer's.  It needs an initializer, is never
+  `let` (`let x: view = e;`) and is not a destructuring target.  With the
+  mode before the name (`view x = e;`) the syntax error shows the fix.
 - A statement that starts with `if` is an if-statement when the
   parenthesised condition is followed by `{`; otherwise it is an expression
   statement whose expression is a ternary (`if c then a else b;`).
@@ -251,6 +261,9 @@ literal   ::= INT | FLOAT | BOOL | CHAR | STRING | NONE
   chains nest in the AST).
 - Match arms: a wildcard `_`, a literal pattern (bare literal tokens only,
   so `-1` is not a pattern), a type with an optional binding, in any order.
+  A binding may borrow the subject, `n: view T` or `n: inout T`
+  (`MatchArm::getMode`); with
+  the mode before the name (`view n: T`) the syntax error shows the fix.
   `None` is accepted as a pattern so that a match over an optional can name
   the absent case.
 

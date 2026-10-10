@@ -50,33 +50,33 @@ class Parser {
     if (self.error == None) { self.error = msg; }
   }
 
-  fn done() -> bool {
+  view fn done() -> bool {
     return self.pos >= self.input.len();
   }
 
-  fn atIs(ch: char) -> bool {
+  view fn atIs(ch: char) -> bool {
     return !self.done() && self.input[self.pos] == ch;
   }
 
-  fn atIsOr(a: char, b: char) -> bool {
+  view fn atIsOr(a: char, b: char) -> bool {
     if (self.done()) { return False; }
     c: char = self.input[self.pos];
     return c == a || c == b;
   }
 
-  fn atIsDigit() -> bool {
+  view fn atIsDigit() -> bool {
     if (self.done()) { return False; }
     c: char = self.input[self.pos];
     return c >= '0' && c <= '9';
   }
 
-  fn atIsIdentStart() -> bool {
+  view fn atIsIdentStart() -> bool {
     if (self.done()) { return False; }
     c: char = self.input[self.pos];
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
   }
 
-  fn atIsIdentChar() -> bool {
+  view fn atIsIdentChar() -> bool {
     if (self.done()) { return False; }
     c: char = self.input[self.pos];
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
@@ -84,13 +84,13 @@ class Parser {
   }
 
   // Current char is '=' and it is NOT the start of '=='.
-  fn atAssign() -> bool {
+  view fn atAssign() -> bool {
     if (!self.atIs('=')) { return False; }
     if (self.pos + 1 >= self.input.len()) { return True; }
     return self.input[self.pos + 1] != '=';
   }
 
-  fn atDigitVal() -> int {
+  view fn atDigitVal() -> int {
     if (self.done()) { return 0; }
     c: char = self.input[self.pos];
     match c {
@@ -128,7 +128,7 @@ class Parser {
   }
 
   // The unconsumed remainder of the input (for "unexpected '…'" diagnostics).
-  fn rest() -> Str {
+  view fn rest() -> Str {
     out: Str = "";
     i: int = self.pos;
     while (i < self.input.len()) {
