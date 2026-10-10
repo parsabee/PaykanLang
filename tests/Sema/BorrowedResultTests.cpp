@@ -6,9 +6,35 @@
 #include "TestUtils.h"
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
+
 using namespace paykan::test;
 
 namespace {
+
+/// Write @p content to @p dir / @p name; its path.
+std::string writeModule(const std::filesystem::path &dir,
+                        const std::string &name, const std::string &content) {
+  std::filesystem::create_directories(dir);
+  std::ofstream(dir / name) << content;
+  return (dir / name).string();
+}
+
+/// Sema over the file @p path, importing from its directory.
+SemaResult semaCheckPath(const std::string &path) {
+  paykan::parser::ParserDriver drv(testFrontend());
+  if (drv.parseFile(path) != 0)
+    return {false, "parse error", 1};
+  std::ostringstream os;
+  paykan::sema::DiagEngine diag(os);
+  diag.setSourceInfo(drv.getCurrentFile(), &drv.getSourceLines());
+  paykan::sema::Sema sema(drv.getASTContext(), diag,
+                          std::filesystem::path(path).parent_path().string(),
+                          drv.getFrontendName());
+  auto ctx = sema.run(drv.getRoot());
+  return {ctx.Ok, os.str(), ctx.ErrorCount};
+}
 
 /// Expect @p r to have failed with each of @p diags (`line:col: error: ...`).
 void expectErrors(const SemaResult &r,
@@ -129,4 +155,80 @@ fn main() -> view int { return 0; }
           "return a 'view'",
           ":13:1: error: 'main' cannot return a borrow"});
   EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
+}
+
+// A `view` local of a borrowed result views what the call borrowed (its
+// receiver and the arguments to its `view` / `inout` parameters) until the
+// local's last use, and so does a `match` arm's `n: view T` of one.
+TEST(BorrowedResult, CallSiteBorrows) {
+  auto r = semaCheck(R"(class Counter {
+  n: int;
+  fn __init__() { self.n = 0; }
+  fn tick() { self.n = self.n + 1; }
+  view fn get() -> int { return self.n; }
+}
+class Box {
+  c: Counter;
+  fn __init__() { self.c = Counter(); }
+  view fn peek() -> view Counter { return self.c; }
+}
+fn longer(a: view Str, b: view Str) -> view Str {
+  return if a.len() > b.len() then a else b;
+}
+fn main() -> int {
+  b = Box();
+  v: view = b.peek();
+  b.c = Counter();
+  println(Str(v.get()));
+  b.c = Counter();
+  s = "hello";
+  t = "hi";
+  w: view = longer(s, t);
+  t = "bye";
+  println(w);
+  match b.peek() {
+    d: view Counter { b.c.tick(); println(Str(d.get())); }
+    _ { }
+  }
+  return 0;
+}
+)");
+  expectErrors(
+      r, {":18:3: error: 'b' is viewed by 'view' local 'v' until 'v' is last "
+          "used; cannot assign to its field 'c'",
+          ":24:3: error: 't' is viewed by 'view' local 'w' until 'w' is last "
+          "used; it cannot be assigned",
+          ":27:23: error: 'b' is viewed by 'view' local 'd' until 'd' is last "
+          "used; 'tick' is not a 'view fn'"});
+  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
+  // After v's last use, b can change.
+  EXPECT_EQ(r.Diagnostics.find(":20:"), std::string::npos) << r.Diagnostics;
+}
+
+// A module's borrowed results are part of its interface: an importer sees
+// them as `view`s.
+TEST(BorrowedResult, AcrossModules) {
+  auto dir = tempDir() / "borrowed_result_modules";
+  std::filesystem::remove_all(dir);
+  writeModule(dir, "base.pkn",
+              "class Counter { n: int;\n"
+              "  fn __init__() { self.n = 0; }\n"
+              "  fn tick() { self.n = self.n + 1; } }\n"
+              "class Box { c: Counter;\n"
+              "  fn __init__() { self.c = Counter(); }\n"
+              "  view fn peek() -> view Counter { return self.c; } }\n"
+              "fn inner(b: view Box) -> view Counter { return b.c; }\n");
+  auto r = semaCheckPath(writeModule(dir, "main.pkn", R"(import base;
+fn main() -> int {
+  b = base::Box();
+  b.peek().tick();
+  base::inner(b).tick();
+  return 0;
+})"));
+  expectErrors(r, {":4:3: error: the result of 'peek' is a 'view'; 'tick' is "
+                   "not a 'view fn'",
+                   ":5:3: error: the result of 'base::inner' is a 'view'; "
+                   "'tick' is not a 'view fn'"});
+  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
+  std::filesystem::remove_all(dir);
 }

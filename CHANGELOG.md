@@ -15,9 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   copy: a 'view' result must be part of 'self' or of a 'view' or 'inout' parameter`).  The
   caller sees the result as a `view`: it is read, passed on to `view` parameters or bound
   to a `view` local, and a value type can be copied out (`the result of 'peek' is a
-  'view'; 'tick' is not a 'view fn'`).  An override keeps how the method it overrides
-  returns; `main` returns a copy, and `-> inout T` is reserved.  In the AST interchange
-  format the result's mode is a `(qual view)` after the return type.
+  'view'; 'tick' is not a 'view fn'`).  A `view` local of a borrowed result borrows what
+  the call borrowed, its receiver and its arguments to `view` / `inout` parameters, until
+  its last use.  An override keeps how the method it overrides returns; `main` returns a
+  copy, and `-> inout T` is reserved.  The result's mode is part of a module's interface
+  (a result-mode byte after a `.pkm` record's parameter modes), and in the AST interchange
+  format it is a `(qual view)` after the return type.
 - `match` arms that borrow the subject (docs/language/07-match-statements.md, "Borrowing
   the subject"): `d: view Dog { … }` binds `d` as a `view` local of the subject, whatever
   the subject is, so nothing changes through it and it passes on only to `view`

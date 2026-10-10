@@ -680,3 +680,53 @@ TEST(Pkm, ViewFnAcrossModules) {
       << dump.out;
   fs::remove_all(dir);
 }
+
+// A borrowed result keeps its mode in a prebuilt module: the dump shows it,
+// and an importer sees the result as a `view`.
+TEST(Pkm, BorrowedResultsAcrossModules) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_results_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "base.pkn",
+            "class Counter { n: int;\n"
+            "  fn __init__() { self.n = 5; }\n"
+            "  fn tick() { self.n = self.n + 1; }\n"
+            "  view fn get() -> int { return self.n; } }\n"
+            "class Box { c: Counter;\n"
+            "  fn __init__() { self.c = Counter(); }\n"
+            "  view fn peek() -> view Counter { return self.c; } }\n"
+            "fn longer(a: view Str, b: view Str) -> view Str {\n"
+            "  return if a.len() > b.len() then a else b; }\n");
+  writeFile(dir / "main.pkn", "import base;\n"
+                              "fn main() -> int {\n"
+                              "  b = base::Box();\n"
+                              "  v: view = b.peek();\n"
+                              "  println(base::longer(\"ab\", \"c\") + "
+                              "Str(v.get()));\n"
+                              "  return 0;\n}\n");
+  writeFile(dir / "bad.pkn", "import base;\n"
+                             "fn main() -> int {\n"
+                             "  b = base::Box();\n"
+                             "  b.peek().tick();\n"
+                             "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  ASSERT_EQ(paykan("--emit-pkm base.pkn").exitCode, 0);
+  fs::remove(dir / "base.pkn");
+  auto ok = paykan("main.pkn");
+  ASSERT_EQ(ok.exitCode, 0) << ok.out;
+  EXPECT_TRUE(contains(ok.out, "ab5\n")) << ok.out;
+  auto bad = paykan("--check-only bad.pkn");
+  EXPECT_NE(bad.exitCode, 0);
+  EXPECT_TRUE(contains(bad.out, "bad.pkn:4:3: error: the result of 'peek' is "
+                                "a 'view'; 'tick' is not a 'view fn'"))
+      << bad.out;
+  auto dump = paykan("pkm dump --section=iface base.pkm");
+  EXPECT_TRUE(contains(dump.out, "method peek() -> view Counter flags 0x2"))
+      << dump.out;
+  EXPECT_TRUE(contains(dump.out, "func longer(view Str, view Str) -> view Str"))
+      << dump.out;
+  fs::remove_all(dir);
+}
