@@ -140,7 +140,7 @@ typeParams  ::= "<" IDENT ( "," IDENT )* ">"
 
 enumDecl    ::= "enum" IDENT "{" IDENT ( "," IDENT )* ","? "}"
 
-funcDecl    ::= "fn" IDENT typeParams? "(" paramList? ")"
+funcDecl    ::= "view"? "fn" IDENT typeParams? "(" paramList? ")"
                 ( "->" typeAnnotation )? block
 paramList   ::= param ( "," param )*
 param       ::= IDENT ":" ( "view" | "inout" )? typeAnnotation
@@ -151,14 +151,17 @@ varDecl     ::= IDENT ":" typeAnnotation
 An enum needs at least one variant; a single trailing comma is permitted.
 A class or function with `typeParams` is generic (a template that Sema
 instantiates); the superclass of a generic class is a plain class name.
-Methods are `funcDecl`s inside a class body.
+Methods are `funcDecl`s inside a class body.  `view fn` marks a method that
+does not change `self` ([language/04-classes.md](language/04-classes.md));
+on a free function it is a semantic error, not a syntax error.
 
 A parameter's type may start with its mode, `view` or `inout`
 ([language/02-functions-and-calling.md](language/02-functions-and-calling.md)):
 `fn bump(n: inout int)`, `fn __init__(start: view int)`.  The keywords are
-reserved and appear nowhere else: `view` or `inout` in any other position (a
-statement, a local's or a field's type, before the parameter's name) is a
-syntax error; before the name, the error shows the parameter rewritten.
+reserved: besides a parameter's type, they only start a local borrow's type
+(`borrowDecl`, below), and `view` a `view fn`.  In any other position (a
+statement, a field's type, before the parameter's name) they are a syntax
+error; before the name, the error shows the parameter rewritten.
 The AST records the mode on the parameter (`Param::Mode`); whether it is
 allowed there (the parameter's type, an override) is Sema's job.
 

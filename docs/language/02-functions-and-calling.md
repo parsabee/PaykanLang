@@ -94,9 +94,10 @@ A `view` parameter of a value type is a copy, which may be assigned to a variabl
 returned. One of an object, string, array, tuple or optional shares what the caller
 passed, but the function cannot change it through the parameter: no assignment to a field
 or an element (`'c' is a 'view' parameter; cannot assign to its field 'n'`), no field or
-element passed to an `inout` parameter, and only the methods that only read can be called
-on it (`toString`, `equals`, `len`, `length`; `'c' is a 'view' parameter; 'tick' may change
-it`).
+element passed to an `inout` parameter, and only a `view fn` can be called on it
+(`toString`, `equals`, `len`, `length`, or a method of its class declared `view fn`, see
+[Methods that don't change `self`](04-classes.md#methods-that-dont-change-self); `'c' is a
+'view' parameter; 'tick' is not a 'view fn'`).
 
 ```pkn
 class Counter {
@@ -141,7 +142,7 @@ parameter`, `'v' is a 'view' local; it cannot be returned`. A `view` of a value 
 copied when it is assigned (`m = n`), and the copy is the variable's own.
 
 A `match` arm's name for a `view` is a `view` too: in `match v { k: Fast { k.tick(); } }`,
-`k.tick()` is an error, `'k' is bound to a 'view'; 'tick' may change it`.
+`k.tick()` is an error, `'k' is bound to a 'view'; 'tick' is not a 'view fn'`.
 
 ### `inout`: the caller's storage
 
@@ -344,6 +345,6 @@ fn fib(n: int) -> int {
 | Non-void return without value | `return;` in non-void function |
 | Return type mismatch | Returned expression type ≠ declared return type |
 | Write to a `view` parameter | Assigning or destructuring into it |
-| A `view` changed, passed on or kept | Writing a field or element of what it holds, calling a method on it that may change it, passing it to a parameter that is not `view`, or storing or returning one that shares what it holds |
+| A `view` changed, passed on or kept | Writing a field or element of what it holds, calling a method on it that is not a `view fn`, passing it to a parameter that is not `view`, or storing or returning one that shares what it holds |
 | Bad `inout` argument | Not a variable or field, not exactly the parameter's type, a `view` parameter or `let` local, an array element, a string's character, or the same place twice in one call |
 | Override changes a mode | An override that drops, adds or changes a parameter's `view`/`inout` |

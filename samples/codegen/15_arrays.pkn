@@ -28,7 +28,7 @@ class Point {
     self.x = px;
     self.y = py;
   }
-  fn toString() -> Str {
+  view fn toString() -> Str {
     return "(" + Str<int>(self.x) + "," + Str(self.y) + ")";
   }
   fn sum() -> int {

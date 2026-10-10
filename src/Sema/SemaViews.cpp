@@ -5,7 +5,7 @@
 // `view` parameter, a `view` local and a `match` arm's name for either, and
 // everything reached through them.  None of those may be assigned, have a field
 // or element assigned, be passed to an `inout` parameter or have a method
-// called on it that may change it.
+// called on it that is not a `view fn`.
 //
 // While objects, strings and arrays are references, a copy of one would
 // change the original, so a `view` stays one: it can only be passed on to a
@@ -60,26 +60,12 @@ bool Sema::checkChangeable(const ast::Expr *e, const std::string &what,
   return false;
 }
 
-bool Sema::readsOnly(ast::ClassType *ct, const ast::MethodDecl *method) {
+bool Sema::checkMethodReceiver(const ast::MethodCallExpr *call,
+                               const ast::MethodDecl *method) {
   if (method->isView())
     return true;
-  // An override of a method that only reads (`toString`, `equals`) only
-  // reads too.
-  for (ast::ClassType *c = ct ? ct->getSuperClass() : nullptr; c;
-       c = c->getSuperClass())
-    if (const ast::MethodDecl *base = c->findMethod(method->getName()))
-      if (base->isView())
-        return true;
-  return false;
-}
-
-bool Sema::checkMethodReceiver(const ast::MethodCallExpr *call,
-                               ast::ClassType *ct,
-                               const ast::MethodDecl *method) {
-  if (readsOnly(ct, method))
-    return true;
   return checkChangeable(call->getReceiver(),
-                         "'" + call->getMethodName() + "' may change it",
+                         "'" + call->getMethodName() + "' is not a 'view fn'",
                          call->getLocation());
 }
 

@@ -183,11 +183,11 @@ class Point {
   y: int;
   fn __init__(x: int, y: int) { self.x = x; self.y = y; }
 
-  fn toString() -> Str {
+  view fn toString() -> Str {
     return "(" + Str(self.x) + ", " + Str(self.y) + ")";
   }
 
-  fn equals(other: Obj) -> bool {
+  view fn equals(other: Obj) -> bool {
     match other {
       p: Point { return self.x == p.x && self.y == p.y; }
       _        { return False; }
@@ -286,7 +286,7 @@ class Task {
     return if self.done then "[x]" else "[ ]";
   }
 
-  fn toString() -> Str {
+  view fn toString() -> Str {
     return self.checkbox() + " " + self.title;
   }
 }
@@ -299,7 +299,7 @@ class DeadlineTask : Task {
     self.due = due;
   }
 
-  fn toString() -> Str {
+  view fn toString() -> Str {
     return self.checkbox() + " " + self.title + " (due " + self.due + ")";
   }
 }

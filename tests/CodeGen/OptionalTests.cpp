@@ -198,7 +198,7 @@ TEST(Optional, CompareTwoOptionals) {
     class Pt {
       x: int;
       fn __init__(v: int) { self.x = v; }
-      fn equals(other: Obj) -> bool {
+      view fn equals(other: Obj) -> bool {
         match other {
           p: Pt { return p.x == self.x; }
           _     { return False; }

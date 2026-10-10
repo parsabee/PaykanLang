@@ -183,7 +183,7 @@ class Task {
   title: Str;
   done: bool;
   fn __init__(title: Str) { self.title = title; self.done = False; }
-  fn toString() -> Str {
+  view fn toString() -> Str {
     return (if self.done then "[x] " else "[ ] ") + self.title;
   }
 }

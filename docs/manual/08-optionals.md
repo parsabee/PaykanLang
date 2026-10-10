@@ -200,7 +200,7 @@ class Task {
     self.done = False;
   }
 
-  fn toString() -> Str {
+  view fn toString() -> Str {
     text = (if self.done then "[x] " else "[ ] ") + self.title;
     match self.due {
       d: Str { return text + " (due " + d + ")"; }

@@ -9,13 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `view fn` (docs/language/04-classes.md, "Methods that don't change self"): a method
+  declared `view fn len() -> int` does not change `self`, and is the only kind of method
+  that can be called on a `view` (`'c' is a 'view' parameter; 'tick' is not a 'view fn'`).
+  `toString`, `equals`, `len` and `length` are `view fn`s.  An override is a `view fn`
+  exactly when the method it overrides is one; `__init__` and a free function never are.
+  The marker is part of a module's interface (method flag `0x2` in a `.pkm`), and a
+  function in the AST interchange format carries it as a trailing `(qual view)`.
 - Local borrows (docs/language/01-language-basics.md, "Local borrows"): a local declared
   with a mode where the type goes, `v: view = k + 1;` or `w: view float = k;`, the type
   inferred when left off.  A `view` local reads its initializer, which may be any
   expression: a copy of a value type, the same object, string or array otherwise.  It
   cannot be assigned, destructured into or passed to an `inout` parameter, nothing reached
-  through it can be assigned, and only the methods that only read (`toString`, `equals`,
-  `len`, `length`, and overrides of them) can be called on it.  An `inout` local (`x:
+  through it can be assigned, and only a `view fn` (`toString`, `equals`, `len`,
+  `length`, or a method declared one) can be called on it.  An `inout` local (`x:
   inout = k;`, `t: inout = self.total;`) is another name for a variable or a field, of any
   type: assigning to it writes there, and it passes its address on to an `inout`
   parameter.  It names a place as an `inout` argument does (not an expression, an array
@@ -26,8 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   block (a loop that uses it keeps it live): the variable an `inout` local names cannot be
   used (`'k' is borrowed by 'inout' local 'x' until 'x' is last used`), and one a `view`
   local reads cannot change (`'c' is viewed by 'view' local 'v' until 'v' is last used;
-  'tick' may change it`).  A borrow of a borrow keeps the first variable borrowed.  A local borrow needs an initializer, is never `let` and
-  is not a destructuring target; written before the name (`view x = e;`) the error shows
+  'tick' is not a 'view fn'`).  A borrow of a borrow keeps the first variable borrowed.
+  A local borrow needs an initializer, is never `let` and is not a destructuring target; written before the name (`view x = e;`) the error shows
   the fix.  In the AST interchange format a local borrow carries `(qual view)` or
   `(qual inout)`.
 - A `view` stays a `view` (docs/language/02-functions-and-calling.md): a `view` parameter
@@ -43,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parameters included).  The mode is written where the type goes: `fn bump(n: inout int)`,
   `fn scale(x: inout float, by: view float)`, `fn show(c: view Counter)`, called as
   `bump(k)`.  A `view` parameter is read-only, and so is what it holds: no field or
-  element write and only the methods that only read through it.  An `inout` parameter is
+  element write and only `view fn` calls through it.  An `inout` parameter is
   its caller's storage, passed by address so
   every write reaches the caller at once: a local variable, a parameter (an `inout` one
   passes its address on) or a field of an object (`obj.f`, `self.f`, `a.b.f`; by real
@@ -82,6 +89,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- An override of `toString` or `equals` is declared `view fn` (`view fn toString() -> Str`),
+  like the `Obj` methods it overrides: a plain `fn` override is an error.
 - `.pkm` interfaces carry a function's, a method's and a constructor's
   parameter modes (`view`, `inout`), so calls and overrides in another module
   are checked against them, whether the module is imported from source, from

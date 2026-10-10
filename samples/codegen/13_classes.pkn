@@ -135,7 +135,7 @@ class Person {
     self.name = n;
     self.age = a;
   }
-  fn toString() -> Str {
+  view fn toString() -> Str {
     return self.name + " (age " + Str<int>(self.age) + ")";
   }
   fn birthday() {

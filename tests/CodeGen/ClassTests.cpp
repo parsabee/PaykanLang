@@ -924,7 +924,7 @@ TEST(Class, EqualsOperatorUsesOverrideWithSelfMatch) {
     class Money {
       cents: int;
       fn __init__(c: int) { self.cents = c; }
-      fn equals(o: Obj) -> bool {
+      view fn equals(o: Obj) -> bool {
         match o {
           m: Money { return self.cents == m.cents; }
           _        { return False; }
@@ -973,7 +973,7 @@ TEST(Class, EqualsOverrideDispatched) {
     class Always {
       v: int;
       fn __init__(x: int) { self.v = x; }
-      fn equals(o: Obj) -> bool { return True; }
+      view fn equals(o: Obj) -> bool { return True; }
     }
   )",
                                  R"(

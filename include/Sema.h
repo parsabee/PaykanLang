@@ -605,12 +605,9 @@ private:
   /// @p what ends the diagnostic ("cannot assign to its field 'n'").
   bool checkChangeable(const ast::Expr *e, const std::string &what,
                        ast::SourceLocation loc);
-  /// Whether @p method of class @p ct only reads its object: it is marked
-  /// so, or overrides a method that is.
-  static bool readsOnly(ast::ClassType *ct, const ast::MethodDecl *method);
-  /// A call of @p method (of class @p ct) on the receiver of @p call: unless
-  /// it only reads, the receiver must be changeable.
-  bool checkMethodReceiver(const ast::MethodCallExpr *call, ast::ClassType *ct,
+  /// A call of @p method on the receiver of @p call: unless it is a `view
+  /// fn`, the receiver must be changeable.
+  bool checkMethodReceiver(const ast::MethodCallExpr *call,
                            const ast::MethodDecl *method);
   /// Whether a value of type @p ty shares what it holds when it is copied
   /// (an object, string, array or tuple, or an optional of one), so that a
@@ -636,6 +633,16 @@ private:
   /// The variable a place starts from: `c` for `c`, `c.a.n`, `c.xs[i]` and
   /// `c.t.0`; null for anything else (a call).
   static const ast::Identifier *placeRoot(const ast::Expr *e);
+
+  // -- Where a `view fn` may be declared (SemaViewFn.cpp)
+
+  /// The `view fn` rules of class method @p method, overriding @p base (null
+  /// when it overrides nothing): `__init__` is never one, and an override is
+  /// one exactly when @p base is.
+  bool checkViewFnDecl(const ast::FuncDecl *method,
+                       const ast::MethodDecl *base);
+  /// Only a method can be a `view fn`: error on each free one in @p tu.
+  bool rejectFreeViewFns(ast::TranslationUnit *tu);
 
   // -- Exclusivity of local borrows (SemaBorrows.cpp)
 
