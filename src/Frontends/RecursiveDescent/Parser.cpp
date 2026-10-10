@@ -1210,23 +1210,32 @@ Stmt *Parser::parseMatchStmt() {
   return Ctx.make<MatchStmt>(span(start), subject, std::move(arms));
 }
 
-// matchArm ::= typeAnnotation "{" stmts "}" | IDENT ":" typeAnnotation "{" ...
-// "}"
+// matchArm ::= typeAnnotation "{" stmts "}"
+//            | IDENT ":" ( "view" | "inout" )? typeAnnotation "{" stmts "}"
 //            | literal "{" stmts "}" | "_" "{" stmts "}"
 MatchArm *Parser::parseMatchArm() {
   SourceLocation start = cur().Loc;
   const std::string *binding = &intern("");
   Type *armType = nullptr;
   Expr *pattern = nullptr;
+  ParamMode mode = ParamMode::Value;
 
   if (accept(Tok::Underscore)) {
     // wildcard
   } else if (isLiteralToken(kind())) {
     pattern = parseLiteral();
   } else {
+    if ((at(Tok::KwView) || at(Tok::KwInout)) && kind(1) == Tok::Ident &&
+        kind(2) == Tok::Colon) {
+      prefixModeError(); // `view n: T`
+      return nullptr;
+    }
     if (at(Tok::Ident) && kind(1) == Tok::Colon) {
       binding = &intern(consume().Text);
       consume(); // ':'
+      if (at(Tok::KwView) || at(Tok::KwInout))
+        mode =
+            consume().Kind == Tok::KwView ? ParamMode::View : ParamMode::Inout;
     }
     armType = parseTypeAnnotation();
     if (!armType)
@@ -1238,7 +1247,9 @@ MatchArm *Parser::parseMatchArm() {
     return nullptr;
   if (pattern)
     return Ctx.make<MatchArm>(span(start), *binding, pattern, body);
-  return Ctx.make<MatchArm>(span(start), *binding, armType, body);
+  auto *arm = Ctx.make<MatchArm>(span(start), *binding, armType, body);
+  arm->setMode(mode);
+  return arm;
 }
 
 // -- Types

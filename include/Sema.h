@@ -321,8 +321,8 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// be a variable (see isTypeNameForVariable) and returns false.
   bool checkBinderName(const std::string &name, ast::SourceLocation loc);
 
-  /// checkBinderName for a match arm's binding; a rejected binding is bound
-  /// poisoned in the arm's scope.
+  /// checkBinderName for a match arm's binding, and its kind (`n: view T` is
+  /// a `view` local); a rejected binding is bound poisoned in the arm's scope.
   bool bindArmName(ast::MatchArm *arm);
 
   // Check that a variable is declared. Returns its type,
@@ -684,9 +684,13 @@ private:
   /// A function or method body: visitStatements, without the borrows of
   /// whatever is being checked around it.
   bool visitBody(const std::vector<ast::Stmt *> &stmts);
-  /// Start the borrow @p vd makes, live until statement @p end of @p block.
-  void startBorrow(const ast::VarDecl *vd,
+  /// Start the borrow of the place @p place by @p by (a local borrow, a
+  /// `match` arm's binding), live until statement @p end of @p block.
+  void startBorrow(const ast::Expr *place, const std::string &by, bool inout,
                    const std::vector<ast::Stmt *> *block, size_t end);
+  /// Check the body of @p arm, a match over @p subject, its binding
+  /// borrowing the subject when it is `n: view T`.
+  bool visitArmBody(const ast::MatchArm *arm, const ast::Expr *subject);
   /// The live borrow (`inout` or `view`) of the variable @p name, or null.
   const Borrow *activeBorrow(const std::string &name, bool inout) const;
   /// Error at @p loc (and false) when variable @p name is named by a live

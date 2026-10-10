@@ -634,6 +634,8 @@ void ASTPrinter::visitMatchStmt(MatchStmt *node) {
                               : "MatchArm");
     if (arm->hasBinding())
       OS << " binding='" << arm->getBinding() << "'";
+    if (arm->getMode() != ParamMode::Value)
+      OS << " " << paramModeName(arm->getMode());
     OS << "\n";
     // A non-wildcard arm carries either a literal pattern (value arm) or a
     // matched type (type arm) — never both; a literal arm's ArmType is null.

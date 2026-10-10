@@ -584,6 +584,8 @@ public:
 //
 //   TypeName { body }             -- type arm, no variable binding
 //   binding: TypeName { body }    -- type arm, with variable binding
+//   binding: view TypeName { }    -- type arm whose binding borrows the
+//                                    subject (`view` or `inout`)
 //   literal { body }              -- value arm (e.g. "Hi" { ... }, 42 { ... })
 //   _ { body }                    -- wildcard (catch-all)
 //
@@ -597,6 +599,7 @@ class MatchArm : public ASTNode {
   Expr *LiteralPattern; // value arm: the literal to compare against; nullptr
                         // otherwise
   CompoundStmt *Body;
+  ParamMode Mode = ParamMode::Value; // a binding's borrow of the subject
 
 public:
   // Type arm (or wildcard when armType == nullptr).
@@ -621,6 +624,10 @@ public:
   void setArmType(Type *t) { ArmType = t; }
   Expr *getLiteralPattern() const { return LiteralPattern; }
   CompoundStmt *getBody() const { return Body; }
+  /// `n: view T` or `n: inout T`: how the binding holds the subject
+  /// (docs/language/07-match-statements.md, "Borrowing the subject").
+  ParamMode getMode() const { return Mode; }
+  void setMode(ParamMode mode) { Mode = mode; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_MatchArm; }
 };

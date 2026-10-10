@@ -117,7 +117,7 @@ to resolve, which reports unknown names.
 | `(while LOC EXPR BLOCK)` | |
 | `(break LOC)`, `(continue LOC)` | |
 | `(match LOC EXPR ARM...)` | `match e { ... }` |
-| `(type-arm LOC STR TYPE BLOCK)` | `b: T { ... }`; the binding `STR` is `""` for `T { ... }` |
+| `(type-arm LOC STR TYPE QUAL? BLOCK)` | `b: T { ... }`; the binding `STR` is `""` for `T { ... }`. `QUAL` is a binding's mode, `(qual view)` for `b: view T { ... }` or `(qual inout)`, and needs a binding |
 | `(value-arm LOC STR EXPR BLOCK)` | `42 { ... }`, `"hi" { ... }`; binding as above |
 | `(wildcard-arm LOC STR BLOCK)` | `_ { ... }` |
 

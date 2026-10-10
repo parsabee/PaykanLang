@@ -952,9 +952,16 @@ private:
     MatchArm *arm = nullptr;
     if (e.Text == "type-arm") {
       Type *ty = type(f, "the matched type");
+      ParamMode mode = ParamMode::Value;
+      if (ty && !paramMode(f, mode))
+        return nullptr;
+      if (mode != ParamMode::Value && binding->empty())
+        return fail(e, "an arm without a binding has no mode"), nullptr;
       CompoundStmt *body = ty ? block(f, "the arm's body") : nullptr;
-      if (body)
+      if (body) {
         arm = Ctx.make<MatchArm>(loc, *binding, ty, body);
+        arm->setMode(mode);
+      }
     } else if (e.Text == "value-arm") {
       Expr *pattern = expr(f, "the matched value");
       CompoundStmt *body = pattern ? block(f, "the arm's body") : nullptr;

@@ -372,6 +372,11 @@ private:
           open("type-arm", arm);
           str(arm->getBinding());
           type(arm->getArmType());
+          if (arm->getMode() != ParamMode::Value) {
+            open("qual");
+            sym(paramModeName(arm->getMode()));
+            close();
+          }
         } else if (arm->getLiteralPattern()) {
           open("value-arm", arm);
           str(arm->getBinding());

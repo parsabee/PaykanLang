@@ -477,3 +477,40 @@ TEST(LocalBorrow, InoutLocalsWriteThrough) {
   EXPECT_EQ(r.StdOut, "12 3 hi! 7 9 8 38 True 1\n");
   guard.expectNoLeaks("inout locals");
 }
+
+// A `match` arm's `n: view T` reads the subject as a plain binding would:
+// an object (passed on to a `view` parameter), a string and a primitive
+// unwrapped from optionals.
+TEST(LocalBorrow, ViewArms) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(
+    class Animal {
+      n: int;
+      fn __init__() { self.n = 4; }
+      view fn get() -> int { return self.n; }
+    }
+    class Dog : Animal { fn __init__() { __super__(); } }
+    fn show(a: view Animal) -> int { return a.get(); }
+    fn main() -> int {
+      a: Animal = Dog();
+      match a {
+        d: view Dog { println(Str(d.get() + show(d))); }
+        _ { }
+      }
+      o: Str? = "hi";
+      match o {
+        s: view Str { println(s + Str(s.len())); }
+        None { }
+      }
+      n: int? = 7;
+      match n {
+        k: view int { println(Str(k * 2)); }
+        None { }
+      }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "8\nhi2\n14\n");
+  guard.expectNoLeaks("view arms");
+}

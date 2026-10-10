@@ -381,6 +381,7 @@ Stmt *ASTCloner::cloneStmt(Stmt *s) {
       else
         arms.push_back(Ctx.make<MatchArm>(arm->getLocation(), arm->getBinding(),
                                           cloneType(arm->getArmType()), body));
+      arms.back()->setMode(arm->getMode());
     }
     return Ctx.make<MatchStmt>(loc, cloneExpr(m->getSubject()),
                                std::move(arms));
