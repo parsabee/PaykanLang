@@ -108,6 +108,10 @@ void ModuleLowering::storeVarBox(const std::string &name, const Val &newBox) {
 
 Val ModuleLowering::emitInoutArg(ast::Expr *arg, std::vector<Val> &keep,
                                  bool keepObject) {
+  // A call's `inout` result: the address it returns (Sema allows no other
+  // call here).
+  if (ast::isa<ast::CallExpr>(arg) || ast::isa<ast::MethodCallExpr>(arg))
+    return emitCallAddress(arg);
   if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(arg)) {
     ast::Expr *recvExpr = ma->getReceiver();
     ast::ClassType *ct = getExprClassType(recvExpr);
@@ -168,6 +172,50 @@ void ModuleLowering::emitInoutBinding(const std::string &name, ast::Expr *place,
   pir::LocalId local = B.addLocal(name, Type::Ptr);
   B.store(local, addr);
   CurrentScope->declareInout(name, local, toPIRType(astTy), astTy);
+}
+
+Val ModuleLowering::emitPlaceAddress(ast::Expr *place) {
+  if (auto *te = ast::dyn_cast<ast::TernaryExpr>(place)) {
+    Val cond = emitExpr(te->getCondition());
+    if (!cond)
+      return Val();
+    pir::LocalId addr = B.addLocal("res.addr", Type::Ptr);
+    pir::If *s = B.openIf(cond, true);
+    B.enter(*s->Then);
+    if (Val a = emitPlaceAddress(te->getTrueExpr()))
+      B.store(addr, a);
+    B.leave();
+    B.enter(*s->Else);
+    if (Val a = emitPlaceAddress(te->getFalseExpr()))
+      B.store(addr, a);
+    B.leave();
+    return B.load(addr, "res.addr");
+  }
+  // The objects on the way belong to `self` or to an `inout` parameter,
+  // which the caller holds: nothing needs keeping past the address.
+  std::vector<Val> keep;
+  Val addr = emitInoutArg(place, keep);
+  releaseAfterCall(keep);
+  return addr;
+}
+
+Val ModuleLowering::emitCallAddress(ast::Expr *call) {
+  Emitter.WantAddress = true;
+  Val addr = Emitter.visit(call);
+  Emitter.WantAddress = false;
+  if (addr && addr.Ty != Type::Ptr) {
+    reportInternalError("an 'inout' place is a call without an 'inout' result");
+    return Val();
+  }
+  return addr;
+}
+
+Val ModuleLowering::loadInoutResult(const Val &addr, ast::Type *astTy) {
+  Type t = toPIRType(canonicalizeDeclType(astTy));
+  Val v = B.ptrLoad(addr, t, "res");
+  if (t == Type::Box)
+    emitRetain(v);
+  return v;
 }
 
 void ModuleLowering::releaseAfterCall(const std::vector<Val> &keep) {

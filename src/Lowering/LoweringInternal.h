@@ -394,6 +394,10 @@ private:
   public:
     ModuleLowering &L;
     explicit ExprEmitter(ModuleLowering &l) : L(l) {}
+    /// Set for one call whose `inout` result is wanted as its address (an
+    /// `inout` argument or local, a returned `inout` result) rather than
+    /// read; the call consumes it.
+    bool WantAddress = false;
 
     /// Every expression is emitted through here (it hides the visitor's own
     /// dispatch), so a primitive that Sema marked for boxing comes out as
@@ -477,6 +481,14 @@ private:
   /// An `inout` local (`x: inout = k;`): a `ptr` local holding the address
   /// of what it names, whose object (for a field) a hidden local keeps.
   Val emitInoutLocal(ast::VarDecl *node);
+  /// The address of the storage an `inout` result names: @p place, part of
+  /// `self` or of an `inout` parameter, or a conditional of two such.
+  Val emitPlaceAddress(ast::Expr *place);
+  /// The address a call returning an `inout` result returns.
+  Val emitCallAddress(ast::Expr *call);
+  /// A call's `inout` result @p addr read as a value of type @p astTy (a
+  /// box is retained, as a call's result is owned).
+  Val loadInoutResult(const Val &addr, ast::Type *astTy);
   /// An `inout` name @p name, of type @p astTy, for the variable or field
   /// @p place: an `inout` local's, or a `match` arm's `n: inout T`.
   void emitInoutBinding(const std::string &name, ast::Expr *place,

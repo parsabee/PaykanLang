@@ -636,6 +636,12 @@ private:
       if (!ret)
         return nullptr;
     }
+    // A borrowed result (`-> view T`) is a `(qual ...)` after its type.
+    ParamMode resultMode = ParamMode::Value;
+    if (!paramMode(f, resultMode))
+      return nullptr;
+    if (resultMode != ParamMode::Value && !ret)
+      return fail(e, "a borrowed result needs a type"), nullptr;
     // A `native fn` has (native "symbol") where the body goes (#198).
     if (const SExpr *nl = f.optionalList("native")) {
       Fields nf(*this, *nl);
@@ -647,6 +653,7 @@ private:
       auto *fn =
           Ctx.make<FuncDecl>(loc, *name, std::move(params), ret, nullptr);
       fn->setNativeSymbol(*symbol);
+      fn->setResultMode(resultMode);
       return fn;
     }
     CompoundStmt *body = block(f, "the function's body");
@@ -665,6 +672,7 @@ private:
     auto *fn = Ctx.make<FuncDecl>(loc, *name, std::move(params), ret, body,
                                   std::move(tparams));
     fn->setView(view);
+    fn->setResultMode(resultMode);
     return fn;
   }
 

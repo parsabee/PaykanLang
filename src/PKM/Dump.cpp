@@ -84,6 +84,13 @@ std::string params(const std::vector<std::string> &types, const ModeRecs &m) {
   return list(out);
 }
 
+/// A borrowed result's mode, before its type (`view `); "" for a copy.
+std::string result(const ModeRecs &m) {
+  if (m.Result == kModeValue)
+    return "";
+  return m.Result == kModeView ? "view " : "inout ";
+}
+
 void dumpHeader(const File &f, std::ostream &os) {
   os << "pkm " << f.formatMajor() << "." << f.formatMinor() << ", "
      << f.sections().size() << " sections, table sha256 "
@@ -183,12 +190,12 @@ void dumpIface(const File &f, std::ostream &os) {
       os << "    field " << fl.FieldName << ": " << fl.TypeName << "\n";
     for (const ClassRec::Method &m : c.Methods)
       os << "    method " << m.Name << "(" << params(m.ParamTypeNames, m.Modes)
-         << ") -> " << m.ReturnTypeName << " flags " << detail::hex(m.Flags)
-         << "\n";
+         << ") -> " << result(m.Modes) << m.ReturnTypeName << " flags "
+         << detail::hex(m.Flags) << "\n";
   }
   for (const FuncRec &fn : i.Functions)
     os << "  func " << fn.Name << "(" << params(fn.ParamTypeNames, fn.Modes)
-       << ") -> " << fn.ReturnTypeName << "\n";
+       << ") -> " << result(fn.Modes) << fn.ReturnTypeName << "\n";
 }
 
 void dumpBinary(const File &f, std::ostream &os, Kind k, const char *name) {

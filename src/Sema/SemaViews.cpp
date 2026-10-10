@@ -20,7 +20,7 @@
 namespace paykan {
 namespace sema {
 
-const ast::Identifier *Sema::placeRoot(const ast::Expr *e) {
+const ast::Expr *Sema::placeBase(const ast::Expr *e) {
   for (;;) {
     if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e))
       e = ma->getReceiver();
@@ -29,11 +29,18 @@ const ast::Identifier *Sema::placeRoot(const ast::Expr *e) {
     else if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(e))
       e = ti->getTuple();
     else
-      return ast::dyn_cast<ast::Identifier>(e);
+      return e;
   }
 }
 
+const ast::Identifier *Sema::placeRoot(const ast::Expr *e) {
+  return ast::dyn_cast<ast::Identifier>(placeBase(e));
+}
+
 std::string Sema::frozenPlace(const ast::Expr *e, bool borrows) {
+  if (const BorrowResult *r = borrowResultOf(e))
+    if (r->Mode == ast::ParamMode::View)
+      return "the result of '" + r->Callee + "' is a 'view'";
   const ast::Identifier *root = placeRoot(e);
   if (!root)
     return "";

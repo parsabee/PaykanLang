@@ -136,23 +136,32 @@ std::vector<uint8_t> writeInterface(const Interface &iface) {
       }
       v.uleb(c->Methods.size());
       bool modes = false;
+      bool results = false;
       for (const ClassRec::Method &m : c->Methods) {
         v.uleb(strs.intern(m.Name));
         writeSig(v, strs, m.ReturnTypeName, m.ParamTypeNames);
         v.u8(m.Flags);
         modes |= !m.Modes.Modes.empty();
+        results |= m.Modes.Result != kModeValue;
       }
-      // Every method's modes, after the methods, when one has any.
-      if (modes)
+      // Every method's modes, after the methods, when one has any; then
+      // every method's result mode, when one returns a borrow.
+      if (modes || results)
         for (const ClassRec::Method &m : c->Methods)
           writeModes(v, strs, m.Modes);
+      if (results)
+        for (const ClassRec::Method &m : c->Methods)
+          v.u8(m.Modes.Result);
     });
   for (const FuncRec *f : sortedByName(iface.Functions))
     record(decls, static_cast<uint64_t>(DeclTag::Func), [&](ByteWriter &v) {
       v.uleb(strs.intern(f->Name));
       writeSig(v, strs, f->ReturnTypeName, f->ParamTypeNames);
-      if (!f->Modes.Modes.empty())
+      bool result = f->Modes.Result != kModeValue;
+      if (!f->Modes.Modes.empty() || result)
         writeModes(v, strs, f->Modes);
+      if (result)
+        v.u8(f->Modes.Result);
     });
 
   ByteWriter inst;
@@ -253,6 +262,14 @@ private:
       if (out.Modes[i] > kModeInout)
         return r.fail("unknown parameter mode " + std::to_string(out.Modes[i]));
     }
+    return true;
+  }
+  /// How a signature returns its result, after its modes.
+  bool result(ByteReader &r, ModeRecs &out) {
+    if (!r.u8(out.Result))
+      return false;
+    if (out.Result > kModeInout)
+      return r.fail("unknown result mode " + std::to_string(out.Result));
     return true;
   }
   /// `uleb count` then records; @p body gets (tag, payload reader) for a
@@ -450,6 +467,10 @@ Status Reader::readDecls(Interface &out) {
             for (ClassRec::Method &m : c.Methods)
               if (!modes(v, m.ParamTypeNames.size(), m.Modes))
                 return true;
+          if (v.remaining() > 0) // every method's result mode
+            for (ClassRec::Method &m : c.Methods)
+              if (!result(v, m.Modes))
+                return true;
           if (ordered(tag, c.Name))
             out.Classes.push_back(std::move(c));
           return true;
@@ -458,8 +479,9 @@ Status Reader::readDecls(Interface &out) {
           FuncRec f;
           if (str(v, f.Name) && str(v, f.ReturnTypeName) &&
               strList(v, f.ParamTypeNames) &&
-              (v.remaining() == 0 || // the modes
-               modes(v, f.ParamTypeNames.size(), f.Modes)) &&
+              (v.remaining() == 0 || // the modes, then the result's
+               (modes(v, f.ParamTypeNames.size(), f.Modes) &&
+                (v.remaining() == 0 || result(v, f.Modes)))) &&
               ordered(tag, f.Name))
             out.Functions.push_back(std::move(f));
           return true;

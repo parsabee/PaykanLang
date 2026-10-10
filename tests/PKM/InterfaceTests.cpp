@@ -161,6 +161,31 @@ TEST(Interface, ParamModes) {
             std::string::npos);
 }
 
+// A borrowed result's mode follows the modes, and only when a result is a
+// borrow: a function with no parameter modes writes an empty list first,
+// and a class writes one result byte per method.
+TEST(Interface, ResultModes) {
+  Interface i = sortedSample();
+  ASSERT_EQ(i.Functions[1].Name, "area");
+  ASSERT_TRUE(i.Functions[1].Modes.Modes.empty());
+  Interface borrows = i;
+  borrows.Functions[1].Modes.Result = kModeView;
+  borrows.Functions[0].Modes.Result = kModeInout;
+  for (ClassRec::Method &m : borrows.Classes[0].Methods)
+    if (m.Name == "area")
+      m.Modes.Result = kModeView;
+  StatusOr<Interface> back =
+      readInterface(writeInterface(borrows), "geometry::shapes");
+  ASSERT_TRUE(back) << back.status().message();
+  EXPECT_EQ(*back, borrows);
+  EXPECT_LT(writeInterface(i).size(), writeInterface(borrows).size());
+
+  Interface bad = borrows;
+  bad.Functions[1].Modes.Result = 3;
+  EXPECT_NE(readError(writeInterface(bad)).find("unknown result mode 3"),
+            std::string::npos);
+}
+
 TEST(Interface, Deterministic) {
   EXPECT_EQ(writeInterface(sampleInterface()),
             writeInterface(sampleInterface()));

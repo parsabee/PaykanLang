@@ -286,8 +286,12 @@ written today (`include/paykan/pkm/Interface.h`): `uleb n, (u8 mode, Str
 name)[n]` after a `FUNC` record's signature, and one such list per method
 after a `CLASS` record's methods, written only when a parameter has a mode
 (mode 0 by value, 1 `view`, 2 `inout`; `n` is 0 or the number of
-parameters).  A record without them reads as having no modes.  The
-interface minor version is bumped for them at the next release.
+parameters).  A borrowed result (`-> view T`) adds a `u8` result mode
+after a `FUNC` record's modes, and one per method after a `CLASS` record's
+lists, written only when a result is a borrow (the modes lists are then
+written too, with `n` 0 where a signature has none).  A record without them
+reads as having no modes and returning copies.  The interface minor version
+is bumped for them at the next release.
 
 Every part but `STRS` is `uleb count` then records `uleb tag, uleb len,
 payload[len]`. A reader parses the fields it knows and ignores trailing
