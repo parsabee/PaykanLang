@@ -21,7 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parameter.  It names a place as an `inout` argument does (not an expression, an array
   element yet, a string's character, `self`, a `let` local or a `view`), of exactly its
   type, and keeps a field's object alive while it can be used.  In PIR, box slots now have
-  addresses (`local.addr`, `field.addr`, `ptr.load`, `ptr.store`).  A local borrow needs an initializer, is never `let` and
+  addresses (`local.addr`, `field.addr`, `ptr.load`, `ptr.store`).  A local borrow of a
+  variable is exclusive while it is live, from its declaration to its last use in its
+  block (a loop that uses it keeps it live): the variable an `inout` local names cannot be
+  used (`'k' is borrowed by 'inout' local 'x' until 'x' is last used`), and one a `view`
+  local reads cannot change (`'c' is viewed by 'view' local 'v' until 'v' is last used;
+  'tick' may change it`).  A borrow of a borrow keeps the first variable borrowed.  A local borrow needs an initializer, is never `let` and
   is not a destructuring target; written before the name (`view x = e;`) the error shows
   the fix.  In the AST interchange format a local borrow carries `(qual view)` or
   `(qual inout)`.

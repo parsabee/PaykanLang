@@ -516,3 +516,78 @@ fn main() -> int { return f(1); })");
                    "passed to a 'view' parameter, and parameter 1 of 'twice' "
                    "is not one"});
 }
+
+// Exclusivity: while an `inout` local is live, the variable it names cannot
+// be used; while a `view` local of a variable is live, the variable cannot
+// change (a value type can still be passed on as a copy).  A borrow lives
+// until its last use in its block, through a whole loop that uses it, and a
+// borrow of a borrow keeps the first variable borrowed.
+TEST(LocalBorrow, Exclusivity) {
+  auto r = semaCheck(R"(class Counter {
+  n: int;
+  fn __init__() { self.n = 0; }
+  fn tick() { self.n = self.n + 1; }
+}
+fn twice(n: int) -> int { return 2 * n; }
+fn report(c: Counter) { }
+fn main() -> int {
+  k = 1;
+  x: inout = k;
+  x = 2;
+  y = k;
+  x = 3;
+  z = k;
+  c = Counter();
+  v: view = c;
+  c.tick();
+  c.n = 4;
+  c = Counter();
+  report(c);
+  println(Str(v.n));
+  c.tick();
+  m = 5;
+  w: view = m;
+  t = twice(m);
+  m = 6;
+  print(Str(w));
+  m = 7;
+  i = 0;
+  a = 1;
+  ai: inout = a;
+  while (i < 3) { a = a + 1; ai = ai + 1; i = i + 1; }
+  p = 1;
+  pi: inout = p;
+  pj: inout = pi;
+  p = 2;
+  pj = 3;
+  p = 4;
+  e: view = k + 1;
+  k = 9;
+  return y + z + t + e;
+})");
+  const std::string kViewed =
+      "error: 'c' is viewed by 'view' local 'v' until 'v' is last used; ";
+  for (const std::string &diag :
+       {std::string(":12:7: error: 'k' is borrowed by 'inout' local 'x' until "
+                    "'x' is last used"),
+        ":17:3: " + kViewed + "'tick' may change it",
+        ":18:3: " + kViewed + "cannot assign to its field 'n'",
+        ":19:3: " + kViewed + "it cannot be assigned",
+        ":20:10: " + kViewed +
+            "it can only be passed to a 'view' parameter, and parameter 1 of "
+            "'report' is not one",
+        std::string(":26:3: error: 'm' is viewed by 'view' local 'w' until "
+                    "'w' is last used; it cannot be assigned"),
+        std::string(":32:23: error: 'a' is borrowed by 'inout' local 'ai' "
+                    "until 'ai' is last used"),
+        std::string(":36:3: error: 'p' is borrowed by 'inout' local 'pj' "
+                    "until 'pj' is last used")})
+    EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
+                                                           << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
+  // After a borrow's last use, and a copy passed on, are fine; a `view` of
+  // an expression borrows nothing.
+  for (const char *line : {":14:", ":22:", ":25:", ":28:", ":38:", ":40:"})
+    EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
+                                                           << r.Diagnostics;
+}

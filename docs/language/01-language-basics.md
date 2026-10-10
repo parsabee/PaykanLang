@@ -298,6 +298,35 @@ field, also of the object a `let` local holds, of exactly the local's type (`'in
 (not yet), a string's character, `self`, a `let` local and anything reached through a
 `view` are errors. An object whose field it names stays alive while the local can be used.
 
+A local borrow of a variable (or of a field or element reached from one) is exclusive while
+it is live, from its declaration to the last statement of its block that uses it; a loop
+that uses it keeps it live for the whole loop:
+
+- while an `inout` local is live, the variable it names cannot be used except through it:
+  `'k' is borrowed by 'inout' local 'x' until 'x' is last used`;
+- while a `view` local of a variable is live, the variable cannot change, as if it were a
+  `view` itself: `'c' is viewed by 'view' local 'v' until 'v' is last used; 'tick' may
+  change it`. A variable of a value type can still be read and passed on as a copy.
+
+```pkn
+fn main() -> int {
+  k = 1;
+  x: inout = k;
+  x = 5;               // the last use of x
+  println(Str(k));     // fine: x is no longer live
+  return 0;
+}
+```
+
+Output:
+
+```
+5
+```
+
+A borrow of a borrow (`y: inout = x;` with `x: inout = k;`) keeps `k` borrowed while `y` is
+live. A `view` local of an expression (`v: view = k + 1;`) borrows nothing.
+
 A local borrow always has an initializer, declares one variable (not a destructuring
 target), and is never `let`: `let x: view = e;` is an error, `a local borrow cannot be
 'let'`. Written before the name, `view x = e;`, the mode is a syntax error that shows the

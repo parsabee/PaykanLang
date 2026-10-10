@@ -615,10 +615,7 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
         CurrentScope->declare(method->getParams()[i].getName(), paramTys[i]);
       declareParamKinds(method);
 
-      bool bodyOk = true;
-      for (auto *stmt : method->getBody()->getStatements())
-        if (!visit(stmt))
-          bodyOk = false;
+      bool bodyOk = visitBody(method->getBody()->getStatements());
 
       if (!bodyOk) {
         ok = false;
