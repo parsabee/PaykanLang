@@ -97,7 +97,7 @@ class Question {
 class Cache<T> {
   slot: T?;
   fn __init__() { }
-  fn get() -> T? { return self.slot; }
+  view fn get() -> T? { return self.slot; }
   fn put(v: T) { self.slot = v; }
 }
 

@@ -11,6 +11,7 @@
 #include "StringMap.h"
 #include "paykan/pkm/Interface.h"
 
+#include <deque>
 #include <filesystem>
 #include <memory>
 #include <set>
@@ -146,6 +147,19 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   };
 
   ClassContext *CurrentClassCtx = nullptr;
+
+  /// What a method body does to `self`, for the warning on a method that
+  /// never changes it but is not a `view fn` (SemaViewFn.cpp).
+  struct MethodUse {
+    ast::ClassType *Class = nullptr;
+    const ast::FuncDecl *Decl = nullptr;
+    bool ChangesSelf = false; // writes `self`, or calls a changing method on
+                              // something reached through it
+    std::vector<std::string> SelfCalls; // `self.m()` of a non-`view fn` m
+  };
+  std::deque<MethodUse> MethodUses; // stable addresses for CurrentMethodUse
+  /// The use being recorded: the method body being checked (null outside).
+  MethodUse *CurrentMethodUse = nullptr;
 
   // -- Function signature table
 
@@ -645,6 +659,9 @@ private:
                        const ast::MethodDecl *base);
   /// Only a method can be a `view fn`: error on each free one in @p tu.
   bool rejectFreeViewFns(ast::TranslationUnit *tu);
+  /// After every body is checked: warn about each method, with its
+  /// overrides, that never changes `self` but is not a `view fn`.
+  void warnMissingViewFns();
 
   // -- Exclusivity of local borrows (SemaBorrows.cpp)
 

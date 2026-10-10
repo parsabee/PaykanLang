@@ -25,7 +25,7 @@ class Counter {
     self.count = self.count + 1;
   }
 
-  fn report() -> Str {
+  view fn report() -> Str {
     return self.name + ": " + Str(self.count);
   }
 }
@@ -121,8 +121,9 @@ error: 'self' is read-only in 'view fn report'; cannot assign to its field 'bala
 error: 'a' is a 'view' parameter; 'deposit' is not a 'view fn'
 ```
 
-An override keeps the marker of the method it overrides, so `toString` and `equals` are
-always `view fn`s. The details are in
+The compiler warns about a method that never changes its object but is not a `view fn`,
+so mark such methods as you write them. An override keeps the marker of the method it
+overrides, so `toString` and `equals` are always `view fn`s. The details are in
 [the language reference](../language/04-classes.md#methods-that-dont-change-self).
 
 ## Objects are references
@@ -174,13 +175,13 @@ statement:
 class Animal {
   name: Str;
   fn __init__(name: Str) { self.name = name; }
-  fn sound() -> Str { return "..."; }
-  fn speak() -> Str { return self.name + " says " + self.sound(); }
+  view fn sound() -> Str { return "..."; }
+  view fn speak() -> Str { return self.name + " says " + self.sound(); }
 }
 
 class Dog : Animal {
   fn __init__(name: Str) { __super__(name); }
-  fn sound() -> Str { return "woof"; }
+  view fn sound() -> Str { return "woof"; }
 }
 
 class Cat : Animal {
@@ -189,7 +190,7 @@ class Cat : Animal {
     __super__(name);
     self.lives = 9;
   }
-  fn sound() -> Str { return "meow"; }
+  view fn sound() -> Str { return "meow"; }
 }
 
 fn main() -> int {
@@ -233,9 +234,9 @@ Things to know about inheritance:
 Every class extends `Obj`, the root of the class hierarchy, directly or indirectly. `Obj`
 provides two methods that your classes can override:
 
-- `fn toString() -> Str`, used by `print` and `println` to print an object. The default
+- `view fn toString() -> Str`, used by `print` and `println` to print an object. The default
   prints `Object@` and an address.
-- `fn equals(other: Obj) -> bool`, used by `==` and `!=`. The default compares identity: two
+- `view fn equals(other: Obj) -> bool`, used by `==` and `!=`. The default compares identity: two
   separately created objects are unequal even if their fields are the same.
 
 Overriding `toString` makes objects printable, and overriding `equals` gives them value

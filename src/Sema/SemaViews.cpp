@@ -38,10 +38,15 @@ std::string Sema::frozenPlace(const ast::Expr *e, bool borrows) {
   if (!root)
     return "";
   const std::string &name = root->getName();
-  if (name == names::kSelf && CurrentClassCtx && CurrentClassCtx->ViewMethod &&
-      !CurrentClassCtx->MethodName.empty())
-    return "'self' is read-only in 'view fn " + CurrentClassCtx->MethodName +
-           "'";
+  if (name == names::kSelf && CurrentClassCtx &&
+      !CurrentClassCtx->MethodName.empty()) {
+    if (CurrentClassCtx->ViewMethod)
+      return "'self' is read-only in 'view fn " + CurrentClassCtx->MethodName +
+             "'";
+    // Here a `view fn` would fail: the method changes `self`.
+    if (CurrentMethodUse)
+      CurrentMethodUse->ChangesSelf = true;
+  }
   switch (varKind(name)) {
   case VarKind::View:
     return "'" + name + "' is a 'view' parameter";
@@ -70,6 +75,15 @@ bool Sema::checkMethodReceiver(const ast::MethodCallExpr *call,
                                const ast::MethodDecl *method) {
   if (method->isView())
     return true;
+  // `self.m()` in a method that may change `self`: whether that changes
+  // `self` depends on m, which the warning works out once every body is
+  // checked.
+  const auto *id = ast::dyn_cast<ast::Identifier>(call->getReceiver());
+  if (id && id->getName() == names::kSelf && CurrentMethodUse &&
+      CurrentClassCtx && !CurrentClassCtx->ViewMethod) {
+    CurrentMethodUse->SelfCalls.push_back(call->getMethodName());
+    return true;
+  }
   return checkChangeable(call->getReceiver(),
                          "'" + call->getMethodName() + "' is not a 'view fn'",
                          call->getLocation());

@@ -39,7 +39,7 @@ SHAPES = """import lib::util;
 class Rect {
   w: int; h: int;
   fn __init__(w: int, h: int) { self.w = w; self.h = h; }
-  fn area() -> int { return util::twice(self.w * self.h) / 2; }
+  view fn area() -> int { return util::twice(self.w * self.h) / 2; }
 }
 fn describe(r: Rect) -> Str { return "rect " + Str(r.area()); }
 """

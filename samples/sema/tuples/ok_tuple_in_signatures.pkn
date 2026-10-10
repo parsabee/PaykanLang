@@ -4,8 +4,8 @@
 class Holder {
   pair: (int, Str);
   fn __init__(p: (int, Str)) { self.pair = p; }
-  fn get() -> (int, Str) { return self.pair; }
-  fn first() -> int { return self.pair.0; }
+  view fn get() -> (int, Str) { return self.pair; }
+  view fn first() -> int { return self.pair.0; }
 }
 
 fn swap(p: (int, Str)) -> (Str, int) {

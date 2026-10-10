@@ -31,7 +31,7 @@ class Point {
   view fn toString() -> Str {
     return "(" + Str<int>(self.x) + "," + Str(self.y) + ")";
   }
-  fn sum() -> int {
+  view fn sum() -> int {
     return self.x + self.y;
   }
 }
@@ -44,7 +44,7 @@ class Labeled {
     self.label = l;
     self.value = v;
   }
-  fn describe() -> Str {
+  view fn describe() -> Str {
     return self.label + "=" + Str<int>(self.value);
   }
 }
