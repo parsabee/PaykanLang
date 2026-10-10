@@ -1118,6 +1118,14 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   }
   S.noteBorrowResult(node, node->getMethodName(), method->getParamModes(),
                      node->getArguments(), node->getReceiver());
+  // An `inout` result is part of the receiver, which must outlive the call.
+  if (method->getParamModes().Result == ast::ParamMode::Inout &&
+      !S.placeRoot(node->getReceiver()) &&
+      !S.isInoutResult(S.placeBase(node->getReceiver())))
+    S.error(node->getReceiver()->getLocation(),
+            "the receiver of '" + node->getMethodName() +
+                "' must be a variable or a field: its 'inout' result is part "
+                "of it");
 
   node->setResolvedType(method->getReturnType());
   return method->getReturnType();
@@ -2140,6 +2148,12 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
     // A borrowed result is a borrow of what the function was given.
     if (CurrentResult.Mode != ast::ParamMode::Value) {
       std::string why = borrowedResultError(node->getReturnValue());
+      // The caller writes the storage as the result's type, so no
+      // conversion can happen (not a subclass to its base).
+      if (why.empty() && CurrentResult.Mode == ast::ParamMode::Inout &&
+          !typesEqual(valTy, CurrentReturnType))
+        why = "an 'inout' result has type '" + typeName(CurrentReturnType) +
+              "', but what it returns has type '" + typeName(valTy) + "'";
       if (why.empty())
         return true;
       error(node->getReturnValue()->getLocation(), why);

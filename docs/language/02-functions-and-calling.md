@@ -293,8 +293,8 @@ fn nothing() {
 ### Borrowed results
 
 A function or method can return a borrow instead of a copy, with the mode where the result's
-type goes: `-> view T`. The result is part of what the function was given as a borrow, so it
-needs no annotation saying where it comes from:
+type goes: `-> view T` or `-> inout T`. The result is part of what the function was given as
+a borrow, so it needs no annotation saying where it comes from:
 
 ```pkn
 class Counter {
@@ -347,7 +347,55 @@ hello 4
 - How a function returns its result is part of a module's interface, imported from source
   or from a `.pkm` file.
 - `main` returns a copy. An override returns its result the way the method it overrides
-  does. `-> inout T` is reserved and is an error for now.
+  does.
+
+`-> inout T` returns the storage of part of `self` or of an `inout` parameter, as an `inout`
+local names it: the caller writes through it.
+
+```pkn
+class Box {
+  k: int;
+  fn __init__() { self.k = 3; }
+  fn num() -> inout int { return self.k; }
+}
+
+fn pick(a: inout int, b: inout int, first: bool) -> inout int {
+  return if first then a else b;
+}
+
+fn bump(n: inout int) { n = n + 1; }
+
+fn main() -> int {
+  b = Box();
+  x: inout = b.num();
+  x = x + 10;      // writes b.k
+  bump(b.num());   // passed on as b.k's storage
+  i = 1;
+  j = 2;
+  p: inout = pick(i, j, False);
+  p = 20;          // writes j
+  println(Str(b.k) + " " + Str(i) + " " + Str(j));
+  return 0;
+}
+```
+
+Output:
+
+```
+14 1 20
+```
+
+- What it returns is a place an `inout` argument could be: part of `self` (not `self`
+  itself) or of an `inout` parameter, not a `view`, a copy or a local, not an array element
+  yet, of exactly the result's type (`an 'inout' result has type 'Animal', but what it
+  returns has type 'Dog'`). A `view fn` cannot return one.
+- The caller binds it to an `inout` local, passes it on to an `inout` parameter, calls a
+  method on it or reads it (`y = b.num() + 1;` copies). It borrows the receiver and the
+  arguments to the call's `inout` parameters, as an `inout` local of them would: while a
+  local of it is live, they cannot be used (`'b' is borrowed by 'inout' local 'x' until 'x'
+  is last used`).
+- The receiver of a method returning `inout` is a variable or a field, which outlives the
+  call: `Box().num()` is an error.
 
 ---
 
@@ -408,3 +456,4 @@ fn fib(n: int) -> int {
 | Bad `inout` argument | Not a variable or field, not exactly the parameter's type, a `view` parameter or `let` local, an array element, a string's character, or the same place twice in one call |
 | Override changes a mode | An override that drops, adds or changes a parameter's `view`/`inout`, or returns a borrow where the method it overrides returns a copy (or the other way) |
 | A `view` result of something else | A `-> view T` function returns a new value, a copy parameter or a local, not part of `self` or of a `view` / `inout` parameter |
+| An `inout` result of something else | A `-> inout T` function returns what an `inout` argument could not be, or what is not part of `self` or of an `inout` parameter, or another type; a `view fn` returns `inout`; the receiver of a method returning `inout` is not a variable or a field |

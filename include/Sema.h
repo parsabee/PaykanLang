@@ -676,7 +676,7 @@ private:
   };
   std::unordered_map<const ast::Expr *, BorrowResult> BorrowResults;
   /// The result-mode rules of the declaration of @p fn (a method when
-  /// @p method): `main` returns a copy, and `inout` results are not yet.
+  /// @p method): `main` returns a copy, and a `view fn` no `inout`.
   bool checkResultDecl(const ast::FuncDecl *fn, bool method);
   /// Record that @p call, of @p callee with @p modes, returns a borrow of
   /// @p receiver (or null) and its borrowed @p args.
@@ -686,8 +686,11 @@ private:
                         const ast::Expr *receiver);
   /// The borrowed result the place @p e is part of, or null.
   const BorrowResult *borrowResultOf(const ast::Expr *e) const;
-  /// Why @p e cannot be returned as the current function's `view` result;
-  /// "" when it is part of `self` or of a `view` / `inout` parameter.
+  /// Whether @p e is a call returning an `inout` result: a place.
+  bool isInoutResult(const ast::Expr *e) const;
+  /// Why @p e cannot be returned as the current function's borrowed result;
+  /// "" when it is part of `self` or of a `view` / `inout` parameter (an
+  /// `inout` one, and an `inout` argument's place, for an `inout` result).
   std::string borrowedResultError(const ast::Expr *e);
 
   // -- Where a `view fn` may be declared (SemaViewFn.cpp)

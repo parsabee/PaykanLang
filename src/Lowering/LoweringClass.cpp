@@ -78,6 +78,8 @@ pir::Signature ModuleLowering::methodSignature(ast::MethodDecl *md) {
   sig.Ret = md->getReturnType()
                 ? toPIRType(canonicalizeDeclType(md->getReturnType()))
                 : Type::Void;
+  if (md->getParamModes().Result == ast::ParamMode::Inout)
+    sig.Ret = Type::Ptr; // the address of the storage it names
   // The virtual `equals` returns int64_t in the runtime (every `*_equals`
   // implementation); a user override is emitted with the same return type and
   // call sites convert the result back to bool.

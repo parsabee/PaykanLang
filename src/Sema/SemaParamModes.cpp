@@ -81,7 +81,7 @@ bool Sema::checkLocalBorrow(const ast::VarDecl *node) {
     return false; // the initializer's error was reported
   if (!ast::isa<ast::Identifier>(place) &&
       !ast::isa<ast::MemberAccessExpr>(place) &&
-      !ast::isa<ast::SubscriptExpr>(place))
+      !ast::isa<ast::SubscriptExpr>(place) && !isInoutResult(place))
     msg = local + " must name a variable or a field";
   else if (!typesEqual(placeTy, node->getType()))
     msg = local + " has type '" + typeName(node->getType()) +
@@ -154,7 +154,7 @@ bool Sema::checkInoutArgs(const ast::ParamModes &modes,
     if (ast::isa<ast::SubscriptExpr>(arg)) {
       msg = inoutPlaceError(arg, "passed to " + param);
     } else if (!ast::isa<ast::Identifier>(arg) &&
-               !ast::isa<ast::MemberAccessExpr>(arg)) {
+               !ast::isa<ast::MemberAccessExpr>(arg) && !isInoutResult(arg)) {
       msg = argN + " must be a variable or a field: parameter '" +
             modes.name(i) + "' is 'inout'";
     } else if (!typesEqual(argTy, paramTys[i])) {
@@ -166,11 +166,18 @@ bool Sema::checkInoutArgs(const ast::ParamModes &modes,
     } else if (std::string why = inoutPlaceError(arg, "passed to " + param);
                !why.empty()) {
       msg = std::move(why);
-    } else if (std::string path = placePath(arg); !path.empty()) {
-      auto [it, first] = places.try_emplace(path, i);
-      if (!first)
-        msg = "'" + path + "' is passed to two 'inout' parameters ('" +
-              modes.name(it->second) + "' and '" + modes.name(i) + "')";
+    } else {
+      // An `inout` result passes on what its call borrowed.
+      std::vector<const ast::Expr *> passed{arg};
+      if (isInoutResult(arg))
+        passed = BorrowResults.at(arg).From;
+      for (const ast::Expr *p : passed)
+        if (std::string path = placePath(p); !path.empty() && msg.empty()) {
+          auto [it, first] = places.try_emplace(path, i);
+          if (!first)
+            msg = "'" + path + "' is passed to two 'inout' parameters ('" +
+                  modes.name(it->second) + "' and '" + modes.name(i) + "')";
+        }
     }
     if (!msg.empty()) {
       error(arg->getLocation(), msg);

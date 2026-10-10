@@ -129,8 +129,8 @@ fn main() -> int {
   EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
 }
 
-// `main` returns a copy, an `inout` result is not supported yet, and an
-// override returns its result the way the method it overrides does.
+// `main` returns a copy, and an override returns its result the way the
+// method it overrides does.
 TEST(BorrowedResult, Declarations) {
   auto r = semaCheck(R"(class Base {
   n: int;
@@ -143,7 +143,6 @@ class Sub : Base {
   view fn get() -> int { return 1; }
   view fn copy() -> view int { return self.n; }
 }
-fn bump(n: inout int) -> inout int { return n; }
 fn main() -> view int { return 0; }
 )");
   expectErrors(
@@ -151,10 +150,8 @@ fn main() -> view int { return 0; }
           "it overrides",
           ":10:3: error: override of 'copy' cannot return a borrow: the "
           "method it overrides returns a copy",
-          ":12:1: error: an 'inout' result is not supported yet: 'bump' can "
-          "return a 'view'",
-          ":13:1: error: 'main' cannot return a borrow"});
-  EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
+          ":12:1: error: 'main' cannot return a borrow"});
+  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
 }
 
 // A `view` local of a borrowed result views what the call borrowed (its
@@ -231,4 +228,58 @@ fn main() -> int {
                    "'tick' is not a 'view fn'"});
   EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
   std::filesystem::remove_all(dir);
+}
+
+// An `inout` result names the storage of part of `self` or of an `inout`
+// parameter, as an `inout` argument would (not `self` itself, an element
+// yet, a `view` or a copy), of exactly the result's type.  A `view fn`
+// returns none.  The caller's receiver must outlive the call, and while a
+// borrow of the result is live, what it borrowed cannot be used.
+TEST(BorrowedResult, InoutResults) {
+  auto r =
+      semaCheck(R"(class Animal { n: int; fn __init__(n: int) { self.n = n; } }
+class Dog : Animal { fn __init__(n: int) { __super__(n); } }
+class Box {
+  a: Animal; d: Dog; xs: int[];
+  fn __init__() { self.a = Dog(1); self.d = Dog(2); self.xs = [1]; }
+  fn me() -> inout Box { return self; }
+  fn wrong() -> inout Animal { return self.d; }
+  fn elem() -> inout int { return self.xs[0]; }
+  fn fine() -> inout Animal { return self.a; }
+  fn num() -> inout int { return self.a.n; }
+}
+class Look { a: Animal; fn __init__() { self.a = Dog(1); } view fn look() -> inout Animal { return self.a; } }
+fn fromView(v: view Animal) -> inout int { return v.n; }
+fn fromCopy(c: Animal) -> inout int { return c.n; }
+fn twice(a: inout int, b: inout int) { }
+fn main() -> int {
+  Box().fine();
+  b = Box();
+  x: inout = b.fine();
+  b.d = Dog(5);
+  x.n = 2;
+  twice(b.num(), b.num());
+  return 0;
+}
+)");
+  expectErrors(
+      r,
+      {":6:33: error: 'self' cannot be returned 'inout': the method would no "
+       "longer know its object",
+       ":7:39: error: an 'inout' result has type 'Animal', but what it "
+       "returns has type 'Dog'",
+       ":8:35: error: an array element cannot be returned 'inout' yet",
+       ":12:60: error: 'view fn look' cannot return 'inout': it does not "
+       "change 'self'",
+       ":13:51: error: 'v' is a 'view' parameter; it cannot be returned "
+       "'inout'",
+       ":14:46: error: 'c' is a copy: an 'inout' result must be part of 'self' "
+       "or of an 'inout' parameter",
+       ":17:3: error: the receiver of 'fine' must be a variable or a field: "
+       "its 'inout' result is part of it",
+       ":20:3: error: 'b' is borrowed by 'inout' local 'x' until 'x' is last "
+       "used",
+       ":22:18: error: 'b' is passed to two 'inout' parameters ('a' and "
+       "'b')"});
+  EXPECT_EQ(r.ErrorCount, 9u) << r.Diagnostics;
 }
