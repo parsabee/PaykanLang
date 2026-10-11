@@ -37,13 +37,44 @@ namespace ast {
 // is fresh, so Sema's per-node annotations (resolved types, rewritten callee
 // names, canonical match-arm types) never leak from one instantiation into
 // another or into the template.
+//
+// A template of another module (docs/design/pkm.md §4) is copied twice.  Its
+// module copies it once with a Renamer, which spells every name the module
+// declares or imports as the hidden qualified name an importer registers
+// (Sema::exportTemplates).  The importer copies that from the other
+// module's ASTContext into its own (`Foreign`): every name is interned anew
+// and every type is rebuilt, a class or an enum as a stub by its name, so
+// nothing of the other context leaks into the copy.
 class ASTCloner {
+public:
+  /// How a template's module spells the names of its own and its imports'
+  /// declarations for an importer; a name returned unchanged stays as it is.
+  struct Renamer {
+    virtual ~Renamer() = default;
+    /// A class or an enum, in a type annotation or an `Enum::Variant`.
+    virtual std::string type(const std::string &name) const = 0;
+    /// A generic class, in `Box<T>`.
+    virtual std::string generic(const std::string &name) const = 0;
+    /// The callee of a call: a function, a constructor or a template.
+    virtual std::string callee(const std::string &name) const = 0;
+  };
+
+private:
   ASTContext &Ctx;
   std::unordered_map<std::string, Type *> Subst;
+  const Renamer *Names;
+  bool Foreign;
+
+  /// @p s interned in this context (a no-op for a name already there).
+  const std::string &in(const std::string &s) { return Ctx.intern(s); }
+  /// A class or enum annotation named @p name: shared, or a stub by its
+  /// (renamed) name.
+  Type *named(Type *ty, const std::string &name);
 
 public:
-  ASTCloner(ASTContext &ctx, std::unordered_map<std::string, Type *> subst)
-      : Ctx(ctx), Subst(std::move(subst)) {}
+  ASTCloner(ASTContext &ctx, std::unordered_map<std::string, Type *> subst,
+            const Renamer *names = nullptr, bool foreign = false)
+      : Ctx(ctx), Subst(std::move(subst)), Names(names), Foreign(foreign) {}
 
   /// Substitute type parameters inside @p ty.  Returns @p ty itself when
   /// nothing inside it changes.
@@ -60,6 +91,10 @@ public:
   /// Copy a class under a new name (fields, methods, superclass name).  The
   /// copy has no type parameters.
   ClassDecl *cloneClassDecl(ClassDecl *cd, const std::string &newName);
+
+  /// Copy a template as a template: same name, same type parameters.
+  FuncDecl *cloneTemplate(FuncDecl *fn);
+  ClassDecl *cloneTemplate(ClassDecl *cd);
 };
 
 } // namespace ast
