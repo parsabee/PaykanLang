@@ -2,10 +2,9 @@
 
 > **Stable in v0.1** (issue #2): the syntax and semantics below are covered by the
 > compatibility promise for the 0.1 series (see `01-language-basics.md`, "Stability").
-> Importing generics across modules is not supported until v0.2.0 ([#57](https://github.com/parsabee/PaykanLang/issues/57)).
 
-Generic classes and functions are parameterised by types. Constraints, variance
-and cross-module templates are not supported in v0.1.
+Generic classes and functions are parameterised by types. Constraints and
+variance are not supported in v0.1.
 
 ---
 
@@ -196,26 +195,51 @@ rejected like any `int` arm.
 
 ## Modules
 
-- Generic classes and functions are **not exported**. From an importer,
-  `gen::Box<int>`, `gen::Box<int>(1)` and `gen::first<int>(xs)` are errors:
-  "generic types cannot be imported yet".
-- Concrete instantiations a module makes for itself *are* exported as
-  ordinary classes, so a value returned by the module can be used:
+A module's generic classes and functions are exported with the rest of it,
+and an importer instantiates them under the module's qualifier, in every
+position a local template may be used: `gen::Box<int>(1)`, `gen::Box("s")`
+(inferred), `b: gen::Box<Str>`, `gen::first(xs)`, and inside the importer's
+own templates (`gen::Box<T>`).
 
 ```pkn
 // lib/gen.pkn
-class Box<T> { … }
+import lib::util;
+class Box<T> {
+  v: T;
+  fn __init__(v: T) { self.v = v; }
+  view fn get() -> view T { return self.v; }
+  view fn tag() -> Str { return util::bracket(Str(__serial())); }
+}
+fn __serial() -> int { return 7; }
 fn mk() -> Box<int> { return Box<int>(41); }
 
 // main.pkn
 import lib::gen;
-b = gen::mk();            // b: Box<int>, a class exported by the module
-println(Str<int>(b.get()));
+b = gen::Box<Str>("s");   // instantiated here
+c = gen::mk();            // the module's own Box<int>
+d = gen::Box<int>(1);     // the same class as c's
 ```
 
-  Declaring your own `class Box<T>` and instantiating `Box<int>` in a module
-  that also imports such an exported `Box<int>` is an error: type names are
-  global across the import graph.
+- **Names in a body are the module's.** A template's body is resolved where
+  it is declared: `__serial`, `Box` and `util::bracket` above are what
+  `lib::gen` declares and imports, whatever the importer calls those names
+  (its own `__serial`, its own `util`).
+- **Checked per instantiation, as the module would check it.** An error in
+  the body is reported in the template's file, with the instantiation note
+  at the request.
+- **One class per instantiation per program.** Class names are global
+  across imports, so `Box<int>` is one class whoever instantiates it: the
+  template's module, the importer, or another importer. Values pass between
+  them, and inference sees through them (a `fn peek<T>(b: Box<T>)` of
+  `lib::gen` binds `T = int` from a `Box<int>` any of them made). An
+  instantiation is compiled once per program.
+- Declaring your own `class Box<T>` and instantiating `Box<int>` in a module
+  that also imports `lib::gen`'s `Box<int>`, or instantiating both your
+  `Box<Str>` and `gen::Box<Str>`, is an error: type names are global across
+  the import graph.
+- A `.pkm` does not hold templates yet (#160): a module that declares them,
+  instantiates another module's, or uses such an instantiation, is built
+  from its source every time (`docs/design/pkm.md` §4.8).
 
 ## Syntax Notes
 
@@ -239,10 +263,10 @@ println(Str<int>(b.get()));
 | Error inside an instantiation | any ordinary error in a body, reported with the instantiation note |
 | Inference failure / ambiguity | see *Inference* |
 | Instantiation depth exceeded | self-instantiation with a growing argument |
-| Imported generic | `mod::Box<int>` and friends |
+| Instantiation name clash | this module's `Box<Str>` and an imported template's, or an imported class `Box<int>` |
 
 ## Not Supported in v0.1
 
 Constraints/bounds (`T: Comparable`) and interfaces, variance, default type
 arguments, explicit specialisation, generic methods on non-generic classes,
-generic superclasses, and exporting templates across modules (v0.2.0, [#57](https://github.com/parsabee/PaykanLang/issues/57)).
+generic superclasses, and templates in a prebuilt `.pkm` (v0.2.0, [#57](https://github.com/parsabee/PaykanLang/issues/57)).
