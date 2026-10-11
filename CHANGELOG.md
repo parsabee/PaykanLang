@@ -131,6 +131,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- What a call passes to an `inout` parameter shares no storage with anything else the
+  call borrows (docs/language/02-functions-and-calling.md, "Exclusivity"): not only another
+  `inout` argument, but a `view` argument and the receiver of a method that may change
+  it or of a `view fn`, and a variable overlaps a field chain on it.  `both(k, k)` with
+  `fn both(a: view int, b: inout int)` is now `'k' is passed to 'view' parameter 'a'; it
+  cannot also be passed to 'inout' parameter 'b'`, and `p.take(p.x)` is `'p.x' is part of
+  'p', the receiver of 'take' (not a 'view fn'); it cannot also be passed to 'inout'
+  parameter 'm'`.
 - A `view fn` returns part of `self` that is an object, string, array, tuple or optional as
   a `view`, `-> view T` (docs/language/04-classes.md, "Methods that don't change self"):
   returned as a copy, its caller could change it.  `view fn name() -> Str { return

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 // The rules of `view` and `inout` parameters, of any type
 // (docs/language/02-functions-and-calling.md, "Parameter modes"): overrides,
-// and the arguments an `inout` parameter takes, none of them twice in one
-// call; and of local borrows
+// and the arguments an `inout` parameter takes, none of them overlapping
+// anything else the call borrows; and of local borrows
 // (docs/language/01-language-basics.md, "Local borrows").  Assignments to a
 // `view` parameter or local are checked with `let` locals'
 // (Sema::checkReassignable).
@@ -26,6 +26,53 @@ std::string placePath(const ast::Expr *e) {
     return "";
   std::string base = placePath(ma->getReceiver());
   return base.empty() ? "" : base + "." + ma->getFieldName();
+}
+
+/// Whether places @p a and @p b share storage: the same, or one a field
+/// chain on the other (`b` and `b.n`, not `b.c` and `b.n`).
+bool overlaps(const std::string &a, const std::string &b) {
+  const std::string &shorter = a.size() < b.size() ? a : b;
+  const std::string &longer = a.size() < b.size() ? b : a;
+  return longer.compare(0, shorter.size(), shorter) == 0 &&
+         (longer.size() == shorter.size() || longer[shorter.size()] == '.');
+}
+
+/// One place a call borrows: an argument's, or the receiver's.
+struct CallUse {
+  std::string Path;
+  std::string What;  // "passed to 'inout' parameter 'm'", ...
+  std::string Param; // the parameter's name; "" for the receiver
+  bool Writes = false;
+};
+
+/// Why @p use cannot share storage with @p earlier in one call; "" if it can.
+std::string callConflict(const CallUse &earlier, const CallUse &use) {
+  if ((!earlier.Writes && !use.Writes) || !overlaps(earlier.Path, use.Path))
+    return "";
+  if (earlier.Path == use.Path) {
+    if (earlier.Writes && use.Writes && !earlier.Param.empty())
+      return "'" + use.Path + "' is passed to two 'inout' parameters ('" +
+             earlier.Param + "' and '" + use.Param + "')";
+    return "'" + use.Path + "' is " + earlier.What + "; it cannot also be " +
+           use.What;
+  }
+  return "'" + use.Path + "' " +
+         (use.Path.size() > earlier.Path.size() ? "is part of '"
+                                                : "contains '") +
+         earlier.Path + "', " + earlier.What + "; it cannot also be " +
+         use.What;
+}
+
+/// The first reason any of @p mine, one argument's places, cannot share
+/// storage with the earlier arguments' and the receiver's @p uses.
+std::string conflictWith(const std::vector<std::vector<CallUse>> &uses,
+                         const std::vector<CallUse> &mine) {
+  for (const CallUse &use : mine)
+    for (const std::vector<CallUse> &earlier : uses)
+      for (const CallUse &e : earlier)
+        if (std::string why = callConflict(e, use); !why.empty())
+          return why;
+  return "";
 }
 
 } // namespace
@@ -130,22 +177,71 @@ bool Sema::checkOverrideModes(const ast::FuncDecl *method,
   return ok;
 }
 
+void Sema::borrowedPaths(const ast::Expr *e, std::vector<std::string> &out) {
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e)) {
+    borrowedPaths(te->getTrueExpr(), out);
+    borrowedPaths(te->getFalseExpr(), out);
+  } else if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e)) {
+    borrowedPaths(se->getArray(), out);
+  } else if (const BorrowResult *r = borrowResultOf(e)) {
+    for (const ast::Expr *from : r->From)
+      borrowedPaths(from, out);
+  } else if (std::string path = placePath(e); !path.empty()) {
+    out.push_back(std::move(path));
+  }
+}
+
 bool Sema::checkInoutArgs(const ast::ParamModes &modes,
                           const std::vector<ast::Type *> &paramTys,
                           const std::vector<ast::Expr *> &args,
-                          const std::string &callee) {
+                          const std::string &callee, const ast::Expr *receiver,
+                          const ast::MethodDecl *method) {
   bool ok = true;
-  // Exclusivity: each place passed to an `inout` parameter of the call, and
-  // its parameter.  The same variable, or the same chain of fields on one,
-  // twice is an error; different chains that might reach the same object at
-  // run time (`a.n` and `b.n`) are not checked.
-  StringMap<size_t> places;
+  // Exclusivity: what each `inout` argument names may not share storage
+  // with anything else the call borrows, the receiver included: another
+  // `inout` argument, a `view` one, or the receiver of a method that may
+  // change it, or of a `view fn`.  Places are compared as written, so
+  // different chains that might reach the same object at run time (`a.n`
+  // and `b.n`) are not checked, and a plain parameter is a copy.
+  std::vector<std::vector<CallUse>> uses;
+  if (receiver && method) {
+    std::vector<std::string> paths;
+    borrowedPaths(receiver, paths);
+    std::vector<CallUse> recv;
+    recv.reserve(paths.size());
+    for (std::string &path : paths)
+      recv.push_back(
+          {std::move(path),
+           method->isView()
+               ? "the receiver of 'view fn " + callee + "'"
+               : "the receiver of '" + callee + "' (not a 'view fn')",
+           "", !method->isView()});
+    uses.push_back(std::move(recv));
+  }
   for (size_t i = 0; i < args.size() && i < paramTys.size(); ++i) {
     ast::Expr *arg = args[i];
     ast::Type *argTy = arg->getResolvedType();
     // An argument of the wrong type was reported by the call's own check.
-    if (modes.mode(i) != ast::ParamMode::Inout || !argTy ||
-        !isAssignable(paramTys[i], argTy))
+    if (!argTy || !isAssignable(paramTys[i], argTy))
+      continue;
+    if (modes.mode(i) == ast::ParamMode::View) {
+      std::vector<std::string> paths;
+      borrowedPaths(arg, paths);
+      std::vector<CallUse> mine;
+      mine.reserve(paths.size());
+      for (std::string &path : paths)
+        mine.push_back({std::move(path),
+                        "passed to 'view' parameter '" + modes.name(i) + "'",
+                        modes.name(i), false});
+      std::string msg = conflictWith(uses, mine);
+      uses.push_back(std::move(mine));
+      if (!msg.empty()) {
+        error(arg->getLocation(), msg);
+        ok = false;
+      }
+      continue;
+    }
+    if (modes.mode(i) != ast::ParamMode::Inout)
       continue;
     const std::string param = "'inout' parameter '" + modes.name(i) + "'";
     const std::string argN =
@@ -168,16 +264,15 @@ bool Sema::checkInoutArgs(const ast::ParamModes &modes,
       msg = std::move(why);
     } else {
       // An `inout` result passes on what its call borrowed.
-      std::vector<const ast::Expr *> passed{arg};
-      if (isInoutResult(arg))
-        passed = BorrowResults.at(arg).From;
-      for (const ast::Expr *p : passed)
-        if (std::string path = placePath(p); !path.empty() && msg.empty()) {
-          auto [it, first] = places.try_emplace(path, i);
-          if (!first)
-            msg = "'" + path + "' is passed to two 'inout' parameters ('" +
-                  modes.name(it->second) + "' and '" + modes.name(i) + "')";
-        }
+      std::vector<std::string> paths;
+      borrowedPaths(arg, paths);
+      std::vector<CallUse> mine;
+      mine.reserve(paths.size());
+      for (std::string &path : paths)
+        mine.push_back(
+            {std::move(path), "passed to " + param, modes.name(i), true});
+      msg = conflictWith(uses, mine);
+      uses.push_back(std::move(mine));
     }
     if (!msg.empty()) {
       error(arg->getLocation(), msg);

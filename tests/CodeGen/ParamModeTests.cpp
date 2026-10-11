@@ -217,12 +217,15 @@ TEST(ParamMode, InoutParametersOfMethodsAndConstructors) {
 TEST(ParamMode, InoutFieldsArePassedByAddress) {
   LeakGuard guard;
   auto r = compileAndRun(R"(
-    class Inner { n: int; fn __init__() { self.n = 0; } }
+    class Inner {
+      n: int;
+      fn __init__() { self.n = 0; }
+      fn addTo(t: inout int) { t = t + 1; }
+    }
     class Holder {
       inner: Inner; total: int; f: float;
       fn __init__() { self.inner = Inner(); self.total = 0; self.f = 0.5; }
-      fn addTo(t: inout int) { t = t + 1; }
-      fn selfBump() { bump(self.total); self.addTo(self.total); }
+      fn selfBump() { bump(self.total); self.inner.addTo(self.total); }
     }
     fn bump(n: inout int) { n = n + 1; }
     fn watch(t: inout int, h: Holder) {
