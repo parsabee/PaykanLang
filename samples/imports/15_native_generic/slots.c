@@ -2,7 +2,8 @@
 //
 // Each gets the kind of its type argument first (PaykanTypeKind), then every
 // argument as a 64-bit slot: a value's bits, or a reference's box, borrowed
-// for the call.  A reference result is returned owned (+1).
+// for the call; an `inout` argument is the address of one.  A reference
+// result is returned owned (+1).
 
 #include "Runtime.h"
 
@@ -47,4 +48,12 @@ int64_t sample_pick(int64_t kind, int64_t first, int64_t a, int64_t b) {
   if ((kind == PAYKAN_KIND_OBJECT || kind == PAYKAN_KIND_OPTIONAL) && r)
     Paykan_retain((PaykanShared *)(intptr_t)r); // the result is owned
   return r;
+}
+
+// Exchanging two slots moves their references: no count changes.
+void sample_swap(int64_t kind, int64_t *a, int64_t *b) {
+  (void)kind;
+  int64_t t = *a;
+  *a = *b;
+  *b = t;
 }

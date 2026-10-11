@@ -469,23 +469,36 @@ the Paykan runtime (`Runtime.h`).  It is how a library implements what Paykan
 cannot express itself, such as the standard library's file I/O (#198):
 
 ```pkn
-native fn __io_write(fd: int, s: Str) -> int = "paykan_io_write";
+native fn __io_write(fd: int, s: view Str) -> int = "paykan_io_write";
 ```
 
 The string is the C symbol.  The rest of the program calls the function like
-any other.  Only these types can cross into C, with the runtime's own
-convention:
+any other.
+
+Only `int`, `float`, `bool` and `char` cross into C by value.  Any other
+parameter is a `view`, which C borrows for the call, or an `inout`, which
+C changes in place: a call never shares a reference with C, so it costs no
+reference counting (`parameter 's' must be 'view' or 'inout' ('s: view
+Str'); only int, float, bool and char cross into C by value`).  Only these
+types cross, with the runtime's own convention:
 
 | Paykan | C | Notes |
 |--------|---|-------|
-| `int`, `float`, `bool`, `char` | `int64_t`, `double`, `bool`, `int8_t` | by value |
-| `Str`, `Obj` parameter | `PaykanObject *` | borrowed for the call; the C code must not keep it without a retain |
+| `int`, `float`, `bool`, `char` | `int64_t`, `double`, `bool`, `int8_t` | by value, or a `view` |
+| `inout int`, ... | `int64_t *`, `double *`, `bool *`, `int8_t *` | the caller's variable |
+| `view Str`, `view Obj` | `PaykanObject *` | borrowed for the call; the C code must not keep it without a retain |
+| `inout Str`, `inout Obj` | `PaykanShared **` | the caller's box: to replace it, release it and store an owned box (never `NULL`) |
 | `Str`, `Obj` result | `PaykanShared *` | owned (+1); never `NULL` |
 | `Str?`, `Obj?` result | `PaykanShared *` | owned (+1); `NULL` is `None` |
 
-A native function cannot be a method and cannot be `main`.  A parameter can
-be a `view`, which C borrows as it does a copy, and the result can be a `view`
-of one (`-> view T` needs a `view` parameter); `inout` doesn't apply yet (#21).
+The result can be a `view` of a `view` or `inout` parameter (`-> view T`);
+it is returned owned, like a copy.  A native function cannot be a method,
+cannot return `inout`, and cannot be `main`.
+
+A call in the module that declares the function calls C directly, lending
+the caller's own references (a temporary argument is released after the
+call).  A call from another module goes through the function's Paykan body,
+which holds a reference to each argument for the call.
 
 ### Generic native functions
 
@@ -494,11 +507,13 @@ which is passed the kind of each type argument first, then every argument as
 a 64-bit slot, and returns its result as one:
 
 ```pkn
-native fn pick<T>(first: bool, a: T, b: T) -> T = "sample_pick";
+native fn pick<T>(first: bool, a: view T, b: view T) -> T = "sample_pick";
+native fn swap<T>(a: inout T, b: inout T) = "sample_swap";
 ```
 
 ```c
 int64_t sample_pick(int64_t kind, int64_t first, int64_t a, int64_t b);
+void sample_swap(int64_t kind, int64_t *a, int64_t *b);
 ```
 
 So any type crosses, and the C code sees what it was given:
@@ -512,9 +527,12 @@ So any type crosses, and the C code sees what it was given:
 | `PAYKAN_KIND_OPTIONAL` | any `T?` | the box, `NULL` for `None` |
 
 Every argument is a slot, including those whose type is not a type
-parameter (`first` above, and a `Str` is its box, not the raw object).
-Argument boxes are borrowed for the call; a box result is owned (+1).  See
-`samples/imports/15_native_generic`.
+parameter (`first` above, and a `Str` is its box, not the raw object).  A
+`view` argument's box is borrowed for the call; an `inout` argument is the
+address of a slot, into which C may store a new value (releasing the box it
+replaces, storing an owned one); a box result is owned (+1).  A parameter
+typed by a type parameter is a `view` or an `inout` (`x: T` is rejected
+whatever `T` will be).  See `samples/imports/15_native_generic`.
 
 `paykan` does not build native code: you compile it however you like (any
 compiler, flags or language that produces C-ABI symbols) and pass the objects

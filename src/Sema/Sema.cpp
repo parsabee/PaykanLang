@@ -2360,10 +2360,10 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
 // A `native fn` (#198) crosses into C with the runtime builtins' convention,
 // which only covers scalars, `Str` and `Obj` (and, as a result, `Str?` and
 // `Obj?`: a null box is None).  An instance of a generic one passes every
-// argument and its result as a 64-bit slot instead, so any type crosses.  A
-// `view` parameter crosses as a copy does (C borrows both), and a `view`
-// result is part of one; `inout` would need a pointer convention C does not
-// have yet (#21).
+// argument and its result as a 64-bit slot instead, so any type crosses.
+// Its parameters are checked by checkNativeParamModes, and a `view` result
+// is part of a `view` or `inout` one; `-> inout` would need C to return an
+// address into Paykan storage.
 bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
                                 const std::vector<ast::Type *> &paramTypes) {
   const bool slots = !node->getTypeArgs().empty();
@@ -2373,7 +2373,7 @@ bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
     auto *bt = ast::dyn_cast<ast::BuiltinType>(t);
     return bt && t != Ctx.getVoidTy();
   };
-  bool ok = true;
+  bool ok = slots || checkNativeParamModes(node, paramTypes);
   auto reject = [&](ast::Type *t, const std::string &what) {
     error(node->getLocation(),
           "native function '" + node->getName() + "': " + what + " '" +
@@ -2387,28 +2387,19 @@ bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
     if (!scalarOrRef(paramTypes[i]))
       reject(paramTypes[i],
              "parameter '" + node->getParams()[i].getName() + "' of type");
-  bool viewParam = false;
-  for (const ast::Param &p : node->getParams()) {
-    viewParam |= p.Mode == ast::ParamMode::View;
-    if (p.Mode == ast::ParamMode::Inout) {
-      error(node->getLocation(),
-            "native function '" + node->getName() + "': parameter '" +
-                p.getName() +
-                "' cannot be 'inout'; a native function takes copies and "
-                "views");
-      ok = false;
-    }
-  }
+  bool borrowed = false;
+  for (const ast::Param &p : node->getParams())
+    borrowed |= p.Mode != ast::ParamMode::Value;
   if (node->getResultMode() == ast::ParamMode::Inout) {
     error(node->getLocation(), "native function '" + node->getName() +
                                    "' cannot return 'inout'; a native "
                                    "function returns a copy or a view");
     ok = false;
-  } else if (node->getResultMode() == ast::ParamMode::View && !viewParam) {
+  } else if (node->getResultMode() == ast::ParamMode::View && !borrowed) {
     error(node->getLocation(),
           "native function '" + node->getName() +
-              "' returns a 'view' but has no 'view' parameter for it to be "
-              "part of");
+              "' returns a 'view' but has no 'view' or 'inout' parameter for "
+              "it to be part of");
     ok = false;
   }
   ast::Type *ret = retTy;
@@ -2421,6 +2412,29 @@ bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
     reject(retTy, "result type");
   if (node->getName() == names::kMain) {
     error(node->getLocation(), "'main' cannot be a native function");
+    ok = false;
+  }
+  return ok;
+}
+
+// Only a scalar crosses into C by value.  C borrows anything else, as a
+// `view`, or changes it in place, as an `inout`, so a call never shares a
+// reference with C.  @p types are the parameters' types; a template's are its
+// annotations, so `x: T` is rejected whatever T will be.
+bool Sema::checkNativeParamModes(const ast::FuncDecl *node,
+                                 const std::vector<ast::Type *> &types) {
+  bool ok = true;
+  for (size_t i = 0; i < types.size(); ++i) {
+    const ast::Param &p = node->getParams()[i];
+    if (p.Mode != ast::ParamMode::Value ||
+        (ast::isa<ast::BuiltinType>(types[i]) && types[i] != Ctx.getVoidTy()))
+      continue;
+    const std::string ty = typeName(types[i]);
+    error(node->getLocation(),
+          "native function '" + node->getName() + "': parameter '" +
+              p.getName() + "' must be 'view' or 'inout' ('" + p.getName() +
+              ": view " + ty +
+              "'); only int, float, bool and char cross into C by value");
     ok = false;
   }
   return ok;

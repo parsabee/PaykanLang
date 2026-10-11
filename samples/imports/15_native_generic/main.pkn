@@ -2,14 +2,16 @@
 //
 // An instance (`describe<float>`) passes C the kind of each type argument,
 // then every argument and its result as a 64-bit slot, so the C code in
-// slots.c sees what it was given.  Build the object yourself and link it
-// with --object (the sample harnesses do this):
+// slots.c sees what it was given.  C borrows a reference (`view`) or changes
+// it in place (`inout`, the address of a slot).  Build the object yourself
+// and link it with --object (the sample harnesses do this):
 //
 //   cc -std=c11 -fPIC -I<paykan include dir> -c slots.c -o slots.o
 //   paykan --object=slots.o main.pkn
 
 native fn describe<T>(x: view T) -> Str = "sample_describe";
-native fn pick<T>(first: bool, a: T, b: T) -> T = "sample_pick";
+native fn pick<T>(first: bool, a: view T, b: view T) -> T = "sample_pick";
+native fn swap<T>(a: inout T, b: inout T) = "sample_swap";
 
 class Point {
   x: int;
@@ -27,6 +29,14 @@ fn main() -> int {
   println(Str<int>(pick<int>(True, 1, 2)));
   println(pick<Str>(False, "left", "right"));
   println(Str<int>(pick<Point>(True, Point(3), Point(4)).x));
+  left = "left";
+  right = "right";
+  swap<Str>(left, right);
+  println(left + " " + right);
+  yes = True;
+  no = False;
+  swap<bool>(yes, no);
+  println(Str<bool>(yes));
   return 0;
 }
 // expect-stdout: int 42
@@ -38,3 +48,5 @@ fn main() -> int {
 // expect-stdout: 1
 // expect-stdout: right
 // expect-stdout: 3
+// expect-stdout: right left
+// expect-stdout: False

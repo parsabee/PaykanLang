@@ -183,14 +183,15 @@ TEST(Lowering, ReturnReleasesEveryScopeAfterEvaluatingTheValue) {
 
 // -- native fn (#198)
 
-// A native function is an ordinary function whose body calls its C symbol
-// with the builtins' convention: a reference argument borrowed as the raw
-// object, a reference result an owned box; its own parameters are released.
+// A native function calls its C symbol with the builtins' convention: a
+// reference argument borrowed as the raw object, a reference result an owned
+// box.  A call in its module calls C itself, with the caller's references;
+// the function's body, for other modules, releases its own parameters.
 TEST(Lowering, NativeFunctionCallsItsCSymbolWithTheBuiltinConvention) {
   auto l = lower(R"(
-    native fn put(fd: int, s: Str) -> int = "pk_test_put";
+    native fn put(fd: int, s: view Str) -> int = "pk_test_put";
     native fn get(fd: int) -> Str? = "pk_test_get";
-    fn main() -> int { n = put(1, "x"); s = get(0); return n; }
+    fn main() -> int { s: Str = "x"; n = put(1, s); t = get(0); return n; }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   EXPECT_NE(l.Text.find("extern fn @$c.pk_test_put(i64, obj) -> i64"),
@@ -206,9 +207,11 @@ TEST(Lowering, NativeFunctionCallsItsCSymbolWithTheBuiltinConvention) {
   EXPECT_EQ(count(put, "release"), 1u) << put;
   std::string get = function(l.Text, "get");
   EXPECT_EQ(count(get, "release"), 0u) << get;
-  // Callers see an ordinary function.
-  EXPECT_NE(function(l.Text, "main").find("call @put("), std::string::npos)
-      << l.Text;
+  // The caller lends `s` to C: no reference is taken for the call.
+  std::string main = function(l.Text, "main");
+  EXPECT_NE(main.find("call @$c.pk_test_put(1, "), std::string::npos) << main;
+  EXPECT_EQ(main.find("call @put("), std::string::npos) << main;
+  EXPECT_EQ(count(main, "retain"), 0u) << main;
 }
 
 // An instance of a generic native function passes the kind of each type
@@ -216,9 +219,10 @@ TEST(Lowering, NativeFunctionCallsItsCSymbolWithTheBuiltinConvention) {
 // reference as its box, borrowed; a reference result is the owned box.
 TEST(Lowering, GenericNativeFunctionPassesKindsAndSlots) {
   auto l = lower(R"(
-    native fn pick<T>(first: bool, a: T, b: T) -> T = "pk_test_pick";
+    native fn pick<T>(first: bool, a: view T, b: view T) -> T = "pk_test_pick";
     fn main() -> int {
-      s = pick<Str>(True, "a", "b");
+      a: Str = "a";
+      s = pick<Str>(True, a, "b");
       f = pick<float>(False, 1.5, 2.5);
       return pick<int>(True, 1, 2);
     }
@@ -228,17 +232,50 @@ TEST(Lowering, GenericNativeFunctionPassesKindsAndSlots) {
                         "i64"),
             std::string::npos)
       << l.Text;
+  std::string main = function(l.Text, "main");
+  EXPECT_NE(main.find("call @$c.pk_test_pick(4, 1, "), std::string::npos)
+      << main;
+  EXPECT_NE(main.find("call @$c.pk_test_pick(1, 0, "), std::string::npos)
+      << main;
+  EXPECT_NE(main.find("call @$c.pk_test_pick(0, 1, 1, 2)"), std::string::npos)
+      << main;
+  EXPECT_NE(main.find("to box"), std::string::npos) << main;
+  EXPECT_NE(main.find("to f64"), std::string::npos) << main;
+  // `a` is lent; the literal "b" is a temporary released after the call.
+  EXPECT_EQ(count(main, "retain"), 0u) << main;
+  // The instance's own body serves other modules.
   std::string str = function(l.Text, "pick<Str>");
   EXPECT_NE(str.find("call @$c.pk_test_pick(4, "), std::string::npos) << str;
-  EXPECT_NE(str.find("to box"), std::string::npos) << str;
-  EXPECT_EQ(count(str, "retain"), 0u) << str;
   EXPECT_EQ(count(str, "release"), 2u) << str; // its own parameters
-  std::string flt = function(l.Text, "pick<float>");
-  EXPECT_NE(flt.find("call @$c.pk_test_pick(1, "), std::string::npos) << flt;
-  EXPECT_NE(flt.find("to f64"), std::string::npos) << flt;
-  EXPECT_NE(function(l.Text, "pick<int>").find("call @$c.pk_test_pick(0, "),
+}
+
+// C gets an `inout` argument's address; a generic instance's goes through
+// a 64-bit slot and back.
+TEST(Lowering, NativeInoutArgumentsAreAddresses) {
+  auto l = lower(R"(
+    native fn bump(n: inout int) = "pk_test_bump";
+    native fn swap<T>(a: inout T, b: inout T) = "pk_test_swap";
+    fn main() -> int {
+      n = 1;
+      bump(n);
+      x = True;
+      y = False;
+      swap<bool>(x, y);
+      return n;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  EXPECT_NE(l.Text.find("extern fn @$c.pk_test_bump(ptr)"), std::string::npos)
+      << l.Text;
+  EXPECT_NE(l.Text.find("extern fn @$c.pk_test_swap(i64, ptr, ptr)"),
             std::string::npos)
       << l.Text;
+  std::string main = function(l.Text, "main");
+  EXPECT_NE(main.find("call @$c.pk_test_bump(%n.addr"), std::string::npos)
+      << main;
+  EXPECT_NE(main.find("call @$c.pk_test_swap(2, %a.slot.addr"),
+            std::string::npos)
+      << main;
 }
 
 // -- Calls: callee-consumes ABI for user functions, borrow for builtins

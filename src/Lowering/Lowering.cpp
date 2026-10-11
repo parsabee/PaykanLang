@@ -540,8 +540,11 @@ Val ModuleLowering::visitTranslationUnit(ast::TranslationUnit *node) {
   // Declare every free function and every class (struct layout, vtable,
   // methods, destructor, constructor) before emitting any body, so calls and
   // `__super__` resolve regardless of source order.
-  for (auto *fn : node->getFuncDecls())
+  for (auto *fn : node->getFuncDecls()) {
     declareFunctionPrototype(fn);
+    if (fn->isNative())
+      NativeDecls[fn->getName()] = fn;
+  }
   for (auto *cls : node->getClassDecls())
     declareClass(cls);
   for (auto *cls : node->getClassDecls())
@@ -1091,33 +1094,75 @@ Val ModuleLowering::visitFuncDecl(ast::FuncDecl *node) {
   return Val();
 }
 
-// A `native fn` (#198) is an ordinary function whose body calls its C symbol
-// with the runtime builtins' convention: a reference argument is borrowed as
-// the raw object, a reference result is an owned box.  An instance of a
-// generic one passes the kind of each type argument first, then every
-// argument and its result as a 64-bit slot, a reference as its box.  Its own
-// parameters are released by the scope cleanup, as in any function.
+// A `native fn` (#198) calls its C symbol with the runtime builtins'
+// convention: C borrows a reference argument as the raw object and gets an
+// `inout` one's address; a reference result is an owned box.  An instance
+// of a generic one passes the kind of each type argument first, then every
+// argument and its result as a 64-bit slot: a reference as its box, an
+// `inout` argument as the address of a slot.  A call in the module that
+// declares it calls C directly, with the caller's own references
+// (visitCallExpr); its body serves other modules' callers and passes on its
+// parameters, which the scope cleanup releases.
 void ModuleLowering::emitNativeBody(ast::FuncDecl *node,
                                     const pir::Function &fn) {
-  const bool slots = !node->getTypeArgs().empty();
-  pir::Signature csig;
-  csig.Ret = slots && fn.Sig.Ret != Type::Void ? Type::I64 : fn.Sig.Ret;
   std::vector<Val> args;
-  for (ast::Type *arg : node->getTypeArgs()) {
+  for (const ast::Param &p : node->getParams())
+    args.push_back(B.load(CurrentScope->lookup(p.getName()), p.getName()));
+  Val result = emitNativeCall(*node, args);
+  emitAllScopesCleanup();
+  if (fn.Sig.Ret == Type::Void)
+    B.emitRetVoid();
+  else
+    B.emitRet(result);
+}
+
+Val ModuleLowering::emitNativeCall(const ast::FuncDecl &node,
+                                   const std::vector<Val> &args) {
+  const bool slots = !node.getTypeArgs().empty();
+  auto toSlot = [&](const Val &v) {
+    return v.Ty == Type::Box ? B.cast(v, Type::I64, "slot") : toSlotBits(v);
+  };
+  auto fromSlot = [&](const Val &bits, ast::Type *ty) {
+    return toPIRType(ty) == Type::Box ? B.cast(bits, Type::Box, "slot.box")
+                                      : fromSlotBits(bits, ty);
+  };
+  ast::Type *retTy = canonicalizeDeclType(node.getReturnType());
+  const Type ret = retTy ? toPIRType(retTy) : Type::Void;
+  pir::Signature csig;
+  csig.Ret = slots && ret != Type::Void ? Type::I64 : ret;
+  std::vector<Val> cargs;
+  for (ast::Type *arg : node.getTypeArgs()) {
     csig.Params.push_back(Type::I64);
-    args.push_back(Val::i64(nativeTypeKind(canonicalizeDeclType(arg))));
+    cargs.push_back(Val::i64(nativeTypeKind(canonicalizeDeclType(arg))));
   }
-  for (const ast::Param &p : node->getParams()) {
-    Val v = B.load(CurrentScope->lookup(p.getName()), p.getName());
-    if (slots)
-      v = v.Ty == Type::Box ? B.cast(v, Type::I64, p.getName() + ".bits")
-                            : toSlotBits(v);
-    else if (v.Ty == Type::Box)
+  // A generic instance's `inout` argument goes through a slot of its own and
+  // back: a bool or a char is stored in less than 8 bytes.
+  struct CopyOut {
+    Val Addr;
+    pir::LocalId Slot;
+    ast::Type *Ty;
+  };
+  std::vector<CopyOut> copyOuts;
+  for (size_t i = 0; i < args.size(); ++i) {
+    const ast::Param &p = node.getParams()[i];
+    Val v = args[i];
+    if (p.Mode == ast::ParamMode::Inout) {
+      if (slots) {
+        ast::Type *ty = canonicalizeDeclType(p.ParamType);
+        pir::LocalId slot = B.addLocal(p.getName() + ".slot", Type::I64);
+        B.store(slot, toSlot(B.ptrLoad(v, toPIRType(ty), p.getName())));
+        copyOuts.push_back({v, slot, ty});
+        v = B.localAddr(slot, p.getName() + ".slot.addr");
+      }
+    } else if (slots) {
+      v = toSlot(v);
+    } else if (v.Ty == Type::Box) {
       v = emitSharedGet(v, p.getName() + ".obj");
+    }
     csig.Params.push_back(v.Ty);
-    args.push_back(v);
+    cargs.push_back(v);
   }
-  const std::string name = pir::nativeName(node->getNativeSymbol());
+  const std::string name = pir::nativeName(node.getNativeSymbol());
   if (!FuncByName.count(name)) {
     Funcs.emplace_back();
     pir::Function &ext = Funcs.back();
@@ -1126,17 +1171,18 @@ void ModuleLowering::emitNativeBody(ast::FuncDecl *node,
     ext.IsExtern = true;
     FuncByName[name] = &ext;
   }
-  Val result = B.call(name, csig, args, "r");
+  Val result = B.call(name, csig, cargs, "r");
+  for (const CopyOut &c : copyOuts)
+    B.ptrStore(c.Addr, fromSlot(B.load(c.Slot, "slot"), c.Ty));
   if (slots && csig.Ret != Type::Void)
-    result =
-        fn.Sig.Ret == Type::Box
-            ? B.cast(result, Type::Box, "r.box")
-            : fromSlotBits(result, canonicalizeDeclType(node->getReturnType()));
-  emitAllScopesCleanup();
-  if (csig.Ret == Type::Void)
-    B.emitRetVoid();
-  else
-    B.emitRet(result);
+    result = fromSlot(result, retTy);
+  return result;
+}
+
+const ast::FuncDecl *
+ModuleLowering::localNative(const std::string &name) const {
+  auto it = NativeDecls.find(name);
+  return it == NativeDecls.end() ? nullptr : it->second;
 }
 
 unsigned char ModuleLowering::nativeTypeKind(ast::Type *ty) const {
@@ -1312,6 +1358,29 @@ Val ModuleLowering::emitAsShared(ast::Expr *expr) {
   Val box = emitAsSharedRaw(expr);
   // `T?` into an `Obj` slot: never hand an `Obj` a NULL box.
   return emitOptionalToObj(expr, box);
+}
+
+Val ModuleLowering::emitBorrowedBox(ast::Expr *arg, std::vector<Val> &keep) {
+  if (isNoneForOptional(arg))
+    return Val::null(Type::Box);
+  // A variable's or a field's own box: it outlives the call.
+  if (!isPrimitiveBoxing(arg) && !isOptionalToObjCoercion(arg)) {
+    auto *id = ast::dyn_cast<ast::Identifier>(arg);
+    if (id && CurrentScope->hasLocal(id->getName()) && holdsBox(id->getName()))
+      return loadVarBox(id->getName());
+    auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(arg);
+    if (ma && ast::isa<ast::Identifier>(ma->getReceiver())) {
+      Val v = emitExpr(arg);
+      if (v && classifyExpr(arg, v).isOwned())
+        keep.push_back(v);
+      return v;
+    }
+  }
+  // A temporary or a conversion: a reference of the caller's own.
+  Val box = emitAsShared(arg);
+  if (box)
+    keep.push_back(box);
+  return box;
 }
 
 bool ModuleLowering::isBorrowedObjectElement(ast::Expr *expr) const {

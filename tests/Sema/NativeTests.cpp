@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Sema tests: the types a `native fn` may take and return (#198).
+// Sema tests: the types a `native fn` may take and return (#198), and how:
+// only a scalar crosses by value, anything else as a `view` or an `inout`.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -9,8 +10,8 @@ using namespace paykan::test;
 
 TEST(Native, BoundaryTypesAreAccepted) {
   auto r = semaCheck(R"(
-    native fn put(fd: int, s: Str, x: float, b: bool, c: char, o: Obj) -> int
-      = "pk_test_put";
+    native fn put(fd: int, s: view Str, x: float, b: bool, c: char,
+                  o: view Obj) -> int = "pk_test_put";
     native fn get(fd: int) -> Str? = "pk_test_get";
     native fn any() -> Obj? = "pk_test_any";
     native fn name() -> Str = "pk_test_name";
@@ -27,7 +28,7 @@ TEST(Native, BoundaryTypesAreAccepted) {
 
 TEST(Native, CallsAreTypeChecked) {
   auto r = semaCheck(R"(
-    native fn put(fd: int, s: Str) -> int = "pk_test_put";
+    native fn put(fd: int, s: view Str) -> int = "pk_test_put";
     fn main() -> int { return put("x", 1); }
   )");
   EXPECT_FALSE(r.Ok);
@@ -35,10 +36,10 @@ TEST(Native, CallsAreTypeChecked) {
 
 TEST(Native, OtherTypesCannotCross) {
   for (const char *decl : {
-           "native fn f(xs: int[]) = \"pk_f\";",
-           "native fn f(p: P) = \"pk_f\";",
-           "native fn f(t: (int, int)) = \"pk_f\";",
-           "native fn f(s: Str?) = \"pk_f\";",
+           "native fn f(xs: view int[]) = \"pk_f\";",
+           "native fn f(p: view P) = \"pk_f\";",
+           "native fn f(t: view (int, int)) = \"pk_f\";",
+           "native fn f(s: view Str?) = \"pk_f\";",
            "native fn f() -> int? = \"pk_f\";",
            "native fn f() -> P = \"pk_f\";",
            "native fn f() -> Str[] = \"pk_f\";",
@@ -52,43 +53,65 @@ TEST(Native, OtherTypesCannotCross) {
   }
 }
 
-// C borrows a `view` argument as it does a copy; `inout` would need a
-// pointer convention.
-TEST(Native, ParametersCanBeViewsNotInout) {
+// C borrows a reference (`view`) or changes it in place (`inout`); a call
+// never shares one with it.  Only a scalar is passed by value.
+TEST(Native, OnlyScalarsCrossByValue) {
   auto r = semaCheck(R"(
-    native fn f(n: view int, s: view Str) -> int = "pk_f";
-    fn main() -> int { return f(1, "x"); }
+    native fn f(n: int, x: float, b: bool, c: char, k: view int,
+                m: inout int, s: view Str, o: inout Obj) -> int = "pk_f";
+    native fn g<T>(n: int, x: view T, y: inout T) = "pk_g";
+    fn main() -> int {
+      m = 1;
+      o: Obj = "o";
+      a = 1;
+      g<int>(1, 2, a);
+      return f(1, 2.0, True, 'c', 3, m, "s", o);
+    }
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 
-  r = semaCheck("native fn f(n: inout int) = \"pk_f\";\n"
+  for (const char *decl : {
+           "native fn f(s: Str) = \"pk_f\";",
+           "native fn f(n: int, o: Obj) -> int = \"pk_f\";",
+           "native fn f<T>(x: T) = \"pk_f\";", // whatever T will be
+       }) {
+    r = semaCheck(std::string(decl) + "\nfn main() -> int { return 0; }");
+    EXPECT_FALSE(r.Ok) << decl;
+    EXPECT_NE(r.Diagnostics.find("must be 'view' or 'inout'"),
+              std::string::npos)
+        << decl << "\n"
+        << r.Diagnostics;
+  }
+  r = semaCheck("native fn f(s: Str) = \"pk_f\";\n"
                 "fn main() -> int { return 0; }");
-  EXPECT_FALSE(r.Ok);
-  EXPECT_NE(r.Diagnostics.find("parameter 'n' cannot be 'inout'"),
+  EXPECT_NE(r.Diagnostics.find("('s: view Str'); only int, float, bool and "
+                               "char cross into C by value"),
             std::string::npos)
       << r.Diagnostics;
 }
 
-// A `view` result is part of a `view` parameter.
-TEST(Native, ViewResultNeedsAViewParameter) {
+// A `view` result is part of a `view` or `inout` parameter.
+TEST(Native, ViewResultNeedsABorrowedParameter) {
   auto r = semaCheck(R"(
     native fn f(s: view Str) -> view Str = "pk_f";
+    native fn g(s: inout Str) -> view Str = "pk_g";
     fn main() -> int { return 0; }
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 
   for (const char *decl : {
-           "native fn f(s: Str) -> view Str = \"pk_f\";",
+           "native fn f(n: int) -> view Str = \"pk_f\";",
            "native fn f() -> view Str = \"pk_f\";",
        }) {
     r = semaCheck(std::string(decl) + "\nfn main() -> int { return 0; }");
     EXPECT_FALSE(r.Ok) << decl;
-    EXPECT_NE(r.Diagnostics.find("has no 'view' parameter"), std::string::npos)
+    EXPECT_NE(r.Diagnostics.find("has no 'view' or 'inout' parameter"),
+              std::string::npos)
         << decl << "\n"
         << r.Diagnostics;
   }
 
-  r = semaCheck("native fn f(n: int) -> inout int = \"pk_f\";\n"
+  r = semaCheck("native fn f(n: inout int) -> inout int = \"pk_f\";\n"
                 "fn main() -> int { return 0; }");
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("cannot return 'inout'"), std::string::npos)
@@ -100,8 +123,9 @@ TEST(Native, ViewResultNeedsAViewParameter) {
 TEST(Native, GenericInstancesTakeAnyType) {
   auto r = semaCheck(R"(
     class P { x: int; }
-    native fn pick<T>(first: bool, a: T, b: T) -> T = "pk_pick";
+    native fn pick<T>(first: bool, a: view T, b: view T) -> T = "pk_pick";
     native fn at<T>(xs: view T[], i: int) -> view T = "pk_at";
+    native fn swap<T>(a: inout T, b: inout T) = "pk_swap";
     fn main() -> int {
       p: P = pick<P>(True, P(), P());
       t = pick<(int, Str)>(False, (1, "a"), (2, "b"));
@@ -109,25 +133,18 @@ TEST(Native, GenericInstancesTakeAnyType) {
       xs: int[] = [1, 2];
       y: int = at<int>(xs, 0);
       n: int = pick(True, 1, 2);
+      q = P();
+      swap<P>(p, q);
       return n + t.0 + y;
     }
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 
   r = semaCheck(R"(
-    native fn pick<T>(first: bool, a: T, b: T) -> T = "pk_pick";
+    native fn pick<T>(first: bool, a: view T, b: view T) -> T = "pk_pick";
     fn main() -> int { return pick<int>(True, 1, "x"); }
   )");
   EXPECT_FALSE(r.Ok);
-
-  r = semaCheck(R"(
-    native fn bump<T>(x: inout T) = "pk_bump";
-    fn main() -> int { n = 1; bump<int>(n); return n; }
-  )");
-  EXPECT_FALSE(r.Ok);
-  EXPECT_NE(r.Diagnostics.find("parameter 'x' cannot be 'inout'"),
-            std::string::npos)
-      << r.Diagnostics;
 }
 
 TEST(Native, MainCannotBeNative) {
