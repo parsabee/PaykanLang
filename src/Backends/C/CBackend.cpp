@@ -71,6 +71,7 @@ public:
 private:
   static Toolchain toolchain(const backend::Input &in) {
     Toolchain tc;
+    tc.ExtraObjects = in.Objects;
     tc.ExtraFlags.push_back("-O" +
                             std::to_string(in.OptLevel > 3 ? 3u : in.OptLevel));
     // The object cache lives next to the LLVM backend's bitcode cache.

@@ -492,6 +492,7 @@ int main(int argc, char *argv[]) {
   in.InputFilename = opts.InputFilename;
   in.ProjectRoot = projectRoot;
   in.OptLevel = opts.optLevel();
+  in.Objects = opts.Objects;
   // -- Lowering
   // Every backend reads PIR: lower the program (the single home of the
   // ownership semantics), verify it, and hand it over.  --emit-pir prints it

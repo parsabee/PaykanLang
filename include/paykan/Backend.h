@@ -51,6 +51,10 @@ struct Input {
   const pir::Program *Program = nullptr;
   /// -O<n>, 0..3.
   unsigned OptLevel = 0;
+  /// --object=<files>: object files (or archives) that define the
+  /// program's native functions (#198).  Every native backend links them;
+  /// the user builds them however they like.
+  std::vector<std::string> Objects;
 };
 
 struct EmitOptions {

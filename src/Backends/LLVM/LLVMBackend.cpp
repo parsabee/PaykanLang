@@ -86,7 +86,8 @@ public:
       Paykan_heap_reset();
     }
     std::vector<std::string> progArgs(args.begin(), args.end());
-    auto result = jit::runModule(std::move(*module), std::move(ctx), progArgs);
+    auto result = jit::runModule(std::move(*module), std::move(ctx), progArgs,
+                                 in.Objects);
     if (opts.TrackHeap)
       Paykan_heap_dump();
     if (!result)
@@ -152,6 +153,7 @@ private:
                                 const std::string &output) {
     std::ostringstream errs;
     toolchain::Toolchain tc;
+    tc.ExtraObjects = in.Objects;
     if (!toolchain::resolveToolchain(tc, errs))
       return Status::error(errs.str());
     toolchain::TempDir tmp;

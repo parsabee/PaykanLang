@@ -131,7 +131,9 @@ not the runtime's, so backends declare it from the PIR signature (C:
 `$c.` (`pir::externCSymbol`).  The `native fn` itself is an ordinary function
 `@put` whose body unboxes each reference parameter (borrowed by the C call),
 calls `@$c.pk_put`, releases its parameters and returns the result; a
-reference result is the C function's owned box.
+reference result is the C function's owned box.  The objects that define the
+`$c.` symbols are not part of PIR: the driver hands them to the backends
+(`backend::Input::Objects`, `--object`).
 
 ## 4. Module-level items
 

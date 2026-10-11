@@ -14,11 +14,13 @@
 #include <vector>
 
 #include <llvm/ExecutionEngine/Orc/EPCEHFrameRegistrar.h>
+#include <llvm/ExecutionEngine/Orc/ExecutionUtils.h>
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h>
 #include <llvm/ExecutionEngine/Orc/TargetProcess/RegisterEHFrames.h>
 #include <llvm/ExecutionEngine/Orc/ThreadSafeModule.h>
 #include <llvm/Support/Error.h>
+#include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/TargetSelect.h>
 
 namespace paykan::jit {
@@ -226,7 +228,8 @@ private:
 
 llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
                               std::unique_ptr<llvm::LLVMContext> ctx,
-                              const std::vector<std::string> &args) {
+                              const std::vector<std::string> &args,
+                              const std::vector<std::string> &nativeObjects) {
   // Inspect main's param count before the module is consumed by the JIT.
   unsigned mainParamCount = 0;
   if (auto *mainIRFn = module->getFunction("main"))
@@ -292,6 +295,25 @@ llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
   // Add the module.
   if (auto err = jit->addIRModule(std::move(tsm)))
     return std::move(err);
+
+  // The program's native C (#198): its objects are linked like the module,
+  // their runtime calls resolve against the table above, and their libc
+  // calls against this process.
+  if (!nativeObjects.empty()) {
+    auto libc = llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(
+        jit->getDataLayout().getGlobalPrefix());
+    if (!libc)
+      return libc.takeError();
+    mainDylib.addGenerator(std::move(*libc));
+  }
+  for (const std::string &path : nativeObjects) {
+    auto buf = llvm::MemoryBuffer::getFile(path);
+    if (!buf)
+      return llvm::createStringError(buf.getError(), "cannot read '%s'",
+                                     path.c_str());
+    if (auto err = jit->addObjectFile(std::move(*buf)))
+      return std::move(err);
+  }
 
   // Look up main and call it.
   auto mainAddr = jit->lookup("main");

@@ -3,6 +3,7 @@
 
 #include "Options.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <ostream>
 #include <string_view>
@@ -186,6 +187,18 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
       o.Plugins.push_back(std::move(plugin));
       continue;
     }
+    if (std::string list;
+        valueOption(name, "object", i, argc, argv, list, r.Error)) {
+      if (!r.Error.empty())
+        return r;
+      for (size_t start = 0; start <= list.size();) {
+        size_t comma = std::min(list.find(',', start), list.size());
+        if (comma > start)
+          o.Objects.push_back(list.substr(start, comma - start));
+        start = comma + 1;
+      }
+      continue;
+    }
     if (std::string dir;
         valueOption(name, "module-path", i, argc, argv, dir, r.Error)) {
       if (!r.Error.empty())
@@ -294,6 +307,10 @@ void printUsage(std::ostream &os, const char *argv0) {
      << "  --module-path=<dir> - Look for prebuilt .pkm modules there "
         "(repeatable;\n"
      << "                      then $PAYKAN_MODULE_PATH)\n"
+     << "  --object=<files>  - Link these objects or archives "
+        "(comma-separated;\n"
+     << "                      repeatable): they define the native "
+        "functions\n"
      << "  -o <file>         - Output file of `build` or `--emit-pkm`\n"
      << "  -O<n>             - Optimization level (0-3, default "
      << kDefaultOptLevel << "; -O0 for debugging)\n"

@@ -25,6 +25,9 @@ struct Toolchain {
   std::string CC;
   /// Extra flags appended to every compile (e.g. "-O2").
   std::vector<std::string> ExtraFlags;
+  /// Object files or archives linked into every executable: the objects
+  /// defining a program's native functions (--object, #198).
+  std::vector<std::string> ExtraObjects;
   /// Path of libpaykan_runtime.a and of the directory holding Runtime.h.
   /// Empty: $PAYKAN_RUNTIME_DIR, then the runtime recorded with
   /// setPackageRuntime(), then the install layout around the executable
