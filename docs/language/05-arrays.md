@@ -216,6 +216,45 @@ Output:
 
 ---
 
+## Buffer
+
+`Buffer<T>` is the same growable storage as a `T[]`, reached only through its methods:
+it has no `[]` and no literal. It is the storage a container class keeps its elements in
+(the standard library's `List<T>`).
+
+| Method | |
+|--------|---|
+| `Buffer<T>()` | An empty buffer |
+| `view fn len() -> int` | The number of elements |
+| `view fn get(i: int) -> T` | Element `i` (a copy for the caller to keep; `i` out of range aborts, as `xs[i]` does) |
+| `set(i: int, v: T)` | Replace element `i` |
+| `push(v: T)`, `pop() -> T` | Add at the end; remove and return the last element (aborts when empty) |
+
+```pkn
+class Stack<T> {
+  items: Buffer<T>;
+  fn __init__() { self.items = Buffer<T>(); }
+  fn push(v: T) { self.items.push(v); }
+  fn pop() -> T { return self.items.pop(); }
+  view fn top() -> T { return self.items.get(self.items.len() - 1); }
+}
+```
+
+- A `Buffer<T>` is an object like an array: assigning one shares it, and it is an `Obj`.
+  It is not a `T[]`, though: neither is assignable to the other, an array literal is not a
+  buffer (`an array literal is not a 'Buffer<int>': make one with 'Buffer<int>()'`), and a
+  generic `T[]` parameter does not bind to a buffer, nor `Buffer<T>` to an array.
+- `b[i]` is an error: `a 'Buffer<int>' has no '[]': use its get(i) and set(i, v)
+  methods`. Nothing borrows an element in place, so no `view` or `inout` reaches into a
+  buffer: `get` returns a copy, `set` replaces.
+- `len` and `get` are `view fn`s, so a `view Buffer<T>` can be read; `set`, `push` and
+  `pop` change it. `set` and `push` keep their value, so it cannot be a `view`.
+- A `match` arm cannot test for a buffer type (at run time a `Buffer<int>` is an array of
+  the same elements): `a match arm cannot test for 'Buffer<int>'`.
+- `Buffer` is a builtin name: no class, generic class or function can be declared with it.
+
+---
+
 ## Semantic Checks
 
 | Error | Trigger |
@@ -224,3 +263,5 @@ Output:
 | Empty literal without annotation | `x = []` with no type annotation |
 | Subscript on non-array type | `x[0]` where `x` is not an array |
 | `.pop()` on empty array | Runtime abort with `paykan: pop on empty array` (checked at runtime, not statically) |
+| Subscript or literal for a buffer | `b[0]`, `b[0] = v`, `b: Buffer<int> = [1]` (see [Buffer](#buffer)) |
+| Buffer type arguments | `Buffer()` (`'Buffer' needs its element type`), `Buffer<int, int>`, `Buffer<void>` |

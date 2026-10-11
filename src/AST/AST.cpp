@@ -178,7 +178,7 @@ Type *ASTCloner::cloneType(Type *ty) {
     Type *elem = cloneType(at->getElementType());
     if (elem == at->getElementType())
       return ty;
-    return Ctx.make<ArrayType>(at->getLocation(), elem);
+    return Ctx.make<ArrayType>(at->getLocation(), elem, at->isBuffer());
   }
   if (auto *gt = dyn_cast<GenericType>(ty)) {
     bool changed = false;

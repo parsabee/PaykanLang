@@ -65,6 +65,8 @@ class ASTContext {
   // the element of a nested array is itself a canonical ArrayType, identity
   // holds at any nesting depth: `int[][]` resolves to one node everywhere.
   std::unordered_map<Type *, ArrayType *> ArrayTypes;
+  // Canonical `Buffer<T>` per element type, keyed like ArrayTypes.
+  std::unordered_map<Type *, ArrayType *> BufferTypes;
 
   // Canonical OptionalType per inner type (lazily created by getOptionalType).
   // Keyed like ArrayTypes: the inner Type* must be canonical, so `Node?`
@@ -76,6 +78,8 @@ class ASTContext {
   std::unordered_map<Type *, ClassType *> SpecializedArrayTypes;
   // Reverse map for O(1) getSpecializedArrayElemType lookups.
   std::unordered_map<ClassType *, Type *> SpecializedArrayElemTypes;
+  // Per-element `Buffer<T>` method tables (getBufferMethods).
+  std::unordered_map<Type *, ClassType *> BufferMethodTypes;
 
   // -- Tuples
   // Canonical base class for every tuple value ("Tuple": Obj subtype whose
@@ -196,6 +200,17 @@ public:
   /// ArrayType), so that array type identity is pointer identity.  Sema
   /// resolves every parser-emitted (source-located) ArrayType to this node.
   ArrayType *getArrayType(Type *elemTy);
+
+  /// The canonical `Buffer<T>` with elements of type @p elemTy (canonical,
+  /// see getArrayType): growable storage like a `T[]`, an object of the
+  /// runtime's array class, but with neither `[]` nor literals; its methods
+  /// are getBufferMethods' (docs/language/05-arrays.md, "Buffer").
+  ArrayType *getBufferType(Type *elemTy);
+
+  /// The methods of `Buffer<T>` for @p elemTy, as an Array subtype for
+  /// method lookup: len() (from Array), get(int) -> T, set(int, T),
+  /// push(T), pop() -> T.  Not registered as a class: it names no type.
+  ClassType *getBufferMethods(Type *elemTy);
 
   /// Return the canonical OptionalType wrapping @p innerTy, creating it on
   /// first use.  @p innerTy must itself be canonical (see getArrayType).

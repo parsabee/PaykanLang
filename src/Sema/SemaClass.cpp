@@ -1038,7 +1038,7 @@ bool Sema::unifyTypes(ast::Type *pattern, ast::Type *actual,
 
   if (auto *at = ast::dyn_cast<ast::ArrayType>(pattern)) {
     auto *aat = ast::dyn_cast<ast::ArrayType>(actual);
-    if (!aat)
+    if (!aat || aat->isBuffer() != at->isBuffer())
       return true;
     // An empty array literal ([]: element void) carries no information.
     if (aat->getElementType() == Ctx.getVoidTy())
@@ -1075,6 +1075,14 @@ bool Sema::unifyTypes(ast::Type *pattern, ast::Type *actual,
   }
 
   if (auto *gt = ast::dyn_cast<ast::GenericType>(pattern)) {
+    // `Buffer<T>` against a buffer: unify the element types.
+    if (gt->getName() == names::kBuffer) {
+      auto *aat = ast::dyn_cast<ast::ArrayType>(actual);
+      if (!aat || !aat->isBuffer() || gt->getNumArgs() != 1)
+        return true;
+      return unifyTypes(gt->getArgs()[0], aat->getElementType(), typeParams,
+                        bindings, conflict);
+    }
     // `Box<T>` against a class: find an instantiation of the same template
     // in the argument's class or one of its ancestors and unify argument-wise.
     for (auto *c = ast::dyn_cast<ast::ClassType>(actual); c;
@@ -1154,6 +1162,23 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
     if (!t)
       return false;
     typeArgs.push_back(t);
+  }
+
+  // `Buffer<T>()`: an empty buffer, made by a builtin constructor named
+  // after its type.
+  if (callee == names::kBuffer) {
+    if (typeArgs.empty()) {
+      error(loc, "'Buffer' needs its element type: 'Buffer<int>()'");
+      return false;
+    }
+    ast::Type *buf = bufferType(typeArgs, loc, "'Buffer'");
+    if (!buf)
+      return false;
+    const std::string name = typeName(buf);
+    if (!lookupFunction(name))
+      declareFunction(name, buf, {}, /*isBuiltin=*/true);
+    node->setCalleeName(Ctx.intern(name));
+    return true;
   }
 
   // Templates are never qualified (they are not exported), so a qualified

@@ -280,6 +280,12 @@ bool ModuleLowering::isObjectElementType(ast::Type *elemTy) const {
          ast::isa<ast::OptionalType>(elemTy);
 }
 
+ast::Type *ModuleLowering::canonicalArray(ast::ArrayType *at) {
+  ast::Type *elem = canonicalizeDeclType(at->getElementType());
+  return at->isBuffer() ? ASTCtx.getBufferType(elem)
+                        : ASTCtx.getArrayType(elem);
+}
+
 ast::Type *ModuleLowering::canonicalizeDeclType(ast::Type *ty) {
   if (!ty)
     return ty;
@@ -295,7 +301,7 @@ ast::Type *ModuleLowering::canonicalizeDeclType(ast::Type *ty) {
     for (ast::Type *e : tt->getElementTypes()) {
       ast::Type *c = canonicalizeDeclType(e);
       if (auto *at = ast::dyn_cast<ast::ArrayType>(c))
-        c = ASTCtx.getArrayType(canonicalizeDeclType(at->getElementType()));
+        c = canonicalArray(at);
       elems.push_back(c);
     }
     return ASTCtx.getTupleType(std::move(elems));
@@ -303,7 +309,7 @@ ast::Type *ModuleLowering::canonicalizeDeclType(ast::Type *ty) {
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty)) {
     ast::Type *inner = canonicalizeDeclType(ot->getInnerType());
     if (auto *at = ast::dyn_cast<ast::ArrayType>(inner))
-      inner = ASTCtx.getArrayType(canonicalizeDeclType(at->getElementType()));
+      inner = canonicalArray(at);
     return ASTCtx.getOptionalType(inner);
   }
   return ty;

@@ -1282,10 +1282,13 @@ public:
 // ElementType points to the type of each stored element.
 class ArrayType : public Type {
   Type *ElementType;
+  bool Buffer;
 
 public:
-  ArrayType(SourceLocation loc, Type *elemTy)
-      : Type(NK_ArrayType, loc), ElementType(elemTy) {
+  /// A `Buffer<T>` (@p buffer) is the same growable storage as a `T[]`,
+  /// reached only through its methods (ASTContext::getBufferType).
+  ArrayType(SourceLocation loc, Type *elemTy, bool buffer = false)
+      : Type(NK_ArrayType, loc), ElementType(elemTy), Buffer(buffer) {
     // Arrays support == / != (lowered to the virtual `equals`, which compares
     // reference identity — see PaykanArray_equals).  The mask must live on the
     // constructor: besides the canonical per-element instances interned by
@@ -1297,6 +1300,7 @@ public:
   }
 
   Type *getElementType() const { return ElementType; }
+  bool isBuffer() const { return Buffer; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_ArrayType; }
 };

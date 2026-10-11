@@ -280,6 +280,8 @@ private:
   pir::Type toPIRType(ast::Type *ty);
   bool isObjectElementType(ast::Type *elemTy) const;
   ast::Type *canonicalizeDeclType(ast::Type *ty);
+  /// The canonical array (or Buffer) type of @p at's canonical element.
+  ast::Type *canonicalArray(ast::ArrayType *at);
   ast::ClassType *resolveExprClassType(ast::Expr *expr);
   pir::Signature functionSignature(ast::FuncDecl *node);
   pir::Function *declareFunctionPrototype(ast::FuncDecl *node);
@@ -412,6 +414,12 @@ private:
     Val emitArrayPush(ast::MethodCallExpr *node, const Val &recv,
                       ast::Type *elemTy);
     Val emitArrayPop(const Val &recv, ast::Type *elemTy);
+    /// `Buffer<T>.get(i)` (a +1 box for an object element, as any method
+    /// result) and `.set(i, v)` on the raw array @p recv.
+    Val emitBufferGet(ast::MethodCallExpr *node, const Val &recv,
+                      ast::Type *elemTy);
+    Val emitBufferSet(ast::MethodCallExpr *node, const Val &recv,
+                      ast::Type *elemTy);
     Val emitShortCircuit(ast::BinaryExpr *node, bool isAnd);
     Val emitIntDivGuards(const Val &lhs, const Val &rhs, bool isDiv);
 

@@ -736,3 +736,46 @@ TEST(Pkm, BorrowedResultsAcrossModules) {
       << dump.out;
   fs::remove_all(dir);
 }
+
+// A module's interface may name `Buffer<T>` types (docs/language/
+// 05-arrays.md, "Buffer"): its `.pkm` spells them as `Buffer<Str>`, and an
+// importer built against the cache entry sees the same types.
+TEST(Pkm, BufferTypesAcrossModules) {
+  REQUIRE_BACKEND();
+  fs::path dir =
+      fs::temp_directory_path() / ("pkm_buffer_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "bufs.pkn",
+            "fn names(n: int) -> Buffer<Str> {\n"
+            "  b = Buffer<Str>(); i: int = 0;\n"
+            "  while (i < n) { b.push(\"n\" + Str(i)); i = i + 1; }\n"
+            "  return b; }\n"
+            "fn count(b: view Buffer<Str>) -> int { return b.len(); }\n"
+            "class Bag { items: Buffer<int>;\n"
+            "  fn __init__() { self.items = Buffer<int>(); }\n"
+            "  fn add(v: int) { self.items.push(v); }\n"
+            "  view fn first() -> int { return self.items.get(0); } }\n");
+  writeFile(dir / "main.pkn",
+            "import bufs;\n"
+            "fn main() -> int {\n"
+            "  b: Buffer<Str> = bufs::names(3);\n"
+            "  bag = bufs::Bag(); bag.add(7); bag.items.push(8);\n"
+            "  println(b.get(2) + \" \" + Str(bufs::count(b)) + \" \" +\n"
+            "          Str(bag.first() + bag.items.len()));\n"
+            "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  for (const char *step : {"module bufs: wrote", "module bufs: cache"}) {
+    auto r = paykan("--verbose --track-heap main.pkn");
+    ASSERT_EQ(r.exitCode, 0) << r.out;
+    EXPECT_TRUE(contains(r.out, step)) << r.out;
+    EXPECT_TRUE(contains(r.out, "n2 3 9\n")) << r.out;
+    EXPECT_TRUE(contains(r.out, "live blocks       : 0")) << r.out;
+  }
+  auto dump = paykan("pkm dump --section=iface .paykan_cache/bufs.pkm");
+  EXPECT_TRUE(contains(dump.out, "func names(int) -> Buffer<Str>")) << dump.out;
+  EXPECT_TRUE(contains(dump.out, "func count(view Buffer<Str>) -> int"))
+      << dump.out;
+  fs::remove_all(dir);
+}

@@ -291,6 +291,13 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // optional value (member access, method call, subscript, arithmetic, …).
   void errorOptionalUnwrap(ast::SourceLocation loc, ast::OptionalType *optTy);
 
+  // `Buffer<args>` written at @p loc (in @p context): the canonical buffer
+  // type, or nullptr after an error.
+  ast::Type *bufferType(const std::vector<ast::Type *> &args,
+                        ast::SourceLocation loc, const std::string &context);
+  // Report `[]` on Buffer type @p buf, which has none.
+  void errorBufferSubscript(ast::SourceLocation loc, ast::ArrayType *buf);
+
   // Returns the lowest common ancestor in the class hierarchy of two class
   // types, or nullptr if they share no common ancestor.
   static ast::ClassType *findLowestCommonAncestor(ast::ClassType *a,

@@ -79,6 +79,10 @@ bool Sema::checkDeclNameAvailable(const std::string &name,
   // (ClassType::Builtin), and a function iff run() registered it so
   // (FunctionSig::IsBuiltin).  Classes are checked first so a name that is
   // both (`Str` is a class and a conversion function) reports as a class.
+  if (name == names::kBuffer) {
+    error(loc, "'" + name + "' is a builtin class and cannot be redeclared");
+    return false;
+  }
   if (auto *ct = Ctx.lookupClassType(name)) {
     if (ct->isBuiltin())
       error(loc, "'" + name + "' is a builtin class and cannot be redeclared");
@@ -158,7 +162,8 @@ bool Sema::typesEqual(ast::Type *a, ast::Type *b) {
   if (a->getKind() != b->getKind())
     return false;
   if (auto *aa = ast::dyn_cast<ast::ArrayType>(a))
-    return typesEqual(aa->getElementType(),
+    return aa->isBuffer() == ast::cast<ast::ArrayType>(b)->isBuffer() &&
+           typesEqual(aa->getElementType(),
                       ast::cast<ast::ArrayType>(b)->getElementType());
   if (auto *ao = ast::dyn_cast<ast::OptionalType>(a))
     return typesEqual(ao->getInnerType(),
@@ -237,6 +242,9 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
   // Array assignability: element types must be compatible.
   if (auto *dstAT = ast::dyn_cast<ast::ArrayType>(dst)) {
     if (auto *srcAT = ast::dyn_cast<ast::ArrayType>(src)) {
+      // A `Buffer<T>` is no `T[]`, and no array literal is a `Buffer<T>`.
+      if (dstAT->isBuffer() != srcAT->isBuffer())
+        return false;
       // An empty literal (void element) is assignable to any array type.
       if (srcAT->getElementType() == Ctx.getVoidTy())
         return true;
@@ -323,7 +331,7 @@ ast::Type *Sema::adoptLiteralElements(ast::Type *dst, ast::Type *srcTy,
 
   if (auto *lit = ast::dyn_cast<ast::ArrayLiteralExpr>(src)) {
     auto *dstAT = ast::dyn_cast<ast::ArrayType>(ast::stripOptional(dst));
-    if (!dstAT || lit->isEmpty())
+    if (!dstAT || dstAT->isBuffer() || lit->isEmpty())
       return srcTy;
     ast::Type *elemTy = dstAT->getElementType();
     std::vector<ast::Type *> adopted;
@@ -374,7 +382,7 @@ ast::Type *Sema::adoptLiteralElements(ast::Type *dst, ast::Type *srcTy,
 void Sema::adoptArrayLiteralType(ast::Type *dst, ast::Expr *src) {
   auto *lit = ast::dyn_cast<ast::ArrayLiteralExpr>(src);
   auto *dstAT = ast::dyn_cast<ast::ArrayType>(ast::stripOptional(dst));
-  if (!lit || !dstAT)
+  if (!lit || !dstAT || dstAT->isBuffer())
     return;
   // An empty literal carries the ArrayType(void) sentinel from
   // visitArrayLiteralExpr; only the destination knows the element type, and
@@ -399,6 +407,27 @@ void Sema::adoptArrayLiteralType(ast::Type *dst, ast::Expr *src) {
     adoptArrayLiteralType(dstAT->getElementType(), lit->getElements()[i]);
 }
 
+ast::Type *Sema::bufferType(const std::vector<ast::Type *> &args,
+                            ast::SourceLocation loc,
+                            const std::string &context) {
+  if (args.size() != 1) {
+    error(loc, std::string("'") + names::kBuffer +
+                   "' expects 1 type argument, got " +
+                   std::to_string(args.size()));
+    return nullptr;
+  }
+  if (args[0] == Ctx.getVoidTy()) {
+    error(loc, context + " has type 'Buffer<void>': a buffer holds values");
+    return nullptr;
+  }
+  return Ctx.getBufferType(args[0]);
+}
+
+void Sema::errorBufferSubscript(ast::SourceLocation loc, ast::ArrayType *buf) {
+  error(loc, "a '" + typeName(buf) +
+                 "' has no '[]': use its get(i) and set(i, v) methods");
+}
+
 bool Sema::diagnoseOptionalNarrowing(ast::SourceLocation loc, ast::Type *dst,
                                      ast::Type *srcTy) {
   auto *srcOT = ast::dyn_cast<ast::OptionalType>(srcTy);
@@ -418,8 +447,14 @@ bool Sema::diagnoseEmptyArrayLiteral(ast::SourceLocation loc, ast::Type *dst,
   auto *at = ast::dyn_cast<ast::ArrayType>(srcTy);
   if (!at || at->getElementType() != Ctx.getVoidTy())
     return false;
-  if (dst && ast::isa<ast::ArrayType>(ast::stripOptional(dst)))
-    return false;
+  if (auto *dstAT = dst ? ast::dyn_cast<ast::ArrayType>(ast::stripOptional(dst))
+                        : nullptr) {
+    if (!dstAT->isBuffer())
+      return false;
+    error(loc, "an array literal is not a '" + typeName(dstAT) +
+                   "': make one with '" + typeName(dstAT) + "()'");
+    return true;
+  }
   error(loc, "cannot infer element type of empty array literal '[]'; "
              "add an explicit type annotation");
   return true;
@@ -465,7 +500,8 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     // The parser's ArrayType carries the annotation's source location; the
     // resolved type is the context's canonical (interned) instance so that
     // array types compare by pointer and nested arrays share element nodes.
-    return Ctx.getArrayType(elemTy);
+    return at->isBuffer() ? Ctx.getBufferType(elemTy)
+                          : Ctx.getArrayType(elemTy);
   }
 
   if (auto *gt = ast::dyn_cast<ast::GenericType>(ty)) {
@@ -482,6 +518,8 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
         return nullptr;
       args.push_back(arg);
     }
+    if (gt->getName() == names::kBuffer)
+      return bufferType(args, loc, context);
     return instantiateClass(gt->getName(), args, loc);
   }
 
@@ -946,7 +984,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
 
   // -- Generic call: instantiate the template and rebind the callee
   if (node->hasTypeArgs() || S.ClassTemplates.count(node->getCalleeName()) ||
-      S.FuncTemplates.count(node->getCalleeName())) {
+      S.FuncTemplates.count(node->getCalleeName()) ||
+      node->getCalleeName() == names::kBuffer) {
     for (auto *ty : argTypes)
       if (!ty)
         return nullptr; // argument errors already reported; cannot infer
@@ -1041,7 +1080,9 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   // push/pop signatures are element-type-aware.
   ast::ClassType *ct = nullptr;
   if (auto *at = ast::dyn_cast<ast::ArrayType>(recvTy))
-    ct = S.Ctx.getOrCreateSpecializedArrayType(at->getElementType());
+    ct = at->isBuffer()
+             ? S.Ctx.getBufferMethods(at->getElementType())
+             : S.Ctx.getOrCreateSpecializedArrayType(at->getElementType());
   else if (auto *tt = ast::dyn_cast<ast::TupleType>(recvTy))
     // Tuples expose only Obj's methods (toString / equals) through their
     // per-element-list specialization.
@@ -1112,6 +1153,11 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     if (node->getMethodName() == names::kPush && node->getNumArguments() == 1)
       S.checkViewNotStored(node->getArguments()[0],
                            node->getArguments()[0]->getResolvedType());
+    // A Buffer's `set` keeps its value.
+    if (node->getMethodName() == names::kSet && node->getNumArguments() == 2 &&
+        ast::isa<ast::ArrayType>(recvTy))
+      S.checkViewNotStored(node->getArguments()[1],
+                           node->getArguments()[1]->getResolvedType());
   } else if (node->getMethodName() != names::kMethodEquals) {
     S.checkViewArgs(method->getParamModes(), node->getArguments(),
                     node->getMethodName());
@@ -1286,6 +1332,10 @@ ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
   if (!at) {
     S.error(node->getLocation(), "subscript '[]' applied to non-array type '" +
                                      typeName(arrayTy) + "'");
+    return nullptr;
+  }
+  if (at->isBuffer()) {
+    S.errorBufferSubscript(node->getLocation(), at);
     return nullptr;
   }
 
@@ -1959,7 +2009,7 @@ bool Sema::checkEntryPoint(ast::TranslationUnit *tu,
     bool params = sig->ParamTypes.empty();
     if (sig->ParamTypes.size() == 1)
       if (auto *at = ast::dyn_cast<ast::ArrayType>(sig->ParamTypes[0]))
-        params = at->getElementType() == Ctx.getStrTy();
+        params = !at->isBuffer() && at->getElementType() == Ctx.getStrTy();
     if (sig->ReturnType == Ctx.getIntTy() && params)
       return true;
     std::string actual = "fn main(";
@@ -2629,6 +2679,10 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
           "subscript assignment on non-array type '" + typeName(arrTy) + "'");
     return false;
   }
+  if (at->isBuffer()) {
+    errorBufferSubscript(node->getLocation(), at);
+    return false;
+  }
   auto *idxTy = resolveExprType(node->getIndex());
   if (idxTy && idxTy != Ctx.getIntTy()) {
     error(node->getIndex()->getLocation(),
@@ -2861,6 +2915,13 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
                                   : nullptr;
       auto *armAt = resolvedArmTy ? ast::dyn_cast<ast::ArrayType>(resolvedArmTy)
                                   : nullptr;
+      // At run time a Buffer is an array of the same elements.
+      if (armAt && armAt->isBuffer()) {
+        error(arm->getLocation(),
+              "a match arm cannot test for '" + typeName(armAt) + "'");
+        armAt = nullptr;
+        resolvedArmTy = nullptr;
+      }
       if (!armCt && !armAt) {
         // Only emit a secondary diagnostic if resolution succeeded but the
         // type is not a class or array. If resolveType already emitted

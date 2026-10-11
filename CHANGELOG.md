@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Buffer<T>` (docs/language/05-arrays.md, "Buffer"): growable storage like a `T[]`,
+  reached only through its methods, `Buffer<T>()`, `len()`, `get(i)`, `set(i, v)`,
+  `push(v)` and `pop()`, with no `[]` and no literal.  It is the storage of container
+  classes such as the standard library's `List<T>`.  A buffer and an array are never
+  assignable to each other, `len` and `get` are `view fn`s, a buffer type cannot be a
+  `match` arm, and `Buffer` is a builtin name.  Interfaces spell it `Buffer<T>`, in the
+  `.pkm` too.
 - Borrowed results (docs/language/02-functions-and-calling.md, "Borrowed results"): a
   function or method declared `-> view T` returns a borrow of part of `self` or of a
   `view` or `inout` parameter, never a new value, a copy parameter or a local (`'d' is a

@@ -317,3 +317,65 @@ TEST(ArrayPromotion, IntElementsIntoFloatArray) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "3\n3.5\n9\n3\n10\n6\n2\n7\n11\n8\n3\n");
 }
+
+// -- Buffer<T>
+
+// Every element kind through get / set / push / pop / len, with the heap
+// clean afterwards: object elements are retained by set and push and
+// released when replaced, popped or freed with the buffer.
+TEST(Buffer, ElementKinds) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class P { x: int; fn __init__(x: int) { self.x = x; } }
+    fn main() -> int {
+      a = Buffer<int>(); a.push(1); a.push(2); a.set(0, 10);
+      f = Buffer<float>(); f.push(1); f.set(0, 2);
+      c = Buffer<char>(); c.push('a'); c.push('b');
+      s = Buffer<Str>(); s.push("x"); s.push("y"); s.set(1, "z");
+      p = Buffer<P>(); p.push(P(1)); p.push(P(2)); p.set(0, P(7));
+      o = Buffer<int?>(); o.push(None); o.push(3);
+      n = Buffer<Buffer<int>>(); n.push(a);
+      println(Str(a.get(0) + a.get(1)) + " " + Str(f.get(0)) + " " +
+              Str(c.get(1)) + " " + s.get(0) + s.get(1) + " " +
+              Str(p.get(0).x) + " " + Str(n.get(0).len()));
+      match o.get(1) { v: int { println(Str(v)); } None { println("none"); } }
+      last: P = p.pop();
+      println(Str(last.x) + " " + Str(p.len()) + " " + s.pop() + " " +
+              Str(a.pop()) + " " + Str(a.len()));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "12 2 b xz 7 2\n3\n2 1 z 2 1\n");
+  g.expectNoLeaks("Buffer.ElementKinds");
+}
+
+TEST(Buffer, InAGenericClass) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Stack<T> {
+      items: Buffer<T>;
+      fn __init__() { self.items = Buffer<T>(); }
+      fn push(v: T) { self.items.push(v); }
+      fn pop() -> T { return self.items.pop(); }
+      view fn top() -> T { return self.items.get(self.items.len() - 1); }
+      view fn size() -> int { return self.items.len(); }
+    }
+    fn sum(b: view Buffer<int>) -> int {
+      s: int = 0; i: int = 0;
+      while (i < b.len()) { s = s + b.get(i); i = i + 1; }
+      return s;
+    }
+    fn main() -> int {
+      st = Stack<Str>(); st.push("a"); st.push("b");
+      t: Str = st.top();
+      println(t + st.pop() + Str(st.size()));
+      xs = Buffer<int>(); xs.push(4); xs.push(5);
+      return sum(xs);
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "bb1\n");
+  EXPECT_EQ(r.ExitCode, 9);
+  g.expectNoLeaks("Buffer.InAGenericClass");
+}

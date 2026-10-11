@@ -140,6 +140,31 @@ ArrayType *ASTContext::getArrayType(Type *elemTy) {
   return at;
 }
 
+ArrayType *ASTContext::getBufferType(Type *elemTy) {
+  auto it = BufferTypes.find(elemTy);
+  if (it != BufferTypes.end())
+    return it->second;
+  auto *bt = make<ArrayType>(SourceLocation(), elemTy, /*buffer=*/true);
+  BufferTypes[elemTy] = bt;
+  return bt;
+}
+
+ClassType *ASTContext::getBufferMethods(Type *elemTy) {
+  auto it = BufferMethodTypes.find(elemTy);
+  if (it != BufferMethodTypes.end())
+    return it->second;
+  std::string name = std::string(names::kBuffer) + "<" + typeName(elemTy) + ">";
+  auto *ty = make<ClassType>(SourceLocation(), intern(name), ArrayTy);
+  // Not build(): the table names no type, so it is not registered.
+  ClassTypeBuilder(*this, ty)
+      .method(names::kGet, elemTy, {IntTy}, MethodDecl::View)
+      .method(names::kSet, VoidTy, {IntTy, elemTy})
+      .method(names::kPush, VoidTy, {elemTy})
+      .method(names::kPop, elemTy);
+  BufferMethodTypes[elemTy] = ty;
+  return ty;
+}
+
 // -- Canonical optional types
 //
 // One OptionalType per (canonical) inner type, mirroring getArrayType: the
@@ -375,7 +400,9 @@ std::string typeName(Type *ty) {
   if (auto *et = dyn_cast<EnumType>(ty))
     return et->getName();
   if (auto *at = dyn_cast<ArrayType>(ty))
-    return typeName(at->getElementType()) + "[]";
+    return at->isBuffer() ? std::string(names::kBuffer) + "<" +
+                                typeName(at->getElementType()) + ">"
+                          : typeName(at->getElementType()) + "[]";
   if (auto *ot = dyn_cast<OptionalType>(ty))
     return typeName(ot->getInnerType()) + "?";
   if (auto *tt = dyn_cast<TupleType>(ty)) {

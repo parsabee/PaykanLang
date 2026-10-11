@@ -1,0 +1,70 @@
+// 49 — Buffer<T>: growable storage reached only through its methods
+// (docs/language/05-arrays.md, "Buffer").  `Buffer<T>()` is empty;
+// get(i) and set(i, v) read and replace an element, push(v) and pop() work
+// at the end, len() counts.  There is no `[]` and no literal.  Exercises
+// value and object elements, a buffer of buffers, a `view` parameter that
+// only reads, and a generic class keeping its elements in one.  Run with
+// --track-heap: zero live blocks.
+
+// expect-stdout: 1 4 9 16 25
+// expect-stdout: sum 55, last 25, now 4
+// expect-stdout: queue: a b c
+// expect-stdout: grid 3x2, corner 6
+
+class Queue<T> {
+  items: Buffer<T>;
+  head: int;
+  fn __init__() { self.items = Buffer<T>(); self.head = 0; }
+  fn enqueue(v: T) { self.items.push(v); }
+  fn dequeue() -> T {
+    v: T = self.items.get(self.head);
+    self.head = self.head + 1;
+    return v;
+  }
+  view fn size() -> int { return self.items.len() - self.head; }
+}
+
+fn sum(b: view Buffer<int>) -> int {
+  s: int = 0;
+  i: int = 0;
+  while (i < b.len()) { s = s + b.get(i); i = i + 1; }
+  return s;
+}
+
+fn main() -> int {
+  squares = Buffer<int>();
+  i: int = 1;
+  while (i <= 5) { squares.push(i * i); i = i + 1; }
+  line: Str = "";
+  i = 0;
+  while (i < squares.len()) {
+    if (i > 0) { line = line + " "; }
+    line = line + Str(squares.get(i));
+    i = i + 1;
+  }
+  println(line);
+  total: int = sum(squares);
+  last: int = squares.pop();
+  println("sum " + Str(total) + ", last " + Str(last) + ", now " +
+          Str(squares.len()));
+
+  q = Queue<Str>();
+  q.enqueue("a"); q.enqueue("b"); q.enqueue("c");
+  out: Str = "queue:";
+  while (q.size() > 0) { out = out + " " + q.dequeue(); }
+  println(out);
+
+  grid = Buffer<Buffer<int>>();
+  r: int = 0;
+  while (r < 3) {
+    row = Buffer<int>();
+    row.push(r * 2 + 1);
+    row.push(r * 2 + 2);
+    grid.push(row);
+    r = r + 1;
+  }
+  corner: Buffer<int> = grid.get(2);
+  println("grid " + Str(grid.len()) + "x" + Str(corner.len()) + ", corner " +
+          Str(corner.get(1)));
+  return 0;
+}

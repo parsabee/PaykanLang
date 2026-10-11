@@ -680,6 +680,18 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     return Val();
   }
 
+  // `Buffer<T>()`: an empty runtime array of T's slot kind.
+  if (auto *bt = node->getResolvedType()
+                     ? ast::dyn_cast<ast::ArrayType>(node->getResolvedType())
+                     : nullptr;
+      bt && bt->isBuffer() && node->getCalleeName() == ast::typeName(bt)) {
+    Val arr = L.callRuntime(L.isObjectElementType(bt->getElementType())
+                                ? kPaykanArrayNewObj
+                                : kPaykanArrayNew,
+                            {Val::i64(0)}, "buf");
+    return L.emitSharedNew(arr, "buf.shared");
+  }
+
   // User-defined function or class constructor: declared up front, or
   // imported.  A miss is a compiler bug.
   pir::Function *callee = L.lookupFunction(node->getCalleeName());
@@ -754,6 +766,46 @@ Val ModuleLowering::ExprEmitter::emitArrayPop(const Val &recv,
   return L.fromSlotBits(raw, elemTy);
 }
 
+Val ModuleLowering::ExprEmitter::emitBufferGet(ast::MethodCallExpr *node,
+                                               const Val &recv,
+                                               ast::Type *elemTy) {
+  Val idx = visit(node->getArguments()[0]);
+  if (!idx)
+    return Val();
+  idx = L.coerceBoolToI64(idx, Type::I64);
+  Val raw = L.callRuntime(kPaykanArrayGet, {recv, idx}, "elem.raw");
+  if (!L.isObjectElementType(elemTy))
+    return L.fromSlotBits(raw, elemTy);
+  Val shared = L.B.cast(raw, Type::Box, "elem.shared");
+  L.emitRetain(shared);
+  return shared;
+}
+
+Val ModuleLowering::ExprEmitter::emitBufferSet(ast::MethodCallExpr *node,
+                                               const Val &recv,
+                                               ast::Type *elemTy) {
+  Val idx = visit(node->getArguments()[0]);
+  if (!idx)
+    return Val();
+  idx = L.coerceBoolToI64(idx, Type::I64);
+  ast::Expr *value = node->getArguments()[1];
+  if (L.isObjectElementType(elemTy)) {
+    Val v = L.emitAsShared(value);
+    if (!v)
+      return Val();
+    L.callRuntime(kPaykanArraySetObj, {recv, idx, v});
+    // set_obj retains; drop the +1 temporary.
+    L.emitRelease(v);
+    return Val();
+  }
+  Val v = visit(value);
+  if (!v)
+    return Val();
+  v = L.toSlotBits(L.promoteIntToFloat(v, elemTy));
+  L.callRuntime(kPaykanArraySet, {recv, idx, v});
+  return Val();
+}
+
 Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     ast::MethodCallExpr *node) {
   const bool wantAddress = std::exchange(WantAddress, false);
@@ -799,8 +851,16 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   ast::Type *recvASTTy = resolveReceiverASTType();
   auto *arrTy = ast::dyn_cast<ast::ArrayType>(recvASTTy);
 
-  // push / pop are direct runtime calls, not vtable slots.
+  // push / pop (and a Buffer's get / set) are direct runtime calls, not
+  // vtable slots.
   const std::string &mname = node->getMethodName();
+  if (arrTy && arrTy->isBuffer() && (mname == kGet || mname == kSet)) {
+    Val result = mname == kGet
+                     ? emitBufferGet(node, recv, arrTy->getElementType())
+                     : emitBufferSet(node, recv, arrTy->getElementType());
+    L.releaseIfOwned(recvOwned);
+    return result;
+  }
   if (arrTy && (mname == kPush || mname == kPop)) {
     Val result = mname == kPush
                      ? emitArrayPush(node, recv, arrTy->getElementType())

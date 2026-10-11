@@ -16,9 +16,12 @@ inline constexpr const char *kErrPrintln = "printerrln";
 inline constexpr const char *kLen = "len";
 inline constexpr const char *kPush = "push";
 inline constexpr const char *kPop = "pop";
+inline constexpr const char *kGet = "get"; ///< Buffer<T>.get(i)
+inline constexpr const char *kSet = "set"; ///< Buffer<T>.set(i, v)
 inline constexpr const char *kOpen = "open";
 inline constexpr const char *kMain = "main"; ///< the program's entry point
 inline constexpr const char *kArray = "Array";
+inline constexpr const char *kBuffer = "Buffer";
 inline constexpr const char *kTuple = "Tuple";
 
 // Built-in class names

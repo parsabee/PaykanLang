@@ -91,7 +91,20 @@ static ast::Type *parseExportedType(ast::ASTContext &ctx,
     }
     if (pos == start)
       return nullptr;
-    ty = ctx.lookupType(text.substr(start, pos - start));
+    std::string name = text.substr(start, pos - start);
+    const std::string buffer = std::string(names::kBuffer) + "<";
+    if (name.starts_with(buffer) && name.back() == '>') {
+      // `Buffer<T>`, spelled by ast::typeName.
+      size_t inner = 0;
+      std::string elem =
+          name.substr(buffer.size(), name.size() - buffer.size() - 1);
+      ast::Type *elemTy = parseExportedType(ctx, elem, inner);
+      if (!elemTy || inner != elem.size())
+        return nullptr;
+      ty = ctx.getBufferType(elemTy);
+    } else {
+      ty = ctx.lookupType(name);
+    }
     if (!ty)
       return nullptr;
   }

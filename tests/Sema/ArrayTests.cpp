@@ -466,3 +466,150 @@ TEST(ArrayCanonical, DimensionMismatchRejected) {
     EXPECT_FALSE(r.Ok);
   }
 }
+
+// -- Buffer<T>: growable storage reached only through its methods
+
+namespace {
+bool hasDiag(const SemaResult &r, const std::string &text) {
+  return r.Diagnostics.find(text) != std::string::npos;
+}
+} // namespace
+
+TEST(Buffer, MethodsOnEveryElementKind) {
+  auto r = semaCheck(R"(
+    class P { x: int; fn __init__(x: int) { self.x = x; } }
+    fn total(b: view Buffer<int>) -> int {
+      s: int = 0; i: int = 0;
+      while (i < b.len()) { s = s + b.get(i); i = i + 1; }
+      return s;
+    }
+    fn main() -> int {
+      a = Buffer<int>(); a.push(1); a.set(0, 2); n: int = a.pop();
+      f: Buffer<float> = Buffer<float>(); f.push(1); f.set(0, 2);
+      s = Buffer<Str>(); s.push("x"); t: Str = s.get(0);
+      p = Buffer<P>(); p.push(P(1)); q: P = p.get(0);
+      o = Buffer<int?>(); o.push(None); o.push(3);
+      nested = Buffer<Buffer<int>>(); nested.push(a);
+      tup = Buffer<(int, Str)>(); tup.push((1, "a"));
+      asObj: Obj = a;
+      return total(a) + nested.get(0).len();
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics, "");
+}
+
+TEST(Buffer, InGenericsAndInference) {
+  auto r = semaCheck(R"(
+    class Stack<T> {
+      items: Buffer<T>;
+      fn __init__() { self.items = Buffer<T>(); }
+      fn push(v: T) { self.items.push(v); }
+      view fn top() -> T { return self.items.get(self.items.len() - 1); }
+    }
+    fn first<T>(b: view Buffer<T>) -> T { return b.get(0); }
+    fn main() -> int {
+      s = Stack<Str>(); s.push("a"); t: Str = s.top();
+      b = Buffer<int>(); b.push(4);
+      n: int = first(b);
+      return n;
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+
+  // A `T[]` does not bind a `Buffer<T>` parameter, nor a Buffer a `T[]` one.
+  auto r2 = semaCheck(R"(
+    fn g<T>(b: Buffer<T>) -> int { return b.len(); }
+    fn h<T>(xs: T[]) -> int { return xs.len(); }
+    fn main() -> int { a: int[] = [1]; b = Buffer<int>(); return g(a) + h(b); }
+  )");
+  EXPECT_FALSE(r2.Ok);
+  EXPECT_EQ(r2.ErrorCount, 2u) << r2.Diagnostics;
+  EXPECT_TRUE(hasDiag(r2, "cannot infer type parameter 'T' of 'g'"))
+      << r2.Diagnostics;
+  EXPECT_TRUE(hasDiag(r2, "cannot infer type parameter 'T' of 'h'"))
+      << r2.Diagnostics;
+}
+
+TEST(Buffer, NoSubscriptsNoLiteralsNotAnArray) {
+  struct Case {
+    const char *Body;
+    const char *Diag;
+  } cases[] = {
+      {"b = Buffer<int>(); x = b[0];",
+       "a 'Buffer<int>' has no '[]': use its get(i) and set(i, v) methods"},
+      {"b = Buffer<int>(); b[0] = 1;",
+       "a 'Buffer<int>' has no '[]': use its get(i) and set(i, v) methods"},
+      {"b: Buffer<int> = [1, 2];",
+       "initializer of type 'int[]' does not match declared type "
+       "'Buffer<int>'"},
+      {"b: Buffer<int> = [];",
+       "an array literal is not a 'Buffer<int>': make one with "
+       "'Buffer<int>()'"},
+      {"b = Buffer<int>(); a: int[] = b;",
+       "initializer of type 'Buffer<int>' does not match declared type "
+       "'int[]'"},
+      {"o: Obj = Buffer<int>(); match o { b: Buffer<int> { } _ { } }",
+       "a match arm cannot test for 'Buffer<int>'"},
+  };
+  for (const Case &c : cases) {
+    auto r = semaCheck(wrapMain(c.Body));
+    EXPECT_FALSE(r.Ok) << c.Body;
+    EXPECT_EQ(r.ErrorCount, 1u) << c.Body << "\n" << r.Diagnostics;
+    EXPECT_TRUE(hasDiag(r, c.Diag)) << c.Body << "\n" << r.Diagnostics;
+  }
+}
+
+TEST(Buffer, ConstructorAndTypeArguments) {
+  struct Case {
+    const char *Body;
+    const char *Diag;
+  } cases[] = {
+      {"b = Buffer();", "'Buffer' needs its element type: 'Buffer<int>()'"},
+      {"b = Buffer<int, int>();", "'Buffer' expects 1 type argument, got 2"},
+      {"b = Buffer<int>(3);",
+       "function 'Buffer<int>' expects 0 argument(s), got 1"},
+      {"b: Buffer<void> = None;",
+       "variable 'b' has type 'Buffer<void>': a buffer holds values"},
+      {"b = Buffer<int>(); b.get(0, 1);",
+       "method 'get' expects 1 argument(s), got 2"},
+      {"b = Buffer<int>(); b.set(0, \"x\");",
+       "argument 2 of 'set' has type 'Str', expected 'int'"},
+  };
+  for (const Case &c : cases) {
+    auto r = semaCheck(wrapMain(c.Body));
+    EXPECT_FALSE(r.Ok) << c.Body;
+    EXPECT_TRUE(hasDiag(r, c.Diag)) << c.Body << "\n" << r.Diagnostics;
+  }
+}
+
+TEST(Buffer, NameIsReserved) {
+  for (const char *decl :
+       {"class Buffer { x: int; }", "class Buffer<T> { x: T; }",
+        "fn Buffer() -> int { return 0; }"}) {
+    auto r = semaCheck(std::string(decl) + "\nfn main() -> int { return 0; }");
+    EXPECT_FALSE(r.Ok) << decl;
+    EXPECT_TRUE(hasDiag(r, "'Buffer' is a builtin class and cannot be "
+                           "redeclared"))
+        << decl << "\n"
+        << r.Diagnostics;
+  }
+}
+
+// Only `len` and `get` read: a `view` of a buffer reaches no other method,
+// and `push` and `set` keep their value, which a view cannot give.
+TEST(Buffer, ViewRules) {
+  auto r = semaCheck(R"(
+    fn f(b: view Buffer<int>) { b.set(0, 1); b.push(2); n: int = b.pop(); }
+    fn g(s: view Str, b: Buffer<Str>) { b.push(s); b.set(0, s); }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
+  EXPECT_TRUE(hasDiag(r, "'b' is a 'view' parameter; 'set' is not a 'view fn'"))
+      << r.Diagnostics;
+  EXPECT_TRUE(hasDiag(r, "'b' is a 'view' parameter; 'pop' is not a 'view fn'"))
+      << r.Diagnostics;
+  EXPECT_TRUE(hasDiag(r, "'s' is a 'view' parameter; it cannot be stored"))
+      << r.Diagnostics;
+}
