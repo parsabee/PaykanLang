@@ -2359,13 +2359,16 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
 
 // A `native fn` (#198) crosses into C with the runtime builtins' convention,
 // which only covers scalars, `Str` and `Obj` (and, as a result, `Str?` and
-// `Obj?`: a null box is None).  Its parameters and result are copies: a
-// `view` or `inout` one would need a pointer convention C does not have yet
-// (#21).
+// `Obj?`: a null box is None).  An instance of a generic one passes every
+// argument and its result as a 64-bit slot instead, so any type crosses.  A
+// `view` parameter crosses as a copy does (C borrows both), and a `view`
+// result is part of one; `inout` would need a pointer convention C does not
+// have yet (#21).
 bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
                                 const std::vector<ast::Type *> &paramTypes) {
+  const bool slots = !node->getTypeArgs().empty();
   auto scalarOrRef = [&](ast::Type *t) {
-    if (t == Ctx.getStrTy() || t == Ctx.getObjTy())
+    if (slots || t == Ctx.getStrTy() || t == Ctx.getObjTy())
       return true;
     auto *bt = ast::dyn_cast<ast::BuiltinType>(t);
     return bt && t != Ctx.getVoidTy();
@@ -2376,26 +2379,36 @@ bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
           "native function '" + node->getName() + "': " + what + " '" +
               typeName(t) +
               "' cannot cross into C (int, float, bool, char, Str and Obj "
-              "can; Str? and Obj? as a result)");
+              "can; Str? and Obj? as a result; a generic native function "
+              "takes any type)");
     ok = false;
   };
   for (size_t i = 0; i < paramTypes.size(); ++i)
     if (!scalarOrRef(paramTypes[i]))
       reject(paramTypes[i],
              "parameter '" + node->getParams()[i].getName() + "' of type");
-  for (const ast::Param &p : node->getParams())
-    if (p.Mode != ast::ParamMode::Value) {
+  bool viewParam = false;
+  for (const ast::Param &p : node->getParams()) {
+    viewParam |= p.Mode == ast::ParamMode::View;
+    if (p.Mode == ast::ParamMode::Inout) {
       error(node->getLocation(),
             "native function '" + node->getName() + "': parameter '" +
-                p.getName() + "' cannot be '" + ast::paramModeName(p.Mode) +
-                "'; a native function's parameters are copies");
+                p.getName() +
+                "' cannot be 'inout'; a native function takes copies and "
+                "views");
       ok = false;
     }
-  if (node->getResultMode() != ast::ParamMode::Value) {
+  }
+  if (node->getResultMode() == ast::ParamMode::Inout) {
     error(node->getLocation(), "native function '" + node->getName() +
-                                   "' cannot return '" +
-                                   ast::paramModeName(node->getResultMode()) +
-                                   "'; a native function returns a copy");
+                                   "' cannot return 'inout'; a native "
+                                   "function returns a copy or a view");
+    ok = false;
+  } else if (node->getResultMode() == ast::ParamMode::View && !viewParam) {
+    error(node->getLocation(),
+          "native function '" + node->getName() +
+              "' returns a 'view' but has no 'view' parameter for it to be "
+              "part of");
     ok = false;
   }
   ast::Type *ret = retTy;

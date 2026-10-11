@@ -211,6 +211,36 @@ TEST(Lowering, NativeFunctionCallsItsCSymbolWithTheBuiltinConvention) {
       << l.Text;
 }
 
+// An instance of a generic native function passes the kind of each type
+// argument first, then every argument and its result as a 64-bit slot: a
+// reference as its box, borrowed; a reference result is the owned box.
+TEST(Lowering, GenericNativeFunctionPassesKindsAndSlots) {
+  auto l = lower(R"(
+    native fn pick<T>(first: bool, a: T, b: T) -> T = "pk_test_pick";
+    fn main() -> int {
+      s = pick<Str>(True, "a", "b");
+      f = pick<float>(False, 1.5, 2.5);
+      return pick<int>(True, 1, 2);
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  EXPECT_NE(l.Text.find("extern fn @$c.pk_test_pick(i64, i64, i64, i64) -> "
+                        "i64"),
+            std::string::npos)
+      << l.Text;
+  std::string str = function(l.Text, "pick<Str>");
+  EXPECT_NE(str.find("call @$c.pk_test_pick(4, "), std::string::npos) << str;
+  EXPECT_NE(str.find("to box"), std::string::npos) << str;
+  EXPECT_EQ(count(str, "retain"), 0u) << str;
+  EXPECT_EQ(count(str, "release"), 2u) << str; // its own parameters
+  std::string flt = function(l.Text, "pick<float>");
+  EXPECT_NE(flt.find("call @$c.pk_test_pick(1, "), std::string::npos) << flt;
+  EXPECT_NE(flt.find("to f64"), std::string::npos) << flt;
+  EXPECT_NE(function(l.Text, "pick<int>").find("call @$c.pk_test_pick(0, "),
+            std::string::npos)
+      << l.Text;
+}
+
 // -- Calls: callee-consumes ABI for user functions, borrow for builtins
 
 TEST(Lowering, UserCallRetainsAVariableArgument) {

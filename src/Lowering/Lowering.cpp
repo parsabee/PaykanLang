@@ -1093,16 +1093,26 @@ Val ModuleLowering::visitFuncDecl(ast::FuncDecl *node) {
 
 // A `native fn` (#198) is an ordinary function whose body calls its C symbol
 // with the runtime builtins' convention: a reference argument is borrowed as
-// the raw object, a reference result is an owned box.  Its own parameters
-// are released by the scope cleanup, as in any function.
+// the raw object, a reference result is an owned box.  An instance of a
+// generic one passes the kind of each type argument first, then every
+// argument and its result as a 64-bit slot, a reference as its box.  Its own
+// parameters are released by the scope cleanup, as in any function.
 void ModuleLowering::emitNativeBody(ast::FuncDecl *node,
                                     const pir::Function &fn) {
+  const bool slots = !node->getTypeArgs().empty();
   pir::Signature csig;
-  csig.Ret = fn.Sig.Ret;
+  csig.Ret = slots && fn.Sig.Ret != Type::Void ? Type::I64 : fn.Sig.Ret;
   std::vector<Val> args;
+  for (ast::Type *arg : node->getTypeArgs()) {
+    csig.Params.push_back(Type::I64);
+    args.push_back(Val::i64(nativeTypeKind(canonicalizeDeclType(arg))));
+  }
   for (const ast::Param &p : node->getParams()) {
     Val v = B.load(CurrentScope->lookup(p.getName()), p.getName());
-    if (v.Ty == Type::Box)
+    if (slots)
+      v = v.Ty == Type::Box ? B.cast(v, Type::I64, p.getName() + ".bits")
+                            : toSlotBits(v);
+    else if (v.Ty == Type::Box)
       v = emitSharedGet(v, p.getName() + ".obj");
     csig.Params.push_back(v.Ty);
     args.push_back(v);
@@ -1117,11 +1127,37 @@ void ModuleLowering::emitNativeBody(ast::FuncDecl *node,
     FuncByName[name] = &ext;
   }
   Val result = B.call(name, csig, args, "r");
+  if (slots && csig.Ret != Type::Void)
+    result =
+        fn.Sig.Ret == Type::Box
+            ? B.cast(result, Type::Box, "r.box")
+            : fromSlotBits(result, canonicalizeDeclType(node->getReturnType()));
   emitAllScopesCleanup();
   if (csig.Ret == Type::Void)
     B.emitRetVoid();
   else
     B.emitRet(result);
+}
+
+unsigned char ModuleLowering::nativeTypeKind(ast::Type *ty) const {
+  if (ast::isa<ast::OptionalType>(ty))
+    return kNativeKindOptional;
+  if (isObjectElementType(ty))
+    return kNativeKindObject;
+  if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty)) {
+    switch (bt->getTypeKind()) {
+    case ast::BuiltinType::Float:
+      return kNativeKindFloat;
+    case ast::BuiltinType::Bool:
+      return kNativeKindBool;
+    case ast::BuiltinType::Char:
+      return kNativeKindChar;
+    case ast::BuiltinType::Int:
+    case ast::BuiltinType::Void:
+      break;
+    }
+  }
+  return kNativeKindInt; // an int or an enum
 }
 
 // -- Optionals

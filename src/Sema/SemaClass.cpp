@@ -993,6 +993,7 @@ std::string Sema::instantiateFunction(const std::string &name,
     subst[*tmpl->getTypeParams()[i]] = args[i];
   ast::ASTCloner cloner(Ctx, std::move(subst));
   ast::FuncDecl *clone = cloner.cloneFuncDecl(tmpl, instName);
+  clone->setTypeArgs(args);
 
   InstantiationStack.push_back({instName, loc});
   bool ok = declareFunctionSignature(clone);

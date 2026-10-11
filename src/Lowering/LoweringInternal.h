@@ -372,6 +372,8 @@ private:
   void emitBody(ast::CompoundStmt *body);
   void emitImplicitReturn(const pir::Signature &sig);
   void emitNativeBody(ast::FuncDecl *node, const pir::Function &fn);
+  /// The NativeTypeKind a generic native function is passed for @p ty.
+  unsigned char nativeTypeKind(ast::Type *ty) const;
   Val emitValueMatch(ast::MatchStmt *node, const Val &subjRaw);
   Val emitEnumMatch(ast::MatchStmt *node, const Val &subjRaw);
   /// Emit `if (check0) body0 else if (check1) body1 ... else default`.

@@ -336,6 +336,21 @@ enum TupleSlotKind : unsigned char {
   kTupleSlotRef = 4,   // PaykanShared* retained by the tuple
 };
 
+// -- Type kinds of a generic native function's type arguments
+//
+// One int64_t per type argument, passed ahead of the slots.  Must match
+// PaykanTypeKind in src/Runtime/Runtime.h (a static_assert in the codegen
+// tests checks it).
+
+enum NativeTypeKind : unsigned char {
+  kNativeKindInt = 0,      // int64_t (also enum values)
+  kNativeKindFloat = 1,    // double bits
+  kNativeKindBool = 2,     // int64_t 0 / 1
+  kNativeKindChar = 3,     // int64_t holding one byte
+  kNativeKindObject = 4,   // PaykanShared*, never null
+  kNativeKindOptional = 5, // PaykanShared*, null for None
+};
+
 // -- Names of lowering-generated globals and values
 
 inline constexpr const char *kStrGlobalName = ".str";

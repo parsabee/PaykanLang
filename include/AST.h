@@ -370,6 +370,9 @@ private:
   CompoundStmt *Body;
   // Type parameter names (interned); empty for an ordinary function.
   std::vector<const std::string *> TypeParams;
+  // An instantiation's type arguments, in TypeParams order; empty for a
+  // declaration written by hand.
+  std::vector<Type *> TypeArgs;
   // The C symbol of a `native fn` (interned), which has no Body; nullptr for
   // an ordinary function (#198).
   const std::string *NativeSymbol = nullptr;
@@ -395,6 +398,11 @@ public:
     return TypeParams;
   }
   bool isGeneric() const { return !TypeParams.empty(); }
+
+  /// The type arguments Sema instantiated this function with (`first<int>`);
+  /// a native one passes their kinds to C.
+  const std::vector<Type *> &getTypeArgs() const { return TypeArgs; }
+  void setTypeArgs(std::vector<Type *> args) { TypeArgs = std::move(args); }
 
   bool isNative() const { return NativeSymbol != nullptr; }
   const std::string &getNativeSymbol() const { return *NativeSymbol; }

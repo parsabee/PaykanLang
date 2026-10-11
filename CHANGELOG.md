@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Generic native functions (docs/language/02-functions-and-calling.md, "Generic native
+  functions"): `native fn pick<T>(first: bool, a: T, b: T) -> T = "c_pick";`.  Each
+  instance calls the same C function with the kind of each type argument first
+  (`PaykanTypeKind` in `Runtime.h`: int, float, bool, char, object or optional), then
+  every argument and its result as a 64-bit slot (a value's bits, a reference's box), so
+  any type crosses into C.  A native function's parameters can be `view`, and its result a
+  `view` of one (`returns a 'view' but has no 'view' parameter for it to be part of`);
+  `inout` is still rejected.  In the AST interchange format a generic native function has
+  its `(type-params ...)` like any other.  See `samples/imports/15_native_generic`.
 - Borrowed results (docs/language/02-functions-and-calling.md, "Borrowed results"): a
   function or method declared `-> view T` returns a borrow of part of `self` or of a
   `view` or `inout` parameter, never a new value, a copy parameter or a local (`'d' is a

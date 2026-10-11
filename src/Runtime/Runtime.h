@@ -527,6 +527,28 @@ void Paykan_release(PaykanShared *shared);
 /// Convenience: return the underlying object pointer.
 PaykanObject *PaykanShared_get(PaykanShared *shared);
 
+// -- Generic native functions
+//
+// An instance of a generic `native fn` (`native fn get<T>(b: view Obj, i: int)
+// -> view T = "..."`, docs/language/02-functions-and-calling.md) receives the
+// kind of each type argument, in order, then every argument as a 64-bit
+// slot, and returns its result as one.  A slot holds a value's bits (an
+// int or enum, a float's IEEE bits, a bool or char widened) or a
+// reference's PaykanShared* box.  Argument boxes are borrowed for the call;
+// a result box is owned (+1).
+//
+// The kind codes are part of the compiler <-> runtime ABI; they must match
+// paykan::names::NativeTypeKind in include/Names.h.
+
+typedef enum PaykanTypeKind {
+  PAYKAN_KIND_INT = 0,      // int64_t (also enum values)
+  PAYKAN_KIND_FLOAT = 1,    // IEEE-754 double bits
+  PAYKAN_KIND_BOOL = 2,     // int64_t 0 / 1
+  PAYKAN_KIND_CHAR = 3,     // int64_t holding one byte
+  PAYKAN_KIND_OBJECT = 4,   // PaykanShared*, never NULL
+  PAYKAN_KIND_OPTIONAL = 5, // PaykanShared*, NULL for None
+} PaykanTypeKind;
+
 // -- Runtime panics
 
 /// Print a diagnostic and abort: the lowering's trap target for integer `/`

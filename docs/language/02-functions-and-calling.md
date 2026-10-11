@@ -483,8 +483,38 @@ convention:
 | `Str`, `Obj` result | `PaykanShared *` | owned (+1); never `NULL` |
 | `Str?`, `Obj?` result | `PaykanShared *` | owned (+1); `NULL` is `None` |
 
-A native function cannot be generic, cannot be a method, and cannot be `main`.
-Its parameters and its result are copies: `view` and `inout` don't apply to them yet (#21).
+A native function cannot be a method and cannot be `main`.  A parameter can
+be a `view`, which C borrows as it does a copy, and the result can be a `view`
+of one (`-> view T` needs a `view` parameter); `inout` doesn't apply yet (#21).
+
+### Generic native functions
+
+A native function can be generic.  Each instance calls the same C function,
+which is passed the kind of each type argument first, then every argument as
+a 64-bit slot, and returns its result as one:
+
+```pkn
+native fn pick<T>(first: bool, a: T, b: T) -> T = "sample_pick";
+```
+
+```c
+int64_t sample_pick(int64_t kind, int64_t first, int64_t a, int64_t b);
+```
+
+So any type crosses, and the C code sees what it was given:
+
+| Kind (`PaykanTypeKind`) | Type argument | Slot |
+|------|----------|------|
+| `PAYKAN_KIND_INT` | `int`, an enum | the value |
+| `PAYKAN_KIND_FLOAT` | `float` | the IEEE-754 bits |
+| `PAYKAN_KIND_BOOL`, `PAYKAN_KIND_CHAR` | `bool`, `char` | the value, widened |
+| `PAYKAN_KIND_OBJECT` | a class, `Str`, `Obj`, an array, a tuple | the `PaykanShared *` box, never `NULL` |
+| `PAYKAN_KIND_OPTIONAL` | any `T?` | the box, `NULL` for `None` |
+
+Every argument is a slot, including those whose type is not a type
+parameter (`first` above, and a `Str` is its box, not the raw object).
+Argument boxes are borrowed for the call; a box result is owned (+1).  See
+`samples/imports/15_native_generic`.
 
 `paykan` does not build native code: you compile it however you like (any
 compiler, flags or language that produces C-ABI symbols) and pass the objects
