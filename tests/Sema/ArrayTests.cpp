@@ -613,3 +613,32 @@ TEST(Buffer, ViewRules) {
   EXPECT_TRUE(hasDiag(r, "'s' is a 'view' parameter; it cannot be stored"))
       << r.Diagnostics;
 }
+
+// Nothing borrows an element in place: `get` returns a new value, so a
+// container cannot hand out an `inout` or `view` into its buffer (the
+// standard library's List<T> is reached only through values).
+TEST(Buffer, NoBorrowIntoElements) {
+  auto r = semaCheck(R"(
+    class Bag<T> {
+      items: Buffer<T>;
+      fn __init__() { self.items = Buffer<T>(); }
+      fn ref(i: int) -> inout T { return self.items.get(i); }
+      view fn peek(i: int) -> view T { return self.items.get(i); }
+    }
+    fn main() -> int {
+      b = Bag<int>();
+      b.items.push(1);
+      e: inout = b.items.get(0);
+      return 0;
+    }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
+  for (const char *diag :
+       {"an 'inout' result must be part of 'self' or of an 'inout' "
+        "parameter, not a new value",
+        "a 'view' result must be part of 'self' or of a 'view' or 'inout' "
+        "parameter, not a new value",
+        "'inout' local 'e' must name a variable or a field"})
+    EXPECT_TRUE(hasDiag(r, diag)) << diag << "\n" << r.Diagnostics;
+}
