@@ -508,7 +508,7 @@ class Emitter {
     }
     if (fn->IsExtern) {
       if (fn->Module.empty())
-        return pir::runtimeSymbol(fn->Name); // runtime: its C name
+        return pir::externCSymbol(fn->Name); // runtime or native: its C name
       return symbolOf(fn->Module, fn->linkName());
     }
     return symbolOf(m.Name, fn->Name);
@@ -828,7 +828,7 @@ class Emitter {
     for (size_t mi : Unit) {
       const pir::Module &m = P.Modules[mi];
       for (const auto &f : m.Functions) {
-        if (f.IsExtern && f.Module.empty())
+        if (f.IsExtern && f.Module.empty() && !pir::isNativeName(f.Name))
           continue; // runtime: Runtime.h declares it
         std::string sym = funcSymbol(m, f.Name);
         if (!seen.insert(sym).second)
@@ -1245,7 +1245,8 @@ class Emitter {
       std::vector<std::string> args;
       args.reserve(i.Args.size());
       std::string fn;
-      if (callee->IsExtern && callee->Module.empty()) {
+      if (callee->IsExtern && callee->Module.empty() &&
+          !pir::isNativeName(callee->Name)) {
         fn = pir::runtimeSymbol(callee->Name);
         const RuntimeProto *proto = findProto(fn);
         if (!proto) {

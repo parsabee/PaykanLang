@@ -306,6 +306,7 @@ void Parser::skipToTopLevelBoundary() {
         return;
       break;
     case Tok::KwFn:
+    case Tok::KwNative:
     case Tok::KwClass:
     case Tok::KwEnum:
     case Tok::KwImport:
@@ -438,6 +439,12 @@ TranslationUnit *Parser::parseTranslationUnit() {
       else
         ok = false;
       break;
+    case Tok::KwNative:
+      if (auto *d = parseFuncDecl(/*native=*/true))
+        funcs.push_back(d);
+      else
+        ok = false;
+      break;
     case Tok::KwEnum:
       if (auto *d = parseEnumDecl())
         enums.push_back(d);
@@ -445,7 +452,8 @@ TranslationUnit *Parser::parseTranslationUnit() {
         ok = false;
       break;
     default:
-      errorAtCurrent("expected 'import', 'class', 'enum' or 'fn' at top level");
+      errorAtCurrent(
+          "expected 'import', 'class', 'enum', 'fn' or 'native' at top level");
       ok = false;
       break;
     }
@@ -720,10 +728,12 @@ void Parser::prefixModeError() {
                          fix + "'");
 }
 
-FuncDecl *Parser::parseFuncDecl() {
+FuncDecl *Parser::parseFuncDecl(bool native) {
   SourceLocation start = cur().Loc;
-  bool view = accept(Tok::KwView); // `view fn` (only a method; see Sema)
-  consume();                       // "fn"
+  bool view = !native && accept(Tok::KwView); // `view fn` (a method; see Sema)
+  consume();                                  // "fn", or "native" before it
+  if (native && !expect(Tok::KwFn, "after 'native'"))
+    return nullptr;
   if (!at(Tok::Ident)) {
     errorAtCurrent("expected a function name after 'fn'");
     return nullptr;
@@ -754,6 +764,29 @@ FuncDecl *Parser::parseFuncDecl() {
     retTy = parseTypeAnnotation();
     if (!retTy)
       return nullptr;
+  }
+
+  // nativeFuncDecl ::= "native" "fn" IDENT "(" params? ")" ( "->" type )?
+  //                    "=" STRING ";"   -- the C symbol instead of a body
+  if (native) {
+    if (!typeParams.empty()) {
+      error(start, "a native function cannot be generic");
+      return nullptr;
+    }
+    if (!expect(Tok::Assign, "after a native function's signature"))
+      return nullptr;
+    if (!at(Tok::String)) {
+      errorAtCurrent("expected the C symbol as a string literal");
+      return nullptr;
+    }
+    const std::string &symbol = intern(consume().StrValue);
+    if (!expect(Tok::Semi, "after a native function"))
+      return nullptr;
+    auto *fn = Ctx.make<FuncDecl>(span(start), name, std::move(params), retTy,
+                                  nullptr);
+    fn->setNativeSymbol(symbol);
+    fn->setResultMode(resultMode);
+    return fn;
   }
 
   CompoundStmt *body = parseBlock();

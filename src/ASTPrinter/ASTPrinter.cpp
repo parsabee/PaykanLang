@@ -498,6 +498,8 @@ void ASTPrinter::visitFuncDecl(FuncDecl *node) {
     OS << " view"; // `view fn`, as written
   OS << " '" << node->getName() << "'";
   printTypeParams(OS, node->getTypeParams());
+  if (node->isNative())
+    OS << " native '" << node->getNativeSymbol() << "'";
   // Parameters are not printed, except the mode of one that has it.
   for (const Param &p : node->getParams())
     if (p.Mode != ParamMode::Value)
@@ -508,10 +510,10 @@ void ASTPrinter::visitFuncDecl(FuncDecl *node) {
     OS << ' ' << paramModeName(node->getResultMode());
   OS << "\n";
   if (node->getReturnType()) {
-    ChildScope cs(*this, false);
+    ChildScope cs(*this, !node->getBody());
     visit(node->getReturnType());
   }
-  {
+  if (node->getBody()) {
     ChildScope cs(*this, true);
     visit(node->getBody());
   }

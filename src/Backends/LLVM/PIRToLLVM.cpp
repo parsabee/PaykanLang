@@ -116,7 +116,7 @@ private:
     if (!f->IsExtern)
       return mangle(module, isMain, name);
     if (f->Module.empty())
-      return runtimeSymbol(name); // runtime: its C name
+      return externCSymbol(name); // runtime or native: its C name
     bool otherIsMain = false;
     if (const Module *other = findModule(f->Module, otherIsMain))
       return mangle(*other, otherIsMain, f->linkName());

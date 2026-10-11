@@ -192,10 +192,15 @@ private:
       sym(paramModeName(d.getResultMode()));
       close();
     }
-    if (d.getBody())
+    if (d.isNative()) {
+      open("native");
+      str(d.getNativeSymbol());
+      close();
+    } else if (d.getBody()) {
       stmt(d.getBody());
-    else
+    } else {
       fail("function '" + d.getName() + "' has no body");
+    }
     if (d.isView()) {
       open("qual");
       sym("view");

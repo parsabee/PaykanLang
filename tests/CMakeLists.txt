@@ -24,6 +24,7 @@ add_executable(parser_tests
     Parser/ModuleTests.cpp
     Parser/ArrayTests.cpp
     Parser/MovTests.cpp
+    Parser/NativeTests.cpp
     Parser/GenericsTests.cpp
     Parser/ConversionTests.cpp
     Parser/OptionalTests.cpp
@@ -58,6 +59,7 @@ if(PAYKAN_TEST_SUITE_sema)
 add_executable(sema_tests
     Sema/ArithTests.cpp
     Sema/FuncTests.cpp
+    Sema/NativeTests.cpp
     Sema/ControlFlowTests.cpp
     Sema/ClassTests.cpp
     Sema/ModuleTests.cpp

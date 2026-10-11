@@ -181,6 +181,36 @@ TEST(Lowering, ReturnReleasesEveryScopeAfterEvaluatingTheValue) {
   EXPECT_NE(inner.find("ret %"), std::string::npos) << inner;
 }
 
+// -- native fn (#198)
+
+// A native function is an ordinary function whose body calls its C symbol
+// with the builtins' convention: a reference argument borrowed as the raw
+// object, a reference result an owned box; its own parameters are released.
+TEST(Lowering, NativeFunctionCallsItsCSymbolWithTheBuiltinConvention) {
+  auto l = lower(R"(
+    native fn put(fd: int, s: Str) -> int = "pk_test_put";
+    native fn get(fd: int) -> Str? = "pk_test_get";
+    fn main() -> int { n = put(1, "x"); s = get(0); return n; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  EXPECT_NE(l.Text.find("extern fn @$c.pk_test_put(i64, obj) -> i64"),
+            std::string::npos)
+      << l.Text;
+  EXPECT_NE(l.Text.find("extern fn @$c.pk_test_get(i64) -> box"),
+            std::string::npos)
+      << l.Text;
+  std::string put = function(l.Text, "put");
+  EXPECT_NE(put.find("unbox"), std::string::npos) << put;
+  EXPECT_NE(put.find("call @$c.pk_test_put("), std::string::npos) << put;
+  EXPECT_EQ(count(put, "retain"), 0u) << put;
+  EXPECT_EQ(count(put, "release"), 1u) << put;
+  std::string get = function(l.Text, "get");
+  EXPECT_EQ(count(get, "release"), 0u) << get;
+  // Callers see an ordinary function.
+  EXPECT_NE(function(l.Text, "main").find("call @put("), std::string::npos)
+      << l.Text;
+}
+
 // -- Calls: callee-consumes ABI for user functions, borrow for builtins
 
 TEST(Lowering, UserCallRetainsAVariableArgument) {

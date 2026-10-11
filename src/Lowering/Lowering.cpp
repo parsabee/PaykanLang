@@ -1082,10 +1082,46 @@ Val ModuleLowering::visitFuncDecl(ast::FuncDecl *node) {
     for (size_t i = 0; i < fn->Params.size(); ++i)
       declareParam(node->getParams()[i].getName(), fn->Params[i],
                    canonicalizeDeclType(node->getParams()[i].ParamType));
-    emitBody(node->getBody());
+    if (node->isNative())
+      emitNativeBody(node, *fn);
+    else
+      emitBody(node->getBody());
   }
   emitImplicitReturn(fn->Sig);
   return Val();
+}
+
+// A `native fn` (#198) is an ordinary function whose body calls its C symbol
+// with the runtime builtins' convention: a reference argument is borrowed as
+// the raw object, a reference result is an owned box.  Its own parameters
+// are released by the scope cleanup, as in any function.
+void ModuleLowering::emitNativeBody(ast::FuncDecl *node,
+                                    const pir::Function &fn) {
+  pir::Signature csig;
+  csig.Ret = fn.Sig.Ret;
+  std::vector<Val> args;
+  for (const ast::Param &p : node->getParams()) {
+    Val v = B.load(CurrentScope->lookup(p.getName()), p.getName());
+    if (v.Ty == Type::Box)
+      v = emitSharedGet(v, p.getName() + ".obj");
+    csig.Params.push_back(v.Ty);
+    args.push_back(v);
+  }
+  const std::string name = pir::nativeName(node->getNativeSymbol());
+  if (!FuncByName.count(name)) {
+    Funcs.emplace_back();
+    pir::Function &ext = Funcs.back();
+    ext.Name = name;
+    ext.Sig = csig;
+    ext.IsExtern = true;
+    FuncByName[name] = &ext;
+  }
+  Val result = B.call(name, csig, args, "r");
+  emitAllScopesCleanup();
+  if (csig.Ret == Type::Void)
+    B.emitRetVoid();
+  else
+    B.emitRet(result);
 }
 
 // -- Optionals
