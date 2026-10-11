@@ -167,21 +167,33 @@ bool ClassType::isSubtypeOf(const ClassType *other) const {
 
 // -- ASTCloner
 
+Type *ASTCloner::named(Type *ty, const std::string &name) {
+  std::string spelled = Names ? Names->type(name) : name;
+  if (!Foreign && spelled == name)
+    return ty;
+  return Ctx.make<ClassType>(ty->getLocation(), in(spelled), nullptr);
+}
+
 Type *ASTCloner::cloneType(Type *ty) {
   if (!ty)
     return nullptr;
   if (auto *ct = dyn_cast<ClassType>(ty)) {
     auto it = Subst.find(ct->getName());
-    return it != Subst.end() ? it->second : ty;
+    return it != Subst.end() ? it->second : named(ty, ct->getName());
   }
+  if (auto *et = dyn_cast<EnumType>(ty))
+    return named(ty, et->getName());
+  if (auto *bt = dyn_cast<BuiltinType>(ty))
+    return Foreign ? Ctx.getBuiltinType(bt->getTypeKind()) : ty;
   if (auto *at = dyn_cast<ArrayType>(ty)) {
     Type *elem = cloneType(at->getElementType());
-    if (elem == at->getElementType())
+    if (elem == at->getElementType() && !Foreign)
       return ty;
     return Ctx.make<ArrayType>(at->getLocation(), elem);
   }
   if (auto *gt = dyn_cast<GenericType>(ty)) {
-    bool changed = false;
+    std::string name = Names ? Names->generic(gt->getName()) : gt->getName();
+    bool changed = Foreign || name != gt->getName();
     std::vector<Type *> args;
     args.reserve(gt->getNumArgs());
     for (auto *a : gt->getArgs()) {
@@ -191,17 +203,16 @@ Type *ASTCloner::cloneType(Type *ty) {
     }
     if (!changed)
       return ty;
-    return Ctx.make<GenericType>(gt->getLocation(), gt->getName(),
-                                 std::move(args));
+    return Ctx.make<GenericType>(gt->getLocation(), in(name), std::move(args));
   }
   if (auto *ot = dyn_cast<OptionalType>(ty)) {
     Type *inner = cloneType(ot->getInnerType());
-    if (inner == ot->getInnerType())
+    if (inner == ot->getInnerType() && !Foreign)
       return ty;
     return Ctx.make<OptionalType>(ot->getLocation(), inner);
   }
   if (auto *tt = dyn_cast<TupleType>(ty)) {
-    bool changed = false;
+    bool changed = Foreign;
     std::vector<Type *> elems;
     elems.reserve(tt->getArity());
     for (auto *el : tt->getElementTypes()) {
@@ -213,7 +224,7 @@ Type *ASTCloner::cloneType(Type *ty) {
       return ty;
     return Ctx.make<TupleType>(tt->getLocation(), std::move(elems));
   }
-  // Builtin and enum types are canonical singletons.
+  // Nothing else is written in a template.
   return ty;
 }
 
@@ -244,7 +255,7 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
                                 cloneExpr(b->getRHS()));
   }
   case ASTNode::NK_Identifier:
-    return Ctx.make<Identifier>(loc, cast<Identifier>(e)->getName());
+    return Ctx.make<Identifier>(loc, in(cast<Identifier>(e)->getName()));
   case ASTNode::NK_CallExpr: {
     auto *c = cast<CallExpr>(e);
     std::vector<Expr *> args;
@@ -253,8 +264,9 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
     std::vector<Type *> typeArgs;
     for (auto *t : c->getTypeArgs())
       typeArgs.push_back(cloneType(t));
-    return Ctx.make<CallExpr>(loc, c->getCalleeName(), std::move(args),
-                              std::move(typeArgs));
+    const std::string &callee = c->getCalleeName();
+    return Ctx.make<CallExpr>(loc, in(Names ? Names->callee(callee) : callee),
+                              std::move(args), std::move(typeArgs));
   }
   case ASTNode::NK_MethodCallExpr: {
     auto *m = cast<MethodCallExpr>(e);
@@ -262,7 +274,7 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
     for (auto *a : m->getArguments())
       args.push_back(cloneExpr(a));
     return Ctx.make<MethodCallExpr>(loc, cloneExpr(m->getReceiver()),
-                                    m->getMethodName(), std::move(args));
+                                    in(m->getMethodName()), std::move(args));
   }
   case ASTNode::NK_TernaryExpr: {
     auto *t = cast<TernaryExpr>(e);
@@ -273,7 +285,7 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
   case ASTNode::NK_MemberAccessExpr: {
     auto *m = cast<MemberAccessExpr>(e);
     return Ctx.make<MemberAccessExpr>(loc, cloneExpr(m->getReceiver()),
-                                      m->getFieldName());
+                                      in(m->getFieldName()));
   }
   case ASTNode::NK_ArrayLiteralExpr: {
     auto *a = cast<ArrayLiteralExpr>(e);
@@ -289,8 +301,9 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
   }
   case ASTNode::NK_EnumValueExpr: {
     auto *ev = cast<EnumValueExpr>(e);
-    return Ctx.make<EnumValueExpr>(loc, ev->getEnumName(),
-                                   ev->getVariantName());
+    const std::string &en = ev->getEnumName();
+    return Ctx.make<EnumValueExpr>(loc, in(Names ? Names->type(en) : en),
+                                   in(ev->getVariantName()));
   }
   case ASTNode::NK_TupleLiteralExpr: {
     auto *t = cast<TupleLiteralExpr>(e);
@@ -333,13 +346,13 @@ Stmt *ASTCloner::cloneStmt(Stmt *s) {
   case ASTNode::NK_AssignStmt: {
     auto *a = cast<AssignStmt>(s);
     auto *lhs = Ctx.make<Identifier>(a->getLHS()->getLocation(),
-                                     a->getLHS()->getName());
+                                     in(a->getLHS()->getName()));
     return Ctx.make<AssignStmt>(loc, lhs, cloneExpr(a->getValue()));
   }
   case ASTNode::NK_DeclStmt: {
     auto *d = cast<DeclStmt>(s);
     auto *vd = cast<VarDecl>(d->getDecl());
-    auto *nvd = Ctx.make<VarDecl>(vd->getLocation(), vd->getName(),
+    auto *nvd = Ctx.make<VarDecl>(vd->getLocation(), in(vd->getName()),
                                   cloneType(vd->getType()),
                                   cloneExpr(vd->getInitExpr()));
     nvd->setLet(vd->isLet());
@@ -366,7 +379,7 @@ Stmt *ASTCloner::cloneStmt(Stmt *s) {
   case ASTNode::NK_MemberAssignStmt: {
     auto *m = cast<MemberAssignStmt>(s);
     return Ctx.make<MemberAssignStmt>(loc, cloneExpr(m->getReceiver()),
-                                      m->getFieldName(),
+                                      in(m->getFieldName()),
                                       cloneExpr(m->getValue()));
   }
   case ASTNode::NK_MatchStmt: {
@@ -375,11 +388,12 @@ Stmt *ASTCloner::cloneStmt(Stmt *s) {
     for (auto *arm : m->getArms()) {
       auto *body = cloneCompound(arm->getBody());
       if (arm->isLiteral())
-        arms.push_back(Ctx.make<MatchArm>(arm->getLocation(), arm->getBinding(),
-                                          cloneExpr(arm->getLiteralPattern()),
-                                          body));
+        arms.push_back(
+            Ctx.make<MatchArm>(arm->getLocation(), in(arm->getBinding()),
+                               cloneExpr(arm->getLiteralPattern()), body));
       else
-        arms.push_back(Ctx.make<MatchArm>(arm->getLocation(), arm->getBinding(),
+        arms.push_back(Ctx.make<MatchArm>(arm->getLocation(),
+                                          in(arm->getBinding()),
                                           cloneType(arm->getArmType()), body));
       arms.back()->setMode(arm->getMode());
     }
@@ -397,7 +411,7 @@ Stmt *ASTCloner::cloneStmt(Stmt *s) {
     std::vector<DestructureStmt::Target> targets;
     targets.reserve(d->getNumTargets());
     for (const auto &t : d->getTargets())
-      targets.push_back({t.Name, cloneType(t.DeclType), t.Loc});
+      targets.push_back({&in(t.getName()), cloneType(t.DeclType), t.Loc});
     return Ctx.make<DestructureStmt>(loc, std::move(targets),
                                      cloneExpr(d->getValue()));
   }
@@ -412,9 +426,9 @@ FuncDecl *ASTCloner::cloneFuncDecl(FuncDecl *fn, const std::string &newName) {
   std::vector<Param> params;
   params.reserve(fn->getParams().size());
   for (auto &p : fn->getParams())
-    params.push_back(Param{p.Name, cloneType(p.ParamType), p.Mode});
+    params.push_back(Param{&in(p.getName()), cloneType(p.ParamType), p.Mode});
   auto *clone = Ctx.make<FuncDecl>(
-      fn->getLocation(), Ctx.intern(newName), std::move(params),
+      fn->getLocation(), in(newName), std::move(params),
       cloneType(fn->getReturnType()), cloneCompound(fn->getBody()));
   clone->setView(fn->isView());
   clone->setResultMode(fn->getResultMode());
@@ -425,14 +439,39 @@ ClassDecl *ASTCloner::cloneClassDecl(ClassDecl *cd,
                                      const std::string &newName) {
   std::vector<VarDecl *> fields;
   for (auto *f : cd->getFields())
-    fields.push_back(Ctx.make<VarDecl>(f->getLocation(), f->getName(),
+    fields.push_back(Ctx.make<VarDecl>(f->getLocation(), in(f->getName()),
                                        cloneType(f->getType()), nullptr));
   std::vector<FuncDecl *> methods;
   for (auto *m : cd->getMethods())
     methods.push_back(cloneFuncDecl(m, m->getName()));
-  return Ctx.make<ClassDecl>(cd->getLocation(), Ctx.intern(newName),
-                             cd->getSuperClassName(), std::move(fields),
-                             std::move(methods));
+  const std::string &super = cd->getSuperClassName();
+  return Ctx.make<ClassDecl>(
+      cd->getLocation(), in(newName),
+      in(Names && !super.empty() ? Names->type(super) : super),
+      std::move(fields), std::move(methods));
+}
+
+FuncDecl *ASTCloner::cloneTemplate(FuncDecl *fn) {
+  FuncDecl *copy = cloneFuncDecl(fn, fn->getName());
+  std::vector<const std::string *> params;
+  for (auto *p : fn->getTypeParams())
+    params.push_back(&in(*p));
+  auto *out = Ctx.make<FuncDecl>(copy->getLocation(), copy->getName(),
+                                 copy->getParams(), copy->getReturnType(),
+                                 copy->getBody(), std::move(params));
+  out->setView(copy->isView());
+  out->setResultMode(copy->getResultMode());
+  return out;
+}
+
+ClassDecl *ASTCloner::cloneTemplate(ClassDecl *cd) {
+  ClassDecl *copy = cloneClassDecl(cd, cd->getName());
+  std::vector<const std::string *> params;
+  for (auto *p : cd->getTypeParams())
+    params.push_back(&in(*p));
+  return Ctx.make<ClassDecl>(copy->getLocation(), copy->getName(),
+                             copy->getSuperClassName(), copy->getFields(),
+                             copy->getMethods(), std::move(params));
 }
 
 } // namespace ast
