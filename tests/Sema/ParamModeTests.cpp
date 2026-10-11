@@ -87,7 +87,7 @@ TEST(ParamMode, ModesApplyToEveryType) {
   auto r = semaCheck(R"(class Counter {
   n: int;
   fn __init__(s: view Str) { self.n = s.len(); }
-  fn put(c: view Counter) -> int { return c.n; }
+  view fn put(c: view Counter) -> int { return c.n; }
 }
 fn f(o: view int?, xs: inout int[], t: view (int, int), b: view Obj) { }
 fn reset(c: inout Counter, s: inout Str) { c = Counter(s); s = "new"; }
@@ -300,6 +300,70 @@ fn main() -> int {
                    "('a' and 'b')",
                    ":19:15: error: 'b.p.x' is passed to two 'inout' "
                    "parameters ('a' and 'b')"});
+}
+
+// What an `inout` argument names shares no storage with anything else the
+// call borrows: a `view` argument, another `inout` one, or the receiver of
+// a method that may change it or of a `view fn`.  A variable and a field
+// chain on it share storage; two fields of one variable don't.
+TEST(ParamMode, InoutOverlapsNothingElse) {
+  auto r = semaCheck(R"(class P {
+  x: int; y: int;
+  fn __init__() { self.x = 0; self.y = 0; }
+  fn take(m: inout int) { self.y = m; }
+  view fn look(m: inout int) -> int { return self.x; }
+  fn merge(o: view P) { self.x = o.x; }
+  fn own() { self.take(self.x); }
+}
+class Q { p: P; n: int; fn __init__() { self.p = P(); self.n = 0; } }
+fn both(a: view int, b: inout int) { }
+fn whole(a: view P, b: inout int) { }
+fn two(a: inout P, b: inout int) { }
+fn rev(a: inout int, b: view P) { }
+fn elem(a: view int, b: inout int[]) { }
+fn main() -> int {
+  k = 1;
+  p = P();
+  q = Q();
+  xs = [1];
+  both(k, k);
+  whole(p, p.x);
+  two(p, p.x);
+  rev(p.x, p);
+  p.take(p.x);
+  p.look(p.x);
+  p.merge(p);
+  elem(xs[0], xs);
+  q.p.take(q.p.y);
+  both(p.x, p.y);
+  q.p.take(q.n);
+  return 0;
+}
+)");
+  EXPECT_EQ(r.ErrorCount, 10u) << r.Diagnostics;
+  expectErrors(
+      r, {":7:24: error: 'self.x' is part of 'self', the receiver of 'take' "
+          "(not a 'view fn'); it cannot also be passed to 'inout' parameter "
+          "'m'",
+          ":20:11: error: 'k' is passed to 'view' parameter 'a'; it cannot "
+          "also be passed to 'inout' parameter 'b'",
+          ":21:12: error: 'p.x' is part of 'p', passed to 'view' parameter "
+          "'a'; it cannot also be passed to 'inout' parameter 'b'",
+          ":22:10: error: 'p.x' is part of 'p', passed to 'inout' parameter "
+          "'a'; it cannot also be passed to 'inout' parameter 'b'",
+          ":23:12: error: 'p' contains 'p.x', passed to 'inout' parameter "
+          "'a'; it cannot also be passed to 'view' parameter 'b'",
+          ":24:10: error: 'p.x' is part of 'p', the receiver of 'take' (not a "
+          "'view fn'); it cannot also be passed to 'inout' parameter 'm'",
+          ":25:10: error: 'p.x' is part of 'p', the receiver of 'view fn "
+          "look'; it cannot also be passed to 'inout' parameter 'm'",
+          ":26:11: error: 'p' is the receiver of 'merge' (not a 'view fn'); "
+          "it cannot also be passed to 'view' parameter 'o'",
+          ":27:15: error: 'xs' is passed to 'view' parameter 'a'; it cannot "
+          "also be passed to 'inout' parameter 'b'",
+          ":28:12: error: 'q.p.y' is part of 'q.p', the receiver of 'take' "
+          "(not a 'view fn'); it cannot also be passed to 'inout' parameter "
+          "'m'"});
 }
 
 // Modes travel with a module's exports: an override in another module keeps

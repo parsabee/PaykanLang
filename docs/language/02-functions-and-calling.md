@@ -229,8 +229,11 @@ seen 1
 
 ### Exclusivity
 
-One call cannot pass the same storage to two `inout` parameters: the same variable, or
-the same chain of fields on the same variable (`a.x` and `a.x`, `self.n` and `self.n`).
+What one call passes to an `inout` parameter shares no storage with anything else the
+call borrows: another `inout` argument, a `view` argument, or the receiver, when the
+method may change it or is a `view fn`. A variable and a chain of fields on it share
+storage (`p` and `p.x`, `self` and `self.n`); two fields of one variable don't (`p.x` and
+`p.y`), and an element shares its array's.
 
 ```pkn
 fn swap(a: inout int, b: inout int) {
@@ -252,6 +255,19 @@ Error:
 error: 'k' is passed to two 'inout' parameters ('a' and 'b')
 ```
 
+The other overlaps are errors the same way:
+
+| Call | Error |
+|---|---|
+| `both(k, k)` with `fn both(a: view int, b: inout int)` | `'k' is passed to 'view' parameter 'a'; it cannot also be passed to 'inout' parameter 'b'` |
+| `two(p, p.x)` with `fn two(a: inout P, b: inout int)` | `'p.x' is part of 'p', passed to 'inout' parameter 'a'; it cannot also be passed to 'inout' parameter 'b'` |
+| `p.take(p.x)`, `take` a method that may change `self` | `'p.x' is part of 'p', the receiver of 'take' (not a 'view fn'); it cannot also be passed to 'inout' parameter 'm'` |
+| `p.look(p.x)`, `look` a `view fn` | `'p.x' is part of 'p', the receiver of 'view fn look'; it cannot also be passed to 'inout' parameter 'm'` |
+| `p.merge(p)`, `merge` a method that may change `self` and takes `o: view P` | `'p' is the receiver of 'merge' (not a 'view fn'); it cannot also be passed to 'view' parameter 'o'` |
+
+A plain parameter is a copy, so it may name the same storage as an `inout` one:
+`three(k, j, k)` with `fn three(a: inout int, b: inout int, c: int)` is fine.
+
 The check is conservative: it compares how the arguments are written. Two different
 paths that reach the same object at run time (`a.n` and `b.n` after `b = a`) are
 accepted, and the callee then sees one storage through both parameters.
@@ -268,9 +284,11 @@ accepted, and the callee then sees one storage through both parameters.
 - Functions are not values in Paykan (only calls name them), so a mode is always known
   where the function is called.
 
-`view` and `inout` are reserved words and may appear only before a parameter's type.
-Written before the name, as in `inout n: int`, they are a syntax error that shows the
-fix: `'inout' goes after the colon, before the type: write 'n: inout int'`.
+`view` and `inout` are reserved words. They go where a type goes: a parameter's, a
+[local borrow's](01-language-basics.md#local-borrows), a `match` arm's or a result's
+([Borrowed results](#borrowed-results)). Written before the name, as in `inout n: int`,
+they are a syntax error that shows the fix: `'inout' goes after the colon, before the
+type: write 'n: inout int'`.
 
 ---
 

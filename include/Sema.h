@@ -749,12 +749,19 @@ private:
   /// The arguments @p args of a call of @p callee whose parameters have the
   /// modes @p modes and the types @p paramTys: an `inout` parameter takes a
   /// variable or a field of exactly its type, never a `view` parameter or a
-  /// `let` local, and no two take the same one.  Arguments of the wrong
-  /// type were reported already.
+  /// `let` local, and what it takes shares no storage with another `inout`
+  /// or `view` argument, nor with the @p receiver of a method call of
+  /// @p method.  Arguments of the wrong type were reported already.
   bool checkInoutArgs(const ast::ParamModes &modes,
                       const std::vector<ast::Type *> &paramTys,
                       const std::vector<ast::Expr *> &args,
-                      const std::string &callee);
+                      const std::string &callee,
+                      const ast::Expr *receiver = nullptr,
+                      const ast::MethodDecl *method = nullptr);
+  /// The places passing @p e borrows, as `checkInoutArgs` compares them: a
+  /// variable or a chain of fields on one; an element borrows its array, a
+  /// conditional both branches, a borrowed result what its call borrowed.
+  void borrowedPaths(const ast::Expr *e, std::vector<std::string> &out);
 
   /// Register classes: names, hierarchy, field types, method signatures, and
   /// constructors (phases 1–4b).  Method bodies are deferred to

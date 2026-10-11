@@ -1105,7 +1105,7 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     }
   }
   S.checkInoutArgs(method->getParamModes(), paramTys, node->getArguments(),
-                   node->getMethodName());
+                   node->getMethodName(), node->getReceiver(), method);
   // A builtin method reads its arguments, but `push` keeps one; `equals`,
   // like `==`, only compares.
   if (ct->isBuiltin() || ast::isa<ast::ArrayType>(recvTy)) {
