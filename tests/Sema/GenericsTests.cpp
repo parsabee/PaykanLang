@@ -480,155 +480,138 @@ SemaResult semaCheckFile(const std::string &path) {
 }
 
 const char *kGenLib = R"(
-class Box<T> { v: T; fn __init__(v: T) { self.v = v; } fn get() -> T { return self.v; } }
+class Box<T> { v: T; fn __init__(v: T) { self.v = v; } view fn get() -> view T { return self.v; } }
 fn mk() -> Box<int> { return Box<int>(41); }
 fn first<T>(xs: T[]) -> T { return xs[0]; }
 )";
 } // namespace
 
-TEST(Generics, ImportedTemplatesAreRejected) {
+// Another module's generic classes and functions are instantiated in the
+// importer (docs/language/11-generics.md), in every position a local
+// template may be used.
+TEST(Generics, ImportedTemplates) {
   auto dir = paykan::test::tempDir() / "pkn_sema_generics_imp";
   std::filesystem::remove_all(dir);
   writeProjectFile(dir, "lib/gen.pkn", kGenLib);
-
-  // Type position.
-  auto p1 = writeProjectFile(dir, "t1.pkn", R"(
-import lib::gen;
-fn main() -> int { b: gen::Box<int> = gen::mk(); return 0; }
-)");
-  auto r1 = semaCheckFile(p1);
-  EXPECT_FALSE(r1.Ok);
-  EXPECT_TRUE(has(r1.Diagnostics, "generic types cannot be imported yet"))
-      << r1.Diagnostics;
-
-  // Constructor call.
-  auto p2 = writeProjectFile(dir, "t2.pkn", R"(
-import lib::gen;
-fn main() -> int { b = gen::Box<int>(1); return 0; }
-)");
-  auto r2 = semaCheckFile(p2);
-  EXPECT_FALSE(r2.Ok);
-  EXPECT_TRUE(has(r2.Diagnostics, "cannot be imported yet")) << r2.Diagnostics;
-
-  // Generic function call.
-  auto p3 = writeProjectFile(dir, "t3.pkn", R"(
-import lib::gen;
-fn main() -> int { x: int = gen::first<int>([1]); return 0; }
-)");
-  auto r3 = semaCheckFile(p3);
-  EXPECT_FALSE(r3.Ok);
-  EXPECT_TRUE(has(r3.Diagnostics, "cannot be imported yet")) << r3.Diagnostics;
-
+  const std::vector<std::pair<std::string, std::string>> cases = {
+      // Type position, holding the module's own Box<int>.
+      {"t1", "import lib::gen;\n"
+             "fn main() -> int { b: gen::Box<int> = gen::mk(); "
+             "return b.get(); }"},
+      // Constructor call, explicit and inferred.
+      {"t2", "import lib::gen;\n"
+             "fn main() -> int { b = gen::Box<int>(1); c = gen::Box(\"s\"); "
+             "return b.get(); }"},
+      // Generic function, explicit and inferred.
+      {"t3", "import lib::gen;\n"
+             "fn main() -> int { x: int = gen::first<int>([1]); "
+             "return x + gen::first([2]); }"},
+      // Aliased import and the full module path.
+      {"t4", "import lib::gen as g;\n"
+             "fn main() -> int { b: lib::gen::Box<int> = g::Box<int>(1); "
+             "return b.get(); }"},
+      // Inside this module's own templates.
+      {"t5", "import lib::gen;\n"
+             "fn wrap<T>(x: T) -> gen::Box<T> { return gen::Box<T>(x); }\n"
+             "fn head<T>(xs: T[]) -> T { return gen::first<T>(xs); }\n"
+             "class W<T> { b: gen::Box<T>; fn __init__(x: T) { "
+             "self.b = gen::Box<T>(x); } }\n"
+             "fn main() -> int { w = W<int>(1); s = W<Str>(\"a\"); "
+             "t: Str = head([\"t\"]); return wrap(2).get() + head([1]); }"},
+  };
+  for (const auto &[name, src] : cases) {
+    auto r = semaCheckFile(writeProjectFile(dir, name + ".pkn", src));
+    EXPECT_TRUE(r.Ok) << name << ":\n" << r.Diagnostics;
+    EXPECT_EQ(r.Diagnostics, "") << name;
+  }
   std::filesystem::remove_all(dir);
 }
 
-namespace {
-size_t countOf(const std::string &haystack, const std::string &needle) {
-  size_t n = 0;
-  for (size_t pos = haystack.find(needle); pos != std::string::npos;
-       pos = haystack.find(needle, pos + needle.size()))
-    ++n;
-  return n;
-}
-
-// Checks @p body (the importer's source after `import geometry::shapes`
-// header @p importLine) and expects exactly one error, the import rejection.
-void expectSingleImportError(const std::filesystem::path &dir,
-                             const std::string &file,
-                             const std::string &importLine,
-                             const std::string &body) {
-  auto p = writeProjectFile(dir, file, importLine + "\n" + body);
-  auto r = semaCheckFile(p);
-  EXPECT_FALSE(r.Ok) << file;
-  EXPECT_EQ(r.ErrorCount, 1u) << file << ":\n" << r.Diagnostics;
-  EXPECT_EQ(countOf(r.Diagnostics, "cannot be imported yet"), 1u)
-      << file << ":\n"
-      << r.Diagnostics;
-  EXPECT_EQ(countOf(r.Diagnostics, "error:"), 1u) << file << ":\n"
-                                                  << r.Diagnostics;
-}
-
-const char *kShapes = R"(
-class Box<T> { v: T; fn __init__(v: T) { self.v = v; } fn get() -> T { return self.v; } }
-fn first<T>(xs: T[]) -> T { return xs[0]; }
-)";
-} // namespace
-
-// #112: every use of another module's template is reported exactly once, and
-// the failed expression's follow-ons (`b.get()`) stay silent.
-TEST(Generics, ImportedTemplateReportedOncePerUse) {
-  auto dir = paykan::test::tempDir() / "pkn_sema_generics_imp_once";
+// A template's body names what its module declares and imports, whatever
+// the importer binds those names to.
+TEST(Generics, ImportedTemplateBodiesUseTheirModule) {
+  auto dir = paykan::test::tempDir() / "pkn_sema_generics_imp_body";
   std::filesystem::remove_all(dir);
-  writeProjectFile(dir, "geometry/shapes.pkn", kShapes);
-  const std::string imp = "import geometry::shapes;";
+  writeProjectFile(dir, "lib/util.pkn", "fn ten() -> int { return 10; }\n");
+  writeProjectFile(dir, "other.pkn", "fn ten() -> Str { return \"x\"; }\n");
+  writeProjectFile(dir, "lib/gen.pkn", R"(
+import lib::util as u;
+class Inner { n: int; fn __init__() { self.n = __helper(); } }
+class Box<T> {
+  v: T;
+  fn __init__(v: T) { self.v = v; }
+  view fn total() -> int { i = Inner(); return i.n + u::ten(); }
+}
+fn __helper() -> int { return 1; }
+fn sum<T>(b: Box<T>) -> int { return b.total() + __helper(); }
+)");
+  // `u` and `__helper` are the importer's own here.
+  auto r = semaCheckFile(writeProjectFile(dir, "main.pkn", R"(
+import lib::gen;
+import other as u;
+fn __helper() -> Str { return u::ten(); }
+fn main() -> int { b = gen::Box(3); s: Str = __helper(); return gen::sum(b); }
+)"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics, "");
+  std::filesystem::remove_all(dir);
+}
 
-  // Constructor call, then a use of the poisoned variable.
-  expectSingleImportError(dir, "ctor.pkn", imp, R"(
-fn main() -> int {
-  b = shapes::Box<int>(7);
-  println(Str(b.get()));
-  return 0;
-}
+// One class per instantiation per program: another module's Box<int> (one
+// it instantiated, or the template module's own) is the importer's
+// Box<int>, and type arguments are inferred through it.
+TEST(Generics, ImportedInstantiationsAreOneClass) {
+  auto dir = paykan::test::tempDir() / "pkn_sema_generics_imp_one";
+  std::filesystem::remove_all(dir);
+  writeProjectFile(dir, "lib/gen.pkn", R"(
+class Box<T> { v: T; fn __init__(v: T) { self.v = v; } view fn get() -> view T { return self.v; } }
+fn own() -> Box<int> { return Box<int>(1); }
+fn none<T>(b: Box<T>) -> T[] { xs: T[] = []; return xs; }
 )");
-  // Type annotation.
-  expectSingleImportError(dir, "ann.pkn", imp, R"(
+  writeProjectFile(dir, "a.pkn",
+                   "import lib::gen;\n"
+                   "fn mk() -> gen::Box<Str> { "
+                   "return gen::Box(\"a\"); }\n");
+  auto r = semaCheckFile(writeProjectFile(dir, "main.pkn", R"(
+import lib::gen;
+import a;
 fn main() -> int {
-  x: shapes::Box<int> = None;
-  println(Str(x.get()));
-  return 0;
+  s: gen::Box<Str> = a::mk();
+  t: Str[] = gen::none(a::mk());
+  n: int[] = gen::none(gen::own());
+  b: gen::Box<int> = gen::own();
+  return b.get();
 }
-)");
-  // Generic function with explicit type arguments.
-  expectSingleImportError(dir, "fn.pkn", imp, R"(
-fn main() -> int {
-  xs: int[] = [1, 2];
-  y = shapes::first<int>(xs);
-  println(Str(y + 1));
-  return 0;
+)"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics, "");
+  std::filesystem::remove_all(dir);
 }
-)");
-  // Aliased import.
-  expectSingleImportError(dir, "alias.pkn", "import geometry::shapes as g;", R"(
-fn main() -> int {
-  b = g::Box<int>(7);
-  println(Str(b.get()));
-  return 0;
-}
-)");
 
-  // A use inside a generic body is resolved again for every instantiation;
-  // it is still reported once.
-  expectSingleImportError(dir, "gen_ctor.pkn", imp, R"(
-fn g<T>(x: T) -> int { b = shapes::Box<int>(7); return b.get(); }
-fn main() -> int { return g<int>(1) + g<Str>("a"); }
+// An error in another module's template is reported in that module's file,
+// with a note at the request (in that file too, here), and names no hidden
+// qualifier.
+TEST(Generics, ImportedTemplateErrorsPointIntoTheirModule) {
+  auto dir = paykan::test::tempDir() / "pkn_sema_generics_imp_err";
+  std::filesystem::remove_all(dir);
+  writeProjectFile(dir, "lib/show.pkn", R"(
+fn show<T>(x: T) -> Str { return x.label(); }
+fn twice<T>(x: T) -> Str { return show(x) + show(x); }
 )");
-  expectSingleImportError(dir, "gen_fn.pkn", imp, R"(
-fn g<T>(x: T) -> int { y = shapes::first<T>([x]); return 0; }
-fn main() -> int { return g<int>(1) + g<Str>("a"); }
-)");
-  expectSingleImportError(dir, "gen_ann.pkn", imp, R"(
-fn g<T>(v: T) -> int { x: shapes::Box<T> = None; return 0; }
-fn main() -> int { return g<int>(1) + g<Str>("a"); }
-)");
-  expectSingleImportError(dir, "gen_alias.pkn", "import geometry::shapes as g;",
-                          R"(
-class W<T> { fn m() -> int { b = g::Box<int>(1); return b.get(); } }
-fn main() -> int { a = W<int>(); c = W<Str>(); return a.m() + c.m(); }
-)");
-
-  // Two uses are two errors.
-  auto p = writeProjectFile(dir, "two.pkn", imp + R"(
-fn main() -> int {
-  a = shapes::Box<int>(1);
-  b = shapes::Box<int>(2);
-  return 0;
-}
-)");
-  auto r = semaCheckFile(p);
-  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
-  EXPECT_EQ(countOf(r.Diagnostics, "cannot be imported yet"), 2u)
+  auto r = semaCheckFile(writeProjectFile(dir, "main.pkn", R"(
+import lib::show as s;
+fn main() -> int { a = s::twice(1); b = s::twice(2); return 0; }
+)"));
+  EXPECT_FALSE(r.Ok);
+  // The cached instantiation is checked once.
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_TRUE(has(r.Diagnostics, "lib/show.pkn:2:34: error: method call on "
+                                 "non-class type 'int'"))
       << r.Diagnostics;
-
+  EXPECT_TRUE(has(r.Diagnostics, "lib/show.pkn:3:35: note: in instantiation "
+                                 "of 'lib::show::show<int>' requested here"))
+      << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find('$'), std::string::npos) << r.Diagnostics;
   std::filesystem::remove_all(dir);
 }
 
@@ -697,6 +680,23 @@ fn main() -> int { b = Box<int>(1); return 0; }
   EXPECT_TRUE(has(r2.Diagnostics, "instantiation 'Box<int>' conflicts with an "
                                   "imported class of the same name"))
       << r2.Diagnostics;
+
+  // So would its own `Box<Str>` and the imported template's, either way
+  // round.
+  for (const char *body : {"a = Box<Str>(\"x\"); b = gen::Box<Str>(\"y\");",
+                           "b = gen::Box<Str>(\"y\"); a = Box<Str>(\"x\");"}) {
+    auto r3 = semaCheckFile(writeProjectFile(
+        dir, "clash2.pkn",
+        std::string("import lib::gen;\n"
+                    "class Box<T> { v: T; fn __init__(v: T) { self.v = v; } "
+                    "}\nfn main() -> int { ") +
+            body + " return 0; }\n"));
+    EXPECT_FALSE(r3.Ok) << body;
+    EXPECT_EQ(r3.ErrorCount, 1u) << r3.Diagnostics;
+    EXPECT_TRUE(has(r3.Diagnostics, "conflicts with another template's "
+                                    "instantiation of the same name"))
+        << r3.Diagnostics;
+  }
   std::filesystem::remove_all(dir);
 }
 

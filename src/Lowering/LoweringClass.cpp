@@ -205,6 +205,7 @@ pir::Class *ModuleLowering::getOrCreateClass(ast::ClassType *ct) {
   if (origin != PL.ClassOrigins.end() && origin->second != Mod.Name) {
     cls.IsExtern = true;
     cls.Module = origin->second;
+    noteExternUse(cls.Name);
   }
   ClassByName[cls.Name] = &cls;
   return &cls;

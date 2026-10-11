@@ -68,6 +68,12 @@ struct ProgramLowering {
   std::unordered_set<std::string> UsedNames;
   /// Class name -> name of the module whose ClassDecl defines it.
   std::unordered_map<std::string, std::string> ClassOrigins;
+  /// An instantiation of another module's generic function
+  /// (`$<module>::f<int>`) -> name of the module that emits it.
+  std::unordered_map<std::string, std::string> FuncOrigins;
+  /// The instantiations of other modules' templates (classes and
+  /// functions), each emitted by the first module lowered that needs it.
+  std::unordered_set<std::string> ForeignInstantiations;
   /// Every SemaContext reachable from Top, keyed by canonical module name.
   std::unordered_map<std::string, const sema::SemaContext *> Contexts;
   bool Indexed = false;
@@ -91,8 +97,10 @@ struct ProgramLowering {
 /// already-lowered modules are shared across the program.
 class ModuleLowering : public ast::ASTVisitor<ModuleLowering, Val> {
 public:
+  /// @p canonical is the module's canonical name, empty for the main
+  /// module.
   ModuleLowering(ProgramLowering &program, const sema::SemaContext &semaCtx,
-                 std::string moduleName);
+                 std::string moduleName, std::string canonical = "");
 
   /// Lower @p tu into Module.  Returns false after an internal error.
   bool run(ast::TranslationUnit *tu);
@@ -108,6 +116,7 @@ public:
 
 private:
   ProgramLowering &PL;
+  std::string Canonical;
   ast::ASTContext &ASTCtx;
   const sema::SemaContext &SemaCtx;
   std::ostream &Errs;
@@ -121,6 +130,11 @@ private:
   };
   std::unordered_map<std::string, ImportedFn> ImportedFunctions;
   void processImports(ast::TranslationUnit *tu);
+  /// The instantiations of other modules' templates this module emits:
+  /// those of SemaContext::ForeignClasses / ForeignFunctions that no module
+  /// lowered before it emits (each is emitted once per program).
+  std::vector<ast::ClassDecl *> ForeignClasses;
+  std::vector<ast::FuncDecl *> ForeignFuncs;
 
   pir::Module Mod;
   /// Functions in declaration order with stable addresses (the module vector
@@ -246,6 +260,11 @@ private:
   pir::Function *declareExternFrom(const pir::Function &fn,
                                    const std::string &modulePath,
                                    const std::string &localName);
+  /// This module uses @p name, declared extern: when it is an instantiation
+  /// of another module's template, the module that emits it is this
+  /// program's choice, so this module is not cached (docs/design/pkm.md
+  /// §4.8).
+  void noteExternUse(const std::string &name);
 
   /// Call a runtime function by its C symbol.
   Val callRuntime(const std::string &symbol, const std::vector<Val> &args,
