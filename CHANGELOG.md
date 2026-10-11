@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Runtime functions for the standard library's `memory::Buffer<T>`: `PaykanBuffer_new`,
+  `_len`, `_get`, `_set`, `_reserve`, `_grow` and `_shrink` (`Runtime.h`, "Buffer"),
+  generic native functions over a `PaykanArray` whose every slot is live.  New slots are
+  0, or None; the buffer retains the references it holds and releases them when they are
+  overwritten, shrunk away or destroyed; growing at least doubles the allocation and
+  shrinking to a quarter of it halves it.  An index out of bounds, a negative count,
+  shrinking by more than the length and reading a never-set slot of a non-optional
+  reference type panic (`buffer index 3 out of bounds (len=3)`).
 - Generic native functions (docs/language/02-functions-and-calling.md, "Generic native
   functions"): `native fn pick<T>(first: bool, a: T, b: T) -> T = "c_pick";`.  Each
   instance calls the same C function with the kind of each type argument first

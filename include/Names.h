@@ -133,6 +133,15 @@ inline constexpr const char *kPaykanTupleToString = "PaykanTuple_toString";
 inline constexpr const char *kPaykanTupleEquals = "PaykanTuple_equals";
 inline constexpr const char *kPaykanTupleVtable = "PaykanTuple_vtable";
 
+// Buffer: called only by the standard library's native functions
+inline constexpr const char *kPaykanBufferNew = "PaykanBuffer_new";
+inline constexpr const char *kPaykanBufferLen = "PaykanBuffer_len";
+inline constexpr const char *kPaykanBufferGet = "PaykanBuffer_get";
+inline constexpr const char *kPaykanBufferSet = "PaykanBuffer_set";
+inline constexpr const char *kPaykanBufferReserve = "PaykanBuffer_reserve";
+inline constexpr const char *kPaykanBufferGrow = "PaykanBuffer_grow";
+inline constexpr const char *kPaykanBufferShrink = "PaykanBuffer_shrink";
+
 // File
 inline constexpr const char *kPaykanFileNew = "PaykanFile_new";
 inline constexpr const char *kPaykanFileOpen = "PaykanFile_open";

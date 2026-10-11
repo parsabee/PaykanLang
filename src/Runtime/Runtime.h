@@ -549,6 +549,24 @@ typedef enum PaykanTypeKind {
   PAYKAN_KIND_OPTIONAL = 5, // PaykanShared*, NULL for None
 } PaykanTypeKind;
 
+// -- Buffer
+//
+// The storage of the standard library's memory::Buffer<T>: generic native
+// functions (above) over a PaykanArray whose every slot is live.  The buffer
+// is its box `buf` (a `view`), or for a function that changes it the address
+// of the slot holding the box (an `inout`, `void *` as the backends declare
+// it).  len() counts the slots; a new slot is 0, or None.  An index out of
+// bounds, a negative count, shrinking by more than len() and reading a
+// never-set slot of a non-optional reference type panic.
+
+int64_t PaykanBuffer_new(int64_t kind, int64_t n); // owned box, n slots
+int64_t PaykanBuffer_len(int64_t kind, int64_t buf);
+int64_t PaykanBuffer_get(int64_t kind, int64_t buf, int64_t i);
+void PaykanBuffer_set(int64_t kind, void *buf, int64_t i, int64_t v);
+void PaykanBuffer_reserve(int64_t kind, void *buf, int64_t n); // >= n slots
+void PaykanBuffer_grow(int64_t kind, void *buf, int64_t by);   // by more
+void PaykanBuffer_shrink(int64_t kind, void *buf, int64_t by); // by fewer
+
 // -- Runtime panics
 
 /// Print a diagnostic and abort: the lowering's trap target for integer `/`
