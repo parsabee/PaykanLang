@@ -21,9 +21,9 @@ using pir::Type;
 
 Val ModuleLowering::ExprEmitter::visit(ast::Expr *node) {
   Val v = ast::ExprVisitor<ExprEmitter, Val>::visit(node);
-  if (!v || !isPrimitiveBoxing(node))
+  if (!v || !isOptionalWrap(node))
     return v;
-  return L.emitPrimitiveBox(v, node->getCoercedType());
+  return L.emitSome(v, node->getCoercedType());
 }
 
 // -- Literals
@@ -45,7 +45,10 @@ Val ModuleLowering::ExprEmitter::visitCharLiteral(ast::CharLiteral *node) {
   return Val::chr(node->getValue());
 }
 
-Val ModuleLowering::ExprEmitter::visitNoneLiteral(ast::NoneLiteral *) {
+Val ModuleLowering::ExprEmitter::visitNoneLiteral(ast::NoneLiteral *node) {
+  // `None` of an optional value type: the absent value.
+  if (ast::isValueOptional(node->getResolvedType()))
+    return L.B.none(L.toPIRType(node->getResolvedType()), "none");
   // The immortal None singleton, as a raw object.
   return L.externObject(kPaykanObjectNone);
 }
@@ -252,6 +255,12 @@ Val ModuleLowering::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
 
   // Object element: the slot stores a box as bits.
   Val shared = L.B.cast(raw, Type::Box, "elem.shared");
+  // An optional value, kept in the slot in its boxed form.
+  if (ast::isValueOptional(elemTy)) {
+    Val v = L.emitOptionalFromBox(shared, elemTy);
+    L.releaseIfOwned(recvOwned);
+    return v;
+  }
   // A temporary array (`mk()[0]`) dies with this expression: retain the
   // element and hand the consumer the +1 box.
   if (L.exprAlreadyShared(node)) {
@@ -505,6 +514,13 @@ Val ModuleLowering::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
     Val v = visit(argExpr);
     if (!v)
       return Val();
+    // An optional value printed: its text, "None" or the value's.
+    if (pir::isOptional(v.Ty)) {
+      v = L.emitOptionalToString(v);
+      ownedArgs.push_back(ExprValue::owned(v));
+      args.push_back(v);
+      continue;
+    }
     ExprValue ev = L.classifyExpr(argExpr, v);
     if (ev.isOwned())
       ownedArgs.push_back(ev);
@@ -536,6 +552,43 @@ bool ModuleLowering::isParseConversion(const std::string &callee) {
   return callee == kConvIntStr || callee == kConvFloatStr ||
          callee == kConvBoolStr || callee == kConvIntBoxStr ||
          callee == kConvFloatBoxStr || callee == kConvBoolBoxStr;
+}
+
+// `int<Str>(s)`, `float<Str>(s)`, `bool<Str>(s)`: the runtime parses the
+// borrowed string into a local and says whether it is valid; the result is
+// that value as the present `int?` & co., or None.
+Val ModuleLowering::ExprEmitter::emitParse(ast::CallExpr *node) {
+  const std::string &name = node->getCalleeName();
+  const char *parse = nullptr;
+  Type payload = Type::I64;
+  if (name == kConvIntStr) {
+    parse = kPaykanStringParseInt;
+  } else if (name == kConvFloatStr) {
+    parse = kPaykanStringParseFloat;
+    payload = Type::F64;
+  } else if (name == kConvBoolStr) {
+    parse = kPaykanStringParseBool;
+  }
+  if (!parse || node->getNumArguments() != 1)
+    return Val();
+  ast::Expr *argExpr = node->getArguments()[0];
+  Val str = visit(argExpr);
+  if (!str)
+    return Val();
+  ExprValue ev = L.classifyExpr(argExpr, str);
+  if (L.exprAlreadyShared(argExpr) && str.Ty == Type::Box)
+    str = L.emitSharedGet(str, "parse.str");
+  pir::LocalId out = L.B.addLocal("parsed", payload);
+  Val ok = L.callRuntime(parse, {str, L.B.localAddr(out, "parsed.addr")},
+                         "parse.ok");
+  L.releaseIfOwned(ev);
+  Val v = L.B.load(out, "parsed");
+  if (name == kConvBoolStr)
+    v = L.B.cmp(CmpPred::Ne, v, Val::i64(0), "parsed.bool");
+  Val some = L.B.some(v, "some");
+  Val none = L.B.none(some.Ty, "none");
+  Val valid = L.B.cmp(CmpPred::Ne, ok, Val::i64(0), "parse.valid");
+  return L.B.select(valid, some, none, "parsed.opt");
 }
 
 bool ModuleLowering::isStrConversion(const std::string &callee) {
@@ -622,6 +675,8 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
   const bool wantAddress = std::exchange(WantAddress, false);
   if (Val conv = emitConversion(node))
     return conv;
+  if (Val parsed = emitParse(node))
+    return parsed;
 
   if (L.IdentityCtors.count(node->getCalleeName()) &&
       node->getNumArguments() == 1)
@@ -748,6 +803,13 @@ Val ModuleLowering::ExprEmitter::emitArrayPush(ast::MethodCallExpr *node,
 
 Val ModuleLowering::ExprEmitter::emitArrayPop(const Val &recv,
                                               ast::Type *elemTy) {
+  if (ast::isValueOptional(elemTy)) {
+    // The slot's box (its boxed form) is handed over: read and release it.
+    Val box = L.callRuntime(kPaykanArrayPopObj, {recv}, "mcall");
+    Val v = L.emitOptionalFromBox(box, elemTy);
+    L.emitRelease(box);
+    return v;
+  }
   if (L.isObjectElementType(elemTy))
     return L.callRuntime(kPaykanArrayPopObj, {recv}, "mcall");
   Val raw = L.callRuntime(kPaykanArrayPop, {recv}, "mcall");
@@ -1063,6 +1125,12 @@ Val ModuleLowering::ExprEmitter::visitTupleIndexExpr(
   // Reference element: the slot's box, borrowed from the tuple; retained
   // first when the tuple was a temporary.
   Val box = L.B.cast(bits, Type::Box, "elem.shared");
+  // An optional value, kept in the slot in its boxed form.
+  if (ast::isValueOptional(elemTy)) {
+    Val v = L.emitOptionalFromBox(box, elemTy);
+    L.releaseIfOwned(recvOwned);
+    return v;
+  }
   if (recvOwned.isOwned()) {
     L.emitRetain(box);
     L.releaseIfOwned(recvOwned);
@@ -1090,7 +1158,10 @@ Val ModuleLowering::visitDestructureStmt(ast::DestructureStmt *node) {
     Val bits = callRuntime(
         kPaykanTupleGet, {raw, Val::i64(static_cast<int64_t>(i))}, "elem.raw");
     Val v;
-    if (isObjectElementType(elemTy)) {
+    if (ast::isValueOptional(elemTy)) {
+      // An optional value, kept in the slot in its boxed form.
+      v = emitOptionalFromBox(B.cast(bits, Type::Box, "elem.shared"), elemTy);
+    } else if (isObjectElementType(elemTy)) {
       // The binding becomes an owner of the element: +1 on the slot's box.
       v = B.cast(bits, Type::Box, "elem.shared");
       emitRetain(v);

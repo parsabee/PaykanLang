@@ -1,10 +1,11 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 // CodeGen / E2E tests for optional primitives `int?`, `float?`, `bool?` and
-// `char?` (#66).  A present value is boxed in the runtime's Int / Float /
-// Bool / Char object, so every test runs under the tracking allocator and
-// asserts zero live heap blocks: each boxing site must hand its sink exactly
-// one reference, and each sink must release it.
+// `char?` (#66).  An optional primitive is a value, the primitive and a
+// presence flag (#96); where only a box fits (an `Obj`, an array or tuple
+// slot) it is kept as the runtime's Int / Float / Bool / Char object, so
+// every test runs under the tracking allocator and asserts zero live heap
+// blocks.
 
 #include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
@@ -319,7 +320,7 @@ TEST(OptionalPrimitive, TernaryCopyAndReassignment) {
       m = a;
       println(m);
       x: int? = 1;
-      y: int? = x;                              // shares x's box
+      y: int? = x;                              // a copy
       x = 2;
       println(y);
       println(x);
@@ -356,6 +357,51 @@ TEST(OptionalPrimitive, IntoObjAsBoxedClasses) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "Int\nFloat\nBool\nChar\nother\nc\n");
   g.expectNoLeaks("IntoObjAsBoxedClasses");
+}
+
+// `inout` optional values: a parameter, a local borrow and a field, written
+// through (None included); a `view` parameter and an override's.
+TEST(OptionalPrimitive, InoutAndViewOptionals) {
+  LeakGuard g;
+  auto r = compileAndRun(R"pkn(
+    fn bump(o: inout int?) {
+      match o { n: int { o = n + 1; } None { o = 0; } }
+    }
+    fn clear(o: inout float?) { o = None; }
+    fn show(o: view int?) -> Str {
+      match o { n: view int { return Str<int>(n); } None { return "None"; } }
+    }
+    class Base {
+      fn __init__() { }
+      fn pick(c: bool) -> char? { return None; }
+    }
+    class Derived : Base {
+      fn __init__() { __super__(); }
+      fn pick(c: bool) -> char? { if (c) { return 'd'; } return None; }
+    }
+    class Box2 { n: int?; f: float?; fn __init__() { } }
+    fn main() -> int {
+      x: int? = None;
+      bump(x); bump(x);
+      println(show(x));
+      b = Box2();
+      bump(b.n);
+      println(show(b.n));
+      y: inout = b.n;
+      bump(y);
+      println(b.n);
+      b.f = 1.5;
+      clear(b.f);
+      println(b.f);
+      o: Base = Derived();
+      println(o.pick(True));
+      println(o.pick(False));
+      return 0;
+    }
+  )pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "1\n0\n1\nNone\nd\nNone\n");
+  g.expectNoLeaks("InoutAndViewOptionals");
 }
 
 // -- Generics

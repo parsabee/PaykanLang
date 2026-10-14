@@ -3,6 +3,7 @@
 //
 // Unit tests for PaykanString runtime functions.
 
+#include <cstring>
 #include <gtest/gtest.h>
 #include <string>
 
@@ -411,4 +412,69 @@ TEST(StringConcatInplace, ResultIsNulTerminated) {
   EXPECT_EQ(a->data[4], '\0');
   PaykanString_destroy((PaykanObject *)a);
   PaykanString_destroy((PaykanObject *)b);
+}
+
+// -- PaykanString_parse_int / _float / _bool (`int<Str>` & co.)
+
+namespace {
+
+/// Parse @p text (of @p len bytes) with @p parse; returns whether it was
+/// valid and stores the value in @p out.
+template <typename T>
+bool parseWith(int64_t (*parse)(PaykanObject *, T *), const char *text,
+               int64_t len, T &out) {
+  PaykanString *s = PaykanString_new(text, len);
+  out = static_cast<T>(42); // overwritten either way
+  int64_t ok = parse((PaykanObject *)s, &out);
+  PaykanString_destroy((PaykanObject *)s);
+  return ok != 0;
+}
+
+} // namespace
+
+TEST(StringParse, IntValidAndLimits) {
+  int64_t v;
+  EXPECT_TRUE(parseWith(PaykanString_parse_int, "-7", 2, v));
+  EXPECT_EQ(v, -7);
+  EXPECT_TRUE(parseWith(PaykanString_parse_int, "9223372036854775807", 19, v));
+  EXPECT_EQ(v, INT64_MAX);
+  EXPECT_TRUE(parseWith(PaykanString_parse_int, "-9223372036854775808", 20, v));
+  EXPECT_EQ(v, INT64_MIN);
+}
+
+TEST(StringParse, IntInvalidStoresZero) {
+  int64_t v;
+  for (const char *text : {"", "abc", "12x", " 12", "12 "}) {
+    EXPECT_FALSE(parseWith(PaykanString_parse_int, text,
+                           static_cast<int64_t>(std::strlen(text)), v))
+        << text;
+    EXPECT_EQ(v, 0) << text;
+  }
+  EXPECT_FALSE(parseWith(PaykanString_parse_int, "1\0002", 4, v));
+  EXPECT_FALSE(parseWith(PaykanString_parse_int, "9223372036854775808", 19, v));
+}
+
+TEST(StringParse, Float) {
+  double d;
+  EXPECT_TRUE(parseWith(PaykanString_parse_float, "2.5", 3, d));
+  EXPECT_EQ(d, 2.5);
+  EXPECT_TRUE(parseWith(PaykanString_parse_float, "-inf", 4, d));
+  EXPECT_TRUE(d < 0 && d * 0 != 0); // -inf
+  EXPECT_FALSE(parseWith(PaykanString_parse_float, "1e999", 5, d));
+  EXPECT_EQ(d, 0.0);
+  EXPECT_FALSE(parseWith(PaykanString_parse_float, " 1", 2, d));
+}
+
+TEST(StringParse, BoolAcceptsExactlyTrueAndFalse) {
+  int64_t b;
+  EXPECT_TRUE(parseWith(PaykanString_parse_bool, "True", 4, b));
+  EXPECT_EQ(b, 1);
+  EXPECT_TRUE(parseWith(PaykanString_parse_bool, "False", 5, b));
+  EXPECT_EQ(b, 0);
+  for (const char *text : {"true", "TRUE", "1", "", "Truex"}) {
+    EXPECT_FALSE(parseWith(PaykanString_parse_bool, text,
+                           static_cast<int64_t>(std::strlen(text)), b))
+        << text;
+    EXPECT_EQ(b, 0) << text;
+  }
 }

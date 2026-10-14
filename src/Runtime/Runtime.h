@@ -46,7 +46,10 @@ extern "C" {
 //       `<Class>..vtable`.
 //   v6: imported modules' symbols are prefixed with the canonical module
 //       name (`geometry::shapes::describe`), not the absolute file path.
-#define PAYKAN_RUNTIME_ABI_VERSION 6
+//   v7: optionals of value types are values, not boxes (#96): an `int?`
+//       parameter, result or field is a { value, presence } pair, and the
+//       parses `int<Str>` & co. are PaykanString_parse_int & co.
+#define PAYKAN_RUNTIME_ABI_VERSION 7
 
 // -- Target assumptions
 //
@@ -190,10 +193,8 @@ int64_t PaykanInt_equals(PaykanObject *self, PaykanShared *other);
 
 extern PaykanMethod PaykanInt_vtable[PAYKAN_OBJECT_SLOTS];
 
-/// `int<Str>(s)`: parse a Str as a decimal integer (an optional sign and
-/// digits, the whole string, no surrounding whitespace, within int64).
-/// Returns the `int?` result: a PaykanShared* wrapping a fresh PaykanInt on
-/// success, or NULL (None) for an invalid or out-of-range string.
+/// `Int<Str>(s)`: PaykanString_parse_int's result as an `Int?`: a
+/// PaykanShared* wrapping a fresh PaykanInt on success, or NULL (None).
 PaykanShared *PaykanInt_from_str(PaykanObject *str);
 
 // -- Float
@@ -215,10 +216,8 @@ int64_t PaykanFloat_equals(PaykanObject *self, PaykanShared *other);
 
 extern PaykanMethod PaykanFloat_vtable[PAYKAN_OBJECT_SLOTS];
 
-/// `float<Str>(s)`: parse a Str as a floating-point number (C `strtod`
-/// syntax, including `nan` and `inf`; the whole string, no leading
-/// whitespace, not overflowing or underflowing).  Returns the `float?`
-/// result: a PaykanShared* wrapping a fresh PaykanFloat, or NULL (None).
+/// `Float<Str>(s)`: PaykanString_parse_float's result as a `Float?`: a
+/// PaykanShared* wrapping a fresh PaykanFloat, or NULL (None).
 PaykanShared *PaykanFloat_from_str(PaykanObject *str);
 
 // -- Bool
@@ -242,10 +241,8 @@ int64_t PaykanBool_equals(PaykanObject *self, PaykanShared *other);
 
 extern PaykanMethod PaykanBool_vtable[PAYKAN_OBJECT_SLOTS];
 
-/// `bool<Str>(s)` / `Bool<Str>(s)`: parse exactly "True" or "False" (the
-/// spellings `Str<bool>` prints; case-sensitive, the whole string).  Returns
-/// the `bool?` result: a PaykanShared* wrapping a fresh PaykanBool, or NULL
-/// (None) for any other string.
+/// `Bool<Str>(s)`: PaykanString_parse_bool's result as a `Bool?`: a
+/// PaykanShared* wrapping a fresh PaykanBool, or NULL (None).
 PaykanShared *PaykanBool_from_str(PaykanObject *str);
 
 // -- Char
@@ -286,6 +283,19 @@ PaykanString *PaykanString_from_int(int64_t value);
 PaykanString *PaykanString_from_float(double value);
 PaykanString *PaykanString_from_bool(int64_t value);
 PaykanString *PaykanString_from_char(int8_t c);
+
+// The parses behind `int<Str>`, `float<Str>` and `bool<Str>`: each returns 1
+// and stores the value in *out when the whole string is one, else returns 0
+// and stores 0 (the lowering makes the `int?` & co. of the two).
+/// A decimal integer: an optional sign and digits, the whole string, no
+/// surrounding whitespace, within int64.
+int64_t PaykanString_parse_int(PaykanObject *str, int64_t *out);
+/// A floating-point number in C `strtod` syntax, including `nan` and `inf`:
+/// the whole string, no leading whitespace, not overflowing or
+/// underflowing (a subnormal result is accepted).
+int64_t PaykanString_parse_float(PaykanObject *str, double *out);
+/// Exactly "True" (1) or "False" (0), the spellings `Str<bool>` prints.
+int64_t PaykanString_parse_bool(PaykanObject *str, int64_t *out);
 int8_t PaykanString_char_at(PaykanObject *self, int64_t idx);
 
 // Method implementations.

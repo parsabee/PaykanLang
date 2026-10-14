@@ -50,6 +50,8 @@ inline constexpr const char *kConstVoidPtr = "const void *";
 inline constexpr const char *kConstCharPtr = "const char *";
 inline constexpr const char *kConstUint8Ptr = "const uint8_t *";
 inline constexpr const char *kCharPtrPtr = "char **";
+inline constexpr const char *kInt64Ptr = "int64_t *";
+inline constexpr const char *kDoublePtr = "double *";
 
 // The runtime's C types (Runtime.h) and pointers to them.
 inline constexpr const char *kRtShared = "PaykanShared";

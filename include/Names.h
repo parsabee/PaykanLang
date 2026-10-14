@@ -20,6 +20,8 @@ inline constexpr const char *kOpen = "open";
 inline constexpr const char *kMain = "main"; ///< the program's entry point
 inline constexpr const char *kArray = "Array";
 inline constexpr const char *kTuple = "Tuple";
+/// How an absent optional prints (the None object's toString).
+inline constexpr const char *kNoneText = "None";
 
 // Built-in class names
 inline constexpr const char *kObj = "Obj";
@@ -94,6 +96,10 @@ inline constexpr const char *kPaykanStringCharAt = "PaykanString_char_at";
 inline constexpr const char *kPaykanStringNew = "PaykanString_new";
 inline constexpr const char *kPaykanStringDestroy = "PaykanString_destroy";
 inline constexpr const char *kPaykanStringFromInt = "PaykanString_from_int";
+inline constexpr const char *kPaykanStringParseInt = "PaykanString_parse_int";
+inline constexpr const char *kPaykanStringParseFloat =
+    "PaykanString_parse_float";
+inline constexpr const char *kPaykanStringParseBool = "PaykanString_parse_bool";
 inline constexpr const char *kPaykanStringFromFloat = "PaykanString_from_float";
 inline constexpr const char *kPaykanStringFromBool = "PaykanString_from_bool";
 inline constexpr const char *kPaykanStringToString = "PaykanString_toString";
@@ -265,6 +271,9 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanStringFromFloat,
     kPaykanStringFromBool,
     kPaykanStringFromChar,
+    kPaykanStringParseInt,
+    kPaykanStringParseFloat,
+    kPaykanStringParseBool,
     // Array
     kPaykanArrayNew,
     kPaykanArrayNewObj,

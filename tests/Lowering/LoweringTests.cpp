@@ -778,6 +778,76 @@ TEST(Lowering, OptionalIntoObjSubstitutesTheNoneSingleton) {
       << l.Text;
 }
 
+// An `int?` & co. is a value (#96): parameters, results, locals and fields
+// of type opt_*, `some` for a widened primitive, `none` for None, `is_some`
+// and `unwrap` for comparisons and `match`; nothing is allocated, retained
+// or released for it.
+TEST(Lowering, OptionalValuesAreNotBoxed) {
+  auto l = lower(R"(
+    class C { n: int?; fn __init__() { } }
+    fn half(n: int) -> int? {
+      if (n % 2 != 0) { return None; }
+      return n / 2;
+    }
+    fn get(o: int?) -> int {
+      match o { v: int { return v; } None { return -1; } }
+    }
+    fn same(a: float?, b: float?) -> bool { return a == b; }
+    fn main() -> int {
+      x: int? = half(4);
+      y = half(3);
+      f: float? = 3;
+      c = C();
+      c.n = x;
+      if (y == None) { x = 7; }
+      return get(x) + get(c.n) + get(y);
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  EXPECT_NE(l.Text.find("fn @half(%n.1: i64) -> opt_i64"), std::string::npos)
+      << l.Text;
+  EXPECT_NE(l.Text.find("field n: opt_i64"), std::string::npos) << l.Text;
+  std::string half = function(l.Text, "half");
+  EXPECT_NE(half.find("none opt_i64"), std::string::npos) << half;
+  EXPECT_NE(half.find(" = some %"), std::string::npos) << half;
+  std::string get = function(l.Text, "get");
+  EXPECT_NE(get.find(" = is_some %o"), std::string::npos) << get;
+  EXPECT_NE(get.find(" = unwrap %o"), std::string::npos) << get;
+  std::string same = function(l.Text, "same");
+  EXPECT_EQ(count(same, " = is_some %"), 2u) << same;
+  EXPECT_EQ(count(same, " = unwrap %"), 2u) << same;
+  std::string m = function(l.Text, "main");
+  EXPECT_NE(m.find("local %x.0: opt_i64"), std::string::npos) << m;
+  EXPECT_NE(m.find(" = some 3.0"), std::string::npos) << m; // promoted
+  for (const char *fn : {"half", "get", "same"}) {
+    std::string body = function(l.Text, fn);
+    for (const char *op : {"box", "retain", "release", "PaykanInt", "new "})
+      EXPECT_EQ(body.find(op), std::string::npos) << op << "\n" << body;
+  }
+  EXPECT_EQ(l.Text.find("PaykanInt"), std::string::npos) << l.Text;
+  EXPECT_EQ(l.Text.find("PaykanFloat"), std::string::npos) << l.Text;
+}
+
+// Printing an optional value formats it, "None" or the value's text; it is
+// never boxed.
+TEST(Lowering, PrintingAnOptionalValueFormatsIt) {
+  auto l = lower(R"(
+    fn main() -> int {
+      a: int? = 5;  b: bool? = None;
+      println(a);  print(b);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string m = function(l.Text, "main");
+  EXPECT_NE(m.find("call @$rt.PaykanString_from_int("), std::string::npos) << m;
+  EXPECT_NE(m.find("call @$rt.PaykanString_from_bool("), std::string::npos)
+      << m;
+  EXPECT_EQ(count(m, "call @$rt.PaykanString_destroy("), 2u) << m;
+  EXPECT_EQ(m.find("box"), std::string::npos) << m;
+  EXPECT_EQ(m.find("PaykanObject_None"), std::string::npos) << m;
+}
+
 // -- Modules
 
 TEST(Lowering, ImportedFunctionsAndClassesAreExternItems) {
@@ -1154,29 +1224,37 @@ TEST(Lowering, OtherNumericConversionsAreInline) {
   EXPECT_EQ(count(l.Text, "call @$rt.Paykan_panic"), 0u) << l.Text;
 }
 
-TEST(Lowering, ParsesCallTheRuntimeAndReturnAnOptionalBox) {
+TEST(Lowering, ParsesCallTheRuntimeAndReturnAnOptionalValue) {
+  // The runtime parses into a local; the result is that value as the
+  // present optional, or None (#96): no box.
   auto l = lower(R"(
     fn p(s: Str) -> int? { return int<Str>(s); }
     fn q(s: Str) -> float? { return float<Str>(s); }
+    fn t(s: Str) -> bool? { return bool<Str>(s); }
     fn main() -> int { return 0; }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
-  std::string p = function(l.Text, "p");
-  EXPECT_NE(p.find("call @$rt.PaykanInt_from_str("), std::string::npos) << p;
-  // The fresh box is returned as-is: no extra retain.
-  EXPECT_EQ(count(p, "retain"), 0u) << p;
-  EXPECT_NE(function(l.Text, "q").find("call @$rt.PaykanFloat_from_str("),
-            std::string::npos)
-      << l.Text;
+  const char *expected[][3] = {
+      {"p", "call @$rt.PaykanString_parse_int(", "none opt_i64"},
+      {"q", "call @$rt.PaykanString_parse_float(", "none opt_f64"},
+      {"t", "call @$rt.PaykanString_parse_bool(", "none opt_bool"},
+  };
+  for (const auto &e : expected) {
+    std::string fn = function(l.Text, e[0]);
+    EXPECT_NE(fn.find(e[1]), std::string::npos) << fn;
+    EXPECT_NE(fn.find("local.addr"), std::string::npos) << fn;
+    EXPECT_NE(fn.find(" = some "), std::string::npos) << fn;
+    EXPECT_NE(fn.find(e[2]), std::string::npos) << fn;
+    EXPECT_EQ(fn.find(" = box "), std::string::npos) << fn;
+  }
 }
 
-TEST(Lowering, BoxedParsesShareThePrimitiveParse) {
-  // `Int<Str>` & co. (#88) are the primitive parse: its box is the `Int?`.
+TEST(Lowering, BoxedParsesReturnTheBoxedOptional) {
+  // `Int<Str>` & co. (#88) return the `Int?` & co. box.
   auto l = lower(R"(
     fn p(s: Str) -> Int? { return Int<Str>(s); }
     fn q(s: Str) -> Float? { return Float<Str>(s); }
     fn r(s: Str) -> Bool? { return Bool<Str>(s); }
-    fn t(s: Str) -> bool? { return bool<Str>(s); }
     fn main() -> int { return 0; }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
@@ -1187,9 +1265,6 @@ TEST(Lowering, BoxedParsesShareThePrimitiveParse) {
             std::string::npos)
       << l.Text;
   EXPECT_NE(function(l.Text, "r").find("call @$rt.PaykanBool_from_str("),
-            std::string::npos)
-      << l.Text;
-  EXPECT_NE(function(l.Text, "t").find("call @$rt.PaykanBool_from_str("),
             std::string::npos)
       << l.Text;
 }

@@ -364,9 +364,29 @@ private:
   // -- Optionals
 
   static bool isNoneForOptional(ast::Expr *expr);
-  /// True when Sema marked @p expr (a primitive) for boxing into the
-  /// optional primitive slot it flows into (`int` -> `int?`).
-  static bool isPrimitiveBoxing(const ast::Expr *expr);
+  /// True when Sema marked @p expr (a primitive) to become the present
+  /// value of the optional primitive slot it flows into (`int` -> `int?`).
+  static bool isOptionalWrap(const ast::Expr *expr);
+  /// The optional type of @p expr's value when that is an optional of a
+  /// value type (`int?` & co.): its own type, or the one it is wrapped into.
+  /// nullptr otherwise.
+  static ast::Type *valueOptionalType(ast::Expr *expr);
+  /// The present `int?` & co. (@p optTy) of the primitive @p v.
+  Val emitSome(const Val &v, ast::Type *optTy);
+  /// Two optionals of one value type, equal when both are None or both are
+  /// present with `==` payloads.
+  Val emitValueOptionalEquals(const Val &a, const Val &b);
+  /// The text of the optional value @p opt, "None" or its value's (what
+  /// `Str<int>` & co. give): an owned string temporary.
+  Val emitOptionalToString(const Val &opt);
+  /// The boxed form of the optional value @p opt of type @p optTy, kept
+  /// where only a box fits (an `Obj`, an array or tuple slot): a fresh +1
+  /// box of the runtime's Int / Float / Bool / Char object, or null for
+  /// None.
+  Val emitOptionalBox(const Val &opt, ast::Type *optTy);
+  /// The optional value (of type @p optTy) of the borrowed box @p box, the
+  /// boxed form of emitOptionalBox.
+  Val emitOptionalFromBox(const Val &box, ast::Type *optTy);
   /// Box the primitive value @p v as the present value of @p optTy (`int?`,
   /// `float?`, `bool?`, `char?`): a fresh +1 box of the runtime's Int /
   /// Float / Bool / Char object.
@@ -419,10 +439,14 @@ private:
     bool WantAddress = false;
 
     /// Every expression is emitted through here (it hides the visitor's own
-    /// dispatch), so a primitive that Sema marked for boxing comes out as
-    /// the +1 box its optional primitive slot expects, whichever site
+    /// dispatch), so a primitive that Sema marked for its optional slot
+    /// comes out as the optional value that slot expects, whichever site
     /// consumes it.
     Val visit(ast::Expr *node);
+
+    /// `int<Str>`, `float<Str>`, `bool<Str>`: the optional value of the
+    /// runtime's parse; an invalid Val for any other call.
+    Val emitParse(ast::CallExpr *node);
 
     Val emitIdentityCtor(ast::CallExpr *node);
     Val emitConversion(ast::CallExpr *node);

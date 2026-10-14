@@ -45,10 +45,11 @@ Design rules:
 | `opt_i64` `opt_f64` `opt_bool` `opt_char` | an inline optional: the payload (`i64`, `f64`, `bool`, `char`) followed by an 8-byte presence word, held and passed by value (#96) | `struct { <payload> value; int64_t present; }` |
 
 Paykan types lower as: `int`→`i64`, `float`→`f64`, `bool`→`bool`,
-`char`→`char`, every enum→`i64`, every reference type (class, `Str`, array,
-tuple, optional)→`box` when stored (variable, field, parameter, return value,
-array/tuple ref slot) and `obj` when used as a raw receiver.  A `T?` is a `box`
-that may be `null`.
+`char`→`char`, every enum→`i64`, `int?`→`opt_i64`, `float?`→`opt_f64`,
+`bool?`→`opt_bool`, `char?`→`opt_char`, and every reference type (class,
+`Str`, array, tuple, and the optional of one)→`box` when stored (variable,
+field, parameter, return value, array/tuple ref slot) and `obj` when used as
+a raw receiver.  A `T?` of a reference type is a `box` that may be `null`.
 
 An optional type holds a payload and a presence word: `none` is the absent
 value (a zero payload, presence 0), `some %v` the present one (presence 1).
@@ -376,20 +377,29 @@ CodeGen enforced, now in one place.
   `null` first; value arms compare literals (Str through
   `PaykanString_equals` with a boxed literal); enum arms compare `i64`
   constants.  Arm bindings are raw `obj` aliases (unowned).
-* **Optionals**: `None` into a `T?` is `null`; a `T?` into an `Obj` slot is
-  replaced by a +1 box of `@$rt.PaykanObject_None` when null.  An optional
-  primitive (`int?`, `float?`, `bool?`, `char?`) boxes a present value: a
-  primitive that Sema marked for an optional primitive slot is lowered as
-  `PaykanInt_new` (etc.) followed by `box`, a fresh +1 box for that slot; a
-  `match` arm binding the primitive reads it with `PaykanInt_value` (etc.)
-  into a plain local.
+* **Optionals**: `None` into a reference `T?` is `null`; a `T?` into an
+  `Obj` slot is replaced by a +1 box of `@$rt.PaykanObject_None` when null.
+  An optional primitive (`int?`, `float?`, `bool?`, `char?`) is a value
+  (`opt_i64` & co.) with no ARC: a primitive that Sema marked for an
+  optional primitive slot is `some` of it (after `int`→`float` promotion for
+  a `float?`), `None` there is `none`, `x == None` is `not (is_some x)`, two
+  of them are equal when their `is_some` agree and, both present, their
+  `unwrap`s are `==`, and a `match` arm binding the primitive is its
+  `unwrap`.  The print builtins print one as its text, formatted with
+  `PaykanString_from_int` & co. when present and `"None"` otherwise.  Where
+  only a box fits (an `Obj` slot, an array element, a tuple element) it is
+  kept boxed: `PaykanInt_new` & co. of the payload followed by `box`, or
+  `null` for None, made on each store and read back (`PaykanInt_value` &
+  co.) on each load.
 * **Conversions** (`Target<Source>(value)`, #64): `Str<…>` calls
   `PaykanString_from_int` & co. (an owned string temporary); `int<Str>` /
-  `float<Str>` / `bool<Str>` call `PaykanInt_from_str` /
-  `PaykanFloat_from_str` / `PaykanBool_from_str`, whose result is the
-  `int?` / `float?` / `bool?` box (a fresh +1 box, `null` for an invalid
-  string; `bool<Str>` accepts exactly `"True"` and `"False"`).  The boxed
-  forms `Int<Str>` & co. are the same calls.  The numeric ones are inline: `int<float>` checks
+  `float<Str>` / `bool<Str>` call `PaykanString_parse_int` /
+  `PaykanString_parse_float` / `PaykanString_parse_bool` with the
+  `local.addr` of a local the value is parsed into, and are the `select` of
+  `some` of that value (a valid string) or `none` (`bool<Str>` accepts
+  exactly `"True"` and `"False"`).  The boxed forms `Int<Str>` & co. call
+  `PaykanInt_from_str` & co., whose result is the `Int?` & co. box (a fresh
+  +1 box, `null` for an invalid string).  The numeric ones are inline: `int<float>` checks
   `cmp ge %f, -2^63` and `cmp lt %f, 2^63` (both false for NaN) and calls
   `@$rt.Paykan_panic_float_to_int(%f)` then `unreachable` otherwise, before the
   `ftoi`; `float<int>` is `itof`; `int<bool>` and `int<char>` are `cast`s to
@@ -423,6 +433,8 @@ PaykanString_from_int(i64) -> obj       PaykanString_from_float(f64) -> obj
 PaykanString_from_bool(i64) -> obj      PaykanString_from_char(char) -> obj
 PaykanString_equals(obj, box) -> i64    PaykanString_toString(obj) -> box
 PaykanString_length(obj) -> i64
+PaykanString_parse_int(obj, ptr) -> i64     PaykanString_parse_float(obj, ptr) -> i64
+PaykanString_parse_bool(obj, ptr) -> i64    ; 1 and the value at ptr, or 0 (and 0 there)
 ; arrays (slots are i64 bits; object slots hold a box cast to i64)
 PaykanArray_new(i64) -> obj             PaykanArray_new_obj(i64) -> obj
 PaykanArray_new_from_data(i64, ptr) -> obj

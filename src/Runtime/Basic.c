@@ -2,18 +2,13 @@
 // SPDX-License-Identifier: MIT
 //
 // Paykan runtime — the boxed primitives Int, Float, Bool and Char: a
-// primitive in an Obj-typed variable, and the present value of an `int?`,
-// `float?`, `bool?` or `char?` (NULL meaning None).
+// primitive in an Obj-typed variable (an `int?` & co. there, or in an array
+// or tuple slot, is one of them or NULL for None).
 
 #include "Runtime.h"
 #include "RuntimeInternal.h"
 
-#include <ctype.h>
-#include <errno.h>
-#include <math.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 // -- Int
 
@@ -49,24 +44,11 @@ int64_t PaykanInt_equals(PaykanObject *self, PaykanShared *other) {
   return Paykan_equals_consume_other(other, result);
 }
 
-/// True when @p s starts with a character strtoll / strtod would skip as
-/// leading whitespace, which `int<Str>` / `float<Str>` reject.
-static int Paykan_starts_with_space(const PaykanString *s) {
-  return s->len > 0 && isspace((unsigned char)s->data[0]);
-}
-
 PaykanShared *PaykanInt_from_str(PaykanObject *str) {
-  PaykanString *s = (PaykanString *)str;
-  if (s->len == 0 || Paykan_starts_with_space(s))
+  int64_t val;
+  if (!PaykanString_parse_int(str, &val))
     return NULL;
-  char *end;
-  errno = 0;
-  long long val = strtoll(s->data, &end, 10);
-  // The whole string must be consumed (an embedded NUL ends strtoll early)
-  // and the value must fit (ERANGE).
-  if (end != s->data + s->len || errno != 0)
-    return NULL;
-  return PaykanShared_new((PaykanObject *)PaykanInt_new((int64_t)val));
+  return PaykanShared_new((PaykanObject *)PaykanInt_new(val));
 }
 
 // -- Float
@@ -104,17 +86,8 @@ int64_t PaykanFloat_equals(PaykanObject *self, PaykanShared *other) {
 }
 
 PaykanShared *PaykanFloat_from_str(PaykanObject *str) {
-  PaykanString *s = (PaykanString *)str;
-  if (s->len == 0 || Paykan_starts_with_space(s))
-    return NULL;
-  char *end;
-  errno = 0;
-  double val = strtod(s->data, &end);
-  if (end != s->data + s->len)
-    return NULL;
-  // ERANGE flags overflow (±HUGE_VAL), a nonzero value underflowing to 0, and
-  // also a subnormal result, which is representable and accepted.
-  if (errno != 0 && (errno != ERANGE || isinf(val) || val == 0.0))
+  double val;
+  if (!PaykanString_parse_float(str, &val))
     return NULL;
   return PaykanShared_new((PaykanObject *)PaykanFloat_new(val));
 }
@@ -154,13 +127,10 @@ int64_t PaykanBool_equals(PaykanObject *self, PaykanShared *other) {
 }
 
 PaykanShared *PaykanBool_from_str(PaykanObject *str) {
-  PaykanString *s = (PaykanString *)str;
-  // Exactly the spellings `Str<bool>` prints, so the two round-trip.
-  if (s->len == 4 && memcmp(s->data, "True", 4) == 0)
-    return PaykanShared_new((PaykanObject *)PaykanBool_new(1));
-  if (s->len == 5 && memcmp(s->data, "False", 5) == 0)
-    return PaykanShared_new((PaykanObject *)PaykanBool_new(0));
-  return NULL;
+  int64_t val;
+  if (!PaykanString_parse_bool(str, &val))
+    return NULL;
+  return PaykanShared_new((PaykanObject *)PaykanBool_new(val));
 }
 
 // -- Char

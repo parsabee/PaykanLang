@@ -7,9 +7,9 @@
 //            elements, a ternary producing an `int?`, a generic `T?` with
 //            T = int, and printing an optional through `Obj`.
 //
-// A present value is boxed in the runtime's Int / Float / Bool / Char object
-// (NULL meaning None), so everything is released by the ordinary ARC rules
-// (run with --track-heap to see zero live blocks).
+// An optional primitive is a value, the primitive and a presence flag (#96):
+// it is boxed only in an `Obj`, an array or a tuple slot (run with
+// --track-heap to see zero live blocks).
 //
 // expect-stdout: parse 12 -> 12
 // expect-stdout: parse 4x -> None

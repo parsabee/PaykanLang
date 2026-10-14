@@ -180,8 +180,8 @@ class Expr : public ASTNode {
   // site.  There are two such conversions: an optional `T?` flowing into an
   // `Obj` slot (the lowering materialises the `None` singleton for a null
   // box), and a primitive flowing into an optional primitive slot (`int` ->
-  // `int?`: the coerced type is the optional and the lowering boxes the
-  // value, see needsPrimitiveBoxing).  nullptr = no conversion.
+  // `int?`: the coerced type is the optional and the lowering makes the
+  // value its present value, see wrapsInOptional).  nullptr = no conversion.
   Type *CoercedType = nullptr;
 
 public:
@@ -1332,7 +1332,8 @@ public:
 // reference type T (Sema rejects nested `T??`) a `T?` is at runtime the very
 // same PaykanShared* box as a `T`, with a NULL box meaning `None` — no layout
 // change, and every runtime entry point that touches boxes tolerates NULL.
-// An optional primitive (`int?`, #66) is its boxed class (`Int`) or NULL.
+// An optional primitive (`int?`, #66) is a value: the primitive and a
+// presence flag held inline (#96, isValueOptional).
 // Like ArrayType, the parser allocates a source-located node per annotation
 // and Sema resolves it to the canonical instance interned by
 // ASTContext::getOptionalType, so optional types compare by pointer identity.
@@ -1611,16 +1612,24 @@ public:
   }
 };
 
+/// Returns true for an optional of a value type, `int?`, `float?`, `bool?`
+/// or `char?` (#96): a value, the payload and a presence flag held inline
+/// (PIR `opt_i64` & co.), with no box and no reference count.
+inline bool isValueOptional(const Type *ty) {
+  auto *ot = dyn_cast<OptionalType>(ty);
+  return ot && isa<BuiltinType>(ot->getInnerType());
+}
+
 /// Returns true for any type whose values are heap-allocated and
-/// reference-counted at runtime: ClassType, ArrayType, TupleType, and
-/// OptionalType (a possibly-NULL PaykanShared* box: an optional reference
-/// type shares the wrapped type's box, and an optional primitive `int?`,
-/// `float?`, `bool?` or `char?` boxes its value in the runtime's boxed
-/// `Int` / `Float` / `Bool` / `Char` object).
-/// Use this instead of spelling out the `||` condition everywhere.
+/// reference-counted at runtime: ClassType, ArrayType, TupleType, and the
+/// OptionalType of one of them (a possibly-NULL PaykanShared* box: it shares
+/// the wrapped type's box).  An optional of a value type is a value
+/// (isValueOptional).  Use this instead of spelling out the `||` condition
+/// everywhere.
 inline bool isRefType(const Type *ty) {
-  return ty && (isa<ClassType>(ty) || isa<ArrayType>(ty) ||
-                isa<TupleType>(ty) || isa<OptionalType>(ty));
+  return ty &&
+         (isa<ClassType>(ty) || isa<ArrayType>(ty) || isa<TupleType>(ty) ||
+          (isa<OptionalType>(ty) && !isValueOptional(ty)));
 }
 
 /// If @p ty is an optional type, return its inner type; otherwise @p ty.
@@ -1630,18 +1639,12 @@ inline Type *stripOptional(Type *ty) {
   return ty;
 }
 
-/// Returns true for an optional primitive `int?`, `float?`, `bool?` or
-/// `char?`, whose present value is boxed (see isRefType).
-inline bool isPrimitiveOptional(const Type *ty) {
-  auto *ot = dyn_cast<OptionalType>(ty);
-  return ot && isa<BuiltinType>(ot->getInnerType());
-}
-
 /// Returns true when a value of type @p src stored into a slot of type
-/// @p dst must be boxed first: a plain primitive (`int`) flowing into an
-/// optional primitive (`int?`, or `float?` after int -> float promotion).
-inline bool needsPrimitiveBoxing(const Type *dst, const Type *src) {
-  return isPrimitiveOptional(dst) && src && isa<BuiltinType>(src);
+/// @p dst becomes the present value of an optional first: a plain primitive
+/// (`int`) flowing into an optional primitive (`int?`, or `float?` after
+/// int -> float promotion).
+inline bool wrapsInOptional(const Type *dst, const Type *src) {
+  return isValueOptional(dst) && src && isa<BuiltinType>(src);
 }
 
 } // namespace ast
