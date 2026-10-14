@@ -211,6 +211,22 @@ private:
 
 // -- Public API
 
+llvm::Error setHostLayout(llvm::Module &module) {
+  llvm::InitializeNativeTarget();
+  llvm::InitializeNativeTargetAsmPrinter();
+  // What LLJITBuilder uses when given no target machine builder, so the
+  // module's layout is the one the JIT checks it against.
+  auto jtmb = llvm::orc::JITTargetMachineBuilder::detectHost();
+  if (!jtmb)
+    return jtmb.takeError();
+  auto layout = jtmb->getDefaultDataLayoutForTarget();
+  if (!layout)
+    return layout.takeError();
+  module.setTargetTriple(jtmb->getTargetTriple().str());
+  module.setDataLayout(*layout);
+  return llvm::Error::success();
+}
+
 llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
                               std::unique_ptr<llvm::LLVMContext> ctx,
                               const std::vector<std::string> &args,
