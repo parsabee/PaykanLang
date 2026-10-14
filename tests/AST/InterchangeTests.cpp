@@ -663,13 +663,23 @@ TEST(Interchange, NativeFunctionRoundTrips) {
   EXPECT_EQ(fn->getBody(), nullptr);
   EXPECT_EQ(write(*tu), text);
 
-  EXPECT_EQ(read("(paykan-ast 1 (unit (fn \"f\" (type-params \"T\") (params) "
-                 "_ (native \"pk_f\"))))",
-                 ctx, error),
-            nullptr);
-  EXPECT_NE(error.find("a native function cannot be generic"),
-            std::string::npos)
-      << error;
+  // A generic one is a template.
+  const std::string generic = "(paykan-ast 1\n"
+                              "  (unit\n"
+                              "    (fn \"pick\"\n"
+                              "      (type-params \"T\")\n"
+                              "      (params\n"
+                              "        (param \"a\"\n"
+                              "          (named-type \"T\")\n"
+                              "          (qual view)))\n"
+                              "      (named-type \"T\")\n"
+                              "      (qual view)\n"
+                              "      (native \"pk_pick\"))))\n";
+  tu = read(generic, ctx, error);
+  ASSERT_NE(tu, nullptr) << error;
+  ASSERT_EQ(tu->getGenericFuncDecls().size(), 1u);
+  EXPECT_TRUE(tu->getGenericFuncDecls()[0]->isNative());
+  EXPECT_EQ(write(*tu), generic);
 }
 
 // A tree deeper than the format allows is refused, without recursing
