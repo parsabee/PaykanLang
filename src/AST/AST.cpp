@@ -478,6 +478,7 @@ FuncDecl *ASTCloner::cloneTemplate(FuncDecl *fn) {
   out->setView(copy->isView());
   out->setStatic(copy->isStatic());
   out->setResultMode(copy->getResultMode());
+  out->setTypeParamBounds(cloneBounds(fn->getTypeParamBounds()));
   return out;
 }
 
@@ -486,9 +487,21 @@ ClassDecl *ASTCloner::cloneTemplate(ClassDecl *cd) {
   std::vector<const std::string *> params;
   for (auto *p : cd->getTypeParams())
     params.push_back(&in(*p));
-  return Ctx.make<ClassDecl>(copy->getLocation(), copy->getName(),
-                             copy->getSuperClassName(), copy->getFields(),
-                             copy->getMethods(), std::move(params));
+  auto *out = Ctx.make<ClassDecl>(copy->getLocation(), copy->getName(),
+                                  copy->getSuperClassName(), copy->getFields(),
+                                  copy->getMethods(), std::move(params));
+  out->setTypeParamBounds(cloneBounds(cd->getTypeParamBounds()));
+  return out;
+}
+
+TypeParamBounds ASTCloner::cloneBounds(const TypeParamBounds &bounds) {
+  TypeParamBounds out;
+  for (const auto &traits : bounds) {
+    auto &cloned = out.emplace_back();
+    for (Type *t : traits)
+      cloned.push_back(cloneType(t));
+  }
+  return out;
 }
 
 } // namespace ast

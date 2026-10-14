@@ -45,6 +45,7 @@ class Type;
 // referenced by TranslationUnit's member vector.
 class EnumDecl;
 class ImplDecl;
+class TraitDecl;
 
 // Base AST node with LLVM-style RTTI
 class ASTNode {
@@ -58,6 +59,7 @@ public:
     NK_ClassDecl,
     NK_EnumDecl,
     NK_ImplDecl,
+    NK_TraitDecl,
 
     // Statements
     NK_StmtBegin,
@@ -161,7 +163,7 @@ public:
   Decl(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_VarDecl && N->getKind() <= NK_ImplDecl;
+    return N->getKind() >= NK_VarDecl && N->getKind() <= NK_TraitDecl;
   }
 };
 
@@ -358,6 +360,10 @@ ParamModes paramModes(const std::vector<Param> &params);
 // Forward declaration for FuncDecl body.
 class CompoundStmt;
 
+/// The traits each type parameter must implement (`<T: Show + Eq>`), as
+/// written: empty, or one (possibly empty) list per type parameter.
+using TypeParamBounds = std::vector<std::vector<Type *>>;
+
 // Free function declaration:  fn name(params) -> retType { body }
 //
 // A generic function (`fn first<T>(xs: T[]) -> T`) carries its type parameter
@@ -372,6 +378,7 @@ private:
   CompoundStmt *Body;
   // Type parameter names (interned); empty for an ordinary function.
   std::vector<const std::string *> TypeParams;
+  TypeParamBounds Bounds;
   // The C symbol of a `native fn` (interned), which has no Body; nullptr for
   // an ordinary function (#198).
   const std::string *NativeSymbol = nullptr;
@@ -400,6 +407,8 @@ public:
     return TypeParams;
   }
   bool isGeneric() const { return !TypeParams.empty(); }
+  const TypeParamBounds &getTypeParamBounds() const { return Bounds; }
+  void setTypeParamBounds(TypeParamBounds b) { Bounds = std::move(b); }
 
   bool isNative() const { return NativeSymbol != nullptr; }
   const std::string &getNativeSymbol() const { return *NativeSymbol; }
@@ -1221,6 +1230,7 @@ private:
   std::vector<FuncDecl *> Methods;
   // Type parameter names (interned); empty for an ordinary class.
   std::vector<const std::string *> TypeParams;
+  TypeParamBounds Bounds;
 
 public:
   ClassDecl(SourceLocation loc, const std::string &internedName,
@@ -1246,6 +1256,8 @@ public:
     return TypeParams;
   }
   bool isGeneric() const { return !TypeParams.empty(); }
+  const TypeParamBounds &getTypeParamBounds() const { return Bounds; }
+  void setTypeParamBounds(TypeParamBounds b) { Bounds = std::move(b); }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_ClassDecl; }
 };
@@ -1266,6 +1278,7 @@ private:
   std::vector<ClassDecl *> GenericClassDecls;
   std::vector<FuncDecl *> GenericFuncDecls;
   std::vector<ImplDecl *> ImplDecls;
+  std::vector<TraitDecl *> TraitDecls;
 
 public:
   TranslationUnit(SourceLocation loc, std::vector<ImportDecl *> imports,
@@ -1274,13 +1287,14 @@ public:
                   std::vector<EnumDecl *> enums = {},
                   std::vector<ClassDecl *> genericClasses = {},
                   std::vector<FuncDecl *> genericFuncs = {},
-                  std::vector<ImplDecl *> impls = {})
+                  std::vector<ImplDecl *> impls = {},
+                  std::vector<TraitDecl *> traits = {})
       : ASTNode(NK_TranslationUnit, loc), Imports(std::move(imports)),
         ClassDecls(std::move(classes)), FuncDecls(std::move(funcs)),
         EnumDecls(std::move(enums)),
         GenericClassDecls(std::move(genericClasses)),
-        GenericFuncDecls(std::move(genericFuncs)), ImplDecls(std::move(impls)) {
-  }
+        GenericFuncDecls(std::move(genericFuncs)), ImplDecls(std::move(impls)),
+        TraitDecls(std::move(traits)) {}
 
   const std::vector<ImportDecl *> &getImports() const { return Imports; }
   const std::vector<ClassDecl *> &getClassDecls() const { return ClassDecls; }
@@ -1293,6 +1307,7 @@ public:
     return GenericFuncDecls;
   }
   const std::vector<ImplDecl *> &getImplDecls() const { return ImplDecls; }
+  const std::vector<TraitDecl *> &getTraitDecls() const { return TraitDecls; }
 
   /// Append an instantiated function (Sema).
   void addFuncDecl(FuncDecl *fn) { FuncDecls.push_back(fn); }
@@ -1482,21 +1497,48 @@ public:
 
 // `impl A { ... }` (#216): methods added to an existing type and dispatched
 // statically, and its `static fn`s.  TypeName is the type as written
-// (`A`, `geo::Point`).
+// (`A`, `geo::Point`).  `impl Show for A { ... }` implements a trait, the
+// annotation Trait (`Show`, `Into<int>`); null for a plain `impl` block.
 class ImplDecl : public Decl {
   const std::string *TypeName; // interned
   std::vector<FuncDecl *> Methods;
+  Type *Trait;
 
 public:
   ImplDecl(SourceLocation loc, const std::string &internedTypeName,
-           std::vector<FuncDecl *> methods)
+           std::vector<FuncDecl *> methods, Type *trait = nullptr)
       : Decl(NK_ImplDecl, loc), TypeName(&internedTypeName),
-        Methods(std::move(methods)) {}
+        Methods(std::move(methods)), Trait(trait) {}
 
   const std::string &getTypeName() const { return *TypeName; }
   const std::vector<FuncDecl *> &getMethods() const { return Methods; }
+  Type *getTrait() const { return Trait; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_ImplDecl; }
+};
+
+// `trait Show { view fn toString() -> Str; }` (#216): the methods a type
+// implementing it must have.  Its methods are signatures only (no body);
+// `Self` in them is the implementing type.
+class TraitDecl : public Decl {
+  const std::string *Name; // interned
+  std::vector<const std::string *> TypeParams;
+  std::vector<FuncDecl *> Methods;
+
+public:
+  TraitDecl(SourceLocation loc, const std::string &internedName,
+            std::vector<const std::string *> typeParams,
+            std::vector<FuncDecl *> methods)
+      : Decl(NK_TraitDecl, loc), Name(&internedName),
+        TypeParams(std::move(typeParams)), Methods(std::move(methods)) {}
+
+  const std::string &getName() const { return *Name; }
+  const std::vector<const std::string *> &getTypeParams() const {
+    return TypeParams;
+  }
+  const std::vector<FuncDecl *> &getMethods() const { return Methods; }
+
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_TraitDecl; }
 };
 
 // Array literal expression: [expr, expr, ...] or []

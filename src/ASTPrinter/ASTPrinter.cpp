@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "ASTPrinter.h"
+#include "ASTContext.h"
 
 #include <cstdio>
 #include <ostream>
@@ -68,7 +69,7 @@ void ASTPrinter::visitTranslationUnit(TranslationUnit *node) {
                  node->getClassDecls().size() + node->getFuncDecls().size() +
                  node->getGenericClassDecls().size() +
                  node->getGenericFuncDecls().size() +
-                 node->getImplDecls().size();
+                 node->getTraitDecls().size() + node->getImplDecls().size();
   size_t idx = 0;
   for (auto *imp : node->getImports()) {
     ++idx;
@@ -100,6 +101,11 @@ void ASTPrinter::visitTranslationUnit(TranslationUnit *node) {
     ChildScope cs(*this, idx == total);
     visitFuncDecl(node->getFuncDecls()[i]);
   }
+  for (auto *tr : node->getTraitDecls()) {
+    ++idx;
+    ChildScope cs(*this, idx == total);
+    visitTraitDecl(tr);
+  }
   for (auto *im : node->getImplDecls()) {
     ++idx;
     ChildScope cs(*this, idx == total);
@@ -107,14 +113,19 @@ void ASTPrinter::visitTranslationUnit(TranslationUnit *node) {
   }
 }
 
-// Render `<T, U>` for a generic declaration's type parameters.
+// Render `<T: Show + Eq, U>` for a generic declaration's type parameters.
 static void printTypeParams(std::ostream &os,
-                            const std::vector<const std::string *> &params) {
+                            const std::vector<const std::string *> &params,
+                            const TypeParamBounds &bounds = {}) {
   if (params.empty())
     return;
   os << " <";
-  for (size_t i = 0; i < params.size(); ++i)
+  for (size_t i = 0; i < params.size(); ++i) {
     os << (i ? ", " : "") << *params[i];
+    if (i < bounds.size())
+      for (size_t j = 0; j < bounds[i].size(); ++j)
+        os << (j ? " + " : ": ") << typeName(bounds[i][j]);
+  }
   os << ">";
 }
 
@@ -505,7 +516,7 @@ void ASTPrinter::visitFuncDecl(FuncDecl *node) {
   if (node->isStatic())
     OS << " static";
   OS << " '" << node->getName() << "'";
-  printTypeParams(OS, node->getTypeParams());
+  printTypeParams(OS, node->getTypeParams(), node->getTypeParamBounds());
   if (node->isNative())
     OS << " native '" << node->getNativeSymbol() << "'";
   // Parameters are not printed, except the mode of one that has it.
@@ -542,7 +553,7 @@ void ASTPrinter::visitMethodDecl(MethodDecl *node) {
 void ASTPrinter::visitClassDecl(ClassDecl *node) {
   header("ClassDecl", node);
   OS << " '" << node->getName() << "'";
-  printTypeParams(OS, node->getTypeParams());
+  printTypeParams(OS, node->getTypeParams(), node->getTypeParamBounds());
   if (node->hasSuperClass())
     OS << " : " << node->getSuperClassName();
   OS << "\n";
@@ -562,7 +573,21 @@ void ASTPrinter::visitClassDecl(ClassDecl *node) {
 
 void ASTPrinter::visitImplDecl(ImplDecl *node) {
   header("ImplDecl", node);
+  if (node->getTrait())
+    OS << " '" << typeName(node->getTrait()) << "' for";
   OS << " '" << node->getTypeName() << "'\n";
+  const auto &methods = node->getMethods();
+  for (size_t i = 0; i < methods.size(); ++i) {
+    ChildScope cs(*this, i + 1 == methods.size());
+    visitFuncDecl(methods[i]);
+  }
+}
+
+void ASTPrinter::visitTraitDecl(TraitDecl *node) {
+  header("TraitDecl", node);
+  OS << " '" << node->getName() << "'";
+  printTypeParams(OS, node->getTypeParams());
+  OS << "\n";
   const auto &methods = node->getMethods();
   for (size_t i = 0; i < methods.size(); ++i) {
     ChildScope cs(*this, i + 1 == methods.size());

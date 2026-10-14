@@ -866,6 +866,9 @@ private:
   /// Phase 4 for the `impl` blocks of @p cd's class: their methods join it.
   bool populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct);
 
+  /// Report the type parameter bounds (`<T: Show>`) as not supported yet.
+  bool rejectBounds(ast::TranslationUnit *tu);
+
   /// Check that every `impl` block names a class of this module, and make
   /// its `static fn`s the module's functions `Type::name`.
   bool checkImplDecls(ast::TranslationUnit *tu);
