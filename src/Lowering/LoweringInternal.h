@@ -230,6 +230,7 @@ private:
       InternedStrings; // content -> @sym
   std::unordered_map<std::string, std::string> InternedArrayData;
   std::unordered_map<std::string, std::string> InternedTupleKinds;
+  std::unordered_map<std::string, std::string> InternedTypeDescriptors;
 
   /// Address (ptr) of the interned C-string global holding @p content.
   Val internString(const std::string &content);
@@ -391,6 +392,11 @@ private:
   void emitBody(ast::CompoundStmt *body);
   void emitImplicitReturn(const pir::Signature &sig);
   void emitNativeBody(ast::FuncDecl *node, const pir::Function &fn);
+  /// The PaykanType (src/Runtime/Runtime.h) a generic native function is
+  /// passed for @p ty: a module data global, one per distinct description.
+  Val emitTypeDescriptor(ast::Type *ty);
+  /// The kind word of @p ty's PaykanType.
+  unsigned char nativeTypeKind(ast::Type *ty) const;
   Val emitValueMatch(ast::MatchStmt *node, const Val &subjRaw);
   Val emitEnumMatch(ast::MatchStmt *node, const Val &subjRaw);
   /// Emit `if (check0) body0 else if (check1) body1 ... else default`.
