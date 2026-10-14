@@ -22,6 +22,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every time (a `.pkm` does not hold templates yet).  Instantiating both this module's `Box<Str>` and an imported
   template's is an error (`conflicts with another template's instantiation of the same
   name`).
+- Generic native functions (docs/language/02-functions-and-calling.md, "Generic native
+  functions"): `native fn pick<T>(first: bool, a: T, b: T) -> T = "c_pick";`.  Each
+  instance calls the same C function with a `PaykanType` for each type argument first
+  (`Runtime.h`: the type's size, alignment, kind and reference offsets), and passes what
+  the function types `T` by address (a `-> T` result through a `void *out`), so a value
+  of any type and size crosses into C; `PaykanType_copy` and `PaykanType_drop` copy and
+  release one.  A native function's parameters can be `view`, and its result a `view` of
+  one (`returns a 'view' but has no 'view' parameter for it to be part of`); `inout` is
+  still rejected.  In the AST interchange format a generic native function has its
+  `(type-params ...)` like any other.  See `samples/imports/15_native_generic`.
 - Borrowed results (docs/language/02-functions-and-calling.md, "Borrowed results"): a
   function or method declared `-> view T` returns a borrow of part of `self` or of a
   `view` or `inout` parameter, never a new value, a copy parameter or a local (`'d' is a

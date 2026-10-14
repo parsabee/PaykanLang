@@ -483,8 +483,44 @@ convention:
 | `Str`, `Obj` result | `PaykanShared *` | owned (+1); never `NULL` |
 | `Str?`, `Obj?` result | `PaykanShared *` | owned (+1); `NULL` is `None` |
 
-A native function cannot be generic, cannot be a method, and cannot be `main`.
-Its parameters and its result are copies: `view` and `inout` don't apply to them yet (#21).
+A native function cannot be a method and cannot be `main`.  A parameter can
+be a `view`, which C borrows as it does a copy, and the result can be a `view`
+of one (`-> view T` needs a `view` parameter); `inout` doesn't apply yet (#21).
+
+### Generic native functions
+
+A native function can be generic.  Each instance calls the same C function,
+which is passed a `PaykanType` describing each type argument first.  What the
+function types by a type parameter crosses by address, so a value of any type,
+of any size, crosses:
+
+```pkn
+native fn pick<T>(first: bool, a: T, b: T) -> T = "sample_pick";
+native fn get<T>(b: view Obj, i: int) -> view T = "sample_get";
+```
+
+```c
+void sample_pick(const PaykanType *t, void *out, bool first, const void *a,
+                 const void *b);
+const void *sample_get(const PaykanType *t, PaykanObject *b, int64_t i);
+```
+
+| Paykan | C |
+|--------|---|
+| a type argument | `const PaykanType *`, ahead of the arguments |
+| `x: T`, `x: view T` | `const void *`: the value's address, borrowed for the call |
+| `-> T` | `void *out`, after the `PaykanType`s: storage C fills, owning the references it writes |
+| `-> view T` | `const void *` returned: the address of a value in a `view` argument, which the caller copies |
+| anything else | as in a non-generic native function |
+
+A `PaykanType` holds a value's `size` and `align`, its `kind`
+(`PaykanTypeKind`: int, float, bool, char, object or optional), and where it
+holds references: `nrefs` words follow it, each a `PaykanShared *`'s byte
+offset `<< 1`, `| 1` if it may be `NULL` (`PaykanType_ref`).  An `int` or a
+`float` is 8 bytes, a `bool` or a `char` 1, and a reference, an array or a
+tuple an 8-byte `PaykanShared *` box (`NULL` for an optional's `None`).
+`PaykanType_copy` copies a value, retaining its references, and
+`PaykanType_drop` releases them.  See `samples/imports/15_native_generic`.
 
 `paykan` does not build native code: you compile it however you like (any
 compiler, flags or language that produces C-ABI symbols) and pass the objects

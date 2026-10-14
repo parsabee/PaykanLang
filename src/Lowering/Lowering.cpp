@@ -11,6 +11,7 @@
 
 #include <cassert>
 #include <cstring>
+#include <optional>
 
 namespace paykan::lowering {
 
@@ -1127,20 +1128,40 @@ Val ModuleLowering::visitFuncDecl(ast::FuncDecl *node) {
 
 // A `native fn` (#198) is an ordinary function whose body calls its C symbol
 // with the runtime builtins' convention: a reference argument is borrowed as
-// the raw object, a reference result is an owned box.  Its own parameters
-// are released by the scope cleanup, as in any function.
+// the raw object, a reference result is an owned box.  An instance of a
+// generic one passes a PaykanType for each type argument first, and what its
+// template typed `T` by address: an argument as its parameter's, a `-> T`
+// result as the address of a local C writes, a `-> view T` result as the
+// address C returns, which the body copies.  Its own parameters are released
+// by the scope cleanup, as in any function.
 void ModuleLowering::emitNativeBody(ast::FuncDecl *node,
                                     const pir::Function &fn) {
   pir::Signature csig;
-  csig.Ret = fn.Sig.Ret;
   std::vector<Val> args;
-  for (const ast::Param &p : node->getParams()) {
-    Val v = B.load(CurrentScope->lookup(p.getName()), p.getName());
+  for (ast::Type *arg : node->getTypeArgs()) {
+    csig.Params.push_back(Type::Ptr);
+    args.push_back(emitTypeDescriptor(canonicalizeDeclType(arg)));
+  }
+  const bool resultByAddress =
+      node->resultByAddress() && fn.Sig.Ret != Type::Void;
+  const bool viewResult = node->getResultMode() == ast::ParamMode::View;
+  std::optional<pir::LocalId> out;
+  if (resultByAddress && !viewResult) {
+    out = B.addLocal("out", fn.Sig.Ret);
+    csig.Params.push_back(Type::Ptr);
+    args.push_back(B.localAddr(*out, "out.addr"));
+  }
+  for (size_t i = 0; i < node->getParams().size(); ++i) {
+    const std::string &pname = node->getParams()[i].getName();
+    pir::LocalId local = CurrentScope->lookup(pname);
+    Val v = node->paramByAddress(i) ? B.localAddr(local, pname + ".addr")
+                                    : B.load(local, pname);
     if (v.Ty == Type::Box)
-      v = emitSharedGet(v, p.getName() + ".obj");
+      v = emitSharedGet(v, pname + ".obj");
     csig.Params.push_back(v.Ty);
     args.push_back(v);
   }
+  csig.Ret = !resultByAddress ? fn.Sig.Ret : out ? Type::Void : Type::Ptr;
   const std::string name = pir::nativeName(node->getNativeSymbol());
   if (!FuncByName.count(name)) {
     Funcs.emplace_back();
@@ -1151,11 +1172,62 @@ void ModuleLowering::emitNativeBody(ast::FuncDecl *node,
     FuncByName[name] = &ext;
   }
   Val result = B.call(name, csig, args, "r");
+  if (out) {
+    result = B.load(*out, "out");
+  } else if (resultByAddress) {
+    result = B.ptrLoad(result, fn.Sig.Ret, "r.val");
+    if (result.Ty == Type::Box)
+      emitRetain(result);
+  }
   emitAllScopesCleanup();
-  if (csig.Ret == Type::Void)
+  if (fn.Sig.Ret == Type::Void)
     B.emitRetVoid();
   else
     B.emitRet(result);
+}
+
+// A value of every type is stored as one PIR slot, aligned to its size: a
+// reference as its box, None as a null one.
+Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
+  const Type slot = toPIRType(ty);
+  const int64_t size = slot == Type::Bool || slot == Type::Char ? 1 : 8;
+  std::vector<int64_t> words = {size, /*align=*/size, nativeTypeKind(ty), 0};
+  if (slot == Type::Box) {
+    words[3] = 1;
+    words.push_back(ast::isa<ast::OptionalType>(ty) ? 1 : 0); // offset 0
+  }
+  std::string key;
+  for (int64_t w : words) {
+    key += std::to_string(w);
+    key += '|';
+  }
+  auto [it, added] = InternedTypeDescriptors.try_emplace(key);
+  if (added) {
+    it->second = ".type" + std::to_string(InternedTypeDescriptors.size() - 1);
+    Mod.Datas.push_back({it->second, std::move(words)});
+  }
+  return Val::symbol(it->second, Type::Ptr);
+}
+
+unsigned char ModuleLowering::nativeTypeKind(ast::Type *ty) const {
+  if (ast::isa<ast::OptionalType>(ty))
+    return kNativeKindOptional;
+  if (isObjectElementType(ty))
+    return kNativeKindObject;
+  if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty)) {
+    switch (bt->getTypeKind()) {
+    case ast::BuiltinType::Float:
+      return kNativeKindFloat;
+    case ast::BuiltinType::Bool:
+      return kNativeKindBool;
+    case ast::BuiltinType::Char:
+      return kNativeKindChar;
+    case ast::BuiltinType::Int:
+    case ast::BuiltinType::Void:
+      break;
+    }
+  }
+  return kNativeKindInt; // an int or an enum
 }
 
 // -- Optionals

@@ -444,7 +444,7 @@ TranslationUnit *Parser::parseTranslationUnit() {
       break;
     case Tok::KwNative:
       if (auto *d = parseFuncDecl(/*native=*/true))
-        funcs.push_back(d);
+        (d->isGeneric() ? genericFuncs : funcs).push_back(d);
       else
         ok = false;
       break;
@@ -836,13 +836,10 @@ FuncDecl *Parser::parseFuncDecl(bool native) {
       return nullptr;
   }
 
-  // nativeFuncDecl ::= "native" "fn" IDENT "(" params? ")" ( "->" type )?
-  //                    "=" STRING ";"   -- the C symbol instead of a body
+  // nativeFuncDecl ::= "native" "fn" IDENT ( "<" typeParamList ">" )?
+  //                    "(" params? ")" ( "->" type )? "=" STRING ";"
+  //                    -- the C symbol instead of a body
   if (native) {
-    if (!typeParams.empty()) {
-      error(start, "a native function cannot be generic");
-      return nullptr;
-    }
     if (!expect(Tok::Assign, "after a native function's signature"))
       return nullptr;
     if (!at(Tok::String)) {
@@ -853,7 +850,7 @@ FuncDecl *Parser::parseFuncDecl(bool native) {
     if (!expect(Tok::Semi, "after a native function"))
       return nullptr;
     auto *fn = Ctx.make<FuncDecl>(span(start), name, std::move(params), retTy,
-                                  nullptr);
+                                  nullptr, std::move(typeParams));
     fn->setNativeSymbol(symbol);
     fn->setResultMode(resultMode);
     return fn;
