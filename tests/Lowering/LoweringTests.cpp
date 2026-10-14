@@ -211,6 +211,50 @@ TEST(Lowering, NativeFunctionCallsItsCSymbolWithTheBuiltinConvention) {
       << l.Text;
 }
 
+// An instance of a generic native function passes the kind of each type
+// argument first, then every argument and its result as a 64-bit slot: a
+// reference as its box, borrowed; a reference result is the owned box.
+TEST(Lowering, GenericNativeFunctionPassesTypesAndAddresses) {
+  auto l = lower(R"(
+    native fn pick<T>(first: bool, a: T, b: T) -> T = "pk_test_pick";
+    native fn get<T>(b: view Obj, i: int) -> view T = "pk_test_get";
+    fn main() -> int {
+      s = pick<Str>(True, "a", "b");
+      f = pick<float>(False, 1.5, 2.5);
+      b: Obj = "x";
+      println(get<Str>(b, 0));
+      return pick<int>(True, 1, 2);
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  // One PaykanType per type: size, alignment, kind, references (offsets).
+  EXPECT_NE(l.Text.find("data @.type0 = [8, 8, 4, 1, 0]"), std::string::npos)
+      << l.Text;
+  EXPECT_NE(l.Text.find("extern fn @$c.pk_test_pick(ptr, ptr, bool, ptr, "
+                        "ptr) -> void"),
+            std::string::npos)
+      << l.Text;
+  EXPECT_NE(l.Text.find("extern fn @$c.pk_test_get(ptr, obj, i64) -> ptr"),
+            std::string::npos)
+      << l.Text;
+  std::string str = function(l.Text, "pick<Str>");
+  EXPECT_NE(str.find("call @$c.pk_test_pick(@.type0, %out.addr"),
+            std::string::npos)
+      << str;
+  EXPECT_NE(str.find("%a.addr.6 = local.addr %a"), std::string::npos) << str;
+  EXPECT_EQ(count(str, "retain"), 0u) << str;
+  EXPECT_EQ(count(str, "release"), 2u) << str; // its own parameters
+  // A view result is the address of a value C keeps; the body copies it.
+  std::string get = function(l.Text, "get<Str>");
+  EXPECT_NE(get.find("ptr.load box, %r"), std::string::npos) << get;
+  EXPECT_EQ(count(get, "retain"), 1u) << get;
+  EXPECT_NE(l.Text.find("data @.type1 = [8, 8, 1, 0]"), std::string::npos)
+      << l.Text;
+  EXPECT_NE(function(l.Text, "pick<float>").find("pk_test_pick(@.type1, "),
+            std::string::npos)
+      << l.Text;
+}
+
 // -- Calls: callee-consumes ABI for user functions, borrow for builtins
 
 TEST(Lowering, UserCallRetainsAVariableArgument) {
