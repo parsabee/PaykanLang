@@ -567,6 +567,36 @@ file name and declaration positions, so no source is needed for the message
 (the source line excerpt is shown when the file exists). JSON diagnostics
 (#144) carry `module`, `file`, `line`, `column` for both frames.
 
+### 4.8 Source imports (implemented before `TMPL`)
+
+Templates of a module imported **from source** already work, without `TMPL`
+or `INST`:
+
+- **Resolution at export (§4.2) as a renamed AST.** `Sema::exportTemplates`
+  clones each template and spells every name its module declares, and every
+  `q::name` of one of its imports, as `$<canonical module>::name` (the hidden
+  qualifier, `Sema::hiddenQualifier`: no source can spell `$`). An importer
+  registers each module the bodies name under its hidden qualifier, then
+  instantiates the clone as it would a local template, in the template
+  module's file for diagnostics (§4.7).
+- **Identity.** A class instantiation is named `Box<int>`, as a local one
+  (open question 3 stands); an instantiation the importer meets as an
+  imported class of the template's module is that class. A function
+  instantiation is `$<module>::f<int>`.
+- **Emission.** Each instantiation is lowered once per program, by the first
+  module lowered that needs it (imports first); the others declare it
+  extern. It is not a unit of its own because it may call methods of the
+  requester's classes (`Box<Foo>`), which the requester only declares while
+  it is lowered; the driver-owned units of §4.5 take those from the
+  requester's `IFACE`.
+- **Caching.** A module with templates, or with instantiations of another
+  module's, is never written to the `.pkm` cache, so no `.pkm` holds
+  another module's instantiation, and importers always see its templates.
+  Nor is a module whose code declares such an instantiation extern (it
+  uses a `Box<int>` another module made): the extern names the module that
+  emits it in this program, which in another program may be a different
+  one.
+
 ---
 ## 5. `CODE`: binary PIR
 
