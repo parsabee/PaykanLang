@@ -648,10 +648,8 @@ private:
       const std::string *symbol = nf.name("the C symbol");
       if (!symbol || !nf.done() || !f.done())
         return nullptr;
-      if (!tparams.empty())
-        return fail(e, "a native function cannot be generic"), nullptr;
-      auto *fn =
-          Ctx.make<FuncDecl>(loc, *name, std::move(params), ret, nullptr);
+      auto *fn = Ctx.make<FuncDecl>(loc, *name, std::move(params), ret, nullptr,
+                                    std::move(tparams));
       fn->setNativeSymbol(*symbol);
       fn->setResultMode(resultMode);
       return fn;

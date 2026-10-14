@@ -134,6 +134,11 @@ inline constexpr const char *kPaykanTupleToString = "PaykanTuple_toString";
 inline constexpr const char *kPaykanTupleEquals = "PaykanTuple_equals";
 inline constexpr const char *kPaykanTupleVtable = "PaykanTuple_vtable";
 
+// Type descriptors: for the C code of generic native functions
+inline constexpr const char *kPaykanTypeCopy = "PaykanType_copy";
+inline constexpr const char *kPaykanTypeDrop = "PaykanType_drop";
+inline constexpr const char *kPaykanTypeIsUnset = "PaykanType_isUnset";
+
 // File
 inline constexpr const char *kPaykanFileNew = "PaykanFile_new";
 inline constexpr const char *kPaykanFileOpen = "PaykanFile_open";
@@ -313,6 +318,21 @@ enum TupleSlotKind : unsigned char {
   kTupleSlotChar = 3,  // int64_t holding one byte
   kTupleSlotRef = 4,   // PaykanShared* retained by the tuple
   kTupleSlotOpt = 5,   // an optional value's presence word; its value next
+};
+
+// -- Kinds of the types a generic native function is passed
+//
+// The `kind` word of a PaykanType (src/Runtime/Runtime.h, "Generic native
+// functions"), which the lowering emits for each type argument.  Must match
+// PaykanTypeKind (a static_assert in the codegen tests checks it).
+
+enum NativeTypeKind : unsigned char {
+  kNativeKindInt = 0,      // int64_t (also enum values)
+  kNativeKindFloat = 1,    // double
+  kNativeKindBool = 2,     // bool
+  kNativeKindChar = 3,     // int8_t
+  kNativeKindObject = 4,   // PaykanShared*, never null
+  kNativeKindOptional = 5, // PaykanShared*, null for None, or inline
 };
 
 // -- Names of lowering-generated globals and values
