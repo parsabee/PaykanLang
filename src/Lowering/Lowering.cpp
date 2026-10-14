@@ -585,6 +585,7 @@ Val ModuleLowering::visitTranslationUnit(ast::TranslationUnit *node) {
 }
 
 Val ModuleLowering::visitEnumDecl(ast::EnumDecl *) { return Val(); }
+Val ModuleLowering::visitImplDecl(ast::ImplDecl *) { return Val(); }
 Val ModuleLowering::visitMethodDecl(ast::MethodDecl *) { return Val(); }
 Val ModuleLowering::visitImportDecl(ast::ImportDecl *) { return Val(); }
 Val ModuleLowering::visitClassDecl(ast::ClassDecl *node) {

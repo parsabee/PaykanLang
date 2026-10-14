@@ -67,7 +67,8 @@ void ASTPrinter::visitTranslationUnit(TranslationUnit *node) {
   size_t total = node->getImports().size() + node->getEnumDecls().size() +
                  node->getClassDecls().size() + node->getFuncDecls().size() +
                  node->getGenericClassDecls().size() +
-                 node->getGenericFuncDecls().size();
+                 node->getGenericFuncDecls().size() +
+                 node->getImplDecls().size();
   size_t idx = 0;
   for (auto *imp : node->getImports()) {
     ++idx;
@@ -98,6 +99,11 @@ void ASTPrinter::visitTranslationUnit(TranslationUnit *node) {
     ++idx;
     ChildScope cs(*this, idx == total);
     visitFuncDecl(node->getFuncDecls()[i]);
+  }
+  for (auto *im : node->getImplDecls()) {
+    ++idx;
+    ChildScope cs(*this, idx == total);
+    visitImplDecl(im);
   }
 }
 
@@ -496,6 +502,8 @@ void ASTPrinter::visitFuncDecl(FuncDecl *node) {
   header("FuncDecl", node);
   if (node->isView())
     OS << " view"; // `view fn`, as written
+  if (node->isStatic())
+    OS << " static";
   OS << " '" << node->getName() << "'";
   printTypeParams(OS, node->getTypeParams());
   if (node->isNative())
@@ -547,6 +555,16 @@ void ASTPrinter::visitClassDecl(ClassDecl *node) {
     ++idx;
     ChildScope cs(*this, idx == total);
     visitFuncDecl(method);
+  }
+}
+
+void ASTPrinter::visitImplDecl(ImplDecl *node) {
+  header("ImplDecl", node);
+  OS << " '" << node->getTypeName() << "'\n";
+  const auto &methods = node->getMethods();
+  for (size_t i = 0; i < methods.size(); ++i) {
+    ChildScope cs(*this, i + 1 == methods.size());
+    visitFuncDecl(methods[i]);
   }
 }
 

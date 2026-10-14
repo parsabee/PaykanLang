@@ -480,10 +480,11 @@ private:
     std::vector<ClassDecl *> classes, genericClasses;
     std::vector<FuncDecl *> funcs, genericFuncs;
     std::vector<EnumDecl *> enums;
+    std::vector<ImplDecl *> impls;
     for (const SExpr *d : f.rest()) {
       if (d->K != SExpr::List) {
         fail(*d, "expected a declaration: (import ...), (enum ...), "
-                 "(class ...) or (fn ...)");
+                 "(class ...), (fn ...) or (impl ...)");
         return nullptr;
       }
       if (d->Text == "import") {
@@ -498,17 +499,42 @@ private:
       } else if (d->Text == "fn") {
         if (auto *fn = funcDecl(*d))
           (fn->isGeneric() ? genericFuncs : funcs).push_back(fn);
+      } else if (d->Text == "impl") {
+        if (auto *im = implDecl(*d))
+          impls.push_back(im);
       } else {
         fail(*d, "(" + d->Text +
                      " ...) is not a top-level declaration (import, enum, "
-                     "class, fn)");
+                     "class, fn, impl)");
       }
       if (failed())
         return nullptr;
     }
     return Ctx.make<TranslationUnit>(
         loc, std::move(imports), std::move(classes), std::move(funcs),
-        std::move(enums), std::move(genericClasses), std::move(genericFuncs));
+        std::move(enums), std::move(genericClasses), std::move(genericFuncs),
+        std::move(impls));
+  }
+
+  ImplDecl *implDecl(const SExpr &e) {
+    Fields f(*this, e);
+    SourceLocation loc = f.location();
+    const std::string *type = f.string("the type's name");
+    const SExpr *ml = type ? f.list("methods") : nullptr;
+    if (!ml)
+      return nullptr;
+    std::vector<FuncDecl *> methods;
+    for (const SExpr &m : ml->Items) {
+      if (m.K != SExpr::List || m.Text != "fn")
+        return fail(m, "expected a method: (fn ...)"), nullptr;
+      auto *fn = funcDecl(m);
+      if (!fn)
+        return nullptr;
+      methods.push_back(fn);
+    }
+    if (!f.done())
+      return nullptr;
+    return Ctx.make<ImplDecl>(loc, *type, std::move(methods));
   }
 
   ImportDecl *importDecl(const SExpr &e) {
@@ -659,19 +685,23 @@ private:
     CompoundStmt *body = block(f, "the function's body");
     if (!body)
       return nullptr;
-    // A `view fn` ends with `(qual view)`.
-    bool view = false;
+    // A `view fn` ends with `(qual view)`, a `static fn` with
+    // `(qual static)`.
+    bool view = false, isStatic = false;
     if (const SExpr *q = f.optionalList("qual")) {
       const SExpr *v = q->Items.size() == 1 ? &q->Items[0] : nullptr;
-      if (!v || v->K != SExpr::Symbol || v->Text != "view")
-        return fail(*q, "expected (qual view)"), nullptr;
-      view = true;
+      if (!v || v->K != SExpr::Symbol ||
+          (v->Text != "view" && v->Text != "static"))
+        return fail(*q, "expected (qual view) or (qual static)"), nullptr;
+      view = v->Text == "view";
+      isStatic = !view;
     }
     if (!f.done())
       return nullptr;
     auto *fn = Ctx.make<FuncDecl>(loc, *name, std::move(params), ret, body,
                                   std::move(tparams));
     fn->setView(view);
+    fn->setStatic(isStatic);
     fn->setResultMode(resultMode);
     return fn;
   }

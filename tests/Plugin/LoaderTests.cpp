@@ -727,7 +727,7 @@ TEST_F(FrontendPlugin, ParseFailures) {
   EXPECT_EQ(bad.Code, 1);
   EXPECT_NE(bad.Err.find("error: frontend 'test-fe' returned an invalid AST: "
                          "1:21: (frob ...) is not a top-level declaration "
-                         "(import, enum, class, fn)"),
+                         "(import, enum, class, fn, impl)"),
             std::string::npos)
       << bad.Err;
 

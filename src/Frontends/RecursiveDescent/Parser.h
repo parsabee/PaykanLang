@@ -115,6 +115,7 @@ private:
   bool parseModulePath(std::string &out);
   ast::ClassDecl *parseClassDecl();
   ast::EnumDecl *parseEnumDecl();
+  ast::ImplDecl *parseImplDecl();
   ast::FuncDecl *parseFuncDecl(bool native = false);
   bool parseTypeParamList(std::vector<const std::string *> &out);
   bool parseParamList(std::vector<ast::Param> &out);

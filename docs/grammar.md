@@ -53,7 +53,7 @@ Keywords (reserved; never identifiers):
 
 ```
 import  as  class  enum  match  mov  fn  native  return  if  then  else
-while  break  continue  True  False  None  _  view  inout  let
+while  break  continue  True  False  None  _  view  inout  let  impl  static
 ```
 
 `_` alone is the `UNDERSCORE` token (destructuring skip, match wildcard);
@@ -107,7 +107,7 @@ one tuple-index token (`\.[0-9]+`, longest match at the dot).
 ```
 translationUnit ::= topLevelDecl*
 topLevelDecl    ::= importDecl | classDecl | funcDecl | nativeFuncDecl
-                  | enumDecl
+                  | enumDecl | implDecl
 ```
 
 Declarations may appear in any order. The AST keeps them in four lists
@@ -140,6 +140,10 @@ classMember ::= varDecl ";" | funcDecl
 typeParams  ::= "<" IDENT ( "," IDENT )* ">"
 
 enumDecl    ::= "enum" IDENT "{" IDENT ( "," IDENT )* ","? "}"
+
+implDecl    ::= "impl" ( modulePath "::" )? IDENT "{" implMember* "}"
+implMember  ::= funcDecl | "static" "fn" IDENT "(" paramList? ")"
+                ( "->" ( "view" | "inout" )? typeAnnotation )? block
 
 funcDecl    ::= "view"? "fn" IDENT typeParams? "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )? block
