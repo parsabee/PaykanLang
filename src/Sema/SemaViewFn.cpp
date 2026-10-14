@@ -77,8 +77,11 @@ void Sema::warnMissingViewFns() {
   std::set<Family> could;
   for (const auto &[family, members] : families) {
     // A family started outside this module (Obj's toString, an imported
-    // class's method) keeps its marker: there is nothing to suggest.
+    // class's method, another module's template) keeps its marker: there is
+    // nothing to suggest.
     const auto *intro = family.first->findMethod(family.second);
+    if (ImportedTypeOrigins.count(family.first->getName()))
+      continue;
     bool introducedHere = false;
     bool changes = false;
     for (const MethodUse *m : members) {

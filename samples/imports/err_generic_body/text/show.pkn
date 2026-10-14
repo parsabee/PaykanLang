@@ -1,0 +1,4 @@
+// Module: text/show
+fn show<T>(x: T) -> Str {
+  return x.label();
+}

@@ -736,3 +736,54 @@ TEST(Pkm, BorrowedResultsAcrossModules) {
       << dump.out;
   fs::remove_all(dir);
 }
+
+// Generic templates across source modules (docs/design/pkm.md §4.8): a
+// module with templates, one that instantiates another module's, and one
+// that only uses such an instantiation (whose emitting module depends on
+// the program) are built from source every time, while the others are
+// cached as usual.  `m3` uses m2's Box<int>; in `p2`, m1 needs Box<int>
+// first and emits it.
+TEST(Pkm, GenericsAcrossSourceModulesAreNotCached) {
+  REQUIRE_BACKEND();
+  fs::path dir =
+      fs::temp_directory_path() / ("pkm_generics_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "lib" / "gen.pkn",
+            "class Box<T> { v: T; fn __init__(v: T) { self.v = v; }\n"
+            "  view fn one() -> int { return 1; } }\n");
+  writeFile(dir / "m1.pkn", "import lib::gen;\n"
+                            "fn one() -> int { return gen::Box<int>(0).one(); "
+                            "}\n");
+  writeFile(dir / "m2.pkn", "import lib::gen;\n"
+                            "fn make() -> gen::Box<int> { "
+                            "return gen::Box<int>(5); }\n");
+  writeFile(dir / "m3.pkn", "import m2;\n"
+                            "fn use() -> int { return m2::make().one(); }\n");
+  writeFile(dir / "plain.pkn", "fn two() -> int { return 2; }\n");
+  writeFile(dir / "p1.pkn", "import m3;\nimport plain;\n"
+                            "fn main() -> int { return m3::use() + "
+                            "plain::two(); }\n");
+  writeFile(dir / "p2.pkn", "import m1;\nimport m3;\n"
+                            "fn main() -> int { return m1::one() + m3::use(); "
+                            "}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  for (int round = 0; round < 2; ++round) {
+    auto p1 = paykan("--verbose p1.pkn");
+    EXPECT_EQ(p1.exitCode, 3) << p1.out;
+    for (const char *m : {"lib::gen", "m2", "m3"})
+      EXPECT_TRUE(contains(p1.out, std::string("module ") + m +
+                                       ": no cache entry; building from "
+                                       "source"))
+          << m << "\n"
+          << p1.out;
+    EXPECT_TRUE(contains(p1.out, round == 0 ? "module plain: wrote"
+                                            : "module plain: cache"))
+        << p1.out;
+    auto p2 = paykan("p2.pkn");
+    EXPECT_EQ(p2.exitCode, 2) << p2.out;
+  }
+  EXPECT_FALSE(fs::exists(dir / ".paykan_cache" / "m3.pkm"));
+  fs::remove_all(dir);
+}
