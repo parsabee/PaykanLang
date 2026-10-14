@@ -32,6 +32,21 @@ static_assert(int(paykan::names::kTupleSlotOpt) == int(PAYKAN_TUPLE_OPT),
 static_assert(paykan::names::kOptionalElemSize == long(PAYKAN_OPTIONAL_SIZE),
               "optional element size ABI drift");
 
+// Likewise the type kinds a generic native function is passed.
+static_assert(int(paykan::names::kNativeKindInt) == int(PAYKAN_KIND_INT),
+              "native type-kind ABI drift");
+static_assert(int(paykan::names::kNativeKindFloat) == int(PAYKAN_KIND_FLOAT),
+              "native type-kind ABI drift");
+static_assert(int(paykan::names::kNativeKindBool) == int(PAYKAN_KIND_BOOL),
+              "native type-kind ABI drift");
+static_assert(int(paykan::names::kNativeKindChar) == int(PAYKAN_KIND_CHAR),
+              "native type-kind ABI drift");
+static_assert(int(paykan::names::kNativeKindObject) == int(PAYKAN_KIND_OBJECT),
+              "native type-kind ABI drift");
+static_assert(int(paykan::names::kNativeKindOptional) ==
+                  int(PAYKAN_KIND_OPTIONAL),
+              "native type-kind ABI drift");
+
 // -- Literals, element reads, printing
 
 TEST(Tuple, PrimitiveElementsRoundTrip) {

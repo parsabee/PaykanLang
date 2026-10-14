@@ -1,0 +1,37 @@
+// Copyright (c) 2026 Parsa Bagheri
+// SPDX-License-Identifier: MIT
+//
+// Paykan runtime — copying and dropping a value of any type through its
+// PaykanType (Runtime.h, "Generic native functions"), for the C code of
+// generic native functions.
+
+#include "Runtime.h"
+
+#include <string.h>
+
+/// The reference the @p type value at @p value holds at its @p k-th place.
+static PaykanShared *type_ref(const PaykanType *type, const void *value,
+                              int64_t k) {
+  PaykanShared *ref;
+  memcpy(&ref, (const char *)value + (PaykanType_ref(type, k) >> 1),
+         sizeof(PaykanShared *));
+  return ref;
+}
+
+void PaykanType_copy(const PaykanType *type, void *dst, const void *src) {
+  memcpy(dst, src, (size_t)type->size);
+  for (int64_t k = 0; k < type->nrefs; ++k)
+    Paykan_retain(type_ref(type, dst, k));
+}
+
+void PaykanType_drop(const PaykanType *type, void *value) {
+  for (int64_t k = 0; k < type->nrefs; ++k)
+    Paykan_release(type_ref(type, value, k));
+}
+
+int PaykanType_isUnset(const PaykanType *type, const void *value) {
+  for (int64_t k = 0; k < type->nrefs; ++k)
+    if (!(PaykanType_ref(type, k) & 1) && !type_ref(type, value, k))
+      return 1;
+  return 0;
+}
