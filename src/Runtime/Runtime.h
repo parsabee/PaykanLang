@@ -482,6 +482,58 @@ void Paykan_release(PaykanShared *shared);
 /// Convenience: return the underlying object pointer.
 PaykanObject *PaykanShared_get(PaykanShared *shared);
 
+// -- Generic native functions
+//
+// An instance of a generic `native fn` (`native fn get<T>(b: view Obj, i: int)
+// -> view T = "..."`, docs/language/02-functions-and-calling.md) receives a
+// PaykanType for each type argument, in order, ahead of its arguments.  A
+// parameter typed by a type parameter (`x: T`, `x: view T`) crosses by
+// address, as a `const void *` C borrows for the call.  A `-> T` result is
+// written to a `void *out` passed after the PaykanTypes, a `-> view T` result
+// is returned as a `const void *` into a `view` argument.  Every other
+// parameter and result crosses as it does for a non-generic native function.
+//
+// A PaykanType describes a value of the type as it is stored: its size and
+// alignment, its kind, and where it holds references (PaykanShared* boxes),
+// which a copy retains and a drop releases.  The compiler emits one per
+// type, as constant data; the kind codes must match
+// paykan::names::NativeTypeKind in include/Names.h.
+
+typedef enum PaykanTypeKind {
+  PAYKAN_KIND_INT = 0,      // int64_t (also enum values)
+  PAYKAN_KIND_FLOAT = 1,    // double
+  PAYKAN_KIND_BOOL = 2,     // bool
+  PAYKAN_KIND_CHAR = 3,     // int8_t
+  PAYKAN_KIND_OBJECT = 4,   // PaykanShared*, never NULL
+  PAYKAN_KIND_OPTIONAL = 5, // PaykanShared*, NULL for None; an inline one
+                            // (int? ...) is its payload and an int64_t
+                            // presence word
+} PaykanTypeKind;
+
+/// Followed in memory by `nrefs` int64_t words, one per reference: its byte
+/// offset in the value << 1, | 1 if it may be NULL (PaykanType_ref).
+typedef struct PaykanType {
+  int64_t size;  ///< bytes of a value
+  int64_t align; ///< its alignment
+  int64_t kind;  ///< PaykanTypeKind
+  int64_t nrefs; ///< references in a value
+} PaykanType;
+
+/// The word of the @p k-th reference of a @p type value.
+static inline int64_t PaykanType_ref(const PaykanType *type, int64_t k) {
+  return ((const int64_t *)(type + 1))[k];
+}
+
+/// Make @p dst (uninitialised storage for a @p type value) a copy of the
+/// value at @p src, retaining the references it holds.
+void PaykanType_copy(const PaykanType *type, void *dst, const void *src);
+/// Release the references the @p type value at @p value holds; the storage
+/// is then uninitialised.
+void PaykanType_drop(const PaykanType *type, void *value);
+/// True if a reference the @p type value at @p value holds that may not be
+/// NULL is: storage that was never set.
+int PaykanType_isUnset(const PaykanType *type, const void *value);
+
 // -- Runtime panics
 
 /// Print a diagnostic and abort: the lowering's trap target for integer `/`

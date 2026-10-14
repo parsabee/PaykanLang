@@ -28,11 +28,25 @@ TEST(Native, MalformedDeclarationsAreRejected) {
            "native fn f() -> int = pk_f;",       // symbol not a string
            "native fn f() -> int = \"pk_f\"",    // no ';'
            "native fn f() -> int { return 1; }", // a body
-           "native fn f<T>(x: T) = \"pk_f\";",   // generic
            "native f() = \"pk_f\";",             // no 'fn'
            "class C { native fn f() = \"pk_f\"; }",
        }) {
     auto [ok, _] = parse(std::string(src) + "\nfn main() -> int { return 0; }");
     EXPECT_FALSE(ok) << src;
   }
+}
+
+// A generic native function is a template, like any generic function.
+TEST(Native, GenericDeclarationParses) {
+  auto [ok, driver] = parse(R"(
+    native fn pick<T>(a: T, b: view T) -> view T = "pk_test_pick";
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(ok);
+  ASSERT_EQ(driver->getRoot()->getGenericFuncDecls().size(), 1u);
+  auto *fn = driver->getRoot()->getGenericFuncDecls()[0];
+  EXPECT_TRUE(fn->isNative());
+  EXPECT_EQ(fn->getNativeSymbol(), "pk_test_pick");
+  EXPECT_EQ(fn->getTypeParams().size(), 1u);
+  EXPECT_EQ(fn->getResultMode(), paykan::ast::ParamMode::View);
 }
