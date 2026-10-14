@@ -102,7 +102,20 @@ Val ModuleLowering::ExprEmitter::visitArrayLiteralExpr(
   Val lenVal = Val::i64(static_cast<int64_t>(len));
 
   Val arr;
-  if (isObjectArray) {
+  if (ast::isValueOptional(elemTy)) {
+    // Optional values are stored inline (#96), each written to its slot.
+    arr = L.callRuntime(kPaykanArrayNewSized,
+                        {lenVal, Val::i64(kOptionalElemSize)}, "arr");
+    for (size_t i = 0; i < len; ++i) {
+      Val v = visit(node->getElements()[i]);
+      if (!v)
+        return Val();
+      L.B.ptrStore(L.callRuntime(kPaykanArraySlot,
+                                 {arr, Val::i64(static_cast<int64_t>(i))},
+                                 "elem.addr"),
+                   v);
+    }
+  } else if (isObjectArray) {
     arr = L.callRuntime(kPaykanArrayNewObj, {lenVal}, "arr");
     for (size_t i = 0; i < len; ++i) {
       auto *elemExpr = node->getElements()[i];
@@ -244,8 +257,15 @@ Val ModuleLowering::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
     return ch;
   }
 
-  Val raw = L.callRuntime(kPaykanArrayGet, {recv.Raw, idx}, "elem.raw");
   ast::Type *elemTy = node->getResolvedType();
+  if (ast::isValueOptional(elemTy)) {
+    // An optional value, read in place.
+    Val addr = L.callRuntime(kPaykanArraySlot, {recv.Raw, idx}, "elem.addr");
+    Val v = L.B.ptrLoad(addr, L.toPIRType(elemTy), "elem");
+    L.releaseIfOwned(recvOwned);
+    return v;
+  }
+  Val raw = L.callRuntime(kPaykanArrayGet, {recv.Raw, idx}, "elem.raw");
   if (!L.isObjectElementType(elemTy)) {
     L.releaseIfOwned(recvOwned);
     if (!elemTy)
@@ -255,12 +275,6 @@ Val ModuleLowering::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
 
   // Object element: the slot stores a box as bits.
   Val shared = L.B.cast(raw, Type::Box, "elem.shared");
-  // An optional value, kept in the slot in its boxed form.
-  if (ast::isValueOptional(elemTy)) {
-    Val v = L.emitOptionalFromBox(shared, elemTy);
-    L.releaseIfOwned(recvOwned);
-    return v;
-  }
   // A temporary array (`mk()[0]`) dies with this expression: retain the
   // element and hand the consumer the +1 box.
   if (L.exprAlreadyShared(node)) {
@@ -783,7 +797,14 @@ Val ModuleLowering::ExprEmitter::emitArrayPush(ast::MethodCallExpr *node,
   if (node->getNumArguments() != 1)
     return Val();
   auto *argExpr = node->getArguments()[0];
-  if (L.isObjectElementType(elemTy)) {
+  if (ast::isValueOptional(elemTy)) {
+    // The value first: the slot's address lasts until the array changes.
+    Val argVal = L.emitExpr(argExpr);
+    if (!argVal)
+      return Val();
+    L.B.ptrStore(L.callRuntime(kPaykanArrayPushSlot, {recv}, "elem.addr"),
+                 argVal);
+  } else if (L.isObjectElementType(elemTy)) {
     Val argVal = L.emitAsShared(argExpr);
     if (!argVal)
       return Val();
@@ -804,11 +825,11 @@ Val ModuleLowering::ExprEmitter::emitArrayPush(ast::MethodCallExpr *node,
 Val ModuleLowering::ExprEmitter::emitArrayPop(const Val &recv,
                                               ast::Type *elemTy) {
   if (ast::isValueOptional(elemTy)) {
-    // The slot's box (its boxed form) is handed over: read and release it.
-    Val box = L.callRuntime(kPaykanArrayPopObj, {recv}, "mcall");
-    Val v = L.emitOptionalFromBox(box, elemTy);
-    L.emitRelease(box);
-    return v;
+    // The runtime copies the element out before the array may shrink.
+    pir::LocalId out = L.B.addLocal("popped", L.toPIRType(elemTy));
+    L.callRuntime(kPaykanArrayPopInto,
+                  {recv, L.B.localAddr(out, "popped.addr")});
+    return L.B.load(out, "popped");
   }
   if (L.isObjectElementType(elemTy))
     return L.callRuntime(kPaykanArrayPopObj, {recv}, "mcall");
@@ -992,7 +1013,13 @@ Val ModuleLowering::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
           if (auto *at = ast::dyn_cast<ast::ArrayType>(st))
             elemTy = at->getElementType();
 
-  if (isObjectElementType(elemTy)) {
+  if (ast::isValueOptional(elemTy)) {
+    // The value first, then the element's address (bounds-checked).
+    Val val = emitExpr(node->getValue());
+    if (!val)
+      return Val();
+    B.ptrStore(callRuntime(kPaykanArraySlot, {arrRaw, idx}, "elem.addr"), val);
+  } else if (isObjectElementType(elemTy)) {
     Val val = emitAsShared(node->getValue());
     if (!val)
       return Val();
@@ -1032,10 +1059,50 @@ unsigned char ModuleLowering::tupleElementKind(ast::Type *elemTy) const {
   return kTupleSlotInt;
 }
 
+int64_t ModuleLowering::tupleSlot(const ast::TupleType *tt, size_t i) {
+  int64_t slot = 0;
+  for (size_t k = 0; k < i && k < tt->getArity(); ++k)
+    slot += ast::isValueOptional(tt->getElementType(k)) ? 2 : 1;
+  return slot;
+}
+
+void ModuleLowering::emitTupleSetValue(const Val &tup, int64_t slot,
+                                       const Val &v, ast::Type *elemTy) {
+  if (ast::isValueOptional(elemTy)) {
+    // The presence word, then the value (0 when absent).
+    callRuntime(kPaykanTupleSet,
+                {tup, Val::i64(slot),
+                 B.cast(B.isSome(v, "opt.has"), Type::I64, "opt.has.bits")});
+    callRuntime(kPaykanTupleSet, {tup, Val::i64(slot + 1),
+                                  toSlotBits(B.unwrap(v, "opt.value"))});
+    return;
+  }
+  callRuntime(kPaykanTupleSet,
+              {tup, Val::i64(slot), toSlotBits(promoteIntToFloat(v, elemTy))});
+}
+
+Val ModuleLowering::emitTupleGetValue(const Val &tup, int64_t slot,
+                                      ast::Type *elemTy) {
+  Val bits = callRuntime(kPaykanTupleGet, {tup, Val::i64(slot)}, "elem.raw");
+  if (!ast::isValueOptional(elemTy))
+    return fromSlotBits(bits, elemTy);
+  Val has = B.cmp(CmpPred::Ne, bits, Val::i64(0), "opt.has");
+  Val valueBits =
+      callRuntime(kPaykanTupleGet, {tup, Val::i64(slot + 1)}, "elem.raw");
+  Val some =
+      B.some(fromSlotBits(valueBits, ast::stripOptional(elemTy)), "some");
+  return B.select(has, some, B.none(some.Ty, "none"), "elem");
+}
+
 Val ModuleLowering::emitTupleKindsGlobal(ast::TupleType *tt) {
   std::string key;
-  for (ast::Type *e : tt->getElementTypes())
+  for (ast::Type *e : tt->getElementTypes()) {
+    if (ast::isValueOptional(e)) {
+      key += static_cast<char>('0' + kTupleSlotOpt);
+      e = ast::stripOptional(e);
+    }
     key += static_cast<char>('0' + tupleElementKind(e));
+  }
   auto it = InternedTupleKinds.find(key);
   if (it != InternedTupleKinds.end())
     return Val::symbol(it->second, Type::Ptr);
@@ -1082,26 +1149,25 @@ Val ModuleLowering::ExprEmitter::visitTupleLiteralExpr(
   auto *tt = ast::dyn_cast<ast::TupleType>(node->getResolvedType());
   assert(tt && tt->getArity() == node->getNumElements() &&
          "Sema must resolve every tuple literal to its TupleType");
-  Val tup = L.callRuntime(kPaykanTupleNew,
-                          {Val::i64(static_cast<int64_t>(tt->getArity())),
-                           L.emitTupleKindsGlobal(tt)},
-                          "tup");
+  Val tup = L.callRuntime(
+      kPaykanTupleNew,
+      {Val::i64(tupleSlot(tt, tt->getArity())), L.emitTupleKindsGlobal(tt)},
+      "tup");
   for (size_t i = 0; i < tt->getArity(); ++i) {
     ast::Expr *elemExpr = node->getElements()[i];
     ast::Type *elemTy = tt->getElementType(i);
-    Val idx = Val::i64(static_cast<int64_t>(i));
+    int64_t slot = tupleSlot(tt, i);
     if (L.isObjectElementType(elemTy)) {
       Val box = L.emitAsShared(elemExpr);
       if (!box)
         return Val();
-      L.callRuntime(kPaykanTupleSetObj, {tup, idx, box});
+      L.callRuntime(kPaykanTupleSetObj, {tup, Val::i64(slot), box});
       L.emitRelease(box);
     } else {
       Val v = visit(elemExpr);
       if (!v)
         return Val();
-      v = L.promoteIntToFloat(v, elemTy);
-      L.callRuntime(kPaykanTupleSet, {tup, idx, L.toSlotBits(v)});
+      L.emitTupleSetValue(tup, slot, v, elemTy);
     }
   }
   return L.emitSharedNew(tup, "tup.shared");
@@ -1114,23 +1180,20 @@ Val ModuleLowering::ExprEmitter::visitTupleIndexExpr(
     return Val();
   const ExprValue &recvOwned = recv.Owned;
 
-  Val bits = L.callRuntime(
-      kPaykanTupleGet,
-      {recv.Raw, Val::i64(static_cast<int64_t>(node->getIndex()))}, "elem.raw");
+  auto *tt = ast::dyn_cast<ast::TupleType>(node->getTuple()->getResolvedType());
+  int64_t slot = tt ? tupleSlot(tt, node->getIndex())
+                    : static_cast<int64_t>(node->getIndex());
   ast::Type *elemTy = node->getResolvedType();
   if (!L.isObjectElementType(elemTy)) {
-    L.releaseIfOwned(recvOwned);
-    return L.fromSlotBits(bits, elemTy);
-  }
-  // Reference element: the slot's box, borrowed from the tuple; retained
-  // first when the tuple was a temporary.
-  Val box = L.B.cast(bits, Type::Box, "elem.shared");
-  // An optional value, kept in the slot in its boxed form.
-  if (ast::isValueOptional(elemTy)) {
-    Val v = L.emitOptionalFromBox(box, elemTy);
+    Val v = L.emitTupleGetValue(recv.Raw, slot, elemTy);
     L.releaseIfOwned(recvOwned);
     return v;
   }
+  // Reference element: the slot's box, borrowed from the tuple; retained
+  // first when the tuple was a temporary.
+  Val bits =
+      L.callRuntime(kPaykanTupleGet, {recv.Raw, Val::i64(slot)}, "elem.raw");
+  Val box = L.B.cast(bits, Type::Box, "elem.shared");
   if (recvOwned.isOwned()) {
     L.emitRetain(box);
     L.releaseIfOwned(recvOwned);
@@ -1155,18 +1218,15 @@ Val ModuleLowering::visitDestructureStmt(ast::DestructureStmt *node) {
     ast::Type *elemTy = tt->getElementType(i);
     const std::string &name = target.getName();
 
-    Val bits = callRuntime(
-        kPaykanTupleGet, {raw, Val::i64(static_cast<int64_t>(i))}, "elem.raw");
     Val v;
-    if (ast::isValueOptional(elemTy)) {
-      // An optional value, kept in the slot in its boxed form.
-      v = emitOptionalFromBox(B.cast(bits, Type::Box, "elem.shared"), elemTy);
-    } else if (isObjectElementType(elemTy)) {
+    if (isObjectElementType(elemTy)) {
       // The binding becomes an owner of the element: +1 on the slot's box.
+      Val bits = callRuntime(kPaykanTupleGet, {raw, Val::i64(tupleSlot(tt, i))},
+                             "elem.raw");
       v = B.cast(bits, Type::Box, "elem.shared");
       emitRetain(v);
     } else {
-      v = fromSlotBits(bits, elemTy);
+      v = emitTupleGetValue(raw, tupleSlot(tt, i), elemTy);
     }
 
     ast::Type *bindTy = elemTy;

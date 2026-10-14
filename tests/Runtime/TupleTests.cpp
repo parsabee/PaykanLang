@@ -388,3 +388,48 @@ TEST(TupleEquals, DoesNotLeakOrDoubleFree) {
   EXPECT_EQ(Paykan_heap_live_blocks(), 0);
   Paykan_heap_set_tracking(0);
 }
+
+// -- Optional value elements (#96): a presence slot and its value
+
+// (int?, Str): an OPT presence word, the int, then the Str.
+static PaykanTuple *makeOptIntStr(bool present, int64_t n, const char *s) {
+  const uint8_t kinds[3] = {PAYKAN_TUPLE_OPT, PAYKAN_TUPLE_INT,
+                            PAYKAN_TUPLE_REF};
+  PaykanTuple *t = PaykanTuple_new(3, kinds);
+  PaykanTuple_set(t, 0, present ? 1 : 0);
+  PaykanTuple_set(t, 1, present ? n : 0);
+  PaykanShared *box = boxStr(s);
+  PaykanTuple_set_obj(t, 2, box);
+  Paykan_release(box);
+  return t;
+}
+
+TEST(TupleOptional, RendersTheValueOrNone) {
+  PaykanTuple *a = makeOptIntStr(true, 7, "x");
+  PaykanTuple *b = makeOptIntStr(false, 0, "y");
+  EXPECT_EQ(render(a), "(7, x)");
+  EXPECT_EQ(render(b), "(None, y)");
+  const uint8_t kinds[2] = {PAYKAN_TUPLE_OPT, PAYKAN_TUPLE_FLOAT};
+  PaykanTuple *f = PaykanTuple_new(2, kinds);
+  PaykanTuple_set(f, 0, 1);
+  PaykanTuple_set(f, 1, bitsOf(2.5));
+  EXPECT_EQ(render(f), "(2.5)");
+  PaykanTuple_destroy((PaykanObject *)a);
+  PaykanTuple_destroy((PaykanObject *)b);
+  PaykanTuple_destroy((PaykanObject *)f);
+}
+
+TEST(TupleOptional, EqualsComparesPresenceThenValue) {
+  PaykanTuple *a = makeOptIntStr(true, 7, "x");
+  PaykanTuple *a2 = makeOptIntStr(true, 7, "x");
+  PaykanTuple *c = makeOptIntStr(true, 8, "x");
+  PaykanTuple *n = makeOptIntStr(false, 0, "x");
+  PaykanTuple *n2 = makeOptIntStr(false, 0, "x");
+  EXPECT_EQ(tupleEq(a, a2), 1);
+  EXPECT_EQ(tupleEq(a, c), 0);
+  EXPECT_EQ(tupleEq(a, n), 0);
+  EXPECT_EQ(tupleEq(n, a), 0);
+  EXPECT_EQ(tupleEq(n, n2), 1);
+  for (PaykanTuple *t : {a, a2, c, n, n2})
+    PaykanTuple_destroy((PaykanObject *)t);
+}

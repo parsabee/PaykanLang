@@ -67,6 +67,10 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanArrayPushObj, {{kObj, kBox}, kVoid}},
     {kPaykanArrayPop, {{kObj}, kI64}},
     {kPaykanArrayPopObj, {{kObj}, kBox}},
+    {kPaykanArrayNewSized, {{kI64, kI64}, kObj}},
+    {kPaykanArraySlot, {{kObj, kI64}, kPtr}},
+    {kPaykanArrayPushSlot, {{kObj}, kPtr}},
+    {kPaykanArrayPopInto, {{kObj, kPtr}, kVoid}},
     {kPaykanTupleNew, {{kI64, kPtr}, kObj}},
     {kPaykanTupleGet, {{kObj, kI64}, kI64}},
     {kPaykanTupleSet, {{kObj, kI64, kI64}, kVoid}},
@@ -283,8 +287,10 @@ bool ModuleLowering::isObjectElementType(ast::Type *elemTy) const {
     return false;
   if (auto *ct = ast::dyn_cast<ast::ClassType>(elemTy))
     return ASTCtx.lookupEnumType(ct->getName()) == nullptr;
+  // An optional value is stored inline (#96), the optional of a reference
+  // as its box.
   return ast::isa<ast::ArrayType>(elemTy) || ast::isa<ast::TupleType>(elemTy) ||
-         ast::isa<ast::OptionalType>(elemTy);
+         (ast::isa<ast::OptionalType>(elemTy) && !ast::isValueOptional(elemTy));
 }
 
 ast::Type *ModuleLowering::canonicalizeDeclType(ast::Type *ty) {
@@ -1261,20 +1267,6 @@ Val ModuleLowering::emitOptionalBox(const Val &opt, ast::Type *optTy) {
   return B.load(tmp, "opt.box");
 }
 
-Val ModuleLowering::emitOptionalFromBox(const Val &box, ast::Type *optTy) {
-  Type t = toPIRType(optTy);
-  pir::LocalId tmp = B.addLocal("opt", t);
-  B.store(tmp, B.none(t, "none"));
-  Val has = B.cmp(pir::CmpPred::Ne, box, Val::null(Type::Box), "opt.has");
-  pir::If *s = B.openIf(has, false);
-  B.enter(*s->Then);
-  if (Val v = emitPrimitiveUnbox(B.unbox(box, "opt.obj"),
-                                 ast::stripOptional(optTy), "opt.value"))
-    B.store(tmp, B.some(v, "some"));
-  B.leave();
-  return B.load(tmp, "opt");
-}
-
 Val ModuleLowering::emitPrimitiveBox(const Val &v, ast::Type *optTy) {
   auto *inner = ast::cast<ast::BuiltinType>(ast::stripOptional(optTy));
   const char *ctor = nullptr;
@@ -1428,8 +1420,8 @@ Val ModuleLowering::emitAsShared(ast::Expr *expr) {
   // `None` into a `T?` slot is the null box (no allocation at all).
   if (isNoneForOptional(expr))
     return Val::null(Type::Box);
-  // An optional value where a box is due: its boxed form (`T?` into `Obj`
-  // also turns None into the None object).
+  // An optional value into an `Obj` slot: its boxed form (and None the
+  // None object).
   if (ast::Type *optTy = valueOptionalType(expr)) {
     Val v = emitExpr(expr);
     if (!v)

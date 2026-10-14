@@ -207,9 +207,9 @@ fn show(o: int?) -> Str {
   as a bare `Int`, which in an `Obj` slot would print the variant's ordinal rather than its name.
 
 At runtime an `int?` is a value: the `int` and a presence flag, held inline in a variable, a
-field or a parameter and copied like an `int`, with no heap allocation and no reference count.
-`None` is the flag being clear. Only where an object is expected (an `Obj`, and for now an
-array or tuple element) is a present value kept as its boxed class.
+field, a parameter, an array element or a tuple element and copied like an `int`, with no heap
+allocation and no reference count. `None` is the flag being clear. Only where an object is
+expected (an `Obj`) is a present value kept as its boxed class.
 
 ---
 
@@ -305,8 +305,8 @@ fn pick(c: bool) -> Str? { return if c then "yes" else None; }
 
 A `T?` of a reference type costs nothing extra: it is the same reference-counted box as a `T`,
 with "no box" meaning `None`. An optional primitive is a value, the primitive and a presence
-flag: it allocates nothing and is never counted (except as an `Obj`, or for now in an array
-or tuple slot, where a present value is one boxed `Int` / `Float` / `Bool` / `Char` object).
+flag: it allocates nothing and is never counted (except as an `Obj`, where a present value is
+one boxed `Int` / `Float` / `Bool` / `Char` object). An `int?[]` holds its elements inline.
 Retaining, releasing and destroying an absent optional are no-ops. See `08-memory-model.md`.
 
 ---

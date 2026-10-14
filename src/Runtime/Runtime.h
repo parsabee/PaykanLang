@@ -48,7 +48,10 @@ extern "C" {
 //       name (`geometry::shapes::describe`), not the absolute file path.
 //   v7: optionals of value types are values, not boxes (#96): an `int?`
 //       parameter, result or field is a { value, presence } pair, and the
-//       parses `int<Str>` & co. are PaykanString_parse_int & co.
+//       parses `int<Str>` & co. are PaykanString_parse_int & co.; an
+//       `int?[]` holds its elements inline (PaykanArray.elem_size,
+//       PaykanArray_new_sized & co.) and a tuple an `int?` element as an
+//       OPT presence slot and its value.
 #define PAYKAN_RUNTIME_ABI_VERSION 7
 
 // -- Target assumptions
@@ -368,17 +371,27 @@ extern PaykanMethod PaykanError_vtable[PAYKAN_OBJECT_SLOTS];
 // Inherits Object.  The first three vtable slots match Object's layout;
 // additional slots follow for Array-specific methods.
 //
-// Every element slot is pointer-sized (8 bytes on all supported targets).
-// Primitive elements (int, float, bool) are stored unboxed as int64_t/double;
-// class-type elements store a PaykanShared* (retained by the array).
+// An element slot is pointer-sized (8 bytes on all supported targets), except
+// in an array of optional values.  Primitive elements (int, float, bool) are
+// stored unboxed as int64_t/double; class-type elements store a
+// PaykanShared* (retained by the array); an optional value (`int?` & co.,
+// #96) is stored inline as the compiler lays it out, PAYKAN_OPTIONAL_SIZE
+// bytes (the payload, then an 8-byte presence word: all zero is None).
+
+/// The size of an inline optional value, an `int?[]` element.
+#define PAYKAN_OPTIONAL_SIZE 16UL
+/// The largest element PaykanArray_new_sized accepts.
+#define PAYKAN_MAX_ELEM_SIZE 64UL
 
 struct PaykanArray {
-  PaykanMethod *vtable; // PaykanArray_vtable (primitive) or
-                        // PaykanArray_obj_vtable (object)
-  PaykanShared *shared; // object header (see PaykanObject)
-  void *data;           // heap-allocated element buffer (8 bytes/slot)
-  unsigned long len;    // number of live elements
-  unsigned long cap;    // allocated capacity (in elements)
+  PaykanMethod *vtable;    // PaykanArray_vtable (primitive),
+                           // PaykanArray_obj_vtable (object) or
+                           // PaykanArray_sized_vtable (optional values)
+  PaykanShared *shared;    // object header (see PaykanObject)
+  void *data;              // heap-allocated element buffer
+  unsigned long len;       // number of live elements
+  unsigned long cap;       // allocated capacity (in elements)
+  unsigned long elem_size; // bytes per element (8, or the optional's size)
 };
 
 // -- Constructors
@@ -390,6 +403,11 @@ PaykanArray *PaykanArray_new_from_data(unsigned long len, const void *data);
 /// Object array (class-type elements stored as PaykanShared*):
 /// set/destroy manage reference counts automatically.
 PaykanArray *PaykanArray_new_obj(unsigned long len);
+
+/// Array of @p len zeroed elements of @p elem_size bytes (an `int?[]`: every
+/// element None), read and written in place through PaykanArray_slot,
+/// PaykanArray_push_slot and PaykanArray_pop_into.  Holds no references.
+PaykanArray *PaykanArray_new_sized(unsigned long len, unsigned long elem_size);
 
 // -- Element access
 
@@ -404,6 +422,18 @@ void PaykanArray_set(PaykanArray *arr, unsigned long idx, void *value);
 /// one.
 void PaykanArray_set_obj(PaykanArray *arr, unsigned long idx,
                          PaykanShared *value);
+
+/// The address of element @p idx (bounds-checked), to read or write in place
+/// before the array next changes length.
+void *PaykanArray_slot(PaykanArray *arr, unsigned long idx);
+
+/// Append an element and return its address (uninitialised: the caller
+/// stores the element there before the array next changes length).
+void *PaykanArray_push_slot(PaykanArray *arr);
+
+/// Remove the last element, copying its elem_size bytes to @p out.  Aborts
+/// if the array is empty.
+void PaykanArray_pop_into(PaykanArray *arr, void *out);
 
 // -- Method implementations
 void PaykanArray_destroy(PaykanObject *self);
@@ -430,6 +460,8 @@ extern PaykanMethod
     PaykanArray_vtable[PAYKAN_ARRAY_SLOTS]; // for primitive-element arrays
 extern PaykanMethod
     PaykanArray_obj_vtable[PAYKAN_ARRAY_SLOTS]; // for object-element arrays
+extern PaykanMethod
+    PaykanArray_sized_vtable[PAYKAN_ARRAY_SLOTS]; // for optional elements
 
 // -- Tuple
 //
@@ -450,6 +482,9 @@ typedef enum PaykanTupleKind {
   PAYKAN_TUPLE_BOOL = 2,  // int64_t 0 / 1
   PAYKAN_TUPLE_CHAR = 3,  // int64_t holding one byte
   PAYKAN_TUPLE_REF = 4,   // PaykanShared* (retained) or NULL
+  // The presence word of an optional value (`int?` & co., #96): 0 / 1.  The
+  // value is the next slot, of its own kind (its bits are 0 when absent).
+  PAYKAN_TUPLE_OPT = 5,
 } PaykanTupleKind;
 
 typedef struct PaykanTuple {

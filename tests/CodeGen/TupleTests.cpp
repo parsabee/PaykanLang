@@ -26,6 +26,11 @@ static_assert(int(paykan::names::kTupleSlotChar) == int(PAYKAN_TUPLE_CHAR),
               "tuple slot-kind ABI drift");
 static_assert(int(paykan::names::kTupleSlotRef) == int(PAYKAN_TUPLE_REF),
               "tuple slot-kind ABI drift");
+static_assert(int(paykan::names::kTupleSlotOpt) == int(PAYKAN_TUPLE_OPT),
+              "tuple slot-kind ABI drift");
+// An `int?[]` element is the size the lowering asks the runtime for.
+static_assert(paykan::names::kOptionalElemSize == long(PAYKAN_OPTIONAL_SIZE),
+              "optional element size ABI drift");
 
 // -- Literals, element reads, printing
 

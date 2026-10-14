@@ -828,6 +828,39 @@ TEST(Lowering, OptionalValuesAreNotBoxed) {
   EXPECT_EQ(l.Text.find("PaykanFloat"), std::string::npos) << l.Text;
 }
 
+// An array or tuple of optional values holds them inline: the elements are
+// read and written in place, a tuple's as a presence slot and a value slot.
+TEST(Lowering, ArrayAndTupleElementsOfOptionalsAreInline) {
+  auto l = lower(R"(
+    fn main() -> int {
+      xs: int?[] = [1, None];
+      xs.push(3);
+      xs[0] = None;
+      a = xs[1];
+      b = xs.pop();
+      t: (bool?, Str) = (True, "s");
+      c = t.0;
+      d = t.1;
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string m = function(l.Text, "main");
+  EXPECT_NE(m.find("call @$rt.PaykanArray_new_sized(2, 16)"), std::string::npos)
+      << m;
+  EXPECT_EQ(count(m, "call @$rt.PaykanArray_slot("), 4u) << m;
+  EXPECT_EQ(count(m, "call @$rt.PaykanArray_push_slot("), 1u) << m;
+  EXPECT_EQ(count(m, "call @$rt.PaykanArray_pop_into("), 1u) << m;
+  EXPECT_NE(m.find("ptr.load opt_i64, %"), std::string::npos) << m;
+  // The tuple: 3 slots, kinds OPT, BOOL, REF; `t.1` is slot 2.
+  EXPECT_NE(m.find("call @$rt.PaykanTuple_new(3, @"), std::string::npos) << m;
+  EXPECT_NE(l.Text.find("= [5, 2, 4]"), std::string::npos) << l.Text;
+  EXPECT_NE(m.find("call @$rt.PaykanTuple_get(%"), std::string::npos) << m;
+  EXPECT_NE(m.find(", 2)"), std::string::npos) << m;
+  EXPECT_EQ(l.Text.find("PaykanInt"), std::string::npos) << l.Text;
+  EXPECT_EQ(l.Text.find("PaykanBool_new"), std::string::npos) << l.Text;
+}
+
 // Printing an optional value formats it, "None" or the value's text; it is
 // never boxed.
 TEST(Lowering, PrintingAnOptionalValueFormatsIt) {

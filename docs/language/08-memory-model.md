@@ -187,9 +187,9 @@ value and allocates nothing, and `x == None` is a plain null test. When a `T?` i
 absent value so that an `Obj` always refers to an object.
 
 An optional primitive (`int?`, `float?`, `bool?`, `char?`) is a value instead (#96): the
-primitive and a presence flag, copied like an `int` and never counted. Only where an object is
-expected (an `Obj`, and for now an array or tuple element) is a present value kept as its boxed
-`Int` & co., allocated when it is stored there. A `match` arm binding the `int` copies the
+primitive and a presence flag, copied like an `int` and never counted, inline in a variable, a
+field, an array element or a tuple element. Only where an object is expected (an `Obj`) is a
+present value kept as its boxed `Int` & co., allocated when it is stored there. A `match` arm binding the `int` copies the
 value out and owns nothing.
 
 ---

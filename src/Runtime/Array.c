@@ -3,13 +3,16 @@
 //
 // Paykan runtime — Array type implementation.
 //
-// Two variants share the PaykanArray layout and differ in their vtable: a
-// primitive array (int / float / bool elements, PaykanArray_new,
-// PaykanArray_vtable) stores raw 8-byte values, an object array
-// (PaykanArray_new_obj, PaykanArray_obj_vtable) stores PaykanShared* that
-// set_obj / push_obj retain and destroy_obj releases.  Reads are the same
-// plain 8-byte copy for both.  The compiler picks the variant from the
-// static element type.
+// Three variants share the PaykanArray layout and differ in their vtable and
+// element size: a primitive array (int / float / bool elements,
+// PaykanArray_new, PaykanArray_vtable) stores raw 8-byte values, an object
+// array (PaykanArray_new_obj, PaykanArray_obj_vtable) stores PaykanShared*
+// that set_obj / push_obj retain and destroy_obj releases, and an array of
+// optional values (`int?[]` & co., PaykanArray_new_sized,
+// PaykanArray_sized_vtable) stores elements of elem_size bytes that the
+// compiler reads and writes in place (PaykanArray_slot, push_slot,
+// pop_into).  The compiler picks the variant from the static element
+// type.
 
 #include "Runtime.h"
 #include "RuntimeInternal.h"
@@ -19,6 +22,9 @@
 #include <string.h>
 
 #define PAYKAN_ELEM_SIZE 8UL
+
+/// The bytes of element @p n of @p arr's buffer.
+#define ARRAY_BYTES(arr, n) ((n) * (arr)->elem_size)
 
 // -- VTables
 
@@ -36,44 +42,61 @@ PaykanMethod PaykanArray_obj_vtable[PAYKAN_ARRAY_SLOTS] = {
     [PAYKAN_SLOT_ARRAY_LENGTH] = (PaykanMethod)PaykanArray_length,
 };
 
+// The methods of a primitive array, under their own vtable: an `int?[]` is
+// told apart from an `int[]` (a match arm), whose elements are another size.
+PaykanMethod PaykanArray_sized_vtable[PAYKAN_ARRAY_SLOTS] = {
+    [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanArray_destroy,
+    [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanArray_toString,
+    [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanArray_equals,
+    [PAYKAN_SLOT_ARRAY_LENGTH] = (PaykanMethod)PaykanArray_length,
+};
+
 // -- Constructors
 
-/// An array of @p len elements copied from @p data, or zeroed when @p data
-/// is NULL (so every object slot starts as a NULL box).
+/// An array of @p len elements of @p elemSize bytes copied from @p data, or
+/// zeroed when @p data is NULL (so every object slot starts as a NULL box,
+/// and every optional as None).
 static PaykanArray *array_alloc(PaykanMethod *vtable, unsigned long len,
-                                const void *data) {
+                                unsigned long elemSize, const void *data) {
   PaykanArray *arr = (PaykanArray *)Paykan_malloc(sizeof(PaykanArray));
   arr->vtable = vtable;
   arr->shared = NULL; // not yet boxed (unique-box invariant)
   arr->len = len;
   arr->cap = len;
+  arr->elem_size = elemSize;
   arr->data = NULL;
   if (len > 0) {
-    arr->data = Paykan_malloc(len * PAYKAN_ELEM_SIZE);
+    arr->data = Paykan_malloc(ARRAY_BYTES(arr, len));
     if (data)
-      memcpy(arr->data, data, len * PAYKAN_ELEM_SIZE);
+      memcpy(arr->data, data, ARRAY_BYTES(arr, len));
     else
-      memset(arr->data, 0, len * PAYKAN_ELEM_SIZE);
+      memset(arr->data, 0, ARRAY_BYTES(arr, len));
   }
   return arr;
 }
 
 PaykanArray *PaykanArray_new(unsigned long len) {
-  return array_alloc(PaykanArray_vtable, len, NULL);
+  return array_alloc(PaykanArray_vtable, len, PAYKAN_ELEM_SIZE, NULL);
 }
 
 PaykanArray *PaykanArray_new_from_data(unsigned long len, const void *data) {
-  return array_alloc(PaykanArray_vtable, len, data);
+  return array_alloc(PaykanArray_vtable, len, PAYKAN_ELEM_SIZE, data);
 }
 
 PaykanArray *PaykanArray_new_obj(unsigned long len) {
-  return array_alloc(PaykanArray_obj_vtable, len, NULL);
+  return array_alloc(PaykanArray_obj_vtable, len, PAYKAN_ELEM_SIZE, NULL);
+}
+
+PaykanArray *PaykanArray_new_sized(unsigned long len, unsigned long elemSize) {
+  if (elemSize == 0 || elemSize > PAYKAN_MAX_ELEM_SIZE)
+    Paykan_runtime_panic("array element size %lu out of range", elemSize);
+  return array_alloc(PaykanArray_sized_vtable, len, elemSize, NULL);
 }
 
 // -- Element access
 
 static void *array_slot(const PaykanArray *arr, unsigned long idx) {
-  return (char *)arr->data + idx * PAYKAN_ELEM_SIZE;
+  return (char *)arr->data + ARRAY_BYTES(arr, idx);
 }
 
 static void array_check_index(const PaykanArray *arr, unsigned long idx) {
@@ -93,6 +116,11 @@ void *PaykanArray_get(PaykanArray *arr, unsigned long idx) {
 void PaykanArray_set(PaykanArray *arr, unsigned long idx, void *value) {
   array_check_index(arr, idx);
   memcpy(array_slot(arr, idx), &value, PAYKAN_ELEM_SIZE);
+}
+
+void *PaykanArray_slot(PaykanArray *arr, unsigned long idx) {
+  array_check_index(arr, idx);
+  return array_slot(arr, idx);
 }
 
 void PaykanArray_set_obj(PaykanArray *arr, unsigned long idx,
@@ -176,7 +204,7 @@ int64_t PaykanArray_length(PaykanObject *self) {
 #define PAYKAN_ARRAY_MIN_CAP 8UL
 
 static void array_resize(PaykanArray *arr, unsigned long newCap) {
-  arr->data = Paykan_realloc(arr->data, newCap * PAYKAN_ELEM_SIZE);
+  arr->data = Paykan_realloc(arr->data, ARRAY_BYTES(arr, newCap));
   if (!arr->data)
     Paykan_runtime_panic("out of memory resizing array to %lu elements",
                          newCap);
@@ -228,4 +256,19 @@ void *PaykanArray_pop(PaykanArray *arr) {
 
 PaykanShared *PaykanArray_pop_obj(PaykanArray *arr) {
   return (PaykanShared *)PaykanArray_pop(arr);
+}
+
+void *PaykanArray_push_slot(PaykanArray *arr) {
+  array_grow(arr);
+  arr->len += 1;
+  return array_slot(arr, arr->len - 1);
+}
+
+void PaykanArray_pop_into(PaykanArray *arr, void *out) {
+  if (arr->len == 0) {
+    Paykan_runtime_panic("pop on empty array");
+  }
+  arr->len -= 1;
+  memcpy(out, array_slot(arr, arr->len), arr->elem_size);
+  array_maybe_shrink(arr);
 }

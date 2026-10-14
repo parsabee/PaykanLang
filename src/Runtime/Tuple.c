@@ -6,8 +6,9 @@
 // One object backs every tuple type (Runtime.h, "Tuple"): the per-slot kind
 // bytes let a single vtable destroy (release the REF slots), compare
 // (element-wise, dispatching `equals` on references) and render (`(1, a)`)
-// a tuple whose element types only the compiler knows.  Header, slots and
-// kind bytes are one heap block.
+// a tuple whose element types only the compiler knows.  An optional value
+// element is two slots, an OPT presence word and its value.  Header, slots
+// and kind bytes are one heap block.
 
 #include "Runtime.h"
 #include "RuntimeInternal.h"
@@ -139,8 +140,17 @@ PaykanShared *PaykanTuple_toString(PaykanObject *self) {
   StrBuf sb = {NULL, 0, 0};
   sb_append(&sb, "(", 1);
   for (int64_t i = 0; i < t->count; ++i) {
-    if (i)
+    // An optional value's value slot follows its presence word, unseparated.
+    int valueOfOptional = i > 0 && t->kinds[i - 1] == PAYKAN_TUPLE_OPT;
+    if (i && !valueOfOptional)
       sb_append(&sb, ", ", 2);
+    if (t->kinds[i] == PAYKAN_TUPLE_OPT) {
+      if (t->slots[i] == 0 || i + 1 == t->count) {
+        sb_append(&sb, "None", 4);
+        ++i; // the value slot
+      }
+      continue;
+    }
     char buf[64];
     int n;
     int64_t bits;
@@ -210,6 +220,13 @@ int64_t PaykanTuple_equals(PaykanObject *self, PaykanShared *other) {
              memcmp(a->kinds, b->kinds, (size_t)a->count) == 0;
     for (int64_t i = 0; result && i < a->count; ++i) {
       switch (a->kinds[i]) {
+      case PAYKAN_TUPLE_OPT:
+        // Both None (their value slots are 0) or both present: then the
+        // value slots, next, decide.
+        result = a->slots[i] == b->slots[i];
+        if (a->slots[i] == 0)
+          ++i;
+        break;
       case PAYKAN_TUPLE_FLOAT: {
         double da, db;
         memcpy(&da, &a->slots[i], sizeof(da));
