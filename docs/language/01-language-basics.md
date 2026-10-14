@@ -18,7 +18,8 @@ optional-mode `match` included) and generics (`11-generics.md`) are **stable in 
 syntax and semantics this reference documents for them are covered by the compatibility
 promise for the 0.1 series. The limitations each chapter lists stay limitations; in
 particular generics cannot be imported across modules until v0.2.0 ([#57](https://github.com/parsabee/PaykanLang/issues/57)). An optional
-primitive is a value, not a box ([#96](https://github.com/parsabee/PaykanLang/issues/96) changed that representation, not the semantics).
+primitive is a value, not a box, and no optional converts to `Obj`
+([#96](https://github.com/parsabee/PaykanLang/issues/96); see `10-optionals.md`).
 
 ### Design Pillars
 

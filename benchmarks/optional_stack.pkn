@@ -1,0 +1,47 @@
+// The optional-values benchmark of #96: 10M pushes onto a Stack<int>, then
+// 10M pops through `pop() -> T?` with T = int, matching each result.  With
+// `raw` as the first argument the pops go through `popRaw() -> T` instead:
+// the same loop without the optional.
+//
+//   paykan -O2 build benchmarks/optional_stack.pkn -o stack
+//   ./stack          # through int?
+//   ./stack raw      # through int
+//   paykan --track-heap benchmarks/optional_stack.pkn   # allocation count
+//
+// Both print 49999995000000.
+
+class Stack<T> {
+  items: T[];
+  fn __init__() { self.items = []; }
+  fn push(v: T) { self.items.push(v); }
+  fn pop() -> T? {
+    if (self.items.len() == 0) { return None; }
+    return self.items.pop();
+  }
+  fn popRaw() -> T { return self.items.pop(); }
+  view fn len() -> int { return self.items.len(); }
+}
+
+fn main(args: Str[]) -> int {
+  n = 10000000;
+  s = Stack<int>();
+  i = 0;
+  while (i < n) {
+    s.push(i);
+    i = i + 1;
+  }
+  total = 0;
+  if (args.len() > 1 && args[1] == "raw") {
+    while (s.len() > 0) { total = total + s.popRaw(); }
+  } else {
+    done = False;
+    while (!done) {
+      match s.pop() {
+        v: int { total = total + v; }
+        None   { done = True; }
+      }
+    }
+  }
+  println(Str(total));
+  return 0;
+}

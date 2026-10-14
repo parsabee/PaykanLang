@@ -3,8 +3,9 @@
 > **Stable in v0.1** (issue #5), optional primitives and optional-mode `match` included: the
 > syntax and semantics below are covered by the compatibility promise for the 0.1 series (see
 > `01-language-basics.md`, "Stability"). Since [#96](https://github.com/parsabee/PaykanLang/issues/96)
-> an optional primitive is a value (the primitive and a presence flag), not a box; the semantics
-> did not change.
+> an optional primitive is a value (the primitive and a presence flag), not a box, and no
+> optional converts to `Obj` (see "Optionals are not objects"); comparing, printing, `match`
+> and narrowing behave as before.
 
 An **optional type** `T?` holds either a value of type `T` or `None`. It is how a program says
 "this may be absent" without giving up the static type: a `next: Node?` field is a `Node` or
