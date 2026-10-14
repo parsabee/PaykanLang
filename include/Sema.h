@@ -529,7 +529,7 @@ public:
         std::string Name;
         std::string ReturnTypeName;
         std::vector<std::string> ParamTypeNames;
-        uint8_t Flags = 0;     // ast::MethodDecl::Private bit
+        uint8_t Flags = 0;     // ast::MethodDecl::Flags
         ast::ParamModes Modes; // `n: inout int`
         bool operator==(const MethodInfo &) const = default;
       };
@@ -853,6 +853,25 @@ private:
 
   /// Phase 4b for one class: register the constructor function `Name(...)`.
   void declareConstructor(ast::ClassDecl *cd, ast::ClassType *ct);
+
+  /// The signature of @p method of @p ct as a MethodDecl with @p flags, its
+  /// annotations resolved and written back; nullptr if one does not resolve.
+  /// @p overridden is the superclass method it overrides, if any.  A mistake
+  /// that leaves the signature usable (an override that does not match) is
+  /// reported and clears @p ok.
+  ast::MethodDecl *declareMethod(ast::FuncDecl *method, ast::ClassType *ct,
+                                 const ast::MethodDecl *overridden,
+                                 uint8_t flags, bool &ok);
+
+  /// Phase 4 for the `impl` blocks of @p cd's class: their methods join it.
+  bool populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct);
+
+  /// Check that every `impl` block names a class of this module, and make
+  /// its `static fn`s the module's functions `Type::name`.
+  bool checkImplDecls(ast::TranslationUnit *tu);
+
+  /// The `impl` blocks by the name of the class they add to.
+  StringMap<std::vector<ast::ImplDecl *>> ImplsByClass;
 
   // -- Generics
   //

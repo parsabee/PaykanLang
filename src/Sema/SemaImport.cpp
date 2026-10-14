@@ -268,12 +268,15 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     }
     for (auto &[fname, fty] : ct->getFields())
       ci.Fields.push_back({fname, ast::typeName(fty)});
-    // __init__ has no vtable slot but is part of the class's interface: a
-    // subclass in the importing module must call it through `__super__`
-    // with the right arguments (addMethod files it back as the init).
+    // __init__ and the `impl` methods have no vtable slot but are part of
+    // the class's interface: a subclass in the importing module must call
+    // __init__ through `__super__` with the right arguments, and importers
+    // call the `impl` methods directly (addMethod files both back).
     std::vector<ast::MethodDecl *> methods = ct->getVTable();
     if (auto *init = ct->findMethod(names::kMethodInit))
       methods.push_back(init);
+    methods.insert(methods.end(), ct->getImplMethods().begin(),
+                   ct->getImplMethods().end());
     for (auto *m : methods) {
       ModuleInfo::ClassInfo::MethodInfo mi;
       mi.Name = m->getName();
@@ -282,7 +285,8 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
         mi.ParamTypeNames.push_back(ast::typeName(pty));
       mi.Flags =
           static_cast<uint8_t>((m->isPrivate() ? ast::MethodDecl::Private : 0) |
-                               (m->isView() ? ast::MethodDecl::View : 0));
+                               (m->isView() ? ast::MethodDecl::View : 0) |
+                               (m->isImpl() ? ast::MethodDecl::Impl : 0));
       mi.Modes = m->getParamModes();
       ci.Methods.push_back(std::move(mi));
     }

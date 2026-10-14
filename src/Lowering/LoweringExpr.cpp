@@ -828,12 +828,18 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     }
   }
 
-  int vtableIdx = ct ? ct->getVTableIndex(node->getMethodName()) : -1;
-  assert(vtableIdx >= 0 && "Sema should have verified method exists");
   ast::MethodDecl *method =
       ct ? ct->findMethod(node->getMethodName()) : nullptr;
-  pir::Signature sig = method ? L.slotSignature(ct, method)
-                              : pir::Signature{{Type::Obj}, Type::Box};
+  // An `impl` method has no vtable slot: it is called directly.
+  pir::Function *implFn =
+      method && method->isImpl()
+          ? L.lookupOwnMethodFunction(ct->implOwner(mname), mname)
+          : nullptr;
+  int vtableIdx = ct ? ct->getVTableIndex(node->getMethodName()) : -1;
+  assert((implFn || vtableIdx >= 0) && "Sema should have verified the method");
+  pir::Signature sig = implFn   ? implFn->Sig
+                       : method ? L.slotSignature(ct, method)
+                                : pir::Signature{{Type::Obj}, Type::Box};
 
   bool isUserDefinedMethod = ct && !ct->isBuiltin();
   std::vector<Val> args;
@@ -883,14 +889,20 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   // A class of this module is named (the backend knows its vtable); a
   // runtime class or a class imported from another module (whose extern item
   // carries only the layout) uses the explicit-signature form.
-  std::string className;
-  if (isUserDefinedMethod && !L.getOrCreateClass(ct)->IsExtern)
-    className = ct->getName();
-  else if (isUserDefinedMethod &&
-           !L.checkImportedSlot(ct, static_cast<uint32_t>(vtableIdx), sig))
-    return Val();
-  Val result = L.B.vcall(recv, className, static_cast<uint32_t>(vtableIdx), sig,
-                         args, "mcall");
+  Val result;
+  if (implFn) {
+    args.insert(args.begin(), recv);
+    result = L.B.call(implFn->Name, sig, args, "mcall");
+  } else {
+    std::string className;
+    if (isUserDefinedMethod && !L.getOrCreateClass(ct)->IsExtern)
+      className = ct->getName();
+    else if (isUserDefinedMethod &&
+             !L.checkImportedSlot(ct, static_cast<uint32_t>(vtableIdx), sig))
+      return Val();
+    result = L.B.vcall(recv, className, static_cast<uint32_t>(vtableIdx), sig,
+                       args, "mcall");
+  }
   L.releaseAfterCall(keep);
   for (const auto &ev : ownedArgs)
     L.releaseIfOwned(ev);

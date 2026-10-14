@@ -1,0 +1,120 @@
+// Copyright (c) 2026 Parsa Bagheri
+// SPDX-License-Identifier: MIT
+// Sema tests: `impl` blocks.  Their methods join the class but are called
+// directly: none may take a name the class or a superclass already has, a
+// subclass cannot override one, and an `impl` block adds only to a class of
+// its own module.
+
+#include "TestUtils.h"
+#include <gtest/gtest.h>
+
+using namespace paykan::test;
+
+namespace {
+
+void expectAll(const SemaResult &r, std::initializer_list<const char *> diags) {
+  for (const char *d : diags)
+    EXPECT_NE(r.Diagnostics.find(d), std::string::npos) << d << "\n"
+                                                        << r.Diagnostics;
+}
+
+} // namespace
+
+// Methods of several blocks, a `static fn` called as `Type::name()`, a
+// subclass using what it inherits, and a class-body method calling an
+// `impl` method; the `view fn` rules hold as in a class body.
+TEST(Impl, MethodsAndStaticFnsCheck) {
+  auto r = semaCheck(R"(class A {
+  n: int;
+  fn __init__(n: int) { self.n = n; }
+  view fn twice() -> int { return self.doubled(); }
+}
+impl A {
+  static fn make() -> A { return A(1); }
+  view fn doubled() -> int { return self.n * 2; }
+}
+impl A { fn bump() { self.n = self.n + 1; } }
+class B : A { fn __init__() { __super__(2); } }
+impl B { view fn plus(k: int) -> int { return self.doubled() + k; } }
+fn main() -> int {
+  a = A::make();
+  a.bump();
+  b = B();
+  b.bump();
+  return a.twice() + b.plus(1);
+}
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 0) << r.Diagnostics;
+}
+
+TEST(Impl, ViewFnRulesApply) {
+  auto r = semaCheck(R"(class A { n: int; fn __init__() { self.n = 0; } }
+impl A {
+  fn bump() { self.n = self.n + 1; }
+  view fn bad() { self.bump(); }
+}
+fn read(a: view A) { a.bump(); }
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"'self' is read-only in 'view fn bad'; 'bump' is not a 'view "
+                "fn'",
+                "'bump' is not a 'view fn'"});
+}
+
+// No method may take a name already in the class or a superclass, in
+// either direction, and `__init__` stays in the class body.
+TEST(Impl, NamesAreNotReused) {
+  auto r =
+      semaCheck(R"(class A { n: int; fn __init__() { self.n = 0; } fn f() {} }
+class B : A { fn __init__() { __super__(); } }
+impl A {
+  fn f() {}
+  fn h() {}
+  fn __init__() {}
+  static fn h() {}
+  static fn mk() -> A { return A(); }
+  static fn mk() -> A { return A(); }
+}
+impl B { fn h() {} fn f() {} }
+class C : A { fn __init__() { __super__(); } fn h() {} }
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"class 'A' already has a method 'f'",
+                "'__init__' goes in the body of class 'A', not in an 'impl' "
+                "block",
+                "class 'A' already has a method 'h'",
+                "redefinition of function 'A::mk'",
+                "class 'B' already has a method 'h' (from 'A')",
+                "class 'B' already has a method 'f' (from 'A')",
+                "method 'h' of 'A' is declared in an 'impl' block and cannot "
+                "be overridden"});
+}
+
+TEST(Impl, OnlyClassesOfTheModule) {
+  auto r = semaCheck(R"(enum Color { Red }
+class Box<T> { v: T; fn __init__(v: T) { self.v = v; } }
+impl Str { fn x() {} }
+impl Color { fn x() {} }
+impl Box { fn x() {} }
+impl Nope { fn x() {} }
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"'Str' is a built-in type; an 'impl' block cannot add methods "
+                "to it",
+                "an 'impl' block for an enum is not supported yet",
+                "an 'impl' block for a generic class is not supported yet",
+                "'impl' for undefined class 'Nope'"});
+}
+
+TEST(Impl, UnknownStaticFnIsUndeclared) {
+  auto r = semaCheck(R"(class A { n: int; fn __init__() { self.n = 0; } }
+impl A { fn f() {} }
+fn main() -> int { A::f(); return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"call to undeclared function 'A::f'"});
+}

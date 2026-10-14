@@ -130,6 +130,10 @@ void ClassType::addMethod(MethodDecl *m) {
     InitMethod = m;
     return;
   }
+  if (m->isImpl()) {
+    ImplMethods.push_back(m);
+    return;
+  }
   // Check if this overrides an existing slot.
   auto it = VTableIndex.find(m->getName());
   if (it != VTableIndex.end()) {
@@ -153,9 +157,20 @@ MethodDecl *ClassType::findMethod(const std::string &name) const {
   auto it = VTableIndex.find(name);
   if (it != VTableIndex.end())
     return VTable[it->second];
+  for (auto *m : ImplMethods)
+    if (m->getName() == name)
+      return m;
   // Walk up the inheritance chain.
   if (SuperClass)
     return SuperClass->findMethod(name);
+  return nullptr;
+}
+
+ClassType *ClassType::implOwner(const std::string &name) {
+  for (ClassType *c = this; c; c = c->SuperClass)
+    for (auto *m : c->ImplMethods)
+      if (m->getName() == name)
+        return c;
   return nullptr;
 }
 
