@@ -1,0 +1,40 @@
+// 15_native_generic — a generic `native fn`: one C function for any type.
+//
+// An instance (`describe<float>`) passes C a PaykanType describing each type
+// argument: its size, alignment, kind and references.  A `T` crosses by
+// address, so the C code in values.c handles a value of any size.  Build the
+// object yourself and link it with --object (the sample harnesses do this):
+//
+//   cc -std=c11 -fPIC -I<paykan include dir> -c values.c -o values.o
+//   paykan --object=values.o main.pkn
+
+native fn describe<T>(x: view T) -> Str = "sample_describe";
+native fn pick<T>(first: bool, a: T, b: T) -> T = "sample_pick";
+
+class Point {
+  x: int;
+  fn __init__(x: int) { self.x = x; }
+}
+
+fn main() -> int {
+  println(describe<int>(42));
+  println(describe<float>(2.5));
+  println(describe<bool>(True));
+  println(describe<char>('k'));
+  println(describe<Point>(Point(1)));
+  nothing: Point? = None;
+  println(describe<Point?>(nothing));
+  println(Str<int>(pick<int>(True, 1, 2)));
+  println(pick<Str>(False, "left", "right"));
+  println(Str<int>(pick<Point>(True, Point(3), Point(4)).x));
+  return 0;
+}
+// expect-stdout: int 42 (size 8)
+// expect-stdout: float 2.5 (size 8)
+// expect-stdout: bool True (size 1)
+// expect-stdout: char k (size 1)
+// expect-stdout: an object (size 8)
+// expect-stdout: None (size 8)
+// expect-stdout: 1
+// expect-stdout: right
+// expect-stdout: 3
