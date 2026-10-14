@@ -11,6 +11,7 @@
 
 #include <cassert>
 #include <cstring>
+#include <optional>
 
 namespace paykan::lowering {
 
@@ -1130,12 +1131,13 @@ Val ModuleLowering::visitFuncDecl(ast::FuncDecl *node) {
 // A `native fn` (#198) calls its C symbol with the runtime builtins'
 // convention: C borrows a reference argument as the raw object and gets an
 // `inout` one's address; a reference result is an owned box.  An instance
-// of a generic one passes the kind of each type argument first, then every
-// argument and its result as a 64-bit slot: a reference as its box, an
-// `inout` argument as the address of a slot.  A call in the module that
-// declares it calls C directly, with the caller's own references
-// (visitCallExpr); its body serves other modules' callers and passes on its
-// parameters, which the scope cleanup releases.
+// of a generic one passes a PaykanType for each type argument first, and
+// what its template typed `T` by address: an argument as the address of its
+// value (an `inout` one's own), a `-> T` result as the address of a local C
+// writes, a `-> view T` result as the address C returns, which is copied.  A
+// call in the module that declares it calls C directly, with the caller's
+// own references (visitCallExpr); its body serves other modules' callers and
+// passes on its parameters, which the scope cleanup releases.
 void ModuleLowering::emitNativeBody(ast::FuncDecl *node,
                                     const pir::Function &fn) {
   std::vector<Val> args;
@@ -1151,50 +1153,37 @@ void ModuleLowering::emitNativeBody(ast::FuncDecl *node,
 
 Val ModuleLowering::emitNativeCall(const ast::FuncDecl &node,
                                    const std::vector<Val> &args) {
-  const bool slots = !node.getTypeArgs().empty();
-  auto toSlot = [&](const Val &v) {
-    return v.Ty == Type::Box ? B.cast(v, Type::I64, "slot") : toSlotBits(v);
-  };
-  auto fromSlot = [&](const Val &bits, ast::Type *ty) {
-    return toPIRType(ty) == Type::Box ? B.cast(bits, Type::Box, "slot.box")
-                                      : fromSlotBits(bits, ty);
-  };
   ast::Type *retTy = canonicalizeDeclType(node.getReturnType());
   const Type ret = retTy ? toPIRType(retTy) : Type::Void;
+  const bool resultByAddress = node.resultByAddress() && ret != Type::Void;
   pir::Signature csig;
-  csig.Ret = slots && ret != Type::Void ? Type::I64 : ret;
   std::vector<Val> cargs;
   for (ast::Type *arg : node.getTypeArgs()) {
-    csig.Params.push_back(Type::I64);
-    cargs.push_back(Val::i64(nativeTypeKind(canonicalizeDeclType(arg))));
+    csig.Params.push_back(Type::Ptr);
+    cargs.push_back(emitTypeDescriptor(canonicalizeDeclType(arg)));
   }
-  // A generic instance's `inout` argument goes through a slot of its own and
-  // back: a bool or a char is stored in less than 8 bytes.
-  struct CopyOut {
-    Val Addr;
-    pir::LocalId Slot;
-    ast::Type *Ty;
-  };
-  std::vector<CopyOut> copyOuts;
+  std::optional<pir::LocalId> out;
+  if (resultByAddress && node.getResultMode() != ast::ParamMode::View) {
+    out = B.addLocal("out", ret);
+    csig.Params.push_back(Type::Ptr);
+    cargs.push_back(B.localAddr(*out, "out.addr"));
+  }
   for (size_t i = 0; i < args.size(); ++i) {
-    const ast::Param &p = node.getParams()[i];
+    const std::string &pname = node.getParams()[i].getName();
     Val v = args[i];
-    if (p.Mode == ast::ParamMode::Inout) {
-      if (slots) {
-        ast::Type *ty = canonicalizeDeclType(p.ParamType);
-        pir::LocalId slot = B.addLocal(p.getName() + ".slot", Type::I64);
-        B.store(slot, toSlot(B.ptrLoad(v, toPIRType(ty), p.getName())));
-        copyOuts.push_back({v, slot, ty});
-        v = B.localAddr(slot, p.getName() + ".slot.addr");
-      }
-    } else if (slots) {
-      v = toSlot(v);
+    if (node.getParams()[i].Mode == ast::ParamMode::Inout) {
+      // Already the address of the caller's storage.
+    } else if (node.paramByAddress(i)) {
+      pir::LocalId value = B.addLocal(pname + ".val", v.Ty);
+      B.store(value, v);
+      v = B.localAddr(value, pname + ".addr");
     } else if (v.Ty == Type::Box) {
-      v = emitSharedGet(v, p.getName() + ".obj");
+      v = emitSharedGet(v, pname + ".obj");
     }
     csig.Params.push_back(v.Ty);
     cargs.push_back(v);
   }
+  csig.Ret = !resultByAddress ? ret : out ? Type::Void : Type::Ptr;
   const std::string name = pir::nativeName(node.getNativeSymbol());
   if (!FuncByName.count(name)) {
     Funcs.emplace_back();
@@ -1205,10 +1194,13 @@ Val ModuleLowering::emitNativeCall(const ast::FuncDecl &node,
     FuncByName[name] = &ext;
   }
   Val result = B.call(name, csig, cargs, "r");
-  for (const CopyOut &c : copyOuts)
-    B.ptrStore(c.Addr, fromSlot(B.load(c.Slot, "slot"), c.Ty));
-  if (slots && csig.Ret != Type::Void)
-    result = fromSlot(result, retTy);
+  if (out) {
+    result = B.load(*out, "out");
+  } else if (resultByAddress) {
+    result = B.ptrLoad(result, ret, "r.val");
+    if (result.Ty == Type::Box)
+      emitRetain(result);
+  }
   return result;
 }
 
@@ -1216,6 +1208,29 @@ const ast::FuncDecl *
 ModuleLowering::localNative(const std::string &name) const {
   auto it = NativeDecls.find(name);
   return it == NativeDecls.end() ? nullptr : it->second;
+}
+
+// A value of every type is stored as one PIR slot, aligned to its size: a
+// reference as its box, None as a null one.
+Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
+  const Type slot = toPIRType(ty);
+  const int64_t size = slot == Type::Bool || slot == Type::Char ? 1 : 8;
+  std::vector<int64_t> words = {size, /*align=*/size, nativeTypeKind(ty), 0};
+  if (slot == Type::Box) {
+    words[3] = 1;
+    words.push_back(ast::isa<ast::OptionalType>(ty) ? 1 : 0); // offset 0
+  }
+  std::string key;
+  for (int64_t w : words) {
+    key += std::to_string(w);
+    key += '|';
+  }
+  auto [it, added] = InternedTypeDescriptors.try_emplace(key);
+  if (added) {
+    it->second = ".type" + std::to_string(InternedTypeDescriptors.size() - 1);
+    Mod.Datas.push_back({it->second, std::move(words)});
+  }
+  return Val::symbol(it->second, Type::Ptr);
 }
 
 unsigned char ModuleLowering::nativeTypeKind(ast::Type *ty) const {

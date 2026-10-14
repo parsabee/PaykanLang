@@ -133,10 +133,16 @@ inline constexpr const char *kPaykanTupleToString = "PaykanTuple_toString";
 inline constexpr const char *kPaykanTupleEquals = "PaykanTuple_equals";
 inline constexpr const char *kPaykanTupleVtable = "PaykanTuple_vtable";
 
+// Type descriptors: for the C code of generic native functions
+inline constexpr const char *kPaykanTypeCopy = "PaykanType_copy";
+inline constexpr const char *kPaykanTypeDrop = "PaykanType_drop";
+inline constexpr const char *kPaykanTypeIsUnset = "PaykanType_isUnset";
+
 // Buffer: called only by the standard library's native functions
 inline constexpr const char *kPaykanBufferNew = "PaykanBuffer_new";
 inline constexpr const char *kPaykanBufferLen = "PaykanBuffer_len";
 inline constexpr const char *kPaykanBufferGet = "PaykanBuffer_get";
+inline constexpr const char *kPaykanBufferCopy = "PaykanBuffer_copy";
 inline constexpr const char *kPaykanBufferSet = "PaykanBuffer_set";
 inline constexpr const char *kPaykanBufferReserve = "PaykanBuffer_reserve";
 inline constexpr const char *kPaykanBufferGrow = "PaykanBuffer_grow";
@@ -348,17 +354,17 @@ enum TupleSlotKind : unsigned char {
   kTupleSlotRef = 4,   // PaykanShared* retained by the tuple
 };
 
-// -- Type kinds of a generic native function's type arguments
+// -- Kinds of the types a generic native function is passed
 //
-// One int64_t per type argument, passed ahead of the slots.  Must match
-// PaykanTypeKind in src/Runtime/Runtime.h (a static_assert in the codegen
-// tests checks it).
+// The `kind` word of a PaykanType (src/Runtime/Runtime.h, "Generic native
+// functions"), which the lowering emits for each type argument.  Must match
+// PaykanTypeKind (a static_assert in the codegen tests checks it).
 
 enum NativeTypeKind : unsigned char {
   kNativeKindInt = 0,      // int64_t (also enum values)
-  kNativeKindFloat = 1,    // double bits
-  kNativeKindBool = 2,     // int64_t 0 / 1
-  kNativeKindChar = 3,     // int64_t holding one byte
+  kNativeKindFloat = 1,    // double
+  kNativeKindBool = 2,     // bool
+  kNativeKindChar = 3,     // int8_t
   kNativeKindObject = 4,   // PaykanShared*, never null
   kNativeKindOptional = 5, // PaykanShared*, null for None
 };

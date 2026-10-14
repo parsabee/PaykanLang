@@ -23,19 +23,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   template's is an error (`conflicts with another template's instantiation of the same
   name`).
 - Runtime functions for the standard library's `memory::Buffer<T>`: `PaykanBuffer_new`,
-  `_len`, `_get`, `_set`, `_reserve`, `_grow` and `_shrink` (`Runtime.h`, "Buffer"),
-  generic native functions over a `PaykanArray` whose every slot is live.  New slots are
-  0, or None; the buffer retains the references it holds and releases them when they are
-  overwritten, shrunk away or destroyed; growing at least doubles the allocation and
-  shrinking to a quarter of it halves it.  An index out of bounds, a negative count,
-  shrinking by more than the length and reading a never-set slot of a non-optional
-  reference type panic (`buffer index 3 out of bounds (len=3)`).
+  `_len`, `_get`, `_copy`, `_set`, `_reserve`, `_grow` and `_shrink` (`Runtime.h`,
+  "Buffer"), generic native functions over a `PaykanBuffer` of values of any size, laid
+  out by their `PaykanType`.  New values are all zero bytes (0, False or None); the
+  buffer retains the references it holds and releases them when they are overwritten,
+  shrunk away or destroyed; growing at least doubles the allocation and shrinking to a
+  quarter of it halves it.  An index out of bounds, a negative count, shrinking by more
+  than the length and reading a never-set reference that may not be None panic (`buffer
+  index 3 out of bounds (len=3)`).
 - Generic native functions (docs/language/02-functions-and-calling.md, "Generic native
   functions"): `native fn pick<T>(first: bool, a: T, b: T) -> T = "c_pick";`.  Each
-  instance calls the same C function with the kind of each type argument first
-  (`PaykanTypeKind` in `Runtime.h`: int, float, bool, char, object or optional), then
-  every argument and its result as a 64-bit slot (a value's bits, a reference's box), so
-  any type crosses into C.  In the AST interchange format a generic native function has its
+  instance calls the same C function with a `PaykanType` for each type argument first
+  (`Runtime.h`: the type's size, alignment, kind and reference offsets), and passes what
+  the function types `T` by address (a `-> T` result through a `void *out`), so a value
+  of any type and size crosses into C; `PaykanType_copy` and `PaykanType_drop` copy and
+  release one.  In the AST interchange format a generic native function has its
   `(type-params ...)` like any other.  See `samples/imports/15_native_generic`.
 - Borrowed results (docs/language/02-functions-and-calling.md, "Borrowed results"): a
   function or method declared `-> view T` returns a borrow of part of `self` or of a
@@ -164,10 +166,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   other parameter is a `view`, which C borrows, or an `inout`, which C changes in place
   (`parameter 's' must be 'view' or 'inout' ('s: view Str'); only int, float, bool and char
   cross into C by value`).  An `inout` argument is the caller's variable: `int64_t *`, ...,
-  `PaykanShared **` for a `Str` or `Obj`, and for a generic instance the address of a
-  64-bit slot.  The result can be a `view` of a `view` or `inout` parameter.  A call in the
-  declaring module calls the C function directly with the caller's own references, so it
-  does no reference counting.
+  `PaykanShared **` for a `Str` or `Obj`, and for a generic instance's `inout T` the
+  value's own address.  The result can be a `view` of a `view` or `inout` parameter.  A
+  call in the declaring module calls the C function directly with the caller's own
+  references, so it does no reference counting.
 - What a call passes to an `inout` parameter shares no storage with anything else the
   call borrows (docs/language/02-functions-and-calling.md, "Exclusivity"): not only another
   `inout` argument, but a `view` argument and the receiver of a method that may change

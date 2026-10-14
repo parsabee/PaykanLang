@@ -530,42 +530,88 @@ PaykanObject *PaykanShared_get(PaykanShared *shared);
 // -- Generic native functions
 //
 // An instance of a generic `native fn` (`native fn get<T>(b: view Obj, i: int)
-// -> view T = "..."`, docs/language/02-functions-and-calling.md) receives the
-// kind of each type argument, in order, then every argument as a 64-bit
-// slot, and returns its result as one.  A slot holds a value's bits (an
-// int or enum, a float's IEEE bits, a bool or char widened) or a
-// reference's PaykanShared* box.  Argument boxes are borrowed for the call;
-// a result box is owned (+1).
+// -> view T = "..."`, docs/language/02-functions-and-calling.md) receives a
+// PaykanType for each type argument, in order, ahead of its arguments.  A
+// parameter typed by a type parameter crosses by address: a `view T` as a
+// `const void *` C borrows for the call, an `inout T` as a `void *` C may
+// change in place.  A `-> T` result is written to a `void *out` passed after
+// the PaykanTypes, a `-> view T` result is returned as a `const void *` into
+// a `view` or `inout` argument.  Every other parameter and result crosses as
+// it does for a non-generic native function.
 //
-// The kind codes are part of the compiler <-> runtime ABI; they must match
+// A PaykanType describes a value of the type as it is stored: its size and
+// alignment, its kind, and where it holds references (PaykanShared* boxes),
+// which a copy retains and a drop releases.  The compiler emits one per
+// type, as constant data; the kind codes must match
 // paykan::names::NativeTypeKind in include/Names.h.
 
 typedef enum PaykanTypeKind {
   PAYKAN_KIND_INT = 0,      // int64_t (also enum values)
-  PAYKAN_KIND_FLOAT = 1,    // IEEE-754 double bits
-  PAYKAN_KIND_BOOL = 2,     // int64_t 0 / 1
-  PAYKAN_KIND_CHAR = 3,     // int64_t holding one byte
+  PAYKAN_KIND_FLOAT = 1,    // double
+  PAYKAN_KIND_BOOL = 2,     // bool
+  PAYKAN_KIND_CHAR = 3,     // int8_t
   PAYKAN_KIND_OBJECT = 4,   // PaykanShared*, never NULL
   PAYKAN_KIND_OPTIONAL = 5, // PaykanShared*, NULL for None
 } PaykanTypeKind;
 
+/// Followed in memory by `nrefs` int64_t words, one per reference: its byte
+/// offset in the value << 1, | 1 if it may be NULL (PaykanType_ref).
+typedef struct PaykanType {
+  int64_t size;  ///< bytes of a value
+  int64_t align; ///< its alignment
+  int64_t kind;  ///< PaykanTypeKind
+  int64_t nrefs; ///< references in a value
+} PaykanType;
+
+/// The word of the @p k-th reference of a @p type value.
+static inline int64_t PaykanType_ref(const PaykanType *type, int64_t k) {
+  return ((const int64_t *)(type + 1))[k];
+}
+
+/// Make @p dst (uninitialised storage for a @p type value) a copy of the
+/// value at @p src, retaining the references it holds.
+void PaykanType_copy(const PaykanType *type, void *dst, const void *src);
+/// Release the references the @p type value at @p value holds; the storage
+/// is then uninitialised.
+void PaykanType_drop(const PaykanType *type, void *value);
+/// True if a reference the @p type value at @p value holds that may not be
+/// NULL is: storage that was never set.
+int PaykanType_isUnset(const PaykanType *type, const void *value);
+
 // -- Buffer
 //
-// The storage of the standard library's memory::Buffer<T>: generic native
-// functions (above) over a PaykanArray whose every slot is live.  The buffer
-// is its box `buf` (a `view`), or for a function that changes it the address
-// of the slot holding the box (an `inout`, `void *` as the backends declare
-// it).  len() counts the slots; a new slot is 0, or None.  An index out of
-// bounds, a negative count, shrinking by more than len() and reading a
-// never-set slot of a non-optional reference type panic.
+// The storage of the standard library's memory::Buffer<T>: `len` live values
+// of a PaykanType `type`, `cap` of them allocated, reached through generic
+// native functions (above).  A function is passed the buffer as its object
+// (a `view Obj`), or one that changes it as the address of its box (an
+// `inout Obj`).  They are declared with the C types the backends give a
+// native function's parameters: `void *` for a PaykanType and any other
+// address.  A new value is all zero bytes: 0, False or None.  Destroying the
+// buffer drops the values.  An index out of bounds, a negative count,
+// shrinking by more than len and reading a never-set reference of a type
+// that may not be NULL panic.
 
-int64_t PaykanBuffer_new(int64_t kind, int64_t n); // owned box, n slots
-int64_t PaykanBuffer_len(int64_t kind, int64_t buf);
-int64_t PaykanBuffer_get(int64_t kind, int64_t buf, int64_t i);
-void PaykanBuffer_set(int64_t kind, void *buf, int64_t i, int64_t v);
-void PaykanBuffer_reserve(int64_t kind, void *buf, int64_t n); // >= n slots
-void PaykanBuffer_grow(int64_t kind, void *buf, int64_t by);   // by more
-void PaykanBuffer_shrink(int64_t kind, void *buf, int64_t by); // by fewer
+typedef struct PaykanBuffer {
+  PaykanMethod *vtable;   // points to PaykanBuffer_vtable
+  PaykanShared *shared;   // object header (see PaykanObject)
+  const PaykanType *type; // of the values (the compiler's constant data)
+  unsigned char *data;    // cap values of type->size bytes
+  int64_t len;            // live values
+  int64_t cap;            // allocated values
+} PaykanBuffer;
+
+extern PaykanMethod PaykanBuffer_vtable[PAYKAN_OBJECT_SLOTS];
+
+PaykanShared *PaykanBuffer_new(void *t, int64_t n); // owned box
+int64_t PaykanBuffer_len(void *t, PaykanObject *b);
+/// The address of value @p i, valid until the buffer next changes.
+void *PaykanBuffer_get(void *t, PaykanObject *b, int64_t i);
+/// Copy value @p i to @p out (uninitialised), retaining its references.
+void PaykanBuffer_copy(void *t, void *out, PaykanObject *b, int64_t i);
+void PaykanBuffer_set(void *t, void *b, int64_t i, void *v);
+void PaykanBuffer_reserve(void *t, void *b, int64_t n);
+void PaykanBuffer_grow(void *t, void *b, int64_t by);
+void PaykanBuffer_shrink(void *t, void *b, int64_t by);
 
 // -- Runtime panics
 

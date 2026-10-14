@@ -214,43 +214,56 @@ TEST(Lowering, NativeFunctionCallsItsCSymbolWithTheBuiltinConvention) {
   EXPECT_EQ(count(main, "retain"), 0u) << main;
 }
 
-// An instance of a generic native function passes the kind of each type
-// argument first, then every argument and its result as a 64-bit slot: a
-// reference as its box, borrowed; a reference result is the owned box.
-TEST(Lowering, GenericNativeFunctionPassesKindsAndSlots) {
+// An instance of a generic native function passes a PaykanType per type
+// argument, then what its template typed `T` by address: a `view T` as its
+// value's, a `-> T` result through a local C writes, a `-> view T` result as
+// an address the caller copies.
+TEST(Lowering, GenericNativeFunctionPassesTypesAndAddresses) {
   auto l = lower(R"(
     native fn pick<T>(first: bool, a: view T, b: view T) -> T = "pk_test_pick";
+    native fn get<T>(b: view Obj, i: int) -> view T = "pk_test_get";
     fn main() -> int {
       a: Str = "a";
       s = pick<Str>(True, a, "b");
       f = pick<float>(False, 1.5, 2.5);
+      b: Obj = "x";
+      println(get<Str>(b, 0));
       return pick<int>(True, 1, 2);
     }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
-  EXPECT_NE(l.Text.find("extern fn @$c.pk_test_pick(i64, i64, i64, i64) -> "
-                        "i64"),
+  // One PaykanType per type: size, alignment, kind, references (offsets).
+  EXPECT_NE(l.Text.find("data @.type0 = [8, 8, 4, 1, 0]"), std::string::npos)
+      << l.Text;
+  EXPECT_NE(l.Text.find("extern fn @$c.pk_test_pick(ptr, ptr, bool, ptr, "
+                        "ptr) -> void"),
+            std::string::npos)
+      << l.Text;
+  EXPECT_NE(l.Text.find("extern fn @$c.pk_test_get(ptr, obj, i64) -> ptr"),
             std::string::npos)
       << l.Text;
   std::string main = function(l.Text, "main");
-  EXPECT_NE(main.find("call @$c.pk_test_pick(4, 1, "), std::string::npos)
+  EXPECT_NE(main.find("call @$c.pk_test_pick(@.type0, %out.addr"),
+            std::string::npos)
       << main;
-  EXPECT_NE(main.find("call @$c.pk_test_pick(1, 0, "), std::string::npos)
+  EXPECT_NE(main.find("call @$c.pk_test_pick(@.type1, %out.addr"),
+            std::string::npos)
       << main;
-  EXPECT_NE(main.find("call @$c.pk_test_pick(0, 1, 1, 2)"), std::string::npos)
+  EXPECT_NE(main.find("call @$c.pk_test_get(@.type0, "), std::string::npos)
       << main;
-  EXPECT_NE(main.find("to box"), std::string::npos) << main;
-  EXPECT_NE(main.find("to f64"), std::string::npos) << main;
   // `a` is lent; the literal "b" is a temporary released after the call.
-  EXPECT_EQ(count(main, "retain"), 0u) << main;
+  // Only the view result is copied.
+  EXPECT_NE(main.find("ptr.load box, %r"), std::string::npos) << main;
+  EXPECT_EQ(count(main, "retain"), 1u) << main;
   // The instance's own body serves other modules.
   std::string str = function(l.Text, "pick<Str>");
-  EXPECT_NE(str.find("call @$c.pk_test_pick(4, "), std::string::npos) << str;
+  EXPECT_NE(str.find("call @$c.pk_test_pick(@.type0, %out.addr"),
+            std::string::npos)
+      << str;
   EXPECT_EQ(count(str, "release"), 2u) << str; // its own parameters
 }
 
-// C gets an `inout` argument's address; a generic instance's goes through
-// a 64-bit slot and back.
+// C gets an `inout` argument's address, a generic instance's included.
 TEST(Lowering, NativeInoutArgumentsAreAddresses) {
   auto l = lower(R"(
     native fn bump(n: inout int) = "pk_test_bump";
@@ -267,13 +280,15 @@ TEST(Lowering, NativeInoutArgumentsAreAddresses) {
   ASSERT_TRUE(l.Ok) << l.Error;
   EXPECT_NE(l.Text.find("extern fn @$c.pk_test_bump(ptr)"), std::string::npos)
       << l.Text;
-  EXPECT_NE(l.Text.find("extern fn @$c.pk_test_swap(i64, ptr, ptr)"),
+  EXPECT_NE(l.Text.find("extern fn @$c.pk_test_swap(ptr, ptr, ptr)"),
             std::string::npos)
+      << l.Text;
+  EXPECT_NE(l.Text.find("data @.type0 = [1, 1, 2, 0]"), std::string::npos)
       << l.Text;
   std::string main = function(l.Text, "main");
   EXPECT_NE(main.find("call @$c.pk_test_bump(%n.addr"), std::string::npos)
       << main;
-  EXPECT_NE(main.find("call @$c.pk_test_swap(2, %a.slot.addr"),
+  EXPECT_NE(main.find("call @$c.pk_test_swap(@.type0, %x.addr"),
             std::string::npos)
       << main;
 }

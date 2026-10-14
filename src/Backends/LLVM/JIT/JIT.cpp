@@ -146,10 +146,16 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanTupleEquals,     reinterpret_cast<void *>(&PaykanTuple_equals)},
     {kPaykanTupleVtable,     reinterpret_cast<void *>(&PaykanTuple_vtable)},
 
+    // For the C code of generic `native fn`s.
+    {kPaykanTypeCopy,        reinterpret_cast<void *>(&PaykanType_copy)},
+    {kPaykanTypeDrop,        reinterpret_cast<void *>(&PaykanType_drop)},
+    {kPaykanTypeIsUnset,     reinterpret_cast<void *>(&PaykanType_isUnset)},
+
     // Reached through `native fn`s (the standard library's memory::Buffer).
     {kPaykanBufferNew,       reinterpret_cast<void *>(&PaykanBuffer_new)},
     {kPaykanBufferLen,       reinterpret_cast<void *>(&PaykanBuffer_len)},
     {kPaykanBufferGet,       reinterpret_cast<void *>(&PaykanBuffer_get)},
+    {kPaykanBufferCopy,      reinterpret_cast<void *>(&PaykanBuffer_copy)},
     {kPaykanBufferSet,       reinterpret_cast<void *>(&PaykanBuffer_set)},
     {kPaykanBufferReserve,   reinterpret_cast<void *>(&PaykanBuffer_reserve)},
     {kPaykanBufferGrow,      reinterpret_cast<void *>(&PaykanBuffer_grow)},

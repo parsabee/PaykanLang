@@ -3,14 +3,12 @@
 //
 // Paykan runtime — the storage of the standard library's memory::Buffer<T>.
 //
-// A buffer is a PaykanArray every slot of which is live: `len` is how many
-// slots the program can read and write, `cap` how many are allocated.  The
-// program reaches it only through these generic native functions (Runtime.h,
-// "Generic native functions"), which are passed T's kind first and then the
-// buffer: its box, borrowed (`view`), or the address of the slot holding it
-// for a function that changes it (`inout`).  A buffer of references has the
-// object array's vtable, so destroying it releases them.  A slot that was
-// never set holds 0, or NULL: None.
+// A buffer holds `len` live values of its PaykanType, `cap` allocated, each
+// `type->size` bytes (Runtime.h, "Buffer").  The program reaches it only
+// through generic native functions, which are passed T's PaykanType first
+// and then the buffer: its object, borrowed (`view`), or the address of its
+// box for a function that changes it (`inout`).  A value that was never set
+// is all zero bytes: 0, False, or None.
 
 #include "Runtime.h"
 #include "RuntimeInternal.h"
@@ -18,151 +16,159 @@
 #include <stdint.h>
 #include <string.h>
 
-#define PAYKAN_BUFFER_SLOT 8UL
-
 /// The capacity a buffer never shrinks below on its own.
-#define PAYKAN_BUFFER_MIN_CAP 8UL
+#define PAYKAN_BUFFER_MIN_CAP 8
 
-static int is_ref(int64_t kind) {
-  return kind == PAYKAN_KIND_OBJECT || kind == PAYKAN_KIND_OPTIONAL;
+static void PaykanBuffer_destroy(PaykanObject *self);
+
+PaykanMethod PaykanBuffer_vtable[PAYKAN_OBJECT_SLOTS] = {
+    [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanBuffer_destroy,
+    [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanObject_toString,
+    [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanObject_equals,
+};
+
+static void *buffer_value(const PaykanBuffer *buf, int64_t i) {
+  return buf->data + (size_t)i * (size_t)buf->type->size;
 }
 
-/// The box a slot's bits are, read by memcpy as Tuple.c does (Runtime.h
-/// asserts a pointer is the slot's 8 bytes).
-static PaykanShared *as_box(int64_t bits) {
-  PaykanShared *box;
-  memcpy(&box, &bits, sizeof bits);
-  return box;
+/// Drop values [from, to): release the references they hold.
+static void buffer_drop(PaykanBuffer *buf, int64_t from, int64_t to) {
+  if (buf->type->nrefs == 0)
+    return;
+  for (int64_t i = from; i < to; ++i)
+    PaykanType_drop(buf->type, buffer_value(buf, i));
 }
 
-static int64_t box_bits(PaykanShared *box) {
-  int64_t bits;
-  memcpy(&bits, &box, sizeof bits);
-  return bits;
+static void PaykanBuffer_destroy(PaykanObject *self) {
+  PaykanBuffer *buf = (PaykanBuffer *)self;
+  buffer_drop(buf, 0, buf->len);
+  Paykan_free(buf->data);
+  Paykan_free(buf);
 }
 
-static PaykanArray *buffer_of(int64_t buf) {
-  return (PaykanArray *)PaykanShared_get(as_box(buf));
+/// The buffer whose box is at @p box (an `inout Obj` argument).
+static PaykanBuffer *buffer_at(const void *box) {
+  return (PaykanBuffer *)PaykanShared_get(*(PaykanShared *const *)box);
 }
 
-/// The buffer whose box is in the slot at @p slot (an `inout` argument).
-static PaykanArray *buffer_at(const void *slot) {
-  int64_t buf;
-  memcpy(&buf, slot, sizeof buf);
-  return buffer_of(buf);
-}
-
-static int64_t *buffer_slots(const PaykanArray *buf) {
-  return (int64_t *)buf->data;
-}
-
-/// @p n as a slot count; a negative one is the program's mistake.
-static unsigned long buffer_count(const char *what, int64_t n) {
+/// @p n as a value count; a negative one is the program's mistake.
+static int64_t buffer_count(const char *what, int64_t n) {
   if (n < 0)
     Paykan_runtime_panic("buffer %s %lld: the count cannot be negative", what,
                          (long long)n);
-  return (unsigned long)n;
+  return n;
 }
 
-static void buffer_check_index(const PaykanArray *buf, int64_t i) {
-  if (i < 0 || (unsigned long)i >= buf->len)
-    Paykan_runtime_panic("buffer index %lld out of bounds (len=%lu)",
-                         (long long)i, buf->len);
+static void buffer_check_index(const PaykanBuffer *buf, int64_t i) {
+  if (i < 0 || i >= buf->len)
+    Paykan_runtime_panic("buffer index %lld out of bounds (len=%lld)",
+                         (long long)i, (long long)buf->len);
 }
 
-static void buffer_realloc(PaykanArray *buf, unsigned long cap) {
-  if (cap > SIZE_MAX / PAYKAN_BUFFER_SLOT)
-    Paykan_runtime_panic("out of memory growing a buffer to %lu slots", cap);
-  buf->data = Paykan_realloc(buf->data, cap * PAYKAN_BUFFER_SLOT);
-  if (!buf->data && cap > 0)
-    Paykan_runtime_panic("out of memory growing a buffer to %lu slots", cap);
+static void buffer_realloc(PaykanBuffer *buf, int64_t cap) {
+  const size_t size = (size_t)buf->type->size;
+  if (size && (size_t)cap > SIZE_MAX / size)
+    Paykan_runtime_panic("out of memory growing a buffer to %lld values",
+                         (long long)cap);
+  buf->data = Paykan_realloc(buf->data, (size_t)cap * size);
+  if (!buf->data && cap > 0 && size > 0)
+    Paykan_runtime_panic("out of memory growing a buffer to %lld values",
+                         (long long)cap);
   buf->cap = cap;
 }
 
-/// Make the buffer @p len slots long, the new ones 0 / None.  The
-/// allocation at least doubles, so growing a slot at a time is amortised
+/// Make the buffer @p len values long, the new ones all zero bytes.  The
+/// allocation at least doubles, so growing a value at a time is amortised
 /// O(1).
-static void buffer_lengthen(PaykanArray *buf, unsigned long len) {
+static void buffer_lengthen(PaykanBuffer *buf, int64_t len) {
   if (len <= buf->len)
     return;
   if (len > buf->cap)
-    buffer_realloc(buf, buf->cap * 2 > len ? buf->cap * 2 : len);
-  memset(buffer_slots(buf) + buf->len, 0,
-         (len - buf->len) * PAYKAN_BUFFER_SLOT);
+    buffer_realloc(buf, buf->cap > len / 2 && buf->cap <= INT64_MAX / 2
+                            ? buf->cap * 2
+                            : len);
+  memset(buffer_value(buf, buf->len), 0,
+         (size_t)(len - buf->len) * (size_t)buf->type->size);
   buf->len = len;
 }
 
-int64_t PaykanBuffer_new(int64_t kind, int64_t n) {
-  unsigned long len = buffer_count("of", n);
-  PaykanArray *buf =
-      is_ref(kind) ? PaykanArray_new_obj(len) : PaykanArray_new(len); // zeroed
-  return box_bits(PaykanShared_new((PaykanObject *)buf));
+PaykanShared *PaykanBuffer_new(void *t, int64_t n) {
+  int64_t len = buffer_count("of", n);
+  PaykanBuffer *buf = (PaykanBuffer *)Paykan_malloc(sizeof(PaykanBuffer));
+  buf->vtable = PaykanBuffer_vtable;
+  buf->shared = NULL; // not yet boxed (unique-box invariant)
+  buf->type = t;
+  buf->data = NULL;
+  buf->len = 0;
+  buf->cap = 0;
+  buffer_lengthen(buf, len);
+  return PaykanShared_new((PaykanObject *)buf);
 }
 
-int64_t PaykanBuffer_len(int64_t kind, int64_t buf) {
-  (void)kind;
-  return (int64_t)buffer_of(buf)->len;
+int64_t PaykanBuffer_len(void *t, PaykanObject *b) {
+  (void)t;
+  return ((PaykanBuffer *)b)->len;
 }
 
-int64_t PaykanBuffer_get(int64_t kind, int64_t buf, int64_t i) {
-  PaykanArray *b = buffer_of(buf);
-  buffer_check_index(b, i);
-  int64_t v = buffer_slots(b)[i];
-  if (is_ref(kind)) {
-    if (!v) {
-      if (kind == PAYKAN_KIND_OBJECT)
-        Paykan_runtime_panic("buffer slot %lld was never set", (long long)i);
-      return 0; // None
-    }
-    Paykan_retain(as_box(v)); // the result is owned
-  }
+void *PaykanBuffer_get(void *t, PaykanObject *b, int64_t i) {
+  PaykanBuffer *buf = (PaykanBuffer *)b;
+  buffer_check_index(buf, i);
+  void *v = buffer_value(buf, i);
+  if (PaykanType_isUnset((const PaykanType *)t, v))
+    Paykan_runtime_panic("buffer value %lld was never set", (long long)i);
   return v;
 }
 
-void PaykanBuffer_set(int64_t kind, void *buf, int64_t i, int64_t v) {
-  PaykanArray *b = buffer_at(buf);
-  buffer_check_index(b, i);
-  int64_t *slot = buffer_slots(b) + i;
-  if (is_ref(kind)) {
-    if (v)
-      Paykan_retain(as_box(v));
-    if (*slot)
-      Paykan_release(as_box(*slot));
+void PaykanBuffer_copy(void *t, void *out, PaykanObject *b, int64_t i) {
+  PaykanType_copy((const PaykanType *)t, out, PaykanBuffer_get(t, b, i));
+}
+
+void PaykanBuffer_set(void *type, void *b, int64_t i, void *v) {
+  const PaykanType *t = (const PaykanType *)type;
+  PaykanBuffer *buf = buffer_at(b);
+  buffer_check_index(buf, i);
+  void *slot = buffer_value(buf, i);
+  // Retain the new value before releasing the old, which may be the same.
+  for (int64_t k = 0; k < t->nrefs; ++k) {
+    PaykanShared *ref;
+    memcpy(&ref, (const char *)v + (PaykanType_ref(t, k) >> 1),
+           sizeof(PaykanShared *));
+    Paykan_retain(ref);
   }
-  *slot = v;
+  PaykanType_drop(t, slot);
+  memmove(slot, v, (size_t)t->size);
 }
 
-void PaykanBuffer_reserve(int64_t kind, void *buf, int64_t n) {
-  (void)kind;
-  buffer_lengthen(buffer_at(buf), buffer_count("reserve", n));
+void PaykanBuffer_reserve(void *t, void *b, int64_t n) {
+  (void)t;
+  buffer_lengthen(buffer_at(b), buffer_count("reserve", n));
 }
 
-void PaykanBuffer_grow(int64_t kind, void *buf, int64_t by) {
-  (void)kind;
-  PaykanArray *b = buffer_at(buf);
-  unsigned long n = buffer_count("grow by", by);
-  if (n > ULONG_MAX - b->len)
-    Paykan_runtime_panic("out of memory growing a buffer by %lu slots", n);
-  buffer_lengthen(b, b->len + n);
+void PaykanBuffer_grow(void *t, void *b, int64_t by) {
+  (void)t;
+  PaykanBuffer *buf = buffer_at(b);
+  int64_t n = buffer_count("grow by", by);
+  if (n > INT64_MAX - buf->len)
+    Paykan_runtime_panic("out of memory growing a buffer by %lld values",
+                         (long long)n);
+  buffer_lengthen(buf, buf->len + n);
 }
 
-/// Drop the last @p by slots, releasing what they hold.  Once at most a
-/// quarter of the allocation is in use it is halved (never below
-/// PAYKAN_BUFFER_MIN_CAP), so a grow / shrink pair never reallocates twice.
-void PaykanBuffer_shrink(int64_t kind, void *buf, int64_t by) {
-  PaykanArray *b = buffer_at(buf);
-  unsigned long n = buffer_count("shrink by", by);
-  if (n > b->len)
-    Paykan_runtime_panic("buffer shrink by %lu: it has only %lu slots", n,
-                         b->len);
-  if (is_ref(kind))
-    for (unsigned long i = b->len - n; i < b->len; ++i)
-      if (buffer_slots(b)[i])
-        Paykan_release(as_box(buffer_slots(b)[i]));
-  b->len -= n;
-  unsigned long cap = b->cap;
-  while (cap / 2 >= PAYKAN_BUFFER_MIN_CAP && b->len <= cap / 4)
+/// Drop the last @p by values.  Once at most a quarter of the allocation is
+/// in use it is halved (never below PAYKAN_BUFFER_MIN_CAP), so a grow /
+/// shrink pair never reallocates twice.
+void PaykanBuffer_shrink(void *t, void *b, int64_t by) {
+  (void)t;
+  PaykanBuffer *buf = buffer_at(b);
+  int64_t n = buffer_count("shrink by", by);
+  if (n > buf->len)
+    Paykan_runtime_panic("buffer shrink by %lld: it has only %lld values",
+                         (long long)n, (long long)buf->len);
+  buffer_drop(buf, buf->len - n, buf->len);
+  buf->len -= n;
+  int64_t cap = buf->cap;
+  while (cap / 2 >= PAYKAN_BUFFER_MIN_CAP && buf->len <= cap / 4)
     cap /= 2;
-  if (cap < b->cap)
-    buffer_realloc(b, cap);
+  if (cap < buf->cap)
+    buffer_realloc(buf, cap);
 }

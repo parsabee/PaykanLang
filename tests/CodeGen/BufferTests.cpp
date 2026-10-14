@@ -17,6 +17,7 @@ const std::string kBuffer = R"(
 native fn __bufferNew<T>(n: int) -> Obj = "PaykanBuffer_new";
 native fn __bufferLen<T>(b: view Obj) -> int = "PaykanBuffer_len";
 native fn __bufferGet<T>(b: view Obj, i: int) -> view T = "PaykanBuffer_get";
+native fn __bufferCopy<T>(b: view Obj, i: int) -> T = "PaykanBuffer_copy";
 native fn __bufferSet<T>(b: inout Obj, i: int, v: view T) = "PaykanBuffer_set";
 native fn __bufferReserve<T>(b: inout Obj, n: int) = "PaykanBuffer_reserve";
 native fn __bufferGrow<T>(b: inout Obj, by: int) = "PaykanBuffer_grow";
@@ -27,6 +28,7 @@ class Buffer<T> {
   fn __init__() { self.__data = __bufferNew<T>(3); }
   view fn len() -> int { return __bufferLen<T>(self.__data); }
   view fn get(i: int) -> view T { return __bufferGet<T>(self.__data, i); }
+  fn copy(i: int) -> T { return __bufferCopy<T>(self.__data, i); }
   fn set(i: int, v: T) { __bufferSet<T>(self.__data, i, v); }
   fn reserve(n: int) { __bufferReserve<T>(self.__data, n); }
   fn grow(by: int) { __bufferGrow<T>(self.__data, by); }
@@ -122,4 +124,25 @@ TEST(Buffer, OptionalSlotsStartAsNone) {
     }
   )",
              "None\nx\nNone\n");
+}
+
+// A bool takes one byte; a copy outlives the value it was taken from.
+TEST(Buffer, HoldsBoolsAndCopiesOut) {
+  expectRuns(R"(
+    fn main() -> int {
+      b = Buffer<bool>();
+      b.grow(13);
+      b.set(1, True);
+      b.set(15, True);
+      println(Str<bool>(b.get(0)) + " " + Str<bool>(b.get(1)) + " " +
+              Str<bool>(b.copy(15)));
+      s = Buffer<Str>();
+      s.set(0, "x");
+      t: Str = s.copy(0);
+      s.set(0, "y");
+      println(t + s.get(0));
+      return 0;
+    }
+  )",
+             "False True True\nxy\n");
 }
