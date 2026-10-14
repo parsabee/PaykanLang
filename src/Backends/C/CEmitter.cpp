@@ -194,8 +194,22 @@ const char *cType(Type t) {
     return kRtObjPtr;
   case Type::Ptr:
     return kVoidPtr;
+  case Type::OptI64:
+    return kOptI64;
+  case Type::OptF64:
+    return kOptF64;
+  case Type::OptBool:
+    return kOptBool;
+  case Type::OptChar:
+    return kOptChar;
   }
   return kVoid;
+}
+
+/// `(T){<value>, <present>}`: a compound literal of the optional type @p t.
+std::string optLiteral(Type t, const std::string &value,
+                       const std::string &present) {
+  return paren(cType(t)) + kLBrace + value + kListSep + present + kRBrace;
 }
 
 /// The C operator of a comparison.  C's float operators already have PIR's
@@ -421,6 +435,7 @@ class Emitter {
   // allocators and globals are emitted only when referenced.
   bool UsesF64Bits = false;
   bool UsesBitsF64 = false;
+  std::set<Type> UsedOptionals;      ///< inline optional types the unit names
   std::set<std::string> NewClasses;  ///< classes the unit constructs
   std::set<std::string> UsedGlobals; ///< symKey(module, global)
 
@@ -726,6 +741,16 @@ class Emitter {
                         kHelperDouble);
     if (UsesF64Bits || UsesBitsF64)
       O << kNewline;
+    // typedef struct { <payload> value; int64_t present; } pkrt_opt_<t>;
+    for (Type t : UsedOptionals)
+      O << stmt(kTypedef + std::string(kSpace) + kStruct + kSpace + kLBrace +
+                kSpace +
+                stmt(declare(cType(pir::optionalPayload(t)), kOptValue)) +
+                kSpace + stmt(declare(kInt64, kOptPresent)) + kSpace + kRBrace +
+                kSpace + cType(t))
+        << kNewline;
+    if (!UsedOptionals.empty())
+      O << kNewline;
   }
 
   /// The PIR type of @p op in a function whose values' types are @p types.
@@ -742,13 +767,33 @@ class Emitter {
     return Type::Void;
   }
 
+  /// Note the inline optional types of @p sig.
+  void noteOptionals(const pir::Signature &sig) {
+    noteOptional(sig.Ret);
+    for (Type t : sig.Params)
+      noteOptional(t);
+  }
+  void noteOptional(Type t) {
+    if (pir::isOptional(t))
+      UsedOptionals.insert(t);
+  }
+
   /// Record what the unit's functions use (see the members above).
   void scanUnit() {
     for (size_t mi : Unit) {
       const pir::Module &m = P.Modules[mi];
+      for (const auto &c : m.Classes) {
+        for (const auto &fld : c.Fields)
+          noteOptional(fld.Ty);
+        for (const auto &e : c.VTable)
+          noteOptionals(e.Sig);
+      }
       for (const auto &f : m.Functions) {
+        noteOptionals(f.Sig);
         if (f.IsExtern)
           continue;
+        for (const auto &l : f.Locals)
+          noteOptional(l.Ty);
         std::unordered_map<pir::ValueId, Type> types;
         for (const auto &p : f.Params)
           types[p.Id] = p.Ty;
@@ -757,6 +802,9 @@ class Emitter {
         auto onInstr = [&](const pir::Instr &i) {
           if (i.Result.Ty != Type::Void)
             types[i.Result.Id] = i.Result.Ty;
+          noteOptional(i.Result.Ty);
+          if (i.Op == pir::Opcode::VCall)
+            noteOptionals(i.Sig);
           if (!uses.live(i))
             return; // not emitted
           for (const auto &a : i.Args)
@@ -923,8 +971,11 @@ class Emitter {
           default:
             break;
           }
+          std::string init = zero;
+          if (pir::isOptional(f.Ty))
+            init = optLiteral(f.Ty, kZero, kZero); // absent
           O << kIndentUnit
-            << stmt(binop(member(kNewObj, fieldName(f.Name)), kOpAssign, zero))
+            << stmt(binop(member(kNewObj, fieldName(f.Name)), kOpAssign, init))
             << kNewline;
         }
         O << kIndentUnit
@@ -1399,6 +1450,23 @@ class Emitter {
       line(stmt(binop(deref(i.Args[0], t), kOpAssign, v)));
       return;
     }
+    case Opcode::Some:
+      pre = resultPrefix(i);
+      line(stmt(pre + optLiteral(i.Result.Ty, operand(i.Args[0]), kOne)));
+      return;
+    case Opcode::None:
+      pre = resultPrefix(i);
+      line(stmt(pre + optLiteral(i.Result.Ty, kZero, kZero)));
+      return;
+    case Opcode::IsSome:
+      pre = resultPrefix(i);
+      line(stmt(pre + paren(binop(operand(i.Args[0]) + kOpDot + kOptPresent,
+                                  kOpNe, kZero))));
+      return;
+    case Opcode::Unwrap:
+      pre = resultPrefix(i);
+      line(stmt(pre + operand(i.Args[0]) + kOpDot + kOptValue));
+      return;
     }
   }
 

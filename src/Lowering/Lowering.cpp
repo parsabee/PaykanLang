@@ -1103,6 +1103,12 @@ void ModuleLowering::emitImplicitReturn(const pir::Signature &sig) {
   case Type::I64:
     B.emitRet(Val::i64(0));
     break;
+  case Type::OptI64:
+  case Type::OptF64:
+  case Type::OptBool:
+  case Type::OptChar:
+    B.emitRet(B.none(sig.Ret));
+    break;
   }
 }
 

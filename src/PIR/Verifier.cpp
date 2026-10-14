@@ -38,17 +38,29 @@ std::string sigStr(const Signature &sig) {
 }
 
 bool isNumeric(Type t) { return t == Type::I64 || t == Type::F64; }
-/// The types an address (local.addr, field.addr) may point to: scalars, and
-/// the box of a reference (an `inout` parameter of a reference type).
+/// The types an address (local.addr, field.addr) may point to: scalars,
+/// inline optionals, and the box of a reference (an `inout` parameter of a
+/// reference type).
 bool isAddressable(Type t) {
-  return isNumeric(t) || t == Type::Bool || t == Type::Char || t == Type::Box;
+  return isNumeric(t) || t == Type::Bool || t == Type::Char || t == Type::Box ||
+         isOptional(t);
 }
 bool isPointerLike(Type t) {
   return t == Type::Box || t == Type::Obj || t == Type::Ptr;
 }
 bool isFieldType(Type t) {
   return t == Type::I64 || t == Type::F64 || t == Type::Bool ||
-         t == Type::Char || t == Type::Box;
+         t == Type::Char || t == Type::Box || isOptional(t);
+}
+
+/// True when @p sig takes or returns an inline optional.
+bool hasOptional(const Signature &sig) {
+  if (isOptional(sig.Ret))
+    return true;
+  for (Type t : sig.Params)
+    if (isOptional(t))
+      return true;
+  return false;
 }
 
 /// The `cast` table of docs/pir.md §6.
@@ -69,6 +81,10 @@ bool castAllowed(Type from, Type to) {
   case Type::Ptr:
     return to == Type::I64 || isPointerLike(to);
   case Type::Void:
+  case Type::OptI64:
+  case Type::OptF64:
+  case Type::OptBool:
+  case Type::OptChar:
     return false;
   }
   return false;
@@ -199,7 +215,8 @@ private:
         if (!isFieldType(f.Ty))
           error(where, "field '" + c.Name + "." + f.Name + "' has type " +
                            typeName(f.Ty) +
-                           " (fields are i64, f64, bool, char or box)");
+                           " (fields are i64, f64, bool, char, box or an "
+                           "optional)");
       }
       if (!c.IsExtern && (c.VTable.empty() || c.VTable[0].Slot != "destroy"))
         error(where, "class '" + c.Name + "': vtable slot 0 must be 'destroy'");
@@ -229,6 +246,12 @@ private:
         if (!f.Symbol.empty() && f.Module.empty())
           error(where, "runtime extern function '@" + f.Name +
                            "' has a 'symbol' (only a module extern may)");
+        // An inline optional crosses into C only as its parts: its by-value
+        // passing is not the same on both backends' C ABIs.
+        if (f.Module.empty() && hasOptional(f.Sig))
+          error(where, "extern function '@" + f.Name +
+                           "' takes or returns an optional (a runtime or "
+                           "native function cannot)");
         continue;
       }
       if (f.Params.size() != f.Sig.Params.size()) {
@@ -418,6 +441,9 @@ private:
         if (isPointerLike(a) && in.Pred != CmpPred::Eq &&
             in.Pred != CmpPred::Ne)
           error("only eq/ne compare " + std::string(typeName(a)) + " values");
+        if (isOptional(a))
+          error("cmp on " + std::string(typeName(a)) +
+                " (compare is_some and the unwrapped payloads)");
         result(in, Type::Bool);
         break;
       }
@@ -608,7 +634,8 @@ private:
         else if (!isAddressable(F.Locals[in.Local].Ty))
           error("local.addr of a local of type " +
                 std::string(typeName(F.Locals[in.Local].Ty)) +
-                " (only i64, f64, bool, char and box slots have addresses)");
+                " (only i64, f64, bool, char, optional and box slots have "
+                "addresses)");
         result(in, Type::Ptr);
         break;
       case Opcode::FieldAddr: {
@@ -626,7 +653,8 @@ private:
         else if (!isAddressable(fld->Ty))
           error("field.addr of a field of type " +
                 std::string(typeName(fld->Ty)) +
-                " (only i64, f64, bool, char and box slots have addresses)");
+                " (only i64, f64, bool, char, optional and box slots have "
+                "addresses)");
         result(in, Type::Ptr);
         break;
       }
@@ -636,7 +664,7 @@ private:
         expect(in.Args[0], Type::Ptr, "address of ptr.load");
         if (!isAddressable(in.Result.Ty))
           error("ptr.load of " + std::string(typeName(in.Result.Ty)) +
-                " (only i64, f64, bool, char and box)");
+                " (only i64, f64, bool, char, an optional and box)");
         result(in, in.Result.Ty);
         break;
       case Opcode::PtrStore: {
@@ -646,8 +674,39 @@ private:
         Type t = typeOf(in.Args[1]);
         if (t != Type::Void && !isAddressable(t))
           error("ptr.store of " + std::string(typeName(t)) +
-                " (only i64, f64, bool, char and box)");
+                " (only i64, f64, bool, char, an optional and box)");
         result(in, Type::Void);
+        break;
+      }
+      case Opcode::Some: {
+        if (!arity(in, 1))
+          break;
+        Type a = typeOf(in.Args[0]);
+        if (a != Type::Void && optionalOf(a) == Type::Void)
+          error("some of " + std::string(typeName(a)) +
+                " (only i64, f64, bool and char have an optional)");
+        result(in, optionalOf(a) == Type::Void ? in.Result.Ty : optionalOf(a));
+        break;
+      }
+      case Opcode::None:
+        arity(in, 0);
+        if (in.Result.Id != kNoValue && !isOptional(in.Result.Ty))
+          error("none of " + std::string(typeName(in.Result.Ty)) +
+                ", which is not an optional");
+        result(in, in.Result.Ty);
+        break;
+      case Opcode::IsSome:
+      case Opcode::Unwrap: {
+        if (!arity(in, 1))
+          break;
+        Type a = typeOf(in.Args[0]);
+        if (a != Type::Void && !isOptional(a))
+          error("operand of " + opName(in) + " has type " + typeName(a) +
+                ", expected an optional");
+        if (in.Op == Opcode::IsSome)
+          result(in, Type::Bool);
+        else
+          result(in, isOptional(a) ? optionalPayload(a) : in.Result.Ty);
         break;
       }
       }

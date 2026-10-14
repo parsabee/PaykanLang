@@ -433,6 +433,48 @@ fn @main() -> i64 {
   EXPECT_NE(err.Message.find("no '%result ='"), std::string::npos) << err.str();
 }
 
+// Inline optionals: `some` takes a payload type, `is_some` / `unwrap` an
+// optional, and an optional is neither compared, cast, computed with nor
+// passed to a runtime or native function.
+TEST(PIRVerifier, ChecksOptionals) {
+  std::string errs = verifyText(R"(module "m"
+extern fn @$rt.Paykan_take(opt_i64) -> void
+extern fn @$c.native() -> opt_f64
+fn @main() -> i64 {
+  %a = some 1
+  %b = none opt_i64
+  %c = some null box
+  %d = is_some 1
+  %e = unwrap 2.5
+  %f = cmp eq %a, %b
+  %g = cast %a to i64
+  %h = add %a, %b
+  %i = is_some %a
+  %j = unwrap %b
+  %k = add %j, 1
+  ret %k
+}
+)");
+  for (const char *e :
+       {"some of box", "operand of is_some has type i64",
+        "operand of unwrap has type f64", "cmp on opt_i64",
+        "cannot cast opt_i64 to i64", "arithmetic on opt_i64",
+        "extern function '@$rt.Paykan_take' takes or returns an optional",
+        "extern function '@$c.native' takes or returns an optional"})
+    EXPECT_NE(errs.find(e), std::string::npos) << e << "\n" << errs;
+  // is_some and unwrap of a well-typed optional are fine: the unwrapped
+  // payload is an i64.
+  EXPECT_EQ(errs.find("%k"), std::string::npos) << errs;
+  EXPECT_EQ(errs.find("returned value"), std::string::npos) << errs;
+
+  ParseError err;
+  EXPECT_FALSE(parseProgram("module \"m\"\nfn @f() -> void {\n"
+                            "  %n = none i64\n  ret\n}\n",
+                            err));
+  EXPECT_NE(err.Message.find("not an optional"), std::string::npos)
+      << err.str();
+}
+
 TEST(PIRVerifier, RejectsBadControlFlow) {
   std::string errs = verifyText(R"(module "m"
 fn @f() -> i64 {

@@ -416,6 +416,40 @@ public:
     i.Args = {ptr.Op, v.Op};
     emit(std::move(i));
   }
+
+  // -- Inline optionals
+
+  /// `some %v`: the present optional of @p v (i64, f64, bool or char).
+  Val some(const Val &v, std::string name = "") {
+    Instr i;
+    i.Op = Opcode::Some;
+    i.Result = newValue(optionalOf(v.Ty), std::move(name));
+    i.Args = {v.Op};
+    return emit(std::move(i));
+  }
+  /// `none T`: the absent optional of type @p optTy.
+  Val none(Type optTy, std::string name = "") {
+    Instr i;
+    i.Op = Opcode::None;
+    i.Result = newValue(optTy, std::move(name));
+    return emit(std::move(i));
+  }
+  /// `is_some %o`: whether the optional @p o is present.
+  Val isSome(const Val &o, std::string name = "") {
+    Instr i;
+    i.Op = Opcode::IsSome;
+    i.Result = newValue(Type::Bool, std::move(name));
+    i.Args = {o.Op};
+    return emit(std::move(i));
+  }
+  /// `unwrap %o`: the payload of @p o (its type's zero when absent).
+  Val unwrap(const Val &o, std::string name = "") {
+    Instr i;
+    i.Op = Opcode::Unwrap;
+    i.Result = newValue(optionalPayload(o.Ty), std::move(name));
+    i.Args = {o.Op};
+    return emit(std::move(i));
+  }
 };
 
 } // namespace paykan::pir

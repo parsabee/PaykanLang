@@ -397,3 +397,114 @@ TEST(OptionalPrimitive, GenericArgumentsAndOptionalOfTypeParameter) {
   EXPECT_EQ(r.StdOut, "None\n8\nNone\n2\nNone\n5\n6\n?\n");
   g.expectNoLeaks("GenericArgumentsAndOptionalOfTypeParameter");
 }
+
+// -- PIR inline optionals (#96)
+
+// `some`, `none`, `is_some` and `unwrap` on both backends, with optionals in
+// locals, parameters, results, fields (a new object's are absent), a vtable
+// slot's signature, `select` and through addresses; `unwrap` of an absent
+// optional is its payload type's zero.
+TEST(OptionalPrimitive, PIRInlineOptionals) {
+  LeakGuard g;
+  auto r = compileAndRunPIR(R"(module "t"
+class C {
+  field n: opt_i64
+  field f: opt_f64
+  vtable {
+    destroy = @C.destroy : (obj) -> void
+    pick = @C.pick : (obj, opt_char, bool) -> opt_char
+  }
+}
+
+fn @C.destroy(%self: obj) -> void {
+  free %self
+  ret
+}
+
+fn @C.pick(%self: obj, %c: opt_char, %keep: bool) -> opt_char {
+  %n = none opt_char
+  %r = select %keep, %c, %n
+  ret %r
+}
+
+fn @inc(%o: opt_i64) -> i64 {
+  %has = is_some %o
+  %v = unwrap %o
+  %w = add %v, 1
+  %r = select %has, %w, 100
+  ret %r
+}
+
+fn @dbl(%p: ptr) -> void {
+  %o = ptr.load opt_i64, %p
+  %v = unwrap %o
+  %w = mul %v, 2
+  %s = some %w
+  ptr.store %p, %s
+  ret
+}
+
+fn @main() -> i64 {
+  local %x: opt_i64
+  local %b: opt_bool
+  %five = some 5
+  store %x, %five
+  %px = local.addr %x
+  call @dbl(%px)
+  %x2 = load %x
+  %a = call @inc(%x2)
+  %none = none opt_i64
+  %z = unwrap %none
+  %c = call @inc(%none)
+  %o = new C
+  %fn = field.load %o, C.n
+  %d = call @inc(%fn)
+  field.store %o, C.n, %five
+  %pn = field.addr %o, C.n
+  call @dbl(%pn)
+  %fn2 = field.load %o, C.n
+  %e = call @inc(%fn2)
+  %ff = field.load %o, C.f
+  %hasf = is_some %ff
+  %fsome = some 2.5
+  field.store %o, C.f, %fsome
+  %ff2 = field.load %o, C.f
+  %fv = unwrap %ff2
+  %fi = ftoi %fv
+  %ch = some 'a'
+  %k1 = vcall %o : C [1] (%ch, true)
+  %k2 = vcall %o : C [1] (%ch, false)
+  %hk1 = is_some %k1
+  %hk2 = is_some %k2
+  %kc = unwrap %k1
+  %kci = cast %kc to i64
+  %tru = some true
+  store %b, %tru
+  %bl = load %b
+  %bv = unwrap %bl
+  free %o
+  %s1 = add %a, %z
+  %c0 = sub %c, 100
+  %d0 = sub %d, 100
+  %s2 = add %s1, %c0
+  %s3 = add %s2, %d0
+  %s4 = add %s3, %e
+  %s5 = add %s4, %fi
+  %k7 = sub %kci, 90
+  %s6 = add %s5, %k7
+  %t1 = select %hk1, 1, 0
+  %t2 = select %hk2, 50, 0
+  %t3 = select %hasf, 50, 0
+  %t4 = select %bv, 3, 0
+  %s7 = add %s6, %t1
+  %s8 = add %s7, %t2
+  %s9 = add %s8, %t3
+  %s10 = add %s9, %t4
+  ret %s10
+}
+)");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  // a 11 + z 0 + c 0 + d 0 + e 11 + fi 2 + 'a' - 90 7 + hk1 1 + bv 3.
+  EXPECT_EQ(r.ExitCode, 35) << r.StdErr;
+  g.expectNoLeaks("inline optionals");
+}

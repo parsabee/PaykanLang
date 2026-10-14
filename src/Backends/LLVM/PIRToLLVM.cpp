@@ -153,6 +153,13 @@ private:
     case Type::Obj:
     case Type::Ptr:
       return llvm::PointerType::getUnqual(Ctx);
+    case Type::OptI64:
+    case Type::OptF64:
+    case Type::OptBool:
+    case Type::OptChar:
+      // { payload, i64 present }: a literal struct, passed by value.
+      return llvm::StructType::get(
+          Ctx, {llvmType(optionalPayload(t)), llvm::Type::getInt64Ty(Ctx)});
     }
     return llvm::Type::getVoidTy(Ctx);
   }
@@ -761,6 +768,23 @@ private:
       break;
     case Opcode::PtrStore:
       B.CreateStore(operand(in.Args[1]), operand(in.Args[0]));
+      break;
+    case Opcode::Some: {
+      llvm::Type *ty = llvmType(in.Result.Ty);
+      llvm::Value *o = B.CreateInsertValue(llvm::PoisonValue::get(ty),
+                                           operand(in.Args[0]), 0);
+      setResult(in, B.CreateInsertValue(o, B.getInt64(1), 1));
+      break;
+    }
+    case Opcode::None:
+      setResult(in, llvm::Constant::getNullValue(llvmType(in.Result.Ty)));
+      break;
+    case Opcode::IsSome:
+      setResult(in, B.CreateICmpNE(B.CreateExtractValue(operand(in.Args[0]), 1),
+                                   B.getInt64(0)));
+      break;
+    case Opcode::Unwrap:
+      setResult(in, B.CreateExtractValue(operand(in.Args[0]), 0));
       break;
     }
   }

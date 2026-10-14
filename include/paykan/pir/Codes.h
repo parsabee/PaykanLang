@@ -51,8 +51,12 @@ inline constexpr OpcodeEntry kOpcodeTable[] = {
     {Opcode::VTableAddr, 23, "vtable.addr"},
     {Opcode::Load, 24, "load"},
     {Opcode::Store, 25, "store"},
-    // 26-29 reserved (#96 some/none/is_some/unwrap), 30-31 (#99 weak.load/
-    // weak.store), 32-33 (#170 global.load/global.store).
+    {Opcode::Some, 26, "some"},
+    {Opcode::None, 27, "none"},
+    {Opcode::IsSome, 28, "is_some"},
+    {Opcode::Unwrap, 29, "unwrap"},
+    // 30-31 reserved (#99 weak.load/weak.store), 32-33 (#170 global.load/
+    // global.store).
     {Opcode::LocalAddr, 34, "local.addr"},
     {Opcode::FieldAddr, 35, "field.addr"},
     {Opcode::PtrLoad, 36, "ptr.load"},
@@ -67,10 +71,14 @@ struct TypeEntry {
 };
 
 inline constexpr TypeEntry kTypeTable[] = {
-    {Type::Void, 0, "void"}, {Type::I64, 1, "i64"},   {Type::F64, 2, "f64"},
-    {Type::Bool, 3, "bool"}, {Type::Char, 4, "char"}, {Type::Box, 5, "box"},
-    {Type::Obj, 6, "obj"},   {Type::Ptr, 7, "ptr"},
-    // 8-15 reserved (#96 inline optionals), 16 (#99 weak), 17-255 reserved.
+    {Type::Void, 0, "void"},         {Type::I64, 1, "i64"},
+    {Type::F64, 2, "f64"},           {Type::Bool, 3, "bool"},
+    {Type::Char, 4, "char"},         {Type::Box, 5, "box"},
+    {Type::Obj, 6, "obj"},           {Type::Ptr, 7, "ptr"},
+    {Type::OptI64, 8, "opt_i64"},    {Type::OptF64, 9, "opt_f64"},
+    {Type::OptBool, 10, "opt_bool"}, {Type::OptChar, 11, "opt_char"},
+    // 12-15 reserved (#96 further inline optionals), 16 (#99 weak), 17-255
+    // reserved.
 };
 
 namespace detail {
@@ -98,9 +106,9 @@ template <typename T, size_t N> constexpr bool rowsUnique(const T (&table)[N]) {
 // per enumerator up to the last one.  Adding an enumerator without a row
 // fails here or in the exhaustive switch of tests/PIR/BinaryTests.cpp.
 static_assert(std::size(kOpcodeTable) ==
-                  static_cast<size_t>(Opcode::PtrStore) + 1,
+                  static_cast<size_t>(Opcode::Unwrap) + 1,
               "every Opcode needs a row in kOpcodeTable");
-static_assert(std::size(kTypeTable) == static_cast<size_t>(Type::Ptr) + 1,
+static_assert(std::size(kTypeTable) == static_cast<size_t>(Type::OptChar) + 1,
               "every Type needs a row in kTypeTable");
 static_assert(detail::rowsUnique(kOpcodeTable), "duplicate opcode row");
 static_assert(detail::rowsUnique(kTypeTable), "duplicate type row");

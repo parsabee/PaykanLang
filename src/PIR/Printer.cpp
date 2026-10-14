@@ -332,6 +332,9 @@ private:
       OS << ' ' << typeName(in.Result.Ty) << ", ";
       printOperandList(in.Args);
       break;
+    case Opcode::None:
+      OS << ' ' << typeName(in.Result.Ty);
+      break;
     case Opcode::Store:
       OS << ' ';
       printLocalRef(in.Local);

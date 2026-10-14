@@ -1220,6 +1220,23 @@ private:
       if (!parseCommaOperands(in.Args, 2))
         return false;
       break;
+    case Opcode::Some:
+    case Opcode::Unwrap:
+      if (!parseCommaOperands(in.Args, 1))
+        return false;
+      needsFixup = true; // from the operand's type
+      break;
+    case Opcode::None:
+      if (!parseType(resultTy))
+        return false;
+      if (!isOptional(resultTy))
+        return error("none of a type that is not an optional");
+      break;
+    case Opcode::IsSome:
+      if (!parseCommaOperands(in.Args, 1))
+        return false;
+      resultTy = Type::Bool;
+      break;
     }
 
     if (hasResult) {
@@ -1331,6 +1348,16 @@ private:
     case Opcode::Select:
       in.Result.Ty =
           in.Args.size() < 3 ? Type::Void : operandType(m, f, in.Args[1]);
+      break;
+    case Opcode::Some:
+      in.Result.Ty = in.Args.empty()
+                         ? Type::Void
+                         : optionalOf(operandType(m, f, in.Args[0]));
+      break;
+    case Opcode::Unwrap:
+      in.Result.Ty = in.Args.empty()
+                         ? Type::Void
+                         : optionalPayload(operandType(m, f, in.Args[0]));
       break;
     case Opcode::Call:
       if (const Function *callee = m.findFunction(in.Callee))
