@@ -58,6 +58,11 @@ struct SemaContext {
   /// keyed by canonical module name (ModuleName.h). Populated by Sema::run()
   /// so the lowering can reuse them without re-running the Sema pass.
   StringMap<std::shared_ptr<SemaContext>> ImportedContexts;
+  /// The module's instantiations of other modules' templates, checked here
+  /// but not part of the module: the lowering emits each once per program
+  /// (docs/design/pkm.md §4.5).
+  std::vector<ast::ClassDecl *> ForeignClasses;
+  std::vector<ast::FuncDecl *> ForeignFunctions;
 
   explicit operator bool() const { return Ok; }
 };
@@ -437,7 +442,8 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   StringMap<std::shared_ptr<SemaContext>> AccumulatedImportContexts;
 
   /// Defining module (canonical name, ModuleName.h) of every class/enum this
-  /// Sema has reconstructed from an import, keyed by canonical type name.
+  /// Sema has reconstructed from an import, or instantiated from another
+  /// module's template, keyed by canonical type name.
   /// Type names are global across the import graph, so reconstructing a type
   /// whose name is already bound to a type from a different module is an
   /// error rather than a silent merge of two unrelated types.
@@ -479,6 +485,8 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   modules::ModuleResolver *Resolver = nullptr;
 
 public:
+  struct ModuleTemplates;
+
   /// Info about an already-analyzed module.  Public (with ModuleCache) so
   /// tests can seed a cache entry and exercise the error paths of export
   /// reconstruction; production code only touches it in SemaImport.cpp.
@@ -541,8 +549,36 @@ public:
       bool operator==(const EnumInfo &) const = default;
     };
     std::vector<EnumInfo> ExportedEnums;
+    /// The module's generic classes and functions; null when it has none.
+    std::shared_ptr<const ModuleTemplates> Templates;
     bool operator==(const ModuleInfo &) const = default;
   };
+
+  /// The generic classes and functions a module exports (docs/design/pkm.md
+  /// §4), as their module resolved them: every name in a body that the
+  /// module declares or imports is spelled with the hidden qualifier
+  /// `$<canonical module>::` (hiddenQualifier), which an importer registers
+  /// for the module and for each module in Uses, and no user code can write.
+  struct ModuleTemplates {
+    std::string Module;                    ///< canonical module name
+    std::vector<ast::ClassDecl *> Classes; ///< in the module's ASTContext
+    std::vector<ast::FuncDecl *> Functions;
+    /// The modules the bodies name, the module itself first: canonical
+    /// name and the file ModuleCache knows it by.
+    std::vector<std::pair<std::string, std::string>> Uses;
+    /// Where the bodies' source locations point, for diagnostics.
+    std::string File;
+    const std::vector<std::string> *Lines = nullptr;
+    /// Keeps the ASTContext the bodies live in alive.
+    std::shared_ptr<void> Owner;
+  };
+
+  /// The qualifier under which an importer registers module @p canonical
+  /// for the bodies of its templates.
+  static std::string hiddenQualifier(const std::string &canonical);
+  /// @p name as diagnostics show it: a name under a hidden qualifier
+  /// (`$lib::box::f`) by its module's path (`lib::box::f`).
+  static std::string displayName(const std::string &name);
 
   /// Global cache of already-analyzed modules, keyed by the resolved path
   /// of the file they came from (a source, or a .pkm).
@@ -842,13 +878,17 @@ private:
   StringMap<bool> FuncInstantiations;
 
   /// What an instantiated ClassType was made from (for inference through
-  /// `Box<T>` parameters and for diagnostics).
+  /// `Box<T>` parameters).
   struct InstantiationInfo {
-    std::string TemplateName;
+    const ast::ClassDecl *Template;
     std::vector<ast::Type *> Args;
   };
   std::unordered_map<ast::ClassType *, InstantiationInfo>
       ClassInstantiationInfo;
+  /// What @p ct was instantiated from: an instantiation made here, or one an
+  /// imported module made of a template this module sees.  nullptr for any
+  /// other class.
+  const InstantiationInfo *instantiationInfo(ast::ClassType *ct);
 
   /// Instantiations whose bodies still have to be checked.
   struct PendingInstantiation {
@@ -857,6 +897,12 @@ private:
     std::string Name;               // canonical instantiation name
     ast::SourceLocation RequestLoc; // where the instantiation was requested
     StringSet TypeParams;           // the template's type parameter names
+    /// The module of a template of another module (null for this one's):
+    /// its body's locations are in that module's file.
+    const ModuleTemplates *Origin = nullptr;
+    /// The file RequestLoc is in (see InstantiationFrame).
+    std::string RequestFile;
+    const std::vector<std::string> *RequestLines = nullptr;
   };
   std::vector<PendingInstantiation> PendingInstantiations;
 
@@ -871,6 +917,9 @@ private:
   struct InstantiationFrame {
     std::string Name;
     ast::SourceLocation RequestLoc;
+    /// The file RequestLoc is in (another module's, inside a template of it).
+    std::string File;
+    const std::vector<std::string> *Lines = nullptr;
   };
   std::vector<InstantiationFrame> InstantiationStack;
   static constexpr size_t kMaxInstantiationDepth = 16;
@@ -884,16 +933,56 @@ private:
   /// emitted before a method that calls it.
   StringMap<StringSet> ConstructsEdges;
 
-  /// Report that qualified name @p name (`shapes::Box`, `g::first`) names a
-  /// template of another module, which cannot be imported yet.  The rejection
-  /// does not depend on the type arguments, but a use inside a generic body is
-  /// resolved again for every instantiation (clones keep the template's source
-  /// locations), so it is reported once per use: a repeat at the same location
-  /// only counts a suppressed follow-on (#112).
-  void errorImportedTemplate(ast::SourceLocation loc, const std::string &name,
-                             const std::string &msg);
-  /// The uses errorImportedTemplate has reported ("line:col:name").
-  StringSet ReportedImportedTemplateUses;
+  // -- Templates of other modules (docs/design/pkm.md §4)
+
+  /// Each registered template of another module, and its module.
+  std::unordered_map<const ast::Decl *, const ModuleTemplates *>
+      ForeignTemplates;
+  /// Modules registered under their hidden qualifier (injectHidden).
+  StringSet HiddenModules;
+  /// The file each module this Sema loaded is cached under, by canonical
+  /// name (ModuleTemplates::Uses).
+  StringMap<std::string> ModulePaths;
+  /// This module's instantiations of other modules' templates (see
+  /// SemaContext::ForeignClasses).
+  std::vector<ast::ClassDecl *> ForeignInstantiatedClassDecls;
+  std::vector<ast::FuncDecl *> ForeignInstantiatedFuncDecls;
+
+  /// The templates of the module this Sema analysed, resolved for its
+  /// importers; null when it has none.  @p canonical is its name.
+  std::shared_ptr<ModuleTemplates>
+  exportTemplates(ast::TranslationUnit *tu, const std::string &canonical);
+  /// Register the templates of the module @p info describes under
+  /// @p qualifier and @p fullModulePath, and every module their bodies
+  /// name under its hidden qualifier.
+  bool injectTemplates(const ModuleInfo &info, const std::string &qualifier,
+                       const std::string &fullModulePath,
+                       ast::SourceLocation loc);
+  /// Register module @p canonical (described by @p info) under its hidden
+  /// qualifier, once.
+  bool injectHidden(const ModuleInfo &info, const std::string &canonical,
+                    ast::SourceLocation loc);
+  /// The module of template @p tmpl when it is another module's.
+  const ModuleTemplates *foreignOrigin(const ast::Decl *tmpl) const;
+
+  /// While alive, diagnostics point into the file of @p origin's module (a
+  /// template of another module is being checked); a null origin changes
+  /// nothing.
+  class OriginSource {
+    DiagEngine &Diags;
+    std::string SavedName;
+    const std::vector<std::string> *SavedLines;
+    bool Active;
+
+  public:
+    OriginSource(DiagEngine &diags, const ModuleTemplates *origin);
+    ~OriginSource();
+    OriginSource(const OriginSource &) = delete;
+    OriginSource &operator=(const OriginSource &) = delete;
+  };
+  /// The instantiation frame for @p name requested at @p loc, in the file
+  /// diagnostics currently point into.
+  InstantiationFrame frameAt(const std::string &name, ast::SourceLocation loc);
 
   /// Register every generic declaration of the module as a template, checking
   /// its name and type parameter list.

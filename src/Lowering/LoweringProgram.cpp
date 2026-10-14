@@ -85,7 +85,7 @@ pir::Module *ProgramLowering::lowerImport(const std::string &name) {
     return nullptr;
   // One module per canonical name.  claimName() keeps the main module's
   // name apart should an import share it.
-  ModuleLowering ml(*this, *modCtx, claimName(name));
+  ModuleLowering ml(*this, *modCtx, claimName(name), name);
   if (!ml.run(modCtx->Root)) {
     Errs << "internal compiler error: lowering failed for imported module '"
          << name << "'\n";
@@ -128,6 +128,20 @@ void ModuleLowering::processImports(ast::TranslationUnit *tu) {
       }
     }
   }
+
+  // Instantiations of other modules' templates, once the imports (which may
+  // need the same ones) are lowered: the first module to need one emits it,
+  // and the later ones declare it extern.
+  for (auto *cls : SemaCtx.ForeignClasses)
+    if (PL.ClassOrigins.try_emplace(cls->getName(), Mod.Name).second) {
+      PL.ForeignInstantiations.insert(cls->getName());
+      ForeignClasses.push_back(cls);
+    }
+  for (auto *fn : SemaCtx.ForeignFunctions)
+    if (PL.FuncOrigins.try_emplace(fn->getName(), Mod.Name).second) {
+      PL.ForeignInstantiations.insert(fn->getName());
+      ForeignFuncs.push_back(fn);
+    }
 }
 
 bool lowerProgram(const sema::SemaContext &ctx, ast::TranslationUnit *tu,

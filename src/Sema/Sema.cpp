@@ -129,11 +129,19 @@ void Sema::error(ast::SourceLocation loc, const std::string &msg) {
   Diags.error(loc, msg);
   // An error inside an instantiation points at the template's source text
   // (clones keep their locations); say which instantiation was being checked
-  // and where it was requested, innermost first, like a C++ compiler.
+  // and where it was requested, innermost first, like a C++ compiler.  A
+  // request in another module's template is shown in that module's file.
+  if (InstantiationStack.empty())
+    return;
+  const std::string file = Diags.getSourceName();
+  const std::vector<std::string> *lines = Diags.getSourceLines();
   for (auto it = InstantiationStack.rbegin(); it != InstantiationStack.rend();
-       ++it)
-    Diags.note(it->RequestLoc,
-               "in instantiation of '" + it->Name + "' requested here");
+       ++it) {
+    Diags.setSourceInfo(it->File, it->Lines);
+    Diags.note(it->RequestLoc, "in instantiation of '" + displayName(it->Name) +
+                                   "' requested here");
+  }
+  Diags.setSourceInfo(file, lines);
 }
 
 void Sema::warning(ast::SourceLocation loc, const std::string &msg) {
@@ -981,8 +989,9 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     }
   if (!sig) {
     if (!S.isFailedImportUse(node->getCalleeName()))
-      S.error(node->getLocation(),
-              "call to undeclared function '" + node->getCalleeName() + "'");
+      S.error(node->getLocation(), "call to undeclared function '" +
+                                       displayName(node->getCalleeName()) +
+                                       "'");
     return nullptr;
   }
 
@@ -993,7 +1002,7 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
 
   if (argTypes.size() != sig->ParamTypes.size()) {
     S.error(node->getLocation(),
-            "function '" + node->getCalleeName() + "' expects " +
+            "function '" + displayName(node->getCalleeName()) + "' expects " +
                 std::to_string(sig->ParamTypes.size()) + " argument(s), got " +
                 std::to_string(argTypes.size()));
     return sig->ReturnType;
@@ -1009,16 +1018,15 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
                                      argTypes[i])) {
       S.error(argExpr->getLocation(),
               "argument " + std::to_string(i + 1) + " of '" +
-                  node->getCalleeName() + "' has type '" +
+                  displayName(node->getCalleeName()) + "' has type '" +
                   typeName(argTypes[i]) + "', expected '" +
                   typeName(sig->ParamTypes[i]) + "'");
     }
   }
-  S.checkInoutArgs(sig->Modes, sig->ParamTypes, node->getArguments(),
-                   node->getCalleeName());
-  S.checkViewArgs(sig->Modes, node->getArguments(), node->getCalleeName());
-  S.noteBorrowResult(node, node->getCalleeName(), sig->Modes,
-                     node->getArguments(), nullptr);
+  const std::string callee = displayName(node->getCalleeName());
+  S.checkInoutArgs(sig->Modes, sig->ParamTypes, node->getArguments(), callee);
+  S.checkViewArgs(sig->Modes, node->getArguments(), callee);
+  S.noteBorrowResult(node, callee, sig->Modes, node->getArguments(), nullptr);
 
   node->setResolvedType(sig->ReturnType);
   return sig->ReturnType;
@@ -1667,7 +1675,9 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
                      getErrorCount(),
                      RepeatedImportFailures != 0,
                      Diags.getDiagnostics(),
-                     std::move(AccumulatedImportContexts)};
+                     std::move(AccumulatedImportContexts),
+                     std::move(ForeignInstantiatedClassDecls),
+                     std::move(ForeignInstantiatedFuncDecls)};
   // The sets live in this frame: a Sema is run once.
   if (ImportStack == &localImportStack)
     ImportStack = nullptr;

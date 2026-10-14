@@ -102,6 +102,10 @@ public:
              std::vector<std::string> deps);
   /// Sema could not build @p canonical (not found, not a file, errors).
   void failed(const std::string &canonical);
+  /// A module built() whose cache entry could not hold all an importer
+  /// needs (generic templates, #160): writeCache leaves it out, so it is
+  /// built from source again.
+  void keepUncached(const std::string &canonical);
 
   /// True when @p canonical was Loaded from a `.pkm`.
   bool isLoaded(const std::string &canonical) const;

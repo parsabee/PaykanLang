@@ -107,9 +107,9 @@ const RuntimeSig *findRuntimeSig(const std::string &name) {
 
 ModuleLowering::ModuleLowering(ProgramLowering &program,
                                const sema::SemaContext &semaCtx,
-                               std::string moduleName)
-    : PL(program), ASTCtx(*semaCtx.ASTCtx), SemaCtx(semaCtx),
-      Errs(program.Errs) {
+                               std::string moduleName, std::string canonical)
+    : PL(program), Canonical(std::move(canonical)), ASTCtx(*semaCtx.ASTCtx),
+      SemaCtx(semaCtx), Errs(program.Errs) {
   Mod.Name = std::move(moduleName);
 }
 
@@ -445,16 +445,44 @@ pir::Function *ModuleLowering::declareExternFrom(const pir::Function &fn,
 pir::Function *ModuleLowering::lookupFunction(const std::string &name) {
   if (auto it = FuncByName.find(name); it != FuncByName.end())
     return it->second;
-  auto imp = ImportedFunctions.find(name);
-  if (imp == ImportedFunctions.end())
+  // The module that defines it, and its symbol there.
+  const pir::Module *def = nullptr;
+  std::string symbol = name;
+  auto byName = [&](const std::string &module) {
+    auto it = PL.ByName.find(module);
+    return it == PL.ByName.end() ? nullptr : it->second;
+  };
+  if (auto imp = ImportedFunctions.find(name); imp != ImportedFunctions.end()) {
+    def = byName(imp->second.Module);
+    symbol = imp->second.Plain;
+  } else if (auto fo = PL.FuncOrigins.find(name); fo != PL.FuncOrigins.end()) {
+    def = byName(fo->second); // another module emits this instantiation
+  } else if (auto co = PL.ClassOrigins.find(name);
+             co != PL.ClassOrigins.end()) {
+    def = byName(co->second); // the constructor of an instantiation there
+  } else if (name.starts_with(kHiddenQualPrefix)) {
+    // `$<module>::f`, named in the body of that module's template.
+    size_t sep = name.rfind(kQualSep, name.find('<'));
+    if (sep == std::string::npos)
+      return nullptr;
+    std::string_view prefix(kHiddenQualPrefix);
+    auto it =
+        PL.ByCanonical.find(name.substr(prefix.size(), sep - prefix.size()));
+    def = it == PL.ByCanonical.end() ? nullptr : it->second;
+    symbol = name.substr(sep + std::string_view(kQualSep).size());
+  }
+  if (!def || def->Name == Mod.Name)
     return nullptr;
-  auto modIt = PL.ByName.find(imp->second.Module);
-  if (modIt == PL.ByName.end())
+  const pir::Function *fn = def->findFunction(symbol);
+  if (!fn || fn->IsExtern)
     return nullptr;
-  const pir::Function *def = modIt->second->findFunction(imp->second.Plain);
-  if (!def || def->IsExtern)
-    return nullptr;
-  return declareExternFrom(*def, imp->second.Module, name);
+  noteExternUse(name);
+  return declareExternFrom(*fn, def->Name, name);
+}
+
+void ModuleLowering::noteExternUse(const std::string &name) {
+  if (!Canonical.empty() && PL.Resolver && PL.ForeignInstantiations.count(name))
+    PL.Resolver->keepUncached(Canonical);
 }
 
 pir::Function *ModuleLowering::lookupClassFunction(ast::ClassType *ct,
@@ -470,6 +498,7 @@ pir::Function *ModuleLowering::lookupClassFunction(ast::ClassType *ct,
   const pir::Function *def = modIt->second->findFunction(symbol);
   if (!def || def->IsExtern)
     return nullptr;
+  noteExternUse(ct->getName());
   return declareExternFrom(*def, origin->second, symbol);
 }
 
@@ -540,16 +569,20 @@ Val ModuleLowering::visitTranslationUnit(ast::TranslationUnit *node) {
   // Declare every free function and every class (struct layout, vtable,
   // methods, destructor, constructor) before emitting any body, so calls and
   // `__super__` resolve regardless of source order.
-  for (auto *fn : node->getFuncDecls()) {
+  std::vector<ast::FuncDecl *> funcs = node->getFuncDecls();
+  funcs.insert(funcs.end(), ForeignFuncs.begin(), ForeignFuncs.end());
+  std::vector<ast::ClassDecl *> classes = node->getClassDecls();
+  classes.insert(classes.end(), ForeignClasses.begin(), ForeignClasses.end());
+  for (auto *fn : funcs) {
     declareFunctionPrototype(fn);
     if (fn->isNative())
       NativeDecls[fn->getName()] = fn;
   }
-  for (auto *cls : node->getClassDecls())
+  for (auto *cls : classes)
     declareClass(cls);
-  for (auto *cls : node->getClassDecls())
+  for (auto *cls : classes)
     visitClassDecl(cls);
-  for (auto *fn : node->getFuncDecls())
+  for (auto *fn : funcs)
     visitFuncDecl(fn);
   return Val();
 }

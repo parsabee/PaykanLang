@@ -73,6 +73,8 @@ public:
     SourceName = std::move(name);
     SourceLines = lines;
   }
+  const std::string &getSourceName() const { return SourceName; }
+  const std::vector<std::string> *getSourceLines() const { return SourceLines; }
 
   void error(ast::SourceLocation loc, const std::string &msg);
   void warning(ast::SourceLocation loc, const std::string &msg);
