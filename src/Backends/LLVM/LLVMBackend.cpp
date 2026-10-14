@@ -110,12 +110,15 @@ private:
                           in.ProjectRoot);
   }
 
-  /// Translate (through the cache) and optimise the program.
+  /// Translate (through the cache) and optimise the program for the JIT:
+  /// under the host's layout, which the JIT runs it with.
   static StatusOr<std::unique_ptr<llvm::Module>>
   compile(const Input &in, llvm::LLVMContext &ctx) {
     auto module = translate(in, ctx);
     if (!module)
       return module.status();
+    if (llvm::Error err = jit::setHostLayout(**module))
+      return Status::error("JIT error: " + llvm::toString(std::move(err)));
     optimizeModule(**module, in.OptLevel);
     return module;
   }
