@@ -159,14 +159,18 @@ TEST(ParseFloat, SubnormalsParseAndOutOfRangeIsNone) {
   g.expectNoLeaks("ParseFloat.SubnormalsParseAndOutOfRangeIsNone");
 }
 
-// -- The boxes: a present int? / float? is an Int / Float object
+// -- The boxes: `Int<Str>` / `Float<Str>` give an Int / Float object
 
 TEST(BoxedEquals, IntBoxesThroughObj) {
   LeakGuard g;
-  auto r = compileAndRun(wrapMain(R"(
-    a: Obj = int<Str>("7");
-    b: Obj = int<Str>("7");
-    c: Obj = int<Str>("8");
+  auto r = compileAndRun(R"(
+    fn boxed(s: Str) -> Obj {
+      match Int<Str>(s) { x: Int { return x; } None { return None; } }
+    }
+  )" + wrapMain(R"(
+    a: Obj = boxed("7");
+    b: Obj = boxed("7");
+    c: Obj = boxed("8");
     match a {
       x: Int {
         println(x.toString());
@@ -175,7 +179,7 @@ TEST(BoxedEquals, IntBoxesThroughObj) {
       }
       _ { println("not an Int"); }
     }
-    n: Obj = int<Str>("nope");
+    n: Obj = boxed("nope");
     match n {
       x: Int { println("Int"); }
       _      { println(n); }
@@ -189,10 +193,9 @@ TEST(BoxedEquals, IntBoxesThroughObj) {
 TEST(BoxedEquals, FloatBoxThroughObj) {
   LeakGuard g;
   auto r = compileAndRun(wrapMain(R"(
-    f: Obj = float<Str>("1.5");
-    match f {
+    match Float<Str>("1.5") {
       y: Float { println(y.toString()); }
-      _        { println("not a Float"); }
+      None     { println("not a Float"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;

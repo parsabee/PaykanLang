@@ -195,20 +195,18 @@ TEST(Conversion, StrOfBoxedSourcesFormatsLikeThePrimitive) {
         _ { return "other"; }
       }
     }
+    fn some(o: Obj?) -> Obj { match o { x: Obj { return x; } None { return None; } } }
     fn main() -> int {
-      i: int? = -42;      println(boxed(i));
-      f: float? = 2.0;    println(boxed(f));
-      g: float? = 0.1;    println(boxed(g));
-      t: bool? = True;    println(boxed(t));
-      u: bool? = False;   println(boxed(u));
-      c: char? = 'z';     println(boxed(c));
-      sp: char? = ' ';    println(boxed(sp));
+      println(boxed(some(Int<Str>("-42"))));
+      println(boxed(some(Float<Str>("2.0"))));
+      println(boxed(some(Float<Str>("0.1"))));
+      println(boxed(some(Bool<Str>("True"))));
+      println(boxed(some(Bool<Str>("False"))));
       return 0;
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "Int -42\nFloat 2\nFloat 0.1\nBool True\nBool False\n"
-                      "Char z|\nChar  |\n");
+  EXPECT_EQ(r.StdOut, "Int -42\nFloat 2\nFloat 0.1\nBool True\nBool False\n");
   g.expectNoLeaks("Conversion.StrOfBoxedSourcesFormatsLikeThePrimitive");
 }
 

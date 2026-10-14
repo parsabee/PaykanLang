@@ -88,9 +88,56 @@ TEST(OptionalPrimitive, EqualityAndObj) {
     x = a == b;
     y = a != None;
     z = None == b;
-    o: Obj = a;                              // prints / matches as an Int box
-    println(b);
+    println(b);                              // `None` or the value
   )"));
+}
+
+TEST(OptionalPrimitive, NotAnObj) {
+  expectError(inMain("a: int? = 1; o: Obj = a;"),
+              "cannot use optional 'int?' as 'Obj': an optional is not an "
+              "object");
+  expectError(inMain("o: Obj = 5;"),
+              "initializer of type 'int' does not match declared type 'Obj'");
+  // No `Obj` holds one, so an `Obj` match has no `int` arm.
+  expectError(inMain("o: Obj = None; match o { n: int { } _ { } }"),
+              "match arm type must be a class or array type");
+}
+
+// A `view` is passed on as it is: it never becomes an optional (#96).
+TEST(OptionalPrimitive, ViewIsNotConvertedToAnOptional) {
+  expectError(R"(
+    fn take(o: view int?) { }
+    fn pass(v: view int) { take(v); }
+    fn main() -> int { return 0; }
+  )",
+              "'v' is a 'view' parameter; a 'view' is not converted, and "
+              "parameter 1 of 'take' is a 'view int?'");
+  expectError(R"(
+    fn pass(v: view int) { o: view int? = v; }
+    fn main() -> int { return 0; }
+  )",
+              "'v' is a 'view' parameter; a 'view' is not converted, and 'o' "
+              "is a 'view int?'");
+  expectError(R"(
+    class N { fn __init__() { } }
+    fn take(o: view N?) { }
+    fn pass(n: view N) { take(n); }
+    fn main() -> int { return 0; }
+  )",
+              "a 'view' is not converted");
+  // A value that is not a `view` still widens, and a `view T?` passes on.
+  expectOk(R"(
+    fn take(o: view int?) { }
+    fn same(o: view int?) { take(o); }
+    fn main() -> int {
+      k = 5;
+      take(k);
+      take(5);
+      x: view int? = k;
+      same(None);
+      return 0;
+    }
+  )");
 }
 
 TEST(OptionalPrimitive, GenericsInstantiateWithOptionalPrimitives) {

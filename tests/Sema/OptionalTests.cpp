@@ -70,12 +70,40 @@ TEST(Optional, OptionalSubclassToOptionalBase) {
   )"));
 }
 
-TEST(Optional, OptionalToObjAllowed) {
+TEST(Optional, OptionalIsPrinted) {
   expectOk(withNode(R"(
     n: Node? = None;
-    o: Obj = n;
-    println(n);          // print takes Obj
+    println(n);          // `None` or the node
+    s: Str? = "a";
+    print(s);
+    printerrln(s);
   )"));
+}
+
+// An optional is not an object (#96): it does not become an `Obj`, in any
+// position.
+TEST(Optional, OptionalIsNotAnObj) {
+  const char *msg = "cannot use optional 'Node?' as 'Obj': an optional is not "
+                    "an object; unwrap it with match";
+  expectError(withNode("n: Node? = None; o: Obj = n;"), msg);
+  expectError(withNode("n: Node? = None; o: Obj = None; o = n;"), msg);
+  expectError(std::string(kNodeClass) +
+                  "fn take(o: Obj) { }\n"
+                  "fn main() -> int { n: Node? = None; take(n); return 0; }\n",
+              msg);
+  expectError(std::string(kNodeClass) +
+                  "fn give(n: Node?) -> Obj { return n; }\n"
+                  "fn main() -> int { return 0; }\n",
+              msg);
+  expectError(std::string(kNodeClass) +
+                  "class H { o: Obj; fn __init__() { self.o = None; } }\n"
+                  "fn main() -> int { h = H(); n: Node? = None; h.o = n; "
+                  "return 0; }\n",
+              msg);
+  expectError(withNode("n: Node? = None; xs: Obj[] = []; xs.push(n);"),
+              "an optional is not an object");
+  expectError(withNode("s: Str? = None; t: (Obj, int) = (s, 1);"),
+              "does not match");
 }
 
 TEST(Optional, ReassignOptionalVar) {

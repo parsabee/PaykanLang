@@ -764,16 +764,17 @@ TEST(Lowering, TupleLiteralUsesAKindsDescriptor) {
   EXPECT_NE(m.find("call @$rt.PaykanTuple_get("), std::string::npos) << m;
 }
 
-TEST(Lowering, OptionalIntoObjSubstitutesTheNoneSingleton) {
+TEST(Lowering, PrintedOptionalSubstitutesTheNoneSingleton) {
   auto l = lower(R"(
     class N { fn __init__() {} }
     fn find() -> N? { return None; }
-    fn main() -> int { o: Obj = find(); println(o); return 0; }
+    fn main() -> int { println(find()); return 0; }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
   EXPECT_NE(m.find("cmp eq %"), std::string::npos) << m;
-  EXPECT_NE(m.find("box @$rt.PaykanObject_None"), std::string::npos) << m;
+  EXPECT_NE(m.find("select %opt.isnone"), std::string::npos) << m;
+  EXPECT_NE(m.find("@$rt.PaykanObject_None"), std::string::npos) << m;
   EXPECT_NE(l.Text.find("extern obj @$rt.PaykanObject_None"), std::string::npos)
       << l.Text;
 }

@@ -48,8 +48,8 @@ fn find(head: Node?, key: int) -> Node? {
   compare it with `==`/`!=` against `None` or another optional, and `match` on it. Everything
   else (fields, methods, subscripts, `+`, `toString()`) needs a `match` first.
 - A field of type `T?` is `None` unless `__init__` assigns it.
-- A `T?` may be used where an `Obj` is expected (so `println(maybe)` prints `None` or the
-  value).
+- A `T?` is not an object: it never becomes an `Obj`, but the print family takes one directly
+  (`println(maybe)` prints `None` or the value).
 
 ---
 
@@ -201,15 +201,14 @@ fn show(o: int?) -> Str {
   `None`), array elements, tuple elements, parameters, returns, ternaries
   (`if c then 3 else None` is an `int?`) and generic arguments (`Box<int?>`). A `T?` inside a
   generic class or function instantiated with `T = int` is an `int?`.
-- In an `Obj` slot, a present value is its boxed class: `Int`, `Float`, `Bool` or `Char`. So
-  `println(x)` prints `5` or `None`, and an `Obj` match can name `i: Int { … }`.
-- `Enum?` is not supported yet ("optional enum types are not supported yet"). An enum would box
-  as a bare `Int`, which in an `Obj` slot would print the variant's ordinal rather than its name.
+- An optional primitive is not an object (see [Optionals are not
+  objects](#optionals-are-not-objects)): `o: Obj = x` is an error. `println(x)` prints `5` or
+  `None`.
+- `Enum?` is not supported yet ("optional enum types are not supported yet").
 
 At runtime an `int?` is a value: the `int` and a presence flag, held inline in a variable, a
 field, a parameter, an array element or a tuple element and copied like an `int`, with no heap
-allocation and no reference count. `None` is the flag being clear. Only where an object is
-expected (an `Obj`) is a present value kept as its boxed class.
+allocation and no reference count. `None` is the flag being clear.
 
 ---
 
@@ -277,16 +276,21 @@ own.
 
 ---
 
-## Optionals as `Obj`
+## Optionals are not objects
 
-A `T?` converts to `Obj`, so it can be handed to anything that takes an `Obj` — most usefully
-the print family:
+An optional is a value that may be absent, not an object: a `T?` never converts to `Obj`, so
+`o: Obj = maybe` (and passing, returning or storing it where an `Obj` is expected) is an error,
+`cannot use optional 'Node?' as 'Obj': an optional is not an object; unwrap it with match`. The
+print family still takes one as it is and prints `None` or the value:
 
 ```pkn
 maybe: Node? = None;
 println(maybe);        // None
-o: Obj = maybe;        // o holds the None object
 ```
+
+A `view` is never converted either: a `view T` cannot be passed to a `view T?` parameter or
+bind a `view T?` local (`'v' is a 'view' parameter; a 'view' is not converted, and parameter 1
+of 'take' is a 'view int?'`). A value that is not a `view` still widens (`take(5)`).
 
 ---
 
@@ -305,8 +309,7 @@ fn pick(c: bool) -> Str? { return if c then "yes" else None; }
 
 A `T?` of a reference type costs nothing extra: it is the same reference-counted box as a `T`,
 with "no box" meaning `None`. An optional primitive is a value, the primitive and a presence
-flag: it allocates nothing and is never counted (except as an `Obj`, where a present value is
-one boxed `Int` / `Float` / `Bool` / `Char` object). An `int?[]` holds its elements inline.
+flag: it allocates nothing and is never counted. An `int?[]` holds its elements inline.
 Retaining, releasing and destroying an absent optional are no-ops. See `08-memory-model.md`.
 
 ---
@@ -328,6 +331,8 @@ Retaining, releasing and destroying an absent optional are no-ops. See `08-memor
 | `duplicate 'None' arm in match on 'T?'` | two `None` arms |
 | `match arm type 'X[]' does not match the optional subject type 'T[]?'` | wrong array arm on an optional array |
 | `match arm type 'float' does not match the optional subject type 'int?'` | an arm other than the primitive on an optional primitive |
+| `cannot use optional 'T?' as 'Obj': an optional is not an object` | a `T?` where an `Obj` is expected (declaration, assignment, argument, return, field or array store) |
+| `'v' is a 'view' parameter; a 'view' is not converted, and parameter 1 of 'f' is a 'view T?'` | a `view T` passed to a `view T?` parameter, or bound to a `view T?` local |
 | `non-void function 'f' does not always return a value` | a `T` arm without `None` / `_` as the last statement of a non-void function |
 
 ---

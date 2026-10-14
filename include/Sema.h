@@ -681,11 +681,18 @@ private:
   /// Why @p e is a `view` (frozenPlace, or a conditional with such a
   /// branch), as the start of a diagnostic; "" when it is not.
   std::string viewOf(const ast::Expr *e, bool borrows = true);
-  /// A `view` can only be passed on to a `view` parameter: each of @p args
-  /// against the parameters' @p modes of a call of @p callee.
+  /// A `view` can only be passed on to a `view` parameter, as it is (no
+  /// conversion to the optional of a `view T?`): each of @p args against
+  /// the parameters' @p modes and types @p paramTys of a call of @p callee.
   bool checkViewArgs(const ast::ParamModes &modes,
+                     const std::vector<ast::Type *> &paramTys,
                      const std::vector<ast::Expr *> &args,
                      const std::string &callee);
+  /// A `view` local @p name of type @p declTy whose initializer @p init (of
+  /// type @p initTy) is a `view`: it names it as it is, so it cannot be its
+  /// optional.
+  bool checkViewLocalNotConverted(const std::string &name, ast::Type *declTy,
+                                  const ast::Expr *init, ast::Type *initTy);
   /// @p e, of type @p ty, is being stored (assigned, put in an array or
   /// tuple, pushed): not a `view` that shares what it holds.
   bool checkViewNotStored(const ast::Expr *e, const ast::Type *ty);

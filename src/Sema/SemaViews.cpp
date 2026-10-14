@@ -114,10 +114,31 @@ std::string Sema::viewOf(const ast::Expr *e, bool borrows) {
 }
 
 bool Sema::checkViewArgs(const ast::ParamModes &modes,
+                         const std::vector<ast::Type *> &paramTys,
                          const std::vector<ast::Expr *> &args,
                          const std::string &callee) {
   bool ok = true;
   for (size_t i = 0; i < args.size(); ++i) {
+    // A `view` is passed on to a `view` parameter as it is: a `view T`
+    // never becomes the optional of a `view T?` (#96).
+    if (modes.mode(i) == ast::ParamMode::View && i < paramTys.size() &&
+        ast::isa<ast::OptionalType>(paramTys[i]) &&
+        args[i]->getResolvedType() &&
+        !ast::isa<ast::OptionalType>(args[i]->getResolvedType())) {
+      std::string msg = viewOf(args[i], /*borrows=*/false);
+      if (!msg.empty()) {
+        msg += "; a 'view' is not converted, and parameter ";
+        msg += std::to_string(i + 1);
+        msg += " of '";
+        msg += callee;
+        msg += "' is a 'view ";
+        msg += typeName(paramTys[i]);
+        msg += "'";
+        error(args[i]->getLocation(), msg);
+        ok = false;
+      }
+      continue;
+    }
     // An `inout` parameter takes no `view` either (checkInoutArgs).  An
     // argument of the wrong type was reported by the call's own check.
     if (modes.mode(i) != ast::ParamMode::Value || !args[i]->getResolvedType())
@@ -137,6 +158,20 @@ bool Sema::checkViewArgs(const ast::ParamModes &modes,
     ok = false;
   }
   return ok;
+}
+
+bool Sema::checkViewLocalNotConverted(const std::string &name,
+                                      ast::Type *declTy, const ast::Expr *init,
+                                      ast::Type *initTy) {
+  if (!ast::isa<ast::OptionalType>(declTy) ||
+      ast::isa<ast::OptionalType>(initTy))
+    return true;
+  std::string why = viewOf(init, /*borrows=*/false);
+  if (why.empty())
+    return true;
+  error(init->getLocation(), why + "; a 'view' is not converted, and '" + name +
+                                 "' is a 'view " + typeName(declTy) + "'");
+  return false;
 }
 
 bool Sema::checkViewNotStored(const ast::Expr *e, const ast::Type *ty) {

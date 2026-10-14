@@ -1,15 +1,12 @@
-// Isolates: the boxes of optional primitives (`int?`, `float?`, `bool?`,
-// `char?`, #66).  Every present value is a fresh Int / Float / Bool / Char
-// object in a PaykanShared box: boxing into a local, a parameter, a return
-// value, a field, an array slot and a tuple element; rebinding between a
-// value and None; a box shared by two variables; a copy into a new local; a `match` on a call
-// result (the subject box is released at the end of the match) whose arm
-// binding owns nothing; a `T?` with T = int inside a generic class; and an
-// optional primitive passed into an `Obj` slot.
+// Isolates: optional primitives (`int?`, `float?`, `bool?`, `char?`, #66),
+// which are values (#96): a present value is held inline in a local, a
+// parameter, a return value, a field, an array slot and a tuple element, and
+// allocates nothing; rebinding between a value and None; a copy into a new
+// local; a `match` on a call result whose arm binding owns nothing; a `T?`
+// with T = int inside a generic class; and printing one.
 //
-// Runtime allocation sites: PaykanInt_new / PaykanFloat_new / PaykanBool_new
-// / PaykanChar_new (Basic.c) + PaykanShared_new (Shared.c), the class
-// instances, the array, the tuple and the strings.
+// Runtime allocation sites: the class instances, the array (inline 16-byte
+// elements), the tuple and the strings.
 //
 // Expected under --track-heap: live blocks : 0.
 // expect-stdout: 6
@@ -60,8 +57,7 @@ fn main() -> int {
 
   t: (int?, bool?) = (4, True);
   c: char? = 'x';
-  o: Obj = c;
-  println(o);
+  println(c);
 
   s = Slot<int>();
   s.set(1);

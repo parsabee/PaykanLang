@@ -59,9 +59,11 @@ TEST(Conversion, EveryBoxedPairHasItsResultType) {
     match p1 { x: Int { t: Str = Str<Int>(x); } None { } }
     match p2 { x: Float { t: Str = Str<Float>(x); } None { } }
     match p3 { x: Bool { t: Str = Str<Bool>(x); } None { } }
-    cq: char? = 'c';
-    o: Obj = cq;
-    match o { x: Char { t: Str = Str<Char>(x); } _ { } }
+    cq: Char? = None;
+    match cq {
+      x: Char { t: Str = Str<Char>(x); }
+      None { }
+    }
   )"));
 }
 
@@ -232,9 +234,8 @@ TEST(Conversion, InferredFormPicksEveryPair) {
     match b1 { x: Int { t: Str = Str(x); } None { } }
     match b2 { x: Float { t: Str = Str(x); } None { } }
     match b3 { x: Bool { t: Str = Str(x); } None { } }
-    cq: char? = c;
-    o: Obj = cq;
-    match o { x: Char { t: Str = Str(x); } _ { } }
+    cq: Char? = None;
+    match cq { x: Char { t: Str = Str(x); } None { } }
   )"));
 }
 

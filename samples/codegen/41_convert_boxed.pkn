@@ -1,6 +1,6 @@
 // 41 — the boxed conversion specializations and bool<Str> (#88)
-// Exercises: Str<Int> / Str<Float> / Str<Bool> / Str<Char>, which format a
-//            boxed value exactly like the primitive form; Int<Str> /
+// Exercises: Str<Int> / Str<Float> / Str<Bool>, which format a boxed value
+//            exactly like the primitive form; Int<Str> /
 //            Float<Str> / Bool<Str>, which parse into the optional box
 //            (`Int?` & co., None for an invalid string); and bool<Str>,
 //            which accepts exactly "True" / "False" and so round-trips
@@ -8,7 +8,7 @@
 //            specialization for the argument's exact type) and the explicit
 //            `Str<Int>(n)`.
 //
-// expect-stdout: Int 42 | Float 2.5 | Bool True | Char x
+// expect-stdout: Int 42 | Float 2.5 | Bool True
 // expect-stdout: 'yes' is not a Bool
 // expect-stdout: settings: 3 of 5 valid
 // expect-stdout: retries=3 ratio=0.75 verbose=False
@@ -22,19 +22,20 @@ fn describe(o: Obj) -> Str {
     n: Int   { return "Int " + Str<Int>(n); }
     f: Float { return "Float " + Str(f); }          // Str<Float>
     b: Bool  { return "Bool " + Str<Bool>(b); }
-    c: Char  { return "Char " + Str(c); }           // Str<Char>
     _        { return "?"; }
   }
 }
 
+// The object an optional box holds (an optional itself is not an `Obj`).
+fn some(o: Obj?) -> Obj {
+  match o { x: Obj { return x; } None { return None; } }
+}
+
 fn main() -> int {
-  // A present optional primitive is its box; formatted like the primitive.
-  i: int? = 42;
-  f: float? = 2.5;
-  b: bool? = True;
-  c: char? = 'x';
-  println(describe(i) + " | " + describe(f) + " | " + describe(b) + " | " +
-          describe(c));
+  // The parses' boxes, formatted like the primitive.
+  println(describe(some(Int<Str>("42"))) + " | " +
+          describe(some(Float<Str>("2.5"))) + " | " +
+          describe(some(Bool<Str>("True"))));
 
   // Parsing into the boxes.
   keys: Str[] = ["retries", "ratio", "verbose", "color", "depth"];

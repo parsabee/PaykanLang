@@ -329,38 +329,33 @@ TEST(Optional, MethodWithOptionalParamAndReturn) {
 
 // -- T? -> Obj coercion: an Obj slot never holds a NULL box
 
-TEST(Optional, OptionalIntoObjMaterialisesNone) {
+// The print builtins print an optional reference, `None` or its value
+// (an optional is not an `Obj`, #96): a variable, a call's fresh result, a
+// field and an element.
+TEST(Optional, PrintingAReferenceOptional) {
   LeakGuard g;
-  auto r = compileAndRun(std::string(kNode) + R"pkn(
-    fn make(c: bool) -> Node? { return if c then Node(1) else None; }
-    fn show(o: Obj) { println(o); }
+  auto r = compileAndRun(R"pkn(
+    class H { s: Str?; fn __init__() { } }
+    fn make(c: bool) -> Str? { return if c then "one" else None; }
     fn main() -> int {
-      a: Node? = None;
-      o: Obj = a;             // declaration
-      println(o);
-      match o {
-        Node { println("node"); }
-        _    { println("other"); }
-      }
-      p: Obj = None;
-      p = make(False);        // assignment into a None-initialised Obj
-      println(p);
-      p = make(True);
-      match p {
-        n: Node { println(Str<int>(n.v)); }
-        _       { println("other"); }
-      }
-      show(a);                // argument
-      show(make(False));
-      xs: Obj[] = [];
-      xs.push(a);             // array element
-      println(xs[0]);
+      a: Str? = None;
+      println(a);
+      println(make(False));
+      println(make(True));
+      h = H();
+      print(h.s); print(" ");
+      h.s = "two";
+      println(h.s);
+      xs: Str?[] = [None, "three"];
+      println(xs[0]); println(xs[1]);
+      printerrln(make(True));
       return 0;
     }
   )pkn");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "None\nother\nNone\n1\nNone\nNone\nNone\n");
-  g.expectNoLeaks("OptionalIntoObjMaterialisesNone");
+  EXPECT_EQ(r.StdOut, "None\nNone\none\nNone two\nNone\nthree\n");
+  EXPECT_NE(r.StdErr.find("one\n"), std::string::npos) << r.StdErr;
+  g.expectNoLeaks("PrintingAReferenceOptional");
 }
 
 // -- Subclass arm on an optional subject; array subject

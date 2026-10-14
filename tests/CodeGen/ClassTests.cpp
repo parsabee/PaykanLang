@@ -989,12 +989,12 @@ TEST(Class, EqualsOverrideDispatched) {
 // unboxed object): the call passes the binding's backing box, not a fresh wrap.
 TEST(Class, EqualsWithMatchBoundArgument) {
   auto r = compileAndRun(wrapMain(R"(
-    x: Obj = int<Str>("7");
-    y: Obj = int<Str>("7");
+    x: Obj = "7";
+    y: Obj = "7";
     match x {
-      a: Int {
+      a: Str {
         match y {
-          b: Int { println(Str<bool>(a.equals(b))); }
+          b: Str { println(Str<bool>(a.equals(b))); }
           _ {}
         }
       }

@@ -377,9 +377,10 @@ CodeGen enforced, now in one place.
   `null` first; value arms compare literals (Str through
   `PaykanString_equals` with a boxed literal); enum arms compare `i64`
   constants.  Arm bindings are raw `obj` aliases (unowned).
-* **Optionals**: `None` into a reference `T?` is `null`; a `T?` into an
-  `Obj` slot is replaced by a +1 box of `@$rt.PaykanObject_None` when null.
-  An optional primitive (`int?`, `float?`, `bool?`, `char?`) is a value
+* **Optionals**: `None` into a reference `T?` is `null`.  An optional is
+  never an `Obj` (Sema rejects that); a reference `T?` passed to a print
+  builtin is `select`ed to `@$rt.PaykanObject_None` when null.  An optional
+  primitive (`int?`, `float?`, `bool?`, `char?`) is a value
   (`opt_i64` & co.) with no ARC: a primitive that Sema marked for an
   optional primitive slot is `some` of it (after `int`→`float` promotion for
   a `float?`), `None` there is `none`, `x == None` is `not (is_some x)`, two
@@ -394,8 +395,6 @@ CodeGen enforced, now in one place.
   local.addr)` for a pop; each address is used before the array can change
   length.  A tuple holds an `int?` element in two slots, an OPT presence
   word (`is_some`, 0 or 1) and its value (the `unwrap`, 0 when absent).
-  Only in an `Obj` slot is it boxed: `PaykanInt_new` & co. of the payload
-  followed by `box`, or the None object.
 * **Conversions** (`Target<Source>(value)`, #64): `Str<…>` calls
   `PaykanString_from_int` & co. (an owned string temporary); `int<Str>` /
   `float<Str>` / `bool<Str>` call `PaykanString_parse_int` /
