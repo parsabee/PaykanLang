@@ -154,7 +154,7 @@ implMember  ::= funcDecl | "static" "fn" IDENT "(" paramList? ")"
 
 funcDecl    ::= "view"? "fn" IDENT typeParams? "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )? block
-nativeFuncDecl ::= "native" "fn" IDENT "(" paramList? ")"
+nativeFuncDecl ::= "native" "fn" IDENT typeParams? "(" paramList? ")"
                    ( "->" ( "view" | "inout" )? typeAnnotation )? "=" STRING ";"   -- the C symbol
 paramList   ::= param ( "," param )*
 param       ::= IDENT ":" ( "view" | "inout" )? typeAnnotation
