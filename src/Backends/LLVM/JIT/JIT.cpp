@@ -153,6 +153,11 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanTupleToString,   reinterpret_cast<void *>(&PaykanTuple_toString)},
     {kPaykanTupleEquals,     reinterpret_cast<void *>(&PaykanTuple_equals)},
     {kPaykanTupleVtable,     reinterpret_cast<void *>(&PaykanTuple_vtable)},
+
+    // For the C code of generic `native fn`s.
+    {kPaykanTypeCopy,        reinterpret_cast<void *>(&PaykanType_copy)},
+    {kPaykanTypeDrop,        reinterpret_cast<void *>(&PaykanType_drop)},
+    {kPaykanTypeIsUnset,     reinterpret_cast<void *>(&PaykanType_isUnset)},
 };
 
 // Match dispatch and generated vtable references look builtin vtables up as
