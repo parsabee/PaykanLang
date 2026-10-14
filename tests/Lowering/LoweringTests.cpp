@@ -214,29 +214,43 @@ TEST(Lowering, NativeFunctionCallsItsCSymbolWithTheBuiltinConvention) {
 // An instance of a generic native function passes the kind of each type
 // argument first, then every argument and its result as a 64-bit slot: a
 // reference as its box, borrowed; a reference result is the owned box.
-TEST(Lowering, GenericNativeFunctionPassesKindsAndSlots) {
+TEST(Lowering, GenericNativeFunctionPassesTypesAndAddresses) {
   auto l = lower(R"(
     native fn pick<T>(first: bool, a: T, b: T) -> T = "pk_test_pick";
+    native fn get<T>(b: view Obj, i: int) -> view T = "pk_test_get";
     fn main() -> int {
       s = pick<Str>(True, "a", "b");
       f = pick<float>(False, 1.5, 2.5);
+      b: Obj = "x";
+      println(get<Str>(b, 0));
       return pick<int>(True, 1, 2);
     }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
-  EXPECT_NE(l.Text.find("extern fn @$c.pk_test_pick(i64, i64, i64, i64) -> "
-                        "i64"),
+  // One PaykanType per type: size, alignment, kind, references (offsets).
+  EXPECT_NE(l.Text.find("data @.type0 = [8, 8, 4, 1, 0]"), std::string::npos)
+      << l.Text;
+  EXPECT_NE(l.Text.find("extern fn @$c.pk_test_pick(ptr, ptr, bool, ptr, "
+                        "ptr) -> void"),
+            std::string::npos)
+      << l.Text;
+  EXPECT_NE(l.Text.find("extern fn @$c.pk_test_get(ptr, obj, i64) -> ptr"),
             std::string::npos)
       << l.Text;
   std::string str = function(l.Text, "pick<Str>");
-  EXPECT_NE(str.find("call @$c.pk_test_pick(4, "), std::string::npos) << str;
-  EXPECT_NE(str.find("to box"), std::string::npos) << str;
+  EXPECT_NE(str.find("call @$c.pk_test_pick(@.type0, %out.addr"),
+            std::string::npos)
+      << str;
+  EXPECT_NE(str.find("%a.addr.6 = local.addr %a"), std::string::npos) << str;
   EXPECT_EQ(count(str, "retain"), 0u) << str;
   EXPECT_EQ(count(str, "release"), 2u) << str; // its own parameters
-  std::string flt = function(l.Text, "pick<float>");
-  EXPECT_NE(flt.find("call @$c.pk_test_pick(1, "), std::string::npos) << flt;
-  EXPECT_NE(flt.find("to f64"), std::string::npos) << flt;
-  EXPECT_NE(function(l.Text, "pick<int>").find("call @$c.pk_test_pick(0, "),
+  // A view result is the address of a value C keeps; the body copies it.
+  std::string get = function(l.Text, "get<Str>");
+  EXPECT_NE(get.find("ptr.load box, %r"), std::string::npos) << get;
+  EXPECT_EQ(count(get, "retain"), 1u) << get;
+  EXPECT_NE(l.Text.find("data @.type1 = [8, 8, 1, 0]"), std::string::npos)
+      << l.Text;
+  EXPECT_NE(function(l.Text, "pick<float>").find("pk_test_pick(@.type1, "),
             std::string::npos)
       << l.Text;
 }

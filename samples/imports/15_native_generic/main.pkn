@@ -1,12 +1,12 @@
 // 15_native_generic — a generic `native fn`: one C function for any type.
 //
-// An instance (`describe<float>`) passes C the kind of each type argument,
-// then every argument and its result as a 64-bit slot, so the C code in
-// slots.c sees what it was given.  Build the object yourself and link it
-// with --object (the sample harnesses do this):
+// An instance (`describe<float>`) passes C a PaykanType describing each type
+// argument: its size, alignment, kind and references.  A `T` crosses by
+// address, so the C code in values.c handles a value of any size.  Build the
+// object yourself and link it with --object (the sample harnesses do this):
 //
-//   cc -std=c11 -fPIC -I<paykan include dir> -c slots.c -o slots.o
-//   paykan --object=slots.o main.pkn
+//   cc -std=c11 -fPIC -I<paykan include dir> -c values.c -o values.o
+//   paykan --object=values.o main.pkn
 
 native fn describe<T>(x: view T) -> Str = "sample_describe";
 native fn pick<T>(first: bool, a: T, b: T) -> T = "sample_pick";
@@ -29,12 +29,12 @@ fn main() -> int {
   println(Str<int>(pick<Point>(True, Point(3), Point(4)).x));
   return 0;
 }
-// expect-stdout: int 42
-// expect-stdout: float 2.5
-// expect-stdout: bool True
-// expect-stdout: char k
-// expect-stdout: an object
-// expect-stdout: None
+// expect-stdout: int 42 (size 8)
+// expect-stdout: float 2.5 (size 8)
+// expect-stdout: bool True (size 1)
+// expect-stdout: char k (size 1)
+// expect-stdout: an object (size 8)
+// expect-stdout: None (size 8)
 // expect-stdout: 1
 // expect-stdout: right
 // expect-stdout: 3

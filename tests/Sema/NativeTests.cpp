@@ -95,24 +95,35 @@ TEST(Native, ViewResultNeedsAViewParameter) {
       << r.Diagnostics;
 }
 
-// An instance of a generic native function passes 64-bit slots, so any
-// type crosses; its calls are checked like any generic function's.
+// An instance of a generic native function passes what its template typed
+// `T` by address, so any type crosses there; the rest crosses as for any
+// native function.  Its calls are checked like any generic function's.
 TEST(Native, GenericInstancesTakeAnyType) {
   auto r = semaCheck(R"(
     class P { x: int; }
     native fn pick<T>(first: bool, a: T, b: T) -> T = "pk_pick";
-    native fn at<T>(xs: view T[], i: int) -> view T = "pk_at";
+    native fn get<T>(b: view Obj, i: int) -> view T = "pk_get";
     fn main() -> int {
       p: P = pick<P>(True, P(), P());
       t = pick<(int, Str)>(False, (1, "a"), (2, "b"));
       o: int? = pick<int?>(True, None, 3);
-      xs: int[] = [1, 2];
-      y: int = at<int>(xs, 0);
+      b: Obj = P();
+      y: int = get<int>(b, 0);
       n: int = pick(True, 1, 2);
       return n + t.0 + y;
     }
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
+
+  r = semaCheck(R"(
+    native fn at<T>(xs: view T[], i: int) -> view T = "pk_at";
+    fn main() -> int { xs: int[] = [1, 2]; return at<int>(xs, 0); }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("parameter 'xs' of type 'int[]' cannot cross "
+                               "into C"),
+            std::string::npos)
+      << r.Diagnostics;
 
   r = semaCheck(R"(
     native fn pick<T>(first: bool, a: T, b: T) -> T = "pk_pick";
