@@ -219,6 +219,9 @@ inline constexpr const char *kPaykanModulePathEnv = "PAYKAN_MODULE_PATH";
 // -- Module system
 
 inline constexpr const char *kQualSep = "::"; ///< Module qualifier separator
+/// Prefix of the qualifier an importer registers a module under for the
+/// bodies of its templates (Sema::hiddenQualifier); no source can spell it.
+inline constexpr const char *kHiddenQualPrefix = "$";
 inline constexpr const char *kStdlibDir =
     "stdlib"; ///< Standard library subdirectory
 

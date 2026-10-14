@@ -926,6 +926,50 @@ TEST(Lowering, ModulesAreNamedByTheirCanonicalModuleName) {
       << t;
 }
 
+// Another module's templates are instantiated by their importers, and each
+// instantiation is emitted once per program, by the first module lowered
+// that needs it; the others declare it extern.  Its body reaches the
+// template module's functions by their symbols there.
+TEST(Lowering, ImportedInstantiationsAreEmittedOnce) {
+  auto dir = std::filesystem::temp_directory_path() /
+             ("lowering_generic_imports_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir / "lib");
+  std::ofstream(dir / "lib" / "gen.pkn")
+      << "class Box<T> { v: T; fn __init__(v: T) { self.v = v; } "
+         "view fn n() -> int { return __h(); } }\n"
+         "fn __h() -> int { return 1; }\n"
+         "fn first<T>(xs: T[]) -> T { return xs[0]; }\n";
+  for (const char *m : {"a", "b"})
+    std::ofstream(dir / (std::string(m) + ".pkn"))
+        << "import lib::gen;\n"
+           "fn "
+        << m
+        << "() -> int { b = gen::Box<Str>(\"s\"); "
+           "return b.n() + gen::first<int>([1]); }\n";
+  auto l = lower("import lib::gen; import a; import b;\n"
+                 "fn main() -> int { b = gen::Box<Str>(\"m\");\n"
+                 "  return b.n() + gen::first<int>([2]) + a::a() + b::b(); }\n",
+                 dir.string());
+  std::filesystem::remove_all(dir);
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string &t = l.Text;
+  EXPECT_EQ(count(t, "\nclass Box<Str> {"), 1u) << t;
+  EXPECT_EQ(count(t, "\nextern class Box<Str> module \"a\""), 2u) << t;
+  EXPECT_EQ(count(t, "\nfn @\"$lib::gen::first<int>\"("), 1u) << t;
+  EXPECT_EQ(count(t, "\nextern fn @\"$lib::gen::first<int>\"(box) -> i64 "
+                     "module \"a\"\n"),
+            2u)
+      << t;
+  for (const pir::Module &m : l.Program.Modules) {
+    const pir::Class *box = m.findClass("Box<Str>");
+    EXPECT_EQ(box && !box->IsExtern, m.Name == "a") << m.Name;
+  }
+  EXPECT_NE(t.find("extern fn @\"$lib::gen::__h\"() -> i64 module "
+                   "\"lib::gen\" symbol @__h\n"),
+            std::string::npos)
+      << t;
+}
+
 TEST(Lowering, CanonicalModuleNameHelpers) {
   using namespace module_name;
   EXPECT_EQ(canonicalImportName("geometry::shapes", false), "geometry::shapes");

@@ -1,0 +1,33 @@
+// OK: generic classes and functions of another module, instantiated here
+// (docs/language/11-generics.md).  A type argument may be explicit or
+// inferred, a template may be used inside this module's own templates, and
+// an instantiation made by several modules (`Box<int>`) is one class.
+// expect-stdout: 16 five [7]
+// expect-stdout: 3 n
+// expect-stdout: 2 1
+import containers::box;
+import counter;
+
+class Holder<T> {
+  b: box::Box<T>;
+  fn __init__(x: T) { self.b = box::Box<T>(x); }
+  view fn peek() -> T { return self.b.get(); }
+}
+
+fn wrap<T>(x: T) -> box::Box<T> { return box::Box<T>(x); }
+
+fn main() -> int {
+  a = box::Box<int>(5);           // explicit type argument
+  b = box::Box("five");           // inferred: Box<Str>
+  c: box::Box<int> = counter::start();
+  c.set(c.get() + a.get() + box::one().get());
+  println(Str(c.get()) + " " + b.get() + " " + a.tag());
+
+  p = box::swap(counter::named()); // Pair<int, Str>
+  println(Str(p.a) + " " + p.b);
+
+  h = Holder<int>(2);
+  w: containers::box::Box<int> = wrap(1);
+  println(Str(h.peek()) + " " + Str(w.get()));
+  return 0;
+}
