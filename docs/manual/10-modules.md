@@ -99,7 +99,10 @@ enums with the same name. Functions are per module: `a::helper()`, `b::helper()`
 **No cycles.** If `a` imports `b`, `b` cannot import `a`, directly or through other
 modules. Move what both need into a third module.
 
-**Generics stay home.** Generic classes and functions cannot be imported yet (see
+**Generics.** A module's generic classes and functions are imported with the rest of it:
+`shapes::Box<int>(7)`, `b: shapes::Box<Str>`, `shapes::first(xs)`. Their bodies use what
+`shapes` declares and imports, whatever your module calls those names. A `Box<int>` is one
+class however many modules use it, so the values pass freely between them (see
 [Generics](09-generics.md#how-generic-code-is-checked)).
 
 **System imports.** A leading `::`, as in `import ::io;`, looks for the module in the

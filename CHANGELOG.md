@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Generic classes and functions of an imported module (docs/language/11-generics.md,
+  "Modules"): `gen::Box<int>(1)`, `gen::Box("s")`, `b: gen::Box<Str>` and `gen::first(xs)`
+  instantiate `gen`'s templates in the importer, in every position a local template may be
+  used, its own templates included.  A body names what its module declares and imports,
+  whatever the importer calls those names, and is checked per
+  instantiation in the template's file (`in instantiation of 'lib::gen::show<int>'
+  requested here`).  `Box<int>` is one class however many modules instantiate it, the
+  template's module included, and is compiled once per program; inference through
+  `Box<T>` parameters sees an imported `Box<int>` too.  A module with templates, with
+  instantiations of another module's, or using such an instantiation, is built from source
+  every time (a `.pkm` does not hold templates yet).  Instantiating both this module's `Box<Str>` and an imported
+  template's is an error (`conflicts with another template's instantiation of the same
+  name`).
 - Runtime functions for the standard library's `memory::Buffer<T>`: `PaykanBuffer_new`,
   `_len`, `_get`, `_set`, `_reserve`, `_grow` and `_shrink` (`Runtime.h`, "Buffer"),
   generic native functions over a `PaykanArray` whose every slot is live.  New slots are
@@ -24,7 +37,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every argument and its result as a 64-bit slot (a value's bits, a reference's box), so
   any type crosses into C.  In the AST interchange format a generic native function has its
   `(type-params ...)` like any other.  See `samples/imports/15_native_generic`.
-
 - Borrowed results (docs/language/02-functions-and-calling.md, "Borrowed results"): a
   function or method declared `-> view T` returns a borrow of part of `self` or of a
   `view` or `inout` parameter, never a new value, a copy parameter or a local (`'d' is a
