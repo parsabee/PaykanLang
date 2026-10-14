@@ -85,7 +85,7 @@ or more.
 | `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? QUAL? BLOCK QUAL?)` | a function or method; the `TYPE` is the return type, `_` for none. A borrowed result has `(qual view)` or `(qual inout)` after its `TYPE` (`-> view Str` is `(named-type "Str") (qual view)`), a `view fn` ends with `(qual view)` and a `static fn` with `(qual static)` |
 | `(impl LOC TYPE (for TRAIT)? (methods FN...))` | an `impl` block: `TYPE` is the type's name as written (`"A"`, `"geo::Point"`). `impl Show for A` has `(for TRAIT)`, the trait as a type |
 | `(trait LOC NAME (type-params NAME...) (methods FN...))` | a trait. Its methods are signatures: each `fn` has `_` in place of its body, and none is generic |
-| `(fn LOC NAME (type-params) (params PARAM...) TYPE? QUAL? (native STRING))` | a `native fn` (#198): the C symbol in place of the body; never generic |
+| `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? QUAL? (native STRING))` | a `native fn` (#198): the C symbol in place of the body; a generic one has type parameters |
 | `(param NAME TYPE QUAL?)` | one parameter; `QUAL` is its mode, `(qual view)` or `(qual inout)`, absent for an ordinary (by-value) parameter: `n: inout int` is `(param "n" (named-type "int") (qual inout))` |
 | `(var LOC NAME TYPE? EXPR? MODE? LET?)` | a variable or field declaration: `x: int = 1` is `(var "x" (named-type "int") (int 1))`. `MODE` is `(qual view)` or `(qual inout)` for a local borrow, which has an initialiser and is never a field or `let`: `v: view = k;` is `(var "v" _ (ident "k") (qual view))`. `LET` is `(let)` for a `let` local, which has an initialiser and is never a field: `let n = 1;` is `(var "n" _ (int 1) (let))` |
 

@@ -1140,6 +1140,21 @@ std::string Sema::instantiateFunction(const std::string &name,
     subst[*tmpl->getTypeParams()[i]] = args[i];
   ast::ASTCloner cloner(Ctx, std::move(subst), nullptr, origin != nullptr);
   ast::FuncDecl *clone = cloner.cloneFuncDecl(tmpl, instName);
+  clone->setTypeArgs(args);
+  if (tmpl->isNative()) {
+    // What the template typed by a bare type parameter crosses by address.
+    auto bare = [&](ast::Type *t) {
+      auto *named = t ? ast::dyn_cast<ast::ClassType>(t) : nullptr;
+      for (auto *p : tmpl->getTypeParams())
+        if (named && *p == named->getName())
+          return true;
+      return false;
+    };
+    std::vector<bool> params;
+    for (const ast::Param &p : tmpl->getParams())
+      params.push_back(bare(p.ParamType));
+    clone->setByAddress(std::move(params), bare(tmpl->getReturnType()));
+  }
 
   const InstantiationFrame request = frameAt(instName, loc);
   InstantiationStack.push_back(request);
