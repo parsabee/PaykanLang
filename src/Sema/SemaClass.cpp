@@ -967,6 +967,9 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
                    " type argument(s), got " + std::to_string(args.size()));
     return nullptr;
   }
+  if (!checkBounds(tmpl, name, tmpl->getTypeParams(),
+                   tmpl->getTypeParamBounds(), args, loc))
+    return nullptr;
 
   // Class names are global across imports, so an instantiation is named by
   // its template's own name, however it was spelled here.
@@ -1122,6 +1125,9 @@ std::string Sema::instantiateFunction(const std::string &name,
                    " type argument(s), got " + std::to_string(args.size()));
     return "";
   }
+  if (!checkBounds(tmpl, name, tmpl->getTypeParams(),
+                   tmpl->getTypeParamBounds(), args, loc))
+    return "";
 
   // Function names are per module: another module's template is
   // instantiated under that module's hidden qualifier.
