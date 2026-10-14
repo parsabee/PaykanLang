@@ -42,6 +42,7 @@ struct ModuleResolver::Entry {
   std::vector<std::string> Deps;    ///< Built, Loaded: direct imports
   support::Hash256 IfaceHash{};     ///< Built, Loaded
   std::optional<pkm::File> File;    ///< Loaded
+  bool KeepUncached = false;        ///< Built: writeCache skips it
 };
 
 /// A .pkm read for a module whose dependencies are still being resolved,
@@ -474,11 +475,16 @@ StatusOr<std::vector<uint8_t>> ModuleResolver::encodeFile(
   return w.finish();
 }
 
+void ModuleResolver::keepUncached(const std::string &canonical) {
+  if (auto it = Entries.find(canonical); it != Entries.end())
+    it->second->KeepUncached = true;
+}
+
 void ModuleResolver::writeCache(const pir::Program &program) {
   if (!Opts.WriteCache)
     return;
   for (auto &[name, entry] : Entries) {
-    if (entry->State != Entry::State::Built)
+    if (entry->State != Entry::State::Built || entry->KeepUncached)
       continue;
     auto mod =
         std::find_if(program.Modules.begin(), program.Modules.end(),

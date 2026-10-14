@@ -6,6 +6,7 @@
 // name (ModuleName.h); with a resolver (paykan/modules/ModuleResolver.h) its
 // exports may come from a .pkm file instead of its source.
 
+#include "ASTClone.h"
 #include "ModuleName.h"
 #include "ModuleUtils.h"
 #include "Names.h"
@@ -306,7 +307,10 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
   // module itself imported were injected as builtins and are not
   // re-exported.
   for (auto &[name, sig] : FunctionTable) {
-    if (sig.IsBuiltin)
+    // Instantiations of other modules' templates (and their constructors)
+    // are those modules'.
+    if (sig.IsBuiltin || name.starts_with(names::kHiddenQualPrefix) ||
+        ImportedTypeOrigins.count(name))
       continue;
     ModuleInfo::FunctionInfo fi;
     fi.Name = name;
@@ -544,6 +548,13 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
 
   ModuleInfo &info = ModuleCache[path] =
       importSema.exportModuleInfo(importRoot, canonical);
+  if (auto templates = importSema.exportTemplates(importRoot, canonical)) {
+    templates->Uses.front().second = path;
+    templates->File = displayPath(path);
+    templates->Lines = &importDriverPtr->getSourceLines();
+    templates->Owner = importDriverPtr;
+    info.Templates = std::move(templates);
+  }
   if (Resolver) {
     std::vector<std::string> deps;
     for (auto *imp : importRoot->getImports())
@@ -551,6 +562,12 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
         deps.push_back(module_name::canonicalImportName(imp->modulePath(m),
                                                         imp->isSystem()));
     Resolver->built(canonical, toInterface(info), std::move(deps));
+    // A .pkm holds neither templates nor instantiations of another
+    // module's ones yet (#160): such a module is built from source each
+    // time, so its importers instantiate from its bodies.
+    if (info.Templates || !childCtx.ForeignClasses.empty() ||
+        !childCtx.ForeignFunctions.empty())
+      Resolver->keepUncached(canonical);
   }
 
   childCtx.OwnedDriver = importDriverPtr;
@@ -763,7 +780,7 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
   };
 
   // Types first (function signatures name them), then functions as
-  // qualifier::name and fullModulePath::name.
+  // qualifier::name and fullModulePath::name, then templates.
   bool ok = registerExportedTypes();
   for (auto &fi : info.ExportedFunctions) {
     if (!injectFnAs(fi, qualifier + names::kQualSep + fi.Name))
@@ -772,6 +789,189 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
         !injectFnAs(fi, fullModulePath + names::kQualSep + fi.Name))
       ok = false;
   }
+  if (ok && info.Templates &&
+      !injectTemplates(info, qualifier, fullModulePath, loc))
+    ok = false;
+  return ok;
+}
+
+// -- Templates of other modules (docs/design/pkm.md §4)
+
+std::string Sema::hiddenQualifier(const std::string &canonical) {
+  return names::kHiddenQualPrefix + canonical;
+}
+
+std::string Sema::displayName(const std::string &name) {
+  const std::string_view prefix(names::kHiddenQualPrefix);
+  return name.starts_with(prefix) ? name.substr(prefix.size()) : name;
+}
+
+const Sema::InstantiationInfo *Sema::instantiationInfo(ast::ClassType *ct) {
+  if (auto it = ClassInstantiationInfo.find(ct);
+      it != ClassInstantiationInfo.end())
+    return &it->second;
+  // `Tmpl<args>` from an import: an instantiation of a template of the
+  // module the class comes from, when that module's templates are here.
+  const std::string &name = ct->getName();
+  const size_t open = name.find('<');
+  auto origin = ImportedTypeOrigins.find(name);
+  if (open == std::string::npos || name.back() != '>' ||
+      origin == ImportedTypeOrigins.end())
+    return nullptr;
+  auto tmpl = ClassTemplates.find(hiddenQualifier(origin->second) +
+                                  names::kQualSep + name.substr(0, open));
+  if (tmpl == ClassTemplates.end())
+    return nullptr;
+  // The arguments as instantiationName spelled them, ", "-separated.
+  InstantiationInfo info{tmpl->second, {}};
+  auto arg = [&](size_t from, size_t to) {
+    auto *ty = resolveExportedType(Ctx, name.substr(from, to - from));
+    info.Args.push_back(ty);
+    return ty != nullptr;
+  };
+  int depth = 0;
+  size_t start = open + 1;
+  for (size_t i = start; i + 1 < name.size(); ++i) {
+    const char c = name[i];
+    if (c == '<' || c == '(')
+      ++depth;
+    else if (c == '>' || c == ')')
+      --depth;
+    else if (c == ',' && depth == 0) {
+      if (!arg(start, i))
+        return nullptr;
+      start = i + 2;
+    }
+  }
+  if (!arg(start, name.size() - 1))
+    return nullptr;
+  return &(ClassInstantiationInfo[ct] = std::move(info));
+}
+
+std::shared_ptr<Sema::ModuleTemplates>
+Sema::exportTemplates(ast::TranslationUnit *tu, const std::string &canonical) {
+  if (tu->getGenericClassDecls().empty() && tu->getGenericFuncDecls().empty())
+    return nullptr;
+  // What the module declares, by the names its bodies use for them.
+  StringSet types, generics, callees;
+  for (auto *cd : tu->getClassDecls()) {
+    types.insert(cd->getName());
+    callees.insert(cd->getName()); // its constructor
+  }
+  for (auto *ed : tu->getEnumDecls())
+    types.insert(ed->getName());
+  for (auto *cd : tu->getGenericClassDecls()) {
+    generics.insert(cd->getName());
+    callees.insert(cd->getName());
+  }
+  for (auto *fn : tu->getFuncDecls())
+    callees.insert(fn->getName());
+  for (auto *fn : tu->getGenericFuncDecls())
+    callees.insert(fn->getName());
+
+  auto mt = std::make_shared<ModuleTemplates>();
+  mt->Module = canonical;
+  mt->Uses.emplace_back(canonical, "");
+  // A body names the module's own declarations bare and an import's as
+  // `q::name`: both become `$<module>::name` (docs/design/pkm.md §4.2).
+  class Names : public ast::ASTCloner::Renamer {
+    Sema &S;
+    ModuleTemplates &MT;
+    const StringSet &Types, &Generics, &Callees;
+    mutable StringSet Used;
+
+    std::string imported(const std::string &name) const {
+      size_t sep = name.rfind(names::kQualSep);
+      if (sep == std::string::npos)
+        return "";
+      auto it = S.ImportQualifiers.find(name.substr(0, sep));
+      if (it == S.ImportQualifiers.end())
+        return "";
+      const std::string &module = it->second.Module;
+      if (Used.insert(module).second) {
+        auto path = S.ModulePaths.find(module);
+        MT.Uses.emplace_back(
+            module, path == S.ModulePaths.end() ? std::string() : path->second);
+      }
+      return hiddenQualifier(module) + names::kQualSep +
+             name.substr(sep + std::string_view(names::kQualSep).size());
+    }
+    std::string spell(const std::string &name, const StringSet &own) const {
+      if (std::string q = imported(name); !q.empty())
+        return q;
+      return own.count(name)
+                 ? hiddenQualifier(MT.Module) + names::kQualSep + name
+                 : name;
+    }
+
+  public:
+    Names(Sema &s, ModuleTemplates &mt, const StringSet &types,
+          const StringSet &generics, const StringSet &callees)
+        : S(s), MT(mt), Types(types), Generics(generics), Callees(callees),
+          Used{mt.Module} {}
+    std::string type(const std::string &name) const override {
+      return spell(name, Types);
+    }
+    std::string generic(const std::string &name) const override {
+      return spell(name, Generics);
+    }
+    std::string callee(const std::string &name) const override {
+      return spell(name, Callees);
+    }
+  };
+  Names names(*this, *mt, types, generics, callees);
+  ast::ASTCloner cloner(Ctx, {}, &names);
+  for (auto *cd : tu->getGenericClassDecls())
+    if (ClassTemplates.count(cd->getName())) // not rejected
+      mt->Classes.push_back(cloner.cloneTemplate(cd));
+  for (auto *fn : tu->getGenericFuncDecls())
+    if (FuncTemplates.count(fn->getName()))
+      mt->Functions.push_back(cloner.cloneTemplate(fn));
+  return mt;
+}
+
+bool Sema::injectHidden(const ModuleInfo &info, const std::string &canonical,
+                        ast::SourceLocation loc) {
+  if (!HiddenModules.insert(canonical).second)
+    return true;
+  const std::string q = hiddenQualifier(canonical);
+  return injectModule(info, q, q, canonical, loc);
+}
+
+bool Sema::injectTemplates(const ModuleInfo &info, const std::string &qualifier,
+                           const std::string &fullModulePath,
+                           ast::SourceLocation loc) {
+  const ModuleTemplates &mt = *info.Templates;
+  bool ok = true;
+  // The bodies name what the module and its imports declare by their
+  // hidden qualifiers.
+  for (const auto &[canonical, path] : mt.Uses) {
+    const ModuleInfo *used = &info;
+    if (canonical != mt.Module) {
+      auto it = ModuleCache.find(path);
+      if (it == ModuleCache.end()) {
+        error(loc, "internal compiler error: module '" + canonical +
+                       "', which the templates of module '" + mt.Module +
+                       "' use, was not loaded");
+        ok = false;
+        continue;
+      }
+      used = &it->second;
+    }
+    if (!injectHidden(*used, canonical, loc))
+      ok = false;
+  }
+  for (const std::string &q :
+       {qualifier, fullModulePath, hiddenQualifier(mt.Module)}) {
+    for (auto *cd : mt.Classes)
+      ClassTemplates[q + names::kQualSep + cd->getName()] = cd;
+    for (auto *fn : mt.Functions)
+      FuncTemplates[q + names::kQualSep + fn->getName()] = fn;
+  }
+  for (auto *cd : mt.Classes)
+    ForeignTemplates[cd] = &mt;
+  for (auto *fn : mt.Functions)
+    ForeignTemplates[fn] = &mt;
   return ok;
 }
 
@@ -814,6 +1014,7 @@ bool Sema::processImport(ast::ImportDecl *node) {
       poison();
       continue;
     }
+    ModulePaths[canonical] = located.Path;
     // The names this import binds must not already name another module.
     bool clash = false;
     for (const std::string *name :

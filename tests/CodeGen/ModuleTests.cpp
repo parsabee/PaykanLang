@@ -276,6 +276,47 @@ fn main() -> int { return mid::bumped() + leaf::base(); }
   std::filesystem::remove_all(tmpDir);
 }
 
+// Another module's templates, instantiated by several modules of one
+// program: each instantiation is one class (values flow between the
+// modules) and is emitted once, or the C backend would see a class defined
+// twice.
+TEST(Module, ImportedGenerics) {
+  auto tmpDir = paykan::test::tempDir() / "pkn_import_generics";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+
+  writeTempFile(tmpDir.string(), "lib/gen.pkn", R"(
+class Box<T> {
+  v: T;
+  fn __init__(v: T) { self.v = v; }
+  view fn get() -> view T { return self.v; }
+  fn set(v: T) { self.v = v; }
+}
+fn __bump(n: int) -> int { return n + 1; }
+fn sum<T>(xs: Box<T>[], f: int) -> int { return xs.len() + __bump(f); }
+)");
+  writeTempFile(tmpDir.string(), "mid.pkn", R"(
+import lib::gen;
+fn make(n: int) -> gen::Box<int> { return gen::Box(n); }
+fn count() -> int { return gen::sum([gen::Box(1)], 0); }
+)");
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+import lib::gen;
+import mid;
+fn main() -> int {
+  b = mid::make(30);
+  b.set(b.get() + gen::Box<int>(4).get());
+  return b.get() + mid::count() + gen::sum([b, mid::make(0)], 1);
+}
+)");
+
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 34 + 2 + 4); // 34, then 1 + 1, then 2 + 2
+
+  std::filesystem::remove_all(tmpDir);
+}
+
 // -- Bitcode cache
 
 // main -> mid -> base.  Editing base's class layout must invalidate mid's

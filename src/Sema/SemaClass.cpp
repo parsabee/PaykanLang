@@ -805,18 +805,27 @@ std::string Sema::instantiationName(const std::string &templateName,
   return s + ">";
 }
 
-void Sema::errorImportedTemplate(ast::SourceLocation loc,
-                                 const std::string &name,
-                                 const std::string &msg) {
-  if (isFailedImportUse(name))
-    return; // the import failed, and was reported
-  const std::string key = std::to_string(loc.getLineStart()) + ":" +
-                          std::to_string(loc.getColumnStart()) + ":" + name;
-  if (!ReportedImportedTemplateUses.insert(key).second) {
-    ++SuppressedFollowOns; // the same use, in another instantiation
-    return;
-  }
-  error(loc, msg);
+const Sema::ModuleTemplates *Sema::foreignOrigin(const ast::Decl *tmpl) const {
+  auto it = ForeignTemplates.find(tmpl);
+  return it == ForeignTemplates.end() ? nullptr : it->second;
+}
+
+Sema::OriginSource::OriginSource(DiagEngine &diags,
+                                 const ModuleTemplates *origin)
+    : Diags(diags), SavedName(diags.getSourceName()),
+      SavedLines(diags.getSourceLines()), Active(origin != nullptr) {
+  if (Active)
+    Diags.setSourceInfo(origin->File, origin->Lines);
+}
+
+Sema::OriginSource::~OriginSource() {
+  if (Active)
+    Diags.setSourceInfo(SavedName, SavedLines);
+}
+
+Sema::InstantiationFrame Sema::frameAt(const std::string &name,
+                                       ast::SourceLocation loc) {
+  return {name, loc, Diags.getSourceName(), Diags.getSourceLines()};
 }
 
 ast::ClassType *Sema::instantiateClass(const std::string &name,
@@ -824,13 +833,8 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
                                        ast::SourceLocation loc) {
   auto tIt = ClassTemplates.find(name);
   if (tIt == ClassTemplates.end()) {
-    if (ErroneousNames.count(name))
-      ++SuppressedFollowOns; // a template rejected at its declaration
-    else if (name.find(names::kQualSep) != std::string::npos)
-      errorImportedTemplate(loc, name,
-                            "generic types cannot be imported yet: '" + name +
-                                "<...>' names a generic class of another "
-                                "module");
+    if (ErroneousNames.count(name) || isFailedImportUse(name))
+      ++SuppressedFollowOns; // reported with its declaration or its import
     else if (Ctx.lookupClassType(name) || Ctx.lookupEnumType(name))
       error(loc, "'" + name +
                      "' is not a generic class and takes no type "
@@ -849,13 +853,44 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     return nullptr;
   }
 
-  const std::string instName = instantiationName(name, args);
+  // Class names are global across imports, so an instantiation is named by
+  // its template's own name, however it was spelled here.
+  const ModuleTemplates *origin = foreignOrigin(tmpl);
+  const std::string instName = instantiationName(tmpl->getName(), args);
   if (auto cIt = ClassInstantiations.find(instName);
-      cIt != ClassInstantiations.end())
-    return cIt->second; // cached (nullptr records an earlier failure)
+      cIt != ClassInstantiations.end()) {
+    // Cached (nullptr records an earlier failure) -- unless it is another
+    // template's of the same name.
+    auto info = cIt->second ? ClassInstantiationInfo.find(cIt->second)
+                            : ClassInstantiationInfo.end();
+    if (info == ClassInstantiationInfo.end() || info->second.Template == tmpl)
+      return cIt->second;
+    error(loc, "instantiation '" + instName + "' of '" + displayName(name) +
+                   "' conflicts with another template's instantiation of the "
+                   "same name (type names are global across imports)");
+    return nullptr;
+  }
 
-  if (Ctx.lookupClassType(instName)) {
-    // An imported module exported its own `Box<int>` as a concrete class.
+  if (auto *existing = Ctx.lookupClassType(instName)) {
+    // An imported module exported `Box<int>` as a concrete class: the very
+    // instantiation, when the template is that module's (or one it reached
+    // through the same template's module).
+    auto o = ImportedTypeOrigins.find(instName);
+    if (origin && o != ImportedTypeOrigins.end() &&
+        o->second == origin->Module) {
+      // Its constructor goes by the class's name too.
+      if (!lookupFunction(instName)) {
+        auto *init = existing->findMethod(names::kMethodInit);
+        declareFunction(instName, existing,
+                        init ? init->getParamTypes()
+                             : std::vector<ast::Type *>{},
+                        /*isBuiltin=*/true);
+        if (init)
+          FunctionTable[instName].Modes = init->getParamModes();
+      }
+      ClassInstantiationInfo[existing] = InstantiationInfo{tmpl, args};
+      return ClassInstantiations[instName] = existing;
+    }
     error(loc, "instantiation '" + instName +
                    "' conflicts with an imported class of the same name "
                    "(type names are global across imports)");
@@ -876,10 +911,12 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   std::unordered_map<std::string, ast::Type *> subst;
   for (size_t i = 0; i < args.size(); ++i)
     subst[*tmpl->getTypeParams()[i]] = args[i];
-  ast::ASTCloner cloner(Ctx, std::move(subst));
+  ast::ASTCloner cloner(Ctx, std::move(subst), nullptr, origin != nullptr);
   ast::ClassDecl *clone = cloner.cloneClassDecl(tmpl, instName);
 
-  InstantiationStack.push_back({instName, loc});
+  const InstantiationFrame request = frameAt(instName, loc);
+  InstantiationStack.push_back(request);
+  OriginSource inOrigin(Diags, origin);
   bool ok = true;
 
   // Superclass (phases 2-3 of checkClassDecls, for this one class).
@@ -916,7 +953,11 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   // Cache before populating: a self-referential field (`next: Node<T>`)
   // resolves to this very type instead of recursing.
   ClassInstantiations[instName] = ct;
-  ClassInstantiationInfo[ct] = InstantiationInfo{name, args};
+  ClassInstantiationInfo[ct] = InstantiationInfo{tmpl, args};
+  // Another module's template makes a class of that module: so its
+  // importers see it, wherever it was instantiated.
+  if (origin)
+    ImportedTypeOrigins[instName] = origin->Module;
 
   if (!populateClassType(clone, ct))
     ok = false;
@@ -933,10 +974,14 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   pending.Class = clone;
   pending.Name = instName;
   pending.RequestLoc = loc;
+  pending.Origin = origin;
+  pending.RequestFile = request.File;
+  pending.RequestLines = request.Lines;
   for (auto *p : tmpl->getTypeParams())
     pending.TypeParams.insert(*p);
   PendingInstantiations.push_back(std::move(pending));
-  InstantiatedClassDecls.push_back(clone);
+  (origin ? ForeignInstantiatedClassDecls : InstantiatedClassDecls)
+      .push_back(clone);
   return ct;
 }
 
@@ -945,14 +990,8 @@ std::string Sema::instantiateFunction(const std::string &name,
                                       ast::SourceLocation loc) {
   auto tIt = FuncTemplates.find(name);
   if (tIt == FuncTemplates.end()) {
-    if (ErroneousNames.count(name))
-      ++SuppressedFollowOns; // a template rejected at its declaration
-    else if (name.find(names::kQualSep) != std::string::npos)
-      errorImportedTemplate(loc, name,
-                            "generic functions cannot be imported yet: '" +
-                                name +
-                                "<...>' names a generic function of another "
-                                "module");
+    if (ErroneousNames.count(name) || isFailedImportUse(name))
+      ++SuppressedFollowOns; // reported with its declaration or its import
     else if (lookupFunction(name))
       error(loc, "'" + name +
                      "' is not a generic function and takes no type "
@@ -969,12 +1008,18 @@ std::string Sema::instantiateFunction(const std::string &name,
     return "";
   }
 
-  std::string instName = instantiationName(name, args);
+  // Function names are per module: another module's template is
+  // instantiated under that module's hidden qualifier.
+  const ModuleTemplates *origin = foreignOrigin(tmpl);
+  std::string instName = origin ? hiddenQualifier(origin->Module) +
+                                      names::kQualSep +
+                                      instantiationName(tmpl->getName(), args)
+                                : instantiationName(name, args);
   if (auto fIt = FuncInstantiations.find(instName);
       fIt != FuncInstantiations.end())
     return fIt->second ? instName : "";
 
-  if (lookupFunction(instName)) {
+  if (!origin && lookupFunction(instName)) {
     error(loc, "instantiation '" + instName +
                    "' conflicts with an imported function of the same name");
     FuncInstantiations[instName] = false;
@@ -991,12 +1036,17 @@ std::string Sema::instantiateFunction(const std::string &name,
   std::unordered_map<std::string, ast::Type *> subst;
   for (size_t i = 0; i < args.size(); ++i)
     subst[*tmpl->getTypeParams()[i]] = args[i];
-  ast::ASTCloner cloner(Ctx, std::move(subst));
+  ast::ASTCloner cloner(Ctx, std::move(subst), nullptr, origin != nullptr);
   ast::FuncDecl *clone = cloner.cloneFuncDecl(tmpl, instName);
   clone->setTypeArgs(args);
 
-  InstantiationStack.push_back({instName, loc});
-  bool ok = declareFunctionSignature(clone);
+  const InstantiationFrame request = frameAt(instName, loc);
+  InstantiationStack.push_back(request);
+  bool ok;
+  {
+    OriginSource inOrigin(Diags, origin);
+    ok = declareFunctionSignature(clone);
+  }
   InstantiationStack.pop_back();
   FuncInstantiations[instName] = ok;
   if (!ok)
@@ -1006,10 +1056,14 @@ std::string Sema::instantiateFunction(const std::string &name,
   pending.Func = clone;
   pending.Name = instName;
   pending.RequestLoc = loc;
+  pending.Origin = origin;
+  pending.RequestFile = request.File;
+  pending.RequestLines = request.Lines;
   for (auto *p : tmpl->getTypeParams())
     pending.TypeParams.insert(*p);
   PendingInstantiations.push_back(std::move(pending));
-  InstantiatedFuncDecls.push_back(clone);
+  (origin ? ForeignInstantiatedFuncDecls : InstantiatedFuncDecls)
+      .push_back(clone);
   return instName;
 }
 
@@ -1077,17 +1131,20 @@ bool Sema::unifyTypes(ast::Type *pattern, ast::Type *actual,
 
   if (auto *gt = ast::dyn_cast<ast::GenericType>(pattern)) {
     // `Box<T>` against a class: find an instantiation of the same template
-    // in the argument's class or one of its ancestors and unify argument-wise.
+    // (however either spells it) in the argument's class or one of its
+    // ancestors and unify argument-wise.
+    auto tmpl = ClassTemplates.find(gt->getName());
+    if (tmpl == ClassTemplates.end())
+      return true;
     for (auto *c = ast::dyn_cast<ast::ClassType>(actual); c;
          c = c->getSuperClass()) {
-      auto it = ClassInstantiationInfo.find(c);
-      if (it == ClassInstantiationInfo.end() ||
-          it->second.TemplateName != gt->getName() ||
-          it->second.Args.size() != gt->getNumArgs())
+      const InstantiationInfo *info = instantiationInfo(c);
+      if (!info || info->Template != tmpl->second ||
+          info->Args.size() != gt->getNumArgs())
         continue;
       for (size_t i = 0; i < gt->getNumArgs(); ++i)
-        if (!unifyTypes(gt->getArgs()[i], it->second.Args[i], typeParams,
-                        bindings, conflict))
+        if (!unifyTypes(gt->getArgs()[i], info->Args[i], typeParams, bindings,
+                        conflict))
           return false;
       return true;
     }
@@ -1157,16 +1214,13 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
     typeArgs.push_back(t);
   }
 
-  // Templates are never qualified (they are not exported), so a qualified
-  // callee can only get here with explicit type arguments.
-  if (callee.find(names::kQualSep) != std::string::npos) {
-    errorImportedTemplate(loc, callee,
-                          "generic types and functions cannot be imported "
-                          "yet: '" +
-                              callee +
-                              "<...>' names a template of another module");
-    return false;
-  }
+  // A parameter type of another module's template, as this context spells
+  // it (inference compares it with this context's types).
+  auto here = [&](const ast::Decl *tmpl, ast::Type *ty) {
+    if (!foreignOrigin(tmpl))
+      return ty;
+    return ast::ASTCloner(Ctx, {}, nullptr, /*foreign=*/true).cloneType(ty);
+  };
 
   if (auto it = ClassTemplates.find(callee); it != ClassTemplates.end()) {
     ast::ClassDecl *tmpl = it->second;
@@ -1177,7 +1231,7 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
       for (auto *m : tmpl->getMethods())
         if (m->getName() == names::kMethodInit)
           for (auto &p : m->getParams())
-            paramTypes.push_back(p.ParamType);
+            paramTypes.push_back(here(tmpl, p.ParamType));
       if (!inferTypeArgs(callee, tmpl->getTypeParams(), paramTypes, argTypes,
                          loc, typeArgs))
         return false;
@@ -1194,7 +1248,7 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
     if (typeArgs.empty()) {
       std::vector<ast::Type *> paramTypes;
       for (auto &p : tmpl->getParams())
-        paramTypes.push_back(p.ParamType);
+        paramTypes.push_back(here(tmpl, p.ParamType));
       if (!inferTypeArgs(callee, tmpl->getTypeParams(), paramTypes, argTypes,
                          loc, typeArgs))
         return false;
@@ -1222,10 +1276,15 @@ bool Sema::checkPendingInstantiations() {
   // index (not iterate) and copy the entry (the vector may reallocate).
   for (size_t i = 0; i < PendingInstantiations.size(); ++i) {
     PendingInstantiation p = PendingInstantiations[i];
-    InstantiationStack.push_back({p.Name, p.RequestLoc});
+    InstantiationStack.push_back(
+        {p.Name, p.RequestLoc, p.RequestFile, p.RequestLines});
     const StringSet *savedParams = CurrentTypeParams;
     CurrentTypeParams = &p.TypeParams;
-    bool r = p.Class ? visitClassDecl(p.Class) : visitFuncDecl(p.Func);
+    bool r;
+    {
+      OriginSource inOrigin(Diags, p.Origin);
+      r = p.Class ? visitClassDecl(p.Class) : visitFuncDecl(p.Func);
+    }
     CurrentTypeParams = savedParams;
     InstantiationStack.pop_back();
     if (!r)

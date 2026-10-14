@@ -1,0 +1,29 @@
+// Module: containers/box -- generic classes and functions for other modules
+// to instantiate.  Their bodies use what this module declares (`__serial`)
+// and what it imports (`util`): an importer instantiates them as this module
+// would, whatever it calls those names itself.
+import containers::util;
+
+class Box<T> {
+  v: T;
+  fn __init__(v: T) { self.v = v; }
+  view fn get() -> view T { return self.v; }
+  fn set(v: T) { self.v = v; }
+  view fn tag() -> Str { return util::bracket(Str(__serial())); }
+}
+
+class Pair<A, B> {
+  a: A;
+  b: B;
+  fn __init__(a: A, b: B) { self.a = a; self.b = b; }
+}
+
+fn __serial() -> int { return 7; }
+
+fn pairOf<A, B>(a: A, b: B) -> Pair<A, B> { return Pair(a, b); }
+
+fn swap<A, B>(p: Pair<A, B>) -> Pair<B, A> { return Pair(p.b, p.a); }
+
+// The module's own Box<int>: importers that instantiate Box<int> get this
+// very class.
+fn one() -> Box<int> { return Box<int>(1); }
