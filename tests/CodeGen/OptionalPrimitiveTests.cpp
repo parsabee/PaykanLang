@@ -401,15 +401,18 @@ TEST(OptionalPrimitive, GenericArgumentsAndOptionalOfTypeParameter) {
 // -- PIR inline optionals (#96)
 
 // `some`, `none`, `is_some` and `unwrap` on both backends, with optionals in
-// locals, parameters, results, fields (a new object's are absent), a vtable
+// locals, parameters, results, fields (a new object's are absent; an
+// opt_char and an opt_bool field are 16 bytes like the others), a vtable
 // slot's signature, `select` and through addresses; `unwrap` of an absent
 // optional is its payload type's zero.
 TEST(OptionalPrimitive, PIRInlineOptionals) {
   LeakGuard g;
   auto r = compileAndRunPIR(R"(module "t"
 class C {
+  field c: opt_char
   field n: opt_i64
   field f: opt_f64
+  field b: opt_bool
   vtable {
     destroy = @C.destroy : (obj) -> void
     pick = @C.pick : (obj, opt_char, bool) -> opt_char
@@ -469,6 +472,10 @@ fn @main() -> i64 {
   %fsome = some 2.5
   field.store %o, C.f, %fsome
   %ff2 = field.load %o, C.f
+  %bt = some true
+  field.store %o, C.b, %bt
+  %cz = some 'z'
+  field.store %o, C.c, %cz
   %fv = unwrap %ff2
   %fi = ftoi %fv
   %ch = some 'a'
@@ -481,7 +488,10 @@ fn @main() -> i64 {
   %tru = some true
   store %b, %tru
   %bl = load %b
-  %bv = unwrap %bl
+  %bv0 = unwrap %bl
+  %fb = field.load %o, C.b
+  %fbv = unwrap %fb
+  %bv = select %fbv, %bv0, false
   free %o
   %s1 = add %a, %z
   %c0 = sub %c, 100

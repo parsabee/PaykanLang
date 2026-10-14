@@ -690,8 +690,10 @@ private:
       if (!c)
         return;
       llvm::StructType *ty = classType(sym, *c);
-      const llvm::DataLayout &dl = M->getDataLayout();
-      llvm::Value *size = B.getInt64(dl.getTypeAllocSize(ty));
+      // The size under the target's layout, which the module gets only
+      // later (the JIT or the object build sets it): with the default one an
+      // optional field's { i8, i64 } would be laid out with a 4-byte i64.
+      llvm::Value *size = llvm::ConstantExpr::getSizeOf(ty);
       llvm::Value *obj = B.CreateCall(fnMalloc(), {size});
       auto *ptrTy = llvm::PointerType::getUnqual(Ctx);
       // Header: vtable, null backpointer; then every field zeroed.

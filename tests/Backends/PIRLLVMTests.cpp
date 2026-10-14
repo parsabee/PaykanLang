@@ -400,6 +400,34 @@ fn @main() -> i64 {
   EXPECT_FALSE(linesWith(ir, "zeroinitializer").empty()) << ir;
   EXPECT_FALSE(linesWith(ir, "extractvalue { double, i64 }").empty()) << ir;
 
+  // An object's size is the target's sizeof, folded once the module has its
+  // data layout: { i1, i64 } is 16 bytes there, 12 under LLVM's default one.
+  ir = translatePIR(R"(module "t"
+class C {
+  field b: opt_bool
+  vtable {
+    destroy = @C.destroy : (obj) -> void
+  }
+}
+
+fn @C.destroy(%self: obj) -> void {
+  free %self
+  ret
+}
+
+fn @main() -> i64 {
+  %o = new C
+  free %o
+  ret 0
+}
+)",
+                    err);
+  ASSERT_FALSE(ir.empty()) << err;
+  auto mallocs = linesWith(ir, "call ptr @Paykan_malloc(");
+  ASSERT_EQ(mallocs.size(), 1u) << ir;
+  EXPECT_NE(mallocs[0].find("ptrtoint (ptr getelementptr"), std::string::npos)
+      << mallocs[0];
+
   auto r = runPIR(R"(module "t"
 fn @pick(%c: bool) -> opt_char {
   %s = some 'k'
