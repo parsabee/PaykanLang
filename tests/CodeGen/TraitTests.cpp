@@ -116,3 +116,23 @@ fn main() -> int {
   guard.expectNoLeaks("Show across modules");
   std::filesystem::remove_all(dir);
 }
+
+TEST(Traits, ScalarsShow) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"pkn(
+    fn show<T: Show>(x: view T) -> Str { return "<" + x.toString() + ">"; }
+    fn main() -> int {
+      n = 42;
+      f = 2.5;
+      b = True;
+      c = 'z';
+      println(n.toString() + " " + f.toString() + " " + b.toString() + " " +
+              c.toString());
+      println(show(n) + show(f) + show(b) + show(c) + show("s"));
+      return 0;
+    }
+  )pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "42 2.5 True z\n<42><2.5><True><z><s>\n");
+  guard.expectNoLeaks("scalar Show");
+}

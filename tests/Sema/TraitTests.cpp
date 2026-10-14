@@ -147,3 +147,23 @@ fn main() -> int {
   EXPECT_EQ(r.Diagnostics.find("'B' does not implement"), std::string::npos)
       << r.Diagnostics;
 }
+
+// int, float, bool and char implement `Show`: `n.toString()` is a `Str`.
+TEST(Traits, ScalarsImplementShow) {
+  auto r = semaCheck(R"(enum Color { Red }
+fn show<T: Show>(x: view T) -> Str { return x.toString(); }
+fn main() -> int {
+  n = 3;
+  s: Str = n.toString() + 2.5.toString() + True.toString() + 'c'.toString();
+  t = show(n) + show(1.5) + show(False) + show('x') + show("s");
+  n.toString(1);
+  show(Color::Red);
+  return s.len() + t.len();
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"method 'toString' expects 0 argument(s), got 1",
+                "'Color' does not implement trait 'Show', which 'show' "
+                "requires of 'T'"});
+  EXPECT_EQ(r.ErrorCount, 2) << r.Diagnostics;
+}

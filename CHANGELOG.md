@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them. The block's methods join `A` like an `impl` block's, and a method `A` already has
   meets a requirement too. Traits can be generic (`trait Into<T>`), and `Self` names the
   implementing type. A class implements its superclasses' traits, and every class
-  implements the built-in `Show` (`view fn toString() -> Str`) through `Obj`. Bounds
+  implements the built-in `Show` (`view fn toString() -> Str`) through `Obj`, as do
+  `int`, `float`, `bool` and `char` (`n.toString()` is `Str(n)`). Bounds
   (`fn f<T: Show + Into<int>>`, `class Box<T: Named>`) are checked where the template is
   instantiated (`'Str' does not implement trait 'Named', which 'greet' requires of 'T'`).
   A trait is not a type.

@@ -42,7 +42,8 @@ std::string fnSignature(bool view, const std::string &name,
 } // namespace
 
 void Sema::registerBuiltinTraits() {
-  // trait Show { view fn toString() -> Str; }, implemented by Obj.
+  // trait Show { view fn toString() -> Str; }, implemented by Obj and the
+  // scalars (whose `toString` is their `Str` conversion).
   auto *toString = Ctx.make<ast::FuncDecl>(
       ast::SourceLocation(), Ctx.intern(names::kMethodToString),
       std::vector<ast::Param>{}, Ctx.getStrTy(), nullptr);
@@ -54,7 +55,12 @@ void Sema::registerBuiltinTraits() {
   TraitInfo &info = Traits[names::kTraitShow];
   info.Decl = show;
   info.IsBuiltin = true;
-  TraitImpls[Ctx.getObjTy()].push_back({&info, {}});
+  for (ast::Type *t : {static_cast<ast::Type *>(Ctx.getObjTy()),
+                       static_cast<ast::Type *>(Ctx.getIntTy()),
+                       static_cast<ast::Type *>(Ctx.getFloatTy()),
+                       static_cast<ast::Type *>(Ctx.getBoolTy()),
+                       static_cast<ast::Type *>(Ctx.getCharTy())})
+    TraitImpls[t].push_back({&info, {}});
 }
 
 bool Sema::declareTraits(ast::TranslationUnit *tu) {

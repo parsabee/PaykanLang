@@ -1079,6 +1079,19 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   else
     ct = ast::dyn_cast<ast::ClassType>(recvTy);
 
+  // `n.toString()` on an int, float, bool or char: the builtin `Show`.
+  if (!ct && ast::isa<ast::BuiltinType>(recvTy) &&
+      recvTy != S.Ctx.getVoidTy() &&
+      node->getMethodName() == names::kMethodToString) {
+    if (node->getNumArguments() != 0) {
+      S.error(node->getLocation(), "method 'toString' expects 0 argument(s), "
+                                   "got " +
+                                       std::to_string(node->getNumArguments()));
+      return nullptr;
+    }
+    node->setResolvedType(S.Ctx.getStrTy());
+    return S.Ctx.getStrTy();
+  }
   if (!ct) {
     S.error(node->getLocation(),
             "method call on non-class type '" + typeName(recvTy) + "'");
