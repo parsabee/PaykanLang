@@ -122,10 +122,11 @@ note: in instantiation of 'Doubler<bool>' requested here
 A type parameter names a type, not a value: inside the generic code you can write `T`,
 `T[]`, `T?`, `Box<T>` or `(T, int)` wherever a type goes, but `T()` and `x = T` are errors.
 
-Generic classes and functions **cannot be imported from another module yet**
-([#57](https://github.com/parsabee/PaykanLang/issues/57)): keep each generic declaration in
-the module that uses it. A module can still return values of its own instantiations, such as
-a `Box<int>`, to its importers. Chapter 10 has more on modules.
+Generic classes and functions can be imported like anything else a module declares:
+`shapes::Box<int>(1)`, `b: shapes::Box<Str>` and `shapes::first(xs)` instantiate the
+templates of `shapes` in your module. The body is checked for your type arguments as
+`shapes` would check it, so an error in it points into `shapes`' file, with the note at
+your call. Chapter 10 has more on modules.
 
 ## Project: undo with a generic stack
 
