@@ -15,6 +15,12 @@
 
 namespace paykan::jit {
 
+/// Give @p module the target triple and data layout runModule() executes it
+/// with (the host's, as the JIT detects it).  Call it before optimising the
+/// module: the optimiser folds sizes and field offsets under the module's
+/// layout, and LLVM's default one lays out an i64 after an i8 at offset 4.
+llvm::Error setHostLayout(llvm::Module &module);
+
 /// Run the "main" function inside the given module via ORC JIT.
 /// The module is consumed (moved into the JIT).
 /// @param args  Arguments forwarded to the Paykan main function as Str[].
