@@ -232,6 +232,7 @@ private:
       InternedStrings; // content -> @sym
   std::unordered_map<std::string, std::string> InternedArrayData;
   std::unordered_map<std::string, std::string> InternedTupleKinds;
+  std::unordered_map<std::string, std::string> InternedTypeDescriptors;
 
   /// Address (ptr) of the interned C-string global holding @p content.
   Val internString(const std::string &content);
@@ -398,11 +399,14 @@ private:
   void emitImplicitReturn(const pir::Signature &sig);
   void emitNativeBody(ast::FuncDecl *node, const pir::Function &fn);
   /// Call @p node's C symbol with @p args, one per parameter: a reference
-  /// as a borrowed box, an `inout` argument as its address, a scalar as is.
+  /// as a borrowed box, an `inout` argument as its address, a value as is.
   Val emitNativeCall(const ast::FuncDecl &node, const std::vector<Val> &args);
   /// The native function of this module named @p name, or nullptr.
   const ast::FuncDecl *localNative(const std::string &name) const;
-  /// The NativeTypeKind a generic native function is passed for @p ty.
+  /// The PaykanType (src/Runtime/Runtime.h) a generic native function is
+  /// passed for @p ty: a module data global, one per distinct description.
+  Val emitTypeDescriptor(ast::Type *ty);
+  /// The kind word of @p ty's PaykanType.
   unsigned char nativeTypeKind(ast::Type *ty) const;
   Val emitValueMatch(ast::MatchStmt *node, const Val &subjRaw);
   Val emitEnumMatch(ast::MatchStmt *node, const Val &subjRaw);

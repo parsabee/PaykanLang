@@ -24,10 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   name`).
 - Generic native functions (docs/language/02-functions-and-calling.md, "Generic native
   functions"): `native fn pick<T>(first: bool, a: T, b: T) -> T = "c_pick";`.  Each
-  instance calls the same C function with the kind of each type argument first
-  (`PaykanTypeKind` in `Runtime.h`: int, float, bool, char, object or optional), then
-  every argument and its result as a 64-bit slot (a value's bits, a reference's box), so
-  any type crosses into C.  In the AST interchange format a generic native function has its
+  instance calls the same C function with a `PaykanType` for each type argument first
+  (`Runtime.h`: the type's size, alignment, kind and reference offsets), and passes what
+  the function types `T` by address (a `-> T` result through a `void *out`), so a value
+  of any type and size crosses into C; `PaykanType_copy` and `PaykanType_drop` copy and
+  release one.  In the AST interchange format a generic native function has its
   `(type-params ...)` like any other.  See `samples/imports/15_native_generic`.
 - Borrowed results (docs/language/02-functions-and-calling.md, "Borrowed results"): a
   function or method declared `-> view T` returns a borrow of part of `self` or of a
@@ -156,10 +157,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   other parameter is a `view`, which C borrows, or an `inout`, which C changes in place
   (`parameter 's' must be 'view' or 'inout' ('s: view Str'); only int, float, bool and char
   cross into C by value`).  An `inout` argument is the caller's variable: `int64_t *`, ...,
-  `PaykanShared **` for a `Str` or `Obj`, and for a generic instance the address of a
-  64-bit slot.  The result can be a `view` of a `view` or `inout` parameter.  A call in the
-  declaring module calls the C function directly with the caller's own references, so it
-  does no reference counting.
+  `PaykanShared **` for a `Str` or `Obj`, and for a generic instance's `inout T` the
+  value's own address.  The result can be a `view` of a `view` or `inout` parameter.  A
+  call in the declaring module calls the C function directly with the caller's own
+  references, so it does no reference counting.
 - What a call passes to an `inout` parameter shares no storage with anything else the
   call borrows (docs/language/02-functions-and-calling.md, "Exclusivity"): not only another
   `inout` argument, but a `view` argument and the receiver of a method that may change

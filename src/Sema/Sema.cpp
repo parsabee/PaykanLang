@@ -2369,32 +2369,33 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
 
 // A `native fn` (#198) crosses into C with the runtime builtins' convention,
 // which only covers scalars, `Str` and `Obj` (and, as a result, `Str?` and
-// `Obj?`: a null box is None).  An instance of a generic one passes every
-// argument and its result as a 64-bit slot instead, so any type crosses.
-// Its parameters are checked by checkNativeParamModes, and a `view` result
-// is part of a `view` or `inout` one; `-> inout` would need C to return an
-// address into Paykan storage.
+// `Obj?`: a null box is None).  An instance of a generic one passes what its
+// template typed by a bare type parameter by address instead, so any type
+// crosses there.  Its parameters are checked by checkNativeParamModes (a
+// template's when it is registered), and a `view` result is part of a
+// `view` or `inout` one; `-> inout` would need C to return an address into
+// Paykan storage.
 bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
                                 const std::vector<ast::Type *> &paramTypes) {
-  const bool slots = !node->getTypeArgs().empty();
   auto scalarOrRef = [&](ast::Type *t) {
-    if (slots || t == Ctx.getStrTy() || t == Ctx.getObjTy())
+    if (t == Ctx.getStrTy() || t == Ctx.getObjTy())
       return true;
     auto *bt = ast::dyn_cast<ast::BuiltinType>(t);
     return bt && t != Ctx.getVoidTy();
   };
-  bool ok = slots || checkNativeParamModes(node, paramTypes);
+  bool ok =
+      !node->getTypeArgs().empty() || checkNativeParamModes(node, paramTypes);
   auto reject = [&](ast::Type *t, const std::string &what) {
     error(node->getLocation(),
           "native function '" + node->getName() + "': " + what + " '" +
               typeName(t) +
               "' cannot cross into C (int, float, bool, char, Str and Obj "
-              "can; Str? and Obj? as a result; a generic native function "
-              "takes any type)");
+              "can, Str? and Obj? as a result, and any type where a generic "
+              "native function says 'T')");
     ok = false;
   };
   for (size_t i = 0; i < paramTypes.size(); ++i)
-    if (!scalarOrRef(paramTypes[i]))
+    if (!node->paramByAddress(i) && !scalarOrRef(paramTypes[i]))
       reject(paramTypes[i],
              "parameter '" + node->getParams()[i].getName() + "' of type");
   bool borrowed = false;
@@ -2418,7 +2419,7 @@ bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
                   ot->getInnerType() == Ctx.getObjTy()
               ? ot->getInnerType()
               : retTy;
-  if (ret != Ctx.getVoidTy() && !scalarOrRef(ret))
+  if (ret != Ctx.getVoidTy() && !node->resultByAddress() && !scalarOrRef(ret))
     reject(retTy, "result type");
   if (node->getName() == names::kMain) {
     error(node->getLocation(), "'main' cannot be a native function");

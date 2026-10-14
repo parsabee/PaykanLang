@@ -373,6 +373,11 @@ private:
   // An instantiation's type arguments, in TypeParams order; empty for a
   // declaration written by hand.
   std::vector<Type *> TypeArgs;
+  // An instance of a generic native function: the parameters, and whether
+  // the result, its template typed by a bare type parameter (`x: view T`,
+  // `-> T`), which cross into C by address.
+  std::vector<bool> ByAddress;
+  bool ResultByAddress = false;
   // The C symbol of a `native fn` (interned), which has no Body; nullptr for
   // an ordinary function (#198).
   const std::string *NativeSymbol = nullptr;
@@ -400,9 +405,20 @@ public:
   bool isGeneric() const { return !TypeParams.empty(); }
 
   /// The type arguments Sema instantiated this function with (`first<int>`);
-  /// a native one passes their kinds to C.
+  /// a native one passes C a description of each.
   const std::vector<Type *> &getTypeArgs() const { return TypeArgs; }
   void setTypeArgs(std::vector<Type *> args) { TypeArgs = std::move(args); }
+
+  /// For an instance of a generic native function: parameter @p i, or the
+  /// result, crosses into C by address (its template typed it `T`).
+  bool paramByAddress(size_t i) const {
+    return i < ByAddress.size() && ByAddress[i];
+  }
+  bool resultByAddress() const { return ResultByAddress; }
+  void setByAddress(std::vector<bool> params, bool result) {
+    ByAddress = std::move(params);
+    ResultByAddress = result;
+  }
 
   bool isNative() const { return NativeSymbol != nullptr; }
   const std::string &getNativeSymbol() const { return *NativeSymbol; }

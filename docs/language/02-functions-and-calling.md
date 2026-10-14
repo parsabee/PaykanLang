@@ -503,36 +503,42 @@ which holds a reference to each argument for the call.
 ### Generic native functions
 
 A native function can be generic.  Each instance calls the same C function,
-which is passed the kind of each type argument first, then every argument as
-a 64-bit slot, and returns its result as one:
+which is passed a `PaykanType` describing each type argument first.  What the
+function types by a type parameter crosses by address, so a value of any type,
+of any size, crosses:
 
 ```pkn
 native fn pick<T>(first: bool, a: view T, b: view T) -> T = "sample_pick";
 native fn swap<T>(a: inout T, b: inout T) = "sample_swap";
+native fn get<T>(b: view Obj, i: int) -> view T = "sample_get";
 ```
 
 ```c
-int64_t sample_pick(int64_t kind, int64_t first, int64_t a, int64_t b);
-void sample_swap(int64_t kind, int64_t *a, int64_t *b);
+void sample_pick(const PaykanType *t, void *out, bool first, const void *a,
+                 const void *b);
+void sample_swap(const PaykanType *t, void *a, void *b);
+const void *sample_get(const PaykanType *t, PaykanObject *b, int64_t i);
 ```
 
-So any type crosses, and the C code sees what it was given:
+| Paykan | C |
+|--------|---|
+| a type argument | `const PaykanType *`, ahead of the arguments |
+| `x: view T` | `const void *`: the value's address, borrowed for the call |
+| `x: inout T` | `void *`: the caller's storage, which C may change (`PaykanType_drop` the old value, then store an owned one) |
+| `-> T` | `void *out`, after the `PaykanType`s: storage C fills, owning the references it writes |
+| `-> view T` | `const void *` returned: the address of a value in a `view` argument, which the caller copies |
+| anything else | as in a non-generic native function |
 
-| Kind (`PaykanTypeKind`) | Type argument | Slot |
-|------|----------|------|
-| `PAYKAN_KIND_INT` | `int`, an enum | the value |
-| `PAYKAN_KIND_FLOAT` | `float` | the IEEE-754 bits |
-| `PAYKAN_KIND_BOOL`, `PAYKAN_KIND_CHAR` | `bool`, `char` | the value, widened |
-| `PAYKAN_KIND_OBJECT` | a class, `Str`, `Obj`, an array, a tuple | the `PaykanShared *` box, never `NULL` |
-| `PAYKAN_KIND_OPTIONAL` | any `T?` | the box, `NULL` for `None` |
-
-Every argument is a slot, including those whose type is not a type
-parameter (`first` above, and a `Str` is its box, not the raw object).  A
-`view` argument's box is borrowed for the call; an `inout` argument is the
-address of a slot, into which C may store a new value (releasing the box it
-replaces, storing an owned one); a box result is owned (+1).  A parameter
-typed by a type parameter is a `view` or an `inout` (`x: T` is rejected
-whatever `T` will be).  See `samples/imports/15_native_generic`.
+A `PaykanType` holds a value's `size` and `align`, its `kind`
+(`PaykanTypeKind`: int, float, bool, char, object or optional), and where it
+holds references: `nrefs` words follow it, each a `PaykanShared *`'s byte
+offset `<< 1`, `| 1` if it may be `NULL` (`PaykanType_ref`).  An `int` or a
+`float` is 8 bytes, a `bool` or a `char` 1, and a reference, an array or a
+tuple an 8-byte `PaykanShared *` box (`NULL` for an optional's `None`).
+`PaykanType_copy` copies a value, retaining its references, and
+`PaykanType_drop` releases them.  A parameter typed by a type parameter is a
+`view` or an `inout` (`x: T` is rejected whatever `T` will be).  See
+`samples/imports/15_native_generic`.
 
 `paykan` does not build native code: you compile it however you like (any
 compiler, flags or language that produces C-ABI symbols) and pass the objects
