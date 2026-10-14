@@ -21,7 +21,10 @@ fn main() -> int {
   d: Node? = wrap(n);
   e: Node? = pass(None);
   f = pass(Node(3));           // inferred Node?
-  o: Obj = f;                  // T? -> Obj is allowed
-  println(f);                  // print takes Obj
+  match f {                    // an optional is not an Obj: unwrap it
+    x: Node { o: Obj = x; }
+    None { }
+  }
+  println(f);                  // print takes an optional: None or the value
   return 0;
 }

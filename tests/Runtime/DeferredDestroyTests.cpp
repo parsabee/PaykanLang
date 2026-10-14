@@ -190,8 +190,8 @@ TEST_F(DeferredDestroy, DeepChainsThroughRuntimeContainers) {
     PaykanShared *s = PaykanShared_new(leaf);
     PaykanTuple_set_obj(t, 1, s);
     Paykan_release(s);
-    PaykanShared *b =
-        PaykanShared_new(reinterpret_cast<PaykanObject *>(PaykanInt_new(i)));
+    PaykanShared *b = PaykanShared_new(
+        reinterpret_cast<PaykanObject *>(PaykanString_from_int(i)));
     PaykanTuple_set_obj(t, 2, b);
     Paykan_release(b);
     PaykanShared *tb = PaykanShared_new(reinterpret_cast<PaykanObject *>(t));

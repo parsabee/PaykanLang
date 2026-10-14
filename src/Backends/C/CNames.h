@@ -62,10 +62,6 @@ inline constexpr const char *kRtBoxPtr = "PaykanShared *";
 inline constexpr const char *kRtStrPtr = "PaykanString *";
 inline constexpr const char *kRtArrPtr = "PaykanArray *";
 inline constexpr const char *kRtTupPtr = "PaykanTuple *";
-inline constexpr const char *kRtIntPtr = "PaykanInt *";
-inline constexpr const char *kRtFloatPtr = "PaykanFloat *";
-inline constexpr const char *kRtBoolPtr = "PaykanBool *";
-inline constexpr const char *kRtCharPtr = "PaykanChar *";
 /// A vtable slot (Runtime.h): the generic function-pointer type every
 /// vtable -- the runtime's and the generated `pkvt_<class>` -- is an array of.
 inline constexpr const char *kRtMethod = "PaykanMethod";

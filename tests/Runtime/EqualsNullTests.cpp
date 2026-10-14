@@ -40,24 +40,6 @@ TEST(EqualsNullOther, NoneSingleton) {
   EXPECT_EQ(equalsWithNullOther(vtEquals(none), none), 0);
 }
 
-TEST(EqualsNullOther, Int) {
-  PaykanInt *v = PaykanInt_new(42);
-  EXPECT_EQ(equalsWithNullOther(PaykanInt_equals, (PaykanObject *)v), 0);
-  PaykanInt_destroy((PaykanObject *)v);
-}
-
-TEST(EqualsNullOther, Float) {
-  PaykanFloat *v = PaykanFloat_new(1.5);
-  EXPECT_EQ(equalsWithNullOther(PaykanFloat_equals, (PaykanObject *)v), 0);
-  PaykanFloat_destroy((PaykanObject *)v);
-}
-
-TEST(EqualsNullOther, Bool) {
-  PaykanBool *v = PaykanBool_new(1);
-  EXPECT_EQ(equalsWithNullOther(PaykanBool_equals, (PaykanObject *)v), 0);
-  PaykanBool_destroy((PaykanObject *)v);
-}
-
 TEST(EqualsNullOther, String) {
   PaykanString *s = PaykanString_new("hello", 5);
   EXPECT_EQ(equalsWithNullOther(PaykanString_equals, (PaykanObject *)s), 0);

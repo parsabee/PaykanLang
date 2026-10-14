@@ -1054,7 +1054,7 @@ private:
                           const std::vector<ast::Type *> &argTypes);
 
   /// True when @p name is a conversion target (`Str`, `int`, `float`,
-  /// `bool`, `char`, `Int`, `Float`, `Bool`), i.e. `name<Source>(value)` is
+  /// `bool`, `char`), i.e. `name<Source>(value)` is
   /// a conversion, or the spelled form (`int<float>`) checkConversion rebinds
   /// such a call to.
   static bool isConversionTarget(std::string_view name);

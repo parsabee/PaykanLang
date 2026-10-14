@@ -1,16 +1,10 @@
-// Sample 20 — Parsing with int<Str> / float<Str>, and the boxed primitives
+// Sample 20 — Parsing with int<Str> / float<Str>
 //
 // int<Str>(s: Str) -> int?    parses a decimal integer string.
 // float<Str>(s: Str) -> float?  parses a floating-point string.
 // Both return None for a string that is not a valid number.  Use match to
-// unwrap the result (the arm binds a plain int / float).
-//
-// Int<Str> / Float<Str> give boxed Int / Float objects (an int? / float? is
-// a value, not an object); the boxes print and compare by value.
-
-fn boxedInt(s: Str) -> Obj {
-  match Int<Str>(s) { x: Int { return x; } None { return None; } }
-}
+// unwrap the result (the arm binds a plain int / float).  The optionals are
+// values: they print as the number or None and compare by value.
 
 fn tryParseInt(s: Str) -> Str {
   match int<Str>(s) {
@@ -70,26 +64,13 @@ fn main() -> int {
   }
   println("valid ints in list: " + Str<int>(total));
 
-  // === the boxes: toString / equals ===
-  println("=== toString / equals ===");
+  // === printing and comparing the optionals ===
+  println("=== print / compare ===");
 
-  a: Obj = boxedInt("7");
-  b: Obj = boxedInt("7");
-  c: Obj = boxedInt("8");
-  match a {
-    x: Int {
-      println(x.toString());
-      println(Str(x.equals(b)));
-      println(Str<bool>(x.equals(c)));
-    }
-    _ {}
-  }
+  println(int<Str>("7"));
   println(Str(int<Str>("7") == int("7")));
-
-  match Float<Str>("1.5") {
-    y: Float { println(y.toString()); }
-    None {}
-  }
+  println(Str(int<Str>("7") == int("8")));
+  println(float<Str>("1.5"));
   println(int("nope"));
 
   return 0;

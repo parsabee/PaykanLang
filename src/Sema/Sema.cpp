@@ -280,7 +280,7 @@ bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
   }
   // A literal whose elements take the destination's element types (`[1, 2]`
   // into `int?[]`, `(None, "a")` into `(int?, Str)`, nested literals): retype
-  // the literal and mark each element that is boxed.
+  // the literal and mark each element that is wrapped.
   srcTy = adoptLiteralElements(dst, srcTy, src);
   if (!isAssignable(dst, srcTy))
     return false;
@@ -1699,13 +1699,13 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
 
 // -- Conversion constructors (#64, #88)
 //
-// `Target<Source>(value)` converts between the primitives, their boxes and
-// `Str`.  Each builtin target has a fixed, closed set of specializations (the
-// valid sources), and no other type, builtin or user-defined, can be one.
-// The source is written (`Str<int>(n)`, checkConversion) or inferred from
-// the argument's exact type (`Str(n)`, inferConversion).  The semantics live in
-// the lowering (Lowering/LoweringExpr.cpp, emitConversion and the runtime
-// table), which both backends inherit.
+// `Target<Source>(value)` converts between the primitives and `Str`.  Each
+// builtin target has a fixed, closed set of specializations (the valid
+// sources), and no other type, builtin or user-defined, can be one. The source
+// is written (`Str<int>(n)`, checkConversion) or inferred from the argument's
+// exact type (`Str(n)`, inferConversion).  The semantics live in the lowering
+// (Lowering/LoweringExpr.cpp, emitConversion and the runtime table), which both
+// backends inherit.
 
 struct ConversionPair {
   const char *Target;
@@ -1722,21 +1722,14 @@ const ConversionPair kConversions[] = {
     {names::kString, names::kTypeFloat, names::kConvStrFloat, false},
     {names::kString, names::kTypeBool, names::kConvStrBool, false},
     {names::kString, names::kTypeChar, names::kConvStrChar, false},
-    {names::kString, names::kIntBox, names::kConvStrIntBox, false},
-    {names::kString, names::kFloatBox, names::kConvStrFloatBox, false},
-    {names::kString, names::kBoolBox, names::kConvStrBoolBox, false},
-    {names::kString, names::kCharBox, names::kConvStrCharBox, false},
     {names::kTypeInt, names::kString, names::kConvIntStr, true},
     {names::kTypeInt, names::kTypeFloat, names::kConvIntFloat, false},
     {names::kTypeInt, names::kTypeBool, names::kConvIntBool, false},
     {names::kTypeInt, names::kTypeChar, names::kConvIntChar, false},
-    {names::kIntBox, names::kString, names::kConvIntBoxStr, true},
     {names::kTypeFloat, names::kString, names::kConvFloatStr, true},
     {names::kTypeFloat, names::kTypeInt, names::kConvFloatInt, false},
-    {names::kFloatBox, names::kString, names::kConvFloatBoxStr, true},
     {names::kTypeBool, names::kTypeInt, names::kConvBoolInt, false},
     {names::kTypeBool, names::kString, names::kConvBoolStr, true},
-    {names::kBoolBox, names::kString, names::kConvBoolBoxStr, true},
     {names::kTypeChar, names::kTypeInt, names::kConvCharInt, false},
 };
 
@@ -1821,7 +1814,7 @@ ast::Type *Sema::inferConversion(ast::CallExpr *node,
 
 ast::Type *Sema::applyConversion(ast::CallExpr *node,
                                  const ConversionPair *pair) {
-  // The result is the target type; a parse (`int<Str>`, `Int<Str>`, ...) can
+  // The result is the target type; a parse (`int<Str>`, `bool<Str>`, ...) can
   // fail, so it returns the optional (None for an invalid string).
   ast::Type *result = Ctx.lookupType(pair->Target);
   if (pair->Parses)
@@ -1868,8 +1861,7 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
   if (!argTy)
     return nullptr; // already reported
   // The source type is written out, so the argument must have exactly that
-  // type: no int -> float promotion, no unwrapping of an optional (a boxed
-  // source is never None).
+  // type: no int -> float promotion, no unwrapping of an optional.
   if (!typesEqual(argTy, source)) {
     if (auto *ot = ast::dyn_cast<ast::OptionalType>(argTy);
         ot && typesEqual(ot->getInnerType(), source)) {

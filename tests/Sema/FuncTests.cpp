@@ -112,7 +112,7 @@ TEST(Func, FunctionShadowsBuiltinReportsCollisionOnly) {
 }
 
 TEST(Func, FunctionShadowsBuiltinClassRejected) {
-  for (const char *name : {"Obj", "Str", "File", "Error", "Int"}) {
+  for (const char *name : {"Obj", "Str", "File", "Error", "Tuple"}) {
     auto r = semaCheck(std::string("fn ") + name + "() -> int { return 0; }\n" +
                        wrapMain(""));
     EXPECT_FALSE(r.Ok) << name;

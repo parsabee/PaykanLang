@@ -76,17 +76,6 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanTupleSet, {{kObj, kI64, kI64}, kVoid}},
     {kPaykanTupleSetObj, {{kObj, kI64, kBox}, kVoid}},
     {kPaykanFileOpen, {{kObj, kObj}, kBox}},
-    {kPaykanIntFromStr, {{kObj}, kBox}},
-    {kPaykanIntNew, {{kI64}, kObj}},
-    {kPaykanFloatNew, {{kF64}, kObj}},
-    {kPaykanBoolNew, {{kI64}, kObj}},
-    {kPaykanCharNew, {{kChr}, kObj}},
-    {kPaykanIntValue, {{kObj}, kI64}},
-    {kPaykanFloatValue, {{kObj}, kF64}},
-    {kPaykanBoolValue, {{kObj}, kI64}},
-    {kPaykanCharValue, {{kObj}, kChr}},
-    {kPaykanFloatFromStr, {{kObj}, kBox}},
-    {kPaykanBoolFromStr, {{kObj}, kBox}},
     {kPaykanPrint, {{kObj}, kVoid}},
     {kPaykanPrintln, {{kObj}, kVoid}},
     {kPaykanErrPrint, {{kObj}, kVoid}},
@@ -551,16 +540,7 @@ void ModuleLowering::bootstrapBuiltins() {
   reg(kConvStrFloat, kPaykanStringFromFloat);
   reg(kConvStrBool, kPaykanStringFromBool);
   reg(kConvStrChar, kPaykanStringFromChar);
-  // The boxed forms (#88).  A boxed source is unboxed (emitBuiltinCall,
-  // conversionUnboxer) and formatted like its primitive; a boxed target's
-  // parse returns the `Int?` & co. box.  (`int<Str>` & co. are emitParse.)
-  reg(kConvStrIntBox, kPaykanStringFromInt);
-  reg(kConvStrFloatBox, kPaykanStringFromFloat);
-  reg(kConvStrBoolBox, kPaykanStringFromBool);
-  reg(kConvStrCharBox, kPaykanStringFromChar);
-  reg(kConvIntBoxStr, kPaykanIntFromStr);
-  reg(kConvFloatBoxStr, kPaykanFloatFromStr);
-  reg(kConvBoolBoxStr, kPaykanBoolFromStr);
+  // (`int<Str>` & co. are emitParse.)
   reg(kOpen, kPaykanFileOpen);
   IdentityCtors.insert(kString);
 }
@@ -631,10 +611,7 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
       return false;
     if (FunctionTable.count(ce->getCalleeName()) ||
         IdentityCtors.count(ce->getCalleeName())) {
-      if (ce->getCalleeName() == kOpen ||
-          isParseConversion(ce->getCalleeName()))
-        return true;
-      return false;
+      return ce->getCalleeName() == kOpen;
     }
     return true;
   }

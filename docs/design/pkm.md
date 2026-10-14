@@ -317,7 +317,7 @@ through `T_CLASS` by name, not by index).
 | tag | entry | payload | meaning |
 |---|---|---|---|
 | 1–5 | `T_INT`, `T_FLOAT`, `T_BOOL`, `T_CHAR`, `T_VOID` | — | primitives (`void` for returns only) |
-| 6 | `T_BUILTIN_CLASS` | `u8 kind` | 0 `Obj`, 1 `Str`, 2 `File`, 3 `Error`, 4 `Int`, 5 `Float`, 6 `Bool`, 7 `Char`: bootstrapped by every `ASTContext`, never described |
+| 6 | `T_BUILTIN_CLASS` | `u8 kind` | 0 `Obj`, 1 `Str`, 2 `File`, 3 `Error`: bootstrapped by every `ASTContext`, never described |
 | 7 | `T_CLASS` | `Mod, Str name` | a user class; `mod` 0 → described by a `CLASS` record here, else by that module's blob |
 | 8 | `T_ENUM` | `Mod, Str name` | likewise |
 | 9 | `T_OPAQUE` | `Mod, uleb id` | a module-private class seen only as the type of a private field of a public class (#19): an object reference with no name or members; `id` = position among the module's private classes sorted by name |
@@ -356,8 +356,7 @@ Records, sorted by `(tag, name)`:
 | 7 | `TEMPLATE_CLASS` | `Str name; Vis (0/3); Attrs; TypeParams; u8 tflags (bit0 ERASABLE, §4.5); Ty super (concrete); fields[] { Str name; Vis; Ty }; methods[] { Str name; Vis; MFlags; Sig }; u8 has_init; Sig init; Tmpl body` |
 | 8 | `TEMPLATE_FUNC` | `Str name; Vis; Attrs; TypeParams; u8 tflags; Sig; Tmpl body` |
 
-`Str`, `Obj`, arrays, tuples, optionals and boxed primitives are never
-written: every context bootstraps them. Static fields in generic classes
+`Str`, `Obj`, arrays, tuples and optionals are never written: every context bootstraps them. Static fields in generic classes
 are rejected at definition (#170), so templates carry none.
 
 **Decision: template bodies are not hashed into `IFACE`.** A `TEMPLATE_*`

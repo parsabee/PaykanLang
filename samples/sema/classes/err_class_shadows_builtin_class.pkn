@@ -1,4 +1,4 @@
-// ERROR: builtin class names (Obj, Str, Array, File, Error, Int, Float, Bool) are reserved
+// ERROR: builtin class names (Obj, Str, Array, File, Error, Tuple) are reserved
 class Str {  // sema error: 'Str' is a builtin class and cannot be redeclared
   fn __init__() {}
 }

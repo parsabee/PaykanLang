@@ -10,8 +10,7 @@ namespace ast {
 ASTContext::ASTContext()
     : IntTy(nullptr), FloatTy(nullptr), BoolTy(nullptr), CharTy(nullptr),
       VoidTy(nullptr), ObjTy(nullptr), StrTy(nullptr), ArrayTy(nullptr),
-      FileTy(nullptr), ErrorTy(nullptr), IntBoxTy(nullptr), FloatBoxTy(nullptr),
-      BoolBoxTy(nullptr), CharBoxTy(nullptr), TupleTy(nullptr) {
+      FileTy(nullptr), ErrorTy(nullptr), TupleTy(nullptr) {
   Pool.reserve(512); // the bootstrap alone makes ~150 nodes
   IntTy = make<BuiltinType>(SourceLocation(), BuiltinType::Int);
   FloatTy = make<BuiltinType>(SourceLocation(), BuiltinType::Float);
@@ -26,19 +25,11 @@ ASTContext::ASTContext()
   ArrayTy = make<ClassType>(SourceLocation(), intern(names::kArray), nullptr);
   FileTy = make<ClassType>(SourceLocation(), intern(names::kFile), nullptr);
   ErrorTy = make<ClassType>(SourceLocation(), intern(names::kError), nullptr);
-  IntBoxTy = make<ClassType>(SourceLocation(), intern(names::kIntBox), nullptr);
-  FloatBoxTy =
-      make<ClassType>(SourceLocation(), intern(names::kFloatBox), nullptr);
-  BoolBoxTy =
-      make<ClassType>(SourceLocation(), intern(names::kBoolBox), nullptr);
-  CharBoxTy =
-      make<ClassType>(SourceLocation(), intern(names::kCharBox), nullptr);
   TupleTy = make<ClassType>(SourceLocation(), intern(names::kTuple), nullptr);
   // The compiler builtins: Sema rejects any user class, enum, or function
   // that would reuse one of their names, and the lowering dispatches their
   // methods to the C runtime.
-  for (ClassType *builtin : {ObjTy, StrTy, ArrayTy, FileTy, ErrorTy, IntBoxTy,
-                             FloatBoxTy, BoolBoxTy, CharBoxTy, TupleTy})
+  for (ClassType *builtin : {ObjTy, StrTy, ArrayTy, FileTy, ErrorTy, TupleTy})
     builtin->setBuiltin();
   buildObjectType();
   buildStringType();
@@ -46,8 +37,6 @@ ASTContext::ASTContext()
   buildTupleType();
   buildFileType();
   buildErrorType();
-  for (ClassType *box : {IntBoxTy, FloatBoxTy, BoolBoxTy, CharBoxTy})
-    buildBoxedType(box);
 }
 
 // -- Bootstrap of the builtin classes
@@ -112,13 +101,6 @@ void ASTContext::buildFileType() {
 void ASTContext::buildErrorType() {
   ErrorTy->setSuperClass(ObjTy);
   ClassTypeBuilder(*this, ErrorTy).objectSlots().build();
-}
-
-// A boxed primitive (Int, Float, Bool, Char) is final and has Obj's slots.
-void ASTContext::buildBoxedType(ClassType *ty) {
-  ty->setSuperClass(ObjTy);
-  ty->setFinal();
-  ClassTypeBuilder(*this, ty).objectSlots().build();
 }
 
 // -- Canonical array types

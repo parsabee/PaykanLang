@@ -14,16 +14,9 @@ fn main() -> int {
   n5: int = int<char>(c);
   n6: char = char<int>(i);
   q1: bool? = bool<Str>(s);     // exactly "True" / "False"
-  // The boxed forms: a boxed source formats like its primitive, a boxed
-  // target parses into the optional box.
-  b1: Int? = Int<Str>(s);
-  b2: Float? = Float<Str>(s);
-  b3: Bool? = Bool<Str>(s);
-  match b1 { x: Int { t: Str = Str<Int>(x); } None { } }
-  match b2 { x: Float { t: Str = Str<Float>(x); } None { } }
-  match b3 { x: Bool { t: Str = Str<Bool>(x); } None { } }
+  // A parsed optional is unwrapped before it is formatted.
+  match p1 { x: int { t: Str = Str<int>(x); } None { } }
   cq: char? = c;
-  o: Obj = cq;
-  match o { x: Char { t: Str = Str<Char>(x); } _ { } }
+  match cq { x: char { t: Str = Str<char>(x); } None { } }
   return 0;
 }

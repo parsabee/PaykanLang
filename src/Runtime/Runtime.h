@@ -47,8 +47,9 @@ extern "C" {
 //   v6: imported modules' symbols are prefixed with the canonical module
 //       name (`geometry::shapes::describe`), not the absolute file path.
 //   v7: optionals of value types are values, not boxes (#96): an `int?`
-//       parameter, result or field is a { value, presence } pair, and the
-//       parses `int<Str>` & co. are PaykanString_parse_int & co.; an
+//       parameter, result or field is a { value, presence } pair, the
+//       boxed Int / Float / Bool / Char are gone, and the parses `int<Str>`
+//       & co. are PaykanString_parse_int & co.; an
 //       `int?[]` holds its elements inline (PaykanArray.elem_size,
 //       PaykanArray_new_sized & co.) and a tuple an `int?` element as an
 //       OPT presence slot and its value.
@@ -176,97 +177,6 @@ extern PaykanMethod PaykanObject_vtable[PAYKAN_OBJECT_SLOTS];
 
 // Singleton None instance — an Obj whose toString returns "None".
 extern PaykanObject PaykanObject_None;
-
-// -- Int
-//
-// Boxed 64-bit signed integer.  Inherits Object.
-
-typedef struct PaykanInt {
-  PaykanMethod *vtable;
-  PaykanShared *shared; // object header (see PaykanObject)
-  int64_t value;
-} PaykanInt;
-
-PaykanInt *PaykanInt_new(int64_t value);
-/// The value of a boxed Int (the unwrapped `int` of a present `int?`).
-int64_t PaykanInt_value(PaykanObject *self);
-void PaykanInt_destroy(PaykanObject *self);
-PaykanShared *PaykanInt_toString(PaykanObject *self);
-int64_t PaykanInt_equals(PaykanObject *self, PaykanShared *other);
-
-extern PaykanMethod PaykanInt_vtable[PAYKAN_OBJECT_SLOTS];
-
-/// `Int<Str>(s)`: PaykanString_parse_int's result as an `Int?`: a
-/// PaykanShared* wrapping a fresh PaykanInt on success, or NULL (None).
-PaykanShared *PaykanInt_from_str(PaykanObject *str);
-
-// -- Float
-//
-// Boxed 64-bit IEEE 754 double.  Inherits Object.
-
-typedef struct PaykanFloat {
-  PaykanMethod *vtable;
-  PaykanShared *shared; // object header (see PaykanObject)
-  double value;
-} PaykanFloat;
-
-PaykanFloat *PaykanFloat_new(double value);
-/// The value of a boxed Float (the unwrapped `float` of a present `float?`).
-double PaykanFloat_value(PaykanObject *self);
-void PaykanFloat_destroy(PaykanObject *self);
-PaykanShared *PaykanFloat_toString(PaykanObject *self);
-int64_t PaykanFloat_equals(PaykanObject *self, PaykanShared *other);
-
-extern PaykanMethod PaykanFloat_vtable[PAYKAN_OBJECT_SLOTS];
-
-/// `Float<Str>(s)`: PaykanString_parse_float's result as a `Float?`: a
-/// PaykanShared* wrapping a fresh PaykanFloat, or NULL (None).
-PaykanShared *PaykanFloat_from_str(PaykanObject *str);
-
-// -- Bool
-//
-// Boxed boolean (stored as int64_t 0/1).  Inherits Object.
-
-typedef struct PaykanBool {
-  PaykanMethod *vtable;
-  PaykanShared *shared; // object header (see PaykanObject)
-  int64_t value;        // 0 = False, 1 = True
-} PaykanBool;
-
-// Bools are unboxed i1/i64 values in generated code; the lowering boxes one
-// only for a present `bool?`.
-PaykanBool *PaykanBool_new(int64_t value);
-/// The value (0 or 1) of a boxed Bool (the unwrapped `bool` of a `bool?`).
-int64_t PaykanBool_value(PaykanObject *self);
-void PaykanBool_destroy(PaykanObject *self);
-PaykanShared *PaykanBool_toString(PaykanObject *self);
-int64_t PaykanBool_equals(PaykanObject *self, PaykanShared *other);
-
-extern PaykanMethod PaykanBool_vtable[PAYKAN_OBJECT_SLOTS];
-
-/// `Bool<Str>(s)`: PaykanString_parse_bool's result as a `Bool?`: a
-/// PaykanShared* wrapping a fresh PaykanBool, or NULL (None).
-PaykanShared *PaykanBool_from_str(PaykanObject *str);
-
-// -- Char
-//
-// Boxed character (a signed 8-bit byte, like `char` in generated code).
-// Inherits Object.  Only a present `char?` is boxed.
-
-typedef struct PaykanChar {
-  PaykanMethod *vtable;
-  PaykanShared *shared; // object header (see PaykanObject)
-  int8_t value;
-} PaykanChar;
-
-PaykanChar *PaykanChar_new(int8_t value);
-/// The value of a boxed Char (the unwrapped `char` of a present `char?`).
-int8_t PaykanChar_value(PaykanObject *self);
-void PaykanChar_destroy(PaykanObject *self);
-PaykanShared *PaykanChar_toString(PaykanObject *self);
-int64_t PaykanChar_equals(PaykanObject *self, PaykanShared *other);
-
-extern PaykanMethod PaykanChar_vtable[PAYKAN_OBJECT_SLOTS];
 
 // -- String
 //
@@ -686,10 +596,6 @@ void Paykan_heap_dump(void);
                            offsetof(T, shared) ==                              \
                                offsetof(PaykanObject, shared),                 \
                        #T " must start with the object header")
-PAYKAN_CHECK_HEADER(PaykanInt);
-PAYKAN_CHECK_HEADER(PaykanFloat);
-PAYKAN_CHECK_HEADER(PaykanBool);
-PAYKAN_CHECK_HEADER(PaykanChar);
 PAYKAN_CHECK_HEADER(PaykanString);
 PAYKAN_CHECK_HEADER(PaykanFile);
 PAYKAN_CHECK_HEADER(PaykanError);

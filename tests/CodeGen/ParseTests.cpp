@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 // CodeGen tests: the fallible parses `int<Str>(s)` -> `int?` and
-// `float<Str>(s)` -> `float?` (#64), and the boxed Int / Float objects a
-// present result is (matched through `Obj`, `equals`, `toString`).
+// `float<Str>(s)` -> `float?` (#64).
 
 #include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
@@ -157,48 +156,4 @@ TEST(ParseFloat, SubnormalsParseAndOutOfRangeIsNone) {
                       "True True\n"
                       "True\n");
   g.expectNoLeaks("ParseFloat.SubnormalsParseAndOutOfRangeIsNone");
-}
-
-// -- The boxes: `Int<Str>` / `Float<Str>` give an Int / Float object
-
-TEST(BoxedEquals, IntBoxesThroughObj) {
-  LeakGuard g;
-  auto r = compileAndRun(R"(
-    fn boxed(s: Str) -> Obj {
-      match Int<Str>(s) { x: Int { return x; } None { return None; } }
-    }
-  )" + wrapMain(R"(
-    a: Obj = boxed("7");
-    b: Obj = boxed("7");
-    c: Obj = boxed("8");
-    match a {
-      x: Int {
-        println(x.toString());
-        println(Str<bool>(x.equals(b)));
-        println(Str<bool>(x.equals(c)));
-      }
-      _ { println("not an Int"); }
-    }
-    n: Obj = boxed("nope");
-    match n {
-      x: Int { println("Int"); }
-      _      { println(n); }
-    }
-  )"));
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "7\nTrue\nFalse\nNone\n");
-  g.expectNoLeaks("BoxedEquals.IntBoxesThroughObj");
-}
-
-TEST(BoxedEquals, FloatBoxThroughObj) {
-  LeakGuard g;
-  auto r = compileAndRun(wrapMain(R"(
-    match Float<Str>("1.5") {
-      y: Float { println(y.toString()); }
-      None     { println("not a Float"); }
-    }
-  )"));
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "1.5\n");
-  g.expectNoLeaks("BoxedEquals.FloatBoxThroughObj");
 }

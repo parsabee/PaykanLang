@@ -46,12 +46,6 @@ class ASTContext {
   // Canonical error type (ClassType inheriting Obj, returned by open() on
   // failure).
   ClassType *ErrorTy;
-  // Boxed primitive types (ClassType inheriting Obj): the boxes of the
-  // optional primitives, so also what `int<Str>` / `float<Str>` return.
-  ClassType *IntBoxTy;
-  ClassType *FloatBoxTy;
-  ClassType *BoolBoxTy;
-  ClassType *CharBoxTy;
 
   // Registry of all class types, keyed by name.
   std::unordered_map<std::string, ClassType *> ClassTypes;
@@ -99,7 +93,6 @@ class ASTContext {
   void buildTupleType();
   void buildFileType();
   void buildErrorType();
-  void buildBoxedType(ClassType *ty);
 
 public:
   ASTContext();
@@ -185,10 +178,6 @@ public:
   ClassType *getArrayTy() const { return ArrayTy; }
   ClassType *getFileTy() const { return FileTy; }
   ClassType *getErrorTy() const { return ErrorTy; }
-  ClassType *getIntBoxTy() const { return IntBoxTy; }
-  ClassType *getFloatBoxTy() const { return FloatBoxTy; }
-  ClassType *getBoolBoxTy() const { return BoolBoxTy; }
-  ClassType *getCharBoxTy() const { return CharBoxTy; }
 
   /// Return the canonical ArrayType whose elements have type @p elemTy,
   /// creating it on first use.  @p elemTy must itself be canonical (a builtin
