@@ -365,7 +365,7 @@ enum NativeTypeKind : unsigned char {
   kNativeKindBool = 2,     // bool
   kNativeKindChar = 3,     // int8_t
   kNativeKindObject = 4,   // PaykanShared*, never null
-  kNativeKindOptional = 5, // PaykanShared*, null for None
+  kNativeKindOptional = 5, // PaykanShared*, null for None, or inline
 };
 
 // -- Names of lowering-generated globals and values

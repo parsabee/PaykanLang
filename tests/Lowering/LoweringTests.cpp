@@ -255,6 +255,23 @@ TEST(Lowering, GenericNativeFunctionPassesTypesAndAddresses) {
       << l.Text;
 }
 
+// An inline optional is its payload and an 8-byte presence word, whatever
+// the payload's size.
+TEST(Lowering, GenericNativeFunctionDescribesInlineOptionals) {
+  auto l = lower(R"(
+    native fn pick<T>(first: bool, a: T, b: T) -> T = "pk_test_pick";
+    fn main() -> int {
+      o: int? = pick<int?>(True, 1, None);
+      c: char? = pick<char?>(False, 'a', None);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  EXPECT_NE(l.Text.find("data @.type0 = [16, 8, 5, 0]"), std::string::npos)
+      << l.Text;
+  EXPECT_EQ(l.Text.find("data @.type1"), std::string::npos) << l.Text;
+}
+
 // -- Calls: callee-consumes ABI for user functions, borrow for builtins
 
 TEST(Lowering, UserCallRetainsAVariableArgument) {

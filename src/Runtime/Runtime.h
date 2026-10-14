@@ -560,7 +560,9 @@ typedef enum PaykanTypeKind {
   PAYKAN_KIND_BOOL = 2,     // bool
   PAYKAN_KIND_CHAR = 3,     // int8_t
   PAYKAN_KIND_OBJECT = 4,   // PaykanShared*, never NULL
-  PAYKAN_KIND_OPTIONAL = 5, // PaykanShared*, NULL for None
+  PAYKAN_KIND_OPTIONAL = 5, // PaykanShared*, NULL for None; an inline one
+                            // (int? ...) is its payload and an int64_t
+                            // presence word
 } PaykanTypeKind;
 
 /// Followed in memory by `nrefs` int64_t words, one per reference: its byte

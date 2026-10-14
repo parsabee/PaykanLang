@@ -1208,12 +1208,16 @@ void ModuleLowering::emitNativeBody(ast::FuncDecl *node,
     B.emitRet(result);
 }
 
-// A value of every type is stored as one PIR slot, aligned to its size: a
-// reference as its box, None as a null one.
+// A value of every type is stored as one PIR slot: a reference as its box,
+// None as a null one, an inline optional as its payload and an 8-byte
+// presence word (docs/pir.md §1).
 Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
   const Type slot = toPIRType(ty);
-  const int64_t size = slot == Type::Bool || slot == Type::Char ? 1 : 8;
-  std::vector<int64_t> words = {size, /*align=*/size, nativeTypeKind(ty), 0};
+  const int64_t size = slot == Type::Bool || slot == Type::Char ? 1
+                       : pir::isOptional(slot)                  ? 16
+                                                                : 8;
+  const int64_t align = size == 1 ? 1 : 8;
+  std::vector<int64_t> words = {size, align, nativeTypeKind(ty), 0};
   if (slot == Type::Box) {
     words[3] = 1;
     words.push_back(ast::isa<ast::OptionalType>(ty) ? 1 : 0); // offset 0
