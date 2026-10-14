@@ -38,6 +38,11 @@ inline constexpr const char *kMethodSuper = "__super__";
 inline constexpr const char *kMethodDestroy = "destroy";
 inline constexpr const char *kMethodToString = "toString";
 inline constexpr const char *kMethodEquals = "equals";
+
+// Traits
+inline constexpr const char *kTraitShow =
+    "Show"; ///< `view fn toString() -> Str`
+inline constexpr const char *kSelfType = "Self"; ///< The implementing type
 inline constexpr const char *kMethodLength = "len";
 inline constexpr const char *kMethodConcat = "concat";
 inline constexpr const char *kMethodWrite = "write";

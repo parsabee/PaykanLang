@@ -427,6 +427,11 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::ClassType *ct,
                                      const ast::MethodDecl *overridden,
                                      uint8_t flags, bool &ok) {
   const std::string &className = ct->getName();
+  struct SelfGuard {
+    ast::ClassType *&Slot, *Saved;
+    ~SelfGuard() { Slot = Saved; }
+  } selfGuard{SelfType, SelfType};
+  SelfType = ct;
   // Resolve return type.
   ast::Type *retTy = Ctx.getVoidTy();
   if (method->getReturnType()) {
@@ -579,8 +584,9 @@ bool Sema::checkImplDecls(ast::TranslationUnit *tu) {
       continue;
     }
     auto *ct = Ctx.lookupClassType(name);
+    ast::Type *named = Ctx.lookupType(name);
     std::string why;
-    if (ct && ct->isBuiltin())
+    if ((ct && ct->isBuiltin()) || (named && ast::isa<ast::BuiltinType>(named)))
       why = "'" + name +
             "' is a built-in type; an 'impl' block cannot add "
             "methods to it";
@@ -597,6 +603,11 @@ bool Sema::checkImplDecls(ast::TranslationUnit *tu) {
       error(im->getLocation(), why);
     if (!ct || !why.empty()) {
       ok = false;
+      continue;
+    }
+    if (im->getTrait()) {
+      if (!checkTraitImpl(im, ct))
+        ok = false;
       continue;
     }
     for (auto *fn : im->getMethods()) {
@@ -943,6 +954,8 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
                      "arguments");
     else if (FuncTemplates.count(name))
       error(loc, "'" + name + "' is a generic function, not a generic class");
+    else if (Traits.count(name))
+      error(loc, "'" + name + "' is a trait, not a type");
     else
       error(loc, "unknown generic class '" + name + "'");
     return nullptr;
