@@ -198,6 +198,16 @@ inline constexpr const char *kNewPrefix = "pknew_";
 /// The emitter's own helpers (prelude, emitted only when a unit uses them).
 inline constexpr const char *kHelperF64Bits = "pkrt_f64_bits";
 inline constexpr const char *kHelperBitsF64 = "pkrt_bits_f64";
+/// The C types of PIR's inline optionals (prelude typedefs, emitted only when
+/// a unit uses them): `{ <payload> value; int64_t present; }`.
+inline constexpr const char *kOptI64 = "pkrt_opt_i64";
+inline constexpr const char *kOptF64 = "pkrt_opt_f64";
+inline constexpr const char *kOptBool = "pkrt_opt_bool";
+inline constexpr const char *kOptChar = "pkrt_opt_char";
+inline constexpr const char *kOptValue = "value";
+inline constexpr const char *kOptPresent = "present";
+inline constexpr const char *kTypedef = "typedef";
+inline constexpr const char *kOpDot = ".";
 /// PIR values: `v<id>` or `v<id>_<name>`.
 inline constexpr const char *kValuePrefix = "v";
 /// A '.' in a value's (PIR) name becomes a '_'.

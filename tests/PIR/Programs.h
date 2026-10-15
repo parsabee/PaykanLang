@@ -59,6 +59,24 @@ fn @bump(%n.1: ptr, %on.2: bool) -> void {
   ret
 }
 
+fn @opt(%o.1: opt_i64) -> opt_f64 {
+  local %c.0: opt_char
+  %has.2 = is_some %o.1
+  %v.3 = unwrap %o.1
+  %b.4 = some true
+  %bv.5 = unwrap %b.4
+  %ch.6 = some 'x'
+  store %c.0, %ch.6
+  %pc.7 = local.addr %c.0
+  %lc.8 = ptr.load opt_char, %pc.7
+  ptr.store %pc.7, %lc.8
+  %n.9 = none opt_f64
+  %f.10 = itof %v.3
+  %s.11 = some %f.10
+  %r.12 = select %has.2, %s.11, %n.9
+  ret %r.12
+}
+
 fn @main() -> i64 {
   local %i.0: i64
   local %acc.1: box

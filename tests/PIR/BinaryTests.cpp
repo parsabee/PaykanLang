@@ -49,6 +49,7 @@ extern vtable @$rt.PaykanArray_vtable
 
 class "ns::Shape" {
   field "w.h": f64
+  field maybe: opt_bool
   vtable {
     destroy = @"ns::Shape.destroy" : (obj) -> void
     area = null : (obj) -> f64
@@ -101,6 +102,17 @@ fn @main() -> i64 {
   store %1, %nb.17
   %nb2.18 = load %1
   release %nb2.18
+  %o1.19 = some -9223372036854775807
+  %o2.20 = some -0.0
+  %o3.21 = some false
+  %o4.22 = some '\xff'
+  %o5.23 = none opt_i64
+  %o6.24 = none opt_f64
+  %o7.25 = none opt_bool
+  %o8.26 = none opt_char
+  field.store %s.1, "ns::Shape".maybe, %o3.21
+  %has.27 = is_some %o5.23
+  %u.28 = unwrap %o1.19
   ret %r.14
 }
 )";
@@ -187,6 +199,10 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
     case Opcode::FieldAddr:
     case Opcode::PtrLoad:
     case Opcode::PtrStore:
+    case Opcode::Some:
+    case Opcode::None:
+    case Opcode::IsSome:
+    case Opcode::Unwrap:
       check(e.Id);
     }
   }
@@ -200,6 +216,10 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
     case Type::Box:
     case Type::Obj:
     case Type::Ptr:
+    case Type::OptI64:
+    case Type::OptF64:
+    case Type::OptBool:
+    case Type::OptChar:
       EXPECT_STREQ(e.Name, typeName(e.Id));
       Type back;
       EXPECT_TRUE(typeFromCode(e.Code, back));
@@ -210,11 +230,14 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
   Opcode op;
   Type ty;
   for (unsigned c = 26; c < 256; ++c) {
-    bool used = c >= 34 && c <= 37; // local.addr field.addr ptr.load ptr.store
+    // some none is_some unwrap; local.addr field.addr ptr.load ptr.store
+    bool used = c <= 29 || (c >= 34 && c <= 37);
     EXPECT_EQ(opcodeFromCode(static_cast<uint8_t>(c), op), used) << c;
   }
-  for (unsigned c = 8; c < 256; ++c)
-    EXPECT_FALSE(typeFromCode(static_cast<uint8_t>(c), ty)) << c;
+  for (unsigned c = 8; c < 256; ++c) {
+    bool used = c <= 11; // opt_i64 opt_f64 opt_bool opt_char
+    EXPECT_EQ(typeFromCode(static_cast<uint8_t>(c), ty), used) << c;
+  }
 }
 
 TEST(PIRBinary, RoundTrip) {
@@ -464,12 +487,12 @@ TEST(PIRBinary, RejectsReservedCodesAndSlack) {
   size_t opcode = retType + 1 + 1 + 1 + 1 + 1 + 1 + 1;
   ASSERT_EQ(good[retType], 1u); // i64
   ASSERT_EQ(good[opcode], 5u);  // neg
-  for (uint8_t code : {8, 16, 17, 255}) {
+  for (uint8_t code : {12, 15, 16, 17, 255}) {
     std::vector<uint8_t> b = good;
     b[retType] = code;
     EXPECT_FALSE(binary::decode(b).isOk()) << "type code " << int(code);
   }
-  for (uint8_t code : {26, 30, 32, 38, 255}) {
+  for (uint8_t code : {30, 31, 32, 33, 38, 255}) {
     std::vector<uint8_t> b = good;
     b[opcode] = code;
     EXPECT_FALSE(binary::decode(b).isOk()) << "opcode " << int(code);

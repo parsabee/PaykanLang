@@ -153,6 +153,13 @@ private:
     case Type::Obj:
     case Type::Ptr:
       return llvm::PointerType::getUnqual(Ctx);
+    case Type::OptI64:
+    case Type::OptF64:
+    case Type::OptBool:
+    case Type::OptChar:
+      // { payload, i64 present }: a literal struct, passed by value.
+      return llvm::StructType::get(
+          Ctx, {llvmType(optionalPayload(t)), llvm::Type::getInt64Ty(Ctx)});
     }
     return llvm::Type::getVoidTy(Ctx);
   }
@@ -683,8 +690,10 @@ private:
       if (!c)
         return;
       llvm::StructType *ty = classType(sym, *c);
-      const llvm::DataLayout &dl = M->getDataLayout();
-      llvm::Value *size = B.getInt64(dl.getTypeAllocSize(ty));
+      // The size under the target's layout, which the module gets only
+      // later (the JIT or the object build sets it): with the default one an
+      // optional field's { i8, i64 } would be laid out with a 4-byte i64.
+      llvm::Value *size = llvm::ConstantExpr::getSizeOf(ty);
       llvm::Value *obj = B.CreateCall(fnMalloc(), {size});
       auto *ptrTy = llvm::PointerType::getUnqual(Ctx);
       // Header: vtable, null backpointer; then every field zeroed.
@@ -761,6 +770,23 @@ private:
       break;
     case Opcode::PtrStore:
       B.CreateStore(operand(in.Args[1]), operand(in.Args[0]));
+      break;
+    case Opcode::Some: {
+      llvm::Type *ty = llvmType(in.Result.Ty);
+      llvm::Value *o = B.CreateInsertValue(llvm::PoisonValue::get(ty),
+                                           operand(in.Args[0]), 0);
+      setResult(in, B.CreateInsertValue(o, B.getInt64(1), 1));
+      break;
+    }
+    case Opcode::None:
+      setResult(in, llvm::Constant::getNullValue(llvmType(in.Result.Ty)));
+      break;
+    case Opcode::IsSome:
+      setResult(in, B.CreateICmpNE(B.CreateExtractValue(operand(in.Args[0]), 1),
+                                   B.getInt64(0)));
+      break;
+    case Opcode::Unwrap:
+      setResult(in, B.CreateExtractValue(operand(in.Args[0]), 0));
       break;
     }
   }

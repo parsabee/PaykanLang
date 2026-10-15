@@ -1706,6 +1706,37 @@ TEST(Driver, OutputDoesNotDependOnTheSourceDirectory) {
   fs::remove_all(base);
 }
 
+// The llvm backend's `run` optimises the program under the layout the JIT
+// runs it with.  Under LLVM's default layout an `int` after a `char` sits 4
+// bytes past it, so the object size the optimiser folds was 4 bytes short
+// and a split store wrote the wrong offset.  --emit-llvm prints run's IR.
+TEST(Driver, RunOptimisesUnderTheHostLayout) {
+  REQUIRE_BACKEND();
+  if (testBackend() != "llvm")
+    GTEST_SKIP() << "the llvm backend's JIT";
+  namespace fs = std::filesystem;
+  auto dir =
+      fs::temp_directory_path() / ("drv_layout_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  fs::create_directories(dir);
+  std::ofstream(dir / "lay.pkn")
+      << "class P {\n  c: char;\n  n: int;\n"
+         "  fn __init__() { self.c = 'x'; self.n = 7; }\n}\n"
+         "fn main() -> int { p = P(); println(Str(p.c) + Str(p.n)); "
+         "return 0; }\n";
+  std::string src = (dir / "lay.pkn").string();
+  auto [rc, ir] = run(paykanRun() + " --emit-source " + src + " 2>&1");
+  ASSERT_EQ(rc, 0) << ir;
+  EXPECT_NE(ir.find("target datalayout"), std::string::npos) << ir;
+  // The header (vtable, shared box) is 16 bytes, the char padded to 8, the
+  // int 8.
+  EXPECT_NE(ir.find("@Paykan_malloc(i64 32)"), std::string::npos) << ir;
+  auto [rc2, out] = run(paykanRun() + " " + src + " 2>&1");
+  EXPECT_EQ(rc2, 0) << out;
+  EXPECT_EQ(out, "x7\n");
+  fs::remove_all(dir);
+}
+
 // `paykan build` and `paykan run` optimise at -O2 unless told otherwise
 // (#102); -O0 still turns optimisation off.
 TEST(Driver, BuildAndRunDefaultToO2) {

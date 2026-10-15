@@ -42,12 +42,22 @@ Design rules:
 | `box` | `PaykanShared*`: an owned-or-borrowed reference-counted box; may be `null` (an optional's `None`) | `PaykanShared *` |
 | `obj` | raw `PaykanObject*`: an unboxed heap object of any class (also `PaykanString*`, `PaykanArray*`, `PaykanTuple*`, `PaykanFile*`, `PaykanError*`, boxed primitives) | `PaykanObject *` (cast at runtime calls) |
 | `ptr` | any other pointer: vtable addresses, literal data, kind descriptors | `void *`  |
+| `opt_i64` `opt_f64` `opt_bool` `opt_char` | an inline optional: the payload (`i64`, `f64`, `bool`, `char`) followed by an 8-byte presence word, held and passed by value (#96) | `struct { <payload> value; int64_t present; }` |
 
 Paykan types lower as: `int`→`i64`, `float`→`f64`, `bool`→`bool`,
 `char`→`char`, every enum→`i64`, every reference type (class, `Str`, array,
 tuple, optional)→`box` when stored (variable, field, parameter, return value,
 array/tuple ref slot) and `obj` when used as a raw receiver.  A `T?` is a `box`
 that may be `null`.
+
+An optional type holds a payload and a presence word: `none` is the absent
+value (a zero payload, presence 0), `some %v` the present one (presence 1).
+It is a value like an `i64`: stored in locals and fields, passed and returned,
+`select`ed and read and written through addresses, with no ARC.  It has no
+constants, is never compared (`is_some`, then the payloads) and never `cast`,
+and a runtime or native function never takes or returns one (its C ABI is
+not the same on both backends' targets: it crosses into C as its parts).  A
+new object's optional fields are absent, as its other fields are zero.
 
 ## 2. Values and constants
 
@@ -183,7 +193,8 @@ backend does no inheritance walk.
 
 * **Layout**: the two-word runtime header (vtable pointer, unique-box
   backpointer; `struct PaykanObject` in `Runtime.h`) followed by *all* fields in
-  declaration order, ancestors first.  Field types are `i64 f64 bool char box`.
+  declaration order, ancestors first.  Field types are `i64 f64 bool char box`
+  and the optionals.
 * **Vtable**: one entry per slot in slot order, each a function symbol (a
   function of this module, an `extern fn`, or `null` for an abstract slot) plus
   its signature.  Slot 0 is always `destroy`.  The vtable's address is the
@@ -295,6 +306,15 @@ field.store %o, Point.x, %v                    ; plain store: ARC is explicit ar
 store %x, %v
 ```
 
+**Inline optionals**
+
+```
+%o = some %v                                   ; i64/f64/bool/char -> its optional
+%n = none opt_i64                              ; the absent optional of that type
+%b = is_some %o                                ; optional -> bool
+%v = unwrap %o                                 ; optional -> payload; zero when absent
+```
+
 **Addresses** (`inout` parameters)
 
 ```
@@ -306,10 +326,10 @@ ptr.store %p, %v                               ; store %v at %p
 
 An `inout` parameter is a `ptr` parameter: the caller passes the address of
 its storage, and the callee reads and writes it in place with `ptr.load` and
-`ptr.store`.  Scalar and box slots have addresses: `local.addr` takes an
-`i64`, `f64`, `bool`, `char` or `box` local, `field.addr` a field of one of
-those types (every field type), and `ptr.load` / `ptr.store` read and write
-those types.  The verifier cannot
+`ptr.store`.  Scalar, optional and box slots have addresses: `local.addr`
+takes an `i64`, `f64`, `bool`, `char`, optional or `box` local, `field.addr` a
+field of one of those types (every field type), and `ptr.load` / `ptr.store`
+read and write those types.  The verifier cannot
 know what an address points to, so the lowering always reads and writes it
 with the slot's own type.  A local's address is valid until its function
 returns; a field's address while its object is alive, which the caller
@@ -458,15 +478,19 @@ The verifier rejects a program when:
 * a value is used before its definition or outside the block that defines it;
   a `local` is loaded/stored with the wrong type or used without a declaration;
 * an instruction's operand types do not match the op (arithmetic type mismatch,
-  `cmp` on different types, a disallowed `cast` pair, non-`bool` condition);
+  `cmp` on different types or on optionals, a disallowed `cast` pair,
+  non-`bool` condition, `some` of anything but `i64`/`f64`/`bool`/`char`,
+  `none` of a type that is not an optional, `is_some`/`unwrap` of a value that
+  is not one);
 * a `call` names an undeclared function or passes the wrong arity/types; a
   `vcall` slot is out of range of the named class's vtable or the argument list
   does not match the slot's signature;
 * `field.load`/`field.store`/`field.addr`/`new`/`vtable.addr` name an
   unknown class or field; a field store has the wrong type;
 * `local.addr` or `field.addr` takes the address of a slot that is not `i64`,
-  `f64`, `bool` or `char`; `ptr.load`/`ptr.store` take an address that is not
-  a `ptr`, or read or write a value of another type;
+  `f64`, `bool`, `char`, an optional or `box`; `ptr.load`/`ptr.store` take an
+  address that is not a `ptr`, or read or write a value of another type;
+* a runtime or native extern takes or returns an optional;
 * `break`/`continue` appear outside a `while`; a statement follows a
   terminator in the same block (a terminator is `break`, `continue`, `ret`,
   `unreachable`, or an `if` whose two branches both end in one); `ret`

@@ -367,6 +367,95 @@ fn @main() -> i64 {
   EXPECT_FALSE(linesWith(ir, "!{}").empty()) << ir;
 }
 
+// An inline optional is a { payload, i64 } value: passed and returned as
+// one, `none` is its zero, `some` sets the presence word to 1.
+TEST(PIRLLVM, OptionalsAreTwoFieldValues) {
+  std::string err;
+  std::string ir = translatePIR(R"(module "t"
+fn @half(%n: i64) -> opt_f64 {
+  %odd = rem %n, 2
+  %bad = cmp ne %odd, 0
+  %f = itof %n
+  %h = div %f, 2.0
+  %s = some %h
+  %z = none opt_f64
+  %r = select %bad, %z, %s
+  ret %r
+}
+
+fn @main() -> i64 {
+  %a = call @half(8)
+  %has = is_some %a
+  %v = unwrap %a
+  %i = ftoi %v
+  %r = select %has, %i, 99
+  ret %r
+}
+)",
+                                err);
+  ASSERT_FALSE(ir.empty()) << err;
+  EXPECT_FALSE(linesWith(ir, "define { double, i64 } @pk.half(i64").empty())
+      << ir;
+  EXPECT_FALSE(linesWith(ir, "insertvalue { double, i64 }").empty()) << ir;
+  EXPECT_FALSE(linesWith(ir, "zeroinitializer").empty()) << ir;
+  EXPECT_FALSE(linesWith(ir, "extractvalue { double, i64 }").empty()) << ir;
+
+  // An object's size is the target's sizeof, folded once the module has its
+  // data layout: { i1, i64 } is 16 bytes there, 12 under LLVM's default one.
+  ir = translatePIR(R"(module "t"
+class C {
+  field b: opt_bool
+  vtable {
+    destroy = @C.destroy : (obj) -> void
+  }
+}
+
+fn @C.destroy(%self: obj) -> void {
+  free %self
+  ret
+}
+
+fn @main() -> i64 {
+  %o = new C
+  free %o
+  ret 0
+}
+)",
+                    err);
+  ASSERT_FALSE(ir.empty()) << err;
+  auto mallocs = linesWith(ir, "call ptr @Paykan_malloc(");
+  ASSERT_EQ(mallocs.size(), 1u) << ir;
+  EXPECT_NE(mallocs[0].find("ptrtoint (ptr getelementptr"), std::string::npos)
+      << mallocs[0];
+
+  auto r = runPIR(R"(module "t"
+fn @pick(%c: bool) -> opt_char {
+  %s = some 'k'
+  %n = none opt_char
+  %r = select %c, %s, %n
+  ret %r
+}
+
+fn @main() -> i64 {
+  local %o: opt_char
+  %a = call @pick(true)
+  store %o, %a
+  %b = call @pick(false)
+  %l = load %o
+  %v = unwrap %l
+  %code = cast %v to i64
+  %hb = is_some %b
+  %nb = unwrap %b
+  %zero = cast %nb to i64
+  %t = select %hb, 1000, %code
+  %r = add %t, %zero
+  ret %r
+}
+)");
+  ASSERT_TRUE(r.Ok) << r.Err;
+  EXPECT_EQ(r.ExitCode, 'k');
+}
+
 TEST(PIRLLVM, CrossModuleCallsAndMainArgs) {
   auto r = runPIR(R"(module "main"
 extern fn @helper(i64) -> i64 module "lib"

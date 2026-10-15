@@ -30,9 +30,54 @@ enum class Type : uint8_t {
   Box, // PaykanShared* (may be null)
   Obj, // raw PaykanObject* (any runtime or user class)
   Ptr, // any other pointer: vtable address, literal data, kind descriptor
+  // Inline optionals (#96): a payload followed by an 8-byte presence word,
+  // held and passed by value (docs/pir.md §1).
+  OptI64,
+  OptF64,
+  OptBool,
+  OptChar,
 };
 
 const char *typeName(Type t);
+
+/// True for an inline optional type (opt_i64 opt_f64 opt_bool opt_char).
+constexpr bool isOptional(Type t) {
+  return t == Type::OptI64 || t == Type::OptF64 || t == Type::OptBool ||
+         t == Type::OptChar;
+}
+
+/// The payload type of the optional @p t (Void when @p t is not one).
+constexpr Type optionalPayload(Type t) {
+  switch (t) {
+  case Type::OptI64:
+    return Type::I64;
+  case Type::OptF64:
+    return Type::F64;
+  case Type::OptBool:
+    return Type::Bool;
+  case Type::OptChar:
+    return Type::Char;
+  default:
+    return Type::Void;
+  }
+}
+
+/// The optional of the payload type @p t (Void when @p t has none: only
+/// i64, f64, bool and char do).
+constexpr Type optionalOf(Type t) {
+  switch (t) {
+  case Type::I64:
+    return Type::OptI64;
+  case Type::F64:
+    return Type::OptF64;
+  case Type::Bool:
+    return Type::OptBool;
+  case Type::Char:
+    return Type::OptChar;
+  default:
+    return Type::Void;
+  }
+}
 
 /// A function signature: parameter types and return type.
 struct Signature {
@@ -188,6 +233,11 @@ enum class Opcode : uint8_t {
   FieldAddr, // obj, ClassName.Field -> ptr
   PtrLoad,   // ptr -> Result.Ty (i64 f64 bool char)
   PtrStore,  // ptr, value
+  // inline optionals (docs/pir.md §6)
+  Some,   // payload -> its optional
+  None,   // -> Result.Ty (an optional), absent
+  IsSome, // optional -> bool
+  Unwrap, // optional -> payload (zero for an absent one)
 };
 
 enum class CmpPred : uint8_t { Eq, Ne, Lt, Le, Gt, Ge };
@@ -276,7 +326,7 @@ struct Function {
 
 struct Field {
   std::string Name;
-  Type Ty; // I64 F64 Bool Char Box
+  Type Ty; // I64 F64 Bool Char Box, or an inline optional
 };
 
 struct VTableEntry {
