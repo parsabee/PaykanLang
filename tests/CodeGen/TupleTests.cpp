@@ -272,11 +272,14 @@ TEST(Tuple, TupleFieldInClass) {
   auto r = compileAndRun(R"(
     class Holder {
       pair: (int, Str);
-      fn __init__(p: (int, Str)) { self.pair = p; }
       fn get() -> (int, Str) { return self.pair; }
       fn first() -> int { return self.pair.0; }
       fn second() -> Str { return self.pair.1; }
       fn reset() { self.pair = (0, "zero"); }
+    }
+
+    impl Holder {
+      fn __init__(p: (int, Str)) { self.pair = p; }
     }
     fn main() -> int {
       h: Holder = Holder((9, "nine"));
@@ -305,10 +308,13 @@ TEST(Tuple, ClassInstanceElements) {
     class Point {
       x: int;
       y: int;
-      fn __init__(x: int, y: int) { self.x = x; self.y = y; }
       view fn toString() -> Str {
         return "P(" + Str<int>(self.x) + "," + Str<int>(self.y) + ")";
       }
+    }
+
+    impl Point {
+      fn __init__(x: int, y: int) { self.x = x; self.y = y; }
     }
     fn main() -> int {
       t = ("origin", Point(0, 0));
@@ -331,7 +337,8 @@ TEST(Tuple, ClassInstanceElements) {
 TEST(Tuple, EqualityIsElementWise) {
   LeakGuard g;
   auto r = compileAndRun(R"(
-    class Thing { fn __init__() {} }
+    class Thing {}
+    impl Thing { fn __init__() {} }
     fn main() -> int {
       a = (1, "s");
       b = (1, "s");
@@ -404,11 +411,15 @@ TEST(Tuple, EnumElementsAndScopes) {
 TEST(Tuple, LiteralsTakeTheDestinationsOptionalElementTypes) {
   LeakGuard g;
   auto r = compileAndRun(R"(
-    class Node { v: int; fn __init__(v: int) { self.v = v; } }
+    class Node { v: int; }
+    impl Node { fn __init__(v: int) { self.v = v; } }
     class Holder {
       t: (Str, int?)[];
-      fn __init__() { self.t = []; }
       fn put(xs: (Str, int?)[]) { self.t = xs; }
+    }
+
+    impl Holder {
+      fn __init__() { self.t = []; }
     }
     fn which(n: Node?) -> Str { match n { x: Node { return "node"; } None { return "none"; } } }
     fn val(n: int?) -> Str { match n { x: int { return Str<int>(x); } None { return "none"; } } }

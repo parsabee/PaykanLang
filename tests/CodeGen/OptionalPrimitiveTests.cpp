@@ -223,7 +223,6 @@ TEST(OptionalPrimitive, FieldsStartAsNoneAndAreReleased) {
       ok: bool?;
       tag: char?;
       count: int?;
-      fn __init__() { }
       fn get() -> int? { return self.count; }
       fn bump() {
         match self.count {
@@ -231,6 +230,10 @@ TEST(OptionalPrimitive, FieldsStartAsNoneAndAreReleased) {
           None { self.count = 1; }
         }
       }
+    }
+
+    impl Reading {
+      fn __init__() { }
     }
     fn main() -> int {
       r = Reading();
@@ -365,14 +368,20 @@ TEST(OptionalPrimitive, GenericArgumentsAndOptionalOfTypeParameter) {
   auto r = compileAndRun(R"pkn(
     class Cell<T> {
       v: T;
-      fn __init__(x: T) { self.v = x; }
       fn get() -> T { return self.v; }
+    }
+
+    impl Cell<T> {
+      fn __init__(x: T) { self.v = x; }
     }
     class Slot<T> {
       v: T?;
-      fn __init__() { }
       fn put(x: T) { self.v = x; }
       fn take() -> T? { r = self.v; self.v = None; return r; }
+    }
+
+    impl Slot<T> {
+      fn __init__() { }
     }
     fn wrap<T>(x: T) -> T? { return x; }
     fn orElse<T>(o: T?, d: T) -> T { match o { v: T { return v; } None { return d; } } }
