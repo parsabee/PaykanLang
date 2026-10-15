@@ -217,8 +217,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   primitive is a value: with them went their conversions `Int<Str>`, `Float<Str>`,
   `Bool<Str>` and `Str<Int>` & co. (use `int<Str>` & co., which return `int?` & co.), and
   the runtime's `PaykanInt` / `PaykanFloat` / `PaykanBool` / `PaykanChar` (`Basic.c`).  The
-  names are no longer reserved, so a program may declare a class `Int`.  Runtime ABI
-  version 7.
+  names are no longer reserved, so a program may declare a class `Int`.
 
 ### Fixed
 
