@@ -20,15 +20,19 @@ TEST(Traits, ImplForMethodsRun) {
     trait Same { view fn same(other: view Self) -> bool; }
     class A {
       n: int;
-      fn __init__(n: int) { self.n = n; }
       view fn name() -> Str { return "A" + Str(self.n); }
+    }
+
+    impl A {
+      fn __init__(n: int) { self.n = n; }
     }
     impl Named for A {}
     impl Into<int> for A { view fn into() -> int { return self.n; } }
     impl Same for A {
       view fn same(other: view Self) -> bool { return self.n == other.n; }
     }
-    class B : A { fn __init__() { __super__(7); } }
+    class B : A {}
+    impl B { fn __init__() { __super__(7); } }
     fn main() -> int {
       a = A(1);
       b = B();
@@ -49,15 +53,19 @@ TEST(Traits, BoundedGenericsRun) {
     trait Same { view fn same(other: view Self) -> bool; }
     class A {
       n: int;
-      fn __init__(n: int) { self.n = n; }
       view fn name() -> Str { return "A" + Str(self.n); }
+    }
+
+    impl A {
+      fn __init__(n: int) { self.n = n; }
     }
     impl Named for A {}
     impl Into<int> for A { view fn into() -> int { return self.n; } }
     impl Same for A {
       view fn same(other: view Self) -> bool { return self.n == other.n; }
     }
-    class B : A { fn __init__() { __super__(7); } }
+    class B : A {}
+    impl B { fn __init__() { __super__(7); } }
     fn greet<T: Named>(x: view T) -> Str { return "hi " + x.name(); }
     fn total<T: Into<int>>(xs: view T[]) -> int {
       t = 0;
@@ -68,8 +76,11 @@ TEST(Traits, BoundedGenericsRun) {
     fn show<T: Show>(x: view T) -> Str { return x.toString(); }
     class Holder<T: Named> {
       v: T;
-      fn __init__(v: T) { self.v = v; }
       view fn label() -> Str { return "[" + self.v.name() + "]"; }
+    }
+
+    impl Holder<T> {
+      fn __init__(v: T) { self.v = v; }
     }
     fn main() -> int {
       a = A(1);
@@ -97,13 +108,17 @@ TEST(Traits, ShowBoundAcrossModules) {
 fn show<T: Show>(x: view T) -> Str { return "<" + x.toString() + ">"; }
 class Box<T: Show> {
   v: T;
-  fn __init__(v: T) { self.v = v; }
   view fn text() -> Str { return show(self.v); }
+}
+
+impl Box<T> {
+  fn __init__(v: T) { self.v = v; }
 }
 )pkn";
   std::ofstream(dir / "main.pkn") << R"pkn(
 import fmt;
-class P { fn __init__() {} view fn toString() -> Str { return "P"; } }
+class P { view fn toString() -> Str { return "P"; } }
+impl P { fn __init__() {} }
 fn main() -> int {
   b = fmt::Box<P>(P());
   println(fmt::show(P()) + " " + b.text() + " " + fmt::show("s"));

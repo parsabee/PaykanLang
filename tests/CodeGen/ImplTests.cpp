@@ -16,12 +16,12 @@ TEST(Impl, MethodsStaticFnsAndSubclasses) {
   auto r = compileAndRun(R"pkn(
     class Point {
       x: int; y: int;
-      fn __init__(x: int, y: int) { self.x = x; self.y = y; }
       view fn describe() -> Str {
         return "Point(" + Str(self.x) + ", " + Str(self.y) + ")";
       }
     }
     impl Point {
+      fn __init__(x: int, y: int) { self.x = x; self.y = y; }
       static fn origin() -> Point { return Point(0, 0); }
       view fn sum() -> int { return self.x + self.y; }
       fn shift(d: int) { self.x = self.x + d; self.y = self.y + d; }
@@ -76,7 +76,8 @@ TEST(Impl, GenericBlocks) {
       }
     }
     fn label<T: Named>(x: view T) -> Str { return x.name(); }
-    class Holder { b: Box<Str>; fn __init__() { self.b = Box("s"); } }
+    class Holder { b: Box<Str>; }
+    impl Holder { fn __init__() { self.b = Box("s"); } }
     fn main() -> int {
       b = Box(1);
       b.set(b.get() + 1);
@@ -118,7 +119,8 @@ impl Bag {
 )";
   std::ofstream(dir / "main.pkn") << R"(
 import shapes;
-class Tagged : shapes::Bag { fn __init__() { __super__(); } }
+class Tagged : shapes::Bag {}
+impl Tagged { fn __init__() { __super__(); } }
 fn main() -> int {
   b = shapes::Bag::of("a", "b");
   b.add("c");
