@@ -1,6 +1,9 @@
 // No field can be read through an optional receiver.
 class Node {
   v: int;
+}
+
+impl Node {
   fn __init__(x: int) { self.v = x; }
 }
 

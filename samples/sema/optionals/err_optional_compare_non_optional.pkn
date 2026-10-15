@@ -1,6 +1,9 @@
 // An optional may only be compared against None or another optional.
 class Node {
   v: int;
+}
+
+impl Node {
   fn __init__(x: int) { self.v = x; }
 }
 

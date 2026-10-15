@@ -4,22 +4,31 @@
 // and inferred function type arguments.
 class Box<T> {
   v: T;
-  fn __init__(v: T) { self.v = v; }
   view fn get() -> view T { return self.v; }
+}
+
+impl Box<T> {
+  fn __init__(v: T) { self.v = v; }
 }
 
 class Pair<K, V> {
   k: K;
   v: V;
-  fn __init__(k: K, v: V) { self.k = k; self.v = v; }
   view fn key() -> view K { return self.k; }
+}
+
+impl Pair<K, V> {
+  fn __init__(k: K, v: V) { self.k = k; self.v = v; }
 }
 
 class Holder {
   b: Box<int>;
   ps: Pair<Str, int>[];
-  fn __init__() { self.b = Box<int>(1); self.ps = []; }
   view fn get() -> view Box<int> { return self.b; }
+}
+
+impl Holder {
+  fn __init__() { self.b = Box<int>(1); self.ps = []; }
 }
 
 fn first<T>(xs: T[]) -> T { return xs[0]; }

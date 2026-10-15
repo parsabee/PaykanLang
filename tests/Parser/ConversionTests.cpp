@@ -98,8 +98,10 @@ TEST(Conversion, ComparisonsAreNotTypeArguments) {
 
 TEST(Conversion, GenericClassesAreUnaffected) {
   auto [ok, driver] = parse(R"(
-    class Box<T> { v: T; fn __init__(x: T) { self.v = x; } }
-    class Pair<K, V> { k: K; v: V; fn __init__(a: K, b: V) { self.k = a; self.v = b; } }
+    class Box<T> { v: T; }
+    impl Box<T> { fn __init__(x: T) { self.v = x; } }
+    class Pair<K, V> { k: K; v: V; }
+    impl Pair<K, V> { fn __init__(a: K, b: V) { self.k = a; self.v = b; } }
     fn main() -> int {
       b = Box<int>(int<float>(1.5));
       p: Pair<Str, int> = Pair<Str, int>(Str<int>(1), 2);

@@ -473,7 +473,8 @@ TEST(ASTInterchange, ParamModes) {
       ("paykan_interchange_modes_" + std::to_string(::getpid()) + ".pkn");
   {
     std::ofstream(path) << "fn bump(n: inout int, by: view int, k: int) { }\n"
-                           "class C { fn __init__(n: view int) { } }\n";
+                           "class C {}\n"
+                           "impl C { fn __init__(n: view int) { } }\n";
   }
   ASSERT_EQ(driver.parseFile(path.string()), 0);
   std::filesystem::remove(path);

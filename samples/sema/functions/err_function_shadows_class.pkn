@@ -5,6 +5,9 @@ fn Point() -> int {  // sema error: 'Point' is already declared as a class
 
 class Point {
   x: int;
+}
+
+impl Point {
   fn __init__(x: int) { self.x = x; }
 }
 
