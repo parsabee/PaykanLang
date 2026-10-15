@@ -564,6 +564,10 @@ public:
     std::string Module;                    ///< canonical module name
     std::vector<ast::ClassDecl *> Classes; ///< in the module's ASTContext
     std::vector<ast::FuncDecl *> Functions;
+    /// The `impl` blocks of each of Classes (not `impl Trait for`, whose
+    /// trait an importer cannot name).
+    std::unordered_map<const ast::ClassDecl *, std::vector<ast::ImplDecl *>>
+        Impls;
     /// The modules the bodies name, the module itself first: canonical
     /// name and the file ModuleCache knows it by.
     std::vector<std::pair<std::string, std::string>> Uses;
@@ -871,8 +875,14 @@ private:
   /// its `static fn`s the module's functions `Type::name`.
   bool checkImplDecls(ast::TranslationUnit *tu);
 
-  /// The `impl` blocks by the name of the class they add to.
+  /// The `impl` blocks by the name of the class they add to: an
+  /// instantiation's are copies of its template's.
   StringMap<std::vector<ast::ImplDecl *>> ImplsByClass;
+  /// The `impl` blocks of the module's generic classes, by template.
+  std::unordered_map<const ast::ClassDecl *, std::vector<ast::ImplDecl *>>
+      TemplateImpls;
+  /// Set once checkImplDecls has run (see PendingTraitImpls).
+  bool ImplsChecked = false;
 
   // -- Traits (SemaTraits.cpp)
 
@@ -1016,6 +1026,15 @@ private:
     const std::vector<std::string> *Lines = nullptr;
   };
   std::vector<InstantiationFrame> InstantiationStack;
+  /// The `impl Trait for` copies of instantiations made before the module's
+  /// `impl` blocks are checked (ImplsChecked): checked with them.
+  struct PendingTraitImpl {
+    ast::ImplDecl *Impl;
+    ast::ClassType *Class;
+    InstantiationFrame Request;
+    const ModuleTemplates *Origin;
+  };
+  std::vector<PendingTraitImpl> PendingTraitImpls;
   static constexpr size_t kMaxInstantiationDepth = 16;
 
   /// Type parameter names of the instantiation whose body is being checked

@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directly, not through the vtable, and subclasses inherit them. A `static fn` is called
   as `Point::origin()`, or `mod::Point::origin()` from an importer. No `impl` method may
   reuse a name the class or a superclass has, and none can be overridden.
+- Generic `impl` blocks (docs/language/11-generics.md, "`impl` Blocks"): `impl Box<T> { ... }`
+  and `impl Named for Box<T> { ... }` give each instantiation of `Box` the block's methods
+  and trait, checked when it is instantiated, also in a module that imports `Box`. A
+  `static fn` in one is not supported yet.
 - Generic classes and functions of an imported module (docs/language/11-generics.md,
   "Modules"): `gen::Box<int>(1)`, `gen::Box("s")`, `b: gen::Box<Str>` and `gen::first(xs)`
   instantiate `gen`'s templates in the importer, in every position a local template may be

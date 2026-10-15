@@ -50,6 +50,10 @@ block holds only the methods its trait requires, and no `static fn`.
 
 `Self` also names the enclosing class in a class's own methods and in its `impl` blocks.
 
+A generic class implements a trait with `impl Named for Box<T> { … }`: each
+instantiation (`Box<int>`) implements it, checked when it is instantiated (see
+`11-generics.md`).
+
 ## Bounds
 
 ```pkn

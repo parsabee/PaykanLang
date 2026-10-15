@@ -98,7 +98,6 @@ TEST(Impl, OnlyClassesOfTheModule) {
 class Box<T> { v: T; fn __init__(v: T) { self.v = v; } }
 impl Str { fn x() {} }
 impl Color { fn x() {} }
-impl Box { fn x() {} }
 impl Nope { fn x() {} }
 fn main() -> int { return 0; }
 )");
@@ -106,8 +105,62 @@ fn main() -> int { return 0; }
   expectAll(r, {"'Str' is a built-in type; an 'impl' block cannot add methods "
                 "to it",
                 "an 'impl' block for an enum is not supported yet",
-                "an 'impl' block for a generic class is not supported yet",
                 "'impl' for undefined class 'Nope'"});
+}
+
+// A generic class's `impl` blocks, by their own names for its type
+// parameters, give each instantiation their methods and traits: also one
+// made for a field type, before the module's `impl` blocks are checked.
+TEST(Impl, GenericBlocksJoinEachInstantiation) {
+  auto r = semaCheck(R"(class Box<T> { v: T; fn __init__(v: T) { self.v = v; } }
+impl Box<U> {
+  view fn get() -> view U { return self.v; }
+  fn set(v: U) { self.v = v; }
+}
+trait Named { view fn name() -> Str; }
+impl Named for Box<T> { view fn name() -> Str { return self.v.toString(); } }
+fn label<T: Named>(x: view T) -> Str { return x.name(); }
+class Holder { b: Box<Str>; fn __init__() { self.b = Box("s"); } }
+fn main() -> int {
+  b = Box(1);
+  b.set(b.get() + 1);
+  h = Holder();
+  println(label(b) + label(h.b));
+  return 0;
+}
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Impl, GenericBlocksAreChecked) {
+  auto r = semaCheck(R"(class Box<T> { v: T; fn __init__(v: T) { self.v = v; } }
+class A { n: int; fn __init__() { self.n = 0; } }
+impl Box { fn f() {} }
+impl Box<T, U> { fn f() {} }
+impl Box<T> { static fn make() {} }
+impl Box<A> { fn f() {} }
+impl A<T> { fn f() {} }
+trait Named { view fn name() -> Str; }
+impl Named for Box<T> {}
+class Cell<T> {
+  v: T;
+  fn __init__(v: T) { self.v = v; }
+  view fn get() -> T { return self.v; }
+}
+impl Cell<T> { fn get() -> T { return self.v; } }
+fn main() -> int { b = Box(1); c = Cell(2); return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"'Box' is a generic class: write 'impl Box<T>'",
+                "'impl Box' names 2 type parameter(s); generic class 'Box' "
+                "has 1",
+                "a 'static fn' in the 'impl' block of a generic class is not "
+                "supported yet",
+                "type parameter 'A' of 'impl' block for 'Box' shadows a type",
+                "'A' is not a generic class: write 'impl A'",
+                "class 'Cell<int>' already has a method 'get'",
+                "class 'Box<int>' does not implement 'view fn name() -> Str' "
+                "of trait 'Named'"});
 }
 
 TEST(Impl, UnknownStaticFnIsUndeclared) {

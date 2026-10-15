@@ -579,6 +579,10 @@ bool Sema::checkImplDecls(ast::TranslationUnit *tu) {
   bool ok = true;
   for (auto *im : tu->getImplDecls()) {
     const std::string &name = im->getTypeName();
+    // A generic class's, checked in registerGenericTemplates.
+    if (auto t = ClassTemplates.find(name);
+        t != ClassTemplates.end() && !foreignOrigin(t->second))
+      continue;
     if (ErroneousNames.count(name)) {
       ok = false; // a dropped class was reported with its declaration
       continue;
@@ -590,14 +594,15 @@ bool Sema::checkImplDecls(ast::TranslationUnit *tu) {
       why = "'" + name +
             "' is a built-in type; an 'impl' block cannot add "
             "methods to it";
-    else if (ct && !localClasses.count(name))
+    else if ((ct && !localClasses.count(name)) || ClassTemplates.count(name))
       why = "an 'impl' block for a class of another module is not supported "
             "yet";
     else if (Ctx.lookupEnumType(name))
       why = "an 'impl' block for an enum is not supported yet";
-    else if (ClassTemplates.count(name) || !im->getTypeParams().empty())
-      why = "an 'impl' block for a generic class is not supported yet";
-    else if (!ct && !isFailedImportUse(name))
+    else if (ct && !im->getTypeParams().empty()) {
+      why = "'" + name + "' is not a generic class: write 'impl ";
+      why += name + "'";
+    } else if (!ct && !isFailedImportUse(name))
       why = "'impl' for undefined class '" + name + "'";
     if (!why.empty())
       error(im->getLocation(), why);
@@ -623,6 +628,15 @@ bool Sema::checkImplDecls(ast::TranslationUnit *tu) {
       tu->addFuncDecl(fn);
     }
   }
+  ImplsChecked = true;
+  for (const auto &p : PendingTraitImpls) {
+    InstantiationStack.push_back(p.Request);
+    OriginSource inOrigin(Diags, p.Origin);
+    if (!checkTraitImpl(p.Impl, p.Class))
+      ok = false;
+    InstantiationStack.pop_back();
+  }
+  PendingTraitImpls.clear();
   return ok;
 }
 
@@ -896,6 +910,50 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
     }
     FuncTemplates[fn->getName()] = fn;
   }
+
+  // The `impl` blocks of the generic classes: each instantiation gets a copy
+  // (instantiateClass).  One of another module's is checkImplDecls's to
+  // reject.
+  for (auto *im : tu->getImplDecls()) {
+    const std::string &name = im->getTypeName();
+    auto t = ClassTemplates.find(name);
+    if (t == ClassTemplates.end() || foreignOrigin(t->second))
+      continue;
+    const auto &params = im->getTypeParams();
+    const auto &want = t->second->getTypeParams();
+    ast::SourceLocation loc = im->getLocation();
+    std::string why;
+    if (params.empty()) {
+      why = "'";
+      why += name;
+      why += "' is a generic class: write 'impl ";
+      why += name;
+      for (size_t i = 0; i < want.size(); ++i)
+        (why += i ? ", " : "<") += *want[i];
+      why += ">'";
+    } else if (params.size() != want.size()) {
+      why = "'impl ";
+      why += name;
+      why += "' names " + std::to_string(params.size());
+      why += " type parameter(s); generic class '";
+      why += name;
+      why += "' has " + std::to_string(want.size());
+    }
+    for (auto *fn : im->getMethods())
+      if (why.empty() && fn->isStatic()) {
+        why = "a 'static fn' in the 'impl' block of a generic class is not "
+              "supported yet";
+        loc = fn->getLocation();
+      }
+    if (!why.empty())
+      error(loc, why);
+    if (!why.empty() ||
+        !checkTypeParams(params, "'impl' block for", name, im->getLocation())) {
+      ok = false;
+      continue;
+    }
+    TemplateImpls[t->second].push_back(im);
+  }
   return ok;
 }
 
@@ -1031,6 +1089,16 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     subst[*tmpl->getTypeParams()[i]] = args[i];
   ast::ASTCloner cloner(Ctx, std::move(subst), nullptr, origin != nullptr);
   ast::ClassDecl *clone = cloner.cloneClassDecl(tmpl, instName);
+  // And its `impl` blocks, each by its own names for the type parameters.
+  std::vector<ast::ImplDecl *> &impls = ImplsByClass[instName];
+  if (auto it = TemplateImpls.find(tmpl); it != TemplateImpls.end())
+    for (auto *im : it->second) {
+      Subst s;
+      for (size_t i = 0; i < args.size(); ++i)
+        s[*im->getTypeParams()[i]] = args[i];
+      ast::ASTCloner c(Ctx, std::move(s), nullptr, origin != nullptr);
+      impls.push_back(c.cloneImplDecl(im, instName));
+    }
 
   const InstantiationFrame request = frameAt(instName, loc);
   InstantiationStack.push_back(request);
@@ -1081,6 +1149,14 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     ok = false;
   if (ok)
     declareConstructor(clone, ct);
+  for (auto *im : ImplsByClass[instName]) {
+    if (!ok || !im->getTrait())
+      continue;
+    if (!ImplsChecked)
+      PendingTraitImpls.push_back({im, ct, request, origin});
+    else if (!checkTraitImpl(im, ct))
+      ok = false;
+  }
   InstantiationStack.pop_back();
 
   if (!ok) {
