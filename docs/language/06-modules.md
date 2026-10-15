@@ -162,6 +162,9 @@ cannot declare a class with the same name as one reached through any of its impo
 // file: geometry/point.pkn
 class Point {
   x: int; y: int;
+}
+
+impl Point {
   fn __init__(x: int, y: int) { self.x = x; self.y = y; }
 }
 
@@ -169,6 +172,9 @@ class Point {
 import geometry::point;
 class Segment {
   a: point::Point; b: point::Point;
+}
+
+impl Segment {
   fn __init__(a: point::Point, b: point::Point) { self.a = a; self.b = b; }
 }
 

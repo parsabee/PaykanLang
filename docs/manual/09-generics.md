@@ -13,8 +13,11 @@ everywhere in the class:
 class Pair<A, B> {
   first: A;
   second: B;
-  fn __init__(a: A, b: B) { self.first = a; self.second = b; }
   fn swap() -> Pair<B, A> { return Pair<B, A>(self.second, self.first); }
+}
+
+impl Pair<A, B> {
+  fn __init__(a: A, b: B) { self.first = a; self.second = b; }
 }
 
 fn main() -> int {
@@ -100,8 +103,11 @@ and says which instantiation needed it:
 ```pkn
 class Doubler<T> {
   v: T;
-  fn __init__(v: T) { self.v = v; }
   fn twice() -> T { return self.v + self.v; }
+}
+
+impl Doubler<T> {
+  fn __init__(v: T) { self.v = v; }
 }
 
 fn main() -> int {
@@ -137,7 +143,6 @@ generic. `pop` returns `T?`, `None` when the stack is empty:
 ```pkn
 class Stack<T> {
   items: T[];
-  fn __init__() { self.items = []; }
   fn push(x: T) { self.items.push(x); }
   fn pop() -> T? {
     if (self.items.len() == 0) { return None; }
@@ -146,19 +151,21 @@ class Stack<T> {
   view fn size() -> int { return self.items.len(); }
 }
 
+impl Stack<T> {
+  fn __init__() { self.items = []; }
+}
+
 class Task {
   title: Str;
+}
+
+impl Task {
   fn __init__(title: Str) { self.title = title; }
 }
 
 class TaskList {
   tasks: Task[];
   removed: Stack<Task>;
-
-  fn __init__() {
-    self.tasks = [];
-    self.removed = Stack<Task>();
-  }
 
   fn add(title: Str) { self.tasks.push(Task(title)); }
 
@@ -188,6 +195,13 @@ class TaskList {
       i = i + 1;
     }
     return out;
+  }
+}
+
+impl TaskList {
+  fn __init__() {
+    self.tasks = [];
+    self.removed = Stack<Task>();
   }
 }
 

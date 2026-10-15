@@ -137,6 +137,9 @@ tuple, and a `stats` function counts done and pending tasks in one pass:
 class Task {
   title: Str;
   done: bool;
+}
+
+impl Task {
   fn __init__(title: Str, done: bool) { self.title = title; self.done = done; }
 }
 

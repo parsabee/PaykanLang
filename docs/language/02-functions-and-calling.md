@@ -102,8 +102,11 @@ element passed to an `inout` parameter, and only a `view fn` can be called on it
 ```pkn
 class Counter {
   n: int;
-  fn __init__() { self.n = 0; }
   fn tick() { self.n = self.n + 1; }
+}
+
+impl Counter {
+  fn __init__() { self.n = 0; }
 }
 
 fn show(c: view Counter, label: view Str) {
@@ -204,6 +207,9 @@ valid even if the callee drops the object from where it was reached:
 ```pkn
 class Counter {
   hits: int;
+}
+
+impl Counter {
   fn __init__() { self.hits = 0; }
 }
 
@@ -317,14 +323,20 @@ a borrow, so it needs no annotation saying where it comes from:
 ```pkn
 class Counter {
   n: int;
-  fn __init__(n: int) { self.n = n; }
   view fn get() -> int { return self.n; }
+}
+
+impl Counter {
+  fn __init__(n: int) { self.n = n; }
 }
 
 class Box {
   c: Counter;
-  fn __init__() { self.c = Counter(4); }
   view fn peek() -> view Counter { return self.c; }
+}
+
+impl Box {
+  fn __init__() { self.c = Counter(4); }
 }
 
 fn longer(a: view Str, b: view Str) -> view Str {
@@ -378,8 +390,11 @@ local names it: the caller writes through it.
 ```pkn
 class Box {
   k: int;
-  fn __init__() { self.k = 3; }
   fn num() -> inout int { return self.k; }
+}
+
+impl Box {
+  fn __init__() { self.k = 3; }
 }
 
 fn pick(a: inout int, b: inout int, first: bool) -> inout int {

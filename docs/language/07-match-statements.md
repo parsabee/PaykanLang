@@ -56,9 +56,12 @@ A type arm matches **only** when the object's runtime class is *exactly* that cl
 does **not** match a base-class arm:
 
 ```pkn
-class Animal { fn __init__() {} }
-class Dog : Animal { fn __init__() { __super__(); } }
-class Labrador : Dog { fn __init__() { __super__(); } }
+class Animal {}
+impl Animal { fn __init__() {} }
+class Dog : Animal {}
+impl Dog { fn __init__() { __super__(); } }
+class Labrador : Dog {}
+impl Labrador { fn __init__() { __super__(); } }
 
 e: Animal = Labrador();
 match e {
@@ -154,8 +157,10 @@ With `inout`, the binding is the subject's storage, like an `inout` local of it:
 to it writes the matched variable or field.
 
 ```pkn
-class Animal { n: int; fn __init__(n: int) { self.n = n; } }
-class Dog : Animal { fn __init__(n: int) { __super__(n); } }
+class Animal { n: int; }
+impl Animal { fn __init__(n: int) { self.n = n; } }
+class Dog : Animal {}
+impl Dog { fn __init__(n: int) { __super__(n); } }
 
 fn main() -> int {
   a: Animal = Dog(1);
