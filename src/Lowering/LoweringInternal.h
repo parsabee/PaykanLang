@@ -143,6 +143,8 @@ private:
   /// Every program function by its PIR name in this module (definitions and
   /// module externs).  Runtime externs are not in it (RuntimeFuncs).
   std::unordered_map<std::string, pir::Function *> FuncByName;
+  /// This module's native functions (instances included), by name.
+  std::unordered_map<std::string, const ast::FuncDecl *> NativeDecls;
   /// Runtime extern functions declared in this module, by C symbol (their
   /// PIR name is pir::runtimeName(symbol)).
   std::unordered_map<std::string, pir::Function *> RuntimeFuncs;
@@ -336,6 +338,10 @@ private:
   Val emitSharedGet(const Val &shared, std::string name = "obj");
   Val emitUnwrappedRef(ast::Expr *expr, std::string name = "ref.obj");
   Val emitAsShared(ast::Expr *expr);
+  /// @p arg's box for a native function to borrow: a variable's or a
+  /// field's as it is, anything else a +1 box added to @p keep, which the
+  /// caller releases after the call.
+  Val emitBorrowedBox(ast::Expr *arg, std::vector<Val> &keep);
   Val emitAsSharedRaw(ast::Expr *expr);
   /// An object array element read that borrows the array's reference
   /// (`arr[i]` of ref type on a live array): a new owner retains the stored
@@ -412,6 +418,11 @@ private:
   void emitBody(ast::CompoundStmt *body);
   void emitImplicitReturn(const pir::Signature &sig);
   void emitNativeBody(ast::FuncDecl *node, const pir::Function &fn);
+  /// Call @p node's C symbol with @p args, one per parameter: a reference
+  /// as a borrowed box, an `inout` argument as its address, a value as is.
+  Val emitNativeCall(const ast::FuncDecl &node, const std::vector<Val> &args);
+  /// The native function of this module named @p name, or nullptr.
+  const ast::FuncDecl *localNative(const std::string &name) const;
   /// The PaykanType (src/Runtime/Runtime.h) a generic native function is
   /// passed for @p ty: a module data global, one per distinct description.
   Val emitTypeDescriptor(ast::Type *ty);

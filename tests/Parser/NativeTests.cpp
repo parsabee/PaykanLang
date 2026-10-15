@@ -9,7 +9,7 @@ using namespace paykan::test;
 
 TEST(Native, DeclarationParses) {
   auto [ok, driver] = parse(R"(
-    native fn put(fd: int, s: Str) -> int = "pk_test_put";
+    native fn put(fd: int, s: view Str) -> int = "pk_test_put";
     native fn flush() = "pk_test_flush";
     fn main() -> int { return put(1, "x"); }
   )");
@@ -39,7 +39,7 @@ TEST(Native, MalformedDeclarationsAreRejected) {
 // A generic native function is a template, like any generic function.
 TEST(Native, GenericDeclarationParses) {
   auto [ok, driver] = parse(R"(
-    native fn pick<T>(a: T, b: view T) -> view T = "pk_test_pick";
+    native fn pick<T>(a: view T, b: view T) -> view T = "pk_test_pick";
     fn main() -> int { return 0; }
   )");
   ASSERT_TRUE(ok);

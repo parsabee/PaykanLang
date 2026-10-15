@@ -781,6 +781,16 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
       ok = false;
       continue;
     }
+    if (fn->isNative()) {
+      std::vector<ast::Type *> annotations;
+      for (const ast::Param &p : fn->getParams())
+        annotations.push_back(p.ParamType);
+      if (!checkNativeParamModes(fn, annotations)) {
+        ErroneousNames.insert(fn->getName()); // calls are follow-ons
+        ok = false;
+        continue;
+      }
+    }
     FuncTemplates[fn->getName()] = fn;
   }
   return ok;
