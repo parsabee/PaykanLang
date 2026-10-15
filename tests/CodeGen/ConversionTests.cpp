@@ -163,7 +163,8 @@ TEST(Conversion, CharOfIntRoundTripsEveryCode) {
 TEST(Conversion, NestedAndInsideOtherExpressions) {
   LeakGuard g;
   auto r = compileAndRun(R"(
-    class Box<T> { v: T; fn __init__(x: T) { self.v = x; } }
+    class Box<T> { v: T; }
+    impl Box<T> { fn __init__(x: T) { self.v = x; } }
     fn twice(n: int) -> int { return n * 2; }
     fn main() -> int {
       b = Box<int>(int<float>(4.75));          // a real generic class still works

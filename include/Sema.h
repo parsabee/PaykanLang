@@ -14,6 +14,7 @@
 #include <deque>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -206,7 +207,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   const FunctionSig *lookupFunction(std::string_view name) const;
 
   /// The kind of top-level entity being declared, for checkDeclNameAvailable.
-  enum class DeclKind { Function, Class, Enum };
+  enum class DeclKind { Function, Class, Enum, Trait };
 
   /// Top-level declarations — functions, classes (whose constructors are
   /// called by class name), and enums — share one namespace with the compiler
@@ -529,7 +530,7 @@ public:
         std::string Name;
         std::string ReturnTypeName;
         std::vector<std::string> ParamTypeNames;
-        uint8_t Flags = 0;     // ast::MethodDecl::Private bit
+        uint8_t Flags = 0;     // ast::MethodDecl::Flags
         ast::ParamModes Modes; // `n: inout int`
         bool operator==(const MethodInfo &) const = default;
       };
@@ -563,6 +564,10 @@ public:
     std::string Module;                    ///< canonical module name
     std::vector<ast::ClassDecl *> Classes; ///< in the module's ASTContext
     std::vector<ast::FuncDecl *> Functions;
+    /// The `impl` blocks of each of Classes (not `impl Trait for`, whose
+    /// trait an importer cannot name).
+    std::unordered_map<const ast::ClassDecl *, std::vector<ast::ImplDecl *>>
+        Impls;
     /// The modules the bodies name, the module itself first: canonical
     /// name and the file ModuleCache knows it by.
     std::vector<std::pair<std::string, std::string>> Uses;
@@ -863,6 +868,110 @@ private:
   /// Phase 4b for one class: register the constructor function `Name(...)`.
   void declareConstructor(ast::ClassDecl *cd, ast::ClassType *ct);
 
+  /// The signature of @p method of @p ct as a MethodDecl with @p flags, its
+  /// annotations resolved and written back; nullptr if one does not resolve.
+  /// @p overridden is the superclass method it overrides, if any.  A mistake
+  /// that leaves the signature usable (an override that does not match) is
+  /// reported and clears @p ok.
+  ast::MethodDecl *declareMethod(ast::FuncDecl *method, ast::ClassType *ct,
+                                 const ast::MethodDecl *overridden,
+                                 uint8_t flags, bool &ok);
+
+  /// Phase 4 for the `impl` blocks of @p cd's class: their methods join it.
+  bool populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct);
+
+  /// Reject an `__init__` in a class body: it goes in an `impl` block.
+  bool rejectBodyInits(ast::TranslationUnit *tu);
+
+  /// Check that every `impl` block names a class of this module, and make
+  /// its `static fn`s the module's functions `Type::name`.
+  bool checkImplDecls(ast::TranslationUnit *tu);
+
+  /// The `impl` blocks by the name of the class they add to: an
+  /// instantiation's are copies of its template's.
+  StringMap<std::vector<ast::ImplDecl *>> ImplsByClass;
+  /// The `impl` blocks of the module's generic classes, by template.
+  std::unordered_map<const ast::ClassDecl *, std::vector<ast::ImplDecl *>>
+      TemplateImpls;
+  /// Set once checkImplDecls has run (see PendingTraitImpls).
+  bool ImplsChecked = false;
+
+  // -- Traits (SemaTraits.cpp)
+
+  struct TraitInfo {
+    ast::TraitDecl *Decl = nullptr;
+    bool IsBuiltin = false;
+    /// A requirement's signature did not resolve (reported with the trait).
+    bool Erroneous = false;
+  };
+  /// A trait with its type arguments: `Into<int>`.
+  struct TraitRef {
+    const TraitInfo *Trait = nullptr;
+    std::vector<ast::Type *> Args;
+  };
+  /// A requirement's signature for one implementation of its trait.
+  struct RequiredSig {
+    ast::Type *Ret = nullptr;
+    std::vector<ast::Type *> Params;
+    ast::ParamModes Modes;
+  };
+  using Subst = std::unordered_map<std::string, ast::Type *>;
+
+  StringMap<TraitInfo> Traits;
+  /// The traits each type implements itself (a class also implements its
+  /// superclasses'), by canonical type.
+  std::unordered_map<const ast::Type *, std::vector<TraitRef>> TraitImpls;
+  /// The type `Self` names while a method's signature is resolved (in its
+  /// body, the class being checked).
+  ast::ClassType *SelfType = nullptr;
+
+  /// Register the builtin trait `Show`, which `Obj` implements.
+  void registerBuiltinTraits();
+  /// Register the module's traits by name (their signatures are checked by
+  /// checkTraitDecls, once classes can be named).
+  bool declareTraits(ast::TranslationUnit *tu);
+  bool checkTraitDecls(ast::TranslationUnit *tu);
+  /// @p fn's signature with @p subst applied (`Self` and the trait's type
+  /// parameters); false after reporting a type that does not resolve.
+  bool resolveRequirement(const ast::FuncDecl *fn, const Subst &subst,
+                          const std::string &traitName, RequiredSig &out);
+  /// The trait the annotation @p ref names (`Show`, `Into<T>` with @p subst
+  /// applied); nullopt after an error.
+  std::optional<TraitRef> resolveTraitRef(ast::Type *ref, const Subst &subst,
+                                          ast::SourceLocation loc);
+  static std::string traitRefName(const TraitRef &tr);
+  /// The type whose implementation of @p tr @p ty has (itself or, for a
+  /// class, a superclass); nullptr if it does not implement it.
+  const ast::Type *traitImplOwner(ast::Type *ty, const TraitRef &tr);
+  /// Record `impl Trait for A` and check that A has every method the trait
+  /// requires, with its signature.
+  bool checkTraitImpl(ast::ImplDecl *im, ast::ClassType *ct);
+
+  // A type parameter's bounds are checked when its template is instantiated,
+  // once the `impl ... for` blocks are recorded (TraitImplsKnown); until
+  // then the check waits in PendingBoundChecks.
+  struct PendingBoundCheck {
+    const ast::Decl *Template;
+    std::string Name;
+    std::vector<ast::Type *> Args;
+    ast::SourceLocation Loc;
+  };
+  std::vector<PendingBoundCheck> PendingBoundChecks;
+  bool TraitImplsKnown = false;
+  /// Templates with a bound that names no trait (reported with them).
+  std::set<const ast::Decl *> BadBounds;
+
+  /// Check that the bounds of the module's templates name traits.
+  bool checkBoundDecls(ast::TranslationUnit *tu);
+  /// Check that @p args implement the traits template @p tmpl (named
+  /// @p name) requires of its type parameters.
+  bool checkBounds(const ast::Decl *tmpl, const std::string &name,
+                   const std::vector<const std::string *> &params,
+                   const ast::TypeParamBounds &bounds,
+                   const std::vector<ast::Type *> &args,
+                   ast::SourceLocation loc);
+  bool checkPendingBounds();
+
   // -- Generics
   //
   // Generic declarations are templates: they are registered by name here and
@@ -929,6 +1038,15 @@ private:
     const std::vector<std::string> *Lines = nullptr;
   };
   std::vector<InstantiationFrame> InstantiationStack;
+  /// The `impl Trait for` copies of instantiations made before the module's
+  /// `impl` blocks are checked (ImplsChecked): checked with them.
+  struct PendingTraitImpl {
+    ast::ImplDecl *Impl;
+    ast::ClassType *Class;
+    InstantiationFrame Request;
+    const ModuleTemplates *Origin;
+  };
+  std::vector<PendingTraitImpl> PendingTraitImpls;
   static constexpr size_t kMaxInstantiationDepth = 16;
 
   /// Type parameter names of the instantiation whose body is being checked

@@ -30,8 +30,10 @@ TEST(Module, MethodReturnsModuleLocalClass) {
   std::filesystem::create_directories(tmpDir);
 
   writeTempFile(tmpDir.string(), "lib.pkn", R"(
-class A { v: int; fn __init__() { self.v = 7; } }
-class B { fn __init__() {} fn make() -> A { return A(); } }
+class A { v: int; }
+impl A { fn __init__() { self.v = 7; } }
+class B { fn make() -> A { return A(); } }
+impl B { fn __init__() {} }
 fn mk() -> A { return A(); }
 )");
   auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
@@ -58,13 +60,17 @@ TEST(Module, MethodSignaturesWithEnumAndArrayOfLocalClass) {
 
   writeTempFile(tmpDir.string(), "lib.pkn", R"(
 enum Kind { Small, Big }
-class Item { v: int; fn __init__(v: int) { self.v = v; } }
+class Item { v: int; }
+impl Item { fn __init__(v: int) { self.v = v; } }
 class Bag {
   kind: Kind;
   first: Item;
-  fn __init__() { self.kind = Kind::Big; self.first = Item(10); }
   fn items() -> Item[] { return [Item(1), Item(2), Item(3)]; }
   fn kindOf() -> Kind { return self.kind; }
+}
+
+impl Bag {
+  fn __init__() { self.kind = Kind::Big; self.first = Item(10); }
 }
 fn total(xs: Item[]) -> int {
   s: int = 0; i: int = 0;
@@ -100,14 +106,18 @@ TEST(Module, TransitiveClassFlowsThroughSignature) {
   std::filesystem::create_directories(tmpDir);
 
   writeTempFile(tmpDir.string(), "leaf.pkn", R"(
-class Thing { v: int; fn __init__(v: int) { self.v = v; } fn twice() -> int { return self.v + self.v; } }
+class Thing { v: int; fn twice() -> int { return self.v + self.v; } }
+impl Thing { fn __init__(v: int) { self.v = v; } }
 )");
   writeTempFile(tmpDir.string(), "mid.pkn", R"(
 import leaf;
 class Wrap {
   t: leaf::Thing;
-  fn __init__() { self.t = leaf::Thing(21); }
   fn get() -> leaf::Thing { return self.t; }
+}
+
+impl Wrap {
+  fn __init__() { self.t = leaf::Thing(21); }
 }
 )");
   auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(

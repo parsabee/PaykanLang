@@ -17,6 +17,9 @@
 class Entry {
   key: Str;
   value: float;
+}
+
+impl Entry {
   fn __init__(k: Str, v: float) {
     self.key = k;
     self.value = v;
@@ -40,13 +43,6 @@ class HashMap {
   buckets: Entry[][];
   size: int;
   nbuckets: int;
-
-  fn __init__() {
-    self.nbuckets = 8;
-    self.size = 0;
-    self.buckets = [];
-    self.fill();
-  }
 
   // Append `nbuckets` empty chains to a freshly-reset bucket array.
   fn fill() {
@@ -172,6 +168,15 @@ class HashMap {
 
   // Drop all entries and shrink back to the initial bucket count.
   fn clear() {
+    self.nbuckets = 8;
+    self.size = 0;
+    self.buckets = [];
+    self.fill();
+  }
+}
+
+impl HashMap {
+  fn __init__() {
     self.nbuckets = 8;
     self.size = 0;
     self.buckets = [];

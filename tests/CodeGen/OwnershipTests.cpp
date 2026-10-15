@@ -34,8 +34,11 @@ TEST(Ownership, ReturnSelf) {
   auto r = compileAndRun(R"(
     class B {
       x: int;
-      fn __init__() { self.x = 1; }
       fn me() -> B { return self; }
+    }
+
+    impl B {
+      fn __init__() { self.x = 1; }
     }
     fn main() -> int {
       b: B = B();
@@ -56,8 +59,11 @@ TEST(Ownership, ReturnSelfChained) {
   auto r = compileAndRun(R"(
     class B {
       x: int;
-      fn __init__() { self.x = 0; }
       fn bump() -> B { self.x = self.x + 1; return self; }
+    }
+
+    impl B {
+      fn __init__() { self.x = 0; }
     }
     fn main() -> int {
       b: B = B();
@@ -78,8 +84,11 @@ TEST(Ownership, PassSelfAsArgument) {
   auto r = compileAndRun(R"(
     class B {
       x: int;
-      fn __init__() { self.x = 1; }
       fn send() { probe(self); }
+    }
+
+    impl B {
+      fn __init__() { self.x = 1; }
     }
     fn probe(b: B) { println(Str<int>(b.x)); }
     fn main() -> int {
@@ -100,11 +109,14 @@ TEST(Ownership, AssignSelfToLocal) {
   auto r = compileAndRun(R"(
     class A {
       x: int;
-      fn __init__() { self.x = 7; }
       fn grab() -> int {
         y = self;
         return y.x;
       }
+    }
+
+    impl A {
+      fn __init__() { self.x = 7; }
     }
     fn main() -> int {
       a: A = A();
@@ -129,6 +141,9 @@ TEST(Ownership, MatchBindingPassedOwnedSubject) {
   auto r = compileAndRun(R"(
     class A {
       x: int;
+    }
+
+    impl A {
       fn __init__() { self.x = 5; }
     }
     fn probe(a: A) { println(Str<int>(a.x)); }
@@ -153,6 +168,9 @@ TEST(Ownership, MatchBindingVarDecls) {
   auto r = compileAndRun(R"(
     class A {
       x: int;
+    }
+
+    impl A {
       fn __init__() { self.x = 5; }
     }
     fn main() -> int {
@@ -181,6 +199,9 @@ TEST(Ownership, MatchBindingCallSubjectImplicitDecl) {
   auto r = compileAndRun(R"(
     class A {
       x: int;
+    }
+
+    impl A {
       fn __init__() { self.x = 5; }
     }
     fn make() -> Obj { return A(); }
@@ -208,10 +229,16 @@ TEST(Ownership, MatchBindingMemberAssign) {
   auto r = compileAndRun(R"(
     class A {
       x: int;
+    }
+
+    impl A {
       fn __init__() { self.x = 5; }
     }
     class Holder {
       a: A;
+    }
+
+    impl Holder {
       fn __init__(a0: A) { self.a = a0; }
     }
     fn main() -> int {
@@ -238,6 +265,9 @@ TEST(Ownership, MatchBindingCopied) {
   auto r = compileAndRun(R"(
     class A {
       x: int;
+    }
+
+    impl A {
       fn __init__() { self.x = 5; }
     }
     fn main() -> int {
@@ -265,6 +295,9 @@ TEST(Ownership, MatchBindingBackedControl) {
   auto r = compileAndRun(R"(
     class A {
       x: int;
+    }
+
+    impl A {
       fn __init__() { self.x = 5; }
     }
     fn make() -> Obj { return A(); }
@@ -294,6 +327,9 @@ TEST(Ownership, ArrayFieldStoreAndRead) {
   auto r = compileAndRun(R"(
     class H {
       arr: int[];
+    }
+
+    impl H {
       fn __init__(a: int[]) { self.arr = a; }
     }
     fn main() -> int {
@@ -315,6 +351,9 @@ TEST(Ownership, ArrayFieldReassign) {
   auto r = compileAndRun(R"(
     class H {
       arr: int[];
+    }
+
+    impl H {
       fn __init__(a: int[]) { self.arr = a; }
     }
     fn main() -> int {
@@ -442,6 +481,9 @@ TEST(Ownership, ImplicitDeclFromObjectArrayElement) {
   auto r = compileAndRun(R"(
     class A {
       x: int;
+    }
+
+    impl A {
       fn __init__(n: int) { self.x = n; }
     }
     fn main() -> int {
@@ -466,10 +508,16 @@ TEST(Ownership, NestedMemberAccessUnwrapsBox) {
   auto r = compileAndRun(R"(
     class A {
       x: int;
+    }
+
+    impl A {
       fn __init__() { self.x = 5; }
     }
     class H {
       a: A;
+    }
+
+    impl H {
       fn __init__(a0: A) { self.a = a0; }
     }
     fn main() -> int {
@@ -495,12 +543,18 @@ TEST(Ownership, AssignNarrowsBaseVar) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class Animal {
-      fn __init__() {}
       fn speak() -> Str { return "..."; }
     }
+
+    impl Animal {
+      fn __init__() {}
+    }
     class Dog : Animal {
-      fn __init__() { __super__(); }
       fn speak() -> Str { return "woof"; }
+    }
+
+    impl Dog {
+      fn __init__() { __super__(); }
     }
     fn main() -> int {
       d: Dog = Dog();

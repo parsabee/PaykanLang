@@ -3,9 +3,12 @@
 // to `(int, Obj)`) because tuples are immutable.
 class Holder {
   pair: (int, Str);
-  fn __init__(p: (int, Str)) { self.pair = p; }
   view fn get() -> view (int, Str) { return self.pair; }
   view fn first() -> int { return self.pair.0; }
+}
+
+impl Holder {
+  fn __init__(p: (int, Str)) { self.pair = p; }
 }
 
 fn swap(p: (int, Str)) -> (Str, int) {

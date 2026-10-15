@@ -90,11 +90,14 @@ fn signalName(s: Signal) -> Str {
 
 class Player {
   facing: Direction;
-  fn __init__(d: Direction) { self.facing = d; }
   // Methods may call module-level free functions (defined anywhere in the file)
   // and pass/return enum values through them.
   fn turnAround() { self.facing = opposite(self.facing); }
   view fn report() -> Str { return dirName(self.facing); }
+}
+
+impl Player {
+  fn __init__(d: Direction) { self.facing = d; }
 }
 
 fn main() -> int {

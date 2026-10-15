@@ -15,6 +15,9 @@
 class Node {
   v: int;
   next: Node?;
+}
+
+impl Node {
   fn __init__(x: int) { self.v = x; }
 }
 

@@ -18,6 +18,9 @@
 class Cell {
   label: Str;
   value: int?;
+}
+
+impl Cell {
   fn __init__() { self.label = Str<int>(0); }
 }
 

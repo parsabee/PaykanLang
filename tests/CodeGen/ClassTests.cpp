@@ -37,6 +37,9 @@ TEST(Class, InitStoresIntField) {
   auto r = compileAndRun(withFns(R"(
     class Counter {
       count: int;
+    }
+
+    impl Counter {
       fn __init__(n: int) {
         self.count = n;
       }
@@ -93,6 +96,9 @@ TEST(Class, MultipleIntFields) {
       a: int;
       b: int;
       c: int;
+    }
+
+    impl Triple {
       fn __init__(x: int, y: int, z: int) {
         self.a = x;
         self.b = y;
@@ -115,6 +121,9 @@ TEST(Class, StrField) {
   auto r = compileAndRun(withFns(R"(
     class Greeter {
       msg: Str;
+    }
+
+    impl Greeter {
       fn __init__(s: Str) {
         self.msg = s;
       }
@@ -133,8 +142,11 @@ TEST(Class, FieldReassign) {
   auto r = compileAndRun(withFns(R"(
     class Mutable {
       val: int;
-      fn __init__(v: int) { self.val = v; }
       fn set(v: int) { self.val = v; }
+    }
+
+    impl Mutable {
+      fn __init__(v: int) { self.val = v; }
     }
   )",
                                  R"(
@@ -153,8 +165,11 @@ TEST(Class, MethodReturnsField) {
   auto r = compileAndRun(withFns(R"(
     class Foo {
       x: int;
-      fn __init__(v: int) { self.x = v; }
       fn get() -> int { return self.x; }
+    }
+
+    impl Foo {
+      fn __init__(v: int) { self.x = v; }
     }
   )",
                                  R"(
@@ -189,8 +204,11 @@ TEST(Class, MethodComputed) {
     class Rect {
       w: int;
       h: int;
-      fn __init__(w: int, h: int) { self.w = w; self.h = h; }
       fn area() -> int { return self.w * self.h; }
+    }
+
+    impl Rect {
+      fn __init__(w: int, h: int) { self.w = w; self.h = h; }
     }
   )",
                                  R"(
@@ -206,6 +224,9 @@ TEST(Class, TwoInstancesIndependent) {
   auto r = compileAndRun(withFns(R"(
     class Val {
       n: int;
+    }
+
+    impl Val {
       fn __init__(v: int) { self.n = v; }
     }
   )",
@@ -226,9 +247,14 @@ TEST(Class, InheritedField) {
   auto r = compileAndRun(withFns(R"(
     class Animal {
       name: Str;
+    }
+
+    impl Animal {
       fn __init__(n: Str) { self.name = n; }
     }
-    class Dog : Animal {
+    class Dog : Animal {}
+
+    impl Dog {
       fn __init__(n: Str) { __super__(n); }
     }
   )",
@@ -245,10 +271,16 @@ TEST(Class, SubclassOwnField) {
   auto r = compileAndRun(withFns(R"(
     class Base {
       x: int;
+    }
+
+    impl Base {
       fn __init__(v: int) { self.x = v; }
     }
     class Child : Base {
       y: int;
+    }
+
+    impl Child {
       fn __init__(v: int, w: int) {
         __super__(v);
         self.y = w;
@@ -287,10 +319,16 @@ TEST(Class, SuperInit) {
   auto r = compileAndRun(withFns(R"(
     class Vehicle {
       speed: int;
+    }
+
+    impl Vehicle {
       fn __init__(s: int) { self.speed = s; }
     }
     class Car : Vehicle {
       brand: Str;
+    }
+
+    impl Car {
       fn __init__(s: int, b: Str) {
         __super__(s);
         self.brand = b;
@@ -311,12 +349,19 @@ TEST(Class, ThreeLevelInheritance) {
   auto r = compileAndRun(withFns(R"(
     class A {
       val: int;
+    }
+
+    impl A {
       fn __init__(v: int) { self.val = v; }
     }
-    class B : A {
+    class B : A {}
+
+    impl B {
       fn __init__(v: int) { __super__(v); }
     }
-    class C : B {
+    class C : B {}
+
+    impl C {
       fn __init__(v: int) { __super__(v); }
     }
   )",
@@ -333,10 +378,15 @@ TEST(Class, InheritedMethod) {
   auto r = compileAndRun(withFns(R"(
     class Base {
       n: int;
-      fn __init__(v: int) { self.n = v; }
       fn doubled() -> int { return self.n * 2; }
     }
-    class Sub : Base {
+
+    impl Base {
+      fn __init__(v: int) { self.n = v; }
+    }
+    class Sub : Base {}
+
+    impl Sub {
       fn __init__(v: int) { __super__(v); }
     }
   )",
@@ -355,6 +405,9 @@ TEST(Class, PassToFunction) {
   auto r = compileAndRun(withFns(R"(
     class Num {
       v: int;
+    }
+
+    impl Num {
       fn __init__(x: int) { self.v = x; }
     }
     fn show(n: Num) {
@@ -375,6 +428,9 @@ TEST(Class, ReturnClassFromFunction) {
     class Pair {
       a: int;
       b: int;
+    }
+
+    impl Pair {
       fn __init__(x: int, y: int) { self.a = x; self.b = y; }
     }
     fn makePair(x: int, y: int) -> Pair {
@@ -442,23 +498,38 @@ TEST(Class, MethodWithLoop) {
 // Shared class hierarchy used across match tests.
 static const std::string kMatchHierarchy = R"(
   class Animal {
-    fn __init__() {}
     fn speak() -> Str { return "..."; }
   }
+
+  impl Animal {
+    fn __init__() {}
+  }
   class Dog : Animal {
-    fn __init__() { __super__(); }
     fn speak() -> Str { return "Woof"; }
   }
-  class Cat : Animal {
+
+  impl Dog {
     fn __init__() { __super__(); }
+  }
+  class Cat : Animal {
     fn speak() -> Str { return "Meow"; }
   }
-  class Bird : Animal {
+
+  impl Cat {
     fn __init__() { __super__(); }
+  }
+  class Bird : Animal {
     fn speak() -> Str { return "Tweet"; }
+  }
+
+  impl Bird {
+    fn __init__() { __super__(); }
   }
   class Labrador : Dog {
     name: Str;
+  }
+
+  impl Labrador {
     fn __init__() { __super__(); self.name = "Rex"; }
   }
 )";
@@ -521,10 +592,14 @@ TEST(MatchCodeGen, WildcardOnly) {
 // Binding introduces a narrowed alias; int field is accessible.
 TEST(MatchCodeGen, BindingIntField) {
   auto r = compileAndRun(withFns(R"(
-    class Shape { fn __init__() {} }
+    class Shape {}
+    impl Shape { fn __init__() {} }
     class Rect : Shape {
       w: int;
       h: int;
+    }
+
+    impl Rect {
       fn __init__(a: int, b: int) { __super__(); self.w = a; self.h = b; }
     }
   )",
@@ -638,9 +713,13 @@ TEST(MatchCodeGen, MultipleMatchStmts) {
 // Arm body with control flow (if/else inside a match arm).
 TEST(MatchCodeGen, ControlFlowInArm) {
   auto r = compileAndRun(withFns(R"(
-    class Node { fn __init__() {} }
+    class Node {}
+    impl Node { fn __init__() {} }
     class Leaf : Node {
       val: int;
+    }
+
+    impl Leaf {
       fn __init__(v: int) { __super__(); self.val = v; }
     }
   )",
@@ -688,9 +767,12 @@ TEST(MatchCodeGen, SubjectIsCallExpr) {
 // Three-level hierarchy: exact-type dispatch at every level.
 TEST(MatchCodeGen, DeepInheritanceExactType) {
   auto r = compileAndRun(withFns(R"(
-    class A { fn __init__() {} }
-    class B : A { fn __init__() { __super__(); } }
-    class C : B { fn __init__() { __super__(); } }
+    class A {}
+    impl A { fn __init__() {} }
+    class B : A {}
+    impl B { fn __init__() { __super__(); } }
+    class C : B {}
+    impl C { fn __init__() { __super__(); } }
   )",
                                  R"(
     x: A = A();
@@ -815,8 +897,10 @@ TEST(Class, MethodCallsFreeFunctionDefinedBefore) {
   auto r =
       compileAndRun("fn helper() -> int { return 7; }\n"
                     "class C {\n"
-                    "  fn __init__() {}\n"
                     "  fn get() -> int { return helper(); }\n"
+                    "}\n"
+                    "impl C {\n"
+                    "  fn __init__() {}\n"
                     "}\n" +
                     wrapMain("c: C = C();\n  println(Str<int>(c.get()));"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -826,8 +910,10 @@ TEST(Class, MethodCallsFreeFunctionDefinedBefore) {
 TEST(Class, MethodCallsFreeFunctionDefinedAfter) {
   auto r =
       compileAndRun("class C {\n"
-                    "  fn __init__() {}\n"
                     "  fn get() -> int { return helper(); }\n"
+                    "}\n"
+                    "impl C {\n"
+                    "  fn __init__() {}\n"
                     "}\n"
                     "fn helper() -> int { return 42; }\n" +
                     wrapMain("c: C = C();\n  println(Str<int>(c.get()));"));
@@ -842,7 +928,8 @@ TEST(Class, MethodCallsFreeFunctionDefinedAfter) {
 // `==` operator.
 TEST(Class, DefaultEqualsIsIdentity) {
   auto r = compileAndRun(withFns(R"(
-    class Box { v: int; fn __init__(x: int) { self.v = x; } }
+    class Box { v: int; }
+    impl Box { fn __init__(x: int) { self.v = x; } }
   )",
                                  R"(
     b: Box = Box(5);
@@ -874,7 +961,8 @@ TEST(Class, CallTemporaryEqualsNone) {
 
 TEST(Class, CallTemporaryNotEqualsNone) {
   auto r = compileAndRun(R"(
-    class Thing { n: int; fn __init__(x: int) { self.n = x; } }
+    class Thing { n: int; }
+    impl Thing { fn __init__(x: int) { self.n = x; } }
     fn process() -> Obj { return Thing(5); }
     fn main() -> int {
       if (process() != None) { println("something"); } else { println("none"); }
@@ -923,13 +1011,16 @@ TEST(Class, EqualsOperatorUsesOverrideWithSelfMatch) {
   auto r = compileAndRun(R"(
     class Money {
       cents: int;
-      fn __init__(c: int) { self.cents = c; }
       view fn equals(o: Obj) -> bool {
         match o {
           m: Money { return self.cents == m.cents; }
           _        { return False; }
         }
       }
+    }
+
+    impl Money {
+      fn __init__(c: int) { self.cents = c; }
     }
     fn main() -> int {
       a: Money = Money(5);
@@ -951,10 +1042,13 @@ TEST(Class, MethodMatchesOwnType) {
   auto r = compileAndRun(R"(
     class Node {
       v: int;
-      fn __init__(x: int) { self.v = x; }
       fn isNode(o: Obj) -> bool {
         match o { n: Node { return True; } _ { return False; } }
       }
+    }
+
+    impl Node {
+      fn __init__(x: int) { self.v = x; }
     }
     fn main() -> int {
       a: Node = Node(1);
@@ -972,8 +1066,11 @@ TEST(Class, EqualsOverrideDispatched) {
   auto r = compileAndRun(withFns(R"(
     class Always {
       v: int;
-      fn __init__(x: int) { self.v = x; }
       view fn equals(o: Obj) -> bool { return True; }
+    }
+
+    impl Always {
+      fn __init__(x: int) { self.v = x; }
     }
   )",
                                  R"(

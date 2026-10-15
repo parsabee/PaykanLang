@@ -6,15 +6,21 @@ import containers::util;
 
 class Box<T> {
   v: T;
-  fn __init__(v: T) { self.v = v; }
   view fn get() -> view T { return self.v; }
   fn set(v: T) { self.v = v; }
   view fn tag() -> Str { return util::bracket(Str(__serial())); }
 }
 
+impl Box<T> {
+  fn __init__(v: T) { self.v = v; }
+}
+
 class Pair<A, B> {
   a: A;
   b: B;
+}
+
+impl Pair<A, B> {
   fn __init__(a: A, b: B) { self.a = a; self.b = b; }
 }
 

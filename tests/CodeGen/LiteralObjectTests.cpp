@@ -128,6 +128,9 @@ TEST(LiteralObject, ExpressionStatementAndFields) {
     class K {
       name: Str;
       tag: Str?;
+    }
+
+    impl K {
       fn __init__() { self.name = "k"; self.tag = "t"; }
     }
     fn main() -> int {

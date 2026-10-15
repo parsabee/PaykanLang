@@ -57,9 +57,12 @@ TEST(Optional, ClassFieldAndMethodSignature) {
   auto [ok, _] = parse(R"(
     class Node {
       next: Node?;
-      fn __init__() {}
       fn tail() -> Node? { return self.next; }
       fn link(n: Node?) { self.next = n; }
+    }
+
+    impl Node {
+      fn __init__() {}
     }
     fn main() -> int { return 0; }
   )");
@@ -115,7 +118,8 @@ TEST(Optional, OptionalPrimitivesParse) {
   // Optional primitives (#66) parse in every type position, including a
   // primitive match arm over an `int?` subject.
   auto [ok, _] = parse(R"(
-    class H { n: int?; fn __init__() {} }
+    class H { n: int?; }
+    impl H { fn __init__() {} }
     fn f(x: float?, b: bool?) -> char? { return None; }
     fn main() -> int {
       x: int? = None;

@@ -51,14 +51,18 @@ void expectErrors(const SemaResult &r,
 // a borrow another call returns of those; a new value, a copy parameter or
 // a local is an error.
 TEST(BorrowedResult, WhatCanBeReturned) {
-  auto r = semaCheck(R"(class Counter { n: int; fn __init__() { self.n = 0; } }
+  auto r = semaCheck(R"(class Counter { n: int; }
+impl Counter { fn __init__() { self.n = 0; } }
 class Box {
   c: Counter; xs: int[];
-  fn __init__() { self.c = Counter(); self.xs = [1]; }
   view fn peek() -> view Counter { return self.c; }
   view fn whole() -> view Box { return self; }
   view fn first() -> view int { return self.xs[0]; }
   fn fresh() -> view Counter { return Counter(); }
+}
+
+impl Box {
+  fn __init__() { self.c = Counter(); self.xs = [1]; }
 }
 fn longer(a: view Str, b: view Str) -> view Str {
   return if a.len() > b.len() then a else b;
@@ -76,9 +80,9 @@ fn main() -> int { return 0; }
       r,
       {":8:39: error: a 'view' result must be part of 'self' or of a 'view' "
        "or 'inout' parameter, not a new value",
-       ":15:51: error: 'd' is a copy: a 'view' result must be part of 'self' "
+       ":19:51: error: 'd' is a copy: a 'view' result must be part of 'self' "
        "or of a 'view' or 'inout' parameter",
-       ":18:10: error: 't' is a local: a 'view' result must be part of "
+       ":22:10: error: 't' is a local: a 'view' result must be part of "
        "'self' or of a 'view' or 'inout' parameter"});
   EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
 }
@@ -89,15 +93,21 @@ fn main() -> int { return 0; }
 TEST(BorrowedResult, TheResultIsAView) {
   auto r = semaCheck(R"(class Counter {
   n: int;
-  fn __init__() { self.n = 0; }
   fn tick() { self.n = self.n + 1; }
   view fn get() -> int { return self.n; }
 }
+
+impl Counter {
+  fn __init__() { self.n = 0; }
+}
 class Box {
   c: Counter; k: int;
-  fn __init__() { self.c = Counter(); self.k = 3; }
   view fn peek() -> view Counter { return self.c; }
   view fn num() -> view int { return self.k; }
+}
+
+impl Box {
+  fn __init__() { self.c = Counter(); self.k = 3; }
 }
 fn keep(c: Counter) { }
 fn show(c: view Counter) { println(Str(c.get())); }
@@ -115,15 +125,15 @@ fn main() -> int {
 }
 )");
   expectErrors(
-      r, {":18:3: error: the result of 'peek' is a 'view'; 'tick' is not a "
+      r, {":24:3: error: the result of 'peek' is a 'view'; 'tick' is not a "
           "'view fn'",
-          ":19:3: error: the result of 'peek' is a 'view'; cannot assign to "
+          ":25:3: error: the result of 'peek' is a 'view'; cannot assign to "
           "its field 'n'",
-          ":20:8: error: the result of 'peek' is a 'view'; it can only be "
+          ":26:8: error: the result of 'peek' is a 'view'; it can only be "
           "passed to a 'view' parameter, and parameter 1 of 'keep' is not one",
-          ":21:7: error: the result of 'peek' is a 'view'; it cannot be "
+          ":27:7: error: the result of 'peek' is a 'view'; it cannot be "
           "stored, only read or passed to a 'view' parameter",
-          ":25:16: error: the result of 'num' is a 'view'; it can only be "
+          ":31:16: error: the result of 'num' is a 'view'; it can only be "
           "passed to a 'view' parameter, and parameter 1 of 'twice' is not "
           "one"});
   EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
@@ -134,23 +144,29 @@ fn main() -> int {
 TEST(BorrowedResult, Declarations) {
   auto r = semaCheck(R"(class Base {
   n: int;
-  fn __init__() { self.n = 0; }
   view fn get() -> view int { return self.n; }
   view fn copy() -> int { return self.n; }
 }
+
+impl Base {
+  fn __init__() { self.n = 0; }
+}
 class Sub : Base {
-  fn __init__() { __super__(); }
   view fn get() -> int { return 1; }
   view fn copy() -> view int { return self.n; }
+}
+
+impl Sub {
+  fn __init__() { __super__(); }
 }
 fn main() -> view int { return 0; }
 )");
   expectErrors(
-      r, {":9:3: error: override of 'get' must return 'view', like the method "
+      r, {":11:3: error: override of 'get' must return 'view', like the method "
           "it overrides",
-          ":10:3: error: override of 'copy' cannot return a borrow: the "
+          ":12:3: error: override of 'copy' cannot return a borrow: the "
           "method it overrides returns a copy",
-          ":12:1: error: 'main' cannot return a borrow"});
+          ":18:1: error: 'main' cannot return a borrow"});
   EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
 }
 
@@ -159,15 +175,18 @@ fn main() -> view int { return 0; }
 // method returns part of `self` for its caller to change, so it is not one
 // that never changes `self`.
 TEST(BorrowedResult, ViewFnReturnsAView) {
-  auto r = semaCheck(R"(class Counter { n: int; fn __init__() { self.n = 0; } }
+  auto r = semaCheck(R"(class Counter { n: int; }
+impl Counter { fn __init__() { self.n = 0; } }
 class Box<T> {
   v: T;
-  fn __init__(v: T) { self.v = v; }
   view fn get() -> T { return self.v; }
+}
+
+impl Box<T> {
+  fn __init__(v: T) { self.v = v; }
 }
 class Named {
   name: Str; c: Counter; n: int;
-  fn __init__() { self.name = "a"; self.c = Counter(); self.n = 1; }
   view fn getName() -> Str { return self.name; }
   view fn pick(f: bool) -> Counter { return if f then self.c else Counter(); }
   view fn me() -> Named { return self; }
@@ -176,6 +195,10 @@ class Named {
   view fn num() -> int { return self.n; }
   view fn label() -> Str { return self.name + "!"; }
   fn grab() -> Counter { return self.c; }
+}
+
+impl Named {
+  fn __init__() { self.name = "a"; self.c = Counter(); self.n = 1; }
 }
 fn main() -> int {
   b = Box<Str>("s");
@@ -187,23 +210,27 @@ fn main() -> int {
       r, {":5:31: error: 'self' is read-only in 'view fn get', so part of it "
           "can only be returned as a 'view': write 'view' before its result "
           "type",
-          ":10:37: error: 'self' is read-only in 'view fn getName', so part "
+          ":13:37: error: 'self' is read-only in 'view fn getName', so part "
           "of it can only be returned as a 'view': write '-> view Str'",
-          ":11:55: error: 'self' is read-only in 'view fn pick', so part of "
+          ":14:55: error: 'self' is read-only in 'view fn pick', so part of "
           "it can only be returned as a 'view': write '-> view Counter'",
-          ":12:34: error: 'self' is read-only in 'view fn me', so part of it "
+          ":15:34: error: 'self' is read-only in 'view fn me', so part of it "
           "can only be returned as a 'view': write '-> view Named'",
-          ":13:38: error: 'self' is read-only in 'view fn toString', so part "
+          ":16:38: error: 'self' is read-only in 'view fn toString', so part "
           "of it can only be returned as a 'view'; the method it overrides "
           "returns a copy, so return a new value"});
   EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
 
-  r = semaCheck(R"(class Counter { n: int; fn __init__() { self.n = 0; } }
+  r = semaCheck(R"(class Counter { n: int; }
+impl Counter { fn __init__() { self.n = 0; } }
 class Box {
   c: Counter; n: int;
-  fn __init__() { self.c = Counter(); self.n = 1; }
   fn grab() -> Counter { return self.c; }
   fn num() -> int { return self.n; }
+}
+
+impl Box {
+  fn __init__() { self.c = Counter(); self.n = 1; }
 }
 fn main() -> int { return 0; }
 )");
@@ -221,14 +248,20 @@ fn main() -> int { return 0; }
 TEST(BorrowedResult, CallSiteBorrows) {
   auto r = semaCheck(R"(class Counter {
   n: int;
-  fn __init__() { self.n = 0; }
   fn tick() { self.n = self.n + 1; }
   view fn get() -> int { return self.n; }
 }
+
+impl Counter {
+  fn __init__() { self.n = 0; }
+}
 class Box {
   c: Counter;
-  fn __init__() { self.c = Counter(); }
   view fn peek() -> view Counter { return self.c; }
+}
+
+impl Box {
+  fn __init__() { self.c = Counter(); }
 }
 fn longer(a: view Str, b: view Str) -> view Str {
   return if a.len() > b.len() then a else b;
@@ -252,11 +285,11 @@ fn main() -> int {
 }
 )");
   expectErrors(
-      r, {":18:3: error: 'b' is viewed by 'view' local 'v' until 'v' is last "
+      r, {":24:3: error: 'b' is viewed by 'view' local 'v' until 'v' is last "
           "used; cannot assign to its field 'c'",
-          ":24:3: error: 't' is viewed by 'view' local 'w' until 'w' is last "
+          ":30:3: error: 't' is viewed by 'view' local 'w' until 'w' is last "
           "used; it cannot be assigned",
-          ":27:23: error: 'b' is viewed by 'view' local 'd' until 'd' is last "
+          ":33:23: error: 'b' is viewed by 'view' local 'd' until 'd' is last "
           "used; 'tick' is not a 'view fn'"});
   EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
   // After v's last use, b can change.
@@ -270,11 +303,11 @@ TEST(BorrowedResult, AcrossModules) {
   std::filesystem::remove_all(dir);
   writeModule(dir, "base.pkn",
               "class Counter { n: int;\n"
-              "  fn __init__() { self.n = 0; }\n"
               "  fn tick() { self.n = self.n + 1; } }\n"
+              "impl Counter { fn __init__() { self.n = 0; } }\n"
               "class Box { c: Counter;\n"
-              "  fn __init__() { self.c = Counter(); }\n"
               "  view fn peek() -> view Counter { return self.c; } }\n"
+              "impl Box { fn __init__() { self.c = Counter(); } }\n"
               "fn inner(b: view Box) -> view Counter { return b.c; }\n");
   auto r = semaCheckPath(writeModule(dir, "main.pkn", R"(import base;
 fn main() -> int {
@@ -297,19 +330,24 @@ fn main() -> int {
 // returns none.  The caller's receiver must outlive the call, and while a
 // borrow of the result is live, what it borrowed cannot be used.
 TEST(BorrowedResult, InoutResults) {
-  auto r =
-      semaCheck(R"(class Animal { n: int; fn __init__(n: int) { self.n = n; } }
-class Dog : Animal { fn __init__(n: int) { __super__(n); } }
+  auto r = semaCheck(R"(class Animal { n: int; }
+impl Animal { fn __init__(n: int) { self.n = n; } }
+class Dog : Animal {}
+impl Dog { fn __init__(n: int) { __super__(n); } }
 class Box {
   a: Animal; d: Dog; xs: int[];
-  fn __init__() { self.a = Dog(1); self.d = Dog(2); self.xs = [1]; }
   fn me() -> inout Box { return self; }
   fn wrong() -> inout Animal { return self.d; }
   fn elem() -> inout int { return self.xs[0]; }
   fn fine() -> inout Animal { return self.a; }
   fn num() -> inout int { return self.a.n; }
 }
-class Look { a: Animal; fn __init__() { self.a = Dog(1); } view fn look() -> inout Animal { return self.a; } }
+
+impl Box {
+  fn __init__() { self.a = Dog(1); self.d = Dog(2); self.xs = [1]; }
+}
+class Look { a: Animal; view fn look() -> inout Animal { return self.a; } }
+impl Look { fn __init__() { self.a = Dog(1); } }
 fn fromView(v: view Animal) -> inout int { return v.n; }
 fn fromCopy(c: Animal) -> inout int { return c.n; }
 fn twice(a: inout int, b: inout int) { }
@@ -325,22 +363,22 @@ fn main() -> int {
 )");
   expectErrors(
       r,
-      {":6:33: error: 'self' cannot be returned 'inout': the method would no "
+      {":7:33: error: 'self' cannot be returned 'inout': the method would no "
        "longer know its object",
-       ":7:39: error: an 'inout' result has type 'Animal', but what it "
+       ":8:39: error: an 'inout' result has type 'Animal', but what it "
        "returns has type 'Dog'",
-       ":8:35: error: an array element cannot be returned 'inout' yet",
-       ":12:60: error: 'view fn look' cannot return 'inout': it does not "
+       ":9:35: error: an array element cannot be returned 'inout' yet",
+       ":17:25: error: 'view fn look' cannot return 'inout': it does not "
        "change 'self'",
-       ":13:51: error: 'v' is a 'view' parameter; it cannot be returned "
+       ":19:51: error: 'v' is a 'view' parameter; it cannot be returned "
        "'inout'",
-       ":14:46: error: 'c' is a copy: an 'inout' result must be part of 'self' "
+       ":20:46: error: 'c' is a copy: an 'inout' result must be part of 'self' "
        "or of an 'inout' parameter",
-       ":17:3: error: the receiver of 'fine' must be a variable or a field: "
+       ":23:3: error: the receiver of 'fine' must be a variable or a field: "
        "its 'inout' result is part of it",
-       ":20:3: error: 'b' is borrowed by 'inout' local 'x' until 'x' is last "
+       ":26:3: error: 'b' is borrowed by 'inout' local 'x' until 'x' is last "
        "used",
-       ":22:18: error: 'b' is passed to two 'inout' parameters ('a' and "
+       ":28:18: error: 'b' is passed to two 'inout' parameters ('a' and "
        "'b')"});
   EXPECT_EQ(r.ErrorCount, 9u) << r.Diagnostics;
 }

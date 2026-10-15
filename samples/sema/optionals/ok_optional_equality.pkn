@@ -3,9 +3,14 @@
 // type (both None -> equal, one None -> not equal, otherwise `equals`).
 class Node {
   v: int;
+}
+
+impl Node {
   fn __init__(x: int) { self.v = x; }
 }
-class Leaf : Node {
+class Leaf : Node {}
+
+impl Leaf {
   fn __init__(x: int) { __super__(x); }
 }
 

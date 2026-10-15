@@ -2,6 +2,9 @@
 // its base declares one — otherwise the base initializer never runs.
 class Base {
   val: int;
+}
+
+impl Base {
   fn __init__(v: int) { self.val = v; }
 }
 

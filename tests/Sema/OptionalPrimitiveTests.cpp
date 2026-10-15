@@ -43,7 +43,8 @@ TEST(OptionalPrimitive, EveryPrimitiveWidensAndTakesNone) {
 
 TEST(OptionalPrimitive, ParamsReturnsFieldsArraysTuples) {
   expectOk(R"(
-    class H { n: int?; c: char?; fn __init__() { } }
+    class H { n: int?; c: char?; }
+    impl H { fn __init__() { } }
     fn half(n: int) -> int? { if (n % 2 != 0) { return None; } return n / 2; }
     fn take(x: float?) -> bool { return x == None; }
     fn main() -> int {
@@ -142,8 +143,10 @@ TEST(OptionalPrimitive, ViewIsNotConvertedToAnOptional) {
 
 TEST(OptionalPrimitive, GenericsInstantiateWithOptionalPrimitives) {
   expectOk(R"(
-    class Cell<T> { v: T; fn __init__(x: T) { self.v = x; } }
-    class Slot<T> { v: T?; fn __init__() { } fn put(x: T) { self.v = x; } }
+    class Cell<T> { v: T; }
+    impl Cell<T> { fn __init__(x: T) { self.v = x; } }
+    class Slot<T> { v: T?; fn put(x: T) { self.v = x; } }
+    impl Slot<T> { fn __init__() { } }
     fn wrap<T>(x: T) -> T? { return x; }
     fn main() -> int {
       c = Cell<int?>(None);

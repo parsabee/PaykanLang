@@ -3,8 +3,8 @@
 > **Stable in v0.1** (issue #2): the syntax and semantics below are covered by the
 > compatibility promise for the 0.1 series (see `01-language-basics.md`, "Stability").
 
-Generic classes and functions are parameterised by types. Constraints and
-variance are not supported in v0.1.
+Generic classes and functions are parameterised by types. A type parameter's
+bounds (`<T: Show>`) are in `12-traits.md`; variance is not supported in v0.1.
 
 ---
 
@@ -32,17 +32,23 @@ variance are not supported in v0.1.
 ```pkn
 class Box<T> {
   v: T;
-  fn __init__(v: T) { self.v = v; }
   fn get() -> T      { return self.v; }
   fn set(v: T)       { self.v = v; }
+}
+
+impl Box<T> {
+  fn __init__(v: T) { self.v = v; }
 }
 
 class Pair<K, V> {
   k: K;
   v: V;
-  fn __init__(k: K, v: V) { self.k = k; self.v = v; }
   fn key() -> K   { return self.k; }
   fn value() -> V { return self.v; }
+}
+
+impl Pair<K, V> {
+  fn __init__(k: K, v: V) { self.k = k; self.v = v; }
 }
 ```
 
@@ -54,6 +60,31 @@ class Pair<K, V> {
   The superclass itself cannot be generic in v0.1.
 - A generic class may mention its own instantiation in signatures
   (`fn link(n: Node<T>)`).
+
+### `impl` Blocks
+
+A generic class's `impl` block names its type parameters after the class's name, and
+each instantiation gets the block's methods with the type arguments put in. The names
+are the block's own: they need not be the ones the class uses.
+
+```pkn
+impl Box<T> {
+  view fn isSame(other: view Box<T>) -> bool { return self.v == other.v; }
+}
+
+trait Keyed<K> { view fn key() -> K; }
+impl Keyed<K> for Pair<K, V> {}   // met by Pair's own key()
+```
+
+- The block names as many type parameters as the class has (`impl Pair<K, V>`), and
+  `impl Box` without them is an error.
+- Its methods are checked when the class is instantiated, like the class body's: a
+  method name already in the class is reported for `Box<int>`, the instantiation.
+- `impl Keyed<K> for Pair<K, V>` makes every instantiation implement the trait:
+  `Pair<Str, int>` implements `Keyed<Str>`, and meets a `T: Keyed<Str>` bound.
+- Its `__init__` can go in one too: `Box(3)` infers `T` from it, as from one in the
+  class body.
+- A generic class's `impl` block cannot have a `static fn` yet.
 
 ## Declaring a Generic Function
 
@@ -82,8 +113,11 @@ ba: Box<int[]> = Box<int[]>([1, 2]);            // instantiation of an array
 
 class Holder {
   b: Box<int>;                         // field
-  fn __init__() { self.b = Box<int>(1); }
   fn get() -> Box<int> { return self.b; }        // return type
+}
+
+impl Holder {
+  fn __init__() { self.b = Box<int>(1); }
 }
 
 fn take(b: Box<Str>) -> int { … }      // parameter
@@ -147,8 +181,11 @@ Tuples and optionals work inside templates and as type arguments:
 ```pkn
 class Pair<A, B> {
   p: (A, B);
-  fn __init__(a: A, b: B) { self.p = (a, b); }
   fn swap() -> (B, A) { return (self.p.1, self.p.0); }
+}
+
+impl Pair<A, B> {
+  fn __init__(a: A, b: B) { self.p = (a, b); }
 }
 fn orElse<T>(x: T?, d: T) -> T {
   match x {
@@ -206,9 +243,12 @@ own templates (`gen::Box<T>`).
 import lib::util;
 class Box<T> {
   v: T;
-  fn __init__(v: T) { self.v = v; }
   view fn get() -> view T { return self.v; }
   view fn tag() -> Str { return util::bracket(Str(__serial())); }
+}
+
+impl Box<T> {
+  fn __init__(v: T) { self.v = v; }
 }
 fn __serial() -> int { return 7; }
 fn mk() -> Box<int> { return Box<int>(41); }
@@ -237,6 +277,8 @@ d = gen::Box<int>(1);     // the same class as c's
   that also imports `lib::gen`'s `Box<int>`, or instantiating both your
   `Box<Str>` and `gen::Box<Str>`, is an error: type names are global across
   the import graph.
+- A generic class's `impl` blocks go with it, except `impl Trait for` blocks:
+  an importer cannot name another module's traits yet (`12-traits.md`).
 - A `.pkm` does not hold templates yet (#160): a module that declares them,
   instantiates another module's, or uses such an instantiation, is built
   from its source every time (`docs/design/pkm.md` §4.8).
@@ -258,7 +300,8 @@ d = gen::Box<int>(1);     // the same class as c's
 | Type arguments on a non-generic | `f<int>(1)` where `f` is ordinary; `Str<int>` in a type position (`t: Str<int>`) — as an expression, `Str<int>(n)` is a conversion constructor (`01-language-basics.md`) |
 | Missing type arguments | `b: Box = …` for a generic `Box` |
 | Type parameter used as a value | `y = T;`, `T()` inside a generic body |
-| Duplicate / shadowing type parameter | `class P<T, T>`, `class Bar<Foo>` when `Foo` is a type |
+| Duplicate / shadowing type parameter | `class P<T, T>`, `class Bar<Foo>` when `Foo` is a type, `impl Box<Foo>` |
+| `impl` type parameters | `impl Box` or `impl Box<T, U>` for a one-parameter `Box`, `impl A<T>` for a non-generic `A` |
 | Name reuse | a class or function named like a generic declaration |
 | Error inside an instantiation | any ordinary error in a body, reported with the instantiation note |
 | Inference failure / ambiguity | see *Inference* |
@@ -267,6 +310,5 @@ d = gen::Box<int>(1);     // the same class as c's
 
 ## Not Supported in v0.1
 
-Constraints/bounds (`T: Comparable`) and interfaces, variance, default type
-arguments, explicit specialisation, generic methods on non-generic classes,
+Variance, default type arguments, explicit specialisation, generic methods on non-generic classes,
 generic superclasses, and templates in a prebuilt `.pkm` (v0.2.0, [#57](https://github.com/parsabee/PaykanLang/issues/57)).

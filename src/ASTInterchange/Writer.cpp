@@ -38,6 +38,10 @@ public:
       funcDecl(*d);
     for (auto *d : tu.getFuncDecls())
       funcDecl(*d);
+    for (auto *d : tu.getTraitDecls())
+      traitDecl(*d);
+    for (auto *d : tu.getImplDecls())
+      implDecl(*d);
     close();
     OS << ")\n";
     return Error.empty();
@@ -146,10 +150,21 @@ private:
     close();
   }
 
-  void typeParams(const std::vector<const std::string *> &params) {
+  /// `(type-params "T" (bound "U" TRAIT...))`: a bounded one as `bound`.
+  void typeParams(const std::vector<const std::string *> &params,
+                  const TypeParamBounds &bounds = {}) {
     open("type-params");
-    for (const std::string *p : params)
-      str(*p);
+    for (size_t i = 0; i < params.size(); ++i) {
+      if (i >= bounds.size() || bounds[i].empty()) {
+        str(*params[i]);
+        continue;
+      }
+      open("bound");
+      str(*params[i]);
+      for (const Type *t : bounds[i])
+        type(t);
+      close();
+    }
     close();
   }
 
@@ -157,7 +172,7 @@ private:
     open("class", &d);
     str(d.getName());
     str(d.getSuperClassName());
-    typeParams(d.getTypeParams());
+    typeParams(d.getTypeParams(), d.getTypeParamBounds());
     open("fields");
     for (const VarDecl *f : d.getFields())
       varDecl(*f);
@@ -169,10 +184,39 @@ private:
     close();
   }
 
-  void funcDecl(const FuncDecl &d) {
-    open("fn", &d);
+  void implDecl(const ImplDecl &d) {
+    open("impl", &d);
+    str(d.getTypeName());
+    if (!d.getTypeParams().empty())
+      typeParams(d.getTypeParams());
+    if (d.getTrait()) {
+      open("for");
+      type(d.getTrait());
+      close();
+    }
+    open("methods");
+    for (const FuncDecl *m : d.getMethods())
+      funcDecl(*m);
+    close();
+    close();
+  }
+
+  void traitDecl(const TraitDecl &d) {
+    open("trait", &d);
     str(d.getName());
     typeParams(d.getTypeParams());
+    open("methods");
+    for (const FuncDecl *m : d.getMethods())
+      funcDecl(*m, /*requirement=*/true);
+    close();
+    close();
+  }
+
+  /// A function; a trait's @p requirement has `_` for its body.
+  void funcDecl(const FuncDecl &d, bool requirement = false) {
+    open("fn", &d);
+    str(d.getName());
+    typeParams(d.getTypeParams(), d.getTypeParamBounds());
     open("params");
     for (const Param &p : d.getParams()) {
       open("param");
@@ -198,12 +242,14 @@ private:
       close();
     } else if (d.getBody()) {
       stmt(d.getBody());
+    } else if (requirement) {
+      none();
     } else {
       fail("function '" + d.getName() + "' has no body");
     }
-    if (d.isView()) {
+    if (d.isView() || d.isStatic()) {
       open("qual");
-      sym("view");
+      sym(d.isView() ? "view" : "static");
       close();
     }
     close();
