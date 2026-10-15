@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 // Codegen tests: `impl` blocks.  Their methods are called directly (no
-// vtable slot), subclasses inherit them, and their `static fn`s are called
-// as `Type::name()`, also from another module.
+// vtable slot), subclasses inherit them, their `static fn`s are called as
+// `Type::name()`, also from another module, and they can hold `__init__`.
 
 #include "CodeGenTestUtils.h"
 #include <filesystem>
@@ -29,12 +29,12 @@ TEST(Impl, MethodsStaticFnsAndSubclasses) {
     }
     class Point3 : Point {
       z: int;
-      fn __init__(x: int, y: int, z: int) { __super__(x, y); self.z = z; }
       view fn describe() -> Str {
         return "Point3(" + Str(self.sum()) + ", " + Str(self.z) + ")";
       }
     }
     impl Point3 {
+      fn __init__(x: int, y: int, z: int) { __super__(x, y); self.z = z; }
       static fn unit() -> Point3 { return Point3(1, 1, 1); }
       view fn volume() -> int { return self.x * self.y * self.z; }
     }
@@ -62,10 +62,10 @@ TEST(Impl, GenericBlocks) {
   auto r = compileAndRun(R"pkn(
     class Box<T> {
       v: T;
-      fn __init__(v: T) { self.v = v; }
       view fn describe() -> Str { return "Box"; }
     }
     impl Box<U> {
+      fn __init__(v: U) { self.v = v; }
       view fn get() -> view U { return self.v; }
       fn set(v: U) { self.v = v; }
     }
@@ -92,7 +92,8 @@ TEST(Impl, GenericBlocks) {
 }
 
 // An importer calls the `impl` methods of a class of another module, also
-// on its own subclass of it, and its `static fn`s as `mod::Type::name()`.
+// on its own subclass of it, and its `static fn`s as `mod::Type::name()`;
+// the subclass's `__super__` reaches an `__init__` declared in `impl`.
 TEST(Impl, AcrossModules) {
   LeakGuard guard;
   auto dir = tempDir() / "pkn_impl_modules";
@@ -101,10 +102,10 @@ TEST(Impl, AcrossModules) {
   std::ofstream(dir / "shapes.pkn") << R"(
 class Bag {
   items: Str[];
-  fn __init__() { self.items = []; }
   view fn size() -> int { return self.items.len(); }
 }
 impl Bag {
+  fn __init__() { self.items = []; }
   static fn of(a: Str, b: Str) -> Bag {
     bag = Bag();
     bag.add(a);
@@ -142,8 +143,9 @@ TEST(Impl, GenericBlocksAcrossModules) {
   std::filesystem::remove_all(dir);
   std::filesystem::create_directories(dir);
   std::ofstream(dir / "gen.pkn") << R"(
-class Box<T> { v: T; fn __init__(v: T) { self.v = v; } }
+class Box<T> { v: T; }
 impl Box<T> {
+  fn __init__(v: T) { self.v = v; }
   view fn get() -> view T { return self.v; }
   fn set(v: T) { self.v = __pick(v, self.v); }
 }

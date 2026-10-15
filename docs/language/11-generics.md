@@ -76,6 +76,8 @@ impl Keyed<K> for Pair<K, V> {}   // met by Pair's own key()
   method name already in the class is reported for `Box<int>`, the instantiation.
 - `impl Keyed<K> for Pair<K, V>` makes every instantiation implement the trait:
   `Pair<Str, int>` implements `Keyed<Str>`, and meets a `T: Keyed<Str>` bound.
+- Its `__init__` can go in one too: `Box(3)` infers `T` from it, as from one in the
+  class body.
 - A generic class's `impl` block cannot have a `static fn` yet.
 
 ## Declaring a Generic Function

@@ -64,7 +64,7 @@ fn main() -> int { return 0; }
 }
 
 // No method may take a name already in the class or a superclass, in
-// either direction, and `__init__` stays in the class body.
+// either direction, and a class has one `__init__`.
 TEST(Impl, NamesAreNotReused) {
   auto r =
       semaCheck(R"(class A { n: int; fn __init__() { self.n = 0; } fn f() {} }
@@ -83,14 +83,40 @@ fn main() -> int { return 0; }
 )");
   EXPECT_FALSE(r.Ok);
   expectAll(r, {"class 'A' already has a method 'f'",
-                "'__init__' goes in the body of class 'A', not in an 'impl' "
-                "block",
+                "class 'A' already has a method '__init__'",
                 "class 'A' already has a method 'h'",
                 "redefinition of function 'A::mk'",
                 "class 'B' already has a method 'h' (from 'A')",
                 "class 'B' already has a method 'f' (from 'A')",
-                "method 'h' of 'A' is declared in an 'impl' block and cannot "
-                "be overridden"});
+                "method 'h' of 'A' is declared in an 'impl' block"});
+}
+
+// An `__init__` in an `impl` block is the class's constructor, with the
+// same rules as one in the class body; a generic class's infers its type
+// arguments.
+TEST(Impl, InitCanGoInAnImplBlock) {
+  auto ok = semaCheck(R"(class A { n: int; }
+impl A { fn __init__(n: int) { self.n = n; } }
+class B : A { m: int; }
+impl B { fn __init__() { __super__(1); self.m = 2; } }
+class Box<T> { v: T; }
+impl Box<U> { fn __init__(v: U) { self.v = v; } }
+fn main() -> int { b = B(); return b.n + b.m + A(3).n + Box(4).v; }
+)");
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
+  auto bad = semaCheck(R"(class A { n: int; }
+impl A { fn __init__(n: int) { self.n = n; } }
+class C : A { }
+class D { k: int; }
+impl D { fn __init__() {} }
+class E { fn __init__() {} }
+impl E { fn __init__() {} }
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(bad.Ok);
+  expectAll(bad, {"class 'C' must declare an '__init__' that calls",
+                  "field 'k' of class 'D' is not assigned on every path",
+                  "class 'E' already has a method '__init__'"});
 }
 
 TEST(Impl, OnlyClassesOfTheModule) {

@@ -20,8 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instantiated (`'Str' does not implement trait 'Named', which 'greet' requires of 'T'`).
   A trait is not a type.
 - `impl` blocks (docs/language/04-classes.md, "`impl` Blocks"): `impl Point { ... }` adds
-  `fn`, `view fn` and `static fn` methods to a class of the same module. They are called
-  directly, not through the vtable, and subclasses inherit them. A `static fn` is called
+  `fn`, `view fn` and `static fn` methods to a class of the same module, and can hold its
+  `__init__`. They are called directly, not through the vtable, and subclasses inherit them. A `static fn` is called
   as `Point::origin()`, or `mod::Point::origin()` from an importer. No `impl` method may
   reuse a name the class or a superclass has, and none can be overridden.
 - Generic `impl` blocks (docs/language/11-generics.md, "`impl` Blocks"): `impl Box<T> { ... }`

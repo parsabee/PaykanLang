@@ -156,10 +156,10 @@ may have several `impl` blocks, and its subclasses inherit their methods.
 class Point {
   x: int;
   y: int;
-  fn __init__(x: int, y: int) { self.x = x; self.y = y; }
 }
 
 impl Point {
+  fn __init__(x: int, y: int) { self.x = x; self.y = y; }
   static fn origin() -> Point { return Point(0, 0); }      // Point::origin()
   view fn lengthSquared() -> int { return self.x * self.x + self.y * self.y; }
   fn shift(d: int) { self.x = self.x + d; self.y = self.y + d; }
@@ -178,8 +178,8 @@ fn main() -> int {
   from a module that imports it.
 - No method may reuse a name that the class or one of its superclasses already has, and
   a subclass cannot override an `impl` method.
-- The class body keeps fields, `__init__` and the virtual methods. `__init__` cannot go
-  in an `impl` block.
+- `__init__` can go in an `impl` block or in the class body; either way it is the
+  class's constructor, and a class has one.
 - An `impl` block can only add to a class of its own module; built-in types and enums
   cannot have one. A generic class's names its type parameters: `impl Box<T> { … }`
   (see `11-generics.md`).
