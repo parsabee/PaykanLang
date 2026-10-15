@@ -14,23 +14,32 @@
 
 class Counter {
   ticks: int;
-  fn __init__() { self.ticks = 0; }
   fn tick() { self.ticks = self.ticks + 1; }
   view fn count() -> int { return self.ticks; }
   view fn double() -> int { return 2 * self.count(); }
   view fn describe() -> Str { return "counter"; }
 }
 
+impl Counter {
+  fn __init__() { self.ticks = 0; }
+}
+
 class Fast : Counter {
-  fn __init__() { __super__(); }
   fn tick() { self.ticks = self.ticks + 10; }
   view fn describe() -> Str { return "fast"; }
 }
 
+impl Fast {
+  fn __init__() { __super__(); }
+}
+
 class Box<T> {
   value: T;
-  fn __init__(value: T) { self.value = value; }
   view fn get() -> T { return self.value; }
+}
+
+impl Box<T> {
+  fn __init__(value: T) { self.value = value; }
 }
 
 fn report(c: view Counter) {

@@ -9,12 +9,14 @@ class Shape {
 class Circle : Shape {
   radius: int;
 
-  fn __init__(r: int) {
-    self.radius = r;
-  }
-
   view fn area() -> int {
     return self.radius;
+  }
+}
+
+impl Circle {
+  fn __init__(r: int) {
+    self.radius = r;
   }
 }
 

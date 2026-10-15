@@ -131,8 +131,9 @@ struct Project {
   void writeBase(const std::string &value, const std::string &extra = "") {
     writeFile(Dir / "base.pkn", "enum Kind { Odd, Even }\n"
                                 "class Cell { v: int;\n"
-                                "  fn __init__(v: int) { self.v = v; }\n"
                                 "  fn twice() -> int { return self.v * 2; } }\n"
+                                "impl Cell {\n"
+                                "  fn __init__(v: int) { self.v = v; } }\n"
                                 "fn base() -> int { return " +
                                     value + "; }\n" + extra);
   }
@@ -448,8 +449,9 @@ TEST(Pkm, EmitPkmAndDump) {
   fs::create_directories(p.Dir / "geometry");
   writeFile(p.Dir / "geometry" / "shapes.pkn",
             "class Rect { w: int; h: int;\n"
-            "  fn __init__(w: int, h: int) { self.w = w; self.h = h; }\n"
             "  fn area() -> int { return self.w * self.h; } }\n"
+            "impl Rect {\n"
+            "  fn __init__(w: int, h: int) { self.w = w; self.h = h; } }\n"
             "fn describe(r: Rect) -> Str { return \"rect\"; }\n");
   // A nested module named by its path from the project root.
   auto emit = run("cd " + p.Dir.string() + " && " + paykanCmd() +
@@ -547,11 +549,13 @@ struct ModesProject {
     fs::remove_all(Dir);
     writeFile(Dir / "base.pkn",
               "class Counter { n: int;\n"
-              "  fn __init__(start: view int) { self.n = start; }\n"
               "  fn add(k: view int) -> int { self.n = self.n + k;\n"
               "    return self.n; }\n"
               "  fn take(to: inout int) { to = to + self.n; } }\n"
-              "class Cell { v: int;\n"
+              "impl Counter {\n"
+              "  fn __init__(start: view int) { self.n = start; } }\n"
+              "class Cell { v: int; }\n"
+              "impl Cell {\n"
               "  fn __init__(v: inout int) { self.v = v; v = 0; } }\n"
               "fn twice(n: view int) -> int { return n * 2; }\n"
               "fn bump(n: inout int) { n = n + 1; }\n");
@@ -559,10 +563,11 @@ struct ModesProject {
         Dir / "main.pkn",
         "import base;\n"
         "class Fast : base::Counter {\n"
-        "  fn __init__(s: view int) { __super__(s); }\n"
         "  fn add(k: view int) -> int { self.n = self.n + 10 * k;\n"
         "    return self.n; }\n"
         "  fn take(to: inout int) { to = to * 100; } }\n"
+        "impl Fast {\n"
+        "  fn __init__(s: view int) { __super__(s); } }\n"
         "fn main() -> int {\n"
         "  c: base::Counter = Fast(1);\n"
         "  plain = base::Counter(5);\n"
@@ -577,8 +582,9 @@ struct ModesProject {
         "  return 0;\n}\n");
     writeFile(Dir / "bad.pkn", "import base;\n"
                                "class Slow : base::Counter {\n"
-                               "  fn __init__(s: int) { __super__(s); }\n"
                                "  fn add(k: int) -> int { return k; } }\n"
+                               "impl Slow {\n"
+                               "  fn __init__(s: int) { __super__(s); } }\n"
                                "fn main() -> int { return 0; }\n");
   }
   ~ModesProject() { fs::remove_all(Dir); }
@@ -609,7 +615,7 @@ TEST(Pkm, ParamModesAcrossModules) {
       << cached.out;
   EXPECT_TRUE(contains(cached.out, kModesExpected)) << cached.out;
   const char *kOverride =
-      "bad.pkn:4:3: error: override of 'add' must keep 'view' on parameter 'k'";
+      "bad.pkn:3:3: error: override of 'add' must keep 'view' on parameter 'k'";
   auto bad = p.paykan("--check-only bad.pkn");
   EXPECT_NE(bad.exitCode, 0);
   EXPECT_TRUE(contains(bad.out, kOverride)) << bad.out;
@@ -648,9 +654,9 @@ TEST(Pkm, ViewFnAcrossModules) {
       fs::temp_directory_path() / ("pkm_viewfn_" + std::to_string(getpid()));
   fs::remove_all(dir);
   writeFile(dir / "base.pkn", "class P { n: int;\n"
-                              "  fn __init__() { self.n = 4; }\n"
                               "  view fn get() -> int { return self.n; }\n"
-                              "  fn set(v: int) { self.n = v; } }\n");
+                              "  fn set(v: int) { self.n = v; } }\n"
+                              "impl P { fn __init__() { self.n = 4; } }\n");
   writeFile(dir / "main.pkn", "import base;\n"
                               "fn main() -> int {\n"
                               "  let p = base::P();\n"
@@ -658,8 +664,8 @@ TEST(Pkm, ViewFnAcrossModules) {
                               "  return 0;\n}\n");
   writeFile(dir / "bad.pkn", "import base;\n"
                              "class Q : base::P {\n"
-                             "  fn __init__() { __super__(); }\n"
                              "  fn get() -> int { return 1; } }\n"
+                             "impl Q { fn __init__() { __super__(); } }\n"
                              "fn main() -> int { return 0; }\n");
   auto paykan = [&](const std::string &args) {
     return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
@@ -671,7 +677,7 @@ TEST(Pkm, ViewFnAcrossModules) {
   EXPECT_TRUE(contains(ok.out, "4\n")) << ok.out;
   auto bad = paykan("--check-only bad.pkn");
   EXPECT_NE(bad.exitCode, 0);
-  EXPECT_TRUE(contains(bad.out, "bad.pkn:4:3: error: override of 'get' must be "
+  EXPECT_TRUE(contains(bad.out, "bad.pkn:3:3: error: override of 'get' must be "
                                 "a 'view fn', like the method it overrides"))
       << bad.out;
   auto dump = paykan("pkm dump --section=iface base.pkm");
@@ -691,13 +697,13 @@ TEST(Pkm, BorrowedResultsAcrossModules) {
   fs::remove_all(dir);
   writeFile(dir / "base.pkn",
             "class Counter { n: int;\n"
-            "  fn __init__() { self.n = 5; }\n"
             "  fn tick() { self.n = self.n + 1; }\n"
             "  view fn get() -> int { return self.n; } }\n"
+            "impl Counter { fn __init__() { self.n = 5; } }\n"
             "class Box { c: Counter;\n"
-            "  fn __init__() { self.c = Counter(); }\n"
             "  view fn peek() -> view Counter { return self.c; }\n"
             "  fn count() -> inout int { return self.c.n; } }\n"
+            "impl Box { fn __init__() { self.c = Counter(); } }\n"
             "fn longer(a: view Str, b: view Str) -> view Str {\n"
             "  return if a.len() > b.len() then a else b; }\n");
   writeFile(dir / "main.pkn", "import base;\n"
@@ -749,8 +755,9 @@ TEST(Pkm, GenericsAcrossSourceModulesAreNotCached) {
       fs::temp_directory_path() / ("pkm_generics_" + std::to_string(getpid()));
   fs::remove_all(dir);
   writeFile(dir / "lib" / "gen.pkn",
-            "class Box<T> { v: T; fn __init__(v: T) { self.v = v; }\n"
-            "  view fn one() -> int { return 1; } }\n");
+            "class Box<T> { v: T;\n"
+            "  view fn one() -> int { return 1; } }\n"
+            "impl Box<T> { fn __init__(v: T) { self.v = v; } }\n");
   writeFile(dir / "m1.pkn", "import lib::gen;\n"
                             "fn one() -> int { return gen::Box<int>(0).one(); "
                             "}\n");

@@ -44,8 +44,11 @@ TEST(Func, CallFunctionDefinedLater) {
 TEST(Func, MethodCallsFreeFunction) {
   auto r = semaCheck(R"(
     class C {
-      fn __init__() {}
       fn get() -> int { return helper(); }
+    }
+
+    impl C {
+      fn __init__() {}
     }
     fn helper() -> int { return 7; }
     fn main() -> int { return 0; }
@@ -58,7 +61,8 @@ TEST(Func, MethodCallsFreeFunction) {
 TEST(Func, FunctionClassNameCollision) {
   auto r = semaCheck(R"(
     fn Foo() -> int { return 1; }
-    class Foo { fn __init__() {} }
+    class Foo {}
+    impl Foo { fn __init__() {} }
     fn main() -> int { return 0; }
   )");
   EXPECT_FALSE(r.Ok);
@@ -67,7 +71,8 @@ TEST(Func, FunctionClassNameCollision) {
       << r.Diagnostics;
 
   r = semaCheck(R"(
-    class Foo { fn __init__() {} }
+    class Foo {}
+    impl Foo { fn __init__() {} }
     fn Foo() -> int { return 1; }
     fn main() -> int { return 0; }
   )");

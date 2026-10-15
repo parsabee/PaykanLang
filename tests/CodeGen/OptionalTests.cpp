@@ -18,9 +18,14 @@ static const char *const kNode = R"pkn(
     class Node {
       v: int;
       next: Node?;
+    }
+
+    impl Node {
       fn __init__(x: int) { self.v = x; }
     }
-    class Leaf : Node {
+    class Leaf : Node {}
+
+    impl Leaf {
       fn __init__(x: int) { __super__(x); }
     }
 )pkn";
@@ -197,13 +202,16 @@ TEST(Optional, CompareTwoOptionals) {
   auto r = compileAndRun(std::string(kNode) + R"pkn(
     class Pt {
       x: int;
-      fn __init__(v: int) { self.x = v; }
       view fn equals(other: Obj) -> bool {
         match other {
           p: Pt { return p.x == self.x; }
           _     { return False; }
         }
       }
+    }
+
+    impl Pt {
+      fn __init__(v: int) { self.x = v; }
     }
     fn make(c: bool) -> Str? { return if c then "a" + "b" else None; }
     fn main() -> int {
@@ -298,7 +306,6 @@ TEST(Optional, MethodWithOptionalParamAndReturn) {
   auto r = compileAndRun(std::string(kNode) + R"pkn(
     class List {
       head: Node?;
-      fn __init__() {}
       fn link(n: Node?) { self.head = n; }
       fn first() -> Node? { return self.head; }
       fn firstOr(d: int) -> int {
@@ -307,6 +314,10 @@ TEST(Optional, MethodWithOptionalParamAndReturn) {
           None    { return d; }
         }
       }
+    }
+
+    impl List {
+      fn __init__() {}
     }
     fn main() -> int {
       l: List = List();
@@ -335,7 +346,8 @@ TEST(Optional, MethodWithOptionalParamAndReturn) {
 TEST(Optional, PrintingAReferenceOptional) {
   LeakGuard g;
   auto r = compileAndRun(R"pkn(
-    class H { s: Str?; fn __init__() { } }
+    class H { s: Str?; }
+    impl H { fn __init__() { } }
     fn make(c: bool) -> Str? { return if c then "one" else None; }
     fn main() -> int {
       a: Str? = None;
@@ -560,8 +572,11 @@ TEST(Optional, ImportedOptionalSignatures) {
     class Node {
       v: int;
       next: Node?;
-      fn __init__(x: int) { self.v = x; }
       fn tail() -> Node? { return self.next; }
+    }
+
+    impl Node {
+      fn __init__(x: int) { self.v = x; }
     }
     fn find(head: Node?, key: int) -> Node? {
       cur: Node? = head;
@@ -616,7 +631,8 @@ fn main() -> int {
 TEST(OptionalTuple, TupleWithOptionalElements) {
   LeakGuard g;
   auto r = compileAndRun(R"pkn(
-    class Node { v: int; fn __init__(x: int) { self.v = x; } }
+    class Node { v: int; }
+    impl Node { fn __init__(x: int) { self.v = x; } }
     fn pick(n: Node?, k: int) -> (Node?, int) { return (n, k); }
     fn show(t: (Node?, int)) -> Str {
       x, k = t;
@@ -656,7 +672,8 @@ TEST(OptionalTuple, ImportedTupleOfOptionals) {
   auto tmp = (paykan::test::tempDir() / "pkn_opt_tuple_cg").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "lib.pkn", R"pkn(
-    class Node { v: int; fn __init__(x: int) { self.v = x; } }
+    class Node { v: int; }
+    impl Node { fn __init__(x: int) { self.v = x; } }
     fn wrap(xs: (Node?, int)[]?) -> (Node?, int)[]? { return xs; }
     fn mk(n: Node?) -> (Node?, int) { return (n, 5); }
   )pkn");

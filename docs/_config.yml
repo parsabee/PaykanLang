@@ -122,8 +122,10 @@ defaults:
     values: { title: Optional types, parent: Language reference, nav_order: 10 }
   - scope: { path: language/11-generics.md }
     values: { title: Generics, parent: Language reference, nav_order: 11 }
+  - scope: { path: language/12-traits.md }
+    values: { title: Traits, parent: Language reference, nav_order: 12 }
   - scope: { path: grammar.md }
-    values: { title: Grammar, parent: Language reference, nav_order: 12 }
+    values: { title: Grammar, parent: Language reference, nav_order: 13 }
 
   # The implementation: IR, backends, plugins
   - scope: { path: internals.md }

@@ -839,6 +839,25 @@ Val ModuleLowering::ExprEmitter::emitArrayPop(const Val &recv,
 Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     ast::MethodCallExpr *node) {
   const bool wantAddress = std::exchange(WantAddress, false);
+  // `n.toString()` on an int, float, bool or char (the builtin `Show`): its
+  // `Str` conversion, as a fresh box like any method's `Str` result.
+  ast::Type *recvResolved = node->getReceiver()->getResolvedType();
+  if (auto *bt = recvResolved ? ast::dyn_cast<ast::BuiltinType>(recvResolved)
+                              : nullptr) {
+    Val v = visit(node->getReceiver());
+    if (!v)
+      return Val();
+    const char *fn =
+        bt->getTypeKind() == ast::BuiltinType::Int     ? kPaykanStringFromInt
+        : bt->getTypeKind() == ast::BuiltinType::Float ? kPaykanStringFromFloat
+        : bt->getTypeKind() == ast::BuiltinType::Bool  ? kPaykanStringFromBool
+                                                       : kPaykanStringFromChar;
+    const pir::Function &rt = L.declareRuntime(fn);
+    Val str = L.B.call(rt.Name, rt.Sig,
+                       {L.coerceBoolToI64(v, rt.Sig.Params[0])}, "str");
+    return L.emitSharedNew(str, "str.shared");
+  }
+
   // A fresh temporary receiver is released after the call (the method
   // borrows it).
   Receiver receiver = L.emitReceiver(node->getReceiver());
@@ -910,12 +929,18 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     }
   }
 
-  int vtableIdx = ct ? ct->getVTableIndex(node->getMethodName()) : -1;
-  assert(vtableIdx >= 0 && "Sema should have verified method exists");
   ast::MethodDecl *method =
       ct ? ct->findMethod(node->getMethodName()) : nullptr;
-  pir::Signature sig = method ? L.slotSignature(ct, method)
-                              : pir::Signature{{Type::Obj}, Type::Box};
+  // An `impl` method has no vtable slot: it is called directly.
+  pir::Function *implFn =
+      method && method->isImpl()
+          ? L.lookupOwnMethodFunction(ct->implOwner(mname), mname)
+          : nullptr;
+  int vtableIdx = ct ? ct->getVTableIndex(node->getMethodName()) : -1;
+  assert((implFn || vtableIdx >= 0) && "Sema should have verified the method");
+  pir::Signature sig = implFn   ? implFn->Sig
+                       : method ? L.slotSignature(ct, method)
+                                : pir::Signature{{Type::Obj}, Type::Box};
 
   bool isUserDefinedMethod = ct && !ct->isBuiltin();
   std::vector<Val> args;
@@ -965,14 +990,20 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   // A class of this module is named (the backend knows its vtable); a
   // runtime class or a class imported from another module (whose extern item
   // carries only the layout) uses the explicit-signature form.
-  std::string className;
-  if (isUserDefinedMethod && !L.getOrCreateClass(ct)->IsExtern)
-    className = ct->getName();
-  else if (isUserDefinedMethod &&
-           !L.checkImportedSlot(ct, static_cast<uint32_t>(vtableIdx), sig))
-    return Val();
-  Val result = L.B.vcall(recv, className, static_cast<uint32_t>(vtableIdx), sig,
-                         args, "mcall");
+  Val result;
+  if (implFn) {
+    args.insert(args.begin(), recv);
+    result = L.B.call(implFn->Name, sig, args, "mcall");
+  } else {
+    std::string className;
+    if (isUserDefinedMethod && !L.getOrCreateClass(ct)->IsExtern)
+      className = ct->getName();
+    else if (isUserDefinedMethod &&
+             !L.checkImportedSlot(ct, static_cast<uint32_t>(vtableIdx), sig))
+      return Val();
+    result = L.B.vcall(recv, className, static_cast<uint32_t>(vtableIdx), sig,
+                       args, "mcall");
+  }
   L.releaseAfterCall(keep);
   for (const auto &ev : ownedArgs)
     L.releaseIfOwned(ev);

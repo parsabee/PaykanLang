@@ -2,11 +2,14 @@
 class Bad {
   x: int;
   y: int;
+  view fn toString() -> Str { return Str<int>(self.x) + "," + Str<int>(self.y); }
+}
+
+impl Bad {
   fn __init__(a: int) {
     self.x = a;
     // missing: self.y = ...
   }
-  view fn toString() -> Str { return Str<int>(self.x) + "," + Str<int>(self.y); }
 }
 
 fn main() -> int {
