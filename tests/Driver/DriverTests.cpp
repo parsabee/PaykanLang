@@ -1720,8 +1720,8 @@ TEST(Driver, RunOptimisesUnderTheHostLayout) {
   fs::remove_all(dir);
   fs::create_directories(dir);
   std::ofstream(dir / "lay.pkn")
-      << "class P {\n  c: char;\n  n: int;\n"
-         "  fn __init__() { self.c = 'x'; self.n = 7; }\n}\n"
+      << "class P {\n  c: char;\n  n: int;\n}\n"
+         "impl P { fn __init__() { self.c = 'x'; self.n = 7; } }\n"
          "fn main() -> int { p = P(); println(Str(p.c) + Str(p.n)); "
          "return 0; }\n";
   std::string src = (dir / "lay.pkn").string();
