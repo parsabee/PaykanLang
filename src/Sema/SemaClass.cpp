@@ -545,15 +545,11 @@ bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct) {
       if (fn->isStatic())
         continue;
       const std::string &name = fn->getName();
-      if (name == names::kMethodInit) {
-        error(fn->getLocation(), "'" + name + "' goes in the body of class '" +
-                                     cd->getName() +
-                                     "', not in an 'impl' block");
-        ok = false;
-        continue;
-      }
+      // __init__ is the same here as in the class body: the class's own,
+      // never inherited or called through the vtable.
+      const bool init = name == names::kMethodInit;
       if (ct->findMethod(name)) {
-        const ast::ClassType *owner = methodOwner(ct, name);
+        const ast::ClassType *owner = init ? ct : methodOwner(ct, name);
         error(fn->getLocation(),
               "class '" + cd->getName() + "' already has a method '" + name +
                   "'" +
@@ -561,8 +557,9 @@ bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct) {
         ok = false;
         continue;
       }
-      if (auto *md =
-              declareMethod(fn, ct, nullptr, ast::MethodDecl::Impl, ok)) {
+      if (auto *md = declareMethod(
+              fn, ct, nullptr,
+              init ? ast::MethodDecl::None : ast::MethodDecl::Impl, ok)) {
         ct->addMethod(md);
         cd->addMethod(fn); // checked and lowered with the class body
       } else {
@@ -1437,14 +1434,26 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
     ast::ClassDecl *tmpl = it->second;
     if (typeArgs.empty()) {
       // Constructor-argument inference: `Box(3)` unifies __init__'s
-      // parameter types with the argument types.
-      std::vector<ast::Type *> paramTypes;
+      // parameter types with the argument types, by the type parameters'
+      // names in the class body or the `impl` block it is in.
+      const ast::FuncDecl *init = nullptr;
+      const std::vector<const std::string *> *params = &tmpl->getTypeParams();
       for (auto *m : tmpl->getMethods())
         if (m->getName() == names::kMethodInit)
-          for (auto &p : m->getParams())
-            paramTypes.push_back(here(tmpl, p.ParamType));
-      if (!inferTypeArgs(callee, tmpl->getTypeParams(), paramTypes, argTypes,
-                         loc, typeArgs))
+          init = m;
+      if (auto impls = TemplateImpls.find(tmpl);
+          !init && impls != TemplateImpls.end())
+        for (auto *im : impls->second)
+          for (auto *m : im->getMethods())
+            if (!im->getTrait() && m->getName() == names::kMethodInit) {
+              init = m;
+              params = &im->getTypeParams();
+            }
+      std::vector<ast::Type *> paramTypes;
+      if (init)
+        for (auto &p : init->getParams())
+          paramTypes.push_back(here(tmpl, p.ParamType));
+      if (!inferTypeArgs(callee, *params, paramTypes, argTypes, loc, typeArgs))
         return false;
     }
     auto *ct = instantiateClass(callee, typeArgs, loc);
