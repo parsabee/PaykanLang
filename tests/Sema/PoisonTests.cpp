@@ -66,7 +66,8 @@ TEST(Poison, PoisonPropagatesThroughDerivedVariables) {
 // Every kind of use of a poisoned variable, one program each.
 TEST(Poison, EveryUseOfAPoisonedVariableIsSilent) {
   const std::string classes =
-      "class P {\n  x: int;\n  fn __init__(x: int) { self.x = x; }\n}\n"
+      "class P {\n  x: int;\n}\n"
+      "impl P {\n  fn __init__(x: int) { self.x = x; }\n}\n"
       "fn f(v: int) -> int { return v; }\n";
   const std::vector<std::string> uses = {
       "a.foo();",                                 // method call
@@ -326,8 +327,8 @@ const std::string kStdinMsg =
     "'Stdin' is a reserved name and cannot be used as a variable";
 const std::string kPointMsg =
     "'Point' is a type name and cannot be used as a variable";
-const std::string kPoint = "class Point { x: int; fn __init__() { self.x = "
-                           "0; } }\n";
+const std::string kPoint = "class Point { x: int; }\n"
+                           "impl Point { fn __init__() { self.x = 0; } }\n";
 
 } // namespace
 

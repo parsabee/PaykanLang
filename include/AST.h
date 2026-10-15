@@ -44,6 +44,8 @@ class Type;
 // Forward declaration — EnumDecl is defined later (after TranslationUnit) but
 // referenced by TranslationUnit's member vector.
 class EnumDecl;
+class ImplDecl;
+class TraitDecl;
 
 // Base AST node with LLVM-style RTTI
 class ASTNode {
@@ -56,6 +58,8 @@ public:
     NK_ImportDecl,
     NK_ClassDecl,
     NK_EnumDecl,
+    NK_ImplDecl,
+    NK_TraitDecl,
 
     // Statements
     NK_StmtBegin,
@@ -159,7 +163,7 @@ public:
   Decl(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_VarDecl && N->getKind() <= NK_EnumDecl;
+    return N->getKind() >= NK_VarDecl && N->getKind() <= NK_TraitDecl;
   }
 };
 
@@ -354,6 +358,10 @@ ParamModes paramModes(const std::vector<Param> &params);
 // Forward declaration for FuncDecl body.
 class CompoundStmt;
 
+/// The traits each type parameter must implement (`<T: Show + Eq>`), as
+/// written: empty, or one (possibly empty) list per type parameter.
+using TypeParamBounds = std::vector<std::vector<Type *>>;
+
 // Free function declaration:  fn name(params) -> retType { body }
 //
 // A generic function (`fn first<T>(xs: T[]) -> T`) carries its type parameter
@@ -368,6 +376,7 @@ private:
   CompoundStmt *Body;
   // Type parameter names (interned); empty for an ordinary function.
   std::vector<const std::string *> TypeParams;
+  TypeParamBounds Bounds;
   // An instantiation's type arguments, in TypeParams order; empty for a
   // declaration written by hand.
   std::vector<Type *> TypeArgs;
@@ -379,7 +388,8 @@ private:
   // The C symbol of a `native fn` (interned), which has no Body; nullptr for
   // an ordinary function (#198).
   const std::string *NativeSymbol = nullptr;
-  bool View = false; // `view fn`: a method that does not change `self`
+  bool View = false;   // `view fn`: a method that does not change `self`
+  bool Static = false; // `static fn`: an `impl` block's function, no `self`
   ParamMode ResultMode = ParamMode::Value; // `-> view T`
 
 public:
@@ -390,6 +400,8 @@ public:
         ReturnType(retTy), Body(body), TypeParams(std::move(typeParams)) {}
 
   const std::string &getName() const { return *Name; }
+  /// Sema names an `impl` block's `static fn` after its type (`A::make`).
+  void setName(const std::string &internedName) { Name = &internedName; }
   const std::vector<Param> &getParams() const { return Params; }
   /// Mutable access for Sema's canonical-type write-back (see VarDecl).
   std::vector<Param> &getMutableParams() { return Params; }
@@ -401,6 +413,8 @@ public:
     return TypeParams;
   }
   bool isGeneric() const { return !TypeParams.empty(); }
+  const TypeParamBounds &getTypeParamBounds() const { return Bounds; }
+  void setTypeParamBounds(TypeParamBounds b) { Bounds = std::move(b); }
 
   /// The type arguments Sema instantiated this function with (`first<int>`);
   /// a native one passes C a description of each.
@@ -428,6 +442,10 @@ public:
   /// (docs/language/04-classes.md, "Methods that don't change self").
   bool isView() const { return View; }
   void setView(bool view) { View = view; }
+
+  /// Declared `static fn` in an `impl` block: called as `Type::name()`.
+  bool isStatic() const { return Static; }
+  void setStatic(bool isStatic) { Static = isStatic; }
 
   /// `-> view T` (or `-> inout T`): the result is a borrow of what the
   /// function was given as one; Value for a copy.
@@ -981,6 +999,7 @@ public:
     None = 0,
     Private = 1 << 0,
     View = 1 << 1, // `view fn`: does not change `self`
+    Impl = 1 << 2, // in an `impl` block: called directly, never overridden
   };
 
 private:
@@ -1004,9 +1023,11 @@ public:
   void setParamModes(ParamModes modes) { Modes = std::move(modes); }
 
   bool isPrivate() const { return MethodFlags & Private; }
-  bool isVirtual() const { return !isPrivate(); }
+  bool isVirtual() const { return !isPrivate() && !isImpl(); }
   /// Only reads its object, so it can be called through a `view`.
   bool isView() const { return MethodFlags & View; }
+  /// Declared in an `impl` block: it has no vtable slot.
+  bool isImpl() const { return MethodFlags & Impl; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_MethodDecl;
@@ -1040,6 +1061,11 @@ class ClassType : public Type {
   // The class initialiser (__init__), stored separately because it is a
   // static function, not a virtual method, and has no vtable slot.
   MethodDecl *InitMethod = nullptr;
+
+  // The methods of its `impl` blocks, in declaration order.  They are called
+  // directly, so they have no vtable slot, and a subclass inherits them
+  // through findMethod.
+  std::vector<MethodDecl *> ImplMethods;
 
   // When true, no user class may inherit from this type.
   bool Final = false;
@@ -1134,12 +1160,20 @@ public:
 
   const std::vector<MethodDecl *> &getVTable() const { return VTable; }
   size_t getVTableSize() const { return VTable.size(); }
+  /// The `impl` methods this class declares (not its superclasses').
+  const std::vector<MethodDecl *> &getImplMethods() const {
+    return ImplMethods;
+  }
 
   /// Find the vtable slot index for a method name, or -1 if not found.
   int getVTableIndex(const std::string &name) const;
 
   /// Look up a method by name (searches this class and parents).
   MethodDecl *findMethod(const std::string &name) const;
+
+  /// The class, from this one up, whose `impl` block declares method
+  /// @p name, or nullptr.
+  ClassType *implOwner(const std::string &name);
 
   /// Returns true if this type is a subtype of (or equal to) Other.
   bool isSubtypeOf(const ClassType *other) const;
@@ -1218,6 +1252,7 @@ private:
   std::vector<FuncDecl *> Methods;
   // Type parameter names (interned); empty for an ordinary class.
   std::vector<const std::string *> TypeParams;
+  TypeParamBounds Bounds;
 
 public:
   ClassDecl(SourceLocation loc, const std::string &internedName,
@@ -1234,6 +1269,8 @@ public:
 
   const std::vector<VarDecl *> &getFields() const { return Fields; }
   const std::vector<FuncDecl *> &getMethods() const { return Methods; }
+  /// Sema adds the methods of the class's `impl` blocks.
+  void addMethod(FuncDecl *m) { Methods.push_back(m); }
   size_t getNumFields() const { return Fields.size(); }
   size_t getNumMethods() const { return Methods.size(); }
 
@@ -1241,6 +1278,8 @@ public:
     return TypeParams;
   }
   bool isGeneric() const { return !TypeParams.empty(); }
+  const TypeParamBounds &getTypeParamBounds() const { return Bounds; }
+  void setTypeParamBounds(TypeParamBounds b) { Bounds = std::move(b); }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_ClassDecl; }
 };
@@ -1260,6 +1299,8 @@ private:
   std::vector<EnumDecl *> EnumDecls;
   std::vector<ClassDecl *> GenericClassDecls;
   std::vector<FuncDecl *> GenericFuncDecls;
+  std::vector<ImplDecl *> ImplDecls;
+  std::vector<TraitDecl *> TraitDecls;
 
 public:
   TranslationUnit(SourceLocation loc, std::vector<ImportDecl *> imports,
@@ -1267,12 +1308,15 @@ public:
                   std::vector<FuncDecl *> funcs,
                   std::vector<EnumDecl *> enums = {},
                   std::vector<ClassDecl *> genericClasses = {},
-                  std::vector<FuncDecl *> genericFuncs = {})
+                  std::vector<FuncDecl *> genericFuncs = {},
+                  std::vector<ImplDecl *> impls = {},
+                  std::vector<TraitDecl *> traits = {})
       : ASTNode(NK_TranslationUnit, loc), Imports(std::move(imports)),
         ClassDecls(std::move(classes)), FuncDecls(std::move(funcs)),
         EnumDecls(std::move(enums)),
         GenericClassDecls(std::move(genericClasses)),
-        GenericFuncDecls(std::move(genericFuncs)) {}
+        GenericFuncDecls(std::move(genericFuncs)), ImplDecls(std::move(impls)),
+        TraitDecls(std::move(traits)) {}
 
   const std::vector<ImportDecl *> &getImports() const { return Imports; }
   const std::vector<ClassDecl *> &getClassDecls() const { return ClassDecls; }
@@ -1284,6 +1328,8 @@ public:
   const std::vector<FuncDecl *> &getGenericFuncDecls() const {
     return GenericFuncDecls;
   }
+  const std::vector<ImplDecl *> &getImplDecls() const { return ImplDecls; }
+  const std::vector<TraitDecl *> &getTraitDecls() const { return TraitDecls; }
 
   /// Append an instantiated function (Sema).
   void addFuncDecl(FuncDecl *fn) { FuncDecls.push_back(fn); }
@@ -1470,6 +1516,59 @@ public:
   size_t getNumVariants() const { return Variants.size(); }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_EnumDecl; }
+};
+
+// `impl A { ... }` (#216): methods added to an existing type and dispatched
+// statically, and its `static fn`s.  TypeName is the type as written
+// (`A`, `geo::Point`).  `impl Show for A { ... }` implements a trait, the
+// annotation Trait (`Show`, `Into<int>`); null for a plain `impl` block.
+class ImplDecl : public Decl {
+  const std::string *TypeName; // interned
+  std::vector<FuncDecl *> Methods;
+  Type *Trait;
+  std::vector<const std::string *> TypeParams; // `impl Box<T>`
+
+public:
+  ImplDecl(SourceLocation loc, const std::string &internedTypeName,
+           std::vector<FuncDecl *> methods, Type *trait = nullptr,
+           std::vector<const std::string *> typeParams = {})
+      : Decl(NK_ImplDecl, loc), TypeName(&internedTypeName),
+        Methods(std::move(methods)), Trait(trait),
+        TypeParams(std::move(typeParams)) {}
+
+  const std::string &getTypeName() const { return *TypeName; }
+  const std::vector<FuncDecl *> &getMethods() const { return Methods; }
+  Type *getTrait() const { return Trait; }
+  /// The generic type's parameters, by the names the block gives them.
+  const std::vector<const std::string *> &getTypeParams() const {
+    return TypeParams;
+  }
+
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_ImplDecl; }
+};
+
+// `trait Show { view fn toString() -> Str; }` (#216): the methods a type
+// implementing it must have.  Its methods are signatures only (no body);
+// `Self` in them is the implementing type.
+class TraitDecl : public Decl {
+  const std::string *Name; // interned
+  std::vector<const std::string *> TypeParams;
+  std::vector<FuncDecl *> Methods;
+
+public:
+  TraitDecl(SourceLocation loc, const std::string &internedName,
+            std::vector<const std::string *> typeParams,
+            std::vector<FuncDecl *> methods)
+      : Decl(NK_TraitDecl, loc), Name(&internedName),
+        TypeParams(std::move(typeParams)), Methods(std::move(methods)) {}
+
+  const std::string &getName() const { return *Name; }
+  const std::vector<const std::string *> &getTypeParams() const {
+    return TypeParams;
+  }
+  const std::vector<FuncDecl *> &getMethods() const { return Methods; }
+
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_TraitDecl; }
 };
 
 // Array literal expression: [expr, expr, ...] or []

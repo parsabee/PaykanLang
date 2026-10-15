@@ -32,6 +32,8 @@ add_executable(parser_tests
     Parser/GrammarEdgeTests.cpp
     Parser/ParamModeTests.cpp
     Parser/LetTests.cpp
+    Parser/ImplTests.cpp
+    Parser/TraitTests.cpp
 )
 target_include_directories(parser_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -76,6 +78,8 @@ add_executable(sema_tests
     Sema/ParamModeTests.cpp
     Sema/LetTests.cpp
     Sema/ViewFnTests.cpp
+    Sema/ImplTests.cpp
+    Sema/TraitTests.cpp
     Sema/BorrowedResultTests.cpp
 )
 target_include_directories(sema_tests
@@ -120,6 +124,7 @@ add_executable(codegen_tests
     CodeGen/GenericsTests.cpp
     CodeGen/OptionalTests.cpp
     CodeGen/OptionalPrimitiveTests.cpp
+    CodeGen/BufferTests.cpp
     CodeGen/TupleTests.cpp
     CodeGen/RegressionTests.cpp
     CodeGen/LiteralObjectTests.cpp
@@ -127,6 +132,8 @@ add_executable(codegen_tests
     CodeGen/HarnessTests.cpp
     CodeGen/ParamModeTests.cpp
     CodeGen/LetTests.cpp
+    CodeGen/ImplTests.cpp
+    CodeGen/TraitTests.cpp
 )
 target_include_directories(codegen_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -398,6 +405,7 @@ paykan_test_suite(runtime PAYKAN_TEST_SUITE_runtime)
 if(PAYKAN_TEST_SUITE_runtime)
 add_executable(runtime_tests
     Runtime/ArrayTests.cpp
+    Runtime/BufferTests.cpp
     Runtime/DeferredDestroyTests.cpp
     Runtime/EqualsNullTests.cpp
     Runtime/ObjectTests.cpp

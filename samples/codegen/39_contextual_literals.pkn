@@ -24,12 +24,18 @@
 
 class Node {
   v: int;
-  fn __init__(v: int) { self.v = v; }
   view fn toString() -> Str { return "N" + Str<int>(self.v); }
+}
+
+impl Node {
+  fn __init__(v: int) { self.v = v; }
 }
 
 class Slot {
   p: (Node?, int);
+}
+
+impl Slot {
   fn __init__() { self.p = (None, 0); }
 }
 

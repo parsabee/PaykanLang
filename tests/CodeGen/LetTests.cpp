@@ -13,7 +13,8 @@ using namespace paykan::test;
 TEST(Let, LocalsHoldValuesAndReferences) {
   LeakGuard guard;
   auto r = compileAndRun(R"(
-    class Point { x: int; fn __init__(x: int) { self.x = x; } }
+    class Point { x: int; }
+    impl Point { fn __init__(x: int) { self.x = x; } }
     fn main() -> int {
       let n = 3;
       let f: float = 2;

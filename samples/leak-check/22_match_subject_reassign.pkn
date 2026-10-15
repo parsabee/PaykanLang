@@ -12,13 +12,19 @@
 
 class A {
   s: Str;
-  fn __init__() { self.s = "a"; }
   view fn name() -> Str { return "A" + self.s; }
 }
 
+impl A {
+  fn __init__() { self.s = "a"; }
+}
+
 class B : A {
-  fn __init__() { __super__(); self.s = "bee"; }
   view fn name() -> Str { return "B" + self.s; }
+}
+
+impl B {
+  fn __init__() { __super__(); self.s = "bee"; }
 }
 
 fn main() -> int {

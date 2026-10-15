@@ -163,8 +163,11 @@ TEST(Module, QualifiedTypeParamRuns) {
   writeTempFile(tmpDir.string(), "geometry/point.pkn", R"(
 class Point {
   x: int; y: int;
-  fn __init__(x: int, y: int) { self.x = x; self.y = y; }
   fn sum() -> int { return self.x + self.y; }
+}
+
+impl Point {
+  fn __init__(x: int, y: int) { self.x = x; self.y = y; }
 }
 )");
 
@@ -191,8 +194,11 @@ TEST(Module, QualifiedTypeFieldRuns) {
   writeTempFile(tmpDir.string(), "geometry/point.pkn", R"(
 class Point {
   x: int; y: int;
-  fn __init__(x: int, y: int) { self.x = x; self.y = y; }
   fn sum() -> int { return self.x + self.y; }
+}
+
+impl Point {
+  fn __init__(x: int, y: int) { self.x = x; self.y = y; }
 }
 )");
 
@@ -200,8 +206,11 @@ class Point {
 import geometry::point;
 class Box {
   origin: point::Point;
-  fn __init__() { self.origin = point::Point(20, 22); }
   fn total() -> int { return self.origin.sum(); }
+}
+
+impl Box {
+  fn __init__() { self.origin = point::Point(20, 22); }
 }
 fn main() -> int { b = Box(); return b.total(); }
 )");
@@ -288,9 +297,12 @@ TEST(Module, ImportedGenerics) {
   writeTempFile(tmpDir.string(), "lib/gen.pkn", R"(
 class Box<T> {
   v: T;
-  fn __init__(v: T) { self.v = v; }
   view fn get() -> view T { return self.v; }
   fn set(v: T) { self.v = v; }
+}
+
+impl Box<T> {
+  fn __init__(v: T) { self.v = v; }
 }
 fn __bump(n: int) -> int { return n + 1; }
 fn sum<T>(xs: Box<T>[], f: int) -> int { return xs.len() + __bump(f); }
@@ -333,8 +345,11 @@ TEST(Module, CacheInvalidatesOnTransitiveLayoutChange) {
   writeTempFile(tmpDir.string(), "base.pkn", R"(
 class Point {
   x: int; y: int;
-  fn __init__(x: int, y: int) { self.x = x; self.y = y; }
   fn sum() -> int { return self.x + self.y; }
+}
+
+impl Point {
+  fn __init__(x: int, y: int) { self.x = x; self.y = y; }
 }
 fn make(a: int, b: int) -> Point { return Point(a, b); }
 )");
@@ -365,8 +380,11 @@ fn main() -> int { return mid::total(); }
   writeTempFile(tmpDir.string(), "base.pkn", R"(
 class Point {
   tag: int; x: int; y: int;
-  fn __init__(x: int, y: int) { self.tag = 100; self.x = x; self.y = y; }
   fn sum() -> int { return self.x + self.y; }
+}
+
+impl Point {
+  fn __init__(x: int, y: int) { self.tag = 100; self.x = x; self.y = y; }
 }
 fn make(a: int, b: int) -> Point { return Point(a, b); }
 )");

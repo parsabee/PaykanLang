@@ -28,6 +28,9 @@ class Node {
   v: int;
   name: Str;
   next: Node?;
+}
+
+impl Node {
   fn __init__(v: int) { self.v = v; self.name = "n"; }
 }
 
@@ -35,6 +38,9 @@ class Tree {
   left: Tree?;
   right: Tree?;
   leaves: Node?;
+}
+
+impl Tree {
   fn __init__() { }
 }
 

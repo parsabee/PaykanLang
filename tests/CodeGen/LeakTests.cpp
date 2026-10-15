@@ -107,7 +107,9 @@ TEST(Leak, ObjArray) {
 TEST(Leak, ClassEmpty) {
   LeakGuard g;
   auto r = compileAndRun(R"(
-    class Box {
+    class Box {}
+
+    impl Box {
       fn __init__() {}
     }
     fn main() -> int {
@@ -126,6 +128,9 @@ TEST(Leak, ClassStrField) {
   auto r = compileAndRun(R"(
     class Person {
       name: Str;
+    }
+
+    impl Person {
       fn __init__(n: Str) { self.name = n; }
     }
     fn main() -> int {
@@ -144,9 +149,14 @@ TEST(Leak, ClassInherit) {
   auto r = compileAndRun(R"(
     class Animal {
       name: Str;
+    }
+
+    impl Animal {
       fn __init__(n: Str) { self.name = n; }
     }
-    class Dog : Animal {
+    class Dog : Animal {}
+
+    impl Dog {
       fn __init__(n: Str) { __super__(n); }
     }
     fn main() -> int {
@@ -232,6 +242,9 @@ TEST(Leak, ClassObjectTransfer) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class Box { v: Str;
+    }
+
+    impl Box {
       fn __init__(s: Str) { self.v = s; }
     }
     fn main() -> int {
@@ -355,6 +368,9 @@ TEST(Leak, CallTemporaryInEquality) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class Thing { n: int;
+    }
+
+    impl Thing {
       fn __init__(x: int) { self.n = x; }
     }
     fn process() -> Obj { return Thing(5); }
@@ -391,6 +407,9 @@ TEST(Leak, CallRootedMemberChainAsValue) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class H { a: Str;
+    }
+
+    impl H {
       fn __init__() { self.a = "hello"; }
     }
     fn makeH() -> H { return H(); }
@@ -408,6 +427,9 @@ TEST(Leak, CallRootedMemberChainAsReceiver) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class H { a: Str;
+    }
+
+    impl H {
       fn __init__() { self.a = "hello"; }
     }
     fn makeH() -> H { return H(); }
@@ -425,9 +447,15 @@ TEST(Leak, CallRootedNestedMemberChain) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class H { a: Str;
+    }
+
+    impl H {
       fn __init__() { self.a = "deep"; }
     }
     class O { h: H;
+    }
+
+    impl O {
       fn __init__() { self.h = H(); }
     }
     fn makeO() -> O { return O(); }
@@ -449,6 +477,9 @@ TEST(Leak, MemberReadIntoImplicitVarRetains) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class H { a: Str;
+    }
+
+    impl H {
       fn __init__() { self.a = "hello"; }
     }
     fn main() -> int {
@@ -467,6 +498,9 @@ TEST(Leak, MemberReadRebindAndFieldToField) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class H { a: Str;
+    }
+
+    impl H {
       fn __init__(s: Str) { self.a = s; }
     }
     fn main() -> int {
@@ -493,6 +527,9 @@ TEST(Leak, MatchOnBorrowedFieldBox) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class H { a: Obj;
+    }
+
+    impl H {
       fn __init__() { self.a = "hello"; }
     }
     fn main() -> int {
@@ -574,6 +611,11 @@ TEST(Leak, EmptyArrayLiteralSinks) {
     class Bag {
       items: Str[];
       grid: Str[][];
+      fn reset() { self.items = []; self.items.push("reset"); }
+      fn take(xs: Str[]) -> int { xs.push("arg"); return xs.len(); }
+    }
+
+    impl Bag {
       fn __init__(seed: Str[]) {
         self.items = [];          // field store in the constructor
         self.grid = [[], []];     // nested empty literals
@@ -583,8 +625,6 @@ TEST(Leak, EmptyArrayLiteralSinks) {
         self.grid[1].push("g1");
         seed.push("seed");
       }
-      fn reset() { self.items = []; self.items.push("reset"); }
-      fn take(xs: Str[]) -> int { xs.push("arg"); return xs.len(); }
     }
     fn fresh() -> Str[] { return []; }
     fn fill(xs: Str[]) -> int { xs.push("fn"); return xs.len(); }
@@ -623,11 +663,14 @@ TEST(Leak, RefTypedArgsToUserMethods) {
   auto r = compileAndRun(R"(
     class Bag {
       xs: int[];
-      fn __init__() { self.xs = [1, 2]; }
       fn sum(ys: int[]) -> int { return ys[0] + ys[1]; }
       fn names(ns: Str[]) -> int { ns.push("m"); return ns.len(); }
       fn first(t: (int, Str)) -> Str { return t.1; }
       fn own() -> int { return self.sum(self.xs); }     // field argument
+    }
+
+    impl Bag {
+      fn __init__() { self.xs = [1, 2]; }
     }
     fn mk() -> int[] { return [10, 20]; }
     fn main() -> int {

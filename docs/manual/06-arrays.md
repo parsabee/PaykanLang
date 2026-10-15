@@ -140,6 +140,9 @@ Each inner array is its own array, with its own length:
 class City {
   name: Str;
   people: int;
+}
+
+impl City {
   fn __init__(name: Str, people: int) { self.name = name; self.people = people; }
 }
 
@@ -182,16 +185,17 @@ using it rather than letting a bad one panic:
 class Task {
   title: Str;
   done: bool;
-  fn __init__(title: Str) { self.title = title; self.done = False; }
   view fn toString() -> Str {
     return (if self.done then "[x] " else "[ ] ") + self.title;
   }
 }
 
+impl Task {
+  fn __init__(title: Str) { self.title = title; self.done = False; }
+}
+
 class TaskList {
   tasks: Task[];
-
-  fn __init__() { self.tasks = []; }
 
   fn add(title: Str) { self.tasks.push(Task(title)); }
 
@@ -233,6 +237,10 @@ class TaskList {
     }
     println(Str(self.pending()) + " of " + Str(self.tasks.len()) + " to do");
   }
+}
+
+impl TaskList {
+  fn __init__() { self.tasks = []; }
 }
 
 fn main() -> int {

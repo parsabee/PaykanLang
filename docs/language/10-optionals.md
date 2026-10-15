@@ -15,6 +15,9 @@ nothing — never a `Str` — and a `count: int?` is an `int` or nothing.
 class Node {
   v: int;
   next: Node?;                       // implicitly None
+}
+
+impl Node {
   fn __init__(x: int) { self.v = x; }
 }
 
@@ -220,6 +223,9 @@ A field of type `T?` need not be assigned in `__init__`; it starts as `None`:
 class Node {
   v: int;
   next: Node?;                       // None until assigned
+}
+
+impl Node {
   fn __init__(x: int) { self.v = x; }
 }
 ```

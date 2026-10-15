@@ -134,9 +134,12 @@ fn opposite(d: Direction) -> Direction {
 ```pkn
 class Player {
   facing: Direction;
-  fn __init__(d: Direction) { self.facing = d; }
   fn turnAround()  { self.facing = opposite(self.facing); }
   fn report() -> Str { return dirName(self.facing); }
+}
+
+impl Player {
+  fn __init__(d: Direction) { self.facing = d; }
 }
 ```
 

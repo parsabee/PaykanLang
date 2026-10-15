@@ -360,6 +360,16 @@ std::string typeName(Type *ty) {
     return typeName(at->getElementType()) + "[]";
   if (auto *ot = dyn_cast<OptionalType>(ty))
     return typeName(ot->getInnerType()) + "?";
+  if (auto *gt = dyn_cast<GenericType>(ty)) {
+    // An annotation not resolved yet: `Box<int>`, a bound `Into<int>`.
+    std::string s = gt->getName() + "<";
+    for (size_t i = 0; i < gt->getNumArgs(); ++i) {
+      if (i)
+        s += ", ";
+      s += typeName(gt->getArgs()[i]);
+    }
+    return s + ">";
+  }
   if (auto *tt = dyn_cast<TupleType>(ty)) {
     // "(int, Str)" — the same spelling the parser accepts, so the serialised
     // form round-trips through module export (SemaImport::resolveExportedType

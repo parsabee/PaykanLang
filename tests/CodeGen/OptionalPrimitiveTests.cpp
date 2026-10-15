@@ -223,7 +223,6 @@ TEST(OptionalPrimitive, FieldsStartAsNoneAndAreReleased) {
       ok: bool?;
       tag: char?;
       count: int?;
-      fn __init__() { }
       fn get() -> int? { return self.count; }
       fn bump() {
         match self.count {
@@ -231,6 +230,10 @@ TEST(OptionalPrimitive, FieldsStartAsNoneAndAreReleased) {
           None { self.count = 1; }
         }
       }
+    }
+
+    impl Reading {
+      fn __init__() { }
     }
     fn main() -> int {
       r = Reading();
@@ -344,14 +347,21 @@ TEST(OptionalPrimitive, InoutAndViewOptionals) {
       match o { n: view int { return Str<int>(n); } None { return "None"; } }
     }
     class Base {
-      fn __init__() { }
       fn pick(c: bool) -> char? { return None; }
     }
+
+    impl Base {
+      fn __init__() { }
+    }
     class Derived : Base {
-      fn __init__() { __super__(); }
       fn pick(c: bool) -> char? { if (c) { return 'd'; } return None; }
     }
-    class Box2 { n: int?; f: float?; fn __init__() { } }
+
+    impl Derived {
+      fn __init__() { __super__(); }
+    }
+    class Box2 { n: int?; f: float?; }
+    impl Box2 { fn __init__() { } }
     fn main() -> int {
       x: int? = None;
       bump(x); bump(x);
@@ -383,14 +393,20 @@ TEST(OptionalPrimitive, GenericArgumentsAndOptionalOfTypeParameter) {
   auto r = compileAndRun(R"pkn(
     class Cell<T> {
       v: T;
-      fn __init__(x: T) { self.v = x; }
       fn get() -> T { return self.v; }
+    }
+
+    impl Cell<T> {
+      fn __init__(x: T) { self.v = x; }
     }
     class Slot<T> {
       v: T?;
-      fn __init__() { }
       fn put(x: T) { self.v = x; }
       fn take() -> T? { r = self.v; self.v = None; return r; }
+    }
+
+    impl Slot<T> {
+      fn __init__() { }
     }
     fn wrap<T>(x: T) -> T? { return x; }
     fn orElse<T>(o: T?, d: T) -> T { match o { v: T { return v; } None { return d; } } }
@@ -496,22 +512,28 @@ TEST(OptionalPrimitive, GenericStackPopsAnOptional) {
   auto r = compileAndRun(R"pkn(
     class Stack<T> {
       items: T[];
-      fn __init__() { self.items = []; }
       fn push(x: T) { self.items.push(x); }
       fn pop() -> T? {
         if (self.items.len() == 0) { return None; }
         return self.items.pop();
       }
     }
+
+    impl Stack<T> {
+      fn __init__() { self.items = []; }
+    }
     class Slots<T> {
       s: T?[];
+      fn put(i: int, x: T) { self.s[i] = x; }
+      fn get(i: int) -> T? { return self.s[i]; }
+    }
+
+    impl Slots<T> {
       fn __init__(n: int) {
         self.s = [];
         i = 0;
         while (i < n) { self.s.push(None); i = i + 1; }
       }
-      fn put(i: int, x: T) { self.s[i] = x; }
-      fn get(i: int) -> T? { return self.s[i]; }
     }
     fn main() -> int {
       st = Stack<int>();

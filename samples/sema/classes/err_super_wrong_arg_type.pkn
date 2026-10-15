@@ -1,9 +1,13 @@
 // ERROR: __super__ called with wrong argument type
-class Animal {
+class Animal {}
+
+impl Animal {
   fn __init__(x: int) {}
 }
 
-class Dog : Animal {
+class Dog : Animal {}
+
+impl Dog {
   fn __init__() {
     __super__(True);  // bool is not assignable to int
   }

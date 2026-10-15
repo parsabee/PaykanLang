@@ -2,6 +2,9 @@
 // — the instantiation depth guard stops the expansion.
 class Bad<T> {
   inner: Bad<Bad<T>>;
+}
+
+impl Bad<T> {
   fn __init__() {}
 }
 

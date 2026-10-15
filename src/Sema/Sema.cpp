@@ -112,6 +112,13 @@ bool Sema::checkDeclNameAvailable(const std::string &name,
       error(loc, "'" + name + "' is already declared as a function");
     return false;
   }
+  if (auto t = Traits.find(name); t != Traits.end()) {
+    error(loc,
+          t->second.IsBuiltin
+              ? "'" + name + "' is a builtin trait and cannot be redeclared"
+              : "'" + name + "' is already declared as a trait");
+    return false;
+  }
   // Generic templates share the namespace: a class name is also its
   // constructor, and a generic function is called like any other.
   if (ClassTemplates.count(name)) {
@@ -451,6 +458,14 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     return Ctx.lookupEnumType(et->getName());
 
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
+    // `Self` in a method is its class (in a trait, the implementing type).
+    if (ct->getName() == names::kSelfType) {
+      if (ast::ClassType *self =
+              SelfType
+                  ? SelfType
+                  : (CurrentClassCtx ? CurrentClassCtx->ClassType : nullptr))
+        return self;
+    }
     // The parser emits a ClassType stub for any unknown type name; it may in
     // fact be an enum, which is resolved here before falling back to classes.
     if (auto *enumTy = Ctx.lookupEnumType(ct->getName()))
@@ -461,6 +476,13 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
       error(loc, context + " names generic class '" + ct->getName() +
                      "' without type arguments (write '" + ct->getName() +
                      "<...>')");
+      return nullptr;
+    }
+    if (Traits.count(ct->getName())) {
+      error(loc, context + " names trait '" + ct->getName() +
+                     "', which is not a type (use a type parameter bounded "
+                     "by it: '<T: " +
+                     ct->getName() + ">')");
       return nullptr;
     }
     if (!isFailedImportUse(ct->getName()))
@@ -1067,6 +1089,19 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   else
     ct = ast::dyn_cast<ast::ClassType>(recvTy);
 
+  // `n.toString()` on an int, float, bool or char: the builtin `Show`.
+  if (!ct && ast::isa<ast::BuiltinType>(recvTy) &&
+      recvTy != S.Ctx.getVoidTy() &&
+      node->getMethodName() == names::kMethodToString) {
+    if (node->getNumArguments() != 0) {
+      S.error(node->getLocation(), "method 'toString' expects 0 argument(s), "
+                                   "got " +
+                                       std::to_string(node->getNumArguments()));
+      return nullptr;
+    }
+    node->setResolvedType(S.Ctx.getStrTy());
+    return S.Ctx.getStrTy();
+  }
   if (!ct) {
     S.error(node->getLocation(),
             "method call on non-class type '" + typeName(recvTy) + "'");
@@ -1661,6 +1696,8 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
     sig.Modes.Names.assign(sig.ParamTypes.size(), "value");
   }
 
+  registerBuiltinTraits();
+
   // Process imports before local declarations.
   StringSet localImportStack, localFailedModules;
   if (!ImportStack)
@@ -1881,6 +1918,17 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
 
 bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   bool ok = rejectFreeViewFns(node);
+  if (!rejectBodyInits(node))
+    ok = false;
+
+  // Traits by name first: no other declaration may take one's name.
+  if (!declareTraits(node))
+    ok = false;
+  // `impl` blocks by their class, whose methods they join in checkClassDecls
+  // (a generic class's, in registerGenericTemplates, when instantiated).
+  for (auto *im : node->getImplDecls())
+    if (im->getTypeParams().empty())
+      ImplsByClass[im->getTypeName()].push_back(im);
 
   // Register enum types first so that class fields, parameters, and variable
   // declarations can reference them by name during the passes that follow.
@@ -1900,6 +1948,17 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   if (!node->getClassDecls().empty())
     if (!checkClassDecls(node->getClassDecls()))
       ok = false;
+  // Then the traits' signatures, which may name the classes, and the
+  // `impl` blocks, which record what implements a trait; only then can a
+  // template's bounds be checked (SemaTraits.cpp).
+  if (!checkTraitDecls(node))
+    ok = false;
+  if (!checkImplDecls(node))
+    ok = false;
+  if (!checkBoundDecls(node))
+    ok = false;
+  if (!checkPendingBounds())
+    ok = false;
 
   // Forward-declare every free function's signature next, so that any body —
   // a free function OR a class method — may call any module-level function
@@ -2003,6 +2062,8 @@ bool Sema::checkEntryPoint(ast::TranslationUnit *tu,
 
 // -- Declarations
 
+bool Sema::visitImplDecl(ast::ImplDecl *) { return true; }
+bool Sema::visitTraitDecl(ast::TraitDecl *) { return true; }
 bool Sema::visitEnumDecl(ast::EnumDecl *node) {
   // Reject names that collide with a builtin, class, function, or existing
   // enum (the primitive type keywords cannot be spelled as identifiers).

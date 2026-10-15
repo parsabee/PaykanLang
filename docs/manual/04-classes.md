@@ -6,20 +6,15 @@ in `tasks` becomes an object.
 
 ## Declaring a class
 
-A class lists its **fields** (each with a type) and then its **methods**. The method called
-`__init__` is the constructor; it runs when an object is created and must give every field a
-value. Inside methods, `self` is the object the method was called on. You never write
-`self` in a parameter list:
+A class lists its **fields** (each with a type) and then its **methods**. Its constructor,
+the method called `__init__`, goes in an `impl` block for the class; it runs when an object
+is created and must give every field a value. Inside methods, `self` is the object the
+method was called on. You never write `self` in a parameter list:
 
 ```pkn
 class Counter {
   name: Str;
   count: int;
-
-  fn __init__(name: Str) {
-    self.name = name;
-    self.count = 0;
-  }
 
   fn increment() {
     self.count = self.count + 1;
@@ -27,6 +22,13 @@ class Counter {
 
   view fn report() -> Str {
     return self.name + ": " + Str(self.count);
+  }
+}
+
+impl Counter {
+  fn __init__(name: Str) {
+    self.name = name;
+    self.count = 0;
   }
 }
 
@@ -70,9 +72,12 @@ was given, so only `view fn` methods can be called on one:
 ```pkn
 class Account {
   balance: int;
-  fn __init__(start: int) { self.balance = start; }
   fn deposit(amount: int) { self.balance = self.balance + amount; }
   view fn report() -> Str { return "balance " + Str(self.balance); }
+}
+
+impl Account {
+  fn __init__(start: int) { self.balance = start; }
 }
 
 fn show(a: view Account) {
@@ -99,9 +104,12 @@ what to fix:
 ```pkn
 class Account {
   balance: int;
-  fn __init__(start: int) { self.balance = start; }
   fn deposit(amount: int) { self.balance = self.balance + amount; }
   view fn report() -> Str { self.balance = 0; return "empty"; }
+}
+
+impl Account {
+  fn __init__(start: int) { self.balance = start; }
 }
 
 fn show(a: view Account) {
@@ -140,6 +148,9 @@ it:
 ```pkn
 class Box {
   value: int;
+}
+
+impl Box {
   fn __init__(v: int) { self.value = v; }
 }
 
@@ -179,23 +190,32 @@ statement:
 ```pkn
 class Animal {
   name: Str;
-  fn __init__(name: Str) { self.name = name; }
   view fn sound() -> Str { return "..."; }
   view fn speak() -> Str { return self.name + " says " + self.sound(); }
 }
 
+impl Animal {
+  fn __init__(name: Str) { self.name = name; }
+}
+
 class Dog : Animal {
-  fn __init__(name: Str) { __super__(name); }
   view fn sound() -> Str { return "woof"; }
+}
+
+impl Dog {
+  fn __init__(name: Str) { __super__(name); }
 }
 
 class Cat : Animal {
   lives: int;
+  view fn sound() -> Str { return "meow"; }
+}
+
+impl Cat {
   fn __init__(name: Str) {
     __super__(name);
     self.lives = 9;
   }
-  view fn sound() -> Str { return "meow"; }
 }
 
 fn main() -> int {
@@ -252,7 +272,6 @@ of the right class:
 class Point {
   x: int;
   y: int;
-  fn __init__(x: int, y: int) { self.x = x; self.y = y; }
 
   view fn toString() -> Str {
     return "(" + Str(self.x) + ", " + Str(self.y) + ")";
@@ -264,6 +283,10 @@ class Point {
       _        { return False; }
     }
   }
+}
+
+impl Point {
+  fn __init__(x: int, y: int) { self.x = x; self.y = y; }
 }
 
 fn main() -> int {
@@ -297,14 +320,21 @@ A `match` on an object compares its **exact** runtime class against each arm, an
 the form `name: Class` binds the object with that type:
 
 ```pkn
-class Shape { fn __init__() {} }
+class Shape {}
+impl Shape { fn __init__() {} }
 class Circle : Shape {
   r: float;
+}
+
+impl Circle {
   fn __init__(r: float) { __super__(); self.r = r; }
 }
 class Rect : Shape {
   w: float;
   h: float;
+}
+
+impl Rect {
   fn __init__(w: float, h: float) { __super__(); self.w = w; self.h = h; }
 }
 
@@ -346,11 +376,6 @@ class Task {
   title: Str;
   done: bool;
 
-  fn __init__(title: Str) {
-    self.title = title;
-    self.done = False;
-  }
-
   fn complete() { self.done = True; }
 
   view fn checkbox() -> Str {
@@ -362,16 +387,25 @@ class Task {
   }
 }
 
+impl Task {
+  fn __init__(title: Str) {
+    self.title = title;
+    self.done = False;
+  }
+}
+
 class DeadlineTask : Task {
   due: Str;
 
+  view fn toString() -> Str {
+    return self.checkbox() + " " + self.title + " (due " + self.due + ")";
+  }
+}
+
+impl DeadlineTask {
   fn __init__(title: Str, due: Str) {
     __super__(title);
     self.due = due;
-  }
-
-  view fn toString() -> Str {
-    return self.checkbox() + " " + self.title + " (due " + self.due + ")";
   }
 }
 

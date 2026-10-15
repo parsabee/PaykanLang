@@ -399,104 +399,111 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       ok = false;
       continue;
     }
-    // Resolve return type.
-    ast::Type *retTy = Ctx.getVoidTy();
-    if (method->getReturnType()) {
-      retTy = resolveType(method->getReturnType(), method->getLocation(),
-                          "method '" + method->getName() + "' in '" +
-                              cd->getName() + "'");
-      if (!retTy) {
-        ok = false;
-        continue;
-      }
-      method->setReturnType(retTy);
-    }
-    // Resolve parameter types.
-    std::vector<ast::Type *> paramTys;
-    bool paramsOk = true;
-    for (auto &p : method->getMutableParams()) {
-      // `self` is the implicit receiver of every method; a parameter of the
-      // same name would silently shadow it in the body scope.
-      if (p.getName() == names::kSelf) {
-        error(method->getLocation(),
-              "'" + std::string(names::kSelf) +
-                  "' cannot be used as a parameter name of method '" +
-                  method->getName() + "' in class '" + cd->getName() +
-                  "'; it is the implicit receiver");
-        paramsOk = false;
-        ok = false;
-        break;
-      }
-      if (!checkBinderName(p.getName(), method->getLocation())) {
-        paramsOk = false;
-        ok = false;
-        break;
-      }
-      auto *pty =
-          resolveType(p.ParamType, method->getLocation(),
-                      "parameter '" + p.getName() + "' of method '" +
-                          method->getName() + "' in '" + cd->getName() + "'");
-      if (!pty) {
-        paramsOk = false;
-        ok = false;
-        break;
-      }
-      p.ParamType = pty;
-      paramTys.push_back(pty);
-    }
-    if (!paramsOk)
-      continue;
-
-    // -- override signature check
-    // If this method overrides a base-class method (same name found by
-    // walking up the inheritance chain), the override must have an identical
-    // signature: same parameter types and return type.  Strict equality is
-    // enforced (no covariance).  __init__ is excluded — it is a per-class
-    // constructor, not a virtual override.
-    if (method->getName() != names::kMethodInit) {
-      if (auto *super = ct->getSuperClass()) {
-        if (auto *baseMethod = super->findMethod(method->getName())) {
-          if (!checkOverrideModes(method, baseMethod))
-            ok = false;
-          const auto &baseParams = baseMethod->getParamTypes();
-          bool sigMatches = typesEqual(baseMethod->getReturnType(), retTy) &&
-                            baseParams.size() == paramTys.size();
-          for (size_t i = 0; sigMatches && i < paramTys.size(); ++i)
-            sigMatches = typesEqual(baseParams[i], paramTys[i]);
-          if (!sigMatches) {
-            error(method->getLocation(),
-                  "override of '" +
-                      signatureString(super, baseMethod->getName(),
-                                      baseMethod->getReturnType(),
-                                      baseMethod->getParamTypes()) +
-                      "' has incompatible signature '" +
-                      signatureString(ct, method->getName(), retTy, paramTys) +
-                      "'");
-            ok = false;
-          }
-        }
-      }
-    }
-
-    // `view fn`: not on __init__, and kept by an override.
+    // __init__ is a per-class constructor, not a virtual override.
     const ast::MethodDecl *overridden = nullptr;
     if (method->getName() != names::kMethodInit && ct->getSuperClass())
       overridden = ct->getSuperClass()->findMethod(method->getName());
-    if (!checkViewFnDecl(method, overridden))
+    if (overridden && overridden->isImpl()) {
+      error(method->getLocation(),
+            "method '" + method->getName() + "' of '" +
+                ct->implOwner(method->getName())->getName() +
+                "' is declared in an 'impl' block and cannot be overridden");
       ok = false;
-    if (!checkResultDecl(method, /*method=*/true))
+      continue;
+    }
+    if (auto *mdecl =
+            declareMethod(method, ct, overridden, ast::MethodDecl::None, ok))
+      ct->addMethod(mdecl);
+    else
       ok = false;
-
-    auto *mdecl = Ctx.make<ast::MethodDecl>(
-        method->getLocation(), method->getName(), retTy, std::move(paramTys),
-        method->isView() ? ast::MethodDecl::View : ast::MethodDecl::None);
-    ast::ParamModes modes = ast::paramModes(method->getParams());
-    modes.Result = method->getResultMode();
-    mdecl->setParamModes(std::move(modes));
-    ct->addMethod(mdecl);
   }
+  if (!populateImplMethods(cd, ct))
+    ok = false;
   PopulatedClasses.insert(cd->getName());
   return ok;
+}
+
+ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::ClassType *ct,
+                                     const ast::MethodDecl *overridden,
+                                     uint8_t flags, bool &ok) {
+  const std::string &className = ct->getName();
+  struct SelfGuard {
+    ast::ClassType *&Slot, *Saved;
+    ~SelfGuard() { Slot = Saved; }
+  } selfGuard{SelfType, SelfType};
+  SelfType = ct;
+  // Resolve return type.
+  ast::Type *retTy = Ctx.getVoidTy();
+  if (method->getReturnType()) {
+    retTy = resolveType(method->getReturnType(), method->getLocation(),
+                        "method '" + method->getName() + "' in '" + className +
+                            "'");
+    if (!retTy)
+      return nullptr;
+    method->setReturnType(retTy);
+  }
+  // Resolve parameter types.
+  std::vector<ast::Type *> paramTys;
+  for (auto &p : method->getMutableParams()) {
+    // `self` is the implicit receiver of every method; a parameter of the
+    // same name would silently shadow it in the body scope.
+    if (p.getName() == names::kSelf) {
+      error(method->getLocation(),
+            "'" + std::string(names::kSelf) +
+                "' cannot be used as a parameter name of method '" +
+                method->getName() + "' in class '" + className +
+                "'; it is the implicit receiver");
+      return nullptr;
+    }
+    if (!checkBinderName(p.getName(), method->getLocation()))
+      return nullptr;
+    auto *pty = resolveType(p.ParamType, method->getLocation(),
+                            "parameter '" + p.getName() + "' of method '" +
+                                method->getName() + "' in '" + className + "'");
+    if (!pty)
+      return nullptr;
+    p.ParamType = pty;
+    paramTys.push_back(pty);
+  }
+
+  // -- override signature check
+  // An override must have an identical signature: same parameter types and
+  // return type.  Strict equality is enforced (no covariance).
+  if (overridden) {
+    if (!checkOverrideModes(method, overridden))
+      ok = false;
+    const auto &baseParams = overridden->getParamTypes();
+    bool sigMatches = typesEqual(overridden->getReturnType(), retTy) &&
+                      baseParams.size() == paramTys.size();
+    for (size_t i = 0; sigMatches && i < paramTys.size(); ++i)
+      sigMatches = typesEqual(baseParams[i], paramTys[i]);
+    if (!sigMatches) {
+      error(method->getLocation(),
+            "override of '" +
+                signatureString(ct->getSuperClass(), overridden->getName(),
+                                overridden->getReturnType(),
+                                overridden->getParamTypes()) +
+                "' has incompatible signature '" +
+                signatureString(ct, method->getName(), retTy, paramTys) + "'");
+      ok = false;
+    }
+  }
+
+  // `view fn`: not on __init__, and kept by an override.
+  if (!checkViewFnDecl(method, overridden))
+    ok = false;
+  if (!checkResultDecl(method, /*method=*/true))
+    ok = false;
+
+  if (method->isView())
+    flags |= ast::MethodDecl::View;
+  auto *mdecl =
+      Ctx.make<ast::MethodDecl>(method->getLocation(), method->getName(), retTy,
+                                std::move(paramTys), flags);
+  ast::ParamModes modes = ast::paramModes(method->getParams());
+  modes.Result = method->getResultMode();
+  mdecl->setParamModes(std::move(modes));
+  return mdecl;
 }
 
 void Sema::declareConstructor(ast::ClassDecl *cd, ast::ClassType *ct) {
@@ -511,6 +518,149 @@ void Sema::declareConstructor(ast::ClassDecl *cd, ast::ClassType *ct) {
   declareFunction(cd->getName(), ct, ctorParams);
   if (initDecl)
     FunctionTable[cd->getName()].Modes = initDecl->getParamModes();
+}
+
+// -- impl blocks
+//
+// An `impl` block's methods join its class: checked like the class body's,
+// but called directly instead of through the vtable, so a subclass cannot
+// override one, and none may take a name the class or a superclass already
+// has.  Its `static fn`s become the module's functions `Type::name`.
+
+/// The class, from @p ct up, that introduces method @p name.
+static const ast::ClassType *methodOwner(const ast::ClassType *ct,
+                                         const std::string &name) {
+  while (ct->getSuperClass() && ct->getSuperClass()->findMethod(name))
+    ct = ct->getSuperClass();
+  return ct;
+}
+
+bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct) {
+  auto it = ImplsByClass.find(cd->getName());
+  if (it == ImplsByClass.end())
+    return true;
+  bool ok = true;
+  for (auto *im : it->second)
+    for (auto *fn : im->getMethods()) {
+      if (fn->isStatic())
+        continue;
+      const std::string &name = fn->getName();
+      // __init__ is the same here as in the class body: the class's own,
+      // never inherited or called through the vtable.
+      const bool init = name == names::kMethodInit;
+      if (ct->findMethod(name)) {
+        const ast::ClassType *owner = init ? ct : methodOwner(ct, name);
+        error(fn->getLocation(),
+              "class '" + cd->getName() + "' already has a method '" + name +
+                  "'" +
+                  (owner == ct ? "" : " (from '" + owner->getName() + "')"));
+        ok = false;
+        continue;
+      }
+      if (auto *md = declareMethod(
+              fn, ct, nullptr,
+              init ? ast::MethodDecl::None : ast::MethodDecl::Impl, ok)) {
+        ct->addMethod(md);
+        cd->addMethod(fn); // checked and lowered with the class body
+      } else {
+        ok = false;
+      }
+    }
+  return ok;
+}
+
+bool Sema::rejectBodyInits(ast::TranslationUnit *tu) {
+  bool ok = true;
+  for (auto *cds : {&tu->getClassDecls(), &tu->getGenericClassDecls()})
+    for (auto *cd : *cds)
+      for (auto *m : cd->getMethods()) {
+        if (m->getName() != names::kMethodInit)
+          continue;
+        std::string impl = cd->getName();
+        const auto &params = cd->getTypeParams();
+        for (size_t i = 0; i < params.size(); ++i)
+          (impl += i ? ", " : "<") += *params[i];
+        if (!params.empty())
+          impl += ">";
+        std::string msg = "'";
+        msg += names::kMethodInit;
+        msg += "' goes in an 'impl' block, not the class body: write 'impl ";
+        msg += impl;
+        msg += " { fn ";
+        msg += names::kMethodInit;
+        msg += "(...) { ... } }'";
+        error(m->getLocation(), msg);
+        ok = false;
+      }
+  return ok;
+}
+
+bool Sema::checkImplDecls(ast::TranslationUnit *tu) {
+  StringSet localClasses;
+  for (auto *cd : tu->getClassDecls())
+    localClasses.insert(cd->getName());
+  bool ok = true;
+  for (auto *im : tu->getImplDecls()) {
+    const std::string &name = im->getTypeName();
+    // A generic class's, checked in registerGenericTemplates.
+    if (auto t = ClassTemplates.find(name);
+        t != ClassTemplates.end() && !foreignOrigin(t->second))
+      continue;
+    if (ErroneousNames.count(name)) {
+      ok = false; // a dropped class was reported with its declaration
+      continue;
+    }
+    auto *ct = Ctx.lookupClassType(name);
+    ast::Type *named = Ctx.lookupType(name);
+    std::string why;
+    if ((ct && ct->isBuiltin()) || (named && ast::isa<ast::BuiltinType>(named)))
+      why = "'" + name +
+            "' is a built-in type; an 'impl' block cannot add "
+            "methods to it";
+    else if ((ct && !localClasses.count(name)) || ClassTemplates.count(name))
+      why = "an 'impl' block for a class of another module is not supported "
+            "yet";
+    else if (Ctx.lookupEnumType(name))
+      why = "an 'impl' block for an enum is not supported yet";
+    else if (ct && !im->getTypeParams().empty()) {
+      why = "'" + name + "' is not a generic class: write 'impl ";
+      why += name + "'";
+    } else if (!ct && !isFailedImportUse(name))
+      why = "'impl' for undefined class '" + name + "'";
+    if (!why.empty())
+      error(im->getLocation(), why);
+    if (!ct || !why.empty()) {
+      ok = false;
+      continue;
+    }
+    if (im->getTrait()) {
+      if (!checkTraitImpl(im, ct))
+        ok = false;
+      continue;
+    }
+    for (auto *fn : im->getMethods()) {
+      if (!fn->isStatic())
+        continue;
+      if (ct->findMethod(fn->getName())) {
+        error(fn->getLocation(), "class '" + name + "' already has a method '" +
+                                     fn->getName() + "'");
+        ok = false;
+        continue;
+      }
+      fn->setName(Ctx.intern(name + names::kQualSep + fn->getName()));
+      tu->addFuncDecl(fn);
+    }
+  }
+  ImplsChecked = true;
+  for (const auto &p : PendingTraitImpls) {
+    InstantiationStack.push_back(p.Request);
+    OriginSource inOrigin(Diags, p.Origin);
+    if (!checkTraitImpl(p.Impl, p.Class))
+      ok = false;
+    InstantiationStack.pop_back();
+  }
+  PendingTraitImpls.clear();
+  return ok;
 }
 
 bool Sema::checkClassBodies() {
@@ -793,6 +943,50 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
     }
     FuncTemplates[fn->getName()] = fn;
   }
+
+  // The `impl` blocks of the generic classes: each instantiation gets a copy
+  // (instantiateClass).  One of another module's is checkImplDecls's to
+  // reject.
+  for (auto *im : tu->getImplDecls()) {
+    const std::string &name = im->getTypeName();
+    auto t = ClassTemplates.find(name);
+    if (t == ClassTemplates.end() || foreignOrigin(t->second))
+      continue;
+    const auto &params = im->getTypeParams();
+    const auto &want = t->second->getTypeParams();
+    ast::SourceLocation loc = im->getLocation();
+    std::string why;
+    if (params.empty()) {
+      why = "'";
+      why += name;
+      why += "' is a generic class: write 'impl ";
+      why += name;
+      for (size_t i = 0; i < want.size(); ++i)
+        (why += i ? ", " : "<") += *want[i];
+      why += ">'";
+    } else if (params.size() != want.size()) {
+      why = "'impl ";
+      why += name;
+      why += "' names " + std::to_string(params.size());
+      why += " type parameter(s); generic class '";
+      why += name;
+      why += "' has " + std::to_string(want.size());
+    }
+    for (auto *fn : im->getMethods())
+      if (why.empty() && fn->isStatic()) {
+        why = "a 'static fn' in the 'impl' block of a generic class is not "
+              "supported yet";
+        loc = fn->getLocation();
+      }
+    if (!why.empty())
+      error(loc, why);
+    if (!why.empty() ||
+        !checkTypeParams(params, "'impl' block for", name, im->getLocation())) {
+      ok = false;
+      continue;
+    }
+    TemplateImpls[t->second].push_back(im);
+  }
   return ok;
 }
 
@@ -851,6 +1045,8 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
                      "arguments");
     else if (FuncTemplates.count(name))
       error(loc, "'" + name + "' is a generic function, not a generic class");
+    else if (Traits.count(name))
+      error(loc, "'" + name + "' is a trait, not a type");
     else
       error(loc, "unknown generic class '" + name + "'");
     return nullptr;
@@ -862,6 +1058,9 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
                    " type argument(s), got " + std::to_string(args.size()));
     return nullptr;
   }
+  if (!checkBounds(tmpl, name, tmpl->getTypeParams(),
+                   tmpl->getTypeParamBounds(), args, loc))
+    return nullptr;
 
   // Class names are global across imports, so an instantiation is named by
   // its template's own name, however it was spelled here.
@@ -923,6 +1122,16 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     subst[*tmpl->getTypeParams()[i]] = args[i];
   ast::ASTCloner cloner(Ctx, std::move(subst), nullptr, origin != nullptr);
   ast::ClassDecl *clone = cloner.cloneClassDecl(tmpl, instName);
+  // And its `impl` blocks, each by its own names for the type parameters.
+  std::vector<ast::ImplDecl *> &impls = ImplsByClass[instName];
+  if (auto it = TemplateImpls.find(tmpl); it != TemplateImpls.end())
+    for (auto *im : it->second) {
+      Subst s;
+      for (size_t i = 0; i < args.size(); ++i)
+        s[*im->getTypeParams()[i]] = args[i];
+      ast::ASTCloner c(Ctx, std::move(s), nullptr, origin != nullptr);
+      impls.push_back(c.cloneImplDecl(im, instName));
+    }
 
   const InstantiationFrame request = frameAt(instName, loc);
   InstantiationStack.push_back(request);
@@ -973,6 +1182,14 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     ok = false;
   if (ok)
     declareConstructor(clone, ct);
+  for (auto *im : ImplsByClass[instName]) {
+    if (!ok || !im->getTrait())
+      continue;
+    if (!ImplsChecked)
+      PendingTraitImpls.push_back({im, ct, request, origin});
+    else if (!checkTraitImpl(im, ct))
+      ok = false;
+  }
   InstantiationStack.pop_back();
 
   if (!ok) {
@@ -1017,6 +1234,9 @@ std::string Sema::instantiateFunction(const std::string &name,
                    " type argument(s), got " + std::to_string(args.size()));
     return "";
   }
+  if (!checkBounds(tmpl, name, tmpl->getTypeParams(),
+                   tmpl->getTypeParamBounds(), args, loc))
+    return "";
 
   // Function names are per module: another module's template is
   // instantiated under that module's hidden qualifier.
@@ -1250,14 +1470,26 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
     ast::ClassDecl *tmpl = it->second;
     if (typeArgs.empty()) {
       // Constructor-argument inference: `Box(3)` unifies __init__'s
-      // parameter types with the argument types.
-      std::vector<ast::Type *> paramTypes;
+      // parameter types with the argument types, by the type parameters'
+      // names in the class body or the `impl` block it is in.
+      const ast::FuncDecl *init = nullptr;
+      const std::vector<const std::string *> *params = &tmpl->getTypeParams();
       for (auto *m : tmpl->getMethods())
         if (m->getName() == names::kMethodInit)
-          for (auto &p : m->getParams())
-            paramTypes.push_back(here(tmpl, p.ParamType));
-      if (!inferTypeArgs(callee, tmpl->getTypeParams(), paramTypes, argTypes,
-                         loc, typeArgs))
+          init = m;
+      if (auto impls = TemplateImpls.find(tmpl);
+          !init && impls != TemplateImpls.end())
+        for (auto *im : impls->second)
+          for (auto *m : im->getMethods())
+            if (!im->getTrait() && m->getName() == names::kMethodInit) {
+              init = m;
+              params = &im->getTypeParams();
+            }
+      std::vector<ast::Type *> paramTypes;
+      if (init)
+        for (auto &p : init->getParams())
+          paramTypes.push_back(here(tmpl, p.ParamType));
+      if (!inferTypeArgs(callee, *params, paramTypes, argTypes, loc, typeArgs))
         return false;
     }
     auto *ct = instantiateClass(callee, typeArgs, loc);
