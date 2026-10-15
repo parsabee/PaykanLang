@@ -14,9 +14,12 @@ namespace {
 const char *kBox = R"(
   class Box<T> {
     v: T;
-    fn __init__(v: T) { self.v = v; }
     fn get() -> T { return self.v; }
     fn set(v: T) { self.v = v; }
+  }
+
+  impl Box<T> {
+    fn __init__(v: T) { self.v = v; }
   }
 )";
 
@@ -60,7 +63,8 @@ CheckedProgram check(const std::string &source) {
 // argument tuple, like Array<T>), and the annotation slots are rewritten to it.
 TEST(Generics, SameInstantiationIsSameClassType) {
   auto r = check(withMain(std::string(kBox) + R"(
-    class Holder { b: Box<int>; fn __init__() { self.b = Box<int>(1); } }
+    class Holder { b: Box<int>; }
+    impl Holder { fn __init__() { self.b = Box<int>(1); } }
     fn take(a: Box<int>, b: Box<int>) -> Box<int> { return a; }
   )",
                           "x: Box<int> = Box<int>(2); take(x, x);"));
@@ -137,14 +141,20 @@ TEST(Generics, InstantiationAsFieldParamReturnAndArray) {
   auto r = semaCheck(withMain(std::string(kBox) + R"(
     class Pair<K, V> {
       k: K; v: V;
-      fn __init__(k: K, v: V) { self.k = k; self.v = v; }
       fn key() -> K { return self.k; }
+    }
+
+    impl Pair<K, V> {
+      fn __init__(k: K, v: V) { self.k = k; self.v = v; }
     }
     class Holder {
       b: Box<int>;
       ps: Pair<Str, int>[];
-      fn __init__() { self.b = Box<int>(1); self.ps = []; }
       fn get() -> Box<int> { return self.b; }
+    }
+
+    impl Holder {
+      fn __init__() { self.b = Box<int>(1); self.ps = []; }
     }
     fn unwrap(b: Box<int>) -> int { return b.get(); }
     fn nest(b: Box<Box<int>>) -> int { return b.get().get(); }
@@ -181,8 +191,11 @@ TEST(Generics, RecursiveInstantiationInFieldIsFine) {
     class Node<T> {
       v: T;
       next: Obj;
-      fn __init__(v: T) { self.v = v; self.next = None; }
       fn link(n: Node<T>) { self.next = n; }
+    }
+
+    impl Node<T> {
+      fn __init__(v: T) { self.v = v; self.next = None; }
     }
   )",
                               "a = Node<int>(1); a.link(Node<int>(2));"));
@@ -191,11 +204,15 @@ TEST(Generics, RecursiveInstantiationInFieldIsFine) {
 
 TEST(Generics, GenericClassWithConcreteSuperclass) {
   auto r = semaCheck(withMain(R"(
-    class Base { n: int; fn __init__(n: int) { self.n = n; } fn num() -> int { return self.n; } }
+    class Base { n: int; fn num() -> int { return self.n; } }
+    impl Base { fn __init__(n: int) { self.n = n; } }
     class Wrap<T> : Base {
       v: T;
-      fn __init__(v: T, n: int) { __super__(n); self.v = v; }
       fn get() -> T { return self.v; }
+    }
+
+    impl Wrap<T> {
+      fn __init__(v: T, n: int) { __super__(n); self.v = v; }
     }
   )",
                               "w: Wrap<Str> = Wrap<Str>(\"a\", 5); "
@@ -208,8 +225,11 @@ TEST(Generics, UninstantiatedTemplateBodyIsNotChecked) {
   auto r = semaCheck(withMain(R"(
     class Broken<T> {
       v: T;
-      fn __init__(v: T) { self.v = v; }
       fn bad() -> int { return undefined_name; }
+    }
+
+    impl Broken<T> {
+      fn __init__(v: T) { self.v = v; }
     }
   )",
                               ""));
@@ -276,8 +296,11 @@ TEST(Generics, ErrorInsideInstantiationNamesIt) {
   auto r = semaCheck(withMain(R"(
     class Adder<T> {
       v: T;
-      fn __init__(v: T) { self.v = v; }
       fn twice() -> T { return self.v + self.v; }
+    }
+
+    impl Adder<T> {
+      fn __init__(v: T) { self.v = v; }
     }
   )",
                               "a = Adder<bool>(True);"));
@@ -292,8 +315,11 @@ TEST(Generics, ErrorInsideInstantiationNamesIt) {
   auto r2 = semaCheck(withMain(R"(
     class Adder<T> {
       v: T;
-      fn __init__(v: T) { self.v = v; }
       fn twice() -> T { return self.v + self.v; }
+    }
+
+    impl Adder<T> {
+      fn __init__(v: T) { self.v = v; }
     }
   )",
                                "a = Adder<int>(1); n: int = a.twice();"));
@@ -325,8 +351,10 @@ TEST(Generics, TypeParamUsedAsValue) {
 }
 
 TEST(Generics, DuplicateTypeParam) {
-  auto r = semaCheck(withMain(
-      "class P<T, T> { a: T; fn __init__(a: T) { self.a = a; } }", ""));
+  auto r =
+      semaCheck(withMain("class P<T, T> { a: T; }\n"
+                         "impl P<T, T> { fn __init__(a: T) { self.a = a; } }",
+                         ""));
   EXPECT_FALSE(r.Ok);
   EXPECT_TRUE(
       has(r.Diagnostics, "duplicate type parameter 'T' in generic class 'P'"))
@@ -336,7 +364,8 @@ TEST(Generics, DuplicateTypeParam) {
 TEST(Generics, TypeParamShadowsType) {
   auto r = semaCheck(withMain(R"(
     class Foo {}
-    class Bar<Foo> { x: Foo; fn __init__(x: Foo) { self.x = x; } }
+    class Bar<Foo> { x: Foo; }
+    impl Bar<Foo> { fn __init__(x: Foo) { self.x = x; } }
   )",
                               ""));
   EXPECT_FALSE(r.Ok);
@@ -372,9 +401,9 @@ TEST(Generics, TemplateNameCollisions) {
 }
 
 TEST(Generics, InstantiationDepthGuard) {
-  auto r = semaCheck(
-      withMain("class Bad<T> { inner: Bad<Bad<T>>; fn __init__() {} }",
-               "b: Bad<int> = Bad<int>();"));
+  auto r = semaCheck(withMain("class Bad<T> { inner: Bad<Bad<T>>; }\n"
+                              "impl Bad<T> { fn __init__() {} }",
+                              "b: Bad<int> = Bad<int>();"));
   EXPECT_FALSE(r.Ok);
   EXPECT_TRUE(has(r.Diagnostics, "exceeds the maximum instantiation depth"))
       << r.Diagnostics;
@@ -447,7 +476,9 @@ TEST(Generics, ConstructorArgumentInference) {
                                     "c: Box<Str> = Box(\"s\");"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 
-  auto r2 = semaCheck(withMain("class E<T> { fn __init__() {} }", "e = E();"));
+  auto r2 = semaCheck(withMain("class E<T> {}\n"
+                               "impl E<T> { fn __init__() {} }",
+                               "e = E();"));
   EXPECT_FALSE(r2.Ok);
   EXPECT_TRUE(has(r2.Diagnostics, "cannot infer type parameter 'T' of 'E'"))
       << r2.Diagnostics;
@@ -480,7 +511,8 @@ SemaResult semaCheckFile(const std::string &path) {
 }
 
 const char *kGenLib = R"(
-class Box<T> { v: T; fn __init__(v: T) { self.v = v; } view fn get() -> view T { return self.v; } }
+class Box<T> { v: T; view fn get() -> view T { return self.v; } }
+impl Box<T> { fn __init__(v: T) { self.v = v; } }
 fn mk() -> Box<int> { return Box<int>(41); }
 fn first<T>(xs: T[]) -> T { return xs[0]; }
 )";
@@ -514,7 +546,8 @@ TEST(Generics, ImportedTemplates) {
       {"t5", "import lib::gen;\n"
              "fn wrap<T>(x: T) -> gen::Box<T> { return gen::Box<T>(x); }\n"
              "fn head<T>(xs: T[]) -> T { return gen::first<T>(xs); }\n"
-             "class W<T> { b: gen::Box<T>; fn __init__(x: T) { "
+             "class W<T> { b: gen::Box<T>; }\n"
+             "impl W<T> { fn __init__(x: T) { "
              "self.b = gen::Box<T>(x); } }\n"
              "fn main() -> int { w = W<int>(1); s = W<Str>(\"a\"); "
              "t: Str = head([\"t\"]); return wrap(2).get() + head([1]); }"},
@@ -536,11 +569,15 @@ TEST(Generics, ImportedTemplateBodiesUseTheirModule) {
   writeProjectFile(dir, "other.pkn", "fn ten() -> Str { return \"x\"; }\n");
   writeProjectFile(dir, "lib/gen.pkn", R"(
 import lib::util as u;
-class Inner { n: int; fn __init__() { self.n = __helper(); } }
+class Inner { n: int; }
+impl Inner { fn __init__() { self.n = __helper(); } }
 class Box<T> {
   v: T;
-  fn __init__(v: T) { self.v = v; }
   view fn total() -> int { i = Inner(); return i.n + u::ten(); }
+}
+
+impl Box<T> {
+  fn __init__(v: T) { self.v = v; }
 }
 fn __helper() -> int { return 1; }
 fn sum<T>(b: Box<T>) -> int { return b.total() + __helper(); }
@@ -564,7 +601,8 @@ TEST(Generics, ImportedInstantiationsAreOneClass) {
   auto dir = paykan::test::tempDir() / "pkn_sema_generics_imp_one";
   std::filesystem::remove_all(dir);
   writeProjectFile(dir, "lib/gen.pkn", R"(
-class Box<T> { v: T; fn __init__(v: T) { self.v = v; } view fn get() -> view T { return self.v; } }
+class Box<T> { v: T; view fn get() -> view T { return self.v; } }
+impl Box<T> { fn __init__(v: T) { self.v = v; } }
 fn own() -> Box<int> { return Box<int>(1); }
 fn none<T>(b: Box<T>) -> T[] { xs: T[] = []; return xs; }
 )");
@@ -672,7 +710,8 @@ fn main() -> int { b = gen::mk(); n: int = b.get(); return n; }
   // … but the importer's own `Box<int>` would clash with it by name.
   auto p2 = writeProjectFile(dir, "clash.pkn", R"(
 import lib::gen;
-class Box<T> { v: T; fn __init__(v: T) { self.v = v; } }
+class Box<T> { v: T; }
+impl Box<T> { fn __init__(v: T) { self.v = v; } }
 fn main() -> int { b = Box<int>(1); return 0; }
 )");
   auto r2 = semaCheckFile(p2);
@@ -688,8 +727,9 @@ fn main() -> int { b = Box<int>(1); return 0; }
     auto r3 = semaCheckFile(writeProjectFile(
         dir, "clash2.pkn",
         std::string("import lib::gen;\n"
-                    "class Box<T> { v: T; fn __init__(v: T) { self.v = v; } "
-                    "}\nfn main() -> int { ") +
+                    "class Box<T> { v: T; }\n"
+                    "impl Box<T> { fn __init__(v: T) { self.v = v; } }\n"
+                    "fn main() -> int { ") +
             body + " return 0; }\n"));
     EXPECT_FALSE(r3.Ok) << body;
     EXPECT_EQ(r3.ErrorCount, 1u) << r3.Diagnostics;
@@ -706,17 +746,24 @@ fn main() -> int { b = Box<int>(1); return 0; }
 // per instantiation (tuple literals, `.N`, destructuring, `T?`, match arms).
 TEST(GenericsTypes, TupleAndOptionalBodiesInstantiate) {
   auto r = semaCheck(R"(
-    class Node { v: int; fn __init__(x: int) { self.v = x; } }
+    class Node { v: int; }
+    impl Node { fn __init__(x: int) { self.v = x; } }
     class Pair<A, B> {
       p: (A, B);
-      fn __init__(a: A, b: B) { self.p = (a, b); }
       fn first() -> A { x, _ = self.p; return x; }
       fn swap() -> (B, A) { return (self.p.1, self.p.0); }
     }
+
+    impl Pair<A, B> {
+      fn __init__(a: A, b: B) { self.p = (a, b); }
+    }
     class Slot<T> {
       v: T?;
-      fn __init__() { }
       fn get() -> T? { return self.v; }
+    }
+
+    impl Slot<T> {
+      fn __init__() { }
     }
     fn orElse<T>(x: T?, d: T) -> T {
       match x {
@@ -737,7 +784,8 @@ TEST(GenericsTypes, TupleAndOptionalBodiesInstantiate) {
 
 TEST(GenericsTypes, InferenceThroughTuplesAndOptionals) {
   auto r = semaCheck(R"(
-    class Node { v: int; fn __init__(x: int) { self.v = x; } }
+    class Node { v: int; }
+    impl Node { fn __init__(x: int) { self.v = x; } }
     fn firstOf<A, B>(p: (A, B)) -> A { return p.0; }
     fn unwrapOr<T>(x: T?, d: T) -> T {
       match x {
@@ -784,9 +832,12 @@ TEST(GenericsTypes, OptionalOfPrimitiveArgumentIsAccepted) {
   auto r = semaCheck(R"(
     class Slot<T> {
       v: T?;
-      fn __init__() { }
       fn put(x: T) { self.v = x; }
       fn get() -> T? { return self.v; }
+    }
+
+    impl Slot<T> {
+      fn __init__() { }
     }
     fn main() -> int {
       b = Slot<int>();
@@ -799,7 +850,8 @@ TEST(GenericsTypes, OptionalOfPrimitiveArgumentIsAccepted) {
 
   auto re = semaCheck(R"(
     enum Color { Red, Green }
-    class Slot<T> { v: T?; fn __init__() { } }
+    class Slot<T> { v: T?; }
+    impl Slot<T> { fn __init__() { } }
     fn main() -> int { b = Slot<Color>(); return 0; }
   )");
   EXPECT_FALSE(re.Ok);
@@ -810,7 +862,8 @@ TEST(GenericsTypes, OptionalOfPrimitiveArgumentIsAccepted) {
       << re.Diagnostics;
 
   auto rn = semaCheck(R"(
-    class Slot<T> { v: T?; fn __init__() { } }
+    class Slot<T> { v: T?; }
+    impl Slot<T> { fn __init__() { } }
     fn main() -> int { b = Slot<int?>(); return 0; }
   )");
   EXPECT_FALSE(rn.Ok);
@@ -820,7 +873,8 @@ TEST(GenericsTypes, OptionalOfPrimitiveArgumentIsAccepted) {
 
   // Likewise an optional tuple (not supported yet, see #15).
   auto r2 = semaCheck(R"(
-    class Slot<T> { v: T?; fn __init__() { } }
+    class Slot<T> { v: T?; }
+    impl Slot<T> { fn __init__() { } }
     fn main() -> int { b = Slot<(int, Str)>(); return 0; }
   )");
   EXPECT_FALSE(r2.Ok);
@@ -831,9 +885,10 @@ TEST(GenericsTypes, OptionalOfPrimitiveArgumentIsAccepted) {
 }
 
 TEST(GenericsTypes, TupleAndOptionalTypeArgs) {
-  auto r = semaCheck(
-      withMain(std::string(kBox) + "class Node { fn __init__() { } }\n",
-               R"(
+  auto r = semaCheck(withMain(std::string(kBox) +
+                                  "class Node {}\n"
+                                  "impl Node { fn __init__() { } }\n",
+                              R"(
     a: Box<(int, Str)> = Box<(int, Str)>((1, "a"));
     t: (int, Str) = a.get();
     n: Node? = None;
@@ -849,8 +904,10 @@ TEST(GenericsTypes, ExportedInstantiationNamesWithCommasAndArrays) {
   auto dir = paykan::test::tempDir() / "pkn_sema_generics_names";
   std::filesystem::remove_all(dir);
   writeProjectFile(dir, "lib.pkn", R"(
-class Pair<A, B> { a: A; b: B; fn __init__(a: A, b: B) { self.a = a; self.b = b; } fn first() -> A { return self.a; } }
-class Box<T> { v: T; fn __init__(v: T) { self.v = v; } fn get() -> T { return self.v; } }
+class Pair<A, B> { a: A; b: B; fn first() -> A { return self.a; } }
+impl Pair<A, B> { fn __init__(a: A, b: B) { self.a = a; self.b = b; } }
+class Box<T> { v: T; fn get() -> T { return self.v; } }
+impl Box<T> { fn __init__(v: T) { self.v = v; } }
 fn mkPair() -> Pair<Str, int> { return Pair<Str, int>("k", 1); }
 fn mkBoxArr() -> Box<int[]> { return Box<int[]>([1, 2, 3]); }
 fn mkBoxes() -> (Pair<Str, int>, Box<int[]>?) { b: Box<int[]>? = None; return (mkPair(), b); }
