@@ -904,7 +904,8 @@ TEST(Lowering, OptionalIntoObjSubstitutesTheNoneSingleton) {
 // or released for it.
 TEST(Lowering, OptionalValuesAreNotBoxed) {
   auto l = lower(R"(
-    class C { n: int?; fn __init__() { } }
+    class C { n: int?; }
+    impl C { fn __init__() { } }
     fn half(n: int) -> int? {
       if (n % 2 != 0) { return None; }
       return n / 2;
