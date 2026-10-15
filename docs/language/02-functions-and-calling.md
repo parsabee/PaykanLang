@@ -484,23 +484,36 @@ the Paykan runtime (`Runtime.h`).  It is how a library implements what Paykan
 cannot express itself, such as the standard library's file I/O (#198):
 
 ```pkn
-native fn __io_write(fd: int, s: Str) -> int = "paykan_io_write";
+native fn __io_write(fd: int, s: view Str) -> int = "paykan_io_write";
 ```
 
 The string is the C symbol.  The rest of the program calls the function like
-any other.  Only these types can cross into C, with the runtime's own
-convention:
+any other.
+
+Only `int`, `float`, `bool` and `char` cross into C by value.  Any other
+parameter is a `view`, which C borrows for the call, or an `inout`, which
+C changes in place: a call never shares a reference with C, so it costs no
+reference counting (`parameter 's' must be 'view' or 'inout' ('s: view
+Str'); only int, float, bool and char cross into C by value`).  Only these
+types cross, with the runtime's own convention:
 
 | Paykan | C | Notes |
 |--------|---|-------|
-| `int`, `float`, `bool`, `char` | `int64_t`, `double`, `bool`, `int8_t` | by value |
-| `Str`, `Obj` parameter | `PaykanObject *` | borrowed for the call; the C code must not keep it without a retain |
+| `int`, `float`, `bool`, `char` | `int64_t`, `double`, `bool`, `int8_t` | by value, or a `view` |
+| `inout int`, ... | `int64_t *`, `double *`, `bool *`, `int8_t *` | the caller's variable |
+| `view Str`, `view Obj` | `PaykanObject *` | borrowed for the call; the C code must not keep it without a retain |
+| `inout Str`, `inout Obj` | `PaykanShared **` | the caller's box: to replace it, release it and store an owned box (never `NULL`) |
 | `Str`, `Obj` result | `PaykanShared *` | owned (+1); never `NULL` |
 | `Str?`, `Obj?` result | `PaykanShared *` | owned (+1); `NULL` is `None` |
 
-A native function cannot be a method and cannot be `main`.  A parameter can
-be a `view`, which C borrows as it does a copy, and the result can be a `view`
-of one (`-> view T` needs a `view` parameter); `inout` doesn't apply yet (#21).
+The result can be a `view` of a `view` or `inout` parameter (`-> view T`);
+it is returned owned, like a copy.  A native function cannot be a method,
+cannot return `inout`, and cannot be `main`.
+
+A call in the module that declares the function calls C directly, lending
+the caller's own references (a temporary argument is released after the
+call).  A call from another module goes through the function's Paykan body,
+which holds a reference to each argument for the call.
 
 ### Generic native functions
 
@@ -510,20 +523,23 @@ function types by a type parameter crosses by address, so a value of any type,
 of any size, crosses:
 
 ```pkn
-native fn pick<T>(first: bool, a: T, b: T) -> T = "sample_pick";
+native fn pick<T>(first: bool, a: view T, b: view T) -> T = "sample_pick";
+native fn swap<T>(a: inout T, b: inout T) = "sample_swap";
 native fn get<T>(b: view Obj, i: int) -> view T = "sample_get";
 ```
 
 ```c
 void sample_pick(const PaykanType *t, void *out, bool first, const void *a,
                  const void *b);
+void sample_swap(const PaykanType *t, void *a, void *b);
 const void *sample_get(const PaykanType *t, PaykanObject *b, int64_t i);
 ```
 
 | Paykan | C |
 |--------|---|
 | a type argument | `const PaykanType *`, ahead of the arguments |
-| `x: T`, `x: view T` | `const void *`: the value's address, borrowed for the call |
+| `x: view T` | `const void *`: the value's address, borrowed for the call |
+| `x: inout T` | `void *`: the caller's storage, which C may change (`PaykanType_drop` the old value, then store an owned one) |
 | `-> T` | `void *out`, after the `PaykanType`s: storage C fills, owning the references it writes |
 | `-> view T` | `const void *` returned: the address of a value in a `view` argument, which the caller copies |
 | anything else | as in a non-generic native function |
@@ -535,7 +551,9 @@ offset `<< 1`, `| 1` if it may be `NULL` (`PaykanType_ref`).  An `int` or a
 `float` is 8 bytes, a `bool` or a `char` 1, and a reference, an array or a
 tuple an 8-byte `PaykanShared *` box (`NULL` for an optional's `None`).
 `PaykanType_copy` copies a value, retaining its references, and
-`PaykanType_drop` releases them.  See `samples/imports/15_native_generic`.
+`PaykanType_drop` releases them.  A parameter typed by a type parameter is a
+`view` or an `inout` (`x: T` is rejected whatever `T` will be).  See
+`samples/imports/15_native_generic`.
 
 `paykan` does not build native code: you compile it however you like (any
 compiler, flags or language that produces C-ABI symbols) and pass the objects
