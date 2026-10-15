@@ -359,8 +359,10 @@ fn main() -> int { return foo::val(); }
 static const char *const kPointModule =
     "class Point {\n"
     "  x: int; y: int;\n"
-    "  fn __init__(x: int, y: int) { self.x = x; self.y = y; }\n"
     "  fn getX() -> int { return self.x; }\n"
+    "}\n"
+    "impl Point {\n"
+    "  fn __init__(x: int, y: int) { self.x = x; self.y = y; }\n"
     "}\n";
 
 TEST(Module, QualifiedTypeParamOk) {
@@ -412,8 +414,11 @@ TEST(Module, QualifiedTypeFieldOk) {
 import geometry::point;
 class Box {
   origin: point::Point;
-  fn __init__() { self.origin = point::Point(0, 0); }
   fn x() -> int { return self.origin.getX(); }
+}
+
+impl Box {
+  fn __init__() { self.origin = point::Point(0, 0); }
 }
 fn main() -> int { b = Box(); return b.x(); }
 )");
@@ -597,8 +602,11 @@ TEST(Module, EnumAsClassFieldTypeIdentityOk) {
 import pal::color;
 class Widget {
   tint: color::Color;
-  fn __init__(t: color::Color) { self.tint = t; }
   fn tintName() -> Str { return color::name(self.tint); }
+}
+
+impl Widget {
+  fn __init__(t: color::Color) { self.tint = t; }
 }
 fn makeBlue() -> Widget { return Widget(color::Color::Blue); }
 )");
@@ -661,7 +669,7 @@ fn main() -> int { return add(1) + math::add(1, 2); }
 TEST(Module, LocalFunctionNamedLikeImportedClassErr) {
   auto tmp = (paykan::test::tempDir() / "pkn_ms_fn_vs_impcls").string();
   std::filesystem::remove_all(tmp);
-  writeFile(tmp, "shapes.pkn", "class Box { fn __init__() {} }\n");
+  writeFile(tmp, "shapes.pkn", "class Box {}\nimpl Box { fn __init__() {} }\n");
   auto main = writeFile(tmp, "main.pkn", R"(
 import shapes;
 fn Box() -> int { return 0; }
@@ -885,9 +893,11 @@ TEST(Module, TypeClashNamesModulesCanonically) {
   auto tmp = (paykan::test::tempDir() / "pkn_ms_clash_names").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "data/list.pkn",
-            "class Node { v: int; fn __init__() { self.v = 1; } }\n");
+            "class Node { v: int; }\n"
+            "impl Node { fn __init__() { self.v = 1; } }\n");
   writeFile(tmp, "data/tree.pkn",
-            "class Node { l: int; fn __init__() { self.l = 0; } }\n");
+            "class Node { l: int; }\n"
+            "impl Node { fn __init__() { self.l = 0; } }\n");
   auto main = writeFile(tmp, "main.pkn", R"(
 import data::list;
 import data::tree as t;

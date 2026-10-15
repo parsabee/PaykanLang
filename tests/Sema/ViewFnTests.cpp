@@ -53,12 +53,14 @@ void expectAll(const SemaResult &r, std::initializer_list<const char *> diags) {
 TEST(ViewFn, SelfIsReadOnly) {
   auto r = semaCheck(R"(class Child {
   k: int;
-  fn __init__() { self.k = 0; }
   fn tick() { self.k = self.k + 1; }
+}
+
+impl Child {
+  fn __init__() { self.k = 0; }
 }
 class Counter {
   n: int; c: Child; xs: int[];
-  fn __init__() { self.n = 0; self.c = Child(); self.xs = [1]; }
   fn tick() { self.n = self.n + 1; }
   view fn a() { self.n = 1; }
   view fn b() { self.tick(); }
@@ -76,33 +78,37 @@ class Counter {
     return self.n + self.xs.len() + self.c.k;
   }
 }
+
+impl Counter {
+  fn __init__() { self.n = 0; self.c = Child(); self.xs = [1]; }
+}
 fn bump(n: inout int) { n = n + 1; }
 fn keep(c: Child) { }
 fn main() -> int { return 0; }
 )");
   EXPECT_EQ(r.ErrorCount, 10u) << r.Diagnostics;
   expectAll(r, {
-                   ":10:17: error: 'self' is read-only in 'view fn a'; cannot "
+                   ":12:17: error: 'self' is read-only in 'view fn a'; cannot "
                    "assign to its field 'n'",
-                   ":11:17: error: 'self' is read-only in 'view fn b'; 'tick' "
+                   ":13:17: error: 'self' is read-only in 'view fn b'; 'tick' "
                    "is not a 'view fn'",
-                   ":12:23: error: 'self' is read-only in 'view fn c2'; it "
+                   ":14:23: error: 'self' is read-only in 'view fn c2'; it "
                    "cannot be passed to 'inout' parameter 'n'",
-                   ":13:17: error: 'self' is read-only in 'view fn d'; 'tick' "
+                   ":15:17: error: 'self' is read-only in 'view fn d'; 'tick' "
                    "is not a 'view fn'",
-                   ":14:17: error: 'self' is read-only in 'view fn e'; 'push' "
+                   ":16:17: error: 'self' is read-only in 'view fn e'; 'push' "
                    "is not a 'view fn'",
-                   ":15:17: error: 'self' is read-only in 'view fn f'; cannot "
+                   ":17:17: error: 'self' is read-only in 'view fn f'; cannot "
                    "assign to its elements",
-                   ":16:22: error: 'self' is read-only in 'view fn g'; it can "
+                   ":18:22: error: 'self' is read-only in 'view fn g'; it can "
                    "only be passed to a 'view' parameter, and parameter 1 of "
                    "'keep' is not one",
-                   ":17:21: error: 'self' is read-only in 'view fn h'; it "
+                   ":19:21: error: 'self' is read-only in 'view fn h'; it "
                    "cannot be stored, only read or passed to a 'view' "
                    "parameter",
-                   ":18:28: error: 'self' is read-only in 'view fn i'; it "
+                   ":20:28: error: 'self' is read-only in 'view fn i'; it "
                    "cannot be named by 'inout' local 't'",
-                   ":19:37: error: 'self' is read-only in 'view fn child', so "
+                   ":21:37: error: 'self' is read-only in 'view fn child', so "
                    "part of it can only be returned as a 'view': write '-> "
                    "view Child'",
                });
@@ -119,7 +125,8 @@ class Sub : Base {
   view fn get() -> int { return 2; }
   fn show() -> Str { return "s"; }
 }
-class Pt { x: int; view fn __init__() { self.x = 0; } }
+class Pt { x: int; }
+impl Pt { view fn __init__() { self.x = 0; } }
 view fn free() { }
 class Shape { view fn toString() -> Str { return "s"; } }
 class Bad { fn toString() -> Str { return "b"; } }
@@ -132,11 +139,11 @@ fn main() -> int { return 0; }
                 "method it overrides may change 'self'",
                 ":7:3: error: override of 'show' must be a 'view fn', like "
                 "the method it overrides",
-                ":9:20: error: '__init__' cannot be a 'view fn': it sets up "
+                ":10:11: error: '__init__' cannot be a 'view fn': it sets up "
                 "'self'",
-                ":10:1: error: only a method can be a 'view fn': 'free' is a "
+                ":11:1: error: only a method can be a 'view fn': 'free' is a "
                 "free function, with no 'self'",
-                ":12:13: error: override of 'toString' must be a 'view fn', "
+                ":13:13: error: override of 'toString' must be a 'view fn', "
                 "like the method it overrides",
             });
 }
@@ -146,9 +153,12 @@ fn main() -> int { return 0; }
 TEST(ViewFn, LetCanCallAnyMethod) {
   auto r = semaCheck(R"(class Counter {
   n: int;
-  fn __init__() { self.n = 0; }
   fn tick() { self.n = self.n + 1; }
   view fn get() -> int { return self.n; }
+}
+
+impl Counter {
+  fn __init__() { self.n = 0; }
 }
 fn main() -> int {
   let c = Counter();
@@ -169,14 +179,20 @@ fn main() -> int {
 TEST(ViewFn, CallableOnAView) {
   auto r = semaCheck(R"(class Counter {
   n: int;
-  fn __init__() { self.n = 0; }
   fn tick() { self.n = self.n + 1; }
   view fn get() -> int { return self.n; }
   view fn toString() -> Str { return "c" + Str(self.n); }
 }
+
+impl Counter {
+  fn __init__() { self.n = 0; }
+}
 class Fast : Counter {
-  fn __init__() { __super__(); }
   view fn get() -> int { return 2 * self.n; }
+}
+
+impl Fast {
+  fn __init__() { __super__(); }
 }
 fn show(c: view Counter, f: view Fast) -> int {
   println(c.toString() + f.toString());
@@ -186,7 +202,7 @@ fn show(c: view Counter, f: view Fast) -> int {
 fn main() -> int { return show(Counter(), Fast()); }
 )");
   EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
-  expectAll(r, {":14:3: error: 'f' is a 'view' parameter; 'tick' is not a "
+  expectAll(r, {":20:3: error: 'f' is a 'view' parameter; 'tick' is not a "
                 "'view fn'"});
 }
 
@@ -198,7 +214,6 @@ fn main() -> int { return show(Counter(), Fast()); }
 TEST(ViewFn, WarnsWhenSelfNeverChanges) {
   auto r = semaCheck(R"(class Shape {
   w: int;
-  fn __init__() { self.w = 2; }
   fn area() -> int { return self.w * self.w; }
   fn twice() -> int { return 2 * self.area(); }
   fn grow() { self.w = self.w + 1; }
@@ -206,11 +221,19 @@ TEST(ViewFn, WarnsWhenSelfNeverChanges) {
   fn hook() -> int { return 0; }
   view fn done() -> int { return self.w; } fn sized() -> int { return twiceOf(self.w); }
 }
+
+impl Shape {
+  fn __init__() { self.w = 2; }
+}
 class Square : Shape {
-  fn __init__() { __super__(); }
   fn hook() -> int { self.w = 0; return 1; }
 }
-class Box<T> { v: T; fn __init__(v: T) { self.v = v; } fn get() -> T { return self.v; } }
+
+impl Square {
+  fn __init__() { __super__(); }
+}
+class Box<T> { v: T; fn get() -> T { return self.v; } }
+impl Box<T> { fn __init__(v: T) { self.v = v; } }
 fn main() -> int {
   b = Box<int>(1);
   c = Box<Str>("a");
@@ -220,13 +243,13 @@ fn twiceOf(n: int) -> int { return 2 * n; }
 )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
   const char *kSuffix = "never changes 'self': make it a 'view fn'";
-  EXPECT_NE(r.Diagnostics.find(":4:3: warning: 'area' never changes 'self': "
+  EXPECT_NE(r.Diagnostics.find(":3:3: warning: 'area' never changes 'self': "
                                "make it a 'view fn' so 'view' parameters can "
                                "call it"),
             std::string::npos)
       << r.Diagnostics;
-  for (const char *loc : {":4:3: warning: 'area' ", ":5:3: warning: 'twice' ",
-                          ":15:56: warning: 'get' "})
+  for (const char *loc : {":3:3: warning: 'area' ", ":4:3: warning: 'twice' ",
+                          ":21:22: warning: 'get' "})
     EXPECT_NE(r.Diagnostics.find(std::string(loc) + kSuffix), std::string::npos)
         << loc << "\n"
         << r.Diagnostics;
@@ -248,18 +271,19 @@ TEST(ViewFn, AcrossModules) {
   std::filesystem::remove_all(dir);
   writeModule(dir, "base.pkn",
               "class P { n: int;\n"
-              "  fn __init__() { self.n = 0; }\n"
               "  view fn get() -> int { return self.n; }\n"
-              "  fn set(v: int) { self.n = v; } }\n");
+              "  fn set(v: int) { self.n = v; } }\n"
+              "impl P { fn __init__() { self.n = 0; } }\n");
   auto r = semaCheckPath(writeModule(dir, "main.pkn", R"(import base;
-class Q : base::P { fn __init__() { __super__(); } fn get() -> int { return 1; } }
+class Q : base::P { fn get() -> int { return 1; } }
+impl Q { fn __init__() { __super__(); } }
 fn main() -> int {
   let p = base::P();
   p.set(2);
   return p.get();
 })"));
   EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
-  expectAll(r, {":2:52: error: override of 'get' must be a 'view fn', like "
+  expectAll(r, {":2:21: error: override of 'get' must be a 'view fn', like "
                 "the method it overrides"});
   std::filesystem::remove_all(dir);
 }

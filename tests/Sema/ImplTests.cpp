@@ -26,15 +26,16 @@ void expectAll(const SemaResult &r, std::initializer_list<const char *> diags) {
 TEST(Impl, MethodsAndStaticFnsCheck) {
   auto r = semaCheck(R"(class A {
   n: int;
-  fn __init__(n: int) { self.n = n; }
   view fn twice() -> int { return self.doubled(); }
 }
 impl A {
+  fn __init__(n: int) { self.n = n; }
   static fn make() -> A { return A(1); }
   view fn doubled() -> int { return self.n * 2; }
 }
 impl A { fn bump() { self.n = self.n + 1; } }
-class B : A { fn __init__() { __super__(2); } }
+class B : A {}
+impl B { fn __init__() { __super__(2); } }
 impl B { view fn plus(k: int) -> int { return self.doubled() + k; } }
 fn main() -> int {
   a = A::make();
@@ -49,7 +50,8 @@ fn main() -> int {
 }
 
 TEST(Impl, ViewFnRulesApply) {
-  auto r = semaCheck(R"(class A { n: int; fn __init__() { self.n = 0; } }
+  auto r = semaCheck(R"(class A { n: int; }
+impl A { fn __init__() { self.n = 0; } }
 impl A {
   fn bump() { self.n = self.n + 1; }
   view fn bad() { self.bump(); }
@@ -66,9 +68,10 @@ fn main() -> int { return 0; }
 // No method may take a name already in the class or a superclass, in
 // either direction, and a class has one `__init__`.
 TEST(Impl, NamesAreNotReused) {
-  auto r =
-      semaCheck(R"(class A { n: int; fn __init__() { self.n = 0; } fn f() {} }
-class B : A { fn __init__() { __super__(); } }
+  auto r = semaCheck(R"(class A { n: int; fn f() {} }
+impl A { fn __init__() { self.n = 0; } }
+class B : A {}
+impl B { fn __init__() { __super__(); } }
 impl A {
   fn f() {}
   fn h() {}
@@ -78,7 +81,8 @@ impl A {
   static fn mk() -> A { return A(); }
 }
 impl B { fn h() {} fn f() {} }
-class C : A { fn __init__() { __super__(); } fn h() {} }
+class C : A { fn h() {} }
+impl C { fn __init__() { __super__(); } }
 fn main() -> int { return 0; }
 )");
   EXPECT_FALSE(r.Ok);
@@ -109,7 +113,8 @@ impl A { fn __init__(n: int) { self.n = n; } }
 class C : A { }
 class D { k: int; }
 impl D { fn __init__() {} }
-class E { fn __init__() {} }
+class E {}
+impl E { fn __init__() {} }
 impl E { fn __init__() {} }
 fn main() -> int { return 0; }
 )");
@@ -121,7 +126,8 @@ fn main() -> int { return 0; }
 
 TEST(Impl, OnlyClassesOfTheModule) {
   auto r = semaCheck(R"(enum Color { Red }
-class Box<T> { v: T; fn __init__(v: T) { self.v = v; } }
+class Box<T> { v: T; }
+impl Box<T> { fn __init__(v: T) { self.v = v; } }
 impl Str { fn x() {} }
 impl Color { fn x() {} }
 impl Nope { fn x() {} }
@@ -138,7 +144,8 @@ fn main() -> int { return 0; }
 // parameters, give each instantiation their methods and traits: also one
 // made for a field type, before the module's `impl` blocks are checked.
 TEST(Impl, GenericBlocksJoinEachInstantiation) {
-  auto r = semaCheck(R"(class Box<T> { v: T; fn __init__(v: T) { self.v = v; } }
+  auto r = semaCheck(R"(class Box<T> { v: T; }
+impl Box<T> { fn __init__(v: T) { self.v = v; } }
 impl Box<U> {
   view fn get() -> view U { return self.v; }
   fn set(v: U) { self.v = v; }
@@ -146,7 +153,8 @@ impl Box<U> {
 trait Named { view fn name() -> Str; }
 impl Named for Box<T> { view fn name() -> Str { return self.v.toString(); } }
 fn label<T: Named>(x: view T) -> Str { return x.name(); }
-class Holder { b: Box<Str>; fn __init__() { self.b = Box("s"); } }
+class Holder { b: Box<Str>; }
+impl Holder { fn __init__() { self.b = Box("s"); } }
 fn main() -> int {
   b = Box(1);
   b.set(b.get() + 1);
@@ -159,8 +167,10 @@ fn main() -> int {
 }
 
 TEST(Impl, GenericBlocksAreChecked) {
-  auto r = semaCheck(R"(class Box<T> { v: T; fn __init__(v: T) { self.v = v; } }
-class A { n: int; fn __init__() { self.n = 0; } }
+  auto r = semaCheck(R"(class Box<T> { v: T; }
+impl Box<T> { fn __init__(v: T) { self.v = v; } }
+class A { n: int; }
+impl A { fn __init__() { self.n = 0; } }
 impl Box { fn f() {} }
 impl Box<T, U> { fn f() {} }
 impl Box<T> { static fn make() {} }
@@ -170,8 +180,11 @@ trait Named { view fn name() -> Str; }
 impl Named for Box<T> {}
 class Cell<T> {
   v: T;
-  fn __init__(v: T) { self.v = v; }
   view fn get() -> T { return self.v; }
+}
+
+impl Cell<T> {
+  fn __init__(v: T) { self.v = v; }
 }
 impl Cell<T> { fn get() -> T { return self.v; } }
 fn main() -> int { b = Box(1); c = Cell(2); return 0; }
@@ -190,7 +203,8 @@ fn main() -> int { b = Box(1); c = Cell(2); return 0; }
 }
 
 TEST(Impl, UnknownStaticFnIsUndeclared) {
-  auto r = semaCheck(R"(class A { n: int; fn __init__() { self.n = 0; } }
+  auto r = semaCheck(R"(class A { n: int; }
+impl A { fn __init__() { self.n = 0; } }
 impl A { fn f() {} }
 fn main() -> int { A::f(); return 0; }
 )");

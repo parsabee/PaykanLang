@@ -29,16 +29,20 @@ trait Into<T> { view fn into() -> T; }
 trait Same { view fn same(other: view Self) -> bool; }
 class A {
   n: int;
-  fn __init__(n: int) { self.n = n; }
   view fn name() -> Str { return "A"; }
   view fn twin() -> Self { return A(0); }
+}
+
+impl A {
+  fn __init__(n: int) { self.n = n; }
 }
 impl Named for A {}
 impl Into<int> for A { view fn into() -> int { return self.n; } }
 impl Same for A {
   view fn same(other: view Self) -> bool { return self.n == other.n; }
 }
-class B : A { fn __init__() { __super__(1); } }
+class B : A {}
+impl B { fn __init__() { __super__(1); } }
 fn main() -> int {
   b = B();
   return b.into() + b.name().len() + b.twin().into() + Str(b.same(b)).len();
@@ -71,14 +75,16 @@ fn main() -> int { return 0; }
 TEST(Traits, ImplsAreChecked) {
   auto r = semaCheck(R"(trait Named { view fn name() -> Str; }
 trait Into<T> { view fn into() -> T; }
-class A { n: int; fn __init__() { self.n = 0; } view fn name() -> int { return 1; } }
+class A { n: int; view fn name() -> int { return 1; } }
+impl A { fn __init__() { self.n = 0; } }
 impl Named for A {}
 impl Into<int> for A {
   fn into() -> int { return 1; }
   fn extra() {}
   static fn make() -> A { return A(); }
 }
-class C { n: int; fn __init__() { self.n = 0; } }
+class C { n: int; }
+impl C { fn __init__() { self.n = 0; } }
 impl Named for C {}
 impl Into for C {}
 impl Show for C {}
@@ -120,12 +126,17 @@ fn main() -> int { return 0; }
 TEST(Traits, BoundsAreChecked) {
   auto r = semaCheck(R"(trait Named { view fn name() -> Str; }
 trait Into<T> { view fn into() -> T; }
-class Box<T: Named> { v: T; fn __init__(v: T) { self.v = v; } }
-class Keeper { b: Box<A>; fn __init__() { self.b = Box<A>(A()); } }
-class A { n: int; fn __init__() { self.n = 0; } view fn name() -> Str { return "A"; } }
+class Box<T: Named> { v: T; }
+impl Box<T> { fn __init__(v: T) { self.v = v; } }
+class Keeper { b: Box<A>; }
+impl Keeper { fn __init__() { self.b = Box<A>(A()); } }
+class A { n: int; view fn name() -> Str { return "A"; } }
+impl A { fn __init__() { self.n = 0; } }
 impl Named for A {}
-class B : A { fn __init__() { __super__(); } }
-class C { n: int; fn __init__() { self.n = 0; } }
+class B : A {}
+impl B { fn __init__() { __super__(); } }
+class C { n: int; }
+impl C { fn __init__() { self.n = 0; } }
 fn greet<T: Named + Show>(x: view T) -> Str { return x.name() + x.toString(); }
 fn conv<T, S: Into<T>>(s: view S) -> T { return s.into(); }
 fn bad<T: Nope>(x: T) {}
