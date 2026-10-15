@@ -186,11 +186,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ptr.store` (docs/pir.md §6), which `inout` parameters lower to.  Only
   scalar (`i64`, `f64`, `bool`, `char`) slots have addresses.  A backend plugin
   must handle them.
-- PIR version 2 (`pir::kPIRVersion`, `PAYKAN_PIR_TEXT_VERSION`): inline optionals
-  (#96, docs/pir.md §1 and §6).  Four value types, `opt_i64`, `opt_f64`, `opt_bool` and
-  `opt_char` (a payload and an 8-byte presence word), and four instructions, `some`,
-  `none`, `is_some` and `unwrap`; optional slots have addresses and may be fields.  A
-  backend plugin must handle them; `.pkm` files and caches of PIR 1 are rebuilt.
+- PIR: inline optionals (#96, docs/pir.md §1 and §6).  Four value types, `opt_i64`,
+  `opt_f64`, `opt_bool` and `opt_char` (a payload and an 8-byte presence word), and four
+  instructions, `some`, `none`, `is_some` and `unwrap`; optional slots have addresses and
+  may be fields.  A backend plugin must handle them.
 - An optional is not an object (#96): a `T?` no longer converts to `Obj`, so `o: Obj = maybe`
   and passing, returning or storing a `T?` where an `Obj` is expected are errors (`cannot use
   optional 'Node?' as 'Obj': an optional is not an object; unwrap it with match`).  The print
@@ -204,7 +203,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `int<Str>` & co. return one without allocating (the runtime's `PaykanString_parse_int` &
   co.).  The semantics are unchanged.  An `int?[]` is a runtime array of 16-byte elements (`PaykanArray_new_sized`, with its
   own vtable), and a tuple holds an `int?` as a presence slot and a value slot (tuple kind
-  `PAYKAN_TUPLE_OPT`).  Runtime ABI version 7.
+  `PAYKAN_TUPLE_OPT`).
 
 ### Removed
 

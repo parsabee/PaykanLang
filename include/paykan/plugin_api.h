@@ -85,7 +85,7 @@ extern "C" {
 /* The version of the PIR text form a backend receives (docs/pir.md): the
  * same number as paykan::pir::kPIRVersion (include/paykan/pir/Version.h),
  * which the binary form stores; the PIR tests check the two agree. */
-#define PAYKAN_PIR_TEXT_VERSION 2
+#define PAYKAN_PIR_TEXT_VERSION 1
 
 /* The version of the AST interchange format a frontend returns
  * (docs/plugins/ast-format.md): the number after `paykan-ast`. */
