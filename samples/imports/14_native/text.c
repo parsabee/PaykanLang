@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: MIT
 //
 // The native functions of text.pkn, written against the Paykan runtime ABI
-// (Runtime.h): a Str argument is a borrowed PaykanObject *, a Str result an
-// owned PaykanShared * (NULL is None for a Str? result).
+// (Runtime.h): a `view` Str argument is a borrowed PaykanObject *, an
+// `inout` one the address of the caller's PaykanShared *, and a Str result
+// an owned PaykanShared * (NULL is None for a Str? result).
 
 #include "Runtime.h"
 
@@ -39,4 +40,18 @@ PaykanShared *sample_text_find(PaykanObject *s, PaykanObject *needle) {
   if (!hit)
     return NULL; // None
   return newStr(hit, (int64_t)strlen(hit));
+}
+
+// Replace the caller's string with its trimmed copy: the new box is the
+// caller's to own, and the old one is released.
+void sample_text_trim(PaykanShared **s) {
+  const PaykanString *str = (const PaykanString *)PaykanShared_get(*s);
+  int64_t start = 0, end = str->len;
+  while (start < end && isspace((unsigned char)str->data[start]))
+    ++start;
+  while (end > start && isspace((unsigned char)str->data[end - 1]))
+    --end;
+  PaykanShared *trimmed = newStr(str->data + start, end - start);
+  Paykan_release(*s);
+  *s = trimmed;
 }
