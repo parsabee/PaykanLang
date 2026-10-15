@@ -19,7 +19,7 @@ instead; its chapters link here for the details.
 9. [Tuples](09-tuples.md): tuple types, element access and destructuring.
 10. [Optional types](10-optionals.md): `T?`, `None` and unwrapping.
 11. [Generics](11-generics.md): generic classes and functions, and inference.
-12. [Traits](12-traits.md): traits and `impl Trait for Type`.
+12. [Traits](12-traits.md): traits, `impl Trait for Type` and bounds on type parameters.
 
 The [grammar](../grammar.md) is the specification of the concrete syntax that every
 frontend implements.

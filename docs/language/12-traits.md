@@ -1,7 +1,8 @@
 # PaykanLang — Traits
 
 A trait names the methods a type must have. `impl Trait for Type` declares that a class
-implements it.
+implements it, and a type parameter's bounds (`<T: Show>`) say which traits its type
+argument must implement.
 
 ---
 
@@ -15,6 +16,8 @@ implements it.
   method that `A` already has meets a requirement too.
 - A class implements every trait its superclasses implement. Every class implements the
   built-in trait `Show` (`view fn toString() -> Str`) through `Obj`.
+- `fn f<T: Show + Into<int>>(...)` and `class Box<T: Named>` bound their type
+  parameters. Each instantiation checks its type arguments against the bounds.
 - A trait is not a type: `x: Named` is an error.
 
 ---
@@ -46,6 +49,26 @@ block holds only the methods its trait requires, and no `static fn`.
 
 `Self` also names the enclosing class in a class's own methods and in its `impl` blocks.
 
+## Bounds
+
+```pkn
+fn greet<T: Named>(x: view T) -> Str { return "hi " + x.name(); }
+fn show<T: Show>(x: view T) -> Str { return x.toString(); }
+
+class Holder<T: Named> {
+  v: T;
+  fn __init__(v: T) { self.v = v; }
+}
+
+greet(A(1));          // A implements Named
+Holder<A>(A(2));
+greet("s");           // error: 'Str' does not implement trait 'Named', which 'greet' requires of 'T'
+```
+
+Bounds are checked where a template is instantiated. The body is still checked once per
+instantiation (see `11-generics.md`), so it may call what the bound requires. A bound
+may name another type parameter: `<T, C: Into<T>>`.
+
 ## Semantic Checks
 
 | Error | Trigger |
@@ -55,12 +78,12 @@ block holds only the methods its trait requires, and no `static fn`.
 | Missing or mismatched method | The class has no method a requirement names, or its signature differs |
 | Extra method | An `impl ... for` block has a method, or a `static fn`, its trait does not require |
 | Implemented twice | The class, or a superclass, already implements the trait (every class implements `Show`) |
-| Not a trait | An `impl ... for` names a class, a built-in type or an unknown name, or gives the wrong number of type arguments |
+| Not a trait | An `impl ... for` or a bound names a class, a built-in type or an unknown name, or gives the wrong number of type arguments |
+| Unmet bound | A type argument does not implement a trait its parameter is bounded by |
 | Trait as a type | A trait is used where a type is expected |
 
 ## Not Supported Yet
 
-Bounds on type parameters (`<T: Show>`, parsed but rejected), traits of another module
-(an importer cannot name them, and their `impl ... for` blocks
+Traits of another module (an importer cannot name them, and their `impl ... for` blocks
 are not in the module interface), `impl ... for` a built-in type, an enum or a class of
 another module, default methods, `static fn` requirements, and trait objects.

@@ -927,8 +927,30 @@ private:
   /// requires, with its signature.
   bool checkTraitImpl(ast::ImplDecl *im, ast::ClassType *ct);
 
-  /// Report the type parameter bounds (`<T: Show>`) as not supported yet.
-  bool rejectBounds(ast::TranslationUnit *tu);
+  // A type parameter's bounds are checked when its template is instantiated,
+  // once the `impl ... for` blocks are recorded (TraitImplsKnown); until
+  // then the check waits in PendingBoundChecks.
+  struct PendingBoundCheck {
+    const ast::Decl *Template;
+    std::string Name;
+    std::vector<ast::Type *> Args;
+    ast::SourceLocation Loc;
+  };
+  std::vector<PendingBoundCheck> PendingBoundChecks;
+  bool TraitImplsKnown = false;
+  /// Templates with a bound that names no trait (reported with them).
+  std::set<const ast::Decl *> BadBounds;
+
+  /// Check that the bounds of the module's templates name traits.
+  bool checkBoundDecls(ast::TranslationUnit *tu);
+  /// Check that @p args implement the traits template @p tmpl (named
+  /// @p name) requires of its type parameters.
+  bool checkBounds(const ast::Decl *tmpl, const std::string &name,
+                   const std::vector<const std::string *> &params,
+                   const ast::TypeParamBounds &bounds,
+                   const std::vector<ast::Type *> &args,
+                   ast::SourceLocation loc);
+  bool checkPendingBounds();
 
   // -- Generics
   //

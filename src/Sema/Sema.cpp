@@ -1929,12 +1929,15 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
     if (!checkClassDecls(node->getClassDecls()))
       ok = false;
   // Then the traits' signatures, which may name the classes, and the
-  // `impl` blocks, which record what implements a trait (SemaTraits.cpp).
+  // `impl` blocks, which record what implements a trait; only then can a
+  // template's bounds be checked (SemaTraits.cpp).
   if (!checkTraitDecls(node))
     ok = false;
   if (!checkImplDecls(node))
     ok = false;
-  if (!rejectBounds(node))
+  if (!checkBoundDecls(node))
+    ok = false;
+  if (!checkPendingBounds())
     ok = false;
 
   // Forward-declare every free function's signature next, so that any body —
@@ -2041,21 +2044,6 @@ bool Sema::checkEntryPoint(ast::TranslationUnit *tu,
 
 bool Sema::visitImplDecl(ast::ImplDecl *) { return true; }
 bool Sema::visitTraitDecl(ast::TraitDecl *) { return true; }
-
-bool Sema::rejectBounds(ast::TranslationUnit *tu) {
-  bool ok = true;
-  auto check = [&](const ast::Decl *d, const ast::TypeParamBounds &bounds) {
-    if (bounds.empty())
-      return;
-    error(d->getLocation(), "type parameter bounds are not supported yet");
-    ok = false;
-  };
-  for (auto *cd : tu->getGenericClassDecls())
-    check(cd, cd->getTypeParamBounds());
-  for (auto *fn : tu->getGenericFuncDecls())
-    check(fn, fn->getTypeParamBounds());
-  return ok;
-}
 bool Sema::visitEnumDecl(ast::EnumDecl *node) {
   // Reject names that collide with a builtin, class, function, or existing
   // enum (the primitive type keywords cannot be spelled as identifiers).

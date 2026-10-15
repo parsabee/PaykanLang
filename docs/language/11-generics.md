@@ -3,8 +3,8 @@
 > **Stable in v0.1** (issue #2): the syntax and semantics below are covered by the
 > compatibility promise for the 0.1 series (see `01-language-basics.md`, "Stability").
 
-Generic classes and functions are parameterised by types. Constraints and
-variance are not supported in v0.1.
+Generic classes and functions are parameterised by types. A type parameter's
+bounds (`<T: Show>`) are in `12-traits.md`; variance is not supported in v0.1.
 
 ---
 
@@ -267,6 +267,5 @@ d = gen::Box<int>(1);     // the same class as c's
 
 ## Not Supported in v0.1
 
-Constraints/bounds (`T: Comparable`) and interfaces, variance, default type
-arguments, explicit specialisation, generic methods on non-generic classes,
+Variance, default type arguments, explicit specialisation, generic methods on non-generic classes,
 generic superclasses, and templates in a prebuilt `.pkm` (v0.2.0, [#57](https://github.com/parsabee/PaykanLang/issues/57)).

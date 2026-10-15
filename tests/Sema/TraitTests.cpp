@@ -3,7 +3,8 @@
 // Sema tests: traits (#216).  `impl Trait for A` must give A every method the
 // trait requires, with its signature (a method A already has counts); a
 // class implements what its superclasses do, and every class implements the
-// builtin `Show` through `Obj`.  A trait is not a type.
+// builtin `Show` through `Obj`.  A trait is not a type.  A type parameter's
+// bounds are checked where the template is instantiated.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -111,4 +112,38 @@ fn main() -> int { return 0; }
   EXPECT_FALSE(r.Ok);
   expectAll(r, {"parameter 'n' names trait 'Named', which is not a type",
                 "'Into' is a trait, not a type"});
+}
+
+// Bounds on functions and classes, met by a subclass through its superclass,
+// by every class (`Show`), and checked for a class field once the impl
+// blocks are known.
+TEST(Traits, BoundsAreChecked) {
+  auto r = semaCheck(R"(trait Named { view fn name() -> Str; }
+trait Into<T> { view fn into() -> T; }
+class Box<T: Named> { v: T; fn __init__(v: T) { self.v = v; } }
+class Keeper { b: Box<A>; fn __init__() { self.b = Box<A>(A()); } }
+class A { n: int; fn __init__() { self.n = 0; } view fn name() -> Str { return "A"; } }
+impl Named for A {}
+class B : A { fn __init__() { __super__(); } }
+class C { n: int; fn __init__() { self.n = 0; } }
+fn greet<T: Named + Show>(x: view T) -> Str { return x.name() + x.toString(); }
+fn conv<T, S: Into<T>>(s: view S) -> T { return s.into(); }
+fn bad<T: Nope>(x: T) {}
+fn main() -> int {
+  ok = greet(B()) + Box<B>(B()).v.name();
+  greet(C());
+  b: Box<C> = Box<C>(C());
+  return conv<int, A>(A());
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"'C' does not implement trait 'Named', which 'greet' requires "
+                "of 'T'",
+                "'C' does not implement trait 'Named', which 'Box' requires of "
+                "'T'",
+                "'A' does not implement trait 'Into<int>', which 'conv' "
+                "requires of 'S'",
+                "unknown trait 'Nope'"});
+  EXPECT_EQ(r.Diagnostics.find("'B' does not implement"), std::string::npos)
+      << r.Diagnostics;
 }

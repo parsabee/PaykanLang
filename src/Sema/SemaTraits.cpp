@@ -6,7 +6,10 @@
 // block's methods join A like those of any `impl` block (populateImplMethods),
 // and a requirement may also be met by a method A already has.  A class
 // implements what its superclasses implement, and every class implements the
-// builtin `Show` through `Obj`.
+// builtin `Show` through `Obj`.  The bounds of a template's type parameters
+// (`<T: Show>`) are checked when it is instantiated: once the module's
+// `impl ... for` blocks are recorded, so an instantiation an annotation asks
+// for before that is checked then.
 
 #include "ASTClone.h"
 #include "Names.h"
@@ -302,6 +305,85 @@ bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::ClassType *ct) {
             "'" + fn->getName() + "' is not a method of trait '" + trait + "'");
       ok = false;
     }
+  return ok;
+}
+
+bool Sema::checkBoundDecls(ast::TranslationUnit *tu) {
+  bool ok = true;
+  auto check = [&](const ast::Decl *tmpl,
+                   const std::vector<const std::string *> &params,
+                   const ast::TypeParamBounds &bounds) {
+    Subst placeholders;
+    for (auto *p : params)
+      placeholders[*p] = Ctx.getObjTy();
+    for (const auto &traits : bounds)
+      for (ast::Type *b : traits)
+        if (!resolveTraitRef(b, placeholders, tmpl->getLocation())) {
+          BadBounds.insert(tmpl);
+          ok = false;
+        }
+  };
+  for (auto *cd : tu->getGenericClassDecls())
+    check(cd, cd->getTypeParams(), cd->getTypeParamBounds());
+  for (auto *fn : tu->getGenericFuncDecls())
+    check(fn, fn->getTypeParams(), fn->getTypeParamBounds());
+  return ok;
+}
+
+bool Sema::checkBounds(const ast::Decl *tmpl, const std::string &name,
+                       const std::vector<const std::string *> &params,
+                       const ast::TypeParamBounds &bounds,
+                       const std::vector<ast::Type *> &args,
+                       ast::SourceLocation loc) {
+  if (bounds.empty())
+    return true;
+  if (!TraitImplsKnown) {
+    PendingBoundChecks.push_back({tmpl, name, args, loc});
+    return true;
+  }
+  if (BadBounds.count(tmpl)) {
+    ++SuppressedFollowOns; // its bounds were reported with the template
+    return false;
+  }
+  Subst subst;
+  for (size_t i = 0; i < params.size() && i < args.size(); ++i)
+    subst[*params[i]] = args[i];
+  bool ok = true;
+  for (size_t i = 0; i < bounds.size() && i < args.size(); ++i)
+    for (ast::Type *b : bounds[i]) {
+      auto tr = resolveTraitRef(b, subst, loc);
+      if (!tr) {
+        ok = false;
+        continue;
+      }
+      if (!traitImplOwner(args[i], *tr)) {
+        error(loc, "'" + typeName(args[i]) + "' does not implement trait '" +
+                       traitRefName(*tr) + "', which '" + displayName(name) +
+                       "' requires of '" + *params[i] + "'");
+        ok = false;
+      }
+    }
+  return ok;
+}
+
+bool Sema::checkPendingBounds() {
+  TraitImplsKnown = true;
+  bool ok = true;
+  for (const auto &pc : PendingBoundChecks) {
+    const std::vector<const std::string *> *params;
+    const ast::TypeParamBounds *bounds;
+    if (auto *cd = ast::dyn_cast<ast::ClassDecl>(pc.Template)) {
+      params = &cd->getTypeParams();
+      bounds = &cd->getTypeParamBounds();
+    } else {
+      auto *fn = ast::cast<ast::FuncDecl>(pc.Template);
+      params = &fn->getTypeParams();
+      bounds = &fn->getTypeParamBounds();
+    }
+    if (!checkBounds(pc.Template, pc.Name, *params, *bounds, pc.Args, pc.Loc))
+      ok = false;
+  }
+  PendingBoundChecks.clear();
   return ok;
 }
 
