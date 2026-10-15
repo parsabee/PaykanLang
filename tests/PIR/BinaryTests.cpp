@@ -642,8 +642,8 @@ TEST(PIRBinary, ByteFlipFuzz) {
 }
 
 TEST(PIRBinary, TupleSlotKindsUpToTheOptionalsPresenceWord) {
-  // 0-4 are the value and reference kinds, 5 an optional's presence word
-  // (PIR 2); nothing above it is a kind.
+  // 0-4 are the value and reference kinds, 5 an optional's presence word;
+  // nothing above it is a kind.
   for (uint8_t kind : {5, 6}) {
     Module m;
     m.Name = "k";
