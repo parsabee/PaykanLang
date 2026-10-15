@@ -4,9 +4,14 @@
 class Node {
   v: int;
   next: Node?;
+}
+
+impl Node {
   fn __init__(x: int) { self.v = x; }
 }
-class Leaf : Node {
+class Leaf : Node {}
+
+impl Leaf {
   fn __init__(x: int) { __super__(x); }
 }
 

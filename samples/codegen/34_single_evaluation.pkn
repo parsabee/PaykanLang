@@ -17,9 +17,11 @@
 // expect-stdout: idx called
 // expect-stdout: show 1
 
-class C { v: int; fn __init__(v: int) { self.v = v; } }
+class C { v: int; }
+impl C { fn __init__(v: int) { self.v = v; } }
 
-class Holder { c: C; fn __init__(v: int) { self.c = C(v); } }
+class Holder { c: C; }
+impl Holder { fn __init__(v: int) { self.c = C(v); } }
 
 fn idx() -> int {
   println("idx called");

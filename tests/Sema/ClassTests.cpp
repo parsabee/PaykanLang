@@ -50,6 +50,9 @@ TEST(Class, ClassInitSetField) {
   auto r = semaCheck(withClasses(R"(
     class Point {
       x: int; y: int;
+    }
+
+    impl Point {
       fn __init__(x: int, y: int) { self.x = x; self.y = y; }
     }
   )"));
@@ -69,9 +72,10 @@ TEST(Class, ImplicitObjBaseEqNeq) {
 // -- destroy is the compiler-generated destructor: final and not callable
 
 TEST(Class, DestroyDirectCallRejected) {
-  auto r = semaCheck(
-      withClasses("class Box { v: int; fn __init__(x: int) { self.v = x; } }",
-                  "b: Box = Box(5); b.destroy(); return 0;"));
+  auto r =
+      semaCheck(withClasses("class Box { v: int; }\n"
+                            "impl Box { fn __init__(x: int) { self.v = x; } }",
+                            "b: Box = Box(5); b.destroy(); return 0;"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("destroy"), std::string::npos) << r.Diagnostics;
 }
@@ -83,8 +87,9 @@ TEST(Class, DestroyDirectCallOnObjRejected) {
 
 TEST(Class, DestroyOverrideRejected) {
   auto r = semaCheck(
-      withClasses("class Box { v: int; fn __init__(x: int) { self.v = x; }\n"
-                  "  fn destroy() { } }"));
+      withClasses("class Box { v: int;\n"
+                  "  fn destroy() { } }\n"
+                  "impl Box { fn __init__(x: int) { self.v = x; } }"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("destroy"), std::string::npos) << r.Diagnostics;
 }
@@ -115,7 +120,8 @@ TEST(Class, DuplicateMethod) {
 
 // Regression: `class print` used to silently replace the builtin `print`.
 TEST(Class, NameShadowsBuiltinFunctionRejected) {
-  auto r = semaCheck(withClasses("class print { fn __init__() {} }",
+  auto r = semaCheck(withClasses("class print {}\n"
+                                 "impl print { fn __init__() {} }",
                                  "print(\"hi\"); return 0;"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find(
@@ -126,7 +132,8 @@ TEST(Class, NameShadowsBuiltinFunctionRejected) {
 
 // The conversion builtins removed by #64 no longer reserve their names.
 TEST(Class, RemovedConversionNamesAreFree) {
-  auto r = semaCheck(withClasses("class StrInt { fn __init__() {} }"));
+  auto r = semaCheck(withClasses("class StrInt {}\n"
+                                 "impl StrInt { fn __init__() {} }"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
@@ -158,9 +165,12 @@ TEST(Class, MemberNamedLikeBuiltinOk) {
   auto r = semaCheck(withClasses(R"(
     class Logger {
       open: int;
-      fn __init__() { self.open = 0; }
       fn print(msg: Str) { println(msg); }
       fn StrInt(n: int) -> Str { return "n"; }
+    }
+
+    impl Logger {
+      fn __init__() { self.open = 0; }
     }
   )",
                                  R"(
@@ -295,10 +305,16 @@ TEST(Class, SuperCallValid) {
   auto r = semaCheck(withClasses(R"(
     class Animal {
       name: Str;
+    }
+
+    impl Animal {
       fn __init__(n: Str) { self.name = n; }
     }
     class Dog : Animal {
       breed: Str;
+    }
+
+    impl Dog {
       fn __init__(n: Str, b: Str) { __super__(n); self.breed = b; }
     }
   )"));
@@ -307,16 +323,20 @@ TEST(Class, SuperCallValid) {
 
 TEST(Class, SuperCallMissing) {
   auto r = semaCheck(withClasses(R"(
-    class Animal { name: Str; fn __init__(n: Str) { self.name = n; } }
-    class Dog : Animal { breed: Str; fn __init__(n: Str, b: Str) { self.breed = b; } }
+    class Animal { name: Str; }
+    impl Animal { fn __init__(n: Str) { self.name = n; } }
+    class Dog : Animal { breed: Str; }
+    impl Dog { fn __init__(n: Str, b: Str) { self.breed = b; } }
   )"));
   EXPECT_FALSE(r.Ok);
 }
 
 TEST(Class, SuperCallWrongArgType) {
   auto r = semaCheck(withClasses(R"(
-    class Animal { fn __init__(x: int) {} }
-    class Dog : Animal { fn __init__() { __super__(True); } }
+    class Animal {}
+    impl Animal { fn __init__(x: int) {} }
+    class Dog : Animal {}
+    impl Dog { fn __init__() { __super__(True); } }
   )"));
   EXPECT_FALSE(r.Ok);
 }
@@ -330,7 +350,8 @@ TEST(Class, SuperCallOutsideInit) {
 
 TEST(Class, SuperCallNoSuperclass) {
   auto r = semaCheck(withClasses(R"(
-    class A { fn __init__() { __super__(); } }
+    class A {}
+    impl A { fn __init__() { __super__(); } }
   )"));
   EXPECT_FALSE(r.Ok);
 }
@@ -538,12 +559,18 @@ TEST(Class, MatchMissingWildcardNoFallthrough) {
 TEST(Class, OverrideReturnTypeMismatchRejected) {
   auto r = semaCheck(R"(
     class Animal {
-      fn __init__() {}
       fn describe() -> int { return 1; }
     }
+
+    impl Animal {
+      fn __init__() {}
+    }
     class Dog : Animal {
-      fn __init__() { __super__(); }
       fn describe() -> Str { return "dog"; }
+    }
+
+    impl Dog {
+      fn __init__() { __super__(); }
     }
     fn main() -> int { return 0; }
   )");
@@ -555,12 +582,18 @@ TEST(Class, OverrideReturnTypeMismatchRejected) {
 TEST(Class, OverrideParamTypeMismatchRejected) {
   auto r = semaCheck(R"(
     class Base {
-      fn __init__() {}
       fn take(x: int) -> int { return x; }
     }
+
+    impl Base {
+      fn __init__() {}
+    }
     class Derived : Base {
-      fn __init__() { __super__(); }
       fn take(x: Str) -> int { return 0; }
+    }
+
+    impl Derived {
+      fn __init__() { __super__(); }
     }
     fn main() -> int { return 0; }
   )");
@@ -572,12 +605,18 @@ TEST(Class, OverrideParamTypeMismatchRejected) {
 TEST(Class, OverrideParamCountMismatchRejected) {
   auto r = semaCheck(R"(
     class Base {
-      fn __init__() {}
       fn f(x: int) -> int { return x; }
     }
+
+    impl Base {
+      fn __init__() {}
+    }
     class Derived : Base {
-      fn __init__() { __super__(); }
       fn f() -> int { return 0; }
+    }
+
+    impl Derived {
+      fn __init__() { __super__(); }
     }
     fn main() -> int { return 0; }
   )");
@@ -587,12 +626,18 @@ TEST(Class, OverrideParamCountMismatchRejected) {
 TEST(Class, OverrideMatchingSignatureAccepted) {
   auto r = semaCheck(R"(
     class Animal {
-      fn __init__() {}
       fn describe() -> int { return 1; }
     }
+
+    impl Animal {
+      fn __init__() {}
+    }
     class Dog : Animal {
-      fn __init__() { __super__(); }
       fn describe() -> int { return 2; }
+    }
+
+    impl Dog {
+      fn __init__() { __super__(); }
     }
     fn main() -> int { return 0; }
   )");
@@ -604,9 +649,12 @@ TEST(Class, OverrideToStringAndEqualsAccepted) {
   auto r = semaCheck(R"(
     class Person {
       name: Str;
-      fn __init__(n: Str) { self.name = n; }
       view fn toString() -> Str { return "Person " + self.name; }
       view fn equals(other: Obj) -> bool { return True; }
+    }
+
+    impl Person {
+      fn __init__(n: Str) { self.name = n; }
     }
     fn main() -> int { return 0; }
   )");
@@ -615,9 +663,12 @@ TEST(Class, OverrideToStringAndEqualsAccepted) {
 
 TEST(Class, OverrideThreeLevelMismatchRejected) {
   auto r = semaCheck(R"(
-    class A { fn __init__() {} fn kind() -> int { return 0; } }
-    class B : A { fn __init__() { __super__(); } fn kind() -> int { return 1; } }
-    class C : B { fn __init__() { __super__(); } fn kind() -> Str { return "c"; } }
+    class A { fn kind() -> int { return 0; } }
+    impl A { fn __init__() {} }
+    class B : A { fn kind() -> int { return 1; } }
+    impl B { fn __init__() { __super__(); } }
+    class C : B { fn kind() -> Str { return "c"; } }
+    impl C { fn __init__() { __super__(); } }
     fn main() -> int { return 0; }
   )");
   EXPECT_FALSE(r.Ok);
@@ -629,9 +680,14 @@ TEST(Class, SuperRequiredForParameterizedBase) {
   auto r = semaCheck(R"(
     class Base {
       val: int;
+    }
+
+    impl Base {
       fn __init__(v: int) { self.val = v; }
     }
-    class Derived : Base {
+    class Derived : Base {}
+
+    impl Derived {
       fn __init__() { }
     }
     fn main() -> int { return 0; }
@@ -645,9 +701,13 @@ TEST(Class, SuperRequiredForZeroParamBase) {
   // Per the language reference, __super__() is required even when the base
   // __init__ takes no parameters.
   auto r = semaCheck(R"(
-    class Base { fn __init__() {} }
+    class Base {}
+    impl Base { fn __init__() {} }
     class Child : Base {
       x: int;
+    }
+
+    impl Child {
       fn __init__(x: int) { self.x = x; }
     }
     fn main() -> int { return 0; }
@@ -661,10 +721,16 @@ TEST(Class, SuperMustBeFirstStatement) {
   auto r = semaCheck(R"(
     class Base {
       val: int;
+    }
+
+    impl Base {
       fn __init__(v: int) { self.val = v; }
     }
     class Derived : Base {
       y: int;
+    }
+
+    impl Derived {
       fn __init__(v: int) {
         self.y = 1;
         __super__(v);
@@ -681,6 +747,9 @@ TEST(Class, DerivedMustDeclareInitWhenBaseHasOne) {
   auto r = semaCheck(R"(
     class Base {
       val: int;
+    }
+
+    impl Base {
       fn __init__(v: int) { self.val = v; }
     }
     class Derived : Base {
@@ -693,9 +762,13 @@ TEST(Class, DerivedMustDeclareInitWhenBaseHasOne) {
 
 TEST(Class, SuperFirstStatementAccepted) {
   auto r = semaCheck(R"(
-    class Base { fn __init__() {} }
+    class Base {}
+    impl Base { fn __init__() {} }
     class Child : Base {
       x: int;
+    }
+
+    impl Child {
       fn __init__(x: int) { __super__(); self.x = x; }
     }
     fn main() -> int { return 0; }
@@ -707,10 +780,16 @@ TEST(Class, SuperWithArgsFirstStatementAccepted) {
   auto r = semaCheck(R"(
     class Base {
       val: int;
+    }
+
+    impl Base {
       fn __init__(v: int) { self.val = v; }
     }
     class Derived : Base {
       y: int;
+    }
+
+    impl Derived {
       fn __init__(v: int) { __super__(v); self.y = v; }
     }
     fn main() -> int { return 0; }
@@ -725,8 +804,11 @@ TEST(Class, InitMissingFieldRejected) {
     class Bad {
       x: int;
       y: int;
-      fn __init__(a: int) { self.x = a; }
       view fn toString() -> Str { return Str<int>(self.x) + Str<int>(self.y); }
+    }
+
+    impl Bad {
+      fn __init__(a: int) { self.x = a; }
     }
     fn main() -> int { return 0; }
   )");
@@ -740,6 +822,9 @@ TEST(Class, InitAllFieldsAssignedAccepted) {
     class Point {
       x: int;
       y: int;
+    }
+
+    impl Point {
       fn __init__(a: int, b: int) { self.x = a; self.y = b; }
     }
     fn main() -> int { return 0; }
@@ -751,6 +836,9 @@ TEST(Class, InitFieldAssignedOnBothBranchesAccepted) {
   auto r = semaCheck(R"(
     class C {
       x: int;
+    }
+
+    impl C {
       fn __init__(a: int) {
         if (a > 0) { self.x = 1; } else { self.x = 2; }
       }
@@ -764,6 +852,9 @@ TEST(Class, InitFieldAssignedOnOnlyOneBranchRejected) {
   auto r = semaCheck(R"(
     class C {
       x: int;
+    }
+
+    impl C {
       fn __init__(a: int) {
         if (a > 0) { self.x = 1; }
       }
@@ -777,6 +868,9 @@ TEST(Class, InitFieldAssignedBeforeEarlyReturnAccepted) {
   auto r = semaCheck(R"(
     class C {
       x: int;
+    }
+
+    impl C {
       fn __init__(a: int) {
         self.x = a;
         if (a > 0) { return; }
@@ -793,6 +887,9 @@ TEST(Class, InitMissingFieldBeforeEarlyReturnRejected) {
     class C {
       x: int;
       y: int;
+    }
+
+    impl C {
       fn __init__(a: int) {
         self.x = a;
         if (a > 0) { return; }
@@ -808,6 +905,9 @@ TEST(Class, InitWhileLoopDoesNotGuaranteeAssignment) {
   auto r = semaCheck(R"(
     class C {
       x: int;
+    }
+
+    impl C {
       fn __init__(a: int) {
         while (a > 0) { self.x = a; }
       }
@@ -832,10 +932,16 @@ TEST(Class, InitDerivedOwnFieldAloneAccepted) {
   auto r = semaCheck(R"(
     class Base {
       a: int;
+    }
+
+    impl Base {
       fn __init__(a: int) { self.a = a; }
     }
     class Derived : Base {
       b: int;
+    }
+
+    impl Derived {
       fn __init__(a: int, b: int) { __super__(a); self.b = b; }
     }
     fn main() -> int { return 0; }
@@ -848,8 +954,11 @@ TEST(Class, InitDerivedOwnFieldAloneAccepted) {
 TEST(Class, SelfParameterNameRejected) {
   auto r = semaCheck(R"(
     class A {
-      fn __init__() {}
       fn m(self: int) -> int { return 1; }
+    }
+
+    impl A {
+      fn __init__() {}
     }
     fn main() -> int {
       a: A = A();
@@ -863,7 +972,9 @@ TEST(Class, SelfParameterNameRejected) {
 
 TEST(Class, SelfParameterNameInInitRejected) {
   auto r = semaCheck(R"(
-    class A {
+    class A {}
+
+    impl A {
       fn __init__(self: int) {}
     }
     fn main() -> int { return 0; }
@@ -881,6 +992,9 @@ TEST(Class, InitFieldAssignedInBoolMatchArmsOk) {
   auto r = semaCheck(R"(
     class A {
       x: int;
+    }
+
+    impl A {
       fn __init__(b: bool) {
         match b {
           True  { self.x = 1; }
@@ -900,6 +1014,9 @@ TEST(Class, InitFieldMissingInOneBoolMatchArmRejected) {
   auto r = semaCheck(R"(
     class A {
       x: int;
+    }
+
+    impl A {
       fn __init__(b: bool) {
         match b {
           True  { self.x = 1; }
@@ -931,7 +1048,8 @@ static size_t errorCount(const std::string &diags) {
 }
 
 TEST(ClassRecovery, BuiltinNameClassDoesNotHideOtherClasses) {
-  auto r = semaCheck(withClasses("class A { fn __init__() { } }\n"
+  auto r = semaCheck(withClasses("class A {}\n"
+                                 "impl A { fn __init__() { } }\n"
                                  "class Int { }",
                                  "a = A();\nreturn 0;"));
   EXPECT_FALSE(r.Ok);
@@ -962,10 +1080,13 @@ TEST(ClassRecovery, UndefinedSuperclassStillDeclaresTheClass) {
   // C is registered (on Obj), so constructing it and using its own members
   // is fine, and an inherited member that may be missing is not reported.
   auto r = semaCheck(withClasses(
-      "class C : Missing { y: int; fn __init__() { self.y = 1; } }\n"
-      "class D : C { fn __init__() { __super__(); }\n"
+      "class C : Missing { y: int; }\n"
+      "impl C { fn __init__() { self.y = 1; } }\n"
+      "class D : C {\n"
       "  fn get() -> int { return self.y + self.z; } }\n"
-      "class Ok { fn __init__() { } }",
+      "impl D { fn __init__() { __super__(); } }\n"
+      "class Ok {}\n"
+      "impl Ok { fn __init__() { } }",
       "c = C();\nc.y = 4;\nd = D();\nn = d.inherited();\no = Ok();\n"
       "return d.get();"));
   EXPECT_FALSE(r.Ok);
@@ -978,10 +1099,13 @@ TEST(ClassRecovery, UndefinedSuperclassStillDeclaresTheClass) {
 
 TEST(ClassRecovery, BadMemberTypeIsReportedOnce) {
   auto r = semaCheck(
-      withClasses("class A { x: Nope; fn __init__(v: int) { self.x = v; }\n"
+      withClasses("class A { x: Nope;\n"
                   "          fn get() -> int { return self.x; } }\n"
-                  "class B : A { fn __init__() { __super__(1); } }\n"
-                  "class E { fn __init__(n: int) { } }",
+                  "impl A { fn __init__(v: int) { self.x = v; } }\n"
+                  "class B : A {}\n"
+                  "impl B { fn __init__() { __super__(1); } }\n"
+                  "class E {}\n"
+                  "impl E { fn __init__(n: int) { } }",
                   "a = A(3);\nb = B();\nv: int = a.x + b.get();\ne = E(1, 2);\n"
                   "return v;"));
   EXPECT_FALSE(r.Ok);

@@ -196,18 +196,20 @@ class Task {
   done: bool;
   priority: Priority;
 
-  fn __init__(title: Str, priority: Priority) {
-    self.title = title;
-    self.done = False;
-    self.priority = priority;
-  }
-
   fn complete() { self.done = True; }
 
   view fn toString() -> Str {
     box = if self.done then "[x]" else "[ ]";
     marker = if self.priority == Priority::High then " !" else "";
     return box + " " + self.title + marker;
+  }
+}
+
+impl Task {
+  fn __init__(title: Str, priority: Priority) {
+    self.title = title;
+    self.done = False;
+    self.priority = priority;
   }
 }
 

@@ -11,14 +11,20 @@
 
 class K {
   name: Str;
-  fn __init__(name: Str) { self.name = name; }
   view fn w() -> int { return 1; }
   view fn vtable() -> int { return 10; }
 }
 
+impl K {
+  fn __init__(name: Str) { self.name = name; }
+}
+
 class D : K {
-  fn __init__() { __super__("d"); }
   view fn vtable() -> int { return 20; }
+}
+
+impl D {
+  fn __init__() { __super__("d"); }
 }
 
 fn K_w() -> int { return 2; }

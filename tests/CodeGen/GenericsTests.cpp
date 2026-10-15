@@ -18,9 +18,12 @@ namespace {
 const char *kBox = R"(
   class Box<T> {
     v: T;
-    fn __init__(v: T) { self.v = v; }
     fn get() -> T { return self.v; }
     fn set(v: T) { self.v = v; }
+  }
+
+  impl Box<T> {
+    fn __init__(v: T) { self.v = v; }
   }
 )";
 
@@ -65,10 +68,13 @@ TEST(Generics, PairStrInt) {
     class Pair<K, V> {
       k: K;
       v: V;
-      fn __init__(k: K, v: V) { self.k = k; self.v = v; }
       fn key() -> K { return self.k; }
       fn value() -> V { return self.v; }
       view fn toString() -> Str { return self.k + "=" + Str<int>(self.v); }
+    }
+
+    impl Pair<K, V> {
+      fn __init__(k: K, v: V) { self.k = k; self.v = v; }
     }
   )",
                                   R"(
@@ -107,11 +113,14 @@ TEST(Generics, StackOfStrAndInt) {
   auto r = compileAndRun(withMain(R"(
     class Stack<T> {
       items: T[];
-      fn __init__() { self.items = []; }
       fn push(v: T) { self.items.push(v); }
       fn pop() -> T { return self.items.pop(); }
       fn size() -> int { return self.items.len(); }
       fn empty() -> bool { return self.items.len() == 0; }
+    }
+
+    impl Stack<T> {
+      fn __init__() { self.items = []; }
     }
   )",
                                   R"(
@@ -208,7 +217,6 @@ TEST(Generics, EqualityDispatchesToEquals) {
   auto r = compileAndRun(withMain(R"(
     class Box<T> {
       v: T;
-      fn __init__(v: T) { self.v = v; }
       fn get() -> T { return self.v; }
       view fn equals(other: Obj) -> bool {
         match other {
@@ -216,6 +224,10 @@ TEST(Generics, EqualityDispatchesToEquals) {
           _ { return False; }
         }
       }
+    }
+
+    impl Box<T> {
+      fn __init__(v: T) { self.v = v; }
     }
   )",
                                   R"(
@@ -238,8 +250,11 @@ TEST(Generics, ArrayOfInstantiationsAndFieldOfInstantiation) {
   auto r = compileAndRun(withMain(std::string(kBox) + R"(
     class Holder {
       b: Box<int>;
-      fn __init__(n: int) { self.b = Box<int>(n); }
       fn get() -> Box<int> { return self.b; }
+    }
+
+    impl Holder {
+      fn __init__(n: int) { self.b = Box<int>(n); }
     }
   )",
                                   R"(
@@ -282,14 +297,20 @@ TEST(Generics, GenericWithConcreteSuperclassVirtualDispatch) {
   auto r = compileAndRun(withMain(R"(
     class Base {
       n: int;
-      fn __init__(n: int) { self.n = n; }
       fn name() -> Str { return "base"; }
+    }
+
+    impl Base {
+      fn __init__(n: int) { self.n = n; }
     }
     class Wrap<T> : Base {
       v: T;
-      fn __init__(v: T, n: int) { __super__(n); self.v = v; }
       fn name() -> Str { return "wrap"; }
       fn get() -> T { return self.v; }
+    }
+
+    impl Wrap<T> {
+      fn __init__(v: T, n: int) { __super__(n); self.v = v; }
     }
   )",
                                   R"(
@@ -311,7 +332,8 @@ TEST(Generics, ExportedInstantiationAcrossModules) {
   {
     std::ofstream lib(dir / "lib" / "gen.pkn");
     lib << R"(
-class Box<T> { v: T; fn __init__(v: T) { self.v = v; } fn get() -> T { return self.v; } }
+class Box<T> { v: T; fn get() -> T { return self.v; } }
+impl Box<T> { fn __init__(v: T) { self.v = v; } }
 fn mk() -> Box<int> { return Box<int>(41); }
 )";
   }
@@ -337,10 +359,13 @@ TEST(GenericsTypes, TupleFieldLiteralIndexAndDestructuring) {
   auto r = compileAndRun(R"(
     class Pair<A, B> {
       p: (A, B);
-      fn __init__(a: A, b: B) { self.p = (a, b); }
       fn first() -> A { x, _ = self.p; return x; }
       fn second() -> B { return self.p.1; }
       fn swap() -> (B, A) { return (self.p.1, self.p.0); }
+    }
+
+    impl Pair<A, B> {
+      fn __init__(a: A, b: B) { self.p = (a, b); }
     }
     fn firstOf<A, B>(p: (A, B)) -> A { return p.0; }
     fn dup<T>(x: T) -> (T, T) { return (x, x); }
@@ -366,12 +391,16 @@ TEST(GenericsTypes, TupleFieldLiteralIndexAndDestructuring) {
 TEST(GenericsTypes, OptionalFieldsAndUnwrapInTemplates) {
   LeakGuard g;
   auto r = compileAndRun(R"(
-    class Node { v: int; fn __init__(x: int) { self.v = x; } }
+    class Node { v: int; }
+    impl Node { fn __init__(x: int) { self.v = x; } }
     class Slot<T> {
       v: T?;
-      fn __init__() { }
       fn set(x: T) { self.v = x; }
       fn get() -> T? { return self.v; }
+    }
+
+    impl Slot<T> {
+      fn __init__() { }
     }
     fn orElse<T>(x: T?, d: T) -> T {
       match x {
@@ -407,8 +436,10 @@ TEST(GenericsTypes, ExportedInstantiationNamesWithCommasAndArrays) {
   {
     std::ofstream lib(dir / "lib.pkn");
     lib << R"(
-class Pair<A, B> { a: A; b: B; fn __init__(a: A, b: B) { self.a = a; self.b = b; } fn first() -> A { return self.a; } }
-class Box<T> { v: T; fn __init__(v: T) { self.v = v; } fn get() -> T { return self.v; } }
+class Pair<A, B> { a: A; b: B; fn first() -> A { return self.a; } }
+impl Pair<A, B> { fn __init__(a: A, b: B) { self.a = a; self.b = b; } }
+class Box<T> { v: T; fn get() -> T { return self.v; } }
+impl Box<T> { fn __init__(v: T) { self.v = v; } }
 fn mkPair() -> Pair<Str, int> { return Pair<Str, int>("k", 1); }
 fn mkBoxArr() -> Box<int[]> { return Box<int[]>([1, 2, 3]); }
 )";

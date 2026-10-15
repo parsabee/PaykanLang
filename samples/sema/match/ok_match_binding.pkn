@@ -1,7 +1,9 @@
 // OK: match arm binding narrows the type — binding is visible inside the arm body
 class Dog {
   name: Str;
+}
 
+impl Dog {
   fn __init__(n: Str) {
     self.name = n;
   }

@@ -268,12 +268,15 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     }
     for (auto &[fname, fty] : ct->getFields())
       ci.Fields.push_back({fname, ast::typeName(fty)});
-    // __init__ has no vtable slot but is part of the class's interface: a
-    // subclass in the importing module must call it through `__super__`
-    // with the right arguments (addMethod files it back as the init).
+    // __init__ and the `impl` methods have no vtable slot but are part of
+    // the class's interface: a subclass in the importing module must call
+    // __init__ through `__super__` with the right arguments, and importers
+    // call the `impl` methods directly (addMethod files both back).
     std::vector<ast::MethodDecl *> methods = ct->getVTable();
     if (auto *init = ct->findMethod(names::kMethodInit))
       methods.push_back(init);
+    methods.insert(methods.end(), ct->getImplMethods().begin(),
+                   ct->getImplMethods().end());
     for (auto *m : methods) {
       ModuleInfo::ClassInfo::MethodInfo mi;
       mi.Name = m->getName();
@@ -282,7 +285,8 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
         mi.ParamTypeNames.push_back(ast::typeName(pty));
       mi.Flags =
           static_cast<uint8_t>((m->isPrivate() ? ast::MethodDecl::Private : 0) |
-                               (m->isView() ? ast::MethodDecl::View : 0));
+                               (m->isView() ? ast::MethodDecl::View : 0) |
+                               (m->isImpl() ? ast::MethodDecl::Impl : 0));
       mi.Modes = m->getParamModes();
       ci.Methods.push_back(std::move(mi));
     }
@@ -921,9 +925,15 @@ Sema::exportTemplates(ast::TranslationUnit *tu, const std::string &canonical) {
   };
   Names names(*this, *mt, types, generics, callees);
   ast::ASTCloner cloner(Ctx, {}, &names);
-  for (auto *cd : tu->getGenericClassDecls())
-    if (ClassTemplates.count(cd->getName())) // not rejected
-      mt->Classes.push_back(cloner.cloneTemplate(cd));
+  for (auto *cd : tu->getGenericClassDecls()) {
+    if (!ClassTemplates.count(cd->getName())) // rejected
+      continue;
+    mt->Classes.push_back(cloner.cloneTemplate(cd));
+    if (auto it = TemplateImpls.find(cd); it != TemplateImpls.end())
+      for (auto *im : it->second)
+        if (!im->getTrait())
+          mt->Impls[mt->Classes.back()].push_back(cloner.cloneTemplate(im));
+  }
   for (auto *fn : tu->getGenericFuncDecls())
     if (FuncTemplates.count(fn->getName()))
       mt->Functions.push_back(cloner.cloneTemplate(fn));
@@ -970,6 +980,8 @@ bool Sema::injectTemplates(const ModuleInfo &info, const std::string &qualifier,
   }
   for (auto *cd : mt.Classes)
     ForeignTemplates[cd] = &mt;
+  for (const auto &[cd, impls] : mt.Impls)
+    TemplateImpls[cd] = impls;
   for (auto *fn : mt.Functions)
     ForeignTemplates[fn] = &mt;
   return ok;

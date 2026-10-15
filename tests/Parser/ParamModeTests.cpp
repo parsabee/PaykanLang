@@ -32,8 +32,11 @@ TEST(ParamMode, ModesOnFunctionsMethodsAndConstructors) {
     fn scale(x: inout float, by: view float, n: int) { }
     class Counter {
       n: int;
-      fn __init__(start: view int) { self.n = start; }
       fn add(to: inout int, k: view int) -> int { return k; }
+    }
+
+    impl Counter {
+      fn __init__(start: view int) { self.n = start; }
     }
     fn main() -> int { return 0; }
   )");
@@ -98,7 +101,8 @@ TEST(ParamMode, ModeBeforeTheNameShowsTheFix) {
       {"fn f(inout x: int) { }", "write 'x: inout int'"},
       {"fn f(n: int, view p: Point) { }", "write 'p: view Point'"},
       {"fn f(view xs: int[]) { }", "write 'xs: view int[]'"},
-      {"class C { fn __init__(inout s: int) { } }", "write 's: inout int'"},
+      {"class C {}\nimpl C { fn __init__(inout s: int) { } }",
+       "write 's: inout int'"},
       {"fn f(inout) { }", "write 'x: inout int'"},
   };
   for (const auto &c : cases) {

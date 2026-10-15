@@ -1,6 +1,9 @@
 // Returning a `T?` from a function declared to return `T` needs a match.
 class Node {
   v: int;
+}
+
+impl Node {
   fn __init__(x: int) { self.v = x; }
 }
 

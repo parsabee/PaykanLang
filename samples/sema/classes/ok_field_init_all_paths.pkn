@@ -2,6 +2,9 @@
 class Point {
   x: int;
   y: int;
+}
+
+impl Point {
   fn __init__(a: int) {
     self.x = a;
     if (a > 0) {

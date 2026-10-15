@@ -221,6 +221,9 @@ TEST(Array, ClassElementArrayEqualityOk) {
   auto r = semaCheck(R"(
     class P {
       v: int;
+    }
+
+    impl P {
       fn __init__(v: int) { self.v = v; }
     }
     fn main() -> int {
@@ -328,13 +331,16 @@ TEST(ArrayCanonical, NestedAnnotationsResolveToSameType) {
     class Grid {
       a: int[][];
       b: int[][];
+      fn rows() -> int[][] { return self.a; }
+    }
+
+    impl Grid {
       fn __init__() {
         self.a = [];
         self.b = [[1, 2]];
         self.a.push([3]);
         self.b.push([4, 5]);
       }
-      fn rows() -> int[][] { return self.a; }
     }
     fn main() -> int {
       g: Grid = Grid();

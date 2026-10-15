@@ -9,7 +9,8 @@
 // Expected under --track-heap: live blocks : 0.
 // expect-stdout: 7
 
-class A { v: int; fn __init__(v: int) { self.v = v; } }
+class A { v: int; }
+impl A { fn __init__(v: int) { self.v = v; } }
 
 fn main() -> int {
   o: A? = A(7);

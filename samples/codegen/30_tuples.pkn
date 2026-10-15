@@ -11,15 +11,21 @@
 class Point {
   x: int;
   y: int;
-  fn __init__(x: int, y: int) { self.x = x; self.y = y; }
   view fn toString() -> Str { return "P(" + Str<int>(self.x) + "," + Str(self.y) + ")"; }
+}
+
+impl Point {
+  fn __init__(x: int, y: int) { self.x = x; self.y = y; }
 }
 
 class Range {
   bounds: (int, int);                     // a tuple-typed field
-  fn __init__(lo: int, hi: int) { self.bounds = (lo, hi); }
   view fn width() -> int { return self.bounds.1 - self.bounds.0; }
   view fn get() -> view (int, int) { return self.bounds; }
+}
+
+impl Range {
+  fn __init__(lo: int, hi: int) { self.bounds = (lo, hi); }
 }
 
 fn divmod(a: int, b: int) -> (int, int) {  // multiple return

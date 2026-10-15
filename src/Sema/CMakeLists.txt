@@ -9,6 +9,7 @@ add_library(paykan_sema STATIC
     SemaViewFn.cpp
     SemaViews.cpp
     SemaBorrows.cpp
+    SemaTraits.cpp
 )
 target_link_libraries(paykan_sema
     PUBLIC  paykan_diag

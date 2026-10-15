@@ -162,7 +162,8 @@ TEST(Conversion, UnlistedTypeArgumentsNameTheClosedSet) {
 
 TEST(Conversion, CustomTypesAreNeverSpecializations) {
   // A user class can't add specializations; toString() stringifies it.
-  const std::string point = "class Point { fn __init__() { } }\n";
+  const std::string point = "class Point {}\n"
+                            "impl Point { fn __init__() { } }\n";
   expectError(point + "fn main() -> int { x = Str<Point>(Point()); return 0; }",
               "no specialization of 'Str' for 'Point'; its specializations "
               "are int, float, bool, char, Int, Float, Bool, Char");
@@ -296,7 +297,8 @@ TEST(Conversion, InferredFormNeedsAnExactSource) {
 }
 
 TEST(Conversion, InferredFormRejectsEveryOtherType) {
-  const std::string decls = "class A { fn __init__() { } }\n"
+  const std::string decls = "class A {}\n"
+                            "impl A { fn __init__() { } }\n"
                             "enum Color { Red }\n";
   auto prog = [&](const std::string &body) {
     return decls + "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
@@ -332,7 +334,8 @@ TEST(Conversion, InferredFormTakesExactlyOneArgument) {
 
 TEST(Conversion, InferredFormInsideGenericsAndCalls) {
   expectOk(R"(
-    class Box<T> { v: T; fn __init__(x: T) { self.v = x; } }
+    class Box<T> { v: T; }
+    impl Box<T> { fn __init__(x: T) { self.v = x; } }
     fn ident<T>(x: T) -> T { return x; }
     fn show<T>(x: T) -> Str { return "?"; }
     fn main() -> int {
@@ -375,7 +378,8 @@ TEST(Conversion, RemovedNamesAreOrdinaryIdentifiersAgain) {
 
 TEST(Conversion, GenericCallsAreStillGenericCalls) {
   expectOk(R"(
-    class Box<T> { v: T; fn __init__(x: T) { self.v = x; } }
+    class Box<T> { v: T; }
+    impl Box<T> { fn __init__(x: T) { self.v = x; } }
     fn ident<T>(x: T) -> T { return x; }
     fn main() -> int {
       b = Box<int>(int<float>(1.5));

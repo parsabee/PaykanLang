@@ -1,6 +1,9 @@
 // ERROR: 'Box' takes one type argument, not two.
 class Box<T> {
   v: T;
+}
+
+impl Box<T> {
   fn __init__(v: T) { self.v = v; }
 }
 
