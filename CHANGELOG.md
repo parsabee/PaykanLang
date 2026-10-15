@@ -186,17 +186,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ptr.store` (docs/pir.md §6), which `inout` parameters lower to.  Only
   scalar (`i64`, `f64`, `bool`, `char`) slots have addresses.  A backend plugin
   must handle them.
-- PIR version 2 (`pir::kPIRVersion`, `PAYKAN_PIR_TEXT_VERSION`): inline optionals
-  (#96, docs/pir.md §1 and §6).  Four value types, `opt_i64`, `opt_f64`, `opt_bool` and
-  `opt_char` (a payload and an 8-byte presence word), and four instructions, `some`,
-  `none`, `is_some` and `unwrap`; optional slots have addresses and may be fields.  A
-  backend plugin must handle them; `.pkm` files and caches of PIR 1 are rebuilt.
+- PIR: inline optionals (#96, docs/pir.md §1 and §6).  Four value types, `opt_i64`,
+  `opt_f64`, `opt_bool` and `opt_char` (a payload and an 8-byte presence word), and four
+  instructions, `some`, `none`, `is_some` and `unwrap`; optional slots have addresses and
+  may be fields.  A backend plugin must handle them.
 - An optional primitive (`int?`, `float?`, `bool?`, `char?`) is a value, the primitive and a
   presence flag held inline (#96), instead of a heap box: a local, parameter, result or field
   of one allocates nothing and is never reference counted, and `int<Str>` & co. return one
   without allocating (the runtime's `PaykanString_parse_int` & co.).  The semantics are
   unchanged.  In an `Obj`, an array element or a tuple element a present value is still its
-  boxed `Int` & co.  Runtime ABI version 7.
+  boxed `Int` & co.
 
 ### Removed
 
