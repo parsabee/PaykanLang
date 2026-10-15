@@ -211,3 +211,16 @@ fn main() -> int { A::f(); return 0; }
   EXPECT_FALSE(r.Ok);
   expectAll(r, {"call to undeclared function 'A::f'"});
 }
+
+// A class body cannot hold `__init__`: the error names the `impl` block to
+// write, a generic class's with its type parameters.
+TEST(Impl, InitInTheClassBodyIsAnError) {
+  auto r = semaCheck(R"(class A { n: int; fn __init__() { self.n = 0; } }
+class Box<K, V> { k: K; fn __init__(k: K) { self.k = k; } }
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"'__init__' goes in an 'impl' block, not the class body: "
+                "write 'impl A { fn __init__(...) { ... } }'",
+                "write 'impl Box<K, V> {"});
+}

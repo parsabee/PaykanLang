@@ -173,6 +173,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `__init__` goes in an `impl` block of its class (docs/language/04-classes.md, "`impl`
+  Blocks"): `class A { fn __init__() { ... } }` is an error that says to write
+  `impl A { fn __init__() { ... } }`. The class body holds the fields and the virtual
+  methods.
 - What a call passes to an `inout` parameter shares no storage with anything else the
   call borrows (docs/language/02-functions-and-calling.md, "Exclusivity"): not only another
   `inout` argument, but a `view` argument and the receiver of a method that may change

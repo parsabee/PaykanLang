@@ -186,8 +186,8 @@ fn main() -> int {
   from a module that imports it.
 - No method may reuse a name that the class or one of its superclasses already has, and
   a subclass cannot override an `impl` method.
-- `__init__` can go in an `impl` block or in the class body; either way it is the
-  class's constructor, and a class has one.
+- `__init__` goes in an `impl` block, not the class body: it is the class's constructor,
+  not a virtual method, and a class has one.
 - An `impl` block can only add to a class of its own module; built-in types and enums
   cannot have one. A generic class's names its type parameters: `impl Box<T> { … }`
   (see `11-generics.md`).
@@ -359,5 +359,6 @@ match a {
 | `self` changed in a `view fn` | A `view fn` assigns `self`'s fields or elements, calls a method on `self` that is not a `view fn`, passes them to `inout`, or passes on or stores a reference reached through `self` |
 | Multiple bases | More than one `:` clause |
 | `self` in parameter list | Writing `self` as an explicit method parameter |
+| `__init__` in the class body | `class A { fn __init__() { … } }`; it goes in `impl A { … }` |
 | `impl` method name taken | An `impl` method or `static fn` has the name of a method of the class or a superclass, or a subclass declares one with an `impl` method's name |
 | `impl` for another type | The block names a built-in type, an enum, or a class of another module |
