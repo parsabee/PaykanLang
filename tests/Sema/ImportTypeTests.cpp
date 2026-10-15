@@ -51,20 +51,25 @@ static SemaFileResult semaCheckFile(const std::string &filePath,
 // single reconstruction order satisfies all of them by luck.
 static const char *const kShapesModule =
     "enum Kind { Round, Square }\n"
-    "class Zeta { v: int; fn __init__() { self.v = 7; } }\n"
+    "class Zeta { v: int; }\n"
+    "impl Zeta { fn __init__() { self.v = 7; } }\n"
     "class Alpha {\n"
     "  kind: Kind;\n"
-    "  fn __init__() { self.kind = Kind::Round; }\n"
     "  fn make() -> Zeta { return Zeta(); }\n"
     "  fn take(z: Zeta) -> int { return z.v; }\n"
     "  fn kindOf() -> Kind { return self.kind; }\n"
     "  fn many() -> Zeta[] { return [Zeta(), Zeta()]; }\n"
     "  fn count(zs: Zeta[]) -> int { return zs.len(); }\n"
     "}\n"
+    "impl Alpha {\n"
+    "  fn __init__() { self.kind = Kind::Round; }\n"
+    "}\n"
     "class Mid {\n"
     "  a: Alpha;\n"
-    "  fn __init__() { self.a = Alpha(); }\n"
     "  fn alpha() -> Alpha { return self.a; }\n"
+    "}\n"
+    "impl Mid {\n"
+    "  fn __init__() { self.a = Alpha(); }\n"
     "}\n"
     "fn mk() -> Zeta { return Zeta(); }\n";
 
@@ -164,8 +169,9 @@ fn main() -> int {
 // mention.
 
 static const char *const kLeafModule =
-    "class Thing { v: int; fn __init__(v: int) { self.v = v; } "
+    "class Thing { v: int; "
     "fn val() -> int { return self.v; } }\n"
+    "impl Thing { fn __init__(v: int) { self.v = v; } }\n"
     "enum Mode { Fast, Slow }\n"
     "fn made() -> Thing { return Thing(5); }\n";
 
@@ -174,11 +180,13 @@ static const char *const kMidModule =
     "class Wrap {\n"
     "  t: leaf::Thing;\n"
     "  mode: leaf::Mode;\n"
-    "  fn __init__() { self.t = leaf::Thing(9); self.mode = leaf::Mode::Fast; "
-    "}\n"
     "  fn get() -> leaf::Thing { return self.t; }\n"
     "  fn put(t: leaf::Thing) -> int { self.t = t; return t.val(); }\n"
     "  fn getMode() -> leaf::Mode { return self.mode; }\n"
+    "}\n"
+    "impl Wrap {\n"
+    "  fn __init__() { self.t = leaf::Thing(9); self.mode = leaf::Mode::Fast; "
+    "}\n"
     "}\n"
     "fn make() -> leaf::Thing { return leaf::made(); }\n";
 
@@ -268,10 +276,11 @@ TEST(Module, SameClassNameFromTwoModulesErr) {
   auto tmp = (paykan::test::tempDir() / "pkn_ms_dup_class").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "list.pkn",
-            "class Node { v: int; fn __init__() { self.v = 1; } }\n");
+            "class Node { v: int; }\n"
+            "impl Node { fn __init__() { self.v = 1; } }\n");
   writeFile(tmp, "tree.pkn",
-            "class Node { l: int; r: int; "
-            "fn __init__() { self.l = 0; self.r = 0; } }\n");
+            "class Node { l: int; r: int; }\n"
+            "impl Node { fn __init__() { self.l = 0; self.r = 0; } }\n");
   auto main = writeFile(tmp, "main.pkn", R"(
 import list;
 import tree;
@@ -352,11 +361,12 @@ fn main() -> int { return 0; }
 TEST(Module, LocalClassClashingWithImportReportedOnce) {
   auto tmp = (paykan::test::tempDir() / "pkn_ms_clash_class").string();
   std::filesystem::remove_all(tmp);
-  writeFile(tmp, "lib.pkn", "class K { fn __init__() { } }\n");
+  writeFile(tmp, "lib.pkn", "class K {}\nimpl K { fn __init__() { } }\n");
   auto main = writeFile(tmp, "main.pkn", R"(
 import lib;
 class K { }
-class Fine { fn __init__() { } }
+class Fine {}
+impl Fine { fn __init__() { } }
 fn main() -> int { k = K(); f = Fine(); return 0; }
 )");
   auto r = semaCheckFile(main, tmp);
