@@ -1879,10 +1879,9 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
 bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   bool ok = rejectFreeViewFns(node);
 
-  for (auto *im : node->getImplDecls()) {
-    error(im->getLocation(), "'impl' blocks are not supported yet");
-    ok = false;
-  }
+  // `impl` blocks by their class, whose methods they join in checkClassDecls.
+  for (auto *im : node->getImplDecls())
+    ImplsByClass[im->getTypeName()].push_back(im);
 
   // Register enum types first so that class fields, parameters, and variable
   // declarations can reference them by name during the passes that follow.
@@ -1902,6 +1901,8 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   if (!node->getClassDecls().empty())
     if (!checkClassDecls(node->getClassDecls()))
       ok = false;
+  if (!checkImplDecls(node))
+    ok = false;
 
   // Forward-declare every free function's signature next, so that any body —
   // a free function OR a class method — may call any module-level function

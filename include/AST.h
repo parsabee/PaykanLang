@@ -395,6 +395,8 @@ public:
         ReturnType(retTy), Body(body), TypeParams(std::move(typeParams)) {}
 
   const std::string &getName() const { return *Name; }
+  /// Sema names an `impl` block's `static fn` after its type (`A::make`).
+  void setName(const std::string &internedName) { Name = &internedName; }
   const std::vector<Param> &getParams() const { return Params; }
   /// Mutable access for Sema's canonical-type write-back (see VarDecl).
   std::vector<Param> &getMutableParams() { return Params; }
@@ -990,6 +992,7 @@ public:
     None = 0,
     Private = 1 << 0,
     View = 1 << 1, // `view fn`: does not change `self`
+    Impl = 1 << 2, // in an `impl` block: called directly, never overridden
   };
 
 private:
@@ -1013,9 +1016,11 @@ public:
   void setParamModes(ParamModes modes) { Modes = std::move(modes); }
 
   bool isPrivate() const { return MethodFlags & Private; }
-  bool isVirtual() const { return !isPrivate(); }
+  bool isVirtual() const { return !isPrivate() && !isImpl(); }
   /// Only reads its object, so it can be called through a `view`.
   bool isView() const { return MethodFlags & View; }
+  /// Declared in an `impl` block: it has no vtable slot.
+  bool isImpl() const { return MethodFlags & Impl; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_MethodDecl;
@@ -1049,6 +1054,11 @@ class ClassType : public Type {
   // The class initialiser (__init__), stored separately because it is a
   // static function, not a virtual method, and has no vtable slot.
   MethodDecl *InitMethod = nullptr;
+
+  // The methods of its `impl` blocks, in declaration order.  They are called
+  // directly, so they have no vtable slot, and a subclass inherits them
+  // through findMethod.
+  std::vector<MethodDecl *> ImplMethods;
 
   // When true, no user class may inherit from this type.
   bool Final = false;
@@ -1143,12 +1153,20 @@ public:
 
   const std::vector<MethodDecl *> &getVTable() const { return VTable; }
   size_t getVTableSize() const { return VTable.size(); }
+  /// The `impl` methods this class declares (not its superclasses').
+  const std::vector<MethodDecl *> &getImplMethods() const {
+    return ImplMethods;
+  }
 
   /// Find the vtable slot index for a method name, or -1 if not found.
   int getVTableIndex(const std::string &name) const;
 
   /// Look up a method by name (searches this class and parents).
   MethodDecl *findMethod(const std::string &name) const;
+
+  /// The class, from this one up, whose `impl` block declares method
+  /// @p name, or nullptr.
+  ClassType *implOwner(const std::string &name);
 
   /// Returns true if this type is a subtype of (or equal to) Other.
   bool isSubtypeOf(const ClassType *other) const;
@@ -1243,6 +1261,8 @@ public:
 
   const std::vector<VarDecl *> &getFields() const { return Fields; }
   const std::vector<FuncDecl *> &getMethods() const { return Methods; }
+  /// Sema adds the methods of the class's `impl` blocks.
+  void addMethod(FuncDecl *m) { Methods.push_back(m); }
   size_t getNumFields() const { return Fields.size(); }
   size_t getNumMethods() const { return Methods.size(); }
 

@@ -534,6 +534,8 @@ void ASTPrinter::visitMethodDecl(MethodDecl *node) {
     OS << " private";
   if (node->isView())
     OS << " view";
+  if (node->isImpl())
+    OS << " impl";
   OS << "\n";
 }
 

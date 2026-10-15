@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `impl` blocks (docs/language/04-classes.md, "`impl` Blocks"): `impl Point { ... }` adds
+  `fn`, `view fn` and `static fn` methods to a class of the same module. They are called
+  directly, not through the vtable, and subclasses inherit them. A `static fn` is called
+  as `Point::origin()`, or `mod::Point::origin()` from an importer. No `impl` method may
+  reuse a name the class or a superclass has, and none can be overridden.
 - Generic classes and functions of an imported module (docs/language/11-generics.md,
   "Modules"): `gen::Box<int>(1)`, `gen::Box("s")`, `b: gen::Box<Str>` and `gen::first(xs)`
   instantiate `gen`'s templates in the importer, in every position a local template may be

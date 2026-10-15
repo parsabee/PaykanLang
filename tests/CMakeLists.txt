@@ -77,6 +77,7 @@ add_executable(sema_tests
     Sema/ParamModeTests.cpp
     Sema/LetTests.cpp
     Sema/ViewFnTests.cpp
+    Sema/ImplTests.cpp
     Sema/BorrowedResultTests.cpp
 )
 target_include_directories(sema_tests
@@ -129,6 +130,7 @@ add_executable(codegen_tests
     CodeGen/HarnessTests.cpp
     CodeGen/ParamModeTests.cpp
     CodeGen/LetTests.cpp
+    CodeGen/ImplTests.cpp
 )
 target_include_directories(codegen_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
