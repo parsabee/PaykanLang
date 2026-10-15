@@ -375,14 +375,21 @@ TEST(OptionalPrimitive, InoutAndViewOptionals) {
       match o { n: view int { return Str<int>(n); } None { return "None"; } }
     }
     class Base {
-      fn __init__() { }
       fn pick(c: bool) -> char? { return None; }
     }
+
+    impl Base {
+      fn __init__() { }
+    }
     class Derived : Base {
-      fn __init__() { __super__(); }
       fn pick(c: bool) -> char? { if (c) { return 'd'; } return None; }
     }
-    class Box2 { n: int?; f: float?; fn __init__() { } }
+
+    impl Derived {
+      fn __init__() { __super__(); }
+    }
+    class Box2 { n: int?; f: float?; }
+    impl Box2 { fn __init__() { } }
     fn main() -> int {
       x: int? = None;
       bump(x); bump(x);
