@@ -25,7 +25,6 @@ native fn __bufferShrink<T>(b: inout Obj, by: int) = "PaykanBuffer_shrink";
 
 class Buffer<T> {
   __data: Obj;
-  fn __init__() { self.__data = __bufferNew<T>(3); }
   view fn len() -> int { return __bufferLen<T>(self.__data); }
   view fn get(i: int) -> view T { return __bufferGet<T>(self.__data, i); }
   fn copy(i: int) -> T { return __bufferCopy<T>(self.__data, i); }
@@ -33,6 +32,10 @@ class Buffer<T> {
   fn reserve(n: int) { __bufferReserve<T>(self.__data, n); }
   fn grow(by: int) { __bufferGrow<T>(self.__data, by); }
   fn shrink(by: int) { __bufferShrink<T>(self.__data, by); }
+}
+
+impl Buffer<T> {
+  fn __init__() { self.__data = __bufferNew<T>(3); }
 }
 )";
 
@@ -84,6 +87,9 @@ TEST(Buffer, HoldsReferences) {
   expectRuns(R"(
     class P {
       x: int;
+    }
+
+    impl P {
       fn __init__(x: int) { self.x = x; }
     }
     fn main() -> int {
