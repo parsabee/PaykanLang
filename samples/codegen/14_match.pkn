@@ -19,27 +19,42 @@
 // ===========================================================================
 
 class Animal {
-  fn __init__() {}
   view fn speak() -> Str { return "..."; }
 }
 
+impl Animal {
+  fn __init__() {}
+}
+
 class Dog : Animal {
-  fn __init__() { __super__(); }
   view fn speak() -> Str { return "Woof"; }
 }
 
-class Cat : Animal {
+impl Dog {
   fn __init__() { __super__(); }
+}
+
+class Cat : Animal {
   view fn speak() -> Str { return "Meow"; }
 }
 
-class Bird : Animal {
+impl Cat {
   fn __init__() { __super__(); }
+}
+
+class Bird : Animal {
   view fn speak() -> Str { return "Tweet"; }
+}
+
+impl Bird {
+  fn __init__() { __super__(); }
 }
 
 class Labrador : Dog {
   name: Str;
+}
+
+impl Labrador {
   fn __init__() { __super__(); self.name = "Rex"; }
 }
 

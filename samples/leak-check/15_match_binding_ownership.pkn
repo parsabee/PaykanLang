@@ -12,11 +12,17 @@
 
 class A {
   x: int;
+}
+
+impl A {
   fn __init__() { self.x = 5; }
 }
 
 class Holder {
   a: A;
+}
+
+impl Holder {
   fn __init__(a0: A) { self.a = a0; }
 }
 

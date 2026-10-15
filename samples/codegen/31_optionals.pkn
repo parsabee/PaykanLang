@@ -13,6 +13,9 @@
 class Node {
   v: int;
   next: Node?;                 // implicitly None — no assignment in __init__
+}
+
+impl Node {
   fn __init__(x: int) { self.v = x; }
 }
 

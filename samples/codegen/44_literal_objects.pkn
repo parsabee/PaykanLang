@@ -27,6 +27,9 @@
 class Tagged {
   name: Str;
   tag: Str?;
+}
+
+impl Tagged {
   fn __init__() { self.name = "k"; self.tag = "t"; }
 }
 
