@@ -33,6 +33,7 @@ add_executable(parser_tests
     Parser/ParamModeTests.cpp
     Parser/LetTests.cpp
     Parser/ImplTests.cpp
+    Parser/TraitTests.cpp
 )
 target_include_directories(parser_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}

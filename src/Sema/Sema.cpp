@@ -1879,9 +1879,21 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
 bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   bool ok = rejectFreeViewFns(node);
 
+  for (auto *tr : node->getTraitDecls()) {
+    error(tr->getLocation(), "traits are not supported yet");
+    ok = false;
+  }
   // `impl` blocks by their class, whose methods they join in checkClassDecls.
-  for (auto *im : node->getImplDecls())
+  for (auto *im : node->getImplDecls()) {
+    if (im->getTrait()) {
+      error(im->getLocation(), "'impl ... for' is not supported yet");
+      ok = false;
+      continue;
+    }
     ImplsByClass[im->getTypeName()].push_back(im);
+  }
+  if (!rejectBounds(node))
+    ok = false;
 
   // Register enum types first so that class fields, parameters, and variable
   // declarations can reference them by name during the passes that follow.
@@ -2007,6 +2019,22 @@ bool Sema::checkEntryPoint(ast::TranslationUnit *tu,
 // -- Declarations
 
 bool Sema::visitImplDecl(ast::ImplDecl *) { return true; }
+bool Sema::visitTraitDecl(ast::TraitDecl *) { return true; }
+
+bool Sema::rejectBounds(ast::TranslationUnit *tu) {
+  bool ok = true;
+  auto check = [&](const ast::Decl *d, const ast::TypeParamBounds &bounds) {
+    if (bounds.empty())
+      return;
+    error(d->getLocation(), "type parameter bounds are not supported yet");
+    ok = false;
+  };
+  for (auto *cd : tu->getGenericClassDecls())
+    check(cd, cd->getTypeParamBounds());
+  for (auto *fn : tu->getGenericFuncDecls())
+    check(fn, fn->getTypeParamBounds());
+  return ok;
+}
 
 bool Sema::visitEnumDecl(ast::EnumDecl *node) {
   // Reject names that collide with a builtin, class, function, or existing

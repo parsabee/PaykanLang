@@ -481,10 +481,11 @@ private:
     std::vector<FuncDecl *> funcs, genericFuncs;
     std::vector<EnumDecl *> enums;
     std::vector<ImplDecl *> impls;
+    std::vector<TraitDecl *> traits;
     for (const SExpr *d : f.rest()) {
       if (d->K != SExpr::List) {
         fail(*d, "expected a declaration: (import ...), (enum ...), "
-                 "(class ...), (fn ...) or (impl ...)");
+                 "(class ...), (fn ...), (trait ...) or (impl ...)");
         return nullptr;
       }
       if (d->Text == "import") {
@@ -502,10 +503,13 @@ private:
       } else if (d->Text == "impl") {
         if (auto *im = implDecl(*d))
           impls.push_back(im);
+      } else if (d->Text == "trait") {
+        if (auto *t = traitDecl(*d))
+          traits.push_back(t);
       } else {
         fail(*d, "(" + d->Text +
                      " ...) is not a top-level declaration (import, enum, "
-                     "class, fn, impl)");
+                     "class, fn, trait, impl)");
       }
       if (failed())
         return nullptr;
@@ -513,28 +517,61 @@ private:
     return Ctx.make<TranslationUnit>(
         loc, std::move(imports), std::move(classes), std::move(funcs),
         std::move(enums), std::move(genericClasses), std::move(genericFuncs),
-        std::move(impls));
+        std::move(impls), std::move(traits));
   }
 
   ImplDecl *implDecl(const SExpr &e) {
     Fields f(*this, e);
     SourceLocation loc = f.location();
-    const std::string *type = f.string("the type's name");
-    const SExpr *ml = type ? f.list("methods") : nullptr;
-    if (!ml)
+    const std::string *typeName = f.string("the type's name");
+    if (!typeName)
       return nullptr;
+    // `impl Show for A`: (for TRAIT) after the type's name.
+    Type *trait = nullptr;
+    if (const SExpr *fl = f.optionalList("for")) {
+      Fields tf(*this, *fl);
+      trait = type(tf, "the trait");
+      if (!trait || !tf.done())
+        return nullptr;
+    }
     std::vector<FuncDecl *> methods;
+    if (!methodList(f, methods, /*requirements=*/false) || !f.done())
+      return nullptr;
+    return Ctx.make<ImplDecl>(loc, *typeName, std::move(methods), trait);
+  }
+
+  TraitDecl *traitDecl(const SExpr &e) {
+    Fields f(*this, e);
+    SourceLocation loc = f.location();
+    const std::string *name = f.name("the trait's name");
+    std::vector<const std::string *> tparams;
+    TypeParamBounds bounds;
+    if (!name || !typeParams(f, tparams, bounds))
+      return nullptr;
+    if (!bounds.empty())
+      return fail(e, "a trait's type parameters cannot have bounds"), nullptr;
+    std::vector<FuncDecl *> methods;
+    if (!methodList(f, methods, /*requirements=*/true) || !f.done())
+      return nullptr;
+    return Ctx.make<TraitDecl>(loc, *name, std::move(tparams),
+                               std::move(methods));
+  }
+
+  /// The `(methods FN...)` field into @p out; a trait's @p requirements
+  /// have `_` for their bodies.
+  bool methodList(Fields &f, std::vector<FuncDecl *> &out, bool requirements) {
+    const SExpr *ml = f.list("methods");
+    if (!ml)
+      return false;
     for (const SExpr &m : ml->Items) {
       if (m.K != SExpr::List || m.Text != "fn")
-        return fail(m, "expected a method: (fn ...)"), nullptr;
-      auto *fn = funcDecl(m);
+        return fail(m, "expected a method: (fn ...)"), false;
+      auto *fn = funcDecl(m, requirements);
       if (!fn)
-        return nullptr;
-      methods.push_back(fn);
+        return false;
+      out.push_back(fn);
     }
-    if (!f.done())
-      return nullptr;
-    return Ctx.make<ImplDecl>(loc, *type, std::move(methods));
+    return true;
   }
 
   ImportDecl *importDecl(const SExpr &e) {
@@ -578,17 +615,43 @@ private:
     return Ctx.make<EnumDecl>(loc, *name, std::move(variants));
   }
 
-  bool typeParams(Fields &f, std::vector<const std::string *> &out) {
+  /// `(type-params "T" (bound "U" TRAIT...))` into @p out and @p bounds
+  /// (left empty when no parameter has a bound).
+  bool typeParams(Fields &f, std::vector<const std::string *> &out,
+                  TypeParamBounds &bounds) {
     const SExpr *l = f.list("type-params");
     if (!l)
       return false;
-    Fields pf(*this, *l);
-    while (!pf.atEnd()) {
-      const std::string *p = pf.name("a type parameter");
-      if (!p)
-        return false;
+    bool anyBound = false;
+    for (const SExpr &item : l->Items) {
+      std::vector<Type *> traits;
+      const std::string *p = nullptr;
+      if (item.K == SExpr::List && item.Text == "bound") {
+        Fields bf(*this, item);
+        p = bf.name("a type parameter");
+        if (!p)
+          return false;
+        while (!bf.atEnd()) {
+          Type *t = type(bf, "a bound");
+          if (!t)
+            return false;
+          traits.push_back(t);
+        }
+        if (traits.empty())
+          return fail(item, "(bound ...) needs at least one trait"), false;
+        anyBound = true;
+      } else if (item.K == SExpr::String && !item.Text.empty()) {
+        p = &intern(item.Text);
+      } else {
+        return fail(item, "expected a type parameter: \"T\" or "
+                          "(bound \"T\" TRAIT...)"),
+               false;
+      }
       out.push_back(p);
+      bounds.push_back(std::move(traits));
     }
+    if (!anyBound)
+      bounds.clear();
     return true;
   }
 
@@ -598,7 +661,8 @@ private:
     const std::string *name = f.name("the class's name");
     const std::string *super = name ? f.string("the superclass") : nullptr;
     std::vector<const std::string *> params;
-    if (!super || !typeParams(f, params))
+    TypeParamBounds bounds;
+    if (!super || !typeParams(f, params, bounds))
       return nullptr;
     std::vector<VarDecl *> fields;
     std::vector<FuncDecl *> methods;
@@ -617,29 +681,22 @@ private:
         return fail(v, "a field cannot be declared with let"), nullptr;
       fields.push_back(vd);
     }
-    const SExpr *ml = f.list("methods");
-    if (!ml)
+    if (!methodList(f, methods, /*requirements=*/false) || !f.done())
       return nullptr;
-    for (const SExpr &m : ml->Items) {
-      if (m.K != SExpr::List || m.Text != "fn")
-        return fail(m, "expected a method: (fn ...)"), nullptr;
-      auto *fn = funcDecl(m);
-      if (!fn)
-        return nullptr;
-      methods.push_back(fn);
-    }
-    if (!f.done())
-      return nullptr;
-    return Ctx.make<ClassDecl>(loc, *name, *super, std::move(fields),
-                               std::move(methods), std::move(params));
+    auto *cd = Ctx.make<ClassDecl>(loc, *name, *super, std::move(fields),
+                                   std::move(methods), std::move(params));
+    cd->setTypeParamBounds(std::move(bounds));
+    return cd;
   }
 
-  FuncDecl *funcDecl(const SExpr &e) {
+  /// A function; a trait's @p requirement has `_` for its body.
+  FuncDecl *funcDecl(const SExpr &e, bool requirement = false) {
     Fields f(*this, e);
     SourceLocation loc = f.location();
     const std::string *name = f.name("the function's name");
     std::vector<const std::string *> tparams;
-    if (!name || !typeParams(f, tparams))
+    TypeParamBounds bounds;
+    if (!name || !typeParams(f, tparams, bounds))
       return nullptr;
     const SExpr *pl = f.list("params");
     if (!pl)
@@ -680,9 +737,17 @@ private:
       fn->setResultMode(resultMode);
       return fn;
     }
-    CompoundStmt *body = block(f, "the function's body");
-    if (!body)
-      return nullptr;
+    CompoundStmt *body = nullptr;
+    if (requirement) {
+      if (!tparams.empty())
+        return fail(e, "a trait method cannot be generic"), nullptr;
+      if (!f.absent())
+        return fail(e, "a trait method has `_` for its body"), nullptr;
+    } else {
+      body = block(f, "the function's body");
+      if (!body)
+        return nullptr;
+    }
     // A `view fn` ends with `(qual view)`, a `static fn` with
     // `(qual static)`.
     bool view = false, isStatic = false;
@@ -701,6 +766,7 @@ private:
     fn->setView(view);
     fn->setStatic(isStatic);
     fn->setResultMode(resultMode);
+    fn->setTypeParamBounds(std::move(bounds));
     return fn;
   }
 

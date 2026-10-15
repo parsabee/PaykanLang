@@ -95,6 +95,8 @@ public:
   /// Copy a template as a template: same name, same type parameters.
   FuncDecl *cloneTemplate(FuncDecl *fn);
   ClassDecl *cloneTemplate(ClassDecl *cd);
+  /// The type parameters' bounds of a template, cloned.
+  TypeParamBounds cloneBounds(const TypeParamBounds &bounds);
 };
 
 } // namespace ast

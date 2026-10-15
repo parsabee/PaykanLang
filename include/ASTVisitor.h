@@ -28,7 +28,8 @@ namespace ast {
   NODE(NK_ImportDecl, ImportDecl, ImportDecl)                                  \
   NODE(NK_ClassDecl, ClassDecl, ClassDecl)                                     \
   NODE(NK_EnumDecl, EnumDecl, EnumDecl)                                        \
-  NODE(NK_ImplDecl, ImplDecl, ImplDecl)
+  NODE(NK_ImplDecl, ImplDecl, ImplDecl)                                        \
+  NODE(NK_TraitDecl, TraitDecl, TraitDecl)
 
 #define PAYKAN_STMT_NODES(NODE)                                                \
   NODE(NK_CompoundStmt, CompoundStmt, CompoundStmt)                            \

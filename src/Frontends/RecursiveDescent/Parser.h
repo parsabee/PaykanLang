@@ -116,8 +116,13 @@ private:
   ast::ClassDecl *parseClassDecl();
   ast::EnumDecl *parseEnumDecl();
   ast::ImplDecl *parseImplDecl();
-  ast::FuncDecl *parseFuncDecl(bool native = false);
-  bool parseTypeParamList(std::vector<const std::string *> &out);
+  ast::TraitDecl *parseTraitDecl();
+  /// A function, or with @p requirement a trait method's signature (`;`
+  /// instead of a body).
+  ast::FuncDecl *parseFuncDecl(bool native = false, bool requirement = false);
+  /// Type parameters and, given @p bounds, their bounds (`T: Show + Eq`).
+  bool parseTypeParamList(std::vector<const std::string *> &out,
+                          ast::TypeParamBounds *bounds);
   bool parseParamList(std::vector<ast::Param> &out);
   void prefixModeError();
   void prefixBorrowError();
