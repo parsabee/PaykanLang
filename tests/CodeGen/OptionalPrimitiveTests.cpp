@@ -540,22 +540,28 @@ TEST(OptionalPrimitive, GenericStackPopsAnOptional) {
   auto r = compileAndRun(R"pkn(
     class Stack<T> {
       items: T[];
-      fn __init__() { self.items = []; }
       fn push(x: T) { self.items.push(x); }
       fn pop() -> T? {
         if (self.items.len() == 0) { return None; }
         return self.items.pop();
       }
     }
+
+    impl Stack<T> {
+      fn __init__() { self.items = []; }
+    }
     class Slots<T> {
       s: T?[];
+      fn put(i: int, x: T) { self.s[i] = x; }
+      fn get(i: int) -> T? { return self.s[i]; }
+    }
+
+    impl Slots<T> {
       fn __init__(n: int) {
         self.s = [];
         i = 0;
         while (i < n) { self.s.push(None); i = i + 1; }
       }
-      fn put(i: int, x: T) { self.s[i] = x; }
-      fn get(i: int) -> T? { return self.s[i]; }
     }
     fn main() -> int {
       st = Stack<int>();
