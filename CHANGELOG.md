@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Traits (docs/language/12-traits.md): `trait Named { view fn name() -> Str; }` lists the
+  methods a type must have, and `impl Named for A { ... }` declares that class `A` has
+  them. The block's methods join `A` like an `impl` block's, and a method `A` already has
+  meets a requirement too. Traits can be generic (`trait Into<T>`), and `Self` names the
+  implementing type. A class implements its superclasses' traits, and every class
+  implements the built-in `Show` (`view fn toString() -> Str`) through `Obj`, as do
+  `int`, `float`, `bool` and `char` (`n.toString()` is `Str(n)`). Bounds
+  (`fn f<T: Show + Into<int>>`, `class Box<T: Named>`) are checked where the template is
+  instantiated (`'Str' does not implement trait 'Named', which 'greet' requires of 'T'`).
+  A trait is not a type.
+- `impl` blocks (docs/language/04-classes.md, "`impl` Blocks"): `impl Point { ... }` adds
+  `fn`, `view fn` and `static fn` methods to a class of the same module, and can hold its
+  `__init__`. They are called directly, not through the vtable, and subclasses inherit them. A `static fn` is called
+  as `Point::origin()`, or `mod::Point::origin()` from an importer. No `impl` method may
+  reuse a name the class or a superclass has, and none can be overridden.
+- Generic `impl` blocks (docs/language/11-generics.md, "`impl` Blocks"): `impl Box<T> { ... }`
+  and `impl Named for Box<T> { ... }` give each instantiation of `Box` the block's methods
+  and trait, checked when it is instantiated, also in a module that imports `Box`. A
+  `static fn` in one is not supported yet.
 - Generic classes and functions of an imported module (docs/language/11-generics.md,
   "Modules"): `gen::Box<int>(1)`, `gen::Box("s")`, `b: gen::Box<Str>` and `gen::first(xs)`
   instantiate `gen`'s templates in the importer, in every position a local template may be
@@ -22,6 +41,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every time (a `.pkm` does not hold templates yet).  Instantiating both this module's `Box<Str>` and an imported
   template's is an error (`conflicts with another template's instantiation of the same
   name`).
+- Runtime functions for the standard library's `memory::Buffer<T>`: `PaykanBuffer_new`,
+  `_len`, `_get`, `_copy`, `_set`, `_reserve`, `_grow` and `_shrink` (`Runtime.h`,
+  "Buffer"), generic native functions over a `PaykanBuffer` of values of any size, laid
+  out by their `PaykanType`.  New values are all zero bytes (0, False or None); the
+  buffer retains the references it holds and releases them when they are overwritten,
+  shrunk away or destroyed; growing at least doubles the allocation and shrinking to a
+  quarter of it halves it.  An index out of bounds, a negative count, shrinking by more
+  than the length and reading a never-set reference that may not be None panic (`buffer
+  index 3 out of bounds (len=3)`).
 - Generic native functions (docs/language/02-functions-and-calling.md, "Generic native
   functions"): `native fn pick<T>(first: bool, a: T, b: T) -> T = "c_pick";`.  Each
   instance calls the same C function with a `PaykanType` for each type argument first
@@ -152,6 +180,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `__init__` goes in an `impl` block of its class (docs/language/04-classes.md, "`impl`
+  Blocks"): `class A { fn __init__() { ... } }` is an error that says to write
+  `impl A { fn __init__() { ... } }`. The class body holds the fields and the virtual
+  methods.
 - A native function's parameters are borrowed (docs/language/02-functions-and-calling.md,
   "Native Functions"): only `int`, `float`, `bool` and `char` cross into C by value; any
   other parameter is a `view`, which C borrows, or an `inout`, which C changes in place

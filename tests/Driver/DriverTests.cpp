@@ -985,7 +985,8 @@ TEST(Driver, EmitPirPrintsTheProgram) {
 
 TEST(Driver, EmitCPrintsCSource) {
   REQUIRE_BACKEND();
-  auto src = writeTmp("class P { x: int; fn __init__(x: int) { self.x = x; } }"
+  auto src = writeTmp("class P { x: int; }\n"
+                      "impl P { fn __init__(x: int) { self.x = x; } }\n"
                       "fn main() -> int { p = P(3); return p.x; }");
   auto [rc, out] = run(std::string(kPaykan) + " --emit-c " + src + " 2>&1");
   std::filesystem::remove(src);
@@ -1286,8 +1287,8 @@ TEST(Driver, CBackendRebuildsACorruptCachedObject) {
   std::filesystem::remove_all(dir);
   std::filesystem::create_directories(dir);
   std::ofstream(dir / "dep.pkn")
-      << "class P { a: int; fn __init__() { self.a = 1; }"
-         " view fn get() -> int { return self.a; } }\n"
+      << "class P { a: int; view fn get() -> int { return self.a; } }\n"
+         "impl P { fn __init__() { self.a = 1; } }\n"
          "fn v() -> int { return 1; }\n";
   std::ofstream(dir / "mid.pkn")
       << "import dep;\nfn mk() -> dep::P { return dep::P(); }\n";
@@ -1434,7 +1435,8 @@ TEST(Driver, BuildProducesAStandaloneExecutable) {
   auto src = (dir / "prog.pkn").string();
   {
     std::ofstream ofs(src);
-    ofs << "class Box { v: int; fn __init__(v: int) { self.v = v; } }"
+    ofs << "class Box { v: int; }\n"
+           "impl Box { fn __init__(v: int) { self.v = v; } }\n"
            "fn main(args: Str[]) -> int { b = Box(40); println(args[1]); "
            "return b.v + args.len(); }";
   }
@@ -1592,8 +1594,9 @@ void writeZooProject(const std::filesystem::path &dir) {
   std::filesystem::create_directories(dir / "b");
   std::ofstream(dir / "geometry" / "shapes.pkn")
       << "class Rect { w: int; h: int;\n"
-         "  fn __init__(w: int, h: int) { self.w = w; self.h = h; }\n"
          "  view fn area() -> int { return self.w * self.h; } }\n"
+         "impl Rect {\n"
+         "  fn __init__(w: int, h: int) { self.w = w; self.h = h; } }\n"
          "fn describe(r: Rect) -> Str { return \"rect\"; }\n";
   std::ofstream(dir / "a" / "util.pkn") << "fn tag() -> int { return 1; }\n";
   std::ofstream(dir / "b" / "util.pkn") << "fn tag() -> int { return 2; }\n";

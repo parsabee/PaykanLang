@@ -71,6 +71,9 @@ chains:
 class Entry {
   key: Str;
   value: float;
+}
+
+impl Entry {
   fn __init__(k: Str, v: float) {
     self.key = k;
     self.value = v;
@@ -82,13 +85,6 @@ class HashMap {
   size: int;
   nbuckets: int;
 
-  fn __init__() {
-    self.nbuckets = 8;
-    self.size = 0;
-    self.buckets = [];
-    self.fill();
-  }
-
   // Append `nbuckets` empty chains to a freshly-reset bucket array.
   fn fill() {
     i: int = 0;
@@ -98,6 +94,15 @@ class HashMap {
       i = i + 1;
     }
   }
+// ...
+impl HashMap {
+  fn __init__() {
+    self.nbuckets = 8;
+    self.size = 0;
+    self.buckets = [];
+    self.fill();
+  }
+}
 ```
 
 `__init__` may call methods, like `fill` here. It does so after every field has a value,
@@ -201,16 +206,18 @@ class Parser {
   env: hashmap::HashMap;
   error: Str?;   // the first error, or None
 
+  // Record the first error only; later errors are usually cascades.
+  fn fail(msg: Str) {
+    if (self.error == None) { self.error = msg; }
+  }
+// ...
+impl Parser {
   fn __init__(s: Str, env: hashmap::HashMap) {
     self.input = s;
     self.pos = 0;
     self.env = env;
   }
-
-  // Record the first error only; later errors are usually cascades.
-  fn fail(msg: Str) {
-    if (self.error == None) { self.error = msg; }
-  }
+}
 ```
 
 The grammar has one method per precedence level, and each level calls the next one up. A
@@ -296,12 +303,6 @@ class Ring<T> {
   cap: int;
   start: int; // index of the oldest item once the buffer is full
 
-  fn __init__(cap: int) {
-    self.items = [];
-    self.cap = cap;
-    self.start = 0;
-  }
-
   // Append `x`, overwriting the oldest item when the buffer is full.
   fn add(x: T) {
     if (self.items.len() < self.cap) {
@@ -311,6 +312,14 @@ class Ring<T> {
       self.start = (self.start + 1) % self.cap;
     }
   }
+// ...
+impl Ring<T> {
+  fn __init__(cap: int) {
+    self.items = [];
+    self.cap = cap;
+    self.start = 0;
+  }
+}
 ```
 
 The history holds `(Str, float)` tuples, the statement and its value, so its type is

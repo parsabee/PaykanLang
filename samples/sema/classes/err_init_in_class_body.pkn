@@ -1,0 +1,9 @@
+// ERROR: a class's __init__ goes in an `impl` block, not in the class body
+class Point {
+  x: int;
+  fn __init__(x: int) { self.x = x; }  // write: impl Point { fn __init__... }
+}
+
+fn main() -> int {
+  return 0;
+}

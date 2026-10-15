@@ -16,10 +16,13 @@ static const char *const kNodeClass =
     "class Node {\n"
     "  v: int;\n"
     "  next: Node?;\n"
-    "  fn __init__(x: int) { self.v = x; }\n"
     "  fn val() -> int { return self.v; }\n"
     "}\n"
-    "class Leaf : Node {\n"
+    "impl Node {\n"
+    "  fn __init__(x: int) { self.v = x; }\n"
+    "}\n"
+    "class Leaf : Node {}\n"
+    "impl Leaf {\n"
     "  fn __init__(x: int) { __super__(x); }\n"
     "}\n";
 
@@ -439,6 +442,9 @@ TEST(Optional, NonOptionalFieldStillMustBeAssigned) {
     class Pair {
       a: Str;
       b: Str?;
+    }
+
+    impl Pair {
       fn __init__() { self.b = None; }
     }
     fn main() -> int { return 0; }
@@ -551,7 +557,8 @@ TEST(Optional, OptionalEnumIsRejected) {
 TEST(Optional, OptionalEnumFieldIsRejected) {
   expectError(R"(
     enum Color { Red, Green }
-    class P { c: Color?; fn __init__() {} }
+    class P { c: Color?; }
+    impl P { fn __init__() {} }
     fn main() -> int { return 0; }
   )",
               "optional enum types are not supported yet");
@@ -596,9 +603,11 @@ static const char *const kListModule =
     "class Node {\n"
     "  v: int;\n"
     "  next: Node?;\n"
-    "  fn __init__(x: int) { self.v = x; }\n"
     "  fn tail() -> Node? { return self.next; }\n"
     "  fn link(n: Node?) { self.next = n; }\n"
+    "}\n"
+    "impl Node {\n"
+    "  fn __init__(x: int) { self.v = x; }\n"
     "}\n"
     "fn find(head: Node?, key: int) -> Node? { return head; }\n"
     "fn first(xs: Str?[]) -> Str? { return xs[0]; }\n"
@@ -717,8 +726,9 @@ TEST(OptionalTuple, DestructuredOptionalElementStillNeedsUnwrap) {
 // subscript store) and in nested literals.
 TEST(OptionalTuple, NoneInTupleLiteralTakesTheSlotsOptional) {
   expectOk(std::string(kNodeClass) + R"(
-    class Box { p: (Node?, int); fn __init__() { self.p = (None, 0); }
+    class Box { p: (Node?, int);
                 fn set(p: (int?, Str)) -> Str { return p.1; } }
+    impl Box { fn __init__() { self.p = (None, 0); } }
     fn take(p: (int?, Str)) -> Str { return p.1; }
     fn mk() -> (Node?, int) { return (None, 2); }
     fn main() -> int {
@@ -814,7 +824,8 @@ TEST(OptionalTupleModule, TupleAndOptionalSignaturesRoundTrip) {
   auto tmp = (paykan::test::tempDir() / "pkn_opt_tuple_mod").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "lib.pkn",
-            "class Node { v: int; fn __init__(x: int) { self.v = x; } }\n"
+            "class Node { v: int; }\n"
+            "impl Node { fn __init__(x: int) { self.v = x; } }\n"
             "fn wrap(xs: (Node?, int)[]?) -> (Node?, int)[]? { return xs; }\n"
             "fn pairs() -> (Node?, Str?)[] { return []; }\n"
             "fn mk(n: Node?) -> (Node?, int) { return (n, 5); }\n");

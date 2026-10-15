@@ -309,6 +309,8 @@ void Parser::skipToTopLevelBoundary() {
     case Tok::KwNative:
     case Tok::KwClass:
     case Tok::KwEnum:
+    case Tok::KwImpl:
+    case Tok::KwTrait:
     case Tok::KwImport:
       if (depth == 0)
         return;
@@ -338,6 +340,7 @@ void Parser::skipToMemberBoundary() {
         return;
       break;
     case Tok::KwFn:
+    case Tok::KwStatic:
       if (depth == 0)
         return;
       break;
@@ -405,6 +408,8 @@ TranslationUnit *Parser::parseTranslationUnit() {
   std::vector<ClassDecl *> classes, genericClasses;
   std::vector<FuncDecl *> funcs, genericFuncs;
   std::vector<EnumDecl *> enums;
+  std::vector<ImplDecl *> impls;
+  std::vector<TraitDecl *> traits;
   // The unit's location starts at 1:1 and ends with its last declaration;
   // an empty unit is <1:1-1:1>.
   SourceLocation loc(1, 1, 1, 1);
@@ -427,8 +432,8 @@ TranslationUnit *Parser::parseTranslationUnit() {
       break;
     case Tok::KwView:
       if (kind(1) != Tok::KwFn) {
-        errorAtCurrent("expected 'import', 'class', 'enum' or 'fn' at top "
-                       "level");
+        errorAtCurrent("expected 'import', 'class', 'enum', 'trait', 'impl' or "
+                       "'fn' at top level");
         ok = false;
         break;
       }
@@ -451,9 +456,26 @@ TranslationUnit *Parser::parseTranslationUnit() {
       else
         ok = false;
       break;
+    case Tok::KwImpl:
+      if (auto *d = parseImplDecl())
+        impls.push_back(d);
+      else
+        ok = false;
+      break;
+    case Tok::KwTrait:
+      if (auto *d = parseTraitDecl())
+        traits.push_back(d);
+      else
+        ok = false;
+      break;
+    case Tok::KwStatic:
+      errorAtCurrent("a 'static fn' goes in an 'impl' block: 'impl Name { "
+                     "static fn ... }'");
+      ok = false;
+      break;
     default:
-      errorAtCurrent(
-          "expected 'import', 'class', 'enum', 'fn' or 'native' at top level");
+      errorAtCurrent("expected 'import', 'class', 'enum', 'trait', 'impl', "
+                     "'fn' or 'native' at top level");
       ok = false;
       break;
     }
@@ -468,7 +490,8 @@ TranslationUnit *Parser::parseTranslationUnit() {
 
   return Ctx.make<TranslationUnit>(
       loc, std::move(imports), std::move(classes), std::move(funcs),
-      std::move(enums), std::move(genericClasses), std::move(genericFuncs));
+      std::move(enums), std::move(genericClasses), std::move(genericFuncs),
+      std::move(impls), std::move(traits));
 }
 
 // -- Imports
@@ -560,15 +583,38 @@ ImportDecl *Parser::parseImportDecl() {
 // classDecl ::= "class" IDENT ( "<" typeParamList ">" )? ( ":" modulePath )?
 //               "{" classMember* "}"
 // classMember ::= varDecl ";" | funcDecl
+// typeParamList ::= typeParam ( "," typeParam )*
+// typeParam ::= IDENT ( ":" typeAnnotation ( "+" typeAnnotation )* )?
 
-bool Parser::parseTypeParamList(std::vector<const std::string *> &out) {
+bool Parser::parseTypeParamList(std::vector<const std::string *> &out,
+                                TypeParamBounds *bounds) {
+  bool anyBound = false;
   do {
     if (!at(Tok::Ident)) {
       errorAtCurrent("expected a type parameter name");
       return false;
     }
     out.push_back(&intern(consume().Text));
+    std::vector<Type *> traits;
+    if (at(Tok::Colon)) {
+      if (!bounds) {
+        errorAtCurrent("a trait's type parameters cannot have bounds");
+        return false;
+      }
+      consume();
+      do {
+        Type *t = parseTypeAnnotation();
+        if (!t)
+          return false;
+        traits.push_back(t);
+      } while (accept(Tok::Plus));
+      anyBound = true;
+    }
+    if (bounds)
+      bounds->push_back(std::move(traits));
   } while (accept(Tok::Comma));
+  if (bounds && !anyBound)
+    bounds->clear();
   return true;
 }
 
@@ -596,8 +642,9 @@ ClassDecl *Parser::parseClassDecl() {
   const std::string &name = intern(consume().Text);
 
   std::vector<const std::string *> typeParams;
+  TypeParamBounds bounds;
   if (accept(Tok::Less)) {
-    if (!parseTypeParamList(typeParams) ||
+    if (!parseTypeParamList(typeParams, &bounds) ||
         !expect(Tok::Greater, "to close the type parameter list"))
       return nullptr;
   }
@@ -630,6 +677,10 @@ ClassDecl *Parser::parseClassDecl() {
           continue;
         }
       }
+    } else if (at(Tok::KwStatic)) {
+      errorAtCurrent("a 'static fn' goes in an 'impl' block, not the class "
+                     "body: 'impl " +
+                     std::string(name) + " { static fn ... }'");
     } else {
       errorAtCurrent("expected a field ('name: Type;') or a method ('fn') in "
                      "the class body");
@@ -642,9 +693,11 @@ ClassDecl *Parser::parseClassDecl() {
   leaveNesting();
   if (!expectCloseBrace("to close the class body", open) || !ok)
     return nullptr;
-  return Ctx.make<ClassDecl>(span(start), name, intern(superName),
-                             std::move(body.Fields), std::move(body.Methods),
-                             std::move(typeParams));
+  auto *cd = Ctx.make<ClassDecl>(
+      span(start), name, intern(superName), std::move(body.Fields),
+      std::move(body.Methods), std::move(typeParams));
+  cd->setTypeParamBounds(std::move(bounds));
+  return cd;
 }
 
 // enumDecl ::= "enum" IDENT "{" IDENT ( "," IDENT )* ","? "}"
@@ -672,6 +725,143 @@ EnumDecl *Parser::parseEnumDecl() {
   if (!expect(Tok::RBrace, "to close the enum body"))
     return nullptr;
   return Ctx.make<EnumDecl>(span(start), name, std::move(variants));
+}
+
+// implDecl ::= "impl" ( typeAnnotation "for" )? modulePath
+//              "{" implMember* "}"
+// implMember ::= ( "view" | "static" )? "fn" ... block
+ImplDecl *Parser::parseImplDecl() {
+  SourceLocation start = consume().Loc; // "impl"
+  if (!at(Tok::Ident)) {
+    errorAtCurrent("expected a type name after 'impl'");
+    return nullptr;
+  }
+  // `impl Show for A`: the trait (`Into<int>`, `fmt::Show`) comes first.
+  Type *trait = nullptr;
+  Type *target = parseTypeAnnotation();
+  if (!target)
+    return nullptr;
+  const char *after = "after 'impl'";
+  if (at(Tok::Ident) && cur().Text == "for") {
+    consume();
+    trait = target;
+    after = "after 'for'";
+    if (!at(Tok::Ident)) {
+      errorAtCurrent("expected a type name after 'for'");
+      return nullptr;
+    }
+    target = parseTypeAnnotation();
+    if (!target)
+      return nullptr;
+  }
+  // The type by its name; a generic one (`Box<T>`) names its parameters.
+  // A built-in type is Sema's to reject.
+  std::string typeName;
+  std::vector<const std::string *> typeParams;
+  if (auto *named = dyn_cast<ClassType>(target)) {
+    typeName = named->getName();
+  } else if (isa<BuiltinType>(target)) {
+    typeName = ast::typeName(target);
+  } else if (auto *generic = dyn_cast<GenericType>(target)) {
+    typeName = generic->getName();
+    for (Type *arg : generic->getArgs()) {
+      auto *param = dyn_cast<ClassType>(arg);
+      if (!param || Ctx.lookupType(param->getName()) ||
+          param->getName().find("::") != std::string::npos) {
+        error(arg->getLocation(), "expected a type parameter name in 'impl " +
+                                      typeName + "<...>', not the type '" +
+                                      ast::typeName(arg) + "'");
+        return nullptr;
+      }
+      typeParams.push_back(&intern(param->getName()));
+    }
+  } else {
+    error(target->getLocation(), std::string("expected a type name ") + after);
+    return nullptr;
+  }
+
+  SourceLocation open = cur().Loc;
+  if (!expect(Tok::LBrace, "to open the impl block"))
+    return nullptr;
+  if (!enterNesting())
+    return nullptr;
+
+  std::vector<FuncDecl *> methods;
+  bool ok = true;
+  while (!at(Tok::RBrace) && !at(Tok::Eof)) {
+    size_t before = Pos;
+    bool isStatic = accept(Tok::KwStatic);
+    if (isStatic && !at(Tok::KwFn)) {
+      errorAtCurrent("expected 'fn' after 'static' (a 'static fn' has no "
+                     "'self', so it is never a 'view fn')");
+    } else if (at(Tok::KwFn) || (at(Tok::KwView) && kind(1) == Tok::KwFn)) {
+      if (auto *m = parseFuncDecl()) {
+        m->setStatic(isStatic);
+        methods.push_back(m);
+        continue;
+      }
+    } else {
+      errorAtCurrent("expected a method ('fn', 'view fn' or 'static fn') in "
+                     "the impl block; fields go in the type's declaration");
+    }
+    ok = false;
+    if (Pos == before)
+      consume(); // guarantee progress
+    skipToMemberBoundary();
+  }
+  leaveNesting();
+  if (!expectCloseBrace("to close the impl block", open) || !ok)
+    return nullptr;
+  return Ctx.make<ImplDecl>(span(start), intern(typeName), std::move(methods),
+                            trait, std::move(typeParams));
+}
+
+// traitDecl ::= "trait" IDENT ( "<" typeParamList ">" )? "{" traitMember* "}"
+// traitMember ::= "view"? "fn" IDENT "(" paramList ")"
+//                 ( "->" ( "view" | "inout" )? typeAnnotation )? ";"
+TraitDecl *Parser::parseTraitDecl() {
+  SourceLocation start = consume().Loc; // "trait"
+  if (!at(Tok::Ident)) {
+    errorAtCurrent("expected a trait name after 'trait'");
+    return nullptr;
+  }
+  const std::string &name = intern(consume().Text);
+  std::vector<const std::string *> typeParams;
+  if (accept(Tok::Less)) {
+    if (!parseTypeParamList(typeParams, nullptr) ||
+        !expect(Tok::Greater, "to close the type parameter list"))
+      return nullptr;
+  }
+
+  SourceLocation open = cur().Loc;
+  if (!expect(Tok::LBrace, "to open the trait body"))
+    return nullptr;
+  if (!enterNesting())
+    return nullptr;
+
+  std::vector<FuncDecl *> methods;
+  bool ok = true;
+  while (!at(Tok::RBrace) && !at(Tok::Eof)) {
+    size_t before = Pos;
+    if (at(Tok::KwFn) || (at(Tok::KwView) && kind(1) == Tok::KwFn)) {
+      if (auto *m = parseFuncDecl(/*native=*/false, /*requirement=*/true)) {
+        methods.push_back(m);
+        continue;
+      }
+    } else {
+      errorAtCurrent(
+          "expected a method signature ('fn' or 'view fn') in the trait");
+    }
+    ok = false;
+    if (Pos == before)
+      consume(); // guarantee progress
+    skipToMemberBoundary();
+  }
+  leaveNesting();
+  if (!expectCloseBrace("to close the trait body", open) || !ok)
+    return nullptr;
+  return Ctx.make<TraitDecl>(span(start), name, std::move(typeParams),
+                             std::move(methods));
 }
 
 // -- Functions
@@ -728,7 +918,7 @@ void Parser::prefixModeError() {
                          fix + "'");
 }
 
-FuncDecl *Parser::parseFuncDecl(bool native) {
+FuncDecl *Parser::parseFuncDecl(bool native, bool requirement) {
   SourceLocation start = cur().Loc;
   bool view = !native && accept(Tok::KwView); // `view fn` (a method; see Sema)
   consume();                                  // "fn", or "native" before it
@@ -741,8 +931,9 @@ FuncDecl *Parser::parseFuncDecl(bool native) {
   const std::string &name = intern(consume().Text);
 
   std::vector<const std::string *> typeParams;
+  TypeParamBounds bounds;
   if (accept(Tok::Less)) {
-    if (!parseTypeParamList(typeParams) ||
+    if (!parseTypeParamList(typeParams, &bounds) ||
         !expect(Tok::Greater, "to close the type parameter list"))
       return nullptr;
   }
@@ -786,6 +977,25 @@ FuncDecl *Parser::parseFuncDecl(bool native) {
     return fn;
   }
 
+  // traitMember: the signature, then ";" instead of a body.
+  if (requirement) {
+    if (!typeParams.empty()) {
+      error(start, "a trait method cannot be generic");
+      return nullptr;
+    }
+    if (at(Tok::LBrace)) {
+      errorAtCurrent("a trait method has no body: end its signature with ';'");
+      return nullptr;
+    }
+    if (!expect(Tok::Semi, "after a trait method's signature"))
+      return nullptr;
+    auto *fn = Ctx.make<FuncDecl>(span(start), name, std::move(params), retTy,
+                                  nullptr);
+    fn->setView(view);
+    fn->setResultMode(resultMode);
+    return fn;
+  }
+
   CompoundStmt *body = parseBlock();
   if (!body)
     return nullptr;
@@ -793,6 +1003,7 @@ FuncDecl *Parser::parseFuncDecl(bool native) {
                                 body, std::move(typeParams));
   fn->setView(view);
   fn->setResultMode(resultMode);
+  fn->setTypeParamBounds(std::move(bounds));
   return fn;
 }
 

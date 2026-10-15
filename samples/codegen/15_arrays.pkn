@@ -24,10 +24,6 @@ class Point {
   x: int;
   y: int;
 
-  fn __init__(px: int, py: int) {
-    self.x = px;
-    self.y = py;
-  }
   view fn toString() -> Str {
     return "(" + Str<int>(self.x) + "," + Str(self.y) + ")";
   }
@@ -36,16 +32,26 @@ class Point {
   }
 }
 
+impl Point {
+  fn __init__(px: int, py: int) {
+    self.x = px;
+    self.y = py;
+  }
+}
+
 class Labeled {
   label: Str;
   value: int;
 
+  view fn describe() -> Str {
+    return self.label + "=" + Str<int>(self.value);
+  }
+}
+
+impl Labeled {
   fn __init__(l: Str, v: int) {
     self.label = l;
     self.value = v;
-  }
-  view fn describe() -> Str {
-    return self.label + "=" + Str<int>(self.value);
   }
 }
 

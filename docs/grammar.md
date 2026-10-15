@@ -53,7 +53,7 @@ Keywords (reserved; never identifiers):
 
 ```
 import  as  class  enum  match  mov  fn  native  return  if  then  else
-while  break  continue  True  False  None  _  view  inout  let
+while  break  continue  True  False  None  _  view  inout  let  impl  static  trait
 ```
 
 `_` alone is the `UNDERSCORE` token (destructuring skip, match wildcard);
@@ -107,7 +107,7 @@ one tuple-index token (`\.[0-9]+`, longest match at the dot).
 ```
 translationUnit ::= topLevelDecl*
 topLevelDecl    ::= importDecl | classDecl | funcDecl | nativeFuncDecl
-                  | enumDecl
+                  | enumDecl | traitDecl | implDecl
 ```
 
 Declarations may appear in any order. The AST keeps them in four lists
@@ -137,9 +137,20 @@ name; for the list form the whole path is the base path.
 classDecl   ::= "class" IDENT typeParams? ( ":" modulePath )?
                 "{" classMember* "}"
 classMember ::= varDecl ";" | funcDecl
-typeParams  ::= "<" IDENT ( "," IDENT )* ">"
+typeParams  ::= "<" typeParam ( "," typeParam )* ">"
+typeParam   ::= IDENT ( ":" typeAnnotation ( "+" typeAnnotation )* )?
 
 enumDecl    ::= "enum" IDENT "{" IDENT ( "," IDENT )* ","? "}"
+
+traitDecl   ::= "trait" IDENT ( "<" IDENT ( "," IDENT )* ">" )?
+                "{" traitMember* "}"
+traitMember ::= "view"? "fn" IDENT "(" paramList? ")"
+                ( "->" ( "view" | "inout" )? typeAnnotation )? ";"
+
+implDecl    ::= "impl" ( typeAnnotation "for" )? modulePath
+                ( "<" IDENT ( "," IDENT )* ">" )? "{" implMember* "}"
+implMember  ::= funcDecl | "static" "fn" IDENT "(" paramList? ")"
+                ( "->" ( "view" | "inout" )? typeAnnotation )? block
 
 funcDecl    ::= "view"? "fn" IDENT typeParams? "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )? block
@@ -154,6 +165,11 @@ varDecl     ::= IDENT ":" typeAnnotation
 An enum needs at least one variant; a single trailing comma is permitted.
 A class or function with `typeParams` is generic (a template that Sema
 instantiates); the superclass of a generic class is a plain class name.
+A type parameter's bounds (`T: Show + Into<int>`) name the traits its type
+argument must implement.  `impl Show for A` implements trait `Show` for `A`;
+`for` is not a keyword, only a word the `impl` declaration expects there.
+The `impl` block of a generic type names its type parameters: `impl Box<T>`.
+A trait's methods are signatures that end with `;`.
 Methods are `funcDecl`s inside a class body.  `view fn` marks a method that
 does not change `self` ([language/04-classes.md](language/04-classes.md));
 on a free function it is a semantic error, not a syntax error.

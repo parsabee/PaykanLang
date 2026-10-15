@@ -4,11 +4,15 @@
 //
 // Expected under --track-heap: live blocks : 0.
 
-class Base {
+class Base {}
+
+impl Base {
   fn __init__() {}
 }
 
-class Derived : Base {
+class Derived : Base {}
+
+impl Derived {
   fn __init__() {
     __super__();
   }

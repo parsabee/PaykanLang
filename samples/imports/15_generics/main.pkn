@@ -10,8 +10,11 @@ import counter;
 
 class Holder<T> {
   b: box::Box<T>;
-  fn __init__(x: T) { self.b = box::Box<T>(x); }
   view fn peek() -> T { return self.b.get(); }
+}
+
+impl Holder<T> {
+  fn __init__(x: T) { self.b = box::Box<T>(x); }
 }
 
 fn wrap<T>(x: T) -> box::Box<T> { return box::Box<T>(x); }

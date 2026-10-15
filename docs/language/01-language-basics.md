@@ -271,6 +271,9 @@ parameter:
 ```pkn
 class Account {
   balance: int;
+}
+
+impl Account {
   fn __init__() { self.balance = 0; }
 }
 
@@ -794,7 +797,8 @@ entity. Declaring a function, class, or enum whose name is a builtin function (`
 the declaration:
 
 ```pkn
-class print { fn __init__() {} }   // error: 'print' is a builtin function and cannot be redeclared
+class print {}
+impl print { fn __init__() {} }   // error: 'print' is a builtin function and cannot be redeclared
 fn open(p: Str) -> int { ... }     // error: 'open' is a builtin function and cannot be redeclared
 enum Error { NotFound }            // error: 'Error' is a builtin class and cannot be redeclared
 ```

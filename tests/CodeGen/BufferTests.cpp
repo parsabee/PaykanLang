@@ -1,0 +1,154 @@
+// Copyright (c) 2026 Parsa Bagheri
+// SPDX-License-Identifier: MIT
+// Codegen / E2E tests for the PaykanBuffer_* runtime functions, called the
+// way the standard library's memory::Buffer<T> calls them: an ordinary
+// generic class whose methods are generic native functions.  Every run is
+// checked for zero live heap blocks.
+
+#include "CodeGenTestUtils.h"
+#include <gtest/gtest.h>
+
+using namespace paykan::test;
+
+namespace {
+
+// The standard library's declaration, verbatim.
+const std::string kBuffer = R"(
+native fn __bufferNew<T>(n: int) -> Obj = "PaykanBuffer_new";
+native fn __bufferLen<T>(b: view Obj) -> int = "PaykanBuffer_len";
+native fn __bufferGet<T>(b: view Obj, i: int) -> view T = "PaykanBuffer_get";
+native fn __bufferCopy<T>(b: view Obj, i: int) -> T = "PaykanBuffer_copy";
+native fn __bufferSet<T>(b: inout Obj, i: int, v: view T) = "PaykanBuffer_set";
+native fn __bufferReserve<T>(b: inout Obj, n: int) = "PaykanBuffer_reserve";
+native fn __bufferGrow<T>(b: inout Obj, by: int) = "PaykanBuffer_grow";
+native fn __bufferShrink<T>(b: inout Obj, by: int) = "PaykanBuffer_shrink";
+
+class Buffer<T> {
+  __data: Obj;
+  view fn len() -> int { return __bufferLen<T>(self.__data); }
+  view fn get(i: int) -> view T { return __bufferGet<T>(self.__data, i); }
+  fn copy(i: int) -> T { return __bufferCopy<T>(self.__data, i); }
+  fn set(i: int, v: T) { __bufferSet<T>(self.__data, i, v); }
+  fn reserve(n: int) { __bufferReserve<T>(self.__data, n); }
+  fn grow(by: int) { __bufferGrow<T>(self.__data, by); }
+  fn shrink(by: int) { __bufferShrink<T>(self.__data, by); }
+}
+
+impl Buffer<T> {
+  fn __init__() { self.__data = __bufferNew<T>(3); }
+}
+)";
+
+void expectRuns(const std::string &main, const std::string &expected) {
+  LeakGuard g;
+  auto r = compileAndRun(kBuffer + main);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0) << r.StdErr;
+  EXPECT_EQ(r.StdOut, expected);
+  g.expectNoLeaks("buffer");
+}
+
+} // namespace
+
+TEST(Buffer, StartsWithThreeZeroedSlots) {
+  expectRuns(R"(
+    fn main() -> int {
+      b = Buffer<int>();
+      println(Str<int>(b.len()));
+      b.set(0, 10);
+      b.set(2, 30);
+      n: int = b.get(0) + b.get(1) + b.get(2);
+      println(Str<int>(n));
+      return 0;
+    }
+  )",
+             "3\n40\n");
+}
+
+TEST(Buffer, ReserveGrowAndShrinkChangeTheLength) {
+  expectRuns(R"(
+    fn main() -> int {
+      b = Buffer<float>();
+      b.grow(2);
+      b.set(4, 2.5);
+      println(Str<int>(b.len()) + " " + Str<float>(b.get(4)));
+      b.shrink(4);
+      println(Str<int>(b.len()));
+      b.reserve(8);
+      b.reserve(2);
+      println(Str<int>(b.len()) + " " + Str<float>(b.get(4)));
+      return 0;
+    }
+  )",
+             "5 2.5\n1\n8 0\n");
+}
+
+TEST(Buffer, HoldsReferences) {
+  expectRuns(R"(
+    class P {
+      x: int;
+    }
+
+    impl P {
+      fn __init__(x: int) { self.x = x; }
+    }
+    fn main() -> int {
+      s = Buffer<Str>();
+      s.set(0, "a");
+      s.set(1, "b");
+      s.set(2, "c");
+      s.set(1, "B");
+      println(s.get(0) + s.get(1) + s.get(2));
+      s.shrink(2);
+      ps = Buffer<P>();
+      p = P(42);
+      ps.set(1, p);
+      ps.set(2, p);
+      println(Str<int>(ps.get(1).x + ps.get(2).x));
+      return 0;
+    }
+  )",
+             "aBc\n84\n");
+}
+
+TEST(Buffer, OptionalSlotsStartAsNone) {
+  expectRuns(R"(
+    fn show(o: view Str?) {
+      match o {
+        v: Str { println(v); }
+        None { println("None"); }
+      }
+    }
+    fn main() -> int {
+      b = Buffer<Str?>();
+      b.set(2, "x");
+      show(b.get(0));
+      show(b.get(2));
+      b.set(2, None);
+      show(b.get(2));
+      return 0;
+    }
+  )",
+             "None\nx\nNone\n");
+}
+
+// A bool takes one byte; a copy outlives the value it was taken from.
+TEST(Buffer, HoldsBoolsAndCopiesOut) {
+  expectRuns(R"(
+    fn main() -> int {
+      b = Buffer<bool>();
+      b.grow(13);
+      b.set(1, True);
+      b.set(15, True);
+      println(Str<bool>(b.get(0)) + " " + Str<bool>(b.get(1)) + " " +
+              Str<bool>(b.copy(15)));
+      s = Buffer<Str>();
+      s.set(0, "x");
+      t: Str = s.copy(0);
+      s.set(0, "y");
+      println(t + s.get(0));
+      return 0;
+    }
+  )",
+             "False True True\nxy\n");
+}

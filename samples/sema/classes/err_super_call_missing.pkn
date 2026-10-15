@@ -2,7 +2,9 @@
 // statement (required whenever the superclass declares an __init__)
 class Animal {
   name: Str;
+}
 
+impl Animal {
   fn __init__(n: Str) {
     self.name = n;
   }
@@ -10,7 +12,9 @@ class Animal {
 
 class Dog : Animal {
   breed: Str;
+}
 
+impl Dog {
   fn __init__(n: Str, b: Str) {
     // missing: __super__(n);
     self.breed = b;

@@ -105,8 +105,11 @@ arrays, so they need no special handling:
 ```pkn
 class Range {
   bounds: (int, int);                        // field
-  fn __init__(lo: int, hi: int) { self.bounds = (lo, hi); }
   fn get() -> (int, int) { return self.bounds; }
+}
+
+impl Range {
+  fn __init__(lo: int, hi: int) { self.bounds = (lo, hi); }
 }
 
 fn swap(p: (int, Str)) -> (Str, int) { return (p.1, p.0); }  // parameter + return

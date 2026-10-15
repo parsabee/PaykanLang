@@ -92,9 +92,16 @@ public:
   /// copy has no type parameters.
   ClassDecl *cloneClassDecl(ClassDecl *cd, const std::string &newName);
 
+  /// Copy an `impl` block for the type named @p newTypeName.  The copy has
+  /// no type parameters.
+  ImplDecl *cloneImplDecl(ImplDecl *im, const std::string &newTypeName);
+
   /// Copy a template as a template: same name, same type parameters.
   FuncDecl *cloneTemplate(FuncDecl *fn);
   ClassDecl *cloneTemplate(ClassDecl *cd);
+  ImplDecl *cloneTemplate(ImplDecl *im);
+  /// The type parameters' bounds of a template, cloned.
+  TypeParamBounds cloneBounds(const TypeParamBounds &bounds);
 };
 
 } // namespace ast

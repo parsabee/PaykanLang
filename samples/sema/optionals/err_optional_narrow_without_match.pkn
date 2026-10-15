@@ -1,6 +1,9 @@
 // A `T?` never converts to `T` implicitly; unwrap it with `match`.
 class Node {
   v: int;
+}
+
+impl Node {
   fn __init__(x: int) { self.v = x; }
 }
 

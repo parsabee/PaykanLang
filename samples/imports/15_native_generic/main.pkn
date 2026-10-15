@@ -15,6 +15,9 @@ native fn swap<T>(a: inout T, b: inout T) = "sample_swap";
 
 class Point {
   x: int;
+}
+
+impl Point {
   fn __init__(x: int) { self.x = x; }
 }
 
