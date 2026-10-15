@@ -532,11 +532,12 @@ PaykanObject *PaykanShared_get(PaykanShared *shared);
 // An instance of a generic `native fn` (`native fn get<T>(b: view Obj, i: int)
 // -> view T = "..."`, docs/language/02-functions-and-calling.md) receives a
 // PaykanType for each type argument, in order, ahead of its arguments.  A
-// parameter typed by a type parameter (`x: T`, `x: view T`) crosses by
-// address, as a `const void *` C borrows for the call.  A `-> T` result is
-// written to a `void *out` passed after the PaykanTypes, a `-> view T` result
-// is returned as a `const void *` into a `view` argument.  Every other
-// parameter and result crosses as it does for a non-generic native function.
+// parameter typed by a type parameter crosses by address: a `view T` as a
+// `const void *` C borrows for the call, an `inout T` as a `void *` C may
+// change in place.  A `-> T` result is written to a `void *out` passed after
+// the PaykanTypes, a `-> view T` result is returned as a `const void *` into
+// a `view` or `inout` argument.  Every other parameter and result crosses as
+// it does for a non-generic native function.
 //
 // A PaykanType describes a value of the type as it is stored: its size and
 // alignment, its kind, and where it holds references (PaykanShared* boxes),
@@ -576,6 +577,41 @@ void PaykanType_drop(const PaykanType *type, void *value);
 /// True if a reference the @p type value at @p value holds that may not be
 /// NULL is: storage that was never set.
 int PaykanType_isUnset(const PaykanType *type, const void *value);
+
+// -- Buffer
+//
+// The storage of the standard library's memory::Buffer<T>: `len` live values
+// of a PaykanType `type`, `cap` of them allocated, reached through generic
+// native functions (above).  A function is passed the buffer as its object
+// (a `view Obj`), or one that changes it as the address of its box (an
+// `inout Obj`).  They are declared with the C types the backends give a
+// native function's parameters: `void *` for a PaykanType and any other
+// address.  A new value is all zero bytes: 0, False or None.  Destroying the
+// buffer drops the values.  An index out of bounds, a negative count,
+// shrinking by more than len and reading a never-set reference of a type
+// that may not be NULL panic.
+
+typedef struct PaykanBuffer {
+  PaykanMethod *vtable;   // points to PaykanBuffer_vtable
+  PaykanShared *shared;   // object header (see PaykanObject)
+  const PaykanType *type; // of the values (the compiler's constant data)
+  unsigned char *data;    // cap values of type->size bytes
+  int64_t len;            // live values
+  int64_t cap;            // allocated values
+} PaykanBuffer;
+
+extern PaykanMethod PaykanBuffer_vtable[PAYKAN_OBJECT_SLOTS];
+
+PaykanShared *PaykanBuffer_new(void *t, int64_t n); // owned box
+int64_t PaykanBuffer_len(void *t, PaykanObject *b);
+/// The address of value @p i, valid until the buffer next changes.
+void *PaykanBuffer_get(void *t, PaykanObject *b, int64_t i);
+/// Copy value @p i to @p out (uninitialised), retaining its references.
+void PaykanBuffer_copy(void *t, void *out, PaykanObject *b, int64_t i);
+void PaykanBuffer_set(void *t, void *b, int64_t i, void *v);
+void PaykanBuffer_reserve(void *t, void *b, int64_t n);
+void PaykanBuffer_grow(void *t, void *b, int64_t by);
+void PaykanBuffer_shrink(void *t, void *b, int64_t by);
 
 // -- Runtime panics
 
