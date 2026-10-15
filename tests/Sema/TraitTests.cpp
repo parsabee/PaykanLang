@@ -1,0 +1,114 @@
+// Copyright (c) 2026 Parsa Bagheri
+// SPDX-License-Identifier: MIT
+// Sema tests: traits (#216).  `impl Trait for A` must give A every method the
+// trait requires, with its signature (a method A already has counts); a
+// class implements what its superclasses do, and every class implements the
+// builtin `Show` through `Obj`.  A trait is not a type.
+
+#include "TestUtils.h"
+#include <gtest/gtest.h>
+
+using namespace paykan::test;
+
+namespace {
+
+void expectAll(const SemaResult &r, std::initializer_list<const char *> diags) {
+  for (const char *d : diags)
+    EXPECT_NE(r.Diagnostics.find(d), std::string::npos) << d << "\n"
+                                                        << r.Diagnostics;
+}
+
+} // namespace
+
+// Requirements met by the impl block and by the class body, a generic
+// trait, and `Self` (in a trait, an impl and a class body).
+TEST(Traits, ConformingProgramChecks) {
+  auto r = semaCheck(R"(trait Named { view fn name() -> Str; }
+trait Into<T> { view fn into() -> T; }
+trait Same { view fn same(other: view Self) -> bool; }
+class A {
+  n: int;
+  fn __init__(n: int) { self.n = n; }
+  view fn name() -> Str { return "A"; }
+  view fn twin() -> Self { return A(0); }
+}
+impl Named for A {}
+impl Into<int> for A { view fn into() -> int { return self.n; } }
+impl Same for A {
+  view fn same(other: view Self) -> bool { return self.n == other.n; }
+}
+class B : A { fn __init__() { __super__(1); } }
+fn main() -> int {
+  b = B();
+  return b.into() + b.name().len() + b.twin().into() + Str(b.same(b)).len();
+}
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 0) << r.Diagnostics;
+}
+
+TEST(Traits, DeclarationsAreChecked) {
+  auto r = semaCheck(R"(trait Named { view fn name() -> Str; }
+trait Named { fn x(); }
+trait Shape { fn __init__(); fn area() -> int; fn area() -> int; }
+trait Bad { fn f() -> Nope; }
+class Show {}
+class Named {}
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"redefinition of trait 'Named'",
+                "a trait cannot require '__init__'",
+                "duplicate method 'area' in trait 'Shape'",
+                "method 'f' of trait 'Bad' has unknown class type 'Nope'",
+                "'Show' is a builtin trait and cannot be redeclared",
+                "'Named' is already declared as a trait"});
+}
+
+// An impl must give the class each required method with the trait's
+// signature (`view fn` and modes included), and nothing else.
+TEST(Traits, ImplsAreChecked) {
+  auto r = semaCheck(R"(trait Named { view fn name() -> Str; }
+trait Into<T> { view fn into() -> T; }
+class A { n: int; fn __init__() { self.n = 0; } view fn name() -> int { return 1; } }
+impl Named for A {}
+impl Into<int> for A {
+  fn into() -> int { return 1; }
+  fn extra() {}
+  static fn make() -> A { return A(); }
+}
+class C { n: int; fn __init__() { self.n = 0; } }
+impl Named for C {}
+impl Into for C {}
+impl Show for C {}
+impl Nope for C {}
+impl Str for C {}
+impl Named for int {}
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"'view fn name() -> int' of class 'A' does not match 'view fn "
+                "name() -> Str' of trait 'Named'",
+                "'fn into() -> int' of class 'A' does not match 'view fn "
+                "into() -> int' of trait 'Into<int>'",
+                "'extra' is not a method of trait 'Into<int>'",
+                "'make' is not a method of trait 'Into<int>'",
+                "class 'C' does not implement 'view fn name() -> Str' of trait "
+                "'Named'",
+                "trait 'Into' expects 1 type argument(s), got 0",
+                "class 'C' already implements 'Show' (through 'Obj')",
+                "unknown trait 'Nope'", "'Str' is not a trait",
+                "'int' is a built-in type"});
+}
+
+TEST(Traits, TraitsAreNotTypes) {
+  auto r = semaCheck(R"(trait Named { view fn name() -> Str; }
+trait Into<T> { view fn into() -> T; }
+fn f(n: Named) {}
+fn g(n: Into<int>) {}
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"parameter 'n' names trait 'Named', which is not a type",
+                "'Into' is a trait, not a type"});
+}

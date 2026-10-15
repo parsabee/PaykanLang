@@ -14,6 +14,7 @@
 #include <deque>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -206,7 +207,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   const FunctionSig *lookupFunction(std::string_view name) const;
 
   /// The kind of top-level entity being declared, for checkDeclNameAvailable.
-  enum class DeclKind { Function, Class, Enum };
+  enum class DeclKind { Function, Class, Enum, Trait };
 
   /// Top-level declarations — functions, classes (whose constructors are
   /// called by class name), and enums — share one namespace with the compiler
@@ -868,15 +869,66 @@ private:
   /// Phase 4 for the `impl` blocks of @p cd's class: their methods join it.
   bool populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct);
 
-  /// Report the type parameter bounds (`<T: Show>`) as not supported yet.
-  bool rejectBounds(ast::TranslationUnit *tu);
-
   /// Check that every `impl` block names a class of this module, and make
   /// its `static fn`s the module's functions `Type::name`.
   bool checkImplDecls(ast::TranslationUnit *tu);
 
   /// The `impl` blocks by the name of the class they add to.
   StringMap<std::vector<ast::ImplDecl *>> ImplsByClass;
+
+  // -- Traits (SemaTraits.cpp)
+
+  struct TraitInfo {
+    ast::TraitDecl *Decl = nullptr;
+    bool IsBuiltin = false;
+    /// A requirement's signature did not resolve (reported with the trait).
+    bool Erroneous = false;
+  };
+  /// A trait with its type arguments: `Into<int>`.
+  struct TraitRef {
+    const TraitInfo *Trait = nullptr;
+    std::vector<ast::Type *> Args;
+  };
+  /// A requirement's signature for one implementation of its trait.
+  struct RequiredSig {
+    ast::Type *Ret = nullptr;
+    std::vector<ast::Type *> Params;
+    ast::ParamModes Modes;
+  };
+  using Subst = std::unordered_map<std::string, ast::Type *>;
+
+  StringMap<TraitInfo> Traits;
+  /// The traits each type implements itself (a class also implements its
+  /// superclasses'), by canonical type.
+  std::unordered_map<const ast::Type *, std::vector<TraitRef>> TraitImpls;
+  /// The type `Self` names while a method's signature is resolved (in its
+  /// body, the class being checked).
+  ast::ClassType *SelfType = nullptr;
+
+  /// Register the builtin trait `Show`, which `Obj` implements.
+  void registerBuiltinTraits();
+  /// Register the module's traits by name (their signatures are checked by
+  /// checkTraitDecls, once classes can be named).
+  bool declareTraits(ast::TranslationUnit *tu);
+  bool checkTraitDecls(ast::TranslationUnit *tu);
+  /// @p fn's signature with @p subst applied (`Self` and the trait's type
+  /// parameters); false after reporting a type that does not resolve.
+  bool resolveRequirement(const ast::FuncDecl *fn, const Subst &subst,
+                          const std::string &traitName, RequiredSig &out);
+  /// The trait the annotation @p ref names (`Show`, `Into<T>` with @p subst
+  /// applied); nullopt after an error.
+  std::optional<TraitRef> resolveTraitRef(ast::Type *ref, const Subst &subst,
+                                          ast::SourceLocation loc);
+  static std::string traitRefName(const TraitRef &tr);
+  /// The type whose implementation of @p tr @p ty has (itself or, for a
+  /// class, a superclass); nullptr if it does not implement it.
+  const ast::Type *traitImplOwner(ast::Type *ty, const TraitRef &tr);
+  /// Record `impl Trait for A` and check that A has every method the trait
+  /// requires, with its signature.
+  bool checkTraitImpl(ast::ImplDecl *im, ast::ClassType *ct);
+
+  /// Report the type parameter bounds (`<T: Show>`) as not supported yet.
+  bool rejectBounds(ast::TranslationUnit *tu);
 
   // -- Generics
   //

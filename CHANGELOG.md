@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Traits (docs/language/12-traits.md): `trait Named { view fn name() -> Str; }` lists the
+  methods a type must have, and `impl Named for A { ... }` declares that class `A` has
+  them. The block's methods join `A` like an `impl` block's, and a method `A` already has
+  meets a requirement too. Traits can be generic (`trait Into<T>`), and `Self` names the
+  implementing type. A class implements its superclasses' traits, and every class
+  implements the built-in `Show` (`view fn toString() -> Str`) through `Obj`. A trait is
+  not a type.
 - `impl` blocks (docs/language/04-classes.md, "`impl` Blocks"): `impl Point { ... }` adds
   `fn`, `view fn` and `static fn` methods to a class of the same module. They are called
   directly, not through the vtable, and subclasses inherit them. A `static fn` is called
