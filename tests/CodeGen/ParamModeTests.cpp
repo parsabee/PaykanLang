@@ -104,12 +104,18 @@ TEST(ParamMode, ViewParametersArePassedByValue) {
     enum Color { Red, Green }
     class Counter {
       n: int;
-      fn __init__(start: view int) { self.n = start; }
       fn add(k: view int) -> int { self.n = self.n + k; return self.n; }
     }
+
+    impl Counter {
+      fn __init__(start: view int) { self.n = start; }
+    }
     class Twice : Counter {
-      fn __init__(s: view int) { __super__(s); }
       fn add(k: view int) -> int { self.n = self.n + 2 * k; return self.n; }
+    }
+
+    impl Twice {
+      fn __init__(s: view int) { __super__(s); }
     }
     fn scale(x: view float, by: view float) -> float { y = x * by; return y; }
     fn name(c: view Color, loud: view bool, end: view char) -> Str {
@@ -187,12 +193,18 @@ TEST(ParamMode, InoutParametersOfMethodsAndConstructors) {
   auto r = compileAndRun(R"(
     class Counter {
       n: int;
-      fn __init__(start: inout int) { self.n = start; start = 0; }
       fn take(to: inout int) { to = to + self.n; }
     }
+
+    impl Counter {
+      fn __init__(start: inout int) { self.n = start; start = 0; }
+    }
     class Twice : Counter {
-      fn __init__(s: inout int) { __super__(s); s = 7; }
       fn take(to: inout int) { to = to + 2 * self.n; }
+    }
+
+    impl Twice {
+      fn __init__(s: inout int) { __super__(s); s = 7; }
     }
     fn main() -> int {
       st = 5;
@@ -219,13 +231,19 @@ TEST(ParamMode, InoutFieldsArePassedByAddress) {
   auto r = compileAndRun(R"(
     class Inner {
       n: int;
-      fn __init__() { self.n = 0; }
       fn addTo(t: inout int) { t = t + 1; }
+    }
+
+    impl Inner {
+      fn __init__() { self.n = 0; }
     }
     class Holder {
       inner: Inner; total: int; f: float;
-      fn __init__() { self.inner = Inner(); self.total = 0; self.f = 0.5; }
       fn selfBump() { bump(self.total); self.inner.addTo(self.total); }
+    }
+
+    impl Holder {
+      fn __init__() { self.inner = Inner(); self.total = 0; self.f = 0.5; }
     }
     fn bump(n: inout int) { n = n + 1; }
     fn watch(t: inout int, h: Holder) {
@@ -267,10 +285,14 @@ TEST(ParamMode, ViewParametersOfReferenceTypes) {
   auto r = compileAndRun(R"(
     class Counter {
       n: int;
-      fn __init__(n: int) { self.n = n; }
       fn tick() { self.n = self.n + 1; }
     }
-    class Fast : Counter { fn __init__(n: int) { __super__(n); } }
+
+    impl Counter {
+      fn __init__(n: int) { self.n = n; }
+    }
+    class Fast : Counter {}
+    impl Fast { fn __init__(n: int) { __super__(n); } }
     fn sum(c: view Counter, xs: view int[], s: view Str) -> int {
       return c.n + xs.len() + s.len() + xs[0];
     }
@@ -303,15 +325,22 @@ TEST(ParamMode, InoutParametersOfReferenceTypes) {
   auto r = compileAndRun(R"(
     class Counter {
       n: int;
-      fn __init__(n: int) { self.n = n; }
       fn tick() { self.n = self.n + 1; }
       fn adopt(c: inout Counter) { c = Counter(self.n); }
     }
+
+    impl Counter {
+      fn __init__(n: int) { self.n = n; }
+    }
     class Fast : Counter {
-      fn __init__(n: int) { __super__(n); }
       fn adopt(c: inout Counter) { c = Fast(10 * self.n); }
     }
-    class Holder { c: Counter; fn __init__() { self.c = Counter(100); } }
+
+    impl Fast {
+      fn __init__(n: int) { __super__(n); }
+    }
+    class Holder { c: Counter; }
+    impl Holder { fn __init__() { self.c = Counter(100); } }
     fn same(c: inout Counter) { c = c; c.tick(); }
     fn keep(c: inout Counter) -> Counter { return c; }
     fn pass(c: inout Counter) { same(c); reset(c); }
@@ -398,10 +427,14 @@ TEST(LocalBorrow, ViewLocalsOfReferenceTypes) {
   auto r = compileAndRun(R"(
     class Counter {
       n: int;
-      fn __init__(n: int) { self.n = n; }
       view fn toString() -> Str { return "counter " + Str(self.n); }
     }
-    class Fast : Counter { fn __init__(n: int) { __super__(n); } }
+
+    impl Counter {
+      fn __init__(n: int) { self.n = n; }
+    }
+    class Fast : Counter {}
+    impl Fast { fn __init__(n: int) { __super__(n); } }
     fn main() -> int {
       c: Counter = Fast(3);
       v: view = c;
@@ -431,13 +464,19 @@ TEST(LocalBorrow, InoutLocalsWriteThrough) {
   auto r = compileAndRun(R"(
     class Counter {
       n: int;
-      fn __init__(n: int) { self.n = n; }
       fn get() -> int { return self.n; }
+    }
+
+    impl Counter {
+      fn __init__(n: int) { self.n = n; }
     }
     class Holder {
       c: Counter; total: int;
-      fn __init__() { self.c = Counter(100); self.total = 0; }
       fn addTo(k: int) { t: inout = self.total; t = t + k; }
+    }
+
+    impl Holder {
+      fn __init__() { self.c = Counter(100); self.total = 0; }
     }
     fn bump(n: inout int) { n = n + 1; }
     fn make() -> Holder { return Holder(); }
@@ -489,10 +528,14 @@ TEST(LocalBorrow, ViewArms) {
   auto r = compileAndRun(R"(
     class Animal {
       n: int;
-      fn __init__() { self.n = 4; }
       view fn get() -> int { return self.n; }
     }
-    class Dog : Animal { fn __init__() { __super__(); } }
+
+    impl Animal {
+      fn __init__() { self.n = 4; }
+    }
+    class Dog : Animal {}
+    impl Dog { fn __init__() { __super__(); } }
     fn show(a: view Animal) -> int { return a.get(); }
     fn main() -> int {
       a: Animal = Dog();
@@ -527,12 +570,17 @@ TEST(LocalBorrow, InoutArmsWriteThrough) {
   auto r = compileAndRun(R"(
     class Animal {
       n: int;
-      fn __init__(n: int) { self.n = n; }
       fn tick() { self.n = self.n + 1; }
       view fn get() -> int { return self.n; }
     }
-    class Dog : Animal { fn __init__(n: int) { __super__(n); } }
-    class Home { pet: Animal; fn __init__() { self.pet = Dog(1); } }
+
+    impl Animal {
+      fn __init__(n: int) { self.n = n; }
+    }
+    class Dog : Animal {}
+    impl Dog { fn __init__(n: int) { __super__(n); } }
+    class Home { pet: Animal; }
+    impl Home { fn __init__() { self.pet = Dog(1); } }
     fn adopt(p: inout Animal) {
       match p {
         d: inout Dog { d = Dog(d.get() + 30); }
@@ -584,14 +632,20 @@ TEST(BorrowedResult, ViewResultsAreRead) {
   auto r = compileAndRun(R"(
     class Counter {
       n: int;
-      fn __init__(n: int) { self.n = n; }
       view fn get() -> int { return self.n; }
+    }
+
+    impl Counter {
+      fn __init__(n: int) { self.n = n; }
     }
     class Box {
       c: Counter; xs: int[];
-      fn __init__() { self.c = Counter(4); self.xs = [7, 8]; }
       view fn peek() -> view Counter { return self.c; }
       view fn first() -> view int { return self.xs[0]; }
+    }
+
+    impl Box {
+      fn __init__() { self.c = Counter(4); self.xs = [7, 8]; }
     }
     fn longer(a: view Str, b: view Str) -> view Str {
       return if a.len() > b.len() then a else b;
@@ -620,15 +674,21 @@ TEST(BorrowedResult, InoutResultsWriteThrough) {
   auto r = compileAndRun(R"(
     class Counter {
       n: int;
-      fn __init__(n: int) { self.n = n; }
       fn tick() { self.n = self.n + 1; }
       view fn get() -> int { return self.n; }
     }
+
+    impl Counter {
+      fn __init__(n: int) { self.n = n; }
+    }
     class Box {
       c: Counter; k: int;
-      fn __init__() { self.c = Counter(1); self.k = 3; }
       fn counter() -> inout Counter { return self.c; }
       fn num() -> inout int { return self.k; }
+    }
+
+    impl Box {
+      fn __init__() { self.c = Counter(1); self.k = 3; }
     }
     fn pick(a: inout int, b: inout int, first: bool) -> inout int {
       return if first then a else b;
