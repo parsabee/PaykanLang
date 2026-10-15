@@ -23,6 +23,9 @@ fn main() -> int {
   println(Str<int>(text::count("banana", 'a')));
   show(text::find("needle in a haystack", "in a"));
   show(text::find("haystack", "needle"));
+  padded = "   spaced out  ";
+  text::trim(padded);
+  println("[" + padded + "]");
   return 0;
 }
 // expect-stdout: HELLO, NATIVE
@@ -30,3 +33,4 @@ fn main() -> int {
 // expect-stdout: 3
 // expect-stdout: found: in a haystack
 // expect-stdout: not found
+// expect-stdout: [spaced out]
