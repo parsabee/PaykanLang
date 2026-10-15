@@ -53,8 +53,11 @@ TEST(ParamMode, ViewParameters) {
     enum Color { Red, Green }
     class Counter {
       n: int;
-      fn __init__(start: view int) { self.n = start; }
       fn add(k: view int, c: view Color) -> int { self.n = self.n + k; return k; }
+    }
+
+    impl Counter {
+      fn __init__(start: view int) { self.n = start; }
     }
     fn twice(x: view float) -> float { y = x; y = y * 2; return y; }
     fn pass(x: view int) -> int { return x + x; }
@@ -86,14 +89,18 @@ fn main() -> int { return 0; })");
 TEST(ParamMode, ModesApplyToEveryType) {
   auto r = semaCheck(R"(class Counter {
   n: int;
-  fn __init__(s: view Str) { self.n = s.len(); }
   view fn put(c: view Counter) -> int { return c.n; }
+}
+
+impl Counter {
+  fn __init__(s: view Str) { self.n = s.len(); }
 }
 fn f(o: view int?, xs: inout int[], t: view (int, int), b: view Obj) { }
 fn reset(c: inout Counter, s: inout Str) { c = Counter(s); s = "new"; }
 fn first<T>(x: view T) -> T { return x; }
 fn swap<T>(a: inout T, b: inout T) { t = a; a = b; b = t; }
-class Box<T> { n: int; fn __init__(v: view T) { self.n = 1; } }
+class Box<T> { n: int; }
+impl Box<T> { fn __init__(v: view T) { self.n = 1; } }
 fn main() -> int {
   c = Counter("ab");
   s = "x";
@@ -118,8 +125,11 @@ fn main() -> int {
 TEST(ParamMode, ViewReferenceParameters) {
   auto r = semaCheck(R"(class Counter {
   n: int;
-  fn __init__() { self.n = 0; }
   fn tick() { self.n = self.n + 1; }
+}
+
+impl Counter {
+  fn __init__() { self.n = 0; }
 }
 fn reset(c: inout Counter) { c = Counter(); }
 fn bump(n: inout int) { n = n + 1; }
@@ -137,16 +147,16 @@ fn look(c: view Counter, s: view Str, xs: view int[]) -> int {
 fn main() -> int { return 0; })");
   EXPECT_EQ(r.ErrorCount, 7u) << r.Diagnostics;
   expectErrors(
-      r, {":9:3: error: 'c' is a 'view' parameter; 'tick' is not a 'view fn'",
-          ":10:3: error: 'c' is a 'view' parameter; cannot assign to its "
+      r, {":12:3: error: 'c' is a 'view' parameter; 'tick' is not a 'view fn'",
+          ":13:3: error: 'c' is a 'view' parameter; cannot assign to its "
           "field 'n'",
-          ":11:3: error: 'xs' is a 'view' parameter; 'push' is not a 'view fn'",
-          ":12:3: error: 'xs' is a 'view' parameter; cannot assign to its "
+          ":14:3: error: 'xs' is a 'view' parameter; 'push' is not a 'view fn'",
+          ":15:3: error: 'xs' is a 'view' parameter; cannot assign to its "
           "elements",
-          ":13:3: error: cannot assign to 'view' parameter 's'",
-          ":14:9: error: 'c' is a 'view' parameter; it cannot be passed to "
+          ":16:3: error: cannot assign to 'view' parameter 's'",
+          ":17:9: error: 'c' is a 'view' parameter; it cannot be passed to "
           "'inout' parameter 'c'",
-          ":15:8: error: 'c' is a 'view' parameter; it cannot be passed to "
+          ":18:8: error: 'c' is a 'view' parameter; it cannot be passed to "
           "'inout' parameter 'n'"});
 }
 
@@ -157,11 +167,16 @@ fn main() -> int { return 0; })");
 TEST(ParamMode, InoutReferenceArguments) {
   auto r = semaCheck(R"(class Counter {
   n: int;
-  fn __init__() { self.n = 0; }
   fn me() { reset(self); }
 }
-class Fast : Counter { fn __init__() { __super__(); } }
-class Holder { c: Counter; fn __init__() { self.c = Counter(); } }
+
+impl Counter {
+  fn __init__() { self.n = 0; }
+}
+class Fast : Counter {}
+impl Fast { fn __init__() { __super__(); } }
+class Holder { c: Counter; }
+impl Holder { fn __init__() { self.c = Counter(); } }
 fn reset(c: inout Counter) { c = Counter(); }
 fn main() -> int {
   let k = Counter();
@@ -177,11 +192,11 @@ fn main() -> int {
 })");
   EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
   expectErrors(
-      r, {":4:19: error: 'self' cannot be passed to 'inout' parameter 'c': the "
+      r, {":3:19: error: 'self' cannot be passed to 'inout' parameter 'c': the "
           "method would no longer know its object",
-          ":12:9: error: 'k' is declared with 'let' and cannot be passed to "
+          ":17:9: error: 'k' is declared with 'let' and cannot be passed to "
           "'inout' parameter 'c'",
-          ":16:9: error: argument 1 of 'reset' has type 'Fast', but 'inout' "
+          ":21:9: error: argument 1 of 'reset' has type 'Fast', but 'inout' "
           "parameter 'c' has type 'Counter'"});
 }
 
@@ -210,8 +225,11 @@ fn main() -> int { return 0; })");
 TEST(ParamMode, InoutArguments) {
   auto r = semaCheck(R"(class C {
   n: int;
-  fn __init__(n: inout int) { self.n = n; }
   fn add(to: inout float) { }
+}
+
+impl C {
+  fn __init__(n: inout int) { self.n = n; }
 }
 fn bump(n: inout int) { n = n + 1; }
 fn put(c: inout char) { }
@@ -238,26 +256,26 @@ fn take(v: view int, p: int, q: inout int) {
 fn main() -> int { return 0; })");
   expectErrors(
       r,
-      {":12:8: error: 'v' is a 'view' parameter; it cannot be passed to "
+      {":15:8: error: 'v' is a 'view' parameter; it cannot be passed to "
        "'inout' parameter 'n'",
-       ":13:8: error: 'k' is declared with 'let' and cannot be passed to "
+       ":16:8: error: 'k' is declared with 'let' and cannot be passed to "
        "'inout' parameter 'n'",
-       ":14:8: error: argument 1 of 'bump' must be a variable or a field: "
+       ":17:8: error: argument 1 of 'bump' must be a variable or a field: "
        "parameter 'n' is 'inout'",
-       ":15:8: error: argument 1 of 'bump' must be a variable or a field: "
+       ":18:8: error: argument 1 of 'bump' must be a variable or a field: "
        "parameter 'n' is 'inout'",
-       ":16:9: error: argument 1 of 'add' has type 'int', but 'inout' "
+       ":19:9: error: argument 1 of 'add' has type 'int', but 'inout' "
        "parameter 'to' has type 'float'",
-       ":18:8: error: an array element cannot be passed to 'inout' parameter "
+       ":21:8: error: an array element cannot be passed to 'inout' parameter "
        "'n' yet",
-       ":20:7: error: a character of a string cannot be passed to 'inout' "
+       ":23:7: error: a character of a string cannot be passed to 'inout' "
        "parameter 'c'",
-       ":25:10: error: 'k' is declared with 'let' and cannot be passed to "
+       ":28:10: error: 'k' is declared with 'let' and cannot be passed to "
        "'inout' parameter 'n'",
-       ":26:8: error: argument 1 of 'bump' has type 'Str', expected 'int'"});
+       ":29:8: error: argument 1 of 'bump' has type 'Str', expected 'int'"});
   EXPECT_EQ(r.ErrorCount, 9u) << r.Diagnostics;
   // Plain and `inout` parameters, variables and fields are accepted.
-  for (const char *line : {":21:", ":22:", ":23:", ":24:"})
+  for (const char *line : {":24:", ":25:", ":26:", ":27:"})
     EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
                                                            << r.Diagnostics;
 }
@@ -268,11 +286,15 @@ fn main() -> int { return 0; })");
 TEST(ParamMode, InoutArgumentsAreExclusive) {
   auto r = semaCheck(R"(class P {
   x: int; y: int; next: P?;
-  fn __init__() { self.x = 0; self.y = 0; self.next = None; }
   fn same() { swap(self.x, self.x); }
   fn other(q: P) { swap(self.x, q.x); }
 }
-class Box { p: P; fn __init__() { self.p = P(); } }
+
+impl P {
+  fn __init__() { self.x = 0; self.y = 0; self.next = None; }
+}
+class Box { p: P; }
+impl Box { fn __init__() { self.p = P(); } }
 fn swap(a: inout int, b: inout int) { t = a; a = b; b = t; }
 fn three(a: inout int, b: inout int, c: int) { }
 fn main() -> int {
@@ -292,13 +314,13 @@ fn main() -> int {
   return 0;
 })");
   EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
-  expectErrors(r, {":4:28: error: 'self.x' is passed to two 'inout' "
+  expectErrors(r, {":3:28: error: 'self.x' is passed to two 'inout' "
                    "parameters ('a' and 'b')",
-                   ":13:11: error: 'k' is passed to two 'inout' parameters "
+                   ":17:11: error: 'k' is passed to two 'inout' parameters "
                    "('a' and 'b')",
-                   ":18:13: error: 'p.x' is passed to two 'inout' parameters "
+                   ":22:13: error: 'p.x' is passed to two 'inout' parameters "
                    "('a' and 'b')",
-                   ":19:15: error: 'b.p.x' is passed to two 'inout' "
+                   ":23:15: error: 'b.p.x' is passed to two 'inout' "
                    "parameters ('a' and 'b')"});
 }
 
@@ -309,13 +331,17 @@ fn main() -> int {
 TEST(ParamMode, InoutOverlapsNothingElse) {
   auto r = semaCheck(R"(class P {
   x: int; y: int;
-  fn __init__() { self.x = 0; self.y = 0; }
   fn take(m: inout int) { self.y = m; }
   view fn look(m: inout int) -> int { return self.x; }
   fn merge(o: view P) { self.x = o.x; }
   fn own() { self.take(self.x); }
 }
-class Q { p: P; n: int; fn __init__() { self.p = P(); self.n = 0; } }
+
+impl P {
+  fn __init__() { self.x = 0; self.y = 0; }
+}
+class Q { p: P; n: int; }
+impl Q { fn __init__() { self.p = P(); self.n = 0; } }
 fn both(a: view int, b: inout int) { }
 fn whole(a: view P, b: inout int) { }
 fn two(a: inout P, b: inout int) { }
@@ -342,26 +368,26 @@ fn main() -> int {
 )");
   EXPECT_EQ(r.ErrorCount, 10u) << r.Diagnostics;
   expectErrors(
-      r, {":7:24: error: 'self.x' is part of 'self', the receiver of 'take' "
+      r, {":6:24: error: 'self.x' is part of 'self', the receiver of 'take' "
           "(not a 'view fn'); it cannot also be passed to 'inout' parameter "
           "'m'",
-          ":20:11: error: 'k' is passed to 'view' parameter 'a'; it cannot "
+          ":24:11: error: 'k' is passed to 'view' parameter 'a'; it cannot "
           "also be passed to 'inout' parameter 'b'",
-          ":21:12: error: 'p.x' is part of 'p', passed to 'view' parameter "
+          ":25:12: error: 'p.x' is part of 'p', passed to 'view' parameter "
           "'a'; it cannot also be passed to 'inout' parameter 'b'",
-          ":22:10: error: 'p.x' is part of 'p', passed to 'inout' parameter "
+          ":26:10: error: 'p.x' is part of 'p', passed to 'inout' parameter "
           "'a'; it cannot also be passed to 'inout' parameter 'b'",
-          ":23:12: error: 'p' contains 'p.x', passed to 'inout' parameter "
+          ":27:12: error: 'p' contains 'p.x', passed to 'inout' parameter "
           "'a'; it cannot also be passed to 'view' parameter 'b'",
-          ":24:10: error: 'p.x' is part of 'p', the receiver of 'take' (not a "
+          ":28:10: error: 'p.x' is part of 'p', the receiver of 'take' (not a "
           "'view fn'); it cannot also be passed to 'inout' parameter 'm'",
-          ":25:10: error: 'p.x' is part of 'p', the receiver of 'view fn "
+          ":29:10: error: 'p.x' is part of 'p', the receiver of 'view fn "
           "look'; it cannot also be passed to 'inout' parameter 'm'",
-          ":26:11: error: 'p' is the receiver of 'merge' (not a 'view fn'); "
+          ":30:11: error: 'p' is the receiver of 'merge' (not a 'view fn'); "
           "it cannot also be passed to 'view' parameter 'o'",
-          ":27:15: error: 'xs' is passed to 'view' parameter 'a'; it cannot "
+          ":31:15: error: 'xs' is passed to 'view' parameter 'a'; it cannot "
           "also be passed to 'inout' parameter 'b'",
-          ":28:12: error: 'q.p.y' is part of 'q.p', the receiver of 'take' "
+          ":32:12: error: 'q.p.y' is part of 'q.p', the receiver of 'take' "
           "(not a 'view fn'); it cannot also be passed to 'inout' parameter "
           "'m'"});
 }
@@ -401,7 +427,8 @@ fn main() -> int { return base::twice(3); })"));
   auto key = std::filesystem::canonical(lib).string();
   paykan::sema::Sema::ModuleCache[key] = info;
   r = semaCheckPath(writeModule(dir, "uses.pkn", R"(import lib;
-class Mine : lib::Box { fn __init__(n: view int) { __super__(n); } }
+class Mine : lib::Box {}
+impl Mine { fn __init__(n: view int) { __super__(n); } }
 class Other : lib::Box {
   fn put(n: int) { }
 }
@@ -418,14 +445,14 @@ fn main() -> int {
   paykan::sema::Sema::ModuleCache.erase(key);
   EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
   expectErrors(
-      r, {":2:62: error: 'n' is a 'view' parameter; it cannot be passed to "
+      r, {":3:50: error: 'n' is a 'view' parameter; it cannot be passed to "
           "'inout' parameter 'n'",
-          ":4:3: error: override of 'put' must keep 'inout' on parameter 'n'",
-          ":8:13: error: 'k' is declared with 'let' and cannot be passed to "
+          ":5:3: error: override of 'put' must keep 'inout' on parameter 'n'",
+          ":9:13: error: 'k' is declared with 'let' and cannot be passed to "
           "'inout' parameter 'n'",
-          ":9:16: error: argument 1 of 'lib::Box' must be a variable or a "
+          ":10:16: error: argument 1 of 'lib::Box' must be a variable or a "
           "field: parameter 'n' is 'inout'",
-          ":10:9: error: argument 1 of 'put' must be a variable or a field: "
+          ":11:9: error: argument 1 of 'put' must be a variable or a field: "
           "parameter 'n' is 'inout'"});
   std::filesystem::remove_all(dir);
 }
@@ -474,10 +501,14 @@ fn main() -> int {
 TEST(LocalBorrow, InoutLocals) {
   auto r = semaCheck(R"(class Counter {
   n: int;
-  fn __init__() { self.n = 0; }
   fn me() { m: inout = self; t: inout = self.n; t = 1; }
 }
-class Fast : Counter { fn __init__() { __super__(); } }
+
+impl Counter {
+  fn __init__() { self.n = 0; }
+}
+class Fast : Counter {}
+impl Fast { fn __init__() { __super__(); } }
 fn bump(n: inout int) { n = n + 1; }
 fn main() -> int {
   k = 1;
@@ -502,20 +533,20 @@ fn main() -> int {
 })");
   EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
   expectErrors(
-      r, {":4:24: error: 'self' cannot be named by 'inout' local 'm': the "
+      r, {":3:24: error: 'self' cannot be named by 'inout' local 'm': the "
           "method would no longer know its object",
-          ":10:14: error: 'inout' local 'a' must name a variable or a field",
-          ":12:14: error: an array element cannot be named by 'inout' local "
+          ":14:14: error: 'inout' local 'a' must name a variable or a field",
+          ":16:14: error: an array element cannot be named by 'inout' local "
           "'b' yet",
-          ":14:14: error: a character of a string cannot be named by 'inout' "
+          ":18:14: error: a character of a string cannot be named by 'inout' "
           "local 'c'",
-          ":16:14: error: 'l' is declared with 'let' and cannot be named by "
+          ":20:14: error: 'l' is declared with 'let' and cannot be named by "
           "'inout' local 'd'",
-          ":18:14: error: 'v' is a 'view' local; it cannot be named by "
+          ":22:14: error: 'v' is a 'view' local; it cannot be named by "
           "'inout' local 'e'",
-          ":19:20: error: 'inout' local 'f' has type 'float', but what it "
+          ":23:20: error: 'inout' local 'f' has type 'float', but what it "
           "names has type 'int'",
-          ":21:22: error: 'inout' local 'g' has type 'Counter', but what it "
+          ":25:22: error: 'inout' local 'g' has type 'Counter', but what it "
           "names has type 'Fast'"});
 }
 
@@ -526,9 +557,12 @@ fn main() -> int {
 TEST(LocalBorrow, ViewOfReferenceTypes) {
   auto r = semaCheck(R"(class Counter {
   n: int;
-  fn __init__() { self.n = 0; }
   fn tick() { self.n = self.n + 1; }
   view fn toString() -> Str { return "c" + Str(self.n); }
+}
+
+impl Counter {
+  fn __init__() { self.n = 0; }
 }
 fn bump(n: inout int) { n = n + 1; }
 fn main() -> int {
@@ -547,16 +581,16 @@ fn main() -> int {
 })");
   EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
   expectErrors(
-      r, {":10:3: error: 'v' is a 'view' local; 'tick' is not a 'view fn'",
-          ":11:3: error: 'v' is a 'view' local; cannot assign to its field 'n'",
-          ":12:8: error: 'v' is a 'view' local; it cannot be passed to "
+      r, {":13:3: error: 'v' is a 'view' local; 'tick' is not a 'view fn'",
+          ":14:3: error: 'v' is a 'view' local; cannot assign to its field 'n'",
+          ":15:8: error: 'v' is a 'view' local; it cannot be passed to "
           "'inout' parameter 'n'",
-          ":14:3: error: 's' is a 'view' local; 'concat' is not a 'view fn'",
-          ":16:3: error: 'a' is a 'view' local; 'push' is not a 'view fn'",
-          ":17:3: error: 'a' is a 'view' local; cannot assign to its "
+          ":17:3: error: 's' is a 'view' local; 'concat' is not a 'view fn'",
+          ":19:3: error: 'a' is a 'view' local; 'push' is not a 'view fn'",
+          ":20:3: error: 'a' is a 'view' local; cannot assign to its "
           "elements",
-          ":18:26: error: 'x' is bound to a 'view'; 'tick' is not a 'view fn'",
-          ":18:36: error: cannot assign to 'x': it is bound to a "
+          ":21:26: error: 'x' is bound to a 'view'; 'tick' is not a 'view fn'",
+          ":21:36: error: cannot assign to 'x': it is bound to a "
           "'view'"});
 }
 
@@ -566,8 +600,10 @@ fn main() -> int {
 // tuple, pushed) nor returned.  The builtin functions only read, but
 // `Str(s)` returns `s` itself; a value type is copied when it is assigned.
 TEST(LocalBorrow, AViewStaysAView) {
-  auto r = semaCheck(R"(class Counter { n: int; fn __init__() { self.n = 0; } }
-class Holder { c: Counter; fn __init__(c: Counter) { self.c = c; } }
+  auto r = semaCheck(R"(class Counter { n: int; }
+impl Counter { fn __init__() { self.n = 0; } }
+class Holder { c: Counter; }
+impl Holder { fn __init__(c: Counter) { self.c = c; } }
 fn report(c: Counter) { }
 fn twice(n: int) -> int { return 2 * n; }
 fn look(n: view int) -> int { return n; }
@@ -605,21 +641,21 @@ fn main() -> int {
   const std::string kPass =
       "it can only be passed to a 'view' parameter, and parameter 1 of '";
   for (const std::string &diag :
-       {std::string(":8:10: error: 'v' is a 'view' local; it cannot be "
+       {std::string(":10:10: error: 'v' is a 'view' local; it cannot be "
                     "returned"),
-        ":13:10: error: 'v' is a 'view' local; " + kPass + "report' is not one",
-        ":14:7: error: " + kStore, ":15:16: error: " + kStore,
-        ":16:9: error: " + kStore, ":17:8: error: " + kStore,
-        ":19:11: error: " + kStore,
-        ":20:14: error: 'v' is a 'view' local; " + kPass + "Holder' is not one",
-        ":21:9: error: " + kStore, ":23:7: error: " + kStore,
-        ":24:9: error: 'k' is a 'view' local; " + kPass + "twice' is not one",
-        ":25:9: error: 'v' is a 'view' local; " + kPass + "twice' is not one",
-        ":27:11: error: 's' is a 'view' local; " + kPass + "Str' is not one"})
+        ":15:10: error: 'v' is a 'view' local; " + kPass + "report' is not one",
+        ":16:7: error: " + kStore, ":17:16: error: " + kStore,
+        ":18:9: error: " + kStore, ":19:8: error: " + kStore,
+        ":21:11: error: " + kStore,
+        ":22:14: error: 'v' is a 'view' local; " + kPass + "Holder' is not one",
+        ":23:9: error: " + kStore, ":25:7: error: " + kStore,
+        ":26:9: error: 'k' is a 'view' local; " + kPass + "twice' is not one",
+        ":27:9: error: 'v' is a 'view' local; " + kPass + "twice' is not one",
+        ":29:11: error: 's' is a 'view' local; " + kPass + "Str' is not one"})
     EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
                                                            << r.Diagnostics;
   EXPECT_EQ(r.ErrorCount, 13u) << r.Diagnostics;
-  for (const char *line : {":28:", ":29:", ":30:", ":31:", ":32:"})
+  for (const char *line : {":30:", ":31:", ":32:", ":33:", ":34:"})
     EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
                                                            << r.Diagnostics;
 }
@@ -649,8 +685,11 @@ fn main() -> int { return f(1); })");
 TEST(LocalBorrow, Exclusivity) {
   auto r = semaCheck(R"(class Counter {
   n: int;
-  fn __init__() { self.n = 0; }
   fn tick() { self.n = self.n + 1; }
+}
+
+impl Counter {
+  fn __init__() { self.n = 0; }
 }
 fn twice(n: int) -> int { return 2 * n; }
 fn report(c: Counter) { }
@@ -692,26 +731,26 @@ fn main() -> int {
   const std::string kViewed =
       "error: 'c' is viewed by 'view' local 'v' until 'v' is last used; ";
   for (const std::string &diag :
-       {std::string(":12:7: error: 'k' is borrowed by 'inout' local 'x' until "
+       {std::string(":15:7: error: 'k' is borrowed by 'inout' local 'x' until "
                     "'x' is last used"),
-        ":17:3: " + kViewed + "'tick' is not a 'view fn'",
-        ":18:3: " + kViewed + "cannot assign to its field 'n'",
-        ":19:3: " + kViewed + "it cannot be assigned",
-        ":20:10: " + kViewed +
+        ":20:3: " + kViewed + "'tick' is not a 'view fn'",
+        ":21:3: " + kViewed + "cannot assign to its field 'n'",
+        ":22:3: " + kViewed + "it cannot be assigned",
+        ":23:10: " + kViewed +
             "it can only be passed to a 'view' parameter, and parameter 1 of "
             "'report' is not one",
-        std::string(":26:3: error: 'm' is viewed by 'view' local 'w' until "
+        std::string(":29:3: error: 'm' is viewed by 'view' local 'w' until "
                     "'w' is last used; it cannot be assigned"),
-        std::string(":32:23: error: 'a' is borrowed by 'inout' local 'ai' "
+        std::string(":35:23: error: 'a' is borrowed by 'inout' local 'ai' "
                     "until 'ai' is last used"),
-        std::string(":36:3: error: 'p' is borrowed by 'inout' local 'pj' "
+        std::string(":39:3: error: 'p' is borrowed by 'inout' local 'pj' "
                     "until 'pj' is last used")})
     EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
                                                            << r.Diagnostics;
   EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
   // After a borrow's last use, and a copy passed on, are fine; a `view` of
   // an expression borrows nothing.
-  for (const char *line : {":14:", ":22:", ":25:", ":28:", ":38:", ":40:"})
+  for (const char *line : {":17:", ":25:", ":28:", ":31:", ":41:", ":43:"})
     EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
                                                            << r.Diagnostics;
 }
@@ -722,11 +761,15 @@ fn main() -> int {
 TEST(LocalBorrow, ViewArms) {
   auto r = semaCheck(R"(class Animal {
   n: int;
-  fn __init__() { self.n = 0; }
   fn tick() { self.n = self.n + 1; }
   view fn get() -> int { return self.n; }
 }
-class Dog : Animal { fn __init__() { __super__(); } }
+
+impl Animal {
+  fn __init__() { self.n = 0; }
+}
+class Dog : Animal {}
+impl Dog { fn __init__() { __super__(); } }
 fn keep(a: Animal) { }
 fn show(a: view Animal) { }
 fn main() -> int {
@@ -751,16 +794,16 @@ fn main() -> int {
   return 0;
 })");
   expectErrors(
-      r, {":14:7: error: 'd' is a 'view' local; 'tick' is not a 'view fn'",
-          ":15:7: error: 'd' is a 'view' local; cannot assign to its field 'n'",
-          ":16:12: error: 'd' is a 'view' local; it can only be passed to a "
+      r, {":18:7: error: 'd' is a 'view' local; 'tick' is not a 'view fn'",
+          ":19:7: error: 'd' is a 'view' local; cannot assign to its field 'n'",
+          ":20:12: error: 'd' is a 'view' local; it can only be passed to a "
           "'view' parameter, and parameter 1 of 'keep' is not one",
-          ":18:7: error: 'a' is viewed by 'view' local 'd' until 'd' is last "
+          ":22:7: error: 'a' is viewed by 'view' local 'd' until 'd' is last "
           "used; 'tick' is not a 'view fn'",
-          ":26:22: error: cannot assign to 'view' local 'x'"});
+          ":30:22: error: cannot assign to 'view' local 'x'"});
   EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
   // After the binding's last use the subject can change again.
-  EXPECT_EQ(r.Diagnostics.find(":20:"), std::string::npos) << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find(":24:"), std::string::npos) << r.Diagnostics;
 }
 
 // A `match` arm's `n: inout T` is the subject's storage: the subject must be
@@ -771,19 +814,26 @@ fn main() -> int {
 TEST(LocalBorrow, InoutArms) {
   auto r = semaCheck(R"(class Animal {
   n: int;
-  fn __init__(n: int) { self.n = n; }
   fn tick() { self.n = self.n + 1; }
 }
-class Dog : Animal { fn __init__(n: int) { __super__(n); } }
+
+impl Animal {
+  fn __init__(n: int) { self.n = n; }
+}
+class Dog : Animal {}
+impl Dog { fn __init__(n: int) { __super__(n); } }
 fn make() -> Animal { return Dog(1); }
 fn look(v: view Animal) {
   match v { d: inout Dog { } _ { } }
 }
 class Box {
   a: Animal;
-  fn __init__() { self.a = Dog(2); }
   fn swap() { match self { b: inout Box { } _ { } } }
   view fn peek() { match self.a { d: inout Dog { } _ { } } }
+}
+
+impl Box {
+  fn __init__() { self.a = Dog(2); }
 }
 fn main() -> int {
   match make() { d: inout Dog { } _ { } }
@@ -805,22 +855,22 @@ fn main() -> int {
 })");
   expectErrors(
       r,
-      {":9:9: error: 'v' is a 'view' parameter; it cannot be bound by 'inout' "
+      {":13:9: error: 'v' is a 'view' parameter; it cannot be bound by 'inout' "
        "arm 'd'",
-       ":14:21: error: 'self' cannot be bound by 'inout' arm 'b': the method "
+       ":17:21: error: 'self' cannot be bound by 'inout' arm 'b': the method "
        "would no longer know its object",
-       ":15:26: error: 'self' is read-only in 'view fn peek'; it cannot be "
+       ":18:26: error: 'self' is read-only in 'view fn peek'; it cannot be "
        "bound by 'inout' arm 'd'",
-       ":18:9: error: 'inout' arm 'd' needs a variable or a field to match on",
-       ":20:9: error: 'fixed' is declared with 'let' and cannot be bound by "
+       ":25:9: error: 'inout' arm 'd' needs a variable or a field to match on",
+       ":27:9: error: 'fixed' is declared with 'let' and cannot be bound by "
        "'inout' arm 'd'",
-       ":22:9: error: 'inout' arm 'k' cannot change the 'int' inside an "
+       ":29:9: error: 'inout' arm 'k' cannot change the 'int' inside an "
        "optional yet",
-       ":26:7: error: 'a' is borrowed by 'inout' local 'd' until 'd' is last "
+       ":33:7: error: 'a' is borrowed by 'inout' local 'd' until 'd' is last "
        "used",
-       ":27:7: error: cannot assign value of type 'Animal' to variable 'd' of "
+       ":34:7: error: cannot assign value of type 'Animal' to variable 'd' of "
        "type 'Dog'"});
   EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
   // After d's last use the subject can be used again.
-  EXPECT_EQ(r.Diagnostics.find(":29:"), std::string::npos) << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find(":36:"), std::string::npos) << r.Diagnostics;
 }
