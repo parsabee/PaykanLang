@@ -12,7 +12,6 @@
 
 class Stack<T> {
   items: T[];
-  fn __init__() { self.items = []; }
   fn push(v: T) { self.items.push(v); }
   fn pop() -> T? {
     if (self.items.len() == 0) { return None; }
@@ -20,6 +19,10 @@ class Stack<T> {
   }
   fn popRaw() -> T { return self.items.pop(); }
   view fn len() -> int { return self.items.len(); }
+}
+
+impl Stack<T> {
+  fn __init__() { self.items = []; }
 }
 
 fn main(args: Str[]) -> int {
