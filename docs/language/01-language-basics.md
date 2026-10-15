@@ -17,8 +17,8 @@ Tuples (`09-tuples.md`), optional types (`10-optionals.md`, optional primitives 
 optional-mode `match` included) and generics (`11-generics.md`) are **stable in v0.1**: the
 syntax and semantics this reference documents for them are covered by the compatibility
 promise for the 0.1 series. The limitations each chapter lists stay limitations; in
-particular generics cannot be imported across modules until v0.2.0 ([#57](https://github.com/parsabee/PaykanLang/issues/57)), and a present
-optional primitive is boxed ([#96](https://github.com/parsabee/PaykanLang/issues/96) changes that representation, not the semantics).
+particular generics cannot be imported across modules until v0.2.0 ([#57](https://github.com/parsabee/PaykanLang/issues/57)). An optional
+primitive is a value, not a box ([#96](https://github.com/parsabee/PaykanLang/issues/96) changed that representation, not the semantics).
 
 ### Design Pillars
 
@@ -651,7 +651,7 @@ Nothing is widened or unwrapped to find one. An `int` argument does not reach `f
 
 `Char` is not a target: it has no specializations, as there is no `char<Str>` parse to box.
 `Int`, `Float` and `Bool` have no other constructor, so `Int(5)` is an error, not a box:
-`Int`'s only specialization is the parse `Int(s)`. A present `int?` already is an `Int`.
+`Int`'s only specialization is the parse `Int(s)`. In an `Obj`, a present `int?` is an `Int`.
 
 **The explicit form.** You may also name the specialization: `Target<Source>(value)`, for
 example `Str<int>(n)` or `int<Str>(s)`. It is the same conversion, and it documents the

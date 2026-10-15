@@ -548,8 +548,10 @@ A `PaykanType` holds a value's `size` and `align`, its `kind`
 (`PaykanTypeKind`: int, float, bool, char, object or optional), and where it
 holds references: `nrefs` words follow it, each a `PaykanShared *`'s byte
 offset `<< 1`, `| 1` if it may be `NULL` (`PaykanType_ref`).  An `int` or a
-`float` is 8 bytes, a `bool` or a `char` 1, and a reference, an array or a
-tuple an 8-byte `PaykanShared *` box (`NULL` for an optional's `None`).
+`float` is 8 bytes, a `bool` or a `char` 1, an `int?`, `float?`, `bool?` or
+`char?` 16 (its payload, then an `int64_t` that is 1 when it is present), and
+a reference, an array or a tuple an 8-byte `PaykanShared *` box (`NULL` for
+an optional's `None`).
 `PaykanType_copy` copies a value, retaining its references, and
 `PaykanType_drop` releases them.  A parameter typed by a type parameter is a
 `view` or an `inout` (`x: T` is rejected whatever `T` will be).  See

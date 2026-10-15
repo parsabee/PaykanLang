@@ -105,8 +105,8 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
         noneArm = arm;
       }
 
-  // An optional primitive (`int?`): its single type arm names the primitive
-  // and always matches a present value.
+  // An optional primitive (`int?`, a value): its single type arm names the
+  // primitive and always matches a present value.
   ast::BuiltinType *primInner =
       optTy ? ast::dyn_cast<ast::BuiltinType>(optTy->getInnerType()) : nullptr;
 
@@ -146,11 +146,9 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
     const TypeArm &ta = typeArms[i];
     ScopeGuard armGuard(*this);
     if (ta.Arm->hasBinding() && primInner) {
-      // `n: int` on an `int?`: n is a plain value read out of the box (the
-      // subject keeps the box; the binding owns nothing).
-      Val v = emitPrimitiveUnbox(subjRaw, primInner, ta.Arm->getBinding());
-      if (!v)
-        return;
+      // `n: int` on an `int?`: n is a plain value, the present payload (the
+      // binding owns nothing).
+      Val v = B.unwrap(subjRaw, ta.Arm->getBinding());
       pir::LocalId local = B.addLocal(ta.Arm->getBinding(), v.Ty);
       B.store(local, v);
       CurrentScope->declare(ta.Arm->getBinding(), local, primInner);
@@ -195,8 +193,10 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
   if (optTy) {
     // Route None to the `None` arm (else the wildcard); the vtable checks
     // below run only on the non-None path.
-    Val isNone =
-        B.cmp(CmpPred::Eq, subjRaw, Val::null(Type::Obj), "opt.isnone");
+    Val isNone = primInner ? B.unary(pir::Opcode::Not,
+                                     B.isSome(subjRaw, "opt.has"), "opt.isnone")
+                           : B.cmp(CmpPred::Eq, subjRaw, Val::null(Type::Obj),
+                                   "opt.isnone");
     pir::If *s = B.openIf(isNone, true);
     B.enter(*s->Then);
     if (noneArm)

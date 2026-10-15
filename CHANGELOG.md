@@ -222,6 +222,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `opt_f64`, `opt_bool` and `opt_char` (a payload and an 8-byte presence word), and four
   instructions, `some`, `none`, `is_some` and `unwrap`; optional slots have addresses and
   may be fields.  A backend plugin must handle them.
+- An optional primitive (`int?`, `float?`, `bool?`, `char?`) is a value, the primitive and a
+  presence flag held inline (#96), instead of a heap box: a local, parameter, result or field
+  of one allocates nothing and is never reference counted, and `int<Str>` & co. return one
+  without allocating (the runtime's `PaykanString_parse_int` & co.).  The semantics are
+  unchanged.  In an `Obj`, an array element or a tuple element a present value is still its
+  boxed `Int` & co.
 
 ### Removed
 

@@ -52,6 +52,9 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanStringFromFloat, {{kF64}, kObj}},
     {kPaykanStringFromBool, {{kI64}, kObj}},
     {kPaykanStringFromChar, {{kChr}, kObj}},
+    {kPaykanStringParseInt, {{kObj, kPtr}, kI64}},
+    {kPaykanStringParseFloat, {{kObj, kPtr}, kI64}},
+    {kPaykanStringParseBool, {{kObj, kPtr}, kI64}},
     {kPaykanStringEquals, {{kObj, kBox}, kI64}},
     {kPaykanStringToString, {{kObj}, kBox}},
     {kPaykanStringLength, {{kObj}, kI64}},
@@ -265,6 +268,10 @@ Type ModuleLowering::toPIRType(ast::Type *ty) {
       return Type::I64;
   if (ast::isa<ast::EnumType>(ty))
     return Type::I64;
+  // An optional of a value type is a value too (#96): `int?` is opt_i64.
+  if (ast::isValueOptional(ty))
+    return pir::optionalOf(
+        toPIRType(ast::cast<ast::OptionalType>(ty)->getInnerType()));
   if (ast::isRefType(ty))
     return Type::Box;
   return Type::Void;
@@ -539,12 +546,9 @@ void ModuleLowering::bootstrapBuiltins() {
   reg(kConvStrFloat, kPaykanStringFromFloat);
   reg(kConvStrBool, kPaykanStringFromBool);
   reg(kConvStrChar, kPaykanStringFromChar);
-  reg(kConvIntStr, kPaykanIntFromStr);
-  reg(kConvFloatStr, kPaykanFloatFromStr);
-  reg(kConvBoolStr, kPaykanBoolFromStr);
   // The boxed forms (#88).  A boxed source is unboxed (emitBuiltinCall,
-  // conversionUnboxer) and formatted like its primitive; a boxed target is
-  // the same parse, whose `int?` & co. box already is the `Int?` & co.
+  // conversionUnboxer) and formatted like its primitive; a boxed target's
+  // parse returns the `Int?` & co. box.  (`int<Str>` & co. are emitParse.)
   reg(kConvStrIntBox, kPaykanStringFromInt);
   reg(kConvStrFloatBox, kPaykanStringFromFloat);
   reg(kConvStrBoolBox, kPaykanStringFromBool);
@@ -605,9 +609,9 @@ Val ModuleLowering::emitExpr(ast::Expr *expr) { return Emitter.visit(expr); }
 // -- Ownership predicates
 
 bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
-  // A primitive boxed for an optional primitive slot: a fresh +1 box.
-  if (isPrimitiveBoxing(expr))
-    return true;
+  // An optional of a value type is a value, never a box.
+  if (valueOptionalType(expr))
+    return false;
   if (ast::isa<ast::ArrayLiteralExpr>(expr) ||
       ast::isa<ast::TupleLiteralExpr>(expr))
     return true;
@@ -638,8 +642,8 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
 }
 
 bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
-  if (isPrimitiveBoxing(expr))
-    return true;
+  if (valueOptionalType(expr))
+    return false;
   if (auto *mae = ast::dyn_cast<ast::MemberAccessExpr>(expr))
     return mae->getResolvedType() && ast::isRefType(mae->getResolvedType()) &&
            exprProducesFreshBox(mae->getReceiver());
@@ -860,6 +864,10 @@ Val ModuleLowering::emitImplicitVarDecl(const std::string &name,
     }
   }
 
+  // An optional value keeps its type (a value, not an owned variable).
+  if (!rhsAstTy && pir::isOptional(val.Ty))
+    rhsAstTy = canonicalizeDeclType(valueOptionalType(rhsExpr));
+
   pir::LocalId local = B.addLocal(name, val.Ty);
   B.store(local, val);
   CurrentScope->declare(name, local, rhsAstTy);
@@ -879,6 +887,9 @@ void ModuleLowering::emitClassVarRebind(const std::string &name,
       emitRetain(newBox);
     }
   }
+  // An optional value into an `Obj` variable: its boxed form.
+  if (ast::Type *optTy = newBox ? nullptr : valueOptionalType(rhsExpr))
+    newBox = emitOptionalBox(val, optTy);
   if (!newBox) {
     if (exprAlreadyShared(rhsExpr))
       newBox = takeSharedOwnership(rhsExpr, val);
@@ -1067,6 +1078,12 @@ Val ModuleLowering::visitVarDecl(ast::VarDecl *node) {
     case Type::Obj:
       B.store(local, Val::null(pirTy));
       break;
+    case Type::OptI64:
+    case Type::OptF64:
+    case Type::OptBool:
+    case Type::OptChar:
+      B.store(local, B.none(pirTy, "none"));
+      break;
     default:
       B.store(local, Val::i64(0));
       break;
@@ -1218,12 +1235,16 @@ ModuleLowering::localNative(const std::string &name) const {
   return it == NativeDecls.end() ? nullptr : it->second;
 }
 
-// A value of every type is stored as one PIR slot, aligned to its size: a
-// reference as its box, None as a null one.
+// A value of every type is stored as one PIR slot: a reference as its box,
+// None as a null one, an inline optional as its payload and an 8-byte
+// presence word (docs/pir.md §1).
 Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
   const Type slot = toPIRType(ty);
-  const int64_t size = slot == Type::Bool || slot == Type::Char ? 1 : 8;
-  std::vector<int64_t> words = {size, /*align=*/size, nativeTypeKind(ty), 0};
+  const int64_t size = slot == Type::Bool || slot == Type::Char ? 1
+                       : pir::isOptional(slot)                  ? 16
+                                                                : 8;
+  const int64_t align = size == 1 ? 1 : 8;
+  std::vector<int64_t> words = {size, align, nativeTypeKind(ty), 0};
   if (slot == Type::Box) {
     words[3] = 1;
     words.push_back(ast::isa<ast::OptionalType>(ty) ? 1 : 0); // offset 0
@@ -1269,9 +1290,92 @@ bool ModuleLowering::isNoneForOptional(ast::Expr *expr) {
          ast::isa<ast::OptionalType>(expr->getResolvedType());
 }
 
-bool ModuleLowering::isPrimitiveBoxing(const ast::Expr *expr) {
-  return ast::needsPrimitiveBoxing(expr->getCoercedType(),
-                                   expr->getResolvedType());
+bool ModuleLowering::isOptionalWrap(const ast::Expr *expr) {
+  return ast::wrapsInOptional(expr->getCoercedType(), expr->getResolvedType());
+}
+
+ast::Type *ModuleLowering::valueOptionalType(ast::Expr *expr) {
+  if (isOptionalWrap(expr))
+    return expr->getCoercedType();
+  if (ast::isValueOptional(expr->getResolvedType()))
+    return expr->getResolvedType();
+  return nullptr;
+}
+
+Val ModuleLowering::emitSome(const Val &v, ast::Type *optTy) {
+  // `f: float? = 3`: the int is promoted first.
+  return B.some(promoteIntToFloat(v, ast::stripOptional(optTy)), "some");
+}
+
+Val ModuleLowering::emitValueOptionalEquals(const Val &a, const Val &b) {
+  // The payload of a None is zero, so comparing it is harmless.
+  Val ha = B.isSome(a, "lhs.has");
+  Val hb = B.isSome(b, "rhs.has");
+  Val same = B.cmp(pir::CmpPred::Eq, ha, hb, "opt.same");
+  Val eq = B.cmp(pir::CmpPred::Eq, B.unwrap(a, "lhs.value"),
+                 B.unwrap(b, "rhs.value"), "opt.eq");
+  Val present = B.select(ha, eq, Val::boolean(true), "opt.eq");
+  return B.select(same, present, Val::boolean(false), "eq");
+}
+
+Val ModuleLowering::emitOptionalToString(const Val &opt) {
+  // A branch, not a select: only one of the two strings is made.
+  pir::LocalId tmp = B.addLocal("opt.str", Type::Obj);
+  pir::If *s = B.openIf(B.isSome(opt, "opt.has"), true);
+  B.enter(*s->Then);
+  Val v = B.unwrap(opt, "opt.value");
+  const char *format = kPaykanStringFromInt;
+  switch (v.Ty) {
+  case Type::F64:
+    format = kPaykanStringFromFloat;
+    break;
+  case Type::Bool:
+    format = kPaykanStringFromBool;
+    v = coerceBoolToI64(v, Type::I64);
+    break;
+  case Type::Char:
+    format = kPaykanStringFromChar;
+    break;
+  default:
+    break;
+  }
+  B.store(tmp, callRuntime(format, {v}, "opt.str"));
+  B.leave();
+  B.enter(*s->Else);
+  B.store(tmp,
+          callRuntime(kPaykanStringNew,
+                      {internString(kNoneText),
+                       Val::i64(static_cast<int64_t>(std::strlen(kNoneText)))},
+                      "opt.str"));
+  B.leave();
+  Val str = B.load(tmp, "opt.str");
+  trackStringTemp(str);
+  return str;
+}
+
+Val ModuleLowering::emitOptionalBox(const Val &opt, ast::Type *optTy) {
+  pir::LocalId tmp = B.addLocal("opt.box", Type::Box);
+  B.store(tmp, Val::null(Type::Box));
+  pir::If *s = B.openIf(B.isSome(opt, "opt.has"), false);
+  B.enter(*s->Then);
+  if (Val box = emitPrimitiveBox(B.unwrap(opt, "opt.value"), optTy))
+    B.store(tmp, box);
+  B.leave();
+  return B.load(tmp, "opt.box");
+}
+
+Val ModuleLowering::emitOptionalFromBox(const Val &box, ast::Type *optTy) {
+  Type t = toPIRType(optTy);
+  pir::LocalId tmp = B.addLocal("opt", t);
+  B.store(tmp, B.none(t, "none"));
+  Val has = B.cmp(pir::CmpPred::Ne, box, Val::null(Type::Box), "opt.has");
+  pir::If *s = B.openIf(has, false);
+  B.enter(*s->Then);
+  if (Val v = emitPrimitiveUnbox(B.unbox(box, "opt.obj"),
+                                 ast::stripOptional(optTy), "opt.value"))
+    B.store(tmp, B.some(v, "some"));
+  B.leave();
+  return B.load(tmp, "opt");
 }
 
 Val ModuleLowering::emitPrimitiveBox(const Val &v, ast::Type *optTy) {
@@ -1360,7 +1464,8 @@ Val ModuleLowering::emitOptionalEquality(ast::BinaryExpr *node) {
   ast::Expr *rhs = node->getRHS();
 
   // `x == None` / `None == x`: a null check on whatever form the optional
-  // takes (a box, or the raw object of an unwrapped variable / element).
+  // takes (a box, or the raw object of an unwrapped variable / element), or
+  // the presence flag of an optional value.
   bool lhsNone = ast::isa<ast::NoneLiteral>(lhs);
   bool rhsNone = ast::isa<ast::NoneLiteral>(rhs);
   if (lhsNone || rhsNone) {
@@ -1368,10 +1473,25 @@ Val ModuleLowering::emitOptionalEquality(ast::BinaryExpr *node) {
     Val v = emitExpr(opt);
     if (!v)
       return v;
+    if (pir::isOptional(v.Ty))
+      return B.unary(pir::Opcode::Not, B.isSome(v, "opt.has"), "opt.isnone");
     ExprValue ev = classifyExpr(opt, v);
     Val isNone = B.cmp(pir::CmpPred::Eq, v, Val::null(v.Ty), "opt.isnone");
     releaseIfOwned(ev);
     return isNone;
+  }
+
+  // Two optional values: their flags and payloads.
+  if (valueOptionalType(lhs) && valueOptionalType(rhs)) {
+    Val a = emitExpr(lhs);
+    Val b = emitExpr(rhs);
+    if (!a || !b)
+      return Val();
+    if (a.Ty != b.Ty) {
+      reportInternalError("comparing optionals of different value types");
+      return Val();
+    }
+    return emitValueOptionalEquals(a, b);
   }
 
   // Two optionals: +1 boxes of both (null-safe); either None -> equal iff
@@ -1411,6 +1531,14 @@ Val ModuleLowering::emitAsShared(ast::Expr *expr) {
   // `None` into a `T?` slot is the null box (no allocation at all).
   if (isNoneForOptional(expr))
     return Val::null(Type::Box);
+  // An optional value where a box is due: its boxed form (`T?` into `Obj`
+  // also turns None into the None object).
+  if (ast::Type *optTy = valueOptionalType(expr)) {
+    Val v = emitExpr(expr);
+    if (!v)
+      return v;
+    return emitOptionalToObj(expr, emitOptionalBox(v, optTy));
+  }
   Val box = emitAsSharedRaw(expr);
   // `T?` into an `Obj` slot: never hand an `Obj` a NULL box.
   return emitOptionalToObj(expr, box);
@@ -1419,8 +1547,10 @@ Val ModuleLowering::emitAsShared(ast::Expr *expr) {
 Val ModuleLowering::emitBorrowedBox(ast::Expr *arg, std::vector<Val> &keep) {
   if (isNoneForOptional(arg))
     return Val::null(Type::Box);
-  // A variable's or a field's own box: it outlives the call.
-  if (!isPrimitiveBoxing(arg) && !isOptionalToObjCoercion(arg)) {
+  // A variable's or a field's own box, when the argument is that reference
+  // as it is: it outlives the call.
+  ast::Type *ty = arg->getResolvedType();
+  if (ty && ast::isRefType(ty) && !isOptionalToObjCoercion(arg)) {
     auto *id = ast::dyn_cast<ast::Identifier>(arg);
     if (id && CurrentScope->hasLocal(id->getName()) && holdsBox(id->getName()))
       return loadVarBox(id->getName());

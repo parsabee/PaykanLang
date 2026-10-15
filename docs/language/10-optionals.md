@@ -2,8 +2,9 @@
 
 > **Stable in v0.1** (issue #5), optional primitives and optional-mode `match` included: the
 > syntax and semantics below are covered by the compatibility promise for the 0.1 series (see
-> `01-language-basics.md`, "Stability"). A present optional primitive is boxed; [#96](https://github.com/parsabee/PaykanLang/issues/96) will
-> change that representation, not the semantics.
+> `01-language-basics.md`, "Stability"). Since [#96](https://github.com/parsabee/PaykanLang/issues/96)
+> an optional primitive is a value (the primitive and a presence flag), not a box; the semantics
+> did not change.
 
 An **optional type** `T?` holds either a value of type `T` or `None`. It is how a program says
 "this may be absent" without giving up the static type: a `next: Node?` field is a `Node` or
@@ -208,8 +209,10 @@ fn show(o: int?) -> Str {
 - `Enum?` is not supported yet ("optional enum types are not supported yet"). An enum would box
   as a bare `Int`, which in an `Obj` slot would print the variant's ordinal rather than its name.
 
-At runtime, a present `int?` is an `Int` box: one heap object, released like any other
-reference. `None` is the null box, as for every optional.
+At runtime an `int?` is a value: the `int` and a presence flag, held inline in a variable, a
+field or a parameter and copied like an `int`, with no heap allocation and no reference count.
+`None` is the flag being clear. Only where an object is expected (an `Obj`, and for now an
+array or tuple element) is a present value kept as its boxed class.
 
 ---
 
@@ -307,9 +310,10 @@ fn pick(c: bool) -> Str? { return if c then "yes" else None; }
 ## Memory
 
 A `T?` of a reference type costs nothing extra: it is the same reference-counted box as a `T`,
-with "no box" meaning `None`. A present optional primitive is one boxed `Int` / `Float` /
-`Bool` / `Char` object; `None` allocates nothing. Retaining, releasing and destroying an absent optional are no-ops. See
-`08-memory-model.md`.
+with "no box" meaning `None`. An optional primitive is a value, the primitive and a presence
+flag: it allocates nothing and is never counted (except as an `Obj`, or for now in an array
+or tuple slot, where a present value is one boxed `Int` / `Float` / `Bool` / `Char` object).
+Retaining, releasing and destroying an absent optional are no-ops. See `08-memory-model.md`.
 
 ---
 

@@ -420,9 +420,12 @@ Val ModuleLowering::lowerMemberAssignStmt(ast::MemberAssignStmt *node) {
       Val rhs = emitExpr(node->getValue());
       if (!rhs)
         return Val();
-      newShared = exprAlreadyShared(node->getValue())
-                      ? takeSharedOwnership(node->getValue(), rhs)
-                      : emitSharedNew(rhs, "field.shared");
+      if (ast::Type *optTy = valueOptionalType(node->getValue()))
+        newShared = emitOptionalBox(rhs, optTy); // into an `Obj` field
+      else
+        newShared = exprAlreadyShared(node->getValue())
+                        ? takeSharedOwnership(node->getValue(), rhs)
+                        : emitSharedNew(rhs, "field.shared");
     }
     newShared = emitOptionalToObj(node->getValue(), newShared);
 

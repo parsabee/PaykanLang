@@ -203,10 +203,10 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
   //   S? -> T?   when S -> T (covariant in the wrapped type).
   // The `None` literal is handled by checkAssignable, which sees the
   // expression; its static type is `Obj`, which is NOT assignable to `T?`.
-  //   An optional primitive `int?` holds a boxed value, so a plain `int`
-  //   (or, for `float?`, an `int` after promotion) widens by boxing, but an
-  //   `S?` only converts to `T?` when the boxed representation is the same:
-  //   `int?` -> `float?` would have to re-box and is rejected.
+  //   An optional primitive `int?` holds its value inline, so a plain `int`
+  //   (or, for `float?`, an `int` after promotion) widens to a present
+  //   value, but an `S?` only converts to `T?` when the representation is
+  //   the same: `int?` -> `float?` would have to convert and is rejected.
   if (auto *dstOT = ast::dyn_cast<ast::OptionalType>(dst)) {
     if (ast::isa<ast::BuiltinType>(dstOT->getInnerType()))
       if (auto *srcOT = ast::dyn_cast<ast::OptionalType>(src))
@@ -255,10 +255,11 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
       // An empty literal (void element) is assignable to any array type.
       if (srcAT->getElementType() == Ctx.getVoidTy())
         return true;
-      // An `int[]` is not an `int?[]`: its slots hold raw values, not boxes
+      // An `int[]` is not an `int?[]`: its slots hold plain values, not
+      // optionals
       // (an array literal is retyped element-wise by checkAssignable).
-      if (ast::needsPrimitiveBoxing(dstAT->getElementType(),
-                                    srcAT->getElementType()))
+      if (ast::wrapsInOptional(dstAT->getElementType(),
+                               srcAT->getElementType()))
         return false;
       return isAssignable(dstAT->getElementType(), srcAT->getElementType());
     }
@@ -290,8 +291,9 @@ bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
   if (!isAssignable(dst, srcTy))
     return false;
   adoptArrayLiteralType(dst, src);
-  // `int` -> `int?` (and `int` -> `float?`): the lowering boxes the value.
-  if (ast::needsPrimitiveBoxing(dst, srcTy)) {
+  // `int` -> `int?` (and `int` -> `float?`): the lowering makes the value
+  // the optional's present value.
+  if (ast::wrapsInOptional(dst, srcTy)) {
     src->setCoercedType(dst);
     return true;
   }
@@ -310,12 +312,11 @@ ast::Type *Sema::adoptLiteralElements(ast::Type *dst, ast::Type *srcTy,
   // keep their own types (the usual representation-preserving rules then
   // decide assignability).
   auto boxes = [&](ast::Type *d, ast::Type *s) {
-    return ast::needsPrimitiveBoxing(d, s) &&
-           isAssignable(ast::stripOptional(d), s);
+    return ast::wrapsInOptional(d, s) && isAssignable(ast::stripOptional(d), s);
   };
   // One element flowing into slot type @p d: a nested literal is adopted
   // recursively, `None` takes an optional slot's type (a null box, as in
-  // checkAssignable), and a primitive is boxed for an optional primitive
+  // checkAssignable), and a primitive is wrapped for an optional primitive
   // slot.  Returns the element's (possibly new) type.
   auto adoptOperand = [&](ast::Type *d, ast::Expr *e) -> ast::Type * {
     ast::Type *t = e->getResolvedType();
@@ -519,15 +520,13 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     auto *inner = resolveType(ot->getInnerType(), loc, context);
     if (!inner)
       return nullptr;
-    // A `T?` is a PaykanShared* box with NULL meaning None: a reference type
-    // shares T's own box, and a primitive (`int?`, `float?`, `bool?`,
-    // `char?`) boxes its value in the runtime's boxed Int / Float / Bool /
-    // Char object.  `void` has no value (the parser rejects the spelled
-    // `void?`; a type argument can still produce it).  An enum would box as
-    // a bare Int and reach `Obj` printing its ordinal, so `Enum?` waits for a
-    // boxed enum representation.  Nested optionals are rejected because a
-    // `T??` would need a second None to distinguish `None` from
-    // `Some(None)`.
+    // A `T?` of a reference type is T's own PaykanShared* box with NULL
+    // meaning None; a primitive's (`int?`, `float?`, `bool?`, `char?`) is a
+    // value, the primitive and a presence flag (#96).  `void` has no value
+    // (the parser rejects the spelled `void?`; a type argument can still
+    // produce it).  `Enum?` is not supported yet.  Nested optionals are
+    // rejected because a `T??` would need a second None to distinguish `None`
+    // from `Some(None)`.
     if (inner == Ctx.getVoidTy()) {
       error(loc, context + " has type 'void?': optional type 'void?' is not "
                            "supported");
@@ -1377,13 +1376,13 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
     ast::Type *result = nullptr;
     if (trueNone != falseNone) {
       ast::Type *valueTy = trueNone ? falseTy : trueTy;
-      if (ast::isRefType(valueTy))
-        result = ast::isa<ast::OptionalType>(valueTy)
-                     ? valueTy
-                     : S.Ctx.getOptionalType(valueTy);
-      else if (ast::isa<ast::BuiltinType>(valueTy) &&
-               valueTy != S.Ctx.getVoidTy())
-        result = S.Ctx.getOptionalType(valueTy); // `int` -> `int?` (boxed)
+      // `x` a `T?` already, a reference `T`, or a primitive (`int` -> `int?`).
+      if (ast::isa<ast::OptionalType>(valueTy))
+        result = valueTy;
+      else if (ast::isRefType(valueTy) ||
+               (ast::isa<ast::BuiltinType>(valueTy) &&
+                valueTy != S.Ctx.getVoidTy()))
+        result = S.Ctx.getOptionalType(valueTy);
     } else if (ast::isa<ast::OptionalType>(trueTy) ||
                ast::isa<ast::OptionalType>(falseTy)) {
       ast::Type *a = ast::stripOptional(trueTy);
@@ -1402,10 +1401,11 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
         trueExpr->setResolvedType(result);
       if (falseNone)
         falseExpr->setResolvedType(result);
-      // A plain primitive branch of an optional primitive result is boxed.
-      if (ast::needsPrimitiveBoxing(result, trueTy))
+      // A plain primitive branch of an optional primitive result is its
+      // present value.
+      if (ast::wrapsInOptional(result, trueTy))
         trueExpr->setCoercedType(result);
-      if (ast::needsPrimitiveBoxing(result, falseTy))
+      if (ast::wrapsInOptional(result, falseTy))
         falseExpr->setCoercedType(result);
       node->setResolvedType(result);
       return result;
@@ -1607,9 +1607,9 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
         continue;
       }
       // A destructured element is stored as-is: an `int` element cannot
-      // fill an `int?` target (it would need boxing; unwrap or re-declare).
+      // fill an `int?` target (it would need wrapping; unwrap or re-declare).
       if (!isAssignable(declTy, elemTy) ||
-          ast::needsPrimitiveBoxing(declTy, elemTy)) {
+          ast::wrapsInOptional(declTy, elemTy)) {
         error(target.Loc, "element " + std::to_string(i) + " of type '" +
                               typeName(elemTy) +
                               "' does not match declared type '" +
@@ -1639,8 +1639,7 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
       owner->set(name, elemTy);
       continue;
     }
-    if (!isAssignable(varTy, elemTy) ||
-        ast::needsPrimitiveBoxing(varTy, elemTy)) {
+    if (!isAssignable(varTy, elemTy) || ast::wrapsInOptional(varTy, elemTy)) {
       error(target.Loc, "cannot assign element " + std::to_string(i) +
                             " of type '" + typeName(elemTy) +
                             "' to variable '" + name + "' of type '" +
@@ -3103,7 +3102,7 @@ bool Sema::checkOptionalMatch(ast::MatchStmt *node,
           bindTy = armCt;
         }
       } else if (ast::isa<ast::BuiltinType>(inner)) {
-        // `int?`: the `int` arm unwraps the box into a plain `int` value.
+        // `int?`: the `int` arm unwraps the present value, a plain `int`.
         if (resolvedArmTy != inner) {
           error(arm->getLocation(),
                 "match arm type '" + typeName(resolvedArmTy) +

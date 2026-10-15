@@ -6,6 +6,9 @@
 #include "Runtime.h"
 #include "RuntimeInternal.h"
 
+#include <ctype.h>
+#include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,6 +62,55 @@ PaykanString *PaykanString_from_bool(int64_t value) {
 
 PaykanString *PaykanString_from_char(int8_t c) {
   return PaykanString_new((const char *)&c, 1);
+}
+
+// -- Parses (`int<Str>`, `float<Str>`, `bool<Str>`)
+
+/// True when @p s starts with a character strtoll / strtod would skip as
+/// leading whitespace, which `int<Str>` / `float<Str>` reject.
+static int string_starts_with_space(const PaykanString *s) {
+  return s->len > 0 && isspace((unsigned char)s->data[0]);
+}
+
+int64_t PaykanString_parse_int(PaykanObject *str, int64_t *out) {
+  PaykanString *s = (PaykanString *)str;
+  *out = 0;
+  if (s->len == 0 || string_starts_with_space(s))
+    return 0;
+  char *end;
+  errno = 0;
+  long long val = strtoll(s->data, &end, 10);
+  // The whole string must be consumed (an embedded NUL ends strtoll early)
+  // and the value must fit (ERANGE).
+  if (end != s->data + s->len || errno != 0)
+    return 0;
+  *out = (int64_t)val;
+  return 1;
+}
+
+int64_t PaykanString_parse_float(PaykanObject *str, double *out) {
+  PaykanString *s = (PaykanString *)str;
+  *out = 0.0;
+  if (s->len == 0 || string_starts_with_space(s))
+    return 0;
+  char *end;
+  errno = 0;
+  double val = strtod(s->data, &end);
+  if (end != s->data + s->len)
+    return 0;
+  // ERANGE flags overflow (±HUGE_VAL), a nonzero value underflowing to 0, and
+  // also a subnormal result, which is representable and accepted.
+  if (errno != 0 && (errno != ERANGE || isinf(val) || val == 0.0))
+    return 0;
+  *out = val;
+  return 1;
+}
+
+int64_t PaykanString_parse_bool(PaykanObject *str, int64_t *out) {
+  PaykanString *s = (PaykanString *)str;
+  // Exactly the spellings `Str<bool>` prints, so the two round-trip.
+  *out = s->len == 4 && memcmp(s->data, "True", 4) == 0;
+  return *out || (s->len == 5 && memcmp(s->data, "False", 5) == 0);
 }
 
 // -- Methods
