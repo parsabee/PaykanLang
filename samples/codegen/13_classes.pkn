@@ -14,9 +14,6 @@
 class Counter {
   count: int;
 
-  fn __init__(start: int) {
-    self.count = start;
-  }
   fn increment() {
     self.count = self.count + 1;
   }
@@ -31,18 +28,27 @@ class Counter {
   }
 }
 
+impl Counter {
+  fn __init__(start: int) {
+    self.count = start;
+  }
+}
+
 // ---- Class with a Str field -----------------------------------------------
 
 class Greeter {
   name: Str;
 
-  fn __init__(n: Str) {
-    self.name = n;
-  }
   view fn greet() -> Str {
     return "Hello, " + self.name + "!";
   }
   fn rename(n: Str) {
+    self.name = n;
+  }
+}
+
+impl Greeter {
+  fn __init__(n: Str) {
     self.name = n;
   }
 }
@@ -59,47 +65,60 @@ class Rectangle : Shape {
   w: int;
   h: int;
 
-  fn __init__(width: int, height: int) {
-    self.w = width;
-    self.h = height;
-  }
   view fn area() -> int { return self.w * self.h; }
   view fn perimeter() -> int { return 2 * (self.w + self.h); }
   view fn describe() -> Str { return "rectangle"; }
 }
 
+impl Rectangle {
+  fn __init__(width: int, height: int) {
+    self.w = width;
+    self.h = height;
+  }
+}
+
 class Square : Rectangle {
+  view fn describe() -> Str { return "square"; }
+}
+
+impl Square {
   fn __init__(side: int) {
     __super__(side, side);
   }
-  view fn describe() -> Str { return "square"; }
 }
 
 // ---- Inheritance: Animal / Dog / Cat  (inherited method, overrides) -------
 
 class Animal {
-  fn __init__() {}
   view fn sound() -> Str { return "..."; }
   view fn isAnimal() -> int { return 1; }
   view fn describe() -> Str { return "animal: " + self.sound(); }
 }
 
+impl Animal {
+  fn __init__() {}
+}
+
 class Dog : Animal {
-  fn __init__() { __super__(); }
   view fn sound() -> Str { return "woof"; }
 }
 
-class Cat : Animal {
+impl Dog {
   fn __init__() { __super__(); }
+}
+
+class Cat : Animal {
   view fn sound() -> Str { return "meow"; }
+}
+
+impl Cat {
+  fn __init__() { __super__(); }
 }
 
 // ---- Accumulator using a while loop inside a method ----------------------
 
 class Summer {
   total: int;
-
-  fn __init__() { self.total = 0; }
 
   fn sumTo(n: int) {
     i: int = 1;
@@ -109,6 +128,10 @@ class Summer {
     }
   }
   fn reset() { self.total = 0; }
+}
+
+impl Summer {
+  fn __init__() { self.total = 0; }
 }
 
 // ---- Sign detector using if/else inside a method -------------------------
@@ -131,10 +154,6 @@ class Person {
   name: Str;
   age: int;
 
-  fn __init__(n: Str, a: int) {
-    self.name = n;
-    self.age = a;
-  }
   view fn toString() -> Str {
     return self.name + " (age " + Str<int>(self.age) + ")";
   }
@@ -143,28 +162,44 @@ class Person {
   }
 }
 
+impl Person {
+  fn __init__(n: Str, a: int) {
+    self.name = n;
+    self.age = a;
+  }
+}
+
 // ---- Three-level inheritance: Vehicle / Car / SportsCar -------------------
 
 class Vehicle {
   speed: int;
-  fn __init__(s: int) { self.speed = s; }
   view fn kind() -> Str { return "vehicle"; }
   view fn topSpeed() -> int { return self.speed; }
 }
 
+impl Vehicle {
+  fn __init__(s: int) { self.speed = s; }
+}
+
 class Car : Vehicle {
-  fn __init__(s: int) { __super__(s); }
   view fn kind() -> Str { return "car"; }
+}
+
+impl Car {
+  fn __init__(s: int) { __super__(s); }
 }
 
 class SportsCar : Car {
   boost: int;
+  view fn kind() -> Str { return "sports car"; }
+  view fn topSpeed() -> int { return self.speed + self.boost; }
+}
+
+impl SportsCar {
   fn __init__(s: int, b: int) {
     __super__(s);
     self.boost = b;
   }
-  view fn kind() -> Str { return "sports car"; }
-  view fn topSpeed() -> int { return self.speed + self.boost; }
 }
 
 // ---- Functions that take / return class instances -------------------------

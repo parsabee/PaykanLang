@@ -13,6 +13,9 @@ native fn pick<T>(first: bool, a: T, b: T) -> T = "sample_pick";
 
 class Point {
   x: int;
+}
+
+impl Point {
   fn __init__(x: int) { self.x = x; }
 }
 

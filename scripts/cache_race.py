@@ -38,9 +38,9 @@ UTIL = "fn tag() -> int {{ return {salt}; }}\nfn twice(x: int) -> int {{ return 
 SHAPES = """import lib::util;
 class Rect {
   w: int; h: int;
-  fn __init__(w: int, h: int) { self.w = w; self.h = h; }
   view fn area() -> int { return util::twice(self.w * self.h) / 2; }
 }
+impl Rect { fn __init__(w: int, h: int) { self.w = w; self.h = h; } }
 fn describe(r: Rect) -> Str { return "rect " + Str(r.area()); }
 """
 MAIN = """import lib::util;

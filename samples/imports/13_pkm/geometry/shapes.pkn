@@ -6,22 +6,31 @@ enum Kind { Flat, Solid }
 
 class Shape {
   name: Str;
-  fn __init__(name: Str) { self.name = name; }
   view fn area() -> int { return 0; }
   view fn kind() -> Kind { return Kind::Flat; }
   view fn describe() -> Str { return self.name + " of area " + Str<int>(self.area()); }
 }
 
+impl Shape {
+  fn __init__(name: Str) { self.name = name; }
+}
+
 class Rect : Shape {
   w: int;
   h: int;
-  fn __init__(w: int, h: int) { __super__("rect"); self.w = w; self.h = h; }
   view fn area() -> int { return self.w * self.h; }
 }
 
+impl Rect {
+  fn __init__(w: int, h: int) { __super__("rect"); self.w = w; self.h = h; }
+}
+
 class Square : Rect {
-  fn __init__(side: int) { __super__(side, side); }
   view fn kind() -> Kind { return Kind::Solid; }
+}
+
+impl Square {
+  fn __init__(side: int) { __super__(side, side); }
 }
 
 // The total area of some shapes.

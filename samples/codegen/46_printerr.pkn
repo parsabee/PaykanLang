@@ -11,8 +11,11 @@
 
 class Step {
   n: int;
-  fn __init__(n: int) { self.n = n; }
   view fn toString() -> Str { return "step " + Str(self.n); }
+}
+
+impl Step {
+  fn __init__(n: int) { self.n = n; }
 }
 
 fn main() -> int {

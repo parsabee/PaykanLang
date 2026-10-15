@@ -12,8 +12,11 @@
 
 class Holder {
   pair: (int, Str);
-  fn __init__(p: (int, Str)) { self.pair = p; }
   view fn get() -> view (int, Str) { return self.pair; }
+}
+
+impl Holder {
+  fn __init__(p: (int, Str)) { self.pair = p; }
 }
 
 fn mk() -> (Str, int) {
