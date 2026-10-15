@@ -145,11 +145,15 @@ TEST(ArrayAssign, PushAfterAssign) {
 
 TEST(RefField, SubscriptObjectArrayField) {
   auto r = compileAndRun(R"(
-class Foo { v: int; fn __init__(x: int){ self.v = x; } }
+class Foo { v: int; }
+impl Foo { fn __init__(x: int){ self.v = x; } }
 class Box {
   items: Foo[];
-  fn __init__(){ self.items = []; self.items.push(Foo(41)); self.items.push(Foo(42)); }
   fn second() -> int { return self.items[1].v; }   // subscript a member-access array
+}
+
+impl Box {
+  fn __init__(){ self.items = []; self.items.push(Foo(41)); self.items.push(Foo(42)); }
 }
 fn main() -> int {
   b: Box = Box();
@@ -168,6 +172,13 @@ TEST(RefField, NestedArrayOfArraysField) {
   auto r = compileAndRun(R"(
 class Grid {
   rows: int[][];
+  fn at(r: int, c: int) -> int {
+    row: int[] = self.rows[r];   // subscript the outer 2-D field
+    return row[c];
+  }
+}
+
+impl Grid {
   fn __init__() {
     self.rows = [];
     i: int = 0;
@@ -178,10 +189,6 @@ class Grid {
       self.rows.push(row);
       i = i + 1;
     }
-  }
-  fn at(r: int, c: int) -> int {
-    row: int[] = self.rows[r];   // subscript the outer 2-D field
-    return row[c];
   }
 }
 fn main() -> int {
@@ -231,12 +238,16 @@ TEST(RefField, MemberAccessPassedAsClassArg) {
   // holder releases it on destruction, so without the retain the object is
   // freed one time too many and a later use reads freed memory.
   auto r = compileAndRun(R"(
-class Named { name: Str; fn __init__(n: Str){ self.name = n; } }
+class Named { name: Str; }
+impl Named { fn __init__(n: Str){ self.name = n; } }
 class Store {
   saved: Str;
-  fn __init__(){ self.saved = ""; }
   fn keep(s: Str) { self.saved = s; }
   fn get() -> Str { return self.saved; }
+}
+
+impl Store {
+  fn __init__(){ self.saved = ""; }
 }
 fn stash(st: Store) {
   nm: Named = Named("hello");
@@ -259,12 +270,16 @@ TEST(RefField, ObjectElementFieldSubscriptAssign) {
   // unwrap the field box and use the object-set path (element type derived
   // from the array expression, not just bare identifiers).
   auto r = compileAndRun(R"(
-class Foo { v: int; fn __init__(x: int){ self.v = x; } }
+class Foo { v: int; }
+impl Foo { fn __init__(x: int){ self.v = x; } }
 class Box {
   items: Foo[];
-  fn __init__(){ self.items = [Foo(1), Foo(2)]; }
   fn set1(f: Foo) { self.items[1] = f; }
   fn get1() -> int { return self.items[1].v; }
+}
+
+impl Box {
+  fn __init__(){ self.items = [Foo(1), Foo(2)]; }
 }
 fn main() -> int {
   b: Box = Box();
@@ -285,8 +300,11 @@ TEST(ArrayPromotion, IntElementsIntoFloatArray) {
   auto r = compileAndRun(R"(
     class C {
       fs: float[];
-      fn __init__() { self.fs = [1, 2]; }
       fn sum(ys: float[]) -> float { return ys[0] + ys[1]; }
+    }
+
+    impl C {
+      fn __init__() { self.fs = [1, 2]; }
     }
     fn total(zs: float[]) -> float { return zs[0] + zs[1]; }
     fn mk() -> float[] { return [7, 8]; }

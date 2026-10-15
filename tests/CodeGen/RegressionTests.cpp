@@ -45,6 +45,9 @@ TEST(Regression, MethodObjectArrayParam) {
   auto r = compileAndRun(R"(
     class P {
       x: int;
+    }
+
+    impl P {
       fn __init__(x: int) { self.x = x; }
     }
     class Bag {
@@ -100,8 +103,11 @@ TEST(Regression, MethodEqualsOverrideAndArrayEquals) {
   auto r = compileAndRun(R"(
     class Bag {
       n: int;
-      fn __init__(n: int) { self.n = n; }
       view fn equals(o: Obj) -> bool { return True; }
+    }
+
+    impl Bag {
+      fn __init__(n: int) { self.n = n; }
     }
     fn main() -> int {
       b = Bag(1);
@@ -130,8 +136,11 @@ TEST(Regression, InferredClassTernaryReceiver) {
     class Point {
       x: int;
       y: int;
-      fn __init__(x: int, y: int) { self.x = x; self.y = y; }
       fn sum() -> int { return self.x + self.y; }
+    }
+
+    impl Point {
+      fn __init__(x: int, y: int) { self.x = x; self.y = y; }
     }
     class Animal { fn sound() -> Str { return "..."; } }
     class Dog : Animal { fn sound() -> Str { return "woof"; } }
@@ -164,8 +173,11 @@ TEST(Regression, InferredArrayTupleOptionalTernary) {
   auto r = compileAndRun(R"(
     class Point {
       x: int;
-      fn __init__(x: int) { self.x = x; }
       fn get() -> int { return self.x; }
+    }
+
+    impl Point {
+      fn __init__(x: int) { self.x = x; }
     }
     fn run(c: bool) -> int {
       p = Point(1);
@@ -197,8 +209,11 @@ TEST(Regression, CharArrayElements) {
   auto r = compileAndRun(R"(
     class Word {
       cs: char[];
-      fn __init__() { self.cs = ['h', 'i']; }
       fn first() -> char { return self.cs[0]; }
+    }
+
+    impl Word {
+      fn __init__() { self.cs = ['h', 'i']; }
     }
     fn isA(c: char) -> bool { return c == 'a'; }
     fn second(cs: char[]) -> char { return cs[1]; }
@@ -237,11 +252,17 @@ TEST(Regression, CallRootedObjectSubscript) {
   auto r = compileAndRun(R"(
     class Point {
       x: int;
-      fn __init__(x: int) { self.x = x; }
       fn get() -> int { return self.x; }
+    }
+
+    impl Point {
+      fn __init__(x: int) { self.x = x; }
     }
     class Holder {
       items: Point[];
+    }
+
+    impl Holder {
       fn __init__() { self.items = [Point(7)]; }
     }
     fn mk() -> Point[] { return [Point(1), Point(2)]; }
@@ -284,6 +305,9 @@ TEST(Regression, CallRootedSubscriptAssign) {
   auto r = compileAndRun(R"(
     class Point {
       x: int;
+    }
+
+    impl Point {
       fn __init__(x: int) { self.x = x; }
     }
     fn mk() -> Point[] { return [Point(1), Point(2)]; }
@@ -333,14 +357,20 @@ TEST(Regression, MethodConstructsOwnAndLaterClass) {
   auto r = compileAndRun(R"(
     class Cell {
       v: int;
-      fn __init__(v: int) { self.v = v; }
       fn clone() -> Cell { return Cell(self.v + 1); }
       fn wrap() -> Box { return Box(self.v * 2); }
     }
+
+    impl Cell {
+      fn __init__(v: int) { self.v = v; }
+    }
     class Box {
       n: int;
-      fn __init__(n: int) { self.n = n; }
       fn cell() -> Cell { return Cell(self.n); }
+    }
+
+    impl Box {
+      fn __init__(n: int) { self.n = n; }
     }
     fn main() -> int {
       c = Cell(3);
@@ -361,8 +391,11 @@ TEST(Regression, ImportedClassConstructsItself) {
   writeProjectFile(dir, "lib/cell.pkn", R"(
 class Cell {
   v: int;
-  fn __init__(v: int) { self.v = v; }
   fn clone() -> Cell { return Cell(self.v + 1); }
+}
+
+impl Cell {
+  fn __init__(v: int) { self.v = v; }
 }
 )");
   auto mainPath = writeProjectFile(dir, "main.pkn", R"(
@@ -384,19 +417,24 @@ fn main() -> int {
 TEST(Regression, SubclassDeclaredBeforeBase) {
   LeakGuard g;
   auto r = compileAndRun(R"(
-    class Square : Rect {
+    class Square : Rect {}
+
+    impl Square {
       fn __init__(s: int) { __super__(s, s, "square"); }
     }
     class Rect {
       w: int;
       h: int;
       tag: Str;
+      fn area() -> int { return self.w * self.h; }
+    }
+
+    impl Rect {
       fn __init__(w: int, h: int, tag: Str) {
         self.w = w;
         self.h = h;
         self.tag = tag;
       }
-      fn area() -> int { return self.w * self.h; }
     }
     fn main() -> int {
       s = Square(4);
@@ -417,24 +455,34 @@ class Rect {
   w: int;
   h: int;
   tag: Str;
+  fn area() -> int { return self.w * self.h; }
+}
+
+impl Rect {
   fn __init__(w: int, h: int, tag: Str) {
     self.w = w;
     self.h = h;
     self.tag = tag;
   }
-  fn area() -> int { return self.w * self.h; }
 }
 class Unit {
   n: int;
+}
+
+impl Unit {
   fn __init__() { self.n = 7; }
 }
 )");
   auto mainPath = writeProjectFile(dir, "main.pkn", R"(
 import shapes::rect;
-class Square : rect::Rect {
+class Square : rect::Rect {}
+
+impl Square {
   fn __init__(s: int) { __super__(s, s, "sq"); }
 }
-class One : rect::Unit {
+class One : rect::Unit {}
+
+impl One {
   fn __init__() { __super__(); }
 }
 fn main() -> int {
@@ -457,25 +505,37 @@ TEST(Regression, SuperArgumentsAreBoxed) {
   auto r = compileAndRun(R"(
     class Point {
       x: int;
+    }
+
+    impl Point {
       fn __init__(x: int) { self.x = x; }
     }
     class Base {
       p: Point;
       name: Str;
       xs: int[];
+    }
+
+    impl Base {
       fn __init__(p: Point, name: Str, xs: int[]) {
         self.p = p;
         self.name = name;
         self.xs = xs;
       }
     }
-    class Lit : Base {
+    class Lit : Base {}
+
+    impl Lit {
       fn __init__() { __super__(Point(1), "literal", [1, 2]); }
     }
-    class Cat : Base {
+    class Cat : Base {}
+
+    impl Cat {
       fn __init__(n: Str) { __super__(Point(2), n + "!", [3]); }
     }
-    class Fwd : Base {
+    class Fwd : Base {}
+
+    impl Fwd {
       fn __init__(p: Point, n: Str, xs: int[]) { __super__(p, n, xs); }
     }
     fn main() -> int {
@@ -503,16 +563,22 @@ TEST(Regression, PushOntoEmptyArrayFieldFromMethod) {
   auto r = compileAndRun(R"(
     class P {
       x: int;
+    }
+
+    impl P {
       fn __init__(x: int) { self.x = x; }
     }
     class SStack {
       items: Str[];
       ps: P[];
-      fn __init__() { self.items = []; self.ps = []; }
       fn push(v: Str) { self.items.push(v); }
       fn pushP(p: P) { self.ps.push(p); }
       fn pop() -> Str { return self.items.pop(); }
       fn popP() -> P { return self.ps.pop(); }
+    }
+
+    impl SStack {
+      fn __init__() { self.items = []; self.ps = []; }
     }
     fn main() -> int {
       s = SStack();
@@ -539,11 +605,15 @@ TEST(Regression, PushOntoEmptyArrayFieldFromMethod) {
 TEST(Regression, SubscriptObjectArrayFieldIsLeakFree) {
   LeakGuard g;
   auto r = compileAndRun(R"(
-class Foo { v: int; fn __init__(x: int){ self.v = x; } }
+class Foo { v: int; }
+impl Foo { fn __init__(x: int){ self.v = x; } }
 class Box {
   items: Foo[];
-  fn __init__(){ self.items = []; self.items.push(Foo(41)); self.items.push(Foo(42)); }
   fn second() -> int { return self.items[1].v; }   // subscript a member-access array
+}
+
+impl Box {
+  fn __init__(){ self.items = []; self.items.push(Foo(41)); self.items.push(Foo(42)); }
 }
 fn main() -> int {
   b: Box = Box();
@@ -563,6 +633,13 @@ TEST(Regression, NestedArrayOfArraysFieldIsLeakFree) {
   auto r = compileAndRun(R"(
 class Grid {
   rows: int[][];
+  fn at(r: int, c: int) -> int {
+    row: int[] = self.rows[r];   // subscript the outer 2-D field
+    return row[c];
+  }
+}
+
+impl Grid {
   fn __init__() {
     self.rows = [];
     i: int = 0;
@@ -573,10 +650,6 @@ class Grid {
       self.rows.push(row);
       i = i + 1;
     }
-  }
-  fn at(r: int, c: int) -> int {
-    row: int[] = self.rows[r];   // subscript the outer 2-D field
-    return row[c];
   }
 }
 fn main() -> int {
@@ -597,6 +670,9 @@ TEST(Regression, EmptyArrayArgumentAndReturn) {
   auto r = compileAndRun(R"(
     class P {
       x: int;
+    }
+
+    impl P {
       fn __init__(x: int) { self.x = x; }
     }
     class Bag {
@@ -677,12 +753,18 @@ TEST(Regression, DestructorAndUserFunctionWithTheOldMangledName) {
   auto r = compileAndRun(R"(
     class K {
       name: Str;
-      fn __init__(name: Str) { self.name = name; }
       fn vtable() -> int { return 10; }
     }
+
+    impl K {
+      fn __init__(name: Str) { self.name = name; }
+    }
     class D : K {
-      fn __init__() { __super__("d"); }
       fn vtable() -> int { return 20; }
+    }
+
+    impl D {
+      fn __init__() { __super__("d"); }
     }
     fn K_destroy(k: K) -> Str { return "user " + k.name; }
     fn K_vtable() -> int { return 30; }
@@ -730,8 +812,11 @@ TEST(Regression, ImportedClassMethodAndImporterFunctionWithTheOldName) {
   writeProjectFile(dir, "lib/cell.pkn", R"(
 class Cell {
   v: int;
-  fn __init__(v: int) { self.v = v; }
   fn clone() -> Cell { return Cell(self.v + 1); }
+}
+
+impl Cell {
+  fn __init__(v: int) { self.v = v; }
 }
 )");
   auto mainPath = writeProjectFile(dir, "main.pkn", R"(
