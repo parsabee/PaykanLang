@@ -569,6 +569,32 @@ bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct) {
   return ok;
 }
 
+bool Sema::rejectBodyInits(ast::TranslationUnit *tu) {
+  bool ok = true;
+  for (auto *cds : {&tu->getClassDecls(), &tu->getGenericClassDecls()})
+    for (auto *cd : *cds)
+      for (auto *m : cd->getMethods()) {
+        if (m->getName() != names::kMethodInit)
+          continue;
+        std::string impl = cd->getName();
+        const auto &params = cd->getTypeParams();
+        for (size_t i = 0; i < params.size(); ++i)
+          (impl += i ? ", " : "<") += *params[i];
+        if (!params.empty())
+          impl += ">";
+        std::string msg = "'";
+        msg += names::kMethodInit;
+        msg += "' goes in an 'impl' block, not the class body: write 'impl ";
+        msg += impl;
+        msg += " { fn ";
+        msg += names::kMethodInit;
+        msg += "(...) { ... } }'";
+        error(m->getLocation(), msg);
+        ok = false;
+      }
+  return ok;
+}
+
 bool Sema::checkImplDecls(ast::TranslationUnit *tu) {
   StringSet localClasses;
   for (auto *cd : tu->getClassDecls())

@@ -1915,6 +1915,8 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
 
 bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   bool ok = rejectFreeViewFns(node);
+  if (!rejectBodyInits(node))
+    ok = false;
 
   // Traits by name first: no other declaration may take one's name.
   if (!declareTraits(node))
