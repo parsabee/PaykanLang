@@ -649,7 +649,7 @@ for that reason; the lowering is deterministic already.
 |---|---|---|---|---|
 | 0 | `void` | | 6 | `obj` |
 | 1 | `i64` | | 7 | `ptr` |
-| 2 | `f64` | | 8–11 | #96 inline optionals: `opt_i64`, `opt_f64`, `opt_bool`, `opt_char` (PIR 2); 12–15 reserved for further ones |
+| 2 | `f64` | | 8–11 | #96 inline optionals: `opt_i64`, `opt_f64`, `opt_bool`, `opt_char`; 12–15 reserved for further ones |
 | 3 | `bool` | | 16 | reserved: #99 `weak` |
 | 4 | `char` | | 17–255 | reserved |
 | 5 | `box` | | | |
@@ -683,7 +683,7 @@ InstrRec := u8 opcode ; uleb result id (0 = none) ; [type result type ; str resu
 | 22 | `vtable.load` | — | 1 |
 | 23 | `vtable.addr` | `str` class (`""` = operand form) | 0/1 |
 | 24, 25 | `load store` | `uleb` local | 0 / 1 |
-| 26–29 | `some none is_some unwrap` (#96, PIR 2) | — (the result type is the result's) | 1 / 0 / 1 / 1 |
+| 26–29 | `some none is_some unwrap` (#96) | — (the result type is the result's) | 1 / 0 / 1 / 1 |
 | 30, 31 | reserved #99 (`weak.load weak.store`) | | |
 | 32, 33 | reserved #170 (`global.load global.store`) | | |
 | 34 | `local.addr` | `uleb` local | 0 |
@@ -733,7 +733,7 @@ ClassRec
 ExternGlobalRec  str name ; u8 kind (0 obj, 1 vtable)        always $rt.
 CStrRec          str name ; bytes                            no NUL stored
 DataRec          str name ; uleb n ; n × sleb
-BytesRec         str name ; bytes                            tuple slot kinds; each byte ≤ 5 (5, an optional's presence word, since PIR 2), checked
+BytesRec         str name ; bytes                            tuple slot kinds; each byte ≤ 5 (5, an optional's presence word), checked
 SlotRec (#170)   str name ; u32 flags (bits0-1 linkage ; bit2 constant ; bit3 lazy ; bit4 singletonInstance #168) ; type ; [bit2] Operand init
 ClassObjRec (#160) str name ; str class ; uleb nTypeArgs ; nTypeArgs × str
 ```

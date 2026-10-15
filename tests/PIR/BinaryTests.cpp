@@ -450,11 +450,10 @@ TEST(PIRBinary, RejectsBadHeaders) {
     b[at] = value;
     return b;
   };
-  EXPECT_FALSE(binary::decode(patched(0, 'X')).isOk()); // magic
-  EXPECT_FALSE(binary::decode(patched(4, 2)).isOk());   // major
-  EXPECT_FALSE(
-      binary::decode(patched(8, kPIRVersion + 1)).isOk()); // PIR version
-  EXPECT_FALSE(binary::decode(patched(13, 0x80)).isOk());  // reserved flag
+  EXPECT_FALSE(binary::decode(patched(0, 'X')).isOk());   // magic
+  EXPECT_FALSE(binary::decode(patched(4, 2)).isOk());     // major
+  EXPECT_FALSE(binary::decode(patched(8, 2)).isOk());     // PIR version
+  EXPECT_FALSE(binary::decode(patched(13, 0x80)).isOk()); // reserved flag
   EXPECT_FALSE(binary::decode(patched(good.size() - 1, 'X')).isOk()); // trailer
   EXPECT_TRUE(binary::decode(patched(6, 7)).isOk()); // a later minor is fine
   std::vector<uint8_t> tail = good;
@@ -643,8 +642,8 @@ TEST(PIRBinary, ByteFlipFuzz) {
 }
 
 TEST(PIRBinary, TupleSlotKindsUpToTheOptionalsPresenceWord) {
-  // 0-4 are the value and reference kinds, 5 an optional's presence word
-  // (PIR 2); nothing above it is a kind.
+  // 0-4 are the value and reference kinds, 5 an optional's presence word;
+  // nothing above it is a kind.
   for (uint8_t kind : {5, 6}) {
     Module m;
     m.Name = "k";
