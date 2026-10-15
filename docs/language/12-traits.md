@@ -32,8 +32,11 @@ trait Same { view fn same(other: view Self) -> bool; }
 
 class A {
   n: int;
-  fn __init__(n: int) { self.n = n; }
   view fn name() -> Str { return "A" + Str(self.n); }   // meets Named's requirement
+}
+
+impl A {
+  fn __init__(n: int) { self.n = n; }
 }
 
 impl Named for A {}
@@ -62,6 +65,9 @@ fn show<T: Show>(x: view T) -> Str { return x.toString(); }   // show(42), show(
 
 class Holder<T: Named> {
   v: T;
+}
+
+impl Holder<T> {
   fn __init__(v: T) { self.v = v; }
 }
 

@@ -222,16 +222,18 @@ class Task {
   done: bool;
   priority: Priority;
 
-  fn __init__(title: Str, priority: Priority) {
-    self.title = title;
-    self.done = False;
-    self.priority = priority;
-  }
-
   view fn toString() -> Str {
     box = if self.done then "[x] " else "[ ] ";
     marker = if self.priority == Priority::High then " !" else "";
     return box + self.title + marker;
+  }
+}
+
+impl Task {
+  fn __init__(title: Str, priority: Priority) {
+    self.title = title;
+    self.done = False;
+    self.priority = priority;
   }
 }
 ```
@@ -276,8 +278,6 @@ import tasks::task;
 class TaskList {
   tasks: task::Task[];
 
-  fn __init__() { self.tasks = []; }
-
   fn add(title: Str, priority: task::Priority) {
     self.tasks.push(task::Task(title, priority));
   }
@@ -308,6 +308,10 @@ class TaskList {
     }
     println(Str(self.pending()) + " of " + Str(self.tasks.len()) + " to do");
   }
+}
+
+impl TaskList {
+  fn __init__() { self.tasks = []; }
 }
 ```
 

@@ -32,17 +32,23 @@ bounds (`<T: Show>`) are in `12-traits.md`; variance is not supported in v0.1.
 ```pkn
 class Box<T> {
   v: T;
-  fn __init__(v: T) { self.v = v; }
   fn get() -> T      { return self.v; }
   fn set(v: T)       { self.v = v; }
+}
+
+impl Box<T> {
+  fn __init__(v: T) { self.v = v; }
 }
 
 class Pair<K, V> {
   k: K;
   v: V;
-  fn __init__(k: K, v: V) { self.k = k; self.v = v; }
   fn key() -> K   { return self.k; }
   fn value() -> V { return self.v; }
+}
+
+impl Pair<K, V> {
+  fn __init__(k: K, v: V) { self.k = k; self.v = v; }
 }
 ```
 
@@ -107,8 +113,11 @@ ba: Box<int[]> = Box<int[]>([1, 2]);            // instantiation of an array
 
 class Holder {
   b: Box<int>;                         // field
-  fn __init__() { self.b = Box<int>(1); }
   fn get() -> Box<int> { return self.b; }        // return type
+}
+
+impl Holder {
+  fn __init__() { self.b = Box<int>(1); }
 }
 
 fn take(b: Box<Str>) -> int { … }      // parameter
@@ -172,8 +181,11 @@ Tuples and optionals work inside templates and as type arguments:
 ```pkn
 class Pair<A, B> {
   p: (A, B);
-  fn __init__(a: A, b: B) { self.p = (a, b); }
   fn swap() -> (B, A) { return (self.p.1, self.p.0); }
+}
+
+impl Pair<A, B> {
+  fn __init__(a: A, b: B) { self.p = (a, b); }
 }
 fn orElse<T>(x: T?, d: T) -> T {
   match x {
@@ -231,9 +243,12 @@ own templates (`gen::Box<T>`).
 import lib::util;
 class Box<T> {
   v: T;
-  fn __init__(v: T) { self.v = v; }
   view fn get() -> view T { return self.v; }
   view fn tag() -> Str { return util::bracket(Str(__serial())); }
+}
+
+impl Box<T> {
+  fn __init__(v: T) { self.v = v; }
 }
 fn __serial() -> int { return 7; }
 fn mk() -> Box<int> { return Box<int>(41); }
