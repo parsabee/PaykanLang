@@ -139,10 +139,12 @@ TEST(Class, RemovedConversionNamesAreFree) {
 
 // The boxed primitive classes removed by #96 no longer reserve their names.
 TEST(Class, RemovedBoxedClassNamesAreFree) {
-  auto r = semaCheck(
-      withClasses("class Int { v: int; fn __init__(x: int) { self.v = x; } }\n"
-                  "class Char { fn __init__() {} }",
-                  "i: Int = Int(3); n: int = i.v; return 0;"));
+  auto r =
+      semaCheck(withClasses("class Int { v: int; }\n"
+                            "impl Int { fn __init__(x: int) { self.v = x; } }\n"
+                            "class Char {}\n"
+                            "impl Char { fn __init__() {} }",
+                            "i: Int = Int(3); n: int = i.v; return 0;"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
