@@ -41,15 +41,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every time (a `.pkm` does not hold templates yet).  Instantiating both this module's `Box<Str>` and an imported
   template's is an error (`conflicts with another template's instantiation of the same
   name`).
+- Runtime functions for the standard library's `memory::Buffer<T>`: `PaykanBuffer_new`,
+  `_len`, `_get`, `_copy`, `_set`, `_reserve`, `_grow` and `_shrink` (`Runtime.h`,
+  "Buffer"), generic native functions over a `PaykanBuffer` of values of any size, laid
+  out by their `PaykanType`.  New values are all zero bytes (0, False or None); the
+  buffer retains the references it holds and releases them when they are overwritten,
+  shrunk away or destroyed; growing at least doubles the allocation and shrinking to a
+  quarter of it halves it.  An index out of bounds, a negative count, shrinking by more
+  than the length and reading a never-set reference that may not be None panic (`buffer
+  index 3 out of bounds (len=3)`).
 - Generic native functions (docs/language/02-functions-and-calling.md, "Generic native
   functions"): `native fn pick<T>(first: bool, a: T, b: T) -> T = "c_pick";`.  Each
   instance calls the same C function with a `PaykanType` for each type argument first
   (`Runtime.h`: the type's size, alignment, kind and reference offsets), and passes what
   the function types `T` by address (a `-> T` result through a `void *out`), so a value
   of any type and size crosses into C; `PaykanType_copy` and `PaykanType_drop` copy and
-  release one.  A native function's parameters can be `view`, and its result a `view` of
-  one (`returns a 'view' but has no 'view' parameter for it to be part of`); `inout` is
-  still rejected.  In the AST interchange format a generic native function has its
+  release one.  In the AST interchange format a generic native function has its
   `(type-params ...)` like any other.  See `samples/imports/15_native_generic`.
 - Borrowed results (docs/language/02-functions-and-calling.md, "Borrowed results"): a
   function or method declared `-> view T` returns a borrow of part of `self` or of a
@@ -173,6 +180,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A native function's parameters are borrowed (docs/language/02-functions-and-calling.md,
+  "Native Functions"): only `int`, `float`, `bool` and `char` cross into C by value; any
+  other parameter is a `view`, which C borrows, or an `inout`, which C changes in place
+  (`parameter 's' must be 'view' or 'inout' ('s: view Str'); only int, float, bool and char
+  cross into C by value`).  An `inout` argument is the caller's variable: `int64_t *`, ...,
+  `PaykanShared **` for a `Str` or `Obj`, and for a generic instance's `inout T` the
+  value's own address.  The result can be a `view` of a `view` or `inout` parameter.  A
+  call in the declaring module calls the C function directly with the caller's own
+  references, so it does no reference counting.
 - What a call passes to an `inout` parameter shares no storage with anything else the
   call borrows (docs/language/02-functions-and-calling.md, "Exclusivity"): not only another
   `inout` argument, but a `view` argument and the receiver of a method that may change
