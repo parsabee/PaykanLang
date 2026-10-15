@@ -1,6 +1,9 @@
 // ERROR: a generic class must be given type arguments in a type position.
 class Box<T> {
   v: T;
+}
+
+impl Box<T> {
   fn __init__(v: T) { self.v = v; }
 }
 

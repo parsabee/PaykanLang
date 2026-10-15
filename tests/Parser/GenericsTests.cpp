@@ -15,8 +15,11 @@ TEST(Generics, GenericClassDecl) {
   auto [ok, driver] = parse(R"(
     class Box<T> {
       v: T;
-      fn __init__(v: T) { self.v = v; }
       fn get() -> T { return self.v; }
+    }
+
+    impl Box<T> {
+      fn __init__(v: T) { self.v = v; }
     }
     fn main() -> int { return 0; }
   )");
