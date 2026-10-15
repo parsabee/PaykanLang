@@ -577,11 +577,12 @@ PaykanObject *PaykanShared_get(PaykanShared *shared);
 // An instance of a generic `native fn` (`native fn get<T>(b: view Obj, i: int)
 // -> view T = "..."`, docs/language/02-functions-and-calling.md) receives a
 // PaykanType for each type argument, in order, ahead of its arguments.  A
-// parameter typed by a type parameter (`x: T`, `x: view T`) crosses by
-// address, as a `const void *` C borrows for the call.  A `-> T` result is
-// written to a `void *out` passed after the PaykanTypes, a `-> view T` result
-// is returned as a `const void *` into a `view` argument.  Every other
-// parameter and result crosses as it does for a non-generic native function.
+// parameter typed by a type parameter crosses by address: a `view T` as a
+// `const void *` C borrows for the call, an `inout T` as a `void *` C may
+// change in place.  A `-> T` result is written to a `void *out` passed after
+// the PaykanTypes, a `-> view T` result is returned as a `const void *` into
+// a `view` or `inout` argument.  Every other parameter and result crosses as
+// it does for a non-generic native function.
 //
 // A PaykanType describes a value of the type as it is stored: its size and
 // alignment, its kind, and where it holds references (PaykanShared* boxes),

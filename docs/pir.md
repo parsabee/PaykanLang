@@ -135,14 +135,16 @@ literals still call `@$rt.PaykanString_new`.  The verifier enforces both
 directions (§9).
 
 **Native names.**  The C function a `native fn` calls (#198) is a module-less
-extern named `$c.<C symbol>`: `native fn put(fd: int, s: Str) -> int =
+extern named `$c.<C symbol>`: `native fn put(fd: int, s: view Str) -> int =
 "pk_put"` declares `extern fn @$c.pk_put(i64, obj) -> i64`.  Its signature is
 not the runtime's, so backends declare it from the PIR signature (C:
 `int64_t pk_put(int64_t, PaykanObject *);`) and link it by the name without
-`$c.` (`pir::externCSymbol`).  The `native fn` itself is an ordinary function
-`@put` whose body unboxes each reference parameter (borrowed by the C call),
-calls `@$c.pk_put`, releases its parameters and returns the result; a
-reference result is the C function's owned box.  The objects that define the
+`$c.` (`pir::externCSymbol`).  A call in the declaring module calls
+`@$c.pk_put` itself, with the caller's own references unboxed (and an
+`inout` argument's address).  The `native fn` is also an ordinary function
+`@put`, for other modules' callers, whose body does the same with its
+parameters, releases them and returns the result; a reference result is the
+C function's owned box.  The objects that define the
 `$c.` symbols are not part of PIR: the driver hands them to the backends
 (`backend::Input::Objects`, `--object`).
 
