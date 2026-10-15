@@ -187,6 +187,8 @@ private:
   void implDecl(const ImplDecl &d) {
     open("impl", &d);
     str(d.getTypeName());
+    if (!d.getTypeParams().empty())
+      typeParams(d.getTypeParams());
     if (d.getTrait()) {
       open("for");
       type(d.getTrait());

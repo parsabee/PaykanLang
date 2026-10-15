@@ -77,9 +77,10 @@ TEST(Trait, MalformedDeclarationsAreRejected) {
            "trait S<T: Show> { fn f(); }", // a bound on its own
            "trait S { fn f(); ",           // unclosed
            "impl Show for { }",            // no type after for
-           "impl Show for Box<T> { }",     // generic, not yet
-           "fn f<T: >(x: T) {}",           // an empty bound
-           "fn f<T: Show +>(x: T) {}",     // a dangling '+'
+           "impl Show for Box<int> { }",   // a type, not a parameter
+           "impl Show for Box? { }",
+           "fn f<T: >(x: T) {}",       // an empty bound
+           "fn f<T: Show +>(x: T) {}", // a dangling '+'
        }) {
     auto [ok, _] = parse(std::string(src) + "\nfn main() -> int { return 0; }");
     EXPECT_FALSE(ok) << src;

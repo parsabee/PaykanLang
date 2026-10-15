@@ -738,30 +738,45 @@ ImplDecl *Parser::parseImplDecl() {
   }
   // `impl Show for A`: the trait (`Into<int>`, `fmt::Show`) comes first.
   Type *trait = nullptr;
-  std::string typeName;
-  Type *first = parseTypeAnnotation();
-  if (!first)
+  Type *target = parseTypeAnnotation();
+  if (!target)
     return nullptr;
+  const char *after = "after 'impl'";
   if (at(Tok::Ident) && cur().Text == "for") {
     consume();
-    trait = first;
+    trait = target;
+    after = "after 'for'";
     if (!at(Tok::Ident)) {
       errorAtCurrent("expected a type name after 'for'");
       return nullptr;
     }
-    if (!parseModulePath(typeName))
+    target = parseTypeAnnotation();
+    if (!target)
       return nullptr;
-  } else if (auto *named = dyn_cast<ClassType>(first)) {
-    typeName = named->getName();
-  } else {
-    error(first->getLocation(),
-          isa<GenericType>(first)
-              ? "an 'impl' block for a generic type is not supported yet"
-              : "expected a type name after 'impl'");
-    return nullptr;
   }
-  if (at(Tok::Less)) {
-    errorAtCurrent("an 'impl' block for a generic type is not supported yet");
+  // The type by its name; a generic one (`Box<T>`) names its parameters.
+  // A built-in type is Sema's to reject.
+  std::string typeName;
+  std::vector<const std::string *> typeParams;
+  if (auto *named = dyn_cast<ClassType>(target)) {
+    typeName = named->getName();
+  } else if (isa<BuiltinType>(target)) {
+    typeName = ast::typeName(target);
+  } else if (auto *generic = dyn_cast<GenericType>(target)) {
+    typeName = generic->getName();
+    for (Type *arg : generic->getArgs()) {
+      auto *param = dyn_cast<ClassType>(arg);
+      if (!param || Ctx.lookupType(param->getName()) ||
+          param->getName().find("::") != std::string::npos) {
+        error(arg->getLocation(), "expected a type parameter name in 'impl " +
+                                      typeName + "<...>', not the type '" +
+                                      ast::typeName(arg) + "'");
+        return nullptr;
+      }
+      typeParams.push_back(&intern(param->getName()));
+    }
+  } else {
+    error(target->getLocation(), std::string("expected a type name ") + after);
     return nullptr;
   }
 
@@ -798,7 +813,7 @@ ImplDecl *Parser::parseImplDecl() {
   if (!expectCloseBrace("to close the impl block", open) || !ok)
     return nullptr;
   return Ctx.make<ImplDecl>(span(start), intern(typeName), std::move(methods),
-                            trait);
+                            trait, std::move(typeParams));
 }
 
 // traitDecl ::= "trait" IDENT ( "<" typeParamList ">" )? "{" traitMember* "}"

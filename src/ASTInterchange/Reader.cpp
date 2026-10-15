@@ -526,6 +526,17 @@ private:
     const std::string *typeName = f.string("the type's name");
     if (!typeName)
       return nullptr;
+    // `impl Box<T>`: (type-params NAME...) after the type's name.
+    std::vector<const std::string *> params;
+    if (const SExpr *tl = f.optionalList("type-params")) {
+      for (const SExpr &item : tl->Items) {
+        if (item.K != SExpr::String || item.Text.empty())
+          return fail(item, "expected a type parameter name"), nullptr;
+        params.push_back(&intern(item.Text));
+      }
+      if (params.empty())
+        return fail(*tl, "(type-params) of an impl needs a name"), nullptr;
+    }
     // `impl Show for A`: (for TRAIT) after the type's name.
     Type *trait = nullptr;
     if (const SExpr *fl = f.optionalList("for")) {
@@ -537,7 +548,8 @@ private:
     std::vector<FuncDecl *> methods;
     if (!methodList(f, methods, /*requirements=*/false) || !f.done())
       return nullptr;
-    return Ctx.make<ImplDecl>(loc, *typeName, std::move(methods), trait);
+    return Ctx.make<ImplDecl>(loc, *typeName, std::move(methods), trait,
+                              std::move(params));
   }
 
   TraitDecl *traitDecl(const SExpr &e) {

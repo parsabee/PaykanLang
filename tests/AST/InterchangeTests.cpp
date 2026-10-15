@@ -773,19 +773,26 @@ TEST(Interchange, ImplBlockRoundTrips) {
                            "impl A {\n"
                            "  view fn read() -> int { return self.n; }\n"
                            "  static fn make() -> A { return A(); }\n"
-                           "}\n";
+                           "}\n"
+                           "impl Show for Pair<K, V> {}\n";
   }
   ASSERT_EQ(driver.parseFile(path.string()), 0);
   std::filesystem::remove(path);
   std::string text = write(*driver.getRoot());
-  EXPECT_NE(text.find("(impl @2:1-5:2 \"A\""), std::string::npos) << text;
+  EXPECT_NE(text.find("(impl @2:1-5:2 \"A\"\n      (methods"),
+            std::string::npos)
+      << text;
   EXPECT_NE(text.find("(qual static)"), std::string::npos) << text;
+  EXPECT_NE(text.find("\"Pair\"\n      (type-params \"K\" \"V\")\n      (for"),
+            std::string::npos)
+      << text;
   ast::ASTContext ctx;
   std::string error;
   ast::TranslationUnit *back = read(text, ctx, error);
   ASSERT_NE(back, nullptr) << error;
-  ASSERT_EQ(back->getImplDecls().size(), 1u);
+  ASSERT_EQ(back->getImplDecls().size(), 2u);
   EXPECT_TRUE(back->getImplDecls()[0]->getMethods()[1]->isStatic());
+  EXPECT_EQ(back->getImplDecls()[1]->getTypeParams().size(), 2u);
   EXPECT_EQ(dump(back), dump(driver.getRoot()));
   EXPECT_EQ(write(*back), text);
 }

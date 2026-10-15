@@ -595,7 +595,7 @@ bool Sema::checkImplDecls(ast::TranslationUnit *tu) {
             "yet";
     else if (Ctx.lookupEnumType(name))
       why = "an 'impl' block for an enum is not supported yet";
-    else if (ClassTemplates.count(name))
+    else if (ClassTemplates.count(name) || !im->getTypeParams().empty())
       why = "an 'impl' block for a generic class is not supported yet";
     else if (!ct && !isFailedImportUse(name))
       why = "'impl' for undefined class '" + name + "'";
