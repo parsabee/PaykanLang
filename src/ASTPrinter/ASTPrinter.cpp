@@ -575,7 +575,9 @@ void ASTPrinter::visitImplDecl(ImplDecl *node) {
   header("ImplDecl", node);
   if (node->getTrait())
     OS << " '" << typeName(node->getTrait()) << "' for";
-  OS << " '" << node->getTypeName() << "'\n";
+  OS << " '" << node->getTypeName() << "'";
+  printTypeParams(OS, node->getTypeParams());
+  OS << "\n";
   const auto &methods = node->getMethods();
   for (size_t i = 0; i < methods.size(); ++i) {
     ChildScope cs(*this, i + 1 == methods.size());

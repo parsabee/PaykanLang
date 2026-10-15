@@ -148,7 +148,7 @@ traitMember ::= "view"? "fn" IDENT "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )? ";"
 
 implDecl    ::= "impl" ( typeAnnotation "for" )? modulePath
-                "{" implMember* "}"
+                ( "<" IDENT ( "," IDENT )* ">" )? "{" implMember* "}"
 implMember  ::= funcDecl | "static" "fn" IDENT "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )? block
 
@@ -168,6 +168,7 @@ instantiates); the superclass of a generic class is a plain class name.
 A type parameter's bounds (`T: Show + Into<int>`) name the traits its type
 argument must implement.  `impl Show for A` implements trait `Show` for `A`;
 `for` is not a keyword, only a word the `impl` declaration expects there.
+The `impl` block of a generic type names its type parameters: `impl Box<T>`.
 A trait's methods are signatures that end with `;`.
 Methods are `funcDecl`s inside a class body.  `view fn` marks a method that
 does not change `self` ([language/04-classes.md](language/04-classes.md));

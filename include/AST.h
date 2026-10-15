@@ -1527,16 +1527,23 @@ class ImplDecl : public Decl {
   const std::string *TypeName; // interned
   std::vector<FuncDecl *> Methods;
   Type *Trait;
+  std::vector<const std::string *> TypeParams; // `impl Box<T>`
 
 public:
   ImplDecl(SourceLocation loc, const std::string &internedTypeName,
-           std::vector<FuncDecl *> methods, Type *trait = nullptr)
+           std::vector<FuncDecl *> methods, Type *trait = nullptr,
+           std::vector<const std::string *> typeParams = {})
       : Decl(NK_ImplDecl, loc), TypeName(&internedTypeName),
-        Methods(std::move(methods)), Trait(trait) {}
+        Methods(std::move(methods)), Trait(trait),
+        TypeParams(std::move(typeParams)) {}
 
   const std::string &getTypeName() const { return *TypeName; }
   const std::vector<FuncDecl *> &getMethods() const { return Methods; }
   Type *getTrait() const { return Trait; }
+  /// The generic type's parameters, by the names the block gives them.
+  const std::vector<const std::string *> &getTypeParams() const {
+    return TypeParams;
+  }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_ImplDecl; }
 };
