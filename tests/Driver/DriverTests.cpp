@@ -1062,7 +1062,8 @@ TEST(Driver, EmitCEmitsBitCastHelpersWhenUsed) {
 // A `native fn`'s C symbol is prototyped from its PIR signature (#198).
 TEST(Driver, EmitCPrototypesNativeFunctions) {
   REQUIRE_BACKEND();
-  auto src = writeTmp("native fn put(fd: int, s: Str) -> int = \"pk_put\";"
+  auto src = writeTmp("native fn put(fd: int, s: view Str) -> int = "
+                      "\"pk_put\";"
                       "native fn get() -> Str? = \"pk_get\";"
                       "fn main() -> int { s = get(); return put(1, \"x\"); }");
   auto [rc, out] = run(std::string(kPaykan) + " --emit-c " + src + " 2>&1");
