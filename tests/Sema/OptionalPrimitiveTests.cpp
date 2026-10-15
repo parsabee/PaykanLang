@@ -120,7 +120,8 @@ TEST(OptionalPrimitive, ViewIsNotConvertedToAnOptional) {
               "'v' is a 'view' parameter; a 'view' is not converted, and 'o' "
               "is a 'view int?'");
   expectError(R"(
-    class N { fn __init__() { } }
+    class N {}
+    impl N { fn __init__() { } }
     fn take(o: view N?) { }
     fn pass(n: view N) { take(n); }
     fn main() -> int { return 0; }

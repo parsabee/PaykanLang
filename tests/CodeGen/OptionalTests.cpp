@@ -346,7 +346,8 @@ TEST(Optional, MethodWithOptionalParamAndReturn) {
 TEST(Optional, PrintingAReferenceOptional) {
   LeakGuard g;
   auto r = compileAndRun(R"pkn(
-    class H { s: Str?; fn __init__() { } }
+    class H { s: Str?; }
+    impl H { fn __init__() { } }
     fn make(c: bool) -> Str? { return if c then "one" else None; }
     fn main() -> int {
       a: Str? = None;

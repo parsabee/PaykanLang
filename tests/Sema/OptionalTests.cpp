@@ -99,7 +99,8 @@ TEST(Optional, OptionalIsNotAnObj) {
                   "fn main() -> int { return 0; }\n",
               msg);
   expectError(std::string(kNodeClass) +
-                  "class H { o: Obj; fn __init__() { self.o = None; } }\n"
+                  "class H { o: Obj; }\n"
+                  "impl H { fn __init__() { self.o = None; } }\n"
                   "fn main() -> int { h = H(); n: Node? = None; h.o = n; "
                   "return 0; }\n",
               msg);
