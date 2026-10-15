@@ -925,9 +925,15 @@ Sema::exportTemplates(ast::TranslationUnit *tu, const std::string &canonical) {
   };
   Names names(*this, *mt, types, generics, callees);
   ast::ASTCloner cloner(Ctx, {}, &names);
-  for (auto *cd : tu->getGenericClassDecls())
-    if (ClassTemplates.count(cd->getName())) // not rejected
-      mt->Classes.push_back(cloner.cloneTemplate(cd));
+  for (auto *cd : tu->getGenericClassDecls()) {
+    if (!ClassTemplates.count(cd->getName())) // rejected
+      continue;
+    mt->Classes.push_back(cloner.cloneTemplate(cd));
+    if (auto it = TemplateImpls.find(cd); it != TemplateImpls.end())
+      for (auto *im : it->second)
+        if (!im->getTrait())
+          mt->Impls[mt->Classes.back()].push_back(cloner.cloneTemplate(im));
+  }
   for (auto *fn : tu->getGenericFuncDecls())
     if (FuncTemplates.count(fn->getName()))
       mt->Functions.push_back(cloner.cloneTemplate(fn));
@@ -974,6 +980,8 @@ bool Sema::injectTemplates(const ModuleInfo &info, const std::string &qualifier,
   }
   for (auto *cd : mt.Classes)
     ForeignTemplates[cd] = &mt;
+  for (const auto &[cd, impls] : mt.Impls)
+    TemplateImpls[cd] = impls;
   for (auto *fn : mt.Functions)
     ForeignTemplates[fn] = &mt;
   return ok;

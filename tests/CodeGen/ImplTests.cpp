@@ -55,6 +55,42 @@ TEST(Impl, MethodsStaticFnsAndSubclasses) {
   guard.expectNoLeaks("impl methods");
 }
 
+// A generic class's `impl` blocks give each instantiation their methods and
+// traits, also one made for a field type.
+TEST(Impl, GenericBlocks) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"pkn(
+    class Box<T> {
+      v: T;
+      fn __init__(v: T) { self.v = v; }
+      view fn describe() -> Str { return "Box"; }
+    }
+    impl Box<U> {
+      view fn get() -> view U { return self.v; }
+      fn set(v: U) { self.v = v; }
+    }
+    trait Named { view fn name() -> Str; }
+    impl Named for Box<T> {
+      view fn name() -> Str {
+        return self.describe() + "(" + self.get().toString() + ")";
+      }
+    }
+    fn label<T: Named>(x: view T) -> Str { return x.name(); }
+    class Holder { b: Box<Str>; fn __init__() { self.b = Box("s"); } }
+    fn main() -> int {
+      b = Box(1);
+      b.set(b.get() + 1);
+      h = Holder();
+      h.b.set("t");
+      println(label(b) + " " + label(h.b));
+      return 0;
+    }
+  )pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "Box(2) Box(t)\n");
+  guard.expectNoLeaks("generic impl blocks");
+}
+
 // An importer calls the `impl` methods of a class of another module, also
 // on its own subclass of it, and its `static fn`s as `mod::Type::name()`.
 TEST(Impl, AcrossModules) {
@@ -95,5 +131,39 @@ fn main() -> int {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "a 3 x\n");
   guard.expectNoLeaks("impl across modules");
+  std::filesystem::remove_all(dir);
+}
+
+// A generic class's `impl` methods go with its template to an importer,
+// which instantiates them, and come with the module's own instantiations.
+TEST(Impl, GenericBlocksAcrossModules) {
+  LeakGuard guard;
+  auto dir = tempDir() / "pkn_generic_impl_modules";
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  std::ofstream(dir / "gen.pkn") << R"(
+class Box<T> { v: T; fn __init__(v: T) { self.v = v; } }
+impl Box<T> {
+  view fn get() -> view T { return self.v; }
+  fn set(v: T) { self.v = __pick(v, self.v); }
+}
+fn __pick<T>(a: T, b: T) -> T { return a; }
+fn mk() -> Box<int> { return Box<int>(41); }
+)";
+  std::ofstream(dir / "main.pkn") << R"(
+import gen;
+fn main() -> int {
+  s = gen::Box("s");
+  s.set("t");
+  n = gen::mk();
+  n.set(n.get() + 1);
+  println(s.get() + " " + Str(n.get()));
+  return 0;
+}
+)";
+  auto r = compileAndRunFile((dir / "main.pkn").string());
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "t 42\n");
+  guard.expectNoLeaks("generic impl across modules");
   std::filesystem::remove_all(dir);
 }

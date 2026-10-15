@@ -469,6 +469,25 @@ ClassDecl *ASTCloner::cloneClassDecl(ClassDecl *cd,
       std::move(fields), std::move(methods));
 }
 
+ImplDecl *ASTCloner::cloneImplDecl(ImplDecl *im,
+                                   const std::string &newTypeName) {
+  std::vector<FuncDecl *> methods;
+  for (auto *m : im->getMethods())
+    methods.push_back(cloneFuncDecl(m, m->getName()));
+  return Ctx.make<ImplDecl>(im->getLocation(), in(newTypeName),
+                            std::move(methods), cloneType(im->getTrait()));
+}
+
+ImplDecl *ASTCloner::cloneTemplate(ImplDecl *im) {
+  ImplDecl *copy = cloneImplDecl(im, im->getTypeName());
+  std::vector<const std::string *> params;
+  for (auto *p : im->getTypeParams())
+    params.push_back(&in(*p));
+  return Ctx.make<ImplDecl>(copy->getLocation(), copy->getTypeName(),
+                            copy->getMethods(), copy->getTrait(),
+                            std::move(params));
+}
+
 FuncDecl *ASTCloner::cloneTemplate(FuncDecl *fn) {
   FuncDecl *copy = cloneFuncDecl(fn, fn->getName());
   std::vector<const std::string *> params;

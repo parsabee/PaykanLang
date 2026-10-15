@@ -1919,9 +1919,11 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   // Traits by name first: no other declaration may take one's name.
   if (!declareTraits(node))
     ok = false;
-  // `impl` blocks by their class, whose methods they join in checkClassDecls.
+  // `impl` blocks by their class, whose methods they join in checkClassDecls
+  // (a generic class's, in registerGenericTemplates, when instantiated).
   for (auto *im : node->getImplDecls())
-    ImplsByClass[im->getTypeName()].push_back(im);
+    if (im->getTypeParams().empty())
+      ImplsByClass[im->getTypeName()].push_back(im);
 
   // Register enum types first so that class fields, parameters, and variable
   // declarations can reference them by name during the passes that follow.

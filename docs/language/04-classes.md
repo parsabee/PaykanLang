@@ -180,8 +180,9 @@ fn main() -> int {
   a subclass cannot override an `impl` method.
 - The class body keeps fields, `__init__` and the virtual methods. `__init__` cannot go
   in an `impl` block.
-- An `impl` block can only add to a class of its own module; built-in types, enums and
-  generic classes cannot have one.
+- An `impl` block can only add to a class of its own module; built-in types and enums
+  cannot have one. A generic class's names its type parameters: `impl Box<T> { … }`
+  (see `11-generics.md`).
 
 ---
 
@@ -330,4 +331,4 @@ match a {
 | Multiple bases | More than one `:` clause |
 | `self` in parameter list | Writing `self` as an explicit method parameter |
 | `impl` method name taken | An `impl` method or `static fn` has the name of a method of the class or a superclass, or a subclass declares one with an `impl` method's name |
-| `impl` for another type | The block names a built-in type, an enum, a generic class, or a class of another module |
+| `impl` for another type | The block names a built-in type, an enum, or a class of another module |
