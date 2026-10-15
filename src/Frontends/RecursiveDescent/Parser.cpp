@@ -309,6 +309,7 @@ void Parser::skipToTopLevelBoundary() {
     case Tok::KwNative:
     case Tok::KwClass:
     case Tok::KwEnum:
+    case Tok::KwImpl:
     case Tok::KwImport:
       if (depth == 0)
         return;
@@ -338,6 +339,7 @@ void Parser::skipToMemberBoundary() {
         return;
       break;
     case Tok::KwFn:
+    case Tok::KwStatic:
       if (depth == 0)
         return;
       break;
@@ -405,6 +407,7 @@ TranslationUnit *Parser::parseTranslationUnit() {
   std::vector<ClassDecl *> classes, genericClasses;
   std::vector<FuncDecl *> funcs, genericFuncs;
   std::vector<EnumDecl *> enums;
+  std::vector<ImplDecl *> impls;
   // The unit's location starts at 1:1 and ends with its last declaration;
   // an empty unit is <1:1-1:1>.
   SourceLocation loc(1, 1, 1, 1);
@@ -427,8 +430,8 @@ TranslationUnit *Parser::parseTranslationUnit() {
       break;
     case Tok::KwView:
       if (kind(1) != Tok::KwFn) {
-        errorAtCurrent("expected 'import', 'class', 'enum' or 'fn' at top "
-                       "level");
+        errorAtCurrent("expected 'import', 'class', 'enum', 'impl' or 'fn' at "
+                       "top level");
         ok = false;
         break;
       }
@@ -451,9 +454,20 @@ TranslationUnit *Parser::parseTranslationUnit() {
       else
         ok = false;
       break;
+    case Tok::KwImpl:
+      if (auto *d = parseImplDecl())
+        impls.push_back(d);
+      else
+        ok = false;
+      break;
+    case Tok::KwStatic:
+      errorAtCurrent("a 'static fn' goes in an 'impl' block: 'impl Name { "
+                     "static fn ... }'");
+      ok = false;
+      break;
     default:
-      errorAtCurrent(
-          "expected 'import', 'class', 'enum', 'fn' or 'native' at top level");
+      errorAtCurrent("expected 'import', 'class', 'enum', 'impl', 'fn' or "
+                     "'native' at top level");
       ok = false;
       break;
     }
@@ -466,9 +480,10 @@ TranslationUnit *Parser::parseTranslationUnit() {
     }
   }
 
-  return Ctx.make<TranslationUnit>(
-      loc, std::move(imports), std::move(classes), std::move(funcs),
-      std::move(enums), std::move(genericClasses), std::move(genericFuncs));
+  return Ctx.make<TranslationUnit>(loc, std::move(imports), std::move(classes),
+                                   std::move(funcs), std::move(enums),
+                                   std::move(genericClasses),
+                                   std::move(genericFuncs), std::move(impls));
 }
 
 // -- Imports
@@ -630,6 +645,10 @@ ClassDecl *Parser::parseClassDecl() {
           continue;
         }
       }
+    } else if (at(Tok::KwStatic)) {
+      errorAtCurrent("a 'static fn' goes in an 'impl' block, not the class "
+                     "body: 'impl " +
+                     std::string(name) + " { static fn ... }'");
     } else {
       errorAtCurrent("expected a field ('name: Type;') or a method ('fn') in "
                      "the class body");
@@ -672,6 +691,57 @@ EnumDecl *Parser::parseEnumDecl() {
   if (!expect(Tok::RBrace, "to close the enum body"))
     return nullptr;
   return Ctx.make<EnumDecl>(span(start), name, std::move(variants));
+}
+
+// implDecl ::= "impl" ( modulePath "::" )? IDENT "{" implMember* "}"
+// implMember ::= ( "view" | "static" )? "fn" ... block
+ImplDecl *Parser::parseImplDecl() {
+  SourceLocation start = consume().Loc; // "impl"
+  if (!at(Tok::Ident)) {
+    errorAtCurrent("expected a type name after 'impl'");
+    return nullptr;
+  }
+  std::string typeName;
+  if (!parseModulePath(typeName))
+    return nullptr;
+  if (at(Tok::Less)) {
+    errorAtCurrent("an 'impl' block for a generic type is not supported yet");
+    return nullptr;
+  }
+
+  SourceLocation open = cur().Loc;
+  if (!expect(Tok::LBrace, "to open the impl block"))
+    return nullptr;
+  if (!enterNesting())
+    return nullptr;
+
+  std::vector<FuncDecl *> methods;
+  bool ok = true;
+  while (!at(Tok::RBrace) && !at(Tok::Eof)) {
+    size_t before = Pos;
+    bool isStatic = accept(Tok::KwStatic);
+    if (isStatic && !at(Tok::KwFn)) {
+      errorAtCurrent("expected 'fn' after 'static' (a 'static fn' has no "
+                     "'self', so it is never a 'view fn')");
+    } else if (at(Tok::KwFn) || (at(Tok::KwView) && kind(1) == Tok::KwFn)) {
+      if (auto *m = parseFuncDecl()) {
+        m->setStatic(isStatic);
+        methods.push_back(m);
+        continue;
+      }
+    } else {
+      errorAtCurrent("expected a method ('fn', 'view fn' or 'static fn') in "
+                     "the impl block; fields go in the type's declaration");
+    }
+    ok = false;
+    if (Pos == before)
+      consume(); // guarantee progress
+    skipToMemberBoundary();
+  }
+  leaveNesting();
+  if (!expectCloseBrace("to close the impl block", open) || !ok)
+    return nullptr;
+  return Ctx.make<ImplDecl>(span(start), intern(typeName), std::move(methods));
 }
 
 // -- Functions

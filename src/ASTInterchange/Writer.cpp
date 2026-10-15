@@ -38,6 +38,8 @@ public:
       funcDecl(*d);
     for (auto *d : tu.getFuncDecls())
       funcDecl(*d);
+    for (auto *d : tu.getImplDecls())
+      implDecl(*d);
     close();
     OS << ")\n";
     return Error.empty();
@@ -169,6 +171,16 @@ private:
     close();
   }
 
+  void implDecl(const ImplDecl &d) {
+    open("impl", &d);
+    str(d.getTypeName());
+    open("methods");
+    for (const FuncDecl *m : d.getMethods())
+      funcDecl(*m);
+    close();
+    close();
+  }
+
   void funcDecl(const FuncDecl &d) {
     open("fn", &d);
     str(d.getName());
@@ -201,9 +213,9 @@ private:
     } else {
       fail("function '" + d.getName() + "' has no body");
     }
-    if (d.isView()) {
+    if (d.isView() || d.isStatic()) {
       open("qual");
-      sym("view");
+      sym(d.isView() ? "view" : "static");
       close();
     }
     close();

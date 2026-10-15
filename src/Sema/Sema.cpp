@@ -1879,6 +1879,11 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
 bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   bool ok = rejectFreeViewFns(node);
 
+  for (auto *im : node->getImplDecls()) {
+    error(im->getLocation(), "'impl' blocks are not supported yet");
+    ok = false;
+  }
+
   // Register enum types first so that class fields, parameters, and variable
   // declarations can reference them by name during the passes that follow.
   for (auto *ed : node->getEnumDecls())
@@ -1999,6 +2004,8 @@ bool Sema::checkEntryPoint(ast::TranslationUnit *tu,
 }
 
 // -- Declarations
+
+bool Sema::visitImplDecl(ast::ImplDecl *) { return true; }
 
 bool Sema::visitEnumDecl(ast::EnumDecl *node) {
   // Reject names that collide with a builtin, class, function, or existing

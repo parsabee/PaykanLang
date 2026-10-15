@@ -231,11 +231,11 @@ TEST(ASTInterchange, RejectsMalformedInput) {
        "1:13: not a 64-bit integer: 99999999999999999999"},
       {"(paykan-ast 1 (block))", "1:15: expected (unit ...)"},
       {"(paykan-ast 1 (unit \"x\"))",
-       "1:21: expected a declaration: (import ...), (enum ...), (class ...) "
-       "or (fn ...)"},
+       "1:21: expected a declaration: (import ...), (enum ...), (class ...), "
+       "(fn ...) or (impl ...)"},
       {"(paykan-ast 1 (unit (var \"x\" _ _)))",
        "1:21: (var ...) is not a top-level declaration (import, enum, class, "
-       "fn)"},
+       "fn, impl)"},
       {"(paykan-ast 1 (unit (import false \"\")))",
        "1:21: (import ...) names no module"},
       {"(paykan-ast 1 (unit (import maybe \"\")))",
@@ -731,3 +731,32 @@ TEST(ASTInterchange, WriteRefusesACheckedAST) {
 }
 
 } // namespace
+
+// An `impl` block (#216) is (impl "Type" (methods FN...)); a `static fn`
+// ends with (qual static), as a `view fn` ends with (qual view).
+TEST(Interchange, ImplBlockRoundTrips) {
+  parser::ParserDriver driver("recursive-descent");
+  auto path =
+      std::filesystem::temp_directory_path() /
+      ("paykan_interchange_impl_" + std::to_string(::getpid()) + ".pkn");
+  {
+    std::ofstream(path) << "class A { n: int; }\n"
+                           "impl A {\n"
+                           "  view fn read() -> int { return self.n; }\n"
+                           "  static fn make() -> A { return A(); }\n"
+                           "}\n";
+  }
+  ASSERT_EQ(driver.parseFile(path.string()), 0);
+  std::filesystem::remove(path);
+  std::string text = write(*driver.getRoot());
+  EXPECT_NE(text.find("(impl @2:1-5:2 \"A\""), std::string::npos) << text;
+  EXPECT_NE(text.find("(qual static)"), std::string::npos) << text;
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *back = read(text, ctx, error);
+  ASSERT_NE(back, nullptr) << error;
+  ASSERT_EQ(back->getImplDecls().size(), 1u);
+  EXPECT_TRUE(back->getImplDecls()[0]->getMethods()[1]->isStatic());
+  EXPECT_EQ(dump(back), dump(driver.getRoot()));
+  EXPECT_EQ(write(*back), text);
+}

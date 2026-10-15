@@ -431,6 +431,7 @@ FuncDecl *ASTCloner::cloneFuncDecl(FuncDecl *fn, const std::string &newName) {
       fn->getLocation(), in(newName), std::move(params),
       cloneType(fn->getReturnType()), cloneCompound(fn->getBody()));
   clone->setView(fn->isView());
+  clone->setStatic(fn->isStatic());
   clone->setResultMode(fn->getResultMode());
   if (fn->isNative())
     clone->setNativeSymbol(in(fn->getNativeSymbol()));
@@ -462,6 +463,7 @@ FuncDecl *ASTCloner::cloneTemplate(FuncDecl *fn) {
                                  copy->getParams(), copy->getReturnType(),
                                  copy->getBody(), std::move(params));
   out->setView(copy->isView());
+  out->setStatic(copy->isStatic());
   out->setResultMode(copy->getResultMode());
   if (copy->isNative())
     out->setNativeSymbol(copy->getNativeSymbol());

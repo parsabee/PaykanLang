@@ -44,6 +44,7 @@ class Type;
 // Forward declaration — EnumDecl is defined later (after TranslationUnit) but
 // referenced by TranslationUnit's member vector.
 class EnumDecl;
+class ImplDecl;
 
 // Base AST node with LLVM-style RTTI
 class ASTNode {
@@ -56,6 +57,7 @@ public:
     NK_ImportDecl,
     NK_ClassDecl,
     NK_EnumDecl,
+    NK_ImplDecl,
 
     // Statements
     NK_StmtBegin,
@@ -159,7 +161,7 @@ public:
   Decl(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_VarDecl && N->getKind() <= NK_EnumDecl;
+    return N->getKind() >= NK_VarDecl && N->getKind() <= NK_ImplDecl;
   }
 };
 
@@ -381,7 +383,8 @@ private:
   // The C symbol of a `native fn` (interned), which has no Body; nullptr for
   // an ordinary function (#198).
   const std::string *NativeSymbol = nullptr;
-  bool View = false; // `view fn`: a method that does not change `self`
+  bool View = false;   // `view fn`: a method that does not change `self`
+  bool Static = false; // `static fn`: an `impl` block's function, no `self`
   ParamMode ResultMode = ParamMode::Value; // `-> view T`
 
 public:
@@ -430,6 +433,10 @@ public:
   /// (docs/language/04-classes.md, "Methods that don't change self").
   bool isView() const { return View; }
   void setView(bool view) { View = view; }
+
+  /// Declared `static fn` in an `impl` block: called as `Type::name()`.
+  bool isStatic() const { return Static; }
+  void setStatic(bool isStatic) { Static = isStatic; }
 
   /// `-> view T` (or `-> inout T`): the result is a borrow of what the
   /// function was given as one; Value for a copy.
@@ -1262,6 +1269,7 @@ private:
   std::vector<EnumDecl *> EnumDecls;
   std::vector<ClassDecl *> GenericClassDecls;
   std::vector<FuncDecl *> GenericFuncDecls;
+  std::vector<ImplDecl *> ImplDecls;
 
 public:
   TranslationUnit(SourceLocation loc, std::vector<ImportDecl *> imports,
@@ -1269,12 +1277,14 @@ public:
                   std::vector<FuncDecl *> funcs,
                   std::vector<EnumDecl *> enums = {},
                   std::vector<ClassDecl *> genericClasses = {},
-                  std::vector<FuncDecl *> genericFuncs = {})
+                  std::vector<FuncDecl *> genericFuncs = {},
+                  std::vector<ImplDecl *> impls = {})
       : ASTNode(NK_TranslationUnit, loc), Imports(std::move(imports)),
         ClassDecls(std::move(classes)), FuncDecls(std::move(funcs)),
         EnumDecls(std::move(enums)),
         GenericClassDecls(std::move(genericClasses)),
-        GenericFuncDecls(std::move(genericFuncs)) {}
+        GenericFuncDecls(std::move(genericFuncs)), ImplDecls(std::move(impls)) {
+  }
 
   const std::vector<ImportDecl *> &getImports() const { return Imports; }
   const std::vector<ClassDecl *> &getClassDecls() const { return ClassDecls; }
@@ -1286,6 +1296,7 @@ public:
   const std::vector<FuncDecl *> &getGenericFuncDecls() const {
     return GenericFuncDecls;
   }
+  const std::vector<ImplDecl *> &getImplDecls() const { return ImplDecls; }
 
   /// Append an instantiated function (Sema).
   void addFuncDecl(FuncDecl *fn) { FuncDecls.push_back(fn); }
@@ -1471,6 +1482,25 @@ public:
   size_t getNumVariants() const { return Variants.size(); }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_EnumDecl; }
+};
+
+// `impl A { ... }` (#216): methods added to an existing type and dispatched
+// statically, and its `static fn`s.  TypeName is the type as written
+// (`A`, `geo::Point`).
+class ImplDecl : public Decl {
+  const std::string *TypeName; // interned
+  std::vector<FuncDecl *> Methods;
+
+public:
+  ImplDecl(SourceLocation loc, const std::string &internedTypeName,
+           std::vector<FuncDecl *> methods)
+      : Decl(NK_ImplDecl, loc), TypeName(&internedTypeName),
+        Methods(std::move(methods)) {}
+
+  const std::string &getTypeName() const { return *TypeName; }
+  const std::vector<FuncDecl *> &getMethods() const { return Methods; }
+
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_ImplDecl; }
 };
 
 // Array literal expression: [expr, expr, ...] or []

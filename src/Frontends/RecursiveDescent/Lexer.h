@@ -37,6 +37,8 @@ enum class Tok : uint8_t {
   KwMov,
   KwFn,
   KwNative,
+  KwImpl,
+  KwStatic,
   KwReturn,
   KwIf,
   KwThen,
