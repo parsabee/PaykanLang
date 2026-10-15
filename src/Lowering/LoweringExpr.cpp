@@ -691,6 +691,26 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
 
   std::vector<Val> args;
   std::vector<Val> keep;
+  // A native function of this module: C borrows what the caller holds.
+  if (const ast::FuncDecl *native = L.localNative(node->getCalleeName())) {
+    for (size_t i = 0; i < node->getNumArguments(); ++i) {
+      ast::Expr *arg = node->getArguments()[i];
+      Type paramTy = callee->Sig.Params[i];
+      Val v;
+      if (paramTy == Type::Ptr)
+        v = L.emitInoutArg(arg, keep);
+      else if (paramTy == Type::Box)
+        v = L.emitBorrowedBox(arg, keep);
+      else if (Val e = visit(arg))
+        v = L.coerceTo(e, paramTy);
+      if (!v)
+        return Val();
+      args.push_back(v);
+    }
+    Val result = L.emitNativeCall(*native, args);
+    L.releaseAfterCall(keep);
+    return result;
+  }
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     auto *arg = node->getArguments()[i];
     Type paramTy =
