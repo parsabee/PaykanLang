@@ -46,10 +46,7 @@ extern "C" {
 //       `<Class>..vtable`.
 //   v6: imported modules' symbols are prefixed with the canonical module
 //       name (`geometry::shapes::describe`), not the absolute file path.
-//   v7: optionals of value types are values, not boxes (#96): an `int?`
-//       parameter, result or field is a { value, presence } pair, and the
-//       parses `int<Str>` & co. are PaykanString_parse_int & co.
-#define PAYKAN_RUNTIME_ABI_VERSION 7
+#define PAYKAN_RUNTIME_ABI_VERSION 6
 
 // -- Target assumptions
 //
