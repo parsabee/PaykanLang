@@ -180,6 +180,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A class without an `__init__` gets the default one (docs/language/04-classes.md, "The
+  default `__init__`"): it takes the superclass constructor's arguments, then one per
+  field of the class, in order, so `class Point { x: int; y: int; }` is built as
+  `Point(1, 2)`, and `Box(3)` infers `Box<int>` from `class Box<T> { v: T; }`.
+  `Point()` no longer leaves the fields zero (a `Str` or object field was null):
+  `function 'Point' expects 2 argument(s), got 0 (it has no '__init__', so it takes
+  x: int, y: int)`. A subclass needs no `__init__` of its own when its superclass has
+  one. An `__init__` that a subclass writes calls `__super__(...)` first unless the
+  superclass's constructor is the default one of a class with no fields, as are its
+  superclasses'.
 - `__init__` goes in an `impl` block of its class (docs/language/04-classes.md, "`impl`
   Blocks"): `class A { fn __init__() { ... } }` is an error that says to write
   `impl A { fn __init__() { ... } }`. The class body holds the fields and the virtual

@@ -1,0 +1,18 @@
+// OK: a derived class without an __init__ gets the default one, which takes
+// the base __init__'s arguments and then its own fields.
+class Base {
+  val: int;
+}
+
+impl Base {
+  fn __init__(v: int) { self.val = v; }
+}
+
+class Derived : Base {
+  y: int;
+}
+
+fn main() -> int {
+  d = Derived(1, 2);   // Base's v, then y
+  return d.val + d.y;
+}

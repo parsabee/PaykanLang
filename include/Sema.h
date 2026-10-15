@@ -873,6 +873,19 @@ private:
   /// Phase 4 for the `impl` blocks of @p cd's class: their methods join it.
   bool populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct);
 
+  /// Give @p cd, which declares no `__init__`, the default one: it takes the
+  /// superclass constructor's arguments and then one per field of the class,
+  /// passes the former to `__super__` and stores each of the latter.
+  bool declareDefaultInit(ast::ClassDecl *cd, ast::ClassType *ct);
+
+  /// The constructor of @p ct does nothing: it is the default `__init__` of
+  /// a class with no fields, and so are its superclasses'.  An `__init__` of
+  /// a subclass need not call it.
+  bool doesNothing(const ast::ClassType *ct) const;
+
+  /// `x: int, s: Str`: the parameters of @p fn, for a diagnostic.
+  static std::string paramList(const ast::FuncDecl *fn);
+
   /// Reject an `__init__` in a class body: it goes in an `impl` block.
   bool rejectBodyInits(ast::TranslationUnit *tu);
 
@@ -1132,6 +1145,8 @@ private:
   /// populated (its vtable prefix must be complete).
   StringSet LocalClassNames;
   StringSet PopulatedClasses;
+  /// The default `__init__` of each class given one (declareDefaultInit).
+  StringMap<const ast::FuncDecl *> DefaultInits;
 
   /// A failed unification: type parameter @p Param was deduced as both
   /// @p First and @p Second.
