@@ -173,8 +173,11 @@ fn makeGrid(rows: int, cols: int) -> int[][] {
 class Point {
   x: int;
   y: int;
-  fn __init__(x: int, y: int) { self.x = x; self.y = y; }
   view fn toString() -> Str { return "(" + Str(self.x) + "," + Str<int>(self.y) + ")"; }
+}
+
+impl Point {
+  fn __init__(x: int, y: int) { self.x = x; self.y = y; }
 }
 
 pts: Point[] = [Point(0,0), Point(1,2), Point(-3,4)];

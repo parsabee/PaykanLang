@@ -224,8 +224,10 @@ TEST(Tuple, AssignableToObj) {
 
 TEST(Tuple, RefElementCovariance) {
   auto r = semaCheck(R"(
-    class A { fn __init__() {} }
-    class B : A { fn __init__() { __super__(); } }
+    class A {}
+    impl A { fn __init__() {} }
+    class B : A {}
+    impl B { fn __init__() { __super__(); } }
     fn main() -> int {
       t: (int, A) = (1, B());
       u: (int, Obj) = (1, "s");
@@ -325,9 +327,12 @@ TEST(Tuple, AsFieldParamReturnAndArrayElement) {
   auto r = semaCheck(R"(
     class Holder {
       pair: (int, Str);
-      fn __init__(p: (int, Str)) { self.pair = p; }
       fn first() -> int { return self.pair.0; }
       fn get() -> (int, Str) { return self.pair; }
+    }
+
+    impl Holder {
+      fn __init__(p: (int, Str)) { self.pair = p; }
     }
     fn swap(p: (int, Str)) -> (Str, int) { return (p.1, p.0); }
     fn main() -> int {
@@ -432,12 +437,16 @@ TEST(Tuple, ModuleRoundTripOfTupleSignatures) {
   auto tmp = (paykan::test::tempDir() / "pkn_ms_tuple").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "geo.pkn", R"(
-class Pt { x: int; y: int; fn __init__(x: int, y: int) { self.x = x; self.y = y; } }
+class Pt { x: int; y: int; }
+impl Pt { fn __init__(x: int, y: int) { self.x = x; self.y = y; } }
 class Bag {
   pair: (int, Str);
-  fn __init__() { self.pair = (1, "one"); }
   fn get() -> (int, Str) { return self.pair; }
   fn nested() -> (Pt, (int, Str)[]) { return (Pt(1, 2), [self.pair]); }
+}
+
+impl Bag {
+  fn __init__() { self.pair = (1, "one"); }
 }
 fn divmod(a: int, b: int) -> (int, int) { return (a / b, a % b); }
 fn pairs() -> (int, Str)[] { return [(1, "a")]; }

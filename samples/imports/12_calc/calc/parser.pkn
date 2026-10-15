@@ -39,12 +39,6 @@ class Parser {
   env: hashmap::HashMap;
   error: Str?;   // the first error, or None
 
-  fn __init__(s: Str, env: hashmap::HashMap) {
-    self.input = s;
-    self.pos = 0;
-    self.env = env;
-  }
-
   // Record the first error only; later errors are usually cascades.
   fn fail(msg: Str) {
     if (self.error == None) { self.error = msg; }
@@ -236,5 +230,13 @@ class Parser {
     self.skipWs();
     noName: Str? = None;
     return (noName, v);
+  }
+}
+
+impl Parser {
+  fn __init__(s: Str, env: hashmap::HashMap) {
+    self.input = s;
+    self.pos = 0;
+    self.env = env;
   }
 }

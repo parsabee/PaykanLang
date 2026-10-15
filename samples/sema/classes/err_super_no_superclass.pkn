@@ -1,5 +1,7 @@
 // ERROR: __super__ called in a class with no explicit superclass
-class A {
+class A {}
+
+impl A {
   fn __init__() {
     __super__();  // A has no explicit superclass
   }

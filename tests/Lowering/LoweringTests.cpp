@@ -365,8 +365,10 @@ TEST(Lowering, InoutParameterIsAPointer) {
 // right after it.
 TEST(Lowering, InoutFieldIsPassedByAddress) {
   auto l = lower(R"(
-    class Inner { n: int; fn __init__() { self.n = 0; } }
-    class Holder { inner: Inner; fn __init__() { self.inner = Inner(); } }
+    class Inner { n: int; }
+    impl Inner { fn __init__() { self.n = 0; } }
+    class Holder { inner: Inner; }
+    impl Holder { fn __init__() { self.inner = Inner(); } }
     fn bump(n: inout int) { n = n + 1; }
     fn main() -> int {
       i = Inner();
@@ -450,14 +452,20 @@ TEST(Lowering, ClassItemCarriesFlattenedLayoutAndVTable) {
   auto l = lower(R"(
     class Base {
       name: Str;
-      fn __init__(name: Str) { self.name = name; }
       fn describe() -> Str { return self.name; }
+    }
+
+    impl Base {
+      fn __init__(name: Str) { self.name = name; }
     }
     class Derived : Base {
       n: int;
-      fn __init__(name: Str, n: int) { __super__(name); self.n = n; }
       fn describe() -> Str { return "derived"; }
       fn extra() -> int { return self.n; }
+    }
+
+    impl Derived {
+      fn __init__(name: Str, n: int) { __super__(name); self.n = n; }
     }
     fn main() -> int { d = Derived("d", 1); return d.extra(); }
   )");
@@ -505,7 +513,8 @@ TEST(Lowering, ClassItemCarriesFlattenedLayoutAndVTable) {
 
 TEST(Lowering, FieldStoreRetainsNewAndReleasesOldValue) {
   auto l = lower(R"(
-    class H { s: Str; fn __init__() { self.s = "a"; } }
+    class H { s: Str; }
+    impl H { fn __init__() { self.s = "a"; } }
     fn main() -> int {
       h = H();
       x: Str = "b";
@@ -527,7 +536,8 @@ TEST(Lowering, FieldStoreRetainsNewAndReleasesOldValue) {
 
 TEST(Lowering, CallRootedFieldReadRetainsTheFieldAndReleasesTheReceiver) {
   auto l = lower(R"(
-    class H { s: Str; fn __init__() { self.s = "a"; } }
+    class H { s: Str; }
+    impl H { fn __init__() { self.s = "a"; } }
     fn mk() -> H { return H(); }
     fn main() -> int {
       t: Str = mk().s;
@@ -581,8 +591,10 @@ TEST(Lowering, StringLiteralMatchSubjectIsAStrReleasedOnEveryExit) {
 
 TEST(Lowering, ClassMatchComparesVTablesAndBindsAnOwnedVariable) {
   auto l = lower(R"(
-    class A { fn __init__() {} }
-    class B : A { fn __init__() { __super__(); } }
+    class A {}
+    impl A { fn __init__() {} }
+    class B : A {}
+    impl B { fn __init__() { __super__(); } }
     fn mk() -> A { return B(); }
     fn main() -> int {
       match mk() {
@@ -612,7 +624,8 @@ TEST(Lowering, ClassMatchComparesVTablesAndBindsAnOwnedVariable) {
 
 TEST(Lowering, MatchBindingOnAVariableSubjectAcquiresItsBox) {
   auto l = lower(R"(
-    class A { v: int; fn __init__(v: int) { self.v = v; } }
+    class A { v: int; }
+    impl A { fn __init__(v: int) { self.v = v; } }
     fn main() -> int {
       x: A = A(1);
       match x {
@@ -636,7 +649,8 @@ TEST(Lowering, MatchBindingOnAVariableSubjectAcquiresItsBox) {
 // the new one into the same slot, with no twin slot.
 TEST(Lowering, ReassigningAMatchBindingIsAnOrdinaryRebind) {
   auto l = lower(R"(
-    class A { v: int; fn __init__(v: int) { self.v = v; } }
+    class A { v: int; }
+    impl A { fn __init__(v: int) { self.v = v; } }
     fn main() -> int {
       o: A? = A(7);
       k: int = 0;
@@ -662,8 +676,10 @@ TEST(Lowering, ReassigningAMatchBindingIsAnOrdinaryRebind) {
 // still refers to: the binding holds its own reference.
 TEST(Lowering, ReassigningTheSubjectInsideAnArmKeepsTheBindingAlive) {
   auto l = lower(R"(
-    class A { fn __init__() {} fn name() -> Str { return "A"; } }
-    class B : A { fn __init__() { __super__(); } fn name() -> Str { return "B"; } }
+    class A { fn name() -> Str { return "A"; } }
+    impl A { fn __init__() {} }
+    class B : A { fn name() -> Str { return "B"; } }
+    impl B { fn __init__() { __super__(); } }
     fn main() -> int {
       x: A = B();
       match x {
@@ -686,7 +702,8 @@ TEST(Lowering, ReassigningTheSubjectInsideAnArmKeepsTheBindingAlive) {
 
 TEST(Lowering, OptionalMatchTestsNullBeforeTheVTable) {
   auto l = lower(R"(
-    class N { v: int; fn __init__(v: int) { self.v = v; } }
+    class N { v: int; }
+    impl N { fn __init__(v: int) { self.v = v; } }
     fn find(f: bool) -> N? { if (f) { return N(1); } return None; }
     fn main() -> int {
       match find(True) {
@@ -772,7 +789,8 @@ TEST(Lowering, AssigningAnObjectElementEvaluatesTheIndexOnce) {
   // Issue #52: `x = arr[idx()]` used to evaluate the subscript once for the
   // value and again for the ownership handling.
   auto l = lower(R"(
-    class C { v: int; fn __init__(v: int) { self.v = v; } }
+    class C { v: int; }
+    impl C { fn __init__(v: int) { self.v = v; } }
     fn idx() -> int { println("idx called"); return 0; }
     fn mk() -> C[] { return [C(3)]; }
     fn main() -> int {
@@ -801,8 +819,10 @@ TEST(Lowering, SideEffectingReceiversAreEvaluatedOnce) {
   // read, a call result assigned to a variable, an element passed to a ref
   // parameter and an element stored into an array slot or a field.
   auto l = lower(R"(
-    class C { v: int; fn __init__(v: int) { self.v = v; } }
-    class H { c: C; fn __init__(c: C) { self.c = c; } }
+    class C { v: int; }
+    impl C { fn __init__(v: int) { self.v = v; } }
+    class H { c: C; }
+    impl H { fn __init__(c: C) { self.c = c; } }
     fn idx() -> int { println("idx"); return 0; }
     fn mkh() -> H { return H(C(5)); }
     fn take(c: C) -> int { return c.v; }
@@ -865,7 +885,8 @@ TEST(Lowering, TupleLiteralUsesAKindsDescriptor) {
 
 TEST(Lowering, OptionalIntoObjSubstitutesTheNoneSingleton) {
   auto l = lower(R"(
-    class N { fn __init__() {} }
+    class N {}
+    impl N { fn __init__() {} }
     fn find() -> N? { return None; }
     fn main() -> int { o: Obj = find(); println(o); return 0; }
   )");
@@ -955,8 +976,9 @@ TEST(Lowering, ImportedFunctionsAndClassesAreExternItems) {
   std::filesystem::create_directories(dir);
   {
     std::ofstream lib(dir / "lib.pkn");
-    lib << "class Adder { n: int; fn __init__(n: int) { self.n = n; } "
+    lib << "class Adder { n: int; "
            "fn add(x: int) -> int { return self.n + x; } }\n"
+           "impl Adder { fn __init__(n: int) { self.n = n; } }\n"
            "fn twice(x: int) -> int { return x * 2; }\n";
   }
   auto l = lower("import lib;\n"
@@ -1000,7 +1022,8 @@ TEST(Lowering, ModulesAreNamedByTheirCanonicalModuleName) {
   std::filesystem::create_directories(dir / "b" / "c");
   std::ofstream(dir / "a" / "util.pkn") << "fn tag() -> int { return 1; }\n";
   std::ofstream(dir / "b" / "c" / "util.pkn")
-      << "class K { v: int; fn __init__() { self.v = 2; } }\n"
+      << "class K { v: int; }\n"
+         "impl K { fn __init__() { self.v = 2; } }\n"
          "fn tag() -> int { return 2; }\n";
   auto l = lower("import a::util; import b::c::util as bu;\n"
                  "import a::util as again;\n"
@@ -1037,8 +1060,9 @@ TEST(Lowering, ImportedInstantiationsAreEmittedOnce) {
              ("lowering_generic_imports_" + std::to_string(getpid()));
   std::filesystem::create_directories(dir / "lib");
   std::ofstream(dir / "lib" / "gen.pkn")
-      << "class Box<T> { v: T; fn __init__(v: T) { self.v = v; } "
+      << "class Box<T> { v: T; "
          "view fn n() -> int { return __h(); } }\n"
+         "impl Box<T> { fn __init__(v: T) { self.v = v; } }\n"
          "fn __h() -> int { return 1; }\n"
          "fn first<T>(xs: T[]) -> T { return xs[0]; }\n";
   for (const char *m : {"a", "b"})

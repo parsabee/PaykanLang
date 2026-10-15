@@ -96,6 +96,9 @@ before the objects become unreachable by setting one of the links to `None`:
 class Person {
   name: Str;
   friend: Person?;
+}
+
+impl Person {
   fn __init__(name: Str) { self.name = name; }
 }
 

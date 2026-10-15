@@ -2,6 +2,9 @@
 // function does not always return a value.
 class Node {
   v: int;
+}
+
+impl Node {
   fn __init__(x: int) { self.v = x; }
 }
 

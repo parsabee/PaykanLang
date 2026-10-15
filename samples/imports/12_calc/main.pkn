@@ -89,12 +89,6 @@ class Ring<T> {
   cap: int;
   start: int; // index of the oldest item once the buffer is full
 
-  fn __init__(cap: int) {
-    self.items = [];
-    self.cap = cap;
-    self.start = 0;
-  }
-
   // Append `x`, overwriting the oldest item when the buffer is full.
   fn add(x: T) {
     if (self.items.len() < self.cap) {
@@ -109,6 +103,14 @@ class Ring<T> {
 
   // The i-th oldest item (0 <= i < len()).
   view fn at(i: int) -> view T { return self.items[(self.start + i) % self.items.len()]; }
+}
+
+impl Ring<T> {
+  fn __init__(cap: int) {
+    self.items = [];
+    self.cap = cap;
+    self.start = 0;
+  }
 }
 
 // How many past statements :history remembers.

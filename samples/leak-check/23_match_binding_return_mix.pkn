@@ -11,7 +11,8 @@
 // expect-stdout: none
 // expect-stdout: q
 
-class A { s: Str; fn __init__(s: Str) { self.s = s; } }
+class A { s: Str; }
+impl A { fn __init__(s: Str) { self.s = s; } }
 
 fn pick(o: A?) -> A {
   match o {

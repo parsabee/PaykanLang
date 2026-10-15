@@ -12,7 +12,9 @@
 
 class H {
   a: Str;
+}
 
+impl H {
   fn __init__() {
     self.a = "hello";
   }
@@ -20,7 +22,9 @@ class H {
 
 class O {
   h: H;
+}
 
+impl O {
   fn __init__() {
     self.h = H();
   }

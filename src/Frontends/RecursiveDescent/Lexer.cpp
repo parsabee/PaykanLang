@@ -35,6 +35,8 @@ constexpr Keyword kKeywords[] = {
     {"mov", Tok::KwMov},
     {"fn", Tok::KwFn},
     {"native", Tok::KwNative},
+    {"impl", Tok::KwImpl},
+    {"static", Tok::KwStatic},
     {"return", Tok::KwReturn},
     {"if", Tok::KwIf},
     {"then", Tok::KwThen},
@@ -49,6 +51,7 @@ constexpr Keyword kKeywords[] = {
     {"view", Tok::KwView},
     {"inout", Tok::KwInout},
     {"let", Tok::KwLet},
+    {"trait", Tok::KwTrait},
 };
 
 } // namespace
@@ -83,6 +86,12 @@ const char *describe(Tok k) {
     return "'fn'";
   case Tok::KwNative:
     return "'native'";
+  case Tok::KwImpl:
+    return "'impl'";
+  case Tok::KwStatic:
+    return "'static'";
+  case Tok::KwTrait:
+    return "'trait'";
   case Tok::KwReturn:
     return "'return'";
   case Tok::KwIf:
@@ -201,6 +210,12 @@ const char *tokenKindName(Tok k) {
     return "KW_FN";
   case Tok::KwNative:
     return "KW_NATIVE";
+  case Tok::KwImpl:
+    return "KW_IMPL";
+  case Tok::KwStatic:
+    return "KW_STATIC";
+  case Tok::KwTrait:
+    return "KW_TRAIT";
   case Tok::KwReturn:
     return "KW_RETURN";
   case Tok::KwIf:

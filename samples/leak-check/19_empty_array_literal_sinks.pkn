@@ -10,6 +10,11 @@
 class Bag {
   items: Str[];
   grid: Str[][];
+  fn reset() { self.items = []; self.items.push("reset"); }
+  view fn take(xs: Str[]) -> int { xs.push("arg"); return xs.len(); }
+}
+
+impl Bag {
   fn __init__(seed: Str[]) {
     self.items = [];
     self.grid = [[], []];
@@ -19,8 +24,6 @@ class Bag {
     self.grid[1].push("g1");
     seed.push("seed");
   }
-  fn reset() { self.items = []; self.items.push("reset"); }
-  view fn take(xs: Str[]) -> int { xs.push("arg"); return xs.len(); }
 }
 
 fn fresh() -> Str[] { return []; }

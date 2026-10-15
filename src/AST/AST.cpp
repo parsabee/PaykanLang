@@ -130,6 +130,10 @@ void ClassType::addMethod(MethodDecl *m) {
     InitMethod = m;
     return;
   }
+  if (m->isImpl()) {
+    ImplMethods.push_back(m);
+    return;
+  }
   // Check if this overrides an existing slot.
   auto it = VTableIndex.find(m->getName());
   if (it != VTableIndex.end()) {
@@ -153,9 +157,20 @@ MethodDecl *ClassType::findMethod(const std::string &name) const {
   auto it = VTableIndex.find(name);
   if (it != VTableIndex.end())
     return VTable[it->second];
+  for (auto *m : ImplMethods)
+    if (m->getName() == name)
+      return m;
   // Walk up the inheritance chain.
   if (SuperClass)
     return SuperClass->findMethod(name);
+  return nullptr;
+}
+
+ClassType *ClassType::implOwner(const std::string &name) {
+  for (ClassType *c = this; c; c = c->SuperClass)
+    for (auto *m : c->ImplMethods)
+      if (m->getName() == name)
+        return c;
   return nullptr;
 }
 
@@ -431,6 +446,7 @@ FuncDecl *ASTCloner::cloneFuncDecl(FuncDecl *fn, const std::string &newName) {
       fn->getLocation(), in(newName), std::move(params),
       cloneType(fn->getReturnType()), cloneCompound(fn->getBody()));
   clone->setView(fn->isView());
+  clone->setStatic(fn->isStatic());
   clone->setResultMode(fn->getResultMode());
   if (fn->isNative())
     clone->setNativeSymbol(in(fn->getNativeSymbol()));
@@ -453,6 +469,25 @@ ClassDecl *ASTCloner::cloneClassDecl(ClassDecl *cd,
       std::move(fields), std::move(methods));
 }
 
+ImplDecl *ASTCloner::cloneImplDecl(ImplDecl *im,
+                                   const std::string &newTypeName) {
+  std::vector<FuncDecl *> methods;
+  for (auto *m : im->getMethods())
+    methods.push_back(cloneFuncDecl(m, m->getName()));
+  return Ctx.make<ImplDecl>(im->getLocation(), in(newTypeName),
+                            std::move(methods), cloneType(im->getTrait()));
+}
+
+ImplDecl *ASTCloner::cloneTemplate(ImplDecl *im) {
+  ImplDecl *copy = cloneImplDecl(im, im->getTypeName());
+  std::vector<const std::string *> params;
+  for (auto *p : im->getTypeParams())
+    params.push_back(&in(*p));
+  return Ctx.make<ImplDecl>(copy->getLocation(), copy->getTypeName(),
+                            copy->getMethods(), copy->getTrait(),
+                            std::move(params));
+}
+
 FuncDecl *ASTCloner::cloneTemplate(FuncDecl *fn) {
   FuncDecl *copy = cloneFuncDecl(fn, fn->getName());
   std::vector<const std::string *> params;
@@ -462,7 +497,9 @@ FuncDecl *ASTCloner::cloneTemplate(FuncDecl *fn) {
                                  copy->getParams(), copy->getReturnType(),
                                  copy->getBody(), std::move(params));
   out->setView(copy->isView());
+  out->setStatic(copy->isStatic());
   out->setResultMode(copy->getResultMode());
+  out->setTypeParamBounds(cloneBounds(fn->getTypeParamBounds()));
   if (copy->isNative())
     out->setNativeSymbol(copy->getNativeSymbol());
   return out;
@@ -473,9 +510,21 @@ ClassDecl *ASTCloner::cloneTemplate(ClassDecl *cd) {
   std::vector<const std::string *> params;
   for (auto *p : cd->getTypeParams())
     params.push_back(&in(*p));
-  return Ctx.make<ClassDecl>(copy->getLocation(), copy->getName(),
-                             copy->getSuperClassName(), copy->getFields(),
-                             copy->getMethods(), std::move(params));
+  auto *out = Ctx.make<ClassDecl>(copy->getLocation(), copy->getName(),
+                                  copy->getSuperClassName(), copy->getFields(),
+                                  copy->getMethods(), std::move(params));
+  out->setTypeParamBounds(cloneBounds(cd->getTypeParamBounds()));
+  return out;
+}
+
+TypeParamBounds ASTCloner::cloneBounds(const TypeParamBounds &bounds) {
+  TypeParamBounds out;
+  for (const auto &traits : bounds) {
+    auto &cloned = out.emplace_back();
+    for (Type *t : traits)
+      cloned.push_back(cloneType(t));
+  }
+  return out;
 }
 
 } // namespace ast

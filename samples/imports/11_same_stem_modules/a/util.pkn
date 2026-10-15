@@ -1,8 +1,11 @@
 // a::util -- same stem as b::util.
 class Counter {
   n: int;
-  fn __init__(n: int) { self.n = n; }
   fn next() -> int { self.n = self.n + 1; return self.n; }
+}
+
+impl Counter {
+  fn __init__(n: int) { self.n = n; }
 }
 
 fn tag() -> Str { return "a"; }

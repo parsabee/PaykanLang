@@ -89,6 +89,9 @@ fn firstVowel(s: Str) -> char? {
 class Question {
   text: Str;
   answer: bool?;               // implicitly None
+}
+
+impl Question {
   fn __init__(t: Str) { self.text = t; }
 }
 
@@ -96,9 +99,12 @@ class Question {
 
 class Cache<T> {
   slot: T?;
-  fn __init__() { }
   view fn get() -> T? { return self.slot; }
   fn put(v: T) { self.slot = v; }
+}
+
+impl Cache<T> {
+  fn __init__() { }
 }
 
 fn square(n: int) -> int { return n * n; }

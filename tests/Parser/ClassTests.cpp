@@ -45,11 +45,14 @@ TEST(Class, ClassWithInitAndMethod) {
   auto [ok, _] = parse(R"(
     class A {
       a: int;
-      fn __init__(a: int) {
-        self.a = a;
-      }
       fn getA() -> int {
         return 0;
+      }
+    }
+
+    impl A {
+      fn __init__(a: int) {
+        self.a = a;
       }
     }
     fn main() -> int { return 0; }

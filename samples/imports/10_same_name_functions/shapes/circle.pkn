@@ -3,6 +3,9 @@
 // with text::fmt's (or main's) functions of the same name.
 class Circle {
   r: int;
+}
+
+impl Circle {
   fn __init__(r: int) { self.r = r; }
 }
 

@@ -98,7 +98,6 @@ it. This is the natural way to model something that is set later, or not at all:
 class Person {
   name: Str;
   email: Str?;
-  fn __init__(name: Str) { self.name = name; }
 
   view fn contact() -> Str {
     match self.email {
@@ -106,6 +105,10 @@ class Person {
       None   { return self.name + " (no email)"; }
     }
   }
+}
+
+impl Person {
+  fn __init__(name: Str) { self.name = name; }
 }
 
 fn main() -> int {
@@ -133,6 +136,9 @@ Here is a minimal linked list with a search that returns `Node?`:
 class Node {
   value: int;
   next: Node?;
+}
+
+impl Node {
   fn __init__(v: int, next: Node?) { self.value = v; self.next = next; }
 }
 
@@ -196,11 +202,6 @@ class Task {
   done: bool;
   due: Str?;
 
-  fn __init__(title: Str) {
-    self.title = title;
-    self.done = False;
-  }
-
   view fn toString() -> Str {
     text = (if self.done then "[x] " else "[ ] ") + self.title;
     match self.due {
@@ -210,9 +211,15 @@ class Task {
   }
 }
 
+impl Task {
+  fn __init__(title: Str) {
+    self.title = title;
+    self.done = False;
+  }
+}
+
 class TaskList {
   tasks: Task[];
-  fn __init__() { self.tasks = []; }
   fn add(title: Str) { self.tasks.push(Task(title)); }
 
   fn find(title: Str) -> Task? {
@@ -223,6 +230,10 @@ class TaskList {
     }
     return None;
   }
+}
+
+impl TaskList {
+  fn __init__() { self.tasks = []; }
 }
 
 fn setDue(list: TaskList, title: Str, due: Str) {

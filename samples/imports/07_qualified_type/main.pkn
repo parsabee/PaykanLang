@@ -13,8 +13,11 @@ import geometry::point;
 // Qualified type as a class field.
 class Box {
   origin: point::Point;
-  fn __init__(p: point::Point) { self.origin = p; }
   view fn total() -> int { return self.origin.sum(); }
+}
+
+impl Box {
+  fn __init__(p: point::Point) { self.origin = p; }
 }
 
 // Qualified type as a parameter type.

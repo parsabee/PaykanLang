@@ -2,6 +2,9 @@
 // `Obj` does not (it might be anything but a Node).
 class Node {
   v: int;
+}
+
+impl Node {
   fn __init__(x: int) { self.v = x; }
 }
 
