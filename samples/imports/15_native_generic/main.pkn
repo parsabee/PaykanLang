@@ -2,14 +2,16 @@
 //
 // An instance (`describe<float>`) passes C a PaykanType describing each type
 // argument: its size, alignment, kind and references.  A `T` crosses by
-// address, so the C code in values.c handles a value of any size.  Build the
-// object yourself and link it with --object (the sample harnesses do this):
+// address, so the C code in values.c handles a value of any size: it borrows
+// a `view` one and changes an `inout` one in place.  Build the object
+// yourself and link it with --object (the sample harnesses do this):
 //
 //   cc -std=c11 -fPIC -I<paykan include dir> -c values.c -o values.o
 //   paykan --object=values.o main.pkn
 
 native fn describe<T>(x: view T) -> Str = "sample_describe";
-native fn pick<T>(first: bool, a: T, b: T) -> T = "sample_pick";
+native fn pick<T>(first: bool, a: view T, b: view T) -> T = "sample_pick";
+native fn swap<T>(a: inout T, b: inout T) = "sample_swap";
 
 class Point {
   x: int;
@@ -30,6 +32,14 @@ fn main() -> int {
   println(Str<int>(pick<int>(True, 1, 2)));
   println(pick<Str>(False, "left", "right"));
   println(Str<int>(pick<Point>(True, Point(3), Point(4)).x));
+  left = "left";
+  right = "right";
+  swap<Str>(left, right);
+  println(left + " " + right);
+  yes = True;
+  no = False;
+  swap<bool>(yes, no);
+  println(Str<bool>(yes));
   return 0;
 }
 // expect-stdout: int 42 (size 8)
@@ -41,3 +51,5 @@ fn main() -> int {
 // expect-stdout: 1
 // expect-stdout: right
 // expect-stdout: 3
+// expect-stdout: right left
+// expect-stdout: False

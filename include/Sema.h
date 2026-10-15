@@ -851,6 +851,8 @@ private:
   bool declareFunctionSignature(ast::FuncDecl *node);
   bool checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
                             const std::vector<ast::Type *> &paramTypes);
+  bool checkNativeParamModes(const ast::FuncDecl *node,
+                             const std::vector<ast::Type *> &types);
 
   /// Phase 4 for one class: resolve field types and method signatures into
   /// the pre-registered ClassType (superclass must already be populated).
