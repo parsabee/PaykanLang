@@ -15,7 +15,8 @@ argument must implement.
   methods join `A` like the methods of any `impl` block (see `04-classes.md`), and a
   method that `A` already has meets a requirement too.
 - A class implements every trait its superclasses implement. Every class implements the
-  built-in trait `Show` (`view fn toString() -> Str`) through `Obj`.
+  built-in trait `Show` (`view fn toString() -> Str`) through `Obj`, and so do `int`,
+  `float`, `bool` and `char`: `n.toString()` is `Str(n)`.
 - `fn f<T: Show + Into<int>>(...)` and `class Box<T: Named>` bound their type
   parameters. Each instantiation checks its type arguments against the bounds.
 - A trait is not a type: `x: Named` is an error.
@@ -53,7 +54,7 @@ block holds only the methods its trait requires, and no `static fn`.
 
 ```pkn
 fn greet<T: Named>(x: view T) -> Str { return "hi " + x.name(); }
-fn show<T: Show>(x: view T) -> Str { return x.toString(); }
+fn show<T: Show>(x: view T) -> Str { return x.toString(); }   // show(42), show(a), show("s")
 
 class Holder<T: Named> {
   v: T;

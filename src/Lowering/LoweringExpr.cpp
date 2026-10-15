@@ -777,6 +777,25 @@ Val ModuleLowering::ExprEmitter::emitArrayPop(const Val &recv,
 Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     ast::MethodCallExpr *node) {
   const bool wantAddress = std::exchange(WantAddress, false);
+  // `n.toString()` on an int, float, bool or char (the builtin `Show`): its
+  // `Str` conversion, as a fresh box like any method's `Str` result.
+  ast::Type *recvResolved = node->getReceiver()->getResolvedType();
+  if (auto *bt = recvResolved ? ast::dyn_cast<ast::BuiltinType>(recvResolved)
+                              : nullptr) {
+    Val v = visit(node->getReceiver());
+    if (!v)
+      return Val();
+    const char *fn =
+        bt->getTypeKind() == ast::BuiltinType::Int     ? kPaykanStringFromInt
+        : bt->getTypeKind() == ast::BuiltinType::Float ? kPaykanStringFromFloat
+        : bt->getTypeKind() == ast::BuiltinType::Bool  ? kPaykanStringFromBool
+                                                       : kPaykanStringFromChar;
+    const pir::Function &rt = L.declareRuntime(fn);
+    Val str = L.B.call(rt.Name, rt.Sig,
+                       {L.coerceBoolToI64(v, rt.Sig.Params[0])}, "str");
+    return L.emitSharedNew(str, "str.shared");
+  }
+
   // A fresh temporary receiver is released after the call (the method
   // borrows it).
   Receiver receiver = L.emitReceiver(node->getReceiver());
