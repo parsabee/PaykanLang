@@ -138,6 +138,16 @@ inline constexpr const char *kPaykanTypeCopy = "PaykanType_copy";
 inline constexpr const char *kPaykanTypeDrop = "PaykanType_drop";
 inline constexpr const char *kPaykanTypeIsUnset = "PaykanType_isUnset";
 
+// Buffer: called only by the standard library's native functions
+inline constexpr const char *kPaykanBufferNew = "PaykanBuffer_new";
+inline constexpr const char *kPaykanBufferLen = "PaykanBuffer_len";
+inline constexpr const char *kPaykanBufferGet = "PaykanBuffer_get";
+inline constexpr const char *kPaykanBufferCopy = "PaykanBuffer_copy";
+inline constexpr const char *kPaykanBufferSet = "PaykanBuffer_set";
+inline constexpr const char *kPaykanBufferReserve = "PaykanBuffer_reserve";
+inline constexpr const char *kPaykanBufferGrow = "PaykanBuffer_grow";
+inline constexpr const char *kPaykanBufferShrink = "PaykanBuffer_shrink";
+
 // File
 inline constexpr const char *kPaykanFileNew = "PaykanFile_new";
 inline constexpr const char *kPaykanFileOpen = "PaykanFile_open";

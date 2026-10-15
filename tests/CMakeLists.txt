@@ -120,6 +120,7 @@ add_executable(codegen_tests
     CodeGen/GenericsTests.cpp
     CodeGen/OptionalTests.cpp
     CodeGen/OptionalPrimitiveTests.cpp
+    CodeGen/BufferTests.cpp
     CodeGen/TupleTests.cpp
     CodeGen/RegressionTests.cpp
     CodeGen/LiteralObjectTests.cpp
@@ -398,6 +399,7 @@ paykan_test_suite(runtime PAYKAN_TEST_SUITE_runtime)
 if(PAYKAN_TEST_SUITE_runtime)
 add_executable(runtime_tests
     Runtime/ArrayTests.cpp
+    Runtime/BufferTests.cpp
     Runtime/DeferredDestroyTests.cpp
     Runtime/EqualsNullTests.cpp
     Runtime/ObjectTests.cpp

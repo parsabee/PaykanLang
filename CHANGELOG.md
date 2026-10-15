@@ -22,6 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every time (a `.pkm` does not hold templates yet).  Instantiating both this module's `Box<Str>` and an imported
   template's is an error (`conflicts with another template's instantiation of the same
   name`).
+- Runtime functions for the standard library's `memory::Buffer<T>`: `PaykanBuffer_new`,
+  `_len`, `_get`, `_copy`, `_set`, `_reserve`, `_grow` and `_shrink` (`Runtime.h`,
+  "Buffer"), generic native functions over a `PaykanBuffer` of values of any size, laid
+  out by their `PaykanType`.  New values are all zero bytes (0, False or None); the
+  buffer retains the references it holds and releases them when they are overwritten,
+  shrunk away or destroyed; growing at least doubles the allocation and shrinking to a
+  quarter of it halves it.  An index out of bounds, a negative count, shrinking by more
+  than the length and reading a never-set reference that may not be None panic (`buffer
+  index 3 out of bounds (len=3)`).
 - Generic native functions (docs/language/02-functions-and-calling.md, "Generic native
   functions"): `native fn pick<T>(first: bool, a: T, b: T) -> T = "c_pick";`.  Each
   instance calls the same C function with a `PaykanType` for each type argument first
