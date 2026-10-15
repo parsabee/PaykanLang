@@ -12,6 +12,6 @@
 
 namespace paykan::pir {
 
-inline constexpr uint32_t kPIRVersion = 2;
+inline constexpr uint32_t kPIRVersion = 1;
 
 } // namespace paykan::pir
