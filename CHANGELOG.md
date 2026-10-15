@@ -186,11 +186,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ptr.store` (docs/pir.md §6), which `inout` parameters lower to.  Only
   scalar (`i64`, `f64`, `bool`, `char`) slots have addresses.  A backend plugin
   must handle them.
-- PIR version 2 (`pir::kPIRVersion`, `PAYKAN_PIR_TEXT_VERSION`): inline optionals
-  (#96, docs/pir.md §1 and §6).  Four value types, `opt_i64`, `opt_f64`, `opt_bool` and
-  `opt_char` (a payload and an 8-byte presence word), and four instructions, `some`,
-  `none`, `is_some` and `unwrap`; optional slots have addresses and may be fields.  A
-  backend plugin must handle them; `.pkm` files and caches of PIR 1 are rebuilt.
+- PIR: inline optionals (#96, docs/pir.md §1 and §6).  Four value types, `opt_i64`,
+  `opt_f64`, `opt_bool` and `opt_char` (a payload and an 8-byte presence word), and four
+  instructions, `some`, `none`, `is_some` and `unwrap`; optional slots have addresses and
+  may be fields.  A backend plugin must handle them.
 
 ### Removed
 
