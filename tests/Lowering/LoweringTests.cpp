@@ -943,11 +943,9 @@ TEST(Lowering, OptionalValuesAreNotBoxed) {
   EXPECT_NE(m.find(" = some 3.0"), std::string::npos) << m; // promoted
   for (const char *fn : {"half", "get", "same"}) {
     std::string body = function(l.Text, fn);
-    for (const char *op : {"box", "retain", "release", "PaykanInt", "new "})
+    for (const char *op : {"box", "retain", "release", "new "})
       EXPECT_EQ(body.find(op), std::string::npos) << op << "\n" << body;
   }
-  EXPECT_EQ(l.Text.find("PaykanInt"), std::string::npos) << l.Text;
-  EXPECT_EQ(l.Text.find("PaykanFloat"), std::string::npos) << l.Text;
 }
 
 // An array or tuple of optional values holds them inline: the elements are
@@ -979,8 +977,6 @@ TEST(Lowering, ArrayAndTupleElementsOfOptionalsAreInline) {
   EXPECT_NE(l.Text.find("= [5, 2, 4]"), std::string::npos) << l.Text;
   EXPECT_NE(m.find("call @$rt.PaykanTuple_get(%"), std::string::npos) << m;
   EXPECT_NE(m.find(", 2)"), std::string::npos) << m;
-  EXPECT_EQ(l.Text.find("PaykanInt"), std::string::npos) << l.Text;
-  EXPECT_EQ(l.Text.find("PaykanBool_new"), std::string::npos) << l.Text;
 }
 
 // Printing an optional value formats it, "None" or the value's text; it is
@@ -1404,51 +1400,5 @@ TEST(Lowering, ParsesCallTheRuntimeAndReturnAnOptionalValue) {
     EXPECT_NE(fn.find(" = some "), std::string::npos) << fn;
     EXPECT_NE(fn.find(e[2]), std::string::npos) << fn;
     EXPECT_EQ(fn.find(" = box "), std::string::npos) << fn;
-  }
-}
-
-TEST(Lowering, BoxedParsesReturnTheBoxedOptional) {
-  // `Int<Str>` & co. (#88) return the `Int?` & co. box.
-  auto l = lower(R"(
-    fn p(s: Str) -> Int? { return Int<Str>(s); }
-    fn q(s: Str) -> Float? { return Float<Str>(s); }
-    fn r(s: Str) -> Bool? { return Bool<Str>(s); }
-    fn main() -> int { return 0; }
-  )");
-  ASSERT_TRUE(l.Ok) << l.Error;
-  std::string p = function(l.Text, "p");
-  EXPECT_NE(p.find("call @$rt.PaykanInt_from_str("), std::string::npos) << p;
-  EXPECT_EQ(count(p, "retain"), 0u) << p;
-  EXPECT_NE(function(l.Text, "q").find("call @$rt.PaykanFloat_from_str("),
-            std::string::npos)
-      << l.Text;
-  EXPECT_NE(function(l.Text, "r").find("call @$rt.PaykanBool_from_str("),
-            std::string::npos)
-      << l.Text;
-}
-
-TEST(Lowering, BoxedSourcesUnboxThenFormat) {
-  auto l = lower(R"(
-    fn a(x: Int) -> Str { return Str<Int>(x); }
-    fn b(x: Float) -> Str { return Str<Float>(x); }
-    fn c(x: Bool) -> Str { return Str<Bool>(x); }
-    fn d(x: Char) -> Str { return Str<Char>(x); }
-    fn main() -> int { return 0; }
-  )");
-  ASSERT_TRUE(l.Ok) << l.Error;
-  const char *expected[][3] = {
-      {"a", "call @$rt.PaykanInt_value(", "call @$rt.PaykanString_from_int("},
-      {"b", "call @$rt.PaykanFloat_value(",
-       "call @$rt.PaykanString_from_float("},
-      {"c", "call @$rt.PaykanBool_value(", "call @$rt.PaykanString_from_bool("},
-      {"d", "call @$rt.PaykanChar_value(", "call @$rt.PaykanString_from_char("},
-  };
-  for (const auto &e : expected) {
-    std::string fn = function(l.Text, e[0]);
-    size_t unbox = fn.find(e[1]);
-    size_t format = fn.find(e[2]);
-    ASSERT_NE(unbox, std::string::npos) << fn;
-    ASSERT_NE(format, std::string::npos) << fn;
-    EXPECT_LT(unbox, format) << fn;
   }
 }

@@ -2,6 +2,6 @@
 class Point {}
 impl Point { fn __init__() { } }
 fn main() -> int {
-  s = Str<Point>(Point());   // error: no specialization of 'Str' for 'Point'; its specializations are int, float, bool, char, Int, Float, Bool, Char
+  s = Str<Point>(Point());   // error: no specialization of 'Str' for 'Point'; its specializations are int, float, bool, char
   return 0;
 }

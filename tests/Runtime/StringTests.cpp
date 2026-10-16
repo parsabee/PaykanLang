@@ -3,6 +3,7 @@
 //
 // Unit tests for PaykanString runtime functions.
 
+#include <cmath>
 #include <cstring>
 #include <gtest/gtest.h>
 #include <string>
@@ -463,6 +464,45 @@ TEST(StringParse, Float) {
   EXPECT_FALSE(parseWith(PaykanString_parse_float, "1e999", 5, d));
   EXPECT_EQ(d, 0.0);
   EXPECT_FALSE(parseWith(PaykanString_parse_float, " 1", 2, d));
+}
+
+// The range rule (docs/language/01-language-basics.md): a value that
+// rounds to a finite float, subnormals included, is accepted; one too large
+// (rounds to +-inf) or too small (nonzero, rounds to 0) is None.  strtod
+// flags subnormal results with ERANGE too, which must not make them None.
+TEST(StringParse, FloatRange) {
+  struct Case {
+    const char *text;
+    double value;
+  } ok[] = {{"1e-310", 1e-310},
+            {"5e-324", 4.9406564584124654e-324},
+            {"-5e-324", -4.9406564584124654e-324},
+            {"4.9406564584124654e-324", 4.9406564584124654e-324},
+            {"2.2250738585072009e-308", 2.2250738585072009e-308},
+            {"2.2250738585072014e-308", 2.2250738585072014e-308},
+            {"1.7976931348623157e308", 1.7976931348623157e308},
+            {"0e-999", 0.0},
+            {"-0.0", -0.0},
+            {"nan", 0.0}};
+  for (const auto &c : ok) {
+    double v;
+    ASSERT_TRUE(parseWith(PaykanString_parse_float, c.text,
+                          static_cast<int64_t>(std::strlen(c.text)), v))
+        << c.text;
+    if (std::string(c.text) == "nan") {
+      EXPECT_NE(v, v);
+      continue;
+    }
+    EXPECT_EQ(v, c.value) << c.text;
+    EXPECT_EQ(std::signbit(v), std::signbit(c.value)) << c.text;
+  }
+  for (const char *bad :
+       {"1e999", "-1e999", "1.8e308", "1e-400", "-1e-400", "2e-324"}) {
+    double v;
+    EXPECT_FALSE(parseWith(PaykanString_parse_float, bad,
+                           static_cast<int64_t>(std::strlen(bad)), v))
+        << bad;
+  }
 }
 
 TEST(StringParse, BoolAcceptsExactlyTrueAndFalse) {

@@ -1,0 +1,15 @@
+// An optional is not an object (#96): neither a `T?` nor a scalar converts
+// to `Obj`; unwrap the optional with match.
+class Node {
+  v: int;
+}
+
+impl Node {
+  fn __init__(x: int) { self.v = x; }
+}
+
+fn main() -> int {
+  n: Node? = Node(1);
+  o: Obj = n;   // error: cannot use optional 'Node?' as 'Obj': an optional is not an object; unwrap it with match
+  return 0;
+}

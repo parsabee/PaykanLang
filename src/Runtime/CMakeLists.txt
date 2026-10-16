@@ -2,7 +2,6 @@
 
 add_library(paykan_runtime STATIC
     Object.c
-    Basic.c
     String.c
     Array.c
     Buffer.c

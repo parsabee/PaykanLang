@@ -40,7 +40,7 @@ Design rules:
 | `bool`| true/false                                                        | `int64_t` or `_Bool` (backend's choice; `0`/`1` at the ABI) |
 | `char`| one byte                                                          | `int8_t`     |
 | `box` | `PaykanShared*`: an owned-or-borrowed reference-counted box; may be `null` (an optional's `None`) | `PaykanShared *` |
-| `obj` | raw `PaykanObject*`: an unboxed heap object of any class (also `PaykanString*`, `PaykanArray*`, `PaykanTuple*`, `PaykanFile*`, `PaykanError*`, boxed primitives) | `PaykanObject *` (cast at runtime calls) |
+| `obj` | raw `PaykanObject*`: an unboxed heap object of any class (also `PaykanString*`, `PaykanArray*`, `PaykanTuple*`, `PaykanFile*`, `PaykanError*`) | `PaykanObject *` (cast at runtime calls) |
 | `ptr` | any other pointer: vtable addresses, literal data, kind descriptors | `void *`  |
 | `opt_i64` `opt_f64` `opt_bool` `opt_char` | an inline optional: the payload (`i64`, `f64`, `bool`, `char`) followed by an 8-byte presence word, held and passed by value (#96) | `struct { <payload> value; int64_t present; }` |
 
@@ -203,8 +203,8 @@ backend does no inheritance walk.
 * A class marked `extern` belongs to another module: its fields are known (for
   `field.load`/`field.store` on imported instances) and its vtable address may
   be taken, but its vtable contents and functions are defined in that module.
-* Runtime classes (`Obj`, `Str`, `File`, `Error`, `Int`, `Float`, `Bool`,
-  arrays, tuples) are never declared as classes; their vtables are
+* Runtime classes (`Obj`, `Str`, `File`, `Error`, arrays, tuples) are never
+  declared as classes; their vtables are
   `extern vtable` globals and their methods are called through `vcall` with an
   explicit slot index, exactly like user classes.
 
@@ -403,9 +403,7 @@ CodeGen enforced, now in one place.
   `PaykanString_parse_float` / `PaykanString_parse_bool` with the
   `local.addr` of a local the value is parsed into, and are the `select` of
   `some` of that value (a valid string) or `none` (`bool<Str>` accepts
-  exactly `"True"` and `"False"`).  The boxed forms `Int<Str>` & co. call
-  `PaykanInt_from_str` & co., whose result is the `Int?` & co. box (a fresh
-  +1 box, `null` for an invalid string).  The numeric ones are inline: `int<float>` checks
+  exactly `"True"` and `"False"`).  The numeric ones are inline: `int<float>` checks
   `cmp ge %f, -2^63` and `cmp lt %f, 2^63` (both false for NaN) and calls
   `@$rt.Paykan_panic_float_to_int(%f)` then `unreachable` otherwise, before the
   `ftoi`; `float<int>` is `itof`; `int<bool>` and `int<char>` are `cast`s to
@@ -454,15 +452,8 @@ PaykanArray_push_slot(obj) -> ptr       PaykanArray_pop_into(obj, ptr) -> void
 ; tuples
 PaykanTuple_new(i64, ptr) -> obj        PaykanTuple_get(obj, i64) -> i64
 PaykanTuple_set(obj, i64, i64) -> void  PaykanTuple_set_obj(obj, i64, box) -> void
-; files / boxed primitives
+; files
 PaykanFile_open(obj, obj) -> box
-PaykanInt_from_str(obj) -> box          PaykanFloat_from_str(obj) -> box
-PaykanBool_from_str(obj) -> box         ; null box (None) for an invalid string
-; boxes of the optional primitives (int? / float? / bool? / char?)
-PaykanInt_new(i64) -> obj               PaykanInt_value(obj) -> i64
-PaykanFloat_new(f64) -> obj             PaykanFloat_value(obj) -> f64
-PaykanBool_new(i64) -> obj              PaykanBool_value(obj) -> i64
-PaykanChar_new(char) -> obj             PaykanChar_value(obj) -> char
 ; I/O
 Paykan_print(obj) -> void   Paykan_println(obj) -> void
 Paykan_printerr(obj) -> void   Paykan_printerrln(obj) -> void
@@ -476,8 +467,6 @@ PaykanFile_readln(obj) -> box
 extern obj PaykanObject_None     extern obj PaykanFile_Stdin
 extern vtable PaykanArray_vtable  extern vtable PaykanArray_obj_vtable
 extern vtable PaykanArray_sized_vtable
-extern vtable PaykanInt_vtable    extern vtable PaykanFloat_vtable
-extern vtable PaykanBool_vtable   extern vtable PaykanChar_vtable
 ```
 
 `names::kCodeGenRequiredSymbols` in `include/Names.h` is the authoritative
@@ -486,7 +475,7 @@ list; the LLVM backend's JIT symbol table must cover it and the C backend links
 
 Vtable slot layouts of runtime classes (slot index = position):
 
-* `Obj`, `Error`, `Int`/`Float`/`Bool`/`Char`, tuples: `destroy, toString, equals`
+* `Obj`, `Error`, tuples: `destroy, toString, equals`
 * `Str`: `destroy, toString, equals, len, concat`
 * `File`: `destroy, toString, equals, write, readln, readbytes, read`
 * arrays: `destroy, toString, equals, len` (`push`/`pop` are direct runtime calls)

@@ -116,7 +116,7 @@ add_executable(codegen_tests
     CodeGen/CharTests.cpp
     CodeGen/ArrayTests.cpp
     CodeGen/LeakTests.cpp
-    CodeGen/BoxedPrimitiveTests.cpp
+    CodeGen/ParseTests.cpp
     CodeGen/ConversionTests.cpp
     CodeGen/ArgsTests.cpp
     CodeGen/EnumTests.cpp
@@ -412,7 +412,7 @@ add_executable(runtime_tests
     Runtime/StringTests.cpp
     Runtime/SharedTests.cpp
     Runtime/FileTests.cpp
-    Runtime/BoxedPrimitiveTests.cpp
+    Runtime/ErrorTests.cpp
     Runtime/OptionalNullTests.cpp
     Runtime/TupleTests.cpp
     Runtime/TypeTests.cpp

@@ -228,14 +228,6 @@ Val ModuleLowering::emitIsExactType(const Val &rawObjPtr, ast::ClassType *ct) {
     runtimeVT = kPaykanFileVtable;
   } else if (ct == ASTCtx.getErrorTy()) {
     runtimeVT = kPaykanErrorVtable;
-  } else if (ct == ASTCtx.getIntBoxTy()) {
-    runtimeVT = kPaykanIntVtable;
-  } else if (ct == ASTCtx.getFloatBoxTy()) {
-    runtimeVT = kPaykanFloatVtable;
-  } else if (ct == ASTCtx.getBoolBoxTy()) {
-    runtimeVT = kPaykanBoolVtable;
-  } else if (ct == ASTCtx.getCharBoxTy()) {
-    runtimeVT = kPaykanCharVtable;
   } else if (ct == ASTCtx.getTupleTy() ||
              ASTCtx.getSpecializedTupleElemType(ct)) {
     runtimeVT = kPaykanTupleVtable;

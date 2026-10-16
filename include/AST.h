@@ -1071,7 +1071,7 @@ class ClassType : public Type {
   bool Final = false;
 
   // When true, this type is a compiler builtin (Obj, Str, Array, File, Error,
-  // Int, Float, Bool) registered by the ASTContext bootstrap: its methods are
+  // Tuple) registered by the ASTContext bootstrap: its methods are
   // implemented in the C runtime rather than emitted from user code, and user
   // code may not declare a class, enum, or function with its name.
   bool Builtin = false;

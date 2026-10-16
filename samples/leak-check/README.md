@@ -39,6 +39,6 @@ line each; the samples parity check (`scripts/samples_parity.py`, ctest
 | `21_match_binding_reassign_loop.pkn` | match-arm binding reassigned in a loop          | per-iteration release (`Shared.c`)   |
 | `22_match_subject_reassign.pkn` | match subject reassigned inside the arm          | binding keeps the subject alive (`Shared.c`) |
 | `23_match_binding_return_mix.pkn` | binding reassigned in a loop + returned, `a = a` | owned binding returned (`Shared.c`)  |
-| `24_optional_primitives.pkn` | `int?` / `float?` / `bool?` / `char?` boxes in every sink, rebinding, copies, `T?` with T = int | `Paykan{Int,Float,Bool,Char}_new` (`Basic.c`) + `PaykanShared` |
-| `25_conversions.pkn` | `Str<...>` temporaries, `int<Str>` / `float<Str>` boxes (present and None), numeric conversions | `PaykanString_from_*` (`String.c`), `Paykan{Int,Float}_from_str` (`Basic.c`) |
+| `24_optional_primitives.pkn` | `int?` / `float?` / `bool?` / `char?` values in every sink (inline, no allocation), rebinding, copies, `T?` with T = int | the instances, array, tuple and strings only |
+| `25_conversions.pkn` | `Str<...>` temporaries, `int<Str>` / `float<Str>` optionals (present and None), numeric conversions | `PaykanString_from_*` (`String.c`) |
 | `26_deep_chain_drop.pkn` | dropping a 1,000,000-node list, a deep wide tree, and 200,000-deep array / tuple chains (#118) | iterative destroy in `Paykan_release` (`Shared.c`) |

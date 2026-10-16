@@ -638,20 +638,13 @@ specialization whose source is **exactly** the type of `value`: `Str(n)` with an
 Nothing is widened or unwrapped to find one. An `int` argument does not reach `float`'s
 `Str` specialization, and an `int?` must be unwrapped with `match` first.
 
-| Target  | Specializations (the source types)                      | Result                                   |
-|---------|---------------------------------------------------------|------------------------------------------|
-| `Str`   | `int`, `float`, `bool`, `char`, `Int`, `Float`, `Bool`, `Char` | `Str`                             |
-| `int`   | `Str`; `float`, `bool`, `char`                          | `int?` from `Str`; `int` otherwise       |
-| `Int`   | `Str`                                                   | `Int?`                                   |
-| `float` | `Str`; `int`                                            | `float?` from `Str`; `float` from `int`  |
-| `Float` | `Str`                                                   | `Float?`                                 |
-| `bool`  | `int`; `Str`                                            | `bool` from `int`; `bool?` from `Str`    |
-| `Bool`  | `Str`                                                   | `Bool?`                                  |
-| `char`  | `int`                                                   | `char`                                   |
-
-`Char` is not a target: it has no specializations, as there is no `char<Str>` parse to box.
-`Int`, `Float` and `Bool` have no other constructor, so `Int(5)` is an error, not a box:
-`Int`'s only specialization is the parse `Int(s)`. In an `Obj`, a present `int?` is an `Int`.
+| Target  | Specializations (the source types) | Result                                   |
+|---------|------------------------------------|------------------------------------------|
+| `Str`   | `int`, `float`, `bool`, `char`     | `Str`                                    |
+| `int`   | `Str`; `float`, `bool`, `char`     | `int?` from `Str`; `int` otherwise       |
+| `float` | `Str`; `int`                       | `float?` from `Str`; `float` from `int`  |
+| `bool`  | `int`; `Str`                       | `bool` from `int`; `bool?` from `Str`    |
+| `char`  | `int`                              | `char`                                   |
 
 **The explicit form.** You may also name the specialization: `Target<Source>(value)`, for
 example `Str<int>(n)` or `int<Str>(s)`. It is the same conversion, and it documents the
@@ -666,11 +659,9 @@ What each specialization does:
 | `Str<float>(f)`   | `float` → `Str`    | `%g` formatting: `"3.14"`, `"2"`, `"1e+20"`, `"-0"`; `"nan"`, `"inf"`, `"-inf"` |
 | `Str<bool>(b)`    | `bool` → `Str`     | `"True"` or `"False"`                                         |
 | `Str<char>(c)`    | `char` → `Str`     | A one-character string                                        |
-| `Str<Int>(x)` … `Str<Char>(x)` | box → `Str` | Exactly what the primitive form gives for the boxed value |
 | `int<Str>(s)`     | `Str` → `int?`     | The parsed integer, or `None` (see below)                     |
 | `float<Str>(s)`   | `Str` → `float?`   | The parsed float, or `None` (see below)                       |
 | `bool<Str>(s)`    | `Str` → `bool?`    | `True` for `"True"`, `False` for `"False"`, else `None`       |
-| `Int<Str>(s)`, `Float<Str>(s)`, `Bool<Str>(s)` | `Str` → `Int?` / `Float?` / `Bool?` | The same parse, as the optional box |
 | `int<float>(f)`   | `float` → `int`    | Truncates toward zero; panics on NaN, ±inf or out of range    |
 | `float<int>(n)`   | `int` → `float`    | The nearest `float` (exact up to 2^53)                        |
 | `int<bool>(b)`    | `bool` → `int`     | `1` for `True`, `0` for `False`                               |
@@ -686,16 +677,11 @@ n: int = int(-2.9);               // -2
 f: float = float<int>(3) / 2.0;   // 1.5
 code: int = int('a');             // 97
 c: char = char<int>(code + 1);    // 'b'
-match Int("7") {
-  x: Int { println(Str(x)); }     // 7 (Str<Int>)
+match int("7") {
+  x: int { println(Str(x)); }     // 7 (Str<int>)
   None   { }
 }
 ```
-
-The boxed sources (`Str(x)` with `x: Int`, and the rest) take a present box: an `Int` is
-never `None`, so an `Int?` is unwrapped with `match` first, as with any optional. The boxed
-targets give the optional box rather than the optional primitive: `Int(s)` is an `Int?`,
-holding the value `int(s)` would give.
 
 **The set is closed.** When no specialization's source is the argument's type, a user class
 included, the call is a compile-time error that lists the target's specializations. The
@@ -705,7 +691,7 @@ specialization; `toString()` is the way to turn an object into a `Str`:
 ```pkn
 a = Point();
 s = Str(a);         // error: no specialization of 'Str' for 'Point'; its specializations
-                    //        are int, float, bool, char, Int, Float, Bool, Char
+                    //        are int, float, bool, char
 o = None;
 t = Str(o);         // error: no specialization of 'Str' for 'Obj'; ...
 x = float(2.5);     // error: no specialization of 'float' for 'float'; its specializations
@@ -716,8 +702,8 @@ y = int<float>(3);  // error: argument of 'int<float>' has type 'int', expected 
 `Str(s)` with a `Str` argument is not a conversion: it is the `Str` constructor, and still
 returns the string.
 
-**Parsing.** `int(s)`, `float(s)` and `bool(s)` with a `Str` (`int<Str>` & co., and their
-boxed forms) can fail, so they return an optional: `None` when `s` is not a valid value. Unwrap the result
+**Parsing.** `int(s)`, `float(s)` and `bool(s)` with a `Str` (`int<Str>` & co.) can fail,
+so they return an optional: `None` when `s` is not a valid value. Unwrap the result
 with `match` (see `10-optionals.md`):
 
 ```pkn
@@ -793,7 +779,7 @@ Top-level declarations — free functions, classes (a class name is also its con
 and enums — share a single namespace with the builtins, and a name identifies exactly one
 entity. Declaring a function, class, or enum whose name is a builtin function (`print`,
 `println`, `printerr`, `printerrln`, `Str`, `open`) or a builtin class (`Obj`, `Str`,
-`Array`, `File`, `Error`, `Int`, `Float`, `Bool`, `Char`) is a compile-time error, reported at
+`Array`, `File`, `Error`, `Tuple`) is a compile-time error, reported at
 the declaration:
 
 ```pkn

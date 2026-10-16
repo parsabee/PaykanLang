@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: MIT
 // CodeGen tests: the conversion constructors `Target<Source>(value)` (#64) —
 // `Str<int|float|bool|char>` and the numeric conversions between int, float,
-// bool and char, with their edge cases — and the boxed forms and `bool<Str>`
-// (#88).  The parses (`int<Str>`,
-// `float<Str>`) are in BoxedPrimitiveTests.cpp; the panics (out-of-range
+// bool and char, with their edge cases — and `bool<Str>` (#88).  The parses
+// (`int<Str>`, `float<Str>`) are in ParseTests.cpp; the panics (out-of-range
 // `int<float>` / `char<int>`) are death tests in DriverTests.cpp.  Every test
 // runs on the backend the suite is built for (llvm and c) and checks zero
 // live heap blocks.
@@ -182,79 +181,7 @@ TEST(Conversion, NestedAndInsideOtherExpressions) {
   g.expectNoLeaks("Conversion.NestedAndInsideOtherExpressions");
 }
 
-// -- The boxed forms and bool<Str> (#88)
-
-TEST(Conversion, StrOfBoxedSourcesFormatsLikeThePrimitive) {
-  LeakGuard g;
-  auto r = compileAndRun(R"(
-    fn boxed(o: Obj) -> Str {
-      match o {
-        x: Int { return "Int " + Str<Int>(x); }
-        x: Float { return "Float " + Str<Float>(x); }
-        x: Bool { return "Bool " + Str<Bool>(x); }
-        x: Char { return "Char " + Str<Char>(x) + "|"; }
-        _ { return "other"; }
-      }
-    }
-    fn some(o: Obj?) -> Obj { match o { x: Obj { return x; } None { return None; } } }
-    fn main() -> int {
-      println(boxed(some(Int<Str>("-42"))));
-      println(boxed(some(Float<Str>("2.0"))));
-      println(boxed(some(Float<Str>("0.1"))));
-      println(boxed(some(Bool<Str>("True"))));
-      println(boxed(some(Bool<Str>("False"))));
-      return 0;
-    }
-  )");
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "Int -42\nFloat 2\nFloat 0.1\nBool True\nBool False\n");
-  g.expectNoLeaks("Conversion.StrOfBoxedSourcesFormatsLikeThePrimitive");
-}
-
-TEST(Conversion, StrOfAnOwnedBoxReleasesIt) {
-  // The boxed argument is a fresh temporary (a call's result, a parse's
-  // unwrapped box): it is released after the formatting.
-  LeakGuard g;
-  auto r = compileAndRun(R"(
-    fn parsed(s: Str) -> Int {
-      match Int<Str>(s) { n: Int { return n; } None { return parsed("0"); } }
-    }
-    fn main() -> int {
-      println(Str<Int>(parsed("17")) + Str<Int>(parsed("x")));
-      xs: Str[] = [];
-      xs.push(Str<Int>(parsed("5")));
-      println(xs[0]);
-      return 0;
-    }
-  )");
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "170\n5\n");
-  g.expectNoLeaks("Conversion.StrOfAnOwnedBoxReleasesIt");
-}
-
-TEST(Conversion, BoxedParsesGiveTheOptionalBox) {
-  LeakGuard g;
-  auto r = compileAndRun(wrapMain(R"(
-    match Int<Str>("-12") { n: Int { println(n); } None { println("None"); } }
-    match Int<Str>("1.5") { n: Int { println(n); } None { println("None"); } }
-    match Float<Str>("2.5e1") { f: Float { println(f); } None { println("None"); } }
-    match Float<Str>("") { f: Float { println(f); } None { println("None"); } }
-    match Bool<Str>("True") { b: Bool { println(b); } None { println("None"); } }
-    match Bool<Str>("false") { b: Bool { println(b); } None { println("None"); } }
-    println(Int<Str>("9223372036854775808"));
-    println(Float<Str>(" 1"));
-    println(Bool<Str>("False"));
-    kept: Int? = Int<Str>("8");
-    println(kept);
-    kept = Int<Str>("nope");
-    println(kept);
-    println(Str<bool>(Int<Str>("3") == None) + Str<bool>(Bool<Str>("") == None));
-  )"));
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "-12\nNone\n25\nNone\nTrue\nNone\nNone\nNone\nFalse\n"
-                      "8\nNone\nFalseTrue\n");
-  g.expectNoLeaks("Conversion.BoxedParsesGiveTheOptionalBox");
-}
+// -- bool<Str> (#88)
 
 TEST(Conversion, BoolOfStrParsesExactlyTrueAndFalse) {
   LeakGuard g;
@@ -284,30 +211,30 @@ TEST(Conversion, BoolOfStrParsesExactlyTrueAndFalse) {
   g.expectNoLeaks("Conversion.BoolOfStrParsesExactlyTrueAndFalse");
 }
 
-TEST(Conversion, BoxedRoundTrips) {
+TEST(Conversion, ParseRoundTrips) {
   LeakGuard g;
   auto r = compileAndRun(wrapMain(R"(
     inputs: Str[] = ["0", "-7", "123456789", "x"];
     i = 0;
     while (i < inputs.len()) {
-      match Int<Str>(inputs[i]) {
-        n: Int { println(Str<bool>(Str<Int>(n) == inputs[i])); }
+      match int<Str>(inputs[i]) {
+        n: int { println(Str<bool>(Str<int>(n) == inputs[i])); }
         None { println("None"); }
       }
       i = i + 1;
     }
-    match Float<Str>(Str<float>(0.1)) {
-      f: Float { println(Str<Float>(f)); }
+    match float<Str>(Str<float>(0.1)) {
+      f: float { println(Str<float>(f)); }
       None { }
     }
-    match Bool<Str>(Str<bool>(False)) {
-      b: Bool { println(Str<Bool>(b)); }
+    match bool<Str>(Str<bool>(False)) {
+      b: bool { println(Str<bool>(b)); }
       None { }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "True\nTrue\nTrue\nNone\n0.1\nFalse\n");
-  g.expectNoLeaks("Conversion.BoxedRoundTrips");
+  g.expectNoLeaks("Conversion.ParseRoundTrips");
 }
 
 // -- The inferred form Target(value) (#88)
@@ -334,15 +261,14 @@ TEST(Conversion, InferredFormMatchesTheExplicitOne) {
   g.expectNoLeaks("Conversion.InferredFormMatchesTheExplicitOne");
 }
 
-TEST(Conversion, InferredParsesAndBoxedForms) {
+TEST(Conversion, InferredParses) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     fn show(s: Str) -> Str {
       out = "";
       match int(s) { n: int { out = out + "int " + Str(n); } None { out = out + "-"; } }
-      match Float(s) { f: Float { out = out + " Float " + Str(f); } None { out = out + " -"; } }
+      match float(s) { f: float { out = out + " float " + Str(f); } None { out = out + " -"; } }
       match bool(s) { b: bool { out = out + " bool " + Str(b); } None { out = out + " -"; } }
-      match Bool(s) { b: Bool { out = out + " Bool " + Str(b); } None { out = out + " -"; } }
       return out;
     }
     fn main() -> int {
@@ -350,15 +276,15 @@ TEST(Conversion, InferredParsesAndBoxedForms) {
       println(show("1.5"));
       println(show("True"));
       println(show("nope"));
-      println(Int("x"));
-      kept: Int? = Int("7");
+      println(int("x"));
+      kept: int? = int("7");
       println(kept);
       println(float("1e999"));
       return 0;
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "int 12 Float 12 - -\n- Float 1.5 - -\n"
-                      "- - bool True Bool True\n- - - -\nNone\n7\nNone\n");
-  g.expectNoLeaks("Conversion.InferredParsesAndBoxedForms");
+  EXPECT_EQ(r.StdOut, "int 12 float 12 -\n- float 1.5 -\n"
+                      "- - bool True\n- - -\nNone\n7\nNone\n");
+  g.expectNoLeaks("Conversion.InferredParses");
 }

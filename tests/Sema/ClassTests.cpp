@@ -137,9 +137,19 @@ TEST(Class, RemovedConversionNamesAreFree) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
+// The boxed primitive classes removed by #96 no longer reserve their names.
+TEST(Class, RemovedBoxedClassNamesAreFree) {
+  auto r =
+      semaCheck(withClasses("class Int { v: int; }\n"
+                            "impl Int { fn __init__(x: int) { self.v = x; } }\n"
+                            "class Char {}\n"
+                            "impl Char { fn __init__() {} }",
+                            "i: Int = Int(3); n: int = i.v; return 0;"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
 TEST(Class, NameShadowsBuiltinClassRejected) {
-  for (const char *name :
-       {"Obj", "Str", "Array", "File", "Error", "Int", "Float", "Bool"}) {
+  for (const char *name : {"Obj", "Str", "Array", "File", "Error", "Tuple"}) {
     auto r = semaCheck(withClasses(std::string("class ") + name + " {}"));
     EXPECT_FALSE(r.Ok) << name;
     EXPECT_NE(
@@ -1126,10 +1136,10 @@ static size_t errorCount(const std::string &diags) {
 TEST(ClassRecovery, BuiltinNameClassDoesNotHideOtherClasses) {
   auto r = semaCheck(withClasses("class A {}\n"
                                  "impl A { fn __init__() { } }\n"
-                                 "class Int { }",
+                                 "class File { }",
                                  "a = A();\nreturn 0;"));
   EXPECT_FALSE(r.Ok);
-  EXPECT_NE(r.Diagnostics.find("'Int' is a builtin class and cannot be "
+  EXPECT_NE(r.Diagnostics.find("'File' is a builtin class and cannot be "
                                "redeclared"),
             std::string::npos)
       << r.Diagnostics;

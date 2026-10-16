@@ -13,7 +13,6 @@ fn main() -> int {
   n2: float = float(i);         // float<int>
   n3: bool = bool(i);           // bool<int>
   n4: char = char(i);           // char<int>
-  b1: Int? = Int(s);            // Int<Str>
-  match b1 { x: Int { t: Str = Str(x); } None { } }   // Str<Int>
+  match p2 { x: float { t: Str = Str(x); } None { } }  // Str<float>
   return 0;
 }

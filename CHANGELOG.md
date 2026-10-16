@@ -255,6 +255,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the same objects freed; `s` simply stays readable.  Until the last-use pass (#186)
   lands, each former `mov` costs one retain/release pair.  The use-after-move,
   loop back-edge and "cannot 'mov' ..." diagnostics went with it.  `mov` stays reserved.
+- The boxed primitive classes `Int`, `Float`, `Bool` and `Char` (#96), now that an optional
+  primitive is a value: with them went their conversions `Int<Str>`, `Float<Str>`,
+  `Bool<Str>` and `Str<Int>` & co. (use `int<Str>` & co., which return `int?` & co.), and
+  the runtime's `PaykanInt` / `PaykanFloat` / `PaykanBool` / `PaykanChar` (`Basic.c`).  The
+  names are no longer reserved, so a program may declare a class `Int`.
 
 ### Fixed
 
