@@ -190,10 +190,10 @@ TEST(Tuple, DestructureReassignsRefVariables) {
   auto r = compileAndRun(R"(
     fn main() -> int {
       s: Str = "old";
-      arr: int[] = [1];
-      s, arr = ("new", [4, 5, 6]);   // both old boxes released
+      w: Str = "w" + "x";
+      s, w = ("new", "abc");          // both old boxes released
       println(s);
-      println(Str<int>(arr.len()));
+      println(Str<int>(w.len()));
       o: Obj = None;
       o, s = ("boxed", "again");      // None-initialised var promoted to owned
       println(o);
@@ -438,17 +438,17 @@ TEST(Tuple, LiteralsTakeTheDestinationsOptionalElementTypes) {
     class Node { v: int; }
     impl Node { fn __init__(v: int) { self.v = v; } }
     class Holder {
-      t: (Str, int?)[];
-      fn put(xs: (Str, int?)[]) { self.t = xs; }
+      t: (Str, int?)[3];
+      fn put(xs: (Str, int?)[3]) { self.t = xs; }
     }
 
     impl Holder {
-      fn __init__() { self.t = []; }
+      fn __init__() { self.t = [("", None), ("", None), ("", None)]; }
     }
     fn which(n: Node?) -> Str { match n { x: Node { return "node"; } None { return "none"; } } }
     fn val(n: int?) -> Str { match n { x: int { return Str<int>(x); } None { return "none"; } } }
-    fn count(xs: (Str, int?)[]) -> int { return xs.len(); }
-    fn mk() -> (Node?, int)[] { return [(None, 1), (Node(2), 2)]; }
+    fn count(xs: view (Str, int?)[]) -> int { return xs.len(); }
+    fn mk() -> (Node?, int)[2] { return [(None, 1), (Node(2), 2)]; }
     fn main() -> int {
       b: (Node?, int) = (None, 1);
       a: (int?, Str) = (None, "a");
@@ -456,14 +456,14 @@ TEST(Tuple, LiteralsTakeTheDestinationsOptionalElementTypes) {
       ps = mk();
       println(which(ps[0].0) + " " + which(ps[1].0));
       nb: int? = None;
-      tbl: (Str, int?)[] = [("a", 1), ("b", nb), ("c", None)];
+      tbl: (Str, int?)[3] = [("a", 1), ("b", nb), ("c", None)];
       println(val(tbl[0].1) + " " + val(tbl[1].1) + " " + val(tbl[2].1));
       h = Holder();
-      h.put([("m", 4), ("n", nb)]);
+      h.put([("m", 4), ("n", nb), ("q", 6)]);
       h.t[1] = ("o", 5);
-      h.t.push(("p", None));
+      h.t[2] = ("p", None);
       println(val(h.t[0].1) + " " + val(h.t[1].1) + " " + val(h.t[2].1));
-      nodes: Node?[] = [None, Node(1)];
+      nodes: Node?[2] = [None, Node(1)];
       println(which(nodes[0]) + " " + which(nodes[1]));
       return count([("x", 1), ("y", nb), ("z", None)]);
     }
@@ -479,9 +479,8 @@ TEST(Tuple, LiteralsTakeTheDestinationsOptionalElementTypes) {
 
 // Tuple equality is element-wise even when both sides are the same object, so
 // a tuple holding a NaN (directly, nested, or in a `float?` element) is
-// unequal to itself, like the NaN.  `float?` behaves the same; `float[]` is
-// reference identity by definition, so it equals itself.  Without a NaN a
-// tuple still equals itself.
+// unequal to itself, like the NaN.  `float?` behaves the same.  Without a NaN
+// a tuple still equals itself.
 TEST(Tuple, NaNElementMakesATupleUnequalToItself) {
   LeakGuard g;
   auto r = compileAndRun(R"(
@@ -497,8 +496,6 @@ TEST(Tuple, NaNElementMakesATupleUnequalToItself) {
       println(Str(n == n) + " " + Str(o == o));
       x: float? = nan;
       println(Str(x == x) + " " + Str(x != x));
-      a: float[] = [nan];
-      println(Str(a == a));
       ok = (1, 2.5, "s", (2, 'c'));
       y: float? = 2.5;
       println(Str(ok == ok) + " " + Str(ok != ok) + " " + Str(y == y));
@@ -507,6 +504,6 @@ TEST(Tuple, NaNElementMakesATupleUnequalToItself) {
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "False True False\nFalse False\nFalse False\n"
-                      "False True\nTrue\nTrue False True\n");
+                      "False True\nTrue False True\n");
   g.expectNoLeaks("NaNElementMakesATupleUnequalToItself");
 }

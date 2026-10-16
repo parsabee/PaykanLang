@@ -320,21 +320,22 @@ TEST(Ownership, MatchBindingBackedControl) {
 
 // -- A4 — array-typed class fields
 
-// An array field must be stored as a retained box: the destructor releases
-// the slot as a box, so a raw store would be a use-after-free / double free.
+// An array field holds its elements in the object: storing one must retain
+// the strings it copies, as the destructor releases them, so a raw store would
+// be a use-after-free / double free.
 TEST(Ownership, ArrayFieldStoreAndRead) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class H {
-      arr: int[];
+      arr: Str[3];
     }
 
     impl H {
-      fn __init__(a: int[]) { self.arr = a; }
+      fn __init__(a: Str[3]) { self.arr = a; }
     }
     fn main() -> int {
-      h: H = H([1, 2, 3]);
-      println(Str<int>(h.arr[0]));
+      h: H = H([Str(1), Str(2), Str(3)]);
+      println(h.arr[0]);
       println(Str<int>(h.arr.len()));
       return 0;
     }
@@ -422,12 +423,12 @@ TEST(Ownership, PushOnNestedSubscript) {
   g.expectNoLeaks("PushOnNestedSubscript");
 }
 
-// len() on a call-result array must dispatch through the Array vtable (it
-// previously resolved through a coincidental Str slot).
+// len() on a call-result array must be the array's length, not its
+// elements' (it previously resolved through a coincidental Str slot).
 TEST(Ownership, LenOnCallResult) {
   LeakGuard g;
   auto r = compileAndRun(R"(
-    fn makeArr() -> int[] { return [1, 2, 3]; }
+    fn makeArr() -> Str[3] { return [Str(1), Str(2), Str(3)]; }
     fn main() -> int {
       println(Str<int>(makeArr().len()));
       return 0;
@@ -487,7 +488,7 @@ TEST(Ownership, ImplicitDeclFromObjectArrayElement) {
       fn __init__(n: int) { self.x = n; }
     }
     fn main() -> int {
-      arr: A[] = [A(1), A(2)];
+      arr: A[2] = [A(1), A(2)];
       y = arr[1];
       println(Str<int>(y.x));
       return 0;

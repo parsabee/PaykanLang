@@ -653,8 +653,7 @@ TEST(OptionalTuple, TupleWithOptionalElements) {
       println(Str<bool>(t == u));
       y: Node?, j: int = u;
       println(Str<bool>(y == None));
-      ts: (Node?, int)[2] = [t, t];
-      ts[1] = u;
+      ts: (Node?, int)[2] = [t, u];
       println(Str<int>(ts.len()));
       return 0;
     }
@@ -672,14 +671,11 @@ TEST(OptionalTuple, ImportedTupleOfOptionals) {
   writeFile(tmp, "lib.pkn", R"pkn(
     class Node { v: int; }
     impl Node { fn __init__(x: int) { self.v = x; } }
-    fn wrap(xs: (Node?, int)[]?) -> (Node?, int)[]? { return xs; }
     fn mk(n: Node?) -> (Node?, int) { return (n, 5); }
   )pkn");
   auto main = writeFile(tmp, "main.pkn", R"pkn(
 import lib;
 fn main() -> int {
-  a: (lib::Node?, int)[]? = lib::wrap(None);
-  println(Str<bool>(a == None));
   x, k = lib::mk(lib::Node(3));
   match x {
     n: lib::Node { println(Str<int>(n.v + k)); }
@@ -692,7 +688,7 @@ fn main() -> int {
 )pkn");
   auto r = compileAndRunFile(main);
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "True\n8\nTrue\n");
+  EXPECT_EQ(r.StdOut, "8\nTrue\n");
   std::filesystem::remove_all(tmp);
   g.expectNoLeaks("ImportedTupleOfOptionals");
 }

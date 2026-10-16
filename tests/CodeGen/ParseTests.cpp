@@ -70,7 +70,7 @@ TEST(ParseInt, InvalidStringsAreNone) {
 TEST(ParseInt, ResultIsAnOrdinaryIntOptional) {
   LeakGuard g;
   auto r = compileAndRun(wrapMain(R"(
-    inputs: Str[] = ["10", "bad", "20", "x", "30"];
+    inputs: Str[5] = ["10", "bad", "20", "x", "30"];
     total: int = 0;
     valid: int = 0;
     i: int = 0;

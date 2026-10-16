@@ -664,7 +664,7 @@ TEST(Leak, RefTypedArgsToUserMethods) {
   auto r = compileAndRun(R"(
     class Bag {
       xs: int[2];
-      fn sum(ys: view int[]) -> int { return ys[0] + ys[1]; }
+      view fn sum(ys: view int[]) -> int { return ys[0] + ys[1]; }
       fn names(ns: Str[2]) -> int { ns[1] = "m"; return ns.len(); }
       fn first(t: (int, Str)) -> Str { return t.1; }
       fn own() -> int { return self.sum(self.xs); }     // field argument
