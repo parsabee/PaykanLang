@@ -232,12 +232,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `opt_f64`, `opt_bool` and `opt_char` (a payload and an 8-byte presence word), and four
   instructions, `some`, `none`, `is_some` and `unwrap`; optional slots have addresses and
   may be fields.  A backend plugin must handle them.
+- An optional is not an object (#96): a `T?` no longer converts to `Obj`, so `o: Obj = maybe`
+  and passing, returning or storing a `T?` where an `Obj` is expected are errors (`cannot use
+  optional 'Node?' as 'Obj': an optional is not an object; unwrap it with match`).  The print
+  family takes an optional as it is and prints `None` or the value, as before.  A `view` is
+  never converted: a `view T` cannot be passed to a `view T?` parameter or bind a `view T?`
+  local (`'v' is a 'view' parameter; a 'view' is not converted, and parameter 1 of 'take' is a
+  'view int?'`); a value that is not a `view` still widens.
 - An optional primitive (`int?`, `float?`, `bool?`, `char?`) is a value, the primitive and a
   presence flag held inline (#96), instead of a heap box: a local, parameter, result, field,
   array element or tuple element of one allocates nothing and is never reference counted, and
   `int<Str>` & co. return one without allocating (the runtime's `PaykanString_parse_int` &
-  co.).  The semantics are unchanged.  In an `Obj` a present value is still its boxed `Int` &
-  co.  An `int?[]` is a runtime array of 16-byte elements (`PaykanArray_new_sized`, with its
+  co.).  The semantics are unchanged.  An `int?[]` is a runtime array of 16-byte elements (`PaykanArray_new_sized`, with its
   own vtable), and a tuple holds an `int?` as a presence slot and a value slot (tuple kind
   `PAYKAN_TUPLE_OPT`).
 

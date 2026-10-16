@@ -178,18 +178,19 @@ rather than an allocation, retaining and releasing it is harmless and it is neve
 
 ### Optional types
 
-A value of optional type `T?` (see `10-optionals.md`) is the **same shared box** as a `T`; the
+A value of optional type `T?` of a reference type `T` (see `10-optionals.md`) is the **same
+shared box** as a `T`; the
 absent value is represented by *having no box at all* rather than by the `None` singleton. This
 means an optional costs nothing extra: retaining, releasing, moving or destroying an absent
 `T?` is a no-op, a `None` stored into an optional field or array slot releases the previous
-value and allocates nothing, and `x == None` is a plain null test. When a `T?` is handed to an
-`Obj` slot (for example `println(maybe)`), the compiler substitutes the `None` singleton for an
-absent value so that an `Obj` always refers to an object.
+value and allocates nothing, and `x == None` is a plain null test. A `T?` never becomes an `Obj`
+(an optional is not an object); when one is printed (`println(maybe)`), the compiler prints the
+`None` singleton for an absent value.
 
 An optional primitive (`int?`, `float?`, `bool?`, `char?`) is a value instead (#96): the
 primitive and a presence flag, copied like an `int` and never counted, inline in a variable, a
-field, an array element or a tuple element. Only where an object is expected (an `Obj`) is a
-present value kept as its boxed `Int` & co., allocated when it is stored there. A `match` arm binding the `int` copies the
+field, an array element or a tuple element. It is not an object, so it never becomes an
+`Obj`. A `match` arm binding the `int` copies the
 value out and owns nothing.
 
 ---

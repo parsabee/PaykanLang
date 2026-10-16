@@ -543,10 +543,11 @@ Val ModuleLowering::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
     // A boxed conversion source (`Str<Int>(x)`): format the boxed value.
     if (const char *unbox = conversionUnboxer(node->getCalleeName()))
       v = L.callRuntime(unbox, {v}, "conv.unboxed");
-    // An optional argument to an `Obj` builtin: substitute the None
-    // singleton for a null pointer so it prints as "None".
-    if (v.Ty == Type::Obj)
-      v = L.emitOptionalToObjRaw(argExpr, v);
+    // An optional reference printed: the None object for a null one, so it
+    // prints as "None".
+    if (v.Ty == Type::Obj &&
+        ast::isa<ast::OptionalType>(argExpr->getResolvedType()))
+      v = L.emitNoneObject(v);
     Type paramTy = i < sig.Params.size() ? sig.Params[i] : Type::Void;
     v = L.coerceBoolToI64(v, paramTy);
     args.push_back(v);

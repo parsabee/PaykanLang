@@ -3,9 +3,8 @@
 // CodeGen / E2E tests for optional primitives `int?`, `float?`, `bool?` and
 // `char?` (#66).  An optional primitive is a value, the primitive and a
 // presence flag (#96), held inline in variables, fields, array elements and
-// tuple elements; only in an `Obj` is a present value the runtime's Int /
-// Float / Bool / Char object.  Every test runs under the tracking allocator
-// and asserts zero live heap blocks.
+// tuple elements, and never an object.  Every test runs under the tracking
+// allocator and asserts zero live heap blocks.
 
 #include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
@@ -333,33 +332,6 @@ TEST(OptionalPrimitive, TernaryCopyAndReassignment) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "0\nNone\n2\nNone\n1\n1\n1\n2\n");
   g.expectNoLeaks("TernaryCopyAndReassignment");
-}
-
-TEST(OptionalPrimitive, IntoObjAsBoxedClasses) {
-  LeakGuard g;
-  auto r = compileAndRun(R"pkn(
-    fn kind(o: Obj) -> Str {
-      match o {
-        i: Int   { return "Int"; }
-        f: Float { return "Float"; }
-        b: Bool  { return "Bool"; }
-        c: Char  { return "Char"; }
-        _        { return "other"; }
-      }
-    }
-    fn main() -> int {
-      a: int? = 1;  f: float? = 1.5;  b: bool? = True;  c: char? = 'c';
-      n: int? = None;
-      println(kind(a)); println(kind(f)); println(kind(b)); println(kind(c));
-      println(kind(n));
-      o: Obj = c;
-      println(o);
-      return 0;
-    }
-  )pkn");
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "Int\nFloat\nBool\nChar\nother\nc\n");
-  g.expectNoLeaks("IntoObjAsBoxedClasses");
 }
 
 // `inout` optional values: a parameter, a local borrow and a field, written

@@ -7,14 +7,14 @@
 //   * a 1,000,000-node `Node?` linked list (class instances, Str fields);
 //   * a deep, wide tree: a 200,000-node spine whose every node also holds a
 //     three-node subtree and a Node (with its Str);
-//   * a chain of 200,000 nested arrays, each holding a boxed int, a tuple
+//   * a chain of 200,000 nested arrays, each holding a string, a tuple
 //     and the next array;
 //   * a chain of tuples nested 200,000 deep through an `Obj` slot, with an
 //     Error from a failed open() in every 10,000th link.
 //
 // Runtime allocation sites: object structs + PaykanShared (Shared.c),
 // PaykanString_new (String.c), PaykanArray_* (Array.c), PaykanTuple_new
-// (Tuple.c), PaykanInt boxes (Basic.c), PaykanError_new (Error.c).
+// (Tuple.c), PaykanError_new (Error.c).
 //
 // Expected under --track-heap: live blocks : 0.
 
@@ -78,9 +78,8 @@ fn arrays(n: int) -> int {
   prev: Obj = None;
   i = 0;
   while (i < n) {
-    b: int? = i;
     o: Obj[] = [prev];
-    o.push(b);
+    o.push(Str<int>(i));
     o.push((i, "t"));
     prev = o;
     i = i + 1;

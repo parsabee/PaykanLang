@@ -161,7 +161,7 @@ TEST(FloatCompare, NaNNotEqualAsAConditionAndANegation) {
   EXPECT_EQ(r.StdOut, "ne\nTrue\nFalse\nTrue\n3\n");
 }
 
-TEST(FloatCompare, NaNThroughTupleBoxedFloatAndMatch) {
+TEST(FloatCompare, NaNThroughTupleOptionalAndMatch) {
   LeakGuard g;
   auto r = compileAndRun(wrapMain(R"(
     inf: float = 1.0e308 * 10.0;
@@ -170,15 +170,9 @@ TEST(FloatCompare, NaNThroughTupleBoxedFloatAndMatch) {
     t1: (float, int) = (n, 1);
     t2: (float, int) = (n, 1);
     println(Str<bool>(t1 == t2) + " " + Str<bool>(t1 != t2));
-    // A boxed Float's equals compares the values with == (a present
-    // `float?` is a Float box; matched as one through `Obj`).
-    o: Obj = float<Str>("nan");
-    match o {
-      f: Float {
-        println(Str<bool>(f == f) + " " + Str<bool>(f != f));
-      }
-      _ { println("no nan"); }
-    }
+    // Two present `float?`s compare their values with ==.
+    f: float? = float<Str>("nan");
+    println(Str<bool>(f == f) + " " + Str<bool>(f != f));
     // A float value match tests each arm with ==: NaN takes the wildcard.
     match n {
       1.0 { println("one"); }
@@ -188,7 +182,7 @@ TEST(FloatCompare, NaNThroughTupleBoxedFloatAndMatch) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.ExitCode, 0);
   EXPECT_EQ(r.StdOut, "False True\nFalse True\nother\n");
-  g.expectNoLeaks("FloatCompareNaNThroughTupleBoxedFloatAndMatch");
+  g.expectNoLeaks("FloatCompareNaNThroughTupleOptionalAndMatch");
 }
 
 // -- Return code

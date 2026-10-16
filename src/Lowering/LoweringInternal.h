@@ -386,20 +386,9 @@ private:
   /// The text of the optional value @p opt, "None" or its value's (what
   /// `Str<int>` & co. give): an owned string temporary.
   Val emitOptionalToString(const Val &opt);
-  /// The boxed form of the optional value @p opt of type @p optTy, for an
-  /// `Obj` slot: a fresh +1 box of the runtime's Int / Float / Bool / Char
-  /// object, or null for None.
-  Val emitOptionalBox(const Val &opt, ast::Type *optTy);
-  /// Box the primitive value @p v as the present value of @p optTy (`int?`,
-  /// `float?`, `bool?`, `char?`): a fresh +1 box of the runtime's Int /
-  /// Float / Bool / Char object.
-  Val emitPrimitiveBox(const Val &v, ast::Type *optTy);
-  /// The primitive value held by the boxed Int / Float / Bool / Char object
-  /// @p rawObj (a present `int?` & co.), as a value of type @p innerTy.
-  Val emitPrimitiveUnbox(const Val &rawObj, ast::Type *innerTy,
-                         const std::string &name);
-  Val emitOptionalToObj(ast::Expr *expr, const Val &box);
-  Val emitOptionalToObjRaw(ast::Expr *expr, const Val &raw);
+  /// The raw object @p raw of an optional reference printed by a print
+  /// builtin, with the None object for a null one.
+  Val emitNoneObject(const Val &raw);
   Val emitOptionalEquality(ast::BinaryExpr *node);
 
   // -- Statements

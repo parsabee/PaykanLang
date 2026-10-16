@@ -893,9 +893,6 @@ void ModuleLowering::emitClassVarRebind(const std::string &name,
       emitRetain(newBox);
     }
   }
-  // An optional value into an `Obj` variable: its boxed form.
-  if (ast::Type *optTy = newBox ? nullptr : valueOptionalType(rhsExpr))
-    newBox = emitOptionalBox(val, optTy);
   if (!newBox) {
     if (exprAlreadyShared(rhsExpr))
       newBox = takeSharedOwnership(rhsExpr, val);
@@ -905,8 +902,6 @@ void ModuleLowering::emitClassVarRebind(const std::string &name,
       // never gets here: visitAssignStmt acquires it with emitAsShared.
       newBox = emitSharedNew(val, "new.box");
   }
-  // `T?` into an `Obj` variable: never store a NULL box in an `Obj`.
-  newBox = emitOptionalToObj(rhsExpr, newBox);
 
   // Release the old box (null-safe) and store the new one.
   storeVarBox(name, newBox);
@@ -1359,94 +1354,7 @@ Val ModuleLowering::emitOptionalToString(const Val &opt) {
   return str;
 }
 
-Val ModuleLowering::emitOptionalBox(const Val &opt, ast::Type *optTy) {
-  pir::LocalId tmp = B.addLocal("opt.box", Type::Box);
-  B.store(tmp, Val::null(Type::Box));
-  pir::If *s = B.openIf(B.isSome(opt, "opt.has"), false);
-  B.enter(*s->Then);
-  if (Val box = emitPrimitiveBox(B.unwrap(opt, "opt.value"), optTy))
-    B.store(tmp, box);
-  B.leave();
-  return B.load(tmp, "opt.box");
-}
-
-Val ModuleLowering::emitPrimitiveBox(const Val &v, ast::Type *optTy) {
-  auto *inner = ast::cast<ast::BuiltinType>(ast::stripOptional(optTy));
-  const char *ctor = nullptr;
-  Val arg = v;
-  switch (inner->getTypeKind()) {
-  case ast::BuiltinType::Int:
-    ctor = kPaykanIntNew;
-    break;
-  case ast::BuiltinType::Float:
-    ctor = kPaykanFloatNew;
-    arg = promoteIntToFloat(arg, ASTCtx.getFloatTy()); // `float? = 3`
-    break;
-  case ast::BuiltinType::Bool:
-    ctor = kPaykanBoolNew;
-    arg = coerceBoolToI64(arg, Type::I64);
-    break;
-  case ast::BuiltinType::Char:
-    ctor = kPaykanCharNew;
-    break;
-  case ast::BuiltinType::Void:
-    break;
-  }
-  if (!ctor) {
-    reportInternalError("boxing a value of type '" + ast::typeName(inner) +
-                        "'");
-    return Val();
-  }
-  Val raw = callRuntime(ctor, {arg}, "opt.prim");
-  return emitSharedNew(raw, "opt.prim.box");
-}
-
-Val ModuleLowering::emitPrimitiveUnbox(const Val &rawObj, ast::Type *innerTy,
-                                       const std::string &name) {
-  auto *inner = ast::cast<ast::BuiltinType>(innerTy);
-  switch (inner->getTypeKind()) {
-  case ast::BuiltinType::Int:
-    return callRuntime(kPaykanIntValue, {rawObj}, name);
-  case ast::BuiltinType::Float:
-    return callRuntime(kPaykanFloatValue, {rawObj}, name);
-  case ast::BuiltinType::Bool: {
-    Val bits = callRuntime(kPaykanBoolValue, {rawObj}, name);
-    return B.cmp(pir::CmpPred::Ne, bits, Val::i64(0), name);
-  }
-  case ast::BuiltinType::Char:
-    return callRuntime(kPaykanCharValue, {rawObj}, name);
-  case ast::BuiltinType::Void:
-    break;
-  }
-  reportInternalError("unboxing a value of type '" + ast::typeName(inner) +
-                      "'");
-  return Val();
-}
-
-static bool isOptionalToObjCoercion(ast::Expr *expr) {
-  ast::Type *rt = expr->getResolvedType();
-  return expr->getCoercedType() && rt && ast::isa<ast::OptionalType>(rt) &&
-         !ast::isa<ast::OptionalType>(expr->getCoercedType());
-}
-
-Val ModuleLowering::emitOptionalToObj(ast::Expr *expr, const Val &box) {
-  if (!box || !isOptionalToObjCoercion(expr))
-    return box;
-  // None: hand the `Obj` slot a +1 box of the immortal None singleton.
-  pir::LocalId tmp = B.addLocal("opt.box", Type::Box);
-  B.store(tmp, box);
-  Val isNone = B.cmp(pir::CmpPred::Eq, box, Val::null(Type::Box), "opt.isnone");
-  pir::If *s = B.openIf(isNone, false);
-  B.enter(*s->Then);
-  Val noneBox = emitSharedNew(externObject(kPaykanObjectNone), "opt.none.box");
-  B.store(tmp, noneBox);
-  B.leave();
-  return B.load(tmp, "opt.box");
-}
-
-Val ModuleLowering::emitOptionalToObjRaw(ast::Expr *expr, const Val &raw) {
-  if (!raw || !isOptionalToObjCoercion(expr))
-    return raw;
+Val ModuleLowering::emitNoneObject(const Val &raw) {
   Val isNone = B.cmp(pir::CmpPred::Eq, raw, Val::null(Type::Obj), "opt.isnone");
   return B.select(isNone, externObject(kPaykanObjectNone), raw, "opt.obj");
 }
@@ -1523,17 +1431,12 @@ Val ModuleLowering::emitAsShared(ast::Expr *expr) {
   // `None` into a `T?` slot is the null box (no allocation at all).
   if (isNoneForOptional(expr))
     return Val::null(Type::Box);
-  // An optional value into an `Obj` slot: its boxed form (and None the
-  // None object).
-  if (ast::Type *optTy = valueOptionalType(expr)) {
-    Val v = emitExpr(expr);
-    if (!v)
-      return v;
-    return emitOptionalToObj(expr, emitOptionalBox(v, optTy));
+  // An optional value is never boxed (Sema lets none reach a box slot).
+  if (valueOptionalType(expr)) {
+    reportInternalError("an optional value where a box is due");
+    return Val();
   }
-  Val box = emitAsSharedRaw(expr);
-  // `T?` into an `Obj` slot: never hand an `Obj` a NULL box.
-  return emitOptionalToObj(expr, box);
+  return emitAsSharedRaw(expr);
 }
 
 Val ModuleLowering::emitBorrowedBox(ast::Expr *arg, std::vector<Val> &keep) {
@@ -1542,7 +1445,7 @@ Val ModuleLowering::emitBorrowedBox(ast::Expr *arg, std::vector<Val> &keep) {
   // A variable's or a field's own box, when the argument is that reference
   // as it is: it outlives the call.
   ast::Type *ty = arg->getResolvedType();
-  if (ty && ast::isRefType(ty) && !isOptionalToObjCoercion(arg)) {
+  if (ty && ast::isRefType(ty)) {
     auto *id = ast::dyn_cast<ast::Identifier>(arg);
     if (id && CurrentScope->hasLocal(id->getName()) && holdsBox(id->getName()))
       return loadVarBox(id->getName());

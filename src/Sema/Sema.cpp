@@ -214,10 +214,11 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
     return isAssignable(dstOT->getInnerType(), ast::stripOptional(src));
   }
 
-  // An optional source can only flow into a non-optional slot typed `Obj`,
-  // which may hold `None` today anyway.  `T?` -> `T` requires a `match`.
+  // An optional never flows into a non-optional slot: `T?` -> `T` requires a
+  // `match`, and an optional is not an object, so not an `Obj` either (#96;
+  // the print builtins take one, see visitCallExpr).
   if (ast::isa<ast::OptionalType>(src))
-    return dst == Ctx.getObjTy();
+    return false;
 
   // Any array type is assignable to Obj (arrays are heap-allocated objects).
   if (dst == Ctx.getObjTy() && ast::isa<ast::ArrayType>(src))
@@ -293,15 +294,7 @@ bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
   adoptArrayLiteralType(dst, src);
   // `int` -> `int?` (and `int` -> `float?`): the lowering makes the value
   // the optional's present value.
-  if (ast::wrapsInOptional(dst, srcTy)) {
-    src->setCoercedType(dst);
-    return true;
-  }
-  // `T?` -> `Obj` (the only non-optional destination an optional may flow
-  // into): the lowering must turn a null box into the boxed `None` singleton so
-  // the receiving `Obj` slot never holds a NULL box, which no `Obj` consumer
-  // (method dispatch, `match`) expects today.
-  if (ast::isa<ast::OptionalType>(srcTy) && !ast::isa<ast::OptionalType>(dst))
+  if (ast::wrapsInOptional(dst, srcTy))
     src->setCoercedType(dst);
   return true;
 }
@@ -420,6 +413,14 @@ bool Sema::diagnoseOptionalNarrowing(ast::SourceLocation loc, ast::Type *dst,
   auto *srcOT = ast::dyn_cast<ast::OptionalType>(srcTy);
   if (!srcOT || ast::isa<ast::OptionalType>(dst))
     return false;
+  // An optional is not an object (#96): it does not become an `Obj`.
+  if (dst == Ctx.getObjTy()) {
+    bool unwrapHelps = isAssignable(dst, srcOT->getInnerType());
+    error(loc, "cannot use optional '" + typeName(srcOT) +
+                   "' as 'Obj': an optional is not an object" +
+                   (unwrapHelps ? "; unwrap it with match" : ""));
+    return true;
+  }
   // Only report the unwrap hint when unwrapping would actually help, i.e. the
   // wrapped type itself fits the destination; otherwise it is an ordinary
   // type mismatch and the generic diagnostic is more accurate.
@@ -956,8 +957,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     if (superInit && argTypes.size() == expectedParams.size()) {
       S.checkInoutArgs(superInit->getParamModes(), expectedParams,
                        node->getArguments(), names::kMethodSuper);
-      S.checkViewArgs(superInit->getParamModes(), node->getArguments(),
-                      names::kMethodSuper);
+      S.checkViewArgs(superInit->getParamModes(), expectedParams,
+                      node->getArguments(), names::kMethodSuper);
     }
     S.CurrentClassCtx->SuperInitCalled = true;
     return S.Ctx.getVoidTy();
@@ -1038,11 +1039,21 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     return sig->ReturnType;
   }
 
+  // The print builtins print an optional too, `None` or its value: they
+  // take one as it is, not as an `Obj` (an optional is not one).
+  const bool printsOptionals =
+      sig->IsBuiltin && (node->getCalleeName() == names::kPrint ||
+                         node->getCalleeName() == names::kPrintln ||
+                         node->getCalleeName() == names::kErrPrint ||
+                         node->getCalleeName() == names::kErrPrintln);
+
   // Check argument types.
   for (size_t i = 0; i < argTypes.size(); ++i) {
     if (!argTypes[i])
       continue; // already reported
     auto *argExpr = node->getArguments()[i];
+    if (printsOptionals && ast::isa<ast::OptionalType>(argTypes[i]))
+      continue;
     if (!S.checkAssignable(sig->ParamTypes[i], argTypes[i], argExpr) &&
         !S.diagnoseOptionalNarrowing(argExpr->getLocation(), sig->ParamTypes[i],
                                      argTypes[i])) {
@@ -1055,7 +1066,7 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   }
   const std::string callee = displayName(node->getCalleeName());
   S.checkInoutArgs(sig->Modes, sig->ParamTypes, node->getArguments(), callee);
-  S.checkViewArgs(sig->Modes, node->getArguments(), callee);
+  S.checkViewArgs(sig->Modes, sig->ParamTypes, node->getArguments(), callee);
   S.noteBorrowResult(node, callee, sig->Modes, node->getArguments(), nullptr);
 
   node->setResolvedType(sig->ReturnType);
@@ -1164,8 +1175,8 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
       S.checkViewNotStored(node->getArguments()[0],
                            node->getArguments()[0]->getResolvedType());
   } else if (node->getMethodName() != names::kMethodEquals) {
-    S.checkViewArgs(method->getParamModes(), node->getArguments(),
-                    node->getMethodName());
+    S.checkViewArgs(method->getParamModes(), method->getParamTypes(),
+                    node->getArguments(), node->getMethodName());
   }
   S.noteBorrowResult(node, node->getMethodName(), method->getParamModes(),
                      node->getArguments(), node->getReceiver());
@@ -1666,7 +1677,8 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
   AccumulatedImportContexts.clear();
 
   // Bootstrap builtin functions — the print family takes a single Obj
-  // (printed via toString); compose multiple pieces with `+`.  Paykan has no
+  // (printed via toString), or an optional (`None` or its value, see
+  // visitCallExpr); compose multiple pieces with `+`.  Paykan has no
   // variadic functions or overloading, so these are ordinary one-arg builtins.
   declareFunction(names::kPrint, Ctx.getVoidTy(), {Ctx.getObjTy()},
                   /*isBuiltin=*/true);
@@ -2633,6 +2645,10 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
         CurrentScope->set(node->getName(), declTy);
         return false;
       }
+      if (node->getMode() == ast::ParamMode::View &&
+          !checkViewLocalNotConverted(node->getName(), declTy,
+                                      node->getInitExpr(), initTy))
+        viewOk = false;
     } else {
       if (diagnoseEmptyArrayLiteral(node->getLocation(), nullptr, initTy)) {
         declarePoisoned(CurrentScope, node->getName());

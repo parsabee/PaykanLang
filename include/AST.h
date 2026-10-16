@@ -181,9 +181,7 @@ public:
 class Expr : public ASTNode {
   Type *ResolvedType = nullptr; // set by Sema after type-checking
   // Set by Sema when the value undergoes an implicit conversion at its use
-  // site.  There are two such conversions: an optional `T?` flowing into an
-  // `Obj` slot (the lowering materialises the `None` singleton for a null
-  // box), and a primitive flowing into an optional primitive slot (`int` ->
+  // site: a primitive flowing into an optional primitive slot (`int` ->
   // `int?`: the coerced type is the optional and the lowering makes the
   // value its present value, see wrapsInOptional).  nullptr = no conversion.
   Type *CoercedType = nullptr;
