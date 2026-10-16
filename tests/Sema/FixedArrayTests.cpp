@@ -231,11 +231,14 @@ TEST(FixedArray, ElementsOfReferenceTypes) {
                   "yet");
 }
 
+// An optional value takes a presence flag padded to its value's alignment
+// and the value: an `int?[65536]` is 1 MiB.
 TEST(FixedArray, ElementsAndSize) {
-  expectBodyError("  os: int?[2] = [None, 1];",
-                  "variable 'os' has type 'int?[2]': a fixed-size array of "
-                  "'int?' is not supported yet");
-  expectBodyError("  g: int?[2][3] = [];", "has type 'int?[2][3]'");
+  expectOk("  os: int?[2] = [None, 1];\n"
+           "  bs: bool?[3] = [True, None, False];\n"
+           "  os[0] = os[1];\n"
+           "  b: bool = os[0] == None && bs[1] != None;");
+  expectBodyError("  big: int?[65537] = [];", "which is too big");
   expectBodyError("  big: int[200000] = [];",
                   "variable 'big' has type 'int[200000]', which is too big: a "
                   "fixed-size array holds at most 1048576 bytes");

@@ -421,3 +421,45 @@ TEST(FixedArray, SliceParameters) {
   EXPECT_EQ(r.StdOut, "12 5 30 15 5\n4 zzz 6\n17 6 Bb 15\n");
   g.expectNoLeaks("SliceParameters");
 }
+
+// An element can be an optional value: held inline (a zeroed one is None),
+// matched, compared with None and printed, also through a slice.
+TEST(FixedArray, OptionalElements) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    fn total(xs: view int?[]) -> int {
+      t = 0;
+      i = 0;
+      while (i < xs.len()) {
+        match xs[i] {
+          n: int { t = t + n; }
+          None { t = t + 100; }
+        }
+        i = i + 1;
+      }
+      return t;
+    }
+    fn main() -> int {
+      os: int?[3] = [1, None, 3];
+      os[0] = None;
+      os[2] = os[2];
+      fs: float?[2] = [2, None];
+      bs: bool?[2] = [None, True];
+      cs: char?[1] = ['x'];
+      copy = os;
+      copy[1] = 7;
+      println(Str(total(os)) + " " + Str(total(copy)) + " " +
+              Str(total([None, 5])));
+      println(fs[0]);
+      println(fs[1]);
+      println(bs[1]);
+      println(cs[0]);
+      if (os[1] == None && copy[1] != None) { println("eq ok"); }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "203 110 105\n2\nNone\nTrue\nx\neq ok\n");
+  g.expectNoLeaks("OptionalElements");
+}
