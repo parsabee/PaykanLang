@@ -88,6 +88,13 @@ void printName(std::string_view name, std::ostream &os) {
     printEscaped(name, os);
 }
 
+/// A local's or field's type: `mem(<size>, <align>)` for a `mem` slot.
+void printSlotType(Type t, int64_t size, int64_t align, std::ostream &os) {
+  os << typeName(t);
+  if (t == Type::Mem)
+    os << '(' << size << ", " << align << ')';
+}
+
 void printSymbol(std::string_view name, std::ostream &os) {
   os << '@';
   printName(name, os);
@@ -188,7 +195,10 @@ public:
       indent(1);
       OS << "local ";
       printLocalRef(static_cast<LocalId>(i));
-      OS << ": " << typeName(F.Locals[i].Ty) << "\n";
+      OS << ": ";
+      const Local &l = F.Locals[i];
+      printSlotType(l.Ty, l.Size, l.Align, OS);
+      OS << "\n";
     }
     printBlock(F.Body, 1);
   }
@@ -450,7 +460,9 @@ void printClass(const Class &c, std::ostream &os) {
   for (const Field &f : c.Fields) {
     os << "  field ";
     printName(f.Name, os);
-    os << ": " << typeName(f.Ty) << "\n";
+    os << ": ";
+    printSlotType(f.Ty, f.Size, f.Align, os);
+    os << "\n";
   }
   if (!c.VTable.empty()) {
     os << "  vtable {\n";

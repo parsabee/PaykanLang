@@ -61,7 +61,10 @@ inline constexpr OpcodeEntry kOpcodeTable[] = {
     {Opcode::FieldAddr, 35, "field.addr"},
     {Opcode::PtrLoad, 36, "ptr.load"},
     {Opcode::PtrStore, 37, "ptr.store"},
-    // 38-255 reserved.
+    {Opcode::PtrAdd, 38, "ptr.add"},
+    {Opcode::MemCopy, 39, "mem.copy"},
+    {Opcode::MemZero, 40, "mem.zero"},
+    // 41-255 reserved.
 };
 
 struct TypeEntry {
@@ -77,7 +80,8 @@ inline constexpr TypeEntry kTypeTable[] = {
     {Type::Obj, 6, "obj"},           {Type::Ptr, 7, "ptr"},
     {Type::OptI64, 8, "opt_i64"},    {Type::OptF64, 9, "opt_f64"},
     {Type::OptBool, 10, "opt_bool"}, {Type::OptChar, 11, "opt_char"},
-    // 12-15 reserved (#96 further inline optionals), 16 (#99 weak), 17-255
+    {Type::Mem, 17, "mem"},
+    // 12-15 reserved (#96 further inline optionals), 16 (#99 weak), 18-255
     // reserved.
 };
 
@@ -108,7 +112,7 @@ template <typename T, size_t N> constexpr bool rowsUnique(const T (&table)[N]) {
 static_assert(std::size(kOpcodeTable) ==
                   static_cast<size_t>(Opcode::Unwrap) + 1,
               "every Opcode needs a row in kOpcodeTable");
-static_assert(std::size(kTypeTable) == static_cast<size_t>(Type::OptChar) + 1,
+static_assert(std::size(kTypeTable) == static_cast<size_t>(Type::Mem) + 1,
               "every Type needs a row in kTypeTable");
 static_assert(detail::rowsUnique(kOpcodeTable), "duplicate opcode row");
 static_assert(detail::rowsUnique(kTypeTable), "duplicate type row");

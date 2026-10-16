@@ -433,6 +433,97 @@ fn @main() -> i64 {
   EXPECT_NE(err.Message.find("no '%result ='"), std::string::npos) << err.str();
 }
 
+// A `mem` local or field holds an aggregate's bytes: `mem(<size>, <align>)`,
+// reached only through its address.
+TEST(PIR, MemSlotsRoundTripAndVerify) {
+  const char *src = R"(module "m"
+class C {
+  field tag: char
+  field buf: mem(3, 1)
+  field words: mem(16, 8)
+  vtable {
+    destroy = @C.destroy : (obj) -> void
+  }
+}
+fn @C.destroy(%self: obj) -> void {
+  free %self
+  ret
+}
+fn @main() -> i64 {
+  local %m: mem(24, 8)
+  %p = local.addr %m
+  mem.zero %p, 24
+  %q = ptr.add %p, 8
+  mem.copy %q, %p, 16
+  %o = new C
+  %f = field.addr %o, C.words
+  mem.copy %f, %p, 16
+  free %o
+  ret 0
+}
+)";
+  std::string once = reprint(src);
+  ASSERT_FALSE(once.empty());
+  EXPECT_EQ(reprint(once), once);
+  for (const char *e : {"field buf: mem(3, 1)", "local %m.0: mem(24, 8)",
+                        "= ptr.add %p.", "mem.copy %q.", "mem.zero %p."})
+    EXPECT_NE(once.find(e), std::string::npos) << e << "\n" << once;
+  ParseError err;
+  auto p = parseProgram(src, err);
+  ASSERT_TRUE(p) << err.str();
+  EXPECT_TRUE(verify(*p).empty()) << formatErrors(verify(*p));
+
+  // `mem` is no value's type, so not a parameter's.
+  EXPECT_FALSE(
+      parseProgram("module \"m\"\nfn @f(%p: mem) -> void {\n  ret\n}\n", err));
+  EXPECT_NE(err.Message.find("'mem' is only the type of a local or a field"),
+            std::string::npos)
+      << err.str();
+}
+
+TEST(PIRVerifier, ChecksMemSlots) {
+  std::string errs = verifyText(R"(module "m"
+class C {
+  field ok: mem(16, 8)
+  field bad: mem(3, 2)
+  vtable {
+    destroy = @C.destroy : (obj) -> void
+  }
+}
+fn @C.destroy(%self: obj) -> void {
+  free %self
+  ret
+}
+fn @main() -> i64 {
+  local %m: mem(24, 8)
+  local %z: mem(0, 1)
+  local %a: mem(8, 3)
+  %v = load %m
+  store %m, 1
+  %o = new C
+  %f = field.load %o, C.ok
+  %p = local.addr %m
+  %q = ptr.add %p, 1.5
+  %r = ptr.add %o, 1
+  mem.copy %p, %o, 8
+  mem.zero %p, %p
+  ret 0
+}
+)");
+  for (const char *e :
+       {"field 'C.bad': a mem slot's size must be a multiple of its alignment",
+        "local '%z': a mem slot's size must be positive",
+        "local '%a': a mem slot's alignment must be 1, 2, 4 or 8",
+        "load of a mem local", "store to a mem local",
+        "field.load of mem field 'ok'",
+        "offset of ptr.add 1.5 has type f64, expected i64",
+        "address of ptr.add %", "source of mem.copy %",
+        "byte count of mem.zero %"})
+    EXPECT_NE(errs.find(e), std::string::npos) << e << "\n" << errs;
+  // A mem local and field have addresses.
+  EXPECT_EQ(errs.find("local.addr of"), std::string::npos) << errs;
+}
+
 // Inline optionals: `some` takes a payload type, `is_some` / `unwrap` an
 // optional, and an optional is neither compared, cast, computed with nor
 // passed to a runtime or native function.

@@ -480,10 +480,23 @@ private:
 
   bool parseType(Type &out) {
     if (Cur.Kind == Tok::Word && parseTypeName(Cur.Text, out)) {
+      if (out == Type::Mem)
+        return error("'mem' is only the type of a local or a field");
       advance();
       return true;
     }
     return error("expected a type");
+  }
+
+  /// A local's or field's type: a type, or `mem(<size>, <align>)`.
+  bool parseSlotType(Type &out, int64_t &size, int64_t &align) {
+    if (!isWord("mem"))
+      return parseType(out);
+    advance();
+    out = Type::Mem;
+    return expect(Tok::LParen, "'('") && parseInt(size) &&
+           expect(Tok::Comma, "','") && parseInt(align) &&
+           expect(Tok::RParen, "')'");
   }
 
   bool parseInt(int64_t &out) {
@@ -661,7 +674,7 @@ private:
         advance();
         Field f;
         if (!parseName(f.Name, "a field name") || !expect(Tok::Colon, "':'") ||
-            !parseType(f.Ty))
+            !parseSlotType(f.Ty, f.Size, f.Align))
           return false;
         c.Fields.push_back(std::move(f));
       } else if (isWord("vtable")) {
@@ -781,7 +794,7 @@ private:
       if (idx != static_cast<ValueId>(f.Locals.size()) ||
           written == std::to_string(idx))
         l.Name = written;
-      if (!expect(Tok::Colon, "':'") || !parseType(l.Ty))
+      if (!expect(Tok::Colon, "':'") || !parseSlotType(l.Ty, l.Size, l.Align))
         return false;
       if (LocalNames.count(written))
         return error("local '%" + written + "' declared twice");
@@ -1217,7 +1230,17 @@ private:
         return error("ptr.load of void");
       break;
     case Opcode::PtrStore:
+    case Opcode::MemZero:
       if (!parseCommaOperands(in.Args, 2))
+        return false;
+      break;
+    case Opcode::PtrAdd:
+      if (!parseCommaOperands(in.Args, 2))
+        return false;
+      resultTy = Type::Ptr;
+      break;
+    case Opcode::MemCopy:
+      if (!parseCommaOperands(in.Args, 3))
         return false;
       break;
     case Opcode::Some:

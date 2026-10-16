@@ -36,9 +36,18 @@ enum class Type : uint8_t {
   OptF64,
   OptBool,
   OptChar,
+  // A run of bytes held in memory, never in a value: the type of a `local`
+  // or a field that stores an aggregate (a fixed-size array), whose size and
+  // alignment the local or field gives (docs/pir.md §1).
+  Mem,
 };
 
 const char *typeName(Type t);
+
+/// The alignments a `mem` slot may have.
+constexpr bool isMemAlign(int64_t a) {
+  return a == 1 || a == 2 || a == 4 || a == 8;
+}
 
 /// True for an inline optional type (opt_i64 opt_f64 opt_bool opt_char).
 constexpr bool isOptional(Type t) {
@@ -256,11 +265,14 @@ enum class Opcode : uint8_t {
   // locals
   Load,  // Local -> type
   Store, // Local, value
-  // addresses of scalar slots (`inout` parameters, docs/pir.md §6)
+  // addresses of slots (`inout` parameters, `mem` slots, docs/pir.md §6)
   LocalAddr, // Local -> ptr
   FieldAddr, // obj, ClassName.Field -> ptr
-  PtrLoad,   // ptr -> Result.Ty (i64 f64 bool char)
+  PtrLoad,   // ptr -> Result.Ty (i64 f64 bool char box, an optional)
   PtrStore,  // ptr, value
+  PtrAdd,    // ptr, i64 byte offset -> ptr
+  MemCopy,   // dst ptr, src ptr, i64 byte count (the two may overlap)
+  MemZero,   // ptr, i64 byte count
   // inline optionals (docs/pir.md §6)
   Some,   // payload -> its optional
   None,   // -> Result.Ty (an optional), absent
@@ -326,6 +338,9 @@ struct Block {
 struct Local {
   std::string Name;
   Type Ty;
+  /// A `mem` local's bytes and alignment (zero for any other type).
+  int64_t Size = 0;
+  int64_t Align = 0;
 };
 
 struct Function {
@@ -354,7 +369,10 @@ struct Function {
 
 struct Field {
   std::string Name;
-  Type Ty; // I64 F64 Bool Char Box, or an inline optional
+  Type Ty; // I64 F64 Bool Char Box, an inline optional, or Mem
+  /// A `mem` field's bytes and alignment (zero for any other type).
+  int64_t Size = 0;
+  int64_t Align = 0;
 };
 
 struct VTableEntry {

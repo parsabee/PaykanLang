@@ -1110,6 +1110,8 @@ void ModuleLowering::emitImplicitReturn(const pir::Signature &sig) {
   case Type::OptChar:
     B.emitRet(B.none(sig.Ret));
     break;
+  case Type::Mem: // never a result: the verifier rejects one
+    break;
   }
 }
 

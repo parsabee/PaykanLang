@@ -43,6 +43,7 @@ Design rules:
 | `obj` | raw `PaykanObject*`: an unboxed heap object of any class (also `PaykanString*`, `PaykanArray*`, `PaykanTuple*`, `PaykanFile*`, `PaykanError*`) | `PaykanObject *` (cast at runtime calls) |
 | `ptr` | any other pointer: vtable addresses, literal data, kind descriptors | `void *`  |
 | `opt_i64` `opt_f64` `opt_bool` `opt_char` | an inline optional: a presence flag, then the payload (`i64`, `f64`, `bool`, `char`) at its natural alignment, held and passed by value (#96): 16 bytes for `opt_i64` and `opt_f64`, 2 for `opt_bool` and `opt_char` | `struct { bool present; <payload> value; }` |
+| `mem(N, A)` | N bytes aligned to A (1, 2, 4 or 8; N a positive multiple of A): the storage of an aggregate, such as a fixed-size array. Only a `local` or a field has this type, never a value, a parameter or a result; it is reached through its address (§6) | `_Alignas(A) uint8_t name[N]` |
 
 Paykan types lower as: `int`→`i64`, `float`→`f64`, `bool`→`bool`,
 `char`→`char`, every enum→`i64`, `int?`→`opt_i64`, `float?`→`opt_f64`,
@@ -102,7 +103,9 @@ extern fn @"x::tag"() -> box module "x" symbol @tag ; named `tag` in module "x"
 ```
 
 Locals are declared at the top of the function body (the lowering hoists them,
-like LLVM entry-block allocas) and read/written with `load`/`store`.  Several
+like LLVM entry-block allocas) and read/written with `load`/`store`; a `mem`
+local (`local %a: mem(24, 8)`) is read and written through its address
+instead (`local.addr`, §6).  Several
 locals may share a name (two match arms binding `a`, a name declared in sibling
 scopes), so the printer writes a local as `%name.I` with `I` its index;
 hand-written text may use any spelling as long as declaration and uses agree.
@@ -197,8 +200,9 @@ backend does no inheritance walk.
 
 * **Layout**: the two-word runtime header (vtable pointer, unique-box
   backpointer; `struct PaykanObject` in `Runtime.h`) followed by *all* fields in
-  declaration order, ancestors first.  Field types are `i64 f64 bool char box`
-  and the optionals.
+  declaration order, ancestors first.  Field types are `i64 f64 bool char box`,
+  the optionals and `mem(N, A)` (laid out at its alignment, as C lays out
+  the `uint8_t` array; reached through `field.addr`).
 * **Vtable**: one entry per slot in slot order, each a function symbol (a
   function of this module, an `extern fn`, or `null` for an abstract slot) plus
   its signature.  Slot 0 is always `destroy`.  The vtable's address is the
@@ -319,21 +323,30 @@ store %x, %v
 %v = unwrap %o                                 ; optional -> payload; zero when absent
 ```
 
-**Addresses** (`inout` parameters)
+**Addresses** (`inout` parameters, `mem` slots)
 
 ```
 %p = local.addr %x                             ; the address of local %x (ptr)
 %p = field.addr %o, Point.x                    ; the address of a field of %o (ptr)
 %v = ptr.load i64, %p                          ; the i64 at %p
 ptr.store %p, %v                               ; store %v at %p
+%q = ptr.add %p, %off                          ; %p plus %off (i64) bytes (ptr)
+mem.copy %dst, %src, %n                        ; copy %n (i64) bytes; the two may overlap
+mem.zero %p, %n                                ; set %n (i64) bytes to zero
 ```
 
 An `inout` parameter is a `ptr` parameter: the caller passes the address of
 its storage, and the callee reads and writes it in place with `ptr.load` and
 `ptr.store`.  Scalar, optional and box slots have addresses: `local.addr`
-takes an `i64`, `f64`, `bool`, `char`, optional or `box` local, `field.addr` a
-field of one of those types (every field type), and `ptr.load` / `ptr.store`
-read and write those types.  The verifier cannot
+takes an `i64`, `f64`, `bool`, `char`, optional, `box` or `mem` local, `field.addr` a
+field of any type, and `ptr.load` / `ptr.store` read and write every one of
+those types but `mem`.  A `mem` slot is the bytes of an aggregate: its parts
+are reached with `ptr.add` from its address and read and written with
+`ptr.load` / `ptr.store` at their own types, and the whole is copied with
+`mem.copy` and cleared with `mem.zero`.  A new object's `mem` fields are
+zero, like its other fields; a `mem` local starts uninitialised.  Like
+`ptr.store`, `mem.copy` and `mem.zero` do no ARC: the lowering retains what
+a copy duplicates and releases what a store or a clear overwrites.  The verifier cannot
 know what an address points to, so the lowering always reads and writes it
 with the slot's own type.  A local's address is valid until its function
 returns; a field's address while its object is alive, which the caller
@@ -501,8 +514,14 @@ The verifier rejects a program when:
 * `field.load`/`field.store`/`field.addr`/`new`/`vtable.addr` name an
   unknown class or field; a field store has the wrong type;
 * `local.addr` or `field.addr` takes the address of a slot that is not `i64`,
-  `f64`, `bool`, `char`, an optional or `box`; `ptr.load`/`ptr.store` take an
-  address that is not a `ptr`, or read or write a value of another type;
+  `f64`, `bool`, `char`, an optional, `box` or `mem`; `ptr.load`/`ptr.store`
+  take an address that is not a `ptr`, or read or write a value of another
+  type (`mem` included); `ptr.add`, `mem.copy` or `mem.zero` take an operand
+  that is not a `ptr` address or an `i64` count;
+* a value, a parameter or a result has type `mem`, or a `mem` local or field
+  is read or written with `load`/`store`/`field.load`/`field.store`; a `mem`
+  slot's size is not a positive multiple of its alignment, or its alignment
+  is not 1, 2, 4 or 8;
 * a runtime or native extern takes or returns an optional;
 * `break`/`continue` appear outside a `while`; a statement follows a
   terminator in the same block (a terminator is `break`, `continue`, `ret`,

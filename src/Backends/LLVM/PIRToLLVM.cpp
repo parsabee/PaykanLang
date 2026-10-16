@@ -161,8 +161,21 @@ private:
       // payload is at its own alignment, as C lays out the same struct.
       return llvm::StructType::get(
           Ctx, {llvm::Type::getInt1Ty(Ctx), llvmType(optionalPayload(t))});
+    case Type::Mem:
+      return llvm::Type::getInt8Ty(Ctx); // a mem slot's type is slotType's
     }
     return llvm::Type::getVoidTy(Ctx);
+  }
+
+  /// The type of a local or field: a `mem` slot of N bytes aligned to A is
+  /// an array of N / A integers of A bytes, so that a class struct lays it
+  /// out at its alignment as C does.
+  llvm::Type *slotType(Type t, int64_t size, int64_t align) {
+    if (t != Type::Mem)
+      return llvmType(t);
+    return llvm::ArrayType::get(
+        llvm::Type::getIntNTy(Ctx, static_cast<unsigned>(align * 8)),
+        static_cast<uint64_t>(size / align));
   }
 
   llvm::FunctionType *functionType(const Signature &sig) {
@@ -184,7 +197,7 @@ private:
     std::vector<llvm::Type *> elems{llvm::PointerType::getUnqual(Ctx),
                                     llvm::PointerType::getUnqual(Ctx)};
     for (const Field &f : c.Fields)
-      elems.push_back(llvmType(f.Ty));
+      elems.push_back(slotType(f.Ty, f.Size, f.Align));
     auto *ty =
         llvm::StructType::create(Ctx, elems, symbol + names::kStructSuffix);
     StructTypes[symbol] = ty;
@@ -355,8 +368,13 @@ private:
       arg.setName(p.Name);
       st.Values[p.Id] = &arg;
     }
-    for (const Local &l : f.Locals)
-      st.Locals.push_back(B.CreateAlloca(llvmType(l.Ty), nullptr, l.Name));
+    for (const Local &l : f.Locals) {
+      llvm::AllocaInst *slot =
+          B.CreateAlloca(slotType(l.Ty, l.Size, l.Align), nullptr, l.Name);
+      if (l.Ty == Type::Mem)
+        slot->setAlignment(llvm::Align(static_cast<uint64_t>(l.Align)));
+      st.Locals.push_back(slot);
+    }
 
     bool terminated = emitBlock(f.Body);
     if (!st.Error.empty()) {
@@ -703,7 +721,8 @@ private:
       B.CreateStore(llvm::ConstantPointerNull::get(ptrTy),
                     B.CreateStructGEP(ty, obj, 1));
       for (size_t i = 0; i < c->Fields.size(); ++i) {
-        llvm::Type *ft = llvmType(c->Fields[i].Ty);
+        const Field &fld = c->Fields[i];
+        llvm::Type *ft = slotType(fld.Ty, fld.Size, fld.Align);
         B.CreateStore(llvm::Constant::getNullValue(ft),
                       B.CreateStructGEP(ty, obj, static_cast<unsigned>(2 + i)));
       }
@@ -771,6 +790,20 @@ private:
       break;
     case Opcode::PtrStore:
       B.CreateStore(operand(in.Args[1]), operand(in.Args[0]));
+      break;
+    case Opcode::PtrAdd:
+      setResult(in, B.CreateGEP(B.getInt8Ty(), operand(in.Args[0]),
+                                operand(in.Args[1])));
+      break;
+    case Opcode::MemCopy:
+      // The bytes' alignment is not in PIR: copy them as unaligned.
+      B.CreateMemMove(operand(in.Args[0]), llvm::MaybeAlign(1),
+                      operand(in.Args[1]), llvm::MaybeAlign(1),
+                      operand(in.Args[2]));
+      break;
+    case Opcode::MemZero:
+      B.CreateMemSet(operand(in.Args[0]), B.getInt8(0), operand(in.Args[1]),
+                     llvm::MaybeAlign(1));
       break;
     case Opcode::Some: {
       llvm::Type *ty = llvmType(in.Result.Ty);

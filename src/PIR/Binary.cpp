@@ -190,6 +190,14 @@ private:
   /// A value or local name: dropped under --strip-names.
   void name(std::string_view s) { str(Strip ? std::string_view() : s); }
   void type(Type t) { W.u8(typeEntry(t).Code); }
+  /// A local's or field's type; a `mem` slot adds its size and alignment.
+  void slotType(Type t, int64_t size, int64_t align) {
+    type(t);
+    if (t == Type::Mem) {
+      W.uleb(static_cast<uint64_t>(size));
+      W.uleb(static_cast<uint64_t>(align));
+    }
+  }
   void sig(const Signature &s) {
     W.uleb(s.Params.size());
     for (Type t : s.Params)
@@ -346,7 +354,7 @@ private:
       W.uleb(f.Locals.size());
       for (const Local &l : f.Locals) {
         name(l.Name);
-        type(l.Ty);
+        slotType(l.Ty, l.Size, l.Align);
       }
       W.uleb(f.NextValueId);
       block(&f.Body);
@@ -366,7 +374,7 @@ private:
     W.uleb(c.Fields.size());
     for (const Field &f : c.Fields) {
       str(f.Name);
-      type(f.Ty);
+      slotType(f.Ty, f.Size, f.Align);
     }
     W.uleb(c.VTable.size());
     for (const VTableEntry &e : c.VTable) {
@@ -443,7 +451,7 @@ public:
       return false;
     c.Fields.resize(static_cast<size_t>(n));
     for (Field &f : c.Fields)
-      if (!str(f.Name) || !type(f.Ty))
+      if (!str(f.Name) || !slotType(f.Ty, f.Size, f.Align))
         return false;
     if (!R.count(n, 3))
       return false;
@@ -494,7 +502,7 @@ public:
       return false;
     f.Locals.resize(static_cast<size_t>(n));
     for (Local &l : f.Locals)
-      if (!str(l.Name) || !type(l.Ty))
+      if (!str(l.Name) || !slotType(l.Ty, l.Size, l.Align))
         return false;
     return R.uleb32(f.NextValueId) && block(f.Body);
   }
@@ -520,6 +528,25 @@ private:
       return false;
     if (!typeFromCode(c, t))
       return R.fail("reserved type code", R.offset() - 1);
+    if (t == Type::Mem)
+      return R.fail("mem is only the type of a local or a field",
+                    R.offset() - 1);
+    return true;
+  }
+  /// A local's or field's type: a type, or `mem` and its size and alignment.
+  bool slotType(Type &t, int64_t &size, int64_t &align) {
+    uint8_t c;
+    if (!R.u8(c))
+      return false;
+    if (!typeFromCode(c, t))
+      return R.fail("reserved type code", R.offset() - 1);
+    if (t != Type::Mem)
+      return true;
+    uint64_t sz, al;
+    if (!R.uleb(sz, INT64_MAX) || !R.uleb(al, INT64_MAX))
+      return false;
+    size = static_cast<int64_t>(sz);
+    align = static_cast<int64_t>(al);
     return true;
   }
   bool sig(Signature &s) {
