@@ -311,9 +311,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   // -- Fixed-size arrays (docs/language/05-arrays.md, "Fixed-size arrays")
   //
-  // For now only a local variable, a parameter and a result have a `T[n]`
-  // type (set around the resolveType of its annotation, which takes the
-  // flag), of scalars, enums or other such arrays.
+  // For now only a local variable, a parameter, a result and a field have a
+  // `T[n]` type (set around the resolveType of its annotation, which takes
+  // the flag), of scalars, enums, references or other such arrays.
 
   bool FixedArrayAllowed = false;
   /// The most bytes a fixed-size array holds.
@@ -323,6 +323,13 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   static int64_t fixedElementBytes(const ast::Type *ty);
   /// True when @p ty is, or holds, a fixed-size array.
   static bool holdsFixedArray(const ast::Type *ty);
+  /// The type of a parameter of type @p ty and mode @p mode: a slice for a
+  /// `view` or `inout` array of elements a fixed-size array can hold, @p ty
+  /// otherwise.
+  ast::Type *sliceOf(ast::Type *ty, ast::ParamMode mode);
+  /// Why @p arg cannot be passed for the slice @p param, appended to the
+  /// argument's error ("" when @p param is not a slice).
+  static std::string sliceArgNote(const ast::Type *param, const ast::Type *arg);
   /// Report a fixed-size array (@p ty) where only a local can have one yet,
   /// @p where; returns false.
   bool errorFixedArrayHere(ast::SourceLocation loc, ast::Type *ty,

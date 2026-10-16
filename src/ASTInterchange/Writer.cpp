@@ -324,7 +324,7 @@ private:
         type(a);
       close();
     } else {
-      // EnumType and PoisonType exist only after Sema.
+      // EnumType, SliceType and PoisonType exist only after Sema.
       fail("a type no frontend produces (the AST was already checked)");
       none();
     }

@@ -768,7 +768,7 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
                                       "parameter " + std::to_string(i + 1) +
                                           " of " + decl);
           if (pty)
-            params.push_back(pty);
+            params.push_back(sliceOf(pty, m.Modes.mode(i)));
           else
             sigOk = false;
         }
@@ -798,7 +798,7 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
           resolveOrReport(fi.ParamTypeNames[i],
                           "parameter " + std::to_string(i + 1) + " of " + decl);
       if (pty)
-        params.push_back(pty);
+        params.push_back(sliceOf(pty, fi.Modes.mode(i)));
       else
         sigOk = false;
     }

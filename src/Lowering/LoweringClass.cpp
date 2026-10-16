@@ -70,10 +70,10 @@ pir::Signature ModuleLowering::methodSignature(ast::MethodDecl *md) {
   pir::Signature sig;
   sig.Params.push_back(Type::Obj);
   for (size_t i = 0; i < md->getNumParams(); ++i) {
-    Type t = paramPIRType(md->getParamTypes()[i], md->getParamModes().mode(i));
-    if (t == Type::Void)
-      t = Type::Box;
-    sig.Params.push_back(t);
+    appendParamTypes(sig.Params, md->getParamTypes()[i],
+                     md->getParamModes().mode(i));
+    if (sig.Params.back() == Type::Void)
+      sig.Params.back() = Type::Box;
   }
   sig.Ret = md->getReturnType()
                 ? toPIRType(canonicalizeDeclType(md->getReturnType()))
@@ -117,9 +117,10 @@ pir::Signature ModuleLowering::constructorSignature(ast::ClassType *ct) {
   pir::Signature sig;
   if (auto *initMd = ct->findMethod(kMethodInit))
     for (size_t i = 0; i < initMd->getNumParams(); ++i) {
-      Type t = paramPIRType(initMd->getParamTypes()[i],
-                            initMd->getParamModes().mode(i));
-      sig.Params.push_back(t == Type::Void ? Type::Box : t);
+      appendParamTypes(sig.Params, initMd->getParamTypes()[i],
+                       initMd->getParamModes().mode(i));
+      if (sig.Params.back() == Type::Void)
+        sig.Params.back() = Type::Box;
     }
   sig.Ret = Type::Box;
   return sig;
@@ -273,8 +274,7 @@ void ModuleLowering::declareClass(ast::ClassDecl *node) {
           getOrCreateFunction(node->getName() + kNameSep + funcDecl->getName(),
                               methodSignature(md));
       fn->Params[0].Name = kSelf;
-      for (size_t i = 0; i < funcDecl->getParams().size(); ++i)
-        fn->Params[i + 1].Name = funcDecl->getParams()[i].getName();
+      nameParams(*fn, 1, funcDecl->getParams());
     }
   }
   pir::Function *dtor = getOrCreateFunction(
@@ -285,9 +285,7 @@ void ModuleLowering::declareClass(ast::ClassDecl *node) {
       getOrCreateFunction(node->getName(), constructorSignature(ct));
   for (auto *m : node->getMethods())
     if (m->getName() == kMethodInit)
-      for (size_t i = 0; i < m->getParams().size() && i < ctor->Params.size();
-           ++i)
-        ctor->Params[i].Name = m->getParams()[i].getName();
+      nameParams(*ctor, 0, m->getParams());
 }
 
 Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
@@ -312,9 +310,11 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
       pir::LocalId selfLocal = B.addLocal(kSelf, Type::Obj);
       B.store(selfLocal, Val(pir::Operand::value(fn->Params[0]), Type::Obj));
       CurrentScope->declareUnowned(kSelf, selfLocal, ct);
+      size_t at = 1;
       for (size_t i = 0; i < funcDecl->getParams().size(); ++i)
-        declareParam(funcDecl->getParams()[i].getName(), fn->Params[i + 1],
-                     md->getParamTypes()[i], funcDecl->getParams()[i].Mode);
+        at +=
+            declareParam(funcDecl->getParams()[i].getName(), fn->Params, at,
+                         md->getParamTypes()[i], funcDecl->getParams()[i].Mode);
       emitBody(funcDecl->getBody());
     }
     emitImplicitReturn(fn->Sig);

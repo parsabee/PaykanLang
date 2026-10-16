@@ -163,13 +163,16 @@ void ModuleLowering::emitFixedRelease(const Val &addr,
 
 Val ModuleLowering::emitFixedElementAddress(ast::Expr *array,
                                             ast::Expr *index) {
-  auto *ft = ast::cast<ast::FixedArrayType>(array->getResolvedType());
+  auto *ft = ast::dyn_cast<ast::FixedArrayType>(array->getResolvedType());
+  ast::Type *elemTy = ft ? ft->getElementType()
+                         : ast::cast<ast::SliceType>(array->getResolvedType())
+                               ->getElementType();
   Val base = emitFixedAddress(array);
   if (!base)
     return Val();
-  int64_t elemSize = fixedLayout(ft->getElementType()).Size;
-  // Sema checked a constant index.
-  if (auto *lit = ast::dyn_cast<ast::IntegerLiteral>(index))
+  int64_t elemSize = fixedLayout(elemTy).Size;
+  // Sema checked a constant index into a fixed-size array.
+  if (auto *lit = ast::dyn_cast<ast::IntegerLiteral>(index); lit && ft)
     return lit->getValue() == 0
                ? base
                : B.ptrAdd(base, Val::i64(lit->getValue() * elemSize),
@@ -177,12 +180,13 @@ Val ModuleLowering::emitFixedElementAddress(ast::Expr *array,
   Val idx = emitExpr(index);
   if (!idx)
     return Val();
+  Val len = ft ? Val::i64(ft->getLength()) : emitSliceLength(array);
   Val neg = B.cmp(CmpPred::Lt, idx, Val::i64(0), "idx.neg");
-  Val over = B.cmp(CmpPred::Ge, idx, Val::i64(ft->getLength()), "idx.over");
+  Val over = B.cmp(CmpPred::Ge, idx, len, "idx.over");
   pir::If *s = B.openIf(B.select(neg, Val::boolean(true), over, "idx.bad"),
                         /*withElse=*/false);
   B.enter(*s->Then);
-  callRuntime(names::kPaykanPanicIndex, {idx, Val::i64(ft->getLength())});
+  callRuntime(names::kPaykanPanicIndex, {idx, len});
   B.emitUnreachable();
   B.leave();
   Val off = B.binary(Opcode::Mul, idx, Val::i64(elemSize), "elem.off");
@@ -260,6 +264,30 @@ void ModuleLowering::declareFixedParam(const std::string &name,
   pir::LocalId local = B.addLocal(name, Type::Ptr);
   B.store(local, addr);
   CurrentScope->declareInout(name, local, Type::Mem, ty);
+}
+
+bool ModuleLowering::isSliceArg(const ast::Expr *arg) {
+  return ast::dyn_cast<ast::SliceType>(arg->getCoercedType()) ||
+         ast::dyn_cast<ast::SliceType>(arg->getResolvedType());
+}
+
+bool ModuleLowering::emitSliceArg(ast::Expr *arg, std::vector<Val> &args) {
+  // A fixed-size array's bytes (a temporary is released after the call),
+  // or the elements of the slice passed on.
+  Val addr = emitFixedAddress(arg);
+  if (!addr)
+    return false;
+  args.push_back(addr);
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(arg->getResolvedType()))
+    args.push_back(Val::i64(ft->getLength()));
+  else
+    args.push_back(emitSliceLength(arg));
+  return true;
+}
+
+Val ModuleLowering::emitSliceLength(ast::Expr *e) {
+  const std::string &name = ast::cast<ast::Identifier>(e)->getName();
+  return B.load(CurrentScope->lookup(name + ".len"), name + ".len");
 }
 
 Val ModuleLowering::emitFixedResultSlot(ast::Type *ty) {

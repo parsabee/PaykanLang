@@ -104,7 +104,7 @@ impl Box<T> { fn __init__(v: view T) { self.n = 1; } }
 fn main() -> int {
   c = Counter("ab");
   s = "x";
-  xs = [1];
+  xs: int[1] = [1];
   reset(c, s);
   f(None, xs, (1, 2), c);
   a = "a";
@@ -150,7 +150,8 @@ fn main() -> int { return 0; })");
       r, {":12:3: error: 'c' is a 'view' parameter; 'tick' is not a 'view fn'",
           ":13:3: error: 'c' is a 'view' parameter; cannot assign to its "
           "field 'n'",
-          ":14:3: error: 'xs' is a 'view' parameter; 'push' is not a 'view fn'",
+          ":14:3: error: 'int[]' has no method 'push' with these arguments (a "
+          "slice has 'len()')",
           ":15:3: error: 'xs' is a 'view' parameter; cannot assign to its "
           "elements",
           ":16:3: error: cannot assign to 'view' parameter 's'",
@@ -351,7 +352,7 @@ fn main() -> int {
   k = 1;
   p = P();
   q = Q();
-  xs = [1];
+  xs: int[1] = [1];
   both(k, k);
   whole(p, p.x);
   two(p, p.x);

@@ -256,10 +256,12 @@ bool Sema::checkInoutArgs(const ast::ParamModes &modes,
                !ast::isa<ast::MemberAccessExpr>(arg) && !isInoutResult(arg)) {
       msg = argN + " must be a variable or a field: parameter '" +
             modes.name(i) + "' is 'inout'";
-    } else if (!typesEqual(argTy, paramTys[i])) {
+    } else if (!typesEqual(argTy, paramTys[i]) &&
+               !ast::dyn_cast<ast::SliceType>(paramTys[i])) {
       // The callee reads and writes the storage as the parameter's type, so
       // no conversion can happen on the way: not int -> float, and not a
-      // subclass to its base (the callee could store another subclass).
+      // subclass to its base (the callee could store another subclass).  A
+      // slice takes a fixed-size array of exactly its element type.
       msg = argN + " has type '" + typeName(argTy) + "', but ";
       msg += param + " has type '" + typeName(paramTys[i]) + "'";
     } else if (std::string why = inoutPlaceError(arg, "passed to " + param);

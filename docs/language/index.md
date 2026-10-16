@@ -12,7 +12,7 @@ instead; its chapters link here for the details.
 3. [Enums](03-enums.md): declaration, variants, equality and matching.
 4. [Classes](04-classes.md): fields, methods, constructors, inheritance and the `Obj` root.
 5. [Arrays](05-arrays.md): creation, indexing, `push` and `pop`, nested arrays,
-   fixed-size arrays (`T[n]`).
+   fixed-size arrays (`T[n]`), slices (`view T[]`).
 6. [Modules](06-modules.md): import forms, path resolution, non-transitivity and the
    compilation cache.
 7. [Match statements](07-match-statements.md): type, variant, value and optional mode.

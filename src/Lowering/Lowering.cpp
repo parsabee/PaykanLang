@@ -350,7 +350,7 @@ pir::Signature ModuleLowering::functionSignature(ast::FuncDecl *node) {
   if (node->getResultMode() == ast::ParamMode::Inout)
     sig.Ret = Type::Ptr; // the address of the storage it names
   for (auto &p : node->getParams())
-    sig.Params.push_back(paramPIRType(p.ParamType, p.Mode));
+    appendParamTypes(sig.Params, p.ParamType, p.Mode);
   // A fixed-size array result is written where a last parameter points.
   if (ast::dyn_cast<ast::FixedArrayType>(retAstTy)) {
     sig.Params.push_back(Type::Ptr);
@@ -364,8 +364,7 @@ pir::Function *ModuleLowering::declareFunctionPrototype(ast::FuncDecl *node) {
     return it->second;
   pir::Function *fn =
       getOrCreateFunction(node->getName(), functionSignature(node));
-  for (size_t i = 0; i < node->getParams().size(); ++i)
-    fn->Params[i].Name = node->getParams()[i].getName();
+  nameParams(*fn, 0, node->getParams());
   if (ast::dyn_cast<ast::FixedArrayType>(node->getReturnType()))
     fn->Params.back().Name = "result"; // where the result is written
   return fn;
@@ -617,8 +616,10 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
   if (auto *e = ast::dyn_cast<ast::TupleIndexExpr>(expr))
     return e->getResolvedType() && ast::isRefType(e->getResolvedType());
   if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(expr)) {
-    // A fixed-size array's element slot holds the box itself.
-    if (ast::dyn_cast<ast::FixedArrayType>(se->getArray()->getResolvedType()))
+    // A fixed-size array's (or a slice's) element slot holds the box itself.
+    if (ast::Type *arrTy = se->getArray()->getResolvedType();
+        ast::dyn_cast<ast::FixedArrayType>(arrTy) ||
+        ast::dyn_cast<ast::SliceType>(arrTy))
       return ast::isRefType(se->getResolvedType());
     return isObjectElementType(se->getResolvedType()) &&
            exprProducesFreshBox(se->getArray());
@@ -654,7 +655,9 @@ bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
     // An element of a temporary fixed-size array (`mk()[0]`), or of a
     // fresh object's field (`mk().xs[0]`), is read as a +1 box
     // (visitSubscriptExpr): the temporary dies with the read.
-    if (ast::dyn_cast<ast::FixedArrayType>(se->getArray()->getResolvedType())) {
+    if (ast::Type *arrTy = se->getArray()->getResolvedType();
+        ast::dyn_cast<ast::FixedArrayType>(arrTy) ||
+        ast::dyn_cast<ast::SliceType>(arrTy)) {
       ast::Expr *root = se->getArray();
       while (auto *inner = ast::dyn_cast<ast::SubscriptExpr>(root))
         root = inner->getArray();
@@ -1196,10 +1199,10 @@ Val ModuleLowering::visitFuncDecl(ast::FuncDecl *node) {
   FunctionStateGuard fnState(*this, fn, retAstTy, /*methodClassTy=*/nullptr);
   {
     ScopeGuard guard(*this);
-    for (size_t i = 0; i < node->getParams().size(); ++i)
-      declareParam(node->getParams()[i].getName(), fn->Params[i],
-                   canonicalizeDeclType(node->getParams()[i].ParamType),
-                   node->getParams()[i].Mode);
+    size_t at = 0;
+    for (const ast::Param &p : node->getParams())
+      at += declareParam(p.getName(), fn->Params, at,
+                         canonicalizeDeclType(p.ParamType), p.Mode);
     if (node->isNative())
       emitNativeBody(node, *fn);
     else

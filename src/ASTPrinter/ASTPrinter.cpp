@@ -428,6 +428,13 @@ void ASTPrinter::visitTupleType(TupleType *node) {
   }
 }
 
+void ASTPrinter::visitSliceType(SliceType *node) {
+  header("SliceType", node);
+  OS << "\n";
+  ChildScope cs(*this, true);
+  visit(node->getElementType());
+}
+
 void ASTPrinter::visitPoisonType(PoisonType *node) {
   header("PoisonType", node);
   OS << "\n";

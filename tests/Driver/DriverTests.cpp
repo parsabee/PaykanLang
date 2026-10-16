@@ -624,6 +624,18 @@ TEST(Driver, FixedArrayIndexOutOfBoundsPanics) {
   EXPECT_NE(out.find("paykan: array index 3 out of bounds (len=3)"),
             std::string::npos)
       << out;
+  // A slice checks every index, a constant one too, against its length.
+  src = writeTmp("fn at(xs: view int[]) -> int { return xs[2]; }\n"
+                 "fn main() -> int {\n"
+                 "  xs: int[2] = [1, 2];\n"
+                 "  return at(xs);\n"
+                 "}\n");
+  auto [sliceRc, sliceOut] = run(paykanRun() + " " + src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_EQ(sliceRc, 128 + SIGABRT) << sliceOut;
+  EXPECT_NE(sliceOut.find("paykan: array index 2 out of bounds (len=2)"),
+            std::string::npos)
+      << sliceOut;
 }
 
 // #117: a user function spelled like the runtime's panic, with its very

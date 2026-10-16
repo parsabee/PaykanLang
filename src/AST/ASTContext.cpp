@@ -134,6 +134,16 @@ FixedArrayType *ASTContext::getFixedArrayType(Type *elemTy, int64_t length) {
   return at;
 }
 
+// One SliceType per (canonical) element type, as for getArrayType.
+SliceType *ASTContext::getSliceType(Type *elemTy) {
+  auto it = SliceTypes.find(elemTy);
+  if (it != SliceTypes.end())
+    return it->second;
+  auto *st = make<SliceType>(SourceLocation(), elemTy);
+  SliceTypes[elemTy] = st;
+  return st;
+}
+
 // -- Canonical optional types
 //
 // One OptionalType per (canonical) inner type, mirroring getArrayType: the
@@ -383,6 +393,9 @@ std::string typeName(Type *ty) {
   }
   if (auto *ot = dyn_cast<OptionalType>(ty))
     return typeName(ot->getInnerType()) + "?";
+  // A slice is spelled as its parameter's type is, its mode aside.
+  if (auto *st = dyn_cast<SliceType>(ty))
+    return typeName(st->getElementType()) + "[]";
   if (auto *gt = dyn_cast<GenericType>(ty)) {
     // An annotation not resolved yet: `Box<int>`, a bound `Into<int>`.
     std::string s = gt->getName() + "<";

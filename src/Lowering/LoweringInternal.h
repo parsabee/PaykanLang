@@ -565,16 +565,35 @@ private:
   /// address, passed as the call's last argument, where the callee writes
   /// the result.
   Val emitFixedResultSlot(ast::Type *ty);
+  /// True when @p arg is passed for a slice parameter: a fixed-size array
+  /// Sema took for one, or a slice passed on.
+  static bool isSliceArg(const ast::Expr *arg);
+  /// Push what @p arg passes for a slice parameter: the address of its
+  /// elements and their number.  False when it failed.
+  bool emitSliceArg(ast::Expr *arg, std::vector<Val> &args);
+  /// The number of elements of the slice parameter @p e names.
+  Val emitSliceLength(ast::Expr *e);
 
   // -- `inout` parameters (LoweringInout.cpp)
 
   /// The PIR type of a parameter of type @p ty and mode @p mode: `ptr` for
   /// `inout`, toPIRType's otherwise.
   pir::Type paramPIRType(ast::Type *ty, ast::ParamMode mode);
-  /// Declare parameter @p name of a function being emitted, whose value is
-  /// @p arg, type @p astTy and mode @p mode, in the current scope.
-  void declareParam(const std::string &name, const pir::Value &arg,
-                    ast::Type *astTy, ast::ParamMode mode);
+  /// Append the PIR types of a parameter of type @p ty and mode @p mode to
+  /// @p out: one, or a slice's two (the address of its elements and their
+  /// number).
+  void appendParamTypes(std::vector<pir::Type> &out, ast::Type *ty,
+                        ast::ParamMode mode);
+  /// Name @p fn's PIR parameters from @p first after @p params (a slice's
+  /// second is `<name>.len`).
+  static void nameParams(pir::Function &fn, size_t first,
+                         const std::vector<ast::Param> &params);
+  /// Declare parameter @p name of a function being emitted, of type @p astTy
+  /// and mode @p mode, whose value is @p params[@p at] (and the next one for
+  /// a slice), in the current scope; returns how many values it takes.
+  size_t declareParam(const std::string &name,
+                      const std::vector<pir::Value> &params, size_t at,
+                      ast::Type *astTy, ast::ParamMode mode);
   /// Store @p v into variable @p name (local @p local) when it is an
   /// `inout` parameter, through its address; false for any other variable.
   bool storeInout(const std::string &name, pir::LocalId local, const Val &v);

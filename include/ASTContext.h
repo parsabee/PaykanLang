@@ -64,6 +64,9 @@ class ASTContext {
   // ArrayTypes (lazily created by getFixedArrayType).
   std::map<std::pair<Type *, int64_t>, FixedArrayType *> FixedArrayTypes;
 
+  // Canonical SliceType per element type, keyed like ArrayTypes.
+  std::unordered_map<Type *, SliceType *> SliceTypes;
+
   // Canonical OptionalType per inner type (lazily created by getOptionalType).
   // Keyed like ArrayTypes: the inner Type* must be canonical, so `Node?`
   // resolves to one node everywhere and identity is pointer identity.
@@ -194,6 +197,8 @@ public:
   /// @p elemTy (`int[3]`), creating it on first use.  @p elemTy must itself
   /// be canonical (see getArrayType).
   FixedArrayType *getFixedArrayType(Type *elemTy, int64_t length);
+  /// The canonical slice of @p elemTy (see ast::SliceType); Sema-internal.
+  SliceType *getSliceType(Type *elemTy);
 
   /// Return the canonical OptionalType wrapping @p innerTy, creating it on
   /// first use.  @p innerTy must itself be canonical (see getArrayType).

@@ -86,7 +86,8 @@ TEST(Traits, BoundedGenericsRun) {
       a = A(1);
       b = B();
       h = Holder<A>(b);
-      println(greet(a) + " " + greet(b) + " " + Str(total([a, b])) + " " +
+      ab: A[2] = [a, b];
+      println(greet(a) + " " + greet(b) + " " + Str(total(ab)) + " " +
               h.label() + " " + Str(a.same(b)) + " " + Str(a.same(A(1))));
       println(show("s"));
       return 0;

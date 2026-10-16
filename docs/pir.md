@@ -350,7 +350,9 @@ a copy duplicates and releases what a store or a clear overwrites.  A
 fixed-size array is passed as the `ptr` address of its bytes in every mode
 (a by-value callee copies it into a `mem` local of its own first), and a
 function returning one takes a last `ptr` parameter, the address of the
-caller's temporary it writes the result to, and returns `void`.  The verifier cannot
+caller's temporary it writes the result to, and returns `void`.  A slice
+parameter (`view T[]`, `inout T[]`) is two: the `ptr` address of the
+elements and their number, an `i64`.  The verifier cannot
 know what an address points to, so the lowering always reads and writes it
 with the slot's own type.  A local's address is valid until its function
 returns; a field's address while its object is alive, which the caller
