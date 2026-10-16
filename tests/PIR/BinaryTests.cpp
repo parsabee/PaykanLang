@@ -44,6 +44,7 @@ const char *const kEdgeProgram = R"(module "bin"
 cstr @"quoted name" = "a\0b" len 3
 data @.d = [-9223372036854775807, 9223372036854775807, 0, -1, 64, -65]
 bytes @.b = []
+bytes @.k = [5, 0, 4, 3]
 extern obj @$rt.PaykanObject_None
 extern vtable @$rt.PaykanArray_vtable
 
@@ -638,4 +639,16 @@ TEST(PIRBinary, ByteFlipFuzz) {
         mustNotCrash(b);
       }
     }
+}
+
+TEST(PIRBinary, TupleSlotKindsUpToTheOptionalsPresenceWord) {
+  // 0-4 are the value and reference kinds, 5 an optional's presence word;
+  // nothing above it is a kind.
+  for (uint8_t kind : {5, 6}) {
+    Module m;
+    m.Name = "k";
+    m.Bytes.push_back({".k", {0, kind}});
+    auto decoded = binary::decode(binary::encode(m));
+    EXPECT_EQ(decoded.isOk(), kind == 5) << int(kind);
+  }
 }

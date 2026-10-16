@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 //
 // Paykan runtime — the boxed primitives Int, Float, Bool and Char: a
-// primitive in an Obj-typed variable (an `int?` & co. there, or in an array
-// or tuple slot, is one of them or NULL for None).
+// primitive in an Obj-typed variable (an `int?` & co. there is one of them,
+// or the None object).
 
 #include "Runtime.h"
 #include "RuntimeInternal.h"

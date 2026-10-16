@@ -734,7 +734,7 @@ ClassRec
 ExternGlobalRec  str name ; u8 kind (0 obj, 1 vtable)        always $rt.
 CStrRec          str name ; bytes                            no NUL stored
 DataRec          str name ; uleb n ; n × sleb
-BytesRec         str name ; bytes                            tuple slot kinds; each byte ≤ 4, checked
+BytesRec         str name ; bytes                            tuple slot kinds; each byte ≤ 5 (5, an optional's presence word), checked
 SlotRec (#170)   str name ; u32 flags (bits0-1 linkage ; bit2 constant ; bit3 lazy ; bit4 singletonInstance #168) ; type ; [bit2] Operand init
 ClassObjRec (#160) str name ; str class ; uleb nTypeArgs ; nTypeArgs × str
 ```

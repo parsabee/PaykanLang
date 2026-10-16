@@ -21,7 +21,7 @@ Design rules:
   releases *before* them.
 * **No target concepts.**  No LLVM types, no C types, no calling-convention
   detail.  LP64 is assumed by the runtime ABI (every array/tuple slot is 8
-  bytes), and PIR inherits that assumption.
+  bytes, an optional value 16), and PIR inherits that assumption.
 * **Runtime by name.**  Anything the runtime does is a `call` to an `extern fn`
   named by its C symbol under the `$rt.` prefix (`@$rt.PaykanString_new`; the
   list below is the ABI).  Only ops that *every*
@@ -388,11 +388,16 @@ CodeGen enforced, now in one place.
   of them are equal when their `is_some` agree and, both present, their
   `unwrap`s are `==`, and a `match` arm binding the primitive is its
   `unwrap`.  The print builtins print one as its text, formatted with
-  `PaykanString_from_int` & co. when present and `"None"` otherwise.  Where
-  only a box fits (an `Obj` slot, an array element, a tuple element) it is
-  kept boxed: `PaykanInt_new` & co. of the payload followed by `box`, or
-  `null` for None, made on each store and read back (`PaykanInt_value` &
-  co.) on each load.
+  `PaykanString_from_int` & co. when present and `"None"` otherwise.  An
+  `int?[]` & co. is a `PaykanArray_new_sized(len, 16)` array whose
+  elements are read and written in place: `ptr.load` / `ptr.store` at
+  `PaykanArray_slot(arr, i)` (bounds-checked), `ptr.store` at
+  `PaykanArray_push_slot(arr)` for a push, and `PaykanArray_pop_into(arr,
+  local.addr)` for a pop; each address is used before the array can change
+  length.  A tuple holds an `int?` element in two slots, an OPT presence
+  word (`is_some`, 0 or 1) and its value (the `unwrap`, 0 when absent).
+  Only in an `Obj` slot is it boxed: `PaykanInt_new` & co. of the payload
+  followed by `box`, or the None object.
 * **Conversions** (`Target<Source>(value)`, #64): `Str<…>` calls
   `PaykanString_from_int` & co. (an owned string temporary); `int<Str>` /
   `float<Str>` / `bool<Str>` call `PaykanString_parse_int` /
@@ -444,6 +449,9 @@ PaykanArray_get(obj, i64) -> i64        PaykanArray_set(obj, i64, i64) -> void
 PaykanArray_set_obj(obj, i64, box) -> void
 PaykanArray_push(obj, i64) -> void      PaykanArray_push_obj(obj, box) -> void
 PaykanArray_pop(obj) -> i64             PaykanArray_pop_obj(obj) -> box
+; arrays of optional values (16-byte elements, accessed in place)
+PaykanArray_new_sized(i64, i64) -> obj  PaykanArray_slot(obj, i64) -> ptr
+PaykanArray_push_slot(obj) -> ptr       PaykanArray_pop_into(obj, ptr) -> void
 ; tuples
 PaykanTuple_new(i64, ptr) -> obj        PaykanTuple_get(obj, i64) -> i64
 PaykanTuple_set(obj, i64, i64) -> void  PaykanTuple_set_obj(obj, i64, box) -> void
@@ -468,6 +476,7 @@ PaykanFile_readln(obj) -> box
 ; globals
 extern obj PaykanObject_None     extern obj PaykanFile_Stdin
 extern vtable PaykanArray_vtable  extern vtable PaykanArray_obj_vtable
+extern vtable PaykanArray_sized_vtable
 extern vtable PaykanInt_vtable    extern vtable PaykanFloat_vtable
 extern vtable PaykanBool_vtable   extern vtable PaykanChar_vtable
 ```

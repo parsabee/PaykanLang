@@ -131,6 +131,14 @@ inline constexpr const char *kPaykanArrayPush = "PaykanArray_push";
 inline constexpr const char *kPaykanArrayPushObj = "PaykanArray_push_obj";
 inline constexpr const char *kPaykanArrayPop = "PaykanArray_pop";
 inline constexpr const char *kPaykanArrayPopObj = "PaykanArray_pop_obj";
+inline constexpr const char *kPaykanArrayNewSized = "PaykanArray_new_sized";
+inline constexpr const char *kPaykanArraySlot = "PaykanArray_slot";
+inline constexpr const char *kPaykanArrayPushSlot = "PaykanArray_push_slot";
+inline constexpr const char *kPaykanArrayPopInto = "PaykanArray_pop_into";
+inline constexpr const char *kPaykanArraySizedVtable =
+    "PaykanArray_sized_vtable";
+/// PAYKAN_OPTIONAL_SIZE: the bytes of an `int?[]` element (Runtime.h).
+inline constexpr long kOptionalElemSize = 16;
 inline constexpr const char *kPaykanArrayVtable = "PaykanArray_vtable";
 inline constexpr const char *kPaykanArrayObjVtable = "PaykanArray_obj_vtable";
 
@@ -305,6 +313,10 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanArrayPushObj,
     kPaykanArrayPop,
     kPaykanArrayPopObj,
+    kPaykanArrayNewSized,
+    kPaykanArraySlot,
+    kPaykanArrayPushSlot,
+    kPaykanArrayPopInto,
     // Tuple
     kPaykanTupleNew,
     kPaykanTupleSet,
@@ -348,6 +360,7 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     // Runtime vtables referenced by `is` / match checks
     kPaykanArrayVtable,
     kPaykanArrayObjVtable,
+    kPaykanArraySizedVtable,
     kPaykanIntVtable,
     kPaykanFloatVtable,
     kPaykanBoolVtable,
@@ -366,6 +379,7 @@ enum TupleSlotKind : unsigned char {
   kTupleSlotBool = 2,  // int64_t 0 / 1
   kTupleSlotChar = 3,  // int64_t holding one byte
   kTupleSlotRef = 4,   // PaykanShared* retained by the tuple
+  kTupleSlotOpt = 5,   // an optional value's presence word; its value next
 };
 
 // -- Kinds of the types a generic native function is passed

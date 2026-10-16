@@ -386,14 +386,10 @@ private:
   /// The text of the optional value @p opt, "None" or its value's (what
   /// `Str<int>` & co. give): an owned string temporary.
   Val emitOptionalToString(const Val &opt);
-  /// The boxed form of the optional value @p opt of type @p optTy, kept
-  /// where only a box fits (an `Obj`, an array or tuple slot): a fresh +1
-  /// box of the runtime's Int / Float / Bool / Char object, or null for
-  /// None.
+  /// The boxed form of the optional value @p opt of type @p optTy, for an
+  /// `Obj` slot: a fresh +1 box of the runtime's Int / Float / Bool / Char
+  /// object, or null for None.
   Val emitOptionalBox(const Val &opt, ast::Type *optTy);
-  /// The optional value (of type @p optTy) of the borrowed box @p box, the
-  /// boxed form of emitOptionalBox.
-  Val emitOptionalFromBox(const Val &box, ast::Type *optTy);
   /// Box the primitive value @p v as the present value of @p optTy (`int?`,
   /// `float?`, `bool?`, `char?`): a fresh +1 box of the runtime's Int /
   /// Float / Bool / Char object.
@@ -440,6 +436,17 @@ private:
   // -- Tuples
 
   unsigned char tupleElementKind(ast::Type *elemTy) const;
+  /// The first runtime slot of element @p i of @p tt (its slot count for
+  /// i == arity): an optional value takes two, its presence word and its
+  /// value.
+  static int64_t tupleSlot(const ast::TupleType *tt, size_t i);
+  /// Store element @p v (of type @p elemTy, not a reference) of a tuple
+  /// being built into its slot(s) from @p slot.
+  void emitTupleSetValue(const Val &tup, int64_t slot, const Val &v,
+                         ast::Type *elemTy);
+  /// Read element (of type @p elemTy, not a reference) of tuple @p tup from
+  /// its slot(s) at @p slot.
+  Val emitTupleGetValue(const Val &tup, int64_t slot, ast::Type *elemTy);
   Val emitTupleKindsGlobal(ast::TupleType *tt);
   Val toSlotBits(const Val &v);
   Val fromSlotBits(const Val &bits, ast::Type *elemTy);

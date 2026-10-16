@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: MIT
 // CodeGen / E2E tests for optional primitives `int?`, `float?`, `bool?` and
 // `char?` (#66).  An optional primitive is a value, the primitive and a
-// presence flag (#96); where only a box fits (an `Obj`, an array or tuple
-// slot) it is kept as the runtime's Int / Float / Bool / Char object, so
-// every test runs under the tracking allocator and asserts zero live heap
-// blocks.
+// presence flag (#96), held inline in variables, fields, array elements and
+// tuple elements; only in an `Obj` is a present value the runtime's Int /
+// Float / Bool / Char object.  Every test runs under the tracking allocator
+// and asserts zero live heap blocks.
 
 #include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
@@ -458,6 +458,154 @@ TEST(OptionalPrimitive, GenericArgumentsAndOptionalOfTypeParameter) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "None\n8\nNone\n2\nNone\n5\n6\n?\n");
   g.expectNoLeaks("GenericArgumentsAndOptionalOfTypeParameter");
+}
+
+// -- Inline storage: arrays, tuples, generics (#96)
+
+// An `int?[]` & co. holds its elements inline: growing past a reallocation
+// and shrinking again keeps every value, None included, and nothing is
+// allocated per element.
+TEST(OptionalPrimitive, ArraysHoldOptionalsInline) {
+  LeakGuard g;
+  auto r = compileAndRun(R"pkn(
+    fn main() -> int {
+      xs: int?[] = [];
+      i = 0;
+      while (i < 100) {
+        if (i % 3 == 0) { xs.push(None); } else { xs.push(i); }
+        i = i + 1;
+      }
+      sum = 0;
+      nones = 0;
+      i = 0;
+      while (i < xs.len()) {
+        match xs[i] { n: int { sum = sum + n; } None { nones = nones + 1; } }
+        i = i + 1;
+      }
+      println(Str<int>(sum) + " " + Str<int>(nones));
+      while (xs.len() > 2) { xs.pop(); }
+      println(xs[0]); println(xs[1]);
+      cs: char?[] = ['a', None, 'c'];
+      bs: bool?[] = [True, None, False];
+      fs: float?[] = [1, None, -0.5];
+      j = 0;
+      while (j < 3) { print(cs[j]); print(" "); print(bs[j]); print(" "); println(fs[j]); j = j + 1; }
+      cs[1] = 'b';
+      println(cs[1]);
+      println(Str<bool>(cs.pop() == cs[0]));
+      return 0;
+    }
+  )pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "3267 34\nNone\n1\na True 1\nNone None None\nc False "
+                      "-0.5\nb\nFalse\n");
+  g.expectNoLeaks("ArraysHoldOptionalsInline");
+}
+
+// A tuple holds an optional value element as a presence word and its value:
+// printing, equality and the elements after it are unaffected.
+TEST(OptionalPrimitive, TuplesHoldOptionalsInline) {
+  LeakGuard g;
+  auto r = compileAndRun(R"pkn(
+    fn pair(n: int) -> (int?, Str, float?) {
+      if (n < 0) { return (None, "neg", None); }
+      return (n, "pos", n * 0.5);
+    }
+    fn main() -> int {
+      a = pair(3);
+      b = pair(-1);
+      println(a); println(b);
+      println(a.1 + " " + b.1);
+      println(a.2); println(b.0);
+      println(Str<bool>(a == pair(3)));
+      println(Str<bool>(a == b));
+      println(Str<bool>(b == pair(-2)));
+      n, s, f = pair(4);
+      println(n); println(s); println(f);
+      t: (char?, bool?) = ('x', None);
+      println(t);
+      return 0;
+    }
+  )pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "(3, pos, 1.5)\n(None, neg, None)\npos neg\n1.5\nNone\n"
+                      "True\nFalse\nTrue\n4\npos\n2\n(x, None)\n");
+  g.expectNoLeaks("TuplesHoldOptionalsInline");
+}
+
+// #96's generics case: a `Stack<int>` whose `pop()` returns `T?`, and an
+// array of `T?` in a template.
+TEST(OptionalPrimitive, GenericStackPopsAnOptional) {
+  LeakGuard g;
+  auto r = compileAndRun(R"pkn(
+    class Stack<T> {
+      items: T[];
+      fn push(x: T) { self.items.push(x); }
+      fn pop() -> T? {
+        if (self.items.len() == 0) { return None; }
+        return self.items.pop();
+      }
+    }
+
+    impl Stack<T> {
+      fn __init__() { self.items = []; }
+    }
+    class Slots<T> {
+      s: T?[];
+      fn put(i: int, x: T) { self.s[i] = x; }
+      fn get(i: int) -> T? { return self.s[i]; }
+    }
+
+    impl Slots<T> {
+      fn __init__(n: int) {
+        self.s = [];
+        i = 0;
+        while (i < n) { self.s.push(None); i = i + 1; }
+      }
+    }
+    fn main() -> int {
+      st = Stack<int>();
+      i = 0;
+      while (i < 1000) { st.push(i); i = i + 1; }
+      total = 0;
+      going = True;
+      while (going) {
+        match st.pop() { n: int { total = total + n; } None { going = False; } }
+      }
+      println(Str<int>(total));
+      sl = Slots<float>(3);
+      sl.put(1, 2.5);
+      println(sl.get(0)); println(sl.get(1));
+      return 0;
+    }
+  )pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "499500\nNone\n2.5\n");
+  g.expectNoLeaks("GenericStackPopsAnOptional");
+}
+
+// An `int?[]` and an `int[]` are different classes at run time (their
+// elements are not the same size): a match on an `Obj` tells them apart.
+TEST(OptionalPrimitive, OptionalArrayIsItsOwnClass) {
+  LeakGuard g;
+  auto r = compileAndRun(R"pkn(
+    fn kind(o: Obj) -> Str {
+      match o {
+        a: int[]  { return "int[] " + Str<int>(a.len()); }
+        b: int?[] { return "int?[] " + Str<int>(b.len()); }
+        _         { return "other"; }
+      }
+    }
+    fn main() -> int {
+      xs: int[] = [1, 2];
+      ys: int?[] = [1, None, 3];
+      println(kind(xs)); println(kind(ys));
+      return 0;
+    }
+  )pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "int[] 2\nint?[] 3\n");
+  g.expectNoLeaks("OptionalArrayIsItsOwnClass");
 }
 
 // -- PIR inline optionals (#96)

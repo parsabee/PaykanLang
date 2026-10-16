@@ -74,7 +74,7 @@ enum Table : size_t {
 };
 constexpr size_t kTableCount = 8;
 constexpr size_t kMinRecordBytes[kTableCount] = {2, 2, 2, 2, 1, 1, 8, 8};
-constexpr uint8_t kMaxBytesKind = 4; // PaykanTupleKind
+constexpr uint8_t kMaxBytesKind = 5; // PaykanTupleKind (5: PAYKAN_TUPLE_OPT)
 constexpr uint8_t kMaxSymbolKind = 9;
 constexpr uint8_t kMaxLinkage = 2;
 constexpr size_t kMinIndexEntryBytes = 5 + 32;
