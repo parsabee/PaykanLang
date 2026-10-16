@@ -224,6 +224,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parameter modes (`view`, `inout`), so calls and overrides in another module
   are checked against them, whether the module is imported from source, from
   the cache or from a prebuilt file.
+- PIR: `mem(N, A)` slots (docs/pir.md §1 and §6), a local's or a field's N bytes
+  aligned to A, for aggregates such as fixed-size arrays.  A `mem` slot is never a
+  value: it is reached through its address, with `ptr.add` to its parts, and copied and
+  cleared with `mem.copy` and `mem.zero`.  A backend plugin must handle the three
+  instructions.
 - PIR: four address instructions, `local.addr`, `field.addr`, `ptr.load` and
   `ptr.store` (docs/pir.md §6), which `inout` parameters lower to.  Only
   scalar (`i64`, `f64`, `bool`, `char`) slots have addresses.  A backend plugin

@@ -45,12 +45,38 @@ bool isAddressable(Type t) {
   return isNumeric(t) || t == Type::Bool || t == Type::Char || t == Type::Box ||
          isOptional(t);
 }
+/// The slots local.addr and field.addr take the address of: the addressable
+/// ones and `mem`.
+bool hasAddress(Type t) { return isAddressable(t) || t == Type::Mem; }
 bool isPointerLike(Type t) {
   return t == Type::Box || t == Type::Obj || t == Type::Ptr;
 }
 bool isFieldType(Type t) {
   return t == Type::I64 || t == Type::F64 || t == Type::Bool ||
-         t == Type::Char || t == Type::Box || isOptional(t);
+         t == Type::Char || t == Type::Box || isOptional(t) || t == Type::Mem;
+}
+
+/// What is wrong with a `mem` slot's layout, or "" when it is valid: a
+/// positive size, a power-of-two alignment up to 8, and a size that is a
+/// multiple of the alignment (as C pads an aggregate).
+std::string memLayoutError(int64_t size, int64_t align) {
+  if (size <= 0)
+    return "a mem slot's size must be positive";
+  if (!isMemAlign(align))
+    return "a mem slot's alignment must be 1, 2, 4 or 8";
+  if (size % align != 0)
+    return "a mem slot's size must be a multiple of its alignment";
+  return "";
+}
+
+/// True when @p sig takes or returns a `mem`, which is never a value.
+bool hasMem(const Signature &sig) {
+  if (sig.Ret == Type::Mem)
+    return true;
+  for (Type t : sig.Params)
+    if (t == Type::Mem)
+      return true;
+  return false;
 }
 
 /// True when @p sig takes or returns an inline optional.
@@ -85,6 +111,7 @@ bool castAllowed(Type from, Type to) {
   case Type::OptF64:
   case Type::OptBool:
   case Type::OptChar:
+  case Type::Mem:
     return false;
   }
   return false;
@@ -215,8 +242,11 @@ private:
         if (!isFieldType(f.Ty))
           error(where, "field '" + c.Name + "." + f.Name + "' has type " +
                            typeName(f.Ty) +
-                           " (fields are i64, f64, bool, char, box or an "
-                           "optional)");
+                           " (fields are i64, f64, bool, char, box, an "
+                           "optional or mem)");
+        else if (f.Ty == Type::Mem)
+          if (std::string bad = memLayoutError(f.Size, f.Align); !bad.empty())
+            error(where, "field '" + c.Name + "." + f.Name + "': " + bad);
       }
       if (!c.IsExtern && (c.VTable.empty() || c.VTable[0].Slot != "destroy"))
         error(where, "class '" + c.Name + "': vtable slot 0 must be 'destroy'");
@@ -240,6 +270,9 @@ private:
     }
 
     for (const Function &f : m.Functions) {
+      if (hasMem(f.Sig))
+        error(where, "function '@" + f.Name +
+                         "' takes or returns a mem (pass its address)");
       if (f.IsExtern) {
         if (!f.Params.empty() || !f.Locals.empty() || !f.Body.Stmts.empty())
           error(where, "extern function '@" + f.Name + "' has a body");
@@ -285,6 +318,13 @@ private:
         : MV(mv), F(f), Where(mv.Index.M.Name + ":@" + f.Name) {}
 
     void run() {
+      for (const Local &l : F.Locals) {
+        if (l.Ty == Type::Void)
+          error("local '%" + l.Name + "' has type void");
+        else if (l.Ty == Type::Mem)
+          if (std::string bad = memLayoutError(l.Size, l.Align); !bad.empty())
+            error("local '%" + l.Name + "': " + bad);
+      }
       for (const Value &p : F.Params)
         define(p);
       bool returns = verifyBlock(F.Body, /*inLoop=*/false);
@@ -310,8 +350,9 @@ private:
       }
       if (!EverDefined.insert(v.Id).second)
         error("value '%" + std::to_string(v.Id) + "' is defined twice");
-      if (v.Ty == Type::Void)
-        error("value '%" + std::to_string(v.Id) + "' has type void");
+      if (v.Ty == Type::Void || v.Ty == Type::Mem)
+        error("value '%" + std::to_string(v.Id) + "' has type " +
+              typeName(v.Ty));
       Visible[v.Id] = v.Ty;
     }
 
@@ -577,6 +618,9 @@ private:
           if (!fld)
             error("class '" + in.ClassName + "' has no field '" + in.Field +
                   "'");
+          else if (fld->Ty == Type::Mem)
+            error(opName(in) + " of mem field '" + in.Field +
+                  "' (a mem slot is read and written through its address)");
         }
         if (store) {
           if (fld)
@@ -614,6 +658,9 @@ private:
         if (in.Local >= F.Locals.size()) {
           error("load of undeclared local " + std::to_string(in.Local));
           result(in, in.Result.Ty);
+        } else if (F.Locals[in.Local].Ty == Type::Mem) {
+          error("load of a mem local (it is read through its address)");
+          result(in, in.Result.Ty);
         } else {
           result(in, F.Locals[in.Local].Ty);
         }
@@ -623,6 +670,8 @@ private:
           break;
         if (in.Local >= F.Locals.size())
           error("store to undeclared local " + std::to_string(in.Local));
+        else if (F.Locals[in.Local].Ty == Type::Mem)
+          error("store to a mem local (it is written through its address)");
         else
           expect(in.Args[0], F.Locals[in.Local].Ty, "stored value");
         result(in, Type::Void);
@@ -631,11 +680,11 @@ private:
         arity(in, 0);
         if (in.Local >= F.Locals.size())
           error("local.addr of undeclared local " + std::to_string(in.Local));
-        else if (!isAddressable(F.Locals[in.Local].Ty))
+        else if (!hasAddress(F.Locals[in.Local].Ty))
           error("local.addr of a local of type " +
                 std::string(typeName(F.Locals[in.Local].Ty)) +
-                " (only i64, f64, bool, char, optional and box slots have "
-                "addresses)");
+                " (only i64, f64, bool, char, optional, box and mem slots "
+                "have addresses)");
         result(in, Type::Ptr);
         break;
       case Opcode::FieldAddr: {
@@ -650,11 +699,11 @@ private:
           error("field.addr on unknown class '" + in.ClassName + "'");
         else if (!fld)
           error("class '" + in.ClassName + "' has no field '" + in.Field + "'");
-        else if (!isAddressable(fld->Ty))
+        else if (!hasAddress(fld->Ty))
           error("field.addr of a field of type " +
                 std::string(typeName(fld->Ty)) +
-                " (only i64, f64, bool, char, optional and box slots have "
-                "addresses)");
+                " (only i64, f64, bool, char, optional, box and mem slots "
+                "have addresses)");
         result(in, Type::Ptr);
         break;
       }
@@ -678,6 +727,28 @@ private:
         result(in, Type::Void);
         break;
       }
+      case Opcode::PtrAdd:
+        if (!arity(in, 2))
+          break;
+        expect(in.Args[0], Type::Ptr, "address of ptr.add");
+        expect(in.Args[1], Type::I64, "offset of ptr.add");
+        result(in, Type::Ptr);
+        break;
+      case Opcode::MemCopy:
+        if (!arity(in, 3))
+          break;
+        expect(in.Args[0], Type::Ptr, "destination of mem.copy");
+        expect(in.Args[1], Type::Ptr, "source of mem.copy");
+        expect(in.Args[2], Type::I64, "byte count of mem.copy");
+        result(in, Type::Void);
+        break;
+      case Opcode::MemZero:
+        if (!arity(in, 2))
+          break;
+        expect(in.Args[0], Type::Ptr, "address of mem.zero");
+        expect(in.Args[1], Type::I64, "byte count of mem.zero");
+        result(in, Type::Void);
+        break;
       case Opcode::Some: {
         if (!arity(in, 1))
           break;
@@ -853,7 +924,9 @@ void verifyProgramLinks(const Program &p, std::vector<VerifyError> &errors) {
       bool same = def->Fields.size() == c.Fields.size();
       for (size_t i = 0; same && i < c.Fields.size(); ++i)
         same = def->Fields[i].Name == c.Fields[i].Name &&
-               def->Fields[i].Ty == c.Fields[i].Ty;
+               def->Fields[i].Ty == c.Fields[i].Ty &&
+               def->Fields[i].Size == c.Fields[i].Size &&
+               def->Fields[i].Align == c.Fields[i].Align;
       if (!same)
         errors.push_back({m.Name, "extern class '" + c.Name +
                                       "' has a different layout than its "

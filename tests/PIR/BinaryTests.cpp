@@ -39,7 +39,7 @@ namespace {
 
 // Every opcode (ftoi is not in kProgram), NaN, -0.0 and inf constants,
 // quoted names, empty blocks, an abstract slot, an extern class, both vcall
-// and vtable.addr forms, extreme integers and chars.
+// and vtable.addr forms, extreme integers and chars, mem slots.
 const char *const kEdgeProgram = R"(module "bin"
 cstr @"quoted name" = "a\0b" len 3
 data @.d = [-9223372036854775807, 9223372036854775807, 0, -1, 64, -65]
@@ -51,6 +51,7 @@ extern vtable @$rt.PaykanArray_vtable
 class "ns::Shape" {
   field "w.h": f64
   field maybe: opt_bool
+  field bytes: mem(24, 8)
   vtable {
     destroy = @"ns::Shape.destroy" : (obj) -> void
     area = null : (obj) -> f64
@@ -72,6 +73,7 @@ fn @"ns::Shape.destroy"(%self.1: obj) -> void {
 fn @main() -> i64 {
   local %"quoted local".0: f64
   local %1: box
+  local %m.2: mem(3, 1)
   %s.1 = new "ns::Shape"
   %f.2 = ftoi 2.5
   %g.3 = ftoi nan
@@ -114,6 +116,11 @@ fn @main() -> i64 {
   field.store %s.1, "ns::Shape".maybe, %o3.21
   %has.27 = is_some %o5.23
   %u.28 = unwrap %o1.19
+  %pm.29 = local.addr %m.2
+  %pf.30 = field.addr %s.1, "ns::Shape".bytes
+  %pf8.31 = ptr.add %pf.30, 8
+  mem.zero %pm.29, 3
+  mem.copy %pf8.31, %pf.30, 16
   ret %r.14
 }
 )";
@@ -200,6 +207,9 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
     case Opcode::FieldAddr:
     case Opcode::PtrLoad:
     case Opcode::PtrStore:
+    case Opcode::PtrAdd:
+    case Opcode::MemCopy:
+    case Opcode::MemZero:
     case Opcode::Some:
     case Opcode::None:
     case Opcode::IsSome:
@@ -221,6 +231,7 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
     case Type::OptF64:
     case Type::OptBool:
     case Type::OptChar:
+    case Type::Mem:
       EXPECT_STREQ(e.Name, typeName(e.Id));
       Type back;
       EXPECT_TRUE(typeFromCode(e.Code, back));
@@ -232,11 +243,12 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
   Type ty;
   for (unsigned c = 26; c < 256; ++c) {
     // some none is_some unwrap; local.addr field.addr ptr.load ptr.store
-    bool used = c <= 29 || (c >= 34 && c <= 37);
+    // ptr.add mem.copy mem.zero
+    bool used = c <= 29 || (c >= 34 && c <= 40);
     EXPECT_EQ(opcodeFromCode(static_cast<uint8_t>(c), op), used) << c;
   }
   for (unsigned c = 8; c < 256; ++c) {
-    bool used = c <= 11; // opt_i64 opt_f64 opt_bool opt_char
+    bool used = c <= 11 || c == 17; // opt_i64 opt_f64 opt_bool opt_char; mem
     EXPECT_EQ(typeFromCode(static_cast<uint8_t>(c), ty), used) << c;
   }
 }
@@ -493,7 +505,7 @@ TEST(PIRBinary, RejectsReservedCodesAndSlack) {
     b[retType] = code;
     EXPECT_FALSE(binary::decode(b).isOk()) << "type code " << int(code);
   }
-  for (uint8_t code : {30, 31, 32, 33, 38, 255}) {
+  for (uint8_t code : {30, 31, 32, 33, 41, 255}) {
     std::vector<uint8_t> b = good;
     b[opcode] = code;
     EXPECT_FALSE(binary::decode(b).isOk()) << "opcode " << int(code);
@@ -528,6 +540,37 @@ TEST(PIRBinary, RejectsReservedCodesAndSlack) {
     b[rec] += 1;
     EXPECT_FALSE(binary::decode(b).isOk());
   }
+}
+
+// `mem` is the type of a local or a field only: a reader rejects it as a
+// parameter's, and a mem slot's size and alignment survive the round trip.
+TEST(PIRBinary, MemIsOnlyASlotType) {
+  Function f;
+  f.Name = "f";
+  f.Sig.Ret = Type::Void;
+  f.Locals.push_back({"m", Type::Mem, 40, 8});
+  f.Body.Stmts.push_back(Return{});
+  Module m = oneFunction(std::move(f));
+  std::vector<uint8_t> good = binary::encode(m);
+  auto d = binary::decode(good);
+  ASSERT_TRUE(d.isOk()) << d.status().message();
+  ASSERT_EQ((*d).Functions.size(), 1u);
+  ASSERT_EQ((*d).Functions[0].Locals.size(), 1u);
+  EXPECT_EQ((*d).Functions[0].Locals[0].Size, 40);
+  EXPECT_EQ((*d).Functions[0].Locals[0].Align, 8);
+
+  Function g;
+  g.Name = "g";
+  g.Sig.Params = {Type::Mem};
+  g.Sig.Ret = Type::Void;
+  g.Params.push_back({1, Type::Mem, "p"});
+  g.NextValueId = 2;
+  g.Body.Stmts.push_back(Return{});
+  auto bad = binary::decode(binary::encode(oneFunction(std::move(g))));
+  ASSERT_FALSE(bad.isOk());
+  EXPECT_NE(bad.status().message().find("mem is only the type of a local"),
+            std::string::npos)
+      << bad.status().message();
 }
 
 TEST(PIRBinary, NestingAndStatementLimits) {

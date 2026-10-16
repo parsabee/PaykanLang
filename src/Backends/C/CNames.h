@@ -26,6 +26,7 @@ inline constexpr const char *kInline = "inline";
 inline constexpr const char *kReturn = "return";
 inline constexpr const char *kSizeof = "sizeof";
 inline constexpr const char *kStatic = "static";
+inline constexpr const char *kAlignas = "_Alignas";
 inline constexpr const char *kStruct = "struct";
 inline constexpr const char *kTrue = "true"; ///< <stdbool.h>
 
@@ -46,6 +47,7 @@ inline constexpr const char *kSize = "size_t";     ///< <stdlib.h>
 
 // Pointer types, spelled as the emitter writes them (`T *`).
 inline constexpr const char *kVoidPtr = "void *";
+inline constexpr const char *kUint8Ptr = "uint8_t *";
 inline constexpr const char *kConstVoidPtr = "const void *";
 inline constexpr const char *kConstCharPtr = "const char *";
 inline constexpr const char *kConstUint8Ptr = "const uint8_t *";
@@ -136,6 +138,8 @@ inline constexpr const char *kAbort = "abort";
 inline constexpr const char *kFmod = "fmod";
 inline constexpr const char *kGetenv = "getenv";
 inline constexpr const char *kMemcpy = "memcpy";
+inline constexpr const char *kMemmove = "memmove";
+inline constexpr const char *kMemset = "memset";
 inline constexpr const char *kStrlen = "strlen";
 
 // -- Literals

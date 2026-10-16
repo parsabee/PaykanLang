@@ -198,8 +198,20 @@ const char *cType(Type t) {
     return kOptBool;
   case Type::OptChar:
     return kOptChar;
+  case Type::Mem:
+    return kUint8; // a mem slot is declared as an array of them (declareSlot)
   }
   return kVoid;
+}
+
+/// The declaration of a local or field: `_Alignas(A) uint8_t name[N]` for a
+/// `mem` slot of N bytes aligned to A, `T name` otherwise.
+std::string declareSlot(Type t, int64_t size, int64_t align,
+                        const std::string &name) {
+  if (t != Type::Mem)
+    return declare(cType(t), name);
+  return kAlignas + paren(std::to_string(align)) + kSpace + kUint8 + kSpace +
+         name + kLBracket + std::to_string(size) + kRBracket;
 }
 
 /// `(T){<present>, <value>}`: a compound literal of the optional type @p t.
@@ -859,7 +871,8 @@ class Emitter {
         << kNewline << kIndentUnit << stmt(declare(kRtBoxPtr, kFieldShared))
         << kNewline;
       for (const auto &f : c->Fields)
-        O << kIndentUnit << stmt(declare(cType(f.Ty), fieldName(f.Name)))
+        O << kIndentUnit
+          << stmt(declareSlot(f.Ty, f.Size, f.Align, fieldName(f.Name)))
           << kNewline;
       O << stmt(kRBrace) << kNewline << kNewline;
     }
@@ -965,6 +978,13 @@ class Emitter {
             break;
           default:
             break;
+          }
+          if (f.Ty == Type::Mem) {
+            O << kIndentUnit
+              << stmt(call(kMemset, {member(kNewObj, fieldName(f.Name)), kZero,
+                                     std::to_string(f.Size)}))
+              << kNewline;
+            continue;
           }
           std::string init = zero;
           if (pir::isOptional(f.Ty))
@@ -1072,8 +1092,10 @@ class Emitter {
       used.insert(nm);
       LocalNames.push_back(nm);
       // A local nothing reads is not declared; its stores are dropped.
-      if (Uses->Locals[i])
-        line(stmt(declare(cType(f.Locals[i].Ty), nm)));
+      if (Uses->Locals[i]) {
+        const pir::Local &l = f.Locals[i];
+        line(stmt(declareSlot(l.Ty, l.Size, l.Align, nm)));
+      }
     }
     emitBlock(f.Body);
     Uses.reset();
@@ -1445,6 +1467,20 @@ class Emitter {
       line(stmt(binop(deref(i.Args[0], t), kOpAssign, v)));
       return;
     }
+    case Opcode::PtrAdd:
+      pre = resultPrefix(i);
+      line(stmt(pre + cast(kVoidPtr) +
+                paren(binop(cast(kUint8Ptr) + operand(i.Args[0]), kOpAdd,
+                            operand(i.Args[1])))));
+      return;
+    case Opcode::MemCopy:
+      line(stmt(call(kMemmove, {operand(i.Args[0]), operand(i.Args[1]),
+                                cast(kSize) + operand(i.Args[2])})));
+      return;
+    case Opcode::MemZero:
+      line(stmt(call(kMemset, {operand(i.Args[0]), kZero,
+                               cast(kSize) + operand(i.Args[1])})));
+      return;
     case Opcode::Some:
       pre = resultPrefix(i);
       line(stmt(pre + optLiteral(i.Result.Ty, kTrue, operand(i.Args[0]))));

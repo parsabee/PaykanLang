@@ -642,6 +642,7 @@ for that reason; the lowering is deterministic already.
 | `str` | `uleb` index into the blob's string table |
 | `type` | one `u8` (§5.4) |
 | `sig` | `uleb` param count, that many `type`, then the return `type` |
+| `slot type` | a `type`; for `mem` (17) it is followed by `uleb` size and `uleb` alignment. `mem` is only a local's or a field's type: a reader rejects it anywhere else |
 
 ### 5.4 Type codes (fixed by table, never by the C++ enum value)
 
@@ -651,8 +652,8 @@ for that reason; the lowering is deterministic already.
 | 1 | `i64` | | 7 | `ptr` |
 | 2 | `f64` | | 8–11 | #96 inline optionals: `opt_i64`, `opt_f64`, `opt_bool`, `opt_char`; 12–15 reserved for further ones |
 | 3 | `bool` | | 16 | reserved: #99 `weak` |
-| 4 | `char` | | 17–255 | reserved |
-| 5 | `box` | | | |
+| 4 | `char` | | 17 | `mem`: a local's or field's bytes (size and alignment follow, §5.3) |
+| 5 | `box` | | 18–255 | reserved |
 
 A reader of codec 1.x rejects reserved codes. A `static_assert`-checked
 table in `include/paykan/pir/Codes.h` holds both the opcode names the
@@ -689,7 +690,9 @@ InstrRec := u8 opcode ; uleb result id (0 = none) ; [type result type ; str resu
 | 34 | `local.addr` | `uleb` local | 0 |
 | 35 | `field.addr` | `str` class; `str` field | 1 |
 | 36, 37 | `ptr.load ptr.store` | — (the loaded type is the result's) | 1 / 2 |
-| 38–255 | reserved | | |
+| 38 | `ptr.add` | — | 2 |
+| 39, 40 | `mem.copy mem.zero` | — | 3 / 2 |
+| 41–255 | reserved | | |
 
 Unused `Instr` extras are not written; a decoded `Instr` has the defaults
 of `PIR.h`, as the text parser produces, so round-trip equality holds. An
@@ -722,13 +725,13 @@ FunctionRec
   -- definitions only --
   uleb nConventions ; nConventions × u8   per-parameter convention (#98): 0 owned, 1 borrowed; nConventions == nParams or 0
   uleb nParams ; nParams × (uleb id ; type ; str name)
-  uleb nLocals ; nLocals × (str name ; type)
+  uleb nLocals ; nLocals × (str name ; slot type)
   uleb nextValueId
   Block body
 ClassRec
   str name ; u32 flags (bit0 extern ; bit1 final #18 ; bit2 abstract #18 ; bit3 singleton #168 ; bit4 hasClassObj #160 ; bits5-6 linkage ; bit7 linkonce reserved)
   str super ("" = root) ; [bit0] str module
-  uleb nFields ; nFields × (str name ; type)                layout order, ancestors first
+  uleb nFields ; nFields × (str name ; slot type)           layout order, ancestors first
   uleb nSlots  ; nSlots  × (str slot ; str target ("" = null) ; sig)
 ExternGlobalRec  str name ; u8 kind (0 obj, 1 vtable)        always $rt.
 CStrRec          str name ; bytes                            no NUL stored
