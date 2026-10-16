@@ -94,9 +94,10 @@ void ModuleLowering::emitFixedInit(ast::Expr *e, const Val &dst) {
       ast::cast<ast::FixedArrayType>(lit->getResolvedType())->getElementType();
   int64_t elemSize = fixedLayout(elemTy).Size;
   for (size_t i = 0; i < lit->getNumElements(); ++i) {
-    Val at = i == 0 ? dst
-                    : B.ptrAdd(dst, Val::i64(static_cast<int64_t>(i) * elemSize),
-                               "elem.addr");
+    Val at = i == 0
+                 ? dst
+                 : B.ptrAdd(dst, Val::i64(static_cast<int64_t>(i) * elemSize),
+                            "elem.addr");
     ast::Expr *elem = lit->getElements()[i];
     if (ast::isa<ast::FixedArrayType>(elemTy)) {
       emitFixedInit(elem, at);

@@ -24,9 +24,8 @@ void expectOk(const std::string &body) {
 void expectError(const std::string &source, const std::string &message) {
   auto r = semaCheck(source);
   EXPECT_FALSE(r.Ok) << source;
-  EXPECT_NE(r.Diagnostics.find(message), std::string::npos)
-      << source << "\n"
-      << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find(message), std::string::npos) << source << "\n"
+                                                            << r.Diagnostics;
 }
 
 void expectBodyError(const std::string &body, const std::string &message) {
@@ -36,22 +35,23 @@ void expectBodyError(const std::string &body, const std::string &message) {
 } // namespace
 
 TEST(FixedArray, LocalsOfScalarsAndEnums) {
-  expectOk("  xs: int[3] = [1, 2, 3];\n"
-           "  fs: float[2] = [1, 2.5];\n" // an int element is promoted
-           "  bs: bool[1] = [True];\n"
-           "  cs: char[2] = ['a', 'b'];\n"
-           "  es: Color[2] = [Color::Red, Color::Green];\n"
-           "  grid: int[2][3] = [[1, 2, 3], [4, 5, 6]];\n"
-           "  row = grid[1];\n"
-           "  n: int = row[2] + xs[0] + grid[0][1] + xs.len() + grid[1].len();\n"
-           "  ys = xs;\n"
-           "  ys[0] = n;\n"
-           "  xs = ys;\n"
-           "  grid[0] = row;\n"
-           "  v: view = xs;\n"
-           "  first = v[0];\n"
-           "  r: inout = xs;\n"
-           "  r[1] = first;");
+  expectOk(
+      "  xs: int[3] = [1, 2, 3];\n"
+      "  fs: float[2] = [1, 2.5];\n" // an int element is promoted
+      "  bs: bool[1] = [True];\n"
+      "  cs: char[2] = ['a', 'b'];\n"
+      "  es: Color[2] = [Color::Red, Color::Green];\n"
+      "  grid: int[2][3] = [[1, 2, 3], [4, 5, 6]];\n"
+      "  row = grid[1];\n"
+      "  n: int = row[2] + xs[0] + grid[0][1] + xs.len() + grid[1].len();\n"
+      "  ys = xs;\n"
+      "  ys[0] = n;\n"
+      "  xs = ys;\n"
+      "  grid[0] = row;\n"
+      "  v: view = xs;\n"
+      "  first = v[0];\n"
+      "  r: inout = xs;\n"
+      "  r[1] = first;");
 }
 
 TEST(FixedArray, LiteralsHaveTheArraysLengthAndElementType) {
@@ -110,8 +110,7 @@ TEST(FixedArray, OnlyALocalsOwnTypeForNow) {
   expectError("fn f() -> int[2] { return [1, 2]; }\n"
               "fn main() -> int { return 0; }",
               notYet);
-  expectError("class C { a: int[2]; }\nfn main() -> int { return 0; }",
-              notYet);
+  expectError("class C { a: int[2]; }\nfn main() -> int { return 0; }", notYet);
   expectBodyError("  o: int[2]? = None;", notYet);
   expectBodyError("  a: int[2][] = [];", notYet);
   expectBodyError("  xs: int[2] = [1, 2];\n  t = (xs, 1);",
