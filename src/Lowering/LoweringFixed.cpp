@@ -73,7 +73,7 @@ Val ModuleLowering::emitFixedElementAddress(ast::Expr *array,
   Val neg = B.cmp(CmpPred::Lt, idx, Val::i64(0), "idx.neg");
   Val over = B.cmp(CmpPred::Ge, idx, Val::i64(ft->getLength()), "idx.over");
   pir::If *s = B.openIf(B.select(neg, Val::boolean(true), over, "idx.bad"),
-                        /*hasElse=*/false);
+                        /*withElse=*/false);
   B.enter(*s->Then);
   callRuntime(names::kPaykanPanicIndex, {idx, Val::i64(ft->getLength())});
   B.emitUnreachable();
