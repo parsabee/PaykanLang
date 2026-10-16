@@ -58,13 +58,13 @@ TEST(Leak, StrOfInt) {
   g.expectNoLeaks("StrOfInt");
 }
 
-// -- int[] array literal (samples/leak-check/04)
+// -- int[n] array literal (samples/leak-check/04)
 
 TEST(Leak, IntArrayLiteral) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     fn main() -> int {
-      a: int[] = [1, 2, 3];
+      a: int[3] = [1, 2, 3];
       return 0;
     }
   )");
@@ -549,12 +549,12 @@ TEST(Leak, MatchOnBorrowedFieldBox) {
 TEST(Leak, CallRootedSubscriptReceiver) {
   LeakGuard g;
   auto r = compileAndRun(R"(
-    fn makeArr() -> int[] { return [1, 2, 3]; }
+    fn makeArr() -> Str[3] { return [Str(1), Str(2), Str(3)]; }
     fn makeStr() -> Str { return "a" + "b"; }
     fn main() -> int {
-      x: int = makeArr()[0];
+      x: Str = makeArr()[0];
       c: char = makeStr()[1];
-      println(Str<int>(x));
+      println(x);
       println(Str<char>(c));
       return 0;
     }
@@ -654,17 +654,18 @@ TEST(Leak, EmptyArrayLiteralSinks) {
 }
 
 // Array / tuple arguments to user-defined METHODS.  The method prologue owns
-// every reference-typed parameter and releases it on exit, so the call site
-// must pass a +1 box for arrays and tuples exactly as it does for classes.
-// Before, they took the borrowed-temporary path and were released twice.
+// every by-value reference-typed parameter (a tuple, the strings of a `Str[2]`)
+// and releases it on exit, so the call site must pass +1 references exactly as
+// it does for classes; a slice parameter borrows the caller's array.  Before,
+// arrays and tuples took the borrowed-temporary path and were released twice.
 
 TEST(Leak, RefTypedArgsToUserMethods) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class Bag {
-      xs: int[];
-      fn sum(ys: int[]) -> int { return ys[0] + ys[1]; }
-      fn names(ns: Str[]) -> int { ns.push("m"); return ns.len(); }
+      xs: int[2];
+      fn sum(ys: view int[]) -> int { return ys[0] + ys[1]; }
+      fn names(ns: Str[2]) -> int { ns[1] = "m"; return ns.len(); }
       fn first(t: (int, Str)) -> Str { return t.1; }
       fn own() -> int { return self.sum(self.xs); }     // field argument
     }
@@ -672,16 +673,15 @@ TEST(Leak, RefTypedArgsToUserMethods) {
     impl Bag {
       fn __init__() { self.xs = [1, 2]; }
     }
-    fn mk() -> int[] { return [10, 20]; }
+    fn mk() -> int[2] { return [10, 20]; }
     fn main() -> int {
       b: Bag = Bag();
-      v: int[] = [3, 4];
+      v: int[2] = [3, 4];
       println(Str<int>(b.sum(v)));                         // local argument
       println(Str<int>(v.len()));                          // local still alive
       println(Str<int>(b.sum([5, 6])));                    // literal argument
       println(Str<int>(b.sum(mk())));                      // call-result argument
       println(Str<int>(b.own()));
-      println(Str<int>(b.names([])));                      // empty literal
       println(Str<int>(b.names(["a", "b"])));
       println(b.first((1, "t")));                        // tuple literal
       t: (int, Str) = (2, "u");
@@ -691,6 +691,6 @@ TEST(Leak, RefTypedArgsToUserMethods) {
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "7\n2\n11\n30\n3\n1\n3\nt\nu\nu\n");
+  EXPECT_EQ(r.StdOut, "7\n2\n11\n30\n3\n2\nt\nu\nu\n");
   g.expectNoLeaks("RefTypedArgsToUserMethods");
 }

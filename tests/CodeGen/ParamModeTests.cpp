@@ -124,13 +124,14 @@ TEST(ParamMode, ViewParametersArePassedByValue) {
       if (loud) { s = s + Str(end); }
       return s;
     }
-    fn at<T>(xs: T[], i: view int) -> T { return xs[i]; }
+    fn at<T>(xs: view T[], i: view int) -> T { return xs[i]; }
     fn main() -> int {
       let k = 3;
       c: Counter = Twice(k);
+      ns: int[2] = [4, 5];
       println(Str(c.add(k)) + " " + Str(scale(1.5, 2)) + " " +
-              name(Color::Green, True, '!') + " " + Str(at([4, 5], 1)) +
-              " " + Str(k));
+              name(Color::Green, True, '!') + " " + Str(at(ns, 1)) + " " +
+              Str(k));
       return 0;
     }
   )");
@@ -163,7 +164,7 @@ TEST(ParamMode, InoutParametersChangeTheCallersVariables) {
     }
     fn split(lo: inout int, hi: inout int, v: int) { lo, hi = (v / 10, v % 10); }
     fn readBack(n: inout int) -> int { n = 41; return n + 1; }
-    fn count<T>(xs: T[], total: inout int) { total = total + xs.len(); }
+    fn count<T>(xs: view T[], total: inout int) { total = total + xs.len(); }
     fn main() -> int {
       k = 1; bump(k); twice(k);
       a = 1; b = 2; swap(a, b);
@@ -174,7 +175,8 @@ TEST(ParamMode, InoutParametersChangeTheCallersVariables) {
       lo = 0; hi = 0; split(lo, hi, 47);
       r = 0; s = readBack(r);
       i = 0; total = 0;
-      while (i < 3) { count([1, 2], total); i = i + 1; }
+      pair: int[2] = [1, 2];
+      while (i < 3) { count(pair, total); i = i + 1; }
       println(Str(k) + " " + Str(a) + Str(b) + " " + Str(x) + " " + Str(f) +
               " " + Str(ch) + " " + Str(c == Color::Red) + " " + Str(lo) +
               Str(hi) + " " + Str(r) + " " + Str(s) + " " + Str(total));
@@ -441,7 +443,7 @@ TEST(LocalBorrow, ViewLocalsOfReferenceTypes) {
       c: Counter = Fast(3);
       v: view = c;
       s: view = "abc";
-      xs: view int[] = [4, 5];
+      xs: view int[2] = [4, 5];
       o: view Counter? = c;
       kind = "plain";
       match v { f: Fast { kind = "fast " + Str(f.n); } _ { } }
@@ -457,10 +459,10 @@ TEST(LocalBorrow, ViewLocalsOfReferenceTypes) {
 }
 
 // An `inout` local is another name for a variable or a field, of every
-// type: assigning to it writes there (an object, string, array or optional
-// is replaced, the old one released), and it passes its address on to an
-// `inout` parameter.  A field's object stays alive while the local can be
-// used.
+// type: assigning to it writes there (an object, string or optional is
+// replaced, the old one released; an array's elements are written in place),
+// and it passes its address on to an `inout` parameter.  A field's object
+// stays alive while the local can be used.
 TEST(LocalBorrow, InoutLocalsWriteThrough) {
   LeakGuard guard;
   auto r = compileAndRun(R"(
@@ -502,10 +504,10 @@ TEST(LocalBorrow, InoutLocalsWriteThrough) {
       ht: inout = h.total;
       ht = 5;
       h.addTo(3);
-      xs = [1, 2];
+      xs: int[2] = [1, 2];
       ys: inout = xs;
-      ys.push(3);
-      ys = [ys.len(), 8];
+      ys[1] = 3;
+      ys = [ys[1], 8];
       o: Counter? = None;
       oo: inout = o;
       oo = Counter(4);
@@ -641,7 +643,7 @@ TEST(BorrowedResult, ViewResultsAreRead) {
       fn __init__(n: int) { self.n = n; }
     }
     class Box {
-      c: Counter; xs: int[];
+      c: Counter; xs: int[2];
       view fn peek() -> view Counter { return self.c; }
       view fn first() -> view int { return self.xs[0]; }
     }

@@ -305,12 +305,15 @@ impl Box<T> {
   fn __init__(v: T) { self.v = v; }
 }
 fn __bump(n: int) -> int { return n + 1; }
-fn sum<T>(xs: Box<T>[], f: int) -> int { return xs.len() + __bump(f); }
+fn sum<T>(xs: view Box<T>[], f: int) -> int { return xs.len() + __bump(f); }
 )");
   writeTempFile(tmpDir.string(), "mid.pkn", R"(
 import lib::gen;
 fn make(n: int) -> gen::Box<int> { return gen::Box(n); }
-fn count() -> int { return gen::sum([gen::Box(1)], 0); }
+fn count() -> int {
+  xs: gen::Box<int>[1] = [gen::Box(1)];
+  return gen::sum(xs, 0);
+}
 )");
   auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
 import lib::gen;
@@ -318,7 +321,8 @@ import mid;
 fn main() -> int {
   b = mid::make(30);
   b.set(b.get() + gen::Box<int>(4).get());
-  return b.get() + mid::count() + gen::sum([b, mid::make(0)], 1);
+  pair: gen::Box<int>[2] = [b, mid::make(0)];
+  return b.get() + mid::count() + gen::sum(pair, 1);
 }
 )");
 

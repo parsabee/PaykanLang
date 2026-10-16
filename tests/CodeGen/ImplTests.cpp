@@ -102,18 +102,25 @@ TEST(Impl, AcrossModules) {
   std::filesystem::create_directories(dir);
   std::ofstream(dir / "shapes.pkn") << R"(
 class Bag {
-  items: Str[];
-  view fn size() -> int { return self.items.len(); }
+  items: Str[4];
+  n: int;
+  view fn size() -> int { return self.n; }
 }
 impl Bag {
-  fn __init__() { self.items = []; }
+  fn __init__() {
+    self.items = ["", "", "", ""];
+    self.n = 0;
+  }
   static fn of(a: Str, b: Str) -> Bag {
     bag = Bag();
     bag.add(a);
     bag.add(b);
     return bag;
   }
-  fn add(s: Str) { self.items.push(s); }
+  fn add(s: Str) {
+    self.items[self.n] = s;
+    self.n = self.n + 1;
+  }
   view fn first() -> view Str { return self.items[0]; }
 }
 )";
