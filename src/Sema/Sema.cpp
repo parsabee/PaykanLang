@@ -1022,10 +1022,19 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
         node->getCalleeName());
 
   if (argTypes.size() != sig->ParamTypes.size()) {
-    S.error(node->getLocation(),
-            "function '" + displayName(node->getCalleeName()) + "' expects " +
-                std::to_string(sig->ParamTypes.size()) + " argument(s), got " +
-                std::to_string(argTypes.size()));
+    std::string msg = "function '" + displayName(node->getCalleeName()) +
+                      "' expects " + std::to_string(sig->ParamTypes.size()) +
+                      " argument(s), got " + std::to_string(argTypes.size());
+    if (auto d = S.DefaultInits.find(node->getCalleeName());
+        d != S.DefaultInits.end()) {
+      msg += " (it has no '";
+      msg += names::kMethodInit;
+      msg += "', so it takes ";
+      msg += d->second->getParams().empty() ? "nothing"
+                                            : Sema::paramList(d->second);
+      msg += ")";
+    }
+    S.error(node->getLocation(), msg);
     return sig->ReturnType;
   }
 

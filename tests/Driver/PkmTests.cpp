@@ -687,6 +687,44 @@ TEST(Pkm, ViewFnAcrossModules) {
   fs::remove_all(dir);
 }
 
+// A class without an `__init__` keeps its default one in a prebuilt module:
+// an importer constructs it from its fields and subclasses it.
+TEST(Pkm, DefaultInitAcrossModules) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_definit_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "geo.pkn", "class Point { x: int; y: int; }\n"
+                             "class Named : Point { name: Str; }\n");
+  writeFile(dir / "main.pkn",
+            "import geo;\n"
+            "class P3 : geo::Point { z: int; }\n"
+            "fn main() -> int {\n"
+            "  p = geo::Point(1, 2);\n"
+            "  n = geo::Named(3, 4, \"n\");\n"
+            "  q = P3(5, 6, 7);\n"
+            "  println(Str(p.x + p.y) + \" \" + n.name + Str(n.y) + \" \" +\n"
+            "          Str(q.x + q.y + q.z));\n"
+            "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  auto src = paykan("--track-heap main.pkn");
+  ASSERT_EQ(src.exitCode, 0) << src.out;
+  EXPECT_TRUE(contains(src.out, "3 n4 18\n")) << src.out;
+  EXPECT_TRUE(contains(src.out, "live blocks       : 0")) << src.out;
+  ASSERT_EQ(paykan("--emit-pkm geo.pkn").exitCode, 0);
+  fs::remove(dir / "geo.pkn");
+  auto pkm = paykan("--track-heap main.pkn");
+  ASSERT_EQ(pkm.exitCode, 0) << pkm.out;
+  EXPECT_TRUE(contains(pkm.out, "3 n4 18\n")) << pkm.out;
+  EXPECT_TRUE(contains(pkm.out, "live blocks       : 0")) << pkm.out;
+  auto dump = paykan("pkm dump --section=iface geo.pkm");
+  EXPECT_TRUE(contains(dump.out, "func Named(int, int, Str) -> Named"))
+      << dump.out;
+  fs::remove_all(dir);
+}
+
 // A borrowed result keeps its mode in a prebuilt module: the dump shows it,
 // an importer sees a `view` result as a `view` and writes through an
 // `inout` one.

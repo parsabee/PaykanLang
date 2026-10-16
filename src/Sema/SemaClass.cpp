@@ -419,7 +419,77 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
   }
   if (!populateImplMethods(cd, ct))
     ok = false;
+  if (!ct->findMethod(names::kMethodInit) && !declareDefaultInit(cd, ct))
+    ok = false;
   PopulatedClasses.insert(cd->getName());
+  return ok;
+}
+
+std::string Sema::paramList(const ast::FuncDecl *fn) {
+  std::string out;
+  for (const auto &p : fn->getParams())
+    out += (out.empty() ? "" : ", ") + p.getName() + ": " +
+           ast::typeName(p.ParamType);
+  return out;
+}
+
+bool Sema::doesNothing(const ast::ClassType *ct) const {
+  for (; ct && ct != Ctx.getObjTy(); ct = ct->getSuperClass())
+    if (!DefaultInits.count(ct->getName()) || ct->getNumFields())
+      return false;
+  return true;
+}
+
+bool Sema::declareDefaultInit(ast::ClassDecl *cd, ast::ClassType *ct) {
+  const ast::SourceLocation loc = cd->getLocation();
+  StringSet used;
+  for (auto &[name, _] : ct->getFields())
+    used.insert(name);
+  std::vector<ast::Param> params;
+  std::vector<ast::Stmt *> body;
+
+  // The superclass constructor's arguments, named as it names them where
+  // that is free (a field of this class may take the name).
+  ast::ClassType *super = ct->getSuperClass();
+  if (const ast::MethodDecl *superInit =
+          super && super != Ctx.getObjTy()
+              ? super->findMethod(names::kMethodInit)
+              : nullptr) {
+    const ast::ParamModes &modes = superInit->getParamModes();
+    std::vector<ast::Expr *> args;
+    for (size_t i = 0; i < superInit->getNumParams(); ++i) {
+      std::string name = modes.name(i);
+      if (name.empty())
+        name = "arg" + std::to_string(i + 1);
+      while (!used.insert(name).second)
+        name += "_";
+      const std::string &interned = Ctx.intern(name);
+      params.push_back(
+          {&interned, superInit->getParamTypes()[i], modes.mode(i)});
+      args.push_back(Ctx.make<ast::Identifier>(loc, interned));
+    }
+    body.push_back(Ctx.make<ast::ExprStmt>(
+        loc, Ctx.make<ast::CallExpr>(loc, Ctx.intern(names::kMethodSuper),
+                                     std::move(args))));
+  }
+  for (auto &[name, type] : ct->getFields()) {
+    const std::string &interned = Ctx.intern(name);
+    params.push_back({&interned, type});
+    body.push_back(Ctx.make<ast::MemberAssignStmt>(
+        loc, Ctx.make<ast::Identifier>(loc, Ctx.intern(names::kSelf)), interned,
+        Ctx.make<ast::Identifier>(loc, interned)));
+  }
+
+  auto *fn = Ctx.make<ast::FuncDecl>(
+      loc, Ctx.intern(names::kMethodInit), std::move(params), nullptr,
+      Ctx.make<ast::CompoundStmt>(loc, std::move(body)));
+  bool ok = true;
+  auto *md = declareMethod(fn, ct, nullptr, ast::MethodDecl::None, ok);
+  if (!md)
+    return false;
+  ct->addMethod(md);
+  cd->addMethod(fn); // checked and lowered like a written one
+  DefaultInits[cd->getName()] = fn;
   return ok;
 }
 
@@ -699,30 +769,6 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
 
   bool ok = true;
 
-  // A derived class whose (non-Obj) superclass declares an __init__ must itself
-  // declare an __init__ — otherwise the base initializer (which may require
-  // arguments) is never invoked and base fields are left uninitialised.  The
-  // declared __init__ is in turn required to call __super__ as its first
-  // statement (checked per-method below).
-  if (auto *super = ct->getSuperClass();
-      super && super != Ctx.getObjTy() &&
-      super->findMethod(names::kMethodInit)) {
-    bool declaresOwnInit = false;
-    for (auto *method : node->getMethods())
-      if (method->getName() == names::kMethodInit) {
-        declaresOwnInit = true;
-        break;
-      }
-    if (!declaresOwnInit) {
-      error(node->getLocation(),
-            "class '" + node->getName() + "' must declare an '" +
-                names::kMethodInit + "' that calls '" + names::kMethodSuper +
-                "' because its superclass '" + super->getName() + "' has an '" +
-                names::kMethodInit + "'");
-      ok = false;
-    }
-  }
-
   for (auto *method : node->getMethods()) {
     classCtx.MethodName = method->getName();
     classCtx.ViewMethod = method->isView();
@@ -747,7 +793,7 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
     if (method->getName() == names::kMethodInit && ct->getSuperClass() &&
         ct->getSuperClass() != Ctx.getObjTy()) {
       auto *superInit = ct->getSuperClass()->findMethod(names::kMethodInit);
-      if (superInit)
+      if (superInit && !doesNothing(ct->getSuperClass()))
         classCtx.SuperInitRequired = true;
     }
 
@@ -808,14 +854,25 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
                         "' must be the first statement of '" +
                         names::kMethodInit + "' in class '" + node->getName() +
                         "'");
-            else
-              error(method->getLocation(),
-                    std::string("'") + names::kMethodInit + "' in class '" +
-                        node->getName() + "' must call '" +
-                        names::kMethodSuper +
-                        "' as its first statement because its superclass '" +
-                        ct->getSuperClass()->getName() + "' has an '" +
-                        names::kMethodInit + "'");
+            else {
+              const std::string &super = ct->getSuperClass()->getName();
+              std::string msg = "'";
+              msg += names::kMethodInit;
+              msg += "' in class '" + node->getName() + "' must call '";
+              msg += names::kMethodSuper;
+              msg += "' as its first statement because its superclass '";
+              msg += super + "' ";
+              if (auto d = DefaultInits.find(super); d != DefaultInits.end()) {
+                msg += "has fields to initialize (its default '";
+                msg += names::kMethodInit;
+                msg += "' takes " + paramList(d->second) + ")";
+              } else {
+                msg += "has an '";
+                msg += names::kMethodInit;
+                msg += "'";
+              }
+              error(method->getLocation(), msg);
+            }
             ok = false;
           }
         }
@@ -1486,9 +1543,20 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
               params = &im->getTypeParams();
             }
       std::vector<ast::Type *> paramTypes;
-      if (init)
+      if (init) {
         for (auto &p : init->getParams())
           paramTypes.push_back(here(tmpl, p.ParamType));
+      } else {
+        // The default __init__: the superclass constructor's parameters (a
+        // generic class's superclass is not generic), then the fields.
+        if (auto *super = tmpl->hasSuperClass()
+                              ? Ctx.lookupClassType(tmpl->getSuperClassName())
+                              : nullptr)
+          if (auto *superInit = super->findMethod(names::kMethodInit))
+            paramTypes = superInit->getParamTypes();
+        for (auto *f : tmpl->getFields())
+          paramTypes.push_back(here(tmpl, f->getType()));
+      }
       if (!inferTypeArgs(callee, *params, paramTypes, argTypes, loc, typeArgs))
         return false;
     }

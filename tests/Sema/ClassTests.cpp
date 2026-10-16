@@ -375,7 +375,7 @@ TEST(Class, MatchBindingInScope) {
   auto r = semaCheck(R"(
     class Dog { name: Str; }
     fn main() -> int {
-      x: Obj = Dog();
+      x: Obj = Dog("");
       match x { d: Dog { d.name = "Rex"; } _ {} }
       return 0;
     }
@@ -743,7 +743,7 @@ TEST(Class, SuperMustBeFirstStatement) {
       << r.Diagnostics;
 }
 
-TEST(Class, DerivedMustDeclareInitWhenBaseHasOne) {
+TEST(Class, DerivedWithoutInitPassesTheBaseInitsArguments) {
   auto r = semaCheck(R"(
     class Base {
       val: int;
@@ -753,11 +753,87 @@ TEST(Class, DerivedMustDeclareInitWhenBaseHasOne) {
       fn __init__(v: int) { self.val = v; }
     }
     class Derived : Base {
-      y: int;
+      y: Str;
     }
+    fn main() -> int {
+      d = Derived(1, "a");
+      return d.val;
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+// A class without an `__init__` gets the default one: the superclass
+// constructor's arguments, then one per field, in order.  A generic one's
+// infers its type arguments from them.
+TEST(Class, DefaultInitTakesTheFields) {
+  auto r = semaCheck(R"(
+    class Point { x: int; y: int; }
+    class Named : Point { name: Str; }
+    class Empty {}
+    class Box<T> { v: T; }
+    class Tagged<T> : Named { tag: T; }
+    fn main() -> int {
+      p = Point(1, 2);
+      n = Named(3, 4, "n");
+      e = Empty();
+      b = Box(5);
+      t = Tagged(6, 7, "t", True);
+      ok: bool = t.tag;
+      return p.x + n.y + b.v + t.x;
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Class, DefaultInitNeedsEveryField) {
+  auto r = semaCheck(R"(
+    class P { x: int; s: Str; }
+    class E {}
+    fn main() -> int {
+      a = P();
+      b = P(1, 2);
+      c = E(1);
+      return 0;
+    }
+  )");
+  EXPECT_FALSE(r.Ok);
+  for (const char *d :
+       {"function 'P' expects 2 argument(s), got 0 (it has no '__init__', so "
+        "it takes x: int, s: Str)",
+        "argument 2 of 'P'",
+        "function 'E' expects 0 argument(s), got 1 (it has no '__init__', so "
+        "it takes nothing)"})
+    EXPECT_NE(r.Diagnostics.find(d), std::string::npos) << d << "\n"
+                                                        << r.Diagnostics;
+}
+
+// An `__init__` of a subclass calls the superclass's default one when it
+// has fields to set; one of a class with none, up the chain, does nothing.
+TEST(Class, SuperCallOfADefaultInit) {
+  auto r = semaCheck(R"(
+    class Shape {}
+    class Rect : Shape { w: int; }
+    impl Rect { fn __init__(w: int) { self.w = w; } }
+    class Square : Rect {}
+    class Cube : Square { d: int; }
+    impl Cube { fn __init__(w: int) { __super__(w); self.d = w; } }
+    fn main() -> int { return Rect(1).w + Cube(2).d; }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  r = semaCheck(R"(
+    class Base { v: int; }
+    class Derived : Base { y: int; }
+    impl Derived { fn __init__(y: int) { self.y = y; } }
     fn main() -> int { return 0; }
   )");
   EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find(
+                "'__init__' in class 'Derived' must call '__super__' as its "
+                "first statement because its superclass 'Base' has fields to "
+                "initialize (its default '__init__' takes v: int)"),
+            std::string::npos)
+      << r.Diagnostics;
 }
 
 TEST(Class, SuperFirstStatementAccepted) {

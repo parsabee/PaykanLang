@@ -1,0 +1,104 @@
+// 49 — The default `__init__`.  A class that declares no `__init__` gets
+// one that takes its superclass constructor's arguments and then one per
+// field it declares, in order (docs/language/04-classes.md, "The default
+// `__init__`").
+// Exercises: a plain class, a subclass of it, a subclass of a class with a
+// written `__init__`, a field-less base whose subclass `__init__` need not
+// call `__super__`, object, optional, array and tuple fields, a generic
+// class whose type argument is inferred from the fields.  Run with
+// --track-heap: zero live blocks.
+
+// expect-stdout: (1, 2) (3, 4) origin
+// expect-stdout: car at 50
+// expect-stdout: a -> b -> end
+// expect-stdout: 3 items, first (1, one), score None
+// expect-stdout: square 9
+// expect-stdout: box of 7
+
+class Point {
+  x: int;
+  y: int;
+  view fn show() -> Str {
+    return "(" + Str(self.x) + ", " + Str(self.y) + ")";
+  }
+}
+
+class Labeled : Point {
+  label: Str;
+}
+
+class Vehicle {
+  speed: int;
+}
+
+impl Vehicle {
+  fn __init__(s: int) { self.speed = s * 10; }
+}
+
+class Car : Vehicle {
+  kind: Str;
+}
+
+class Node {
+  name: Str;
+  next: Node?;
+}
+
+class Inventory {
+  items: Str[];
+  first: (int, Str);
+  score: int?;
+}
+
+class Shape {
+  view fn area() -> int { return 0; }
+}
+
+class Square : Shape {
+  side: int;
+  view fn area() -> int { return self.side * self.side; }
+}
+
+impl Square {
+  fn __init__(side: int) { self.side = side; }   // Shape's does nothing
+}
+
+class Box<T> {
+  v: T;
+}
+
+fn chain(n: Node) -> Str {
+  match n.next {
+    m: Node { return n.name + " -> " + chain(m); }
+    None { return n.name + " -> end"; }
+  }
+}
+
+fn scoreText(s: int?) -> Str {
+  match s {
+    v: int { return Str(v); }
+    None { return "None"; }
+  }
+}
+
+fn main() -> int {
+  p = Point(1, 2);
+  l = Labeled(3, 4, "origin");
+  println(p.show() + " " + l.show() + " " + l.label);
+
+  c = Car(5, "car");
+  println(c.kind + " at " + Str(c.speed));
+
+  println(chain(Node("a", Node("b", None))));
+
+  inv = Inventory(["x", "y", "z"], (1, "one"), None);
+  println(Str(inv.items.len()) + " items, first " + inv.first.toString() +
+          ", score " + scoreText(inv.score));
+
+  s: Shape = Square(3);
+  println("square " + Str(s.area()));
+
+  b = Box(7);
+  println("box of " + Str(b.v));
+  return 0;
+}

@@ -1,0 +1,10 @@
+// ERROR: a class without an __init__ is constructed from all of its fields.
+class Point {
+  x: int;
+  y: int;
+}
+
+fn main() -> int {
+  p = Point(1);   // its default __init__ takes x: int, y: int
+  return p.x;
+}

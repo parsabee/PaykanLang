@@ -53,19 +53,51 @@ TEST(Class, InitStoresIntField) {
   EXPECT_EQ(r.StdOut, "42\n");
 }
 
-// Default (zero) initialisation: int field is 0 before any __init__ writes it.
-TEST(Class, FieldDefaultZero) {
+// A class without an __init__ is constructed from its fields, in order.
+TEST(Class, DefaultInitTakesTheFields) {
   auto r = compileAndRun(withFns(R"(
     class Box {
       val: int;
+      name: Str;
     }
   )",
                                  R"(
-    b: Box = Box();
-    println(Str<int>(b.val));
+    b: Box = Box(5, "five");
+    println(Str<int>(b.val) + " " + b.name);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "0\n");
+  EXPECT_EQ(r.StdOut, "5 five\n");
+}
+
+// The default __init__ chains up through superclasses (to a written
+// __init__ too) and stores every kind of field: an object, an optional, an
+// array, a tuple and a generic one; nothing leaks.
+TEST(Class, DefaultInitChainsAndStoresEveryField) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Vehicle { speed: int; }
+    impl Vehicle { fn __init__(s: int) { self.speed = s * 10; } }
+    class Car : Vehicle { name: Str; }
+    class Node { label: Str; next: Node?; }
+    class Bag : Car { xs: int[]; pair: (int, Str); n: int?; }
+    class Box<T> { v: T; }
+    fn main() -> int {
+      c = Car(5, "car");
+      l = Node("a", Node("b", None));
+      b = Bag(1, "bag", [2, 3], (4, "four"), None);
+      x = Box(Node("c", None));
+      println(Str(c.speed) + " " + c.name + " " + Str(b.speed) + " " +
+              Str(b.xs.len()) + " " + b.pair.1 + " " + x.v.label);
+      match l.next {
+        m: Node { println(l.label + m.label); }
+        None { println("none"); }
+      }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "50 car 10 2 four c\nab\n");
+  g.expectNoLeaks("DefaultInitChainsAndStoresEveryField");
 }
 
 // --- Field read / write ----------------------------------------------------
@@ -79,7 +111,7 @@ TEST(Class, FieldReadWrite) {
     }
   )",
                                  R"(
-    p: Point = Point();
+    p: Point = Point(0, 0);
     p.x = 3;
     p.y = 7;
     println(Str<int>(p.x));
@@ -189,7 +221,7 @@ TEST(Class, MethodWithParam) {
     }
   )",
                                  R"(
-    a: Acc = Acc();
+    a: Acc = Acc(0);
     a.add(5);
     a.add(3);
     println(Str<int>(a.total));
@@ -485,7 +517,7 @@ TEST(Class, MethodWithLoop) {
     }
   )",
                                  R"(
-    s: Summer = Summer();
+    s: Summer = Summer(0);
     s.sumTo(5);
     println(Str<int>(s.total));
   )"));

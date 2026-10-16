@@ -17,7 +17,9 @@ bounds (`<T: Show>`) are in `12-traits.md`; variance is not supported in v0.1.
   ordinary class named after it (`Box<int>` and `Box<Str>` are unrelated, and
   so are `Box<Dog>` and `Box<Animal>`: there is no variance).
 - Construct with the type arguments — `Box<int>(3)` — or let the compiler
-  infer them from the `__init__` arguments: `Box(3)`.
+  infer them from the `__init__` arguments: `Box(3)`. Without an `__init__`, the
+  default one takes the fields (see `04-classes.md`), so `class Box<T> { v: T; }`
+  infers them too.
 - Call a generic function with explicit arguments, `first<int>(xs)`, or let
   them be inferred from the argument types, `first(xs)`.
 - Type parameters name types only; `T` cannot be read as a value or constructed.
@@ -167,7 +169,8 @@ same<float>(1, 2.0);      // ok (1 promotes to float)
 ```
 
 A generic **class** may be constructed without type arguments when they can be
-inferred from its `__init__` parameters: `Box(3)` is `Box<int>(3)`.
+inferred from its `__init__` parameters, or its fields' types when it has the
+default `__init__`: `Box(3)` is `Box<int>(3)`.
 
 ## Type Parameters Are Types
 

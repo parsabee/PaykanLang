@@ -111,6 +111,7 @@ fn main() -> int { b = B(); return b.n + b.m + A(3).n + Box(4).v; }
   auto bad = semaCheck(R"(class A { n: int; }
 impl A { fn __init__(n: int) { self.n = n; } }
 class C : A { }
+impl C { fn __init__() {} }
 class D { k: int; }
 impl D { fn __init__() {} }
 class E {}
@@ -119,7 +120,7 @@ impl E { fn __init__() {} }
 fn main() -> int { return 0; }
 )");
   EXPECT_FALSE(bad.Ok);
-  expectAll(bad, {"class 'C' must declare an '__init__' that calls",
+  expectAll(bad, {"'__init__' in class 'C' must call '__super__' as its first",
                   "field 'k' of class 'D' is not assigned on every path",
                   "class 'E' already has a method '__init__'"});
 }
