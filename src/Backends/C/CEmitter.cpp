@@ -202,10 +202,10 @@ const char *cType(Type t) {
   return kVoid;
 }
 
-/// `(T){<value>, <present>}`: a compound literal of the optional type @p t.
-std::string optLiteral(Type t, const std::string &value,
-                       const std::string &present) {
-  return paren(cType(t)) + kLBrace + value + kListSep + present + kRBrace;
+/// `(T){<present>, <value>}`: a compound literal of the optional type @p t.
+std::string optLiteral(Type t, const std::string &present,
+                       const std::string &value) {
+  return paren(cType(t)) + kLBrace + present + kListSep + value + kRBrace;
 }
 
 /// The C operator of a comparison.  C's float operators already have PIR's
@@ -737,13 +737,12 @@ class Emitter {
                         kHelperDouble);
     if (UsesF64Bits || UsesBitsF64)
       O << kNewline;
-    // typedef struct { <payload> value; int64_t present; } pkrt_opt_<t>;
+    // typedef struct { bool present; <payload> value; } pkrt_opt_<t>;
     for (Type t : UsedOptionals)
       O << stmt(kTypedef + std::string(kSpace) + kStruct + kSpace + kLBrace +
-                kSpace +
+                kSpace + stmt(declare(kBool, kOptPresent)) + kSpace +
                 stmt(declare(cType(pir::optionalPayload(t)), kOptValue)) +
-                kSpace + stmt(declare(kInt64, kOptPresent)) + kSpace + kRBrace +
-                kSpace + cType(t))
+                kSpace + kRBrace + kSpace + cType(t))
         << kNewline;
     if (!UsedOptionals.empty())
       O << kNewline;
@@ -969,7 +968,7 @@ class Emitter {
           }
           std::string init = zero;
           if (pir::isOptional(f.Ty))
-            init = optLiteral(f.Ty, kZero, kZero); // absent
+            init = optLiteral(f.Ty, kFalse, kZero); // absent
           O << kIndentUnit
             << stmt(binop(member(kNewObj, fieldName(f.Name)), kOpAssign, init))
             << kNewline;
@@ -1448,16 +1447,15 @@ class Emitter {
     }
     case Opcode::Some:
       pre = resultPrefix(i);
-      line(stmt(pre + optLiteral(i.Result.Ty, operand(i.Args[0]), kOne)));
+      line(stmt(pre + optLiteral(i.Result.Ty, kTrue, operand(i.Args[0]))));
       return;
     case Opcode::None:
       pre = resultPrefix(i);
-      line(stmt(pre + optLiteral(i.Result.Ty, kZero, kZero)));
+      line(stmt(pre + optLiteral(i.Result.Ty, kFalse, kZero)));
       return;
     case Opcode::IsSome:
       pre = resultPrefix(i);
-      line(stmt(pre + paren(binop(operand(i.Args[0]) + kOpDot + kOptPresent,
-                                  kOpNe, kZero))));
+      line(stmt(pre + operand(i.Args[0]) + kOpDot + kOptPresent));
       return;
     case Opcode::Unwrap:
       pre = resultPrefix(i);

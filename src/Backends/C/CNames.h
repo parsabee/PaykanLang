@@ -197,7 +197,7 @@ inline constexpr const char *kNewPrefix = "pknew_";
 inline constexpr const char *kHelperF64Bits = "pkrt_f64_bits";
 inline constexpr const char *kHelperBitsF64 = "pkrt_bits_f64";
 /// The C types of PIR's inline optionals (prelude typedefs, emitted only when
-/// a unit uses them): `{ <payload> value; int64_t present; }`.
+/// a unit uses them): `{ bool present; <payload> value; }`.
 inline constexpr const char *kOptI64 = "pkrt_opt_i64";
 inline constexpr const char *kOptF64 = "pkrt_opt_f64";
 inline constexpr const char *kOptBool = "pkrt_opt_bool";

@@ -229,7 +229,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scalar (`i64`, `f64`, `bool`, `char`) slots have addresses.  A backend plugin
   must handle them.
 - PIR: inline optionals (#96, docs/pir.md §1 and §6).  Four value types, `opt_i64`,
-  `opt_f64`, `opt_bool` and `opt_char` (a payload and an 8-byte presence word), and four
+  `opt_f64`, `opt_bool` and `opt_char` (a bool presence flag, then the payload at its
+  alignment: 16 bytes for `opt_i64` and `opt_f64`, 2 for `opt_bool` and `opt_char`), and four
   instructions, `some`, `none`, `is_some` and `unwrap`; optional slots have addresses and
   may be fields.  A backend plugin must handle them.
 - An optional is not an object (#96): a `T?` no longer converts to `Obj`, so `o: Obj = maybe`

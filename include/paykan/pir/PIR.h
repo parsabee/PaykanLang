@@ -30,8 +30,8 @@ enum class Type : uint8_t {
   Box, // PaykanShared* (may be null)
   Obj, // raw PaykanObject* (any runtime or user class)
   Ptr, // any other pointer: vtable address, literal data, kind descriptor
-  // Inline optionals (#96): a payload followed by an 8-byte presence word,
-  // held and passed by value (docs/pir.md §1).
+  // Inline optionals (#96): a bool presence flag, then the payload at its
+  // natural alignment, held and passed by value (docs/pir.md §1).
   OptI64,
   OptF64,
   OptBool,
@@ -77,6 +77,34 @@ constexpr Type optionalOf(Type t) {
   default:
     return Type::Void;
   }
+}
+
+/// The bytes a value of type @p t takes in memory (a field, an array
+/// element, a native function's PaykanType).  An optional is its presence
+/// flag (a bool) and then its payload, at the payload's alignment.
+constexpr int64_t storeSize(Type t) {
+  switch (t) {
+  case Type::Void:
+    return 0;
+  case Type::Bool:
+  case Type::Char:
+    return 1;
+  case Type::OptBool:
+  case Type::OptChar:
+    return 2;
+  case Type::OptI64:
+  case Type::OptF64:
+    return 16;
+  default:
+    return 8;
+  }
+}
+
+/// The alignment of a value of type @p t in memory: an optional's is its
+/// payload's.
+constexpr int64_t storeAlign(Type t) {
+  const Type payload = isOptional(t) ? optionalPayload(t) : t;
+  return payload == Type::Void ? 1 : storeSize(payload);
 }
 
 /// A function signature: parameter types and return type.

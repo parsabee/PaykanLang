@@ -42,7 +42,7 @@ Design rules:
 | `box` | `PaykanShared*`: an owned-or-borrowed reference-counted box; may be `null` (an optional's `None`) | `PaykanShared *` |
 | `obj` | raw `PaykanObject*`: an unboxed heap object of any class (also `PaykanString*`, `PaykanArray*`, `PaykanTuple*`, `PaykanFile*`, `PaykanError*`) | `PaykanObject *` (cast at runtime calls) |
 | `ptr` | any other pointer: vtable addresses, literal data, kind descriptors | `void *`  |
-| `opt_i64` `opt_f64` `opt_bool` `opt_char` | an inline optional: the payload (`i64`, `f64`, `bool`, `char`) followed by an 8-byte presence word, held and passed by value (#96) | `struct { <payload> value; int64_t present; }` |
+| `opt_i64` `opt_f64` `opt_bool` `opt_char` | an inline optional: a presence flag, then the payload (`i64`, `f64`, `bool`, `char`) at its natural alignment, held and passed by value (#96): 16 bytes for `opt_i64` and `opt_f64`, 2 for `opt_bool` and `opt_char` | `struct { bool present; <payload> value; }` |
 
 Paykan types lower as: `int`→`i64`, `float`→`f64`, `bool`→`bool`,
 `char`→`char`, every enum→`i64`, `int?`→`opt_i64`, `float?`→`opt_f64`,
@@ -51,8 +51,11 @@ Paykan types lower as: `int`→`i64`, `float`→`f64`, `bool`→`bool`,
 field, parameter, return value, array/tuple ref slot) and `obj` when used as
 a raw receiver.  A `T?` of a reference type is a `box` that may be `null`.
 
-An optional type holds a payload and a presence word: `none` is the absent
-value (a zero payload, presence 0), `some %v` the present one (presence 1).
+An optional type holds a presence flag and a payload: `none` is the absent
+value (presence false, a zero payload), `some %v` the present one (presence
+true).  In memory (a field, an array element, a native function's
+`PaykanType`) it is laid out as C lays out that struct, so all zero is
+`none`.
 It is a value like an `i64`: stored in locals and fields, passed and returned,
 `select`ed and read and written through addresses, with no ARC.  It has no
 constants, is never compared (`is_some`, then the payloads) and never `cast`,
@@ -390,8 +393,9 @@ CodeGen enforced, now in one place.
   `unwrap`s are `==`, and a `match` arm binding the primitive is its
   `unwrap`.  The print builtins print one as its text, formatted with
   `PaykanString_from_int` & co. when present and `"None"` otherwise.  An
-  `int?[]` & co. is a `PaykanArray_new_sized(len, 16)` array whose
-  elements are read and written in place: `ptr.load` / `ptr.store` at
+  `int?[]` & co. is a `PaykanArray_new_sized(len, size)` array, `size`
+  being the optional's (16 for `int?` and `float?`, 2 for `bool?` and
+  `char?`), whose elements are read and written in place: `ptr.load` / `ptr.store` at
   `PaykanArray_slot(arr, i)` (bounds-checked), `ptr.store` at
   `PaykanArray_push_slot(arr)` for a push, and `PaykanArray_pop_into(arr,
   local.addr)` for a pop; each address is used before the array can change

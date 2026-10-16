@@ -278,11 +278,9 @@ extern PaykanMethod PaykanError_vtable[PAYKAN_OBJECT_SLOTS];
 // in an array of optional values.  Primitive elements (int, float, bool) are
 // stored unboxed as int64_t/double; class-type elements store a
 // PaykanShared* (retained by the array); an optional value (`int?` & co.,
-// #96) is stored inline as the compiler lays it out, PAYKAN_OPTIONAL_SIZE
-// bytes (the payload, then an 8-byte presence word: all zero is None).
-
-/// The size of an inline optional value, an `int?[]` element.
-#define PAYKAN_OPTIONAL_SIZE 16UL
+// #96) is stored inline as the compiler lays it out: a bool presence flag,
+// then the payload at its alignment, so 2 bytes for `bool?` and `char?` and
+// 16 for `int?` and `float?` (all zero is None).
 /// The largest element PaykanArray_new_sized accepts.
 #define PAYKAN_MAX_ELEM_SIZE 64UL
 
@@ -500,8 +498,8 @@ typedef enum PaykanTypeKind {
   PAYKAN_KIND_CHAR = 3,     // int8_t
   PAYKAN_KIND_OBJECT = 4,   // PaykanShared*, never NULL
   PAYKAN_KIND_OPTIONAL = 5, // PaykanShared*, NULL for None; an inline one
-                            // (int? ...) is its payload and an int64_t
-                            // presence word
+                            // (int? ...) is a bool presence flag and then
+                            // its payload
 } PaykanTypeKind;
 
 /// Followed in memory by `nrefs` int64_t words, one per reference: its byte

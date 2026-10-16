@@ -1214,15 +1214,12 @@ ModuleLowering::localNative(const std::string &name) const {
 }
 
 // A value of every type is stored as one PIR slot: a reference as its box,
-// None as a null one, an inline optional as its payload and an 8-byte
-// presence word (docs/pir.md §1).
+// None as a null one, an inline optional as its presence flag and payload
+// (docs/pir.md §1).
 Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
   const Type slot = toPIRType(ty);
-  const int64_t size = slot == Type::Bool || slot == Type::Char ? 1
-                       : pir::isOptional(slot)                  ? 16
-                                                                : 8;
-  const int64_t align = size == 1 ? 1 : 8;
-  std::vector<int64_t> words = {size, align, nativeTypeKind(ty), 0};
+  std::vector<int64_t> words = {pir::storeSize(slot), pir::storeAlign(slot),
+                                nativeTypeKind(ty), 0};
   if (slot == Type::Box) {
     words[3] = 1;
     words.push_back(ast::isa<ast::OptionalType>(ty) ? 1 : 0); // offset 0

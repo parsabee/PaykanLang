@@ -132,6 +132,38 @@ TEST(Buffer, OptionalSlotsStartAsNone) {
              "None\nx\nNone\n");
 }
 
+// An optional value is its presence flag and payload: a `char?` takes two
+// bytes and an `int?` sixteen, a new one is None, and both survive growing.
+TEST(Buffer, HoldsOptionalValuesOfEverySize) {
+  expectRuns(R"(
+    fn c(o: view char?) -> Str {
+      match o { v: char { return Str<char>(v); } None { return "-"; } }
+    }
+    fn n(o: view int?) -> Str {
+      match o { v: int { return Str<int>(v); } None { return "-"; } }
+    }
+    fn main() -> int {
+      cs = Buffer<char?>();
+      ns = Buffer<int?>();
+      cs.grow(20);
+      ns.grow(20);
+      i: int = 0;
+      while (i < 23) {
+        if (i % 3 == 0) { cs.set(i, 'a'); ns.set(i, i * 1000); }
+        i = i + 1;
+      }
+      cs.set(1, None);
+      s = "";
+      i = 0;
+      while (i < 7) { s = s + c(cs.get(i)) + n(ns.get(i)) + " "; i = i + 1; }
+      println(s);
+      println(c(cs.copy(21)) + n(ns.copy(21)) + " " + c(cs.get(22)));
+      return 0;
+    }
+  )",
+             "a0 -- -- a3000 -- -- a6000 \na21000 -\n");
+}
+
 // A bool takes one byte; a copy outlives the value it was taken from.
 TEST(Buffer, HoldsBoolsAndCopiesOut) {
   expectRuns(R"(
