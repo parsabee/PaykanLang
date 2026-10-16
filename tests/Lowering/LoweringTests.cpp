@@ -293,8 +293,8 @@ TEST(Lowering, NativeInoutArgumentsAreAddresses) {
       << main;
 }
 
-// An inline optional is its payload and an 8-byte presence word, whatever
-// the payload's size.
+// An inline optional is a presence flag and its payload at the payload's
+// alignment: an `int?` is 16 bytes, a `char?` 2.
 TEST(Lowering, GenericNativeFunctionDescribesInlineOptionals) {
   auto l = lower(R"(
     native fn pick<T>(first: bool, a: view T, b: view T) -> T = "pk_test_pick";
@@ -307,7 +307,8 @@ TEST(Lowering, GenericNativeFunctionDescribesInlineOptionals) {
   ASSERT_TRUE(l.Ok) << l.Error;
   EXPECT_NE(l.Text.find("data @.type0 = [16, 8, 5, 0]"), std::string::npos)
       << l.Text;
-  EXPECT_EQ(l.Text.find("data @.type1"), std::string::npos) << l.Text;
+  EXPECT_NE(l.Text.find("data @.type1 = [2, 1, 5, 0]"), std::string::npos)
+      << l.Text;
 }
 
 // -- Calls: callee-consumes ABI for user functions, borrow for builtins
@@ -977,6 +978,32 @@ TEST(Lowering, ArrayAndTupleElementsOfOptionalsAreInline) {
   EXPECT_NE(l.Text.find("= [5, 2, 4]"), std::string::npos) << l.Text;
   EXPECT_NE(m.find("call @$rt.PaykanTuple_get(%"), std::string::npos) << m;
   EXPECT_NE(m.find(", 2)"), std::string::npos) << m;
+}
+
+// An optional value is its presence flag and then its payload at its
+// alignment: an array's elements and a native function's PaykanType have
+// that size, 16 bytes for `int?` and `float?` and 2 for `bool?` and `char?`.
+TEST(Lowering, OptionalValueSizesFollowTheirPayloads) {
+  auto l = lower(R"(
+    native fn keep<T>(v: view T) = "pk_keep";
+    fn main() -> int {
+      a: int?[] = [1];  b: float?[] = [None];
+      c: bool?[] = [True];  d: char?[] = ['x', None];
+      i: int? = 1;  f: bool? = None;
+      keep<int?>(i);
+      keep<bool?>(f);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string m = function(l.Text, "main");
+  for (const char *call :
+       {"PaykanArray_new_sized(1, 16)", "PaykanArray_new_sized(1, 2)",
+        "PaykanArray_new_sized(2, 2)"})
+    EXPECT_NE(m.find(call), std::string::npos) << call << "\n" << m;
+  EXPECT_EQ(count(m, "PaykanArray_new_sized(1, 16)"), 2u) << m;
+  EXPECT_NE(l.Text.find("= [16, 8, 5, 0]"), std::string::npos) << l.Text;
+  EXPECT_NE(l.Text.find("= [2, 1, 5, 0]"), std::string::npos) << l.Text;
 }
 
 // Printing an optional value formats it, "None" or the value's text; it is

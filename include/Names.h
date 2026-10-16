@@ -124,8 +124,6 @@ inline constexpr const char *kPaykanArrayPushSlot = "PaykanArray_push_slot";
 inline constexpr const char *kPaykanArrayPopInto = "PaykanArray_pop_into";
 inline constexpr const char *kPaykanArraySizedVtable =
     "PaykanArray_sized_vtable";
-/// PAYKAN_OPTIONAL_SIZE: the bytes of an `int?[]` element (Runtime.h).
-inline constexpr long kOptionalElemSize = 16;
 inline constexpr const char *kPaykanArrayVtable = "PaykanArray_vtable";
 inline constexpr const char *kPaykanArrayObjVtable = "PaykanArray_obj_vtable";
 

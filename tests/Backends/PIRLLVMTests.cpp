@@ -367,8 +367,8 @@ fn @main() -> i64 {
   EXPECT_FALSE(linesWith(ir, "!{}").empty()) << ir;
 }
 
-// An inline optional is a { payload, i64 } value: passed and returned as
-// one, `none` is its zero, `some` sets the presence word to 1.
+// An inline optional is an { i1, payload } value: passed and returned as
+// one, `none` is its zero, `some` sets the presence flag.
 TEST(PIRLLVM, OptionalsAreTwoFieldValues) {
   std::string err;
   std::string ir = translatePIR(R"(module "t"
@@ -394,11 +394,11 @@ fn @main() -> i64 {
 )",
                                 err);
   ASSERT_FALSE(ir.empty()) << err;
-  EXPECT_FALSE(linesWith(ir, "define { double, i64 } @pk.half(i64").empty())
+  EXPECT_FALSE(linesWith(ir, "define { i1, double } @pk.half(i64").empty())
       << ir;
-  EXPECT_FALSE(linesWith(ir, "insertvalue { double, i64 }").empty()) << ir;
+  EXPECT_FALSE(linesWith(ir, "insertvalue { i1, double }").empty()) << ir;
   EXPECT_FALSE(linesWith(ir, "zeroinitializer").empty()) << ir;
-  EXPECT_FALSE(linesWith(ir, "extractvalue { double, i64 }").empty()) << ir;
+  EXPECT_FALSE(linesWith(ir, "extractvalue { i1, double }").empty()) << ir;
 
   // An object's size is the target's sizeof, folded once the module has its
   // data layout: { i1, i64 } is 16 bytes there, 12 under LLVM's default one.

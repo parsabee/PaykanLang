@@ -646,17 +646,24 @@ TEST(ArrayResizePolicy, GrowthAndShrinkReallocsAreLogarithmic) {
 // -- PaykanArray_new_sized — arrays of optional values (#96)
 
 namespace {
+// The compiler's layouts of an `int?` and a `bool?`: a presence flag, then
+// the payload at its alignment.
 struct OptInt {
+  bool present;
   int64_t value;
-  int64_t present;
 };
-static_assert(sizeof(OptInt) == PAYKAN_OPTIONAL_SIZE);
+static_assert(sizeof(OptInt) == 16);
+struct OptBool {
+  bool present;
+  bool value;
+};
+static_assert(sizeof(OptBool) == 2);
 } // namespace
 
 TEST(ArraySized, ZeroedElementsAndOwnVtable) {
-  PaykanArray *arr = PaykanArray_new_sized(3, PAYKAN_OPTIONAL_SIZE);
+  PaykanArray *arr = PaykanArray_new_sized(3, sizeof(OptInt));
   EXPECT_EQ(arr->len, 3UL);
-  EXPECT_EQ(arr->elem_size, PAYKAN_OPTIONAL_SIZE);
+  EXPECT_EQ(arr->elem_size, sizeof(OptInt));
   EXPECT_EQ(arr->vtable, PaykanArray_sized_vtable);
   for (unsigned long i = 0; i < 3; ++i) {
     auto *e = static_cast<OptInt *>(PaykanArray_slot(arr, i));
@@ -667,31 +674,46 @@ TEST(ArraySized, ZeroedElementsAndOwnVtable) {
 }
 
 TEST(ArraySized, PushSlotAndPopIntoKeepEveryElementAcrossResizes) {
-  PaykanArray *arr = PaykanArray_new_sized(0, PAYKAN_OPTIONAL_SIZE);
+  PaykanArray *arr = PaykanArray_new_sized(0, sizeof(OptInt));
   for (int64_t i = 0; i < 100; ++i) {
     auto *e = static_cast<OptInt *>(PaykanArray_push_slot(arr));
-    *e = {i, i % 2};
+    *e = {i % 2 == 1, i};
   }
   EXPECT_EQ(arr->len, 100UL);
   EXPECT_EQ(static_cast<OptInt *>(PaykanArray_slot(arr, 41))->value, 41);
   for (int64_t i = 99; i >= 0; --i) {
-    OptInt out{-1, -1};
+    OptInt out{true, -1};
     PaykanArray_pop_into(arr, &out);
     EXPECT_EQ(out.value, i);
-    EXPECT_EQ(out.present, i % 2);
+    EXPECT_EQ(out.present, i % 2 == 1);
   }
   EXPECT_EQ(arr->len, 0UL);
   PaykanArray_destroy((PaykanObject *)arr);
 }
 
+// A `bool?[]` has 2-byte elements; they stay in place across resizes.
+TEST(ArraySized, TwoByteElementsAcrossResizes) {
+  PaykanArray *arr = PaykanArray_new_sized(0, sizeof(OptBool));
+  for (int i = 0; i < 50; ++i)
+    *static_cast<OptBool *>(PaykanArray_push_slot(arr)) = {i % 3 != 0,
+                                                           i % 2 == 0};
+  EXPECT_EQ(arr->elem_size, 2UL);
+  for (int i = 0; i < 50; ++i) {
+    auto *e = static_cast<OptBool *>(PaykanArray_slot(arr, i));
+    EXPECT_EQ(e->present, i % 3 != 0);
+    EXPECT_EQ(e->value, i % 2 == 0);
+  }
+  PaykanArray_destroy((PaykanObject *)arr);
+}
+
 TEST(ArraySized, SlotOutOfBoundsDies) {
-  PaykanArray *arr = PaykanArray_new_sized(1, PAYKAN_OPTIONAL_SIZE);
+  PaykanArray *arr = PaykanArray_new_sized(1, sizeof(OptInt));
   EXPECT_DEATH(PaykanArray_slot(arr, 1), "out of bounds");
   PaykanArray_destroy((PaykanObject *)arr);
 }
 
 TEST(ArraySized, PopIntoEmptyDies) {
-  PaykanArray *arr = PaykanArray_new_sized(0, PAYKAN_OPTIONAL_SIZE);
+  PaykanArray *arr = PaykanArray_new_sized(0, sizeof(OptInt));
   OptInt out;
   EXPECT_DEATH(PaykanArray_pop_into(arr, &out), "pop on empty array");
   PaykanArray_destroy((PaykanObject *)arr);

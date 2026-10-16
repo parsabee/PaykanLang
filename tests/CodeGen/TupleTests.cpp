@@ -7,6 +7,7 @@
 
 #include "CodeGenTestUtils.h"
 #include "Names.h"
+#include "paykan/pir/PIR.h"
 #include <gtest/gtest.h>
 
 extern "C" {
@@ -28,9 +29,27 @@ static_assert(int(paykan::names::kTupleSlotRef) == int(PAYKAN_TUPLE_REF),
               "tuple slot-kind ABI drift");
 static_assert(int(paykan::names::kTupleSlotOpt) == int(PAYKAN_TUPLE_OPT),
               "tuple slot-kind ABI drift");
-// An `int?[]` element is the size the lowering asks the runtime for.
-static_assert(paykan::names::kOptionalElemSize == long(PAYKAN_OPTIONAL_SIZE),
-              "optional element size ABI drift");
+// An inline optional in memory (an `int?[]` element, a field, a native
+// function's PaykanType) is the C backend's `{ bool present; T value; }`: the
+// size and alignment the lowering gives the runtime are that struct's.
+namespace {
+template <typename T> struct OptLayout {
+  bool present;
+  T value;
+};
+template <typename T> constexpr bool sameLayout(paykan::pir::Type t) {
+  return paykan::pir::storeSize(t) == int64_t(sizeof(OptLayout<T>)) &&
+         paykan::pir::storeAlign(t) == int64_t(alignof(OptLayout<T>));
+}
+} // namespace
+static_assert(sameLayout<int64_t>(paykan::pir::Type::OptI64),
+              "optional layout ABI drift");
+static_assert(sameLayout<double>(paykan::pir::Type::OptF64),
+              "optional layout ABI drift");
+static_assert(sameLayout<bool>(paykan::pir::Type::OptBool),
+              "optional layout ABI drift");
+static_assert(sameLayout<int8_t>(paykan::pir::Type::OptChar),
+              "optional layout ABI drift");
 
 // Likewise the type kinds a generic native function is passed.
 static_assert(int(paykan::names::kNativeKindInt) == int(PAYKAN_KIND_INT),

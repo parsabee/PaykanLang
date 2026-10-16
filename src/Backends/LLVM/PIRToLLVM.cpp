@@ -157,9 +157,10 @@ private:
     case Type::OptF64:
     case Type::OptBool:
     case Type::OptChar:
-      // { payload, i64 present }: a literal struct, passed by value.
+      // { i1 present, payload }: a literal struct, passed by value; the
+      // payload is at its own alignment, as C lays out the same struct.
       return llvm::StructType::get(
-          Ctx, {llvmType(optionalPayload(t)), llvm::Type::getInt64Ty(Ctx)});
+          Ctx, {llvm::Type::getInt1Ty(Ctx), llvmType(optionalPayload(t))});
     }
     return llvm::Type::getVoidTy(Ctx);
   }
@@ -773,20 +774,19 @@ private:
       break;
     case Opcode::Some: {
       llvm::Type *ty = llvmType(in.Result.Ty);
-      llvm::Value *o = B.CreateInsertValue(llvm::PoisonValue::get(ty),
-                                           operand(in.Args[0]), 0);
-      setResult(in, B.CreateInsertValue(o, B.getInt64(1), 1));
+      llvm::Value *o =
+          B.CreateInsertValue(llvm::PoisonValue::get(ty), B.getTrue(), 0);
+      setResult(in, B.CreateInsertValue(o, operand(in.Args[0]), 1));
       break;
     }
     case Opcode::None:
       setResult(in, llvm::Constant::getNullValue(llvmType(in.Result.Ty)));
       break;
     case Opcode::IsSome:
-      setResult(in, B.CreateICmpNE(B.CreateExtractValue(operand(in.Args[0]), 1),
-                                   B.getInt64(0)));
+      setResult(in, B.CreateExtractValue(operand(in.Args[0]), 0));
       break;
     case Opcode::Unwrap:
-      setResult(in, B.CreateExtractValue(operand(in.Args[0]), 0));
+      setResult(in, B.CreateExtractValue(operand(in.Args[0]), 1));
       break;
     }
   }

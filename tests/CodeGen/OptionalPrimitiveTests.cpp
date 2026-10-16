@@ -252,6 +252,49 @@ TEST(OptionalPrimitive, FieldsStartAsNoneAndAreReleased) {
   g.expectNoLeaks("FieldsStartAsNoneAndAreReleased");
 }
 
+// A `bool?` or `char?` is two bytes, an `int?` or `float?` sixteen, each at
+// its payload's alignment: small optionals sit between other fields and in
+// their own arrays without disturbing their neighbours.
+TEST(OptionalPrimitive, SmallOptionalsKeepTheirNeighbours) {
+  LeakGuard g;
+  auto r = compileAndRun(R"pkn(
+    class Mixed {
+      a: bool?;
+      n: int;
+      b: char?;
+      c: bool?;
+      f: float?;
+      d: char?;
+      s: Str;
+      e: int?;
+    }
+    fn main() -> int {
+      m = Mixed(True, -1, 'x', None, 2.5, 'y', "str", 7);
+      println(m.a); println(Str(m.n)); println(m.b); println(m.c);
+      println(m.f); println(m.d); println(m.s); println(m.e);
+      m.c = False; m.b = None; m.n = 9;
+      println(m.a); println(m.b); println(m.c); println(m.d); println(Str(m.n));
+      bs: bool?[] = [];
+      cs: char?[] = [];
+      i: int = 0;
+      while (i < 40) {
+        if (i % 4 == 0) { bs.push(None); cs.push('z'); }
+        else { bs.push(i % 2 == 0); cs.push(None); }
+        i = i + 1;
+      }
+      println(Str(bs.len()) + " " + Str(cs.len()));
+      println(bs[0]); println(bs[1]); println(bs[2]); println(cs[36]);
+      println(cs[37]); println(bs.pop()); println(cs.pop());
+      return 0;
+    }
+  )pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "True\n-1\nx\nNone\n2.5\ny\nstr\n7\n"
+                      "True\nNone\nFalse\ny\n9\n"
+                      "40 40\nNone\nFalse\nTrue\nz\nNone\nFalse\nNone\n");
+  g.expectNoLeaks("SmallOptionalsKeepTheirNeighbours");
+}
+
 TEST(OptionalPrimitive, ArraysOfOptionalPrimitives) {
   LeakGuard g;
   auto r = compileAndRun(R"pkn(

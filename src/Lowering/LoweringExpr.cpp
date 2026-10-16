@@ -105,7 +105,8 @@ Val ModuleLowering::ExprEmitter::visitArrayLiteralExpr(
   if (ast::isValueOptional(elemTy)) {
     // Optional values are stored inline (#96), each written to its slot.
     arr = L.callRuntime(kPaykanArrayNewSized,
-                        {lenVal, Val::i64(kOptionalElemSize)}, "arr");
+                        {lenVal, Val::i64(pir::storeSize(L.toPIRType(elemTy)))},
+                        "arr");
     for (size_t i = 0; i < len; ++i) {
       Val v = visit(node->getElements()[i]);
       if (!v)
