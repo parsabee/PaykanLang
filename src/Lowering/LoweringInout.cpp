@@ -171,6 +171,12 @@ void ModuleLowering::emitInoutBinding(const std::string &name, ast::Expr *place,
   }
   pir::LocalId local = B.addLocal(name, Type::Ptr);
   B.store(local, addr);
+  // A fixed-size array is reached through the address (LoweringFixed.cpp).
+  ast::Type *placeTy = astTy ? astTy : place->getResolvedType();
+  if (ast::isa<ast::FixedArrayType>(placeTy)) {
+    CurrentScope->declareInout(name, local, Type::Mem, placeTy);
+    return;
+  }
   CurrentScope->declareInout(name, local, toPIRType(astTy), astTy);
 }
 

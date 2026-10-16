@@ -219,6 +219,65 @@ Output:
 
 ---
 
+## Fixed-size arrays
+
+`T[n]` is an array of exactly `n` elements, stored inline: in the variable
+itself, not on the heap. The length is an integer literal, at least 1. A
+fixed-size array is a **value**: assigning or copying one copies its
+elements, so the copy and the original change independently. It is not an
+`Obj`, has no `push` or `pop`, and its one method is `len()`.
+
+```pkn
+fn main() -> int {
+  xs: int[3] = [1, 2, 3];
+  ys = xs;                 // a copy
+  ys[0] = 10;
+  xs = [xs[2], xs[0], xs[1]];
+  println(Str(xs[0]) + " " + Str(ys[0]) + " " + Str(xs.len()));
+  return 0;
+}
+```
+
+Output:
+
+```
+3 10 3
+```
+
+- A literal for a `T[n]` slot has exactly `n` elements, each of type `T`
+  (`array literal has 2 element(s), but 'int[3]' has 3`). A literal with no
+  `T[n]` slot to flow into is still a growable `T[]`.
+- An index is an `int`. A constant one is checked when compiling (`index 3 is
+  out of bounds for 'int[3]' (its indexes are 0 to 2)`), any other when
+  running: `paykan: array index 3 out of bounds (len=3)`.
+- The elements are part of the value, so a `let` array's elements cannot be
+  assigned, and neither can a `view`'s. An `inout` local names the array
+  itself (`r: inout = xs;`).
+- An array of arrays puts its first length on its first index, as in C:
+  `int[2][3]` is two `int[3]`s, indexed `grid[i][j]` with `i < 2` and `j < 3`.
+  A row is a value too: `row = grid[1];` copies it.
+- An array holds at most 1048576 bytes (1 MiB).
+- For now, only `int`, `float`, `bool`, `char`, an enum and other fixed-size
+  arrays can be elements. And for now a fixed-size array is only ever a local
+  variable's own type: it cannot be a parameter, a result, a field, a tuple
+  or growable array element, an optional or a type argument.
+
+```pkn
+fn main() -> int {
+  let xs: int[2] = [1, 2];
+  xs[0] = 5;
+  return 0;
+}
+```
+
+Error:
+
+```
+'xs' is declared with 'let'; its elements are part of its value and cannot be assigned
+```
+
+---
+
 ## Semantic Checks
 
 | Error | Trigger |
@@ -227,3 +286,5 @@ Output:
 | Empty literal without annotation | `x = []` with no type annotation |
 | Subscript on non-array type | `x[0]` where `x` is not an array |
 | `.pop()` on empty array | Runtime abort with `paykan: pop on empty array` (checked at runtime, not statically) |
+| Fixed-size array literal of the wrong length | `xs: int[3] = [1, 2]` |
+| Fixed-size array index out of bounds | `xs[3]` for an `int[3]`: a constant index when compiling, any other at runtime (`paykan: array index 3 out of bounds (len=3)`) |

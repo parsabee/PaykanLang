@@ -102,6 +102,9 @@ bool Sema::sharesStorage(const ast::Type *ty) {
     return false;
   if (const auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
     return sharesStorage(ot->getInnerType());
+  // A fixed-size array is a value: a copy of it shares what its elements do.
+  if (const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty))
+    return sharesStorage(ft->getElementType());
   return true;
 }
 

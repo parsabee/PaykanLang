@@ -498,6 +498,34 @@ private:
   /// Runtime symbol implementing @p name for the builtin class @p ct, or "".
   const char *builtinMethodSymbol(ast::ClassType *ct, const std::string &name);
 
+  // -- Fixed-size arrays (LoweringFixed.cpp)
+
+  struct FixedLayout {
+    int64_t Size = 0;
+    int64_t Align = 1;
+  };
+  /// The bytes and alignment of a value of @p ty held in memory: a
+  /// fixed-size array's are its elements', one after another.
+  FixedLayout fixedLayout(ast::Type *ty);
+  /// The address of the bytes of @p e, an expression of a fixed-size array
+  /// type: a variable's own (or, for an `inout` one, the array it names),
+  /// an element's, or a literal's, built in a temporary.
+  Val emitFixedAddress(ast::Expr *e);
+  /// The address of element @p index of the fixed-size array @p array,
+  /// after a bounds check.
+  Val emitFixedElementAddress(ast::Expr *array, ast::Expr *index);
+  /// Write the value of @p e, of a fixed-size array type, into the bytes at
+  /// @p dst: a literal element by element, anything else copied.  @p e must
+  /// not read @p dst (a new variable's storage).
+  void emitFixedInit(ast::Expr *e, const Val &dst);
+  /// A fixed-size array variable @p name initialised with @p init (zero
+  /// without one), declared in the current scope.
+  void declareFixedVar(const std::string &name, ast::FixedArrayType *ty,
+                       ast::Expr *init);
+  /// Copy the value of @p value into the fixed-size array place at @p dst
+  /// (an assignment: @p value may read @p dst).
+  void emitFixedAssign(const Val &dst, ast::Expr *value);
+
   // -- `inout` parameters (LoweringInout.cpp)
 
   /// The PIR type of a parameter of type @p ty and mode @p mode: `ptr` for

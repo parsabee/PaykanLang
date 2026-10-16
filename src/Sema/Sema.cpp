@@ -449,8 +449,69 @@ void Sema::errorOptionalUnwrap(ast::SourceLocation loc,
                  "' without unwrapping (use match)");
 }
 
+int64_t Sema::fixedElementBytes(const ast::Type *ty) {
+  if (ast::isa<ast::EnumType>(ty))
+    return 8;
+  if (const auto *bt = ast::dyn_cast<ast::BuiltinType>(ty)) {
+    switch (bt->getTypeKind()) {
+    case ast::BuiltinType::Int:
+    case ast::BuiltinType::Float:
+      return 8;
+    case ast::BuiltinType::Bool:
+    case ast::BuiltinType::Char:
+      return 1;
+    case ast::BuiltinType::Void:
+      return -1;
+    }
+  }
+  if (const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
+    int64_t elem = fixedElementBytes(ft->getElementType());
+    if (elem < 0 || ft->getLength() > kMaxFixedArrayBytes / elem)
+      return -1;
+    return elem * ft->getLength();
+  }
+  return -1;
+}
+
+bool Sema::holdsFixedArray(const ast::Type *ty) {
+  if (!ty)
+    return false;
+  if (ast::isa<ast::FixedArrayType>(ty))
+    return true;
+  if (const auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
+    return holdsFixedArray(ot->getInnerType());
+  if (const auto *at = ast::dyn_cast<ast::ArrayType>(ty))
+    return holdsFixedArray(at->getElementType());
+  if (const auto *tt = ast::dyn_cast<ast::TupleType>(ty))
+    for (const ast::Type *e : tt->getElementTypes())
+      if (holdsFixedArray(e))
+        return true;
+  return false;
+}
+
+bool Sema::errorFixedArrayHere(ast::SourceLocation loc, ast::Type *ty,
+                               const std::string &where) {
+  error(loc, where + ": a fixed-size array ('" + typeName(ty) +
+                 "') is only supported as a local variable's own type for "
+                 "now");
+  return false;
+}
+
+std::string Sema::letFixedArrayRoot(const ast::Expr *e) {
+  for (;;) {
+    if (const auto *id = ast::dyn_cast<ast::Identifier>(e))
+      return varKind(id->getName()) == VarKind::Let ? id->getName() : "";
+    const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e);
+    const ast::Type *base = se ? se->getArray()->getResolvedType() : nullptr;
+    if (!base || !ast::isa<ast::FixedArrayType>(base))
+      return "";
+    e = se->getArray();
+  }
+}
+
 ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
                              const std::string &context) {
+  const bool allowFixed = std::exchange(FixedArrayAllowed, false);
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty))
     return Ctx.getBuiltinType(bt->getTypeKind());
 
@@ -501,21 +562,37 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
   }
 
   if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
-    // An array of arrays is one type, reported once.
+    // An array of arrays is one type, checked as a whole.
     std::vector<int64_t> lengths;
     ast::Type *elem = ft;
     while (auto *f = ast::dyn_cast<ast::FixedArrayType>(elem)) {
       lengths.push_back(f->getLength());
       elem = f->getElementType();
     }
-    auto *resolved = resolveType(elem, loc, context + " element");
-    if (!resolved)
+    auto *base = resolveType(elem, loc, context + " element");
+    if (!base)
       return nullptr;
+    ast::Type *fixed = base;
     for (auto it = lengths.rbegin(); it != lengths.rend(); ++it)
-      resolved = Ctx.getFixedArrayType(resolved, *it);
-    error(loc, context + " has type '" + typeName(resolved) +
-                   "': fixed-size arrays are not supported yet");
-    return nullptr;
+      fixed = Ctx.getFixedArrayType(fixed, *it);
+    if (!allowFixed) {
+      errorFixedArrayHere(loc, fixed, context);
+      return nullptr;
+    }
+    if (fixedElementBytes(base) < 0) {
+      error(loc, context + " has type '" + typeName(fixed) +
+                     "': a fixed-size array of '" + typeName(base) +
+                     "' is not supported yet (only of 'int', 'float', "
+                     "'bool', 'char' or an enum)");
+      return nullptr;
+    }
+    if (fixedElementBytes(fixed) < 0) {
+      error(loc, context + " has type '" + typeName(fixed) +
+                     "', which is too big: a fixed-size array holds at most " +
+                     std::to_string(kMaxFixedArrayBytes) + " bytes");
+      return nullptr;
+    }
+    return fixed;
   }
 
   if (auto *gt = ast::dyn_cast<ast::GenericType>(ty)) {
@@ -1103,6 +1180,19 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     return nullptr;
   }
 
+  // A fixed-size array has one method, `len()`, its length.
+  if (auto *fixed = ast::dyn_cast<ast::FixedArrayType>(recvTy)) {
+    if (node->getMethodName() != names::kLen || node->getNumArguments() != 0) {
+      S.error(node->getLocation(),
+              "'" + typeName(fixed) + "' has no method '" +
+                  node->getMethodName() +
+                  "' with these arguments (a fixed-size array has 'len()')");
+      return nullptr;
+    }
+    node->setResolvedType(S.Ctx.getIntTy());
+    return S.Ctx.getIntTy();
+  }
+
   // Resolve the ClassType to look up the method on.
   // Array types dispatch through a per-element specialized ClassType so that
   // push/pop signatures are element-type-aware.
@@ -1261,6 +1351,8 @@ ast::Type *
 Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
   // The slot this literal flows into, if known (see visitExpecting).
   ast::Type *expected = std::exchange(S.LiteralExpectation, nullptr);
+  if (auto *fixed = ast::dyn_cast<ast::FixedArrayType>(expected))
+    return checkFixedArrayLiteral(node, fixed);
   auto *expectedAT =
       expected ? ast::dyn_cast<ast::ArrayType>(ast::stripOptional(expected))
                : nullptr;
@@ -1336,9 +1428,66 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
       }
     }
   }
+  if (holdsFixedArray(elemTy)) {
+    S.errorFixedArrayHere(node->getLocation(), elemTy,
+                          "an element of a growable array");
+    return nullptr;
+  }
   auto *arrTy = S.Ctx.getArrayType(elemTy);
   node->setResolvedType(arrTy);
   return arrTy;
+}
+
+ast::Type *
+Sema::ExprChecker::checkFixedArrayLiteral(ast::ArrayLiteralExpr *node,
+                                          ast::FixedArrayType *fixed) {
+  ast::Type *elemTy = fixed->getElementType();
+  if (static_cast<int64_t>(node->getNumElements()) != fixed->getLength()) {
+    S.error(node->getLocation(),
+            "array literal has " + std::to_string(node->getNumElements()) +
+                " element(s), but '" + typeName(fixed) + "' has " +
+                std::to_string(fixed->getLength()));
+    return nullptr;
+  }
+  bool ok = true;
+  for (ast::Expr *elem : node->getElements()) {
+    auto *ty = visitExpecting(elem, elemTy);
+    if (!ty) {
+      ok = false;
+      continue;
+    }
+    if (!S.checkAssignable(elemTy, ty, elem)) {
+      S.error(elem->getLocation(),
+              "array literal element of type '" + typeName(ty) +
+                  "' does not match the element type '" + typeName(elemTy) +
+                  "' of '" + typeName(fixed) + "'");
+      ok = false;
+    }
+  }
+  if (!ok)
+    return nullptr;
+  node->setResolvedType(fixed);
+  return fixed;
+}
+
+bool Sema::checkFixedIndex(ast::FixedArrayType *fixed, const ast::Expr *index) {
+  // A constant index is checked here; any other at run time.
+  int64_t i;
+  if (const auto *lit = ast::dyn_cast<ast::IntegerLiteral>(index))
+    i = lit->getValue();
+  else if (const auto *neg = ast::dyn_cast<ast::UnaryExpr>(index);
+           neg && neg->getOpcode() == ast::UnaryOpcode::Neg &&
+           ast::isa<ast::IntegerLiteral>(neg->getOperand()))
+    i = -ast::cast<ast::IntegerLiteral>(neg->getOperand())->getValue();
+  else
+    return true;
+  if (i >= 0 && i < fixed->getLength())
+    return true;
+  error(index->getLocation(), "index " + std::to_string(i) +
+                                  " is out of bounds for '" + typeName(fixed) +
+                                  "' (its indexes are 0 to " +
+                                  std::to_string(fixed->getLength() - 1) + ")");
+  return false;
 }
 
 ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
@@ -1363,7 +1512,8 @@ ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
   }
 
   auto *at = ast::dyn_cast<ast::ArrayType>(arrayTy);
-  if (!at) {
+  auto *fixed = ast::dyn_cast<ast::FixedArrayType>(arrayTy);
+  if (!at && !fixed) {
     S.error(node->getLocation(), "subscript '[]' applied to non-array type '" +
                                      typeName(arrayTy) + "'");
     return nullptr;
@@ -1377,9 +1527,12 @@ ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
             "array index must be 'int', got '" + typeName(idxTy) + "'");
     return nullptr;
   }
+  if (fixed && !S.checkFixedIndex(fixed, node->getIndex()))
+    return nullptr;
 
-  node->setResolvedType(at->getElementType());
-  return at->getElementType();
+  ast::Type *elemTy = at ? at->getElementType() : fixed->getElementType();
+  node->setResolvedType(elemTy);
+  return elemTy;
 }
 
 ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
@@ -1396,6 +1549,11 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
   }
 
   if (trueTy == falseTy) {
+    if (holdsFixedArray(trueTy)) {
+      S.errorFixedArrayHere(node->getLocation(), trueTy,
+                            "a conditional expression");
+      return nullptr;
+    }
     node->setResolvedType(trueTy);
     return trueTy;
   }
@@ -1498,6 +1656,12 @@ Sema::ExprChecker::visitTupleLiteralExpr(ast::TupleLiteralExpr *node) {
       S.error(elem->getLocation(), "tuple element " + std::to_string(i) +
                                        " has type 'void' (the expression "
                                        "produces no value)");
+      ok = false;
+      continue;
+    }
+    if (holdsFixedArray(ty)) {
+      S.errorFixedArrayHere(elem->getLocation(), ty,
+                            "tuple element " + std::to_string(i));
       ok = false;
       continue;
     }
@@ -2608,6 +2772,7 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   ast::Type *declTy = nullptr;
 
   if (node->getType()) {
+    FixedArrayAllowed = true; // a local may be a fixed-size array
     declTy = resolveType(node->getType(), node->getLocation(),
                          "variable '" + node->getName() + "'");
     if (!declTy) {
@@ -2757,7 +2922,8 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
     return false;
   }
   auto *at = ast::dyn_cast<ast::ArrayType>(arrTy);
-  if (!at) {
+  auto *fixed = ast::dyn_cast<ast::FixedArrayType>(arrTy);
+  if (!at && !fixed) {
     error(node->getLocation(),
           "subscript assignment on non-array type '" + typeName(arrTy) + "'");
     return false;
@@ -2766,19 +2932,30 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   if (idxTy && idxTy != Ctx.getIntTy()) {
     error(node->getIndex()->getLocation(),
           "array index must be int, got '" + typeName(idxTy) + "'");
+  } else if (idxTy && fixed && !checkFixedIndex(fixed, node->getIndex())) {
+    return false;
   }
+  // A fixed-size array's elements are its value: a `let` one keeps them.
+  if (fixed)
+    if (std::string let = letFixedArrayRoot(node->getArray()); !let.empty()) {
+      error(node->getLocation(), "'" + let +
+                                     "' is declared with 'let'; its elements "
+                                     "are part of its value and cannot be "
+                                     "assigned");
+      return false;
+    }
   if (!checkChangeable(node->getArray(), "cannot assign to its elements",
                        node->getLocation()))
     return false;
-  auto *valTy = resolveExprType(node->getValue(), at->getElementType());
+  ast::Type *elemTy = at ? at->getElementType() : fixed->getElementType();
+  auto *valTy = resolveExprType(node->getValue(), elemTy);
   if (!valTy)
     return false;
-  if (!checkAssignable(at->getElementType(), valTy, node->getValue())) {
-    if (!diagnoseOptionalNarrowing(node->getLocation(), at->getElementType(),
-                                   valTy))
+  if (!checkAssignable(elemTy, valTy, node->getValue())) {
+    if (!diagnoseOptionalNarrowing(node->getLocation(), elemTy, valTy))
       error(node->getLocation(), "cannot assign value of type '" +
                                      typeName(valTy) + "' to array of '" +
-                                     typeName(at->getElementType()) + "'");
+                                     typeName(elemTy) + "'");
     return false;
   }
   return checkViewNotStored(node->getValue(), valTy);

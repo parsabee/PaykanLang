@@ -67,6 +67,7 @@ add_executable(sema_tests
     Sema/ModuleTests.cpp
     Sema/ImportTypeTests.cpp
     Sema/ArrayTests.cpp
+    Sema/FixedArrayTests.cpp
     Sema/EnumTests.cpp
     Sema/GenericsTests.cpp
     Sema/ConversionTests.cpp
@@ -126,6 +127,7 @@ add_executable(codegen_tests
     CodeGen/OptionalPrimitiveTests.cpp
     CodeGen/BufferTests.cpp
     CodeGen/MemSlotTests.cpp
+    CodeGen/FixedArrayTests.cpp
     CodeGen/TupleTests.cpp
     CodeGen/RegressionTests.cpp
     CodeGen/LiteralObjectTests.cpp

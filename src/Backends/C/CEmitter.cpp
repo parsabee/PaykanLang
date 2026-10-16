@@ -118,6 +118,7 @@ const RuntimeProto kRuntimeProtos[] = {
     {names::kPaykanPanicDivOverflow, kVoid, {}},
     {names::kPaykanPanicFloatToInt, kVoid, {kDouble}},
     {names::kPaykanPanicIntToChar, kVoid, {kInt64}},
+    {names::kPaykanPanicIndex, kVoid, {kInt64, kInt64}},
     {names::kPaykanStringNew, kRtStrPtr, {kConstCharPtr, kInt64}},
     {names::kPaykanStringDestroy, kVoid, {kRtObjPtr}},
     {names::kPaykanStringConcat, kRtObjPtr, {kRtObjPtr, kRtObjPtr}},

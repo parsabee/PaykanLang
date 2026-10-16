@@ -580,6 +580,10 @@ PAYKAN_NORETURN void Paykan_panic_float_to_int(double value);
 /// the char range 0..255.
 PAYKAN_NORETURN void Paykan_panic_int_to_char(int64_t value);
 
+/// Print a diagnostic naming @p index and @p len and abort: a fixed-size
+/// array's element read or written at an index outside 0..len-1.
+PAYKAN_NORETURN void Paykan_panic_index(int64_t index, int64_t len);
+
 // -- I/O builtins
 
 /// Print one object (via toString) to stdout, without a newline.

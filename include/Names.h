@@ -185,6 +185,7 @@ inline constexpr const char *kPaykanPanicDivOverflow =
 inline constexpr const char *kPaykanPanicFloatToInt =
     "Paykan_panic_float_to_int";
 inline constexpr const char *kPaykanPanicIntToChar = "Paykan_panic_int_to_char";
+inline constexpr const char *kPaykanPanicIndex = "Paykan_panic_index";
 
 // Reference counting
 inline constexpr const char *kPaykanSharedNew = "PaykanShared_new";
@@ -258,6 +259,7 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanPanicDivOverflow,
     kPaykanPanicFloatToInt,
     kPaykanPanicIntToChar,
+    kPaykanPanicIndex,
     // String
     kPaykanStringNew,
     kPaykanStringDestroy,

@@ -120,6 +120,12 @@ public:
     Fn->Locals.push_back({std::move(name), ty});
     return static_cast<LocalId>(Fn->Locals.size() - 1);
   }
+  /// A `mem` local of @p size bytes aligned to @p align.
+  LocalId addMemLocal(std::string name, int64_t size, int64_t align) {
+    assert(Fn);
+    Fn->Locals.push_back({std::move(name), Type::Mem, size, align});
+    return static_cast<LocalId>(Fn->Locals.size() - 1);
+  }
   Type localType(LocalId id) const { return Fn->Locals[id].Ty; }
 
   // -- Raw statement emission
@@ -414,6 +420,28 @@ public:
     Instr i;
     i.Op = Opcode::PtrStore;
     i.Args = {ptr.Op, v.Op};
+    emit(std::move(i));
+  }
+  /// `ptr.add %p, %off`: @p ptr plus @p off (i64) bytes.
+  Val ptrAdd(const Val &ptr, const Val &off, std::string name = "") {
+    Instr i;
+    i.Op = Opcode::PtrAdd;
+    i.Result = newValue(Type::Ptr, std::move(name));
+    i.Args = {ptr.Op, off.Op};
+    return emit(std::move(i));
+  }
+  /// `mem.copy %dst, %src, %n`
+  void memCopy(const Val &dst, const Val &src, const Val &n) {
+    Instr i;
+    i.Op = Opcode::MemCopy;
+    i.Args = {dst.Op, src.Op, n.Op};
+    emit(std::move(i));
+  }
+  /// `mem.zero %p, %n`
+  void memZero(const Val &ptr, const Val &n) {
+    Instr i;
+    i.Op = Opcode::MemZero;
+    i.Args = {ptr.Op, n.Op};
     emit(std::move(i));
   }
 

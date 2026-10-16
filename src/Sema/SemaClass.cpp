@@ -1109,6 +1109,12 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     return nullptr;
   }
   ast::ClassDecl *tmpl = tIt->second;
+  for (size_t i = 0; i < args.size(); ++i)
+    if (holdsFixedArray(args[i]))
+      return errorFixedArrayHere(loc, args[i],
+                                 "type argument " + std::to_string(i + 1) +
+                                     " of '" + name + "'"),
+             nullptr;
   if (args.size() != tmpl->getTypeParams().size()) {
     error(loc, "generic class '" + name + "' expects " +
                    std::to_string(tmpl->getTypeParams().size()) +
@@ -1285,6 +1291,12 @@ std::string Sema::instantiateFunction(const std::string &name,
     return "";
   }
   ast::FuncDecl *tmpl = tIt->second;
+  for (size_t i = 0; i < args.size(); ++i)
+    if (holdsFixedArray(args[i]))
+      return errorFixedArrayHere(loc, args[i],
+                                 "type argument " + std::to_string(i + 1) +
+                                     " of '" + name + "'"),
+             "";
   if (args.size() != tmpl->getTypeParams().size()) {
     error(loc, "generic function '" + name + "' expects " +
                    std::to_string(tmpl->getTypeParams().size()) +
