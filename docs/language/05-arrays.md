@@ -261,10 +261,18 @@ Output:
   function's own copy, a `view` one reads the caller's array, and an `inout`
   one changes it. A result is returned as a copy (`-> int[3]`; a `view` or
   `inout` result of one is not supported yet).
-- For now, only `int`, `float`, `bool`, `char`, an enum and other fixed-size
-  arrays can be elements. And for now a fixed-size array is only ever a local
-  variable, a parameter or a result: it cannot be a field, a tuple or
-  growable array element, an optional or a type argument.
+- An element can be a scalar (`int`, `float`, `bool`, `char`), an enum, a
+  reference (a class, `Str`, a growable array, a tuple, an optional of one)
+  or another fixed-size array. An optional of a value type (`int?`) cannot
+  be one yet.
+- An element of a reference type is a reference, as a variable of that type
+  is: copying the array copies the references, so the copy and the original
+  share their elements' objects, and an element of a `view` array is a
+  `view` too.
+- For now a fixed-size array is only ever a local variable, a parameter or a
+  result: it cannot be a field, a tuple or growable array element, an
+  optional or a type argument. And an element cannot be named by an `inout`
+  local or passed to an `inout` parameter yet.
 
 ```pkn
 fn bumped(xs: int[3]) -> int[3] {
@@ -289,6 +297,26 @@ Output:
 
 ```
 0 101
+```
+
+```pkn
+class Counter { n: int; }
+
+fn main() -> int {
+  cs: Counter[2] = [Counter(1), Counter(2)];
+  copy = cs;               // the same two counters
+  copy[0].n = 10;
+  names: Str[2] = ["ann", "bob"];
+  names[1] = names[0] + "!";
+  println(Str(cs[0].n) + " " + names[1]);
+  return 0;
+}
+```
+
+Output:
+
+```
+10 ann!
 ```
 
 ```pkn

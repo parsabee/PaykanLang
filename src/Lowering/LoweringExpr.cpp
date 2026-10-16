@@ -238,10 +238,17 @@ Val ModuleLowering::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
   // An element of a fixed-size array, read in place (a nested array's is its
   // address).
   if (ast::dyn_cast<ast::FixedArrayType>(node->getArray()->getResolvedType())) {
+    size_t mark = L.FixedTemps.size();
     Val addr = L.emitFixedElementAddress(node->getArray(), node->getIndex());
     if (!addr || ast::dyn_cast<ast::FixedArrayType>(node->getResolvedType()))
       return addr;
-    return L.B.ptrLoad(addr, L.toPIRType(node->getResolvedType()), "elem");
+    Val elem = L.B.ptrLoad(addr, L.toPIRType(node->getResolvedType()), "elem");
+    // A temporary's element outlives it as a +1 box (exprProducesFreshBox).
+    if (L.FixedTemps.size() > mark) {
+      L.emitRetain(elem);
+      L.releaseFixedTemps(mark);
+    }
+    return elem;
   }
   Val idx = visit(node->getIndex());
   if (!idx)
@@ -711,6 +718,7 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     Val selfVal = L.B.load(L.CurrentScope->lookup(kSelf), kSelf);
     std::vector<Val> initArgs = {selfVal};
     std::vector<Val> keep;
+    size_t fixedMark = L.FixedTemps.size();
     for (size_t i = 0; i < node->getNumArguments(); ++i) {
       auto *argExpr = node->getArguments()[i];
       Type paramTy = i + 1 < superFn->Sig.Params.size()
@@ -745,6 +753,7 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     }
     L.B.call(superFn->Name, superFn->Sig, initArgs);
     L.releaseAfterCall(keep);
+    L.releaseFixedTemps(fixedMark);
     return Val();
   }
 
@@ -779,6 +788,7 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     L.releaseAfterCall(keep);
     return result;
   }
+  size_t fixedMark = L.FixedTemps.size();
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     auto *arg = node->getArguments()[i];
     Type paramTy =
@@ -817,10 +827,12 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     args.push_back(slot);
     L.B.call(callee->Name, callee->Sig, args);
     L.releaseAfterCall(keep);
+    L.releaseFixedTemps(fixedMark);
     return slot;
   }
   Val result = L.B.call(callee->Name, callee->Sig, args, "call");
   L.releaseAfterCall(keep);
+  L.releaseFixedTemps(fixedMark);
   if (result && result.Ty == Type::Ptr && !wantAddress) // an `inout` result
     return L.loadInoutResult(result, node->getResolvedType());
   return result;
@@ -879,9 +891,11 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   // A fixed-size array's `len()`: its length.  An element receiver is still
   // evaluated, for its index and its bounds check.
   if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(recvResolved)) {
+    size_t mark = L.FixedTemps.size();
     if (!ast::isa<ast::Identifier>(node->getReceiver()) &&
         !L.emitFixedAddress(node->getReceiver()))
       return Val();
+    L.releaseFixedTemps(mark);
     return Val::i64(ft->getLength());
   }
   // `n.toString()` on an int, float, bool or char (the builtin `Show`): its
@@ -990,6 +1004,7 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   std::vector<Val> args;
   std::vector<ExprValue> ownedArgs;
   std::vector<Val> keep;
+  size_t fixedMark = L.FixedTemps.size();
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     auto *argExpr = node->getArguments()[i];
     if (ast::dyn_cast<ast::FixedArrayType>(argExpr->getResolvedType())) {
@@ -1064,6 +1079,7 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
                        args, "mcall");
   }
   L.releaseAfterCall(keep);
+  L.releaseFixedTemps(fixedMark);
   for (const auto &ev : ownedArgs)
     L.releaseIfOwned(ev);
   L.releaseIfOwned(recvOwned);
@@ -1086,17 +1102,25 @@ Val ModuleLowering::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   // An element of a fixed-size array, written in place.
   if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(
           node->getArray()->getResolvedType())) {
+    size_t mark = FixedTemps.size();
     Val addr = emitFixedElementAddress(node->getArray(), node->getIndex());
     if (!addr)
       return Val();
     ast::Type *elemTy = ft->getElementType();
     if (ast::dyn_cast<ast::FixedArrayType>(elemTy)) {
       emitFixedAssign(addr, node->getValue());
-      return Val();
-    }
-    Val v = emitExpr(node->getValue());
-    if (v)
+    } else if (ast::isRefType(elemTy)) {
+      // The new reference is taken before the old one goes (`xs[0] =
+      // xs[0];`).
+      if (Val box = emitAsShared(node->getValue())) {
+        Val old = B.ptrLoad(addr, Type::Box, "old");
+        B.ptrStore(addr, box);
+        emitRelease(old);
+      }
+    } else if (Val v = emitExpr(node->getValue())) {
       B.ptrStore(addr, coerceTo(v, toPIRType(elemTy)));
+    }
+    releaseFixedTemps(mark);
     return Val();
   }
   Receiver arr = emitReceiver(node->getArray());

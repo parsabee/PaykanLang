@@ -464,6 +464,9 @@ int64_t Sema::fixedElementBytes(const ast::Type *ty) {
       return -1;
     }
   }
+  // A reference is held as its box.
+  if (ast::isRefType(ty))
+    return 8;
   if (const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
     int64_t elem = fixedElementBytes(ft->getElementType());
     if (elem < 0 || ft->getLength() > kMaxFixedArrayBytes / elem)
@@ -594,8 +597,7 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     if (fixedElementBytes(base) < 0) {
       error(loc, context + " has type '" + typeName(fixed) +
                      "': a fixed-size array of '" + typeName(base) +
-                     "' is not supported yet (only of 'int', 'float', "
-                     "'bool', 'char' or an enum)");
+                     "' is not supported yet");
       return nullptr;
     }
     if (fixedElementBytes(fixed) < 0) {

@@ -11,9 +11,14 @@
 // are read and written in place, at the array's address plus the index times
 // the element's size, after a bounds check that panics
 // (Paykan_panic_index); a nested array's element is an address again.
-// Initialising or assigning a whole array copies its bytes (mem.copy).  The
-// elements are scalars (int, float, bool, char, an enum) or other such
-// arrays, so no element is counted and nothing is released.
+// Initialising or assigning a whole array copies its bytes (mem.copy).
+//
+// An element of a reference type is its box, and its slot owns a reference
+// to it, as a variable does: a copy retains every element, an assignment
+// releases the elements it replaces, and a variable's are released when its
+// scope ends.  A temporary (a call's result, a literal) owns its elements:
+// the place it initialises takes them over, and any other use releases them
+// once it is done (FixedTemps).
 
 #include "LoweringInternal.h"
 #include "Names.h"
@@ -24,6 +29,36 @@ using pir::CmpPred;
 using pir::Opcode;
 using pir::Type;
 
+namespace {
+
+/// The references an array of references holds: its elements' at every
+/// depth, one after another.
+int64_t fixedRefCount(ast::FixedArrayType *ft) {
+  int64_t n = ft->getLength();
+  while (auto *inner =
+             ast::dyn_cast<ast::FixedArrayType>(ft->getElementType())) {
+    ft = inner;
+    n *= ft->getLength();
+  }
+  return n;
+}
+
+/// Up to this many references are retained or released one by one; more in
+/// a loop.
+constexpr int64_t kUnrolledRefs = 4;
+
+} // namespace
+
+bool ModuleLowering::fixedHoldsRefs(const ast::Type *ty) {
+  const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty);
+  if (!ft)
+    return false;
+  while (const auto *inner =
+             ast::dyn_cast<ast::FixedArrayType>(ft->getElementType()))
+    ft = inner;
+  return ast::isRefType(ft->getElementType());
+}
+
 ModuleLowering::FixedLayout ModuleLowering::fixedLayout(ast::Type *ty) {
   if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
     FixedLayout elem = fixedLayout(ft->getElementType());
@@ -33,28 +68,80 @@ ModuleLowering::FixedLayout ModuleLowering::fixedLayout(ast::Type *ty) {
   return {pir::storeSize(t), pir::storeAlign(t)};
 }
 
-Val ModuleLowering::emitFixedAddress(ast::Expr *e) {
+ModuleLowering::FixedValue ModuleLowering::emitFixedValue(ast::Expr *e) {
   if (auto *id = ast::dyn_cast<ast::Identifier>(e)) {
     pir::LocalId local = CurrentScope->lookup(id->getName());
     if (CurrentScope->inoutType(id->getName()) != Type::Void)
-      return B.load(local, id->getName() + ".addr");
-    return B.localAddr(local, id->getName() + ".addr");
+      return {B.load(local, id->getName() + ".addr")};
+    return {B.localAddr(local, id->getName() + ".addr")};
   }
   if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(e))
-    return emitFixedElementAddress(se->getArray(), se->getIndex());
+    return {emitFixedElementAddress(se->getArray(), se->getIndex())};
   // A call's result, in the temporary the call wrote.
   if (ast::isa<ast::CallExpr>(e) || ast::isa<ast::MethodCallExpr>(e))
-    return emitExpr(e);
+    return {emitExpr(e), /*Temp=*/true};
   if (auto *lit = ast::dyn_cast<ast::ArrayLiteralExpr>(e)) {
     FixedLayout l = fixedLayout(lit->getResolvedType());
     pir::LocalId tmp = B.addMemLocal("lit", l.Size, l.Align);
     Val addr = B.localAddr(tmp, "lit.addr");
     emitFixedInit(lit, addr);
-    return addr;
+    return {addr, /*Temp=*/true};
   }
   reportInternalError("a fixed-size array value that is not a variable, an "
                       "element, a literal or a call");
-  return Val();
+  return {};
+}
+
+Val ModuleLowering::emitFixedAddress(ast::Expr *e) {
+  FixedValue v = emitFixedValue(e);
+  if (v.Temp && v.Addr && fixedHoldsRefs(e->getResolvedType()))
+    FixedTemps.emplace_back(
+        v.Addr, ast::cast<ast::FixedArrayType>(e->getResolvedType()));
+  return v.Addr;
+}
+
+void ModuleLowering::releaseFixedTemps(size_t mark) {
+  while (FixedTemps.size() > mark) {
+    auto [addr, ty] = FixedTemps.back();
+    FixedTemps.pop_back();
+    emitFixedRelease(addr, ty);
+  }
+}
+
+void ModuleLowering::forEachFixedRef(const Val &addr, ast::FixedArrayType *ty,
+                                     const std::function<void(Val)> &fn) {
+  if (!addr || !fixedHoldsRefs(ty))
+    return;
+  const int64_t n = fixedRefCount(ty);
+  const int64_t size = pir::storeSize(Type::Box);
+  if (n <= kUnrolledRefs) {
+    for (int64_t i = 0; i < n; ++i)
+      fn(B.ptrLoad(i == 0 ? addr
+                          : B.ptrAdd(addr, Val::i64(i * size), "elem.addr"),
+                   Type::Box, "elem"));
+    return;
+  }
+  pir::LocalId i = B.addLocal("i", Type::I64);
+  B.store(i, Val::i64(0));
+  pir::While *w = B.openWhile();
+  B.enter(*w->CondBlock);
+  B.setWhileCond(w, B.cmp(CmpPred::Lt, B.load(i, "i"), Val::i64(n), "more"));
+  B.leave();
+  B.enterLoopBody(*w->Body);
+  Val iv = B.load(i, "i");
+  Val off = B.binary(Opcode::Mul, iv, Val::i64(size), "elem.off");
+  fn(B.ptrLoad(B.ptrAdd(addr, off, "elem.addr"), Type::Box, "elem"));
+  B.store(i, B.binary(Opcode::Add, iv, Val::i64(1), "i.next"));
+  B.leaveLoopBody();
+}
+
+void ModuleLowering::emitFixedRetain(const Val &addr, ast::FixedArrayType *ty) {
+  forEachFixedRef(addr, ty, [&](const Val &box) { emitRetain(box); });
+}
+
+void ModuleLowering::emitFixedRelease(const Val &addr,
+                                      ast::FixedArrayType *ty) {
+  forEachFixedRef(addr, ty, [&](const Val &box) { emitRelease(box); });
 }
 
 Val ModuleLowering::emitFixedElementAddress(ast::Expr *array,
@@ -86,15 +173,21 @@ Val ModuleLowering::emitFixedElementAddress(ast::Expr *array,
 }
 
 void ModuleLowering::emitFixedInit(ast::Expr *e, const Val &dst) {
+  auto *ft = ast::cast<ast::FixedArrayType>(e->getResolvedType());
   auto *lit = ast::dyn_cast<ast::ArrayLiteralExpr>(e);
   if (!lit) {
-    Val src = emitFixedAddress(e);
-    if (src)
-      B.memCopy(dst, src, Val::i64(fixedLayout(e->getResolvedType()).Size));
+    // A temporary's references move here; any other array's are shared.
+    size_t mark = FixedTemps.size();
+    FixedValue src = emitFixedValue(e);
+    if (!src.Addr)
+      return;
+    B.memCopy(dst, src.Addr, Val::i64(fixedLayout(ft).Size));
+    if (!src.Temp)
+      emitFixedRetain(dst, ft);
+    releaseFixedTemps(mark);
     return;
   }
-  ast::Type *elemTy =
-      ast::cast<ast::FixedArrayType>(lit->getResolvedType())->getElementType();
+  ast::Type *elemTy = ft->getElementType();
   int64_t elemSize = fixedLayout(elemTy).Size;
   for (size_t i = 0; i < lit->getNumElements(); ++i) {
     Val at = i == 0
@@ -104,6 +197,13 @@ void ModuleLowering::emitFixedInit(ast::Expr *e, const Val &dst) {
     ast::Expr *elem = lit->getElements()[i];
     if (ast::isa<ast::FixedArrayType>(elemTy)) {
       emitFixedInit(elem, at);
+      continue;
+    }
+    if (ast::isRefType(elemTy)) { // the slot owns a reference
+      Val box = emitAsShared(elem);
+      if (!box)
+        return;
+      B.ptrStore(at, box);
       continue;
     }
     Val v = emitExpr(elem);
@@ -134,7 +234,9 @@ void ModuleLowering::declareFixedParam(const std::string &name,
     // The callee's own copy: what it changes, the caller's array keeps.
     FixedLayout l = fixedLayout(ty);
     pir::LocalId local = B.addMemLocal(name, l.Size, l.Align);
-    B.memCopy(B.localAddr(local, name + ".addr"), addr, Val::i64(l.Size));
+    Val own = B.localAddr(local, name + ".addr");
+    B.memCopy(own, addr, Val::i64(l.Size));
+    emitFixedRetain(own, ty);
     CurrentScope->declare(name, local, ty);
     return;
   }
@@ -152,9 +254,17 @@ Val ModuleLowering::emitFixedResultSlot(ast::Type *ty) {
 void ModuleLowering::emitFixedAssign(const Val &dst, ast::Expr *value) {
   // A literal is built in a temporary first: its elements may read the
   // array it replaces (`xs = [xs[1], xs[0]];`).
-  Val src = emitFixedAddress(value);
-  if (src)
-    B.memCopy(dst, src, Val::i64(fixedLayout(value->getResolvedType()).Size));
+  auto *ft = ast::cast<ast::FixedArrayType>(value->getResolvedType());
+  size_t mark = FixedTemps.size();
+  FixedValue src = emitFixedValue(value);
+  if (!src.Addr)
+    return;
+  // The new references are taken before the old ones go (`xs = xs;`).
+  if (!src.Temp)
+    emitFixedRetain(src.Addr, ft);
+  emitFixedRelease(dst, ft);
+  B.memCopy(dst, src.Addr, Val::i64(fixedLayout(ft).Size));
+  releaseFixedTemps(mark);
 }
 
 } // namespace paykan::lowering

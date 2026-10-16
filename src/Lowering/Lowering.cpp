@@ -185,6 +185,8 @@ void ModuleLowering::Scope::declare(const std::string &name, pir::LocalId local,
     SharedVars.insert(name);
     DeclOrder.push_back({local, astTy});
   }
+  if (fixedHoldsRefs(astTy))
+    FixedVars.push_back({local, astTy});
 }
 
 void ModuleLowering::Scope::declareUnowned(const std::string &name,
@@ -614,9 +616,13 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
     return true;
   if (auto *e = ast::dyn_cast<ast::TupleIndexExpr>(expr))
     return e->getResolvedType() && ast::isRefType(e->getResolvedType());
-  if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(expr))
+  if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(expr)) {
+    // A fixed-size array's element slot holds the box itself.
+    if (ast::dyn_cast<ast::FixedArrayType>(se->getArray()->getResolvedType()))
+      return ast::isRefType(se->getResolvedType());
     return isObjectElementType(se->getResolvedType()) &&
            exprProducesFreshBox(se->getArray());
+  }
   if (auto *e = ast::dyn_cast<ast::MethodCallExpr>(expr))
     return e->getResolvedType() && ast::isRefType(e->getResolvedType());
   if (auto *e = ast::dyn_cast<ast::TernaryExpr>(expr))
@@ -644,8 +650,19 @@ bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
   if (auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(expr))
     return ti->getResolvedType() && ast::isRefType(ti->getResolvedType()) &&
            exprProducesFreshBox(ti->getTuple());
-  if (ast::isa<ast::SubscriptExpr>(expr))
+  if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(expr)) {
+    // An element of a temporary fixed-size array (`mk()[0]`) is read as a
+    // +1 box (visitSubscriptExpr): the temporary dies with the read.
+    if (ast::dyn_cast<ast::FixedArrayType>(se->getArray()->getResolvedType())) {
+      ast::Expr *root = se->getArray();
+      while (auto *inner = ast::dyn_cast<ast::SubscriptExpr>(root))
+        root = inner->getArray();
+      return exprAlreadyShared(expr) && (ast::isa<ast::CallExpr>(root) ||
+                                         ast::isa<ast::MethodCallExpr>(root) ||
+                                         ast::isa<ast::ArrayLiteralExpr>(root));
+    }
     return exprAlreadyShared(expr);
+  }
   if (auto *mce = ast::dyn_cast<ast::MethodCallExpr>(expr))
     return mce->getResolvedType() && ast::isRefType(mce->getResolvedType());
   if (auto *te = ast::dyn_cast<ast::TernaryExpr>(expr))
@@ -778,6 +795,9 @@ void ModuleLowering::emitScopeCleanup(Scope &scope) {
            "DeclOrder must only contain ref-typed variables");
     emitRelease(B.load(it->Local));
   }
+  for (auto it = scope.FixedVars.rbegin(); it != scope.FixedVars.rend(); ++it)
+    emitFixedRelease(B.localAddr(it->Local, "arr.addr"),
+                     ast::cast<ast::FixedArrayType>(it->ASTType));
   for (auto it = scope.PendingReleases.rbegin();
        it != scope.PendingReleases.rend(); ++it)
     emitRelease(*it);
@@ -815,6 +835,13 @@ Val ModuleLowering::visitDeclStmt(ast::DeclStmt *node) {
 }
 
 Val ModuleLowering::visitExprStmt(ast::ExprStmt *node) {
+  // A fixed-size array result bound to nothing: its references go now.
+  if (ast::dyn_cast<ast::FixedArrayType>(node->getExpr()->getResolvedType())) {
+    size_t mark = FixedTemps.size();
+    emitFixedAddress(node->getExpr());
+    releaseFixedTemps(mark);
+    return Val();
+  }
   Val val = emitExpr(node->getExpr());
   // An owned result bound to nothing (`A();`, a bare string temporary) is
   // torn down immediately.
@@ -1522,11 +1549,13 @@ Val ModuleLowering::emitAsSharedRaw(ast::Expr *expr) {
     return box;
   }
 
-  // Ref-typed field (obj.field) or tuple element (t.1): the slot owns its
-  // box, so a new owner retains it (unless the read was call-rooted and
-  // already handed us a +1).
+  // Ref-typed field (obj.field), tuple element (t.1) or fixed-size array
+  // element: the slot owns its box, so a new owner retains it (unless the
+  // read was call-rooted and already handed us a +1).  A growable array's
+  // element that is not a +1 was taken above.
   if (ast::isa<ast::MemberAccessExpr>(expr) ||
-      ast::isa<ast::TupleIndexExpr>(expr)) {
+      ast::isa<ast::TupleIndexExpr>(expr) ||
+      ast::isa<ast::SubscriptExpr>(expr)) {
     if (expr->getResolvedType() && ast::isRefType(expr->getResolvedType())) {
       Val box = emitExpr(expr);
       return takeSharedOwnership(expr, box);

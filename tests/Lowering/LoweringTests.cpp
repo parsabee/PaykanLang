@@ -1061,6 +1061,31 @@ TEST(Lowering, FixedArrayParametersAndResults) {
   EXPECT_NE(m.find(", %res.addr"), std::string::npos) << m;
 }
 
+// An element of a reference type is its box, owned by the slot: a copy
+// retains it, the scope's exit releases it (in a loop past a few), and a
+// call's result moves into the variable it initialises.
+TEST(Lowering, FixedArraysOfReferencesOwnTheirElements) {
+  auto l = lower(R"(
+    fn pair() -> Str[2] { return ["a", "b"]; }
+    fn main() -> int {
+      xs: Str[2] = pair();
+      ys = xs;
+      big: Str[5] = ["1", "2", "3", "4", ys[1]];
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string m = function(l.Text, "main");
+  for (const char *e :
+       {"local %xs.0: mem(16, 8)", "local %big.", ": mem(40, 8)",
+        "ptr.load box, %", "while {", "cmp lt %i.", ", 5\n"})
+    EXPECT_NE(m.find(e), std::string::npos) << e << "\n" << m;
+  // ys's two elements and ys[1] into big; nothing for pair()'s result.
+  EXPECT_EQ(count(m, "retain"), 3u) << m;
+  // xs's and ys's two each, unrolled; big's five in one loop.
+  EXPECT_EQ(count(m, "release"), 5u) << m;
+}
+
 // Printing an optional value formats it, "None" or the value's text; it is
 // never boxed.
 TEST(Lowering, PrintingAnOptionalValueFormatsIt) {

@@ -186,3 +186,121 @@ TEST(FixedArray, IndexesComputedAtRunTime) {
   )",
                "30\n");
 }
+
+// An element of a reference type is a reference: a copy of the array
+// shares its elements' objects, and an assigned element or array lets go of
+// the ones it replaces.
+TEST(FixedArray, ElementsOfReferenceTypes) {
+  expectOutput(R"(
+    ss: Str[3] = ["a", "b", "c"];
+    ss[1] = ss[0] + ss[2];
+    ss[2] = ss[2];
+    copy = ss;
+    copy[0] = "z";
+    ss = ss;
+    println(ss[0] + ss[1] + ss[2] + " " + copy[0] + copy[1]);
+    grid: Str[2][3] = [["a", "b", "c"], ["d", "e", "f"]];
+    row = grid[1];
+    grid[0] = row;
+    grid = [grid[1], [row[2], row[1], row[0]]];
+    grid[1][1] = "E";
+    println(grid[0][0] + grid[1][1] + grid[1][2] + row[1]);
+    os: Str?[2] = [None, "x"];
+    match os[1] {
+      s: Str { println("some " + s); }
+      None { println("none"); }
+    }
+    ts: (int, Str)[2] = [(1, "one"), (2, "two")];
+    arrs: int[][2] = [[1, 2], [3]];
+    arrs[1].push(4);
+    println(ts[1].1 + " " + Str(arrs[1].len()) + " " + Str(arrs[0][1]));
+    big: Str[6] = ["1", "2", "3", "4", "5", "6"];
+    b2 = big;
+    b2[5] = "x";
+    r: inout = big;
+    r[0] = "R";
+    println(big[0] + big[5] + b2[0] + b2[5]);
+  )",
+               "aacc zac\ndEde\nsome x\ntwo 2 2\nR61x\n");
+}
+
+// A call's result or a literal owns its elements: one that initialises a
+// place hands them over, one that is only read, passed or dropped lets go
+// of them; so do the variables a loop iteration or a return leaves.
+TEST(FixedArray, TemporariesAndScopesLetGoOfTheirElements) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Animal {
+      name: Str;
+      view fn speak() -> Str { return "it " + self.name; }
+    }
+    impl Animal {
+      fn __init__(n: Str) { self.name = n; }
+    }
+    class Dog : Animal {
+      view fn speak() -> Str { return "woof " + self.name; }
+    }
+    impl Dog {
+      fn __init__(n: Str) { __super__(n); }
+    }
+    class Kennel { first: Str; }
+    impl Kennel {
+      fn __init__(dogs: view Animal[2]) { self.first = dogs[0].speak(); }
+      view fn pair(extra: Str[2]) -> Str[2] { return [self.first, extra[1]]; }
+    }
+    fn names() -> Str[2] { return ["ann", "bob"]; }
+    fn shout(xs: Str[2]) -> Str[2] {
+      xs[1] = xs[1] + "!";
+      return xs;
+    }
+    fn rename(xs: inout Str[2]) { xs[0] = "q"; }
+    fn find(xs: view Str[5], s: Str) -> int {
+      i = 0;
+      while (i < xs.len()) {
+        pair: Str[2] = [xs[i], s];
+        if (pair[0] == pair[1]) {
+          return i;
+        }
+        i = i + 1;
+      }
+      return -1;
+    }
+    fn main() -> int {
+      i = 0;
+      hits = 0;
+      while (names()[0] == "ann" && i < 3) {
+        pair: Str[2] = [Str(i), "x"];
+        i = i + 1;
+        if (i == 2) {
+          continue;
+        }
+        if (pair[0] == "9") {
+          break;
+        }
+        hits = hits + pair[1].len();
+      }
+      println(Str(hits) + " " + Str(find(["a", "b", "c", "d", "e"], "c")) +
+              " " + Str(find(["a", "b", "c", "d", "e"], "z")));
+      names();
+      ns = shout(names());
+      println(ns[0] + ns[1] + " " + shout(ns)[1] + " " +
+              Str(names().len()) + " " + Str(names()[1].len()));
+      rename(ns);
+      zoo: Animal[2] = [Dog("rex"), Animal("cat")];
+      zoo[1] = Dog("fido");
+      k = Kennel(zoo);
+      p = k.pair(ns);
+      println(zoo[1].speak() + ", " + p[0] + ", " + p[1] + ", " +
+              k.pair(["x", "y"])[1]);
+      match names()[1] {
+        "bob" { return 7; }
+        _ { return 0; }
+      }
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 7);
+  EXPECT_EQ(r.StdOut, "2 2 -1\nannbob! bob!! 2 3\n"
+                      "woof fido, woof rex, bob!, y\n");
+  g.expectNoLeaks("TemporariesAndScopesLetGoOfTheirElements");
+}

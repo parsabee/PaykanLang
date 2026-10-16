@@ -87,10 +87,13 @@ void Sema::declareParamKinds(const ast::FuncDecl *fn) {
 
 std::string Sema::inoutPlaceError(const ast::Expr *place,
                                   const std::string &use) {
-  if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(place))
-    return ast::isa<ast::ArrayType>(se->getArray()->getResolvedType())
+  if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(place)) {
+    const ast::Type *arr = se->getArray()->getResolvedType();
+    return ast::dyn_cast<ast::ArrayType>(arr) ||
+                   ast::dyn_cast<ast::FixedArrayType>(arr)
                ? "an array element cannot be " + use + " yet"
                : "a character of a string cannot be " + use;
+  }
   const auto *id = ast::dyn_cast<ast::Identifier>(place);
   if (id && id->getName() == names::kSelf)
     return "'self' cannot be " + use +
