@@ -139,6 +139,27 @@ inline ParseResult parse(const std::string &source) {
   return {rc == 0, std::move(driver)};
 }
 
+/// Parse with a DiagEngine attached to the driver (the way the compiler
+/// driver wires it), capturing both the rendered diagnostic text and the
+/// structured diagnostics so tests can assert on exact source locations.
+struct DiagParseResult {
+  bool Ok;
+  std::string Text;
+  std::vector<sema::Diagnostic> Diags;
+};
+
+inline DiagParseResult parseWithDiags(const std::string &source) {
+  auto path = writeTempFile(source);
+  parser::ParserDriver driver(testFrontend());
+  std::ostringstream os;
+  sema::DiagEngine diag(os);
+  diag.setSourceInfo(path, &driver.getSourceLines());
+  driver.setDiagEngine(&diag);
+  int rc = driver.parseFile(path);
+  std::filesystem::remove(path);
+  return {rc == 0, os.str(), diag.getDiagnostics()};
+}
+
 /// Run semantic analysis on source. Returns {ok, errorMessages}.
 struct SemaResult {
   bool Ok;

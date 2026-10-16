@@ -396,6 +396,13 @@ void ASTPrinter::visitArrayType(ArrayType *node) {
   visit(node->getElementType());
 }
 
+void ASTPrinter::visitFixedArrayType(FixedArrayType *node) {
+  header("FixedArrayType", node);
+  OS << " " << node->getLength() << "\n";
+  ChildScope cs(*this, true);
+  visit(node->getElementType());
+}
+
 void ASTPrinter::visitGenericType(GenericType *node) {
   header("GenericType", node);
   OS << " '" << node->getName() << "'\n";

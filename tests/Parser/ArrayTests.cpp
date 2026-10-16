@@ -50,6 +50,46 @@ TEST(Array, ClassArrayType) {
   EXPECT_TRUE(ok);
 }
 
+// `T[n]`: a fixed-size array type, n an integer literal; the suffixes nest
+// left to right, so `int[3][2]` is two `int[3]`s.
+TEST(Array, FixedSizeArrayTypes) {
+  auto [ok, driver] = parse(R"(
+    fn f(a: float[4], b: Str?[2]) -> bool[1] { return [true]; }
+    fn main() -> int {
+      xs: int[3] = [1, 2, 3];
+      grid: int[3][2] = [[1, 2, 3], [4, 5, 6]];
+      lists: int[][2] = [[], []];
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(ok);
+  std::string d = dumpAST(*driver);
+  // (The dump shows a function's result type, not its parameters'.)
+  for (const char *e :
+       {"FixedArrayType <2:38-2:45> 1", "FixedArrayType <4:11-4:17> 3",
+        "FixedArrayType <5:13-5:22> 2\n    |   | `-FixedArrayType <5:13-5:19> "
+        "3",
+        "FixedArrayType <6:14-6:22> 2\n    |   | `-ArrayType"})
+    EXPECT_NE(d.find(e), std::string::npos) << e << "\n" << d;
+}
+
+TEST(Array, FixedSizeArrayLength) {
+  auto zero = parseWithDiags("fn main() -> int {\n"
+                             "  xs: int[0] = [];\n"
+                             "  return 0;\n"
+                             "}\n");
+  EXPECT_FALSE(zero.Ok);
+  EXPECT_NE(zero.Text.find("2:11: error: a fixed-size array has at least one "
+                           "element: its length must be 1 or more"),
+            std::string::npos)
+      << zero.Text;
+  // The length is an integer literal.
+  auto name = parseWithDiags("fn f(n: int, xs: int[n]) {}\n");
+  EXPECT_FALSE(name.Ok);
+  EXPECT_NE(name.Text.find("to close the array type"), std::string::npos)
+      << name.Text;
+}
+
 TEST(Array, ArrayTypeAsParam) {
   auto [ok, _] = parse(R"(
     fn sum(nums: int[]) -> int { return 0; }

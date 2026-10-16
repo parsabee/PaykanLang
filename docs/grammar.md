@@ -189,7 +189,7 @@ allowed there (the parameter's type, an override) is Sema's job.
 ## 5. Types
 
 ```
-typeAnnotation ::= primaryType ( "[" "]" | "?" )*
+typeAnnotation ::= primaryType ( "[" "]" | "[" INT "]" | "?" )*
 primaryType    ::= IDENT
                  | modulePath "::" IDENT
                  | IDENT "<" typeArgList ">"
@@ -198,8 +198,10 @@ primaryType    ::= IDENT
 typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
 ```
 
-- `T[]` is an array type, `T?` an optional type; the suffixes nest left to
-  right (`int[][]`, `Node?[]`, `(int, Str)[]`).
+- `T[]` is an array type, `T[n]` a fixed-size array of `n` elements (an
+  integer literal, at least 1: `a fixed-size array has at least one element`),
+  and `T?` an optional type; the suffixes nest left to right (`int[][]`,
+  `Node?[]`, `(int, Str)[]`, `int[3][2]` is two `int[3]`s).
 - `T?` is rejected at parse time when `T` is `void` (`optional type 'void?'
   is not supported`) or already optional (`nested optional type 'Str??' is
   not supported`). The other builtin value types have optional forms

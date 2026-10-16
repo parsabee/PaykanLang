@@ -60,6 +60,10 @@ class ASTContext {
   // holds at any nesting depth: `int[][]` resolves to one node everywhere.
   std::unordered_map<Type *, ArrayType *> ArrayTypes;
 
+  // Canonical FixedArrayType per (element type, length), keyed like
+  // ArrayTypes (lazily created by getFixedArrayType).
+  std::map<std::pair<Type *, int64_t>, FixedArrayType *> FixedArrayTypes;
+
   // Canonical OptionalType per inner type (lazily created by getOptionalType).
   // Keyed like ArrayTypes: the inner Type* must be canonical, so `Node?`
   // resolves to one node everywhere and identity is pointer identity.
@@ -185,6 +189,11 @@ public:
   /// ArrayType), so that array type identity is pointer identity.  Sema
   /// resolves every parser-emitted (source-located) ArrayType to this node.
   ArrayType *getArrayType(Type *elemTy);
+
+  /// Return the canonical FixedArrayType of @p length elements of type
+  /// @p elemTy (`int[3]`), creating it on first use.  @p elemTy must itself
+  /// be canonical (see getArrayType).
+  FixedArrayType *getFixedArrayType(Type *elemTy, int64_t length);
 
   /// Return the canonical OptionalType wrapping @p innerTy, creating it on
   /// first use.  @p innerTy must itself be canonical (see getArrayType).

@@ -25,7 +25,7 @@ namespace ast {
 //
 // Substitution rules for a type annotation:
 //   * ClassType stub whose name is a type parameter  -> the argument type
-//   * ArrayType                                      -> element substituted
+//   * ArrayType, FixedArrayType                      -> element substituted
 //   * GenericType (Box<T>)                           -> arguments substituted
 //   * OptionalType (T?)                              -> inner type substituted
 //   * TupleType ((T, int))                           -> elements substituted

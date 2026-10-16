@@ -500,6 +500,16 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     return Ctx.getArrayType(elemTy);
   }
 
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
+    auto *elemTy = resolveType(ft->getElementType(), loc, context + " element");
+    if (!elemTy)
+      return nullptr;
+    error(loc, context + " has type '" +
+                   typeName(Ctx.getFixedArrayType(elemTy, ft->getLength())) +
+                   "': fixed-size arrays are not supported yet");
+    return nullptr;
+  }
+
   if (auto *gt = ast::dyn_cast<ast::GenericType>(ty)) {
     // Generic type application `Box<int>`: resolve the arguments to canonical
     // types, then instantiate (or fetch the cached instantiation of) the class

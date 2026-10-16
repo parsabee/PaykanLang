@@ -206,6 +206,12 @@ Type *ASTCloner::cloneType(Type *ty) {
       return ty;
     return Ctx.make<ArrayType>(at->getLocation(), elem);
   }
+  if (auto *ft = dyn_cast<FixedArrayType>(ty)) {
+    Type *elem = cloneType(ft->getElementType());
+    if (elem == ft->getElementType() && !Foreign)
+      return ty;
+    return Ctx.make<FixedArrayType>(ft->getLocation(), elem, ft->getLength());
+  }
   if (auto *gt = dyn_cast<GenericType>(ty)) {
     std::string name = Names ? Names->generic(gt->getName()) : gt->getName();
     bool changed = Foreign || name != gt->getName();

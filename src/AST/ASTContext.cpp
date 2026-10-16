@@ -122,6 +122,18 @@ ArrayType *ASTContext::getArrayType(Type *elemTy) {
   return at;
 }
 
+// One FixedArrayType per (canonical) element type and length, as for
+// getArrayType.
+FixedArrayType *ASTContext::getFixedArrayType(Type *elemTy, int64_t length) {
+  auto key = std::make_pair(elemTy, length);
+  auto it = FixedArrayTypes.find(key);
+  if (it != FixedArrayTypes.end())
+    return it->second;
+  auto *at = make<FixedArrayType>(SourceLocation(), elemTy, length);
+  FixedArrayTypes[key] = at;
+  return at;
+}
+
 // -- Canonical optional types
 //
 // One OptionalType per (canonical) inner type, mirroring getArrayType: the
@@ -358,6 +370,9 @@ std::string typeName(Type *ty) {
     return et->getName();
   if (auto *at = dyn_cast<ArrayType>(ty))
     return typeName(at->getElementType()) + "[]";
+  if (auto *ft = dyn_cast<FixedArrayType>(ty))
+    return typeName(ft->getElementType()) + "[" +
+           std::to_string(ft->getLength()) + "]";
   if (auto *ot = dyn_cast<OptionalType>(ty))
     return typeName(ot->getInnerType()) + "?";
   if (auto *gt = dyn_cast<GenericType>(ty)) {

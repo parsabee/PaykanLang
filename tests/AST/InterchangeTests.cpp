@@ -275,7 +275,7 @@ TEST(ASTInterchange, RejectsMalformedInput) {
       {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) (int) "
        "(block))))",
        "1:52: (int ...) is not a type (named-type, array-type, "
-       "optional-type, tuple-type, generic-type)"},
+       "fixed-array-type, optional-type, tuple-type, generic-type)"},
       {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) (optional-type "
        "(named-type \"void\")) (block))))",
        "1:52: optional type 'void?' is not supported"},
@@ -509,6 +509,44 @@ TEST(ASTInterchange, ParamModes) {
 }
 
 // A `let` local is a `var` with a trailing `(let)`.
+// `T[n]` is `(fixed-array-type TYPE INT)`, with a length of at least 1.
+TEST(ASTInterchange, FixedArrayTypes) {
+  const std::string text =
+      "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block (decl "
+      "(var \"a\" (fixed-array-type (fixed-array-type (named-type \"int\") "
+      "3) 2) (array)))))))";
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *tu = read(text, ctx, error);
+  ASSERT_NE(tu, nullptr) << error;
+  std::string d = dump(tu);
+  EXPECT_NE(d.find("FixedArrayType 2\n"), std::string::npos) << d;
+  EXPECT_NE(d.find("FixedArrayType 3\n"), std::string::npos) << d;
+  std::string written = write(*tu);
+  EXPECT_NE(written.find("(fixed-array-type\n"), std::string::npos) << written;
+  ast::ASTContext ctx2;
+  ast::TranslationUnit *back = read(written, ctx2, error);
+  ASSERT_NE(back, nullptr) << error;
+  EXPECT_EQ(dump(back), d);
+
+  struct Case {
+    const char *Type;
+    const char *Error;
+  };
+  for (const Case &c :
+       {Case{"(fixed-array-type (named-type \"int\") 0)",
+             "a fixed-size array has at least one element"},
+        Case{"(fixed-array-type (named-type \"int\"))", "the length"},
+        Case{"(fixed-array-type 3)", "the element type"}}) {
+    std::string doc = "(paykan-ast 1 (unit (fn \"f\" (type-params) (params "
+                      "(param \"a\" " +
+                      std::string(c.Type) + ")) _ (block))))";
+    EXPECT_EQ(read(doc, ctx, error), nullptr) << c.Type;
+    EXPECT_NE(error.find(c.Error), std::string::npos)
+        << c.Type << ": " << error;
+  }
+}
+
 TEST(ASTInterchange, LetLocals) {
   const std::string text = "(paykan-ast 1 (unit (fn \"f\" (type-params) "
                            "(params) _ (block (decl (var \"n\" _ (int 1) "
