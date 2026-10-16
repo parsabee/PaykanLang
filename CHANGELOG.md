@@ -245,7 +245,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `int<Str>` & co. return one without allocating (the runtime's `PaykanString_parse_int` &
   co.).  The semantics are unchanged.  An `int?[]` is a runtime array of 16-byte elements (`PaykanArray_new_sized`, with its
   own vtable), and a tuple holds an `int?` as a presence slot and a value slot (tuple kind
-  `PAYKAN_TUPLE_OPT`).
+  `PAYKAN_TUPLE_OPT`).  In #96's benchmark
+  (`benchmarks/optional_stack.pkn`: 10M pushes onto a `Stack<int>`, then 10M pops through
+  `pop() -> T?`) the program makes 16 allocations instead of 20,000,016, and popping
+  through the `int?` takes as long as popping a plain `int`.
 
 ### Removed
 
@@ -263,6 +266,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The llvm backend's `run` (and `--emit-llvm`) optimised the program under LLVM's default data
+  layout instead of the host's, which the JIT then ran it with: an object with a `char` or
+  `bool` field before an `int` was allocated a few bytes short, and stores could land at the
+  default layout's offsets.  The module now gets the host's layout before it is optimised.
 - On macOS, programs are compiled and linked for the deployment target the
   runtime was built for.  CMake 4 builds the runtime for the host's macOS
   version, which can be newer than the system `cc`'s default; `ld` then

@@ -30,8 +30,9 @@ included) and generics are **stable in v0.1**: their syntax and semantics as doc
 [`docs/language/`](docs/language/) are covered by the compatibility promise for the 0.1
 series, so a program that follows the reference keeps its meaning in every 0.1.x release.
 The limitations the reference documents stay: generics cannot be imported across modules
-until v0.2.0 ([#57](https://github.com/parsabee/PaykanLang/issues/57)), and a present optional primitive is boxed ([#96](https://github.com/parsabee/PaykanLang/issues/96) will change that
-representation, not the semantics). Not covered by the promise: the plugin interfaces
+until v0.2.0 ([#57](https://github.com/parsabee/PaykanLang/issues/57)). Since
+[#96](https://github.com/parsabee/PaykanLang/issues/96) an optional primitive is a value, not a
+box, and an optional no longer converts to `Obj`. Not covered by the promise: the plugin interfaces
 (the C plugin API `include/paykan/plugin_api.h`, the PIR text a backend plugin receives, and
 the C++ interfaces `Frontend.h`, `Backend.h` and the registry) are versioned but not yet
 stable; see [`docs/plugins/overview.md`](docs/plugins/overview.md) and
