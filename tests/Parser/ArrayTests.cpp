@@ -50,14 +50,15 @@ TEST(Array, ClassArrayType) {
   EXPECT_TRUE(ok);
 }
 
-// `T[n]`: a fixed-size array type, n an integer literal; the suffixes nest
-// left to right, so `int[3][2]` is two `int[3]`s.
+// `T[n]`: a fixed-size array type, n an integer literal.  A run of lengths
+// is one array of arrays whose first length is its first index's, so
+// `int[2][3]` is two `int[3]`s, while `int[][2]` is two `int[]`s.
 TEST(Array, FixedSizeArrayTypes) {
   auto [ok, driver] = parse(R"(
     fn f(a: float[4], b: Str?[2]) -> bool[1] { return [true]; }
     fn main() -> int {
       xs: int[3] = [1, 2, 3];
-      grid: int[3][2] = [[1, 2, 3], [4, 5, 6]];
+      grid: int[2][3] = [[1, 2, 3], [4, 5, 6]];
       lists: int[][2] = [[], []];
       return 0;
     }
@@ -67,8 +68,8 @@ TEST(Array, FixedSizeArrayTypes) {
   // (The dump shows a function's result type, not its parameters'.)
   for (const char *e :
        {"FixedArrayType <2:38-2:45> 1", "FixedArrayType <4:11-4:17> 3",
-        "FixedArrayType <5:13-5:22> 2\n    |   | `-FixedArrayType <5:13-5:19> "
-        "3",
+        "FixedArrayType <5:13-5:22> 2\n    |   | `-FixedArrayType <5:13-5:22> "
+        "3\n    |   |   `-BuiltinType 'int'",
         "FixedArrayType <6:14-6:22> 2\n    |   | `-ArrayType"})
     EXPECT_NE(d.find(e), std::string::npos) << e << "\n" << d;
 }

@@ -370,9 +370,17 @@ std::string typeName(Type *ty) {
     return et->getName();
   if (auto *at = dyn_cast<ArrayType>(ty))
     return typeName(at->getElementType()) + "[]";
-  if (auto *ft = dyn_cast<FixedArrayType>(ty))
-    return typeName(ft->getElementType()) + "[" +
-           std::to_string(ft->getLength()) + "]";
+  if (auto *ft = dyn_cast<FixedArrayType>(ty)) {
+    // An array of arrays is written with its first index's length first, as
+    // it is parsed: two `int[3]`s are `int[2][3]`.
+    std::string lengths;
+    Type *elem = ft;
+    for (auto *f = ft; f; f = dyn_cast<FixedArrayType>(f->getElementType())) {
+      lengths += "[" + std::to_string(f->getLength()) + "]";
+      elem = f->getElementType();
+    }
+    return typeName(elem) + lengths;
+  }
   if (auto *ot = dyn_cast<OptionalType>(ty))
     return typeName(ot->getInnerType()) + "?";
   if (auto *gt = dyn_cast<GenericType>(ty)) {

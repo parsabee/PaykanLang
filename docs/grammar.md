@@ -201,7 +201,10 @@ typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
 - `T[]` is an array type, `T[n]` a fixed-size array of `n` elements (an
   integer literal, at least 1: `a fixed-size array has at least one element`),
   and `T?` an optional type; the suffixes nest left to right (`int[][]`,
-  `Node?[]`, `(int, Str)[]`, `int[3][2]` is two `int[3]`s).
+  `Node?[]`, `(int, Str)[]`, `int[3][]` is an array of `int[3]`s).  A run of
+  lengths is one array of arrays whose first length is its first index's, as
+  in C: `int[2][3]` is two `int[3]`s, indexed `grid[i][j]` with `i < 2` and
+  `j < 3`.
 - `T?` is rejected at parse time when `T` is `void` (`optional type 'void?'
   is not supported`) or already optional (`nested optional type 'Str??' is
   not supported`). The other builtin value types have optional forms

@@ -501,11 +501,19 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
   }
 
   if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
-    auto *elemTy = resolveType(ft->getElementType(), loc, context + " element");
-    if (!elemTy)
+    // An array of arrays is one type, reported once.
+    std::vector<int64_t> lengths;
+    ast::Type *elem = ft;
+    while (auto *f = ast::dyn_cast<ast::FixedArrayType>(elem)) {
+      lengths.push_back(f->getLength());
+      elem = f->getElementType();
+    }
+    auto *resolved = resolveType(elem, loc, context + " element");
+    if (!resolved)
       return nullptr;
-    error(loc, context + " has type '" +
-                   typeName(Ctx.getFixedArrayType(elemTy, ft->getLength())) +
+    for (auto it = lengths.rbegin(); it != lengths.rend(); ++it)
+      resolved = Ctx.getFixedArrayType(resolved, *it);
+    error(loc, context + " has type '" + typeName(resolved) +
                    "': fixed-size arrays are not supported yet");
     return nullptr;
   }

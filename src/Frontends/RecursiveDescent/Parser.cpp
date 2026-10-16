@@ -1596,15 +1596,25 @@ Type *Parser::parseTypeAnnotation() {
       // the missing `]` where it is missing.
       consume();
       if (at(Tok::Int)) {
-        Token n = consume();
-        if (n.IntValue < 1) {
-          error(n.Loc, "a fixed-size array has at least one element: its "
-                       "length must be 1 or more");
-          return nullptr;
+        // A run of lengths, `[2][3]`, is one array of arrays whose first
+        // length is its first index's: two `int[3]`s.
+        std::vector<int64_t> lengths;
+        for (;;) {
+          Token n = consume();
+          if (n.IntValue < 1) {
+            error(n.Loc, "a fixed-size array has at least one element: its "
+                         "length must be 1 or more");
+            return nullptr;
+          }
+          if (!expect(Tok::RBracket, "to close the array type"))
+            return nullptr;
+          lengths.push_back(n.IntValue);
+          if (!(at(Tok::LBracket) && peek(1).Kind == Tok::Int))
+            break;
+          consume();
         }
-        if (!expect(Tok::RBracket, "to close the array type"))
-          return nullptr;
-        ty = Ctx.make<FixedArrayType>(span(start), ty, n.IntValue);
+        for (auto it = lengths.rbegin(); it != lengths.rend(); ++it)
+          ty = Ctx.make<FixedArrayType>(span(start), ty, *it);
         continue;
       }
       if (!expect(Tok::RBracket, "to close the array type"))
