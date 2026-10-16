@@ -505,10 +505,12 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::ClassType *ct,
   // Resolve return type.
   ast::Type *retTy = Ctx.getVoidTy();
   if (method->getReturnType()) {
+    FixedArrayAllowed = true; // a result may be a fixed-size array
     retTy = resolveType(method->getReturnType(), method->getLocation(),
                         "method '" + method->getName() + "' in '" + className +
                             "'");
-    if (!retTy)
+    if (!retTy || !checkFixedResult(retTy, method->getResultMode(),
+                                    method->getLocation()))
       return nullptr;
     method->setReturnType(retTy);
   }
@@ -527,6 +529,7 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::ClassType *ct,
     }
     if (!checkBinderName(p.getName(), method->getLocation()))
       return nullptr;
+    FixedArrayAllowed = true; // a parameter may be a fixed-size array
     auto *pty = resolveType(p.ParamType, method->getLocation(),
                             "parameter '" + p.getName() + "' of method '" +
                                 method->getName() + "' in '" + className + "'");
@@ -799,13 +802,16 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
 
     // Resolve return type (already validated in Phase 4; needed for body).
     ast::Type *retTy = Ctx.getVoidTy();
-    if (method->getReturnType())
+    if (method->getReturnType()) {
+      FixedArrayAllowed = true;
       retTy = resolveType(method->getReturnType(), method->getLocation(),
                           "method '" + method->getName() + "'");
+    }
 
     // Resolve parameter types.
     std::vector<ast::Type *> paramTys;
     for (auto &p : method->getParams()) {
+      FixedArrayAllowed = true;
       auto *pty = resolveType(p.ParamType, method->getLocation(),
                               "parameter '" + p.getName() + "'");
       // Unreachable in practice (a class with an unresolvable parameter type

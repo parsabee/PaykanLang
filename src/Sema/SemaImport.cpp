@@ -15,6 +15,8 @@
 #include "paykan/modules/ModuleResolver.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cstdint>
 #include <filesystem>
 #include <utility>
 
@@ -100,6 +102,30 @@ static ast::Type *parseExportedType(ast::ASTContext &ctx,
     if (text.compare(pos, 2, "[]") == 0) {
       pos += 2;
       ty = ctx.getArrayType(ty);
+    } else if (pos + 1 < text.size() && text[pos] == '[' &&
+               std::isdigit(static_cast<unsigned char>(text[pos + 1]))) {
+      // A run of lengths, first index first, as typeName writes it: two
+      // `int[3]`s are `int[2][3]`.
+      std::vector<int64_t> lengths;
+      while (pos + 1 < text.size() && text[pos] == '[' &&
+             std::isdigit(static_cast<unsigned char>(text[pos + 1]))) {
+        size_t close = text.find(']', pos);
+        if (close == std::string::npos)
+          return nullptr;
+        int64_t n = 0;
+        for (size_t i = pos + 1; i < close; ++i) {
+          if (!std::isdigit(static_cast<unsigned char>(text[i])) ||
+              n > (INT64_MAX - 9) / 10)
+            return nullptr;
+          n = n * 10 + (text[i] - '0');
+        }
+        if (n < 1)
+          return nullptr;
+        lengths.push_back(n);
+        pos = close + 1;
+      }
+      for (auto it = lengths.rbegin(); it != lengths.rend(); ++it)
+        ty = ctx.getFixedArrayType(ty, *it);
     } else if (pos < text.size() && text[pos] == '?') {
       ++pos;
       ty = ctx.getOptionalType(ty);

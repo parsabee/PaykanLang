@@ -42,6 +42,9 @@ Val ModuleLowering::emitFixedAddress(ast::Expr *e) {
   }
   if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(e))
     return emitFixedElementAddress(se->getArray(), se->getIndex());
+  // A call's result, in the temporary the call wrote.
+  if (ast::isa<ast::CallExpr>(e) || ast::isa<ast::MethodCallExpr>(e))
+    return emitExpr(e);
   if (auto *lit = ast::dyn_cast<ast::ArrayLiteralExpr>(e)) {
     FixedLayout l = fixedLayout(lit->getResolvedType());
     pir::LocalId tmp = B.addMemLocal("lit", l.Size, l.Align);
@@ -50,7 +53,7 @@ Val ModuleLowering::emitFixedAddress(ast::Expr *e) {
     return addr;
   }
   reportInternalError("a fixed-size array value that is not a variable, an "
-                      "element or a literal");
+                      "element, a literal or a call");
   return Val();
 }
 
@@ -94,9 +97,10 @@ void ModuleLowering::emitFixedInit(ast::Expr *e, const Val &dst) {
       ast::cast<ast::FixedArrayType>(lit->getResolvedType())->getElementType();
   int64_t elemSize = fixedLayout(elemTy).Size;
   for (size_t i = 0; i < lit->getNumElements(); ++i) {
-    Val at = i == 0 ? dst
-                    : B.ptrAdd(dst, Val::i64(static_cast<int64_t>(i) * elemSize),
-                               "elem.addr");
+    Val at = i == 0
+                 ? dst
+                 : B.ptrAdd(dst, Val::i64(static_cast<int64_t>(i) * elemSize),
+                            "elem.addr");
     ast::Expr *elem = lit->getElements()[i];
     if (ast::isa<ast::FixedArrayType>(elemTy)) {
       emitFixedInit(elem, at);
@@ -119,6 +123,30 @@ void ModuleLowering::declareFixedVar(const std::string &name,
   else
     B.memZero(addr, Val::i64(l.Size));
   CurrentScope->declare(name, local, ty);
+}
+
+void ModuleLowering::declareFixedParam(const std::string &name,
+                                       const pir::Value &arg,
+                                       ast::FixedArrayType *ty,
+                                       ast::ParamMode mode) {
+  Val addr(pir::Operand::value(arg), Type::Ptr);
+  if (mode == ast::ParamMode::Value) {
+    // The callee's own copy: what it changes, the caller's array keeps.
+    FixedLayout l = fixedLayout(ty);
+    pir::LocalId local = B.addMemLocal(name, l.Size, l.Align);
+    B.memCopy(B.localAddr(local, name + ".addr"), addr, Val::i64(l.Size));
+    CurrentScope->declare(name, local, ty);
+    return;
+  }
+  pir::LocalId local = B.addLocal(name, Type::Ptr);
+  B.store(local, addr);
+  CurrentScope->declareInout(name, local, Type::Mem, ty);
+}
+
+Val ModuleLowering::emitFixedResultSlot(ast::Type *ty) {
+  FixedLayout l = fixedLayout(ty);
+  pir::LocalId tmp = B.addMemLocal("res", l.Size, l.Align);
+  return B.localAddr(tmp, "res.addr");
 }
 
 void ModuleLowering::emitFixedAssign(const Val &dst, ast::Expr *value) {

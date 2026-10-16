@@ -311,9 +311,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   // -- Fixed-size arrays (docs/language/05-arrays.md, "Fixed-size arrays")
   //
-  // For now only a local variable has a `T[n]` type (set around the
-  // resolveType of its annotation, which takes the flag), of scalars, enums
-  // or other such arrays.
+  // For now only a local variable, a parameter and a result have a `T[n]`
+  // type (set around the resolveType of its annotation, which takes the
+  // flag), of scalars, enums or other such arrays.
 
   bool FixedArrayAllowed = false;
   /// The most bytes a fixed-size array holds.
@@ -327,6 +327,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// @p where; returns false.
   bool errorFixedArrayHere(ast::SourceLocation loc, ast::Type *ty,
                            const std::string &where);
+  /// False (after reporting it) for a `view` or `inout` result (@p mode) of
+  /// a fixed-size array @p retTy, which is not supported yet.
+  bool checkFixedResult(ast::Type *retTy, ast::ParamMode mode,
+                        ast::SourceLocation loc);
   /// The `let` local a fixed-size array element place @p e is part of (its
   /// value), or "" when it is not one.
   std::string letFixedArrayRoot(const ast::Expr *e);

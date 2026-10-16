@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 // Sema tests: fixed-size arrays, `T[n]` (docs/language/05-arrays.md,
-// "Fixed-size arrays").  For now a local variable's own type only, of
-// scalars, enums and other such arrays.
+// "Fixed-size arrays").  For now the type of a local variable, a parameter
+// or a result, of scalars, enums and other such arrays.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -24,9 +24,8 @@ void expectOk(const std::string &body) {
 void expectError(const std::string &source, const std::string &message) {
   auto r = semaCheck(source);
   EXPECT_FALSE(r.Ok) << source;
-  EXPECT_NE(r.Diagnostics.find(message), std::string::npos)
-      << source << "\n"
-      << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find(message), std::string::npos) << source << "\n"
+                                                            << r.Diagnostics;
 }
 
 void expectBodyError(const std::string &body, const std::string &message) {
@@ -36,22 +35,23 @@ void expectBodyError(const std::string &body, const std::string &message) {
 } // namespace
 
 TEST(FixedArray, LocalsOfScalarsAndEnums) {
-  expectOk("  xs: int[3] = [1, 2, 3];\n"
-           "  fs: float[2] = [1, 2.5];\n" // an int element is promoted
-           "  bs: bool[1] = [True];\n"
-           "  cs: char[2] = ['a', 'b'];\n"
-           "  es: Color[2] = [Color::Red, Color::Green];\n"
-           "  grid: int[2][3] = [[1, 2, 3], [4, 5, 6]];\n"
-           "  row = grid[1];\n"
-           "  n: int = row[2] + xs[0] + grid[0][1] + xs.len() + grid[1].len();\n"
-           "  ys = xs;\n"
-           "  ys[0] = n;\n"
-           "  xs = ys;\n"
-           "  grid[0] = row;\n"
-           "  v: view = xs;\n"
-           "  first = v[0];\n"
-           "  r: inout = xs;\n"
-           "  r[1] = first;");
+  expectOk(
+      "  xs: int[3] = [1, 2, 3];\n"
+      "  fs: float[2] = [1, 2.5];\n" // an int element is promoted
+      "  bs: bool[1] = [True];\n"
+      "  cs: char[2] = ['a', 'b'];\n"
+      "  es: Color[2] = [Color::Red, Color::Green];\n"
+      "  grid: int[2][3] = [[1, 2, 3], [4, 5, 6]];\n"
+      "  row = grid[1];\n"
+      "  n: int = row[2] + xs[0] + grid[0][1] + xs.len() + grid[1].len();\n"
+      "  ys = xs;\n"
+      "  ys[0] = n;\n"
+      "  xs = ys;\n"
+      "  grid[0] = row;\n"
+      "  v: view = xs;\n"
+      "  first = v[0];\n"
+      "  r: inout = xs;\n"
+      "  r[1] = first;");
 }
 
 TEST(FixedArray, LiteralsHaveTheArraysLengthAndElementType) {
@@ -103,15 +103,51 @@ TEST(FixedArray, HasOnlyLen) {
                   "int[2]");
 }
 
-TEST(FixedArray, OnlyALocalsOwnTypeForNow) {
-  const std::string notYet = "a fixed-size array ('int[2]') is only supported "
-                             "as a local variable's own type for now";
-  expectError("fn f(a: int[2]) {}\nfn main() -> int { return 0; }", notYet);
-  expectError("fn f() -> int[2] { return [1, 2]; }\n"
+// A parameter in every mode and a result can be a fixed-size array; a
+// literal argument or result takes the slot's type.
+TEST(FixedArray, ParametersAndResults) {
+  auto r = semaCheck(R"(
+    fn total(xs: view int[3]) -> int { return xs[0] + xs[1] + xs[2]; }
+    fn twice(xs: int[3]) -> int[3] {
+      xs[0] = xs[0] * 2;
+      return xs;
+    }
+    fn zero(xs: inout int[3]) { xs = [0, 0, 0]; }
+    fn unit() -> float[2][2] { return [[1, 0], [0, 1]]; }
+    class C { n: int; }
+    impl C {
+      fn __init__(xs: view int[3]) { self.n = total(xs); }
+      view fn row(i: int) -> int[3] { return [i, self.n, i]; }
+    }
+    fn main() -> int {
+      xs: int[3] = [1, 2, 3];
+      ys = twice(xs);
+      zero(ys);
+      c = C([4, 5, 6]);
+      zs: int[3] = c.row(total(xs));
+      return total(twice([1, 1, 1])) + int(unit()[1][1]) + c.row(1)[0];
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  expectError("fn f(xs: int[3]) {}\n"
+              "fn main() -> int { f([1, 2]); return 0; }",
+              "array literal has 2 element(s), but 'int[3]' has 3");
+  expectError("fn f(xs: view int[3]) { xs[0] = 1; }\n"
               "fn main() -> int { return 0; }",
-              notYet);
-  expectError("class C { a: int[2]; }\nfn main() -> int { return 0; }",
-              notYet);
+              "'xs' is a 'view' parameter; cannot assign to its elements");
+  expectError("fn f() -> view int[2] { return [1, 2]; }\n"
+              "fn main() -> int { return 0; }",
+              "a 'view' result of a fixed-size array ('int[2]') is not "
+              "supported yet; return a copy ('-> int[2]')");
+  expectError("native fn f(xs: int[2]) = \"pk_f\";\n"
+              "fn main() -> int { return 0; }",
+              "'int[2]' cannot cross into C");
+}
+
+TEST(FixedArray, OnlyALocalAParameterOrAResultForNow) {
+  const std::string notYet = "a fixed-size array ('int[2]') can only be a "
+                             "local variable, a parameter or a result for now";
+  expectError("class C { a: int[2]; }\nfn main() -> int { return 0; }", notYet);
   expectBodyError("  o: int[2]? = None;", notYet);
   expectBodyError("  a: int[2][] = [];", notYet);
   expectBodyError("  xs: int[2] = [1, 2];\n  t = (xs, 1);",

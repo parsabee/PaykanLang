@@ -1032,6 +1032,35 @@ TEST(Lowering, FixedArraysAreMemSlots) {
   EXPECT_EQ(count(m, "PaykanArray"), 0u) << m;
 }
 
+// A fixed-size array parameter is an address in every mode; a by-value one
+// is copied on entry, a `view` one is not.  A result is written where a last
+// `ptr` parameter points, and the function returns nothing.
+TEST(Lowering, FixedArrayParametersAndResults) {
+  auto l = lower(R"(
+    fn first(xs: view int[3]) -> int { return xs[0]; }
+    fn twice(xs: int[3]) -> int[3] { return [xs[0] * 2, xs[1], xs[2]]; }
+    fn main() -> int {
+      xs: int[3] = [1, 2, 3];
+      ys = twice(xs);
+      return first(ys);
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string first = function(l.Text, "first");
+  std::string twice = function(l.Text, "twice");
+  std::string m = function(l.Text, "main");
+  EXPECT_NE(first.find("fn @first(%xs.1: ptr) -> i64"), std::string::npos)
+      << first;
+  EXPECT_EQ(count(first, "mem.copy"), 0u) << first;
+  EXPECT_NE(twice.find("fn @twice(%xs.1: ptr, %result.2: ptr) -> void"),
+            std::string::npos)
+      << twice;
+  EXPECT_NE(twice.find("local %xs.0: mem(24, 8)"), std::string::npos) << twice;
+  EXPECT_NE(twice.find("mem.copy %xs.addr"), std::string::npos) << twice;
+  EXPECT_NE(m.find("call @twice(%xs.addr"), std::string::npos) << m;
+  EXPECT_NE(m.find(", %res.addr"), std::string::npos) << m;
+}
+
 // Printing an optional value formats it, "None" or the value's text; it is
 // never boxed.
 TEST(Lowering, PrintingAnOptionalValueFormatsIt) {

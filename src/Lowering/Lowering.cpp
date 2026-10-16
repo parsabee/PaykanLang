@@ -270,7 +270,7 @@ Type ModuleLowering::toPIRType(ast::Type *ty) {
     return Type::Box;
   // Never a value: a fixed-size array is held in a `mem` slot
   // (LoweringFixed.cpp).
-  if (ast::isa<ast::FixedArrayType>(ty))
+  if (ast::dyn_cast<ast::FixedArrayType>(ty))
     return Type::Mem;
   return Type::Void;
 }
@@ -349,6 +349,11 @@ pir::Signature ModuleLowering::functionSignature(ast::FuncDecl *node) {
     sig.Ret = Type::Ptr; // the address of the storage it names
   for (auto &p : node->getParams())
     sig.Params.push_back(paramPIRType(p.ParamType, p.Mode));
+  // A fixed-size array result is written where a last parameter points.
+  if (ast::dyn_cast<ast::FixedArrayType>(retAstTy)) {
+    sig.Params.push_back(Type::Ptr);
+    sig.Ret = Type::Void;
+  }
   return sig;
 }
 
@@ -357,9 +362,10 @@ pir::Function *ModuleLowering::declareFunctionPrototype(ast::FuncDecl *node) {
     return it->second;
   pir::Function *fn =
       getOrCreateFunction(node->getName(), functionSignature(node));
-  size_t idx = 0;
-  for (auto &p : fn->Params)
-    p.Name = node->getParams()[idx++].getName();
+  for (size_t i = 0; i < node->getParams().size(); ++i)
+    fn->Params[i].Name = node->getParams()[i].getName();
+  if (ast::dyn_cast<ast::FixedArrayType>(node->getReturnType()))
+    fn->Params.back().Name = "result"; // where the result is written
   return fn;
 }
 
@@ -967,6 +973,17 @@ Val ModuleLowering::visitAssignStmt(ast::AssignStmt *node) {
 }
 
 Val ModuleLowering::visitReturnStmt(ast::ReturnStmt *node) {
+  // A fixed-size array result: written where the last parameter points (a
+  // temporary of the caller's, which nothing here can reach otherwise).
+  if (node->getReturnValue() &&
+      ast::dyn_cast<ast::FixedArrayType>(CurrentFuncReturnASTType)) {
+    const pir::Value &dst = B.function()->Params.back();
+    emitFixedInit(node->getReturnValue(),
+                  Val(pir::Operand::value(dst), Type::Ptr));
+    emitAllScopesCleanup();
+    B.emitRetVoid();
+    return Val();
+  }
   if (node->getReturnValue()) {
     auto *retExpr = node->getReturnValue();
     Val val;
@@ -1148,9 +1165,10 @@ Val ModuleLowering::visitFuncDecl(ast::FuncDecl *node) {
   FunctionStateGuard fnState(*this, fn, retAstTy, /*methodClassTy=*/nullptr);
   {
     ScopeGuard guard(*this);
-    for (size_t i = 0; i < fn->Params.size(); ++i)
+    for (size_t i = 0; i < node->getParams().size(); ++i)
       declareParam(node->getParams()[i].getName(), fn->Params[i],
-                   canonicalizeDeclType(node->getParams()[i].ParamType));
+                   canonicalizeDeclType(node->getParams()[i].ParamType),
+                   node->getParams()[i].Mode);
     if (node->isNative())
       emitNativeBody(node, *fn);
     else
