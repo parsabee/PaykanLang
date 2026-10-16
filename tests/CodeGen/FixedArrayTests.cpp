@@ -304,3 +304,64 @@ TEST(FixedArray, TemporariesAndScopesLetGoOfTheirElements) {
                       "woof fido, woof rex, bob!, y\n");
   g.expectNoLeaks("TemporariesAndScopesLetGoOfTheirElements");
 }
+
+// A field is held in its object, which releases its references when it
+// dies; it is read and written in place, also through a call's result
+// (`mk().cells[1][1]`), passed by address and named by an `inout` local.
+TEST(FixedArray, Fields) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Grid { cells: int[2][3]; tags: Str[2]; }
+    impl Grid {
+      fn set(r: int, c: int, v: int) { self.cells[r][c] = v; }
+      view fn at(r: int, c: int) -> int { return self.cells[r][c]; }
+      fn rename(i: int, s: Str) { self.tags[i] = s; }
+      view fn row(r: int) -> int[3] { return self.cells[r]; }
+    }
+    class Named { names: Str[6]; }
+    impl Named {
+      fn __init__() { self.names = ["a", "b", "c", "d", "e", "f"]; }
+    }
+    class More : Named { extra: Str[1]; }
+    impl More {
+      fn __init__() {
+        __super__();
+        self.extra = ["x"];
+      }
+    }
+    class Box<T> { xs: T[2]; }
+    fn mk() -> Grid { return Grid([[1, 2, 3], [4, 5, 6]], ["p", "q"]); }
+    fn total(xs: view int[3]) -> int { return xs[0] + xs[1] + xs[2]; }
+    fn clear(ts: inout Str[2]) { ts = ["", ts[0]]; }
+    fn main() -> int {
+      g = Grid([[1, 2, 3], [4, 5, 6]], ["p", "q"]);
+      g.set(1, 2, 60);
+      g.rename(0, "P" + g.tags[1]);
+      println(Str(g.at(1, 2)) + " " + g.tags[0] + " " +
+              Str(total(g.cells[0])) + " " + Str(g.cells.len()));
+      g.cells[1] = [0, 0, 0];
+      r = g.row(0);
+      g.cells[0] = [7, 8, 9];
+      copy = g.tags;
+      g.tags = ["new", g.tags[0]];
+      println(Str(r[0]) + " " + Str(g.cells[0][0]) + " " +
+              Str(g.cells[1][2]) + " " + copy[0] + " " + g.tags[1]);
+      println(mk().tags[1] + " " + Str(mk().cells[1][1]) + " " +
+              Str(total(mk().cells[1])) + " " + Str(mk().tags.len()));
+      t = mk().tags;
+      mk().tags[0] = "lost";
+      m = More();
+      clear(g.tags);
+      inner: inout = g.tags;
+      inner[0] = "in";
+      b = Box<Str>(["box", t[0]]);
+      println(t[0] + m.names[5] + m.extra[0] + " " + g.tags[0] + g.tags[1] +
+              " " + b.xs[0] + b.xs[1]);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "60 Pq 6 2\n1 7 0 Pq Pq\nq 5 15 2\npfx innew boxp\n");
+  g.expectNoLeaks("Fields");
+}

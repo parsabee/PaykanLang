@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   copy), and so can a result, also across modules. An element can be a scalar, an enum,
   a reference (`Str[2]`, `Point[4]`: a copy of the array shares the elements' objects) or
   another such array; not yet an optional of a value type. For now only a local variable,
-  a parameter or a result can be one.
+  a parameter, a result or a field (held inside its object) can be one.
 - Traits (docs/language/12-traits.md): `trait Named { view fn name() -> Str; }` lists the
   methods a type must have, and `impl Named for A { ... }` declares that class `A` has
   them. The block's methods join `A` like an `impl` block's, and a method `A` already has

@@ -245,7 +245,8 @@ Val ModuleLowering::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
     Val elem = L.B.ptrLoad(addr, L.toPIRType(node->getResolvedType()), "elem");
     // A temporary's element outlives it as a +1 box (exprProducesFreshBox).
     if (L.FixedTemps.size() > mark) {
-      L.emitRetain(elem);
+      if (elem.Ty == Type::Box)
+        L.emitRetain(elem);
       L.releaseFixedTemps(mark);
     }
     return elem;

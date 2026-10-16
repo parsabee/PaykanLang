@@ -549,6 +549,7 @@ fn scale(v: inout int[2], by: int) {
 fn corners(names: view Str[2][2]) -> Str[2] {
   return [names[0][0], names[1][1]];
 }
+class Path { stops: Str[3]; }
 )");
   auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
 import geo::grid;
@@ -558,11 +559,13 @@ fn main() -> int {
   v: int[2] = [1, 2];
   grid::scale(v, 10);
   c = grid::corners([["ab", "c"], ["d", "efg"]]);
-  return t[2][1] * 10 + t.len() + v[1] + c[0].len() * c[1].len();
+  p = grid::Path(["x", "yy", "zzzz"]);
+  return t[2][1] * 10 + t.len() + v[1] + c[0].len() * c[1].len() +
+         p.stops[2].len();
 }
 )");
-  EXPECT_EQ(runProjectInChild(mainPath), 60 + 3 + 20 + 2 * 3);
-  EXPECT_EQ(runProjectInChild(mainPath), 60 + 3 + 20 + 2 * 3); // the cache
+  EXPECT_EQ(runProjectInChild(mainPath), 60 + 3 + 20 + 2 * 3 + 4);
+  EXPECT_EQ(runProjectInChild(mainPath), 60 + 3 + 20 + 2 * 3 + 4); // cache
   std::filesystem::remove_all(tmpDir);
 }
 

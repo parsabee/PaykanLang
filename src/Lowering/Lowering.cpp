@@ -651,12 +651,16 @@ bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
     return ti->getResolvedType() && ast::isRefType(ti->getResolvedType()) &&
            exprProducesFreshBox(ti->getTuple());
   if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(expr)) {
-    // An element of a temporary fixed-size array (`mk()[0]`) is read as a
-    // +1 box (visitSubscriptExpr): the temporary dies with the read.
+    // An element of a temporary fixed-size array (`mk()[0]`), or of a
+    // fresh object's field (`mk().xs[0]`), is read as a +1 box
+    // (visitSubscriptExpr): the temporary dies with the read.
     if (ast::dyn_cast<ast::FixedArrayType>(se->getArray()->getResolvedType())) {
       ast::Expr *root = se->getArray();
       while (auto *inner = ast::dyn_cast<ast::SubscriptExpr>(root))
         root = inner->getArray();
+      if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(root))
+        return exprAlreadyShared(expr) &&
+               exprProducesFreshBox(ma->getReceiver());
       return exprAlreadyShared(expr) && (ast::isa<ast::CallExpr>(root) ||
                                          ast::isa<ast::MethodCallExpr>(root) ||
                                          ast::isa<ast::ArrayLiteralExpr>(root));
