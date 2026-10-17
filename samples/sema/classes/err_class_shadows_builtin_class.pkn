@@ -1,4 +1,4 @@
-// ERROR: builtin class names (Obj, Str, File, Error, Tuple) are reserved
+// ERROR: builtin class names (Obj, Str, File, Error) are reserved
 class Str {  // sema error: 'Str' is a builtin class and cannot be redeclared
 }
 

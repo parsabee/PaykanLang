@@ -170,9 +170,9 @@ private:
     };
     /// Owned variables declared in this scope, in declaration order.
     std::vector<VarMeta> DeclOrder;
-    /// Fixed-size arrays of references declared in this scope, whose
-    /// elements are released at its exit.
-    std::vector<VarMeta> FixedVars;
+    /// Values held in memory, holding references, declared in this scope:
+    /// their references are released at its exit.
+    std::vector<VarMeta> MemVars;
     /// `inout` parameters declared in this scope: their local holds the
     /// address of the caller's storage, of this type.
     std::unordered_map<std::string, pir::Type> InoutVars;
@@ -233,8 +233,7 @@ private:
 
   std::unordered_map<std::string, std::string>
       InternedStrings; // content -> @sym
-  std::unordered_map<std::string, std::string> InternedArrayData;
-  std::unordered_map<std::string, std::string> InternedTupleKinds;
+  std::unordered_map<std::string, std::string> InternedTupleLayouts;
   std::unordered_map<std::string, std::string> InternedTypeDescriptors;
 
   /// Address (ptr) of the interned C-string global holding @p content.
@@ -398,7 +397,10 @@ private:
   void emitNativeBody(ast::FuncDecl *node, const pir::Function &fn);
   /// Call @p node's C symbol with @p args, one per parameter: a reference
   /// as a borrowed box, an `inout` argument as its address, a value as is.
-  Val emitNativeCall(const ast::FuncDecl &node, const std::vector<Val> &args);
+  /// A value held in memory crosses by address: its argument in @p args is
+  /// one, and a result of one is written to @p memResult.
+  Val emitNativeCall(const ast::FuncDecl &node, const std::vector<Val> &args,
+                     const Val &memResult = Val());
   /// The native function of this module named @p name, or nullptr.
   const ast::FuncDecl *localNative(const std::string &name) const;
   /// The PaykanType (src/Runtime/Runtime.h) a generic native function is
@@ -414,24 +416,6 @@ private:
                       const std::function<void()> &emitDefault);
   void emitMatchArmBody(ast::MatchArm *arm);
   ast::MatchArm *findWildcardArm(ast::MatchStmt *node);
-
-  // -- Tuples
-
-  unsigned char tupleElementKind(ast::Type *elemTy) const;
-  /// The first runtime slot of element @p i of @p tt (its slot count for
-  /// i == arity): an optional value takes two, its presence word and its
-  /// value.
-  static int64_t tupleSlot(const ast::TupleType *tt, size_t i);
-  /// Store element @p v (of type @p elemTy, not a reference) of a tuple
-  /// being built into its slot(s) from @p slot.
-  void emitTupleSetValue(const Val &tup, int64_t slot, const Val &v,
-                         ast::Type *elemTy);
-  /// Read element (of type @p elemTy, not a reference) of tuple @p tup from
-  /// its slot(s) at @p slot.
-  Val emitTupleGetValue(const Val &tup, int64_t slot, ast::Type *elemTy);
-  Val emitTupleKindsGlobal(ast::TupleType *tt);
-  Val toSlotBits(const Val &v);
-  Val fromSlotBits(const Val &bits, ast::Type *elemTy);
 
   // -- Expressions
 
@@ -493,47 +477,50 @@ private:
   /// Runtime symbol implementing @p name for the builtin class @p ct, or "".
   const char *builtinMethodSymbol(ast::ClassType *ct, const std::string &name);
 
-  // -- Fixed-size arrays (LoweringFixed.cpp)
+  // -- Values held in memory: fixed-size arrays and tuples (LoweringMem.cpp)
 
-  struct FixedLayout {
+  struct MemLayout {
     int64_t Size = 0;
     int64_t Align = 1;
   };
   /// The bytes and alignment of a value of @p ty held in memory: a
-  /// fixed-size array's are its elements', one after another.
-  FixedLayout fixedLayout(ast::Type *ty);
-  /// True when @p ty is a fixed-size array of references (at any depth):
-  /// each element slot owns a reference to its box.
-  static bool fixedHoldsRefs(const ast::Type *ty);
-  /// A fixed-size array value: the address of its bytes, and whether they
-  /// are a temporary (a call's result, a literal) whose elements' references
-  /// the consumer takes over.
-  struct FixedValue {
+  /// fixed-size array's are its elements', one after another, a tuple's its
+  /// elements' at their alignments, like a C struct's fields.
+  MemLayout memLayout(ast::Type *ty);
+  /// The byte offset of element @p i of a value of the tuple type @p tt.
+  int64_t tupleElementOffset(const ast::TupleType *tt, size_t i);
+  /// True when @p ty (isMemType) holds references, at any depth: each such
+  /// slot owns a reference to its box.
+  static bool memHoldsRefs(const ast::Type *ty);
+  /// A value held in memory: the address of its bytes, and whether they are
+  /// a temporary (a call's result, a literal) whose references the consumer
+  /// takes over.
+  struct MemValue {
     Val Addr;
     bool Temp = false;
   };
-  /// The bytes of @p e, an expression of a fixed-size array type: a
-  /// variable's own (or, for an `inout` one, the array it names), an
-  /// element's, or a temporary.
-  FixedValue emitFixedValue(ast::Expr *e);
-  /// emitFixedValue's address, borrowed: a temporary of references is
-  /// added to FixedTemps, for its consumer to release with
-  /// releaseFixedTemps once done with it.
-  Val emitFixedAddress(ast::Expr *e);
-  /// What fixed-size array addresses handed out depend on: temporaries of
-  /// references (with their type), and +1 boxes of the objects holding
-  /// field arrays (with none).
-  std::vector<std::pair<Val, ast::FixedArrayType *>> FixedTemps;
-  /// Release what was added to FixedTemps since its size was @p mark.
-  void releaseFixedTemps(size_t mark);
-  /// Retain, or release, every reference held by the array of type @p ty at
-  /// @p addr (nothing for an array of values).
-  void emitFixedRetain(const Val &addr, ast::FixedArrayType *ty);
-  void emitFixedRelease(const Val &addr, ast::FixedArrayType *ty);
-  /// Call @p fn with the box in each reference slot of the array of type
+  /// The bytes of @p e, an expression of a type held in memory: a
+  /// variable's own (or, for an `inout` one, the value it names), an
+  /// element's or a field's, or a temporary.
+  MemValue emitMemValue(ast::Expr *e);
+  /// emitMemValue's address, borrowed: a temporary holding references is
+  /// added to MemTemps, for its consumer to release with releaseMemTemps
+  /// once done with it.
+  Val emitMemAddress(ast::Expr *e);
+  /// What addresses handed out depend on: temporaries holding references
+  /// (with their type), and +1 boxes of the objects holding fields (with
+  /// none).
+  std::vector<std::pair<Val, ast::Type *>> MemTemps;
+  /// Release what was added to MemTemps since its size was @p mark.
+  void releaseMemTemps(size_t mark);
+  /// Retain, or release, every reference held by the value of type @p ty at
+  /// @p addr (nothing for one of plain values).
+  void emitMemRetain(const Val &addr, ast::Type *ty);
+  void emitMemRelease(const Val &addr, ast::Type *ty);
+  /// Call @p fn with the box in each reference slot of the value of type
   /// @p ty at @p addr.
-  void forEachFixedRef(const Val &addr, ast::FixedArrayType *ty,
-                       const std::function<void(Val)> &fn);
+  void forEachMemRef(const Val &addr, ast::Type *ty,
+                     const std::function<void(Val)> &fn);
   /// Call @p fn with the address of each of the slots @p from to @p to
   /// (exclusive), @p stride bytes apart, of the memory at @p base: one by
   /// one for a few, in a loop for more.
@@ -542,29 +529,44 @@ private:
   /// The address of element @p index of the fixed-size array @p array,
   /// after a bounds check.
   Val emitFixedElementAddress(ast::Expr *array, ast::Expr *index);
-  /// Write the value of @p e, of a fixed-size array type, into the bytes at
+  /// The address of element @p index of the tuple @p tuple.
+  Val emitTupleElementAddress(ast::Expr *tuple, size_t index);
+  /// Write the value of @p e, of a type held in memory, into the bytes at
   /// @p dst: a literal element by element, anything else copied.  @p e must
   /// not read @p dst (a new variable's storage).
-  void emitFixedInit(ast::Expr *e, const Val &dst);
+  void emitMemInit(ast::Expr *e, const Val &dst);
+  /// Write the value of @p e, of type @p ty (an element of a literal), into
+  /// the slot at @p dst: an owned box for a reference, the bytes of a value
+  /// held in memory.
+  void emitElementInit(ast::Expr *e, ast::Type *ty, const Val &dst);
   /// Initialise the array of type @p ft at @p dst from `[elem; n]`.
   void emitFixedRepeat(ast::Expr *elem, ast::FixedArrayType *ft,
                        const Val &dst);
-  /// A fixed-size array variable @p name initialised with @p init (zero
-  /// without one), declared in the current scope.
-  void declareFixedVar(const std::string &name, ast::FixedArrayType *ty,
-                       ast::Expr *init);
-  /// Copy the value of @p value into the fixed-size array place at @p dst
-  /// (an assignment: @p value may read @p dst).
-  void emitFixedAssign(const Val &dst, ast::Expr *value);
-  /// A fixed-size array parameter @p name, whose value @p arg is the
-  /// caller's array's address: copied for a by-value one, the address kept
-  /// for a `view` or `inout` one.
-  void declareFixedParam(const std::string &name, const pir::Value &arg,
-                         ast::FixedArrayType *ty, ast::ParamMode mode);
-  /// A temporary for a call's fixed-size array result of type @p ty: its
+  /// A variable @p name of a type held in memory, initialised with @p init
+  /// (zero without one), declared in the current scope.
+  void declareMemVar(const std::string &name, ast::Type *ty, ast::Expr *init);
+  /// Copy the value of @p value into the place at @p dst (an assignment:
+  /// @p value may read @p dst).
+  void emitMemAssign(const Val &dst, ast::Expr *value);
+  /// A parameter @p name of a type held in memory, whose value @p arg is the
+  /// address of the caller's value: copied for a by-value one, the address
+  /// kept for a `view` or `inout` one.
+  void declareMemParam(const std::string &name, const pir::Value &arg,
+                       ast::Type *ty, ast::ParamMode mode);
+  /// A temporary for a call's result of type @p ty (held in memory): its
   /// address, passed as the call's last argument, where the callee writes
   /// the result.
-  Val emitFixedResultSlot(ast::Type *ty);
+  Val emitMemResultSlot(ast::Type *ty);
+  /// The scalar or box element of type @p ty at @p addr, read in place: a
+  /// box borrowed from its slot.
+  Val emitElementLoad(const Val &addr, ast::Type *ty);
+  /// The layout of the tuple type @p tt the runtime reads (Runtime.h,
+  /// "Tuples"), as constant data.
+  Val emitTupleLayout(ast::TupleType *tt);
+  /// The text of the tuple @p e, a new string (PaykanTuple_toString).
+  Val emitTupleToString(ast::Expr *e);
+  /// Whether the tuples @p a and @p b are equal (PaykanTuple_equals).
+  Val emitTupleEquals(ast::Expr *a, ast::Expr *b);
   /// True when @p arg is passed for a slice parameter: a fixed-size array
   /// Sema took for one, or a slice passed on.
   static bool isSliceArg(const ast::Expr *arg);

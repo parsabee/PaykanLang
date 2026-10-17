@@ -3,7 +3,8 @@
 // An instance (`describe<float>`) passes C a PaykanType describing each type
 // argument: its size, alignment, kind and references.  A `T` crosses by
 // address, so the C code in values.c handles a value of any size: it borrows
-// a `view` one and changes an `inout` one in place.  Build the object
+// a `view` one and changes an `inout` one in place (a tuple is its elements
+// in place, at the offsets C struct layout gives them).  Build the object
 // yourself and link it with --object (the sample harnesses do this):
 //
 //   cc -std=c11 -fPIC -I<paykan include dir> -c values.c -o values.o
@@ -29,9 +30,11 @@ fn main() -> int {
   println(describe<Point>(Point(1)));
   nothing: Point? = None;
   println(describe<Point?>(nothing));
+  println(describe<(int, Str)>((1, "a")));
   println(Str<int>(pick<int>(True, 1, 2)));
   println(pick<Str>(False, "left", "right"));
   println(Str<int>(pick<Point>(True, Point(3), Point(4)).x));
+  println(pick<(int, Str)>(False, (5, "five"), (6, "six")));
   left = "left";
   right = "right";
   swap<Str>(left, right);
@@ -40,6 +43,10 @@ fn main() -> int {
   no = False;
   swap<bool>(yes, no);
   println(Str<bool>(yes));
+  lt = (1, "one");
+  rt = (2, "two");
+  swap<(int, Str)>(lt, rt);
+  println(lt);
   return 0;
 }
 // expect-stdout: int 42 (size 8)
@@ -48,8 +55,11 @@ fn main() -> int {
 // expect-stdout: char k (size 1)
 // expect-stdout: an object (size 8)
 // expect-stdout: None (size 8)
+// expect-stdout: a tuple holding 1 reference(s) (size 16)
 // expect-stdout: 1
 // expect-stdout: right
 // expect-stdout: 3
+// expect-stdout: (6, six)
 // expect-stdout: right left
 // expect-stdout: False
+// expect-stdout: (2, two)

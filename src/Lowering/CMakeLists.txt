@@ -6,7 +6,7 @@ add_library(paykan_lowering STATIC
     LoweringExpr.cpp
     LoweringMatch.cpp
     LoweringClass.cpp
-    LoweringFixed.cpp
+    LoweringMem.cpp
     LoweringInout.cpp
     LoweringProgram.cpp
 )

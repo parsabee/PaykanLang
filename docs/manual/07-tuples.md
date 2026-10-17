@@ -96,9 +96,12 @@ Nested patterns such as `a, (b, c) = ...` are not supported; destructure in two 
 
 ## Tuples as values
 
-A tuple is a value like any other: it can be stored in a variable, a field or an array, and
-passed to and returned from functions. `==` and `!=` compare tuples element by element, with
-each element compared the way `==` compares it on its own (strings by content):
+A tuple is a value, like an `int` or an array: it can be stored in a variable, a field or an
+array, and passed to and returned from functions, and each of these copies it. Its elements
+are held right where the tuple is, so a tuple of numbers costs no allocation at all. A tuple
+is not an `Obj`, though: `o: Obj = (1, 2)` is an error. `==` and `!=` compare tuples element
+by element, with each element compared the way `==` compares it on its own (strings by
+content):
 
 ```pkn
 fn main() -> int {

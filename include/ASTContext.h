@@ -66,24 +66,14 @@ class ASTContext {
   std::unordered_map<Type *, OptionalType *> OptionalTypes;
 
   // -- Tuples
-  // Canonical base class for every tuple value ("Tuple": Obj subtype whose
-  // vtable mirrors PaykanTuple_vtable — destroy / toString / equals).
-  ClassType *TupleTy;
   // Canonical TupleType per element-type list (lazily created by
   // getTupleType).  Key: the element Type* pointers, each canonical, so that
   // `(int, (Str, bool))` resolves to one node everywhere.
   std::map<std::vector<Type *>, TupleType *> TupleTypes;
-  // Per-element-list specialized tuple ClassTypes (`Tuple<int, Str>`), keyed
-  // by canonical TupleType*, plus the reverse map.  They subclass TupleTy and
-  // add no methods; they exist so that a tuple receiver has a ClassType for
-  // method lookup / vtable dispatch.
-  std::unordered_map<TupleType *, ClassType *> SpecializedTupleTypes;
-  std::unordered_map<ClassType *, TupleType *> SpecializedTupleElemTypes;
 
   // -- Bootstrap helpers (called from the constructor)
   void buildObjectType();
   void buildStringType();
-  void buildTupleType();
   void buildFileType();
   void buildErrorType();
 
@@ -185,22 +175,10 @@ public:
   /// node.
   OptionalType *getOptionalType(Type *innerTy);
 
-  /// The canonical `Tuple` base ClassType (every tuple value is one).
-  ClassType *getTupleTy() const { return TupleTy; }
-
   /// Return the canonical TupleType with the given element types, creating
   /// it on first use.  Each element must itself be canonical (see
   /// getFixedArrayType) so that tuple type identity is pointer identity.
   TupleType *getTupleType(std::vector<Type *> elemTys);
-
-  /// Return (creating if needed) the specialized ClassType `Tuple<T1, T2>`
-  /// for the canonical tuple type @p tt — a subtype of getTupleTy() used for
-  /// method lookup and vtable dispatch on tuple receivers.
-  ClassType *getOrCreateSpecializedTupleType(TupleType *tt);
-
-  /// If @p ct is a specialized tuple ClassType, return the TupleType it was
-  /// created for; otherwise nullptr.
-  TupleType *getSpecializedTupleElemType(ClassType *ct) const;
 
   /// Return the canonical BuiltinType* for a given Kind.
   BuiltinType *getBuiltinType(BuiltinType::Kind k) const;

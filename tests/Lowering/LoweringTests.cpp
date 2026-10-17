@@ -819,20 +819,63 @@ TEST(Lowering, SideEffectingReceiversAreEvaluatedOnce) {
   EXPECT_EQ(count(m, "call @idx()"), 4u) << m;
 }
 
-TEST(Lowering, TupleLiteralUsesAKindsDescriptor) {
+// A tuple is a `mem` local holding its elements in place, each stored and
+// loaded at its offset; its Str is released at scope end.  Nothing else is
+// emitted for it: no runtime call and no data.
+TEST(Lowering, TupleIsAMemLocalWithItsElementsInPlace) {
   auto l = lower(R"(
     fn main() -> int { t = (1, "s"); return t.0; }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
-  EXPECT_NE(l.Text.find("bytes @.tuple.kinds0 = [0, 4]"), std::string::npos)
-      << l.Text;
   std::string m = function(l.Text, "main");
-  EXPECT_NE(m.find("call @$rt.PaykanTuple_new(2, @.tuple.kinds0)"),
+  EXPECT_NE(m.find("local %t.0: mem(16, 8)\n"), std::string::npos) << m;
+  EXPECT_NE(m.find("ptr.store %t.addr.1, 1\n"), std::string::npos) << m;
+  EXPECT_NE(m.find("%elem.addr.2 = ptr.add %t.addr.1, 8\n"), std::string::npos)
+      << m;
+  EXPECT_NE(m.find("ptr.store %elem.addr.2, %shared."), std::string::npos) << m;
+  EXPECT_NE(m.find(" = ptr.load i64, %t.addr."), std::string::npos) << m;
+  EXPECT_NE(m.find(" = ptr.load box, %elem.addr."), std::string::npos) << m;
+  EXPECT_EQ(count(m, "release %"), 1u) << m;
+  EXPECT_EQ(l.Text.find("PaykanTuple_"), std::string::npos) << l.Text;
+  EXPECT_EQ(l.Text.find("data @"), std::string::npos) << l.Text;
+}
+
+// Printing, `toString` and `==` hand the runtime the tuple's address and its
+// layout, a `.tupleN` data global emitted once per tuple type.
+TEST(Lowering, PrintedOrComparedTupleUsesALayout) {
+  auto l = lower(R"(
+    fn main() -> int {
+      t = (1, "s");
+      u = (1, "s");
+      println(t);
+      b = t == u;
+      n: ((int?, bool), Str?, char?, float) = ((None, True), None, 'c', 2.5);
+      s: Str = n.toString();
+      println(n);
+      return t.0;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  // (int, Str): INT at 0, OBJECT at 8.
+  EXPECT_NE(l.Text.find("data @.tuple0 = [2, 0, 0, 4, 8]\n"), std::string::npos)
+      << l.Text;
+  // A nested TUPLE with its own layout, an inline `int?` (OPTIONAL of INT),
+  // a `Str?` (OPTIONAL of OBJECT), a `char?` (OPTIONAL of CHAR), a float.
+  EXPECT_NE(l.Text.find("data @.tuple1 = [4, 6, 0, 2, 5, 0, 0, 2, 16, 5, 24, "
+                        "4, 5, 32, 3, 1, 40]\n"),
+            std::string::npos)
+      << l.Text;
+  EXPECT_EQ(count(l.Text, "data @"), 2u) << l.Text;
+  std::string m = function(l.Text, "main");
+  EXPECT_NE(m.find("local %n.3: mem(48, 8)\n"), std::string::npos) << m;
+  EXPECT_NE(m.find("call @$rt.PaykanTuple_toString(%t.addr."),
             std::string::npos)
       << m;
-  EXPECT_NE(m.find("call @$rt.PaykanTuple_set("), std::string::npos) << m;
-  EXPECT_NE(m.find("call @$rt.PaykanTuple_set_obj("), std::string::npos) << m;
-  EXPECT_NE(m.find("call @$rt.PaykanTuple_get("), std::string::npos) << m;
+  EXPECT_NE(m.find("call @$rt.PaykanTuple_equals(%t.addr."), std::string::npos)
+      << m;
+  EXPECT_EQ(count(m, ", @.tuple0)"), 2u) << m;
+  EXPECT_EQ(count(m, "call @$rt.PaykanTuple_toString(%n.addr."), 2u) << m;
+  EXPECT_EQ(count(m, ", @.tuple1)"), 2u) << m;
 }
 
 TEST(Lowering, PrintedOptionalSubstitutesTheNoneSingleton) {
@@ -901,7 +944,7 @@ TEST(Lowering, OptionalValuesAreNotBoxed) {
 }
 
 // An array or tuple of optional values holds them inline: the elements are
-// read and written in place, a tuple's as a presence slot and a value slot.
+// read and written in place, a tuple's at its offset.
 TEST(Lowering, ArrayAndTupleElementsOfOptionalsAreInline) {
   auto l = lower(R"(
     fn main() -> int {
@@ -919,15 +962,19 @@ TEST(Lowering, ArrayAndTupleElementsOfOptionalsAreInline) {
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
   // Three 16-byte elements, stored three times by the literal and once by
-  // `xs[0] = None`, and loaded as they are.
+  // `xs[0] = None`, and loaded as they are; the tuple's two elements are
+  // stored once each.
   EXPECT_NE(m.find("local %xs.0: mem(48, 8)"), std::string::npos) << m;
-  EXPECT_EQ(count(m, "ptr.store %"), 4u) << m;
+  EXPECT_EQ(count(m, "ptr.store %"), 6u) << m;
   EXPECT_EQ(count(m, "ptr.load opt_i64, %"), 2u) << m;
-  // The tuple: 3 slots, kinds OPT, BOOL, REF; `t.1` is slot 2.
-  EXPECT_NE(m.find("call @$rt.PaykanTuple_new(3, @"), std::string::npos) << m;
-  EXPECT_NE(l.Text.find("= [5, 2, 4]"), std::string::npos) << l.Text;
-  EXPECT_NE(m.find("call @$rt.PaykanTuple_get(%"), std::string::npos) << m;
-  EXPECT_NE(m.find(", 2)"), std::string::npos) << m;
+  // The tuple: the `bool?` (two bytes) at 0, the Str at 8.
+  EXPECT_NE(m.find("local %t.4: mem(16, 8)"), std::string::npos) << m;
+  EXPECT_NE(m.find("local %c.5: opt_bool"), std::string::npos) << m;
+  EXPECT_NE(m.find(" = some true\n  ptr.store %t.addr."), std::string::npos)
+      << m;
+  EXPECT_NE(m.find(" = ptr.load opt_bool, %t.addr."), std::string::npos) << m;
+  EXPECT_EQ(count(m, " = ptr.load box, %elem.addr."), 2u) << m; // t.1, its drop
+  EXPECT_EQ(l.Text.find("PaykanTuple_"), std::string::npos) << l.Text;
 }
 
 // An optional value is its presence flag and then its payload at its

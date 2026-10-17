@@ -115,9 +115,11 @@ Output:
 ```
 
 `v` is evaluated once, and each element is a copy of its value. A value of a reference type
-(a class, `Str`, a tuple) is a reference, so the elements all name one object: `[Counter(0);
+(a class, `Str`) is a reference, so the elements all name one object: `[Counter(0);
 3]` holds a single counter three times, and a change made through one element shows through
-the others until an element is assigned another object.
+the others until an element is assigned another object. A tuple is copied into each element,
+and the copies share the objects it holds: `[(0, Counter(0)); 3]` is three tuples naming one
+counter.
 
 ```pkn
 class Counter { n: int; }
@@ -272,10 +274,11 @@ An `inout` local names the array itself (`r: inout = xs;`).
 ### Arrays of references
 
 An element can be a scalar (`int`, `float`, `bool`, `char`), an optional of one (`int?`,
-held inline, `None` when zeroed), an enum, a reference (a class, `Str`, a tuple, an optional
-of one) or another array. An element of a reference type is a reference, as a variable of
-that type is: copying the array copies the references, so the copy and the original share
-their elements' objects, and an element of a `view` array is a `view` too.
+held inline, `None` when zeroed), an enum, a reference (a class, `Str`, an optional of one), a
+tuple (held inline, see `09-tuples.md`) or another array. An element of a reference type is
+a reference, as a variable of that type is: copying the array copies the references, so the
+copy and the original share their elements' objects, and an element of a `view` array is a
+`view` too.
 
 ```pkn
 class Counter { n: int; }

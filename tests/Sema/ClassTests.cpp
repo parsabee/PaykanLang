@@ -149,7 +149,7 @@ TEST(Class, RemovedBoxedClassNamesAreFree) {
 }
 
 TEST(Class, NameShadowsBuiltinClassRejected) {
-  for (const char *name : {"Obj", "Str", "File", "Error", "Tuple"}) {
+  for (const char *name : {"Obj", "Str", "File", "Error"}) {
     auto r = semaCheck(withClasses(std::string("class ") + name + " {}"));
     EXPECT_FALSE(r.Ok) << name;
     EXPECT_NE(

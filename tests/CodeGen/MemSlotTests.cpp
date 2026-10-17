@@ -56,6 +56,39 @@ fn @main() -> i64 {
   EXPECT_EQ(r.ExitCode, 7 + 5 + 'x' + 1 + 0 - 'x');
 }
 
+// A `cast` between i64 and f64 reinterprets the bits (the C backend's
+// pkrt_f64_bits / pkrt_bits_f64): a float's bits stored in an integer slot
+// come back as the same float, the sign of zero included.
+TEST(MemSlot, FloatBitsRoundTripThroughAnInteger) {
+  auto r = compileAndRunPIR(R"(module "t"
+fn @main() -> i64 {
+  local %a: mem(16, 8)
+  %pa = local.addr %a
+  %bits = cast 2.5 to i64
+  ptr.store %pa, %bits
+  %p1 = ptr.add %pa, 8
+  %nzbits = cast -0.0 to i64
+  ptr.store %p1, %nzbits
+  %got = ptr.load i64, %pa
+  %f = cast %got to f64
+  %nz = ptr.load i64, %p1
+  %g = cast %nz to f64
+  %neg = cmp lt %nz, 0
+  %zero = cmp eq %g, 0.0
+  %f4 = mul %f, 4.0
+  %n = ftoi %f4
+  %one = cast %neg to i64
+  %two = cast %zero to i64
+  %s1 = add %n, %one
+  %s2 = add %s1, %two
+  ret %s2
+}
+)");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  // 2.5 * 4, the sign bit of -0.0 set in its bits, and -0.0 == 0.0.
+  EXPECT_EQ(r.ExitCode, 10 + 1 + 1);
+}
+
 // mem.copy is a memmove: its source and destination may overlap.
 TEST(MemSlot, CopyMayOverlap) {
   auto r = compileAndRunPIR(R"(module "t"

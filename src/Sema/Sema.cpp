@@ -222,18 +222,13 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
   if (ast::isa<ast::OptionalType>(src))
     return false;
 
-  // Tuples: a tuple value is an instance of the builtin `Tuple` class (an Obj
-  // subtype), so it is assignable to `Obj` (and to `Tuple` itself).  Between
-  // tuple types, assignability is element-wise and *representation-
-  // preserving*: primitive elements must match exactly (no int -> float
-  // promotion — the runtime slot holds raw bits and no conversion is
-  // emitted), while reference-typed elements may be covariant
+  // Tuples: assignability is element-wise and *representation-preserving*:
+  // a copy is the tuple's bytes, so value elements must match exactly (no int
+  // -> float promotion), while reference-typed elements may be covariant
   // (`(int, Str)` is assignable to `(int, Obj)`) because tuples are
-  // immutable and every reference slot holds a box regardless of its
-  // static type.
+  // immutable and every reference slot holds a box regardless of its static
+  // type.
   if (auto *srcTT = ast::dyn_cast<ast::TupleType>(src)) {
-    if (auto *dstCT = ast::dyn_cast<ast::ClassType>(dst))
-      return Ctx.getTupleTy()->isSubtypeOf(dstCT);
     auto *dstTT = ast::dyn_cast<ast::TupleType>(dst);
     if (!dstTT || dstTT->getArity() != srcTT->getArity())
       return false;
@@ -242,7 +237,10 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
       ast::Type *s = srcTT->getElementType(i);
       if (d == s)
         continue;
-      if (!ast::isRefType(d) || !ast::isRefType(s) || !isAssignable(d, s))
+      const bool sameShape =
+          (ast::isRefType(d) && ast::isRefType(s)) ||
+          (ast::isa<ast::TupleType>(d) && ast::isa<ast::TupleType>(s));
+      if (!sameShape || !isAssignable(d, s))
         return false;
     }
     return true;
@@ -365,6 +363,28 @@ void Sema::errorOptionalUnwrap(ast::SourceLocation loc,
                  "' without unwrapping (use match)");
 }
 
+/// The alignment of a value of @p ty held in memory: a scalar's or a box's
+/// is its size, an optional value's its payload's, an array's its element's,
+/// a tuple's its most aligned element's.
+static int64_t elementAlign(const ast::Type *ty) {
+  if (const auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
+    int64_t align = 1;
+    for (const ast::Type *e : tt->getElementTypes())
+      align = std::max(align, elementAlign(e));
+    return align;
+  }
+  if (const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty))
+    return elementAlign(ft->getElementType());
+  if (ast::isValueOptional(ty))
+    return elementAlign(ast::cast<ast::OptionalType>(ty)->getInnerType());
+  if (const auto *bt = ast::dyn_cast<ast::BuiltinType>(ty))
+    return bt->getTypeKind() == ast::BuiltinType::Bool ||
+                   bt->getTypeKind() == ast::BuiltinType::Char
+               ? 1
+               : 8;
+  return 8; // an enum value, or a box
+}
+
 int64_t Sema::fixedElementBytes(const ast::Type *ty) {
   if (ast::isa<ast::EnumType>(ty))
     return 8;
@@ -400,6 +420,18 @@ int64_t Sema::fixedElementBytes(const ast::Type *ty) {
     }
     int64_t elem = fixedElementBytes(ft->getElementType());
     return elem < 0 ? -1 : elem * ft->getLength();
+  }
+  // A tuple: its elements at their alignments, like a C struct's fields.
+  if (const auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
+    auto alignUp = [](int64_t n, int64_t a) { return (n + a - 1) / a * a; };
+    int64_t size = 0;
+    for (const ast::Type *e : tt->getElementTypes()) {
+      int64_t bytes = fixedElementBytes(e);
+      if (bytes < 0)
+        return -1;
+      size = alignUp(size, elementAlign(e)) + bytes;
+    }
+    return alignUp(size, elementAlign(tt));
   }
   return -1;
 }
@@ -648,8 +680,7 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
                      "?', which is not supported");
       return nullptr;
     }
-    // An optional tuple would be representable (a tuple is a boxed reference
-    // value), but it could never be unwrapped: `match` rejects tuple type
+    // An optional tuple could never be unwrapped: `match` rejects tuple type
     // arms, so the `T` arm that unwraps an optional does not exist for it.
     // Reject it until tuple patterns land.
     if (ast::isa<ast::TupleType>(inner)) {
@@ -1155,8 +1186,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     return sig->ReturnType;
   }
 
-  // The print builtins print an optional too, `None` or its value: they
-  // take one as it is, not as an `Obj` (an optional is not one).
+  // The print builtins print an optional too, `None` or its value, and a
+  // tuple: they take one as it is, not as an `Obj` (neither is one).
   const bool printsOptionals =
       sig->IsBuiltin && (node->getCalleeName() == names::kPrint ||
                          node->getCalleeName() == names::kPrintln ||
@@ -1168,7 +1199,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     if (!argTypes[i])
       continue; // already reported
     auto *argExpr = node->getArguments()[i];
-    if (printsOptionals && ast::isa<ast::OptionalType>(argTypes[i]))
+    if (printsOptionals && (ast::isa<ast::OptionalType>(argTypes[i]) ||
+                            ast::isa<ast::TupleType>(argTypes[i])))
       continue;
     if (!S.checkAssignable(sig->ParamTypes[i], argTypes[i], argExpr) &&
         !S.diagnoseOptionalNarrowing(argExpr->getLocation(), sig->ParamTypes[i],
@@ -1220,17 +1252,13 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   }
 
   // Resolve the ClassType to look up the method on.
-  ast::ClassType *ct = nullptr;
-  if (auto *tt = ast::dyn_cast<ast::TupleType>(recvTy))
-    // Tuples expose only Obj's methods (toString / equals) through their
-    // per-element-list specialization.
-    ct = S.Ctx.getOrCreateSpecializedTupleType(tt);
-  else
-    ct = ast::dyn_cast<ast::ClassType>(recvTy);
+  ast::ClassType *ct = ast::dyn_cast<ast::ClassType>(recvTy);
 
-  // `n.toString()` on an int, float, bool or char: the builtin `Show`.
-  if (!ct && ast::isa<ast::BuiltinType>(recvTy) &&
-      recvTy != S.Ctx.getVoidTy() &&
+  // `n.toString()` on an int, float, bool or char, or on a tuple: the
+  // builtin `Show`.
+  if (!ct &&
+      ((ast::isa<ast::BuiltinType>(recvTy) && recvTy != S.Ctx.getVoidTy()) ||
+       ast::isa<ast::TupleType>(recvTy)) &&
       node->getMethodName() == names::kMethodToString) {
     if (node->getNumArguments() != 0) {
       S.error(node->getLocation(), "method 'toString' expects 0 argument(s), "

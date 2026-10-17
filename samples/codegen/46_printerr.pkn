@@ -1,6 +1,6 @@
 // 44 — the print family: print / println write to stdout, printerr /
-// printerrln to stderr. Each takes exactly one Obj and prints its toString;
-// compose longer messages with `+`.
+// printerrln to stderr. Each takes exactly one Obj or tuple and prints its
+// toString; compose longer messages with `+`.
 //
 // Run with `2>/dev/null` to see only stdout, or `>/dev/null` for stderr only.
 //

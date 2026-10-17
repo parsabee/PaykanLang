@@ -42,8 +42,9 @@ std::string fnSignature(bool view, const std::string &name,
 } // namespace
 
 void Sema::registerBuiltinTraits() {
-  // trait Show { view fn toString() -> Str; }, implemented by Obj and the
-  // scalars (whose `toString` is their `Str` conversion).
+  // trait Show { view fn toString() -> Str; }, implemented by Obj, the
+  // scalars (whose `toString` is their `Str` conversion) and the tuples
+  // (traitImplOwner).
   auto *toString = Ctx.make<ast::FuncDecl>(
       ast::SourceLocation(), Ctx.intern(names::kMethodToString),
       std::vector<ast::Param>{}, Ctx.getStrTy(), nullptr);
@@ -228,9 +229,11 @@ const ast::Type *Sema::traitImplOwner(ast::Type *ty, const TraitRef &tr) {
         return c;
     return nullptr;
   }
-  // A tuple is an object.
+  // A tuple shows its elements (the builtin `Show`).
   if (ast::isa<ast::TupleType>(ty))
-    return has(Ctx.getObjTy()) ? Ctx.getObjTy() : nullptr;
+    return tr.Trait->IsBuiltin && tr.Trait->Decl->getName() == names::kTraitShow
+               ? ty
+               : nullptr;
   return has(ty) ? ty : nullptr;
 }
 

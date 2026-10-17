@@ -5,8 +5,8 @@
 // local; a `match` on a call result whose arm binding owns nothing; a `T?`
 // with T = int inside a generic class; and printing one.
 //
-// Runtime allocation sites: the class instances, the tuple and the strings
-// (the array holds its 16-byte elements inline).
+// Runtime allocation sites: the class instances and the strings (the array
+// holds its 16-byte elements inline, the tuple its elements in place).
 //
 // Expected under --track-heap: live blocks : 0.
 // expect-stdout: 6

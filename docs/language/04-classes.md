@@ -177,12 +177,13 @@ and `self` is read-only in its body: through `self` it cannot
 Each is an error that names the method: `'self' is read-only in 'view fn value'; 'tick' is
 not a 'view fn'`. Other objects can change as usual.
 
-Part of `self` that is an object, string, tuple or optional, or an array of them, is a
-`view` in a `view fn`, so the method returns it as one, `-> view T`
+Part of `self` that is an object, string or optional, or an array or tuple holding one,
+is a `view` in a `view fn`, so the method returns it as one, `-> view T`
 ([Borrowed results](02-functions-and-calling.md#borrowed-results)), and its caller cannot
 change it. `view fn name() -> Str { return self.name; }` is an error: `'self' is read-only
 in 'view fn name', so part of it can only be returned as a 'view': write '-> view Str'`. A
-field of a value type is returned as a copy (`view fn count() -> int`). An override of a
+field of a value type, or an array or tuple of them, is returned as a copy (`view fn
+count() -> int`, `view fn bounds() -> (int, int)`). An override of a
 method that returns a copy, such as `toString`, returns a new value instead. A method that
 is not a `view fn` may return part of `self` for its caller to change.
 

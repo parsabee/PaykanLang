@@ -16,7 +16,6 @@ inline constexpr const char *kErrPrintln = "printerrln";
 inline constexpr const char *kLen = "len";
 inline constexpr const char *kOpen = "open";
 inline constexpr const char *kMain = "main"; ///< the program's entry point
-inline constexpr const char *kTuple = "Tuple";
 /// How an absent optional prints (the None object's toString).
 inline constexpr const char *kNoneText = "None";
 
@@ -98,15 +97,9 @@ inline constexpr const char *kPaykanStringConcat = "PaykanString_concat";
 inline constexpr const char *kPaykanStringAt = "PaykanString_at";
 inline constexpr const char *kPaykanStringVtable = "PaykanString_vtable";
 
-// Tuple
-inline constexpr const char *kPaykanTupleNew = "PaykanTuple_new";
-inline constexpr const char *kPaykanTupleSet = "PaykanTuple_set";
-inline constexpr const char *kPaykanTupleSetObj = "PaykanTuple_set_obj";
-inline constexpr const char *kPaykanTupleGet = "PaykanTuple_get";
-inline constexpr const char *kPaykanTupleDestroy = "PaykanTuple_destroy";
+// Tuples, through their layouts
 inline constexpr const char *kPaykanTupleToString = "PaykanTuple_toString";
 inline constexpr const char *kPaykanTupleEquals = "PaykanTuple_equals";
-inline constexpr const char *kPaykanTupleVtable = "PaykanTuple_vtable";
 
 // Type descriptors: for the C code of generic native functions
 inline constexpr const char *kPaykanTypeCopy = "PaykanType_copy";
@@ -246,11 +239,9 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanStringParseInt,
     kPaykanStringParseFloat,
     kPaykanStringParseBool,
-    // Tuple
-    kPaykanTupleNew,
-    kPaykanTupleSet,
-    kPaykanTupleSetObj,
-    kPaykanTupleGet,
+    // Tuples
+    kPaykanTupleToString,
+    kPaykanTupleEquals,
     // File
     kPaykanFileOpen,
     // IO
@@ -275,26 +266,12 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanFileReadln,
 };
 
-// -- Tuple slot kinds (compiler <-> runtime ABI)
-//
-// One byte per tuple element, emitted by the lowering as the `kinds`
-// descriptor passed to PaykanTuple_new.  Must match PaykanTupleKind in
-// src/Runtime/Runtime.h (a static_assert in the codegen tests checks it).
-
-enum TupleSlotKind : unsigned char {
-  kTupleSlotInt = 0,   // int64_t (also enum values)
-  kTupleSlotFloat = 1, // double bits
-  kTupleSlotBool = 2,  // int64_t 0 / 1
-  kTupleSlotChar = 3,  // int64_t holding one byte
-  kTupleSlotRef = 4,   // PaykanShared* retained by the tuple
-  kTupleSlotOpt = 5,   // an optional value's presence word; its value next
-};
-
-// -- Kinds of the types a generic native function is passed
+// -- Kinds of values
 //
 // The `kind` word of a PaykanType (src/Runtime/Runtime.h, "Generic native
-// functions"), which the lowering emits for each type argument.  Must match
-// PaykanTypeKind (a static_assert in the codegen tests checks it).
+// functions"), which the lowering emits for each type argument, and of each
+// element of a tuple's layout ("Tuples").  Must match PaykanTypeKind (a
+// static_assert in the codegen tests checks it).
 
 enum NativeTypeKind : unsigned char {
   kNativeKindInt = 0,      // int64_t (also enum values)
@@ -303,13 +280,14 @@ enum NativeTypeKind : unsigned char {
   kNativeKindChar = 3,     // int8_t
   kNativeKindObject = 4,   // PaykanShared*, never null
   kNativeKindOptional = 5, // PaykanShared*, null for None, or inline
+  kNativeKindTuple = 6,    // its elements in place
 };
 
 // -- Names of lowering-generated globals and values
 
 inline constexpr const char *kStrGlobalName = ".str";
 inline constexpr const char *kInt2FPName = "int2fp";
-inline constexpr const char *kTupleKindsGlobalName = ".tuple.kinds";
+inline constexpr const char *kTupleLayoutGlobalName = ".tuple";
 
 } // namespace names
 } // namespace paykan

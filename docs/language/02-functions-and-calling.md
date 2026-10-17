@@ -142,12 +142,13 @@ be passed to a 'view' parameter, and parameter 1 of 'twice' is not one`. The fix
 that parameter `view` too. The builtin functions only read (`println(v)`), and so do the
 builtin methods. `Str(s)` with a `Str` returns `s` itself, so it takes no `view`.
 
-A `view` of an object, string, tuple or optional, or of an array of them, shares what it
-holds, so it is never stored or returned, where another name could change it later.
+A `view` of an object, string or optional, or of an array or tuple holding one, shares what
+it holds, so it is never stored or returned, where another name could change it later.
 Assigning it to a variable, a field or an element, putting it in an array or tuple and
 `return` are errors: `'v' is a 'view' local; it cannot be stored, only read or passed to a 'view'
-parameter`, `'v' is a 'view' local; it cannot be returned`. A `view` of a value type is
-copied when it is assigned (`m = n`), and the copy is the variable's own.
+parameter`, `'v' is a 'view' local; it cannot be returned`. A `view` of a value type, or of
+an array or tuple of them (`int[3]`, `(int, float)`), is copied when it is assigned (`m =
+n`), and the copy is the variable's own.
 
 A `match` arm's name for a `view` is a `view` too: in `match v { k: Fast { k.tick(); } }`,
 `k.tick()` is an error, `'k' is bound to a 'view'; 'tick' is not a 'view fn'`.
@@ -511,6 +512,11 @@ types cross, with the runtime's own convention:
 | `Str`, `Obj` result | `PaykanShared *` | owned (+1); never `NULL` |
 | `Str?`, `Obj?` result | `PaykanShared *` | owned (+1); `NULL` is `None` |
 
+Any other type, a tuple for one, crosses only as a type parameter's argument
+of a [generic native function](#generic-native-functions): `native fn f(t: view
+(int, int))` is an error (`parameter 't' of type '(int, int)' cannot cross
+into C`).
+
 The result can be a `view` of a `view` or `inout` parameter (`-> view T`);
 it is returned owned, like a copy.  A native function cannot be a method,
 cannot return `inout`, and cannot be `main`.
@@ -524,8 +530,8 @@ which holds a reference to each argument for the call.
 
 A native function can be generic.  Each instance calls the same C function,
 which is passed a `PaykanType` describing each type argument first.  What the
-function types by a type parameter crosses by address, so a value of any type,
-of any size, crosses:
+function types by a type parameter crosses by address, so a value of any type
+and size crosses (a tuple as the address of its elements):
 
 ```pkn
 native fn pick<T>(first: bool, a: view T, b: view T) -> T = "sample_pick";
@@ -550,13 +556,15 @@ const void *sample_get(const PaykanType *t, PaykanObject *b, int64_t i);
 | anything else | as in a non-generic native function |
 
 A `PaykanType` holds a value's `size` and `align`, its `kind`
-(`PaykanTypeKind`: int, float, bool, char, object or optional), and where it
+(`PaykanTypeKind`: int, float, bool, char, object, optional or tuple), and where it
 holds references: `nrefs` words follow it, each a `PaykanShared *`'s byte
 offset `<< 1`, `| 1` if it may be `NULL` (`PaykanType_ref`).  An `int` or a
-`float` is 8 bytes, a `bool` or a `char` 1, an `int?`, `float?`, `bool?` or
-`char?` 16 (its payload, then an `int64_t` that is 1 when it is present), and
-a reference or a tuple an 8-byte `PaykanShared *` box (`NULL` for an
-optional's `None`).
+`float` is 8 bytes, a `bool` or a `char` 1, an `int?` or a `float?` 16 and a
+`bool?` or a `char?` 2 (a `bool` that is true when it is present, then its
+payload at the payload's alignment), and a reference an 8-byte
+`PaykanShared *` box (`NULL` for an optional's `None`).  A tuple is its
+elements in place, laid out as a C struct of them (kind `PAYKAN_KIND_TUPLE`,
+each reference it holds, nested tuples' included, at its offset).
 `PaykanType_copy` copies a value, retaining its references, and
 `PaykanType_drop` releases them.  A parameter typed by a type parameter is a
 `view` or an `inout` (`x: T` is rejected whatever `T` will be).  See

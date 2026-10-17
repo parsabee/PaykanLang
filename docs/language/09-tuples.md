@@ -21,9 +21,10 @@ than one value from a function.
   tuple instead.  (Objects *inside* a tuple keep their own mutability.)
 - Destructuring: `q, r = divmod(7, 2);` binds each element to a name; `_`
   skips an element; `q: int, r: int = ...` annotates the targets.
-- Tuples are **`Obj` subtypes** (reference-counted heap objects, like class instances):
-  they can be printed, stored in an `Obj`, passed and returned freely.
-- `==` / `!=` compare **element-wise**; `toString` renders `(1, a)`.
+- Tuples are **values held in place**, like arrays: a tuple's elements sit in the
+  variable, field or array element that holds it, and assigning or passing a tuple
+  copies it.  A tuple is not an `Obj`.
+- `==` / `!=` compare **element-wise**; `toString()` (and `println`) renders `(1, a)`.
 
 ---
 
@@ -39,8 +40,10 @@ pairs: (int, Str)[2] = [(1, "one"), (2, "two")];
 A literal's type is exactly the tuple of its element types — there is no
 promotion inside a tuple literal, so `t: (float, int) = (1, 2)` is an error
 (write `(1.0, 2)`).  Reference-typed elements are covariant: an `(int, Str)`
-can be assigned to an `(int, Obj)`.  Where the literal flows into a typed slot,
-its optional elements come from that slot: `p: (Node?, int) = (None, 1)` and
+can be assigned to an `(int, Obj)`, and a nested tuple element by element
+(`((1, "a"), 2)` to a `((int, Obj), int)`); value elements must match exactly.
+Where the literal flows into a typed slot, its optional elements come from that
+slot: `p: (Node?, int) = (None, 1)` and
 `ps: (Str, int?)[2] = [("a", 1), ("b", None)]` work (see `10-optionals.md`).
 
 An element cannot be a fixed-size array for now (`tuple element 0: a fixed-size array
@@ -101,25 +104,72 @@ Rules:
 
 ## Tuples as Values
 
-Tuples are reference-counted heap objects, exactly like class instances, so
-they need no special handling:
+A tuple is a value, like an `int` or an array: it is held in place, in the
+variable, the field or the array element that holds it, and assigning it,
+passing it to a parameter without a mode or returning it copies it.  The copy
+holds the same elements: a copy of a tuple holding an object names that same
+object, as a copy of an array of objects does.  Assigning a new tuple to the
+original leaves the copy as it was.  A tuple goes anywhere a type does — a
+field, a parameter, a result, an array element (`(int, Str)[3]`, `[(0, "k");
+3]`), a type argument (`Box<(Str, int)>`), a branch of a ternary:
 
 ```pkn
 class Range {
-  bounds: (int, int);                        // field
-  fn get() -> (int, int) { return self.bounds; }
+  bounds: (int, int);                                   // a field
+  view fn get() -> (int, int) { return self.bounds; }   // returned as a copy
 }
 
 impl Range {
   fn __init__(lo: int, hi: int) { self.bounds = (lo, hi); }
 }
 
+class Box<T> {
+  v: T;
+  view fn get() -> view T { return self.v; }
+}
+
+impl Box<T> {
+  fn __init__(v: T) { self.v = v; }
+}
+
 fn swap(p: (int, Str)) -> (Str, int) { return (p.1, p.0); }  // parameter + return
 
-o: Obj = (1, 2);           // any tuple is an Obj
-println(o);                // (1, 2)
-m = t;                     // shares the tuple, like any reference value
+fn main() -> int {
+  r = Range(10, 25);
+  lo, hi = r.get();
+  t = (1, "one");
+  m = t;                                 // a copy of t
+  t = (2, "two");                        // m is still (1, one)
+  keys: (int, Str)[3] = [(0, "k"); 3];   // three copies of (0, k)
+  b = Box<(Str, int)>(swap(m));          // a tuple type argument
+  println(Str(hi - lo) + " " + m.1 + " " + t.1 + " " + keys[2].1);
+  println(b.get());
+  return 0;
+}
 ```
+
+Output:
+
+```
+15 one two k
+(one, 1)
+```
+
+Parameter modes work on tuples as on other types (`02-functions-and-calling.md`).
+A parameter without a mode is the callee's own copy.  An `inout` tuple is the
+caller's variable: assigning a new tuple to it replaces the caller's.  A `view`
+tuple whose elements are all values (`(int, float)`) is copied when it is
+assigned, like a `view int`; one that holds a reference (an object, a `Str`,
+an optional of one) is a `view` of what it holds, so it is read or passed on
+to a `view` parameter but never stored or returned (`'p' is a 'view' parameter;
+it cannot be stored, only read or passed to a 'view' parameter`), as a `view
+Str[]` is.  The same goes for a `-> view T` result with `T` a tuple and for a
+tuple field returned from a `view fn`.
+
+A tuple is not an `Obj`: `o: Obj = (1, 2)` is an error (`initializer of type
+'(int, int)' does not match declared type 'Obj' for variable 'o'`).  Print it,
+compare it and call `toString()` on it directly; where an `Obj` is needed, keep
+the tuple in a field of a class.
 
 ---
 
@@ -132,14 +182,24 @@ println(Str(a == b));               // True  — element-wise, Str by content
 println(Str<bool>(a != (2, "s")));        // True
 println(Str(((1, "x"), 2.5) == ((1, "x"), 2.5)));   // True — nested
 println(a.toString());                  // (1, s)
+println(a);                             // (1, s)
 ```
 
 Both operands of `==` / `!=` must have the **same tuple type**.  Primitive
 elements compare by value; reference elements use their own `equals` (so class
-instances compare by identity unless the class overrides `equals`).  Ordering
-operators (`<`, …) are not defined for tuples.
+instances compare by identity unless the class overrides `equals`), and two
+absent optionals are equal.  Ordering operators (`<`, …) are not defined for
+tuples.  `toString()` is a tuple's one method: compare with `==`, not
+`equals` (`t.equals(u)` is an error, `method call on non-class type '(int,
+int)'`).
 
-Comparison is element-wise even when both sides are the same tuple object;
+`print`, `println`, `printerr` and `printerrln` take a tuple as they take an
+`Obj`, and print what its `toString()` returns: each element as `println`
+shows it, `None` for an absent optional, an object through its own
+`toString`.  A tuple meets a `Show` bound (`fn show<T: Show>(x: view T)`, see
+`12-traits.md`), as `int` does.
+
+Comparison is element-wise even when both sides are the same variable;
 there is no identity shortcut.  So `float` elements follow IEEE 754: a tuple
 holding a NaN (directly, in a nested tuple, or in a `float?` element) is
 unequal to every tuple, itself included, exactly as the NaN is unequal to
@@ -179,6 +239,8 @@ True
 | Duplicate target | `a, a = (1, 2)` |
 | No element promotion | `t: (float, int) = (1, 2)` |
 | Mismatched equality | `(1, "a") == (1, 2)` |
+| A tuple as an `Obj` | `o: Obj = (1, 2)`; passing a tuple to an `Obj` parameter |
+| A method other than `toString` | `t.equals(u)`, `t.len()` |
 | `void` element | `(nothing(), 1)` |
 | Array element | `([1, 2], 1)` |
 
@@ -189,18 +251,20 @@ True
 Tuples in `match` patterns, nested destructuring, named elements, mutation,
 1-tuples, and spreading a tuple into call arguments. A `match` arm cannot name a
 tuple type (`(int, int) { … }` is rejected with "match arm type must be a class
-type"): every tuple shares one runtime class, so there is no per-type
-identity to test.
+type"): a tuple is not an object, so no `match` subject ever holds one.  An
+optional tuple (`(int, Str)?`) is rejected, as it could not be unwrapped (see
+`10-optionals.md`).
 
 ---
 
 ## Notes
 
-- Every tuple is an instance of the builtin class `Tuple`, an `Obj` subtype. The
-  name is reserved (`class Tuple {}` is an error), and `x: Tuple = (1, 2)`
-  type-checks, but like `Obj` it only offers `toString` and `equals`.
 - `toString` prints the elements without quotes, as `println` does, so
   `("a, b", 1)` prints as `(a, b, 1)`.
-- At run time a tuple is one heap object holding its elements, released like any
-  other reference: reference elements are retained by the tuple and released when
-  it is destroyed (see `08-memory-model.md`).
+- At run time a tuple is laid out in place like a C struct: its elements one
+  after another at their natural alignment, a reference element as its box, an
+  `int?` element inline (a presence flag, then the `int`), a nested tuple
+  inline.  A tuple of `int`s allocates nothing.  Each copy of a tuple retains
+  the references it holds; a variable's are released when its scope ends, a
+  field's when its object is destroyed, an array element's with the array (see
+  `08-memory-model.md`).

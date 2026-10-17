@@ -44,9 +44,9 @@ const char *const kEdgeProgram = R"(module "bin"
 cstr @"quoted name" = "a\0b" len 3
 data @.d = [-9223372036854775807, 9223372036854775807, 0, -1, 64, -65]
 bytes @.b = []
-bytes @.k = [5, 0, 4, 3]
+bytes @.k = [0, 127, 128, 255]
 extern obj @$rt.PaykanObject_None
-extern vtable @$rt.PaykanTuple_vtable
+extern vtable @$rt.PaykanError_vtable
 
 class "ns::Shape" {
   field "w.h": f64
@@ -85,7 +85,7 @@ fn @main() -> i64 {
   %a.8 = vcall %s.1 : "ns::Shape" [1] ()
   %b.9 = vcall %s.1 : (obj) -> f64 [1] ()
   %vt.10 = vtable.addr "ns::Shape"
-  %vt2.11 = vtable.addr @$rt.PaykanTuple_vtable
+  %vt2.11 = vtable.addr @$rt.PaykanError_vtable
   field.store %s.1, "ns::Shape"."w.h", %a.8
   %fl.12 = field.load %s.1, "ns::Shape"."w.h"
   if %nz.6 {
@@ -684,14 +684,19 @@ TEST(PIRBinary, ByteFlipFuzz) {
     }
 }
 
-TEST(PIRBinary, TupleSlotKindsUpToTheOptionalsPresenceWord) {
-  // 0-4 are the value and reference kinds, 5 an optional's presence word;
-  // nothing above it is a kind.
-  for (uint8_t kind : {5, 6}) {
-    Module m;
-    m.Name = "k";
-    m.Bytes.push_back({".k", {0, kind}});
-    auto decoded = binary::decode(binary::encode(m));
-    EXPECT_EQ(decoded.isOk(), kind == 5) << int(kind);
-  }
+// A bytes global holds any byte values, and they round-trip unchanged.
+TEST(PIRBinary, BytesGlobalHoldsEveryByteValue) {
+  Module m;
+  m.Name = "k";
+  std::vector<uint8_t> all(256);
+  for (int b = 0; b < 256; ++b)
+    all[static_cast<size_t>(b)] = static_cast<uint8_t>(b);
+  m.Bytes.push_back({".all", all});
+  expectRoundTrip(m);
+  auto decoded = binary::decode(binary::encode(m));
+  ASSERT_TRUE(decoded.isOk()) << decoded.status().message();
+  const Module &back = *decoded;
+  ASSERT_EQ(back.Bytes.size(), 1u);
+  EXPECT_EQ(back.Bytes[0].Name, ".all");
+  EXPECT_EQ(back.Bytes[0].Bytes, all);
 }

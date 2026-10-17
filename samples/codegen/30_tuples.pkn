@@ -1,12 +1,16 @@
 // 30 — tuples: fixed-arity, heterogeneous, immutable values
 // Exercises: tuple types `(T1, T2)` and literals `(e1, e2)`, element access
 //            `t.0` / `t.1` (compile-time index, `t.0.1` for nesting), tuples
-//            as parameters / return values / fields / array elements,
+//            as parameters / return values / fields / array elements
+//            (`[(0, "k"); 3]` included) / generic type arguments,
 //            multiple return with destructuring `q, r = divmod(7, 2);`
-//            (`_` skips an element), element-wise `==` / `!=` (lowered to the
-//            runtime `equals`), and `toString` rendering `(1, a)`.
-// A tuple is a heap object under ARC like a class instance: it is retained
-// when copied and released at scope exit.
+//            (`_` skips an element), element-wise `==` / `!=`, `toString`
+//            rendering `(1, a)`, a tuple meeting a `T: Show` bound, and
+//            covariant elements (`(int, Str)` where `(int, Obj)` is expected).
+// A tuple is a value held in place, like `T[n]`: its elements sit side by side
+// in the variable, field or array slot that holds it.  Copying a tuple copies
+// its elements (the references in it are retained once per copy), so a copy
+// is independent of its source.
 
 class Point {
   x: int;
@@ -35,6 +39,19 @@ fn divmod(a: int, b: int) -> (int, int) {  // multiple return
 fn label(p: Point) -> (Str, Point) {
   return ("point", p);
 }
+
+class Box<T> {
+  v: T;
+  view fn get() -> view T { return self.v; }
+}
+
+impl Box<T> {
+  fn __init__(v: T) { self.v = v; }
+}
+
+fn bracket<T: Show>(x: view T) -> Str { return "[" + x.toString() + "]"; }
+
+fn tag(t: (int, Obj)) -> Str { return t.1.toString(); }
 
 fn main() -> int {
   // Literals and element access.
@@ -78,13 +95,21 @@ fn main() -> int {
   println(Str<bool>(a != (2, "s")));        // True
   println(Str(label(pt) == label(pt))); // True  (same Point object)
 
-  // A copy shares the tuple; re-assigning the source leaves the copy intact.
+  // A copy is its own value; re-assigning the source leaves the copy intact.
   m = a;
   a = (0, "reset");
   println(m.1 + a.1);                     // sreset
 
-  // Tuples are Obj values: printable, storable as Obj.
-  o: Obj = (q, r);
-  println(o);                             // (3, 2)
+  // Filled arrays, generic type arguments and `Show`.
+  keys: (int, Str)[3] = [(0, "k"); 3];
+  println(keys[2]);                       // (0, k)
+  bx = Box<(Str, int)>(("seven", 7));
+  println(bx.get());                      // (seven, 7)
+  println(bracket((q, r)));               // [(3, 2)]
+  s: Str = (q, r).toString();
+  println(s + "!");                       // (3, 2)!
+
+  // Covariant elements: a `(int, Str)` passed where `(int, Obj)` is expected.
+  println(tag((1, "obj")));               // obj
   return 0;
 }

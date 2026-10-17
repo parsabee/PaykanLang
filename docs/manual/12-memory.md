@@ -9,12 +9,13 @@ your programs, how to check them for leaks, and the one kind of leak ARC cannot 
 
 Types come in two kinds:
 
-- **Value types**: `int`, `float`, `bool`, `char`, enums and arrays (`int[3]`). They are
-  copied on assignment and live in their variable or field, so there is nothing to manage.
-  An array of objects or strings holds references to them, as a variable would.
-- **Reference types**: class instances, `Str`, tuples, `File`, `Error` and optional
-  values. They live on the heap, and variables, fields and array elements hold references
-  to them.
+- **Value types**: `int`, `float`, `bool`, `char`, enums, arrays (`int[3]`) and tuples
+  (`(int, Str)`). They are copied on assignment and live in their variable or field, so there
+  is nothing to manage. An array or a tuple of objects or strings holds references to them,
+  as a variable would.
+- **Reference types**: class instances, `Str`, `File`, `Error` and optional values of
+  them. They live on the heap, and variables, fields, array elements and tuple elements hold
+  references to them.
 
 Each heap object carries a **reference count**. Storing a reference (in a variable, a field,
 an array or a tuple, or by passing it to a function) increments the count; when a reference

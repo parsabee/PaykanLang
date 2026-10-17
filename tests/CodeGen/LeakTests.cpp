@@ -547,11 +547,11 @@ TEST(Leak, CallRootedSubscriptReceiver) {
   g.expectNoLeaks("CallRootedSubscriptReceiver");
 }
 
-// Array / tuple arguments to user-defined METHODS.  The method prologue owns
-// every by-value reference-typed parameter (a tuple, the strings of a `Str[2]`)
-// and releases it on exit, so the call site must pass +1 references exactly as
-// it does for classes; a slice parameter borrows the caller's array.  Before,
-// arrays and tuples took the borrowed-temporary path and were released twice.
+// Array / tuple arguments to user-defined METHODS.  A by-value parameter
+// holding references (a tuple, a `Str[2]`) is the method's own copy, whose
+// references it releases on exit; a slice parameter borrows the caller's
+// array.  Every argument form (local, literal, call result, field) is
+// released exactly once.
 
 TEST(Leak, RefTypedArgsToUserMethods) {
   LeakGuard g;

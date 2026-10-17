@@ -10,7 +10,7 @@ namespace ast {
 ASTContext::ASTContext()
     : IntTy(nullptr), FloatTy(nullptr), BoolTy(nullptr), CharTy(nullptr),
       VoidTy(nullptr), ObjTy(nullptr), StrTy(nullptr), FileTy(nullptr),
-      ErrorTy(nullptr), TupleTy(nullptr) {
+      ErrorTy(nullptr) {
   Pool.reserve(512); // the bootstrap alone makes ~150 nodes
   IntTy = make<BuiltinType>(SourceLocation(), BuiltinType::Int);
   FloatTy = make<BuiltinType>(SourceLocation(), BuiltinType::Float);
@@ -24,15 +24,13 @@ ASTContext::ASTContext()
   StrTy = make<ClassType>(SourceLocation(), intern(names::kString), nullptr);
   FileTy = make<ClassType>(SourceLocation(), intern(names::kFile), nullptr);
   ErrorTy = make<ClassType>(SourceLocation(), intern(names::kError), nullptr);
-  TupleTy = make<ClassType>(SourceLocation(), intern(names::kTuple), nullptr);
   // The compiler builtins: Sema rejects any user class, enum, or function
   // that would reuse one of their names, and the lowering dispatches their
   // methods to the C runtime.
-  for (ClassType *builtin : {ObjTy, StrTy, FileTy, ErrorTy, TupleTy})
+  for (ClassType *builtin : {ObjTy, StrTy, FileTy, ErrorTy})
     builtin->setBuiltin();
   buildObjectType();
   buildStringType();
-  buildTupleType();
   buildFileType();
   buildErrorType();
 }
@@ -67,14 +65,6 @@ void ASTContext::buildStringType() {
       .method(names::kMethodLength, IntTy, {}, MethodDecl::View) // slot 3
       .method(names::kMethodConcat, VoidTy, {StrTy})             // slot 4
       .build();
-}
-
-// Tuple is the final base class of every tuple value (one runtime object
-// backs them all, Runtime/Tuple.c); it has no methods beyond Obj's.
-void ASTContext::buildTupleType() {
-  TupleTy->setSuperClass(ObjTy);
-  TupleTy->setFinal();
-  ClassTypeBuilder(*this, TupleTy).objectSlots().build();
 }
 
 void ASTContext::buildFileType() {
@@ -148,41 +138,6 @@ TupleType *ASTContext::getTupleType(std::vector<Type *> elemTys) {
   auto *tt = make<TupleType>(SourceLocation(), elemTys);
   TupleTypes[std::move(elemTys)] = tt;
   return tt;
-}
-
-// -- Specialized per-element-list tuple types
-//
-// Lazily create `Tuple<int, Str>` etc.  Each is a subtype of TupleTy adding no
-// methods; the specialization only gives a tuple-typed receiver a ClassType
-// to resolve `toString` / `equals` against (and `==` / `!=`, which lower to
-// `equals`).  Every specialization shares the single runtime vtable
-// PaykanTuple_vtable — the element kinds live in the object, not the vtable.
-// Flagged builtin so the lowering dispatches its methods with the runtime ABI.
-//
-ClassType *ASTContext::getOrCreateSpecializedTupleType(TupleType *tt) {
-  auto it = SpecializedTupleTypes.find(tt);
-  if (it != SpecializedTupleTypes.end())
-    return it->second;
-
-  std::string name = std::string(names::kTuple) + "<";
-  for (size_t i = 0; i < tt->getArity(); ++i) {
-    if (i)
-      name += ", ";
-    name += typeName(tt->getElementType(i));
-  }
-  name += ">";
-  auto *specTy = make<ClassType>(SourceLocation(), intern(name), TupleTy);
-  specTy->setBuiltin();
-  specTy->setFinal();
-  ClassTypeBuilder(*this, specTy).build();
-  SpecializedTupleTypes[tt] = specTy;
-  SpecializedTupleElemTypes[specTy] = tt;
-  return specTy;
-}
-
-TupleType *ASTContext::getSpecializedTupleElemType(ClassType *ct) const {
-  auto it = SpecializedTupleElemTypes.find(ct);
-  return it != SpecializedTupleElemTypes.end() ? it->second : nullptr;
 }
 
 // -- ClassTypeBuilder

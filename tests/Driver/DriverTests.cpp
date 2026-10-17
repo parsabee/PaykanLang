@@ -1075,18 +1075,22 @@ TEST(Driver, EmitCOmitsUnusedEntities) {
   EXPECT_EQ(out.find("INT64_C(2)"), std::string::npos) << out;
 }
 
-// The bit-cast helpers are emitted when a cast needs them (a tuple stores a
-// float element's bits).
-TEST(Driver, EmitCEmitsBitCastHelpersWhenUsed) {
+// The bit-cast helpers are emitted only for a PIR `cast` between i64 and f64
+// (MemSlot.FloatBitsRoundTripThroughAnInteger runs them), which the lowering
+// never emits: a float held in place, in a tuple, an array or a `float?`, is
+// stored as a double.
+TEST(Driver, EmitCStoresFloatsInPlaceWithoutBitCasts) {
   REQUIRE_BACKEND();
   auto src = writeTmp("fn main() -> int { t = (1.5, 2);"
-                      "  println(Str<float>(t.0)); return 0; }");
+                      "  xs: float[2] = [0.5, t.0]; o: float? = t.0;"
+                      "  println(Str<float>(t.0 + xs[1])); println(t);"
+                      "  return 0; }");
   auto [rc, out] = run(std::string(kPaykan) + " --emit-c " + src + " 2>&1");
   std::filesystem::remove(src);
   EXPECT_EQ(rc, 0) << out;
-  EXPECT_NE(out.find("static inline double pkrt_bits_f64(int64_t i)"),
-            std::string::npos)
-      << out;
+  EXPECT_NE(out.find("*((double *)"), std::string::npos) << out;
+  EXPECT_EQ(out.find("pkrt_bits_f64"), std::string::npos) << out;
+  EXPECT_EQ(out.find("pkrt_f64_bits"), std::string::npos) << out;
 }
 
 // A `native fn`'s C symbol is prototyped from its PIR signature (#198).

@@ -198,6 +198,10 @@ b = Box<(int, Str)>((1, "a"));     // tuple type argument
 m = ident<Node?>(n);               // optional type argument
 ```
 
+A tuple type argument is a value like any tuple: `Box<(int, Str)>`'s field
+holds the tuple's elements in place, a `T` parameter is a copy of one, and a
+tuple meets a `T: Show` bound.
+
 Because each instantiation is checked separately, a `T?` in a template is
 an optional of whatever `T` is. `Slot<int>` holds an `int?` (an optional
 primitive, see `10-optionals.md`), and `orElse(x, 0)` with `x: int?` works
