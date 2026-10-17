@@ -1,0 +1,8 @@
+// expect-panic: dequeue from an empty Queue
+import ::collections;
+
+fn main() -> int {
+  q = collections::Queue<int>();
+  q.dequeue();
+  return 0;
+}

@@ -513,6 +513,8 @@ PaykanString_equals(obj, box) -> i64    PaykanString_toString(obj) -> box
 PaykanString_length(obj) -> i64
 PaykanString_parse_int(obj, ptr) -> i64     PaykanString_parse_float(obj, ptr) -> i64
 PaykanString_parse_bool(obj, ptr) -> i64    ; 1 and the value at ptr, or 0 (and 0 there)
+; hash (the builtin Hashable's `hash()`)
+PaykanInt_hash(i64) -> i64              PaykanString_hash(obj) -> i64
 ; tuples: the address of the value (of both, for equals), then its layout
 PaykanTuple_toString(ptr, ptr) -> obj   PaykanTuple_equals(ptr, ptr, ptr) -> i64
 ; files

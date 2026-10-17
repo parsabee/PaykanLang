@@ -36,6 +36,12 @@ inline constexpr const char *kMethodEquals = "equals";
 // Traits
 inline constexpr const char *kTraitShow =
     "Show"; ///< `view fn toString() -> Str`
+inline constexpr const char *kTraitHashable =
+    "Hashable"; ///< `view fn hash() -> int`
+/// No methods: the types held in place and copied whole, which a class
+/// cannot implement.
+inline constexpr const char *kTraitValueType = "ValueType";
+inline constexpr const char *kMethodHash = "hash";
 inline constexpr const char *kSelfType = "Self"; ///< The implementing type
 inline constexpr const char *kMethodLength = "len";
 inline constexpr const char *kMethodConcat = "concat";
@@ -115,6 +121,14 @@ inline constexpr const char *kPaykanBufferSet = "PaykanBuffer_set";
 inline constexpr const char *kPaykanBufferReserve = "PaykanBuffer_reserve";
 inline constexpr const char *kPaykanBufferGrow = "PaykanBuffer_grow";
 inline constexpr const char *kPaykanBufferShrink = "PaykanBuffer_shrink";
+
+// Reached only through a `native fn` of the standard library
+inline constexpr const char *kPaykanPanicMessage = "Paykan_panic_message";
+inline constexpr const char *kPaykanPanicValue = "Paykan_panic_value";
+
+// Hash: `hash()` of the builtin Hashable types
+inline constexpr const char *kPaykanIntHash = "PaykanInt_hash";
+inline constexpr const char *kPaykanStringHash = "PaykanString_hash";
 
 // File
 inline constexpr const char *kPaykanFileNew = "PaykanFile_new";
@@ -239,6 +253,9 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanStringParseInt,
     kPaykanStringParseFloat,
     kPaykanStringParseBool,
+    // Hash
+    kPaykanIntHash,
+    kPaykanStringHash,
     // Tuples
     kPaykanTupleToString,
     kPaykanTupleEquals,

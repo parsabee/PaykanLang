@@ -1,0 +1,83 @@
+// ::memory: Buffer<T>, a run of slots whose storage is the runtime's
+// (Runtime.h, "Buffer"), reached through generic native functions, and
+// Box<T>, one value held in a shared object.
+//
+// A buffer has len() slots.  It grows and shrinks only when asked to, and
+// growing a slot at a time is amortised O(1).  A new slot holds zero bytes,
+// which is the value 0, 0.0, False, char 0 or None.  A reference slot that
+// may not be None (a class, Str, a tuple) is unset until stored, and reading
+// one panics, as do an index out of bounds, a negative count and shrinking
+// by more than len().
+//
+// The buffer holds its own reference to each value it stores and drops it
+// when the slot is overwritten or shrunk away, or the buffer dies.
+//
+// Names starting with `__` are the module's own: the language has no
+// visibility keywords yet, so this is a convention.
+
+native fn __new<T>(n: int) -> Obj = "PaykanBuffer_new";
+native fn __len<T>(b: view Obj) -> int = "PaykanBuffer_len";
+native fn __get<T>(b: view Obj, i: int) -> view T = "PaykanBuffer_get";
+native fn __copy<T>(b: view Obj, i: int) -> T = "PaykanBuffer_copy";
+native fn __set<T>(b: inout Obj, i: int, v: view T) = "PaykanBuffer_set";
+native fn __reserve<T>(b: inout Obj, n: int) = "PaykanBuffer_reserve";
+native fn __grow<T>(b: inout Obj, by: int) = "PaykanBuffer_grow";
+native fn __shrink<T>(b: inout Obj, by: int) = "PaykanBuffer_shrink";
+
+class Buffer<T> {
+  __data: Obj;
+}
+
+impl Buffer<T> {
+  // A buffer of `n` new slots.
+  fn __init__(n: int) { self.__data = __new<T>(n); }
+
+  // The number of slots.
+  view fn len() -> int { return __len<T>(self.__data); }
+
+  // Slot `i`, for 0 <= i < len().
+  view fn get(i: int) -> view T { return __get<T>(self.__data, i); }
+
+  // A copy of slot `i`, to keep.
+  view fn copy(i: int) -> T { return __copy<T>(self.__data, i); }
+
+  // Store `v` in slot `i`.
+  fn set(i: int, v: view T) { __set<T>(self.__data, i, v); }
+
+  // Make the buffer at least `n` slots long.
+  fn reserve(n: int) { __reserve<T>(self.__data, n); }
+
+  // Add `by` new slots at the end.
+  fn grow(by: int) { __grow<T>(self.__data, by); }
+
+  // Drop the last `by` slots.
+  fn shrink(by: int) { __shrink<T>(self.__data, by); }
+
+  // Append `v` in a new slot.
+  fn push(v: view T) {
+    __grow<T>(self.__data, 1);
+    __set<T>(self.__data, __len<T>(self.__data) - 1, v);
+  }
+
+  // Exchange slots `i` and `j`.
+  fn swap(i: int, j: int) {
+    a: T = __copy<T>(self.__data, i);
+    b: T = __copy<T>(self.__data, j);
+    __set<T>(self.__data, i, b);
+    __set<T>(self.__data, j, a);
+  }
+}
+
+// One value of a ValueType (int, float, bool, char, an enum or a tuple) in an
+// object, so that the value can be shared: assigning a box shares it, and a
+// change through one name shows through every other.  get() is the value's
+// storage, which the caller reads, assigns through an `inout` local or
+// passes to an `inout` parameter.
+class Box<T: ValueType> {
+  __data: T;
+}
+
+impl Box<T> {
+  fn __init__(v: T) { self.__data = v; }
+  fn get() -> inout T { return self.__data; }
+}

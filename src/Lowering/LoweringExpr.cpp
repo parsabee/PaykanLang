@@ -681,9 +681,10 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
       return Val();
     args.push_back(L.coerceTo(v, paramTy));
   }
-  // A fixed-size array result: written into a temporary, whose address is
-  // the call's value.
-  if (ast::isMemType(node->getResolvedType())) {
+  // A result held in memory: written into a temporary, whose address is the
+  // call's value (an `inout` one is the address of its storage instead).
+  if (ast::isMemType(node->getResolvedType()) &&
+      callee->Sig.Ret != Type::Ptr) {
     Val slot = L.emitMemResultSlot(node->getResolvedType());
     args.push_back(slot);
     L.B.call(callee->Name, callee->Sig, args);
@@ -714,6 +715,30 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
       return Val();
     L.releaseMemTemps(mark);
     return Val::i64(ft->getLength());
+  }
+  // `n.hash()` on an int, bool or char (the builtin `Hashable`): the
+  // runtime's hash of its value, the char's code or the bool's 0 or 1.
+  if (recvResolved && ast::isa<ast::BuiltinType>(recvResolved) &&
+      node->getMethodName() == kMethodHash) {
+    Val v = visit(node->getReceiver());
+    if (!v)
+      return Val();
+    if (v.Ty != Type::I64)
+      v = L.B.cast(v, Type::I64, "hash.ext");
+    const pir::Function &rt = L.declareRuntime(kPaykanIntHash);
+    return L.B.call(rt.Name, rt.Sig, {v}, "hash");
+  }
+  // `s.hash()` on a Str: the runtime's hash of its bytes.  Str is final, so
+  // the call is direct; a fresh temporary receiver is released after it.
+  if (recvResolved == L.ASTCtx.getStrTy() &&
+      node->getMethodName() == kMethodHash) {
+    Receiver receiver = L.emitReceiver(node->getReceiver());
+    if (!receiver)
+      return Val();
+    const pir::Function &rt = L.declareRuntime(kPaykanStringHash);
+    Val h = L.B.call(rt.Name, rt.Sig, {receiver.Raw}, "hash");
+    L.releaseIfOwned(receiver.Owned);
+    return h;
   }
   // `t.toString()` on a tuple (the builtin `Show`): its text, as a fresh box
   // like any method's `Str` result.
@@ -870,7 +895,7 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   // A fixed-size array result is written into a temporary, whose address is
   // the call's value.
   Val fixedSlot;
-  if (ast::isMemType(node->getResolvedType())) {
+  if (ast::isMemType(node->getResolvedType()) && sig.Ret != Type::Ptr) {
     fixedSlot = L.emitMemResultSlot(node->getResolvedType());
     args.push_back(fixedSlot);
   }

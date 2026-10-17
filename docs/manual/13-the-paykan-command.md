@@ -155,7 +155,7 @@ files, the cache and prebuilt modules in detail.
 |----------|--------|
 | `CC` | the C compiler the c backend uses (default `cc`) |
 | `PAYKAN_RUNTIME_DIR` | where to find the runtime (`lib/` and `include/paykan/` under it) |
-| `PAYKAN_STDLIB` | the directory of system imports, `import ::name;` ([Modules](10-modules.md)) |
+| `PAYKAN_STDLIB` | the directory of system imports, `import ::name;`, instead of the installed standard library ([Modules](10-modules.md)) |
 | `PAYKAN_MODULE_PATH` | `:`-separated directories of prebuilt `.pkm` modules, searched after the `--module-path` directories |
 | `PAYKAN_PLUGIN_PATH` | more directories to load plugins from, separated by `:` |
 

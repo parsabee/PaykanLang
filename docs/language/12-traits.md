@@ -18,6 +18,12 @@ argument must implement.
   built-in trait `Show` (`view fn toString() -> Str`) through `Obj`, and so do `int`,
   `float`, `bool` and `char` (`n.toString()` is `Str(n)`) and tuples (`(1, "a").toString()`
   is `(1, a)`).
+- The built-in trait `Hashable` (`view fn hash() -> int`) is implemented by `int`, `bool`,
+  `char` and `Str`, and by a class with an `impl Hashable for` block. The standard
+  library's hash tables take `Hashable` keys (see [Hashable](#hashable)).
+- The built-in trait `ValueType` has no methods. It is implemented by the types held in
+  place and copied whole: `int`, `float`, `bool`, `char`, every enum and every tuple (see
+  [ValueType](#valuetype)).
 - `fn f<T: Show + Into<int>>(...)` and `class Box<T: Named>` bound their type
   parameters. Each instantiation checks its type arguments against the bounds.
 - A trait is not a type: `x: Named` is an error.
@@ -80,6 +86,87 @@ greet("s");           // error: 'Str' does not implement trait 'Named', which 'g
 Bounds are checked where a template is instantiated. The body is still checked once per
 instantiation (see `11-generics.md`), so it may call what the bound requires. A bound
 may name another type parameter: `<T, C: Into<T>>`.
+
+## Hashable
+
+`Hashable` is a built-in trait, like `Show`:
+
+```pkn
+trait Hashable { view fn hash() -> int; }
+```
+
+`int`, `bool`, `char` and `Str` implement it. Their `hash()` is the same for equal values,
+in every run and on every backend, and its bits are well mixed: a `bool` hashes as `0` or
+`1` does, and a `char` as its code does. A `float` does not implement it, and neither does
+an enum, a tuple or an optional. A class implements it with an `impl Hashable for` block.
+Values that are `==` must have the same hash, so a class that overrides `equals` hashes
+the same fields that `equals` compares:
+
+```pkn
+class Point {
+  x: int;
+  y: int;
+  view fn equals(other: Obj) -> bool {
+    match other {
+      p: Point { return p.x == self.x && p.y == self.y; }
+      _ { return False; }
+    }
+  }
+}
+
+impl Hashable for Point {
+  view fn hash() -> int { return (self.x * 31 + self.y).hash(); }
+}
+
+fn sameHash<T: Hashable>(a: view T, b: view T) -> bool { return a.hash() == b.hash(); }
+
+fn main() -> int {
+  println(Str(sameHash(Point(1, 2), Point(1, 2))) + " " + Str(sameHash("ab", "ab")) +
+          " " + Str(sameHash(7, 8)));
+  return 0;
+}
+```
+
+Output:
+
+```
+True True False
+```
+
+The standard library's `HashMap<K, V>` and `HashSet<K>` require `K: Hashable` (see
+[the standard library](13-standard-library.md)). Declaring a trait named `Hashable` is an
+error, as for `Show`.
+
+## ValueType
+
+`ValueType` is a built-in trait with no methods. It is implemented by the types whose
+values are held in place and copied whole by an assignment: `int`, `float`, `bool`,
+`char`, every enum and every tuple (see [the memory model](08-memory-model.md)). A fixed-size
+array is one too, though it cannot be a type argument yet. A class, `Str` and an
+optional are not, and `impl ValueType for` a class is an error: a class is shared by
+reference.
+
+```pkn
+enum Suit { Hearts, Spades }
+
+fn twice<T: ValueType>(x: T) -> (T, T) { return (x, x); }
+
+fn main() -> int {
+  p = twice((1, "one"));
+  s = twice(Suit::Spades);
+  println(Str(twice(2).1) + " " + p.1.1 + " " + Str(s.0 == Suit::Spades));
+  return 0;
+}
+```
+
+Output:
+
+```
+2 one True
+```
+
+The standard library's `memory::Box<T: ValueType>` holds one in a shared object (see
+[the standard library](13-standard-library.md#memory)).
 
 ## Semantic Checks
 

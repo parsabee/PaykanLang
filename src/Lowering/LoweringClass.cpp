@@ -78,10 +78,11 @@ pir::Signature ModuleLowering::methodSignature(ast::MethodDecl *md) {
   sig.Ret = md->getReturnType()
                 ? toPIRType(canonicalizeDeclType(md->getReturnType()))
                 : Type::Void;
+  // The address of the storage it names, also of a value held in memory.
   if (md->getParamModes().Result == ast::ParamMode::Inout)
-    sig.Ret = Type::Ptr; // the address of the storage it names
+    sig.Ret = Type::Ptr;
   // A result held in memory is written where a last parameter points.
-  if (ast::isMemType(md->getReturnType())) {
+  else if (ast::isMemType(md->getReturnType())) {
     sig.Params.push_back(Type::Ptr);
     sig.Ret = Type::Void;
   }

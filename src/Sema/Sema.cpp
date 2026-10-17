@@ -1255,19 +1255,28 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   ast::ClassType *ct = ast::dyn_cast<ast::ClassType>(recvTy);
 
   // `n.toString()` on an int, float, bool or char, or on a tuple: the
-  // builtin `Show`.
+  // builtin `Show`; `n.hash()` on an int, bool or char, and `s.hash()` on a
+  // Str: the builtin `Hashable`.
+  const std::string &mname = node->getMethodName();
+  ast::Type *builtinResult = nullptr;
   if (!ct &&
       ((ast::isa<ast::BuiltinType>(recvTy) && recvTy != S.Ctx.getVoidTy()) ||
        ast::isa<ast::TupleType>(recvTy)) &&
-      node->getMethodName() == names::kMethodToString) {
+      mname == names::kMethodToString)
+    builtinResult = S.Ctx.getStrTy();
+  else if (mname == names::kMethodHash &&
+           (recvTy == S.Ctx.getIntTy() || recvTy == S.Ctx.getBoolTy() ||
+            recvTy == S.Ctx.getCharTy() || ct == S.Ctx.getStrTy()))
+    builtinResult = S.Ctx.getIntTy();
+  if (builtinResult) {
     if (node->getNumArguments() != 0) {
-      S.error(node->getLocation(), "method 'toString' expects 0 argument(s), "
-                                   "got " +
+      S.error(node->getLocation(), "method '" + mname +
+                                       "' expects 0 argument(s), got " +
                                        std::to_string(node->getNumArguments()));
       return nullptr;
     }
-    node->setResolvedType(S.Ctx.getStrTy());
-    return S.Ctx.getStrTy();
+    node->setResolvedType(builtinResult);
+    return builtinResult;
   }
   if (!ct) {
     S.error(node->getLocation(),

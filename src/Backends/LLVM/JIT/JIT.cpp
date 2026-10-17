@@ -77,6 +77,8 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanStringLength,    reinterpret_cast<void *>(&PaykanString_length)},
     {kPaykanStringConcat,    reinterpret_cast<void *>(&PaykanString_concat)},
     {kPaykanStringAt,        reinterpret_cast<void *>(&PaykanString_at)},
+    {kPaykanIntHash,         reinterpret_cast<void *>(&PaykanInt_hash)},
+    {kPaykanStringHash,      reinterpret_cast<void *>(&PaykanString_hash)},
 
     {kPaykanPrint,           reinterpret_cast<void *>(&Paykan_print)},
     {kPaykanPrintln,         reinterpret_cast<void *>(&Paykan_println)},
@@ -121,6 +123,8 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanBufferReserve,   reinterpret_cast<void *>(&PaykanBuffer_reserve)},
     {kPaykanBufferGrow,      reinterpret_cast<void *>(&PaykanBuffer_grow)},
     {kPaykanBufferShrink,    reinterpret_cast<void *>(&PaykanBuffer_shrink)},
+    {kPaykanPanicMessage,    reinterpret_cast<void *>(&Paykan_panic_message)},
+    {kPaykanPanicValue,      reinterpret_cast<void *>(&Paykan_panic_value)},
 };
 
 // Match dispatch and generated vtable references look builtin vtables up as

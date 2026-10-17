@@ -1,0 +1,19 @@
+[] len=0 True
+[a, b, c, d] len=4 front=a back=d
+ad [b, c] len=2
+[z, b, c, y] len=4
+True False [z, c, y] len=3
+True False
+ycz [] len=0
+[again] len=1
+[] len=0
+[after clear] len=1
+True 1
+1one True
+True 2
+stack [5, 4, 3, 2, 1] peek=5
+popped 54321 len=0
+queue [first, second, third] peek=first
+first second len=1
+third fourth True
+0

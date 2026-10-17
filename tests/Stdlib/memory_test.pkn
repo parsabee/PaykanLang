@@ -1,0 +1,37 @@
+// ::memory Buffer<T>: new slots are zero (or unset), set/get/copy, growth,
+// shrinking and swap, for values and references.
+import ::memory;
+
+fn main() -> int {
+  n = memory::Buffer<int>(3);
+  println(Str(n.len()) + " " + Str(n.get(0) + n.get(2)));
+  n.set(1, 7);
+  n.grow(2);
+  n.push(9);
+  println(Str(n.len()) + " " + Str(n.get(1)) + " " + Str(n.get(4)) + " " +
+          Str(n.copy(5)));
+  n.swap(1, 5);
+  println(Str(n.get(1)) + Str(n.get(5)));
+  n.shrink(4);
+  n.reserve(3);
+  println(Str(n.len()) + " " + Str(n.get(1)) + " " + Str(n.get(2)));
+
+  s = memory::Buffer<Str>(0);
+  i: int = 0;
+  while (i < 100) {
+    s.push("s" + Str(i));
+    i = i + 1;
+  }
+  kept: Str = s.copy(42);
+  s.shrink(99);
+  println(Str(s.len()) + " " + s.get(0) + " " + kept);
+
+  opt = memory::Buffer<Str?>(2);
+  opt.set(1, "here");
+  println(Str(opt.get(0) == None) + " " + Str(opt.get(1) == None));
+  f = memory::Buffer<float>(1);
+  b = memory::Buffer<bool>(1);
+  c = memory::Buffer<char>(1);
+  println(Str(f.get(0)) + " " + Str(b.get(0)) + " " + Str(int<char>(c.get(0))));
+  return 0;
+}

@@ -178,3 +178,71 @@ fn main() -> int {
                 "requires of 'T'"});
   EXPECT_EQ(r.ErrorCount, 2) << r.Diagnostics;
 }
+
+// int, bool, char and Str implement `Hashable`: `n.hash()` is an `int`.  A
+// class implements it with an `impl Hashable for` block; float, enums and
+// other classes do not.
+TEST(Traits, BuiltinHashable) {
+  auto r = semaCheck(R"(enum Color { Red }
+class Key { id: int; }
+impl Hashable for Key { view fn hash() -> int { return self.id; } }
+class Plain { n: int; }
+fn h<T: Hashable>(x: view T) -> int { return x.hash(); }
+fn main() -> int {
+  n = 3;
+  s = "s";
+  k: int = n.hash() + True.hash() + 'c'.hash() + s.hash() + "t".hash();
+  k = k + h(n) + h(False) + h('x') + h("s") + h(Key(1));
+  n.hash(1);
+  h(1.5);
+  h(Color::Red);
+  h(Plain(1));
+  return k;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"method 'hash' expects 0 argument(s), got 1",
+                "'float' does not implement trait 'Hashable', which 'h' "
+                "requires of 'T'",
+                "'Color' does not implement trait 'Hashable', which 'h' "
+                "requires of 'T'",
+                "'Plain' does not implement trait 'Hashable', which 'h' "
+                "requires of 'T'"});
+  EXPECT_EQ(r.ErrorCount, 4) << r.Diagnostics;
+}
+
+TEST(Traits, HashableIsBuiltin) {
+  auto r = semaCheck(R"(trait Hashable { view fn hash() -> int; }
+class K { n: int; }
+impl Hashable for K { fn hash() -> Str { return ""; } }
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"'Hashable' is a builtin trait and cannot be redeclared"});
+}
+
+// int, float, bool, char, enums and tuples are ValueTypes; Str, classes and
+// optionals are not, and a class cannot implement it.
+TEST(Traits, BuiltinValueType) {
+  auto r = semaCheck(R"(enum Color { Red }
+class P { x: int; }
+impl ValueType for P {}
+fn v<T: ValueType>(x: view T) -> int { return 1; }
+fn main() -> int {
+  n: int? = 1;
+  k: int = v(1) + v(2.5) + v(True) + v('c') + v(Color::Red) + v((1, "s"));
+  k = k + v("s") + v(P(1)) + v(n);
+  return k;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"class 'P' cannot implement 'ValueType': a class is shared "
+                "by reference, not held in place",
+                "'Str' does not implement trait 'ValueType', which 'v' "
+                "requires of 'T'",
+                "'P' does not implement trait 'ValueType', which 'v' "
+                "requires of 'T'",
+                "'int?' does not implement trait 'ValueType', which 'v' "
+                "requires of 'T'"});
+  EXPECT_EQ(r.ErrorCount, 4) << r.Diagnostics;
+}

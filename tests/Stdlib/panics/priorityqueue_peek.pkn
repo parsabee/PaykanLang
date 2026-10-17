@@ -1,0 +1,8 @@
+// expect-panic: peek on an empty priority queue
+import ::collections;
+
+fn main() -> int {
+  q = collections::MaxPriorityQueue<Str>();
+  println(q.peek());
+  return 0;
+}

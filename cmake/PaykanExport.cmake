@@ -5,6 +5,8 @@
 # Installed layout (relative to the prefix):
 #   bin/paykan                        the driver with the built-in plugins
 #   lib/paykan/plugins/<version>/     the system plugin directory (empty)
+#   lib/paykan/stdlib/<version>/      the standard library, sources and .pkm
+#                                     modules (stdlib/CMakeLists.txt)
 #   include/paykan/plugin_api.h       the C plugin interface (+ the generated
 #                                     plugin_api_version.h it includes)
 #   lib/libpaykan_*.a                 core (incl. lowering), driver, runtime and plugin libraries

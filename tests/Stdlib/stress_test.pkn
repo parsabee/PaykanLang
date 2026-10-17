@@ -1,0 +1,87 @@
+// ::collections under many random operations: a LinkedList and a HashMap
+// checked against a List kept in step with them.
+import ::collections;
+
+class Rng {
+  state: int;
+  // The next value in 0 <= v < n (a linear congruential generator).
+  fn next(n: int) -> int {
+    self.state = self.state * 6364136223846793005 + 1442695040888963407;
+    v: int = (self.state / 65536) % n;
+    if (v < 0) { return v + n; }
+    return v;
+  }
+}
+
+fn same(l: view collections::LinkedList<int>, model: view collections::List<int>) -> bool {
+  xs = l.toList();
+  if (xs.len() != model.len()) { return False; }
+  i: int = 0;
+  while (i < xs.len()) {
+    if (xs.get(i) != model.get(i)) { return False; }
+    i = i + 1;
+  }
+  return True;
+}
+
+fn main() -> int {
+  rng = Rng(42);
+  l = collections::LinkedList<int>();
+  model = collections::List<int>();
+  ok: bool = True;
+  step: int = 0;
+  while (step < 3000) {
+    op: int = rng.next(6);
+    v: int = rng.next(50);
+    if (op == 0) {
+      l.pushFront(v);
+      model.insert(0, v);
+    } else if (op == 1 || op == 2) {
+      l.pushBack(v);
+      model.push(v);
+    } else if (op == 3 && !model.isEmpty()) {
+      if (l.popFront() != model.removeAt(0)) { ok = False; }
+    } else if (op == 4 && !model.isEmpty()) {
+      if (l.popBack() != model.pop()) { ok = False; }
+    } else if (op == 5) {
+      if (l.remove(v) != model.remove(v)) { ok = False; }
+    }
+    if (step % 100 == 0 && !same(l, model)) { ok = False; }
+    step = step + 1;
+  }
+  println("linked list " + Str(ok && same(l, model)) + " len " + Str(l.len()));
+
+  m = collections::HashMap<int, int>();
+  keys = collections::List<int>();
+  vals = collections::List<int>();
+  ok = True;
+  step = 0;
+  while (step < 5000) {
+    k: int = rng.next(300) - 150;
+    i: int = keys.indexOf(k);
+    if (rng.next(3) == 0) {
+      removed: bool = m.remove(k);
+      if (removed != (i >= 0)) { ok = False; }
+      if (i >= 0) {
+        keys.removeAt(i);
+        vals.removeAt(i);
+      }
+    } else {
+      added: bool = m.put(k, step);
+      if (added != (i < 0)) { ok = False; }
+      if (i >= 0) { vals.set(i, step); }
+      else {
+        keys.push(k);
+        vals.push(step);
+      }
+    }
+    step = step + 1;
+  }
+  i: int = 0;
+  while (i < keys.len()) {
+    if (m.get(keys.get(i)) != vals.get(i)) { ok = False; }
+    i = i + 1;
+  }
+  println("hash map " + Str(ok && m.len() == keys.len()) + " len " + Str(m.len()));
+  return 0;
+}

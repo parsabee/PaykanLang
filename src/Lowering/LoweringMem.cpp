@@ -138,9 +138,10 @@ ModuleLowering::MemValue ModuleLowering::emitMemValue(ast::Expr *e) {
     return {B.fieldAddr(recv.Raw, ct->getName(), ma->getFieldName(),
                         ma->getFieldName() + ".addr")};
   }
-  // A call's result, in the temporary the call wrote.
+  // A call's result, in the temporary the call wrote, or for an `inout`
+  // result the storage it names, which is not the consumer's to drop.
   if (ast::isa<ast::CallExpr>(e) || ast::isa<ast::MethodCallExpr>(e))
-    return {emitExpr(e), /*Temp=*/true};
+    return {emitExpr(e), /*Temp=*/!e->isInoutResult()};
   if (ast::isa<ast::ArrayLiteralExpr>(e) ||
       ast::isa<ast::TupleLiteralExpr>(e)) {
     MemLayout l = memLayout(e->getResolvedType());

@@ -78,6 +78,17 @@ void Paykan_runtime_panic(const char *fmt, ...) {
   abort();
 }
 
+void Paykan_panic_message(PaykanObject *message) {
+  const PaykanString *s = (const PaykanString *)message;
+  Paykan_runtime_panic("%.*s", (int)s->len, s->data);
+}
+
+void Paykan_panic_value(void *t, void *out, PaykanObject *message) {
+  (void)t;
+  (void)out;
+  Paykan_panic_message(message);
+}
+
 void Paykan_panic_div_by_zero(void) {
   Paykan_runtime_panic("integer division or modulo by zero");
 }

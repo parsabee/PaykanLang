@@ -42,26 +42,42 @@ std::string fnSignature(bool view, const std::string &name,
 } // namespace
 
 void Sema::registerBuiltinTraits() {
-  // trait Show { view fn toString() -> Str; }, implemented by Obj, the
-  // scalars (whose `toString` is their `Str` conversion) and the tuples
-  // (traitImplOwner).
-  auto *toString = Ctx.make<ast::FuncDecl>(
-      ast::SourceLocation(), Ctx.intern(names::kMethodToString),
-      std::vector<ast::Param>{}, Ctx.getStrTy(), nullptr);
-  toString->setView(true);
-  auto *show = Ctx.make<ast::TraitDecl>(ast::SourceLocation(),
-                                        Ctx.intern(names::kTraitShow),
-                                        std::vector<const std::string *>{},
-                                        std::vector<ast::FuncDecl *>{toString});
-  TraitInfo &info = Traits[names::kTraitShow];
-  info.Decl = show;
-  info.IsBuiltin = true;
-  for (ast::Type *t : {static_cast<ast::Type *>(Ctx.getObjTy()),
-                       static_cast<ast::Type *>(Ctx.getIntTy()),
-                       static_cast<ast::Type *>(Ctx.getFloatTy()),
-                       static_cast<ast::Type *>(Ctx.getBoolTy()),
-                       static_cast<ast::Type *>(Ctx.getCharTy())})
-    TraitImpls[t].push_back({&info, {}});
+  // `trait <name> { view fn <method>() -> <ret>; }`, or `trait <name> {}`
+  // without a method, implemented by @p impls.
+  auto builtin = [&](const char *name, const char *method, ast::Type *ret,
+                     std::initializer_list<ast::Type *> impls) {
+    std::vector<ast::FuncDecl *> methods;
+    if (method) {
+      auto *fn =
+          Ctx.make<ast::FuncDecl>(ast::SourceLocation(), Ctx.intern(method),
+                                  std::vector<ast::Param>{}, ret, nullptr);
+      fn->setView(true);
+      methods.push_back(fn);
+    }
+    auto *decl = Ctx.make<ast::TraitDecl>(
+        ast::SourceLocation(), Ctx.intern(name),
+        std::vector<const std::string *>{}, std::move(methods));
+    TraitInfo &info = Traits[name];
+    info.Decl = decl;
+    info.IsBuiltin = true;
+    for (ast::Type *t : impls)
+      TraitImpls[t].push_back({&info, {}});
+  };
+  // Show is implemented by Obj, the scalars (whose `toString` is their `Str`
+  // conversion) and the tuples (traitImplOwner).
+  builtin(names::kTraitShow, names::kMethodToString, Ctx.getStrTy(),
+          {Ctx.getObjTy(), Ctx.getIntTy(), Ctx.getFloatTy(), Ctx.getBoolTy(),
+           Ctx.getCharTy()});
+  // Hashable by int, bool, char and Str (whose `hash` is the runtime's
+  // PaykanInt_hash / PaykanString_hash); a class implements it with an
+  // `impl Hashable for` block.  Not float, whose `==` is not an equivalence.
+  builtin(names::kTraitHashable, names::kMethodHash, Ctx.getIntTy(),
+          {Ctx.getIntTy(), Ctx.getBoolTy(), Ctx.getCharTy(), Ctx.getStrTy()});
+  // ValueType by the types held in place and copied whole: int, float, bool
+  // and char here, and every enum, tuple and fixed-size array
+  // (traitImplOwner).  Not a class, Str or an optional.
+  builtin(names::kTraitValueType, nullptr, nullptr,
+          {Ctx.getIntTy(), Ctx.getFloatTy(), Ctx.getBoolTy(), Ctx.getCharTy()});
 }
 
 bool Sema::declareTraits(ast::TranslationUnit *tu) {
@@ -229,11 +245,17 @@ const ast::Type *Sema::traitImplOwner(ast::Type *ty, const TraitRef &tr) {
         return c;
     return nullptr;
   }
+  auto isBuiltinTrait = [&](const char *name) {
+    return tr.Trait->IsBuiltin && tr.Trait->Decl->getName() == name;
+  };
+  // Every enum, tuple and fixed-size array is a ValueType.
+  if ((ast::isa<ast::EnumType>(ty) || ast::isa<ast::TupleType>(ty) ||
+       ast::isa<ast::FixedArrayType>(ty)) &&
+      isBuiltinTrait(names::kTraitValueType))
+    return ty;
   // A tuple shows its elements (the builtin `Show`).
   if (ast::isa<ast::TupleType>(ty))
-    return tr.Trait->IsBuiltin && tr.Trait->Decl->getName() == names::kTraitShow
-               ? ty
-               : nullptr;
+    return isBuiltinTrait(names::kTraitShow) ? ty : nullptr;
   return has(ty) ? ty : nullptr;
 }
 
@@ -242,6 +264,14 @@ bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::ClassType *ct) {
   if (!tr)
     return false;
   const std::string trait = traitRefName(*tr);
+  // A class is an object, shared by reference: never a ValueType.
+  if (tr->Trait->IsBuiltin &&
+      tr->Trait->Decl->getName() == names::kTraitValueType) {
+    error(im->getLocation(),
+          "class '" + ct->getName() + "' cannot implement 'ValueType': a " +
+              "class is shared by reference, not held in place");
+    return false;
+  }
   if (const ast::Type *owner = traitImplOwner(ct, *tr)) {
     error(im->getLocation(),
           "class '" + ct->getName() + "' already implements '" + trait + "'" +

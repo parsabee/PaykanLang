@@ -139,8 +139,32 @@ configure_file(
 target_include_directories(paykan_compile_options INTERFACE
     $<BUILD_INTERFACE:${PAYKAN_GENERATED_INCLUDE_DIR}>)
 
+# -- The standard library's location ------------------------------------------
+# The installed standard library is <prefix>/<libdir>/paykan/stdlib/<version>,
+# which `paykan` finds from its own directory, <prefix>/<bindir>, by this
+# relative path (src/Driver).  The build tree stages it at the same path
+# from bin/ (stdlib/CMakeLists.txt), so a built `paykan` finds it too.
+include(GNUInstallDirs)
+file(RELATIVE_PATH PAYKAN_STDLIB_DIR_FROM_BINDIR
+    "${CMAKE_INSTALL_FULL_BINDIR}"
+    "${CMAKE_INSTALL_FULL_LIBDIR}/paykan/stdlib/${PAYKAN_VERSION}")
+set(PAYKAN_INSTALL_STDLIBDIR ${CMAKE_INSTALL_LIBDIR}/paykan/stdlib/${PAYKAN_VERSION})
+
 # -- Subdirectories -----------------------------------------------------------
 add_subdirectory(src)
+# The standard library, compiled by the `paykan` just built: on by default,
+# off when that `paykan` cannot run here (cross-compiling).
+if(CMAKE_CROSSCOMPILING)
+    set(_paykan_stdlib_default OFF)
+else()
+    set(_paykan_stdlib_default ON)
+endif()
+option(PAYKAN_BUILD_STDLIB
+    "Compile the standard library (stdlib/) with the built paykan and install it"
+    ${_paykan_stdlib_default})
+if(PAYKAN_BUILD_STDLIB)
+    add_subdirectory(stdlib)
+endif()
 if(PAYKAN_ENABLED_TEST_SUITES)
     add_subdirectory(tests)
 endif()

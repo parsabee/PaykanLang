@@ -46,18 +46,35 @@ inline std::string modulePathToRelative(std::string_view modulePath) {
   return relPath.string() + ".pkn";
 }
 
-/// The file of module @p modulePath, not checked to exist: under
-/// $PAYKAN_STDLIB (or <projectRoot>/stdlib) for a system import, under
-/// @p projectRoot otherwise.
+/// The installed standard library, <prefix>/lib/paykan/stdlib/<version>/
+/// found from the executable: the driver sets it at startup.  Empty when
+/// there is none to search.
+inline std::filesystem::path &installedStdlibDir() {
+  static std::filesystem::path dir;
+  return dir;
+}
+
+/// The directory of system imports: $PAYKAN_STDLIB when it is set, else the
+/// installed standard library when it exists, else <projectRoot>/stdlib.
+inline std::filesystem::path stdlibDir(const std::string &projectRoot) {
+  const char *env = std::getenv(names::kPaykanStdlibEnv);
+  if (env && env[0])
+    return env;
+  std::error_code ec;
+  if (const auto &installed = installedStdlibDir();
+      !installed.empty() && std::filesystem::is_directory(installed, ec))
+    return installed;
+  return appendPath(projectRoot, names::kStdlibDir);
+}
+
+/// The file of module @p modulePath, not checked to exist: under the
+/// standard library (stdlibDir) for a system import, under @p projectRoot
+/// otherwise.
 inline std::filesystem::path moduleFile(const std::string &projectRoot,
                                         bool isSystem,
                                         std::string_view modulePath) {
-  std::filesystem::path base = projectRoot;
-  if (isSystem) {
-    const char *env = std::getenv(names::kPaykanStdlibEnv);
-    base = env && env[0] ? std::filesystem::path(env)
-                         : appendPath(base, names::kStdlibDir);
-  }
+  std::filesystem::path base =
+      isSystem ? stdlibDir(projectRoot) : std::filesystem::path(projectRoot);
   return appendPath(base, modulePathToRelative(modulePath));
 }
 

@@ -1,0 +1,69 @@
+// ::memory Box<T: ValueType>: one value shared through an object, written
+// through get() by an `inout` local, an `inout` argument or a field of it.
+import ::memory;
+
+enum Light { Red, Yellow, Green }
+
+class Counter {
+  hits: memory::Box<int>;
+}
+
+fn bump(n: inout int) { n = n + 1; }
+
+fn next(l: Light) -> Light {
+  match l {
+    Red { return Light::Green; }
+    Green { return Light::Yellow; }
+    Yellow { return Light::Red; }
+  }
+}
+
+fn main() -> int {
+  // Two names, one box: a change through either shows through both.
+  total = memory::Box(0);
+  alias = total;
+  bump(total.get());
+  bump(alias.get());
+  n: inout int = alias.get();
+  n = n * 10;
+  println(Str(total.get()) + " " + Str(alias.get()));
+
+  // Objects that share one box share its value.
+  a = Counter(total);
+  b = Counter(total);
+  bump(a.hits.get());
+  println(Str(b.hits.get()) + " " + Str(total.get()));
+
+  f = memory::Box(1.5);
+  x: inout float = f.get();
+  x = x * 3.0;
+  c = memory::Box('a');
+  ch: inout char = c.get();
+  ch = 'z';
+  flag = memory::Box(False);
+  on: inout bool = flag.get();
+  on = !on;
+  println(Str(f.get()) + " " + Str(c.get()) + " " + Str(flag.get()));
+
+  light = memory::Box(Light::Red);
+  i: int = 0;
+  while (i < 4) {
+    l: inout Light = light.get();
+    l = next(l);
+    i = i + 1;
+  }
+  println(Str(light.get() == Light::Green));
+
+  // A tuple: read in place, replaced whole.
+  pair = memory::Box((1, "one"));
+  shared = pair;
+  println(Str(pair.get().0) + pair.get().1);
+  p: inout (int, Str) = shared.get();
+  p = (2, "two");
+  println(Str(pair.get().0) + pair.get().1);
+  kept = pair.get();
+  q: inout (int, Str) = pair.get();
+  q = (3, "three");
+  println(Str(kept.0) + kept.1 + " " + Str(pair.get().0) + pair.get().1);
+  return 0;
+}

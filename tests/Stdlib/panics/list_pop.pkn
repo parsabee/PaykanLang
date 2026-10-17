@@ -1,0 +1,8 @@
+// expect-panic: pop from an empty List
+import ::collections;
+
+fn main() -> int {
+  xs = collections::List<Str>();
+  xs.pop();
+  return 0;
+}

@@ -4,6 +4,7 @@ add_library(paykan_runtime STATIC
     Object.c
     String.c
     Buffer.c
+    Hash.c
     Tuple.c
     Type.c
     File.c

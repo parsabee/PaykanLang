@@ -533,6 +533,20 @@ if(PAYKAN_TEST_SUITE_samples AND PAYKAN_SAMPLES_BACKENDS)
                 ${PAYKAN_SAMPLES_BACKENDS})
 endif()
 
+# The standard library's tests (tests/Stdlib) on every backend that runs
+# programs, against the standard library the build staged next to `paykan`
+# (stdlib/CMakeLists.txt, scripts/stdlib_tests.py) (stdlib).
+paykan_test_suite(stdlib PAYKAN_TEST_SUITE_stdlib)
+if(PAYKAN_TEST_SUITE_stdlib AND PAYKAN_SAMPLES_BACKENDS)
+    if(TARGET paykan_stdlib)
+        paykan_add_python_test(StdlibTests stdlib_tests.py
+                    --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
+    else()
+        message(STATUS "The stdlib tests are skipped: the build compiles no "
+                       "standard library (PAYKAN_BUILD_STDLIB)")
+    endif()
+endif()
+
 # The C backend's output is strict ISO C11 (docs/c-backend.md): every
 # sample's C compiles with -std=c11 -pedantic-errors -Wall -Wextra -Werror on
 # every C compiler found (GCC and Clang), at -O0 and -O2, and runs exactly

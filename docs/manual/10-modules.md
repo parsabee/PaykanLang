@@ -108,11 +108,12 @@ modules. Move what both need into a third module.
 class however many modules use it, so the values pass freely between them (see
 [Generics](09-generics.md#how-generic-code-is-checked)).
 
-**System imports.** A leading `::`, as in `import ::io;`, looks for the module in the
-standard-library directory (`$PAYKAN_STDLIB`, or `stdlib/` under the source root) instead of
-the source root. No standard library ships with PaykanLang yet, so this is only useful for
-modules you put there yourself. The built-in functions and types (`println`, `Str`, `open`,
-`File`, `Stdin` and the rest) need no import.
+**System imports.** A leading `::`, as in `import ::collections;`, looks for the module in
+the standard library instead of the source root. The standard library ships with
+PaykanLang: `::collections` has lists, linked lists, stacks, queues, hash maps, hash sets
+and priority queues (see [the standard library](../language/13-standard-library.md)). Set
+`$PAYKAN_STDLIB` to use another directory of system modules. The built-in functions and
+types (`println`, `Str`, `open`, `File`, `Stdin` and the rest) need no import.
 
 ## Project: `tasks` as a multi-file program
 

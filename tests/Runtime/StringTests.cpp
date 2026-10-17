@@ -518,3 +518,35 @@ TEST(StringParse, BoolAcceptsExactlyTrueAndFalse) {
     EXPECT_EQ(b, 0) << text;
   }
 }
+
+// -- PaykanString_hash / PaykanInt_hash
+
+namespace {
+int64_t hashOf(const char *data, int64_t len) {
+  PaykanString *s = PaykanString_new(data, len);
+  int64_t h = PaykanString_hash((PaykanObject *)s);
+  PaykanString_destroy((PaykanObject *)s);
+  return h;
+}
+} // namespace
+
+TEST(StringHash, EqualBytesHashAlike) {
+  EXPECT_EQ(hashOf("hello", 5), hashOf("hello", 5));
+  EXPECT_NE(hashOf("hello", 5), hashOf("hellp", 5));
+  EXPECT_NE(hashOf("ab", 2), hashOf("ba", 2));
+  // The length counts: an embedded NUL is a byte like any other.
+  EXPECT_NE(hashOf("", 0), hashOf("\0", 1));
+  EXPECT_NE(hashOf("a", 1), hashOf("a\0", 2));
+}
+
+TEST(IntHash, IsDeterministicAndMixed) {
+  EXPECT_EQ(PaykanInt_hash(42), PaykanInt_hash(42));
+  // Consecutive values spread over the low bits a table indexes by.
+  int seen[16] = {0};
+  for (int64_t n = 0; n < 1600; ++n)
+    ++seen[PaykanInt_hash(n) & 15];
+  for (int bucket : seen) {
+    EXPECT_GT(bucket, 60);
+    EXPECT_LT(bucket, 140);
+  }
+}

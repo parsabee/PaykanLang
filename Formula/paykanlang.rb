@@ -9,8 +9,9 @@
 # tagged GitHub Release (or the auto-generated source archive for the tag) and
 # invokes the project's `cmake --install` rules: the `paykan` binary -> bin/,
 # the runtime archive -> lib/, Runtime.h and the C plugin interface
-# plugin_api.h -> include/paykan/, and the (empty) system plugin directory
-# lib/paykan/plugins/<version>/.
+# plugin_api.h -> include/paykan/, the (empty) system plugin directory
+# lib/paykan/plugins/<version>/, and the standard library, compiled during the
+# build, -> lib/paykan/stdlib/<version>/.
 #
 # It builds the core (#27, #123): the recursive-descent frontend and the c
 # backend, which need only a C++20
