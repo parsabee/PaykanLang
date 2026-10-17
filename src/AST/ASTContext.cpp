@@ -9,7 +9,8 @@ namespace ast {
 
 ASTContext::ASTContext()
     : IntTy(nullptr), FloatTy(nullptr), BoolTy(nullptr), CharTy(nullptr),
-      VoidTy(nullptr), ObjTy(nullptr), StrTy(nullptr), FileTy(nullptr), ErrorTy(nullptr), TupleTy(nullptr) {
+      VoidTy(nullptr), ObjTy(nullptr), StrTy(nullptr), FileTy(nullptr),
+      ErrorTy(nullptr), TupleTy(nullptr) {
   Pool.reserve(512); // the bootstrap alone makes ~150 nodes
   IntTy = make<BuiltinType>(SourceLocation(), BuiltinType::Int);
   FloatTy = make<BuiltinType>(SourceLocation(), BuiltinType::Float);
