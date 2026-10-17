@@ -53,6 +53,8 @@ ast::ClassType *ModuleLowering::getExprClassType(ast::Expr *expr) const {
     return ast::dyn_cast<ast::ClassType>(mce->getResolvedType());
   if (auto *ce = ast::dyn_cast<ast::CallExpr>(expr))
     return ast::dyn_cast<ast::ClassType>(ce->getResolvedType());
+  if (auto *cv = ast::dyn_cast<ast::CallValueExpr>(expr))
+    return ast::dyn_cast<ast::ClassType>(cv->getResolvedType());
   if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(expr))
     return ast::dyn_cast<ast::ClassType>(se->getResolvedType());
   if (auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(expr))

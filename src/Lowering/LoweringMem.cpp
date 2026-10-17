@@ -147,7 +147,8 @@ ModuleLowering::MemValue ModuleLowering::emitMemValue(ast::Expr *e) {
   }
   // A call's result, in the temporary the call wrote, or for an `inout`
   // result the storage it names, which is not the consumer's to drop.
-  if (ast::isa<ast::CallExpr>(e) || ast::isa<ast::MethodCallExpr>(e))
+  if (ast::isa<ast::CallExpr>(e) || ast::isa<ast::MethodCallExpr>(e) ||
+      ast::isa<ast::CallValueExpr>(e))
     return {emitExpr(e), /*Temp=*/!e->isInoutResult()};
   if (ast::isa<ast::ArrayLiteralExpr>(e) ||
       ast::isa<ast::TupleLiteralExpr>(e)) {

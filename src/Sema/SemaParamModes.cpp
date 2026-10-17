@@ -91,6 +91,7 @@ std::string Sema::inoutPlaceError(const ast::Expr *place,
   // struct is one (a variable, a field of an object or of another struct,
   // an `inout` result), not in a temporary, which dies with the statement,
   // and not in an array element (not yet, like the element itself).
+  const ast::Expr *root = place; // the variable (or field) holding it
   for (const ast::Expr *e = place;;) {
     const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e);
     if (!ma || !ast::isa<ast::StructType>(ma->getReceiver()->getResolvedType()))
@@ -106,7 +107,7 @@ std::string Sema::inoutPlaceError(const ast::Expr *place,
       return "a field of a struct that is not a variable or a field (a "
              "temporary, which dies with the statement) cannot be " +
              use;
-    e = recv;
+    e = root = recv;
   }
   if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(place)) {
     const ast::Type *arr = se->getArray()->getResolvedType();
@@ -115,7 +116,7 @@ std::string Sema::inoutPlaceError(const ast::Expr *place,
                ? "an array element cannot be " + use + " yet"
                : "a character of a string cannot be " + use;
   }
-  const auto *id = ast::dyn_cast<ast::Identifier>(place);
+  const auto *id = ast::dyn_cast<ast::Identifier>(root);
   // A struct method's `self` is the receiver's storage, which an `inout`
   // may name (unless it is read-only, which frozenPlace reports below); a
   // class method's is its object.

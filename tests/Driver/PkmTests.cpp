@@ -1071,6 +1071,41 @@ TEST(Pkm, FunctionTypeArgumentsInInstantiationNames) {
   fs::remove_all(dir);
 }
 
+// A struct template and a class template of one name in two modules: the
+// second instantiation of `Pair<int, int>` conflicts with the first, in
+// either order (a class after a struct stopped the compiler).
+TEST(Pkm, StructAndClassInstantiationsOfOneNameConflict) {
+  REQUIRE_BACKEND();
+  auto dir = fs::temp_directory_path() /
+             ("pkm_inst_clash_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  fs::create_directories(dir);
+  writeFile(dir / "a.pkn", "struct Pair<A, B> { a: A; b: B; }\n");
+  writeFile(dir / "b.pkn", "class Pair<A, B> { a: A; b: B; }\n");
+  writeFile(dir / "main.pkn", "import a;\nimport b;\n"
+                              "fn main() -> int {\n"
+                              "  x = a::Pair(1, 2);\n"
+                              "  y = b::Pair(1, 2);\n"
+                              "  return x.a + y.b;\n}\n");
+  writeFile(dir / "main2.pkn", "import a;\nimport b;\n"
+                               "fn main() -> int {\n"
+                               "  y = b::Pair(1, 2);\n"
+                               "  x = a::Pair(1, 2);\n"
+                               "  return x.a + y.b;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  for (const char *file : {"main.pkn", "main2.pkn"}) {
+    auto r = paykan(file);
+    EXPECT_NE(r.exitCode, 0) << file << "\n" << r.out;
+    EXPECT_TRUE(contains(r.out, "instantiation 'Pair<int, int>' conflicts "
+                                "with an imported type of the same name"))
+        << file << "\n"
+        << r.out;
+  }
+  fs::remove_all(dir);
+}
+
 // A generic struct is a template like a generic class: its module, and a
 // module that instantiates it, are built from source each time, and the
 // instantiation is one struct whoever makes it.

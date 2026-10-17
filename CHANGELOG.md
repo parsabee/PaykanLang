@@ -31,6 +31,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A generic class or struct whose method instantiates its template with an ever-growing
   type argument (`Deep<Deep<T>>`) is now reported (`exceeds the maximum instantiation
   depth`) instead of instantiating without end.
+- Fixes from an inspection of structs, generic structs and function values: a method
+  that changes `self` can no longer be called on a `let` struct, on a struct in a tuple
+  or on an element of a `let` array (`'p' is declared with 'let'; its value cannot
+  change, and 'shift' is not a 'view fn'`), and a field of a `let` struct or of a
+  captured struct is no longer an `inout` place; `p.__init__(...)` is rejected for
+  structs and classes (`'__init__' cannot be called directly`; on a class it crashed
+  the compiler); a bounded generic struct instantiated by a field type (`struct Outer {
+  k: Keyed<int>; }`) no longer crashes the compiler, and neither does a class
+  instantiation named like an existing struct instantiation (`struct List<T>` next to
+  `collections::List<int>`), which is now the documented conflict error; a type
+  parameter shadowing a template declared later is reported; a call through a function
+  value that is not a name (`fs[0]()`, `t.0(8)`, `mk()()`) now works for results that
+  are references or values held in memory (it failed PIR verification, dropped the
+  statement or stopped the compiler); a named function assigned to a variable without
+  an annotation (`g = square; g(3)`) can be called; a closure stays alive while an
+  argument of its call rebinds the variable or field that held it (`f(swap(f))`,
+  `o.cb(reset(o))` read freed memory); a captured struct's object-typed field is
+  changed through the object (`w.node.n = 7` in a lambda); and the slice hint spells a
+  function element type in parentheses.
 - Assigning `self` in a class method (`self = C(1)`) is now an error (`cannot assign to
   'self'`): `self` names the object the method was called on, and the assignment changed
   nothing the caller could see.

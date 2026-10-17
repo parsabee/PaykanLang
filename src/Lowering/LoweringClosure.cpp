@@ -248,10 +248,15 @@ Val ModuleLowering::emitFunctionRefValue(const std::string &fnName,
   return emitSharedNew(obj, "closure.shared");
 }
 
-Val ModuleLowering::emitClosureCall(const Val &closure, ast::FunctionType *fnt,
+Val ModuleLowering::emitClosureCall(const Val &box, ast::FunctionType *fnt,
                                     const std::vector<ast::Expr *> &argExprs,
                                     ast::Type *resultTy, bool wantAddress) {
   const pir::Signature sig = closureSignature(fnt);
+  // The call's own reference to the closure: an argument may rebind the
+  // variable or the field that holds it (`f(swap(f))`, `o.cb(reset(o))`),
+  // which would free it before, or while, it runs.
+  emitRetain(box);
+  Val closure = emitSharedGet(box, "closure.obj");
   std::vector<Val> args;
   std::vector<Val> keep;
   size_t fixedMark = MemTemps.size();
@@ -298,11 +303,13 @@ Val ModuleLowering::emitClosureCall(const Val &closure, ast::FunctionType *fnt,
     B.vcall(closure, "", kClosureCallSlot, sig, args);
     releaseAfterCall(keep);
     releaseMemTemps(fixedMark);
+    emitRelease(box);
     return slot;
   }
   Val result = B.vcall(closure, "", kClosureCallSlot, sig, args, "call");
   releaseAfterCall(keep);
   releaseMemTemps(fixedMark);
+  emitRelease(box);
   (void)wantAddress; // a function type's result is never an `inout`
   return result;
 }

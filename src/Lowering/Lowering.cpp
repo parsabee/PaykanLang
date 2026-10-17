@@ -329,6 +329,8 @@ ast::ClassType *ModuleLowering::resolveExprClassType(ast::Expr *expr) {
     resolved = ce->getResolvedType();
   else if (auto *mce = ast::dyn_cast<ast::MethodCallExpr>(expr))
     resolved = mce->getResolvedType();
+  else if (auto *cv = ast::dyn_cast<ast::CallValueExpr>(expr))
+    resolved = cv->getResolvedType();
   else if (auto *mae = ast::dyn_cast<ast::MemberAccessExpr>(expr))
     resolved = mae->getResolvedType();
   else if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(expr))
@@ -652,6 +654,9 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
     return ast::isRefType(expr->getResolvedType());
   if (auto *e = ast::dyn_cast<ast::MethodCallExpr>(expr))
     return e->getResolvedType() && ast::isRefType(e->getResolvedType());
+  // A call through a function value returns a +1 box, as a function does.
+  if (auto *e = ast::dyn_cast<ast::CallValueExpr>(expr))
+    return e->getResolvedType() && ast::isRefType(e->getResolvedType());
   if (auto *e = ast::dyn_cast<ast::TernaryExpr>(expr))
     return e->getResolvedType() && ast::isRefType(e->getResolvedType());
   if (auto *e = ast::dyn_cast<ast::MemberAccessExpr>(expr))
@@ -708,12 +713,15 @@ bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
       return false;
     return exprAlreadyShared(expr) && (ast::isa<ast::CallExpr>(root) ||
                                        ast::isa<ast::MethodCallExpr>(root) ||
+                                       ast::isa<ast::CallValueExpr>(root) ||
                                        ast::isa<ast::ArrayLiteralExpr>(root) ||
                                        ast::isa<ast::TupleLiteralExpr>(root) ||
                                        ast::isa<ast::TernaryExpr>(root));
   }
   if (auto *mce = ast::dyn_cast<ast::MethodCallExpr>(expr))
     return mce->getResolvedType() && ast::isRefType(mce->getResolvedType());
+  if (auto *cv = ast::dyn_cast<ast::CallValueExpr>(expr))
+    return cv->getResolvedType() && ast::isRefType(cv->getResolvedType());
   if (auto *te = ast::dyn_cast<ast::TernaryExpr>(expr))
     return te->getResolvedType() && ast::isRefType(te->getResolvedType());
   if (ast::isa<ast::CallExpr>(expr))
@@ -904,8 +912,11 @@ Val ModuleLowering::emitImplicitVarDecl(const std::string &name,
     // Not a class: an optional keeps its precise Sema type; fall back to Obj
     // when nothing recorded a type.
     ast::Type *rt = rhsExpr->getResolvedType();
+    // A function used as a value (`g = square;`) is no variable: its
+    // resolved function type stands.
     if (!(rt && ast::isa<ast::OptionalType>(rt)))
-      if (auto *id = ast::dyn_cast<ast::Identifier>(rhsExpr))
+      if (auto *id = ast::dyn_cast<ast::Identifier>(rhsExpr);
+          id && !id->isFunctionRef())
         rt = CurrentScope->lookupASTType(id->getName());
     rhsAstTy = rt && ast::isRefType(rt)
                    ? canonicalizeDeclType(rt)

@@ -264,8 +264,9 @@ A function value is a *closure*: a reference-counted object holding the code and
 captures.  Copying one (assigning it, passing it, storing it in a field or an element)
 shares it, as with an object, and the last reference releases it and its captures.  Two
 closures are `==` when they are the same closure: each evaluation of a lambda expression
-makes a new one, so `fn() {} == fn() {}` is `False`, while a stored closure equals itself,
-which is what `List<T>.contains` needs.  A closure is not an `Obj`: it cannot be printed,
+makes a new one, so `fn() {} == fn() {}` is `False`, and so does each use of a named
+function as a value (`square == square` is `False` too), while a stored closure equals
+itself, which is what `List<T>.contains` needs.  A closure is not an `Obj`: it cannot be printed,
 converted to a `Str`, stored in an `Obj` slot, matched by class, or given to a `T: Show`
 or `T: Hashable` bound.
 

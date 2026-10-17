@@ -638,10 +638,14 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
   // `T[]` is a slice, the type of a `view` or `inout` parameter only.
   if (auto *at = ast::dyn_cast<ast::ArrayType>(ty)) {
     if (!allowSlice) {
+      const std::string elem = typeName(at->getElementType());
       error(loc, context + " has type '" + typeName(at) +
                      "': a slice can only be a 'view' or 'inout' parameter, "
                      "and an array has a length ('" +
-                     typeName(at->getElementType()) + "[3]')");
+                     (ast::isa<ast::FunctionType>(at->getElementType())
+                          ? "(" + elem + ")"
+                          : elem) +
+                     "[3]')");
       return nullptr;
     }
     FixedArrayAllowed = true; // a slice's elements may be fixed-size arrays
@@ -1556,6 +1560,15 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
             "'destroy' cannot be called directly; an object is destroyed "
             "automatically when its last reference is released");
     return method->getReturnType();
+  }
+  // `__init__` runs once, on construction (`P(...)`); run again by name it
+  // would re-initialise a value that is in use.
+  if (node->getMethodName() == names::kMethodInit) {
+    S.error(node->getLocation(),
+            "'__init__' cannot be called directly; it runs when a value is "
+            "constructed ('" +
+                ownerName + "(...)')");
+    return nullptr;
   }
 
   // Only a `view fn` may be called on a `view`.
