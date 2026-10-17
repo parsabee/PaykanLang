@@ -42,6 +42,10 @@ void Sema::noteBorrowResult(const ast::Expr *call, const std::string &callee,
                             const ast::Expr *receiver) {
   if (modes.Result == ast::ParamMode::Value)
     return;
+  // The lowering reads it from the call: a value held in memory is then used
+  // in place, not copied out into a temporary.
+  if (modes.Result == ast::ParamMode::Inout)
+    const_cast<ast::Expr *>(call)->setInoutResult(true);
   BorrowResult &r = BorrowResults[call];
   r.Callee = callee;
   r.Mode = modes.Result;

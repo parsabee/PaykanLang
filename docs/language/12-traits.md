@@ -21,6 +21,9 @@ argument must implement.
 - The built-in trait `Hashable` (`view fn hash() -> int`) is implemented by `int`, `bool`,
   `char` and `Str`, and by a class with an `impl Hashable for` block. The standard
   library's hash tables take `Hashable` keys (see [Hashable](#hashable)).
+- The built-in trait `ValueType` has no methods. It is implemented by the types held in
+  place and copied whole: `int`, `float`, `bool`, `char`, every enum and every tuple (see
+  [ValueType](#valuetype)).
 - `fn f<T: Show + Into<int>>(...)` and `class Box<T: Named>` bound their type
   parameters. Each instantiation checks its type arguments against the bounds.
 - A trait is not a type: `x: Named` is an error.
@@ -133,6 +136,37 @@ True True False
 The standard library's `HashMap<K, V>` and `HashSet<K>` require `K: Hashable` (see
 [the standard library](13-standard-library.md)). Declaring a trait named `Hashable` is an
 error, as for `Show`.
+
+## ValueType
+
+`ValueType` is a built-in trait with no methods. It is implemented by the types whose
+values are held in place and copied whole by an assignment: `int`, `float`, `bool`,
+`char`, every enum and every tuple (see [the memory model](08-memory-model.md)). A fixed-size
+array is one too, though it cannot be a type argument yet. A class, `Str` and an
+optional are not, and `impl ValueType for` a class is an error: a class is shared by
+reference.
+
+```pkn
+enum Suit { Hearts, Spades }
+
+fn twice<T: ValueType>(x: T) -> (T, T) { return (x, x); }
+
+fn main() -> int {
+  p = twice((1, "one"));
+  s = twice(Suit::Spades);
+  println(Str(twice(2).1) + " " + p.1.1 + " " + Str(s.0 == Suit::Spades));
+  return 0;
+}
+```
+
+Output:
+
+```
+2 one True
+```
+
+The standard library's `memory::Box<T: ValueType>` holds one in a shared object (see
+[the standard library](13-standard-library.md#memory)).
 
 ## Semantic Checks
 

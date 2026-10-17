@@ -187,6 +187,9 @@ class Expr : public ASTNode {
   // `int?`: the coerced type is the optional and the lowering makes the
   // value its present value, see wrapsInOptional).  nullptr = no conversion.
   Type *CoercedType = nullptr;
+  // Set by Sema on a call of a function or method with an `inout` result
+  // (`-> inout T`): its value is the storage it names, not a temporary.
+  bool InoutResult = false;
 
 public:
   Expr(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
@@ -196,6 +199,9 @@ public:
 
   void setCoercedType(Type *ty) { CoercedType = ty; }
   Type *getCoercedType() const { return CoercedType; }
+
+  void setInoutResult(bool inout) { InoutResult = inout; }
+  bool isInoutResult() const { return InoutResult; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() >= NK_IntegerLiteral &&

@@ -220,3 +220,29 @@ fn main() -> int { return 0; }
   EXPECT_FALSE(r.Ok);
   expectAll(r, {"'Hashable' is a builtin trait and cannot be redeclared"});
 }
+
+// int, float, bool, char, enums and tuples are ValueTypes; Str, classes and
+// optionals are not, and a class cannot implement it.
+TEST(Traits, BuiltinValueType) {
+  auto r = semaCheck(R"(enum Color { Red }
+class P { x: int; }
+impl ValueType for P {}
+fn v<T: ValueType>(x: view T) -> int { return 1; }
+fn main() -> int {
+  n: int? = 1;
+  k: int = v(1) + v(2.5) + v(True) + v('c') + v(Color::Red) + v((1, "s"));
+  k = k + v("s") + v(P(1)) + v(n);
+  return k;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"class 'P' cannot implement 'ValueType': a class is shared "
+                "by reference, not held in place",
+                "'Str' does not implement trait 'ValueType', which 'v' "
+                "requires of 'T'",
+                "'P' does not implement trait 'ValueType', which 'v' "
+                "requires of 'T'",
+                "'int?' does not implement trait 'ValueType', which 'v' "
+                "requires of 'T'"});
+  EXPECT_EQ(r.ErrorCount, 4) << r.Diagnostics;
+}

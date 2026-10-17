@@ -12,7 +12,8 @@ qualifier: `collections::List<int>()`.
 - `::collections`: `List<T>`, `LinkedList<T>`, `Stack<T>`, `Queue<T>`, `HashMap<K, V>`,
   `HashSet<K>`, `MinPriorityQueue<T>` and `MaxPriorityQueue<T>`, and the functions
   `listOf` and `listToString`.
-- `::memory`: `Buffer<T>`, the growable storage the containers are built on.
+- `::memory`: `Buffer<T>`, the growable storage the containers are built on, and
+  `Box<T: ValueType>`, one value in a shared object.
 - Every container is an object, so assigning one shares it. A container holds its own
   reference to each element. A method that hands an element out returns a copy, which
   shares an object element with the container.
@@ -171,6 +172,37 @@ it panics.
 | `get(i)`, `copy(i)`, `set(i, v)` | Slot `i`: a `view` of it, a copy to keep, or a new value |
 | `push(v)`, `grow(by)`, `reserve(n)`, `shrink(by)` | Change the number of slots; growing one at a time is amortised O(1) |
 | `swap(i, j)` | Exchange two slots |
+
+`Box<T: ValueType>(v)` holds one value of a [`ValueType`](12-traits.md#valuetype) (`int`,
+`float`, `bool`, `char`, an enum or a tuple) in an object, so the value can be shared:
+assigning a box shares it, and a change through one name shows through every other.
+`get()` returns `inout T`, the value's storage. Read it, pass it to an `inout`
+parameter, or assign through an `inout` local:
+
+```pkn
+import ::memory;
+
+fn bump(n: inout int) { n = n + 1; }
+
+fn main() -> int {
+  hits = memory::Box(0);
+  alias = hits;
+  bump(hits.get());
+  n: inout int = alias.get();
+  n = n * 10;
+  pair = memory::Box((1, "one"));
+  p: inout (int, Str) = pair.get();
+  p = (2, "two");
+  println(Str(hits.get()) + " " + pair.get().1);
+  return 0;
+}
+```
+
+Output:
+
+```
+10 two
+```
 
 ---
 

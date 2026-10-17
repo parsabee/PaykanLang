@@ -722,3 +722,48 @@ TEST(BorrowedResult, InoutResultsWriteThrough) {
   EXPECT_EQ(r.StdOut, "14 41 2 20 55\n");
   guard.expectNoLeaks("inout results");
 }
+
+// An `inout` result of a tuple, which is held in place, is the address of
+// its storage: it is written through (by an `inout` local, an `inout`
+// argument or another `inout` result), read in place, and copied out only
+// when it is stored.  Nothing of it is a temporary to release, also for the
+// references it holds.
+TEST(BorrowedResult, InoutTupleResultsWriteThrough) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(
+    class H {
+      t: (int, Str);
+      n: ((int, Str), Str);
+      fn get() -> inout (int, Str) { return self.t; }
+      fn nested() -> inout ((int, Str), Str) { return self.n; }
+    }
+    fn pick(a: inout (int, Str), b: inout (int, Str), first: bool)
+        -> inout (int, Str) {
+      return if first then a else b;
+    }
+    fn set(x: inout (int, Str)) { x = (9, "nine"); }
+    fn show(v: view (int, Str)) -> Str { return Str(v.0) + v.1; }
+    fn main() -> int {
+      h = H((1, "one"), ((2, "two"), "x"));
+      copy = h.get();
+      println(h.get().1 + " " + h.nested().0.1 + h.nested().1);
+      set(h.get());
+      println(show(copy) + " " + show(h.t));
+      w: inout (int, Str) = h.get();
+      w = (3, "three");
+      inner: inout ((int, Str), Str) = h.nested();
+      inner = ((4, "four"), "y");
+      println(show(h.get()) + " " + show(h.n.0) + h.n.1);
+      a = (5, "a");
+      b = (6, "b");
+      p: inout (int, Str) = pick(a, b, False);
+      p = (7, "seven");
+      set(pick(a, b, True));
+      println(show(a) + " " + show(b));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "one twox\n1one 9nine\n3three 4foury\n9nine 7seven\n");
+  guard.expectNoLeaks("inout tuple results");
+}

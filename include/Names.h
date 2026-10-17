@@ -38,6 +38,9 @@ inline constexpr const char *kTraitShow =
     "Show"; ///< `view fn toString() -> Str`
 inline constexpr const char *kTraitHashable =
     "Hashable"; ///< `view fn hash() -> int`
+/// No methods: the types held in place and copied whole, which a class
+/// cannot implement.
+inline constexpr const char *kTraitValueType = "ValueType";
 inline constexpr const char *kMethodHash = "hash";
 inline constexpr const char *kSelfType = "Self"; ///< The implementing type
 inline constexpr const char *kMethodLength = "len";

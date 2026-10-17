@@ -1,5 +1,6 @@
 // ::memory: Buffer<T>, a run of slots whose storage is the runtime's
-// (Runtime.h, "Buffer"), reached through generic native functions.
+// (Runtime.h, "Buffer"), reached through generic native functions, and
+// Box<T>, one value held in a shared object.
 //
 // A buffer has len() slots.  It grows and shrinks only when asked to, and
 // growing a slot at a time is amortised O(1).  A new slot holds zero bytes,
@@ -65,4 +66,18 @@ impl Buffer<T> {
     __set<T>(self.__data, i, b);
     __set<T>(self.__data, j, a);
   }
+}
+
+// One value of a ValueType (int, float, bool, char, an enum or a tuple) in an
+// object, so that the value can be shared: assigning a box shares it, and a
+// change through one name shows through every other.  get() is the value's
+// storage, which the caller reads, assigns through an `inout` local or
+// passes to an `inout` parameter.
+class Box<T: ValueType> {
+  __data: T;
+}
+
+impl Box<T> {
+  fn __init__(v: T) { self.__data = v; }
+  fn get() -> inout T { return self.__data; }
 }

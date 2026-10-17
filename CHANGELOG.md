@@ -31,6 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   backend: the runtime's `PaykanInt_hash` (a `bool` or `char` hashes as its `int` value)
   and `PaykanString_hash` (FNV-1a over the bytes), both ending in the SplitMix64
   finalizer.  Declaring a trait named `Hashable` is an error.
+- The built-in trait `ValueType` (docs/language/12-traits.md, "ValueType"), with no
+  methods: implemented by `int`, `float`, `bool`, `char`, every enum and every tuple, the
+  types held in place.  A class, `Str` and an optional are not, and `impl ValueType for`
+  a class is an error (`class 'P' cannot implement 'ValueType': a class is shared by
+  reference, not held in place`).
+- `memory::Box<T: ValueType>`: one value in a shared object, whose `get()` is the
+  value's storage (`-> inout T`).
 - Runtime functions for the standard library's panics, reached through `native fn`s:
   `Paykan_panic_message(Str)` prints `paykan: <message>` and aborts, and
   `Paykan_panic_value`, the same as a generic `native fn` with a result, for where a value
@@ -363,6 +370,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A `-> inout` result of a tuple was copied out into a temporary instead of naming its
+  storage: a write through it (an `inout` local, an `inout` argument) changed only the
+  copy, and reading an element of one released the references the storage held.  It is
+  now the address of the storage, like an `inout` result of any other type.
 - The llvm backend's `run` (and `--emit-llvm`) optimised the program under LLVM's default data
   layout instead of the host's, which the JIT then ran it with: an object with a `char` or
   `bool` field before an `int` was allocated a few bytes short, and stores could land at the

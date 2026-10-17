@@ -325,12 +325,14 @@ pir::Signature ModuleLowering::functionSignature(ast::FuncDecl *node) {
   pir::Signature sig;
   ast::Type *retAstTy = canonicalizeDeclType(node->getReturnType());
   sig.Ret = retAstTy ? toPIRType(retAstTy) : Type::Void;
-  if (node->getResultMode() == ast::ParamMode::Inout)
+  const bool inoutResult = node->getResultMode() == ast::ParamMode::Inout;
+  if (inoutResult)
     sig.Ret = Type::Ptr; // the address of the storage it names
   for (auto &p : node->getParams())
     appendParamTypes(sig.Params, p.ParamType, p.Mode);
-  // A result held in memory is written where a last parameter points.
-  if (ast::isMemType(retAstTy)) {
+  // A result held in memory is written where a last parameter points (but
+  // an `inout` one is its storage's address, like any other).
+  if (!inoutResult && ast::isMemType(retAstTy)) {
     sig.Params.push_back(Type::Ptr);
     sig.Ret = Type::Void;
   }
@@ -343,7 +345,7 @@ pir::Function *ModuleLowering::declareFunctionPrototype(ast::FuncDecl *node) {
   pir::Function *fn =
       getOrCreateFunction(node->getName(), functionSignature(node));
   nameParams(*fn, 0, node->getParams());
-  if (ast::isMemType(node->getReturnType()))
+  if (fn->Sig.Ret != Type::Ptr && ast::isMemType(node->getReturnType()))
     fn->Params.back().Name = "result"; // where the result is written
   return fn;
 }
@@ -620,7 +622,8 @@ bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
       ast::isa<ast::TupleIndexExpr>(expr)) {
     // An element of a temporary (`mk()[0]`, `mk().1`), or of a fresh
     // object's field (`mk().xs[0]`), is read as a +1 box: the temporary
-    // dies with the read.
+    // dies with the read.  A call with an `inout` result is no temporary:
+    // its element is borrowed from the storage the call names.
     ast::Expr *root = expr;
     for (;;) {
       if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(root))
@@ -632,6 +635,8 @@ bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
     }
     if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(root))
       return exprAlreadyShared(expr) && exprProducesFreshBox(ma->getReceiver());
+    if (root->isInoutResult())
+      return false;
     return exprAlreadyShared(expr) && (ast::isa<ast::CallExpr>(root) ||
                                        ast::isa<ast::MethodCallExpr>(root) ||
                                        ast::isa<ast::ArrayLiteralExpr>(root) ||
@@ -953,7 +958,8 @@ Val ModuleLowering::visitAssignStmt(ast::AssignStmt *node) {
 Val ModuleLowering::visitReturnStmt(ast::ReturnStmt *node) {
   // A result held in memory: written where the last parameter points (a
   // temporary of the caller's, which nothing here can reach otherwise).
-  if (node->getReturnValue() && ast::isMemType(CurrentFuncReturnASTType)) {
+  if (node->getReturnValue() && ast::isMemType(CurrentFuncReturnASTType) &&
+      B.function()->Sig.Ret != Type::Ptr) {
     const pir::Value &dst = B.function()->Params.back();
     emitMemInit(node->getReturnValue(),
                 Val(pir::Operand::value(dst), Type::Ptr));

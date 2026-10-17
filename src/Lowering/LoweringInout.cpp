@@ -261,6 +261,9 @@ Val ModuleLowering::emitCallAddress(ast::Expr *call) {
 }
 
 Val ModuleLowering::loadInoutResult(const Val &addr, ast::Type *astTy) {
+  // A value held in memory is used by its address, as a variable's is.
+  if (ast::isMemType(astTy))
+    return addr;
   Type t = toPIRType(canonicalizeDeclType(astTy));
   Val v = B.ptrLoad(addr, t, "res");
   if (t == Type::Box)

@@ -681,9 +681,10 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
       return Val();
     args.push_back(L.coerceTo(v, paramTy));
   }
-  // A fixed-size array result: written into a temporary, whose address is
-  // the call's value.
-  if (ast::isMemType(node->getResolvedType())) {
+  // A result held in memory: written into a temporary, whose address is the
+  // call's value (an `inout` one is the address of its storage instead).
+  if (ast::isMemType(node->getResolvedType()) &&
+      callee->Sig.Ret != Type::Ptr) {
     Val slot = L.emitMemResultSlot(node->getResolvedType());
     args.push_back(slot);
     L.B.call(callee->Name, callee->Sig, args);
@@ -894,7 +895,7 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   // A fixed-size array result is written into a temporary, whose address is
   // the call's value.
   Val fixedSlot;
-  if (ast::isMemType(node->getResolvedType())) {
+  if (ast::isMemType(node->getResolvedType()) && sig.Ret != Type::Ptr) {
     fixedSlot = L.emitMemResultSlot(node->getResolvedType());
     args.push_back(fixedSlot);
   }
