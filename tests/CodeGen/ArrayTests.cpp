@@ -11,11 +11,11 @@ static std::string wrapMain(const std::string &body) {
   return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
-// -- int[] subscript assignment
+// -- int[n] subscript assignment
 
 TEST(ArrayAssign, IntArray) {
   auto r = compileAndRun(wrapMain(R"(
-    arr: int[] = [10, 20, 30];
+    arr: int[3] = [10, 20, 30];
     arr[0] = 99;
     arr[2] = 42;
     println(Str<int>(arr[0]));
@@ -28,7 +28,7 @@ TEST(ArrayAssign, IntArray) {
 
 TEST(ArrayAssign, IntArrayLoopOverwrite) {
   auto r = compileAndRun(wrapMain(R"(
-    arr: int[] = [0, 0, 0, 0, 0];
+    arr: int[5] = [0, 0, 0, 0, 0];
     i: int = 0;
     while (i < 5) {
       arr[i] = i * i;
@@ -44,11 +44,11 @@ TEST(ArrayAssign, IntArrayLoopOverwrite) {
   EXPECT_EQ(r.StdOut, "0\n1\n4\n9\n16\n");
 }
 
-// -- float[] subscript assignment
+// -- float[n] subscript assignment
 
 TEST(ArrayAssign, FloatArray) {
   auto r = compileAndRun(wrapMain(R"(
-    arr: float[] = [1.0, 2.0, 3.0];
+    arr: float[3] = [1.0, 2.0, 3.0];
     arr[1] = 9.5;
     println(Str<float>(arr[0]));
     println(Str<float>(arr[1]));
@@ -58,11 +58,11 @@ TEST(ArrayAssign, FloatArray) {
   EXPECT_EQ(r.StdOut, "1\n9.5\n3\n");
 }
 
-// -- bool[] subscript assignment
+// -- bool[n] subscript assignment
 
 TEST(ArrayAssign, BoolArray) {
   auto r = compileAndRun(wrapMain(R"(
-    arr: bool[] = [True, False, True];
+    arr: bool[3] = [True, False, True];
     arr[0] = False;
     arr[2] = False;
     println(Str<bool>(arr[0]));
@@ -73,11 +73,11 @@ TEST(ArrayAssign, BoolArray) {
   EXPECT_EQ(r.StdOut, "False\nFalse\nFalse\n");
 }
 
-// -- Str[] subscript assignment
+// -- Str[n] subscript assignment
 
 TEST(ArrayAssign, StrArray) {
   auto r = compileAndRun(wrapMain(R"(
-    arr: Str[] = ["a", "b", "c"];
+    arr: Str[3] = ["a", "b", "c"];
     arr[1] = "hello";
     println(arr[0]);
     println(arr[1]);
@@ -89,7 +89,7 @@ TEST(ArrayAssign, StrArray) {
 
 TEST(ArrayAssign, StrArrayMultipleWrites) {
   auto r = compileAndRun(wrapMain(R"(
-    arr: Str[] = ["x", "y", "z"];
+    arr: Str[3] = ["x", "y", "z"];
     arr[0] = "first";
     arr[0] = "second";
     println(arr[0]);
@@ -267,13 +267,13 @@ fn main() -> int {
 
 TEST(RefField, ObjectElementFieldSubscriptAssign) {
   // Assigning into an object-element array field (self.items[i] = obj) must
-  // unwrap the field box and use the object-set path (element type derived
-  // from the array expression, not just bare identifiers).
+  // store into the field in place and use the object-set path (element type
+  // derived from the array expression, not just bare identifiers).
   auto r = compileAndRun(R"(
 class Foo { v: int; }
 impl Foo { fn __init__(x: int){ self.v = x; } }
 class Box {
-  items: Foo[];
+  items: Foo[2];
   fn set1(f: Foo) { self.items[1] = f; }
   fn get1() -> int { return self.items[1].v; }
 }
@@ -292,32 +292,30 @@ fn main() -> int {
   EXPECT_EQ(r.StdOut, "99\n");
 }
 
-// int -> float promotion into float[] element slots.  Every scalar store
-// promotes; the element paths (literal, push, subscript store) used to store
-// the integer bit pattern, which read back as a denormal double.
+// int -> float promotion into float element slots.  Every scalar store
+// promotes; the element paths (literal, subscript store) used to store the
+// integer bit pattern, which read back as a denormal double.
 
 TEST(ArrayPromotion, IntElementsIntoFloatArray) {
   auto r = compileAndRun(R"(
     class C {
-      fs: float[];
-      fn sum(ys: float[]) -> float { return ys[0] + ys[1]; }
+      fs: float[2];
+      fn sum(ys: view float[]) -> float { return ys[0] + ys[1]; }
     }
 
     impl C {
       fn __init__() { self.fs = [1, 2]; }
     }
-    fn total(zs: float[]) -> float { return zs[0] + zs[1]; }
-    fn mk() -> float[] { return [7, 8]; }
+    fn total(zs: view float[]) -> float { return zs[0] + zs[1]; }
+    fn mk() -> float[2] { return [7, 8]; }
     fn main() -> int {
-      xs: float[] = [1, 2];            // all-int literal into float[]
+      xs: float[2] = [1, 2];           // all-int literal into float[2]
       println(Str<float>(xs[0] + xs[1]));
-      ys: float[] = [1, 2.5];          // mixed literal
+      ys: float[2] = [1, 2.5];         // mixed literal
       println(Str<float>(ys[0] + ys[1]));
       n: int = 4;
-      zs: float[] = [n, n + 1];        // non-constant int elements
+      zs: float[2] = [n, n + 1];       // non-constant int elements
       println(Str<float>(zs[0] + zs[1]));
-      xs.push(3);                      // push(int)
-      println(Str<float>(xs[2]));
       xs[0] = 10;                      // subscript store
       println(Str<float>(xs[0]));
       xs = [5, 6];                     // reassignment
@@ -327,11 +325,11 @@ TEST(ArrayPromotion, IntElementsIntoFloatArray) {
       println(Str<float>(total([3, 4]))); // function argument
       println(Str<float>(c.sum([5, 6]))); // method argument
       println(Str<float>(mk()[1]));      // returned literal
-      grid: float[][] = [[1], [2]];    // nested literals
+      grid: float[2][1] = [[1], [2]];  // nested literals
       println(Str<float>(grid[0][0] + grid[1][0]));
       return 0;
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "3\n3.5\n9\n3\n10\n6\n2\n7\n11\n8\n3\n");
+  EXPECT_EQ(r.StdOut, "3\n3.5\n9\n10\n6\n2\n7\n11\n8\n3\n");
 }

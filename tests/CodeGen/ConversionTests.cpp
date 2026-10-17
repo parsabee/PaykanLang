@@ -169,7 +169,7 @@ TEST(Conversion, NestedAndInsideOtherExpressions) {
       b = Box<int>(int<float>(4.75));          // a real generic class still works
       println(Str<int>(b.v));
       println(Str<float>(float<int>(twice(int<bool>(True))) + 0.5));
-      xs: int[] = [int<char>('a'), int<float>(2.5), int<bool>(False)];
+      xs: int[3] = [int<char>('a'), int<float>(2.5), int<bool>(False)];
       println(Str<int>(xs[0] + xs[1] + xs[2]));
       t = (Str<int>(1), char<int>(65));
       println(t.0 + Str<char>(t.1));
@@ -214,7 +214,7 @@ TEST(Conversion, BoolOfStrParsesExactlyTrueAndFalse) {
 TEST(Conversion, ParseRoundTrips) {
   LeakGuard g;
   auto r = compileAndRun(wrapMain(R"(
-    inputs: Str[] = ["0", "-7", "123456789", "x"];
+    inputs: Str[4] = ["0", "-7", "123456789", "x"];
     i = 0;
     while (i < inputs.len()) {
       match int<Str>(inputs[i]) {

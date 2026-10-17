@@ -114,8 +114,7 @@ TEST(OptionalPrimitive, MatchBindingIsAPlainValue) {
       }
       println(o);
       total = 0;
-      xs: int?[] = [1, 2, 3];
-      xs.push(None);
+      xs: int?[4] = [1, 2, 3, None];
       i = 0;
       while (i < xs.len()) {
         match xs[i] {
@@ -274,24 +273,24 @@ TEST(OptionalPrimitive, SmallOptionalsKeepTheirNeighbours) {
       println(m.f); println(m.d); println(m.s); println(m.e);
       m.c = False; m.b = None; m.n = 9;
       println(m.a); println(m.b); println(m.c); println(m.d); println(Str(m.n));
-      bs: bool?[] = [];
-      cs: char?[] = [];
+      bs: bool?[8] = [True, True, True, True, True, True, True, True];
+      cs: char?[8] = ['a', 'a', 'a', 'a', 'a', 'a', 'a', 'a'];
       i: int = 0;
-      while (i < 40) {
-        if (i % 4 == 0) { bs.push(None); cs.push('z'); }
-        else { bs.push(i % 2 == 0); cs.push(None); }
+      while (i < 8) {
+        if (i % 4 == 0) { bs[i] = None; cs[i] = 'z'; }
+        else { bs[i] = i % 2 == 0; cs[i] = None; }
         i = i + 1;
       }
       println(Str(bs.len()) + " " + Str(cs.len()));
-      println(bs[0]); println(bs[1]); println(bs[2]); println(cs[36]);
-      println(cs[37]); println(bs.pop()); println(cs.pop());
+      println(bs[0]); println(bs[1]); println(bs[2]); println(cs[4]);
+      println(cs[5]); println(bs[7]); println(cs[7]);
       return 0;
     }
   )pkn");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "True\n-1\nx\nNone\n2.5\ny\nstr\n7\n"
                       "True\nNone\nFalse\ny\n9\n"
-                      "40 40\nNone\nFalse\nTrue\nz\nNone\nFalse\nNone\n");
+                      "8 8\nNone\nFalse\nTrue\nz\nNone\nFalse\nNone\n");
   g.expectNoLeaks("SmallOptionalsKeepTheirNeighbours");
 }
 
@@ -324,7 +323,7 @@ TEST(OptionalPrimitive, ArraysOfOptionalPrimitives) {
 TEST(OptionalPrimitive, TupleElements) {
   LeakGuard g;
   auto r = compileAndRun(R"pkn(
-    fn find(xs: int[], key: int) -> (int?, Str) {
+    fn find(xs: view int[], key: int) -> (int?, Str) {
       i = 0;
       while (i < xs.len()) {
         if (xs[i] == key) { return (i, "found"); }
@@ -334,7 +333,7 @@ TEST(OptionalPrimitive, TupleElements) {
       return (none, "missing");
     }
     fn main() -> int {
-      xs: int[] = [4, 5, 6];
+      xs: int[3] = [4, 5, 6];
       a = find(xs, 6);
       b = find(xs, 9);
       println(a.0); println(a.1);

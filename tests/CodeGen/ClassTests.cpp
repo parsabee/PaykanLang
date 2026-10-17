@@ -79,7 +79,7 @@ TEST(Class, DefaultInitChainsAndStoresEveryField) {
     impl Vehicle { fn __init__(s: int) { self.speed = s * 10; } }
     class Car : Vehicle { name: Str; }
     class Node { label: Str; next: Node?; }
-    class Bag : Car { xs: int[]; pair: (int, Str); n: int?; }
+    class Bag : Car { xs: int[2]; pair: (int, Str); n: int?; }
     class Box<T> { v: T; }
     fn main() -> int {
       c = Car(5, "car");

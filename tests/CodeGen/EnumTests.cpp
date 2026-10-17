@@ -139,8 +139,8 @@ TEST(EnumCodeGen, ReturnEnumFromFunction) {
 }
 
 // Arrays of enums are primitive (i64) arrays, not object arrays: literal
-// construction, push, subscript get/set, and len must all treat the element as
-// a raw value rather than a boxed PaykanShared*.
+// construction, subscript get/set, and len must all treat the element as a raw
+// value rather than a boxed PaykanShared*.
 TEST(EnumCodeGen, ArrayOfEnums) {
   auto src =
       "enum Dir { North, East, South, West }\n"
@@ -152,9 +152,9 @@ TEST(EnumCodeGen, ArrayOfEnums) {
       "    West  { return \"W\"; }\n"
       "  }\n"
       "}\n" +
-      wrapMain("xs: Dir[] = [Dir::North, Dir::East];\n"
-               "  xs.push(Dir::South);\n" // grow
-               "  xs[0] = Dir::West;\n"   // subscript set
+      wrapMain("xs: Dir[3] = [Dir::North, Dir::East, Dir::North];\n"
+               "  xs[2] = Dir::South;\n" // subscript set
+               "  xs[0] = Dir::West;\n"
                "  i: int = 0;\n"
                "  while (i < xs.len()) { println(nm(xs[i])); i = i + 1; }");
   auto r = compileAndRun(src);

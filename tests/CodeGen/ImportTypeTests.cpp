@@ -65,14 +65,14 @@ impl Item { fn __init__(v: int) { self.v = v; } }
 class Bag {
   kind: Kind;
   first: Item;
-  fn items() -> Item[] { return [Item(1), Item(2), Item(3)]; }
+  fn items() -> Item[3] { return [Item(1), Item(2), Item(3)]; }
   fn kindOf() -> Kind { return self.kind; }
 }
 
 impl Bag {
   fn __init__() { self.kind = Kind::Big; self.first = Item(10); }
 }
-fn total(xs: Item[]) -> int {
+fn total(xs: view Item[]) -> int {
   s: int = 0; i: int = 0;
   while (i < xs.len()) { s = s + xs[i].v; i = i + 1; }
   return s;
@@ -82,7 +82,7 @@ fn total(xs: Item[]) -> int {
 import lib;
 fn main() -> int {
   b: lib::Bag = lib::Bag();
-  xs: lib::Item[] = b.items();
+  xs: lib::Item[3] = b.items();
   k: lib::Kind = b.kindOf();
   bonus: int = 0;
   if (k == lib::Kind::Big) { bonus = 100; }

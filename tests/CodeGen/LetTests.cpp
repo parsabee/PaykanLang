@@ -21,10 +21,9 @@ TEST(Let, LocalsHoldValuesAndReferences) {
       let s = "n=" + Str(n);
       let p = Point(1);
       let base: Obj = Point(5);
-      let xs = [n, 4];
+      let xs: int[3] = [n, 4, p.x];
       let o: int? = None;
       p.x = p.x + n;
-      xs.push(p.x);
       { let n = 10; println(Str(n)); }
       i = 0;
       while (i < 2) { let k = i * 2; print(Str(k) + " "); i = i + 1; }

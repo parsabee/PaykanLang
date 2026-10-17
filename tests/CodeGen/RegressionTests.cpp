@@ -17,17 +17,17 @@ extern "C" {
 
 using namespace paykan::test;
 
-// -- Ref-typed (array / tuple) parameters of user methods
+// -- Array and tuple parameters of user methods
 
 TEST(Regression, MethodArrayParam) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class Bag {
-      fn take(ys: int[]) -> int { return ys.len(); }
+      fn take(ys: view int[]) -> int { return ys.len(); }
     }
     fn main() -> int {
       b = Bag();
-      ys: int[] = [1, 2, 3];
+      ys: int[3] = [1, 2, 3];
       println(Str<int>(b.take(ys)));
       println(Str<int>(b.take([4, 5])));
       println(Str<int>(ys.len()));
@@ -51,17 +51,17 @@ TEST(Regression, MethodObjectArrayParam) {
       fn __init__(x: int) { self.x = x; }
     }
     class Bag {
-      fn total(ps: P[]) -> int {
+      fn total(ps: view P[]) -> int {
         s = 0;
         i = 0;
         while (i < ps.len()) { s = s + ps[i].x; i = i + 1; }
         return s;
       }
-      fn count(ss: Str[]) -> int { return ss.len(); }
+      fn count(ss: view Str[]) -> int { return ss.len(); }
     }
     fn main() -> int {
       b = Bag();
-      ps: P[] = [P(1), P(2)];
+      ps: P[2] = [P(1), P(2)];
       println(Str<int>(b.total(ps)));
       println(Str<int>(b.total([P(3), P(4)])));
       println(Str<int>(b.count(["a", "b", "c"])));
@@ -208,7 +208,7 @@ TEST(Regression, CharArrayElements) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class Word {
-      cs: char[];
+      cs: char[2];
       fn first() -> char { return self.cs[0]; }
     }
 
@@ -216,9 +216,9 @@ TEST(Regression, CharArrayElements) {
       fn __init__() { self.cs = ['h', 'i']; }
     }
     fn isA(c: char) -> bool { return c == 'a'; }
-    fn second(cs: char[]) -> char { return cs[1]; }
+    fn second(cs: view char[]) -> char { return cs[1]; }
     fn main() -> int {
-      cs: char[] = ['a', 'b'];
+      cs: char[2] = ['a', 'b'];
       println(Str<char>(cs[1]));
       if (cs[0] == 'a') { println("eq"); }
       println(Str<bool>(isA(cs[0])));
@@ -226,24 +226,24 @@ TEST(Regression, CharArrayElements) {
       d = cs[0];
       println(Str<char>(c) + Str<char>(d));
       x = 'k';
-      ds: char[] = [x, 'm'];
-      ds.push('z');
+      ds: char[3] = [x, 'm', x];
+      ds[2] = 'z';
       ds[0] = 'q';
-      println(Str<char>(ds[0]) + Str<char>(second(ds)) + Str<char>(ds.pop()));
+      println(Str<char>(ds[0]) + Str<char>(second(ds)) + Str<char>(ds[2]));
       println(Str<int>(ds.len()));
       w = Word();
       println(Str<char>(w.first()) + Str<char>(w.cs[1]));
       s: Str = "yo";
       println(Str<char>(s[1]));
-      bs: bool[] = [True, False];
-      bs.push(True);
-      println(Str<bool>(bs.pop()) + Str<bool>(bs[1]));
+      bs: bool[3] = [True, False, False];
+      bs[2] = True;
+      println(Str<bool>(bs[2]) + Str<bool>(bs[1]));
       return 0;
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.ExitCode, 0);
-  EXPECT_EQ(r.StdOut, "b\neq\nTrue\nba\nqmz\n2\nhi\no\nTrueFalse\n");
+  EXPECT_EQ(r.StdOut, "b\neq\nTrue\nba\nqmz\n3\nhi\no\nTrueFalse\n");
   g.expectNoLeaks("CharArrayElements");
 }
 
@@ -259,15 +259,15 @@ TEST(Regression, CallRootedObjectSubscript) {
       fn __init__(x: int) { self.x = x; }
     }
     class Holder {
-      items: Point[];
+      items: Point[1];
     }
 
     impl Holder {
       fn __init__() { self.items = [Point(7)]; }
     }
-    fn mk() -> Point[] { return [Point(1), Point(2)]; }
-    fn mks() -> Str[] { return ["a", "b"]; }
-    fn mkn() -> int[][] { return [[1, 2], [3]]; }
+    fn mk() -> Point[2] { return [Point(1), Point(2)]; }
+    fn mks() -> Str[2] { return ["a", "b"]; }
+    fn mkn() -> int[2][2] { return [[1, 2], [3, 4]]; }
     fn mkh() -> Holder { return Holder(); }
     fn take(p: Point) -> int { return p.x; }
     fn ret() -> Point { return mk()[1]; }
@@ -286,7 +286,7 @@ TEST(Regression, CallRootedObjectSubscript) {
       println(Str<int>(mkn()[1].len()));
       println(Str<int>(mkh().items[0].x));
       println(Str<int>(ret().x));
-      ps: Point[] = [mk()[1]];
+      ps: Point[1] = [mk()[1]];
       println(Str<int>(ps[0].x));
       match mk()[0] {
         pp: Point { println(Str<int>(pp.x)); }
@@ -296,7 +296,7 @@ TEST(Regression, CallRootedObjectSubscript) {
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.ExitCode, 0);
-  EXPECT_EQ(r.StdOut, "1\n2\n3\n1\n1\nab\n2\n1\n7\n2\n2\n1\n");
+  EXPECT_EQ(r.StdOut, "1\n2\n3\n1\n1\nab\n2\n2\n7\n2\n2\n1\n");
   g.expectNoLeaks("CallRootedObjectSubscript");
 }
 
@@ -310,13 +310,13 @@ TEST(Regression, CallRootedSubscriptAssign) {
     impl Point {
       fn __init__(x: int) { self.x = x; }
     }
-    fn mk() -> Point[] { return [Point(1), Point(2)]; }
-    fn mki() -> int[] { return [1, 2]; }
-    fn mkn() -> int[][] { return [[1, 2], [3]]; }
+    fn mk() -> Point[2] { return [Point(1), Point(2)]; }
+    fn mki() -> int[2] { return [1, 2]; }
+    fn mkn() -> int[2][2] { return [[1, 2], [3, 4]]; }
     fn main() -> int {
       mk()[0] = Point(9);
       mki()[1] = 5;
-      mkn()[0] = [5];
+      mkn()[0] = [5, 6];
       mkn()[1][0] = 4;
       return 0;
     }
@@ -513,30 +513,31 @@ TEST(Regression, SuperArgumentsAreBoxed) {
     class Base {
       p: Point;
       name: Str;
-      xs: int[];
+      xs: int[2];
     }
 
     impl Base {
-      fn __init__(p: Point, name: Str, xs: int[]) {
+      fn __init__(p: Point, name: Str, xs: int[2]) {
         self.p = p;
         self.name = name;
         self.xs = xs;
       }
     }
+    fn two(a: int, b: int) -> int[2] { return [a, b]; }
     class Lit : Base {}
 
     impl Lit {
-      fn __init__() { __super__(Point(1), "literal", [1, 2]); }
+      fn __init__() { __super__(Point(1), "literal", two(1, 2)); }
     }
     class Cat : Base {}
 
     impl Cat {
-      fn __init__(n: Str) { __super__(Point(2), n + "!", [3]); }
+      fn __init__(n: Str) { __super__(Point(2), n + "!", two(3, 4)); }
     }
     class Fwd : Base {}
 
     impl Fwd {
-      fn __init__(p: Point, n: Str, xs: int[]) { __super__(p, n, xs); }
+      fn __init__(p: Point, n: Str, xs: int[2]) { __super__(p, n, xs); }
     }
     fn main() -> int {
       a = Lit();
@@ -545,7 +546,7 @@ TEST(Regression, SuperArgumentsAreBoxed) {
       println(b.name + Str<int>(b.p.x));
       q = Point(3);
       s: Str = "fwd";
-      ys: int[] = [7];
+      ys: int[2] = [7, 8];
       c = Fwd(q, s, ys);
       println(c.name + Str<int>(c.p.x) + Str<int>(q.x) + s + Str<int>(ys.len()));
       return 0;
@@ -553,7 +554,7 @@ TEST(Regression, SuperArgumentsAreBoxed) {
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.ExitCode, 0);
-  EXPECT_EQ(r.StdOut, "literal12\nc!2\nfwd33fwd1\n");
+  EXPECT_EQ(r.StdOut, "literal12\nc!2\nfwd33fwd2\n");
   g.expectNoLeaks("SuperArgumentsAreBoxed");
 }
 // -- Empty array literals take their element type from the destination

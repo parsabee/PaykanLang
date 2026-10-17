@@ -211,9 +211,7 @@ TEST(FixedArray, ElementsOfReferenceTypes) {
       None { println("none"); }
     }
     ts: (int, Str)[2] = [(1, "one"), (2, "two")];
-    arrs: int[][2] = [[1, 2], [3]];
-    arrs[1].push(4);
-    println(ts[1].1 + " " + Str(arrs[1].len()) + " " + Str(arrs[0][1]));
+    println(ts[1].1);
     big: Str[6] = ["1", "2", "3", "4", "5", "6"];
     b2 = big;
     b2[5] = "x";
@@ -221,7 +219,7 @@ TEST(FixedArray, ElementsOfReferenceTypes) {
     r[0] = "R";
     println(big[0] + big[5] + b2[0] + b2[5]);
   )",
-               "aacc zac\ndEde\nsome x\ntwo 2 2\nR61x\n");
+               "aacc zac\ndEde\nsome x\ntwo\nR61x\n");
 }
 
 // A call's result or a literal owns its elements: one that initialises a

@@ -106,9 +106,9 @@ TEST(LiteralObject, TupleArrayAndOptionalElements) {
       println(first(("arg", 2)));
       m: (Str, Str) = ("m1", "m2");
       println(m.0 + m.1);
-      a: Str[] = ["x", "y"];
+      a: Str[3] = ["x", "y", ""];
       a[0] = "z";
-      a.push("w");
+      a[2] = "w";
       println(a[0] + a[1] + a[2]);
       println(["p", "q"][1]);
       o: Str? = "opt";

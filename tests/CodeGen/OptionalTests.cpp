@@ -185,8 +185,7 @@ TEST(Optional, CompareAgainstNone) {
       println(Str<bool>(n.next == None));        // field read
       n.next = Node(6);
       println(Str<bool>(n.next != None));
-      xs: Node?[] = [];
-      xs.push(None);
+      xs: Node?[1] = [None];
       println(Str<bool>(xs[0] == None));         // array element
       return 0;
     }
@@ -358,7 +357,7 @@ TEST(Optional, PrintingAReferenceOptional) {
       print(h.s); print(" ");
       h.s = "two";
       println(h.s);
-      xs: Str?[] = [None, "three"];
+      xs: Str?[2] = [None, "three"];
       println(xs[0]); println(xs[1]);
       printerrln(make(True));
       return 0;
@@ -431,7 +430,7 @@ TEST(Optional, OptionalArraySubject) {
   g.expectNoLeaks("OptionalArraySubject");
 }
 
-// -- T?[] — arrays with None slots
+// -- T?[n] — arrays with None slots
 
 TEST(Optional, ArrayOfOptionals) {
   LeakGuard g;
@@ -443,24 +442,24 @@ TEST(Optional, ArrayOfOptionals) {
       }
     }
     fn main() -> int {
-      xs: Node?[] = [];
-      xs.push(None);
-      xs.push(Node(1));
-      xs.push(Node(2));
+      xs: Node?[3] = [None, None, None];
+      xs[1] = Node(1);
+      xs[2] = Node(2);
       xs[2] = None;           // releases Node(2)
       xs[0] = Node(0);        // fills a None slot
       i: int = 0;
       while (i < xs.len()) { print(show(xs[i]) + " "); i = i + 1; }
       println("");
-      p: Node? = xs.pop();    // None
-      q: Node? = xs.pop();    // Node(1)
+      p: Node? = xs[2];       // None
+      q: Node? = xs[1];       // Node(1), taken out of its slot
+      xs[1] = None;
       println(show(p) + show(q));
       e: Node? = xs[0];       // retains the element
       xs[0] = None;
       println(show(e));
-      ss: Str?[] = [];
-      ss.push("a");
-      ss.push(None);
+      ss: Str?[2] = [None, None];
+      ss[0] = "a";
+      ss[1] = None;
       println(Str<int>(ss.len()));
       return 0;
     }
@@ -654,9 +653,7 @@ TEST(OptionalTuple, TupleWithOptionalElements) {
       println(Str<bool>(t == u));
       y: Node?, j: int = u;
       println(Str<bool>(y == None));
-      ts: (Node?, int)[] = [];
-      ts.push(t);
-      ts.push(u);
+      ts: (Node?, int)[2] = [t, u];
       println(Str<int>(ts.len()));
       return 0;
     }
@@ -674,14 +671,11 @@ TEST(OptionalTuple, ImportedTupleOfOptionals) {
   writeFile(tmp, "lib.pkn", R"pkn(
     class Node { v: int; }
     impl Node { fn __init__(x: int) { self.v = x; } }
-    fn wrap(xs: (Node?, int)[]?) -> (Node?, int)[]? { return xs; }
     fn mk(n: Node?) -> (Node?, int) { return (n, 5); }
   )pkn");
   auto main = writeFile(tmp, "main.pkn", R"pkn(
 import lib;
 fn main() -> int {
-  a: (lib::Node?, int)[]? = lib::wrap(None);
-  println(Str<bool>(a == None));
   x, k = lib::mk(lib::Node(3));
   match x {
     n: lib::Node { println(Str<int>(n.v + k)); }
@@ -694,7 +688,7 @@ fn main() -> int {
 )pkn");
   auto r = compileAndRunFile(main);
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "True\n8\nTrue\n");
+  EXPECT_EQ(r.StdOut, "8\nTrue\n");
   std::filesystem::remove_all(tmp);
   g.expectNoLeaks("ImportedTupleOfOptionals");
 }

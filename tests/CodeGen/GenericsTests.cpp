@@ -145,13 +145,15 @@ TEST(Generics, StackOfStrAndInt) {
 TEST(Generics, GenericFirstOnIntAndStrArrays) {
   LeakGuard g;
   auto r = compileAndRun(withMain(R"(
-    fn first<T>(xs: T[]) -> T { return xs[0]; }
-    fn last<T>(xs: T[]) -> T { return xs[xs.len() - 1]; }
+    fn first<T>(xs: view T[]) -> view T { return xs[0]; }
+    fn last<T>(xs: view T[]) -> view T { return xs[xs.len() - 1]; }
   )",
                                   R"(
-    println(Str<int>(first([10, 20, 30])));
-    println(first(["x", "y"]));
-    words: Str[] = ["p", "q", "r"];
+    nums: int[3] = [10, 20, 30];
+    println(Str<int>(first(nums)));
+    letters: Str[2] = ["x", "y"];
+    println(first(letters));
+    words: Str[3] = ["p", "q", "r"];
     println(last(words));
     println(Str<int>(last<int>([7])));
   )"));
@@ -258,15 +260,15 @@ TEST(Generics, ArrayOfInstantiationsAndFieldOfInstantiation) {
     }
   )",
                                   R"(
-    arr: Box<int>[] = [Box<int>(1), Box<int>(2)];
-    arr.push(Box<int>(3));
+    arr: Box<int>[3] = [Box<int>(1), Box<int>(2), Box<int>(0)];
+    arr[2] = Box<int>(3);
     total: int = 0;
     i: int = 0;
     while (i < arr.len()) { total = total + arr[i].get(); i = i + 1; }
     println(Str<int>(total));
     h: Holder = Holder(40);
     println(Str<int>(h.get().get() + 2));
-    names: Box<Str>[] = [Box<Str>("n")];
+    names: Box<Str>[1] = [Box<Str>("n")];
     println(names[0].get());
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
