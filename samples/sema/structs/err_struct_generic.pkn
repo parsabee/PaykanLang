@@ -1,3 +1,0 @@
-// ERROR: generic struct 'Pair' is not supported yet: a struct cannot have type parameters
-struct Pair<T> { a: T; b: T; }
-fn main() -> int { return 0; }

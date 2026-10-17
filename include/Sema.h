@@ -64,6 +64,7 @@ struct SemaContext {
   /// (docs/design/pkm.md §4.5).
   std::vector<ast::ClassDecl *> ForeignClasses;
   std::vector<ast::FuncDecl *> ForeignFunctions;
+  std::vector<ast::StructDecl *> ForeignStructs;
 
   explicit operator bool() const { return Ok; }
 };
@@ -619,10 +620,10 @@ public:
     std::string Module;                    ///< canonical module name
     std::vector<ast::ClassDecl *> Classes; ///< in the module's ASTContext
     std::vector<ast::FuncDecl *> Functions;
-    /// The `impl` blocks of each of Classes (not `impl Trait for`, whose
-    /// trait an importer cannot name).
-    std::unordered_map<const ast::ClassDecl *, std::vector<ast::ImplDecl *>>
-        Impls;
+    std::vector<ast::StructDecl *> Structs;
+    /// The `impl` blocks of each of Classes and Structs (not `impl Trait
+    /// for`, whose trait an importer cannot name).
+    std::unordered_map<const ast::Decl *, std::vector<ast::ImplDecl *>> Impls;
     /// The modules the bodies name, the module itself first: canonical
     /// name and the file ModuleCache knows it by.
     std::vector<std::pair<std::string, std::string>> Uses;
@@ -984,9 +985,58 @@ private:
   bool checkStructBodies();
   /// The module's structs declareStructs registered, in source order.
   std::vector<ast::StructDecl *> DeclaredStructs;
+  /// Their names (a later declaration of one of them is a redefinition,
+  /// not a conflict with an import).
+  StringSet LocalStructNames;
   /// The structs in the order populateStructs resolved them: every struct
   /// before the structs that hold it.
   std::vector<ast::StructDecl *> SortedStructs;
+
+  // -- Generic structs: templates and instantiations, as for classes
+  // (registerGenericTemplates registers them, resolveType and
+  // resolveGenericCall instantiate them).
+
+  /// Struct templates declared by this module (and, qualified, imported),
+  /// by name.
+  StringMap<ast::StructDecl *> StructTemplates;
+  /// Instantiation cache by canonical instantiation name; nullptr records a
+  /// failure.
+  StringMap<ast::StructType *> StructInstantiations;
+  /// What an instantiated StructType was made from (for inference through
+  /// `Pair<T>` parameters).
+  struct StructInstantiationInfo {
+    const ast::StructDecl *Template;
+    std::vector<ast::Type *> Args;
+  };
+  std::unordered_map<ast::StructType *, StructInstantiationInfo>
+      StructInstantiationInfos;
+  /// What @p st was instantiated from: an instantiation made here, or one
+  /// an imported module made of a template this module sees.  nullptr for
+  /// any other struct.
+  const StructInstantiationInfo *structInstantiationInfo(ast::StructType *st);
+  /// Instantiate struct template @p name with canonical @p args, or return
+  /// the cached instantiation.  Registers the struct (stub, fields, `impl`
+  /// methods, constructor) immediately and queues its bodies.  Returns
+  /// nullptr after reporting an error.
+  ast::StructType *instantiateStruct(const std::string &name,
+                                     const std::vector<ast::Type *> &args,
+                                     ast::SourceLocation loc);
+  /// Whether a value of @p ty holds a @p target in place: it is one, or a
+  /// tuple or a struct holding one.
+  static bool holdsStruct(const ast::Type *ty, const ast::StructType *target);
+  /// Instantiated structs in creation order (injectInstantiations).
+  std::vector<ast::StructDecl *> InstantiatedStructDecls;
+  std::vector<ast::StructDecl *> ForeignInstantiatedStructDecls;
+  /// Whether @p name is a class, struct or function template.
+  bool isTemplate(const std::string &name) const {
+    return ClassTemplates.count(name) || StructTemplates.count(name) ||
+           FuncTemplates.count(name);
+  }
+  /// Split the canonical instantiation name @p name (`Tmpl<arg1, arg2>`)
+  /// into the template's name and its arguments, resolved in this context;
+  /// false when it is not one or an argument does not resolve.
+  bool parseInstantiationName(const std::string &name, std::string &base,
+                              std::vector<ast::Type *> &args);
   /// The method @p name of @p ty, a class (its own or inherited, vtable or
   /// `impl`) or a struct (`impl`); nullptr for any other type.
   static ast::MethodDecl *methodOf(ast::Type *ty, const std::string &name);
@@ -996,8 +1046,9 @@ private:
   /// The `impl` blocks by the name of the class they add to: an
   /// instantiation's are copies of its template's.
   StringMap<std::vector<ast::ImplDecl *>> ImplsByClass;
-  /// The `impl` blocks of the module's generic classes, by template.
-  std::unordered_map<const ast::ClassDecl *, std::vector<ast::ImplDecl *>>
+  /// The `impl` blocks of the module's generic classes and structs, by
+  /// template.
+  std::unordered_map<const ast::Decl *, std::vector<ast::ImplDecl *>>
       TemplateImpls;
   /// Set once checkImplDecls has run (see PendingTraitImpls).
   bool ImplsChecked = false;
@@ -1114,8 +1165,13 @@ private:
 
   /// Instantiations whose bodies still have to be checked.
   struct PendingInstantiation {
-    ast::ClassDecl *Class = nullptr; // exactly one of Class / Func is set
+    ast::ClassDecl *Class = nullptr; // exactly one of Class / Func / Struct
     ast::FuncDecl *Func = nullptr;
+    ast::StructDecl *Struct = nullptr;
+    /// How many instantiations deep the request was made (instantiationDepth
+    /// there), so that a body instantiating a template with an ever-growing
+    /// argument (`Deep<Deep<T>>`) is stopped as a field doing it is.
+    size_t Depth = 0;
     std::string Name;               // canonical instantiation name
     ast::SourceLocation RequestLoc; // where the instantiation was requested
     StringSet TypeParams;           // the template's type parameter names
@@ -1144,6 +1200,14 @@ private:
     const std::vector<std::string> *Lines = nullptr;
   };
   std::vector<InstantiationFrame> InstantiationStack;
+  /// The depth of the instantiation whose body is being checked
+  /// (checkPendingInstantiations); 0 in hand-written code.
+  size_t CurrentInstantiationDepth = 0;
+  /// How many instantiations deep the current point is: the body's own
+  /// depth plus the instantiations in progress within it.
+  size_t instantiationDepth() const {
+    return CurrentInstantiationDepth + InstantiationStack.size();
+  }
   /// The `impl Trait for` copies of instantiations made before the module's
   /// `impl` blocks are checked (ImplsChecked): checked with them.
   struct PendingTraitImpl {

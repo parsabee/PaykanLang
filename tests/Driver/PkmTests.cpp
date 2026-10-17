@@ -973,3 +973,55 @@ TEST(Pkm, GenericsAcrossSourceModulesAreNotCached) {
   EXPECT_FALSE(fs::exists(dir / ".paykan_cache" / "m3.pkm"));
   fs::remove_all(dir);
 }
+
+// A generic struct is a template like a generic class: its module, and a
+// module that instantiates it, are built from source each time, and the
+// instantiation is one struct whoever makes it.
+TEST(Pkm, GenericStructsAcrossSourceModulesAreNotCached) {
+  REQUIRE_BACKEND();
+  fs::path dir = fs::temp_directory_path() /
+                 ("pkm_generic_structs_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "lib" / "gen.pkn",
+            "struct Pair<A, B> { a: A; b: B; }\n"
+            "impl Pair<A, B> { view fn sum() -> int { return 1; } }\n"
+            "fn mk() -> Pair<int, Str> { return Pair<int, Str>(2, \"m\"); }\n");
+  writeFile(dir / "m1.pkn", "import lib::gen;\n"
+                            "fn one() -> int { return gen::Pair(1, 2).sum(); "
+                            "}\n");
+  writeFile(dir / "m2.pkn", "import lib::gen;\n"
+                            "fn make() -> gen::Pair<Str, int> { "
+                            "return gen::Pair<Str, int>(\"m\", 2); }\n");
+  writeFile(dir / "plain.pkn", "fn two() -> int { return 2; }\n");
+  // m2's Pair<Str, int> is one struct with main's; gen's own Pair<int, Str>
+  // (mk's result) is one with main's explicit instantiation of it.
+  writeFile(dir / "main.pkn",
+            "import m1;\nimport m2;\nimport plain;\nimport lib::gen;\n"
+            "fn main() -> int { p = m2::make(); p.b = p.b + 1;\n"
+            "  q = gen::Pair<Str, int>(\"m\", 3);\n"
+            "  r = gen::mk(); r.a = 0;\n"
+            "  println(p.toString() + \" \" + Str(p == q) + \" \" +\n"
+            "          Str(r == gen::Pair<int, Str>(0, \"m\")));\n"
+            "  return m1::one() + plain::two() + p.b; }\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  for (int round = 0; round < 2; ++round) {
+    auto r = paykan("--verbose --track-heap main.pkn");
+    EXPECT_EQ(r.exitCode, 6) << r.out;
+    EXPECT_TRUE(contains(r.out, "Pair<Str, int>(a: m, b: 3) True True\n"))
+        << r.out;
+    EXPECT_TRUE(contains(r.out, "live blocks       : 0")) << r.out;
+    for (const char *m : {"lib::gen", "m1", "m2"})
+      EXPECT_TRUE(contains(r.out, std::string("module ") + m +
+                                      ": no cache entry; building from "
+                                      "source"))
+          << m << "\n"
+          << r.out;
+    EXPECT_TRUE(contains(r.out, round == 0 ? "module plain: wrote"
+                                           : "module plain: cache"))
+        << r.out;
+  }
+  EXPECT_FALSE(fs::exists(dir / ".paykan_cache" / "m2.pkm"));
+  fs::remove_all(dir);
+}

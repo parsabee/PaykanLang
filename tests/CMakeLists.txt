@@ -83,6 +83,7 @@ add_executable(sema_tests
     Sema/TraitTests.cpp
     Sema/BorrowedResultTests.cpp
     Sema/StructTests.cpp
+    Sema/GenericStructTests.cpp
 )
 target_include_directories(sema_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}

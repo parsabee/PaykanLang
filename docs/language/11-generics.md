@@ -88,6 +88,9 @@ impl Keyed<K> for Pair<K, V> {}   // met by Pair's own key()
   class body.
 - A generic class's `impl` block cannot have a `static fn` yet.
 
+A struct can be generic in the same way (`struct Pair<A, B> { a: A; b: B; }`, with
+`impl Pair<A, B>` blocks): see [Generic structs](14-structs.md#generic-structs).
+
 ## Declaring a Generic Function
 
 ```pkn

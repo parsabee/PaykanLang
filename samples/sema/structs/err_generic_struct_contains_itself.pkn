@@ -1,0 +1,6 @@
+// ERROR: struct 'Node<int>' contains itself: field 'next' holds a 'Node<int>'; a struct is held in place, so it cannot hold one of its own (hold it in a class instead)
+struct Node<T> { v: T; next: Node<T>; }
+fn main() -> int {
+  n = Node<int>(1, n);
+  return 0;
+}

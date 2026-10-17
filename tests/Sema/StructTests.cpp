@@ -457,21 +457,17 @@ fn main() -> int {
   EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
 }
 
-TEST(Struct, NativeFunctionsAndGenericStructs) {
+TEST(Struct, NativeFunctions) {
   auto r = semaCheck(R"(
 struct A { x: int; }
-struct Pair<T> { a: T; b: T; }
-impl Pair<T> { view fn first() -> T { return self.a; } }
 native fn f(a: view A) -> int = "c_f";
 native fn g<T>(a: view T) -> int = "c_g";
 fn main() -> int { return g(A(1)); }
 )");
   EXPECT_FALSE(r.Ok);
-  expectAll(r, {"generic struct 'Pair' is not supported yet: a struct cannot "
-                "have type parameters",
-                "native function 'f': parameter 'a' of type 'A' cannot cross "
+  expectAll(r, {"native function 'f': parameter 'a' of type 'A' cannot cross "
                 "into C"});
-  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
 }
 
 TEST(Struct, EqualityPrintingAndShow) {
