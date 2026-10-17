@@ -93,7 +93,6 @@ PAYKAN_STATIC_ASSERT(~0 == -1 && (int64_t)UINT64_MAX == -1 &&
 typedef struct PaykanObject PaykanObject;
 typedef struct PaykanString PaykanString;
 typedef struct PaykanShared PaykanShared;
-typedef struct PaykanArray PaykanArray;
 
 // -- Object
 //
@@ -135,10 +134,7 @@ enum {
   PAYKAN_SLOT_FILE_READLN = 4,    // PaykanShared *(*)(PaykanObject *self)
   PAYKAN_SLOT_FILE_READBYTES = 5, // PaykanShared *(*)(PaykanObject *, int64_t)
   PAYKAN_SLOT_FILE_READ = 6,      // PaykanShared *(*)(PaykanObject *self)
-  PAYKAN_FILE_SLOTS = 7,
-  // Array
-  PAYKAN_SLOT_ARRAY_LENGTH = 3, // int64_t (*)(PaykanObject *self)
-  PAYKAN_ARRAY_SLOTS = 4
+  PAYKAN_FILE_SLOTS = 7
 };
 
 struct PaykanObject {
@@ -268,101 +264,6 @@ int64_t PaykanError_equals(PaykanObject *self, PaykanShared *other);
 
 // Global vtable instance.
 extern PaykanMethod PaykanError_vtable[PAYKAN_OBJECT_SLOTS];
-
-// -- Array
-//
-// Inherits Object.  The first three vtable slots match Object's layout;
-// additional slots follow for Array-specific methods.
-//
-// An element slot is pointer-sized (8 bytes on all supported targets), except
-// in an array of optional values.  Primitive elements (int, float, bool) are
-// stored unboxed as int64_t/double; class-type elements store a
-// PaykanShared* (retained by the array); an optional value (`int?` & co.,
-// #96) is stored inline as the compiler lays it out: a bool presence flag,
-// then the payload at its alignment, so 2 bytes for `bool?` and `char?` and
-// 16 for `int?` and `float?` (all zero is None).
-/// The largest element PaykanArray_new_sized accepts.
-#define PAYKAN_MAX_ELEM_SIZE 64UL
-
-struct PaykanArray {
-  PaykanMethod *vtable;    // PaykanArray_vtable (primitive),
-                           // PaykanArray_obj_vtable (object) or
-                           // PaykanArray_sized_vtable (optional values)
-  PaykanShared *shared;    // object header (see PaykanObject)
-  void *data;              // heap-allocated element buffer
-  unsigned long len;       // number of live elements
-  unsigned long cap;       // allocated capacity (in elements)
-  unsigned long elem_size; // bytes per element (8, or the optional's size)
-};
-
-// -- Constructors
-
-/// Primitive array (int / float / bool): elements stored as raw 8-byte values.
-PaykanArray *PaykanArray_new(unsigned long len);
-PaykanArray *PaykanArray_new_from_data(unsigned long len, const void *data);
-
-/// Object array (class-type elements stored as PaykanShared*):
-/// set/destroy manage reference counts automatically.
-PaykanArray *PaykanArray_new_obj(unsigned long len);
-
-/// Array of @p len zeroed elements of @p elem_size bytes (an `int?[]`: every
-/// element None), read and written in place through PaykanArray_slot,
-/// PaykanArray_push_slot and PaykanArray_pop_into.  Holds no references.
-PaykanArray *PaykanArray_new_sized(unsigned long len, unsigned long elem_size);
-
-// -- Element access
-
-/// Read an 8-byte slot as a void*.
-/// Caller reinterprets as int64_t, double, or PaykanShared* as appropriate.
-void *PaykanArray_get(PaykanArray *arr, unsigned long idx);
-
-/// Primitive set: plain 8-byte store, no reference counting.
-void PaykanArray_set(PaykanArray *arr, unsigned long idx, void *value);
-
-/// Object set: releases the old PaykanShared* in the slot and retains the new
-/// one.
-void PaykanArray_set_obj(PaykanArray *arr, unsigned long idx,
-                         PaykanShared *value);
-
-/// The address of element @p idx (bounds-checked), to read or write in place
-/// before the array next changes length.
-void *PaykanArray_slot(PaykanArray *arr, unsigned long idx);
-
-/// Append an element and return its address (uninitialised: the caller
-/// stores the element there before the array next changes length).
-void *PaykanArray_push_slot(PaykanArray *arr);
-
-/// Remove the last element, copying its elem_size bytes to @p out.  Aborts
-/// if the array is empty.
-void PaykanArray_pop_into(PaykanArray *arr, void *out);
-
-// -- Method implementations
-void PaykanArray_destroy(PaykanObject *self);
-void PaykanArray_destroy_obj(PaykanObject *self);
-PaykanShared *PaykanArray_toString(PaykanObject *self);
-int64_t PaykanArray_equals(PaykanObject *self, PaykanShared *other);
-int64_t PaykanArray_length(PaykanObject *self);
-
-/// Append a primitive value to the array (reallocs the backing buffer).
-void PaykanArray_push(PaykanArray *arr, void *value);
-
-/// Append an object (PaykanShared*) to the array; retains the new element.
-void PaykanArray_push_obj(PaykanArray *arr, PaykanShared *value);
-
-/// Remove and return the last primitive element.  Aborts if array is empty.
-void *PaykanArray_pop(PaykanArray *arr);
-
-/// Remove and return the last object element (transferred ownership — caller
-/// is responsible for releasing the returned PaykanShared*).
-PaykanShared *PaykanArray_pop_obj(PaykanArray *arr);
-
-// -- VTable instances
-extern PaykanMethod
-    PaykanArray_vtable[PAYKAN_ARRAY_SLOTS]; // for primitive-element arrays
-extern PaykanMethod
-    PaykanArray_obj_vtable[PAYKAN_ARRAY_SLOTS]; // for object-element arrays
-extern PaykanMethod
-    PaykanArray_sized_vtable[PAYKAN_ARRAY_SLOTS]; // for optional elements
 
 // -- Tuple
 //
@@ -602,6 +503,18 @@ void Paykan_printerrln(PaykanObject *obj);
 /// for programs that embed the runtime.
 void Paykan_flush(void);
 
+// -- Program arguments
+//
+// `fn main(args: view Str[])` is passed a slice of the program's arguments:
+// one string per argv entry, or none when PAYKAN_NO_ARGS is set (the kernel
+// always supplies an argv[0], so a caller that wants none says so).  The
+// entry point makes them before main runs and drops them after it returns.
+
+/// The boxed strings of argv, @p *count of them.
+PaykanShared **Paykan_args_new(int argc, char **argv, int64_t *count);
+/// Release the @p count strings and the slice itself.
+void Paykan_args_free(PaykanShared **args, int64_t count);
+
 // -- Pluggable heap allocator
 //
 // Every heap allocation of the runtime and of generated code (object structs
@@ -682,7 +595,6 @@ void Paykan_heap_dump(void);
 PAYKAN_CHECK_HEADER(PaykanString);
 PAYKAN_CHECK_HEADER(PaykanFile);
 PAYKAN_CHECK_HEADER(PaykanError);
-PAYKAN_CHECK_HEADER(PaykanArray);
 PAYKAN_CHECK_HEADER(PaykanTuple);
 #undef PAYKAN_CHECK_HEADER
 

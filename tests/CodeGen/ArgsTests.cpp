@@ -1,14 +1,14 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// End-to-end tests for main(args: Str[]) parameter passing.
+// End-to-end tests for main(args: view Str[]) parameter passing.
 
 #include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
 
 using namespace paykan::test;
 
-// -- main(args: Str[]) — program argument passing
+// -- main(args: view Str[]) — program argument passing
 
 TEST(Args, NoArgVariantStillRuns) {
   auto r = compileAndRun(R"(
@@ -22,7 +22,7 @@ TEST(Args, NoArgVariantStillRuns) {
 
 TEST(Args, ArgCountViaLen) {
   auto r = compileAndRunWithArgs(R"(
-    fn main(args: Str[]) -> int {
+    fn main(args: view Str[]) -> int {
       return args.len();
     }
   )",
@@ -33,8 +33,8 @@ TEST(Args, ArgCountViaLen) {
 
 TEST(Args, FirstArgIsScriptPath) {
   auto r = compileAndRunWithArgs(R"(
-    fn main(args: Str[]) -> int {
-      x: Str = args[0];
+    fn main(args: view Str[]) -> int {
+      x: view Str = args[0];
       print(x);
       return 0;
     }
@@ -47,7 +47,7 @@ TEST(Args, FirstArgIsScriptPath) {
 
 TEST(Args, SecondArgReadable) {
   auto r = compileAndRunWithArgs(R"(
-    fn main(args: Str[]) -> int {
+    fn main(args: view Str[]) -> int {
       print(args[1]);
       return 0;
     }
@@ -59,7 +59,7 @@ TEST(Args, SecondArgReadable) {
 
 TEST(Args, EmptyArgList) {
   auto r = compileAndRunWithArgs(R"(
-    fn main(args: Str[]) -> int {
+    fn main(args: view Str[]) -> int {
       return args.len();
     }
   )",
@@ -70,7 +70,7 @@ TEST(Args, EmptyArgList) {
 
 TEST(Args, ArgLenUsedInLogic) {
   auto r = compileAndRunWithArgs(R"(
-    fn main(args: Str[]) -> int {
+    fn main(args: view Str[]) -> int {
       if (args.len() > 1) {
         return 1;
       } else {
@@ -81,4 +81,39 @@ TEST(Args, ArgLenUsedInLogic) {
                                  {"script.pkn", "extra"});
   ASSERT_TRUE(r.CompileOk);
   EXPECT_EQ(r.ExitCode, 1);
+}
+
+// `args` is a slice: it is passed on to `view Str[]` parameters, which index
+// it and measure it like any other slice.
+TEST(Args, PassedToSliceParameters) {
+  LeakGuard g;
+  auto r = compileAndRunWithArgs(R"(
+    fn longest(ss: view Str[]) -> int {
+      n = 0;
+      i = 0;
+      while (i < ss.len()) {
+        if (ss[i].len() > n) { n = ss[i].len(); }
+        i = i + 1;
+      }
+      return n;
+    }
+    fn joined(ss: view Str[], from: int) -> Str {
+      s = "";
+      i = from;
+      while (i < ss.len()) {
+        s = s + ss[i] + ";";
+        i = i + 1;
+      }
+      return s;
+    }
+    fn main(args: view Str[]) -> int {
+      println(joined(args, 1));
+      return longest(args);
+    }
+  )",
+                                 {"s.pkn", "a", "abcdefgh", "xyz"});
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 8);
+  EXPECT_EQ(r.StdOut, "a;abcdefgh;xyz;\n");
+  g.expectNoLeaks("PassedToSliceParameters");
 }

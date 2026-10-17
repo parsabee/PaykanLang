@@ -60,20 +60,20 @@ println(p.toString());     // (1,2)
 
 - Each field has a type annotation. Fields **do not have default values** — every field must be
   assigned inside `__init__`, or passed to the default one.
-- Field types may be builtins, `Str`, arrays, or other class types.
+- Field types may be builtins, `Str`, fixed-size arrays (`T[n]`), or other class types.
 
 ```pkn
 class User {
   id: int;
   name: Str;
-  friends: User[];
+  scores: int[3];
 }
 
 impl User {
   fn __init__(id: int, name: Str) {
     self.id = id;
     self.name = name;
-    self.friends = [];
+    self.scores = [0, 0, 0];
   }
 }
 ```
@@ -167,8 +167,7 @@ A method may change `self`. One that does not is written `view fn`, like `value`
 and `self` is read-only in its body: through `self` it cannot
 
 - assign a field or an element (`self.n = 1`, `self.xs[0] = 1`);
-- call a method that is not a `view fn` (`self.tick()`, `self.xs.push(1)`,
-  `self.child.tick()`);
+- call a method that is not a `view fn` (`self.tick()`, `self.child.tick()`);
 - pass `self`'s fields to an `inout` parameter (`bump(self.n)`) or name one with an
   `inout` local;
 - pass `self` or its fields to a parameter that is not `view`, or store `self` or a
@@ -178,8 +177,8 @@ and `self` is read-only in its body: through `self` it cannot
 Each is an error that names the method: `'self' is read-only in 'view fn value'; 'tick' is
 not a 'view fn'`. Other objects can change as usual.
 
-Part of `self` that is an object, string, array, tuple or optional is a `view` in a
-`view fn`, so the method returns it as one, `-> view T`
+Part of `self` that is an object, string, tuple or optional, or an array of them, is a
+`view` in a `view fn`, so the method returns it as one, `-> view T`
 ([Borrowed results](02-functions-and-calling.md#borrowed-results)), and its caller cannot
 change it. `view fn name() -> Str { return self.name; }` is an error: `'self' is read-only
 in 'view fn name', so part of it can only be returned as a 'view': write '-> view Str'`. A
@@ -190,8 +189,8 @@ is not a `view fn` may return part of `self` for its caller to change.
 Only a `view fn` can be called on a `view`, a parameter or a local
 ([Functions](02-functions-and-calling.md#view-read-only)): `'c' is a 'view' parameter;
 'increment' is not a 'view fn'`. The builtin methods that only read are `view fn`s:
-`toString`, `equals`, `len`, `length`; `push`, `pop`, `concat` and the `File` methods are
-not. A `let` local only cannot be reassigned: any method can be called on what it holds.
+`toString`, `equals`, `len`, `length`; `concat` and the `File` methods are not. A `let`
+local only cannot be reassigned: any method can be called on what it holds.
 
 - `__init__` cannot be a `view fn`: it sets up `self`.
 - An override keeps the marker of the method it overrides, both ways:
@@ -354,7 +353,8 @@ println(p.toString());   // Alice (age 30)
 
 - `Derived <: Base` whenever `class Derived : Base`.
 - A `Derived` instance may be stored in a variable of type `Base` or `Obj`.
-- `Derived[]` is **not** a subtype of `Base[]` (arrays are invariant).
+- `Derived[n]` is **not** a `Base[n]`, and a `view Base[]` parameter does not take one
+  (an array's element type is exact).
 
 ```pkn
 a: Animal = Dog();   // Dog stored as Animal — valid

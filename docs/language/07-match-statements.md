@@ -138,7 +138,7 @@ With `view`, the binding is a `view` local of the subject, whatever the subject 
 - nothing changes through it: no field or element write, only `view fn` calls, no `inout`
   argument (`'d' is a 'view' local; 'tick' is not a 'view fn'`);
 - it can only be passed on to a `view` parameter, and if it shares what it holds (an
-  object, string or array) it is never stored or returned;
+  object or a string) it is never stored or returned;
 - it cannot be assigned (`cannot assign to 'view' local 'd'`);
 - while it is live, from the start of the arm to its last use there, the variable the
   subject starts from cannot change (`'a' is viewed by 'view' local 'd' until 'd' is last

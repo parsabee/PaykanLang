@@ -133,20 +133,6 @@ const RuntimeProto kRuntimeProtos[] = {
     {names::kPaykanStringEquals, kInt64, {kRtObjPtr, kRtBoxPtr}},
     {names::kPaykanStringToString, kRtBoxPtr, {kRtObjPtr}},
     {names::kPaykanStringLength, kInt64, {kRtObjPtr}},
-    {names::kPaykanArrayNew, kRtArrPtr, {kUnsignedLong}},
-    {names::kPaykanArrayNewObj, kRtArrPtr, {kUnsignedLong}},
-    {names::kPaykanArrayNewFromData, kRtArrPtr, {kUnsignedLong, kConstVoidPtr}},
-    {names::kPaykanArrayGet, kVoidPtr, {kRtArrPtr, kUnsignedLong}},
-    {names::kPaykanArraySet, kVoid, {kRtArrPtr, kUnsignedLong, kVoidPtr}},
-    {names::kPaykanArraySetObj, kVoid, {kRtArrPtr, kUnsignedLong, kRtBoxPtr}},
-    {names::kPaykanArrayPush, kVoid, {kRtArrPtr, kVoidPtr}},
-    {names::kPaykanArrayPushObj, kVoid, {kRtArrPtr, kRtBoxPtr}},
-    {names::kPaykanArrayPop, kVoidPtr, {kRtArrPtr}},
-    {names::kPaykanArrayPopObj, kRtBoxPtr, {kRtArrPtr}},
-    {names::kPaykanArrayNewSized, kRtArrPtr, {kUnsignedLong, kUnsignedLong}},
-    {names::kPaykanArraySlot, kVoidPtr, {kRtArrPtr, kUnsignedLong}},
-    {names::kPaykanArrayPushSlot, kVoidPtr, {kRtArrPtr}},
-    {names::kPaykanArrayPopInto, kVoid, {kRtArrPtr, kVoidPtr}},
     {names::kPaykanTupleNew, kRtTupPtr, {kInt64, kConstUint8Ptr}},
     {names::kPaykanTupleGet, kInt64, {kRtTupPtr, kInt64}},
     {names::kPaykanTupleSet, kVoid, {kRtTupPtr, kInt64, kInt64}},
@@ -1518,7 +1504,7 @@ class Emitter {
       fail("the main module defines no 'main' function");
       return;
     }
-    bool takesArgs = mainFn->Sig.Params.size() == 1;
+    bool takesArgs = mainFn->Sig.Params.size() == 2;
     // int main(int argc, char **argv) {
     line(openBlock(
         declare(kInt, kMain) +
@@ -1531,40 +1517,23 @@ class Emitter {
     line(openBlock(ifHead(kMainTrack)) + kSpace +
          stmt(call(kRtHeapSetTracking, {kOne})) + kSpace +
          stmt(call(names::kPaykanHeapReset, {})) + kSpace + kRBrace);
+    std::vector<std::string> mainArgs;
     if (takesArgs) {
-      // PAYKAN_NO_ARGS: run with an empty argument list (the kernel always
-      // supplies an argv[0], so a caller that wants argc == 0 says so).
-      line(stmt(binop(declare(pointerTo(kRtArray), kMainArgs), kOpAssign,
-                      call(names::kPaykanArrayNewObj, {kZero}))));
-      line(ifHead(envSet(kEnvNoArgs)) + kSpace +
-           stmt(binop(kArgc, kOpAssign, kZero)));
-      // for (int i = 0; i < argc; ++i) {
-      line(openBlock(
-          kFor + std::string(kSpace) +
-          paren(stmt(binop(declare(kInt, kMainIndex), kOpAssign, kZero)) +
-                kSpace + stmt(binop(kMainIndex, kOpLt, kArgc)) + kSpace +
-                kOpPreInc + kMainIndex)));
-      ++Indent;
-      std::string arg = subscript(kArgv, kMainIndex);
-      line(stmt(binop(declare(pointerTo(kRtString), kMainStr), kOpAssign,
-                      call(names::kPaykanStringNew,
-                           {arg, cast(kInt64) + call(kStrlen, {arg})}))));
-      line(stmt(
-          binop(declare(pointerTo(kRtShared), kMainBox), kOpAssign,
-                call(names::kPaykanSharedNew, {cast(kRtObjPtr) + kMainStr}))));
-      line(stmt(call(names::kPaykanArrayPushObj, {kMainArgs, kMainBox})));
-      line(stmt(call(names::kPaykanRelease, {kMainBox})));
-      --Indent;
-      line(kRBrace);
+      // args: view Str[] -- a slice of the arguments' strings
+      // (Paykan_args_new, which also honours PAYKAN_NO_ARGS).
+      line(stmt(declare(kInt64, kMainArgsLen)));
+      line(stmt(binop(declare(pointerTo(pointerTo(kRtShared)), kMainArgs),
+                      kOpAssign,
+                      call(names::kPaykanArgsNew,
+                           {kArgc, kArgv, std::string("&") + kMainArgsLen}))));
+      mainArgs = {kMainArgs, kMainArgsLen};
     } else {
       line(stmt(cast(kVoid) + kArgc) + kSpace + stmt(cast(kVoid) + kArgv));
     }
-    std::vector<std::string> mainArgs;
-    if (takesArgs)
-      mainArgs.push_back(
-          call(names::kPaykanSharedNew, {cast(kRtObjPtr) + kMainArgs}));
     line(stmt(binop(declare(kInt64, kMainRc), kOpAssign,
                     call(symbolOf(main.Name, kMain), mainArgs))));
+    if (takesArgs)
+      line(stmt(call(names::kPaykanArgsFree, {kMainArgs, kMainArgsLen})));
     line(ifHead(kMainTrack) + kSpace + stmt(call(kRtHeapDump, {})));
     line(stmt(kReturn + std::string(kSpace) + cast(kInt) + kMainRc));
     Indent = 0;

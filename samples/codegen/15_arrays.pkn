@@ -1,22 +1,18 @@
 // 15_arrays.pkn — comprehensive codegen sample for arrays
 // Covers: int/float/bool primitive array literals, Str array literals,
 //         user-class array literals, subscript read (primitive + object),
-//         len() builtin, array as function parameter, array as return type,
-//         array.toString(), array.equals(), array element method call,
-//         nested len+subscript expressions,
-//         constant-literal optimization (PaykanArray_new_from_data),
-//         dynamic arrays (non-constant elements), empty array with annotation,
-//         array in while loop (manual iteration), multi-element str concat
-//         from subscript results, bool array elements, float array elements,
-//         array assigned to Obj (vtable toString ABI), Str.concat() via vtable.
-// Exercises: visitArrayLiteralExpr (primitive constant, primitive dynamic,
-//            object), visitSubscriptExpr (int, float, bool, Str, class),
-//            visitCallExpr len(), visitMethodCallExpr on array variable and
-//            on subscript result, InternedArrayData, InternedStrings,
-//            PaykanArray_new_from_data, PaykanArray_new_obj / set_obj / get,
-//            Scope::SharedVars for array variables, emitScopeCleanup,
-//            visitFuncDecl with array-typed params, visitReturnStmt with
-//            array return type.
+//         len(), slices (`view T[]`) as function parameters, arrays as
+//         return types, array element method calls, nested len+subscript
+//         expressions, constant and non-constant elements, array in while
+//         loop (manual iteration), multi-element str concat from subscript
+//         results, bool array elements, float array elements, inferred
+//         lengths (`T[_]`), 2D arrays (`T[n][m]`) and slices of rows,
+//         Str.concat() via vtable.
+// Exercises: array literals (primitive constant, primitive non-constant,
+//            object), subscripts (int, float, bool, Str, class), len() on
+//            arrays, slices and rows, method calls on subscript results,
+//            array-typed parameters and results, scope cleanup of arrays
+//            holding objects.
 
 // ---- A simple class to put into arrays ------------------------------------
 
@@ -57,7 +53,7 @@ impl Labeled {
 
 // ---- Helper functions -------------------------------------------------------
 
-fn sumArray(a: int[]) -> int {
+fn sumArray(a: view int[]) -> int {
   total: int = 0;
   i: int = 0;
   while (i < a.len()) {
@@ -67,15 +63,15 @@ fn sumArray(a: int[]) -> int {
   return total;
 }
 
-fn firstStr(a: Str[]) -> Str {
+fn firstStr(a: view Str[]) -> view Str {
   return a[0];
 }
 
-fn makePoints() -> Point[] {
+fn makePoints() -> Point[3] {
   return [Point(1, 2), Point(3, 4), Point(5, 6)];
 }
 
-fn concatAll(a: Str[]) -> Str {
+fn concatAll(a: view Str[]) -> Str {
   result: Str = "";
   i: int = 0;
   while (i < a.len()) {
@@ -85,27 +81,22 @@ fn concatAll(a: Str[]) -> Str {
   return result;
 }
 
-// matMul: multiply two NxM and MxP int matrices, return NxP result as int[][]
-fn matMul(A: int[][], B: int[][]) -> int[][] {
-  rows: int = A.len();
-  cols: int = B[0].len();
-  inner: int = B.len();
-  C: int[][] = [];
+// matMul: multiply two 2x2 int matrices (slices of rows of two)
+fn matMul(A: view int[2][], B: view int[2][]) -> int[2][2] {
+  C: int[2][2] = [[0, 0], [0, 0]];
   i: int = 0;
-  while (i < rows) {
-    row: int[] = [];
+  while (i < C.len()) {
     j: int = 0;
-    while (j < cols) {
+    while (j < C[i].len()) {
       sum: int = 0;
       k: int = 0;
-      while (k < inner) {
+      while (k < B.len()) {
         sum = sum + A[i][k] * B[k][j];
         k = k + 1;
       }
-      row.push(sum);
+      C[i][j] = sum;
       j = j + 1;
     }
-    C.push(row);
     i = i + 1;
   }
   return C;
@@ -117,9 +108,9 @@ fn matMul(A: int[][], B: int[][]) -> int[][] {
 
 fn main() -> int {
 
-  // --- 1. Int array literal (constant -> PaykanArray_new_from_data) ----------
+  // --- 1. Int array literal (constant elements) ------------------------------
   println("=== int array ===");
-  nums: int[] = [10, 20, 30, 40, 50];
+  nums: int[5] = [10, 20, 30, 40, 50];
   println(Str(nums.len()));          // 5
   println(Str<int>(nums[0]));            // 10
   println(Str(nums[2]));            // 30
@@ -127,13 +118,13 @@ fn main() -> int {
 
   // --- 2. Float array literal -----------------------------------------------
   println("=== float array ===");
-  fs: float[] = [1.5, 2.5, 3.5];
+  fs: float[3] = [1.5, 2.5, 3.5];
   println(Str(fs.len()));            // 3
   println(Str<float>(fs[1]));            // 2.5
 
   // --- 3. Bool array literal ------------------------------------------------
   println("=== bool array ===");
-  bs: bool[] = [1 == 1, 1 == 0, 1 == 1, 1 == 1];
+  bs: bool[4] = [1 == 1, 1 == 0, 1 == 1, 1 == 1];
   println(Str(bs.len()));            // 4
   println(Str<bool>(bs[0]));             // True
   println(Str(bs[1]));             // False
@@ -141,7 +132,7 @@ fn main() -> int {
 
   // --- 4. Str array literal (object array) ----------------------------------
   println("=== str array ===");
-  words: Str[] = ["hello", "world", "paykan"];
+  words: Str[3] = ["hello", "world", "paykan"];
   println(Str(words.len()));         // 3
   println(words[0]);                      // hello
   println(words[1]);                      // world
@@ -149,14 +140,14 @@ fn main() -> int {
 
   // --- 5. Method call on Str array element ----------------------------------
   println("=== str element method ===");
-  strs: Str[] = ["foo", "bar", "baz"];
+  strs: Str[_] = ["foo", "bar", "baz"];
   println(strs[0].toString());            // foo
   println(Str<int>(strs[1].len()));    // 3
   println(Str(strs[2].len()));   // 3
 
   // --- 6. User-class array --------------------------------------------------
   println("=== Point array ===");
-  pts: Point[] = [Point(0, 0), Point(3, 4), Point(6, 8)];
+  pts: Point[3] = [Point(0, 0), Point(3, 4), Point(6, 8)];
   println(Str<int>(pts.len()));           // 3
   println(pts[0].toString());             // (0,0)
   println(pts[1].toString());             // (3,4)
@@ -167,62 +158,46 @@ fn main() -> int {
   println(Str(pts[1].sum()));       // 7
   println(Str<int>(pts[2].sum()));       // 14
 
-  // --- 8. len() builtin -----------------------------------------------------
+  // --- 8. len() -------------------------------------------------------------
   println("=== len ===");
-  a1: int[] = [1, 2, 3];
-  a2: int[] = [1, 2, 3, 4, 5, 6, 7];
+  a1: int[_] = [1, 2, 3];
+  a2: int[_] = [1, 2, 3, 4, 5, 6, 7];
   println(Str(a1.len()));            // 3
   println(Str<int>(a2.len()));            // 7
 
-  // --- 9. Array as function parameter ---------------------------------------
+  // --- 9. Array as function parameter (a slice) ------------------------------
   println("=== array param ===");
-  data: int[] = [1, 2, 3, 4, 5];
+  data: int[5] = [1, 2, 3, 4, 5];
   println(Str(sumArray(data)));     // 15
 
-  arr2: int[] = [10, 20, 30];
+  arr2: int[3] = [10, 20, 30];
   println(Str<int>(sumArray(arr2)));     // 60
+  println(Str(sumArray([7, 8])));   // 15
 
   // --- 10. Array as function return value -----------------------------------
   println("=== array return ===");
-  returned: Point[] = makePoints();
+  returned: Point[3] = makePoints();
   println(Str(returned.len()));      // 3
   println(returned[0].toString());        // (1,2)
   println(returned[2].toString());        // (5,6)
 
   // --- 11. Str array helpers ------------------------------------------------
   println("=== str array helpers ===");
-  greetings: Str[] = ["hi", "hey", "hello"];
+  greetings: Str[3] = ["hi", "hey", "hello"];
   println(firstStr(greetings));           // hi
   println(concatAll(greetings));          // hiheyhello
 
-  // --- 12. Dynamic int array (non-constant elements via variables) ----------
-  println("=== dynamic int array ===");
+  // --- 12. Int array with non-constant elements (via variables) -------------
+  println("=== computed int array ===");
   base: int = 5;
-  dynamic: int[] = [base, base + 1, base + 2, base + 3];
-  println(Str<int>(dynamic.len()));       // 4
-  println(Str(dynamic[0]));         // 5
-  println(Str<int>(dynamic[3]));         // 8
+  computed: int[4] = [base, base + 1, base + 2, base + 3];
+  println(Str<int>(computed.len()));       // 4
+  println(Str(computed[0]));         // 5
+  println(Str<int>(computed[3]));         // 8
 
-  // --- 13. Empty array with annotation --------------------------------------
-  println("=== empty array ===");
-  empty: int[] = [];
-  println(Str(empty.len()));         // 0
-
-  // --- 14. Array.toString() -------------------------------------------------
-  println("=== array toString ===");
-  t: int[] = [1, 2, 3];
-  println(t.toString());                  // Array@0x...[len=3]
-
-  // --- 15. Array.equals() — identity equality: two distinct arrays are never equal
-  println("=== array equals ===");
-  e1: int[] = [7, 8, 9];
-  e2: int[] = [7, 8, 9];
-  println(Str<bool>(e1.equals(e2)));     // False (different objects)
-  println(Str(e1.equals(e1)));     // True  (same object)
-
-  // --- 16. Labeled class array with describe() calls -----------------------
+  // --- 13. Labeled class array with describe() calls -----------------------
   println("=== Labeled array ===");
-  labels: Labeled[] = [Labeled("x", 10), Labeled("y", 20), Labeled("z", 30)];
+  labels: Labeled[3] = [Labeled("x", 10), Labeled("y", 20), Labeled("z", 30)];
   i: int = 0;
   while (i < labels.len()) {
     println(labels[i].describe());
@@ -230,26 +205,21 @@ fn main() -> int {
   }
   // x=10, y=20, z=30
 
-  // --- 17. Array subscript in expressions -----------------------------------
+  // --- 14. Array subscript in expressions -----------------------------------
   println("=== subscript in expressions ===");
-  ns: int[] = [3, 7, 2, 8, 1];
+  ns: int[5] = [3, 7, 2, 8, 1];
   println(Str<int>(ns[0] + ns[1]));      // 10
   println(Str(ns[3] - ns[2]));      // 6
   println(Str<bool>(ns[4] < ns[0]));     // True
 
-  // --- 18. Interning: identical constant arrays share one global ------------
-  println("=== interned arrays ===");
-  ia1: int[] = [100, 200, 300];
-  ia2: int[] = [100, 200, 300];
+  // --- 15. Two arrays with the same constant elements -----------------------
+  println("=== same constant arrays ===");
+  ia1: int[3] = [100, 200, 300];
+  ia2: int[3] = [100, 200, 300];
   println(Str(ia1[0] + ia2[0]));    // 200
   println(Str<int>(ia1.len() + ia2.len())); // 6
 
-  // --- 19. Array assigned to Obj — toString() dispatches via Object vtable ----
-  println("=== array as Obj ===");
-  arrObj: Obj = [1, 2, 3];
-  println(arrObj.toString());                  // Array@0x...[len=3]
-
-  // --- 20. Str.concat() via vtable (in-place mutation) ---
+  // --- 16. Str.concat() via vtable (in-place mutation) ---
   println("=== str concat vtable ===");
   ca: Str = "hello";
   cb: Str = " world";
@@ -257,12 +227,12 @@ fn main() -> int {
   println(ca);                            // hello world
   println(Str(ca.len()));        // 11
 
-  // --- 21. Multidimensional arrays (int[][]) --------------------------------
+  // --- 17. Multidimensional arrays (int[3][3]) ------------------------------
   println("=== 2D int array ===");
-  row0: int[] = [1, 2, 3];
-  row1: int[] = [4, 5, 6];
-  row2: int[] = [7, 8, 9];
-  matrix: int[][] = [row0, row1, row2];
+  row0: int[3] = [1, 2, 3];
+  row1: int[3] = [4, 5, 6];
+  row2: int[3] = [7, 8, 9];
+  matrix: int[3][3] = [row0, row1, row2];
   println(Str<int>(matrix.len()));        // 3
   println(Str(matrix[0][0]));        // 1
   println(Str<int>(matrix[1][1]));        // 5
@@ -270,7 +240,7 @@ fn main() -> int {
   println(Str<int>(matrix[0][2]));        // 3
   println(Str(matrix[2][0]));        // 7
 
-  // --- 22. Iterating a 2D array with nested while loops --------------------
+  // --- 18. Iterating a 2D array with nested while loops --------------------
   println("=== 2D iteration ===");
   r: int = 0;
   while (r < matrix.len()) {
@@ -283,41 +253,37 @@ fn main() -> int {
   }
   // 1 2 3 4 5 6 7 8 9
 
-  // --- 23. 2D array arithmetic ----------------------------------------------
+  // --- 19. 2D array arithmetic ----------------------------------------------
   println("=== 2D arithmetic ===");
   println(Str(matrix[0][0] + matrix[1][1] + matrix[2][2]));  // 15  (diagonal)
   println(Str<int>(matrix[0][1] + matrix[1][0]));                  // 6   (2+4)
 
-  // --- 24. Array of Str arrays (Str[][]) ------------------------------------
+  // --- 20. Array of Str arrays (Str[2][3]) ----------------------------------
   println("=== 2D Str array ===");
-  s0: Str[] = ["a", "b", "c"];
-  s1: Str[] = ["d", "e", "f"];
-  grid: Str[][] = [s0, s1];
+  s0: Str[3] = ["a", "b", "c"];
+  s1: Str[3] = ["d", "e", "f"];
+  grid: Str[2][3] = [s0, s1];
   println(Str(grid.len()));          // 2
   println(grid[0][0]);                    // a
   println(grid[1][2]);                    // f
 
-  // --- 26. Matrix multiplication via matMul() --------------------------------
+  // --- 21. Matrix multiplication via matMul() --------------------------------
   // A = [[1,2],[3,4]]   B = [[5,6],[7,8]]
   // C = [[19,22],[43,50]]
   println("=== mat mul ===");
-  ma0: int[] = [1, 2];
-  ma1: int[] = [3, 4];
-  MA: int[][] = [ma0, ma1];
-  mb0: int[] = [5, 6];
-  mb1: int[] = [7, 8];
-  MB: int[][] = [mb0, mb1];
-  C: int[][] = matMul(MA, MB);
+  MA: int[2][2] = [[1, 2], [3, 4]];
+  MB: int[_][_] = [[5, 6], [7, 8]];
+  C: int[2][2] = matMul(MA, MB);
   println(Str<int>(C[0][0]));   // 19
   println(Str(C[0][1]));   // 22
   println(Str<int>(C[1][0]));   // 43
   println(Str(C[1][1]));   // 50
 
-  // --- 27. 2D array of Point rows (Point[][]) --------------------------------
+  // --- 22. 2D array of Point rows (Point[2][2]) ------------------------------
   println("=== 2D Point array ===");
-  pr0: Point[] = [Point(0, 0), Point(1, 0)];
-  pr1: Point[] = [Point(0, 1), Point(1, 1)];
-  grid2: Point[][] = [pr0, pr1];
+  pr0: Point[2] = [Point(0, 0), Point(1, 0)];
+  pr1: Point[2] = [Point(0, 1), Point(1, 1)];
+  grid2: Point[2][2] = [pr0, pr1];
   println(Str<int>(grid2.len()));         // 2
   println(grid2[0][0].toString());        // (0,0)
   println(grid2[1][1].toString());        // (1,1)

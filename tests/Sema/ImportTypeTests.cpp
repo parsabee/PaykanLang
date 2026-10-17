@@ -58,8 +58,8 @@ static const char *const kShapesModule =
     "  fn make() -> Zeta { return Zeta(); }\n"
     "  fn take(z: Zeta) -> int { return z.v; }\n"
     "  fn kindOf() -> Kind { return self.kind; }\n"
-    "  fn many() -> Zeta[] { return [Zeta(), Zeta()]; }\n"
-    "  fn count(zs: Zeta[]) -> int { return zs.len(); }\n"
+    "  fn many() -> Zeta[2] { return [Zeta(), Zeta()]; }\n"
+    "  fn count(zs: view Zeta[]) -> int { return zs.len(); }\n"
     "}\n"
     "impl Alpha {\n"
     "  fn __init__() { self.kind = Kind::Round; }\n"
@@ -150,7 +150,7 @@ TEST(Module, ArrayOfModuleLocalClassReturnAndParamOk) {
 import shapes;
 fn main() -> int {
   a: shapes::Alpha = shapes::Alpha();
-  zs: shapes::Zeta[] = a.many();
+  zs: shapes::Zeta[2] = a.many();
   first: shapes::Zeta = zs[0];
   return a.count(zs) + first.v;
 }
@@ -312,7 +312,7 @@ TEST(Module, UnknownExportedTypeErr) {
 
   paykan::sema::Sema::ModuleInfo info;
   info.ExportedFunctions.push_back(
-      {"ghost", "Ghost", {"int", "Phantom[]"}, {}});
+      {"ghost", "Ghost", {"int", "Phantom[2]"}, {}});
   paykan::sema::Sema::ModuleInfo::ClassInfo ci;
   ci.Name = "Holder";
   ci.OriginModule = "lib";
@@ -338,7 +338,7 @@ fn main() -> int { return 0; }
        {"import of module 'lib': return type of function 'ghost' has unknown "
         "type 'Ghost'",
         "import of module 'lib': parameter 2 of function 'ghost' has unknown "
-        "type 'Phantom[]'",
+        "type 'Phantom[2]'",
         "import of module 'lib': field 'f' of class 'Holder' has unknown "
         "type 'Spectre'",
         "import of module 'lib': return type of method 'Holder.m' has "

@@ -95,143 +95,10 @@ Val ModuleLowering::ExprEmitter::visitMemberAccessExpr(
 
 // -- Arrays
 
+// A literal's value is the address of its temporary (emitFixedValue).
 Val ModuleLowering::ExprEmitter::visitArrayLiteralExpr(
     ast::ArrayLiteralExpr *node) {
-  ast::Type *elemTy = nullptr;
-  if (auto *at = ast::dyn_cast<ast::ArrayType>(node->getResolvedType()))
-    elemTy = at->getElementType();
-
-  bool isObjectArray = L.isObjectElementType(elemTy);
-  size_t len = node->getNumElements();
-  Val lenVal = Val::i64(static_cast<int64_t>(len));
-
-  Val arr;
-  if (ast::isValueOptional(elemTy)) {
-    // Optional values are stored inline (#96), each written to its slot.
-    arr = L.callRuntime(kPaykanArrayNewSized,
-                        {lenVal, Val::i64(pir::storeSize(L.toPIRType(elemTy)))},
-                        "arr");
-    for (size_t i = 0; i < len; ++i) {
-      Val v = visit(node->getElements()[i]);
-      if (!v)
-        return Val();
-      L.B.ptrStore(L.callRuntime(kPaykanArraySlot,
-                                 {arr, Val::i64(static_cast<int64_t>(i))},
-                                 "elem.addr"),
-                   v);
-    }
-  } else if (isObjectArray) {
-    arr = L.callRuntime(kPaykanArrayNewObj, {lenVal}, "arr");
-    for (size_t i = 0; i < len; ++i) {
-      auto *elemExpr = node->getElements()[i];
-      Val v = L.emitAsShared(elemExpr);
-      if (!v)
-        return Val();
-      L.callRuntime(kPaykanArraySetObj,
-                    {arr, Val::i64(static_cast<int64_t>(i)), v});
-      // set_obj retains the stored box; release the +1 temporary.
-      L.emitRelease(v);
-    }
-  } else if (len > 0) {
-    arr = emitPrimitiveArrayLiteral(node, len);
-    if (!arr)
-      return Val();
-  } else {
-    arr = L.callRuntime(kPaykanArrayNew, {lenVal}, "arr");
-  }
-  // Box the raw PaykanArray*.
-  return L.emitSharedNew(arr, "arr.shared");
-}
-
-/// Compile-time slot bits of a constant operand (after promotion), if any.
-static bool constantSlotBits(const Val &v, int64_t &out) {
-  if (auto *i = std::get_if<int64_t>(&v.Op.V)) {
-    out = *i;
-    return true;
-  }
-  if (auto *d = std::get_if<double>(&v.Op.V)) {
-    static_assert(sizeof(double) == sizeof(int64_t));
-    std::memcpy(&out, d, sizeof(out));
-    return true;
-  }
-  if (auto *b = std::get_if<bool>(&v.Op.V)) {
-    out = *b ? 1 : 0;
-    return true;
-  }
-  if (auto *c = std::get_if<char>(&v.Op.V)) {
-    out = static_cast<unsigned char>(*c);
-    return true;
-  }
-  return false;
-}
-
-Val ModuleLowering::ExprEmitter::emitPrimitiveArrayLiteral(
-    ast::ArrayLiteralExpr *node, size_t len) {
-  ast::Type *elemTy = nullptr;
-  if (auto *at = ast::dyn_cast<ast::ArrayType>(node->getResolvedType()))
-    elemTy = at->getElementType();
-  Val lenVal = Val::i64(static_cast<int64_t>(len));
-
-  // Constant fast path: every element a compile-time constant -> one static
-  // data global and PaykanArray_new_from_data.
-  std::vector<int64_t> words;
-  words.reserve(len);
-  for (size_t i = 0; i < len; ++i) {
-    auto *elemExpr = node->getElements()[i];
-    if (!ast::isa<ast::IntegerLiteral>(elemExpr) &&
-        !ast::isa<ast::FloatLiteral>(elemExpr) &&
-        !ast::isa<ast::BoolLiteral>(elemExpr) &&
-        !ast::isa<ast::CharLiteral>(elemExpr) &&
-        !ast::isa<ast::EnumValueExpr>(elemExpr) &&
-        !ast::isa<ast::UnaryExpr>(elemExpr)) {
-      words.clear();
-      break;
-    }
-    // Emitting a literal (or a folded unary on one) produces no instructions.
-    Val v = visit(elemExpr);
-    if (!v)
-      return Val();
-    v = L.promoteIntToFloat(v, elemTy);
-    int64_t bits;
-    if (!constantSlotBits(v, bits)) {
-      words.clear();
-      break;
-    }
-    words.push_back(bits);
-  }
-
-  if (!words.empty()) {
-    std::string key;
-    key.reserve(len * 5);
-    for (int64_t w : words) {
-      key += std::to_string(w);
-      key += '|';
-    }
-    std::string global;
-    auto it = L.InternedArrayData.find(key);
-    if (it != L.InternedArrayData.end()) {
-      global = it->second;
-    } else {
-      global = ".arr.data" + std::to_string(L.Mod.Datas.size());
-      L.Mod.Datas.push_back({global, words});
-      L.InternedArrayData[key] = global;
-    }
-    return L.callRuntime(kPaykanArrayNewFromData,
-                         {lenVal, Val::symbol(global, Type::Ptr)}, "arr");
-  }
-
-  // Dynamic path: allocate then fill per element.
-  Val arr = L.callRuntime(kPaykanArrayNew, {lenVal}, "arr");
-  for (size_t i = 0; i < len; ++i) {
-    auto *elemExpr = node->getElements()[i];
-    Val v = visit(elemExpr);
-    if (!v)
-      return Val();
-    v = L.promoteIntToFloat(v, elemTy);
-    v = L.toSlotBits(v);
-    L.callRuntime(kPaykanArraySet, {arr, Val::i64(static_cast<int64_t>(i)), v});
-  }
-  return arr;
+  return L.emitFixedAddress(node);
 }
 
 Val ModuleLowering::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
@@ -253,60 +120,17 @@ Val ModuleLowering::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
     }
     return elem;
   }
+  // A string's character.
   Val idx = visit(node->getIndex());
   if (!idx)
     return Val();
   idx = L.coerceBoolToI64(idx, Type::I64);
-
-  // Str vs. char[] receiver: decided from the receiver's own type.
-  bool receiverIsStr = false;
-  if (node->getResolvedType() == L.ASTCtx.getCharTy()) {
-    ast::Type *recvTy = node->getArray()->getResolvedType();
-    if (auto *id = ast::dyn_cast<ast::Identifier>(node->getArray());
-        !recvTy && id && L.CurrentScope)
-      recvTy = L.CurrentScope->lookupASTType(id->getName());
-    receiverIsStr = !ast::dyn_cast<ast::ArrayType>(recvTy); // null-safe
-  }
-
-  // A call-rooted receiver is torn down once the element is copied out.
   Receiver recv = L.emitReceiver(node->getArray());
   if (!recv)
     return Val();
-  const ExprValue &recvOwned = recv.Owned;
-
-  if (receiverIsStr) {
-    Val ch = L.callRuntime(kPaykanStringCharAt, {recv.Raw, idx}, "str.char_at");
-    L.releaseIfOwned(recvOwned);
-    return ch;
-  }
-
-  ast::Type *elemTy = node->getResolvedType();
-  if (ast::isValueOptional(elemTy)) {
-    // An optional value, read in place.
-    Val addr = L.callRuntime(kPaykanArraySlot, {recv.Raw, idx}, "elem.addr");
-    Val v = L.B.ptrLoad(addr, L.toPIRType(elemTy), "elem");
-    L.releaseIfOwned(recvOwned);
-    return v;
-  }
-  Val raw = L.callRuntime(kPaykanArrayGet, {recv.Raw, idx}, "elem.raw");
-  if (!L.isObjectElementType(elemTy)) {
-    L.releaseIfOwned(recvOwned);
-    if (!elemTy)
-      return raw;
-    return L.fromSlotBits(raw, elemTy);
-  }
-
-  // Object element: the slot stores a box as bits.
-  Val shared = L.B.cast(raw, Type::Box, "elem.shared");
-  // A temporary array (`mk()[0]`) dies with this expression: retain the
-  // element and hand the consumer the +1 box.
-  if (L.exprAlreadyShared(node)) {
-    L.emitRetain(shared);
-    L.releaseIfOwned(recvOwned);
-    return shared;
-  }
-  // Borrowed from a live array: unwrap to the raw object.
-  return L.emitSharedGet(shared, "elem.obj");
+  Val ch = L.callRuntime(kPaykanStringCharAt, {recv.Raw, idx}, "str.char_at");
+  L.releaseIfOwned(recv.Owned);
+  return ch;
 }
 
 Val ModuleLowering::ExprEmitter::visitTernaryExpr(ast::TernaryExpr *node) {
@@ -851,52 +675,6 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
   return result;
 }
 
-Val ModuleLowering::ExprEmitter::emitArrayPush(ast::MethodCallExpr *node,
-                                               const Val &recv,
-                                               ast::Type *elemTy) {
-  if (node->getNumArguments() != 1)
-    return Val();
-  auto *argExpr = node->getArguments()[0];
-  if (ast::isValueOptional(elemTy)) {
-    // The value first: the slot's address lasts until the array changes.
-    Val argVal = L.emitExpr(argExpr);
-    if (!argVal)
-      return Val();
-    L.B.ptrStore(L.callRuntime(kPaykanArrayPushSlot, {recv}, "elem.addr"),
-                 argVal);
-  } else if (L.isObjectElementType(elemTy)) {
-    Val argVal = L.emitAsShared(argExpr);
-    if (!argVal)
-      return Val();
-    L.callRuntime(kPaykanArrayPushObj, {recv, argVal});
-    // push_obj retains the stored box; drop the +1 temporary.
-    L.emitRelease(argVal);
-  } else {
-    Val argVal = L.emitExpr(argExpr);
-    if (!argVal)
-      return Val();
-    argVal = L.promoteIntToFloat(argVal, elemTy);
-    argVal = L.toSlotBits(argVal);
-    L.callRuntime(kPaykanArrayPush, {recv, argVal});
-  }
-  return Val();
-}
-
-Val ModuleLowering::ExprEmitter::emitArrayPop(const Val &recv,
-                                              ast::Type *elemTy) {
-  if (ast::isValueOptional(elemTy)) {
-    // The runtime copies the element out before the array may shrink.
-    pir::LocalId out = L.B.addLocal("popped", L.toPIRType(elemTy));
-    L.callRuntime(kPaykanArrayPopInto,
-                  {recv, L.B.localAddr(out, "popped.addr")});
-    return L.B.load(out, "popped");
-  }
-  if (L.isObjectElementType(elemTy))
-    return L.callRuntime(kPaykanArrayPopObj, {recv}, "mcall");
-  Val raw = L.callRuntime(kPaykanArrayPop, {recv}, "mcall");
-  return L.fromSlotBits(raw, elemTy);
-}
-
 Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     ast::MethodCallExpr *node) {
   const bool wantAddress = std::exchange(WantAddress, false);
@@ -971,22 +749,10 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   };
 
   ast::Type *recvASTTy = resolveReceiverASTType();
-  auto *arrTy = ast::dyn_cast<ast::ArrayType>(recvASTTy);
-
-  // push / pop are direct runtime calls, not vtable slots.
   const std::string &mname = node->getMethodName();
-  if (arrTy && (mname == kPush || mname == kPop)) {
-    Val result = mname == kPush
-                     ? emitArrayPush(node, recv, arrTy->getElementType())
-                     : emitArrayPop(recv, arrTy->getElementType());
-    L.releaseIfOwned(recvOwned);
-    return result;
-  }
 
   ast::ClassType *ct = nullptr;
-  if (arrTy)
-    ct = L.ASTCtx.getArrayTy();
-  else if (auto *tupTy = ast::dyn_cast<ast::TupleType>(recvASTTy))
+  if (auto *tupTy = ast::dyn_cast<ast::TupleType>(recvASTTy))
     ct = L.ASTCtx.getOrCreateSpecializedTupleType(tupTy);
   else
     ct = ast::dyn_cast<ast::ClassType>(recvASTTy);
@@ -1126,71 +892,25 @@ Val ModuleLowering::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   ast::Type *arrTy = node->getArray()->getResolvedType();
   auto *ft = ast::dyn_cast<ast::FixedArrayType>(arrTy);
   auto *st = ast::dyn_cast<ast::SliceType>(arrTy);
-  if (ft || st) {
-    size_t mark = FixedTemps.size();
-    Val addr = emitFixedElementAddress(node->getArray(), node->getIndex());
-    if (!addr)
-      return Val();
-    ast::Type *elemTy = ft ? ft->getElementType() : st->getElementType();
-    if (ast::dyn_cast<ast::FixedArrayType>(elemTy)) {
-      emitFixedAssign(addr, node->getValue());
-    } else if (ast::isRefType(elemTy)) {
-      // The new reference is taken before the old one goes (`xs[0] =
-      // xs[0];`).
-      if (Val box = emitAsShared(node->getValue())) {
-        Val old = B.ptrLoad(addr, Type::Box, "old");
-        B.ptrStore(addr, box);
-        emitRelease(old);
-      }
-    } else if (Val v = emitExpr(node->getValue())) {
-      B.ptrStore(addr, coerceTo(v, toPIRType(elemTy)));
+  size_t mark = FixedTemps.size();
+  Val addr = emitFixedElementAddress(node->getArray(), node->getIndex());
+  if (!addr)
+    return Val();
+  ast::Type *elemTy = ft ? ft->getElementType() : st->getElementType();
+  if (ast::dyn_cast<ast::FixedArrayType>(elemTy)) {
+    emitFixedAssign(addr, node->getValue());
+  } else if (ast::isRefType(elemTy)) {
+    // The new reference is taken before the old one goes (`xs[0] =
+    // xs[0];`).
+    if (Val box = emitAsShared(node->getValue())) {
+      Val old = B.ptrLoad(addr, Type::Box, "old");
+      B.ptrStore(addr, box);
+      emitRelease(old);
     }
-    releaseFixedTemps(mark);
-    return Val();
+  } else if (Val v = emitExpr(node->getValue())) {
+    B.ptrStore(addr, coerceTo(v, toPIRType(elemTy)));
   }
-  Receiver arr = emitReceiver(node->getArray());
-  if (!arr)
-    return Val();
-  const Val &arrRaw = arr.Raw;
-
-  Val idx = emitExpr(node->getIndex());
-  if (!idx)
-    return Val();
-  idx = coerceBoolToI64(idx, Type::I64);
-
-  ast::Type *elemTy = nullptr;
-  if (ast::Type *arrTy = node->getArray()->getResolvedType())
-    if (auto *at = ast::dyn_cast<ast::ArrayType>(arrTy))
-      elemTy = at->getElementType();
-  if (!elemTy)
-    if (auto *id = ast::dyn_cast<ast::Identifier>(node->getArray()))
-      if (CurrentScope)
-        if (auto *st = CurrentScope->lookupASTType(id->getName()))
-          if (auto *at = ast::dyn_cast<ast::ArrayType>(st))
-            elemTy = at->getElementType();
-
-  if (ast::isValueOptional(elemTy)) {
-    // The value first, then the element's address (bounds-checked).
-    Val val = emitExpr(node->getValue());
-    if (!val)
-      return Val();
-    B.ptrStore(callRuntime(kPaykanArraySlot, {arrRaw, idx}, "elem.addr"), val);
-  } else if (isObjectElementType(elemTy)) {
-    Val val = emitAsShared(node->getValue());
-    if (!val)
-      return Val();
-    callRuntime(kPaykanArraySetObj, {arrRaw, idx, val});
-    // set_obj retains; drop the +1 temporary.
-    emitRelease(val);
-  } else {
-    Val val = emitExpr(node->getValue());
-    if (!val)
-      return Val();
-    val = promoteIntToFloat(val, elemTy);
-    val = toSlotBits(val);
-    callRuntime(kPaykanArraySet, {arrRaw, idx, val});
-  }
-  releaseIfOwned(arr.Owned);
+  releaseFixedTemps(mark);
   return Val();
 }
 
@@ -1270,6 +990,28 @@ Val ModuleLowering::emitTupleKindsGlobal(ast::TupleType *tt) {
   Mod.Bytes.push_back({name, std::move(bytes)});
   InternedTupleKinds[key] = name;
   return Val::symbol(name, Type::Ptr);
+}
+
+/// Compile-time slot bits of a constant operand (after promotion), if any.
+static bool constantSlotBits(const Val &v, int64_t &out) {
+  if (auto *i = std::get_if<int64_t>(&v.Op.V)) {
+    out = *i;
+    return true;
+  }
+  if (auto *d = std::get_if<double>(&v.Op.V)) {
+    static_assert(sizeof(double) == sizeof(int64_t));
+    std::memcpy(&out, d, sizeof(out));
+    return true;
+  }
+  if (auto *b = std::get_if<bool>(&v.Op.V)) {
+    out = *b ? 1 : 0;
+    return true;
+  }
+  if (auto *c = std::get_if<char>(&v.Op.V)) {
+    out = static_cast<unsigned char>(*c);
+    return true;
+  }
+  return false;
 }
 
 Val ModuleLowering::toSlotBits(const Val &v) {

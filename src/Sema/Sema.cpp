@@ -160,11 +160,9 @@ void Sema::note(ast::SourceLocation loc, const std::string &msg) {
 }
 
 // Type equality.  Every type Sema compares is canonical -- builtin singletons,
-// registered ClassType/EnumType instances, and ArrayTypes interned per element
-// type by ASTContext::getArrayType -- so pointer identity is the whole test.
-// The structural fallback for arrays guards against a parser-emitted
-// (source-located) ArrayType that reaches a comparison without having been
-// resolved; it never fires for resolved types.
+// registered ClassType/EnumType instances, and the types ASTContext interns
+// per element (arrays, slices, optionals, tuples) -- so pointer identity is
+// the whole test; the structural fallback never fires for resolved types.
 bool Sema::typesEqual(ast::Type *a, ast::Type *b) {
   if (a == b)
     return true;
@@ -172,9 +170,6 @@ bool Sema::typesEqual(ast::Type *a, ast::Type *b) {
     return false;
   if (a->getKind() != b->getKind())
     return false;
-  if (auto *aa = ast::dyn_cast<ast::ArrayType>(a))
-    return typesEqual(aa->getElementType(),
-                      ast::cast<ast::ArrayType>(b)->getElementType());
   if (auto *ao = ast::dyn_cast<ast::OptionalType>(a))
     return typesEqual(ao->getInnerType(),
                       ast::cast<ast::OptionalType>(b)->getInnerType());
@@ -227,10 +222,6 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
   if (ast::isa<ast::OptionalType>(src))
     return false;
 
-  // Any array type is assignable to Obj (arrays are heap-allocated objects).
-  if (dst == Ctx.getObjTy() && ast::isa<ast::ArrayType>(src))
-    return true;
-
   // Tuples: a tuple value is an instance of the builtin `Tuple` class (an Obj
   // subtype), so it is assignable to `Obj` (and to `Tuple` itself).  Between
   // tuple types, assignability is element-wise and *representation-
@@ -257,23 +248,6 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
     return true;
   }
 
-  // Array assignability: element types must be compatible.
-  if (auto *dstAT = ast::dyn_cast<ast::ArrayType>(dst)) {
-    if (auto *srcAT = ast::dyn_cast<ast::ArrayType>(src)) {
-      // An empty literal (void element) is assignable to any array type.
-      if (srcAT->getElementType() == Ctx.getVoidTy())
-        return true;
-      // An `int[]` is not an `int?[]`: its slots hold plain values, not
-      // optionals
-      // (an array literal is retyped element-wise by checkAssignable).
-      if (ast::wrapsInOptional(dstAT->getElementType(),
-                               srcAT->getElementType()))
-        return false;
-      return isAssignable(dstAT->getElementType(), srcAT->getElementType());
-    }
-    return false;
-  }
-
   // ClassType subtyping: src <: dst.
   if (auto *dstCT = ast::dyn_cast<ast::ClassType>(dst))
     if (auto *srcCT = ast::dyn_cast<ast::ClassType>(src))
@@ -298,7 +272,6 @@ bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
   srcTy = adoptLiteralElements(dst, srcTy, src);
   if (!isAssignable(dst, srcTy))
     return false;
-  adoptArrayLiteralType(dst, src);
   // `int` -> `int?` (and `int` -> `float?`): the lowering makes the value
   // the optional's present value.  A fixed-size array into a slice is
   // passed as its address and length.
@@ -338,31 +311,6 @@ ast::Type *Sema::adoptLiteralElements(ast::Type *dst, ast::Type *srcTy,
     return d;
   };
 
-  if (auto *lit = ast::dyn_cast<ast::ArrayLiteralExpr>(src)) {
-    auto *dstAT = ast::dyn_cast<ast::ArrayType>(ast::stripOptional(dst));
-    if (!dstAT || lit->isEmpty())
-      return srcTy;
-    ast::Type *elemTy = dstAT->getElementType();
-    std::vector<ast::Type *> adopted;
-    adopted.reserve(lit->getNumElements());
-    bool changed = false;
-    for (ast::Expr *e : lit->getElements()) {
-      ast::Type *before = e->getResolvedType();
-      adopted.push_back(adoptOperand(elemTy, e));
-      changed = changed || adopted.back() != before;
-    }
-    if (!changed)
-      return srcTy;
-    // The literal now holds the destination's element type: every element
-    // must fit it (and gets any coercion it needs, e.g. `T?` -> `Obj`).
-    for (size_t i = 0; i < adopted.size(); ++i)
-      if (adopted[i] != elemTy &&
-          (!adopted[i] ||
-           !checkAssignable(elemTy, adopted[i], lit->getElements()[i])))
-        return srcTy;
-    lit->setResolvedType(dstAT);
-    return dstAT;
-  }
   if (auto *lit = ast::dyn_cast<ast::TupleLiteralExpr>(src)) {
     auto *dstTT = ast::dyn_cast<ast::TupleType>(ast::stripOptional(dst));
     auto *litTT = ast::dyn_cast<ast::TupleType>(srcTy);
@@ -388,34 +336,6 @@ ast::Type *Sema::adoptLiteralElements(ast::Type *dst, ast::Type *srcTy,
   return srcTy;
 }
 
-void Sema::adoptArrayLiteralType(ast::Type *dst, ast::Expr *src) {
-  auto *lit = ast::dyn_cast<ast::ArrayLiteralExpr>(src);
-  auto *dstAT = ast::dyn_cast<ast::ArrayType>(ast::stripOptional(dst));
-  if (!lit || !dstAT)
-    return;
-  // An empty literal carries the ArrayType(void) sentinel from
-  // visitArrayLiteralExpr; only the destination knows the element type, and
-  // the lowering needs it to pick an object-element array (whose destructor
-  // releases the elements pushed into it later) over a primitive one.
-  if (lit->isEmpty()) {
-    lit->setResolvedType(dstAT);
-    return;
-  }
-  // `[1, 2]` into a `float[]` slot: the literal unified to `int[]`, which
-  // isAssignable accepts (int -> float), but the lowering stores whatever the
-  // literal's own element type says.  Retype it so the elements are promoted
-  // to doubles (emitPrimitiveArrayLiteral); left as `int[]`, the integer bit
-  // patterns read back as denormal floats.
-  if (dstAT->getElementType() == Ctx.getFloatTy())
-    if (auto *litAT = ast::dyn_cast<ast::ArrayType>(lit->getResolvedType()))
-      if (litAT->getElementType() == Ctx.getIntTy())
-        lit->setResolvedType(dstAT);
-  // Otherwise a non-empty literal keeps its own unified type; only its empty
-  // nested literals (`[[], []]` into `Str[][]`) still need the destination.
-  for (size_t i = 0; i < lit->getNumElements(); ++i)
-    adoptArrayLiteralType(dstAT->getElementType(), lit->getElements()[i]);
-}
-
 bool Sema::diagnoseOptionalNarrowing(ast::SourceLocation loc, ast::Type *dst,
                                      ast::Type *srcTy) {
   auto *srcOT = ast::dyn_cast<ast::OptionalType>(srcTy);
@@ -435,18 +355,6 @@ bool Sema::diagnoseOptionalNarrowing(ast::SourceLocation loc, ast::Type *dst,
   if (!isAssignable(dst, srcOT->getInnerType()))
     return false;
   errorOptionalUnwrap(loc, srcOT);
-  return true;
-}
-
-bool Sema::diagnoseEmptyArrayLiteral(ast::SourceLocation loc, ast::Type *dst,
-                                     ast::Type *srcTy) {
-  auto *at = ast::dyn_cast<ast::ArrayType>(srcTy);
-  if (!at || at->getElementType() != Ctx.getVoidTy())
-    return false;
-  if (dst && ast::isa<ast::ArrayType>(ast::stripOptional(dst)))
-    return false;
-  error(loc, "cannot infer element type of empty array literal '[]'; "
-             "add an explicit type annotation");
   return true;
 }
 
@@ -503,8 +411,6 @@ bool Sema::holdsFixedArray(const ast::Type *ty) {
     return true;
   if (const auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
     return holdsFixedArray(ot->getInnerType());
-  if (const auto *at = ast::dyn_cast<ast::ArrayType>(ty))
-    return holdsFixedArray(at->getElementType());
   if (const auto *tt = ast::dyn_cast<ast::TupleType>(ty))
     for (const ast::Type *e : tt->getElementTypes())
       if (holdsFixedArray(e))
@@ -512,19 +418,9 @@ bool Sema::holdsFixedArray(const ast::Type *ty) {
   return false;
 }
 
-ast::Type *Sema::sliceOf(ast::Type *ty, ast::ParamMode mode) {
-  auto *at = ast::dyn_cast<ast::ArrayType>(ty);
-  if (!at || mode == ast::ParamMode::Value ||
-      fixedElementBytes(at->getElementType()) < 0)
-    return ty;
-  return Ctx.getSliceType(at->getElementType());
-}
-
 std::string Sema::sliceArgNote(const ast::Type *param, const ast::Type *arg) {
   if (!ast::dyn_cast<ast::SliceType>(param))
     return "";
-  if (ast::dyn_cast<ast::ArrayType>(arg))
-    return " (a slice takes a fixed-size array, not a growable one)";
   if (ast::dyn_cast<ast::FixedArrayType>(arg))
     return " (a slice takes a fixed-size array of exactly its element type)";
   return "";
@@ -602,9 +498,10 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
                              const std::string &context) {
   const bool allowFixed = std::exchange(FixedArrayAllowed, false);
   const bool allowInferred = std::exchange(InferredLengthAllowed, false);
+  const bool allowSlice = std::exchange(SliceAllowed, false);
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty))
     return Ctx.getBuiltinType(bt->getTypeKind());
-  // A parameter's slice (sliceOf), resolved already.
+  // A parameter's slice, resolved already.
   if (ast::isa<ast::SliceType>(ty))
     return ty;
 
@@ -644,14 +541,26 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     return nullptr;
   }
 
+  // `T[]` is a slice, the type of a `view` or `inout` parameter only.
   if (auto *at = ast::dyn_cast<ast::ArrayType>(ty)) {
+    if (!allowSlice) {
+      error(loc, context + " has type '" + typeName(at) +
+                     "': a slice can only be a 'view' or 'inout' parameter, "
+                     "and an array has a length ('" +
+                     typeName(at->getElementType()) + "[3]')");
+      return nullptr;
+    }
+    FixedArrayAllowed = true; // a slice's elements may be fixed-size arrays
     auto *elemTy = resolveType(at->getElementType(), loc, context + " element");
     if (!elemTy)
       return nullptr;
-    // The parser's ArrayType carries the annotation's source location; the
-    // resolved type is the context's canonical (interned) instance so that
-    // array types compare by pointer and nested arrays share element nodes.
-    return Ctx.getArrayType(elemTy);
+    if (fixedElementBytes(elemTy) < 0) {
+      error(loc, context + " has type '" + typeName(elemTy) +
+                     "[]': a slice of '" + typeName(elemTy) +
+                     "' is not supported yet");
+      return nullptr;
+    }
+    return Ctx.getSliceType(elemTy);
   }
 
   if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
@@ -1025,8 +934,8 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   // Equality requires compatible types.
   if ((node->getOpcode() == ast::BinaryOpcode::Eq ||
        node->getOpcode() == ast::BinaryOpcode::Ne)) {
-    // Same type is always OK (`int[] == int[]` unifies because array types are
-    // canonical per element type, while `int[] == Str[]` stays an error).
+    // Same type is always OK (types are canonical, so `(int, Str) == (int,
+    // Str)` unifies while `(int, Str) == (Str, int)` stays an error).
     if (!typesEqual(lhsTy, rhsTy)) {
       // Allow class subtype comparisons (either direction).
       auto *lhsCT = ast::dyn_cast<ast::ClassType>(lhsTy);
@@ -1311,12 +1220,8 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   }
 
   // Resolve the ClassType to look up the method on.
-  // Array types dispatch through a per-element specialized ClassType so that
-  // push/pop signatures are element-type-aware.
   ast::ClassType *ct = nullptr;
-  if (auto *at = ast::dyn_cast<ast::ArrayType>(recvTy))
-    ct = S.Ctx.getOrCreateSpecializedArrayType(at->getElementType());
-  else if (auto *tt = ast::dyn_cast<ast::TupleType>(recvTy))
+  if (auto *tt = ast::dyn_cast<ast::TupleType>(recvTy))
     // Tuples expose only Obj's methods (toString / equals) through their
     // per-element-list specialization.
     ct = S.Ctx.getOrCreateSpecializedTupleType(tt);
@@ -1394,16 +1299,11 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   }
   S.checkInoutArgs(method->getParamModes(), paramTys, node->getArguments(),
                    node->getMethodName(), node->getReceiver(), method);
-  // A builtin method reads its arguments, but `push` keeps one; `equals`,
-  // like `==`, only compares.
-  if (ct->isBuiltin() || ast::isa<ast::ArrayType>(recvTy)) {
-    if (node->getMethodName() == names::kPush && node->getNumArguments() == 1)
-      S.checkViewNotStored(node->getArguments()[0],
-                           node->getArguments()[0]->getResolvedType());
-  } else if (node->getMethodName() != names::kMethodEquals) {
+  // A builtin method reads its arguments; `equals`, like `==`, only
+  // compares.
+  if (!ct->isBuiltin() && node->getMethodName() != names::kMethodEquals)
     S.checkViewArgs(method->getParamModes(), method->getParamTypes(),
                     node->getArguments(), node->getMethodName());
-  }
   S.noteBorrowResult(node, node->getMethodName(), method->getParamModes(),
                      node->getArguments(), node->getReceiver());
   // An `inout` result is part of the receiver, which must outlive the call.
@@ -1471,54 +1371,31 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
   ast::Type *expected = std::exchange(S.LiteralExpectation, nullptr);
   if (auto *fixed = ast::dyn_cast<ast::FixedArrayType>(expected))
     return checkFixedArrayLiteral(node, fixed);
-  // Into a slice: a fixed-size array of the literal's own length.
-  if (auto *slice = ast::dyn_cast<ast::SliceType>(expected);
-      slice && !node->isEmpty())
-    return checkFixedArrayLiteral(
-        node,
-        S.Ctx.getFixedArrayType(slice->getElementType(),
-                                static_cast<int64_t>(node->getNumElements())));
-  auto *expectedAT =
-      expected ? ast::dyn_cast<ast::ArrayType>(ast::stripOptional(expected))
-               : nullptr;
-  ast::Type *expectedElem = expectedAT ? expectedAT->getElementType() : nullptr;
-
-  // Empty literal [] is valid only where an explicit array type annotation is
-  // present (e.g. a: int[] = []).  Return ArrayType(void) as a sentinel;
-  // isAssignable() treats it as compatible with any array destination.
   if (node->isEmpty()) {
-    auto *arrTy = S.Ctx.getArrayType(S.Ctx.getVoidTy());
-    node->setResolvedType(arrTy);
-    return arrTy;
+    S.error(node->getLocation(), "an empty array literal has no type: an "
+                                 "array has at least one element");
+    return nullptr;
   }
+  const auto n = static_cast<int64_t>(node->getNumElements());
+  // Into a slice: a fixed-size array of the literal's own length.
+  if (auto *slice = ast::dyn_cast<ast::SliceType>(expected))
+    return checkFixedArrayLiteral(
+        node, S.Ctx.getFixedArrayType(slice->getElementType(), n));
 
-  // Non-empty: resolve all elements and unify to a common element type.
+  // Anywhere else, an array of its own length of its elements' common type.
   std::vector<ast::Type *> elemTys;
   elemTys.reserve(node->getNumElements());
   for (ast::Expr *elem : node->getElements()) {
-    auto *ty = visitExpecting(elem, expectedElem);
+    auto *ty = visit(elem);
     if (!ty)
       return nullptr;
     S.checkViewNotStored(elem, ty);
     elemTys.push_back(ty);
   }
-  // Elements that disagree but all fit the slot's element type (`int` and
-  // `int?` into `int?[]`, `("a", 1)` and `("b", n)` into `(Str, int?)[]`)
-  // take that type; checkAssignable marks each element's coercion.
-  // Returns the index of the first element that does not fit (or the
-  // element count when all do).
-  auto firstMisfit = [&]() {
-    for (size_t i = 0; i < elemTys.size(); ++i)
-      if (!S.checkAssignable(expectedElem, elemTys[i], node->getElements()[i]))
-        return i;
-    return elemTys.size();
-  };
-  ast::Type *elemTy = nullptr;
-  for (size_t i = 0; i < elemTys.size(); ++i) {
+  ast::Type *elemTy = elemTys.front();
+  for (size_t i = 1; i < elemTys.size(); ++i) {
     auto *ty = elemTys[i];
-    if (!elemTy) {
-      elemTy = ty;
-    } else if (!typesEqual(elemTy, ty)) {
+    if (!typesEqual(elemTy, ty)) {
       // int <-> float promotion across elements.
       if (elemTy == S.Ctx.getIntTy() && ty == S.Ctx.getFloatTy()) {
         elemTy = S.Ctx.getFloatTy();
@@ -1534,18 +1411,6 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
             continue;
           }
         }
-        if (expectedElem) {
-          size_t bad = firstMisfit();
-          if (bad == elemTys.size()) {
-            elemTy = expectedElem;
-            break;
-          }
-          S.error(node->getElements()[bad]->getLocation(),
-                  "array literal element of type '" + typeName(elemTys[bad]) +
-                      "' does not match the expected element type '" +
-                      typeName(expectedElem) + "'");
-          return nullptr;
-        }
         S.error(node->getElements()[i]->getLocation(),
                 "array literal has inconsistent element types: '" +
                     typeName(elemTy) + "' and '" + typeName(ty) + "'");
@@ -1553,14 +1418,28 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
       }
     }
   }
-  if (holdsFixedArray(elemTy)) {
-    S.errorFixedArrayHere(node->getLocation(), elemTy,
-                          "an element of a growable array");
+  if (ast::isa<ast::SliceType>(elemTy)) {
+    S.errorFixedArrayHere(node->getLocation(), elemTy, "an array element");
     return nullptr;
   }
-  auto *arrTy = S.Ctx.getArrayType(elemTy);
-  node->setResolvedType(arrTy);
-  return arrTy;
+  if (fixedElementBytes(elemTy) < 0) {
+    S.error(node->getLocation(),
+            "an array of '" + typeName(elemTy) + "' is not supported yet");
+    return nullptr;
+  }
+  auto *fixed = S.Ctx.getFixedArrayType(elemTy, n);
+  if (fixedElementBytes(fixed) < 0) {
+    S.error(node->getLocation(),
+            "array literal of type '" + typeName(fixed) +
+                "' is too big: a fixed-size array holds at most " +
+                std::to_string(kMaxFixedArrayElements) + " elements");
+    return nullptr;
+  }
+  // Each element takes the common type (`[1, 2.5]` is a `float[2]`).
+  for (size_t i = 0; i < elemTys.size(); ++i)
+    S.checkAssignable(elemTy, elemTys[i], node->getElements()[i]);
+  node->setResolvedType(fixed);
+  return fixed;
 }
 
 ast::Type *
@@ -1657,10 +1536,9 @@ ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
     return S.Ctx.getCharTy();
   }
 
-  auto *at = ast::dyn_cast<ast::ArrayType>(arrayTy);
   auto *fixed = ast::dyn_cast<ast::FixedArrayType>(arrayTy);
   auto *slice = ast::dyn_cast<ast::SliceType>(arrayTy);
-  if (!at && !fixed && !slice) {
+  if (!fixed && !slice) {
     S.error(node->getLocation(), "subscript '[]' applied to non-array type '" +
                                      typeName(arrayTy) + "'");
     return nullptr;
@@ -1677,9 +1555,7 @@ ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
   if (fixed && !S.checkFixedIndex(fixed, node->getIndex()))
     return nullptr;
 
-  ast::Type *elemTy = at      ? at->getElementType()
-                      : fixed ? fixed->getElementType()
-                              : slice->getElementType();
+  ast::Type *elemTy = fixed ? fixed->getElementType() : slice->getElementType();
   node->setResolvedType(elemTy);
   return elemTy;
 }
@@ -1815,17 +1691,6 @@ Sema::ExprChecker::visitTupleLiteralExpr(ast::TupleLiteralExpr *node) {
       continue;
     }
     S.checkViewNotStored(elem, ty);
-    // An empty array literal has no element type of its own and nothing
-    // inside a tuple literal can supply one (unlike an annotated variable),
-    // so codegen could not pick the right array representation.
-    if (auto *at = ast::dyn_cast<ast::ArrayType>(ty);
-        at && at->getElementType() == S.Ctx.getVoidTy()) {
-      S.error(elem->getLocation(),
-              "cannot infer element type of empty array literal '[]' inside a "
-              "tuple literal; bind it to an annotated variable first");
-      ok = false;
-      continue;
-    }
     elemTys.push_back(ty);
   }
   if (!ok)
@@ -2342,15 +2207,16 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   return ok;
 }
 
-// A program's entry point is `fn main() -> int` or `fn main(args: Str[]) ->
-// int` (the lowering's `@main`, which the PIR verifier checks again).  Checked
+// A program's entry point is `fn main() -> int` or `fn main(args: view
+// Str[]) -> int` (the lowering's `@main`, which the PIR verifier checks
+// again).  Checked
 // here so the error has a source location on every frontend (#132).
 bool Sema::checkEntryPoint(ast::TranslationUnit *tu,
                            const std::vector<ast::FuncDecl *> &declaredFns) {
   if (EntryPointCheck == EntryPoint::None)
     return true;
   const std::string expected =
-      "'fn main() -> int' or 'fn main(args: Str[]) -> int'";
+      "'fn main() -> int' or 'fn main(args: view Str[]) -> int'";
   for (auto *fn : tu->getGenericFuncDecls())
     if (fn->getName() == names::kMain) {
       error(fn->getLocation(), "'main' cannot be generic; the program's entry "
@@ -2369,15 +2235,18 @@ bool Sema::checkEntryPoint(ast::TranslationUnit *tu,
     if (!sig)
       return false;
     bool params = sig->ParamTypes.empty();
-    if (sig->ParamTypes.size() == 1)
-      if (auto *at = ast::dyn_cast<ast::ArrayType>(sig->ParamTypes[0]))
-        params = at->getElementType() == Ctx.getStrTy();
+    if (sig->ParamTypes.size() == 1 &&
+        sig->Modes.mode(0) == ast::ParamMode::View)
+      if (auto *st = ast::dyn_cast<ast::SliceType>(sig->ParamTypes[0]))
+        params = st->getElementType() == Ctx.getStrTy();
     if (sig->ReturnType == Ctx.getIntTy() && params)
       return true;
     std::string actual = "fn main(";
     for (size_t i = 0; i < sig->ParamTypes.size(); ++i) {
       if (i)
         actual += ", ";
+      if (sig->Modes.mode(i) != ast::ParamMode::Value)
+        actual += std::string(ast::paramModeName(sig->Modes.mode(i))) + " ";
       actual += typeName(sig->ParamTypes[i]);
     }
     actual += ") -> ";
@@ -2396,7 +2265,7 @@ bool Sema::checkEntryPoint(ast::TranslationUnit *tu,
   // declaration happens to come first.
   error(ast::SourceLocation(1, 1, 1, 1),
         "program has no entry point 'fn main() -> int' (or "
-        "'fn main(args: Str[]) -> int')");
+        "'fn main(args: view Str[]) -> int')");
   return false;
 }
 
@@ -2513,10 +2382,6 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   auto *owner = CurrentScope->findOwner(varName);
   if (!owner) {
     // First assignment: declare in the current scope.
-    if (diagnoseEmptyArrayLiteral(node->getLocation(), nullptr, valTy)) {
-      declarePoisoned(CurrentScope, varName);
-      return false;
-    }
     if (ast::isa<ast::SliceType>(valTy)) {
       errorFixedArrayHere(node->getLocation(), valTy,
                           "variable '" + varName + "'");
@@ -2534,14 +2399,9 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   // A poisoned variable (its declaration failed) is re-declared by a valid
   // assignment, with the value's type, in the scope that owns it.
   if (ast::isa<ast::PoisonType>(varTy)) {
-    if (diagnoseEmptyArrayLiteral(node->getLocation(), nullptr, valTy))
-      return false;
     owner->set(varName, valTy);
     return viewOk;
   }
-
-  if (diagnoseEmptyArrayLiteral(node->getLocation(), varTy, valTy))
-    return false;
 
   if (!checkAssignable(varTy, valTy, node->getValue())) {
     if (!diagnoseOptionalNarrowing(node->getLocation(), varTy, valTy))
@@ -2762,13 +2622,13 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
       return false;
     }
     FixedArrayAllowed = true; // a parameter may be a fixed-size array
+    SliceAllowed = p.Mode != ast::ParamMode::Value; // or a slice
     auto *ty = resolveType(p.ParamType, node->getLocation(),
                            "parameter '" + p.getName() + "'");
     if (!ty) {
       ErroneousNames.insert(node->getName()); // as for the return type
       return false;
     }
-    ty = sliceOf(ty, p.Mode);
     p.ParamType = ty;
     paramTypes.push_back(ty);
   }
@@ -2997,10 +2857,6 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     if (node->getMode() == ast::ParamMode::Value)
       viewOk = checkViewNotStored(node->getInitExpr(), initTy);
     if (declTy) {
-      if (diagnoseEmptyArrayLiteral(node->getLocation(), declTy, initTy)) {
-        CurrentScope->set(node->getName(), declTy);
-        return false;
-      }
       if (!checkAssignable(declTy, initTy, node->getInitExpr())) {
         if (!diagnoseOptionalNarrowing(node->getLocation(), declTy, initTy))
           error(node->getLocation(),
@@ -3015,10 +2871,6 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
                                       node->getInitExpr(), initTy))
         viewOk = false;
     } else {
-      if (diagnoseEmptyArrayLiteral(node->getLocation(), nullptr, initTy)) {
-        declarePoisoned(CurrentScope, node->getName());
-        return false;
-      }
       if (ast::isa<ast::SliceType>(initTy)) {
         errorFixedArrayHere(node->getLocation(), initTy,
                             "variable '" + node->getName() + "'");
@@ -3112,15 +2964,14 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   auto *arrTy = resolveExprType(node->getArray());
   if (!arrTy)
     return false;
-  // An optional array cannot be indexed (it may be None).
+  // An optional cannot be indexed (it may be None).
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(arrTy)) {
     errorOptionalUnwrap(node->getLocation(), ot);
     return false;
   }
-  auto *at = ast::dyn_cast<ast::ArrayType>(arrTy);
   auto *fixed = ast::dyn_cast<ast::FixedArrayType>(arrTy);
   auto *slice = ast::dyn_cast<ast::SliceType>(arrTy);
-  if (!at && !fixed && !slice) {
+  if (!fixed && !slice) {
     error(node->getLocation(),
           "subscript assignment on non-array type '" + typeName(arrTy) + "'");
     return false;
@@ -3144,9 +2995,7 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   if (!checkChangeable(node->getArray(), "cannot assign to its elements",
                        node->getLocation()))
     return false;
-  ast::Type *elemTy = at      ? at->getElementType()
-                      : fixed ? fixed->getElementType()
-                              : slice->getElementType();
+  ast::Type *elemTy = fixed ? fixed->getElementType() : slice->getElementType();
   auto *valTy = resolveExprType(node->getValue(), elemTy);
   if (!valTy)
     return false;
@@ -3368,38 +3217,17 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
       arm->setArmType(resolvedArmTy); // write canonical pointer back
       auto *armCt = resolvedArmTy ? ast::dyn_cast<ast::ClassType>(resolvedArmTy)
                                   : nullptr;
-      auto *armAt = resolvedArmTy ? ast::dyn_cast<ast::ArrayType>(resolvedArmTy)
-                                  : nullptr;
-      if (!armCt && !armAt) {
+      if (!armCt) {
         // Only emit a secondary diagnostic if resolution succeeded but the
-        // type is not a class or array. If resolveType already emitted
-        // "unknown type", resolvedArmTy is null and that's enough.
+        // type is not a class. If resolveType already emitted "unknown
+        // type", resolvedArmTy is null and that's enough.
         if (resolvedArmTy)
-          error(arm->getLocation(),
-                "match arm type must be a class or array type");
+          error(arm->getLocation(), "match arm type must be a class type");
         ok = false;
         // The binding is still in scope in the body, poisoned.
         if (arm->hasBinding())
           declarePoisoned(CurrentScope, arm->getBinding());
         // Still try to visit the body to surface further errors.
-      } else if (armAt) {
-        // Array arm: the subject must be Obj (arrays are dispatched as Obj
-        // at runtime — they share the Obj vtable header).
-        if (subjectCt != Ctx.getObjTy()) {
-          error(arm->getLocation(),
-                "array match arm requires an 'Obj' subject, got '" +
-                    subjectCt->getName() + "'");
-          ok = false;
-        }
-        if (arm->hasBinding() && !bindArmName(arm, node->getSubject(), armAt)) {
-          ok = false;
-        } else if (arm->hasBinding()) {
-          if (!CurrentScope->declare(arm->getBinding(), armAt)) {
-            error(arm->getLocation(),
-                  "redeclaration of '" + arm->getBinding() + "' in match arm");
-            ok = false;
-          }
-        }
       } else {
         // 3. The arm type must be a subclass of the subject's static type.
         //    (Matching Obj against Obj arms is always allowed since every class
@@ -3451,7 +3279,6 @@ bool Sema::checkOptionalMatch(ast::MatchStmt *node,
                               ast::OptionalType *subjectTy) {
   ast::Type *inner = subjectTy->getInnerType();
   auto *innerCt = ast::dyn_cast<ast::ClassType>(inner);
-  auto *innerAt = ast::dyn_cast<ast::ArrayType>(inner);
   const std::string subjName = typeName(subjectTy);
 
   bool ok = true;
@@ -3522,16 +3349,6 @@ bool Sema::checkOptionalMatch(ast::MatchStmt *node,
           ok = false;
         } else {
           bindTy = inner;
-        }
-      } else if (innerAt) {
-        if (!typesEqual(resolvedArmTy, innerAt)) {
-          error(arm->getLocation(),
-                "match arm type '" + typeName(resolvedArmTy) +
-                    "' does not match the optional subject type '" + subjName +
-                    "'");
-          ok = false;
-        } else {
-          bindTy = innerAt;
         }
       }
       if (bindTy == inner)

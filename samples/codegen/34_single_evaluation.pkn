@@ -28,7 +28,7 @@ fn idx() -> int {
   return 0;
 }
 
-fn arrs() -> C[] {
+fn arrs() -> C[2] {
   println("arrs called");
   return [C(3), C(4)];
 }
@@ -43,7 +43,7 @@ fn show(c: C) {
 }
 
 fn main() -> int {
-  arr: C[] = [C(1), C(2)];
+  arr: C[2] = [C(1), C(2)];
   x: C = C(9);
   x = arr[idx()];
   println(Str(x.v));

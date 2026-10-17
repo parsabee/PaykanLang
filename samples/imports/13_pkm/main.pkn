@@ -20,7 +20,7 @@ fn main() -> int {
   s: shapes::Square = shapes::Square(5);
   println(r.describe());
   println(s.describe());
-  all: shapes::Shape[] = [r, s];
+  all: shapes::Shape[2] = [r, s];
   println(Str<int>(shapes::total(all)));
   println(shapes::kindName(r.kind()));
   println(shapes::kindName(s.kind()));

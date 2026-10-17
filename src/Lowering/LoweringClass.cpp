@@ -226,12 +226,7 @@ Val ModuleLowering::emitIsExactType(const Val &rawObjPtr, ast::ClassType *ct) {
   Val loaded = B.vtableLoad(rawObjPtr, "vtable." + ct->getName());
   Val expected;
   const char *runtimeVT = nullptr;
-  if (auto *elemTy = ASTCtx.getSpecializedArrayElemType(ct)) {
-    // Specialized array type: the runtime vtable the array was created with.
-    runtimeVT = ast::isValueOptional(elemTy)  ? kPaykanArraySizedVtable
-                : isObjectElementType(elemTy) ? kPaykanArrayObjVtable
-                                              : kPaykanArrayVtable;
-  } else if (ct == ASTCtx.getObjTy()) {
+  if (ct == ASTCtx.getObjTy()) {
     runtimeVT = kPaykanObjectVtable;
   } else if (ct == ASTCtx.getStrTy()) {
     runtimeVT = kPaykanStringVtable;

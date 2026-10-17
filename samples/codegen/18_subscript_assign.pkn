@@ -3,8 +3,9 @@
 //         str[idx] returning a single-char Str,
 //         iterating over string characters via subscript,
 //         mixed subscript read + write in a loop.
-// Exercises: visitSubscriptAssignStmt (CodeGen), PaykanArray_set,
-//            PaykanString_at, visitSubscriptExpr on Str receiver.
+// Exercises: element stores into int[n] / float[n] / bool[n] / Str[n]
+//            arrays (a Str element store releases the string it replaces),
+//            PaykanString_at, subscripts on a Str receiver.
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -17,7 +18,7 @@ fn printBool(b: bool) -> int {
 
 fn intArrayAssign() -> int {
   println("=== int array assign ===");
-  arr: int[] = [10, 20, 30];
+  arr: int[3] = [10, 20, 30];
   arr[0] = 99;
   arr[2] = 42;
   println(Str(arr[0]));  // 99
@@ -30,7 +31,7 @@ fn intArrayAssign() -> int {
 
 fn floatArrayAssign() -> int {
   println("=== float array assign ===");
-  arr: float[] = [1.0, 2.0, 3.0];
+  arr: float[3] = [1.0, 2.0, 3.0];
   arr[1] = 9.5;
   println(Str<float>(arr[0]));  // 1.0
   println(Str(arr[1]));  // 9.5
@@ -42,7 +43,7 @@ fn floatArrayAssign() -> int {
 
 fn boolArrayAssign() -> int {
   println("=== bool array assign ===");
-  arr: bool[] = [True, False, True];
+  arr: bool[3] = [True, False, True];
   arr[0] = False;
   arr[2] = False;
   printBool(arr[0]);  // False
@@ -55,7 +56,7 @@ fn boolArrayAssign() -> int {
 
 fn strArrayAssign() -> int {
   println("=== str array assign ===");
-  arr: Str[] = ["a", "b", "c"];
+  arr: Str[3] = ["a", "b", "c"];
   arr[1] = "hello";
   println(arr[0]);  // a
   println(arr[1]);  // hello
@@ -67,7 +68,7 @@ fn strArrayAssign() -> int {
 
 fn loopOverwrite() -> int {
   println("=== loop overwrite ===");
-  arr: int[] = [0, 0, 0, 0, 0];
+  arr: int[5] = [0, 0, 0, 0, 0];
   i: int = 0;
   while (i < 5) {
     arr[i] = i * i;

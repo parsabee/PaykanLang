@@ -39,8 +39,6 @@ class ASTContext {
   // Canonical class types.
   ClassType *ObjTy;
   ClassType *StrTy;
-  // Canonical array type (ClassType with vtable matching PAYKAN_SLOT_ARRAY_*).
-  ClassType *ArrayTy;
   // Canonical file type (ClassType inheriting Obj).
   ClassType *FileTy;
   // Canonical error type (ClassType inheriting Obj, returned by open() on
@@ -54,29 +52,18 @@ class ASTContext {
   // types backed by i64; they are NOT class types and live in their own map.
   std::unordered_map<std::string, EnumType *> EnumTypes;
 
-  // Canonical ArrayType per element type (lazily created by getArrayType).
-  // Key: element Type* pointer (canonical within this ASTContext).  Because
-  // the element of a nested array is itself a canonical ArrayType, identity
-  // holds at any nesting depth: `int[][]` resolves to one node everywhere.
-  std::unordered_map<Type *, ArrayType *> ArrayTypes;
-
-  // Canonical FixedArrayType per (element type, length), keyed like
-  // ArrayTypes (lazily created by getFixedArrayType).
+  // Canonical FixedArrayType per (element type, length), lazily created by
+  // getFixedArrayType.  Keys are canonical within this ASTContext, so
+  // identity holds at any nesting depth.
   std::map<std::pair<Type *, int64_t>, FixedArrayType *> FixedArrayTypes;
 
-  // Canonical SliceType per element type, keyed like ArrayTypes.
+  // Canonical SliceType per element type.
   std::unordered_map<Type *, SliceType *> SliceTypes;
 
   // Canonical OptionalType per inner type (lazily created by getOptionalType).
-  // Keyed like ArrayTypes: the inner Type* must be canonical, so `Node?`
+  // The inner Type* must be canonical, so `Node?`
   // resolves to one node everywhere and identity is pointer identity.
   std::unordered_map<Type *, OptionalType *> OptionalTypes;
-
-  // Per-element specialized array ClassTypes (lazily created).
-  // Key: element Type* pointer (canonical within this ASTContext).
-  std::unordered_map<Type *, ClassType *> SpecializedArrayTypes;
-  // Reverse map for O(1) getSpecializedArrayElemType lookups.
-  std::unordered_map<ClassType *, Type *> SpecializedArrayElemTypes;
 
   // -- Tuples
   // Canonical base class for every tuple value ("Tuple": Obj subtype whose
@@ -89,14 +76,13 @@ class ASTContext {
   // Per-element-list specialized tuple ClassTypes (`Tuple<int, Str>`), keyed
   // by canonical TupleType*, plus the reverse map.  They subclass TupleTy and
   // add no methods; they exist so that a tuple receiver has a ClassType for
-  // method lookup / vtable dispatch, mirroring Array<T>.
+  // method lookup / vtable dispatch.
   std::unordered_map<TupleType *, ClassType *> SpecializedTupleTypes;
   std::unordered_map<ClassType *, TupleType *> SpecializedTupleElemTypes;
 
   // -- Bootstrap helpers (called from the constructor)
   void buildObjectType();
   void buildStringType();
-  void buildArrayType();
   void buildTupleType();
   void buildFileType();
   void buildErrorType();
@@ -182,54 +168,29 @@ public:
   // Canonical class type accessors.
   ClassType *getObjTy() const { return ObjTy; }
   ClassType *getStrTy() const { return StrTy; }
-  ClassType *getArrayTy() const { return ArrayTy; }
   ClassType *getFileTy() const { return FileTy; }
   ClassType *getErrorTy() const { return ErrorTy; }
 
-  /// Return the canonical ArrayType whose elements have type @p elemTy,
-  /// creating it on first use.  @p elemTy must itself be canonical (a builtin
-  /// singleton, a registered ClassType/EnumType, or another canonical
-  /// ArrayType), so that array type identity is pointer identity.  Sema
-  /// resolves every parser-emitted (source-located) ArrayType to this node.
-  ArrayType *getArrayType(Type *elemTy);
-
   /// Return the canonical FixedArrayType of @p length elements of type
   /// @p elemTy (`int[3]`), creating it on first use.  @p elemTy must itself
-  /// be canonical (see getArrayType).
+  /// be canonical (a builtin singleton, a registered ClassType/EnumType, or
+  /// another canonical type), so that type identity is pointer identity.
   FixedArrayType *getFixedArrayType(Type *elemTy, int64_t length);
   /// The canonical slice of @p elemTy (see ast::SliceType); Sema-internal.
   SliceType *getSliceType(Type *elemTy);
 
   /// Return the canonical OptionalType wrapping @p innerTy, creating it on
-  /// first use.  @p innerTy must itself be canonical (see getArrayType).
+  /// first use.  @p innerTy must itself be canonical (see getFixedArrayType).
   /// Sema resolves every parser-emitted (source-located) OptionalType to this
   /// node.
   OptionalType *getOptionalType(Type *innerTy);
-
-  /// Return (creating if needed) the specialized ClassType for arrays whose
-  /// elements have type @p elemTy.  The returned type is a subtype of ArrayTy
-  /// and carries push(elemTy)->void and pop()->elemTy method declarations.
-  ClassType *getOrCreateSpecializedArrayType(Type *elemTy);
-
-  /// If @p ct is a specialized array ClassType (e.g. Array<Str>), return its
-  /// element type; otherwise return nullptr.
-  Type *getSpecializedArrayElemType(ClassType *ct) const;
-
-  /// Read-only view of the specialized array ClassTypes, keyed by element
-  /// type.  Each distinct element type has exactly one entry.
-  const std::unordered_map<Type *, ClassType *> &
-  getSpecializedArrayTypes() const {
-    return SpecializedArrayTypes;
-  }
-
-  // -- Tuples
 
   /// The canonical `Tuple` base ClassType (every tuple value is one).
   ClassType *getTupleTy() const { return TupleTy; }
 
   /// Return the canonical TupleType with the given element types, creating
   /// it on first use.  Each element must itself be canonical (see
-  /// getArrayType) so that tuple type identity is pointer identity.
+  /// getFixedArrayType) so that tuple type identity is pointer identity.
   TupleType *getTupleType(std::vector<Type *> elemTys);
 
   /// Return (creating if needed) the specialized ClassType `Tuple<T1, T2>`

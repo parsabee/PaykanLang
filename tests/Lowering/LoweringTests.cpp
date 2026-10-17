@@ -759,33 +759,6 @@ TEST(Lowering, EnumMatchComparesConstants) {
 
 // -- Arrays, tuples, optionals
 
-TEST(Lowering, ConstantPrimitiveArrayLiteralUsesADataGlobal) {
-  auto l = lower(R"(
-    fn main() -> int { xs = [1, 2, 3]; return xs.len(); }
-  )");
-  ASSERT_TRUE(l.Ok) << l.Error;
-  EXPECT_NE(l.Text.find("data @.arr.data0 = [1, 2, 3]"), std::string::npos)
-      << l.Text;
-  std::string m = function(l.Text, "main");
-  EXPECT_NE(m.find("call @$rt.PaykanArray_new_from_data(3, @.arr.data0)"),
-            std::string::npos)
-      << m;
-  // len is a vtable slot of the runtime Array class (explicit signature).
-  EXPECT_NE(m.find("vcall %"), std::string::npos) << m;
-}
-
-TEST(Lowering, ObjectArrayLiteralSetsAndReleasesEachElement) {
-  auto l = lower(R"(
-    fn main() -> int { xs = ["a", "b"]; return 0; }
-  )");
-  ASSERT_TRUE(l.Ok) << l.Error;
-  std::string m = function(l.Text, "main");
-  EXPECT_NE(m.find("call @$rt.PaykanArray_new_obj(2)"), std::string::npos) << m;
-  EXPECT_EQ(count(m, "call @$rt.PaykanArray_set_obj("), 2u) << m;
-  // set_obj retains: each +1 element box is released, plus xs at scope exit.
-  EXPECT_EQ(count(m, "release"), 3u) << m;
-}
-
 TEST(Lowering, AssigningAnObjectElementEvaluatesTheIndexOnce) {
   // Issue #52: `x = arr[idx()]` used to evaluate the subscript once for the
   // value and again for the ownership handling.
@@ -793,9 +766,9 @@ TEST(Lowering, AssigningAnObjectElementEvaluatesTheIndexOnce) {
     class C { v: int; }
     impl C { fn __init__(v: int) { self.v = v; } }
     fn idx() -> int { println("idx called"); return 0; }
-    fn mk() -> C[] { return [C(3)]; }
+    fn mk() -> C[1] { return [C(3)]; }
     fn main() -> int {
-      arr: C[] = [C(1), C(2)];
+      arr: C[2] = [C(1), C(2)];
       x: C = C(9);
       x = arr[idx()];
       y: C = arr[idx()];
@@ -807,12 +780,12 @@ TEST(Lowering, AssigningAnObjectElementEvaluatesTheIndexOnce) {
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
   EXPECT_EQ(count(m, "call @idx()"), 4u) << m;
-  EXPECT_EQ(count(m, "call @mk()"), 1u) << m;
-  EXPECT_EQ(count(m, "call @$rt.PaykanArray_get("), 4u) << m;
-  // Each element read by a declared owner retains the stored box once
-  // (x from arr, y, x from the temporary array); z's first assignment
-  // acquires it with a single `box`.
-  EXPECT_EQ(count(m, "retain"), 3u) << m;
+  EXPECT_EQ(count(m, "call @mk("), 1u) << m;
+  // One bounds check per subscript, on the index evaluated once.
+  EXPECT_EQ(count(m, "call @$rt.Paykan_panic_index("), 4u) << m;
+  // Each element read retains the stored box once (x, y and z from arr, x
+  // from the temporary array, whose own element is then released).
+  EXPECT_EQ(count(m, "retain"), 4u) << m;
 }
 
 TEST(Lowering, SideEffectingReceiversAreEvaluatedOnce) {
@@ -828,7 +801,7 @@ TEST(Lowering, SideEffectingReceiversAreEvaluatedOnce) {
     fn mkh() -> H { return H(C(5)); }
     fn take(c: C) -> int { return c.v; }
     fn main() -> int {
-      arr: C[] = [C(1), C(2)];
+      arr: C[2] = [C(1), C(2)];
       x: Obj = C(9);
       x = mkh().c;
       w: C = mkh().c;
@@ -844,28 +817,6 @@ TEST(Lowering, SideEffectingReceiversAreEvaluatedOnce) {
   std::string m = function(l.Text, "main");
   EXPECT_EQ(count(m, "call @mkh()"), 3u) << m;
   EXPECT_EQ(count(m, "call @idx()"), 4u) << m;
-}
-
-TEST(Lowering, ArrayMatchArmBindingDispatchesThroughTheArrayType) {
-  // The binding of an `arr: Str[]` arm has the array type: `len` is a slot
-  // of the runtime Array class, not of the specialized `Array<Str>` key.
-  auto l = lower(R"(
-    fn main() -> int {
-      x: Obj = ["hello", "world"];
-      match x {
-        arr: Str[] { arr.push("!"); println(arr[2]); return arr.len(); }
-        _ { }
-      }
-      return 0;
-    }
-  )");
-  ASSERT_TRUE(l.Ok) << l.Error;
-  std::string m = function(l.Text, "main");
-  // `len` is a runtime-class slot (explicit signature), not a slot of a
-  // `"Array<Str>"` class item, which would have no slots.
-  EXPECT_NE(m.find(" : (obj) -> i64 [3] ()"), std::string::npos) << m;
-  EXPECT_EQ(m.find(" : \"Array<Str>\" ["), std::string::npos) << m;
-  EXPECT_NE(m.find("call @$rt.PaykanArray_push_obj("), std::string::npos) << m;
 }
 
 TEST(Lowering, TupleLiteralUsesAKindsDescriptor) {
@@ -954,11 +905,11 @@ TEST(Lowering, OptionalValuesAreNotBoxed) {
 TEST(Lowering, ArrayAndTupleElementsOfOptionalsAreInline) {
   auto l = lower(R"(
     fn main() -> int {
-      xs: int?[] = [1, None];
-      xs.push(3);
+      xs: int?[3] = [1, None, 3];
       xs[0] = None;
       a = xs[1];
-      b = xs.pop();
+      i = 2;
+      b = xs[i];
       t: (bool?, Str) = (True, "s");
       c = t.0;
       d = t.1;
@@ -967,12 +918,11 @@ TEST(Lowering, ArrayAndTupleElementsOfOptionalsAreInline) {
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
-  EXPECT_NE(m.find("call @$rt.PaykanArray_new_sized(2, 16)"), std::string::npos)
-      << m;
-  EXPECT_EQ(count(m, "call @$rt.PaykanArray_slot("), 4u) << m;
-  EXPECT_EQ(count(m, "call @$rt.PaykanArray_push_slot("), 1u) << m;
-  EXPECT_EQ(count(m, "call @$rt.PaykanArray_pop_into("), 1u) << m;
-  EXPECT_NE(m.find("ptr.load opt_i64, %"), std::string::npos) << m;
+  // Three 16-byte elements, stored three times by the literal and once by
+  // `xs[0] = None`, and loaded as they are.
+  EXPECT_NE(m.find("local %xs.0: mem(48, 8)"), std::string::npos) << m;
+  EXPECT_EQ(count(m, "ptr.store %"), 4u) << m;
+  EXPECT_EQ(count(m, "ptr.load opt_i64, %"), 2u) << m;
   // The tuple: 3 slots, kinds OPT, BOOL, REF; `t.1` is slot 2.
   EXPECT_NE(m.find("call @$rt.PaykanTuple_new(3, @"), std::string::npos) << m;
   EXPECT_NE(l.Text.find("= [5, 2, 4]"), std::string::npos) << l.Text;
@@ -987,8 +937,8 @@ TEST(Lowering, OptionalValueSizesFollowTheirPayloads) {
   auto l = lower(R"(
     native fn keep<T>(v: view T) = "pk_keep";
     fn main() -> int {
-      a: int?[] = [1];  b: float?[] = [None];
-      c: bool?[] = [True];  d: char?[] = ['x', None];
+      a: int?[1] = [1];  b: float?[1] = [None];
+      c: bool?[1] = [True];  d: char?[2] = ['x', None];
       i: int? = 1;  f: bool? = None;
       keep<int?>(i);
       keep<bool?>(f);
@@ -997,11 +947,11 @@ TEST(Lowering, OptionalValueSizesFollowTheirPayloads) {
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
-  for (const char *call :
-       {"PaykanArray_new_sized(1, 16)", "PaykanArray_new_sized(1, 2)",
-        "PaykanArray_new_sized(2, 2)"})
-    EXPECT_NE(m.find(call), std::string::npos) << call << "\n" << m;
-  EXPECT_EQ(count(m, "PaykanArray_new_sized(1, 16)"), 2u) << m;
+  for (const char *local : {"local %a.0: mem(16, 8)", "local %b.1: mem(16, 8)",
+                            "local %c.2: mem(2, 1)", "local %d.3: mem(4, 1)"})
+    EXPECT_NE(m.find(local), std::string::npos) << local << "\n" << m;
+  // d's second element is one `char?` in.
+  EXPECT_NE(m.find("ptr.add %d.addr.7, 2\n"), std::string::npos) << m;
   EXPECT_NE(l.Text.find("= [16, 8, 5, 0]"), std::string::npos) << l.Text;
   EXPECT_NE(l.Text.find("= [2, 1, 5, 0]"), std::string::npos) << l.Text;
 }
@@ -1029,7 +979,6 @@ TEST(Lowering, FixedArraysAreMemSlots) {
   // Only the computed index is checked.
   EXPECT_EQ(count(m, "Paykan_panic_index"), 1u) << m;
   EXPECT_EQ(count(m, "retain"), 0u) << m;
-  EXPECT_EQ(count(m, "PaykanArray"), 0u) << m;
 }
 
 // A fixed-size array parameter is an address in every mode; a by-value one
@@ -1248,7 +1197,7 @@ TEST(Lowering, ImportedInstantiationsAreEmittedOnce) {
          "view fn n() -> int { return __h(); } }\n"
          "impl Box<T> { fn __init__(v: T) { self.v = v; } }\n"
          "fn __h() -> int { return 1; }\n"
-         "fn first<T>(xs: T[]) -> T { return xs[0]; }\n";
+         "fn first<T>(xs: view T[]) -> T { return xs[0]; }\n";
   for (const char *m : {"a", "b"})
     std::ofstream(dir / (std::string(m) + ".pkn"))
         << "import lib::gen;\n"
@@ -1266,7 +1215,7 @@ TEST(Lowering, ImportedInstantiationsAreEmittedOnce) {
   EXPECT_EQ(count(t, "\nclass Box<Str> {"), 1u) << t;
   EXPECT_EQ(count(t, "\nextern class Box<Str> module \"a\""), 2u) << t;
   EXPECT_EQ(count(t, "\nfn @\"$lib::gen::first<int>\"("), 1u) << t;
-  EXPECT_EQ(count(t, "\nextern fn @\"$lib::gen::first<int>\"(box) -> i64 "
+  EXPECT_EQ(count(t, "\nextern fn @\"$lib::gen::first<int>\"(ptr, i64) -> i64 "
                      "module \"a\"\n"),
             2u)
       << t;

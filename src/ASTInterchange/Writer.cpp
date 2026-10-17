@@ -117,8 +117,8 @@ private:
 
   /// False (with the error) once the output would nest deeper than read()
   /// accepts: such a tree has no interchange form.  It bounds the recursion
-  /// here too (the recursive-descent frontend builds an `int[][]...` of any
-  /// length, for one).
+  /// here too (the recursive-descent frontend builds an `int?[]...` or a
+  /// `(int, (int, ...))` of any depth, for one).
   bool enter() {
     if (Depth < kMaxDepth)
       return true;

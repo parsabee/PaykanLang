@@ -146,8 +146,7 @@ impl Player {
 ### In an array
 
 ```pkn
-route: Direction[] = [Direction::North, Direction::East, Direction::South];
-route.push(Direction::West);          // grow
+route: Direction[4] = [Direction::North, Direction::East, Direction::South, Direction::West];
 route[0] = opposite(route[0]);        // North -> South
 
 j: int = 0;

@@ -14,11 +14,8 @@ inline constexpr const char *kPrintln = "println";
 inline constexpr const char *kErrPrint = "printerr";
 inline constexpr const char *kErrPrintln = "printerrln";
 inline constexpr const char *kLen = "len";
-inline constexpr const char *kPush = "push";
-inline constexpr const char *kPop = "pop";
 inline constexpr const char *kOpen = "open";
 inline constexpr const char *kMain = "main"; ///< the program's entry point
-inline constexpr const char *kArray = "Array";
 inline constexpr const char *kTuple = "Tuple";
 /// How an absent optional prints (the None object's toString).
 inline constexpr const char *kNoneText = "None";
@@ -101,32 +98,6 @@ inline constexpr const char *kPaykanStringConcat = "PaykanString_concat";
 inline constexpr const char *kPaykanStringAt = "PaykanString_at";
 inline constexpr const char *kPaykanStringVtable = "PaykanString_vtable";
 
-// Array
-inline constexpr const char *kPaykanArrayNew = "PaykanArray_new";
-inline constexpr const char *kPaykanArrayNewObj = "PaykanArray_new_obj";
-inline constexpr const char *kPaykanArrayNewFromData =
-    "PaykanArray_new_from_data";
-inline constexpr const char *kPaykanArrayDestroy = "PaykanArray_destroy";
-inline constexpr const char *kPaykanArrayDestroyObj = "PaykanArray_destroy_obj";
-inline constexpr const char *kPaykanArrayToString = "PaykanArray_toString";
-inline constexpr const char *kPaykanArrayEquals = "PaykanArray_equals";
-inline constexpr const char *kPaykanArrayLength = "PaykanArray_length";
-inline constexpr const char *kPaykanArrayGet = "PaykanArray_get";
-inline constexpr const char *kPaykanArraySet = "PaykanArray_set";
-inline constexpr const char *kPaykanArraySetObj = "PaykanArray_set_obj";
-inline constexpr const char *kPaykanArrayPush = "PaykanArray_push";
-inline constexpr const char *kPaykanArrayPushObj = "PaykanArray_push_obj";
-inline constexpr const char *kPaykanArrayPop = "PaykanArray_pop";
-inline constexpr const char *kPaykanArrayPopObj = "PaykanArray_pop_obj";
-inline constexpr const char *kPaykanArrayNewSized = "PaykanArray_new_sized";
-inline constexpr const char *kPaykanArraySlot = "PaykanArray_slot";
-inline constexpr const char *kPaykanArrayPushSlot = "PaykanArray_push_slot";
-inline constexpr const char *kPaykanArrayPopInto = "PaykanArray_pop_into";
-inline constexpr const char *kPaykanArraySizedVtable =
-    "PaykanArray_sized_vtable";
-inline constexpr const char *kPaykanArrayVtable = "PaykanArray_vtable";
-inline constexpr const char *kPaykanArrayObjVtable = "PaykanArray_obj_vtable";
-
 // Tuple
 inline constexpr const char *kPaykanTupleNew = "PaykanTuple_new";
 inline constexpr const char *kPaykanTupleSet = "PaykanTuple_set";
@@ -177,6 +148,9 @@ inline constexpr const char *kPaykanPrint = "Paykan_print";
 inline constexpr const char *kPaykanPrintln = "Paykan_println";
 inline constexpr const char *kPaykanErrPrint = "Paykan_printerr";
 inline constexpr const char *kPaykanErrPrintln = "Paykan_printerrln";
+// Program arguments (the entry point's, for `main(args: view Str[])`)
+inline constexpr const char *kPaykanArgsNew = "Paykan_args_new";
+inline constexpr const char *kPaykanArgsFree = "Paykan_args_free";
 
 // Runtime panics (noreturn)
 inline constexpr const char *kPaykanPanicDivByZero = "Paykan_panic_div_by_zero";
@@ -272,21 +246,6 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanStringParseInt,
     kPaykanStringParseFloat,
     kPaykanStringParseBool,
-    // Array
-    kPaykanArrayNew,
-    kPaykanArrayNewObj,
-    kPaykanArrayNewFromData,
-    kPaykanArrayGet,
-    kPaykanArraySet,
-    kPaykanArraySetObj,
-    kPaykanArrayPush,
-    kPaykanArrayPushObj,
-    kPaykanArrayPop,
-    kPaykanArrayPopObj,
-    kPaykanArrayNewSized,
-    kPaykanArraySlot,
-    kPaykanArrayPushSlot,
-    kPaykanArrayPopInto,
     // Tuple
     kPaykanTupleNew,
     kPaykanTupleSet,
@@ -314,10 +273,6 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanFileEquals,
     kPaykanFileWrite,
     kPaykanFileReadln,
-    // Runtime vtables referenced by `is` / match checks
-    kPaykanArrayVtable,
-    kPaykanArrayObjVtable,
-    kPaykanArraySizedVtable,
 };
 
 // -- Tuple slot kinds (compiler <-> runtime ABI)

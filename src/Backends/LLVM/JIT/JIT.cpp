@@ -104,29 +104,6 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanObjectVtable,    reinterpret_cast<void *>(&PaykanObject_vtable)},
     {kPaykanStringVtable,    reinterpret_cast<void *>(&PaykanString_vtable)},
 
-    {kPaykanArrayNew,        reinterpret_cast<void *>(&PaykanArray_new)},
-    {kPaykanArrayNewFromData,reinterpret_cast<void *>(&PaykanArray_new_from_data)},
-    {kPaykanArrayNewObj,     reinterpret_cast<void *>(&PaykanArray_new_obj)},
-    {kPaykanArrayDestroy,    reinterpret_cast<void *>(&PaykanArray_destroy)},
-    {kPaykanArrayDestroyObj, reinterpret_cast<void *>(&PaykanArray_destroy_obj)},
-    {kPaykanArrayGet,        reinterpret_cast<void *>(&PaykanArray_get)},
-    {kPaykanArraySet,        reinterpret_cast<void *>(&PaykanArray_set)},
-    {kPaykanArraySetObj,     reinterpret_cast<void *>(&PaykanArray_set_obj)},
-    {kPaykanArrayLength,     reinterpret_cast<void *>(&PaykanArray_length)},
-    {kPaykanArrayPush,       reinterpret_cast<void *>(&PaykanArray_push)},
-    {kPaykanArrayPushObj,    reinterpret_cast<void *>(&PaykanArray_push_obj)},
-    {kPaykanArrayPop,        reinterpret_cast<void *>(&PaykanArray_pop)},
-    {kPaykanArrayPopObj,     reinterpret_cast<void *>(&PaykanArray_pop_obj)},
-    {kPaykanArrayNewSized,   reinterpret_cast<void *>(&PaykanArray_new_sized)},
-    {kPaykanArraySlot,       reinterpret_cast<void *>(&PaykanArray_slot)},
-    {kPaykanArrayPushSlot,   reinterpret_cast<void *>(&PaykanArray_push_slot)},
-    {kPaykanArrayPopInto,    reinterpret_cast<void *>(&PaykanArray_pop_into)},
-    {kPaykanArraySizedVtable, reinterpret_cast<void *>(&PaykanArray_sized_vtable)},
-    {kPaykanArrayToString,   reinterpret_cast<void *>(&PaykanArray_toString)},
-    {kPaykanArrayEquals,     reinterpret_cast<void *>(&PaykanArray_equals)},
-    {kPaykanArrayVtable,     reinterpret_cast<void *>(&PaykanArray_vtable)},
-    {kPaykanArrayObjVtable,  reinterpret_cast<void *>(&PaykanArray_obj_vtable)},
-
     {kPaykanTupleNew,        reinterpret_cast<void *>(&PaykanTuple_new)},
     {kPaykanTupleSet,        reinterpret_cast<void *>(&PaykanTuple_set)},
     {kPaykanTupleSetObj,     reinterpret_cast<void *>(&PaykanTuple_set_obj)},
@@ -339,18 +316,18 @@ llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
 
   AbortAsExitStatus panicsExit;
 
-  if (mainParamCount == 1) {
-    // main(args: Str[]) — build a PaykanArray<Str> from the args vector.
-    PaykanArray *arr = PaykanArray_new_obj(0);
-    for (const auto &s : args) {
-      PaykanString *ps = PaykanString_new(s.c_str(), (int64_t)s.size());
-      PaykanShared *shared = PaykanShared_new((PaykanObject *)ps);
-      PaykanArray_push_obj(arr, shared);
-      Paykan_release(shared); // array retained; drop our ref
-    }
-    PaykanShared *argsShared = PaykanShared_new((PaykanObject *)arr);
-    // Transfer ownership to main — its scope cleanup releases argsShared.
-    return mainAddr->toPtr<int (*)(void *)>()(argsShared);
+  if (mainParamCount == 2) {
+    // main(args: view Str[]): a slice of the arguments' strings.
+    std::vector<PaykanShared *> argv;
+    argv.reserve(args.size());
+    for (const auto &s : args)
+      argv.push_back(PaykanShared_new((PaykanObject *)PaykanString_new(
+          s.c_str(), static_cast<int64_t>(s.size()))));
+    int rc = mainAddr->toPtr<int (*)(void *, int64_t)>()(
+        argv.data(), static_cast<int64_t>(argv.size()));
+    for (PaykanShared *arg : argv)
+      Paykan_release(arg);
+    return rc;
   }
 
   return mainAddr->toPtr<int (*)()>()();

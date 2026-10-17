@@ -28,7 +28,7 @@ impl Cell {
 }
 
 class Splitter {
-  view fn split(c: Cell) -> Cell[] { return [Cell(c.v / 2), Cell(c.v - c.v / 2)]; }
+  view fn split(c: Cell) -> Cell[2] { return [Cell(c.v / 2), Cell(c.v - c.v / 2)]; }
 }
 
 impl Splitter {
@@ -37,7 +37,7 @@ impl Splitter {
 
 enum Kind { Even, Odd }
 
-fn total(cs: Cell[]) -> int {
+fn total(cs: view Cell[]) -> int {
   s: int = 0;
   i: int = 0;
   while (i < cs.len()) { s = s + cs[i].v; i = i + 1; }

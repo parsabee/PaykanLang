@@ -36,15 +36,16 @@ namespace sema {
 ///   type  := base suffix*
 ///   base  := '(' type (', ' type)+ ')'        -- tuple (arity >= 2)
 ///          | name                             -- builtin / class / enum
-///   suffix := '[]'                            -- array of the type so far
+///   suffix := '[]'                            -- slice of the type so far
+///           | '[' INT ']'+                    -- fixed-size array of it
 ///           | '?'                             -- optional of the type so far
 ///
 /// Suffixes apply left to right, mirroring how ast::typeName spells nesting:
-/// "Str?[]" is an array of optional strings, "int[]?" an optional array, and
-/// "(Node?, int)[]?" an optional array of tuples.  A name runs up to the next
-/// ',' or ')' at this nesting level or the next suffix.  A generic
+/// "Str?[]" is a slice of optional strings, "int[2]?" would be an optional
+/// array, and "(Node?, int)[3]" an array of tuples.  A name runs up to the
+/// next ',' or ')' at this nesting level or the next suffix.  A generic
 /// instantiation's name carries its type arguments (`Pair<Str, int>`,
-/// `Box<Node?[]>`): everything between its '<' and the matching '>' is part of
+/// `Box<Node?>`): everything between its '<' and the matching '>' is part of
 /// the name, which is registered under exactly that spelling.  Returns nullptr
 /// (leaving @p pos wherever it stopped) if the text is malformed or a base
 /// name is unknown in @p ctx.
@@ -101,7 +102,7 @@ static ast::Type *parseExportedType(ast::ASTContext &ctx,
   for (;;) {
     if (text.compare(pos, 2, "[]") == 0) {
       pos += 2;
-      ty = ctx.getArrayType(ty);
+      ty = ctx.getSliceType(ty);
     } else if (pos + 1 < text.size() && text[pos] == '[' &&
                std::isdigit(static_cast<unsigned char>(text[pos + 1]))) {
       // A run of lengths, first index first, as typeName writes it: two
@@ -251,7 +252,7 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
                                         const std::string &moduleName) const {
   // The module's type registry holds (a) the classes/enums it declares,
   // (b) the ones it reached through its own imports, and (c) compiler
-  // builtins plus lazily-created Array<T> specialisations.  (a) is exported
+  // builtins plus lazily-created Tuple<...> specialisations.  (a) is exported
   // under the importer's qualifier.  (b) is exported WITHOUT a qualifier —
   // it must exist in the importing context so the module's signatures that
   // mention it resolve (with type identity preserved), but names are never
@@ -277,11 +278,10 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     // identity.
     if (name != ct->getName())
       continue;
-    // Lazily-created Array<T> / Tuple<T1, T2> specialisations are never
-    // exported either: the importing context rebuilds its own from the
-    // `T[]` / `(T1, T2)` spellings in the signatures that use them.
-    if (isBootstrapClassName(name) || Ctx.getSpecializedArrayElemType(ct) ||
-        Ctx.getSpecializedTupleElemType(ct))
+    // Lazily-created Tuple<T1, T2> specialisations are never exported
+    // either: the importing context rebuilds its own from the `(T1, T2)`
+    // spellings in the signatures that use them.
+    if (isBootstrapClassName(name) || Ctx.getSpecializedTupleElemType(ct))
       continue;
     ModuleInfo::ClassInfo ci;
     ci.Name = name;
@@ -768,7 +768,7 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
                                       "parameter " + std::to_string(i + 1) +
                                           " of " + decl);
           if (pty)
-            params.push_back(sliceOf(pty, m.Modes.mode(i)));
+            params.push_back(pty);
           else
             sigOk = false;
         }
@@ -798,7 +798,7 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
           resolveOrReport(fi.ParamTypeNames[i],
                           "parameter " + std::to_string(i + 1) + " of " + decl);
       if (pty)
-        params.push_back(sliceOf(pty, fi.Modes.mode(i)));
+        params.push_back(pty);
       else
         sigOk = false;
     }

@@ -28,8 +28,8 @@ fn main() -> int {
   println(describe("42") + " | " + describe("2.5") + " | " + describe("True"));
 
   // Parsing settings by key.
-  keys: Str[] = ["retries", "ratio", "verbose", "color", "depth"];
-  vals: Str[] = ["3", "0.75", "False", "yes", "deep"];
+  keys: Str[5] = ["retries", "ratio", "verbose", "color", "depth"];
+  vals: Str[5] = ["3", "0.75", "False", "yes", "deep"];
   line = "";
   valid = 0;
   k = 0;
@@ -63,7 +63,7 @@ fn main() -> int {
     None    { println("'true' is not a bool"); }
   }
   out = "round trip:";
-  flags: bool[] = [True, False];
+  flags: bool[2] = [True, False];
   j = 0;
   while (j < flags.len()) {
     match bool(Str(flags[j])) {                   // bool<Str>(Str<bool>(...))

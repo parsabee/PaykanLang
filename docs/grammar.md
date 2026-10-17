@@ -198,14 +198,19 @@ primaryType    ::= IDENT
 typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
 ```
 
-- `T[]` is an array type, `T[n]` a fixed-size array of `n` elements (an
-  integer literal, at least 1: `a fixed-size array has at least one element`),
-  and `T?` an optional type; the suffixes nest left to right (`int[][]`,
-  `Node?[]`, `(int, Str)[]`, `int[3][]` is an array of `int[3]`s).  A run of
-  lengths is one array of arrays whose first length is its first index's, as
-  in C: `int[2][3]` is two `int[3]`s, indexed `grid[i][j]` with `i < 2` and
+- `T[n]` is an array of `n` elements (an integer literal, at least 1: `a
+  fixed-size array has at least one element`), `T[]` a slice and `T?` an
+  optional type; the suffixes nest left to right (`Node?[3]`,
+  `(int, Str)[2]`, `int[3][]` is a slice of `int[3]`s).  A run of lengths is
+  one array of arrays whose first length is its first index's, as in C:
+  `int[2][3]` is two `int[3]`s, indexed `grid[i][j]` with `i < 2` and
   `j < 3`.  A length of `_` (`int[_]`) is the initializer's; Sema allows it
   only in a variable declaration with one.
+- `T[]` parses wherever a type does, but it is only the spelling of a
+  `view` or `inout` parameter's slice
+  ([language/05-arrays.md](language/05-arrays.md#slices)): Sema rejects it
+  anywhere else (`variable 'x' has type 'int[]': a slice can only be a 'view'
+  or 'inout' parameter, and an array has a length ('int[3]')`).
 - `T?` is rejected at parse time when `T` is `void` (`optional type 'void?'
   is not supported`) or already optional (`nested optional type 'Str??' is
   not supported`). The other builtin value types have optional forms
@@ -342,6 +347,14 @@ A parenthesised expression is just the inner expression (no node is
 created); `(a)` is a 1-tuple nowhere. A tuple literal has at least two
 elements.
 
+An array literal `[e1, ..., en]` is a `T[n]`, an array of its own length.
+Where it flows into a typed slot (a declaration's type, an argument, a
+return, a field), `T` is the slot's element type, and into a slice it is a
+`T[n]` of the slice's `T`. Anywhere else `T` is its elements' common type:
+`int` and `float` give `float` (`[1, 2.5]` is a `float[2]`), and classes
+their nearest common ancestor. `[]` parses, but Sema rejects it (`an empty
+array literal has no type: an array has at least one element`).
+
 ### Generic call versus comparison
 
 `name <` in expression position is ambiguous between a comparison and a
@@ -388,9 +401,9 @@ column, as `--dump-ast` prints them. Rules that every frontend follows:
 - The `TranslationUnit` spans `1:1` to the end of its last declaration;
   an empty file gives `<1:1-1:1>`.
 - Builtin and bootstrap types resolved at parse time (`int`, `Str`, ...)
-  carry no location; `ClassType` stubs, `ArrayType`, `OptionalType`,
-  `TupleType` and `GenericType` nodes created by the parser carry the
-  location of their annotation.
+  carry no location; `ClassType` stubs, `ArrayType` (`T[]`),
+  `FixedArrayType` (`T[n]`), `OptionalType`, `TupleType` and `GenericType`
+  nodes created by the parser carry the location of their annotation.
 
 ## 9. Diagnostics and recovery
 

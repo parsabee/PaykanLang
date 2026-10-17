@@ -60,7 +60,7 @@ CheckedProgram check(const std::string &source) {
 // -- Instantiation identity and registration
 
 // Two uses of `Box<int>` resolve to one ClassType (cached per canonical
-// argument tuple, like Array<T>), and the annotation slots are rewritten to it.
+// argument tuple), and the annotation slots are rewritten to it.
 TEST(Generics, SameInstantiationIsSameClassType) {
   auto r = check(withMain(std::string(kBox) + R"(
     class Holder { b: Box<int>; }
@@ -108,10 +108,10 @@ TEST(Generics, SameInstantiationIsSameClassType) {
 // the template stays in its own list.
 TEST(Generics, InstantiationsAreInjectedIntoTU) {
   auto r = check(withMain(std::string(kBox) + R"(
-    fn first<T>(xs: T[]) -> T { return xs[0]; }
+    fn first<T>(xs: view T[]) -> view T { return xs[0]; }
   )",
                           "a = Box<int>(1); b = Box<Str>(\"s\"); "
-                          "c = first([1]); d = first<Str>([\"x\"]);"));
+                          "c = first([1]); d = first<Str>([\"x\"]).len();"));
   ASSERT_TRUE(r.Ok) << r.Diagnostics;
   auto *tu = r.Driver->getRoot();
   std::vector<std::string> classes, funcs;
@@ -149,25 +149,28 @@ TEST(Generics, InstantiationAsFieldParamReturnAndArray) {
     }
     class Holder {
       b: Box<int>;
-      ps: Pair<Str, int>[];
+      ps: Pair<Str, int>[2];
       fn get() -> Box<int> { return self.b; }
     }
 
     impl Holder {
-      fn __init__() { self.b = Box<int>(1); self.ps = []; }
+      fn __init__() {
+        self.b = Box<int>(1);
+        self.ps = [Pair<Str, int>("a", 1), Pair<Str, int>("b", 2)];
+      }
     }
     fn unwrap(b: Box<int>) -> int { return b.get(); }
     fn nest(b: Box<Box<int>>) -> int { return b.get().get(); }
+    fn total(bs: view Box<int>[]) -> int { return bs[0].v + bs[1].v; }
   )",
                               R"(
     h: Holder = Holder();
     n: int = unwrap(h.get());
     m: int = nest(Box<Box<int>>(h.get()));
-    arr: Box<int>[] = [Box<int>(1), Box<int>(2)];
+    arr: Box<int>[2] = [Box<int>(1), Box<int>(2)];
     k: Str = Pair<Str, int>("a", 1).key();
-    ba: Box<int[]> = Box<int[]>([1, 2]);
-    xs: int[] = ba.get();
-    h.ps.push(Pair<Str, int>("b", 2));
+    h.ps[1] = Pair<Str, int>("c", 3);
+    j: int = total(arr) + h.ps[0].v;
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -419,19 +422,21 @@ TEST(Generics, WrongConstructorArgumentNamesInstantiation) {
 
 // -- Type-argument inference for generic functions
 
-TEST(Generics, InferenceFromPlainArrayAndBoxParams) {
+TEST(Generics, InferenceFromSliceAndBoxParams) {
   auto r = semaCheck(withMain(std::string(kBox) + R"(
-    fn first<T>(xs: T[]) -> T { return xs[0]; }
+    fn first<T>(xs: view T[]) -> view T { return xs[0]; }
     fn unbox<T>(b: Box<T>) -> T { return b.get(); }
     fn pick<A, B>(a: A, b: B) -> B { return b; }
   )",
                               R"(
     i: int = first([1, 2]);
-    s: Str = first(["a"]);
+    s: int = first(["a"]).len();
     n: int = unbox(Box<int>(4));
     t: Str = unbox(Box<Str>("s"));
     f: float = pick("x", 1.5);
     e: int = first<int>([3]);
+    fs: float[2] = [1.5, 2];
+    g: float = first(fs);
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -461,14 +466,6 @@ TEST(Generics, InferenceAmbiguous) {
   auto r2 = semaCheck(withMain("fn pick<T>(a: T, b: T) -> T { return a; }",
                                "f: float = pick<float>(1, 2.0);"));
   EXPECT_TRUE(r2.Ok) << r2.Diagnostics;
-}
-
-TEST(Generics, InferenceFromEmptyArrayLiteralFails) {
-  auto r = semaCheck(
-      withMain("fn first<T>(xs: T[]) -> T { return xs[0]; }", "first([]);"));
-  EXPECT_FALSE(r.Ok);
-  EXPECT_TRUE(has(r.Diagnostics, "cannot infer type parameter 'T'"))
-      << r.Diagnostics;
 }
 
 TEST(Generics, ConstructorArgumentInference) {
@@ -514,7 +511,7 @@ const char *kGenLib = R"(
 class Box<T> { v: T; view fn get() -> view T { return self.v; } }
 impl Box<T> { fn __init__(v: T) { self.v = v; } }
 fn mk() -> Box<int> { return Box<int>(41); }
-fn first<T>(xs: T[]) -> T { return xs[0]; }
+fn first<T>(xs: view T[]) -> view T { return xs[0]; }
 )";
 } // namespace
 
@@ -545,12 +542,14 @@ TEST(Generics, ImportedTemplates) {
       // Inside this module's own templates.
       {"t5", "import lib::gen;\n"
              "fn wrap<T>(x: T) -> gen::Box<T> { return gen::Box<T>(x); }\n"
-             "fn head<T>(xs: T[]) -> T { return gen::first<T>(xs); }\n"
+             "fn head<T>(xs: view T[]) -> view T { "
+             "return gen::first<T>(xs); }\n"
              "class W<T> { b: gen::Box<T>; }\n"
              "impl W<T> { fn __init__(x: T) { "
              "self.b = gen::Box<T>(x); } }\n"
              "fn main() -> int { w = W<int>(1); s = W<Str>(\"a\"); "
-             "t: Str = head([\"t\"]); return wrap(2).get() + head([1]); }"},
+             "t: int = head([\"t\"]).len(); "
+             "return wrap(2).get() + head([1]); }"},
   };
   for (const auto &[name, src] : cases) {
     auto r = semaCheckFile(writeProjectFile(dir, name + ".pkn", src));
@@ -604,7 +603,7 @@ TEST(Generics, ImportedInstantiationsAreOneClass) {
 class Box<T> { v: T; view fn get() -> view T { return self.v; } }
 impl Box<T> { fn __init__(v: T) { self.v = v; } }
 fn own() -> Box<int> { return Box<int>(1); }
-fn none<T>(b: Box<T>) -> T[] { xs: T[] = []; return xs; }
+fn two<T>(b: Box<T>) -> T[2] { return [b.v, b.v]; }
 )");
   writeProjectFile(dir, "a.pkn",
                    "import lib::gen;\n"
@@ -615,8 +614,8 @@ import lib::gen;
 import a;
 fn main() -> int {
   s: gen::Box<Str> = a::mk();
-  t: Str[] = gen::none(a::mk());
-  n: int[] = gen::none(gen::own());
+  t: Str[2] = gen::two(a::mk());
+  n: int[2] = gen::two(gen::own());
   b: gen::Box<int> = gen::own();
   return b.get();
 }
@@ -893,14 +892,14 @@ TEST(GenericsTypes, TupleAndOptionalTypeArgs) {
     t: (int, Str) = a.get();
     n: Node? = None;
     b: Box<Node?> = Box<Node?>(n);
-    c: Box<Node?[]> = Box<Node?[]>([]);
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
-// Exported instantiations whose names contain ',' and '[]' round-trip: the
-// import type parser keeps `Pair<Str, int>` / `Box<int[]>` together as names.
-TEST(GenericsTypes, ExportedInstantiationNamesWithCommasAndArrays) {
+// Exported instantiations whose names contain ',' round-trip: the import
+// type parser keeps `Pair<Str, int>` / `Box<Pair<Str, int>>` together as
+// names.
+TEST(GenericsTypes, ExportedInstantiationNamesWithCommas) {
   auto dir = paykan::test::tempDir() / "pkn_sema_generics_names";
   std::filesystem::remove_all(dir);
   writeProjectFile(dir, "lib.pkn", R"(
@@ -909,14 +908,14 @@ impl Pair<A, B> { fn __init__(a: A, b: B) { self.a = a; self.b = b; } }
 class Box<T> { v: T; fn get() -> T { return self.v; } }
 impl Box<T> { fn __init__(v: T) { self.v = v; } }
 fn mkPair() -> Pair<Str, int> { return Pair<Str, int>("k", 1); }
-fn mkBoxArr() -> Box<int[]> { return Box<int[]>([1, 2, 3]); }
-fn mkBoxes() -> (Pair<Str, int>, Box<int[]>?) { b: Box<int[]>? = None; return (mkPair(), b); }
+fn mkBoxPair() -> Box<Pair<Str, int>> { return Box<Pair<Str, int>>(mkPair()); }
+fn mkBoxes() -> (Pair<Str, int>, Box<Pair<Str, int>>?) { b: Box<Pair<Str, int>>? = None; return (mkPair(), b); }
 )");
   auto p = writeProjectFile(dir, "main.pkn", R"(
 import lib;
 fn main() -> int {
   s: Str = lib::mkPair().first();
-  n: int = lib::mkBoxArr().get().len();
+  n: int = lib::mkBoxPair().get().b;
   x, y = lib::mkBoxes();
   k: Str = x.first();
   return n;

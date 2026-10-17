@@ -42,7 +42,7 @@ TEST(Native, OtherTypesCannotCross) {
            "native fn f(s: view Str?) = \"pk_f\";",
            "native fn f() -> int? = \"pk_f\";",
            "native fn f() -> P = \"pk_f\";",
-           "native fn f() -> Str[] = \"pk_f\";",
+           "native fn f() -> Str[2] = \"pk_f\";",
        }) {
     auto r = semaCheck(std::string("class P { x: int; }\n") + decl +
                        "\nfn main() -> int { return 0; }");
@@ -143,7 +143,7 @@ TEST(Native, GenericInstancesTakeAnyType) {
 
   r = semaCheck(R"(
     native fn at<T>(xs: view T[], i: int) -> view T = "pk_at";
-    fn main() -> int { xs: int[] = [1, 2]; return at<int>(xs, 0); }
+    fn main() -> int { xs: int[2] = [1, 2]; return at<int>(xs, 0); }
   )");
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("parameter 'xs' of type 'int[]' cannot cross "

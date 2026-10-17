@@ -21,7 +21,7 @@ fn name(params) {
   optionally take the command-line arguments:
 
 ```pkn
-fn main(args: Str[]) -> int {
+fn main(args: view Str[]) -> int {
   // args[0] is the source-file path; args[1..] are the arguments after it
   println(args[0]);
   return 0;
@@ -42,10 +42,16 @@ paramName: TypeName
 
 Passed by value — a copy is made at the call site.
 
-### Class / Str / Array parameters (`s: Str`, `a: int[]`, `p: Point`)
+### Class / Str parameters (`s: Str`, `p: Point`)
 
 The reference count of the object is incremented on entry and decremented on return.
 The caller's variable is unaffected.
+
+### Array parameters (`a: int[3]`, `xs: view int[]`)
+
+A fixed-size array is a value: a plain `a: int[3]` parameter is the function's own copy.
+A `view int[]` or `inout int[]` parameter is a slice, which reaches the caller's array of
+any length in place (see `05-arrays.md`).
 
 ---
 
@@ -134,13 +140,12 @@ on to another `view` parameter, whatever its type, so no function it reaches can
 it. With `fn twice(n: int)`, `twice(v)` is an error: `'v' is a 'view' local; it can only
 be passed to a 'view' parameter, and parameter 1 of 'twice' is not one`. The fix is to make
 that parameter `view` too. The builtin functions only read (`println(v)`), and so do the
-builtin methods, except `push`. `Str(s)` with a `Str` returns `s` itself, so it takes no
-`view`.
+builtin methods. `Str(s)` with a `Str` returns `s` itself, so it takes no `view`.
 
-A `view` of an object, string, array, tuple or optional shares what it holds, so it is
-never stored or returned, where another name could change it later. Assigning it to a
-variable, a field or an element, putting it in an array or tuple, `push` and `return` are
-errors: `'v' is a 'view' local; it cannot be stored, only read or passed to a 'view'
+A `view` of an object, string, tuple or optional, or of an array of them, shares what it
+holds, so it is never stored or returned, where another name could change it later.
+Assigning it to a variable, a field or an element, putting it in an array or tuple and
+`return` are errors: `'v' is a 'view' local; it cannot be stored, only read or passed to a 'view'
 parameter`, `'v' is a 'view' local; it cannot be returned`. A `view` of a value type is
 copied when it is assigned (`m = n`), and the copy is the variable's own.
 
@@ -550,8 +555,8 @@ holds references: `nrefs` words follow it, each a `PaykanShared *`'s byte
 offset `<< 1`, `| 1` if it may be `NULL` (`PaykanType_ref`).  An `int` or a
 `float` is 8 bytes, a `bool` or a `char` 1, an `int?`, `float?`, `bool?` or
 `char?` 16 (its payload, then an `int64_t` that is 1 when it is present), and
-a reference, an array or a tuple an 8-byte `PaykanShared *` box (`NULL` for
-an optional's `None`).
+a reference or a tuple an 8-byte `PaykanShared *` box (`NULL` for an
+optional's `None`).
 `PaykanType_copy` copies a value, retaining its references, and
 `PaykanType_drop` releases them.  A parameter typed by a type parameter is a
 `view` or an `inout` (`x: T` is rejected whatever `T` will be).  See

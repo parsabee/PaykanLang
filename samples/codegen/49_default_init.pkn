@@ -45,7 +45,7 @@ class Node {
 }
 
 class Inventory {
-  items: Str[];
+  items: Str[3];
   first: (int, Str);
   score: int?;
 }

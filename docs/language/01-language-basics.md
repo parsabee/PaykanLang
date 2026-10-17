@@ -36,8 +36,8 @@ primitive is a value, not a box, and no optional converts to `Obj`
 - A Paykan program is a list of **top-level declarations**: imports, classes, and functions.
   There are no top-level statements.
 - Execution begins at `main`, which must return `int`. Its return value becomes the process
-  exit code. `main` may optionally take the command-line arguments as `fn main(args: Str[]) -> int`;
-  `args[0]` is the source-file path under `paykan run` (the executable's path for a program made
+  exit code. `main` may optionally take the command-line arguments as
+  `fn main(args: view Str[]) -> int`; `args[0]` is the source-file path under `paykan run` (the executable's path for a program made
   by `paykan build`) and the remaining elements are the arguments after it. A program without
   one of these two `main`s (an empty file included) is a compile error; `paykan --check-only`
   also accepts a module without `main`, but still checks a `main` it declares.
@@ -92,11 +92,13 @@ compile-time error. Use the `\n` escape for line breaks.
 
 ### Arrays
 
-Dynamic arrays stored on the heap. See `05-arrays.md` for the full array system.
+`T[n]` holds exactly `n` elements of type `T`, stored in the variable itself. An array
+literal is an array of its own length. See `05-arrays.md` for the full array system.
 
 ```pkn
-a: int[]    = [1, 2, 3, 4, 5];
-mat: int[][] = [[1, 2], [3, 4]];   // 2D
+a: int[5] = [1, 2, 3, 4, 5];
+b = [1, 2, 3];                      // an int[3]
+mat: int[2][2] = [[1, 2], [3, 4]];  // 2D
 ```
 
 ### Class Types (vtable-bearing, heap-allocated, reference-counted)
@@ -113,7 +115,7 @@ mat: int[][] = [[1, 2], [3, 4]];   // 2D
 
 ### Optional Types
 
-Any reference type `T` (a class, `Str`, or an array) and the primitives `int`, `float`, `bool`
+Any reference type `T` (a class or `Str`) and the primitives `int`, `float`, `bool`
 and `char` have an optional form `T?` that holds either a `T` or `None`. A `T` converts to `T?` implicitly; a `T?` is unwrapped with `match`. See
 `10-optionals.md`.
 
@@ -225,8 +227,8 @@ limit = 11;              // error: 'limit' is declared with 'let' and cannot be 
 
 `let` applies to local declarations only: not to parameters, fields or destructuring
 (`let a, b = t;` is a syntax error). It fixes the variable, not the object it refers to: the
-fields of an object held in a `let` variable can still be changed, and an array's elements
-too. A `let` variable cannot be passed to an `inout` parameter
+fields of an object held in a `let` variable can still be changed. An array's elements are
+part of its value, so those of a `let` array cannot be assigned. A `let` variable cannot be passed to an `inout` parameter
 ([Parameter modes](02-functions-and-calling.md#parameter-modes-view-and-inout)), only to a
 plain or `view` one. Like any variable, an inner block may declare its own variable with the
 same name.
@@ -282,10 +284,10 @@ fn main() -> int {
   a = Account();
   b: inout = a.balance;
   b = b + 10;
-  names = ["x"];
+  names = ["x", "y"];
   n: inout = names;
-  n = ["y", "z"];
-  println(Str(a.balance) + " " + Str(names.len()));
+  n = [n[1], "z"];
+  println(Str(a.balance) + " " + names[0] + names[1]);
   return 0;
 }
 ```
@@ -293,7 +295,7 @@ fn main() -> int {
 Output:
 
 ```
-10 2
+10 yz
 ```
 
 What it names follows the rules of an
@@ -406,14 +408,13 @@ under [Conversions](#conversions)).
 `<`, `>`, `<=`, `>=`, `==`, `!=` — result is `bool`.
 Equality operators require compatible types.
 
-For **reference types** (classes, `Str`, arrays), `==` dispatches to `equals`: `a == b` invokes
+For **reference types** (classes, `Str`), `==` dispatches to `equals`: `a == b` invokes
 `a.equals(b)` through the vtable, and `a != b` is its negation. A class may override `equals` to
 define what equality means for it; the default (inherited from `Obj`) compares object identity, so
 two separately-constructed instances are unequal unless the class overrides `equals`. `Str`
-overrides `equals` to compare by content, so `"ab" == "ab"` is `True`. Arrays do **not**
-override it: array `==` compares reference identity, and both operands must be arrays of the
-**same element type** (`int[] == Str[]` is a compile-time error; see `05-arrays.md`). For
-**value types** (`int`, `float`, `bool`, `char`, enums) `==` compares the values directly.
+overrides `equals` to compare by content, so `"ab" == "ab"` is `True`. For **value types**
+(`int`, `float`, `bool`, `char`, enums) `==` compares the values directly. Arrays have no `==`
+(see `05-arrays.md`).
 
 Float comparisons follow IEEE 754: NaN is unequal to everything, itself included (with `nan`
 a NaN-valued `float` such as `0.0 * (1.0e308 * 10.0)`, `nan == nan` is `False`, `nan != nan` is `True`, and `<`, `>`, `<=`, `>=` with a NaN operand are `False`),
@@ -735,8 +736,8 @@ paykan: int<float>(inf): the value is NaN, infinite or outside the int range
 paykan: char<int>(300): the value is outside the char range 0..255
 ```
 
-A panic (these, an integer division by zero or `INT64_MIN / -1`, an index out of bounds, `.pop()` on an empty
-array) flushes the output already printed to stdout, prints its message to stderr and
+A panic (these, an integer division by zero or `INT64_MIN / -1`, an index out of bounds)
+flushes the output already printed to stdout, prints its message to stderr and
 aborts the program with `SIGABRT`, so everything printed before the panic reaches a pipe or
 a file too, ahead of the message. `paykan run` (and `paykan prog.pkn`) then exits with status
 `134` (128 + `SIGABRT`) on every backend. An executable made by `paykan build` is the
@@ -780,7 +781,7 @@ Top-level declarations — free functions, classes (a class name is also its con
 and enums — share a single namespace with the builtins, and a name identifies exactly one
 entity. Declaring a function, class, or enum whose name is a builtin function (`print`,
 `println`, `printerr`, `printerrln`, `Str`, `open`) or a builtin class (`Obj`, `Str`,
-`Array`, `File`, `Error`, `Tuple`) is a compile-time error, reported at
+`File`, `Error`, `Tuple`) is a compile-time error, reported at
 the declaration:
 
 ```pkn

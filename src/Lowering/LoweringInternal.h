@@ -346,10 +346,6 @@ private:
   /// caller releases after the call.
   Val emitBorrowedBox(ast::Expr *arg, std::vector<Val> &keep);
   Val emitAsSharedRaw(ast::Expr *expr);
-  /// An object array element read that borrows the array's reference
-  /// (`arr[i]` of ref type on a live array): a new owner retains the stored
-  /// box, which emitAsShared does while evaluating the array and index once.
-  bool isBorrowedObjectElement(ast::Expr *expr) const;
 
   // -- String temporaries
 
@@ -461,10 +457,6 @@ private:
     Val emitIdentityCtor(ast::CallExpr *node);
     Val emitConversion(ast::CallExpr *node);
     Val emitBuiltinCall(ast::CallExpr *node);
-    Val emitPrimitiveArrayLiteral(ast::ArrayLiteralExpr *node, size_t len);
-    Val emitArrayPush(ast::MethodCallExpr *node, const Val &recv,
-                      ast::Type *elemTy);
-    Val emitArrayPop(const Val &recv, ast::Type *elemTy);
     Val emitShortCircuit(ast::BinaryExpr *node, bool isAnd);
     Val emitIntDivGuards(const Val &lhs, const Val &rhs, bool isDiv);
 

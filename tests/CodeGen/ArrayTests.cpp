@@ -121,39 +121,23 @@ TEST(ArraySubscript, StringIndexBuildResult) {
   EXPECT_EQ(r.StdOut, "cba\n");
 }
 
-// -- push/pop still work after subscript assign
-
-TEST(ArrayAssign, PushAfterAssign) {
-  auto r = compileAndRun(wrapMain(R"(
-    arr: int[] = [1, 2, 3];
-    arr[0] = 10;
-    arr.push(99);
-    println(Str<int>(arr[0]));
-    println(Str<int>(arr.len()));
-  )"));
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "10\n4\n");
-}
-
-// Reference-typed arrays reached through a member access / call (regression).
+// Arrays reached through a member access / call (regression).
 //
 // Subscripting or passing an array that comes from a member access
-// (self.field), a ref-returning call, or a ternary must unwrap the
-// PaykanShared* box to the raw PaykanArray* first.  These used to read
-// length/data from the box struct (len=0 traps, garbage elements) or
-// over-release the object.
+// (self.field) or a call must read the array in place, and an element of a
+// reference type read out of it must be retained, not over-released.
 
 TEST(RefField, SubscriptObjectArrayField) {
   auto r = compileAndRun(R"(
 class Foo { v: int; }
 impl Foo { fn __init__(x: int){ self.v = x; } }
 class Box {
-  items: Foo[];
+  items: Foo[2];
   fn second() -> int { return self.items[1].v; }   // subscript a member-access array
 }
 
 impl Box {
-  fn __init__(){ self.items = []; self.items.push(Foo(41)); self.items.push(Foo(42)); }
+  fn __init__(){ self.items = [Foo(41), Foo(42)]; }
 }
 fn main() -> int {
   b: Box = Box();
@@ -167,26 +151,26 @@ fn main() -> int {
 }
 
 TEST(RefField, NestedArrayOfArraysField) {
-  // An array-of-arrays field (T[][]) — the outer element is itself a
-  // reference-typed array, so the object-element read must re-box/unwrap.
+  // An array-of-arrays field (int[3][3]): the outer element is itself an
+  // array, so a row read out of the field is a copy of it.
   auto r = compileAndRun(R"(
 class Grid {
-  rows: int[][];
+  rows: int[3][3];
   fn at(r: int, c: int) -> int {
-    row: int[] = self.rows[r];   // subscript the outer 2-D field
+    row: int[3] = self.rows[r];   // subscript the outer 2-D field
     return row[c];
   }
 }
 
 impl Grid {
   fn __init__() {
-    self.rows = [];
+    self.rows = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
     i: int = 0;
     while (i < 3) {
-      row: int[] = [];
+      row: int[3] = [0, 0, 0];
       j: int = 0;
-      while (j < 3) { row.push(i * 3 + j); j = j + 1; }
-      self.rows.push(row);
+      while (j < 3) { row[j] = i * 3 + j; j = j + 1; }
+      self.rows[i] = row;
       i = i + 1;
     }
   }
@@ -204,32 +188,32 @@ fn main() -> int {
 }
 
 TEST(RefField, ThreeDimArrayLiteralsAndSubscripts) {
-  // int[][][] spelled at several use sites (annotations, a parameter, a
-  // return type, nested literals) must all agree on one canonical type so the
-  // nested element reads/writes lower consistently at every depth.
+  // int[2][2][2] spelled at several use sites (annotations, a slice
+  // parameter, a return type, nested literals) must all agree on one
+  // canonical type so the nested element reads/writes lower consistently at
+  // every depth.
   auto r = compileAndRun(R"(
-fn corner(c: int[][][]) -> int { return c[1][1][1]; }
-fn build() -> int[][][] {
-  cube: int[][][] = [];
-  cube.push([[1, 2], [3, 4]]);
-  cube.push([[5, 6], [7, 8]]);
+fn corner(c: view int[2][2][]) -> int { return c[1][1][1]; }
+fn build() -> int[2][2][2] {
+  cube: int[2][2][2] = [[[1, 2], [3, 4]], [[0, 0], [0, 0]]];
+  cube[1] = [[5, 6], [7, 8]];
   return cube;
 }
 fn main() -> int {
-  c: int[][][] = build();
+  c: int[2][2][2] = build();
   println(Str<int>(corner(c)));         // 8
   c[0][1][0] = 30;
-  plane: int[][] = c[0];
+  plane: int[2][2] = c[0];
   println(Str<int>(plane[1][0]));       // 30
-  c[1] = [[9]];
+  c[1] = [[9, 10], [11, 12]];
   println(Str<int>(c[1][0][0]));        // 9
   println(Str<int>(c.len()));           // 2
-  println(Str<int>(c[1].len()));        // 1
+  println(Str<int>(c[1][1].len()));     // 2
   return 0;
 }
 )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "8\n30\n9\n2\n1\n");
+  EXPECT_EQ(r.StdOut, "8\n30\n9\n2\n2\n");
 }
 
 TEST(RefField, MemberAccessPassedAsClassArg) {

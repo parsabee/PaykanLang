@@ -35,11 +35,11 @@ Status addEntryPoint(llvm::Module &module) {
   llvm::Function *paykanMain = module.getFunction("main");
   if (!paykanMain || paykanMain->isDeclaration())
     return Status::error("the main module defines no 'main' function");
-  if (paykanMain->arg_size() > 1)
-    return Status::error("'main' takes at most one parameter");
+  if (paykanMain->arg_size() != 0 && paykanMain->arg_size() != 2)
+    return Status::error("'main' takes no parameter or a slice of strings");
   paykanMain->setName(kPaykanMainName);
   paykanMain->setLinkage(llvm::GlobalValue::InternalLinkage);
-  bool takesArgs = paykanMain->arg_size() == 1;
+  bool takesArgs = paykanMain->arg_size() == 2;
 
   llvm::LLVMContext &ctx = module.getContext();
   llvm::IRBuilder<> b(ctx);
@@ -77,45 +77,23 @@ Status addEntryPoint(llvm::Module &module) {
   b.CreateBr(start);
   b.SetInsertPoint(start);
 
-  llvm::SmallVector<llvm::Value *, 1> callArgs;
+  llvm::SmallVector<llvm::Value *, 2> callArgs;
+  llvm::Value *argCount = nullptr;
   if (takesArgs) {
-    // args: Str[] -- one string per argv entry (none under PAYKAN_NO_ARGS:
-    // the kernel always supplies an argv[0], so a caller that wants
-    // argc == 0 says so).
-    llvm::Value *arr = b.CreateCall(fn(names::kPaykanArrayNewObj, ptr, {i64}),
-                                    {b.getInt64(0)}, "args");
-    llvm::Value *noArgs = b.CreateIsNotNull(b.CreateCall(
-        fn("getenv", ptr, {ptr}), {b.CreateGlobalStringPtr("PAYKAN_NO_ARGS")}));
-    llvm::Value *count = b.CreateSelect(noArgs, b.getInt32(0), argc, "count");
-    auto *head = llvm::BasicBlock::Create(ctx, "args.head", entry);
-    auto *body = llvm::BasicBlock::Create(ctx, "args.body", entry);
-    auto *done = llvm::BasicBlock::Create(ctx, "args.done", entry);
-    llvm::BasicBlock *pre = b.GetInsertBlock();
-    b.CreateBr(head);
-    b.SetInsertPoint(head);
-    llvm::PHINode *i = b.CreatePHI(i32, 2, "i");
-    i->addIncoming(b.getInt32(0), pre);
-    b.CreateCondBr(b.CreateICmpSLT(i, count), body, done);
-    b.SetInsertPoint(body);
-    llvm::Value *cstr =
-        b.CreateLoad(ptr, b.CreateGEP(ptr, argv, b.CreateSExt(i, i64)));
-    llvm::Value *len = b.CreateCall(fn("strlen", i64, {ptr}), {cstr});
-    llvm::Value *str =
-        b.CreateCall(fn(names::kPaykanStringNew, ptr, {ptr, i64}), {cstr, len});
-    llvm::Value *box =
-        b.CreateCall(fn(names::kPaykanSharedNew, ptr, {ptr}), {str});
-    b.CreateCall(fn(names::kPaykanArrayPushObj, voidTy, {ptr, ptr}),
-                 {arr, box});
-    b.CreateCall(fn(names::kPaykanRelease, voidTy, {ptr}), {box});
-    i->addIncoming(b.CreateAdd(i, b.getInt32(1)), body);
-    b.CreateBr(head);
-    b.SetInsertPoint(done);
-    // Ownership of the boxed array passes to main; its scope cleanup
-    // releases it.
-    callArgs.push_back(
-        b.CreateCall(fn(names::kPaykanSharedNew, ptr, {ptr}), {arr}));
+    // args: view Str[] -- a slice of the arguments' strings
+    // (Paykan_args_new, which also honours PAYKAN_NO_ARGS).
+    llvm::Value *countSlot = b.CreateAlloca(i64, nullptr, "args.len.addr");
+    llvm::Value *args =
+        b.CreateCall(fn(names::kPaykanArgsNew, ptr, {i32, ptr, ptr}),
+                     {argc, argv, countSlot}, "args");
+    argCount = b.CreateLoad(i64, countSlot, "args.len");
+    callArgs.push_back(args);
+    callArgs.push_back(argCount);
   }
   llvm::Value *rc = b.CreateCall(paykanMain, callArgs);
+  if (takesArgs)
+    b.CreateCall(fn(names::kPaykanArgsFree, voidTy, {ptr, i64}),
+                 {callArgs[0], argCount});
 
   auto *dump = llvm::BasicBlock::Create(ctx, "track.dump", entry);
   auto *exit = llvm::BasicBlock::Create(ctx, "exit", entry);

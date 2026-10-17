@@ -12,8 +12,10 @@ guarantee, not something you write by hand.
 
 - **Value types** (`int`, `float`, `bool`, `char`, `enum`) live on the stack, are copied on
   assignment, and are never reference-counted.
-- **Reference types** (class instances, `Str`, `File`, `Error`, arrays, tuples, and
-  their optionals) live on the heap and are reference-counted.
+- **Arrays** (`T[n]`) are values too: held inline in their variable or field and copied
+  whole on assignment. An array of a reference type holds references to its elements.
+- **Reference types** (class instances, `Str`, `File`, `Error`, tuples, and their
+  optionals) live on the heap and are reference-counted.
 - Each heap object is owned through a **shared box** holding a strong count and a pointer to the
   object. Copying a reference **retains** (count `+1`); dropping one **releases** (count `-1`).
 - When the count reaches zero the object's **`destroy`** runs — releasing the references it holds
@@ -31,7 +33,8 @@ The category of a type decides how it is stored and whether ARC applies.
 | Category | Types | Storage | On assignment / passing |
 |----------|-------|---------|--------------------------|
 | **Value** | `int`, `float`, `bool`, `char`, `enum`, and their optionals `int?`, `float?`, `bool?`, `char?` | Stack / register (inline in a field) | Copied bit-for-bit; independent thereafter |
-| **Reference** | class instances, `Str`, arrays, tuples, `File`, `Error`, optionals `T?` of these | Heap | Reference shared; count adjusted |
+| **Array** | `T[n]` of any element type | Inline in the variable, the field or the enclosing array | Elements copied; reference elements retained |
+| **Reference** | class instances, `Str`, tuples, `File`, `Error`, optionals `T?` of these | Heap | Reference shared; count adjusted |
 
 A value type has no identity beyond its bits: assigning one `int` to another produces two
 independent values. A reference type has identity: assigning one variable to another makes both
@@ -42,10 +45,13 @@ a: int = 1;
 b: int = a;      // independent copy
 b = 2;           // a is still 1
 
-xs: int[] = [1, 2, 3];
-ys: int[] = xs;  // same array — both names share it
-ys[0] = 99;      // xs[0] is now 99 too
+p: Point = Point(1, 2);
+q: Point = p;    // same object — both names share it
+q.x = 99;        // p.x is now 99 too
 ```
+
+An array is a value: `ys = xs` copies its elements, so a later `ys[0] = 99` leaves `xs[0]` as
+it was.
 
 ---
 
@@ -84,8 +90,8 @@ aliased references.
 When a release drops the count to zero:
 
 1. The object's `destroy` method runs. The compiler generates `destroy` to **release every
-   reference the object holds** — its reference-typed fields, and for an array its reference-typed
-   elements — so destruction cascades transitively.
+   reference the object holds** — its reference-typed fields, and the reference-typed elements
+   of its array fields — so destruction cascades transitively.
 2. The object's memory and its box are freed.
 
 This is **deterministic**: an object is destroyed at the exact point its last reference is
@@ -93,12 +99,12 @@ released, in a well-defined order, with no background collector and no pause. A 
 example, is closed as soon as the last reference to it goes away.
 
 Destruction is **iterative**: deep chains are freed without stack growth. A linked list of a
-million nodes, a deeply nested tree, or arrays and tuples nested inside each other are destroyed
+million nodes, a deeply nested tree, or tuples nested inside each other are destroyed
 in constant C stack space, so dropping them cannot overflow the stack. The release that drops the
 last reference destroys its object; every object that `destroy` releases to zero is set aside
 rather than destroyed on the spot, and the same release then destroys the set-aside objects one
 by one until none remain. The order is fixed: a depth-first pre-order walk of the objects that
-die, each object's references taken in field order (index order for an array or a tuple) — the
+die, each object's references taken in field order (index order in an array or a tuple) — the
 order in which a recursive destruction would start them — except that an object's `destroy`
 finishes before the objects it released are destroyed. All of them are destroyed and freed before
 that release returns.
@@ -155,17 +161,18 @@ the same objects. The variable `s` simply stays readable afterwards.
 `Str` is a heap, reference-counted class. String literals and the results of `+` concatenation
 are reference-counted objects like any other.
 
-Arrays are reference-counted heap objects too, and how they treat their **elements** depends on
-the element type:
+An array `T[n]` is a value, not an object: it has no box and no count of its own, and lives
+where its variable or field does, inline in the stack frame or in the object. How it treats its
+**elements** depends on the element type:
 
-- An array of a **value type** (`int[]`, `float[]`, `bool[]`, an enum array) stores the scalar
-  values directly inline; there is nothing to reference-count per element.
-- An array of a **reference type** (`Str[]`, `Point[]`, …) stores references and **retains** each
-  element it holds. Overwriting a slot or `pop`-ing releases the old element, and destroying the
-  array releases all remaining elements.
+- An array of a **value type** (`int[3]`, `float[3]`, `bool[3]`, an enum array) stores the
+  scalar values directly; there is nothing to reference-count per element.
+- An array of a **reference type** (`Str[3]`, `Point[3]`, …) stores references and **retains**
+  each element it holds. Overwriting a slot releases the old element, and the array releases
+  all its elements when its variable goes out of scope or the object holding it is destroyed.
 
-Assigning an array shares it (the reference is retained); arrays are not deep-copied. See
-`05-arrays.md`.
+Assigning an array, or passing it to a plain parameter, copies it: the copy retains each element's object, which the two
+arrays then share. See `05-arrays.md`.
 
 ---
 

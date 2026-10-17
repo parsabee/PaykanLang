@@ -9,8 +9,7 @@ namespace ast {
 
 ASTContext::ASTContext()
     : IntTy(nullptr), FloatTy(nullptr), BoolTy(nullptr), CharTy(nullptr),
-      VoidTy(nullptr), ObjTy(nullptr), StrTy(nullptr), ArrayTy(nullptr),
-      FileTy(nullptr), ErrorTy(nullptr), TupleTy(nullptr) {
+      VoidTy(nullptr), ObjTy(nullptr), StrTy(nullptr), FileTy(nullptr), ErrorTy(nullptr), TupleTy(nullptr) {
   Pool.reserve(512); // the bootstrap alone makes ~150 nodes
   IntTy = make<BuiltinType>(SourceLocation(), BuiltinType::Int);
   FloatTy = make<BuiltinType>(SourceLocation(), BuiltinType::Float);
@@ -22,18 +21,16 @@ ASTContext::ASTContext()
   // signature can name any of them.
   ObjTy = make<ClassType>(SourceLocation(), intern(names::kObj), nullptr);
   StrTy = make<ClassType>(SourceLocation(), intern(names::kString), nullptr);
-  ArrayTy = make<ClassType>(SourceLocation(), intern(names::kArray), nullptr);
   FileTy = make<ClassType>(SourceLocation(), intern(names::kFile), nullptr);
   ErrorTy = make<ClassType>(SourceLocation(), intern(names::kError), nullptr);
   TupleTy = make<ClassType>(SourceLocation(), intern(names::kTuple), nullptr);
   // The compiler builtins: Sema rejects any user class, enum, or function
   // that would reuse one of their names, and the lowering dispatches their
   // methods to the C runtime.
-  for (ClassType *builtin : {ObjTy, StrTy, ArrayTy, FileTy, ErrorTy, TupleTy})
+  for (ClassType *builtin : {ObjTy, StrTy, FileTy, ErrorTy, TupleTy})
     builtin->setBuiltin();
   buildObjectType();
   buildStringType();
-  buildArrayType();
   buildTupleType();
   buildFileType();
   buildErrorType();
@@ -71,14 +68,6 @@ void ASTContext::buildStringType() {
       .build();
 }
 
-void ASTContext::buildArrayType() {
-  ArrayTy->setSuperClass(ObjTy);
-  ClassTypeBuilder(*this, ArrayTy)
-      .objectSlots()
-      .method(names::kLen, IntTy, {}, MethodDecl::View) // slot 3
-      .build();
-}
-
 // Tuple is the final base class of every tuple value (one runtime object
 // backs them all, Runtime/Tuple.c); it has no methods beyond Obj's.
 void ASTContext::buildTupleType() {
@@ -103,27 +92,11 @@ void ASTContext::buildErrorType() {
   ClassTypeBuilder(*this, ErrorTy).objectSlots().build();
 }
 
-// -- Canonical array types
-//
-// One ArrayType per (canonical) element type.  The parser still allocates a
-// source-located ArrayType for every `T[]` annotation so diagnostics can point
-// at it, but Sema resolves each one to the instance returned here, so two uses
-// of `int[][]` share a single node and pointer comparison is sufficient.  This
-// also keeps the specialized-class cache below keyed correctly for nested
-// arrays: the element type of `int[][]` is the canonical `int[]` node, so
-// Array<int[]> is built once rather than once per use site.
-//
-ArrayType *ASTContext::getArrayType(Type *elemTy) {
-  auto it = ArrayTypes.find(elemTy);
-  if (it != ArrayTypes.end())
-    return it->second;
-  auto *at = make<ArrayType>(SourceLocation(), elemTy);
-  ArrayTypes[elemTy] = at;
-  return at;
-}
+// -- Canonical array and slice types
 
-// One FixedArrayType per (canonical) element type and length, as for
-// getArrayType.
+// One FixedArrayType per (canonical) element type and length.  The parser
+// allocates a source-located node for every annotation, but Sema resolves
+// each one to the instance returned here, so these types compare by pointer.
 FixedArrayType *ASTContext::getFixedArrayType(Type *elemTy, int64_t length) {
   auto key = std::make_pair(elemTy, length);
   auto it = FixedArrayTypes.find(key);
@@ -134,7 +107,7 @@ FixedArrayType *ASTContext::getFixedArrayType(Type *elemTy, int64_t length) {
   return at;
 }
 
-// One SliceType per (canonical) element type, as for getArrayType.
+// One SliceType per (canonical) element type, as for getFixedArrayType.
 SliceType *ASTContext::getSliceType(Type *elemTy) {
   auto it = SliceTypes.find(elemTy);
   if (it != SliceTypes.end())
@@ -146,7 +119,7 @@ SliceType *ASTContext::getSliceType(Type *elemTy) {
 
 // -- Canonical optional types
 //
-// One OptionalType per (canonical) inner type, mirroring getArrayType: the
+// One OptionalType per (canonical) inner type, as for getFixedArrayType: the
 // parser's source-located `T?` nodes are resolved by Sema to the instance
 // returned here so that `Node?` in a field, a parameter, and a match subject
 // is one node and compares by pointer.
@@ -160,38 +133,9 @@ OptionalType *ASTContext::getOptionalType(Type *innerTy) {
   return ot;
 }
 
-// -- Specialized per-element array types
-//
-// Lazily create Array<int>, Array<float>, etc.  Each specialized type is a
-// subtype of ArrayTy and adds push(elemTy)->void and pop()->elemTy so that
-// Sema can type-check calls with the correct element type.
-// These types are not used for vtable dispatch: the lowering emits direct
-// calls to PaykanArray_push / PaykanArray_pop for those methods.
-//
-ClassType *ASTContext::getOrCreateSpecializedArrayType(Type *elemTy) {
-  auto it = SpecializedArrayTypes.find(elemTy);
-  if (it != SpecializedArrayTypes.end())
-    return it->second;
-
-  std::string name = std::string(names::kArray) + "<" + typeName(elemTy) + ">";
-  auto *specTy = make<ClassType>(SourceLocation(), intern(name), ArrayTy);
-  ClassTypeBuilder(*this, specTy)
-      .method(names::kPush, VoidTy, {elemTy}) // slot 0 in specialized type
-      .method(names::kPop, elemTy)            // slot 1 in specialized type
-      .build();
-  SpecializedArrayTypes[elemTy] = specTy;
-  SpecializedArrayElemTypes[specTy] = elemTy;
-  return specTy;
-}
-
-Type *ASTContext::getSpecializedArrayElemType(ClassType *ct) const {
-  auto it = SpecializedArrayElemTypes.find(ct);
-  return it != SpecializedArrayElemTypes.end() ? it->second : nullptr;
-}
-
 // -- Canonical tuple types
 //
-// One TupleType per (canonical) element-type list, exactly like getArrayType:
+// One TupleType per (canonical) element-type list, as for getFixedArrayType:
 // the parser allocates a source-located TupleType for every `(T1, T2)`
 // annotation, Sema resolves each to the instance returned here, and nested
 // tuples share their inner nodes, so resolved tuple types compare by pointer.

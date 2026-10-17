@@ -12,7 +12,7 @@ than one value from a function.
 ## Quick Summary
 
 - Type notation: `(T1, T2, ...)` with **at least two** element types, e.g.
-  `(int, Str)`, `(int, (Str, bool))`, `(int, Str)[]`, `(int[], Str)`.
+  `(int, Str)`, `(int, (Str, bool))`, `(int, Str)[2]`.
 - Literals: `(1, "a")`, `(x, y + 1)`.  A parenthesised single expression
   `(x)` is just `x`; there are no 1-tuples and no empty tuple.
 - Element access: `t.0`, `t.1`, … — the index is a compile-time constant and
@@ -21,7 +21,7 @@ than one value from a function.
   tuple instead.  (Objects *inside* a tuple keep their own mutability.)
 - Destructuring: `q, r = divmod(7, 2);` binds each element to a name; `_`
   skips an element; `q: int, r: int = ...` annotates the targets.
-- Tuples are **`Obj` subtypes** (reference-counted heap objects, like arrays):
+- Tuples are **`Obj` subtypes** (reference-counted heap objects, like class instances):
   they can be printed, stored in an `Obj`, passed and returned freely.
 - `==` / `!=` compare **element-wise**; `toString` renders `(1, a)`.
 
@@ -33,8 +33,7 @@ than one value from a function.
 t: (int, Str) = (1, "a");
 u = (2.5, True, 'c');                     // inferred: (float, bool, char)
 n: (int, (Str, bool)) = (1, ("x", True)); // nesting
-pairs: (int, Str)[] = [(1, "one"), (2, "two")];
-mixed: (int[], Str) = ([1, 2, 3], "nums");
+pairs: (int, Str)[2] = [(1, "one"), (2, "two")];
 ```
 
 A literal's type is exactly the tuple of its element types — there is no
@@ -42,7 +41,10 @@ promotion inside a tuple literal, so `t: (float, int) = (1, 2)` is an error
 (write `(1.0, 2)`).  Reference-typed elements are covariant: an `(int, Str)`
 can be assigned to an `(int, Obj)`.  Where the literal flows into a typed slot,
 its optional elements come from that slot: `p: (Node?, int) = (None, 1)` and
-`ps: (Str, int?)[] = [("a", 1), ("b", None)]` work (see `10-optionals.md`).
+`ps: (Str, int?)[2] = [("a", 1), ("b", None)]` work (see `10-optionals.md`).
+
+An element cannot be a fixed-size array for now (`tuple element 0: a fixed-size array
+('int[2]') can only be a local variable, a parameter, a result or a field for now`).
 
 ---
 
@@ -99,8 +101,8 @@ Rules:
 
 ## Tuples as Values
 
-Tuples are reference-counted heap objects, exactly like class instances and
-arrays, so they need no special handling:
+Tuples are reference-counted heap objects, exactly like class instances, so
+they need no special handling:
 
 ```pkn
 class Range {
@@ -178,7 +180,7 @@ True
 | No element promotion | `t: (float, int) = (1, 2)` |
 | Mismatched equality | `(1, "a") == (1, 2)` |
 | `void` element | `(nothing(), 1)` |
-| Empty array element | `([], 1)` — bind `[]` to an annotated variable first |
+| Array element | `([1, 2], 1)` |
 
 ---
 
@@ -187,7 +189,7 @@ True
 Tuples in `match` patterns, nested destructuring, named elements, mutation,
 1-tuples, and spreading a tuple into call arguments. A `match` arm cannot name a
 tuple type (`(int, int) { … }` is rejected with "match arm type must be a class
-or array type"): every tuple shares one runtime class, so there is no per-type
+type"): every tuple shares one runtime class, so there is no per-type
 identity to test.
 
 ---

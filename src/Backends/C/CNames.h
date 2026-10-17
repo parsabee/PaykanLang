@@ -37,7 +37,6 @@ inline constexpr const char *kBool = "bool"; ///< <stdbool.h>
 inline constexpr const char *kChar = "char";
 inline constexpr const char *kInt = "int";
 inline constexpr const char *kDouble = "double";
-inline constexpr const char *kUnsignedLong = "unsigned long";
 inline constexpr const char *kInt8 = "int8_t";     ///< <stdint.h>
 inline constexpr const char *kUint8 = "uint8_t";   ///< <stdint.h>
 inline constexpr const char *kInt64 = "int64_t";   ///< <stdint.h>
@@ -48,7 +47,6 @@ inline constexpr const char *kSize = "size_t";     ///< <stdlib.h>
 // Pointer types, spelled as the emitter writes them (`T *`).
 inline constexpr const char *kVoidPtr = "void *";
 inline constexpr const char *kUint8Ptr = "uint8_t *";
-inline constexpr const char *kConstVoidPtr = "const void *";
 inline constexpr const char *kConstCharPtr = "const char *";
 inline constexpr const char *kConstUint8Ptr = "const uint8_t *";
 inline constexpr const char *kCharPtrPtr = "char **";
@@ -57,12 +55,9 @@ inline constexpr const char *kDoublePtr = "double *";
 
 // The runtime's C types (Runtime.h) and pointers to them.
 inline constexpr const char *kRtShared = "PaykanShared";
-inline constexpr const char *kRtString = "PaykanString";
-inline constexpr const char *kRtArray = "PaykanArray";
 inline constexpr const char *kRtObjPtr = "PaykanObject *";
 inline constexpr const char *kRtBoxPtr = "PaykanShared *";
 inline constexpr const char *kRtStrPtr = "PaykanString *";
-inline constexpr const char *kRtArrPtr = "PaykanArray *";
 inline constexpr const char *kRtTupPtr = "PaykanTuple *";
 /// A vtable slot (Runtime.h): the generic function-pointer type every
 /// vtable -- the runtime's and the generated `pkvt_<class>` -- is an array of.
@@ -140,7 +135,6 @@ inline constexpr const char *kGetenv = "getenv";
 inline constexpr const char *kMemcpy = "memcpy";
 inline constexpr const char *kMemmove = "memmove";
 inline constexpr const char *kMemset = "memset";
-inline constexpr const char *kStrlen = "strlen";
 
 // -- Literals
 
@@ -229,9 +223,7 @@ inline constexpr const char *kArgc = "argc";
 inline constexpr const char *kArgv = "argv";
 inline constexpr const char *kMainTrack = "track";
 inline constexpr const char *kMainArgs = "args";
-inline constexpr const char *kMainIndex = "i";
-inline constexpr const char *kMainStr = "s";
-inline constexpr const char *kMainBox = "b";
+inline constexpr const char *kMainArgsLen = "args_len";
 inline constexpr const char *kMainRc = "rc";
 /// New-object helpers' local: `o`.
 inline constexpr const char *kNewObj = "o";

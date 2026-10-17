@@ -34,7 +34,7 @@ impl Square {
 }
 
 // The total area of some shapes.
-fn total(shapes: Shape[]) -> int {
+fn total(shapes: view Shape[]) -> int {
   sum: int = 0;
   i: int = 0;
   while (i < shapes.len()) { sum = sum + shapes[i].area(); i = i + 1; }
