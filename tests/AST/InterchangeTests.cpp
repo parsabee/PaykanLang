@@ -120,7 +120,7 @@ TEST(ASTInterchange, ReadsEveryNode) {
       (methods (fn "get" (type-params) (params) (named-type "T")
         (block (return (member (ident "self") "item"))))))
     (class "Point" "Obj" (type-params) (fields) (methods))
-    (fn @4:1-9:9 "main" (type-params) (params (param "args" (array-type (named-type "Str"))))
+    (fn @4:1-9:9 "main" (type-params) (params (param "args" (array-type (named-type "Str")) (qual view)))
       (named-type "int")
       (block
         (decl (var "x" (optional-type (named-type "int")) (none)))
@@ -142,6 +142,7 @@ TEST(ASTInterchange, ReadsEveryNode) {
         (expr (subscript (ident "a") (binary add (int 1) (int 2))))
         (expr (enum-value "Color" "Red"))
         (expr (tuple-index (ident "t") 1))
+        (expr (array-repeat (array (int 1) (int 2)) 3))
         (return _)))))
 )";
   ast::ASTContext ctx;
@@ -161,6 +162,7 @@ TEST(ASTInterchange, ReadsEveryNode) {
   EXPECT_EQ(main->getReturnType(), ctx.getIntTy());
   auto *argTy = ast::cast<ast::ArrayType>(main->getParams()[0].ParamType);
   EXPECT_EQ(argTy->getElementType(), ctx.getStrTy());
+  EXPECT_EQ(main->getParams()[0].Mode, ast::ParamMode::View);
   auto &stmts = main->getBody()->getStatements();
   auto *tdecl =
       ast::cast<ast::VarDecl>(ast::cast<ast::DeclStmt>(stmts[1])->getDecl());
@@ -174,6 +176,12 @@ TEST(ASTInterchange, ReadsEveryNode) {
   auto *ds = ast::cast<ast::DestructureStmt>(stmts[10]);
   EXPECT_EQ(ds->getTargets()[0].Loc.getLineStart(), 5u);
   EXPECT_TRUE(ds->getTargets()[1].isSkip());
+  auto *rep = ast::cast<ast::ArrayLiteralExpr>(
+      ast::cast<ast::ExprStmt>(stmts[stmts.size() - 2])->getExpr());
+  EXPECT_TRUE(rep->isRepeat());
+  EXPECT_EQ(rep->getRepeatCount(), 3);
+  EXPECT_EQ(
+      ast::cast<ast::ArrayLiteralExpr>(rep->getElements()[0])->getLength(), 2);
   // And it writes back to the same AST.
   std::string again = write(*tu);
   ast::ASTContext ctx2;
@@ -351,6 +359,21 @@ TEST(ASTInterchange, RejectsMalformedInput) {
       {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
        "(expr (int \"1\"))))))",
        "1:72: expected an integer: the value"},
+      {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
+       "(expr (array-repeat (int 0) 0))))))",
+       "1:67: an array has at least one element"},
+      {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
+       "(expr (array-repeat (int 0) -3))))))",
+       "1:67: an array has at least one element"},
+      {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
+       "(expr (array-repeat (int 0)))))))",
+       "1:67: (array-repeat ...) is missing the count"},
+      {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
+       "(expr (array-repeat (int 0) n))))))",
+       "1:89: expected an integer: the count"},
+      {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
+       "(expr (array-repeat))))))",
+       "1:67: (array-repeat ...) is missing the repeated value"},
       {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
        "(expr (tuple (int 1)))))))",
        "1:67: a tuple needs at least two elements"},
