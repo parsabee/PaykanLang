@@ -482,10 +482,16 @@ int64_t Sema::fixedElementBytes(const ast::Type *ty) {
             ast::cast<ast::OptionalType>(ty)->getInnerType()))
       return 2 * fixedElementBytes(inner);
   if (const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
+    // Its elements, counted across its rows.
+    int64_t count = 1;
+    for (const auto *f = ft; f;
+         f = ast::dyn_cast<ast::FixedArrayType>(f->getElementType())) {
+      if (f->getLength() > kMaxFixedArrayElements / count)
+        return -1;
+      count *= f->getLength();
+    }
     int64_t elem = fixedElementBytes(ft->getElementType());
-    if (elem < 0 || ft->getLength() > kMaxFixedArrayBytes / elem)
-      return -1;
-    return elem * ft->getLength();
+    return elem < 0 ? -1 : elem * ft->getLength();
   }
   return -1;
 }
@@ -684,7 +690,7 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     if (fixedElementBytes(fixed) < 0) {
       error(loc, context + " has type '" + typeName(fixed) +
                      "', which is too big: a fixed-size array holds at most " +
-                     std::to_string(kMaxFixedArrayBytes) + " bytes");
+                     std::to_string(kMaxFixedArrayElements) + " elements");
       return nullptr;
     }
     return fixed;
@@ -2977,7 +2983,7 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
               "variable '" + node->getName() + "' has type '" +
                   typeName(filled) +
                   "', which is too big: a fixed-size array holds at most " +
-                  std::to_string(kMaxFixedArrayBytes) + " bytes");
+                  std::to_string(kMaxFixedArrayElements) + " elements");
       if (!filled || fixedElementBytes(filled) < 0) {
         declarePoisoned(CurrentScope, node->getName());
         return false;

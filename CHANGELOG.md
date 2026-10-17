@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   method is `len()`. A literal for it has exactly its length of elements. An index out of
   bounds is an error when it is a constant, and a panic (`paykan: array index 3 out of
   bounds (len=3)`) otherwise. A `let` array's elements cannot be assigned. `int[2][3]` is
-  two `int[3]`s. A parameter can be one in every mode (a plain one is the function's own
+  two `int[3]`s, and an array holds at most 16384 elements, counted across its rows. A
+  parameter can be one in every mode (a plain one is the function's own
   copy), and so can a result, also across modules. An element can be a scalar or an
   optional of one (`int?[3]`), an enum, a reference (`Str[2]`, `Point[4]`: a copy of the
   array shares the elements' objects) or another such array. For now only a local variable,

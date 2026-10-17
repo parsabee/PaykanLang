@@ -319,10 +319,11 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// Set around the resolveType of a variable declaration's annotation when
   /// it has an initializer: only there can a length be `_` (inferred).
   bool InferredLengthAllowed = false;
-  /// The most bytes a fixed-size array holds.
-  static constexpr int64_t kMaxFixedArrayBytes = int64_t(1) << 20;
+  /// The most elements a fixed-size array holds, counted across its rows
+  /// (`int[2][3]` holds 6).
+  static constexpr int64_t kMaxFixedArrayElements = 16384;
   /// The bytes @p ty takes inline in a fixed-size array; -1 when it cannot
-  /// be an element (yet) or the total is over kMaxFixedArrayBytes.
+  /// be an element (yet) or holds over kMaxFixedArrayElements elements.
   static int64_t fixedElementBytes(const ast::Type *ty);
   /// True when @p ty is, or holds, a fixed-size array.
   static bool holdsFixedArray(const ast::Type *ty);

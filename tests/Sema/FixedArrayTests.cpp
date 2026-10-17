@@ -232,17 +232,24 @@ TEST(FixedArray, ElementsOfReferenceTypes) {
 }
 
 // An optional value takes a presence flag padded to its value's alignment
-// and the value: an `int?[65536]` is 1 MiB.
+// and the value.  An array holds at most 16384 elements, counted across its
+// rows.
 TEST(FixedArray, ElementsAndSize) {
   expectOk("  os: int?[2] = [None, 1];\n"
            "  bs: bool?[3] = [True, None, False];\n"
            "  os[0] = os[1];\n"
            "  b: bool = os[0] == None && bs[1] != None;");
-  expectBodyError("  big: int?[65537] = [];", "which is too big");
+  auto atMost =
+      semaCheck("fn f(a: view int?[16384], b: view char[128][128]) {}\n"
+                "fn main() -> int { return 0; }");
+  EXPECT_TRUE(atMost.Ok) << atMost.Diagnostics;
+  expectBodyError("  big: int?[16385] = [];", "which is too big");
   expectBodyError("  big: int[200000] = [];",
                   "variable 'big' has type 'int[200000]', which is too big: a "
-                  "fixed-size array holds at most 1048576 bytes");
-  expectBodyError("  big: char[1024][1025] = [];", "which is too big");
+                  "fixed-size array holds at most 16384 elements");
+  expectBodyError("  big: char[128][129] = [];", "which is too big");
+  expectBodyError("  big: char[1][9223372036854775807] = [];",
+                  "which is too big");
 }
 
 // A `view T[]` or `inout T[]` parameter is a slice: it takes a fixed-size
@@ -348,8 +355,8 @@ TEST(FixedArray, InferredLengths) {
                   "shape, not from 'int'");
   expectBodyError("  x: int[_][_] = [[1, 2], [3]];",
                   "array literal has 1 element(s), but 'int[2]' has 2");
-  expectError("fn big() -> int[65536] { return big(); }\n"
+  expectError("fn big() -> int[8192] { return big(); }\n"
               "fn main() -> int {\n  x: int[_][_] = [big(), big(), big()];\n"
               "  return 0;\n}\n",
-              "variable 'x' has type 'int[3][65536]', which is too big");
+              "variable 'x' has type 'int[3][8192]', which is too big");
 }
