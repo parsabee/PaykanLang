@@ -492,8 +492,20 @@ bool Sema::holdsFixedArray(const ast::Type *ty) {
 bool Sema::errorFixedArrayHere(ast::SourceLocation loc, ast::Type *ty,
                                const std::string &where) {
   error(loc, where + ": a fixed-size array ('" + typeName(ty) +
-                 "') is only supported as a local variable's own type for "
-                 "now");
+                 "') can only be a local variable, a parameter or a result "
+                 "for now");
+  return false;
+}
+
+bool Sema::checkFixedResult(ast::Type *retTy, ast::ParamMode mode,
+                            ast::SourceLocation loc) {
+  if (mode == ast::ParamMode::Value || !ast::isa<ast::FixedArrayType>(retTy))
+    return true;
+  error(loc, std::string("a '") +
+                 (mode == ast::ParamMode::View ? "view" : "inout") +
+                 "' result of a fixed-size array ('" + typeName(retTy) +
+                 "') is not supported yet; return a copy ('-> " +
+                 typeName(retTy) + "')");
   return false;
 }
 
@@ -2582,9 +2594,11 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
   // generic type application).
   ast::Type *retTy = Ctx.getVoidTy();
   if (node->getReturnType()) {
+    FixedArrayAllowed = true; // a result may be a fixed-size array
     retTy = resolveType(node->getReturnType(), node->getLocation(),
                         "function '" + node->getName() + "' return type");
-    if (!retTy) {
+    if (!retTy ||
+        !checkFixedResult(retTy, node->getResultMode(), node->getLocation())) {
       // Calls by its name are follow-ons of the reported error (#89).
       ErroneousNames.insert(node->getName());
       return false;
@@ -2599,6 +2613,7 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
       ErroneousNames.insert(node->getName()); // as for the return type
       return false;
     }
+    FixedArrayAllowed = true; // a parameter may be a fixed-size array
     auto *ty = resolveType(p.ParamType, node->getLocation(),
                            "parameter '" + p.getName() + "'");
     if (!ty) {
@@ -2720,14 +2735,18 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
   // idempotent and, for a registered function, is guaranteed to succeed —
   // declareFunctionSignature already wrote the canonical types back).
   ast::Type *retTy = Ctx.getVoidTy();
-  if (node->getReturnType())
+  if (node->getReturnType()) {
+    FixedArrayAllowed = true;
     retTy = resolveType(node->getReturnType(), node->getLocation(),
                         "function '" + node->getName() + "' return type");
+  }
 
   std::vector<ast::Type *> paramTypes;
-  for (auto &p : node->getParams())
+  for (auto &p : node->getParams()) {
+    FixedArrayAllowed = true;
     paramTypes.push_back(resolveType(p.ParamType, node->getLocation(),
                                      "parameter '" + p.getName() + "'"));
+  }
 
   // Type-check the body in a new scope with params.
   auto *savedRetTy = CurrentReturnType;

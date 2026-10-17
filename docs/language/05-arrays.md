@@ -257,10 +257,39 @@ Output:
   `int[2][3]` is two `int[3]`s, indexed `grid[i][j]` with `i < 2` and `j < 3`.
   A row is a value too: `row = grid[1];` copies it.
 - An array holds at most 1048576 bytes (1 MiB).
+- A parameter can be a fixed-size array in every mode. A plain one is the
+  function's own copy, a `view` one reads the caller's array, and an `inout`
+  one changes it. A result is returned as a copy (`-> int[3]`; a `view` or
+  `inout` result of one is not supported yet).
 - For now, only `int`, `float`, `bool`, `char`, an enum and other fixed-size
   arrays can be elements. And for now a fixed-size array is only ever a local
-  variable's own type: it cannot be a parameter, a result, a field, a tuple
-  or growable array element, an optional or a type argument.
+  variable, a parameter or a result: it cannot be a field, a tuple or
+  growable array element, an optional or a type argument.
+
+```pkn
+fn bumped(xs: int[3]) -> int[3] {
+  xs[0] = xs[0] + 100;     // the function's own copy
+  return xs;
+}
+
+fn clear(xs: inout int[3]) {
+  xs = [0, 0, 0];          // the caller's array
+}
+
+fn main() -> int {
+  a: int[3] = [1, 2, 3];
+  b = bumped(a);
+  clear(a);
+  println(Str(a[0]) + " " + Str(b[0]));
+  return 0;
+}
+```
+
+Output:
+
+```
+0 101
+```
 
 ```pkn
 fn main() -> int {

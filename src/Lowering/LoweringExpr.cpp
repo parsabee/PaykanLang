@@ -239,7 +239,7 @@ Val ModuleLowering::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
   // address).
   if (ast::dyn_cast<ast::FixedArrayType>(node->getArray()->getResolvedType())) {
     Val addr = L.emitFixedElementAddress(node->getArray(), node->getIndex());
-    if (!addr || ast::isa<ast::FixedArrayType>(node->getResolvedType()))
+    if (!addr || ast::dyn_cast<ast::FixedArrayType>(node->getResolvedType()))
       return addr;
     return L.B.ptrLoad(addr, L.toPIRType(node->getResolvedType()), "elem");
   }
@@ -716,6 +716,13 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
       Type paramTy = i + 1 < superFn->Sig.Params.size()
                          ? superFn->Sig.Params[i + 1]
                          : Type::Void;
+      if (ast::dyn_cast<ast::FixedArrayType>(argExpr->getResolvedType())) {
+        Val p = L.emitFixedAddress(argExpr); // passed by address
+        if (!p)
+          return Val();
+        initArgs.push_back(p);
+        continue;
+      }
       if (paramTy == Type::Ptr) { // `inout`: the argument's address
         Val p = L.emitInoutArg(argExpr, keep);
         if (!p)
@@ -776,6 +783,13 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     auto *arg = node->getArguments()[i];
     Type paramTy =
         i < callee->Sig.Params.size() ? callee->Sig.Params[i] : Type::Void;
+    if (ast::dyn_cast<ast::FixedArrayType>(arg->getResolvedType())) {
+      Val p = L.emitFixedAddress(arg); // passed by address
+      if (!p)
+        return Val();
+      args.push_back(p);
+      continue;
+    }
     if (paramTy == Type::Ptr) { // `inout`: the argument's address
       Val p = L.emitInoutArg(arg, keep);
       if (!p)
@@ -795,6 +809,15 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     if (!v)
       return Val();
     args.push_back(L.coerceTo(v, paramTy));
+  }
+  // A fixed-size array result: written into a temporary, whose address is
+  // the call's value.
+  if (ast::dyn_cast<ast::FixedArrayType>(node->getResolvedType())) {
+    Val slot = L.emitFixedResultSlot(node->getResolvedType());
+    args.push_back(slot);
+    L.B.call(callee->Name, callee->Sig, args);
+    L.releaseAfterCall(keep);
+    return slot;
   }
   Val result = L.B.call(callee->Name, callee->Sig, args, "call");
   L.releaseAfterCall(keep);
@@ -969,6 +992,13 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   std::vector<Val> keep;
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     auto *argExpr = node->getArguments()[i];
+    if (ast::dyn_cast<ast::FixedArrayType>(argExpr->getResolvedType())) {
+      Val p = L.emitFixedAddress(argExpr); // passed by address
+      if (!p)
+        return Val();
+      args.push_back(p);
+      continue;
+    }
     if (i + 1 < sig.Params.size() && sig.Params[i + 1] == Type::Ptr) {
       // `inout`: the argument's address
       Val p = L.emitInoutArg(argExpr, keep);
@@ -1005,6 +1035,14 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     args.push_back(L.coerceTo(v, paramTy));
   }
 
+  // A fixed-size array result is written into a temporary, whose address is
+  // the call's value.
+  Val fixedSlot;
+  if (ast::dyn_cast<ast::FixedArrayType>(node->getResolvedType())) {
+    fixedSlot = L.emitFixedResultSlot(node->getResolvedType());
+    args.push_back(fixedSlot);
+  }
+
   // Virtual dispatch through the receiver's vtable.  User classes are named
   // (the backend knows their vtable layout); runtime classes use the
   // explicit-signature form.
@@ -1029,6 +1067,8 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   for (const auto &ev : ownedArgs)
     L.releaseIfOwned(ev);
   L.releaseIfOwned(recvOwned);
+  if (fixedSlot)
+    return fixedSlot;
   // An i64 slot result standing for a Paykan bool (`equals`) comes back as
   // the bool the expression has.
   if (result && result.Ty == Type::I64 && method && method->getReturnType() &&
@@ -1050,7 +1090,7 @@ Val ModuleLowering::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
     if (!addr)
       return Val();
     ast::Type *elemTy = ft->getElementType();
-    if (ast::isa<ast::FixedArrayType>(elemTy)) {
+    if (ast::dyn_cast<ast::FixedArrayType>(elemTy)) {
       emitFixedAssign(addr, node->getValue());
       return Val();
     }

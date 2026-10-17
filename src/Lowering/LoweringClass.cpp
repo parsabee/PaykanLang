@@ -80,6 +80,11 @@ pir::Signature ModuleLowering::methodSignature(ast::MethodDecl *md) {
                 : Type::Void;
   if (md->getParamModes().Result == ast::ParamMode::Inout)
     sig.Ret = Type::Ptr; // the address of the storage it names
+  // A fixed-size array result is written where a last parameter points.
+  if (ast::dyn_cast<ast::FixedArrayType>(md->getReturnType())) {
+    sig.Params.push_back(Type::Ptr);
+    sig.Ret = Type::Void;
+  }
   // The virtual `equals` returns int64_t in the runtime (every `*_equals`
   // implementation); a user override is emitted with the same return type and
   // call sites convert the result back to bool.
@@ -304,7 +309,7 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
       CurrentScope->declareUnowned(kSelf, selfLocal, ct);
       for (size_t i = 0; i < funcDecl->getParams().size(); ++i)
         declareParam(funcDecl->getParams()[i].getName(), fn->Params[i + 1],
-                     md->getParamTypes()[i]);
+                     md->getParamTypes()[i], funcDecl->getParams()[i].Mode);
       emitBody(funcDecl->getBody());
     }
     emitImplicitReturn(fn->Sig);

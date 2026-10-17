@@ -53,12 +53,20 @@ pir::Type ModuleLowering::Scope::inoutType(const std::string &name) const {
 }
 
 Type ModuleLowering::paramPIRType(ast::Type *ty, ast::ParamMode mode) {
-  return mode == ast::ParamMode::Inout ? Type::Ptr
-                                       : toPIRType(canonicalizeDeclType(ty));
+  // A fixed-size array is passed by address in every mode
+  // (LoweringFixed.cpp).
+  return mode == ast::ParamMode::Inout || ast::dyn_cast<ast::FixedArrayType>(ty)
+             ? Type::Ptr
+             : toPIRType(canonicalizeDeclType(ty));
 }
 
 void ModuleLowering::declareParam(const std::string &name,
-                                  const pir::Value &arg, ast::Type *astTy) {
+                                  const pir::Value &arg, ast::Type *astTy,
+                                  ast::ParamMode mode) {
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(astTy)) {
+    declareFixedParam(name, arg, ft, mode);
+    return;
+  }
   pir::LocalId local = B.addLocal(name, arg.Ty);
   B.store(local, Val(pir::Operand::value(arg), arg.Ty));
   // Ref-typed parameters arrive as owned +1 boxes: declared as owned, the
@@ -173,7 +181,7 @@ void ModuleLowering::emitInoutBinding(const std::string &name, ast::Expr *place,
   B.store(local, addr);
   // A fixed-size array is reached through the address (LoweringFixed.cpp).
   ast::Type *placeTy = astTy ? astTy : place->getResolvedType();
-  if (ast::isa<ast::FixedArrayType>(placeTy)) {
+  if (ast::dyn_cast<ast::FixedArrayType>(placeTy)) {
     CurrentScope->declareInout(name, local, Type::Mem, placeTy);
     return;
   }

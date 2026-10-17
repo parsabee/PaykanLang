@@ -123,6 +123,51 @@ TEST(FixedArray, LocalBorrows) {
                "7 8 3\n7 0\n");
 }
 
+// A by-value parameter is the callee's own copy, a `view` one reads the
+// caller's array and an `inout` one changes it; a result is a value like any
+// other, also from a method and as an element or a receiver.
+TEST(FixedArray, ParametersAndResults) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    fn total(xs: view int[3]) -> int { return xs[0] + xs[1] + xs[2]; }
+    fn bumped(xs: int[3]) -> int[3] {
+      xs[0] = xs[0] + 100;
+      return xs;
+    }
+    fn swap(a: inout int[3], b: inout int[3]) {
+      tmp = a;
+      a = b;
+      b = tmp;
+    }
+    fn unit() -> float[2][2] { return [[1, 0], [0, 1]]; }
+    class Stats { n: int; }
+    impl Stats {
+      fn __init__(xs: view int[3]) { self.n = total(xs); }
+      view fn doubled(xs: int[3]) -> int[3] {
+        return [xs[0] * 2, xs[1] * 2, self.n];
+      }
+    }
+    fn main() -> int {
+      xs: int[3] = [1, 2, 3];
+      ys = bumped(xs);
+      println(Str(xs[0]) + " " + Str(ys[0]) + " " + Str(total(ys)) + " " +
+              Str(total([4, 5, 6])));
+      swap(xs, ys);
+      println(Str(xs[0]) + " " + Str(ys[0]));
+      println(Str(unit()[1][1]) + " " + Str(unit().len()));
+      s = Stats(ys);
+      d = s.doubled(xs);
+      println(Str(d[0]) + " " + Str(d[2]) + " " + Str(s.doubled(xs)[1]));
+      xs = bumped(bumped(xs));
+      return xs[0] - 300;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 1); // 101 + 200 - 300
+  EXPECT_EQ(r.StdOut, "1 101 106 15\n101 1\n1 2\n202 6 4\n");
+  g.expectNoLeaks("ParametersAndResults");
+}
+
 TEST(FixedArray, IndexesComputedAtRunTime) {
   expectOutput(R"(
     sq: int[5] = [0, 0, 0, 0, 0];

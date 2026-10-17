@@ -531,6 +531,37 @@ fn main() -> int { return mid::bumped() + lf::base(); }
 // #70: two imported modules and the main file each define `tag`; every call
 // reaches its own module's function, through a qualifier, an alias or the
 // full module path, and a module calls its own `tag` next to an imported one.
+// A fixed-size array parameter and result across modules: the importer
+// passes the address and gives the result a temporary, from source and
+// again from the cached interface (`int[2][3]` read back from its name).
+TEST(Module, FixedArraysAcrossModules) {
+  auto tmpDir = paykan::test::tempDir() / "pkn_fixed_array_import_test";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir / "geo");
+  writeTempFile((tmpDir / "geo").string(), "grid.pkn", R"(
+fn transpose(g: view int[2][3]) -> int[3][2] {
+  return [[g[0][0], g[1][0]], [g[0][1], g[1][1]], [g[0][2], g[1][2]]];
+}
+fn scale(v: inout int[2], by: int) {
+  v[0] = v[0] * by;
+  v[1] = v[1] * by;
+}
+)");
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+import geo::grid;
+fn main() -> int {
+  g: int[2][3] = [[1, 2, 3], [4, 5, 6]];
+  t = grid::transpose(g);
+  v: int[2] = [1, 2];
+  grid::scale(v, 10);
+  return t[2][1] * 10 + t.len() + v[1];
+}
+)");
+  EXPECT_EQ(runProjectInChild(mainPath), 60 + 3 + 20);
+  EXPECT_EQ(runProjectInChild(mainPath), 60 + 3 + 20); // from the cache
+  std::filesystem::remove_all(tmpDir);
+}
+
 TEST(Module, SameNamedFunctionsOfSeveralModules) {
   auto tmpDir = paykan::test::tempDir() / "pkn_import_dup_fns";
   std::filesystem::remove_all(tmpDir);

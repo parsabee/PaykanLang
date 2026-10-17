@@ -525,6 +525,15 @@ private:
   /// Copy the value of @p value into the fixed-size array place at @p dst
   /// (an assignment: @p value may read @p dst).
   void emitFixedAssign(const Val &dst, ast::Expr *value);
+  /// A fixed-size array parameter @p name, whose value @p arg is the
+  /// caller's array's address: copied for a by-value one, the address kept
+  /// for a `view` or `inout` one.
+  void declareFixedParam(const std::string &name, const pir::Value &arg,
+                         ast::FixedArrayType *ty, ast::ParamMode mode);
+  /// A temporary for a call's fixed-size array result of type @p ty: its
+  /// address, passed as the call's last argument, where the callee writes
+  /// the result.
+  Val emitFixedResultSlot(ast::Type *ty);
 
   // -- `inout` parameters (LoweringInout.cpp)
 
@@ -532,9 +541,9 @@ private:
   /// `inout`, toPIRType's otherwise.
   pir::Type paramPIRType(ast::Type *ty, ast::ParamMode mode);
   /// Declare parameter @p name of a function being emitted, whose value is
-  /// @p arg and type @p astTy, in the current scope.
+  /// @p arg, type @p astTy and mode @p mode, in the current scope.
   void declareParam(const std::string &name, const pir::Value &arg,
-                    ast::Type *astTy);
+                    ast::Type *astTy, ast::ParamMode mode);
   /// Store @p v into variable @p name (local @p local) when it is an
   /// `inout` parameter, through its address; false for any other variable.
   bool storeInout(const std::string &name, pir::LocalId local, const Val &v);

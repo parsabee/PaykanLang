@@ -346,7 +346,11 @@ are reached with `ptr.add` from its address and read and written with
 `mem.copy` and cleared with `mem.zero`.  A new object's `mem` fields are
 zero, like its other fields; a `mem` local starts uninitialised.  Like
 `ptr.store`, `mem.copy` and `mem.zero` do no ARC: the lowering retains what
-a copy duplicates and releases what a store or a clear overwrites.  The verifier cannot
+a copy duplicates and releases what a store or a clear overwrites.  A
+fixed-size array is passed as the `ptr` address of its bytes in every mode
+(a by-value callee copies it into a `mem` local of its own first), and a
+function returning one takes a last `ptr` parameter, the address of the
+caller's temporary it writes the result to, and returns `void`.  The verifier cannot
 know what an address points to, so the lowering always reads and writes it
 with the slot's own type.  A local's address is valid until its function
 returns; a field's address while its object is alive, which the caller

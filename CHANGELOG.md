@@ -14,8 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   method is `len()`. A literal for it has exactly its length of elements. An index out of
   bounds is an error when it is a constant, and a panic (`paykan: array index 3 out of
   bounds (len=3)`) otherwise. A `let` array's elements cannot be assigned. `int[2][3]` is
-  two `int[3]`s. For now the elements are `int`, `float`, `bool`, `char`, an enum or
-  another such array, and only a local variable can be one.
+  two `int[3]`s. A parameter can be one in every mode (a plain one is the function's own
+  copy), and so can a result, also across modules. For now the elements are `int`,
+  `float`, `bool`, `char`, an enum or another such array, and only a local variable, a
+  parameter or a result can be one.
 - Traits (docs/language/12-traits.md): `trait Named { view fn name() -> Str; }` lists the
   methods a type must have, and `impl Named for A { ... }` declares that class `A` has
   them. The block's methods join `A` like an `impl` block's, and a method `A` already has
