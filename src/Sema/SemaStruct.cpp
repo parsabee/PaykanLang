@@ -15,6 +15,7 @@
 // (populateStructs), so a field can name a class; its method bodies last
 // (checkStructBodies), when every function of the module is declared.
 
+#include "ASTClone.h"
 #include "Names.h"
 #include "Sema.h"
 #include "SemaInternal.h"
@@ -38,15 +39,8 @@ ast::MethodDecl *Sema::methodOf(ast::Type *ty, const std::string &name) {
 
 bool Sema::declareStructs(ast::TranslationUnit *tu) {
   bool ok = true;
-  // Generic structs come with their own PR; until then they are rejected
-  // (and their `impl` blocks' errors are follow-ons).
-  for (auto *sd : tu->getGenericStructDecls()) {
-    error(sd->getLocation(), "generic struct '" + sd->getName() +
-                                 "' is not supported yet: a struct cannot "
-                                 "have type parameters");
-    ErroneousNames.insert(sd->getName());
-    ok = false;
-  }
+  // A generic struct is a template (registerGenericTemplates): it is
+  // instantiated where it is used, never registered as a type itself.
   // A struct whose name is taken is dropped (its name keeps resolving to
   // whatever owns it, and the calls by it are follow-ons); every other one
   // is registered as a stub, fields to come.
@@ -65,6 +59,7 @@ bool Sema::declareStructs(ast::TranslationUnit *tu) {
     }
     Ctx.registerStructType(name, sd->getLocation());
     DeclaredStructs.push_back(sd);
+    LocalStructNames.insert(name);
   }
   return ok;
 }
@@ -207,6 +202,24 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
       ok = false;
       continue;
     }
+    // A struct held in place cannot hold itself.  The module's own structs
+    // are ordered so that a cycle is found before any of them is populated
+    // (populateStructs); an instantiation's fields are resolved as they
+    // come (its own instantiation resolving to the stub), so the field is
+    // checked here, and left out, so that no type holds itself.
+    if (holdsStruct(fty, st)) {
+      std::string msg = "struct '";
+      msg += name;
+      msg += "' contains itself: field '";
+      msg += field->getName();
+      msg += "' holds a '";
+      msg += name;
+      msg += "'; a struct is held in place, so it cannot hold one of its "
+             "own (hold it in a class instead)";
+      error(field->getLocation(), msg);
+      ok = false;
+      continue;
+    }
     field->setType(fty); // canonical write-back for the lowering
     st->addField(field->getName(), fty);
   }
@@ -285,6 +298,170 @@ void Sema::declareConstructor(ast::StructDecl *sd, ast::StructType *st) {
   declareFunction(sd->getName(), st, ctorParams);
   if (initDecl)
     FunctionTable[sd->getName()].Modes = initDecl->getParamModes();
+}
+
+// -- Generic structs
+
+// static
+bool Sema::holdsStruct(const ast::Type *ty, const ast::StructType *target) {
+  if (ty == target)
+    return true;
+  if (const auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
+    for (const ast::Type *e : tt->getElementTypes())
+      if (holdsStruct(e, target))
+        return true;
+    return false;
+  }
+  if (const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty))
+    return holdsStruct(ft->getElementType(), target);
+  return false;
+}
+
+ast::StructType *Sema::instantiateStruct(const std::string &name,
+                                         const std::vector<ast::Type *> &args,
+                                         ast::SourceLocation loc) {
+  auto tIt = StructTemplates.find(name);
+  if (tIt == StructTemplates.end()) {
+    // Only resolveType and resolveGenericCall come here, with a template.
+    error(loc, "unknown generic struct '" + name + "'");
+    return nullptr;
+  }
+  ast::StructDecl *tmpl = tIt->second;
+  for (size_t i = 0; i < args.size(); ++i)
+    if (holdsFixedArray(args[i]))
+      return errorFixedArrayHere(loc, args[i],
+                                 "type argument " + std::to_string(i + 1) +
+                                     " of '" + name + "'"),
+             nullptr;
+  if (args.size() != tmpl->getTypeParams().size()) {
+    error(loc, "generic struct '" + name + "' expects " +
+                   std::to_string(tmpl->getTypeParams().size()) +
+                   " type argument(s), got " + std::to_string(args.size()));
+    return nullptr;
+  }
+  if (!checkBounds(tmpl, name, tmpl->getTypeParams(),
+                   tmpl->getTypeParamBounds(), args, loc))
+    return nullptr;
+
+  // Type names are global across imports (as for classes): an
+  // instantiation is named by its template's own name.
+  const ModuleTemplates *origin = foreignOrigin(tmpl);
+  const std::string instName = instantiationName(tmpl->getName(), args);
+  if (auto cIt = StructInstantiations.find(instName);
+      cIt != StructInstantiations.end()) {
+    auto info = cIt->second ? StructInstantiationInfos.find(cIt->second)
+                            : StructInstantiationInfos.end();
+    if (info == StructInstantiationInfos.end() || info->second.Template == tmpl)
+      return cIt->second;
+    error(loc, "instantiation '" + instName + "' of '" + displayName(name) +
+                   "' conflicts with another template's instantiation of the "
+                   "same name (type names are global across imports)");
+    return nullptr;
+  }
+
+  if (auto *existing = Ctx.lookupStructType(instName)) {
+    // An imported module exported `Pair<int>` as a concrete struct: the
+    // very instantiation, when the template is that module's.
+    auto o = ImportedTypeOrigins.find(instName);
+    if (origin && o != ImportedTypeOrigins.end() &&
+        o->second == origin->Module) {
+      if (!lookupFunction(instName)) { // its constructor, by its name
+        auto *init = existing->findMethod(names::kMethodInit);
+        declareFunction(instName, existing,
+                        init ? init->getParamTypes()
+                             : std::vector<ast::Type *>{},
+                        /*isBuiltin=*/true);
+        if (init)
+          FunctionTable[instName].Modes = init->getParamModes();
+      }
+      StructInstantiationInfos[existing] = StructInstantiationInfo{tmpl, args};
+      return StructInstantiations[instName] = existing;
+    }
+    error(loc, "instantiation '" + instName +
+                   "' conflicts with an imported struct of the same name "
+                   "(type names are global across imports)");
+    StructInstantiations[instName] = nullptr;
+    return nullptr;
+  }
+  if (Ctx.lookupType(instName)) {
+    error(loc, "instantiation '" + instName +
+                   "' conflicts with an imported type of the same name "
+                   "(type names are global across imports)");
+    StructInstantiations[instName] = nullptr;
+    return nullptr;
+  }
+  if (instantiationDepth() >= kMaxInstantiationDepth) {
+    error(loc, "instantiating '" + instName +
+                   "' exceeds the maximum instantiation depth (" +
+                   std::to_string(kMaxInstantiationDepth) +
+                   "); a generic struct may not instantiate itself with an "
+                   "ever-growing type argument");
+    StructInstantiations[instName] = nullptr;
+    return nullptr;
+  }
+
+  // Clone the template with the type parameters substituted, and its
+  // `impl` blocks, each by its own names for the type parameters.
+  Subst subst;
+  for (size_t i = 0; i < args.size(); ++i)
+    subst[*tmpl->getTypeParams()[i]] = args[i];
+  ast::ASTCloner cloner(Ctx, std::move(subst), nullptr, origin != nullptr);
+  ast::StructDecl *clone = cloner.cloneStructDecl(tmpl, instName);
+  std::vector<ast::ImplDecl *> &impls = ImplsByClass[instName];
+  if (auto it = TemplateImpls.find(tmpl); it != TemplateImpls.end())
+    for (auto *im : it->second) {
+      Subst s;
+      for (size_t i = 0; i < args.size(); ++i)
+        s[*im->getTypeParams()[i]] = args[i];
+      ast::ASTCloner c(Ctx, std::move(s), nullptr, origin != nullptr);
+      impls.push_back(c.cloneImplDecl(im, instName));
+    }
+
+  const InstantiationFrame request = frameAt(instName, loc);
+  InstantiationStack.push_back(request);
+  OriginSource inOrigin(Diags, origin);
+
+  ast::StructType *st = Ctx.registerStructType(instName, loc);
+  // Cached before the fields are resolved: a field naming this very
+  // instantiation resolves to the stub, and is then reported below.
+  StructInstantiations[instName] = st;
+  StructInstantiationInfos[st] = StructInstantiationInfo{tmpl, args};
+  if (origin)
+    ImportedTypeOrigins[instName] = origin->Module;
+
+  bool ok = populateStructType(clone, st);
+  if (ok)
+    declareConstructor(clone, st);
+  for (auto *im : impls) {
+    if (!ok || !im->getTrait())
+      continue;
+    if (!ImplsChecked)
+      PendingTraitImpls.push_back({im, st, request, origin});
+    else if (!checkTraitImpl(im, st))
+      ok = false;
+  }
+  InstantiationStack.pop_back();
+
+  if (!ok) {
+    ErroneousClasses.insert(instName);
+    StructInstantiations[instName] = nullptr;
+    return nullptr;
+  }
+
+  PendingInstantiation pending;
+  pending.Struct = clone;
+  pending.Name = instName;
+  pending.Depth = instantiationDepth() + 1;
+  pending.RequestLoc = loc;
+  pending.Origin = origin;
+  pending.RequestFile = request.File;
+  pending.RequestLines = request.Lines;
+  for (auto *p : tmpl->getTypeParams())
+    pending.TypeParams.insert(*p);
+  PendingInstantiations.push_back(std::move(pending));
+  (origin ? ForeignInstantiatedStructDecls : InstantiatedStructDecls)
+      .push_back(clone);
+  return st;
 }
 
 bool Sema::checkStructBodies() {

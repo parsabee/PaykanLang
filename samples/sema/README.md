@@ -16,7 +16,7 @@ type-checking (no codegen or JIT execution).
 | `generics/` | Generic classes / functions: instantiation, inference, diagnostics |
 | `optionals/` | Optional types `T?` — `None`, widening, unwrapping with `match`, optional fields and arrays of optionals |
 | `tuples/`  | Tuple types, literals, `.N` access, destructuring, immutability |
-| `structs/` | `struct` declarations, fields assigned in place, `impl` blocks, nominal typing, the `let` / `view` / `inout` rules, what is not supported yet |
+| `structs/` | `struct` declarations, fields assigned in place, `impl` blocks, nominal typing, the `let` / `view` / `inout` rules, generic structs, what is not supported yet |
 | `conversions/` | Conversion constructors `Target<Source>(value)`: the supported pairs, result types |
 
 ## Running

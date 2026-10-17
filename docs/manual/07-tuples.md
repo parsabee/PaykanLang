@@ -243,7 +243,9 @@ Stats(done: 2, pending: 11)
 
 Use a class when values must share one object that several names refer to, or when
 subclasses and `match` are needed; use a struct for a small group of fields that is
-copied around like a number.
+copied around like a number. A struct can be generic, like a class (chapter 9):
+`struct Pair<A, B> { a: A; b: B; }`, used as `Pair<int, Str>` or inferred from
+`Pair(1, "one")`.
 
 The reference chapters are [Tuples](../language/09-tuples.md) and
 [Structs](../language/14-structs.md). Next: [Optionals and None](08-optionals.md).

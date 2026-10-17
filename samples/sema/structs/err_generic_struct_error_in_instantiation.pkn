@@ -1,0 +1,9 @@
+// ERROR: return value of type 'Str' does not match function return type 'int'
+// The error is reported in the template's body, with a note naming the
+// instantiation ('Box<Str>') that was being checked.
+struct Box<T> { v: T; }
+impl Box<T> { view fn bad() -> int { return self.v; } }
+fn main() -> int {
+  b = Box("s");
+  return b.bad();
+}

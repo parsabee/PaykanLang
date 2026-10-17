@@ -135,6 +135,7 @@ private:
   /// lowered before it emits (each is emitted once per program).
   std::vector<ast::ClassDecl *> ForeignClasses;
   std::vector<ast::FuncDecl *> ForeignFuncs;
+  std::vector<ast::StructDecl *> ForeignStructs;
 
   pir::Module Mod;
   /// Functions in declaration order with stable addresses (the module vector

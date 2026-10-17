@@ -20,8 +20,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as for classes, so a struct is a key of `HashMap` and `HashSet`.  A struct crosses
   modules and prebuilt `.pkm` files (a `STRUCT` interface record), and the runtime renders
   and compares one through its layout (`PaykanStruct_toString`, `PaykanStruct_equals`,
-  the layout kind `PAYKAN_KIND_STRUCT`).  Not yet: generic structs, optional structs,
-  `match` on a struct, a fixed-size array field and an `impl` for another module's struct.
+  the layout kind `PAYKAN_KIND_STRUCT`).  Not yet: optional structs, `match` on a
+  struct, a fixed-size array field and an `impl` for another module's struct.
+- Generic structs (docs/language/14-structs.md, "Generic structs"): `struct Pair<A, B>
+  { a: A; b: B; }` is a template like a generic class, instantiated by its type
+  arguments (`Pair<int, Str>`) or inferred from a constructor call (`Pair(1, "a")`, from
+  the fields or from an `__init__` of an `impl Pair<A, B>` block), with `impl` and `impl
+  Trait for` blocks and bounds, in every position a struct goes, across modules too.
+  A `static fn` in a generic struct's `impl` block is not supported yet.
+- A generic class or struct whose method instantiates its template with an ever-growing
+  type argument (`Deep<Deep<T>>`) is now reported (`exceeds the maximum instantiation
+  depth`) instead of instantiating without end.
 
 - The standard library ships with the compiler (docs/language/13-standard-library.md), in
   `stdlib/`: `::collections` has `List<T>`, `LinkedList<T>` (doubly linked and circular

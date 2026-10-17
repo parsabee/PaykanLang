@@ -190,7 +190,8 @@ std::optional<Sema::TraitRef> Sema::resolveTraitRef(ast::Type *ref,
   if (it == Traits.end()) {
     if (isFailedImportUse(name))
       return std::nullopt;
-    if (Ctx.lookupType(name) || ClassTemplates.count(name))
+    if (Ctx.lookupType(name) || ClassTemplates.count(name) ||
+        StructTemplates.count(name))
       error(loc, "'" + name + "' is not a trait");
     else
       error(loc, "unknown trait '" + name + "'");
@@ -379,6 +380,8 @@ bool Sema::checkBoundDecls(ast::TranslationUnit *tu) {
   };
   for (auto *cd : tu->getGenericClassDecls())
     check(cd, cd->getTypeParams(), cd->getTypeParamBounds());
+  for (auto *sd : tu->getGenericStructDecls())
+    check(sd, sd->getTypeParams(), sd->getTypeParamBounds());
   for (auto *fn : tu->getGenericFuncDecls())
     check(fn, fn->getTypeParams(), fn->getTypeParamBounds());
   return ok;

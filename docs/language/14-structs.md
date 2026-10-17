@@ -31,8 +31,11 @@ methods come from `impl` blocks.
 - Parameter modes work as for tuples: a plain parameter is a copy, `view` reads the
   caller's struct, `inout` is the caller's struct.  A field of a struct variable or field
   is an `inout` place (`bump(p.x)`).
-- Not yet: generic structs, optional structs (`Point?`), `match` on a struct, a
-  fixed-size array field, a struct that contains itself.
+- Generic: `struct Pair<A, B> { a: A; b: B; }` is a template, instantiated by its type
+  arguments (`Pair<int, Str>`) or inferred from a constructor call (`Pair(1, "a")`),
+  with `impl Pair<A, B>` blocks, as a generic class is (`11-generics.md`).
+- Not yet: optional structs (`Point?`), `match` on a struct, a fixed-size array field, a
+  struct that contains itself.
 
 ---
 
@@ -69,7 +72,8 @@ holds the class: a reference is not containment.
 A struct has no superclass: `struct X : Base { ... }` is a syntax error (`a struct has no
 superclass: 'struct X { ... }' (a struct is a value, not an object; use a class to
 inherit)`), and so is a method in the body (`a struct body holds fields only ('name:
-Type;'); a method goes in an 'impl' block: 'impl X { fn ... }'`).
+Type;'); a method goes in an 'impl' block: 'impl X { fn ... }'`).  A struct can be
+generic (`struct Pair<A, B> { a: A; b: B; }`, see [Generic structs](#generic-structs)).
 
 ---
 
@@ -420,6 +424,92 @@ east False 1 1
 
 ---
 
+## Generic structs
+
+A struct can have type parameters, like a class (`11-generics.md`): `struct Pair<A, B> {
+a: A; b: B; }` is a template, and each use with distinct type arguments instantiates it
+into a struct of its own, `Pair<int, Str>`, which has everything a written struct has.
+An instantiation is written with its arguments (`p: Pair<int, Str>`,
+`Pair<int, Str>(1, "a")`) or inferred from a constructor call: `Pair(1, "a")` unifies the
+fields, or the parameters of the `__init__` of an `impl` block, with the arguments.  Its
+`impl` blocks name the type parameters after the struct's name (`impl Pair<A, B>`; the
+names are the block's own), and every instantiation gets their methods; `impl Trait for
+Pair<A, B>` makes every instantiation implement the trait; a bound (`struct Keyed<K:
+Hashable>`) is checked at each instantiation.
+
+```pkn
+struct Pair<A, B> {
+  a: A;
+  b: B;
+}
+
+impl Pair<A, B> {
+  view fn first() -> view A { return self.a; }
+  fn swapWith(other: inout Pair<A, B>) { t = self.a; self.a = other.a; other.a = t; }
+  fn flipped() -> Pair<B, A> { return Pair<B, A>(self.b, self.a); }
+}
+
+struct Box<T> { v: T; }
+
+impl Box<T> {
+  fn __init__(v: T) { self.v = v; }
+  view fn get() -> view T { return self.v; }
+}
+
+struct Keyed<K: Hashable> { key: K; n: int; }   // a bound, checked per instantiation
+
+impl Hashable for Keyed<K> {
+  view fn hash() -> int { return self.key.hash(); }
+}
+
+fn sumInts(p: view Pair<int, int>) -> int { return p.a + p.b; }
+fn firstOf<A, B>(p: view Pair<A, B>) -> view A { return p.a; }   // A, B inferred
+fn sameHash<T: Hashable>(a: view T, b: view T) -> bool { return a.hash() == b.hash(); }
+
+fn main() -> int {
+  p = Pair(1, "one");                    // Pair<int, Str>, inferred
+  q: Pair<int, Str> = Pair<int, Str>(2, "two");
+  p.swapWith(q);
+  f = p.flipped();                       // Pair<Str, int>
+  b = Box(Pair(3, 4));                   // Box<Pair<int, int>>, through __init__
+  bs: Box<int>[2] = [Box(1), Box(2)];
+  bs[1].v = 7;
+  println(p);
+  println(f);
+  println(Str(sumInts(b.get())) + " " + firstOf(f) + " " + Str(bs[0].v + bs[1].v) + " " +
+          Str(sameHash(Keyed("k", 1), Keyed("k", 2))) + " " + Str(p == q));
+  return 0;
+}
+```
+
+Output:
+
+```
+Pair<int, Str>(a: 2, b: one)
+Pair<Str, int>(a: one, b: 2)
+7 one 8 True False
+```
+
+The rules of generic classes hold: a type parameter is a type inside the template, the
+template itself is not checked until it is instantiated, an error in an instantiation is
+reported in the template's body with a note naming the instantiation (`in instantiation
+of 'Box<Str>' requested here`), instantiations are cached by their canonical name (`Pair<int,
+Str>` is one struct wherever it is used), each instantiation is a distinct nominal type
+(`Pair<int, Str>` is not `Pair<Str, int>`), a template name is global with the other type
+names (`'Pair' is already declared as a generic struct`), and the instantiation depth is
+bounded.  `toString` renders the instantiation's name.  An instantiation of another
+module's generic struct (`gen::Pair<int, Str>`, `gen::Pair(1, "a")`) is made in the
+importer as for a generic class, and is one struct whoever makes it; a module that
+declares or instantiates generic structs is built from its source each time, as a `.pkm`
+holds no templates yet.
+
+What a struct cannot hold, an instantiation cannot either: `struct Node<T> { v: T; next:
+Node<T>; }` is reported when it is instantiated (`struct 'Node<int>' contains itself:
+field 'next' holds a 'Node<int>'`), as is a fixed-size array type argument.  A `static fn`
+in a generic struct's `impl` block is not supported yet, like a generic class's.
+
+---
+
 ## Modules
 
 A struct declared in a module is used from an importer as `mod::Name`: its constructor
@@ -470,7 +560,7 @@ Point(x: 4, y: 2) 6 True
 | Taken name | `struct A` next to a class, enum, function or trait `A`; `struct Str` |
 | Contains itself | `struct A { b: B; } struct B { a: A; }`; `struct C { c: (int, C); }` |
 | Array field | `struct A { xs: int[3]; }` |
-| Generic struct | `struct Pair<T> { ... }` |
+| Generic struct misuse | `Pair<int>` for two parameters; `p: Pair` without arguments; `A<int>` for a plain struct; `impl Pair { }`; a `static fn` in `impl Pair<A, B>`; `Same(1, "a")` for `Same<T> { a: T; b: T; }` |
 | Optional struct | `a: A? = None` |
 | Nominal mismatch | `b: B = a`; `t: (int, int) = a`; `a == b` across types |
 | Not an `Obj` | `o: Obj = a` |
@@ -495,11 +585,12 @@ Point(x: 4, y: 2) 6 True
 
 ## Not Yet Supported
 
-Generic structs (`struct Pair<T, U>`), optional structs (`Point?`), `match` on a struct, a
-fixed-size array field, an `impl` block for a struct of another module, a field of an array
-element as an `inout` place, and a struct crossing into C other than as a type argument of a
-generic native function (`02-functions-and-calling.md`, "Generic native functions").  Like
-a tuple, a struct has no `equals` method and cannot be ordered with `<`.
+Optional structs (`Point?`), `match` on a struct, a fixed-size array field, an `impl`
+block for a struct of another module, a `static fn` in a generic struct's `impl` block, a
+field of an array element as an `inout` place, and a struct crossing into C other than as
+a type argument of a generic native function (`02-functions-and-calling.md`, "Generic
+native functions").  Like a tuple, a struct has no `equals` method and cannot be ordered
+with `<`.
 
 ---
 

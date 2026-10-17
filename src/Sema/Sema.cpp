@@ -96,9 +96,10 @@ bool Sema::checkDeclNameAvailable(const std::string &name,
     return false;
   }
   if (Ctx.lookupStructType(name)) {
-    if (kind == DeclKind::Struct)
+    if (kind == DeclKind::Struct && !LocalStructNames.count(name))
       // Local structs are checked before any of them is registered, so a
-      // struct hit while declaring a struct can only come from an import.
+      // struct hit while declaring a struct can only come from an import
+      // (or, for a generic struct, from a struct of the module).
       error(loc, "struct '" + name +
                      "' conflicts with an imported type of the same name");
     else if (kind == DeclKind::Class)
@@ -136,6 +137,10 @@ bool Sema::checkDeclNameAvailable(const std::string &name,
   // constructor, and a generic function is called like any other.
   if (ClassTemplates.count(name)) {
     error(loc, "'" + name + "' is already declared as a generic class");
+    return false;
+  }
+  if (StructTemplates.count(name)) {
+    error(loc, "'" + name + "' is already declared as a generic struct");
     return false;
   }
   if (FuncTemplates.count(name)) {
@@ -609,10 +614,13 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
       return structTy;
     if (auto *canonical = Ctx.lookupClassType(ct->getName()))
       return canonical;
-    if (ClassTemplates.count(ct->getName())) {
-      error(loc, context + " names generic class '" + ct->getName() +
-                     "' without type arguments (write '" + ct->getName() +
-                     "<...>')");
+    if (ClassTemplates.count(ct->getName()) ||
+        StructTemplates.count(ct->getName())) {
+      error(loc,
+            context + " names generic " +
+                (ClassTemplates.count(ct->getName()) ? "class '" : "struct '") +
+                ct->getName() + "' without type arguments (write '" +
+                ct->getName() + "<...>')");
       return nullptr;
     }
     if (Traits.count(ct->getName())) {
@@ -705,6 +713,8 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
         return nullptr;
       args.push_back(arg);
     }
+    if (StructTemplates.count(gt->getName()))
+      return instantiateStruct(gt->getName(), args, loc);
     return instantiateClass(gt->getName(), args, loc);
   }
 
@@ -860,6 +870,7 @@ bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
 bool Sema::isTypeNameForVariable(const std::string &name) const {
   return Ctx.lookupClassType(name) || Ctx.lookupEnumType(name) ||
          Ctx.lookupStructType(name) || ClassTemplates.count(name) ||
+         StructTemplates.count(name) ||
          (CurrentTypeParams && CurrentTypeParams->count(name)) ||
          name == names::kObj || name == names::kString ||
          name == names::kFile || name == names::kTypeInt ||
@@ -1102,15 +1113,13 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   const FunctionSig *known = nullptr;
   // Explicit type arguments (`Box<int>(...)`) need no argument types: the
   // instance is known first, and so are its parameters.
-  const bool explicitInstance =
-      node->hasTypeArgs() && !S.isConversionTarget(node->getCalleeName()) &&
-      (S.ClassTemplates.count(node->getCalleeName()) ||
-       S.FuncTemplates.count(node->getCalleeName()));
+  const bool explicitInstance = node->hasTypeArgs() &&
+                                !S.isConversionTarget(node->getCalleeName()) &&
+                                S.isTemplate(node->getCalleeName());
   if (explicitInstance && !S.resolveGenericCall(node, {}))
     return nullptr;
   if (explicitInstance ||
-      (!node->hasTypeArgs() && !S.ClassTemplates.count(node->getCalleeName()) &&
-       !S.FuncTemplates.count(node->getCalleeName())))
+      (!node->hasTypeArgs() && !S.isTemplate(node->getCalleeName())))
     if (const auto *sig = S.lookupFunction(node->getCalleeName());
         sig && sig->ParamTypes.size() == node->getNumArguments())
       known = sig;
@@ -1208,8 +1217,7 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
 
   // -- Generic call: instantiate the template and rebind the callee
   if (!explicitInstance &&
-      (node->hasTypeArgs() || S.ClassTemplates.count(node->getCalleeName()) ||
-       S.FuncTemplates.count(node->getCalleeName()))) {
+      (node->hasTypeArgs() || S.isTemplate(node->getCalleeName()))) {
     for (auto *ty : argTypes)
       if (!ty)
         return nullptr; // argument errors already reported; cannot infer
@@ -2081,7 +2089,8 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
                      Diags.getDiagnostics(),
                      std::move(AccumulatedImportContexts),
                      std::move(ForeignInstantiatedClassDecls),
-                     std::move(ForeignInstantiatedFuncDecls)};
+                     std::move(ForeignInstantiatedFuncDecls),
+                     std::move(ForeignInstantiatedStructDecls)};
   // The sets live in this frame: a Sema is run once.
   if (ImportStack == &localImportStack)
     ImportStack = nullptr;

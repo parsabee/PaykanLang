@@ -1,0 +1,6 @@
+// ERROR: cannot infer type parameter 'T' of 'Same': deduced as both 'int' and 'Str'
+struct Same<T> { a: T; b: T; }
+fn main() -> int {
+  s = Same(1, "a");
+  return 0;
+}
