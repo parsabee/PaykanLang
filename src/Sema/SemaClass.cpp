@@ -96,9 +96,16 @@ bool Sema::checkInitFieldsAssigned(
     for (unsigned i = 0; i < n; ++i) {
       if (!assigned[i] && !reported[i]) {
         reported[i] = true;
-        error(loc, "field '" + fields[i].first + "' of " + kind + " '" +
-                       typeName + "' is not assigned on every path through '" +
-                       names::kMethodInit + "'");
+        std::string msg = "field '";
+        msg += fields[i].first;
+        msg += "' of ";
+        msg += kind;
+        msg += " '";
+        msg += typeName;
+        msg += "' is not assigned on every path through '";
+        msg += names::kMethodInit;
+        msg += "'";
+        error(loc, msg);
         ok = false;
       }
     }
