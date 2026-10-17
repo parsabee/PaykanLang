@@ -683,8 +683,7 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
   }
   // A result held in memory: written into a temporary, whose address is the
   // call's value (an `inout` one is the address of its storage instead).
-  if (ast::isMemType(node->getResolvedType()) &&
-      callee->Sig.Ret != Type::Ptr) {
+  if (ast::isMemType(node->getResolvedType()) && callee->Sig.Ret != Type::Ptr) {
     Val slot = L.emitMemResultSlot(node->getResolvedType());
     args.push_back(slot);
     L.B.call(callee->Name, callee->Sig, args);
