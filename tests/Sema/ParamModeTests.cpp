@@ -647,16 +647,15 @@ fn main() -> int {
         ":21:11: error: " + kStore,
         ":22:14: error: 'v' is a 'view' local; " + kPass + "Holder' is not one",
         ":23:9: error: " + kStore, ":25:7: error: " + kStore,
-        ":26:9: error: 'k' is a 'view' local; " + kPass + "twice' is not one",
-        ":27:9: error: 'v' is a 'view' local; " + kPass + "twice' is not one",
         ":29:11: error: 's' is a 'view' local; " + kPass + "Str' is not one"})
     EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
                                                            << r.Diagnostics;
-  EXPECT_EQ(r.ErrorCount, 11u) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 9u) << r.Diagnostics;
   // A literal holds a copy of each element: `[v]` and `(v, 1)` are values
-  // of their own.
+  // of their own; an `int` read through a `view` (`k`, `v.n`) is passed to
+  // a by-value parameter as a copy.
   for (const char *line :
-       {":18:", ":19:", ":30:", ":31:", ":32:", ":33:", ":34:"})
+       {":18:", ":19:", ":26:", ":27:", ":30:", ":31:", ":32:", ":33:", ":34:"})
     EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
                                                            << r.Diagnostics;
 }
@@ -692,18 +691,80 @@ fn main() -> int {
 // A `view` parameter stays one too: it can only be passed on to a `view`
 // parameter.
 TEST(ParamMode, ViewParametersOnlyPassToView) {
-  auto r = semaCheck(R"(fn twice(n: int) -> int { return 2 * n; }
+  // A `view` of a reference (an object, a `Str`, a value holding one) goes
+  // only to a `view` parameter; a value type leaves a `view` as a copy.
+  auto r = semaCheck(R"(class Counter { n: int; }
+struct P { x: int; name: Str; }
+fn twice(n: int) -> int { return 2 * n; }
 fn look(n: view int) -> int { return n; }
-fn f(n: view int) -> int {
+fn keep(c: Counter) -> int { return c.n; }
+fn peek(c: view Counter) -> int { return c.n; }
+fn tag(s: Str) -> int { return s.len(); }
+fn hold(p: P) -> int { return p.x; }
+fn f(n: view int, c: view Counter, s: view Str, p: view P) -> int {
   println(Str(n));
   m = n;
-  return twice(n) + look(n) + twice(m);
+  return twice(n) + look(n) + twice(m) + keep(c) + peek(c) + tag(s) + hold(p) + twice(c.n) + twice(p.x);
 }
-fn main() -> int { return f(1); })");
-  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
-  expectErrors(r, {":6:16: error: 'n' is a 'view' parameter; it can only be "
-                   "passed to a 'view' parameter, and parameter 1 of 'twice' "
+fn main() -> int { return f(1, Counter(1), "s", P(1, "p")); })");
+  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
+  expectErrors(r, {":12:47: error: 'c' is a 'view' parameter; it can only be "
+                   "passed to a 'view' parameter, and parameter 1 of 'keep' "
+                   "is not one",
+                   ":12:66: error: 's' is a 'view' parameter; it can only be "
+                   "passed to a 'view' parameter, and parameter 1 of 'tag' "
+                   "is not one",
+                   ":12:76: error: 'p' is a 'view' parameter; it can only be "
+                   "passed to a 'view' parameter, and parameter 1 of 'hold' "
                    "is not one"});
+}
+
+TEST(ParamMode, ValueTypesLeaveAViewAsCopies) {
+  // An `int` (or a struct, tuple or fixed-size array of value types) read
+  // through any `view` -- a parameter, a local, a `view fn`'s `self`, a
+  // `view` result, an element of a `view` array -- can be passed to a
+  // by-value parameter: the parameter is a copy, as an assignment of it
+  // is.  What holds a reference still cannot.
+  auto r = semaCheck(R"(
+struct P { x: int; y: int; }
+struct Q { x: int; name: Str; }
+class C {
+  n: int; p: P; q: Q; name: Str;
+  view fn twiceN(f: (int) -> int) -> int { return f(self.n); }
+  view fn twiceP(g: (P) -> int) -> int { return g(self.p); }
+  view fn num() -> view int { return self.n; }
+  view fn bad(h: (Str) -> int, k: (Q) -> int) -> int { return h(self.name) + k(self.q); }
+}
+fn twice(n: int) -> int { return 2 * n; }
+fn sumP(p: P) -> int { return p.x + p.y; }
+fn sumQ(q: Q) -> int { return q.x; }
+fn total(xs: view int[], f: (int) -> int) -> int {
+  t = 0; i = 0;
+  while (i < xs.len()) { t = t + f(xs[i]); i = i + 1; }
+  return t;
+}
+fn main() -> int {
+  c = C(1, P(1, 2), Q(1, "q"), "c");
+  v: view = c;
+  k: view = 3;
+  dbl = fn(x: int) -> int { return x * 2; };
+  n = twice(k) + twice(v.n) + sumP(v.p) + twice(v.p.x) + twice(c.num()) +
+      c.twiceN(dbl) + c.twiceP(sumP) + total([1, 2, 3], dbl) + twice(v.q.x);
+  n = n + sumQ(v.q);
+  return n;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  for (const char *diag :
+       {"'self' is read-only in 'view fn bad'; it can only be passed to a "
+        "'view' parameter, and parameter 1 of 'h' is not one",
+        "'self' is read-only in 'view fn bad'; it can only be passed to a "
+        "'view' parameter, and parameter 1 of 'k' is not one",
+        "'v' is a 'view' local; it can only be passed to a 'view' parameter, "
+        "and parameter 1 of 'sumQ' is not one"})
+    EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
+                                                           << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
 }
 
 // Exclusivity: while an `inout` local is live, the variable it names cannot

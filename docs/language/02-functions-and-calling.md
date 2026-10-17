@@ -136,14 +136,25 @@ Output:
 ticks 1
 ```
 
-#### A `view` stays a `view`
+#### A `view` of a reference stays a `view`
 
-A `view`, a parameter or a [local](01-language-basics.md#local-borrows), can only be passed
-on to another `view` parameter, whatever its type, so no function it reaches can change
-it. With `fn twice(n: int)`, `twice(v)` is an error: `'v' is a 'view' local; it can only
-be passed to a 'view' parameter, and parameter 1 of 'twice' is not one`. The fix is to make
-that parameter `view` too. The builtin functions only read (`println(v)`), and so do the
-builtin methods. `Str(s)` with a `Str` returns `s` itself, so it takes no `view`.
+A `view` of a reference -- an object, a string, an optional of one, or an array, tuple or
+struct holding one -- can only be passed on to another `view` parameter, a parameter or a
+[local](01-language-basics.md#local-borrows) alike, so no function it reaches can change or
+keep what it shares. With `fn keep(c: Counter)` and `v: view = Counter()`, `keep(v)` is an
+error: `'v' is a 'view' local; it can only be passed to a 'view' parameter, and parameter 1
+of 'keep' is not one`. The fix is to make that parameter `view` too. The builtin functions
+only read (`println(v)`), and so do the builtin methods. `Str(s)` with a `Str` returns `s`
+itself, so it takes no `view`.
+
+A value type read through a `view` -- an `int` parameter `n: view int`, a local `k: view =
+3`, a field `v.n` of a viewed object, an element `xs[i]` of a `view int[]`, a `view int`
+result, or a struct, tuple or fixed-size array of value types -- is passed to a by-value
+parameter as a copy, which cannot change what it was read from, just as assigning it
+(`m = n`) copies it. So `twice(n)`, `f(xs[i])` with `f: (int) -> int` and, in a `view fn`,
+`g(self.x)` with `x: int` are fine; `g(self.name)` with `name: Str` is not (`'self' is
+read-only in 'view fn m'; it can only be passed to a 'view' parameter, and parameter 1 of
+'g' is not one`).
 
 A `view` of an object, string or optional, or of an array or tuple holding one, shares what
 it holds, so it is never stored or returned, where another name could change it later.
@@ -372,7 +383,7 @@ hello 4
   result of another call that borrows only those. A new value, a copy parameter or a local
   is an error: `'d' is a copy: a 'view' result must be part of 'self' or of a 'view' or
   'inout' parameter`.
-- The caller sees the result as a `view` ([A `view` stays a `view`](#a-view-stays-a-view)):
+- The caller sees the result as a `view` ([A `view` stays a `view`](#a-view-of-a-reference-stays-a-view)):
   it can be read, passed on to a `view` parameter or bound to a `view` local, and a value
   type can be copied out (`k = b.num();`); nothing changes through it and one that shares
   what it holds is never stored (`the result of 'peek' is a 'view'; 'tick' is not a 'view
