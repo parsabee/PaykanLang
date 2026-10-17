@@ -212,14 +212,19 @@ fn splitOnce(s: Str, sep: char) -> (Str, Str) {
 import tasks::task;
 
 class TaskList {
-  tasks: task::Task[];
+  tasks: task::Task[8];   // room for eight tasks
+  count: int;             // tasks[0] to tasks[count - 1] are in use
 
-  fn add(title: Str, priority: task::Priority) {
-    self.tasks.push(task::Task(title, priority));
+  // Adds a task; False if the list is full.
+  fn add(title: Str, priority: task::Priority) -> bool {
+    if (self.count == self.tasks.len()) { return False; }
+    self.tasks[self.count] = task::Task(title, priority);
+    self.count = self.count + 1;
+    return True;
   }
 
   fn complete(n: int) -> bool {
-    if (n < 1 || n > self.tasks.len()) { return False; }
+    if (n < 1 || n > self.count) { return False; }
     self.tasks[n - 1].done = True;
     return True;
   }
@@ -227,7 +232,7 @@ class TaskList {
   view fn pending() -> int {
     count = 0;
     i = 0;
-    while (i < self.tasks.len()) {
+    while (i < self.count) {
       if (!self.tasks[i].done) { count = count + 1; }
       i = i + 1;
     }
@@ -236,16 +241,20 @@ class TaskList {
 
   view fn show() {
     i = 0;
-    while (i < self.tasks.len()) {
+    while (i < self.count) {
       println(Str(i + 1) + ". " + self.tasks[i].toString());
       i = i + 1;
     }
-    println(Str(self.pending()) + " of " + Str(self.tasks.len()) + " to do");
+    println(Str(self.pending()) + " of " + Str(self.count) + " to do");
   }
 }
 
 impl TaskList {
-  fn __init__() { self.tasks = []; }
+  fn __init__() {
+    blank = task::Task("", task::Priority::Normal);
+    self.tasks = [blank, blank, blank, blank, blank, blank, blank, blank];
+    self.count = 0;
+  }
 }
 ```
 
@@ -262,7 +271,7 @@ fn run(tasks: tl::TaskList, line: Str) {
   match command {
     "add" {
       title, priority = text::splitOnce(rest, '|');
-      tasks.add(title, task::parsePriority(priority));
+      if (!tasks.add(title, task::parsePriority(priority))) { println("the list is full"); }
     }
     "done" {
       match int(rest) {
