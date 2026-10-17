@@ -189,7 +189,7 @@ allowed there (the parameter's type, an override) is Sema's job.
 ## 5. Types
 
 ```
-typeAnnotation ::= primaryType ( "[" "]" | "[" INT "]" | "?" )*
+typeAnnotation ::= primaryType ( "[" "]" | "[" ( INT | "_" ) "]" | "?" )*
 primaryType    ::= IDENT
                  | modulePath "::" IDENT
                  | IDENT "<" typeArgList ">"
@@ -204,7 +204,8 @@ typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
   `Node?[]`, `(int, Str)[]`, `int[3][]` is an array of `int[3]`s).  A run of
   lengths is one array of arrays whose first length is its first index's, as
   in C: `int[2][3]` is two `int[3]`s, indexed `grid[i][j]` with `i < 2` and
-  `j < 3`.
+  `j < 3`.  A length of `_` (`int[_]`) is the initializer's; Sema allows it
+  only in a variable declaration with one.
 - `T?` is rejected at parse time when `T` is `void` (`optional type 'void?'
   is not supported`) or already optional (`nested optional type 'Str??' is
   not supported`). The other builtin value types have optional forms

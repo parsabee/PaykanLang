@@ -1381,11 +1381,16 @@ class FixedArrayType : public Type {
   int64_t Length;
 
 public:
+  /// The length of `T[_]`, which a variable declaration infers from its
+  /// initializer (Sema replaces it with the initializer's).
+  static constexpr int64_t kInferredLength = -1;
+
   FixedArrayType(SourceLocation loc, Type *elemTy, int64_t length)
       : Type(NK_FixedArrayType, loc), ElementType(elemTy), Length(length) {}
 
   Type *getElementType() const { return ElementType; }
   int64_t getLength() const { return Length; }
+  bool isInferred() const { return Length == kInferredLength; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_FixedArrayType;

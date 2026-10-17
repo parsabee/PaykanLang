@@ -1595,21 +1595,27 @@ Type *Parser::parseTypeAnnotation() {
       // A `[` after a type can only open the `[]` or `[n]` suffix: report
       // the missing `]` where it is missing.
       consume();
-      if (at(Tok::Int)) {
+      auto isLength = [](Tok k) {
+        return k == Tok::Int || k == Tok::Underscore;
+      };
+      if (isLength(cur().Kind)) {
         // A run of lengths, `[2][3]`, is one array of arrays whose first
-        // length is its first index's: two `int[3]`s.
+        // length is its first index's: two `int[3]`s.  `_` is a length a
+        // variable declaration infers from its initializer.
         std::vector<int64_t> lengths;
         for (;;) {
           Token n = consume();
-          if (n.IntValue < 1) {
+          if (n.Kind == Tok::Int && n.IntValue < 1) {
             error(n.Loc, "a fixed-size array has at least one element: its "
                          "length must be 1 or more");
             return nullptr;
           }
           if (!expect(Tok::RBracket, "to close the array type"))
             return nullptr;
-          lengths.push_back(n.IntValue);
-          if (!(at(Tok::LBracket) && peek(1).Kind == Tok::Int))
+          lengths.push_back(n.Kind == Tok::Int
+                                ? n.IntValue
+                                : FixedArrayType::kInferredLength);
+          if (!(at(Tok::LBracket) && isLength(peek(1).Kind)))
             break;
           consume();
         }
