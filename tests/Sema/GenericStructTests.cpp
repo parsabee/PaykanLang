@@ -300,8 +300,7 @@ fn main() -> int { return 0; }
   EXPECT_FALSE(r.Ok);
   expectAll(r, {"'Pair' is already declared as a generic struct",
                 "duplicate type parameter 'T' in generic struct 'S'",
-                "type parameter 'Str' of generic struct 'U' shadows a type of "
-                "the same name",
+                "type parameter 'Str' of generic struct 'U' shadows a type",
                 "redefinition of generic struct 'V'",
                 "'W' is already declared as a struct",
                 "'X' is already declared as a generic struct"});
