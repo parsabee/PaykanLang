@@ -465,6 +465,10 @@ private:
     Val emitArrayPush(ast::MethodCallExpr *node, const Val &recv,
                       ast::Type *elemTy);
     Val emitArrayPop(const Val &recv, ast::Type *elemTy);
+    /// `Buffer<T>()` and a buffer's method (LoweringBuffer.cpp).
+    Val emitBufferNew(ast::CallExpr *node);
+    Val emitBufferCall(ast::MethodCallExpr *node, const Val &buf,
+                       ast::Type *elemTy);
     Val emitShortCircuit(ast::BinaryExpr *node, bool isAnd);
     Val emitIntDivGuards(const Val &lhs, const Val &rhs, bool isDiv);
 

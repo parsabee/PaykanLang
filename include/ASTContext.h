@@ -78,6 +78,10 @@ class ASTContext {
   // Reverse map for O(1) getSpecializedArrayElemType lookups.
   std::unordered_map<ClassType *, Type *> SpecializedArrayElemTypes;
 
+  // The builtin Buffer<T> per element type (lazily created), and back.
+  std::unordered_map<Type *, ClassType *> BufferTypes;
+  std::unordered_map<const ClassType *, Type *> BufferElemTypes;
+
   // -- Tuples
   // Canonical base class for every tuple value ("Tuple": Obj subtype whose
   // vtable mirrors PaykanTuple_vtable — destroy / toString / equals).
@@ -214,6 +218,15 @@ public:
   /// If @p ct is a specialized array ClassType (e.g. Array<Str>), return its
   /// element type; otherwise return nullptr.
   Type *getSpecializedArrayElemType(ClassType *ct) const;
+
+  /// The builtin `Buffer<T>` of elements of type @p elemTy (canonical),
+  /// created on first use: a final class of the runtime (PaykanBuffer, its
+  /// objects shared like any class's) whose methods are its PaykanBuffer_*
+  /// functions (docs/language/05-arrays.md, "Buffer").
+  ClassType *getBufferType(Type *elemTy);
+
+  /// The element type of @p ct when it is a `Buffer<T>`, nullptr otherwise.
+  Type *getBufferElemType(const ClassType *ct) const;
 
   /// Read-only view of the specialized array ClassTypes, keyed by element
   /// type.  Each distinct element type has exactly one entry.

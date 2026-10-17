@@ -79,6 +79,10 @@ bool Sema::checkDeclNameAvailable(const std::string &name,
   // (ClassType::Builtin), and a function iff run() registered it so
   // (FunctionSig::IsBuiltin).  Classes are checked first so a name that is
   // both (`Str` is a class and a conversion function) reports as a class.
+  if (name == names::kBuffer) {
+    error(loc, "'Buffer' is a builtin class and cannot be redeclared");
+    return false;
+  }
   if (auto *ct = Ctx.lookupClassType(name)) {
     if (ct->isBuiltin())
       error(loc, "'" + name + "' is a builtin class and cannot be redeclared");
@@ -524,6 +528,56 @@ std::string Sema::sliceArgNote(const ast::Type *param, const ast::Type *arg) {
   return "";
 }
 
+ast::Type *Sema::bufferType(const std::vector<ast::Type *> &args,
+                            ast::SourceLocation loc,
+                            const std::string &context) {
+  if (args.size() != 1) {
+    error(loc, context + ": 'Buffer' takes one type argument, its element "
+                         "type ('Buffer<int>')");
+    return nullptr;
+  }
+  if (args[0] == Ctx.getVoidTy()) {
+    error(loc, context + ": a 'Buffer<void>' could hold no value");
+    return nullptr;
+  }
+  return Ctx.getBufferType(args[0]);
+}
+
+ast::Type *Sema::checkBufferConstruction(ast::CallExpr *node) {
+  ast::SourceLocation loc = node->getLocation();
+  if (node->getTypeArgs().size() != 1) {
+    error(loc, "'Buffer' takes one type argument, its element type: "
+               "'Buffer<int>()'");
+    return nullptr;
+  }
+  std::vector<ast::Type *> args;
+  for (size_t i = 0; i < node->getTypeArgs().size(); ++i) {
+    auto *arg =
+        resolveType(node->getTypeArgs()[i], loc,
+                    "type argument " + std::to_string(i + 1) + " of 'Buffer'");
+    if (!arg)
+      return nullptr;
+    args.push_back(arg);
+  }
+  ast::Type *ty = bufferType(args, loc, "type argument 1 of 'Buffer'");
+  if (ty && node->getNumArguments() != 0) {
+    error(loc, "'" + typeName(ty) + "()' takes no arguments: it starts with " +
+                   std::to_string(names::kBufferInitialLength) +
+                   " slots, and grow(by) adds more");
+    return nullptr;
+  }
+  return ty;
+}
+
+bool Sema::errorBufferArm(ast::SourceLocation loc, ast::ClassType *armCt) {
+  if (!Ctx.getBufferElemType(armCt))
+    return false;
+  error(loc, "match arm type '" + typeName(armCt) +
+                 "' cannot be tested: at run time a buffer does not say "
+                 "its element type");
+  return true;
+}
+
 bool Sema::errorFixedArrayHere(ast::SourceLocation loc, ast::Type *ty,
                                const std::string &where) {
   if (ast::isa<ast::SliceType>(ty)) {
@@ -664,6 +718,8 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
         return nullptr;
       args.push_back(arg);
     }
+    if (gt->getName() == names::kBuffer)
+      return bufferType(args, loc, context);
     return instantiateClass(gt->getName(), args, loc);
   }
 
@@ -1047,6 +1103,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   // each argument its parameter's type as the expected type (a generic call
   // infers from the arguments, so they come first there).
   const FunctionSig *known = nullptr;
+  if (node->getCalleeName() == names::kBuffer)
+    return S.checkBufferConstruction(node);
   // Explicit type arguments (`Box<int>(...)`) need no argument types: the
   // instance is known first, and so are its parameters.
   const bool explicitInstance =
@@ -3311,6 +3369,10 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
             ok = false;
           }
         }
+      } else if (errorBufferArm(arm->getLocation(), armCt)) {
+        ok = false;
+        if (arm->hasBinding())
+          declarePoisoned(CurrentScope, arm->getBinding());
       } else {
         // 3. The arm type must be a subclass of the subject's static type.
         //    (Matching Obj against Obj arms is always allowed since every class
@@ -3414,7 +3476,10 @@ bool Sema::checkOptionalMatch(ast::MatchStmt *node,
         ok = false;
       } else if (innerCt) {
         auto *armCt = ast::dyn_cast<ast::ClassType>(resolvedArmTy);
-        if (!armCt || !armCt->isSubtypeOf(innerCt)) {
+        if (armCt && armCt != innerCt &&
+            errorBufferArm(arm->getLocation(), armCt)) {
+          ok = false;
+        } else if (!armCt || !armCt->isSubtypeOf(innerCt)) {
           error(arm->getLocation(),
                 "type '" + typeName(resolvedArmTy) +
                     "' is not a subclass of '" + typeName(inner) +

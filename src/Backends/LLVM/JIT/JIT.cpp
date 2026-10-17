@@ -141,7 +141,7 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanTypeDrop,        reinterpret_cast<void *>(&PaykanType_drop)},
     {kPaykanTypeIsUnset,     reinterpret_cast<void *>(&PaykanType_isUnset)},
 
-    // Reached through `native fn`s (the standard library's memory::Buffer).
+    // The builtin Buffer<T>'s methods.
     {kPaykanBufferNew,       reinterpret_cast<void *>(&PaykanBuffer_new)},
     {kPaykanBufferLen,       reinterpret_cast<void *>(&PaykanBuffer_len)},
     {kPaykanBufferGet,       reinterpret_cast<void *>(&PaykanBuffer_get)},

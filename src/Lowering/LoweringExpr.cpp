@@ -700,6 +700,8 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
 
   if (L.FunctionTable.count(node->getCalleeName()))
     return emitBuiltinCall(node);
+  if (node->getCalleeName() == kBuffer)
+    return emitBufferNew(node);
 
   // __super__(args): call the base class __init__ with self.
   if (node->getCalleeName() == kMethodSuper) {
@@ -972,6 +974,16 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
 
   ast::Type *recvASTTy = resolveReceiverASTType();
   auto *arrTy = ast::dyn_cast<ast::ArrayType>(recvASTTy);
+
+  // A buffer's own methods are the runtime's; Obj's are slots as usual.
+  if (auto *bct = ast::dyn_cast<ast::ClassType>(recvASTTy))
+    if (ast::Type *elemTy = L.ASTCtx.getBufferElemType(bct);
+        elemTy && bct->getVTableIndex(node->getMethodName()) >= 0 &&
+        !L.ASTCtx.getObjTy()->findMethod(node->getMethodName())) {
+      Val result = emitBufferCall(node, recv, elemTy);
+      L.releaseIfOwned(recvOwned);
+      return result;
+    }
 
   // push / pop are direct runtime calls, not vtable slots.
   const std::string &mname = node->getMethodName();

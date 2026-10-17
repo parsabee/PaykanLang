@@ -45,7 +45,8 @@ namespace sema {
 /// ',' or ')' at this nesting level or the next suffix.  A generic
 /// instantiation's name carries its type arguments (`Pair<Str, int>`,
 /// `Box<Node?[]>`): everything between its '<' and the matching '>' is part of
-/// the name, which is registered under exactly that spelling.  Returns nullptr
+/// the name, which is registered under exactly that spelling (a `Buffer<T>`
+/// is made from T's name).  Returns nullptr
 /// (leaving @p pos wherever it stopped) if the text is malformed or a base
 /// name is unknown in @p ctx.
 static ast::Type *parseExportedType(ast::ASTContext &ctx,
@@ -94,7 +95,19 @@ static ast::Type *parseExportedType(ast::ASTContext &ctx,
     }
     if (pos == start)
       return nullptr;
-    ty = ctx.lookupType(text.substr(start, pos - start));
+    const std::string name = text.substr(start, pos - start);
+    ty = ctx.lookupType(name);
+    // A buffer this context has not made yet: `Buffer<` its element `>`.
+    const std::string buffer = std::string(names::kBuffer) + "<";
+    if (!ty && name.size() > buffer.size() + 1 && name.starts_with(buffer) &&
+        name.back() == '>') {
+      const std::string elemName =
+          name.substr(buffer.size(), name.size() - buffer.size() - 1);
+      size_t end = 0;
+      if (ast::Type *elem = parseExportedType(ctx, elemName, end);
+          elem && end == elemName.size())
+        ty = ctx.getBufferType(elem);
+    }
     if (!ty)
       return nullptr;
   }
@@ -277,11 +290,11 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     // identity.
     if (name != ct->getName())
       continue;
-    // Lazily-created Array<T> / Tuple<T1, T2> specialisations are never
-    // exported either: the importing context rebuilds its own from the
-    // `T[]` / `(T1, T2)` spellings in the signatures that use them.
+    // Lazily-created Array<T> / Tuple<T1, T2> specialisations and buffers
+    // are never exported either: the importing context rebuilds its own
+    // from the `T[]` / `(T1, T2)` / `Buffer<T>` spellings that use them.
     if (isBootstrapClassName(name) || Ctx.getSpecializedArrayElemType(ct) ||
-        Ctx.getSpecializedTupleElemType(ct))
+        Ctx.getSpecializedTupleElemType(ct) || Ctx.getBufferElemType(ct))
       continue;
     ModuleInfo::ClassInfo ci;
     ci.Name = name;

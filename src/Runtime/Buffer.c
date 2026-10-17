@@ -1,14 +1,13 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// Paykan runtime — the storage of the standard library's memory::Buffer<T>.
+// Paykan runtime — the builtin Buffer<T>.
 //
 // A buffer holds `len` live values of its PaykanType, `cap` allocated, each
-// `type->size` bytes (Runtime.h, "Buffer").  The program reaches it only
-// through generic native functions, which are passed T's PaykanType first
-// and then the buffer: its object, borrowed (`view`), or the address of its
-// box for a function that changes it (`inout`).  A value that was never set
-// is all zero bytes: 0, False, or None.
+// `type->size` bytes (Runtime.h, "Buffer").  The compiler calls these
+// functions for a buffer's methods, with T's PaykanType first and then the
+// buffer's object.  A value that was never set is all zero bytes: 0, False,
+// or None.
 
 #include "Runtime.h"
 #include "RuntimeInternal.h"
@@ -44,11 +43,6 @@ static void PaykanBuffer_destroy(PaykanObject *self) {
   buffer_drop(buf, 0, buf->len);
   Paykan_free(buf->data);
   Paykan_free(buf);
-}
-
-/// The buffer whose box is at @p box (an `inout Obj` argument).
-static PaykanBuffer *buffer_at(const void *box) {
-  return (PaykanBuffer *)PaykanShared_get(*(PaykanShared *const *)box);
 }
 
 /// @p n as a value count; a negative one is the program's mistake.
@@ -123,9 +117,9 @@ void PaykanBuffer_copy(void *t, void *out, PaykanObject *b, int64_t i) {
   PaykanType_copy((const PaykanType *)t, out, PaykanBuffer_get(t, b, i));
 }
 
-void PaykanBuffer_set(void *type, void *b, int64_t i, void *v) {
+void PaykanBuffer_set(void *type, PaykanObject *b, int64_t i, void *v) {
   const PaykanType *t = (const PaykanType *)type;
-  PaykanBuffer *buf = buffer_at(b);
+  PaykanBuffer *buf = (PaykanBuffer *)b;
   buffer_check_index(buf, i);
   void *slot = buffer_value(buf, i);
   // Retain the new value before releasing the old, which may be the same.
@@ -139,14 +133,14 @@ void PaykanBuffer_set(void *type, void *b, int64_t i, void *v) {
   memmove(slot, v, (size_t)t->size);
 }
 
-void PaykanBuffer_reserve(void *t, void *b, int64_t n) {
+void PaykanBuffer_reserve(void *t, PaykanObject *b, int64_t n) {
   (void)t;
-  buffer_lengthen(buffer_at(b), buffer_count("reserve", n));
+  buffer_lengthen((PaykanBuffer *)b, buffer_count("reserve", n));
 }
 
-void PaykanBuffer_grow(void *t, void *b, int64_t by) {
+void PaykanBuffer_grow(void *t, PaykanObject *b, int64_t by) {
   (void)t;
-  PaykanBuffer *buf = buffer_at(b);
+  PaykanBuffer *buf = (PaykanBuffer *)b;
   int64_t n = buffer_count("grow by", by);
   if (n > INT64_MAX - buf->len)
     Paykan_runtime_panic("out of memory growing a buffer by %lld values",
@@ -157,9 +151,9 @@ void PaykanBuffer_grow(void *t, void *b, int64_t by) {
 /// Drop the last @p by values.  Once at most a quarter of the allocation is
 /// in use it is halved (never below PAYKAN_BUFFER_MIN_CAP), so a grow /
 /// shrink pair never reallocates twice.
-void PaykanBuffer_shrink(void *t, void *b, int64_t by) {
+void PaykanBuffer_shrink(void *t, PaykanObject *b, int64_t by) {
   (void)t;
-  PaykanBuffer *buf = buffer_at(b);
+  PaykanBuffer *buf = (PaykanBuffer *)b;
   int64_t n = buffer_count("shrink by", by);
   if (n > buf->len)
     Paykan_runtime_panic("buffer shrink by %lld: it has only %lld values",

@@ -332,6 +332,15 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   static std::string sliceArgNote(const ast::Type *param, const ast::Type *arg);
   /// Report a fixed-size array (@p ty) where only a local can have one yet,
   /// @p where; returns false.
+  /// The builtin `Buffer<T>` of @p args (resolved), or nullptr after
+  /// reporting when there is not exactly one or it is `void`.
+  ast::Type *bufferType(const std::vector<ast::Type *> &args,
+                        ast::SourceLocation loc, const std::string &context);
+  /// The type of `Buffer<T>()`: a new buffer, nullptr after reporting.
+  ast::Type *checkBufferConstruction(ast::CallExpr *node);
+  /// Reports a `Buffer<T>` match arm, which no run-time test can tell from
+  /// another buffer; false when @p armCt is not one.
+  bool errorBufferArm(ast::SourceLocation loc, ast::ClassType *armCt);
   bool errorFixedArrayHere(ast::SourceLocation loc, ast::Type *ty,
                            const std::string &where);
   /// False (after reporting it) for a `view` or `inout` result (@p mode) of

@@ -3,6 +3,7 @@
 
 add_library(paykan_lowering STATIC
     Lowering.cpp
+    LoweringBuffer.cpp
     LoweringExpr.cpp
     LoweringMatch.cpp
     LoweringClass.cpp

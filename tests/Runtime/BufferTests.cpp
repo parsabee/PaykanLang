@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// Unit tests for the PaykanBuffer_* functions, the storage of the standard
-// library's memory::Buffer<T>: values of any PaykanType, new values all zero
-// bytes, references retained by the buffer and released when they leave
-// it, and misuse panics.  Each test runs on the tracking allocator and ends
+// Unit tests for the PaykanBuffer_* functions, the builtin Buffer<T>'s
+// methods: values of any PaykanType, new values all zero bytes, references
+// retained by the buffer and released when they leave it, and misuse
+// panics.  Each test runs on the tracking allocator and ends
 // with no live blocks.
 
 #include <cstddef>
@@ -59,8 +59,8 @@ int64_t intAt(PaykanShared *buf, int64_t i) {
   return v;
 }
 
-void setInt(PaykanShared **buf, int64_t i, int64_t v) {
-  PaykanBuffer_set(&kInt, buf, i, &v);
+void setInt(PaykanShared *buf, int64_t i, int64_t v) {
+  PaykanBuffer_set(&kInt, obj(buf), i, &v);
 }
 
 PaykanShared *boxAt(RefType &t, PaykanShared *buf, int64_t i) {
@@ -96,7 +96,7 @@ TEST(Buffer, ValuesRoundTrip) {
   TrackingHeap heap;
   PaykanShared *buf = PaykanBuffer_new(&kFloat, 2);
   double d = 2.5;
-  PaykanBuffer_set(&kFloat, &buf, 1, &d);
+  PaykanBuffer_set(&kFloat, obj(buf), 1, &d);
   double got = 0;
   PaykanBuffer_copy(&kFloat, &got, obj(buf), 1);
   EXPECT_EQ(got, 2.5);
@@ -110,7 +110,7 @@ TEST(Buffer, ReferencesAreRetainedAndReleased) {
   TrackingHeap heap;
   PaykanShared *buf = PaykanBuffer_new(&kStr.head, 2);
   PaykanShared *a = str("a");
-  PaykanBuffer_set(&kStr.head, &buf, 0, &a);
+  PaykanBuffer_set(&kStr.head, obj(buf), 0, &a);
   EXPECT_EQ(a->refCount, 2);
   EXPECT_EQ(boxAt(kStr, buf, 0), a);
   EXPECT_EQ(a->refCount, 2);
@@ -120,13 +120,13 @@ TEST(Buffer, ReferencesAreRetainedAndReleased) {
   EXPECT_EQ(a->refCount, 3);
   Paykan_release(got);
   // Overwriting releases the old value; storing it again is safe.
-  PaykanBuffer_set(&kStr.head, &buf, 0, &a);
+  PaykanBuffer_set(&kStr.head, obj(buf), 0, &a);
   EXPECT_EQ(a->refCount, 2);
   PaykanShared *b = str("b");
-  PaykanBuffer_set(&kStr.head, &buf, 0, &b);
+  PaykanBuffer_set(&kStr.head, obj(buf), 0, &b);
   EXPECT_EQ(a->refCount, 1);
   Paykan_release(a);
-  PaykanBuffer_set(&kStr.head, &buf, 1, &b);
+  PaykanBuffer_set(&kStr.head, obj(buf), 1, &b);
   Paykan_release(b);
   Paykan_release(buf); // releases both of its references to b
 }
@@ -136,9 +136,9 @@ TEST(Buffer, OptionalValuesStartAsNone) {
   PaykanShared *buf = PaykanBuffer_new(&kOpt.head, 1);
   EXPECT_EQ(boxAt(kOpt, buf, 0), nullptr);
   PaykanShared *a = str("a");
-  PaykanBuffer_set(&kOpt.head, &buf, 0, &a);
+  PaykanBuffer_set(&kOpt.head, obj(buf), 0, &a);
   PaykanShared *none = nullptr;
-  PaykanBuffer_set(&kOpt.head, &buf, 0, &none);
+  PaykanBuffer_set(&kOpt.head, obj(buf), 0, &none);
   EXPECT_EQ(a->refCount, 1);
   Paykan_release(a);
   Paykan_release(buf);
@@ -150,8 +150,8 @@ TEST(Buffer, HoldsValuesOfAnySize) {
   TrackingHeap heap;
   PaykanShared *buf = PaykanBuffer_new(&kWide.head, 2);
   Wide w = {7, str("w"), true};
-  PaykanBuffer_set(&kWide.head, &buf, 0, &w);
-  PaykanBuffer_set(&kWide.head, &buf, 1, &w);
+  PaykanBuffer_set(&kWide.head, obj(buf), 0, &w);
+  PaykanBuffer_set(&kWide.head, obj(buf), 1, &w);
   EXPECT_EQ(w.ref->refCount, 3);
   const char *first = (const char *)PaykanBuffer_get(&kWide.head, obj(buf), 0);
   const char *second = (const char *)PaykanBuffer_get(&kWide.head, obj(buf), 1);
@@ -162,7 +162,7 @@ TEST(Buffer, HoldsValuesOfAnySize) {
   EXPECT_TRUE(got.flag);
   EXPECT_EQ(w.ref->refCount, 4);
   PaykanType_drop(&kWide.head, &got);
-  PaykanBuffer_shrink(&kWide.head, &buf, 1);
+  PaykanBuffer_shrink(&kWide.head, obj(buf), 1);
   EXPECT_EQ(w.ref->refCount, 2);
   Paykan_release(w.ref);
   Paykan_release(buf);
@@ -171,23 +171,23 @@ TEST(Buffer, HoldsValuesOfAnySize) {
 TEST(Buffer, ReserveGrowAndShrinkChangeTheLength) {
   TrackingHeap heap;
   PaykanShared *buf = PaykanBuffer_new(&kInt, 3);
-  setInt(&buf, 2, 7);
-  PaykanBuffer_reserve(&kInt, &buf, 2); // already has 2
+  setInt(buf, 2, 7);
+  PaykanBuffer_reserve(&kInt, obj(buf), 2); // already has 2
   EXPECT_EQ(PaykanBuffer_len(&kInt, obj(buf)), 3);
-  PaykanBuffer_reserve(&kInt, &buf, 10);
+  PaykanBuffer_reserve(&kInt, obj(buf), 10);
   EXPECT_EQ(PaykanBuffer_len(&kInt, obj(buf)), 10);
-  PaykanBuffer_grow(&kInt, &buf, 5);
+  PaykanBuffer_grow(&kInt, obj(buf), 5);
   EXPECT_EQ(PaykanBuffer_len(&kInt, obj(buf)), 15);
   EXPECT_EQ(intAt(buf, 2), 7);
   for (int64_t i = 3; i < 15; ++i)
     EXPECT_EQ(intAt(buf, i), 0) << i;
-  setInt(&buf, 14, 9);
-  PaykanBuffer_shrink(&kInt, &buf, 12);
+  setInt(buf, 14, 9);
+  PaykanBuffer_shrink(&kInt, obj(buf), 12);
   EXPECT_EQ(PaykanBuffer_len(&kInt, obj(buf)), 3);
   // A value that comes back is new: 0, not what it held before.
-  PaykanBuffer_grow(&kInt, &buf, 12);
+  PaykanBuffer_grow(&kInt, obj(buf), 12);
   EXPECT_EQ(intAt(buf, 14), 0);
-  PaykanBuffer_shrink(&kInt, &buf, 15);
+  PaykanBuffer_shrink(&kInt, obj(buf), 15);
   EXPECT_EQ(PaykanBuffer_len(&kInt, obj(buf)), 0);
   Paykan_release(buf);
 }
@@ -196,8 +196,8 @@ TEST(Buffer, ShrinkReleasesTheDroppedReferences) {
   TrackingHeap heap;
   PaykanShared *buf = PaykanBuffer_new(&kStr.head, 3);
   PaykanShared *a = str("a");
-  PaykanBuffer_set(&kStr.head, &buf, 2, &a);
-  PaykanBuffer_shrink(&kStr.head, &buf, 2);
+  PaykanBuffer_set(&kStr.head, obj(buf), 2, &a);
+  PaykanBuffer_shrink(&kStr.head, obj(buf), 2);
   EXPECT_EQ(a->refCount, 1);
   Paykan_release(a);
   Paykan_release(buf);
@@ -210,10 +210,10 @@ TEST(Buffer, AllocationGrowsGeometricallyAndShrinks) {
   PaykanShared *buf = PaykanBuffer_new(&kInt, 0);
   int64_t before = Paykan_heap_total_reallocs();
   for (int i = 0; i < 1000; ++i)
-    PaykanBuffer_grow(&kInt, &buf, 1);
+    PaykanBuffer_grow(&kInt, obj(buf), 1);
   EXPECT_LE(Paykan_heap_total_reallocs() - before, 12);
   EXPECT_GE(cap(buf), 1000);
-  PaykanBuffer_shrink(&kInt, &buf, 999);
+  PaykanBuffer_shrink(&kInt, obj(buf), 999);
   EXPECT_EQ(cap(buf), 8);
   Paykan_release(buf);
 }
@@ -223,7 +223,7 @@ TEST(BufferDeath, OutOfBoundsPanics) {
   EXPECT_DEATH(PaykanBuffer_get(&kInt, obj(buf), 3),
                "buffer index 3 out of bounds \\(len=3\\)");
   EXPECT_DEATH(PaykanBuffer_get(&kInt, obj(buf), -1), "out of bounds");
-  EXPECT_DEATH(setInt(&buf, 5, 1), "out of bounds");
+  EXPECT_DEATH(setInt(buf, 5, 1), "out of bounds");
   Paykan_release(buf);
 }
 
@@ -240,10 +240,10 @@ TEST(BufferDeath, NeverSetReferencePanics) {
 TEST(BufferDeath, BadCountsPanic) {
   PaykanShared *buf = PaykanBuffer_new(&kInt, 3);
   EXPECT_DEATH(PaykanBuffer_new(&kInt, -1), "cannot be negative");
-  EXPECT_DEATH(PaykanBuffer_grow(&kInt, &buf, -2),
+  EXPECT_DEATH(PaykanBuffer_grow(&kInt, obj(buf), -2),
                "buffer grow by -2: the count cannot be negative");
-  EXPECT_DEATH(PaykanBuffer_reserve(&kInt, &buf, -1), "cannot be negative");
-  EXPECT_DEATH(PaykanBuffer_shrink(&kInt, &buf, 4),
+  EXPECT_DEATH(PaykanBuffer_reserve(&kInt, obj(buf), -1), "cannot be negative");
+  EXPECT_DEATH(PaykanBuffer_shrink(&kInt, obj(buf), 4),
                "buffer shrink by 4: it has only 3 values");
   Paykan_release(buf);
 }

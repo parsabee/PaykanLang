@@ -1,9 +1,8 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Codegen / E2E tests for the PaykanBuffer_* runtime functions, called the
-// way the standard library's memory::Buffer<T> calls them: an ordinary
-// generic class whose methods are generic native functions.  Every run is
-// checked for zero live heap blocks.
+// Codegen / E2E tests for the builtin Buffer<T> (docs/language/05-arrays.md,
+// "Buffer"), whose methods are the runtime's PaykanBuffer_* functions.
+// Every run is checked for zero live heap blocks.
 
 #include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
@@ -12,36 +11,9 @@ using namespace paykan::test;
 
 namespace {
 
-// The standard library's declaration, verbatim.
-const std::string kBuffer = R"(
-native fn __bufferNew<T>(n: int) -> Obj = "PaykanBuffer_new";
-native fn __bufferLen<T>(b: view Obj) -> int = "PaykanBuffer_len";
-native fn __bufferGet<T>(b: view Obj, i: int) -> view T = "PaykanBuffer_get";
-native fn __bufferCopy<T>(b: view Obj, i: int) -> T = "PaykanBuffer_copy";
-native fn __bufferSet<T>(b: inout Obj, i: int, v: view T) = "PaykanBuffer_set";
-native fn __bufferReserve<T>(b: inout Obj, n: int) = "PaykanBuffer_reserve";
-native fn __bufferGrow<T>(b: inout Obj, by: int) = "PaykanBuffer_grow";
-native fn __bufferShrink<T>(b: inout Obj, by: int) = "PaykanBuffer_shrink";
-
-class Buffer<T> {
-  __data: Obj;
-  view fn len() -> int { return __bufferLen<T>(self.__data); }
-  view fn get(i: int) -> view T { return __bufferGet<T>(self.__data, i); }
-  fn copy(i: int) -> T { return __bufferCopy<T>(self.__data, i); }
-  fn set(i: int, v: T) { __bufferSet<T>(self.__data, i, v); }
-  fn reserve(n: int) { __bufferReserve<T>(self.__data, n); }
-  fn grow(by: int) { __bufferGrow<T>(self.__data, by); }
-  fn shrink(by: int) { __bufferShrink<T>(self.__data, by); }
-}
-
-impl Buffer<T> {
-  fn __init__() { self.__data = __bufferNew<T>(3); }
-}
-)";
-
 void expectRuns(const std::string &main, const std::string &expected) {
   LeakGuard g;
-  auto r = compileAndRun(kBuffer + main);
+  auto r = compileAndRun(main);
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.ExitCode, 0) << r.StdErr;
   EXPECT_EQ(r.StdOut, expected);
@@ -183,4 +155,52 @@ TEST(Buffer, HoldsBoolsAndCopiesOut) {
     }
   )",
              "False True True\nxy\n");
+}
+
+// A buffer is shared like any object: what one variable changes, another
+// sees.  It can be a field of a generic class, a parameter whose element
+// type is inferred, and a result.
+TEST(Buffer, IsSharedAndGeneric) {
+  expectRuns(R"(
+    class Stack<T> {
+      items: Buffer<T>;
+    }
+    impl Stack<T> {
+      fn __init__() {
+        self.items = Buffer<T>();
+        self.items.shrink(self.items.len());
+      }
+      fn push(v: view T) {
+        self.items.grow(1);
+        self.items.set(self.items.len() - 1, v);
+      }
+      fn pop() -> T {
+        v: T = self.items.copy(self.items.len() - 1);
+        self.items.shrink(1);
+        return v;
+      }
+    }
+    fn count<T>(b: view Buffer<T>) -> int { return b.len(); }
+    fn squares(n: int) -> Buffer<int> {
+      b = Buffer<int>();
+      b.reserve(n);
+      i = 0;
+      while (i < n) { b.set(i, i * i); i = i + 1; }
+      return b;
+    }
+    fn main() -> int {
+      b = squares(4);
+      alias = b;
+      alias.grow(1);
+      alias.set(4, 16);
+      s = Stack<Str>();
+      s.push("a");
+      s.push("b" + "c");
+      top = s.pop();
+      println(Str(b.len()) + " " + Str(b.get(4)) + " " + Str(count(b)) + " " +
+              top + Str(count(s.items)) + " " + Str(b == alias));
+      return 0;
+    }
+  )",
+             "5 16 5 bc1 True\n");
 }

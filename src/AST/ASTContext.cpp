@@ -189,6 +189,41 @@ Type *ASTContext::getSpecializedArrayElemType(ClassType *ct) const {
   return it != SpecializedArrayElemTypes.end() ? it->second : nullptr;
 }
 
+// Buffer<T>'s methods are not vtable slots: the lowering calls the runtime's
+// PaykanBuffer_* functions for them.  `get` lends the slot (`-> view T`),
+// and `set` reads its value, as a `view` parameter.
+ClassType *ASTContext::getBufferType(Type *elemTy) {
+  if (auto it = BufferTypes.find(elemTy); it != BufferTypes.end())
+    return it->second;
+  std::string name = std::string(names::kBuffer) + "<" + typeName(elemTy) + ">";
+  auto *ty = make<ClassType>(SourceLocation(), intern(name), ObjTy);
+  ty->setBuiltin();
+  ty->setFinal();
+  ParamModes lends;
+  lends.Result = ParamMode::View;
+  ParamModes reads;
+  reads.Modes = {ParamMode::Value, ParamMode::View};
+  reads.Names = {"i", "v"};
+  ClassTypeBuilder(*this, ty)
+      .method(names::kLen, IntTy, {}, MethodDecl::View)
+      .method(names::kBufferGet, elemTy, {IntTy}, MethodDecl::View, lends)
+      .method(names::kBufferCopy, elemTy, {IntTy})
+      .method(names::kBufferSet, VoidTy, {IntTy, elemTy}, MethodDecl::None,
+              reads)
+      .method(names::kBufferReserve, VoidTy, {IntTy})
+      .method(names::kBufferGrow, VoidTy, {IntTy})
+      .method(names::kBufferShrink, VoidTy, {IntTy})
+      .build();
+  BufferTypes[elemTy] = ty;
+  BufferElemTypes[ty] = elemTy;
+  return ty;
+}
+
+Type *ASTContext::getBufferElemType(const ClassType *ct) const {
+  auto it = BufferElemTypes.find(ct);
+  return it != BufferElemTypes.end() ? it->second : nullptr;
+}
+
 // -- Canonical tuple types
 //
 // One TupleType per (canonical) element-type list, exactly like getArrayType:

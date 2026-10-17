@@ -1458,6 +1458,15 @@ bool Sema::unifyTypes(ast::Type *pattern, ast::Type *actual,
                       conflict);
   }
 
+  if (auto *gt = ast::dyn_cast<ast::GenericType>(pattern);
+      gt && gt->getName() == names::kBuffer && gt->getNumArgs() == 1) {
+    // `Buffer<T>` against a buffer: its element type.
+    auto *ct = ast::dyn_cast<ast::ClassType>(actual);
+    ast::Type *elem = ct ? Ctx.getBufferElemType(ct) : nullptr;
+    return !elem ||
+           unifyTypes(gt->getArgs()[0], elem, typeParams, bindings, conflict);
+  }
+
   if (auto *gt = ast::dyn_cast<ast::GenericType>(pattern)) {
     // `Box<T>` against a class: find an instantiation of the same template
     // (however either spells it) in the argument's class or one of its

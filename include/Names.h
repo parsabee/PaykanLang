@@ -20,6 +20,16 @@ inline constexpr const char *kOpen = "open";
 inline constexpr const char *kMain = "main"; ///< the program's entry point
 inline constexpr const char *kArray = "Array";
 inline constexpr const char *kTuple = "Tuple";
+/// The builtin `Buffer<T>` and its methods (ASTContext::getBufferType).
+inline constexpr const char *kBuffer = "Buffer";
+inline constexpr const char *kBufferGet = "get";
+inline constexpr const char *kBufferCopy = "copy";
+inline constexpr const char *kBufferSet = "set";
+inline constexpr const char *kBufferReserve = "reserve";
+inline constexpr const char *kBufferGrow = "grow";
+inline constexpr const char *kBufferShrink = "shrink";
+/// The slots `Buffer<T>()` starts with.
+inline constexpr int kBufferInitialLength = 3;
 /// How an absent optional prints (the None object's toString).
 inline constexpr const char *kNoneText = "None";
 
@@ -142,7 +152,7 @@ inline constexpr const char *kPaykanTypeCopy = "PaykanType_copy";
 inline constexpr const char *kPaykanTypeDrop = "PaykanType_drop";
 inline constexpr const char *kPaykanTypeIsUnset = "PaykanType_isUnset";
 
-// Buffer: called only by the standard library's native functions
+// Buffer: the builtin Buffer<T>'s methods (LoweringBuffer.cpp)
 inline constexpr const char *kPaykanBufferNew = "PaykanBuffer_new";
 inline constexpr const char *kPaykanBufferLen = "PaykanBuffer_len";
 inline constexpr const char *kPaykanBufferGet = "PaykanBuffer_get";

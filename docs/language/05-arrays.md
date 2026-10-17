@@ -407,6 +407,57 @@ Output:
 
 ---
 
+## Buffer
+
+`Buffer<T>` is the builtin storage for a run of `T`s that grows and shrinks
+at run time; the standard library's `List<T>` keeps its elements in one. It
+has an explicit length, `len()`, and no `[]`: every slot in it is read and
+written through a method, and it has no `push` or `pop`.
+
+| Method | |
+|---|---|
+| `Buffer<T>()` | a new buffer of 3 slots |
+| `view fn len() -> int` | the number of slots |
+| `view fn get(i: int) -> view T` | slot `i`, lent: copy a value out, or call a `view fn` on it |
+| `fn copy(i: int) -> T` | a copy of slot `i`, to keep |
+| `fn set(i: int, v: view T)` | store `v` in slot `i` |
+| `fn reserve(n: int)` | make it at least `n` slots long |
+| `fn grow(by: int)`, `fn shrink(by: int)` | add `by` slots at the end, drop the last `by` |
+
+```pkn
+fn main() -> int {
+  b = Buffer<Str>();
+  b.set(0, "a");
+  b.set(2, "c");
+  b.grow(2);
+  b.set(4, "e");
+  same = b;                // a buffer is an object: this shares it
+  same.shrink(1);
+  println(Str(b.len()) + " " + b.get(0) + " " + b.copy(2));
+  return 0;
+}
+```
+
+Output:
+
+```
+4 a c
+```
+
+- A new slot holds its type's default: 0, 0.0, False or char 0, or None for
+  an optional. A slot of a reference type that was never set has none, and
+  reading it panics (`buffer value 1 was never set`), as do an index out of
+  bounds, a negative count and shrinking by more than `len()`.
+- The buffer keeps its own reference to each element and drops it when the
+  slot is overwritten, shrunk away or the buffer dies.
+- A buffer is a final class: it can be a variable, a field, a parameter, a
+  result or an `Obj`, and a generic `b: view Buffer<T>` takes `T` from it.
+  `Buffer` is a builtin name, so no class or function can take it.
+- At run time a buffer's class does not say its element type, so a
+  `Buffer<T>` cannot be a `match` arm.
+
+---
+
 ## Semantic Checks
 
 | Error | Trigger |
@@ -416,4 +467,6 @@ Output:
 | Subscript on non-array type | `x[0]` where `x` is not an array |
 | `.pop()` on empty array | Runtime abort with `paykan: pop on empty array` (checked at runtime, not statically) |
 | Fixed-size array literal of the wrong length | `xs: int[3] = [1, 2]` |
+| A buffer without its element type | `Buffer()`: `'Buffer' takes one type argument, its element type` |
+| A buffer arm | `match o { b: Buffer<int> { ... } }`: `cannot be tested: at run time a buffer does not say its element type` |
 | Fixed-size array index out of bounds | `xs[3]` for an `int[3]`: a constant index when compiling, any other at runtime (`paykan: array index 3 out of bounds (len=3)`) |

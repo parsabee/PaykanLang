@@ -582,6 +582,46 @@ fn main() -> int {
   std::filesystem::remove_all(tmpDir);
 }
 
+// A buffer in another module's interface: a field, a result and a
+// parameter, from source and again from the cached interface (`Buffer<Str>`
+// made from its name).
+TEST(Module, BuffersAcrossModules) {
+  auto tmpDir = paykan::test::tempDir() / "pkn_buffer_import_test";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+  writeTempFile(tmpDir.string(), "lib.pkn", R"(
+class Names { all: Buffer<Str>; }
+impl Names {
+  fn __init__() { self.all = Buffer<Str>(); }
+}
+fn squares(n: int) -> Buffer<int> {
+  b = Buffer<int>();
+  b.reserve(n);
+  i = 0;
+  while (i < n) { b.set(i, i * i); i = i + 1; }
+  return b;
+}
+fn total(b: view Buffer<int>) -> int {
+  t = 0;
+  i = 0;
+  while (i < b.len()) { t = t + b.get(i); i = i + 1; }
+  return t;
+}
+)");
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+import lib;
+fn main() -> int {
+  s = lib::squares(5);
+  n = lib::Names();
+  n.all.set(0, "zed");
+  return lib::total(s) + s.len() + n.all.get(0).len();
+}
+)");
+  EXPECT_EQ(runProjectInChild(mainPath), 30 + 5 + 3);
+  EXPECT_EQ(runProjectInChild(mainPath), 30 + 5 + 3);
+  std::filesystem::remove_all(tmpDir);
+}
+
 TEST(Module, SameNamedFunctionsOfSeveralModules) {
   auto tmpDir = paykan::test::tempDir() / "pkn_import_dup_fns";
   std::filesystem::remove_all(tmpDir);
