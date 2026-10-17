@@ -351,6 +351,35 @@ TEST(Class, SuperCallWrongArgType) {
   EXPECT_FALSE(r.Ok);
 }
 
+// `__super__`'s arguments are checked against the superclass `__init__`'s
+// parameters as a call's are: a literal takes its parameter's type.
+TEST(Class, SuperCallLiteralsTakeTheParameterTypes) {
+  auto r = semaCheck(withClasses(R"(
+    class Node { v: int; }
+    class Base {}
+    impl Base {
+      fn __init__(xs: float[2], link: Node?, pair: (Node?, int), q: int?,
+                  names: Str?[2]) {}
+    }
+    class Derived : Base {}
+    impl Derived {
+      fn __init__() { __super__([1, 2], None, (None, 3), 4, [None, "b"]); }
+    }
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  auto bad = semaCheck(withClasses(R"(
+    class Base {}
+    impl Base { fn __init__(xs: float[2]) {} }
+    class Derived : Base {}
+    impl Derived { fn __init__() { __super__([1, 2, 3]); } }
+  )"));
+  EXPECT_FALSE(bad.Ok);
+  EXPECT_NE(bad.Diagnostics.find("array literal has 3 element(s), but "
+                                 "'float[2]' has 2"),
+            std::string::npos)
+      << bad.Diagnostics;
+}
+
 TEST(Class, SuperCallOutsideInit) {
   auto r = semaCheck(withClasses(R"(
     class A { fn foo() { __super__(); } }

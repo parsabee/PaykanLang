@@ -493,6 +493,44 @@ fn main() -> int {
   std::filesystem::remove_all(dir);
 }
 
+// A literal passed to `__super__` takes the superclass `__init__`'s
+// parameter type: `[1, 2]` into a `float[2]`, `None` into an optional,
+// `(None, 3)` into a `(Node?, int)`.
+TEST(Regression, SuperLiteralArgumentsTakeTheParameterTypes) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Node { v: int; }
+    class Base {
+      xs: float[2];
+      link: Node?;
+      pair: (Node?, int);
+      q: int?;
+    }
+    impl Base {
+      fn __init__(xs: float[2], link: Node?, pair: (Node?, int), q: int?) {
+        self.xs = xs;
+        self.link = link;
+        self.pair = pair;
+        self.q = q;
+      }
+    }
+    class Derived : Base {}
+    impl Derived {
+      fn __init__() { __super__([1, 2], None, (None, 3), 4); }
+    }
+    fn main() -> int {
+      d = Derived();
+      println(Str(d.xs[0] + d.xs[1]) + " " + Str(d.pair.1) + " " +
+              Str(d.link == None));
+      match d.q { n: int { println(Str(n)); } None { println("none"); } }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "3 3 True\n4\n");
+  g.expectNoLeaks("super literal arguments");
+}
+
 TEST(Regression, SuperArgumentsAreBoxed) {
   LeakGuard g;
   auto r = compileAndRun(R"(
