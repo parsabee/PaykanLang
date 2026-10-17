@@ -58,6 +58,7 @@ TEST(Tuple, NestedType) {
   EXPECT_NE(dump.find("TupleType <3:16-3:27> 2 elements"), std::string::npos);
 }
 
+// (Sema rejects an array tuple element for now.)
 TEST(Tuple, ArrayOfTuplesAndTupleOfArrays) {
   auto [ok, _] = parse(R"(
     fn main() -> int {
