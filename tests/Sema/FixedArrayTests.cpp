@@ -101,8 +101,8 @@ TEST(FixedArray, ElementsArePartOfTheValue) {
 }
 
 TEST(FixedArray, HasOnlyLen) {
-  expectBodyError("  xs: int[2] = [1, 2];\n  xs.push(3);",
-                  "'int[2]' has no method 'push' with these arguments (a "
+  expectBodyError("  xs: int[2] = [1, 2];\n  xs.first();",
+                  "'int[2]' has no method 'first' with these arguments (a "
                   "fixed-size array has 'len()')");
   expectBodyError("  xs: int[2] = [1, 2];\n  ys: int[2] = [1, 2];\n"
                   "  b = xs == ys;",
@@ -294,9 +294,9 @@ TEST(FixedArray, SliceParameters) {
               "fn main() -> int { g = [[1, 2], [3, 4]]; f(g); return 0; }",
               "argument 1 of 'f' has type 'int[2][2]', expected 'int[]' (a "
               "slice takes a fixed-size array of exactly its element type)");
-  expectError("fn f(xs: inout int[]) { xs.push(1); }\n"
+  expectError("fn f(xs: inout int[]) { xs.first(); }\n"
               "fn main() -> int { return 0; }",
-              "'int[]' has no method 'push' with these arguments (a slice "
+              "'int[]' has no method 'first' with these arguments (a slice "
               "has 'len()')");
   expectError("fn f(xs: inout int[]) { xs = [1]; }\n"
               "fn main() -> int { return 0; }",

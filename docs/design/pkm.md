@@ -321,13 +321,14 @@ through `T_CLASS` by name, not by index).
 | 7 | `T_CLASS` | `Mod, Str name` | a user class; `mod` 0 → described by a `CLASS` record here, else by that module's blob |
 | 8 | `T_ENUM` | `Mod, Str name` | likewise |
 | 9 | `T_OPAQUE` | `Mod, uleb id` | a module-private class seen only as the type of a private field of a public class (#19): an object reference with no name or members; `id` = position among the module's private classes sorted by name |
-| 10 | `T_ARRAY` | `Ty elem` | `T[]` |
+| 10 | `T_ARRAY` | `Ty elem, uleb n (≥1)` | `T[n]` |
 | 11 | `T_OPTIONAL` | `Ty inner` | `T?` |
 | 12 | `T_TUPLE` | `uleb n (≥2), Ty[n]` | `(T1, …)` |
 | 13 | `T_PARAM` | `uleb index` | the *index*-th type parameter of the enclosing template/trait/impl record or `TMPL` body |
 | 14 | `T_APPLY` | `Mod, Str tmpl, uleb n, Ty[n]` | a generic application `Box<int>`, `List<Pair<K,V>>`. Concrete iff no `T_PARAM` is reachable; a concrete application's identity is its canonical instantiation name (§4.4) |
 | 15 | `T_TRAIT_OBJ` | `Mod, Str trait, uleb n, Ty[n]` | reserved for #147 (bumps the interface minor when first written) |
 | 16 | `T_WEAK` | `Ty inner` | reserved for #99 |
+| 17 | `T_SLICE` | `Ty elem` | `T[]`, the slice of a `view` or `inout` parameter |
 
 ### 3.5 `DECLS`
 
@@ -428,7 +429,7 @@ verified PIR"; this design reads that as "ships what importers specialise
 
 | Name in a template body | Resolved at export to |
 |---|---|
-| a type annotation (`T`, `T[]`, `point::Point`, `Box<T>`, `Node<T>?`) | `Ty` |
+| a type annotation (`T`, `T[3]`, `point::Point`, `Box<T>`, `Node<T>?`) | `Ty` |
 | a callee | `Callee`: this module's function/ctor, another module's function `(Mod, name)`, a template, a builtin (`println`, `len`, `open`, conversions), `__super__`, a type parameter used as a value (kept so the importer reports it), or `UNRESOLVED(name)` |
 | `Enum::Variant` (qualified or not) | `(Ty, variant index)` |
 | a module constant, a class static, a static call (#170/#167) | `(Mod, name)` / a `TYPE` identifier |
@@ -494,7 +495,7 @@ for `T`, so `ASTCloner::cloneType` substitutes it; `T_APPLY` → a
 canonically and **no spaces**: builtins bare, user classes and enums
 module-qualified, nested applications likewise:
 `geometry::shapes::Box<int>`, `geometry::shapes::Box<geometry::point::Point>`,
-`::collections::List<geometry::shapes::Box<int>[]>`. One nominal type
+`::collections::List<geometry::shapes::Box<int>?>`. One nominal type
 program-wide (`match`, `equals`, assignment all agree); `Sema::instantiationName`
 produces it once `typeName` spells imported classes canonically. Today's
 spelling has a space after commas (`Pair<Str, int>`); **open question 3.**
@@ -1195,8 +1196,9 @@ The lowering of an importer needs, for each imported declaration, its PIR
 symbol, signature and (for classes) layout and vtable. **Decision:** one
 fixed core function, `lowering::externsFor(const pkm::Interface &)`, derives
 them from `IFACE` records: Sema type → PIR type (`int → i64`, `float →
-f64`, `bool`, `char`, every class/array/string/tuple/optional-of-reference
-→ `box`, …, the same mapping the lowering uses for its own module); symbol
+f64`, `bool`, `char`, every class/string/tuple/optional-of-reference
+→ `box`, a fixed-size array → `mem`, …, the same mapping the lowering uses
+for its own module); symbol
 = the PIR name the lowering gives the declaration (`describe`,
 `Shape.area`, `Box<int>`, `Box<int>.get`, the canonical instantiation
 spelling of §4.4); field layout = ancestors first, then own fields in

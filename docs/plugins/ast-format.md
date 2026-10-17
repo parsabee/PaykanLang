@@ -94,7 +94,7 @@ or more.
 | Node | Meaning |
 |---|---|
 | `(named-type LOC NAME)` | a type by name: `int`, `float`, `bool`, `char`, `void`, `Str`, `Obj`, a class or enum, or a qualified `module::Type` |
-| `(array-type LOC TYPE)` | `T[]` |
+| `(array-type LOC TYPE)` | `T[]`, the slice of a `view` or `inout` parameter (`xs: view int[]`) |
 | `(fixed-array-type LOC TYPE INT)` | `T[n]`, a fixed-size array of `INT` (at least 1) elements: `int[3]` is `(fixed-array-type (named-type "int") 3)`. `INT` can be the symbol `_` instead, a length inferred from the initializer (`int[_]`) |
 | `(optional-type LOC TYPE)` | `T?` (not of `void`, not of another optional) |
 | `(tuple-type LOC TYPE TYPE TYPE...)` | `(T1, T2, ...)`, at least two |
@@ -144,7 +144,7 @@ to resolve, which reports unknown names.
 | `(method-call LOC EXPR NAME EXPR...)` | `recv.m(a, b)` |
 | `(member LOC EXPR NAME)` | `recv.field` |
 | `(subscript LOC EXPR EXPR)` | `arr[i]` |
-| `(array LOC EXPR...)` | `[a, b]`, `[]` |
+| `(array LOC EXPR...)` | `[a, b]` (`[]` parses, and Sema rejects it) |
 | `(tuple LOC EXPR EXPR EXPR...)` | `(a, b)`, at least two |
 | `(tuple-index LOC EXPR INT)` | `t.0` |
 | `(enum-value LOC NAME NAME)` | `Color::Red`: the enum's name (qualified if spelled so) and the variant |
