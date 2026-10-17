@@ -1064,7 +1064,7 @@ std::string Sema::instantiationName(const std::string &templateName,
   // diagnostics.  The arguments are canonical, so equal spellings mean equal
   // types and the name is a valid cache key.  LLVM symbol names may contain
   // any character (they are quoted in textual IR), so `Box<int>_vtable` is a
-  // legal global -- the same convention the Tuple<...> specialisations use.
+  // legal global.
   std::string s = templateName + "<";
   for (size_t i = 0; i < args.size(); ++i) {
     if (i)

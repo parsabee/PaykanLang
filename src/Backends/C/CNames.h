@@ -48,9 +48,10 @@ inline constexpr const char *kSize = "size_t";     ///< <stdlib.h>
 inline constexpr const char *kVoidPtr = "void *";
 inline constexpr const char *kUint8Ptr = "uint8_t *";
 inline constexpr const char *kConstCharPtr = "const char *";
-inline constexpr const char *kConstUint8Ptr = "const uint8_t *";
 inline constexpr const char *kCharPtrPtr = "char **";
 inline constexpr const char *kInt64Ptr = "int64_t *";
+inline constexpr const char *kConstInt64Ptr = "const int64_t *";
+inline constexpr const char *kConstVoidPtr = "const void *";
 inline constexpr const char *kDoublePtr = "double *";
 
 // The runtime's C types (Runtime.h) and pointers to them.
@@ -58,7 +59,6 @@ inline constexpr const char *kRtShared = "PaykanShared";
 inline constexpr const char *kRtObjPtr = "PaykanObject *";
 inline constexpr const char *kRtBoxPtr = "PaykanShared *";
 inline constexpr const char *kRtStrPtr = "PaykanString *";
-inline constexpr const char *kRtTupPtr = "PaykanTuple *";
 /// A vtable slot (Runtime.h): the generic function-pointer type every
 /// vtable -- the runtime's and the generated `pkvt_<class>` -- is an array of.
 inline constexpr const char *kRtMethod = "PaykanMethod";

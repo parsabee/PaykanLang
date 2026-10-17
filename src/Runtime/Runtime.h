@@ -265,72 +265,6 @@ int64_t PaykanError_equals(PaykanObject *self, PaykanShared *other);
 // Global vtable instance.
 extern PaykanMethod PaykanError_vtable[PAYKAN_OBJECT_SLOTS];
 
-// -- Tuple
-//
-// Inherits Object; its vtable has exactly Object's slots
-// (destroy / toString / equals).  ONE generic object backs every tuple type
-// `(T1, T2, ...)`: `count` 8-byte slots plus one kind byte per slot telling
-// the runtime how to interpret it.  Primitive elements are stored raw;
-// reference elements (classes, arrays, nested tuples) store a PaykanShared*
-// retained by the tuple.  Tuples are immutable at the language level — the
-// set functions exist so a literal can be filled right after construction.
-//
-// The kind codes are part of the compiler <-> runtime ABI; they must match
-// paykan::names::TupleSlotKind in include/Names.h.
-
-typedef enum PaykanTupleKind {
-  PAYKAN_TUPLE_INT = 0,   // int64_t (also enum values)
-  PAYKAN_TUPLE_FLOAT = 1, // IEEE-754 double bits
-  PAYKAN_TUPLE_BOOL = 2,  // int64_t 0 / 1
-  PAYKAN_TUPLE_CHAR = 3,  // int64_t holding one byte
-  PAYKAN_TUPLE_REF = 4,   // PaykanShared* (retained) or NULL
-  // The presence word of an optional value (`int?` & co., #96): 0 / 1.  The
-  // value is the next slot, of its own kind (its bits are 0 when absent).
-  PAYKAN_TUPLE_OPT = 5,
-} PaykanTupleKind;
-
-typedef struct PaykanTuple {
-  PaykanMethod *vtable; // points to PaykanTuple_vtable
-  PaykanShared *shared; // object header (see PaykanObject)
-  int64_t count;        // number of elements (arity)
-  uint64_t *slots;      // count 8-byte slots, inline after the header
-  uint8_t *kinds;       // count kind bytes, inline after the slots
-  // (slots and kinds point into the same heap block as the header: one
-  // allocation per tuple.  A pointer rather than a trailing unsized array
-  // because this header is also compiled as C++ with -Wpedantic.)
-} PaykanTuple;
-
-/// Allocate a tuple with `count` zeroed slots; `kinds` (count bytes, copied)
-/// gives each slot's PaykanTupleKind.
-PaykanTuple *PaykanTuple_new(int64_t count, const uint8_t *kinds);
-
-/// Number of elements.  Test-only (the arity is static in generated code).
-int64_t PaykanTuple_count(PaykanTuple *t);
-
-/// Kind of slot `idx`.  Test-only.  Aborts if out of range.
-int64_t PaykanTuple_kind(PaykanTuple *t, int64_t idx);
-
-/// Read the raw 8-byte slot `idx` (the caller reinterprets as int64_t, double
-/// bits, or PaykanShared* — a reference is NOT retained).  Aborts if out of
-/// range.
-int64_t PaykanTuple_get(PaykanTuple *t, int64_t idx);
-
-/// Store raw bits into a value slot.  Aborts on a reference slot.
-void PaykanTuple_set(PaykanTuple *t, int64_t idx, int64_t bits);
-
-/// Store a box into a reference slot: releases the old box (if any) and
-/// retains the new one (the caller keeps its own reference).  Aborts on a
-/// value slot.
-void PaykanTuple_set_obj(PaykanTuple *t, int64_t idx, PaykanShared *value);
-
-// -- Method implementations
-void PaykanTuple_destroy(PaykanObject *self); // releases every REF slot
-PaykanShared *PaykanTuple_toString(PaykanObject *self); // "(1, a)"
-int64_t PaykanTuple_equals(PaykanObject *self, PaykanShared *other);
-
-// Global vtable instance (shared by every tuple type).
-extern PaykanMethod PaykanTuple_vtable[PAYKAN_OBJECT_SLOTS];
-
 // -- Shared: the reference-counted box around a PaykanObject
 //
 // A PaykanShared box holds a strong reference count and a pointer to the
@@ -401,6 +335,7 @@ typedef enum PaykanTypeKind {
   PAYKAN_KIND_OPTIONAL = 5, // PaykanShared*, NULL for None; an inline one
                             // (int? ...) is a bool presence flag and then
                             // its payload
+  PAYKAN_KIND_TUPLE = 6,    // its elements in place ("Tuples", below)
 } PaykanTypeKind;
 
 /// Followed in memory by `nrefs` int64_t words, one per reference: its byte
@@ -426,6 +361,27 @@ void PaykanType_drop(const PaykanType *type, void *value);
 /// True if a reference the @p type value at @p value holds that may not be
 /// NULL is: storage that was never set.
 int PaykanType_isUnset(const PaykanType *type, const void *value);
+
+// -- Tuples
+//
+// A tuple is a value held in place: its elements laid out like a C struct's
+// fields, a reference element as its PaykanShared* box.  The compiler copies
+// and releases one inline; rendering and comparing one go through the
+// tuple's layout, constant data the compiler emits per tuple type, int64_t
+// words: the element count, then for each element its PaykanTypeKind, its
+// byte offset, and
+//   - for an OPTIONAL, the kind of its payload: OBJECT for a box (NULL for
+//     None), or that of an inline optional's payload, which follows its
+//     bool presence flag at the payload's alignment (1 for a bool or char,
+//     8 for an int or float);
+//   - for a TUPLE, the nested tuple's layout (offsets within it).
+
+/// The text of the tuple at @p value, `(1, a)`: each element as `print`
+/// shows it, None for an absent optional.  A new string.
+PaykanString *PaykanTuple_toString(const void *value, const int64_t *layout);
+/// Whether the tuples at @p a and @p b are equal: element by element,
+/// floats by IEEE 754 `==`, references by their `equals` (two None equal).
+int64_t PaykanTuple_equals(const void *a, const void *b, const int64_t *layout);
 
 // -- Buffer
 //
@@ -595,7 +551,6 @@ void Paykan_heap_dump(void);
 PAYKAN_CHECK_HEADER(PaykanString);
 PAYKAN_CHECK_HEADER(PaykanFile);
 PAYKAN_CHECK_HEADER(PaykanError);
-PAYKAN_CHECK_HEADER(PaykanTuple);
 #undef PAYKAN_CHECK_HEADER
 
 #ifdef __cplusplus

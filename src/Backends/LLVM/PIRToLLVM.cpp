@@ -241,7 +241,7 @@ private:
 
   /// A private constant global whose address is not significant (so the
   /// optimiser and the linker may merge identical ones), aligned to
-  /// @p align: string literals (align 1), array data (8), tuple kind bytes.
+  /// @p align: string literals and byte data (1), word data (8).
   /// The module owns the global.
   void defineConstant(llvm::Constant *init, const std::string &name,
                       llvm::Align align) {

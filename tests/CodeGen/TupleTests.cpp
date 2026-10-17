@@ -16,19 +16,6 @@ extern "C" {
 
 using namespace paykan::test;
 
-// The slot-kind codes CodeGen emits must be the ones the runtime interprets.
-static_assert(int(paykan::names::kTupleSlotInt) == int(PAYKAN_TUPLE_INT),
-              "tuple slot-kind ABI drift");
-static_assert(int(paykan::names::kTupleSlotFloat) == int(PAYKAN_TUPLE_FLOAT),
-              "tuple slot-kind ABI drift");
-static_assert(int(paykan::names::kTupleSlotBool) == int(PAYKAN_TUPLE_BOOL),
-              "tuple slot-kind ABI drift");
-static_assert(int(paykan::names::kTupleSlotChar) == int(PAYKAN_TUPLE_CHAR),
-              "tuple slot-kind ABI drift");
-static_assert(int(paykan::names::kTupleSlotRef) == int(PAYKAN_TUPLE_REF),
-              "tuple slot-kind ABI drift");
-static_assert(int(paykan::names::kTupleSlotOpt) == int(PAYKAN_TUPLE_OPT),
-              "tuple slot-kind ABI drift");
 // An inline optional in memory (an `int?[n]` element, a field, a native
 // function's PaykanType) is the C backend's `{ bool present; T value; }`: the
 // size and alignment the lowering gives the runtime are that struct's.
@@ -64,6 +51,8 @@ static_assert(int(paykan::names::kNativeKindObject) == int(PAYKAN_KIND_OBJECT),
               "native type-kind ABI drift");
 static_assert(int(paykan::names::kNativeKindOptional) ==
                   int(PAYKAN_KIND_OPTIONAL),
+              "native type-kind ABI drift");
+static_assert(int(paykan::names::kNativeKindTuple) == int(PAYKAN_KIND_TUPLE),
               "native type-kind ABI drift");
 
 // -- Literals, element reads, printing

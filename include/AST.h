@@ -1639,9 +1639,9 @@ public:
 
 // Tuple type: (T1, T2, ...)  (e.g. (int, Str), (int, (Str, bool))[2])
 //
-// A fixed-arity (>= 2), heterogeneous, immutable product type.  A tuple
-// value is a heap-allocated Obj subtype at runtime (see src/Runtime/Tuple.c),
-// so it flows through ARC exactly like a class value.
+// A fixed-arity (>= 2), heterogeneous, immutable product type.  A tuple is a
+// value held in place (isMemType): its elements laid out like a C struct's
+// fields, a reference element as its box.
 // The parser allocates a source-located node per annotation; Sema resolves
 // each one to the canonical instance interned by ASTContext::getTupleType, so
 // resolved tuple types compare by pointer identity.
@@ -1651,10 +1651,9 @@ class TupleType : public Type {
 public:
   TupleType(SourceLocation loc, std::vector<Type *> elemTys)
       : Type(NK_TupleType, loc), ElementTypes(std::move(elemTys)) {
-    // == / != lower to the virtual `equals` (element-wise, see
-    // PaykanTuple_equals).  Set on the constructor: besides the canonical
-    // instances, the parser allocates a node per annotation, so there is no
-    // single bootstrap point to set it on.
+    // == / != compare element-wise (PaykanTuple_equals).  Set on the
+    // constructor: besides the canonical instances, the parser allocates a
+    // node per annotation, so there is no single bootstrap point to set it on.
     addBinaryOp(BinaryOpcode::Eq);
     addBinaryOp(BinaryOpcode::Ne);
   }
@@ -1789,14 +1788,20 @@ inline bool isValueOptional(const Type *ty) {
 }
 
 /// Returns true for any type whose values are heap-allocated and
-/// reference-counted at runtime: ClassType, TupleType, and the
-/// OptionalType of one of them (a possibly-NULL PaykanShared* box: it shares
-/// the wrapped type's box).  An optional of a value type is a value
-/// (isValueOptional).  Use this instead of spelling out the `||` condition
-/// everywhere.
+/// reference-counted at runtime: ClassType and the OptionalType of one (a
+/// possibly-NULL PaykanShared* box: it shares the class's box).  An optional
+/// of a value type is a value (isValueOptional).  Use this instead of
+/// spelling out the `||` condition everywhere.
 inline bool isRefType(const Type *ty) {
-  return ty && (isa<ClassType>(ty) || isa<TupleType>(ty) ||
+  return ty && (isa<ClassType>(ty) ||
                 (isa<OptionalType>(ty) && !isValueOptional(ty)));
+}
+
+/// Returns true for a type whose values are held in memory, in place: a
+/// fixed-size array (`T[n]`) or a tuple.  A copy copies its bytes and
+/// retains the references among them.
+inline bool isMemType(const Type *ty) {
+  return ty && (isa<FixedArrayType>(ty) || isa<TupleType>(ty));
 }
 
 /// If @p ty is an optional type, return its inner type; otherwise @p ty.

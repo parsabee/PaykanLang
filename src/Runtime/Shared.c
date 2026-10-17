@@ -34,9 +34,9 @@ void Paykan_retain(PaykanShared *shared) {
 //
 // Destroying an object releases the references it holds, and a release that
 // drops a count to zero destroys that object in turn.  Done recursively, every
-// link of a chain (a `Node?` list, a nested array or tuple, a deep tree) costs
-// at least one C stack frame, so dropping a long enough chain overflows the
-// stack (#118).  Destruction is therefore iterative:
+// link of a chain (a `Node?` list, a deep tree) costs at least one C stack
+// frame, so dropping a long enough chain overflows the stack (#118).
+// Destruction is therefore iterative:
 //
 //   * The release that drops a count to zero while no destroy is running is
 //     the OUTERMOST release.  It destroys its object, then keeps destroying
@@ -52,7 +52,7 @@ void Paykan_retain(PaykanShared *shared) {
 // order is deterministic and is the order the recursive scheme started its
 // destroys in: a depth-first pre-order walk of the objects that die, each
 // object's references taken in the order its destroy releases them (field
-// order for a class, index order for an array or a tuple).  The difference
+// order for a class, index order for a buffer).  The difference
 // is only that a destroy now finishes before the objects it released are
 // destroyed.  Depth-first order also keeps the walk cache-friendly: the
 // memory freed last is reused first, as with the recursive scheme.  Every

@@ -69,10 +69,10 @@ Val ModuleLowering::ExprEmitter::visitEnumValueExpr(ast::EnumValueExpr *node) {
 Val ModuleLowering::ExprEmitter::visitIdentifier(ast::Identifier *node) {
   if (node->getName() == kStdin)
     return L.externObject(kPaykanFileStdin);
-  // A fixed-size array, or a slice: the address of its bytes.
+  // A value held in memory, or a slice: the address of its bytes.
   if (ast::Type *t = L.CurrentScope->lookupASTType(node->getName());
-      ast::dyn_cast<ast::FixedArrayType>(t) || ast::dyn_cast<ast::SliceType>(t))
-    return L.emitFixedAddress(node);
+      ast::isMemType(t) || ast::dyn_cast<ast::SliceType>(t))
+    return L.emitMemAddress(node);
   pir::LocalId local = L.CurrentScope->lookup(node->getName());
   Val val = L.B.load(local, node->getName());
   // An `inout` parameter: read the caller's storage (a box: borrowed, and
@@ -95,28 +95,30 @@ Val ModuleLowering::ExprEmitter::visitMemberAccessExpr(
 
 // -- Arrays
 
-// A literal's value is the address of its temporary (emitFixedValue).
+// A literal's value is the address of its temporary (emitMemValue).
 Val ModuleLowering::ExprEmitter::visitArrayLiteralExpr(
     ast::ArrayLiteralExpr *node) {
-  return L.emitFixedAddress(node);
+  return L.emitMemAddress(node);
 }
 
 Val ModuleLowering::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
-  // An element of a fixed-size array or a slice, read in place (a nested
-  // array's is its address).
+  // An element of a fixed-size array or a slice, read in place (one held
+  // in memory is its address).
   if (ast::Type *arrTy = node->getArray()->getResolvedType();
       ast::dyn_cast<ast::FixedArrayType>(arrTy) ||
       ast::dyn_cast<ast::SliceType>(arrTy)) {
-    size_t mark = L.FixedTemps.size();
+    if (ast::isMemType(node->getResolvedType()))
+      return L.emitMemAddress(node);
+    size_t mark = L.MemTemps.size();
     Val addr = L.emitFixedElementAddress(node->getArray(), node->getIndex());
-    if (!addr || ast::dyn_cast<ast::FixedArrayType>(node->getResolvedType()))
+    if (!addr)
       return addr;
-    Val elem = L.B.ptrLoad(addr, L.toPIRType(node->getResolvedType()), "elem");
+    Val elem = L.emitElementLoad(addr, node->getResolvedType());
     // A temporary's element outlives it as a +1 box (exprProducesFreshBox).
-    if (L.FixedTemps.size() > mark) {
+    if (L.MemTemps.size() > mark) {
       if (elem.Ty == Type::Box)
         L.emitRetain(elem);
-      L.releaseFixedTemps(mark);
+      L.releaseMemTemps(mark);
     }
     return elem;
   }
@@ -134,6 +136,9 @@ Val ModuleLowering::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
 }
 
 Val ModuleLowering::ExprEmitter::visitTernaryExpr(ast::TernaryExpr *node) {
+  // A value held in memory: the address of a temporary (emitMemValue).
+  if (ast::isMemType(node->getResolvedType()))
+    return L.emitMemAddress(node);
   Val cond = visit(node->getCondition());
   if (!cond)
     return Val();
@@ -257,8 +262,11 @@ Val ModuleLowering::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
       node->getOpcode() == ast::BinaryOpcode::Ne) {
     ast::Type *lt = node->getLHS()->getResolvedType();
     ast::Type *rt = node->getRHS()->getResolvedType();
-    if (ast::isa<ast::OptionalType>(lt) || ast::isa<ast::OptionalType>(rt)) {
-      Val eq = L.emitOptionalEquality(node);
+    if (ast::isa<ast::OptionalType>(lt) || ast::isa<ast::OptionalType>(rt) ||
+        ast::isa<ast::TupleType>(lt)) {
+      Val eq = ast::isa<ast::TupleType>(lt)
+                   ? L.emitTupleEquals(node->getLHS(), node->getRHS())
+                   : L.emitOptionalEquality(node);
       if (!eq)
         return Val();
       if (node->getOpcode() == ast::BinaryOpcode::Ne)
@@ -372,6 +380,15 @@ Val ModuleLowering::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
   std::vector<ExprValue> ownedArgs;
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     auto *argExpr = node->getArguments()[i];
+    // A tuple printed: its text.
+    if (ast::isa<ast::TupleType>(argExpr->getResolvedType())) {
+      Val v = L.emitTupleToString(argExpr);
+      if (!v)
+        return Val();
+      ownedArgs.push_back(ExprValue::owned(v));
+      args.push_back(v);
+      continue;
+    }
     Val v = visit(argExpr);
     if (!v)
       return Val();
@@ -545,7 +562,7 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     Val selfVal = L.B.load(L.CurrentScope->lookup(kSelf), kSelf);
     std::vector<Val> initArgs = {selfVal};
     std::vector<Val> keep;
-    size_t fixedMark = L.FixedTemps.size();
+    size_t fixedMark = L.MemTemps.size();
     for (size_t i = 0; i < node->getNumArguments(); ++i) {
       auto *argExpr = node->getArguments()[i];
       if (L.isSliceArg(argExpr)) {
@@ -556,8 +573,8 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
       Type paramTy = initArgs.size() < superFn->Sig.Params.size()
                          ? superFn->Sig.Params[initArgs.size()]
                          : Type::Void;
-      if (ast::dyn_cast<ast::FixedArrayType>(argExpr->getResolvedType())) {
-        Val p = L.emitFixedAddress(argExpr); // passed by address
+      if (ast::isMemType(argExpr->getResolvedType())) {
+        Val p = L.emitMemAddress(argExpr); // passed by address
         if (!p)
           return Val();
         initArgs.push_back(p);
@@ -585,7 +602,7 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     }
     L.B.call(superFn->Name, superFn->Sig, initArgs);
     L.releaseAfterCall(keep);
-    L.releaseFixedTemps(fixedMark);
+    L.releaseMemTemps(fixedMark);
     return Val();
   }
 
@@ -602,11 +619,14 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
   std::vector<Val> keep;
   // A native function of this module: C borrows what the caller holds.
   if (const ast::FuncDecl *native = L.localNative(node->getCalleeName())) {
+    size_t mark = L.MemTemps.size();
     for (size_t i = 0; i < node->getNumArguments(); ++i) {
       ast::Expr *arg = node->getArguments()[i];
       Type paramTy = callee->Sig.Params[i];
       Val v;
-      if (paramTy == Type::Ptr)
+      if (ast::isMemType(arg->getResolvedType()))
+        v = L.emitMemAddress(arg); // a value held in memory: its address
+      else if (paramTy == Type::Ptr)
         v = L.emitInoutArg(arg, keep);
       else if (paramTy == Type::Box)
         v = L.emitBorrowedBox(arg, keep);
@@ -616,11 +636,15 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
         return Val();
       args.push_back(v);
     }
-    Val result = L.emitNativeCall(*native, args);
+    Val memResult;
+    if (ast::isMemType(node->getResolvedType()))
+      memResult = L.emitMemResultSlot(node->getResolvedType());
+    Val result = L.emitNativeCall(*native, args, memResult);
     L.releaseAfterCall(keep);
+    L.releaseMemTemps(mark);
     return result;
   }
-  size_t fixedMark = L.FixedTemps.size();
+  size_t fixedMark = L.MemTemps.size();
   for (auto *arg : node->getArguments()) {
     if (L.isSliceArg(arg)) {
       if (!L.emitSliceArg(arg, args))
@@ -630,8 +654,8 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     Type paramTy = args.size() < callee->Sig.Params.size()
                        ? callee->Sig.Params[args.size()]
                        : Type::Void;
-    if (ast::dyn_cast<ast::FixedArrayType>(arg->getResolvedType())) {
-      Val p = L.emitFixedAddress(arg); // passed by address
+    if (ast::isMemType(arg->getResolvedType())) {
+      Val p = L.emitMemAddress(arg); // passed by address
       if (!p)
         return Val();
       args.push_back(p);
@@ -659,17 +683,17 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
   }
   // A fixed-size array result: written into a temporary, whose address is
   // the call's value.
-  if (ast::dyn_cast<ast::FixedArrayType>(node->getResolvedType())) {
-    Val slot = L.emitFixedResultSlot(node->getResolvedType());
+  if (ast::isMemType(node->getResolvedType())) {
+    Val slot = L.emitMemResultSlot(node->getResolvedType());
     args.push_back(slot);
     L.B.call(callee->Name, callee->Sig, args);
     L.releaseAfterCall(keep);
-    L.releaseFixedTemps(fixedMark);
+    L.releaseMemTemps(fixedMark);
     return slot;
   }
   Val result = L.B.call(callee->Name, callee->Sig, args, "call");
   L.releaseAfterCall(keep);
-  L.releaseFixedTemps(fixedMark);
+  L.releaseMemTemps(fixedMark);
   if (result && result.Ty == Type::Ptr && !wantAddress) // an `inout` result
     return L.loadInoutResult(result, node->getResolvedType());
   return result;
@@ -684,12 +708,20 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   if (ast::dyn_cast<ast::SliceType>(recvResolved))
     return L.emitSliceLength(node->getReceiver());
   if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(recvResolved)) {
-    size_t mark = L.FixedTemps.size();
+    size_t mark = L.MemTemps.size();
     if (!ast::isa<ast::Identifier>(node->getReceiver()) &&
-        !L.emitFixedAddress(node->getReceiver()))
+        !L.emitMemAddress(node->getReceiver()))
       return Val();
-    L.releaseFixedTemps(mark);
+    L.releaseMemTemps(mark);
     return Val::i64(ft->getLength());
+  }
+  // `t.toString()` on a tuple (the builtin `Show`): its text, as a fresh box
+  // like any method's `Str` result.
+  if (ast::isa<ast::TupleType>(recvResolved)) {
+    Val str = L.emitTupleToString(node->getReceiver());
+    if (!str)
+      return Val();
+    return L.emitSharedNew(str, "str.shared");
   }
   // `n.toString()` on an int, float, bool or char (the builtin `Show`): its
   // `Str` conversion, as a fresh box like any method's `Str` result.
@@ -751,11 +783,7 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   ast::Type *recvASTTy = resolveReceiverASTType();
   const std::string &mname = node->getMethodName();
 
-  ast::ClassType *ct = nullptr;
-  if (auto *tupTy = ast::dyn_cast<ast::TupleType>(recvASTTy))
-    ct = L.ASTCtx.getOrCreateSpecializedTupleType(tupTy);
-  else
-    ct = ast::dyn_cast<ast::ClassType>(recvASTTy);
+  ast::ClassType *ct = ast::dyn_cast<ast::ClassType>(recvASTTy);
   if (!ct)
     ct = L.getExprClassType(node->getReceiver());
   if (!ct) {
@@ -785,7 +813,7 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   std::vector<Val> args;
   std::vector<ExprValue> ownedArgs;
   std::vector<Val> keep;
-  size_t fixedMark = L.FixedTemps.size();
+  size_t fixedMark = L.MemTemps.size();
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     auto *argExpr = node->getArguments()[i];
     // The PIR parameter this argument goes to: after the receiver, and two
@@ -796,8 +824,8 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
         return Val();
       continue;
     }
-    if (ast::dyn_cast<ast::FixedArrayType>(argExpr->getResolvedType())) {
-      Val p = L.emitFixedAddress(argExpr); // passed by address
+    if (ast::isMemType(argExpr->getResolvedType())) {
+      Val p = L.emitMemAddress(argExpr); // passed by address
       if (!p)
         return Val();
       args.push_back(p);
@@ -842,8 +870,8 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   // A fixed-size array result is written into a temporary, whose address is
   // the call's value.
   Val fixedSlot;
-  if (ast::dyn_cast<ast::FixedArrayType>(node->getResolvedType())) {
-    fixedSlot = L.emitFixedResultSlot(node->getResolvedType());
+  if (ast::isMemType(node->getResolvedType())) {
+    fixedSlot = L.emitMemResultSlot(node->getResolvedType());
     args.push_back(fixedSlot);
   }
 
@@ -868,7 +896,7 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
                        args, "mcall");
   }
   L.releaseAfterCall(keep);
-  L.releaseFixedTemps(fixedMark);
+  L.releaseMemTemps(fixedMark);
   for (const auto &ev : ownedArgs)
     L.releaseIfOwned(ev);
   L.releaseIfOwned(recvOwned);
@@ -892,13 +920,13 @@ Val ModuleLowering::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   ast::Type *arrTy = node->getArray()->getResolvedType();
   auto *ft = ast::dyn_cast<ast::FixedArrayType>(arrTy);
   auto *st = ast::dyn_cast<ast::SliceType>(arrTy);
-  size_t mark = FixedTemps.size();
+  size_t mark = MemTemps.size();
   Val addr = emitFixedElementAddress(node->getArray(), node->getIndex());
   if (!addr)
     return Val();
   ast::Type *elemTy = ft ? ft->getElementType() : st->getElementType();
-  if (ast::dyn_cast<ast::FixedArrayType>(elemTy)) {
-    emitFixedAssign(addr, node->getValue());
+  if (ast::isMemType(elemTy)) {
+    emitMemAssign(addr, node->getValue());
   } else if (ast::isRefType(elemTy)) {
     // The new reference is taken before the old one goes (`xs[0] =
     // xs[0];`).
@@ -910,193 +938,35 @@ Val ModuleLowering::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   } else if (Val v = emitExpr(node->getValue())) {
     B.ptrStore(addr, coerceTo(v, toPIRType(elemTy)));
   }
-  releaseFixedTemps(mark);
+  releaseMemTemps(mark);
   return Val();
 }
 
 // -- Tuples
 
-unsigned char ModuleLowering::tupleElementKind(ast::Type *elemTy) const {
-  if (isObjectElementType(elemTy))
-    return kTupleSlotRef;
-  if (auto *bt = ast::dyn_cast<ast::BuiltinType>(elemTy)) {
-    switch (bt->getTypeKind()) {
-    case ast::BuiltinType::Float:
-      return kTupleSlotFloat;
-    case ast::BuiltinType::Bool:
-      return kTupleSlotBool;
-    case ast::BuiltinType::Char:
-      return kTupleSlotChar;
-    case ast::BuiltinType::Int:
-    case ast::BuiltinType::Void:
-      break;
-    }
-  }
-  return kTupleSlotInt;
-}
-
-int64_t ModuleLowering::tupleSlot(const ast::TupleType *tt, size_t i) {
-  int64_t slot = 0;
-  for (size_t k = 0; k < i && k < tt->getArity(); ++k)
-    slot += ast::isValueOptional(tt->getElementType(k)) ? 2 : 1;
-  return slot;
-}
-
-void ModuleLowering::emitTupleSetValue(const Val &tup, int64_t slot,
-                                       const Val &v, ast::Type *elemTy) {
-  if (ast::isValueOptional(elemTy)) {
-    // The presence word, then the value (0 when absent).
-    callRuntime(kPaykanTupleSet,
-                {tup, Val::i64(slot),
-                 B.cast(B.isSome(v, "opt.has"), Type::I64, "opt.has.bits")});
-    callRuntime(kPaykanTupleSet, {tup, Val::i64(slot + 1),
-                                  toSlotBits(B.unwrap(v, "opt.value"))});
-    return;
-  }
-  callRuntime(kPaykanTupleSet,
-              {tup, Val::i64(slot), toSlotBits(promoteIntToFloat(v, elemTy))});
-}
-
-Val ModuleLowering::emitTupleGetValue(const Val &tup, int64_t slot,
-                                      ast::Type *elemTy) {
-  Val bits = callRuntime(kPaykanTupleGet, {tup, Val::i64(slot)}, "elem.raw");
-  if (!ast::isValueOptional(elemTy))
-    return fromSlotBits(bits, elemTy);
-  Val has = B.cmp(CmpPred::Ne, bits, Val::i64(0), "opt.has");
-  Val valueBits =
-      callRuntime(kPaykanTupleGet, {tup, Val::i64(slot + 1)}, "elem.raw");
-  Val some =
-      B.some(fromSlotBits(valueBits, ast::stripOptional(elemTy)), "some");
-  return B.select(has, some, B.none(some.Ty, "none"), "elem");
-}
-
-Val ModuleLowering::emitTupleKindsGlobal(ast::TupleType *tt) {
-  std::string key;
-  for (ast::Type *e : tt->getElementTypes()) {
-    if (ast::isValueOptional(e)) {
-      key += static_cast<char>('0' + kTupleSlotOpt);
-      e = ast::stripOptional(e);
-    }
-    key += static_cast<char>('0' + tupleElementKind(e));
-  }
-  auto it = InternedTupleKinds.find(key);
-  if (it != InternedTupleKinds.end())
-    return Val::symbol(it->second, Type::Ptr);
-  std::string name =
-      std::string(kTupleKindsGlobalName) + std::to_string(Mod.Bytes.size());
-  std::vector<uint8_t> bytes;
-  for (char c : key)
-    bytes.push_back(static_cast<uint8_t>(c - '0'));
-  Mod.Bytes.push_back({name, std::move(bytes)});
-  InternedTupleKinds[key] = name;
-  return Val::symbol(name, Type::Ptr);
-}
-
-/// Compile-time slot bits of a constant operand (after promotion), if any.
-static bool constantSlotBits(const Val &v, int64_t &out) {
-  if (auto *i = std::get_if<int64_t>(&v.Op.V)) {
-    out = *i;
-    return true;
-  }
-  if (auto *d = std::get_if<double>(&v.Op.V)) {
-    static_assert(sizeof(double) == sizeof(int64_t));
-    std::memcpy(&out, d, sizeof(out));
-    return true;
-  }
-  if (auto *b = std::get_if<bool>(&v.Op.V)) {
-    out = *b ? 1 : 0;
-    return true;
-  }
-  if (auto *c = std::get_if<char>(&v.Op.V)) {
-    out = static_cast<unsigned char>(*c);
-    return true;
-  }
-  return false;
-}
-
-Val ModuleLowering::toSlotBits(const Val &v) {
-  int64_t bits;
-  if (v.Ty != Type::I64 && constantSlotBits(v, bits))
-    return Val::i64(bits);
-  if (v.Ty == Type::F64)
-    return B.cast(v, Type::I64, "f64.bits");
-  if (v.Ty == Type::Bool || v.Ty == Type::Char)
-    return B.cast(v, Type::I64, "bool.ext");
-  return v;
-}
-
-Val ModuleLowering::fromSlotBits(const Val &bits, ast::Type *elemTy) {
-  if (auto *bt = ast::dyn_cast<ast::BuiltinType>(elemTy)) {
-    switch (bt->getTypeKind()) {
-    case ast::BuiltinType::Float:
-      return B.cast(bits, Type::F64, "elem.f64");
-    case ast::BuiltinType::Bool:
-      return B.cast(bits, Type::Bool, "elem.bool");
-    case ast::BuiltinType::Char:
-      return B.cast(bits, Type::Char, "elem.char");
-    case ast::BuiltinType::Int:
-    case ast::BuiltinType::Void:
-      break;
-    }
-  }
-  return bits;
-}
-
+// A literal's value is the address of its temporary (emitMemValue).
 Val ModuleLowering::ExprEmitter::visitTupleLiteralExpr(
     ast::TupleLiteralExpr *node) {
-  auto *tt = ast::dyn_cast<ast::TupleType>(node->getResolvedType());
-  assert(tt && tt->getArity() == node->getNumElements() &&
-         "Sema must resolve every tuple literal to its TupleType");
-  Val tup = L.callRuntime(
-      kPaykanTupleNew,
-      {Val::i64(tupleSlot(tt, tt->getArity())), L.emitTupleKindsGlobal(tt)},
-      "tup");
-  for (size_t i = 0; i < tt->getArity(); ++i) {
-    ast::Expr *elemExpr = node->getElements()[i];
-    ast::Type *elemTy = tt->getElementType(i);
-    int64_t slot = tupleSlot(tt, i);
-    if (L.isObjectElementType(elemTy)) {
-      Val box = L.emitAsShared(elemExpr);
-      if (!box)
-        return Val();
-      L.callRuntime(kPaykanTupleSetObj, {tup, Val::i64(slot), box});
-      L.emitRelease(box);
-    } else {
-      Val v = visit(elemExpr);
-      if (!v)
-        return Val();
-      L.emitTupleSetValue(tup, slot, v, elemTy);
-    }
-  }
-  return L.emitSharedNew(tup, "tup.shared");
+  return L.emitMemAddress(node);
 }
 
 Val ModuleLowering::ExprEmitter::visitTupleIndexExpr(
     ast::TupleIndexExpr *node) {
-  Receiver recv = L.emitReceiver(node->getTuple());
-  if (!recv)
-    return Val();
-  const ExprValue &recvOwned = recv.Owned;
-
-  auto *tt = ast::dyn_cast<ast::TupleType>(node->getTuple()->getResolvedType());
-  int64_t slot = tt ? tupleSlot(tt, node->getIndex())
-                    : static_cast<int64_t>(node->getIndex());
-  ast::Type *elemTy = node->getResolvedType();
-  if (!L.isObjectElementType(elemTy)) {
-    Val v = L.emitTupleGetValue(recv.Raw, slot, elemTy);
-    L.releaseIfOwned(recvOwned);
-    return v;
+  // An element held in memory is its address; any other is read in place.
+  if (ast::isMemType(node->getResolvedType()))
+    return L.emitMemAddress(node);
+  size_t mark = L.MemTemps.size();
+  Val addr = L.emitTupleElementAddress(node->getTuple(), node->getIndex());
+  if (!addr)
+    return addr;
+  Val elem = L.emitElementLoad(addr, node->getResolvedType());
+  // A temporary's element outlives it as a +1 box (exprProducesFreshBox).
+  if (L.MemTemps.size() > mark) {
+    if (elem.Ty == Type::Box)
+      L.emitRetain(elem);
+    L.releaseMemTemps(mark);
   }
-  // Reference element: the slot's box, borrowed from the tuple; retained
-  // first when the tuple was a temporary.
-  Val bits =
-      L.callRuntime(kPaykanTupleGet, {recv.Raw, Val::i64(slot)}, "elem.raw");
-  Val box = L.B.cast(bits, Type::Box, "elem.shared");
-  if (recvOwned.isOwned()) {
-    L.emitRetain(box);
-    L.releaseIfOwned(recvOwned);
-  }
-  return box;
+  return elem;
 }
 
 Val ModuleLowering::visitDestructureStmt(ast::DestructureStmt *node) {
@@ -1104,10 +974,12 @@ Val ModuleLowering::visitDestructureStmt(ast::DestructureStmt *node) {
   assert(tt && tt->getArity() == node->getNumTargets() &&
          "Sema must resolve the destructured value to a matching TupleType");
 
-  Receiver val = emitReceiver(node->getValue());
-  if (!val)
+  // The tuple's bytes, kept until every element is copied out (`a, b = (b,
+  // a);` reads both before either is replaced).
+  size_t mark = MemTemps.size();
+  Val base = emitMemAddress(node->getValue());
+  if (!base)
     return Val();
-  const Val &raw = val.Raw;
 
   for (size_t i = 0; i < node->getNumTargets(); ++i) {
     const auto &target = node->getTargets()[i];
@@ -1115,23 +987,39 @@ Val ModuleLowering::visitDestructureStmt(ast::DestructureStmt *node) {
       continue;
     ast::Type *elemTy = tt->getElementType(i);
     const std::string &name = target.getName();
+    int64_t off = tupleElementOffset(tt, i);
+    Val at = off == 0 ? base : B.ptrAdd(base, Val::i64(off), "elem.addr");
+    ast::Type *bindTy =
+        target.DeclType ? canonicalizeDeclType(target.DeclType) : elemTy;
+    Scope *owner = target.DeclType ? nullptr : CurrentScope->findOwner(name);
 
-    Val v;
-    if (isObjectElementType(elemTy)) {
-      // The binding becomes an owner of the element: +1 on the slot's box.
-      Val bits = callRuntime(kPaykanTupleGet, {raw, Val::i64(tupleSlot(tt, i))},
-                             "elem.raw");
-      v = B.cast(bits, Type::Box, "elem.shared");
-      emitRetain(v);
-    } else {
-      v = emitTupleGetValue(raw, tupleSlot(tt, i), elemTy);
+    // An element held in memory: a new variable's copy, or the variable's
+    // bytes replaced.
+    if (ast::isMemType(elemTy)) {
+      const int64_t size = memLayout(elemTy).Size;
+      if (!owner) {
+        MemLayout l = memLayout(bindTy);
+        pir::LocalId local = B.addMemLocal(name, l.Size, l.Align);
+        Val dst = B.localAddr(local, name + ".addr");
+        B.memCopy(dst, at, Val::i64(size));
+        emitMemRetain(dst, elemTy);
+        CurrentScope->declare(name, local, bindTy);
+        continue;
+      }
+      pir::LocalId local = owner->lookup(name);
+      Val dst = CurrentScope->inoutType(name) != Type::Void
+                    ? B.load(local, name + ".addr")
+                    : B.localAddr(local, name + ".addr");
+      emitMemRetain(at, elemTy);
+      emitMemRelease(dst, elemTy);
+      B.memCopy(dst, at, Val::i64(size));
+      continue;
     }
 
-    ast::Type *bindTy = elemTy;
-    Scope *owner = target.DeclType ? nullptr : CurrentScope->findOwner(name);
+    Val v = emitElementLoad(at, elemTy);
+    if (ast::isRefType(elemTy))
+      emitRetain(v); // the binding becomes an owner of the element
     if (!owner) {
-      if (target.DeclType)
-        bindTy = canonicalizeDeclType(target.DeclType);
       Type pirTy = toPIRType(bindTy);
       if (pirTy == Type::Void)
         pirTy = v.Ty;
@@ -1160,7 +1048,7 @@ Val ModuleLowering::visitDestructureStmt(ast::DestructureStmt *node) {
 
   // Every element has been copied out (references retained): a temporary
   // tuple can die now.
-  releaseIfOwned(val.Owned);
+  releaseMemTemps(mark);
   return Val();
 }
 

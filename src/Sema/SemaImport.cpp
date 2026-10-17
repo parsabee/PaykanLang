@@ -252,7 +252,7 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
                                         const std::string &moduleName) const {
   // The module's type registry holds (a) the classes/enums it declares,
   // (b) the ones it reached through its own imports, and (c) compiler
-  // builtins plus lazily-created Tuple<...> specialisations.  (a) is exported
+  // builtins.  (a) is exported
   // under the importer's qualifier.  (b) is exported WITHOUT a qualifier —
   // it must exist in the importing context so the module's signatures that
   // mention it resolve (with type identity preserved), but names are never
@@ -278,10 +278,7 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     // identity.
     if (name != ct->getName())
       continue;
-    // Lazily-created Tuple<T1, T2> specialisations are never exported
-    // either: the importing context rebuilds its own from the `(T1, T2)`
-    // spellings in the signatures that use them.
-    if (isBootstrapClassName(name) || Ctx.getSpecializedTupleElemType(ct))
+    if (isBootstrapClassName(name))
       continue;
     ModuleInfo::ClassInfo ci;
     ci.Name = name;
