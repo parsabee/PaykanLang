@@ -106,6 +106,7 @@ public:
     NK_OptionalType,
     NK_EnumType,
     NK_TupleType,
+    NK_SliceType,
     NK_PoisonType,
     NK_GenericType, // must stay the last Type kind (see Type::classof)
 
@@ -1681,6 +1682,24 @@ public:
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_PoisonType;
   }
+};
+
+// The type of a `view T[]` or `inout T[]` parameter: a slice, the address of
+// a fixed-size array's elements and their number (docs/language/05-arrays.md,
+// "Slices").  It is spelled `T[]` with the parameter's mode; Sema gives it to
+// the parameter, so a slice is indexed, measured with `len()` and passed to
+// another slice parameter, and nothing else.  One canonical instance per
+// element type (ASTContext::getSliceType).
+class SliceType : public Type {
+  Type *ElementType;
+
+public:
+  SliceType(SourceLocation loc, Type *elemTy)
+      : Type(NK_SliceType, loc), ElementType(elemTy) {}
+
+  Type *getElementType() const { return ElementType; }
+
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_SliceType; }
 };
 
 // Tuple literal expression: (e1, e2, ...) — always >= 2 elements; a

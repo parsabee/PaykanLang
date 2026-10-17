@@ -536,6 +536,7 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::ClassType *ct,
                                 method->getName() + "' in '" + className + "'");
     if (!pty)
       return nullptr;
+    pty = sliceOf(pty, p.Mode);
     p.ParamType = pty;
     paramTys.push_back(pty);
   }
@@ -1412,6 +1413,14 @@ bool Sema::unifyTypes(ast::Type *pattern, ast::Type *actual,
   }
 
   if (auto *at = ast::dyn_cast<ast::ArrayType>(pattern)) {
+    // A fixed-size array or a slice passed for a slice (`view T[]`) gives
+    // its element type.
+    if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(actual))
+      return unifyTypes(at->getElementType(), ft->getElementType(), typeParams,
+                        bindings, conflict);
+    if (auto *st = ast::dyn_cast<ast::SliceType>(actual))
+      return unifyTypes(at->getElementType(), st->getElementType(), typeParams,
+                        bindings, conflict);
     auto *aat = ast::dyn_cast<ast::ArrayType>(actual);
     if (!aat)
       return true;

@@ -1107,6 +1107,31 @@ TEST(Lowering, FixedArrayFieldsAreMemFields) {
   EXPECT_EQ(count(d, "release"), 2u) << d;
 }
 
+// A slice parameter is two PIR parameters, the address of the elements and
+// their number: a fixed-size array argument passes its address and its
+// length, a slice passes both on.
+TEST(Lowering, SlicesAreAnAddressAndALength) {
+  auto l = lower(R"(
+    fn sum(xs: view int[]) -> int { return xs[0] + xs.len(); }
+    fn pass(xs: view int[]) -> int { return sum(xs); }
+    fn main() -> int {
+      a: int[3] = [1, 2, 3];
+      return pass(a);
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string sum = function(l.Text, "sum");
+  EXPECT_NE(sum.find("fn @sum(%xs.1: ptr, %xs.len.2: i64) -> i64"),
+            std::string::npos)
+      << sum;
+  EXPECT_NE(sum.find("call @$rt.Paykan_panic_index"), std::string::npos) << sum;
+  std::string pass = function(l.Text, "pass");
+  EXPECT_NE(pass.find("call @sum(%xs.addr"), std::string::npos) << pass;
+  std::string m = function(l.Text, "main");
+  EXPECT_NE(m.find("call @pass(%a.addr"), std::string::npos) << m;
+  EXPECT_NE(m.find(", 3)"), std::string::npos) << m;
+}
+
 // Printing an optional value formats it, "None" or the value's text; it is
 // never boxed.
 TEST(Lowering, PrintingAnOptionalValueFormatsIt) {

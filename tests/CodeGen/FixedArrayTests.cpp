@@ -365,3 +365,59 @@ TEST(FixedArray, Fields) {
   EXPECT_EQ(r.StdOut, "60 Pq 6 2\n1 7 0 Pq Pq\nq 5 15 2\npfx innew boxp\n");
   g.expectNoLeaks("Fields");
 }
+
+// A slice parameter reads and writes the caller's array in place, whatever
+// its length: a variable, a literal, a row, a field, or a slice passed on.
+TEST(FixedArray, SliceParameters) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Counter { n: int; tags: Str[2]; }
+    impl Counter {
+      fn __init__(xs: view int[]) {
+        self.n = xs.len();
+        self.tags = ["a", "b"];
+      }
+      view fn total(xs: view int[]) -> int { return self.n + sum(xs); }
+    }
+    fn sum(xs: view int[]) -> int {
+      t = 0;
+      i = 0;
+      while (i < xs.len()) {
+        t = t + xs[i];
+        i = i + 1;
+      }
+      return t;
+    }
+    fn double(xs: inout int[]) {
+      i = 0;
+      while (i < xs.len()) {
+        xs[i] = xs[i] * 2;
+        i = i + 1;
+      }
+    }
+    fn first(ss: view Str[]) -> int { return ss[0].len() + ss.len(); }
+    fn rename(ss: inout Str[], s: Str) { ss[ss.len() - 1] = s; }
+    fn count<T>(xs: view T[]) -> int { return xs.len(); }
+    fn pass(xs: view int[]) -> int { return sum(xs) + count(xs); }
+    fn main() -> int {
+      a: int[3] = [1, 2, 3];
+      b: int[5] = [1, 1, 1, 1, 1];
+      double(a);
+      println(Str(sum(a)) + " " + Str(sum(b)) + " " + Str(sum([10, 20])) +
+              " " + Str(pass(a)) + " " + Str(count(b)));
+      ss: Str[2] = ["ab", "c"];
+      rename(ss, "zzz");
+      println(Str(first(ss)) + " " + ss[1] + " " + Str(first(["hello"])));
+      c = Counter(b);
+      rename(c.tags, "B" + c.tags[1]);
+      grid: int[2][3] = [[1, 2, 3], [4, 5, 6]];
+      println(Str(c.total(a)) + " " + Str(c.total([1])) + " " + c.tags[1] +
+              " " + Str(sum(grid[1])));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "12 5 30 15 5\n4 zzz 6\n17 6 Bb 15\n");
+  g.expectNoLeaks("SliceParameters");
+}

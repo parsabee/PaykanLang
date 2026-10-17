@@ -303,9 +303,11 @@ TEST(ParamMode, ViewParametersOfReferenceTypes) {
     fn main() -> int {
       c = Counter(30);
       c.tick();
+      names: Str[2] = ["a", "b"];
+      cs: Counter[3] = [c, c, c];
       println(Str(sum(c, [1, 2], "abc")) + " " + Str(sum(Fast(4), [5], "")) +
-              " " + Str(passOn(c, [7])) + " " + Str(size(["a", "b"])) +
-              Str(size([c, c, c])));
+              " " + Str(passOn(c, [7])) + " " + Str(size(names)) +
+              Str(size(cs)));
       return 0;
     }
   )");
@@ -350,7 +352,7 @@ TEST(ParamMode, InoutParametersOfReferenceTypes) {
     fn clear(o: inout Counter?) { o = None; }
     fn fill(o: inout Counter?) { o = Counter(5); }
     fn pair(t: inout (int, Str)) { t = (t.0 + 1, t.1 + "?"); }
-    fn grow(xs: inout int[]) { xs.push(7); xs = [xs.len(), 9]; }
+    fn refill(xs: inout int[]) { xs[1] = xs[0] + 8; xs[0] = xs.len(); }
     fn seen(c: inout Counter, other: Counter) -> int {
       c = Counter(0);
       return other.n;
@@ -374,8 +376,8 @@ TEST(ParamMode, InoutParametersOfReferenceTypes) {
       fill(o);
       t = (1, "t");
       pair(t);
-      xs = [1];
-      grow(xs);
+      xs: int[2] = [1, 7];
+      refill(xs);
       y = Counter(4);
       z = y;
       w = seen(y, z);

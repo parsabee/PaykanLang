@@ -241,3 +241,59 @@ TEST(FixedArray, ElementsAndSize) {
                   "fixed-size array holds at most 1048576 bytes");
   expectBodyError("  big: char[1024][1025] = [];", "which is too big");
 }
+
+// A `view T[]` or `inout T[]` parameter is a slice: it takes a fixed-size
+// array of any length (a literal becomes one) or another slice, and is
+// indexed, measured with `len()` and passed on, nothing else.
+TEST(FixedArray, SliceParameters) {
+  auto r = semaCheck(R"(
+    fn sum(xs: view int[]) -> int { return xs[0] + xs.len(); }
+    fn bump(xs: inout int[]) { xs[0] = sum(xs); }
+    fn count<T>(xs: view T[]) -> int { return xs.len(); }
+    class C { n: int; }
+    impl C { fn __init__(xs: view Str[]) { self.n = xs[0].len(); } }
+    fn main() -> int {
+      a: int[3] = [1, 2, 3];
+      g: int[2][2] = [[1, 2], [3, 4]];
+      bump(a);
+      c = C(["ab"]);
+      return sum(a) + sum([4, 5]) + sum(g[1]) + count(a) + c.n;
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  const std::string slice = "a slice ('int[]') can only be indexed, measured "
+                            "with 'len()' or passed to a 'view' or 'inout' "
+                            "array parameter";
+  expectError("fn f(xs: view int[]) {}\n"
+              "fn main() -> int { g = [1, 2]; f(g); return 0; }",
+              "argument 1 of 'f' has type 'int[]', expected 'int[]' (a slice "
+              "takes a fixed-size array, not a growable one)");
+  expectError("fn f(xs: view float[]) {}\n"
+              "fn main() -> int { a: int[1] = [1]; f(a); return 0; }",
+              "(a slice takes a fixed-size array of exactly its element "
+              "type)");
+  expectError("fn f(xs: inout int[]) { xs.push(1); }\n"
+              "fn main() -> int { return 0; }",
+              "'int[]' has no method 'push' with these arguments (a slice "
+              "has 'len()')");
+  expectError("fn f(xs: inout int[]) { xs = [1]; }\n"
+              "fn main() -> int { return 0; }",
+              "'xs' is a slice; assign its elements ('xs[i] = ...')");
+  expectError("fn f(xs: inout int[]) { ys = xs; }\n"
+              "fn main() -> int { return 0; }",
+              "variable 'ys': " + slice);
+  expectError("fn f(xs: inout int[]) { t = (xs, 1); }\n"
+              "fn main() -> int { return 0; }",
+              "tuple element 0: " + slice);
+  expectError("fn id<T>(x: T) -> int { return 0; }\n"
+              "fn f(xs: view int[]) -> int { return id(xs); }\n"
+              "fn main() -> int { return 0; }",
+              "type argument 1 of 'id': " + slice);
+  expectError("fn f(xs: view int[]) { xs[0] = 1; }\n"
+              "fn main() -> int { return 0; }",
+              "'xs' is a 'view' parameter; cannot assign to its elements");
+  expectError("fn f(xs: inout int[]) {}\n"
+              "fn main() -> int { let a: int[1] = [1]; f(a); return 0; }",
+              "'a' is declared with 'let' and cannot be passed to 'inout' "
+              "parameter 'xs'");
+}

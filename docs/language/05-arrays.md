@@ -353,6 +353,58 @@ Error:
 'xs' is declared with 'let'; its elements are part of its value and cannot be assigned
 ```
 
+### Slices
+
+A `view T[]` or `inout T[]` parameter is a **slice**. It takes a fixed-size
+array of any length with element type `T`, and reaches the caller's elements
+in place; `xs.len()` is that array's length. A `view` slice only reads. An
+`inout` one assigns elements (`xs[i] = v;`), but not the whole slice, and it
+has no `push` or `pop`.
+
+```pkn
+fn sum(xs: view int[]) -> int {
+  t = 0;
+  i = 0;
+  while (i < xs.len()) {
+    t = t + xs[i];
+    i = i + 1;
+  }
+  return t;
+}
+
+fn scale(xs: inout int[], by: int) {
+  i = 0;
+  while (i < xs.len()) {
+    xs[i] = xs[i] * by;
+    i = i + 1;
+  }
+}
+
+fn main() -> int {
+  a: int[3] = [1, 2, 3];
+  scale(a, 10);
+  grid: int[2][2] = [[1, 2], [3, 4]];
+  println(Str(sum(a)) + " " + Str(sum([5, 6])) + " " + Str(sum(grid[1])));
+  return 0;
+}
+```
+
+Output:
+
+```
+60 11 7
+```
+
+- An argument is a fixed-size array (a variable, a row such as `grid[1]`, a
+  field), a literal, which becomes a fixed-size array of its own length, or a
+  slice passed on. A growable array cannot be passed for one.
+- The array's element type must be the slice's exactly: an `int[3]` is not a
+  `float[]`.
+- A slice can only be indexed, measured with `len()` and passed on. It cannot
+  be stored, copied, returned or printed.
+- A generic `xs: view T[]` takes `T` from the array's elements. A literal
+  argument there needs a variable first (`xs: int[2] = [1, 2];`).
+
 ---
 
 ## Semantic Checks

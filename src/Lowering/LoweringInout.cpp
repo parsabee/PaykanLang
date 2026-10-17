@@ -60,12 +60,46 @@ Type ModuleLowering::paramPIRType(ast::Type *ty, ast::ParamMode mode) {
              : toPIRType(canonicalizeDeclType(ty));
 }
 
-void ModuleLowering::declareParam(const std::string &name,
-                                  const pir::Value &arg, ast::Type *astTy,
-                                  ast::ParamMode mode) {
+void ModuleLowering::appendParamTypes(std::vector<Type> &out, ast::Type *ty,
+                                      ast::ParamMode mode) {
+  if (ast::dyn_cast<ast::SliceType>(ty)) {
+    out.push_back(Type::Ptr);
+    out.push_back(Type::I64);
+    return;
+  }
+  out.push_back(paramPIRType(ty, mode));
+}
+
+void ModuleLowering::nameParams(pir::Function &fn, size_t first,
+                                const std::vector<ast::Param> &params) {
+  size_t at = first;
+  for (const ast::Param &p : params) {
+    if (at < fn.Params.size())
+      fn.Params[at++].Name = p.getName();
+    if (ast::dyn_cast<ast::SliceType>(p.ParamType) && at < fn.Params.size())
+      fn.Params[at++].Name = p.getName() + ".len";
+  }
+}
+
+size_t ModuleLowering::declareParam(const std::string &name,
+                                    const std::vector<pir::Value> &params,
+                                    size_t at, ast::Type *astTy,
+                                    ast::ParamMode mode) {
+  const pir::Value &arg = params[at];
+  if (auto *st = ast::dyn_cast<ast::SliceType>(astTy)) {
+    // The address of the elements, reached as an `inout` array's, and their
+    // number in `<name>.len`.
+    pir::LocalId addr = B.addLocal(name, Type::Ptr);
+    B.store(addr, Val(pir::Operand::value(arg), Type::Ptr));
+    CurrentScope->declareInout(name, addr, Type::Mem, st);
+    pir::LocalId len = B.addLocal(name + ".len", Type::I64);
+    B.store(len, Val(pir::Operand::value(params[at + 1]), Type::I64));
+    CurrentScope->declare(name + ".len", len, ASTCtx.getIntTy());
+    return 2;
+  }
   if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(astTy)) {
     declareFixedParam(name, arg, ft, mode);
-    return;
+    return 1;
   }
   pir::LocalId local = B.addLocal(name, arg.Ty);
   B.store(local, Val(pir::Operand::value(arg), arg.Ty));
@@ -79,6 +113,7 @@ void ModuleLowering::declareParam(const std::string &name,
     CurrentScope->declare(name, local, astTy);
   else
     CurrentScope->declare(name, local, nullptr);
+  return 1;
 }
 
 bool ModuleLowering::storeInout(const std::string &name, pir::LocalId local,

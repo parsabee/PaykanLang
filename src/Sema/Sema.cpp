@@ -194,6 +194,13 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
   if (dst == src)
     return true;
 
+  // A slice takes a fixed-size array of exactly its element type, of any
+  // length (and another slice, the same type).
+  if (auto *dstST = ast::dyn_cast<ast::SliceType>(dst)) {
+    auto *srcFT = ast::dyn_cast<ast::FixedArrayType>(src);
+    return srcFT && srcFT->getElementType() == dstST->getElementType();
+  }
+
   // int -> float promotion.
   if (dst == Ctx.getFloatTy() && src == Ctx.getIntTy())
     return true;
@@ -293,8 +300,9 @@ bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
     return false;
   adoptArrayLiteralType(dst, src);
   // `int` -> `int?` (and `int` -> `float?`): the lowering makes the value
-  // the optional's present value.
-  if (ast::wrapsInOptional(dst, srcTy))
+  // the optional's present value.  A fixed-size array into a slice is
+  // passed as its address and length.
+  if (ast::wrapsInOptional(dst, srcTy) || ast::dyn_cast<ast::SliceType>(dst))
     src->setCoercedType(dst);
   return true;
 }
@@ -479,7 +487,7 @@ int64_t Sema::fixedElementBytes(const ast::Type *ty) {
 bool Sema::holdsFixedArray(const ast::Type *ty) {
   if (!ty)
     return false;
-  if (ast::isa<ast::FixedArrayType>(ty))
+  if (ast::isa<ast::FixedArrayType>(ty) || ast::isa<ast::SliceType>(ty))
     return true;
   if (const auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
     return holdsFixedArray(ot->getInnerType());
@@ -492,8 +500,32 @@ bool Sema::holdsFixedArray(const ast::Type *ty) {
   return false;
 }
 
+ast::Type *Sema::sliceOf(ast::Type *ty, ast::ParamMode mode) {
+  auto *at = ast::dyn_cast<ast::ArrayType>(ty);
+  if (!at || mode == ast::ParamMode::Value ||
+      fixedElementBytes(at->getElementType()) < 0)
+    return ty;
+  return Ctx.getSliceType(at->getElementType());
+}
+
+std::string Sema::sliceArgNote(const ast::Type *param, const ast::Type *arg) {
+  if (!ast::dyn_cast<ast::SliceType>(param))
+    return "";
+  if (ast::dyn_cast<ast::ArrayType>(arg))
+    return " (a slice takes a fixed-size array, not a growable one)";
+  if (ast::dyn_cast<ast::FixedArrayType>(arg))
+    return " (a slice takes a fixed-size array of exactly its element type)";
+  return "";
+}
+
 bool Sema::errorFixedArrayHere(ast::SourceLocation loc, ast::Type *ty,
                                const std::string &where) {
+  if (ast::isa<ast::SliceType>(ty)) {
+    error(loc, where + ": a slice ('" + typeName(ty) +
+                   "') can only be indexed, measured with 'len()' or passed "
+                   "to a 'view' or 'inout' array parameter");
+    return false;
+  }
   error(loc, where + ": a fixed-size array ('" + typeName(ty) +
                  "') can only be a local variable, a parameter, a result or "
                  "a field for now");
@@ -529,6 +561,9 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
   const bool allowFixed = std::exchange(FixedArrayAllowed, false);
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty))
     return Ctx.getBuiltinType(bt->getTypeKind());
+  // A parameter's slice (sliceOf), resolved already.
+  if (ast::isa<ast::SliceType>(ty))
+    return ty;
 
   if (auto *et = ast::dyn_cast<ast::EnumType>(ty))
     return Ctx.lookupEnumType(et->getName());
@@ -1069,7 +1104,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
                   "argument " + std::to_string(i + 1) + " of '" +
                       names::kMethodSuper + "' has type '" +
                       typeName(argTypes[i]) + "', expected '" +
-                      typeName(expectedParams[i]) + "'");
+                      typeName(expectedParams[i]) + "'" +
+                      sliceArgNote(expectedParams[i], argTypes[i]));
       }
     }
     if (superInit && argTypes.size() == expectedParams.size()) {
@@ -1180,7 +1216,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
               "argument " + std::to_string(i + 1) + " of '" +
                   displayName(node->getCalleeName()) + "' has type '" +
                   typeName(argTypes[i]) + "', expected '" +
-                  typeName(sig->ParamTypes[i]) + "'");
+                  typeName(sig->ParamTypes[i]) + "'" +
+                  sliceArgNote(sig->ParamTypes[i], argTypes[i]));
     }
   }
   const std::string callee = displayName(node->getCalleeName());
@@ -1204,13 +1241,17 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     return nullptr;
   }
 
-  // A fixed-size array has one method, `len()`, its length.
-  if (auto *fixed = ast::dyn_cast<ast::FixedArrayType>(recvTy)) {
+  // A fixed-size array, and a slice of one, has one method, `len()`, its
+  // length.
+  if (ast::dyn_cast<ast::FixedArrayType>(recvTy) ||
+      ast::dyn_cast<ast::SliceType>(recvTy)) {
     if (node->getMethodName() != names::kLen || node->getNumArguments() != 0) {
       S.error(node->getLocation(),
-              "'" + typeName(fixed) + "' has no method '" +
-                  node->getMethodName() +
-                  "' with these arguments (a fixed-size array has 'len()')");
+              "'" + typeName(recvTy) + "' has no method '" +
+                  node->getMethodName() + "' with these arguments (a " +
+                  (ast::isa<ast::SliceType>(recvTy) ? "slice"
+                                                    : "fixed-size array") +
+                  " has 'len()')");
       return nullptr;
     }
     node->setResolvedType(S.Ctx.getIntTy());
@@ -1295,7 +1336,8 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
       S.error(argExpr->getLocation(),
               "argument " + std::to_string(i + 1) + " of '" +
                   node->getMethodName() + "' has type '" + typeName(argTy) +
-                  "', expected '" + typeName(paramTys[i]) + "'");
+                  "', expected '" + typeName(paramTys[i]) + "'" +
+                  sliceArgNote(paramTys[i], argTy));
     }
   }
   S.checkInoutArgs(method->getParamModes(), paramTys, node->getArguments(),
@@ -1377,6 +1419,13 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
   ast::Type *expected = std::exchange(S.LiteralExpectation, nullptr);
   if (auto *fixed = ast::dyn_cast<ast::FixedArrayType>(expected))
     return checkFixedArrayLiteral(node, fixed);
+  // Into a slice: a fixed-size array of the literal's own length.
+  if (auto *slice = ast::dyn_cast<ast::SliceType>(expected);
+      slice && !node->isEmpty())
+    return checkFixedArrayLiteral(
+        node,
+        S.Ctx.getFixedArrayType(slice->getElementType(),
+                                static_cast<int64_t>(node->getNumElements())));
   auto *expectedAT =
       expected ? ast::dyn_cast<ast::ArrayType>(ast::stripOptional(expected))
                : nullptr;
@@ -1537,7 +1586,8 @@ ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
 
   auto *at = ast::dyn_cast<ast::ArrayType>(arrayTy);
   auto *fixed = ast::dyn_cast<ast::FixedArrayType>(arrayTy);
-  if (!at && !fixed) {
+  auto *slice = ast::dyn_cast<ast::SliceType>(arrayTy);
+  if (!at && !fixed && !slice) {
     S.error(node->getLocation(), "subscript '[]' applied to non-array type '" +
                                      typeName(arrayTy) + "'");
     return nullptr;
@@ -1554,7 +1604,9 @@ ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
   if (fixed && !S.checkFixedIndex(fixed, node->getIndex()))
     return nullptr;
 
-  ast::Type *elemTy = at ? at->getElementType() : fixed->getElementType();
+  ast::Type *elemTy = at      ? at->getElementType()
+                      : fixed ? fixed->getElementType()
+                              : slice->getElementType();
   node->setResolvedType(elemTy);
   return elemTy;
 }
@@ -2334,6 +2386,11 @@ bool Sema::checkReassignable(const std::string &name, ast::SourceLocation loc) {
     error(loc, why + "; it cannot be assigned");
     return false;
   }
+  if (ast::dyn_cast<ast::SliceType>(CurrentScope->lookup(name))) {
+    error(loc, "'" + name + "' is a slice; assign its elements ('" + name +
+                   "[i] = ...')");
+    return false;
+  }
   switch (varKind(name)) {
   case VarKind::Let:
     error(loc,
@@ -2384,6 +2441,12 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   if (!owner) {
     // First assignment: declare in the current scope.
     if (diagnoseEmptyArrayLiteral(node->getLocation(), nullptr, valTy)) {
+      declarePoisoned(CurrentScope, varName);
+      return false;
+    }
+    if (ast::isa<ast::SliceType>(valTy)) {
+      errorFixedArrayHere(node->getLocation(), valTy,
+                          "variable '" + varName + "'");
       declarePoisoned(CurrentScope, varName);
       return false;
     }
@@ -2632,6 +2695,7 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
       ErroneousNames.insert(node->getName()); // as for the return type
       return false;
     }
+    ty = sliceOf(ty, p.Mode);
     p.ParamType = ty;
     paramTypes.push_back(ty);
   }
@@ -2860,6 +2924,12 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
         declarePoisoned(CurrentScope, node->getName());
         return false;
       }
+      if (ast::isa<ast::SliceType>(initTy)) {
+        errorFixedArrayHere(node->getLocation(), initTy,
+                            "variable '" + node->getName() + "'");
+        declarePoisoned(CurrentScope, node->getName());
+        return false;
+      }
       declTy = initTy;
     }
   }
@@ -2954,7 +3024,8 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   }
   auto *at = ast::dyn_cast<ast::ArrayType>(arrTy);
   auto *fixed = ast::dyn_cast<ast::FixedArrayType>(arrTy);
-  if (!at && !fixed) {
+  auto *slice = ast::dyn_cast<ast::SliceType>(arrTy);
+  if (!at && !fixed && !slice) {
     error(node->getLocation(),
           "subscript assignment on non-array type '" + typeName(arrTy) + "'");
     return false;
@@ -2978,7 +3049,9 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   if (!checkChangeable(node->getArray(), "cannot assign to its elements",
                        node->getLocation()))
     return false;
-  ast::Type *elemTy = at ? at->getElementType() : fixed->getElementType();
+  ast::Type *elemTy = at      ? at->getElementType()
+                      : fixed ? fixed->getElementType()
+                              : slice->getElementType();
   auto *valTy = resolveExprType(node->getValue(), elemTy);
   if (!valTy)
     return false;

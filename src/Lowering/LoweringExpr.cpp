@@ -69,9 +69,9 @@ Val ModuleLowering::ExprEmitter::visitEnumValueExpr(ast::EnumValueExpr *node) {
 Val ModuleLowering::ExprEmitter::visitIdentifier(ast::Identifier *node) {
   if (node->getName() == kStdin)
     return L.externObject(kPaykanFileStdin);
-  // A fixed-size array: the address of its bytes.
-  if (ast::dyn_cast<ast::FixedArrayType>(
-          L.CurrentScope->lookupASTType(node->getName())))
+  // A fixed-size array, or a slice: the address of its bytes.
+  if (ast::Type *t = L.CurrentScope->lookupASTType(node->getName());
+      ast::dyn_cast<ast::FixedArrayType>(t) || ast::dyn_cast<ast::SliceType>(t))
     return L.emitFixedAddress(node);
   pir::LocalId local = L.CurrentScope->lookup(node->getName());
   Val val = L.B.load(local, node->getName());
@@ -235,9 +235,11 @@ Val ModuleLowering::ExprEmitter::emitPrimitiveArrayLiteral(
 }
 
 Val ModuleLowering::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
-  // An element of a fixed-size array, read in place (a nested array's is its
-  // address).
-  if (ast::dyn_cast<ast::FixedArrayType>(node->getArray()->getResolvedType())) {
+  // An element of a fixed-size array or a slice, read in place (a nested
+  // array's is its address).
+  if (ast::Type *arrTy = node->getArray()->getResolvedType();
+      ast::dyn_cast<ast::FixedArrayType>(arrTy) ||
+      ast::dyn_cast<ast::SliceType>(arrTy)) {
     size_t mark = L.FixedTemps.size();
     Val addr = L.emitFixedElementAddress(node->getArray(), node->getIndex());
     if (!addr || ast::dyn_cast<ast::FixedArrayType>(node->getResolvedType()))
@@ -722,8 +724,13 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     size_t fixedMark = L.FixedTemps.size();
     for (size_t i = 0; i < node->getNumArguments(); ++i) {
       auto *argExpr = node->getArguments()[i];
-      Type paramTy = i + 1 < superFn->Sig.Params.size()
-                         ? superFn->Sig.Params[i + 1]
+      if (L.isSliceArg(argExpr)) {
+        if (!L.emitSliceArg(argExpr, initArgs))
+          return Val();
+        continue;
+      }
+      Type paramTy = initArgs.size() < superFn->Sig.Params.size()
+                         ? superFn->Sig.Params[initArgs.size()]
                          : Type::Void;
       if (ast::dyn_cast<ast::FixedArrayType>(argExpr->getResolvedType())) {
         Val p = L.emitFixedAddress(argExpr); // passed by address
@@ -790,10 +797,15 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     return result;
   }
   size_t fixedMark = L.FixedTemps.size();
-  for (size_t i = 0; i < node->getNumArguments(); ++i) {
-    auto *arg = node->getArguments()[i];
-    Type paramTy =
-        i < callee->Sig.Params.size() ? callee->Sig.Params[i] : Type::Void;
+  for (auto *arg : node->getArguments()) {
+    if (L.isSliceArg(arg)) {
+      if (!L.emitSliceArg(arg, args))
+        return Val();
+      continue;
+    }
+    Type paramTy = args.size() < callee->Sig.Params.size()
+                       ? callee->Sig.Params[args.size()]
+                       : Type::Void;
     if (ast::dyn_cast<ast::FixedArrayType>(arg->getResolvedType())) {
       Val p = L.emitFixedAddress(arg); // passed by address
       if (!p)
@@ -891,6 +903,8 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   ast::Type *recvResolved = node->getReceiver()->getResolvedType();
   // A fixed-size array's `len()`: its length.  An element receiver is still
   // evaluated, for its index and its bounds check.
+  if (ast::dyn_cast<ast::SliceType>(recvResolved))
+    return L.emitSliceLength(node->getReceiver());
   if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(recvResolved)) {
     size_t mark = L.FixedTemps.size();
     if (!ast::isa<ast::Identifier>(node->getReceiver()) &&
@@ -1008,6 +1022,14 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   size_t fixedMark = L.FixedTemps.size();
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     auto *argExpr = node->getArguments()[i];
+    // The PIR parameter this argument goes to: after the receiver, and two
+    // for each slice.
+    const size_t at = args.size() + 1;
+    if (L.isSliceArg(argExpr)) {
+      if (!L.emitSliceArg(argExpr, args))
+        return Val();
+      continue;
+    }
     if (ast::dyn_cast<ast::FixedArrayType>(argExpr->getResolvedType())) {
       Val p = L.emitFixedAddress(argExpr); // passed by address
       if (!p)
@@ -1015,7 +1037,7 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
       args.push_back(p);
       continue;
     }
-    if (i + 1 < sig.Params.size() && sig.Params[i + 1] == Type::Ptr) {
+    if (at < sig.Params.size() && sig.Params[at] == Type::Ptr) {
       // `inout`: the argument's address
       Val p = L.emitInoutArg(argExpr, keep);
       if (!p)
@@ -1043,7 +1065,7 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
       return Val();
     if (ExprValue ev = L.classifyExpr(argExpr, v); ev.isOwned())
       ownedArgs.push_back(ev);
-    Type paramTy = i + 1 < sig.Params.size() ? sig.Params[i + 1] : Type::Void;
+    Type paramTy = at < sig.Params.size() ? sig.Params[at] : Type::Void;
     // A builtin method borrowing a ref argument (File.write(s)) takes the
     // raw object.
     if (paramTy == Type::Obj && v.Ty == Type::Box)
@@ -1100,14 +1122,16 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
 // -- Subscript assignment
 
 Val ModuleLowering::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
-  // An element of a fixed-size array, written in place.
-  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(
-          node->getArray()->getResolvedType())) {
+  // An element of a fixed-size array or a slice, written in place.
+  ast::Type *arrTy = node->getArray()->getResolvedType();
+  auto *ft = ast::dyn_cast<ast::FixedArrayType>(arrTy);
+  auto *st = ast::dyn_cast<ast::SliceType>(arrTy);
+  if (ft || st) {
     size_t mark = FixedTemps.size();
     Val addr = emitFixedElementAddress(node->getArray(), node->getIndex());
     if (!addr)
       return Val();
-    ast::Type *elemTy = ft->getElementType();
+    ast::Type *elemTy = ft ? ft->getElementType() : st->getElementType();
     if (ast::dyn_cast<ast::FixedArrayType>(elemTy)) {
       emitFixedAssign(addr, node->getValue());
     } else if (ast::isRefType(elemTy)) {
