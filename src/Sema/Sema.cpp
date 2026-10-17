@@ -1376,7 +1376,7 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
                                  "array has at least one element");
     return nullptr;
   }
-  const auto n = static_cast<int64_t>(node->getNumElements());
+  const int64_t n = node->getLength();
   // Into a slice: a fixed-size array of the literal's own length.
   if (auto *slice = ast::dyn_cast<ast::SliceType>(expected))
     return checkFixedArrayLiteral(
@@ -1445,8 +1445,8 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
 ast::Type *
 Sema::ExprChecker::checkFixedArrayLiteral(ast::ArrayLiteralExpr *node,
                                           ast::FixedArrayType *fixed) {
-  // A `_` length (a variable declaration's) is the literal's element count;
-  // an element's `_` lengths are the first element's.
+  // A `_` length (a variable declaration's) is the literal's length; an
+  // element's `_` lengths are the first element's.
   if (fixed->isInferred()) {
     if (node->isEmpty()) {
       S.error(node->getLocation(),
@@ -1454,13 +1454,12 @@ Sema::ExprChecker::checkFixedArrayLiteral(ast::ArrayLiteralExpr *node,
                   "' no length: a fixed-size array has at least one element");
       return nullptr;
     }
-    fixed = S.Ctx.getFixedArrayType(
-        fixed->getElementType(), static_cast<int64_t>(node->getNumElements()));
+    fixed = S.Ctx.getFixedArrayType(fixed->getElementType(), node->getLength());
   }
   ast::Type *elemTy = fixed->getElementType();
-  if (static_cast<int64_t>(node->getNumElements()) != fixed->getLength()) {
+  if (node->getLength() != fixed->getLength()) {
     S.error(node->getLocation(),
-            "array literal has " + std::to_string(node->getNumElements()) +
+            "array literal has " + std::to_string(node->getLength()) +
                 " element(s), but '" + typeName(fixed) + "' has " +
                 std::to_string(fixed->getLength()));
     return nullptr;

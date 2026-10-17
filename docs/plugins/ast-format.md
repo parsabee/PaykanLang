@@ -145,6 +145,7 @@ to resolve, which reports unknown names.
 | `(member LOC EXPR NAME)` | `recv.field` |
 | `(subscript LOC EXPR EXPR)` | `arr[i]` |
 | `(array LOC EXPR...)` | `[a, b]` (`[]` parses, and Sema rejects it) |
+| `(array-repeat LOC EXPR INT)` | `[v; n]`, `INT` (at least 1) copies of `EXPR`: `[0; 3]` is `(array-repeat (int 0) 3)` |
 | `(tuple LOC EXPR EXPR EXPR...)` | `(a, b)`, at least two |
 | `(tuple-index LOC EXPR INT)` | `t.0` |
 | `(enum-value LOC NAME NAME)` | `Color::Red`: the enum's name (qualified if spelled so) and the variant |

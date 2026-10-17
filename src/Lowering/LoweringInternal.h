@@ -534,6 +534,11 @@ private:
   /// @p ty at @p addr.
   void forEachFixedRef(const Val &addr, ast::FixedArrayType *ty,
                        const std::function<void(Val)> &fn);
+  /// Call @p fn with the address of each of the slots @p from to @p to
+  /// (exclusive), @p stride bytes apart, of the memory at @p base: one by
+  /// one for a few, in a loop for more.
+  void forEachSlot(const Val &base, int64_t from, int64_t to, int64_t stride,
+                   const std::function<void(Val)> &fn);
   /// The address of element @p index of the fixed-size array @p array,
   /// after a bounds check.
   Val emitFixedElementAddress(ast::Expr *array, ast::Expr *index);
@@ -541,6 +546,9 @@ private:
   /// @p dst: a literal element by element, anything else copied.  @p e must
   /// not read @p dst (a new variable's storage).
   void emitFixedInit(ast::Expr *e, const Val &dst);
+  /// Initialise the array of type @p ft at @p dst from `[elem; n]`.
+  void emitFixedRepeat(ast::Expr *elem, ast::FixedArrayType *ft,
+                       const Val &dst);
   /// A fixed-size array variable @p name initialised with @p init (zero
   /// without one), declared in the current scope.
   void declareFixedVar(const std::string &name, ast::FixedArrayType *ty,

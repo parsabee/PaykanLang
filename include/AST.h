@@ -1588,21 +1588,32 @@ public:
   static bool classof(const ASTNode *N) { return N->getKind() == NK_TraitDecl; }
 };
 
-// Array literal expression: [expr, expr, ...] or []
+// Array literal expression: `[a, b, c]`, or `[v; n]`, `n` copies of one
+// value (`n` an integer literal).
 //
-// An empty literal ([]) requires an explicit type annotation on the
-// surrounding declaration; Sema rejects bare `y = []`.
-// A non-empty literal's element type is inferred by Sema.
+// Sema types it as a `T[n]` (Sema rejects `[]`, which parses): the length is
+// the number of elements, or the repeat count.  The repeated value is
+// evaluated once, so `[Node(); 3]` holds one object three times.
 class ArrayLiteralExpr : public Expr {
   std::vector<Expr *> Elements;
+  // The `n` of `[v; n]` (its single element is `v`), or 0 for a list.
+  int64_t RepeatCount;
 
 public:
-  ArrayLiteralExpr(SourceLocation loc, std::vector<Expr *> elems)
-      : Expr(NK_ArrayLiteralExpr, loc), Elements(std::move(elems)) {}
+  ArrayLiteralExpr(SourceLocation loc, std::vector<Expr *> elems,
+                   int64_t repeatCount = 0)
+      : Expr(NK_ArrayLiteralExpr, loc), Elements(std::move(elems)),
+        RepeatCount(repeatCount) {}
 
   const std::vector<Expr *> &getElements() const { return Elements; }
   size_t getNumElements() const { return Elements.size(); }
   bool isEmpty() const { return Elements.empty(); }
+  bool isRepeat() const { return RepeatCount != 0; }
+  int64_t getRepeatCount() const { return RepeatCount; }
+  // The array's length: the number of elements, or the repeat count.
+  int64_t getLength() const {
+    return isRepeat() ? RepeatCount : static_cast<int64_t>(Elements.size());
+  }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_ArrayLiteralExpr;
@@ -1626,11 +1637,11 @@ public:
   }
 };
 
-// Tuple type: (T1, T2, ...)  (e.g. (int, Str), (int, (Str, bool))[])
+// Tuple type: (T1, T2, ...)  (e.g. (int, Str), (int, (Str, bool))[2])
 //
-// A fixed-arity (>= 2), heterogeneous, immutable product type.  Like arrays,
-// a tuple value is a heap-allocated Obj subtype at runtime (see
-// src/Runtime/Tuple.c), so it flows through ARC exactly like a class value.
+// A fixed-arity (>= 2), heterogeneous, immutable product type.  A tuple
+// value is a heap-allocated Obj subtype at runtime (see src/Runtime/Tuple.c),
+// so it flows through ARC exactly like a class value.
 // The parser allocates a source-located node per annotation; Sema resolves
 // each one to the canonical instance interned by ASTContext::getTupleType, so
 // resolved tuple types compare by pointer identity.

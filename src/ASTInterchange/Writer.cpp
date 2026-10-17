@@ -640,11 +640,19 @@ private:
       close();
       return;
     }
-    case ASTNode::NK_ArrayLiteralExpr:
-      open("array", e);
-      exprs(cast<ArrayLiteralExpr>(e)->getElements());
+    case ASTNode::NK_ArrayLiteralExpr: {
+      const auto *a = cast<ArrayLiteralExpr>(e);
+      if (a->isRepeat()) {
+        open("array-repeat", a);
+        expr(a->getElements().front());
+        OS << " " << a->getRepeatCount();
+      } else {
+        open("array", a);
+        exprs(a->getElements());
+      }
       close();
       return;
+    }
     case ASTNode::NK_SubscriptExpr: {
       const auto *s = cast<SubscriptExpr>(e);
       open("subscript", s);

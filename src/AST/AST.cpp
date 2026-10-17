@@ -313,7 +313,8 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
     std::vector<Expr *> elems;
     for (auto *el : a->getElements())
       elems.push_back(cloneExpr(el));
-    return Ctx.make<ArrayLiteralExpr>(loc, std::move(elems));
+    return Ctx.make<ArrayLiteralExpr>(loc, std::move(elems),
+                                      a->getRepeatCount());
   }
   case ASTNode::NK_SubscriptExpr: {
     auto *s = cast<SubscriptExpr>(e);
