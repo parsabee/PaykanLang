@@ -1,0 +1,6 @@
+// ERROR: 'peek' returns a borrow ('-> view'); it cannot be a function value yet
+fn peek(s: view Str) -> view Str { return s; }
+fn main() -> int {
+  p = peek;
+  return 0;
+}

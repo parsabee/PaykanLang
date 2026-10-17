@@ -1,0 +1,108 @@
+// 53 — function types: functions as values, lambdas and their captures
+// Exercises: the `(T1, T2) -> R` type with `view` and `inout` parameter
+//            modes and a tuple or function result; named functions (free,
+//            `static fn`) as values; lambdas `fn(x: int) -> int { ... }`
+//            that capture variables by copy (values copied, objects shared);
+//            function values held in variables, fields of classes and
+//            structs, array and tuple elements, optionals and generics;
+//            calls through each of them (`f(x)`, `obj.cb(x)`, `fs[0](x)`,
+//            `make()(x)`); closures returned from functions and methods (a
+//            method's lambda shares `self`); identity equality of closures.
+// Every closure is a reference: copying one shares it, and it is released
+// when the last holder lets go, together with the captures it owns.
+
+fn square(x: int) -> int { return x * x; }
+fn plus(a: int, b: int) -> int { return a + b; }
+
+fn apply(f: (int) -> int, x: int) -> int { return f(x); }
+
+fn compose(f: (int) -> int, g: (int) -> int) -> (int) -> int {
+  return fn(x: int) -> int { return g(f(x)); };
+}
+
+fn sumWith(xs: view int[], f: (view int) -> int) -> int {
+  total = 0;
+  i = 0;
+  while (i < xs.len()) {
+    total = total + f(xs[i]);
+    i = i + 1;
+  }
+  return total;
+}
+
+fn divmod(a: int, b: int) -> (int, int) { return (a / b, a % b); }
+
+fn bump(n: inout int, by: int) { n = n + by; }
+
+fn mapFirst<T, U>(xs: view T[], f: (view T) -> U) -> U { return f(xs[0]); }
+
+class Button {
+  label: Str;
+  onClick: (Str) -> Str;
+  fn click() -> Str { return self.onClick(self.label); }
+}
+
+class Counter {
+  n: int;
+  fn make() -> () -> int { return fn() -> int { return self.n; }; }   // shares self
+  fn adder() -> (int) -> void { return fn(d: int) { self.n = self.n + d; }; }
+}
+
+struct Op {
+  name: Str;
+  run: (int, int) -> int;
+}
+
+impl Op {
+  static fn twice(x: int) -> int { return x + x; }
+}
+
+fn main() -> int {
+  // Named functions and lambdas as values, called through a variable.
+  sq = square;
+  n = 10;
+  addN = fn(x: int) -> int { return x + n; };          // copies n now
+  n = 20;                                              // ...so this is not seen
+  println(Str(apply(sq, 3)) + " " + Str(addN(1)) + " " + Str(apply(Op::twice, 4)));
+
+  // Modes and tuple results in a function type.
+  dm: (int, int) -> (int, int) = divmod;
+  b: (inout int, int) -> void = bump;
+  k = 5;
+  b(k, 2);
+  println(Str(dm(17, 5).0) + " " + Str(dm(17, 5).1) + " " + Str(k));
+
+  // Composition: a closure that captures two function values.
+  h = compose(sq, addN);                               // addN(sq(x))
+  println(Str(h(3)) + " " + Str(sumWith([1, 2, 3], fn(x: view int) -> int { return x * 2; })));
+
+  // Fields of a class and of a struct; elements of an array and a tuple.
+  btn = Button("ok", fn(l: Str) -> Str { return l + "!"; });
+  op = Op("plus", plus);
+  fs: ((int) -> int)[2] = [sq, h];
+  t: ((int, int) -> int, Str) = (plus, "t");
+  println(btn.click() + " " + Str(op.run(2, 3)) + " " + Str(fs[1](1)) + " " +
+          Str(t.0(4, 5)) + " " + Str(compose(fs[0], fs[1])(2)));
+
+  // A method's lambda shares its object.
+  c = Counter(1);
+  get = c.make();
+  add = c.adder();
+  add(41);
+  println(Str(get()) + " " + Str(c.n));
+
+  // Generics infer type parameters through a function type; optionals hold
+  // closures and `match` unwraps them.
+  s = mapFirst(["a", "bb"], fn(x: view Str) -> Str { return x + x; });
+  opt: ((int) -> int)? = None;
+  if (s == "aa") { opt = sq; }
+  match opt {
+    f: (int) -> int { println(s + " " + Str(f(6))); }
+    None { println("none"); }
+  }
+
+  // Closures are references: equal only to themselves.
+  g = h;
+  println(Str(g == h) + " " + Str(h == sq) + " " + Str(fs[1] == h));
+  return apply(addN, 2);
+}

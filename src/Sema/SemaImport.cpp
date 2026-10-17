@@ -53,26 +53,57 @@ static ast::Type *parseExportedType(ast::ASTContext &ctx,
                                     const std::string &text, size_t &pos) {
   ast::Type *ty = nullptr;
   if (pos < text.size() && text[pos] == '(') {
+    // `(T1, T2)`, a tuple type, or `(view T1, T2) -> R`, a function type
+    // (`() -> R` takes no parameter), as typeName spells them; a function
+    // type in parentheses takes a suffix, `((int) -> int)?`.
     ++pos;
     std::vector<ast::Type *> elems;
-    for (;;) {
-      ast::Type *elem = parseExportedType(ctx, text, pos);
-      if (!elem)
+    std::vector<ast::ParamMode> modes;
+    bool anyMode = false;
+    if (pos < text.size() && text[pos] == ')') {
+      ++pos;
+    } else {
+      for (;;) {
+        ast::ParamMode mode = ast::ParamMode::Value;
+        if (text.compare(pos, 5, "view ") == 0) {
+          mode = ast::ParamMode::View;
+          pos += 5;
+        } else if (text.compare(pos, 6, "inout ") == 0) {
+          mode = ast::ParamMode::Inout;
+          pos += 6;
+        }
+        anyMode |= mode != ast::ParamMode::Value;
+        ast::Type *elem = parseExportedType(ctx, text, pos);
+        if (!elem)
+          return nullptr;
+        elems.push_back(elem);
+        modes.push_back(mode);
+        if (text.compare(pos, 2, ", ") == 0) {
+          pos += 2;
+          continue;
+        }
+        if (pos < text.size() && text[pos] == ')') {
+          ++pos;
+          break;
+        }
         return nullptr;
-      elems.push_back(elem);
-      if (text.compare(pos, 2, ", ") == 0) {
-        pos += 2;
-        continue;
       }
-      if (pos < text.size() && text[pos] == ')') {
-        ++pos;
-        break;
-      }
-      return nullptr;
     }
-    if (elems.size() < 2)
+    if (text.compare(pos, 4, " -> ") == 0) {
+      pos += 4;
+      ast::Type *ret = parseExportedType(ctx, text, pos);
+      if (!ret)
+        return nullptr;
+      return ctx.getFunctionType(std::move(elems), std::move(modes), ret);
+    }
+    if (anyMode)
       return nullptr;
-    ty = ctx.getTupleType(std::move(elems));
+    if (elems.size() == 1 && ast::isa<ast::FunctionType>(elems[0]))
+      ty = elems[0];
+    else if (elems.size() < 2)
+      return nullptr;
+    else
+      ty = ctx.getTupleType(std::move(elems));
   } else {
     size_t start = pos;
     while (pos < text.size() && text[pos] != ',' && text[pos] != ')' &&

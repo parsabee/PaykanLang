@@ -1,0 +1,5 @@
+// ERROR: a function type's result is a copy: '-> view T' is not supported in a function type
+fn main() -> int {
+  f: (int) -> view Str = g;
+  return 0;
+}

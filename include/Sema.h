@@ -97,7 +97,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     View,
     ViewLocal,
     ViewBinding,
-    Inout
+    Inout,
+    /// A variable of an enclosing function, captured by copy by a lambda
+    /// (docs/language/15-function-types.md): read-only inside it.
+    Captured
   };
 
   /// A single lexical scope. Each scope has its own local bindings and a
@@ -128,6 +131,47 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   };
 
   Scope *CurrentScope = nullptr;
+
+  // -- Lambdas (SemaLambda.cpp, docs/language/15-function-types.md)
+
+  struct ClassContext;
+  struct FunctionSig;
+  struct MethodUse;
+  /// A lambda whose body is being checked: its node, the scope its
+  /// parameters live in (the names used inside that resolve outside it are
+  /// captured, and declared there as Captured copies), and the method
+  /// context it was written in (whose `self` it may capture).
+  struct LambdaContext {
+    ast::LambdaExpr *Node;
+    Scope *Boundary;
+    const ClassContext *Outer;
+    /// The enclosing method's use of `self`: capturing `self` counts as
+    /// changing it (the closure may, later).
+    MethodUse *OuterUse;
+  };
+  std::vector<LambdaContext> LambdaStack;
+  /// Check a lambda: its signature, its body as a function's, and the
+  /// variables it captures.  Its function type, or nullptr after an error.
+  ast::Type *checkLambda(ast::LambdaExpr *node);
+  /// Record that the enclosing lambdas capture the variable @p name (of type
+  /// @p ty, bound in @p owner) when it is bound outside them; false (after
+  /// reporting it) when it cannot be captured.
+  bool captureVariable(const std::string &name, ast::Type *ty, Scope *owner,
+                       ast::SourceLocation loc);
+  /// The function type a function value of signature @p sig has.
+  ast::FunctionType *functionTypeOf(const FunctionSig &sig);
+  /// Whether the function @p name may be a value (`f = square;`): a
+  /// function of the program with a signature a function type can spell;
+  /// reports why not otherwise.
+  bool checkFunctionValue(const std::string &name, const FunctionSig &sig,
+                          ast::SourceLocation loc);
+  /// Check a call of the function value of type @p fnt (`f(args)`, a call
+  /// through a variable or a field) named @p what in diagnostics: the
+  /// arguments' types and modes.  The result type, or nullptr.
+  ast::Type *checkFunctionValueCall(ast::FunctionType *fnt,
+                                    const std::vector<ast::Expr *> &args,
+                                    const std::string &what,
+                                    ast::SourceLocation loc);
 
   /// The kind of variable @p name where it is bound (innermost first).
   VarKind varKind(std::string_view name) const;

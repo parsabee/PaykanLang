@@ -128,8 +128,10 @@ defaults:
     values: { title: The standard library, parent: Language reference, nav_order: 13 }
   - scope: { path: language/14-structs.md }
     values: { title: Structs, parent: Language reference, nav_order: 14 }
+  - scope: { path: language/15-function-types.md }
+    values: { title: Function types and lambdas, parent: Language reference, nav_order: 15 }
   - scope: { path: grammar.md }
-    values: { title: Grammar, parent: Language reference, nav_order: 15 }
+    values: { title: Grammar, parent: Language reference, nav_order: 16 }
 
   # The implementation: IR, backends, plugins
   - scope: { path: internals.md }

@@ -128,6 +128,19 @@ p.x = 5;                            // assigned in place
 println(p);                         // Point(x: 5, y: 2)
 ```
 
+### Function types
+
+`(T1, T2) -> R` is the type of a function value: a lambda, `fn(x: int) -> int { return
+x + 1; }`, or a named function used without calling it. A function value is a closure, a
+reference holding the variables the lambda captured (by copy), called like a function.
+See `15-function-types.md`.
+
+```pkn
+square = fn(x: int) -> int { return x * x; };
+apply: ((int) -> int, int) -> int = fn(f: (int) -> int, x: int) -> int { return f(x); };
+n = apply(square, 3);               // 9
+```
+
 ### Class Types (vtable-bearing, heap-allocated, reference-counted)
 
 `Obj` is the root of the class hierarchy. Every class transitively extends it. It defines:

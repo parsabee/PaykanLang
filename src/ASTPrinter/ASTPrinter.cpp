@@ -442,6 +442,23 @@ void ASTPrinter::visitTupleType(TupleType *node) {
   }
 }
 
+void ASTPrinter::visitFunctionType(FunctionType *node) {
+  // "FunctionType 2 params view 1 ->": the modes of the parameters that have
+  // one (by index), then the parameter types and the result type as children.
+  header("FunctionType", node);
+  OS << " " << node->getNumParams() << " params";
+  for (size_t i = 0; i < node->getNumParams(); ++i)
+    if (node->getMode(i) != ParamMode::Value)
+      OS << ' ' << paramModeName(node->getMode(i)) << ' ' << i;
+  OS << " ->\n";
+  for (size_t i = 0; i < node->getNumParams(); ++i) {
+    ChildScope cs(*this, false);
+    visit(node->getParamType(i));
+  }
+  ChildScope cs(*this, true);
+  visit(node->getReturnType());
+}
+
 void ASTPrinter::visitStructType(StructType *node) {
   header("StructType", node);
   OS << " '" << node->getName() << "'\n";
@@ -457,6 +474,37 @@ void ASTPrinter::visitSliceType(SliceType *node) {
 void ASTPrinter::visitPoisonType(PoisonType *node) {
   header("PoisonType", node);
   OS << "\n";
+}
+
+void ASTPrinter::visitCallValueExpr(CallValueExpr *node) {
+  header("CallValueExpr", node);
+  OS << " " << node->getNumArguments() << " args\n";
+  {
+    ChildScope cs(*this, node->getNumArguments() == 0);
+    visit(node->getCallee());
+  }
+  for (size_t i = 0; i < node->getNumArguments(); ++i) {
+    ChildScope cs(*this, i + 1 == node->getNumArguments());
+    visit(node->getArguments()[i]);
+  }
+}
+
+void ASTPrinter::visitLambdaExpr(LambdaExpr *node) {
+  // Like a FuncDecl without a name: the modes of the parameters that have
+  // one, `->` when it has a result type, then the result type and the body.
+  header("LambdaExpr", node);
+  for (const Param &p : node->getParams())
+    if (p.Mode != ParamMode::Value)
+      OS << ' ' << paramModeName(p.Mode) << " '" << p.getName() << "'";
+  if (node->getReturnType())
+    OS << " ->";
+  OS << "\n";
+  if (node->getReturnType()) {
+    ChildScope cs(*this, false);
+    visit(node->getReturnType());
+  }
+  ChildScope cs(*this, true);
+  visit(node->getBody());
 }
 
 void ASTPrinter::visitTupleLiteralExpr(TupleLiteralExpr *node) {

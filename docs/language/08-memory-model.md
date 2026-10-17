@@ -37,6 +37,7 @@ The category of a type decides how it is stored and whether ARC applies.
 | **Array** | `T[n]` of any element type | Inline in the variable, the field or the enclosing array | Elements copied; reference elements retained |
 | **Tuple** | `(T1, T2, ...)` of any element types | Inline in the variable, the field or the enclosing array or tuple | Elements copied; reference elements retained |
 | **Struct** | `struct Name { ... }` of any field types | Inline, like a tuple of its fields | Fields copied; reference fields retained |
+| **Function value** | `(T1, T2) -> R`: a lambda or a named function | Heap: a closure object holding the captured variables (copied when the lambda is made) | Reference shared; count adjusted; the captures are released with the closure |
 | **Reference** | class instances, `Str`, `File`, `Error`, optionals `T?` of these | Heap | Reference shared; count adjusted |
 
 A value type has no identity beyond its bits: assigning one `int` to another produces two
@@ -228,6 +229,10 @@ are not collected and will leak.** PaykanLang currently has no cycle collector a
 references. Until weak references land, avoid building reference cycles among long-lived objects,
 or break them explicitly by overwriting one of the linking fields before the objects go out of
 scope.
+
+A closure is an object too, and its captures are its fields: a lambda that captures an object
+and is then stored in that object (`h.cb = fn() -> int { return h.n; };`) forms a cycle like any
+other, and leaks the same way unless the field is overwritten before `h` goes out of scope.
 
 ---
 

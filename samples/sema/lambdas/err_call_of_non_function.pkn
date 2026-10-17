@@ -1,0 +1,5 @@
+// ERROR: 'n' has type 'int', which is not a function type; it cannot be called
+fn main() -> int {
+  n = 1;
+  return n(2);
+}

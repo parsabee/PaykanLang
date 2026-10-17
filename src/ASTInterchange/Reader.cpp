@@ -961,6 +961,29 @@ private:
                nullptr;
       return Ctx.make<TupleType>(loc, std::move(elems));
     }
+    if (e.Text == "fn-type") {
+      const SExpr *pl = f.list("params");
+      if (!pl)
+        return nullptr;
+      std::vector<Type *> params;
+      std::vector<ParamMode> modes;
+      for (const SExpr &p : pl->Items) {
+        if (p.K != SExpr::List || p.Text != "param")
+          return fail(p, "expected a parameter: (param TYPE)"), nullptr;
+        Fields pf(*this, p);
+        Type *pty = type(pf, "the parameter's type");
+        ParamMode mode = ParamMode::Value;
+        if (!pty || !paramMode(pf, mode) || !pf.done())
+          return nullptr;
+        params.push_back(pty);
+        modes.push_back(mode);
+      }
+      Type *ret = type(f, "the result type");
+      if (!ret || !f.done())
+        return nullptr;
+      return Ctx.make<FunctionType>(loc, std::move(params), std::move(modes),
+                                    ret);
+    }
     if (e.Text == "generic-type") {
       const std::string *name = f.name("the generic type's name");
       if (!name)
@@ -979,7 +1002,7 @@ private:
     return fail(e, "(" + e.Text +
                        " ...) is not a type (named-type, array-type, "
                        "fixed-array-type, optional-type, tuple-type, "
-                       "generic-type)"),
+                       "fn-type, generic-type)"),
            nullptr;
   }
 
@@ -1354,6 +1377,44 @@ private:
     } else if (t == "mov") {
       return fail(e, "(mov ...): " + std::string(frontend::kMovRemoved)),
              nullptr;
+    } else if (t == "call-value") {
+      Expr *callee = expr(f, "the function value");
+      if (!callee)
+        return nullptr;
+      std::vector<Expr *> args;
+      while (!f.atEnd()) {
+        Expr *a = expr(f, "an argument");
+        if (!a)
+          return nullptr;
+        args.push_back(a);
+      }
+      return Ctx.make<CallValueExpr>(loc, callee, std::move(args));
+    } else if (t == "lambda") {
+      const SExpr *pl = f.list("params");
+      if (!pl)
+        return nullptr;
+      std::vector<Param> params;
+      for (const SExpr &p : pl->Items) {
+        if (p.K != SExpr::List || p.Text != "param")
+          return fail(p, "expected (param \"name\" TYPE)"), nullptr;
+        Fields pf(*this, p);
+        const std::string *pname = pf.name("the parameter's name");
+        Type *pty = pname ? type(pf, "the parameter's type") : nullptr;
+        ParamMode mode = ParamMode::Value;
+        if (!pty || !paramMode(pf, mode) || !pf.done())
+          return nullptr;
+        params.push_back({pname, pty, mode});
+      }
+      Type *ret = nullptr;
+      if (!f.absent()) {
+        ret = type(f, "the result type or _");
+        if (!ret)
+          return nullptr;
+      }
+      CompoundStmt *body = block(f, "the lambda's body");
+      if (!body || !f.done())
+        return nullptr;
+      return Ctx.make<LambdaExpr>(loc, std::move(params), ret, body);
     } else if (t == "tuple") {
       std::vector<Expr *> elems;
       if (!exprs(f, elems))

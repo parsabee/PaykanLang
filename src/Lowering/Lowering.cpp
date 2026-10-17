@@ -268,6 +268,17 @@ Type ModuleLowering::toPIRType(ast::Type *ty) {
   return Type::Void;
 }
 
+// static
+bool ModuleLowering::isFunctionValueExpr(const ast::Expr *expr) {
+  if (ast::isa<ast::LambdaExpr>(expr))
+    return true;
+  if (auto *id = ast::dyn_cast<ast::Identifier>(expr))
+    return id->isFunctionRef();
+  if (auto *ev = ast::dyn_cast<ast::EnumValueExpr>(expr))
+    return ev->getFunctionRef() != nullptr;
+  return false;
+}
+
 bool ModuleLowering::isObjectElementType(ast::Type *elemTy) const {
   if (!elemTy)
     return false;
@@ -632,6 +643,9 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
   // An optional of a value type is a value, never a box.
   if (valueOptionalType(expr))
     return false;
+  // A function value is a closure's box, fresh (LoweringClosure.cpp).
+  if (isFunctionValueExpr(expr))
+    return true;
   // An array's (or a slice's or a tuple's) element slot holds the box
   // itself.
   if (ast::isa<ast::SubscriptExpr>(expr) || ast::isa<ast::TupleIndexExpr>(expr))
@@ -657,6 +671,8 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
 bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
   if (valueOptionalType(expr))
     return false;
+  if (isFunctionValueExpr(expr))
+    return true;
   // A struct's field is an element of a value held in memory, like a
   // tuple's; a class's is in its object.
   auto structField = [](const ast::Expr *e) {

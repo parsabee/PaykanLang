@@ -99,6 +99,7 @@ or more.
 | `(fixed-array-type LOC TYPE INT)` | `T[n]`, a fixed-size array of `INT` (at least 1) elements: `int[3]` is `(fixed-array-type (named-type "int") 3)`. `INT` can be the symbol `_` instead, a length inferred from the initializer (`int[_]`) |
 | `(optional-type LOC TYPE)` | `T?` (not of `void`, not of another optional) |
 | `(tuple-type LOC TYPE TYPE TYPE...)` | `(T1, T2, ...)`, at least two |
+| `(fn-type LOC (params (param TYPE QUAL?)...) TYPE)` | a function type ([`../language/15-function-types.md`](../language/15-function-types.md)): `(int, view Str) -> bool` is `(fn-type (params (param (named-type "int")) (param (named-type "Str") (qual view))) (named-type "bool"))`; the result type is never `_` (`void` is `(named-type "void")`) |
 | `(generic-type LOC NAME TYPE TYPE...)` | `Box<int>`, `Pair<Str, int>`, `m::Box<int>` |
 
 A `named-type` is resolved the way the recursive-descent frontend resolves a
@@ -149,6 +150,8 @@ to resolve, which reports unknown names.
 | `(array-repeat LOC EXPR INT)` | `[v; n]`, `INT` (at least 1) copies of `EXPR`: `[0; 3]` is `(array-repeat (int 0) 3)` |
 | `(tuple LOC EXPR EXPR EXPR...)` | `(a, b)`, at least two |
 | `(tuple-index LOC EXPR INT)` | `t.0` |
+| `(lambda LOC (params PARAM...) TYPE? BLOCK)` | a lambda, `fn(x: int) -> int { ... }`: the parameters and the result type (`_` for none) as a `fn`'s, then the body |
+| `(call-value LOC EXPR EXPR...)` | a call of a function value that is not named, `xs[0](1)`, `t.0(x)`: the callee, then the arguments (`f(1)` with `f` a variable is a `call`, `obj.cb(1)` with `cb` a field a `method-call`) |
 | `(enum-value LOC NAME NAME)` | `Color::Red`: the enum's name (qualified if spelled so) and the variant |
 
 Parentheses in the source are not nodes: `(a + b) * c` is

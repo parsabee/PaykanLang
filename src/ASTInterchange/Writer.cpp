@@ -335,6 +335,24 @@ private:
       for (const Type *e : tt->getElementTypes())
         type(e);
       close();
+    } else if (const auto *fnt = dyn_cast<FunctionType>(t)) {
+      // Each parameter is (param TYPE QUAL?), as a function's without the
+      // name; then the result type.
+      open("fn-type", fnt);
+      open("params");
+      for (size_t i = 0; i < fnt->getNumParams(); ++i) {
+        open("param");
+        type(fnt->getParamType(i));
+        if (fnt->getMode(i) != ParamMode::Value) {
+          open("qual");
+          sym(paramModeName(fnt->getMode(i)));
+          close();
+        }
+        close();
+      }
+      close();
+      type(fnt->getReturnType());
+      close();
     } else if (const auto *gt = dyn_cast<GenericType>(t)) {
       open("generic-type", gt);
       str(gt->getName());
@@ -690,6 +708,37 @@ private:
       exprs(cast<TupleLiteralExpr>(e)->getElements());
       close();
       return;
+    case ASTNode::NK_CallValueExpr: {
+      const auto *c = cast<CallValueExpr>(e);
+      open("call-value", c);
+      expr(c->getCallee());
+      exprs(c->getArguments());
+      close();
+      return;
+    }
+    case ASTNode::NK_LambdaExpr: {
+      // (lambda LOC (params PARAM...) TYPE? BLOCK), the parameters and the
+      // result as a function's.
+      const auto *l = cast<LambdaExpr>(e);
+      open("lambda", l);
+      open("params");
+      for (const Param &p : l->getParams()) {
+        open("param");
+        str(p.getName());
+        type(p.ParamType);
+        if (p.Mode != ParamMode::Value) {
+          open("qual");
+          sym(paramModeName(p.Mode));
+          close();
+        }
+        close();
+      }
+      close();
+      optionalType(l->getReturnType());
+      stmt(l->getBody());
+      close();
+      return;
+    }
     case ASTNode::NK_TupleIndexExpr: {
       const auto *t = cast<TupleIndexExpr>(e);
       open("tuple-index", t);

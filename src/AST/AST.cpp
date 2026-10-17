@@ -268,6 +268,22 @@ Type *ASTCloner::cloneType(Type *ty) {
       return ty;
     return Ctx.make<TupleType>(tt->getLocation(), std::move(elems));
   }
+  if (auto *fnt = dyn_cast<FunctionType>(ty)) {
+    bool changed = Foreign;
+    std::vector<Type *> params;
+    params.reserve(fnt->getNumParams());
+    for (auto *p : fnt->getParamTypes()) {
+      Type *c = cloneType(p);
+      changed |= c != p;
+      params.push_back(c);
+    }
+    Type *ret = cloneType(fnt->getReturnType());
+    changed |= ret != fnt->getReturnType();
+    if (!changed)
+      return ty;
+    return Ctx.make<FunctionType>(fnt->getLocation(), std::move(params),
+                                  fnt->getModes(), ret);
+  }
   // Nothing else is written in a template.
   return ty;
 }
@@ -361,6 +377,24 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
     auto *ti = cast<TupleIndexExpr>(e);
     return Ctx.make<TupleIndexExpr>(loc, cloneExpr(ti->getTuple()),
                                     ti->getIndex());
+  }
+  case ASTNode::NK_CallValueExpr: {
+    auto *c = cast<CallValueExpr>(e);
+    std::vector<Expr *> args;
+    for (auto *a : c->getArguments())
+      args.push_back(cloneExpr(a));
+    return Ctx.make<CallValueExpr>(loc, cloneExpr(c->getCallee()),
+                                   std::move(args));
+  }
+  case ASTNode::NK_LambdaExpr: {
+    // The copy has no captures: Sema records them when it checks the copy.
+    auto *l = cast<LambdaExpr>(e);
+    std::vector<Param> params;
+    for (const Param &p : l->getParams())
+      params.push_back(Param{&in(p.getName()), cloneType(p.ParamType), p.Mode});
+    return Ctx.make<LambdaExpr>(loc, std::move(params),
+                                cloneType(l->getReturnType()),
+                                cloneCompound(l->getBody()));
   }
   default:
     break;

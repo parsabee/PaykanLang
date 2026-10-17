@@ -1,0 +1,198 @@
+# Function types and lambdas
+
+The design behind `docs/language/15-function-types.md`: what a function value
+is, what it may capture, how it is called, and how it is laid out at run time.
+The decisions were made to fit the language as it is (values held in place,
+objects behind reference-counted boxes, `view` / `inout` borrows checked at
+compile time) and to need no change to the PIR format, the runtime ABI or the
+`.pkm` format, whose versions stay fixed until 0.2.0.  The open questions at
+the end are the ones a reviewer should answer; each has the default this
+implementation takes.
+
+## Summary of the decisions
+
+| Topic | Decision |
+|-------|----------|
+| Type syntax | `(T1, T2) -> R`; `() -> R` for no parameters; `-> void` for no result; a parameter may have a mode, `(view Str, inout int) -> bool`; `->` is right-associative, and a function type is parenthesised to take a suffix (`((int) -> int)[3]`, `((int) -> int)?`) |
+| Values | a lambda `fn(x: int) -> int { return x + 1; }`, or a named function used without calling it (`square`, `m::square`): a free function of the module or an import, a `static fn` (`Point::origin`), not a method, a constructor, a builtin or an uninstantiated generic |
+| Representation | a reference type: a value is a shared, reference-counted object (a *closure*) holding a code pointer and its captures; copying one shares it, like an object; it is not an `Obj`, `==` is identity (the same closure), and it has no `toString` or `hash` |
+| Captures | a lambda copies, when it is made, each variable of the enclosing function it uses (an `int` is copied, an object or a `Str` is retained, a struct or a tuple is copied like an assignment); only a plain variable (a local or a by-value parameter) or a class method's `self` can be captured, never a `view` or `inout` name, a `view fn`'s `self` or a struct's `self`; inside the lambda a captured name is read-only |
+| Calls | `f(args)` where `f` is a variable or parameter of function type, `obj.f(args)` where `f` is a field of function type (and `self.f(args)`), with the arguments checked and passed exactly as for the function's own parameters, modes included |
+| Nominal? | structural: two function types are the same when their parameter types, modes and result type are |
+| Generics | a function type may name type parameters (`fn map<T, U>(xs: view T[], f: (view T) -> U)`), and a function value is a type argument (`List<(int) -> int>`) |
+| Optionals | `((int) -> int)?` is a nullable reference, unwrapped with `match` like an optional object |
+| Modules | a function type crosses a module boundary in a signature or a field like any type; a closure made in one module is called in another through its vtable |
+| Not yet | borrowed results (`-> view T`) in a function type; methods as values (`p.shift` bound to `p`); generic lambdas; a lambda capturing a `view`, an `inout` or a struct's `self`; printing a function value |
+
+## Syntax
+
+```
+functionType ::= "(" ( paramType ( "," paramType )* )? ")" "->" typeAnnotation
+paramType    ::= ( "view" | "inout" )? typeAnnotation
+lambda       ::= "fn" "(" paramList? ")" ( "->" typeAnnotation )? block
+```
+
+`(int) -> bool` is a function type and `(int, Str)` a tuple type: after the
+closing `)`, `->` decides.  `(T)` alone stays an error (there are no
+parenthesised types) unless `T` is a function type: `((int) -> int)[3]` is an
+array of three functions, `((int) -> int)?` an optional function, and
+`(int) -> int[]` a function returning a slice-less error (its result is
+`int[]`, which is not a type a result may have).  The result of a function
+type is any type, `void` included (`(int) -> void` is the type of
+`fn log(n: int) { ... }`); `-> view T` and `-> inout T` are rejected.
+
+A lambda is written like a function without a name, in expression position:
+`fn(x: int) -> int { return x * 2; }`.  Its parameters are annotated (there is
+no inference of a lambda's parameter types from the context yet), its result
+type is written or `void`, and its body is a block (no expression bodies).
+`view fn(...)` is not a lambda: `view` qualifies methods.
+
+## Typing
+
+* A function type is canonical: `ASTContext::getFunctionType(params, modes,
+  result)` returns one node per shape, so type identity is pointer identity,
+  as for tuples and optionals.  `typeName` spells it as written, so it round
+  trips through a `.pkm` interface and reads naturally in diagnostics.
+* Assignability is identity: no variance in parameters or results (a
+  `(Dog) -> int` is not an `(Animal) -> int`), no mode dropping.  `int ->
+  float` promotion does not apply to function types.
+* A named function used as a value has the type of its signature.  A
+  generic function must be instantiated to be a value, and that is not
+  supported yet (`first<int>` as a value).  A builtin (`print`, a conversion,
+  a constructor) is not a value: it has no single signature or is not a
+  function.
+* A lambda's type is the function type of its signature.  Its body is
+  checked as a function body: `return` matches its result type, a non-void
+  body returns on every path, `break` and `continue` do not reach out of it.
+* `sharesStorage` is true for a function type: a `view` of one is read or
+  passed on, never stored, like a `view` of an object.
+
+## Captures
+
+A lambda may use the variables of the function (or method, or lambda) it is
+written in.  Each such variable is *captured by copy* when the lambda
+expression is evaluated: the closure holds a copy of the variable's value as
+it was then, as a struct field would.  A reference (an object, a `Str`, an
+array, an optional of one) is retained; a value held in place (a struct, a
+tuple) is copied with its references retained.  Later assignments to the
+variable do not reach the closure, and the closure does not change the
+variable.
+
+Inside the lambda a captured name is read-only: it cannot be assigned, passed
+to an `inout` parameter, have a field or an element assigned (when it is a
+value held in place) or be the subject of a changing method call.  An object
+reached through a captured reference can still be changed, as an object held
+by two variables can.  The reason: the closure's copy would be the one
+changed, which the program could not see and which would persist across calls
+(a closure is not meant to be a mutable cell; use an object for that).
+
+What cannot be captured: a `view` or `inout` parameter, a `view` or `inout`
+local, a `match` binding of one (they are borrows that end with the function;
+a closure may outlive it), `self` in a `view fn` (the copy could change the
+object the `view fn` promised not to), and `self` in a struct's method (it is
+the receiver's storage, not a value).  `self` in a class's method that is not
+a `view fn` is captured as a reference to the object, like any object.
+
+The capture set is computed by Sema (the names the body uses that resolve
+outside the lambda) and recorded on the `LambdaExpr`, in first-use order.
+
+## Run-time representation
+
+A closure is an object of a class the lowering synthesises per lambda (and
+per named function used as a value): two-word header, then one field per
+capture; its vtable is `[destroy, toString, equals, call]`, the first three
+the runtime's object defaults (`PaykanObject_toString`, `PaykanObject_equals`)
+and a generated `destroy` that releases the captures.  Slot 3, `call`, has the
+signature `(obj self, params...) -> result` with the parameters passed as a
+method's are (a `view` reference as a borrowed box, an `inout` as the address
+of the caller's storage, a value held in memory by address, a result held in
+memory through a trailing pointer).  So:
+
+* a function value is a `box` in PIR, retained and released like an object's;
+* `f(args)` lowers to `unbox` the variable's box, then `vcall` slot 3 with
+  the function type's signature and no class name (the verifier checks the
+  signature, which is all a call site knows): no new PIR instruction;
+* a lambda expression lowers to `new` of its class, a `field.store` per
+  capture (a reference retained, a value held in memory copied and its
+  references retained) and `box`, a fresh owned box like a constructor's;
+* a named function as a value is a closure class with no captures whose
+  `call` forwards its parameters to the function (ownership passes through:
+  the callee consumes the boxes `call` was given);
+* a `PaykanType` descriptor for a function type (a generic native function's
+  argument) is an object's: one reference at offset 0.
+
+The classes are module items like any other, named `fn.N` (a lambda) and
+`fn.ref.<function>` (a named function): names no Paykan identifier can spell,
+mangled by the C backend like `Box<int>`.  A closure crosses modules as a
+box: the module that calls it needs only its signature.  Nothing is added to
+the runtime: the vtable layout is an object's, so `Paykan_release` destroys a
+closure through slot 0 as it does any object.
+
+## Diagnostics
+
+| Error | Example |
+|-------|---------|
+| a `(T)` that is not a function type | `x: (int) = 1` |
+| `-> view` in a function type | `f: (int) -> view Str` |
+| a parameter type of `void` | `(void) -> int` |
+| a mode in a tuple type | `(view int, int)` |
+| mismatched function types | `f: (int) -> int = fn(x: float) -> int { ... }` |
+| calling a non-function | `n = 1; n(2)` |
+| wrong arguments to a function value | `f(1, 2)` for `f: (int) -> int`; `f("a")`; a `view` argument to an `inout` parameter |
+| a builtin, constructor or generic as a value | `p = println;`, `c = Point;`, `g = first;` |
+| a method as a value | `m = p.shift;` |
+| capturing a borrow | `fn f(v: view Str) { g = fn() -> int { return v.len(); }; }` |
+| capturing `self` in a `view fn` or a struct method | `view fn m() { g = fn() { self.x = 1; }; }` |
+| assigning a captured name | `n = 1; g = fn() { n = 2; };` |
+| a captured name as an `inout` argument | `g = fn() { bump(n); };` |
+| a lambda's `break` outside its own loop | `while (c) { g = fn() { break; }; }` |
+| `toString`, `print` on a function value | `println(f)`, `f.toString()` |
+
+## Open questions
+
+Each with the default taken here; a different answer changes the
+implementation in the place noted.
+
+1. **Capture by copy or by reference?**  By copy (above): it keeps the
+   language's rule that only objects are shared, needs no cells for captured
+   locals and no escape analysis, and makes a closure safe to store and call
+   later.  By-reference captures would let a lambda count calls into a local
+   (`n = n + 1`), the way JavaScript or Swift closures do; that needs the
+   captured local to live in a shared cell (an object) for both the function
+   and the closure, which is a bigger change to locals.  Changes: Sema's
+   capture rules and the lowering of locals.
+2. **Should a lambda's parameter types be inferable from the context?**
+   Not yet: `xs.map(fn(x) { return x + 1; })` would need bidirectional
+   inference through the call's parameter type.  The expected type is at hand
+   in Sema (`resolveExprType(e, expected)`), so this can be added later
+   without a syntax change.  Changes: Sema's `visitLambdaExpr`.
+3. **Should function types be `Obj`s?**  No: an `Obj` is an object with
+   `toString` and `equals` and a class, and `match` dispatches on classes; a
+   function value has none of that.  Keeping it out of `Obj` keeps `match`
+   and printing simple.  Making it an `Obj` would let it be stored in
+   `Obj`-typed slots and printed.  Changes: `isAssignable` and the runtime
+   vtable's `toString`.
+4. **Should methods be values (`p.shift` bound to `p`)?**  Not yet: a bound
+   method is a closure capturing the receiver, which is the by-copy capture
+   of `self`, but a struct's method needs its receiver's storage, which a
+   closure cannot hold.  A class's bound method can be added as sugar for
+   `fn(d: int) { p.shift(d); }`.
+5. **Should a named generic function be a value with explicit arguments
+   (`first<int>`)?**  Not yet; the instantiation machinery can produce the
+   function and the value would be a `fn.ref` closure of it.  Changes: the
+   parser (a type argument list on an identifier that is not called) and
+   `visitIdentifier`.
+6. **Variance?**  None: identity.  Parameter contravariance and result
+   covariance for reference types would be sound but the existing conversion
+   rules are representation-preserving (a tuple element must match exactly),
+   so function types follow those.
+7. **Equality and printing?**  `==` is identity (the same closure), as
+   for an object without an `equals` of its own: two evaluations of the same
+   lambda are different closures, but a stored closure equals itself, which
+   is what `List<T>.contains` and `indexOf` need to take function values.
+   No `toString`: it would have nothing to show but an address.  An
+   alternative is no `==` at all, which keeps `List<(int) -> int>` out.
+8. **Where does a lambda's `self` come from in a class method?**  Captured as
+   a reference, like any object; the lambda's body then treats `self` as an
+   ordinary variable holding the object (private methods are still the
+   class's to call, so a lambda inside the class may call them).

@@ -1,0 +1,6 @@
+// ERROR: 'self' is read-only in 'view fn reader'; a function cannot capture it (its copy could change the object)
+class C {
+  x: int;
+  view fn reader() -> () -> int { return fn() -> int { return self.x; }; }
+}
+fn main() -> int { return 0; }

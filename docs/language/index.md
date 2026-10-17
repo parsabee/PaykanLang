@@ -25,6 +25,8 @@ instead; its chapters link here for the details.
     stacks, queues, hash maps and sets, priority queues) and `::memory`.
 14. [Structs](14-structs.md): values with named fields, held in place like tuples, with
     `impl` blocks for their methods.
+15. [Function types and lambdas](15-function-types.md): `(int, float) -> bool`, lambdas,
+    captures, and calling through a function value.
 
 The [grammar](../grammar.md) is the specification of the concrete syntax that every
 frontend implements.

@@ -1512,6 +1512,24 @@ bool Sema::unifyTypes(ast::Type *pattern, ast::Type *actual,
                       conflict);
   }
 
+  if (auto *ft = ast::dyn_cast<ast::FunctionType>(pattern)) {
+    // `(view T) -> U` against a function type of the same arity and modes:
+    // unify the parameters and the result pairwise (a lambda argument's
+    // result type gives U).  A mismatch is left to the argument check.
+    auto *aft = ast::dyn_cast<ast::FunctionType>(actual);
+    if (!aft || aft->getNumParams() != ft->getNumParams())
+      return true;
+    for (size_t i = 0; i < ft->getNumParams(); ++i) {
+      if (aft->getMode(i) != ft->getMode(i))
+        return true;
+      if (!unifyTypes(ft->getParamType(i), aft->getParamType(i), typeParams,
+                      bindings, conflict))
+        return false;
+    }
+    return unifyTypes(ft->getReturnType(), aft->getReturnType(), typeParams,
+                      bindings, conflict);
+  }
+
   if (auto *gt = ast::dyn_cast<ast::GenericType>(pattern)) {
     // `Pair<T>` against a struct: an instantiation of the same template
     // unifies argument-wise (a struct has no ancestors).

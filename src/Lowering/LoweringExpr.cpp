@@ -63,12 +63,45 @@ Val ModuleLowering::ExprEmitter::visitStringLiteral(ast::StringLiteral *node) {
 }
 
 Val ModuleLowering::ExprEmitter::visitEnumValueExpr(ast::EnumValueExpr *node) {
+  // `m::f` used as a value: a closure of the function.
+  if (const std::string *fn = node->getFunctionRef())
+    return L.emitFunctionRefValue(
+        *fn, ast::cast<ast::FunctionType>(node->getResolvedType()));
   return Val::i64(node->getValue());
+}
+
+Val ModuleLowering::ExprEmitter::visitLambdaExpr(ast::LambdaExpr *node) {
+  return L.emitLambdaValue(node);
+}
+
+Val ModuleLowering::ExprEmitter::visitCallValueExpr(ast::CallValueExpr *node) {
+  // The callee's closure, borrowed for the call (a temporary's kept until
+  // after it).
+  const bool wantAddress = std::exchange(WantAddress, false);
+  auto *fnt =
+      ast::dyn_cast<ast::FunctionType>(node->getCallee()->getResolvedType());
+  if (!fnt) {
+    L.reportInternalError("call of a value that holds no function");
+    return Val();
+  }
+  std::vector<Val> keep;
+  Val box = L.emitBorrowedBox(node->getCallee(), keep);
+  if (!box)
+    return Val();
+  Val closure = L.emitSharedGet(box, "closure.obj");
+  Val result = L.emitClosureCall(closure, fnt, node->getArguments(),
+                                 node->getResolvedType(), wantAddress);
+  L.releaseAfterCall(keep);
+  return result;
 }
 
 Val ModuleLowering::ExprEmitter::visitIdentifier(ast::Identifier *node) {
   if (node->getName() == kStdin)
     return L.externObject(kPaykanFileStdin);
+  // A function used as a value: a closure of it (a fresh box).
+  if (node->isFunctionRef())
+    return L.emitFunctionRefValue(
+        node->getName(), ast::cast<ast::FunctionType>(node->getResolvedType()));
   // A value held in memory, or a slice: the address of its bytes.
   if (ast::Type *t = L.CurrentScope->lookupASTType(node->getName());
       ast::isMemType(t) || ast::dyn_cast<ast::SliceType>(t))
@@ -530,6 +563,25 @@ Val ModuleLowering::ExprEmitter::emitConversion(ast::CallExpr *node) {
 Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
   // Wanted as an address only by this call, not by the arguments' calls.
   const bool wantAddress = std::exchange(WantAddress, false);
+  // A call through a function value: the variable's closure, borrowed for
+  // the call (the variable keeps it alive), called through its vtable.
+  if (node->calleeIsValue()) {
+    ast::Type *varTy = L.CurrentScope->lookupASTType(node->getCalleeName());
+    auto *fnt = varTy ? ast::dyn_cast<ast::FunctionType>(varTy) : nullptr;
+    if (!fnt) {
+      L.reportInternalError("call through '" + node->getCalleeName() +
+                            "', which holds no function value");
+      return Val();
+    }
+    auto *id = L.ASTCtx.make<ast::Identifier>(
+        node->getLocation(), L.ASTCtx.intern(node->getCalleeName()));
+    id->setResolvedType(varTy);
+    Val closure = visit(id);
+    if (!closure)
+      return Val();
+    return L.emitClosureCall(closure, fnt, node->getArguments(),
+                             node->getResolvedType(), wantAddress);
+  }
   if (Val conv = emitConversion(node))
     return conv;
   if (Val parsed = emitParse(node))
@@ -703,6 +755,52 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     ast::MethodCallExpr *node) {
   const bool wantAddress = std::exchange(WantAddress, false);
   ast::Type *recvResolved = node->getReceiver()->getResolvedType();
+  // `f == g` on function values (visitBinaryExpr's synthesized `equals`):
+  // the closure's own `equals`, the runtime's identity test, through its
+  // vtable (slot 2 of every object's).
+  if (ast::isa<ast::FunctionType>(recvResolved) &&
+      node->getMethodName() == kMethodEquals && node->getNumArguments() == 1) {
+    std::vector<Val> keep;
+    Val box = L.emitBorrowedBox(node->getReceiver(), keep);
+    if (!box)
+      return Val();
+    Val recv = L.emitSharedGet(box, "closure.obj");
+    Val other = L.emitAsShared(node->getArguments()[0]); // consumed
+    if (!other)
+      return Val();
+    const pir::Function &equals = L.declareRuntime(kPaykanObjectEquals);
+    Val r = L.B.vcall(recv, "", 2, equals.Sig, {other}, "equals");
+    L.releaseAfterCall(keep);
+    return L.B.cmp(CmpPred::Ne, r, Val::i64(0), "eq");
+  }
+  // `obj.cb(args)` with `cb` a field of function type: the field's closure,
+  // borrowed for the call (the receiver, kept for the call, holds it).
+  if (node->isFieldCall()) {
+    ast::Type *fieldTy = nullptr;
+    if (auto *ct = ast::dyn_cast<ast::ClassType>(recvResolved))
+      fieldTy = ct->findField(node->getMethodName());
+    else if (auto *st = ast::dyn_cast<ast::StructType>(recvResolved))
+      fieldTy = st->findField(node->getMethodName());
+    auto *fnt = fieldTy ? ast::dyn_cast<ast::FunctionType>(fieldTy) : nullptr;
+    if (!fnt) {
+      L.reportInternalError("call through field '" + node->getMethodName() +
+                            "', which holds no function value");
+      return Val();
+    }
+    auto *ma = L.ASTCtx.make<ast::MemberAccessExpr>(
+        node->getLocation(), node->getReceiver(),
+        L.ASTCtx.intern(node->getMethodName()));
+    ma->setResolvedType(fieldTy);
+    std::vector<Val> keep;
+    Val box = L.emitBorrowedBox(ma, keep);
+    if (!box)
+      return Val();
+    Val closure = L.emitSharedGet(box, "closure.obj");
+    Val result = L.emitClosureCall(closure, fnt, node->getArguments(),
+                                   node->getResolvedType(), wantAddress);
+    L.releaseAfterCall(keep);
+    return result;
+  }
   // A fixed-size array's `len()`: its length.  An element receiver is still
   // evaluated, for its index and its bounds check.
   if (ast::dyn_cast<ast::SliceType>(recvResolved))

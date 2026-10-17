@@ -140,6 +140,19 @@ TupleType *ASTContext::getTupleType(std::vector<Type *> elemTys) {
   return tt;
 }
 
+FunctionType *ASTContext::getFunctionType(std::vector<Type *> paramTys,
+                                          std::vector<ParamMode> modes,
+                                          Type *retTy) {
+  auto key = std::make_tuple(paramTys, modes, retTy);
+  auto it = FunctionTypes.find(key);
+  if (it != FunctionTypes.end())
+    return it->second;
+  auto *ft = make<FunctionType>(SourceLocation(), std::move(paramTys),
+                                std::move(modes), retTy);
+  FunctionTypes[std::move(key)] = ft;
+  return ft;
+}
+
 // -- ClassTypeBuilder
 
 ASTContext::ClassTypeBuilder::ClassTypeBuilder(ASTContext &ctx, ClassType *ty)
@@ -301,8 +314,28 @@ std::string typeName(Type *ty) {
   // Before TupleType, which a StructType is: a struct goes by its name.
   if (auto *st = dyn_cast<StructType>(ty))
     return st->getName();
+  // A function type takes a suffix only in parentheses: `((int) -> int)?`.
+  auto suffixed = [](Type *inner) {
+    std::string s = typeName(inner);
+    return isa<FunctionType>(inner) ? "(" + s + ")" : s;
+  };
+  if (auto *fnt = dyn_cast<FunctionType>(ty)) {
+    // "(int, view Str) -> bool", as the parser accepts it, so the serialised
+    // form round-trips through module export.
+    std::string s = "(";
+    for (size_t i = 0; i < fnt->getNumParams(); ++i) {
+      if (i)
+        s += ", ";
+      if (fnt->getMode(i) != ParamMode::Value) {
+        s += paramModeName(fnt->getMode(i));
+        s += " ";
+      }
+      s += typeName(fnt->getParamType(i));
+    }
+    return s + ") -> " + typeName(fnt->getReturnType());
+  }
   if (auto *at = dyn_cast<ArrayType>(ty))
-    return typeName(at->getElementType()) + "[]";
+    return suffixed(at->getElementType()) + "[]";
   if (auto *ft = dyn_cast<FixedArrayType>(ty)) {
     // An array of arrays is written with its first index's length first, as
     // it is parsed: two `int[3]`s are `int[2][3]`.
@@ -315,13 +348,13 @@ std::string typeName(Type *ty) {
                  "]";
       elem = f->getElementType();
     }
-    return typeName(elem) + lengths;
+    return suffixed(elem) + lengths;
   }
   if (auto *ot = dyn_cast<OptionalType>(ty))
-    return typeName(ot->getInnerType()) + "?";
+    return suffixed(ot->getInnerType()) + "?";
   // A slice is spelled as its parameter's type is, its mode aside.
   if (auto *st = dyn_cast<SliceType>(ty))
-    return typeName(st->getElementType()) + "[]";
+    return suffixed(st->getElementType()) + "[]";
   if (auto *gt = dyn_cast<GenericType>(ty)) {
     // An annotation not resolved yet: `Box<int>`, a bound `Into<int>`.
     std::string s = gt->getName() + "<";
