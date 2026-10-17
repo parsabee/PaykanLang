@@ -237,7 +237,10 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
       ast::Type *s = srcTT->getElementType(i);
       if (d == s)
         continue;
-      if (!ast::isRefType(d) || !ast::isRefType(s) || !isAssignable(d, s))
+      const bool sameShape =
+          (ast::isRefType(d) && ast::isRefType(s)) ||
+          (ast::isa<ast::TupleType>(d) && ast::isa<ast::TupleType>(s));
+      if (!sameShape || !isAssignable(d, s))
         return false;
     }
     return true;
