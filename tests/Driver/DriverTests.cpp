@@ -610,6 +610,22 @@ TEST(Driver, IntModByZeroTraps) {
   EXPECT_NE(out.find("division or modulo by zero"), std::string::npos) << out;
 }
 
+// A fixed-size array's element read or written outside its bounds panics.
+TEST(Driver, FixedArrayIndexOutOfBoundsPanics) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp("fn main() -> int {\n"
+                      "  xs: int[3] = [1, 2, 3];\n"
+                      "  i = 3;\n"
+                      "  return xs[i];\n"
+                      "}\n");
+  auto [rc, out] = run(paykanRun() + " " + src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_EQ(rc, 128 + SIGABRT) << out;
+  EXPECT_NE(out.find("paykan: array index 3 out of bounds (len=3)"),
+            std::string::npos)
+      << out;
+}
+
 // #117: a user function spelled like the runtime's panic, with its very
 // signature, is an ordinary function: it runs when called, and a division by
 // zero still reaches the runtime's panic (message, stdout flushed, SIGABRT),

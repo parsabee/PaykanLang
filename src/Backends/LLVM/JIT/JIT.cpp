@@ -90,6 +90,7 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanPanicDivOverflow, reinterpret_cast<void *>(&Paykan_panic_div_overflow)},
     {kPaykanPanicFloatToInt, reinterpret_cast<void *>(&Paykan_panic_float_to_int)},
     {kPaykanPanicIntToChar,  reinterpret_cast<void *>(&Paykan_panic_int_to_char)},
+    {kPaykanPanicIndex,      reinterpret_cast<void *>(&Paykan_panic_index)},
     {kPaykanRetain,          reinterpret_cast<void *>(&Paykan_retain)},
     {kPaykanRelease,         reinterpret_cast<void *>(&Paykan_release)},
 

@@ -1006,6 +1006,32 @@ TEST(Lowering, OptionalValueSizesFollowTheirPayloads) {
   EXPECT_NE(l.Text.find("= [2, 1, 5, 0]"), std::string::npos) << l.Text;
 }
 
+// A fixed-size array is a `mem` local reached through its address: an
+// element at a constant index is a `ptr.add`, one at a computed index is
+// bounds-checked first, and a copy is a `mem.copy` of its bytes.  Nothing
+// is boxed or counted.
+TEST(Lowering, FixedArraysAreMemSlots) {
+  auto l = lower(R"(
+    fn main() -> int {
+      grid: char[2][3] = [['a', 'b', 'c'], ['d', 'e', 'f']];
+      row = grid[1];
+      i = 2;
+      return int(row[i]) + int(grid[0][1]);
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string m = function(l.Text, "main");
+  for (const char *e :
+       {"local %grid.0: mem(6, 1)", "local %row.1: mem(3, 1)",
+        "ptr.add %grid.addr", "mem.copy %row.addr", ", 3\n",
+        "call @$rt.Paykan_panic_index(%i.", "ptr.load char, %elem.addr"})
+    EXPECT_NE(m.find(e), std::string::npos) << e << "\n" << m;
+  // Only the computed index is checked.
+  EXPECT_EQ(count(m, "Paykan_panic_index"), 1u) << m;
+  EXPECT_EQ(count(m, "retain"), 0u) << m;
+  EXPECT_EQ(count(m, "PaykanArray"), 0u) << m;
+}
+
 // Printing an optional value formats it, "None" or the value's text; it is
 // never boxed.
 TEST(Lowering, PrintingAnOptionalValueFormatsIt) {

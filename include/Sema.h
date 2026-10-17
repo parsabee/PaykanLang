@@ -309,6 +309,31 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   ast::Type *resolveType(ast::Type *ty, ast::SourceLocation loc,
                          const std::string &context);
 
+  // -- Fixed-size arrays (docs/language/05-arrays.md, "Fixed-size arrays")
+  //
+  // For now only a local variable has a `T[n]` type (set around the
+  // resolveType of its annotation, which takes the flag), of scalars, enums
+  // or other such arrays.
+
+  bool FixedArrayAllowed = false;
+  /// The most bytes a fixed-size array holds.
+  static constexpr int64_t kMaxFixedArrayBytes = int64_t(1) << 20;
+  /// The bytes @p ty takes inline in a fixed-size array; -1 when it cannot
+  /// be an element (yet) or the total is over kMaxFixedArrayBytes.
+  static int64_t fixedElementBytes(const ast::Type *ty);
+  /// True when @p ty is, or holds, a fixed-size array.
+  static bool holdsFixedArray(const ast::Type *ty);
+  /// Report a fixed-size array (@p ty) where only a local can have one yet,
+  /// @p where; returns false.
+  bool errorFixedArrayHere(ast::SourceLocation loc, ast::Type *ty,
+                           const std::string &where);
+  /// The `let` local a fixed-size array element place @p e is part of (its
+  /// value), or "" when it is not one.
+  std::string letFixedArrayRoot(const ast::Expr *e);
+  /// False (after reporting it) when @p index is a constant out of
+  /// @p fixed's bounds.
+  bool checkFixedIndex(ast::FixedArrayType *fixed, const ast::Expr *index);
+
   // -- Poisoned binders (#89)
   //
   // A binder whose declaration failed (a bad initializer, an unresolvable type
@@ -384,6 +409,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
       return visit(e);
     }
 
+    /// A literal flowing into a fixed-size array slot: exactly its length
+    /// of elements, each of its element type.
+    ast::Type *checkFixedArrayLiteral(ast::ArrayLiteralExpr *node,
+                                      ast::FixedArrayType *fixed);
 #define EXPR_VISIT(Kind, Name, Cast) ast::Type *visit##Name(ast::Cast *node);
     PAYKAN_EXPR_NODES(EXPR_VISIT)
 #undef EXPR_VISIT

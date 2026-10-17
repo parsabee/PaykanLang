@@ -69,6 +69,10 @@ Val ModuleLowering::ExprEmitter::visitEnumValueExpr(ast::EnumValueExpr *node) {
 Val ModuleLowering::ExprEmitter::visitIdentifier(ast::Identifier *node) {
   if (node->getName() == kStdin)
     return L.externObject(kPaykanFileStdin);
+  // A fixed-size array: the address of its bytes.
+  if (ast::dyn_cast<ast::FixedArrayType>(
+          L.CurrentScope->lookupASTType(node->getName())))
+    return L.emitFixedAddress(node);
   pir::LocalId local = L.CurrentScope->lookup(node->getName());
   Val val = L.B.load(local, node->getName());
   // An `inout` parameter: read the caller's storage (a box: borrowed, and
@@ -231,6 +235,14 @@ Val ModuleLowering::ExprEmitter::emitPrimitiveArrayLiteral(
 }
 
 Val ModuleLowering::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
+  // An element of a fixed-size array, read in place (a nested array's is its
+  // address).
+  if (ast::dyn_cast<ast::FixedArrayType>(node->getArray()->getResolvedType())) {
+    Val addr = L.emitFixedElementAddress(node->getArray(), node->getIndex());
+    if (!addr || ast::isa<ast::FixedArrayType>(node->getResolvedType()))
+      return addr;
+    return L.B.ptrLoad(addr, L.toPIRType(node->getResolvedType()), "elem");
+  }
   Val idx = visit(node->getIndex());
   if (!idx)
     return Val();
@@ -840,9 +852,17 @@ Val ModuleLowering::ExprEmitter::emitArrayPop(const Val &recv,
 Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     ast::MethodCallExpr *node) {
   const bool wantAddress = std::exchange(WantAddress, false);
+  ast::Type *recvResolved = node->getReceiver()->getResolvedType();
+  // A fixed-size array's `len()`: its length.  An element receiver is still
+  // evaluated, for its index and its bounds check.
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(recvResolved)) {
+    if (!ast::isa<ast::Identifier>(node->getReceiver()) &&
+        !L.emitFixedAddress(node->getReceiver()))
+      return Val();
+    return Val::i64(ft->getLength());
+  }
   // `n.toString()` on an int, float, bool or char (the builtin `Show`): its
   // `Str` conversion, as a fresh box like any method's `Str` result.
-  ast::Type *recvResolved = node->getReceiver()->getResolvedType();
   if (auto *bt = recvResolved ? ast::dyn_cast<ast::BuiltinType>(recvResolved)
                               : nullptr) {
     Val v = visit(node->getReceiver());
@@ -1023,6 +1043,22 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
 // -- Subscript assignment
 
 Val ModuleLowering::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
+  // An element of a fixed-size array, written in place.
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(
+          node->getArray()->getResolvedType())) {
+    Val addr = emitFixedElementAddress(node->getArray(), node->getIndex());
+    if (!addr)
+      return Val();
+    ast::Type *elemTy = ft->getElementType();
+    if (ast::isa<ast::FixedArrayType>(elemTy)) {
+      emitFixedAssign(addr, node->getValue());
+      return Val();
+    }
+    Val v = emitExpr(node->getValue());
+    if (v)
+      B.ptrStore(addr, coerceTo(v, toPIRType(elemTy)));
+    return Val();
+  }
   Receiver arr = emitReceiver(node->getArray());
   if (!arr)
     return Val();

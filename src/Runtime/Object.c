@@ -94,6 +94,11 @@ void Paykan_panic_float_to_int(double value) {
       buf);
 }
 
+void Paykan_panic_index(int64_t index, int64_t len) {
+  Paykan_runtime_panic("array index %lld out of bounds (len=%lld)",
+                       (long long)index, (long long)len);
+}
+
 void Paykan_panic_int_to_char(int64_t value) {
   Paykan_runtime_panic(
       "char<int>(%lld): the value is outside the char range 0..255",

@@ -44,6 +44,7 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanPanicDivOverflow, {{}, kVoid}},
     {kPaykanPanicFloatToInt, {{kF64}, kVoid}},
     {kPaykanPanicIntToChar, {{kI64}, kVoid}},
+    {kPaykanPanicIndex, {{kI64, kI64}, kVoid}},
     {kPaykanStringNew, {{kPtr, kI64}, kObj}},
     {kPaykanStringDestroy, {{kObj}, kVoid}},
     {kPaykanStringConcat, {{kObj, kObj}, kObj}},
@@ -267,6 +268,10 @@ Type ModuleLowering::toPIRType(ast::Type *ty) {
         toPIRType(ast::cast<ast::OptionalType>(ty)->getInnerType()));
   if (ast::isRefType(ty))
     return Type::Box;
+  // Never a value: a fixed-size array is held in a `mem` slot
+  // (LoweringFixed.cpp).
+  if (ast::isa<ast::FixedArrayType>(ty))
+    return Type::Mem;
   return Type::Void;
 }
 
@@ -885,6 +890,21 @@ void ModuleLowering::emitClassVarRebind(const std::string &name,
 }
 
 Val ModuleLowering::visitAssignStmt(ast::AssignStmt *node) {
+  // A fixed-size array: a new variable holding a copy, or its bytes replaced.
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(
+          node->getValue()->getResolvedType())) {
+    const std::string &name = node->getVarName();
+    if (!CurrentScope->findOwner(name)) {
+      declareFixedVar(name, ft, node->getValue());
+      return Val();
+    }
+    pir::LocalId local = CurrentScope->lookup(name);
+    Val dst = CurrentScope->inoutType(name) != Type::Void
+                  ? B.load(local, name + ".addr")
+                  : B.localAddr(local, name + ".addr");
+    emitFixedAssign(dst, node->getValue());
+    return Val();
+  }
   // `x = arr[i]` into an owned ref variable: acquire the element's box
   // straight from the array.  Evaluating the value first and then again for
   // the ownership handling would run the array and index expressions twice.
@@ -1016,6 +1036,13 @@ Val ModuleLowering::visitContinueStmt(ast::ContinueStmt *) {
 Val ModuleLowering::visitVarDecl(ast::VarDecl *node) {
   if (node->getMode() == ast::ParamMode::Inout)
     return emitInoutLocal(node);
+  ast::Type *varTy = node->getType();
+  if (!varTy && node->getInitExpr())
+    varTy = node->getInitExpr()->getResolvedType();
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(varTy)) {
+    declareFixedVar(node->getName(), ft, node->getInitExpr());
+    return Val();
+  }
   ast::Type *declTy = canonicalizeDeclType(node->getType());
   Type pirTy = declTy ? toPIRType(declTy) : Type::Void;
 
