@@ -26,7 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a parameter, a result or a field (held inside its object) can be one. A `view T[]` or
   `inout T[]` parameter is a slice: it takes a fixed-size array of any length (a literal
   becomes one) or another slice, and reads or writes its elements in place. A growable
-  array can no longer be passed for one.
+  array can no longer be passed for one. In a variable declaration with an initializer a
+  length can be `_`, the initializer's: `x: int[_][_] = [[1, 2, 3], [4, 5, 6]];` is an
+  `int[2][3]`, and `z: float[_] = f();` takes the length of the array `f` returns.
 - Traits (docs/language/12-traits.md): `trait Named { view fn name() -> Str; }` lists the
   methods a type must have, and `impl Named for A { ... }` declares that class `A` has
   them. The block's methods join `A` like an `impl` block's, and a method `A` already has

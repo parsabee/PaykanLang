@@ -421,7 +421,10 @@ std::string typeName(Type *ty) {
     std::string lengths;
     Type *elem = ft;
     for (auto *f = ft; f; f = dyn_cast<FixedArrayType>(f->getElementType())) {
-      lengths += "[" + std::to_string(f->getLength()) + "]";
+      lengths += "[" +
+                 (f->isInferred() ? std::string("_")
+                                  : std::to_string(f->getLength())) +
+                 "]";
       elem = f->getElementType();
     }
     return typeName(elem) + lengths;

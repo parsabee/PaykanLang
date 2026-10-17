@@ -74,6 +74,25 @@ TEST(Array, FixedSizeArrayTypes) {
     EXPECT_NE(d.find(e), std::string::npos) << e << "\n" << d;
 }
 
+// A length can be `_`, for the declaration to infer (Sema checks where).
+TEST(Array, InferredLengths) {
+  auto [ok, driver] = parse(R"(
+    fn main() -> int {
+      x: int[_][_] = [[1, 2, 3], [4, 5, 6]];
+      y: int[2][_] = [[1], [2]];
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(ok);
+  std::string d = dumpAST(*driver);
+  for (const char *e :
+       {"FixedArrayType <3:10-3:19> _\n    |   | `-FixedArrayType <3:10-3:19> "
+        "_\n    |   |   `-BuiltinType 'int'",
+        "FixedArrayType <4:10-4:19> 2\n    |   | `-FixedArrayType <4:10-4:19> "
+        "_\n"})
+    EXPECT_NE(d.find(e), std::string::npos) << e << "\n" << d;
+}
+
 TEST(Array, FixedSizeArrayLength) {
   auto zero = parseWithDiags("fn main() -> int {\n"
                              "  xs: int[0] = [];\n"

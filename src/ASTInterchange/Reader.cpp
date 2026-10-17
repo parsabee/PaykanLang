@@ -871,11 +871,23 @@ private:
     }
     if (e.Text == "fixed-array-type") {
       Type *elem = type(f, "the element type");
+      if (!elem)
+        return nullptr;
+      // `_`: a length the declaration infers (docs/grammar.md).
       int64_t n = 0;
-      if (!elem || !f.integer("the length", n) || !f.done())
+      const SExpr *len = f.next("the length");
+      if (!len)
+        return nullptr;
+      if (len->K == SExpr::Symbol && len->Text == "_")
+        n = FixedArrayType::kInferredLength;
+      else if (len->K != SExpr::Number)
+        return fail(*len, "expected an integer or _: the length"), nullptr;
+      else if (!integer(*len, n))
+        return nullptr;
+      if (!f.done())
         return nullptr;
       // The check the grammar makes (docs/grammar.md).
-      if (n < 1)
+      if (n < 1 && n != FixedArrayType::kInferredLength)
         return fail(e, "a fixed-size array has at least one element: its "
                        "length must be 1 or more"),
                nullptr;

@@ -398,7 +398,10 @@ void ASTPrinter::visitArrayType(ArrayType *node) {
 
 void ASTPrinter::visitFixedArrayType(FixedArrayType *node) {
   header("FixedArrayType", node);
-  OS << " " << node->getLength() << "\n";
+  if (node->isInferred())
+    OS << " _\n";
+  else
+    OS << " " << node->getLength() << "\n";
   ChildScope cs(*this, true);
   visit(node->getElementType());
 }

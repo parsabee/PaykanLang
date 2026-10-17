@@ -247,6 +247,14 @@ Output:
 - A literal for a `T[n]` slot has exactly `n` elements, each of type `T`
   (`array literal has 2 element(s), but 'int[3]' has 3`). A literal with no
   `T[n]` slot to flow into is still a growable `T[]`.
+- In a variable declaration with an initializer, a length can be `_`: it is
+  the initializer's. An array literal gives its element count, and its first
+  element (a literal or any fixed-size array) the lengths of a nested `_`.
+  Anything else gives the lengths of the fixed-size array it is. `x: int[_][_] = [[1, 2, 3], [4, 5, 6]];` is an
+  `int[2][3]`, and with `fn fill<T>(v: T) -> T[3]`, `z: float[_] =
+  fill<float>(1.5);` is a `float[3]`. An empty literal gives no length, and
+  a `_` anywhere else is an error (`a length can be '_' only in a variable
+  declaration with an initializer, which gives it`).
 - An index is an `int`. A constant one is checked when compiling (`index 3 is
   out of bounds for 'int[3]' (its indexes are 0 to 2)`), any other when
   running: `paykan: array index 3 out of bounds (len=3)`.
@@ -469,4 +477,5 @@ Output:
 | Fixed-size array literal of the wrong length | `xs: int[3] = [1, 2]` |
 | A buffer without its element type | `Buffer()`: `'Buffer' takes one type argument, its element type` |
 | A buffer arm | `match o { b: Buffer<int> { ... } }`: `cannot be tested: at run time a buffer does not say its element type` |
+| `_` length with nothing to give it | `fn f(x: int[_])`, `x: int[_] = []`, `x: int[_] = 3` |
 | Fixed-size array index out of bounds | `xs[3]` for an `int[3]`: a constant index when compiling, any other at runtime (`paykan: array index 3 out of bounds (len=3)`) |

@@ -461,3 +461,45 @@ TEST(FixedArray, OptionalElements) {
   EXPECT_EQ(r.StdOut, "203 110 105\n2\nNone\nTrue\nx\neq ok\n");
   g.expectNoLeaks("OptionalElements");
 }
+
+// A `_` length is the initializer's: a literal's element count (its first
+// element's lengths for a nested `_`) or the length of the array a call
+// returns.
+TEST(FixedArray, InferredLengths) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class A {
+      n: int;
+      view fn tag() -> Str { return "A" + Str(self.n); }
+    }
+    impl A {
+      fn __init__(n: int) { self.n = n; }
+    }
+    class B : A {
+      view fn tag() -> Str { return "B" + Str(self.n); }
+    }
+    impl B {
+      fn __init__(n: int) { __super__(n); }
+    }
+    fn fill<T>(v: T) -> T[3] { return [v, v, v]; }
+    fn rows() -> int[2][3] { return [[1, 2, 3], [4, 5, 6]]; }
+    fn main() -> int {
+      x: int[_][_] = [[1, 2, 3], [4, 5, 6]];
+      y: A[_] = [B(1), A(2), B(3)];
+      z: float[_] = fill<float>(1.5);
+      w: int[2][_] = rows();
+      let v: char[_] = ['h', 'i'];
+      f: float[_] = [1, 2];
+      copy: int[_][_] = [x[1], x[0], [7, 8, 9]];
+      println(Str(x.len()) + " " + Str(x[1].len()) + " " + Str(x[1][2]) + " " +
+              y[0].tag() + y[1].tag() + y[2].tag() + " " + Str(z.len()) +
+              Str(z[2]) + " " + Str(w[1][0]) + " " + Str(v[1]) + " " +
+              Str(f[0] / 4.0) + " " + Str(copy[0][0]) + Str(copy[2][2]));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "2 3 6 B1A2B3 31.5 4 i 0.25 49\n");
+  g.expectNoLeaks("InferredLengths");
+}

@@ -316,6 +316,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // the flag), of scalars, enums, references or other such arrays.
 
   bool FixedArrayAllowed = false;
+  /// Set around the resolveType of a variable declaration's annotation when
+  /// it has an initializer: only there can a length be `_` (inferred).
+  bool InferredLengthAllowed = false;
   /// The most bytes a fixed-size array holds.
   static constexpr int64_t kMaxFixedArrayBytes = int64_t(1) << 20;
   /// The bytes @p ty takes inline in a fixed-size array; -1 when it cannot
@@ -323,6 +326,13 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   static int64_t fixedElementBytes(const ast::Type *ty);
   /// True when @p ty is, or holds, a fixed-size array.
   static bool holdsFixedArray(const ast::Type *ty);
+  /// True when a length of the fixed-size array @p ty is `_`.
+  static bool hasInferredLength(const ast::Type *ty);
+  /// @p ty with each `_` length replaced by @p from's at the same depth;
+  /// nullptr when @p from has no fixed-size array there.
+  ast::Type *fillLengths(ast::Type *ty, ast::Type *from);
+  /// Reports that @p from, at @p loc, gives the `_` lengths of @p ty none.
+  void errorNoLengths(ast::SourceLocation loc, ast::Type *ty, ast::Type *from);
   /// The type of a parameter of type @p ty and mode @p mode: a slice for a
   /// `view` or `inout` array of elements a fixed-size array can hold, @p ty
   /// otherwise.

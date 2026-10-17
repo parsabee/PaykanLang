@@ -509,12 +509,14 @@ TEST(ASTInterchange, ParamModes) {
 }
 
 // A `let` local is a `var` with a trailing `(let)`.
-// `T[n]` is `(fixed-array-type TYPE INT)`, with a length of at least 1.
+// `T[n]` is `(fixed-array-type TYPE INT)`, with a length of at least 1 or
+// `_`, inferred.
 TEST(ASTInterchange, FixedArrayTypes) {
   const std::string text =
       "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block (decl "
       "(var \"a\" (fixed-array-type (fixed-array-type (named-type \"int\") "
-      "3) 2) (array)))))))";
+      "3) 2) (array))) (decl (var \"b\" (fixed-array-type (named-type "
+      "\"int\") _) (array)))))))";
   ast::ASTContext ctx;
   std::string error;
   ast::TranslationUnit *tu = read(text, ctx, error);
@@ -522,8 +524,10 @@ TEST(ASTInterchange, FixedArrayTypes) {
   std::string d = dump(tu);
   EXPECT_NE(d.find("FixedArrayType 2\n"), std::string::npos) << d;
   EXPECT_NE(d.find("FixedArrayType 3\n"), std::string::npos) << d;
+  EXPECT_NE(d.find("FixedArrayType _\n"), std::string::npos) << d;
   std::string written = write(*tu);
   EXPECT_NE(written.find("(fixed-array-type\n"), std::string::npos) << written;
+  EXPECT_NE(written.find(" _)"), std::string::npos) << written;
   ast::ASTContext ctx2;
   ast::TranslationUnit *back = read(written, ctx2, error);
   ASSERT_NE(back, nullptr) << error;
@@ -537,6 +541,8 @@ TEST(ASTInterchange, FixedArrayTypes) {
        {Case{"(fixed-array-type (named-type \"int\") 0)",
              "a fixed-size array has at least one element"},
         Case{"(fixed-array-type (named-type \"int\"))", "the length"},
+        Case{"(fixed-array-type (named-type \"int\") n)",
+             "expected an integer or _: the length"},
         Case{"(fixed-array-type 3)", "the element type"}}) {
     std::string doc = "(paykan-ast 1 (unit (fn \"f\" (type-params) (params "
                       "(param \"a\" " +
