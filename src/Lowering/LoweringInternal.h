@@ -170,6 +170,9 @@ private:
     };
     /// Owned variables declared in this scope, in declaration order.
     std::vector<VarMeta> DeclOrder;
+    /// Fixed-size arrays of references declared in this scope, whose
+    /// elements are released at its exit.
+    std::vector<VarMeta> FixedVars;
     /// `inout` parameters declared in this scope: their local holds the
     /// address of the caller's storage, of this type.
     std::unordered_map<std::string, pir::Type> InoutVars;
@@ -507,10 +510,36 @@ private:
   /// The bytes and alignment of a value of @p ty held in memory: a
   /// fixed-size array's are its elements', one after another.
   FixedLayout fixedLayout(ast::Type *ty);
-  /// The address of the bytes of @p e, an expression of a fixed-size array
-  /// type: a variable's own (or, for an `inout` one, the array it names),
-  /// an element's, or a literal's, built in a temporary.
+  /// True when @p ty is a fixed-size array of references (at any depth):
+  /// each element slot owns a reference to its box.
+  static bool fixedHoldsRefs(const ast::Type *ty);
+  /// A fixed-size array value: the address of its bytes, and whether they
+  /// are a temporary (a call's result, a literal) whose elements' references
+  /// the consumer takes over.
+  struct FixedValue {
+    Val Addr;
+    bool Temp = false;
+  };
+  /// The bytes of @p e, an expression of a fixed-size array type: a
+  /// variable's own (or, for an `inout` one, the array it names), an
+  /// element's, or a temporary.
+  FixedValue emitFixedValue(ast::Expr *e);
+  /// emitFixedValue's address, borrowed: a temporary of references is
+  /// added to FixedTemps, for its consumer to release with
+  /// releaseFixedTemps once done with it.
   Val emitFixedAddress(ast::Expr *e);
+  std::vector<std::pair<Val, ast::FixedArrayType *>> FixedTemps;
+  /// Release the elements of the temporaries added to FixedTemps since its
+  /// size was @p mark.
+  void releaseFixedTemps(size_t mark);
+  /// Retain, or release, every reference held by the array of type @p ty at
+  /// @p addr (nothing for an array of values).
+  void emitFixedRetain(const Val &addr, ast::FixedArrayType *ty);
+  void emitFixedRelease(const Val &addr, ast::FixedArrayType *ty);
+  /// Call @p fn with the box in each reference slot of the array of type
+  /// @p ty at @p addr.
+  void forEachFixedRef(const Val &addr, ast::FixedArrayType *ty,
+                       const std::function<void(Val)> &fn);
   /// The address of element @p index of the fixed-size array @p array,
   /// after a bounds check.
   Val emitFixedElementAddress(ast::Expr *array, ast::Expr *index);

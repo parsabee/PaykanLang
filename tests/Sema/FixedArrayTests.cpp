@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // Sema tests: fixed-size arrays, `T[n]` (docs/language/05-arrays.md,
 // "Fixed-size arrays").  For now the type of a local variable, a parameter
-// or a result, of scalars, enums and other such arrays.
+// or a result, of scalars, enums, references and other such arrays.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -162,11 +162,44 @@ TEST(FixedArray, OnlyALocalAParameterOrAResultForNow) {
               "type argument 1 of 'id': " + notYet);
 }
 
+// An element is a reference like any other: a view of the array is a view
+// of its elements, and an element is not an `inout` place yet.
+TEST(FixedArray, ElementsOfReferenceTypes) {
+  auto r = semaCheck(R"(
+    class P { x: int; }
+    fn names() -> Str[2] { return ["a", "b"]; }
+    fn main() -> int {
+      ss: Str[3] = ["a", names()[1], "c" + "d"];
+      ps: P[2] = [P(1), P(2)];
+      ps[1].x = ps[0].x;
+      let fixed: P[1] = [P(3)];
+      fixed[0].x = 4;
+      os: Str?[2] = [None, ss[0]];
+      ts: (int, Str)[1] = [(1, "one")];
+      arrs: int[][2] = [[1], []];
+      arrs[1].push(ts[0].0);
+      grid: Str[2][2] = [[ss[0], ss[1]], names()];
+      return ss[2].len() + grid[1][0].len();
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  expectError("class P { x: int; }\n"
+              "fn f(ps: view P[2]) { ps[0].x = 1; }\n"
+              "fn main() -> int { return 0; }",
+              "'ps' is a 'view' parameter");
+  expectError("fn f(ss: view Str[2]) -> Str { return ss[0]; }\n"
+              "fn main() -> int { return 0; }",
+              "'ss' is a 'view' parameter; it cannot be returned");
+  expectBodyError("  xs: int[2] = [1, 2];\n  r: inout = xs[1];",
+                  "an array element cannot be named by 'inout' local 'r' "
+                  "yet");
+}
+
 TEST(FixedArray, ElementsAndSize) {
-  expectBodyError("  ss: Str[2] = [\"a\", \"b\"];",
-                  "variable 'ss' has type 'Str[2]': a fixed-size array of "
-                  "'Str' is not supported yet");
-  expectBodyError("  g: Str[2][3] = [];", "has type 'Str[2][3]'");
+  expectBodyError("  os: int?[2] = [None, 1];",
+                  "variable 'os' has type 'int?[2]': a fixed-size array of "
+                  "'int?' is not supported yet");
+  expectBodyError("  g: int?[2][3] = [];", "has type 'int?[2][3]'");
   expectBodyError("  big: int[200000] = [];",
                   "variable 'big' has type 'int[200000]', which is too big: a "
                   "fixed-size array holds at most 1048576 bytes");

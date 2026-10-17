@@ -385,6 +385,13 @@ CodeGen enforced, now in one place.
   call.
 * **Returns** of reference types are +1 boxes.  Runtime methods returning a
   reference also return a +1 box.
+* **Fixed-size arrays of references** own one reference per element slot,
+  as variables do: a copy (`mem.copy`) is followed by a `retain` of every
+  element, an assignment releases the elements it overwrites, and scope
+  exit releases a variable's (one by one, or in a `while` past four).  A
+  call's result or a literal owns its elements: they move into the place it
+  initialises, and are released after any other use (an element read from
+  it is retained first).
 * **Fields and array/tuple ref slots** own their box; `field.store` is preceded
   by a retain-or-steal of the new value and the old value is released
   (null-checked); `PaykanArray_set_obj`/`push_obj`/`PaykanTuple_set_obj` retain
