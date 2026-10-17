@@ -264,7 +264,9 @@ Output:
 - An array of arrays puts its first length on its first index, as in C:
   `int[2][3]` is two `int[3]`s, indexed `grid[i][j]` with `i < 2` and `j < 3`.
   A row is a value too: `row = grid[1];` copies it.
-- An array holds at most 1048576 bytes (1 MiB).
+- An array holds at most 16384 elements, counted across its rows
+  (`int[2][3]` holds 6): `xs: int[20000]` is an error (`which is too big: a
+  fixed-size array holds at most 16384 elements`).
 - A parameter can be a fixed-size array in every mode. A plain one is the
   function's own copy, a `view` one reads the caller's array, and an `inout`
   one changes it. A result is returned as a copy (`-> int[3]`; a `view` or
