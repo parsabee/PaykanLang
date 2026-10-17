@@ -184,3 +184,47 @@ TEST(Buffer, HoldsBoolsAndCopiesOut) {
   )",
              "False True True\nxy\n");
 }
+
+// A tuple is held in place: its references (here a Str and a Node) are
+// retained by the buffer, its `int?` is inline, and a copy outlives the value
+// it was taken from.  A tuple of plain values is copied out of a `get`.
+TEST(Buffer, HoldsTuples) {
+  expectRuns(R"(
+    class Node {
+      v: int;
+      view fn toString() -> Str { return "N" + Str<int>(self.v); }
+    }
+    impl Node { fn __init__(v: int) { self.v = v; } }
+    fn opt(o: view int?) -> Str {
+      match o { v: int { return Str<int>(v); } None { return "-"; } }
+    }
+    fn main() -> int {
+      b = Buffer<(Str, Node, int?)>();
+      n = Node(1);
+      b.set(0, ("a", n, 1));
+      b.set(1, ("b" + "b", Node(2), None));
+      b.set(2, ("c", n, 3));
+      println(b.get(0));
+      println(b.get(1));
+      println(b.get(1).0 + " " + opt(b.get(1).2) + " " + opt(b.get(2).2));
+      t = b.copy(2);
+      b.set(2, ("d", Node(4), 4));
+      println(t);
+      println(b.get(2));
+      b.grow(2);
+      b.set(4, t);
+      println(Str<int>(b.len()) + " " + b.get(4).0);
+      b.shrink(3);
+      n.v = 9;
+      println(b.get(0));
+      ps = Buffer<(int, float)>();
+      ps.set(1, (2, 0.5));
+      p = ps.get(1);
+      println(p);
+      println(ps.get(0));
+      return 0;
+    }
+  )",
+             "(a, N1, 1)\n(bb, N2, None)\nbb - 3\n(c, N1, 3)\n(d, N4, 4)\n5 c\n"
+             "(a, N9, 1)\n(2, 0.5)\n(0, 0)\n");
+}

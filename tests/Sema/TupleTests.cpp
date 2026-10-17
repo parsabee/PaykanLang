@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 // Sema tests: tuple types — element types, indexing, immutability,
-// destructuring, assignability, tuples in signatures/fields/arrays, and the
-// module round-trip of tuple-typed signatures.
+// destructuring, assignability, views, tuples in signatures/fields/arrays,
+// and the module round-trip of tuple-typed signatures.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -207,11 +207,69 @@ TEST(Tuple, DestructureDuplicateTarget) {
 
 // -- Assignability, equality, and tuples in other positions
 
-TEST(Tuple, AssignableToObj) {
+// A tuple is a value, not an Obj: it is not assignable to one, and there is
+// no class named for tuples.
+TEST(Tuple, NotAnObj) {
   auto r = semaCheck(wrapMain(R"(
     o: Obj = (1, "a");
-    println((1, 2));
   )"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("initializer of type '(int, Str)' does not "
+                               "match declared type 'Obj' for variable 'o'"),
+            std::string::npos)
+      << r.Diagnostics;
+  auto arg = semaCheck("fn f(o: Obj) {}\n" + wrapMain("f((1, 2));"));
+  EXPECT_FALSE(arg.Ok);
+  EXPECT_NE(arg.Diagnostics.find(
+                "argument 1 of 'f' has type '(int, int)', expected 'Obj'"),
+            std::string::npos)
+      << arg.Diagnostics;
+  auto assign = semaCheck(wrapMain(R"(
+    o: Obj = "s";
+    o = (1, "a");
+  )"));
+  EXPECT_FALSE(assign.Ok);
+  EXPECT_NE(assign.Diagnostics.find("cannot assign value of type '(int, Str)' "
+                                    "to variable 'o' of type 'Obj'"),
+            std::string::npos)
+      << assign.Diagnostics;
+}
+
+TEST(Tuple, NoBuiltinTupleClass) {
+  auto r = semaCheck(wrapMain("x: Tuple = (1, 2);"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("variable 'x' has unknown class type 'Tuple'"),
+            std::string::npos)
+      << r.Diagnostics;
+}
+
+TEST(Tuple, PrintedAndShown) {
+  auto r = semaCheck(wrapMain(R"(
+    t = (1, "a");
+    println(t);
+    print(t);
+    printerrln((1, 2.5));
+    println(((1, 'c'), None));
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Tuple, SatisfiesAShowBound) {
+  auto r = semaCheck(R"(
+    fn show<T: Show>(x: view T) -> Str { return x.toString(); }
+    class Box<T: Show> {
+      item: T;
+      view fn text() -> Str { return self.item.toString(); }
+    }
+    impl Box<T> { fn __init__(v: T) { self.item = v; } }
+    fn main() -> int {
+      s: Str = show((1, "a"));
+      s2: Str = show(((1, 'c'), 2.5));
+      b = Box<(int, Str?)>((1, None));
+      s3: Str = b.text();
+      return 0;
+    }
+  )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
@@ -229,6 +287,39 @@ TEST(Tuple, RefElementCovariance) {
     }
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+// Covariance goes through nested tuples element by element.
+TEST(Tuple, NestedRefElementCovariance) {
+  auto r = semaCheck(R"(
+    class A {}
+    impl A { fn __init__() {} }
+    class B : A {}
+    impl B { fn __init__() { __super__(); } }
+    fn take(t: ((Obj, int), int)) -> int { return t.1; }
+    fn main() -> int {
+      nn: ((Str, int), int) = (("a", 1), 2);
+      no: ((Obj, int), int) = nn;
+      no = (("b", 3), 4);
+      deep: (int, ((Obj, A?), int)) = (1, (("a", B()), 2));
+      return take(nn);
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+// A value element of a nested tuple must match exactly: no int -> float.
+TEST(Tuple, NestedValueElementsMustMatch) {
+  auto r = semaCheck(wrapMain(R"(
+    a: ((int, int), Str) = ((1, 2), "a");
+    b: ((float, int), Str) = a;
+  )"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("initializer of type '((int, int), Str)' does "
+                               "not match declared type '((float, int), Str)' "
+                               "for variable 'b'"),
+            std::string::npos)
+      << r.Diagnostics;
 }
 
 TEST(Tuple, NoPrimitivePromotionAcrossElements) {
@@ -270,7 +361,9 @@ TEST(Tuple, EqualitySameTypeOk) {
     b = (1, "x");
     eq: bool = a == b;
     ne: bool = a != b;
-    eq2: bool = a.equals(b);
+    n = ((1, 2.5), None);
+    m = ((1, 2.5), None);
+    eq2: bool = n == m;
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -300,20 +393,23 @@ TEST(Tuple, OrderingOperatorsRejected) {
       << r.Diagnostics;
 }
 
+// `toString` is a tuple's only method; `==` compares tuples.
 TEST(Tuple, ToStringMethodAndNoOtherMethods) {
   auto ok = semaCheck(wrapMain(R"(
     t = (1, "a");
     s: Str = t.toString();
+    s2: Str = ((1, 2), 'c').toString();
   )"));
   EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
-  auto bad = semaCheck(wrapMain(R"(
-    t = (1, "a");
-    n: int = t.len();
-  )"));
-  EXPECT_FALSE(bad.Ok);
-  EXPECT_NE(bad.Diagnostics.find("no method 'len' on type 'Tuple<int, Str>'"),
-            std::string::npos)
-      << bad.Diagnostics;
+  for (const char *call : {"t.len()", "t.equals(t)"}) {
+    auto bad = semaCheck(
+        wrapMain(std::string("t = (1, \"a\");\n") + "x = " + call + ";"));
+    EXPECT_FALSE(bad.Ok) << call;
+    EXPECT_NE(
+        bad.Diagnostics.find("method call on non-class type '(int, Str)'"),
+        std::string::npos)
+        << bad.Diagnostics;
+  }
 }
 
 TEST(Tuple, AsFieldParamReturnAndArrayElement) {
@@ -375,7 +471,7 @@ TEST(Tuple, UnknownElementClassInAnnotation) {
 
 TEST(Tuple, MatchArmOnTupleRejected) {
   auto r = semaCheck(wrapMain(R"(
-    o: Obj = (1, 2);
+    o: Obj = "s";
     match o {
       (int, int) { println("pair"); }
       _ { }
@@ -387,11 +483,67 @@ TEST(Tuple, MatchArmOnTupleRejected) {
       << r.Diagnostics;
 }
 
-TEST(Tuple, TupleIsReservedBuiltinName) {
-  auto r = semaCheck("class Tuple {}\nfn main() -> int { return 0; }\n");
-  EXPECT_FALSE(r.Ok);
-  EXPECT_NE(r.Diagnostics.find("'Tuple' is a builtin class"), std::string::npos)
-      << r.Diagnostics;
+// `Tuple` is an ordinary class name, usable as a tuple element too.
+TEST(Tuple, TupleIsAnOrdinaryClassName) {
+  auto r = semaCheck(R"(
+    class Tuple { x: int; }
+    impl Tuple { fn __init__() { self.x = 1; } }
+    fn main() -> int {
+      t: Tuple = Tuple();
+      p: (Tuple, int) = (t, 1);
+      return t.x + p.1 + p.0.x;
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+// -- Views of tuples
+
+// A view of a tuple of plain values is copied out like an int; one holding
+// references follows the view rules, as a `Str[n]` does.
+TEST(Tuple, ViewOfPlainValuesCanBeCopiedOut) {
+  auto r = semaCheck(R"(
+    fn first<T>(xs: view T[]) -> view T { return xs[0]; }
+    fn main() -> int {
+      nums: (int, float)[2] = [(1, 1.5), (2, 2.5)];
+      g = first(nums);
+      h: (int, float) = first(nums);
+      nested: ((int, bool), char)[1] = [((1, True), 'c')];
+      k = first(nested);
+      return g.0 + h.0 + k.0.0;
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Tuple, ViewHoldingReferencesCannotBeStored) {
+  const std::string decls = R"(
+    class Node {}
+    impl Node { fn __init__() {} }
+    fn first<T>(xs: view T[]) -> view T { return xs[0]; }
+    class H { t: (Str, Node); }
+    impl H { fn __init__() { self.t = ("a", Node()); } }
+  )";
+  const std::string refs = "refs: (Str, Node)[2] = [(\"a\", Node()), "
+                           "(\"b\", Node())];\n";
+  for (const char *stmt :
+       {"k = first(refs);", "k: (Str, Node) = first(refs);",
+        "h = H();\nh.t = first(refs);", "s: Str = first(refs).0;"}) {
+    auto r = semaCheck(decls + wrapMain(refs + stmt));
+    EXPECT_FALSE(r.Ok) << stmt;
+    EXPECT_NE(r.Diagnostics.find("the result of 'first<(Str, Node)>' is a "
+                                 "'view'; it cannot be stored, only read or "
+                                 "passed to a 'view' parameter"),
+              std::string::npos)
+        << stmt << "\n"
+        << r.Diagnostics;
+  }
+  // Reading it in place is fine.
+  auto ok = semaCheck(decls + wrapMain(refs + R"(
+    println(first(refs));
+    n: int = first(refs).0.len();
+  )"));
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
 }
 
 // -- Module round-trip of tuple-typed signatures

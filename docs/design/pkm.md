@@ -737,7 +737,7 @@ ClassRec
 ExternGlobalRec  str name ; u8 kind (0 obj, 1 vtable)        always $rt.
 CStrRec          str name ; bytes                            no NUL stored
 DataRec          str name ; uleb n ; n × sleb
-BytesRec         str name ; bytes                            tuple slot kinds; each byte ≤ 5 (5, an optional's presence word), checked
+BytesRec         str name ; bytes                            raw constant bytes, any values
 SlotRec (#170)   str name ; u32 flags (bits0-1 linkage ; bit2 constant ; bit3 lazy ; bit4 singletonInstance #168) ; type ; [bit2] Operand init
 ClassObjRec (#160) str name ; str class ; uleb nTypeArgs ; nTypeArgs × str
 ```
@@ -1196,8 +1196,8 @@ The lowering of an importer needs, for each imported declaration, its PIR
 symbol, signature and (for classes) layout and vtable. **Decision:** one
 fixed core function, `lowering::externsFor(const pkm::Interface &)`, derives
 them from `IFACE` records: Sema type → PIR type (`int → i64`, `float →
-f64`, `bool`, `char`, every class/string/tuple/optional-of-reference
-→ `box`, a fixed-size array → `mem`, …, the same mapping the lowering uses
+f64`, `bool`, `char`, every class/string/optional-of-reference
+→ `box`, a fixed-size array or a tuple → `mem`, …, the same mapping the lowering uses
 for its own module); symbol
 = the PIR name the lowering gives the declaration (`describe`,
 `Shape.area`, `Box<int>`, `Box<int>.get`, the canonical instantiation

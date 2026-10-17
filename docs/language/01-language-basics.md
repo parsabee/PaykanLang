@@ -102,6 +102,18 @@ z: int[8] = [0; 8];                 // eight copies of 0
 mat: int[2][2] = [[1, 2], [3, 4]];  // 2D
 ```
 
+### Tuples
+
+`(T1, T2, ...)` groups a fixed number of values of possibly different types. Like an array,
+a tuple is a value held in its variable (or field, or array element) and copied on
+assignment; it is immutable and is not an `Obj`. See `09-tuples.md`.
+
+```pkn
+p: (int, Str) = (1, "one");
+q, name = p;                        // destructuring
+first: int = p.0;                   // element access
+```
+
 ### Class Types (vtable-bearing, heap-allocated, reference-counted)
 
 `Obj` is the root of the class hierarchy. Every class transitively extends it. It defines:
@@ -606,7 +618,7 @@ fn main() -> int {
 | `printerr(o)`     | Print to stderr, no newline             |
 | `printerrln(o)`   | Print to stderr, then a newline         |
 
-Each takes **exactly one** argument — an `Obj`, printed via its `toString`.
+Each takes **exactly one** argument — an `Obj` or a tuple, printed via its `toString`.
 Paykan has no variadic functions or overloading, so there is no multi-argument
 form: compose pieces with `+` (string concatenation).
 
@@ -782,7 +794,7 @@ Top-level declarations — free functions, classes (a class name is also its con
 and enums — share a single namespace with the builtins, and a name identifies exactly one
 entity. Declaring a function, class, or enum whose name is a builtin function (`print`,
 `println`, `printerr`, `printerrln`, `Str`, `open`) or a builtin class (`Obj`, `Str`,
-`File`, `Error`, `Tuple`) is a compile-time error, reported at
+`File`, `Error`) is a compile-time error, reported at
 the declaration:
 
 ```pkn

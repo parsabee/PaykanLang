@@ -91,8 +91,8 @@ int gPointEqualsCalls = 0;
 int64_t Point_equals(PaykanObject *self, PaykanShared *other) {
   ++gPointEqualsCalls;
   PaykanObject *o = PaykanShared_get(other);
-  int64_t result = o && o->vtable == Point_vtable &&
-                   ((Point *)o)->x == ((Point *)self)->x;
+  int64_t result =
+      o && o->vtable == Point_vtable && ((Point *)o)->x == ((Point *)self)->x;
   Paykan_release(other); // `other` is consumed
   return result;
 }
@@ -115,17 +115,12 @@ struct Scalars {
   int8_t c;
   PaykanShared *s;
 };
-const int64_t kScalarsLayout[] = {5,
-                                  kInt,
-                                  OFF(Scalars, i),
-                                  kFloat,
-                                  OFF(Scalars, f),
-                                  kBool,
-                                  OFF(Scalars, b),
-                                  kChar,
-                                  OFF(Scalars, c),
-                                  kObj,
-                                  OFF(Scalars, s)};
+const int64_t kScalarsLayout[] = {5,                        // elements
+                                  kInt,   OFF(Scalars, i),  // int
+                                  kFloat, OFF(Scalars, f),  // float
+                                  kBool,  OFF(Scalars, b),  // bool
+                                  kChar,  OFF(Scalars, c),  // char
+                                  kObj,   OFF(Scalars, s)}; // Str
 
 template <typename T> struct Inline {
   bool present;
@@ -140,10 +135,12 @@ struct Optionals {
   Inline<int8_t> c;
   PaykanShared *s; // NULL for None
 };
-const int64_t kOptionalsLayout[] = {
-    5,           kOpt, OFF(Optionals, i), kInt,  kOpt, OFF(Optionals, f),
-    kFloat,      kOpt, OFF(Optionals, b), kBool, kOpt, OFF(Optionals, c),
-    kChar,       kOpt, OFF(Optionals, s), kObj};
+const int64_t kOptionalsLayout[] = {5,                               // elements
+                                    kOpt, OFF(Optionals, i), kInt,   // int?
+                                    kOpt, OFF(Optionals, f), kFloat, // float?
+                                    kOpt, OFF(Optionals, b), kBool,  // bool?
+                                    kOpt, OFF(Optionals, c), kChar,  // char?
+                                    kOpt, OFF(Optionals, s), kObj};  // Str?
 
 // The payload offsets the layout comment promises.
 static_assert(offsetof(Inline<int64_t>, value) == 8, "int? payload at 8");
@@ -156,8 +153,7 @@ struct IntStr {
   int64_t n;
   PaykanShared *s;
 };
-const int64_t kIntStrLayout[] = {2, kInt, OFF(IntStr, n), kObj,
-                                 OFF(IntStr, s)};
+const int64_t kIntStrLayout[] = {2, kInt, OFF(IntStr, n), kObj, OFF(IntStr, s)};
 
 // ((int, Str), (char, (bool, float)), int)
 struct Inner2 {
@@ -174,12 +170,14 @@ struct Nested {
   int64_t n;
 };
 const int64_t kNestedLayout[] = {
-    3,
-    kTuple, OFF(Nested, a), 2, kInt, OFF(IntStr, n), kObj, OFF(IntStr, s),
-    kTuple, OFF(Nested, b), 2, kChar, OFF(Inner1, c),
-        kTuple, OFF(Inner1, t), 2, kBool, OFF(Inner2, b), kFloat,
-        OFF(Inner2, f),
-    kInt, OFF(Nested, n)};
+    3,                                              // elements
+    kTuple, OFF(Nested, a), 2,                      // (int, Str)
+    kInt,   OFF(IntStr, n), kObj,   OFF(IntStr, s), //
+    kTuple, OFF(Nested, b), 2,                      // (char, (bool, float))
+    kChar,  OFF(Inner1, c),                         //
+    kTuple, OFF(Inner1, t), 2,                      // (bool, float)
+    kBool,  OFF(Inner2, b), kFloat, OFF(Inner2, f), //
+    kInt,   OFF(Nested, n)};                        // int
 
 // (int, float)
 struct IntFloat {
@@ -227,14 +225,13 @@ TEST(TupleToString, FloatsRenderLikeStrFloat) {
 
 TEST(TupleToString, OptionalsRenderTheirValueOrNone) {
   TrackingHeap heap;
-  Optionals some = {{true, 7}, {true, 2.5}, {true, false}, {true, 'z'},
-                    str("s")};
+  Optionals some = {
+      {true, 7}, {true, 2.5}, {true, false}, {true, 'z'}, str("s")};
   EXPECT_EQ(render(&some, kOptionalsLayout), "(7, 2.5, False, z, s)");
   // An absent one is None whatever its payload bytes hold.
-  Optionals none = {{false, 7}, {false, 2.5}, {false, true}, {false, 'z'},
-                    nullptr};
-  EXPECT_EQ(render(&none, kOptionalsLayout),
-            "(None, None, None, None, None)");
+  Optionals none = {
+      {false, 7}, {false, 2.5}, {false, true}, {false, 'z'}, nullptr};
+  EXPECT_EQ(render(&none, kOptionalsLayout), "(None, None, None, None, None)");
   Paykan_release(some.s);
 }
 
@@ -373,10 +370,10 @@ TEST(TupleEquals, OptionalsComparePresenceThenValue) {
   b.f.value = std::nan("");
   EXPECT_EQ(eq(&b, &b, kOptionalsLayout), 0);
   // Two None are equal, whatever the payload bytes of an absent one hold.
-  Optionals n1 = {{false, 1}, {false, 1.0}, {false, true}, {false, 'a'},
-                  nullptr};
-  Optionals n2 = {{false, 2}, {false, std::nan("")}, {false, false},
-                  {false, 'b'}, nullptr};
+  Optionals n1 = {
+      {false, 1}, {false, 1.0}, {false, true}, {false, 'a'}, nullptr};
+  Optionals n2 = {
+      {false, 2}, {false, std::nan("")}, {false, false}, {false, 'b'}, nullptr};
   EXPECT_EQ(eq(&n1, &n2, kOptionalsLayout), 1);
   EXPECT_EQ(eq(&n2, &n1, kOptionalsLayout), 1);
   EXPECT_EQ(s->refCount, 1);

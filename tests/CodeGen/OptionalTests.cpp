@@ -593,8 +593,9 @@ fn main() -> int {
   g.expectNoLeaks("ImportedOptionalSignatures");
 }
 
-// Interaction with tuples (#4): optional elements are REF slots that may hold
-// NULL; destructuring, equality, printing and arrays must stay leak-free.
+// Interaction with tuples (#4): an optional reference element is a box that
+// is NULL for None; destructuring, equality, printing and arrays must stay
+// leak-free.
 
 TEST(OptionalTuple, TupleWithOptionalElements) {
   LeakGuard g;

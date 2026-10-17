@@ -53,7 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   meets a requirement too. Traits can be generic (`trait Into<T>`), and `Self` names the
   implementing type. A class implements its superclasses' traits, and every class
   implements the built-in `Show` (`view fn toString() -> Str`) through `Obj`, as do
-  `int`, `float`, `bool` and `char` (`n.toString()` is `Str(n)`). Bounds
+  `int`, `float`, `bool` and `char` (`n.toString()` is `Str(n)`) and tuples. Bounds
   (`fn f<T: Show + Into<int>>`, `class Box<T: Named>`) are checked where the template is
   instantiated (`'Str' does not implement trait 'Named', which 'greet' requires of 'T'`).
   A trait is not a type.
@@ -256,12 +256,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot also be passed to 'inout' parameter 'b'`, and `p.take(p.x)` is `'p.x' is part of
   'p', the receiver of 'take' (not a 'view fn'); it cannot also be passed to 'inout'
   parameter 'm'`.
-- A `view fn` returns part of `self` that is an object, string, tuple or optional (or an
-  array of them) as a `view`, `-> view T` (docs/language/04-classes.md, "Methods that don't change self"):
+- A `view fn` returns part of `self` that is an object, string or optional (or an
+  array or tuple holding one) as a `view`, `-> view T` (docs/language/04-classes.md, "Methods that don't change self"):
   returned as a copy, its caller could change it.  `view fn name() -> Str { return
   self.name; }` is now an error, `'self' is read-only in 'view fn name', so part of it can
-  only be returned as a 'view': write '-> view Str'`; a field of a value type is still
-  returned as a copy.  A method that is not a `view fn` and returns part of `self` no longer
+  only be returned as a 'view': write '-> view Str'`; a field of a value type (or an array
+  or tuple of them) is still returned as a copy.  A method that is not a `view fn` and returns part of `self` no longer
   gets the warning that it never changes `self`.
 - An override of `toString` or `equals` is declared `view fn` (`view fn toString() -> Str`),
   like the `Obj` methods it overrides: a plain `fn` override is an error.
@@ -270,7 +270,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are checked against them, whether the module is imported from source, from
   the cache or from a prebuilt file.
 - PIR: `mem(N, A)` slots (docs/pir.md §1 and §6), a local's or a field's N bytes
-  aligned to A, for aggregates such as fixed-size arrays.  A `mem` slot is never a
+  aligned to A, for aggregates: fixed-size arrays and tuples.  A `mem` slot is never a
   value: it is reached through its address, with `ptr.add` to its parts, and copied and
   cleared with `mem.copy` and `mem.zero`.  A backend plugin must handle the three
   instructions.
@@ -295,11 +295,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   array element or tuple element of one allocates nothing and is never reference counted, and
   `int<Str>` & co. return one without allocating (the runtime's `PaykanString_parse_int` &
   co.).  The semantics are unchanged.  An `int?[3]` holds its elements inline, 16 bytes
-  each, and a tuple holds an `int?` as a presence slot and a value slot (tuple kind
-  `PAYKAN_TUPLE_OPT`).  In #96's benchmark
+  each, and a tuple holds an `int?` element inline at its offset.  In #96's benchmark
   (`benchmarks/optional_stack.pkn`: 10M pushes onto a `Stack<int>` and 10M pops through
   `pop() -> T?`) popping through the `int?` allocates nothing and takes as long as popping
   a plain `int`.
+
+- Tuples are values held in place (docs/language/09-tuples.md, "Tuples as Values"), like
+  `T[n]`: a tuple's elements are laid out like a C struct's fields in the variable, field
+  or array element that holds it, a reference element as its box and an `int?` element or
+  a nested tuple inline.  Assigning, passing or returning a tuple copies it and retains
+  the references it holds, which each copy releases in turn; a tuple of `int`s allocates
+  nothing.  A tuple is not an `Obj`: `o: Obj = (1, 2)` is an error (`initializer of type
+  '(int, int)' does not match declared type 'Obj' for variable 'o'`), and `Tuple` is no
+  longer a builtin class name (`x: Tuple` is an unknown type, and a program may declare a
+  class `Tuple`).  `==` / `!=`, printing and `toString()` are unchanged, and a tuple meets
+  a `Show` bound; `t.equals(u)` is gone (`method call on non-class type '(int, int)'`):
+  compare with `==`.  A `view` of a tuple of values is copied when it is assigned; one
+  holding a reference follows the `view` rules (`'p' is a 'view' parameter; it cannot be
+  stored, ...`).  Runtime: the `PaykanTuple` object (its vtable, `PaykanTuple_new`,
+  `_get`, `_set`, `_set_obj`, `_destroy`) is replaced by `PaykanTuple_toString(value,
+  layout)` and `PaykanTuple_equals(a, b, layout)` over a tuple layout the compiler emits
+  per tuple type (`Runtime.h`, "Tuples"), and `PaykanTypeKind` gains `PAYKAN_KIND_TUPLE`:
+  a generic native function's `T` that is a tuple crosses by address, its references at
+  their offsets.  In PIR a tuple is `mem` storage, passed and returned by address like a
+  fixed-size array, and its layout a `.tupleN` `data` global (docs/pir.md §1, §4, §7);
+  the lowering emits no `bytes` globals, and a `.pkm` file's `bytes` may hold any values.
 
 ### Removed
 
