@@ -16,14 +16,16 @@ argument must implement.
   method that `A` already has meets a requirement too.
 - A class implements every trait its superclasses implement. Every class implements the
   built-in trait `Show` (`view fn toString() -> Str`) through `Obj`, and so do `int`,
-  `float`, `bool` and `char` (`n.toString()` is `Str(n)`) and tuples (`(1, "a").toString()`
-  is `(1, a)`).
+  `float`, `bool` and `char` (`n.toString()` is `Str(n)`), tuples (`(1, "a").toString()`
+  is `(1, a)`) and structs (`Point(x: 1, y: 2)`).
 - The built-in trait `Hashable` (`view fn hash() -> int`) is implemented by `int`, `bool`,
-  `char` and `Str`, and by a class with an `impl Hashable for` block. The standard
-  library's hash tables take `Hashable` keys (see [Hashable](#hashable)).
+  `char` and `Str`, and by a class or a struct with an `impl Hashable for` block. The
+  standard library's hash tables take `Hashable` keys (see [Hashable](#hashable)).
 - The built-in trait `ValueType` has no methods. It is implemented by the types held in
-  place and copied whole: `int`, `float`, `bool`, `char`, every enum and every tuple (see
-  [ValueType](#valuetype)).
+  place and copied whole: `int`, `float`, `bool`, `char`, every enum, every tuple and every
+  struct (see [ValueType](#valuetype)).
+- `impl Name for S { ... }` declares that struct `S` implements `Name` too, with the same
+  rules (see `14-structs.md`).
 - `fn f<T: Show + Into<int>>(...)` and `class Box<T: Named>` bound their type
   parameters. Each instantiation checks its type arguments against the bounds.
 - A trait is not a type: `x: Named` is an error.
@@ -98,9 +100,10 @@ trait Hashable { view fn hash() -> int; }
 `int`, `bool`, `char` and `Str` implement it. Their `hash()` is the same for equal values,
 in every run and on every backend, and its bits are well mixed: a `bool` hashes as `0` or
 `1` does, and a `char` as its code does. A `float` does not implement it, and neither does
-an enum, a tuple or an optional. A class implements it with an `impl Hashable for` block.
-Values that are `==` must have the same hash, so a class that overrides `equals` hashes
-the same fields that `equals` compares:
+an enum, a tuple or an optional. A class or a struct implements it with an `impl Hashable
+for` block. Values that are `==` must have the same hash, so a class that overrides
+`equals` hashes the same fields that `equals` compares, and a struct (whose `==` is field
+by field) hashes its fields:
 
 ```pkn
 class Point {
@@ -141,10 +144,11 @@ error, as for `Show`.
 
 `ValueType` is a built-in trait with no methods. It is implemented by the types whose
 values are held in place and copied whole by an assignment: `int`, `float`, `bool`,
-`char`, every enum and every tuple (see [the memory model](08-memory-model.md)). A fixed-size
-array is one too, though it cannot be a type argument yet. A class, `Str` and an
-optional are not, and `impl ValueType for` a class is an error: a class is shared by
-reference.
+`char`, every enum, every tuple and every struct (see [the memory model](08-memory-model.md)).
+A fixed-size array is one too, though it cannot be a type argument yet. A class, `Str` and
+an optional are not, and `impl ValueType for` a class is an error: a class is shared by
+reference. A struct implements it already, so `impl ValueType for` a struct is an error
+too (`struct 'P' already implements 'ValueType'`).
 
 ```pkn
 enum Suit { Hearts, Spades }

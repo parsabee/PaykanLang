@@ -336,6 +336,9 @@ typedef enum PaykanTypeKind {
                             // (int? ...) is a bool presence flag and then
                             // its payload
   PAYKAN_KIND_TUPLE = 6,    // its elements in place ("Tuples", below)
+  PAYKAN_KIND_STRUCT = 7,   // a struct's fields in place, with their names:
+                            // only in a layout ("Structs", below), never
+                            // the kind of a PaykanType (a struct's is TUPLE)
 } PaykanTypeKind;
 
 /// Followed in memory by `nrefs` int64_t words, one per reference: its byte
@@ -382,6 +385,25 @@ PaykanString *PaykanTuple_toString(const void *value, const int64_t *layout);
 /// Whether the tuples at @p a and @p b are equal: element by element,
 /// floats by IEEE 754 `==`, references by their `equals` (two None equal).
 int64_t PaykanTuple_equals(const void *a, const void *b, const int64_t *layout);
+
+// -- Structs
+//
+// A struct (docs/language/14-structs.md) is a value held in place like a
+// tuple, with a name and named fields.  Its layout is a tuple's with the
+// names in it: the field count, the struct's name, then for each field its
+// name and the words a tuple element has (the kind and the byte offset, then
+// an OPTIONAL's payload kind or a nested TUPLE's layout).  A name is its byte
+// length in one word, then its bytes packed eight to a word, the first byte
+// in the lowest eight bits.  A struct nested in a tuple or in another struct
+// is an element of kind STRUCT: its kind and offset, then its own layout.
+
+/// The text of the struct at @p value, `Point(x: 1, y: 2)`: its name, then
+/// each field's name and value as `print` shows it.  A new string.
+PaykanString *PaykanStruct_toString(const void *value, const int64_t *layout);
+/// Whether the structs at @p a and @p b are equal: field by field, as
+/// PaykanTuple_equals compares elements.
+int64_t PaykanStruct_equals(const void *a, const void *b,
+                            const int64_t *layout);
 
 // -- Buffer
 //

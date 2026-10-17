@@ -157,6 +157,14 @@ Val ModuleLowering::emitInoutArg(ast::Expr *arg, std::vector<Val> &keep,
     return emitCallAddress(arg);
   if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(arg)) {
     ast::Expr *recvExpr = ma->getReceiver();
+    // A struct's field: its address in the struct's bytes, which a
+    // variable's, a field's or an element's are (Sema takes no temporary's);
+    // like a value held in memory passed by address, it outlives the call.
+    if (auto *st = getExprStructType(recvExpr)) {
+      int idx = st->fieldIndex(ma->getFieldName());
+      assert(idx >= 0 && "Sema should have verified the field exists");
+      return emitTupleElementAddress(recvExpr, static_cast<size_t>(idx));
+    }
     ast::ClassType *ct = getExprClassType(recvExpr);
     if (!ct) {
       reportInternalError("an 'inout' field of a non-class receiver");

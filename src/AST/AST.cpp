@@ -180,6 +180,25 @@ bool ClassType::isSubtypeOf(const ClassType *other) const {
   return SuperClass ? SuperClass->isSubtypeOf(other) : false;
 }
 
+// -- StructType
+
+void StructType::addMethod(MethodDecl *m) {
+  if (m->getName() == names::kMethodInit) {
+    InitMethod = m;
+    return;
+  }
+  ImplMethods.push_back(m);
+}
+
+MethodDecl *StructType::findMethod(const std::string &name) const {
+  if (name == names::kMethodInit)
+    return InitMethod;
+  for (auto *m : ImplMethods)
+    if (m->getName() == name)
+      return m;
+  return nullptr;
+}
+
 // -- ASTCloner
 
 Type *ASTCloner::named(Type *ty, const std::string &name) {
@@ -198,6 +217,10 @@ Type *ASTCloner::cloneType(Type *ty) {
   }
   if (auto *et = dyn_cast<EnumType>(ty))
     return named(ty, et->getName());
+  // Before TupleType, which a StructType is: a struct is named, never
+  // rebuilt from its fields.
+  if (auto *st = dyn_cast<StructType>(ty))
+    return named(ty, st->getName());
   if (auto *bt = dyn_cast<BuiltinType>(ty))
     return Foreign ? Ctx.getBuiltinType(bt->getTypeKind()) : ty;
   if (auto *at = dyn_cast<ArrayType>(ty)) {
@@ -474,6 +497,32 @@ ClassDecl *ASTCloner::cloneClassDecl(ClassDecl *cd,
       cd->getLocation(), in(newName),
       in(Names && !super.empty() ? Names->type(super) : super),
       std::move(fields), std::move(methods));
+}
+
+StructDecl *ASTCloner::cloneStructDecl(StructDecl *sd,
+                                       const std::string &newName) {
+  std::vector<VarDecl *> fields;
+  for (auto *f : sd->getFields())
+    fields.push_back(Ctx.make<VarDecl>(f->getLocation(), in(f->getName()),
+                                       cloneType(f->getType()), nullptr));
+  auto *out =
+      Ctx.make<StructDecl>(sd->getLocation(), in(newName), std::move(fields));
+  for (auto *m : sd->getMethods())
+    out->addMethod(cloneFuncDecl(m, m->getName()));
+  return out;
+}
+
+StructDecl *ASTCloner::cloneTemplate(StructDecl *sd) {
+  StructDecl *copy = cloneStructDecl(sd, sd->getName());
+  std::vector<const std::string *> params;
+  for (auto *p : sd->getTypeParams())
+    params.push_back(&in(*p));
+  auto *out = Ctx.make<StructDecl>(copy->getLocation(), copy->getName(),
+                                   copy->getFields(), std::move(params));
+  for (auto *m : copy->getMethods())
+    out->addMethod(m);
+  out->setTypeParamBounds(cloneBounds(sd->getTypeParamBounds()));
+  return out;
 }
 
 ImplDecl *ASTCloner::cloneImplDecl(ImplDecl *im,

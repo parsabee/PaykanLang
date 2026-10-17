@@ -108,6 +108,8 @@ const RuntimeSymbol kRuntimeSymbols[] = {
 
     {kPaykanTupleToString,   reinterpret_cast<void *>(&PaykanTuple_toString)},
     {kPaykanTupleEquals,     reinterpret_cast<void *>(&PaykanTuple_equals)},
+    {kPaykanStructToString,  reinterpret_cast<void *>(&PaykanStruct_toString)},
+    {kPaykanStructEquals,    reinterpret_cast<void *>(&PaykanStruct_equals)},
 
     // For the C code of generic `native fn`s.
     {kPaykanTypeCopy,        reinterpret_cast<void *>(&PaykanType_copy)},

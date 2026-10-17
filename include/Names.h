@@ -103,9 +103,11 @@ inline constexpr const char *kPaykanStringConcat = "PaykanString_concat";
 inline constexpr const char *kPaykanStringAt = "PaykanString_at";
 inline constexpr const char *kPaykanStringVtable = "PaykanString_vtable";
 
-// Tuples, through their layouts
+// Tuples and structs, through their layouts
 inline constexpr const char *kPaykanTupleToString = "PaykanTuple_toString";
 inline constexpr const char *kPaykanTupleEquals = "PaykanTuple_equals";
+inline constexpr const char *kPaykanStructToString = "PaykanStruct_toString";
+inline constexpr const char *kPaykanStructEquals = "PaykanStruct_equals";
 
 // Type descriptors: for the C code of generic native functions
 inline constexpr const char *kPaykanTypeCopy = "PaykanType_copy";
@@ -256,9 +258,11 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     // Hash
     kPaykanIntHash,
     kPaykanStringHash,
-    // Tuples
+    // Tuples and structs
     kPaykanTupleToString,
     kPaykanTupleEquals,
+    kPaykanStructToString,
+    kPaykanStructEquals,
     // File
     kPaykanFileOpen,
     // IO
@@ -298,6 +302,8 @@ enum NativeTypeKind : unsigned char {
   kNativeKindObject = 4,   // PaykanShared*, never null
   kNativeKindOptional = 5, // PaykanShared*, null for None, or inline
   kNativeKindTuple = 6,    // its elements in place
+  kNativeKindStruct = 7,   // a struct's fields in place, with their names
+                           // (only in a layout, never a PaykanType's kind)
 };
 
 // -- Names of lowering-generated globals and values
@@ -305,6 +311,7 @@ enum NativeTypeKind : unsigned char {
 inline constexpr const char *kStrGlobalName = ".str";
 inline constexpr const char *kInt2FPName = "int2fp";
 inline constexpr const char *kTupleLayoutGlobalName = ".tuple";
+inline constexpr const char *kStructLayoutGlobalName = ".struct";
 
 } // namespace names
 } // namespace paykan

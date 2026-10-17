@@ -62,11 +62,11 @@ std::string Sema::signatureString(const ast::ClassType *owner,
 
 // -- Definite-assignment analysis for __init__ (Check 1)
 
-bool Sema::checkInitFieldsAssigned(ast::ClassType *ct, ast::CompoundStmt *body,
-                                   ast::SourceLocation initLoc,
-                                   const std::string &className) {
+bool Sema::checkInitFieldsAssigned(
+    const std::vector<std::pair<std::string, ast::Type *>> &fields,
+    ast::CompoundStmt *body, ast::SourceLocation initLoc,
+    const std::string &kind, const std::string &typeName) {
   // Own fields only — base fields are initialised by the required __super__.
-  const auto &fields = ct->getFields();
   if (fields.empty())
     return true;
 
@@ -96,8 +96,8 @@ bool Sema::checkInitFieldsAssigned(ast::ClassType *ct, ast::CompoundStmt *body,
     for (unsigned i = 0; i < n; ++i) {
       if (!assigned[i] && !reported[i]) {
         reported[i] = true;
-        error(loc, "field '" + fields[i].first + "' of class '" + className +
-                       "' is not assigned on every path through '" +
+        error(loc, "field '" + fields[i].first + "' of " + kind + " '" +
+                       typeName + "' is not assigned on every path through '" +
                        names::kMethodInit + "'");
         ok = false;
       }
@@ -494,15 +494,15 @@ bool Sema::declareDefaultInit(ast::ClassDecl *cd, ast::ClassType *ct) {
   return ok;
 }
 
-ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::ClassType *ct,
+ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
                                      const ast::MethodDecl *overridden,
                                      uint8_t flags, bool &ok) {
-  const std::string &className = ct->getName();
+  const std::string className = typeName(owner);
   struct SelfGuard {
-    ast::ClassType *&Slot, *Saved;
+    ast::Type *&Slot, *Saved;
     ~SelfGuard() { Slot = Saved; }
   } selfGuard{SelfType, SelfType};
-  SelfType = ct;
+  SelfType = owner;
   // Resolve return type.
   ast::Type *retTy = Ctx.getVoidTy();
   if (method->getReturnType()) {
@@ -524,8 +524,8 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::ClassType *ct,
       error(method->getLocation(),
             "'" + std::string(names::kSelf) +
                 "' cannot be used as a parameter name of method '" +
-                method->getName() + "' in class '" + className +
-                "'; it is the implicit receiver");
+                method->getName() + "' in " + typeKindWord(owner) + " '" +
+                className + "'; it is the implicit receiver");
       return nullptr;
     }
     if (!checkBinderName(p.getName(), method->getLocation()))
@@ -545,6 +545,7 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::ClassType *ct,
   // An override must have an identical signature: same parameter types and
   // return type.  Strict equality is enforced (no covariance).
   if (overridden) {
+    auto *ct = ast::cast<ast::ClassType>(owner); // only a class overrides
     if (!checkOverrideModes(method, overridden))
       ok = false;
     const auto &baseParams = overridden->getParamTypes();
@@ -671,9 +672,11 @@ bool Sema::rejectBodyInits(ast::TranslationUnit *tu) {
 }
 
 bool Sema::checkImplDecls(ast::TranslationUnit *tu) {
-  StringSet localClasses;
+  StringSet localTypes;
   for (auto *cd : tu->getClassDecls())
-    localClasses.insert(cd->getName());
+    localTypes.insert(cd->getName());
+  for (auto *sd : tu->getStructDecls())
+    localTypes.insert(sd->getName());
   bool ok = true;
   for (auto *im : tu->getImplDecls()) {
     const std::string &name = im->getTypeName();
@@ -686,38 +689,42 @@ bool Sema::checkImplDecls(ast::TranslationUnit *tu) {
       continue;
     }
     auto *ct = Ctx.lookupClassType(name);
+    auto *st = Ctx.lookupStructType(name);
+    ast::Type *target = ct ? static_cast<ast::Type *>(ct) : st;
     ast::Type *named = Ctx.lookupType(name);
     std::string why;
     if ((ct && ct->isBuiltin()) || (named && ast::isa<ast::BuiltinType>(named)))
       why = "'" + name +
             "' is a built-in type; an 'impl' block cannot add "
             "methods to it";
-    else if ((ct && !localClasses.count(name)) || ClassTemplates.count(name))
-      why = "an 'impl' block for a class of another module is not supported "
-            "yet";
+    else if ((target && !localTypes.count(name)) || ClassTemplates.count(name))
+      why = std::string("an 'impl' block for a ") + (st ? "struct" : "class") +
+            " of another module is not supported yet";
     else if (Ctx.lookupEnumType(name))
       why = "an 'impl' block for an enum is not supported yet";
-    else if (ct && !im->getTypeParams().empty()) {
-      why = "'" + name + "' is not a generic class: write 'impl ";
+    else if (target && !im->getTypeParams().empty()) {
+      why = "'" + name + "' is not a generic " + typeKindWord(target) +
+            ": write 'impl ";
       why += name + "'";
-    } else if (!ct && !isFailedImportUse(name))
+    } else if (!target && !isFailedImportUse(name))
       why = "'impl' for undefined class '" + name + "'";
     if (!why.empty())
       error(im->getLocation(), why);
-    if (!ct || !why.empty()) {
+    if (!target || !why.empty()) {
       ok = false;
       continue;
     }
     if (im->getTrait()) {
-      if (!checkTraitImpl(im, ct))
+      if (!checkTraitImpl(im, target))
         ok = false;
       continue;
     }
     for (auto *fn : im->getMethods()) {
       if (!fn->isStatic())
         continue;
-      if (ct->findMethod(fn->getName())) {
-        error(fn->getLocation(), "class '" + name + "' already has a method '" +
+      if (methodOf(target, fn->getName())) {
+        error(fn->getLocation(), std::string(typeKindWord(target)) + " '" +
+                                     name + "' already has a method '" +
                                      fn->getName() + "'");
         ok = false;
         continue;
@@ -730,7 +737,7 @@ bool Sema::checkImplDecls(ast::TranslationUnit *tu) {
   for (const auto &p : PendingTraitImpls) {
     InstantiationStack.push_back(p.Request);
     OriginSource inOrigin(Diags, p.Origin);
-    if (!checkTraitImpl(p.Impl, p.Class))
+    if (!checkTraitImpl(p.Impl, p.Type))
       ok = false;
     InstantiationStack.pop_back();
   }
@@ -889,8 +896,9 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
         // of __init__.  Run after the body type-checks so subject types (used
         // for match-exhaustiveness) are resolved.
         if (method->getName() == names::kMethodInit) {
-          if (!checkInitFieldsAssigned(ct, method->getBody(),
-                                       method->getLocation(), node->getName()))
+          if (!checkInitFieldsAssigned(ct->getFields(), method->getBody(),
+                                       method->getLocation(), "class",
+                                       node->getName()))
             ok = false;
         }
       }

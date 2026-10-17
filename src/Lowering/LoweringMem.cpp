@@ -126,8 +126,15 @@ ModuleLowering::MemValue ModuleLowering::emitMemValue(ast::Expr *e) {
   if (auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(e))
     return {emitTupleElementAddress(ti->getTuple(), ti->getIndex())};
   // A field, in its object: a call-rooted one (`mk().xs`) is kept until the
-  // consumer is done with the address.
+  // consumer is done with the address.  A struct's field is in the struct's
+  // bytes, at its offset, like a tuple's element.
   if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e)) {
+    if (auto *st = getExprStructType(ma->getReceiver())) {
+      int idx = st->fieldIndex(ma->getFieldName());
+      assert(idx >= 0 && "Sema should have verified the field exists");
+      return {
+          emitTupleElementAddress(ma->getReceiver(), static_cast<size_t>(idx))};
+    }
     Receiver recv = emitReceiver(ma->getReceiver(), "obj");
     ast::ClassType *ct = getExprClassType(ma->getReceiver());
     if (!recv || !ct)
@@ -457,16 +464,35 @@ void ModuleLowering::emitMemAssign(const Val &dst, ast::Expr *value) {
   releaseMemTemps(mark);
 }
 
-// -- Tuples: their layouts, text and equality
+// -- Tuples and structs: their layouts, text and equality
 
 Val ModuleLowering::emitTupleLayout(ast::TupleType *tt) {
   std::vector<int64_t> words;
+  // A name (Runtime.h, "Structs"): its length, then its bytes packed eight
+  // to a word, the first byte in the lowest eight bits.
+  auto appendName = [&](const std::string &name) {
+    words.push_back(static_cast<int64_t>(name.size()));
+    for (size_t i = 0; i < name.size(); i += 8) {
+      uint64_t word = 0;
+      for (size_t k = 0; k < 8 && i + k < name.size(); ++k)
+        word |= static_cast<uint64_t>(static_cast<unsigned char>(name[i + k]))
+                << (8 * k);
+      words.push_back(static_cast<int64_t>(word));
+    }
+  };
   std::function<void(ast::TupleType *)> append = [&](ast::TupleType *t) {
+    auto *st = ast::dyn_cast<ast::StructType>(t);
     words.push_back(static_cast<int64_t>(t->getArity()));
+    if (st)
+      appendName(st->getName());
     for (size_t i = 0; i < t->getArity(); ++i) {
       ast::Type *e = t->getElementType(i);
+      if (st)
+        appendName(st->getFieldName(i));
       auto *nested = ast::dyn_cast<ast::TupleType>(e);
-      words.push_back(nested ? int64_t{names::kNativeKindTuple}
+      words.push_back(nested ? (ast::isa<ast::StructType>(nested)
+                                    ? int64_t{names::kNativeKindStruct}
+                                    : int64_t{names::kNativeKindTuple})
                              : int64_t{nativeTypeKind(e)});
       words.push_back(tupleElementOffset(t, i));
       if (nested)
@@ -485,7 +511,9 @@ Val ModuleLowering::emitTupleLayout(ast::TupleType *tt) {
   }
   auto [it, added] = InternedTupleLayouts.try_emplace(key);
   if (added) {
-    it->second = std::string(names::kTupleLayoutGlobalName) +
+    it->second = std::string(ast::isa<ast::StructType>(tt)
+                                 ? names::kStructLayoutGlobalName
+                                 : names::kTupleLayoutGlobalName) +
                  std::to_string(InternedTupleLayouts.size() - 1);
     Mod.Datas.push_back({it->second, std::move(words)});
   }
@@ -497,10 +525,11 @@ Val ModuleLowering::emitTupleToString(ast::Expr *e) {
   Val addr = emitMemAddress(e);
   if (!addr)
     return Val();
-  Val str = callRuntime(
-      names::kPaykanTupleToString,
-      {addr, emitTupleLayout(ast::cast<ast::TupleType>(e->getResolvedType()))},
-      "tup.str");
+  auto *tt = ast::cast<ast::TupleType>(e->getResolvedType());
+  Val str =
+      callRuntime(ast::isa<ast::StructType>(tt) ? names::kPaykanStructToString
+                                                : names::kPaykanTupleToString,
+                  {addr, emitTupleLayout(tt)}, "tup.str");
   releaseMemTemps(mark);
   trackStringTemp(str);
   return str;
@@ -512,11 +541,11 @@ Val ModuleLowering::emitTupleEquals(ast::Expr *a, ast::Expr *b) {
   Val pb = pa ? emitMemAddress(b) : Val();
   if (!pb)
     return Val();
-  Val eq = callRuntime(
-      names::kPaykanTupleEquals,
-      {pa, pb,
-       emitTupleLayout(ast::cast<ast::TupleType>(a->getResolvedType()))},
-      "tup.eq");
+  auto *tt = ast::cast<ast::TupleType>(a->getResolvedType());
+  Val eq =
+      callRuntime(ast::isa<ast::StructType>(tt) ? names::kPaykanStructEquals
+                                                : names::kPaykanTupleEquals,
+                  {pa, pb, emitTupleLayout(tt)}, "tup.eq");
   releaseMemTemps(mark);
   return B.cmp(CmpPred::Ne, eq, Val::i64(0), "eq");
 }

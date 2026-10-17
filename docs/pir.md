@@ -198,8 +198,12 @@ generic native function, and a `.tupleN` one, the layout of a tuple type
 (`Runtime.h`, "Tuples": the element count, then each element's
 `PaykanTypeKind` and byte offset, an optional's payload kind, a nested tuple's
 layout), for each tuple type that is printed, compared or converted with
-`toString()`.  A `bytes` global (raw constant bytes) is part of the format,
-though the lowering emits none.
+`toString()`, and a `.structN` one for each struct type that is (`Runtime.h`,
+"Structs": a tuple's layout with the struct's name after the count and each
+field's name before its entry, a name being its byte length then its bytes
+packed eight to a word; a struct nested in a tuple or a struct is an entry of
+kind `STRUCT`, its layout inline).  A `bytes` global (raw constant bytes) is
+part of the format, though the lowering emits none.
 
 Every symbol a function body references must be declared in its module: a call
 to a runtime function needs the `extern fn`, a field access needs the `class`
@@ -439,6 +443,20 @@ CodeGen enforced, now in one place.
   concatenation's: destroyed after a print, boxed when kept) and
   `PaykanTuple_equals` (`i64`, nonzero when equal: `==` is its `cmp ne
   ..., 0`, `!=` the `not` of that).
+* **Structs** (docs/language/14-structs.md) are tuples with names: the same
+  `mem` storage, copies, retains and releases, with a field read as
+  `ptr.add` of the field's offset from the struct's address and a field
+  assignment a `ptr.store` there (a `mem` field a `mem.copy`), after the
+  release of the reference it replaces.  A method `S.m` takes the
+  receiver's address as its first `ptr` parameter (`self`, declared as an
+  `inout` parameter: it reads and writes the receiver's storage), then its
+  parameters, then the result slot of a `mem` or `inout` result; a `static
+  fn` is a function `S::f`; the constructor `S` takes the `__init__`'s
+  parameters and a last `ptr`, the caller's storage, which it zeroes before
+  calling `S.__init__` on it, and returns `void`.  Printing, `toString()`
+  and `==`/`!=` pass the address and the `.structN` layout to
+  `PaykanStruct_toString` and `PaykanStruct_equals`, with the conventions
+  of the tuple calls.
 * **Fields** own their box; `field.store` is preceded by a retain-or-steal
   of the new value and the old value is released (null-checked).
 * **Indexing** an array or a slice checks the index first: when it is
@@ -517,6 +535,8 @@ PaykanString_parse_bool(obj, ptr) -> i64    ; 1 and the value at ptr, or 0 (and 
 PaykanInt_hash(i64) -> i64              PaykanString_hash(obj) -> i64
 ; tuples: the address of the value (of both, for equals), then its layout
 PaykanTuple_toString(ptr, ptr) -> obj   PaykanTuple_equals(ptr, ptr, ptr) -> i64
+; structs: likewise, with a struct layout
+PaykanStruct_toString(ptr, ptr) -> obj  PaykanStruct_equals(ptr, ptr, ptr) -> i64
 ; files
 PaykanFile_open(obj, obj) -> box
 ; I/O

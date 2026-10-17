@@ -1,0 +1,133 @@
+// 51 — structs: values held in place with named fields
+// Exercises: `struct` declarations, the constructor `Point(1, 2)` (the
+//            fields in order, or an `__init__` from an `impl` block), field
+//            reads `p.x` and assignments `p.x = 5` in place, copies (`q = p`
+//            copies the fields; a copy of a struct holding an object names
+//            the same object), structs as fields / parameters / results /
+//            array elements / tuple elements / type arguments, `impl` blocks
+//            (methods whose `self` is the receiver's storage, `view fn`,
+//            `static fn`, an `inout` result), `impl Trait for`, field-wise
+//            `==` / `!=`, `toString` rendering `Point(x: 1, y: 2)`, and the
+//            `view` / `inout` parameter modes.
+// A struct is a value held in place, like a tuple: its fields sit side by
+// side in the variable, field or array slot that holds it.  Unlike a
+// tuple's elements, its fields are named and can be assigned.  A struct has
+// no superclass, no vtable and no identity: two structs are equal when
+// their fields are.
+
+struct Point {
+  x: int;
+  y: int;
+}
+
+impl Point {
+  static fn origin() -> Point { return Point(0, 0); }
+  view fn sum() -> int { return self.x + self.y; }
+  fn shift(dx: int, dy: int) { self.x = self.x + dx; self.y = self.y + dy; }
+  view fn moved(dx: int, dy: int) -> Point { q = self; q.shift(dx, dy); return q; }
+  fn xSlot() -> inout int { return self.x; }
+}
+
+impl Hashable for Point {
+  view fn hash() -> int { return (self.x * 31 + self.y).hash(); }
+}
+
+class Node {
+  n: int;
+  view fn toString() -> Str { return "Node" + Str(self.n); }
+}
+
+// A struct holding a reference and a tuple; a default constructor takes the
+// fields in order.
+struct Item {
+  name: Str;
+  node: Node;
+  pos: (int, int);
+}
+
+struct Line {
+  a: Point;            // a struct field, held in place
+  b: Point;
+  label: Str;
+}
+
+impl Line {
+  fn __init__(a: Point, b: Point) { self.a = a; self.b = b; self.label = "line"; }
+  view fn length2() -> int {
+    dx = self.b.x - self.a.x;
+    dy = self.b.y - self.a.y;
+    return dx * dx + dy * dy;
+  }
+}
+
+class Box<T> {
+  v: T;
+  view fn get() -> view T { return self.v; }
+}
+
+impl Box<T> {
+  fn __init__(v: T) { self.v = v; }
+}
+
+class Shape {
+  at: Point;           // a struct field of a class: assigned in place
+}
+
+fn show<T: Show>(x: view T) -> Str { return x.toString(); }
+fn twice<T: ValueType>(x: T) -> (T, T) { return (x, x); }
+fn hashOf<T: Hashable>(x: view T) -> int { return x.hash(); }
+
+fn bump(n: inout int) { n = n + 1; }
+fn farthest(ps: view Point[]) -> Point {
+  best = ps[0];
+  i = 1;
+  while (i < ps.len()) {
+    if (ps[i].sum() > best.sum()) { best = ps[i]; }
+    i = i + 1;
+  }
+  return best;
+}
+fn normalize(p: inout Point) { p = Point(p.x / 2, p.y / 2); }
+
+fn main() -> int {
+  p = Point(1, 2);
+  p.x = 5;                                 // assigned in place
+  q = p;                                   // a copy
+  q.shift(1, 1);
+  println(p);                              // Point(x: 5, y: 2)
+  println(q);                              // Point(x: 6, y: 3)
+  println(Str(p == q) + " " + Str(p == Point(5, 2)) + " " + Str(p != q));
+
+  bump(p.xSlot());                         // through an `inout` result
+  bump(q.x);                               // a field as an `inout` place
+  println(Str(p.x) + " " + Str(q.x));
+
+  l = Line(p, q);
+  l.a.y = 0;                               // a field of a field
+  println(show(l) + " " + Str(l.length2()));
+
+  s = Shape(Point::origin());
+  s.at.shift(3, 4);
+  println(s.at.moved(1, 1));
+
+  item = Item("it", Node(1), (7, 8));
+  copy = item;
+  copy.name = "copy";                      // copy's own field
+  copy.node.n = 2;                         // the shared object
+  println(item);
+  println(copy);
+
+  ps: Point[3] = [Point(1, 1), Point(4, 4), Point(2, 2)];
+  ps[2].x = 9;                             // an element's field, in place
+  println(farthest(ps));
+  far = farthest(ps);
+  normalize(far);                          // the caller's variable, replaced
+  println(far);
+
+  pair = twice(p);                         // (Point, Point)
+  b = Box(Point(2, 3));
+  t: (Point, Str) = (b.get(), "boxed");
+  println(Str(pair.1.sum()) + " " + Str(t.0.y) + " " + t.1 + " " +
+          Str(hashOf(p) == Point(6, 2).hash()));
+  return p.sum() + ps[2].x;
+}

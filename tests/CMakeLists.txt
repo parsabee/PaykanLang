@@ -34,6 +34,7 @@ add_executable(parser_tests
     Parser/LetTests.cpp
     Parser/ImplTests.cpp
     Parser/TraitTests.cpp
+    Parser/StructTests.cpp
 )
 target_include_directories(parser_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -81,6 +82,7 @@ add_executable(sema_tests
     Sema/ImplTests.cpp
     Sema/TraitTests.cpp
     Sema/BorrowedResultTests.cpp
+    Sema/StructTests.cpp
 )
 target_include_directories(sema_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -128,6 +130,7 @@ add_executable(codegen_tests
     CodeGen/MemSlotTests.cpp
     CodeGen/FixedArrayTests.cpp
     CodeGen/TupleTests.cpp
+    CodeGen/StructTests.cpp
     CodeGen/RegressionTests.cpp
     CodeGen/LiteralObjectTests.cpp
     CodeGen/RuntimeNameTests.cpp
@@ -416,6 +419,7 @@ add_executable(runtime_tests
     Runtime/ErrorTests.cpp
     Runtime/OptionalNullTests.cpp
     Runtime/TupleTests.cpp
+    Runtime/StructTests.cpp
     Runtime/TypeTests.cpp
 )
 target_include_directories(runtime_tests

@@ -1,0 +1,7 @@
+// ERROR: 'a' is declared with 'let'; its fields are part of its value and cannot be assigned
+struct A { x: int; }
+fn main() -> int {
+  let a = A(1);
+  a.x = 2;
+  return a.x;
+}

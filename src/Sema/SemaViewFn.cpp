@@ -67,25 +67,32 @@ void Sema::warnMissingViewFns() {
   // introduces it: all of them are `view fn` or none is.  A family could be
   // one when no member changes `self` and every `self.m()` in its members
   // calls a family that could be one too (a fixed point, so that a getter
-  // calling another getter is found in one compile).
-  using Family = std::pair<ast::ClassType *, std::string>;
+  // calling another getter is found in one compile).  A struct's method is
+  // a family of its own (a struct inherits nothing).
+  using Family = std::pair<ast::Type *, std::string>;
+  auto familyOf = [](const MethodUse &use, const std::string &name) -> Family {
+    if (use.Struct)
+      return {use.Struct, name};
+    return {introducingClass(use.Class, name), name};
+  };
+  auto ownerOf = [](const MethodUse &use) -> ast::Type * {
+    return use.Struct ? static_cast<ast::Type *>(use.Struct) : use.Class;
+  };
   std::map<Family, std::vector<const MethodUse *>> families;
-  for (const MethodUse &use : MethodUses) {
-    const std::string &name = use.Decl->getName();
-    families[{introducingClass(use.Class, name), name}].push_back(&use);
-  }
+  for (const MethodUse &use : MethodUses)
+    families[familyOf(use, use.Decl->getName())].push_back(&use);
   std::set<Family> could;
   for (const auto &[family, members] : families) {
     // A family started outside this module (Obj's toString, an imported
     // class's method, another module's template) keeps its marker: there is
     // nothing to suggest.
-    const auto *intro = family.first->findMethod(family.second);
-    if (ImportedTypeOrigins.count(family.first->getName()))
+    const auto *intro = methodOf(family.first, family.second);
+    if (ImportedTypeOrigins.count(typeName(family.first)))
       continue;
     bool introducedHere = false;
     bool changes = false;
     for (const MethodUse *m : members) {
-      introducedHere |= m->Class == family.first;
+      introducedHere |= ownerOf(*m) == family.first;
       changes |= m->ChangesSelf;
     }
     if (introducedHere && !changes && intro && !intro->isView())
@@ -97,7 +104,7 @@ void Sema::warnMissingViewFns() {
       bool stays = true;
       for (const MethodUse *m : families[*it])
         for (const std::string &callee : m->SelfCalls)
-          if (!could.count({introducingClass(m->Class, callee), callee}))
+          if (!could.count(familyOf(*m, callee)))
             stays = false;
       if (stays) {
         ++it;
@@ -112,7 +119,7 @@ void Sema::warnMissingViewFns() {
   std::set<std::pair<size_t, size_t>> warned;
   for (const Family &family : could) {
     for (const MethodUse *m : families[family]) {
-      if (m->Class != family.first)
+      if (ownerOf(*m) != family.first)
         continue;
       ast::SourceLocation loc = m->Decl->getLocation();
       if (!warned.insert({loc.getLineStart(), loc.getColumnStart()}).second)

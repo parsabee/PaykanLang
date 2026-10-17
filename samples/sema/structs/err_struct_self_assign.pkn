@@ -1,0 +1,6 @@
+// ERROR: cannot assign to 'self': assign its fields instead
+struct A { x: int; }
+impl A {
+  fn reset() { self = A(0); }
+}
+fn main() -> int { return 0; }

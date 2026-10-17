@@ -95,6 +95,19 @@ bool Sema::checkDeclNameAvailable(const std::string &name,
     error(loc, "'" + name + "' is a builtin function and cannot be redeclared");
     return false;
   }
+  if (Ctx.lookupStructType(name)) {
+    if (kind == DeclKind::Struct)
+      // Local structs are checked before any of them is registered, so a
+      // struct hit while declaring a struct can only come from an import.
+      error(loc, "struct '" + name +
+                     "' conflicts with an imported type of the same name");
+    else if (kind == DeclKind::Class)
+      error(loc,
+            "class '" + name + "' conflicts with a struct of the same name");
+    else
+      error(loc, "'" + name + "' is already declared as a struct");
+    return false;
+  }
   if (Ctx.lookupEnumType(name)) {
     if (kind == DeclKind::Enum)
       error(loc, "redefinition of enum '" + name + "'");
@@ -170,6 +183,9 @@ bool Sema::typesEqual(ast::Type *a, ast::Type *b) {
     return false;
   if (a->getKind() != b->getKind())
     return false;
+  // A struct is nominal: equal to itself only (the identity test above).
+  if (ast::isa<ast::StructType>(a))
+    return false;
   if (auto *ao = ast::dyn_cast<ast::OptionalType>(a))
     return typesEqual(ao->getInnerType(),
                       ast::cast<ast::OptionalType>(b)->getInnerType());
@@ -220,6 +236,13 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
   // `match`, and an optional is not an object, so not an `Obj` either (#96;
   // the print builtins take one, see visitCallExpr).
   if (ast::isa<ast::OptionalType>(src))
+    return false;
+
+  // A struct is nominal: only itself flows into it (the identity test
+  // above), and it is never a tuple of the same shape.  (Its fields can be
+  // assigned, so a covariant copy would let a `Point` holding a `Dog`
+  // become one holding a `Cat` through an `Animal`-typed field.)
+  if (ast::isa<ast::StructType>(dst) || ast::isa<ast::StructType>(src))
     return false;
 
   // Tuples: assignability is element-wise and *representation-preserving*:
@@ -312,7 +335,9 @@ ast::Type *Sema::adoptLiteralElements(ast::Type *dst, ast::Type *srcTy,
   if (auto *lit = ast::dyn_cast<ast::TupleLiteralExpr>(src)) {
     auto *dstTT = ast::dyn_cast<ast::TupleType>(ast::stripOptional(dst));
     auto *litTT = ast::dyn_cast<ast::TupleType>(srcTy);
-    if (!dstTT || !litTT || dstTT->getArity() != litTT->getArity() ||
+    // A tuple literal never flows into a struct (nominal typing).
+    if (!dstTT || ast::isa<ast::StructType>(dstTT) || !litTT ||
+        dstTT->getArity() != litTT->getArity() ||
         litTT->getArity() != lit->getNumElements())
       return srcTy;
     std::vector<ast::Type *> elems = litTT->getElementTypes();
@@ -514,15 +539,38 @@ bool Sema::checkFixedResult(ast::Type *retTy, ast::ParamMode mode,
   return false;
 }
 
-std::string Sema::letFixedArrayRoot(const ast::Expr *e) {
+const ast::TupleIndexExpr *Sema::tupleElementHolding(const ast::Expr *e) {
+  for (;;) {
+    if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(e))
+      return ti;
+    const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e);
+    if (!ma || !ast::isa<ast::StructType>(ma->getReceiver()->getResolvedType()))
+      return nullptr;
+    e = ma->getReceiver();
+  }
+}
+
+std::string Sema::letValueRoot(const ast::Expr *e) {
   for (;;) {
     if (const auto *id = ast::dyn_cast<ast::Identifier>(e))
       return varKind(id->getName()) == VarKind::Let ? id->getName() : "";
-    const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e);
-    const ast::Type *base = se ? se->getArray()->getResolvedType() : nullptr;
-    if (!base || !ast::isa<ast::FixedArrayType>(base))
+    // An element of a fixed-size array, a field of a struct or an element
+    // of a tuple is part of the value that holds it.
+    if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e)) {
+      const ast::Type *base = se->getArray()->getResolvedType();
+      if (!base || !ast::isa<ast::FixedArrayType>(base))
+        return "";
+      e = se->getArray();
+    } else if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e)) {
+      const ast::Type *base = ma->getReceiver()->getResolvedType();
+      if (!base || !ast::isa<ast::StructType>(base))
+        return "";
+      e = ma->getReceiver();
+    } else if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(e)) {
+      e = ti->getTuple();
+    } else {
       return "";
-    e = se->getArray();
+    }
   }
 }
 
@@ -541,18 +589,24 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     return Ctx.lookupEnumType(et->getName());
 
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
-    // `Self` in a method is its class (in a trait, the implementing type).
+    // `Self` in a method is its class or struct (in a trait, the
+    // implementing type).
     if (ct->getName() == names::kSelfType) {
-      if (ast::ClassType *self =
-              SelfType
-                  ? SelfType
-                  : (CurrentClassCtx ? CurrentClassCtx->ClassType : nullptr))
+      ast::Type *self = SelfType;
+      if (!self && CurrentClassCtx)
+        self = CurrentClassCtx->ClassType
+                   ? static_cast<ast::Type *>(CurrentClassCtx->ClassType)
+                   : CurrentClassCtx->Struct;
+      if (self)
         return self;
     }
     // The parser emits a ClassType stub for any unknown type name; it may in
-    // fact be an enum, which is resolved here before falling back to classes.
+    // fact be an enum or a struct, which are resolved here before falling
+    // back to classes.
     if (auto *enumTy = Ctx.lookupEnumType(ct->getName()))
       return enumTy;
+    if (auto *structTy = Ctx.lookupStructType(ct->getName()))
+      return structTy;
     if (auto *canonical = Ctx.lookupClassType(ct->getName()))
       return canonical;
     if (ClassTemplates.count(ct->getName())) {
@@ -680,6 +734,14 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
                      "?', which is not supported");
       return nullptr;
     }
+    // An optional struct could not be unwrapped either (`match` takes no
+    // struct subject or arm); before the tuple check, which a struct is.
+    if (ast::isa<ast::StructType>(inner)) {
+      error(loc, context + " has type '" + typeName(inner) +
+                     "?': optional struct types are not supported yet (an "
+                     "optional struct cannot be unwrapped with match)");
+      return nullptr;
+    }
     // An optional tuple could never be unwrapped: `match` rejects tuple type
     // arms, so the `T` arm that unwraps an optional does not exist for it.
     // Reject it until tuple patterns land.
@@ -692,6 +754,11 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     // Resolve to the context's canonical (interned) instance, as for arrays.
     return Ctx.getOptionalType(inner);
   }
+
+  // A struct type is canonical already (a resolved annotation, or a type
+  // argument put into a template); before the tuple case, which it is too.
+  if (ast::isa<ast::StructType>(ty))
+    return ty;
 
   if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
     std::vector<ast::Type *> elems;
@@ -792,7 +859,7 @@ bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
 
 bool Sema::isTypeNameForVariable(const std::string &name) const {
   return Ctx.lookupClassType(name) || Ctx.lookupEnumType(name) ||
-         ClassTemplates.count(name) ||
+         Ctx.lookupStructType(name) || ClassTemplates.count(name) ||
          (CurrentTypeParams && CurrentTypeParams->count(name)) ||
          name == names::kObj || name == names::kString ||
          name == names::kFile || name == names::kTypeInt ||
@@ -1051,7 +1118,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   if (known)
     expectedArgs = known->ParamTypes;
   // `__super__(...)`: the superclass `__init__`'s parameters (checked below).
-  else if (node->getCalleeName() == names::kMethodSuper && S.CurrentClassCtx)
+  else if (node->getCalleeName() == names::kMethodSuper && S.CurrentClassCtx &&
+           S.CurrentClassCtx->ClassType)
     if (auto *sc = S.CurrentClassCtx->ClassType->getSuperClass();
         sc && !S.isErroneousClass(sc))
       if (auto *init = sc->findMethod(names::kMethodInit);
@@ -1071,6 +1139,14 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
       S.error(node->getLocation(), std::string("'") + names::kMethodSuper +
                                        "' can only be called inside '" +
                                        names::kMethodInit + "'");
+      return nullptr;
+    }
+    if (!S.CurrentClassCtx->ClassType) {
+      S.error(node->getLocation(), std::string("'") + names::kMethodSuper +
+                                       "' called in struct '" +
+                                       S.CurrentClassCtx->Struct->getName() +
+                                       "', which has no superclass (a struct "
+                                       "does not inherit)");
       return nullptr;
     }
     auto *superClass = S.CurrentClassCtx->ClassType->getSuperClass();
@@ -1175,7 +1251,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   }
 
   // Record "class A constructs class B" edges for instantiation ordering.
-  if (S.CurrentClassCtx && S.Ctx.lookupClassType(node->getCalleeName()))
+  if (S.CurrentClassCtx && S.CurrentClassCtx->ClassType &&
+      S.Ctx.lookupClassType(node->getCalleeName()))
     S.ConstructsEdges[S.CurrentClassCtx->ClassType->getName()].insert(
         node->getCalleeName());
 
@@ -1261,12 +1338,13 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     return S.Ctx.getIntTy();
   }
 
-  // Resolve the ClassType to look up the method on.
+  // Resolve the ClassType, or the StructType, to look up the method on.
   ast::ClassType *ct = ast::dyn_cast<ast::ClassType>(recvTy);
+  ast::StructType *st = ast::dyn_cast<ast::StructType>(recvTy);
 
-  // `n.toString()` on an int, float, bool or char, or on a tuple: the
-  // builtin `Show`; `n.hash()` on an int, bool or char, and `s.hash()` on a
-  // Str: the builtin `Hashable`.
+  // `n.toString()` on an int, float, bool or char, or on a tuple or a
+  // struct: the builtin `Show`; `n.hash()` on an int, bool or char, and
+  // `s.hash()` on a Str: the builtin `Hashable`.
   const std::string &mname = node->getMethodName();
   ast::Type *builtinResult = nullptr;
   if (!ct &&
@@ -1288,18 +1366,21 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     node->setResolvedType(builtinResult);
     return builtinResult;
   }
-  if (!ct) {
+  if (!ct && !st) {
     S.error(node->getLocation(),
             "method call on non-class type '" + typeName(recvTy) + "'");
     return nullptr;
   }
 
-  ast::MethodDecl *method = ct->findMethod(node->getMethodName());
-  std::string ownerName = ct->getName();
+  // A struct's methods are those of its `impl` blocks, called directly.
+  ast::MethodDecl *method = ct ? ct->findMethod(node->getMethodName())
+                               : st->findMethod(node->getMethodName());
+  std::string ownerName = ct ? ct->getName() : st->getName();
 
   if (!method) {
-    if (S.isErroneousClass(ct)) {
-      ++S.SuppressedFollowOns; // the class declaration was already reported
+    if (ct ? S.isErroneousClass(ct)
+           : S.ErroneousClasses.count(st->getName()) != 0) {
+      ++S.SuppressedFollowOns; // the type's declaration was already reported
       return nullptr;
     }
     S.error(node->getLocation(), "no method '" + node->getMethodName() +
@@ -1348,7 +1429,7 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                    node->getMethodName(), node->getReceiver(), method);
   // A builtin method reads its arguments; `equals`, like `==`, only
   // compares.
-  if (!ct->isBuiltin() && node->getMethodName() != names::kMethodEquals)
+  if (!(ct && ct->isBuiltin()) && node->getMethodName() != names::kMethodEquals)
     S.checkViewArgs(method->getParamModes(), method->getParamTypes(),
                     node->getArguments(), node->getMethodName());
   S.noteBorrowResult(node, node->getMethodName(), method->getParamModes(),
@@ -1387,6 +1468,20 @@ Sema::ExprChecker::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
   // A field cannot be read through an optional receiver (it may be None).
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(recvTy)) {
     S.errorOptionalUnwrap(node->getLocation(), ot);
+    return nullptr;
+  }
+
+  // A struct's field, by name.
+  if (auto *st = ast::dyn_cast<ast::StructType>(recvTy)) {
+    if (auto *fty = st->findField(node->getFieldName())) {
+      node->setResolvedType(fty);
+      return fty;
+    }
+    if (S.ErroneousClasses.count(st->getName()))
+      ++S.SuppressedFollowOns; // the struct declaration was already reported
+    else
+      S.error(node->getLocation(), "no field '" + node->getFieldName() +
+                                       "' in struct '" + st->getName() + "'");
     return nullptr;
   }
 
@@ -1709,7 +1804,9 @@ Sema::ExprChecker::visitTupleLiteralExpr(ast::TupleLiteralExpr *node) {
   auto *expectedTT =
       expected ? ast::dyn_cast<ast::TupleType>(ast::stripOptional(expected))
                : nullptr;
-  if (expectedTT && expectedTT->getArity() != node->getNumElements())
+  // A struct slot (nominal) expects nothing of a tuple literal.
+  if (expectedTT && (ast::isa<ast::StructType>(expectedTT) ||
+                     expectedTT->getArity() != node->getNumElements()))
     expectedTT = nullptr;
   std::vector<ast::Type *> elemTys;
   elemTys.reserve(node->getNumElements());
@@ -1748,6 +1845,16 @@ ast::Type *Sema::ExprChecker::visitTupleIndexExpr(ast::TupleIndexExpr *node) {
   auto *recvTy = visit(node->getTuple());
   if (!recvTy)
     return nullptr;
+  if (auto *st = ast::dyn_cast<ast::StructType>(recvTy)) {
+    std::string fields;
+    for (const std::string &f : st->getFieldNames())
+      fields += (fields.empty() ? "" : ", ") + f;
+    S.error(node->getLocation(),
+            "tuple index '." + std::to_string(node->getIndex()) +
+                "' applied to struct type '" + st->getName() +
+                "': a struct's fields are named (" + fields + ")");
+    return nullptr;
+  }
   auto *tt = ast::dyn_cast<ast::TupleType>(recvTy);
   if (!tt) {
     S.error(node->getLocation(),
@@ -1814,7 +1921,7 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
     return bindTargetsAfterError();
 
   auto *tt = ast::dyn_cast<ast::TupleType>(valTy);
-  if (!tt) {
+  if (!tt || ast::isa<ast::StructType>(valTy)) {
     error(node->getValue()->getLocation(),
           "cannot destructure a value of type '" + typeName(valTy) +
               "'; only tuples can be destructured");
@@ -2173,8 +2280,9 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   // Traits by name first: no other declaration may take one's name.
   if (!declareTraits(node))
     ok = false;
-  // `impl` blocks by their class, whose methods they join in checkClassDecls
-  // (a generic class's, in registerGenericTemplates, when instantiated).
+  // `impl` blocks by their class or struct, whose methods they join in
+  // checkClassDecls / populateStructs (a generic class's, in
+  // registerGenericTemplates, when instantiated).
   for (auto *im : node->getImplDecls())
     if (im->getTypeParams().empty())
       ImplsByClass[im->getTypeName()].push_back(im);
@@ -2184,6 +2292,12 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   for (auto *ed : node->getEnumDecls())
     if (!visitEnumDecl(ed))
       ok = false;
+
+  // Then the structs' names, as stubs: a class field or a signature may
+  // name one.  Their fields come after the classes (populateStructs), as
+  // they may name those.
+  if (!declareStructs(node))
+    ok = false;
 
   // Register generic class / function templates by name.  They are not
   // checked here; every use below instantiates them on demand (resolveType /
@@ -2197,6 +2311,8 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   if (!node->getClassDecls().empty())
     if (!checkClassDecls(node->getClassDecls()))
       ok = false;
+  if (!populateStructs())
+    ok = false;
   // Then the traits' signatures, which may name the classes, and the
   // `impl` blocks, which record what implements a trait; only then can a
   // template's bounds be checked (SemaTraits.cpp).
@@ -2227,10 +2343,13 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   if (!checkEntryPoint(node, declaredFns))
     ok = false;
 
-  // Now check class method bodies (they can resolve free functions) …
+  // Now check class and struct method bodies (they can resolve free
+  // functions) …
   if (!node->getClassDecls().empty())
     if (!checkClassBodies())
       ok = false;
+  if (!checkStructBodies())
+    ok = false;
 
   // … and finally free-function bodies (signatures all registered above).
   for (auto *fn : declaredFns)
@@ -2419,6 +2538,15 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   // Guard: the target name must not shadow a type or reserved name.
   if (!checkBinderName(varName, node->getLocation()))
     return false;
+  // `self` is the method's object, or a struct method's receiver: it names
+  // what the method was called on, and cannot name something else.
+  if (varName == names::kSelf && CurrentClassCtx &&
+      !CurrentClassCtx->MethodName.empty()) {
+    error(node->getLocation(),
+          std::string("cannot assign to 'self'") +
+              (CurrentClassCtx->Struct ? ": assign its fields instead" : ""));
+    return false;
+  }
   // The variable is still declared after this error.
   const bool viewOk = checkViewNotStored(node->getValue(), valTy);
 
@@ -2952,35 +3080,66 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
     return false;
   }
 
-  // `t.0 = v`: the parser hands tuple-index assignment over as a member
-  // assignment whose field name is the index (docs/grammar.md) so that the
-  // rejection is a typed diagnostic.  Tuples are immutable.
-  if (ast::isa<ast::TupleType>(recvTy)) {
+  ast::Type *fieldTy = nullptr;
+  if (auto *st = ast::dyn_cast<ast::StructType>(recvTy)) {
+    // A struct's fields can be assigned, in place, where the struct is
+    // changeable: not through a `view`, and not in a `let` local, whose
+    // fields are part of its value.
+    fieldTy = st->findField(node->getFieldName());
+    if (!fieldTy) {
+      if (ErroneousClasses.count(st->getName()))
+        ++SuppressedFollowOns; // the struct declaration was already reported
+      else
+        error(node->getLocation(), "no field '" + node->getFieldName() +
+                                       "' in struct '" + st->getName() + "'");
+      return false;
+    }
+    if (std::string let = letValueRoot(node->getReceiver()); !let.empty()) {
+      error(node->getLocation(), "'" + let +
+                                     "' is declared with 'let'; its fields "
+                                     "are part of its value and cannot be "
+                                     "assigned");
+      return false;
+    }
+    // A struct held in a tuple is part of the tuple's value, which is
+    // immutable: so are its fields (through any structs in between).
+    if (const auto *ti = tupleElementHolding(node->getReceiver())) {
+      error(node->getLocation(),
+            "cannot assign to field '" + node->getFieldName() +
+                "' of a struct in element '." + std::to_string(ti->getIndex()) +
+                "' of type '" + typeName(ti->getTuple()->getResolvedType()) +
+                "': tuples are immutable; build a new tuple instead");
+      return false;
+    }
+  } else if (ast::isa<ast::TupleType>(recvTy)) {
+    // `t.0 = v`: the parser hands tuple-index assignment over as a member
+    // assignment whose field name is the index (docs/grammar.md) so that the
+    // rejection is a typed diagnostic.  Tuples are immutable.
     error(node->getLocation(), "cannot assign to element '." +
                                    node->getFieldName() + "' of type '" +
                                    typeName(recvTy) +
                                    "': tuples are immutable; build a new tuple "
                                    "instead");
     return false;
-  }
+  } else {
+    auto *ct = ast::dyn_cast<ast::ClassType>(recvTy);
+    if (!ct) {
+      error(node->getLocation(), "member assignment '." + node->getFieldName() +
+                                     "' on non-class type '" +
+                                     typeName(recvTy) + "'");
+      return false;
+    }
 
-  auto *ct = ast::dyn_cast<ast::ClassType>(recvTy);
-  if (!ct) {
-    error(node->getLocation(), "member assignment '." + node->getFieldName() +
-                                   "' on non-class type '" + typeName(recvTy) +
-                                   "'");
-    return false;
-  }
-
-  // Look up the field in the class hierarchy.
-  ast::Type *fieldTy = ct->findField(node->getFieldName());
-  if (!fieldTy) {
-    if (isErroneousClass(ct)) // the class declaration was already reported
-      ++SuppressedFollowOns;
-    else
-      error(node->getLocation(), "no field '" + node->getFieldName() +
-                                     "' in class '" + ct->getName() + "'");
-    return false;
+    // Look up the field in the class hierarchy.
+    fieldTy = ct->findField(node->getFieldName());
+    if (!fieldTy) {
+      if (isErroneousClass(ct)) // the class declaration was already reported
+        ++SuppressedFollowOns;
+      else
+        error(node->getLocation(), "no field '" + node->getFieldName() +
+                                       "' in class '" + ct->getName() + "'");
+      return false;
+    }
   }
 
   if (!checkChangeable(node->getReceiver(),
@@ -3029,7 +3188,7 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   }
   // A fixed-size array's elements are its value: a `let` one keeps them.
   if (fixed)
-    if (std::string let = letFixedArrayRoot(node->getArray()); !let.empty()) {
+    if (std::string let = letValueRoot(node->getArray()); !let.empty()) {
       error(node->getLocation(), "'" + let +
                                      "' is declared with 'let'; its elements "
                                      "are part of its value and cannot be "
@@ -3216,8 +3375,12 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
   auto *subjectCt = ast::dyn_cast<ast::ClassType>(subjectTy);
   if (!subjectCt) {
     error(node->getSubject()->getLocation(),
-          "match subject must be a class type, got '" + typeName(subjectTy) +
-              "'");
+          ast::isa<ast::StructType>(subjectTy)
+              ? "match on a struct ('" + typeName(subjectTy) +
+                    "') is not supported yet: a struct is a value, not an "
+                    "object"
+              : "match subject must be a class type, got '" +
+                    typeName(subjectTy) + "'");
     return false;
   }
 

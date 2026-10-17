@@ -1,0 +1,7 @@
+// ERROR: struct 'A' already has a method 'toString'
+// A struct's `toString` is built in (`A(x: 1)`), like a tuple's.
+struct A { x: int; }
+impl A {
+  view fn toString() -> Str { return "A"; }
+}
+fn main() -> int { return 0; }

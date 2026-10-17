@@ -168,6 +168,8 @@ static void sortModuleInfo(Sema::ModuleInfo &info) {
   };
   std::sort(info.ExportedClasses.begin(), info.ExportedClasses.end(),
             byLocalThenName);
+  std::sort(info.ExportedStructs.begin(), info.ExportedStructs.end(),
+            byLocalThenName);
   std::sort(info.ExportedEnums.begin(), info.ExportedEnums.end(),
             byLocalThenName);
   std::sort(info.ExportedFunctions.begin(), info.ExportedFunctions.end(),
@@ -265,11 +267,26 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     auto it = ImportedTypeOrigins.find(name);
     return it == ImportedTypeOrigins.end() ? std::string() : it->second;
   };
-  StringSet localClasses, localEnums;
+  StringSet localClasses, localEnums, localStructs;
   for (auto *cd : tu->getClassDecls())
     localClasses.insert(cd->getName());
   for (auto *ed : tu->getEnumDecls())
     localEnums.insert(ed->getName());
+  for (auto *sd : tu->getStructDecls())
+    localStructs.insert(sd->getName());
+  auto methodInfo = [](const ast::MethodDecl *m) {
+    ModuleInfo::ClassInfo::MethodInfo mi;
+    mi.Name = m->getName();
+    mi.ReturnTypeName = ast::typeName(m->getReturnType());
+    for (auto *pty : m->getParamTypes())
+      mi.ParamTypeNames.push_back(ast::typeName(pty));
+    mi.Flags =
+        static_cast<uint8_t>((m->isPrivate() ? ast::MethodDecl::Private : 0) |
+                             (m->isView() ? ast::MethodDecl::View : 0) |
+                             (m->isImpl() ? ast::MethodDecl::Impl : 0));
+    mi.Modes = m->getParamModes();
+    return mi;
+  };
 
   for (auto &[name, ct] : Ctx.getClassTypes()) {
     // The registry holds each class under its canonical name and again
@@ -300,20 +317,29 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
       methods.push_back(init);
     methods.insert(methods.end(), ct->getImplMethods().begin(),
                    ct->getImplMethods().end());
-    for (auto *m : methods) {
-      ModuleInfo::ClassInfo::MethodInfo mi;
-      mi.Name = m->getName();
-      mi.ReturnTypeName = ast::typeName(m->getReturnType());
-      for (auto *pty : m->getParamTypes())
-        mi.ParamTypeNames.push_back(ast::typeName(pty));
-      mi.Flags =
-          static_cast<uint8_t>((m->isPrivate() ? ast::MethodDecl::Private : 0) |
-                               (m->isView() ? ast::MethodDecl::View : 0) |
-                               (m->isImpl() ? ast::MethodDecl::Impl : 0));
-      mi.Modes = m->getParamModes();
-      ci.Methods.push_back(std::move(mi));
-    }
+    for (auto *m : methods)
+      ci.Methods.push_back(methodInfo(m));
     info.ExportedClasses.push_back(std::move(ci));
+  }
+
+  // Struct types: fields in declaration order, then `__init__` and the
+  // `impl` methods, which importers call directly (canonical entries only,
+  // as for classes).
+  for (auto &[name, st] : Ctx.getStructTypes()) {
+    if (name != st->getName())
+      continue; // alias key — skip
+    ModuleInfo::StructInfo si;
+    si.Name = name;
+    si.IsLocal = localStructs.count(name) != 0;
+    si.OriginModule = si.IsLocal ? moduleName : lookupOrigin(name);
+    for (size_t i = 0; i < st->getNumFields(); ++i)
+      si.Fields.push_back(
+          {st->getFieldName(i), ast::typeName(st->getElementType(i))});
+    if (auto *init = st->findMethod(names::kMethodInit))
+      si.Methods.push_back(methodInfo(init));
+    for (auto *m : st->getImplMethods())
+      si.Methods.push_back(methodInfo(m));
+    info.ExportedStructs.push_back(std::move(si));
   }
 
   // Enum types: name + variants in declaration order (canonical entries
@@ -396,6 +422,18 @@ pkm::Interface Sema::toInterface(const ModuleInfo &info) {
                             toModeRecs(m.Modes)});
     iface.Classes.push_back(std::move(cr));
   }
+  for (auto &si : info.ExportedStructs) {
+    pkm::StructRec sr;
+    sr.Name = si.Name;
+    sr.IsLocal = si.IsLocal;
+    sr.OriginModule = si.OriginModule;
+    for (auto &f : si.Fields)
+      sr.Fields.push_back({f.FieldName, f.TypeName});
+    for (auto &m : si.Methods)
+      sr.Methods.push_back({m.Name, m.ReturnTypeName, m.ParamTypeNames, m.Flags,
+                            toModeRecs(m.Modes)});
+    iface.Structs.push_back(std::move(sr));
+  }
   for (auto &ei : info.ExportedEnums)
     iface.Enums.push_back({ei.Name, ei.Variants, ei.IsLocal, ei.OriginModule});
   return iface;
@@ -419,6 +457,18 @@ Sema::ModuleInfo Sema::fromInterface(const pkm::Interface &iface) {
       ci.Methods.push_back({m.Name, m.ReturnTypeName, m.ParamTypeNames, m.Flags,
                             fromModeRecs(m.Modes)});
     info.ExportedClasses.push_back(std::move(ci));
+  }
+  for (auto &sr : iface.Structs) {
+    ModuleInfo::StructInfo si;
+    si.Name = sr.Name;
+    si.IsLocal = sr.IsLocal;
+    si.OriginModule = sr.OriginModule;
+    for (auto &f : sr.Fields)
+      si.Fields.push_back({f.FieldName, f.TypeName});
+    for (auto &m : sr.Methods)
+      si.Methods.push_back({m.Name, m.ReturnTypeName, m.ParamTypeNames, m.Flags,
+                            fromModeRecs(m.Modes)});
+    info.ExportedStructs.push_back(std::move(si));
   }
   for (auto &er : iface.Enums)
     info.ExportedEnums.push_back(
@@ -659,6 +709,36 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
     if (qualifier != fullModulePath)
       Ctx.addEnumTypeAlias(fullModulePath + names::kQualSep + name, et);
   };
+  auto addStructAliases = [&](ast::StructType *st, const std::string &name) {
+    Ctx.addStructTypeAlias(qualifier + names::kQualSep + name, st);
+    if (qualifier != fullModulePath)
+      Ctx.addStructTypeAlias(fullModulePath + names::kQualSep + name, st);
+  };
+  /// A method of an imported class or struct, as a MethodDecl; nullptr
+  /// after reporting a type that does not resolve.
+  auto importedMethod = [&](const ModuleInfo::ClassInfo::MethodInfo &m,
+                            const std::string &owner) -> ast::MethodDecl * {
+    const std::string decl = "method '" + owner + "." + m.Name + "'";
+    auto *retTy = resolveOrReport(m.ReturnTypeName, "return type of " + decl);
+    bool sigOk = retTy != nullptr;
+    std::vector<ast::Type *> params;
+    for (size_t i = 0; i < m.ParamTypeNames.size(); ++i) {
+      auto *pty =
+          resolveOrReport(m.ParamTypeNames[i],
+                          "parameter " + std::to_string(i + 1) + " of " + decl);
+      if (pty)
+        params.push_back(pty);
+      else
+        sigOk = false;
+    }
+    if (!sigOk)
+      return nullptr;
+    auto *md =
+        Ctx.make<ast::MethodDecl>(ast::SourceLocation(), Ctx.intern(m.Name),
+                                  retTy, std::move(params), m.Flags);
+    md->setParamModes(m.Modes);
+    return md;
+  };
 
   // Reconstruct every exported enum and class.  Returns false (with
   // diagnostics emitted) if anything failed to resolve.
@@ -688,6 +768,31 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
         addEnumAliases(et, ei.Name);
     }
 
+    // Struct stubs next: a class field or a method signature may name a
+    // struct, and a struct field a class, so every type exists before any
+    // field is resolved.  Their fields and methods come after the classes.
+    std::vector<const ModuleInfo::StructInfo *> createdStructs;
+    for (auto &si : info.ExportedStructs) {
+      if (!checkOrigin("struct", si.Name, si.OriginModule)) {
+        ok = false;
+        continue;
+      }
+      auto *st = Ctx.lookupStructType(si.Name);
+      if (!st) {
+        if (Ctx.lookupClassType(si.Name) || Ctx.lookupEnumType(si.Name)) {
+          error(loc, diagPrefix + "struct '" + si.Name + "' conflicts with a " +
+                         (Ctx.lookupClassType(si.Name) ? "class" : "an enum") +
+                         " of the same name already in scope");
+          ok = false;
+          continue;
+        }
+        st = Ctx.registerStructType(si.Name, loc);
+        createdStructs.push_back(&si);
+      } // else: already present — pointer identity preserved
+      if (si.IsLocal)
+        addStructAliases(st, si.Name);
+    }
+
     // Classes, phase 1: pre-register a stub for every class not already
     // present, superclass before subclass.  All stubs exist before any
     // signature is resolved, so a method or field may name any class of the
@@ -705,10 +810,10 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
           addClassAliases(ct, ci.Name);
         continue;
       }
-      if (Ctx.lookupEnumType(ci.Name)) {
-        error(loc, diagPrefix + "class '" + ci.Name +
-                       "' conflicts with an enum of the same name already "
-                       "in scope");
+      if (Ctx.lookupEnumType(ci.Name) || Ctx.lookupStructType(ci.Name)) {
+        error(loc, diagPrefix + "class '" + ci.Name + "' conflicts with " +
+                       (Ctx.lookupEnumType(ci.Name) ? "an enum" : "a struct") +
+                       " of the same name already in scope");
         ok = false;
         continue;
       }
@@ -778,6 +883,28 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
       builder.build();
       if (ci->IsLocal)
         addClassAliases(ct, ci->Name);
+    }
+
+    // Structs, phase 2: their fields (in the exporter's order, which holds
+    // every struct before the structs that hold it) and methods.
+    for (auto *si : createdStructs) {
+      auto *st = Ctx.lookupStructType(si->Name);
+      for (auto &f : si->Fields) {
+        auto *fty =
+            resolveOrReport(f.TypeName, "field '" + f.FieldName +
+                                            "' of struct '" + si->Name + "'");
+        if (!fty) {
+          ok = false;
+          continue;
+        }
+        st->addField(f.FieldName, fty);
+      }
+      for (auto &m : si->Methods) {
+        if (auto *md = importedMethod(m, si->Name))
+          st->addMethod(md);
+        else
+          ok = false;
+      }
     }
     return ok;
   };
@@ -884,6 +1011,10 @@ Sema::exportTemplates(ast::TranslationUnit *tu, const std::string &canonical) {
   for (auto *cd : tu->getClassDecls()) {
     types.insert(cd->getName());
     callees.insert(cd->getName()); // its constructor
+  }
+  for (auto *sd : tu->getStructDecls()) {
+    types.insert(sd->getName());
+    callees.insert(sd->getName()); // its constructor
   }
   for (auto *ed : tu->getEnumDecls())
     types.insert(ed->getName());
