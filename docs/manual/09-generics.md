@@ -53,28 +53,31 @@ when they cannot be (for example when the parameter appears only in the return t
 them explicitly:
 
 ```pkn
-fn lastOf<T>(xs: T[]) -> T? {
-  if (xs.len() == 0) { return None; }
+fn lastOf<T>(xs: view T[]) -> view T {
   return xs[xs.len() - 1];
 }
 
-fn repeat<T>(x: T, n: int) -> T[] {
-  out: T[] = [];
+fn indexOf<T>(xs: view T[], x: view T) -> int? {
   i = 0;
-  while (i < n) {
-    out.push(x);
+  while (i < xs.len()) {
+    if (xs[i] == x) { return i; }
     i = i + 1;
   }
-  return out;
+  return None;
+}
+
+fn three<T>(x: T) -> T[3] {
+  return [x, x, x];
 }
 
 fn main() -> int {
-  println(lastOf([3, 1, 4]));
+  println(Str(lastOf([3, 1, 4])));
   println(lastOf(["x", "y"]));
-  empty: Str[] = [];
-  println(lastOf(empty));
-  println(Str(repeat<Str>("ab", 3).len()));
-  println(Str(repeat(7, 2)[1] + 1 == 8));
+  println(indexOf(["a", "b", "c"], "c"));
+  println(indexOf([1, 2], 5));
+  words = three<Str>("ab");          // a Str[3]
+  println(Str(words.len()) + " " + lastOf(words));
+  println(Str(three(7)[1] + 1 == 8));
   return 0;
 }
 ```
@@ -84,10 +87,16 @@ Output:
 ```
 4
 y
+2
 None
-3
+3 ab
 True
 ```
+
+A slice parameter (`view T[]`, see [Arrays](06-arrays.md#arrays-are-values)) takes `T` from
+the array's elements, so `lastOf` works on an array of any type and length. `lastOf`
+returns a `view` of the caller's element, and `indexOf` an `int?` that is `None` when the
+value is not there.
 
 Inference is exact: in `fn same<T>(a: T, b: T)`, the call `same(1, 2.0)` is an error because
 `T` cannot be both `int` and `float`; `same<float>(1, 2.0)` is fine. Only free functions can
@@ -126,7 +135,8 @@ note: in instantiation of 'Doubler<bool>' requested here
 ```
 
 A type parameter names a type, not a value: inside the generic code you can write `T`,
-`T[]`, `T?`, `Box<T>` or `(T, int)` wherever a type goes, but `T()` and `x = T` are errors.
+`T[3]`, `view T[]`, `T?`, `Box<T>` or `(T, int)` wherever a type goes, but `T()` and
+`x = T` are errors.
 
 Generic classes and functions can be imported like anything else a module declares:
 `shapes::Box<int>(1)`, `b: shapes::Box<Str>` and `shapes::first(xs)` instantiate the
@@ -138,21 +148,38 @@ your call. Chapter 10 has more on modules.
 
 `tasks` remembers the tasks it removes, so the last removal can be undone. The history is a
 `Stack<Task>`, and since nothing about a stack depends on what it holds, `Stack<T>` is
-generic. `pop` returns `T?`, `None` when the stack is empty:
+generic. It keeps its items in a `T?[8]` with a count, so its empty slots are `None`.
+`push` returns `False` when the stack is full, and `pop` returns `T?`, `None` when the stack
+is empty:
 
 ```pkn
 class Stack<T> {
-  items: T[];
-  fn push(x: T) { self.items.push(x); }
-  fn pop() -> T? {
-    if (self.items.len() == 0) { return None; }
-    return self.items.pop();
+  items: T?[8];
+  count: int;
+
+  fn push(x: T) -> bool {
+    if (self.count == self.items.len()) { return False; }
+    self.items[self.count] = x;
+    self.count = self.count + 1;
+    return True;
   }
-  view fn size() -> int { return self.items.len(); }
+
+  fn pop() -> T? {
+    if (self.count == 0) { return None; }
+    self.count = self.count - 1;
+    top = self.items[self.count];
+    self.items[self.count] = None;
+    return top;
+  }
+
+  view fn size() -> int { return self.count; }
 }
 
 impl Stack<T> {
-  fn __init__() { self.items = []; }
+  fn __init__() {
+    self.items = [None, None, None, None, None, None, None, None];
+    self.count = 0;
+  }
 }
 
 class Task {
@@ -164,25 +191,35 @@ impl Task {
 }
 
 class TaskList {
-  tasks: Task[];
+  tasks: Task[8];
+  count: int;
   removed: Stack<Task>;
 
-  fn add(title: Str) { self.tasks.push(Task(title)); }
+  fn add(t: Task) -> bool {
+    if (self.count == self.tasks.len()) { return False; }
+    self.tasks[self.count] = t;
+    self.count = self.count + 1;
+    return True;
+  }
 
+  // Removes task number `n`, moving the ones after it down.
   fn remove(n: int) {
-    kept: Task[] = [];
-    i = 0;
-    while (i < self.tasks.len()) {
-      if (i == n - 1) { self.removed.push(self.tasks[i]); }
-      else { kept.push(self.tasks[i]); }
+    if (n < 1 || n > self.count) { return; }
+    self.removed.push(self.tasks[n - 1]);
+    i = n;
+    while (i < self.count) {
+      self.tasks[i - 1] = self.tasks[i];
       i = i + 1;
     }
-    self.tasks = kept;
+    self.count = self.count - 1;
   }
 
   fn undo() {
     match self.removed.pop() {
-      t: Task { self.tasks.push(t); println("restored '" + t.title + "'"); }
+      t: Task {
+        if (self.add(t)) { println("restored '" + t.title + "'"); }
+        else { println("no room for '" + t.title + "'"); }
+      }
       None    { println("nothing to undo"); }
     }
   }
@@ -190,7 +227,7 @@ class TaskList {
   view fn titles() -> Str {
     out = "";
     i = 0;
-    while (i < self.tasks.len()) {
+    while (i < self.count) {
       out = out + (if i > 0 then ", " else "") + self.tasks[i].title;
       i = i + 1;
     }
@@ -200,16 +237,18 @@ class TaskList {
 
 impl TaskList {
   fn __init__() {
-    self.tasks = [];
+    blank = Task("");
+    self.tasks = [blank, blank, blank, blank, blank, blank, blank, blank];
+    self.count = 0;
     self.removed = Stack<Task>();
   }
 }
 
 fn main() -> int {
   list = TaskList();
-  list.add("buy milk");
-  list.add("fix the leak");
-  list.add("call mum");
+  list.add(Task("buy milk"));
+  list.add(Task("fix the leak"));
+  list.add(Task("call mum"));
   list.remove(1);
   list.remove(1);
   println(list.titles());
@@ -221,7 +260,11 @@ fn main() -> int {
   numbers = Stack<int>();       // the same Stack, for ints
   numbers.push(1);
   numbers.push(2);
-  println(Str(numbers.size()) + " numbers, top " + Str(numbers.items[1]));
+  size = numbers.size();
+  match numbers.pop() {
+    top: int { println(Str(size) + " numbers, top " + Str(top)); }
+    None     { }
+  }
   return 0;
 }
 ```

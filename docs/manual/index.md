@@ -23,7 +23,8 @@ features first with small programs and then puts them to work on `tasks`.
    `toString` and `equals`.
 5. [Enums and `match`](05-enums-and-match.md): closed sets of values and the four ways to
    `match`.
-6. [Arrays](06-arrays.md): growable arrays, nested arrays, arrays of objects.
+6. [Arrays](06-arrays.md): arrays and their length, slices, keeping a count, nested arrays,
+   arrays of objects.
 7. [Tuples](07-tuples.md): returning several values and destructuring them.
 8. [Optionals and `None`](08-optionals.md): values that may be absent, and how to unwrap
    them.

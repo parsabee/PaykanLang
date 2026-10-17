@@ -7,8 +7,8 @@ chapter `tasks` learns to look tasks up and to give them an optional deadline.
 
 ## Optional types
 
-Add `?` to a type to make it optional: `Str?`, `int?`, `Task?`, `int[]?`. Any class, `Str`,
-array, `int`, `float`, `bool` and `char` can be optional. `None` is the absent value:
+Add `?` to a type to make it optional: `Str?`, `int?`, `Task?`. Any class, `Str`, `int`,
+`float`, `bool` and `char` can be optional. `None` is the absent value:
 
 ```pkn
 fn main() -> int {
@@ -178,9 +178,9 @@ True
 
 - `None` on its own has the type `Obj`, the root class. So `x = None;` declares an `Obj`
   variable, not an optional: write the type, as in `x: Task? = None;`. The same goes for
-  an array literal holding `None`: `ts: Task?[] = [None]` needs its annotation.
-- `T?[]` is an array whose elements may be `None`; `T[]?` is an array that may itself be
-  absent.
+  an array literal holding `None`: `ts: Task?[2] = [None, None]` needs its annotation.
+- `T?[n]` is an array whose elements may be `None`. An array cannot itself be optional
+  (`int[3]?` is rejected).
 - `if c then value else None` has the type `T?` when `value` is a `T`.
 - An enum cannot be optional yet (`Direction?` is rejected), and neither can a tuple.
   Return a class, or a tuple with a `bool` that says whether the value is valid.
@@ -219,12 +219,19 @@ impl Task {
 }
 
 class TaskList {
-  tasks: Task[];
-  fn add(title: Str) { self.tasks.push(Task(title)); }
+  tasks: Task[8];
+  count: int;
+
+  fn add(title: Str) -> bool {
+    if (self.count == self.tasks.len()) { return False; }
+    self.tasks[self.count] = Task(title);
+    self.count = self.count + 1;
+    return True;
+  }
 
   fn find(title: Str) -> Task? {
     i = 0;
-    while (i < self.tasks.len()) {
+    while (i < self.count) {
       if (self.tasks[i].title == title) { return self.tasks[i]; }
       i = i + 1;
     }
@@ -233,7 +240,11 @@ class TaskList {
 }
 
 impl TaskList {
-  fn __init__() { self.tasks = []; }
+  fn __init__() {
+    blank = Task("");
+    self.tasks = [blank, blank, blank, blank, blank, blank, blank, blank];
+    self.count = 0;
+  }
 }
 
 fn setDue(list: TaskList, title: Str, due: Str) {

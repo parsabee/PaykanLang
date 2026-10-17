@@ -90,13 +90,6 @@ TEST(Tuple, VoidElementRejected) {
       << r.Diagnostics;
 }
 
-TEST(Tuple, EmptyArrayLiteralElementRejected) {
-  auto r = semaCheck(wrapMain("t = ([], 1);"));
-  EXPECT_FALSE(r.Ok);
-  EXPECT_NE(r.Diagnostics.find("inside a tuple literal"), std::string::npos)
-      << r.Diagnostics;
-}
-
 // -- Immutability
 
 TEST(Tuple, IndexAssignmentRejected) {
@@ -338,12 +331,10 @@ TEST(Tuple, AsFieldParamReturnAndArrayElement) {
     fn main() -> int {
       h: Holder = Holder((1, "a"));
       q, r = h.get();
-      pairs: (int, Str)[] = [(1, "a"), (2, "b")];
-      pairs.push(h.pair);
+      pairs: (int, Str)[2] = [(1, "a"), (2, "b")];
+      pairs[1] = h.pair;
       s, n = swap(pairs[0]);
       inner: Str = pairs[1].1;
-      arrs: (int[], Str) = ([1, 2], "x");
-      first: int = arrs.0[0];
       return h.first() + q + n;
     }
   )");
@@ -391,7 +382,7 @@ TEST(Tuple, MatchArmOnTupleRejected) {
     }
   )"));
   EXPECT_FALSE(r.Ok);
-  EXPECT_NE(r.Diagnostics.find("match arm type must be a class or array type"),
+  EXPECT_NE(r.Diagnostics.find("match arm type must be a class type"),
             std::string::npos)
       << r.Diagnostics;
 }
@@ -442,15 +433,16 @@ impl Pt { fn __init__(x: int, y: int) { self.x = x; self.y = y; } }
 class Bag {
   pair: (int, Str);
   fn get() -> (int, Str) { return self.pair; }
-  fn nested() -> (Pt, (int, Str)[]) { return (Pt(1, 2), [self.pair]); }
+  fn nested() -> (Pt, (int, Str)) { return (Pt(1, 2), self.pair); }
 }
 
 impl Bag {
   fn __init__() { self.pair = (1, "one"); }
 }
 fn divmod(a: int, b: int) -> (int, int) { return (a / b, a % b); }
-fn pairs() -> (int, Str)[] { return [(1, "a")]; }
-fn take(p: (Pt, (int, Str)[])) -> int { return p.0.x; }
+fn pairs() -> (int, Str)[1] { return [(1, "a")]; }
+fn count(ps: view (int, Str)[]) -> int { return ps.len(); }
+fn take(p: (Pt, (int, Str))) -> int { return p.0.x; }
 )");
   auto main = writeFile(tmp, "main.pkn", R"(
 import geo;
@@ -458,9 +450,9 @@ fn main() -> int {
   q, r = geo::divmod(7, 2);
   b: geo::Bag = geo::Bag();
   n, s = b.get();
-  ps: (int, Str)[] = geo::pairs();
-  t: (geo::Pt, (int, Str)[]) = b.nested();
-  x: int = geo::take(t) + geo::take(b.nested());
+  ps: (int, Str)[1] = geo::pairs();
+  t: (geo::Pt, (int, Str)) = b.nested();
+  x: int = geo::take(t) + geo::take(b.nested()) + geo::count(ps);
   return q + r + n + x + ps[0].0;
 }
 )");

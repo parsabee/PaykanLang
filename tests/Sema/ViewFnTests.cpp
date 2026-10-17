@@ -47,9 +47,9 @@ void expectAll(const SemaResult &r, std::initializer_list<const char *> diags) {
 } // namespace
 
 // In a `view fn`, `self` and everything reached through it is read-only: no
-// field or element write, no call of a method that is not a `view fn`
-// (`push` included), no `inout` argument, and a `view` of it stays one, also
-// when returned (`-> view T`).  Other objects can change.
+// field or element write, no call of a method that is not a `view fn`, no
+// `inout` argument, and a `view` of it stays one, also when returned
+// (`-> view T`).  Other objects can change.
 TEST(ViewFn, SelfIsReadOnly) {
   auto r = semaCheck(R"(class Child {
   k: int;
@@ -60,13 +60,13 @@ impl Child {
   fn __init__() { self.k = 0; }
 }
 class Counter {
-  n: int; c: Child; xs: int[];
+  n: int; c: Child; xs: int[1];
   fn tick() { self.n = self.n + 1; }
   view fn a() { self.n = 1; }
   view fn b() { self.tick(); }
   view fn c2() { bump(self.n); }
   view fn d() { self.c.tick(); }
-  view fn e() { self.xs.push(1); }
+  view fn e() { fill(self.xs); }
   view fn f() { self.xs[0] = 2; }
   view fn g() { keep(self.c); }
   view fn h() { o = self.c; }
@@ -83,6 +83,7 @@ impl Counter {
   fn __init__() { self.n = 0; self.c = Child(); self.xs = [1]; }
 }
 fn bump(n: inout int) { n = n + 1; }
+fn fill(xs: inout int[]) { }
 fn keep(c: Child) { }
 fn main() -> int { return 0; }
 )");
@@ -96,8 +97,8 @@ fn main() -> int { return 0; }
                    "cannot be passed to 'inout' parameter 'n'",
                    ":15:17: error: 'self' is read-only in 'view fn d'; 'tick' "
                    "is not a 'view fn'",
-                   ":16:17: error: 'self' is read-only in 'view fn e'; 'push' "
-                   "is not a 'view fn'",
+                   ":16:22: error: 'self' is read-only in 'view fn e'; it "
+                   "cannot be passed to 'inout' parameter 'xs'",
                    ":17:17: error: 'self' is read-only in 'view fn f'; cannot "
                    "assign to its elements",
                    ":18:22: error: 'self' is read-only in 'view fn g'; it can "
@@ -166,7 +167,6 @@ fn main() -> int {
   let xs = [1, 2];
   c.tick();
   s.concat("d");
-  xs.push(3);
   println(c.toString() + s.toString());
   return c.get() + s.len() + xs.len();
 }
