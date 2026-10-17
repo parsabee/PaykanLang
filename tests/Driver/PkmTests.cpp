@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include "BuildId.h"
 #include "paykan/pkm/File.h"
 #include "paykan/pkm/Manifest.h"
 
@@ -19,6 +20,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <string>
 #include <vector>
@@ -160,6 +162,37 @@ struct Project {
 
 const char *kExpected = "2\n120\n";
 
+/// Rewrite the manifest of the .pkm file at @p path with @p change.
+void rewriteManifest(
+    const fs::path &path,
+    const std::function<void(paykan::pkm::Manifest &)> &change) {
+  std::string bytes = slurp(path);
+  auto file = paykan::pkm::File::read(std::span<const uint8_t>(
+      reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()));
+  ASSERT_TRUE(file) << file.status().message();
+  paykan::pkm::Manifest m = (*file).manifest();
+  change(m);
+  paykan::pkm::Writer w;
+  for (const auto &e : (*file).sections()) {
+    auto s = (*file).section(static_cast<paykan::pkm::Kind>(e.Kind));
+    if (e.Kind == static_cast<uint32_t>(paykan::pkm::Kind::Manifest))
+      w.add(e.Kind, e.Flags, paykan::pkm::encodeManifest(m));
+    else
+      w.add(e.Kind, e.Flags, std::vector<uint8_t>(s.begin(), s.end()));
+  }
+  auto patched = w.finish();
+  ASSERT_TRUE(patched) << patched.status().message();
+  writeFile(path, std::string((*patched).begin(), (*patched).end()));
+}
+
+/// The core.build the .pkm file at @p path records.
+std::string coreBuildOf(const fs::path &path) {
+  std::string bytes = slurp(path);
+  auto file = paykan::pkm::File::read(std::span<const uint8_t>(
+      reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()));
+  return file ? (*file).manifest().Core.Build : "<unreadable>";
+}
+
 bool contains(const std::string &text, const std::string &what) {
   return text.find(what) != std::string::npos;
 }
@@ -211,6 +244,50 @@ TEST(Pkm, CacheEntriesAreByteIdenticalAcrossColdBuilds) {
   EXPECT_EQ(slurp(p.entry("mid")), mid);
   // A file carries no path of the project it was built in.
   EXPECT_FALSE(contains(base, p.Dir.string()));
+}
+
+/// A cache entry records the build ID of the paykan that wrote it, and
+/// another build of the same version rebuilds it (#188): its lowered code
+/// may differ although the version string does not.
+TEST(Pkm, CacheEntryOfAnotherBuildIsRebuilt) {
+  REQUIRE_BACKEND();
+  Project p("build_id");
+  auto first = p.runMain();
+  ASSERT_EQ(first.exitCode, 0) << first.out;
+  EXPECT_EQ(coreBuildOf(p.entry("base")), paykan::kBuildId);
+  rewriteManifest(p.entry("base"),
+                  [](paykan::pkm::Manifest &m) { m.Core.Build = "elsewhere"; });
+  auto second = p.runMain("--verbose");
+  ASSERT_EQ(second.exitCode, 0) << second.out;
+  EXPECT_TRUE(contains(second.out, kExpected)) << second.out;
+  EXPECT_TRUE(contains(second.out, "module base: cache .paykan_cache/base.pkm "
+                                   "is stale (compiled by paykan "))
+      << second.out;
+  EXPECT_TRUE(contains(second.out, " (elsewhere); this is paykan "))
+      << second.out;
+  EXPECT_TRUE(contains(second.out, "module base: wrote .paykan_cache/base.pkm"))
+      << second.out;
+  EXPECT_TRUE(
+      contains(second.out, "module mid: cache .paykan_cache/mid.pkm usable"))
+      << second.out;
+  EXPECT_EQ(coreBuildOf(p.entry("base")), paykan::kBuildId);
+}
+
+/// A prebuilt module is judged by its version alone: one written by another
+/// build of an accepted version is used.
+TEST(Pkm, PrebuiltModuleOfAnotherBuildIsUsed) {
+  REQUIRE_BACKEND();
+  Project p("build_id_prebuilt");
+  ASSERT_EQ(run("cd " + p.Dir.string() + " && " + paykanCmd() +
+                " --emit-pkm base.pkn")
+                .exitCode,
+            0);
+  rewriteManifest(p.Dir / "base.pkm",
+                  [](paykan::pkm::Manifest &m) { m.Core.Build = "elsewhere"; });
+  fs::remove(p.Dir / "base.pkn");
+  auto r = p.runMain();
+  ASSERT_EQ(r.exitCode, 0) << r.out;
+  EXPECT_TRUE(contains(r.out, kExpected)) << r.out;
 }
 
 TEST(Pkm, BodyEditRebuildsThatModuleOnly) {

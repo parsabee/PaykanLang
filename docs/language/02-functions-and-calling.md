@@ -144,11 +144,12 @@ builtin methods. `Str(s)` with a `Str` returns `s` itself, so it takes no `view`
 
 A `view` of an object, string or optional, or of an array or tuple holding one, shares what
 it holds, so it is never stored or returned, where another name could change it later.
-Assigning it to a variable, a field or an element, putting it in an array or tuple and
-`return` are errors: `'v' is a 'view' local; it cannot be stored, only read or passed to a 'view'
-parameter`, `'v' is a 'view' local; it cannot be returned`. A `view` of a value type, or of
-an array or tuple of them (`int[3]`, `(int, float)`), is copied when it is assigned (`m =
-n`), and the copy is the variable's own.
+Assigning it to a variable, a field or an element and `return` are errors: `'v' is a 'view'
+local; it cannot be stored, only read or passed to a 'view' parameter`, `'v' is a 'view'
+local; it cannot be returned`. A `view` of a value type, or of an array or tuple of them
+(`int[3]`, `(int, float)`), is copied when it is assigned (`m = n`), and the copy is the
+variable's own. An array or tuple literal is a new value, so any `view` can be one of its
+elements: `[v]`, `(v, 1)` and `return (s, 1);` hold `v` and `s` as values of their own.
 
 A `match` arm's name for a `view` is a `view` too: in `match v { k: Fast { k.tick(); } }`,
 `k.tick()` is an error, `'k' is bound to a 'view'; 'tick' is not a 'view fn'`.

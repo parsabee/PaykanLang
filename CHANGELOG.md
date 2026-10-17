@@ -250,6 +250,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- An array or tuple literal can have a `view` as an element (`[v]`, `(s, 1)`, `return (s, 1);`
+  with `s: view Str`): it is a new value, holding its own reference to the element.  Other
+  stores of a `view` (a variable, a field, an element, `return`) stay errors.
 - The program's entry point is `fn main() -> int` or `fn main(args: view Str[]) -> int`
   (docs/language/02-functions-and-calling.md): the arguments are a slice, which `main`
   reads (`args[0]` is the script path, or the executable's) but does not keep.  Any other
@@ -370,6 +373,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A `.paykan_cache` module entry written by another build of the same version was reused
+  (#188), so a compiler fix never reached a cached import: every development build calls
+  itself 0.1.1.  Each build now has a build ID, a hash of the compiler's sources
+  (`cmake/BuildId.cmake`), which a cache entry records (`core.build`) and which must match
+  for the entry to be used; `--verbose` reports `is stale (compiled by paykan 0.1.1
+  (<id>); this is paykan 0.1.1 (<id>))`.  A release build (`-DPAYKAN_RELEASE=ON`, set by
+  the release workflow and the Homebrew formula) has no build ID, and a prebuilt `.pkm` is
+  still judged by its version alone.
 - A literal argument of `__super__(...)` was typed on its own instead of by the superclass
   `__init__`'s parameter: `__super__([1, 2])` for a `float[2]` parameter was an error
   (`argument 1 of '__super__' has type 'int[2]', expected 'float[2]'`), as was `None` or

@@ -42,6 +42,7 @@ class Paykanlang < Formula
            "-DPAYKAN_FRONTENDS=recursive-descent",
            "-DPAYKAN_BACKENDS=c",
            "-DPAYKAN_BUILD_TESTS=OFF",
+           "-DPAYKAN_RELEASE=ON",
            *std_cmake_args
     system "cmake", "--build", "build", "--parallel", ENV.make_jobs.to_s
     system "cmake", "--install", "build"

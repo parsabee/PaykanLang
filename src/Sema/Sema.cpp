@@ -1436,7 +1436,6 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
     auto *ty = visit(elem);
     if (!ty)
       return nullptr;
-    S.checkViewNotStored(elem, ty);
     elemTys.push_back(ty);
   }
   ast::Type *elemTy = elemTys.front();
@@ -1736,7 +1735,6 @@ Sema::ExprChecker::visitTupleLiteralExpr(ast::TupleLiteralExpr *node) {
       ok = false;
       continue;
     }
-    S.checkViewNotStored(elem, ty);
     elemTys.push_back(ty);
   }
   if (!ok)

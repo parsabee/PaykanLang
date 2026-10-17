@@ -139,6 +139,20 @@ configure_file(
 target_include_directories(paykan_compile_options INTERFACE
     $<BUILD_INTERFACE:${PAYKAN_GENERATED_INCLUDE_DIR}>)
 
+# The build ID (BuildId.h): a hash of the compiler's sources, regenerated on
+# every build, which tells the module cache apart builds of one version
+# (cmake/BuildId.cmake, #188).  The release workflow turns PAYKAN_RELEASE on:
+# a release has no build ID, and its version alone identifies it.
+option(PAYKAN_RELEASE "Build a release: no build ID (cmake/BuildId.cmake)" OFF)
+add_custom_target(paykan_build_id
+    COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+            -DOUTPUT=${PAYKAN_GENERATED_INCLUDE_DIR}/BuildId.h
+            -DRELEASE=${PAYKAN_RELEASE}
+            -P ${PROJECT_SOURCE_DIR}/cmake/BuildId.cmake
+    BYPRODUCTS ${PAYKAN_GENERATED_INCLUDE_DIR}/BuildId.h
+    COMMENT "Computing the paykan build ID"
+    VERBATIM)
+
 # -- The standard library's location ------------------------------------------
 # The installed standard library is <prefix>/<libdir>/paykan/stdlib/<version>,
 # which `paykan` finds from its own directory, <prefix>/<bindir>, by this
