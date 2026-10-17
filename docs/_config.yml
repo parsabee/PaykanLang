@@ -156,3 +156,5 @@ defaults:
     values: { title: "Design: the .pkm module file", parent: Implementation and plugins, nav_order: 9 }
   - scope: { path: design/function-types.md }
     values: { title: "Design: function types", parent: Implementation and plugins, nav_order: 10 }
+  - scope: { path: design/visibility.md }
+    values: { title: "Design: private members", parent: Implementation and plugins, nav_order: 11 }
