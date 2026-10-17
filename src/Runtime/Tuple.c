@@ -15,7 +15,7 @@
 #define TUPLE_LOAD(T, name)                                                    \
   static T load_##name(const char *at) {                                       \
     T v;                                                                       \
-    memcpy(&v, at, sizeof v);                                                  \
+    memcpy(&v, at, sizeof(T));                                                 \
     return v;                                                                  \
   }
 TUPLE_LOAD(int64_t, int)

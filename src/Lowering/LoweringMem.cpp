@@ -208,8 +208,9 @@ void ModuleLowering::forEachMemRef(const Val &addr, ast::Type *ty,
     }
     return;
   }
-  auto [elemTy, n] = innermostElements(ast::cast<ast::FixedArrayType>(ty));
-  forEachSlot(addr, 0, n, memLayout(elemTy).Size,
+  const auto inner = innermostElements(ast::cast<ast::FixedArrayType>(ty));
+  ast::Type *elemTy = inner.first;
+  forEachSlot(addr, 0, inner.second, memLayout(elemTy).Size,
               [&](const Val &at) { forEachMemRef(at, elemTy, fn); });
 }
 
