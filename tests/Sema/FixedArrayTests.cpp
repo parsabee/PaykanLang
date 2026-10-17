@@ -375,3 +375,75 @@ TEST(FixedArray, InferredLengths) {
               "  return 0;\n}\n",
               "variable 'x' has type 'int[3][8192]', which is too big");
 }
+
+// `[v; n]` is typed like a list literal of n elements: each copy takes the
+// slot's element type (an `int` into a `float[n]`, `None` into an optional),
+// a `_` length is n, `[[0; 3]; 2]` is an `int[2][3]`, and into a slice it is
+// an array of n elements of the slice's element type.
+TEST(FixedArray, RepeatLiterals) {
+  auto r = semaCheck(R"(
+    class Node { v: int; }
+    class Board { cells: char[3][3]; }
+    impl Board { fn __init__() { self.cells = [['.'; 3]; 3]; } }
+    fn sum(xs: view int[]) -> int { return xs[0] + xs.len(); }
+    fn first(xs: view float[]) -> float { return xs[0]; }
+    fn count(xs: view int?[]) -> int { return xs.len(); }
+    fn rows(g: view int[3][]) -> int { return g.len(); }
+    fn zeros() -> float[8] { return [0; 8]; }
+    fn fill<T>(v: T) -> T[4] { return [v; 4]; }
+    fn main() -> int {
+      fs: float[4] = [0; 4];
+      os: int?[8] = [None; 8];
+      ps: float?[2] = [1; 2];
+      ns: Node?[2] = [None; 2];
+      x: int[_] = [7; 5];
+      y: int[5] = x;
+      g: int[_][_] = [[0; 3]; 2];
+      h: int[2][3] = g;
+      k: int[3][3] = [[1; 3]; 3];
+      a = [1; 3];
+      b: int[3] = a;
+      c = [2.5; 2];
+      d: float[2] = c;
+      e: Str[2] = ["s"; 2];
+      m: (int, Str)[3] = [(1, "a"); 3];
+      n: Node[3] = [Node(1); 3];
+      z: int[_] = fill<int>(3);
+      return sum([1; 4]) + sum(x) + int(first([1; 2])) + count([None; 2]) +
+             rows([[0; 3]; 2]) + rows(g) + int(zeros()[7]) + y[4] + h[1][2] +
+             k[2][2] + b[2] + int(d[1]) + e[1].len() + m[2].0 + n[2].v + z[3] +
+             int(fs[3]) + ns.len() + os.len() + ps.len();
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  expectBodyError("  x: int[3] = [0; 4];",
+                  "array literal has 4 element(s), but 'int[3]' has 3");
+  expectBodyError("  g: int[2][3] = [[0; 2]; 2];",
+                  "array literal has 2 element(s), but 'int[3]' has 3");
+  expectBodyError("  g: int[3][2] = [[0; 2]; 2];",
+                  "array literal has 2 element(s), but 'int[3][2]' has 3");
+  expectBodyError("  x: Str[2] = [1; 2];",
+                  "array literal element of type 'int' does not match the "
+                  "element type 'Str' of 'Str[2]'");
+  expectBodyError("  x: int[2] = [1.5; 2];",
+                  "array literal element of type 'float' does not match the "
+                  "element type 'int' of 'int[2]'");
+  expectError("class Node { v: int; }\n"
+              "fn main() -> int { n: Node[2] = [None; 2]; return 0; }",
+              "does not match the element type 'Node' of 'Node[2]'");
+  expectError("fn f(xs: view Str[]) {}\n"
+              "fn main() -> int { f([1; 3]); return 0; }",
+              "array literal element of type 'int' does not match the element "
+              "type 'Str' of 'Str[3]'");
+  expectBodyError("  xs = [0; 20000];",
+                  "array literal of type 'int[20000]' is too big: a fixed-size "
+                  "array holds at most 16384 elements");
+  expectBodyError("  g = [[0; 200]; 100];",
+                  "array literal of type 'int[100][200]' is too big");
+  expectBodyError("  x: int[_] = [0; 20000];",
+                  "variable 'x' has type 'int[20000]', which is too big");
+  expectBodyError("  xs = [0; 16384];\n  n: int = xs[16383] + xs.len();\n"
+                  "  y = xs[16384];",
+                  "index 16384 is out of bounds for 'int[16384]' (its indexes "
+                  "are 0 to 16383)");
+}

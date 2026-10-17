@@ -61,8 +61,8 @@ TEST(Tuple, NestedType) {
 TEST(Tuple, ArrayOfTuplesAndTupleOfArrays) {
   auto [ok, _] = parse(R"(
     fn main() -> int {
-      a: (int, Str)[] = [];
-      b: (int[], Str) = ([1], "x");
+      a: (int, Str)[2] = [(1, "a"); 2];
+      b: (int[1], Str) = ([1], "x");
       return 0;
     }
   )");
@@ -155,7 +155,7 @@ TEST(Tuple, LiteralAsCallArgumentAndInArray) {
   auto [ok, _] = parse(R"(
     fn f(p: (int, int)) -> int { return p.0; }
     fn main() -> int {
-      arr: (int, int)[] = [(1, 2), (3, 4)];
+      arr: (int, int)[2] = [(1, 2), (3, 4)];
       return f((1, 2)) + f(arr[0]);
     }
   )");

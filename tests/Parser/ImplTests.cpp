@@ -35,7 +35,7 @@ TEST(Impl, MalformedBlocksAreRejected) {
            "impl A { static view fn f() {} }", // static and view
            "impl A { fn f() {} ",              // unclosed
            "impl Box<int> { fn f() {} }",      // a type, not a parameter
-           "impl Box<T[]> { fn f() {} }", "impl Box<Str> { fn f() {} }",
+           "impl Box<T[2]> { fn f() {} }", "impl Box<Str> { fn f() {} }",
            "impl Box<a::T> { fn f() {} }", "impl Box? { fn f() {} }",
            "static fn f() {}",             // outside an impl
            "class A { static fn f() {} }", // in a class body

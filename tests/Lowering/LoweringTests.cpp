@@ -1035,6 +1035,85 @@ TEST(Lowering, FixedArraysOfReferencesOwnTheirElements) {
   EXPECT_EQ(count(m, "release"), 5u) << m;
 }
 
+// `[v; n]`: a zero of a plain scalar element is one `mem.zero` of the whole
+// array; any other v is stored in slot 0 and then in the others, one by one
+// for up to four more and in a `while` loop past that.
+TEST(Lowering, RepeatLiteralsOfScalars) {
+  auto l = lower(R"(
+    fn zeros() -> int {
+      xs: int[64] = [0; 64];
+      fs = [0.0; 8];
+      bs = [False; 4];
+      cs = ['\0'; 2];
+      return xs[3];
+    }
+    fn fill(x: int) -> int {
+      xs: int[64] = [x; 64];
+      return xs[3];
+    }
+    fn few(x: int) -> int {
+      xs = [x + 1; 5];
+      return xs[4];
+    }
+    fn main() -> int { return zeros() + fill(1) + few(2); }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string zeros = function(l.Text, "zeros");
+  EXPECT_NE(zeros.find("mem.zero %xs.addr.1, 512\n"), std::string::npos)
+      << zeros;
+  EXPECT_EQ(count(zeros, "mem.zero"), 4u) << zeros;
+  EXPECT_EQ(count(zeros, "ptr.store"), 0u) << zeros;
+  EXPECT_EQ(count(zeros, "while"), 0u) << zeros;
+  std::string fill = function(l.Text, "fill");
+  for (const char *e : {"while {", "cmp lt %i.", ", 64\n"})
+    EXPECT_NE(fill.find(e), std::string::npos) << e << "\n" << fill;
+  // Slot 0, then the loop's one store.
+  EXPECT_EQ(count(fill, "ptr.store"), 2u) << fill;
+  EXPECT_EQ(count(fill, "mem.zero"), 0u) << fill;
+  std::string few = function(l.Text, "few");
+  EXPECT_EQ(count(few, "while"), 0u) << few;
+  EXPECT_EQ(count(few, "ptr.store"), 5u) << few;
+  // v is computed once.
+  EXPECT_EQ(count(few, " = add "), 1u) << few;
+}
+
+// A reference v is retained once for each slot past the first (a variable's
+// value once more, as any copy of it is), a nested array element is a
+// `mem.copy` of the first row with its references retained, and v is
+// evaluated once.
+TEST(Lowering, RepeatLiteralsOfReferences) {
+  auto l = lower(R"(
+    fn shared() -> int {
+      s = "a";
+      xs: Str[3] = [s; 3];
+      return xs[2].len();
+    }
+    fn fresh(n: int) -> int {
+      xs: Str[3] = [Str(n); 3];
+      return xs[2].len();
+    }
+    fn rows() -> int {
+      s = "a";
+      g: Str[3][2] = [[s; 2]; 3];
+      return g[2][1].len();
+    }
+    fn main() -> int { return shared() + fresh(7) + rows(); }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string shared = function(l.Text, "shared");
+  EXPECT_EQ(count(shared, "retain"), 3u) << shared;
+  EXPECT_EQ(count(shared, "ptr.store %"), 3u) << shared;
+  // The literal's three and s.
+  EXPECT_EQ(count(shared, "release"), 4u) << shared;
+  std::string fresh = function(l.Text, "fresh");
+  EXPECT_EQ(count(fresh, "call @$rt.PaykanString_from_int("), 1u) << fresh;
+  EXPECT_EQ(count(fresh, "retain"), 2u) << fresh;
+  std::string rows = function(l.Text, "rows");
+  EXPECT_EQ(count(rows, "mem.copy"), 2u) << rows;
+  // s into the first row's two slots, and each copied row's two elements.
+  EXPECT_EQ(count(rows, "retain"), 6u) << rows;
+}
+
 // A fixed-size array field is a `mem` field of the object, written in
 // place, and the destructor releases the references in it.
 TEST(Lowering, FixedArrayFieldsAreMemFields) {

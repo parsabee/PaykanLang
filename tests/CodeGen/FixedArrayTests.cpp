@@ -169,7 +169,7 @@ TEST(FixedArray, ParametersAndResults) {
 
 TEST(FixedArray, IndexesComputedAtRunTime) {
   expectOutput(R"(
-    sq: int[5] = [0, 0, 0, 0, 0];
+    sq: int[5] = [0; 5];
     i = 0;
     while (i < sq.len()) {
       sq[i] = i * i;
@@ -398,7 +398,7 @@ TEST(FixedArray, SliceParameters) {
     fn pass(xs: view int[]) -> int { return sum(xs) + count(xs); }
     fn main() -> int {
       a: int[3] = [1, 2, 3];
-      b: int[5] = [1, 1, 1, 1, 1];
+      b: int[5] = [1; 5];
       double(a);
       println(Str(sum(a)) + " " + Str(sum(b)) + " " + Str(sum([10, 20])) +
               " " + Str(pass(a)) + " " + Str(count(b)));
@@ -501,4 +501,112 @@ TEST(FixedArray, InferredLengths) {
   EXPECT_EQ(r.ExitCode, 0) << r.StdErr;
   EXPECT_EQ(r.StdOut, "2 3 6 B1A2B3 31.5 4 i 0.25 49\n");
   g.expectNoLeaks("InferredLengths");
+}
+
+// `[v; n]` is n copies of v: a zero fills the whole array (all 16384 slots
+// of the largest), any other value is stored in every slot, and an `int`
+// into a `float[n]` is promoted.
+TEST(FixedArray, RepeatLiteralsOfScalars) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    fn sum(xs: view int[]) -> int {
+      t = 0;
+      i = 0;
+      while (i < xs.len()) {
+        t = t + xs[i];
+        i = i + 1;
+      }
+      return t;
+    }
+    fn main() -> int {
+      zs: int[16384] = [0; 16384];
+      zs[16383] = 5;
+      println(Str(zs.len()) + " " + Str(zs[0]) + " " + Str(zs[8191]) + " " +
+              Str(sum(zs)));
+      x = 3;
+      sevens = [x + 4; 6];
+      sevens[0] = 0;
+      fives = [5; 5];
+      println(Str(sum(sevens)) + " " + Str(sum(fives)) + " " +
+              Str(sum([2; 3])) + " " + Str(sevens.len()));
+      fs: float[4] = [0; 4];
+      fs[1] = 1.5;
+      gs = [2.5; 3];
+      bs = [True; 5];
+      bs[4] = False;
+      cs = ['x'; 2];
+      zc = ['\0'; 3];
+      zb = [False; 2];
+      println(Str(fs[0] + fs[3]) + " " + Str(fs[1]) + " " + Str(gs[2]) + " " +
+              Str(bs[0]) + Str(bs[4]) + " " + Str(cs[0]) + Str(cs[1]) + " " +
+              Str(int(zc[2])) + " " + Str(zb[1]));
+      grid = [[1; 3]; 2];
+      grid[0][0] = 9;
+      println(Str(grid[0][0]) + " " + Str(grid[1][0]) + " " +
+              Str(sum(grid[1])));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "16384 0 0 5\n35 25 6 6\n0 1.5 2.5 TrueFalse xx 0 "
+                      "False\n9 1 3\n");
+  g.expectNoLeaks("RepeatLiteralsOfScalars");
+}
+
+// v is evaluated once: every slot holds the same reference (one `Node`
+// three times, one string twice), a nested array is copied into every row,
+// and a call runs once.
+TEST(FixedArray, RepeatLiteralsOfReferences) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Node { v: int; }
+    impl Node { fn __init__(v: int) { self.v = v; } }
+    class Counter {
+      n: int;
+      fn next() -> int {
+        self.n = self.n + 1;
+        return self.n * 10;
+      }
+    }
+    fn main() -> int {
+      s = "ab";
+      ss = [s; 3];
+      ss[1] = "c";
+      ts = [Str(7); 2];
+      println(ss[0] + ss[1] + ss[2] + " " + ts[0] + ts[1]);
+      nodes = [Node(1); 3];
+      nodes[0].v = 42;
+      println(Str(nodes[1].v) + " " + Str(nodes[2].v));
+      grid: Str[3][3] = [[s + "!"; 3]; 3];
+      grid[1][1] = "x";
+      grid[2] = [grid[1][1]; 3];
+      println(grid[0][1] + grid[1][1] + grid[1][0] + grid[2][2]);
+      os: int?[4] = [None; 4];
+      os[2] = 5;
+      ps: float?[2] = [1; 2];
+      println(os[0]);
+      println(os[2]);
+      println(ps[1]);
+      ns: Node?[3] = [None; 3];
+      ns[1] = nodes[2];
+      match ns[1] {
+        n: Node { println("node " + Str(n.v)); }
+        None { println("none"); }
+      }
+      match ns[2] {
+        n: Node { println("node " + Str(n.v)); }
+        None { println("none"); }
+      }
+      c = Counter(0);
+      tens = [c.next(); 4];
+      println(Str(c.n) + " " + Str(tens[0] + tens[3]));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "abcab 77\n42 42\nab!xab!x\nNone\n5\n1\nnode 42\nnone\n"
+                      "1 20\n");
+  g.expectNoLeaks("RepeatLiteralsOfReferences");
 }

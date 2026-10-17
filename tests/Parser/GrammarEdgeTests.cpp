@@ -20,9 +20,10 @@ TEST(GrammarEdge, LeadingCommaInArgumentListRejected) {
 }
 
 TEST(GrammarEdge, LeadingCommaInArrayLiteralRejected) {
-  EXPECT_FALSE(parse("fn main() -> int { x: int[] = [, 1]; return 0; }").Ok);
-  EXPECT_TRUE(parse("fn main() -> int { x: int[] = [1, 2]; y: int[] = []; "
-                    "return 0; }")
+  EXPECT_FALSE(parse("fn main() -> int { x: int[2] = [, 1]; return 0; }").Ok);
+  EXPECT_FALSE(parse("fn main() -> int { x: int[2] = [, 1; 2]; return 0; }").Ok);
+  EXPECT_TRUE(parse("fn main() -> int { x: int[2] = [1, 2]; y = [1; 2]; "
+                    "z = []; return 0; }")
                   .Ok);
 }
 
@@ -188,7 +189,7 @@ TEST(GrammarEdge, NestingLimitIsTheSameOnEveryFrontend) {
   });
   // Empty brackets at the limit add no level.
   EXPECT_TRUE(parsesOnEveryFrontend(
-      inMain(repeat("{ ", 511) + "f(); x: int[] = []; " + repeat("} ", 511)),
+      inMain(repeat("{ ", 511) + "f(); x = []; " + repeat("} ", 511)),
       "empty brackets at the limit"));
 }
 

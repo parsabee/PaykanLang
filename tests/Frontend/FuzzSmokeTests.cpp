@@ -71,13 +71,14 @@ std::vector<std::string> loadCorpus() {
     import ::io; import lib::{a as b, c};
     enum Color { Red, Green, Blue, }
     class Box<T> : Base { v: T; fn get() -> T { return self.v; } }
-    fn first<T>(xs: T[]) -> T { return xs[0]; }
+    fn first<T>(xs: view T[]) -> T { return xs[0]; }
     fn main() -> int {
       p: (int, Str) = (1, "one"); a, b = p; x: Box<int>? = None;
       match x { Box<int> { } y: Str { } 1 { } "s" { } None { } _ { } }
       if (a < 2 && !b) { a = if a then 1 else 2; } else if (a == 3) { } else { }
       while (True) { break; continue; }
-      xs: int[] = [1, 2, 3]; xs[0] = a; p.0.len(); c: Color = Color::Red;
+      xs: int[3] = [1, 2, 3]; xs[0] = a; p.0.len(); c: Color = Color::Red;
+      zs: int[2][4] = [[0; 4]; 2]; zs[1][3] = xs.len();
       return first<int>(xs) + Box<Str>("v").get().len();
     }
   )");
@@ -197,8 +198,8 @@ TEST(FuzzSmoke, PathologicalNesting) {
   parseQuietly(types);
   std::string arrays = "fn main() -> int { x: int";
   for (int i = 0; i < 100000; ++i)
-    arrays += "[]";
-  parseQuietly(arrays + " = []; return 0; }");
+    arrays += "[1]";
+  parseQuietly(arrays + " = [0; 1]; return 0; }");
 }
 
 TEST(FuzzSmoke, LongTokens) {

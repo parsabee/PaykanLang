@@ -59,7 +59,7 @@ TEST(Generics, GenericClassMultipleParamsAndSuperclass) {
 
 TEST(Generics, GenericFuncDecl) {
   auto [ok, driver] = parse(R"(
-    fn first<T>(xs: T[]) -> T { return xs[0]; }
+    fn first<T>(xs: view T[]) -> T { return xs[0]; }
     fn swap<A, B>(a: A, b: B) { }
     fn main() -> int { return 0; }
   )");
@@ -71,7 +71,7 @@ TEST(Generics, GenericFuncDecl) {
   EXPECT_TRUE(first->isGeneric());
   ASSERT_EQ(first->getTypeParams().size(), 1u);
   EXPECT_EQ(*first->getTypeParams()[0], "T");
-  // Parameter `xs: T[]` is an array of the stub `T`.
+  // Parameter `xs: view T[]` is a slice of the stub `T`.
   auto *arr = dyn_cast<ArrayType>(first->getParams()[0].ParamType);
   ASSERT_NE(arr, nullptr);
   auto *elem = dyn_cast<ClassType>(arr->getElementType());
@@ -135,24 +135,25 @@ TEST(Generics, NestedAndMultipleTypeArgs) {
 
 TEST(Generics, ArrayOfInstantiationAndInstantiationOfArray) {
   auto [ok, driver] = parse(R"(
-    fn main() -> int { a: Box<int>[] = []; return 0; }
+    fn main() -> int { a: Box<int>[2] = [Box<int>(1); 2]; return 0; }
   )");
   ASSERT_TRUE(ok);
   auto *vd = firstVarDecl(driver->getRoot());
   ASSERT_NE(vd, nullptr);
-  auto *arr = dyn_cast<ArrayType>(vd->getType());
+  auto *arr = dyn_cast<FixedArrayType>(vd->getType());
   ASSERT_NE(arr, nullptr);
   EXPECT_TRUE(isa<GenericType>(arr->getElementType()));
 
+  // (Sema rejects an array type argument for now.)
   auto [ok2, driver2] = parse(R"(
-    fn main() -> int { b: Box<int[]> = None; return 0; }
+    fn main() -> int { b: Box<int[3]> = None; return 0; }
   )");
   ASSERT_TRUE(ok2);
   auto *vd2 = firstVarDecl(driver2->getRoot());
   ASSERT_NE(vd2, nullptr);
   auto *gt = dyn_cast<GenericType>(vd2->getType());
   ASSERT_NE(gt, nullptr);
-  EXPECT_TRUE(isa<ArrayType>(gt->getArgs()[0]));
+  EXPECT_TRUE(isa<FixedArrayType>(gt->getArgs()[0]));
 }
 
 TEST(Generics, TypeArgsInParamsReturnFieldsAndMatchArms) {
@@ -333,7 +334,7 @@ TEST(Generics, TupleAndOptionalTypeArgsOnCalls) {
   EXPECT_TRUE(isa<OptionalType>(call2->getTypeArgs()[0]));
 
   auto [ok3, driver3] = parse(R"(
-    fn main() -> int { p = Pair<Node?[], (int, Str)?>(a, b); return 0; }
+    fn main() -> int { p = Pair<Node?[2], (int, Str)?>(a, b); return 0; }
   )");
   ASSERT_TRUE(ok3);
   auto *call3 = firstCall(driver3->getRoot());
