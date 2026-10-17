@@ -596,13 +596,13 @@ class C {
     destroy = @k : (obj) -> void
   }
 }
-fn @main(%args.1: box) -> i64 {
+fn @main(%args.1: ptr, %args.len.2: i64) -> i64 {
   call @nope(1)
   call @k(1, 2)
   call @k(true)
-  %o.2 = new D
-  %v.3 = field.load %o.2, C.g
-  %w.4 = vcall %o.2 : C [5] ()
+  %o.3 = new D
+  %v.4 = field.load %o.3, C.g
+  %w.5 = vcall %o.3 : C [5] ()
   ret 0
 }
 fn @main2() -> void {

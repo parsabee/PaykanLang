@@ -8,8 +8,8 @@
 //
 //   A1  `self` used as a value (return / argument / assignment)
 //   A2  match-arm bindings used with ownership-taking consumers
-//   A4  array-typed class fields stored as boxes, not raw pointers
-//   A5  push/pop and equality on receivers that are not bare identifiers
+//   A4  array-typed class fields holding references to their elements
+//   A5  len() on receivers that are not bare identifiers
 //   B8  vtable-convention narrowing on assignment
 //
 // Each test asserts BOTH correct output/exit and zero live heap blocks — a
@@ -346,82 +346,32 @@ TEST(Ownership, ArrayFieldStoreAndRead) {
   g.expectNoLeaks("ArrayFieldStoreAndRead");
 }
 
-// Re-assigning an array field releases the old box and retains the new one.
+// Re-assigning an array field releases the elements it replaces and retains
+// the new ones, also one the new value takes from the old.
 TEST(Ownership, ArrayFieldReassign) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class H {
-      arr: int[];
+      arr: Str[2];
     }
 
     impl H {
-      fn __init__(a: int[]) { self.arr = a; }
+      fn __init__(a: Str[2]) { self.arr = a; }
     }
     fn main() -> int {
-      h: H = H([1, 2, 3]);
-      h.arr = [7, 8];
-      println(Str<int>(h.arr[0] + h.arr.len()));
+      h: H = H([Str(1), Str(2)]);
+      h.arr = [Str(7), h.arr[0]];
+      println(h.arr[0] + h.arr[1] + Str<int>(h.arr.len()));
       return 0;
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.ExitCode, 0);
-  EXPECT_EQ(r.StdOut, "9\n");
+  EXPECT_EQ(r.StdOut, "712\n");
   g.expectNoLeaks("ArrayFieldReassign");
 }
 
-// -- A5 — push/pop/length/equality on non-identifier receivers
-
-// push on a call-result receiver: the receiver type comes from the resolved
-// expression type, and the fresh receiver box is released after the call.
-TEST(Ownership, PushOnCallResult) {
-  LeakGuard g;
-  auto r = compileAndRun(R"(
-    fn makeArr() -> int[] { return [1, 2]; }
-    fn main() -> int {
-      makeArr().push(3);
-      return 0;
-    }
-  )");
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.ExitCode, 0);
-  g.expectNoLeaks("PushOnCallResult");
-}
-
-// pop on a call-result receiver returns the element and frees the temporary.
-TEST(Ownership, PopOnCallResult) {
-  LeakGuard g;
-  auto r = compileAndRun(R"(
-    fn makeArr() -> int[] { return [1, 2]; }
-    fn main() -> int {
-      n: int = makeArr().pop();
-      println(Str<int>(n));
-      return 0;
-    }
-  )");
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.ExitCode, 0);
-  EXPECT_EQ(r.StdOut, "2\n");
-  g.expectNoLeaks("PopOnCallResult");
-}
-
-// push through a nested subscript receiver (m[0] is an ArrayType expression,
-// not a bare identifier).
-TEST(Ownership, PushOnNestedSubscript) {
-  LeakGuard g;
-  auto r = compileAndRun(R"(
-    fn main() -> int {
-      m: int[][] = [[1, 2], [3, 4]];
-      m[0].push(9);
-      println(Str<int>(m[0].len()));
-      return 0;
-    }
-  )");
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.ExitCode, 0);
-  EXPECT_EQ(r.StdOut, "3\n");
-  g.expectNoLeaks("PushOnNestedSubscript");
-}
+// -- A5 — len() on non-identifier receivers
 
 // len() on a call-result array must be the array's length, not its
 // elements' (it previously resolved through a coincidental Str slot).
@@ -438,40 +388,6 @@ TEST(Ownership, LenOnCallResult) {
   EXPECT_EQ(r.ExitCode, 0);
   EXPECT_EQ(r.StdOut, "3\n");
   g.expectNoLeaks("LenOnCallResult");
-}
-
-// Array equality on literal temporaries: identity semantics (two distinct
-// temporaries are not equal), single receiver unwrap, no leaks.
-TEST(Ownership, ArrayEqualityTemporaries) {
-  LeakGuard g;
-  auto r = compileAndRun(R"(
-    fn main() -> int {
-      if ([1, 2] == [1, 2]) { println("True"); } else { println("False"); }
-      return 0;
-    }
-  )");
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.ExitCode, 0);
-  EXPECT_EQ(r.StdOut, "False\n");
-  g.expectNoLeaks("ArrayEqualityTemporaries");
-}
-
-// Array equality on the same owned variable: identity holds, and the equals
-// ABI (consumed boxed `other`) balances against the variable's ownership.
-TEST(Ownership, ArrayEqualitySameVariable) {
-  LeakGuard g;
-  auto r = compileAndRun(R"(
-    fn main() -> int {
-      a: int[] = [1, 2];
-      if (a == a) { println("True"); } else { println("False"); }
-      if (a != [1, 2]) { println("ne"); } else { println("eq"); }
-      return 0;
-    }
-  )");
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.ExitCode, 0);
-  EXPECT_EQ(r.StdOut, "True\nne\n");
-  g.expectNoLeaks("ArrayEqualitySameVariable");
 }
 
 // Implicit declaration from an object-array element: `y = arr[i]` must type

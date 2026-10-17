@@ -1,6 +1,6 @@
 // OK: .len() returns int for any array
 fn main() -> int {
-  a: int[] = [1, 2, 3];
+  a: int[3] = [1, 2, 3];
   n: int = a.len();
   return 0;
 }

@@ -12,7 +12,7 @@ impl Point {
 }
 
 fn main() -> int {
-  pts: Point[] = [Point(1, 2), Point(3, 4)];
+  pts: Point[2] = [Point(1, 2), Point(3, 4)];
   n: int = pts.len();
   return 0;
 }

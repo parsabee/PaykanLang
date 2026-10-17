@@ -1,12 +1,11 @@
-// Isolates: an Obj[] holding a single boxed (reference-counted) element.
+// Isolates: an Obj[1] holding a single boxed (reference-counted) element.
 // Runtime allocation site: PaykanShared (Shared.c) — the ARC box wrapping the
-// stored object, plus the array backing buffer.
+// stored string; the array holds that box inline, in its one slot.
 //
-// Expected under --track-heap: live blocks : 0 (the array and its element are
+// Expected under --track-heap: live blocks : 0 (the array's element is
 // released at end of scope).
 
 fn main() -> int {
-  a: Obj[] = [];
-  a.push("x");
+  a: Obj[1] = ["x"];
   return 0;
 }

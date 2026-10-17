@@ -441,16 +441,19 @@ TEST(Driver, EntryPointIsCheckedWithASourceLocation) {
     int CheckOnlyExit;
   };
   const std::string none = ":1:1: error: program has no entry point 'fn "
-                           "main() -> int' (or 'fn main(args: Str[]) -> int')";
+                           "main() -> int' (or 'fn main(args: view Str[]) -> "
+                           "int')";
   const std::string must = ":1:1: error: the program's entry point must be "
-                           "'fn main() -> int' or 'fn main(args: Str[]) -> "
-                           "int', not ";
+                           "'fn main() -> int' or 'fn main(args: view Str[]) "
+                           "-> int', not ";
   const std::vector<Case> cases = {
       {"", none, 0},
       {"fn f() -> int { return 1; }\n", none, 0},
       {"fn main() -> Str { return \"\"; }\n", must + "'fn main() -> Str'", 1},
       {"fn main(n: int) -> int { return n; }\n", must + "'fn main(int) -> int'",
        1},
+      {"fn main(args: inout Str[]) -> int { return 0; }\n",
+       must + "'fn main(inout Str[]) -> int'", 1},
   };
   for (const auto &fe : frontends) {
     const std::string paykan = std::string(kPaykan) + " --frontend=" + fe;
@@ -582,7 +585,8 @@ TEST(Driver, ProgramArgumentsFollowTheSourceFile) {
   REQUIRE_BACKEND();
   // Everything after the source file is the program's, even if it looks
   // like an option.
-  auto src = writeTmp("fn main(args: Str[]) -> int { return args.len(); }");
+  auto src =
+      writeTmp("fn main(args: view Str[]) -> int { return args.len(); }");
   auto [rc, out] = run(paykanRun() + " " + src + " --dump-ast -O2 x 2>&1");
   std::filesystem::remove(src);
   EXPECT_EQ(rc, 4) << out;
@@ -859,12 +863,10 @@ TEST(Driver, PanicFlushesStdoutOnEveryBackend) {
     const char *message;
   };
   const Case cases[] = {
-      {"index", "xs = [1, 2, 3]; println(Str<int>(xs[10]));",
+      {"index", "xs = [1, 2, 3]; i: int = 10; println(Str<int>(xs[i]));",
        "paykan: array index 10 out of bounds (len=3)"},
       {"store", "xs = [1, 2, 3]; i: int = 5; xs[i] = 4;",
        "paykan: array index 5 out of bounds (len=3)"},
-      {"pop", "xs: int[] = []; v = xs.pop(); println(Str<int>(v));",
-       "paykan: pop on empty array"},
       {"strindex", "s: Str = \"ab\"; c = s[7]; println(Str<char>(c));",
        "paykan: string index 7 out of bounds (len=2)"},
       {"divzero", "z: int = 0; println(Str<int>(7 / z));",
@@ -1073,12 +1075,12 @@ TEST(Driver, EmitCOmitsUnusedEntities) {
   EXPECT_EQ(out.find("INT64_C(2)"), std::string::npos) << out;
 }
 
-// The bit-cast helpers are emitted when a cast needs them (a float array
-// stores its elements' bits).
+// The bit-cast helpers are emitted when a cast needs them (a tuple stores a
+// float element's bits).
 TEST(Driver, EmitCEmitsBitCastHelpersWhenUsed) {
   REQUIRE_BACKEND();
-  auto src = writeTmp("fn main() -> int { a: float[] = [1.5];"
-                      "  println(Str<float>(a[0])); return 0; }");
+  auto src = writeTmp("fn main() -> int { t = (1.5, 2);"
+                      "  println(Str<float>(t.0)); return 0; }");
   auto [rc, out] = run(std::string(kPaykan) + " --emit-c " + src + " 2>&1");
   std::filesystem::remove(src);
   EXPECT_EQ(rc, 0) << out;
@@ -1229,7 +1231,7 @@ TEST(Driver, CBackendBuildsAnExecutableAndCachesObjects) {
   auto src = (dir / "prog.pkn").string();
   {
     std::ofstream ofs(src);
-    ofs << "fn main(args: Str[]) -> int { println(\"built\"); return "
+    ofs << "fn main(args: view Str[]) -> int { println(\"built\"); return "
            "args.len(); }";
   }
   auto exe = (dir / "prog").string();
@@ -1465,8 +1467,8 @@ TEST(Driver, BuildProducesAStandaloneExecutable) {
     std::ofstream ofs(src);
     ofs << "class Box { v: int; }\n"
            "impl Box { fn __init__(v: int) { self.v = v; } }\n"
-           "fn main(args: Str[]) -> int { b = Box(40); println(args[1]); "
-           "return b.v + args.len(); }";
+           "fn main(args: view Str[]) -> int { b = Box(40); "
+           "println(args[1]); return b.v + args.len(); }";
   }
   auto buildAndRun = [&](const std::string &opt) {
     auto exe = (dir / ("prog" + opt)).string();
@@ -1568,7 +1570,7 @@ TEST(Driver, BuildRejectsAStrayArgument) {
 
 TEST(Driver, CBackendRunForwardsArgumentsAndTracksTheHeap) {
   REQUIRE_BACKEND();
-  auto src = writeTmp("fn main(args: Str[]) -> int { println(args[1]); "
+  auto src = writeTmp("fn main(args: view Str[]) -> int { println(args[1]); "
                       "return args.len(); }");
   auto [rc, out] = run(std::string(kPaykan) + " --backend=c --track-heap " +
                        src + " hello 2>&1");

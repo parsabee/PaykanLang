@@ -29,7 +29,7 @@ static_assert(int(paykan::names::kTupleSlotRef) == int(PAYKAN_TUPLE_REF),
               "tuple slot-kind ABI drift");
 static_assert(int(paykan::names::kTupleSlotOpt) == int(PAYKAN_TUPLE_OPT),
               "tuple slot-kind ABI drift");
-// An inline optional in memory (an `int?[]` element, a field, a native
+// An inline optional in memory (an `int?[n]` element, a field, a native
 // function's PaykanType) is the C backend's `{ bool present; T value; }`: the
 // size and alignment the lowering gives the runtime are that struct's.
 namespace {
@@ -125,31 +125,24 @@ TEST(Tuple, NestedTuples) {
   g.expectNoLeaks("NestedTuples");
 }
 
-TEST(Tuple, TupleInArrayAndArrayInTuple) {
+TEST(Tuple, TupleInArray) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     fn main() -> int {
-      pairs: (int, Str)[] = [(1, "one"), (2, "two")];
-      pairs.push((3, "three"));
+      pairs: (int, Str)[3] = [(1, "one"), (2, "two"), (3, "three")];
       println(pairs[2].1);
       println(pairs[0]);
       println(Str<int>(pairs.len()));
       p = pairs[1];            // element acquired by a new owner
       println(p.1);
-      pairs[0] = (10, "ten");  // set_obj releases the old tuple
+      pairs[0] = (10, "ten");  // releases the old tuple
       println(pairs[0]);
-
-      arrs: (int[], Str) = ([1, 2, 3], "nums");
-      arrs.0.push(4);
-      println(Str<int>(arrs.0.len()));
-      println(Str<int>(arrs.0[3]));
-      println(arrs.1);
       return 0;
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "three\n(1, one)\n3\ntwo\n(10, ten)\n4\n4\nnums\n");
-  g.expectNoLeaks("TupleInArrayAndArrayInTuple");
+  EXPECT_EQ(r.StdOut, "three\n(1, one)\n3\ntwo\n(10, ten)\n");
+  g.expectNoLeaks("TupleInArray");
 }
 
 // -- Multiple return and destructuring

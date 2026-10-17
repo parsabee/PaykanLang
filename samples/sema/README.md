@@ -8,13 +8,13 @@ type-checking (no codegen or JIT execution).
 
 | Directory  | Feature area                                      |
 |------------|---------------------------------------------------|
-| `arrays/`  | Array types, literals, subscript, `len()`, match  |
+| `arrays/`  | Array types `T[n]`, slice parameters, literals, subscript, `len()` |
 | `classes/` | Class declarations, fields, methods, inheritance, `__super__` |
 | `functions/` | Free-function declarations and top-level name collisions |
 | `match/`   | `match` statement — arms, bindings, wildcards     |
 | `enums/`   | `enum` declarations, variant access, equality, enum match |
 | `generics/` | Generic classes / functions: instantiation, inference, diagnostics |
-| `optionals/` | Optional types `T?` — `None`, widening, unwrapping with `match`, optional fields and arrays |
+| `optionals/` | Optional types `T?` — `None`, widening, unwrapping with `match`, optional fields and arrays of optionals |
 | `tuples/`  | Tuple types, literals, `.N` access, destructuring, immutability |
 | `conversions/` | Conversion constructors `Target<Source>(value)`: the supported pairs, result types |
 

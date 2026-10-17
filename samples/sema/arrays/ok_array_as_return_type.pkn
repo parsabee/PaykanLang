@@ -1,10 +1,10 @@
 // OK: array type as a function return type
-fn makeInts() -> int[] {
+fn makeInts() -> int[3] {
   return [1, 2, 3];
 }
 
 fn main() -> int {
-  a: int[] = makeInts();
+  a: int[3] = makeInts();
   n: int = a.len();
   return 0;
 }

@@ -1,5 +1,4 @@
-// Optional types: arrays of optionals (`Node?[]`, None slots) and
-// optional arrays (`int[]?`).
+// Optional types: arrays of optionals (`Node?[n]`, None slots).
 class Node {
   v: int;
 }
@@ -9,24 +8,15 @@ impl Node {
 }
 
 fn main() -> int {
-  xs: Node?[] = [];
-  xs.push(None);
-  xs.push(Node(1));
+  xs: Node?[2] = [None, Node(1)];
   xs[0] = Node(2);
   xs[1] = None;
   e: Node? = xs[0];
-  p: Node? = xs.pop();
+  p: Node? = xs[1];
+  ys: Node?[_] = [None, None];  // the None elements take the declared type
   match xs[0] {
     n: Node { println(Str<int>(n.v)); }
     None    { println("none"); }
-  }
-
-  ys: int[]? = None;
-  ys = [1, 2];
-  zs: Str[]? = [];             // the empty literal takes the wrapped type
-  match ys {
-    a: int[] { a.push(3); println(Str<int>(a.len())); }
-    None     { println("none"); }
   }
   return 0;
 }

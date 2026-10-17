@@ -10,8 +10,7 @@ fn main() -> int {
   f: float? = 3;          // int -> float, then boxed
   b: bool? = None;
   c: char? = 'c';
-  xs: int?[] = [1, 2];
-  xs.push(None);
+  xs: int?[3] = [1, 2, None];
   match a {
     n: int { println(Str<int>(n + 1)); }
     None   { println("odd"); }

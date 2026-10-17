@@ -23,15 +23,15 @@ impl Pair<K, V> {
 
 class Holder {
   b: Box<int>;
-  ps: Pair<Str, int>[];
+  ps: Pair<Str, int>[1];
   view fn get() -> view Box<int> { return self.b; }
 }
 
 impl Holder {
-  fn __init__() { self.b = Box<int>(1); self.ps = []; }
+  fn __init__() { self.b = Box<int>(1); self.ps = [Pair<Str, int>("p", 0)]; }
 }
 
-fn first<T>(xs: T[]) -> T { return xs[0]; }
+fn first<T>(xs: view T[]) -> view T { return xs[0]; }
 fn unbox<T>(b: view Box<T>) -> T { return b.get(); }
 
 fn describe(o: Obj) -> Str {
@@ -46,9 +46,9 @@ fn main() -> int {
   h: Holder = Holder();
   n: int = unbox(h.get());
   m: int = unbox<int>(Box<Box<int>>(Box<int>(1)).get());
-  arr: Box<int>[] = [Box<int>(1), Box<int>(2)];
+  arr: Box<int>[2] = [Box<int>(1), Box<int>(2)];
   k: view Str = Pair<Str, int>("a", 1).key();
-  s: Str = first(["x"]);
+  s: view Str = first(["x"]);
   i: int = first<int>([3]);
   inferred = Box(5);
   println(describe(inferred));

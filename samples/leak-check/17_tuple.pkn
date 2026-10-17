@@ -6,7 +6,7 @@
 // retained by the tuple and released by PaykanTuple_destroy.
 //
 // Runtime allocation sites: PaykanTuple_new (Tuple.c), PaykanShared (Shared.c),
-// PaykanString_new (String.c), PaykanArray_* (Array.c), object structs.
+// PaykanString_new (String.c), object structs.
 //
 // Expected under --track-heap: live blocks : 0.
 
@@ -30,8 +30,7 @@ fn main() -> int {
   nested = ((1, "x"), (2.5, t)); // nested tuple sharing t
   println(nested);
   println(mk().0);               // call-rooted element read
-  arr: (int, Str)[] = [t, (2, "b")];
-  arr.push(mk_pair());
+  arr: (int, Str)[3] = [t, (2, "b"), mk_pair()];
   h: Holder = Holder(t);
   pair: view = h.get();         // a 'view' of h.pair
   println(Str<bool>(t == (1, "a")));

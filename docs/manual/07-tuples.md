@@ -51,7 +51,7 @@ fn divmod(a: int, b: int) -> (int, int) {
   return (a / b, a % b);
 }
 
-fn minMax(xs: int[]) -> (int, int) {
+fn minMax(xs: view int[]) -> (int, int) {
   lo = xs[0];
   hi = xs[0];
   i = 1;
@@ -102,8 +102,7 @@ each element compared the way `==` compares it on its own (strings by content):
 
 ```pkn
 fn main() -> int {
-  scores: (Str, int)[] = [("ada", 92), ("alan", 85)];
-  scores.push(("grace", 97));
+  scores: (Str, int)[3] = [("ada", 92), ("alan", 85), ("grace", 97)];
   i = 0;
   while (i < scores.len()) {
     name, score = scores[i];
@@ -161,7 +160,7 @@ fn splitOnce(s: Str, sep: char) -> (Str, Str) {
 }
 
 // (done, pending)
-fn stats(tasks: Task[]) -> (int, int) {
+fn stats(tasks: view Task[]) -> (int, int) {
   done = 0;
   i = 0;
   while (i < tasks.len()) {
