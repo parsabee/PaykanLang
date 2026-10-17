@@ -46,7 +46,7 @@ fn stripLine(s: Str) -> Str {
 
 // True if `s` begins with `prefix` (character-by-character; `Str ==` is
 // reference identity, so the comparison is done over chars).
-fn startsWith(s: Str, prefix: Str) -> bool {
+fn startsWith(s: view Str, prefix: view Str) -> bool {
   if (prefix.len() > s.len()) { return False; }
   i: int = 0;
   while (i < prefix.len()) {

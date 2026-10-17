@@ -1,8 +1,9 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Sema tests: fixed-size arrays, `T[n]` (docs/language/05-arrays.md,
-// "Fixed-size arrays").  For now the type of a local variable, a parameter,
-// a result or a field, of scalars, enums, references and other such arrays.
+// Sema tests: arrays, `T[n]`, and slices, `view T[]` / `inout T[]`
+// (docs/language/05-arrays.md).  An array is for now the type of a local
+// variable, a parameter, a result or a field, of scalars, enums, references
+// and other arrays.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>

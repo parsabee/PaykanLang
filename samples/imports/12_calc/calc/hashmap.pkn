@@ -8,15 +8,41 @@
 //   2. There is no char -> int conversion — so `charOrd` derives an ordinal by
 //      finding the character's index in a reference alphabet.
 //
-// Buckets are an array of arrays (`Entry[][]`). The table doubles its bucket
-// count when the load factor passes 0.75 and rehashes, keeping lookups O(1)
-// on average. `lookup` returns an optional (`Entry?`): a missing key is
-// `None`, so callers unwrap with `match` instead of pairing has() with get().
+// The table has a fixed number of buckets (`Entry?[8]`), each the first entry
+// of a linked chain (`Entry.next`), or None when the bucket is empty. A new
+// key goes at the end of its bucket's chain, so a bucket keeps its keys in the
+// order they were added. `lookup` returns an optional (`Entry?`): a missing
+// key is `None`, so callers unwrap with `match` instead of pairing has() with
+// get().
 
-// One key/value pair living in a bucket chain.
+// One key/value pair, linked to the next one in its bucket.
 class Entry {
   key: Str;
   value: float;
+  next: Entry?;   // the next entry in the same bucket, or None
+
+  // Link `e` at the end of the chain that starts here.
+  fn append(e: Entry) {
+    match self.next {
+      n: Entry { n.append(e); }
+      None     { self.next = e; }
+    }
+  }
+
+  // Unlink the entry after this one whose key is `key`. Returns True if there
+  // was one.
+  fn unlink(key: Str) -> bool {
+    match self.next {
+      n: Entry {
+        if (n.key.equals(key)) {
+          self.next = n.next;
+          return True;
+        }
+        return n.unlink(key);
+      }
+      None { return False; }
+    }
+  }
 }
 
 impl Entry {
@@ -40,19 +66,8 @@ fn charOrd(c: char) -> int {
 }
 
 class HashMap {
-  buckets: Entry[][];
+  buckets: Entry?[8];
   size: int;
-  nbuckets: int;
-
-  // Append `nbuckets` empty chains to a freshly-reset bucket array.
-  fn fill() {
-    i: int = 0;
-    while (i < self.nbuckets) {
-      chain: Entry[] = [];
-      self.buckets.push(chain);
-      i = i + 1;
-    }
-  }
 
   // djb2 over the key's character ordinals, folded into the bucket range.
   view fn indexFor(key: Str) -> int {
@@ -63,18 +78,21 @@ class HashMap {
       i = i + 1;
     }
     if (h < 0) { h = 0 - h; }
-    return h % self.nbuckets;
+    return h % self.buckets.len();
   }
 
   // The entry stored under `key`, or None when the key is absent.  Not a
   // `view fn`: the entry it returns can be changed (insert does).
   fn lookup(key: Str) -> Entry? {
-    chain: Entry[] = self.buckets[self.indexFor(key)];
-    i: int = 0;
-    while (i < chain.len()) {
-      e: Entry = chain[i];
-      if (e.key.equals(key)) { return e; }
-      i = i + 1;
+    cur: Entry? = self.buckets[self.indexFor(key)];
+    while (cur != None) {
+      match cur {
+        e: Entry {
+          if (e.key.equals(key)) { return e; }
+          cur = e.next;
+        }
+        None { }
+      }
     }
     return None;
   }
@@ -88,98 +106,56 @@ class HashMap {
         return False;
       }
       None {
-        self.buckets[self.indexFor(key)].push(Entry(key, value));
+        b: int = self.indexFor(key);
+        match self.buckets[b] {
+          first: Entry { first.append(Entry(key, value)); }
+          None         { self.buckets[b] = Entry(key, value); }
+        }
         return True;
       }
     }
   }
 
   fn put(key: Str, value: float) {
-    if (self.insert(key, value)) {
-      self.size = self.size + 1;
-      // Grow when load factor exceeds 3/4.
-      if (self.size * 4 > self.nbuckets * 3) { self.resize(); }
-    }
-  }
-
-  // Double the bucket count and redistribute every entry.
-  fn resize() {
-    old: Entry[][] = self.buckets;
-    self.nbuckets = self.nbuckets * 2;
-    self.buckets = [];
-    self.fill();
-    bi: int = 0;
-    while (bi < old.len()) {
-      chain: Entry[] = old[bi];
-      j: int = 0;
-      while (j < chain.len()) {
-        e: Entry = chain[j];
-        self.insert(e.key, e.value); // size already counted; just redistribute
-        j = j + 1;
-      }
-      bi = bi + 1;
-    }
+    if (self.insert(key, value)) { self.size = self.size + 1; }
   }
 
   // Delete a key. Returns True if it was present.
   fn remove(key: Str) -> bool {
-    chain: Entry[] = self.buckets[self.indexFor(key)];
-    survivors: Entry[] = [];
-    found: bool = False;
-    i: int = 0;
-    while (i < chain.len()) {
-      e: Entry = chain[i];
-      if (e.key.equals(key)) { found = True; }
-      else { survivors.push(e); }
-      i = i + 1;
-    }
-    if (found) {
-      // Compact the chain in place: drop everything, push the survivors back.
-      while (chain.len() > 0) { chain.pop(); }
-      k: int = 0;
-      while (k < survivors.len()) {
-        chain.push(survivors[k]);
-        k = k + 1;
+    b: int = self.indexFor(key);
+    match self.buckets[b] {
+      first: Entry {
+        if (first.key.equals(key)) {
+          self.buckets[b] = first.next; // the chain now starts at the second
+        } else if (!first.unlink(key)) {
+          return False;
+        }
+        self.size = self.size - 1;
+        return True;
       }
-      self.size = self.size - 1;
+      None { return False; }
     }
-    return found;
   }
 
-  // Every (name, value) pair currently stored, in bucket order.  Not a
-  // `view fn`: the pairs share the stored names.
-  fn entries() -> (Str, float)[] {
-    out: (Str, float)[] = [];
-    bi: int = 0;
-    while (bi < self.buckets.len()) {
-      chain: Entry[] = self.buckets[bi];
-      j: int = 0;
-      while (j < chain.len()) {
-        e: Entry = chain[j];
-        out.push((e.key, e.value));
-        j = j + 1;
-      }
-      bi = bi + 1;
-    }
-    return out;
-  }
+  // The number of buckets, and the first entry of bucket `b`'s chain (None
+  // when it is empty): with `Entry.next`, a way to visit every entry, in
+  // bucket order.  `bucket` is not a `view fn`: the entries it reaches can be
+  // changed.
+  view fn bucketCount() -> int { return self.buckets.len(); }
+  fn bucket(b: int) -> Entry? { return self.buckets[b]; }
 
   view fn count() -> int { return self.size; }
 
-  // Drop all entries and shrink back to the initial bucket count.
+  // Drop all entries.
   fn clear() {
-    self.nbuckets = 8;
+    self.buckets = [None, None, None, None, None, None, None, None];
     self.size = 0;
-    self.buckets = [];
-    self.fill();
   }
 }
 
 impl HashMap {
   fn __init__() {
-    self.nbuckets = 8;
+    self.buckets = [None, None, None, None, None, None, None, None];
     self.size = 0;
-    self.buckets = [];
-    self.fill();
   }
 }

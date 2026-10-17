@@ -2,7 +2,7 @@
 
 This appendix walks through a complete program from the repository,
 [`samples/imports/12_calc`](../../samples/imports/12_calc/main.pkn): an arithmetic calculator
-with variables, a command history and an interactive mode. At about 860 lines in four
+with variables, a command history and an interactive mode. At about 870 lines in four
 modules it uses most of what this manual covers: classes, an enum, `match` in all its modes,
 arrays, tuples, optionals, a generic class, modules, standard input and command-line
 arguments. The test suite runs it on every backend, and the excerpts below are checked
@@ -62,17 +62,26 @@ import calc::utils;
 
 ## The variable store: `calc/hashmap.pkn`
 
-Variables live in a hash table with separate chaining: an array of buckets, each an array of
-`Entry` objects. Note the type `Entry[][]` and the loop that fills the buckets with empty
-chains:
+Variables live in a hash table with separate chaining. The table is a fixed array of eight
+buckets, `Entry?[8]`: each bucket is the first `Entry` of a linked chain, or `None` while it
+is empty, and each entry's `next` field links the one after it. `append` walks a chain by
+handing the new entry on until it reaches the entry that has no `next`:
 
 ```pkn
 // from: samples/imports/12_calc/calc/hashmap.pkn
 class Entry {
   key: Str;
   value: float;
-}
+  next: Entry?;   // the next entry in the same bucket, or None
 
+  // Link `e` at the end of the chain that starts here.
+  fn append(e: Entry) {
+    match self.next {
+      n: Entry { n.append(e); }
+      None     { self.next = e; }
+    }
+  }
+// ...
 impl Entry {
   fn __init__(k: Str, v: float) {
     self.key = k;
@@ -81,47 +90,38 @@ impl Entry {
 }
 // ...
 class HashMap {
-  buckets: Entry[][];
+  buckets: Entry?[8];
   size: int;
-  nbuckets: int;
-
-  // Append `nbuckets` empty chains to a freshly-reset bucket array.
-  fn fill() {
-    i: int = 0;
-    while (i < self.nbuckets) {
-      chain: Entry[] = [];
-      self.buckets.push(chain);
-      i = i + 1;
-    }
-  }
 // ...
 impl HashMap {
   fn __init__() {
-    self.nbuckets = 8;
+    self.buckets = [None, None, None, None, None, None, None, None];
     self.size = 0;
-    self.buckets = [];
-    self.fill();
   }
 }
 ```
 
-`__init__` may call methods, like `fill` here. It does so after every field has a value,
-which is the safe order: the compiler does not stop a method called earlier from reading a
-field that is not set yet.
+`next` is optional, so it starts as `None` and `Entry`'s `__init__` leaves it alone. The
+hash is folded into `self.buckets.len()`, so the number of buckets is written only once, in
+the field's type.
 
 Looking a key up returns an **optional**, `Entry?`, so a missing variable is `None` rather
-than a special value. `lookup` changes nothing, but it is not a `view fn`: the entry it
-returns is the one stored in the table, and `insert` changes it.
+than a special value. The loop is the linked-list walk from [Optionals](08-optionals.md).
+`lookup` changes nothing, but it is not a `view fn`: the entry it returns is the one stored
+in the table, and `insert` changes it.
 
 ```pkn
 // from: samples/imports/12_calc/calc/hashmap.pkn
   fn lookup(key: Str) -> Entry? {
-    chain: Entry[] = self.buckets[self.indexFor(key)];
-    i: int = 0;
-    while (i < chain.len()) {
-      e: Entry = chain[i];
-      if (e.key.equals(key)) { return e; }
-      i = i + 1;
+    cur: Entry? = self.buckets[self.indexFor(key)];
+    while (cur != None) {
+      match cur {
+        e: Entry {
+          if (e.key.equals(key)) { return e; }
+          cur = e.next;
+        }
+        None { }
+      }
     }
     return None;
   }
@@ -129,7 +129,9 @@ returns is the one stored in the table, and `insert` changes it.
 
 and `insert` unwraps it with an optional-mode `match`. Because `Entry` is a class, `e` in the
 first arm is a reference to the entry stored in the table, so assigning `e.value` updates the
-table in place:
+table in place. A new key goes into its bucket, which it starts when the bucket is `None`;
+otherwise it goes at the end of the chain, so a bucket keeps its keys in the order they were
+added:
 
 ```pkn
 // from: samples/imports/12_calc/calc/hashmap.pkn
@@ -140,7 +142,11 @@ table in place:
         return False;
       }
       None {
-        self.buckets[self.indexFor(key)].push(Entry(key, value));
+        b: int = self.indexFor(key);
+        match self.buckets[b] {
+          first: Entry { first.append(Entry(key, value)); }
+          None         { self.buckets[b] = Entry(key, value); }
+        }
         return True;
       }
     }
@@ -152,26 +158,54 @@ after it. Keys are compared with `e.key.equals(key)`, which compares contents ju
 `e.key == key` would. (A comment at the top of the module predates `==` comparing strings by
 content.)
 
-`entries` returns every variable as an array of tuples, `(Str, float)[]`, for the `:vars`
-command. It is not a `view fn` either, since the tuples share the stored names:
+Removing a key unlinks its entry: the first one of a bucket by storing its `next` in the
+bucket, any other by `Entry.unlink`, which links the entry before it to the one after it.
 
 ```pkn
 // from: samples/imports/12_calc/calc/hashmap.pkn
-  fn entries() -> (Str, float)[] {
-    out: (Str, float)[] = [];
-    bi: int = 0;
-    while (bi < self.buckets.len()) {
-      chain: Entry[] = self.buckets[bi];
-      j: int = 0;
-      while (j < chain.len()) {
-        e: Entry = chain[j];
-        out.push((e.key, e.value));
-        j = j + 1;
+  fn remove(key: Str) -> bool {
+    b: int = self.indexFor(key);
+    match self.buckets[b] {
+      first: Entry {
+        if (first.key.equals(key)) {
+          self.buckets[b] = first.next; // the chain now starts at the second
+        } else if (!first.unlink(key)) {
+          return False;
+        }
+        self.size = self.size - 1;
+        return True;
       }
-      bi = bi + 1;
+      None { return False; }
     }
-    return out;
   }
+```
+
+For the `:vars` command, the map gives out the number of buckets and the first entry of
+each, `bucket(b)`; `listVars` in `main.pkn` follows the `next` links from there. `bucket` is
+not a `view fn` either, since the entries it reaches can be changed:
+
+```pkn
+// from: samples/imports/12_calc/main.pkn
+fn listVars(env: hashmap::HashMap) {
+  if (env.count() == 0) {
+    println("(no variables)");
+    return;
+  }
+  b: int = 0;
+  while (b < env.bucketCount()) {
+    cur: hashmap::Entry? = env.bucket(b);
+    while (cur != None) {
+      match cur {
+        e: hashmap::Entry {
+          println("  " + e.key + " = " + show(e.value));
+          cur = e.next;
+        }
+        None { }
+      }
+    }
+    b = b + 1;
+  }
+}
 ```
 
 ## The parser: `calc/parser.pkn`
@@ -292,42 +326,49 @@ its type, since a bare `None` in a tuple literal with no declared destination wo
 
 ### A generic ring buffer
 
-The `:history` command shows the last 20 statements. They are kept in a generic ring buffer,
+The `:history` command shows the last 16 statements. They are kept in a generic ring buffer,
 `Ring<T>`, declared in `main.pkn` itself because generic classes cannot be imported from
-another module yet:
+another module yet. It holds an array of 16 slots, a count of the slots in use, and the
+index of the oldest item once all of them are. Until the buffer is full, `add` fills the
+next free slot; after that it overwrites the oldest item and moves `start` on:
 
 ```pkn
 // from: samples/imports/12_calc/main.pkn
 class Ring<T> {
-  items: T[];
-  cap: int;
+  items: T[16];
+  count: int; // how many slots are in use: all of them once the buffer is full
   start: int; // index of the oldest item once the buffer is full
 
   // Append `x`, overwriting the oldest item when the buffer is full.
   fn add(x: T) {
-    if (self.items.len() < self.cap) {
-      self.items.push(x);
+    if (self.count < self.items.len()) {
+      self.items[self.count] = x;
+      self.count = self.count + 1;
     } else {
       self.items[self.start] = x;
-      self.start = (self.start + 1) % self.cap;
+      self.start = (self.start + 1) % self.items.len();
     }
   }
 // ...
 impl Ring<T> {
-  fn __init__(cap: int) {
-    self.items = [];
-    self.cap = cap;
+  // Every slot starts as `blank`, until an item is added there.
+  fn __init__(blank: T) {
+    self.items = [blank, blank, blank, blank, blank, blank, blank, blank,
+                  blank, blank, blank, blank, blank, blank, blank, blank];
+    self.count = 0;
     self.start = 0;
   }
 }
 ```
 
-The history holds `(Str, float)` tuples, the statement and its value, so its type is
-`Ring<(Str, float)>`:
+An array always holds all of its elements, so `__init__` takes a `blank` item to fill the
+slots with until they are used, as the task list in [Arrays](06-arrays.md#project-the-task-list)
+does. The history holds `(Str, float)` tuples, the statement and its value, so its type is
+`Ring<(Str, float)>`, and its blank is an empty statement:
 
 ```pkn
 // from: samples/imports/12_calc/main.pkn
-  history: Ring<(Str, float)> = Ring<(Str, float)>(historySize());
+  history: Ring<(Str, float)> = Ring<(Str, float)>(("", 0.0));
 ```
 
 ### Evaluating a statement
@@ -389,20 +430,21 @@ The interactive loop is the standard-input idiom from [Files and I/O](11-files-a
 
 ### The command line
 
-`main` takes `args: Str[]` and walks it with an index, so that `-e` can consume the argument
-after it. Exit status `2` signals a usage error, a common convention:
+`main` takes `args: view Str[]`, a slice of the arguments, and walks it with an index, so
+that `-e` can consume the argument after it. Exit status `2` signals a usage error, a common
+convention:
 
 ```pkn
 // from: samples/imports/12_calc/main.pkn
-fn main(args: Str[]) -> int {
+fn main(args: view Str[]) -> int {
   quiet: bool = False;
   runDemo: bool = True;
-  exprs: Str[] = [];
+  nexprs: int = 0;
 
   // -- command-line parsing: flags, repeatable -e, positional expressions --
   i: int = 1;
   while (i < args.len()) {
-    a: Str = args[i];
+    a: view = args[i];
     if (a.equals("-h") || a.equals("--help")) {
       printUsage();
       return 0;
@@ -413,11 +455,34 @@ fn main(args: Str[]) -> int {
     } else if (a.equals("-e") || a.equals("--eval")) {
       if (i + 1 < args.len()) {
         i = i + 1;
-        exprs.push(args[i]);
+        nexprs = nexprs + 1;
       } else {
         printerrln("error: " + a + " requires an argument");
         return 2;
       }
+```
+
+The arguments are a `view`, which `main` reads but does not keep, and `a` is a `view` local
+of one. So this first pass only checks the options and counts the expressions. After the
+demo, a second pass walks the arguments again and evaluates the expressions in order. Each
+one is passed as its `toString()`, a string of the program's own that the parser and the
+history can keep:
+
+```pkn
+// from: samples/imports/12_calc/main.pkn
+  if (nexprs > 0) {
+    j: int = 1;
+    while (j < args.len()) {
+      if (args[j].equals("-e") || args[j].equals("--eval")) {
+        j = j + 1;
+        evalStatement(args[j].toString(), env, history, quiet);
+      } else if (!isOption(args[j])) {
+        evalStatement(args[j].toString(), env, history, quiet);
+      }
+      j = j + 1;
+    }
+    return 0;
+  }
 ```
 
 ## Ideas for extending it
