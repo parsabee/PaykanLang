@@ -26,6 +26,10 @@ PaykanShared *sample_describe(const PaykanType *t, const void *x) {
   case PAYKAN_KIND_CHAR:
     snprintf(what, sizeof what, "char %c", (char)*(const int8_t *)x);
     break;
+  case PAYKAN_KIND_TUPLE: // its elements in place, references at offsets
+    snprintf(what, sizeof what, "a tuple holding %lld reference(s)",
+             (long long)t->nrefs);
+    break;
   default: // a reference: None if the optional's is NULL
     snprintf(what, sizeof what, "%s",
              *(PaykanShared *const *)x ? "an object" : "None");

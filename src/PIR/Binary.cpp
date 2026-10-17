@@ -74,7 +74,6 @@ enum Table : size_t {
 };
 constexpr size_t kTableCount = 8;
 constexpr size_t kMinRecordBytes[kTableCount] = {2, 2, 2, 2, 1, 1, 8, 8};
-constexpr uint8_t kMaxBytesKind = 5; // PaykanTupleKind (5: PAYKAN_TUPLE_OPT)
 constexpr uint8_t kMaxSymbolKind = 9;
 constexpr uint8_t kMaxLinkage = 2;
 constexpr size_t kMinIndexEntryBytes = 5 + 32;
@@ -430,9 +429,6 @@ public:
     std::span<const uint8_t> b;
     if (!str(g.Name) || !R.count(n) || !R.bytes(static_cast<size_t>(n), b))
       return false;
-    for (uint8_t k : b)
-      if (k > kMaxBytesKind)
-        return R.fail("tuple slot kind out of range");
     g.Bytes.assign(b.begin(), b.end());
     return true;
   }

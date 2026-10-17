@@ -61,10 +61,8 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanStringLength, {{kObj}, kI64}},
     {kPaykanIntHash, {{kI64}, kI64}},
     {kPaykanStringHash, {{kObj}, kI64}},
-    {kPaykanTupleNew, {{kI64, kPtr}, kObj}},
-    {kPaykanTupleGet, {{kObj, kI64}, kI64}},
-    {kPaykanTupleSet, {{kObj, kI64, kI64}, kVoid}},
-    {kPaykanTupleSetObj, {{kObj, kI64, kBox}, kVoid}},
+    {kPaykanTupleToString, {{kPtr, kPtr}, kObj}},
+    {kPaykanTupleEquals, {{kPtr, kPtr, kPtr}, kI64}},
     {kPaykanFileOpen, {{kObj, kObj}, kBox}},
     {kPaykanPrint, {{kObj}, kVoid}},
     {kPaykanPrintln, {{kObj}, kVoid}},
@@ -173,8 +171,8 @@ void ModuleLowering::Scope::declare(const std::string &name, pir::LocalId local,
     SharedVars.insert(name);
     DeclOrder.push_back({local, astTy});
   }
-  if (fixedHoldsRefs(astTy))
-    FixedVars.push_back({local, astTy});
+  if (memHoldsRefs(astTy))
+    MemVars.push_back({local, astTy});
 }
 
 void ModuleLowering::Scope::declareUnowned(const std::string &name,
@@ -258,9 +256,9 @@ Type ModuleLowering::toPIRType(ast::Type *ty) {
         toPIRType(ast::cast<ast::OptionalType>(ty)->getInnerType()));
   if (ast::isRefType(ty))
     return Type::Box;
-  // Never a value: a fixed-size array is held in a `mem` slot
-  // (LoweringFixed.cpp).
-  if (ast::dyn_cast<ast::FixedArrayType>(ty))
+  // Never a value: a fixed-size array or a tuple is held in a `mem` slot
+  // (LoweringMem.cpp).
+  if (ast::isMemType(ty))
     return Type::Mem;
   return Type::Void;
 }
@@ -274,8 +272,7 @@ bool ModuleLowering::isObjectElementType(ast::Type *elemTy) const {
     return ASTCtx.lookupEnumType(ct->getName()) == nullptr;
   // An optional value is stored inline (#96), the optional of a reference
   // as its box.
-  return ast::isa<ast::TupleType>(elemTy) ||
-         (ast::isa<ast::OptionalType>(elemTy) && !ast::isValueOptional(elemTy));
+  return ast::isa<ast::OptionalType>(elemTy) && !ast::isValueOptional(elemTy);
 }
 
 ast::Type *ModuleLowering::canonicalizeDeclType(ast::Type *ty) {
@@ -332,8 +329,8 @@ pir::Signature ModuleLowering::functionSignature(ast::FuncDecl *node) {
     sig.Ret = Type::Ptr; // the address of the storage it names
   for (auto &p : node->getParams())
     appendParamTypes(sig.Params, p.ParamType, p.Mode);
-  // A fixed-size array result is written where a last parameter points.
-  if (ast::dyn_cast<ast::FixedArrayType>(retAstTy)) {
+  // A result held in memory is written where a last parameter points.
+  if (ast::isMemType(retAstTy)) {
     sig.Params.push_back(Type::Ptr);
     sig.Ret = Type::Void;
   }
@@ -346,7 +343,7 @@ pir::Function *ModuleLowering::declareFunctionPrototype(ast::FuncDecl *node) {
   pir::Function *fn =
       getOrCreateFunction(node->getName(), functionSignature(node));
   nameParams(*fn, 0, node->getParams());
-  if (ast::dyn_cast<ast::FixedArrayType>(node->getReturnType()))
+  if (ast::isMemType(node->getReturnType()))
     fn->Params.back().Name = "result"; // where the result is written
   return fn;
 }
@@ -591,13 +588,10 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
   // An optional of a value type is a value, never a box.
   if (valueOptionalType(expr))
     return false;
-  if (ast::isa<ast::TupleLiteralExpr>(expr))
-    return true;
-  if (auto *e = ast::dyn_cast<ast::TupleIndexExpr>(expr))
-    return e->getResolvedType() && ast::isRefType(e->getResolvedType());
-  // An array's (or a slice's) element slot holds the box itself.
-  if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(expr))
-    return ast::isRefType(se->getResolvedType());
+  // An array's (or a slice's or a tuple's) element slot holds the box
+  // itself.
+  if (ast::isa<ast::SubscriptExpr>(expr) || ast::isa<ast::TupleIndexExpr>(expr))
+    return ast::isRefType(expr->getResolvedType());
   if (auto *e = ast::dyn_cast<ast::MethodCallExpr>(expr))
     return e->getResolvedType() && ast::isRefType(e->getResolvedType());
   if (auto *e = ast::dyn_cast<ast::TernaryExpr>(expr))
@@ -622,28 +616,32 @@ bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
   if (auto *mae = ast::dyn_cast<ast::MemberAccessExpr>(expr))
     return mae->getResolvedType() && ast::isRefType(mae->getResolvedType()) &&
            exprProducesFreshBox(mae->getReceiver());
-  if (auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(expr))
-    return ti->getResolvedType() && ast::isRefType(ti->getResolvedType()) &&
-           exprProducesFreshBox(ti->getTuple());
-  if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(expr)) {
-    // An element of a temporary array (`mk()[0]`), or of a fresh object's
-    // field (`mk().xs[0]`), is read as a +1 box (visitSubscriptExpr): the
-    // temporary dies with the read.
-    ast::Expr *root = se->getArray();
-    while (auto *inner = ast::dyn_cast<ast::SubscriptExpr>(root))
-      root = inner->getArray();
+  if (ast::isa<ast::SubscriptExpr>(expr) ||
+      ast::isa<ast::TupleIndexExpr>(expr)) {
+    // An element of a temporary (`mk()[0]`, `mk().1`), or of a fresh
+    // object's field (`mk().xs[0]`), is read as a +1 box: the temporary
+    // dies with the read.
+    ast::Expr *root = expr;
+    for (;;) {
+      if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(root))
+        root = se->getArray();
+      else if (auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(root))
+        root = ti->getTuple();
+      else
+        break;
+    }
     if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(root))
       return exprAlreadyShared(expr) && exprProducesFreshBox(ma->getReceiver());
     return exprAlreadyShared(expr) && (ast::isa<ast::CallExpr>(root) ||
                                        ast::isa<ast::MethodCallExpr>(root) ||
-                                       ast::isa<ast::ArrayLiteralExpr>(root));
+                                       ast::isa<ast::ArrayLiteralExpr>(root) ||
+                                       ast::isa<ast::TupleLiteralExpr>(root) ||
+                                       ast::isa<ast::TernaryExpr>(root));
   }
   if (auto *mce = ast::dyn_cast<ast::MethodCallExpr>(expr))
     return mce->getResolvedType() && ast::isRefType(mce->getResolvedType());
   if (auto *te = ast::dyn_cast<ast::TernaryExpr>(expr))
     return te->getResolvedType() && ast::isRefType(te->getResolvedType());
-  if (ast::isa<ast::TupleLiteralExpr>(expr))
-    return true;
   if (ast::isa<ast::CallExpr>(expr))
     return exprAlreadyShared(expr);
   return false;
@@ -769,9 +767,8 @@ void ModuleLowering::emitScopeCleanup(Scope &scope) {
            "DeclOrder must only contain ref-typed variables");
     emitRelease(B.load(it->Local));
   }
-  for (auto it = scope.FixedVars.rbegin(); it != scope.FixedVars.rend(); ++it)
-    emitFixedRelease(B.localAddr(it->Local, "arr.addr"),
-                     ast::cast<ast::FixedArrayType>(it->ASTType));
+  for (auto it = scope.MemVars.rbegin(); it != scope.MemVars.rend(); ++it)
+    emitMemRelease(B.localAddr(it->Local, "mem.addr"), it->ASTType);
   for (auto it = scope.PendingReleases.rbegin();
        it != scope.PendingReleases.rend(); ++it)
     emitRelease(*it);
@@ -809,11 +806,11 @@ Val ModuleLowering::visitDeclStmt(ast::DeclStmt *node) {
 }
 
 Val ModuleLowering::visitExprStmt(ast::ExprStmt *node) {
-  // A fixed-size array result bound to nothing: its references go now.
-  if (ast::dyn_cast<ast::FixedArrayType>(node->getExpr()->getResolvedType())) {
-    size_t mark = FixedTemps.size();
-    emitFixedAddress(node->getExpr());
-    releaseFixedTemps(mark);
+  // A result held in memory bound to nothing: its references go now.
+  if (ast::isMemType(node->getExpr()->getResolvedType())) {
+    size_t mark = MemTemps.size();
+    emitMemAddress(node->getExpr());
+    releaseMemTemps(mark);
     return Val();
   }
   Val val = emitExpr(node->getExpr());
@@ -830,8 +827,8 @@ Val ModuleLowering::emitImplicitVarDecl(const std::string &name,
   ast::Type *rhsAstTy = resolveExprClassType(rhsExpr);
   bool isPointer = val.Ty == Type::Box || val.Ty == Type::Obj;
   if (!rhsAstTy && isPointer) {
-    // Not a class: an optional, array or tuple value keeps its precise Sema
-    // type; fall back to Obj when nothing recorded a type.
+    // Not a class: an optional keeps its precise Sema type; fall back to Obj
+    // when nothing recorded a type.
     ast::Type *rt = rhsExpr->getResolvedType();
     if (!(rt && ast::isa<ast::OptionalType>(rt)))
       if (auto *id = ast::dyn_cast<ast::Identifier>(rhsExpr))
@@ -897,19 +894,19 @@ void ModuleLowering::emitClassVarRebind(const std::string &name,
 }
 
 Val ModuleLowering::visitAssignStmt(ast::AssignStmt *node) {
-  // A fixed-size array: a new variable holding a copy, or its bytes replaced.
-  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(
-          node->getValue()->getResolvedType())) {
+  // A value held in memory: a new variable holding a copy, or its bytes
+  // replaced.
+  if (ast::Type *ty = node->getValue()->getResolvedType(); ast::isMemType(ty)) {
     const std::string &name = node->getVarName();
     if (!CurrentScope->findOwner(name)) {
-      declareFixedVar(name, ft, node->getValue());
+      declareMemVar(name, ty, node->getValue());
       return Val();
     }
     pir::LocalId local = CurrentScope->lookup(name);
     Val dst = CurrentScope->inoutType(name) != Type::Void
                   ? B.load(local, name + ".addr")
                   : B.localAddr(local, name + ".addr");
-    emitFixedAssign(dst, node->getValue());
+    emitMemAssign(dst, node->getValue());
     return Val();
   }
   Val val = emitExpr(node->getValue());
@@ -954,13 +951,12 @@ Val ModuleLowering::visitAssignStmt(ast::AssignStmt *node) {
 }
 
 Val ModuleLowering::visitReturnStmt(ast::ReturnStmt *node) {
-  // A fixed-size array result: written where the last parameter points (a
+  // A result held in memory: written where the last parameter points (a
   // temporary of the caller's, which nothing here can reach otherwise).
-  if (node->getReturnValue() &&
-      ast::dyn_cast<ast::FixedArrayType>(CurrentFuncReturnASTType)) {
+  if (node->getReturnValue() && ast::isMemType(CurrentFuncReturnASTType)) {
     const pir::Value &dst = B.function()->Params.back();
-    emitFixedInit(node->getReturnValue(),
-                  Val(pir::Operand::value(dst), Type::Ptr));
+    emitMemInit(node->getReturnValue(),
+                Val(pir::Operand::value(dst), Type::Ptr));
     emitAllScopesCleanup();
     B.emitRetVoid();
     return Val();
@@ -1037,8 +1033,9 @@ Val ModuleLowering::visitVarDecl(ast::VarDecl *node) {
   ast::Type *varTy = node->getType();
   if (!varTy && node->getInitExpr())
     varTy = node->getInitExpr()->getResolvedType();
-  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(varTy)) {
-    declareFixedVar(node->getName(), ft, node->getInitExpr());
+  if (ast::isMemType(varTy)) {
+    declareMemVar(node->getName(), canonicalizeDeclType(varTy),
+                  node->getInitExpr());
     return Val();
   }
   ast::Type *declTy = canonicalizeDeclType(node->getType());
@@ -1046,7 +1043,7 @@ Val ModuleLowering::visitVarDecl(ast::VarDecl *node) {
 
   Val initVal;
   if (node->getInitExpr()) {
-    // Every ref-typed variable holds an owned box: a class/array/tuple value,
+    // Every ref-typed variable holds an owned box: a class value,
     // an optional (`None` is the null box), and `o: Obj = None`, which boxes
     // the immortal None singleton (acquire semantics; its destroy is a
     // no-op, so the box is the only allocation).
@@ -1172,9 +1169,19 @@ Val ModuleLowering::visitFuncDecl(ast::FuncDecl *node) {
 void ModuleLowering::emitNativeBody(ast::FuncDecl *node,
                                     const pir::Function &fn) {
   std::vector<Val> args;
-  for (const ast::Param &p : node->getParams())
-    args.push_back(B.load(CurrentScope->lookup(p.getName()), p.getName()));
-  Val result = emitNativeCall(*node, args);
+  for (const ast::Param &p : node->getParams()) {
+    pir::LocalId local = CurrentScope->lookup(p.getName());
+    // A value held in memory: its address (the caller's, for a borrow).
+    if (ast::isMemType(p.ParamType) &&
+        CurrentScope->inoutType(p.getName()) == Type::Void)
+      args.push_back(B.localAddr(local, p.getName() + ".addr"));
+    else
+      args.push_back(B.load(local, p.getName()));
+  }
+  Val memResult;
+  if (ast::isMemType(node->getReturnType()))
+    memResult = Val(pir::Operand::value(fn.Params.back()), Type::Ptr);
+  Val result = emitNativeCall(*node, args, memResult);
   emitAllScopesCleanup();
   if (fn.Sig.Ret == Type::Void)
     B.emitRetVoid();
@@ -1183,9 +1190,11 @@ void ModuleLowering::emitNativeBody(ast::FuncDecl *node,
 }
 
 Val ModuleLowering::emitNativeCall(const ast::FuncDecl &node,
-                                   const std::vector<Val> &args) {
+                                   const std::vector<Val> &args,
+                                   const Val &memResult) {
   ast::Type *retTy = canonicalizeDeclType(node.getReturnType());
   const Type ret = retTy ? toPIRType(retTy) : Type::Void;
+  const bool memRet = ast::isMemType(retTy);
   const bool resultByAddress = node.resultByAddress() && ret != Type::Void;
   pir::Signature csig;
   std::vector<Val> cargs;
@@ -1194,16 +1203,22 @@ Val ModuleLowering::emitNativeCall(const ast::FuncDecl &node,
     cargs.push_back(emitTypeDescriptor(canonicalizeDeclType(arg)));
   }
   std::optional<pir::LocalId> out;
-  if (resultByAddress && node.getResultMode() != ast::ParamMode::View) {
-    out = B.addLocal("out", ret);
+  const bool viewResult = node.getResultMode() == ast::ParamMode::View;
+  if (resultByAddress && !viewResult) {
     csig.Params.push_back(Type::Ptr);
-    cargs.push_back(B.localAddr(*out, "out.addr"));
+    if (memRet) {
+      cargs.push_back(memResult);
+    } else {
+      out = B.addLocal("out", ret);
+      cargs.push_back(B.localAddr(*out, "out.addr"));
+    }
   }
   for (size_t i = 0; i < args.size(); ++i) {
     const std::string &pname = node.getParams()[i].getName();
     Val v = args[i];
-    if (node.getParams()[i].Mode == ast::ParamMode::Inout) {
-      // Already the address of the caller's storage.
+    if (node.getParams()[i].Mode == ast::ParamMode::Inout ||
+        ast::isMemType(node.getParams()[i].ParamType)) {
+      // Already the address of the caller's storage, or of the value.
     } else if (node.paramByAddress(i)) {
       pir::LocalId value = B.addLocal(pname + ".val", v.Ty);
       B.store(value, v);
@@ -1214,7 +1229,9 @@ Val ModuleLowering::emitNativeCall(const ast::FuncDecl &node,
     csig.Params.push_back(v.Ty);
     cargs.push_back(v);
   }
-  csig.Ret = !resultByAddress ? ret : out ? Type::Void : Type::Ptr;
+  csig.Ret = !resultByAddress                 ? ret
+             : out || (memRet && !viewResult) ? Type::Void
+                                              : Type::Ptr;
   const std::string name = pir::nativeName(node.getNativeSymbol());
   if (!FuncByName.count(name)) {
     Funcs.emplace_back();
@@ -1225,6 +1242,14 @@ Val ModuleLowering::emitNativeCall(const ast::FuncDecl &node,
     FuncByName[name] = &ext;
   }
   Val result = B.call(name, csig, cargs, "r");
+  if (memRet) {
+    // A view result: the value it names, copied.
+    if (viewResult) {
+      B.memCopy(memResult, result, Val::i64(memLayout(retTy).Size));
+      emitMemRetain(memResult, retTy);
+    }
+    return memResult;
+  }
   if (out) {
     result = B.load(*out, "out");
   } else if (resultByAddress) {
@@ -1241,14 +1266,32 @@ ModuleLowering::localNative(const std::string &name) const {
   return it == NativeDecls.end() ? nullptr : it->second;
 }
 
-// A value of every type is stored as one PIR slot: a reference as its box,
-// None as a null one, an inline optional as its presence flag and payload
-// (docs/pir.md §1).
+// A value of every type but a tuple is stored as one PIR slot: a reference
+// as its box, None as a null one, an inline optional as its presence flag
+// and payload (docs/pir.md §1).  A tuple is its elements in place, each
+// reference among them at its offset.
 Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
   const Type slot = toPIRType(ty);
   std::vector<int64_t> words = {pir::storeSize(slot), pir::storeAlign(slot),
                                 nativeTypeKind(ty), 0};
-  if (slot == Type::Box) {
+  if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
+    MemLayout l = memLayout(tt);
+    words = {l.Size, l.Align, kNativeKindTuple, 0};
+    std::function<void(ast::TupleType *, int64_t)> refs = [&](ast::TupleType *t,
+                                                              int64_t base) {
+      for (size_t i = 0; i < t->getArity(); ++i) {
+        ast::Type *e = t->getElementType(i);
+        int64_t off = base + tupleElementOffset(t, i);
+        if (auto *nested = ast::dyn_cast<ast::TupleType>(e)) {
+          refs(nested, off);
+        } else if (ast::isRefType(e)) {
+          ++words[3];
+          words.push_back(off << 1 | (ast::isa<ast::OptionalType>(e) ? 1 : 0));
+        }
+      }
+    };
+    refs(tt, 0);
+  } else if (slot == Type::Box) {
     words[3] = 1;
     words.push_back(ast::isa<ast::OptionalType>(ty) ? 1 : 0); // offset 0
   }

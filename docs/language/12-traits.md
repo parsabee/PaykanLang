@@ -16,7 +16,8 @@ argument must implement.
   method that `A` already has meets a requirement too.
 - A class implements every trait its superclasses implement. Every class implements the
   built-in trait `Show` (`view fn toString() -> Str`) through `Obj`, and so do `int`,
-  `float`, `bool` and `char`: `n.toString()` is `Str(n)`.
+  `float`, `bool` and `char` (`n.toString()` is `Str(n)`) and tuples (`(1, "a").toString()`
+  is `(1, a)`).
 - The built-in trait `Hashable` (`view fn hash() -> int`) is implemented by `int`, `bool`,
   `char` and `Str`, and by a class with an `impl Hashable for` block. The standard
   library's hash tables take `Hashable` keys (see [Hashable](#hashable)).

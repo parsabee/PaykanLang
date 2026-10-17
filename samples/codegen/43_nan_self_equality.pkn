@@ -1,16 +1,15 @@
 // 43 — NaN and self-comparison (#111): `==` on a value that holds a NaN is
-// False even when both sides are the same object, because the comparison is
+// False even when both sides are the same variable, because the comparison is
 // IEEE 754 all the way down -- tuples compare element by element, a `float?`
-// compares its present values, and neither checks object identity first.
-// Exercises: tuple `==` / `!=` / `equals` on the same object with a NaN
-//            element (direct, nested, inside a `float?` element), `float?`
-//            self-comparison, and the non-NaN cases that stay equal to
-//            themselves.
+// compares its present values, and neither checks identity first.
+// Exercises: tuple `==` / `!=` of a variable with itself, a NaN element
+//            (direct, nested, inside a `float?` element), a copy compared
+//            through a function, `float?` self-comparison, and the non-NaN
+//            cases that stay equal to themselves.
 
 // expect-stdout: nan == nan:      False
 // expect-stdout: t == t:          False
 // expect-stdout: t != t:          True
-// expect-stdout: t.equals(t):     False
 // expect-stdout: t == u:          False
 // expect-stdout: alias == t:      False
 // expect-stdout: nested n == n:   False
@@ -28,11 +27,10 @@ fn main() -> int {
   nan: float = 0.0 / 0.0;
   t = (1, nan);
   u = (1, nan);
-  alias = t;                                   // the same tuple object
+  alias = t;                                   // a copy of t
   println("nan == nan:      " + Str(nan == nan));
   println("t == t:          " + Str(t == t));
   println("t != t:          " + Str<bool>(t != t));
-  println("t.equals(t):     " + Str(t.equals(t)));
   println("t == u:          " + Str(t == u));
   println("alias == t:      " + Str(same(alias, t)));
   n = ((1, nan), "x");

@@ -58,8 +58,8 @@ void Sema::registerBuiltinTraits() {
     for (ast::Type *t : impls)
       TraitImpls[t].push_back({&info, {}});
   };
-  // Show is implemented by Obj and the scalars (whose `toString` is their
-  // `Str` conversion).
+  // Show is implemented by Obj, the scalars (whose `toString` is their `Str`
+  // conversion) and the tuples (traitImplOwner).
   builtin(names::kTraitShow, names::kMethodToString, Ctx.getStrTy(),
           {Ctx.getObjTy(), Ctx.getIntTy(), Ctx.getFloatTy(), Ctx.getBoolTy(),
            Ctx.getCharTy()});
@@ -235,9 +235,11 @@ const ast::Type *Sema::traitImplOwner(ast::Type *ty, const TraitRef &tr) {
         return c;
     return nullptr;
   }
-  // A tuple is an object.
+  // A tuple shows its elements (the builtin `Show`).
   if (ast::isa<ast::TupleType>(ty))
-    return has(Ctx.getObjTy()) ? Ctx.getObjTy() : nullptr;
+    return tr.Trait->IsBuiltin && tr.Trait->Decl->getName() == names::kTraitShow
+               ? ty
+               : nullptr;
   return has(ty) ? ty : nullptr;
 }
 

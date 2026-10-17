@@ -166,7 +166,7 @@ TEST(FloatCompare, NaNThroughTupleOptionalAndMatch) {
   auto r = compileAndRun(wrapMain(R"(
     inf: float = 1.0e308 * 10.0;
     n: float = inf - inf;
-    // Element-wise tuple equality compares the float slots with ==.
+    // Element-wise tuple equality compares the float elements with ==.
     t1: (float, int) = (n, 1);
     t2: (float, int) = (n, 1);
     println(Str<bool>(t1 == t2) + " " + Str<bool>(t1 != t2));

@@ -1,12 +1,14 @@
 // Isolates: tuple values — a literal with a Str element, a tuple
 // returned from a function and destructured, a nested tuple, a tuple stored
 // in an array and in a class field, a call-rooted element read (`mk().0`),
-// element-wise `==`, and a tuple copied between locals.  Every tuple is ONE runtime block
-// (header + slots + kinds) plus its PaykanShared box; reference elements are
-// retained by the tuple and released by PaykanTuple_destroy.
+// element-wise `==`, and a tuple copied between locals.  A tuple is a value
+// held in place (in its variable, field or array slot), not a block of its
+// own: `(1, "a")` allocates only its Str, and a tuple of ints allocates
+// nothing.  Each copy of a tuple retains the references in it; a variable's
+// are released at scope exit, a field's or array slot's when its holder dies.
 //
-// Runtime allocation sites: PaykanTuple_new (Tuple.c), PaykanShared (Shared.c),
-// PaykanString_new (String.c), object structs.
+// Runtime allocation sites: PaykanString_new (String.c), object structs +
+// PaykanShared (Shared.c).
 //
 // Expected under --track-heap: live blocks : 0.
 
@@ -27,16 +29,17 @@ fn main() -> int {
   t = (1, "a");                  // literal with a Str element
   s: Str = t.1;                  // new owner of the element
   str, n = mk();                 // destructure a returned temporary
-  nested = ((1, "x"), (2.5, t)); // nested tuple sharing t
+  nested = ((1, "x"), (2.5, t)); // nested tuple holding a copy of t
   println(nested);
   println(mk().0);               // call-rooted element read
   arr: (int, Str)[3] = [t, (2, "b"), mk_pair()];
   h: Holder = Holder(t);
   pair: view = h.get();         // a 'view' of h.pair
   println(Str<bool>(t == (1, "a")));
-  m = t;
+  m = t;                         // a copy: retains t's Str again
+  ints = (1, (2, 3));            // only ints: nothing allocated
   println(m.1 + s + str + pair.1 + arr[2].1);
-  println(Str(n + pair.0));
+  println(Str(n + pair.0 + ints.1.1));
   return 0;
 }
 

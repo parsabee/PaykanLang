@@ -510,8 +510,8 @@ TEST(OptionalPrimitive, ArraysHoldOptionalsInline) {
   g.expectNoLeaks("ArraysHoldOptionalsInline");
 }
 
-// A tuple holds an optional value element as a presence word and its value:
-// printing, equality and the elements after it are unaffected.
+// A tuple holds an optional value element inline, its presence flag and then
+// its payload: printing, equality and the elements after it are unaffected.
 TEST(OptionalPrimitive, TuplesHoldOptionalsInline) {
   LeakGuard g;
   auto r = compileAndRun(R"pkn(

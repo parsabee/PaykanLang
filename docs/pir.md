@@ -20,8 +20,8 @@ Design rules:
   slots.  `break`/`continue`/`ret` never carry cleanup: the lowering emits the
   releases *before* them.
 * **No target concepts.**  No LLVM types, no C types, no calling-convention
-  detail.  LP64 is assumed by the runtime ABI (a pointer, a box and every
-  tuple slot are 8 bytes), and PIR inherits that assumption.
+  detail.  LP64 is assumed by the runtime ABI (a pointer and a box are 8
+  bytes), and PIR inherits that assumption.
 * **Runtime by name.**  Anything the runtime does is a `call` to an `extern fn`
   named by its C symbol under the `$rt.` prefix (`@$rt.PaykanString_new`; the
   list below is the ABI).  Only ops that *every*
@@ -35,31 +35,36 @@ Design rules:
 | PIR   | Meaning                                                           | C            |
 |-------|-------------------------------------------------------------------|--------------|
 | `void`| no value (function returns only)                                  | `void`       |
-| `i64` | 64-bit signed integer; also enum values and raw 8-byte slot bits  | `int64_t`    |
+| `i64` | 64-bit signed integer; also enum values                           | `int64_t`    |
 | `f64` | IEEE-754 double                                                   | `double`     |
 | `bool`| true/false                                                        | `int64_t` or `_Bool` (backend's choice; `0`/`1` at the ABI) |
 | `char`| one byte                                                          | `int8_t`     |
 | `box` | `PaykanShared*`: an owned-or-borrowed reference-counted box; may be `null` (an optional's `None`) | `PaykanShared *` |
-| `obj` | raw `PaykanObject*`: an unboxed heap object of any class (also `PaykanString*`, `PaykanTuple*`, `PaykanFile*`, `PaykanError*`) | `PaykanObject *` (cast at runtime calls) |
-| `ptr` | any other pointer: vtable addresses, literal data, kind descriptors | `void *`  |
+| `obj` | raw `PaykanObject*`: an unboxed heap object of any class (also `PaykanString*`, `PaykanFile*`, `PaykanError*`) | `PaykanObject *` (cast at runtime calls) |
+| `ptr` | any other pointer: vtable addresses, literal data, type descriptors and tuple layouts, the address of a slot | `void *`  |
 | `opt_i64` `opt_f64` `opt_bool` `opt_char` | an inline optional: a presence flag, then the payload (`i64`, `f64`, `bool`, `char`) at its natural alignment, held and passed by value (#96): 16 bytes for `opt_i64` and `opt_f64`, 2 for `opt_bool` and `opt_char` | `struct { bool present; <payload> value; }` |
-| `mem(N, A)` | N bytes aligned to A (1, 2, 4 or 8; N a positive multiple of A): the storage of an aggregate, such as a fixed-size array. Only a `local` or a field has this type, never a value, a parameter or a result; it is reached through its address (§6) | `_Alignas(A) uint8_t name[N]` |
+| `mem(N, A)` | N bytes aligned to A (1, 2, 4 or 8; N a positive multiple of A): the storage of an aggregate, a fixed-size array or a tuple. Only a `local` or a field has this type, never a value, a parameter or a result; it is reached through its address (§6) | `_Alignas(A) uint8_t name[N]` |
 
 Paykan types lower as: `int`→`i64`, `float`→`f64`, `bool`→`bool`,
 `char`→`char`, every enum→`i64`, `int?`→`opt_i64`, `float?`→`opt_f64`,
 `bool?`→`opt_bool`, `char?`→`opt_char`, and every reference type (class,
-`Str`, tuple, and the optional of one)→`box` when stored (variable, field,
-parameter, return value, array element, tuple ref slot) and `obj` when used
+`Str`, and the optional of one)→`box` when stored (variable, field,
+parameter, return value, array or tuple element) and `obj` when used
 as a raw receiver.  A `T?` of a reference type is a `box` that may be `null`.
 A fixed-size array `T[n]` is `mem` storage holding its `n` elements one after
 another, each laid out as its type is stored (8 bytes for an `i64`, `f64` or
 `box`, 1 for a `bool` or a `char`, an optional's size, a row's `mem`):
 `int[3]` is `mem(24, 8)`, `bool[2]` is `mem(2, 1)`, `int[2][3]` is
-`mem(48, 8)`.
+`mem(48, 8)`.  A tuple is `mem` storage holding its elements as C lays out a
+struct of them: each, laid out as its type is stored (a nested tuple as its
+`mem`), at the next offset its alignment allows, the whole padded to the
+largest alignment: `(int, Str)` is `mem(16, 8)`, `(bool, char)` is `mem(2,
+1)`, `(int?, (Str, bool))` is `mem(32, 8)` (the `opt_i64` at 0, the `box` at
+16, the `bool` at 24).
 
 An optional type holds a presence flag and a payload: `none` is the absent
 value (presence false, a zero payload), `some %v` the present one (presence
-true).  In memory (a field, an array element, a native function's
+true).  In memory (a field, an array or tuple element, a native function's
 `PaykanType`) it is laid out as C lays out that struct, so all zero is
 `none`.
 It is a value like an `i64`: stored in locals and fields, passed and returned,
@@ -166,7 +171,8 @@ module "<name>"                     ; the canonical module name (`geometry::shap
 
 cstr  @.str0  = "hello\n"  len 6   ; NUL-terminated literal data (`ptr`)
 data  @.type0 = [8, 8, 0, 0]       ; constant i64 words: a `PaykanType` descriptor (`ptr`)
-bytes @.tk0   = [0, 4]             ; tuple slot-kind descriptor, PaykanTupleKind bytes (`ptr`)
+data  @.tuple0 = [2, 0, 0, 4, 8]   ; constant i64 words: a tuple layout (`ptr`)
+bytes @.b0    = [0, 4]             ; constant bytes (`ptr`)
 
 extern obj    @$rt.PaykanObject_None   ; runtime object singletons (`obj`)
 extern vtable @$rt.PaykanString_vtable ; runtime vtable globals (`ptr`)
@@ -186,6 +192,14 @@ extern class Adder module "helper" { field n: i64 }   ; layout only
 
 fn / extern fn                      ; §3
 ```
+
+The lowering emits a `.typeN` `data` global for each type argument of a
+generic native function, and a `.tupleN` one, the layout of a tuple type
+(`Runtime.h`, "Tuples": the element count, then each element's
+`PaykanTypeKind` and byte offset, an optional's payload kind, a nested tuple's
+layout), for each tuple type that is printed, compared or converted with
+`toString()`.  A `bytes` global (raw constant bytes) is part of the format,
+though the lowering emits none.
 
 Every symbol a function body references must be declared in its module: a call
 to a runtime function needs the `extern fn`, a field access needs the `class`
@@ -221,7 +235,7 @@ backend does no inheritance walk.
 * A class marked `extern` belongs to another module: its fields are known (for
   `field.load`/`field.store` on imported instances) and its vtable address may
   be taken, but its vtable contents and functions are defined in that module.
-* Runtime classes (`Obj`, `Str`, `File`, `Error`, tuples) are never
+* Runtime classes (`Obj`, `Str`, `File`, `Error`) are never
   declared as classes; their vtables are
   `extern vtable` globals and their methods are called through `vcall` with an
   explicit slot index, exactly like user classes.
@@ -282,10 +296,10 @@ operand is NaN; it is exactly `not (eq a, b)`), and `eq`, `lt`, `le`, `gt`,
 for a NaN `x`, and every other comparison involving a NaN is false.  These
 are LLVM's `fcmp une` / `oeq olt ole ogt oge` and C's `!= == < <= > >=`.
 
-`cast` pairs: `f64->i64` and `i64->f64` reinterpret the bits (tuple
-slots); `bool->i64`, `char->i64` zero-extend; `i64->bool`, `i64->char`
-truncate; `box<->i64`, `obj<->i64`, `ptr<->i64` are pointer/int casts (slot
-bits); `obj<->ptr`, `box<->ptr` are free.  Nothing else.
+`cast` pairs: `f64->i64` and `i64->f64` reinterpret the bits; `bool->i64`,
+`char->i64` zero-extend; `i64->bool`, `i64->char` truncate; `box<->i64`,
+`obj<->i64`, `ptr<->i64` are pointer/int casts; `obj<->ptr`, `box<->ptr` are
+free.  Nothing else.
 
 **Calls**
 
@@ -358,10 +372,11 @@ are reached with `ptr.add` from its address and read and written with
 zero, like its other fields; a `mem` local starts uninitialised.  Like
 `ptr.store`, `mem.copy` and `mem.zero` do no ARC: the lowering retains what
 a copy duplicates and releases what a store or a clear overwrites.  A
-fixed-size array is passed as the `ptr` address of its bytes in every mode
-(a by-value callee copies it into a `mem` local of its own first), and a
-function returning one takes a last `ptr` parameter, the address of the
-caller's temporary it writes the result to, and returns `void`.  A slice
+fixed-size array or a tuple is passed as the `ptr` address of its bytes in
+every mode (a by-value callee copies it into a `mem` local of its own
+first), and a function returning one takes a last `ptr` parameter, the
+address of the caller's temporary it writes the result to, and returns
+`void`.  A slice
 parameter (`view T[]`, `inout T[]`) is two: the `ptr` address of the
 elements and their number, an `i64`.  The verifier cannot
 know what an address points to, so the lowering always reads and writes it
@@ -371,7 +386,7 @@ guarantees by keeping the object retained for the duration of the call.  An
 `inout` local (`x: inout = k;`) is a `ptr` local too, holding the address of
 what it names; a hidden owned local keeps a field's object alive for as long
 as the local can be used.  An address is only ever kept in a `ptr` local,
-never in a field or an array or tuple slot.  Like `store` and `field.store`,
+never in a field or an array or tuple element.  Like `store` and `field.store`,
 `ptr.store` does no ARC.  An `inout` of a reference type holds the address of
 a `box` slot, not a reference of its own: it retains nothing, and an
 assignment through it releases the box it loads from the slot before storing
@@ -384,7 +399,7 @@ CodeGen enforced, now in one place.
 
 * **Variables** hold `box` values and own one reference.  Declaring a variable
   from an expression yields an owned box: a fresh +1 box (call, method call,
-  ternary, tuple literal, call-rooted field read) is stored as-is; a borrowed
+  ternary, call-rooted field read) is stored as-is; a borrowed
   box (plain field read, tuple element, array element, another variable) is
   `retain`ed first; a raw object
   (string literal, concat result, `self`, a match-arm binding) is `box`ed, which
@@ -411,10 +426,21 @@ CodeGen enforced, now in one place.
   of a scalar element type is one `mem.zero` instead.  A field is a `mem`
   field reached with `field.addr`, and `C.destroy` releases its references
   too.
-* **Fields and tuple ref slots** own their box; `field.store` is preceded
-  by a retain-or-steal of the new value and the old value is released
-  (null-checked); `PaykanTuple_set_obj` retains internally, so the +1
-  temporary passed to it is released afterwards.
+* **Tuples** follow the same rules: a tuple's reference elements (a nested
+  tuple's included) are owned, one reference per copy.  A tuple literal is
+  built in place, each element stored at its offset (a literal assigned to
+  an existing tuple is built in a temporary first, then copied); copying a
+  tuple is a `mem.copy` followed by a `retain` of each reference element;
+  an assignment releases the ones it replaces; scope exit releases a
+  variable's, `C.destroy` a field's, and an array releases its tuples'
+  with its other elements.  Printing a tuple, `toString()` and `==`/`!=`
+  pass its address (both operands' for `==`) and its `.tupleN` layout to
+  `PaykanTuple_toString` (a new string `obj`, a temporary like a
+  concatenation's: destroyed after a print, boxed when kept) and
+  `PaykanTuple_equals` (`i64`, nonzero when equal: `==` is its `cmp ne
+  ..., 0`, `!=` the `not` of that).
+* **Fields** own their box; `field.store` is preceded by a retain-or-steal
+  of the new value and the old value is released (null-checked).
 * **Indexing** an array or a slice checks the index first: when it is
   negative or not below the length, `call @$rt.Paykan_panic_index(%i, %len)`
   and `unreachable`.  The element is then read or written in place, with
@@ -442,8 +468,8 @@ CodeGen enforced, now in one place.
   `PaykanString_from_int` & co. when present and `"None"` otherwise.  An
   element of an `int?[n]` & co. is the optional itself, the optional's size
   in the array's `mem` (16 bytes for `int?` and `float?`, 2 for `bool?` and
-  `char?`), read and written in place.  A tuple holds an `int?` element in two slots, an OPT presence
-  word (`is_some`, 0 or 1) and its value (the `unwrap`, 0 when absent).
+  `char?`), read and written in place, and so is an `int?` element of a
+  tuple, at its offset.
 * **Conversions** (`Target<Source>(value)`, #64): `Str<…>` calls
   `PaykanString_from_int` & co. (an owned string temporary); `int<Str>` /
   `float<Str>` / `bool<Str>` call `PaykanString_parse_int` /
@@ -489,9 +515,8 @@ PaykanString_parse_int(obj, ptr) -> i64     PaykanString_parse_float(obj, ptr) -
 PaykanString_parse_bool(obj, ptr) -> i64    ; 1 and the value at ptr, or 0 (and 0 there)
 ; hash (the builtin Hashable's `hash()`)
 PaykanInt_hash(i64) -> i64              PaykanString_hash(obj) -> i64
-; tuples
-PaykanTuple_new(i64, ptr) -> obj        PaykanTuple_get(obj, i64) -> i64
-PaykanTuple_set(obj, i64, i64) -> void  PaykanTuple_set_obj(obj, i64, box) -> void
+; tuples: the address of the value (of both, for equals), then its layout
+PaykanTuple_toString(ptr, ptr) -> obj   PaykanTuple_equals(ptr, ptr, ptr) -> i64
 ; files
 PaykanFile_open(obj, obj) -> box
 ; I/O
@@ -508,7 +533,6 @@ extern obj PaykanObject_None     extern obj PaykanFile_Stdin
 ; runtime classes' vtables, their type identities for `match`
 extern vtable PaykanObject_vtable   extern vtable PaykanString_vtable
 extern vtable PaykanFile_vtable     extern vtable PaykanError_vtable
-extern vtable PaykanTuple_vtable
 ```
 
 An executable's entry code, not PIR, calls the two functions that make and
@@ -525,12 +549,13 @@ list; the LLVM backend's JIT symbol table must cover it and the C backend links
 
 Vtable slot layouts of runtime classes (slot index = position):
 
-* `Obj`, `Error`, tuples: `destroy, toString, equals`
+* `Obj`, `Error`: `destroy, toString, equals`
 * `Str`: `destroy, toString, equals, len, concat`
 * `File`: `destroy, toString, equals, write, readln, readbytes, read`
 
 An array is not an object and has no vtable: `len()` is its type's length,
-or a slice's `i64` length.
+or a slice's `i64` length.  Nor is a tuple: its `toString()` and `==` are the
+`PaykanTuple_*` calls above.
 
 ## 9. Verifier
 

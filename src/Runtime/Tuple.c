@@ -1,121 +1,50 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// Paykan runtime — Tuple type implementation.
-//
-// One object backs every tuple type (Runtime.h, "Tuple"): the per-slot kind
-// bytes let a single vtable destroy (release the REF slots), compare
-// (element-wise, dispatching `equals` on references) and render (`(1, a)`)
-// a tuple whose element types only the compiler knows.  An optional value
-// element is two slots, an OPT presence word and its value.  Header, slots
-// and kind bytes are one heap block.
+// Paykan runtime — rendering and comparing a tuple, a value held in place,
+// through its layout (Runtime.h, "Tuples").
 
 #include "Runtime.h"
 #include "RuntimeInternal.h"
 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
-// A REF slot is read and written by memcpy of the slot width, so the two
-// widths must agree.
-_Static_assert(sizeof(PaykanShared *) == sizeof(uint64_t),
-               "a tuple slot must hold a PaykanShared* exactly");
-
-// -- VTable
-
-PaykanMethod PaykanTuple_vtable[PAYKAN_OBJECT_SLOTS] = {
-    [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanTuple_destroy,
-    [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanTuple_toString,
-    [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanTuple_equals,
-};
-
-// -- Constructor / destructor
-
-PaykanTuple *PaykanTuple_new(int64_t count, const uint8_t *kinds) {
-  if (count < 0) {
-    Paykan_runtime_panic("negative tuple arity %lld", (long long)count);
+/// The element of type T at @p at (read with memcpy: elements are aligned,
+/// but the bytes are not declared as a T).
+#define TUPLE_LOAD(T, name)                                                    \
+  static T load_##name(const char *at) {                                       \
+    T v;                                                                       \
+    memcpy(&v, at, sizeof(T));                                                 \
+    return v;                                                                  \
   }
-  size_t n = (size_t)count;
-  // Slots follow the fixed header (sizeof(PaykanTuple) is a multiple of 8, so
-  // they stay 8-byte aligned); the kind bytes follow the slots.  Slots are
-  // zeroed so an early destroy (or a REF slot never set) releases nothing.
-  PaykanTuple *t = (PaykanTuple *)Paykan_malloc(sizeof(PaykanTuple) +
-                                                n * sizeof(uint64_t) + n);
-  t->vtable = PaykanTuple_vtable;
-  t->shared = NULL; // not yet boxed (unique-box invariant)
-  t->count = count;
-  t->slots = (uint64_t *)(t + 1);
-  memset(t->slots, 0, n * sizeof(uint64_t));
-  t->kinds = (uint8_t *)(t->slots + n);
-  if (n)
-    memcpy(t->kinds, kinds, n);
-  return t;
+TUPLE_LOAD(int64_t, int)
+TUPLE_LOAD(double, float)
+TUPLE_LOAD(uint8_t, byte)
+TUPLE_LOAD(PaykanShared *, box)
+#undef TUPLE_LOAD
+
+/// The offset, in an inline optional, of a payload of @p kind.
+static int64_t payload_offset(int64_t kind) {
+  return kind == PAYKAN_KIND_BOOL || kind == PAYKAN_KIND_CHAR ? 1 : 8;
 }
 
-void PaykanTuple_destroy(PaykanObject *self) {
-  PaykanTuple *t = (PaykanTuple *)self;
-  for (int64_t i = 0; i < t->count; ++i) {
-    if (t->kinds[i] != PAYKAN_TUPLE_REF)
-      continue;
-    PaykanShared *box;
-    memcpy(&box, &t->slots[i], sizeof(t->slots[i]));
-    if (box)
-      Paykan_release(box);
-  }
-  Paykan_free(t);
-}
-
-// -- Element access
-
-static void tuple_check_index(const PaykanTuple *t, int64_t idx) {
-  if (idx < 0 || idx >= t->count) {
-    Paykan_runtime_panic("tuple index %lld out of bounds (arity=%lld)",
-                         (long long)idx, (long long)t->count);
-  }
-}
-
-int64_t PaykanTuple_count(PaykanTuple *t) { return t->count; }
-
-int64_t PaykanTuple_kind(PaykanTuple *t, int64_t idx) {
-  tuple_check_index(t, idx);
-  return t->kinds[idx];
-}
-
-int64_t PaykanTuple_get(PaykanTuple *t, int64_t idx) {
-  tuple_check_index(t, idx);
-  int64_t bits;
-  memcpy(&bits, &t->slots[idx], sizeof(bits));
-  return bits;
-}
-
-void PaykanTuple_set(PaykanTuple *t, int64_t idx, int64_t bits) {
-  tuple_check_index(t, idx);
-  if (t->kinds[idx] == PAYKAN_TUPLE_REF) {
-    Paykan_runtime_panic("PaykanTuple_set on reference slot %lld",
-                         (long long)idx);
-  }
-  memcpy(&t->slots[idx], &bits, sizeof(bits));
-}
-
-void PaykanTuple_set_obj(PaykanTuple *t, int64_t idx, PaykanShared *value) {
-  tuple_check_index(t, idx);
-  if (t->kinds[idx] != PAYKAN_TUPLE_REF) {
-    Paykan_runtime_panic("PaykanTuple_set_obj on value slot %lld",
-                         (long long)idx);
-  }
-  PaykanShared *old;
-  memcpy(&old, &t->slots[idx], sizeof(t->slots[idx]));
-  if (old)
-    Paykan_release(old);
-  if (value)
-    Paykan_retain(value);
-  memcpy(&t->slots[idx], &value, sizeof(t->slots[idx]));
+/// The words of the layout entry at @p e: its own and a nested tuple's.
+static const int64_t *next_entry(const int64_t *e) {
+  if (e[0] == PAYKAN_KIND_OPTIONAL)
+    return e + 3;
+  if (e[0] != PAYKAN_KIND_TUPLE)
+    return e + 2;
+  int64_t n = e[2];
+  e += 3;
+  for (int64_t i = 0; i < n; ++i)
+    e = next_entry(e);
+  return e;
 }
 
 // -- toString
 
-/// A growable byte buffer for the rendering.
+/// A byte buffer for the rendering.
 typedef struct {
   char *data;
   size_t len;
@@ -135,128 +64,126 @@ static void sb_append(StrBuf *b, const char *s, size_t n) {
   b->data[b->len] = '\0';
 }
 
-PaykanShared *PaykanTuple_toString(PaykanObject *self) {
-  PaykanTuple *t = (PaykanTuple *)self;
-  StrBuf sb = {NULL, 0, 0};
-  sb_append(&sb, "(", 1);
-  for (int64_t i = 0; i < t->count; ++i) {
-    // An optional value's value slot follows its presence word, unseparated.
-    int valueOfOptional = i > 0 && t->kinds[i - 1] == PAYKAN_TUPLE_OPT;
-    if (i && !valueOfOptional)
-      sb_append(&sb, ", ", 2);
-    if (t->kinds[i] == PAYKAN_TUPLE_OPT) {
-      if (t->slots[i] == 0 || i + 1 == t->count) {
-        sb_append(&sb, "None", 4);
-        ++i; // the value slot
-      }
-      continue;
-    }
-    char buf[64];
-    int n;
-    int64_t bits;
-    memcpy(&bits, &t->slots[i], sizeof(bits));
-    switch (t->kinds[i]) {
-    case PAYKAN_TUPLE_FLOAT: {
-      double d;
-      memcpy(&d, &bits, sizeof(d));
-      n = Paykan_format_float(buf, sizeof(buf), d); // matches Str<float>
-      sb_append(&sb, buf, (size_t)n);
+static void render_tuple(StrBuf *sb, const char *value, const int64_t *layout);
+
+/// Append the scalar of @p kind at @p at, or the object a box holds.
+static void render_scalar(StrBuf *sb, int64_t kind, const char *at) {
+  char buf[64];
+  int n;
+  switch (kind) {
+  case PAYKAN_KIND_FLOAT:
+    // As Str<float> renders it.
+    n = Paykan_format_float(buf, sizeof(buf), load_float(at));
+    sb_append(sb, buf, (size_t)n);
+    break;
+  case PAYKAN_KIND_BOOL:
+    if (load_byte(at))
+      sb_append(sb, "True", 4);
+    else
+      sb_append(sb, "False", 5);
+    break;
+  case PAYKAN_KIND_CHAR:
+    sb_append(sb, at, 1);
+    break;
+  case PAYKAN_KIND_OBJECT: {
+    PaykanShared *box = load_box(at);
+    if (!box) {
+      sb_append(sb, "None", 4);
       break;
     }
-    case PAYKAN_TUPLE_BOOL:
-      if (bits)
-        sb_append(&sb, "True", 4);
+    // The element's own toString (a +1 Str box, consumed here).
+    PaykanShared *s = Paykan_vcall_toString(PaykanShared_get(box));
+    PaykanString *str = (PaykanString *)PaykanShared_get(s);
+    sb_append(sb, str->data, (size_t)str->len);
+    Paykan_release(s);
+    break;
+  }
+  case PAYKAN_KIND_INT:
+  default:
+    n = snprintf(buf, sizeof(buf), "%lld", (long long)load_int(at));
+    sb_append(sb, buf, (size_t)n);
+    break;
+  }
+}
+
+static void render_tuple(StrBuf *sb, const char *value, const int64_t *layout) {
+  sb_append(sb, "(", 1);
+  const int64_t *e = layout + 1;
+  for (int64_t i = 0; i < layout[0]; ++i, e = next_entry(e)) {
+    if (i)
+      sb_append(sb, ", ", 2);
+    const char *at = value + e[1];
+    if (e[0] == PAYKAN_KIND_TUPLE) {
+      render_tuple(sb, at, e + 2);
+    } else if (e[0] == PAYKAN_KIND_OPTIONAL && e[2] != PAYKAN_KIND_OBJECT) {
+      if (load_byte(at))
+        render_scalar(sb, e[2], at + payload_offset(e[2]));
       else
-        sb_append(&sb, "False", 5);
-      break;
-    case PAYKAN_TUPLE_CHAR: {
-      char c = (char)bits;
-      sb_append(&sb, &c, 1);
-      break;
-    }
-    case PAYKAN_TUPLE_REF: {
-      PaykanShared *box;
-      memcpy(&box, &bits, sizeof(bits));
-      PaykanObject *obj = PaykanShared_get(box);
-      if (!obj) {
-        sb_append(&sb, "None", 4);
-        break;
-      }
-      // Dispatch the element's own toString (a fresh +1 Str box we consume).
-      PaykanShared *s = Paykan_vcall_toString(obj);
-      PaykanString *str = (PaykanString *)PaykanShared_get(s);
-      sb_append(&sb, str->data, (size_t)str->len);
-      Paykan_release(s);
-      break;
-    }
-    case PAYKAN_TUPLE_INT:
-    default:
-      n = snprintf(buf, sizeof(buf), "%lld", (long long)bits);
-      sb_append(&sb, buf, (size_t)n);
-      break;
+        sb_append(sb, "None", 4);
+    } else {
+      render_scalar(sb, e[0] == PAYKAN_KIND_OPTIONAL ? e[2] : e[0], at);
     }
   }
-  sb_append(&sb, ")", 1);
-  PaykanString *out =
-      PaykanString_new(sb.data ? sb.data : "()", sb.data ? (int64_t)sb.len : 2);
+  sb_append(sb, ")", 1);
+}
+
+PaykanString *PaykanTuple_toString(const void *value, const int64_t *layout) {
+  StrBuf sb = {NULL, 0, 0};
+  render_tuple(&sb, (const char *)value, layout);
+  PaykanString *out = PaykanString_new(sb.data, (int64_t)sb.len);
   Paykan_free(sb.data);
-  return PaykanShared_new((PaykanObject *)out);
+  return out;
 }
 
 // -- equals
 
-int64_t PaykanTuple_equals(PaykanObject *self, PaykanShared *other) {
-  PaykanObject *o = Paykan_equals_unbox_other(other);
-  int64_t result = 0;
-  // No identity shortcut (`o == self` -> equal): equality is element-wise
-  // even for one object, so a tuple holding a NaN is unequal to itself, as
-  // the NaN is (IEEE 754, #111).
-  if (o && o->vtable == PaykanTuple_vtable) {
-    PaykanTuple *a = (PaykanTuple *)self;
-    PaykanTuple *b = (PaykanTuple *)o;
-    // Same arity and the same element kinds (a `(int, Str)` never equals a
-    // `(int, int)`; Sema already forbids comparing them statically).
-    result = a->count == b->count &&
-             memcmp(a->kinds, b->kinds, (size_t)a->count) == 0;
-    for (int64_t i = 0; result && i < a->count; ++i) {
-      switch (a->kinds[i]) {
-      case PAYKAN_TUPLE_OPT:
-        // Both None (their value slots are 0) or both present: then the
-        // value slots, next, decide.
-        result = a->slots[i] == b->slots[i];
-        if (a->slots[i] == 0)
-          ++i;
-        break;
-      case PAYKAN_TUPLE_FLOAT: {
-        double da, db;
-        memcpy(&da, &a->slots[i], sizeof(da));
-        memcpy(&db, &b->slots[i], sizeof(db));
-        result = da == db;
-        break;
-      }
-      case PAYKAN_TUPLE_REF: {
-        PaykanShared *sa, *sb;
-        memcpy(&sa, &a->slots[i], sizeof(a->slots[i]));
-        memcpy(&sb, &b->slots[i], sizeof(b->slots[i]));
-        PaykanObject *oa = PaykanShared_get(sa);
-        PaykanObject *ob = PaykanShared_get(sb);
-        if (!oa || !ob) {
-          result = oa == ob; // two empty slots are equal; one empty is not
-          break;
-        }
-        // The virtual `equals` consumes its argument box: hand it a +1.
-        Paykan_retain(sb);
-        result = Paykan_vcall_equals(oa, sb) != 0;
-        break;
-      }
-      case PAYKAN_TUPLE_INT:
-      case PAYKAN_TUPLE_BOOL:
-      case PAYKAN_TUPLE_CHAR:
-      default:
-        result = a->slots[i] == b->slots[i];
-        break;
-      }
-    }
+/// Whether the scalars of @p kind at @p a and @p b are equal.
+static int scalar_equals(int64_t kind, const char *a, const char *b) {
+  switch (kind) {
+  case PAYKAN_KIND_FLOAT:
+    // IEEE 754: a NaN is unequal to everything, itself included (#111).
+    return load_float(a) == load_float(b);
+  case PAYKAN_KIND_BOOL:
+  case PAYKAN_KIND_CHAR:
+    return load_byte(a) == load_byte(b);
+  case PAYKAN_KIND_OBJECT: {
+    PaykanShared *sa = load_box(a);
+    PaykanShared *sb = load_box(b);
+    if (!sa || !sb)
+      return sa == sb; // two None are equal; None and an object are not
+    // The virtual `equals` consumes its argument box: hand it a +1.
+    Paykan_retain(sb);
+    return Paykan_vcall_equals(PaykanShared_get(sa), sb) != 0;
   }
-  return Paykan_equals_consume_other(other, result);
+  case PAYKAN_KIND_INT:
+  default:
+    return load_int(a) == load_int(b);
+  }
+}
+
+static int tuple_equals(const char *a, const char *b, const int64_t *layout) {
+  const int64_t *e = layout + 1;
+  for (int64_t i = 0; i < layout[0]; ++i, e = next_entry(e)) {
+    const char *ea = a + e[1];
+    const char *eb = b + e[1];
+    int same;
+    if (e[0] == PAYKAN_KIND_TUPLE) {
+      same = tuple_equals(ea, eb, e + 2);
+    } else if (e[0] == PAYKAN_KIND_OPTIONAL && e[2] != PAYKAN_KIND_OBJECT) {
+      // Both None, or both present with equal payloads.
+      int64_t off = payload_offset(e[2]);
+      same = load_byte(ea) == load_byte(eb) &&
+             (!load_byte(ea) || scalar_equals(e[2], ea + off, eb + off));
+    } else {
+      same = scalar_equals(e[0] == PAYKAN_KIND_OPTIONAL ? e[2] : e[0], ea, eb);
+    }
+    if (!same)
+      return 0;
+  }
+  return 1;
+}
+
+int64_t PaykanTuple_equals(const void *a, const void *b,
+                           const int64_t *layout) {
+  return tuple_equals((const char *)a, (const char *)b, layout);
 }

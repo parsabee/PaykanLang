@@ -157,13 +157,13 @@ compile instead of miscompiling.
 
 | Assumption | Why | Check |
 |---|---|---|
-| `CHAR_BIT == 8` | tuple kind bytes, string data, `int8_t` chars | `_Static_assert` |
-| LP64: 8-byte pointers, `intptr_t` and `unsigned long` | every tuple slot is 8 bytes and holds an `int64_t`, a `double` or a pointer, and a reference in an array is an 8-byte box pointer | `_Static_assert` on the sizes; `#error` without `intptr_t` |
-| A pointer converted to `intptr_t` / `int64_t` and back is the same pointer (C11 6.3.2.3p5-6 leave it implementation-defined) | pointers stored in integer slots (`(PaykanShared *)(intptr_t)slot`) | documented; true of every LP64 ABI |
+| `CHAR_BIT == 8` | byte offsets into `mem` storage (arrays, tuples) and tuple layouts, string data, `int8_t` chars | `_Static_assert` |
+| LP64: 8-byte pointers, `intptr_t` and `unsigned long` | a reference in an array, a tuple or a `PaykanType` value is an 8-byte box pointer at the offset the lowering computed for both backends | `_Static_assert` on the sizes; `#error` without `intptr_t` |
+| A pointer converted to `intptr_t` / `int64_t` and back is the same pointer (C11 6.3.2.3p5-6 leave it implementation-defined) | PIR's `cast`s between `i64` and `box`, `obj` or `ptr` (`(PaykanShared *)(intptr_t)v`) | documented; true of every LP64 ABI |
 | Function pointers are pointer-sized | vtable slots are 8 bytes, matching the LLVM backend's vtables | `_Static_assert` |
 | Two's complement, and converting an out-of-range value to a signed type wraps modulo 2^64 (6.3.1.3p3 leaves it implementation-defined) | `(int64_t)((uint64_t)a + (uint64_t)b)` and the other wrapping operations | `_Static_assert((int64_t)UINT64_MAX == -1 && ...)` |
 | IEEE 754 binary64 `double`, with NaN and infinities | float semantics, `cast` bit patterns, `NAN` / `INFINITY` literals | `_Static_assert` on `<float.h>` (`FLT_RADIX`, `DBL_MANT_DIG`, `DBL_MAX_EXP`, `DBL_MIN_EXP`) |
-| An object struct can be used through a `PaykanObject *` (and a pointer to it converted to and from `PaykanObject *`): every Paykan object struct, generated or in the runtime, starts with the same two-word header | the runtime's ARC and method calls see every object as a `PaykanObject`; generated code casts between `struct pk_…`, `PaykanString`, `PaykanTuple`, … and `PaykanObject *` | `_Static_assert` on the runtime structs' header offsets; the generated code reads vtables only through `memcpy` (`Paykan_vtable_of`), never through another struct type |
+| An object struct can be used through a `PaykanObject *` (and a pointer to it converted to and from `PaykanObject *`): every Paykan object struct, generated or in the runtime, starts with the same two-word header | the runtime's ARC and method calls see every object as a `PaykanObject`; generated code casts between `struct pk_…`, `PaykanString`, `PaykanFile`, … and `PaykanObject *` | `_Static_assert` on the runtime structs' header offsets; the generated code reads vtables only through `memcpy` (`Paykan_vtable_of`), never through another struct type |
 
 `__STDC_IEC_559__` (full Annex F conformance) is deliberately not required:
 GCC and Clang on glibc define it, Apple's clang does not, and the generated

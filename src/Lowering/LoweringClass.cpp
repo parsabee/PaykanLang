@@ -80,8 +80,8 @@ pir::Signature ModuleLowering::methodSignature(ast::MethodDecl *md) {
                 : Type::Void;
   if (md->getParamModes().Result == ast::ParamMode::Inout)
     sig.Ret = Type::Ptr; // the address of the storage it names
-  // A fixed-size array result is written where a last parameter points.
-  if (ast::dyn_cast<ast::FixedArrayType>(md->getReturnType())) {
+  // A result held in memory is written where a last parameter points.
+  if (ast::isMemType(md->getReturnType())) {
     sig.Params.push_back(Type::Ptr);
     sig.Ret = Type::Void;
   }
@@ -206,8 +206,8 @@ pir::Class *ModuleLowering::getOrCreateClass(ast::ClassType *ct) {
   for (auto &[name, ty] : allFieldsInOrder(ct)) {
     Type t = toPIRType(ty);
     cls.Fields.push_back({name, t == Type::Void ? Type::Box : t});
-    if (t == Type::Mem) { // a fixed-size array, held inline
-      FixedLayout l = fixedLayout(ty);
+    if (t == Type::Mem) { // an array or a tuple, held inline
+      MemLayout l = memLayout(ty);
       cls.Fields.back().Size = l.Size;
       cls.Fields.back().Align = l.Align;
     }
@@ -234,9 +234,6 @@ Val ModuleLowering::emitIsExactType(const Val &rawObjPtr, ast::ClassType *ct) {
     runtimeVT = kPaykanFileVtable;
   } else if (ct == ASTCtx.getErrorTy()) {
     runtimeVT = kPaykanErrorVtable;
-  } else if (ct == ASTCtx.getTupleTy() ||
-             ASTCtx.getSpecializedTupleElemType(ct)) {
-    runtimeVT = kPaykanTupleVtable;
   }
   if (runtimeVT) {
     // Runtime class: its vtable global is the type identity.
@@ -380,10 +377,10 @@ void ModuleLowering::emitDestructor(ast::ClassDecl *node, ast::ClassType *ct) {
 
   // Release every ref-typed field (null-safe), then free the struct.
   for (auto &[fname, fty] : allFieldsInOrder(ct)) {
-    if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(fty)) {
-      if (fixedHoldsRefs(ft))
-        emitFixedRelease(
-            B.fieldAddr(self, ct->getName(), fname, fname + ".addr"), ft);
+    if (ast::isMemType(fty)) {
+      if (memHoldsRefs(fty))
+        emitMemRelease(B.fieldAddr(self, ct->getName(), fname, fname + ".addr"),
+                       fty);
       continue;
     }
     if (!ast::isRefType(fty))
@@ -410,10 +407,10 @@ Val ModuleLowering::lowerMemberAssignStmt(ast::MemberAssignStmt *node) {
   ast::Type *fieldASTTy = fieldASTType(ct, node->getFieldName());
   assert(fieldASTTy && "Sema should have verified field exists");
 
-  if (ast::dyn_cast<ast::FixedArrayType>(fieldASTTy)) {
-    emitFixedAssign(B.fieldAddr(objPtr, ct->getName(), node->getFieldName(),
-                                node->getFieldName() + ".addr"),
-                    node->getValue());
+  if (ast::isMemType(fieldASTTy)) {
+    emitMemAssign(B.fieldAddr(objPtr, ct->getName(), node->getFieldName(),
+                              node->getFieldName() + ".addr"),
+                  node->getValue());
   } else if (fieldASTTy && ast::isRefType(fieldASTTy)) {
     // The slot owns a box: retain/steal the new one, release the old one.
     Val newShared;
@@ -455,6 +452,9 @@ Val ModuleLowering::lowerMemberAssignStmt(ast::MemberAssignStmt *node) {
 }
 
 Val ModuleLowering::lowerMemberAccessExpr(ast::MemberAccessExpr *node) {
+  // A field held in memory: its address, in its object.
+  if (ast::isMemType(node->getResolvedType()))
+    return emitMemAddress(node);
   // A call-rooted receiver (`makeH().a`) is a fresh +1 box torn down after
   // the read; a ref-typed field is retained first so it survives.
   Receiver recv = emitReceiver(node->getReceiver(), "obj");

@@ -106,14 +106,8 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanObjectVtable,    reinterpret_cast<void *>(&PaykanObject_vtable)},
     {kPaykanStringVtable,    reinterpret_cast<void *>(&PaykanString_vtable)},
 
-    {kPaykanTupleNew,        reinterpret_cast<void *>(&PaykanTuple_new)},
-    {kPaykanTupleSet,        reinterpret_cast<void *>(&PaykanTuple_set)},
-    {kPaykanTupleSetObj,     reinterpret_cast<void *>(&PaykanTuple_set_obj)},
-    {kPaykanTupleGet,        reinterpret_cast<void *>(&PaykanTuple_get)},
-    {kPaykanTupleDestroy,    reinterpret_cast<void *>(&PaykanTuple_destroy)},
     {kPaykanTupleToString,   reinterpret_cast<void *>(&PaykanTuple_toString)},
     {kPaykanTupleEquals,     reinterpret_cast<void *>(&PaykanTuple_equals)},
-    {kPaykanTupleVtable,     reinterpret_cast<void *>(&PaykanTuple_vtable)},
 
     // For the C code of generic `native fn`s.
     {kPaykanTypeCopy,        reinterpret_cast<void *>(&PaykanType_copy)},
@@ -146,7 +140,6 @@ const VTableAlias kVTableAliases[] = {
     {kString,   reinterpret_cast<void *>(&PaykanString_vtable)},
     {kFile,     reinterpret_cast<void *>(&PaykanFile_vtable)},
     {kError,    reinterpret_cast<void *>(&PaykanError_vtable)},
-    {kTuple,    reinterpret_cast<void *>(&PaykanTuple_vtable)},
 };
 // clang-format on
 
