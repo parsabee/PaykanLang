@@ -370,6 +370,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A literal argument of `__super__(...)` was typed on its own instead of by the superclass
+  `__init__`'s parameter: `__super__([1, 2])` for a `float[2]` parameter was an error
+  (`argument 1 of '__super__' has type 'int[2]', expected 'float[2]'`), as was `None` or
+  `(None, 3)` for an optional or a tuple of optionals.  It now takes the parameter's type,
+  as a call's argument does.
 - A `-> inout` result of a tuple was copied out into a temporary instead of naming its
   storage: a write through it (an `inout` local, an `inout` argument) changed only the
   copy, and reading an element of one released the references the storage held.  It is
