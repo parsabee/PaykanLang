@@ -458,6 +458,41 @@ TEST(LocalBorrow, ViewLocalsOfReferenceTypes) {
   guard.expectNoLeaks("view reference locals");
 }
 
+// A literal holds its own reference to each `view` element: the value it
+// makes outlives the view and is released once.
+TEST(LocalBorrow, LiteralsHoldTheirViewElements) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(
+    class Node { n: int; }
+    class Named { name: Str; n: int; }
+    impl Named {
+      view fn pair() -> (Str, int) { return (self.name, self.n); }
+      view fn names() -> Str[2] { return [self.name, "x"]; }
+    }
+    fn tup(s: view Str) -> (Str, int) { return (s, s.len()); }
+    fn arr(s: view Str) -> Str[3] { return [s; 3]; }
+    fn wrap(n: view Node) -> (Node, (Node, int)) { return (n, (n, 1)); }
+    fn main() -> int {
+      t = tup(Str(12));
+      a = arr("ab" + "c");
+      w = wrap(Node(5));
+      w.0.n = 6;
+      h = Named("h", 9);
+      p = h.pair();
+      names = h.names();
+      v: view = Node(1);
+      xs = [v, Node(2)];
+      println(t.0 + " " + Str(t.1) + " " + a[2] + " " + Str(w.1.0.n) + " " +
+              p.0 + Str(p.1) + " " + names[0] + names[1] + " " +
+              Str(xs[0].n + xs[1].n));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "12 2 abc 6 h9 hx 3\n");
+  guard.expectNoLeaks("literals of views");
+}
+
 // An `inout` local is another name for a variable or a field, of every
 // type: assigning to it writes there (an object, string or optional is
 // replaced, the old one released; an array's elements are written in place),

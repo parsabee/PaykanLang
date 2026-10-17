@@ -250,6 +250,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- An array or tuple literal can have a `view` as an element (`[v]`, `(s, 1)`, `return (s, 1);`
+  with `s: view Str`): it is a new value, holding its own reference to the element.  Other
+  stores of a `view` (a variable, a field, an element, `return`) stay errors.
 - The program's entry point is `fn main() -> int` or `fn main(args: view Str[]) -> int`
   (docs/language/02-functions-and-calling.md): the arguments are a slice, which `main`
   reads (`args[0]` is the script path, or the executable's) but does not keep.  Any other
