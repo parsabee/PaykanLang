@@ -1,11 +1,10 @@
-// OK: == / != between tuples of the same type (lowered to the element-wise
-// `equals`), plus the explicit toString / equals methods.
+// OK: == / != between tuples of the same type (element-wise: Str by content,
+// objects by their `equals`), plus the builtin toString.
 fn main() -> int {
   a = (1, "x");
   b = (1, "x");
   same: bool = a == b;
   diff: bool = a != b;
-  viaMethod: bool = a.equals(b);
   s: Str = a.toString();
   return 0;
 }

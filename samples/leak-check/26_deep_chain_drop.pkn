@@ -8,13 +8,14 @@
 //   * a deep, wide tree: a 200,000-node spine whose every node also holds a
 //     three-node subtree and a Node (with its Str);
 //   * a chain of 200,000 links through arrays: each link's `Obj[3]` field
-//     holds the next link, a string and a tuple;
-//   * a chain of tuples nested 200,000 deep through an `Obj` slot, with an
-//     Error from a failed open() in every 10,000th link.
+//     holds the next link, a string and a Node;
+//   * a chain of 200,000 objects linked through tuples: each link's tuple
+//     field holds, in place, a nested tuple with the next link and an `Obj`
+//     slot, which carries an Error from a failed open() in every 10,000th
+//     link.  Releasing a link releases the references its tuple holds.
 //
 // Runtime allocation sites: object structs + PaykanShared (Shared.c),
-// PaykanString_new (String.c), PaykanTuple_new (Tuple.c), PaykanError_new
-// (Error.c).
+// PaykanString_new (String.c), PaykanError_new (Error.c).
 //
 // Expected under --track-heap: live blocks : 0.
 
@@ -46,6 +47,14 @@ impl Tree {
 
 class Link {
   slots: Obj[3];
+}
+
+class Chain {
+  link: (int, (Chain?, Obj));             // the next link sits in a tuple
+}
+
+impl Chain {
+  fn __init__(link: (int, (Chain?, Obj))) { self.link = link; }
 }
 
 fn leaf() -> Tree {
@@ -82,21 +91,21 @@ fn arrays(n: int) -> int {
   prev: Obj = None;
   i = 0;
   while (i < n) {
-    prev = Link([prev, Str<int>(i), (i, "t")]);
+    prev = Link([prev, Str<int>(i), Node(i)]);
     i = i + 1;
   }
   return i;
 }
 
 fn tuples(n: int) -> int {
-  prev: Obj = None;
+  prev: Chain? = None;
   i = 0;
   while (i < n) {
     e: Obj = None;
     if (i % 10000 == 0) {
       e = open("/nonexistent/paykan/leak-check/deep.txt", "r");
     }
-    prev = (i, prev, e);
+    prev = Chain((i, (prev, e)));
     i = i + 1;
   }
   return i;

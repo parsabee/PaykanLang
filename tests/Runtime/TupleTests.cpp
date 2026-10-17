@@ -1,11 +1,16 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// Unit tests for the PaykanTuple runtime object: construction with
-// per-slot kinds, raw / reference slot access, destroy releasing exactly the
-// reference slots, element-wise equals, and toString rendering.
+// Unit tests for PaykanTuple_toString and PaykanTuple_equals: a tuple is a
+// value held in place, so each test builds one in C++ memory laid out the
+// way the compiler lays it out (a struct with natural alignment, a reference
+// element as its PaykanShared* box, an `int?` element inline as
+// {bool present; T value}, a nested tuple inline) and describes it with a
+// layout (Runtime.h, "Tuples").  Each test runs on the tracking allocator
+// and ends with no live blocks.
 
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <gtest/gtest.h>
 #include <string>
@@ -14,422 +19,446 @@ extern "C" {
 #include "Runtime.h"
 }
 
-#include "RuntimeEqualsHelper.h"
+namespace {
 
-// -- Helpers
+// RAII: the tracking allocator with zeroed counters; no live blocks at the
+// end.
+struct TrackingHeap {
+  TrackingHeap() {
+    Paykan_heap_set_tracking(1);
+    Paykan_heap_reset();
+  }
+  ~TrackingHeap() {
+    EXPECT_EQ(Paykan_heap_live_blocks(), 0);
+    Paykan_heap_set_tracking(0);
+  }
+};
 
-static int64_t bitsOf(double d) {
-  int64_t b;
-  memcpy(&b, &d, sizeof(b));
-  return b;
-}
+constexpr int64_t kInt = PAYKAN_KIND_INT;
+constexpr int64_t kFloat = PAYKAN_KIND_FLOAT;
+constexpr int64_t kBool = PAYKAN_KIND_BOOL;
+constexpr int64_t kChar = PAYKAN_KIND_CHAR;
+constexpr int64_t kObj = PAYKAN_KIND_OBJECT;
+constexpr int64_t kOpt = PAYKAN_KIND_OPTIONAL;
+constexpr int64_t kTuple = PAYKAN_KIND_TUPLE;
 
-static double doubleOf(int64_t b) {
-  double d;
-  memcpy(&d, &b, sizeof(d));
-  return d;
-}
+#define OFF(T, field) static_cast<int64_t>(offsetof(T, field))
 
-static PaykanShared *boxStr(const char *s) {
+PaykanShared *str(const char *s) {
   return PaykanShared_new(
       (PaykanObject *)PaykanString_new(s, (int64_t)strlen(s)));
 }
 
-static std::string render(PaykanTuple *t) {
-  PaykanShared *s = PaykanTuple_toString((PaykanObject *)t);
-  std::string out(((PaykanString *)PaykanShared_get(s))->data);
-  Paykan_release(s);
+std::string render(const void *value, const int64_t *layout) {
+  PaykanString *s = PaykanTuple_toString(value, layout);
+  std::string out(s->data, (size_t)s->len);
+  PaykanString_destroy((PaykanObject *)s);
   return out;
 }
 
-static int64_t tupleEq(PaykanTuple *a, PaykanTuple *b) {
-  return paykanTestEquals(PaykanTuple_equals, (PaykanObject *)a,
-                          (PaykanObject *)b);
+int64_t eq(const void *a, const void *b, const int64_t *layout) {
+  return PaykanTuple_equals(a, b, layout);
 }
 
-// (int, Str) with the given values; the Str slot is retained by the tuple.
-static PaykanTuple *makeIntStr(int64_t n, const char *s) {
-  const uint8_t kinds[2] = {PAYKAN_TUPLE_INT, PAYKAN_TUPLE_REF};
-  PaykanTuple *t = PaykanTuple_new(2, kinds);
-  PaykanTuple_set(t, 0, n);
-  PaykanShared *box = boxStr(s);
-  PaykanTuple_set_obj(t, 1, box);
-  Paykan_release(box); // the tuple holds the surviving reference
-  return t;
+// -- A class element: Point(x) renders as P(x) and equals another Point of
+// the same x (its toString and equals through the vtable, as a generated
+// class's are).
+
+struct Point {
+  PaykanMethod *vtable;
+  PaykanShared *shared;
+  int64_t x;
+};
+
+void Point_destroy(PaykanObject *self) { Paykan_free(self); }
+
+PaykanShared *Point_toString(PaykanObject *self) {
+  std::string s = "P(" + std::to_string(((Point *)self)->x) + ")";
+  return PaykanShared_new(
+      (PaykanObject *)PaykanString_new(s.data(), (int64_t)s.size()));
 }
 
-// -- Construction
+int64_t Point_equals(PaykanObject *self, PaykanShared *other);
 
-TEST(TupleNew, CountKindsAndVtable) {
-  const uint8_t kinds[3] = {PAYKAN_TUPLE_INT, PAYKAN_TUPLE_REF,
-                            PAYKAN_TUPLE_FLOAT};
-  PaykanTuple *t = PaykanTuple_new(3, kinds);
-  EXPECT_EQ(t->count, 3);
-  EXPECT_EQ(PaykanTuple_count(t), 3);
-  EXPECT_EQ((void *)t->vtable, (void *)&PaykanTuple_vtable);
-  EXPECT_EQ(t->shared, nullptr);
-  EXPECT_EQ(PaykanTuple_kind(t, 0), PAYKAN_TUPLE_INT);
-  EXPECT_EQ(PaykanTuple_kind(t, 1), PAYKAN_TUPLE_REF);
-  EXPECT_EQ(PaykanTuple_kind(t, 2), PAYKAN_TUPLE_FLOAT);
-  // The kinds are copied, not aliased.
-  EXPECT_NE((const void *)t->kinds, (const void *)kinds);
-  PaykanTuple_destroy((PaykanObject *)t);
+PaykanMethod Point_vtable[PAYKAN_OBJECT_SLOTS] = {
+    reinterpret_cast<PaykanMethod>(&Point_destroy),
+    reinterpret_cast<PaykanMethod>(&Point_toString),
+    reinterpret_cast<PaykanMethod>(&Point_equals),
+};
+
+int gPointEqualsCalls = 0;
+
+int64_t Point_equals(PaykanObject *self, PaykanShared *other) {
+  ++gPointEqualsCalls;
+  PaykanObject *o = PaykanShared_get(other);
+  int64_t result = o && o->vtable == Point_vtable &&
+                   ((Point *)o)->x == ((Point *)self)->x;
+  Paykan_release(other); // `other` is consumed
+  return result;
 }
 
-TEST(TupleNew, SlotsAreZeroInitialised) {
-  const uint8_t kinds[2] = {PAYKAN_TUPLE_REF, PAYKAN_TUPLE_INT};
-  PaykanTuple *t = PaykanTuple_new(2, kinds);
-  EXPECT_EQ(PaykanTuple_get(t, 0), 0);
-  EXPECT_EQ(PaykanTuple_get(t, 1), 0);
-  // Destroying with a NULL reference slot is a no-op release.
-  PaykanTuple_destroy((PaykanObject *)t);
+PaykanShared *point(int64_t x) {
+  auto *p = static_cast<Point *>(Paykan_malloc(sizeof(Point)));
+  p->vtable = Point_vtable;
+  p->shared = nullptr;
+  p->x = x;
+  return PaykanShared_new((PaykanObject *)p);
 }
 
-TEST(TupleNew, SingleHeapBlock) {
-  Paykan_heap_set_tracking(1);
-  Paykan_heap_reset();
-  const uint8_t kinds[2] = {PAYKAN_TUPLE_INT, PAYKAN_TUPLE_INT};
-  PaykanTuple *t = PaykanTuple_new(2, kinds);
-  EXPECT_EQ(Paykan_heap_live_blocks(), 1);
-  PaykanTuple_destroy((PaykanObject *)t);
-  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
-  Paykan_heap_set_tracking(0);
+// -- Tuple types as the compiler lays them out
+
+// (int, float, bool, char, Str)
+struct Scalars {
+  int64_t i;
+  double f;
+  bool b;
+  int8_t c;
+  PaykanShared *s;
+};
+const int64_t kScalarsLayout[] = {5,
+                                  kInt,
+                                  OFF(Scalars, i),
+                                  kFloat,
+                                  OFF(Scalars, f),
+                                  kBool,
+                                  OFF(Scalars, b),
+                                  kChar,
+                                  OFF(Scalars, c),
+                                  kObj,
+                                  OFF(Scalars, s)};
+
+template <typename T> struct Inline {
+  bool present;
+  T value;
+};
+
+// (int?, float?, bool?, char?, Str?)
+struct Optionals {
+  Inline<int64_t> i;
+  Inline<double> f;
+  Inline<bool> b;
+  Inline<int8_t> c;
+  PaykanShared *s; // NULL for None
+};
+const int64_t kOptionalsLayout[] = {
+    5,           kOpt, OFF(Optionals, i), kInt,  kOpt, OFF(Optionals, f),
+    kFloat,      kOpt, OFF(Optionals, b), kBool, kOpt, OFF(Optionals, c),
+    kChar,       kOpt, OFF(Optionals, s), kObj};
+
+// The payload offsets the layout comment promises.
+static_assert(offsetof(Inline<int64_t>, value) == 8, "int? payload at 8");
+static_assert(offsetof(Inline<double>, value) == 8, "float? payload at 8");
+static_assert(offsetof(Inline<bool>, value) == 1, "bool? payload at 1");
+static_assert(offsetof(Inline<int8_t>, value) == 1, "char? payload at 1");
+
+// (int, Str)
+struct IntStr {
+  int64_t n;
+  PaykanShared *s;
+};
+const int64_t kIntStrLayout[] = {2, kInt, OFF(IntStr, n), kObj,
+                                 OFF(IntStr, s)};
+
+// ((int, Str), (char, (bool, float)), int)
+struct Inner2 {
+  bool b;
+  double f;
+};
+struct Inner1 {
+  int8_t c;
+  Inner2 t;
+};
+struct Nested {
+  IntStr a;
+  Inner1 b;
+  int64_t n;
+};
+const int64_t kNestedLayout[] = {
+    3,
+    kTuple, OFF(Nested, a), 2, kInt, OFF(IntStr, n), kObj, OFF(IntStr, s),
+    kTuple, OFF(Nested, b), 2, kChar, OFF(Inner1, c),
+        kTuple, OFF(Inner1, t), 2, kBool, OFF(Inner2, b), kFloat,
+        OFF(Inner2, f),
+    kInt, OFF(Nested, n)};
+
+// (int, float)
+struct IntFloat {
+  int64_t n;
+  double f;
+};
+const int64_t kIntFloatLayout[] = {2, kInt, OFF(IntFloat, n), kFloat,
+                                   OFF(IntFloat, f)};
+
+// (Obj, Obj?): two references, the second one nullable.
+struct Refs {
+  PaykanShared *a;
+  PaykanShared *b;
+};
+const int64_t kRefsLayout[] = {2, kObj, OFF(Refs, a), kOpt, OFF(Refs, b), kObj};
+
+void release(Refs &r) {
+  Paykan_release(r.a);
+  Paykan_release(r.b);
 }
 
-// -- Primitive slots
-
-TEST(TupleSetGet, IntFloatBoolChar) {
-  const uint8_t kinds[4] = {PAYKAN_TUPLE_INT, PAYKAN_TUPLE_FLOAT,
-                            PAYKAN_TUPLE_BOOL, PAYKAN_TUPLE_CHAR};
-  PaykanTuple *t = PaykanTuple_new(4, kinds);
-  PaykanTuple_set(t, 0, -42);
-  PaykanTuple_set(t, 1, bitsOf(2.5));
-  PaykanTuple_set(t, 2, 1);
-  PaykanTuple_set(t, 3, (int64_t)'z');
-  EXPECT_EQ(PaykanTuple_get(t, 0), -42);
-  EXPECT_DOUBLE_EQ(doubleOf(PaykanTuple_get(t, 1)), 2.5);
-  EXPECT_EQ(PaykanTuple_get(t, 2), 1);
-  EXPECT_EQ((char)PaykanTuple_get(t, 3), 'z');
-  PaykanTuple_destroy((PaykanObject *)t);
-}
-
-TEST(TupleSetGet, OutOfBoundsDies) {
-  const uint8_t kinds[2] = {PAYKAN_TUPLE_INT, PAYKAN_TUPLE_INT};
-  PaykanTuple *t = PaykanTuple_new(2, kinds);
-  EXPECT_DEATH(PaykanTuple_get(t, 2), "out of bounds");
-  EXPECT_DEATH(PaykanTuple_set(t, -1, 0), "out of bounds");
-  PaykanTuple_destroy((PaykanObject *)t);
-}
-
-TEST(TupleSetGet, KindMismatchDies) {
-  const uint8_t kinds[2] = {PAYKAN_TUPLE_INT, PAYKAN_TUPLE_REF};
-  PaykanTuple *t = PaykanTuple_new(2, kinds);
-  EXPECT_DEATH(PaykanTuple_set(t, 1, 0), "reference slot");
-  EXPECT_DEATH(PaykanTuple_set_obj(t, 0, nullptr), "value slot");
-  PaykanTuple_destroy((PaykanObject *)t);
-}
-
-// -- Reference slots
-
-TEST(TupleSetObj, RetainsStoredBoxAndReleasesOld) {
-  const uint8_t kinds[2] = {PAYKAN_TUPLE_REF, PAYKAN_TUPLE_REF};
-  PaykanTuple *t = PaykanTuple_new(2, kinds);
-
-  PaykanShared *a = boxStr("a");
-  EXPECT_EQ(a->refCount, 1);
-  PaykanTuple_set_obj(t, 0, a);
-  EXPECT_EQ(a->refCount, 2); // tuple + test
-
-  PaykanShared *got;
-  int64_t bits = PaykanTuple_get(t, 0);
-  memcpy(&got, &bits, sizeof(bits));
-  EXPECT_EQ(got, a); // get returns the box bits without retaining
-  EXPECT_EQ(a->refCount, 2);
-
-  PaykanShared *b = boxStr("b");
-  PaykanTuple_set_obj(t, 0, b); // replaces a: a released, b retained
-  EXPECT_EQ(a->refCount, 1);
-  EXPECT_EQ(b->refCount, 2);
-
-  PaykanTuple_destroy((PaykanObject *)t);
-  EXPECT_EQ(b->refCount, 1); // destroy released the tuple's reference
-  Paykan_release(a);
-  Paykan_release(b);
-}
-
-TEST(TupleDestroy, ReleasesExactlyTheReferenceSlots) {
-  Paykan_heap_set_tracking(1);
-  Paykan_heap_reset();
-  {
-    const uint8_t kinds[3] = {PAYKAN_TUPLE_INT, PAYKAN_TUPLE_REF,
-                              PAYKAN_TUPLE_REF};
-    PaykanTuple *t = PaykanTuple_new(3, kinds);
-    PaykanTuple_set(t, 0, 7);
-    PaykanShared *s = boxStr("owned by tuple");
-    PaykanTuple_set_obj(t, 1, s);
-    Paykan_release(s); // tuple now the sole owner
-    // slot 2 left NULL
-    PaykanTuple_destroy((PaykanObject *)t);
-  }
-  EXPECT_EQ(Paykan_heap_live_blocks(), 0); // string, its box, and the tuple
-  Paykan_heap_set_tracking(0);
-}
-
-TEST(TupleDestroy, NestedTupleIsReleased) {
-  Paykan_heap_set_tracking(1);
-  Paykan_heap_reset();
-  {
-    PaykanTuple *inner = makeIntStr(1, "in");
-    PaykanShared *innerBox = PaykanShared_new((PaykanObject *)inner);
-    const uint8_t kinds[2] = {PAYKAN_TUPLE_REF, PAYKAN_TUPLE_INT};
-    PaykanTuple *outer = PaykanTuple_new(2, kinds);
-    PaykanTuple_set_obj(outer, 0, innerBox);
-    Paykan_release(innerBox);
-    PaykanTuple_set(outer, 1, 2);
-    EXPECT_EQ(render(outer), "((1, in), 2)");
-    PaykanTuple_destroy((PaykanObject *)outer);
-  }
-  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
-  Paykan_heap_set_tracking(0);
-}
+} // namespace
 
 // -- toString
 
 TEST(TupleToString, RendersEachKind) {
-  const uint8_t kinds[5] = {PAYKAN_TUPLE_INT, PAYKAN_TUPLE_FLOAT,
-                            PAYKAN_TUPLE_BOOL, PAYKAN_TUPLE_CHAR,
-                            PAYKAN_TUPLE_REF};
-  PaykanTuple *t = PaykanTuple_new(5, kinds);
-  PaykanTuple_set(t, 0, 1);
-  PaykanTuple_set(t, 1, bitsOf(2.5));
-  PaykanTuple_set(t, 2, 1);
-  PaykanTuple_set(t, 3, (int64_t)'c');
-  PaykanShared *s = boxStr("a");
-  PaykanTuple_set_obj(t, 4, s);
-  Paykan_release(s);
-  EXPECT_EQ(render(t), "(1, 2.5, True, c, a)");
-  PaykanTuple_destroy((PaykanObject *)t);
+  TrackingHeap heap;
+  Scalars t = {1, 2.5, true, 'c', str("a")};
+  EXPECT_EQ(render(&t, kScalarsLayout), "(1, 2.5, True, c, a)");
+  Scalars u = {-7, -0.125, false, 'Z', t.s};
+  EXPECT_EQ(render(&u, kScalarsLayout), "(-7, -0.125, False, Z, a)");
+  Paykan_release(t.s);
 }
 
+// A float element renders as Str<float> does.
+TEST(TupleToString, FloatsRenderLikeStrFloat) {
+  TrackingHeap heap;
+  IntFloat t = {0, 2.0};
+  EXPECT_EQ(render(&t, kIntFloatLayout), "(0, 2)");
+  t.f = std::nan("");
+  EXPECT_EQ(render(&t, kIntFloatLayout), "(0, nan)");
+  t.f = -INFINITY;
+  EXPECT_EQ(render(&t, kIntFloatLayout), "(0, -inf)");
+}
+
+TEST(TupleToString, OptionalsRenderTheirValueOrNone) {
+  TrackingHeap heap;
+  Optionals some = {{true, 7}, {true, 2.5}, {true, false}, {true, 'z'},
+                    str("s")};
+  EXPECT_EQ(render(&some, kOptionalsLayout), "(7, 2.5, False, z, s)");
+  // An absent one is None whatever its payload bytes hold.
+  Optionals none = {{false, 7}, {false, 2.5}, {false, true}, {false, 'z'},
+                    nullptr};
+  EXPECT_EQ(render(&none, kOptionalsLayout),
+            "(None, None, None, None, None)");
+  Paykan_release(some.s);
+}
+
+// A NULL box renders as None even where the element is not optional.
 TEST(TupleToString, NullReferenceRendersNone) {
-  const uint8_t kinds[2] = {PAYKAN_TUPLE_REF, PAYKAN_TUPLE_INT};
-  PaykanTuple *t = PaykanTuple_new(2, kinds);
-  PaykanTuple_set(t, 1, 0);
-  EXPECT_EQ(render(t), "(None, 0)");
-  PaykanTuple_destroy((PaykanObject *)t);
+  TrackingHeap heap;
+  IntStr t = {3, nullptr};
+  EXPECT_EQ(render(&t, kIntStrLayout), "(3, None)");
+}
+
+TEST(TupleToString, NestedTuplesRenderInPlace) {
+  TrackingHeap heap;
+  Nested t = {{1, str("in")}, {'x', {true, 0.5}}, 2};
+  EXPECT_EQ(render(&t, kNestedLayout), "((1, in), (x, (True, 0.5)), 2)");
+  Paykan_release(t.a.s);
+}
+
+TEST(TupleToString, ClassElementRendersThroughItsToString) {
+  TrackingHeap heap;
+  Refs t = {point(3),
+            PaykanShared_new((PaykanObject *)PaykanError_new("oops", 4))};
+  EXPECT_EQ(render(&t, kRefsLayout), "(P(3), oops)");
+  // Rendering borrows the elements.
+  EXPECT_EQ(t.a->refCount, 1);
+  EXPECT_EQ(t.b->refCount, 1);
+  release(t);
 }
 
 TEST(TupleToString, LongRenderingGrowsBuffer) {
-  const uint8_t kinds[2] = {PAYKAN_TUPLE_REF, PAYKAN_TUPLE_REF};
-  PaykanTuple *t = PaykanTuple_new(2, kinds);
+  TrackingHeap heap;
   std::string big(200, 'x');
-  PaykanShared *s = boxStr(big.c_str());
-  PaykanTuple_set_obj(t, 0, s);
-  PaykanTuple_set_obj(t, 1, s);
+  PaykanShared *s = str(big.c_str());
+  Refs t = {s, s};
+  EXPECT_EQ(render(&t, kRefsLayout), "(" + big + ", " + big + ")");
   Paykan_release(s);
-  EXPECT_EQ(render(t), "(" + big + ", " + big + ")");
-  PaykanTuple_destroy((PaykanObject *)t);
 }
 
 // -- equals
 
-TEST(TupleEquals, ElementWiseOnPrimitivesAndStrings) {
-  PaykanTuple *a = makeIntStr(1, "x");
-  PaykanTuple *b = makeIntStr(1, "x"); // distinct Str object, same content
-  PaykanTuple *c = makeIntStr(2, "x");
-  PaykanTuple *d = makeIntStr(1, "y");
-  EXPECT_EQ(tupleEq(a, a), 1);
-  EXPECT_EQ(tupleEq(a, b), 1);
-  EXPECT_EQ(tupleEq(a, c), 0);
-  EXPECT_EQ(tupleEq(a, d), 0);
-  for (PaykanTuple *t : {a, b, c, d})
-    PaykanTuple_destroy((PaykanObject *)t);
+TEST(TupleEquals, EachScalarKind) {
+  TrackingHeap heap;
+  PaykanShared *a = str("a");
+  Scalars t = {1, 2.5, true, 'c', a};
+  Scalars u = t;
+  EXPECT_EQ(eq(&t, &u, kScalarsLayout), 1);
+  u.i = 2;
+  EXPECT_EQ(eq(&t, &u, kScalarsLayout), 0);
+  u = t;
+  u.f = 2.25;
+  EXPECT_EQ(eq(&t, &u, kScalarsLayout), 0);
+  u = t;
+  u.b = false;
+  EXPECT_EQ(eq(&t, &u, kScalarsLayout), 0);
+  u = t;
+  u.c = 'd';
+  EXPECT_EQ(eq(&t, &u, kScalarsLayout), 0);
+  // A Str compares by content: another string of the same text is equal.
+  u = t;
+  u.s = str("a");
+  EXPECT_EQ(eq(&t, &u, kScalarsLayout), 1);
+  Paykan_release(u.s);
+  u.s = str("b");
+  EXPECT_EQ(eq(&t, &u, kScalarsLayout), 0);
+  Paykan_release(u.s);
+  EXPECT_EQ(a->refCount, 1);
+  Paykan_release(a);
 }
 
-TEST(TupleEquals, FloatsCompareByValue) {
-  const uint8_t kinds[2] = {PAYKAN_TUPLE_FLOAT, PAYKAN_TUPLE_BOOL};
-  PaykanTuple *a = PaykanTuple_new(2, kinds);
-  PaykanTuple *b = PaykanTuple_new(2, kinds);
-  PaykanTuple_set(a, 0, bitsOf(0.5));
-  PaykanTuple_set(b, 0, bitsOf(0.5));
-  PaykanTuple_set(a, 1, 1);
-  PaykanTuple_set(b, 1, 1);
-  EXPECT_EQ(tupleEq(a, b), 1);
-  PaykanTuple_set(b, 0, bitsOf(0.25));
-  EXPECT_EQ(tupleEq(a, b), 0);
-  PaykanTuple_destroy((PaykanObject *)a);
-  PaykanTuple_destroy((PaykanObject *)b);
+// Only the elements are compared, not the padding between them.
+TEST(TupleEquals, PaddingIsIgnored) {
+  TrackingHeap heap;
+  Scalars t, u;
+  memset(&t, 0xAA, sizeof t);
+  memset(&u, 0x55, sizeof u);
+  t.i = u.i = 4;
+  t.f = u.f = 1.5;
+  t.b = u.b = true;
+  t.c = u.c = 'q';
+  t.s = u.s = str("p");
+  EXPECT_EQ(eq(&t, &u, kScalarsLayout), 1);
+  Paykan_release(t.s);
 }
 
-// A tuple holding a NaN is unequal to itself, exactly like the NaN (#111):
-// equality is element-wise even when both sides are the same object.
-TEST(TupleEquals, NaNElementIsUnequalEvenOnTheSameObject) {
-  const uint8_t kinds[2] = {PAYKAN_TUPLE_INT, PAYKAN_TUPLE_FLOAT};
-  PaykanTuple *a = PaykanTuple_new(2, kinds);
-  PaykanTuple *b = PaykanTuple_new(2, kinds);
-  PaykanTuple_set(a, 0, 1);
-  PaykanTuple_set(b, 0, 1);
-  PaykanTuple_set(a, 1, bitsOf(std::nan("")));
-  PaykanTuple_set(b, 1, bitsOf(std::nan("")));
-  EXPECT_EQ(tupleEq(a, a), 0); // same object
-  EXPECT_EQ(tupleEq(a, b), 0); // distinct objects
-  EXPECT_EQ(tupleEq(b, a), 0);
-  // -0.0 == 0.0 under IEEE, so those tuples are equal.
-  PaykanTuple_set(a, 1, bitsOf(-0.0));
-  PaykanTuple_set(b, 1, bitsOf(0.0));
-  EXPECT_EQ(tupleEq(a, b), 1);
-  EXPECT_EQ(tupleEq(a, a), 1);
-  PaykanTuple_destroy((PaykanObject *)a);
-  PaykanTuple_destroy((PaykanObject *)b);
+// A tuple holding a NaN is unequal to itself, exactly like the NaN (#111);
+// -0.0 == 0.0 under IEEE 754, so those tuples are equal.
+TEST(TupleEquals, FloatsCompareByIEEE754) {
+  TrackingHeap heap;
+  IntFloat a = {1, std::nan("")};
+  IntFloat b = a;
+  EXPECT_EQ(eq(&a, &a, kIntFloatLayout), 0); // the same bytes
+  EXPECT_EQ(eq(&a, &b, kIntFloatLayout), 0);
+  a.f = -0.0;
+  b.f = 0.0;
+  EXPECT_EQ(eq(&a, &b, kIntFloatLayout), 1);
+  EXPECT_EQ(eq(&b, &a, kIntFloatLayout), 1);
+  EXPECT_EQ(eq(&a, &a, kIntFloatLayout), 1);
 }
 
-// Without a NaN, a tuple is still equal to itself (by elements now, not by
-// identity), primitives and references alike.
-TEST(TupleEquals, NonNaNTupleIsEqualToItself) {
-  const uint8_t kinds[2] = {PAYKAN_TUPLE_FLOAT, PAYKAN_TUPLE_REF};
-  PaykanTuple *a = PaykanTuple_new(2, kinds);
-  PaykanTuple_set(a, 0, bitsOf(0.5));
-  PaykanShared *s = boxStr("s");
-  PaykanTuple_set_obj(a, 1, s);
-  Paykan_release(s);
-  EXPECT_EQ(tupleEq(a, a), 1);
-  PaykanTuple_destroy((PaykanObject *)a);
-}
-
-// A NaN reached through a reference element -- a nested tuple, either of
-// two -- makes the outer tuple unequal to itself too.
-TEST(TupleEquals, NaNInsideReferenceElementIsUnequalOnTheSameObject) {
-  const uint8_t innerKinds[1] = {PAYKAN_TUPLE_FLOAT};
-  PaykanTuple *inner = PaykanTuple_new(1, innerKinds);
-  PaykanTuple_set(inner, 0, bitsOf(std::nan("")));
-  const uint8_t kinds[2] = {PAYKAN_TUPLE_REF, PAYKAN_TUPLE_REF};
-  PaykanTuple *a = PaykanTuple_new(2, kinds);
-  PaykanShared *bi = PaykanShared_new((PaykanObject *)inner);
-  PaykanTuple_set_obj(a, 0, bi);
-  Paykan_release(bi);
-  PaykanTuple *other = PaykanTuple_new(1, innerKinds);
-  PaykanTuple_set(other, 0, bitsOf(2.0));
-  PaykanShared *bf = PaykanShared_new((PaykanObject *)other);
-  PaykanTuple_set_obj(a, 1, bf);
-  Paykan_release(bf);
-  EXPECT_EQ(tupleEq(a, a), 0); // inner (nan,) != itself
-  PaykanTuple_set(inner, 0, bitsOf(1.0));
-  EXPECT_EQ(tupleEq(a, a), 1);
-  PaykanTuple_set(other, 0, bitsOf(std::nan("")));
-  EXPECT_EQ(tupleEq(a, a), 0); // the other (nan,) != itself
-  PaykanTuple_destroy((PaykanObject *)a);
-}
-
-TEST(TupleEquals, ArityAndKindMismatchAreUnequal) {
-  const uint8_t k2[2] = {PAYKAN_TUPLE_INT, PAYKAN_TUPLE_INT};
-  const uint8_t k3[3] = {PAYKAN_TUPLE_INT, PAYKAN_TUPLE_INT, PAYKAN_TUPLE_INT};
-  const uint8_t kf[2] = {PAYKAN_TUPLE_INT, PAYKAN_TUPLE_FLOAT};
-  PaykanTuple *a = PaykanTuple_new(2, k2);
-  PaykanTuple *b = PaykanTuple_new(3, k3);
-  PaykanTuple *c = PaykanTuple_new(2, kf); // same bits (all zero), other kind
-  EXPECT_EQ(tupleEq(a, b), 0);
-  EXPECT_EQ(tupleEq(a, c), 0);
-  PaykanTuple_destroy((PaykanObject *)a);
-  PaykanTuple_destroy((PaykanObject *)b);
-  PaykanTuple_destroy((PaykanObject *)c);
-}
-
-TEST(TupleEquals, NullReferenceSlots) {
-  const uint8_t kinds[2] = {PAYKAN_TUPLE_REF, PAYKAN_TUPLE_INT};
-  PaykanTuple *a = PaykanTuple_new(2, kinds);
-  PaykanTuple *b = PaykanTuple_new(2, kinds);
-  EXPECT_EQ(tupleEq(a, b), 1); // both NULL
-  PaykanShared *s = boxStr("s");
-  PaykanTuple_set_obj(b, 0, s);
-  Paykan_release(s);
-  EXPECT_EQ(tupleEq(a, b), 0); // NULL vs non-NULL
-  EXPECT_EQ(tupleEq(b, a), 0);
-  PaykanTuple_destroy((PaykanObject *)a);
-  PaykanTuple_destroy((PaykanObject *)b);
-}
-
-TEST(TupleEquals, NestedTuplesAndNonTupleOther) {
-  PaykanTuple *ia = makeIntStr(1, "x");
-  PaykanTuple *ib = makeIntStr(1, "x");
-  const uint8_t kinds[2] = {PAYKAN_TUPLE_REF, PAYKAN_TUPLE_INT};
-  PaykanTuple *a = PaykanTuple_new(2, kinds);
-  PaykanTuple *b = PaykanTuple_new(2, kinds);
-  PaykanShared *ba = PaykanShared_new((PaykanObject *)ia);
-  PaykanShared *bb = PaykanShared_new((PaykanObject *)ib);
-  PaykanTuple_set_obj(a, 0, ba);
-  PaykanTuple_set_obj(b, 0, bb);
-  Paykan_release(ba);
-  Paykan_release(bb);
-  EXPECT_EQ(tupleEq(a, b), 1);
-  // A non-tuple `other` is never equal.
-  PaykanString *str = PaykanString_new("t", 1);
-  EXPECT_EQ(paykanTestEquals(PaykanTuple_equals, (PaykanObject *)a,
-                             (PaykanObject *)str),
-            0);
-  PaykanString_destroy((PaykanObject *)str);
-  PaykanTuple_destroy((PaykanObject *)a);
-  PaykanTuple_destroy((PaykanObject *)b);
-}
-
-TEST(TupleEquals, DoesNotLeakOrDoubleFree) {
-  Paykan_heap_set_tracking(1);
-  Paykan_heap_reset();
-  {
-    PaykanTuple *a = makeIntStr(1, "x");
-    PaykanTuple *b = makeIntStr(1, "x");
-    // Exercise the consumed-box ABI the way generated code does: `other`
-    // arrives as a +1 box that equals releases.
-    PaykanShared *bb = PaykanShared_new((PaykanObject *)b);
-    Paykan_retain(bb);
-    EXPECT_EQ(PaykanTuple_equals((PaykanObject *)a, bb), 1);
-    Paykan_release(bb); // destroys b
-    PaykanTuple_destroy((PaykanObject *)a);
+TEST(TupleEquals, OptionalsComparePresenceThenValue) {
+  TrackingHeap heap;
+  PaykanShared *s = str("s");
+  Optionals a = {{true, 7}, {true, 2.5}, {true, false}, {true, 'z'}, s};
+  Optionals b = a;
+  EXPECT_EQ(eq(&a, &b, kOptionalsLayout), 1);
+  // Present against absent, either way, for each element.
+  for (int k = 0; k < 5; ++k) {
+    b = a;
+    switch (k) {
+    case 0:
+      b.i.present = false;
+      break;
+    case 1:
+      b.f.present = false;
+      break;
+    case 2:
+      b.b.present = false;
+      break;
+    case 3:
+      b.c.present = false;
+      break;
+    default:
+      b.s = nullptr;
+      break;
+    }
+    EXPECT_EQ(eq(&a, &b, kOptionalsLayout), 0) << k;
+    EXPECT_EQ(eq(&b, &a, kOptionalsLayout), 0) << k;
   }
-  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
-  Paykan_heap_set_tracking(0);
+  // Both present, different payloads.
+  b = a;
+  b.i.value = 8;
+  EXPECT_EQ(eq(&a, &b, kOptionalsLayout), 0);
+  b = a;
+  b.b.value = true;
+  EXPECT_EQ(eq(&a, &b, kOptionalsLayout), 0);
+  b = a;
+  b.f.value = std::nan("");
+  EXPECT_EQ(eq(&b, &b, kOptionalsLayout), 0);
+  // Two None are equal, whatever the payload bytes of an absent one hold.
+  Optionals n1 = {{false, 1}, {false, 1.0}, {false, true}, {false, 'a'},
+                  nullptr};
+  Optionals n2 = {{false, 2}, {false, std::nan("")}, {false, false},
+                  {false, 'b'}, nullptr};
+  EXPECT_EQ(eq(&n1, &n2, kOptionalsLayout), 1);
+  EXPECT_EQ(eq(&n2, &n1, kOptionalsLayout), 1);
+  EXPECT_EQ(s->refCount, 1);
+  Paykan_release(s);
 }
 
-// -- Optional value elements (#96): a presence slot and its value
-
-// (int?, Str): an OPT presence word, the int, then the Str.
-static PaykanTuple *makeOptIntStr(bool present, int64_t n, const char *s) {
-  const uint8_t kinds[3] = {PAYKAN_TUPLE_OPT, PAYKAN_TUPLE_INT,
-                            PAYKAN_TUPLE_REF};
-  PaykanTuple *t = PaykanTuple_new(3, kinds);
-  PaykanTuple_set(t, 0, present ? 1 : 0);
-  PaykanTuple_set(t, 1, present ? n : 0);
-  PaykanShared *box = boxStr(s);
-  PaykanTuple_set_obj(t, 2, box);
-  Paykan_release(box);
-  return t;
+TEST(TupleEquals, NullReferences) {
+  TrackingHeap heap;
+  IntStr a = {1, nullptr};
+  IntStr b = {1, nullptr};
+  EXPECT_EQ(eq(&a, &b, kIntStrLayout), 1); // two None
+  b.s = str("s");
+  EXPECT_EQ(eq(&a, &b, kIntStrLayout), 0); // None against an object
+  EXPECT_EQ(eq(&b, &a, kIntStrLayout), 0);
+  Paykan_release(b.s);
 }
 
-TEST(TupleOptional, RendersTheValueOrNone) {
-  PaykanTuple *a = makeOptIntStr(true, 7, "x");
-  PaykanTuple *b = makeOptIntStr(false, 0, "y");
-  EXPECT_EQ(render(a), "(7, x)");
-  EXPECT_EQ(render(b), "(None, y)");
-  const uint8_t kinds[2] = {PAYKAN_TUPLE_OPT, PAYKAN_TUPLE_FLOAT};
-  PaykanTuple *f = PaykanTuple_new(2, kinds);
-  PaykanTuple_set(f, 0, 1);
-  PaykanTuple_set(f, 1, bitsOf(2.5));
-  EXPECT_EQ(render(f), "(2.5)");
-  PaykanTuple_destroy((PaykanObject *)a);
-  PaykanTuple_destroy((PaykanObject *)b);
-  PaykanTuple_destroy((PaykanObject *)f);
+// A reference element is compared by its `equals`, which is handed its own
+// reference to the other element (and consumes it): the tuples' references
+// are untouched.
+TEST(TupleEquals, ReferencesCompareThroughEquals) {
+  TrackingHeap heap;
+  gPointEqualsCalls = 0;
+  PaykanShared *err = PaykanShared_new((PaykanObject *)PaykanError_new("e", 1));
+  Refs a = {point(3), err};
+  Refs b = {point(3), err};
+  EXPECT_EQ(eq(&a, &b, kRefsLayout), 1); // distinct Points, the same x
+  EXPECT_EQ(gPointEqualsCalls, 1);
+  EXPECT_EQ(a.a->refCount, 1);
+  EXPECT_EQ(b.a->refCount, 1);
+  EXPECT_EQ(err->refCount, 1);
+  Paykan_release(b.a);
+  b.a = point(4);
+  EXPECT_EQ(eq(&a, &b, kRefsLayout), 0);
+  EXPECT_EQ(b.a->refCount, 1);
+  // Error's equals is identity: another Error with the same message is not
+  // equal.
+  Paykan_release(b.a);
+  b.a = point(3);
+  b.b = PaykanShared_new((PaykanObject *)PaykanError_new("e", 1));
+  EXPECT_EQ(eq(&a, &b, kRefsLayout), 0);
+  release(a);
+  release(b);
 }
 
-TEST(TupleOptional, EqualsComparesPresenceThenValue) {
-  PaykanTuple *a = makeOptIntStr(true, 7, "x");
-  PaykanTuple *a2 = makeOptIntStr(true, 7, "x");
-  PaykanTuple *c = makeOptIntStr(true, 8, "x");
-  PaykanTuple *n = makeOptIntStr(false, 0, "x");
-  PaykanTuple *n2 = makeOptIntStr(false, 0, "x");
-  EXPECT_EQ(tupleEq(a, a2), 1);
-  EXPECT_EQ(tupleEq(a, c), 0);
-  EXPECT_EQ(tupleEq(a, n), 0);
-  EXPECT_EQ(tupleEq(n, a), 0);
-  EXPECT_EQ(tupleEq(n, n2), 1);
-  for (PaykanTuple *t : {a, a2, c, n, n2})
-    PaykanTuple_destroy((PaykanObject *)t);
+// The first unequal element decides: the elements after it are not compared.
+TEST(TupleEquals, StopsAtTheFirstUnequalElement) {
+  TrackingHeap heap;
+  gPointEqualsCalls = 0;
+  struct IntPoint {
+    int64_t n;
+    PaykanShared *p;
+  };
+  const int64_t layout[] = {2, kInt, OFF(IntPoint, n), kObj, OFF(IntPoint, p)};
+  IntPoint a = {1, point(5)};
+  IntPoint b = {2, point(5)};
+  EXPECT_EQ(eq(&a, &b, layout), 0);
+  EXPECT_EQ(gPointEqualsCalls, 0);
+  b.n = 1;
+  EXPECT_EQ(eq(&a, &b, layout), 1);
+  EXPECT_EQ(gPointEqualsCalls, 1);
+  Paykan_release(a.p);
+  Paykan_release(b.p);
+}
+
+TEST(TupleEquals, NestedTuplesCompareElementWise) {
+  TrackingHeap heap;
+  Nested a = {{1, str("in")}, {'x', {true, 0.5}}, 2};
+  Nested b = {{1, str("in")}, {'x', {true, 0.5}}, 2};
+  EXPECT_EQ(eq(&a, &b, kNestedLayout), 1);
+  b.b.t.b = false; // two levels down
+  EXPECT_EQ(eq(&a, &b, kNestedLayout), 0);
+  b.b.t.b = true;
+  b.a.n = 9;
+  EXPECT_EQ(eq(&a, &b, kNestedLayout), 0);
+  b.a.n = 1;
+  b.n = 3; // the element after the nested ones
+  EXPECT_EQ(eq(&a, &b, kNestedLayout), 0);
+  b.n = 2;
+  // A NaN inside a nested tuple makes the outer one unequal to itself.
+  b.b.t.f = std::nan("");
+  EXPECT_EQ(eq(&b, &b, kNestedLayout), 0);
+  Paykan_release(a.a.s);
+  Paykan_release(b.a.s);
 }

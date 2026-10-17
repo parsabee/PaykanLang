@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -173,27 +174,37 @@ TEST_F(DeferredDestroy, LongChainDoesNotOverflowTheStack) {
 }
 
 TEST_F(DeferredDestroy, DeepChainsThroughRuntimeContainers) {
-  // Tuples (slot release) are destroyed through the same queue: a chain of
-  // tuples with a Str or an Error and a boxed int hanging off every one.
+  // A buffer drops its values when it is destroyed, through the same queue:
+  // a chain of buffers, each holding one Link value whose first reference is
+  // the previous buffer, with a Str or an Error and a Str of the index
+  // hanging off every one.
+  struct Link {
+    PaykanShared *prev; // NULL in the first buffer
+    PaykanShared *leaf;
+    PaykanShared *index;
+  };
+  struct LinkType {
+    PaykanType head;
+    int64_t refs[3];
+  };
+  // Not const: the PaykanBuffer_* functions take a PaykanType as a `void *`.
+  static LinkType kLink = {
+      {sizeof(Link), alignof(Link), PAYKAN_KIND_TUPLE, 3},
+      {(int64_t)offsetof(Link, prev) << 1 | 1,
+       (int64_t)offsetof(Link, leaf) << 1, (int64_t)offsetof(Link, index) << 1}};
   constexpr int kLen = 300000;
   PaykanShared *prev = nullptr;
-  const uint8_t kinds[3] = {PAYKAN_TUPLE_REF, PAYKAN_TUPLE_REF,
-                            PAYKAN_TUPLE_REF};
   for (int i = 0; i < kLen; ++i) {
-    PaykanTuple *t = PaykanTuple_new(3, kinds);
-    PaykanTuple_set_obj(t, 0, prev); // retains
-    Paykan_release(prev);
     PaykanObject *leaf =
         i % 2 ? reinterpret_cast<PaykanObject *>(PaykanString_new("x", 1))
               : reinterpret_cast<PaykanObject *>(PaykanError_new("e", 1));
-    PaykanShared *s = PaykanShared_new(leaf);
-    PaykanTuple_set_obj(t, 1, s);
-    Paykan_release(s);
-    PaykanShared *b = PaykanShared_new(
-        reinterpret_cast<PaykanObject *>(PaykanString_from_int(i)));
-    PaykanTuple_set_obj(t, 2, b);
-    Paykan_release(b);
-    prev = PaykanShared_new(reinterpret_cast<PaykanObject *>(t));
+    Link link = {prev, PaykanShared_new(leaf),
+                 PaykanShared_new(reinterpret_cast<PaykanObject *>(
+                     PaykanString_from_int(i)))};
+    PaykanShared *buf = PaykanBuffer_new(&kLink.head, 1);
+    PaykanBuffer_set(&kLink.head, &buf, 0, &link); // retains
+    PaykanType_drop(&kLink.head, &link);
+    prev = buf;
   }
   Paykan_release(prev);
 }
