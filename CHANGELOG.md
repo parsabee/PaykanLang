@@ -215,8 +215,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signature is an error (`the program's entry point must be 'fn main() -> int' or 'fn
   main(args: view Str[]) -> int', not 'fn main(int) -> int'`).  In PIR `@main` is
   `() -> i64` or `(ptr, i64) -> i64` (docs/pir.md §4): the backend's entry code makes the
-  slice with the runtime's `Paykan_args_new` before it calls `@main` and drops it with
-  `Paykan_args_free` after.  A backend plugin must do the same.
+  slice before it calls `@main` and drops it after, in an executable with the runtime's
+  `Paykan_args_new` and `Paykan_args_free`.  A backend plugin must do the same.
 - A class without an `__init__` gets the default one (docs/language/04-classes.md, "The
   default `__init__`"): it takes the superclass constructor's arguments, then one per
   field of the class, in order, so `class Point { x: int; y: int; }` is built as
@@ -289,9 +289,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   co.).  The semantics are unchanged.  An `int?[3]` holds its elements inline, 16 bytes
   each, and a tuple holds an `int?` as a presence slot and a value slot (tuple kind
   `PAYKAN_TUPLE_OPT`).  In #96's benchmark
-  (`benchmarks/optional_stack.pkn`: 10M pushes onto a `Stack<int>`, then 10M pops through
-  `pop() -> T?`) the program makes 16 allocations instead of 20,000,016, and popping
-  through the `int?` takes as long as popping a plain `int`.
+  (`benchmarks/optional_stack.pkn`: 10M pushes onto a `Stack<int>` and 10M pops through
+  `pop() -> T?`) popping through the `int?` allocates nothing and takes as long as popping
+  a plain `int`.
 
 ### Removed
 

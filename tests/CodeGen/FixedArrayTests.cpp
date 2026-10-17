@@ -1,10 +1,9 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Fixed-size arrays, `T[n]` (docs/language/05-arrays.md, "Fixed-size
-// arrays"): values held in `mem` slots, copied whole, read and written in
-// place.  Every test runs on the backend the suite is built for (llvm and c)
-// and checks zero live heap blocks.  The index panic is a death test in
-// DriverTests.cpp.
+// Fixed-size arrays, `T[n]` (docs/language/05-arrays.md): values held in `mem`
+// slots, copied whole, read and written in place.  Every test runs on the
+// backend the suite is built for (llvm and c) and checks zero live heap blocks.
+// The index panic is a death test in DriverTests.cpp.
 
 #include "CodeGenTestUtils.h"
 

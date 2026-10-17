@@ -182,7 +182,8 @@ path of the executable for a program made with `paykan build`. The real argument
 The arguments are a `view`, so `main` reads them but does not keep them: an argument can be
 printed, compared, parsed (`int(args[1])`), passed to a `view` parameter or joined into a new
 string, but `name = args[1];` is an error (`'args' is a 'view' parameter; it cannot be
-stored, only read or passed to a 'view' parameter`).
+stored, only read or passed to a 'view' parameter`). To keep one, take a string of the
+program's own: `name = args[1].toString();`.
 
 ## Project: `tasks` remembers
 

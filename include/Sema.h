@@ -295,7 +295,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   ast::Type *resolveType(ast::Type *ty, ast::SourceLocation loc,
                          const std::string &context);
 
-  // -- Fixed-size arrays (docs/language/05-arrays.md, "Fixed-size arrays")
+  // -- Fixed-size arrays (docs/language/05-arrays.md)
   //
   // For now only a local variable, a parameter, a result and a field have a
   // `T[n]` type (set around the resolveType of its annotation, which takes

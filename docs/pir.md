@@ -197,10 +197,12 @@ A **program** is the list of PIR modules reachable from the main module
 concern.  The entry point is the main module's `@main`, which takes either no
 parameters or the program's arguments as a slice, `(ptr, i64)`: the address of
 their strings' `box` slots and their number.  It returns `i64`.  The backend's
-entry code (C's `main`, the JIT's or a native executable's entry) makes the
-slice with `Paykan_args_new(argc, argv, &count)` before it calls `@main`, and
-drops it with `Paykan_args_free(args, count)` after: `@main` borrows the
-strings, as any slice parameter borrows its elements.
+entry code makes the slice before it calls `@main` and drops it after:
+`@main` borrows the strings, as any slice parameter borrows its elements.  An
+executable's `main(argc, argv)` (the C backend's, and the llvm backend's for
+`paykan build`) makes it with `Paykan_args_new(argc, argv, &count)` and drops
+it with `Paykan_args_free(args, count)`; the llvm backend's JIT boxes the
+same strings itself.
 
 ## 5. Classes, layouts and vtables
 
@@ -502,8 +504,8 @@ extern vtable PaykanFile_vtable     extern vtable PaykanError_vtable
 extern vtable PaykanTuple_vtable
 ```
 
-The entry code, not PIR, calls the two functions that make and drop the
-program's arguments (§4):
+An executable's entry code, not PIR, calls the two functions that make and
+drop the program's arguments (§4):
 
 ```
 Paykan_args_new(int argc, char **argv, int64_t *count) -> PaykanShared **

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 //
 // AST -> PIR lowering: fixed-size arrays (`T[n]`,
-// docs/language/05-arrays.md, "Fixed-size arrays").
+// docs/language/05-arrays.md).
 //
 // A fixed-size array is a value held in memory, never in an SSA value: a
 // variable is a `mem` local of its bytes (an `inout` one a `ptr` local
