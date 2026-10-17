@@ -1027,6 +1027,50 @@ TEST(Pkm, FunctionTypesAcrossModules) {
   fs::remove_all(dir);
 }
 
+// An instantiation whose type argument is a function type keeps its name
+// across modules: the `>` of the `->` is not the instantiation's closing
+// bracket, and the arguments after it are still its own (`Pair<(int) ->
+// int, Str>` names one struct, `Map<(int, int) -> int, Str>` one class).
+TEST(Pkm, FunctionTypeArgumentsInInstantiationNames) {
+  REQUIRE_BACKEND();
+  auto dir = fs::temp_directory_path() /
+             ("pkm_fntype_args_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  fs::create_directories(dir / "lib");
+  writeFile(dir / "lib" / "shapes.pkn",
+            "struct Pair<A, B> { a: A; b: B; }\n"
+            "impl Pair<A, B> { view fn first() -> view A { return self.a; } }\n"
+            "class Map<K, V> { k: K; v: V;\n"
+            "  view fn key() -> view K { return self.k; } }\n"
+            "fn makePair() -> Pair<(int, int) -> int, Str> {\n"
+            "  return Pair<(int, int) -> int, Str>(fn(a: int, b: int) -> int "
+            "{ return a * b; }, \"mul\"); }\n"
+            "fn makeMap() -> Map<(int) -> int, Str> {\n"
+            "  return Map<(int) -> int, Str>(fn(a: int) -> int { return a * "
+            "2; }, \"dbl\"); }\n"
+            "fn apply(p: view Pair<(int, int) -> int, Str>, x: int) -> int "
+            "{ return p.a(x, x); }\n");
+  writeFile(dir / "main.pkn",
+            "import lib::shapes;\n"
+            "fn main() -> int {\n"
+            "  p = shapes::makePair();\n"
+            "  q = shapes::Pair(fn(x: int) -> int { return x + 1; }, 2);\n"
+            "  m = shapes::makeMap();\n"
+            "  r: shapes::Pair<(int, int) -> int, Str> = p;\n"
+            "  println(Str(shapes::apply(p, 3)) + \" \" + p.b + \" \" + "
+            "Str(q.a(q.b)) + \" \" + Str(m.key()(3)) + \" \" + m.v + \" "
+            "\" + Str(r.first()(2, 2)));\n"
+            "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  auto src = paykan("--track-heap main.pkn");
+  ASSERT_EQ(src.exitCode, 0) << src.out;
+  EXPECT_TRUE(contains(src.out, "9 mul 3 6 dbl 4\n")) << src.out;
+  EXPECT_TRUE(contains(src.out, "live blocks       : 0")) << src.out;
+  fs::remove_all(dir);
+}
+
 // A generic struct is a template like a generic class: its module, and a
 // module that instantiates it, are built from source each time, and the
 // instantiation is one struct whoever makes it.

@@ -109,11 +109,15 @@ static ast::Type *parseExportedType(ast::ASTContext &ctx,
     while (pos < text.size() && text[pos] != ',' && text[pos] != ')' &&
            text[pos] != '[' && text[pos] != '?') {
       if (text[pos] == '<') {
-        // Instantiation name: skip to the matching '>'.
+        // Instantiation name: skip to the matching '>' (the '>' of a
+        // function type's '->' among the arguments is not one).
         int depth = 0;
         do {
           if (text[pos] == '<')
             ++depth;
+          else if (text[pos] == '-' && pos + 1 < text.size() &&
+                   text[pos + 1] == '>')
+            ++pos;
           else if (text[pos] == '>')
             --depth;
           ++pos;
@@ -1010,6 +1014,8 @@ bool Sema::parseInstantiationName(const std::string &name, std::string &base,
     const char c = name[i];
     if (c == '<' || c == '(')
       ++depth;
+    else if (c == '-' && name[i + 1] == '>')
+      ++i; // a function type's '->' closes nothing
     else if (c == '>' || c == ')')
       --depth;
     else if (c == ',' && depth == 0) {

@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A generic class or struct whose method instantiates its template with an ever-growing
   type argument (`Deep<Deep<T>>`) is now reported (`exceeds the maximum instantiation
   depth`) instead of instantiating without end.
+- Assigning `self` in a class method (`self = C(1)`) is now an error (`cannot assign to
+  'self'`): `self` names the object the method was called on, and the assignment changed
+  nothing the caller could see.
 - Function types and lambdas (docs/language/15-function-types.md, design in
   docs/design/function-types.md): `(int, float) -> bool` is the type of a function
   value, with the parameters' modes part of it (`(view Str, inout int) -> bool`) and the
