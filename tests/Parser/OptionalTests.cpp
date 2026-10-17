@@ -45,10 +45,11 @@ TEST(Optional, OptionalArrayAndArrayOfOptional) {
   )");
   ASSERT_TRUE(ok);
   std::string d = dumpAST(*driver);
-  for (const char *e : {"OptionalType <3:11-3:18>\n    |   | `-FixedArrayType "
-                        "<3:11-3:17> 3\n",
-                        "FixedArrayType <4:11-4:18> 2\n    |   | `-OptionalType "
-                        "<4:11-4:15>\n"})
+  for (const char *e :
+       {"OptionalType <3:11-3:18>\n    |   | `-FixedArrayType "
+        "<3:11-3:17> 3\n",
+        "FixedArrayType <4:11-4:18> 2\n    |   | `-OptionalType "
+        "<4:11-4:15>\n"})
     EXPECT_NE(d.find(e), std::string::npos) << e << "\n" << d;
 }
 

@@ -538,8 +538,8 @@ TEST(ASTInterchange, FixedArrayTypes) {
   const std::string text =
       "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block (decl "
       "(var \"a\" (fixed-array-type (fixed-array-type (named-type \"int\") "
-      "3) 2) (array))) (decl (var \"b\" (fixed-array-type (named-type "
-      "\"int\") _) (array)))))))";
+      "3) 2) (array-repeat (array-repeat (int 0) 3) 2))) (decl (var \"b\" "
+      "(fixed-array-type (named-type \"int\") _) (array (int 1))))))))";
   ast::ASTContext ctx;
   std::string error;
   ast::TranslationUnit *tu = read(text, ctx, error);
@@ -574,6 +574,54 @@ TEST(ASTInterchange, FixedArrayTypes) {
     EXPECT_NE(error.find(c.Error), std::string::npos)
         << c.Type << ": " << error;
   }
+}
+
+// `[v; n]` is `(array-repeat EXPR INT)`, the value and its count (at least
+// 1), and reads back as the same literal.
+TEST(ASTInterchange, RepeatArrayLiterals) {
+  parser::ParserDriver driver("recursive-descent");
+  auto path =
+      std::filesystem::temp_directory_path() /
+      ("paykan_interchange_repeat_" + std::to_string(::getpid()) + ".pkn");
+  {
+    std::ofstream(path) << "fn main() -> int {\n"
+                           "  xs = [0; 3];\n"
+                           "  x = 1;\n"
+                           "  g = [[x + 1; 2]; 16384];\n"
+                           "  return 0;\n"
+                           "}\n";
+  }
+  ASSERT_EQ(driver.parseFile(path.string()), 0);
+  std::filesystem::remove(path);
+  std::string text = write(*driver.getRoot());
+  std::string flat; // one line: every run of whitespace is one space
+  for (char c : text)
+    if (!std::isspace(static_cast<unsigned char>(c)))
+      flat += c;
+    else if (!flat.empty() && flat.back() != ' ')
+      flat += ' ';
+  for (const char *e :
+       {"(array-repeat @2:8-2:14 (int @2:9-2:10 0) 3)",
+        "(array-repeat @4:7-4:26 (array-repeat @4:8-4:18 (binary @4:9-4:14 add "
+        "(ident @4:9-4:10 \"x\") (int @4:13-4:14 1)) 2) 16384)"})
+    EXPECT_NE(flat.find(e), std::string::npos) << e << "\n" << text;
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *back = read(text, ctx, error);
+  ASSERT_NE(back, nullptr) << error;
+  std::string d = dump(back);
+  EXPECT_EQ(d, dump(driver.getRoot()));
+  EXPECT_NE(d.find("ArrayLiteralExpr <2:8-2:14> 3 copies\n"), std::string::npos)
+      << d;
+  EXPECT_NE(d.find("16384 copies\n"), std::string::npos) << d;
+  EXPECT_EQ(write(*back), text);
+  // A list of one element stays a list.
+  std::string one = "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ "
+                    "(block (expr (array (int 7)))))))";
+  ast::TranslationUnit *list = read(one, ctx, error);
+  ASSERT_NE(list, nullptr) << error;
+  EXPECT_NE(dump(list).find("ArrayLiteralExpr 1 elements\n"), std::string::npos)
+      << dump(list);
 }
 
 TEST(ASTInterchange, LetLocals) {

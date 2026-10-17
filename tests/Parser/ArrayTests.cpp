@@ -277,9 +277,8 @@ TEST(Array, RepeatLiteralErrors) {
     auto r = parseWithDiags(std::string("fn main() -> int {\n  xs = ") +
                             c.Literal + ";\n  return 0;\n}\n");
     EXPECT_FALSE(r.Ok) << c.Literal;
-    EXPECT_NE(r.Text.find(c.Error), std::string::npos)
-        << c.Literal << "\n"
-        << r.Text;
+    EXPECT_NE(r.Text.find(c.Error), std::string::npos) << c.Literal << "\n"
+                                                       << r.Text;
   }
 }
 

@@ -127,7 +127,7 @@ TEST(Generics, StackOfStrAndInt) {
 
     impl Stack<T> {
       fn __init__(fill: T) {
-        self.items = [fill, fill, fill, fill];
+        self.items = [fill; 4];
         self.n = 0;
       }
     }

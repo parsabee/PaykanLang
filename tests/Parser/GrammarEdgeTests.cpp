@@ -21,7 +21,8 @@ TEST(GrammarEdge, LeadingCommaInArgumentListRejected) {
 
 TEST(GrammarEdge, LeadingCommaInArrayLiteralRejected) {
   EXPECT_FALSE(parse("fn main() -> int { x: int[2] = [, 1]; return 0; }").Ok);
-  EXPECT_FALSE(parse("fn main() -> int { x: int[2] = [, 1; 2]; return 0; }").Ok);
+  EXPECT_FALSE(
+      parse("fn main() -> int { x: int[2] = [, 1; 2]; return 0; }").Ok);
   EXPECT_TRUE(parse("fn main() -> int { x: int[2] = [1, 2]; y = [1; 2]; "
                     "z = []; return 0; }")
                   .Ok);

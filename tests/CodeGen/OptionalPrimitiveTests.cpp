@@ -273,8 +273,8 @@ TEST(OptionalPrimitive, SmallOptionalsKeepTheirNeighbours) {
       println(m.f); println(m.d); println(m.s); println(m.e);
       m.c = False; m.b = None; m.n = 9;
       println(m.a); println(m.b); println(m.c); println(m.d); println(Str(m.n));
-      bs: bool?[8] = [True, True, True, True, True, True, True, True];
-      cs: char?[8] = ['a', 'a', 'a', 'a', 'a', 'a', 'a', 'a'];
+      bs: bool?[8] = [True; 8];
+      cs: char?[8] = ['a'; 8];
       i: int = 0;
       while (i < 8) {
         if (i % 4 == 0) { bs[i] = None; cs[i] = 'z'; }
@@ -478,7 +478,7 @@ TEST(OptionalPrimitive, ArraysHoldOptionalsInline) {
   LeakGuard g;
   auto r = compileAndRun(R"pkn(
     fn main() -> int {
-      xs: int?[9] = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+      xs: int?[9] = [0; 9];
       i = 0;
       while (i < xs.len()) {
         if (i % 3 == 0) { xs[i] = None; } else { xs[i] = i; }
@@ -562,7 +562,7 @@ TEST(OptionalPrimitive, GenericStackPopsAnOptional) {
 
     impl Stack<T> {
       fn __init__(fill: T) {
-        self.items = [fill, fill, fill, fill, fill, fill, fill, fill];
+        self.items = [fill; 8];
         self.n = 0;
       }
     }
