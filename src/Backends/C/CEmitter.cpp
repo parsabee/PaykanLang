@@ -133,6 +133,8 @@ const RuntimeProto kRuntimeProtos[] = {
     {names::kPaykanStringEquals, kInt64, {kRtObjPtr, kRtBoxPtr}},
     {names::kPaykanStringToString, kRtBoxPtr, {kRtObjPtr}},
     {names::kPaykanStringLength, kInt64, {kRtObjPtr}},
+    {names::kPaykanIntHash, kInt64, {kInt64}},
+    {names::kPaykanStringHash, kInt64, {kRtObjPtr}},
     {names::kPaykanTupleNew, kRtTupPtr, {kInt64, kConstUint8Ptr}},
     {names::kPaykanTupleGet, kInt64, {kRtTupPtr, kInt64}},
     {names::kPaykanTupleSet, kVoid, {kRtTupPtr, kInt64, kInt64}},

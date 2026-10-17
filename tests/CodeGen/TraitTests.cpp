@@ -152,3 +152,28 @@ TEST(Traits, ScalarsShow) {
   EXPECT_EQ(r.StdOut, "42 2.5 True z\n<42><2.5><True><z><s>\n");
   guard.expectNoLeaks("scalar Show");
 }
+
+// `hash()` of int, bool, char and Str (the builtin `Hashable`): equal values
+// hash alike (a char and a bool as their codes), and a class's own `hash`
+// meets a `T: Hashable` bound.
+TEST(Traits, BuiltinHashable) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"pkn(
+    class Key { id: int; }
+    impl Hashable for Key { view fn hash() -> int { return self.id.hash(); } }
+    fn h<T: Hashable>(x: view T) -> int { return x.hash(); }
+    fn main() -> int {
+      n = 97;
+      one = 1;
+      s = "ab";
+      println(Str(h(n) == n.hash()) + " " + Str(h(1) == h(2)) + " " +
+              Str(h('a') == h(n)) + " " + Str(True.hash() == one.hash()));
+      println(Str((s + "c").hash() == "abc".hash()) + " " +
+              Str(h(s) == h("ba")) + " " + Str(h(Key(7)) == h(7)));
+      return 0;
+    }
+  )pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "True False True True\nTrue False True\n");
+  guard.expectNoLeaks("builtin Hashable");
+}

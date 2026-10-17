@@ -1,0 +1,64 @@
+// ::collections List<T>: growth, indexing, insert/remove, search, copies.
+import ::collections;
+
+class Point {
+  x: int;
+  y: int;
+  view fn toString() -> Str { return "(" + Str(self.x) + "," + Str(self.y) + ")"; }
+  view fn equals(other: Obj) -> bool {
+    match other {
+      p: Point { return p.x == self.x && p.y == self.y; }
+      _ { return False; }
+    }
+  }
+}
+
+fn main() -> int {
+  xs = collections::List<int>();
+  println(Str(xs.len()) + " " + Str(xs.isEmpty()));
+  i: int = 0;
+  while (i < 10) {
+    xs.push(i * i);
+    i = i + 1;
+  }
+  println(collections::listToString(xs));
+  println(Str(xs.len()) + " " + Str(xs.get(3)) + " " + Str(xs.last()));
+  xs.set(0, -1);
+  xs.insert(0, 100);
+  xs.insert(xs.len(), 200);
+  xs.insert(5, 55);
+  println(collections::listToString(xs));
+  println(Str(xs.removeAt(0)) + " " + Str(xs.removeAt(xs.len() - 1)) + " " +
+          Str(xs.pop()));
+  println(Str(xs.indexOf(55)) + " " + Str(xs.indexOf(7)) + " " +
+          Str(xs.contains(16)) + " " + Str(xs.remove(55)) + " " +
+          Str(xs.remove(55)));
+  xs.reverse();
+  println(collections::listToString(xs));
+
+  words = collections::listOf(["pear", "fig", "apple"]);
+  copy = words.copy();
+  copy.push("kiwi");
+  words.set(1, "plum");
+  println(collections::listToString(words) + " " +
+          collections::listToString(copy));
+  words.clear();
+  println(Str(words.len()) + " " + Str(words.isEmpty()));
+
+  pts = collections::List<Point>();
+  pts.push(Point(1, 2));
+  pts.push(Point(3, 4));
+  println(collections::listToString(pts) + " " + Str(pts.contains(Point(3, 4))) +
+          " " + Str(pts.indexOf(Point(9, 9))));
+
+  // A list of optionals and a list of lists.
+  maybe = collections::List<Str?>();
+  maybe.push("a");
+  maybe.push(None);
+  println(Str(maybe.len()) + " " + Str(maybe.get(1) == None));
+  grid = collections::List<collections::List<int>>();
+  grid.push(collections::listOf([1, 2]));
+  grid.push(collections::listOf([3]));
+  println(Str(grid.get(0).len() + grid.get(1).len()));
+  return 0;
+}

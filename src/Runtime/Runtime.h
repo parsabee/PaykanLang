@@ -462,6 +462,17 @@ void PaykanBuffer_reserve(void *t, void *b, int64_t n);
 void PaykanBuffer_grow(void *t, void *b, int64_t by);
 void PaykanBuffer_shrink(void *t, void *b, int64_t by);
 
+// -- Hash: the builtin `Hashable` trait's `hash()` of the scalars and Str
+//
+// The same value always hashes the same within and across runs, on every
+// backend; values that are `==` hash alike.  The bits are well mixed, so a
+// table may index by the low bits of a hash.
+
+/// `n.hash()` of an int, and of a bool (0 or 1) or char (its code).
+int64_t PaykanInt_hash(int64_t n);
+/// `s.hash()` of a Str: of its bytes.
+int64_t PaykanString_hash(PaykanObject *self);
+
 // -- Runtime panics
 
 /// Print a diagnostic and abort: the lowering's trap target for integer `/`
@@ -484,6 +495,14 @@ PAYKAN_NORETURN void Paykan_panic_int_to_char(int64_t value);
 /// Print a diagnostic naming @p index and @p len and abort: a fixed-size
 /// array's element read or written at an index outside 0..len-1.
 PAYKAN_NORETURN void Paykan_panic_index(int64_t index, int64_t len);
+
+/// Print `paykan: <message>` and abort: the standard library's `native fn`
+/// for a broken precondition (`pop` on an empty list, say).
+PAYKAN_NORETURN void Paykan_panic_message(PaykanObject *message);
+/// Paykan_panic_message as a generic `native fn` with a result of type @p t
+/// (`-> T`), for where the program needs a value: it never stores one.
+PAYKAN_NORETURN void Paykan_panic_value(void *t, void *out,
+                                        PaykanObject *message);
 
 // -- I/O builtins
 

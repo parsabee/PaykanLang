@@ -21,6 +21,8 @@ instead; its chapters link here for the details.
 10. [Optional types](10-optionals.md): `T?`, `None` and unwrapping.
 11. [Generics](11-generics.md): generic classes and functions, and inference.
 12. [Traits](12-traits.md): traits, `impl Trait for Type` and bounds on type parameters.
+13. [The standard library](13-standard-library.md): `::collections` (lists, linked lists,
+    stacks, queues, hash maps and sets, priority queues) and `::memory`.
 
 The [grammar](../grammar.md) is the specification of the concrete syntax that every
 frontend implements.

@@ -17,6 +17,9 @@ argument must implement.
 - A class implements every trait its superclasses implement. Every class implements the
   built-in trait `Show` (`view fn toString() -> Str`) through `Obj`, and so do `int`,
   `float`, `bool` and `char`: `n.toString()` is `Str(n)`.
+- The built-in trait `Hashable` (`view fn hash() -> int`) is implemented by `int`, `bool`,
+  `char` and `Str`, and by a class with an `impl Hashable for` block. The standard
+  library's hash tables take `Hashable` keys (see [Hashable](#hashable)).
 - `fn f<T: Show + Into<int>>(...)` and `class Box<T: Named>` bound their type
   parameters. Each instantiation checks its type arguments against the bounds.
 - A trait is not a type: `x: Named` is an error.
@@ -79,6 +82,56 @@ greet("s");           // error: 'Str' does not implement trait 'Named', which 'g
 Bounds are checked where a template is instantiated. The body is still checked once per
 instantiation (see `11-generics.md`), so it may call what the bound requires. A bound
 may name another type parameter: `<T, C: Into<T>>`.
+
+## Hashable
+
+`Hashable` is a built-in trait, like `Show`:
+
+```pkn
+trait Hashable { view fn hash() -> int; }
+```
+
+`int`, `bool`, `char` and `Str` implement it. Their `hash()` is the same for equal values,
+in every run and on every backend, and its bits are well mixed: a `bool` hashes as `0` or
+`1` does, and a `char` as its code does. A `float` does not implement it, and neither does
+an enum, a tuple or an optional. A class implements it with an `impl Hashable for` block.
+Values that are `==` must have the same hash, so a class that overrides `equals` hashes
+the same fields that `equals` compares:
+
+```pkn
+class Point {
+  x: int;
+  y: int;
+  view fn equals(other: Obj) -> bool {
+    match other {
+      p: Point { return p.x == self.x && p.y == self.y; }
+      _ { return False; }
+    }
+  }
+}
+
+impl Hashable for Point {
+  view fn hash() -> int { return (self.x * 31 + self.y).hash(); }
+}
+
+fn sameHash<T: Hashable>(a: view T, b: view T) -> bool { return a.hash() == b.hash(); }
+
+fn main() -> int {
+  println(Str(sameHash(Point(1, 2), Point(1, 2))) + " " + Str(sameHash("ab", "ab")) +
+          " " + Str(sameHash(7, 8)));
+  return 0;
+}
+```
+
+Output:
+
+```
+True True False
+```
+
+The standard library's `HashMap<K, V>` and `HashSet<K>` require `K: Hashable` (see
+[the standard library](13-standard-library.md)). Declaring a trait named `Hashable` is an
+error, as for `Show`.
 
 ## Semantic Checks
 

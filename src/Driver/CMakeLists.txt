@@ -6,6 +6,10 @@
 # paykan        -- the driver executable with every plugin of this build.
 
 add_library(paykan_driver STATIC main.cpp Options.cpp)
+# Where `paykan` looks for its installed standard library (CMakeLists.txt).
+target_compile_definitions(paykan_driver PRIVATE
+    PAYKAN_STDLIB_DIR_FROM_BINDIR="${PAYKAN_STDLIB_DIR_FROM_BINDIR}"
+)
 target_link_libraries(paykan_driver
     PUBLIC  paykan_ast_printer
             paykan_sema

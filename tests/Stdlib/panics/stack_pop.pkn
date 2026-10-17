@@ -1,0 +1,8 @@
+// expect-panic: pop from an empty Stack
+import ::collections;
+
+fn main() -> int {
+  s = collections::Stack<int>();
+  s.pop();
+  return 0;
+}

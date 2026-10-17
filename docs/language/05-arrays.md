@@ -6,7 +6,7 @@ holds it, and assigning it copies its elements. A function takes an array of any
 through a slice parameter, `view T[]` or `inout T[]`.
 
 Storage that grows is the standard library's: see `List<T>` and `Buffer<T>` in
-[PaykanLang_StdLib](https://github.com/parsabee/PaykanLang_StdLib).
+[the standard library](13-standard-library.md).
 
 ---
 

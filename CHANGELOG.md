@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The standard library ships with the compiler (docs/language/13-standard-library.md), in
+  `stdlib/`: `::collections` has `List<T>`, `LinkedList<T>` (doubly linked and circular
+  through a sentinel node, its nodes linked by index so no reference cycles form),
+  `Stack<T>` and `Queue<T>` (on a `LinkedList<T>`), `HashMap<K: Hashable, V>` and
+  `HashSet<K: Hashable>` (separate chaining), and `MinPriorityQueue<T>` and
+  `MaxPriorityQueue<T>` (binary heaps of elements pushed with an `int` priority, equal
+  priorities popping in push order); `::memory` has `Buffer<T>`.  A broken precondition
+  panics (`pop from an empty Stack`).  The build compiles each module to a `.pkm` with the
+  `paykan` it built and stages it with its source in `lib/paykan/stdlib/<version>/` next
+  to `bin/paykan`; `cmake --install` installs them in `<prefix>/lib/paykan/stdlib/<version>/`
+  and the release packages include them.  `-DPAYKAN_BUILD_STDLIB=OFF` leaves the library
+  out, and it is off by default when cross-compiling.  The `stdlib` test suite
+  (`scripts/stdlib_tests.py`) runs `tests/Stdlib` on every backend.
+- A system import (`import ::collections;`) finds the installed standard library: it
+  looks in `$PAYKAN_STDLIB` when it is set, then in `<prefix>/lib/paykan/stdlib/<version>/`
+  next to the `paykan` executable when that exists, then in `<source-root>/stdlib`.
+- The built-in trait `Hashable` (docs/language/12-traits.md, "Hashable"):
+  `view fn hash() -> int`, implemented by `int`, `bool`, `char` and `Str` and by a class
+  with an `impl Hashable for` block.  The hash of equal values is equal on every run and
+  backend: the runtime's `PaykanInt_hash` (a `bool` or `char` hashes as its `int` value)
+  and `PaykanString_hash` (FNV-1a over the bytes), both ending in the SplitMix64
+  finalizer.  Declaring a trait named `Hashable` is an error.
+- Runtime functions for the standard library's panics, reached through `native fn`s:
+  `Paykan_panic_message(Str)` prints `paykan: <message>` and aborts, and
+  `Paykan_panic_value`, the same as a generic `native fn` with a result, for where a value
+  is due.
 - Arrays are `T[n]` (docs/language/05-arrays.md): `xs: int[3] = [1, 2, 3];` holds three
   ints inline. An array is a value, so `ys = xs` copies it, and its one method is `len()`.
   A literal for a `T[n]` has exactly `n` elements. An index out of bounds is an error when

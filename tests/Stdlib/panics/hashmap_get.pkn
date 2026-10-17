@@ -1,0 +1,9 @@
+// expect-panic: HashMap.get of a key it does not have
+import ::collections;
+
+fn main() -> int {
+  m = collections::HashMap<Str, int>();
+  m.put("a", 1);
+  println(Str(m.get("b")));
+  return 0;
+}

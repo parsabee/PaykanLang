@@ -59,6 +59,8 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanStringEquals, {{kObj, kBox}, kI64}},
     {kPaykanStringToString, {{kObj}, kBox}},
     {kPaykanStringLength, {{kObj}, kI64}},
+    {kPaykanIntHash, {{kI64}, kI64}},
+    {kPaykanStringHash, {{kObj}, kI64}},
     {kPaykanTupleNew, {{kI64, kPtr}, kObj}},
     {kPaykanTupleGet, {{kObj, kI64}, kI64}},
     {kPaykanTupleSet, {{kObj, kI64, kI64}, kVoid}},

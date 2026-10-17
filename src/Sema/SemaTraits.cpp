@@ -42,25 +42,32 @@ std::string fnSignature(bool view, const std::string &name,
 } // namespace
 
 void Sema::registerBuiltinTraits() {
-  // trait Show { view fn toString() -> Str; }, implemented by Obj and the
-  // scalars (whose `toString` is their `Str` conversion).
-  auto *toString = Ctx.make<ast::FuncDecl>(
-      ast::SourceLocation(), Ctx.intern(names::kMethodToString),
-      std::vector<ast::Param>{}, Ctx.getStrTy(), nullptr);
-  toString->setView(true);
-  auto *show = Ctx.make<ast::TraitDecl>(ast::SourceLocation(),
-                                        Ctx.intern(names::kTraitShow),
-                                        std::vector<const std::string *>{},
-                                        std::vector<ast::FuncDecl *>{toString});
-  TraitInfo &info = Traits[names::kTraitShow];
-  info.Decl = show;
-  info.IsBuiltin = true;
-  for (ast::Type *t : {static_cast<ast::Type *>(Ctx.getObjTy()),
-                       static_cast<ast::Type *>(Ctx.getIntTy()),
-                       static_cast<ast::Type *>(Ctx.getFloatTy()),
-                       static_cast<ast::Type *>(Ctx.getBoolTy()),
-                       static_cast<ast::Type *>(Ctx.getCharTy())})
-    TraitImpls[t].push_back({&info, {}});
+  // `trait <name> { view fn <method>() -> <ret>; }`, implemented by @p impls.
+  auto builtin = [&](const char *name, const char *method, ast::Type *ret,
+                     std::initializer_list<ast::Type *> impls) {
+    auto *fn =
+        Ctx.make<ast::FuncDecl>(ast::SourceLocation(), Ctx.intern(method),
+                                std::vector<ast::Param>{}, ret, nullptr);
+    fn->setView(true);
+    auto *decl = Ctx.make<ast::TraitDecl>(
+        ast::SourceLocation(), Ctx.intern(name),
+        std::vector<const std::string *>{}, std::vector<ast::FuncDecl *>{fn});
+    TraitInfo &info = Traits[name];
+    info.Decl = decl;
+    info.IsBuiltin = true;
+    for (ast::Type *t : impls)
+      TraitImpls[t].push_back({&info, {}});
+  };
+  // Show is implemented by Obj and the scalars (whose `toString` is their
+  // `Str` conversion).
+  builtin(names::kTraitShow, names::kMethodToString, Ctx.getStrTy(),
+          {Ctx.getObjTy(), Ctx.getIntTy(), Ctx.getFloatTy(), Ctx.getBoolTy(),
+           Ctx.getCharTy()});
+  // Hashable by int, bool, char and Str (whose `hash` is the runtime's
+  // PaykanInt_hash / PaykanString_hash); a class implements it with an
+  // `impl Hashable for` block.  Not float, whose `==` is not an equivalence.
+  builtin(names::kTraitHashable, names::kMethodHash, Ctx.getIntTy(),
+          {Ctx.getIntTy(), Ctx.getBoolTy(), Ctx.getCharTy(), Ctx.getStrTy()});
 }
 
 bool Sema::declareTraits(ast::TranslationUnit *tu) {

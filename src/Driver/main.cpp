@@ -5,6 +5,7 @@
 #include "ASTPrinter.h"
 #include "DiagEngine.h"
 #include "ModuleName.h"
+#include "ModuleUtils.h"
 #include "Names.h"
 #include "Options.h"
 #include "ParserDriver.h"
@@ -352,6 +353,13 @@ int main(int argc, char *argv[]) {
   paykan::plugin::DiscoveryOptions discovery =
       paykan::plugin::discoveryOptionsFromEnvironment();
   discovery.ExplicitFiles = opts.Plugins;
+  // The installed standard library, next to the executable as the system
+  // plugin directory is.
+  if (!discovery.ExecutableDir.empty())
+    paykan::module_utils::installedStdlibDir() =
+        (std::filesystem::path(discovery.ExecutableDir) /
+         PAYKAN_STDLIB_DIR_FROM_BINDIR)
+            .lexically_normal();
   if (opts.NoPlugins)
     discovery.DisableDiscovery = true;
   const paykan::plugin::LoadReport &plugins =

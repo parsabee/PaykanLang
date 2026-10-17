@@ -11,7 +11,7 @@ replaced by `::` and the `.pkn` extension dropped) is the module's canonical nam
 - `import modulePath as Alias;` — bring declarations in under `Alias::name`.
 - `import base::{a, b as c};` — import several modules of one directory at once.
 - `import ::modulePath;` — a system import, looked up in the standard-library directory
-  instead of the source root (no standard library ships yet).
+  instead of the source root (see [the standard library](13-standard-library.md)).
 - Module paths use `::` as a separator, mirroring directory structure.
 - There are no visibility modifiers. Everything declared at the top level of a module is
   importable.
@@ -98,12 +98,14 @@ module path.
 
 A leading `::` marks a **system** import: `import ::io;` (or `import ::{io, fs};`) looks for
 `io.pkn` in the standard-library directory instead of the source root. That directory is
-`$PAYKAN_STDLIB` when the environment variable is set, and `<source-root>/stdlib` otherwise.
-A system module is otherwise an ordinary module, and it is cached under
-`.paykan_cache/@system/` (see [Module Files](#module-files)).
+the first of `$PAYKAN_STDLIB` when the environment variable is set, the installed standard
+library (`<prefix>/lib/paykan/stdlib/<version>/` next to the `paykan` executable's
+`<prefix>/bin/`) when it exists, and `<source-root>/stdlib`. A system module is otherwise an
+ordinary module, and it is cached under `.paykan_cache/@system/` (see
+[Module Files](#module-files)).
 
-No standard library ships with PaykanLang yet (it is planned, #113), so a system import only
-finds modules you provide yourself in that directory. The builtins (`println`, `Str`, `File`,
+The standard library ships with the compiler: `::collections` and `::memory` (see
+[the standard library](13-standard-library.md)). The builtins (`println`, `Str`, `File`,
 `open`, `Stdin`, ...) need no import.
 
 ---

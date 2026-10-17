@@ -8,12 +8,14 @@
 # The package holds what `cmake --install` installs, under /usr: bin/paykan,
 # the runtime archive and its headers (include/paykan), the C plugin
 # interface (plugin_api.h, plugin_api_version.h), the find_package(Paykan)
-# CMake package and the empty system plugin directory
-# lib/paykan/plugins/<version>, plus the license as
+# CMake package, the empty system plugin directory
+# lib/paykan/plugins/<version> and the standard library
+# lib/paykan/stdlib/<version>, plus the license as
 # share/doc/paykanlang/copyright.  The frontend test support
 # (PaykanTestSupport.cmake, its own install component) is left out.
-# `paykan` finds the runtime and the plugin directory relative to its own
-# executable, so /usr/bin/paykan uses /usr/lib and /usr/include.
+# `paykan` finds the runtime, the plugin directory and the standard library
+# relative to its own executable, so /usr/bin/paykan uses /usr/lib and
+# /usr/include.
 #
 # The version is PAYKAN_VERSION, with a pre-release label in Debian's form
 # ("1.2.3-rc1" becomes "1.2.3~rc1", which sorts before "1.2.3").  The

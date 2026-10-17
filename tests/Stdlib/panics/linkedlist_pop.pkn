@@ -1,0 +1,10 @@
+// expect-panic: popFront on an empty LinkedList
+import ::collections;
+
+fn main() -> int {
+  l = collections::LinkedList<int>();
+  l.pushBack(1);
+  l.popBack();
+  l.popFront();
+  return 0;
+}
