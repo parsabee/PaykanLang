@@ -66,7 +66,6 @@ add_executable(sema_tests
     Sema/ClassTests.cpp
     Sema/ModuleTests.cpp
     Sema/ImportTypeTests.cpp
-    Sema/ArrayTests.cpp
     Sema/FixedArrayTests.cpp
     Sema/EnumTests.cpp
     Sema/GenericsTests.cpp
@@ -407,7 +406,6 @@ endif()
 paykan_test_suite(runtime PAYKAN_TEST_SUITE_runtime)
 if(PAYKAN_TEST_SUITE_runtime)
 add_executable(runtime_tests
-    Runtime/ArrayTests.cpp
     Runtime/BufferTests.cpp
     Runtime/DeferredDestroyTests.cpp
     Runtime/EqualsNullTests.cpp

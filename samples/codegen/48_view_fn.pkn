@@ -63,6 +63,6 @@ fn main() -> int {
   let box = Box<int>(7);
   let names = ["a", "b"];
   println("box " + Str(box.get()) + ", names " + Str(names.len()) +
-          ", printable " + Str(names.toString().len() > 0));
+          ", printable " + Str(names[0].toString().len() > 0));
   return 0;
 }

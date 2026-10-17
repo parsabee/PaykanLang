@@ -41,11 +41,10 @@ fn find(head: Node?, key: int) -> Node? {
 ## Quick Summary
 
 - `T?` is written as a suffix and is allowed in every type position: variables, fields,
-  parameters, return types, match arms, array element types (`Node?[]`) and arrays
-  themselves (`int[]?`).
-- Reference types (classes, `Str`, arrays) and the primitives `int`, `float`, `bool` and
-  `char` can be optional (see [Optional Primitives](#optional-primitives)). `Enum?`, `void?`,
-  `T??` and optional tuples are rejected.
+  parameters, return types, match arms and array element types (`Node?[3]`).
+- Reference types (classes, `Str`) and the primitives `int`, `float`, `bool` and `char` can
+  be optional (see [Optional Primitives](#optional-primitives)). `Enum?`, `void?`, `T??`,
+  optional tuples and optional arrays (`int[3]?`) are rejected.
 - `None` is the absent value. A `T` converts to `T?` implicitly; a `T?` **never** converts back
   to `T` — unwrap it with `match`.
 - On a `T?` you may: assign it, pass and return it, store it in fields and arrays,
@@ -122,14 +121,7 @@ match maybe {
   ```
 
 - The subject can be any optional expression: a variable, a field (`match self.next { … }`), a
-  call result, an array element. An optional array subject binds the array:
-
-  ```pkn
-  match nums {                      // nums: int[]?
-    a: int[] { a.push(4); }
-    None     { }
-  }
-  ```
+  call result, an array element.
 
 Matching on an `Obj` subject is unchanged; in particular the `match Stdin.readln() { line: Str
 { … } _ { … } }` idiom keeps working exactly as before, and a `None` arm is only valid on an
@@ -187,9 +179,9 @@ fn show(o: int?) -> Str {
   (see `01-language-basics.md`).
 - A primitive widens to its optional implicitly (`x: int? = 5`). An `int` also widens to
   `float?`, after the usual `int` -> `float` promotion (`f: float? = 3`).
-- An `int?` does **not** convert to a `float?` (or any other optional). `int[]` is not an
-  `int?[]` either. An array or tuple literal still works where its elements need boxing
-  (`xs: int?[] = [1, 2]`, `p: (int?, Str) = (1, "a")`), but destructuring does not box:
+- An `int?` does **not** convert to a `float?` (or any other optional). `int[2]` is not an
+  `int?[2]` either. An array or tuple literal still works where its elements need boxing
+  (`xs: int?[2] = [1, 2]`, `p: (int?, Str) = (1, "a")`), but destructuring does not box:
   `a: int?, s: Str = (1, "a")` is an error. See [Literals take their destination's
   types](#literals-take-their-destinations-types) for `None` and mixed elements.
 - In a `match` on an `int?` subject, the only type arm is `n: int`. It matches every present
@@ -237,45 +229,42 @@ Assigning `None` to an optional field releases whatever it held.
 
 ## Arrays
 
-- **Array of optionals** — `Node?[]`: slots may hold `None`; `push(None)`, `xs[i] = None` and
-  `pop()` (which yields a `Node?`) all work, and destroying the array releases only the present
-  elements.
-- **Optional array** — `int[]?`: the whole array may be absent; the empty literal `[]` takes
-  the wrapped array type (`xs: Str[]? = []`).
+An **array of optionals**, `Node?[n]`, may hold `None` in any slot: `xs[i] = None` works,
+`xs[i]` is a `Node?`, and the array releases only its present elements. An array itself
+cannot be optional for now (`int[3]?` is an error).
 
 ```pkn
-xs: Node?[] = [];
-xs.push(None);
-xs.push(Node(1));
+xs: Node?[2] = [None, Node(1)];
 xs[0] = Node(2);
-match xs[1] { n: Node { … } None { … } }
+xs[1] = None;
+match xs[0] { n: Node { … } None { … } }
 ```
 
 An array literal containing `None` takes its destination's element type
-(`xs: Node?[] = [None, n]`). Without a declared destination a bare `None` is `Obj`:
-`xs = [None, Node(1)]` is an `Obj[]`, and `xs = [None, n]` (with `n: Node?`) is an error.
-Annotate the variable, or build the array with `push`.
+(`xs: Node?[2] = [None, n]`, and `slots: Node?[8] = [None; 8]` is eight empty slots).
+Without a declared destination a bare `None` is `Obj`: `xs = [None, Node(1)]` is an
+`Obj[2]`, and `xs = [None, n]` (with `n: Node?`) is an error. Annotate the variable.
 
 ---
 
 ## Literals take their destination's types
 
 An array or tuple literal flowing into a typed slot (a declaration, an assignment to an
-existing variable, an argument, a return, a field or element store, `push`) takes the slot's
+existing variable, an argument, a return, a field or element store) takes the slot's
 element types where its own elements need them, including in nested literals:
 
 ```pkn
 a: (int?, Str) = (None, "a");             // None takes the slot's int?
 b: (Node?, int) = (None, 1);              // ... or Node?
 nb: int? = None;
-tbl: (Str, int?)[] = [("a", 1), ("b", nb), ("c", None)];   // int and int? elements
-nodes: Node?[] = [Node(1), None];
-nested: (Str, (int?, Node?))[] = [("a", (1, None))];
+tbl: (Str, int?)[3] = [("a", 1), ("b", nb), ("c", None)];   // int and int? elements
+nodes: Node?[2] = [Node(1), None];
+nested: (Str, (int?, Node?))[1] = [("a", (1, None))];
 ```
 
 A literal still has to fit: `(None, "a")` is not an `(int, Str)`, and
-`[("a", 1), ("b", nb)]` is not a `(Str, int)[]` ("array literal element of type '(Str, int?)'
-does not match the expected element type '(Str, int)'"). There is no promotion inside a tuple
+`[("a", 1), ("b", nb)]` is not a `(Str, int)[2]` ("array literal element of type '(Str, int?)'
+does not match the element type '(Str, int)' of '(Str, int)[2]'"). There is no promotion inside a tuple
 literal either (`(1, 2)` is not a `(float, int)`). Where there is no destination, as in
 `t = (None, 1)`, a `None` is `Obj` and the elements of an array literal must agree on their
 own.
@@ -315,7 +304,7 @@ fn pick(c: bool) -> Str? { return if c then "yes" else None; }
 
 A `T?` of a reference type costs nothing extra: it is the same reference-counted box as a `T`,
 with "no box" meaning `None`. An optional primitive is a value, the primitive and a presence
-flag: it allocates nothing and is never counted. An `int?[]` holds its elements inline.
+flag: it allocates nothing and is never counted. An `int?[3]` holds its elements inline.
 Retaining, releasing and destroying an absent optional are no-ops. See `08-memory-model.md`.
 
 ---
@@ -335,7 +324,6 @@ Retaining, releasing and destroying an absent optional are no-ops. See `08-memor
 | `match arm type 'T?' cannot be optional` | an optional arm type |
 | `unreachable arm: the 'T' arm above already matches every non-None value` | a type arm after the `T` arm |
 | `duplicate 'None' arm in match on 'T?'` | two `None` arms |
-| `match arm type 'X[]' does not match the optional subject type 'T[]?'` | wrong array arm on an optional array |
 | `match arm type 'float' does not match the optional subject type 'int?'` | an arm other than the primitive on an optional primitive |
 | `cannot use optional 'T?' as 'Obj': an optional is not an object` | a `T?` where an `Obj` is expected (declaration, assignment, argument, return, field or array store) |
 | `'v' is a 'view' parameter; a 'view' is not converted, and parameter 1 of 'f' is a 'view T?'` | a `view T` passed to a `view T?` parameter, or bound to a `view T?` local |

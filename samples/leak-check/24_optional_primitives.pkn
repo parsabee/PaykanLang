@@ -5,8 +5,8 @@
 // local; a `match` on a call result whose arm binding owns nothing; a `T?`
 // with T = int inside a generic class; and printing one.
 //
-// Runtime allocation sites: the class instances, the array (inline 16-byte
-// elements), the tuple and the strings.
+// Runtime allocation sites: the class instances, the tuple and the strings
+// (the array holds its 16-byte elements inline).
 //
 // Expected under --track-heap: live blocks : 0.
 // expect-stdout: 6
@@ -56,10 +56,9 @@ fn main() -> int {
   h.f = 0.5;
   h.f = None;
 
-  xs: int?[] = [1, 2];
-  xs.push(None);
+  xs: int?[3] = [1, 2, None];
   xs[0] = 5;
-  xs.pop();
+  xs[1] = None;
 
   t: (int?, bool?) = (4, True);
   c: char? = 'x';

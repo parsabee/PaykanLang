@@ -433,8 +433,9 @@ TEST(Module, QualifiedTypeArrayOk) {
   writeFile(tmp, "geometry/point.pkn", kPointModule);
   auto main = writeFile(tmp, "main.pkn", R"(
 import geometry::point;
-fn first(ps: point::Point[]) -> int { return ps[0].getX(); }
-fn main() -> int { ps: point::Point[] = [point::Point(7, 8)]; return first(ps); }
+fn first(ps: point::Point[1]) -> int { return ps[0].getX(); }
+fn count(ps: view point::Point[]) -> int { return ps.len(); }
+fn main() -> int { ps: point::Point[1] = [point::Point(7, 8)]; return first(ps) + count(ps); }
 )");
   auto r = semaCheckFile(main, tmp);
   EXPECT_TRUE(r.Ok) << r.Diagnostics;

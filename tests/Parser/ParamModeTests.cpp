@@ -236,8 +236,8 @@ TEST(MatchArm, Modes) {
   const char *const cases[][2] = {
       {"view d: Dog { }", "'view' goes after the colon, before the type: "
                           "write 'd: view Dog'"},
-      {"inout d: Dog[] { }", "'inout' goes after the colon, before the type: "
-                             "write 'd: inout Dog[]'"},
+      {"inout d: Box<Dog> { }", "'inout' goes after the colon, before the "
+                                "type: write 'd: inout Box<Dog>'"},
   };
   for (const auto &c : cases) {
     std::string src = std::string("fn main() -> int {\n  match a {\n    ") +

@@ -5,8 +5,8 @@
 //            multiple return with destructuring `q, r = divmod(7, 2);`
 //            (`_` skips an element), element-wise `==` / `!=` (lowered to the
 //            runtime `equals`), and `toString` rendering `(1, a)`.
-// A tuple is a heap object under ARC like a class instance or an array: it is
-// retained when copied and released at scope exit.
+// A tuple is a heap object under ARC like a class instance: it is retained
+// when copied and released at scope exit.
 
 class Point {
   x: int;
@@ -57,13 +57,11 @@ fn main() -> int {
   println(nested);                        // ((1, 2), (x, (3, y)))
   println(nested.1.1.1);                  // y
 
-  // Tuples of arrays and arrays of tuples.
-  pairs: (int, Str)[] = [(1, "one"), (2, "two")];
-  pairs.push((3, "three"));
+  // Arrays of tuples.
+  pairs: (int, Str)[3] = [(1, "one"), (2, "two"), (0, "")];
+  pairs[2] = (3, "three");                // an element replaced by a new tuple
   println(pairs[2].1);                    // three
-  arrs: (int[], Str) = ([1, 2, 3], "nums");
-  arrs.0.push(4);                         // the array inside is still mutable
-  println(Str(arrs.0.len()));          // 4
+  println(Str(pairs.len() + pairs[1].0)); // 5
 
   // Tuples holding objects, as fields, and returned from methods.
   name, pt = label(Point(1, 2));

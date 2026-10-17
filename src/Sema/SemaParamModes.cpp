@@ -89,8 +89,8 @@ std::string Sema::inoutPlaceError(const ast::Expr *place,
                                   const std::string &use) {
   if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(place)) {
     const ast::Type *arr = se->getArray()->getResolvedType();
-    return ast::dyn_cast<ast::ArrayType>(arr) ||
-                   ast::dyn_cast<ast::FixedArrayType>(arr)
+    return ast::dyn_cast<ast::FixedArrayType>(arr) ||
+                   ast::dyn_cast<ast::SliceType>(arr)
                ? "an array element cannot be " + use + " yet"
                : "a character of a string cannot be " + use;
   }

@@ -301,10 +301,11 @@ private:
       if (f.Name == "main") {
         bool ok = f.Sig.Ret == Type::I64 &&
                   (f.Sig.Params.empty() ||
-                   (f.Sig.Params.size() == 1 && f.Sig.Params[0] == Type::Box));
+                   (f.Sig.Params.size() == 2 && f.Sig.Params[0] == Type::Ptr &&
+                    f.Sig.Params[1] == Type::I64));
         if (!ok)
           error(where, "'@main' must have signature () -> i64 or "
-                       "(box) -> i64, not " +
+                       "(ptr, i64) -> i64, not " +
                            sigStr(f.Sig));
       }
     }

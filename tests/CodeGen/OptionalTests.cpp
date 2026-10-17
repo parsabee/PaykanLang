@@ -369,7 +369,7 @@ TEST(Optional, PrintingAReferenceOptional) {
   g.expectNoLeaks("PrintingAReferenceOptional");
 }
 
-// -- Subclass arm on an optional subject; array subject
+// -- Subclass arm on an optional subject
 
 TEST(Optional, SubclassArmThenInnerArm) {
   LeakGuard g;
@@ -397,37 +397,6 @@ TEST(Optional, SubclassArmThenInnerArm) {
   EXPECT_EQ(r.StdOut,
             "leaf 1\nnode 2\nnone\ninner arm takes a subclass instance\n");
   g.expectNoLeaks("SubclassArmThenInnerArm");
-}
-
-TEST(Optional, OptionalArraySubject) {
-  LeakGuard g;
-  auto r = compileAndRun(R"pkn(
-    fn total(xs: int[]?) -> int {
-      match xs {
-        a: int[] {
-          a.push(10);
-          s: int = 0;
-          i: int = 0;
-          while (i < a.len()) { s = s + a[i]; i = i + 1; }
-          return s;
-        }
-        None { return -1; }
-      }
-    }
-    fn main() -> int {
-      println(Str<int>(total([1, 2, 3])));
-      println(Str<int>(total(None)));
-      ys: Str[]? = [];
-      match ys {
-        a: Str[] { a.push("z"); println(a[0]); }
-        None     { println("none"); }
-      }
-      return 0;
-    }
-  )pkn");
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "16\n-1\nz\n");
-  g.expectNoLeaks("OptionalArraySubject");
 }
 
 // -- T?[n] — arrays with None slots

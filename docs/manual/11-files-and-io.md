@@ -149,10 +149,11 @@ it is redirected to a file or a pipe.
 
 ## Command-line arguments
 
-To receive its command-line arguments, `main` takes a `Str[]`:
+To receive its command-line arguments, `main` takes a `view Str[]`, a slice of the
+arguments (see [Arrays](06-arrays.md#arrays-are-values)):
 
 ```pkn
-fn main(args: Str[]) -> int {
+fn main(args: view Str[]) -> int {
   if (args.len() < 2) {
     printerrln("usage: greet <name>...");
     return 2;
@@ -177,6 +178,12 @@ Hello, Grace!
 path of the executable for a program made with `paykan build`. The real arguments start at
 `args[1]`. With `paykan run`, everything after the source file belongs to the program, so
 `paykan greet.pkn --help` passes `--help` to `greet`, not to `paykan`.
+
+The arguments are a `view`, so `main` reads them but does not keep them: an argument can be
+printed, compared, parsed (`int(args[1])`), passed to a `view` parameter or joined into a new
+string, but `name = args[1];` is an error (`'args' is a 'view' parameter; it cannot be
+stored, only read or passed to a 'view' parameter`). To keep one, take a string of the
+program's own: `name = args[1].toString();`.
 
 ## Project: `tasks` remembers
 
@@ -276,16 +283,26 @@ fn splitOnce(s: Str, sep: char) -> (Str, Str) {
 import tasks::task;
 
 class TaskList {
-  tasks: task::Task[];
+  tasks: task::Task[8];   // room for eight tasks
+  count: int;             // tasks[0] to tasks[count - 1] are in use
 
-  fn add(title: Str, priority: task::Priority) {
-    self.tasks.push(task::Task(title, priority));
+  // Adds a task; False if the list is full.
+  fn add(title: Str, priority: task::Priority) -> bool {
+    if (self.count == self.tasks.len()) { return False; }
+    self.tasks[self.count] = task::Task(title, priority);
+    self.count = self.count + 1;
+    return True;
   }
 
-  fn addTask(t: task::Task) { self.tasks.push(t); }
+  fn addTask(t: task::Task) -> bool {
+    if (self.count == self.tasks.len()) { return False; }
+    self.tasks[self.count] = t;
+    self.count = self.count + 1;
+    return True;
+  }
 
   fn complete(n: int) -> bool {
-    if (n < 1 || n > self.tasks.len()) { return False; }
+    if (n < 1 || n > self.count) { return False; }
     self.tasks[n - 1].done = True;
     return True;
   }
@@ -293,7 +310,7 @@ class TaskList {
   view fn pending() -> int {
     count = 0;
     i = 0;
-    while (i < self.tasks.len()) {
+    while (i < self.count) {
       if (!self.tasks[i].done) { count = count + 1; }
       i = i + 1;
     }
@@ -302,16 +319,19 @@ class TaskList {
 
   view fn show() {
     i = 0;
-    while (i < self.tasks.len()) {
+    while (i < self.count) {
       println(Str(i + 1) + ". " + self.tasks[i].toString());
       i = i + 1;
     }
-    println(Str(self.pending()) + " of " + Str(self.tasks.len()) + " to do");
+    println(Str(self.pending()) + " of " + Str(self.count) + " to do");
   }
 }
 
 impl TaskList {
-  fn __init__() { self.tasks = []; }
+  fn __init__() {
+    self.tasks = [task::Task("", task::Priority::Normal); 8];
+    self.count = 0;
+  }
 }
 ```
 
@@ -349,14 +369,14 @@ fn addLine(tasks: list::TaskList, line: Str) {
   }
   t = task::Task(title, task::parsePriority(priority));
   t.done = done == "1";
-  tasks.addTask(t);
+  if (!tasks.addTask(t)) { printerrln("the list is full, skipping: " + line); }
 }
 
 fn save(tasks: list::TaskList, path: Str) -> bool {
   match open(path, "w") {
     f: File {
       i = 0;
-      while (i < tasks.tasks.len()) {
+      while (i < tasks.count) {
         t = tasks.tasks[i];
         f.write((if t.done then "1" else "0") + "|"
                 + task::priorityName(t.priority) + "|" + t.title + "\n");
@@ -388,11 +408,11 @@ fn usage() -> int {
 }
 
 // Joins args[from..] with spaces, leaving out a trailing priority word.
-fn titleFrom(args: Str[], from: int) -> (Str, Str) {
+fn titleFrom(args: view Str[], from: int) -> (Str, task::Priority) {
   last = args.len();
-  priority = "normal";
+  priority = task::Priority::Normal;
   if (last - from > 1 && (args[last - 1] == "high" || args[last - 1] == "low")) {
-    priority = args[last - 1];
+    priority = if args[last - 1] == "high" then task::Priority::High else task::Priority::Low;
     last = last - 1;
   }
   title = "";
@@ -404,7 +424,7 @@ fn titleFrom(args: Str[], from: int) -> (Str, Str) {
   return (title, priority);
 }
 
-fn main(args: Str[]) -> int {
+fn main(args: view Str[]) -> int {
   if (args.len() < 2) { return usage(); }
   path = "tasks.txt";
   tasks: list::TaskList = store::load(path);
@@ -413,7 +433,10 @@ fn main(args: Str[]) -> int {
     "add" {
       if (args.len() < 3) { return usage(); }
       title, priority = titleFrom(args, 2);
-      tasks.add(title, task::parsePriority(priority));
+      if (!tasks.add(title, priority)) {
+        printerrln("the list is full");
+        return 1;
+      }
       changed = True;
     }
     "done" {

@@ -34,7 +34,7 @@ build's sanitizer and coverage flags, since the runtime archive is
 instrumented with them.
 
 A program started with `paykan run` sees the script path as `args[0]`
-(`fn main(args: Str[])`), like the llvm backend.  A runtime panic flushes
+(`fn main(args: view Str[])`), like the llvm backend.  A runtime panic flushes
 stdout (and every open `File`), prints its message to stderr and aborts the
 program (`SIGABRT`); `paykan run` then exits with 128 + the signal number,
 134, which is also what the llvm backend's `paykan run` exits with (its JIT
@@ -82,9 +82,11 @@ backends.
   `Paykan_release`, `PaykanShared_new`, `PaykanShared_get`, `Paykan_malloc`,
   `Paykan_free`); every other runtime call is cast to the prototype in
   `Runtime.h`.
-* `main(int argc, char **argv)` builds the `Str[]` argument array, honours
-  `PAYKAN_TRACK_HEAP` (set by `--track-heap`) and returns the Paykan `main`'s
-  result.
+* `main(int argc, char **argv)` makes the program's arguments with
+  `Paykan_args_new`, passes them to the Paykan `main` as a slice (their
+  address and number) and drops them with `Paykan_args_free` after it
+  returns, honours `PAYKAN_TRACK_HEAP` (set by `--track-heap`) and returns
+  the Paykan `main`'s result.
 * Nothing unused is emitted: the bit-cast helpers, allocators (`pknew_*`)
   and string / data globals only when referenced, no local that nothing
   reads, and no binding for a call result nothing reads; an unread
@@ -156,12 +158,12 @@ compile instead of miscompiling.
 | Assumption | Why | Check |
 |---|---|---|
 | `CHAR_BIT == 8` | tuple kind bytes, string data, `int8_t` chars | `_Static_assert` |
-| LP64: 8-byte pointers, `intptr_t` and `unsigned long` | every array and tuple slot is 8 bytes and holds an `int64_t`, a `double` or a pointer; array lengths are `unsigned long` | `_Static_assert` on the sizes; `#error` without `intptr_t` |
+| LP64: 8-byte pointers, `intptr_t` and `unsigned long` | every tuple slot is 8 bytes and holds an `int64_t`, a `double` or a pointer, and a reference in an array is an 8-byte box pointer | `_Static_assert` on the sizes; `#error` without `intptr_t` |
 | A pointer converted to `intptr_t` / `int64_t` and back is the same pointer (C11 6.3.2.3p5-6 leave it implementation-defined) | pointers stored in integer slots (`(PaykanShared *)(intptr_t)slot`) | documented; true of every LP64 ABI |
 | Function pointers are pointer-sized | vtable slots are 8 bytes, matching the LLVM backend's vtables | `_Static_assert` |
 | Two's complement, and converting an out-of-range value to a signed type wraps modulo 2^64 (6.3.1.3p3 leaves it implementation-defined) | `(int64_t)((uint64_t)a + (uint64_t)b)` and the other wrapping operations | `_Static_assert((int64_t)UINT64_MAX == -1 && ...)` |
 | IEEE 754 binary64 `double`, with NaN and infinities | float semantics, `cast` bit patterns, `NAN` / `INFINITY` literals | `_Static_assert` on `<float.h>` (`FLT_RADIX`, `DBL_MANT_DIG`, `DBL_MAX_EXP`, `DBL_MIN_EXP`) |
-| An object struct can be used through a `PaykanObject *` (and a pointer to it converted to and from `PaykanObject *`): every Paykan object struct, generated or in the runtime, starts with the same two-word header | the runtime's ARC and method calls see every object as a `PaykanObject`; generated code casts between `struct pk_…`, `PaykanString`, `PaykanArray`, … and `PaykanObject *` | `_Static_assert` on the runtime structs' header offsets; the generated code reads vtables only through `memcpy` (`Paykan_vtable_of`), never through another struct type |
+| An object struct can be used through a `PaykanObject *` (and a pointer to it converted to and from `PaykanObject *`): every Paykan object struct, generated or in the runtime, starts with the same two-word header | the runtime's ARC and method calls see every object as a `PaykanObject`; generated code casts between `struct pk_…`, `PaykanString`, `PaykanTuple`, … and `PaykanObject *` | `_Static_assert` on the runtime structs' header offsets; the generated code reads vtables only through `memcpy` (`Paykan_vtable_of`), never through another struct type |
 
 `__STDC_IEC_559__` (full Annex F conformance) is deliberately not required:
 GCC and Clang on glibc define it, Apple's clang does not, and the generated

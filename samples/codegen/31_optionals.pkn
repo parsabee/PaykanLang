@@ -3,8 +3,8 @@
 //            an unassigned optional field (`next: Node?`), `T` -> `T?` widening,
 //            `x == None` / `x != None` null checks, `match` as the unwrap (a
 //            `Node` arm binds every present value, `None` covers the absent
-//            case), optional parameters and returns, `T?[]` with None slots,
-//            an optional array `int[]?`, and printing an optional.
+//            case), optional parameters and returns, `T?[n]` with None
+//            slots, and printing an optional.
 //
 // A `T?` is the same reference-counted box as a `T` with NULL meaning None, so
 // the whole list is released through the ordinary destructors (run this with
@@ -93,25 +93,11 @@ fn main() -> int {
   println(s);                                // text
 
   println("=== array of optionals ===");
-  slots: Node?[] = [];
-  slots.push(None);
-  slots.push(Node(42));
+  slots: Node?[2] = [None, Node(42)];
   slots[0] = Node(7);
   slots[1] = None;
   println(describe(slots[0]));               // found 7
   println(describe(slots[1]));               // not found
-
-  println("=== optional array ===");
-  nums: int[]? = None;
-  match nums {
-    a: int[] { println(Str(a.len())); }
-    None     { println("no numbers"); }      // no numbers
-  }
-  nums = [10, 20];
-  match nums {
-    a: int[] { a.push(30); println(Str<int>(a.len())); }   // 3
-    None     { println("no numbers"); }
-  }
 
   println("=== two optionals ===");
   a: Str? = "same";

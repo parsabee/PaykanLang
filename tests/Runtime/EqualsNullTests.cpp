@@ -57,9 +57,3 @@ TEST(EqualsNullOther, Error) {
   EXPECT_EQ(equalsWithNullOther(PaykanError_equals, (PaykanObject *)e), 0);
   PaykanError_destroy((PaykanObject *)e);
 }
-
-TEST(EqualsNullOther, Array) {
-  PaykanArray *a = PaykanArray_new(3);
-  EXPECT_EQ(equalsWithNullOther(PaykanArray_equals, (PaykanObject *)a), 0);
-  PaykanArray_destroy((PaykanObject *)a);
-}

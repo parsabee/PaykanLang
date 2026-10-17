@@ -346,10 +346,6 @@ private:
   /// caller releases after the call.
   Val emitBorrowedBox(ast::Expr *arg, std::vector<Val> &keep);
   Val emitAsSharedRaw(ast::Expr *expr);
-  /// An object array element read that borrows the array's reference
-  /// (`arr[i]` of ref type on a live array): a new owner retains the stored
-  /// box, which emitAsShared does while evaluating the array and index once.
-  bool isBorrowedObjectElement(ast::Expr *expr) const;
 
   // -- String temporaries
 
@@ -461,10 +457,6 @@ private:
     Val emitIdentityCtor(ast::CallExpr *node);
     Val emitConversion(ast::CallExpr *node);
     Val emitBuiltinCall(ast::CallExpr *node);
-    Val emitPrimitiveArrayLiteral(ast::ArrayLiteralExpr *node, size_t len);
-    Val emitArrayPush(ast::MethodCallExpr *node, const Val &recv,
-                      ast::Type *elemTy);
-    Val emitArrayPop(const Val &recv, ast::Type *elemTy);
     Val emitShortCircuit(ast::BinaryExpr *node, bool isAnd);
     Val emitIntDivGuards(const Val &lhs, const Val &rhs, bool isDiv);
 
@@ -542,6 +534,11 @@ private:
   /// @p ty at @p addr.
   void forEachFixedRef(const Val &addr, ast::FixedArrayType *ty,
                        const std::function<void(Val)> &fn);
+  /// Call @p fn with the address of each of the slots @p from to @p to
+  /// (exclusive), @p stride bytes apart, of the memory at @p base: one by
+  /// one for a few, in a loop for more.
+  void forEachSlot(const Val &base, int64_t from, int64_t to, int64_t stride,
+                   const std::function<void(Val)> &fn);
   /// The address of element @p index of the fixed-size array @p array,
   /// after a bounds check.
   Val emitFixedElementAddress(ast::Expr *array, ast::Expr *index);
@@ -549,6 +546,9 @@ private:
   /// @p dst: a literal element by element, anything else copied.  @p e must
   /// not read @p dst (a new variable's storage).
   void emitFixedInit(ast::Expr *e, const Val &dst);
+  /// Initialise the array of type @p ft at @p dst from `[elem; n]`.
+  void emitFixedRepeat(ast::Expr *elem, ast::FixedArrayType *ft,
+                       const Val &dst);
   /// A fixed-size array variable @p name initialised with @p init (zero
   /// without one), declared in the current scope.
   void declareFixedVar(const std::string &name, ast::FixedArrayType *ty,

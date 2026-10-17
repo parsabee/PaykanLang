@@ -23,7 +23,8 @@ llvm::Error setHostLayout(llvm::Module &module);
 
 /// Run the "main" function inside the given module via ORC JIT.
 /// The module is consumed (moved into the JIT).
-/// @param args  Arguments forwarded to the Paykan main function as Str[].
+/// @param args  Arguments passed to the Paykan main function as its
+///              `view Str[]` slice.
 ///              args[0] should be the script path (like argv[0] for scripts).
 /// @param nativeObjects  Object files defining the program's native
 ///              functions (--object, #198; position-independent), linked

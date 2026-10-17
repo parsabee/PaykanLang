@@ -1,7 +1,8 @@
-// The optional-values benchmark of #96: 10M pushes onto a Stack<int>, then
-// 10M pops through `pop() -> T?` with T = int, matching each result.  With
-// `raw` as the first argument the pops go through `popRaw() -> T` instead:
-// the same loop without the optional.
+// The optional-values benchmark of #96: 10M pushes onto a Stack<int> and 10M
+// pops through `pop() -> T?` with T = int, matching each result, in rounds
+// that fill the stack and empty it.  With `raw` as the first argument the
+// pops go through `popRaw() -> T` instead: the same loop without the
+// optional.
 //
 //   paykan -O2 build benchmarks/optional_stack.pkn -o stack
 //   ./stack          # through int?
@@ -11,37 +12,52 @@
 // Both print 49999995000000.
 
 class Stack<T> {
-  items: T[];
-  fn push(v: T) { self.items.push(v); }
-  fn pop() -> T? {
-    if (self.items.len() == 0) { return None; }
-    return self.items.pop();
+  items: T[8];
+  count: int;
+  fn push(v: T) {
+    self.items[self.count] = v;
+    self.count = self.count + 1;
   }
-  fn popRaw() -> T { return self.items.pop(); }
-  view fn len() -> int { return self.items.len(); }
+  fn pop() -> T? {
+    if (self.count == 0) { return None; }
+    self.count = self.count - 1;
+    return self.items[self.count];
+  }
+  fn popRaw() -> T {
+    self.count = self.count - 1;
+    return self.items[self.count];
+  }
+  view fn len() -> int { return self.count; }
+  view fn capacity() -> int { return self.items.len(); }
 }
 
 impl Stack<T> {
-  fn __init__() { self.items = []; }
+  fn __init__(blank: T) {
+    self.items = [blank; 8];
+    self.count = 0;
+  }
 }
 
-fn main(args: Str[]) -> int {
+fn main(args: view Str[]) -> int {
   n = 10000000;
-  s = Stack<int>();
+  raw = args.len() > 1 && args[1] == "raw";
+  s = Stack<int>(0);
+  total = 0;
   i = 0;
   while (i < n) {
-    s.push(i);
-    i = i + 1;
-  }
-  total = 0;
-  if (args.len() > 1 && args[1] == "raw") {
-    while (s.len() > 0) { total = total + s.popRaw(); }
-  } else {
-    done = False;
-    while (!done) {
-      match s.pop() {
-        v: int { total = total + v; }
-        None   { done = True; }
+    while (s.len() < s.capacity()) {
+      s.push(i);
+      i = i + 1;
+    }
+    if (raw) {
+      while (s.len() > 0) { total = total + s.popRaw(); }
+    } else {
+      done = False;
+      while (!done) {
+        match s.pop() {
+          v: int { total = total + v; }
+          None   { done = True; }
+        }
       }
     }
   }

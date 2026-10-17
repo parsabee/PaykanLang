@@ -6,16 +6,16 @@
 //
 // args: {tmpdir}
 
-// The directory the scratch files go in: the first argument (the samples
-// harnesses pass a fresh one per run, `// args: {tmpdir}`, so parallel runs
-// never share a file), else /tmp.
-fn scratchDir(args: Str[]) -> Str {
-  if (args.len() > 1) { return args[1]; }
-  return "/tmp";
+// The path of the scratch file `name`: in the first argument's directory
+// (the samples harnesses pass a fresh one per run, `// args: {tmpdir}`, so
+// parallel runs never share a file), else in /tmp.
+fn scratchPath(args: view Str[], name: Str) -> Str {
+  if (args.len() > 1) { return args[1] + "/" + name; }
+  return "/tmp/" + name;
 }
 
-fn main(args: Str[]) -> int {
-  match open(scratchDir(args) + "/pkn_leakcheck_write.txt", "w") {
+fn main(args: view Str[]) -> int {
+  match open(scratchPath(args, "pkn_leakcheck_write.txt"), "w") {
     e: Error { }
     f: File  { f.write("hello"); }
   }

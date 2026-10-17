@@ -459,15 +459,15 @@ fn @main() -> i64 {
 TEST(PIRLLVM, CrossModuleCallsAndMainArgs) {
   auto r = runPIR(R"(module "main"
 extern fn @helper(i64) -> i64 module "lib"
-extern fn @$rt.Paykan_release(box) -> void
-extern fn @$rt.PaykanShared_get(box) -> obj
-extern fn @$rt.PaykanArray_length(obj) -> i64
-fn @main(%args: box) -> i64 {
-  %arr = unbox %args
-  %n = call @$rt.PaykanArray_length(%arr)
+extern fn @$rt.PaykanString_length(obj) -> i64
+fn @main(%args: ptr, %n: i64) -> i64 {
+  %at = ptr.add %args, 16
+  %arg = ptr.load box, %at
+  %s = unbox %arg
+  %len = call @$rt.PaykanString_length(%s)
   %h = call @helper(%n)
-  release %args
-  ret %h
+  %r = add %h, %len
+  ret %r
 }
 module "lib"
 fn @helper(%a: i64) -> i64 {
@@ -475,9 +475,9 @@ fn @helper(%a: i64) -> i64 {
   ret %r
 }
 )",
-                  {"script", "x", "y"});
+                  {"script", "x", "yz"});
   ASSERT_TRUE(r.Ok) << r.Err;
-  EXPECT_EQ(r.ExitCode, 30);
+  EXPECT_EQ(r.ExitCode, 32); // 3 arguments * 10 + the length of "yz"
 }
 
 TEST(PIRLLVM, UnreachableAfterNoreturnCall) {

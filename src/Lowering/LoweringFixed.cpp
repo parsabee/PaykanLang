@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 //
 // AST -> PIR lowering: fixed-size arrays (`T[n]`,
-// docs/language/05-arrays.md, "Fixed-size arrays").
+// docs/language/05-arrays.md).
 //
 // A fixed-size array is a value held in memory, never in an SSA value: a
 // variable is a `mem` local of its bytes (an `inout` one a `ptr` local
@@ -24,6 +24,8 @@
 #include "LoweringInternal.h"
 #include "Names.h"
 
+#include <cmath>
+
 namespace paykan::lowering {
 
 using pir::CmpPred;
@@ -44,9 +46,21 @@ int64_t fixedRefCount(ast::FixedArrayType *ft) {
   return n;
 }
 
-/// Up to this many references are retained or released one by one; more in
-/// a loop.
-constexpr int64_t kUnrolledRefs = 4;
+/// Up to this many slots are visited one by one; more in a loop.
+constexpr int64_t kUnrolledSlots = 4;
+
+/// Whether @p e is a literal whose value is all zero bits.
+bool isZeroLiteral(const ast::Expr *e) {
+  if (const auto *i = ast::dyn_cast<ast::IntegerLiteral>(e))
+    return i->getValue() == 0;
+  if (const auto *f = ast::dyn_cast<ast::FloatLiteral>(e))
+    return f->getValue() == 0.0 && !std::signbit(f->getValue());
+  if (const auto *b = ast::dyn_cast<ast::BoolLiteral>(e))
+    return !b->getValue();
+  if (const auto *c = ast::dyn_cast<ast::CharLiteral>(e))
+    return c->getValue() == 0;
+  return false;
+}
 
 } // namespace
 
@@ -129,25 +143,28 @@ void ModuleLowering::forEachFixedRef(const Val &addr, ast::FixedArrayType *ty,
                                      const std::function<void(Val)> &fn) {
   if (!addr || !fixedHoldsRefs(ty))
     return;
-  const int64_t n = fixedRefCount(ty);
-  const int64_t size = pir::storeSize(Type::Box);
-  if (n <= kUnrolledRefs) {
-    for (int64_t i = 0; i < n; ++i)
-      fn(B.ptrLoad(i == 0 ? addr
-                          : B.ptrAdd(addr, Val::i64(i * size), "elem.addr"),
-                   Type::Box, "elem"));
+  forEachSlot(addr, 0, fixedRefCount(ty), pir::storeSize(Type::Box),
+              [&](const Val &at) { fn(B.ptrLoad(at, Type::Box, "elem")); });
+}
+
+void ModuleLowering::forEachSlot(const Val &base, int64_t from, int64_t to,
+                                 int64_t stride,
+                                 const std::function<void(Val)> &fn) {
+  if (to - from <= kUnrolledSlots) {
+    for (int64_t i = from; i < to; ++i)
+      fn(i == 0 ? base : B.ptrAdd(base, Val::i64(i * stride), "elem.addr"));
     return;
   }
   pir::LocalId i = B.addLocal("i", Type::I64);
-  B.store(i, Val::i64(0));
+  B.store(i, Val::i64(from));
   pir::While *w = B.openWhile();
   B.enter(*w->CondBlock);
-  B.setWhileCond(w, B.cmp(CmpPred::Lt, B.load(i, "i"), Val::i64(n), "more"));
+  B.setWhileCond(w, B.cmp(CmpPred::Lt, B.load(i, "i"), Val::i64(to), "more"));
   B.leave();
   B.enterLoopBody(*w->Body);
   Val iv = B.load(i, "i");
-  Val off = B.binary(Opcode::Mul, iv, Val::i64(size), "elem.off");
-  fn(B.ptrLoad(B.ptrAdd(addr, off, "elem.addr"), Type::Box, "elem"));
+  Val off = B.binary(Opcode::Mul, iv, Val::i64(stride), "elem.off");
+  fn(B.ptrAdd(base, off, "elem.addr"));
   B.store(i, B.binary(Opcode::Add, iv, Val::i64(1), "i.next"));
   B.leaveLoopBody();
 }
@@ -210,6 +227,10 @@ void ModuleLowering::emitFixedInit(ast::Expr *e, const Val &dst) {
   }
   ast::Type *elemTy = ft->getElementType();
   int64_t elemSize = fixedLayout(elemTy).Size;
+  if (lit->isRepeat()) {
+    emitFixedRepeat(lit->getElements().front(), ft, dst);
+    return;
+  }
   for (size_t i = 0; i < lit->getNumElements(); ++i) {
     Val at = i == 0
                  ? dst
@@ -232,6 +253,40 @@ void ModuleLowering::emitFixedInit(ast::Expr *e, const Val &dst) {
       return;
     B.ptrStore(at, coerceTo(v, toPIRType(elemTy)));
   }
+}
+
+void ModuleLowering::emitFixedRepeat(ast::Expr *elem, ast::FixedArrayType *ft,
+                                     const Val &dst) {
+  ast::Type *elemTy = ft->getElementType();
+  const int64_t elemSize = fixedLayout(elemTy).Size;
+  if (ast::isa<ast::BuiltinType>(elemTy) && isZeroLiteral(elem)) {
+    B.memZero(dst, Val::i64(fixedLayout(ft).Size));
+    return;
+  }
+  // The value is evaluated once, into the first slot; the others copy it.
+  auto *innerFt = ast::dyn_cast<ast::FixedArrayType>(elemTy);
+  const bool ref = ast::isRefType(elemTy);
+  Val v;
+  if (innerFt) {
+    emitFixedInit(elem, dst);
+  } else {
+    v = ref ? emitAsShared(elem) : emitExpr(elem);
+    if (!v)
+      return;
+    if (!ref)
+      v = coerceTo(v, toPIRType(elemTy));
+    B.ptrStore(dst, v);
+  }
+  forEachSlot(dst, 1, ft->getLength(), elemSize, [&](const Val &at) {
+    if (innerFt) {
+      B.memCopy(at, dst, Val::i64(elemSize));
+      emitFixedRetain(at, innerFt);
+      return;
+    }
+    B.ptrStore(at, v);
+    if (ref) // each slot owns a reference
+      emitRetain(v);
+  });
 }
 
 void ModuleLowering::declareFixedVar(const std::string &name,

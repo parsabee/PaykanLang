@@ -42,14 +42,13 @@ TEST(Let, IsAnOrdinaryLocalOtherwise) {
       let n = 3;
       let f: float = 2;
       let p = Point(1);
-      let xs = [1, 2];
+      let ps = [Point(2)];
       p.x = n;
-      xs[0] = p.x;
-      xs.push(n);
+      ps[0].x = p.x;
       { n: int = 4; n = 5; }
       i = 0;
       while (i < 2) { let k = i; i = i + k + 1; }
-      return n + p.x;
+      return n + p.x + ps[0].x;
     }
   )");
   EXPECT_TRUE(ok.Ok) << ok.Diagnostics;

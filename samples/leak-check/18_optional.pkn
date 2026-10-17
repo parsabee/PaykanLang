@@ -4,11 +4,11 @@
 // None-initialised optional field, rebinding an optional between None and a
 // value, an optional copied between locals, a `T?` printed (the None
 // singleton stands for a NULL one), a `match` on an optional call
-// result (the subject box is released at match.end), and `T?[]` slots being
+// result (the subject box is released at match.end), and `T?[n]` slots being
 // overwritten with None (releasing the old element) and destroyed with NULLs.
 //
-// Runtime allocation sites: the Node structs + boxes, the strings, the
-// optional array and its buffer.
+// Runtime allocation sites: the Node structs + boxes, the strings (the array
+// of optionals holds its slots inline).
 //
 // Expected under --track-heap: live blocks : 0.
 
@@ -46,11 +46,9 @@ fn main() -> int {
   head: Node = Node(10);
   head.next = Node(11);        // field owns the temporary
   head.next = None;            // releases Node(11)
-  xs: Node?[] = [];
-  xs.push(None);
-  xs.push(Node(20));
+  xs: Node?[3] = [None, Node(20), None];
   xs[1] = None;                // releases Node(20)
-  xs.push(Node(21));           // destroyed with the array
+  xs[2] = Node(21);            // destroyed with the array
   s: Str? = "str";
   s = None;                    // releases the string
   return 0;

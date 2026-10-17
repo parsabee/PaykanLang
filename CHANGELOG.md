@@ -9,22 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Fixed-size arrays (docs/language/05-arrays.md, "Fixed-size arrays"): `xs: int[3] =
-  [1, 2, 3];` holds three ints inline. It is a value, so `ys = xs` copies it, and its one
-  method is `len()`. A literal for it has exactly its length of elements. An index out of
-  bounds is an error when it is a constant, and a panic (`paykan: array index 3 out of
-  bounds (len=3)`) otherwise. A `let` array's elements cannot be assigned. `int[2][3]` is
-  two `int[3]`s, and an array holds at most 16384 elements, counted across its rows. A
-  parameter can be one in every mode (a plain one is the function's own
-  copy), and so can a result, also across modules. An element can be a scalar or an
-  optional of one (`int?[3]`), an enum, a reference (`Str[2]`, `Point[4]`: a copy of the
-  array shares the elements' objects) or another such array. For now only a local variable,
-  a parameter, a result or a field (held inside its object) can be one. A `view T[]` or
-  `inout T[]` parameter is a slice: it takes a fixed-size array of any length (a literal
-  becomes one) or another slice, and reads or writes its elements in place. A growable
-  array can no longer be passed for one. In a variable declaration with an initializer a
-  length can be `_`, the initializer's: `x: int[_][_] = [[1, 2, 3], [4, 5, 6]];` is an
-  `int[2][3]`, and `z: float[_] = f();` takes the length of the array `f` returns.
+- Arrays are `T[n]` (docs/language/05-arrays.md): `xs: int[3] = [1, 2, 3];` holds three
+  ints inline. An array is a value, so `ys = xs` copies it, and its one method is `len()`.
+  A literal for a `T[n]` has exactly `n` elements. An index out of bounds is an error when
+  it is a constant, and a panic (`paykan: array index 3 out of bounds (len=3)`) otherwise.
+  A `let` array's elements cannot be assigned. `int[2][3]` is two `int[3]`s, and an array
+  holds at most 16384 elements, counted across its rows. A parameter can be one in every
+  mode (a plain one is the function's own copy), and so can a result, also across
+  modules. An element can be a scalar or an optional of one (`int?[3]`), an enum, a
+  reference (`Str[2]`, `Point[4]`: a copy of the array shares the elements' objects) or
+  another array. For now an array is only ever a local variable, a parameter, a result or
+  a field (held inside its object): not a tuple element, an optional, a type argument, a
+  `match` arm or an `Obj` (`tuple element 0: a fixed-size array ('int[2]') can only be a
+  local variable, a parameter, a result or a field for now`), and it has no `==` and is
+  not printed. In a variable declaration with an initializer a length can be `_`, the
+  initializer's: `x: int[_][_] = [[1, 2, 3], [4, 5, 6]];` is an `int[2][3]`, and
+  `z: float[_] = f();` takes the length of the array `f` returns.
+- An array literal is a `T[n]` of its own length (docs/language/05-arrays.md,
+  "Literals"): `[1, 2, 3]` is an `int[3]`, `[1, 2.5]` a `float[2]` and `[[1, 2], [3, 4]]`
+  an `int[2][2]`, and objects of different classes give their nearest common ancestor.
+  Where the literal flows into a typed slot, its elements take the slot's element type
+  (`xs: float[2] = [1, 2]`). An array has at least one element: `[]` is an error (`an
+  empty array literal has no type: an array has at least one element`).
+- `[v; n]` is an array of `n` copies of `v` (docs/language/05-arrays.md, "Repeated
+  values"): `slots: Entry?[8] = [None; 8];`, and `[[0; 3]; 2]` is an `int[2][3]` of zeros.
+  The count is an integer literal of at least 1 (`[0; 0]` is an error, `an array has at
+  least one element: the count must be 1 or more`), and the literal types as one of `n`
+  elements, so `[0; 4]` flowing into a `float[4]` is four `0.0`s. `v` is evaluated once:
+  `[Node(); 3]` holds one object three times. In PIR, `[0; n]` (or `0.0`, `False`,
+  `'\0'`) of a scalar element type is one `mem.zero` of the array. In the AST interchange
+  format it is `(array-repeat LOC EXPR INT)`.
+- Slices (docs/language/05-arrays.md, "Slices"): `T[]` is the type of a `view` or `inout`
+  parameter, a slice. It takes an array of any length whose elements are exactly `T`
+  (a literal becomes one) or another slice, and reads or writes the elements in place: a
+  slice is indexed, measured with `len()` and passed on. A generic `xs: view T[]` takes
+  `T` from the elements. Anywhere else `T[]` is an error (`variable 'x' has type 'int[]':
+  a slice can only be a 'view' or 'inout' parameter, and an array has a length
+  ('int[3]')`). In PIR a slice parameter is two, the `ptr` address of the elements and
+  their `i64` number.
 - Traits (docs/language/12-traits.md): `trait Named { view fn name() -> Str; }` lists the
   methods a type must have, and `impl Named for A { ... }` declares that class `A` has
   them. The block's methods join `A` like an `impl` block's, and a method `A` already has
@@ -137,10 +159,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `(qual inout)`.
 - A `view` stays a `view` (docs/language/02-functions-and-calling.md): a `view` parameter
   or local can only be passed on to a `view` parameter, whatever its type (`print`,
-  `println` and `open` take `view` parameters; the builtin methods read their arguments,
-  except `push`; `Str(s)` returns `s` itself and takes none).  One that shares what it
-  holds is never stored (assigned, put in an array or tuple, destructured, pushed) or
-  returned, and a `match` arm's name for one is a `view` too.  Passing a `view` to an
+  `println` and `open` take `view` parameters; the builtin methods read their arguments;
+  `Str(s)` returns `s` itself and takes none).  One that shares what it holds is never
+  stored (assigned, put in an array or tuple, destructured) or returned, and a `match` arm's name for one is a `view` too.  Passing a `view` to an
   `inout` parameter now reads `'v' is a 'view' parameter; it cannot be passed to 'inout'
   parameter 'n'`.
 - `view` and `inout` parameters (docs/language/02-functions-and-calling.md, "Parameter
@@ -196,6 +217,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The program's entry point is `fn main() -> int` or `fn main(args: view Str[]) -> int`
+  (docs/language/02-functions-and-calling.md): the arguments are a slice, which `main`
+  reads (`args[0]` is the script path, or the executable's) but does not keep.  Any other
+  signature is an error (`the program's entry point must be 'fn main() -> int' or 'fn
+  main(args: view Str[]) -> int', not 'fn main(int) -> int'`).  In PIR `@main` is
+  `() -> i64` or `(ptr, i64) -> i64` (docs/pir.md §4): the backend's entry code makes the
+  slice before it calls `@main` and drops it after, in an executable with the runtime's
+  `Paykan_args_new` and `Paykan_args_free`.  A backend plugin must do the same.
 - A class without an `__init__` gets the default one (docs/language/04-classes.md, "The
   default `__init__`"): it takes the superclass constructor's arguments, then one per
   field of the class, in order, so `class Point { x: int; y: int; }` is built as
@@ -227,8 +256,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot also be passed to 'inout' parameter 'b'`, and `p.take(p.x)` is `'p.x' is part of
   'p', the receiver of 'take' (not a 'view fn'); it cannot also be passed to 'inout'
   parameter 'm'`.
-- A `view fn` returns part of `self` that is an object, string, array, tuple or optional as
-  a `view`, `-> view T` (docs/language/04-classes.md, "Methods that don't change self"):
+- A `view fn` returns part of `self` that is an object, string, tuple or optional (or an
+  array of them) as a `view`, `-> view T` (docs/language/04-classes.md, "Methods that don't change self"):
   returned as a copy, its caller could change it.  `view fn name() -> Str { return
   self.name; }` is now an error, `'self' is read-only in 'view fn name', so part of it can
   only be returned as a 'view': write '-> view Str'`; a field of a value type is still
@@ -265,12 +294,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   presence flag held inline (#96), instead of a heap box: a local, parameter, result, field,
   array element or tuple element of one allocates nothing and is never reference counted, and
   `int<Str>` & co. return one without allocating (the runtime's `PaykanString_parse_int` &
-  co.).  The semantics are unchanged.  An `int?[]` is a runtime array of 16-byte elements (`PaykanArray_new_sized`, with its
-  own vtable), and a tuple holds an `int?` as a presence slot and a value slot (tuple kind
+  co.).  The semantics are unchanged.  An `int?[3]` holds its elements inline, 16 bytes
+  each, and a tuple holds an `int?` as a presence slot and a value slot (tuple kind
   `PAYKAN_TUPLE_OPT`).  In #96's benchmark
-  (`benchmarks/optional_stack.pkn`: 10M pushes onto a `Stack<int>`, then 10M pops through
-  `pop() -> T?`) the program makes 16 allocations instead of 20,000,016, and popping
-  through the `int?` takes as long as popping a plain `int`.
+  (`benchmarks/optional_stack.pkn`: 10M pushes onto a `Stack<int>` and 10M pops through
+  `pop() -> T?`) popping through the `int?` allocates nothing and takes as long as popping
+  a plain `int`.
 
 ### Removed
 

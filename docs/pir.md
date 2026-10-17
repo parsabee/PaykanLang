@@ -20,8 +20,8 @@ Design rules:
   slots.  `break`/`continue`/`ret` never carry cleanup: the lowering emits the
   releases *before* them.
 * **No target concepts.**  No LLVM types, no C types, no calling-convention
-  detail.  LP64 is assumed by the runtime ABI (every array/tuple slot is 8
-  bytes, an optional value 16), and PIR inherits that assumption.
+  detail.  LP64 is assumed by the runtime ABI (a pointer, a box and every
+  tuple slot are 8 bytes), and PIR inherits that assumption.
 * **Runtime by name.**  Anything the runtime does is a `call` to an `extern fn`
   named by its C symbol under the `$rt.` prefix (`@$rt.PaykanString_new`; the
   list below is the ABI).  Only ops that *every*
@@ -40,7 +40,7 @@ Design rules:
 | `bool`| true/false                                                        | `int64_t` or `_Bool` (backend's choice; `0`/`1` at the ABI) |
 | `char`| one byte                                                          | `int8_t`     |
 | `box` | `PaykanShared*`: an owned-or-borrowed reference-counted box; may be `null` (an optional's `None`) | `PaykanShared *` |
-| `obj` | raw `PaykanObject*`: an unboxed heap object of any class (also `PaykanString*`, `PaykanArray*`, `PaykanTuple*`, `PaykanFile*`, `PaykanError*`) | `PaykanObject *` (cast at runtime calls) |
+| `obj` | raw `PaykanObject*`: an unboxed heap object of any class (also `PaykanString*`, `PaykanTuple*`, `PaykanFile*`, `PaykanError*`) | `PaykanObject *` (cast at runtime calls) |
 | `ptr` | any other pointer: vtable addresses, literal data, kind descriptors | `void *`  |
 | `opt_i64` `opt_f64` `opt_bool` `opt_char` | an inline optional: a presence flag, then the payload (`i64`, `f64`, `bool`, `char`) at its natural alignment, held and passed by value (#96): 16 bytes for `opt_i64` and `opt_f64`, 2 for `opt_bool` and `opt_char` | `struct { bool present; <payload> value; }` |
 | `mem(N, A)` | N bytes aligned to A (1, 2, 4 or 8; N a positive multiple of A): the storage of an aggregate, such as a fixed-size array. Only a `local` or a field has this type, never a value, a parameter or a result; it is reached through its address (§6) | `_Alignas(A) uint8_t name[N]` |
@@ -48,9 +48,14 @@ Design rules:
 Paykan types lower as: `int`→`i64`, `float`→`f64`, `bool`→`bool`,
 `char`→`char`, every enum→`i64`, `int?`→`opt_i64`, `float?`→`opt_f64`,
 `bool?`→`opt_bool`, `char?`→`opt_char`, and every reference type (class,
-`Str`, array, tuple, and the optional of one)→`box` when stored (variable,
-field, parameter, return value, array/tuple ref slot) and `obj` when used as
-a raw receiver.  A `T?` of a reference type is a `box` that may be `null`.
+`Str`, tuple, and the optional of one)→`box` when stored (variable, field,
+parameter, return value, array element, tuple ref slot) and `obj` when used
+as a raw receiver.  A `T?` of a reference type is a `box` that may be `null`.
+A fixed-size array `T[n]` is `mem` storage holding its `n` elements one after
+another, each laid out as its type is stored (8 bytes for an `i64`, `f64` or
+`box`, 1 for a `bool` or a `char`, an optional's size, a row's `mem`):
+`int[3]` is `mem(24, 8)`, `bool[2]` is `mem(2, 1)`, `int[2][3]` is
+`mem(48, 8)`.
 
 An optional type holds a presence flag and a payload: `none` is the absent
 value (presence false, a zero payload), `some %v` the present one (presence
@@ -160,11 +165,11 @@ C function's owned box.  The objects that define the
 module "<name>"                     ; the canonical module name (`geometry::shapes`; the main module: its file stem)
 
 cstr  @.str0  = "hello\n"  len 6   ; NUL-terminated literal data (`ptr`)
-data  @.arr0  = [1, 2, 3]          ; constant i64 words, primitive array literals (`ptr`)
+data  @.type0 = [8, 8, 0, 0]       ; constant i64 words: a `PaykanType` descriptor (`ptr`)
 bytes @.tk0   = [0, 4]             ; tuple slot-kind descriptor, PaykanTupleKind bytes (`ptr`)
 
 extern obj    @$rt.PaykanObject_None   ; runtime object singletons (`obj`)
-extern vtable @$rt.PaykanArray_vtable  ; runtime vtable globals (`ptr`)
+extern vtable @$rt.PaykanString_vtable ; runtime vtable globals (`ptr`)
 
 class Point {                      ; layout + vtable, see §5 (`: Super` names
                                    ; the superclass; none for a root class)
@@ -190,8 +195,14 @@ lowering emits these declarations; the verifier checks them.
 A **program** is the list of PIR modules reachable from the main module
 (main module first, each module exactly once).  Linking them is a backend
 concern.  The entry point is the main module's `@main`, which takes either no
-parameters or one `box` parameter (an owned `Str[]` of program arguments, which
-`main` releases like any owned parameter) and returns `i64`.
+parameters or the program's arguments as a slice, `(ptr, i64)`: the address of
+their strings' `box` slots and their number.  It returns `i64`.  The backend's
+entry code makes the slice before it calls `@main` and drops it after:
+`@main` borrows the strings, as any slice parameter borrows its elements.  An
+executable's `main(argc, argv)` (the C backend's, and the llvm backend's for
+`paykan build`) makes it with `Paykan_args_new(argc, argv, &count)` and drops
+it with `Paykan_args_free(args, count)`; the llvm backend's JIT boxes the
+same strings itself.
 
 ## 5. Classes, layouts and vtables
 
@@ -210,7 +221,7 @@ backend does no inheritance walk.
 * A class marked `extern` belongs to another module: its fields are known (for
   `field.load`/`field.store` on imported instances) and its vtable address may
   be taken, but its vtable contents and functions are defined in that module.
-* Runtime classes (`Obj`, `Str`, `File`, `Error`, arrays, tuples) are never
+* Runtime classes (`Obj`, `Str`, `File`, `Error`, tuples) are never
   declared as classes; their vtables are
   `extern vtable` globals and their methods are called through `vcall` with an
   explicit slot index, exactly like user classes.
@@ -271,7 +282,7 @@ operand is NaN; it is exactly `not (eq a, b)`), and `eq`, `lt`, `le`, `gt`,
 for a NaN `x`, and every other comparison involving a NaN is false.  These
 are LLVM's `fcmp une` / `oeq olt ole ogt oge` and C's `!= == < <= > >=`.
 
-`cast` pairs: `f64->i64` and `i64->f64` reinterpret the bits (array/tuple
+`cast` pairs: `f64->i64` and `i64->f64` reinterpret the bits (tuple
 slots); `bool->i64`, `char->i64` zero-extend; `i64->bool`, `i64->char`
 truncate; `box<->i64`, `obj<->i64`, `ptr<->i64` are pointer/int casts (slot
 bits); `obj<->ptr`, `box<->ptr` are free.  Nothing else.
@@ -304,7 +315,7 @@ free %o              ; Paykan_free of the object struct (destructors only)
 %v = field.load %o, Point.x
 field.store %o, Point.x, %v                    ; plain store: ARC is explicit around it
 %p = vtable.load %o                            ; the object's vtable pointer (ptr)
-%p = vtable.addr Point   |   vtable.addr @$rt.PaykanArray_obj_vtable
+%p = vtable.addr Point   |   vtable.addr @$rt.PaykanString_vtable
 ```
 
 **Locals**
@@ -373,9 +384,9 @@ CodeGen enforced, now in one place.
 
 * **Variables** hold `box` values and own one reference.  Declaring a variable
   from an expression yields an owned box: a fresh +1 box (call, method call,
-  ternary, array/tuple literal, call-rooted field or element read) is stored
-  as-is; a borrowed box (plain field read, tuple element, array element,
-  another variable) is `retain`ed first; a raw object
+  ternary, tuple literal, call-rooted field read) is stored as-is; a borrowed
+  box (plain field read, tuple element, array element, another variable) is
+  `retain`ed first; a raw object
   (string literal, concat result, `self`, a match-arm binding) is `box`ed, which
   creates the object's unique box or acquires the existing one.
 * **Scope exit** releases the scope's owned variables in reverse declaration
@@ -393,12 +404,21 @@ CodeGen enforced, now in one place.
   exit releases a variable's (one by one, or in a `while` past four).  A
   call's result or a literal owns its elements: they move into the place it
   initialises, and are released after any other use (an element read from
-  it is retained first).  A field is a `mem` field reached with
-  `field.addr`, and `C.destroy` releases its references too.
-* **Fields and array/tuple ref slots** own their box; `field.store` is preceded
+  it is retained first).  A `[v; n]` literal stores `v` in slot 0 and
+  copies it into the others (one by one for up to four more, else in a
+  `while`), retaining a reference once per extra slot and a nested array's
+  references after its `mem.copy`; a zero `v` (`0`, `0.0`, `False`, `'\0'`)
+  of a scalar element type is one `mem.zero` instead.  A field is a `mem`
+  field reached with `field.addr`, and `C.destroy` releases its references
+  too.
+* **Fields and tuple ref slots** own their box; `field.store` is preceded
   by a retain-or-steal of the new value and the old value is released
-  (null-checked); `PaykanArray_set_obj`/`push_obj`/`PaykanTuple_set_obj` retain
-  internally, so the +1 temporary passed to them is released afterwards.
+  (null-checked); `PaykanTuple_set_obj` retains internally, so the +1
+  temporary passed to it is released afterwards.
+* **Indexing** an array or a slice checks the index first: when it is
+  negative or not below the length, `call @$rt.Paykan_panic_index(%i, %len)`
+  and `unreachable`.  The element is then read or written in place, with
+  `ptr.load` / `ptr.store` at `ptr.add` of the index times the element size.
 * **Temporaries**: a raw `PaykanString*` produced by a literal, `Str<int>` & co.
   or concatenation is destroyed (`PaykanString_destroy`) by the consumer unless
   it is boxed; a fresh box used as a receiver or borrowed argument is released
@@ -420,13 +440,9 @@ CodeGen enforced, now in one place.
   `unwrap`s are `==`, and a `match` arm binding the primitive is its
   `unwrap`.  The print builtins print one as its text, formatted with
   `PaykanString_from_int` & co. when present and `"None"` otherwise.  An
-  `int?[]` & co. is a `PaykanArray_new_sized(len, size)` array, `size`
-  being the optional's (16 for `int?` and `float?`, 2 for `bool?` and
-  `char?`), whose elements are read and written in place: `ptr.load` / `ptr.store` at
-  `PaykanArray_slot(arr, i)` (bounds-checked), `ptr.store` at
-  `PaykanArray_push_slot(arr)` for a push, and `PaykanArray_pop_into(arr,
-  local.addr)` for a pop; each address is used before the array can change
-  length.  A tuple holds an `int?` element in two slots, an OPT presence
+  element of an `int?[n]` & co. is the optional itself, the optional's size
+  in the array's `mem` (16 bytes for `int?` and `float?`, 2 for `bool?` and
+  `char?`), read and written in place.  A tuple holds an `int?` element in two slots, an OPT presence
   word (`is_some`, 0 or 1) and its value (the `unwrap`, 0 when absent).
 * **Conversions** (`Target<Source>(value)`, #64): `Str<…>` calls
   `PaykanString_from_int` & co. (an owned string temporary); `int<Str>` /
@@ -461,6 +477,7 @@ PaykanShared_new(obj) -> box     PaykanShared_get(box) -> obj
 ; panics (noreturn)
 Paykan_panic_div_by_zero() -> void      Paykan_panic_div_overflow() -> void
 Paykan_panic_float_to_int(f64) -> void  Paykan_panic_int_to_char(i64) -> void
+Paykan_panic_index(i64, i64) -> void    ; the index, the length
 ; strings
 PaykanString_new(ptr, i64) -> obj       PaykanString_destroy(obj) -> void
 PaykanString_concat(obj, obj) -> obj    PaykanString_char_at(obj, i64) -> char
@@ -470,16 +487,6 @@ PaykanString_equals(obj, box) -> i64    PaykanString_toString(obj) -> box
 PaykanString_length(obj) -> i64
 PaykanString_parse_int(obj, ptr) -> i64     PaykanString_parse_float(obj, ptr) -> i64
 PaykanString_parse_bool(obj, ptr) -> i64    ; 1 and the value at ptr, or 0 (and 0 there)
-; arrays (slots are i64 bits; object slots hold a box cast to i64)
-PaykanArray_new(i64) -> obj             PaykanArray_new_obj(i64) -> obj
-PaykanArray_new_from_data(i64, ptr) -> obj
-PaykanArray_get(obj, i64) -> i64        PaykanArray_set(obj, i64, i64) -> void
-PaykanArray_set_obj(obj, i64, box) -> void
-PaykanArray_push(obj, i64) -> void      PaykanArray_push_obj(obj, box) -> void
-PaykanArray_pop(obj) -> i64             PaykanArray_pop_obj(obj) -> box
-; arrays of optional values (16-byte elements, accessed in place)
-PaykanArray_new_sized(i64, i64) -> obj  PaykanArray_slot(obj, i64) -> ptr
-PaykanArray_push_slot(obj) -> ptr       PaykanArray_pop_into(obj, ptr) -> void
 ; tuples
 PaykanTuple_new(i64, ptr) -> obj        PaykanTuple_get(obj, i64) -> i64
 PaykanTuple_set(obj, i64, i64) -> void  PaykanTuple_set_obj(obj, i64, box) -> void
@@ -496,8 +503,18 @@ PaykanFile_equals(obj, box) -> i64  PaykanFile_write(obj, obj) -> void
 PaykanFile_readln(obj) -> box
 ; globals
 extern obj PaykanObject_None     extern obj PaykanFile_Stdin
-extern vtable PaykanArray_vtable  extern vtable PaykanArray_obj_vtable
-extern vtable PaykanArray_sized_vtable
+; runtime classes' vtables, their type identities for `match`
+extern vtable PaykanObject_vtable   extern vtable PaykanString_vtable
+extern vtable PaykanFile_vtable     extern vtable PaykanError_vtable
+extern vtable PaykanTuple_vtable
+```
+
+An executable's entry code, not PIR, calls the two functions that make and
+drop the program's arguments (§4):
+
+```
+Paykan_args_new(int argc, char **argv, int64_t *count) -> PaykanShared **
+Paykan_args_free(PaykanShared **args, int64_t count) -> void
 ```
 
 `names::kCodeGenRequiredSymbols` in `include/Names.h` is the authoritative
@@ -509,7 +526,9 @@ Vtable slot layouts of runtime classes (slot index = position):
 * `Obj`, `Error`, tuples: `destroy, toString, equals`
 * `Str`: `destroy, toString, equals, len, concat`
 * `File`: `destroy, toString, equals, write, readln, readbytes, read`
-* arrays: `destroy, toString, equals, len` (`push`/`pop` are direct runtime calls)
+
+An array is not an object and has no vtable: `len()` is its type's length,
+or a slice's `i64` length.
 
 ## 9. Verifier
 
@@ -548,7 +567,7 @@ The verifier rejects a program when:
   vtable`) is not named `$rt.<symbol>` (a module-less `extern fn` may instead
   be a native `$c.<symbol>`), or anything else (a function, a module extern's
   `symbol`, a `cstr`/`data`/`bytes` global) has either name;
-* `@main` has a signature other than `() -> i64` or `(box) -> i64`.
+* `@main` has a signature other than `() -> i64` or `(ptr, i64) -> i64`.
 
 ## 10. Text format summary
 

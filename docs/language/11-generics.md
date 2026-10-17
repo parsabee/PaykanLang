@@ -11,9 +11,9 @@ bounds (`<T: Show>`) are in `12-traits.md`; variance is not supported in v0.1.
 ## Quick Summary
 
 - Declare type parameters after the name: `class Box<T> { … }`,
-  `class Pair<K, V> { … }`, `fn first<T>(xs: T[]) -> T { … }`.
+  `class Pair<K, V> { … }`, `fn first<T>(xs: view T[]) -> view T { … }`.
 - Use a generic class by giving it type arguments: `Box<int>`, `Pair<Str, int>`,
-  `Box<int>[]`, `Box<Box<int>>`. Each distinct argument list is its own
+  `Box<int>[2]`, `Box<Box<int>>`. Each distinct argument list is its own
   ordinary class named after it (`Box<int>` and `Box<Str>` are unrelated, and
   so are `Box<Dog>` and `Box<Animal>`: there is no variance).
 - Construct with the type arguments — `Box<int>(3)` — or let the compiler
@@ -91,7 +91,7 @@ impl Keyed<K> for Pair<K, V> {}   // met by Pair's own key()
 ## Declaring a Generic Function
 
 ```pkn
-fn first<T>(xs: T[]) -> T { return xs[0]; }
+fn first<T>(xs: view T[]) -> view T { return xs[0]; }
 
 fn unbox<T>(b: Box<T>) -> T { return b.get(); }
 
@@ -110,8 +110,7 @@ Type arguments are accepted wherever a type is written:
 b: Box<int> = Box<int>(3);            // variable annotation and constructor
 p: Pair<Str, int> = Pair<Str, int>("age", 42);
 nested: Box<Box<int>> = Box<Box<int>>(b);
-arr: Box<int>[] = [Box<int>(1), Box<int>(2)];   // array of instantiations
-ba: Box<int[]> = Box<int[]>([1, 2]);            // instantiation of an array
+arr: Box<int>[2] = [Box<int>(1), Box<int>(2)];   // array of instantiations
 
 class Holder {
   b: Box<int>;                         // field
@@ -147,15 +146,14 @@ unbox(Box<int>(4));       // T = int, found through Box<T>
 first<Str>(words);        // explicit — always allowed
 ```
 
-Inference looks through arrays (`T[]`), tuples (`(A, B)`, element by element),
-optionals (`T?` against a `U?` or a plain `U`) and instantiations (`Box<T>`,
-also when the argument is a subclass of one). A bare `None` argument is typed
-`Obj` and carries no information about `T`: `unwrapOr(None, Node(3))` infers
-`T = Node` from the second argument, but `wrap(None)` alone cannot be inferred
-and needs `wrap<Node>(None)`; an empty array literal `[]` carries no
-information either. It is exact: a
-parameter that appears twice must be deduced as the same type, and no
-promotion or subtyping is applied. When inference is impossible or ambiguous
+Inference looks through slices (`view T[]`, against an array's elements),
+tuples (`(A, B)`, element by element), optionals (`T?` against a `U?` or a
+plain `U`) and instantiations (`Box<T>`, also when the argument is a subclass
+of one). A bare `None` argument is typed `Obj` and carries no information
+about `T`: `unwrapOr(None, Node(3))` infers `T = Node` from the second
+argument, but `wrap(None)` alone cannot be inferred and needs
+`wrap<Node>(None)`. It is exact: a parameter that appears twice must be
+deduced as the same type, and no promotion or subtyping is applied. When inference is impossible or ambiguous
 the call is an error with a hint to write the arguments explicitly:
 
 ```pkn
@@ -175,9 +173,9 @@ default `__init__`: `Box(3)` is `Box<int>(3)`.
 ## Type Parameters Are Types
 
 Inside a generic declaration `T` stands for the type argument and nothing
-else. It can be used in annotations, `T[]`, `Box<T>`, tuple types `(T, int)`,
-optional types `T?`, and `match` arms, but `y = T;` and `T()` are errors
-("type parameter 'T' cannot be used as a value").
+else. It can be used in annotations, `T[3]`, `view T[]`, `Box<T>`, tuple types
+`(T, int)`, optional types `T?`, and `match` arms, but `y = T;` and `T()` are
+errors ("type parameter 'T' cannot be used as a value").
 
 Tuples and optionals work inside templates and as type arguments:
 

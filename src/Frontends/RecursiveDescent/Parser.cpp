@@ -1912,8 +1912,26 @@ Expr *Parser::parsePrimary() {
   case Tok::LBracket: {
     consume();
     std::vector<Expr *> elems;
-    if (!parseArgumentList(Tok::RBracket, elems) ||
-        !expect(Tok::RBracket, "to close the array literal"))
+    if (!parseArgumentList(Tok::RBracket, elems))
+      return nullptr;
+    // `[v; n]`: n copies of v.
+    if (elems.size() == 1 && accept(Tok::Semi)) {
+      if (!at(Tok::Int)) {
+        errorAtCurrent("expected the number of copies, an integer literal");
+        return nullptr;
+      }
+      Token n = consume();
+      if (n.IntValue < 1) {
+        error(n.Loc, "an array has at least one element: the count must be 1 "
+                     "or more");
+        return nullptr;
+      }
+      if (!expect(Tok::RBracket, "to close the array literal"))
+        return nullptr;
+      return Ctx.make<ArrayLiteralExpr>(span(start), std::move(elems),
+                                        n.IntValue);
+    }
+    if (!expect(Tok::RBracket, "to close the array literal"))
       return nullptr;
     return Ctx.make<ArrayLiteralExpr>(span(start), std::move(elems));
   }

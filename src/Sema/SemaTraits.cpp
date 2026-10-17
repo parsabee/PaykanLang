@@ -228,8 +228,8 @@ const ast::Type *Sema::traitImplOwner(ast::Type *ty, const TraitRef &tr) {
         return c;
     return nullptr;
   }
-  // An array or a tuple is an object.
-  if (ast::isa<ast::ArrayType>(ty) || ast::isa<ast::TupleType>(ty))
+  // A tuple is an object.
+  if (ast::isa<ast::TupleType>(ty))
     return has(Ctx.getObjTy()) ? Ctx.getObjTy() : nullptr;
   return has(ty) ? ty : nullptr;
 }

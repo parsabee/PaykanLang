@@ -1,13 +1,13 @@
 // Sample 24 — Command-line arguments
 //
-// main now accepts an optional args: Str[] parameter.
+// main may take an `args: view Str[]` parameter: a slice of the arguments.
 // args[0] is always the script path.
 // args[1..] are the arguments passed after the source file on the command line.
 //
 // Usage:
 //   ./build/bin/paykan samples/codegen/24_args.pkn hello world 42
 
-fn main(args: Str[]) -> int {
+fn main(args: view Str[]) -> int {
   println("argc: " + Str<int>(args.len()));
   i: int = 0;
   while (i < args.len()) {

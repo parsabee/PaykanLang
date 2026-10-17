@@ -23,7 +23,7 @@ normalised) and leave zero live heap blocks.  By default the program gets no
 arguments and an empty standard input.  Two optional additions change that:
 
 - `Output (arguments: a b c):` passes `a`, `b` and `c` (split on whitespace)
-  after the source file, so `main(args: Str[])` sees them as `args[1..]`;
+  after the source file, so `main(args: view Str[])` sees them as `args[1..]`;
 - an `Input:` line and a fenced block between the program and its `Output:`
   is fed to the program's standard input.
 

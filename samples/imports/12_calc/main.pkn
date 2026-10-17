@@ -80,41 +80,40 @@ import calc::parser;
 import calc::hashmap;
 import calc::utils;
 
-// A fixed-capacity ring buffer that keeps the most recent `cap` items, oldest
+// A fixed-capacity ring buffer that keeps the most recent 16 items, oldest
 // first. It is generic: `Ring<(Str, float)>` below holds the statement history,
 // and any other element type works the same way. (Generic types are not
 // exported across modules yet, so it lives in this module.)
 class Ring<T> {
-  items: T[];
-  cap: int;
+  items: T[16];
+  count: int; // how many slots are in use: all of them once the buffer is full
   start: int; // index of the oldest item once the buffer is full
 
   // Append `x`, overwriting the oldest item when the buffer is full.
   fn add(x: T) {
-    if (self.items.len() < self.cap) {
-      self.items.push(x);
+    if (self.count < self.items.len()) {
+      self.items[self.count] = x;
+      self.count = self.count + 1;
     } else {
       self.items[self.start] = x;
-      self.start = (self.start + 1) % self.cap;
+      self.start = (self.start + 1) % self.items.len();
     }
   }
 
-  view fn len() -> int { return self.items.len(); }
+  view fn len() -> int { return self.count; }
 
   // The i-th oldest item (0 <= i < len()).
   view fn at(i: int) -> view T { return self.items[(self.start + i) % self.items.len()]; }
 }
 
 impl Ring<T> {
-  fn __init__(cap: int) {
-    self.items = [];
-    self.cap = cap;
+  // Every slot starts as `blank`, until an item is added there.
+  fn __init__(blank: T) {
+    self.items = [blank; 16];
+    self.count = 0;
     self.start = 0;
   }
 }
-
-// How many past statements :history remembers.
-fn historySize() -> int { return 20; }
 
 // Format a result with trailing zeros trimmed.
 fn show(v: float) -> Str {
@@ -161,18 +160,25 @@ fn evalStatement(src: Str, env: hashmap::HashMap,
   }
 }
 
-// List every stored variable.
+// List every stored variable, walking each bucket's chain of entries.
 fn listVars(env: hashmap::HashMap) {
-  vars: (Str, float)[] = env.entries();
-  if (vars.len() == 0) {
+  if (env.count() == 0) {
     println("(no variables)");
     return;
   }
-  i: int = 0;
-  while (i < vars.len()) {
-    name, value = vars[i];
-    println("  " + name + " = " + show(value));
-    i = i + 1;
+  b: int = 0;
+  while (b < env.bucketCount()) {
+    cur: hashmap::Entry? = env.bucket(b);
+    while (cur != None) {
+      match cur {
+        e: hashmap::Entry {
+          println("  " + e.key + " = " + show(e.value));
+          cur = e.next;
+        }
+        None { }
+      }
+    }
+    b = b + 1;
   }
 }
 
@@ -292,7 +298,7 @@ fn printHelp() {
 // REPL. It covers expressions, assignment, `ans`, the constants, every
 // command and a few errors, and ends with `a` and `b` defined.
 fn demo(env: hashmap::HashMap, history: Ring<(Str, float)>) {
-  script: Str[] = [
+  script: Str[_] = [
     "1 + 2 * 3",
     "(1 + 2) * 3",
     "x = 6",
@@ -337,15 +343,20 @@ fn printUsage() {
   println("With no expressions, reads one statement per line from stdin.");
 }
 
-fn main(args: Str[]) -> int {
+// True for an option such as `-q` (a lone `-` is not one).
+fn isOption(a: view Str) -> bool {
+  return utils::startsWith(a, "-") && a.len() > 1;
+}
+
+fn main(args: view Str[]) -> int {
   quiet: bool = False;
   runDemo: bool = True;
-  exprs: Str[] = [];
+  nexprs: int = 0;
 
   // -- command-line parsing: flags, repeatable -e, positional expressions --
   i: int = 1;
   while (i < args.len()) {
-    a: Str = args[i];
+    a: view = args[i];
     if (a.equals("-h") || a.equals("--help")) {
       printUsage();
       return 0;
@@ -356,30 +367,38 @@ fn main(args: Str[]) -> int {
     } else if (a.equals("-e") || a.equals("--eval")) {
       if (i + 1 < args.len()) {
         i = i + 1;
-        exprs.push(args[i]);
+        nexprs = nexprs + 1;
       } else {
         printerrln("error: " + a + " requires an argument");
         return 2;
       }
-    } else if (utils::startsWith(a, "-") && a.len() > 1) {
+    } else if (isOption(a)) {
       printerrln("error: unknown option '" + a + "' (try -h)");
       return 2;
     } else {
-      exprs.push(a); // a positional argument is an expression
+      nexprs = nexprs + 1; // a positional argument is an expression
     }
     i = i + 1;
   }
 
   env: hashmap::HashMap = hashmap::HashMap();
   defineConstants(env);
-  history: Ring<(Str, float)> = Ring<(Str, float)>(historySize());
+  history: Ring<(Str, float)> = Ring<(Str, float)>(("", 0.0));
   if (runDemo) { demo(env, history); }
 
-  // Batch mode: evaluate every collected expression, sharing one environment.
-  if (exprs.len() > 0) {
-    j: int = 0;
-    while (j < exprs.len()) {
-      evalStatement(exprs[j], env, history, quiet);
+  // Batch mode: walk the arguments again and evaluate every expression, in
+  // order, sharing one environment. The first pass checked the options, so
+  // each one here is known. `toString()` gives an argument's string as one
+  // of our own, for the parser and the history to keep.
+  if (nexprs > 0) {
+    j: int = 1;
+    while (j < args.len()) {
+      if (args[j].equals("-e") || args[j].equals("--eval")) {
+        j = j + 1;
+        evalStatement(args[j].toString(), env, history, quiet);
+      } else if (!isOption(args[j])) {
+        evalStatement(args[j].toString(), env, history, quiet);
+      }
       j = j + 1;
     }
     return 0;

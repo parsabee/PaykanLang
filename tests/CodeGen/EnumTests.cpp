@@ -138,7 +138,7 @@ TEST(EnumCodeGen, ReturnEnumFromFunction) {
   EXPECT_EQ(r.StdOut, "south\n");
 }
 
-// Arrays of enums are primitive (i64) arrays, not object arrays: literal
+// An array of enums holds raw (i64) values, not references: literal
 // construction, subscript get/set, and len must all treat the element as a raw
 // value rather than a boxed PaykanShared*.
 TEST(EnumCodeGen, ArrayOfEnums) {

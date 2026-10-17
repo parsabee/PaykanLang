@@ -6,7 +6,7 @@
 // match subject.
 //
 // Runtime allocation sites: PaykanString_from_int / _float / _bool / _char
-// (String.c), the class instance and the array.
+// (String.c), the class instance and the strings in the array.
 //
 // Expected under --track-heap: live blocks : 0.
 // expect-stdout: 0 1 2 3 4
@@ -40,7 +40,7 @@ fn main() -> int {
   }
   println(line);
 
-  words: Str[] = ["1", "2", "x", "3", "", "4", "5"];
+  words: Str[7] = ["1", "2", "x", "3", "", "4", "5"];
   total = 0;
   i = 0;
   while (i < words.len()) { total = total + parseOr(words[i], 0); i = i + 1; }

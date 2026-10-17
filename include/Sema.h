@@ -240,9 +240,8 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
                                      ast::Type *retTy,
                                      const std::vector<ast::Type *> &paramTys);
 
-  // Type equality.  Resolved types are canonical (including ArrayTypes, which
-  // ASTContext interns per element type), so this is pointer identity with a
-  // structural fallback for any unresolved parser ArrayType node.
+  // Type equality.  Resolved types are canonical (ASTContext interns them),
+  // so this is pointer identity with a structural fallback.
   static bool typesEqual(ast::Type *a, ast::Type *b);
 
   // Returns true if a value of type `src` can be assigned to a location of
@@ -263,13 +262,6 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   //     `int?`) is marked with the optional so the lowering boxes it.
   bool checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src);
 
-  // Record the destination's array type on an empty array literal `[]` (and
-  // on empty literals nested in a non-empty one) so the lowering can choose an
-  // object-element array where the elements need releasing.  Called from
-  // checkAssignable, so every typed sink -- declaration, assignment, field
-  // store, call/method/push argument, return, subscript store -- is covered.
-  void adoptArrayLiteralType(ast::Type *dst, ast::Expr *src);
-
   // An array or tuple literal flowing into a slot whose element types it
   // must take: `[1, 2]` into `int?[]` and `(1, "a")` into `(int?, Str)` box
   // their primitives (Expr::CoercedType), a `None` element takes the slot's
@@ -285,12 +277,6 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // unwrapping" error at @p loc and return true; otherwise return false so the
   // caller emits its own generic mismatch diagnostic.
   bool diagnoseOptionalNarrowing(ast::SourceLocation loc, ast::Type *dst,
-                                 ast::Type *srcTy);
-
-  // If @p srcTy is an empty array literal's type (`[]`, no element type of
-  // its own) and @p dst (nullptr: none) cannot supply one -- it is not an
-  // array or an optional array -- report it at @p loc and return true.
-  bool diagnoseEmptyArrayLiteral(ast::SourceLocation loc, ast::Type *dst,
                                  ast::Type *srcTy);
 
   // Emit the unwrap diagnostic for an operation that is not defined on an
@@ -309,13 +295,16 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   ast::Type *resolveType(ast::Type *ty, ast::SourceLocation loc,
                          const std::string &context);
 
-  // -- Fixed-size arrays (docs/language/05-arrays.md, "Fixed-size arrays")
+  // -- Fixed-size arrays (docs/language/05-arrays.md)
   //
   // For now only a local variable, a parameter, a result and a field have a
   // `T[n]` type (set around the resolveType of its annotation, which takes
   // the flag), of scalars, enums, references or other such arrays.
 
   bool FixedArrayAllowed = false;
+  /// Set around the resolveType of a `view` or `inout` parameter's type:
+  /// only there is `T[]` (a slice) a type.
+  bool SliceAllowed = false;
   /// Set around the resolveType of a variable declaration's annotation when
   /// it has an initializer: only there can a length be `_` (inferred).
   bool InferredLengthAllowed = false;
@@ -334,10 +323,6 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   ast::Type *fillLengths(ast::Type *ty, ast::Type *from);
   /// Reports that @p from, at @p loc, gives the `_` lengths of @p ty none.
   void errorNoLengths(ast::SourceLocation loc, ast::Type *ty, ast::Type *from);
-  /// The type of a parameter of type @p ty and mode @p mode: a slice for a
-  /// `view` or `inout` array of elements a fixed-size array can hold, @p ty
-  /// otherwise.
-  ast::Type *sliceOf(ast::Type *ty, ast::ParamMode mode);
   /// Why @p arg cannot be passed for the slice @p param, appended to the
   /// argument's error ("" when @p param is not a slice).
   static std::string sliceArgNote(const ast::Type *param, const ast::Type *arg);
@@ -1286,7 +1271,8 @@ public:
 
   /// How run() checks the program's entry point, `main` (#132).  A module
   /// that is imported, or analysed on its own, needs none; a program that is
-  /// built or run needs `fn main() -> int` or `fn main(args: Str[]) -> int`.
+  /// built or run needs `fn main() -> int` or `fn main(args: view Str[]) ->
+  /// int`.
   enum class EntryPoint {
     None,       ///< no check (the default; imported modules)
     IfDeclared, ///< a declared `main` must have an entry-point signature

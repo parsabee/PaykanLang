@@ -126,17 +126,6 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
     }
     ast::ClassType *armCt = ast::dyn_cast<ast::ClassType>(arm->getArmType());
     ast::Type *bindTy = armCt;
-    // Array-type arms resolve to the specialized array ClassType so vtable
-    // identity comparison works like class arms.  The binding keeps the
-    // array type itself: the specialized class is only a vtable key (it has
-    // no PIR class or slots), and method calls, push/pop and subscripts on
-    // the binding dispatch through the array type.
-    if (!armCt) {
-      if (auto *at = ast::dyn_cast<ast::ArrayType>(arm->getArmType())) {
-        armCt = ASTCtx.getOrCreateSpecializedArrayType(at->getElementType());
-        bindTy = at;
-      }
-    }
     assert(armCt && "Sema should have verified arm type exists");
     bool matchesAnySome = optTy && arm->getArmType() == optTy->getInnerType();
     typeArms.push_back({armCt, bindTy, matchesAnySome, arm});

@@ -1,10 +1,12 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// Paykan runtime — I/O builtins.
+// Paykan runtime — I/O builtins and the program's arguments.
 
 #include "RuntimeInternal.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 /// Print one object to @p stream through its toString.  (The print builtins
 /// take a single Obj: pieces are composed with `+`.)
@@ -33,3 +35,22 @@ void Paykan_printerrln(PaykanObject *obj) {
 }
 
 void Paykan_flush(void) { fflush(stdout); }
+
+// -- Program arguments
+
+PaykanShared **Paykan_args_new(int argc, char **argv, int64_t *count) {
+  int64_t n = getenv("PAYKAN_NO_ARGS") ? 0 : argc;
+  PaykanShared **args = (PaykanShared **)Paykan_malloc((size_t)(n > 0 ? n : 1) *
+                                                       sizeof(PaykanShared *));
+  for (int64_t i = 0; i < n; ++i)
+    args[i] = PaykanShared_new(
+        (PaykanObject *)PaykanString_new(argv[i], (int64_t)strlen(argv[i])));
+  *count = n;
+  return args;
+}
+
+void Paykan_args_free(PaykanShared **args, int64_t count) {
+  for (int64_t i = 0; i < count; ++i)
+    Paykan_release(args[i]);
+  Paykan_free(args);
+}

@@ -1290,6 +1290,14 @@ private:
       if (!exprs(f, elems))
         return nullptr;
       out = Ctx.make<ArrayLiteralExpr>(loc, std::move(elems));
+    } else if (t == "array-repeat") {
+      Expr *v = expr(f, "the repeated value");
+      int64_t n = 0;
+      if (!v || !f.integer("the count", n))
+        return nullptr;
+      if (n < 1)
+        return fail(e, "an array has at least one element"), nullptr;
+      out = Ctx.make<ArrayLiteralExpr>(loc, std::vector<Expr *>{v}, n);
     } else if (t == "subscript") {
       Expr *arr = expr(f, "the array");
       Expr *idx = arr ? expr(f, "the index") : nullptr;

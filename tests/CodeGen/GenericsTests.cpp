@@ -104,38 +104,48 @@ TEST(Generics, BoxOfBoxInt) {
   g.expectNoLeaks("BoxOfBoxInt");
 }
 
-// Stack<T> over T[] with Str and int elements.  Every element is popped
-// before main returns: pushing a Str into an array FIELD from inside a method
-// and leaving it there leaks the element even for a hand-written class (a
-// pre-existing ownership bug unrelated to generics).
+// Stack<T> over a fixed-capacity T[4] field and a count, with Str and int
+// elements: the methods write and read the field in place, and an element
+// still on the stack is released with it.
 TEST(Generics, StackOfStrAndInt) {
   LeakGuard g;
   auto r = compileAndRun(withMain(R"(
     class Stack<T> {
-      items: T[];
-      fn push(v: T) { self.items.push(v); }
-      fn pop() -> T { return self.items.pop(); }
-      fn size() -> int { return self.items.len(); }
-      fn empty() -> bool { return self.items.len() == 0; }
+      items: T[4];
+      n: int;
+      fn push(v: T) {
+        self.items[self.n] = v;
+        self.n = self.n + 1;
+      }
+      fn pop() -> T {
+        self.n = self.n - 1;
+        return self.items[self.n];
+      }
+      view fn size() -> int { return self.n; }
+      view fn empty() -> bool { return self.n == 0; }
     }
 
     impl Stack<T> {
-      fn __init__() { self.items = []; }
+      fn __init__(fill: T) {
+        self.items = [fill; 4];
+        self.n = 0;
+      }
     }
   )",
                                   R"(
-    s: Stack<Str> = Stack<Str>();
+    s: Stack<Str> = Stack<Str>("");
     s.push("a");
     s.push("b");
     s.push("c");
     println(Str<int>(s.size()));
     while (!s.empty()) { println(s.pop()); }
-    n: Stack<int> = Stack<int>();
+    n: Stack<int> = Stack<int>(0);
     n.push(1);
     n.push(2);
     total: int = 0;
     while (!n.empty()) { total = total + n.pop(); }
     println(Str<int>(total));
+    s.push("left");               // released with the stack
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "3\nc\nb\na\n3\n");
@@ -276,19 +286,17 @@ TEST(Generics, ArrayOfInstantiationsAndFieldOfInstantiation) {
   g.expectNoLeaks("ArrayOfInstantiationsAndFieldOfInstantiation");
 }
 
-TEST(Generics, ConstructorInferenceAndInstantiationOfArray) {
+TEST(Generics, ConstructorInference) {
   LeakGuard g;
   auto r = compileAndRun(withMain(kBox, R"(
     b = Box(5);
     println(Str<int>(b.get()));
     s = Box("inferred");
     println(s.get());
-    xs: Box<int[]> = Box<int[]>([1, 2, 3]);
-    println(Str<int>(xs.get().len()));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "5\ninferred\n3\n");
-  g.expectNoLeaks("ConstructorInferenceAndInstantiationOfArray");
+  EXPECT_EQ(r.StdOut, "5\ninferred\n");
+  g.expectNoLeaks("ConstructorInference");
 }
 
 // Instantiations are merged into the class list so that a superclass is
@@ -430,7 +438,7 @@ TEST(GenericsTypes, OptionalFieldsAndUnwrapInTemplates) {
   g.expectNoLeaks("OptionalFieldsAndUnwrapInTemplates");
 }
 
-TEST(GenericsTypes, ExportedInstantiationNamesWithCommasAndArrays) {
+TEST(GenericsTypes, ExportedInstantiationNamesWithCommasAndTuples) {
   LeakGuard g;
   auto dir = paykan::test::tempDir() / "pkn_cg_generics_names";
   std::filesystem::remove_all(dir);
@@ -443,7 +451,7 @@ impl Pair<A, B> { fn __init__(a: A, b: B) { self.a = a; self.b = b; } }
 class Box<T> { v: T; fn get() -> T { return self.v; } }
 impl Box<T> { fn __init__(v: T) { self.v = v; } }
 fn mkPair() -> Pair<Str, int> { return Pair<Str, int>("k", 1); }
-fn mkBoxArr() -> Box<int[]> { return Box<int[]>([1, 2, 3]); }
+fn mkBoxTuple() -> Box<(Str, int)> { return Box<(Str, int)>(("t", 3)); }
 )";
   }
   auto mainPath = (dir / "main.pkn").string();
@@ -454,8 +462,8 @@ import lib;
 fn main() -> int {
   p = lib::mkPair();
   println(p.first());
-  b = lib::mkBoxArr();
-  return b.get().len();
+  b = lib::mkBoxTuple();
+  return b.get().1;
 }
 )";
   }
@@ -464,5 +472,5 @@ fn main() -> int {
   EXPECT_EQ(r.StdOut, "k\n");
   EXPECT_EQ(r.ExitCode, 3);
   std::filesystem::remove_all(dir);
-  g.expectNoLeaks("ExportedInstantiationNamesWithCommasAndArrays");
+  g.expectNoLeaks("ExportedInstantiationNamesWithCommasAndTuples");
 }

@@ -143,7 +143,7 @@ Note the capitals in `True` and `False`. An `int` converts to a `float` automati
 `float` never silently becomes an `int`, and neither ever becomes a `bool`.
 
 Besides these, `Str` is the string type, `void` is the "returns nothing" type of functions,
-and every class you declare is a type. Later chapters add arrays (`int[]`), tuples
+and every class you declare is a type. Later chapters add arrays (`int[3]`), tuples
 (`(int, Str)`), optionals (`int?`) and generic types (`Box<int>`).
 
 ### Printing values
@@ -343,9 +343,9 @@ Some rules to know:
 - There is no overloading: each function name is used once. Names of the built-in functions
   (`print`, `println`, `printerr`, `printerrln`, `open`) and built-in types (`Str`, `Obj`,
   `File` and others) are reserved.
-- Arguments are passed by value for `int`, `float`, `bool` and `char`. Strings, arrays and
-  objects are passed by reference: a function receives the same object as its caller (more
-  in [Classes](04-classes.md) and [Memory](12-memory.md)).
+- Arguments are passed by value for `int`, `float`, `bool`, `char` and arrays (the function
+  gets a copy). Strings and objects are passed by reference: a function receives the same
+  object as its caller (more in [Classes](04-classes.md) and [Memory](12-memory.md)).
 
 A parameter of any type can say how it is passed. An `inout` parameter is the caller's
 variable (or a field of an object): the function changes it in place, and assigning an object

@@ -7,14 +7,14 @@
 //   * a 1,000,000-node `Node?` linked list (class instances, Str fields);
 //   * a deep, wide tree: a 200,000-node spine whose every node also holds a
 //     three-node subtree and a Node (with its Str);
-//   * a chain of 200,000 nested arrays, each holding a string, a tuple
-//     and the next array;
+//   * a chain of 200,000 links through arrays: each link's `Obj[3]` field
+//     holds the next link, a string and a tuple;
 //   * a chain of tuples nested 200,000 deep through an `Obj` slot, with an
 //     Error from a failed open() in every 10,000th link.
 //
 // Runtime allocation sites: object structs + PaykanShared (Shared.c),
-// PaykanString_new (String.c), PaykanArray_* (Array.c), PaykanTuple_new
-// (Tuple.c), PaykanError_new (Error.c).
+// PaykanString_new (String.c), PaykanTuple_new (Tuple.c), PaykanError_new
+// (Error.c).
 //
 // Expected under --track-heap: live blocks : 0.
 
@@ -42,6 +42,10 @@ class Tree {
 
 impl Tree {
   fn __init__() { }
+}
+
+class Link {
+  slots: Obj[3];
 }
 
 fn leaf() -> Tree {
@@ -78,10 +82,7 @@ fn arrays(n: int) -> int {
   prev: Obj = None;
   i = 0;
   while (i < n) {
-    o: Obj[] = [prev];
-    o.push(Str<int>(i));
-    o.push((i, "t"));
-    prev = o;
+    prev = Link([prev, Str<int>(i), (i, "t")]);
     i = i + 1;
   }
   return i;

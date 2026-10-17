@@ -119,9 +119,8 @@ fn main() -> int {
 }
 
 // What a `view` parameter holds cannot change through it, whatever its type:
-// no field or element write, no call of a method that is not a `view fn`
-// (`push` included), no `inout` argument.  Reads and `view fn` calls are
-// fine.
+// no field or element write, no call of a method that is not a `view fn`, no
+// `inout` argument.  Reads and `view fn` calls are fine.
 TEST(ParamMode, ViewReferenceParameters) {
   auto r = semaCheck(R"(class Counter {
   n: int;
@@ -136,7 +135,6 @@ fn bump(n: inout int) { n = n + 1; }
 fn look(c: view Counter, s: view Str, xs: view int[]) -> int {
   c.tick();
   c.n = 2;
-  xs.push(1);
   xs[0] = 1;
   s = "x";
   reset(c);
@@ -145,19 +143,17 @@ fn look(c: view Counter, s: view Str, xs: view int[]) -> int {
   return c.n + s.len() + xs.len() + xs[0];
 }
 fn main() -> int { return 0; })");
-  EXPECT_EQ(r.ErrorCount, 7u) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 6u) << r.Diagnostics;
   expectErrors(
       r, {":12:3: error: 'c' is a 'view' parameter; 'tick' is not a 'view fn'",
           ":13:3: error: 'c' is a 'view' parameter; cannot assign to its "
           "field 'n'",
-          ":14:3: error: 'int[]' has no method 'push' with these arguments (a "
-          "slice has 'len()')",
-          ":15:3: error: 'xs' is a 'view' parameter; cannot assign to its "
+          ":14:3: error: 'xs' is a 'view' parameter; cannot assign to its "
           "elements",
-          ":16:3: error: cannot assign to 'view' parameter 's'",
-          ":17:9: error: 'c' is a 'view' parameter; it cannot be passed to "
+          ":15:3: error: cannot assign to 'view' parameter 's'",
+          ":16:9: error: 'c' is a 'view' parameter; it cannot be passed to "
           "'inout' parameter 'c'",
-          ":18:8: error: 'c' is a 'view' parameter; it cannot be passed to "
+          ":17:8: error: 'c' is a 'view' parameter; it cannot be passed to "
           "'inout' parameter 'n'"});
 }
 
@@ -566,6 +562,7 @@ impl Counter {
   fn __init__() { self.n = 0; }
 }
 fn bump(n: inout int) { n = n + 1; }
+fn fill(xs: inout int[]) { }
 fn main() -> int {
   v: view = Counter();
   v.tick();
@@ -574,7 +571,7 @@ fn main() -> int {
   s: view = "abc";
   s.concat("d");
   a: view = [1, 2];
-  a.push(3);
+  fill(a);
   a[0] = 5;
   match v { x: Counter { x.tick(); x = Counter(); } }
   println(v.toString() + s + Str(s.len() + a.len() + a[0] + v.n));
@@ -582,23 +579,24 @@ fn main() -> int {
 })");
   EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
   expectErrors(
-      r, {":13:3: error: 'v' is a 'view' local; 'tick' is not a 'view fn'",
-          ":14:3: error: 'v' is a 'view' local; cannot assign to its field 'n'",
-          ":15:8: error: 'v' is a 'view' local; it cannot be passed to "
+      r, {":14:3: error: 'v' is a 'view' local; 'tick' is not a 'view fn'",
+          ":15:3: error: 'v' is a 'view' local; cannot assign to its field 'n'",
+          ":16:8: error: 'v' is a 'view' local; it cannot be passed to "
           "'inout' parameter 'n'",
-          ":17:3: error: 's' is a 'view' local; 'concat' is not a 'view fn'",
-          ":19:3: error: 'a' is a 'view' local; 'push' is not a 'view fn'",
-          ":20:3: error: 'a' is a 'view' local; cannot assign to its "
+          ":18:3: error: 's' is a 'view' local; 'concat' is not a 'view fn'",
+          ":20:8: error: 'a' is a 'view' local; it cannot be passed to "
+          "'inout' parameter 'xs'",
+          ":21:3: error: 'a' is a 'view' local; cannot assign to its "
           "elements",
-          ":21:26: error: 'x' is bound to a 'view'; 'tick' is not a 'view fn'",
-          ":21:36: error: cannot assign to 'x': it is bound to a "
+          ":22:26: error: 'x' is bound to a 'view'; 'tick' is not a 'view fn'",
+          ":22:36: error: cannot assign to 'x': it is bound to a "
           "'view'"});
 }
 
 // A `view` stays one: it can only be passed on to a `view` parameter,
 // whatever its type, and one that shares what it holds (an object, string,
 // array, tuple or optional) is never stored (assigned, put in an array or
-// tuple, pushed) nor returned.  The builtin functions only read, but
+// tuple) nor returned.  The builtin functions only read, but
 // `Str(s)` returns `s` itself; a value type is copied when it is assigned.
 TEST(LocalBorrow, AViewStaysAView) {
   auto r = semaCheck(R"(class Counter { n: int; }
@@ -620,8 +618,8 @@ fn main() -> int {
   e: Counter = v;
   xs = [v];
   t = (v, 1);
-  ys: Counter[] = [];
-  ys.push(v);
+  ys: Counter[1] = [Counter()];
+  ys[0] = v;
   h = Holder(v);
   h.c = v;
   flag = True;
@@ -632,8 +630,8 @@ fn main() -> int {
   u = Str(s);
   println(v);
   m = k;
-  ints: int[] = [];
-  ints.push(k);
+  ints: int[1] = [k];
+  ints[0] = k;
   return look(k) + look(v.n) + twice(m) + twice(k + 1);
 })");
   const std::string kStore =

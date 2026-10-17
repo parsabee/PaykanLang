@@ -1,5 +1,5 @@
-// OK: bool[] declared and initialised
+// OK: bool[3] declared and initialised
 fn main() -> int {
-  flags: bool[] = [True, False, True];
+  flags: bool[3] = [True, False, True];
   return 0;
 }

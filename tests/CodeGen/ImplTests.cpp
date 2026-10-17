@@ -108,7 +108,7 @@ class Bag {
 }
 impl Bag {
   fn __init__() {
-    self.items = ["", "", "", ""];
+    self.items = [""; 4];
     self.n = 0;
   }
   static fn of(a: Str, b: Str) -> Bag {

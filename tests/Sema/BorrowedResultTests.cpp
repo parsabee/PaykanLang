@@ -54,7 +54,7 @@ TEST(BorrowedResult, WhatCanBeReturned) {
   auto r = semaCheck(R"(class Counter { n: int; }
 impl Counter { fn __init__() { self.n = 0; } }
 class Box {
-  c: Counter; xs: int[];
+  c: Counter; xs: int[1];
   view fn peek() -> view Counter { return self.c; }
   view fn whole() -> view Box { return self; }
   view fn first() -> view int { return self.xs[0]; }
@@ -335,7 +335,7 @@ impl Animal { fn __init__(n: int) { self.n = n; } }
 class Dog : Animal {}
 impl Dog { fn __init__(n: int) { __super__(n); } }
 class Box {
-  a: Animal; d: Dog; xs: int[];
+  a: Animal; d: Dog; xs: int[1];
   fn me() -> inout Box { return self; }
   fn wrong() -> inout Animal { return self.d; }
   fn elem() -> inout int { return self.xs[0]; }

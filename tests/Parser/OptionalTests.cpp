@@ -33,15 +33,24 @@ TEST(Optional, VarDeclOptionalStr) {
 }
 
 TEST(Optional, OptionalArrayAndArrayOfOptional) {
-  // `int[]?` (optional array) and `Str?[]` (array of optionals) both parse.
-  auto [ok, _] = parse(R"(
+  // `int[3]?` (an optional array, which Sema rejects for now) and `Str?[2]`
+  // (an array of optionals) both parse, each suffix applying to the type
+  // before it.
+  auto [ok, driver] = parse(R"(
     fn main() -> int {
-      xs: int[]? = None;
-      ys: Str?[] = [];
+      xs: int[3]? = None;
+      ys: Str?[2] = [None; 2];
       return 0;
     }
   )");
-  EXPECT_TRUE(ok);
+  ASSERT_TRUE(ok);
+  std::string d = dumpAST(*driver);
+  for (const char *e :
+       {"OptionalType <3:11-3:18>\n    |   | `-FixedArrayType "
+        "<3:11-3:17> 3\n",
+        "FixedArrayType <4:11-4:18> 2\n    |   | `-OptionalType "
+        "<4:11-4:15>\n"})
+    EXPECT_NE(d.find(e), std::string::npos) << e << "\n" << d;
 }
 
 TEST(Optional, ParamAndReturnType) {
@@ -123,7 +132,7 @@ TEST(Optional, OptionalPrimitivesParse) {
     fn f(x: float?, b: bool?) -> char? { return None; }
     fn main() -> int {
       x: int? = None;
-      xs: int?[] = [1, 2];
+      xs: int?[2] = [1, 2];
       t: (int?, Str) = (1, "a");
       match x {
         n: int { println("some"); }

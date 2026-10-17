@@ -1,8 +1,9 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Sema tests: fixed-size arrays, `T[n]` (docs/language/05-arrays.md,
-// "Fixed-size arrays").  For now the type of a local variable, a parameter,
-// a result or a field, of scalars, enums, references and other such arrays.
+// Sema tests: arrays, `T[n]`, and slices, `view T[]` / `inout T[]`
+// (docs/language/05-arrays.md).  An array is for now the type of a local
+// variable, a parameter, a result or a field, of scalars, enums, references
+// and other arrays.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -66,10 +67,15 @@ TEST(FixedArray, LiteralsHaveTheArraysLengthAndElementType) {
   expectBodyError("  a: int[2] = [1, 2];\n  b: int[3] = a;",
                   "initializer of type 'int[2]' does not match declared type "
                   "'int[3]'");
-  // A literal without a fixed-size array slot is still a growable array.
-  expectBodyError("  a = [1, 2];\n  b: int[2] = a;",
-                  "initializer of type 'int[]' does not match declared type "
-                  "'int[2]'");
+  // Without a slot, a literal has its elements' count and type.
+  expectOk("  a = [1, 2];\n  b: int[2] = a;\n  g = [a, [3, 4]];\n"
+           "  h: int[2][2] = g;");
+  expectBodyError("  a = [1, 2.5];\n  b: int[2] = a;",
+                  "initializer of type 'float[2]' does not match declared "
+                  "type 'int[2]'");
+  expectBodyError("  a = [[1, 2], [3, 4]];\n  b: int[4] = a;",
+                  "initializer of type 'int[2][2]' does not match declared "
+                  "type 'int[4]'");
 }
 
 TEST(FixedArray, ConstantIndexesAreChecked) {
@@ -95,8 +101,8 @@ TEST(FixedArray, ElementsArePartOfTheValue) {
 }
 
 TEST(FixedArray, HasOnlyLen) {
-  expectBodyError("  xs: int[2] = [1, 2];\n  xs.push(3);",
-                  "'int[2]' has no method 'push' with these arguments (a "
+  expectBodyError("  xs: int[2] = [1, 2];\n  xs.first();",
+                  "'int[2]' has no method 'first' with these arguments (a "
                   "fixed-size array has 'len()')");
   expectBodyError("  xs: int[2] = [1, 2];\n  ys: int[2] = [1, 2];\n"
                   "  b = xs == ys;",
@@ -184,12 +190,11 @@ TEST(FixedArray, OnlyALocalAParameterAResultOrAFieldForNow) {
   const std::string notYet = "a fixed-size array ('int[2]') can only be a "
                              "local variable, a parameter, a result or a "
                              "field for now";
-  expectBodyError("  o: int[2]? = None;", notYet);
-  expectBodyError("  a: int[2][] = [];", notYet);
+  expectBodyError("  o: int[2]? = None;", "variable 'o': " + notYet);
   expectBodyError("  xs: int[2] = [1, 2];\n  t = (xs, 1);",
                   "tuple element 0: " + notYet);
-  expectBodyError("  xs: int[2] = [1, 2];\n  zs = [xs, xs];",
-                  "an element of a growable array: " + notYet);
+  expectBodyError("  o: Obj = None;\n  match o { xs: int[2] { } _ { } }",
+                  "match arm: " + notYet);
   expectBodyError("  xs: int[2] = [1, 2];\n  c = if True then xs else xs;",
                   "a conditional expression: " + notYet);
   expectError("fn id<T>(x: T) -> T { return x; }\n"
@@ -212,10 +217,8 @@ TEST(FixedArray, ElementsOfReferenceTypes) {
       fixed[0].x = 4;
       os: Str?[2] = [None, ss[0]];
       ts: (int, Str)[1] = [(1, "one")];
-      arrs: int[][2] = [[1], []];
-      arrs[1].push(ts[0].0);
       grid: Str[2][2] = [[ss[0], ss[1]], names()];
-      return ss[2].len() + grid[1][0].len();
+      return ss[2].len() + grid[1][0].len() + ts[0].0;
     }
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -243,13 +246,19 @@ TEST(FixedArray, ElementsAndSize) {
       semaCheck("fn f(a: view int?[16384], b: view char[128][128]) {}\n"
                 "fn main() -> int { return 0; }");
   EXPECT_TRUE(atMost.Ok) << atMost.Diagnostics;
-  expectBodyError("  big: int?[16385] = [];", "which is too big");
-  expectBodyError("  big: int[200000] = [];",
-                  "variable 'big' has type 'int[200000]', which is too big: a "
-                  "fixed-size array holds at most 16384 elements");
-  expectBodyError("  big: char[128][129] = [];", "which is too big");
-  expectBodyError("  big: char[1][9223372036854775807] = [];",
-                  "which is too big");
+  expectError("fn f(big: view int?[16385]) {}\n"
+              "fn main() -> int { return 0; }",
+              "which is too big");
+  expectError("class C { big: int[200000]; }\n"
+              "fn main() -> int { return 0; }",
+              "field 'big' in class 'C' has type 'int[200000]', which is too "
+              "big: a fixed-size array holds at most 16384 elements");
+  expectError("fn f() -> char[128][129] { return f(); }\n"
+              "fn main() -> int { return 0; }",
+              "which is too big");
+  expectError("fn f(big: char[1][9223372036854775807]) {}\n"
+              "fn main() -> int { return 0; }",
+              "which is too big");
 }
 
 // A `view T[]` or `inout T[]` parameter is a slice: it takes a fixed-size
@@ -275,16 +284,19 @@ TEST(FixedArray, SliceParameters) {
                             "with 'len()' or passed to a 'view' or 'inout' "
                             "array parameter";
   expectError("fn f(xs: view int[]) {}\n"
-              "fn main() -> int { g = [1, 2]; f(g); return 0; }",
-              "argument 1 of 'f' has type 'int[]', expected 'int[]' (a slice "
-              "takes a fixed-size array, not a growable one)");
+              "fn main() -> int { s = \"ab\"; f(s); return 0; }",
+              "argument 1 of 'f' has type 'Str', expected 'int[]'");
   expectError("fn f(xs: view float[]) {}\n"
               "fn main() -> int { a: int[1] = [1]; f(a); return 0; }",
-              "(a slice takes a fixed-size array of exactly its element "
-              "type)");
-  expectError("fn f(xs: inout int[]) { xs.push(1); }\n"
+              "argument 1 of 'f' has type 'int[1]', expected 'float[]' (a "
+              "slice takes a fixed-size array of exactly its element type)");
+  expectError("fn f(xs: view int[]) {}\n"
+              "fn main() -> int { g = [[1, 2], [3, 4]]; f(g); return 0; }",
+              "argument 1 of 'f' has type 'int[2][2]', expected 'int[]' (a "
+              "slice takes a fixed-size array of exactly its element type)");
+  expectError("fn f(xs: inout int[]) { xs.first(); }\n"
               "fn main() -> int { return 0; }",
-              "'int[]' has no method 'push' with these arguments (a slice "
+              "'int[]' has no method 'first' with these arguments (a slice "
               "has 'len()')");
   expectError("fn f(xs: inout int[]) { xs = [1]; }\n"
               "fn main() -> int { return 0; }",
@@ -295,6 +307,9 @@ TEST(FixedArray, SliceParameters) {
   expectError("fn f(xs: inout int[]) { t = (xs, 1); }\n"
               "fn main() -> int { return 0; }",
               "tuple element 0: " + slice);
+  expectError("fn f(xs: inout int[]) { ys = [xs, xs]; }\n"
+              "fn main() -> int { return 0; }",
+              "an array element: " + slice);
   expectError("fn id<T>(x: T) -> int { return 0; }\n"
               "fn f(xs: view int[]) -> int { return id(xs); }\n"
               "fn main() -> int { return 0; }",
@@ -359,4 +374,76 @@ TEST(FixedArray, InferredLengths) {
               "fn main() -> int {\n  x: int[_][_] = [big(), big(), big()];\n"
               "  return 0;\n}\n",
               "variable 'x' has type 'int[3][8192]', which is too big");
+}
+
+// `[v; n]` is typed like a list literal of n elements: each copy takes the
+// slot's element type (an `int` into a `float[n]`, `None` into an optional),
+// a `_` length is n, `[[0; 3]; 2]` is an `int[2][3]`, and into a slice it is
+// an array of n elements of the slice's element type.
+TEST(FixedArray, RepeatLiterals) {
+  auto r = semaCheck(R"(
+    class Node { v: int; }
+    class Board { cells: char[3][3]; }
+    impl Board { fn __init__() { self.cells = [['.'; 3]; 3]; } }
+    fn sum(xs: view int[]) -> int { return xs[0] + xs.len(); }
+    fn first(xs: view float[]) -> float { return xs[0]; }
+    fn count(xs: view int?[]) -> int { return xs.len(); }
+    fn rows(g: view int[3][]) -> int { return g.len(); }
+    fn zeros() -> float[8] { return [0; 8]; }
+    fn fill<T>(v: T) -> T[4] { return [v; 4]; }
+    fn main() -> int {
+      fs: float[4] = [0; 4];
+      os: int?[8] = [None; 8];
+      ps: float?[2] = [1; 2];
+      ns: Node?[2] = [None; 2];
+      x: int[_] = [7; 5];
+      y: int[5] = x;
+      g: int[_][_] = [[0; 3]; 2];
+      h: int[2][3] = g;
+      k: int[3][3] = [[1; 3]; 3];
+      a = [1; 3];
+      b: int[3] = a;
+      c = [2.5; 2];
+      d: float[2] = c;
+      e: Str[2] = ["s"; 2];
+      m: (int, Str)[3] = [(1, "a"); 3];
+      n: Node[3] = [Node(1); 3];
+      z: int[_] = fill<int>(3);
+      return sum([1; 4]) + sum(x) + int(first([1; 2])) + count([None; 2]) +
+             rows([[0; 3]; 2]) + rows(g) + int(zeros()[7]) + y[4] + h[1][2] +
+             k[2][2] + b[2] + int(d[1]) + e[1].len() + m[2].0 + n[2].v + z[3] +
+             int(fs[3]) + ns.len() + os.len() + ps.len();
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  expectBodyError("  x: int[3] = [0; 4];",
+                  "array literal has 4 element(s), but 'int[3]' has 3");
+  expectBodyError("  g: int[2][3] = [[0; 2]; 2];",
+                  "array literal has 2 element(s), but 'int[3]' has 3");
+  expectBodyError("  g: int[3][2] = [[0; 2]; 2];",
+                  "array literal has 2 element(s), but 'int[3][2]' has 3");
+  expectBodyError("  x: Str[2] = [1; 2];",
+                  "array literal element of type 'int' does not match the "
+                  "element type 'Str' of 'Str[2]'");
+  expectBodyError("  x: int[2] = [1.5; 2];",
+                  "array literal element of type 'float' does not match the "
+                  "element type 'int' of 'int[2]'");
+  expectError("class Node { v: int; }\n"
+              "fn main() -> int { n: Node[2] = [None; 2]; return 0; }",
+              "does not match the element type 'Node' of 'Node[2]'");
+  expectError("fn f(xs: view Str[]) {}\n"
+              "fn main() -> int { f([1; 3]); return 0; }",
+              "array literal element of type 'int' does not match the element "
+              "type 'Str' of 'Str[3]'");
+  expectBodyError("  xs = [0; 20000];",
+                  "array literal of type 'int[20000]' is too big: a fixed-size "
+                  "array holds at most 16384 elements");
+  expectBodyError("  g = [[0; 200]; 100];",
+                  "array literal of type 'int[100][200]' is too big");
+  expectBodyError("  x: int[_] = [0; 20000];",
+                  "variable 'x' has type 'int[20000]', which is too big");
+  expectBodyError("  xs = [0; 16384];\n  n: int = xs[16383] + xs.len();\n"
+                  "  y = xs[16384];",
+                  "index 16384 is out of bounds for 'int[16384]' (its indexes "
+                  "are 0 to 16383)");
 }

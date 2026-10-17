@@ -2,10 +2,10 @@
 // Exercises: `None` inside a tuple literal taking the slot's `T?`
 //            (`(None, "a")` into `(int?, Str)`, `(None, 1)` into
 //            `(Node?, int)`) in a declaration, an argument, a return, a
-//            field store and a push; an array literal of tuples whose
-//            elements mix `int` and `int?` (`[("a", 1), ("b", nb)]` into
-//            `(Str, int?)[]`); `None` among class instances in a `Node?[]`
-//            literal; and nested tuple / array literals.
+//            field store and an element store; an array literal of tuples
+//            whose elements mix `int` and `int?` (`[("a", 1), ("b", nb)]`
+//            into `(Str, int?)[4]`); `None` among class instances in a
+//            `Node?[3]` literal; and nested tuple / array literals.
 //
 // Every `None` is a null box and every present primitive an Int box, so the
 // ordinary ARC rules release everything (run with --track-heap to see zero
@@ -20,7 +20,7 @@
 // expect-stdout: N1 None N3
 // expect-stdout: (a, (1, None)) (b, (None, N4))
 // expect-stdout: (None, 7)
-// expect-stdout: 1 None | None
+// expect-stdout: 1 None | None None
 
 class Node {
   v: int;
@@ -42,10 +42,11 @@ impl Slot {
 fn take(p: (int?, Str)) -> Str { return "take: " + p.1; }
 fn mk() -> (Node?, int) { return (None, 2); }
 
-fn showPairs(xs: (Str, int?)[]) -> Str {
+// The first `count` pairs of `xs`.
+fn showPairs(xs: view (Str, int?)[], count: int) -> Str {
   out = "";
   i = 0;
-  while (i < xs.len()) {
+  while (i < count) {
     if (i > 0) { out = out + " "; }
     out = out + xs[i].toString();
     i = i + 1;
@@ -53,7 +54,7 @@ fn showPairs(xs: (Str, int?)[]) -> Str {
   return out;
 }
 
-fn showNodes(xs: Node?[]) -> Str {
+fn showNodes(xs: view Node?[]) -> Str {
   out = "";
   i = 0;
   while (i < xs.len()) {
@@ -67,7 +68,7 @@ fn showNodes(xs: Node?[]) -> Str {
   return out;
 }
 
-fn showInts(xs: int?[]) -> Str {
+fn showInts(xs: view int?[]) -> Str {
   out = "";
   i = 0;
   while (i < xs.len()) {
@@ -92,24 +93,24 @@ fn main() -> int {
 
   // An array literal of tuples mixing `int` and `int?` elements.
   nb: int? = None;
-  tbl: (Str, int?)[] = [("a", 1), ("b", nb), ("c", 3)];
-  println(showPairs(tbl));
-  tbl.push(("d", None));
-  println(showPairs(tbl));
+  tbl: (Str, int?)[4] = [("a", 1), ("b", nb), ("c", 3), ("", 0)];
+  println(showPairs(tbl, 3));
+  tbl[3] = ("d", None);
+  println(showPairs(tbl, 4));
 
   // `None` among class instances.
-  nodes: Node?[] = [Node(1), None, Node(3)];
+  nodes: Node?[3] = [Node(1), None, Node(3)];
   println(showNodes(nodes));
 
   // Nested literals.
-  nested: (Str, (int?, Node?))[] = [("a", (1, None)), ("b", (nb, Node(4)))];
+  nested: (Str, (int?, Node?))[2] = [("a", (1, None)), ("b", (nb, Node(4)))];
   println(nested[0].toString() + " " + nested[1].toString());
 
   s = Slot();
   s.p = (None, 7);
   println(s.p);
 
-  grid: int?[][] = [[1, nb], [None]];
+  grid: int?[2][2] = [[1, nb], [None, None]];
   println(showInts(grid[0]) + " | " + showInts(grid[1]));
   return 0;
 }

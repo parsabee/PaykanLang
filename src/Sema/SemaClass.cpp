@@ -531,12 +531,12 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::ClassType *ct,
     if (!checkBinderName(p.getName(), method->getLocation()))
       return nullptr;
     FixedArrayAllowed = true; // a parameter may be a fixed-size array
+    SliceAllowed = p.Mode != ast::ParamMode::Value; // or a slice
     auto *pty = resolveType(p.ParamType, method->getLocation(),
                             "parameter '" + p.getName() + "' of method '" +
                                 method->getName() + "' in '" + className + "'");
     if (!pty)
       return nullptr;
-    pty = sliceOf(pty, p.Mode);
     p.ParamType = pty;
     paramTys.push_back(pty);
   }
@@ -1058,13 +1058,13 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
 // static
 std::string Sema::instantiationName(const std::string &templateName,
                                     const std::vector<ast::Type *> &args) {
-  // `Box<int>`, `Pair<Str, int>`, `Box<int[]>`, `Box<Box<int>>` -- the same
+  // `Box<int>`, `Pair<Str, int>`, `Box<Str?>`, `Box<Box<int>>` -- the same
   // spelling ast::typeName produces for the instantiation afterwards, so the
   // name round-trips through module export/import and reads naturally in
   // diagnostics.  The arguments are canonical, so equal spellings mean equal
   // types and the name is a valid cache key.  LLVM symbol names may contain
   // any character (they are quoted in textual IR), so `Box<int>_vtable` is a
-  // legal global -- the same convention the Array<T> specialisations use.
+  // legal global -- the same convention the Tuple<...> specialisations use.
   std::string s = templateName + "<";
   for (size_t i = 0; i < args.size(); ++i) {
     if (i)
@@ -1421,14 +1421,7 @@ bool Sema::unifyTypes(ast::Type *pattern, ast::Type *actual,
     if (auto *st = ast::dyn_cast<ast::SliceType>(actual))
       return unifyTypes(at->getElementType(), st->getElementType(), typeParams,
                         bindings, conflict);
-    auto *aat = ast::dyn_cast<ast::ArrayType>(actual);
-    if (!aat)
-      return true;
-    // An empty array literal ([]: element void) carries no information.
-    if (aat->getElementType() == Ctx.getVoidTy())
-      return true;
-    return unifyTypes(at->getElementType(), aat->getElementType(), typeParams,
-                      bindings, conflict);
+    return true;
   }
 
   if (auto *tt = ast::dyn_cast<ast::TupleType>(pattern)) {

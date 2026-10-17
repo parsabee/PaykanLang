@@ -366,10 +366,10 @@ using TypeParamBounds = std::vector<std::vector<Type *>>;
 
 // Free function declaration:  fn name(params) -> retType { body }
 //
-// A generic function (`fn first<T>(xs: T[]) -> T`) carries its type parameter
-// names in TypeParams.  Such a declaration is a template: Sema never checks it
-// directly but instantiates it per distinct type-argument tuple by cloning it
-// with the type parameters substituted (see ASTClone.h).
+// A generic function (`fn first<T>(xs: view T[]) -> T`) carries its type
+// parameter names in TypeParams.  Such a declaration is a template: Sema never
+// checks it directly but instantiates it per distinct type-argument tuple by
+// cloning it with the type parameters substituted (see ASTClone.h).
 class FuncDecl : public Decl {
 private:
   const std::string *Name; // points into ASTContext::StringPool (stable)
@@ -1346,25 +1346,14 @@ public:
   }
 };
 
-// Array type: T[]  (e.g. int[], Str[], float[])
-//
-// The array itself is heap-allocated (a subclass of Obj at runtime).
-// ElementType points to the type of each stored element.
+// `T[]` as written (e.g. `view int[]`): the type of a `view` or `inout`
+// parameter that is a slice, which Sema resolves to the canonical SliceType.
 class ArrayType : public Type {
   Type *ElementType;
 
 public:
   ArrayType(SourceLocation loc, Type *elemTy)
-      : Type(NK_ArrayType, loc), ElementType(elemTy) {
-    // Arrays support == / != (lowered to the virtual `equals`, which compares
-    // reference identity — see PaykanArray_equals).  The mask must live on the
-    // constructor: besides the canonical per-element instances interned by
-    // ASTContext::getArrayType, the parser allocates a source-located node for
-    // every `T[]` annotation, so unlike the ClassType singletons there is no
-    // single bootstrap point to patch.
-    addBinaryOp(BinaryOpcode::Eq);
-    addBinaryOp(BinaryOpcode::Ne);
-  }
+      : Type(NK_ArrayType, loc), ElementType(elemTy) {}
 
   Type *getElementType() const { return ElementType; }
 
@@ -1372,8 +1361,8 @@ public:
 };
 
 // Fixed-size array type: `T[n]`, n (at least 1) elements of T held inline.
-// It is a value: copying one copies its elements, and it is not an Obj.  Like
-// ArrayType, the parser allocates a source-located node per annotation and
+// It is a value: copying one copies its elements, and it is not an Obj.  The
+// parser allocates a source-located node per annotation and
 // Sema resolves it to the canonical instance of
 // ASTContext::getFixedArrayType, so these types compare by pointer.
 class FixedArrayType : public Type {
@@ -1422,7 +1411,7 @@ public:
   }
 };
 
-// Optional type: T?  (e.g. Node?, Str?, int[]?)
+// Optional type: T?  (e.g. Node?, Str?, int?)
 //
 // Issue #5.  A `T?` holds either a value of type T or `None`.  For a
 // reference type T (Sema rejects nested `T??`) a `T?` is at runtime the very
@@ -1430,7 +1419,7 @@ public:
 // change, and every runtime entry point that touches boxes tolerates NULL.
 // An optional primitive (`int?`, #66) is a value: the primitive and a
 // presence flag held inline (#96, isValueOptional).
-// Like ArrayType, the parser allocates a source-located node per annotation
+// The parser allocates a source-located node per annotation
 // and Sema resolves it to the canonical instance interned by
 // ASTContext::getOptionalType, so optional types compare by pointer identity.
 class OptionalType : public Type {
@@ -1599,21 +1588,32 @@ public:
   static bool classof(const ASTNode *N) { return N->getKind() == NK_TraitDecl; }
 };
 
-// Array literal expression: [expr, expr, ...] or []
+// Array literal expression: `[a, b, c]`, or `[v; n]`, `n` copies of one
+// value (`n` an integer literal).
 //
-// An empty literal ([]) requires an explicit type annotation on the
-// surrounding declaration; Sema rejects bare `y = []`.
-// A non-empty literal's element type is inferred by Sema.
+// Sema types it as a `T[n]` (Sema rejects `[]`, which parses): the length is
+// the number of elements, or the repeat count.  The repeated value is
+// evaluated once, so `[Node(); 3]` holds one object three times.
 class ArrayLiteralExpr : public Expr {
   std::vector<Expr *> Elements;
+  // The `n` of `[v; n]` (its single element is `v`), or 0 for a list.
+  int64_t RepeatCount;
 
 public:
-  ArrayLiteralExpr(SourceLocation loc, std::vector<Expr *> elems)
-      : Expr(NK_ArrayLiteralExpr, loc), Elements(std::move(elems)) {}
+  ArrayLiteralExpr(SourceLocation loc, std::vector<Expr *> elems,
+                   int64_t repeatCount = 0)
+      : Expr(NK_ArrayLiteralExpr, loc), Elements(std::move(elems)),
+        RepeatCount(repeatCount) {}
 
   const std::vector<Expr *> &getElements() const { return Elements; }
   size_t getNumElements() const { return Elements.size(); }
   bool isEmpty() const { return Elements.empty(); }
+  bool isRepeat() const { return RepeatCount != 0; }
+  int64_t getRepeatCount() const { return RepeatCount; }
+  // The array's length: the number of elements, or the repeat count.
+  int64_t getLength() const {
+    return isRepeat() ? RepeatCount : static_cast<int64_t>(Elements.size());
+  }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_ArrayLiteralExpr;
@@ -1637,11 +1637,11 @@ public:
   }
 };
 
-// Tuple type: (T1, T2, ...)  (e.g. (int, Str), (int, (Str, bool))[])
+// Tuple type: (T1, T2, ...)  (e.g. (int, Str), (int, (Str, bool))[2])
 //
-// A fixed-arity (>= 2), heterogeneous, immutable product type.  Like arrays,
-// a tuple value is a heap-allocated Obj subtype at runtime (see
-// src/Runtime/Tuple.c), so it flows through ARC exactly like a class value.
+// A fixed-arity (>= 2), heterogeneous, immutable product type.  A tuple
+// value is a heap-allocated Obj subtype at runtime (see src/Runtime/Tuple.c),
+// so it flows through ARC exactly like a class value.
 // The parser allocates a source-located node per annotation; Sema resolves
 // each one to the canonical instance interned by ASTContext::getTupleType, so
 // resolved tuple types compare by pointer identity.
@@ -1652,8 +1652,9 @@ public:
   TupleType(SourceLocation loc, std::vector<Type *> elemTys)
       : Type(NK_TupleType, loc), ElementTypes(std::move(elemTys)) {
     // == / != lower to the virtual `equals` (element-wise, see
-    // PaykanTuple_equals).  Set on the constructor for the same reason as
-    // ArrayType: there is no single bootstrap point for parser-emitted nodes.
+    // PaykanTuple_equals).  Set on the constructor: besides the canonical
+    // instances, the parser allocates a node per annotation, so there is no
+    // single bootstrap point to set it on.
     addBinaryOp(BinaryOpcode::Eq);
     addBinaryOp(BinaryOpcode::Ne);
   }
@@ -1788,15 +1789,14 @@ inline bool isValueOptional(const Type *ty) {
 }
 
 /// Returns true for any type whose values are heap-allocated and
-/// reference-counted at runtime: ClassType, ArrayType, TupleType, and the
+/// reference-counted at runtime: ClassType, TupleType, and the
 /// OptionalType of one of them (a possibly-NULL PaykanShared* box: it shares
 /// the wrapped type's box).  An optional of a value type is a value
 /// (isValueOptional).  Use this instead of spelling out the `||` condition
 /// everywhere.
 inline bool isRefType(const Type *ty) {
-  return ty &&
-         (isa<ClassType>(ty) || isa<ArrayType>(ty) || isa<TupleType>(ty) ||
-          (isa<OptionalType>(ty) && !isValueOptional(ty)));
+  return ty && (isa<ClassType>(ty) || isa<TupleType>(ty) ||
+                (isa<OptionalType>(ty) && !isValueOptional(ty)));
 }
 
 /// If @p ty is an optional type, return its inner type; otherwise @p ty.

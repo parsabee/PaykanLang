@@ -1,10 +1,10 @@
-// Isolates: an int[] array literal.
-// Runtime allocation site: PaykanArray_* (Array.c) — allocates the PaykanArray
-// header and its backing element buffer.
+// Isolates: an int[3] array literal.
+// Runtime allocation site: none — a `T[n]` holds its elements inline (a local
+// one on the stack), so the literal allocates nothing.
 //
-// Expected under --track-heap: live blocks : 0.
+// Expected under --track-heap: live blocks : 0 (and no allocations at all).
 
 fn main() -> int {
-  a: int[] = [1, 2, 3];
+  a: int[3] = [1, 2, 3];
   return 0;
 }

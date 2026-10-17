@@ -57,7 +57,7 @@ fn main() -> int {
 
   i: int = 0;
   total = 0;
-  inputs: Str[] = ["10", "20", "bad", "30", "nope", "40"];
+  inputs: Str[6] = ["10", "20", "bad", "30", "nope", "40"];
   while (i < inputs.len()) {
     if (int<Str>(inputs[i]) != None) { total = total + 1; }
     i = i + 1;

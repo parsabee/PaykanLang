@@ -230,8 +230,8 @@ TEST(Func, PrintRejectsMultipleArgs) {
 // -- The program's entry point (#132)
 //
 // A program that is built or run needs `fn main() -> int` (or `fn main(args:
-// Str[]) -> int`).  Sema reports a missing or ill-typed one with a source
-// location, before the PIR verifier would.
+// view Str[]) -> int`).  Sema reports a missing or ill-typed one with a
+// source location, before the PIR verifier would.
 
 namespace {
 
@@ -266,10 +266,11 @@ void expectEntryPointError(const std::string &source,
 } // namespace
 
 TEST(Func, EntryPointSignaturesOk) {
-  for (const char *src : {"fn main() -> int { return 0; }",
-                          "fn main(args: Str[]) -> int { return args.len(); }",
-                          "fn helper() -> int { return 1; }\n"
-                          "fn main() -> int { return helper(); }"}) {
+  for (const char *src :
+       {"fn main() -> int { return 0; }",
+        "fn main(args: view Str[]) -> int { return args.len(); }",
+        "fn helper() -> int { return 1; }\n"
+        "fn main() -> int { return helper(); }"}) {
     auto r = semaCheckProgram(src);
     EXPECT_TRUE(r.Ok) << src << "\n" << r.Diagnostics;
     EXPECT_EQ(r.ErrorCount, 0u) << src << "\n" << r.Diagnostics;
@@ -279,7 +280,7 @@ TEST(Func, EntryPointSignaturesOk) {
 TEST(Func, MissingMainIsOneLocatedError) {
   const std::string missing =
       "prog.pkn:1:1: error: program has no entry point 'fn main() -> int' "
-      "(or 'fn main(args: Str[]) -> int')";
+      "(or 'fn main(args: view Str[]) -> int')";
   expectEntryPointError("", missing);
   expectEntryPointError("// nothing here\n", missing);
   expectEntryPointError("fn helper() -> int { return 1; }\n", missing);
@@ -290,18 +291,21 @@ TEST(Func, MissingMainIsOneLocatedError) {
 
 TEST(Func, IllTypedMainIsOneErrorAtItsDeclaration) {
   const std::string must = "error: the program's entry point must be 'fn "
-                           "main() -> int' or 'fn main(args: Str[]) -> int', "
-                           "not ";
+                           "main() -> int' or 'fn main(args: view Str[]) -> "
+                           "int', not ";
   expectEntryPointError("fn f() -> int { return 1; }\n"
                         "fn main() -> Str { return \"x\"; }\n",
                         "prog.pkn:2:1: " + must + "'fn main() -> Str'");
   expectEntryPointError("fn main() { }\n", must + "'fn main() -> void'");
   expectEntryPointError("fn main(n: int) -> int { return n; }\n",
                         must + "'fn main(int) -> int'");
-  expectEntryPointError("fn main(args: Str[], n: int) -> int { return n; }\n",
-                        must + "'fn main(Str[], int) -> int'");
-  expectEntryPointError("fn main(args: int[]) -> int { return 0; }\n",
-                        must + "'fn main(int[]) -> int'");
+  expectEntryPointError(
+      "fn main(args: view Str[], n: int) -> int { return n; }\n",
+      must + "'fn main(view Str[], int) -> int'");
+  expectEntryPointError("fn main(args: view int[]) -> int { return 0; }\n",
+                        must + "'fn main(view int[]) -> int'");
+  expectEntryPointError("fn main(args: inout Str[]) -> int { return 0; }\n",
+                        must + "'fn main(inout Str[]) -> int'");
   expectEntryPointError("fn main() -> int? { return 0; }\n",
                         must + "'fn main() -> int?'");
   expectEntryPointError("fn main<T>() -> int { return 0; }\n",

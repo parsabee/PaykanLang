@@ -94,7 +94,7 @@ or more.
 | Node | Meaning |
 |---|---|
 | `(named-type LOC NAME)` | a type by name: `int`, `float`, `bool`, `char`, `void`, `Str`, `Obj`, a class or enum, or a qualified `module::Type` |
-| `(array-type LOC TYPE)` | `T[]` |
+| `(array-type LOC TYPE)` | `T[]`, the slice of a `view` or `inout` parameter (`xs: view int[]`) |
 | `(fixed-array-type LOC TYPE INT)` | `T[n]`, a fixed-size array of `INT` (at least 1) elements: `int[3]` is `(fixed-array-type (named-type "int") 3)`. `INT` can be the symbol `_` instead, a length inferred from the initializer (`int[_]`) |
 | `(optional-type LOC TYPE)` | `T?` (not of `void`, not of another optional) |
 | `(tuple-type LOC TYPE TYPE TYPE...)` | `(T1, T2, ...)`, at least two |
@@ -144,7 +144,8 @@ to resolve, which reports unknown names.
 | `(method-call LOC EXPR NAME EXPR...)` | `recv.m(a, b)` |
 | `(member LOC EXPR NAME)` | `recv.field` |
 | `(subscript LOC EXPR EXPR)` | `arr[i]` |
-| `(array LOC EXPR...)` | `[a, b]`, `[]` |
+| `(array LOC EXPR...)` | `[a, b]` (`[]` parses, and Sema rejects it) |
+| `(array-repeat LOC EXPR INT)` | `[v; n]`, `INT` (at least 1) copies of `EXPR`: `[0; 3]` is `(array-repeat (int 0) 3)` |
 | `(tuple LOC EXPR EXPR EXPR...)` | `(a, b)`, at least two |
 | `(tuple-index LOC EXPR INT)` | `t.0` |
 | `(enum-value LOC NAME NAME)` | `Color::Red`: the enum's name (qualified if spelled so) and the variant |
@@ -158,8 +159,9 @@ Parentheses in the source are not nodes: `(a + b) * c` is
 line and column in the text and a message, anything that does not follow
 the rules above: unknown tags, missing or extra fields, a field of the wrong
 kind, an empty name where one is required, a tuple or destructuring with
-fewer than two elements, a byte value out of range, a malformed location, an
-unknown escape, a version it does not read, and nesting beyond the limit. It
+fewer than two elements, an `array-repeat` count below 1, a byte value out
+of range, a malformed location, an unknown escape, a version it does not
+read, and nesting beyond the limit. It
 also makes the grammar's own checks that the recursive-descent frontend
 makes while parsing (`void?`, nested optionals). Everything else (unknown
 names, types that don't match, ...) is Sema's job, with the same

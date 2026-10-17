@@ -68,12 +68,13 @@ fn show(o: int?) -> Str {
 
 // ---- float?, char?, bool? --------------------------------------------------
 
-fn mean(xs: int[]) -> float? {
-  if (xs.len() == 0) { return None; }
+// The mean of the first `count` elements of `xs`; None for none of them.
+fn mean(xs: view int[], count: int) -> float? {
+  if (count == 0) { return None; }
   sum = 0;
   i = 0;
-  while (i < xs.len()) { sum = sum + xs[i]; i = i + 1; }
-  return sum / (xs.len() * 1.0);
+  while (i < count) { sum = sum + xs[i]; i = i + 1; }
+  return sum / (count * 1.0);
 }
 
 fn firstVowel(s: Str) -> char? {
@@ -114,11 +115,11 @@ fn main() -> int {
   println("parse 4x -> " + show(parse("4x")));
   println("parse  -> " + show(parse("")));
 
-  m = mean([1, 2, 3, 4]);
+  readings = [1, 2, 3, 4];
+  m = mean(readings, readings.len());
   match m { f: float { println("mean -> " + Str(f)); } None { } }
-  empty: int[] = [];
   print("mean of nothing -> ");
-  println(mean(empty));
+  println(mean(readings, 0));
 
   print("first vowel of 'rhythm' -> ");
   println(firstVowel("rhythm"));
@@ -138,7 +139,7 @@ fn main() -> int {
   println("equal: " + Str<bool>(a == b));
   println("equal to None: " + Str(a == None));
 
-  sparse: int?[] = [1, 2, 3];
+  sparse: int?[3] = [1, 2, 3];
   sparse[1] = None;
   print("sparse: ");
   print(sparse[0]); print(" "); print(sparse[1]); print(" "); println(sparse[2]);

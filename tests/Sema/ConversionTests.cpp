@@ -247,8 +247,8 @@ TEST(Conversion, InferredFormRejectsEveryOtherType) {
               "no specialization of 'Str' for 'Obj'" + strSet);
   expectError(prog("s = Str(None);"),
               "no specialization of 'Str' for 'Obj'" + strSet);
-  expectError(prog("xs: int[] = [1]; s = Str(xs);"),
-              "no specialization of 'Str' for 'int[]'" + strSet);
+  expectError(prog("xs: int[1] = [1]; s = Str(xs);"),
+              "no specialization of 'Str' for 'int[1]'" + strSet);
   expectError(prog("a = A(); n = int(a);"),
               "no specialization of 'int' for 'A'; its specializations are "
               "Str, float, bool, char");

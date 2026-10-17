@@ -219,7 +219,7 @@ impl Cat {
 }
 
 fn main() -> int {
-  pets: Animal[] = [Dog("Rex"), Cat("Tom"), Animal("Generic")];
+  pets: Animal[3] = [Dog("Rex"), Cat("Tom"), Animal("Generic")];
   i = 0;
   while (i < pets.len()) {
     println(pets[i].speak());
@@ -251,8 +251,8 @@ Things to know about inheritance:
 - `__super__(...)` can only be called in `__init__`. An overriding method cannot call the
   base class's version of itself, so put shared logic in a separate method (like `speak`
   above) or a free function.
-- Arrays are not covariant: a `Dog[]` is not an `Animal[]`. Declare the array with the type
-  you need, as `pets: Animal[]` above.
+- Arrays are not covariant: a `Dog[2]` is not an `Animal[2]`. Declare the array with the
+  type you need, as `pets: Animal[3]` above.
 
 ## `Obj`, `toString` and `equals`
 

@@ -72,29 +72,13 @@ TEST(Leak, IntArrayLiteral) {
   g.expectNoLeaks("IntArrayLiteral");
 }
 
-// -- Str[] array with push (samples/leak-check/05)
-
-TEST(Leak, StrArrayPush) {
-  LeakGuard g;
-  auto r = compileAndRun(R"(
-    fn main() -> int {
-      arr: Str[] = [];
-      arr.push("one");
-      arr.push("two");
-      return 0;
-    }
-  )");
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  g.expectNoLeaks("StrArrayPush");
-}
-
 // -- Object array (samples/leak-check/06)
 
 TEST(Leak, ObjArray) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     fn main() -> int {
-      arr: Obj[] = [];
+      arr: Obj[1] = ["x"];
       return 0;
     }
   )");
@@ -561,96 +545,6 @@ TEST(Leak, CallRootedSubscriptReceiver) {
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   g.expectNoLeaks("CallRootedSubscriptReceiver");
-}
-
-// Array-typed ternary: both branches must yield a boxed PaykanShared* (the
-// ternary is classified as a fresh +1 box), on the taken and not-taken paths,
-// for primitive and object element arrays, with no leaks.
-
-TEST(Leak, TernaryArrayBranches) {
-  LeakGuard g;
-  auto r = compileAndRun(R"(
-    fn pick(c: bool) -> int {
-      a: int[] = [1, 2, 3];
-      b: int[] = [4, 5];
-      xs: int[] = if c then a else b;
-      xs.push(9);
-      return xs.len();
-    }
-    fn names(c: bool) -> Str {
-      s: Str[] = ["a"];
-      t: Str[] = ["b", "c"];
-      zs: Str[] = if c then s else t;
-      zs = if c then t else s;   // rebind through the assignment path
-      return zs[0];
-    }
-    fn main() -> int {
-      println(Str<int>(pick(True)));    // a: 3 + 1 pushed
-      println(Str<int>(pick(False)));   // b: 2 + 1 pushed
-      println(names(True));           // t[0]
-      println(names(False));          // s[0]
-      lit: int[] = if False then [1] else [2, 3];
-      println(Str<int>(lit.len()));
-      println(Str<int>((if True then lit else [7]).len()));
-      return 0;
-    }
-  )");
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "4\n3\nb\na\n2\n2\n");
-  g.expectNoLeaks("TernaryArrayBranches");
-}
-
-// Empty array literal at every typed sink (samples/leak-check/19).  Sema types
-// `[]` as ArrayType(void) and must adopt the destination's element type at
-// EVERY sink, not just declarations; otherwise CodeGen emits a primitive
-// array whose destructor never releases the objects pushed into it.
-
-TEST(Leak, EmptyArrayLiteralSinks) {
-  LeakGuard g;
-  auto r = compileAndRun(R"(
-    class Bag {
-      items: Str[];
-      grid: Str[][];
-      fn reset() { self.items = []; self.items.push("reset"); }
-      fn take(xs: Str[]) -> int { xs.push("arg"); return xs.len(); }
-    }
-
-    impl Bag {
-      fn __init__(seed: Str[]) {
-        self.items = [];          // field store in the constructor
-        self.grid = [[], []];     // nested empty literals
-        self.items.push("ctor");
-        self.grid[0].push("g0");
-        self.grid[1] = [];        // subscript store
-        self.grid[1].push("g1");
-        seed.push("seed");
-      }
-    }
-    fn fresh() -> Str[] { return []; }
-    fn fill(xs: Str[]) -> int { xs.push("fn"); return xs.len(); }
-    fn main() -> int {
-      b: Bag = Bag([]);                      // constructor argument
-      println(b.items[0] + b.grid[0][0] + b.grid[1][0]);
-      b.reset();                             // field store in a method
-      println(b.items[0]);
-      b.items = [];                          // field store from outside
-      b.items.push("outside");
-      println(b.items[0]);
-      println(Str<int>(fill([])));             // free-function argument
-      println(Str<int>(b.take([])));           // method argument
-      f: Str[] = fresh();                    // returned literal
-      f.push("ret");
-      println(f[0]);
-      rows: Str[][] = [];
-      rows.push([]);                         // push argument
-      rows[0].push("pushed");
-      println(rows[0][0]);
-      return 0;
-    }
-  )");
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "ctorg0g1\nreset\noutside\n1\n1\nret\npushed\n");
-  g.expectNoLeaks("EmptyArrayLiteralSinks");
 }
 
 // Array / tuple arguments to user-defined METHODS.  The method prologue owns

@@ -120,7 +120,7 @@ TEST(ASTInterchange, ReadsEveryNode) {
       (methods (fn "get" (type-params) (params) (named-type "T")
         (block (return (member (ident "self") "item"))))))
     (class "Point" "Obj" (type-params) (fields) (methods))
-    (fn @4:1-9:9 "main" (type-params) (params (param "args" (array-type (named-type "Str"))))
+    (fn @4:1-9:9 "main" (type-params) (params (param "args" (array-type (named-type "Str")) (qual view)))
       (named-type "int")
       (block
         (decl (var "x" (optional-type (named-type "int")) (none)))
@@ -142,6 +142,7 @@ TEST(ASTInterchange, ReadsEveryNode) {
         (expr (subscript (ident "a") (binary add (int 1) (int 2))))
         (expr (enum-value "Color" "Red"))
         (expr (tuple-index (ident "t") 1))
+        (expr (array-repeat (array (int 1) (int 2)) 3))
         (return _)))))
 )";
   ast::ASTContext ctx;
@@ -161,6 +162,7 @@ TEST(ASTInterchange, ReadsEveryNode) {
   EXPECT_EQ(main->getReturnType(), ctx.getIntTy());
   auto *argTy = ast::cast<ast::ArrayType>(main->getParams()[0].ParamType);
   EXPECT_EQ(argTy->getElementType(), ctx.getStrTy());
+  EXPECT_EQ(main->getParams()[0].Mode, ast::ParamMode::View);
   auto &stmts = main->getBody()->getStatements();
   auto *tdecl =
       ast::cast<ast::VarDecl>(ast::cast<ast::DeclStmt>(stmts[1])->getDecl());
@@ -174,6 +176,12 @@ TEST(ASTInterchange, ReadsEveryNode) {
   auto *ds = ast::cast<ast::DestructureStmt>(stmts[10]);
   EXPECT_EQ(ds->getTargets()[0].Loc.getLineStart(), 5u);
   EXPECT_TRUE(ds->getTargets()[1].isSkip());
+  auto *rep = ast::cast<ast::ArrayLiteralExpr>(
+      ast::cast<ast::ExprStmt>(stmts[stmts.size() - 2])->getExpr());
+  EXPECT_TRUE(rep->isRepeat());
+  EXPECT_EQ(rep->getRepeatCount(), 3);
+  EXPECT_EQ(
+      ast::cast<ast::ArrayLiteralExpr>(rep->getElements()[0])->getLength(), 2);
   // And it writes back to the same AST.
   std::string again = write(*tu);
   ast::ASTContext ctx2;
@@ -352,6 +360,21 @@ TEST(ASTInterchange, RejectsMalformedInput) {
        "(expr (int \"1\"))))))",
        "1:72: expected an integer: the value"},
       {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
+       "(expr (array-repeat (int 0) 0))))))",
+       "1:67: an array has at least one element"},
+      {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
+       "(expr (array-repeat (int 0) -3))))))",
+       "1:67: an array has at least one element"},
+      {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
+       "(expr (array-repeat (int 0)))))))",
+       "1:67: (array-repeat ...) is missing the count"},
+      {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
+       "(expr (array-repeat (int 0) n))))))",
+       "1:89: expected an integer: the count"},
+      {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
+       "(expr (array-repeat))))))",
+       "1:67: (array-repeat ...) is missing the repeated value"},
+      {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
        "(expr (tuple (int 1)))))))",
        "1:67: a tuple needs at least two elements"},
       {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
@@ -515,8 +538,8 @@ TEST(ASTInterchange, FixedArrayTypes) {
   const std::string text =
       "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block (decl "
       "(var \"a\" (fixed-array-type (fixed-array-type (named-type \"int\") "
-      "3) 2) (array))) (decl (var \"b\" (fixed-array-type (named-type "
-      "\"int\") _) (array)))))))";
+      "3) 2) (array-repeat (array-repeat (int 0) 3) 2))) (decl (var \"b\" "
+      "(fixed-array-type (named-type \"int\") _) (array (int 1))))))))";
   ast::ASTContext ctx;
   std::string error;
   ast::TranslationUnit *tu = read(text, ctx, error);
@@ -551,6 +574,54 @@ TEST(ASTInterchange, FixedArrayTypes) {
     EXPECT_NE(error.find(c.Error), std::string::npos)
         << c.Type << ": " << error;
   }
+}
+
+// `[v; n]` is `(array-repeat EXPR INT)`, the value and its count (at least
+// 1), and reads back as the same literal.
+TEST(ASTInterchange, RepeatArrayLiterals) {
+  parser::ParserDriver driver("recursive-descent");
+  auto path =
+      std::filesystem::temp_directory_path() /
+      ("paykan_interchange_repeat_" + std::to_string(::getpid()) + ".pkn");
+  {
+    std::ofstream(path) << "fn main() -> int {\n"
+                           "  xs = [0; 3];\n"
+                           "  x = 1;\n"
+                           "  g = [[x + 1; 2]; 16384];\n"
+                           "  return 0;\n"
+                           "}\n";
+  }
+  ASSERT_EQ(driver.parseFile(path.string()), 0);
+  std::filesystem::remove(path);
+  std::string text = write(*driver.getRoot());
+  std::string flat; // one line: every run of whitespace is one space
+  for (char c : text)
+    if (!std::isspace(static_cast<unsigned char>(c)))
+      flat += c;
+    else if (!flat.empty() && flat.back() != ' ')
+      flat += ' ';
+  for (const char *e :
+       {"(array-repeat @2:8-2:14 (int @2:9-2:10 0) 3)",
+        "(array-repeat @4:7-4:26 (array-repeat @4:8-4:18 (binary @4:9-4:14 add "
+        "(ident @4:9-4:10 \"x\") (int @4:13-4:14 1)) 2) 16384)"})
+    EXPECT_NE(flat.find(e), std::string::npos) << e << "\n" << text;
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *back = read(text, ctx, error);
+  ASSERT_NE(back, nullptr) << error;
+  std::string d = dump(back);
+  EXPECT_EQ(d, dump(driver.getRoot()));
+  EXPECT_NE(d.find("ArrayLiteralExpr <2:8-2:14> 3 copies\n"), std::string::npos)
+      << d;
+  EXPECT_NE(d.find("16384 copies\n"), std::string::npos) << d;
+  EXPECT_EQ(write(*back), text);
+  // A list of one element stays a list.
+  std::string one = "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ "
+                    "(block (expr (array (int 7)))))))";
+  ast::TranslationUnit *list = read(one, ctx, error);
+  ASSERT_NE(list, nullptr) << error;
+  EXPECT_NE(dump(list).find("ArrayLiteralExpr 1 elements\n"), std::string::npos)
+      << dump(list);
 }
 
 TEST(ASTInterchange, LetLocals) {

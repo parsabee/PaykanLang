@@ -16,7 +16,7 @@ provide a safe, ergonomic, performant, and productive interface that compiles to
 This is **v0.1.1**, a patch release of v0.1.0, the first release, which lays the foundation.
 Implemented and tested today: static typing with inference, single-inheritance classes with virtual dispatch,
 ARC, value-aware `==` (reference types dispatch to a virtual
-`equals`), dynamic arrays, a file-based module system, `match` type dispatch, enums, tuples,
+`equals`), fixed-size arrays and slices, a file-based module system, `match` type dispatch, enums, tuples,
 optionals, generics, and conversion constructors (`Str(n)`, `int<Str>(s)`). Programs are lowered to a
 backend-neutral IR (PIR) and compiled by one of two backends: the C backend (emits C11 and
 builds it with the system C compiler) or the optional LLVM backend (LLVM IR, run in-process by
@@ -207,7 +207,7 @@ with the system C compiler into a temporary directory and runs that; `--backend=
 it in-process through LLVM's ORC JIT.
 `--emit-llvm` and `--emit-c` need their backend to be built in. `main`'s return value becomes
 the process exit code, and extra command-line arguments after the source file are passed to
-`main(args: Str[])` (with `args[0]` the source-file path under `run`, and the executable's path for a
+`main(args: view Str[])` (with `args[0]` the source-file path under `run`, and the executable's path for a
 program made by `build`). Source files use the
 `.pkn` extension (`.pk` is also accepted).
 

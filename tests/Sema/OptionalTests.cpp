@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // Sema tests: optional types `T?` (issue #5) — assignability,
 // operations that require unwrapping, equality against None, `match` as the
-// unwrap, exhaustiveness, optional fields, `T?[]`, and module round-trips.
+// unwrap, exhaustiveness, optional fields, `T?[n]`, and module round-trips.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -104,7 +104,7 @@ TEST(Optional, OptionalIsNotAnObj) {
                   "fn main() -> int { h = H(); n: Node? = None; h.o = n; "
                   "return 0; }\n",
               msg);
-  expectError(withNode("n: Node? = None; xs: Obj[] = []; xs.push(n);"),
+  expectError(withNode("n: Node? = None; xs: Obj[1] = [Node(1)]; xs[0] = n;"),
               "an optional is not an object");
   expectError(withNode("s: Str? = None; t: (Obj, int) = (s, 1);"),
               "does not match");
@@ -212,17 +212,6 @@ TEST(Optional, MemberAssignOnOptionalIsError) {
   expectError(withNode("a: Node? = Node(1); a.v = 3;"), kUnwrapNode);
 }
 
-TEST(Optional, SubscriptOnOptionalArrayIsError) {
-  expectError(withNode("xs: int[]? = [1, 2]; x: int = xs[0];"),
-              "cannot use optional 'int[]?' as 'int[]' without unwrapping "
-              "(use match)");
-}
-
-TEST(Optional, SubscriptAssignOnOptionalArrayIsError) {
-  expectError(withNode("xs: int[]? = [1, 2]; xs[0] = 5;"),
-              "cannot use optional 'int[]?' as 'int[]'");
-}
-
 TEST(Optional, ConcatOnOptionalStrIsError) {
   expectError(withNode(R"(s: Str? = "a"; t: Str = s + "b";)"),
               "cannot use optional 'Str?' as 'Str' without unwrapping "
@@ -320,16 +309,6 @@ TEST(Optional, MatchOnOptionalStr) {
   )"));
 }
 
-TEST(Optional, MatchOnOptionalArray) {
-  expectOk(withNode(R"(
-    xs: int[]? = [1, 2, 3];
-    match xs {
-      a: int[] { println(Str<int>(a.len())); }
-      None     { println("none"); }
-    }
-  )"));
-}
-
 TEST(Optional, MatchOnOptionalFieldAndCallResult) {
   expectOk(std::string(kNodeClass) + R"(
     fn find(k: int) -> Node? { return Node(k); }
@@ -411,12 +390,6 @@ TEST(Optional, MatchArmAfterInnerArmIsUnreachable) {
 TEST(Optional, MatchDuplicateNoneArmIsError) {
   expectError(withNode("a: Node? = None; match a { None { } None { } _ { } }"),
               "duplicate 'None' arm in match on 'Node?'");
-}
-
-TEST(Optional, MatchWrongArrayArmIsError) {
-  expectError(withNode("xs: int[]? = [1]; match xs { a: Str[] { } _ { } }"),
-              "match arm type 'Str[]' does not match the optional subject "
-              "type 'int[]?'");
 }
 
 TEST(Optional, MatchBindingIsNarrowedToArmType) {
@@ -519,17 +492,14 @@ TEST(Optional, LinkedListTraversal) {
   )");
 }
 
-// ─── arrays of optionals and optional arrays ────────────────────────────────
+// ─── arrays of optionals ────────────────────────────────────────────────────
 
 TEST(Optional, ArrayOfOptionals) {
   expectOk(withNode(R"(
-    xs: Node?[] = [];
-    xs.push(None);
-    xs.push(Node(1));
+    xs: Node?[2] = [None, Node(1)];
     xs[0] = Node(2);
     xs[1] = None;
     e: Node? = xs[0];
-    p: Node? = xs.pop();
     match xs[0] {
       n: Node { println(Str<int>(n.v)); }
       None    { }
@@ -537,16 +507,8 @@ TEST(Optional, ArrayOfOptionals) {
   )"));
 }
 
-TEST(Optional, OptionalArrayWithEmptyLiteral) {
-  expectOk(withNode(R"(
-    xs: Str[]? = [];
-    ys: Str[]? = None;
-    ys = [];
-  )"));
-}
-
 TEST(Optional, ArrayOfOptionalsElementNarrowingIsError) {
-  expectError(withNode("xs: Node?[] = []; xs.push(Node(1)); n: Node = xs[0];"),
+  expectError(withNode("xs: Node?[1] = [Node(1)]; n: Node = xs[0];"),
               kUnwrapNode);
 }
 
@@ -639,8 +601,8 @@ static const char *const kListModule =
     "  fn __init__(x: int) { self.v = x; }\n"
     "}\n"
     "fn find(head: Node?, key: int) -> Node? { return head; }\n"
-    "fn first(xs: Str?[]) -> Str? { return xs[0]; }\n"
-    "fn maybeArr(xs: int[]?) -> int[]? { return xs; }\n";
+    "fn first(xs: Str?[2]) -> Str? { return xs[0]; }\n"
+    "fn count(xs: view Str?[]) -> int { return xs.len(); }\n";
 
 TEST(OptionalModule, ExportedOptionalSignaturesRoundTrip) {
   auto tmp = (paykan::test::tempDir() / "pkn_opt_mod").string();
@@ -655,11 +617,9 @@ fn main() -> int {
   t: list::Node? = n.tail();
   f: list::Node? = list::find(n, 2);
   g: list::Node? = list::find(None, 2);
-  ss: Str?[] = [];
-  ss.push(None);
+  ss: Str?[2] = [None, "s"];
   s: Str? = list::first(ss);
-  a: int[]? = list::maybeArr([1, 2]);
-  b: int[]? = list::maybeArr(None);
+  c: int = list::count(ss);
   match t {
     x: list::Node { println(Str<int>(x.v)); }
     None { println("none"); }
@@ -727,8 +687,7 @@ TEST(OptionalTuple, TupleWithOptionalElementsOk) {
       y: Node?, j: int = u;
       same: bool = t == pick(a, 1);
       isNone: bool = y == None;
-      ts: (Node?, int)[] = [];
-      ts.push(t);
+      ts: (Node?, int)[2] = [t, u];
       match x {
         n: Node { k = n.val(); }
         None    { }
@@ -768,8 +727,7 @@ TEST(OptionalTuple, NoneInTupleLiteralTakesTheSlotsOptional) {
       bx = Box();
       bx.set((None, "y"));
       bx.p = (None, 4);
-      ps: (Node?, int)[] = [];
-      ps.push((None, 5));
+      ps: (Node?, int)[1] = [(None, 5)];
       ps[0] = (None, 6);
       n: (Str, (Node?, int?)) = ("n", (None, None));
       c: (Obj, int) = (None, 1);
@@ -799,20 +757,19 @@ TEST(OptionalTuple, NoneInTupleLiteralStillNeedsAnOptionalSlot) {
 // `("b", n)`, `None` among class instances).
 TEST(OptionalTuple, ArrayLiteralElementsTakeTheDeclaredElementType) {
   expectOk(std::string(kNodeClass) + R"(
-    fn count(xs: (Str, int?)[]) -> int { return xs.len(); }
-    fn mk(nb: int?) -> (Str, int?)[] { return [("r", nb), ("s", 1)]; }
+    fn count(xs: view (Str, int?)[]) -> int { return xs.len(); }
+    fn mk(nb: int?) -> (Str, int?)[2] { return [("r", nb), ("s", 1)]; }
     fn main() -> int {
       nb: int? = None;
       n: Node? = None;
-      tbl: (Str, int?)[] = [("a", 1), ("b", nb), ("c", 3)];
-      tbl = [("x", nb), ("y", None)];
+      tbl: (Str, int?)[3] = [("a", 1), ("b", nb), ("c", 3)];
+      tbl = [("x", nb), ("y", None), ("z", 2)];
       count([("p", 1), ("q", nb)]);
-      tbl.push(("w", None));
-      ints: int?[] = [1, nb, None];
-      nodes: Node?[] = [None, n, Node(1)];
-      grid: int?[][] = [[1], [nb], []];
-      nested: (Str, (int?, Node?))[] = [("a", (1, None)), ("b", (nb, n))];
-      inTuple: (int?[], Str) = ([1, nb], "s");
+      tbl[2] = ("w", None);
+      ints: int?[3] = [1, nb, None];
+      nodes: Node?[3] = [None, n, Node(1)];
+      grid: int?[2][2] = [[1, nb], [None, 2]];
+      nested: (Str, (int?, Node?))[2] = [("a", (1, None)), ("b", (nb, n))];
       return 0;
     }
   )");
@@ -820,21 +777,22 @@ TEST(OptionalTuple, ArrayLiteralElementsTakeTheDeclaredElementType) {
 
 TEST(OptionalTuple, ArrayLiteralElementThatDoesNotFitIsReported) {
   expectError("fn main() -> int { nb: int? = None; "
-              "t: (Str, int?)[] = [(\"a\", 1), (\"b\", nb), (1, 2)]; "
+              "t: (Str, int?)[3] = [(\"a\", 1), (\"b\", nb), (1, 2)]; "
               "return 0; }",
               "array literal element of type '(int, int)' does not match the "
-              "expected element type '(Str, int?)'");
+              "element type '(Str, int?)' of '(Str, int?)[3]'");
   expectError("fn main() -> int { nb: int? = None; "
-              "t: (Str, int)[] = [(\"a\", 1), (\"b\", nb)]; return 0; }",
+              "t: (Str, int)[2] = [(\"a\", 1), (\"b\", nb)]; return 0; }",
               "array literal element of type '(Str, int?)' does not match "
-              "the expected element type '(Str, int)'");
+              "the element type '(Str, int)' of '(Str, int)[2]'");
   // No destination: the elements must agree on their own.
   expectError("fn main() -> int { nb: int? = None; "
               "x = [(1, \"a\"), (nb, \"b\")]; return 0; }",
               "array literal has inconsistent element types");
   // No promotion inside a tuple literal, contextual or not.
-  expectError("fn main() -> int { t: (float, int)[] = [(1, 2)]; return 0; }",
-              "does not match declared type '(float, int)[]'");
+  expectError("fn main() -> int { t: (float, int)[1] = [(1, 2)]; return 0; }",
+              "array literal element of type '(int, int)' does not match the "
+              "element type '(float, int)' of '(float, int)[1]'");
 }
 
 TEST(OptionalTuple, OptionalTupleTypeRejected) {
@@ -843,29 +801,30 @@ TEST(OptionalTuple, OptionalTupleTypeRejected) {
     fn main() -> int { return 0; }
   )",
               "optional tuple types are not supported yet");
-  expectError("fn main() -> int { x: (int, Str)?[] = []; return 0; }",
+  expectError("fn main() -> int { x: (int, Str)?[1] = [None]; return 0; }",
               "optional tuple types are not supported yet");
 }
 
 TEST(OptionalTupleModule, TupleAndOptionalSignaturesRoundTrip) {
-  // Serialised spellings mix tuple parentheses with `?` and `[]` suffixes:
-  // "(Node?, int)[]?", "(Node?, Str?)[]", "(Node?, int)".
+  // Serialised spellings mix tuple parentheses with `?` and array suffixes:
+  // "(Node?, int)[2]", "(Node?, Str?)[]", "(Node?, Str?)[1]", "(Node?, int)".
   auto tmp = (paykan::test::tempDir() / "pkn_opt_tuple_mod").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "lib.pkn",
             "class Node { v: int; }\n"
             "impl Node { fn __init__(x: int) { self.v = x; } }\n"
-            "fn wrap(xs: (Node?, int)[]?) -> (Node?, int)[]? { return xs; }\n"
-            "fn pairs() -> (Node?, Str?)[] { return []; }\n"
+            "fn wrap(xs: (Node?, int)[2]) -> (Node?, int)[2] { return xs; }\n"
+            "fn count(xs: view (Node?, Str?)[]) -> int { return xs.len(); }\n"
+            "fn pairs() -> (Node?, Str?)[1] { return [(None, None)]; }\n"
             "fn mk(n: Node?) -> (Node?, int) { return (n, 5); }\n");
   auto ok = writeFile(tmp, "main.pkn", R"(
 import lib;
 fn main() -> int {
-  a: (lib::Node?, int)[]? = lib::wrap(None);
-  b: (lib::Node?, int)[]? = lib::wrap([]);
-  p: (lib::Node?, Str?)[] = lib::pairs();
+  a: (lib::Node?, int)[2] = lib::wrap([(None, 1), (lib::Node(2), 3)]);
+  p: (lib::Node?, Str?)[1] = lib::pairs();
+  c: int = lib::count(p);
   x, k = lib::mk(None);
-  return k;
+  return k + c;
 }
 )");
   auto r = semaCheckFile(ok, tmp);

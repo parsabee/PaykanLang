@@ -16,7 +16,7 @@ fn main() -> int {
   f: view lib::Cell = p.first();        // ... from the class that was declared first, as a 'view'
   k: lib::Kind = f.kindOf();            // method returning a module enum
   s: lib::Splitter = lib::Splitter();
-  halves: lib::Cell[] = s.split(c);     // method returning an array of a class
+  halves: lib::Cell[2] = s.split(c);    // method returning an array of a class
 
   odd: int = 0;
   if (k == lib::Kind::Odd) { odd = 1; }

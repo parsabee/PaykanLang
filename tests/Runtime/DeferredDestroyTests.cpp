@@ -173,9 +173,8 @@ TEST_F(DeferredDestroy, LongChainDoesNotOverflowTheStack) {
 }
 
 TEST_F(DeferredDestroy, DeepChainsThroughRuntimeContainers) {
-  // Arrays (element release) and tuples (slot release) are destroyed through
-  // the same queue: a chain alternating array -> tuple -> array ... with a
-  // Str or an Error and a boxed int hanging off every tuple.
+  // Tuples (slot release) are destroyed through the same queue: a chain of
+  // tuples with a Str or an Error and a boxed int hanging off every one.
   constexpr int kLen = 300000;
   PaykanShared *prev = nullptr;
   const uint8_t kinds[3] = {PAYKAN_TUPLE_REF, PAYKAN_TUPLE_REF,
@@ -194,11 +193,7 @@ TEST_F(DeferredDestroy, DeepChainsThroughRuntimeContainers) {
         reinterpret_cast<PaykanObject *>(PaykanString_from_int(i)));
     PaykanTuple_set_obj(t, 2, b);
     Paykan_release(b);
-    PaykanShared *tb = PaykanShared_new(reinterpret_cast<PaykanObject *>(t));
-    PaykanArray *arr = PaykanArray_new_obj(0);
-    PaykanArray_push_obj(arr, tb); // retains
-    Paykan_release(tb);
-    prev = PaykanShared_new(reinterpret_cast<PaykanObject *>(arr));
+    prev = PaykanShared_new(reinterpret_cast<PaykanObject *>(t));
   }
   Paykan_release(prev);
 }

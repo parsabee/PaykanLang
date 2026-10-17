@@ -1,10 +1,10 @@
-// ERROR: passing an int[] to a function that expects Str[]
-fn process(words: Str[]) -> int {
+// ERROR: passing an int[3] to a function that expects a Str[] slice
+fn process(words: view Str[]) -> int {
   return 0;
 }
 
 fn main() -> int {
-  nums: int[] = [1, 2, 3];
-  process(nums);  // sema error: argument type 'int[]' does not match 'Str[]'
+  nums: int[3] = [1, 2, 3];
+  process(nums);  // sema error: argument type 'int[3]' does not match 'Str[]'
   return 0;
 }

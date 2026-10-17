@@ -35,14 +35,25 @@ impl Pair<K, V> {
 }
 
 class Stack<T> {
-  items: T[];
-  fn push(v: T) { self.items.push(v); }
-  fn pop() -> T { return self.items.pop(); }
-  view fn empty() -> bool { return self.items.len() == 0; }
+  items: T[4];
+  count: int;
+  fn push(v: T) {
+    self.items[self.count] = v;
+    self.count = self.count + 1;
+  }
+  fn pop() -> T {
+    self.count = self.count - 1;
+    return self.items[self.count];
+  }
+  view fn empty() -> bool { return self.count == 0; }
 }
 
 impl Stack<T> {
-  fn __init__() { self.items = []; }
+  // Up to four items; the free slots hold `blank`.
+  fn __init__(blank: T) {
+    self.items = [blank; 4];
+    self.count = 0;
+  }
 }
 
 class Holder {
@@ -54,7 +65,7 @@ impl Holder {
   fn __init__(n: int) { self.b = Box<int>(n); }
 }
 
-fn first<T>(xs: T[]) -> T { return xs[0]; }
+fn first<T>(xs: view T[]) -> view T { return xs[0]; }
 
 fn unbox<T>(b: Box<T>) -> T { return b.get(); }
 
@@ -79,7 +90,7 @@ fn main() -> int {
   bb: Box<Box<int>> = Box<Box<int>>(bi);      // nested instantiation
   println(Str(bb.get().get()));            // 3
 
-  s: Stack<Str> = Stack<Str>();
+  s: Stack<Str> = Stack<Str>("");
   s.push("a");
   s.push("b");
   while (!s.empty()) { println(s.pop()); }    // b, a
@@ -94,7 +105,7 @@ fn main() -> int {
   h: Holder = Holder(40);                     // instantiation as a field type
   println(Str(h.get().get() + 2));         // 42
 
-  arr: Box<int>[] = [Box<int>(1), Box<int>(2)];
+  arr: Box<int>[2] = [Box<int>(1), Box<int>(2)];
   println(Str<int>(arr[1].get()));              // 2
 
   println(describe(bi));                      // Box<int> holding 3

@@ -98,7 +98,7 @@ TEST(Regression, MethodTupleParam) {
   g.expectNoLeaks("MethodTupleParam");
 }
 
-TEST(Regression, MethodEqualsOverrideAndArrayEquals) {
+TEST(Regression, MethodEqualsOverride) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class Bag {
@@ -112,20 +112,15 @@ TEST(Regression, MethodEqualsOverrideAndArrayEquals) {
     fn main() -> int {
       b = Bag(1);
       c = Bag(2);
-      ys: int[] = [1, 2, 3];
-      zs: int[] = ys;
       println(Str<bool>(b == c));
       println(Str<bool>(b.equals(c)));
-      println(Str<bool>(ys == zs));
-      println(Str<bool>(ys.equals([1, 2, 3])));
       return 0;
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.ExitCode, 0);
-  // Array equality is reference identity.
-  EXPECT_EQ(r.StdOut, "True\nTrue\nTrue\nFalse\n");
-  g.expectNoLeaks("MethodEqualsOverrideAndArrayEquals");
+  EXPECT_EQ(r.StdOut, "True\nTrue\n");
+  g.expectNoLeaks("MethodEqualsOverride");
 }
 
 // -- Inferred-type variables initialised from a ref-typed ternary
@@ -168,7 +163,7 @@ TEST(Regression, InferredClassTernaryReceiver) {
   g.expectNoLeaks("InferredClassTernaryReceiver");
 }
 
-TEST(Regression, InferredArrayTupleOptionalTernary) {
+TEST(Regression, InferredTupleOptionalTernary) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class Point {
@@ -182,14 +177,12 @@ TEST(Regression, InferredArrayTupleOptionalTernary) {
     fn run(c: bool) -> int {
       p = Point(1);
       q = Point(2);
-      ps: Point[] = [p];
-      arr = if c then ps else [q, q];
       t: (int, Point) = (5, p);
       tup = if c then t else (6, q);
       opt = if c then p else None;
       n = 0;
       if (opt != None) { n = 100; }
-      return arr.len() * 1000 + arr[0].get() * 10 + tup.1.get() + tup.0 + n;
+      return tup.1.get() * 10 + tup.0 + n;
     }
     fn main() -> int {
       println(Str<int>(run(True)));
@@ -199,8 +192,8 @@ TEST(Regression, InferredArrayTupleOptionalTernary) {
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.ExitCode, 0);
-  EXPECT_EQ(r.StdOut, "1116\n2028\n");
-  g.expectNoLeaks("InferredArrayTupleOptionalTernary");
+  EXPECT_EQ(r.StdOut, "115\n26\n");
+  g.expectNoLeaks("InferredTupleOptionalTernary");
 }
 // -- Array subscript: char elements and temporary (call-rooted) receivers
 
@@ -557,50 +550,7 @@ TEST(Regression, SuperArgumentsAreBoxed) {
   EXPECT_EQ(r.StdOut, "literal12\nc!2\nfwd33fwd2\n");
   g.expectNoLeaks("SuperArgumentsAreBoxed");
 }
-// -- Empty array literals take their element type from the destination
-
-TEST(Regression, PushOntoEmptyArrayFieldFromMethod) {
-  LeakGuard g;
-  auto r = compileAndRun(R"(
-    class P {
-      x: int;
-    }
-
-    impl P {
-      fn __init__(x: int) { self.x = x; }
-    }
-    class SStack {
-      items: Str[];
-      ps: P[];
-      fn push(v: Str) { self.items.push(v); }
-      fn pushP(p: P) { self.ps.push(p); }
-      fn pop() -> Str { return self.items.pop(); }
-      fn popP() -> P { return self.ps.pop(); }
-    }
-
-    impl SStack {
-      fn __init__() { self.items = []; self.ps = []; }
-    }
-    fn main() -> int {
-      s = SStack();
-      s.push("a");
-      s.push("b" + "c");
-      s.push("d");
-      s.pushP(P(1));
-      q = P(2);
-      s.pushP(q);
-      s.pushP(P(3));
-      println(s.pop());
-      println(Str<int>(s.popP().x));
-      println(Str<int>(s.items.len()) + " " + Str<int>(s.ps.len()));
-      return 0;
-    }
-  )");
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.ExitCode, 0);
-  EXPECT_EQ(r.StdOut, "d\n3\n2 2\n");
-  g.expectNoLeaks("PushOntoEmptyArrayFieldFromMethod");
-}
+// -- Array fields subscripted through a member access
 
 // The same program as ArrayTests' RefField.SubscriptObjectArrayField.
 TEST(Regression, SubscriptObjectArrayFieldIsLeakFree) {
@@ -609,12 +559,12 @@ TEST(Regression, SubscriptObjectArrayFieldIsLeakFree) {
 class Foo { v: int; }
 impl Foo { fn __init__(x: int){ self.v = x; } }
 class Box {
-  items: Foo[];
+  items: Foo[2];
   fn second() -> int { return self.items[1].v; }   // subscript a member-access array
 }
 
 impl Box {
-  fn __init__(){ self.items = []; self.items.push(Foo(41)); self.items.push(Foo(42)); }
+  fn __init__(){ self.items = [Foo(41), Foo(42)]; }
 }
 fn main() -> int {
   b: Box = Box();
@@ -633,22 +583,22 @@ TEST(Regression, NestedArrayOfArraysFieldIsLeakFree) {
   LeakGuard g;
   auto r = compileAndRun(R"(
 class Grid {
-  rows: int[][];
+  rows: int[3][3];
   fn at(r: int, c: int) -> int {
-    row: int[] = self.rows[r];   // subscript the outer 2-D field
+    row: int[3] = self.rows[r];   // subscript the outer 2-D field
     return row[c];
   }
 }
 
 impl Grid {
   fn __init__() {
-    self.rows = [];
+    self.rows = [[0; 3]; 3];
     i: int = 0;
     while (i < 3) {
-      row: int[] = [];
+      row: int[3] = [0; 3];
       j: int = 0;
-      while (j < 3) { row.push(i * 3 + j); j = j + 1; }
-      self.rows.push(row);
+      while (j < 3) { row[j] = i * 3 + j; j = j + 1; }
+      self.rows[i] = row;
       i = i + 1;
     }
   }
@@ -664,39 +614,6 @@ fn main() -> int {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "0\n5\n7\n");
   g.expectNoLeaks("NestedArrayOfArraysFieldIsLeakFree");
-}
-
-TEST(Regression, EmptyArrayArgumentAndReturn) {
-  LeakGuard g;
-  auto r = compileAndRun(R"(
-    class P {
-      x: int;
-    }
-
-    impl P {
-      fn __init__(x: int) { self.x = x; }
-    }
-    class Bag {
-      fn fill(ps: P[]) -> int { ps.push(P(1)); ps.push(P(2)); return ps.len(); }
-    }
-    fn fill(ss: Str[]) -> int { ss.push("x"); return ss.len(); }
-    fn none() -> P[] { return []; }
-    fn main() -> int {
-      println(Str<int>(fill([])));
-      println(Str<int>(Bag().fill([])));
-      ps = none();
-      ps.push(P(3));
-      grid: Str[][] = [["a"]];
-      grid[0] = [];
-      grid[0].push("b");
-      println(Str<int>(ps.len()) + grid[0][0]);
-      return 0;
-    }
-  )");
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.ExitCode, 0);
-  EXPECT_EQ(r.StdOut, "1\n2\n1b\n");
-  g.expectNoLeaks("EmptyArrayArgumentAndReturn");
 }
 
 // #72: `match` on a literal subject (string, and the primitive literals) is a
@@ -838,47 +755,4 @@ fn main() -> int {
   EXPECT_EQ(r.StdOut, "1104\n");
   g.expectNoLeaks("ImportedClassMethodAndImporterFunctionWithTheOldName");
   std::filesystem::remove_all(dir);
-}
-
-// Issue #95: push/pop at the array capacity boundary thrashed (two reallocs
-// per pair).  The issue's repro, scaled down: peak 100,000 (cap 131,072),
-// then 20,000 push/pop pairs at len 65,536 = cap/2.
-
-TEST(Regression, ArrayPushPopAtCapacityBoundary) {
-  LeakGuard g;
-  auto r = compileAndRun(R"(
-    class Item {}
-    fn main() -> int {
-      xs: int[] = [];
-      os: Item[] = [];
-      i = 0;
-      while (i < 100000) { xs.push(i); os.push(Item()); i = i + 1; }
-      while (xs.len() > 65536) { xs.pop(); os.pop(); }
-      k = 0;
-      sum = 0;
-      while (k < 20000) {
-        xs.push(k);
-        sum = sum + xs.pop();
-        os.push(Item());
-        os.pop();
-        k = k + 1;
-      }
-      println(Str(xs.len()));
-      println(Str(os.len()));
-      println(Str(sum));
-      println(Str(xs[65535]));
-      return 0;
-    }
-  )");
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.ExitCode, 0);
-  EXPECT_EQ(r.StdOut, "65536\n65536\n199990000\n65535\n");
-  g.expectNoLeaks("array push/pop at capacity boundary");
-  // The JIT runs in process, so the realloc counter is the program's own:
-  // growth to 131,072 is 15 doublings per array, and the boundary loop adds
-  // none (it was 2 x 2 x 20,000 before the fix).  The C backend runs the same
-  // runtime in a child; tests/Runtime/ArrayTests.cpp covers it directly.
-  if (testBackend() == "llvm") {
-    EXPECT_LE(Paykan_heap_total_reallocs(), 100);
-  }
 }

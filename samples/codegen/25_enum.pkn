@@ -13,7 +13,7 @@
 //   6. exhaustive `match` (every variant covered, no wildcard needed)
 //   7. an enum field inside a class, mutated through a method
 //   8. a state machine: enum-in / enum-out transitions reassigned in a loop
-//   9. arrays of enums: literal, push, subscript get/set, iteration
+//   9. arrays of enums: literal, subscript get/set, iteration
 //  10. a single-variant enum
 
 // --- Multiple enum declarations -------------------------------------------
@@ -152,10 +152,10 @@ fn main() -> int {
     i = i + 1;
   }
 
-  // 9. Arrays of enums: literal, push, subscript get/set, iteration.
+  // 9. Arrays of enums: literal, subscript get/set, iteration.
   println("== arrays ==");
-  route: Direction[] = [Direction::North, Direction::East, Direction::South];
-  route.push(Direction::West);               // grow
+  route: Direction[4] = [Direction::North, Direction::East, Direction::South,
+                         Direction::West];
   route[0] = opposite(route[0]);             // North -> South
   j: int = 0;
   while (j < route.len()) {

@@ -53,10 +53,9 @@ TEST(OptionalPrimitive, ParamsReturnsFieldsArraysTuples) {
       h.c = None;
       r = half(4);
       t = take(1);                           // int literal -> float?
-      xs: int?[] = [1, 2];                   // literal elements are boxed
-      xs.push(None);
-      xs.push(3);
+      xs: int?[3] = [1, None, 2];            // literal elements are boxed
       xs[0] = None;
+      xs[2] = 3;
       p: (int?, Str) = (1, "a");
       q = if t then 3 else None;             // int?
       return 0;
@@ -101,7 +100,7 @@ TEST(OptionalPrimitive, NotAnObj) {
               "initializer of type 'int' does not match declared type 'Obj'");
   // No `Obj` holds one, so an `Obj` match has no `int` arm.
   expectError(inMain("o: Obj = None; match o { n: int { } _ { } }"),
-              "match arm type must be a class or array type");
+              "match arm type must be a class type");
 }
 
 // A `view` is passed on as it is: it never becomes an optional (#96).
@@ -184,8 +183,8 @@ TEST(OptionalPrimitive, NoReboxingBetweenOptionals) {
 }
 
 TEST(OptionalPrimitive, PrimitiveArrayIsNotAnOptionalArray) {
-  expectError(inMain("xs: int[] = [1];\n ys: int?[] = xs;"),
-              "does not match declared type 'int?[]'");
+  expectError(inMain("xs: int[1] = [1];\n ys: int?[1] = xs;"),
+              "does not match declared type 'int?[1]'");
 }
 
 TEST(OptionalPrimitive, MatchArmMustNameThePrimitive) {

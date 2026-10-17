@@ -89,7 +89,7 @@ TEST(Poison, EveryUseOfAPoisonedVariableIsSilent) {
       "xs = [1]; xs[0] = a;",              // assigned into an array
       "pp = P(1); pp.x = a;",              // assigned into a field
       "t = (a, 1); println(t.0);",         // tuple element
-      "u = [a, a]; println(u);",           // array element
+      "u = [a, a]; println(Str(u[1]));",   // array element
       "s = Str(a); println(s);",           // inferred conversion
       "s = Str<int>(a); println(s);",      // explicit conversion
       "m = a; println(m);",                // copy
@@ -115,10 +115,11 @@ TEST(Poison, ReturnOfAPoisonedVariableIsSilent) {
              kBadMsg);
 }
 
-// An empty array literal without an annotation fails the declaration too.
-TEST(Poison, UninferableEmptyArrayPoisonsTheVariable) {
-  expectOnly(wrapMain("a = [];\n println(a);\n a.push(1);"),
-             "cannot infer element type of empty array literal");
+// An empty array literal fails the declaration too.
+TEST(Poison, EmptyArrayLiteralPoisonsTheVariable) {
+  expectOnly(wrapMain("a = [];\n n = a.len();\n x: int = a[0];"),
+             "an empty array literal has no type: an array has at least one "
+             "element");
 }
 
 // -- Recovery

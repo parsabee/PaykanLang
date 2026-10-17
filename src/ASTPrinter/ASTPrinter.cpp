@@ -489,7 +489,10 @@ void ASTPrinter::visitDestructureStmt(DestructureStmt *node) {
 
 void ASTPrinter::visitArrayLiteralExpr(ArrayLiteralExpr *node) {
   header("ArrayLiteralExpr", node);
-  OS << " " << node->getNumElements() << " elements\n";
+  if (node->isRepeat())
+    OS << " " << node->getRepeatCount() << " copies\n";
+  else
+    OS << " " << node->getNumElements() << " elements\n";
   for (size_t i = 0; i < node->getNumElements(); ++i) {
     ChildScope cs(*this, i + 1 == node->getNumElements());
     visit(node->getElements()[i]);

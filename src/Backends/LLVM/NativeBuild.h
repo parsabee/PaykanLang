@@ -16,12 +16,12 @@
 namespace paykan::backend::llvm_backend {
 
 /// Turn the program's `main` into the C entry point an executable needs.
-/// The Paykan `main` (`() -> i64` or `(args: Str[]) -> i64`) is renamed and
-/// made internal, and a `int main(int argc, char **argv)` is added that does
-/// what the C backend's generated main does: honour PAYKAN_TRACK_HEAP
-/// (tracking allocator + heap dump at exit) and PAYKAN_NO_ARGS (run with an
-/// empty argument list), pass argv as the `Str[]` argument, and return the
-/// program's result as the exit status.
+/// The Paykan `main` (`() -> i64`, or `(ptr, i64) -> i64` for its `args:
+/// view Str[]` slice) is renamed and made internal, and a `int main(int argc,
+/// char **argv)` is added that does what the C backend's generated main does:
+/// honour PAYKAN_TRACK_HEAP (tracking allocator + heap dump at exit), pass
+/// argv as the slice (Paykan_args_new, which honours PAYKAN_NO_ARGS), and
+/// return the program's result as the exit status.
 Status addEntryPoint(llvm::Module &module);
 
 /// A TargetMachine for the host (default triple, host CPU and features,
