@@ -379,6 +379,7 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
         }
       }
     }
+    FixedArrayAllowed = true; // a field may be a fixed-size array
     auto *fty = resolveType(field->getType(), field->getLocation(),
                             "field '" + field->getName() + "' in class '" +
                                 cd->getName() + "'");

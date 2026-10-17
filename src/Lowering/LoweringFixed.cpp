@@ -18,7 +18,8 @@
 // releases the elements it replaces, and a variable's are released when its
 // scope ends.  A temporary (a call's result, a literal) owns its elements:
 // the place it initialises takes them over, and any other use releases them
-// once it is done (FixedTemps).
+// once it is done (FixedTemps).  A field is in its object's bytes
+// (field.addr); the object of a call-rooted one is released the same way.
 
 #include "LoweringInternal.h"
 #include "Names.h"
@@ -77,6 +78,19 @@ ModuleLowering::FixedValue ModuleLowering::emitFixedValue(ast::Expr *e) {
   }
   if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(e))
     return {emitFixedElementAddress(se->getArray(), se->getIndex())};
+  // A field, in its object: a call-rooted one (`mk().xs`) is kept until the
+  // consumer is done with the address.
+  if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e)) {
+    Receiver recv = emitReceiver(ma->getReceiver(), "obj");
+    ast::ClassType *ct = getExprClassType(ma->getReceiver());
+    if (!recv || !ct)
+      return {};
+    getOrCreateClass(ct);
+    if (recv.Owned.isOwned())
+      FixedTemps.emplace_back(recv.Owned.V, nullptr);
+    return {B.fieldAddr(recv.Raw, ct->getName(), ma->getFieldName(),
+                        ma->getFieldName() + ".addr")};
+  }
   // A call's result, in the temporary the call wrote.
   if (ast::isa<ast::CallExpr>(e) || ast::isa<ast::MethodCallExpr>(e))
     return {emitExpr(e), /*Temp=*/true};
@@ -87,8 +101,8 @@ ModuleLowering::FixedValue ModuleLowering::emitFixedValue(ast::Expr *e) {
     emitFixedInit(lit, addr);
     return {addr, /*Temp=*/true};
   }
-  reportInternalError("a fixed-size array value that is not a variable, an "
-                      "element, a literal or a call");
+  reportInternalError("a fixed-size array value that is not a variable, a "
+                      "field, an element, a literal or a call");
   return {};
 }
 
@@ -102,9 +116,12 @@ Val ModuleLowering::emitFixedAddress(ast::Expr *e) {
 
 void ModuleLowering::releaseFixedTemps(size_t mark) {
   while (FixedTemps.size() > mark) {
-    auto [addr, ty] = FixedTemps.back();
+    auto [v, ty] = FixedTemps.back();
     FixedTemps.pop_back();
-    emitFixedRelease(addr, ty);
+    if (ty)
+      emitFixedRelease(v, ty);
+    else
+      emitRelease(v);
   }
 }
 

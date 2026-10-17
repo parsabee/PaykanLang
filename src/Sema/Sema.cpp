@@ -495,8 +495,8 @@ bool Sema::holdsFixedArray(const ast::Type *ty) {
 bool Sema::errorFixedArrayHere(ast::SourceLocation loc, ast::Type *ty,
                                const std::string &where) {
   error(loc, where + ": a fixed-size array ('" + typeName(ty) +
-                 "') can only be a local variable, a parameter or a result "
-                 "for now");
+                 "') can only be a local variable, a parameter, a result or "
+                 "a field for now");
   return false;
 }
 
@@ -1006,8 +1006,17 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   // each argument its parameter's type as the expected type (a generic call
   // infers from the arguments, so they come first there).
   const FunctionSig *known = nullptr;
-  if (!node->hasTypeArgs() && !S.ClassTemplates.count(node->getCalleeName()) &&
-      !S.FuncTemplates.count(node->getCalleeName()))
+  // Explicit type arguments (`Box<int>(...)`) need no argument types: the
+  // instance is known first, and so are its parameters.
+  const bool explicitInstance =
+      node->hasTypeArgs() && !S.isConversionTarget(node->getCalleeName()) &&
+      (S.ClassTemplates.count(node->getCalleeName()) ||
+       S.FuncTemplates.count(node->getCalleeName()));
+  if (explicitInstance && !S.resolveGenericCall(node, {}))
+    return nullptr;
+  if (explicitInstance ||
+      (!node->hasTypeArgs() && !S.ClassTemplates.count(node->getCalleeName()) &&
+       !S.FuncTemplates.count(node->getCalleeName())))
     if (const auto *sig = S.lookupFunction(node->getCalleeName());
         sig && sig->ParamTypes.size() == node->getNumArguments())
       known = sig;
@@ -1084,8 +1093,9 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     return S.inferConversion(node, argTypes);
 
   // -- Generic call: instantiate the template and rebind the callee
-  if (node->hasTypeArgs() || S.ClassTemplates.count(node->getCalleeName()) ||
-      S.FuncTemplates.count(node->getCalleeName())) {
+  if (!explicitInstance &&
+      (node->hasTypeArgs() || S.ClassTemplates.count(node->getCalleeName()) ||
+       S.FuncTemplates.count(node->getCalleeName()))) {
     for (auto *ty : argTypes)
       if (!ty)
         return nullptr; // argument errors already reported; cannot infer

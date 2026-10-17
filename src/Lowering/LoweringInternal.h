@@ -528,9 +528,11 @@ private:
   /// added to FixedTemps, for its consumer to release with
   /// releaseFixedTemps once done with it.
   Val emitFixedAddress(ast::Expr *e);
+  /// What fixed-size array addresses handed out depend on: temporaries of
+  /// references (with their type), and +1 boxes of the objects holding
+  /// field arrays (with none).
   std::vector<std::pair<Val, ast::FixedArrayType *>> FixedTemps;
-  /// Release the elements of the temporaries added to FixedTemps since its
-  /// size was @p mark.
+  /// Release what was added to FixedTemps since its size was @p mark.
   void releaseFixedTemps(size_t mark);
   /// Retain, or release, every reference held by the array of type @p ty at
   /// @p addr (nothing for an array of values).

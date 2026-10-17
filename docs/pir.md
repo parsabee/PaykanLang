@@ -391,7 +391,8 @@ CodeGen enforced, now in one place.
   exit releases a variable's (one by one, or in a `while` past four).  A
   call's result or a literal owns its elements: they move into the place it
   initialises, and are released after any other use (an element read from
-  it is retained first).
+  it is retained first).  A field is a `mem` field reached with
+  `field.addr`, and `C.destroy` releases its references too.
 * **Fields and array/tuple ref slots** own their box; `field.store` is preceded
   by a retain-or-steal of the new value and the old value is released
   (null-checked); `PaykanArray_set_obj`/`push_obj`/`PaykanTuple_set_obj` retain

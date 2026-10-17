@@ -269,8 +269,11 @@ Output:
   is: copying the array copies the references, so the copy and the original
   share their elements' objects, and an element of a `view` array is a
   `view` too.
-- For now a fixed-size array is only ever a local variable, a parameter or a
-  result: it cannot be a field, a tuple or growable array element, an
+- A field can be a fixed-size array: it is held inside its object, and
+  `__init__` assigns it like any other field. Its elements change only where
+  the object can (`self.cells[0][1] = 5;` is not allowed in a `view fn`).
+- For now a fixed-size array is only ever a local variable, a parameter, a
+  result or a field: it cannot be a tuple or growable array element, an
   optional or a type argument. And an element cannot be named by an `inout`
   local or passed to an `inout` parameter yet.
 
@@ -317,6 +320,23 @@ Output:
 
 ```
 10 ann!
+```
+
+```pkn
+class Board { cells: char[3][3]; }
+
+fn main() -> int {
+  b = Board([['.', '.', '.'], ['.', '.', '.'], ['.', '.', '.']]);
+  b.cells[1][1] = 'x';
+  println(Str(b.cells[1][1]) + " " + Str(b.cells.len()));
+  return 0;
+}
+```
+
+Output:
+
+```
+x 3
 ```
 
 ```pkn

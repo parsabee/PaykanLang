@@ -205,6 +205,11 @@ pir::Class *ModuleLowering::getOrCreateClass(ast::ClassType *ct) {
   for (auto &[name, ty] : allFieldsInOrder(ct)) {
     Type t = toPIRType(ty);
     cls.Fields.push_back({name, t == Type::Void ? Type::Box : t});
+    if (t == Type::Mem) { // a fixed-size array, held inline
+      FixedLayout l = fixedLayout(ty);
+      cls.Fields.back().Size = l.Size;
+      cls.Fields.back().Align = l.Align;
+    }
   }
   auto origin = PL.ClassOrigins.find(ct->getName());
   if (origin != PL.ClassOrigins.end() && origin->second != Mod.Name) {
@@ -345,7 +350,8 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
 }
 
 // `void Class.destroy(obj self)`: the user `destroy` body (if any), then a
-// release of every ref-typed field, then the struct is freed.
+// release of every ref-typed field and of the references in every
+// fixed-size array field, then the struct is freed.
 void ModuleLowering::emitDestructor(ast::ClassDecl *node, ast::ClassType *ct) {
   pir::Function *fn =
       FuncByName.at(node->getName() + kNameSep + kMethodDestroy);
@@ -379,6 +385,12 @@ void ModuleLowering::emitDestructor(ast::ClassDecl *node, ast::ClassType *ct) {
 
   // Release every ref-typed field (null-safe), then free the struct.
   for (auto &[fname, fty] : allFieldsInOrder(ct)) {
+    if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(fty)) {
+      if (fixedHoldsRefs(ft))
+        emitFixedRelease(
+            B.fieldAddr(self, ct->getName(), fname, fname + ".addr"), ft);
+      continue;
+    }
     if (!ast::isRefType(fty))
       continue;
     Val box = B.fieldLoad(self, ct->getName(), fname, Type::Box, fname);
@@ -403,7 +415,11 @@ Val ModuleLowering::lowerMemberAssignStmt(ast::MemberAssignStmt *node) {
   ast::Type *fieldASTTy = fieldASTType(ct, node->getFieldName());
   assert(fieldASTTy && "Sema should have verified field exists");
 
-  if (fieldASTTy && ast::isRefType(fieldASTTy)) {
+  if (ast::dyn_cast<ast::FixedArrayType>(fieldASTTy)) {
+    emitFixedAssign(B.fieldAddr(objPtr, ct->getName(), node->getFieldName(),
+                                node->getFieldName() + ".addr"),
+                    node->getValue());
+  } else if (fieldASTTy && ast::isRefType(fieldASTTy)) {
     // The slot owns a box: retain/steal the new one, release the old one.
     Val newShared;
     if (isNoneForOptional(node->getValue()))

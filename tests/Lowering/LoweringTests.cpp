@@ -1086,6 +1086,27 @@ TEST(Lowering, FixedArraysOfReferencesOwnTheirElements) {
   EXPECT_EQ(count(m, "release"), 5u) << m;
 }
 
+// A fixed-size array field is a `mem` field of the object, written in
+// place, and the destructor releases the references in it.
+TEST(Lowering, FixedArrayFieldsAreMemFields) {
+  auto l = lower(R"(
+    class Grid { cells: int[2][3]; tags: Str[2]; }
+    fn main() -> int {
+      g = Grid([[1, 2, 3], [4, 5, 6]], ["a", "b"]);
+      g.cells[1][2] = 7;
+      return g.cells[1][2];
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  for (const char *e : {"field cells: mem(48, 8)", "field tags: mem(16, 8)"})
+    EXPECT_NE(l.Text.find(e), std::string::npos) << e << "\n" << l.Text;
+  std::string m = function(l.Text, "main");
+  EXPECT_NE(m.find("field.addr %"), std::string::npos) << m;
+  std::string d = function(l.Text, "Grid.destroy");
+  EXPECT_NE(d.find("field.addr %self"), std::string::npos) << d;
+  EXPECT_EQ(count(d, "release"), 2u) << d;
+}
+
 // Printing an optional value formats it, "None" or the value's text; it is
 // never boxed.
 TEST(Lowering, PrintingAnOptionalValueFormatsIt) {

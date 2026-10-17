@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 // Sema tests: fixed-size arrays, `T[n]` (docs/language/05-arrays.md,
-// "Fixed-size arrays").  For now the type of a local variable, a parameter
-// or a result, of scalars, enums, references and other such arrays.
+// "Fixed-size arrays").  For now the type of a local variable, a parameter,
+// a result or a field, of scalars, enums, references and other such arrays.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -144,10 +144,46 @@ TEST(FixedArray, ParametersAndResults) {
               "'int[2]' cannot cross into C");
 }
 
-TEST(FixedArray, OnlyALocalAParameterOrAResultForNow) {
+// A field is part of its object: changed only where the object can be, and
+// assigned by `__init__` like any other.
+TEST(FixedArray, Fields) {
+  auto r = semaCheck(R"(
+    class Grid { cells: int[2][3]; tags: Str[2]; }
+    impl Grid {
+      fn set(c: int, v: int) { self.cells[1][c] = v; }
+      view fn at(c: int) -> int { return self.cells[1][c]; }
+    }
+    class Box<T> { xs: T[2]; }
+    fn total(xs: view int[3]) -> int { return xs[0] + xs[1] + xs[2]; }
+    fn main() -> int {
+      g = Grid([[1, 2, 3], [4, 5, 6]], ["a", "b"]);
+      g.cells[0] = [7, 8, 9];
+      g.tags = [g.tags[1], "c"];
+      b = Box<int>([1, 2]);
+      return total(g.cells[1]) + g.at(0) + b.xs[1] + g.tags[0].len();
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  expectError("class G { c: int[2]; }\n"
+              "impl G { view fn f() { self.c[0] = 1; } }\n"
+              "fn main() -> int { return 0; }",
+              "'self' is read-only in 'view fn f'; cannot assign to its "
+              "elements");
+  expectError("class G { c: int[2]; }\n"
+              "fn f(g: view G) { g.c[1] = 1; }\n"
+              "fn main() -> int { return 0; }",
+              "'g' is a 'view' parameter; cannot assign to its elements");
+  expectError("class G { c: int[2]; n: int; }\n"
+              "impl G { fn __init__() { self.n = 1; } }\n"
+              "fn main() -> int { return 0; }",
+              "field 'c' of class 'G' is not assigned on every path through "
+              "'__init__'");
+}
+
+TEST(FixedArray, OnlyALocalAParameterAResultOrAFieldForNow) {
   const std::string notYet = "a fixed-size array ('int[2]') can only be a "
-                             "local variable, a parameter or a result for now";
-  expectError("class C { a: int[2]; }\nfn main() -> int { return 0; }", notYet);
+                             "local variable, a parameter, a result or a "
+                             "field for now";
   expectBodyError("  o: int[2]? = None;", notYet);
   expectBodyError("  a: int[2][] = [];", notYet);
   expectBodyError("  xs: int[2] = [1, 2];\n  t = (xs, 1);",
