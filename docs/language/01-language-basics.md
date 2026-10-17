@@ -98,6 +98,7 @@ literal is an array of its own length. See `05-arrays.md` for the full array sys
 ```pkn
 a: int[5] = [1, 2, 3, 4, 5];
 b = [1, 2, 3];                      // an int[3]
+z: int[8] = [0; 8];                 // eight copies of 0
 mat: int[2][2] = [[1, 2], [3, 4]];  // 2D
 ```
 

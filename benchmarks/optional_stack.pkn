@@ -33,7 +33,7 @@ class Stack<T> {
 
 impl Stack<T> {
   fn __init__(blank: T) {
-    self.items = [blank, blank, blank, blank, blank, blank, blank, blank];
+    self.items = [blank; 8];
     self.count = 0;
   }
 }

@@ -178,7 +178,7 @@ True
 
 - `None` on its own has the type `Obj`, the root class. So `x = None;` declares an `Obj`
   variable, not an optional: write the type, as in `x: Task? = None;`. The same goes for
-  an array literal holding `None`: `ts: Task?[2] = [None, None]` needs its annotation.
+  an array literal holding `None`: `ts: Task?[8] = [None; 8]` needs its annotation.
 - `T?[n]` is an array whose elements may be `None`. An array cannot itself be optional
   (`int[3]?` is rejected).
 - `if c then value else None` has the type `T?` when `value` is a `T`.
@@ -241,8 +241,7 @@ class TaskList {
 
 impl TaskList {
   fn __init__() {
-    blank = Task("");
-    self.tasks = [blank, blank, blank, blank, blank, blank, blank, blank];
+    self.tasks = [Task(""); 8];
     self.count = 0;
   }
 }

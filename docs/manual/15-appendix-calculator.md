@@ -95,15 +95,16 @@ class HashMap {
 // ...
 impl HashMap {
   fn __init__() {
-    self.buckets = [None, None, None, None, None, None, None, None];
+    self.buckets = [None; 8];
     self.size = 0;
   }
 }
 ```
 
-`next` is optional, so it starts as `None` and `Entry`'s `__init__` leaves it alone. The
-hash is folded into `self.buckets.len()`, so the number of buckets is written only once, in
-the field's type.
+`next` is optional, so it starts as `None` and `Entry`'s `__init__` leaves it alone.
+`[None; 8]` is eight `None`s, so every bucket starts empty, and `clear` assigns it again. The
+hash is folded into `self.buckets.len()`, so the lookups follow the field's type rather than
+repeating the number of buckets.
 
 Looking a key up returns an **optional**, `Entry?`, so a missing variable is `None` rather
 than a special value. The loop is the linked-list walk from [Optionals](08-optionals.md).
@@ -353,18 +354,18 @@ class Ring<T> {
 impl Ring<T> {
   // Every slot starts as `blank`, until an item is added there.
   fn __init__(blank: T) {
-    self.items = [blank, blank, blank, blank, blank, blank, blank, blank,
-                  blank, blank, blank, blank, blank, blank, blank, blank];
+    self.items = [blank; 16];
     self.count = 0;
     self.start = 0;
   }
 }
 ```
 
-An array always holds all of its elements, so `__init__` takes a `blank` item to fill the
-slots with until they are used, as the task list in [Arrays](06-arrays.md#project-the-task-list)
-does. The history holds `(Str, float)` tuples, the statement and its value, so its type is
-`Ring<(Str, float)>`, and its blank is an empty statement:
+An array always holds all of its elements, so `__init__` takes a `blank` item and fills the
+slots with `[blank; 16]` until they are used, as the task list in
+[Arrays](06-arrays.md#project-the-task-list) does. The history holds `(Str, float)` tuples,
+the statement and its value, so its type is `Ring<(Str, float)>`, and its blank is an empty
+statement:
 
 ```pkn
 // from: samples/imports/12_calc/main.pkn

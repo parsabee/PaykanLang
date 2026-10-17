@@ -159,8 +159,9 @@ Parentheses in the source are not nodes: `(a + b) * c` is
 line and column in the text and a message, anything that does not follow
 the rules above: unknown tags, missing or extra fields, a field of the wrong
 kind, an empty name where one is required, a tuple or destructuring with
-fewer than two elements, a byte value out of range, a malformed location, an
-unknown escape, a version it does not read, and nesting beyond the limit. It
+fewer than two elements, an `array-repeat` count below 1, a byte value out
+of range, a malformed location, an unknown escape, a version it does not
+read, and nesting beyond the limit. It
 also makes the grammar's own checks that the recursive-descent frontend
 makes while parsing (`void?`, nested optionals). Everything else (unknown
 names, types that don't match, ...) is Sema's job, with the same

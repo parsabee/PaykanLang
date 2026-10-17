@@ -109,8 +109,7 @@ class Ring<T> {
 impl Ring<T> {
   // Every slot starts as `blank`, until an item is added there.
   fn __init__(blank: T) {
-    self.items = [blank, blank, blank, blank, blank, blank, blank, blank,
-                  blank, blank, blank, blank, blank, blank, blank, blank];
+    self.items = [blank; 16];
     self.count = 0;
     self.start = 0;
   }

@@ -31,6 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Where the literal flows into a typed slot, its elements take the slot's element type
   (`xs: float[2] = [1, 2]`). An array has at least one element: `[]` is an error (`an
   empty array literal has no type: an array has at least one element`).
+- `[v; n]` is an array of `n` copies of `v` (docs/language/05-arrays.md, "Repeated
+  values"): `slots: Entry?[8] = [None; 8];`, and `[[0; 3]; 2]` is an `int[2][3]` of zeros.
+  The count is an integer literal of at least 1 (`[0; 0]` is an error, `an array has at
+  least one element: the count must be 1 or more`), and the literal types as one of `n`
+  elements, so `[0; 4]` flowing into a `float[4]` is four `0.0`s. `v` is evaluated once:
+  `[Node(); 3]` holds one object three times. In PIR, `[0; n]` (or `0.0`, `False`,
+  `'\0'`) of a scalar element type is one `mem.zero` of the array. In the AST interchange
+  format it is `(array-repeat LOC EXPR INT)`.
 - Slices (docs/language/05-arrays.md, "Slices"): `T[]` is the type of a `view` or `inout`
   parameter, a slice. It takes an array of any length whose elements are exactly `T`
   (a literal becomes one) or another slice, and reads or writes the elements in place: a

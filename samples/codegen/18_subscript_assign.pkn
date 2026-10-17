@@ -68,7 +68,7 @@ fn strArrayAssign() -> int {
 
 fn loopOverwrite() -> int {
   println("=== loop overwrite ===");
-  arr: int[5] = [0, 0, 0, 0, 0];
+  arr: int[5] = [0; 5];
   i: int = 0;
   while (i < 5) {
     arr[i] = i * i;

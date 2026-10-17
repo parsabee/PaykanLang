@@ -327,6 +327,7 @@ primary ::= literal
           | "(" expression ")"
           | "(" expression ( "," expression )+ ")"           -- tuple literal
           | "[" argumentList? "]"                            -- array literal
+          | "[" expression ";" INT "]"                       -- repeated value
 
 argumentList ::= expression ( "," expression )*
 ```
@@ -354,6 +355,14 @@ return, a field), `T` is the slot's element type, and into a slice it is a
 `int` and `float` give `float` (`[1, 2.5]` is a `float[2]`), and classes
 their nearest common ancestor. `[]` parses, but Sema rejects it (`an empty
 array literal has no type: an array has at least one element`).
+
+`[v; n]` is `n` copies of `v`. `n` is an `INT` of at least 1: `[0; 0]` is a
+syntax error (`an array has at least one element: the count must be 1 or
+more`), and so is any other token after the `;` (`[0; n]`: `expected the
+number of copies, an integer literal`). It types as the literal `[v, ...,
+v]` of `n` elements would, so `[0; 4]` flowing into a `float[4]` is four
+`0.0`s and `[[0; 3]; 2]` is an `int[2][3]`. `v` is evaluated once and every
+element is a copy of its value: `[Node(); 3]` holds one object three times.
 
 ### Generic call versus comparison
 

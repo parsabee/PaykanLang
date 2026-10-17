@@ -241,9 +241,9 @@ match xs[0] { n: Node { … } None { … } }
 ```
 
 An array literal containing `None` takes its destination's element type
-(`xs: Node?[2] = [None, n]`). Without a declared destination a bare `None` is `Obj`:
-`xs = [None, Node(1)]` is an `Obj[2]`, and `xs = [None, n]` (with `n: Node?`) is an error.
-Annotate the variable.
+(`xs: Node?[2] = [None, n]`, and `slots: Node?[8] = [None; 8]` is eight empty slots).
+Without a declared destination a bare `None` is `Obj`: `xs = [None, Node(1)]` is an
+`Obj[2]`, and `xs = [None, n]` (with `n: Node?`) is an error. Annotate the variable.
 
 ---
 

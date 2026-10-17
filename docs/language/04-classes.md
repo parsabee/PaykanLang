@@ -73,7 +73,7 @@ impl User {
   fn __init__(id: int, name: Str) {
     self.id = id;
     self.name = name;
-    self.scores = [0, 0, 0];
+    self.scores = [0; 3];
   }
 }
 ```

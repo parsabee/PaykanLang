@@ -14,8 +14,9 @@ fn main() -> int {
   primes = [2, 3, 5, 7];               // int[4]
   names: Str[2] = ["Ada", "Grace"];
   sizes: float[_] = [1.5, 2, 4];       // float[3]: _ takes the literal's length
+  zeros = [0; 6];                      // int[6]: six copies of 0
   println(Str(primes.len()) + " primes, " + Str(names.len()) + " names, "
-          + Str(sizes.len()) + " sizes");
+          + Str(sizes.len()) + " sizes, " + Str(zeros.len()) + " zeros");
   println("the first prime is " + Str(primes[0]));
   return 0;
 }
@@ -24,7 +25,7 @@ fn main() -> int {
 Output:
 
 ```
-4 primes, 2 names, 3 sizes
+4 primes, 2 names, 3 sizes, 6 zeros
 the first prime is 2
 ```
 
@@ -33,6 +34,12 @@ has exactly `n` elements (`names: Str[2] = ["Ada"]` is an error). Write `_` for 
 take it from the initializer, as `sizes` does. An array has at least one element, so `[]` is
 an error. All elements of a literal must have the same type, except that `int`s and `float`s
 mix into `float`s.
+
+`[v; n]` is an array of `n` copies of `v`, where `n` is a number written out, at least 1
+(`[0; n]` with a variable `n` is an error). It is how you make an array that the program
+fills in afterwards, as the next section does: `[0; 6]` is six zeros, `[""; 3]` three empty
+strings, and `flags: bool[4] = [False; 4]` four `False`s. With a declared type, `v` takes
+its element type, so `ratios: float[3] = [0; 3]` holds `0.0`s.
 
 ## Reading and writing
 
@@ -51,7 +58,7 @@ There is no `for` loop, so you walk an array with `while` and an index:
 
 ```pkn
 fn main() -> int {
-  squares = [0, 0, 0, 0, 0];
+  squares = [0; 5];
   i = 0;
   while (i < squares.len()) {
     squares[i] = (i + 1) * (i + 1);
@@ -141,7 +148,7 @@ count and increments the count; removing the last value decrements it:
 
 ```pkn
 fn main() -> int {
-  stack = [0, 0, 0, 0];      // room for 4
+  stack = [0; 4];            // room for 4
   count = 0;
   n = 1;
   while (n <= 3) {
@@ -289,8 +296,7 @@ class TaskList {
 
 impl TaskList {
   fn __init__() {
-    blank = Task("");
-    self.tasks = [blank, blank, blank, blank, blank, blank, blank, blank];
+    self.tasks = [Task(""); 8];
     self.count = 0;
   }
 }
@@ -322,6 +328,11 @@ cleared 1
 2. [ ] call mum
 2 of 2 to do
 ```
+
+`[Task(""); 8]` calls `Task("")` once, and a class value is a reference to its object, so
+the eight slots hold the same blank task. That is fine here: `add` puts a new task in a slot
+before anything changes it, and `complete` only reaches the slots in use. An array whose
+elements each need their own object from the start is filled in a loop.
 
 The reference chapter is [Arrays](../language/05-arrays.md). Next:
 [Tuples](07-tuples.md).

@@ -251,8 +251,7 @@ class TaskList {
 
 impl TaskList {
   fn __init__() {
-    blank = task::Task("", task::Priority::Normal);
-    self.tasks = [blank, blank, blank, blank, blank, blank, blank, blank];
+    self.tasks = [task::Task("", task::Priority::Normal); 8];
     self.count = 0;
   }
 }

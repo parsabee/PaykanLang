@@ -67,7 +67,7 @@ fn indexOf<T>(xs: view T[], x: view T) -> int? {
 }
 
 fn three<T>(x: T) -> T[3] {
-  return [x, x, x];
+  return [x; 3];
 }
 
 fn main() -> int {
@@ -177,7 +177,7 @@ class Stack<T> {
 
 impl Stack<T> {
   fn __init__() {
-    self.items = [None, None, None, None, None, None, None, None];
+    self.items = [None; 8];
     self.count = 0;
   }
 }
@@ -237,8 +237,7 @@ class TaskList {
 
 impl TaskList {
   fn __init__() {
-    blank = Task("");
-    self.tasks = [blank, blank, blank, blank, blank, blank, blank, blank];
+    self.tasks = [Task(""); 8];
     self.count = 0;
     self.removed = Stack<Task>();
   }

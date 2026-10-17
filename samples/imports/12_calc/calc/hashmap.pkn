@@ -148,14 +148,14 @@ class HashMap {
 
   // Drop all entries.
   fn clear() {
-    self.buckets = [None, None, None, None, None, None, None, None];
+    self.buckets = [None; 8];
     self.size = 0;
   }
 }
 
 impl HashMap {
   fn __init__() {
-    self.buckets = [None, None, None, None, None, None, None, None];
+    self.buckets = [None; 8];
     self.size = 0;
   }
 }

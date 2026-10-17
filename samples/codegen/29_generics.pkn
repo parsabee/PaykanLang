@@ -51,7 +51,7 @@ class Stack<T> {
 impl Stack<T> {
   // Up to four items; the free slots hold `blank`.
   fn __init__(blank: T) {
-    self.items = [blank, blank, blank, blank];
+    self.items = [blank; 4];
     self.count = 0;
   }
 }

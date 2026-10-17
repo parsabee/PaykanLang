@@ -16,6 +16,8 @@ Storage that grows is the standard library's: see `List<T>` and `Buffer<T>` in
   `Point[4]`).
 - Arrays of arrays: `int[2][3]` is two `int[3]`s, indexed `grid[i][j]`.
 - Literals: `[e1, e2, e3]` is an array of its own length; `[1, 2, 3]` is an `int[3]`.
+- `[v; n]` is `n` copies of `v`, `n` an integer literal of at least 1: `[0; 8]` is an
+  `int[8]` of zeros. `v` is evaluated once, so `[Node(); 3]` holds one object three times.
 - A length written `_` (`x: int[_] = …`) is the initializer's.
 - An array is a value: assigning it, or passing it to a plain parameter, copies its
   elements. It is not an `Obj`.
@@ -66,7 +68,7 @@ initializer's. An array literal gives its element count, and its first element t
 of a nested `_`. Anything else gives the lengths of the array it is.
 
 ```pkn
-fn fill<T>(v: T) -> T[3] { return [v, v, v]; }
+fn fill<T>(v: T) -> T[3] { return [v; 3]; }
 
 fn main() -> int {
   x: int[_][_] = [[1, 2, 3], [4, 5, 6]];   // an int[2][3]
@@ -86,13 +88,71 @@ A `_` anywhere else is an error (`a length can be '_' only in a variable declara
 initializer, which gives it`), and so is an initializer that gives no length: `x: int[_] =
 3` (`'int[_]' takes its lengths from a fixed-size array of its shape, not from 'int'`).
 
+### Repeated values
+
+`[v; n]` is an array of `n` copies of `v`. The count `n` is an integer literal of at least
+1, and `[v; n]` types as the literal `[v, ..., v]` of `n` elements would: on its own `[0; 3]`
+is an `int[3]`; flowing into a `T[n]`, `v` takes the element type `T` (`[0; 4]` into a
+`float[4]` is four `0.0`s, `[None; 8]` into an `int?[8]` eight `None`s); and it gives a `_`
+length its count.
+
+```pkn
+fn main() -> int {
+  zeros: float[4] = [0; 4];          // the int 0 becomes 0.0
+  slots: int?[8] = [None; 8];
+  grid: int[_][_] = [[0; 3]; 2];     // an int[2][3]
+  grid[1][2] = 7;
+  println(Str(zeros.len()) + " " + Str(slots[5] == None) + " " + Str(grid[0][2]) + " "
+          + Str(grid[1][2]));
+  return 0;
+}
+```
+
+Output:
+
+```
+4 True 0 7
+```
+
+`v` is evaluated once, and each element is a copy of its value. A value of a reference type
+(a class, `Str`, a tuple) is a reference, so the elements all name one object: `[Counter(0);
+3]` holds a single counter three times, and a change made through one element shows through
+the others until an element is assigned another object.
+
+```pkn
+class Counter { n: int; }
+
+fn main() -> int {
+  cs = [Counter(0); 3];    // one Counter, three times
+  cs[0].n = 5;
+  cs[1] = Counter(1);      // cs[1] now holds a second Counter
+  println(Str(cs[2].n) + " " + Str(cs[1].n));
+  return 0;
+}
+```
+
+Output:
+
+```
+5 1
+```
+
+- The count is a literal: `[0; n]` is an error (`unexpected identifier 'n'; expected the
+  number of copies, an integer literal`), and so are `[0; -1]` and `[0; 3.0]`.
+- `[0; 0]` is an error: `an array has at least one element: the count must be 1 or more`.
+- The count is the literal's length: `xs: int[3] = [0; 4]` is an error (`array literal has
+  4 element(s), but 'int[3]' has 3`), and so is `[0; 20000]` (`array literal of type
+  'int[20000]' is too big: a fixed-size array holds at most 16384 elements`).
+- `v` must fit the element type: `xs: Str[2] = [1; 2]` is an error (`array literal element
+  of type 'int' does not match the element type 'Str' of 'Str[2]'`).
+
 ### Filling an array
 
 An array starts with the elements of its initializer, and a loop can set them afterwards:
 
 ```pkn
 fn main() -> int {
-  squares: int[5] = [0, 0, 0, 0, 0];
+  squares: int[5] = [0; 5];
   i = 0;
   while (i < squares.len()) {
     squares[i] = i * i;
@@ -110,7 +170,36 @@ Output:
 ```
 
 A program that collects a varying number of elements gives an array a capacity, the most it
-will hold, and keeps beside it a count of the slots in use.
+will hold, and keeps beside it a count of the slots in use. `[v; n]` fills the capacity with
+a placeholder that the count has not reached yet:
+
+```pkn
+fn main() -> int {
+  divisors: int[16] = [0; 16];   // room for 16
+  count = 0;                     // divisors[0] to divisors[count - 1] are in use
+  d = 1;
+  while (d <= 36 && count < divisors.len()) {
+    if (36 % d == 0) {
+      divisors[count] = d;
+      count = count + 1;
+    }
+    d = d + 1;
+  }
+  println(Str(count) + " divisors, the largest " + Str(divisors[count - 1]));
+  return 0;
+}
+```
+
+Output:
+
+```
+9 divisors, the largest 36
+```
+
+For an array of objects the placeholder is one blank object (`tasks: Task[8] =
+[Task(""); 8]`), which the unused slots share: a slot gets its own object when it is
+assigned one, before the program changes it. An optional element type (`Task?[8]`) can start
+as `[None; 8]` instead.
 
 ---
 
@@ -283,7 +372,7 @@ allowed in a `view fn`).
 class Board { cells: char[3][3]; }
 
 fn main() -> int {
-  b = Board([['.', '.', '.'], ['.', '.', '.'], ['.', '.', '.']]);
+  b = Board([['.'; 3]; 3]);
   b.cells[1][1] = 'x';
   println(Str(b.cells[1][1]) + " " + Str(b.cells.len()));
   return 0;
@@ -311,7 +400,7 @@ fn bumped(xs: int[3]) -> int[3] {
 }
 
 fn clear(xs: inout int[3]) {
-  xs = [0, 0, 0];          // the caller's array
+  xs = [0; 3];             // the caller's array
 }
 
 fn main() -> int {
@@ -409,10 +498,12 @@ it does not convert to `Obj`; each is an error such as `tuple element 0: a fixed
 |-------|---------|
 | Inconsistent element types | `[1, "two"]` |
 | Empty literal | `[]` anywhere |
-| Literal of the wrong length | `xs: int[3] = [1, 2]` |
+| Literal of the wrong length | `xs: int[3] = [1, 2]`, `xs: int[3] = [0; 4]` |
+| Element that does not fit the element type | `xs: Str[2] = [1, 2]`, `xs: Str[2] = [1; 2]` |
 | Length that is not a positive literal | `int[0]` (at parse time) |
+| Count that is not a positive literal | `[0; 0]`, `[0; n]`, `[0; -1]`, `[0; 3.0]` (at parse time) |
 | `_` length with nothing to give it | `fn f(x: int[_])`, `x: int[_] = 3` |
-| Too many elements | `int[20000]`, `int[200][100]` |
+| Too many elements | `int[20000]`, `int[200][100]`, `[0; 20000]` |
 | Index out of bounds | `xs[3]` for an `int[3]`: a constant index when compiling, any other at runtime (`paykan: array index 3 out of bounds (len=3)`) |
 | Subscript on a non-array | `x[0]` where `x` is not an array, a slice or a `Str` |
 | Element assigned through a `let` or a `view` | `xs[0] = 5` with `let xs` or `xs: view int[]` |

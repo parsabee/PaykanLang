@@ -83,7 +83,7 @@ fn concatAll(a: view Str[]) -> Str {
 
 // matMul: multiply two 2x2 int matrices (slices of rows of two)
 fn matMul(A: view int[2][], B: view int[2][]) -> int[2][2] {
-  C: int[2][2] = [[0, 0], [0, 0]];
+  C: int[2][2] = [[0; 2]; 2];
   i: int = 0;
   while (i < C.len()) {
     j: int = 0;
