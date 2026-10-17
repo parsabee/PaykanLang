@@ -29,6 +29,7 @@ namespace ast {
 //   * GenericType (Box<T>)                           -> arguments substituted
 //   * OptionalType (T?)                              -> inner type substituted
 //   * TupleType ((T, int))                           -> elements substituted
+//   * StructType (a resolved struct)                 -> a stub by its name
 //   * anything else (builtin, enum, other class)     -> shared, not copied
 // Source locations are preserved on every cloned node, so a diagnostic inside
 // an instantiation points at the template's source text.
@@ -92,6 +93,10 @@ public:
   /// copy has no type parameters.
   ClassDecl *cloneClassDecl(ClassDecl *cd, const std::string &newName);
 
+  /// Copy a struct under a new name (fields, and the `impl` methods Sema
+  /// added).  The copy has no type parameters.
+  StructDecl *cloneStructDecl(StructDecl *sd, const std::string &newName);
+
   /// Copy an `impl` block for the type named @p newTypeName.  The copy has
   /// no type parameters.
   ImplDecl *cloneImplDecl(ImplDecl *im, const std::string &newTypeName);
@@ -99,6 +104,7 @@ public:
   /// Copy a template as a template: same name, same type parameters.
   FuncDecl *cloneTemplate(FuncDecl *fn);
   ClassDecl *cloneTemplate(ClassDecl *cd);
+  StructDecl *cloneTemplate(StructDecl *sd);
   ImplDecl *cloneTemplate(ImplDecl *im);
   /// The type parameters' bounds of a template, cloned.
   TypeParamBounds cloneBounds(const TypeParamBounds &bounds);

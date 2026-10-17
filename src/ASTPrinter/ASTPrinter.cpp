@@ -65,11 +65,12 @@ ASTPrinter::ASTPrinter(std::ostream &os) : OS(os) {}
 void ASTPrinter::visitTranslationUnit(TranslationUnit *node) {
   header("TranslationUnit", node);
   OS << "\n";
-  size_t total = node->getImports().size() + node->getEnumDecls().size() +
-                 node->getClassDecls().size() + node->getFuncDecls().size() +
-                 node->getGenericClassDecls().size() +
-                 node->getGenericFuncDecls().size() +
-                 node->getTraitDecls().size() + node->getImplDecls().size();
+  size_t total =
+      node->getImports().size() + node->getEnumDecls().size() +
+      node->getGenericStructDecls().size() + node->getStructDecls().size() +
+      node->getClassDecls().size() + node->getFuncDecls().size() +
+      node->getGenericClassDecls().size() + node->getGenericFuncDecls().size() +
+      node->getTraitDecls().size() + node->getImplDecls().size();
   size_t idx = 0;
   for (auto *imp : node->getImports()) {
     ++idx;
@@ -80,6 +81,16 @@ void ASTPrinter::visitTranslationUnit(TranslationUnit *node) {
     ++idx;
     ChildScope cs(*this, idx == total);
     visitEnumDecl(en);
+  }
+  for (auto *sd : node->getGenericStructDecls()) {
+    ++idx;
+    ChildScope cs(*this, idx == total);
+    visitStructDecl(sd);
+  }
+  for (auto *sd : node->getStructDecls()) {
+    ++idx;
+    ChildScope cs(*this, idx == total);
+    visitStructDecl(sd);
   }
   for (auto *cls : node->getGenericClassDecls()) {
     ++idx;
@@ -431,6 +442,11 @@ void ASTPrinter::visitTupleType(TupleType *node) {
   }
 }
 
+void ASTPrinter::visitStructType(StructType *node) {
+  header("StructType", node);
+  OS << " '" << node->getName() << "'\n";
+}
+
 void ASTPrinter::visitSliceType(SliceType *node) {
   header("SliceType", node);
   OS << "\n";
@@ -578,6 +594,25 @@ void ASTPrinter::visitClassDecl(ClassDecl *node) {
     OS << " : " << node->getSuperClassName();
   OS << "\n";
   size_t total = node->getNumFields() + node->getNumMethods();
+  size_t idx = 0;
+  for (auto *field : node->getFields()) {
+    ++idx;
+    ChildScope cs(*this, idx == total);
+    visitVarDecl(field);
+  }
+  for (auto *method : node->getMethods()) {
+    ++idx;
+    ChildScope cs(*this, idx == total);
+    visitFuncDecl(method);
+  }
+}
+
+void ASTPrinter::visitStructDecl(StructDecl *node) {
+  header("StructDecl", node);
+  OS << " '" << node->getName() << "'";
+  printTypeParams(OS, node->getTypeParams(), node->getTypeParamBounds());
+  OS << "\n";
+  size_t total = node->getNumFields() + node->getMethods().size();
   size_t idx = 0;
   for (auto *field : node->getFields()) {
     ++idx;

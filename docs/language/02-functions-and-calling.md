@@ -513,10 +513,10 @@ types cross, with the runtime's own convention:
 | `Str`, `Obj` result | `PaykanShared *` | owned (+1); never `NULL` |
 | `Str?`, `Obj?` result | `PaykanShared *` | owned (+1); `NULL` is `None` |
 
-Any other type, a tuple for one, crosses only as a type parameter's argument
-of a [generic native function](#generic-native-functions): `native fn f(t: view
-(int, int))` is an error (`parameter 't' of type '(int, int)' cannot cross
-into C`).
+Any other type, a tuple or a struct for one, crosses only as a type parameter's
+argument of a [generic native function](#generic-native-functions): `native fn
+f(t: view (int, int))` is an error (`parameter 't' of type '(int, int)' cannot
+cross into C`), and so is `native fn g(p: view Point)` for a struct `Point`.
 
 The result can be a `view` of a `view` or `inout` parameter (`-> view T`);
 it is returned owned, like a copy.  A native function cannot be a method,

@@ -240,10 +240,10 @@ TEST(ASTInterchange, RejectsMalformedInput) {
       {"(paykan-ast 1 (block))", "1:15: expected (unit ...)"},
       {"(paykan-ast 1 (unit \"x\"))",
        "1:21: expected a declaration: (import ...), (enum ...), (class ...), "
-       "(fn ...), (trait ...) or (impl ...)"},
+       "(struct ...), (fn ...), (trait ...) or (impl ...)"},
       {"(paykan-ast 1 (unit (var \"x\" _ _)))",
        "1:21: (var ...) is not a top-level declaration (import, enum, class, "
-       "fn, trait, impl)"},
+       "struct, fn, trait, impl)"},
       {"(paykan-ast 1 (unit (import false \"\")))",
        "1:21: (import ...) names no module"},
       {"(paykan-ast 1 (unit (import maybe \"\")))",

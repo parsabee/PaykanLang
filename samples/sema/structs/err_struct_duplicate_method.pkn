@@ -1,0 +1,9 @@
+// ERROR: struct 'A' already has a method 'get'
+struct A { x: int; }
+impl A {
+  view fn get() -> int { return self.x; }
+}
+impl A {
+  view fn get() -> int { return self.x + 1; }
+}
+fn main() -> int { return 0; }

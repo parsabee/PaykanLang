@@ -126,8 +126,10 @@ defaults:
     values: { title: Traits, parent: Language reference, nav_order: 12 }
   - scope: { path: language/13-standard-library.md }
     values: { title: The standard library, parent: Language reference, nav_order: 13 }
+  - scope: { path: language/14-structs.md }
+    values: { title: Structs, parent: Language reference, nav_order: 14 }
   - scope: { path: grammar.md }
-    values: { title: Grammar, parent: Language reference, nav_order: 14 }
+    values: { title: Grammar, parent: Language reference, nav_order: 15 }
 
   # The implementation: IR, backends, plugins
   - scope: { path: internals.md }

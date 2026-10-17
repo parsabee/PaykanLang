@@ -30,6 +30,10 @@ public:
       importDecl(*d);
     for (auto *d : tu.getEnumDecls())
       enumDecl(*d);
+    for (auto *d : tu.getGenericStructDecls())
+      structDecl(*d);
+    for (auto *d : tu.getStructDecls())
+      structDecl(*d);
     for (auto *d : tu.getGenericClassDecls())
       classDecl(*d);
     for (auto *d : tu.getClassDecls())
@@ -184,6 +188,17 @@ private:
     close();
   }
 
+  void structDecl(const StructDecl &d) {
+    open("struct", &d);
+    str(d.getName());
+    typeParams(d.getTypeParams(), d.getTypeParamBounds());
+    open("fields");
+    for (const VarDecl *f : d.getFields())
+      varDecl(*f);
+    close();
+    close();
+  }
+
   void implDecl(const ImplDecl &d) {
     open("impl", &d);
     str(d.getTypeName());
@@ -327,7 +342,8 @@ private:
         type(a);
       close();
     } else {
-      // EnumType, SliceType and PoisonType exist only after Sema.
+      // EnumType, StructType, SliceType and PoisonType exist only after
+      // Sema (a struct is named in a parsed AST: a `named-type`).
       fail("a type no frontend produces (the AST was already checked)");
       none();
     }

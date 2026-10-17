@@ -41,8 +41,10 @@ enum class PartTag : uint32_t {
 };
 
 /// DECLS record tags (§3.5); TRAIT, IMPL, CONST and TEMPLATE_* are not
-/// written by the prototype.
-enum class DeclTag : uint8_t { Enum = 1, Class = 2, Func = 5 };
+/// written by the prototype.  STRUCT (9) is the prototype's record for a
+/// struct type (docs/language/14-structs.md): a name, fields and methods,
+/// like a CLASS without a superclass or a vtable.
+enum class DeclTag : uint8_t { Enum = 1, Class = 2, Func = 5, Struct = 9 };
 
 /// A MODS entry (§3.3): index 0 is the module itself (hashes zero), the
 /// rest its direct dependencies sorted by canonical name.
@@ -104,6 +106,17 @@ struct ClassRec {
   bool operator==(const ClassRec &) const = default;
 };
 
+/// ModuleInfo::StructInfo: the fields in declaration order and the methods
+/// (`__init__` first, then the `impl` methods), encoded as a ClassRec's.
+struct StructRec {
+  std::string Name;
+  bool IsLocal = true;
+  std::string OriginModule;
+  std::vector<ClassRec::Field> Fields;
+  std::vector<ClassRec::Method> Methods;
+  bool operator==(const StructRec &) const = default;
+};
+
 /// ModuleInfo::EnumInfo.
 struct EnumRec {
   std::string Name;
@@ -120,6 +133,7 @@ struct Interface {
   std::vector<FuncRec> Functions;
   std::vector<ClassRec> Classes;
   std::vector<EnumRec> Enums;
+  std::vector<StructRec> Structs;
   std::string DisplayFile; ///< DIAG: project-relative; "" writes no DIAG
   bool operator==(const Interface &) const = default;
 };

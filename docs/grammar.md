@@ -52,7 +52,7 @@ STRING   ::= '"' ( [^\\"\n] | "\\" [^\n] )* '"'
 Keywords (reserved; never identifiers):
 
 ```
-import  as  class  enum  match  mov  fn  native  return  if  then  else
+import  as  class  struct  enum  match  mov  fn  native  return  if  then  else
 while  break  continue  True  False  None  _  view  inout  let  impl  static  trait
 ```
 
@@ -106,13 +106,14 @@ one tuple-index token (`\.[0-9]+`, longest match at the dot).
 
 ```
 translationUnit ::= topLevelDecl*
-topLevelDecl    ::= importDecl | classDecl | funcDecl | nativeFuncDecl
-                  | enumDecl | traitDecl | implDecl
+topLevelDecl    ::= importDecl | classDecl | structDecl | funcDecl
+                  | nativeFuncDecl | enumDecl | traitDecl | implDecl
 ```
 
-Declarations may appear in any order. The AST keeps them in four lists
-(imports, enums, classes, functions), each in source order, with generic
-classes and generic functions in two further lists.
+Declarations may appear in any order. The AST keeps them in lists by kind
+(imports, enums, structs, classes, functions, traits, `impl` blocks), each in
+source order, with generic structs, generic classes and generic functions in
+three further lists.
 
 ## 3. Imports
 
@@ -140,6 +141,8 @@ classMember ::= varDecl ";" | funcDecl
 typeParams  ::= "<" typeParam ( "," typeParam )* ">"
 typeParam   ::= IDENT ( ":" typeAnnotation ( "+" typeAnnotation )* )?
 
+structDecl  ::= "struct" IDENT typeParams? "{" ( varDecl ";" )+ "}"
+
 enumDecl    ::= "enum" IDENT "{" IDENT ( "," IDENT )* ","? "}"
 
 traitDecl   ::= "trait" IDENT ( "<" IDENT ( "," IDENT )* ">" )?
@@ -163,7 +166,13 @@ varDecl     ::= IDENT ":" typeAnnotation
 ```
 
 An enum needs at least one variant; a single trailing comma is permitted.
-A class or function with `typeParams` is generic (a template that Sema
+A struct body holds fields only, at least one: a method goes in an `impl`
+block, and a struct has no superclass
+([language/14-structs.md](language/14-structs.md)); both are syntax errors
+(`a struct body holds fields only ('name: Type;'); a method goes in an 'impl'
+block`, `a struct has no superclass`), and so is an empty body (`struct 'S'
+has no fields: a struct has at least one`).
+A class, struct or function with `typeParams` is generic (a template that Sema
 instantiates); the superclass of a generic class is a plain class name.
 A type parameter's bounds (`T: Show + Into<int>`) name the traits its type
 argument must implement.  `impl Show for A` implements trait `Show` for `A`;
@@ -224,8 +233,9 @@ typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
 - An unqualified name resolves at parse time to the builtin type or
   bootstrap class of that name (`int`, `Str`, `Obj`, ...) if there is one;
   any other name becomes a `ClassType` stub carrying the name and its
-  location, which Sema resolves (the class may be declared later in the
-  file). A qualified name always becomes a stub named `module::Type`.
+  location, which Sema resolves (the class, struct or enum may be declared
+  later in the file). A qualified name always becomes a stub named
+  `module::Type`.
 
 ## 6. Statements
 
@@ -425,8 +435,9 @@ not message text.
 
 The recursive-descent frontend recovers from a syntax error at the next
 statement boundary (`;`, or the `}` of the enclosing block, matching braces
-on the way), at the next class member (`fn`, `;`, `}`) and at the next
-top-level declaration (`import`, `class`, `enum`, `fn`), so one file can
+on the way), at the next class or struct member (`fn`, `;`, `}`) and at the
+next top-level declaration (`import`, `class`, `struct`, `enum`, `fn`), so
+one file can
 report several independent errors. Another frontend may recover less (for
 example only at `;` inside a block). Any error makes the parse fail; a file
 with errors is never handed to Sema.

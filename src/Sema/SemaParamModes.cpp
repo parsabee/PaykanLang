@@ -87,6 +87,27 @@ void Sema::declareParamKinds(const ast::FuncDecl *fn) {
 
 std::string Sema::inoutPlaceError(const ast::Expr *place,
                                   const std::string &use) {
+  // A struct's field is in the struct's own bytes: it is a place where the
+  // struct is one (a variable, a field of an object or of another struct,
+  // an `inout` result), not in a temporary, which dies with the statement,
+  // and not in an array element (not yet, like the element itself).
+  for (const ast::Expr *e = place;;) {
+    const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e);
+    if (!ma || !ast::isa<ast::StructType>(ma->getReceiver()->getResolvedType()))
+      break;
+    const ast::Expr *recv = ma->getReceiver();
+    if (ast::isa<ast::SubscriptExpr>(recv))
+      return inoutPlaceError(recv, use);
+    if (ast::isa<ast::TupleIndexExpr>(recv))
+      return "a field of a struct held in a tuple cannot be " + use +
+             ": tuples are immutable";
+    if (!ast::isa<ast::Identifier>(recv) &&
+        !ast::isa<ast::MemberAccessExpr>(recv) && !isInoutResult(recv))
+      return "a field of a struct that is not a variable or a field (a "
+             "temporary, which dies with the statement) cannot be " +
+             use;
+    e = recv;
+  }
   if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(place)) {
     const ast::Type *arr = se->getArray()->getResolvedType();
     return ast::dyn_cast<ast::FixedArrayType>(arr) ||
@@ -95,7 +116,11 @@ std::string Sema::inoutPlaceError(const ast::Expr *place,
                : "a character of a string cannot be " + use;
   }
   const auto *id = ast::dyn_cast<ast::Identifier>(place);
-  if (id && id->getName() == names::kSelf)
+  // A struct method's `self` is the receiver's storage, which an `inout`
+  // may name (unless it is read-only, which frozenPlace reports below); a
+  // class method's is its object.
+  if (id && id->getName() == names::kSelf &&
+      !(CurrentClassCtx && CurrentClassCtx->Struct))
     return "'self' cannot be " + use +
            ": the method would no longer know its object";
   if (id && varKind(id->getName()) == VarKind::Let)

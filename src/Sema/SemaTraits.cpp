@@ -248,6 +248,15 @@ const ast::Type *Sema::traitImplOwner(ast::Type *ty, const TraitRef &tr) {
   auto isBuiltinTrait = [&](const char *name) {
     return tr.Trait->IsBuiltin && tr.Trait->Decl->getName() == name;
   };
+  // A struct is a ValueType and shows its fields (the builtin `Show`);
+  // anything else, an `impl ... for` block gives it.  Before the tuple
+  // cases, which a struct is too.
+  if (ast::isa<ast::StructType>(ty)) {
+    if (isBuiltinTrait(names::kTraitValueType) ||
+        isBuiltinTrait(names::kTraitShow))
+      return ty;
+    return has(ty) ? ty : nullptr;
+  }
   // Every enum, tuple and fixed-size array is a ValueType.
   if ((ast::isa<ast::EnumType>(ty) || ast::isa<ast::TupleType>(ty) ||
        ast::isa<ast::FixedArrayType>(ty)) &&
@@ -259,23 +268,26 @@ const ast::Type *Sema::traitImplOwner(ast::Type *ty, const TraitRef &tr) {
   return has(ty) ? ty : nullptr;
 }
 
-bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::ClassType *ct) {
+bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::Type *ty) {
   auto tr = resolveTraitRef(im->getTrait(), {}, im->getLocation());
   if (!tr)
     return false;
   const std::string trait = traitRefName(*tr);
-  // A class is an object, shared by reference: never a ValueType.
-  if (tr->Trait->IsBuiltin &&
+  const std::string kind = typeKindWord(ty);
+  const std::string name = typeName(ty);
+  // A class is an object, shared by reference: never a ValueType.  (A
+  // struct is one already: reported below as implemented.)
+  if (ast::isa<ast::ClassType>(ty) && tr->Trait->IsBuiltin &&
       tr->Trait->Decl->getName() == names::kTraitValueType) {
     error(im->getLocation(),
-          "class '" + ct->getName() + "' cannot implement 'ValueType': a " +
+          "class '" + name + "' cannot implement 'ValueType': a " +
               "class is shared by reference, not held in place");
     return false;
   }
-  if (const ast::Type *owner = traitImplOwner(ct, *tr)) {
+  if (const ast::Type *owner = traitImplOwner(ty, *tr)) {
     error(im->getLocation(),
-          "class '" + ct->getName() + "' already implements '" + trait + "'" +
-              (owner == ct
+          kind + " '" + name + "' already implements '" + trait + "'" +
+              (owner == ty
                    ? ""
                    : " (through '" + typeName(const_cast<ast::Type *>(owner)) +
                          "')"));
@@ -283,13 +295,13 @@ bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::ClassType *ct) {
   }
   // Recorded even if a requirement is not met, which is reported here, so
   // the bounds it satisfies are not reported again.
-  TraitImpls[ct].push_back(*tr);
+  TraitImpls[ty].push_back(*tr);
   if (tr->Trait->Erroneous) {
     ++SuppressedFollowOns; // its requirements were reported with it
     return false;
   }
 
-  Subst subst{{std::string(names::kSelfType), ct}};
+  Subst subst{{std::string(names::kSelfType), ty}};
   const auto &params = tr->Trait->Decl->getTypeParams();
   for (size_t i = 0; i < params.size(); ++i)
     subst[*params[i]] = tr->Args[i];
@@ -304,9 +316,12 @@ bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::ClassType *ct) {
     }
     const std::string want = fnSignature(req->isView(), req->getName(),
                                          sig.Params, sig.Modes, sig.Ret);
-    ast::MethodDecl *m = ct->findMethod(req->getName());
+    ast::MethodDecl *m = methodOf(ty, req->getName());
     if (!m) {
-      std::string msg = "class '" + ct->getName() + "' does not implement '";
+      std::string msg = kind;
+      msg += " '";
+      msg += name;
+      msg += "' does not implement '";
       msg += want;
       msg += "' of trait '";
       msg += trait;
@@ -326,8 +341,8 @@ bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::ClassType *ct) {
       std::string msg = "'";
       msg += fnSignature(m->isView(), m->getName(), m->getParamTypes(),
                          m->getParamModes(), m->getReturnType());
-      msg += "' of class '";
-      msg += ct->getName();
+      msg += "' of " + kind + " '";
+      msg += name;
       msg += "' does not match '";
       msg += want;
       msg += "' of trait '";

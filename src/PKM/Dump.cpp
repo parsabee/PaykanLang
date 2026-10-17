@@ -196,6 +196,16 @@ void dumpIface(const File &f, std::ostream &os) {
   for (const FuncRec &fn : i.Functions)
     os << "  func " << fn.Name << "(" << params(fn.ParamTypeNames, fn.Modes)
        << ") -> " << result(fn.Modes) << fn.ReturnTypeName << "\n";
+  for (const StructRec &s : i.Structs) {
+    os << "  struct " << s.Name << " [" << origin(s.IsLocal, s.OriginModule)
+       << "]\n";
+    for (const ClassRec::Field &fl : s.Fields)
+      os << "    field " << fl.FieldName << ": " << fl.TypeName << "\n";
+    for (const ClassRec::Method &m : s.Methods)
+      os << "    method " << m.Name << "(" << params(m.ParamTypeNames, m.Modes)
+         << ") -> " << result(m.Modes) << m.ReturnTypeName << " flags "
+         << detail::hex(m.Flags) << "\n";
+  }
 }
 
 void dumpBinary(const File &f, std::ostream &os, Kind k, const char *name) {

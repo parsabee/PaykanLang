@@ -308,6 +308,7 @@ void Parser::skipToTopLevelBoundary() {
     case Tok::KwFn:
     case Tok::KwNative:
     case Tok::KwClass:
+    case Tok::KwStruct:
     case Tok::KwEnum:
     case Tok::KwImpl:
     case Tok::KwTrait:
@@ -410,6 +411,7 @@ TranslationUnit *Parser::parseTranslationUnit() {
   std::vector<EnumDecl *> enums;
   std::vector<ImplDecl *> impls;
   std::vector<TraitDecl *> traits;
+  std::vector<StructDecl *> structs, genericStructs;
   // The unit's location starts at 1:1 and ends with its last declaration;
   // an empty unit is <1:1-1:1>.
   SourceLocation loc(1, 1, 1, 1);
@@ -430,10 +432,16 @@ TranslationUnit *Parser::parseTranslationUnit() {
       else
         ok = false;
       break;
+    case Tok::KwStruct:
+      if (auto *d = parseStructDecl())
+        (d->isGeneric() ? genericStructs : structs).push_back(d);
+      else
+        ok = false;
+      break;
     case Tok::KwView:
       if (kind(1) != Tok::KwFn) {
-        errorAtCurrent("expected 'import', 'class', 'enum', 'trait', 'impl' or "
-                       "'fn' at top level");
+        errorAtCurrent("expected 'import', 'class', 'struct', 'enum', 'trait', "
+                       "'impl' or 'fn' at top level");
         ok = false;
         break;
       }
@@ -474,8 +482,8 @@ TranslationUnit *Parser::parseTranslationUnit() {
       ok = false;
       break;
     default:
-      errorAtCurrent("expected 'import', 'class', 'enum', 'trait', 'impl', "
-                     "'fn' or 'native' at top level");
+      errorAtCurrent("expected 'import', 'class', 'struct', 'enum', 'trait', "
+                     "'impl', 'fn' or 'native' at top level");
       ok = false;
       break;
     }
@@ -491,7 +499,8 @@ TranslationUnit *Parser::parseTranslationUnit() {
   return Ctx.make<TranslationUnit>(
       loc, std::move(imports), std::move(classes), std::move(funcs),
       std::move(enums), std::move(genericClasses), std::move(genericFuncs),
-      std::move(impls), std::move(traits));
+      std::move(impls), std::move(traits), std::move(structs),
+      std::move(genericStructs));
 }
 
 // -- Imports
@@ -698,6 +707,77 @@ ClassDecl *Parser::parseClassDecl() {
       std::move(body.Methods), std::move(typeParams));
   cd->setTypeParamBounds(std::move(bounds));
   return cd;
+}
+
+// structDecl ::= "struct" IDENT typeParams? "{" ( varDecl ";" )+ "}"
+//
+// A struct body holds fields only: a method goes in an `impl` block, and a
+// struct has no superclass.  Both are reported where they are written.
+StructDecl *Parser::parseStructDecl() {
+  SourceLocation start = consume().Loc; // "struct"
+  if (!at(Tok::Ident)) {
+    errorAtCurrent("expected a struct name after 'struct'");
+    return nullptr;
+  }
+  const std::string &name = intern(consume().Text);
+
+  std::vector<const std::string *> typeParams;
+  TypeParamBounds bounds;
+  if (accept(Tok::Less)) {
+    if (!parseTypeParamList(typeParams, &bounds) ||
+        !expect(Tok::Greater, "to close the type parameter list"))
+      return nullptr;
+  }
+  if (at(Tok::Colon)) {
+    error(cur().Loc, "a struct has no superclass: 'struct " +
+                         std::string(name) +
+                         " { ... }' (a struct is a value, "
+                         "not an object; use a class to inherit)");
+    return nullptr;
+  }
+
+  SourceLocation open = cur().Loc;
+  if (!expect(Tok::LBrace, "to open the struct body"))
+    return nullptr;
+  if (!enterNesting())
+    return nullptr;
+
+  std::vector<VarDecl *> fields;
+  bool ok = true;
+  while (!at(Tok::RBrace) && !at(Tok::Eof)) {
+    size_t before = Pos;
+    if (at(Tok::Ident)) {
+      if (auto *f = parseVarDecl()) {
+        if (expect(Tok::Semi, "after the field declaration")) {
+          fields.push_back(f);
+          continue;
+        }
+      }
+    } else if (at(Tok::KwFn) || at(Tok::KwStatic) ||
+               (at(Tok::KwView) && kind(1) == Tok::KwFn)) {
+      errorAtCurrent("a struct body holds fields only ('name: Type;'); a "
+                     "method goes in an 'impl' block: 'impl " +
+                     std::string(name) + " { fn ... }'");
+    } else {
+      errorAtCurrent("expected a field ('name: Type;') in the struct body");
+    }
+    ok = false;
+    if (Pos == before)
+      consume(); // guarantee progress
+    skipToMemberBoundary();
+  }
+  leaveNesting();
+  if (!expectCloseBrace("to close the struct body", open) || !ok)
+    return nullptr;
+  if (fields.empty()) {
+    error(span(start), "struct '" + std::string(name) +
+                           "' has no fields: a struct has at least one");
+    return nullptr;
+  }
+  auto *sd = Ctx.make<StructDecl>(span(start), name, std::move(fields),
+                                  std::move(typeParams));
+  sd->setTypeParamBounds(std::move(bounds));
+  return sd;
 }
 
 // enumDecl ::= "enum" IDENT "{" IDENT ( "," IDENT )* ","? "}"

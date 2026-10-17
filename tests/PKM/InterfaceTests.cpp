@@ -27,6 +27,7 @@ Interface sortedSample() {
   std::sort(i.Functions.begin(), i.Functions.end(), byName);
   std::sort(i.Classes.begin(), i.Classes.end(), byName);
   std::sort(i.Enums.begin(), i.Enums.end(), byName);
+  std::sort(i.Structs.begin(), i.Structs.end(), byName);
   return i;
 }
 
@@ -138,11 +139,11 @@ TEST(Interface, RoundTrip) {
 // records it had before, and an older file reads as having none.
 TEST(Interface, ParamModes) {
   Interface i = sortedSample();
-  ASSERT_EQ(i.Functions[0].Name, "Shape");
+  ASSERT_EQ(i.Functions[1].Name, "Shape");
   ASSERT_EQ(i.Classes[0].Methods[1].Name, "__scale");
-  ASSERT_FALSE(i.Functions[0].Modes.Modes.empty());
+  ASSERT_FALSE(i.Functions[1].Modes.Modes.empty());
   Interface plain = i;
-  plain.Functions[0].Modes = {};
+  plain.Functions[1].Modes = {};
   for (ClassRec::Method &m : plain.Classes[0].Methods)
     m.Modes = {};
   StatusOr<Interface> back =
@@ -152,7 +153,7 @@ TEST(Interface, ParamModes) {
   EXPECT_LT(writeInterface(plain).size(), writeInterface(i).size());
 
   Interface bad = i;
-  bad.Functions[0].Modes.Modes[1] = 3;
+  bad.Functions[1].Modes.Modes[1] = 3;
   EXPECT_NE(readError(writeInterface(bad)).find("unknown parameter mode 3"),
             std::string::npos);
   bad = i;
@@ -166,11 +167,11 @@ TEST(Interface, ParamModes) {
 // and a class writes one result byte per method.
 TEST(Interface, ResultModes) {
   Interface i = sortedSample();
-  ASSERT_EQ(i.Functions[1].Name, "area");
-  ASSERT_TRUE(i.Functions[1].Modes.Modes.empty());
+  ASSERT_EQ(i.Functions[2].Name, "area");
+  ASSERT_TRUE(i.Functions[2].Modes.Modes.empty());
   Interface borrows = i;
-  borrows.Functions[1].Modes.Result = kModeView;
-  borrows.Functions[0].Modes.Result = kModeInout;
+  borrows.Functions[2].Modes.Result = kModeView;
+  borrows.Functions[1].Modes.Result = kModeInout;
   for (ClassRec::Method &m : borrows.Classes[0].Methods)
     if (m.Name == "area")
       m.Modes.Result = kModeView;
@@ -181,7 +182,7 @@ TEST(Interface, ResultModes) {
   EXPECT_LT(writeInterface(i).size(), writeInterface(borrows).size());
 
   Interface bad = borrows;
-  bad.Functions[1].Modes.Result = 3;
+  bad.Functions[2].Modes.Result = 3;
   EXPECT_NE(readError(writeInterface(bad)).find("unknown result mode 3"),
             std::string::npos);
 }
@@ -381,6 +382,9 @@ TEST(Interface, Records) {
     EXPECT_FALSE(readInterface(writeInterface(bad), i.Module));
     bad = i;
     bad.Functions.push_back(bad.Functions[0]);
+    EXPECT_FALSE(readInterface(writeInterface(bad), i.Module));
+    bad = i;
+    bad.Structs.push_back(bad.Structs[0]);
     EXPECT_FALSE(readInterface(writeInterface(bad), i.Module));
     // Out of order: FUNC before ENUM, hand-built from the good DECLS.
     auto ps = partsWithBytes(good);

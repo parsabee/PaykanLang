@@ -1,0 +1,6 @@
+// ERROR: a struct body holds fields only ('name: Type;'); a method goes in an 'impl' block: 'impl X { fn ... }'
+struct X {
+  n: int;
+  fn get() -> int { return self.n; }
+}
+fn main() -> int { return 0; }

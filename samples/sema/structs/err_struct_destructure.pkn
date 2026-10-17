@@ -1,0 +1,6 @@
+// ERROR: cannot destructure a value of type 'A'; only tuples can be destructured
+struct A { x: int; y: int; }
+fn main() -> int {
+  x, y = A(1, 2);
+  return x + y;
+}

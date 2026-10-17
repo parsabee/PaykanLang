@@ -76,6 +76,15 @@ pir::Module *ProgramLowering::lowerImport(const std::string &name) {
     for (const pir::Class &cls : m.Classes)
       if (!cls.IsExtern)
         ClassOrigins.try_emplace(cls.Name, m.Name);
+    // A struct has no PIR item: its methods and constructor are the module's
+    // functions `S.m` and `S`, so the struct `S` is defined where a
+    // function `S.<name>` is (names::kNameSep cannot occur in a Paykan
+    // identifier).
+    for (const pir::Function &fn : m.Functions) {
+      size_t sep = fn.IsExtern ? std::string::npos : fn.Name.find(kNameSep);
+      if (sep != std::string::npos && sep > 0)
+        ClassOrigins.try_emplace(fn.Name.substr(0, sep), m.Name);
+    }
     ByCanonical[name] = &m;
     ByName[m.Name] = &m;
     return &m;
@@ -98,10 +107,12 @@ pir::Module *ProgramLowering::lowerImport(const std::string &name) {
 }
 
 void ModuleLowering::processImports(ast::TranslationUnit *tu) {
-  // Record where this module's own classes live before anything references
-  // them (instantiations count as local declarations).
+  // Record where this module's own classes and structs live before anything
+  // references them (instantiations count as local declarations).
   for (auto *cls : tu->getClassDecls())
     PL.ClassOrigins.try_emplace(cls->getName(), Mod.Name);
+  for (auto *sd : tu->getStructDecls())
+    PL.ClassOrigins.try_emplace(sd->getName(), Mod.Name);
 
   for (auto *imp : tu->getImports()) {
     for (auto &m : imp->getModules()) {

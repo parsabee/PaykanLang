@@ -219,11 +219,12 @@ bool Sema::checkViewNotReturned(const ast::Expr *e, const ast::Type *ty) {
                       "', so part of it can only be returned as a 'view'";
     // An override returns its result as the method it overrides does.  An
     // instance of a generic class (`Box<Str>`) knows the result's type only
-    // with its parameters substituted.
+    // with its parameters substituted.  (A struct's method overrides
+    // nothing.)
     const ast::ClassType *cls = CurrentClassCtx->ClassType;
-    if (cls->getSuperClass() && cls->getSuperClass()->findMethod(name))
+    if (cls && cls->getSuperClass() && cls->getSuperClass()->findMethod(name))
       msg += "; the method it overrides returns a copy, so return a new value";
-    else if (cls->getName().find('<') != std::string::npos)
+    else if (cls && cls->getName().find('<') != std::string::npos)
       msg += ": write 'view' before its result type";
     else
       msg += ": write '-> view " + typeName(CurrentReturnType) + "'";

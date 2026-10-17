@@ -739,8 +739,13 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     L.releaseIfOwned(receiver.Owned);
     return h;
   }
-  // `t.toString()` on a tuple (the builtin `Show`): its text, as a fresh box
-  // like any method's `Str` result.
+  // A struct's method, called directly on the receiver's storage
+  // (LoweringStruct.cpp); its `toString()` is the builtin one, below.
+  if (auto *st = L.getExprStructType(node->getReceiver());
+      st && node->getMethodName() != kMethodToString)
+    return emitStructMethodCall(node, st, wantAddress);
+  // `t.toString()` on a tuple or a struct (the builtin `Show`): its text,
+  // as a fresh box like any method's `Str` result.
   if (ast::isa<ast::TupleType>(recvResolved)) {
     Val str = L.emitTupleToString(node->getReceiver());
     if (!str)
@@ -838,58 +843,9 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   std::vector<ExprValue> ownedArgs;
   std::vector<Val> keep;
   size_t fixedMark = L.MemTemps.size();
-  for (size_t i = 0; i < node->getNumArguments(); ++i) {
-    auto *argExpr = node->getArguments()[i];
-    // The PIR parameter this argument goes to: after the receiver, and two
-    // for each slice.
-    const size_t at = args.size() + 1;
-    if (L.isSliceArg(argExpr)) {
-      if (!L.emitSliceArg(argExpr, args))
-        return Val();
-      continue;
-    }
-    if (ast::isMemType(argExpr->getResolvedType())) {
-      Val p = L.emitMemAddress(argExpr); // passed by address
-      if (!p)
-        return Val();
-      args.push_back(p);
-      continue;
-    }
-    if (at < sig.Params.size() && sig.Params[at] == Type::Ptr) {
-      // `inout`: the argument's address
-      Val p = L.emitInoutArg(argExpr, keep);
-      if (!p)
-        return Val();
-      args.push_back(p);
-      continue;
-    }
-    ast::Type *paramASTTy = (method && i < method->getParamTypes().size())
-                                ? method->getParamTypes()[i]
-                                : nullptr;
-    // Ref-typed arguments to user methods and to the virtual `equals` use
-    // the callee-consumes ABI (+1 box); builtin methods borrow.
-    bool isClassParam =
-        ast::isRefType(paramASTTy) &&
-        (isUserDefinedMethod || node->getMethodName() == kMethodEquals);
-    if (isClassParam) {
-      Val v = L.emitAsShared(argExpr);
-      if (!v)
-        return Val();
-      args.push_back(v);
-      continue;
-    }
-    Val v = visit(argExpr);
-    if (!v)
-      return Val();
-    if (ExprValue ev = L.classifyExpr(argExpr, v); ev.isOwned())
-      ownedArgs.push_back(ev);
-    Type paramTy = at < sig.Params.size() ? sig.Params[at] : Type::Void;
-    // A builtin method borrowing a ref argument (File.write(s)) takes the
-    // raw object.
-    if (paramTy == Type::Obj && v.Ty == Type::Box)
-      v = L.emitSharedGet(v, "unboxed");
-    args.push_back(L.coerceTo(v, paramTy));
-  }
+  if (!emitMethodArgs(node, method, sig, isUserDefinedMethod, args, ownedArgs,
+                      keep))
+    return Val();
 
   // A fixed-size array result is written into a temporary, whose address is
   // the call's value.
@@ -935,6 +891,64 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   if (result && result.Ty == Type::Ptr && !wantAddress) // an `inout` result
     return L.loadInoutResult(result, node->getResolvedType());
   return result;
+}
+
+bool ModuleLowering::ExprEmitter::emitMethodArgs(
+    ast::MethodCallExpr *node, const ast::MethodDecl *method,
+    const pir::Signature &sig, bool userDefined, std::vector<Val> &args,
+    std::vector<ExprValue> &ownedArgs, std::vector<Val> &keep) {
+  for (size_t i = 0; i < node->getNumArguments(); ++i) {
+    auto *argExpr = node->getArguments()[i];
+    // The PIR parameter this argument goes to: after the receiver, and two
+    // for each slice.
+    const size_t at = args.size() + 1;
+    if (L.isSliceArg(argExpr)) {
+      if (!L.emitSliceArg(argExpr, args))
+        return false;
+      continue;
+    }
+    if (ast::isMemType(argExpr->getResolvedType())) {
+      Val p = L.emitMemAddress(argExpr); // passed by address
+      if (!p)
+        return false;
+      args.push_back(p);
+      continue;
+    }
+    if (at < sig.Params.size() && sig.Params[at] == Type::Ptr) {
+      // `inout`: the argument's address
+      Val p = L.emitInoutArg(argExpr, keep);
+      if (!p)
+        return false;
+      args.push_back(p);
+      continue;
+    }
+    ast::Type *paramASTTy = (method && i < method->getParamTypes().size())
+                                ? method->getParamTypes()[i]
+                                : nullptr;
+    // Ref-typed arguments to user methods and to the virtual `equals` use
+    // the callee-consumes ABI (+1 box); builtin methods borrow.
+    bool isClassParam = ast::isRefType(paramASTTy) &&
+                        (userDefined || node->getMethodName() == kMethodEquals);
+    if (isClassParam) {
+      Val v = L.emitAsShared(argExpr);
+      if (!v)
+        return false;
+      args.push_back(v);
+      continue;
+    }
+    Val v = visit(argExpr);
+    if (!v)
+      return false;
+    if (ExprValue ev = L.classifyExpr(argExpr, v); ev.isOwned())
+      ownedArgs.push_back(ev);
+    Type paramTy = at < sig.Params.size() ? sig.Params[at] : Type::Void;
+    // A builtin method borrowing a ref argument (File.write(s)) takes the
+    // raw object.
+    if (paramTy == Type::Obj && v.Ty == Type::Box)
+      v = L.emitSharedGet(v, "unboxed");
+    args.push_back(L.coerceTo(v, paramTy));
+  }
+  return true;
 }
 
 // -- Subscript assignment

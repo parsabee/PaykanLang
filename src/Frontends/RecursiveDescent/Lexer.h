@@ -40,6 +40,7 @@ enum class Tok : uint8_t {
   KwImpl,
   KwStatic,
   KwTrait,
+  KwStruct,
   KwReturn,
   KwIf,
   KwThen,

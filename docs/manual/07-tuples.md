@@ -1,8 +1,9 @@
-# Tuples
+# Tuples and structs
 
 A tuple groups a fixed number of values, which may have different types, into one value.
 Their main use is returning more than one value from a function. In this chapter `tasks`
-uses them to report statistics and to split lines of text.
+uses them to report statistics and to split lines of text. A struct is a tuple whose
+elements have names and can be changed; the chapter ends with one.
 
 ## Tuple types and values
 
@@ -193,5 +194,56 @@ title 'fix the leak', priority 'high'
 2 done, 1 pending
 ```
 
-The reference chapter is [Tuples](../language/09-tuples.md). Next:
-[Optionals and None](08-optionals.md).
+## Structs: named fields
+
+When a group of values has a shape worth naming, declare a **struct**: a value with named
+fields. `tasks` keeps its statistics in one:
+
+```pkn
+struct Stats {
+  done: int;
+  pending: int;
+}
+
+impl Stats {
+  view fn total() -> int { return self.done + self.pending; }
+  fn count(isDone: bool) {
+    if (isDone) { self.done = self.done + 1; } else { self.pending = self.pending + 1; }
+  }
+}
+
+fn main() -> int {
+  s = Stats(0, 0);                  // the fields, in order
+  s.count(True);
+  s.count(False);
+  s.count(True);
+  s.pending = s.pending + 10;       // a field is assigned in place
+  t = s;                            // a copy
+  t.done = 0;
+  println(s);
+  println(Str(s.total()) + " " + Str(t.total()) + " " + Str(s == t));
+  return 0;
+}
+```
+
+Output:
+
+```
+Stats(done: 2, pending: 11)
+13 11 False
+```
+
+- `Stats(0, 0)` builds a struct from its fields in order; an `impl` block can declare an
+  `__init__` instead, and holds the struct's methods, as a class's does.
+- A struct is a value like a tuple: `t = s` copies it, and `t.done = 0` leaves `s` alone.
+  Unlike a tuple, its fields have names and can be assigned, and in a method `self` is the
+  variable the method was called on, so `s.count(True)` changes `s`.
+- A struct has no superclass and no `vtable`: it is not an object, and `==` compares two
+  structs field by field. `println` prints the struct's name with each field.
+
+Use a class when values must share one object that several names refer to, or when
+subclasses and `match` are needed; use a struct for a small group of fields that is
+copied around like a number.
+
+The reference chapters are [Tuples](../language/09-tuples.md) and
+[Structs](../language/14-structs.md). Next: [Optionals and None](08-optionals.md).

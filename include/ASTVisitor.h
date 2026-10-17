@@ -29,7 +29,8 @@ namespace ast {
   NODE(NK_ClassDecl, ClassDecl, ClassDecl)                                     \
   NODE(NK_EnumDecl, EnumDecl, EnumDecl)                                        \
   NODE(NK_ImplDecl, ImplDecl, ImplDecl)                                        \
-  NODE(NK_TraitDecl, TraitDecl, TraitDecl)
+  NODE(NK_TraitDecl, TraitDecl, TraitDecl)                                     \
+  NODE(NK_StructDecl, StructDecl, StructDecl)
 
 #define PAYKAN_STMT_NODES(NODE)                                                \
   NODE(NK_CompoundStmt, CompoundStmt, CompoundStmt)                            \
@@ -74,6 +75,7 @@ namespace ast {
   NODE(NK_OptionalType, OptionalType, OptionalType)                            \
   NODE(NK_EnumType, EnumType, EnumType)                                        \
   NODE(NK_TupleType, TupleType, TupleType)                                     \
+  NODE(NK_StructType, StructType, StructType)                                  \
   NODE(NK_SliceType, SliceType, SliceType)                                     \
   NODE(NK_PoisonType, PoisonType, PoisonType)                                  \
   NODE(NK_GenericType, GenericType, GenericType)

@@ -25,7 +25,8 @@ features first with small programs and then puts them to work on `tasks`.
    `match`.
 6. [Arrays](06-arrays.md): arrays and their length, slices, keeping a count, nested arrays,
    arrays of objects.
-7. [Tuples](07-tuples.md): returning several values and destructuring them.
+7. [Tuples and structs](07-tuples.md): returning several values and destructuring them;
+   structs, values with named fields.
 8. [Optionals and `None`](08-optionals.md): values that may be absent, and how to unwrap
    them.
 9. [Generics](09-generics.md): generic classes and functions.

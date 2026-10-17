@@ -88,6 +88,16 @@ inline Interface sampleInterface() {
   vec.OriginModule = "geometry::vec";
   i.Classes = {vec, shape};
   i.Enums.push_back({"Color", {"Red", "Green"}, true, "geometry::shapes"});
+  // A struct: its fields, its `__init__` and its `impl` methods (`sum` a
+  // `view fn` from an `impl` block: flags 0x6), and its constructor function.
+  StructRec point;
+  point.Name = "Point";
+  point.OriginModule = "geometry::shapes";
+  point.Fields = {{"x", "int"}, {"y", "int"}};
+  point.Methods = {{"__init__", "void", {"int", "int"}, 0, {}},
+                   {"sum", "int", {}, 6, {}}};
+  i.Structs.push_back(point);
+  i.Functions.push_back({"Point", "Point", {"int", "int"}, {}});
   i.DisplayFile = "geometry/shapes.pkn";
   return i;
 }
