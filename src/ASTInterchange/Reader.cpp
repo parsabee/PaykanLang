@@ -869,6 +869,18 @@ private:
         return nullptr;
       return Ctx.make<ArrayType>(loc, elem);
     }
+    if (e.Text == "fixed-array-type") {
+      Type *elem = type(f, "the element type");
+      int64_t n = 0;
+      if (!elem || !f.integer("the length", n) || !f.done())
+        return nullptr;
+      // The check the grammar makes (docs/grammar.md).
+      if (n < 1)
+        return fail(e, "a fixed-size array has at least one element: its "
+                       "length must be 1 or more"),
+               nullptr;
+      return Ctx.make<FixedArrayType>(loc, elem, n);
+    }
     if (e.Text == "optional-type") {
       Type *inner = type(f, "the inner type");
       if (!inner || !f.done())
@@ -913,7 +925,8 @@ private:
     }
     return fail(e, "(" + e.Text +
                        " ...) is not a type (named-type, array-type, "
-                       "optional-type, tuple-type, generic-type)"),
+                       "fixed-array-type, optional-type, tuple-type, "
+                       "generic-type)"),
            nullptr;
   }
 

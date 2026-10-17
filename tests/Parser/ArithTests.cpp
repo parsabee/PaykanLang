@@ -8,31 +8,6 @@
 
 using namespace paykan::test;
 
-namespace {
-
-/// Parse with a DiagEngine attached to the driver (the way the compiler
-/// driver wires it), capturing both the rendered diagnostic text and the
-/// structured diagnostics so tests can assert on exact source locations.
-struct DiagParseResult {
-  bool Ok;
-  std::string Text;
-  std::vector<paykan::sema::Diagnostic> Diags;
-};
-
-DiagParseResult parseWithDiags(const std::string &source) {
-  auto path = writeTempFile(source);
-  paykan::parser::ParserDriver driver(paykan::test::testFrontend());
-  std::ostringstream os;
-  paykan::sema::DiagEngine diag(os);
-  diag.setSourceInfo(path, &driver.getSourceLines());
-  driver.setDiagEngine(&diag);
-  int rc = driver.parseFile(path);
-  std::filesystem::remove(path);
-  return {rc == 0, os.str(), diag.getDiagnostics()};
-}
-
-} // namespace
-
 TEST(Arith, EmptyMain) {
   auto [ok, _] = parse("fn main() -> int { return 0; }");
   EXPECT_TRUE(ok);

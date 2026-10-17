@@ -1592,9 +1592,31 @@ Type *Parser::parseTypeAnnotation() {
     return nullptr;
   for (;;) {
     if (at(Tok::LBracket)) {
-      // A `[` after a type can only open the `[]` suffix: report the missing
-      // `]` where it is missing.
+      // A `[` after a type can only open the `[]` or `[n]` suffix: report
+      // the missing `]` where it is missing.
       consume();
+      if (at(Tok::Int)) {
+        // A run of lengths, `[2][3]`, is one array of arrays whose first
+        // length is its first index's: two `int[3]`s.
+        std::vector<int64_t> lengths;
+        for (;;) {
+          Token n = consume();
+          if (n.IntValue < 1) {
+            error(n.Loc, "a fixed-size array has at least one element: its "
+                         "length must be 1 or more");
+            return nullptr;
+          }
+          if (!expect(Tok::RBracket, "to close the array type"))
+            return nullptr;
+          lengths.push_back(n.IntValue);
+          if (!(at(Tok::LBracket) && peek(1).Kind == Tok::Int))
+            break;
+          consume();
+        }
+        for (auto it = lengths.rbegin(); it != lengths.rend(); ++it)
+          ty = Ctx.make<FixedArrayType>(span(start), ty, *it);
+        continue;
+      }
       if (!expect(Tok::RBracket, "to close the array type"))
         return nullptr;
       ty = Ctx.make<ArrayType>(span(start), ty);

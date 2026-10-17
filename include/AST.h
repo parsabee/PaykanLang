@@ -102,6 +102,7 @@ public:
     NK_BuiltinType,
     NK_ClassType,
     NK_ArrayType,
+    NK_FixedArrayType,
     NK_OptionalType,
     NK_EnumType,
     NK_TupleType,
@@ -1367,6 +1368,27 @@ public:
   Type *getElementType() const { return ElementType; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_ArrayType; }
+};
+
+// Fixed-size array type: `T[n]`, n (at least 1) elements of T held inline.
+// It is a value: copying one copies its elements, and it is not an Obj.  Like
+// ArrayType, the parser allocates a source-located node per annotation and
+// Sema resolves it to the canonical instance of
+// ASTContext::getFixedArrayType, so these types compare by pointer.
+class FixedArrayType : public Type {
+  Type *ElementType;
+  int64_t Length;
+
+public:
+  FixedArrayType(SourceLocation loc, Type *elemTy, int64_t length)
+      : Type(NK_FixedArrayType, loc), ElementType(elemTy), Length(length) {}
+
+  Type *getElementType() const { return ElementType; }
+  int64_t getLength() const { return Length; }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_FixedArrayType;
+  }
 };
 
 // Generic type application:  Box<int>, Pair<Str, int>, mod::Box<int>

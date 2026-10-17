@@ -14,6 +14,27 @@ static std::string wrapMain(const std::string &body) {
 
 // -- Array declarations
 
+// `T[n]` parses, and Sema resolves its element type, but has no rules for it
+// yet.
+TEST(Array, FixedSizeArraysAreNotSupportedYet) {
+  auto r = semaCheck(wrapMain("  xs: int[3] = [1, 2, 3];"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("variable 'xs' has type 'int[3]': fixed-size "
+                               "arrays are not supported yet"),
+            std::string::npos)
+      << r.Diagnostics;
+  // The first length is the first index's, and the type is written so.
+  auto grid = semaCheck(wrapMain("  g: int[2][3] = [];"));
+  EXPECT_NE(grid.Diagnostics.find("'int[2][3]': fixed-size arrays are not "
+                                  "supported yet"),
+            std::string::npos)
+      << grid.Diagnostics;
+  auto unknown = semaCheck(wrapMain("  xs: Nope[3] = [];"));
+  EXPECT_NE(unknown.Diagnostics.find("unknown class type 'Nope'"),
+            std::string::npos)
+      << unknown.Diagnostics;
+}
+
 TEST(Array, IntArrayLiteral) {
   auto r = semaCheck(wrapMain("a: int[] = [1, 2, 3];"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;

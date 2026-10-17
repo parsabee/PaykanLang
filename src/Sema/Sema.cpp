@@ -500,6 +500,24 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     return Ctx.getArrayType(elemTy);
   }
 
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
+    // An array of arrays is one type, reported once.
+    std::vector<int64_t> lengths;
+    ast::Type *elem = ft;
+    while (auto *f = ast::dyn_cast<ast::FixedArrayType>(elem)) {
+      lengths.push_back(f->getLength());
+      elem = f->getElementType();
+    }
+    auto *resolved = resolveType(elem, loc, context + " element");
+    if (!resolved)
+      return nullptr;
+    for (auto it = lengths.rbegin(); it != lengths.rend(); ++it)
+      resolved = Ctx.getFixedArrayType(resolved, *it);
+    error(loc, context + " has type '" + typeName(resolved) +
+                   "': fixed-size arrays are not supported yet");
+    return nullptr;
+  }
+
   if (auto *gt = ast::dyn_cast<ast::GenericType>(ty)) {
     // Generic type application `Box<int>`: resolve the arguments to canonical
     // types, then instantiate (or fetch the cached instantiation of) the class

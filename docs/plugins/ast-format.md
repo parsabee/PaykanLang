@@ -95,6 +95,7 @@ or more.
 |---|---|
 | `(named-type LOC NAME)` | a type by name: `int`, `float`, `bool`, `char`, `void`, `Str`, `Obj`, a class or enum, or a qualified `module::Type` |
 | `(array-type LOC TYPE)` | `T[]` |
+| `(fixed-array-type LOC TYPE INT)` | `T[n]`, a fixed-size array of `INT` (at least 1) elements: `int[3]` is `(fixed-array-type (named-type "int") 3)` |
 | `(optional-type LOC TYPE)` | `T?` (not of `void`, not of another optional) |
 | `(tuple-type LOC TYPE TYPE TYPE...)` | `(T1, T2, ...)`, at least two |
 | `(generic-type LOC NAME TYPE TYPE...)` | `Box<int>`, `Pair<Str, int>`, `m::Box<int>` |

@@ -303,6 +303,11 @@ private:
       open("array-type", at);
       type(at->getElementType());
       close();
+    } else if (const auto *ft = dyn_cast<FixedArrayType>(t)) {
+      open("fixed-array-type", ft);
+      type(ft->getElementType());
+      OS << " " << ft->getLength();
+      close();
     } else if (const auto *ot = dyn_cast<OptionalType>(t)) {
       open("optional-type", ot);
       type(ot->getInnerType());
