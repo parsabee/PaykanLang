@@ -644,7 +644,6 @@ fn main() -> int {
                     "returned"),
         ":15:10: error: 'v' is a 'view' local; " + kPass + "report' is not one",
         ":16:7: error: " + kStore, ":17:16: error: " + kStore,
-        ":18:9: error: " + kStore, ":19:8: error: " + kStore,
         ":21:11: error: " + kStore,
         ":22:14: error: 'v' is a 'view' local; " + kPass + "Holder' is not one",
         ":23:9: error: " + kStore, ":25:7: error: " + kStore,
@@ -653,10 +652,41 @@ fn main() -> int {
         ":29:11: error: 's' is a 'view' local; " + kPass + "Str' is not one"})
     EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
                                                            << r.Diagnostics;
-  EXPECT_EQ(r.ErrorCount, 13u) << r.Diagnostics;
-  for (const char *line : {":30:", ":31:", ":32:", ":33:", ":34:"})
+  EXPECT_EQ(r.ErrorCount, 11u) << r.Diagnostics;
+  // A literal holds a copy of each element: `[v]` and `(v, 1)` are values
+  // of their own.
+  for (const char *line :
+       {":18:", ":19:", ":30:", ":31:", ":32:", ":33:", ":34:"})
     EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
                                                            << r.Diagnostics;
+}
+
+// An array or tuple literal is a new value: any `view` can be one of its
+// elements, wherever the literal goes.
+TEST(LocalBorrow, LiteralsTakeViewElements) {
+  auto r = semaCheck(R"(class Node { n: int; }
+class Named { name: Str; n: int; }
+impl Named {
+  view fn pair() -> (Str, int) { return (self.name, self.n); }
+  view fn names() -> Str[2] { return [self.name, "x"]; }
+}
+fn arr(s: view Str) -> Str[2] { return [s, "x"]; }
+fn tup(s: view Str) -> (Str, int) { return (s, 1); }
+fn rep(s: view Str) -> Str[3] { return [s; 3]; }
+fn nest(s: view Str) -> ((Str, int), (Str, Str)) { return ((s, 1), (s, "y")); }
+fn main() -> int {
+  v: view = Node(0);
+  s: view = "s";
+  xs = [v, Node(1)];
+  ys: Node[1] = [v];
+  t = (v, s);
+  u: (Node, (Str, int)) = (v, (s, 2));
+  w = [(s, v)];
+  return arr(s).len() + tup(s).1 + rep(s).len() + nest(s).0.1 + xs.len() +
+         ys.len() + t.1.len() + u.1.1 + w.len();
+})");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 0u) << r.Diagnostics;
 }
 
 // A `view` parameter stays one too: it can only be passed on to a `view`
