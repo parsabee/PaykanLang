@@ -66,10 +66,15 @@ TEST(FixedArray, LiteralsHaveTheArraysLengthAndElementType) {
   expectBodyError("  a: int[2] = [1, 2];\n  b: int[3] = a;",
                   "initializer of type 'int[2]' does not match declared type "
                   "'int[3]'");
-  // A literal without a fixed-size array slot is still a growable array.
-  expectBodyError("  a = [1, 2];\n  b: int[2] = a;",
-                  "initializer of type 'int[]' does not match declared type "
-                  "'int[2]'");
+  // Without a slot, a literal has its elements' count and type.
+  expectOk("  a = [1, 2];\n  b: int[2] = a;\n  g = [a, [3, 4]];\n"
+           "  h: int[2][2] = g;");
+  expectBodyError("  a = [1, 2.5];\n  b: int[2] = a;",
+                  "initializer of type 'float[2]' does not match declared "
+                  "type 'int[2]'");
+  expectBodyError("  a = [[1, 2], [3, 4]];\n  b: int[4] = a;",
+                  "initializer of type 'int[2][2]' does not match declared "
+                  "type 'int[4]'");
 }
 
 TEST(FixedArray, ConstantIndexesAreChecked) {
@@ -184,12 +189,11 @@ TEST(FixedArray, OnlyALocalAParameterAResultOrAFieldForNow) {
   const std::string notYet = "a fixed-size array ('int[2]') can only be a "
                              "local variable, a parameter, a result or a "
                              "field for now";
-  expectBodyError("  o: int[2]? = None;", notYet);
-  expectBodyError("  a: int[2][] = [];", notYet);
+  expectBodyError("  o: int[2]? = None;", "variable 'o': " + notYet);
   expectBodyError("  xs: int[2] = [1, 2];\n  t = (xs, 1);",
                   "tuple element 0: " + notYet);
-  expectBodyError("  xs: int[2] = [1, 2];\n  zs = [xs, xs];",
-                  "an element of a growable array: " + notYet);
+  expectBodyError("  o: Obj = None;\n  match o { xs: int[2] { } _ { } }",
+                  "match arm: " + notYet);
   expectBodyError("  xs: int[2] = [1, 2];\n  c = if True then xs else xs;",
                   "a conditional expression: " + notYet);
   expectError("fn id<T>(x: T) -> T { return x; }\n"
@@ -212,10 +216,8 @@ TEST(FixedArray, ElementsOfReferenceTypes) {
       fixed[0].x = 4;
       os: Str?[2] = [None, ss[0]];
       ts: (int, Str)[1] = [(1, "one")];
-      arrs: int[][2] = [[1], []];
-      arrs[1].push(ts[0].0);
       grid: Str[2][2] = [[ss[0], ss[1]], names()];
-      return ss[2].len() + grid[1][0].len();
+      return ss[2].len() + grid[1][0].len() + ts[0].0;
     }
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -243,13 +245,19 @@ TEST(FixedArray, ElementsAndSize) {
       semaCheck("fn f(a: view int?[16384], b: view char[128][128]) {}\n"
                 "fn main() -> int { return 0; }");
   EXPECT_TRUE(atMost.Ok) << atMost.Diagnostics;
-  expectBodyError("  big: int?[16385] = [];", "which is too big");
-  expectBodyError("  big: int[200000] = [];",
-                  "variable 'big' has type 'int[200000]', which is too big: a "
-                  "fixed-size array holds at most 16384 elements");
-  expectBodyError("  big: char[128][129] = [];", "which is too big");
-  expectBodyError("  big: char[1][9223372036854775807] = [];",
-                  "which is too big");
+  expectError("fn f(big: view int?[16385]) {}\n"
+              "fn main() -> int { return 0; }",
+              "which is too big");
+  expectError("class C { big: int[200000]; }\n"
+              "fn main() -> int { return 0; }",
+              "field 'big' in class 'C' has type 'int[200000]', which is too "
+              "big: a fixed-size array holds at most 16384 elements");
+  expectError("fn f() -> char[128][129] { return f(); }\n"
+              "fn main() -> int { return 0; }",
+              "which is too big");
+  expectError("fn f(big: char[1][9223372036854775807]) {}\n"
+              "fn main() -> int { return 0; }",
+              "which is too big");
 }
 
 // A `view T[]` or `inout T[]` parameter is a slice: it takes a fixed-size
@@ -275,13 +283,16 @@ TEST(FixedArray, SliceParameters) {
                             "with 'len()' or passed to a 'view' or 'inout' "
                             "array parameter";
   expectError("fn f(xs: view int[]) {}\n"
-              "fn main() -> int { g = [1, 2]; f(g); return 0; }",
-              "argument 1 of 'f' has type 'int[]', expected 'int[]' (a slice "
-              "takes a fixed-size array, not a growable one)");
+              "fn main() -> int { s = \"ab\"; f(s); return 0; }",
+              "argument 1 of 'f' has type 'Str', expected 'int[]'");
   expectError("fn f(xs: view float[]) {}\n"
               "fn main() -> int { a: int[1] = [1]; f(a); return 0; }",
-              "(a slice takes a fixed-size array of exactly its element "
-              "type)");
+              "argument 1 of 'f' has type 'int[1]', expected 'float[]' (a "
+              "slice takes a fixed-size array of exactly its element type)");
+  expectError("fn f(xs: view int[]) {}\n"
+              "fn main() -> int { g = [[1, 2], [3, 4]]; f(g); return 0; }",
+              "argument 1 of 'f' has type 'int[2][2]', expected 'int[]' (a "
+              "slice takes a fixed-size array of exactly its element type)");
   expectError("fn f(xs: inout int[]) { xs.push(1); }\n"
               "fn main() -> int { return 0; }",
               "'int[]' has no method 'push' with these arguments (a slice "
@@ -295,6 +306,9 @@ TEST(FixedArray, SliceParameters) {
   expectError("fn f(xs: inout int[]) { t = (xs, 1); }\n"
               "fn main() -> int { return 0; }",
               "tuple element 0: " + slice);
+  expectError("fn f(xs: inout int[]) { ys = [xs, xs]; }\n"
+              "fn main() -> int { return 0; }",
+              "an array element: " + slice);
   expectError("fn id<T>(x: T) -> int { return 0; }\n"
               "fn f(xs: view int[]) -> int { return id(xs); }\n"
               "fn main() -> int { return 0; }",
