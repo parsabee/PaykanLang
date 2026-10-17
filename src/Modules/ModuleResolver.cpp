@@ -12,6 +12,7 @@
 
 #include "paykan/modules/ModuleResolver.h"
 
+#include "BuildId.h"
 #include "ModuleName.h"
 #include "ModuleUtils.h"
 #include "Names.h"
@@ -96,6 +97,7 @@ pkm::HostIdentity ModuleResolver::hostIdentity() {
   h.RuntimeAbi = kRuntimeABIVersion;
   h.Target = {8, 8, 1, 64, 64};
   h.CoreVersion = kVersion;
+  h.CoreBuild = kBuildId;
   h.CompatibleVersions = {kVersion};
   return h;
 }
@@ -441,7 +443,7 @@ StatusOr<std::vector<uint8_t>> ModuleResolver::encodeFile(
             static_cast<uint32_t>(kVersionMinor),
             static_cast<uint32_t>(kVersionPatch),
             kVersionPrerelease,
-            ""};
+            Host.CoreBuild};
   m.Formats = {pkm::kIfaceMajor, pkm::kIfaceMinor,     0,
                pir::kPIRVersion, pkm::kCodeBinaryPir1, 0};
   m.RuntimeAbi = Host.RuntimeAbi;

@@ -448,7 +448,8 @@ target_link_libraries(driver_tests
             paykan_pkm
             paykan_compile_options
 )
-add_dependencies(driver_tests paykan paykan_incompatible_plugins)
+# paykan_build_id: BuildId.h, the build ID the cache tests expect.
+add_dependencies(driver_tests paykan paykan_incompatible_plugins paykan_build_id)
 if(PAYKAN_COVERAGE)
     target_compile_definitions(driver_tests PRIVATE PAYKAN_TEST_COVERAGE=1)
 endif()

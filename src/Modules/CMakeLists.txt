@@ -13,6 +13,9 @@ target_include_directories(paykan_modules
     PRIVATE ${PROJECT_SOURCE_DIR}/src/Runtime
 )
 
+# The build ID it stamps into cache entries (BuildId.h, CMakeLists.txt).
+add_dependencies(paykan_modules paykan_build_id)
+
 target_link_libraries(paykan_modules
     PUBLIC  paykan_pkm
             paykan_pir
