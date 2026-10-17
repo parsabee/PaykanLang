@@ -72,7 +72,7 @@ TEST(Leak, IntArrayLiteral) {
   g.expectNoLeaks("IntArrayLiteral");
 }
 
-// -- Object array
+// -- Object array (samples/leak-check/06)
 
 TEST(Leak, ObjArray) {
   LeakGuard g;
