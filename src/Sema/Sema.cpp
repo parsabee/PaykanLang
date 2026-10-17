@@ -524,6 +524,36 @@ std::string Sema::sliceArgNote(const ast::Type *param, const ast::Type *arg) {
   return "";
 }
 
+bool Sema::hasInferredLength(const ast::Type *ty) {
+  for (const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty); ft;
+       ft = ast::dyn_cast<ast::FixedArrayType>(ft->getElementType()))
+    if (ft->isInferred())
+      return true;
+  return false;
+}
+
+ast::Type *Sema::fillLengths(ast::Type *ty, ast::Type *from) {
+  auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty);
+  if (!ft || !hasInferredLength(ft))
+    return ty;
+  auto *fromFT = ast::dyn_cast<ast::FixedArrayType>(from);
+  if (!fromFT)
+    return nullptr;
+  ast::Type *elem = fillLengths(ft->getElementType(), fromFT->getElementType());
+  if (!elem)
+    return nullptr;
+  return Ctx.getFixedArrayType(elem, ft->isInferred() ? fromFT->getLength()
+                                                      : ft->getLength());
+}
+
+void Sema::errorNoLengths(ast::SourceLocation loc, ast::Type *ty,
+                          ast::Type *from) {
+  error(loc, "'" + typeName(ty) +
+                 "' takes its lengths from a fixed-size array of its shape, "
+                 "not from '" +
+                 typeName(from) + "'");
+}
+
 bool Sema::errorFixedArrayHere(ast::SourceLocation loc, ast::Type *ty,
                                const std::string &where) {
   if (ast::isa<ast::SliceType>(ty)) {
@@ -565,6 +595,7 @@ std::string Sema::letFixedArrayRoot(const ast::Expr *e) {
 ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
                              const std::string &context) {
   const bool allowFixed = std::exchange(FixedArrayAllowed, false);
+  const bool allowInferred = std::exchange(InferredLengthAllowed, false);
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty))
     return Ctx.getBuiltinType(bt->getTypeKind());
   // A parameter's slice (sliceOf), resolved already.
@@ -639,6 +670,15 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
       error(loc, context + " has type '" + typeName(fixed) +
                      "': a fixed-size array of '" + typeName(base) +
                      "' is not supported yet");
+      return nullptr;
+    }
+    // Its size is checked once its lengths are inferred (visitVarDecl).
+    if (hasInferredLength(fixed)) {
+      if (allowInferred)
+        return fixed;
+      error(loc, context + " has type '" + typeName(fixed) +
+                     "': a length can be '_' only in a variable declaration "
+                     "with an initializer, which gives it");
       return nullptr;
     }
     if (fixedElementBytes(fixed) < 0) {
@@ -1520,6 +1560,18 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
 ast::Type *
 Sema::ExprChecker::checkFixedArrayLiteral(ast::ArrayLiteralExpr *node,
                                           ast::FixedArrayType *fixed) {
+  // A `_` length (a variable declaration's) is the literal's element count;
+  // an element's `_` lengths are the first element's.
+  if (fixed->isInferred()) {
+    if (node->isEmpty()) {
+      S.error(node->getLocation(),
+              "an empty array literal gives '" + typeName(fixed) +
+                  "' no length: a fixed-size array has at least one element");
+      return nullptr;
+    }
+    fixed = S.Ctx.getFixedArrayType(
+        fixed->getElementType(), static_cast<int64_t>(node->getNumElements()));
+  }
   ast::Type *elemTy = fixed->getElementType();
   if (static_cast<int64_t>(node->getNumElements()) != fixed->getLength()) {
     S.error(node->getLocation(),
@@ -1534,6 +1586,15 @@ Sema::ExprChecker::checkFixedArrayLiteral(ast::ArrayLiteralExpr *node,
     if (!ty) {
       ok = false;
       continue;
+    }
+    if (hasInferredLength(elemTy)) {
+      ast::Type *filled = S.fillLengths(elemTy, ty);
+      if (!filled) {
+        S.errorNoLengths(elem->getLocation(), elemTy, ty);
+        return nullptr;
+      }
+      elemTy = filled;
+      fixed = S.Ctx.getFixedArrayType(elemTy, fixed->getLength());
     }
     if (!S.checkAssignable(elemTy, ty, elem)) {
       S.error(elem->getLocation(),
@@ -2874,6 +2935,8 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
 
   if (node->getType()) {
     FixedArrayAllowed = true; // a local may be a fixed-size array
+    // and a length may be `_` where an initializer gives it
+    InferredLengthAllowed = node->getInitExpr() != nullptr;
     declTy = resolveType(node->getType(), node->getLocation(),
                          "variable '" + node->getName() + "'");
     if (!declTy) {
@@ -2888,6 +2951,9 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   if (node->getInitExpr()) {
     unsigned errorsBefore = Diags.getErrorCount() + SuppressedFollowOns;
     auto *initTy = resolveExprType(node->getInitExpr(), declTy);
+    // A `_` length is the initializer's: a literal fills it in as it is
+    // checked (checkFixedArrayLiteral), anything else has it in its type.
+    const bool inferred = declTy && hasInferredLength(declTy);
     if (!initTy) {
       // Only when the initializer failed silently: an error inside it (or
       // one suppressed as a follow-on) already explains the failure.
@@ -2896,11 +2962,28 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
               "cannot determine type of initializer for variable '" +
                   node->getName() + "'");
       // A resolved annotation still types the variable; otherwise poison it.
-      if (declTy)
+      if (declTy && !inferred)
         CurrentScope->set(node->getName(), declTy);
       else
         declarePoisoned(CurrentScope, node->getName());
       return false;
+    }
+    if (inferred) {
+      ast::Type *filled = fillLengths(declTy, initTy);
+      if (!filled)
+        errorNoLengths(node->getInitExpr()->getLocation(), declTy, initTy);
+      else if (fixedElementBytes(filled) < 0)
+        error(node->getLocation(),
+              "variable '" + node->getName() + "' has type '" +
+                  typeName(filled) +
+                  "', which is too big: a fixed-size array holds at most " +
+                  std::to_string(kMaxFixedArrayBytes) + " bytes");
+      if (!filled || fixedElementBytes(filled) < 0) {
+        declarePoisoned(CurrentScope, node->getName());
+        return false;
+      }
+      declTy = filled;
+      node->setType(declTy);
     }
 
     // The variable is still declared after this error.  A local borrow may

@@ -300,3 +300,56 @@ TEST(FixedArray, SliceParameters) {
               "'a' is declared with 'let' and cannot be passed to 'inout' "
               "parameter 'xs'");
 }
+
+// A length of `_` in a variable declaration with an initializer is the
+// initializer's: an array literal's element count (its first element's
+// lengths for a nested `_`), or the length of the fixed-size array anything
+// else is.
+TEST(FixedArray, InferredLengths) {
+  auto r = semaCheck(R"(
+    class A {}
+    class B : A {}
+    fn fill<T>(v: T) -> T[3] { return [v, v, v]; }
+    fn main() -> int {
+      x: int[_][_] = [[1, 2, 3], [4, 5, 6]];
+      y: A[_] = [B(), A(), B()];
+      z: float[_] = fill<float>(1.5);
+      return x[1][2] + y.len() + z.len();
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  expectOk("  x: int[_][_] = [[1, 2, 3], [4, 5, 6]];\n"
+           "  a: int[2][3] = x;\n"
+           "  rows: int[_][_] = [a[0], [7, 8, 9], x[1]];\n"
+           "  y: int[2][_] = x;\n"
+           "  let c: char[_] = ['h', 'i'];\n"
+           "  f: float[_] = [1, 2.5];\n"
+           "  v: view int[_] = x[1];\n"
+           "  n: int = a[1][2] + y[0].len() + c.len() + v[0] + "
+           "rows[2][0];");
+  const std::string onlyHere = "has type 'int[_]': a length can be '_' only "
+                               "in a variable declaration with an "
+                               "initializer, which gives it";
+  expectError("fn f(x: int[_]) {}\nfn main() -> int { return 0; }",
+              "parameter 'x' " + onlyHere);
+  expectError("fn f() -> int[_] { return [1]; }\n"
+              "fn main() -> int { return 0; }",
+              "function 'f' return type " + onlyHere);
+  expectError("class C { xs: int[_]; }\nfn main() -> int { return 0; }",
+              "field 'xs' in class 'C' " + onlyHere);
+  expectBodyError("  x: int[_] = [];",
+                  "an empty array literal gives 'int[_]' no length: a "
+                  "fixed-size array has at least one element");
+  expectBodyError("  x: int[_] = 3;",
+                  "'int[_]' takes its lengths from a fixed-size array of its "
+                  "shape, not from 'int'");
+  expectBodyError("  x: int[_][_] = [1, 2];",
+                  "'int[_]' takes its lengths from a fixed-size array of its "
+                  "shape, not from 'int'");
+  expectBodyError("  x: int[_][_] = [[1, 2], [3]];",
+                  "array literal has 1 element(s), but 'int[2]' has 2");
+  expectError("fn big() -> int[65536] { return big(); }\n"
+              "fn main() -> int {\n  x: int[_][_] = [big(), big(), big()];\n"
+              "  return 0;\n}\n",
+              "variable 'x' has type 'int[3][65536]', which is too big");
+}
