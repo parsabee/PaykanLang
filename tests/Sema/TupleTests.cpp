@@ -529,7 +529,9 @@ TEST(Tuple, ViewHoldingReferencesCannotBeStored) {
   for (const char *stmt :
        {"k = first(refs);", "k: (Str, Node) = first(refs);",
         "h = H();\nh.t = first(refs);", "s: Str = first(refs).0;"}) {
-    auto r = semaCheck(decls + wrapMain(refs + stmt));
+    std::string body = refs;
+    body += stmt;
+    auto r = semaCheck(decls + wrapMain(body));
     EXPECT_FALSE(r.Ok) << stmt;
     EXPECT_NE(r.Diagnostics.find("the result of 'first<(Str, Node)>' is a "
                                  "'view'; it cannot be stored, only read or "

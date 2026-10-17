@@ -688,9 +688,9 @@ TEST(PIRBinary, ByteFlipFuzz) {
 TEST(PIRBinary, BytesGlobalHoldsEveryByteValue) {
   Module m;
   m.Name = "k";
-  std::vector<uint8_t> all;
+  std::vector<uint8_t> all(256);
   for (int b = 0; b < 256; ++b)
-    all.push_back(static_cast<uint8_t>(b));
+    all[static_cast<size_t>(b)] = static_cast<uint8_t>(b);
   m.Bytes.push_back({".all", all});
   expectRoundTrip(m);
   auto decoded = binary::decode(binary::encode(m));
