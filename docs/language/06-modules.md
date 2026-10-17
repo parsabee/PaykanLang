@@ -221,12 +221,15 @@ the source root, named by the module's canonical name: `a::b::c` is cached as
 not depend on the directory the compiler is launched from, so `paykan proj/main.pkn` and
 `cd proj && paykan main.pkn` share one cache. The main file is never cached.
 
-- **Validity.** An entry is used only when it was written by this very `paykan` (version and
-  format numbers), from exactly the current source (size and hash, never timestamps), and
+- **Validity.** An entry is used only when it was written by this very `paykan` (its version,
+  its build ID and the format numbers), from exactly the current source (size and hash, never
+  timestamps), and
   against the current interface of every module it imports. Editing a function body
   therefore rebuilds that module only; changing a class or a function signature also
   rebuilds the modules that import it, and theirs only if their own interface changed.
-  `--verbose` prints, for every import, which file was used or why an entry was not.
+  `--verbose` prints, for every import, which file was used or why an entry was not. The
+  build ID is a hash of the compiler's sources, so two builds of one version from
+  different sources do not share entries. A release has none: its version identifies it.
 - **Robustness.** Entries are written atomically (to a temporary file that is then renamed
   into place), and only after the whole program verified. An entry that is missing,
   truncated, corrupt or out of date is rebuilt. `--rebuild-modules` rebuilds every entry;

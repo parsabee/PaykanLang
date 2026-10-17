@@ -370,6 +370,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A `.paykan_cache` module entry written by another build of the same version was reused
+  (#188), so a compiler fix never reached a cached import: every development build calls
+  itself 0.1.1.  Each build now has a build ID, a hash of the compiler's sources
+  (`cmake/BuildId.cmake`), which a cache entry records (`core.build`) and which must match
+  for the entry to be used; `--verbose` reports `is stale (compiled by paykan 0.1.1
+  (<id>); this is paykan 0.1.1 (<id>))`.  A release build (`-DPAYKAN_RELEASE=ON`, set by
+  the release workflow and the Homebrew formula) has no build ID, and a prebuilt `.pkm` is
+  still judged by its version alone.
 - A `-> inout` result of a tuple was copied out into a temporary instead of naming its
   storage: a write through it (an `inout` local, an `inout` argument) changed only the
   copy, and reading an element of one released the references the storage held.  It is
