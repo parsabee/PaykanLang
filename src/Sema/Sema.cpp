@@ -1101,10 +1101,20 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     if (const auto *sig = S.lookupFunction(node->getCalleeName());
         sig && sig->ParamTypes.size() == node->getNumArguments())
       known = sig;
+  std::vector<ast::Type *> expectedArgs;
+  if (known)
+    expectedArgs = known->ParamTypes;
+  // `__super__(...)`: the superclass `__init__`'s parameters (checked below).
+  else if (node->getCalleeName() == names::kMethodSuper && S.CurrentClassCtx)
+    if (auto *sc = S.CurrentClassCtx->ClassType->getSuperClass();
+        sc && !S.isErroneousClass(sc))
+      if (auto *init = sc->findMethod(names::kMethodInit);
+          init && init->getParamTypes().size() == node->getNumArguments())
+        expectedArgs = init->getParamTypes();
   std::vector<ast::Type *> argTypes;
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     auto *ty = visitExpecting(node->getArguments()[i],
-                              known ? known->ParamTypes[i] : nullptr);
+                              expectedArgs.empty() ? nullptr : expectedArgs[i]);
     argTypes.push_back(ty);
   }
 
