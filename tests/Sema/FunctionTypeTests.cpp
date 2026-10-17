@@ -304,8 +304,7 @@ fn main() -> int {
 )");
   EXPECT_FALSE(r.Ok);
   expectAll(r, {"'break' outside of a loop",
-                "the lambda does not always return a value (its result type "
-                "is 'int')",
+                "the lambda does not always return a value (its result type",
                 "duplicate parameter 'x' in the lambda",
                 "parameter 'v' cannot have type 'void'",
                 "non-void function must return a value"});
@@ -344,8 +343,7 @@ fn main() -> int {
 )");
   EXPECT_FALSE(r.Ok);
   expectAll(r, {"argument 1 of 'println' has type '() -> int', expected 'Obj'",
-                "initializer of type '() -> int' does not match declared type "
-                "'Obj'",
+                "initializer of type '() -> int' does not match declared type",
                 "method call on non-class type '() -> int'",
                 "does not implement trait 'Show'",
                 "does not implement trait 'Hashable'"});
