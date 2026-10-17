@@ -475,6 +475,12 @@ int64_t Sema::fixedElementBytes(const ast::Type *ty) {
   // A reference is held as its box.
   if (ast::isRefType(ty))
     return 8;
+  // An optional value is a presence flag padded to its value's alignment,
+  // then the value (`int?` takes 16 bytes, `bool?` 2).
+  if (ast::isValueOptional(ty))
+    if (const auto *inner = ast::dyn_cast<ast::BuiltinType>(
+            ast::cast<ast::OptionalType>(ty)->getInnerType()))
+      return 2 * fixedElementBytes(inner);
   if (const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
     int64_t elem = fixedElementBytes(ft->getElementType());
     if (elem < 0 || ft->getLength() > kMaxFixedArrayBytes / elem)

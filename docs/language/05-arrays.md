@@ -261,10 +261,10 @@ Output:
   function's own copy, a `view` one reads the caller's array, and an `inout`
   one changes it. A result is returned as a copy (`-> int[3]`; a `view` or
   `inout` result of one is not supported yet).
-- An element can be a scalar (`int`, `float`, `bool`, `char`), an enum, a
-  reference (a class, `Str`, a growable array, a tuple, an optional of one)
-  or another fixed-size array. An optional of a value type (`int?`) cannot
-  be one yet.
+- An element can be a scalar (`int`, `float`, `bool`, `char`), an optional
+  of one (`int?`, held inline, `None` when zeroed), an enum, a reference (a
+  class, `Str`, a growable array, a tuple, an optional of one) or another
+  fixed-size array.
 - An element of a reference type is a reference, as a variable of that type
   is: copying the array copies the references, so the copy and the original
   share their elements' objects, and an element of a `view` array is a

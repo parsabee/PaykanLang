@@ -15,9 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bounds is an error when it is a constant, and a panic (`paykan: array index 3 out of
   bounds (len=3)`) otherwise. A `let` array's elements cannot be assigned. `int[2][3]` is
   two `int[3]`s. A parameter can be one in every mode (a plain one is the function's own
-  copy), and so can a result, also across modules. An element can be a scalar, an enum,
-  a reference (`Str[2]`, `Point[4]`: a copy of the array shares the elements' objects) or
-  another such array; not yet an optional of a value type. For now only a local variable,
+  copy), and so can a result, also across modules. An element can be a scalar or an
+  optional of one (`int?[3]`), an enum, a reference (`Str[2]`, `Point[4]`: a copy of the
+  array shares the elements' objects) or another such array. For now only a local variable,
   a parameter, a result or a field (held inside its object) can be one. A `view T[]` or
   `inout T[]` parameter is a slice: it takes a fixed-size array of any length (a literal
   becomes one) or another slice, and reads or writes its elements in place. A growable
