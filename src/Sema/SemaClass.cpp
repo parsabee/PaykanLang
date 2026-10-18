@@ -687,9 +687,12 @@ bool Sema::checkImplDecls(ast::TranslationUnit *tu) {
   bool ok = true;
   for (auto *im : tu->getImplDecls()) {
     const std::string &name = im->getTypeName();
-    // A generic class's, checked in registerGenericTemplates.
+    // A generic class's or struct's, checked in registerGenericTemplates.
     if (auto t = ClassTemplates.find(name);
         t != ClassTemplates.end() && !foreignOrigin(t->second))
+      continue;
+    if (auto t = StructTemplates.find(name);
+        t != StructTemplates.end() && !foreignOrigin(t->second))
       continue;
     if (ErroneousNames.count(name)) {
       ok = false; // a dropped class was reported with its declaration
@@ -704,8 +707,10 @@ bool Sema::checkImplDecls(ast::TranslationUnit *tu) {
       why = "'" + name +
             "' is a built-in type; an 'impl' block cannot add "
             "methods to it";
-    else if ((target && !localTypes.count(name)) || ClassTemplates.count(name))
-      why = std::string("an 'impl' block for a ") + (st ? "struct" : "class") +
+    else if ((target && !localTypes.count(name)) ||
+             ClassTemplates.count(name) || StructTemplates.count(name))
+      why = std::string("an 'impl' block for a ") +
+            (st || StructTemplates.count(name) ? "struct" : "class") +
             " of another module is not supported yet";
     else if (Ctx.lookupEnumType(name))
       why = "an 'impl' block for an enum is not supported yet";
@@ -959,7 +964,7 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
         continue;
       }
       if (Ctx.lookupType(*p) || LocalClassNames.count(*p) ||
-          ClassTemplates.count(*p)) {
+          ClassTemplates.count(*p) || StructTemplates.count(*p)) {
         std::string msg = "type parameter '";
         msg += *p;
         msg += "' of ";
@@ -994,6 +999,26 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
     ClassTemplates[cd->getName()] = cd;
   }
 
+  for (auto *sd : tu->getGenericStructDecls()) {
+    if (StructTemplates.count(sd->getName())) {
+      error(sd->getLocation(),
+            "redefinition of generic struct '" + sd->getName() + "'");
+      ok = false;
+      continue;
+    }
+    if (!checkDeclNameAvailable(sd->getName(), sd->getLocation(),
+                                DeclKind::Struct)) {
+      ok = false;
+      continue;
+    }
+    if (!checkTypeParams(sd->getTypeParams(), "generic struct", sd->getName(),
+                         sd->getLocation())) {
+      ok = false;
+      continue;
+    }
+    StructTemplates[sd->getName()] = sd;
+  }
+
   for (auto *fn : tu->getGenericFuncDecls()) {
     if (FuncTemplates.count(fn->getName())) {
       error(fn->getLocation(),
@@ -1024,38 +1049,53 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
     FuncTemplates[fn->getName()] = fn;
   }
 
-  // The `impl` blocks of the generic classes: each instantiation gets a copy
-  // (instantiateClass).  One of another module's is checkImplDecls's to
-  // reject.
+  // The `impl` blocks of the generic classes and structs: each
+  // instantiation gets a copy (instantiateClass, instantiateStruct).  One of
+  // another module's is checkImplDecls's to reject.
   for (auto *im : tu->getImplDecls()) {
     const std::string &name = im->getTypeName();
-    auto t = ClassTemplates.find(name);
-    if (t == ClassTemplates.end() || foreignOrigin(t->second))
+    const ast::Decl *tmpl = nullptr;
+    const std::vector<const std::string *> *want = nullptr;
+    const char *kind = "class";
+    if (auto t = ClassTemplates.find(name); t != ClassTemplates.end()) {
+      tmpl = t->second;
+      want = &t->second->getTypeParams();
+    } else if (auto s = StructTemplates.find(name);
+               s != StructTemplates.end()) {
+      tmpl = s->second;
+      want = &s->second->getTypeParams();
+      kind = "struct";
+    }
+    if (!tmpl || foreignOrigin(tmpl))
       continue;
     const auto &params = im->getTypeParams();
-    const auto &want = t->second->getTypeParams();
     ast::SourceLocation loc = im->getLocation();
     std::string why;
     if (params.empty()) {
       why = "'";
       why += name;
-      why += "' is a generic class: write 'impl ";
+      why += "' is a generic ";
+      why += kind;
+      why += ": write 'impl ";
       why += name;
-      for (size_t i = 0; i < want.size(); ++i)
-        (why += i ? ", " : "<") += *want[i];
+      for (size_t i = 0; i < want->size(); ++i)
+        (why += i ? ", " : "<") += *(*want)[i];
       why += ">'";
-    } else if (params.size() != want.size()) {
+    } else if (params.size() != want->size()) {
       why = "'impl ";
       why += name;
       why += "' names " + std::to_string(params.size());
-      why += " type parameter(s); generic class '";
+      why += " type parameter(s); generic ";
+      why += kind;
+      why += " '";
       why += name;
-      why += "' has " + std::to_string(want.size());
+      why += "' has " + std::to_string(want->size());
     }
     for (auto *fn : im->getMethods())
       if (why.empty() && fn->isStatic()) {
-        why = "a 'static fn' in the 'impl' block of a generic class is not "
-              "supported yet";
+        why = "a 'static fn' in the 'impl' block of a generic ";
+        why += kind;
+        why += " is not supported yet";
         loc = fn->getLocation();
       }
     if (!why.empty())
@@ -1065,7 +1105,7 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
       ok = false;
       continue;
     }
-    TemplateImpls[t->second].push_back(im);
+    TemplateImpls[tmpl].push_back(im);
   }
   return ok;
 }
@@ -1122,6 +1162,10 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     else if (Ctx.lookupClassType(name) || Ctx.lookupEnumType(name))
       error(loc, "'" + name +
                      "' is not a generic class and takes no type "
+                     "arguments");
+    else if (Ctx.lookupStructType(name))
+      error(loc, "'" + name +
+                     "' is not a generic struct and takes no type "
                      "arguments");
     else if (FuncTemplates.count(name))
       error(loc, "'" + name + "' is a generic function, not a generic class");
@@ -1192,7 +1236,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     ClassInstantiations[instName] = nullptr;
     return nullptr;
   }
-  if (InstantiationStack.size() >= kMaxInstantiationDepth) {
+  if (instantiationDepth() >= kMaxInstantiationDepth) {
     error(loc, "instantiating '" + instName +
                    "' exceeds the maximum instantiation depth (" +
                    std::to_string(kMaxInstantiationDepth) +
@@ -1286,6 +1330,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   PendingInstantiation pending;
   pending.Class = clone;
   pending.Name = instName;
+  pending.Depth = instantiationDepth() + 1;
   pending.RequestLoc = loc;
   pending.Origin = origin;
   pending.RequestFile = request.File;
@@ -1347,7 +1392,7 @@ std::string Sema::instantiateFunction(const std::string &name,
     FuncInstantiations[instName] = false;
     return "";
   }
-  if (InstantiationStack.size() >= kMaxInstantiationDepth) {
+  if (instantiationDepth() >= kMaxInstantiationDepth) {
     error(loc, "instantiating '" + instName +
                    "' exceeds the maximum instantiation depth (" +
                    std::to_string(kMaxInstantiationDepth) + ")");
@@ -1391,6 +1436,7 @@ std::string Sema::instantiateFunction(const std::string &name,
   PendingInstantiation pending;
   pending.Func = clone;
   pending.Name = instName;
+  pending.Depth = instantiationDepth() + 1;
   pending.RequestLoc = loc;
   pending.Origin = origin;
   pending.RequestFile = request.File;
@@ -1467,6 +1513,22 @@ bool Sema::unifyTypes(ast::Type *pattern, ast::Type *actual,
   }
 
   if (auto *gt = ast::dyn_cast<ast::GenericType>(pattern)) {
+    // `Pair<T>` against a struct: an instantiation of the same template
+    // unifies argument-wise (a struct has no ancestors).
+    if (auto stmpl = StructTemplates.find(gt->getName());
+        stmpl != StructTemplates.end()) {
+      auto *st = ast::dyn_cast<ast::StructType>(actual);
+      const StructInstantiationInfo *info =
+          st ? structInstantiationInfo(st) : nullptr;
+      if (!info || info->Template != stmpl->second ||
+          info->Args.size() != gt->getNumArgs())
+        return true;
+      for (size_t i = 0; i < gt->getNumArgs(); ++i)
+        if (!unifyTypes(gt->getArgs()[i], info->Args[i], typeParams, bindings,
+                        conflict))
+          return false;
+      return true;
+    }
     // `Box<T>` against a class: find an instantiation of the same template
     // (however either spells it) in the argument's class or one of its
     // ancestors and unify argument-wise.
@@ -1603,6 +1665,39 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
     return true;
   }
 
+  if (auto it = StructTemplates.find(callee); it != StructTemplates.end()) {
+    ast::StructDecl *tmpl = it->second;
+    if (typeArgs.empty()) {
+      // Constructor-argument inference: `Pair(1, "a")` unifies the
+      // parameters of the `__init__` of an `impl` block (by that block's
+      // names for the type parameters), or the fields of the default one,
+      // with the argument types.
+      const ast::FuncDecl *init = nullptr;
+      const std::vector<const std::string *> *params = &tmpl->getTypeParams();
+      if (auto impls = TemplateImpls.find(tmpl); impls != TemplateImpls.end())
+        for (auto *im : impls->second)
+          for (auto *m : im->getMethods())
+            if (!im->getTrait() && m->getName() == names::kMethodInit) {
+              init = m;
+              params = &im->getTypeParams();
+            }
+      std::vector<ast::Type *> paramTypes;
+      if (init)
+        for (auto &p : init->getParams())
+          paramTypes.push_back(here(tmpl, p.ParamType));
+      else
+        for (auto *f : tmpl->getFields())
+          paramTypes.push_back(here(tmpl, f->getType()));
+      if (!inferTypeArgs(callee, *params, paramTypes, argTypes, loc, typeArgs))
+        return false;
+    }
+    auto *st = instantiateStruct(callee, typeArgs, loc);
+    if (!st)
+      return false;
+    node->setCalleeName(st->getName()); // interned by the ASTContext
+    return true;
+  }
+
   if (auto it = FuncTemplates.find(callee); it != FuncTemplates.end()) {
     ast::FuncDecl *tmpl = it->second;
     if (typeArgs.empty()) {
@@ -1621,7 +1716,8 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
   }
 
   // Explicit type arguments on something that is not a template.
-  if (lookupFunction(callee) || Ctx.lookupClassType(callee))
+  if (lookupFunction(callee) || Ctx.lookupClassType(callee) ||
+      Ctx.lookupStructType(callee))
     error(loc, "'" + callee + "' is not generic and takes no type arguments");
   else if (ErroneousNames.count(callee))
     ++SuppressedFollowOns; // a template rejected at its declaration
@@ -1640,11 +1736,16 @@ bool Sema::checkPendingInstantiations() {
         {p.Name, p.RequestLoc, p.RequestFile, p.RequestLines});
     const StringSet *savedParams = CurrentTypeParams;
     CurrentTypeParams = &p.TypeParams;
+    const size_t savedDepth = CurrentInstantiationDepth;
+    CurrentInstantiationDepth = p.Depth;
     bool r;
     {
       OriginSource inOrigin(Diags, p.Origin);
-      r = p.Class ? visitClassDecl(p.Class) : visitFuncDecl(p.Func);
+      r = p.Class    ? visitClassDecl(p.Class)
+          : p.Struct ? visitStructDecl(p.Struct)
+                     : visitFuncDecl(p.Func);
     }
+    CurrentInstantiationDepth = savedDepth;
     CurrentTypeParams = savedParams;
     InstantiationStack.pop_back();
     if (!r)
@@ -1655,6 +1756,11 @@ bool Sema::checkPendingInstantiations() {
 }
 
 void Sema::injectInstantiations(ast::TranslationUnit *tu) {
+  // A struct's functions are all declared before any body is emitted, and
+  // a struct holds another only after it: creation order is fine.
+  for (auto *sd : InstantiatedStructDecls)
+    tu->addStructDecl(sd);
+  InstantiatedStructDecls.clear();
   if (InstantiatedClassDecls.empty() && InstantiatedFuncDecls.empty())
     return;
 

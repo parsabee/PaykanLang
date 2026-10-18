@@ -299,6 +299,136 @@ TEST(Struct, FieldsOfTemporariesAndElementsAreReleased) {
   g.expectNoLeaks("FieldsOfTemporariesAndElementsAreReleased");
 }
 
+// -- Generic structs
+
+TEST(Struct, GenericStructsInstantiateLikeClasses) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    struct Pair<A, B> { a: A; b: B; }
+    impl Pair<A, B> {
+      view fn first() -> view A { return self.a; }
+      fn swapWith(other: inout Pair<A, B>) { t = self.a; self.a = other.a; other.a = t; }
+      fn flipped() -> Pair<B, A> { return Pair<B, A>(self.b, self.a); }
+    }
+    struct Box<T> { v: T; }
+    impl Box<T> {
+      fn __init__(v: T) { self.v = v; }
+      fn set(v: T) { self.v = v; }
+      view fn get() -> view T { return self.v; }
+    }
+    impl Hashable for Box<T> { view fn hash() -> int { return 7; } }
+    trait Named { view fn name() -> Str; }
+    impl Named for Pair<A, B> { view fn name() -> Str { return "pair"; } }
+    class Holder<T> { p: Pair<T, Str>; }
+    impl Holder<T> { fn __init__(x: T) { self.p = Pair<T, Str>(x, "h"); } }
+    fn sumInts(p: view Pair<int, int>) -> int { return p.a + p.b; }
+    fn firstOf<A, B>(p: view Pair<A, B>) -> view A { return p.a; }
+    fn mkBox<T>(v: T) -> Box<T> { return Box(v); }
+    fn greet<T: Named>(x: view T) -> Str { return x.name(); }
+    fn show<T: Show>(x: view T) -> Str { return x.toString(); }
+    fn main() -> int {
+      p = Pair(1, "one");               // inferred Pair<int, Str>
+      q: Pair<int, Str> = Pair<int, Str>(2, "two");
+      p.swapWith(q);
+      f = p.flipped();
+      println(p);
+      println(f);
+      println(show(q) + " " + greet(p) + " " + Str(p.first()) + Str(firstOf(f).len()));
+      b = Box(Pair(3, 4));
+      b.set(Pair(5, 6));
+      println(Str(sumInts(b.get())) + " " + Str(b.hash()) + " " + show(mkBox("s")));
+      h = Holder(9);
+      h.p.a = 10;
+      bs: Box<int>[2] = [Box(1), Box(2)];
+      bs[1].v = 7;
+      t = (Pair(1.5, 'c'), Box(True));
+      println(Str(h.p.a) + h.p.b + " " + Str(bs[0].v + bs[1].v) + " " + Str(t.0.b) + Str(t.1.v));
+      println(Str(p == Pair(2, "two")) + Str(b == Box(Pair(5, 6))) + Str(Box(1) == Box(2)));
+      return p.a + q.a;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "Pair<int, Str>(a: 2, b: one)\n"
+                      "Pair<Str, int>(a: one, b: 2)\n"
+                      "Pair<int, Str>(a: 1, b: two) pair 23\n"
+                      "11 7 Box<Str>(v: s)\n"
+                      "10h 8 cTrue\n"
+                      "FalseTrueFalse\n");
+  EXPECT_EQ(r.ExitCode, 3);
+  g.expectNoLeaks("GenericStructsInstantiateLikeClasses");
+}
+
+TEST(Struct, GenericStructsHoldingReferencesAreReleased) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Node { n: int; view fn toString() -> Str { return "N" + Str(self.n); } }
+    struct Slot<T> { v: T; label: Str; }
+    impl Slot<T> { fn put(v: T) { self.v = v; } }
+    struct Two<A, B> { a: Slot<A>; b: Slot<B>; }
+    fn mk(i: int) -> Slot<Node> { return Slot<Node>(Node(i), "s" + Str(i)); }
+    fn main() -> int {
+      s = mk(1);
+      t = s;                               // the same Node
+      t.put(Node(2));                      // t's own
+      two = Two<Node, Str>(s, Slot<Str>("x", "y"));
+      two.a.label = "two";
+      two.b.put("z");
+      xs: Slot<Node>[2] = [mk(3), mk(4)];
+      xs[0] = xs[1];
+      println(s);
+      println(t);
+      println(two);
+      println(Str(xs[0].v.n + xs[1].v.n) + " " + Str(mk(5).v.n) + " " + mk(6).label);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "Slot<Node>(v: N1, label: s1)\n"
+                      "Slot<Node>(v: N2, label: s1)\n"
+                      "Two<Node, Str>(a: Slot<Node>(v: N1, label: two), b: "
+                      "Slot<Str>(v: z, label: y))\n"
+                      "8 5 s6\n");
+  EXPECT_EQ(r.ExitCode, 0);
+  g.expectNoLeaks("GenericStructsHoldingReferencesAreReleased");
+}
+
+TEST(Struct, GenericStructsImportedFromAnotherModule) {
+  LeakGuard g;
+  auto tmpDir = paykan::test::tempDir() / "pkn_generic_struct_module_test";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+  writeTempFile(tmpDir, "lib/gen.pkn", R"(
+struct Pair<A, B> { a: A; b: B; }
+impl Pair<A, B> {
+  view fn first() -> view A { return self.a; }
+  fn bump(d: int) { self.a = self.a; }
+}
+struct Box<T> { v: T; }
+impl Box<T> { fn __init__(v: T) { self.v = v; } view fn get() -> view T { return self.v; } }
+fn mk() -> Pair<int, Str> { return Pair<int, Str>(41, "x"); }
+fn boxed<T>(v: T) -> Box<T> { return Box<T>(v); }
+)");
+  auto mainPath = writeTempFile(tmpDir, "main.pkn", R"(
+import lib::gen;
+fn main() -> int {
+  p = gen::mk();                      // the module's own Pair<int, Str>
+  q = gen::Pair<int, Str>(1, "q");    // the same struct
+  r = gen::Pair("s", 2.5);            // a new instantiation, here
+  p.a = p.a + q.a;
+  b: gen::Box<Str> = gen::boxed("b"); // an instantiation of a function
+  c = gen::Box(r);
+  println(p.toString() + " " + r.first() + " " + b.get() + " " + c.get().b.toString() + " " + Str(p == q));
+  return p.a;
+}
+)");
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "Pair<int, Str>(a: 42, b: x) s b 2.5 False\n");
+  EXPECT_EQ(r.ExitCode, 42);
+  g.expectNoLeaks("GenericStructsImportedFromAnotherModule");
+  std::filesystem::remove_all(tmpDir);
+}
+
 // -- Modules
 
 TEST(Struct, ImportedFromAnotherModule) {

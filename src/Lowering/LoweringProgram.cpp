@@ -153,6 +153,11 @@ void ModuleLowering::processImports(ast::TranslationUnit *tu) {
       PL.ForeignInstantiations.insert(fn->getName());
       ForeignFuncs.push_back(fn);
     }
+  for (auto *sd : SemaCtx.ForeignStructs)
+    if (PL.ClassOrigins.try_emplace(sd->getName(), Mod.Name).second) {
+      PL.ForeignInstantiations.insert(sd->getName());
+      ForeignStructs.push_back(sd);
+    }
 }
 
 bool lowerProgram(const sema::SemaContext &ctx, ast::TranslationUnit *tu,

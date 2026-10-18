@@ -643,7 +643,7 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
     // module's ones yet (#160): such a module is built from source each
     // time, so its importers instantiate from its bodies.
     if (info.Templates || !childCtx.ForeignClasses.empty() ||
-        !childCtx.ForeignFunctions.empty())
+        !childCtx.ForeignFunctions.empty() || !childCtx.ForeignStructs.empty())
       Resolver->keepUncached(canonical);
   }
 
@@ -960,27 +960,17 @@ std::string Sema::displayName(const std::string &name) {
   return name.starts_with(prefix) ? name.substr(prefix.size()) : name;
 }
 
-const Sema::InstantiationInfo *Sema::instantiationInfo(ast::ClassType *ct) {
-  if (auto it = ClassInstantiationInfo.find(ct);
-      it != ClassInstantiationInfo.end())
-    return &it->second;
-  // `Tmpl<args>` from an import: an instantiation of a template of the
-  // module the class comes from, when that module's templates are here.
-  const std::string &name = ct->getName();
+bool Sema::parseInstantiationName(const std::string &name, std::string &base,
+                                  std::vector<ast::Type *> &args) {
   const size_t open = name.find('<');
-  auto origin = ImportedTypeOrigins.find(name);
-  if (open == std::string::npos || name.back() != '>' ||
-      origin == ImportedTypeOrigins.end())
-    return nullptr;
-  auto tmpl = ClassTemplates.find(hiddenQualifier(origin->second) +
-                                  names::kQualSep + name.substr(0, open));
-  if (tmpl == ClassTemplates.end())
-    return nullptr;
+  if (open == std::string::npos || name.back() != '>')
+    return false;
+  base = name.substr(0, open);
   // The arguments as instantiationName spelled them, ", "-separated.
-  InstantiationInfo info{tmpl->second, {}};
+  args.clear();
   auto arg = [&](size_t from, size_t to) {
     auto *ty = resolveExportedType(Ctx, name.substr(from, to - from));
-    info.Args.push_back(ty);
+    args.push_back(ty);
     return ty != nullptr;
   };
   int depth = 0;
@@ -993,18 +983,58 @@ const Sema::InstantiationInfo *Sema::instantiationInfo(ast::ClassType *ct) {
       --depth;
     else if (c == ',' && depth == 0) {
       if (!arg(start, i))
-        return nullptr;
+        return false;
       start = i + 2;
     }
   }
-  if (!arg(start, name.size() - 1))
+  return arg(start, name.size() - 1);
+}
+
+const Sema::InstantiationInfo *Sema::instantiationInfo(ast::ClassType *ct) {
+  if (auto it = ClassInstantiationInfo.find(ct);
+      it != ClassInstantiationInfo.end())
+    return &it->second;
+  // `Tmpl<args>` from an import: an instantiation of a template of the
+  // module the class comes from, when that module's templates are here.
+  const std::string &name = ct->getName();
+  auto origin = ImportedTypeOrigins.find(name);
+  std::string base;
+  std::vector<ast::Type *> args;
+  if (origin == ImportedTypeOrigins.end() ||
+      !parseInstantiationName(name, base, args))
     return nullptr;
-  return &(ClassInstantiationInfo[ct] = std::move(info));
+  auto tmpl = ClassTemplates.find(hiddenQualifier(origin->second) +
+                                  names::kQualSep + base);
+  if (tmpl == ClassTemplates.end())
+    return nullptr;
+  return &(ClassInstantiationInfo[ct] =
+               InstantiationInfo{tmpl->second, std::move(args)});
+}
+
+const Sema::StructInstantiationInfo *
+Sema::structInstantiationInfo(ast::StructType *st) {
+  if (auto it = StructInstantiationInfos.find(st);
+      it != StructInstantiationInfos.end())
+    return &it->second;
+  const std::string &name = st->getName();
+  auto origin = ImportedTypeOrigins.find(name);
+  std::string base;
+  std::vector<ast::Type *> args;
+  if (origin == ImportedTypeOrigins.end() ||
+      !parseInstantiationName(name, base, args))
+    return nullptr;
+  auto tmpl = StructTemplates.find(hiddenQualifier(origin->second) +
+                                   names::kQualSep + base);
+  if (tmpl == StructTemplates.end())
+    return nullptr;
+  return &(StructInstantiationInfos[st] =
+               StructInstantiationInfo{tmpl->second, std::move(args)});
 }
 
 std::shared_ptr<Sema::ModuleTemplates>
 Sema::exportTemplates(ast::TranslationUnit *tu, const std::string &canonical) {
-  if (tu->getGenericClassDecls().empty() && tu->getGenericFuncDecls().empty())
+  if (tu->getGenericClassDecls().empty() && tu->getGenericFuncDecls().empty() &&
+      tu->getGenericStructDecls().empty())
     return nullptr;
   // What the module declares, by the names its bodies use for them.
   StringSet types, generics, callees;
@@ -1021,6 +1051,10 @@ Sema::exportTemplates(ast::TranslationUnit *tu, const std::string &canonical) {
   for (auto *cd : tu->getGenericClassDecls()) {
     generics.insert(cd->getName());
     callees.insert(cd->getName());
+  }
+  for (auto *sd : tu->getGenericStructDecls()) {
+    generics.insert(sd->getName());
+    callees.insert(sd->getName());
   }
   for (auto *fn : tu->getFuncDecls())
     callees.insert(fn->getName());
@@ -1091,6 +1125,15 @@ Sema::exportTemplates(ast::TranslationUnit *tu, const std::string &canonical) {
   for (auto *fn : tu->getGenericFuncDecls())
     if (FuncTemplates.count(fn->getName()))
       mt->Functions.push_back(cloner.cloneTemplate(fn));
+  for (auto *sd : tu->getGenericStructDecls()) {
+    if (!StructTemplates.count(sd->getName())) // rejected
+      continue;
+    mt->Structs.push_back(cloner.cloneTemplate(sd));
+    if (auto it = TemplateImpls.find(sd); it != TemplateImpls.end())
+      for (auto *im : it->second)
+        if (!im->getTrait())
+          mt->Impls[mt->Structs.back()].push_back(cloner.cloneTemplate(im));
+  }
   return mt;
 }
 
@@ -1131,9 +1174,13 @@ bool Sema::injectTemplates(const ModuleInfo &info, const std::string &qualifier,
       ClassTemplates[q + names::kQualSep + cd->getName()] = cd;
     for (auto *fn : mt.Functions)
       FuncTemplates[q + names::kQualSep + fn->getName()] = fn;
+    for (auto *sd : mt.Structs)
+      StructTemplates[q + names::kQualSep + sd->getName()] = sd;
   }
   for (auto *cd : mt.Classes)
     ForeignTemplates[cd] = &mt;
+  for (auto *sd : mt.Structs)
+    ForeignTemplates[sd] = &mt;
   for (const auto &[cd, impls] : mt.Impls)
     TemplateImpls[cd] = impls;
   for (auto *fn : mt.Functions)

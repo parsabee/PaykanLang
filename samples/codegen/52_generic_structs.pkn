@@ -1,0 +1,87 @@
+// 52 — generic structs: templates of values with named fields
+// Exercises: `struct Pair<A, B>` templates, instantiation by type arguments
+//            (`Pair<int, Str>`) and by inference from a constructor call
+//            (`Pair(1, "one")`, from the fields or from an `__init__` of an
+//            `impl` block), `impl Pair<A, B>` blocks whose methods every
+//            instantiation gets, `impl Trait for Pair<A, B>`, bounds
+//            (`struct Keyed<K: Hashable>`), instantiations as fields,
+//            parameters, results, array and tuple elements and type
+//            arguments, inference through a `Pair<A, B>` parameter, and
+//            `toString` rendering the instantiation's name.
+// Every instantiation is its own struct: `Pair<int, Str>` and
+// `Pair<Str, int>` are different types, held in place and copied like any
+// struct, and compiled once per program.
+
+struct Pair<A, B> {
+  a: A;
+  b: B;
+}
+
+impl Pair<A, B> {
+  view fn first() -> view A { return self.a; }
+  fn swapWith(other: inout Pair<A, B>) { t = self.a; self.a = other.a; other.a = t; }
+  fn flipped() -> Pair<B, A> { return Pair<B, A>(self.b, self.a); }
+}
+
+trait Named { view fn name() -> Str; }
+impl Named for Pair<A, B> { view fn name() -> Str { return "pair"; } }
+
+struct Box<T> {
+  v: T;
+}
+
+impl Box<T> {
+  fn __init__(v: T) { self.v = v; }       // Box(3) infers T from it
+  fn set(v: T) { self.v = v; }
+  view fn get() -> view T { return self.v; }
+}
+
+struct Keyed<K: Hashable> {
+  key: K;
+  n: int;
+}
+
+impl Hashable for Keyed<K> {
+  view fn hash() -> int { return self.key.hash(); }
+}
+
+class Holder<T> {
+  p: Pair<T, Str>;                         // an instantiation as a field
+}
+
+impl Holder<T> {
+  fn __init__(x: T) { self.p = Pair<T, Str>(x, "held"); }
+}
+
+fn sumInts(p: view Pair<int, int>) -> int { return p.a + p.b; }
+fn firstOf<A, B>(p: view Pair<A, B>) -> view A { return p.a; }   // A, B inferred
+fn boxed<T>(v: T) -> Box<T> { return Box(v); }
+fn greet<T: Named>(x: view T) -> Str { return x.name(); }
+fn show<T: Show>(x: view T) -> Str { return x.toString(); }
+fn sameHash<T: Hashable>(a: view T, b: view T) -> bool { return a.hash() == b.hash(); }
+
+fn main() -> int {
+  p = Pair(1, "one");                      // Pair<int, Str>
+  q: Pair<int, Str> = Pair<int, Str>(2, "two");
+  p.swapWith(q);
+  f = p.flipped();                         // Pair<Str, int>
+  println(p);
+  println(f);
+  println(show(q) + " " + greet(p) + " " + Str(p.first()) + " " + firstOf(f));
+
+  b = Box(Pair(3, 4));                     // Box<Pair<int, int>>
+  b.set(Pair(5, 6));
+  println(Str(sumInts(b.get())) + " " + show(boxed("s")));
+
+  h = Holder(9);
+  h.p.a = 10;
+  bs: Box<int>[2] = [Box(1), Box(2)];
+  bs[1].v = 7;
+  t = (Pair(1.5, 'c'), Box(True));
+  println(Str(h.p.a) + h.p.b + " " + Str(bs[0].v + bs[1].v) + " " + Str(t.0.b) + Str(t.1.v));
+
+  k = Keyed("k", 1);
+  println(Str(sameHash(k, Keyed("k", 2))) + " " + Str(sameHash(k, Keyed("j", 1))));
+  println(Str(p == Pair(2, "one")) + " " + Str(b == Box(Pair(5, 6))) + " " + Str(Box(1) == Box(2)));
+  return p.a + q.a;
+}

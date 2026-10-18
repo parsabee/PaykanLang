@@ -589,7 +589,8 @@ Val ModuleLowering::visitTranslationUnit(ast::TranslationUnit *node) {
   funcs.insert(funcs.end(), ForeignFuncs.begin(), ForeignFuncs.end());
   std::vector<ast::ClassDecl *> classes = node->getClassDecls();
   classes.insert(classes.end(), ForeignClasses.begin(), ForeignClasses.end());
-  const std::vector<ast::StructDecl *> &structs = node->getStructDecls();
+  std::vector<ast::StructDecl *> structs = node->getStructDecls();
+  structs.insert(structs.end(), ForeignStructs.begin(), ForeignStructs.end());
   for (auto *fn : funcs) {
     declareFunctionPrototype(fn);
     if (fn->isNative())
