@@ -1,0 +1,114 @@
+// 54 — weak references: `weak` locals and fields
+// Exercises: `weak y: Node? = x;` (a local that refers to an object without
+//            keeping it alive, inferred `weak u = x;`, and one starting as
+//            None), `weak parent: Node?;` (a class field: the back link of a
+//            tree that breaks the parent <-> child cycle), reading a weak
+//            reference as a `T?` with `match` and `== None`, assigning and
+//            copying it (a strong copy keeps the object), a lambda capturing
+//            a weak variable weakly (a closure stored in the object it
+//            refers to forms no cycle), and the `None` a weak reference
+//            reads as once its object is gone.
+// Every object is freed with its last strong reference: the tree, the
+// buttons and the closures all go, so the program leaks nothing.
+
+class Node {
+  name: Str;
+  weak parent: Node?;
+  first: Node?;
+  next: Node?;
+}
+
+impl Node {
+  fn __init__(name: Str) {
+    self.name = name;
+    self.parent = None;
+    self.first = None;
+    self.next = None;
+  }
+  fn add(child: Node) {
+    child.parent = self;
+    child.next = self.first;
+    self.first = child;
+  }
+  fn path() -> Str {
+    match self.parent {
+      p: Node { return p.path() + "/" + self.name; }
+      None { return self.name; }
+    }
+  }
+}
+
+class Button {
+  label: Str;
+  onClick: () -> Str;
+}
+
+impl Button {
+  fn __init__(label: Str) {
+    self.label = label;
+    self.onClick = fn() -> Str { return "unwired"; };
+  }
+  fn wire() {
+    weak me: Button? = self;
+    self.onClick = fn() -> Str {
+      match me {
+        b: Button { return "clicked " + b.label; }
+        None { return "no button"; }
+      }
+    };
+  }
+  view fn click() -> Str { return self.onClick(); }
+}
+
+fn show(w: Node?) -> Str {
+  match w {
+    n: Node { return n.name; }
+    None { return "gone"; }
+  }
+}
+
+fn main() -> int {
+  // A tree whose children point back at their parent weakly.
+  root = Node("root");
+  a = Node("a");
+  b = Node("b");
+  root.add(a);
+  a.add(b);
+  println(b.path());
+
+  // A weak local reads as the object while something holds it.
+  weak w: Node? = root;
+  weak u = a;
+  weak e: Node?;
+  println(show(w) + " " + show(u) + " " + show(e) + " " + Str(e == None));
+
+  // Dropping the root frees it: the children lose their parent, and the
+  // weak local reads as None.
+  root = Node("other");
+  println(b.path() + " " + show(w) + " " + Str(w == None));
+
+  // A strong copy taken from a weak reference keeps the object.
+  keep: Node? = u;
+  a = Node("c");
+  println(show(u) + " " + show(keep));
+  keep = None;
+  println(show(u));
+
+  // A closure stored in the object it refers to, through a weak capture.
+  btn = Button("ok");
+  println(btn.click());
+  btn.wire();
+  println(btn.click());
+  f = btn.onClick;
+  btn = Button("another");
+  println(f());
+  return 0;
+}
+// expect-stdout: root/a/b
+// expect-stdout: root a gone True
+// expect-stdout: a/b gone True
+// expect-stdout: a a
+// expect-stdout: gone
+// expect-stdout: unwired
+// expect-stdout: clicked ok
+// expect-stdout: no button

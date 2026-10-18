@@ -184,8 +184,9 @@ ASTContext::ClassTypeBuilder::method(const std::string &name, Type *retTy,
 }
 
 ASTContext::ClassTypeBuilder &
-ASTContext::ClassTypeBuilder::field(const std::string &name, Type *ty) {
-  Ty->addField(name, ty);
+ASTContext::ClassTypeBuilder::field(const std::string &name, Type *ty,
+                                    bool weak) {
+  Ty->addField(name, ty, weak);
   return *this;
 }
 

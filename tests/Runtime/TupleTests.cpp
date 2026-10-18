@@ -52,7 +52,7 @@ PaykanShared *str(const char *s) {
 std::string render(const void *value, const int64_t *layout) {
   PaykanString *s = PaykanTuple_toString(value, layout);
   std::string out(s->data, (size_t)s->len);
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
   return out;
 }
 
@@ -66,11 +66,13 @@ int64_t eq(const void *a, const void *b, const int64_t *layout) {
 
 struct Point {
   PaykanMethod *vtable;
-  PaykanShared *shared;
+  int64_t strong;
+  int64_t weak;
   int64_t x;
 };
 
-void Point_destroy(PaykanObject *self) { Paykan_free(self); }
+// Nothing to tear down: the runtime frees the object after the destroy.
+void Point_destroy(PaykanObject *self) { (void)self; }
 
 PaykanShared *Point_toString(PaykanObject *self) {
   std::string s = "P(" + std::to_string(((Point *)self)->x) + ")";
@@ -100,7 +102,8 @@ int64_t Point_equals(PaykanObject *self, PaykanShared *other) {
 PaykanShared *point(int64_t x) {
   auto *p = static_cast<Point *>(Paykan_malloc(sizeof(Point)));
   p->vtable = Point_vtable;
-  p->shared = nullptr;
+  p->strong = 0;
+  p->weak = 0;
   p->x = x;
   return PaykanShared_new((PaykanObject *)p);
 }
@@ -255,8 +258,8 @@ TEST(TupleToString, ClassElementRendersThroughItsToString) {
             PaykanShared_new((PaykanObject *)PaykanError_new("oops", 4))};
   EXPECT_EQ(render(&t, kRefsLayout), "(P(3), oops)");
   // Rendering borrows the elements.
-  EXPECT_EQ(t.a->refCount, 1);
-  EXPECT_EQ(t.b->refCount, 1);
+  EXPECT_EQ(t.a->strong, 1);
+  EXPECT_EQ(t.b->strong, 1);
   release(t);
 }
 
@@ -296,7 +299,7 @@ TEST(TupleEquals, EachScalarKind) {
   u.s = str("b");
   EXPECT_EQ(eq(&t, &u, kScalarsLayout), 0);
   Paykan_release(u.s);
-  EXPECT_EQ(a->refCount, 1);
+  EXPECT_EQ(a->strong, 1);
   Paykan_release(a);
 }
 
@@ -376,7 +379,7 @@ TEST(TupleEquals, OptionalsComparePresenceThenValue) {
       {false, 2}, {false, std::nan("")}, {false, false}, {false, 'b'}, nullptr};
   EXPECT_EQ(eq(&n1, &n2, kOptionalsLayout), 1);
   EXPECT_EQ(eq(&n2, &n1, kOptionalsLayout), 1);
-  EXPECT_EQ(s->refCount, 1);
+  EXPECT_EQ(s->strong, 1);
   Paykan_release(s);
 }
 
@@ -402,13 +405,13 @@ TEST(TupleEquals, ReferencesCompareThroughEquals) {
   Refs b = {point(3), err};
   EXPECT_EQ(eq(&a, &b, kRefsLayout), 1); // distinct Points, the same x
   EXPECT_EQ(gPointEqualsCalls, 1);
-  EXPECT_EQ(a.a->refCount, 1);
-  EXPECT_EQ(b.a->refCount, 1);
-  EXPECT_EQ(err->refCount, 1);
+  EXPECT_EQ(a.a->strong, 1);
+  EXPECT_EQ(b.a->strong, 1);
+  EXPECT_EQ(err->strong, 1);
   Paykan_release(b.a);
   b.a = point(4);
   EXPECT_EQ(eq(&a, &b, kRefsLayout), 0);
-  EXPECT_EQ(b.a->refCount, 1);
+  EXPECT_EQ(b.a->strong, 1);
   // Error's equals is identity: another Error with the same message is not
   // equal.
   Paykan_release(b.a);

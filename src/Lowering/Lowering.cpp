@@ -51,6 +51,7 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanPanicIndex, {{kI64, kI64}, kVoid}},
     {kPaykanStringNew, {{kPtr, kI64}, kObj}},
     {kPaykanStringDestroy, {{kObj}, kVoid}},
+    {kPaykanDispose, {{kObj}, kVoid}},
     {kPaykanStringConcat, {{kObj, kObj}, kObj}},
     {kPaykanStringCharAt, {{kObj, kI64}, kChr}},
     {kPaykanStringFromInt, {{kI64}, kObj}},
@@ -153,6 +154,14 @@ bool ModuleLowering::Scope::isOwned(const std::string &name) const {
   return Parent ? Parent->isOwned(name) : false;
 }
 
+bool ModuleLowering::Scope::isWeak(const std::string &name) const {
+  if (WeakVars.count(name))
+    return true;
+  if (Locals.count(name))
+    return false;
+  return Parent ? Parent->isWeak(name) : false;
+}
+
 ast::Type *ModuleLowering::Scope::lookupASTType(const std::string &name) const {
   auto it = ASTTypeMap.find(name);
   if (it != ASTTypeMap.end())
@@ -181,6 +190,14 @@ void ModuleLowering::Scope::declare(const std::string &name, pir::LocalId local,
   }
   if (memHoldsRefs(astTy))
     MemVars.push_back({local, astTy});
+}
+
+void ModuleLowering::Scope::declareWeak(const std::string &name,
+                                        pir::LocalId local, ast::Type *astTy) {
+  Locals[name] = local;
+  ASTTypeMap[name] = astTy;
+  WeakVars.insert(name);
+  DeclOrder.push_back({local, astTy, true});
 }
 
 void ModuleLowering::Scope::declareUnowned(const std::string &name,
@@ -672,6 +689,10 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
   // A function value is a closure's box, fresh (LoweringClosure.cpp).
   if (isFunctionValueExpr(expr))
     return true;
+  // A `weak` variable reads as a fresh +1 box (or null): its slot holds a
+  // weak reference, never a box to borrow.
+  if (auto *id = ast::dyn_cast<ast::Identifier>(expr))
+    return CurrentScope && CurrentScope->isWeak(id->getName());
   // An array's (or a slice's or a tuple's) element slot holds the box
   // itself.
   if (ast::isa<ast::SubscriptExpr>(expr) || ast::isa<ast::TupleIndexExpr>(expr))
@@ -701,6 +722,11 @@ bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
   if (valueOptionalType(expr))
     return false;
   if (isFunctionValueExpr(expr))
+    return true;
+  // A `weak` variable or field is loaded as a fresh +1 box (or null).
+  if (auto *id = ast::dyn_cast<ast::Identifier>(expr))
+    return CurrentScope && CurrentScope->isWeak(id->getName());
+  if (isWeakFieldAccess(expr))
     return true;
   // A struct's field is an element of a value held in memory, like a
   // tuple's; a class's is in its object.
@@ -802,7 +828,7 @@ void ModuleLowering::destroyStringTempIfOwned(const Val &v) {
   OwnedStringTemps.erase(v.id());
   if (B.isTerminated())
     return;
-  callRuntime(kPaykanStringDestroy, {v});
+  callRuntime(kPaykanDispose, {v});
 }
 
 ExprValue ModuleLowering::classifyExpr(ast::Expr *expr, const Val &val) const {
@@ -936,7 +962,10 @@ void ModuleLowering::emitScopeCleanup(Scope &scope) {
   for (auto it = scope.DeclOrder.rbegin(); it != scope.DeclOrder.rend(); ++it) {
     assert(it->ASTType && ast::isRefType(it->ASTType) &&
            "DeclOrder must only contain ref-typed variables");
-    emitRelease(B.load(it->Local));
+    if (it->Weak)
+      B.weakRelease(B.load(it->Local));
+    else
+      emitRelease(B.load(it->Local));
   }
   for (auto it = scope.MemVars.rbegin(); it != scope.MemVars.rend(); ++it)
     emitMemRelease(B.localAddr(it->Local, "mem.addr"), it->ASTType);
@@ -1063,8 +1092,12 @@ void ModuleLowering::emitClassVarRebind(const std::string &name,
       newBox = emitSharedNew(val, "new.box");
   }
 
-  // Release the old box (null-safe) and store the new one.
-  storeVarBox(name, newBox);
+  // Release the old box (null-safe) and store the new one; a `weak`
+  // variable takes a weak reference to what the new box names.
+  if (CurrentScope->isWeak(name))
+    storeWeakVar(name, newBox);
+  else
+    storeVarBox(name, newBox);
 }
 
 Val ModuleLowering::visitAssignStmt(ast::AssignStmt *node) {
@@ -1102,9 +1135,11 @@ Val ModuleLowering::visitAssignStmt(ast::AssignStmt *node) {
   if (astTy && ast::isRefType(astTy)) {
     ast::ClassType *rhsCT = resolveExprClassType(node->getValue());
     // Every assignable ref-typed variable owns its box (match-arm bindings
-    // included) or is an `inout` parameter, a reference to the caller's;
-    // only `self` is unowned, and Sema rejects assigning to it.
-    if (!holdsBox(node->getVarName())) {
+    // included), holds a weak reference, or is an `inout` parameter, a
+    // reference to the caller's; only `self` is unowned, and Sema rejects
+    // assigning to it.
+    if (!holdsBox(node->getVarName()) &&
+        !CurrentScope->isWeak(node->getVarName())) {
       reportInternalError("assignment to unowned variable '" +
                           node->getVarName() + "'");
       return val;
@@ -1216,6 +1251,22 @@ Val ModuleLowering::visitVarDecl(ast::VarDecl *node) {
   ast::Type *declTy = canonicalizeDeclType(node->getType());
   Type pirTy = declTy ? toPIRType(declTy) : Type::Void;
 
+  // `weak y: T? = e;`: a weak reference to what the initializer names
+  // (none for a missing initializer or `None`), in a `weak` local.
+  if (node->isWeak()) {
+    Val box = node->getInitExpr() ? emitAsShared(node->getInitExpr())
+                                  : Val::null(Type::Box);
+    if (!box)
+      return Val();
+    Val weak = B.weakNew(box, node->getName() + ".weak");
+    if (!box.isNull())
+      emitRelease(box); // the +1 the initializer handed over
+    pir::LocalId local = B.addLocal(node->getName(), Type::Weak);
+    B.store(local, weak);
+    CurrentScope->declareWeak(node->getName(), local, declTy);
+    return Val();
+  }
+
   Val initVal;
   if (node->getInitExpr()) {
     // Every ref-typed variable holds an owned box: a class value,
@@ -1307,7 +1358,8 @@ void ModuleLowering::emitImplicitReturn(const pir::Signature &sig) {
   case Type::OptChar:
     B.emitRet(B.none(sig.Ret));
     break;
-  case Type::Mem: // never a result: the verifier rejects one
+  case Type::Mem:  // never a result: the verifier rejects one
+  case Type::Weak: // never a result either (a weak is loaded as a box)
     break;
   }
 }

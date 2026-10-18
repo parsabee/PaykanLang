@@ -31,7 +31,7 @@ int64_t equalsWithNullOther(int64_t (*fn)(PaykanObject *, PaykanShared *),
 TEST(EqualsNullOther, Object) {
   PaykanObject *obj = PaykanObject_new();
   EXPECT_EQ(equalsWithNullOther(PaykanObject_equals, obj), 0);
-  PaykanObject_destroy(obj);
+  Paykan_dispose(obj);
 }
 
 TEST(EqualsNullOther, NoneSingleton) {
@@ -43,13 +43,13 @@ TEST(EqualsNullOther, NoneSingleton) {
 TEST(EqualsNullOther, String) {
   PaykanString *s = PaykanString_new("hello", 5);
   EXPECT_EQ(equalsWithNullOther(PaykanString_equals, (PaykanObject *)s), 0);
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(EqualsNullOther, File) {
   PaykanFile *f = PaykanFile_new();
   EXPECT_EQ(equalsWithNullOther(PaykanFile_equals, (PaykanObject *)f), 0);
-  PaykanFile_destroy((PaykanObject *)f);
+  Paykan_dispose((PaykanObject *)f);
 }
 
 TEST(EqualsNullOther, Error) {

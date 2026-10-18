@@ -136,7 +136,6 @@ class C {
   }
 }
 fn @C.destroy(%self: obj) -> void {
-  free %self
   ret
 }
 fn @main() -> i64 {

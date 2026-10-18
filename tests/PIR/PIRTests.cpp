@@ -97,7 +97,6 @@ fn @K_w() -> i64 {
 }
 
 fn @K.destroy(%self.1: obj) -> void {
-  free %self.1
   ret
 }
 
@@ -106,7 +105,6 @@ fn @K_destroy(%self.1: obj) -> void {
 }
 
 fn @"Pair<Str, int>.destroy"(%self.1: obj) -> void {
-  free %self.1
   ret
 }
 
@@ -233,7 +231,7 @@ class "Box<int>" {
   field v: i64
   vtable { destroy = @d : (obj) -> void }
 }
-fn @d(%self: obj) -> void { free %self  ret }
+fn @d(%self: obj) -> void { ret }
 fn @main() -> i64 {
   local %x: box
   store %x, null
@@ -272,7 +270,6 @@ class "Pair<Str, int>" {
 }
 
 fn @"Pair<Str, int>_destroy"(%self.1: obj) -> void {
-  free %self.1
   ret
 }
 
@@ -446,7 +443,6 @@ class C {
   }
 }
 fn @C.destroy(%self: obj) -> void {
-  free %self
   ret
 }
 fn @main() -> i64 {
@@ -491,7 +487,6 @@ class C {
   }
 }
 fn @C.destroy(%self: obj) -> void {
-  free %self
   ret
 }
 fn @main() -> i64 {
@@ -527,6 +522,76 @@ fn @main() -> i64 {
 // Inline optionals: `some` takes a payload type, `is_some` / `unwrap` an
 // optional, and an optional is neither compared, cast, computed with nor
 // passed to a runtime or native function.
+TEST(PIR, WeakReferencesRoundTripAndVerify) {
+  const char *src = R"(module "m"
+class Node {
+  field next: box
+  field parent: weak
+  vtable {
+    destroy = @Node.destroy : (obj) -> void
+  }
+}
+fn @Node.destroy(%self: obj) -> void {
+  %n = field.load %self, Node.next
+  release %n
+  %p = field.load %self, Node.parent
+  weak.release %p
+  ret
+}
+fn @main() -> i64 {
+  local %w: weak
+  %o = new Node
+  %b = box %o
+  %wk = weak.new %b
+  store %w, %wk
+  %w2 = load %w
+  %l = weak.load %w2
+  release %l
+  field.store %o, Node.parent, %wk
+  release %b
+  ret 0
+}
+)";
+  EXPECT_EQ(verifyText(src), "");
+  ParseError err;
+  auto p = parseProgram(src, err);
+  ASSERT_TRUE(p.has_value()) << err.str();
+  if (!p.has_value())
+    return;
+  std::string printed = toString(*p);
+  for (const char *piece :
+       {"field parent: weak", "local %w.0: weak", " = weak.new %b.",
+        " = weak.load %w2.", "weak.release %p."})
+    EXPECT_NE(printed.find(piece), std::string::npos) << piece << "\n"
+                                                      << printed;
+  auto again = parseProgram(printed, err);
+  ASSERT_TRUE(again.has_value()) << err.str();
+  EXPECT_EQ(toString(*again), printed);
+}
+
+TEST(PIRVerifier, ChecksWeakReferences) {
+  std::string errs = verifyText(R"(module "m"
+fn @main() -> i64 {
+  %a = weak.new 1
+  %b = weak.load null box
+  %c = weak.new null box
+  weak.release %c
+  weak.release null box
+  %d = cast %c to i64
+  %e = cmp eq %c, %c
+  ret 0
+}
+)");
+  for (const char *e : {"operand of weak.new 1 has type i64, expected box",
+                        "operand of weak.load null box has type box, expected "
+                        "weak",
+                        "operand of weak.release null box has type box, "
+                        "expected weak",
+                        "cannot cast weak to i64"})
+    EXPECT_NE(errs.find(e), std::string::npos) << e << "\n" << errs;
+  EXPECT_EQ(errs.find("%c = weak.new"), std::string::npos) << errs;
+}
+
 TEST(PIRVerifier, ChecksOptionals) {
   std::string errs = verifyText(R"(module "m"
 extern fn @$rt.Paykan_take(opt_i64) -> void

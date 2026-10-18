@@ -165,11 +165,16 @@ private:
     std::unordered_map<std::string, ast::Type *> ASTTypeMap;
     /// Variables whose slot stores an owned PaykanShared* box.
     std::unordered_set<std::string> SharedVars;
+    /// `weak` variables (docs/language/08-memory-model.md): their slot
+    /// stores a weak reference, loaded as a fresh +1 box on every read.
+    std::unordered_set<std::string> WeakVars;
     struct VarMeta {
       pir::LocalId Local;
       ast::Type *ASTType;
+      bool Weak = false; // released with weak.release, not release
     };
-    /// Owned variables declared in this scope, in declaration order.
+    /// Owned variables declared in this scope, in declaration order (the
+    /// `weak` ones among them).
     std::vector<VarMeta> DeclOrder;
     /// Values held in memory, holding references, declared in this scope:
     /// their references are released at its exit.
@@ -185,9 +190,16 @@ private:
     bool hasLocal(const std::string &name) const;
     pir::LocalId lookup(const std::string &name) const; // asserts found
     bool isOwned(const std::string &name) const;
+    /// Whether @p name is a `weak` variable (of this scope or an enclosing
+    /// one, up to the scope that declares it).
+    bool isWeak(const std::string &name) const;
     ast::Type *lookupASTType(const std::string &name) const;
     void updateASTType(const std::string &name, ast::Type *newTy);
     void declare(const std::string &name, pir::LocalId local, ast::Type *astTy);
+    /// A `weak` variable of type @p astTy (`T?` of a class), whose local
+    /// (of type `weak`) is released with weak.release at scope exit.
+    void declareWeak(const std::string &name, pir::LocalId local,
+                     ast::Type *astTy);
     /// A borrowed, never-released raw-object binding.  Only `self` is
     /// declared this way: the caller owns the object for the whole call, and
     /// Sema rejects assignments to `self`.  Match-arm bindings are ordinary
@@ -536,11 +548,15 @@ private:
   /// A closure class @p name with a field per capture and the vtable
   /// [destroy, toString, equals, call] (the functions declared, bodies to
   /// come).
+  /// @p captureWeak marks the captures of `weak` variables: a weak field
+  /// of the closure, loaded as a strong reference for a call's duration.
   pir::Class *declareClosureClass(const std::string &name,
                                   const std::vector<ast::Type *> &captureTys,
+                                  const std::vector<bool> &captureWeak,
                                   const pir::Signature &callSig);
   void emitClosureDestructor(const std::string &name,
-                             const std::vector<ast::Type *> &captureTys);
+                             const std::vector<ast::Type *> &captureTys,
+                             const std::vector<bool> &captureWeak);
   /// The class and functions of lambda @p node (made once): its name.
   const std::string &lowerLambda(ast::LambdaExpr *node);
   /// A new closure of @p node, its captures copied in: a fresh owned box.
@@ -719,6 +735,14 @@ private:
   /// Put the +1 box @p newBox in variable @p name's storage (holdsBox),
   /// releasing the box it held.
   void storeVarBox(const std::string &name, const Val &newBox);
+  /// A fresh +1 box (or null) loaded from the `weak` variable @p name.
+  Val loadWeakVar(const std::string &name);
+  /// Make the `weak` variable @p name refer to what the +1 box @p box names
+  /// (consuming @p box), dropping the weak reference it held.
+  void storeWeakVar(const std::string &name, const Val &box);
+  /// Whether @p e reads a `weak` field of a class (`obj.next` with `weak
+  /// next: Node?`): such a read is a fresh +1 box, like a call's result.
+  bool isWeakFieldAccess(const ast::Expr *e) const;
   /// The address passed for the `inout` argument @p arg: a variable's
   /// `local.addr`, the address an `inout` parameter holds, or a field's
   /// `field.addr`.  A +1 box the caller keeps for the duration of the call

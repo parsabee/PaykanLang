@@ -111,6 +111,10 @@ Val ModuleLowering::ExprEmitter::visitIdentifier(ast::Identifier *node) {
   if (ast::Type *t = L.CurrentScope->lookupASTType(node->getName());
       ast::isMemType(t) || ast::dyn_cast<ast::SliceType>(t))
     return L.emitMemAddress(node);
+  // A `weak` variable: a fresh +1 box of its object, or null once the
+  // object is gone (exprProducesFreshBox).
+  if (L.CurrentScope->isWeak(node->getName()))
+    return L.loadWeakVar(node->getName());
   pir::LocalId local = L.CurrentScope->lookup(node->getName());
   Val val = L.B.load(local, node->getName());
   // An `inout` parameter: read the caller's storage (a box: borrowed, and
@@ -1261,6 +1265,10 @@ Val ModuleLowering::visitDestructureStmt(ast::DestructureStmt *node) {
     pir::LocalId local = owner->lookup(name);
     ast::Type *varTy = CurrentScope->lookupASTType(name);
     if (varTy && ast::isRefType(varTy)) {
+      if (CurrentScope->isWeak(name)) {
+        storeWeakVar(name, v);
+        continue;
+      }
       if (!holdsBox(name)) {
         reportInternalError("destructuring into unowned variable '" + name +
                             "'");

@@ -18,15 +18,15 @@ PaykanMethod PaykanError_vtable[PAYKAN_OBJECT_SLOTS] = {
 PaykanError *PaykanError_new(const char *msg, int64_t len) {
   PaykanError *e = (PaykanError *)Paykan_malloc(sizeof(PaykanError));
   e->vtable = PaykanError_vtable;
-  e->shared = NULL; // not yet boxed (unique-box invariant)
+  e->strong = 0; // unowned until boxed
+  e->weak = 0;
   e->message = PaykanString_new(msg, len);
   return e;
 }
 
 void PaykanError_destroy(PaykanObject *self) {
   PaykanError *e = (PaykanError *)self;
-  PaykanString_destroy((PaykanObject *)e->message);
-  Paykan_free(e);
+  Paykan_dispose((PaykanObject *)e->message); // the message was never boxed
 }
 
 PaykanShared *PaykanError_toString(PaykanObject *self) {

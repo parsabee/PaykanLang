@@ -90,18 +90,25 @@ paykan heap stats:
   ** LEAK: 10 block(s) / 202 byte(s) not freed **
 ```
 
-PaykanLang currently has no cycle collector and no weak references (both are on the
-roadmap). Until then, avoid cycles among long-lived objects, or break a cycle yourself
-before the objects become unreachable by setting one of the links to `None`:
+PaykanLang has no cycle collector. The fix is a **weak reference**: a field (or a local)
+declared with `weak` refers to an object without counting as a reference to it, so it never
+keeps the object alive. Its type is an optional, because it reads as `None` once the object
+is gone. Make the back link weak and the cycle is no cycle at all:
 
 ```pkn
 class Person {
   name: Str;
-  friend: Person?;
+  weak friend: Person?;
 }
 
 impl Person {
-  fn __init__(name: Str) { self.name = name; }
+  fn __init__(name: Str) { self.name = name; self.friend = None; }
+  fn friendName() -> Str {
+    match self.friend {
+      f: Person { return f.name; }
+      None { return "nobody"; }
+    }
+  }
 }
 
 fn main() -> int {
@@ -109,8 +116,9 @@ fn main() -> int {
   b = Person("Grace");
   a.friend = b;
   b.friend = a;
-  println(a.name + " and " + b.name + " are friends");
-  b.friend = None;       // break the cycle: now a and b can be freed
+  println(a.name + " and " + a.friendName() + " are friends");
+  b = Person("Alan");    // Grace was held only by b: she is freed
+  println(a.name + " and " + a.friendName() + " are friends");
   return 0;
 }
 ```
@@ -119,11 +127,18 @@ Output:
 
 ```
 Ada and Grace are friends
+Ada and nobody are friends
 ```
 
-This version ends with `live blocks : 0`. Structures where links only point one way, such
-as a list where each node refers to the next, or a tree where parents refer to children but
-not back, never form cycles and need no care.
+This version ends with `live blocks : 0`. A weak field is read like any optional: `match`
+unwraps it, `== None` tests it, and copying it into an ordinary variable or field takes a
+strong reference that keeps the object alive for as long as that copy lives. A local can be
+weak too (`weak w = a;`), and a lambda that captures a weak local captures it weakly, so a
+closure stored in an object can refer to that object without keeping it alive. Where no
+link is naturally the weak one, you can still break a cycle by hand, setting one of the
+links to `None` before the objects become unreachable. Structures where links only point one
+way, such as a list where each node refers to the next, or a tree where parents refer to
+children but not back, never form cycles and need no care.
 
 ## No `mov`
 

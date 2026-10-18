@@ -43,7 +43,6 @@ static void PaykanBuffer_destroy(PaykanObject *self) {
   PaykanBuffer *buf = (PaykanBuffer *)self;
   buffer_drop(buf, 0, buf->len);
   Paykan_free(buf->data);
-  Paykan_free(buf);
 }
 
 /// The buffer whose box is at @p box (an `inout Obj` argument).
@@ -96,7 +95,8 @@ PaykanShared *PaykanBuffer_new(void *t, int64_t n) {
   int64_t len = buffer_count("of", n);
   PaykanBuffer *buf = (PaykanBuffer *)Paykan_malloc(sizeof(PaykanBuffer));
   buf->vtable = PaykanBuffer_vtable;
-  buf->shared = NULL; // not yet boxed (unique-box invariant)
+  buf->strong = 0; // unowned until boxed
+  buf->weak = 0;
   buf->type = t;
   buf->data = NULL;
   buf->len = 0;
