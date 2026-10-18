@@ -3286,8 +3286,10 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     }
 
     // The variable is still declared after this error.  A local borrow may
-    // name a `view` (checkLocalBorrow).
-    if (node->getMode() == ast::ParamMode::Value)
+    // name a `view` (checkLocalBorrow), and so may a `weak` local: it takes
+    // no reference of its own (a weak reference is not a copy of the
+    // view), and what it reads later is a fresh reference to the object.
+    if (node->getMode() == ast::ParamMode::Value && !node->isWeak())
       viewOk = checkViewNotStored(node->getInitExpr(), initTy);
     if (declTy) {
       if (!checkAssignable(declTy, initTy, node->getInitExpr())) {
