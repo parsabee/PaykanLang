@@ -1,0 +1,79 @@
+// 54 — private members: the `__` prefix
+// Exercises: `__` fields and methods of classes and structs read, assigned
+//            and called from the type's own methods, `impl` blocks, trait
+//            impls, `static fn`s and lambdas inside methods (and from the
+//            type's other instances); a `__` free function and a `__` class
+//            used anywhere in the module; a generic class with a private
+//            field, whose instantiations share the template's methods; the
+//            default `__init__` taking private fields; `toString` and `==`
+//            seeing every field.
+// Nothing changes at run time: privacy is a compile-time check.
+
+class Counter {
+  __count: int;
+  step: int;
+  fn tick() { self.__bump(self.step); }
+  view fn value() -> int { return self.__count; }
+  fn __bump(by: int) { self.__count = self.__count + by; }
+  fn adder() -> (int) -> int { return fn(d: int) -> int { return self.__count + d; }; }
+}
+
+impl Counter {
+  static fn make(n: int) -> Counter { c = Counter(0, n); c.__count = 10; return c; }
+  fn copyFrom(o: view Counter) { self.__count = o.__count; }
+}
+
+trait Named { view fn name() -> Str; }
+impl Named for Counter { view fn name() -> Str { return "Counter(" + Str(self.__count) + ")"; } }
+
+struct P {
+  __x: int;
+  y: int;
+}
+
+impl P {
+  fn __set(v: int) { self.__x = v; }
+  fn bump() { self.__set(self.__x + 1); }
+  view fn x() -> int { return self.__x; }
+  static fn origin() -> P { p = P(0, 0); p.__x = 1; return p; }
+}
+
+class __Node { v: int; next: __Node?; }
+fn __sum(n: view __Node) -> int {
+  match n.next {
+    m: __Node { return n.v + __sum(m); }
+    None { return n.v; }
+  }
+}
+
+class Box<T> {
+  __v: T;
+  fn get() -> T { return self.__v; }
+  fn set(v: T) { self.__v = v; }
+}
+impl Box<T> {
+  fn __init__(v: T) { self.__v = v; }
+  fn take(o: Box<T>) { self.__v = o.__v; }       // another instance's private field
+}
+
+fn main() -> int {
+  c = Counter::make(3);
+  c.tick();
+  d = Counter(0, 1);
+  d.copyFrom(c);
+  add = c.adder();
+  println(Str(c.value()) + " " + Str(d.value()) + " " + c.name() + " " + Str(add(5)));
+
+  p = P::origin();
+  p.bump();
+  q = P(2, 3);                              // the private field, as a constructor argument
+  println(Str(p.x()) + " " + Str(q.x()) + " " + q.toString() + " " + Str(p == P(2, 0)));
+
+  chain = __Node(1, __Node(2, __Node(3, None)));
+  b = Box("s");
+  b.set("t");
+  o = Box("u");
+  b.take(o);
+  println(Str(__sum(chain)) + " " + b.get());
+  return 0;
+}

@@ -12,6 +12,7 @@ add_library(paykan_sema STATIC
     SemaTraits.cpp
     SemaStruct.cpp
     SemaLambda.cpp
+    SemaVisibility.cpp
 )
 target_link_libraries(paykan_sema
     PUBLIC  paykan_diag

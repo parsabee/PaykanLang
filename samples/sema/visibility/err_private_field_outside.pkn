@@ -1,0 +1,7 @@
+// A `__` field is the class's own: not readable or assignable from main.
+class Counter { __count: int; }
+fn main() -> int {
+  c = Counter(0);
+  c.__count = 5;                 // error: '__count' is private to 'Counter'
+  return c.__count;
+}

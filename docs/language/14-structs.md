@@ -176,6 +176,14 @@ field (`no field 'z' in struct 'A'`).
 
 ---
 
+### Private fields and methods
+
+A field or a method whose name starts with two underscores is private to the struct, exactly
+as for a class ([Classes](04-classes.md#private-fields-and-methods)): `self.__n` is read and
+assigned only in the struct's own methods, in its body or its `impl` blocks and trait impls;
+`p.__n` elsewhere is `'__n' is private to 'P': it is reachable only from its own methods`.
+The default constructor still takes every field, private ones included.
+
 ## Structs as Values
 
 A struct is a value, like a tuple or an `int`: it is held in place and assigning it,
@@ -554,6 +562,7 @@ Point(x: 4, y: 2) 6 True
 | Error | Trigger |
 |-------|---------|
 | No fields | `struct A { }` |
+| Private member used outside the struct | `p.__n` or `p.__m()` outside the struct's methods: `'__n' is private to 'P': it is reachable only from its own methods` |
 | Superclass | `struct A : B { ... }` |
 | Method in the body | `struct A { x: int; fn f() {} }` |
 | Duplicate field | `struct A { x: int; x: int; }` |

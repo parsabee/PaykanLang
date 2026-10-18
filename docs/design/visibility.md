@@ -54,10 +54,14 @@ shadowing error if the name is public in the superclass.
 
 The check is made where a member is resolved, on the owner of the member (the
 class or struct that declares it, found by walking the superclass chain) and
-the class context of the code (`CurrentClassCtx`): the two must be the same
-type.  A free function, a lambda inside a method (which keeps the method's
-class context), a trait's default method and the body of another type all
-fail it.
+the class context of the code (`CurrentClassCtx`, or the type a `static fn`
+belongs to): the two must be the same type, or instantiations of the same
+template (`List<int>`'s methods reach `List<Str>`'s private members: the
+methods are the template's).  A free function, the body of another type and
+a subclass's methods all fail it; a lambda inside a method keeps the
+method's class context.  A private method is still a method: a subclass's
+`__m` overrides it as any method would, a later change may make private
+methods non-virtual.
 
 ## Free functions and types: private to the module
 
@@ -126,3 +130,8 @@ Each with the default taken here.
    reached by an exported template.  Leaving them out would need a layout
    record of its own in the format, which stays fixed until 0.2.0.
 5. **Should a single underscore mean anything?**  No.
+6. **Should a private type's name be the module's own too?**  Not yet: type
+   names are global across an import graph (one canonical name per type, as
+   `docs/language/06-modules.md` says), so two modules still cannot both
+   declare a `__Node`.  Privacy here is about reach, not naming; module-local
+   canonical names are a 0.2.0 change (`docs/design/pkm.md` §3.6).

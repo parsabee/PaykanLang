@@ -1027,6 +1027,88 @@ TEST(Pkm, FunctionTypesAcrossModules) {
   fs::remove_all(dir);
 }
 
+// A module's `__` names are its own (docs/design/visibility.md): an
+// importer cannot write them, from the source or from the `.pkm`, while the
+// module's public functions, static fns and exported templates keep using
+// them; a public class's `__` field or method is that class's own.
+TEST(Pkm, PrivateNamesAreTheModulesOwn) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_private_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  fs::create_directories(dir / "lib");
+  writeFile(dir / "lib" / "shapes.pkn",
+            "class __Node { v: int; }\n"
+            "fn __helper(n: int) -> int { return n + 1; }\n"
+            "enum __Mode { A, B }\n"
+            "class Pub { __n: int; v: int;\n"
+            "  fn get() -> int { return __helper(self.__n); } }\n"
+            "impl Pub { static fn __mk() -> Pub { return Pub(1, 2); }\n"
+            "  static fn mk() -> Pub { return Pub::__mk(); } }\n"
+            "class Gen<T> { __v: T;\n"
+            "  fn get() -> T { return self.__v + __helper(0); } }\n"
+            "impl Gen<T> { fn __init__(v: T) { self.__v = v; } }\n"
+            "class __GenHidden<T> { v: T; }\n"
+            "fn useHidden() -> int { h = __GenHidden<int>(3); return h.v; }\n");
+  writeFile(dir / "main.pkn",
+            "import lib::shapes;\n"
+            "fn main() -> int {\n"
+            "  p = shapes::Pub::mk();\n"
+            "  println(Str(p.get()) + \" \" + Str(shapes::useHidden()));\n"
+            "  return 0;\n}\n");
+  // A template's body uses the module's private names in the importer
+  // (templates come from the source: a `.pkm` carries none, #160).
+  writeFile(dir / "gen.pkn", "import lib::shapes;\n"
+                             "fn main() -> int {\n"
+                             "  g = shapes::Gen(4);\n"
+                             "  println(Str(g.get()));\n"
+                             "  return 0;\n}\n");
+  writeFile(dir / "bad.pkn", "import lib::shapes;\n"
+                             "fn main() -> int {\n"
+                             "  a = shapes::__helper(1);\n"
+                             "  n = shapes::__Node(1);\n"
+                             "  m: shapes::__Mode = shapes::__Mode::A;\n"
+                             "  p = shapes::Pub::__mk();\n"
+                             "  q = shapes::Pub::mk();\n"
+                             "  r = q.__n;\n"
+                             "  h = shapes::__GenHidden<int>(1);\n"
+                             "  b: __Node = n;\n"
+                             "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  auto check = [&](const char *when) {
+    auto ok = paykan("--track-heap main.pkn");
+    EXPECT_EQ(ok.exitCode, 0) << when << "\n" << ok.out;
+    EXPECT_TRUE(contains(ok.out, "2 3\n")) << when << "\n" << ok.out;
+    EXPECT_TRUE(contains(ok.out, "live blocks       : 0")) << when << "\n"
+                                                           << ok.out;
+    auto bad = paykan("--check-only bad.pkn");
+    EXPECT_NE(bad.exitCode, 0) << when;
+    for (const char *line :
+         {"'shapes::__helper' is private to module 'lib::shapes'",
+          "'shapes::__Node' is private to module 'lib::shapes'",
+          "'shapes::__Mode' is private to module 'lib::shapes'",
+          "'__mk' is private to 'Pub': it is reachable only from its own "
+          "methods",
+          "'__n' is private to 'Pub': it is reachable only from its own "
+          "methods",
+          "'shapes::__GenHidden' is private to module 'lib::shapes'",
+          "'__Node' is private to module 'lib::shapes'"})
+      EXPECT_TRUE(contains(bad.out, line)) << when << ": " << line << "\n"
+                                           << bad.out;
+  };
+  check("from source");
+  auto gen = paykan("--track-heap gen.pkn");
+  EXPECT_EQ(gen.exitCode, 0) << gen.out;
+  EXPECT_TRUE(contains(gen.out, "5\n")) << gen.out;
+  EXPECT_TRUE(contains(gen.out, "live blocks       : 0")) << gen.out;
+  ASSERT_EQ(paykan("--emit-pkm lib/shapes.pkn").exitCode, 0);
+  fs::remove(dir / "lib" / "shapes.pkn");
+  check("from the .pkm");
+  fs::remove_all(dir);
+}
+
 // An instantiation whose type argument is a function type keeps its name
 // across modules: the `>` of the `->` is not the instantiation's closing
 // bracket, and the arguments after it are still its own (`Pair<(int) ->

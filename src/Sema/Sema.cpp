@@ -605,6 +605,17 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
       if (self)
         return self;
     }
+    // A private type of an imported module, spelled bare: it is that
+    // module's own (a qualified spelling is reported below).
+    if (names::isPrivateName(ct->getName()) &&
+        ct->getName().find(names::kQualSep) == std::string::npos &&
+        ct->getName().find('<') == std::string::npos) // not an instantiation
+      if (auto o = ImportedTypeOrigins.find(ct->getName());
+          o != ImportedTypeOrigins.end()) {
+        error(loc, "'" + ct->getName() + "' is private to module '" +
+                       o->second + "'");
+        return nullptr;
+      }
     // The parser emits a ClassType stub for any unknown type name; it may in
     // fact be an enum or a struct, which are resolved here before falling
     // back to classes.
@@ -630,6 +641,8 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
                      ct->getName() + ">')");
       return nullptr;
     }
+    if (reportPrivateImport(ct->getName(), loc))
+      return nullptr;
     if (!isFailedImportUse(ct->getName()))
       error(loc, context + " has unknown class type '" + ct->getName() + "'");
     return nullptr;
@@ -1018,6 +1031,8 @@ ast::Type *Sema::ExprChecker::visitEnumValueExpr(ast::EnumValueExpr *node) {
     // value: its function type.
     const std::string qualified =
         node->getEnumName() + names::kQualSep + node->getVariantName();
+    if (!S.checkStaticMemberUse(qualified, node->getLocation()))
+      return nullptr;
     if (const FunctionSig *sig = S.lookupFunction(qualified)) {
       if (!S.checkFunctionValue(qualified, *sig, node->getLocation()))
         return nullptr;
@@ -1026,6 +1041,9 @@ ast::Type *Sema::ExprChecker::visitEnumValueExpr(ast::EnumValueExpr *node) {
       node->setResolvedType(fnt);
       return fnt;
     }
+    if (S.reportPrivateImport(qualified, node->getLocation()) ||
+        S.reportPrivateImport(node->getEnumName(), node->getLocation()))
+      return nullptr;
     if (!S.isFailedImportUse(node->getEnumName()))
       S.error(node->getLocation(),
               "unknown enum type '" + node->getEnumName() + "'");
@@ -1205,6 +1223,9 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
 }
 
 ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
+  // `C::__m(...)`: a private static method is its type's own.
+  if (!S.checkStaticMemberUse(node->getCalleeName(), node->getLocation()))
+    return nullptr;
   // A call through a function value (`f(1)` with `f: (int) -> int`): the
   // variable, which shadows a function of the same name, is read as any
   // other (its liveness, borrows and capture checked), then called.
@@ -1384,6 +1405,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
       return sig->ReturnType;
     }
   if (!sig) {
+    if (S.reportPrivateImport(node->getCalleeName(), node->getLocation()))
+      return nullptr;
     if (!S.isFailedImportUse(node->getCalleeName()))
       S.error(node->getLocation(), "call to undeclared function '" +
                                        displayName(node->getCalleeName()) +
@@ -1530,6 +1553,11 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                             : st->findField(node->getMethodName());
     auto *fnt = fieldTy ? ast::dyn_cast<ast::FunctionType>(fieldTy) : nullptr;
     if (fnt) {
+      if (!S.checkMemberAccess(ct ? static_cast<ast::Type *>(
+                                        S.fieldOwner(ct, node->getMethodName()))
+                                  : static_cast<ast::Type *>(st),
+                               node->getMethodName(), node->getLocation()))
+        return nullptr;
       ast::Type *ret =
           S.checkFunctionValueCall(fnt, node->getArguments(),
                                    node->getMethodName(), node->getLocation());
@@ -1551,6 +1579,13 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                                      "' on type '" + ownerName + "'");
     return nullptr;
   }
+
+  // A private method is its type's own.
+  if (!S.checkMemberAccess(ct ? static_cast<ast::Type *>(
+                                    S.declaringClass(ct, node->getMethodName()))
+                              : static_cast<ast::Type *>(st),
+                           node->getMethodName(), node->getLocation()))
+    return nullptr;
 
   // `destroy` is the compiler-generated ARC destructor; it runs automatically
   // when the last reference is released. Calling it directly would free a
@@ -1647,6 +1682,8 @@ Sema::ExprChecker::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
   // A struct's field, by name.
   if (auto *st = ast::dyn_cast<ast::StructType>(recvTy)) {
     if (auto *fty = st->findField(node->getFieldName())) {
+      if (!S.checkMemberAccess(st, node->getFieldName(), node->getLocation()))
+        return nullptr;
       node->setResolvedType(fty);
       return fty;
     }
@@ -1668,6 +1705,9 @@ Sema::ExprChecker::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
 
   // Walk the class hierarchy (this class + all ancestors) for the field.
   if (auto *fty = ct->findField(node->getFieldName())) {
+    if (!S.checkMemberAccess(S.fieldOwner(ct, node->getFieldName()),
+                             node->getFieldName(), node->getLocation()))
+      return nullptr;
     node->setResolvedType(fty);
     return fty;
   }
@@ -2993,6 +3033,23 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
     paramTypes.push_back(ty);
   }
 
+  // A public function cannot hand an importer a type it could not name.
+  if (!isModulePrivateName(node->getName()) &&
+      node->getName().find('<') == std::string::npos) {
+    const std::string who =
+        "'" + displayName(node->getName()) + "' is public but ";
+    bool pub = checkPublicSurface(who + "its result", "function", retTy,
+                                  node->getLocation());
+    for (auto &p : node->getParams())
+      pub = checkPublicSurface(who + "parameter '" + p.getName() + "'",
+                               "function", p.ParamType, node->getLocation()) &&
+            pub;
+    if (!pub) {
+      ErroneousNames.insert(node->getName());
+      return false;
+    }
+  }
+
   if (node->isNative() && !checkNativeSignature(node, retTy, paramTypes)) {
     ErroneousNames.insert(node->getName());
     return false;
@@ -3099,6 +3156,21 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
     return false;
   if (node->isNative())
     return true; // the body is C (#198)
+
+  // A `static fn` of a class or struct (`C::make`) reaches its type's
+  // private members, like a method.
+  struct OwnerGuard {
+    ast::Type *&Slot, *Saved;
+    ~OwnerGuard() { Slot = Saved; }
+  } ownerGuard{CurrentStaticOwner, CurrentStaticOwner};
+  CurrentStaticOwner = nullptr;
+  if (size_t sep = node->getName().rfind(names::kQualSep);
+      sep != std::string::npos) {
+    const std::string prefix = node->getName().substr(0, sep);
+    CurrentStaticOwner = Ctx.lookupClassType(prefix);
+    if (!CurrentStaticOwner)
+      CurrentStaticOwner = Ctx.lookupStructType(prefix);
+  }
 
   // Re-resolve the annotations to set up the body scope (resolveType is
   // idempotent and, for a registered function, is guaranteed to succeed —
@@ -3282,6 +3354,8 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
                                        "' in struct '" + st->getName() + "'");
       return false;
     }
+    if (!checkMemberAccess(st, node->getFieldName(), node->getLocation()))
+      return false;
     if (std::string let = letValueRoot(node->getReceiver()); !let.empty()) {
       error(node->getLocation(), "'" + let +
                                      "' is declared with 'let'; its fields "
@@ -3328,6 +3402,9 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
                                        "' in class '" + ct->getName() + "'");
       return false;
     }
+    if (!checkMemberAccess(fieldOwner(ct, node->getFieldName()),
+                           node->getFieldName(), node->getLocation()))
+      return false;
   }
 
   if (!checkChangeable(node->getReceiver(),

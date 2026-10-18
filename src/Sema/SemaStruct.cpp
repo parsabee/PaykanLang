@@ -222,6 +222,13 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
     }
     field->setType(fty); // canonical write-back for the lowering
     st->addField(field->getName(), fty);
+    if (!names::isPrivateName(field->getName()) &&
+        !isModulePrivateName(sd->getName()) &&
+        sd->getName().find('<') == std::string::npos &&
+        !checkPublicSurface("field '" + field->getName() + "' of '" +
+                                sd->getName() + "' is public but it",
+                            "field", fty, field->getLocation()))
+      ok = false;
   }
   if (!populateImplMethods(sd, st))
     ok = false;
@@ -278,7 +285,9 @@ bool Sema::declareDefaultInit(ast::StructDecl *sd, ast::StructType *st) {
       loc, Ctx.intern(names::kMethodInit), std::move(params), nullptr,
       Ctx.make<ast::CompoundStmt>(loc, std::move(body)));
   bool ok = true;
+  DeclaringDefaultInit = true; // its parameters are the fields, checked
   auto *md = declareMethod(fn, st, nullptr, ast::MethodDecl::None, ok);
+  DeclaringDefaultInit = false;
   if (!md)
     return false;
   st->addMethod(md);
@@ -323,7 +332,8 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   auto tIt = StructTemplates.find(name);
   if (tIt == StructTemplates.end()) {
     // Only resolveType and resolveGenericCall come here, with a template.
-    error(loc, "unknown generic struct '" + name + "'");
+    if (!reportPrivateImport(name, loc))
+      error(loc, "unknown generic struct '" + name + "'");
     return nullptr;
   }
   ast::StructDecl *tmpl = tIt->second;

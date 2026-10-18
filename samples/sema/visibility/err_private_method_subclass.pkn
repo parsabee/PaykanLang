@@ -1,0 +1,6 @@
+// A subclass does not reach its superclass's `__` members.
+class Base { __n: int; fn __secret() -> int { return self.__n; } }
+class Sub : Base {
+  fn peek() -> int { return self.__secret(); }   // error: '__secret' is private to 'Base'
+}
+fn main() -> int { return Sub(1).peek(); }
