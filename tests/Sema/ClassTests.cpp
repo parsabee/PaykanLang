@@ -163,6 +163,24 @@ TEST(Class, RemovedBoxedClassNamesAreFree) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
+// A builtin type's name (`int`, a sized type, `void`) is nobody's to
+// declare, whatever the kind of declaration.
+TEST(Class, BuiltinTypeNamesAreReserved) {
+  for (const char *decl :
+       {"class int { v: int; }", "class u8 { v: int; }",
+        "struct f32 { v: int; }", "enum unsigned { A }",
+        "fn float(x: int) -> int { return x; }", "fn i64() { }",
+        "trait void { fn f(); }", "class bool { v: int; }"}) {
+    auto r =
+        semaCheck(std::string(decl) + "\nfn main() -> int { return 0; }\n");
+    EXPECT_FALSE(r.Ok) << decl;
+    EXPECT_NE(r.Diagnostics.find("is a builtin type and cannot be redeclared"),
+              std::string::npos)
+        << decl << "\n"
+        << r.Diagnostics;
+  }
+}
+
 TEST(Class, NameShadowsBuiltinClassRejected) {
   for (const char *name : {"Obj", "Str", "File", "Error"}) {
     auto r = semaCheck(withClasses(std::string("class ") + name + " {}"));

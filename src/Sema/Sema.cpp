@@ -77,6 +77,12 @@ const Sema::FunctionSig *Sema::lookupFunction(std::string_view name) const {
 
 bool Sema::checkDeclNameAvailable(const std::string &name,
                                   ast::SourceLocation loc, DeclKind kind) {
+  // A builtin type's name (`int`, `u8`, `void`, ...; the parser resolves
+  // them before any declaration is seen) is nobody's to declare.
+  if (ast::BuiltinType::Kind builtin; ast::builtinKindOfName(name, builtin)) {
+    error(loc, "'" + name + "' is a builtin type and cannot be redeclared");
+    return false;
+  }
   // Compiler builtins are registered before any user declaration and must
   // never be replaced.  Which names are builtin is not spelled out here: a
   // class is builtin iff the ASTContext bootstrap flagged it

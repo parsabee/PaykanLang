@@ -688,10 +688,11 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
   if (auto *ce = ast::dyn_cast<ast::CallExpr>(expr)) {
     if (!ce->getResolvedType() || !ast::isRefType(ce->getResolvedType()))
       return false;
-    if (FunctionTable.count(ce->getCalleeName()) ||
-        IdentityCtors.count(ce->getCalleeName())) {
+    // `Str(s)` is its argument (emitIdentityCtor): a box when `s` is one.
+    if (IdentityCtors.count(ce->getCalleeName()) && ce->getNumArguments() == 1)
+      return exprAlreadyShared(ce->getArguments()[0]);
+    if (FunctionTable.count(ce->getCalleeName()))
       return ce->getCalleeName() == kOpen;
-    }
     return true;
   }
   return false;
@@ -748,8 +749,12 @@ bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
     return cv->getResolvedType() && ast::isRefType(cv->getResolvedType());
   if (auto *te = ast::dyn_cast<ast::TernaryExpr>(expr))
     return te->getResolvedType() && ast::isRefType(te->getResolvedType());
-  if (ast::isa<ast::CallExpr>(expr))
+  if (auto *ce = ast::dyn_cast<ast::CallExpr>(expr)) {
+    // `Str(s)` is its argument, fresh when the argument is.
+    if (IdentityCtors.count(ce->getCalleeName()) && ce->getNumArguments() == 1)
+      return exprProducesFreshBox(ce->getArguments()[0]);
     return exprAlreadyShared(expr);
+  }
   return false;
 }
 

@@ -484,6 +484,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A top-level declaration named after a builtin type (`class int { ... }`, `struct u8`,
+  `enum unsigned`, `fn float(...)`, under any of the types' spellings) was accepted and
+  silently shadowed by the builtin; it is now rejected (`'u8' is a builtin type and cannot
+  be redeclared`), as a declaration named after a builtin function or class is.
+- `Str(s)` with a fresh string argument — a method call's result (`Str(y.toString())`), a
+  conversion's or a concatenation's — failed PIR verification (the call was classified as
+  not holding a box while it passed its argument's box through); the `Str` constructor now
+  takes its argument's ownership classification, so the string is passed on and released
+  once.
+
 - A `.paykan_cache` module entry written by another build of the same version was reused
   (#188), so a compiler fix never reached a cached import: every development build calls
   itself 0.1.1.  Each build now has a build ID, a hash of the compiler's sources
