@@ -85,14 +85,14 @@ PaykanShared *str(const char *s) {
 std::string render(const void *value, const Layout &layout) {
   PaykanString *s = PaykanStruct_toString(value, layout.data());
   std::string out(s->data, (size_t)s->len);
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
   return out;
 }
 
 std::string renderTuple(const void *value, const Layout &layout) {
   PaykanString *s = PaykanTuple_toString(value, layout.data());
   std::string out(s->data, (size_t)s->len);
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
   return out;
 }
 
@@ -206,8 +206,8 @@ TEST(StructToString, EveryKindRendersAsPrintShowsIt) {
   EXPECT_EQ(render(&r, kRec),
             "Rec(name: a b, f: -0.125, b: False, c: z, maybe: m, oi: 7)");
   // Rendering borrows the references.
-  EXPECT_EQ(r.name->refCount, 1);
-  EXPECT_EQ(r.maybe->refCount, 1);
+  EXPECT_EQ(r.name->strong, 1);
+  EXPECT_EQ(r.maybe->strong, 1);
   Paykan_release(r.name);
   Paykan_release(r.maybe);
 }
@@ -274,7 +274,7 @@ TEST(StructEquals, EveryKindComparesAsATupleElementDoes) {
   b.f = std::nan("");
   EXPECT_EQ(eq(&b, &b, kRec), 0); // IEEE 754: a NaN is unequal to itself
   // Comparing borrows the references.
-  EXPECT_EQ(a.name->refCount, 1);
+  EXPECT_EQ(a.name->strong, 1);
   Paykan_release(a.name);
   Paykan_release(b.name);
 }

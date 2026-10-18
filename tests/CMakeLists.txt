@@ -32,6 +32,7 @@ add_executable(parser_tests
     Parser/GrammarEdgeTests.cpp
     Parser/ParamModeTests.cpp
     Parser/LetTests.cpp
+    Parser/WeakTests.cpp
     Parser/ImplTests.cpp
     Parser/TraitTests.cpp
     Parser/StructTests.cpp
@@ -79,6 +80,7 @@ add_executable(sema_tests
     Sema/InterfaceConversionTests.cpp
     Sema/ParamModeTests.cpp
     Sema/LetTests.cpp
+    Sema/WeakTests.cpp
     Sema/ViewFnTests.cpp
     Sema/ImplTests.cpp
     Sema/TraitTests.cpp
@@ -144,6 +146,7 @@ add_executable(codegen_tests
     CodeGen/HarnessTests.cpp
     CodeGen/ParamModeTests.cpp
     CodeGen/LetTests.cpp
+    CodeGen/WeakTests.cpp
     CodeGen/ImplTests.cpp
     CodeGen/TraitTests.cpp
 )
@@ -422,6 +425,7 @@ add_executable(runtime_tests
     Runtime/ObjectTests.cpp
     Runtime/StringTests.cpp
     Runtime/SharedTests.cpp
+    Runtime/WeakTests.cpp
     Runtime/FileTests.cpp
     Runtime/ErrorTests.cpp
     Runtime/OptionalNullTests.cpp

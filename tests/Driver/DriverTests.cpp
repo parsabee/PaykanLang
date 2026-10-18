@@ -1024,7 +1024,9 @@ TEST(Driver, EmitCPrintsCSource) {
   EXPECT_NE(out.find("#include \"Runtime.h\""), std::string::npos) << out;
   EXPECT_NE(out.find("int main(int argc, char **argv)"), std::string::npos)
       << out;
-  EXPECT_NE(out.find("PaykanShared *shared;"), std::string::npos) << out;
+  // The object header: the vtable, then the strong and the weak count.
+  EXPECT_NE(out.find("int64_t strong;"), std::string::npos) << out;
+  EXPECT_NE(out.find("int64_t weak;"), std::string::npos) << out;
 }
 
 // Every vtable is an array of PaykanMethod (Runtime.h), read with
@@ -1762,9 +1764,9 @@ TEST(Driver, RunOptimisesUnderTheHostLayout) {
   auto [rc, ir] = run(paykanRun() + " --emit-source " + src + " 2>&1");
   ASSERT_EQ(rc, 0) << ir;
   EXPECT_NE(ir.find("target datalayout"), std::string::npos) << ir;
-  // The header (vtable, shared box) is 16 bytes, the char padded to 8, the
-  // int 8.
-  EXPECT_NE(ir.find("@Paykan_malloc(i64 32)"), std::string::npos) << ir;
+  // The header (vtable, strong count, weak count) is 24 bytes, the char
+  // padded to 8, the int 8.
+  EXPECT_NE(ir.find("@Paykan_malloc(i64 40)"), std::string::npos) << ir;
   auto [rc2, out] = run(paykanRun() + " " + src + " 2>&1");
   EXPECT_EQ(rc2, 0) << out;
   EXPECT_EQ(out, "x7\n");

@@ -22,26 +22,26 @@ TEST(StringNew, StoresDataAndLength) {
   ASSERT_NE(s, nullptr);
   EXPECT_EQ(s->len, 5);
   EXPECT_STREQ(s->data, "hello");
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringNew, NulTerminated) {
   PaykanString *s = PaykanString_new("abc", 3);
   EXPECT_EQ(s->data[3], '\0');
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringNew, EmptyString) {
   PaykanString *s = PaykanString_new("", 0);
   EXPECT_EQ(s->len, 0);
   EXPECT_STREQ(s->data, "");
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringNew, VtableIsStringVtable) {
   PaykanString *s = PaykanString_new("x", 1);
   EXPECT_EQ((void *)s->vtable, (void *)&PaykanString_vtable);
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringNew, EmbeddedNulBytes) {
@@ -51,7 +51,7 @@ TEST(StringNew, EmbeddedNulBytes) {
   EXPECT_EQ(s->data[0], 'a');
   EXPECT_EQ(s->data[1], '\0');
   EXPECT_EQ(s->data[2], 'b');
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 // -- PaykanString_from_int / from_float / from_bool
@@ -59,19 +59,19 @@ TEST(StringNew, EmbeddedNulBytes) {
 TEST(StringFromInt, Zero) {
   PaykanString *s = PaykanString_from_int(0);
   EXPECT_STREQ(s->data, "0");
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringFromInt, Positive) {
   PaykanString *s = PaykanString_from_int(42);
   EXPECT_STREQ(s->data, "42");
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringFromInt, Negative) {
   PaykanString *s = PaykanString_from_int(-7);
   EXPECT_STREQ(s->data, "-7");
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringFromFloat, BasicValue) {
@@ -79,31 +79,31 @@ TEST(StringFromFloat, BasicValue) {
   ASSERT_NE(s, nullptr);
   // %g formatting — just confirm it contains "3.14".
   EXPECT_NE(std::string(s->data).find("3.14"), std::string::npos);
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringFromFloat, Zero) {
   PaykanString *s = PaykanString_from_float(0.0);
   EXPECT_STREQ(s->data, "0");
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringFromBool, True) {
   PaykanString *s = PaykanString_from_bool(1);
   EXPECT_STREQ(s->data, "True");
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringFromBool, False) {
   PaykanString *s = PaykanString_from_bool(0);
   EXPECT_STREQ(s->data, "False");
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringFromBool, NonZeroIsTrue) {
   PaykanString *s = PaykanString_from_bool(99);
   EXPECT_STREQ(s->data, "True");
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 // -- PaykanString_toString
@@ -115,7 +115,7 @@ TEST(StringToString, ReturnsFreshCopy) {
   EXPECT_NE(copy, s);
   EXPECT_STREQ(copy->data, "hi");
   Paykan_release(shared);
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringToString, CopyIsIndependent) {
@@ -124,7 +124,7 @@ TEST(StringToString, CopyIsIndependent) {
   PaykanString *copy = (PaykanString *)PaykanShared_get(shared);
   EXPECT_NE(copy->data, s->data);
   Paykan_release(shared);
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 // -- PaykanString_equals
@@ -135,8 +135,8 @@ TEST(StringEquals, SameContent) {
   EXPECT_EQ(paykanTestEquals(PaykanString_equals, (PaykanObject *)a,
                              (PaykanObject *)b),
             1);
-  PaykanString_destroy((PaykanObject *)a);
-  PaykanString_destroy((PaykanObject *)b);
+  Paykan_dispose((PaykanObject *)a);
+  Paykan_dispose((PaykanObject *)b);
 }
 
 TEST(StringEquals, DifferentContent) {
@@ -145,8 +145,8 @@ TEST(StringEquals, DifferentContent) {
   EXPECT_EQ(paykanTestEquals(PaykanString_equals, (PaykanObject *)a,
                              (PaykanObject *)b),
             0);
-  PaykanString_destroy((PaykanObject *)a);
-  PaykanString_destroy((PaykanObject *)b);
+  Paykan_dispose((PaykanObject *)a);
+  Paykan_dispose((PaykanObject *)b);
 }
 
 TEST(StringEquals, DifferentLength) {
@@ -155,8 +155,8 @@ TEST(StringEquals, DifferentLength) {
   EXPECT_EQ(paykanTestEquals(PaykanString_equals, (PaykanObject *)a,
                              (PaykanObject *)b),
             0);
-  PaykanString_destroy((PaykanObject *)a);
-  PaykanString_destroy((PaykanObject *)b);
+  Paykan_dispose((PaykanObject *)a);
+  Paykan_dispose((PaykanObject *)b);
 }
 
 TEST(StringEquals, EmptyStrings) {
@@ -165,8 +165,8 @@ TEST(StringEquals, EmptyStrings) {
   EXPECT_EQ(paykanTestEquals(PaykanString_equals, (PaykanObject *)a,
                              (PaykanObject *)b),
             1);
-  PaykanString_destroy((PaykanObject *)a);
-  PaykanString_destroy((PaykanObject *)b);
+  Paykan_dispose((PaykanObject *)a);
+  Paykan_dispose((PaykanObject *)b);
 }
 
 TEST(StringEquals, NonStringOtherFallsBackToIdentity) {
@@ -174,8 +174,8 @@ TEST(StringEquals, NonStringOtherFallsBackToIdentity) {
   PaykanObject *obj = PaykanObject_new();
   // Different types -> identity comparison -> not equal.
   EXPECT_EQ(paykanTestEquals(PaykanString_equals, (PaykanObject *)s, obj), 0);
-  PaykanString_destroy((PaykanObject *)s);
-  PaykanObject_destroy(obj);
+  Paykan_dispose((PaykanObject *)s);
+  Paykan_dispose(obj);
 }
 
 // -- PaykanString_length
@@ -183,13 +183,13 @@ TEST(StringEquals, NonStringOtherFallsBackToIdentity) {
 TEST(StringLength, ReturnsLen) {
   PaykanString *s = PaykanString_new("hello", 5);
   EXPECT_EQ(PaykanString_length((PaykanObject *)s), 5);
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringLength, EmptyIsZero) {
   PaykanString *s = PaykanString_new("", 0);
   EXPECT_EQ(PaykanString_length((PaykanObject *)s), 0);
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 // -- PaykanString_concat
@@ -201,9 +201,9 @@ TEST(StringConcat, TwoStrings) {
       (PaykanString *)PaykanString_concat((PaykanObject *)a, (PaykanObject *)b);
   EXPECT_EQ(c->len, 6);
   EXPECT_STREQ(c->data, "foobar");
-  PaykanString_destroy((PaykanObject *)a);
-  PaykanString_destroy((PaykanObject *)b);
-  PaykanString_destroy((PaykanObject *)c);
+  Paykan_dispose((PaykanObject *)a);
+  Paykan_dispose((PaykanObject *)b);
+  Paykan_dispose((PaykanObject *)c);
 }
 
 TEST(StringConcat, WithEmptyLeft) {
@@ -212,9 +212,9 @@ TEST(StringConcat, WithEmptyLeft) {
   PaykanString *c =
       (PaykanString *)PaykanString_concat((PaykanObject *)a, (PaykanObject *)b);
   EXPECT_STREQ(c->data, "bar");
-  PaykanString_destroy((PaykanObject *)a);
-  PaykanString_destroy((PaykanObject *)b);
-  PaykanString_destroy((PaykanObject *)c);
+  Paykan_dispose((PaykanObject *)a);
+  Paykan_dispose((PaykanObject *)b);
+  Paykan_dispose((PaykanObject *)c);
 }
 
 TEST(StringConcat, WithEmptyRight) {
@@ -223,9 +223,9 @@ TEST(StringConcat, WithEmptyRight) {
   PaykanString *c =
       (PaykanString *)PaykanString_concat((PaykanObject *)a, (PaykanObject *)b);
   EXPECT_STREQ(c->data, "foo");
-  PaykanString_destroy((PaykanObject *)a);
-  PaykanString_destroy((PaykanObject *)b);
-  PaykanString_destroy((PaykanObject *)c);
+  Paykan_dispose((PaykanObject *)a);
+  Paykan_dispose((PaykanObject *)b);
+  Paykan_dispose((PaykanObject *)c);
 }
 
 TEST(StringConcat, BothEmpty) {
@@ -235,9 +235,9 @@ TEST(StringConcat, BothEmpty) {
       (PaykanString *)PaykanString_concat((PaykanObject *)a, (PaykanObject *)b);
   EXPECT_EQ(c->len, 0);
   EXPECT_STREQ(c->data, "");
-  PaykanString_destroy((PaykanObject *)a);
-  PaykanString_destroy((PaykanObject *)b);
-  PaykanString_destroy((PaykanObject *)c);
+  Paykan_dispose((PaykanObject *)a);
+  Paykan_dispose((PaykanObject *)b);
+  Paykan_dispose((PaykanObject *)c);
 }
 
 TEST(StringConcat, ResultIsNulTerminated) {
@@ -246,9 +246,9 @@ TEST(StringConcat, ResultIsNulTerminated) {
   PaykanString *c =
       (PaykanString *)PaykanString_concat((PaykanObject *)a, (PaykanObject *)b);
   EXPECT_EQ(c->data[4], '\0');
-  PaykanString_destroy((PaykanObject *)a);
-  PaykanString_destroy((PaykanObject *)b);
-  PaykanString_destroy((PaykanObject *)c);
+  Paykan_dispose((PaykanObject *)a);
+  Paykan_dispose((PaykanObject *)b);
+  Paykan_dispose((PaykanObject *)c);
 }
 
 // -- Vtable dispatch
@@ -259,14 +259,14 @@ TEST(StringVtable, ToStringViaVtable) {
   PaykanString *copy = (PaykanString *)PaykanShared_get(shared);
   EXPECT_STREQ(copy->data, "test");
   Paykan_release(shared);
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringVtable, LengthViaVtable) {
   PaykanString *s = PaykanString_new("hello", 5);
   auto length = vtSlot<PaykanLengthFn>(s, PAYKAN_SLOT_STRING_LENGTH);
   EXPECT_EQ(length((PaykanObject *)s), 5);
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringVtable, DestroyViaVtable) {
@@ -284,7 +284,7 @@ TEST(StringAt, FirstChar) {
   EXPECT_EQ(ch->len, 1);
   EXPECT_EQ(ch->data[0], 'h');
   Paykan_release(sh);
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringAt, LastChar) {
@@ -293,7 +293,7 @@ TEST(StringAt, LastChar) {
   PaykanString *ch = (PaykanString *)PaykanShared_get(sh);
   EXPECT_EQ(ch->data[0], 'o');
   Paykan_release(sh);
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringAt, MiddleChar) {
@@ -303,7 +303,7 @@ TEST(StringAt, MiddleChar) {
   EXPECT_EQ(ch->data[0], 'k');
   EXPECT_EQ(ch->len, 1);
   Paykan_release(sh);
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringAt, ResultIsNulTerminated) {
@@ -312,7 +312,7 @@ TEST(StringAt, ResultIsNulTerminated) {
   PaykanString *ch = (PaykanString *)PaykanShared_get(sh);
   EXPECT_EQ(ch->data[1], '\0');
   Paykan_release(sh);
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringAt, ResultHasStringVtable) {
@@ -321,7 +321,7 @@ TEST(StringAt, ResultHasStringVtable) {
   PaykanString *ch = (PaykanString *)PaykanShared_get(sh);
   EXPECT_EQ((void *)ch->vtable, (void *)&PaykanString_vtable);
   Paykan_release(sh);
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringAt, ReturnsOwnedShared) {
@@ -333,19 +333,19 @@ TEST(StringAt, ReturnsOwnedShared) {
   Paykan_release(sh);
   // Original string is still alive and untouched.
   EXPECT_STREQ(s->data, "hi");
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringAt, OutOfBoundsDiesInDebug) {
   PaykanString *s = PaykanString_new("ab", 2);
   EXPECT_DEATH(PaykanString_at((PaykanObject *)s, 2), "");
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringAt, NegativeIndexDies) {
   PaykanString *s = PaykanString_new("ab", 2);
   EXPECT_DEATH(PaykanString_at((PaykanObject *)s, -1), "");
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 // -- PaykanString_char_at
@@ -353,25 +353,25 @@ TEST(StringAt, NegativeIndexDies) {
 TEST(StringCharAt, FirstChar) {
   PaykanString *s = PaykanString_new("hello", 5);
   EXPECT_EQ(PaykanString_char_at((PaykanObject *)s, 0), 'h');
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringCharAt, LastChar) {
   PaykanString *s = PaykanString_new("hello", 5);
   EXPECT_EQ(PaykanString_char_at((PaykanObject *)s, 4), 'o');
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringCharAt, MidChar) {
   PaykanString *s = PaykanString_new("paykan", 6);
   EXPECT_EQ(PaykanString_char_at((PaykanObject *)s, 3), 'k');
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 TEST(StringCharAt, SingleChar) {
   PaykanString *s = PaykanString_new("x", 1);
   EXPECT_EQ(PaykanString_char_at((PaykanObject *)s, 0), 'x');
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
 }
 
 // -- PaykanString_concat_inplace
@@ -382,8 +382,8 @@ TEST(StringConcatInplace, AppendToEmpty) {
   PaykanString_concat_inplace((PaykanObject *)a, (PaykanObject *)b);
   EXPECT_EQ(a->len, 5);
   EXPECT_STREQ(a->data, "hello");
-  PaykanString_destroy((PaykanObject *)a);
-  PaykanString_destroy((PaykanObject *)b);
+  Paykan_dispose((PaykanObject *)a);
+  Paykan_dispose((PaykanObject *)b);
 }
 
 TEST(StringConcatInplace, AppendNonEmpty) {
@@ -392,8 +392,8 @@ TEST(StringConcatInplace, AppendNonEmpty) {
   PaykanString_concat_inplace((PaykanObject *)a, (PaykanObject *)b);
   EXPECT_EQ(a->len, 6);
   EXPECT_STREQ(a->data, "foobar");
-  PaykanString_destroy((PaykanObject *)a);
-  PaykanString_destroy((PaykanObject *)b);
+  Paykan_dispose((PaykanObject *)a);
+  Paykan_dispose((PaykanObject *)b);
 }
 
 TEST(StringConcatInplace, AppendEmpty) {
@@ -402,8 +402,8 @@ TEST(StringConcatInplace, AppendEmpty) {
   PaykanString_concat_inplace((PaykanObject *)a, (PaykanObject *)b);
   EXPECT_EQ(a->len, 5);
   EXPECT_STREQ(a->data, "hello");
-  PaykanString_destroy((PaykanObject *)a);
-  PaykanString_destroy((PaykanObject *)b);
+  Paykan_dispose((PaykanObject *)a);
+  Paykan_dispose((PaykanObject *)b);
 }
 
 TEST(StringConcatInplace, ResultIsNulTerminated) {
@@ -411,8 +411,8 @@ TEST(StringConcatInplace, ResultIsNulTerminated) {
   PaykanString *b = PaykanString_new("cd", 2);
   PaykanString_concat_inplace((PaykanObject *)a, (PaykanObject *)b);
   EXPECT_EQ(a->data[4], '\0');
-  PaykanString_destroy((PaykanObject *)a);
-  PaykanString_destroy((PaykanObject *)b);
+  Paykan_dispose((PaykanObject *)a);
+  Paykan_dispose((PaykanObject *)b);
 }
 
 // -- PaykanString_parse_int / _float / _bool (`int<Str>` & co.)
@@ -427,7 +427,7 @@ bool parseWith(int64_t (*parse)(PaykanObject *, T *), const char *text,
   PaykanString *s = PaykanString_new(text, len);
   out = static_cast<T>(42); // overwritten either way
   int64_t ok = parse((PaykanObject *)s, &out);
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
   return ok != 0;
 }
 
@@ -525,7 +525,7 @@ namespace {
 int64_t hashOf(const char *data, int64_t len) {
   PaykanString *s = PaykanString_new(data, len);
   int64_t h = PaykanString_hash((PaykanObject *)s);
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
   return h;
 }
 } // namespace

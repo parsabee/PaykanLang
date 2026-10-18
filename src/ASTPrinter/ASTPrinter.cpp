@@ -232,6 +232,8 @@ void ASTPrinter::visitVarDecl(VarDecl *node) {
   OS << " '" << node->getName() << "'";
   if (node->isLet())
     OS << " let";
+  if (node->isWeak())
+    OS << " weak";
   if (node->getMode() != ParamMode::Value)
     OS << " " << paramModeName(node->getMode());
   if (node->getType())

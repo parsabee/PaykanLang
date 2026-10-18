@@ -53,7 +53,7 @@ Keywords (reserved; never identifiers):
 
 ```
 import  as  class  struct  enum  match  mov  fn  native  return  if  then  else
-while  break  continue  True  False  None  _  view  inout  let  impl  static  trait
+while  break  continue  True  False  None  _  view  inout  let  weak  impl  static  trait
 ```
 
 `_` alone is the `UNDERSCORE` token (destructuring skip, match wildcard);
@@ -137,7 +137,7 @@ name; for the list form the whole path is the base path.
 ```
 classDecl   ::= "class" IDENT typeParams? ( ":" modulePath )?
                 "{" classMember* "}"
-classMember ::= varDecl ";" | funcDecl
+classMember ::= "weak"? varDecl ";" | funcDecl
 typeParams  ::= "<" typeParam ( "," typeParam )* ">"
 typeParam   ::= IDENT ( ":" typeAnnotation ( "+" typeAnnotation )* )?
 
@@ -259,6 +259,7 @@ statement ::= ";"
             | expression "=" expression ";"
             | varDecl "=" expression ";"
             | letDecl
+            | weakDecl
             | borrowDecl
             | destructureTargets "=" expression ";"
             | "return" expression? ";"
@@ -270,6 +271,7 @@ statement ::= ";"
             | matchStmt
 
 letDecl   ::= "let" IDENT ( ":" typeAnnotation )? "=" expression ";"
+weakDecl  ::= "weak" IDENT ( ":" typeAnnotation )? ( "=" expression )? ";"
 borrowDecl ::= IDENT ":" ( "view" | "inout" ) typeAnnotation? "=" expression ";"
 
 ifStmt    ::= "if" "(" expression ")" block ( "else" ( block | ifStmt ) )?

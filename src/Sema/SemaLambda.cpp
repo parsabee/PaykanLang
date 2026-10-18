@@ -92,6 +92,7 @@ bool Sema::captureVariable(const std::string &name, ast::Type *ty, Scope *owner,
     case VarKind::Plain:
     case VarKind::Let:
     case VarKind::Captured:
+    case VarKind::Weak:
       break;
     }
     if (!why.empty()) {
@@ -118,7 +119,9 @@ bool Sema::captureVariable(const std::string &name, ast::Type *ty, Scope *owner,
       if (lc.OuterUse)
         lc.OuterUse->ChangesSelf = true; // the closure may change it later
     }
-    lc.Node->addCapture(Ctx.intern(name), ty);
+    // A `weak` variable is captured as a weak reference: the closure holds
+    // the object weakly too, and a call reads it as the variable reads.
+    lc.Node->addCapture(Ctx.intern(name), ty, kind == VarKind::Weak);
     lc.Boundary->declare(name, ty);
     lc.Boundary->Kinds[name] = VarKind::Captured;
     owner = lc.Boundary;

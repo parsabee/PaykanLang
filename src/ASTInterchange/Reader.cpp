@@ -548,6 +548,8 @@ private:
         return fail(v, "a field has a type and no initialiser"), nullptr;
       if (vd->isLet())
         return fail(v, "a field cannot be declared with let"), nullptr;
+      if (vd->isWeak())
+        return fail(v, "a struct field cannot be weak"), nullptr;
       fields.push_back(vd);
     }
     // The check the grammar makes (docs/grammar.md).
@@ -859,7 +861,8 @@ private:
         return nullptr;
     }
     // A local borrow (`x: view = e;`) carries (qual view) or (qual inout),
-    // and `let x = e;` a trailing (let); each has an initialiser.
+    // `let x = e;` a trailing (let) and `weak y: T? = e;` (or a class's
+    // `weak` field) a trailing (weak); a borrow or a let has an initialiser.
     ParamMode mode = ParamMode::Value;
     if (!paramMode(f, mode))
       return nullptr;
@@ -873,10 +876,20 @@ private:
       return fail(*let, "a let declaration has an initialiser"), nullptr;
     if (let && borrow)
       return fail(*let, "a local borrow cannot be let"), nullptr;
+    const SExpr *weak = f.optionalList("weak");
+    if (weak && !weak->Items.empty())
+      return fail(*weak, "(weak) takes no fields"), nullptr;
+    if (weak && (let || borrow))
+      return fail(*weak, "a weak declaration is neither let nor a borrow"),
+             nullptr;
+    if (weak && !ty && !init)
+      return fail(*weak, "a weak declaration has a type or an initialiser"),
+             nullptr;
     if (!f.done())
       return nullptr;
     auto *vd = Ctx.make<VarDecl>(loc, *name, ty, init);
     vd->setLet(let != nullptr);
+    vd->setWeak(weak != nullptr);
     vd->setMode(mode);
     return vd;
   }

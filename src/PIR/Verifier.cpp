@@ -53,7 +53,8 @@ bool isPointerLike(Type t) {
 }
 bool isFieldType(Type t) {
   return t == Type::I64 || t == Type::F64 || t == Type::Bool ||
-         t == Type::Char || t == Type::Box || isOptional(t) || t == Type::Mem;
+         t == Type::Char || t == Type::Box || isOptional(t) || t == Type::Mem ||
+         t == Type::Weak;
 }
 
 /// What is wrong with a `mem` slot's layout, or "" when it is valid: a
@@ -112,6 +113,7 @@ bool castAllowed(Type from, Type to) {
   case Type::OptBool:
   case Type::OptChar:
   case Type::Mem:
+  case Type::Weak:
     return false;
   }
   return false;
@@ -634,6 +636,24 @@ private:
           break;
         expect(in.Args[0], Type::Box, "operand of unbox");
         result(in, Type::Obj);
+        break;
+      case Opcode::WeakNew:
+        if (!arity(in, 1))
+          break;
+        expect(in.Args[0], Type::Box, "operand of weak.new");
+        result(in, Type::Weak);
+        break;
+      case Opcode::WeakLoad:
+        if (!arity(in, 1))
+          break;
+        expect(in.Args[0], Type::Weak, "operand of weak.load");
+        result(in, Type::Box);
+        break;
+      case Opcode::WeakRelease:
+        if (!arity(in, 1))
+          break;
+        expect(in.Args[0], Type::Weak, "operand of weak.release");
+        result(in, Type::Void);
         break;
       case Opcode::New:
         arity(in, 0);

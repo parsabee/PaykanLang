@@ -1197,6 +1197,20 @@ private:
         return false;
       resultTy = Type::Obj;
       break;
+    case Opcode::WeakNew:
+      if (!parseCommaOperands(in.Args, 1))
+        return false;
+      resultTy = Type::Weak;
+      break;
+    case Opcode::WeakLoad:
+      if (!parseCommaOperands(in.Args, 1))
+        return false;
+      resultTy = Type::Box;
+      break;
+    case Opcode::WeakRelease:
+      if (!parseCommaOperands(in.Args, 1))
+        return false;
+      break;
     case Opcode::New:
       if (!parseName(in.ClassName, "a class name"))
         return false;

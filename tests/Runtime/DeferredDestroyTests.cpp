@@ -24,13 +24,14 @@ namespace {
 //
 // TestNode owns up to kMaxKids boxed children; its destroy logs its id, then
 // releases the children in index order (exactly what a compiler-generated
-// destroy does with its reference-typed fields), then frees itself.
+// destroy does with its reference-typed fields); the runtime frees it.
 
 constexpr int kMaxKids = 4;
 
 struct TestNode {
   PaykanMethod *vtable;
-  PaykanShared *shared;
+  int64_t strong;
+  int64_t weak;
   int id;
   PaykanShared *kids[kMaxKids];
 };
@@ -47,7 +48,6 @@ void TestNode_destroy(PaykanObject *self) {
   for (PaykanShared *kid : n->kids)
     Paykan_release(kid); // null-safe
   gLogAtEnd.push_back(gLog.size());
-  Paykan_free(n);
 }
 
 PaykanMethod TestNode_vtable[PAYKAN_OBJECT_SLOTS] = {
@@ -149,11 +149,11 @@ TEST_F(DeferredDestroy, SurvivingChildIsNotQueued) {
 }
 
 TEST_F(DeferredDestroy, NoneInsideDestroyIsHandled) {
-  // A boxed None released inside a destroy is queued like any dead box; its
-  // destroy is a no-op and it is left unboxed so it can be boxed again.
+  // The immortal None released inside a destroy never dies (its strong
+  // count started at 1 and goes back to it), so nothing is queued for it.
   PaykanShared *none = PaykanShared_new(&PaykanObject_None);
   Paykan_release(makeNode(1, {none, makeNode(2, {})}));
-  EXPECT_EQ(PaykanObject_None.shared, nullptr);
+  EXPECT_EQ(PaykanObject_None.strong, 1);
   EXPECT_EQ(gLog, std::vector<int>({1, 2}));
 }
 

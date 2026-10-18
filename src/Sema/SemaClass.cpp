@@ -396,7 +396,14 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       continue;
     }
     field->setType(fty); // canonical write-back for the lowering
-    ct->addField(field->getName(), fty);
+    if (field->isWeak() &&
+        !checkWeakType(fty, field->getLocation(),
+                       "field '" + field->getName() + "' of class '" +
+                           cd->getName() + "'")) {
+      ok = false;
+      continue;
+    }
+    ct->addField(field->getName(), fty, field->isWeak());
     // A public field of a public class cannot hand an importer a type it
     // could not name (an instantiation's fields are the template's).
     if (!names::isPrivateName(field->getName()) &&

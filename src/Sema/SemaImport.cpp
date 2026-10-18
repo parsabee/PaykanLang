@@ -342,7 +342,7 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
         ci.SuperClassName = "";
     }
     for (auto &[fname, fty] : ct->getFields())
-      ci.Fields.push_back({fname, ast::typeName(fty)});
+      ci.Fields.push_back({fname, ast::typeName(fty), ct->isWeakField(fname)});
     // __init__ and the `impl` methods have no vtable slot but are part of
     // the class's interface: a subclass in the importing module must call
     // __init__ through `__super__` with the right arguments, and importers
@@ -451,7 +451,7 @@ pkm::Interface Sema::toInterface(const ModuleInfo &info) {
     cr.IsLocal = ci.IsLocal;
     cr.OriginModule = ci.OriginModule;
     for (auto &f : ci.Fields)
-      cr.Fields.push_back({f.FieldName, f.TypeName});
+      cr.Fields.push_back({f.FieldName, f.TypeName, f.Weak});
     for (auto &m : ci.Methods)
       cr.Methods.push_back({m.Name, m.ReturnTypeName, m.ParamTypeNames, m.Flags,
                             toModeRecs(m.Modes)});
@@ -487,7 +487,7 @@ Sema::ModuleInfo Sema::fromInterface(const pkm::Interface &iface) {
     ci.IsLocal = cr.IsLocal;
     ci.OriginModule = cr.OriginModule;
     for (auto &f : cr.Fields)
-      ci.Fields.push_back({f.FieldName, f.TypeName});
+      ci.Fields.push_back({f.FieldName, f.TypeName, f.Weak});
     for (auto &m : cr.Methods)
       ci.Methods.push_back({m.Name, m.ReturnTypeName, m.ParamTypeNames, m.Flags,
                             fromModeRecs(m.Modes)});
@@ -902,7 +902,7 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
           ok = false;
           continue;
         }
-        builder.field(f.FieldName, fty);
+        builder.field(f.FieldName, fty, f.Weak);
       }
       for (auto &m : ci->Methods) {
         const std::string decl = "method '" + ci->Name + "." + m.Name + "'";

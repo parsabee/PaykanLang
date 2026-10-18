@@ -51,6 +51,7 @@ constexpr Keyword kKeywords[] = {
     {"view", Tok::KwView},
     {"inout", Tok::KwInout},
     {"let", Tok::KwLet},
+    {"weak", Tok::KwWeak},
     {"trait", Tok::KwTrait},
     {"struct", Tok::KwStruct},
 };
@@ -121,6 +122,8 @@ const char *describe(Tok k) {
     return "'inout'";
   case Tok::KwLet:
     return "'let'";
+  case Tok::KwWeak:
+    return "'weak'";
   case Tok::Underscore:
     return "'_'";
   case Tok::Assign:
@@ -247,6 +250,8 @@ const char *tokenKindName(Tok k) {
     return "KW_INOUT";
   case Tok::KwLet:
     return "KW_LET";
+  case Tok::KwWeak:
+    return "KW_WEAK";
   case Tok::Underscore:
     return "UNDERSCORE";
   case Tok::Assign:

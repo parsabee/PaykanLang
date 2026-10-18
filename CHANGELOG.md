@@ -39,6 +39,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PAYKAN_KIND_UINT`; the ABI and format versions stay (CLAUDE.md).  Not yet: bitwise
   operators, literal suffixes, hexadecimal literals, `char` to the sized types, implicit
   widening.
+- Weak references (docs/language/08-memory-model.md, "Weak references"; design in
+  docs/design/weak-references.md): `weak y: Point? = x;` declares a local, and `weak
+  parent: Node?;` a class field, that refers to an object without keeping it alive.  The
+  type is `T?` of a class `T` (a user class, `Str`, `File`, `Error` or `Obj`), inferred
+  from the initializer when left off (`weak u = x;`), and a local without an initializer
+  starts as `None`.  A weak reference reads as a `T?`: the object while something holds
+  it, `None` once it has been destroyed; it is assigned a `T` or a `T?`, matched, compared
+  with `== None`, passed, returned and copied into a strong variable or field (which then
+  keeps the object), and a lambda captures a `weak` variable weakly.  It is the back link
+  that breaks a reference cycle (a child's `parent`, a closure stored in the object it
+  refers to).  A weak reference cannot be passed to an `inout` parameter, named by an
+  `inout` local or bound by an `inout` match arm; `weak` is a keyword.  Not yet: a `weak`
+  struct field, tuple or array element, parameter or result.  In PIR a weak reference has
+  the type `weak` and the ops `weak.new`, `weak.load` and `weak.release`; the runtime has
+  `Paykan_weak_new`, `Paykan_weak_load` and `Paykan_weak_release`; a `.pkm` interface
+  marks a weak field with a flags byte (`pkm dump` prints `weak field parent: Node?`).
 - Structs (docs/language/14-structs.md): `struct Point { x: int; y: int; }` declares a
   value type with named fields, held in place and copied by assignment like a tuple, with
   no superclass, no vtable and no identity.  `Point(1, 2)` constructs one from its fields
@@ -364,6 +380,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- An object is one allocation (docs/language/08-memory-model.md, "The reference counts"):
+  the reference counts live in the object's header, `{ vtable, strong count, weak count,
+  fields… }`, and the separate `PaykanShared` box is gone.  A strong reference
+  (`PaykanShared *`) and a weak reference (`PaykanWeak *`) are the object's own pointer:
+  `PaykanShared_new` is a retain and returns the object, `PaykanShared_get` is the
+  identity, and both backends lower `unbox` to the identity.  A `destroy` (vtable slot 0)
+  releases what the object holds and tears down its resources but no longer frees the
+  object: the runtime frees it after the destroy, or keeps it, empty, until the last weak
+  reference to it is released (`Paykan_weak_release`).  Generated destructors no longer end
+  in `free`, `PaykanObject_destroy` is a no-op, `PaykanString_destroy` frees the bytes
+  only, and a string temporary the generated code drops goes through the new
+  `Paykan_dispose(obj)` (destroy and free an object that was never boxed).  Every object
+  struct, the runtime's and the generated ones, starts with the three-word header; the
+  immortal `None` and `Stdin` start with a strong count of 1.  The runtime ABI, PIR and
+  `.pkm` versions are unchanged (pre-release): delete every `.paykan_cache` directory
+  written by an older build.
 - An array or tuple literal can have a `view` as an element (`[v]`, `(s, 1)`, `return (s, 1);`
   with `s: view Str`): it is a new value, holding its own reference to the element.  Other
   stores of a `view` (a variable, a field, an element, `return`) stay errors.

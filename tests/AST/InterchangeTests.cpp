@@ -624,6 +624,58 @@ TEST(ASTInterchange, RepeatArrayLiterals) {
       << dump(list);
 }
 
+// A `weak` local or class field is a `var` with a trailing `(weak)`.
+TEST(ASTInterchange, WeakDeclarations) {
+  const std::string text =
+      "(paykan-ast 1 (unit "
+      "(class \"Node\" \"\" (type-params) (fields (var \"parent\" "
+      "(optional-type (named-type \"Node\")) _ (weak))) (methods)) "
+      "(fn \"f\" (type-params) (params) _ (block "
+      "(decl (var \"w\" (optional-type (named-type \"Node\")) (ident \"x\") "
+      "(weak))) (decl (var \"u\" _ (ident \"x\") (weak))) "
+      "(decl (var \"e\" (optional-type (named-type \"Node\")) _ (weak)))))))";
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *tu = read(text, ctx, error);
+  ASSERT_NE(tu, nullptr) << error;
+  std::string d = dump(tu);
+  EXPECT_NE(d.find("VarDecl 'parent' weak type\n"), std::string::npos) << d;
+  EXPECT_NE(d.find("VarDecl 'w' weak type\n"), std::string::npos) << d;
+  EXPECT_NE(d.find("VarDecl 'u' weak\n"), std::string::npos) << d;
+  EXPECT_NE(d.find("VarDecl 'e' weak type\n"), std::string::npos) << d;
+  std::string written = write(*tu);
+  EXPECT_NE(written.find("(weak)"), std::string::npos) << written;
+  ast::ASTContext ctx2;
+  ast::TranslationUnit *back = read(written, ctx2, error);
+  ASSERT_NE(back, nullptr) << error;
+  EXPECT_EQ(dump(back), d);
+
+  struct Case {
+    const char *Var;
+    const char *Error;
+  };
+  for (const Case &c :
+       {Case{"(var \"n\" _ (ident \"x\") (weak x))", "(weak) takes no fields"},
+        Case{"(var \"n\" _ (ident \"x\") (let) (weak))",
+             "a weak declaration is neither let nor a borrow"},
+        Case{"(var \"n\" _ (ident \"x\") (qual view) (weak))",
+             "a weak declaration is neither let nor a borrow"},
+        Case{"(var \"n\" _ _ (weak))",
+             "a weak declaration has a type or an initialiser"}}) {
+    std::string doc = "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) "
+                      "_ (block (decl " +
+                      std::string(c.Var) + ")))))";
+    EXPECT_EQ(read(doc, ctx, error), nullptr) << c.Var;
+    EXPECT_NE(error.find(c.Error), std::string::npos) << c.Var << ": " << error;
+  }
+  std::string field = "(paykan-ast 1 (unit (struct \"S\" (type-params) "
+                      "(fields (var \"p\" (optional-type (named-type \"P\")) "
+                      "_ (weak))))))";
+  EXPECT_EQ(read(field, ctx, error), nullptr);
+  EXPECT_NE(error.find("a struct field cannot be weak"), std::string::npos)
+      << error;
+}
+
 TEST(ASTInterchange, LetLocals) {
   const std::string text = "(paykan-ast 1 (unit (fn \"f\" (type-params) "
                            "(params) _ (block (decl (var \"n\" _ (int 1) "

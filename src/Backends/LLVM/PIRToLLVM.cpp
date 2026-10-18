@@ -152,6 +152,7 @@ private:
     case Type::Box:
     case Type::Obj:
     case Type::Ptr:
+    case Type::Weak:
       return llvm::PointerType::getUnqual(Ctx);
     case Type::OptI64:
     case Type::OptF64:
@@ -186,7 +187,12 @@ private:
     return llvm::FunctionType::get(llvmType(sig.Ret), params, false);
   }
 
-  /// The struct type of a class: {vtable ptr, backpointer, fields...}.
+  /// The number of header words of every object (Runtime.h, PaykanObject):
+  /// the vtable pointer, the strong count and the weak count.  A class's
+  /// fields follow them.
+  static constexpr unsigned kHeaderWords = 3;
+
+  /// The struct type of a class: {vtable ptr, strong, weak, fields...}.
   /// Struct types are per translation, never looked up by name in the
   /// context: a cached module loaded earlier may carry an older layout of a
   /// class under the same name.
@@ -195,7 +201,8 @@ private:
     if (it != StructTypes.end())
       return it->second;
     std::vector<llvm::Type *> elems{llvm::PointerType::getUnqual(Ctx),
-                                    llvm::PointerType::getUnqual(Ctx)};
+                                    llvm::Type::getInt64Ty(Ctx),
+                                    llvm::Type::getInt64Ty(Ctx)};
     for (const Field &f : c.Fields)
       elems.push_back(slotType(f.Ty, f.Size, f.Align));
     auto *ty =
@@ -232,8 +239,16 @@ private:
     return runtimeFn(names::kPaykanSharedNew, llvm::PointerType::getUnqual(Ctx),
                      {llvm::PointerType::getUnqual(Ctx)});
   }
-  llvm::FunctionCallee fnSharedGet() {
-    return runtimeFn(names::kPaykanSharedGet, llvm::PointerType::getUnqual(Ctx),
+  llvm::FunctionCallee fnWeakNew() {
+    return runtimeFn(names::kPaykanWeakNew, llvm::PointerType::getUnqual(Ctx),
+                     {llvm::PointerType::getUnqual(Ctx)});
+  }
+  llvm::FunctionCallee fnWeakLoad() {
+    return runtimeFn(names::kPaykanWeakLoad, llvm::PointerType::getUnqual(Ctx),
+                     {llvm::PointerType::getUnqual(Ctx)});
+  }
+  llvm::FunctionCallee fnWeakRelease() {
+    return runtimeFn(names::kPaykanWeakRelease, llvm::Type::getVoidTy(Ctx),
                      {llvm::PointerType::getUnqual(Ctx)});
   }
 
@@ -553,7 +568,8 @@ private:
       return nullptr;
     }
     return B.CreateStructGEP(classType(sym, *c), operand(in.Args[0]),
-                             static_cast<unsigned>(2 + idx), in.Field);
+                             kHeaderWords + static_cast<unsigned>(idx),
+                             in.Field);
   }
 
   void emitInstr(const Instr &in) {
@@ -757,7 +773,17 @@ private:
       setResult(in, B.CreateCall(fnSharedNew(), {operand(in.Args[0])}));
       break;
     case Opcode::Unbox:
-      setResult(in, B.CreateCall(fnSharedGet(), {operand(in.Args[0])}));
+      // A box is its object (Runtime.h, "Shared"): the identity.
+      setResult(in, operand(in.Args[0]));
+      break;
+    case Opcode::WeakNew:
+      setResult(in, B.CreateCall(fnWeakNew(), {operand(in.Args[0])}));
+      break;
+    case Opcode::WeakLoad:
+      setResult(in, B.CreateCall(fnWeakLoad(), {operand(in.Args[0])}));
+      break;
+    case Opcode::WeakRelease:
+      B.CreateCall(fnWeakRelease(), {operand(in.Args[0])});
       break;
     case Opcode::New: {
       std::string sym;
@@ -770,17 +796,20 @@ private:
       // optional field's { i8, i64 } would be laid out with a 4-byte i64.
       llvm::Value *size = llvm::ConstantExpr::getSizeOf(ty);
       llvm::Value *obj = B.CreateCall(fnMalloc(), {size});
-      auto *ptrTy = llvm::PointerType::getUnqual(Ctx);
-      // Header: vtable, null backpointer; then every field zeroed.
+      // Header: vtable, zero strong and weak counts; then every field
+      // zeroed.
       B.CreateStore(M->getNamedGlobal(vtableName(sym)),
                     B.CreateStructGEP(ty, obj, 0));
-      B.CreateStore(llvm::ConstantPointerNull::get(ptrTy),
-                    B.CreateStructGEP(ty, obj, 1));
+      llvm::Constant *zero =
+          llvm::ConstantInt::get(llvm::Type::getInt64Ty(Ctx), 0);
+      B.CreateStore(zero, B.CreateStructGEP(ty, obj, 1));
+      B.CreateStore(zero, B.CreateStructGEP(ty, obj, 2));
       for (size_t i = 0; i < c->Fields.size(); ++i) {
         const Field &fld = c->Fields[i];
         llvm::Type *ft = slotType(fld.Ty, fld.Size, fld.Align);
         B.CreateStore(llvm::Constant::getNullValue(ft),
-                      B.CreateStructGEP(ty, obj, static_cast<unsigned>(2 + i)));
+                      B.CreateStructGEP(
+                          ty, obj, kHeaderWords + static_cast<unsigned>(i)));
       }
       setResult(in, obj);
       break;

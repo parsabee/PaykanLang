@@ -134,6 +134,30 @@ TEST(Interface, RoundTrip) {
   EXPECT_EQ(*back, s);
 }
 
+// A class field's flags byte marks a `weak` field; a struct's fields have
+// no flags (a struct field is never weak).
+TEST(Interface, WeakFields) {
+  Interface i;
+  i.Module = "tree";
+  ClassRec node;
+  node.Name = "Node";
+  node.OriginModule = "tree";
+  node.Fields = {{"name", "Str"}, {"parent", "Node?", true}, {"next", "Node?"}};
+  i.Classes.push_back(node);
+  std::vector<uint8_t> b = writeInterface(i);
+  StatusOr<Interface> back = readInterface(b, "tree");
+  ASSERT_TRUE(back) << back.status().message();
+  EXPECT_EQ(*back, i);
+  ASSERT_EQ((*back).Classes.size(), 1u);
+  EXPECT_FALSE((*back).Classes[0].Fields[0].Weak);
+  EXPECT_TRUE((*back).Classes[0].Fields[1].Weak);
+  EXPECT_FALSE((*back).Classes[0].Fields[2].Weak);
+  // The flag is part of the interface: it changes the bytes.
+  node.Fields[1].Weak = false;
+  i.Classes[0] = node;
+  EXPECT_NE(writeInterface(i), b);
+}
+
 // The parameter modes follow a FUNC record's signature and a CLASS record's
 // methods, and only when one has any, so a module without them has the
 // records it had before, and an older file reads as having none.
