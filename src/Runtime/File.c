@@ -28,7 +28,8 @@ PaykanMethod PaykanFile_vtable[PAYKAN_FILE_SLOTS] = {
 PaykanFile *PaykanFile_new(void) {
   PaykanFile *f = (PaykanFile *)Paykan_malloc(sizeof(PaykanFile));
   f->vtable = PaykanFile_vtable;
-  f->shared = NULL; // not yet boxed (unique-box invariant)
+  f->strong = 0; // unowned until boxed
+  f->weak = 0;
   f->handle = NULL;
   return f;
 }
@@ -54,7 +55,6 @@ void PaykanFile_destroy(PaykanObject *self) {
   PaykanFile *f = (PaykanFile *)self;
   if (f->handle)
     fclose(f->handle);
-  Paykan_free(f);
 }
 
 PaykanShared *PaykanFile_toString(PaykanObject *self) {
@@ -160,7 +160,8 @@ static PaykanMethod PaykanStdin_vtable[PAYKAN_FILE_SLOTS] = {
 
 PaykanFile PaykanFile_Stdin = {
     .vtable = PaykanStdin_vtable,
-    .shared = NULL, // boxed on demand; release re-clears it (immortal destroy)
+    .strong = 1, // immortal: nothing releases this reference
+    .weak = 0,
     .handle = NULL, // stdin is not a constant expression: set at startup
 };
 

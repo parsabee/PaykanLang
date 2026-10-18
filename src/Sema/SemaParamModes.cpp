@@ -132,6 +132,15 @@ std::string Sema::inoutPlaceError(const ast::Expr *place,
            "' is captured by copy by the function, and the copy is read-only; "
            "it cannot be " +
            use;
+  // A weak reference is not a place a strong reference could be written to.
+  if (id && varKind(id->getName()) == VarKind::Weak)
+    return "'" + id->getName() + "' is a 'weak' reference and cannot be " + use;
+  if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(place))
+    if (const auto *ct =
+            ast::dyn_cast<ast::ClassType>(ma->getReceiver()->getResolvedType());
+        ct && ct->isWeakField(ma->getFieldName()))
+      return "field '" + ma->getFieldName() + "' of class '" + ct->getName() +
+             "' is a 'weak' reference and cannot be " + use;
   std::string why = frozenPlace(place);
   if (!why.empty())
     why += "; it cannot be " + use;

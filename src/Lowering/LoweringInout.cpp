@@ -137,6 +137,30 @@ Val ModuleLowering::loadVarBox(const std::string &name) {
   return slot;
 }
 
+Val ModuleLowering::loadWeakVar(const std::string &name) {
+  return B.weakLoad(B.load(CurrentScope->lookup(name), name + ".weak"), name);
+}
+
+void ModuleLowering::storeWeakVar(const std::string &name, const Val &box) {
+  pir::LocalId local = CurrentScope->lookup(name);
+  Val weak = B.weakNew(box, name + ".weak");
+  if (!box.isNull())
+    emitRelease(box); // the +1 handed over; the weak reference remains
+  B.weakRelease(B.load(local, "old.weak"));
+  B.store(local, weak);
+}
+
+bool ModuleLowering::isWeakFieldAccess(const ast::Expr *e) const {
+  const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e);
+  if (!ma)
+    return false;
+  const auto *ct = ast::dyn_cast<ast::ClassType>(
+      ma->getReceiver()->getResolvedType()); // null-safe
+  if (!ct) // a variable's narrowed type, or `self` (both read-only here)
+    ct = getExprClassType(const_cast<ast::Expr *>(ma->getReceiver()));
+  return ct && ct->isWeakField(ma->getFieldName());
+}
+
 void ModuleLowering::storeVarBox(const std::string &name, const Val &newBox) {
   pir::LocalId local = CurrentScope->lookup(name);
   if (CurrentScope->inoutType(name) == Type::Box) {

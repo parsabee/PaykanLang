@@ -8,7 +8,7 @@ inheritance, and the `Obj` root.
 ## Quick Summary
 
 - Class instances are **heap-allocated** with a leading vtable pointer; layout is
-  `{ vptr, owner-box pointer, fields… }` (see `08-memory-model.md` for the owner box).
+  `{ vptr, strong count, weak count, fields… }` (see `08-memory-model.md` for the counts).
 - Class names use `UpperCamelCase`.
 - Every class transitively extends `Obj`. There is no multiple inheritance.
 - **All methods declared inside a class are virtual** — dispatched through the vtable.
@@ -63,6 +63,9 @@ println(p.toString());     // (1,2)
 - Each field has a type annotation. Fields **do not have default values** — every field must be
   assigned inside `__init__`, or passed to the default one.
 - Field types may be builtins, `Str`, fixed-size arrays (`T[n]`), or other class types.
+- A field declared `weak` (`weak parent: Node?;`) refers to its object without keeping it
+  alive and reads as `None` once the object is gone; its type is `T?` for a class `T`. It is
+  the back link that breaks a reference cycle (see `08-memory-model.md`, "Weak References").
 
 ```pkn
 class User {
@@ -398,6 +401,8 @@ match a {
 | `__super__(…)` not first | Derived `__init__` body does not begin with `__super__(…)` |
 | `__super__(…)` outside `__init__` | `__super__(…)` called in any method other than `__init__` |
 | Direct call to `destroy` | User code calls `obj.destroy()` explicitly |
+| `weak` field of the wrong type | `weak f: Node;` (not optional) or `weak f: int?;` (not a class): `'weak' field 'f' of class 'C' must be optional ...` / `... has type 'int?'; a weak reference is an optional class type` |
+| `weak` field passed `inout` | `f(obj.parent)` where `parent` is `weak` and the parameter is `inout`: a weak reference is not a place a strong reference could be written to |
 | Override of `destroy` | A class declares its own `fn destroy()` |
 | Override signature mismatch | Override has a different parameter or return type than the base method |
 | Override changes a parameter mode | Override drops, adds or changes a parameter's `view` / `inout` |

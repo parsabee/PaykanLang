@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace paykan {
@@ -290,8 +291,10 @@ public:
   }
 };
 
-// Variable declaration with explicit type (x: int = 10), or a `let` local
-// (let x = 10;), which cannot be reassigned.
+// Variable declaration with explicit type (x: int = 10), a `let` local
+// (let x = 10;), which cannot be reassigned, or a `weak` local or field
+// (weak y: Point? = x;), which holds a weak reference
+// (docs/language/08-memory-model.md, "Weak references").
 // How a parameter or a local is held
 // (docs/language/02-functions-and-calling.md, "Parameter modes"): by value (the
 // default), `view` (read-only) or `inout` (another name for the caller's
@@ -307,6 +310,7 @@ private:
   Type *VarType;
   Expr *InitExpr;
   bool Let = false;
+  bool Weak = false;
   ParamMode Mode = ParamMode::Value; // `x: view = e;`, `x: inout = p;`
 
 public:
@@ -326,6 +330,12 @@ public:
   /// Declared with `let`: the variable cannot be reassigned.
   bool isLet() const { return Let; }
   void setLet(bool let) { Let = let; }
+
+  /// Declared with `weak`: the variable or field holds a weak reference to
+  /// its object (its type is `T?` of a class `T`, and it reads as None once
+  /// the object is destroyed).
+  bool isWeak() const { return Weak; }
+  void setWeak(bool weak) { Weak = weak; }
 
   /// A local borrow (docs/language/01-language-basics.md, "Local borrows"):
   /// `view` or `inout`; Value for any other declaration.
@@ -959,6 +969,7 @@ public:
   struct Capture {
     const std::string *Name; // interned
     Type *Ty;                // canonical
+    bool Weak = false;       // a `weak` variable: captured as a weak reference
     const std::string &getName() const { return *Name; }
   };
 
@@ -982,8 +993,9 @@ public:
   CompoundStmt *getBody() const { return Body; }
 
   const std::vector<Capture> &getCaptures() const { return Captures; }
-  void addCapture(const std::string &internedName, Type *ty) {
-    Captures.push_back({&internedName, ty});
+  void addCapture(const std::string &internedName, Type *ty,
+                  bool weak = false) {
+    Captures.push_back({&internedName, ty, weak});
   }
   bool capturesSelf() const { return CapturesSelf; }
   void setCapturesSelf(bool v) { CapturesSelf = v; }
@@ -1151,6 +1163,9 @@ class ClassType : public Type {
 
   // Instance fields: (name, type) pairs.
   std::vector<std::pair<std::string, Type *>> Fields;
+  // The fields declared `weak` (docs/language/08-memory-model.md): they hold
+  // a weak reference, and their type is `T?` of a class `T`.
+  std::unordered_set<std::string> WeakFields;
 
   // All virtual methods in layout order (vtable). __init__ is NOT here.
   std::vector<MethodDecl *> VTable;
@@ -1226,13 +1241,24 @@ public:
 
   // -- Fields
 
-  void addField(const std::string &name, Type *ty) {
+  void addField(const std::string &name, Type *ty, bool weak = false) {
     Fields.emplace_back(name, ty);
+    if (weak)
+      WeakFields.insert(name);
   }
   const std::vector<std::pair<std::string, Type *>> &getFields() const {
     return Fields;
   }
   size_t getNumFields() const { return Fields.size(); }
+
+  /// Whether field @p name, of this class or an ancestor, holds a weak
+  /// reference (declared `weak`).
+  bool isWeakField(const std::string &name) const {
+    for (const ClassType *c = this; c; c = c->SuperClass)
+      if (c->WeakFields.count(name))
+        return true;
+    return false;
+  }
 
   /// Look up an instance field by name, searching this class and then each
   /// ancestor in turn.  Returns the field's type, or nullptr if no class in

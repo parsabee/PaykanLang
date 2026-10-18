@@ -112,6 +112,10 @@ const RuntimeProto kRuntimeProtos[] = {
     {names::kPaykanRelease, kVoid, {kRtBoxPtr}},
     {names::kPaykanSharedNew, kRtBoxPtr, {kRtObjPtr}},
     {names::kPaykanSharedGet, kRtObjPtr, {kRtBoxPtr}},
+    {names::kPaykanDispose, kVoid, {kRtObjPtr}},
+    {names::kPaykanWeakNew, kRtWeakPtr, {kRtBoxPtr}},
+    {names::kPaykanWeakLoad, kRtBoxPtr, {kRtWeakPtr}},
+    {names::kPaykanWeakRelease, kVoid, {kRtWeakPtr}},
     {names::kPaykanMalloc, kVoidPtr, {kSize}},
     {names::kPaykanFree, kVoid, {kVoidPtr}},
     {names::kPaykanPanicDivByZero, kVoid, {}},
@@ -183,6 +187,8 @@ const char *cType(Type t) {
     return kRtObjPtr;
   case Type::Ptr:
     return kVoidPtr;
+  case Type::Weak:
+    return kRtWeakPtr;
   case Type::OptI64:
     return kOptI64;
   case Type::OptF64:
@@ -357,6 +363,9 @@ bool hasSideEffects(const pir::Instr &i) {
   case Opcode::New:
   case Opcode::Retain:
   case Opcode::Release:
+  case Opcode::WeakNew:
+  case Opcode::WeakLoad:
+  case Opcode::WeakRelease:
   case Opcode::Free:
   case Opcode::FieldStore:
   case Opcode::PtrStore:
@@ -861,7 +870,8 @@ class Emitter {
       O << classStruct(c->Name) << kSpace << kLBrace << kSpace << comment(note)
         << kNewline;
       O << kIndentUnit << stmt(declare(pointerTo(kRtMethod), kFieldVTable))
-        << kNewline << kIndentUnit << stmt(declare(kRtBoxPtr, kFieldShared))
+        << kNewline << kIndentUnit << stmt(declare(kInt64, kFieldStrong))
+        << kNewline << kIndentUnit << stmt(declare(kInt64, kFieldWeak))
         << kNewline;
       for (const auto &f : c->Fields)
         O << kIndentUnit
@@ -953,7 +963,10 @@ class Emitter {
                         classVTable(c.Name)))
           << kNewline;
         O << kIndentUnit
-          << stmt(binop(member(kNewObj, kFieldShared), kOpAssign, kNull))
+          << stmt(binop(member(kNewObj, kFieldStrong), kOpAssign, kZero))
+          << kNewline;
+        O << kIndentUnit
+          << stmt(binop(member(kNewObj, kFieldWeak), kOpAssign, kZero))
           << kNewline;
         for (const auto &f : c.Fields) {
           const char *zero = kZero;
@@ -967,6 +980,7 @@ class Emitter {
           case Type::Box:
           case Type::Obj:
           case Type::Ptr:
+          case Type::Weak:
             zero = kNull;
             break;
           default:
@@ -1375,8 +1389,20 @@ class Emitter {
       line(stmt(pre + call(names::kPaykanSharedNew, {operand(i.Args[0])})));
       return;
     case Opcode::Unbox:
+      // A box is its object (Runtime.h, "Shared"): the identity.
       pre = resultPrefix(i);
-      line(stmt(pre + call(names::kPaykanSharedGet, {operand(i.Args[0])})));
+      line(stmt(pre + cast(kRtObjPtr) + operand(i.Args[0])));
+      return;
+    case Opcode::WeakNew:
+      pre = resultPrefix(i);
+      line(stmt(pre + call(names::kPaykanWeakNew, {operand(i.Args[0])})));
+      return;
+    case Opcode::WeakLoad:
+      pre = resultPrefix(i);
+      line(stmt(pre + call(names::kPaykanWeakLoad, {operand(i.Args[0])})));
+      return;
+    case Opcode::WeakRelease:
+      line(stmt(call(names::kPaykanWeakRelease, {operand(i.Args[0])})));
       return;
     case Opcode::New:
       pre = resultPrefix(i);

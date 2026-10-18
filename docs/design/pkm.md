@@ -653,7 +653,7 @@ for that reason; the lowering is deterministic already.
 | 0 | `void` | | 6 | `obj` |
 | 1 | `i64` | | 7 | `ptr` |
 | 2 | `f64` | | 8–11 | #96 inline optionals: `opt_i64`, `opt_f64`, `opt_bool`, `opt_char`; 12–15 reserved for further ones |
-| 3 | `bool` | | 16 | reserved: #99 `weak` |
+| 3 | `bool` | | 16 | `weak`: a weak reference (#99, docs/design/weak-references.md) |
 | 4 | `char` | | 17 | `mem`: a local's or field's bytes (size and alignment follow, §5.3) |
 | 5 | `box` | | 18–255 | reserved |
 
@@ -687,14 +687,16 @@ InstrRec := u8 opcode ; uleb result id (0 = none) ; [type result type ; str resu
 | 23 | `vtable.addr` | `str` class (`""` = operand form) | 0/1 |
 | 24, 25 | `load store` | `uleb` local | 0 / 1 |
 | 26–29 | `some none is_some unwrap` (#96) | — (the result type is the result's) | 1 / 0 / 1 / 1 |
-| 30, 31 | reserved #99 (`weak.load weak.store`) | | |
+| 30, 31 | `weak.load weak.new` (#99) | — | 1 |
 | 32, 33 | reserved #170 (`global.load global.store`) | | |
 | 34 | `local.addr` | `uleb` local | 0 |
 | 35 | `field.addr` | `str` class; `str` field | 1 |
 | 36, 37 | `ptr.load ptr.store` | — (the loaded type is the result's) | 1 / 2 |
 | 38 | `ptr.add` | — | 2 |
 | 39, 40 | `mem.copy mem.zero` | — | 3 / 2 |
-| 41–255 | reserved | | |
+| 41–48 | reserved | | |
+| 49 | `weak.release` (#99) | — | 1 |
+| 50–255 | reserved | | |
 
 Unused `Instr` extras are not written; a decoded `Instr` has the defaults
 of `PIR.h`, as the text parser produces, so round-trip equality holds. An
@@ -1383,7 +1385,7 @@ Reserved now so no later major bump is needed:
 | #18 override/final/pure | `MFlags.FINAL/OVERRIDE/PURE`; `cflags.FINAL`; class `abstract` bit |
 | #147 traits | `TRAIT`, `IMPL`, `Bounds`, `T_TRAIT_OBJ`, trait default bodies in `TMPL` |
 | #160 generics | `TMPL` section, `INST` part, `ERASABLE`, `erased`/`nHiddenParams`, `ClassObjRec`, `$class` spelling |
-| #96 inline optionals, #99 weak | type codes 8–16, opcodes 26–31, `T_WEAK` |
+| #96 inline optionals, #99 weak (done: type code 16, opcodes 30, 31 and 49, a class field's flags byte) | type codes 8–16, opcodes 26–31, `T_WEAK` |
 | #98 borrowed params | `Sig.conv` per parameter; `nConventions` |
 | #93 one allocation | header kind is a property of `runtime_abi`, nothing per class |
 | #153 runtime as library | manifest `runtime_abi` + `libraries` (`RUNTIME`, `ALLOCATOR`); payload flag bit 5 |

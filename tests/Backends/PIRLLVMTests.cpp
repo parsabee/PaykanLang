@@ -277,7 +277,6 @@ class Counter {
 }
 
 fn @Counter_destroy(%self: obj) -> void {
-  free %self
   ret
 }
 
@@ -328,7 +327,6 @@ class C {
 }
 
 fn @C_destroy(%self: obj) -> void {
-  free %self
   ret
 }
 
@@ -411,7 +409,6 @@ class C {
 }
 
 fn @C.destroy(%self: obj) -> void {
-  free %self
   ret
 }
 

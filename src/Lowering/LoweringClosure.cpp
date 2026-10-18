@@ -52,15 +52,14 @@ pir::Signature ModuleLowering::closureSignature(ast::FunctionType *fnt) {
   return sig;
 }
 
-pir::Class *
-ModuleLowering::declareClosureClass(const std::string &name,
-                                    const std::vector<ast::Type *> &captureTys,
-                                    const pir::Signature &callSig) {
+pir::Class *ModuleLowering::declareClosureClass(
+    const std::string &name, const std::vector<ast::Type *> &captureTys,
+    const std::vector<bool> &captureWeak, const pir::Signature &callSig) {
   Classes_.emplace_back();
   pir::Class &cls = Classes_.back();
   cls.Name = name;
   for (size_t i = 0; i < captureTys.size(); ++i) {
-    Type t = toPIRType(captureTys[i]);
+    Type t = captureWeak[i] ? Type::Weak : toPIRType(captureTys[i]);
     pir::Field f{captureField(i), t == Type::Void ? Type::Box : t};
     if (t == Type::Mem) {
       MemLayout l = memLayout(captureTys[i]);
@@ -88,7 +87,8 @@ ModuleLowering::declareClosureClass(const std::string &name,
 }
 
 void ModuleLowering::emitClosureDestructor(
-    const std::string &name, const std::vector<ast::Type *> &captureTys) {
+    const std::string &name, const std::vector<ast::Type *> &captureTys,
+    const std::vector<bool> &captureWeak) {
   pir::Function *fn = FuncByName.at(name + kNameSep + kMethodDestroy);
   FunctionStateGuard fnState(*this, fn, nullptr, nullptr);
   Val self(pir::Operand::value(fn->Params[0]), Type::Obj);
@@ -102,9 +102,12 @@ void ModuleLowering::emitClosureDestructor(
     }
     if (!ast::isRefType(ty))
       continue;
+    if (captureWeak[i]) {
+      B.weakRelease(B.fieldLoad(self, name, field, Type::Weak, field));
+      continue;
+    }
     emitRelease(B.fieldLoad(self, name, field, Type::Box, field));
   }
-  B.freeObject(self);
   B.emitRetVoid();
 }
 
@@ -117,9 +120,12 @@ const std::string &ModuleLowering::lowerLambda(ast::LambdaExpr *node) {
                            kNameSep + std::to_string(NextClosureId++);
   auto *fnt = ast::cast<ast::FunctionType>(node->getResolvedType());
   std::vector<ast::Type *> captureTys;
-  for (const auto &cap : node->getCaptures())
+  std::vector<bool> captureWeak;
+  for (const auto &cap : node->getCaptures()) {
     captureTys.push_back(cap.Ty);
-  declareClosureClass(name, captureTys, closureSignature(fnt));
+    captureWeak.push_back(cap.Weak);
+  }
+  declareClosureClass(name, captureTys, captureWeak, closureSignature(fnt));
   pir::Function *call = FuncByName.at(name + kNameSep + kClosureCall);
   nameParams(*call, 1, node->getParams());
   if (ast::isMemType(fnt->getReturnType()))
@@ -150,6 +156,15 @@ const std::string &ModuleLowering::lowerLambda(ast::LambdaExpr *node) {
                     Val::i64(l.Size));
           emitMemRetain(own, ty);
           CurrentScope->declare(cname, local, ty);
+        } else if (captureWeak[i]) {
+          // A captured `weak` variable: the object, held strongly for the
+          // call's duration (None once it is gone), as the variable reads.
+          Val box = B.weakLoad(
+              B.fieldLoad(self, name, field, Type::Weak, cname + ".weak"),
+              cname);
+          pir::LocalId local = B.addLocal(cname, Type::Box);
+          B.store(local, box);
+          CurrentScope->declare(cname, local, ty);
         } else if (ast::isRefType(ty)) {
           Val box = B.fieldLoad(self, name, field, Type::Box, cname);
           emitRetain(box);
@@ -174,7 +189,7 @@ const std::string &ModuleLowering::lowerLambda(ast::LambdaExpr *node) {
     MemTemps = std::move(savedTemps);
     CurrentScope = savedScope;
   }
-  emitClosureDestructor(name, captureTys);
+  emitClosureDestructor(name, captureTys, captureWeak);
   return LambdaClasses[node] = name;
 }
 
@@ -195,6 +210,13 @@ Val ModuleLowering::emitLambdaValue(ast::LambdaExpr *node) {
       Val dst = B.fieldAddr(obj, name, field, field + ".addr");
       B.memCopy(dst, src, Val::i64(memLayout(cap.Ty).Size));
       emitMemRetain(dst, cap.Ty);
+    } else if (cap.Weak) {
+      // A `weak` variable: the closure holds its object weakly too.
+      Val box = emitAsShared(id); // +1, dropped once the weak one is taken
+      if (!box)
+        return Val();
+      B.fieldStore(obj, name, field, B.weakNew(box, field + ".weak"));
+      emitRelease(box);
     } else if (ast::isRefType(cap.Ty)) {
       Val box = emitAsShared(id); // +1, the field's own
       if (!box)
@@ -222,7 +244,7 @@ const std::string &ModuleLowering::lowerFunctionRef(const std::string &fnName,
                         "' used as a value is not declared");
     return FunctionRefClasses[fnName] = name;
   }
-  declareClosureClass(name, {}, closureSignature(fnt));
+  declareClosureClass(name, {}, {}, closureSignature(fnt));
   pir::Function *call = FuncByName.at(name + kNameSep + kClosureCall);
   // `call` forwards its parameters: a box given to it is the callee's.
   {
@@ -237,7 +259,7 @@ const std::string &ModuleLowering::lowerFunctionRef(const std::string &fnName,
     else
       B.emitRet(result);
   }
-  emitClosureDestructor(name, {});
+  emitClosureDestructor(name, {}, {});
   return FunctionRefClasses[fnName] = name;
 }
 
