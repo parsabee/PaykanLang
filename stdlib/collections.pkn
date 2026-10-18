@@ -275,16 +275,18 @@ impl LinkedList<T> {
 
   // The first element.
   view fn front() -> T {
-    match self.__head {
-      h: __Node<T> { return h.value; }
+    weak h = self.__head; // a weak reference reads as a copy, never a view
+    match h {
+      n: __Node<T> { return n.value; }
       None { return __fail<T>("front on an empty LinkedList"); }
     }
   }
 
   // The last element.
   view fn back() -> T {
-    match self.__tail {
-      t: __Node<T> { return t.value; }
+    weak t = self.__tail;
+    match t {
+      n: __Node<T> { return n.value; }
       None { return __fail<T>("back on an empty LinkedList"); }
     }
   }
@@ -313,7 +315,7 @@ impl LinkedList<T> {
   // The elements from first to last, in a new list.
   view fn toList() -> List<T> {
     out: List<T> = List<T>();
-    cur: __Node<T>? = self.__head;
+    weak cur = self.__head; // the cursor: no reference copied out of self
     while (True) {
       match cur {
         n: __Node<T> {
@@ -343,7 +345,7 @@ impl LinkedList<T> {
 
   // The first node whose value == v, if any.
   view fn __find(v: view T) -> __Node<T>? {
-    cur: __Node<T>? = self.__head;
+    weak cur = self.__head; // the cursor: no reference copied out of self
     while (True) {
       match cur {
         n: __Node<T> {
