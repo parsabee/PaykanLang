@@ -238,6 +238,66 @@ TEST(Weak, LoopsAndEarlyExits) {
   g.expectNoLeaks("weak locals in loops");
 }
 
+// A `view fn` walks a chain of nodes through a `weak` cursor: the cursor
+// takes no reference to `self`'s nodes, and each read of it is a fresh
+// reference the method may bind, read and return.
+TEST(Weak, CursorInAViewMethod) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Node { v: int; next: Node?; }
+    class Chain { head: Node?; }
+    impl Chain {
+      fn __init__() { self.head = None; }
+      fn push(v: int) { self.head = Node(v, self.head); }
+      view fn sum() -> int {
+        total = 0;
+        weak cur = self.head;
+        while (cur != None) {
+          match cur {
+            n: Node { total = total + n.v; cur = n.next; }
+            None { }
+          }
+        }
+        return total;
+      }
+      view fn find(v: int) -> Node? {
+        weak cur = self.head;
+        while (cur != None) {
+          match cur {
+            n: Node {
+              if (n.v == v) { return n; }
+              cur = n.next;
+            }
+            None { }
+          }
+        }
+        return None;
+      }
+    }
+    fn show(c: view Chain) -> Str {
+      match c.find(2) {
+        n: Node { return Str(c.sum()) + " found " + Str(n.v); }
+        None { return Str(c.sum()) + " none"; }
+      }
+    }
+    fn main() -> int {
+      c = Chain();
+      println(show(c));
+      c.push(1);
+      c.push(2);
+      c.push(3);
+      println(show(c));
+      kept: Node? = c.find(2);
+      c = Chain();
+      match kept { n: Node { println(Str(n.v)); } None { println("gone"); } }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "0 none\n6 found 2\n2\n");
+  g.expectNoLeaks("weak cursor");
+}
+
 // The runtime's classes are classes: a `Str` or an `Obj` can be referred to
 // weakly, and the immortal `None` object stays.
 TEST(Weak, StringsAndObjects) {

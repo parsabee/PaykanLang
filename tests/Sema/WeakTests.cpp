@@ -87,6 +87,47 @@ TEST(Weak, IsNotAnInoutPlace) {
                 "arm 'n'"});
 }
 
+// A `weak` local may name what a `view` names (a `view` parameter, part of
+// `self` in a `view fn`): it takes no reference, so the view is not copied,
+// and what it reads is a fresh reference, so a `view fn` can walk a chain of
+// nodes through one and return what it finds.
+TEST(Weak, LocalMayNameWhatAViewNames) {
+  auto r = semaCheck(R"(
+    class Node { v: int; next: Node?; }
+    class Chain {
+      head: Node?;
+      view fn sum() -> int {
+        total = 0;
+        weak cur = self.head;
+        while (cur != None) {
+          match cur {
+            n: Node { total = total + n.v; cur = n.next; }
+            None { }
+          }
+        }
+        return total;
+      }
+      view fn first() -> Node? {
+        weak h = self.head;
+        match h {
+          n: Node { return n; }
+          None { return None; }
+        }
+      }
+    }
+    fn peek(c: view Chain, n: view Node) -> int {
+      weak w = c.head;
+      weak m = n;
+      match w { x: Node { return x.v; } None { return -1; } }
+    }
+    fn main() -> int {
+      c = Chain(None);
+      return c.sum() + peek(c, Node(1, None));
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
 // Otherwise a weak reference is an ordinary `T?`: assigned, compared,
 // matched, passed by value or as a `view`, returned, stored, captured and
 // shadowed; `weak y = x` infers `T?` from a `T` or a `T?`.
