@@ -23,6 +23,8 @@ instead; its chapters link here for the details.
 12. [Traits](12-traits.md): traits, `impl Trait for Type` and bounds on type parameters.
 13. [The standard library](13-standard-library.md): `::collections` (lists, linked lists,
     stacks, queues, hash maps and sets, priority queues) and `::memory`.
+14. [Structs](14-structs.md): values with named fields, held in place like tuples, with
+    `impl` blocks for their methods.
 
 The [grammar](../grammar.md) is the specification of the concrete syntax that every
 frontend implements.

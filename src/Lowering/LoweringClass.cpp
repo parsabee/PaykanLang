@@ -396,6 +396,9 @@ void ModuleLowering::emitDestructor(ast::ClassDecl *node, ast::ClassType *ct) {
 // -- Member assignment / access
 
 Val ModuleLowering::lowerMemberAssignStmt(ast::MemberAssignStmt *node) {
+  // A struct's field is written in place (LoweringStruct.cpp).
+  if (auto *st = getExprStructType(node->getReceiver()))
+    return lowerStructFieldAssign(node, st);
   Receiver recv = emitReceiver(node->getReceiver(), "obj");
   if (!recv)
     return Val();
@@ -453,9 +456,12 @@ Val ModuleLowering::lowerMemberAssignStmt(ast::MemberAssignStmt *node) {
 }
 
 Val ModuleLowering::lowerMemberAccessExpr(ast::MemberAccessExpr *node) {
-  // A field held in memory: its address, in its object.
+  // A field held in memory: its address, in its object (or in its struct).
   if (ast::isMemType(node->getResolvedType()))
     return emitMemAddress(node);
+  // A struct's field is read in place (LoweringStruct.cpp).
+  if (auto *st = getExprStructType(node->getReceiver()))
+    return lowerStructFieldRead(node, st);
   // A call-rooted receiver (`makeH().a`) is a fresh +1 box torn down after
   // the read; a ref-typed field is retained first so it survives.
   Receiver recv = emitReceiver(node->getReceiver(), "obj");

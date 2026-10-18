@@ -260,6 +260,10 @@ private:
   /// defines class @p ct (ProgramLowering::ClassOrigins).
   pir::Function *lookupClassFunction(ast::ClassType *ct,
                                      const std::string &symbol);
+  /// The same for the class or struct named @p typeName (a struct's
+  /// functions are `S`, its constructor, and `S.m`, its methods).
+  pir::Function *lookupTypeFunction(const std::string &typeName,
+                                    const std::string &symbol);
   /// Declare @p fn (defined in module @p modulePath) as extern here, named
   /// @p localName in this module (or a variant of it, if that is taken).
   pir::Function *declareExternFrom(const pir::Function &fn,
@@ -441,6 +445,24 @@ private:
     Val emitIdentityCtor(ast::CallExpr *node);
     Val emitConversion(ast::CallExpr *node);
     Val emitBuiltinCall(ast::CallExpr *node);
+    /// The arguments of the method call @p node for @p method, whose PIR
+    /// signature is @p sig (the receiver first, at index 0), appended to
+    /// @p args: a slice as two values, a value held in memory by address,
+    /// an `inout` argument as its address (its kept objects in @p keep), a
+    /// reference as a +1 box when the method is @p userDefined (a builtin
+    /// borrows it), the owned temporaries among the rest in @p ownedArgs.
+    /// False when an argument failed.
+    bool emitMethodArgs(ast::MethodCallExpr *node,
+                        const ast::MethodDecl *method,
+                        const pir::Signature &sig, bool userDefined,
+                        std::vector<Val> &args,
+                        std::vector<ExprValue> &ownedArgs,
+                        std::vector<Val> &keep);
+    /// A call of a method of the struct @p st (LoweringStruct.cpp): the
+    /// receiver's address, then the arguments; @p wantAddress as for a
+    /// call's `inout` result.
+    Val emitStructMethodCall(ast::MethodCallExpr *node, ast::StructType *st,
+                             bool wantAddress);
     Val emitShortCircuit(ast::BinaryExpr *node, bool isAnd);
     Val emitIntDivGuards(const Val &lhs, const Val &rhs, bool isDiv);
 
@@ -476,6 +498,35 @@ private:
   Val lowerMemberAccessExpr(ast::MemberAccessExpr *node);
   /// Runtime symbol implementing @p name for the builtin class @p ct, or "".
   const char *builtinMethodSymbol(ast::ClassType *ct, const std::string &name);
+
+  // -- Structs (LoweringStruct.cpp, docs/language/14-structs.md)
+  //
+  // A struct is a tuple of its fields to the lowering (ast::StructType is a
+  // TupleType): held in memory, copied, retained and released like one.
+  // Its methods are functions `S.m(self: ptr, ...)` whose `self` is the
+  // receiver's address, its constructor `S(..., out: ptr)` writes the new
+  // value where the caller's temporary is, and its text and equality go
+  // through its layout (names included) like a tuple's.
+
+  /// The signature of the struct method @p md: the receiver's address
+  /// first, then the parameters, then the address a result held in memory
+  /// is written to (as methodSignature).
+  pir::Signature structMethodSignature(ast::MethodDecl *md);
+  /// The constructor's: the `__init__` parameters, then the address of the
+  /// value to make.
+  pir::Signature structConstructorSignature(ast::StructType *st);
+  /// Declare the functions of @p sd's struct (its methods and constructor),
+  /// before any body is emitted.
+  void declareStruct(ast::StructDecl *sd);
+  /// Emit the bodies: each method, and the constructor (zero the value,
+  /// then `__init__`).
+  Val lowerStructDecl(ast::StructDecl *sd);
+  /// The struct type of @p e's value, canonical in this module, or nullptr.
+  ast::StructType *getExprStructType(ast::Expr *e);
+  /// `p.x` read, the receiver a struct: in place, as a tuple element.
+  Val lowerStructFieldRead(ast::MemberAccessExpr *node, ast::StructType *st);
+  /// `p.x = v`, the receiver a struct: written in place.
+  Val lowerStructFieldAssign(ast::MemberAssignStmt *node, ast::StructType *st);
 
   // -- Values held in memory: fixed-size arrays and tuples (LoweringMem.cpp)
 
@@ -561,11 +612,14 @@ private:
   /// box borrowed from its slot.
   Val emitElementLoad(const Val &addr, ast::Type *ty);
   /// The layout of the tuple type @p tt the runtime reads (Runtime.h,
-  /// "Tuples"), as constant data.
+  /// "Tuples"), as constant data; a struct's holds its name and its fields'
+  /// ("Structs").
   Val emitTupleLayout(ast::TupleType *tt);
-  /// The text of the tuple @p e, a new string (PaykanTuple_toString).
+  /// The text of the tuple or struct @p e, a new string
+  /// (PaykanTuple_toString / PaykanStruct_toString).
   Val emitTupleToString(ast::Expr *e);
-  /// Whether the tuples @p a and @p b are equal (PaykanTuple_equals).
+  /// Whether the tuples or structs @p a and @p b are equal
+  /// (PaykanTuple_equals / PaykanStruct_equals).
   Val emitTupleEquals(ast::Expr *a, ast::Expr *b);
   /// True when @p arg is passed for a slice parameter: a fixed-size array
   /// Sema took for one, or a slice passed on.

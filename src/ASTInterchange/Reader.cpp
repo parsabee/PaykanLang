@@ -482,10 +482,12 @@ private:
     std::vector<EnumDecl *> enums;
     std::vector<ImplDecl *> impls;
     std::vector<TraitDecl *> traits;
+    std::vector<StructDecl *> structs, genericStructs;
     for (const SExpr *d : f.rest()) {
       if (d->K != SExpr::List) {
         fail(*d, "expected a declaration: (import ...), (enum ...), "
-                 "(class ...), (fn ...), (trait ...) or (impl ...)");
+                 "(class ...), (struct ...), (fn ...), (trait ...) or "
+                 "(impl ...)");
         return nullptr;
       }
       if (d->Text == "import") {
@@ -497,6 +499,9 @@ private:
       } else if (d->Text == "class") {
         if (auto *c = classDecl(*d))
           (c->isGeneric() ? genericClasses : classes).push_back(c);
+      } else if (d->Text == "struct") {
+        if (auto *s = structDecl(*d))
+          (s->isGeneric() ? genericStructs : structs).push_back(s);
       } else if (d->Text == "fn") {
         if (auto *fn = funcDecl(*d))
           (fn->isGeneric() ? genericFuncs : funcs).push_back(fn);
@@ -509,7 +514,7 @@ private:
       } else {
         fail(*d, "(" + d->Text +
                      " ...) is not a top-level declaration (import, enum, "
-                     "class, fn, trait, impl)");
+                     "class, struct, fn, trait, impl)");
       }
       if (failed())
         return nullptr;
@@ -517,7 +522,43 @@ private:
     return Ctx.make<TranslationUnit>(
         loc, std::move(imports), std::move(classes), std::move(funcs),
         std::move(enums), std::move(genericClasses), std::move(genericFuncs),
-        std::move(impls), std::move(traits));
+        std::move(impls), std::move(traits), std::move(structs),
+        std::move(genericStructs));
+  }
+
+  StructDecl *structDecl(const SExpr &e) {
+    Fields f(*this, e);
+    SourceLocation loc = f.location();
+    const std::string *name = f.name("the struct's name");
+    std::vector<const std::string *> params;
+    TypeParamBounds bounds;
+    if (!name || !typeParams(f, params, bounds))
+      return nullptr;
+    std::vector<VarDecl *> fields;
+    const SExpr *fl = f.list("fields");
+    if (!fl)
+      return nullptr;
+    for (const SExpr &v : fl->Items) {
+      if (v.K != SExpr::List || v.Text != "var")
+        return fail(v, "expected a field: (var ...)"), nullptr;
+      auto *vd = varDecl(v);
+      if (!vd)
+        return nullptr;
+      if (vd->getInitExpr() || !vd->getType())
+        return fail(v, "a field has a type and no initialiser"), nullptr;
+      if (vd->isLet())
+        return fail(v, "a field cannot be declared with let"), nullptr;
+      fields.push_back(vd);
+    }
+    // The check the grammar makes (docs/grammar.md).
+    if (fields.empty())
+      return fail(e, "a struct has at least one field"), nullptr;
+    if (!f.done())
+      return nullptr;
+    auto *sd =
+        Ctx.make<StructDecl>(loc, *name, std::move(fields), std::move(params));
+    sd->setTypeParamBounds(std::move(bounds));
+    return sd;
   }
 
   ImplDecl *implDecl(const SExpr &e) {

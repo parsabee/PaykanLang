@@ -36,6 +36,7 @@ The category of a type decides how it is stored and whether ARC applies.
 | **Value** | `int`, `float`, `bool`, `char`, `enum`, and their optionals `int?`, `float?`, `bool?`, `char?` | Stack / register (inline in a field) | Copied bit-for-bit; independent thereafter |
 | **Array** | `T[n]` of any element type | Inline in the variable, the field or the enclosing array | Elements copied; reference elements retained |
 | **Tuple** | `(T1, T2, ...)` of any element types | Inline in the variable, the field or the enclosing array or tuple | Elements copied; reference elements retained |
+| **Struct** | `struct Name { ... }` of any field types | Inline, like a tuple of its fields | Fields copied; reference fields retained |
 | **Reference** | class instances, `Str`, `File`, `Error`, optionals `T?` of these | Heap | Reference shared; count adjusted |
 
 A value type has no identity beyond its bits: assigning one `int` to another produces two
@@ -184,6 +185,11 @@ element (`Str`, a class, `Node?`) is its box, which the tuple **retains**. Each 
 (an assignment, a plain parameter, a result, an array element) retains the references in it
 once more; a variable's are released when it goes out of scope, a field's when its object is
 destroyed, an array element's with its array. See `09-tuples.md`.
+
+A struct is a value in exactly the same way: it is laid out like the tuple of its fields and
+retains and releases the references it holds as a tuple does. Assigning a field in place
+(`p.name = s`) retains the new reference and releases the one it replaces. A method's `self`
+is the receiver's storage, so a method allocates nothing to be called. See `14-structs.md`.
 
 ---
 

@@ -52,6 +52,11 @@ class ASTContext {
   // types backed by i64; they are NOT class types and live in their own map.
   std::unordered_map<std::string, EnumType *> EnumTypes;
 
+  // Registry of all struct types, keyed by name (and by any qualified
+  // import alias, see addStructTypeAlias).  A struct is a value type held in
+  // place; it is not a class type and lives in its own map.
+  std::unordered_map<std::string, StructType *> StructTypes;
+
   // Canonical FixedArrayType per (element type, length), lazily created by
   // getFixedArrayType.  Keys are canonical within this ASTContext, so
   // identity holds at any nesting depth.
@@ -208,6 +213,23 @@ public:
     return EnumTypes;
   }
 
+  /// Create and register a new (empty) StructType.  Fields are added to the
+  /// returned type via addField().  Returns nullptr if the name is taken.
+  StructType *registerStructType(const std::string &name, SourceLocation loc);
+
+  /// Look up a registered struct type by name.  Returns nullptr if not found.
+  StructType *lookupStructType(const std::string &name) const;
+
+  /// Register an additional name that resolves to an already-registered
+  /// StructType (a qualified alias like "module::Point").  Has no effect if
+  /// the alias is already present.
+  void addStructTypeAlias(const std::string &alias, StructType *st);
+
+  /// Read-only view of the struct type registry.
+  const std::unordered_map<std::string, StructType *> &getStructTypes() const {
+    return StructTypes;
+  }
+
   /// Register an additional name that resolves to an already-registered
   /// ClassType (e.g. a qualified alias like "module::Foo" -> Foo's ClassType).
   /// Has no effect if the alias is already present.
@@ -219,7 +241,8 @@ public:
   void addEnumTypeAlias(const std::string &alias, EnumType *et);
 
   /// Look up any type by name: builtins (int, float, bool, void) first,
-  /// then the class type registry.  Returns nullptr if not found.
+  /// then the enum, struct and class type registries.  Returns nullptr if
+  /// not found.
   Type *lookupType(const std::string &name) const;
 
   /// Read-only view of the class type registry (used by Sema to export types
@@ -230,11 +253,11 @@ public:
 };
 
 /// Canonical display name for a type: builtin keyword ("int", "float", …),
-/// class or enum name, element name plus "[]" for arrays, inner name plus "?"
-/// for optionals, and "unknown" for null or unrecognised types.  The single
-/// source of truth shared by Sema diagnostics, module-export serialisation
-/// (SemaImport, which parses the "[]" / "?" suffixes back), and specialized
-/// array-type naming.
+/// class, struct or enum name, element name plus "[]" for arrays, inner name
+/// plus "?" for optionals, and "unknown" for null or unrecognised types.  The
+/// single source of truth shared by Sema diagnostics, module-export
+/// serialisation (SemaImport, which parses the "[]" / "?" suffixes back), and
+/// specialized array-type naming.
 std::string typeName(Type *ty);
 
 } // namespace ast

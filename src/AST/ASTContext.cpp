@@ -237,6 +237,24 @@ void ASTContext::addClassTypeAlias(const std::string &alias, ClassType *ct) {
   ClassTypes.emplace(alias, ct); // no-op if already present
 }
 
+StructType *ASTContext::registerStructType(const std::string &name,
+                                           SourceLocation loc) {
+  if (StructTypes.count(name))
+    return nullptr;
+  auto *ty = make<StructType>(loc, intern(name));
+  StructTypes[name] = ty;
+  return ty;
+}
+
+StructType *ASTContext::lookupStructType(const std::string &name) const {
+  auto it = StructTypes.find(name);
+  return it != StructTypes.end() ? it->second : nullptr;
+}
+
+void ASTContext::addStructTypeAlias(const std::string &alias, StructType *st) {
+  StructTypes.emplace(alias, st); // no-op if already present
+}
+
 void ASTContext::addEnumTypeAlias(const std::string &alias, EnumType *et) {
   EnumTypes.emplace(alias, et); // no-op if already present
 }
@@ -254,6 +272,8 @@ Type *ASTContext::lookupType(const std::string &name) const {
     return VoidTy;
   if (auto *et = lookupEnumType(name))
     return et;
+  if (auto *st = lookupStructType(name))
+    return st;
   return lookupClassType(name);
 }
 
@@ -278,6 +298,9 @@ std::string typeName(Type *ty) {
     return ct->getName();
   if (auto *et = dyn_cast<EnumType>(ty))
     return et->getName();
+  // Before TupleType, which a StructType is: a struct goes by its name.
+  if (auto *st = dyn_cast<StructType>(ty))
+    return st->getName();
   if (auto *at = dyn_cast<ArrayType>(ty))
     return typeName(at->getElementType()) + "[]";
   if (auto *ft = dyn_cast<FixedArrayType>(ty)) {

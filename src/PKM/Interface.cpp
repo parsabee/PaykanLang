@@ -110,10 +110,32 @@ std::vector<uint8_t> writeInterface(const Interface &iface) {
   ByteWriter types;
   types.uleb(0);
 
-  // DECLS sorted by (tag, name): ENUM, CLASS, FUNC.
+  // DECLS sorted by (tag, name): ENUM, CLASS, FUNC, STRUCT.
   ByteWriter decls;
   decls.uleb(iface.Enums.size() + iface.Classes.size() +
-             iface.Functions.size());
+             iface.Functions.size() + iface.Structs.size());
+  // A class's or a struct's methods: each, then every method's modes when
+  // one has any, then every method's result mode when one returns a
+  // borrow.
+  auto writeMethods = [&](ByteWriter &v,
+                          const std::vector<ClassRec::Method> &methods) {
+    v.uleb(methods.size());
+    bool modes = false;
+    bool results = false;
+    for (const ClassRec::Method &m : methods) {
+      v.uleb(strs.intern(m.Name));
+      writeSig(v, strs, m.ReturnTypeName, m.ParamTypeNames);
+      v.u8(m.Flags);
+      modes |= !m.Modes.Modes.empty();
+      results |= m.Modes.Result != kModeValue;
+    }
+    if (modes || results)
+      for (const ClassRec::Method &m : methods)
+        writeModes(v, strs, m.Modes);
+    if (results)
+      for (const ClassRec::Method &m : methods)
+        v.u8(m.Modes.Result);
+  };
   for (const EnumRec *e : sortedByName(iface.Enums))
     record(decls, static_cast<uint64_t>(DeclTag::Enum), [&](ByteWriter &v) {
       v.uleb(strs.intern(e->Name));
@@ -134,24 +156,7 @@ std::vector<uint8_t> writeInterface(const Interface &iface) {
         v.uleb(strs.intern(f.FieldName));
         v.uleb(strs.intern(f.TypeName));
       }
-      v.uleb(c->Methods.size());
-      bool modes = false;
-      bool results = false;
-      for (const ClassRec::Method &m : c->Methods) {
-        v.uleb(strs.intern(m.Name));
-        writeSig(v, strs, m.ReturnTypeName, m.ParamTypeNames);
-        v.u8(m.Flags);
-        modes |= !m.Modes.Modes.empty();
-        results |= m.Modes.Result != kModeValue;
-      }
-      // Every method's modes, after the methods, when one has any; then
-      // every method's result mode, when one returns a borrow.
-      if (modes || results)
-        for (const ClassRec::Method &m : c->Methods)
-          writeModes(v, strs, m.Modes);
-      if (results)
-        for (const ClassRec::Method &m : c->Methods)
-          v.u8(m.Modes.Result);
+      writeMethods(v, c->Methods);
     });
   for (const FuncRec *f : sortedByName(iface.Functions))
     record(decls, static_cast<uint64_t>(DeclTag::Func), [&](ByteWriter &v) {
@@ -162,6 +167,18 @@ std::vector<uint8_t> writeInterface(const Interface &iface) {
         writeModes(v, strs, f->Modes);
       if (result)
         v.u8(f->Modes.Result);
+    });
+  for (const StructRec *s : sortedByName(iface.Structs))
+    record(decls, static_cast<uint64_t>(DeclTag::Struct), [&](ByteWriter &v) {
+      v.uleb(strs.intern(s->Name));
+      v.u8(s->IsLocal ? kDeclLocal : 0);
+      v.uleb(strs.intern(s->OriginModule));
+      v.uleb(s->Fields.size());
+      for (const ClassRec::Field &f : s->Fields) {
+        v.uleb(strs.intern(f.FieldName));
+        v.uleb(strs.intern(f.TypeName));
+      }
+      writeMethods(v, s->Methods);
     });
 
   ByteWriter inst;
@@ -431,6 +448,27 @@ Status Reader::readDecls(Interface &out) {
     lastName = name;
     return true;
   };
+  // A class's or a struct's methods, then the modes and result modes every
+  // method has when any does.
+  auto readMethods = [&](ByteReader &v, std::vector<ClassRec::Method> &out) {
+    uint64_t n;
+    if (!detail::readCount(v, n, 4))
+      return false;
+    out.resize(static_cast<size_t>(n));
+    for (ClassRec::Method &m : out)
+      if (!str(v, m.Name) || !str(v, m.ReturnTypeName) ||
+          !strList(v, m.ParamTypeNames) || !v.u8(m.Flags))
+        return false;
+    if (v.remaining() > 0) // every method's modes
+      for (ClassRec::Method &m : out)
+        if (!modes(v, m.ParamTypeNames.size(), m.Modes))
+          return false;
+    if (v.remaining() > 0) // every method's result mode
+      for (ClassRec::Method &m : out)
+        if (!result(v, m.Modes))
+          return false;
+    return true;
+  };
   Status s = records(
       "DECLS", part(PartTag::Decls)->Bytes, [&](uint64_t tag, ByteReader &v) {
         switch (static_cast<DeclTag>(tag)) {
@@ -456,23 +494,28 @@ Status Reader::readDecls(Interface &out) {
           for (ClassRec::Field &f : c.Fields)
             if (!str(v, f.FieldName) || !str(v, f.TypeName))
               return true;
-          if (!detail::readCount(v, n, 4))
+          if (!readMethods(v, c.Methods))
             return true;
-          c.Methods.resize(static_cast<size_t>(n));
-          for (ClassRec::Method &m : c.Methods)
-            if (!str(v, m.Name) || !str(v, m.ReturnTypeName) ||
-                !strList(v, m.ParamTypeNames) || !v.u8(m.Flags))
-              return true;
-          if (v.remaining() > 0) // every method's modes
-            for (ClassRec::Method &m : c.Methods)
-              if (!modes(v, m.ParamTypeNames.size(), m.Modes))
-                return true;
-          if (v.remaining() > 0) // every method's result mode
-            for (ClassRec::Method &m : c.Methods)
-              if (!result(v, m.Modes))
-                return true;
           if (ordered(tag, c.Name))
             out.Classes.push_back(std::move(c));
+          return true;
+        }
+        case DeclTag::Struct: {
+          StructRec s;
+          uint8_t flags;
+          uint64_t n;
+          if (!str(v, s.Name) || !v.u8(flags) || !str(v, s.OriginModule) ||
+              !detail::readCount(v, n, 2))
+            return true;
+          s.IsLocal = flags & kDeclLocal;
+          s.Fields.resize(static_cast<size_t>(n));
+          for (ClassRec::Field &f : s.Fields)
+            if (!str(v, f.FieldName) || !str(v, f.TypeName))
+              return true;
+          if (!readMethods(v, s.Methods))
+            return true;
+          if (ordered(tag, s.Name))
+            out.Structs.push_back(std::move(s));
           return true;
         }
         case DeclTag::Func: {

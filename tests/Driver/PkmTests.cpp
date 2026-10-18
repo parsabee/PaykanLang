@@ -802,6 +802,70 @@ TEST(Pkm, DefaultInitAcrossModules) {
   fs::remove_all(dir);
 }
 
+// A struct keeps its fields, its `impl` methods (statically dispatched),
+// its `static fn`s and its constructor in a prebuilt module: an importer
+// constructs it, reads and assigns its fields in place and calls its
+// methods, from the source and from the `.pkm` alike.
+TEST(Pkm, StructsAcrossModules) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_structs_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "geo.pkn",
+            "struct Point { x: int; y: int; }\n"
+            "impl Point {\n"
+            "  fn __init__(x: int, y: int) { self.x = x; self.y = y; }\n"
+            "  static fn origin() -> Point { return Point(0, 0); }\n"
+            "  view fn sum() -> int { return self.x + self.y; }\n"
+            "  fn shift(d: int) { self.x = self.x + d; }\n"
+            "}\n"
+            "struct Named { p: Point; name: Str; }\n"
+            "class Shape { at: Point; view fn where() -> Point { return "
+            "self.at; } }\n"
+            "fn make(n: int) -> Named { return Named(Point(n, n), \"n\" + "
+            "Str(n)); }\n");
+  writeFile(dir / "main.pkn",
+            "import geo;\n"
+            "fn main() -> int {\n"
+            "  p = geo::Point(1, 2);\n"
+            "  p.shift(3);\n"
+            "  o = geo::Point::origin();\n"
+            "  n = geo::make(4);\n"
+            "  n.p.shift(1);\n"
+            "  n.name = n.name + \"!\";\n"
+            "  s = geo::Shape(p);\n"
+            "  q: geo::Point = s.where();\n"
+            "  println(p.toString() + \" \" + Str(p.sum()) + \" \" + "
+            "Str(o == p) + \" \" + n.name + Str(n.p.x) + \" \" + "
+            "Str(q.sum()) + \" \" + Str(p == q));\n"
+            "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  const std::string expected = "Point(x: 4, y: 2) 6 False n4!5 6 True\n";
+  auto src = paykan("--track-heap main.pkn");
+  ASSERT_EQ(src.exitCode, 0) << src.out;
+  EXPECT_TRUE(contains(src.out, expected)) << src.out;
+  EXPECT_TRUE(contains(src.out, "live blocks       : 0")) << src.out;
+  ASSERT_EQ(paykan("--emit-pkm geo.pkn").exitCode, 0);
+  fs::remove(dir / "geo.pkn");
+  auto pkm = paykan("--track-heap main.pkn");
+  ASSERT_EQ(pkm.exitCode, 0) << pkm.out;
+  EXPECT_TRUE(contains(pkm.out, expected)) << pkm.out;
+  EXPECT_TRUE(contains(pkm.out, "live blocks       : 0")) << pkm.out;
+  auto dump = paykan("pkm dump --section=iface geo.pkm");
+  for (const char *line :
+       {"struct Point [local from \"geo\"]", "    field x: int",
+        "    method __init__(int, int) -> void flags 0x0",
+        "    method sum() -> int flags 0x6",
+        "    method shift(int) -> void flags 0x4",
+        "struct Named [local from \"geo\"]", "    field name: Str",
+        "func Point(int, int) -> Point", "func Point::origin() -> Point",
+        "func Named(Point, Str) -> Named", "func make(int) -> Named"})
+    EXPECT_TRUE(contains(dump.out, line)) << line << "\n" << dump.out;
+  fs::remove_all(dir);
+}
+
 // A borrowed result keeps its mode in a prebuilt module: the dump shows it,
 // an importer sees a `view` result as a `view` and writes through an
 // `inout` one.

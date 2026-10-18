@@ -46,6 +46,7 @@ class Type;
 class EnumDecl;
 class ImplDecl;
 class TraitDecl;
+class StructDecl;
 
 // Base AST node with LLVM-style RTTI
 class ASTNode {
@@ -60,6 +61,7 @@ public:
     NK_EnumDecl,
     NK_ImplDecl,
     NK_TraitDecl,
+    NK_StructDecl,
 
     // Statements
     NK_StmtBegin,
@@ -106,6 +108,7 @@ public:
     NK_OptionalType,
     NK_EnumType,
     NK_TupleType,
+    NK_StructType, // a TupleType with a name and named fields (see TupleType)
     NK_SliceType,
     NK_PoisonType,
     NK_GenericType, // must stay the last Type kind (see Type::classof)
@@ -165,7 +168,7 @@ public:
   Decl(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_VarDecl && N->getKind() <= NK_TraitDecl;
+    return N->getKind() >= NK_VarDecl && N->getKind() <= NK_StructDecl;
   }
 };
 
@@ -1292,6 +1295,49 @@ public:
   static bool classof(const ASTNode *N) { return N->getKind() == NK_ClassDecl; }
 };
 
+// User-defined struct declaration (docs/language/14-structs.md):
+//   struct Point { x: int; y: int; }
+//
+// Fields are VarDecl nodes (no initializer), at least one.  A struct body
+// holds no methods: they come from its `impl` blocks, which Sema adds here
+// (addMethod) so that the lowering emits them with the struct.  Sema
+// registers the corresponding StructType in the ASTContext.  A generic
+// struct (`struct Pair<T> { ... }`) carries its type parameter names in
+// TypeParams and is a template that Sema instantiates per distinct
+// type-argument list, like a generic class.
+class StructDecl : public Decl {
+  const std::string *Name; // points into ASTContext::StringPool (stable)
+  std::vector<VarDecl *> Fields;
+  std::vector<FuncDecl *> Methods; // the `impl` blocks' (Sema)
+  std::vector<const std::string *> TypeParams;
+  TypeParamBounds Bounds;
+
+public:
+  StructDecl(SourceLocation loc, const std::string &internedName,
+             std::vector<VarDecl *> fields,
+             std::vector<const std::string *> typeParams = {})
+      : Decl(NK_StructDecl, loc), Name(&internedName),
+        Fields(std::move(fields)), TypeParams(std::move(typeParams)) {}
+
+  const std::string &getName() const { return *Name; }
+  const std::vector<VarDecl *> &getFields() const { return Fields; }
+  size_t getNumFields() const { return Fields.size(); }
+  const std::vector<FuncDecl *> &getMethods() const { return Methods; }
+  /// Sema adds the methods of the struct's `impl` blocks.
+  void addMethod(FuncDecl *m) { Methods.push_back(m); }
+
+  const std::vector<const std::string *> &getTypeParams() const {
+    return TypeParams;
+  }
+  bool isGeneric() const { return !TypeParams.empty(); }
+  const TypeParamBounds &getTypeParamBounds() const { return Bounds; }
+  void setTypeParamBounds(TypeParamBounds b) { Bounds = std::move(b); }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_StructDecl;
+  }
+};
+
 // Translation unit (top-level container)
 //
 // Generic (template) declarations are kept apart from ordinary ones: every
@@ -1309,6 +1355,8 @@ private:
   std::vector<FuncDecl *> GenericFuncDecls;
   std::vector<ImplDecl *> ImplDecls;
   std::vector<TraitDecl *> TraitDecls;
+  std::vector<StructDecl *> StructDecls;
+  std::vector<StructDecl *> GenericStructDecls;
 
 public:
   TranslationUnit(SourceLocation loc, std::vector<ImportDecl *> imports,
@@ -1318,13 +1366,16 @@ public:
                   std::vector<ClassDecl *> genericClasses = {},
                   std::vector<FuncDecl *> genericFuncs = {},
                   std::vector<ImplDecl *> impls = {},
-                  std::vector<TraitDecl *> traits = {})
+                  std::vector<TraitDecl *> traits = {},
+                  std::vector<StructDecl *> structs = {},
+                  std::vector<StructDecl *> genericStructs = {})
       : ASTNode(NK_TranslationUnit, loc), Imports(std::move(imports)),
         ClassDecls(std::move(classes)), FuncDecls(std::move(funcs)),
         EnumDecls(std::move(enums)),
         GenericClassDecls(std::move(genericClasses)),
         GenericFuncDecls(std::move(genericFuncs)), ImplDecls(std::move(impls)),
-        TraitDecls(std::move(traits)) {}
+        TraitDecls(std::move(traits)), StructDecls(std::move(structs)),
+        GenericStructDecls(std::move(genericStructs)) {}
 
   const std::vector<ImportDecl *> &getImports() const { return Imports; }
   const std::vector<ClassDecl *> &getClassDecls() const { return ClassDecls; }
@@ -1338,6 +1389,14 @@ public:
   }
   const std::vector<ImplDecl *> &getImplDecls() const { return ImplDecls; }
   const std::vector<TraitDecl *> &getTraitDecls() const { return TraitDecls; }
+  const std::vector<StructDecl *> &getStructDecls() const {
+    return StructDecls;
+  }
+  const std::vector<StructDecl *> &getGenericStructDecls() const {
+    return GenericStructDecls;
+  }
+  /// Append an instantiated struct (Sema).
+  void addStructDecl(StructDecl *sd) { StructDecls.push_back(sd); }
 
   /// Append an instantiated function (Sema).
   void addFuncDecl(FuncDecl *fn) { FuncDecls.push_back(fn); }
@@ -1651,24 +1710,102 @@ public:
 // The parser allocates a source-located node per annotation; Sema resolves
 // each one to the canonical instance interned by ASTContext::getTupleType, so
 // resolved tuple types compare by pointer identity.
+//
+// A StructType is a TupleType too (isa<TupleType> holds for one): a struct's
+// fields are laid out, copied, retained and released exactly as a tuple's
+// elements are, so the lowering treats the two alike.  Where the language
+// tells them apart -- a struct is nominal, its fields are named and mutable,
+// it has methods -- Sema checks isa<StructType> first.
 class TupleType : public Type {
   std::vector<Type *> ElementTypes;
 
-public:
-  TupleType(SourceLocation loc, std::vector<Type *> elemTys)
-      : Type(NK_TupleType, loc), ElementTypes(std::move(elemTys)) {
+protected:
+  TupleType(NodeKind kind, SourceLocation loc, std::vector<Type *> elemTys)
+      : Type(kind, loc), ElementTypes(std::move(elemTys)) {
     // == / != compare element-wise (PaykanTuple_equals).  Set on the
     // constructor: besides the canonical instances, the parser allocates a
     // node per annotation, so there is no single bootstrap point to set it on.
     addBinaryOp(BinaryOpcode::Eq);
     addBinaryOp(BinaryOpcode::Ne);
   }
+  /// A struct's fields are added one by one as they are resolved.
+  void addElementType(Type *ty) { ElementTypes.push_back(ty); }
+
+public:
+  TupleType(SourceLocation loc, std::vector<Type *> elemTys)
+      : TupleType(NK_TupleType, loc, std::move(elemTys)) {}
 
   const std::vector<Type *> &getElementTypes() const { return ElementTypes; }
   size_t getArity() const { return ElementTypes.size(); }
   Type *getElementType(size_t i) const { return ElementTypes[i]; }
 
-  static bool classof(const ASTNode *N) { return N->getKind() == NK_TupleType; }
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_TupleType || N->getKind() == NK_StructType;
+  }
+};
+
+// Struct type: `struct Point { x: int; y: int; }`
+// (docs/language/14-structs.md).
+//
+// A value type with named fields: a tuple of its field types (see TupleType)
+// that is nominal -- two structs with the same fields are different types,
+// and a struct is never a tuple of the same shape -- with mutable fields
+// (`p.x = 1`), the methods of its `impl` blocks (called directly, there is no
+// vtable and no inheritance) and a constructor, its `__init__` (the default
+// one takes the fields in order).  Its `toString()` is `Point(x: 1, y: 2)`
+// and `==` compares the fields.  One canonical instance per struct,
+// registered by name in the ASTContext (registerStructType), so struct types
+// compare by pointer identity.
+class StructType : public TupleType {
+  const std::string *Name; // points into ASTContext::StringPool (stable)
+  std::vector<std::string> FieldNames; // parallel to the element types
+  // The methods of its `impl` blocks, in declaration order (no vtable: each
+  // is called directly), and its `__init__`, kept apart like a class's.
+  std::vector<MethodDecl *> ImplMethods;
+  MethodDecl *InitMethod = nullptr;
+
+public:
+  StructType(SourceLocation loc, const std::string &internedName)
+      : TupleType(NK_StructType, loc, {}), Name(&internedName) {}
+
+  const std::string &getName() const { return *Name; }
+
+  // -- Fields (Sema adds them as it resolves their types)
+
+  void addField(const std::string &name, Type *ty) {
+    FieldNames.push_back(name);
+    addElementType(ty);
+  }
+  const std::vector<std::string> &getFieldNames() const { return FieldNames; }
+  const std::string &getFieldName(size_t i) const { return FieldNames[i]; }
+  size_t getNumFields() const { return FieldNames.size(); }
+  /// The index of field @p name, or -1.
+  int fieldIndex(const std::string &name) const {
+    for (size_t i = 0; i < FieldNames.size(); ++i)
+      if (FieldNames[i] == name)
+        return static_cast<int>(i);
+    return -1;
+  }
+  /// The type of field @p name, or nullptr.
+  Type *findField(const std::string &name) const {
+    int i = fieldIndex(name);
+    return i < 0 ? nullptr : getElementType(static_cast<size_t>(i));
+  }
+
+  // -- Methods
+
+  /// Add an `impl` method, or the `__init__`.
+  void addMethod(MethodDecl *m);
+  /// The `impl` method (or `__init__`) named @p name, or nullptr.
+  MethodDecl *findMethod(const std::string &name) const;
+  const std::vector<MethodDecl *> &getImplMethods() const {
+    return ImplMethods;
+  }
+  MethodDecl *getInitMethod() const { return InitMethod; }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_StructType;
+  }
 };
 
 // Poison type: the type of a binder whose declaration failed (#89).

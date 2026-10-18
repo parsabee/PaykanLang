@@ -76,11 +76,12 @@ or more.
 
 | Node | Meaning |
 |---|---|
-| `(unit LOC DECL...)` | the file. Each `DECL` is an `import`, `enum`, `class` or `fn`, in any order |
+| `(unit LOC DECL...)` | the file. Each `DECL` is an `import`, `enum`, `struct`, `class`, `fn`, `trait` or `impl`, in any order |
 | `(import LOC SYSTEM BASE MODULE...)` | `import`. `SYSTEM` is `true` for `import ::name`, else `false`; `BASE` is the path before the last segment (`"a::b"` for `import a::b::m`, `""` for none); at least one `MODULE` |
 | `(module NAME ALIAS)` | one imported module; `ALIAS` is a string, `""` for none (`import m as x` has `(module "m" "x")`; `import a::{m, n}` has two) |
 | `(enum LOC NAME NAME...)` | `enum E { A, B }`: the name, then the variants |
 | `(class LOC NAME SUPER (type-params NAME...) (fields VAR...) (methods FN...))` | a class. `SUPER` is the superclass's name or `""`; a generic class has type parameters. Each field is a `var` with a type and no initialiser |
+| `(struct LOC NAME (type-params NAME...) (fields VAR...))` | a struct ([`../language/14-structs.md`](../language/14-structs.md)): the name, the type parameters of a generic one, and its fields (at least one), each a `var` with a type and no initialiser. A struct body has no methods: they are in its `impl` blocks |
 | `(bound NAME TYPE...)` | in `type-params`, in place of `NAME`: a type parameter with bounds, the traits as types (`T: Show + Into<int>` is `(bound "T" (named-type "Show") (generic-type "Into" ...))`) |
 | `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? QUAL? BLOCK QUAL?)` | a function or method; the `TYPE` is the return type, `_` for none. A borrowed result has `(qual view)` or `(qual inout)` after its `TYPE` (`-> view Str` is `(named-type "Str") (qual view)`), a `view fn` ends with `(qual view)` and a `static fn` with `(qual static)` |
 | `(impl LOC TYPE (type-params NAME...)? (for TRAIT)? (methods FN...))` | an `impl` block: `TYPE` is the type's name as written (`"A"`, `"geo::Point"`). The block of a generic type has its type parameters (`impl Box<T>` is `(impl "Box" (type-params "T") ...)`). `impl Show for A` has `(for TRAIT)`, the trait as a type |
@@ -93,7 +94,7 @@ or more.
 
 | Node | Meaning |
 |---|---|
-| `(named-type LOC NAME)` | a type by name: `int`, `float`, `bool`, `char`, `void`, `Str`, `Obj`, a class or enum, or a qualified `module::Type` |
+| `(named-type LOC NAME)` | a type by name: `int`, `float`, `bool`, `char`, `void`, `Str`, `Obj`, a class, struct or enum, or a qualified `module::Type` |
 | `(array-type LOC TYPE)` | `T[]`, the slice of a `view` or `inout` parameter (`xs: view int[]`) |
 | `(fixed-array-type LOC TYPE INT)` | `T[n]`, a fixed-size array of `INT` (at least 1) elements: `int[3]` is `(fixed-array-type (named-type "int") 3)`. `INT` can be the symbol `_` instead, a length inferred from the initializer (`int[_]`) |
 | `(optional-type LOC TYPE)` | `T?` (not of `void`, not of another optional) |
@@ -200,6 +201,9 @@ change, except for optional trailing items that only new constructs use: a
 parameter's or a local borrow's `(qual ...)` and a local's `(let)`. They keep the version, because every document that
 was valid stays valid and means the same, and a reader that predates an item
 rejects a document that uses it (an unexpected field) instead of misreading
-it. The core's tests write and read back the AST of every program in the
+it. The `struct` declaration is the same kind of addition: a document that
+uses it is rejected by a reader that predates it, and every other document
+reads as before, so the version stays 1 until 0.2.0 bumps it with the other
+formats. The core's tests write and read back the AST of every program in the
 samples corpus and check that the result is identical
 (`tests/AST/InterchangeTests.cpp`).

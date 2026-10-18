@@ -1,0 +1,4 @@
+// ERROR: struct 'A' contains itself (through 'B'); a struct is held in place, so it cannot hold one of its own (hold it in a class instead)
+struct A { b: B; }
+struct B { a: A; }
+fn main() -> int { return 0; }

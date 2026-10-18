@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Structs (docs/language/14-structs.md): `struct Point { x: int; y: int; }` declares a
+  value type with named fields, held in place and copied by assignment like a tuple, with
+  no superclass, no vtable and no identity.  `Point(1, 2)` constructs one from its fields
+  in order, or through an `__init__` declared in an `impl Point { ... }` block, which also
+  holds its methods and `static fn`s; `p.x = 5` assigns a field in place (also through a
+  field, an array element or an `inout`), and in a method `self` is the receiver's
+  storage.  `==` compares field by field, `toString()` renders `Point(x: 1, y: 2)`, every
+  struct implements `Show` and `ValueType`, and `impl Hashable for` and user traits work
+  as for classes, so a struct is a key of `HashMap` and `HashSet`.  A struct crosses
+  modules and prebuilt `.pkm` files (a `STRUCT` interface record), and the runtime renders
+  and compares one through its layout (`PaykanStruct_toString`, `PaykanStruct_equals`,
+  the layout kind `PAYKAN_KIND_STRUCT`).  Not yet: generic structs, optional structs,
+  `match` on a struct, a fixed-size array field and an `impl` for another module's struct.
+
 - The standard library ships with the compiler (docs/language/13-standard-library.md), in
   `stdlib/`: `::collections` has `List<T>`, `LinkedList<T>` (doubly linked and circular
   through a sentinel node, its nodes linked by index so no reference cycles form),

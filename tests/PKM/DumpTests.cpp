@@ -23,18 +23,18 @@ std::string dumpOf(const std::vector<uint8_t> &b, DumpOptions opts = {}) {
 }
 
 const char *const kGolden =
-    R"(pkm 1.0, 6 sections, table sha256 df226d6fd8f8c92b
-iface_hash 78e86f3f87b718d456935059b9cf235da1e0fc4eac4f922db2c6bdeb0972a839
+    R"(pkm 1.0, 6 sections, table sha256 3eed8942f4f2ea7f
+iface_hash 998d623ce010f992c93d2fedff8521a5100167a2a5c670dab5593b94844dbe3c
 tmpl_hash 0000000000000000000000000000000000000000000000000000000000000000
 code_hash 31635559fa224a2c41eac6c6a0ecf6e9b08ee0747deaf38cbf2f08365f54f4c6
-module_hash 074d48f462f246653790c0bfe03f2da568f9a54b107c150297be5b5083390ad5
+module_hash 0db6c3e4ef684beeaa51f2895998226f1d62f37e37c652b8338692c4af285cd8
 sections:
   #0 MANIFEST flags REQUIRED offset 0x1c0 size 430 sha256 cd1968da24a98197
-  #1 IFACE flags REQUIRED offset 0x370 size 592 sha256 78e86f3f87b718d4
-  #2 CODE flags REQUIRED offset 0x5c0 size 21 sha256 31635559fa224a2c
-  #3 SYMIDX flags - offset 0x5d8 size 6 sha256 12643e6ba7fdc1f1
-  #4 PAYLOAD flags INSTANCED offset 0x5e0 size 11 sha256 18e9d2416680ac3c
-  #5 PAYLOAD flags INSTANCED offset 0x5f0 size 19 sha256 6d8555986ae05822
+  #1 IFACE flags REQUIRED offset 0x370 size 640 sha256 998d623ce010f992
+  #2 CODE flags REQUIRED offset 0x5f0 size 21 sha256 31635559fa224a2c
+  #3 SYMIDX flags - offset 0x608 size 6 sha256 12643e6ba7fdc1f1
+  #4 PAYLOAD flags INSTANCED offset 0x610 size 11 sha256 18e9d2416680ac3c
+  #5 PAYLOAD flags INSTANCED offset 0x620 size 19 sha256 6d8555986ae05822
 manifest:
   module geometry::shapes
   contents 0x1 (HAS_CODE)
@@ -67,8 +67,14 @@ iface:
     method __scale(inout float) -> void flags 0x1
     method __init__(int, view int) -> void flags 0x0
   class Vec super "Shape" [imported from "geometry::vec"]
+  func Point(int, int) -> Point
   func Shape(int, view int) -> Shape
   func area(Shape) -> float
+  struct Point [local from "geometry::shapes"]
+    field x: int
+    field y: int
+    method __init__(int, int) -> void flags 0x0
+    method sum() -> int flags 0x6
 tmpl: absent
 code: 21 B, sha256 31635559fa224a2c41eac6c6a0ecf6e9b08ee0747deaf38cbf2f08365f54f4c6
 symidx: 6 B, sha256 12643e6ba7fdc1f1e76eb68141e5d02904f35ea9e64b4094bcd2ada3e44e990f

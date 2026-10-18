@@ -114,6 +114,20 @@ q, name = p;                        // destructuring
 first: int = p.0;                   // element access
 ```
 
+### Structs
+
+`struct Name { field: Type; ... }` declares a value type with named fields. Like a tuple,
+a struct is held in its variable (or field, or array element) and copied on assignment;
+unlike a tuple's elements, its fields are named and can be assigned in place. A struct has
+no superclass and no vtable; its methods come from `impl` blocks. See `14-structs.md`.
+
+```pkn
+struct Point { x: int; y: int; }
+p = Point(1, 2);                    // the fields in order
+p.x = 5;                            // assigned in place
+println(p);                         // Point(x: 5, y: 2)
+```
+
 ### Class Types (vtable-bearing, heap-allocated, reference-counted)
 
 `Obj` is the root of the class hierarchy. Every class transitively extends it. It defines:

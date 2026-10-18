@@ -154,9 +154,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // Populated while visitClassDecl is running; nullptr outside of a class.
   //
   struct ClassContext {
-    ast::ClassType *ClassType; // the type being checked
-    std::string MethodName;    // method currently being checked (empty = none)
-    bool ViewMethod = false;   // it is a `view fn`: `self` is read-only
+    ast::ClassType *ClassType = nullptr; // the class being checked, or
+    ast::StructType *Struct = nullptr;   // the struct (one of the two)
+    std::string MethodName;  // method currently being checked (empty = none)
+    bool ViewMethod = false; // it is a `view fn`: `self` is read-only
     bool SuperInitRequired = false; // __init__ must call __super__
     bool SuperInitCalled = false;   // __super__ has been called
   };
@@ -166,7 +167,8 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// What a method body does to `self`, for the warning on a method that
   /// never changes it but is not a `view fn` (SemaViewFn.cpp).
   struct MethodUse {
-    ast::ClassType *Class = nullptr;
+    ast::ClassType *Class = nullptr;   // the method's class, or
+    ast::StructType *Struct = nullptr; // its struct
     const ast::FuncDecl *Decl = nullptr;
     bool ChangesSelf = false; // writes `self`, calls a changing method on
                               // something reached through it, or returns
@@ -207,14 +209,14 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   const FunctionSig *lookupFunction(std::string_view name) const;
 
   /// The kind of top-level entity being declared, for checkDeclNameAvailable.
-  enum class DeclKind { Function, Class, Enum, Trait };
+  enum class DeclKind { Function, Class, Enum, Trait, Struct };
 
-  /// Top-level declarations — functions, classes (whose constructors are
-  /// called by class name), and enums — share one namespace with the compiler
-  /// builtins: a name identifies exactly one entity.  Returns true if @p name
-  /// is free; otherwise emits a diagnostic at @p loc naming the existing
-  /// entity (builtin function / builtin class / class / enum / function) and
-  /// returns false.
+  /// Top-level declarations — functions, classes and structs (whose
+  /// constructors are called by their name), and enums — share one namespace
+  /// with the compiler builtins: a name identifies exactly one entity.
+  /// Returns true if @p name is free; otherwise emits a diagnostic at @p loc
+  /// naming the existing entity (builtin function / builtin class / class /
+  /// struct / enum / function) and returns false.
   bool checkDeclNameAvailable(const std::string &name, ast::SourceLocation loc,
                               DeclKind kind);
 
@@ -334,9 +336,13 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// a fixed-size array @p retTy, which is not supported yet.
   bool checkFixedResult(ast::Type *retTy, ast::ParamMode mode,
                         ast::SourceLocation loc);
-  /// The `let` local a fixed-size array element place @p e is part of (its
-  /// value), or "" when it is not one.
-  std::string letFixedArrayRoot(const ast::Expr *e);
+  /// The `let` local the place @p e is part of (its value): an element of a
+  /// fixed-size array, a field of a struct, or a chain of those; "" when it
+  /// is not one.
+  std::string letValueRoot(const ast::Expr *e);
+  /// The tuple element, if any, that holds the struct whose field @p e is
+  /// (through any structs in between): part of a tuple, so immutable.
+  const ast::TupleIndexExpr *tupleElementHolding(const ast::Expr *e);
   /// False (after reporting it) when @p index is a constant out of
   /// @p fixed's bounds.
   bool checkFixedIndex(ast::FixedArrayType *fixed, const ast::Expr *index);
@@ -575,6 +581,19 @@ public:
       bool operator==(const ClassInfo &) const = default;
     };
     std::vector<ClassInfo> ExportedClasses;
+
+    // Serialised struct-type descriptions: the fields in declaration order
+    // and the methods (`__init__` first, then the `impl` methods), as a
+    // ClassInfo's.
+    struct StructInfo {
+      std::string Name;
+      bool IsLocal = true;      // see ClassInfo::IsLocal
+      std::string OriginModule; // see ClassInfo::OriginModule
+      std::vector<ClassInfo::FieldInfo> Fields;
+      std::vector<ClassInfo::MethodInfo> Methods;
+      bool operator==(const StructInfo &) const = default;
+    };
+    std::vector<StructInfo> ExportedStructs;
 
     // Serialised enum-type descriptions: the enum name plus its variant names
     // in declaration order (the index is the variant's underlying value).
@@ -857,14 +876,16 @@ private:
   /// checkClassDecls and after free-function signatures are registered.
   bool checkClassBodies();
 
-  /// Definite-assignment check for a constructor body: verify every own field
-  /// of `ct` is assigned (self.field = …) on every control-flow path out of
-  /// `body` (each return and the final fall-through).  Emits an error per
-  /// field left possibly-unassigned.  Returns true if all fields are
-  /// definitely assigned.
-  bool checkInitFieldsAssigned(ast::ClassType *ct, ast::CompoundStmt *body,
-                               ast::SourceLocation initLoc,
-                               const std::string &className);
+  /// Definite-assignment check for a constructor body: verify every own
+  /// field in @p fields (a class's own, or a struct's) is assigned
+  /// (self.field = …) on every control-flow path out of `body` (each return
+  /// and the final fall-through).  Emits an error per field left
+  /// possibly-unassigned, naming the @p kind ("class" or "struct") and
+  /// @p typeName.  Returns true if all fields are definitely assigned.
+  bool checkInitFieldsAssigned(
+      const std::vector<std::pair<std::string, ast::Type *>> &fields,
+      ast::CompoundStmt *body, ast::SourceLocation initLoc,
+      const std::string &kind, const std::string &typeName);
 
   /// Topologically-sorted class decls (superclass before subclass), populated
   /// by checkClassDecls and consumed by checkClassBodies.
@@ -904,12 +925,12 @@ private:
   /// Phase 4b for one class: register the constructor function `Name(...)`.
   void declareConstructor(ast::ClassDecl *cd, ast::ClassType *ct);
 
-  /// The signature of @p method of @p ct as a MethodDecl with @p flags, its
-  /// annotations resolved and written back; nullptr if one does not resolve.
-  /// @p overridden is the superclass method it overrides, if any.  A mistake
-  /// that leaves the signature usable (an override that does not match) is
-  /// reported and clears @p ok.
-  ast::MethodDecl *declareMethod(ast::FuncDecl *method, ast::ClassType *ct,
+  /// The signature of @p method of @p owner (a class or a struct) as a
+  /// MethodDecl with @p flags, its annotations resolved and written back;
+  /// nullptr if one does not resolve.  @p overridden is the superclass
+  /// method it overrides, if any.  A mistake that leaves the signature
+  /// usable (an override that does not match) is reported and clears @p ok.
+  ast::MethodDecl *declareMethod(ast::FuncDecl *method, ast::Type *owner,
                                  const ast::MethodDecl *overridden,
                                  uint8_t flags, bool &ok);
 
@@ -932,9 +953,45 @@ private:
   /// Reject an `__init__` in a class body: it goes in an `impl` block.
   bool rejectBodyInits(ast::TranslationUnit *tu);
 
-  /// Check that every `impl` block names a class of this module, and make
-  /// its `static fn`s the module's functions `Type::name`.
+  /// Check that every `impl` block names a class or a struct of this
+  /// module, and make its `static fn`s the module's functions `Type::name`.
   bool checkImplDecls(ast::TranslationUnit *tu);
+
+  // -- Structs (SemaStruct.cpp, docs/language/14-structs.md)
+  //
+  // A struct is a value type with named fields and the methods of its `impl`
+  // blocks; its type is an ast::StructType, a TupleType by its name.  Its
+  // declaration goes through the same phases as a class's: the name, a
+  // registered stub (so that class fields and signatures can name it), its
+  // fields and methods, its constructor, and last its method bodies.
+
+  /// Phases 1-2: check the struct names and register a stub for each.
+  bool declareStructs(ast::TranslationUnit *tu);
+  /// Phases 3-4: resolve the fields (in an order where every struct a field
+  /// holds comes first, so a struct that contains itself is reported), the
+  /// `impl` methods, the `__init__` (the default one when none is written)
+  /// and the constructor function.
+  bool populateStructs();
+  bool populateStructType(ast::StructDecl *sd, ast::StructType *st);
+  /// Phase 4 for the `impl` blocks of @p sd's struct: their methods join it.
+  bool populateImplMethods(ast::StructDecl *sd, ast::StructType *st);
+  /// Give @p sd, which declares no `__init__`, the default one: one
+  /// parameter per field, in order, stored into the field.
+  bool declareDefaultInit(ast::StructDecl *sd, ast::StructType *st);
+  /// Register the constructor function `Name(...)`.
+  void declareConstructor(ast::StructDecl *sd, ast::StructType *st);
+  /// Phase 5: the method bodies, over SortedStructs.
+  bool checkStructBodies();
+  /// The module's structs declareStructs registered, in source order.
+  std::vector<ast::StructDecl *> DeclaredStructs;
+  /// The structs in the order populateStructs resolved them: every struct
+  /// before the structs that hold it.
+  std::vector<ast::StructDecl *> SortedStructs;
+  /// The method @p name of @p ty, a class (its own or inherited, vtable or
+  /// `impl`) or a struct (`impl`); nullptr for any other type.
+  static ast::MethodDecl *methodOf(ast::Type *ty, const std::string &name);
+  /// "class" or "struct", for a diagnostic about @p ty.
+  static const char *typeKindWord(const ast::Type *ty);
 
   /// The `impl` blocks by the name of the class they add to: an
   /// instantiation's are copies of its template's.
@@ -971,8 +1028,8 @@ private:
   /// superclasses'), by canonical type.
   std::unordered_map<const ast::Type *, std::vector<TraitRef>> TraitImpls;
   /// The type `Self` names while a method's signature is resolved (in its
-  /// body, the class being checked).
-  ast::ClassType *SelfType = nullptr;
+  /// body, the class or struct being checked).
+  ast::Type *SelfType = nullptr;
 
   /// Register the builtin trait `Show`, which `Obj` implements.
   void registerBuiltinTraits();
@@ -992,9 +1049,9 @@ private:
   /// The type whose implementation of @p tr @p ty has (itself or, for a
   /// class, a superclass); nullptr if it does not implement it.
   const ast::Type *traitImplOwner(ast::Type *ty, const TraitRef &tr);
-  /// Record `impl Trait for A` and check that A has every method the trait
-  /// requires, with its signature.
-  bool checkTraitImpl(ast::ImplDecl *im, ast::ClassType *ct);
+  /// Record `impl Trait for A` (@p ty, a class or a struct) and check that
+  /// A has every method the trait requires, with its signature.
+  bool checkTraitImpl(ast::ImplDecl *im, ast::Type *ty);
 
   // A type parameter's bounds are checked when its template is instantiated,
   // once the `impl ... for` blocks are recorded (TraitImplsKnown); until
@@ -1091,7 +1148,7 @@ private:
   /// `impl` blocks are checked (ImplsChecked): checked with them.
   struct PendingTraitImpl {
     ast::ImplDecl *Impl;
-    ast::ClassType *Class;
+    ast::Type *Type; // the class (or struct) implementing the trait
     InstantiationFrame Request;
     const ModuleTemplates *Origin;
   };

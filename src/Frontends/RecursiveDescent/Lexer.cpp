@@ -52,6 +52,7 @@ constexpr Keyword kKeywords[] = {
     {"inout", Tok::KwInout},
     {"let", Tok::KwLet},
     {"trait", Tok::KwTrait},
+    {"struct", Tok::KwStruct},
 };
 
 } // namespace
@@ -92,6 +93,8 @@ const char *describe(Tok k) {
     return "'static'";
   case Tok::KwTrait:
     return "'trait'";
+  case Tok::KwStruct:
+    return "'struct'";
   case Tok::KwReturn:
     return "'return'";
   case Tok::KwIf:
@@ -216,6 +219,8 @@ const char *tokenKindName(Tok k) {
     return "KW_STATIC";
   case Tok::KwTrait:
     return "KW_TRAIT";
+  case Tok::KwStruct:
+    return "KW_STRUCT";
   case Tok::KwReturn:
     return "KW_RETURN";
   case Tok::KwIf:

@@ -63,6 +63,8 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanStringHash, {{kObj}, kI64}},
     {kPaykanTupleToString, {{kPtr, kPtr}, kObj}},
     {kPaykanTupleEquals, {{kPtr, kPtr, kPtr}, kI64}},
+    {kPaykanStructToString, {{kPtr, kPtr}, kObj}},
+    {kPaykanStructEquals, {{kPtr, kPtr, kPtr}, kI64}},
     {kPaykanFileOpen, {{kObj, kObj}, kBox}},
     {kPaykanPrint, {{kObj}, kVoid}},
     {kPaykanPrintln, {{kObj}, kVoid}},
@@ -243,11 +245,14 @@ Type ModuleLowering::toPIRType(ast::Type *ty) {
       return Type::Void;
     }
   }
-  // A parser ClassType stub may name an enum (resolved by Sema): enums are
-  // i64 values, not boxes.
-  if (auto *ct = ast::dyn_cast<ast::ClassType>(ty))
+  // A parser ClassType stub may name an enum or a struct (resolved by
+  // Sema): enums are i64 values, not boxes, and a struct is held in memory.
+  if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
     if (ASTCtx.lookupEnumType(ct->getName()))
       return Type::I64;
+    if (ASTCtx.lookupStructType(ct->getName()))
+      return Type::Mem;
+  }
   if (ast::isa<ast::EnumType>(ty))
     return Type::I64;
   // An optional of a value type is a value too (#96): `int?` is opt_i64.
@@ -266,10 +271,11 @@ Type ModuleLowering::toPIRType(ast::Type *ty) {
 bool ModuleLowering::isObjectElementType(ast::Type *elemTy) const {
   if (!elemTy)
     return false;
-  if (ast::isa<ast::EnumType>(elemTy))
+  if (ast::isa<ast::EnumType>(elemTy) || ast::isa<ast::StructType>(elemTy))
     return false;
   if (auto *ct = ast::dyn_cast<ast::ClassType>(elemTy))
-    return ASTCtx.lookupEnumType(ct->getName()) == nullptr;
+    return ASTCtx.lookupEnumType(ct->getName()) == nullptr &&
+           ASTCtx.lookupStructType(ct->getName()) == nullptr;
   // An optional value is stored inline (#96), the optional of a reference
   // as its box.
   return ast::isa<ast::OptionalType>(elemTy) && !ast::isValueOptional(elemTy);
@@ -281,8 +287,17 @@ ast::Type *ModuleLowering::canonicalizeDeclType(ast::Type *ty) {
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
     if (auto *et = ASTCtx.lookupEnumType(ct->getName()))
       return et;
+    if (auto *st = ASTCtx.lookupStructType(ct->getName()))
+      return st;
     if (auto *canonical = ASTCtx.lookupClassType(ct->getName()))
       return canonical;
+  }
+  // A struct by its name, never rebuilt from its fields (before the tuple
+  // case, which it is too).
+  if (auto *st = ast::dyn_cast<ast::StructType>(ty)) {
+    if (auto *canonical = ASTCtx.lookupStructType(st->getName()))
+      return canonical;
+    return st;
   }
   if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
     std::vector<ast::Type *> elems;
@@ -497,6 +512,23 @@ pir::Function *ModuleLowering::lookupClassFunction(ast::ClassType *ct,
   return declareExternFrom(*def, origin->second, symbol);
 }
 
+pir::Function *ModuleLowering::lookupTypeFunction(const std::string &typeName,
+                                                  const std::string &symbol) {
+  if (auto it = FuncByName.find(symbol); it != FuncByName.end())
+    return it->second;
+  auto origin = PL.ClassOrigins.find(typeName);
+  if (origin == PL.ClassOrigins.end() || origin->second == Mod.Name)
+    return nullptr;
+  auto modIt = PL.ByName.find(origin->second);
+  if (modIt == PL.ByName.end())
+    return nullptr;
+  const pir::Function *def = modIt->second->findFunction(symbol);
+  if (!def || def->IsExtern)
+    return nullptr;
+  noteExternUse(typeName);
+  return declareExternFrom(*def, origin->second, symbol);
+}
+
 Val ModuleLowering::internString(const std::string &content) {
   auto it = InternedStrings.find(content);
   if (it != InternedStrings.end())
@@ -549,20 +581,26 @@ bool ModuleLowering::run(ast::TranslationUnit *tu) {
 }
 
 Val ModuleLowering::visitTranslationUnit(ast::TranslationUnit *node) {
-  // Declare every free function and every class (struct layout, vtable,
-  // methods, destructor, constructor) before emitting any body, so calls and
-  // `__super__` resolve regardless of source order.
+  // Declare every free function, every struct (methods, constructor) and
+  // every class (struct layout, vtable, methods, destructor, constructor)
+  // before emitting any body, so calls and `__super__` resolve regardless
+  // of source order.
   std::vector<ast::FuncDecl *> funcs = node->getFuncDecls();
   funcs.insert(funcs.end(), ForeignFuncs.begin(), ForeignFuncs.end());
   std::vector<ast::ClassDecl *> classes = node->getClassDecls();
   classes.insert(classes.end(), ForeignClasses.begin(), ForeignClasses.end());
+  const std::vector<ast::StructDecl *> &structs = node->getStructDecls();
   for (auto *fn : funcs) {
     declareFunctionPrototype(fn);
     if (fn->isNative())
       NativeDecls[fn->getName()] = fn;
   }
+  for (auto *sd : structs)
+    declareStruct(sd);
   for (auto *cls : classes)
     declareClass(cls);
+  for (auto *sd : structs)
+    visitStructDecl(sd);
   for (auto *cls : classes)
     visitClassDecl(cls);
   for (auto *fn : funcs)
@@ -572,6 +610,9 @@ Val ModuleLowering::visitTranslationUnit(ast::TranslationUnit *node) {
 
 Val ModuleLowering::visitEnumDecl(ast::EnumDecl *) { return Val(); }
 Val ModuleLowering::visitImplDecl(ast::ImplDecl *) { return Val(); }
+Val ModuleLowering::visitStructDecl(ast::StructDecl *node) {
+  return lowerStructDecl(node);
+}
 Val ModuleLowering::visitTraitDecl(ast::TraitDecl *) { return Val(); }
 Val ModuleLowering::visitMethodDecl(ast::MethodDecl *) { return Val(); }
 Val ModuleLowering::visitImportDecl(ast::ImportDecl *) { return Val(); }
@@ -615,21 +656,32 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
 bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
   if (valueOptionalType(expr))
     return false;
-  if (auto *mae = ast::dyn_cast<ast::MemberAccessExpr>(expr))
+  // A struct's field is an element of a value held in memory, like a
+  // tuple's; a class's is in its object.
+  auto structField = [](const ast::Expr *e) {
+    auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e);
+    return ma && ast::isa<ast::StructType>(
+                     ma->getReceiver()->getResolvedType()); // null-safe
+  };
+  if (auto *mae = ast::dyn_cast<ast::MemberAccessExpr>(expr);
+      mae && !structField(expr))
     return mae->getResolvedType() && ast::isRefType(mae->getResolvedType()) &&
            exprProducesFreshBox(mae->getReceiver());
   if (ast::isa<ast::SubscriptExpr>(expr) ||
-      ast::isa<ast::TupleIndexExpr>(expr)) {
-    // An element of a temporary (`mk()[0]`, `mk().1`), or of a fresh
-    // object's field (`mk().xs[0]`), is read as a +1 box: the temporary
-    // dies with the read.  A call with an `inout` result is no temporary:
-    // its element is borrowed from the storage the call names.
+      ast::isa<ast::TupleIndexExpr>(expr) || structField(expr)) {
+    // An element of a temporary (`mk()[0]`, `mk().1`, `mk().x` of a
+    // struct), or of a fresh object's field (`mk().xs[0]`), is read as a +1
+    // box: the temporary dies with the read.  A call with an `inout` result
+    // is no temporary: its element is borrowed from the storage the call
+    // names.
     ast::Expr *root = expr;
     for (;;) {
       if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(root))
         root = se->getArray();
       else if (auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(root))
         root = ti->getTuple();
+      else if (structField(root))
+        root = ast::cast<ast::MemberAccessExpr>(root)->getReceiver();
       else
         break;
     }

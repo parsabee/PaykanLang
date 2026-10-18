@@ -114,6 +114,7 @@ private:
       std::vector<std::pair<std::string, std::string>> &out);
   bool parseModulePath(std::string &out);
   ast::ClassDecl *parseClassDecl();
+  ast::StructDecl *parseStructDecl();
   ast::EnumDecl *parseEnumDecl();
   ast::ImplDecl *parseImplDecl();
   ast::TraitDecl *parseTraitDecl();

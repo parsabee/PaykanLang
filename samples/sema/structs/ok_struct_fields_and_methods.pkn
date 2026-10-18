@@ -1,0 +1,54 @@
+// OK: a struct is a value with named fields, constructed from its fields in
+// order (or through an `__init__` from an `impl` block), read with `p.x`,
+// assigned in place with `p.x = v`, copied by assignment, and given methods,
+// `static fn`s and traits by `impl` blocks.
+struct Point {
+  x: int;
+  y: int;
+}
+
+impl Point {
+  static fn origin() -> Point { return Point(0, 0); }
+  view fn sum() -> int { return self.x + self.y; }
+  fn shift(d: int) { self.x = self.x + d; self.y = self.y + d; }
+  view fn moved(d: int) -> Point { q = self; q.shift(d); return q; }
+  fn xSlot() -> inout int { return self.x; }
+}
+
+impl Hashable for Point {
+  view fn hash() -> int { return (self.x * 31 + self.y).hash(); }
+}
+
+struct Line {
+  a: Point;
+  b: Point;
+  label: Str;
+}
+
+impl Line {
+  fn __init__(a: Point, b: Point) { self.a = a; self.b = b; self.label = "line"; }
+}
+
+class Shape { at: Point; }
+
+fn bump(n: inout int) { n = n + 1; }
+fn show<T: Show>(x: view T) -> Str { return x.toString(); }
+fn twice<T: ValueType>(x: T) -> (T, T) { return (x, x); }
+
+fn main() -> int {
+  p = Point(1, 2);
+  p.x = 5;
+  q = p;
+  q.shift(1);
+  bump(p.xSlot());
+  bump(q.y);
+  l = Line(p, q);
+  l.a.y = 0;
+  s = Shape(Point::origin());
+  s.at.shift(3);
+  ps: Point[2] = [p, q];
+  ps[1].x = 9;
+  pair = twice(p);
+  println(show(l) + " " + Str(p == q) + " " + Str(p.hash()));
+  return p.sum() + l.a.x + s.at.moved(1).y + pair.1.x + ps[1].x;
+}
