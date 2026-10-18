@@ -182,6 +182,8 @@ struct PaykanString {
 // Constructor / destructor.
 PaykanString *PaykanString_new(const char *data, int64_t len);
 PaykanString *PaykanString_from_int(int64_t value);
+/// The bits of @p value printed as an unsigned 64-bit integer (`unsigned`).
+PaykanString *PaykanString_from_uint(int64_t value);
 PaykanString *PaykanString_from_float(double value);
 PaykanString *PaykanString_from_bool(int64_t value);
 PaykanString *PaykanString_from_char(int8_t c);
@@ -192,6 +194,9 @@ PaykanString *PaykanString_from_char(int8_t c);
 /// A decimal integer: an optional sign and digits, the whole string, no
 /// surrounding whitespace, within int64.
 int64_t PaykanString_parse_int(PaykanObject *str, int64_t *out);
+/// A decimal unsigned integer: digits, the whole string, no sign, no
+/// surrounding whitespace, within uint64 (stored as its bits).
+int64_t PaykanString_parse_uint(PaykanObject *str, int64_t *out);
 /// A floating-point number in C `strtod` syntax, including `nan` and `inf`:
 /// the whole string, no leading whitespace, not overflowing or
 /// underflowing (a subnormal result is accepted).
@@ -339,6 +344,8 @@ typedef enum PaykanTypeKind {
   PAYKAN_KIND_STRUCT = 7,   // a struct's fields in place, with their names:
                             // only in a layout ("Structs", below), never
                             // the kind of a PaykanType (a struct's is TUPLE)
+  PAYKAN_KIND_UINT = 8,     // uint64_t (`unsigned`); the narrower sized
+                            // integers and floats are INT and FLOAT
 } PaykanTypeKind;
 
 /// Followed in memory by `nrefs` int64_t words, one per reference: its byte
@@ -469,6 +476,17 @@ PAYKAN_NORETURN void Paykan_panic_float_to_int(double value);
 /// Print a diagnostic naming @p value and abort: `char<int>(value)` outside
 /// the char range 0..255.
 PAYKAN_NORETURN void Paykan_panic_int_to_char(int64_t value);
+
+/// Paykan_panic_float_to_int for a conversion to the integer type named by
+/// the @p len bytes at @p target (`i8<float>(value)`, ...).
+PAYKAN_NORETURN void
+Paykan_panic_float_to_type(double value, const char *target, int64_t len);
+
+// -- Sized numeric types (docs/design/sized-types.md)
+
+/// @p value rounded to the nearest binary16 (`f16`) value, ties to even:
+/// subnormals are kept, and a magnitude of 65520 or more becomes infinity.
+double Paykan_round_f16(double value);
 
 /// Print a diagnostic naming @p index and @p len and abort: a fixed-size
 /// array's element read or written at an index outside 0..len-1.

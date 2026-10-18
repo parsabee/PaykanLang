@@ -238,7 +238,9 @@ TEST(Conversion, InferredFormRejectsEveryOtherType) {
   auto prog = [&](const std::string &body) {
     return decls + "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
   };
-  const std::string strSet = "; its specializations are int, float, bool, char";
+  const std::string strSet =
+      "; its specializations are int, float, bool, char, "
+      "i8, i16, i32, u8, u16, u32, unsigned, f16, f32";
   expectError(prog("a = A(); s = Str(a);"),
               "no specialization of 'Str' for 'A'" + strSet);
   expectError(prog("s = Str(Color::Red);"),
@@ -251,10 +253,11 @@ TEST(Conversion, InferredFormRejectsEveryOtherType) {
               "no specialization of 'Str' for 'int[1]'" + strSet);
   expectError(prog("a = A(); n = int(a);"),
               "no specialization of 'int' for 'A'; its specializations are "
-              "Str, float, bool, char");
+              "Str, float, bool, char, i8, i16, i32, u8, u16, u32, unsigned, "
+              "f16, f32");
   expectError(prog("n = float(None);"),
               "no specialization of 'float' for 'Obj'; its specializations are "
-              "Str, int");
+              "Str, int, i8, i16, i32, u8, u16, u32, unsigned, f16, f32");
 }
 
 TEST(Conversion, InferredFormTakesExactlyOneArgument) {

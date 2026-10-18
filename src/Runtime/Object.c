@@ -6,6 +6,7 @@
 #include "Runtime.h"
 #include "RuntimeInternal.h"
 
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -103,6 +104,36 @@ void Paykan_panic_float_to_int(double value) {
   Paykan_runtime_panic(
       "int<float>(%s): the value is NaN, infinite or outside the int range",
       buf);
+}
+
+void Paykan_panic_float_to_type(double value, const char *target, int64_t len) {
+  char buf[64];
+  Paykan_format_float(buf, sizeof(buf), value);
+  Paykan_runtime_panic(
+      "%.*s<float>(%s): the value is NaN, infinite or outside the %.*s range",
+      (int)len, target, buf, (int)len, target);
+}
+
+double Paykan_round_f16(double value) {
+  if (isnan(value) || isinf(value) || value == 0.0)
+    return value;
+  double magnitude = fabs(value);
+  // 65504 is the largest f16; from 65520 (half an ulp above it) a value
+  // rounds to the next binade, which overflows.
+  if (magnitude >= 65520.0)
+    return value < 0 ? -INFINITY : INFINITY;
+  // The quantum of the value's binade: 2^(e-10) for a value in [2^e,
+  // 2^(e+1)); every subnormal shares 2^-24.
+  int e;
+  frexp(magnitude, &e); // magnitude = m * 2^e with m in [0.5, 1)
+  int binade = e - 1;
+  if (binade < -14)
+    binade = -14;
+  double quantum = ldexp(1.0, binade - 10);
+  // The division is exact (a power of two), and nearbyint rounds to
+  // nearest, ties to even, in the default rounding mode.
+  double rounded = nearbyint(magnitude / quantum) * quantum;
+  return copysign(rounded, value);
 }
 
 void Paykan_panic_index(int64_t index, int64_t len) {

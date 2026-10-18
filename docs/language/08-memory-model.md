@@ -10,8 +10,8 @@ guarantee, not something you write by hand.
 
 ## Quick Summary
 
-- **Value types** (`int`, `float`, `bool`, `char`, `enum`) live on the stack, are copied on
-  assignment, and are never reference-counted.
+- **Value types** (`int`, `float`, `bool`, `char`, the sized numeric types, `enum`) live on
+  the stack, are copied on assignment, and are never reference-counted.
 - **Arrays** (`T[n]`) and **tuples** (`(T1, T2)`) are values too: held inline in their
   variable, field or array element and copied whole on assignment. A reference element
   is a reference: copying the array or tuple retains it.
@@ -33,7 +33,7 @@ The category of a type decides how it is stored and whether ARC applies.
 
 | Category | Types | Storage | On assignment / passing |
 |----------|-------|---------|--------------------------|
-| **Value** | `int`, `float`, `bool`, `char`, `enum`, and their optionals `int?`, `float?`, `bool?`, `char?` | Stack / register (inline in a field) | Copied bit-for-bit; independent thereafter |
+| **Value** | `int`, `float`, `bool`, `char`, the sized numeric types (`u8`, `f32`, …, each in an 8-byte slot), `enum`, and their optionals `int?`, `float?`, `bool?`, `char?`, `u8?` | Stack / register (inline in a field) | Copied bit-for-bit; independent thereafter |
 | **Array** | `T[n]` of any element type | Inline in the variable, the field or the enclosing array | Elements copied; reference elements retained |
 | **Tuple** | `(T1, T2, ...)` of any element types | Inline in the variable, the field or the enclosing array or tuple | Elements copied; reference elements retained |
 | **Struct** | `struct Name { ... }` of any field types | Inline, like a tuple of its fields | Fields copied; reference fields retained |

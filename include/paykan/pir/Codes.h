@@ -64,7 +64,16 @@ inline constexpr OpcodeEntry kOpcodeTable[] = {
     {Opcode::PtrAdd, 38, "ptr.add"},
     {Opcode::MemCopy, 39, "mem.copy"},
     {Opcode::MemZero, 40, "mem.zero"},
-    // 41-255 reserved.
+    // Sized numeric types (docs/design/sized-types.md).
+    {Opcode::Wrap, 41, "wrap"},
+    {Opcode::Mask, 42, "mask"},
+    {Opcode::UDiv, 43, "udiv"},
+    {Opcode::URem, 44, "urem"},
+    {Opcode::UCmp, 45, "ucmp"},
+    {Opcode::UToF, 46, "utof"},
+    {Opcode::FToU, 47, "ftou"},
+    {Opcode::FRound32, 48, "fround32"},
+    // 49-255 reserved.
 };
 
 struct TypeEntry {
@@ -110,7 +119,7 @@ template <typename T, size_t N> constexpr bool rowsUnique(const T (&table)[N]) {
 // per enumerator up to the last one.  Adding an enumerator without a row
 // fails here or in the exhaustive switch of tests/PIR/BinaryTests.cpp.
 static_assert(std::size(kOpcodeTable) ==
-                  static_cast<size_t>(Opcode::Unwrap) + 1,
+                  static_cast<size_t>(Opcode::FRound32) + 1,
               "every Opcode needs a row in kOpcodeTable");
 static_assert(std::size(kTypeTable) == static_cast<size_t>(Type::Mem) + 1,
               "every Type needs a row in kTypeTable");

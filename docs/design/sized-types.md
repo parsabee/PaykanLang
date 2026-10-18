@@ -17,8 +17,8 @@ end each have the default this implementation takes.
 | Storage | every value takes 8 bytes, 8-byte aligned, like an `int`: a narrower integer is held sign-extended (signed) or zero-extended (unsigned) in an `i64` slot, an `f32` or `f16` as the `f64` it exactly is; `bool` and `char` keep their byte |
 | Integer arithmetic | `+ - * / %` on one type give that type; the result wraps to the width (two's complement, the low bits), as `int` wraps today; `/` and `%` by zero panic; `/` and `%` of unsigned types are unsigned; unary `-` is not defined on unsigned types |
 | Float arithmetic | `+ - * /` on `f32` or `f16` are computed in `f64` and rounded to the type's precision after each operation (exact for these operations, as `f64` has enough bits); comparisons are IEEE as for `float` |
-| Mixing | an operation needs both operands of one type; the only promotion is the existing `int` with `float` (to `float`); anything else is spelled with a conversion |
-| Literals | an integer literal takes the integer type the context expects when it fits that type (`x: u8 = 255`, `x + 1`, `x == 0`, a `match` arm, an argument, a field, an element), an error when it does not (`the literal 256 does not fit in 'u8' (0 to 255)`); a float literal takes `f32` or `f16` the same way; without a context an integer literal is `int` and a float literal `float` |
+| Mixing | an operation needs both operands of one type; the only promotion is the existing `int` with `float` (to `float`); anything else is spelled with a conversion (`operator '+' is not defined for types 'i32' and 'int' (the operands must have one type: convert one with 'i32(...)' or 'int(...)')`) |
+| Literals | an integer literal (and `-literal`) takes the integer type the context expects when it fits that type (`x: u8 = 255`, `x + 1`, `x == 0`, a `match` arm, an argument, a field, an element, a `T?` slot), an error when it does not (`the literal 256 does not fit in 'u8' (0 to 255)`); a float literal, or an integer literal, takes `f32` or `f16` the same way (an error when its magnitude rounds to infinity); only the literal itself adapts (`100 + 100` is an `int` expression); without a context an integer literal is `int` and a float literal `float` |
 | Conversions | `i8(x)` … `f16(x)`, `unsigned(x)` and `int(x)`, `float(x)` from any numeric type: integer to integer wraps to the width; float to integer truncates toward zero and panics outside the target's range (as `int(x)` does); integer to float rounds to nearest; `Str(x)` prints; `i8(s)` … parse a `Str` to `i8?` …, `None` when the text is not a number of that type |
 | Methods and traits | `toString()` and `hash()` on every numeric type; every numeric type is `Show`, `Hashable` and `ValueType`, as `int` and `float` are |
 | Optionals and match | `i32?`, `u8?`, `f32?` are value optionals like `int?`; `match` on a sized integer compares with literals of its type |
@@ -55,6 +55,16 @@ are unsigned (`udiv`, `urem`, `ucmp`, `utof`, `ftou`, `PaykanString_from_uint`,
 and hashing are the same bits as `int`'s.  The narrower unsigned types are
 non-negative in canonical form, so their signed division and ordering are
 right.
+
+An `f32` literal is rounded by the compiler; an `f16` literal lowers to the
+`Paykan_round_f16` call on its `f64` value, so the compiler and the runtime
+share one rounding.  An integer converts to `f32` or `f16` through `f64`
+(`itof` then the rounding), which is the correctly rounded result for every
+integer an `f32` or `f16` can distinguish.  The `INT64_MIN / -1` guard of
+`int` division is not emitted for a narrower type, whose quotient wraps
+(`i8(-128) / i8(-1)` is `-128`).  An integer literal is at most
+`9223372036854775807`, so the upper half of `unsigned` is reached through a
+conversion or a parse (`unsigned(-1)`, `unsigned("18446744073709551615")`).
 
 ## Typing
 

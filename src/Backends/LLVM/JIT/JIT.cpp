@@ -64,6 +64,8 @@ const RuntimeSymbol kRuntimeSymbols[] = {
 
     {kPaykanStringNew,       reinterpret_cast<void *>(&PaykanString_new)},
     {kPaykanStringFromInt,   reinterpret_cast<void *>(&PaykanString_from_int)},
+    {kPaykanStringFromUint,  reinterpret_cast<void *>(&PaykanString_from_uint)},
+    {kPaykanStringParseUint, reinterpret_cast<void *>(&PaykanString_parse_uint)},
     {kPaykanStringFromFloat, reinterpret_cast<void *>(&PaykanString_from_float)},
     {kPaykanStringFromBool,  reinterpret_cast<void *>(&PaykanString_from_bool)},
     {kPaykanStringFromChar,  reinterpret_cast<void *>(&PaykanString_from_char)},
@@ -92,6 +94,8 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanPanicDivOverflow, reinterpret_cast<void *>(&Paykan_panic_div_overflow)},
     {kPaykanPanicFloatToInt, reinterpret_cast<void *>(&Paykan_panic_float_to_int)},
     {kPaykanPanicIntToChar,  reinterpret_cast<void *>(&Paykan_panic_int_to_char)},
+    {kPaykanPanicFloatToType, reinterpret_cast<void *>(&Paykan_panic_float_to_type)},
+    {kPaykanRoundF16,        reinterpret_cast<void *>(&Paykan_round_f16)},
     {kPaykanPanicIndex,      reinterpret_cast<void *>(&Paykan_panic_index)},
     {kPaykanRetain,          reinterpret_cast<void *>(&Paykan_retain)},
     {kPaykanRelease,         reinterpret_cast<void *>(&Paykan_release)},

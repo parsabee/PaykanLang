@@ -801,3 +801,63 @@ fn @main() -> i64 {
   EXPECT_EQ(runtimeSymbol("$rt.Paykan_println"), "Paykan_println");
   EXPECT_EQ(runtimeName("Paykan_println"), "$rt.Paykan_println");
 }
+
+// -- Sized numeric types (docs/design/sized-types.md)
+
+// `wrap`, `mask`, `udiv`, `urem`, `ucmp`, `utof`, `ftou` and `fround32`
+// print, parse and verify.
+TEST(PIR, SizedTypeInstructionsRoundTripAndVerify) {
+  const char *src = R"(module "m"
+
+fn @main() -> i64 {
+  %a.1 = wrap 8 300
+  %b.2 = mask 16 %a.1
+  %c.3 = udiv %b.2, 3
+  %d.4 = urem %c.3, 2
+  %e.5 = ucmp lt %c.3, %d.4
+  %f.6 = utof %d.4
+  %g.7 = fround32 %f.6
+  %h.8 = ftou %g.7
+  %i.9 = select %e.5, %h.8, %a.1
+  %j.10 = wrap 32 %i.9
+  ret %j.10
+}
+)";
+  EXPECT_EQ(reprint(src), src);
+  ParseError err;
+  auto p = parseProgram(src, err);
+  ASSERT_TRUE(p.has_value()) << err.str();
+  if (!p.has_value())
+    return;
+  auto errors = verify(*p);
+  EXPECT_TRUE(errors.empty()) << formatErrors(errors);
+}
+
+TEST(PIR, SizedTypeInstructionsAreTyped) {
+  auto fn = [](const std::string &body) {
+    return "module \"m\"\nfn @main() -> i64 {\n" + body + "\n  ret 0\n}\n";
+  };
+  EXPECT_NE(verifyText(fn("  %a = wrap 8 1.5")).find("operand of wrap / mask"),
+            std::string::npos);
+  EXPECT_NE(verifyText(fn("  %a = mask 8 true")).find("operand of wrap / mask"),
+            std::string::npos);
+  EXPECT_NE(verifyText(fn("  %a = udiv 1.5, 2.5")).find("operand of udiv"),
+            std::string::npos);
+  EXPECT_NE(verifyText(fn("  %a = ucmp lt 1.5, 2.5")).find("operand of ucmp"),
+            std::string::npos);
+  EXPECT_NE(verifyText(fn("  %a = utof 1.5")).find("operand of utof"),
+            std::string::npos);
+  EXPECT_NE(verifyText(fn("  %a = ftou 1")).find("operand of ftou"),
+            std::string::npos);
+  EXPECT_NE(verifyText(fn("  %a = fround32 1")).find("operand of fround32"),
+            std::string::npos);
+  // The width is 8, 16 or 32: the parser refuses another.
+  EXPECT_NE(verifyText(fn("  %a = wrap 64 1")).find("PARSE ERROR"),
+            std::string::npos);
+  EXPECT_NE(verifyText(fn("  %a = mask 7 1")).find("PARSE ERROR"),
+            std::string::npos);
+  EXPECT_EQ(
+      verifyText(fn("  %a = wrap 32 1\n  %b = mask 8 %a\n  %c = fround32 1.5\n"
+                    "  %d = ftou %c\n  %e = utof %d\n  %f = ucmp ge %d, %b")),
+      "");
+}

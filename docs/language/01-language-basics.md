@@ -66,13 +66,81 @@ fn main() -> int {
 
 | Type    | Description                         |
 |---------|-------------------------------------|
-| `int`   | 64-bit signed integer               |
-| `float` | 64-bit IEEE 754 floating-point      |
+| `int`   | 64-bit signed integer (also spelled `i64`) |
+| `float` | 64-bit IEEE 754 floating-point (also spelled `f64`) |
+| `unsigned` | 64-bit unsigned integer (also spelled `u64`) |
+| `i8`, `i16`, `i32` | 8-, 16- and 32-bit signed integers |
+| `u8`, `u16`, `u32` | 8-, 16- and 32-bit unsigned integers |
+| `f16`, `f32` | 16- and 32-bit IEEE 754 floating-point |
 | `bool`  | Boolean — literals `True` / `False` |
 | `char`  | 8-bit character — literals `'a'`, `'\n'` |
 | `void`  | Function return type only           |
 
 - `int` -> `float` promotion is implicit when assigning or passing to a `float` parameter.
+  No other numeric type converts implicitly.
+
+### Sized numeric types
+
+`i8`, `i16`, `i32`, `u8`, `u16`, `u32`, `unsigned`, `f16` and `f32` are numeric types with a
+fixed width, next to `int` and `float` (whose other spellings `i64`, `f64` and `u64` name
+the same three types: `int` and `i64` are one type, printed as `int`, as are `float` and
+`f64`, and `unsigned` and `u64`, printed as `unsigned`).  Every one of them takes an 8-byte
+slot in memory, like an `int`, so a struct, tuple or array of them has the layout it would
+have with `int` and `float`; the width is the range of values the type holds.
+
+```pkn
+fn main() -> int {
+  a: u8 = 250;
+  a = a + 10;                        // wraps to 4: a u8 holds 0 to 255
+  n: i8 = -128;
+  big: unsigned = unsigned(-1);      // 18446744073709551615
+  half: f32 = 0.1;
+  println(Str(a) + " " + Str(n - 1) + " " + Str(big / 2) + " " + Str(half));
+  return 0;
+}
+```
+
+Output:
+
+```
+4 127 9223372036854775807 0.1
+```
+
+- **One type per operation.** The two operands of `+ - * / %` and of a comparison must
+  have the same type; the one promotion is `int` with `float`.  `x + y` with `x: i32` and
+  `y: int` is an error (`operator '+' is not defined for types 'i32' and 'int'`): write
+  `x + i32(y)` or `int(x) + y`.  The result has the operands' type, and the integer result
+  **wraps** to the type's width, as `int` wraps at 64 bits: `u8` arithmetic is modulo 256,
+  `i8` arithmetic keeps the low 8 bits as a signed value.  `/` and `%` by zero panic as for
+  `int`; `/`, `%` and the comparisons of an `unsigned` are unsigned (`unsigned(-1) / 2` is
+  `9223372036854775807`, `unsigned(-1) > 1` is `True`).  Unary `-` is not defined on the
+  unsigned types.
+- **Literals take the type the context expects.**  An integer literal (and `-literal`)
+  flowing into a slot of a sized integer type — a variable with a declared type, a
+  parameter, a field, an element, a `match` arm, or the other operand of an operator — has
+  that type when it fits it (`x: u8 = 255`, `x + 1`, `x == 0`), and is an error when it does
+  not (`the literal 256 does not fit in 'u8' (0 to 255)`).  A float literal (or an integer
+  literal) flowing into an `f32` or `f16` slot is that float.  Only a literal adapts: `100 +
+  100` is an `int` expression, so `q: i8 = 100 + 100;` is an error.  Without a context an
+  integer literal is an `int` and a float literal a `float`.
+- **`f16` and `f32` arithmetic** is computed in `float` precision and rounded to the type
+  after each operation, which gives the correctly rounded `f32` or `f16` result;
+  comparisons are IEEE as for `float`.  A value too large for the type is its infinity:
+  `f16(70000.0)` is `inf`, and `65504` is the largest finite `f16`.
+- **Conversions** between any two numeric types use the conversion constructors
+  (`u8(300)` is `44`, `i8(200)` is `-56`, `int(unsigned(-1))` is `-1`, `i32(-1.5)` is `-1`,
+  `f16(0.1)` is `0.0999756`): see [Conversions](#conversions).  `Str(x)` prints any
+  numeric value (an `unsigned` without a sign), and `u8(s)`, `unsigned(s)`, `f32(s)` … parse
+  a `Str` into a `u8?`, `unsigned?`, `f32?` …, `None` when the text is not a number of that
+  type (`u8("256")` is `None`).
+- **Methods and traits.**  Every numeric type has `toString()` and is `Show` and
+  `ValueType`; the integer types have `hash()` and are `Hashable`, so a `u32` is a
+  `HashMap` key.  A sized type has an optional (`u8?`), is a `match` subject with literal
+  arms, and is a type argument like any value type (`Box<u8>`, `List<f32>`).
+- **Not yet:** bitwise operators and shifts, literal suffixes (`1u8`), hexadecimal
+  literals, `char` conversions to the sized types (`u8(int(c))` spells a byte), and
+  implicit widening (`i32` to `int`).  The design is in
+  [`design/sized-types.md`](../design/sized-types.md).
 
 ### String Type
 
@@ -155,8 +223,8 @@ n = apply(square, 3);               // 9
 
 ### Optional Types
 
-Any reference type `T` (a class or `Str`) and the primitives `int`, `float`, `bool`
-and `char` have an optional form `T?` that holds either a `T` or `None`. A `T` converts to `T?` implicitly; a `T?` is unwrapped with `match`. See
+Any reference type `T` (a class or `Str`) and the primitives `int`, `float`, `bool`,
+`char` and the sized numeric types have an optional form `T?` that holds either a `T` or `None`. A `T` converts to `T?` implicitly; a `T?` is unwrapped with `match`. See
 `10-optionals.md`.
 
 ```pkn
@@ -390,8 +458,8 @@ A `match` arm's binding can borrow the subject in the same way, `d: view Dog { �
 
 | Literal        | Type    | Examples          |
 |----------------|---------|-------------------|
-| Integer        | `int`   | `0`, `42`, `-17`  |
-| Floating-point | `float` | `3.14`, `0.5`     |
+| Integer        | `int` (or the sized integer type the context expects) | `0`, `42`, `-17`  |
+| Floating-point | `float` (or `f32` / `f16` when expected) | `3.14`, `0.5`     |
 | Boolean        | `bool`  | `True`, `False`   |
 | Character      | `char`  | `'a'`, `'\n'`, `'\t'` |
 | String         | `Str`   | `"hello"`, `""`   |
@@ -417,7 +485,9 @@ NaN are computed, not written: `1.0e308 * 10.0`, `0.0 * (1.0e308 * 10.0)`.
 | `/` | Division       | Numeric only                       |
 | `%` | Modulo         | Numeric only                       |
 
-Result type is `float` if either operand is `float`, otherwise `int`.
+Both operands have one numeric type, and the result has that type; the one exception is
+`int` with `float`, computed as `float`.  The sized types (`u8`, `i32`, `unsigned`, `f32`,
+…) wrap or round to their width ([Sized numeric types](#sized-numeric-types)).
 
 **Integer arithmetic** is 64-bit two's complement and behaves the same on every backend:
 
@@ -453,7 +523,7 @@ For **reference types** (classes, `Str`), `==` dispatches to `equals`: `a == b` 
 define what equality means for it; the default (inherited from `Obj`) compares object identity, so
 two separately-constructed instances are unequal unless the class overrides `equals`. `Str`
 overrides `equals` to compare by content, so `"ab" == "ab"` is `True`. For **value types**
-(`int`, `float`, `bool`, `char`, enums) `==` compares the values directly. Arrays have no `==`
+(`int`, `float`, `bool`, `char`, the sized numeric types, enums) `==` compares the values directly. Arrays have no `==`
 (see `05-arrays.md`).
 
 Float comparisons follow IEEE 754: NaN is unequal to everything, itself included (with `nan`
@@ -682,11 +752,16 @@ Nothing is widened or unwrapped to find one. An `int` argument does not reach `f
 
 | Target  | Specializations (the source types) | Result                                   |
 |---------|------------------------------------|------------------------------------------|
-| `Str`   | `int`, `float`, `bool`, `char`     | `Str`                                    |
-| `int`   | `Str`; `float`, `bool`, `char`     | `int?` from `Str`; `int` otherwise       |
-| `float` | `Str`; `int`                       | `float?` from `Str`; `float` from `int`  |
+| `Str`   | `int`, `float`, `bool`, `char`, and every sized numeric type | `Str`           |
+| `int`   | `Str`; `float`, `bool`, `char`, and every sized numeric type | `int?` from `Str`; `int` otherwise |
+| `float` | `Str`; `int`, and every sized numeric type | `float?` from `Str`; `float` otherwise |
+| `i8` … `u32`, `unsigned`, `f16`, `f32` | `Str`; every other numeric type | `T?` from `Str`; `T` otherwise |
 | `bool`  | `int`; `Str`                       | `bool` from `int`; `bool?` from `Str`    |
 | `char`  | `int`                              | `char`                                   |
+
+The numeric types are `int`, `float`, `i8`, `i16`, `i32`, `u8`, `u16`, `u32`, `unsigned`,
+`f16` and `f32` (`i64`, `f64` and `u64` are other spellings of the first two and of
+`unsigned`, so `u64(x)` and `unsigned(x)` are one conversion).
 
 **The explicit form.** You may also name the specialization: `Target<Source>(value)`, for
 example `Str<int>(n)` or `int<Str>(s)`. It is the same conversion, and it documents the
@@ -710,6 +785,12 @@ What each specialization does:
 | `bool<int>(n)`    | `int` → `bool`     | `n != 0`                                                      |
 | `int<char>(c)`    | `char` → `int`     | The character's byte code, `0`..`255`                         |
 | `char<int>(n)`    | `int` → `char`     | The character with byte code `n`; panics outside `0`..`255`   |
+| `u8<int>(n)`, `i32<unsigned>(u)`, `int<u8>(b)`, … | integer → integer | The low bits of the two's-complement value: `u8(300)` is `44`, `i8(200)` is `-56`, `unsigned(-1)` is `18446744073709551615`, `int(unsigned(-1))` is `-1` |
+| `i8<float>(f)`, `unsigned<f32>(x)`, … | float → integer | Truncates toward zero; panics on NaN, ±inf or a value outside the target's range (`i8(-128.9)` is `-128`, `i8(128.0)` panics) |
+| `f32<int>(n)`, `float<u8>(b)`, … | integer → float | The nearest value of the target (`f32(16777217)` is `16777216`) |
+| `f16<float>(f)`, `float<f32>(x)`, … | float → float | Rounded to the target's precision; too large is its infinity (`f16(0.1)` is `0.0999756`, `f16(70000.0)` is `inf`) |
+| `Str<u8>(b)`, `Str<f32>(x)`, … | sized → `Str` | As `Str<int>` / `Str<float>`; `Str<unsigned>` prints the unsigned value |
+| `u8<Str>(s)`, `unsigned<Str>(s)`, `f32<Str>(s)`, … | `Str` → `T?` | The parsed value, or `None` when the text is not a number of the type: outside its range (`u8("256")`), or signed for an `unsigned` (`unsigned("-1")`) |
 
 ```pkn
 println(Str(42));                 // 42
@@ -733,11 +814,12 @@ specialization; `toString()` is the way to turn an object into a `Str`:
 ```pkn
 a = Point();
 s = Str(a);         // error: no specialization of 'Str' for 'Point'; its specializations
-                    //        are int, float, bool, char
+                    //        are int, float, bool, char, i8, i16, i32, u8, u16, u32,
+                    //        unsigned, f16, f32
 o = None;
 t = Str(o);         // error: no specialization of 'Str' for 'Obj'; ...
 x = float(2.5);     // error: no specialization of 'float' for 'float'; its specializations
-                    //        are Str, int
+                    //        are Str, int, i8, i16, i32, u8, u16, u32, unsigned, f16, f32
 y = int<float>(3);  // error: argument of 'int<float>' has type 'int', expected 'float'
 ```
 

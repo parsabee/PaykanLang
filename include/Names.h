@@ -66,6 +66,20 @@ inline constexpr const char *kTypeFloat = "float";
 inline constexpr const char *kTypeBool = "bool";
 inline constexpr const char *kTypeChar = "char";
 inline constexpr const char *kTypeVoid = "void";
+// The sized numeric types (docs/design/sized-types.md); `i64`, `u64` and
+// `f64` are the other spellings of `int`, `unsigned` and `float`.
+inline constexpr const char *kTypeI8 = "i8";
+inline constexpr const char *kTypeI16 = "i16";
+inline constexpr const char *kTypeI32 = "i32";
+inline constexpr const char *kTypeI64 = "i64";
+inline constexpr const char *kTypeU8 = "u8";
+inline constexpr const char *kTypeU16 = "u16";
+inline constexpr const char *kTypeU32 = "u32";
+inline constexpr const char *kTypeU64 = "u64";
+inline constexpr const char *kTypeUnsigned = "unsigned";
+inline constexpr const char *kTypeF16 = "f16";
+inline constexpr const char *kTypeF32 = "f32";
+inline constexpr const char *kTypeF64 = "f64";
 
 // Conversion constructors `Target<Source>(value)` (#64, #88): the closed set
 // of specializations of the builtin types.  Sema rebinds a conversion call's
@@ -100,6 +114,8 @@ inline constexpr const char *kPaykanStringCharAt = "PaykanString_char_at";
 inline constexpr const char *kPaykanStringNew = "PaykanString_new";
 inline constexpr const char *kPaykanStringDestroy = "PaykanString_destroy";
 inline constexpr const char *kPaykanStringFromInt = "PaykanString_from_int";
+inline constexpr const char *kPaykanStringFromUint = "PaykanString_from_uint";
+inline constexpr const char *kPaykanStringParseUint = "PaykanString_parse_uint";
 inline constexpr const char *kPaykanStringParseInt = "PaykanString_parse_int";
 inline constexpr const char *kPaykanStringParseFloat =
     "PaykanString_parse_float";
@@ -178,6 +194,10 @@ inline constexpr const char *kPaykanPanicDivOverflow =
 inline constexpr const char *kPaykanPanicFloatToInt =
     "Paykan_panic_float_to_int";
 inline constexpr const char *kPaykanPanicIntToChar = "Paykan_panic_int_to_char";
+inline constexpr const char *kPaykanPanicFloatToType =
+    "Paykan_panic_float_to_type";
+/// `f16` rounding (docs/design/sized-types.md)
+inline constexpr const char *kPaykanRoundF16 = "Paykan_round_f16";
 inline constexpr const char *kPaykanPanicIndex = "Paykan_panic_index";
 
 // Reference counting
@@ -251,6 +271,7 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanPanicDivByZero,
     kPaykanPanicDivOverflow,
     kPaykanPanicFloatToInt,
+    kPaykanPanicFloatToType,
     kPaykanPanicIntToChar,
     kPaykanPanicIndex,
     // String
@@ -259,12 +280,16 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanStringConcat,
     kPaykanStringCharAt,
     kPaykanStringFromInt,
+    kPaykanStringFromUint,
     kPaykanStringFromFloat,
     kPaykanStringFromBool,
     kPaykanStringFromChar,
     kPaykanStringParseInt,
+    kPaykanStringParseUint,
     kPaykanStringParseFloat,
     kPaykanStringParseBool,
+    // Sized numeric types
+    kPaykanRoundF16,
     // Hash
     kPaykanIntHash,
     kPaykanStringHash,
@@ -314,6 +339,8 @@ enum NativeTypeKind : unsigned char {
   kNativeKindTuple = 6,    // its elements in place
   kNativeKindStruct = 7,   // a struct's fields in place, with their names
                            // (only in a layout, never a PaykanType's kind)
+  kNativeKindUInt = 8,     // uint64_t (`unsigned`); the narrower sized
+                           // integers and floats are kInt and kFloat
 };
 
 // -- Names of lowering-generated globals and values

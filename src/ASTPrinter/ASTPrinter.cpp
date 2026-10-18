@@ -372,24 +372,7 @@ void ASTPrinter::visitMethodCallExpr(MethodCallExpr *node) {
 
 void ASTPrinter::visitBuiltinType(BuiltinType *node) {
   header("BuiltinType", node);
-  switch (node->getTypeKind()) {
-  case BuiltinType::Int:
-    OS << " 'int'";
-    break;
-  case BuiltinType::Float:
-    OS << " 'float'";
-    break;
-  case BuiltinType::Bool:
-    OS << " 'bool'";
-    break;
-  case BuiltinType::Char:
-    OS << " 'char'";
-    break;
-  case BuiltinType::Void:
-    OS << " 'void'";
-    break;
-  }
-  OS << "\n";
+  OS << " '" << builtinKindName(node->getTypeKind()) << "'\n";
 }
 
 void ASTPrinter::visitClassType(ClassType *node) {

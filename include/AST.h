@@ -8,6 +8,7 @@
 #include <concepts>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -1071,7 +1072,36 @@ public:
     Bool,
     Char,
     Void,
+    // The sized numeric types (docs/design/sized-types.md).  `int` is the
+    // 64-bit signed integer and `float` the 64-bit float (Int and Float
+    // above); `unsigned` is U64.  Every one is held in an 8-byte slot.
+    I8,
+    I16,
+    I32,
+    U8,
+    U16,
+    U32,
+    U64,
+    F16,
+    F32,
   };
+  static constexpr unsigned kNumKinds = F32 + 1;
+
+  /// Int and the sized integer kinds, signed and unsigned.
+  static bool isIntegerKind(Kind k) {
+    return k == Int || (k >= I8 && k <= U64);
+  }
+  /// U8 .. U64.
+  static bool isUnsignedKind(Kind k) { return k >= U8 && k <= U64; }
+  /// Float, F16 and F32.
+  static bool isFloatKind(Kind k) { return k == Float || k == F16 || k == F32; }
+  static bool isNumericKind(Kind k) {
+    return isIntegerKind(k) || isFloatKind(k);
+  }
+  /// The width in bits of an integer kind, 0 for another kind.
+  static unsigned integerBits(Kind k);
+  /// The width in bits of a floating-point kind, 0 for another kind.
+  static unsigned floatBits(Kind k);
 
 private:
   Kind TypeKind;
@@ -1085,11 +1115,22 @@ public:
   }
 
   Kind getTypeKind() const { return TypeKind; }
+  bool isInteger() const { return isIntegerKind(TypeKind); }
+  bool isUnsigned() const { return isUnsignedKind(TypeKind); }
+  bool isFloat() const { return isFloatKind(TypeKind); }
+  bool isNumeric() const { return isNumericKind(TypeKind); }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_BuiltinType;
   }
 };
+
+/// The keyword a builtin kind is printed as: `int`, `unsigned`, `float`,
+/// `i8`, ... (`i64`, `u64` and `f64` are other spellings of the first three).
+const char *builtinKindName(BuiltinType::Kind k);
+/// The kind a type keyword names, with its alternative spellings; false when
+/// @p name is not a builtin type's.
+bool builtinKindOfName(std::string_view name, BuiltinType::Kind &kind);
 
 // Method declaration (name + signature + flags)
 class MethodDecl : public Decl {

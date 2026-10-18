@@ -12,11 +12,13 @@ ASTContext::ASTContext()
       VoidTy(nullptr), ObjTy(nullptr), StrTy(nullptr), FileTy(nullptr),
       ErrorTy(nullptr) {
   Pool.reserve(512); // the bootstrap alone makes ~150 nodes
-  IntTy = make<BuiltinType>(SourceLocation(), BuiltinType::Int);
-  FloatTy = make<BuiltinType>(SourceLocation(), BuiltinType::Float);
-  BoolTy = make<BuiltinType>(SourceLocation(), BuiltinType::Bool);
-  CharTy = make<BuiltinType>(SourceLocation(), BuiltinType::Char);
-  VoidTy = make<BuiltinType>(SourceLocation(), BuiltinType::Void);
+  for (unsigned k = 0; k < BuiltinType::kNumKinds; ++k)
+    BuiltinTys[k] = make<BuiltinType>(SourceLocation(), BuiltinType::Kind(k));
+  IntTy = BuiltinTys[BuiltinType::Int];
+  FloatTy = BuiltinTys[BuiltinType::Float];
+  BoolTy = BuiltinTys[BuiltinType::Bool];
+  CharTy = BuiltinTys[BuiltinType::Char];
+  VoidTy = BuiltinTys[BuiltinType::Void];
   PoisonTy = make<PoisonType>(SourceLocation());
   // Every builtin class is allocated before any is populated, so a method
   // signature can name any of them.
@@ -201,19 +203,7 @@ ASTContext::ClassTypeBuilder ASTContext::buildClassType(const std::string &name,
 }
 
 BuiltinType *ASTContext::getBuiltinType(BuiltinType::Kind k) const {
-  switch (k) {
-  case BuiltinType::Int:
-    return IntTy;
-  case BuiltinType::Float:
-    return FloatTy;
-  case BuiltinType::Bool:
-    return BoolTy;
-  case BuiltinType::Char:
-    return CharTy;
-  case BuiltinType::Void:
-    return VoidTy;
-  }
-  return VoidTy;
+  return unsigned(k) < BuiltinType::kNumKinds ? BuiltinTys[k] : VoidTy;
 }
 
 void ASTContext::registerClassType(ClassType *ct) {
@@ -273,16 +263,9 @@ void ASTContext::addEnumTypeAlias(const std::string &alias, EnumType *et) {
 }
 
 Type *ASTContext::lookupType(const std::string &name) const {
-  if (name == names::kTypeInt)
-    return IntTy;
-  if (name == names::kTypeFloat)
-    return FloatTy;
-  if (name == names::kTypeBool)
-    return BoolTy;
-  if (name == names::kTypeChar)
-    return CharTy;
-  if (name == names::kTypeVoid)
-    return VoidTy;
+  BuiltinType::Kind kind;
+  if (builtinKindOfName(name, kind))
+    return BuiltinTys[kind];
   if (auto *et = lookupEnumType(name))
     return et;
   if (auto *st = lookupStructType(name))
@@ -293,20 +276,8 @@ Type *ASTContext::lookupType(const std::string &name) const {
 std::string typeName(Type *ty) {
   if (!ty)
     return "unknown";
-  if (auto *bt = dyn_cast<BuiltinType>(ty)) {
-    switch (bt->getTypeKind()) {
-    case BuiltinType::Int:
-      return names::kTypeInt;
-    case BuiltinType::Float:
-      return names::kTypeFloat;
-    case BuiltinType::Bool:
-      return names::kTypeBool;
-    case BuiltinType::Char:
-      return names::kTypeChar;
-    case BuiltinType::Void:
-      return names::kTypeVoid;
-    }
-  }
+  if (auto *bt = dyn_cast<BuiltinType>(ty))
+    return builtinKindName(bt->getTypeKind());
   if (auto *ct = dyn_cast<ClassType>(ty))
     return ct->getName();
   if (auto *et = dyn_cast<EnumType>(ty))

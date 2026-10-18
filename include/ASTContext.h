@@ -32,6 +32,8 @@ class ASTContext {
   BuiltinType *BoolTy;
   BuiltinType *CharTy;
   BuiltinType *VoidTy;
+  // Every builtin type by kind: the five above and the sized numeric types.
+  BuiltinType *BuiltinTys[BuiltinType::kNumKinds];
 
   // The internal poison type of a binder whose declaration failed (#89); not
   // a source type (see ast::PoisonType).

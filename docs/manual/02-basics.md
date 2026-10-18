@@ -142,6 +142,13 @@ Note the capitals in `True` and `False`. An `int` converts to a `float` automati
 `float` is expected (`f: float = 3;` is fine), but nothing else converts implicitly: a
 `float` never silently becomes an `int`, and neither ever becomes a `bool`.
 
+There are also sized versions of the numbers: `i8`, `i16`, `i32`, `u8`, `u16`, `u32` and
+`unsigned` (a 64-bit unsigned integer) hold integers of that width, and `f16` and `f32` are
+narrower floats.  They work like `int` and `float` but keep to their range (`u8` arithmetic
+wraps at 256) and never mix with another type without a conversion; a literal takes the
+sized type where one is expected (`x: u8 = 255;`).  See [Sized numeric
+types](../language/01-language-basics.md#sized-numeric-types).
+
 Besides these, `Str` is the string type, `void` is the "returns nothing" type of functions,
 and every class you declare is a type. Later chapters add arrays (`int[3]`), tuples
 (`(int, Str)`), optionals (`int?`) and generic types (`Box<int>`).

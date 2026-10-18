@@ -1239,3 +1239,71 @@ TEST(Pkm, GenericStructsAcrossSourceModulesAreNotCached) {
   EXPECT_FALSE(fs::exists(dir / ".paykan_cache" / "m2.pkm"));
   fs::remove_all(dir);
 }
+
+// The sized numeric types (docs/design/sized-types.md) cross a module
+// boundary from the source and from a `.pkm`: a struct with sized fields, a
+// function taking and returning them, and `unsigned` through its spelling
+// `u64` all keep their types, and a literal argument takes the parameter's
+// sized type.
+TEST(Pkm, SizedTypesCrossModulesAndPkm) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_sized_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  fs::create_directories(dir / "lib");
+  writeFile(dir / "lib" / "pix.pkn",
+            "struct Rgb { r: u8; g: u8; b: u8; }\n"
+            "fn brightness(c: Rgb) -> u16 {\n"
+            "  return u16(c.r) + u16(c.g) + u16(c.b); }\n"
+            "fn big() -> u64 { return unsigned(-1); }\n"
+            "fn half(x: f32) -> f32 { return x / 2; }\n"
+            "fn wrap(n: i8) -> i8 { return n + 1; }\n"
+            "fn tiny(x: f16) -> f16 { return x; }\n");
+  writeFile(
+      dir / "main.pkn",
+      "import lib::pix;\n"
+      "fn main() -> int {\n"
+      "  c = pix::Rgb(200, 200, 255);\n"
+      "  println(Str(pix::brightness(c)) + \" \" + Str(pix::big()) + \" \"\n"
+      "          + Str(pix::half(0.5)) + \" \" + Str(pix::wrap(127)) + \" \"\n"
+      "          + Str(pix::tiny(0.1)) + \" \" + c.toString());\n"
+      "  u: unsigned = pix::big() / 2;\n"
+      "  println(Str(u));\n"
+      "  return 0;\n}\n");
+  writeFile(dir / "bad.pkn", "import lib::pix;\n"
+                             "fn main() -> int {\n"
+                             "  a = pix::wrap(128);\n"
+                             "  b: int = pix::big();\n"
+                             "  c = pix::half(1.5) + 1.0;\n"
+                             "  d: float = c;\n"
+                             "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  auto check = [&](const char *when) {
+    auto ok = paykan("--track-heap main.pkn");
+    EXPECT_EQ(ok.exitCode, 0) << when << "\n" << ok.out;
+    EXPECT_TRUE(contains(ok.out, "655 18446744073709551615 0.25 -128 "
+                                 "0.0999756 Rgb(r: 200, g: 200, b: 255)\n"
+                                 "9223372036854775807\n"))
+        << when << "\n"
+        << ok.out;
+    EXPECT_TRUE(contains(ok.out, "live blocks       : 0")) << when << "\n"
+                                                           << ok.out;
+    auto bad = paykan("--check-only bad.pkn");
+    EXPECT_NE(bad.exitCode, 0) << when;
+    for (const char *line :
+         {"the literal 128 does not fit in 'i8' (-128 to 127)",
+          "initializer of type 'unsigned' does not match declared type 'int' "
+          "for variable 'b'",
+          "initializer of type 'f32' does not match declared type 'float' "
+          "for variable 'd'"})
+      EXPECT_TRUE(contains(bad.out, line)) << when << ": " << line << "\n"
+                                           << bad.out;
+  };
+  check("from source");
+  ASSERT_EQ(paykan("--emit-pkm lib/pix.pkn").exitCode, 0);
+  fs::remove(dir / "lib" / "pix.pkn");
+  check("from the .pkm");
+  fs::remove_all(dir);
+}

@@ -85,10 +85,146 @@ const char *UnaryExpr::getOpcodeStr() const {
 
 // -- BuiltinType
 
+unsigned BuiltinType::integerBits(Kind k) {
+  switch (k) {
+  case Int:
+  case U64:
+    return 64;
+  case I32:
+  case U32:
+    return 32;
+  case I16:
+  case U16:
+    return 16;
+  case I8:
+  case U8:
+    return 8;
+  case Float:
+  case Bool:
+  case Char:
+  case Void:
+  case F16:
+  case F32:
+    break;
+  }
+  return 0;
+}
+
+unsigned BuiltinType::floatBits(Kind k) {
+  switch (k) {
+  case Float:
+    return 64;
+  case F32:
+    return 32;
+  case F16:
+    return 16;
+  case Int:
+  case Bool:
+  case Char:
+  case Void:
+  case I8:
+  case I16:
+  case I32:
+  case U8:
+  case U16:
+  case U32:
+  case U64:
+    break;
+  }
+  return 0;
+}
+
+const char *builtinKindName(BuiltinType::Kind k) {
+  switch (k) {
+  case BuiltinType::Int:
+    return names::kTypeInt;
+  case BuiltinType::Float:
+    return names::kTypeFloat;
+  case BuiltinType::Bool:
+    return names::kTypeBool;
+  case BuiltinType::Char:
+    return names::kTypeChar;
+  case BuiltinType::Void:
+    return names::kTypeVoid;
+  case BuiltinType::I8:
+    return names::kTypeI8;
+  case BuiltinType::I16:
+    return names::kTypeI16;
+  case BuiltinType::I32:
+    return names::kTypeI32;
+  case BuiltinType::U8:
+    return names::kTypeU8;
+  case BuiltinType::U16:
+    return names::kTypeU16;
+  case BuiltinType::U32:
+    return names::kTypeU32;
+  case BuiltinType::U64:
+    return names::kTypeUnsigned;
+  case BuiltinType::F16:
+    return names::kTypeF16;
+  case BuiltinType::F32:
+    return names::kTypeF32;
+  }
+  return names::kTypeVoid;
+}
+
+bool builtinKindOfName(std::string_view name, BuiltinType::Kind &kind) {
+  static const struct {
+    const char *Name;
+    BuiltinType::Kind Kind;
+  } kNames[] = {
+      {names::kTypeInt, BuiltinType::Int},
+      {names::kTypeI64, BuiltinType::Int},
+      {names::kTypeFloat, BuiltinType::Float},
+      {names::kTypeF64, BuiltinType::Float},
+      {names::kTypeBool, BuiltinType::Bool},
+      {names::kTypeChar, BuiltinType::Char},
+      {names::kTypeVoid, BuiltinType::Void},
+      {names::kTypeI8, BuiltinType::I8},
+      {names::kTypeI16, BuiltinType::I16},
+      {names::kTypeI32, BuiltinType::I32},
+      {names::kTypeU8, BuiltinType::U8},
+      {names::kTypeU16, BuiltinType::U16},
+      {names::kTypeU32, BuiltinType::U32},
+      {names::kTypeU64, BuiltinType::U64},
+      {names::kTypeUnsigned, BuiltinType::U64},
+      {names::kTypeF16, BuiltinType::F16},
+      {names::kTypeF32, BuiltinType::F32},
+  };
+  for (const auto &entry : kNames)
+    if (name == entry.Name) {
+      kind = entry.Kind;
+      return true;
+    }
+  return false;
+}
+
 void BuiltinType::initOps() {
   switch (TypeKind) {
+  case U8:
+  case U16:
+  case U32:
+  case U64:
+    // An unsigned type has no negation; otherwise the integer operators.
+    addBinaryOp(BinaryOpcode::Add);
+    addBinaryOp(BinaryOpcode::Sub);
+    addBinaryOp(BinaryOpcode::Mul);
+    addBinaryOp(BinaryOpcode::Div);
+    addBinaryOp(BinaryOpcode::Mod);
+    addBinaryOp(BinaryOpcode::Lt);
+    addBinaryOp(BinaryOpcode::Gt);
+    addBinaryOp(BinaryOpcode::Le);
+    addBinaryOp(BinaryOpcode::Ge);
+    addBinaryOp(BinaryOpcode::Eq);
+    addBinaryOp(BinaryOpcode::Ne);
+    break;
   case Int:
   case Float:
+  case I8:
+  case I16:
+  case I32:
+  case F16:
+  case F32:
     addUnaryOp(UnaryOpcode::Neg);
     addBinaryOp(BinaryOpcode::Add);
     addBinaryOp(BinaryOpcode::Sub);

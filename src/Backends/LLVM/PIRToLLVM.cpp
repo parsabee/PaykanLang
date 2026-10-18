@@ -662,6 +662,62 @@ private:
     case Opcode::Cast:
       setResult(in, emitCast(operand(in.Args[0]), in.CastTo));
       break;
+    case Opcode::Wrap:
+    case Opcode::Mask: {
+      llvm::Type *narrow = llvm::Type::getIntNTy(Ctx, in.Slot);
+      llvm::Type *i64 = llvm::Type::getInt64Ty(Ctx);
+      llvm::Value *low = B.CreateTrunc(operand(in.Args[0]), narrow);
+      setResult(in, in.Op == Opcode::Wrap ? B.CreateSExt(low, i64)
+                                          : B.CreateZExt(low, i64));
+      break;
+    }
+    case Opcode::UDiv:
+      setResult(in, B.CreateUDiv(operand(in.Args[0]), operand(in.Args[1])));
+      break;
+    case Opcode::URem:
+      setResult(in, B.CreateURem(operand(in.Args[0]), operand(in.Args[1])));
+      break;
+    case Opcode::UCmp: {
+      llvm::Value *a = operand(in.Args[0]), *b = operand(in.Args[1]);
+      llvm::Value *r = nullptr;
+      switch (in.Pred) {
+      case CmpPred::Eq:
+        r = B.CreateICmpEQ(a, b);
+        break;
+      case CmpPred::Ne:
+        r = B.CreateICmpNE(a, b);
+        break;
+      case CmpPred::Lt:
+        r = B.CreateICmpULT(a, b);
+        break;
+      case CmpPred::Le:
+        r = B.CreateICmpULE(a, b);
+        break;
+      case CmpPred::Gt:
+        r = B.CreateICmpUGT(a, b);
+        break;
+      case CmpPred::Ge:
+        r = B.CreateICmpUGE(a, b);
+        break;
+      }
+      setResult(in, r);
+      break;
+    }
+    case Opcode::UToF:
+      setResult(in, B.CreateUIToFP(operand(in.Args[0]),
+                                   llvm::Type::getDoubleTy(Ctx)));
+      break;
+    case Opcode::FToU:
+      // The lowering guards the range, so fptoui never yields poison.
+      setResult(
+          in, B.CreateFPToUI(operand(in.Args[0]), llvm::Type::getInt64Ty(Ctx)));
+      break;
+    case Opcode::FRound32: {
+      llvm::Value *narrow =
+          B.CreateFPTrunc(operand(in.Args[0]), llvm::Type::getFloatTy(Ctx));
+      setResult(in, B.CreateFPExt(narrow, llvm::Type::getDoubleTy(Ctx)));
+      break;
+    }
     case Opcode::Call: {
       llvm::Function *callee =
           M->getFunction(functionName(*S->Mod, S->IsMain, in.Callee));

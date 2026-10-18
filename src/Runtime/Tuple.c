@@ -119,6 +119,11 @@ static void render_scalar(StrBuf *sb, int64_t kind, const char *at) {
   case PAYKAN_KIND_CHAR:
     sb_append(sb, at, 1);
     break;
+  case PAYKAN_KIND_UINT:
+    // As Str<unsigned> renders it.
+    n = snprintf(buf, sizeof(buf), "%llu", (unsigned long long)load_int(at));
+    sb_append(sb, buf, (size_t)n);
+    break;
   case PAYKAN_KIND_OBJECT: {
     PaykanShared *box = load_box(at);
     if (!box) {
@@ -221,6 +226,7 @@ static int scalar_equals(int64_t kind, const char *a, const char *b) {
     return Paykan_vcall_equals(PaykanShared_get(sa), sb) != 0;
   }
   case PAYKAN_KIND_INT:
+  case PAYKAN_KIND_UINT:
   default:
     return load_int(a) == load_int(b);
   }

@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Sized numeric types (docs/language/01-language-basics.md, "Sized numeric types";
+  docs/design/sized-types.md): `i8`, `i16`, `i32`, `u8`, `u16`, `u32`, `unsigned`, `f16`
+  and `f32`, with `i64`, `u64` and `f64` as other spellings of `int`, `unsigned` and
+  `float`.  Every value takes an 8-byte slot, so layouts, the runtime structures and the
+  `.pkm` format are unchanged.  The operands of an operation have one type (`int` with
+  `float` stays the one promotion), integer results wrap to the type's width, `f16` and
+  `f32` results are rounded after each operation, and an `unsigned` divides, takes the
+  remainder and orders unsigned.  A numeric literal takes the sized type its context
+  expects when it fits it (`x: u8 = 255`, `x + 1`, a `match` arm) and is an error when
+  it does not.  The conversion constructors convert between every pair of numeric types
+  (integer to integer keeps the low bits, float to integer truncates and panics outside
+  the target's range, integer to float rounds), `Str(x)` prints every numeric type
+  (`unsigned` without a sign) and `u8(s)` & co. parse a `Str` into a `u8?` & co.  Every
+  numeric type is `Show` and `ValueType` and the integer ones `Hashable`.  PIR gains
+  `wrap`, `mask`, `udiv`, `urem`, `ucmp`, `utof`, `ftou` and `fround32` (docs/pir.md §6)
+  and the runtime `PaykanString_from_uint`, `PaykanString_parse_uint`,
+  `Paykan_round_f16`, `Paykan_panic_float_to_type` and the layout kind
+  `PAYKAN_KIND_UINT`; the ABI and format versions stay (CLAUDE.md).  Not yet: bitwise
+  operators, literal suffixes, hexadecimal literals, `char` to the sized types, implicit
+  widening.
 - Structs (docs/language/14-structs.md): `struct Point { x: int; y: int; }` declares a
   value type with named fields, held in place and copied by assignment like a tuple, with
   no superclass, no vtable and no identity.  `Point(1, 2)` constructs one from its fields

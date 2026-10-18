@@ -45,7 +45,7 @@ void Sema::registerBuiltinTraits() {
   // `trait <name> { view fn <method>() -> <ret>; }`, or `trait <name> {}`
   // without a method, implemented by @p impls.
   auto builtin = [&](const char *name, const char *method, ast::Type *ret,
-                     std::initializer_list<ast::Type *> impls) {
+                     const std::vector<ast::Type *> &impls) {
     std::vector<ast::FuncDecl *> methods;
     if (method) {
       auto *fn =
@@ -63,21 +63,39 @@ void Sema::registerBuiltinTraits() {
     for (ast::Type *t : impls)
       TraitImpls[t].push_back({&info, {}});
   };
+  // The numeric types, `int` and `float` first.
+  std::vector<ast::Type *> numerics;
+  std::vector<ast::Type *> integers;
+  for (unsigned k = 0; k < ast::BuiltinType::kNumKinds; ++k) {
+    auto kind = static_cast<ast::BuiltinType::Kind>(k);
+    if (ast::BuiltinType::isNumericKind(kind))
+      numerics.push_back(Ctx.getBuiltinType(kind));
+    if (ast::BuiltinType::isIntegerKind(kind))
+      integers.push_back(Ctx.getBuiltinType(kind));
+  }
   // Show is implemented by Obj, the scalars (whose `toString` is their `Str`
   // conversion) and the tuples (traitImplOwner).
-  builtin(names::kTraitShow, names::kMethodToString, Ctx.getStrTy(),
-          {Ctx.getObjTy(), Ctx.getIntTy(), Ctx.getFloatTy(), Ctx.getBoolTy(),
-           Ctx.getCharTy()});
-  // Hashable by int, bool, char and Str (whose `hash` is the runtime's
-  // PaykanInt_hash / PaykanString_hash); a class implements it with an
-  // `impl Hashable for` block.  Not float, whose `==` is not an equivalence.
-  builtin(names::kTraitHashable, names::kMethodHash, Ctx.getIntTy(),
-          {Ctx.getIntTy(), Ctx.getBoolTy(), Ctx.getCharTy(), Ctx.getStrTy()});
-  // ValueType by the types held in place and copied whole: int, float, bool
-  // and char here, and every enum, tuple and fixed-size array
+  std::vector<ast::Type *> show{Ctx.getObjTy()};
+  show.insert(show.end(), numerics.begin(), numerics.end());
+  show.push_back(Ctx.getBoolTy());
+  show.push_back(Ctx.getCharTy());
+  builtin(names::kTraitShow, names::kMethodToString, Ctx.getStrTy(), show);
+  // Hashable by the integer types, bool, char and Str (whose `hash` is the
+  // runtime's PaykanInt_hash / PaykanString_hash); a class implements it
+  // with an `impl Hashable for` block.  Not a float, whose `==` is not an
+  // equivalence.
+  std::vector<ast::Type *> hashable = integers;
+  hashable.push_back(Ctx.getBoolTy());
+  hashable.push_back(Ctx.getCharTy());
+  hashable.push_back(Ctx.getStrTy());
+  builtin(names::kTraitHashable, names::kMethodHash, Ctx.getIntTy(), hashable);
+  // ValueType by the types held in place and copied whole: the numeric
+  // types, bool and char here, and every enum, tuple and fixed-size array
   // (traitImplOwner).  Not a class, Str or an optional.
-  builtin(names::kTraitValueType, nullptr, nullptr,
-          {Ctx.getIntTy(), Ctx.getFloatTy(), Ctx.getBoolTy(), Ctx.getCharTy()});
+  std::vector<ast::Type *> values = numerics;
+  values.push_back(Ctx.getBoolTy());
+  values.push_back(Ctx.getCharTy());
+  builtin(names::kTraitValueType, nullptr, nullptr, values);
 }
 
 bool Sema::declareTraits(ast::TranslationUnit *tu) {

@@ -262,6 +262,54 @@ public:
     i.Args = {a.Op};
     return emit(std::move(i));
   }
+  /// The low @p bits of an i64, sign-extended (`wrap`) or zero-extended
+  /// (`mask`): the canonical form of a sized integer
+  /// (docs/design/sized-types.md).
+  Val wrap(const Val &a, unsigned bits, std::string name = "") {
+    return widthOp(Opcode::Wrap, a, bits, std::move(name));
+  }
+  Val mask(const Val &a, unsigned bits, std::string name = "") {
+    return widthOp(Opcode::Mask, a, bits, std::move(name));
+  }
+  Val ucmp(CmpPred pred, const Val &a, const Val &b, std::string name = "") {
+    Instr i;
+    i.Op = Opcode::UCmp;
+    i.Pred = pred;
+    i.Result = newValue(Type::Bool, std::move(name));
+    i.Args = {a.Op, b.Op};
+    return emit(std::move(i));
+  }
+  Val utof(const Val &a, std::string name = "") {
+    Instr i;
+    i.Op = Opcode::UToF;
+    i.Result = newValue(Type::F64, std::move(name));
+    i.Args = {a.Op};
+    return emit(std::move(i));
+  }
+  /// f64 -> the bits of a uint64, truncating toward zero.  Only defined for
+  /// operands in [0, 2^64): the caller guards the range.
+  Val ftou(const Val &a, std::string name = "") {
+    Instr i;
+    i.Op = Opcode::FToU;
+    i.Result = newValue(Type::I64, std::move(name));
+    i.Args = {a.Op};
+    return emit(std::move(i));
+  }
+  Val fround32(const Val &a, std::string name = "") {
+    Instr i;
+    i.Op = Opcode::FRound32;
+    i.Result = newValue(Type::F64, std::move(name));
+    i.Args = {a.Op};
+    return emit(std::move(i));
+  }
+  Val widthOp(Opcode op, const Val &a, unsigned bits, std::string name) {
+    Instr i;
+    i.Op = op;
+    i.Slot = bits;
+    i.Result = newValue(Type::I64, std::move(name));
+    i.Args = {a.Op};
+    return emit(std::move(i));
+  }
 
   Val call(const std::string &callee, const Signature &sig,
            const std::vector<Val> &args, std::string name = "") {

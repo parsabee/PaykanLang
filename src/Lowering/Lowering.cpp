@@ -10,7 +10,9 @@
 #include "Names.h"
 
 #include <cassert>
+#include <cmath>
 #include <cstring>
+#include <limits>
 #include <optional>
 
 namespace paykan::lowering {
@@ -43,6 +45,8 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanPanicDivByZero, {{}, kVoid}},
     {kPaykanPanicDivOverflow, {{}, kVoid}},
     {kPaykanPanicFloatToInt, {{kF64}, kVoid}},
+    {kPaykanPanicFloatToType, {{kF64, kPtr, kI64}, kVoid}},
+    {kPaykanRoundF16, {{kF64}, kF64}},
     {kPaykanPanicIntToChar, {{kI64}, kVoid}},
     {kPaykanPanicIndex, {{kI64, kI64}, kVoid}},
     {kPaykanStringNew, {{kPtr, kI64}, kObj}},
@@ -50,6 +54,8 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanStringConcat, {{kObj, kObj}, kObj}},
     {kPaykanStringCharAt, {{kObj, kI64}, kChr}},
     {kPaykanStringFromInt, {{kI64}, kObj}},
+    {kPaykanStringFromUint, {{kI64}, kObj}},
+    {kPaykanStringParseUint, {{kObj, kPtr}, kI64}},
     {kPaykanStringFromFloat, {{kF64}, kObj}},
     {kPaykanStringFromBool, {{kI64}, kObj}},
     {kPaykanStringFromChar, {{kChr}, kObj}},
@@ -232,10 +238,21 @@ ModuleLowering::FunctionStateGuard::~FunctionStateGuard() {
 
 Type ModuleLowering::toPIRType(ast::Type *ty) {
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty)) {
+    // Every integer type is held sign- or zero-extended in an i64 and every
+    // floating-point type as the f64 it is (docs/design/sized-types.md).
     switch (bt->getTypeKind()) {
     case ast::BuiltinType::Int:
+    case ast::BuiltinType::I8:
+    case ast::BuiltinType::I16:
+    case ast::BuiltinType::I32:
+    case ast::BuiltinType::U8:
+    case ast::BuiltinType::U16:
+    case ast::BuiltinType::U32:
+    case ast::BuiltinType::U64:
       return Type::I64;
     case ast::BuiltinType::Float:
+    case ast::BuiltinType::F16:
+    case ast::BuiltinType::F32:
       return Type::F64;
     case ast::BuiltinType::Bool:
       return Type::Bool;
@@ -573,9 +590,16 @@ void ModuleLowering::bootstrapBuiltins() {
   reg(kErrPrint, kPaykanErrPrint);
   reg(kErrPrintln, kPaykanErrPrintln);
   // Conversions with a runtime implementation, by the spelled callee Sema
-  // rebinds them to (the numeric ones are inline, see emitConversion).
-  reg(kConvStrInt, kPaykanStringFromInt);
-  reg(kConvStrFloat, kPaykanStringFromFloat);
+  // rebinds them to (the numeric ones are inline, see emitConversion):
+  // `Str<T>` for every numeric T, bool and char.
+  for (unsigned k = 0; k < ast::BuiltinType::kNumKinds; ++k) {
+    const auto kind = static_cast<ast::BuiltinType::Kind>(k);
+    if (!ast::BuiltinType::isNumericKind(kind))
+      continue;
+    const std::string spelled =
+        std::string(kString) + "<" + ast::builtinKindName(kind) + ">";
+    reg(spelled.c_str(), toStringRuntime(kind));
+  }
   reg(kConvStrBool, kPaykanStringFromBool);
   reg(kConvStrChar, kPaykanStringFromChar);
   // (`int<Str>` & co. are emitParse.)
@@ -808,6 +832,71 @@ Val ModuleLowering::promoteIntToFloat(const Val &v, ast::Type *targetTy) {
       return Val::f64(static_cast<double>(*c));
     return B.itof(v, kInt2FPName);
   }
+  return v;
+}
+
+ast::BuiltinType::Kind ModuleLowering::builtinKind(ast::Type *ty) {
+  if (auto *bt = ty ? ast::dyn_cast<ast::BuiltinType>(ty) : nullptr)
+    return bt->getTypeKind();
+  return ast::BuiltinType::Void;
+}
+
+const char *ModuleLowering::toStringRuntime(ast::BuiltinType::Kind k) {
+  if (k == ast::BuiltinType::U64)
+    return kPaykanStringFromUint;
+  if (ast::BuiltinType::isFloatKind(k))
+    return kPaykanStringFromFloat;
+  if (k == ast::BuiltinType::Bool)
+    return kPaykanStringFromBool;
+  if (k == ast::BuiltinType::Char)
+    return kPaykanStringFromChar;
+  return kPaykanStringFromInt;
+}
+
+bool ModuleLowering::conversionTypes(const std::string &callee,
+                                     ast::Type *&target,
+                                     ast::Type *&source) const {
+  const size_t open = callee.find('<');
+  if (open == std::string::npos || callee.back() != '>')
+    return false;
+  target = ASTCtx.lookupType(callee.substr(0, open));
+  source = ASTCtx.lookupType(callee.substr(open + 1, callee.size() - open - 2));
+  auto scalar = [&](ast::Type *t) {
+    return t && (ast::isa<ast::BuiltinType>(t) || t == ASTCtx.getStrTy());
+  };
+  return scalar(target) && scalar(source);
+}
+
+Val ModuleLowering::canonicalize(const Val &v, ast::Type *ty) {
+  using ast::BuiltinType;
+  if (!v)
+    return v;
+  const BuiltinType::Kind k = builtinKind(ty);
+  const unsigned bits = BuiltinType::integerBits(k);
+  if (BuiltinType::isIntegerKind(k) && bits < 64) {
+    const bool isUnsigned = BuiltinType::isUnsignedKind(k);
+    if (auto *c = std::get_if<int64_t>(&v.Op.V)) {
+      const uint64_t lowMask = (1ULL << bits) - 1;
+      const uint64_t low = static_cast<uint64_t>(*c) & lowMask;
+      if (!isUnsigned && ((low >> (bits - 1)) & 1))
+        return Val::i64(static_cast<int64_t>(low | ~lowMask));
+      return Val::i64(static_cast<int64_t>(low));
+    }
+    return isUnsigned ? B.mask(v, bits, "mask") : B.wrap(v, bits, "wrap");
+  }
+  if (k == BuiltinType::F32) {
+    if (auto *c = std::get_if<double>(&v.Op.V)) {
+      // Beyond the f32 maximum plus half an ulp a value rounds to infinity
+      // (the C++ conversion of such a value is undefined).
+      if (std::fabs(*c) >= 3.4028235677973366e+38)
+        return Val::f64(
+            std::copysign(std::numeric_limits<double>::infinity(), *c));
+      return Val::f64(static_cast<double>(static_cast<float>(*c)));
+    }
+    return B.fround32(v, "f32");
+  }
+  if (k == BuiltinType::F16)
+    return callRuntime(kPaykanRoundF16, {v}, "f16");
   return v;
 }
 
@@ -1402,12 +1491,22 @@ unsigned char ModuleLowering::nativeTypeKind(ast::Type *ty) const {
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty)) {
     switch (bt->getTypeKind()) {
     case ast::BuiltinType::Float:
+    case ast::BuiltinType::F16:
+    case ast::BuiltinType::F32:
       return kNativeKindFloat;
     case ast::BuiltinType::Bool:
       return kNativeKindBool;
     case ast::BuiltinType::Char:
       return kNativeKindChar;
+    case ast::BuiltinType::U64:
+      return kNativeKindUInt; // printed unsigned
     case ast::BuiltinType::Int:
+    case ast::BuiltinType::I8:
+    case ast::BuiltinType::I16:
+    case ast::BuiltinType::I32:
+    case ast::BuiltinType::U8:
+    case ast::BuiltinType::U16:
+    case ast::BuiltinType::U32:
     case ast::BuiltinType::Void:
       break;
     }
@@ -1450,13 +1549,16 @@ Val ModuleLowering::emitValueOptionalEquals(const Val &a, const Val &b) {
   return B.select(same, present, Val::boolean(false), "eq");
 }
 
-Val ModuleLowering::emitOptionalToString(const Val &opt) {
+Val ModuleLowering::emitOptionalToString(const Val &opt, ast::Type *astTy) {
   // A branch, not a select: only one of the two strings is made.
   pir::LocalId tmp = B.addLocal("opt.str", Type::Obj);
   pir::If *s = B.openIf(B.isSome(opt, "opt.has"), true);
   B.enter(*s->Then);
   Val v = B.unwrap(opt, "opt.value");
   const char *format = kPaykanStringFromInt;
+  if (auto *ot = astTy ? ast::dyn_cast<ast::OptionalType>(astTy) : nullptr;
+      ot && builtinKind(ot->getInnerType()) == ast::BuiltinType::U64)
+    format = kPaykanStringFromUint;
   switch (v.Ty) {
   case Type::F64:
     format = kPaykanStringFromFloat;

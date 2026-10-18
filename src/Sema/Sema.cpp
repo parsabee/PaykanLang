@@ -6,8 +6,12 @@
 #include "SemaInternal.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace paykan {
 namespace sema {
@@ -422,7 +426,16 @@ int64_t Sema::fixedElementBytes(const ast::Type *ty) {
     switch (bt->getTypeKind()) {
     case ast::BuiltinType::Int:
     case ast::BuiltinType::Float:
-      return 8;
+    case ast::BuiltinType::I8:
+    case ast::BuiltinType::I16:
+    case ast::BuiltinType::I32:
+    case ast::BuiltinType::U8:
+    case ast::BuiltinType::U16:
+    case ast::BuiltinType::U32:
+    case ast::BuiltinType::U64:
+    case ast::BuiltinType::F16:
+    case ast::BuiltinType::F32:
+      return 8; // every numeric type takes an 8-byte slot
     case ast::BuiltinType::Bool:
     case ast::BuiltinType::Char:
       return 1;
@@ -912,14 +925,16 @@ bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
 }
 
 bool Sema::isTypeNameForVariable(const std::string &name) const {
+  ast::BuiltinType::Kind kind;
   return Ctx.lookupClassType(name) || Ctx.lookupEnumType(name) ||
          Ctx.lookupStructType(name) || ClassTemplates.count(name) ||
          StructTemplates.count(name) ||
          (CurrentTypeParams && CurrentTypeParams->count(name)) ||
          name == names::kObj || name == names::kString ||
-         name == names::kFile || name == names::kTypeInt ||
-         name == names::kTypeBool || name == names::kTypeFloat ||
-         name == names::kTypeChar || name == names::kStdin;
+         name == names::kFile ||
+         (ast::builtinKindOfName(name, kind) &&
+          kind != ast::BuiltinType::Void) ||
+         name == names::kStdin;
 }
 
 // Visit an expression and return its resolved type (nullptr on error).
@@ -930,11 +945,119 @@ ast::Type *Sema::resolveExprType(ast::Expr *expr, ast::Type *expected) {
 
 // -- ExprVisitor
 
-ast::Type *Sema::ExprChecker::visitIntegerLiteral(ast::IntegerLiteral *) {
+bool Sema::ExprChecker::isNumericLiteral(const ast::Expr *e) {
+  if (const auto *u = ast::dyn_cast<ast::UnaryExpr>(e))
+    return u->getOpcode() == ast::UnaryOpcode::Neg &&
+           isNumericLiteral(u->getOperand());
+  return ast::isa<ast::IntegerLiteral>(e) || ast::isa<ast::FloatLiteral>(e);
+}
+
+ast::Type *Sema::ExprChecker::sizedLiteralTarget(const ast::Expr *e,
+                                                 ast::Type *expected) {
+  if (!expected || !isNumericLiteral(e))
+    return nullptr;
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(expected))
+    expected = ot->getInnerType();
+  auto *bt = ast::dyn_cast<ast::BuiltinType>(expected);
+  if (!bt || !bt->isNumeric() || bt->getTypeKind() == ast::BuiltinType::Int ||
+      bt->getTypeKind() == ast::BuiltinType::Float)
+    return nullptr;
+  // A float literal is never an integer.
+  const ast::Expr *lit = e;
+  if (const auto *u = ast::dyn_cast<ast::UnaryExpr>(lit))
+    lit = u->getOperand();
+  if (bt->isInteger() && ast::isa<ast::FloatLiteral>(lit))
+    return nullptr;
+  return bt;
+}
+
+namespace {
+
+/// The range of the integer kind @p k, as [lo, hi].
+void integerRange(ast::BuiltinType::Kind k, int64_t &lo, int64_t &hi) {
+  const unsigned bits = ast::BuiltinType::integerBits(k);
+  if (ast::BuiltinType::isUnsignedKind(k)) {
+    lo = 0;
+    // A literal is at most INT64_MAX; `unsigned` reaches it.
+    hi = bits == 64 ? INT64_MAX : static_cast<int64_t>((1ULL << bits) - 1);
+  } else {
+    lo = bits == 64 ? INT64_MIN : -static_cast<int64_t>(1ULL << (bits - 1));
+    hi =
+        bits == 64 ? INT64_MAX : static_cast<int64_t>((1ULL << (bits - 1)) - 1);
+  }
+}
+
+/// The text of the range of the integer kind @p k for a diagnostic:
+/// `0 to 255`, `-128 to 127`, `0 to 18446744073709551615`.
+std::string integerRangeText(ast::BuiltinType::Kind k) {
+  int64_t lo, hi;
+  integerRange(k, lo, hi);
+  std::string hiText = std::to_string(hi);
+  if (k == ast::BuiltinType::U64)
+    hiText = "18446744073709551615";
+  return std::to_string(lo) + " to " + hiText;
+}
+
+/// The text of a float literal for a diagnostic.
+std::string floatText(double value) {
+  char buf[64];
+  std::snprintf(buf, sizeof(buf), "%g", value);
+  return buf;
+}
+
+/// Whether the finite @p value, rounded to the float kind @p k, stays finite.
+bool floatFits(ast::BuiltinType::Kind k, double value) {
+  if (std::isinf(value) || std::isnan(value))
+    return true; // `inf` and `nan` are not literals; nothing to check
+  switch (k) {
+  case ast::BuiltinType::F32:
+    return std::fabs(value) <= 3.4028235677973366e+38; // the f32 maximum,
+                                                       // plus half an ulp
+  case ast::BuiltinType::F16:
+    return std::fabs(value) < 65520.0; // rounds to the f16 maximum, 65504
+  default:
+    return true;
+  }
+}
+
+} // namespace
+
+ast::Type *Sema::ExprChecker::checkSizedLiteral(ast::Expr *node,
+                                                ast::Type *target,
+                                                bool isInteger,
+                                                int64_t intValue,
+                                                double floatValue) {
+  auto *bt = ast::cast<ast::BuiltinType>(target);
+  const ast::BuiltinType::Kind k = bt->getTypeKind();
+  if (bt->isInteger()) {
+    int64_t lo, hi;
+    integerRange(k, lo, hi);
+    if (intValue < lo || intValue > hi) {
+      S.error(node->getLocation(), "the literal " + std::to_string(intValue) +
+                                       " does not fit in '" + typeName(bt) +
+                                       "' (" + integerRangeText(k) + ")");
+      return nullptr;
+    }
+    return bt;
+  }
+  const double value = isInteger ? static_cast<double>(intValue) : floatValue;
+  if (!floatFits(k, value)) {
+    S.error(node->getLocation(), "the literal " + floatText(value) +
+                                     " does not fit in '" + typeName(bt) + "'");
+    return nullptr;
+  }
+  return bt;
+}
+
+ast::Type *Sema::ExprChecker::visitIntegerLiteral(ast::IntegerLiteral *node) {
+  if (ast::Type *target = std::exchange(S.LiteralExpectation, nullptr))
+    return checkSizedLiteral(node, target, true, node->getValue(), 0.0);
   return S.Ctx.getIntTy();
 }
 
-ast::Type *Sema::ExprChecker::visitFloatLiteral(ast::FloatLiteral *) {
+ast::Type *Sema::ExprChecker::visitFloatLiteral(ast::FloatLiteral *node) {
+  if (ast::Type *target = std::exchange(S.LiteralExpectation, nullptr))
+    return checkSizedLiteral(node, target, false, 0, node->getValue());
   return S.Ctx.getFloatTy();
 }
 
@@ -1063,6 +1186,30 @@ ast::Type *Sema::ExprChecker::visitEnumValueExpr(ast::EnumValueExpr *node) {
 }
 
 ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
+  // `-5` flowing into a sized numeric slot: the negated literal takes the
+  // slot's type when it fits (`-128` fits an `i8`, `-1` no `u8`).
+  if (ast::Type *target = std::exchange(S.LiteralExpectation, nullptr)) {
+    ast::Expr *operand = node->getOperand();
+    if (auto *il = ast::dyn_cast<ast::IntegerLiteral>(operand)) {
+      // The literal's magnitude is at most INT64_MAX, so its negation fits.
+      ast::Type *ty =
+          checkSizedLiteral(node, target, true, -il->getValue(), 0.0);
+      if (!ty)
+        return nullptr;
+      operand->setResolvedType(ty);
+      return ty;
+    }
+    if (auto *fl = ast::dyn_cast<ast::FloatLiteral>(operand)) {
+      ast::Type *ty =
+          checkSizedLiteral(node, target, false, 0, -fl->getValue());
+      if (!ty)
+        return nullptr;
+      operand->setResolvedType(ty);
+      return ty;
+    }
+    // `-(-5)`: the inner negation takes the slot's type.
+    S.LiteralExpectation = target;
+  }
   auto *operandTy = visit(node->getOperand());
   if (!operandTy)
     return nullptr;
@@ -1092,8 +1239,17 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
 }
 
 ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
-  auto *lhsTy = visit(node->getLHS());
-  ast::Type *rhsTy = visit(node->getRHS());
+  // A numeric literal operand takes the other operand's sized type (`x + 1`
+  // with `x: u8` adds two `u8`), so the non-literal operand is typed first.
+  ast::Type *lhsTy = nullptr;
+  ast::Type *rhsTy = nullptr;
+  if (isNumericLiteral(node->getLHS()) && !isNumericLiteral(node->getRHS())) {
+    rhsTy = visit(node->getRHS());
+    lhsTy = visitOperand(node->getLHS(), rhsTy);
+  } else {
+    lhsTy = visit(node->getLHS());
+    rhsTy = visitOperand(node->getRHS(), lhsTy);
+  }
   if (!lhsTy || !rhsTy)
     return nullptr;
 
@@ -1156,6 +1312,25 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
     return nullptr;
   }
 
+  // Two numeric operands have one type; the one promotion is `int` with
+  // `float` (docs/design/sized-types.md).
+  auto *lhsBT = ast::dyn_cast<ast::BuiltinType>(lhsTy);
+  auto *rhsBT = ast::dyn_cast<ast::BuiltinType>(rhsTy);
+  const bool numericPair =
+      lhsBT && rhsBT && lhsBT->isNumeric() && rhsBT->isNumeric();
+  const bool intWithFloat =
+      (lhsTy == S.Ctx.getIntTy() && rhsTy == S.Ctx.getFloatTy()) ||
+      (lhsTy == S.Ctx.getFloatTy() && rhsTy == S.Ctx.getIntTy());
+  if (numericPair && lhsTy != rhsTy && !intWithFloat) {
+    S.error(node->getLocation(),
+            "operator '" + std::string(node->getOpcodeStr()) +
+                "' is not defined for types '" + typeName(lhsTy) + "' and '" +
+                typeName(rhsTy) +
+                "' (the operands must have one type: convert one with '" +
+                typeName(lhsTy) + "(...)' or '" + typeName(rhsTy) + "(...)')");
+    return nullptr;
+  }
+
   // Equality requires compatible types.
   if ((node->getOpcode() == ast::BinaryOpcode::Eq ||
        node->getOpcode() == ast::BinaryOpcode::Ne)) {
@@ -1187,6 +1362,9 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   case ast::BinaryOpcode::Mul:
   case ast::BinaryOpcode::Div:
   case ast::BinaryOpcode::Mod:
+    // One numeric type gives that type; `int` with `float` gives `float`.
+    if (numericPair && lhsTy == rhsTy)
+      return lhsTy;
     if (lhsTy == S.Ctx.getFloatTy() || rhsTy == S.Ctx.getFloatTy())
       return S.Ctx.getFloatTy();
     return S.Ctx.getIntTy();
@@ -1280,6 +1458,12 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   std::vector<ast::Type *> expectedArgs;
   if (known)
     expectedArgs = known->ParamTypes;
+  // `Str<u16>(3)`: the argument of an explicit conversion flows into the
+  // written source type, so a literal takes that sized type.
+  else if (node->hasTypeArgs() && node->getTypeArgs().size() == 1 &&
+           S.isConversionTarget(node->getCalleeName()) &&
+           ast::isa<ast::BuiltinType>(node->getTypeArgs()[0]))
+    expectedArgs = {node->getTypeArgs()[0]};
   // `__super__(...)`: the superclass `__init__`'s parameters (checked below).
   else if (node->getCalleeName() == names::kMethodSuper && S.CurrentClassCtx &&
            S.CurrentClassCtx->ClassType)
@@ -1517,8 +1701,10 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
       mname == names::kMethodToString)
     builtinResult = S.Ctx.getStrTy();
   else if (mname == names::kMethodHash &&
-           (recvTy == S.Ctx.getIntTy() || recvTy == S.Ctx.getBoolTy() ||
-            recvTy == S.Ctx.getCharTy() || ct == S.Ctx.getStrTy()))
+           ((ast::isa<ast::BuiltinType>(recvTy) &&
+             (ast::cast<ast::BuiltinType>(recvTy)->isInteger() ||
+              recvTy == S.Ctx.getBoolTy() || recvTy == S.Ctx.getCharTy())) ||
+            ct == S.Ctx.getStrTy()))
     builtinResult = S.Ctx.getIntTy();
   if (builtinResult) {
     if (node->getNumArguments() != 0) {
@@ -2315,44 +2501,77 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
 // backends inherit.
 
 struct ConversionPair {
-  const char *Target;
-  const char *Source;
-  const char *Spelled; // the rebound callee the lowering dispatches on
+  std::string Target;
+  std::string Source;
+  std::string Spelled; // the rebound callee the lowering dispatches on
   bool Parses;         // a parse of a Str: the result is the optional target
 };
 
 namespace {
 
-// Grouped by target, each group in the order its diagnostics list it.
-const ConversionPair kConversions[] = {
-    {names::kString, names::kTypeInt, names::kConvStrInt, false},
-    {names::kString, names::kTypeFloat, names::kConvStrFloat, false},
-    {names::kString, names::kTypeBool, names::kConvStrBool, false},
-    {names::kString, names::kTypeChar, names::kConvStrChar, false},
-    {names::kTypeInt, names::kString, names::kConvIntStr, true},
-    {names::kTypeInt, names::kTypeFloat, names::kConvIntFloat, false},
-    {names::kTypeInt, names::kTypeBool, names::kConvIntBool, false},
-    {names::kTypeInt, names::kTypeChar, names::kConvIntChar, false},
-    {names::kTypeFloat, names::kString, names::kConvFloatStr, true},
-    {names::kTypeFloat, names::kTypeInt, names::kConvFloatInt, false},
-    {names::kTypeBool, names::kTypeInt, names::kConvBoolInt, false},
-    {names::kTypeBool, names::kString, names::kConvBoolStr, true},
-    {names::kTypeChar, names::kTypeInt, names::kConvCharInt, false},
-};
+/// The conversions, grouped by target, each group in the order its
+/// diagnostics list it: `Str` from every scalar; `int`, `float` and the
+/// sized numeric types from a `Str` (a parse) and from every other numeric
+/// type; `bool` and `char` from `int` only (docs/design/sized-types.md).
+const std::vector<ConversionPair> &conversions() {
+  static const std::vector<ConversionPair> kTable = [] {
+    using ast::BuiltinType;
+    std::vector<ConversionPair> t;
+    auto add = [&](const std::string &target, const std::string &source,
+                   bool parses) {
+      t.push_back({target, source, target + "<" + source + ">", parses});
+    };
+    // The numeric types, in the order the diagnostics list them.
+    std::vector<std::string> numerics;
+    for (BuiltinType::Kind k :
+         {BuiltinType::Int, BuiltinType::Float, BuiltinType::I8,
+          BuiltinType::I16, BuiltinType::I32, BuiltinType::U8, BuiltinType::U16,
+          BuiltinType::U32, BuiltinType::U64, BuiltinType::F16,
+          BuiltinType::F32})
+      numerics.push_back(ast::builtinKindName(k));
+    add(names::kString, names::kTypeInt, false);
+    add(names::kString, names::kTypeFloat, false);
+    add(names::kString, names::kTypeBool, false);
+    add(names::kString, names::kTypeChar, false);
+    for (size_t i = 2; i < numerics.size(); ++i)
+      add(names::kString, numerics[i], false);
+    for (const std::string &target : numerics) {
+      add(target, names::kString, true);
+      for (const std::string &source : numerics)
+        if (source != target)
+          add(target, source, false);
+      // `int` also converts the two non-numeric scalars, as before the sized
+      // types (so its list reads `Str, float, bool, char, i8, ...`).
+      if (target == names::kTypeInt) {
+        ConversionPair boolPair{target, names::kTypeBool,
+                                target + "<" + names::kTypeBool + ">", false};
+        ConversionPair charPair{target, names::kTypeChar,
+                                target + "<" + names::kTypeChar + ">", false};
+        auto at = t.end() - static_cast<long>(numerics.size() - 2);
+        t.insert(at, {boolPair, charPair});
+      }
+    }
+    add(names::kTypeBool, names::kTypeInt, false);
+    add(names::kTypeBool, names::kString, true);
+    add(names::kTypeChar, names::kTypeInt, false);
+    return t;
+  }();
+  return kTable;
+}
 
 /// The specialization set of @p target, for a diagnostic: "int, float, ...".
 std::string specializationList(const std::string &target) {
   std::string list;
-  for (const auto &c : kConversions)
+  for (const auto &c : conversions())
     if (target == c.Target)
-      list += (list.empty() ? "" : ", ") + std::string(c.Source);
+      list += (list.empty() ? "" : ", ") + c.Source;
   return list;
 }
 
 /// The pair `target<source>`, or nullptr when it is not a specialization.
 const ConversionPair *findConversion(const std::string &target,
                                      const std::string &source) {
-  for (const auto &c : kConversions)
+  for (const auto &c : conversions())
     if (target == c.Target && source == c.Source)
       return &c;
   return nullptr;
@@ -2366,19 +2585,25 @@ std::string noSpecializationMessage(const std::string &target,
 }
 
 /// The conversion target of a callee: the target itself (`int`), or the
-/// target of the spelled form (`int<float>`) a checked call carries.
+/// target of the spelled form (`int<float>`) a checked call carries, under
+/// its printed name (`u64` and `i64` are `unsigned` and `int`).
 std::string conversionTargetOf(const std::string &callee) {
-  return callee.substr(0, callee.find('<'));
+  std::string target = callee.substr(0, callee.find('<'));
+  ast::BuiltinType::Kind kind;
+  if (ast::builtinKindOfName(target, kind))
+    return ast::builtinKindName(kind);
+  return target;
 }
 
 } // namespace
 
 bool Sema::isConversionTarget(std::string_view name) {
-  for (const auto &c : kConversions)
-    // A call checked once already carries its spelled form (`int<float>`).
-    if (name == c.Target || name == c.Spelled)
-      return true;
-  return false;
+  // A call checked once already carries its spelled form (`int<float>`).
+  const std::string_view target = name.substr(0, name.find('<'));
+  if (target == names::kString)
+    return true;
+  ast::BuiltinType::Kind kind;
+  return ast::builtinKindOfName(target, kind) && kind != ast::BuiltinType::Void;
 }
 
 bool Sema::isStrConstruction(ast::CallExpr *node,
@@ -3508,7 +3733,8 @@ bool Sema::checkValueMatch(ast::MatchStmt *node, ast::Type *subjectTy) {
         declarePoisoned(CurrentScope, arm->getBinding());
         ok = false;
       }
-      auto *litTy = resolveExprType(arm->getLiteralPattern());
+      // A numeric literal takes the subject's sized type when it fits.
+      auto *litTy = resolveExprType(arm->getLiteralPattern(), subjectTy);
       if (litTy && !typesEqual(litTy, subjectTy)) {
         error(arm->getLocation(), "match arm literal of type '" +
                                       typeName(litTy) +

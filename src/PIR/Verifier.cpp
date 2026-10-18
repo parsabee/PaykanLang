@@ -522,6 +522,49 @@ private:
         result(in, in.CastTo);
         break;
       }
+      case Opcode::Wrap:
+      case Opcode::Mask:
+        if (!arity(in, 1))
+          break;
+        expect(in.Args[0], Type::I64, "operand of wrap / mask");
+        if (in.Slot != 8 && in.Slot != 16 && in.Slot != 32)
+          error(std::string(opcodeName(in.Op)) + " width " +
+                std::to_string(in.Slot) + " is not 8, 16 or 32");
+        result(in, Type::I64);
+        break;
+      case Opcode::UDiv:
+      case Opcode::URem:
+        if (!arity(in, 2))
+          break;
+        expect(in.Args[0], Type::I64, "operand of udiv / urem");
+        expect(in.Args[1], Type::I64, "operand of udiv / urem");
+        result(in, Type::I64);
+        break;
+      case Opcode::UCmp:
+        if (!arity(in, 2))
+          break;
+        expect(in.Args[0], Type::I64, "operand of ucmp");
+        expect(in.Args[1], Type::I64, "operand of ucmp");
+        result(in, Type::Bool);
+        break;
+      case Opcode::UToF:
+        if (!arity(in, 1))
+          break;
+        expect(in.Args[0], Type::I64, "operand of utof");
+        result(in, Type::F64);
+        break;
+      case Opcode::FToU:
+        if (!arity(in, 1))
+          break;
+        expect(in.Args[0], Type::F64, "operand of ftou");
+        result(in, Type::I64);
+        break;
+      case Opcode::FRound32:
+        if (!arity(in, 1))
+          break;
+        expect(in.Args[0], Type::F64, "operand of fround32");
+        result(in, Type::F64);
+        break;
       case Opcode::Call: {
         auto it = MV.Index.Functions.find(in.Callee);
         if (it == MV.Index.Functions.end()) {

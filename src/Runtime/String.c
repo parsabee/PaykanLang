@@ -48,6 +48,12 @@ PaykanString *PaykanString_from_int(int64_t value) {
   return PaykanString_new(buf, n);
 }
 
+PaykanString *PaykanString_from_uint(int64_t value) {
+  char buf[32];
+  int n = snprintf(buf, sizeof(buf), "%llu", (unsigned long long)value);
+  return PaykanString_new(buf, n);
+}
+
 PaykanString *PaykanString_from_float(double value) {
   char buf[64];
   int n = Paykan_format_float(buf, sizeof(buf), value);
@@ -82,6 +88,22 @@ int64_t PaykanString_parse_int(PaykanObject *str, int64_t *out) {
   long long val = strtoll(s->data, &end, 10);
   // The whole string must be consumed (an embedded NUL ends strtoll early)
   // and the value must fit (ERANGE).
+  if (end != s->data + s->len || errno != 0)
+    return 0;
+  *out = (int64_t)val;
+  return 1;
+}
+
+int64_t PaykanString_parse_uint(PaykanObject *str, int64_t *out) {
+  PaykanString *s = (PaykanString *)str;
+  *out = 0;
+  // strtoull accepts a sign and negates: only digits are an unsigned number.
+  if (s->len == 0 || s->data[0] == '-' || s->data[0] == '+' ||
+      string_starts_with_space(s))
+    return 0;
+  char *end;
+  errno = 0;
+  unsigned long long val = strtoull(s->data, &end, 10);
   if (end != s->data + s->len || errno != 0)
     return 0;
   *out = (int64_t)val;

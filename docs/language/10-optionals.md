@@ -42,8 +42,9 @@ fn find(head: Node?, key: int) -> Node? {
 
 - `T?` is written as a suffix and is allowed in every type position: variables, fields,
   parameters, return types, match arms and array element types (`Node?[3]`).
-- Reference types (classes, `Str`) and the primitives `int`, `float`, `bool` and `char` can
-  be optional (see [Optional Primitives](#optional-primitives)). `Enum?`, `void?`, `T??`,
+- Reference types (classes, `Str`) and the primitives `int`, `float`, `bool`, `char` and
+  the sized numeric types (`u8?`, `f32?`, …) can be optional (see [Optional
+  Primitives](#optional-primitives)). `Enum?`, `void?`, `T??`,
   optional tuples and optional arrays (`int[3]?`) are rejected.
 - `None` is the absent value. A `T` converts to `T?` implicitly; a `T?` **never** converts back
   to `T` — unwrap it with `match`.

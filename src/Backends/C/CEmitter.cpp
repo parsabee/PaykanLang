@@ -117,6 +117,8 @@ const RuntimeProto kRuntimeProtos[] = {
     {names::kPaykanPanicDivByZero, kVoid, {}},
     {names::kPaykanPanicDivOverflow, kVoid, {}},
     {names::kPaykanPanicFloatToInt, kVoid, {kDouble}},
+    {names::kPaykanPanicFloatToType, kVoid, {kDouble, kConstCharPtr, kInt64}},
+    {names::kPaykanRoundF16, kDouble, {kDouble}},
     {names::kPaykanPanicIntToChar, kVoid, {kInt64}},
     {names::kPaykanPanicIndex, kVoid, {kInt64, kInt64}},
     {names::kPaykanStringNew, kRtStrPtr, {kConstCharPtr, kInt64}},
@@ -124,10 +126,12 @@ const RuntimeProto kRuntimeProtos[] = {
     {names::kPaykanStringConcat, kRtObjPtr, {kRtObjPtr, kRtObjPtr}},
     {names::kPaykanStringCharAt, kInt8, {kRtObjPtr, kInt64}},
     {names::kPaykanStringFromInt, kRtStrPtr, {kInt64}},
+    {names::kPaykanStringFromUint, kRtStrPtr, {kInt64}},
     {names::kPaykanStringFromFloat, kRtStrPtr, {kDouble}},
     {names::kPaykanStringFromBool, kRtStrPtr, {kInt64}},
     {names::kPaykanStringFromChar, kRtStrPtr, {kInt8}},
     {names::kPaykanStringParseInt, kInt64, {kRtObjPtr, kInt64Ptr}},
+    {names::kPaykanStringParseUint, kInt64, {kRtObjPtr, kInt64Ptr}},
     {names::kPaykanStringParseFloat, kInt64, {kRtObjPtr, kDoublePtr}},
     {names::kPaykanStringParseBool, kInt64, {kRtObjPtr, kInt64Ptr}},
     {names::kPaykanStringEquals, kInt64, {kRtObjPtr, kRtBoxPtr}},
@@ -1268,6 +1272,50 @@ class Emitter {
       // so the conversion is always defined.
       pre = resultPrefix(i);
       line(stmt(pre + cast(kInt64) + operand(i.Args[0])));
+      return;
+    case Opcode::Wrap:
+    case Opcode::Mask: {
+      // The low bits, sign-extended through the signed C type of the width
+      // (the conversion of an out-of-range value to a signed type is
+      // implementation-defined in C11, and two's complement everywhere this
+      // runs) or zero-extended through the unsigned one.
+      pre = resultPrefix(i);
+      const bool signExtend = i.Op == Opcode::Wrap;
+      const char *narrow = i.Slot == 8    ? (signExtend ? kInt8 : kUint8)
+                           : i.Slot == 16 ? (signExtend ? kInt16 : kUint16)
+                                          : (signExtend ? kInt32 : kUint32);
+      line(stmt(pre + cast(kInt64) + cast(narrow) + operand(i.Args[0])));
+      return;
+    }
+    case Opcode::UDiv:
+    case Opcode::URem: {
+      pre = resultPrefix(i);
+      std::string a = operand(i.Args[0]), b = operand(i.Args[1]);
+      line(stmt(
+          pre + cast(kInt64) +
+          paren(binop(cast(kUint64) + a, i.Op == Opcode::UDiv ? kOpDiv : kOpRem,
+                      cast(kUint64) + b))));
+      return;
+    }
+    case Opcode::UCmp: {
+      pre = resultPrefix(i);
+      std::string a = operand(i.Args[0]), b = operand(i.Args[1]);
+      line(stmt(pre + paren(binop(cast(kUint64) + a, cmpOperator(i.Pred),
+                                  cast(kUint64) + b))));
+      return;
+    }
+    case Opcode::UToF:
+      pre = resultPrefix(i);
+      line(stmt(pre + cast(kDouble) + cast(kUint64) + operand(i.Args[0])));
+      return;
+    case Opcode::FToU:
+      // Truncates toward zero; the lowering guards the range [0, 2^64).
+      pre = resultPrefix(i);
+      line(stmt(pre + cast(kInt64) + cast(kUint64) + operand(i.Args[0])));
+      return;
+    case Opcode::FRound32:
+      pre = resultPrefix(i);
+      line(stmt(pre + cast(kDouble) + cast(kFloat) + operand(i.Args[0])));
       return;
     case Opcode::Cast: {
       pre = resultPrefix(i);

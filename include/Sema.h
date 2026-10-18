@@ -492,15 +492,42 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     }
 
     /// visit(@p e) where the value flows into a slot of type @p expected
-    /// (nullptr: unknown).  Only an array or tuple literal uses it: its
+    /// (nullptr: unknown).  An array or tuple literal uses it: its
     /// elements are visited against the slot's element types, and an array
     /// literal whose elements disagree (`[("a", 1), ("b", n)]` with `n:
-    /// int?`) takes the slot's element type when every element fits it.
+    /// int?`) takes the slot's element type when every element fits it.  A
+    /// numeric literal (`5`, `-5`, `1.5`) flowing into a slot of a sized
+    /// numeric type takes that type when it fits it
+    /// (docs/design/sized-types.md).
     ast::Type *visitExpecting(ast::Expr *e, ast::Type *expected) {
       if (expected && (ast::isa<ast::ArrayLiteralExpr>(e) ||
                        ast::isa<ast::TupleLiteralExpr>(e)))
         S.LiteralExpectation = expected;
+      else if (ast::Type *sized = sizedLiteralTarget(e, expected))
+        S.LiteralExpectation = sized;
       return visit(e);
+    }
+
+    /// Whether @p e is an integer or float literal, or the negation of one.
+    static bool isNumericLiteral(const ast::Expr *e);
+    /// The sized numeric type a literal @p e flowing into a slot of type
+    /// @p expected (or a `T?` of it) takes, nullptr when @p expected is not
+    /// one or @p e is not a numeric literal.  `int` and `float` slots leave
+    /// a literal its own type.
+    static ast::Type *sizedLiteralTarget(const ast::Expr *e,
+                                         ast::Type *expected);
+    /// The type of the literal @p node with the value @p value flowing into
+    /// the sized type @p target: @p target when the value fits it, else an
+    /// error (`the literal 256 does not fit in 'u8' (0 to 255)`).
+    ast::Type *checkSizedLiteral(ast::Expr *node, ast::Type *target,
+                                 bool isInteger, int64_t intValue,
+                                 double floatValue);
+    /// visit(@p operand) of a binary operator whose other operand has type
+    /// @p otherTy: a numeric literal takes the other operand's sized type.
+    ast::Type *visitOperand(ast::Expr *operand, ast::Type *otherTy) {
+      if (otherTy && isNumericLiteral(operand))
+        return visitExpecting(operand, otherTy);
+      return visit(operand);
     }
 
     /// A literal flowing into a fixed-size array slot: exactly its length

@@ -41,6 +41,11 @@ inline constexpr const char *kInt8 = "int8_t";     ///< <stdint.h>
 inline constexpr const char *kUint8 = "uint8_t";   ///< <stdint.h>
 inline constexpr const char *kInt64 = "int64_t";   ///< <stdint.h>
 inline constexpr const char *kUint64 = "uint64_t"; ///< <stdint.h>
+inline constexpr const char *kInt16 = "int16_t";   ///< <stdint.h>
+inline constexpr const char *kUint16 = "uint16_t"; ///< <stdint.h>
+inline constexpr const char *kInt32 = "int32_t";   ///< <stdint.h>
+inline constexpr const char *kUint32 = "uint32_t"; ///< <stdint.h>
+inline constexpr const char *kFloat = "float";
 inline constexpr const char *kIntptr = "intptr_t"; ///< <stdint.h>
 inline constexpr const char *kSize = "size_t";     ///< <stdlib.h>
 
