@@ -99,9 +99,8 @@ a list of `Show` elements as `[a, b, c]`.
 
 ### `LinkedList<T>`
 
-A doubly linked list with a sentinel node. The list is circular through the sentinel: the
-sentinel's next node is the first element and its previous node is the last, so both
-ends are O(1) to reach, add to and remove from. `contains` and `remove` walk the list.
+A doubly linked list: both ends are O(1) to reach, add to and remove from. `contains`
+and `remove` walk the list.
 
 | Method | Description |
 |--------|-------------|
@@ -114,9 +113,10 @@ ends are O(1) to reach, add to and remove from. `contains` and `remove` walk the
 | `clear()` | Remove every element |
 | `toList()` | The elements from first to last, in a new `List<T>` |
 
-The nodes link to each other by index, in buffers the list owns, not by reference.
-Neighbours that held references to each other would form reference cycles, which
-[reference counting never frees](08-memory-model.md#reference-cycles).
+Each node owns the next one and holds the previous one as a
+[`weak` reference](08-memory-model.md#weak-references), so two neighbours form no
+reference cycle and dropping the list frees every node. `pushFront` and `pushBack` take
+the element by value (an object is then shared with the list), like `HashMap.put`.
 
 ### `Stack<T>` and `Queue<T>`
 

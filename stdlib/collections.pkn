@@ -1,7 +1,7 @@
 // ::collections: the standard containers.
 //
 //   List<T>                  a growable array
-//   LinkedList<T>            a doubly linked list with a sentinel node
+//   LinkedList<T>            a doubly linked list
 //   Stack<T>, Queue<T>       last-in-first-out and first-in-first-out,
 //                            on a LinkedList
 //   HashMap<K, V>, HashSet<K>
@@ -194,146 +194,166 @@ fn listToString<T: Show>(xs: view List<T>) -> Str {
 
 // -- LinkedList ---------------------------------------------------------------
 
-// A doubly linked list, circular through a sentinel node: the sentinel's
-// next node is the first element's and its previous node the last
-// element's, so both ends are O(1) to reach, add to and remove from, and
-// an empty list is the sentinel linked to itself.
-//
-// The nodes are kept in buffers and link to each other by index: node 0 is
-// the sentinel, and node k's value, next and previous nodes are slot k of
-// `__values`, `__next` and `__prev`.  Linking objects to each other would
-// make every pair of neighbours a reference cycle, which reference counting
-// never frees.  Removing a node moves the last node into its slot, so the
-// buffers hold exactly the sentinel and the elements.
+// A node of a LinkedList: its value, the next node, which the node owns (the
+// list owns the chain through its head), and the previous node as a `weak`
+// back link, so two neighbours form no reference cycle and dropping the
+// list frees every node.
+class __Node<T> {
+  value: T;
+  next: __Node<T>?;
+  weak prev: __Node<T>?;
+}
+
+// A doubly linked list: both ends are O(1) to reach, add to and remove from.
+// The head owns the chain of nodes through their `next` links; the tail is a
+// weak reference, kept alive by the chain.
 class LinkedList<T> {
-  __values: memory::Buffer<T>; // slot 0, the sentinel's, is never set
-  __next: memory::Buffer<unsigned>;
-  __prev: memory::Buffer<unsigned>;
+  __head: __Node<T>?;
+  weak __tail: __Node<T>?;
+  __len: unsigned;
 }
 
 impl LinkedList<T> {
   // An empty list.
   fn __init__() {
-    self.__values = memory::Buffer<T>(1);
-    self.__next = memory::Buffer<unsigned>(1); // the sentinel links to itself
-    self.__prev = memory::Buffer<unsigned>(1);
+    self.__head = None;
+    self.__tail = None;
+    self.__len = 0;
   }
 
   // The number of elements.
-  view fn len() -> unsigned { return self.__next.len() - 1; }
+  view fn len() -> unsigned { return self.__len; }
 
   // True when the list has no elements.
-  view fn isEmpty() -> bool { return self.__next.len() == 1; }
+  view fn isEmpty() -> bool { return self.__len == 0; }
 
   // Add `v` before the first element.
-  fn pushFront(v: view T) { self.__linkAfter(0, v); }
+  fn pushFront(v: T) {
+    n = __Node<T>(v, self.__head, None);
+    match self.__head {
+      h: __Node<T> { h.prev = n; }
+      None { self.__tail = n; }
+    }
+    self.__head = n;
+    self.__len = self.__len + 1;
+  }
 
   // Add `v` after the last element.
-  fn pushBack(v: view T) { self.__linkAfter(self.__prev.copy(0), v); }
+  fn pushBack(v: T) {
+    match self.__tail {
+      t: __Node<T> {
+        n = __Node<T>(v, None, t);
+        t.next = n;
+        self.__tail = n;
+        self.__len = self.__len + 1;
+      }
+      None { self.pushFront(v); }
+    }
+  }
 
   // Remove and return the first element.
   fn popFront() -> T {
-    self.__nonEmpty("popFront");
-    return self.__unlink(self.__next.copy(0));
+    match self.__head {
+      h: __Node<T> {
+        self.__unlink(h);
+        return h.value;
+      }
+      None { return __fail<T>("popFront on an empty LinkedList"); }
+    }
   }
 
   // Remove and return the last element.
   fn popBack() -> T {
-    self.__nonEmpty("popBack");
-    return self.__unlink(self.__prev.copy(0));
+    match self.__tail {
+      t: __Node<T> {
+        self.__unlink(t);
+        return t.value;
+      }
+      None { return __fail<T>("popBack on an empty LinkedList"); }
+    }
   }
 
   // The first element.
   view fn front() -> T {
-    self.__nonEmpty("front");
-    return self.__values.copy(self.__next.copy(0));
+    match self.__head {
+      h: __Node<T> { return h.value; }
+      None { return __fail<T>("front on an empty LinkedList"); }
+    }
   }
 
   // The last element.
   view fn back() -> T {
-    self.__nonEmpty("back");
-    return self.__values.copy(self.__prev.copy(0));
+    match self.__tail {
+      t: __Node<T> { return t.value; }
+      None { return __fail<T>("back on an empty LinkedList"); }
+    }
   }
 
   // True when some element == v.
-  view fn contains(v: view T) -> bool { return self.__find(v) != 0; }
+  view fn contains(v: view T) -> bool { return self.__find(v) != None; }
 
   // Remove the first element == v; True if there was one.
   fn remove(v: view T) -> bool {
-    k: unsigned = self.__find(v);
-    if (k == 0) { return False; }
-    self.__unlink(k);
-    return True;
+    match self.__find(v) {
+      n: __Node<T> {
+        self.__unlink(n);
+        return True;
+      }
+      None { return False; }
+    }
   }
 
   // Remove every element.
   fn clear() {
-    n: unsigned = self.len();
-    self.__values.shrink(n);
-    self.__next.shrink(n);
-    self.__prev.shrink(n);
-    self.__next.set(0, 0);
-    self.__prev.set(0, 0);
+    self.__head = None;
+    self.__tail = None;
+    self.__len = 0;
   }
 
   // The elements from first to last, in a new list.
   view fn toList() -> List<T> {
     out: List<T> = List<T>();
-    k: unsigned = self.__next.copy(0);
-    while (k != 0) {
-      out.push(self.__values.get(k));
-      k = self.__next.copy(k);
+    cur: __Node<T>? = self.__head;
+    while (True) {
+      match cur {
+        n: __Node<T> {
+          out.push(n.value);
+          cur = n.next;
+        }
+        None { return out; }
+      }
     }
     return out;
   }
 
-  // A new node holding `v`, linked in after node `at`.
-  fn __linkAfter(at: unsigned, v: view T) {
-    k: unsigned = self.__next.len();
-    after: unsigned = self.__next.copy(at);
-    self.__values.push(v);
-    self.__next.push(after);
-    self.__prev.push(at);
-    self.__next.set(at, k);
-    self.__prev.set(after, k);
-  }
-
-  // Unlink node `k` (not the sentinel) and return its value.
-  fn __unlink(k: unsigned) -> T {
-    v: T = self.__values.copy(k);
-    p: unsigned = self.__prev.copy(k);
-    n: unsigned = self.__next.copy(k);
-    self.__next.set(p, n);
-    self.__prev.set(n, p);
-    // Fill the hole with the last node, and point its neighbours at it.
-    last: unsigned = self.__next.len() - 1;
-    if (k != last) {
-      self.__values.swap(k, last);
-      lp: unsigned = self.__prev.copy(last);
-      ln: unsigned = self.__next.copy(last);
-      self.__prev.set(k, lp);
-      self.__next.set(k, ln);
-      self.__next.set(lp, k);
-      self.__prev.set(ln, k);
+  // Take node `n` out of the chain.
+  fn __unlink(n: __Node<T>) {
+    match n.prev {
+      p: __Node<T> { p.next = n.next; }
+      None { self.__head = n.next; }
     }
-    self.__values.shrink(1);
-    self.__next.shrink(1);
-    self.__prev.shrink(1);
-    return v;
-  }
-
-  // The first node whose value == v, or 0 (the sentinel).
-  view fn __find(v: view T) -> unsigned {
-    k: unsigned = self.__next.copy(0);
-    while (k != 0) {
-      if (self.__values.get(k) == v) { return k; }
-      k = self.__next.copy(k);
+    match n.next {
+      x: __Node<T> { x.prev = n.prev; }
+      None { self.__tail = n.prev; }
     }
-    return 0;
+    n.next = None;
+    n.prev = None;
+    self.__len = self.__len - 1;
   }
 
-  view fn __nonEmpty(what: view Str) {
-    if (self.__next.len() == 1) { __panic(what + " on an empty LinkedList"); }
+  // The first node whose value == v, if any.
+  view fn __find(v: view T) -> __Node<T>? {
+    cur: __Node<T>? = self.__head;
+    while (True) {
+      match cur {
+        n: __Node<T> {
+          if (n.value == v) { return n; }
+          cur = n.next;
+        }
+        None { return None; }
+      }
+    }
+    return None;
   }
 }
 
@@ -352,7 +372,7 @@ impl Stack<T> {
   view fn isEmpty() -> bool { return self.__list.isEmpty(); }
 
   // Put `v` on top.
-  fn push(v: view T) { self.__list.pushFront(v); }
+  fn push(v: T) { self.__list.pushFront(v); }
 
   // Remove and return the top element.
   fn pop() -> T {
@@ -386,7 +406,7 @@ impl Queue<T> {
   view fn isEmpty() -> bool { return self.__list.isEmpty(); }
 
   // Add `v` at the back.
-  fn enqueue(v: view T) { self.__list.pushBack(v); }
+  fn enqueue(v: T) { self.__list.pushBack(v); }
 
   // Remove and return the front element.
   fn dequeue() -> T {

@@ -18,7 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Buffer` natives take and return `unsigned`), `HashMap`'s bucket index is the hash's
   bits read as an `unsigned` modulo the bucket count, and the containers hold sized
   elements and keys (`List<u8>`, `HashMap<u32, Str>`, `Box<f32>`, a
-  `MinPriorityQueue<f16>`), with a stdlib test and a docs example.
+  `MinPriorityQueue<f16>`), with a stdlib test and a docs example.  `LinkedList<T>` is
+  made of node objects again: each node owns the next and holds the previous one as a
+  `weak` reference, instead of the index-linked buffers that worked around reference
+  cycles; `pushFront`, `pushBack`, `Stack.push` and `Queue.enqueue` take the element by
+  value, like `HashMap.put`.
 - Sized numeric types (docs/language/01-language-basics.md, "Sized numeric types";
   docs/design/sized-types.md): `i8`, `i16`, `i32`, `u8`, `u16`, `u32`, `unsigned`, `f16`
   and `f32`, with `i64`, `u64` and `f64` as other spellings of `int`, `unsigned` and
@@ -140,8 +144,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inferred lambda parameter types, capture by reference.
 
 - The standard library ships with the compiler (docs/language/13-standard-library.md), in
-  `stdlib/`: `::collections` has `List<T>`, `LinkedList<T>` (doubly linked and circular
-  through a sentinel node, its nodes linked by index so no reference cycles form),
+  `stdlib/`: `::collections` has `List<T>`, `LinkedList<T>` (doubly linked, each node
+  holding the previous one as a `weak` reference so no reference cycles form),
   `Stack<T>` and `Queue<T>` (on a `LinkedList<T>`), `HashMap<K: Hashable, V>` and
   `HashSet<K: Hashable>` (separate chaining), and `MinPriorityQueue<T>` and
   `MaxPriorityQueue<T>` (binary heaps of elements pushed with an `int` priority, equal
