@@ -16,7 +16,7 @@ fn main() -> int {
   l.pushBack("d");
   println(show(l) + " front=" + l.front() + " back=" + l.back());
   println(l.popFront() + l.popBack() + " " + show(l));
-  // Removing from the middle moves the last node into the hole.
+  // Removing from the middle relinks the neighbours.
   l.pushFront("z");
   l.pushBack("y");
   println(show(l));
