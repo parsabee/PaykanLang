@@ -126,7 +126,7 @@ TEST(Lowering, StringTemporaryPassedToBuiltinIsDestroyedAfterTheCall) {
   std::string m = function(l.Text, "main");
   size_t newStr = m.find("call @$rt.PaykanString_new(");
   size_t println = m.find("call @$rt.Paykan_println(");
-  size_t destroy = m.find("call @$rt.PaykanString_destroy(");
+  size_t destroy = m.find("call @$rt.Paykan_dispose(");
   ASSERT_NE(newStr, std::string::npos) << m;
   ASSERT_NE(println, std::string::npos) << m;
   ASSERT_NE(destroy, std::string::npos) << m;
@@ -147,7 +147,7 @@ TEST(Lowering, ConcatReleasesOwnedOperandsAndTracksTheResult) {
   std::string m = function(l.Text, "main");
   // Literal and Str<int> temporaries are destroyed after the concat; the
   // concat result is boxed into `s` and released at scope exit.
-  EXPECT_EQ(count(m, "call @$rt.PaykanString_destroy("), 2u) << m;
+  EXPECT_EQ(count(m, "call @$rt.Paykan_dispose("), 2u) << m;
   size_t concat = m.find("call @$rt.PaykanString_concat(");
   size_t box = m.find(" = box ");
   ASSERT_NE(concat, std::string::npos) << m;
@@ -501,11 +501,12 @@ TEST(Lowering, ClassItemCarriesFlattenedLayoutAndVTable) {
   // __super__ passes a +1 box of the argument.
   std::string init2 = function(t, "Derived.__init__");
   EXPECT_NE(init2.find("call @Base.__init__("), std::string::npos) << init2;
-  // The destructor releases the ref-typed field and frees the struct.
+  // The destructor releases the ref-typed field; the runtime frees the
+  // struct after it (docs/pir.md §5).
   std::string dtor = function(t, "Derived.destroy");
   EXPECT_NE(dtor.find("field.load %"), std::string::npos) << dtor;
   EXPECT_EQ(count(dtor, "release"), 1u) << dtor;
-  EXPECT_NE(dtor.find("free %"), std::string::npos) << dtor;
+  EXPECT_EQ(dtor.find("free %"), std::string::npos) << dtor;
   // Virtual dispatch names the class and the slot.
   std::string m = function(t, "main");
   EXPECT_NE(m.find("vcall %"), std::string::npos) << m;
@@ -1222,7 +1223,7 @@ TEST(Lowering, PrintingAnOptionalValueFormatsIt) {
   EXPECT_NE(m.find("call @$rt.PaykanString_from_int("), std::string::npos) << m;
   EXPECT_NE(m.find("call @$rt.PaykanString_from_bool("), std::string::npos)
       << m;
-  EXPECT_EQ(count(m, "call @$rt.PaykanString_destroy("), 2u) << m;
+  EXPECT_EQ(count(m, "call @$rt.Paykan_dispose("), 2u) << m;
   EXPECT_EQ(m.find("box"), std::string::npos) << m;
   EXPECT_EQ(m.find("PaykanObject_None"), std::string::npos) << m;
 }
@@ -1490,7 +1491,7 @@ TEST(Lowering, StringLiteralUsedAsAnObjectIsAStr) {
   EXPECT_NE(m.find("vcall %str."), std::string::npos) << m; // .len()
   // The subscript's and the receiver's Strs are destroyed after their use;
   // the bound one is boxed into `v` (released at scope exit).
-  EXPECT_EQ(count(m, "call @$rt.PaykanString_destroy(%str."), 2u) << m;
+  EXPECT_EQ(count(m, "call @$rt.Paykan_dispose(%str."), 2u) << m;
   EXPECT_NE(m.find("= box %str."), std::string::npos) << m;
 }
 

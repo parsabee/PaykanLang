@@ -100,7 +100,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     Inout,
     /// A variable of an enclosing function, captured by copy by a lambda
     /// (docs/language/15-function-types.md): read-only inside it.
-    Captured
+    Captured,
+    /// A `weak` local (docs/language/08-memory-model.md): it holds a weak
+    /// reference, so no `inout` may name it.
+    Weak
   };
 
   /// A single lexical scope. Each scope has its own local bindings and a
@@ -674,6 +677,7 @@ public:
       struct FieldInfo {
         std::string FieldName;
         std::string TypeName;
+        bool Weak = false; // declared `weak` (a class field only)
         bool operator==(const FieldInfo &) const = default;
       };
       struct MethodInfo {
@@ -820,6 +824,11 @@ private:
   /// The rules of the local borrow @p node (`x: view = e;`, `x: inout =
   /// k;`), just declared in the current scope: records its kind.
   bool checkLocalBorrow(const ast::VarDecl *node);
+  /// Whether @p ty may be the type of a `weak` declaration: `T?` of a
+  /// class `T` (docs/language/08-memory-model.md); an error names @p what
+  /// otherwise.
+  bool checkWeakType(ast::Type *ty, ast::SourceLocation loc,
+                     const std::string &what);
   /// Why the place @p place cannot be @p use ("passed to 'inout' parameter
   /// 'n'", "named by 'inout' local 'x'"): an array element (not yet), a
   /// string's character, `self`, a `let` local or a `view`; "" when it can.

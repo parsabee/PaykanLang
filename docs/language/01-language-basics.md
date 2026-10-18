@@ -341,6 +341,21 @@ part of its value, so those of a `let` array cannot be assigned. A `let` variabl
 plain or `view` one. Like any variable, an inner block may declare its own variable with the
 same name.
 
+A variable declared with `weak` refers to an object without keeping it alive. Its type is
+`T?` for a class `T`, inferred from the initializer when left off, and it reads as `None`
+once the object is gone:
+
+```pkn
+p = Point(1, 2);
+weak w: Point? = p;      // p's object, while something holds it
+weak u = p;              // inferred Point?
+weak e: Point?;          // None until assigned
+```
+
+`weak` also declares a class field (`weak parent: Node?;`). See
+[`08-memory-model.md`](08-memory-model.md#weak-references) for what a weak reference is for
+and how it is read.
+
 ### Local borrows
 
 A local can be declared with a mode, `view` or `inout`, written where the type goes, as for

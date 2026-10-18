@@ -52,13 +52,13 @@ TEST(FileNew, AllocatesWithNullHandle) {
   PaykanFile *f = PaykanFile_new();
   ASSERT_NE(f, nullptr);
   EXPECT_EQ(f->handle, nullptr);
-  PaykanFile_destroy((PaykanObject *)f);
+  Paykan_dispose((PaykanObject *)f);
 }
 
 TEST(FileNew, VtableIsFileVtable) {
   PaykanFile *f = PaykanFile_new();
   EXPECT_EQ((void *)f->vtable, (void *)&PaykanFile_vtable);
-  PaykanFile_destroy((PaykanObject *)f);
+  Paykan_dispose((PaykanObject *)f);
 }
 
 // -- PaykanFile_destroy
@@ -70,14 +70,14 @@ TEST(FileDestroy, ClosesOpenHandle) {
   PaykanFile *f = PaykanFile_new();
   f->handle = fopen(path.c_str(), "r");
   ASSERT_NE(f->handle, nullptr);
-  PaykanFile_destroy((PaykanObject *)f); // must not crash
+  Paykan_dispose((PaykanObject *)f); // must not crash
   std::remove(path.c_str());
 }
 
 TEST(FileDestroy, NullHandleIsHarmless) {
   PaykanFile *f = PaykanFile_new();
   f->handle = nullptr;
-  PaykanFile_destroy((PaykanObject *)f); // must not crash
+  Paykan_dispose((PaykanObject *)f); // must not crash
 }
 
 // -- PaykanFile_toString
@@ -89,7 +89,7 @@ TEST(FileToString, ContainsFilePrefix) {
   ASSERT_NE(s, nullptr);
   EXPECT_NE(std::string(s->data).find("File@"), std::string::npos);
   Paykan_release(shared);
-  PaykanFile_destroy((PaykanObject *)f);
+  Paykan_dispose((PaykanObject *)f);
 }
 
 // -- PaykanFile_equals
@@ -99,7 +99,7 @@ TEST(FileEquals, SameObjectIsEqual) {
   EXPECT_EQ(
       paykanTestEquals(PaykanFile_equals, (PaykanObject *)f, (PaykanObject *)f),
       1);
-  PaykanFile_destroy((PaykanObject *)f);
+  Paykan_dispose((PaykanObject *)f);
 }
 
 TEST(FileEquals, DifferentObjectsAreNotEqual) {
@@ -108,8 +108,8 @@ TEST(FileEquals, DifferentObjectsAreNotEqual) {
   EXPECT_EQ(
       paykanTestEquals(PaykanFile_equals, (PaykanObject *)a, (PaykanObject *)b),
       0);
-  PaykanFile_destroy((PaykanObject *)a);
-  PaykanFile_destroy((PaykanObject *)b);
+  Paykan_dispose((PaykanObject *)a);
+  Paykan_dispose((PaykanObject *)b);
 }
 
 // -- PaykanFile_open
@@ -129,8 +129,8 @@ TEST(FileOpen, SuccessReturnsFile) {
   EXPECT_NE(((PaykanFile *)obj)->handle, nullptr);
 
   Paykan_release(shared);
-  PaykanString_destroy(pathStr);
-  PaykanString_destroy(modeStr);
+  Paykan_dispose((PaykanObject *)pathStr);
+  Paykan_dispose((PaykanObject *)modeStr);
   std::remove(path.c_str());
 }
 
@@ -147,8 +147,8 @@ TEST(FileOpen, FailureReturnsError) {
   EXPECT_EQ(obj->vtable, PaykanError_vtable);
 
   Paykan_release(shared);
-  PaykanString_destroy(pathStr);
-  PaykanString_destroy(modeStr);
+  Paykan_dispose((PaykanObject *)pathStr);
+  Paykan_dispose((PaykanObject *)modeStr);
 }
 
 TEST(FileOpen, OpenForWrite) {
@@ -164,8 +164,8 @@ TEST(FileOpen, OpenForWrite) {
   EXPECT_NE(obj, &PaykanObject_None);
 
   Paykan_release(shared);
-  PaykanString_destroy(pathStr);
-  PaykanString_destroy(modeStr);
+  Paykan_dispose((PaykanObject *)pathStr);
+  Paykan_dispose((PaykanObject *)modeStr);
   std::remove(path);
 }
 
@@ -186,11 +186,11 @@ TEST(FileWrite, WritesContentToFile) {
 
   PaykanObject *content = strObj("hello paykan\n");
   PaykanFile_write(fObj, content);
-  PaykanString_destroy(content);
+  Paykan_dispose((PaykanObject *)content);
 
   Paykan_release(fShared); // closes handle via destroy
-  PaykanString_destroy(pathStr);
-  PaykanString_destroy(modeStr);
+  Paykan_dispose((PaykanObject *)pathStr);
+  Paykan_dispose((PaykanObject *)modeStr);
 
   // Read back and verify.
   FILE *fp = fopen(path, "r");
@@ -216,11 +216,11 @@ TEST(FileWrite, EmptyStringIsHarmless) {
 
   PaykanObject *empty = strObj("");
   PaykanFile_write(fObj, empty); // must not crash
-  PaykanString_destroy(empty);
+  Paykan_dispose((PaykanObject *)empty);
 
   Paykan_release(fShared);
-  PaykanString_destroy(pathStr);
-  PaykanString_destroy(modeStr);
+  Paykan_dispose((PaykanObject *)pathStr);
+  Paykan_dispose((PaykanObject *)modeStr);
   std::remove(path);
 }
 
@@ -242,8 +242,8 @@ TEST(FileReadln, ReadsSingleLine) {
   Paykan_release(lineShared);
 
   Paykan_release(fShared);
-  PaykanString_destroy(pathStr);
-  PaykanString_destroy(modeStr);
+  Paykan_dispose((PaykanObject *)pathStr);
+  Paykan_dispose((PaykanObject *)modeStr);
   std::remove(path.c_str());
 }
 
@@ -266,8 +266,8 @@ TEST(FileReadln, ReadsMultipleLines) {
   }
 
   Paykan_release(fShared);
-  PaykanString_destroy(pathStr);
-  PaykanString_destroy(modeStr);
+  Paykan_dispose((PaykanObject *)pathStr);
+  Paykan_dispose((PaykanObject *)modeStr);
   std::remove(path.c_str());
 }
 
@@ -287,8 +287,8 @@ TEST(FileReadln, ReturnsNoneAtEOF) {
   Paykan_release(ls);
 
   Paykan_release(fShared);
-  PaykanString_destroy(pathStr);
-  PaykanString_destroy(modeStr);
+  Paykan_dispose((PaykanObject *)pathStr);
+  Paykan_dispose((PaykanObject *)modeStr);
   std::remove(path.c_str());
 }
 
@@ -308,8 +308,8 @@ TEST(FileReadln, LineWithoutTrailingNewline) {
   Paykan_release(ls);
 
   Paykan_release(fShared);
-  PaykanString_destroy(pathStr);
-  PaykanString_destroy(modeStr);
+  Paykan_dispose((PaykanObject *)pathStr);
+  Paykan_dispose((PaykanObject *)modeStr);
   std::remove(path.c_str());
 }
 
@@ -333,8 +333,8 @@ TEST(FileReadln, LongLineTriggersBufferGrowth) {
   Paykan_release(ls);
 
   Paykan_release(fShared);
-  PaykanString_destroy(pathStr);
-  PaykanString_destroy(modeStr);
+  Paykan_dispose((PaykanObject *)pathStr);
+  Paykan_dispose((PaykanObject *)modeStr);
   std::remove(path.c_str());
 }
 
@@ -362,8 +362,8 @@ TEST(FileRoundTrip, WriteAndReadBack) {
     PaykanString_destroy(l2);
 
     Paykan_release(fShared);
-    PaykanString_destroy(pathStr);
-    PaykanString_destroy(modeStr);
+    Paykan_dispose((PaykanObject *)pathStr);
+    Paykan_dispose((PaykanObject *)modeStr);
   }
 
   // Read them back.
@@ -385,8 +385,8 @@ TEST(FileRoundTrip, WriteAndReadBack) {
     Paykan_release(ls2);
 
     Paykan_release(fShared);
-    PaykanString_destroy(pathStr);
-    PaykanString_destroy(modeStr);
+    Paykan_dispose((PaykanObject *)pathStr);
+    Paykan_dispose((PaykanObject *)modeStr);
   }
 
   std::remove(path);
@@ -408,8 +408,8 @@ TEST(FileReadbytes, ReadsUpToN) {
   Paykan_release(chunk);
 
   Paykan_release(fShared);
-  PaykanString_destroy(pathStr);
-  PaykanString_destroy(modeStr);
+  Paykan_dispose((PaykanObject *)pathStr);
+  Paykan_dispose((PaykanObject *)modeStr);
   std::remove(path.c_str());
 }
 
@@ -427,8 +427,8 @@ TEST(FileReadbytes, ReadsLessThanNAtEOF) {
   Paykan_release(chunk);
 
   Paykan_release(fShared);
-  PaykanString_destroy(pathStr);
-  PaykanString_destroy(modeStr);
+  Paykan_dispose((PaykanObject *)pathStr);
+  Paykan_dispose((PaykanObject *)modeStr);
   std::remove(path.c_str());
 }
 
@@ -445,8 +445,8 @@ TEST(FileReadbytes, ReturnsNoneAtEOF) {
   Paykan_release(chunk);
 
   Paykan_release(fShared);
-  PaykanString_destroy(pathStr);
-  PaykanString_destroy(modeStr);
+  Paykan_dispose((PaykanObject *)pathStr);
+  Paykan_dispose((PaykanObject *)modeStr);
   std::remove(path.c_str());
 }
 
@@ -466,8 +466,8 @@ TEST(FileRead, ReadsEntireFile) {
   Paykan_release(all);
 
   Paykan_release(fShared);
-  PaykanString_destroy(pathStr);
-  PaykanString_destroy(modeStr);
+  Paykan_dispose((PaykanObject *)pathStr);
+  Paykan_dispose((PaykanObject *)modeStr);
   std::remove(path.c_str());
 }
 
@@ -484,8 +484,8 @@ TEST(FileRead, ReturnsNoneOnEmptyFile) {
   Paykan_release(all);
 
   Paykan_release(fShared);
-  PaykanString_destroy(pathStr);
-  PaykanString_destroy(modeStr);
+  Paykan_dispose((PaykanObject *)pathStr);
+  Paykan_dispose((PaykanObject *)modeStr);
   std::remove(path.c_str());
 }
 

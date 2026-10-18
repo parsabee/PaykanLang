@@ -203,6 +203,10 @@ inline constexpr const char *kPaykanPanicIndex = "Paykan_panic_index";
 // Reference counting
 inline constexpr const char *kPaykanSharedNew = "PaykanShared_new";
 inline constexpr const char *kPaykanSharedGet = "PaykanShared_get";
+inline constexpr const char *kPaykanDispose = "Paykan_dispose";
+inline constexpr const char *kPaykanWeakNew = "Paykan_weak_new";
+inline constexpr const char *kPaykanWeakLoad = "Paykan_weak_load";
+inline constexpr const char *kPaykanWeakRelease = "Paykan_weak_release";
 inline constexpr const char *kPaykanRetain = "Paykan_retain";
 inline constexpr const char *kPaykanRelease = "Paykan_release";
 
@@ -267,6 +271,10 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanRelease,
     kPaykanSharedNew,
     kPaykanSharedGet,
+    kPaykanDispose,
+    kPaykanWeakNew,
+    kPaykanWeakLoad,
+    kPaykanWeakRelease,
     // Panics
     kPaykanPanicDivByZero,
     kPaykanPanicDivOverflow,

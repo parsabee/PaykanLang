@@ -55,8 +55,9 @@ inline constexpr OpcodeEntry kOpcodeTable[] = {
     {Opcode::None, 27, "none"},
     {Opcode::IsSome, 28, "is_some"},
     {Opcode::Unwrap, 29, "unwrap"},
-    // 30-31 reserved (#99 weak.load/weak.store), 32-33 (#170 global.load/
-    // global.store).
+    {Opcode::WeakLoad, 30, "weak.load"},
+    {Opcode::WeakNew, 31, "weak.new"},
+    // 32-33 reserved (#170 global.load/global.store).
     {Opcode::LocalAddr, 34, "local.addr"},
     {Opcode::FieldAddr, 35, "field.addr"},
     {Opcode::PtrLoad, 36, "ptr.load"},
@@ -73,7 +74,8 @@ inline constexpr OpcodeEntry kOpcodeTable[] = {
     {Opcode::UToF, 46, "utof"},
     {Opcode::FToU, 47, "ftou"},
     {Opcode::FRound32, 48, "fround32"},
-    // 49-255 reserved.
+    {Opcode::WeakRelease, 49, "weak.release"},
+    // 50-255 reserved.
 };
 
 struct TypeEntry {
@@ -89,9 +91,8 @@ inline constexpr TypeEntry kTypeTable[] = {
     {Type::Obj, 6, "obj"},           {Type::Ptr, 7, "ptr"},
     {Type::OptI64, 8, "opt_i64"},    {Type::OptF64, 9, "opt_f64"},
     {Type::OptBool, 10, "opt_bool"}, {Type::OptChar, 11, "opt_char"},
-    {Type::Mem, 17, "mem"},
-    // 12-15 reserved (#96 further inline optionals), 16 (#99 weak), 18-255
-    // reserved.
+    {Type::Weak, 16, "weak"},        {Type::Mem, 17, "mem"},
+    // 12-15 reserved (#96 further inline optionals), 18-255 reserved.
 };
 
 namespace detail {
@@ -119,9 +120,9 @@ template <typename T, size_t N> constexpr bool rowsUnique(const T (&table)[N]) {
 // per enumerator up to the last one.  Adding an enumerator without a row
 // fails here or in the exhaustive switch of tests/PIR/BinaryTests.cpp.
 static_assert(std::size(kOpcodeTable) ==
-                  static_cast<size_t>(Opcode::FRound32) + 1,
+                  static_cast<size_t>(Opcode::WeakRelease) + 1,
               "every Opcode needs a row in kOpcodeTable");
-static_assert(std::size(kTypeTable) == static_cast<size_t>(Type::Mem) + 1,
+static_assert(std::size(kTypeTable) == static_cast<size_t>(Type::Weak) + 1,
               "every Type needs a row in kTypeTable");
 static_assert(detail::rowsUnique(kOpcodeTable), "duplicate opcode row");
 static_assert(detail::rowsUnique(kTypeTable), "duplicate type row");

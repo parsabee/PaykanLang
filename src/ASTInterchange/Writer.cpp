@@ -284,6 +284,10 @@ private:
       open("let");
       close();
     }
+    if (d.isWeak()) {
+      open("weak");
+      close();
+    }
     close();
   }
 

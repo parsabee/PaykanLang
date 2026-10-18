@@ -87,6 +87,7 @@ struct ClassRec {
   struct Field {
     std::string FieldName;
     std::string TypeName;
+    bool Weak = false; ///< a class field declared `weak` (never a struct's)
     bool operator==(const Field &) const = default;
   };
   struct Method {

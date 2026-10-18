@@ -33,6 +33,8 @@ constexpr uint64_t kModuleRec = 1;
 constexpr uint64_t kDiagFileRec = 1;
 /// Class and enum record flags.
 constexpr uint8_t kDeclLocal = 1;
+/// A class field's flags byte: bit 0 for a `weak` field.
+constexpr uint8_t kFieldWeak = 1;
 /// Record tags below this are required (§3.2).
 constexpr uint64_t kOptionalTag = 0x80;
 
@@ -155,6 +157,7 @@ std::vector<uint8_t> writeInterface(const Interface &iface) {
       for (const ClassRec::Field &f : c->Fields) {
         v.uleb(strs.intern(f.FieldName));
         v.uleb(strs.intern(f.TypeName));
+        v.u8(f.Weak ? kFieldWeak : 0);
       }
       writeMethods(v, c->Methods);
     });
@@ -491,9 +494,12 @@ Status Reader::readDecls(Interface &out) {
             return true;
           c.IsLocal = flags & kDeclLocal;
           c.Fields.resize(static_cast<size_t>(n));
-          for (ClassRec::Field &f : c.Fields)
-            if (!str(v, f.FieldName) || !str(v, f.TypeName))
+          for (ClassRec::Field &f : c.Fields) {
+            uint8_t fflags;
+            if (!str(v, f.FieldName) || !str(v, f.TypeName) || !v.u8(fflags))
               return true;
+            f.Weak = fflags & kFieldWeak;
+          }
           if (!readMethods(v, c.Methods))
             return true;
           if (ordered(tag, c.Name))

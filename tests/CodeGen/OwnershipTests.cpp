@@ -487,29 +487,29 @@ TEST(Ownership, AssignNarrowsBaseVar) {
   g.expectNoLeaks("AssignNarrowsBaseVar");
 }
 
-// -- Unique-box invariant at the runtime level
+// -- One reference count per object, at the runtime level
 
-// Boxing the same object twice yields the SAME box with a bumped refcount —
-// the invariant that makes every raw-alias boxing site safe.
-TEST(Ownership, SharedNewAcquiresExistingBox) {
+// Boxing the same object twice gives the same pointer (the object's own) with
+// a bumped strong count -- what makes every raw-alias boxing site safe.
+TEST(Ownership, SharedNewRetainsTheObject) {
   PaykanObject *obj = PaykanObject_new();
   PaykanShared *first = PaykanShared_new(obj);
   PaykanShared *second = PaykanShared_new(obj);
   EXPECT_EQ(first, second);
-  EXPECT_EQ(first->refCount, 2);
-  EXPECT_EQ(obj->shared, first);
+  EXPECT_EQ(first, obj);
+  EXPECT_EQ(obj->strong, 2);
   Paykan_release(second);
-  EXPECT_EQ(first->refCount, 1);
-  Paykan_release(first); // destroys obj, frees the box
+  EXPECT_EQ(obj->strong, 1);
+  Paykan_release(first); // destroys and frees obj
 }
 
-// The immortal None singleton cycles cleanly: boxing installs a box, the
-// final release clears the backpointer (destroy is a no-op), and a later
-// boxing starts fresh.
-TEST(Ownership, NoneSingletonBoxCycle) {
-  ASSERT_EQ(PaykanObject_None.shared, nullptr);
+// The immortal None singleton: its strong count starts at 1 and nothing
+// releases that reference, so boxings and releases never destroy it.
+TEST(Ownership, NoneSingletonStaysAlive) {
+  ASSERT_EQ(PaykanObject_None.strong, 1);
   PaykanShared *s = PaykanShared_new(&PaykanObject_None);
-  EXPECT_EQ(PaykanObject_None.shared, s);
+  EXPECT_EQ(s, &PaykanObject_None);
+  EXPECT_EQ(PaykanObject_None.strong, 2);
   Paykan_release(s);
-  EXPECT_EQ(PaykanObject_None.shared, nullptr);
+  EXPECT_EQ(PaykanObject_None.strong, 1);
 }

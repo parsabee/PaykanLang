@@ -210,6 +210,9 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
     case Opcode::PtrAdd:
     case Opcode::MemCopy:
     case Opcode::MemZero:
+    case Opcode::WeakNew:
+    case Opcode::WeakLoad:
+    case Opcode::WeakRelease:
     case Opcode::Some:
     case Opcode::None:
     case Opcode::IsSome:
@@ -240,6 +243,7 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
     case Type::OptBool:
     case Type::OptChar:
     case Type::Mem:
+    case Type::Weak:
       EXPECT_STREQ(e.Name, typeName(e.Id));
       Type back;
       EXPECT_TRUE(typeFromCode(e.Code, back));
@@ -250,19 +254,48 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
   Opcode op;
   Type ty;
   for (unsigned c = 26; c < 256; ++c) {
-    // some none is_some unwrap; local.addr field.addr ptr.load ptr.store
-    // ptr.add mem.copy mem.zero; wrap mask udiv urem ucmp utof ftou fround32
-    bool used = c <= 29 || (c >= 34 && c <= 48);
+    // some none is_some unwrap weak.load weak.new; local.addr field.addr
+    // ptr.load ptr.store ptr.add mem.copy mem.zero; wrap mask udiv urem
+    // ucmp utof ftou fround32 weak.release
+    bool used = c <= 31 || (c >= 34 && c <= 49);
     EXPECT_EQ(opcodeFromCode(static_cast<uint8_t>(c), op), used) << c;
   }
   for (unsigned c = 8; c < 256; ++c) {
-    bool used = c <= 11 || c == 17; // opt_i64 opt_f64 opt_bool opt_char; mem
+    // opt_i64 opt_f64 opt_bool opt_char; weak; mem
+    bool used = c <= 11 || c == 16 || c == 17;
     EXPECT_EQ(typeFromCode(static_cast<uint8_t>(c), ty), used) << c;
   }
 }
 
 TEST(PIRBinary, RoundTrip) {
   for (const Module &m : parse(kProgram).Modules)
+    expectRoundTrip(m);
+  // The weak type and its ops.
+  for (const Module &m : parse(R"(module "w"
+class Node {
+  field parent: weak
+  vtable {
+    destroy = @Node.destroy : (obj) -> void
+  }
+}
+fn @Node.destroy(%self: obj) -> void {
+  %p = field.load %self, Node.parent
+  weak.release %p
+  ret
+}
+fn @main() -> i64 {
+  local %w: weak
+  %o = new Node
+  %b = box %o
+  %wk = weak.new %b
+  store %w, %wk
+  %l = weak.load %wk
+  release %l
+  release %b
+  ret 0
+}
+)")
+                             .Modules)
     expectRoundTrip(m);
   for (const Module &m : parse(kEdgeProgram).Modules)
     expectRoundTrip(m);
@@ -508,12 +541,12 @@ TEST(PIRBinary, RejectsReservedCodesAndSlack) {
   size_t opcode = retType + 1 + 1 + 1 + 1 + 1 + 1 + 1;
   ASSERT_EQ(good[retType], 1u); // i64
   ASSERT_EQ(good[opcode], 5u);  // neg
-  for (uint8_t code : {12, 15, 16, 17, 255}) {
+  for (uint8_t code : {12, 15, 17, 18, 255}) {
     std::vector<uint8_t> b = good;
     b[retType] = code;
     EXPECT_FALSE(binary::decode(b).isOk()) << "type code " << int(code);
   }
-  for (uint8_t code : {30, 31, 32, 33, 41, 255}) {
+  for (uint8_t code : {32, 33, 50, 255}) {
     std::vector<uint8_t> b = good;
     b[opcode] = code;
     EXPECT_FALSE(binary::decode(b).isOk()) << "opcode " << int(code);

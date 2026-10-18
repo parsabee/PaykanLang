@@ -44,6 +44,7 @@ Design rules:
 | `ptr` | any other pointer: vtable addresses, literal data, type descriptors and tuple layouts, the address of a slot | `void *`  |
 | `opt_i64` `opt_f64` `opt_bool` `opt_char` | an inline optional: a presence flag, then the payload (`i64`, `f64`, `bool`, `char`) at its natural alignment, held and passed by value (#96): 16 bytes for `opt_i64` and `opt_f64`, 2 for `opt_bool` and `opt_char` | `struct { bool present; <payload> value; }` |
 | `mem(N, A)` | N bytes aligned to A (1, 2, 4 or 8; N a positive multiple of A): the storage of an aggregate, a fixed-size array or a tuple. Only a `local` or a field has this type, never a value, a parameter or a result; it is reached through its address (§6) | `_Alignas(A) uint8_t name[N]` |
+| `weak` | `PaykanWeak*`: a weak reference to an object (docs/language/08-memory-model.md, "Weak references"), the type of a `weak` local or field; may be `null`. Made from a `box` by `weak.new`, read as a `box` by `weak.load`, dropped by `weak.release` (§6); never addressed, cast or compared | `PaykanWeak *` |
 
 Paykan types lower as: `int`→`i64`, `float`→`f64`, `bool`→`bool`,
 `char`→`char`, every enum→`i64`, `int?`→`opt_i64`, `float?`→`opt_f64`,
@@ -227,11 +228,13 @@ same strings itself.
 A `class` item gives the complete object layout and the complete vtable; the
 backend does no inheritance walk.
 
-* **Layout**: the two-word runtime header (vtable pointer, unique-box
-  backpointer; `struct PaykanObject` in `Runtime.h`) followed by *all* fields in
-  declaration order, ancestors first.  Field types are `i64 f64 bool char box`,
-  the optionals and `mem(N, A)` (laid out at its alignment, as C lays out
-  the `uint8_t` array; reached through `field.addr`).
+* **Layout**: the three-word runtime header (vtable pointer, strong count,
+  weak count; `struct PaykanObject` in `Runtime.h`: an object carries its
+  own reference counts, so a `box` is the object's pointer) followed by
+  *all* fields in declaration order, ancestors first.  Field types are `i64
+  f64 bool char box weak`, the optionals and `mem(N, A)` (laid out at its
+  alignment, as C lays out the `uint8_t` array; reached through
+  `field.addr`).
 * **Vtable**: one entry per slot in slot order, each a function symbol (a
   function of this module, an `extern fn`, or `null` for an abstract slot) plus
   its signature.  Slot 0 is always `destroy`.  The vtable's address is the
@@ -245,12 +248,15 @@ backend does no inheritance walk.
   explicit slot index, exactly like user classes.
 
 Constructors and destructors are ordinary functions produced by the lowering:
-`@Point(args...) -> box` allocates with `new`, installs the vtable, nulls the
-backpointer, zeroes the fields, boxes the object (`box`, before `__init__`, so
-`self` inside `__init__` recovers the caller's box) and calls
+`@Point(args...) -> box` allocates with `new`, installs the vtable, zeroes
+the counts and the fields, boxes the object (`box`, before `__init__`, so
+`self` inside `__init__` is the caller's box) and calls
 `@Point.__init__(obj, args...)`; `@Point.destroy(obj)` releases every
-ref-typed field and frees the struct (`free`).  `destroy` is entirely
-compiler-generated: it is final, so a class cannot write or override it.  Every
+ref-typed field (`weak.release` for a `weak` one) and returns: the runtime
+frees the object after the destroy, or keeps it for its weak references
+(Runtime.h, "Shared"), so a destroy never `free`s its object.  `destroy` is
+entirely compiler-generated: it is final, so a class cannot write or
+override it.  Every
 method `m` of a class `C` is the function `@C.m(obj self, params...)`.  The
 '.' cannot occur in a Paykan identifier, so these names never clash with a
 program function (`fn Point_move`, `fn Point_destroy`); backends must keep
@@ -344,10 +350,13 @@ runtime `int64_t` params, boxing, unboxing).
 ```
 retain %b            ; box -> void              Paykan_retain
 release %b           ; box -> void              Paykan_release (null-safe)
-%b = box %o          ; obj -> box               PaykanShared_new: create-OR-acquire (+1)
-%o = unbox %b        ; box -> obj               PaykanShared_get (pure read; null -> null)
+%b = box %o          ; obj -> box               PaykanShared_new: the object, strong +1
+%o = unbox %b        ; box -> obj               the identity (null -> null)
+%w = weak.new %b     ; box -> weak              Paykan_weak_new: a weak reference (null -> null)
+%b = weak.load %w    ; weak -> box              Paykan_weak_load: a +1 box while alive, else null
+weak.release %w      ; weak -> void             Paykan_weak_release (null-safe)
 %o = new Point       ; allocate + header init + zeroed fields (Paykan_malloc)
-free %o              ; Paykan_free of the object struct (destructors only)
+free %o              ; Paykan_free of the object struct (an object never boxed)
 %v = field.load %o, Point.x
 field.store %o, Point.x, %v                    ; plain store: ARC is explicit around it
 %p = vtable.load %o                            ; the object's vtable pointer (ptr)
@@ -490,14 +499,28 @@ CodeGen enforced, now in one place.
   destroys a closure through slot 0 like any object.
 * **Fields** own their box; `field.store` is preceded by a retain-or-steal
   of the new value and the old value is released (null-checked).
+* **Weak references** (docs/language/08-memory-model.md): a `weak` local is
+  a `local` of type `weak`, a `weak` field a field of type `weak`.  A
+  declaration or an assignment takes the value as a +1 box (as a variable's
+  initializer is taken), stores `weak.new` of it and releases the box; an
+  assignment `weak.release`s the old value first (a field's too).  A read
+  (`load` or `field.load`, then `weak.load`) is a fresh +1 box, or null:
+  it is owned like a call's result (released after a print or a comparison,
+  pending for a `match`, stored as-is in a variable or a field, passed as
+  an argument).  Scope exit `weak.release`s a `weak` local in declaration
+  order with the owned variables, and `C.destroy` `weak.release`s a `weak`
+  field.  A closure captures a `weak` variable as a `weak` field: stored
+  with `weak.new` from the variable's read, released by the closure's
+  destroy, and loaded (`weak.load`) into an owned local at the start of a
+  call.
 * **Indexing** an array or a slice checks the index first: when it is
   negative or not below the length, `call @$rt.Paykan_panic_index(%i, %len)`
   and `unreachable`.  The element is then read or written in place, with
   `ptr.load` / `ptr.store` at `ptr.add` of the index times the element size.
 * **Temporaries**: a raw `PaykanString*` produced by a literal, `Str<int>` & co.
-  or concatenation is destroyed (`PaykanString_destroy`) by the consumer unless
-  it is boxed; a fresh box used as a receiver or borrowed argument is released
-  after the use.
+  or concatenation is destroyed and freed (`Paykan_dispose`) by the consumer
+  unless it is boxed; a fresh box used as a receiver or borrowed argument is
+  released after the use.
 * **Match**: the subject is evaluated once; a boxed subject is owned for the
   match's duration (pending release at match end, also on early exits).  Class
   arms compare `vtable.load` against `vtable.addr`; optional subjects test
@@ -560,6 +583,9 @@ crossing into the runtime is `cast` to `i64` first.
 Paykan_malloc(i64) -> ptr        Paykan_free(ptr) -> void
 Paykan_retain(box) -> void       Paykan_release(box) -> void
 PaykanShared_new(obj) -> box     PaykanShared_get(box) -> obj
+Paykan_weak_new(box) -> weak     Paykan_weak_load(weak) -> box
+Paykan_weak_release(weak) -> void
+Paykan_dispose(obj) -> void      ; destroy and free an object never boxed (a string temporary)
 ; panics (noreturn)
 Paykan_panic_div_by_zero() -> void      Paykan_panic_div_overflow() -> void
 Paykan_panic_float_to_int(f64) -> void  Paykan_panic_int_to_char(i64) -> void
@@ -637,6 +663,9 @@ The verifier rejects a program when:
   does not match the slot's signature;
 * `field.load`/`field.store`/`field.addr`/`new`/`vtable.addr` name an
   unknown class or field; a field store has the wrong type;
+* `weak.new` takes anything but a `box`, `weak.load` or `weak.release`
+  anything but a `weak`; a `weak` is cast or compared, or its address
+  taken;
 * `local.addr` or `field.addr` takes the address of a slot that is not `i64`,
   `f64`, `bool`, `char`, an optional, `box` or `mem`; `ptr.load`/`ptr.store`
   take an address that is not a `ptr`, or read or write a value of another

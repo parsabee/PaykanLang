@@ -92,23 +92,34 @@ PAYKAN_STATIC_ASSERT(~0 == -1 && (int64_t)UINT64_MAX == -1 &&
 
 typedef struct PaykanObject PaykanObject;
 typedef struct PaykanString PaykanString;
-typedef struct PaykanShared PaykanShared;
+/// A strong reference to an object: the object's own pointer (the reference
+/// counts live in the object's header, so an object is one allocation).
+/// The name marks a pointer that holds a reference, counted in `strong`:
+/// a PaykanShared* is owned (+1) or borrowed, a PaykanObject* is a raw
+/// alias.  See "Shared" below.
+typedef struct PaykanObject PaykanShared;
+/// A weak reference to an object: its pointer again, counted in `weak`.
+/// Loading one (Paykan_weak_load) gives a strong reference while the object
+/// is alive, and NULL once it has been destroyed.
+typedef struct PaykanObject PaykanWeak;
 
 // -- Object
 //
 // Root of the class hierarchy.  Every Paykan heap object starts with this
-// two-word header so that a PaykanObject* can always reach the vtable AND its
-// owning PaykanShared box:
+// three-word header, so that a PaykanObject* reaches the vtable and the
+// object's own reference counts (docs/language/08-memory-model.md):
 //
 //   [0] vtable  — method dispatch + type identity
-//   [1] shared  — backpointer to this object's unique PaykanShared box
-//                 (the unique-box invariant, see PaykanShared below), or NULL
-//                 while the object has never been boxed / is not currently
-//                 boxed.
+//   [1] strong  — the strong reference count: the number of owned
+//                 PaykanShared* references.  Above zero while the object is
+//                 alive; the destroy runs when it drops to zero.
+//   [2] weak    — the weak reference count: the number of PaykanWeak*
+//                 references.  The memory is freed when both are zero.
 //
 // Every constructor (the runtime's and the generated class constructors)
-// must initialise `shared` to NULL; PaykanShared_new installs the backpointer
-// and Paykan_release clears it when the box dies.
+// initialises `strong` and `weak` to 0: a new object is unowned until it is
+// boxed (PaykanShared_new).  An immortal static (PaykanObject_None,
+// PaykanFile_Stdin) starts with `strong` 1, which nothing ever releases.
 
 // A vtable is an array of PaykanMethod, the generic function-pointer type:
 // every slot holds a method converted to `void (*)(void)` and is converted
@@ -139,7 +150,8 @@ enum {
 
 struct PaykanObject {
   PaykanMethod *vtable; // this class's vtable (PAYKAN_SLOT_*)
-  PaykanShared *shared; // unique-box backpointer (header slot 1)
+  int64_t strong;       // strong reference count (header slot 1)
+  int64_t weak;         // weak reference count (header slot 2)
 };
 
 /// The vtable of any Paykan object, whatever its struct type: the header's
@@ -174,9 +186,10 @@ extern PaykanObject PaykanObject_None;
 
 struct PaykanString {
   PaykanMethod *vtable; // points to PaykanString_vtable
-  PaykanShared *shared; // object header (see PaykanObject)
-  char *data;           // heap-allocated NUL-terminated buffer
-  int64_t len;          // length in bytes (excludes NUL)
+  int64_t strong;       // object header (see PaykanObject)
+  int64_t weak;
+  char *data;  // heap-allocated NUL-terminated buffer
+  int64_t len; // length in bytes (excludes NUL)
 };
 
 // Constructor / destructor.
@@ -225,8 +238,9 @@ extern PaykanMethod PaykanString_vtable[PAYKAN_STRING_SLOTS];
 
 typedef struct PaykanFile {
   PaykanMethod *vtable; // points to PaykanFile_vtable
-  PaykanShared *shared; // object header (see PaykanObject)
-  FILE *handle;         // underlying C file handle (NULL if closed)
+  int64_t strong;       // object header (see PaykanObject)
+  int64_t weak;
+  FILE *handle; // underlying C file handle (NULL if closed)
 } PaykanFile;
 
 // Constructor / destructor.
@@ -257,7 +271,8 @@ extern PaykanFile PaykanFile_Stdin;
 
 typedef struct PaykanError {
   PaykanMethod *vtable; // points to PaykanError_vtable
-  PaykanShared *shared; // object header (see PaykanObject)
+  int64_t strong;       // object header (see PaykanObject)
+  int64_t weak;
   PaykanString *message;
 } PaykanError;
 
@@ -270,48 +285,64 @@ int64_t PaykanError_equals(PaykanObject *self, PaykanShared *other);
 // Global vtable instance.
 extern PaykanMethod PaykanError_vtable[PAYKAN_OBJECT_SLOTS];
 
-// -- Shared: the reference-counted box around a PaykanObject
+// -- Shared: strong and weak references to a PaykanObject
 //
-// A PaykanShared box holds a strong reference count and a pointer to the
-// owned object.  When the count drops to zero, the owned object is destroyed
-// and the box itself is freed.
+// An object carries its own reference counts (the header above): there is
+// no separate control block, so a reference is the object's pointer.  The
+// runtime keeps the two names apart to say what a pointer holds:
 //
-// The unique-box invariant: every live heap object has AT MOST ONE box, and
-// the object's header backpointer (`obj->shared`) names it.  Two boxes
-// around one object would each destroy it when their own count hit zero.
-// The runtime enforces the invariant in PaykanShared_new, which creates OR
-// acquires: an object that already has a box gets that box back, retained.
-// So generated code that holds an object only as a raw PaykanObject* (the
-// `self` parameter, which the method ABI passes unboxed; a match-arm
-// binding; an array element) can always "box this pointer" and get an owned
-// reference to the right box.
+//   PaykanObject*  a raw alias, counted nowhere (`self` in a method, a
+//                  match-arm binding, a temporary not yet boxed);
+//   PaykanShared*  a strong reference, counted in `strong` (a variable, a
+//                  field, an argument, a result; NULL for an absent `T?`);
+//   PaykanWeak*    a weak reference, counted in `weak` (a `weak` variable or
+//                  field, docs/language/08-memory-model.md).
+//
+// "Boxing" a raw pointer (PaykanShared_new) is a strong retain: generated
+// code that holds an object only as a raw PaykanObject* can always box it
+// and get an owned reference to the same object.  When `strong` drops to
+// zero the object's destroy runs (it releases what the object holds and
+// tears down its non-object resources, and must not free the object) and
+// every weak reference to it reads as NULL from then on; the memory is freed
+// right after the destroy, or, while weak references remain, by the last
+// weak release.
 
-typedef struct PaykanShared {
-  int64_t refCount;     // strong reference count (starts at 1)
-  PaykanObject *object; // the owned object (never NULL)
-} PaykanShared;
-
-/// Return an owned (+1) box for `obj` — the unique-box invariant's single
-/// entry point.  If `obj` already has a box (obj->shared != NULL) that box is
-/// retained and returned; otherwise a fresh box (refcount 1) is created and
-/// installed as `obj->shared`.  The destructor is taken from
-/// `obj->vtable->destroy` when the refcount reaches zero.
+/// A strong (+1) reference to `obj`: `obj` itself, with `strong` incremented.
+/// NULL for NULL.
 PaykanShared *PaykanShared_new(PaykanObject *obj);
 
-/// Increment the reference count.
+/// Increment the strong count (NULL-safe).
 void Paykan_retain(PaykanShared *shared);
 
-/// Decrement the reference count.  Destroys the owned object and frees
-/// the box when it reaches zero, clearing the object's box backpointer
-/// first (so an immortal object — static None / Stdin, whose destroy is a
-/// no-op — is left unboxed rather than dangling).  Destruction is iterative
-/// (Shared.c): an object released to zero inside a destroy is deferred and
-/// destroyed by the outermost release before it returns, so deep chains are
-/// freed in bounded C stack space.
+/// Decrement the strong count (NULL-safe).  At zero the object's destroy
+/// (vtable slot 0) runs, and the object is freed unless weak references to
+/// it remain, in which case the last Paykan_weak_release frees it.
+/// Destruction is iterative (Shared.c): an object released to zero inside a
+/// destroy is deferred and destroyed by the outermost release before it
+/// returns, so deep chains are freed in bounded C stack space.
 void Paykan_release(PaykanShared *shared);
 
-/// Convenience: return the underlying object pointer.
+/// The object a strong reference names: the same pointer (NULL for NULL).
 PaykanObject *PaykanShared_get(PaykanShared *shared);
+
+/// Destroy and free an object nothing references (`strong` and `weak` both
+/// zero): a temporary that was never boxed, such as a string the generated
+/// code made and did not keep.  The same as boxing it and releasing that
+/// reference.  NULL-safe.
+void Paykan_dispose(PaykanObject *obj);
+
+/// A weak reference to the object `shared` names (NULL for NULL): the same
+/// pointer, with `weak` incremented.  The strong reference is untouched.
+PaykanWeak *Paykan_weak_new(PaykanShared *shared);
+
+/// A strong (+1) reference to the object `weak` names while it is alive
+/// (its `strong` count is above zero), NULL once it has been destroyed, or
+/// is being destroyed, or for a NULL `weak`.
+PaykanShared *Paykan_weak_load(PaykanWeak *weak);
+
+/// Decrement the weak count (NULL-safe).  Frees the object when it was
+/// destroyed already and this was the last weak reference to it.
+void Paykan_weak_release(PaykanWeak *weak);
 
 // -- Generic native functions
 //
@@ -426,8 +457,9 @@ int64_t PaykanStruct_equals(const void *a, const void *b,
 // that may not be NULL panic.
 
 typedef struct PaykanBuffer {
-  PaykanMethod *vtable;   // points to PaykanBuffer_vtable
-  PaykanShared *shared;   // object header (see PaykanObject)
+  PaykanMethod *vtable; // points to PaykanBuffer_vtable
+  int64_t strong;       // object header (see PaykanObject)
+  int64_t weak;
   const PaykanType *type; // of the values (the compiler's constant data)
   unsigned char *data;    // cap values of type->size bytes
   int64_t len;            // live values
@@ -600,16 +632,18 @@ int64_t Paykan_heap_total_reallocs(void);
 void Paykan_heap_dump(void);
 
 // Every object struct starts with PaykanObject's header (the vtable, then the
-// box backpointer), so a pointer to it can be converted to and used as a
-// PaykanObject * (docs/c-backend.md, "Target assumptions").
+// strong and the weak count), so a pointer to it can be converted to and used
+// as a PaykanObject * (docs/c-backend.md, "Target assumptions").
 #define PAYKAN_CHECK_HEADER(T)                                                 \
   PAYKAN_STATIC_ASSERT(offsetof(T, vtable) == 0 &&                             \
-                           offsetof(T, shared) ==                              \
-                               offsetof(PaykanObject, shared),                 \
+                           offsetof(T, strong) ==                              \
+                               offsetof(PaykanObject, strong) &&               \
+                           offsetof(T, weak) == offsetof(PaykanObject, weak),  \
                        #T " must start with the object header")
 PAYKAN_CHECK_HEADER(PaykanString);
 PAYKAN_CHECK_HEADER(PaykanFile);
 PAYKAN_CHECK_HEADER(PaykanError);
+PAYKAN_CHECK_HEADER(PaykanBuffer);
 #undef PAYKAN_CHECK_HEADER
 
 #ifdef __cplusplus
