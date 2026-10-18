@@ -12,9 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The standard library uses the private members and the sized numeric types
   (docs/language/13-standard-library.md): the `__` names of `::collections` and
   `::memory` are now enforced as private rather than a convention (a program naming
-  `m.__size` or `collections::__bucket` is rejected), `HashMap`'s bucket index is the
-  hash's bits read as an `unsigned` modulo the bucket count, and the containers hold
-  sized elements and keys (`List<u8>`, `HashMap<u32, Str>`, `Box<f32>`, a
+  `m.__size` or `collections::__bucket` is rejected), every index and size of the
+  library is an `unsigned` (`len()` returns one, `get(i)` & co. take one, `indexOf`
+  returns an `unsigned?` that is `None` for a missing element instead of `-1`, and the
+  `Buffer` natives take and return `unsigned`), `HashMap`'s bucket index is the hash's
+  bits read as an `unsigned` modulo the bucket count, and the containers hold sized
+  elements and keys (`List<u8>`, `HashMap<u32, Str>`, `Box<f32>`, a
   `MinPriorityQueue<f16>`), with a stdlib test and a docs example.
 - Sized numeric types (docs/language/01-language-basics.md, "Sized numeric types";
   docs/design/sized-types.md): `i8`, `i16`, `i32`, `u8`, `u16`, `u32`, `unsigned`, `f16`

@@ -18,6 +18,10 @@ qualifier: `collections::List<int>()`.
   reference to each element. A method that hands an element out returns a copy, which
   shares an object element with the container.
 - Elements are compared with `==`, so a class compares by its `equals`.
+- Every index and size is an `unsigned`: `len()` returns one, `get(i)`, `set(i, v)`,
+  `insert(i, v)`, `removeAt(i)` and `swap(i, j)` take one, and `indexOf(v)` returns an
+  `unsigned?` that is `None` when there is no such element. A literal index takes the
+  type (`xs.get(0)`); a counter is declared `i: unsigned = 0`.
 - The keys of a `HashMap` or `HashSet` implement the builtin trait
   [`Hashable`](12-traits.md#hashable): `int`, `bool`, `char`, `Str`, a sized integer type
   (`u32`, `unsigned`, …), or a class with an `impl Hashable for` block.
@@ -85,8 +89,8 @@ move the elements after the index.
 | `len()`, `isEmpty()` | The number of elements |
 | `get(i)`, `set(i, v)` | Element `i`, `0 <= i < len()` |
 | `push(v)`, `pop()`, `last()` | At the end |
-| `insert(i, v)`, `removeAt(i)` | Anywhere, `0 <= i <= len()` for `insert` |
-| `indexOf(v)`, `contains(v)`, `remove(v)` | Search with `==`; `indexOf` is `-1` when there is none, `remove` drops the first match |
+| `insert(i, v)`, `removeAt(i)` | Anywhere, `i <= len()` for `insert` |
+| `indexOf(v)`, `contains(v)`, `remove(v)` | Search with `==`; `indexOf` is an `unsigned?`, `None` when there is none, `remove` drops the first match |
 | `swap(i, j)`, `reverse()`, `clear()` | In place |
 | `copy()` | A new list of the same elements |
 
@@ -203,8 +207,8 @@ it panics.
 
 | Method | Description |
 |--------|-------------|
-| `len()` | The number of slots |
-| `get(i)`, `copy(i)`, `set(i, v)` | Slot `i`: a `view` of it, a copy to keep, or a new value |
+| `len()` | The number of slots, an `unsigned` |
+| `get(i)`, `copy(i)`, `set(i, v)` | Slot `i` (an `unsigned`): a `view` of it, a copy to keep, or a new value |
 | `push(v)`, `grow(by)`, `reserve(n)`, `shrink(by)` | Change the number of slots; growing one at a time is amortised O(1) |
 | `swap(i, j)` | Exchange two slots |
 

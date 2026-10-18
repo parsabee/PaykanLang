@@ -13,7 +13,10 @@ fn main() -> int {
   bytes.push(bytes.get(0) + bytes.get(1));   // 253
   bytes.push(bytes.get(2) + 10);             // 7
   println(collections::listToString<u8>(bytes));
-  println(Str(bytes.contains(7)) + " " + Str(bytes.indexOf(253)) + " " + Str(bytes.contains(1)));
+  match bytes.indexOf(253) {
+    at: unsigned { println(Str(bytes.contains(7)) + " " + Str(at) + " " + Str(bytes.contains(1))); }
+    None { println("not found"); }
+  }
 
   // HashMap<u32, Str>: a literal key takes the key type; keys above the
   // int32 range are their own keys.
