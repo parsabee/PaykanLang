@@ -187,7 +187,8 @@ void dumpIface(const File &f, std::ostream &os) {
     os << "  class " << c.Name << " super " << quoted(c.SuperClassName) << " ["
        << origin(c.IsLocal, c.OriginModule) << "]\n";
     for (const ClassRec::Field &fl : c.Fields)
-      os << "    field " << fl.FieldName << ": " << fl.TypeName << "\n";
+      os << "    " << (fl.Weak ? "weak " : "") << "field " << fl.FieldName
+         << ": " << fl.TypeName << "\n";
     for (const ClassRec::Method &m : c.Methods)
       os << "    method " << m.Name << "(" << params(m.ParamTypeNames, m.Modes)
          << ") -> " << result(m.Modes) << m.ReturnTypeName << " flags "

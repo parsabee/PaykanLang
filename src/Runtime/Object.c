@@ -23,11 +23,14 @@ PaykanMethod PaykanObject_vtable[PAYKAN_OBJECT_SLOTS] = {
 PaykanObject *PaykanObject_new(void) {
   PaykanObject *obj = (PaykanObject *)Paykan_malloc(sizeof(PaykanObject));
   obj->vtable = PaykanObject_vtable;
-  obj->shared = NULL; // not yet boxed (unique-box invariant)
+  obj->strong = 0; // unowned until boxed
+  obj->weak = 0;
   return obj;
 }
 
-void PaykanObject_destroy(PaykanObject *self) { Paykan_free(self); }
+// An Obj holds nothing: there is nothing to tear down (the runtime frees the
+// memory after the destroy, Runtime.h "Shared").
+void PaykanObject_destroy(PaykanObject *self) { (void)self; }
 
 // -- Default methods
 
@@ -60,9 +63,9 @@ static PaykanMethod PaykanNone_vtable[PAYKAN_OBJECT_SLOTS] = {
     [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanObject_equals,
 };
 
-// Boxing None installs a box and Paykan_release clears it again (destroy is
-// a no-op), so the singleton cycles cleanly through boxings.
-PaykanObject PaykanObject_None = {PaykanNone_vtable, NULL};
+// Immortal: its strong count starts at 1, which nothing releases, so the
+// boxings and releases of the singleton never destroy it.
+PaykanObject PaykanObject_None = {PaykanNone_vtable, 1, 0};
 
 // -- Runtime panics
 

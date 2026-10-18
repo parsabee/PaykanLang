@@ -17,13 +17,16 @@ guarantee, not something you write by hand.
   is a reference: copying the array or tuple retains it.
 - **Reference types** (class instances, `Str`, `File`, `Error`, and their optionals) live
   on the heap and are reference-counted.
-- Each heap object is owned through a **shared box** holding a strong count and a pointer to the
-  object. Copying a reference **retains** (count `+1`); dropping one **releases** (count `-1`).
-- When the count reaches zero the object's **`destroy`** runs — releasing the references it holds
-  — and the memory is freed. Destruction is **deterministic**: it happens at the moment of the
-  last release, not at some later collection.
+- Each heap object carries its **reference counts** in its own header, a strong count and a weak
+  count. Copying a reference **retains** (strong count `+1`); dropping one **releases** (`-1`).
+- When the strong count reaches zero the object's **`destroy`** runs — releasing the references
+  it holds — and the memory is freed. Destruction is **deterministic**: it happens at the
+  moment of the last release, not at some later collection.
 - `destroy` is compiler-generated and **final** — it cannot be written, overridden, or called.
-- Reference **cycles are not collected** and will leak (see *Reference Cycles* below).
+- A **`weak`** variable or field refers to an object without keeping it alive, and reads as
+  `None` once the object is gone (see *Weak References* below).
+- Reference **cycles are not collected** and will leak unless a `weak` reference breaks them
+  (see *Reference Cycles* below).
 
 ---
 
@@ -60,33 +63,31 @@ assigned a new tuple.
 
 ---
 
-## The Shared Box
+## The Reference Counts
 
-Every reference-counted object is reached through a small heap **box** that pairs a strong count
-with the owned object:
+Every reference-counted object carries its counts in its own header, so an object is one heap
+allocation and a reference to it is simply its address:
 
 ```
-box: { refCount, object }   // refCount starts at 1 when the box is created
+object: { vtable pointer, strong count, weak count, fields… }
 ```
 
-Two operations maintain the count:
+Two operations maintain the strong count:
 
 - **retain** — increments the count when a new reference to the object is created (an assignment,
   passing the object into a place that keeps it, storing it in a field or array).
 - **release** — decrements the count when a reference goes away (a variable leaves scope, a field
   or slot is overwritten, a temporary is discarded).
 
+The weak count is the number of `weak` variables and fields that refer to the object (see
+*Weak References* below); it never keeps the object alive.
+
 The object is reached the same way regardless of its concrete class because every heap object
 begins with a pointer to its **vtable** — the table of its methods, including `destroy`,
-`toString`, and `equals` — followed by a pointer back to its box. A class instance's layout is
-`{ vtable pointer, box pointer, fields… }`.
-
-The box is **unique**: each object has exactly one box for its entire lifetime, recorded in its
-header. Whenever a new owning reference to an object is needed — no matter which alias it is
-reached through (`self`, a `match` binding, a field, an array element) — the existing box is
-found through the backpointer and retained, rather than a second box being created. This is
-what makes the reference count a single source of truth and rules out double-frees from
-aliased references.
+`toString`, and `equals` — followed by its two counts. Because the counts live in the object,
+every alias of it (`self`, a `match` binding, a field, an array element) retains the same
+count: the strong count is a single source of truth, and a new owning reference taken through
+any alias is always right.
 
 ---
 
@@ -95,9 +96,12 @@ aliased references.
 When a release drops the count to zero:
 
 1. The object's `destroy` method runs. The compiler generates `destroy` to **release every
-   reference the object holds** — its reference-typed fields, and the reference-typed elements
-   of its array and tuple fields — so destruction cascades transitively.
-2. The object's memory and its box are freed.
+   reference the object holds** — its reference-typed fields (the `weak` ones dropped), and
+   the reference-typed elements of its array and tuple fields — so destruction cascades
+   transitively.
+2. The object's memory is freed. If `weak` references to the object remain, its memory is
+   kept, empty, until the last of them goes away; every one of them reads as `None` from now
+   on.
 
 This is **deterministic**: an object is destroyed at the exact point its last reference is
 released, in a well-defined order, with no background collector and no pause. A `File`, for
@@ -220,19 +224,99 @@ value out and owns nothing.
 
 ---
 
+## Weak References
+
+A variable or a class field declared with `weak` refers to an object **without keeping it
+alive**. Its type is `T?` for a class `T` (a user class, `Str`, `File`, `Error` or `Obj`),
+and it may be left off a local declaration that has an initializer:
+
+```pkn
+class Node {
+  name: Str;
+  weak parent: Node?;   // a back link that does not own the parent
+  first: Node?;
+  next: Node?;
+}
+
+impl Node {
+  fn __init__(name: Str) {
+    self.name = name;
+    self.parent = None;
+    self.first = None;
+    self.next = None;
+  }
+  fn add(child: Node) {
+    child.parent = self;
+    child.next = self.first;
+    self.first = child;
+  }
+  fn path() -> Str {
+    match self.parent {
+      p: Node { return p.path() + "/" + self.name; }
+      None { return self.name; }
+    }
+  }
+}
+
+fn main() -> int {
+  root = Node("root");
+  a = Node("a");
+  root.add(a);
+  weak w: Node? = root;   // reads as root while something holds it
+  weak u = a;             // inferred Node?
+  println(a.path() + " " + Str(w == None));
+  root = Node("other");   // the first root dies: it was held by nothing else
+  println(a.path() + " " + Str(w == None));
+  match u {
+    n: Node { println(n.name); }
+    None { println("gone"); }
+  }
+  return 0;
+}
+```
+
+Output:
+
+```
+root/a False
+a True
+a
+```
+
+Reading a `weak` variable or field gives a `T?`: the object while it is alive, `None` once it
+has been destroyed. The value read is an ordinary optional — matched with `match`, compared
+with `== None`, passed, returned, or stored in a strong variable or field, which then keeps the
+object alive. Assigning a `T` or a `T?` to a `weak` variable or field makes it refer to that
+object (or to nothing, for `None`) without retaining it. A lambda that captures a `weak`
+variable captures it weakly, so a closure can refer to the object that stores it without
+forming a cycle (see [`15-function-types.md`](15-function-types.md#captures)).
+
+A weak reference is not a place a strong reference could be written to, so it cannot be passed
+to an `inout` parameter, named by an `inout` local, or bound by an `inout` match arm. It can be
+`view`ed, since a view only reads it. For now `weak` applies to locals and class fields: not to
+struct fields, tuple or array elements, parameters or results.
+
+The object's memory is kept, empty, while `weak` references to it remain (its own references
+are released when it is destroyed), and freed with the last of them — so a program that drops
+its weak references frees everything, as `--track-heap` shows.
+
+---
+
 ## Reference Cycles
 
 Reference counting reclaims an object when its count reaches zero. If two or more objects refer to
 each other so that their counts never fall to zero — a parent holding a child that holds the
 parent back — the group becomes unreachable from the program yet keeps itself alive. **Such cycles
-are not collected and will leak.** PaykanLang currently has no cycle collector and no weak
-references. Until weak references land, avoid building reference cycles among long-lived objects,
-or break them explicitly by overwriting one of the linking fields before the objects go out of
-scope.
+are not collected and will leak.** PaykanLang has no cycle collector. Break a cycle with a
+`weak` reference: make the back link (the child's `parent`, an observer's `owner`, a closure's
+reference to the object that stores it) a `weak` field or variable, as in the example above,
+and the objects are freed with their last outside reference. Where no link is naturally the
+weak one, overwrite one of the linking fields with `None` before the objects go out of scope.
 
 A closure is an object too, and its captures are its fields: a lambda that captures an object
 and is then stored in that object (`h.cb = fn() -> int { return h.n; };`) forms a cycle like any
-other, and leaks the same way unless the field is overwritten before `h` goes out of scope.
+other, and leaks the same way unless the capture is a `weak` variable (`weak me = h; h.cb =
+fn() -> int { match me { ... } };`) or the field is overwritten before `h` goes out of scope.
 
 ---
 
@@ -255,5 +339,9 @@ sharing a reference-counted object across threads is safe today.
 - A reference keeps its object alive for exactly as long as it is reachable.
 - `destroy` runs automatically and releases everything an object owns, transitively.
 
-The two things the model does **not** do for you today are collecting reference cycles and making
-reference counting safe across threads — both are known and on the roadmap.
+- A `weak` reference never keeps an object alive and never dangles: it reads as `None` once
+  the object is gone.
+
+The two things the model does **not** do for you today are collecting reference cycles (break
+them with `weak`) and making reference counting safe across threads — both are known and on
+the roadmap.

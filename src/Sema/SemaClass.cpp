@@ -395,7 +395,14 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       continue;
     }
     field->setType(fty); // canonical write-back for the lowering
-    ct->addField(field->getName(), fty);
+    if (field->isWeak() &&
+        !checkWeakType(fty, field->getLocation(),
+                       "field '" + field->getName() + "' of class '" +
+                           cd->getName() + "'")) {
+      ok = false;
+      continue;
+    }
+    ct->addField(field->getName(), fty, field->isWeak());
   }
 
   // -- methods --

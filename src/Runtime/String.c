@@ -29,7 +29,8 @@ PaykanMethod PaykanString_vtable[PAYKAN_STRING_SLOTS] = {
 static PaykanString *string_alloc(int64_t len) {
   PaykanString *s = (PaykanString *)Paykan_malloc(sizeof(PaykanString));
   s->vtable = PaykanString_vtable;
-  s->shared = NULL; // not yet boxed (unique-box invariant)
+  s->strong = 0; // unowned until boxed
+  s->weak = 0;
   s->len = len;
   s->data = (char *)Paykan_malloc((size_t)len + 1);
   s->data[len] = '\0';
@@ -134,12 +135,12 @@ PaykanShared *PaykanString_at(PaykanObject *self, int64_t idx) {
   return PaykanShared_new((PaykanObject *)PaykanString_new(s->data + idx, 1));
 }
 
+// The runtime frees the object itself after the destroy (Runtime.h,
+// "Shared"); a string made and dropped unboxed goes through Paykan_dispose.
 void PaykanString_destroy(PaykanObject *self) {
   PaykanString *s = (PaykanString *)self;
-  if (s) {
+  if (s)
     Paykan_free(s->data);
-    Paykan_free(s);
-  }
 }
 
 PaykanShared *PaykanString_toString(PaykanObject *self) {

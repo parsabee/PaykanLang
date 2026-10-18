@@ -147,7 +147,8 @@ public:
                              ParamModes modes = {});
 
     /// Add an instance field.
-    ClassTypeBuilder &field(const std::string &name, Type *ty);
+    ClassTypeBuilder &field(const std::string &name, Type *ty,
+                            bool weak = false);
 
     /// Finish building, register in the context's class type registry, and
     /// return the ClassType.
