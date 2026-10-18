@@ -1870,3 +1870,35 @@ TEST(Driver, BuildAndRunDefaultToO2) {
   }
   fs::remove_all(dir);
 }
+
+// -- The standard library's private members
+
+// The `__` names of `::collections` and `::memory` are private
+// (docs/language/06-modules.md): a program cannot reach a container's `__`
+// fields and methods, or the modules' `__` functions and classes.
+TEST(Driver, StandardLibraryPrivateMembersAreEnforced) {
+  auto src = writeTmp("import ::collections;\n"
+                      "import ::memory;\n"
+                      "fn main() -> int {\n"
+                      "  m = collections::HashMap<int, int>();\n"
+                      "  n = m.__size;\n"
+                      "  e = m.__find(1, 1);\n"
+                      "  b = collections::__bucket(1, 2);\n"
+                      "  x = collections::__Entry<int, int>(1, 2, 3, None);\n"
+                      "  buf = memory::Buffer<int>(1);\n"
+                      "  d = buf.__data;\n"
+                      "  return 0;\n}\n");
+  auto [rc, out] = run(std::string(kPaykan) + " --check-only " + src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_NE(rc, 0);
+  for (const char *line :
+       {"'__size' is private to 'HashMap<int, int>': it is reachable only "
+        "from its own methods",
+        "'__find' is private to 'HashMap<int, int>': it is reachable only "
+        "from its own methods",
+        "'collections::__bucket' is private to module '::collections'",
+        "'collections::__Entry' is private to module '::collections'",
+        "'__data' is private to 'Buffer<int>': it is reachable only from its "
+        "own methods"})
+    EXPECT_NE(out.find(line), std::string::npos) << line << "\n" << out;
+}

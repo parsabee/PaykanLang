@@ -23,6 +23,14 @@ qualifier: `collections::List<int>()`.
   (`u32`, `unsigned`, …), or a class with an `impl Hashable for` block.
 - A broken precondition panics: `pop` on an empty container, an index out of range,
   `get` of a key a map does not have.
+- The library's `__` names are [private](06-modules.md#private-to-the-module): a
+  container's `__` fields and methods are reachable only from its own methods, and the
+  modules' `__` functions and classes (`collections::__Entry`, `memory::__new`) only from
+  inside the module.  A program that names one is rejected (`'__size' is private to
+  'HashMap<int, int>': it is reachable only from its own methods`).
+- The [sized numeric types](01-language-basics.md#sized-numeric-types) are elements and
+  keys like `int` and `float`: a `List<u8>`, a `HashMap<u32, Str>`, a `Box<f32>`; a
+  literal pushed or put takes the element or key type.
 - The build compiles the library with the compiler and installs it in
   `<prefix>/lib/paykan/stdlib/<version>/`, where `paykan` finds it (see
   [Where the library is](#where-the-library-is)).
@@ -157,6 +165,33 @@ To order numbers by their own value, push each one with itself as its priority:
 `q.push(n, n)`.
 
 ---
+
+### Sized numeric types in the containers
+
+Every container takes the [sized numeric types](01-language-basics.md#sized-numeric-types)
+as elements, and the hash tables take the sized integer types as keys (they are `Hashable`).
+A literal flowing into a container's method takes the element type, so `bytes.push(250)`
+pushes a `u8`, and the elements keep their arithmetic: adding two `u8` elements wraps at 256.
+
+```pkn
+import ::collections;
+
+fn main() -> int {
+  bytes = collections::List<u8>();
+  bytes.push(250);
+  bytes.push(bytes.get(0) + 10);          // 4: u8 arithmetic wraps
+  codes = collections::HashMap<u32, Str>();
+  codes.put(4000000000, "big");           // a key above the i32 range
+  println(collections::listToString<u8>(bytes) + " " + codes.get(4000000000));
+  return 0;
+}
+```
+
+Output:
+
+```
+[250, 4] big
+```
 
 ## `::memory`
 

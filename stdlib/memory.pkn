@@ -12,8 +12,9 @@
 // The buffer holds its own reference to each value it stores and drops it
 // when the slot is overwritten or shrunk away, or the buffer dies.
 //
-// Names starting with `__` are the module's own: the language has no
-// visibility keywords yet, so this is a convention.
+// Names starting with `__` are private (docs/language/06-modules.md,
+// "Private to the module"): the `__` native functions are the module's own,
+// and `Buffer`'s `__data` is reachable only from its methods.
 
 native fn __new<T>(n: int) -> Obj = "PaykanBuffer_new";
 native fn __len<T>(b: view Obj) -> int = "PaykanBuffer_len";

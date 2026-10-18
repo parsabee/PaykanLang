@@ -16,8 +16,10 @@
 // broken precondition, such as `pop` on an empty container or an index out
 // of range, panics.
 //
-// Names starting with `__` are the module's own: the language has no
-// visibility keywords yet, so this is a convention.
+// Names starting with `__` are private (docs/language/06-modules.md,
+// "Private to the module"): `__Entry`, `__Heap`, `__panic`, `__fail` and
+// `__bucket` are the module's own, and a `__` field or method is reachable
+// only from its type's methods.
 
 import ::memory;
 
@@ -586,11 +588,10 @@ impl HashMap<K, V> {
   }
 }
 
-// The bucket of hash `h` among `n`.
+// The bucket of hash `h` among `n`: the hash's bits read as an unsigned
+// number, modulo `n`, so a negative hash lands in a bucket too.
 fn __bucket(h: int, n: int) -> int {
-  b: int = h % n;
-  if (b < 0) { return b + n; }
-  return b;
+  return int(unsigned(h) % unsigned(n));
 }
 
 // A set of Hashable keys, compared with == (see HashMap).
