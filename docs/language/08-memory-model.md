@@ -296,6 +296,13 @@ to an `inout` parameter, named by an `inout` local, or bound by an `inout` match
 `view`ed, since a view only reads it. For now `weak` applies to locals and class fields: not to
 struct fields, tuple or array elements, parameters or results.
 
+A `weak` local may name what a `view` names: a `view` parameter, or part of `self` in a
+`view fn`. It takes no reference of its own, so the view is not copied, and what it reads is
+a fresh reference to the object, which the method may bind, read and return. That is how a
+`view fn` walks a chain of objects reached from `self` without copying a reference out of
+the view (a plain local could not hold one): `weak cur = self.head;` then `match cur { n: Node
+{ ...; cur = n.next; } None { } }`.
+
 The object's memory is kept, empty, while `weak` references to it remain (its own references
 are released when it is destroyed), and freed with the last of them — so a program that drops
 its weak references frees everything, as `--track-heap` shows.

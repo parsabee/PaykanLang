@@ -177,7 +177,9 @@ and `self` is read-only in its body: through `self` it cannot
   `inout` local;
 - pass `self` or its fields to a parameter that is not `view`, or store `self` or a
   reference reached through it ([A `view` stays a
-  `view`](02-functions-and-calling.md#a-view-stays-a-view)).
+  `view`](02-functions-and-calling.md#a-view-stays-a-view)); a `weak` local may name a
+  reference reached through `self`, since it takes none
+  ([Weak references](08-memory-model.md#weak-references)).
 
 Each is an error that names the method: `'self' is read-only in 'view fn value'; 'tick' is
 not a 'view fn'`. Other objects can change as usual.
