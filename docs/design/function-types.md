@@ -99,9 +99,10 @@ outside the lambda) and recorded on the `LambdaExpr`, in first-use order.
 ## Run-time representation
 
 A closure is an object of a class the lowering synthesises per lambda (and
-per named function used as a value): two-word header, then one field per
-capture; its vtable is `[destroy, toString, equals, call]`, the first three
-the runtime's object defaults (`PaykanObject_toString`, `PaykanObject_equals`)
+per named function used as a value): the object header, then one field per
+capture (a `weak` variable's a `weak` field, docs/design/weak-references.md);
+its vtable is `[destroy, toString, equals, call]`, the first three the
+runtime's object defaults (`PaykanObject_toString`, `PaykanObject_equals`)
 and a generated `destroy` that releases the captures.  Slot 3, `call`, has the
 signature `(obj self, params...) -> result` with the parameters passed as a
 method's are (a `view` reference as a borrowed box, an `inout` as the address

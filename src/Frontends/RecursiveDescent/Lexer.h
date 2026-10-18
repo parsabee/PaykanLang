@@ -54,6 +54,7 @@ enum class Tok : uint8_t {
   KwView, // parameter modes
   KwInout,
   KwLet,
+  KwWeak,
   Underscore, // `_` (destructuring skip / match wildcard); `_x` is an Ident
   // Punctuation and operators
   Assign,     // =
