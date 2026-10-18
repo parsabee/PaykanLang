@@ -49,9 +49,9 @@ TEST(PaykanType, CopyRetainsAndDropReleasesItsReferences) {
   EXPECT_EQ(b.n, 7);
   EXPECT_EQ(b.maybe, nullptr);
   EXPECT_EQ(b.ref, a.ref);
-  EXPECT_EQ(a.ref->refCount, 2);
+  EXPECT_EQ(a.ref->strong, 2);
   PaykanType_drop(&kPair.head, &b);
-  EXPECT_EQ(a.ref->refCount, 1);
+  EXPECT_EQ(a.ref->strong, 1);
   PaykanType_drop(&kPair.head, &a);
 }
 

@@ -285,6 +285,9 @@ bool Parser::errorAtCurrent(const std::string &expected) {
            ")";
   else if (t.Kind == Tok::KwLet)
     hint = " ('let' only starts a local declaration: 'let x = 1;')";
+  else if (t.Kind == Tok::KwWeak)
+    hint = " ('weak' only starts the declaration of a weak reference, a local "
+           "or a class field: 'weak y: Point? = x;')";
   error(t.Loc, "unexpected " + found + "; " + expected + hint);
   return true;
 }
@@ -679,13 +682,19 @@ ClassDecl *Parser::parseClassDecl() {
         body.Methods.push_back(m);
         continue;
       }
-    } else if (at(Tok::Ident)) {
+    } else if (at(Tok::Ident) || (at(Tok::KwWeak) && kind(1) == Tok::Ident)) {
+      // `weak next: Node?;`: a field holding a weak reference.
+      const bool weak = accept(Tok::KwWeak);
       if (auto *f = parseVarDecl()) {
+        f->setWeak(weak);
         if (expect(Tok::Semi, "after the field declaration")) {
           body.Fields.push_back(f);
           continue;
         }
       }
+    } else if (at(Tok::KwWeak)) {
+      errorAtCurrent("expected a field name after 'weak': 'weak next: " +
+                     std::string(name) + "?;'");
     } else if (at(Tok::KwStatic)) {
       errorAtCurrent("a 'static fn' goes in an 'impl' block, not the class "
                      "body: 'impl " +
@@ -753,6 +762,10 @@ StructDecl *Parser::parseStructDecl() {
           continue;
         }
       }
+    } else if (at(Tok::KwWeak)) {
+      errorAtCurrent("a struct field cannot be 'weak': a weak reference is a "
+                     "field of a class or a local (a struct is a value, "
+                     "copied with its fields)");
     } else if (at(Tok::KwFn) || at(Tok::KwStatic) ||
                (at(Tok::KwView) && kind(1) == Tok::KwFn)) {
       errorAtCurrent("a struct body holds fields only ('name: Type;'); a "
@@ -1194,6 +1207,9 @@ bool Parser::parseStatement(Stmt *&out) {
   case Tok::KwLet:
     return parseLetDecl(out);
 
+  case Tok::KwWeak:
+    return parseWeakDecl(out);
+
   case Tok::KwView:
   case Tok::KwInout:
     // `view x = e;`, with the mode before the name.
@@ -1335,6 +1351,56 @@ bool Parser::parseLetDecl(Stmt *&out) {
   // `;` is only part of the statement; both start at `let`.
   auto *vd = Ctx.make<VarDecl>(span(start), name, ty, init);
   vd->setLet(true);
+  auto *ds = Ctx.make<DeclStmt>(span(start), vd);
+  if (!expect(Tok::Semi, "after the declaration"))
+    return false;
+  out = ds;
+  return true;
+}
+
+// weakDecl ::= "weak" IDENT ( ":" typeAnnotation )? ( "=" expression )? ";"
+//
+// A weak reference (docs/language/08-memory-model.md): the type is `T?` of a
+// class `T` (Sema checks), given or inferred from the initializer; without
+// an initializer the local starts as None.
+bool Parser::parseWeakDecl(Stmt *&out) {
+  SourceLocation start = consume().Loc; // "weak"
+  if (!at(Tok::Ident)) {
+    errorAtCurrent("expected a variable name after 'weak'");
+    return false;
+  }
+  const std::string &name = intern(consume().Text);
+  Type *ty = nullptr;
+  if (accept(Tok::Colon)) {
+    if (at(Tok::KwView) || at(Tok::KwInout)) {
+      error(cur().Loc, "a 'weak' local is not a borrow: it holds a weak "
+                       "reference of its own, so it cannot be '" +
+                           std::string(cur().Text) + "'");
+      return false;
+    }
+    ty = parseTypeAnnotation();
+    if (!ty)
+      return false;
+  }
+  if (at(Tok::Comma)) {
+    error(cur().Loc, "'weak' declares one variable; destructuring with "
+                     "'weak' is not supported");
+    return false;
+  }
+  Expr *init = nullptr;
+  if (accept(Tok::Assign)) {
+    init = parseExpression();
+    if (!init)
+      return false;
+  }
+  if (!ty && !init) {
+    error(start, "a 'weak' declaration needs a type or an initial value: "
+                 "'weak " +
+                     std::string(name) + ": Point? = x;'");
+    return false;
+  }
+  auto *vd = Ctx.make<VarDecl>(span(start), name, ty, init);
+  vd->setWeak(true);
   auto *ds = Ctx.make<DeclStmt>(span(start), vd);
   if (!expect(Tok::Semi, "after the declaration"))
     return false;

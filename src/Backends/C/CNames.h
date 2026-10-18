@@ -58,6 +58,7 @@ inline constexpr const char *kDoublePtr = "double *";
 inline constexpr const char *kRtShared = "PaykanShared";
 inline constexpr const char *kRtObjPtr = "PaykanObject *";
 inline constexpr const char *kRtBoxPtr = "PaykanShared *";
+inline constexpr const char *kRtWeakPtr = "PaykanWeak *";
 inline constexpr const char *kRtStrPtr = "PaykanString *";
 /// A vtable slot (Runtime.h): the generic function-pointer type every
 /// vtable -- the runtime's and the generated `pkvt_<class>` -- is an array of.
@@ -67,7 +68,8 @@ inline constexpr const char *kRtVTableOf = "Paykan_vtable_of";
 
 // The header fields of every Paykan object struct (PaykanObject's layout).
 inline constexpr const char *kFieldVTable = "vtable";
-inline constexpr const char *kFieldShared = "shared";
+inline constexpr const char *kFieldStrong = "strong";
+inline constexpr const char *kFieldWeak = "weak";
 
 // -- C operators
 

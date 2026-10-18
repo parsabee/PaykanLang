@@ -36,6 +36,6 @@ TEST(OptionalNull, EqualsWithNullOtherIsFalse) {
   EXPECT_EQ(PaykanObject_equals(o, nullptr), 0);
   PaykanString *s = PaykanString_new("x", 1);
   EXPECT_EQ(PaykanString_equals((PaykanObject *)s, nullptr), 0);
-  PaykanString_destroy((PaykanObject *)s);
-  PaykanObject_destroy(o);
+  Paykan_dispose((PaykanObject *)s);
+  Paykan_dispose(o);
 }

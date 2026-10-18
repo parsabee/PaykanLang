@@ -158,3 +158,5 @@ defaults:
     values: { title: "Design: function types", parent: Implementation and plugins, nav_order: 10 }
   - scope: { path: design/visibility.md }
     values: { title: "Design: private members", parent: Implementation and plugins, nav_order: 11 }
+  - scope: { path: design/weak-references.md }
+    values: { title: "Design: weak references", parent: Implementation and plugins, nav_order: 12 }

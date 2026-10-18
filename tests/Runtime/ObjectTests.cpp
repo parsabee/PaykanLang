@@ -18,13 +18,13 @@ extern "C" {
 TEST(ObjectNew, AllocatesObject) {
   PaykanObject *obj = PaykanObject_new();
   ASSERT_NE(obj, nullptr);
-  PaykanObject_destroy(obj);
+  Paykan_dispose(obj);
 }
 
 TEST(ObjectNew, VtableIsObjectVtable) {
   PaykanObject *obj = PaykanObject_new();
   EXPECT_EQ(obj->vtable, PaykanObject_vtable);
-  PaykanObject_destroy(obj);
+  Paykan_dispose(obj);
 }
 
 // -- PaykanObject_toString
@@ -36,7 +36,7 @@ TEST(ObjectToString, ContainsObjectPrefix) {
   ASSERT_NE(s, nullptr);
   EXPECT_NE(std::string(s->data).find("Object@"), std::string::npos);
   Paykan_release(shared);
-  PaykanObject_destroy(obj);
+  Paykan_dispose(obj);
 }
 
 TEST(ObjectToString, ReturnsNewStringEachCall) {
@@ -51,7 +51,7 @@ TEST(ObjectToString, ReturnsNewStringEachCall) {
   EXPECT_STREQ(s1->data, s2->data);
   Paykan_release(sh1);
   Paykan_release(sh2);
-  PaykanObject_destroy(obj);
+  Paykan_dispose(obj);
 }
 
 // -- PaykanObject_equals
@@ -59,15 +59,15 @@ TEST(ObjectToString, ReturnsNewStringEachCall) {
 TEST(ObjectEquals, SameObjectIsEqual) {
   PaykanObject *obj = PaykanObject_new();
   EXPECT_EQ(paykanTestEquals(PaykanObject_equals, obj, obj), 1);
-  PaykanObject_destroy(obj);
+  Paykan_dispose(obj);
 }
 
 TEST(ObjectEquals, DifferentObjectsAreNotEqual) {
   PaykanObject *a = PaykanObject_new();
   PaykanObject *b = PaykanObject_new();
   EXPECT_EQ(paykanTestEquals(PaykanObject_equals, a, b), 0);
-  PaykanObject_destroy(a);
-  PaykanObject_destroy(b);
+  Paykan_dispose(a);
+  Paykan_dispose(b);
 }
 
 // -- Vtable dispatch
@@ -79,8 +79,8 @@ TEST(ObjectVtable, VTableOfReadsTheHeader) {
   PaykanString *s = PaykanString_new("x", 1);
   EXPECT_EQ(Paykan_vtable_of(s), PaykanString_vtable);
   EXPECT_EQ(Paykan_vtable_of(&PaykanFile_Stdin), PaykanFile_Stdin.vtable);
-  PaykanString_destroy((PaykanObject *)s);
-  PaykanObject_destroy(obj);
+  Paykan_dispose((PaykanObject *)s);
+  Paykan_dispose(obj);
 }
 
 TEST(ObjectVtable, ToStringViaVtable) {
@@ -90,13 +90,13 @@ TEST(ObjectVtable, ToStringViaVtable) {
   ASSERT_NE(s, nullptr);
   EXPECT_NE(std::string(s->data).find("Object@"), std::string::npos);
   Paykan_release(shared);
-  PaykanObject_destroy(obj);
+  Paykan_dispose(obj);
 }
 
 TEST(ObjectVtable, EqualsViaVtable) {
   PaykanObject *obj = PaykanObject_new();
   EXPECT_EQ(paykanTestEquals(vtEquals(obj), obj, obj), 1);
-  PaykanObject_destroy(obj);
+  Paykan_dispose(obj);
 }
 
 TEST(ObjectVtable, DestroyViaVtable) {
@@ -123,7 +123,7 @@ TEST(ObjectNone, EqualsOnlyItself) {
   EXPECT_EQ(
       paykanTestEquals(vtEquals(&PaykanObject_None), &PaykanObject_None, other),
       0);
-  PaykanObject_destroy(other);
+  Paykan_dispose(other);
 }
 
 TEST(ObjectNone, DestroyIsNoOp) {

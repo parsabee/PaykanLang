@@ -1188,6 +1188,65 @@ TEST(Pkm, StructAndClassInstantiationsOfOneNameConflict) {
   fs::remove_all(dir);
 }
 
+// A `weak` field crosses modules and prebuilt `.pkm` files: the importer
+// stores and reads it as a weak reference (the interface records the flag),
+// so a tree built from another module's class is freed with its root.
+TEST(Pkm, WeakFieldsAcrossModules) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_weak_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "tree.pkn",
+            "class Node {\n"
+            "  name: Str;\n"
+            "  weak parent: Node?;\n"
+            "  first: Node?;\n"
+            "  next: Node?;\n"
+            "  fn add(child: Node) {\n"
+            "    child.parent = self; child.next = self.first; self.first = "
+            "child; }\n"
+            "  fn path() -> Str {\n"
+            "    match self.parent { p: Node { return p.path() + \"/\" + "
+            "self.name; } None { return self.name; } } }\n"
+            "}\n"
+            "impl Node { fn __init__(name: Str) { self.name = name; "
+            "self.parent = None; self.first = None; self.next = None; } }\n");
+  writeFile(dir / "main.pkn",
+            "import tree;\n"
+            "fn main() -> int {\n"
+            "  root = tree::Node(\"root\");\n"
+            "  a = tree::Node(\"a\");\n"
+            "  root.add(a);\n"
+            "  a.parent = root;\n"
+            "  weak w = root;\n"
+            "  print(a.path() + \" \");\n"
+            "  root = tree::Node(\"other\");\n"
+            "  print(a.path() + \" \");\n"
+            "  match w { n: tree::Node { println(n.name); } None { "
+            "println(\"gone\"); } }\n"
+            "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  const std::string expected = "root/a a gone\n";
+  auto src = paykan("--track-heap main.pkn");
+  ASSERT_EQ(src.exitCode, 0) << src.out;
+  EXPECT_TRUE(contains(src.out, expected)) << src.out;
+  EXPECT_TRUE(contains(src.out, "live blocks       : 0")) << src.out;
+  ASSERT_EQ(paykan("--emit-pkm tree.pkn").exitCode, 0);
+  fs::remove(dir / "tree.pkn");
+  auto pkm = paykan("--track-heap main.pkn");
+  ASSERT_EQ(pkm.exitCode, 0) << pkm.out;
+  EXPECT_TRUE(contains(pkm.out, expected)) << pkm.out;
+  EXPECT_TRUE(contains(pkm.out, "live blocks       : 0")) << pkm.out;
+  auto dump = paykan("pkm dump --section=iface tree.pkm");
+  for (const char *line :
+       {"    field name: Str", "    weak field parent: Node?",
+        "    field first: Node?"})
+    EXPECT_TRUE(contains(dump.out, line)) << line << "\n" << dump.out;
+  fs::remove_all(dir);
+}
+
 // A generic struct is a template like a generic class: its module, and a
 // module that instantiates it, are built from source each time, and the
 // instantiation is one struct whoever makes it.

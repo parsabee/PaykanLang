@@ -25,14 +25,10 @@ inline int64_t paykanTestEquals(int64_t (*fn)(PaykanObject *, PaykanShared *),
   PaykanShared *box = PaykanShared_new(other);
   Paykan_retain(box); // offset the release performed by the callee
   int64_t result = fn(self, box);
-  // Drop the final reference without destroying `other` (the test owns it):
-  // detach the object from the box, then release — refcount hits zero with a
-  // null object, so only the shell is freed. Clearing the backpointer keeps
-  // the unique-box invariant intact for any later boxing of `other`.
-  if (other && other->shared == box)
-    other->shared = nullptr;
-  box->object = nullptr;
-  Paykan_release(box);
+  // Drop the extra reference without destroying `other` (the test owns it,
+  // and disposes of it itself): the count goes back to what it was.
+  if (other)
+    --other->strong;
   return result;
 }
 

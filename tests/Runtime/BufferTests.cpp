@@ -111,20 +111,20 @@ TEST(Buffer, ReferencesAreRetainedAndReleased) {
   PaykanShared *buf = PaykanBuffer_new(&kStr.head, 2);
   PaykanShared *a = str("a");
   PaykanBuffer_set(&kStr.head, &buf, 0, &a);
-  EXPECT_EQ(a->refCount, 2);
+  EXPECT_EQ(a->strong, 2);
   EXPECT_EQ(boxAt(kStr, buf, 0), a);
-  EXPECT_EQ(a->refCount, 2);
+  EXPECT_EQ(a->strong, 2);
   PaykanShared *got = nullptr;
   PaykanBuffer_copy(&kStr.head, &got, obj(buf), 0);
   EXPECT_EQ(text(got), "a");
-  EXPECT_EQ(a->refCount, 3);
+  EXPECT_EQ(a->strong, 3);
   Paykan_release(got);
   // Overwriting releases the old value; storing it again is safe.
   PaykanBuffer_set(&kStr.head, &buf, 0, &a);
-  EXPECT_EQ(a->refCount, 2);
+  EXPECT_EQ(a->strong, 2);
   PaykanShared *b = str("b");
   PaykanBuffer_set(&kStr.head, &buf, 0, &b);
-  EXPECT_EQ(a->refCount, 1);
+  EXPECT_EQ(a->strong, 1);
   Paykan_release(a);
   PaykanBuffer_set(&kStr.head, &buf, 1, &b);
   Paykan_release(b);
@@ -139,7 +139,7 @@ TEST(Buffer, OptionalValuesStartAsNone) {
   PaykanBuffer_set(&kOpt.head, &buf, 0, &a);
   PaykanShared *none = nullptr;
   PaykanBuffer_set(&kOpt.head, &buf, 0, &none);
-  EXPECT_EQ(a->refCount, 1);
+  EXPECT_EQ(a->strong, 1);
   Paykan_release(a);
   Paykan_release(buf);
 }
@@ -152,7 +152,7 @@ TEST(Buffer, HoldsValuesOfAnySize) {
   Wide w = {7, str("w"), true};
   PaykanBuffer_set(&kWide.head, &buf, 0, &w);
   PaykanBuffer_set(&kWide.head, &buf, 1, &w);
-  EXPECT_EQ(w.ref->refCount, 3);
+  EXPECT_EQ(w.ref->strong, 3);
   const char *first = (const char *)PaykanBuffer_get(&kWide.head, obj(buf), 0);
   const char *second = (const char *)PaykanBuffer_get(&kWide.head, obj(buf), 1);
   EXPECT_EQ(second - first, (ptrdiff_t)sizeof(Wide));
@@ -160,10 +160,10 @@ TEST(Buffer, HoldsValuesOfAnySize) {
   PaykanBuffer_copy(&kWide.head, &got, obj(buf), 1);
   EXPECT_EQ(got.n, 7);
   EXPECT_TRUE(got.flag);
-  EXPECT_EQ(w.ref->refCount, 4);
+  EXPECT_EQ(w.ref->strong, 4);
   PaykanType_drop(&kWide.head, &got);
   PaykanBuffer_shrink(&kWide.head, &buf, 1);
-  EXPECT_EQ(w.ref->refCount, 2);
+  EXPECT_EQ(w.ref->strong, 2);
   Paykan_release(w.ref);
   Paykan_release(buf);
 }
@@ -198,7 +198,7 @@ TEST(Buffer, ShrinkReleasesTheDroppedReferences) {
   PaykanShared *a = str("a");
   PaykanBuffer_set(&kStr.head, &buf, 2, &a);
   PaykanBuffer_shrink(&kStr.head, &buf, 2);
-  EXPECT_EQ(a->refCount, 1);
+  EXPECT_EQ(a->strong, 1);
   Paykan_release(a);
   Paykan_release(buf);
 }
