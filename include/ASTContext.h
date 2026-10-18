@@ -10,6 +10,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
@@ -75,6 +76,14 @@ class ASTContext {
   // getTupleType).  Key: the element Type* pointers, each canonical, so that
   // `(int, (Str, bool))` resolves to one node everywhere.
   std::map<std::vector<Type *>, TupleType *> TupleTypes;
+
+  // -- Function types
+  // Canonical FunctionType per (parameter types, modes, result type), lazily
+  // created by getFunctionType; the parts are canonical, so a function type's
+  // identity is pointer identity.
+  std::map<std::tuple<std::vector<Type *>, std::vector<ParamMode>, Type *>,
+           FunctionType *>
+      FunctionTypes;
 
   // -- Bootstrap helpers (called from the constructor)
   void buildObjectType();
@@ -184,6 +193,11 @@ public:
   /// it on first use.  Each element must itself be canonical (see
   /// getFixedArrayType) so that tuple type identity is pointer identity.
   TupleType *getTupleType(std::vector<Type *> elemTys);
+
+  /// Return the canonical FunctionType of the given parameter types and
+  /// modes and result type (each canonical), creating it on first use.
+  FunctionType *getFunctionType(std::vector<Type *> paramTys,
+                                std::vector<ParamMode> modes, Type *retTy);
 
   /// Return the canonical BuiltinType* for a given Kind.
   BuiltinType *getBuiltinType(BuiltinType::Kind k) const;

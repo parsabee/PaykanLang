@@ -317,6 +317,8 @@ private:
 
   bool exprAlreadyShared(ast::Expr *expr) const;
   bool exprProducesFreshBox(ast::Expr *expr) const;
+  /// A lambda, or a function used as a value: a fresh closure box.
+  static bool isFunctionValueExpr(const ast::Expr *expr);
   ExprValue classifyExpr(ast::Expr *expr, const Val &val) const;
   void releaseIfOwned(const ExprValue &ev);
   Val takeSharedOwnership(ast::Expr *expr, const Val &val);
@@ -499,6 +501,41 @@ private:
   Val lowerMemberAccessExpr(ast::MemberAccessExpr *node);
   /// Runtime symbol implementing @p name for the builtin class @p ct, or "".
   const char *builtinMethodSymbol(ast::ClassType *ct, const std::string &name);
+
+  // -- Function values (LoweringClosure.cpp,
+  // docs/language/15-function-types.md)
+
+  /// The closure classes made so far: per lambda, and per named function
+  /// used as a value.
+  std::unordered_map<const ast::LambdaExpr *, std::string> LambdaClasses;
+  std::unordered_map<std::string, std::string> FunctionRefClasses;
+  unsigned NextClosureId = 0;
+  /// The `call` slot's signature for a closure of type @p fnt: the closure
+  /// object, then the parameters as a method's, a result held in memory
+  /// written through a trailing pointer.
+  pir::Signature closureSignature(ast::FunctionType *fnt);
+  /// A closure class @p name with a field per capture and the vtable
+  /// [destroy, toString, equals, call] (the functions declared, bodies to
+  /// come).
+  pir::Class *declareClosureClass(const std::string &name,
+                                  const std::vector<ast::Type *> &captureTys,
+                                  const pir::Signature &callSig);
+  void emitClosureDestructor(const std::string &name,
+                             const std::vector<ast::Type *> &captureTys);
+  /// The class and functions of lambda @p node (made once): its name.
+  const std::string &lowerLambda(ast::LambdaExpr *node);
+  /// A new closure of @p node, its captures copied in: a fresh owned box.
+  Val emitLambdaValue(ast::LambdaExpr *node);
+  /// A closure class whose `call` forwards to the function @p fnName (made
+  /// once per function): its name.
+  const std::string &lowerFunctionRef(const std::string &fnName,
+                                      ast::FunctionType *fnt);
+  Val emitFunctionRefValue(const std::string &fnName, ast::FunctionType *fnt);
+  /// Call the closure object @p closure (borrowed for the call) of type
+  /// @p fnt with @p argExprs; @p resultTy is the call's resolved type.
+  Val emitClosureCall(const Val &closure, ast::FunctionType *fnt,
+                      const std::vector<ast::Expr *> &argExprs,
+                      ast::Type *resultTy, bool wantAddress);
 
   // -- Structs (LoweringStruct.cpp, docs/language/14-structs.md)
   //

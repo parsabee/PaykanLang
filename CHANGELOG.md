@@ -31,6 +31,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A generic class or struct whose method instantiates its template with an ever-growing
   type argument (`Deep<Deep<T>>`) is now reported (`exceeds the maximum instantiation
   depth`) instead of instantiating without end.
+- Function types and lambdas (docs/language/15-function-types.md, design in
+  docs/design/function-types.md): `(int, float) -> bool` is the type of a function
+  value, with the parameters' modes part of it (`(view Str, inout int) -> bool`) and the
+  result a copy; `() -> R` takes no parameter, `-> void` returns nothing, `->` is
+  right-associative, and `((int) -> int)[3]` / `((int) -> int)?` give a function type a
+  suffix.  A value is a lambda `fn(x: int) -> int { return x + 1; }`, or a named function
+  used without calling it (`square`, `m::square`, `Point::origin`).  A lambda captures the
+  variables of the function it is written in by copy (a reference retained, a value held in
+  place copied), read-only inside it; a `view`, an `inout`, a `view fn`'s `self` or a
+  struct method's `self` cannot be captured.  A function value is called like a function
+  (`f(1)`, `obj.cb(1)`, `fs[0](1)`), with the arguments checked and passed as for the
+  function's own parameters.  A closure is a reference with identity (`==`), released like
+  an object; it is not an `Obj`.  Function types go in every type position, cross modules
+  and prebuilt `.pkm` files, and are type arguments (`List<(int) -> int>`).  At run time a
+  closure is an object of a class the compiler makes per lambda, called through a fourth
+  vtable slot; the PIR format, the runtime ABI and the `.pkm` format are unchanged.  Not
+  yet: borrowed results in a function type, methods and generic functions as values,
+  inferred lambda parameter types, capture by reference.
 
 - The standard library ships with the compiler (docs/language/13-standard-library.md), in
   `stdlib/`: `::collections` has `List<T>`, `LinkedList<T>` (doubly linked and circular

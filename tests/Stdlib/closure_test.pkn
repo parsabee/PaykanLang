@@ -1,0 +1,38 @@
+// Function values (docs/language/15-function-types.md) in the collections:
+// a closure is a reference with identity, so it is an element of a
+// List<T>, found by `contains` and `indexOf`, and a value of a HashMap.
+import ::collections;
+
+fn square(x: int) -> int { return x * x; }
+
+fn main() -> int {
+  fs = collections::List<(int) -> int>();
+  fs.push(square);
+  fs.push(fn(x: int) -> int { return x + 1; });
+  double = fn(x: int) -> int { return x * 2; };
+  fs.push(double);
+  i = 0;
+  total = 0;
+  while (i < fs.len()) {
+    f = fs.get(i);
+    total = total + f(3);
+    i = i + 1;
+  }
+  println(Str(total) + " " + Str(fs.contains(double)) + " " + Str(fs.indexOf(double)) +
+          " " + Str(fs.contains(fn(x: int) -> int { return x * 2; })));
+
+  greetings = collections::HashMap<Str, (Str) -> Str>();
+  greetings.put("en", fn(n: Str) -> Str { return "hello " + n; });
+  greetings.put("fr", fn(n: Str) -> Str { return "bonjour " + n; });
+  g = greetings.get("fr");
+  println(g("pat") + " " + Str(greetings.containsKey("de")) + " " + Str(greetings.len()));
+
+  stack = collections::Stack<() -> int>();
+  n = 1;
+  stack.push(fn() -> int { return n; });
+  n = 2;
+  stack.push(fn() -> int { return n; });
+  top = stack.pop();
+  println(Str(top()) + " " + Str(stack.len()));
+  return 0;
+}

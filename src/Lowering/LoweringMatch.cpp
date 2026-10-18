@@ -124,10 +124,14 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
       typeArms.push_back({nullptr, primInner, /*MatchesAnySome=*/true, arm});
       continue;
     }
+    // A class arm is an exact-type test; the arm naming an optional's
+    // wrapped type (a class, or a function type, whose closures have no
+    // class) matches every present value.
     ast::ClassType *armCt = ast::dyn_cast<ast::ClassType>(arm->getArmType());
-    ast::Type *bindTy = armCt;
-    assert(armCt && "Sema should have verified arm type exists");
+    ast::Type *bindTy = arm->getArmType();
     bool matchesAnySome = optTy && arm->getArmType() == optTy->getInnerType();
+    assert((armCt || matchesAnySome) &&
+           "Sema should have verified arm type exists");
     typeArms.push_back({armCt, bindTy, matchesAnySome, arm});
   }
 

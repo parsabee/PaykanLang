@@ -1603,30 +1603,70 @@ Type *Parser::parsePrimaryType() {
   if (accept(Tok::LParen)) {
     if (!enterNesting())
       return nullptr;
+    // `(T1, T2)` is a tuple type and `(T1, T2) -> R` a function type: the
+    // `->` after the `)` decides, so the elements are parsed alike, a
+    // parameter's mode kept until it is known which it is.
     std::vector<Type *> elems;
-    Type *first = parseTypeAnnotation();
-    if (!first) {
-      leaveNesting();
-      return nullptr;
+    std::vector<ParamMode> modes;
+    SourceLocation firstModeLoc;
+    bool anyMode = false;
+    if (!at(Tok::RParen)) {
+      do {
+        ParamMode mode = ParamMode::Value;
+        if (at(Tok::KwView) || at(Tok::KwInout)) {
+          if (!anyMode)
+            firstModeLoc = cur().Loc;
+          anyMode = true;
+          mode = consume().Kind == Tok::KwView ? ParamMode::View
+                                               : ParamMode::Inout;
+        }
+        Type *t = parseTypeAnnotation();
+        if (!t) {
+          leaveNesting();
+          return nullptr;
+        }
+        elems.push_back(t);
+        modes.push_back(mode);
+      } while (accept(Tok::Comma));
     }
-    elems.push_back(first);
-    if (!expect(Tok::Comma, "(a tuple type needs at least two element types; "
-                            "there are no parenthesised types)")) {
-      leaveNesting();
-      return nullptr;
-    }
-    do {
-      Type *t = parseTypeAnnotation();
-      if (!t) {
-        leaveNesting();
+    leaveNesting();
+    const bool functionType = at(Tok::RParen) && kind(1) == Tok::Arrow;
+    if (!functionType) {
+      if (elems.empty()) {
+        errorAtCurrent("expected a type");
         return nullptr;
       }
-      elems.push_back(t);
-    } while (accept(Tok::Comma));
-    leaveNesting();
-    if (!expect(Tok::RParen, "to close the tuple type"))
+      if (anyMode) {
+        error(firstModeLoc, "a tuple element has no mode: 'view' and 'inout' "
+                            "go on a function type's parameters ('(view Str) "
+                            "-> int')");
+        return nullptr;
+      }
+      // `((int) -> int)[3]`: a function type takes a suffix in parentheses.
+      if (elems.size() == 1 && !isa<FunctionType>(elems[0]) &&
+          !expect(Tok::Comma,
+                  "(a tuple type needs at least two element types; there "
+                  "are no parenthesised types)"))
+        return nullptr;
+      if (!expect(Tok::RParen, "to close the tuple type"))
+        return nullptr;
+      if (elems.size() == 1)
+        return elems[0];
+      return Ctx.make<TupleType>(span(start), std::move(elems));
+    }
+    consume(); // ')'
+    consume(); // '->'
+    if (at(Tok::KwView) || at(Tok::KwInout)) {
+      error(cur().Loc, "a function type's result is a copy: '-> " +
+                           std::string(cur().Text) +
+                           " T' is not supported in a function type");
       return nullptr;
-    return Ctx.make<TupleType>(span(start), std::move(elems));
+    }
+    Type *ret = parseTypeAnnotation();
+    if (!ret)
+      return nullptr;
+    return Ctx.make<FunctionType>(span(start), std::move(elems),
+                                  std::move(modes), ret);
   }
 
   if (!at(Tok::Ident)) {
@@ -1807,6 +1847,17 @@ Expr *Parser::parsePostfix() {
   if (!e)
     return nullptr;
   for (;;) {
+    if (at(Tok::LParen)) {
+      // `xs[0](1)`, `t.0(x)`, `make()(2)`: a call of a function value that
+      // is not named (a named one is a CallExpr or a MethodCallExpr).
+      consume();
+      std::vector<Expr *> args;
+      if (!parseArgumentList(Tok::RParen, args) ||
+          !expect(Tok::RParen, "to close the argument list"))
+        return nullptr;
+      e = Ctx.make<CallValueExpr>(span(start), e, std::move(args));
+      continue;
+    }
     if (at(Tok::Dot)) {
       Token dot = consume();
       if (at(Tok::Int) && cur().Offset == dot.Offset + 1) {
@@ -1987,6 +2038,37 @@ Expr *Parser::parsePrimary() {
     if (!expect(Tok::RParen, "to close the tuple literal"))
       return nullptr;
     return Ctx.make<TupleLiteralExpr>(span(start), std::move(elems));
+  }
+
+  case Tok::KwFn: {
+    // A lambda: a function without a name, in expression position.
+    consume();
+    if (!expect(Tok::LParen, "after 'fn' (a lambda has no name: 'fn(x: int) "
+                             "-> int { ... }')"))
+      return nullptr;
+    std::vector<Param> params;
+    if (!parseParamList(params) ||
+        !expect(Tok::RParen, "to close the parameter list"))
+      return nullptr;
+    Type *retTy = nullptr;
+    if (accept(Tok::Arrow)) {
+      if (at(Tok::KwView) || at(Tok::KwInout)) {
+        error(cur().Loc, "a lambda's result is a copy: '-> " +
+                             std::string(cur().Text) + " T' is not supported");
+        return nullptr;
+      }
+      retTy = parseTypeAnnotation();
+      if (!retTy)
+        return nullptr;
+    }
+    if (!at(Tok::LBrace)) {
+      errorAtCurrent("expected '{' to start the lambda's body");
+      return nullptr;
+    }
+    CompoundStmt *body = parseBlock();
+    if (!body)
+      return nullptr;
+    return Ctx.make<LambdaExpr>(span(start), std::move(params), retTy, body);
   }
 
   case Tok::LBracket: {

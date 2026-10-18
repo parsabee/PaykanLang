@@ -17,6 +17,9 @@ fn name(params) {
 - No function overloading — each name must be unique in the program.
 - Functions may be declared in any order — calling a function that is declared later in the
   file is fine (forward references are allowed).
+- A function is a value too: `f = square;` holds it, and `fn(x: int) -> int { ... }` is a
+  function without a name (a lambda).  Its type is `(int) -> int`; see
+  `15-function-types.md`.
 - `main` must return `int`; its return value becomes the process exit code. `main` may
   optionally take the command-line arguments:
 
@@ -608,3 +611,4 @@ the C library and the runtime functions compiled code uses
 | Override changes a mode | An override that drops, adds or changes a parameter's `view`/`inout`, or returns a borrow where the method it overrides returns a copy (or the other way) |
 | A `view` result of something else | A `-> view T` function returns a new value, a copy parameter or a local, not part of `self` or of a `view` / `inout` parameter |
 | An `inout` result of something else | A `-> inout T` function returns what an `inout` argument could not be, or what is not part of `self` or of an `inout` parameter, or another type; a `view fn` returns `inout`; the receiver of a method returning `inout` is not a variable or a field |
+| A function value misused | A builtin, a constructor, a generic function or a function returning a borrow used as a value; a call through a variable that is not a function; wrong arguments to a function value; a lambda capturing a borrow or assigning a captured name (see `15-function-types.md`) |

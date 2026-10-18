@@ -770,6 +770,33 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
   if (ast::isa<ast::StructType>(ty))
     return ty;
 
+  if (auto *fnt = ast::dyn_cast<ast::FunctionType>(ty)) {
+    // `(int, view Str) -> bool`: the parameters as a function's (a slice
+    // for a `view` or `inout` one, a fixed-size array for any), the result
+    // any type but a fixed-size array; then the canonical instance.
+    std::vector<ast::Type *> params;
+    std::vector<ast::ParamMode> modes;
+    for (size_t i = 0; i < fnt->getNumParams(); ++i) {
+      const std::string what = context + " parameter " + std::to_string(i + 1);
+      FixedArrayAllowed = true;
+      SliceAllowed = fnt->getMode(i) != ast::ParamMode::Value;
+      auto *pty = resolveType(fnt->getParamType(i), loc, what);
+      if (!pty)
+        return nullptr;
+      if (pty == Ctx.getVoidTy()) {
+        error(loc, what + " cannot have type 'void'");
+        return nullptr;
+      }
+      params.push_back(pty);
+      modes.push_back(fnt->getMode(i));
+    }
+    FixedArrayAllowed = true; // a result may be a fixed-size array
+    auto *ret = resolveType(fnt->getReturnType(), loc, context + " result");
+    if (!ret)
+      return nullptr;
+    return Ctx.getFunctionType(std::move(params), std::move(modes), ret);
+  }
+
   if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
     std::vector<ast::Type *> elems;
     elems.reserve(tt->getArity());
@@ -921,13 +948,80 @@ ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
                                      "' cannot be used as a value");
     return nullptr;
   }
+  // A function used as a value (`f = square;`): its function type.
+  if (!S.CurrentScope->lookup(node->getName())) {
+    if (const FunctionSig *sig = S.lookupFunction(node->getName())) {
+      if (!S.checkFunctionValue(node->getName(), *sig, node->getLocation()))
+        return nullptr;
+      node->setFunctionRef(true);
+      auto *fnt = S.functionTypeOf(*sig);
+      node->setResolvedType(fnt);
+      return fnt;
+    }
+    if (S.FuncTemplates.count(node->getName())) {
+      S.error(node->getLocation(),
+              "'" + node->getName() +
+                  "' is a generic function; a generic function cannot be a "
+                  "function value yet (wrap a call to it in a lambda)");
+      return nullptr;
+    }
+  }
   S.checkNotBorrowed(node->getName(), node->getLocation());
-  return S.checkIdentLive(node->getName(), node->getLocation());
+  ast::Type *ty = S.checkIdentLive(node->getName(), node->getLocation());
+  // Inside a lambda, a variable of the function it is written in is
+  // captured (by copy) when it is first used.
+  if (ty && !S.LambdaStack.empty() &&
+      !S.captureVariable(node->getName(), ty,
+                         S.CurrentScope->findOwner(node->getName()),
+                         node->getLocation()))
+    return nullptr;
+  return ty;
+}
+
+ast::Type *Sema::ExprChecker::visitLambdaExpr(ast::LambdaExpr *node) {
+  return S.checkLambda(node);
+}
+
+ast::Type *Sema::ExprChecker::visitCallValueExpr(ast::CallValueExpr *node) {
+  // `xs[0](1)`: the callee is any expression of function type.
+  ast::Type *calleeTy = visit(node->getCallee());
+  if (!calleeTy)
+    return nullptr;
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(calleeTy)) {
+    S.errorOptionalUnwrap(node->getLocation(), ot);
+    return nullptr;
+  }
+  auto *fnt = ast::dyn_cast<ast::FunctionType>(calleeTy);
+  if (!fnt) {
+    S.error(node->getLocation(), "a value of type '" + typeName(calleeTy) +
+                                     "' is not a function value; it cannot "
+                                     "be called");
+    return nullptr;
+  }
+  // Named by its type: the callee is an expression.
+  ast::Type *ret = S.checkFunctionValueCall(fnt, node->getArguments(),
+                                            typeName(fnt), node->getLocation());
+  if (!ret)
+    return nullptr;
+  node->setResolvedType(ret);
+  return ret;
 }
 
 ast::Type *Sema::ExprChecker::visitEnumValueExpr(ast::EnumValueExpr *node) {
   auto *enumTy = S.Ctx.lookupEnumType(node->getEnumName());
   if (!enumTy) {
+    // `m::f` or `S::f`, an imported function or a `static fn` used as a
+    // value: its function type.
+    const std::string qualified =
+        node->getEnumName() + names::kQualSep + node->getVariantName();
+    if (const FunctionSig *sig = S.lookupFunction(qualified)) {
+      if (!S.checkFunctionValue(qualified, *sig, node->getLocation()))
+        return nullptr;
+      node->setFunctionRef(S.Ctx.intern(qualified));
+      auto *fnt = S.functionTypeOf(*sig);
+      node->setResolvedType(fnt);
+      return fnt;
+    }
     if (!S.isFailedImportUse(node->getEnumName()))
       S.error(node->getLocation(),
               "unknown enum type '" + node->getEnumName() + "'");
@@ -1107,6 +1201,41 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
 }
 
 ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
+  // A call through a function value (`f(1)` with `f: (int) -> int`): the
+  // variable, which shadows a function of the same name, is read as any
+  // other (its liveness, borrows and capture checked), then called.
+  if (ast::Type *varTy = S.CurrentScope->lookup(node->getCalleeName());
+      varTy && !node->hasTypeArgs()) {
+    const std::string &name = node->getCalleeName();
+    S.checkNotBorrowed(name, node->getLocation());
+    varTy = S.checkIdentLive(name, node->getLocation());
+    if (!varTy)
+      return nullptr;
+    if (!S.LambdaStack.empty() &&
+        !S.captureVariable(name, varTy, S.CurrentScope->findOwner(name),
+                           node->getLocation()))
+      return nullptr;
+    if (auto *ot = ast::dyn_cast<ast::OptionalType>(varTy)) {
+      S.errorOptionalUnwrap(node->getLocation(), ot);
+      return nullptr;
+    }
+    auto *fnt = ast::dyn_cast<ast::FunctionType>(varTy);
+    if (!fnt) {
+      S.error(node->getLocation(), "'" + name + "' has type '" +
+                                       typeName(varTy) +
+                                       "', which is not a function type; it "
+                                       "cannot be called");
+      return nullptr;
+    }
+    ast::Type *ret = S.checkFunctionValueCall(fnt, node->getArguments(), name,
+                                              node->getLocation());
+    if (!ret)
+      return nullptr;
+    node->setCalleeIsValue(true);
+    node->setResolvedType(ret);
+    return ret;
+  }
+
   // Type-check all arguments first.  A plain call to a known function gives
   // each argument its parameter's type as the expected type (a generic call
   // infers from the arguments, so they come first there).
@@ -1389,6 +1518,29 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     if (ct ? S.isErroneousClass(ct)
            : S.ErroneousClasses.count(st->getName()) != 0) {
       ++S.SuppressedFollowOns; // the type's declaration was already reported
+      return nullptr;
+    }
+    // `obj.cb(args)` with `cb` a field of function type: a call through
+    // the field's value (the receiver is read, not changed).
+    ast::Type *fieldTy = ct ? ct->findField(node->getMethodName())
+                            : st->findField(node->getMethodName());
+    auto *fnt = fieldTy ? ast::dyn_cast<ast::FunctionType>(fieldTy) : nullptr;
+    if (fnt) {
+      ast::Type *ret =
+          S.checkFunctionValueCall(fnt, node->getArguments(),
+                                   node->getMethodName(), node->getLocation());
+      if (!ret)
+        return nullptr;
+      node->setFieldCall(true);
+      node->setResolvedType(ret);
+      return ret;
+    }
+    if (fieldTy) {
+      S.error(node->getLocation(),
+              "no method '" + node->getMethodName() + "' on type '" +
+                  ownerName + "' (its field '" + node->getMethodName() +
+                  "' has type '" + typeName(fieldTy) +
+                  "', which is not a function type)");
       return nullptr;
     }
     S.error(node->getLocation(), "no method '" + node->getMethodName() +
@@ -2510,6 +2662,12 @@ bool Sema::checkReassignable(const std::string &name, ast::SourceLocation loc) {
     error(loc,
           "'" + name + "' is declared with 'let' and cannot be reassigned");
     return false;
+  case VarKind::Captured:
+    error(loc, "cannot assign to '" + name +
+                   "': the function captures it by copy, and the copy is "
+                   "read-only (assign it before the function is made, or "
+                   "keep it in an object)");
+    return false;
   case VarKind::View:
     error(loc, "cannot assign to 'view' parameter '" + name + "'");
     return false;
@@ -2533,6 +2691,14 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
     expected = existing->lookup(node->getVarName());
   if (expected && ast::isa<ast::PoisonType>(expected))
     expected = nullptr; // a poisoned variable takes the value's own type
+  // Inside a lambda, assigning a variable of the enclosing function
+  // captures it first (and the capture, a read-only copy, is then
+  // rejected by checkReassignable below).
+  if (expected && !LambdaStack.empty() &&
+      !captureVariable(node->getVarName(), expected,
+                       CurrentScope->findOwner(node->getVarName()),
+                       node->getLocation()))
+    return false;
   auto *valTy = resolveExprType(node->getValue(), expected);
   const auto &varName = node->getVarName();
   if (!valTy) {
@@ -3555,8 +3721,10 @@ bool Sema::checkOptionalMatch(ast::MatchStmt *node,
         } else {
           bindTy = armCt;
         }
-      } else if (ast::isa<ast::BuiltinType>(inner)) {
-        // `int?`: the `int` arm unwraps the present value, a plain `int`.
+      } else if (ast::isa<ast::BuiltinType>(inner) ||
+                 ast::isa<ast::FunctionType>(inner)) {
+        // `int?`: the `int` arm unwraps the present value, a plain `int`;
+        // likewise the function type of a `((int) -> int)?`.
         if (resolvedArmTy != inner) {
           error(arm->getLocation(),
                 "match arm type '" + typeName(resolvedArmTy) +

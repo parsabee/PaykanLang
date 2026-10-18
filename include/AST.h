@@ -99,6 +99,8 @@ public:
     NK_EnumValueExpr,
     NK_TupleLiteralExpr,
     NK_TupleIndexExpr,
+    NK_CallValueExpr,
+    NK_LambdaExpr, // must stay the last Expr kind (see Expr::classof)
 
     // Types
     NK_BuiltinType,
@@ -111,6 +113,7 @@ public:
     NK_StructType, // a TupleType with a name and named fields (see TupleType)
     NK_SliceType,
     NK_PoisonType,
+    NK_FunctionType,
     NK_GenericType, // must stay the last Type kind (see Type::classof)
 
     // Match arm (child of MatchStmt, not a Stmt itself)
@@ -207,8 +210,7 @@ public:
   bool isInoutResult() const { return InoutResult; }
 
   static bool classof(const ASTNode *N) {
-    return N->getKind() >= NK_IntegerLiteral &&
-           N->getKind() <= NK_TupleIndexExpr;
+    return N->getKind() >= NK_IntegerLiteral && N->getKind() <= NK_LambdaExpr;
   }
 };
 
@@ -861,12 +863,17 @@ public:
 class Identifier : public Expr {
 private:
   const std::string *Name; // points into ASTContext::StringPool (stable)
+  // Set by Sema when the name is a function used as a value (`f = square;`,
+  // docs/language/15-function-types.md): the lowering makes a closure of it.
+  bool FunctionRef = false;
 
 public:
   Identifier(SourceLocation loc, const std::string &internedName)
       : Expr(NK_Identifier, loc), Name(&internedName) {}
 
   const std::string &getName() const { return *Name; }
+  void setFunctionRef(bool ref) { FunctionRef = ref; }
+  bool isFunctionRef() const { return FunctionRef; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_Identifier;
@@ -890,6 +897,9 @@ private:
   const std::string *CalleeName; // points into ASTContext::StringPool (stable)
   std::vector<Expr *> Arguments;
   std::vector<Type *> TypeArgs; // explicit type arguments; empty if none
+  // Set by Sema when the callee is a variable or parameter of function type
+  // (`f(1)` with `f: (int) -> int`): a call through a function value.
+  bool CalleeIsValue = false;
 
 public:
   CallExpr(SourceLocation loc, const std::string &internedCallee,
@@ -906,8 +916,81 @@ public:
   size_t getNumArguments() const { return Arguments.size(); }
   const std::vector<Type *> &getTypeArgs() const { return TypeArgs; }
   bool hasTypeArgs() const { return !TypeArgs.empty(); }
+  void setCalleeIsValue(bool v) { CalleeIsValue = v; }
+  bool calleeIsValue() const { return CalleeIsValue; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_CallExpr; }
+};
+
+// A call of a function value that is not named: `xs[0](1)`, `t.0(x)`,
+// `make()(2)` (docs/language/15-function-types.md).  A call by name is a
+// CallExpr (`f(1)`, a variable of function type) or a MethodCallExpr
+// (`obj.cb(1)`, a field of function type); the callee here is any other
+// expression, of function type.
+class CallValueExpr : public Expr {
+  Expr *Callee;
+  std::vector<Expr *> Arguments;
+
+public:
+  CallValueExpr(SourceLocation loc, Expr *callee, std::vector<Expr *> args)
+      : Expr(NK_CallValueExpr, loc), Callee(callee),
+        Arguments(std::move(args)) {}
+
+  Expr *getCallee() const { return Callee; }
+  const std::vector<Expr *> &getArguments() const { return Arguments; }
+  size_t getNumArguments() const { return Arguments.size(); }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_CallValueExpr;
+  }
+};
+
+// Lambda expression: `fn(x: int) -> int { return x + 1; }`
+// (docs/language/15-function-types.md).
+//
+// A function without a name, in expression position, whose value is a
+// closure: its body may use the variables of the function it is written in,
+// which it captures by copy when it is evaluated.  Sema records the captures
+// (the names the body uses that resolve outside the lambda, in first-use
+// order, with their types) and the lambda's function type; the lowering
+// makes a class per lambda holding the captures.
+class LambdaExpr : public Expr {
+public:
+  struct Capture {
+    const std::string *Name; // interned
+    Type *Ty;                // canonical
+    const std::string &getName() const { return *Name; }
+  };
+
+private:
+  std::vector<Param> Params;
+  Type *ReturnType; // nullptr means void
+  CompoundStmt *Body;
+  std::vector<Capture> Captures; // set by Sema
+  bool CapturesSelf = false;     // `self` of a class method is among them
+
+public:
+  LambdaExpr(SourceLocation loc, std::vector<Param> params, Type *retTy,
+             CompoundStmt *body)
+      : Expr(NK_LambdaExpr, loc), Params(std::move(params)), ReturnType(retTy),
+        Body(body) {}
+
+  const std::vector<Param> &getParams() const { return Params; }
+  std::vector<Param> &getMutableParams() { return Params; }
+  Type *getReturnType() const { return ReturnType; }
+  void setReturnType(Type *ty) { ReturnType = ty; }
+  CompoundStmt *getBody() const { return Body; }
+
+  const std::vector<Capture> &getCaptures() const { return Captures; }
+  void addCapture(const std::string &internedName, Type *ty) {
+    Captures.push_back({&internedName, ty});
+  }
+  bool capturesSelf() const { return CapturesSelf; }
+  void setCapturesSelf(bool v) { CapturesSelf = v; }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_LambdaExpr;
+  }
 };
 
 // Method call expression: receiver.method(args)
@@ -916,6 +999,9 @@ private:
   Expr *Receiver;
   const std::string *MethodName; // points into ASTContext::StringPool (stable)
   std::vector<Expr *> Arguments;
+  // Set by Sema when the name is a field of function type, not a method
+  // (`obj.cb(1)` with `cb: (int) -> int`): a call through the field's value.
+  bool FieldCall = false;
 
 public:
   MethodCallExpr(SourceLocation loc, Expr *receiver,
@@ -927,6 +1013,8 @@ public:
   const std::string &getMethodName() const { return *MethodName; }
   const std::vector<Expr *> &getArguments() const { return Arguments; }
   size_t getNumArguments() const { return Arguments.size(); }
+  void setFieldCall(bool v) { FieldCall = v; }
+  bool isFieldCall() const { return FieldCall; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_MethodCallExpr;
@@ -1553,10 +1641,11 @@ public:
 // Resolves to the variant's implicit 64-bit value.  The EnumType pointer is
 // filled in by Sema (the parser only records the spelled names).
 class EnumValueExpr : public Expr {
-  const std::string *EnumName;      // interned; spelled enum name
-  const std::string *VariantName;   // interned; spelled variant name
-  EnumType *ResolvedEnum = nullptr; // set by Sema
-  int64_t Value = -1;               // set by Sema (variant index)
+  const std::string *EnumName;              // interned; spelled enum name
+  const std::string *VariantName;           // interned; spelled variant name
+  EnumType *ResolvedEnum = nullptr;         // set by Sema
+  int64_t Value = -1;                       // set by Sema (variant index)
+  const std::string *FunctionRef = nullptr; // set by Sema (see below)
 
 public:
   EnumValueExpr(SourceLocation loc, const std::string &internedEnum,
@@ -1566,6 +1655,12 @@ public:
 
   const std::string &getEnumName() const { return *EnumName; }
   const std::string &getVariantName() const { return *VariantName; }
+  /// Set by Sema when `m::f` names an imported function used as a value
+  /// (docs/language/15-function-types.md): the function's qualified name.
+  void setFunctionRef(const std::string &internedName) {
+    FunctionRef = &internedName;
+  }
+  const std::string *getFunctionRef() const { return FunctionRef; }
 
   void setResolvedEnum(EnumType *e) { ResolvedEnum = e; }
   int64_t getValue() const { return Value; }
@@ -1838,6 +1933,43 @@ public:
 // the parameter, so a slice is indexed, measured with `len()` and passed to
 // another slice parameter, and nothing else.  One canonical instance per
 // element type (ASTContext::getSliceType).
+// Function type: `(int, view Str) -> bool`
+// (docs/language/15-function-types.md).
+//
+// The type of a function value: a lambda or a named function used without
+// calling it.  Its parameters have types and modes, as a function's do, and
+// its result is a copy (never a borrow).  Structural: Sema resolves every
+// annotation to the canonical instance of its shape
+// (ASTContext::getFunctionType), so function types compare by pointer
+// identity.  A value is a closure, a reference-counted object (isRefType).
+class FunctionType : public Type {
+  std::vector<Type *> ParamTypes;
+  std::vector<ParamMode> Modes; // parallel to ParamTypes
+  Type *ReturnType;             // never null: the builtin void for none
+
+public:
+  FunctionType(SourceLocation loc, std::vector<Type *> params,
+               std::vector<ParamMode> modes, Type *retTy)
+      : Type(NK_FunctionType, loc), ParamTypes(std::move(params)),
+        Modes(std::move(modes)), ReturnType(retTy) {
+    // == / != compare closures by identity, as objects without an `equals`
+    // of their own do (so a function value is a `List<T>` element).
+    addBinaryOp(BinaryOpcode::Eq);
+    addBinaryOp(BinaryOpcode::Ne);
+  }
+
+  const std::vector<Type *> &getParamTypes() const { return ParamTypes; }
+  const std::vector<ParamMode> &getModes() const { return Modes; }
+  size_t getNumParams() const { return ParamTypes.size(); }
+  Type *getParamType(size_t i) const { return ParamTypes[i]; }
+  ParamMode getMode(size_t i) const { return Modes[i]; }
+  Type *getReturnType() const { return ReturnType; }
+
+  static bool classof(const ASTNode *N) {
+    return N->getKind() == NK_FunctionType;
+  }
+};
+
 class SliceType : public Type {
   Type *ElementType;
 
@@ -1936,7 +2068,7 @@ inline bool isValueOptional(const Type *ty) {
 /// of a value type is a value (isValueOptional).  Use this instead of
 /// spelling out the `||` condition everywhere.
 inline bool isRefType(const Type *ty) {
-  return ty && (isa<ClassType>(ty) ||
+  return ty && (isa<ClassType>(ty) || isa<FunctionType>(ty) ||
                 (isa<OptionalType>(ty) && !isValueOptional(ty)));
 }
 

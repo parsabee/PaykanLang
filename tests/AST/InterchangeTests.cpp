@@ -283,7 +283,7 @@ TEST(ASTInterchange, RejectsMalformedInput) {
       {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) (int) "
        "(block))))",
        "1:52: (int ...) is not a type (named-type, array-type, "
-       "fixed-array-type, optional-type, tuple-type, generic-type)"},
+       "fixed-array-type, optional-type, tuple-type, fn-type, generic-type)"},
       {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) (optional-type "
        "(named-type \"void\")) (block))))",
        "1:52: optional type 'void?' is not supported"},
@@ -850,6 +850,39 @@ TEST(ASTInterchange, WriteRefusesACheckedAST) {
 
 // An `impl` block (#216) is (impl "Type" (methods FN...)); a `static fn`
 // ends with (qual static), as a `view fn` ends with (qual view).
+// Function types (`fn-type`, with each parameter's mode), lambdas
+// (`lambda`) and calls of function values that are not named
+// (`call-value`) round-trip (docs/language/15-function-types.md).
+TEST(Interchange, FunctionTypesRoundTrip) {
+  parser::ParserDriver driver("recursive-descent");
+  auto path = std::filesystem::temp_directory_path() /
+              ("paykan_interchange_fn_" + std::to_string(::getpid()) + ".pkn");
+  {
+    std::ofstream(path)
+        << "fn apply(f: (view Str, inout int) -> bool, g: () -> void) -> "
+           "(int) -> int {\n"
+           "  h = fn(x: int) -> int { return x + 1; };\n"
+           "  log = fn(s: view Str) { println(s); };\n"
+           "  fs: ((int) -> int)[1] = [h];\n"
+           "  n = fs[0](1) + h(2) + apply(f, g)(3);\n"
+           "  return h;\n"
+           "}\n";
+  }
+  ASSERT_EQ(driver.parseFile(path.string()), 0);
+  std::filesystem::remove(path);
+  std::string text = write(*driver.getRoot());
+  EXPECT_NE(text.find("(fn-type"), std::string::npos) << text;
+  EXPECT_NE(text.find("view"), std::string::npos) << text;
+  EXPECT_NE(text.find("(lambda"), std::string::npos) << text;
+  EXPECT_NE(text.find("(call-value"), std::string::npos) << text;
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *back = read(text, ctx, error);
+  ASSERT_NE(back, nullptr) << error;
+  EXPECT_EQ(dump(back), dump(driver.getRoot()));
+  EXPECT_EQ(write(*back), text);
+}
+
 TEST(Interchange, TraitsRoundTrip) {
   parser::ParserDriver driver("recursive-descent");
   auto path =

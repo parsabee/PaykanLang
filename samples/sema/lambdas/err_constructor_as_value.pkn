@@ -1,0 +1,6 @@
+// ERROR: 'Point' is a constructor, not a function value (wrap it: 'fn(...) -> Point { return Point(...); }')
+class Point { x: int; }
+fn main() -> int {
+  mk = Point;
+  return 0;
+}

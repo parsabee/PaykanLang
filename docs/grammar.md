@@ -203,9 +203,21 @@ primaryType    ::= IDENT
                  | modulePath "::" IDENT
                  | IDENT "<" typeArgList ">"
                  | modulePath "::" IDENT "<" typeArgList ">"
-                 | "(" typeAnnotation ( "," typeAnnotation )+ ")"
+                 | "(" typeAnnotation ( "," typeAnnotation )+ ")"   -- tuple type
+                 | functionType
+                 | "(" functionType ")"
+functionType   ::= "(" ( paramType ( "," paramType )* )? ")" "->" typeAnnotation
+paramType      ::= ( "view" | "inout" )? typeAnnotation
 typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
 ```
+
+- `(int, view Str) -> bool` is a function type (docs/language/15-function-types.md):
+  the `->` after the `)` tells it from a tuple type, so a tuple type's elements have
+  no mode (`a tuple element has no mode`).  `() -> int` takes no parameter; the result
+  may be `void`, never `view` or `inout`.  `->` is right-associative, and a function
+  type takes the `[]`, `[n]` and `?` suffixes only in parentheses: `(int) -> int[]`
+  returns an `int[]`, `((int) -> int)?` is an optional function.  `(T)` with any other
+  `T` stays an error: there are no parenthesised types.
 
 - `T[n]` is an array of `n` elements (an integer literal, at least 1: `a
   fixed-size array has at least one element`), `T[]` a slice and `T?` an
@@ -321,7 +333,8 @@ multiplicative ::= unary ( ( "*" | "/" | "%" ) unary )*
 unary          ::= ( "!" | "-" ) unary | postfix
 
 postfix ::= primary postfixOp*
-postfixOp ::= "." IDENT "(" argumentList? ")"      -- method call
+postfixOp ::= "(" argumentList? ")"                -- call of a function value
+            | "." IDENT "(" argumentList? ")"      -- method call
             | "." IDENT                            -- field access
             | "." INT                              -- tuple index (see §1)
             | "[" expression "]"                   -- subscript
@@ -338,9 +351,17 @@ primary ::= literal
           | "(" expression ( "," expression )+ ")"           -- tuple literal
           | "[" argumentList? "]"                            -- array literal
           | "[" expression ";" INT "]"                       -- repeated value
+          | lambda
+
+lambda  ::= "fn" "(" paramList? ")" ( "->" typeAnnotation )? block
 
 argumentList ::= expression ( "," expression )*
 ```
+
+A lambda is a function without a name, in expression position
+(docs/language/15-function-types.md): `fn(x: int) -> int { return x + 1; }`.
+Its parameters are written like a function's, modes included, its result type
+is written or `void`, never `view` or `inout`, and its body is a block.
 
 Precedence, lowest to highest: ternary; `||`; `&&`; relational; `+ -`;
 `* / %`; unary `! -`; postfix. Binary operators are left-associative

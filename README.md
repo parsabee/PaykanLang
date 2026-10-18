@@ -17,7 +17,8 @@ This is **v0.1.1**, a patch release of v0.1.0, the first release, which lays the
 Implemented and tested today: static typing with inference, single-inheritance classes with virtual dispatch,
 ARC, value-aware `==` (reference types dispatch to a virtual
 `equals`), fixed-size arrays and slices, a file-based module system, `match` type dispatch, enums, tuples,
-structs (value types with named fields and `impl` blocks), optionals, generics, traits, and
+structs (value types with named fields and `impl` blocks), function types and lambdas
+(`(int) -> bool`, closures capturing by copy), optionals, generics, traits, and
 conversion constructors (`Str(n)`, `int<Str>(s)`). Programs are lowered to a
 backend-neutral IR (PIR) and compiled by one of two backends: the C backend (emits C11 and
 builds it with the system C compiler) or the optional LLVM backend (LLVM IR, run in-process by
@@ -267,7 +268,8 @@ To learn PaykanLang:
 - **Documentation: [parsabee.github.io/PaykanLang](https://parsabee.github.io/PaykanLang/)** — the manual, a tutorial that builds a real program chapter by chapter ([`docs/manual/`](docs/manual/index.md)), with the reference below.
 - **[`docs/language/`](docs/language/)** — the full reference: language basics,
   functions, enums, classes, arrays, modules, `match` statements, the memory model,
-  tuples, optional types, generics, traits, the standard library and structs; the conversion
+  tuples, optional types, generics, traits, the standard library, structs and function
+  types; the conversion
   constructors (`Str(n)`, `int<Str>(s)`, ...) are under "Conversions" in
   [`01-language-basics.md`](docs/language/01-language-basics.md).
 - **[`samples/`](samples/)** — runnable `.pkn` programs exercising every feature

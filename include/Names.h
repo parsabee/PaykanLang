@@ -313,5 +313,17 @@ inline constexpr const char *kInt2FPName = "int2fp";
 inline constexpr const char *kTupleLayoutGlobalName = ".tuple";
 inline constexpr const char *kStructLayoutGlobalName = ".struct";
 
+// -- Function values (docs/language/15-function-types.md)
+//
+// A closure is an object of a class the lowering makes: `fn.<module>.N` for
+// a lambda, `fn.ref.<module>.<function>` for a named function used as a value
+// (names no identifier can spell, unique across the program's modules,
+// mangled by the backends like `Box<int>`).  Its vtable is an object's three
+// slots, then `call`.
+inline constexpr const char *kClosureClassPrefix = "fn.";
+inline constexpr const char *kClosureRefPrefix = "fn.ref.";
+inline constexpr const char *kClosureCall = "call";
+inline constexpr unsigned kClosureCallSlot = 3;
+
 } // namespace names
 } // namespace paykan

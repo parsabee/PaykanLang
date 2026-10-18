@@ -1,0 +1,5 @@
+// ERROR: 'println' is a builtin and cannot be a function value (wrap it in a lambda)
+fn main() -> int {
+  p = println;
+  return 0;
+}

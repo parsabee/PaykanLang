@@ -1,0 +1,5 @@
+// ERROR: 'v' is a 'view' parameter; a function cannot capture a borrow (it may outlive the call that holds it)
+fn keep(v: view Str) -> () -> int {
+  return fn() -> int { return v.len(); };
+}
+fn main() -> int { return 0; }

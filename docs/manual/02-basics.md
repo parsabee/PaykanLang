@@ -399,6 +399,46 @@ The value `main` returns is the program's exit status. A non-zero status tells t
 that something went wrong, which matters for scripts: `paykan check.pkn && echo ok` prints
 `ok` only when `main` returned 0.
 
+### Functions as values
+
+A function can be stored in a variable, passed to another function or returned from
+one. The type of such a value lists the parameter types in parentheses and the result
+after `->`: `(int) -> int` is a function taking an `int` and returning an `int`, and
+`(Str, int) -> void` takes two arguments and returns nothing. A named function is a
+value just by its name, and `fn(...) -> ... { ... }` without a name writes one in place
+(a *lambda*):
+
+```pkn
+fn double(x: int) -> int { return x * 2; }
+
+fn apply(f: (int) -> int, x: int) -> int {
+  return f(x);
+}
+
+fn main() -> int {
+  step = 3;
+  addStep = fn(x: int) -> int { return x + step; };   // uses `step` from main
+  println(Str(apply(double, 5)) + " " + Str(apply(addStep, 5)));
+  step = 100;
+  println(Str(addStep(5)));                           // still 8: the lambda copied `step`
+  return 0;
+}
+```
+
+Output:
+
+```
+10 8
+8
+```
+
+A lambda copies the variables it uses from the surrounding function at the moment it is
+written, and cannot assign to them: `addStep` keeps its own `step`, which the later
+assignment in `main` does not change. The copies, like every argument and result of a
+function value, are plain copies for value types and references for objects. The full
+rules, including fields and array elements of function types and calling them, are in
+[Function types](../language/15-function-types.md).
+
 ## Project: the first pieces of `tasks`
 
 Our to-do list manager will need to show how far along the list is. Here are its first two

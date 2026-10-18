@@ -1,0 +1,5 @@
+// ERROR: the lambda does not always return a value (its result type is 'int')
+fn main() -> int {
+  f = fn(x: int) -> int { if (x > 0) { return x; } };
+  return f(1);
+}

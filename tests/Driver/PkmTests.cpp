@@ -974,6 +974,59 @@ TEST(Pkm, GenericsAcrossSourceModulesAreNotCached) {
   fs::remove_all(dir);
 }
 
+// A function type in a signature or a field keeps its spelling in a
+// prebuilt module, modes included; an importer passes closures in and calls
+// the ones it gets back, from the source and from the `.pkm` alike.
+TEST(Pkm, FunctionTypesAcrossModules) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_fntypes_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "ops.pkn",
+            "fn square(x: int) -> int { return x * x; }\n"
+            "fn twice(f: (int) -> int) -> (int) -> int {\n"
+            "  return fn(x: int) -> int { return f(f(x)); }; }\n"
+            "fn each(xs: view int[], f: (view int, inout int) -> void) -> int "
+            "{\n"
+            "  t = 0; i = 0;\n"
+            "  while (i < xs.len()) { f(xs[i], t); i = i + 1; }\n"
+            "  return t; }\n"
+            "class Button { label: Str; onClick: (Str) -> Str;\n"
+            "  fn click() -> Str { return self.onClick(self.label); } }\n");
+  writeFile(dir / "main.pkn",
+            "import ops;\n"
+            "fn main() -> int {\n"
+            "  t = ops::twice(ops::square);\n"
+            "  b = ops::Button(\"b\", fn(l: Str) -> Str { return l + \"!\"; "
+            "});\n"
+            "  n = ops::each([1, 2, 3], fn(x: view int, acc: inout int) { acc "
+            "= acc + x; });\n"
+            "  println(Str(t(3)) + \" \" + b.click() + \" \" + Str(n));\n"
+            "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  const std::string expected = "81 b! 6\n";
+  auto src = paykan("--track-heap main.pkn");
+  ASSERT_EQ(src.exitCode, 0) << src.out;
+  EXPECT_TRUE(contains(src.out, expected)) << src.out;
+  EXPECT_TRUE(contains(src.out, "live blocks       : 0")) << src.out;
+  ASSERT_EQ(paykan("--emit-pkm ops.pkn").exitCode, 0);
+  fs::remove(dir / "ops.pkn");
+  auto pkm = paykan("--track-heap main.pkn");
+  ASSERT_EQ(pkm.exitCode, 0) << pkm.out;
+  EXPECT_TRUE(contains(pkm.out, expected)) << pkm.out;
+  EXPECT_TRUE(contains(pkm.out, "live blocks       : 0")) << pkm.out;
+  auto dump = paykan("pkm dump --section=iface ops.pkm");
+  for (const char *line :
+       {"func twice((int) -> int) -> (int) -> int",
+        "func each(view int[], (view int, inout int) -> void) -> int",
+        "    field onClick: (Str) -> Str",
+        "func Button(Str, (Str) -> Str) -> Button"})
+    EXPECT_TRUE(contains(dump.out, line)) << line << "\n" << dump.out;
+  fs::remove_all(dir);
+}
+
 // A generic struct is a template like a generic class: its module, and a
 // module that instantiates it, are built from source each time, and the
 // instantiation is one struct whoever makes it.

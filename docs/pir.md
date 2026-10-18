@@ -457,6 +457,19 @@ CodeGen enforced, now in one place.
   and `==`/`!=` pass the address and the `.structN` layout to
   `PaykanStruct_toString` and `PaykanStruct_equals`, with the conventions
   of the tuple calls.
+* **Function values** (docs/language/15-function-types.md) are closures:
+  objects of a class the lowering makes per lambda (`fn.<module>.N`) or per
+  named function used as a value (`fn.ref.<module>.<function>`), with a
+  field per capture and the vtable `[destroy, toString, equals, call]`, the
+  middle two the runtime's object defaults and `call` the function's code
+  with the closure object first, its parameters as a method's.  A lambda
+  expression is `new`, a `field.store` per capture (a reference as a +1 box,
+  a value held in memory copied and its references retained) and `box`, a
+  fresh owned box like a constructor's; a call through a function value is
+  `unbox` of the variable's (or field's, or element's) box and `vcall` of
+  slot 3 with the function type's signature and no class name (the verifier
+  checks the signature, which is all a call site knows).  `Paykan_release`
+  destroys a closure through slot 0 like any object.
 * **Fields** own their box; `field.store` is preceded by a retain-or-steal
   of the new value and the old value is released (null-checked).
 * **Indexing** an array or a slice checks the index first: when it is

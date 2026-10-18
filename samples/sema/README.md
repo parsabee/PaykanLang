@@ -17,6 +17,7 @@ type-checking (no codegen or JIT execution).
 | `optionals/` | Optional types `T?` — `None`, widening, unwrapping with `match`, optional fields and arrays of optionals |
 | `tuples/`  | Tuple types, literals, `.N` access, destructuring, immutability |
 | `structs/` | `struct` declarations, fields assigned in place, `impl` blocks, nominal typing, the `let` / `view` / `inout` rules, generic structs, what is not supported yet |
+| `lambdas/` | Function types `(T) -> R`, lambdas and their captures, named functions as values, calls through function values |
 | `conversions/` | Conversion constructors `Target<Source>(value)`: the supported pairs, result types |
 
 ## Running
@@ -35,7 +36,8 @@ for f in samples/sema/arrays/*.pkn samples/sema/classes/*.pkn \
          samples/sema/functions/*.pkn samples/sema/match/*.pkn \
          samples/sema/enums/*.pkn samples/sema/generics/*.pkn \
          samples/sema/optionals/*.pkn samples/sema/tuples/*.pkn \
-         samples/sema/structs/*.pkn samples/sema/conversions/*.pkn; do
+         samples/sema/structs/*.pkn samples/sema/lambdas/*.pkn \
+         samples/sema/conversions/*.pkn; do
   paykan --check-only "$f" 2>&1 && echo "OK: $f" || echo "ERR: $f"
 done
 ```

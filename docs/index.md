@@ -2,7 +2,7 @@
 
 PaykanLang (source files end in `.pkn`) is a statically typed language that compiles to native
 code. It has type inference, classes with single inheritance and virtual methods, enums,
-`match`, fixed-size arrays, tuples, structs, optional types, generics and a file-based module system.
+`match`, fixed-size arrays, tuples, structs, function types and lambdas, optional types, generics and a file-based module system.
 Memory is managed by automatic reference counting: there is no garbage collector and no
 manual `free`, and objects are destroyed the moment their last reference goes away.
 

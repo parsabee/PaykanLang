@@ -11,6 +11,7 @@ add_library(paykan_sema STATIC
     SemaBorrows.cpp
     SemaTraits.cpp
     SemaStruct.cpp
+    SemaLambda.cpp
 )
 target_link_libraries(paykan_sema
     PUBLIC  paykan_diag

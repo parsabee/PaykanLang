@@ -127,6 +127,11 @@ std::string Sema::inoutPlaceError(const ast::Expr *place,
     // It could be reassigned through the other name.
     return "'" + id->getName() + "' is declared with 'let' and cannot be " +
            use;
+  if (id && varKind(id->getName()) == VarKind::Captured)
+    return "'" + id->getName() +
+           "' is captured by copy by the function, and the copy is read-only; "
+           "it cannot be " +
+           use;
   std::string why = frozenPlace(place);
   if (!why.empty())
     why += "; it cannot be " + use;

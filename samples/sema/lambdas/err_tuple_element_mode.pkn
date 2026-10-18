@@ -1,0 +1,5 @@
+// ERROR: a tuple element has no mode: 'view' and 'inout' go on a function type's parameters ('(view Str) -> int')
+fn main() -> int {
+  t: (view int, int) = (1, 2);
+  return 0;
+}
