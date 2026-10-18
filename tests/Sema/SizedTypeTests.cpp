@@ -211,6 +211,18 @@ TEST(SizedTypes, ConversionsFromAndToStr) {
               "cannot use optional 'i8?' as 'i8' without unwrapping");
 }
 
+// An explicit conversion expects one argument of its written source type:
+// extra arguments are the arity error, with no expectation to read for
+// them (the sanitizers caught an out-of-bounds read here).
+TEST(SizedTypes, AnExplicitConversionWithExtraArgumentsIsAnArityError) {
+  expectError(inMain("s: Str = Str<u16>(3, 4);"),
+              "conversion 'Str<u16>' takes exactly one argument, got 2");
+  expectError(inMain("n: int = int<float>(1.5, 2.5, 3.5);"),
+              "conversion 'int<float>' takes exactly one argument, got 3");
+  expectError(inMain("n: u8 = u8<int>();"),
+              "conversion 'u8<int>' takes exactly one argument, got 0");
+}
+
 TEST(SizedTypes, TheConversionSetIsClosedAndListed) {
   expectError(inMain("a: u8 = u8('a');"),
               "no specialization of 'u8' for 'char'; its specializations are "

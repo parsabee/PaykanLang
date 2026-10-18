@@ -1480,8 +1480,9 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
         expectedArgs = init->getParamTypes();
   std::vector<ast::Type *> argTypes;
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
-    auto *ty = visitExpecting(node->getArguments()[i],
-                              expectedArgs.empty() ? nullptr : expectedArgs[i]);
+    auto *ty =
+        visitExpecting(node->getArguments()[i],
+                       i < expectedArgs.size() ? expectedArgs[i] : nullptr);
     argTypes.push_back(ty);
   }
 
