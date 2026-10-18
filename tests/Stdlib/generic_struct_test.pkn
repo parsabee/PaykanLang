@@ -9,12 +9,20 @@ impl Hashable for Pair<A, B> {
   view fn hash() -> int { return self.a.hash() * 31 + self.b.hash(); }
 }
 
+// The text of an index `indexOf` returns: the number, or "None".
+fn idx(i: unsigned?) -> Str {
+  match i {
+    n: unsigned { return Str(n); }
+    None { return "None"; }
+  }
+}
+
 fn main() -> int {
   l = collections::List<Pair<int, Str>>();
   l.push(Pair(1, "one"));
   l.push(Pair(2, "two"));
   println(Str(l.get(1).first()) + " " + Str(l.contains(Pair(1, "one"))) + " " +
-          Str(l.indexOf(Pair(3, "three"))) + " " + Str(l.len()));
+          idx(l.indexOf(Pair(3, "three"))) + " " + Str(l.len()));
   println(l.get(0));
 
   m = collections::HashMap<Pair<int, int>, Str>();

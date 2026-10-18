@@ -13,6 +13,14 @@ class Point {
   }
 }
 
+// The text of an index `indexOf` returns: the number, or "None".
+fn idx(i: unsigned?) -> Str {
+  match i {
+    n: unsigned { return Str(n); }
+    None { return "None"; }
+  }
+}
+
 fn main() -> int {
   xs = collections::List<int>();
   println(Str(xs.len()) + " " + Str(xs.isEmpty()));
@@ -30,7 +38,7 @@ fn main() -> int {
   println(collections::listToString(xs));
   println(Str(xs.removeAt(0)) + " " + Str(xs.removeAt(xs.len() - 1)) + " " +
           Str(xs.pop()));
-  println(Str(xs.indexOf(55)) + " " + Str(xs.indexOf(7)) + " " +
+  println(idx(xs.indexOf(55)) + " " + idx(xs.indexOf(7)) + " " +
           Str(xs.contains(16)) + " " + Str(xs.remove(55)) + " " +
           Str(xs.remove(55)));
   xs.reverse();
@@ -49,7 +57,7 @@ fn main() -> int {
   pts.push(Point(1, 2));
   pts.push(Point(3, 4));
   println(collections::listToString(pts) + " " + Str(pts.contains(Point(3, 4))) +
-          " " + Str(pts.indexOf(Point(9, 9))));
+          " " + idx(pts.indexOf(Point(9, 9))));
 
   // A list of optionals and a list of lists.
   maybe = collections::List<Str?>();

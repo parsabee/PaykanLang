@@ -21,9 +21,9 @@ impl Hashable for Point {
 // The sorted keys, so the output does not depend on the table's order.
 fn sortedKeys(m: view collections::HashMap<Str, int>) -> Str {
   ks = m.keys();
-  i: int = 1;
+  i: unsigned = 1;
   while (i < ks.len()) {
-    j: int = i;
+    j: unsigned = i;
     while (j > 0 && ks.get(j - 1).len() > ks.get(j).len()) {
       ks.swap(j - 1, j);
       j = j - 1;
@@ -52,10 +52,10 @@ fn main() -> int {
           " " + Str(counts.len()));
   total: int = 0;
   vs = counts.values();
-  i = 0;
-  while (i < vs.len()) {
-    total = total + vs.get(i);
-    i = i + 1;
+  v: unsigned = 0;
+  while (v < vs.len()) {
+    total = total + vs.get(v);
+    v = v + 1;
   }
   println("total " + Str(total));
 
