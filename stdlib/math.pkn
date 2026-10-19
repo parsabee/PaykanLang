@@ -1,0 +1,78 @@
+// ::math: the C library's math functions, on `float`.
+//
+// Each native function is the C99 <math.h> function of the same name (or,
+// where the name says more, the one in its comment), called directly: the C
+// backend links the program with -lm, and the llvm backend's JIT resolves the
+// symbols in its own process.  So they behave exactly as C's do: a result
+// out of range is an infinity, a domain error (`sqrt(-1.0)`, `log(-1.0)`) is
+// NaN, and nothing panics.
+//
+// What C has only as a macro or a constant is written here in Paykan:
+// `isNaN`, `isInf`, `isFinite`, and `pi()`, `e()`, `inf()`, `nan()` (the
+// language has no global constants).
+
+// -- Constants ----------------------------------------------------------------
+
+fn pi() -> float { return 3.141592653589793; }
+fn e() -> float { return 2.718281828459045; }
+fn inf() -> float { return 1.0 / 0.0; }
+fn nan() -> float { return 0.0 / 0.0; }
+
+// -- Classification -----------------------------------------------------------
+
+fn isNaN(x: float) -> bool { return x != x; }
+fn isInf(x: float) -> bool { return x == 1.0 / 0.0 || x == -1.0 / 0.0; }
+fn isFinite(x: float) -> bool { return x == x && !isInf(x); }
+
+// -- Powers, roots, exponentials and logarithms -------------------------------
+
+native fn sqrt(x: float) -> float = "sqrt";
+native fn cbrt(x: float) -> float = "cbrt";
+native fn pow(x: float, y: float) -> float = "pow";
+native fn hypot(x: float, y: float) -> float = "hypot";
+native fn exp(x: float) -> float = "exp";
+native fn exp2(x: float) -> float = "exp2";
+native fn expm1(x: float) -> float = "expm1"; // e^x - 1, accurate near 0
+native fn log(x: float) -> float = "log";     // the natural logarithm
+native fn log2(x: float) -> float = "log2";
+native fn log10(x: float) -> float = "log10";
+native fn log1p(x: float) -> float = "log1p"; // log(1 + x), accurate near 0
+
+// -- Trigonometric and hyperbolic functions (radians) -------------------------
+
+native fn sin(x: float) -> float = "sin";
+native fn cos(x: float) -> float = "cos";
+native fn tan(x: float) -> float = "tan";
+native fn asin(x: float) -> float = "asin";
+native fn acos(x: float) -> float = "acos";
+native fn atan(x: float) -> float = "atan";
+native fn atan2(y: float, x: float) -> float = "atan2";
+native fn sinh(x: float) -> float = "sinh";
+native fn cosh(x: float) -> float = "cosh";
+native fn tanh(x: float) -> float = "tanh";
+native fn asinh(x: float) -> float = "asinh";
+native fn acosh(x: float) -> float = "acosh";
+native fn atanh(x: float) -> float = "atanh";
+
+// -- Rounding and remainders --------------------------------------------------
+
+native fn floor(x: float) -> float = "floor";
+native fn ceil(x: float) -> float = "ceil";
+native fn trunc(x: float) -> float = "trunc";
+native fn round(x: float) -> float = "round"; // halves away from zero
+native fn fmod(x: float, y: float) -> float = "fmod"; // the sign of x, like %
+native fn remainder(x: float, y: float) -> float = "remainder"; // to the nearest
+
+// -- Magnitude and sign -------------------------------------------------------
+
+native fn abs(x: float) -> float = "fabs";
+native fn min(x: float, y: float) -> float = "fmin"; // ignores a NaN operand
+native fn max(x: float, y: float) -> float = "fmax"; // ignores a NaN operand
+native fn copysign(x: float, y: float) -> float = "copysign";
+
+// -- Special functions --------------------------------------------------------
+
+native fn erf(x: float) -> float = "erf";
+native fn erfc(x: float) -> float = "erfc";
+native fn gamma(x: float) -> float = "tgamma";  // the gamma function
+native fn lgamma(x: float) -> float = "lgamma"; // log |gamma(x)|

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `::math`, a standard library module of the C library's math functions on `float`
+  (docs/language/13-standard-library.md, "`::math`"): `sqrt`, `cbrt`, `pow`, `hypot`,
+  the exponentials and logarithms, the trigonometric and hyperbolic functions,
+  `floor`, `ceil`, `trunc`, `round`, `fmod`, `remainder`, `abs`, `min`, `max`,
+  `copysign`, `erf`, `erfc`, `gamma` and `lgamma`, each a native function bound
+  directly to its `<math.h>` symbol, plus `pi()`, `e()`, `inf()`, `nan()`, `isNaN`,
+  `isInf` and `isFinite` in Paykan, with a stdlib test and a docs example.
 - The standard library uses the private members and the sized numeric types
   (docs/language/13-standard-library.md): the `__` names of `::collections` and
   `::memory` are now enforced as private rather than a convention (a program naming

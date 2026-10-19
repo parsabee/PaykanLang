@@ -1,0 +1,67 @@
+// ::math: the C library's functions through native declarations, and the
+// constants and classification written in Paykan.  Every value printed is
+// one that rounds the same way on every C library (Str prints %g).
+import ::math;
+
+fn show(name: Str, v: float) { println(name + " " + Str(v)); }
+
+fn main() -> int {
+  show("pi", math::pi());
+  show("e", math::e());
+  show("inf", math::inf());
+  show("-inf", -math::inf());
+  println("nan " + Str(math::isNaN(math::nan())));
+
+  show("sqrt", math::sqrt(2.0));
+  show("cbrt", math::cbrt(-27.0));
+  show("pow", math::pow(2.0, 0.5));
+  show("pow-int", math::pow(-2.0, 3.0));
+  show("hypot", math::hypot(3.0, 4.0));
+  show("exp", math::exp(1.0));
+  show("exp2", math::exp2(10.0));
+  show("expm1", math::expm1(1e-10));
+  show("log", math::log(math::e()));
+  show("log2", math::log2(1024.0));
+  show("log10", math::log10(0.001));
+  show("log1p", math::log1p(1e-10));
+
+  show("sin", math::sin(math::pi() / 6.0));
+  show("cos", math::cos(0.0));
+  show("tan", math::tan(math::pi() / 4.0));
+  show("asin", math::asin(1.0));
+  show("acos", math::acos(-1.0));
+  show("atan", math::atan(1.0));
+  show("atan2", math::atan2(-1.0, -1.0));
+  show("sinh", math::sinh(1.0));
+  show("cosh", math::cosh(1.0));
+  show("tanh", math::tanh(0.5));
+  show("asinh", math::asinh(1.0));
+  show("acosh", math::acosh(2.0));
+  show("atanh", math::atanh(0.5));
+
+  show("floor", math::floor(-2.5));
+  show("ceil", math::ceil(-2.5));
+  show("trunc", math::trunc(-2.5));
+  show("round", math::round(-2.5));
+  show("round+", math::round(2.5));
+  show("fmod", math::fmod(-7.0, 3.0));
+  show("remainder", math::remainder(7.0, 4.0));
+
+  show("abs", math::abs(-3.5));
+  show("min", math::min(2.0, math::nan()));
+  show("max", math::max(-1.0, 4.0));
+  show("copysign", math::copysign(3.0, -0.0));
+
+  show("erf", math::erf(0.5));
+  show("erfc", math::erfc(0.5));
+  show("gamma", math::gamma(5.0));
+  show("gamma-half", math::gamma(0.5));
+  show("lgamma", math::lgamma(10.0));
+
+  // Domain errors and overflow are NaN and infinities, never a panic.
+  println(Str(math::isNaN(math::sqrt(-1.0))) + " " + Str(math::isNaN(math::log(-1.0))));
+  println(Str(math::isInf(math::exp(1000.0))) + " " + Str(math::log(0.0)));
+  println(Str(math::isFinite(1.0)) + " " + Str(math::isFinite(math::inf()))
+          + " " + Str(math::isFinite(math::nan())) + " " + Str(math::isInf(1e308)));
+  return 0;
+}

@@ -14,6 +14,9 @@ qualifier: `collections::List<int>()`.
   `listOf` and `listToString`.
 - `::memory`: `Buffer<T>`, the growable storage the containers are built on, and
   `Box<T: ValueType>`, one value in a shared object.
+- `::math`: the C library's math functions on `float` (`sqrt`, `pow`, `exp`, `log`,
+  `sin`, `atan2`, `floor`, `round`, `gamma`, …), bound directly to `<math.h>`, with
+  `pi()`, `e()`, `inf()`, `nan()` and `isNaN`, `isInf`, `isFinite`.
 - Every container is an object, so assigning one shares it. A container holds its own
   reference to each element. A method that hands an element out returns a copy, which
   shares an object element with the container.
@@ -241,6 +244,54 @@ Output:
 
 ```
 10 two
+```
+
+## `::math`
+
+The C library's math functions on `float`. Each one is a [native
+function](02-functions-and-calling.md#native-functions) bound to the C99 `<math.h>`
+function of the same name, so it computes exactly what C's does: a domain error
+(`sqrt(-1.0)`, `log(-1.0)`) is NaN, a result out of range is an infinity, and nothing
+panics. The trigonometric functions work in radians.
+
+| Functions | Description |
+|-----------|-------------|
+| `sqrt`, `cbrt`, `pow(x, y)`, `hypot(x, y)` | Roots and powers |
+| `exp`, `exp2`, `expm1`, `log`, `log2`, `log10`, `log1p` | Exponentials and logarithms; `log` is the natural one, `expm1(x)` is `e^x - 1` and `log1p(x)` is `log(1 + x)`, both accurate near 0 |
+| `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2(y, x)` | Trigonometric functions |
+| `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh` | Hyperbolic functions |
+| `floor`, `ceil`, `trunc`, `round` | Rounding to a whole `float`; `round` takes halves away from zero |
+| `fmod(x, y)`, `remainder(x, y)` | `fmod` has the sign of `x`, like `%`; `remainder` rounds the quotient to the nearest |
+| `abs`, `min(x, y)`, `max(x, y)`, `copysign(x, y)` | `abs` is C's `fabs`, `min` and `max` are `fmin` and `fmax`, which ignore a NaN operand |
+| `erf`, `erfc`, `gamma`, `lgamma` | `gamma` is C's `tgamma`; `lgamma` is the logarithm of the absolute value of `gamma` |
+| `pi()`, `e()`, `inf()`, `nan()` | Constants (the language has no global constants) |
+| `isNaN(x)`, `isInf(x)`, `isFinite(x)` | Classification |
+
+The functions take and return `float`; a sized float (`f32`, `f16`) converts with
+`float(x)` first.
+
+```pkn
+import ::math;
+
+fn main() -> int {
+  r = 2.0;
+  println("area " + Str(math::pi() * math::pow(r, 2.0)));
+  println("hypot " + Str(math::hypot(3.0, 4.0)) + ", 45 degrees is "
+          + Str(math::atan2(1.0, 1.0)) + " radians");
+  println(Str(math::floor(-2.5)) + " " + Str(math::round(-2.5)) + " "
+          + Str(math::gamma(5.0)));
+  println(Str(math::isNaN(math::sqrt(-1.0))) + " " + Str(math::log(0.0)));
+  return 0;
+}
+```
+
+Output:
+
+```
+area 12.5664
+hypot 5, 45 degrees is 0.785398 radians
+-3 -3 24
+True -inf
 ```
 
 ---
