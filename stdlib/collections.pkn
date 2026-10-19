@@ -1,7 +1,7 @@
 // ::collections: the standard containers.
 //
 //   List<T>                  a growable array
-//   LinkedList<T>            a doubly linked list with a sentinel node
+//   LinkedList<T>            a doubly linked list
 //   Stack<T>, Queue<T>       last-in-first-out and first-in-first-out,
 //                            on a LinkedList
 //   HashMap<K, V>, HashSet<K>
@@ -9,15 +9,19 @@
 //   MinPriorityQueue<T>, MaxPriorityQueue<T>
 //                            binary heaps ordered by an int priority
 //
-// Every container is an object: assigning one shares it.  A container holds
+// Every container is an object: assigning one shares it.  Every index and
+// size is an `unsigned`: `len()` returns one, `get(i)` takes one, and
+// `indexOf` returns an `unsigned?`.  A container holds
 // its own reference to each element it stores.  Elements are compared with
 // `==`, so a class compares by its `equals`.  A method that hands an element
 // out returns a copy (an object is then shared with the container).  A
 // broken precondition, such as `pop` on an empty container or an index out
 // of range, panics.
 //
-// Names starting with `__` are the module's own: the language has no
-// visibility keywords yet, so this is a convention.
+// Names starting with `__` are private (docs/language/06-modules.md,
+// "Private to the module"): `__Entry`, `__Heap`, `__panic`, `__fail` and
+// `__bucket` are the module's own, and a `__` field or method is reachable
+// only from its type's methods.
 
 import ::memory;
 
@@ -38,19 +42,19 @@ impl List<T> {
   fn __init__() { self.__items = memory::Buffer<T>(0); }
 
   // The number of elements.
-  view fn len() -> int { return self.__items.len(); }
+  view fn len() -> unsigned { return self.__items.len(); }
 
   // True when the list has no elements.
   view fn isEmpty() -> bool { return self.__items.len() == 0; }
 
-  // Element `i`, for 0 <= i < len().
-  view fn get(i: int) -> T {
+  // Element `i`, for i < len().
+  view fn get(i: unsigned) -> T {
     self.__check(i, self.__items.len());
     return self.__items.copy(i);
   }
 
-  // Replace element `i`, for 0 <= i < len().
-  fn set(i: int, v: view T) {
+  // Replace element `i`, for i < len().
+  fn set(i: unsigned, v: view T) {
     self.__check(i, self.__items.len());
     self.__items.set(i, v);
   }
@@ -60,7 +64,7 @@ impl List<T> {
 
   // Remove and return the last element.
   fn pop() -> T {
-    n: int = self.__items.len();
+    n: unsigned = self.__items.len();
     if (n == 0) { __panic("pop from an empty List"); }
     v: T = self.__items.copy(n - 1);
     self.__items.shrink(1);
@@ -69,36 +73,36 @@ impl List<T> {
 
   // The last element.
   view fn last() -> T {
-    n: int = self.__items.len();
+    n: unsigned = self.__items.len();
     if (n == 0) { return __fail<T>("last of an empty List"); }
     return self.__items.copy(n - 1);
   }
 
   // Exchange elements `i` and `j`.
-  fn swap(i: int, j: int) {
+  fn swap(i: unsigned, j: unsigned) {
     self.__check(i, self.__items.len());
     self.__check(j, self.__items.len());
     self.__items.swap(i, j);
   }
 
-  // Insert `v` before element `i`, for 0 <= i <= len().
-  fn insert(i: int, v: view T) {
-    n: int = self.__items.len();
+  // Insert `v` before element `i`, for i <= len().
+  fn insert(i: unsigned, v: view T) {
+    n: unsigned = self.__items.len();
     self.__check(i, n + 1);
     self.__items.push(v);
-    j: int = n;
+    j: unsigned = n;
     while (j > i) {
       self.__items.swap(j, j - 1);
       j = j - 1;
     }
   }
 
-  // Remove and return element `i`, for 0 <= i < len().
-  fn removeAt(i: int) -> T {
-    n: int = self.__items.len();
+  // Remove and return element `i`, for i < len().
+  fn removeAt(i: unsigned) -> T {
+    n: unsigned = self.__items.len();
     self.__check(i, n);
     v: T = self.__items.copy(i);
-    j: int = i;
+    j: unsigned = i;
     while (j < n - 1) {
       self.__items.swap(j, j + 1);
       j = j + 1;
@@ -107,32 +111,34 @@ impl List<T> {
     return v;
   }
 
-  // The index of the first element == v, or -1.
-  view fn indexOf(v: view T) -> int {
-    i: int = 0;
-    n: int = self.__items.len();
+  // The index of the first element == v, or None.
+  view fn indexOf(v: view T) -> unsigned? {
+    i: unsigned = 0;
+    n: unsigned = self.__items.len();
     while (i < n) {
       if (self.__items.get(i) == v) { return i; }
       i = i + 1;
     }
-    return -1;
+    return None;
   }
 
   // True when some element == v.
-  view fn contains(v: view T) -> bool { return self.indexOf(v) >= 0; }
+  view fn contains(v: view T) -> bool { return self.indexOf(v) != None; }
 
   // Remove the first element == v; True if there was one.
   fn remove(v: view T) -> bool {
-    i: int = self.indexOf(v);
-    if (i < 0) { return False; }
-    self.removeAt(i);
-    return True;
+    match self.indexOf(v) {
+      i: unsigned { self.removeAt(i); return True; }
+      None { return False; }
+    }
   }
 
   // Reverse the order of the elements.
   fn reverse() {
-    i: int = 0;
-    j: int = self.__items.len() - 1;
+    n: unsigned = self.__items.len();
+    if (n < 2) { return; }
+    i: unsigned = 0;
+    j: unsigned = n - 1;
     while (i < j) {
       self.__items.swap(i, j);
       i = i + 1;
@@ -146,8 +152,8 @@ impl List<T> {
   // A new list of the same elements (which it shares, if they are objects).
   view fn copy() -> List<T> {
     out: List<T> = List<T>();
-    i: int = 0;
-    n: int = self.__items.len();
+    i: unsigned = 0;
+    n: unsigned = self.__items.len();
     while (i < n) {
       out.push(self.__items.get(i));
       i = i + 1;
@@ -155,8 +161,8 @@ impl List<T> {
     return out;
   }
 
-  view fn __check(i: int, n: int) {
-    if (i < 0 || i >= n) {
+  view fn __check(i: unsigned, n: unsigned) {
+    if (i >= n) {
       __panic("List index " + Str(i) + " out of range (len=" +
               Str(self.__items.len()) + ")");
     }
@@ -177,7 +183,7 @@ fn listOf<T>(xs: view T[]) -> List<T> {
 // "[a, b, c]": the elements' toString, in order.
 fn listToString<T: Show>(xs: view List<T>) -> Str {
   out: Str = "[";
-  i: int = 0;
+  i: unsigned = 0;
   while (i < xs.len()) {
     if (i > 0) { out = out + ", "; }
     out = out + xs.get(i).toString();
@@ -188,146 +194,168 @@ fn listToString<T: Show>(xs: view List<T>) -> Str {
 
 // -- LinkedList ---------------------------------------------------------------
 
-// A doubly linked list, circular through a sentinel node: the sentinel's
-// next node is the first element's and its previous node the last
-// element's, so both ends are O(1) to reach, add to and remove from, and
-// an empty list is the sentinel linked to itself.
-//
-// The nodes are kept in buffers and link to each other by index: node 0 is
-// the sentinel, and node k's value, next and previous nodes are slot k of
-// `__values`, `__next` and `__prev`.  Linking objects to each other would
-// make every pair of neighbours a reference cycle, which reference counting
-// never frees.  Removing a node moves the last node into its slot, so the
-// buffers hold exactly the sentinel and the elements.
+// A node of a LinkedList: its value, the next node, which the node owns (the
+// list owns the chain through its head), and the previous node as a `weak`
+// back link, so two neighbours form no reference cycle and dropping the
+// list frees every node.
+class __Node<T> {
+  value: T;
+  next: __Node<T>?;
+  weak prev: __Node<T>?;
+}
+
+// A doubly linked list: both ends are O(1) to reach, add to and remove from.
+// The head owns the chain of nodes through their `next` links; the tail is a
+// weak reference, kept alive by the chain.
 class LinkedList<T> {
-  __values: memory::Buffer<T>; // slot 0, the sentinel's, is never set
-  __next: memory::Buffer<int>;
-  __prev: memory::Buffer<int>;
+  __head: __Node<T>?;
+  weak __tail: __Node<T>?;
+  __len: unsigned;
 }
 
 impl LinkedList<T> {
   // An empty list.
   fn __init__() {
-    self.__values = memory::Buffer<T>(1);
-    self.__next = memory::Buffer<int>(1); // the sentinel links to itself
-    self.__prev = memory::Buffer<int>(1);
+    self.__head = None;
+    self.__tail = None;
+    self.__len = 0;
   }
 
   // The number of elements.
-  view fn len() -> int { return self.__next.len() - 1; }
+  view fn len() -> unsigned { return self.__len; }
 
   // True when the list has no elements.
-  view fn isEmpty() -> bool { return self.__next.len() == 1; }
+  view fn isEmpty() -> bool { return self.__len == 0; }
 
   // Add `v` before the first element.
-  fn pushFront(v: view T) { self.__linkAfter(0, v); }
+  fn pushFront(v: T) {
+    n = __Node<T>(v, self.__head, None);
+    match self.__head {
+      h: __Node<T> { h.prev = n; }
+      None { self.__tail = n; }
+    }
+    self.__head = n;
+    self.__len = self.__len + 1;
+  }
 
   // Add `v` after the last element.
-  fn pushBack(v: view T) { self.__linkAfter(self.__prev.copy(0), v); }
+  fn pushBack(v: T) {
+    match self.__tail {
+      t: __Node<T> {
+        n = __Node<T>(v, None, t);
+        t.next = n;
+        self.__tail = n;
+        self.__len = self.__len + 1;
+      }
+      None { self.pushFront(v); }
+    }
+  }
 
   // Remove and return the first element.
   fn popFront() -> T {
-    self.__nonEmpty("popFront");
-    return self.__unlink(self.__next.copy(0));
+    match self.__head {
+      h: __Node<T> {
+        self.__unlink(h);
+        return h.value;
+      }
+      None { return __fail<T>("popFront on an empty LinkedList"); }
+    }
   }
 
   // Remove and return the last element.
   fn popBack() -> T {
-    self.__nonEmpty("popBack");
-    return self.__unlink(self.__prev.copy(0));
+    match self.__tail {
+      t: __Node<T> {
+        self.__unlink(t);
+        return t.value;
+      }
+      None { return __fail<T>("popBack on an empty LinkedList"); }
+    }
   }
 
   // The first element.
   view fn front() -> T {
-    self.__nonEmpty("front");
-    return self.__values.copy(self.__next.copy(0));
+    weak h = self.__head; // a weak reference reads as a copy, never a view
+    match h {
+      n: __Node<T> { return n.value; }
+      None { return __fail<T>("front on an empty LinkedList"); }
+    }
   }
 
   // The last element.
   view fn back() -> T {
-    self.__nonEmpty("back");
-    return self.__values.copy(self.__prev.copy(0));
+    weak t = self.__tail;
+    match t {
+      n: __Node<T> { return n.value; }
+      None { return __fail<T>("back on an empty LinkedList"); }
+    }
   }
 
   // True when some element == v.
-  view fn contains(v: view T) -> bool { return self.__find(v) != 0; }
+  view fn contains(v: view T) -> bool { return self.__find(v) != None; }
 
   // Remove the first element == v; True if there was one.
   fn remove(v: view T) -> bool {
-    k: int = self.__find(v);
-    if (k == 0) { return False; }
-    self.__unlink(k);
-    return True;
+    match self.__find(v) {
+      n: __Node<T> {
+        self.__unlink(n);
+        return True;
+      }
+      None { return False; }
+    }
   }
 
   // Remove every element.
   fn clear() {
-    n: int = self.len();
-    self.__values.shrink(n);
-    self.__next.shrink(n);
-    self.__prev.shrink(n);
-    self.__next.set(0, 0);
-    self.__prev.set(0, 0);
+    self.__head = None;
+    self.__tail = None;
+    self.__len = 0;
   }
 
   // The elements from first to last, in a new list.
   view fn toList() -> List<T> {
     out: List<T> = List<T>();
-    k: int = self.__next.copy(0);
-    while (k != 0) {
-      out.push(self.__values.get(k));
-      k = self.__next.copy(k);
+    weak cur = self.__head; // the cursor: no reference copied out of self
+    while (True) {
+      match cur {
+        n: __Node<T> {
+          out.push(n.value);
+          cur = n.next;
+        }
+        None { return out; }
+      }
     }
     return out;
   }
 
-  // A new node holding `v`, linked in after node `at`.
-  fn __linkAfter(at: int, v: view T) {
-    k: int = self.__next.len();
-    after: int = self.__next.copy(at);
-    self.__values.push(v);
-    self.__next.push(after);
-    self.__prev.push(at);
-    self.__next.set(at, k);
-    self.__prev.set(after, k);
-  }
-
-  // Unlink node `k` (not the sentinel) and return its value.
-  fn __unlink(k: int) -> T {
-    v: T = self.__values.copy(k);
-    p: int = self.__prev.copy(k);
-    n: int = self.__next.copy(k);
-    self.__next.set(p, n);
-    self.__prev.set(n, p);
-    // Fill the hole with the last node, and point its neighbours at it.
-    last: int = self.__next.len() - 1;
-    if (k != last) {
-      self.__values.swap(k, last);
-      lp: int = self.__prev.copy(last);
-      ln: int = self.__next.copy(last);
-      self.__prev.set(k, lp);
-      self.__next.set(k, ln);
-      self.__next.set(lp, k);
-      self.__prev.set(ln, k);
+  // Take node `n` out of the chain.
+  fn __unlink(n: __Node<T>) {
+    match n.prev {
+      p: __Node<T> { p.next = n.next; }
+      None { self.__head = n.next; }
     }
-    self.__values.shrink(1);
-    self.__next.shrink(1);
-    self.__prev.shrink(1);
-    return v;
-  }
-
-  // The first node whose value == v, or 0 (the sentinel).
-  view fn __find(v: view T) -> int {
-    k: int = self.__next.copy(0);
-    while (k != 0) {
-      if (self.__values.get(k) == v) { return k; }
-      k = self.__next.copy(k);
+    match n.next {
+      x: __Node<T> { x.prev = n.prev; }
+      None { self.__tail = n.prev; }
     }
-    return 0;
+    n.next = None;
+    n.prev = None;
+    self.__len = self.__len - 1;
   }
 
-  view fn __nonEmpty(what: view Str) {
-    if (self.__next.len() == 1) { __panic(what + " on an empty LinkedList"); }
+  // The first node whose value == v, if any.
+  view fn __find(v: view T) -> __Node<T>? {
+    weak cur = self.__head; // the cursor: no reference copied out of self
+    while (True) {
+      match cur {
+        n: __Node<T> {
+          if (n.value == v) { return n; }
+          cur = n.next;
+        }
+        None { return None; }
+      }
+    }
+    return None;
   }
 }
 
@@ -342,11 +370,11 @@ impl Stack<T> {
   // An empty stack.
   fn __init__() { self.__list = LinkedList<T>(); }
 
-  view fn len() -> int { return self.__list.len(); }
+  view fn len() -> unsigned { return self.__list.len(); }
   view fn isEmpty() -> bool { return self.__list.isEmpty(); }
 
   // Put `v` on top.
-  fn push(v: view T) { self.__list.pushFront(v); }
+  fn push(v: T) { self.__list.pushFront(v); }
 
   // Remove and return the top element.
   fn pop() -> T {
@@ -376,11 +404,11 @@ impl Queue<T> {
   // An empty queue.
   fn __init__() { self.__list = LinkedList<T>(); }
 
-  view fn len() -> int { return self.__list.len(); }
+  view fn len() -> unsigned { return self.__list.len(); }
   view fn isEmpty() -> bool { return self.__list.isEmpty(); }
 
   // Add `v` at the back.
-  fn enqueue(v: view T) { self.__list.pushBack(v); }
+  fn enqueue(v: T) { self.__list.pushBack(v); }
 
   // Remove and return the front element.
   fn dequeue() -> T {
@@ -419,7 +447,7 @@ class __Entry<K, V> {
 // more.  The order of keys() is the table's, not the insertion order.
 class HashMap<K: Hashable, V> {
   __buckets: memory::Buffer<__Entry<K, V>?>;
-  __size: int;
+  __size: unsigned;
 }
 
 impl HashMap<K, V> {
@@ -430,7 +458,7 @@ impl HashMap<K, V> {
   }
 
   // The number of keys.
-  view fn len() -> int { return self.__size; }
+  view fn len() -> unsigned { return self.__size; }
 
   // True when the map has no keys.
   view fn isEmpty() -> bool { return self.__size == 0; }
@@ -449,7 +477,7 @@ impl HashMap<K, V> {
     if ((self.__size + 1) * 4 > self.__buckets.len() * 3) {
       self.__rehash(self.__buckets.len() * 2);
     }
-    b: int = __bucket(h, self.__buckets.len());
+    b: unsigned = __bucket(h, self.__buckets.len());
     self.__buckets.set(b, __Entry<K, V>(k, v, h, self.__buckets.copy(b)));
     self.__size = self.__size + 1;
     return True;
@@ -479,7 +507,7 @@ impl HashMap<K, V> {
   // Remove `k` and its value; True if it was a key.
   fn remove(k: view K) -> bool {
     h: int = k.hash();
-    b: int = __bucket(h, self.__buckets.len());
+    b: unsigned = __bucket(h, self.__buckets.len());
     prev: __Entry<K, V>? = None;
     cur: __Entry<K, V>? = self.__buckets.copy(b);
     while (True) {
@@ -511,7 +539,7 @@ impl HashMap<K, V> {
   // The keys, in a new list.
   view fn keys() -> List<K> {
     out: List<K> = List<K>();
-    i: int = 0;
+    i: unsigned = 0;
     while (i < self.__buckets.len()) {
       cur: __Entry<K, V>? = self.__buckets.copy(i);
       while (cur != None) {
@@ -531,7 +559,7 @@ impl HashMap<K, V> {
   // The values, in a new list, in the order of keys().
   view fn values() -> List<V> {
     out: List<V> = List<V>();
-    i: int = 0;
+    i: unsigned = 0;
     while (i < self.__buckets.len()) {
       cur: __Entry<K, V>? = self.__buckets.copy(i);
       while (cur != None) {
@@ -564,17 +592,17 @@ impl HashMap<K, V> {
   }
 
   // Move every entry into `n` new buckets.
-  fn __rehash(n: int) {
+  fn __rehash(n: unsigned) {
     old: memory::Buffer<__Entry<K, V>?> = self.__buckets;
     self.__buckets = memory::Buffer<__Entry<K, V>?>(n);
-    i: int = 0;
+    i: unsigned = 0;
     while (i < old.len()) {
       cur: __Entry<K, V>? = old.copy(i);
       while (cur != None) {
         match cur {
           e: __Entry<K, V> {
             cur = e.next;
-            b: int = __bucket(e.hash, n);
+            b: unsigned = __bucket(e.hash, n);
             e.next = self.__buckets.copy(b);
             self.__buckets.set(b, e);
           }
@@ -586,11 +614,10 @@ impl HashMap<K, V> {
   }
 }
 
-// The bucket of hash `h` among `n`.
-fn __bucket(h: int, n: int) -> int {
-  b: int = h % n;
-  if (b < 0) { return b + n; }
-  return b;
+// The bucket of hash `h` among `n`: the hash's bits read as an unsigned
+// number, modulo `n`, so a negative hash lands in a bucket too.
+fn __bucket(h: int, n: unsigned) -> unsigned {
+  return unsigned(h) % n;
 }
 
 // A set of Hashable keys, compared with == (see HashMap).
@@ -603,7 +630,7 @@ impl HashSet<K> {
   fn __init__() { self.__map = HashMap<K, bool>(); }
 
   // The number of keys.
-  view fn len() -> int { return self.__map.len(); }
+  view fn len() -> unsigned { return self.__map.len(); }
 
   // True when the set has no keys.
   view fn isEmpty() -> bool { return self.__map.isEmpty(); }
@@ -633,8 +660,8 @@ impl HashSet<K> {
 class __Heap<T> {
   __values: memory::Buffer<T>;
   __priorities: memory::Buffer<int>;
-  __order: memory::Buffer<int>;
-  __pushed: int;
+  __order: memory::Buffer<unsigned>;
+  __pushed: unsigned;
   __max: bool;
 }
 
@@ -642,12 +669,12 @@ impl __Heap<T> {
   fn __init__(max: bool) {
     self.__values = memory::Buffer<T>(0);
     self.__priorities = memory::Buffer<int>(0);
-    self.__order = memory::Buffer<int>(0);
+    self.__order = memory::Buffer<unsigned>(0);
     self.__pushed = 0;
     self.__max = max;
   }
 
-  view fn len() -> int { return self.__values.len(); }
+  view fn len() -> unsigned { return self.__values.len(); }
 
   fn push(v: view T, priority: int) {
     self.__values.push(v);
@@ -660,7 +687,7 @@ impl __Heap<T> {
   fn pop(what: view Str) -> T {
     self.__nonEmpty(what);
     v: T = self.__values.copy(0);
-    last: int = self.__values.len() - 1;
+    last: unsigned = self.__values.len() - 1;
     self.__swap(0, last);
     self.__values.shrink(1);
     self.__priorities.shrink(1);
@@ -680,14 +707,14 @@ impl __Heap<T> {
   }
 
   fn clear() {
-    n: int = self.__values.len();
+    n: unsigned = self.__values.len();
     self.__values.shrink(n);
     self.__priorities.shrink(n);
     self.__order.shrink(n);
   }
 
   // True when node `i` pops before node `j`.
-  view fn __before(i: int, j: int) -> bool {
+  view fn __before(i: unsigned, j: unsigned) -> bool {
     pi: int = self.__priorities.copy(i);
     pj: int = self.__priorities.copy(j);
     if (pi != pj) {
@@ -697,30 +724,30 @@ impl __Heap<T> {
     return self.__order.copy(i) < self.__order.copy(j);
   }
 
-  fn __swap(i: int, j: int) {
+  fn __swap(i: unsigned, j: unsigned) {
     if (i == j) { return; }
     self.__values.swap(i, j);
     self.__priorities.swap(i, j);
     self.__order.swap(i, j);
   }
 
-  fn __siftUp(i: int) {
-    k: int = i;
+  fn __siftUp(i: unsigned) {
+    k: unsigned = i;
     while (k > 0) {
-      parent: int = (k - 1) / 2;
+      parent: unsigned = (k - 1) / 2;
       if (!self.__before(k, parent)) { return; }
       self.__swap(k, parent);
       k = parent;
     }
   }
 
-  fn __siftDown(i: int) {
-    n: int = self.__values.len();
-    k: int = i;
+  fn __siftDown(i: unsigned) {
+    n: unsigned = self.__values.len();
+    k: unsigned = i;
     while (True) {
-      best: int = k;
-      l: int = 2 * k + 1;
-      r: int = l + 1;
+      best: unsigned = k;
+      l: unsigned = 2 * k + 1;
+      r: unsigned = l + 1;
       if (l < n && self.__before(l, best)) { best = l; }
       if (r < n && self.__before(r, best)) { best = r; }
       if (best == k) { return; }
@@ -744,7 +771,7 @@ impl MinPriorityQueue<T> {
   // An empty queue.
   fn __init__() { self.__heap = __Heap<T>(False); }
 
-  view fn len() -> int { return self.__heap.len(); }
+  view fn len() -> unsigned { return self.__heap.len(); }
   view fn isEmpty() -> bool { return self.__heap.len() == 0; }
 
   // Add `v` with `priority`.
@@ -773,7 +800,7 @@ impl MaxPriorityQueue<T> {
   // An empty queue.
   fn __init__() { self.__heap = __Heap<T>(True); }
 
-  view fn len() -> int { return self.__heap.len(); }
+  view fn len() -> unsigned { return self.__heap.len(); }
   view fn isEmpty() -> bool { return self.__heap.len() == 0; }
 
   // Add `v` with `priority`.

@@ -18,11 +18,23 @@ qualifier: `collections::List<int>()`.
   reference to each element. A method that hands an element out returns a copy, which
   shares an object element with the container.
 - Elements are compared with `==`, so a class compares by its `equals`.
+- Every index and size is an `unsigned`: `len()` returns one, `get(i)`, `set(i, v)`,
+  `insert(i, v)`, `removeAt(i)` and `swap(i, j)` take one, and `indexOf(v)` returns an
+  `unsigned?` that is `None` when there is no such element. A literal index takes the
+  type (`xs.get(0)`); a counter is declared `i: unsigned = 0`.
 - The keys of a `HashMap` or `HashSet` implement the builtin trait
   [`Hashable`](12-traits.md#hashable): `int`, `bool`, `char`, `Str`, a sized integer type
   (`u32`, `unsigned`, …), or a class with an `impl Hashable for` block.
 - A broken precondition panics: `pop` on an empty container, an index out of range,
   `get` of a key a map does not have.
+- The library's `__` names are [private](06-modules.md#private-to-the-module): a
+  container's `__` fields and methods are reachable only from its own methods, and the
+  modules' `__` functions and classes (`collections::__Entry`, `memory::__new`) only from
+  inside the module.  A program that names one is rejected (`'__size' is private to
+  'HashMap<int, int>': it is reachable only from its own methods`).
+- The [sized numeric types](01-language-basics.md#sized-numeric-types) are elements and
+  keys like `int` and `float`: a `List<u8>`, a `HashMap<u32, Str>`, a `Box<f32>`; a
+  literal pushed or put takes the element or key type.
 - The build compiles the library with the compiler and installs it in
   `<prefix>/lib/paykan/stdlib/<version>/`, where `paykan` finds it (see
   [Where the library is](#where-the-library-is)).
@@ -77,8 +89,8 @@ move the elements after the index.
 | `len()`, `isEmpty()` | The number of elements |
 | `get(i)`, `set(i, v)` | Element `i`, `0 <= i < len()` |
 | `push(v)`, `pop()`, `last()` | At the end |
-| `insert(i, v)`, `removeAt(i)` | Anywhere, `0 <= i <= len()` for `insert` |
-| `indexOf(v)`, `contains(v)`, `remove(v)` | Search with `==`; `indexOf` is `-1` when there is none, `remove` drops the first match |
+| `insert(i, v)`, `removeAt(i)` | Anywhere, `i <= len()` for `insert` |
+| `indexOf(v)`, `contains(v)`, `remove(v)` | Search with `==`; `indexOf` is an `unsigned?`, `None` when there is none, `remove` drops the first match |
 | `swap(i, j)`, `reverse()`, `clear()` | In place |
 | `copy()` | A new list of the same elements |
 
@@ -87,9 +99,8 @@ a list of `Show` elements as `[a, b, c]`.
 
 ### `LinkedList<T>`
 
-A doubly linked list with a sentinel node. The list is circular through the sentinel: the
-sentinel's next node is the first element and its previous node is the last, so both
-ends are O(1) to reach, add to and remove from. `contains` and `remove` walk the list.
+A doubly linked list: both ends are O(1) to reach, add to and remove from. `contains`
+and `remove` walk the list.
 
 | Method | Description |
 |--------|-------------|
@@ -102,9 +113,10 @@ ends are O(1) to reach, add to and remove from. `contains` and `remove` walk the
 | `clear()` | Remove every element |
 | `toList()` | The elements from first to last, in a new `List<T>` |
 
-The nodes link to each other by index, in buffers the list owns, not by reference.
-Neighbours that held references to each other would form reference cycles, which
-[reference counting never frees](08-memory-model.md#reference-cycles).
+Each node owns the next one and holds the previous one as a
+[`weak` reference](08-memory-model.md#weak-references), so two neighbours form no
+reference cycle and dropping the list frees every node. `pushFront` and `pushBack` take
+the element by value (an object is then shared with the list), like `HashMap.put`.
 
 ### `Stack<T>` and `Queue<T>`
 
@@ -158,6 +170,33 @@ To order numbers by their own value, push each one with itself as its priority:
 
 ---
 
+### Sized numeric types in the containers
+
+Every container takes the [sized numeric types](01-language-basics.md#sized-numeric-types)
+as elements, and the hash tables take the sized integer types as keys (they are `Hashable`).
+A literal flowing into a container's method takes the element type, so `bytes.push(250)`
+pushes a `u8`, and the elements keep their arithmetic: adding two `u8` elements wraps at 256.
+
+```pkn
+import ::collections;
+
+fn main() -> int {
+  bytes = collections::List<u8>();
+  bytes.push(250);
+  bytes.push(bytes.get(0) + 10);          // 4: u8 arithmetic wraps
+  codes = collections::HashMap<u32, Str>();
+  codes.put(4000000000, "big");           // a key above the i32 range
+  println(collections::listToString<u8>(bytes) + " " + codes.get(4000000000));
+  return 0;
+}
+```
+
+Output:
+
+```
+[250, 4] big
+```
+
 ## `::memory`
 
 `Buffer<T>(n)` is `n` slots of `T` whose storage is the runtime's, reached through generic
@@ -168,8 +207,8 @@ it panics.
 
 | Method | Description |
 |--------|-------------|
-| `len()` | The number of slots |
-| `get(i)`, `copy(i)`, `set(i, v)` | Slot `i`: a `view` of it, a copy to keep, or a new value |
+| `len()` | The number of slots, an `unsigned` |
+| `get(i)`, `copy(i)`, `set(i, v)` | Slot `i` (an `unsigned`): a `view` of it, a copy to keep, or a new value |
 | `push(v)`, `grow(by)`, `reserve(n)`, `shrink(by)` | Change the number of slots; growing one at a time is amortised O(1) |
 | `swap(i, j)` | Exchange two slots |
 

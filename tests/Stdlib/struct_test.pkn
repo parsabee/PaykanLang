@@ -10,12 +10,20 @@ impl Hashable for P { view fn hash() -> int { return (self.x * 31 + self.y).hash
 
 struct Named { p: P; name: Str; }
 
+// The text of an index `indexOf` returns: the number, or "None".
+fn idx(i: unsigned?) -> Str {
+  match i {
+    n: unsigned { return Str(n); }
+    None { return "None"; }
+  }
+}
+
 fn main() -> int {
   l = collections::List<P>();
   l.push(P(5, 6));
   l.push(P(7, 8));
   println(Str(l.get(1).sum()) + " " + Str(l.contains(P(5, 6))) + " " +
-          Str(l.indexOf(P(9, 9))) + " " + Str(l.len()));
+          idx(l.indexOf(P(9, 9))) + " " + Str(l.len()));
   println(l.get(0));
 
   m = collections::HashMap<P, Str>();

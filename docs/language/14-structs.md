@@ -419,7 +419,7 @@ fn main() -> int {
   ps.push(Point(1, 0));
   ps.push(Point(2, 2));
   println(names.get(Point(1, 0)) + " " + Str(names.containsKey(Point(2, 2))) + " " +
-          Str(ps.indexOf(Point(2, 2))) + " " + Str(ps.get(0).x));
+          Str(ps.contains(Point(2, 2))) + " " + Str(ps.get(0).x));
   return 0;
 }
 ```
@@ -427,7 +427,7 @@ fn main() -> int {
 Output:
 
 ```
-east False 1 1
+east False True 1
 ```
 
 ---

@@ -5,20 +5,28 @@ import ::collections;
 
 fn square(x: int) -> int { return x * x; }
 
+// The text of an index `indexOf` returns: the number, or "None".
+fn idx(i: unsigned?) -> Str {
+  match i {
+    n: unsigned { return Str(n); }
+    None { return "None"; }
+  }
+}
+
 fn main() -> int {
   fs = collections::List<(int) -> int>();
   fs.push(square);
   fs.push(fn(x: int) -> int { return x + 1; });
   double = fn(x: int) -> int { return x * 2; };
   fs.push(double);
-  i = 0;
+  i: unsigned = 0;
   total = 0;
   while (i < fs.len()) {
     f = fs.get(i);
     total = total + f(3);
     i = i + 1;
   }
-  println(Str(total) + " " + Str(fs.contains(double)) + " " + Str(fs.indexOf(double)) +
+  println(Str(total) + " " + Str(fs.contains(double)) + " " + idx(fs.indexOf(double)) +
           " " + Str(fs.contains(fn(x: int) -> int { return x * 2; })));
 
   greetings = collections::HashMap<Str, (Str) -> Str>();
