@@ -319,7 +319,7 @@ changed through it: no field or element write, and only a `view fn`
 `toString`, `equals`, `len` or `length`, can be called on it (`'v' is a 'view' local;
 'tick' is not a 'view fn'`). A `view` local stays one: it can only be passed on to a `view` parameter,
 and is never stored or returned
-([A `view` stays a `view`](02-functions-and-calling.md#a-view-stays-a-view)).
+([A `view` stays a `view`](02-functions-and-calling.md#a-view-of-a-reference-stays-a-view)).
 
 An `inout` local, `x: inout = place;`, is another name for a variable or a field: reading
 it reads there, and assigning to it writes there, of any type (an object, string or array is

@@ -47,6 +47,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A generic class or struct whose method instantiates its template with an ever-growing
   type argument (`Deep<Deep<T>>`) is now reported (`exceeds the maximum instantiation
   depth`) instead of instantiating without end.
+- A value type read through a `view` is passed to a by-value parameter as a copy
+  (docs/language/02-functions-and-calling.md, "A `view` of a reference stays a `view`"): `twice(n)` with `n: view int`, `twice(k)` with `k:
+  view = 3`, `f(xs[i])` with `xs: view int[]`, `twice(b.num())` with `num() -> view int`,
+  and `g(self.x)` with `x: int` in a `view fn` were errors (`it can only be passed to a
+  'view' parameter`) although assigning the same value copies it; they are now allowed.
+  A `view` of an object, a `Str`, or a struct, tuple or array holding one still goes only
+  to a `view` parameter.  The 'never changes self' warning is unchanged: a method that
+  passes part of `self` to a by-value parameter is still not reported.
 - Fixes from an inspection of structs, generic structs and function values: a method
   that changes `self` can no longer be called on a `let` struct, on a struct in a tuple
   or on an element of a `let` array (`'p' is declared with 'let'; its value cannot

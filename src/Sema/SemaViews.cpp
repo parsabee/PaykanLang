@@ -195,11 +195,15 @@ bool Sema::checkViewArgs(const ast::ParamModes &modes,
     // argument of the wrong type was reported by the call's own check.
     if (modes.mode(i) != ast::ParamMode::Value || !args[i]->getResolvedType())
       continue;
-    // A viewed variable of a value type is passed as a copy, which cannot
-    // change it.
-    std::string msg =
-        viewOf(args[i], sharesStorage(args[i]->getResolvedType()));
-    if (msg.empty())
+    // A value that shares nothing (an `int`, a struct or a tuple of them:
+    // an element of a `view` array, a field of a `view fn`'s `self`, a
+    // `view int` parameter) is passed as a copy, which cannot change what
+    // it was read from, as assigning it copies it.  The place is still
+    // looked at: part of `self` passed on counts as a possible change of
+    // `self` for the 'never changes self' warning, as before.
+    const bool shares = sharesStorage(args[i]->getResolvedType());
+    std::string msg = viewOf(args[i], shares);
+    if (msg.empty() || !shares)
       continue;
     msg += "; it can only be passed to a 'view' parameter, and parameter ";
     msg += std::to_string(i + 1);

@@ -84,7 +84,7 @@ TEST(FunctionType, CapturesAreCopiedAndReleased) {
     fn mapAll(xs: view int[], f: (int) -> int) -> int {
       total = 0;
       i = 0;
-      while (i < xs.len()) { x = xs[i]; total = total + f(x); i = i + 1; }
+      while (i < xs.len()) { total = total + f(xs[i]); i = i + 1; }   // a copy out of the view
       return total;
     }
     fn describe(n: Node) -> (Str) -> Str {
@@ -273,7 +273,7 @@ struct Op { name: Str; run: (int, int) -> int; }
 fn makeCounter(start: int) -> () -> int { return fn() -> int { return start + 1; }; }
 fn applyAll(xs: view int[], f: (int) -> int) -> int {
   t = 0; i = 0;
-  while (i < xs.len()) { x = xs[i]; t = t + f(x); i = i + 1; }
+  while (i < xs.len()) { t = t + f(xs[i]); i = i + 1; }
   return t;
 }
 )");

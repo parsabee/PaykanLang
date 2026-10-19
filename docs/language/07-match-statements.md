@@ -193,7 +193,7 @@ Output:
 
 The mode goes after the colon: `view d: Dog { }` is a syntax error that shows the fix,
 `d: view Dog`. A binding of a `view` subject is a `view` even without the mode
-([A `view` stays a `view`](02-functions-and-calling.md#a-view-stays-a-view)).
+([A `view` stays a `view`](02-functions-and-calling.md#a-view-of-a-reference-stays-a-view)).
 
 ---
 

@@ -132,11 +132,10 @@ fn main() -> int {
           ":26:8: error: the result of 'peek' is a 'view'; it can only be "
           "passed to a 'view' parameter, and parameter 1 of 'keep' is not one",
           ":27:7: error: the result of 'peek' is a 'view'; it cannot be "
-          "stored, only read or passed to a 'view' parameter",
-          ":31:16: error: the result of 'num' is a 'view'; it can only be "
-          "passed to a 'view' parameter, and parameter 1 of 'twice' is not "
-          "one"});
-  EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
+          "stored, only read or passed to a 'view' parameter"});
+  // `twice(b.num())`: a `view int` result is passed on as a copy.
+  EXPECT_EQ(r.Diagnostics.find(":31:"), std::string::npos) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
 }
 
 // `main` returns a copy, and an override returns its result the way the
