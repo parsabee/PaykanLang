@@ -210,9 +210,8 @@ fn __g<T>(v: T) -> T { return v; }
 fn main() -> int { return 0; }
 )");
   EXPECT_FALSE(r.Ok);
-  expectAll(r, {"function '__f': the '__' prefix makes a member private to "
-                "its class or struct; a module's own function is spelled "
-                "'_f'",
+  expectAll(r, {"function '__f': the '__' prefix makes a member private",
+                "a module's own function is spelled '_f'",
                 "class '__C': the '__' prefix", "struct '__S': the '__' prefix",
                 "enum '__E': the '__' prefix", "trait '__T': the '__' prefix",
                 "function '__g': the '__' prefix"});
