@@ -345,8 +345,8 @@ fn main() -> int {
 }
 )");
   EXPECT_FALSE(r.Ok);
-  expectAll(r, {"'() -> int' does not implement trait 'Show', which "
-                "'io::println' requires of 'T'",
+  expectAll(r, {"'() -> int' does not implement trait 'Show'",
+                "which 'io::println' requires of 'T'",
                 "initializer of type '() -> int' does not match declared type",
                 "method call on non-class type '() -> int'",
                 "does not implement trait 'Show'",

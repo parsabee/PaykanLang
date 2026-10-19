@@ -141,6 +141,7 @@ TEST_F(DeferredDestroy, ManyPendingObjectsKeepTheirOrder) {
                         makeNode(100000 + 3 * i + 2, {})});
   Paykan_release(next);
   std::vector<int> expected;
+  expected.reserve(4 * kSpine);
   for (int i = 0; i < kSpine; ++i)
     expected.push_back(i);
   for (int i = kSpine - 1; i >= 0; --i)
