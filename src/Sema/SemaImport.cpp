@@ -739,21 +739,21 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
   };
 
   auto addClassAliases = [&](ast::ClassType *ct, const std::string &name) {
-    if (!hiddenInject && names::isPrivateName(name))
+    if (!hiddenInject && names::isModulePrivateName(name))
       return;
     Ctx.addClassTypeAlias(qualifier + names::kQualSep + name, ct);
     if (qualifier != fullModulePath)
       Ctx.addClassTypeAlias(fullModulePath + names::kQualSep + name, ct);
   };
   auto addEnumAliases = [&](ast::EnumType *et, const std::string &name) {
-    if (!hiddenInject && names::isPrivateName(name))
+    if (!hiddenInject && names::isModulePrivateName(name))
       return;
     Ctx.addEnumTypeAlias(qualifier + names::kQualSep + name, et);
     if (qualifier != fullModulePath)
       Ctx.addEnumTypeAlias(fullModulePath + names::kQualSep + name, et);
   };
   auto addStructAliases = [&](ast::StructType *st, const std::string &name) {
-    if (!hiddenInject && names::isPrivateName(name))
+    if (!hiddenInject && names::isModulePrivateName(name))
       return;
     Ctx.addStructTypeAlias(qualifier + names::kQualSep + name, st);
     if (qualifier != fullModulePath)
@@ -982,7 +982,7 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
   // qualifier::name and fullModulePath::name, then templates.
   bool ok = registerExportedTypes();
   for (auto &fi : info.ExportedFunctions) {
-    if (!hiddenInject && isModulePrivateName(fi.Name))
+    if (!hiddenInject && isModuleOwnName(fi.Name))
       continue; // the module's own: a private function or type's constructor
     if (!injectFnAs(fi, qualifier + names::kQualSep + fi.Name))
       ok = false;
@@ -1222,13 +1222,13 @@ bool Sema::injectTemplates(const ModuleInfo &info, const std::string &qualifier,
     // A private template is reachable under the hidden qualifier only.
     const bool hidden = q == hiddenQualifier(mt.Module);
     for (auto *cd : mt.Classes)
-      if (hidden || !names::isPrivateName(cd->getName()))
+      if (hidden || !names::isModulePrivateName(cd->getName()))
         ClassTemplates[q + names::kQualSep + cd->getName()] = cd;
     for (auto *fn : mt.Functions)
-      if (hidden || !names::isPrivateName(fn->getName()))
+      if (hidden || !names::isModulePrivateName(fn->getName()))
         FuncTemplates[q + names::kQualSep + fn->getName()] = fn;
     for (auto *sd : mt.Structs)
-      if (hidden || !names::isPrivateName(sd->getName()))
+      if (hidden || !names::isModulePrivateName(sd->getName()))
         StructTemplates[q + names::kQualSep + sd->getName()] = sd;
   }
   for (auto *cd : mt.Classes)

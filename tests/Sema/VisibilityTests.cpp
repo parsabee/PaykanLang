@@ -1,10 +1,11 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Sema tests: private members (docs/design/visibility.md).  A `__` field or
+// Sema tests: private names (docs/design/visibility.md).  A `__` field or
 // method is its class's or struct's own, reachable from that type's
-// methods, `impl` blocks, trait impls and `static fn`s only; a public
-// declaration cannot name a `__` type.  Module privacy is tested through
-// the driver (tests/Driver/PkmTests.cpp, Pkm.PrivateNamesAreTheModulesOwn).
+// methods, `impl` blocks, trait impls and `static fn`s only; a `_` name is
+// its module's own, and a public declaration cannot name a `_` type.  Module
+// privacy across an import is tested through the driver
+// (tests/Driver/PkmTests.cpp, Pkm.PrivateNamesAreTheModulesOwn).
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -43,8 +44,8 @@ impl P {
   view fn x() -> int { return self.__x; }
   static fn origin() -> P { p = P(0, 0); p.__x = 1; return p; }
 }
-class __Node { v: int; next: __Node?; }
-fn __helper(n: view __Node) -> int { return n.v; }
+class _Node { v: int; next: _Node?; }
+fn _helper(n: view _Node) -> int { return n.v; }
 class Box<T> { __v: T; view fn get() -> T { return self.__v; } fn set(v: T) { self.__v = v; } }
 impl Box<T> { fn __init__(v: T) { self.__v = v; } fn take(o: Box<T>) { self.__v = o.__v; } }
 fn main() -> int {
@@ -54,10 +55,10 @@ fn main() -> int {
   d.copyFrom(c);
   p = P::origin();
   p.bump();
-  n = __Node(5, None);
+  n = _Node(5, None);
   b = Box(7);
   b.set(8);
-  return c.value() + d.value() + c.name().len() + p.x() + __helper(n) + b.get() + c.later()(1);
+  return c.value() + d.value() + c.name().len() + p.x() + _helper(n) + b.get() + c.later()(1);
 }
 )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -110,57 +111,62 @@ fn main() -> int {
 
 TEST(Visibility, PublicSurfaceCannotNameAPrivateType) {
   auto r = semaCheck(R"(
-class __Hidden { v: int; }
-struct __Pt { x: int; }
-fn make() -> __Hidden { return __Hidden(1); }
-fn take(h: __Hidden, k: int) {}
-fn takeList(hs: __Pt[2]) -> int { return hs[0].x; }
+class _Hidden { v: int; }
+struct _Pt { x: int; }
+fn make() -> _Hidden { return _Hidden(1); }
+fn take(h: _Hidden, k: int) {}
+fn takeList(hs: _Pt[2]) -> int { return hs[0].x; }
 class Pub {
-  h: __Hidden;
-  __mine: __Hidden;
-  fn get() -> __Hidden { return self.h; }
-  fn __peek() -> __Hidden { return self.h; }
+  h: _Hidden;
+  __mine: _Hidden;
+  fn get() -> _Hidden { return self.h; }
+  fn __peek() -> _Hidden { return self.h; }
 }
-impl Pub { fn __init__(h: __Hidden) { self.h = h; self.__mine = h; } }
-fn __mk() -> __Hidden { return __Hidden(2); }
-class __Holder { h: __Hidden; fn get() -> __Hidden { return self.h; } }
+impl Pub { fn __init__(h: _Hidden) { self.h = h; self.__mine = h; } }
+fn _mk() -> _Hidden { return _Hidden(2); }
+class _Holder { h: _Hidden; fn get() -> _Hidden { return self.h; } }
 fn main() -> int { return take(make(), 1).len(); }
 )");
   EXPECT_FALSE(r.Ok);
   expectAll(r, {"'make' is public but its result names the private type "
-                "'__Hidden'; make the function private or the type public",
+                "'_Hidden'; make the function private or the type public",
                 "'take' is public but parameter 'h' names the private type "
-                "'__Hidden'; make the function private or the type public",
+                "'_Hidden'; make the function private or the type public",
                 "'takeList' is public but parameter 'hs' names the private "
-                "type '__Pt'",
+                "type '_Pt'",
                 "field 'h' of 'Pub' is public but it names the private type "
-                "'__Hidden'; make the field private or the type public",
+                "'_Hidden'; make the field private or the type public",
                 "method 'get' of 'Pub' is public but its result names the "
-                "private type '__Hidden'; make the method private or the "
+                "private type '_Hidden'; make the method private or the "
                 "type public",
                 "method '__init__' of 'Pub' is public but parameter 'h' names "
-                "the private type '__Hidden'"});
-  // `__mine`, `__peek`, `__mk` and `__Holder` may name it.
+                "the private type '_Hidden'"});
+  // `__mine`, `__peek`, `_mk` and `_Holder` may name it.
   EXPECT_EQ(r.Diagnostics.find("'__mine'"), std::string::npos) << r.Diagnostics;
   EXPECT_EQ(r.Diagnostics.find("'__peek'"), std::string::npos) << r.Diagnostics;
-  EXPECT_EQ(r.Diagnostics.find("'__mk'"), std::string::npos) << r.Diagnostics;
-  EXPECT_EQ(r.Diagnostics.find("'__Holder'"), std::string::npos)
+  EXPECT_EQ(r.Diagnostics.find("'_mk'"), std::string::npos) << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find("'_Holder'"), std::string::npos)
       << r.Diagnostics;
 }
 
-TEST(Visibility, ReservedAndSingleUnderscoreNamesAreNotPrivate) {
+TEST(Visibility, ReservedNamesAreNotPrivateAndUnderscoreMembersAreTheModules) {
+  // `_x` is reachable anywhere in its module: a subclass, a free function.
   auto r = semaCheck(R"(
 class C { _x: int; __y: int; }
 impl C {
   fn __init__(x: int) { self._x = x; self.__y = x; }
   fn __repr() -> int { return self.__y; }
 }
-class D : C { fn x() -> int { return self._x; } }
+class D : C { fn x() -> int { return self._x + self._half(); } }
+impl C { view fn _half() -> int { return self._x / 2; } static fn _one() -> C { return C(1); } }
 impl D { fn __init__() { __super__(7); } }
+struct S { _n: int; }
 fn main() -> int {
-  c = C(1);
+  c = C::_one();
   d = D();
-  return c._x + d.x() + c.__repr();
+  s = S(2);
+  s._n = 3;
+  return c._x + d.x() + c._half() + s._n + c.__repr();
 }
 )");
   EXPECT_FALSE(r.Ok);
@@ -190,4 +196,24 @@ fn main() -> int {
   expectAll(r, {":12:10: error: '__v' is private to 'Box<int>': it is "
                 "reachable only from its own methods"});
   EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+}
+
+TEST(Visibility, DoubleUnderscoreIsForMembersOnly) {
+  auto r = semaCheck(R"(
+fn __f() -> int { return 1; }
+class __C { v: int; }
+struct __S { v: int; }
+enum __E { A }
+trait __T { view fn t() -> int; }
+class Box<T> { v: T; }
+fn __g<T>(v: T) -> T { return v; }
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"function '__f': the '__' prefix makes a member private to "
+                "its class or struct; a module's own function is spelled "
+                "'_f'",
+                "class '__C': the '__' prefix", "struct '__S': the '__' prefix",
+                "enum '__E': the '__' prefix", "trait '__T': the '__' prefix",
+                "function '__g': the '__' prefix"});
 }

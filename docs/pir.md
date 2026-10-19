@@ -228,8 +228,8 @@ same strings itself.
 A `class` item gives the complete object layout and the complete vtable; the
 backend does no inheritance walk.
 
-* **Layout**: the three-word runtime header (vtable pointer, strong count,
-  weak count; `struct PaykanObject` in `Runtime.h`: an object carries its
+* **Layout**: the 16-byte runtime header (vtable pointer, 32-bit strong
+  count, 32-bit weak count; `struct PaykanObject` in `Runtime.h`: an object carries its
   own reference counts, so a `box` is the object's pointer) followed by
   *all* fields in declaration order, ancestors first.  Field types are `i64
   f64 bool char box weak`, the optionals and `mem(N, A)` (laid out at its

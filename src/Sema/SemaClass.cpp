@@ -407,7 +407,7 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
     // A public field of a public class cannot hand an importer a type it
     // could not name (an instantiation's fields are the template's).
     if (!names::isPrivateName(field->getName()) &&
-        !isModulePrivateName(cd->getName()) &&
+        !isModuleOwnName(cd->getName()) &&
         cd->getName().find('<') == std::string::npos &&
         !checkPublicSurface("field '" + field->getName() + "' of '" +
                                 cd->getName() + "' is public but it",
@@ -570,8 +570,7 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
   // A public method of a public type cannot hand an importer a type it
   // could not name (an instantiation's methods are the template's).
   if (!DeclaringDefaultInit && !names::isPrivateName(method->getName()) &&
-      !isModulePrivateName(className) &&
-      className.find('<') == std::string::npos) {
+      !isModuleOwnName(className) && className.find('<') == std::string::npos) {
     const std::string who = "method '" + method->getName() + "' of '" +
                             className + "' is public but ";
     bool pub = checkPublicSurface(who + "its result", "method", retTy,
@@ -785,7 +784,7 @@ bool Sema::checkImplDecls(ast::TranslationUnit *tu) {
   ImplsChecked = true;
   for (const auto &p : PendingTraitImpls) {
     InstantiationStack.push_back(p.Request);
-    OriginSource inOrigin(Diags, p.Origin);
+    OriginSource inOrigin(*this, p.Origin);
     if (!checkTraitImpl(p.Impl, p.Type))
       ok = false;
     InstantiationStack.pop_back();
@@ -1179,17 +1178,18 @@ const Sema::ModuleTemplates *Sema::foreignOrigin(const ast::Decl *tmpl) const {
   return it == ForeignTemplates.end() ? nullptr : it->second;
 }
 
-Sema::OriginSource::OriginSource(DiagEngine &diags,
-                                 const ModuleTemplates *origin)
-    : Diags(diags), SavedName(diags.getSourceName()),
-      SavedLines(diags.getSourceLines()), Active(origin != nullptr) {
+Sema::OriginSource::OriginSource(Sema &s, const ModuleTemplates *origin)
+    : S(s), SavedOrigin(s.CurrentOrigin), SavedName(s.Diags.getSourceName()),
+      SavedLines(s.Diags.getSourceLines()), Active(origin != nullptr) {
+  S.CurrentOrigin = origin;
   if (Active)
-    Diags.setSourceInfo(origin->File, origin->Lines);
+    S.Diags.setSourceInfo(origin->File, origin->Lines);
 }
 
 Sema::OriginSource::~OriginSource() {
+  S.CurrentOrigin = SavedOrigin;
   if (Active)
-    Diags.setSourceInfo(SavedName, SavedLines);
+    S.Diags.setSourceInfo(SavedName, SavedLines);
 }
 
 Sema::InstantiationFrame Sema::frameAt(const std::string &name,
@@ -1319,7 +1319,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
 
   const InstantiationFrame request = frameAt(instName, loc);
   InstantiationStack.push_back(request);
-  OriginSource inOrigin(Diags, origin);
+  OriginSource inOrigin(*this, origin);
   bool ok = true;
 
   // Superclass (phases 2-3 of checkClassDecls, for this one class).
@@ -1479,7 +1479,7 @@ std::string Sema::instantiateFunction(const std::string &name,
   InstantiationStack.push_back(request);
   bool ok;
   {
-    OriginSource inOrigin(Diags, origin);
+    OriginSource inOrigin(*this, origin);
     ok = declareFunctionSignature(clone);
   }
   InstantiationStack.pop_back();
@@ -1814,7 +1814,7 @@ bool Sema::checkPendingInstantiations() {
     CurrentInstantiationDepth = p.Depth;
     bool r;
     {
-      OriginSource inOrigin(Diags, p.Origin);
+      OriginSource inOrigin(*this, p.Origin);
       r = p.Class    ? visitClassDecl(p.Class)
           : p.Struct ? visitStructDecl(p.Struct)
                      : visitFuncDecl(p.Func);

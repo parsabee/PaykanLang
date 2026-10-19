@@ -569,7 +569,7 @@ TEST(Generics, ImportedTemplateBodiesUseTheirModule) {
   writeProjectFile(dir, "lib/gen.pkn", R"(
 import lib::util as u;
 class Inner { n: int; }
-impl Inner { fn __init__() { self.n = __helper(); } }
+impl Inner { fn __init__() { self.n = _helper(); } }
 class Box<T> {
   v: T;
   view fn total() -> int { i = Inner(); return i.n + u::ten(); }
@@ -578,15 +578,15 @@ class Box<T> {
 impl Box<T> {
   fn __init__(v: T) { self.v = v; }
 }
-fn __helper() -> int { return 1; }
-fn sum<T>(b: Box<T>) -> int { return b.total() + __helper(); }
+fn _helper() -> int { return 1; }
+fn sum<T>(b: Box<T>) -> int { return b.total() + _helper(); }
 )");
-  // `u` and `__helper` are the importer's own here.
+  // `u` and `_helper` are the importer's own here.
   auto r = semaCheckFile(writeProjectFile(dir, "main.pkn", R"(
 import lib::gen;
 import other as u;
-fn __helper() -> Str { return u::ten(); }
-fn main() -> int { b = gen::Box(3); s: Str = __helper(); return gen::sum(b); }
+fn _helper() -> Str { return u::ten(); }
+fn main() -> int { b = gen::Box(3); s: Str = _helper(); return gen::sum(b); }
 )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
   EXPECT_EQ(r.Diagnostics, "");

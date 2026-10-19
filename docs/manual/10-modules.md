@@ -61,7 +61,8 @@ True
 ```
 
 - Everything declared at the top level of a module (functions, classes and enums) can be
-  imported. There is no `export` keyword and no private declarations.
+  imported, except the names starting with `_`, which are the module's own. There is no
+  `export` keyword.
 - Imported names are always qualified: a type is `shapes::Circle`, a variant is
   `shapes::Kind::Round`. Your own module's names stay unqualified.
 - Import paths always start from the source root, also inside the modules in

@@ -14,28 +14,28 @@ namespace {
 
 // The standard library's declaration, verbatim.
 const std::string kBuffer = R"(
-native fn __bufferNew<T>(n: int) -> Obj = "PaykanBuffer_new";
-native fn __bufferLen<T>(b: view Obj) -> int = "PaykanBuffer_len";
-native fn __bufferGet<T>(b: view Obj, i: int) -> view T = "PaykanBuffer_get";
-native fn __bufferCopy<T>(b: view Obj, i: int) -> T = "PaykanBuffer_copy";
-native fn __bufferSet<T>(b: inout Obj, i: int, v: view T) = "PaykanBuffer_set";
-native fn __bufferReserve<T>(b: inout Obj, n: int) = "PaykanBuffer_reserve";
-native fn __bufferGrow<T>(b: inout Obj, by: int) = "PaykanBuffer_grow";
-native fn __bufferShrink<T>(b: inout Obj, by: int) = "PaykanBuffer_shrink";
+native fn _bufferNew<T>(n: int) -> Obj = "PaykanBuffer_new";
+native fn _bufferLen<T>(b: view Obj) -> int = "PaykanBuffer_len";
+native fn _bufferGet<T>(b: view Obj, i: int) -> view T = "PaykanBuffer_get";
+native fn _bufferCopy<T>(b: view Obj, i: int) -> T = "PaykanBuffer_copy";
+native fn _bufferSet<T>(b: inout Obj, i: int, v: view T) = "PaykanBuffer_set";
+native fn _bufferReserve<T>(b: inout Obj, n: int) = "PaykanBuffer_reserve";
+native fn _bufferGrow<T>(b: inout Obj, by: int) = "PaykanBuffer_grow";
+native fn _bufferShrink<T>(b: inout Obj, by: int) = "PaykanBuffer_shrink";
 
 class Buffer<T> {
   __data: Obj;
-  view fn len() -> int { return __bufferLen<T>(self.__data); }
-  view fn get(i: int) -> view T { return __bufferGet<T>(self.__data, i); }
-  fn copy(i: int) -> T { return __bufferCopy<T>(self.__data, i); }
-  fn set(i: int, v: T) { __bufferSet<T>(self.__data, i, v); }
-  fn reserve(n: int) { __bufferReserve<T>(self.__data, n); }
-  fn grow(by: int) { __bufferGrow<T>(self.__data, by); }
-  fn shrink(by: int) { __bufferShrink<T>(self.__data, by); }
+  view fn len() -> int { return _bufferLen<T>(self.__data); }
+  view fn get(i: int) -> view T { return _bufferGet<T>(self.__data, i); }
+  fn copy(i: int) -> T { return _bufferCopy<T>(self.__data, i); }
+  fn set(i: int, v: T) { _bufferSet<T>(self.__data, i, v); }
+  fn reserve(n: int) { _bufferReserve<T>(self.__data, n); }
+  fn grow(by: int) { _bufferGrow<T>(self.__data, by); }
+  fn shrink(by: int) { _bufferShrink<T>(self.__data, by); }
 }
 
 impl Buffer<T> {
-  fn __init__() { self.__data = __bufferNew<T>(3); }
+  fn __init__() { self.__data = _bufferNew<T>(3); }
 }
 )";
 

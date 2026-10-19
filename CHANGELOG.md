@@ -391,6 +391,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The object header is 16 bytes instead of 24 (src/Runtime/Runtime.h, `PaykanObject`;
+  docs/language/08-memory-model.md): the vtable pointer, then a 32-bit strong count and a
+  32-bit weak count, so every object is 8 bytes smaller.  A count that would pass
+  `INT32_MAX` panics (`too many strong references to one object`) instead of wrapping.
+  Deferred destruction keeps its pending objects on a runtime stack (256 inline slots,
+  then the C heap) rather than in their `strong` words, which can no longer hold a
+  pointer; the destroy order is unchanged.  The object layout is ABI: clear every
+  `.paykan_cache` after upgrading.
+- Two levels of privacy (docs/design/visibility.md): `__` now only marks a field or
+  method private to its class or struct, and a single `_` marks a name private to its
+  module.  A `_` free function, class, struct, enum or trait is what a top-level `__`
+  one was (`collections::_Entry`, `memory::_new`); a `_` field or method is reachable
+  from any code of the module that declares its type, a subclass and a free function
+  included, and from no importer (`'_w' of 'Pub' is private to module 'lib::shapes'`).
+  A top-level declaration named with `__` is rejected.  The standard library's private
+  functions and classes are renamed to match.
 - An object is one allocation (docs/language/08-memory-model.md, "The reference counts"):
   the reference counts live in the object's header, `{ vtable, strong count, weak count,
   fields… }`, and the separate `PaykanShared` box is gone.  A strong reference
@@ -530,6 +546,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A generic class or function of a module whose body calls a `static fn` of one of that
+  module's types (`Pub::make()`) no longer fails to lower with "call to undeclared
+  function '$m::Pub::make'" when an importer instantiates it.
 - A top-level declaration named after a builtin type (`class int { ... }`, `struct u8`,
   `enum unsigned`, `fn float(...)`, under any of the types' spellings) was accepted and
   silently shadowed by the builtin; it is now rejected (`'u8' is a builtin type and cannot

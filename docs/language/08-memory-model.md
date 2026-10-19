@@ -72,6 +72,10 @@ allocation and a reference to it is simply its address:
 object: { vtable pointer, strong count, weak count, fields… }
 ```
 
+The header is 16 bytes: the 8-byte vtable pointer and two 32-bit counts. An object can have up to
+2,147,483,647 references of each kind; one more stops the program with `paykan: too many strong
+references to one object` rather than corrupting the count.
+
 Two operations maintain the strong count:
 
 - **retain** — increments the count when a new reference to the object is created (an assignment,

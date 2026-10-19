@@ -424,9 +424,18 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// `m::__name` written in an importer: reported as private to its
   /// module, true; false when @p name is not of that form.
   bool reportPrivateImport(const std::string &name, ast::SourceLocation loc);
-  /// Whether a declaration's name is its module's own (`__f`, `__T`,
-  /// `__T::f`): the first segment is private.
-  static bool isModulePrivateName(const std::string &name);
+  /// Whether a declaration's name is its module's own (`_f`, `_T`,
+  /// `_T::f`): the first segment is private to the module.
+  static bool isModuleOwnName(const std::string &name);
+  /// The canonical name of the module that declares @p ty (for an
+  /// instantiation, its template's), "" for this module's own or a builtin.
+  std::string moduleOf(ast::Type *ty);
+  /// The canonical name of the module whose code is being checked, "" for
+  /// this module's own.
+  std::string currentModule() const;
+  /// `__` on a free function or a type, which only a member can have:
+  /// reported, false.
+  bool rejectTopLevelTypePrivate(ast::TranslationUnit *tu);
   /// False (after reporting it) when @p index is a constant out of
   /// @p fixed's bounds.
   bool checkFixedIndex(ast::FixedArrayType *fixed, const ast::Expr *index);
@@ -1376,17 +1385,21 @@ private:
   /// The module of template @p tmpl when it is another module's.
   const ModuleTemplates *foreignOrigin(const ast::Decl *tmpl) const;
 
-  /// While alive, diagnostics point into the file of @p origin's module (a
-  /// template of another module is being checked); a null origin changes
-  /// nothing.
+  /// The module whose template is being checked (CurrentModule), or nullptr
+  /// for this module's own code.
+  const ModuleTemplates *CurrentOrigin = nullptr;
+  /// While alive, the code checked is @p origin's module's (a template of
+  /// another module, or this module's own code for a null origin), and
+  /// diagnostics point into that module's file.
   class OriginSource {
-    DiagEngine &Diags;
+    Sema &S;
+    const ModuleTemplates *SavedOrigin;
     std::string SavedName;
     const std::vector<std::string> *SavedLines;
     bool Active;
 
   public:
-    OriginSource(DiagEngine &diags, const ModuleTemplates *origin);
+    OriginSource(Sema &s, const ModuleTemplates *origin);
     ~OriginSource();
     OriginSource(const OriginSource &) = delete;
     OriginSource &operator=(const OriginSource &) = delete;

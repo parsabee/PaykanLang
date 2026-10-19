@@ -121,8 +121,8 @@ namespace {
 
 struct Link {
   PaykanMethod *vtable;
-  int64_t strong;
-  int64_t weak;
+  int32_t strong;
+  int32_t weak;
   PaykanShared *next;
   PaykanWeak *peer;
 };

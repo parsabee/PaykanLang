@@ -80,10 +80,15 @@ every capture is.
 ```c
 struct PaykanObject {
   PaykanMethod *vtable; // method dispatch and type identity
-  int64_t strong;       // strong references: owned PaykanShared* pointers
-  int64_t weak;         // weak references: PaykanWeak* pointers
-};
+  int32_t strong;       // strong references: owned PaykanShared* pointers
+  int32_t weak;         // weak references: PaykanWeak* pointers
+};                      // 16 bytes
 ```
+
+Each count is 32 bits: a retain, a weak load or a new weak reference that
+would take a count past `PAYKAN_REF_MAX` (`INT32_MAX`) panics (`too many
+strong references to one object`) instead of wrapping to a count that would
+free a live object.
 
 `PaykanShared` and `PaykanWeak` are both `PaykanObject`: a reference is the
 object's address, and the two names say what a pointer holds (a strong
@@ -96,10 +101,10 @@ The separate control block is gone.  `PaykanShared_new(obj)` is `++strong`
 and returns `obj`; `PaykanShared_get` is the identity; `Paykan_retain` and
 `Paykan_release` work on the object.  Both backends lower `unbox` to the
 identity and `box` to `PaykanShared_new`, keep `PaykanShared_get` in the
-runtime for native code, and lay out a class as the three header words
-followed by its fields (the LLVM backend's struct type is `{ptr, i64, i64,
+runtime for native code, and lay out a class as the 16-byte header followed
+by its fields (the LLVM backend's struct type is `{ptr, i32, i32,
 fields...}` and a field is at index 3 + i; the C backend's struct starts
-`PaykanMethod *vtable; int64_t strong; int64_t weak;`).
+`PaykanMethod *vtable; int32_t strong; int32_t weak;`).
 
 ### Destroy and free
 
@@ -125,17 +130,18 @@ called `PaykanString_destroy` before.
 ```
 > 0   alive: the strong count
 -1    dying: its destroy is running
-<= -2 dead, destruction pending: -2 - the link to the next pending object
+-2    dead, destruction pending: on the pending stack
 0     destroyed: a zombie while weak > 0, freed otherwise
 ```
 
-Deferred destruction (#118) threads its pending list through the dead
-objects' `strong` words, encoded below zero so that a weak load of a
-pending object (`strong > 0` is the liveness test) sees it dead, exactly as
-it sees a dying or destroyed one: a weak reference never gives out an object
-whose destroy has started, or is about to.  The encoding relies on a
-user-space address being non-negative as an `intptr_t`, true on every
-64-bit platform the runtime supports (`Shared.c`).  The marker `-1` during
+Deferred destruction (#118) keeps its pending objects on a stack of the
+runtime's (`Shared.c`: 256 inline slots, then the C heap, kept for the next
+drain) and marks each one `-2`, below zero so that a weak load of a pending
+object (`strong > 0` is the liveness test) sees it dead, exactly as it sees
+a dying or destroyed one: a weak reference never gives out an object whose
+destroy has started, or is about to.  The pending list used to be threaded
+through the dead objects' `strong` words, but a 32-bit word cannot hold a
+pointer.  The marker `-1` during
 the destroy also keeps a weak release inside the destroy (an object holding
 a weak reference to itself) from freeing the object under the destroy's
 feet: the free waits for `destroy_dead_object` to set `strong` to 0 and

@@ -1038,18 +1038,23 @@ TEST(Pkm, PrivateNamesAreTheModulesOwn) {
   fs::remove_all(dir);
   fs::create_directories(dir / "lib");
   writeFile(dir / "lib" / "shapes.pkn",
-            "class __Node { v: int; }\n"
-            "fn __helper(n: int) -> int { return n + 1; }\n"
-            "enum __Mode { A, B }\n"
-            "class Pub { __n: int; v: int;\n"
-            "  fn get() -> int { return __helper(self.__n); } }\n"
-            "impl Pub { static fn __mk() -> Pub { return Pub(1, 2); }\n"
+            "class _Node { v: int; }\n"
+            "fn _helper(n: int) -> int { return n + 1; }\n"
+            "enum _Mode { A, B }\n"
+            "class Pub { __n: int; v: int; _w: int;\n"
+            "  fn get() -> int { return _helper(self.__n); }\n"
+            "  view fn _twice() -> int { return self._w * 2; } }\n"
+            "impl Pub { static fn __mk() -> Pub { return Pub(1, 2, 3); }\n"
+            "  static fn _make() -> Pub { return Pub(0, 0, 3); }\n"
             "  static fn mk() -> Pub { return Pub::__mk(); } }\n"
             "class Gen<T> { __v: T;\n"
-            "  fn get() -> T { return self.__v + __helper(0); } }\n"
+            "  fn get() -> T {\n"
+            "    return self.__v + _helper(0) + Pub::_make()._w - 3; } }\n"
             "impl Gen<T> { fn __init__(v: T) { self.__v = v; } }\n"
-            "class __GenHidden<T> { v: T; }\n"
-            "fn useHidden() -> int { h = __GenHidden<int>(3); return h.v; }\n");
+            "class _GenHidden<T> { v: T; }\n"
+            "fn useHidden() -> int {\n"
+            "  h = _GenHidden<int>(3); p = Pub::_make();\n"
+            "  return h.v + p._twice() - p._w * 2; }\n");
   writeFile(dir / "main.pkn",
             "import lib::shapes;\n"
             "fn main() -> int {\n"
@@ -1065,14 +1070,17 @@ TEST(Pkm, PrivateNamesAreTheModulesOwn) {
                              "  return 0;\n}\n");
   writeFile(dir / "bad.pkn", "import lib::shapes;\n"
                              "fn main() -> int {\n"
-                             "  a = shapes::__helper(1);\n"
-                             "  n = shapes::__Node(1);\n"
-                             "  m: shapes::__Mode = shapes::__Mode::A;\n"
+                             "  a = shapes::_helper(1);\n"
+                             "  n = shapes::_Node(1);\n"
+                             "  m: shapes::_Mode = shapes::_Mode::A;\n"
                              "  p = shapes::Pub::__mk();\n"
                              "  q = shapes::Pub::mk();\n"
                              "  r = q.__n;\n"
-                             "  h = shapes::__GenHidden<int>(1);\n"
-                             "  b: __Node = n;\n"
+                             "  s = q._w;\n"
+                             "  t = q._twice();\n"
+                             "  u = shapes::Pub::_make();\n"
+                             "  h = shapes::_GenHidden<int>(1);\n"
+                             "  b: _Node = n;\n"
                              "  return 0;\n}\n");
   auto paykan = [&](const std::string &args) {
     return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
@@ -1086,15 +1094,18 @@ TEST(Pkm, PrivateNamesAreTheModulesOwn) {
     auto bad = paykan("--check-only bad.pkn");
     EXPECT_NE(bad.exitCode, 0) << when;
     for (const char *line :
-         {"'shapes::__helper' is private to module 'lib::shapes'",
-          "'shapes::__Node' is private to module 'lib::shapes'",
-          "'shapes::__Mode' is private to module 'lib::shapes'",
+         {"'shapes::_helper' is private to module 'lib::shapes'",
+          "'shapes::_Node' is private to module 'lib::shapes'",
+          "'shapes::_Mode' is private to module 'lib::shapes'",
           "'__mk' is private to 'Pub': it is reachable only from its own "
           "methods",
           "'__n' is private to 'Pub': it is reachable only from its own "
           "methods",
-          "'shapes::__GenHidden' is private to module 'lib::shapes'",
-          "'__Node' is private to module 'lib::shapes'"})
+          "'_w' of 'Pub' is private to module 'lib::shapes'",
+          "'_twice' of 'Pub' is private to module 'lib::shapes'",
+          "'_make' of 'Pub' is private to module 'lib::shapes'",
+          "'shapes::_GenHidden' is private to module 'lib::shapes'",
+          "'_Node' is private to module 'lib::shapes'"})
       EXPECT_TRUE(contains(bad.out, line)) << when << ": " << line << "\n"
                                            << bad.out;
   };

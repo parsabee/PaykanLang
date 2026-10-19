@@ -156,9 +156,9 @@ class Box<T> { v: T; }
 impl Box<T> {
   fn __init__(v: T) { self.v = v; }
   view fn get() -> view T { return self.v; }
-  fn set(v: T) { self.v = __pick(v, self.v); }
+  fn set(v: T) { self.v = _pick(v, self.v); }
 }
-fn __pick<T>(a: T, b: T) -> T { return a; }
+fn _pick<T>(a: T, b: T) -> T { return a; }
 fn mk() -> Box<int> { return Box<int>(41); }
 )";
   std::ofstream(dir / "main.pkn") << R"(

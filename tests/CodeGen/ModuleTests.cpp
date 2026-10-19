@@ -304,8 +304,8 @@ class Box<T> {
 impl Box<T> {
   fn __init__(v: T) { self.v = v; }
 }
-fn __bump(n: int) -> int { return n + 1; }
-fn sum<T>(xs: view Box<T>[], f: int) -> int { return xs.len() + __bump(f); }
+fn _bump(n: int) -> int { return n + 1; }
+fn sum<T>(xs: view Box<T>[], f: int) -> int { return xs.len() + _bump(f); }
 )");
   writeTempFile(tmpDir.string(), "mid.pkn", R"(
 import lib::gen;

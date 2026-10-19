@@ -32,12 +32,22 @@ inline constexpr const char *kStdin = "Stdin";
 inline constexpr const char *kMethodInit = "__init__";
 inline constexpr const char *kMethodSuper = "__super__";
 
-/// A name the `__` prefix makes private (docs/design/visibility.md): a field
-/// or method private to its class or struct, a free function or a type
-/// private to its module.  The reserved `__init__` and `__super__` are not.
-inline bool isPrivateName(std::string_view name) {
+/// A name the `__` prefix makes private to its class or struct
+/// (docs/design/visibility.md): a field or method reachable only from that
+/// type's own methods.  The reserved `__init__` and `__super__` are not.
+inline bool isTypePrivateName(std::string_view name) {
   return name.size() > 2 && name[0] == '_' && name[1] == '_' &&
          name != kMethodInit && name != kMethodSuper;
+}
+/// A name the `_` prefix makes private to its module: a free function, a
+/// type, or a field or method reachable anywhere in the module that declares
+/// it and from no importer.
+inline bool isModulePrivateName(std::string_view name) {
+  return name.size() > 1 && name[0] == '_' && name[1] != '_';
+}
+/// A member name private either way.
+inline bool isPrivateName(std::string_view name) {
+  return isTypePrivateName(name) || isModulePrivateName(name);
 }
 inline constexpr const char *kMethodDestroy = "destroy";
 inline constexpr const char *kMethodToString = "toString";

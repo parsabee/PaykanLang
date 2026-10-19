@@ -30,8 +30,8 @@ constexpr int kMaxKids = 4;
 
 struct TestNode {
   PaykanMethod *vtable;
-  int64_t strong;
-  int64_t weak;
+  int32_t strong;
+  int32_t weak;
   int id;
   PaykanShared *kids[kMaxKids];
 };
@@ -125,6 +125,36 @@ TEST_F(DeferredDestroy, NestedChainsAreDestroyedOneAfterAnother) {
   for (int c = 0; c < 3; ++c)
     for (int i = 0; i < kLen; ++i)
       expected.push_back((c + 1) * 10000 + i);
+  EXPECT_EQ(gLog, expected);
+}
+
+TEST_F(DeferredDestroy, ManyPendingObjectsKeepTheirOrder) {
+  // A comb: spine node i holds [spine i + 1, three leaves].  Each destroy
+  // queues a spine node and three leaves, so the pending stack outgrows its
+  // inline room (256) and moves to the heap; the order is still the
+  // recursive one: the spine, then the leaves, the deepest node's first.
+  constexpr int kSpine = 300;
+  PaykanShared *next = nullptr;
+  for (int i = kSpine - 1; i >= 0; --i)
+    next = makeNode(i, {next, makeNode(100000 + 3 * i, {}),
+                        makeNode(100000 + 3 * i + 1, {}),
+                        makeNode(100000 + 3 * i + 2, {})});
+  Paykan_release(next);
+  std::vector<int> expected;
+  for (int i = 0; i < kSpine; ++i)
+    expected.push_back(i);
+  for (int i = kSpine - 1; i >= 0; --i)
+    for (int k = 0; k < 3; ++k)
+      expected.push_back(100000 + 3 * i + k);
+  EXPECT_EQ(gLog, expected);
+  // And again, with the grown stack kept from the first drain.
+  gLog.clear();
+  next = nullptr;
+  for (int i = kSpine - 1; i >= 0; --i)
+    next = makeNode(i, {next, makeNode(100000 + 3 * i, {}),
+                        makeNode(100000 + 3 * i + 1, {}),
+                        makeNode(100000 + 3 * i + 2, {})});
+  Paykan_release(next);
   EXPECT_EQ(gLog, expected);
 }
 

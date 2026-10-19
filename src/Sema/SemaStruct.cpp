@@ -223,7 +223,7 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
     field->setType(fty); // canonical write-back for the lowering
     st->addField(field->getName(), fty);
     if (!names::isPrivateName(field->getName()) &&
-        !isModulePrivateName(sd->getName()) &&
+        !isModuleOwnName(sd->getName()) &&
         sd->getName().find('<') == std::string::npos &&
         !checkPublicSurface("field '" + field->getName() + "' of '" +
                                 sd->getName() + "' is public but it",
@@ -429,7 +429,7 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
 
   const InstantiationFrame request = frameAt(instName, loc);
   InstantiationStack.push_back(request);
-  OriginSource inOrigin(Diags, origin);
+  OriginSource inOrigin(*this, origin);
 
   ast::StructType *st = Ctx.registerStructType(instName, loc);
   // Cached before the fields are resolved: a field naming this very

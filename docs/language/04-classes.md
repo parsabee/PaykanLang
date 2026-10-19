@@ -88,10 +88,9 @@ impl User {
 A field or method whose name starts with two underscores is **private to its class**: it can
 be read, assigned or called only from the class's own methods (the ones in its body, in its
 `impl` blocks and in its trait impls), and nowhere else: not from a subclass, not from a free
-function or another class in the same module, not from an importer. A single underscore means
-nothing, and `__init__` and `__super__` keep their special meaning. The default `__init__`
-still takes every field in order, private ones included, since a constructor is the class's
-own code:
+function or another class in the same module, not from an importer. `__init__` and `__super__`
+keep their special meaning. The default `__init__` still takes every field in order, private
+ones included, since a constructor is the class's own code:
 
 ```pkn
 class Counter {
@@ -121,9 +120,15 @@ Output:
 `c.__count` or `c.__bump(1)` in `main`, or in a method of another class, is an error:
 `'__count' is private to 'Counter': it is reachable only from its own methods`. The same holds
 in a subclass: `self.__count` inside `class Sub : Counter` is rejected, and a subclass may declare
-its own `__count`, a different field. A public field or a public method whose type or signature
-names a private class (`fn make() -> __Node`) is rejected in the declaring module, because an
-importer would receive a value it cannot name; see [Modules](06-modules.md#private-to-the-module).
+its own `__count`, a different field.
+
+A field or method whose name starts with **one** underscore (`_cache`, `_rebuild()`, `static fn
+_make()`) is **private to its module** instead: every function and class of the module that
+declares the class reaches it, a subclass and a free function included, and an importer does
+not (`'_cache' of 'Counter' is private to module 'm'`). A public field or a public method whose
+type or signature names a module-private class (`fn make() -> _Node`) is rejected in the
+declaring module, because an importer would receive a value it cannot name; see
+[Modules](06-modules.md#private-to-the-module).
 `toString`, `==` and `hash` see every field as before. The rules are in
 `docs/design/visibility.md`.
 
@@ -458,7 +463,9 @@ match a {
 | Multiple bases | More than one `:` clause |
 | `self` in parameter list | Writing `self` as an explicit method parameter |
 | Private member used outside its class | `c.__count`, `c.__bump()`, `self.__count` in a subclass, or in a free function: `'__count' is private to 'Counter': it is reachable only from its own methods` |
-| Private type in a public signature | A public field, a public method or a free function naming a `__`-prefixed class, struct, enum or trait: `'make' is public but its result names the private type '__Node'; make the function private or the type public` |
+| Module-private member used by an importer | `c._cache` or `m::Counter::_make()` outside the module that declares `Counter`: `'_cache' of 'Counter' is private to module 'm'` |
+| Private type in a public signature | A public field, a public method or a free function naming a `_`-prefixed class, struct, enum or trait: `'make' is public but its result names the private type '_Node'; make the function private or the type public` |
+| `__` on a top-level declaration | `fn __f()`, `class __C`: `function '__f': the '__' prefix makes a member private to its class or struct; a module's own function is spelled '_f'` |
 | Assigning `self` | `self = C(1)` in a method: `self` names the object the method was called on (`cannot assign to 'self'`) |
 | `__init__` in the class body | `class A { fn __init__() { … } }`; it goes in `impl A { … }` |
 | `impl` method name taken | An `impl` method or `static fn` has the name of a method of the class or a superclass, or a subclass declares one with an `impl` method's name |

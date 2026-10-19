@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 // -- The `strong` word
 //
@@ -17,28 +18,48 @@
 // object is dead and the word records how far its destruction has got:
 //
 //   kDying    its destroy is running (destroy_dead_object);
-//   <= kDead  destruction is pending (deferred, below): the word holds the
-//             link to the next pending object, as kDead - the pointer;
+//   kPending  destruction is pending (deferred, below): the object is on the
+//             pending stack;
 //   0         destroyed: the memory is freed as soon as `weak` is zero, and
 //             stays a zombie, read as NULL by every weak reference, until
 //             the last weak release frees it.
 //
 // A weak load therefore gives an object only while `strong` is above zero:
-// never one that is dying, pending or destroyed.
+// never one that is dying, pending or destroyed.  Both counts are 32 bits
+// (Runtime.h, PaykanObject); one more reference than PAYKAN_REF_MAX panics
+// instead of wrapping to a count that would free a live object.
 
-enum { kDying = -1, kDead = -2 };
+enum { kDying = -1, kPending = -2 };
+
+#if defined(__GNUC__) || defined(__clang__)
+#define PAYKAN_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#else
+#define PAYKAN_UNLIKELY(x) (x)
+#endif
+
+PAYKAN_NORETURN static void count_overflow(const char *kind) {
+  Paykan_runtime_panic("too many %s references to one object (the limit is "
+                       "%d)",
+                       kind, (int)PAYKAN_REF_MAX);
+}
 
 // -- Strong references
 
 PaykanShared *PaykanShared_new(PaykanObject *obj) {
-  if (obj)
+  if (obj) {
+    if (PAYKAN_UNLIKELY(obj->strong == PAYKAN_REF_MAX))
+      count_overflow("strong");
     ++obj->strong;
+  }
   return obj;
 }
 
 void Paykan_retain(PaykanShared *shared) {
-  if (shared)
+  if (shared) {
+    if (PAYKAN_UNLIKELY(shared->strong == PAYKAN_REF_MAX))
+      count_overflow("strong");
     ++shared->strong;
+  }
 }
 
 PaykanObject *PaykanShared_get(PaykanShared *shared) { return shared; }
@@ -55,10 +76,11 @@ PaykanObject *PaykanShared_get(PaykanShared *shared) { return shared; }
 //     the OUTERMOST release.  It destroys its object, then keeps destroying
 //     pending objects until none are left, and only then returns.
 //   * A release that drops a count to zero while a destroy is running (it is
-//     called from inside a destroy) does not destroy anything: it appends the
-//     dead object to the running destroy's BATCH and returns at once.
-//   * When a destroy returns, its batch is moved, in order, to the FRONT of
-//     the pending list; the next object destroyed is the pending list's head.
+//     called from inside a destroy) does not destroy anything: it pushes the
+//     dead object on the pending stack and returns at once.
+//   * When a destroy returns, the objects it pushed are reversed in place, so
+//     that the first one it released is on top; the next object destroyed is
+//     the one on top.
 //
 // The C stack depth of a release is therefore bounded (outermost release ->
 // destroy -> nested release) whatever the shape of the object graph.  The
@@ -72,50 +94,56 @@ PaykanObject *PaykanShared_get(PaykanShared *shared) { return shared; }
 // object is destroyed and freed before the outermost release returns, so
 // destruction stays prompt.
 //
-// The lists are intrusive and allocate nothing (so --track-heap counts are
-// unaffected and a release cannot fail): they are threaded through the dead
-// objects themselves.  A dead object's `strong` word is free to hold the
-// link to the next one until its destroy runs, encoded below zero so that a
-// weak load of a pending object sees it dead.
+// The stack holds kInlinePending objects without allocating; past that it
+// grows on the C heap (never Paykan_malloc, so --track-heap counts are
+// unaffected) and keeps its storage for the next drain.  A dead object's
+// header has no room for the link (its counts are 32 bits, a pointer 64),
+// which is why the stack is not threaded through the objects.
 //
 // Like the reference counts themselves this state is not thread-safe: the
 // runtime assumes a single thread of execution (08-memory-model.md).
 
-_Static_assert(sizeof(intptr_t) <= sizeof(int64_t),
-               "a dead object's link is stored in its strong word");
+enum { kInlinePending = 256 };
 
-static int g_destroying;           // nonzero while a release is draining
-static PaykanObject *g_pending;    // next dead object to destroy, or NULL
-static PaykanObject *g_batch_head; // released by the running destroy ...
-static PaykanObject *g_batch_tail; // ... in release order, or NULL
+static int g_destroying; // nonzero while a release is draining
+static PaykanObject *g_inline_pending[kInlinePending];
+static PaykanObject **g_pending = g_inline_pending; // the pending stack ...
+static size_t g_pending_len;                        // ... its height ...
+static size_t g_pending_cap = kInlinePending;       // ... and its room
 
-// The link is kDead - the pointer's value, so a NULL link is kDead and any
-// other link is below it.  A pointer converted to intptr_t and back compares
-// equal to the original (C11 7.20.1.4), int64_t holds every intptr_t value,
-// and a user-space address is never negative as an intptr_t on the 64-bit
-// platforms the runtime supports, so the encoded word stays below zero.
-static void dead_set_next(PaykanObject *obj, PaykanObject *next) {
-  obj->strong = kDead - (int64_t)(intptr_t)next;
-}
-
-static PaykanObject *dead_next(const PaykanObject *obj) {
-  // NOLINTNEXTLINE(performance-no-int-to-ptr): the link is stored as integer
-  return (PaykanObject *)(intptr_t)(kDead - obj->strong);
+static void push_pending(PaykanObject *obj) {
+  if (PAYKAN_UNLIKELY(g_pending_len == g_pending_cap)) {
+    size_t cap = g_pending_cap * 2;
+    PaykanObject **grown =
+        g_pending == g_inline_pending
+            ? (PaykanObject **)malloc(cap * sizeof *grown)
+            : (PaykanObject **)realloc(g_pending, cap * sizeof *grown);
+    if (!grown)
+      Paykan_runtime_panic("out of memory destroying %zu objects",
+                           g_pending_len + 1);
+    if (g_pending == g_inline_pending)
+      memcpy(grown, g_inline_pending, sizeof g_inline_pending);
+    g_pending = grown;
+    g_pending_cap = cap;
+  }
+  obj->strong = kPending;
+  g_pending[g_pending_len++] = obj;
 }
 
 // Run a dead object's destroy, free the object (or leave it a zombie for its
-// weak references), then move everything that destroy released to the front
-// of the pending list (keeping its order).
+// weak references), then reverse what that destroy pushed, so that the first
+// object it released is destroyed next.
 static void destroy_dead_object(PaykanObject *obj) {
+  const size_t mark = g_pending_len;
   obj->strong = kDying;
   Paykan_vcall_destroy(obj);
   obj->strong = 0;
   if (obj->weak == 0)
     Paykan_free(obj);
-  if (g_batch_head) {
-    dead_set_next(g_batch_tail, g_pending);
-    g_pending = g_batch_head;
-    g_batch_head = g_batch_tail = (PaykanObject *)0;
+  for (size_t i = mark, j = g_pending_len; i + 1 < j; ++i, --j) {
+    PaykanObject *t = g_pending[i];
+    g_pending[i] = g_pending[j - 1];
+    g_pending[j - 1] = t;
   }
 }
 
@@ -127,21 +155,13 @@ void Paykan_release(PaykanShared *shared) {
   if (shared && --shared->strong <= 0) {
     if (g_destroying) {
       // A destroy is running: defer to the outermost release.
-      dead_set_next(shared, (PaykanObject *)0);
-      if (g_batch_tail)
-        dead_set_next(g_batch_tail, shared);
-      else
-        g_batch_head = shared;
-      g_batch_tail = shared;
+      push_pending(shared);
       return;
     }
     g_destroying = 1;
     destroy_dead_object(shared);
-    while (g_pending) {
-      PaykanObject *obj = g_pending;
-      g_pending = dead_next(obj);
-      destroy_dead_object(obj);
-    }
+    while (g_pending_len)
+      destroy_dead_object(g_pending[--g_pending_len]);
     g_destroying = 0;
   }
 }
@@ -153,13 +173,18 @@ void Paykan_dispose(PaykanObject *obj) {
 // -- Weak references
 
 PaykanWeak *Paykan_weak_new(PaykanShared *shared) {
-  if (shared)
+  if (shared) {
+    if (PAYKAN_UNLIKELY(shared->weak == PAYKAN_REF_MAX))
+      count_overflow("weak");
     ++shared->weak;
+  }
   return shared;
 }
 
 PaykanShared *Paykan_weak_load(PaykanWeak *weak) {
   if (weak && weak->strong > 0) {
+    if (PAYKAN_UNLIKELY(weak->strong == PAYKAN_REF_MAX))
+      count_overflow("strong");
     ++weak->strong;
     return weak;
   }

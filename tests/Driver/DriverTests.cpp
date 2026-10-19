@@ -1025,8 +1025,8 @@ TEST(Driver, EmitCPrintsCSource) {
   EXPECT_NE(out.find("int main(int argc, char **argv)"), std::string::npos)
       << out;
   // The object header: the vtable, then the strong and the weak count.
-  EXPECT_NE(out.find("int64_t strong;"), std::string::npos) << out;
-  EXPECT_NE(out.find("int64_t weak;"), std::string::npos) << out;
+  EXPECT_NE(out.find("int32_t strong;"), std::string::npos) << out;
+  EXPECT_NE(out.find("int32_t weak;"), std::string::npos) << out;
 }
 
 // Every vtable is an array of PaykanMethod (Runtime.h), read with
@@ -1764,9 +1764,9 @@ TEST(Driver, RunOptimisesUnderTheHostLayout) {
   auto [rc, ir] = run(paykanRun() + " --emit-source " + src + " 2>&1");
   ASSERT_EQ(rc, 0) << ir;
   EXPECT_NE(ir.find("target datalayout"), std::string::npos) << ir;
-  // The header (vtable, strong count, weak count) is 24 bytes, the char
-  // padded to 8, the int 8.
-  EXPECT_NE(ir.find("@Paykan_malloc(i64 40)"), std::string::npos) << ir;
+  // The header (vtable, 32-bit strong count, 32-bit weak count) is 16
+  // bytes, the char padded to 8, the int 8.
+  EXPECT_NE(ir.find("@Paykan_malloc(i64 32)"), std::string::npos) << ir;
   auto [rc2, out] = run(paykanRun() + " " + src + " 2>&1");
   EXPECT_EQ(rc2, 0) << out;
   EXPECT_EQ(out, "x7\n");
@@ -1885,8 +1885,8 @@ TEST(Driver, StandardLibraryPrivateMembersAreEnforced) {
                       "  m = collections::HashMap<int, int>();\n"
                       "  n = m.__size;\n"
                       "  e = m.__find(1, 1);\n"
-                      "  b = collections::__bucket(1, 2);\n"
-                      "  x = collections::__Entry<int, int>(1, 2, 3, None);\n"
+                      "  b = collections::_bucket(1, 2);\n"
+                      "  x = collections::_Entry<int, int>(1, 2, 3, None);\n"
                       "  buf = memory::Buffer<int>(1);\n"
                       "  d = buf.__data;\n"
                       "  return 0;\n}\n");
@@ -1898,8 +1898,8 @@ TEST(Driver, StandardLibraryPrivateMembersAreEnforced) {
         "from its own methods",
         "'__find' is private to 'HashMap<int, int>': it is reachable only "
         "from its own methods",
-        "'collections::__bucket' is private to module '::collections'",
-        "'collections::__Entry' is private to module '::collections'",
+        "'collections::_bucket' is private to module '::collections'",
+        "'collections::_Entry' is private to module '::collections'",
         "'__data' is private to 'Buffer<int>': it is reachable only from its "
         "own methods"})
     EXPECT_NE(out.find(line), std::string::npos) << line << "\n" << out;

@@ -252,13 +252,13 @@ import lib::util;
 class Box<T> {
   v: T;
   view fn get() -> view T { return self.v; }
-  view fn tag() -> Str { return util::bracket(Str(__serial())); }
+  view fn tag() -> Str { return util::bracket(Str(_serial())); }
 }
 
 impl Box<T> {
   fn __init__(v: T) { self.v = v; }
 }
-fn __serial() -> int { return 7; }
+fn _serial() -> int { return 7; }
 fn mk() -> Box<int> { return Box<int>(41); }
 
 // main.pkn
@@ -269,9 +269,9 @@ d = gen::Box<int>(1);     // the same class as c's
 ```
 
 - **Names in a body are the module's.** A template's body is resolved where
-  it is declared: `__serial`, `Box` and `util::bracket` above are what
+  it is declared: `_serial`, `Box` and `util::bracket` above are what
   `lib::gen` declares and imports, whatever the importer calls those names
-  (its own `__serial`, its own `util`).
+  (its own `_serial`, its own `util`).
 - **Checked per instantiation, as the module would check it.** An error in
   the body is reported in the template's file, with the instantiation note
   at the request.

@@ -114,8 +114,8 @@ The standard library ships with the compiler: `::collections` and `::memory` (se
 
 A module exposes its top-level **function** (`fn`), **class**, **struct**, **enum** and
 **trait** declarations. There is no explicit `export` keyword: everything declared at the top
-level is importable under the chosen qualifier or alias, except the names that start with two
-underscores, which are [private to the module](#private-to-the-module).
+level is importable under the chosen qualifier or alias, except the names that start with an
+underscore, which are [private to the module](#private-to-the-module).
 
 An imported enum is named like any other qualified type. Use `mod::Enum` (or `Alias::Enum`, or
 the full `path::to::mod::Enum`) wherever a type is expected, and `mod::Enum::Variant` to name a
@@ -138,18 +138,23 @@ fn main() -> int {
 
 ### Private to the module
 
-A top-level function, class, struct, enum or trait whose name starts with two underscores
-(`__bucket`, `__Entry`) is **private to its module**: inside the module it is an ordinary
-declaration, used anywhere; an importer cannot name it. `m::__bucket(1, 2)`, a `m::__Entry`
-annotation, `m::__Entry<int, Str>(...)`, `class C : m::__Base` and `impl m::__Trait for C` are
-all rejected with `'m::__bucket' is private to module 'm'`. A generic class or function the
-module exports may use its private names in its bodies; an importer that instantiates it
-still runs that code, it just cannot write the names.
+A top-level function, class, struct, enum or trait whose name starts with one underscore
+(`_bucket`, `_Entry`) is **private to its module**: inside the module it is an ordinary
+declaration, used anywhere; an importer cannot name it. `m::_bucket(1, 2)`, a `m::_Entry`
+annotation, `m::_Entry<int, Str>(...)`, `class C : m::_Base` and `impl m::_Trait for C` are
+all rejected with `'m::_bucket' is private to module 'm'`. A field or method of a class or
+struct whose name starts with one underscore is the module's own the same way: any code of
+the module reaches it, an importer does not (`'_w' of 'Pub' is private to module 'm'`). Two
+underscores (`__count`) are for a member private to its own class or struct
+([Classes](04-classes.md#private-fields-and-methods)), and a top-level declaration cannot
+have them. A generic class or function the module exports may use its private names in its
+bodies; an importer that instantiates it still runs that code, it just cannot write the
+names.
 
 Because an importer could not name what it received, a public declaration cannot expose a
 private type: a free function's parameter or result, a public field, or a public method of a
 public class or struct that names a private type is an error in the declaring module
-(`'make' is public but its result names the private type '__Node'; make the function private
+(`'make' is public but its result names the private type '_Node'; make the function private
 or the type public`). A private function, a private field or method, and the members of a
 private type may name private types freely. The design, with the alternatives considered, is
 in `docs/design/visibility.md`.
@@ -286,5 +291,6 @@ interface 1.0, PIR 1, runtime ABI 6); ... Rebuild it from source.`), never a sil
 | Conflicting qualifier | Two imports bind the same qualifier (alias, last path segment or full path) to different modules |
 | Conflicting type name | Two modules in the import graph declare different classes/enums under one name, or a file declares a class named like an imported one |
 | Unknown exported type | An import's export record names a type nothing provides (a compiler bug or corrupt cache — reported against the `import`, never silently degraded to `Obj`/`void`) |
-| Private name imported | `Mod::__name` for a function, class, struct, enum or trait whose name starts with `__`: `'Mod::__name' is private to module 'Mod'` |
-| Private type exposed | A free function, a public field or a public method naming a `__`-prefixed type |
+| Private name imported | `Mod::_name` for a function, class, struct, enum or trait whose name starts with `_`: `'Mod::_name' is private to module 'Mod'` |
+| Module-private member imported | `x._f`, `x._m()` or `Mod::T::_s()` on a type of another module: `'_f' of 'T' is private to module 'Mod'` |
+| Private type exposed | A free function, a public field or a public method naming a `_`-prefixed type |

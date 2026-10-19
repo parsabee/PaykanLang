@@ -1,5 +1,5 @@
 // Private members: a `__` field or method is reachable from its type's own
-// methods, `impl` blocks, trait impls and `static fn`s; a `__` function or
+// methods, `impl` blocks, trait impls and `static fn`s; a `_` function or
 // type is used anywhere in its module.
 class Counter {
   __count: int;
@@ -19,12 +19,12 @@ impl P {
   fn bump() { self.__x = self.__x + 1; }
   view fn x() -> int { return self.__x; }
 }
-class __Node { v: int; }
-fn __helper(n: view __Node) -> int { return n.v; }
+class _Node { v: int; }
+fn _helper(n: view _Node) -> int { return n.v; }
 fn main() -> int {
   c = Counter::make(3);
   c.tick();
   p = P(1);
   p.bump();
-  return c.value() + p.x() + __helper(__Node(5)) + c.name().len();
+  return c.value() + p.x() + _helper(_Node(5)) + c.name().len();
 }

@@ -36,7 +36,27 @@ TEST(SharedNew, ANewObjectIsUnowned) {
   Paykan_dispose(obj);
 }
 
+TEST(SharedNew, TheHeaderIsAVTableAndTwo32BitCounts) {
+  EXPECT_EQ(sizeof(PaykanObject), 16u);
+  EXPECT_EQ(sizeof(PaykanObject::strong), 4u);
+  EXPECT_EQ(sizeof(PaykanObject::weak), 4u);
+}
+
 // -- Paykan_retain
+
+TEST(SharedRetainDeathTest, ACountPastTheLimitPanics) {
+  // A count never wraps: one reference past PAYKAN_REF_MAX panics.
+  PaykanObject *obj = PaykanObject_new();
+  obj->strong = PAYKAN_REF_MAX;
+  EXPECT_DEATH(Paykan_retain(obj), "too many strong references");
+  EXPECT_DEATH(PaykanShared_new(obj), "too many strong references");
+  EXPECT_DEATH(Paykan_weak_load(obj), "too many strong references");
+  obj->strong = 1;
+  obj->weak = PAYKAN_REF_MAX;
+  EXPECT_DEATH(Paykan_weak_new(obj), "too many weak references");
+  obj->weak = 0;
+  Paykan_release(obj);
+}
 
 TEST(SharedRetain, IncrementsRefCount) {
   PaykanObject *obj = PaykanObject_new();

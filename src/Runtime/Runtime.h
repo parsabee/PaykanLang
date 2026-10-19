@@ -106,15 +106,18 @@ typedef struct PaykanObject PaykanWeak;
 // -- Object
 //
 // Root of the class hierarchy.  Every Paykan heap object starts with this
-// three-word header, so that a PaykanObject* reaches the vtable and the
+// 16-byte header, so that a PaykanObject* reaches the vtable and the
 // object's own reference counts (docs/language/08-memory-model.md):
 //
-//   [0] vtable  — method dispatch + type identity
-//   [1] strong  — the strong reference count: the number of owned
+//   [0] vtable  — method dispatch + type identity (64 bits)
+//   [1] strong  — the strong reference count (32 bits): the number of owned
 //                 PaykanShared* references.  Above zero while the object is
 //                 alive; the destroy runs when it drops to zero.
-//   [2] weak    — the weak reference count: the number of PaykanWeak*
-//                 references.  The memory is freed when both are zero.
+//   [2] weak    — the weak reference count (32 bits): the number of
+//                 PaykanWeak* references.  The memory is freed when both are
+//                 zero.
+//
+// A count that would pass PAYKAN_REF_MAX panics rather than wrap.
 //
 // Every constructor (the runtime's and the generated class constructors)
 // initialises `strong` and `weak` to 0: a new object is unowned until it is
@@ -150,9 +153,15 @@ enum {
 
 struct PaykanObject {
   PaykanMethod *vtable; // this class's vtable (PAYKAN_SLOT_*)
-  int64_t strong;       // strong reference count (header slot 1)
-  int64_t weak;         // weak reference count (header slot 2)
+  int32_t strong;       // strong reference count (header slot 1)
+  int32_t weak;         // weak reference count (header slot 2)
 };
+
+/// The most references of either kind an object can have.
+#define PAYKAN_REF_MAX INT32_MAX
+
+PAYKAN_STATIC_ASSERT(sizeof(PaykanObject) == 16,
+                     "the object header is a vtable and two 32-bit counts");
 
 /// The vtable of any Paykan object, whatever its struct type: the header's
 /// first word, copied out with memcpy so that it is never read through an
@@ -186,8 +195,8 @@ extern PaykanObject PaykanObject_None;
 
 struct PaykanString {
   PaykanMethod *vtable; // points to PaykanString_vtable
-  int64_t strong;       // object header (see PaykanObject)
-  int64_t weak;
+  int32_t strong;       // object header (see PaykanObject)
+  int32_t weak;
   char *data;  // heap-allocated NUL-terminated buffer
   int64_t len; // length in bytes (excludes NUL)
 };
@@ -238,8 +247,8 @@ extern PaykanMethod PaykanString_vtable[PAYKAN_STRING_SLOTS];
 
 typedef struct PaykanFile {
   PaykanMethod *vtable; // points to PaykanFile_vtable
-  int64_t strong;       // object header (see PaykanObject)
-  int64_t weak;
+  int32_t strong;       // object header (see PaykanObject)
+  int32_t weak;
   FILE *handle; // underlying C file handle (NULL if closed)
 } PaykanFile;
 
@@ -271,8 +280,8 @@ extern PaykanFile PaykanFile_Stdin;
 
 typedef struct PaykanError {
   PaykanMethod *vtable; // points to PaykanError_vtable
-  int64_t strong;       // object header (see PaykanObject)
-  int64_t weak;
+  int32_t strong;       // object header (see PaykanObject)
+  int32_t weak;
   PaykanString *message;
 } PaykanError;
 
@@ -458,8 +467,8 @@ int64_t PaykanStruct_equals(const void *a, const void *b,
 
 typedef struct PaykanBuffer {
   PaykanMethod *vtable; // points to PaykanBuffer_vtable
-  int64_t strong;       // object header (see PaykanObject)
-  int64_t weak;
+  int32_t strong;       // object header (see PaykanObject)
+  int32_t weak;
   const PaykanType *type; // of the values (the compiler's constant data)
   unsigned char *data;    // cap values of type->size bytes
   int64_t len;            // live values

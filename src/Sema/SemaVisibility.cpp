@@ -1,11 +1,13 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// Semantic analysis: private members (docs/design/visibility.md).  A name
-// starting with `__` is private: a field or method to its class or struct
-// (reachable from that type's methods and `static fn`s only, in whatever
-// module they are instantiated), a free function or a type to its module
-// (never through an import's qualifier).  A public declaration cannot hand
+// Semantic analysis: private names (docs/design/visibility.md).  A field or
+// method starting with `__` is private to its class or struct (reachable from
+// that type's methods and `static fn`s only, in whatever module they are
+// instantiated).  A name starting with one `_` is private to its module: a
+// free function, a type, or a field or method, reachable anywhere in the
+// declaring module (including its templates' bodies, wherever they are
+// instantiated) and never from an importer.  A public declaration cannot hand
 // an importer a value of a type it could not name.
 
 #include "Names.h"
@@ -66,9 +68,41 @@ ast::ClassType *Sema::declaringClass(ast::ClassType *ct,
   return nullptr;
 }
 
+std::string Sema::moduleOf(ast::Type *ty) {
+  const ast::Decl *tmpl = nullptr;
+  if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
+    if (const InstantiationInfo *info = instantiationInfo(ct))
+      tmpl = info->Template;
+  } else if (auto *st = ast::dyn_cast<ast::StructType>(ty)) {
+    if (const StructInstantiationInfo *info = structInstantiationInfo(st))
+      tmpl = info->Template;
+  }
+  if (tmpl) {
+    const ModuleTemplates *origin = foreignOrigin(tmpl);
+    return origin ? origin->Module : std::string();
+  }
+  auto it = ImportedTypeOrigins.find(ast::typeName(ty));
+  return it == ImportedTypeOrigins.end() ? std::string() : it->second;
+}
+
+std::string Sema::currentModule() const {
+  return CurrentOrigin ? CurrentOrigin->Module : std::string();
+}
+
 bool Sema::checkMemberAccess(ast::Type *owner, const std::string &member,
                              ast::SourceLocation loc) {
-  if (!owner || !names::isPrivateName(member))
+  if (!owner)
+    return true;
+  if (names::isModulePrivateName(member)) {
+    const std::string module = moduleOf(owner);
+    if (module == currentModule())
+      return true;
+    error(loc, "'" + member + "' of '" + typeName(owner) + "' is private to " +
+                   (module.empty() ? std::string("its module")
+                                   : "module '" + module + "'"));
+    return false;
+  }
+  if (!names::isTypePrivateName(member))
     return true;
   ast::Type *here = nullptr;
   if (CurrentClassCtx)
@@ -102,7 +136,7 @@ std::string Sema::privateTypeIn(ast::Type *ty) {
     return "";
   auto named = [](const std::string &name) {
     const std::string seg = lastSegment(name);
-    return names::isPrivateName(seg) ? seg : std::string();
+    return names::isModulePrivateName(seg) ? seg : std::string();
   };
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
     if (std::string p = named(ct->getName()); !p.empty())
@@ -168,7 +202,8 @@ bool Sema::reportPrivateImport(const std::string &name,
                                ast::SourceLocation loc) {
   const std::string base = baseName(name);
   const size_t sep = base.rfind(names::kQualSep);
-  if (sep == std::string::npos || !names::isPrivateName(base.substr(sep + 2)))
+  if (sep == std::string::npos ||
+      !names::isModulePrivateName(base.substr(sep + 2)))
     return false;
   auto it = ImportQualifiers.find(base.substr(0, sep));
   if (it == ImportQualifiers.end())
@@ -177,11 +212,42 @@ bool Sema::reportPrivateImport(const std::string &name,
   return true;
 }
 
-bool Sema::isModulePrivateName(const std::string &name) {
+bool Sema::isModuleOwnName(const std::string &name) {
   const std::string base = baseName(name);
   const size_t sep = base.find(names::kQualSep);
-  return names::isPrivateName(sep == std::string::npos ? base
-                                                       : base.substr(0, sep));
+  return names::isModulePrivateName(
+      sep == std::string::npos ? base : base.substr(0, sep));
+}
+
+bool Sema::rejectTopLevelTypePrivate(ast::TranslationUnit *tu) {
+  bool ok = true;
+  auto check = [&](const std::string &name, const char *kind,
+                   ast::SourceLocation loc) {
+    if (!names::isTypePrivateName(name))
+      return;
+    error(loc, std::string(kind) + " '" + name +
+                   "': the '__' prefix makes a member private to its class "
+                   "or struct; a module's own " +
+                   kind + " is spelled '" + name.substr(1) + "'");
+    ok = false;
+  };
+  for (auto *fn : tu->getFuncDecls())
+    check(fn->getName(), "function", fn->getLocation());
+  for (auto *fn : tu->getGenericFuncDecls())
+    check(fn->getName(), "function", fn->getLocation());
+  for (auto *cd : tu->getClassDecls())
+    check(cd->getName(), "class", cd->getLocation());
+  for (auto *cd : tu->getGenericClassDecls())
+    check(cd->getName(), "class", cd->getLocation());
+  for (auto *sd : tu->getStructDecls())
+    check(sd->getName(), "struct", sd->getLocation());
+  for (auto *sd : tu->getGenericStructDecls())
+    check(sd->getName(), "struct", sd->getLocation());
+  for (auto *ed : tu->getEnumDecls())
+    check(ed->getName(), "enum", ed->getLocation());
+  for (auto *td : tu->getTraitDecls())
+    check(td->getName(), "trait", td->getLocation());
+  return ok;
 }
 
 } // namespace sema

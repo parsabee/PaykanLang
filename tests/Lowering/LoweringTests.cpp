@@ -1321,9 +1321,9 @@ TEST(Lowering, ImportedInstantiationsAreEmittedOnce) {
   std::filesystem::create_directories(dir / "lib");
   std::ofstream(dir / "lib" / "gen.pkn")
       << "class Box<T> { v: T; "
-         "view fn n() -> int { return __h(); } }\n"
+         "view fn n() -> int { return _h(); } }\n"
          "impl Box<T> { fn __init__(v: T) { self.v = v; } }\n"
-         "fn __h() -> int { return 1; }\n"
+         "fn _h() -> int { return 1; }\n"
          "fn first<T>(xs: view T[]) -> T { return xs[0]; }\n";
   for (const char *m : {"a", "b"})
     std::ofstream(dir / (std::string(m) + ".pkn"))
@@ -1350,8 +1350,8 @@ TEST(Lowering, ImportedInstantiationsAreEmittedOnce) {
     const pir::Class *box = m.findClass("Box<Str>");
     EXPECT_EQ(box && !box->IsExtern, m.Name == "a") << m.Name;
   }
-  EXPECT_NE(t.find("extern fn @\"$lib::gen::__h\"() -> i64 module "
-                   "\"lib::gen\" symbol @__h\n"),
+  EXPECT_NE(t.find("extern fn @\"$lib::gen::_h\"() -> i64 module "
+                   "\"lib::gen\" symbol @_h\n"),
             std::string::npos)
       << t;
 }

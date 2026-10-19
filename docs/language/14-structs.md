@@ -182,7 +182,9 @@ A field or a method whose name starts with two underscores is private to the str
 as for a class ([Classes](04-classes.md#private-fields-and-methods)): `self.__n` is read and
 assigned only in the struct's own methods, in its body or its `impl` blocks and trait impls;
 `p.__n` elsewhere is `'__n' is private to 'P': it is reachable only from its own methods`.
-The default constructor still takes every field, private ones included.
+The default constructor still takes every field, private ones included. A field or method
+with one underscore (`_n`) is private to the module instead, as for a class: any code of the
+module reaches it, an importer does not.
 
 ## Structs as Values
 

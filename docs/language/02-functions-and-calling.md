@@ -505,7 +505,7 @@ the Paykan runtime (`Runtime.h`).  It is how a library implements what Paykan
 cannot express itself, such as the standard library's file I/O (#198):
 
 ```pkn
-native fn __io_write(fd: int, s: view Str) -> int = "paykan_io_write";
+native fn _io_write(fd: int, s: view Str) -> int = "paykan_io_write";
 ```
 
 The string is the C symbol.  The rest of the program calls the function like

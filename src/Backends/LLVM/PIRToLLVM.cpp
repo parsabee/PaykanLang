@@ -187,12 +187,13 @@ private:
     return llvm::FunctionType::get(llvmType(sig.Ret), params, false);
   }
 
-  /// The number of header words of every object (Runtime.h, PaykanObject):
-  /// the vtable pointer, the strong count and the weak count.  A class's
-  /// fields follow them.
+  /// The number of header members of every object (Runtime.h,
+  /// PaykanObject): the vtable pointer, then the 32-bit strong and weak
+  /// counts, 16 bytes in all.  A class's fields follow them.
   static constexpr unsigned kHeaderWords = 3;
 
-  /// The struct type of a class: {vtable ptr, strong, weak, fields...}.
+  /// The struct type of a class: {vtable ptr, i32 strong, i32 weak,
+  /// fields...}.
   /// Struct types are per translation, never looked up by name in the
   /// context: a cached module loaded earlier may carry an older layout of a
   /// class under the same name.
@@ -201,8 +202,8 @@ private:
     if (it != StructTypes.end())
       return it->second;
     std::vector<llvm::Type *> elems{llvm::PointerType::getUnqual(Ctx),
-                                    llvm::Type::getInt64Ty(Ctx),
-                                    llvm::Type::getInt64Ty(Ctx)};
+                                    llvm::Type::getInt32Ty(Ctx),
+                                    llvm::Type::getInt32Ty(Ctx)};
     for (const Field &f : c.Fields)
       elems.push_back(slotType(f.Ty, f.Size, f.Align));
     auto *ty =
@@ -801,7 +802,7 @@ private:
       B.CreateStore(M->getNamedGlobal(vtableName(sym)),
                     B.CreateStructGEP(ty, obj, 0));
       llvm::Constant *zero =
-          llvm::ConstantInt::get(llvm::Type::getInt64Ty(Ctx), 0);
+          llvm::ConstantInt::get(llvm::Type::getInt32Ty(Ctx), 0);
       B.CreateStore(zero, B.CreateStructGEP(ty, obj, 1));
       B.CreateStore(zero, B.CreateStructGEP(ty, obj, 2));
       for (size_t i = 0; i < c->Fields.size(); ++i) {

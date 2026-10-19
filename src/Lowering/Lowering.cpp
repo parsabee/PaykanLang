@@ -518,15 +518,20 @@ pir::Function *ModuleLowering::lookupFunction(const std::string &name) {
              co != PL.ClassOrigins.end()) {
     def = byName(co->second); // the constructor of an instantiation there
   } else if (name.starts_with(kHiddenQualPrefix)) {
-    // `$<module>::f`, named in the body of that module's template.
-    size_t sep = name.rfind(kQualSep, name.find('<'));
-    if (sep == std::string::npos)
-      return nullptr;
+    // `$<module>::f`, named in the body of that module's template, or
+    // `$<module>::T::f` for a `static fn` of one of its types: the longest
+    // prefix that is a module.
     std::string_view prefix(kHiddenQualPrefix);
-    auto it =
-        PL.ByCanonical.find(name.substr(prefix.size(), sep - prefix.size()));
-    def = it == PL.ByCanonical.end() ? nullptr : it->second;
-    symbol = name.substr(sep + std::string_view(kQualSep).size());
+    for (size_t sep = name.rfind(kQualSep, name.find('<'));
+         sep != std::string::npos && sep > prefix.size() && !def;
+         sep = name.rfind(kQualSep, sep - 1)) {
+      auto it =
+          PL.ByCanonical.find(name.substr(prefix.size(), sep - prefix.size()));
+      if (it == PL.ByCanonical.end())
+        continue;
+      def = it->second;
+      symbol = name.substr(sep + std::string_view(kQualSep).size());
+    }
   }
   if (!def || def->Name == Mod.Name)
     return nullptr;

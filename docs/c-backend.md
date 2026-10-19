@@ -44,9 +44,9 @@ backends.
 
 ## The generated C
 
-* One `struct` per class with the runtime's three-word object header (vtable
-  pointer, strong count, weak count) followed by every field, ancestors
-  first.
+* One `struct` per class with the runtime's 16-byte object header (vtable
+  pointer, `int32_t` strong count, `int32_t` weak count) followed by every
+  field, ancestors first.
   Class, function and global names are mangled as `pk_<module>_<name>` (any
   character outside `[A-Za-z0-9_]` becomes `_XX`, and a clash gets a `_<n>`
   suffix), so modules never collide and generics instantiations
@@ -164,7 +164,7 @@ compile instead of miscompiling.
 | Function pointers are pointer-sized | vtable slots are 8 bytes, matching the LLVM backend's vtables | `_Static_assert` |
 | Two's complement, and converting an out-of-range value to a signed type wraps modulo 2^64 (6.3.1.3p3 leaves it implementation-defined) | `(int64_t)((uint64_t)a + (uint64_t)b)` and the other wrapping operations | `_Static_assert((int64_t)UINT64_MAX == -1 && ...)` |
 | IEEE 754 binary64 `double`, with NaN and infinities | float semantics, `cast` bit patterns, `NAN` / `INFINITY` literals | `_Static_assert` on `<float.h>` (`FLT_RADIX`, `DBL_MANT_DIG`, `DBL_MAX_EXP`, `DBL_MIN_EXP`) |
-| An object struct can be used through a `PaykanObject *` (and a pointer to it converted to and from `PaykanObject *`): every Paykan object struct, generated or in the runtime, starts with the same three-word header | the runtime's ARC and method calls see every object as a `PaykanObject`; generated code casts between `struct pk_…`, `PaykanString`, `PaykanFile`, … and `PaykanObject *` | `_Static_assert` on the runtime structs' header offsets; the generated code reads vtables only through `memcpy` (`Paykan_vtable_of`), never through another struct type |
+| An object struct can be used through a `PaykanObject *` (and a pointer to it converted to and from `PaykanObject *`): every Paykan object struct, generated or in the runtime, starts with the same 16-byte header | the runtime's ARC and method calls see every object as a `PaykanObject`; generated code casts between `struct pk_…`, `PaykanString`, `PaykanFile`, … and `PaykanObject *` | `_Static_assert` on the runtime structs' header offsets; the generated code reads vtables only through `memcpy` (`Paykan_vtable_of`), never through another struct type |
 
 `__STDC_IEC_559__` (full Annex F conformance) is deliberately not required:
 GCC and Clang on glibc define it, Apple's clang does not, and the generated

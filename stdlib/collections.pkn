@@ -18,16 +18,16 @@
 // broken precondition, such as `pop` on an empty container or an index out
 // of range, panics.
 //
-// Names starting with `__` are private (docs/language/06-modules.md,
-// "Private to the module"): `__Entry`, `__Heap`, `__panic`, `__fail` and
-// `__bucket` are the module's own, and a `__` field or method is reachable
+// Names starting with `_` are private (docs/language/06-modules.md,
+// "Private to the module"): `_Entry`, `_Heap`, `_panic`, `_fail` and
+// `_bucket` are the module's own, and a `__` field or method is reachable
 // only from its type's methods.
 
 import ::memory;
 
-native fn __panic(message: view Str) = "Paykan_panic_message";
-// __panic for where a value is due: it never returns one.
-native fn __fail<T>(message: view Str) -> T = "Paykan_panic_value";
+native fn _panic(message: view Str) = "Paykan_panic_message";
+// _panic for where a value is due: it never returns one.
+native fn _fail<T>(message: view Str) -> T = "Paykan_panic_value";
 
 // -- List ---------------------------------------------------------------------
 
@@ -65,7 +65,7 @@ impl List<T> {
   // Remove and return the last element.
   fn pop() -> T {
     n: unsigned = self.__items.len();
-    if (n == 0) { __panic("pop from an empty List"); }
+    if (n == 0) { _panic("pop from an empty List"); }
     v: T = self.__items.copy(n - 1);
     self.__items.shrink(1);
     return v;
@@ -74,7 +74,7 @@ impl List<T> {
   // The last element.
   view fn last() -> T {
     n: unsigned = self.__items.len();
-    if (n == 0) { return __fail<T>("last of an empty List"); }
+    if (n == 0) { return _fail<T>("last of an empty List"); }
     return self.__items.copy(n - 1);
   }
 
@@ -163,7 +163,7 @@ impl List<T> {
 
   view fn __check(i: unsigned, n: unsigned) {
     if (i >= n) {
-      __panic("List index " + Str(i) + " out of range (len=" +
+      _panic("List index " + Str(i) + " out of range (len=" +
               Str(self.__items.len()) + ")");
     }
   }
@@ -198,18 +198,18 @@ fn listToString<T: Show>(xs: view List<T>) -> Str {
 // list owns the chain through its head), and the previous node as a `weak`
 // back link, so two neighbours form no reference cycle and dropping the
 // list frees every node.
-class __Node<T> {
+class _Node<T> {
   value: T;
-  next: __Node<T>?;
-  weak prev: __Node<T>?;
+  next: _Node<T>?;
+  weak prev: _Node<T>?;
 }
 
 // A doubly linked list: both ends are O(1) to reach, add to and remove from.
 // The head owns the chain of nodes through their `next` links; the tail is a
 // weak reference, kept alive by the chain.
 class LinkedList<T> {
-  __head: __Node<T>?;
-  weak __tail: __Node<T>?;
+  __head: _Node<T>?;
+  weak __tail: _Node<T>?;
   __len: unsigned;
 }
 
@@ -229,9 +229,9 @@ impl LinkedList<T> {
 
   // Add `v` before the first element.
   fn pushFront(v: T) {
-    n = __Node<T>(v, self.__head, None);
+    n = _Node<T>(v, self.__head, None);
     match self.__head {
-      h: __Node<T> { h.prev = n; }
+      h: _Node<T> { h.prev = n; }
       None { self.__tail = n; }
     }
     self.__head = n;
@@ -241,8 +241,8 @@ impl LinkedList<T> {
   // Add `v` after the last element.
   fn pushBack(v: T) {
     match self.__tail {
-      t: __Node<T> {
-        n = __Node<T>(v, None, t);
+      t: _Node<T> {
+        n = _Node<T>(v, None, t);
         t.next = n;
         self.__tail = n;
         self.__len = self.__len + 1;
@@ -254,22 +254,22 @@ impl LinkedList<T> {
   // Remove and return the first element.
   fn popFront() -> T {
     match self.__head {
-      h: __Node<T> {
+      h: _Node<T> {
         self.__unlink(h);
         return h.value;
       }
-      None { return __fail<T>("popFront on an empty LinkedList"); }
+      None { return _fail<T>("popFront on an empty LinkedList"); }
     }
   }
 
   // Remove and return the last element.
   fn popBack() -> T {
     match self.__tail {
-      t: __Node<T> {
+      t: _Node<T> {
         self.__unlink(t);
         return t.value;
       }
-      None { return __fail<T>("popBack on an empty LinkedList"); }
+      None { return _fail<T>("popBack on an empty LinkedList"); }
     }
   }
 
@@ -277,8 +277,8 @@ impl LinkedList<T> {
   view fn front() -> T {
     weak h = self.__head; // a weak reference reads as a copy, never a view
     match h {
-      n: __Node<T> { return n.value; }
-      None { return __fail<T>("front on an empty LinkedList"); }
+      n: _Node<T> { return n.value; }
+      None { return _fail<T>("front on an empty LinkedList"); }
     }
   }
 
@@ -286,8 +286,8 @@ impl LinkedList<T> {
   view fn back() -> T {
     weak t = self.__tail;
     match t {
-      n: __Node<T> { return n.value; }
-      None { return __fail<T>("back on an empty LinkedList"); }
+      n: _Node<T> { return n.value; }
+      None { return _fail<T>("back on an empty LinkedList"); }
     }
   }
 
@@ -297,7 +297,7 @@ impl LinkedList<T> {
   // Remove the first element == v; True if there was one.
   fn remove(v: view T) -> bool {
     match self.__find(v) {
-      n: __Node<T> {
+      n: _Node<T> {
         self.__unlink(n);
         return True;
       }
@@ -318,7 +318,7 @@ impl LinkedList<T> {
     weak cur = self.__head; // the cursor: no reference copied out of self
     while (True) {
       match cur {
-        n: __Node<T> {
+        n: _Node<T> {
           out.push(n.value);
           cur = n.next;
         }
@@ -329,13 +329,13 @@ impl LinkedList<T> {
   }
 
   // Take node `n` out of the chain.
-  fn __unlink(n: __Node<T>) {
+  fn __unlink(n: _Node<T>) {
     match n.prev {
-      p: __Node<T> { p.next = n.next; }
+      p: _Node<T> { p.next = n.next; }
       None { self.__head = n.next; }
     }
     match n.next {
-      x: __Node<T> { x.prev = n.prev; }
+      x: _Node<T> { x.prev = n.prev; }
       None { self.__tail = n.prev; }
     }
     n.next = None;
@@ -344,11 +344,11 @@ impl LinkedList<T> {
   }
 
   // The first node whose value == v, if any.
-  view fn __find(v: view T) -> __Node<T>? {
+  view fn __find(v: view T) -> _Node<T>? {
     weak cur = self.__head; // the cursor: no reference copied out of self
     while (True) {
       match cur {
-        n: __Node<T> {
+        n: _Node<T> {
           if (n.value == v) { return n; }
           cur = n.next;
         }
@@ -378,13 +378,13 @@ impl Stack<T> {
 
   // Remove and return the top element.
   fn pop() -> T {
-    if (self.__list.isEmpty()) { __panic("pop from an empty Stack"); }
+    if (self.__list.isEmpty()) { _panic("pop from an empty Stack"); }
     return self.__list.popFront();
   }
 
   // The top element.
   view fn peek() -> T {
-    if (self.__list.isEmpty()) { __panic("peek at an empty Stack"); }
+    if (self.__list.isEmpty()) { _panic("peek at an empty Stack"); }
     return self.__list.front();
   }
 
@@ -412,13 +412,13 @@ impl Queue<T> {
 
   // Remove and return the front element.
   fn dequeue() -> T {
-    if (self.__list.isEmpty()) { __panic("dequeue from an empty Queue"); }
+    if (self.__list.isEmpty()) { _panic("dequeue from an empty Queue"); }
     return self.__list.popFront();
   }
 
   // The front element.
   view fn peek() -> T {
-    if (self.__list.isEmpty()) { __panic("peek at an empty Queue"); }
+    if (self.__list.isEmpty()) { _panic("peek at an empty Queue"); }
     return self.__list.front();
   }
 
@@ -432,11 +432,11 @@ impl Queue<T> {
 // -- HashMap and HashSet --------------------------------------------------------
 
 // One key and its value, in its bucket's chain.
-class __Entry<K, V> {
+class _Entry<K, V> {
   key: K;
   value: V;
   hash: int;
-  next: __Entry<K, V>?;
+  next: _Entry<K, V>?;
 }
 
 // A hash table: each key is Hashable and maps to one value.  Two keys are
@@ -446,14 +446,14 @@ class __Entry<K, V> {
 // keeps at most 3 entries for every 4 buckets, doubling when it would hold
 // more.  The order of keys() is the table's, not the insertion order.
 class HashMap<K: Hashable, V> {
-  __buckets: memory::Buffer<__Entry<K, V>?>;
+  __buckets: memory::Buffer<_Entry<K, V>?>;
   __size: unsigned;
 }
 
 impl HashMap<K, V> {
   // An empty map.
   fn __init__() {
-    self.__buckets = memory::Buffer<__Entry<K, V>?>(8);
+    self.__buckets = memory::Buffer<_Entry<K, V>?>(8);
     self.__size = 0;
   }
 
@@ -468,7 +468,7 @@ impl HashMap<K, V> {
   fn put(k: K, v: V) -> bool {
     h: int = k.hash();
     match self.__find(k, h) {
-      e: __Entry<K, V> {
+      e: _Entry<K, V> {
         e.value = v;
         return False;
       }
@@ -477,8 +477,8 @@ impl HashMap<K, V> {
     if ((self.__size + 1) * 4 > self.__buckets.len() * 3) {
       self.__rehash(self.__buckets.len() * 2);
     }
-    b: unsigned = __bucket(h, self.__buckets.len());
-    self.__buckets.set(b, __Entry<K, V>(k, v, h, self.__buckets.copy(b)));
+    b: unsigned = _bucket(h, self.__buckets.len());
+    self.__buckets.set(b, _Entry<K, V>(k, v, h, self.__buckets.copy(b)));
     self.__size = self.__size + 1;
     return True;
   }
@@ -486,15 +486,15 @@ impl HashMap<K, V> {
   // The value of `k`, which must be a key.
   view fn get(k: view K) -> V {
     match self.__find(k, k.hash()) {
-      e: __Entry<K, V> { return e.value; }
-      None { return __fail<V>("HashMap.get of a key it does not have"); }
+      e: _Entry<K, V> { return e.value; }
+      None { return _fail<V>("HashMap.get of a key it does not have"); }
     }
   }
 
   // The value of `k`, or `otherwise` if it is not a key.
   view fn getOr(k: view K, otherwise: V) -> V {
     match self.__find(k, k.hash()) {
-      e: __Entry<K, V> { return e.value; }
+      e: _Entry<K, V> { return e.value; }
       None { return otherwise; }
     }
   }
@@ -507,15 +507,15 @@ impl HashMap<K, V> {
   // Remove `k` and its value; True if it was a key.
   fn remove(k: view K) -> bool {
     h: int = k.hash();
-    b: unsigned = __bucket(h, self.__buckets.len());
-    prev: __Entry<K, V>? = None;
-    cur: __Entry<K, V>? = self.__buckets.copy(b);
+    b: unsigned = _bucket(h, self.__buckets.len());
+    prev: _Entry<K, V>? = None;
+    cur: _Entry<K, V>? = self.__buckets.copy(b);
     while (True) {
       match cur {
-        e: __Entry<K, V> {
+        e: _Entry<K, V> {
           if (e.hash == h && e.key == k) {
             match prev {
-              p: __Entry<K, V> { p.next = e.next; }
+              p: _Entry<K, V> { p.next = e.next; }
               None { self.__buckets.set(b, e.next); }
             }
             self.__size = self.__size - 1;
@@ -532,7 +532,7 @@ impl HashMap<K, V> {
 
   // Remove every key.
   fn clear() {
-    self.__buckets = memory::Buffer<__Entry<K, V>?>(8);
+    self.__buckets = memory::Buffer<_Entry<K, V>?>(8);
     self.__size = 0;
   }
 
@@ -541,10 +541,10 @@ impl HashMap<K, V> {
     out: List<K> = List<K>();
     i: unsigned = 0;
     while (i < self.__buckets.len()) {
-      cur: __Entry<K, V>? = self.__buckets.copy(i);
+      cur: _Entry<K, V>? = self.__buckets.copy(i);
       while (cur != None) {
         match cur {
-          e: __Entry<K, V> {
+          e: _Entry<K, V> {
             out.push(e.key);
             cur = e.next;
           }
@@ -561,10 +561,10 @@ impl HashMap<K, V> {
     out: List<V> = List<V>();
     i: unsigned = 0;
     while (i < self.__buckets.len()) {
-      cur: __Entry<K, V>? = self.__buckets.copy(i);
+      cur: _Entry<K, V>? = self.__buckets.copy(i);
       while (cur != None) {
         match cur {
-          e: __Entry<K, V> {
+          e: _Entry<K, V> {
             out.push(e.value);
             cur = e.next;
           }
@@ -577,11 +577,11 @@ impl HashMap<K, V> {
   }
 
   // The entry of key `k`, whose hash is `h`, or None.
-  view fn __find(k: view K, h: int) -> __Entry<K, V>? {
-    cur: __Entry<K, V>? = self.__buckets.copy(__bucket(h, self.__buckets.len()));
+  view fn __find(k: view K, h: int) -> _Entry<K, V>? {
+    cur: _Entry<K, V>? = self.__buckets.copy(_bucket(h, self.__buckets.len()));
     while (True) {
       match cur {
-        e: __Entry<K, V> {
+        e: _Entry<K, V> {
           if (e.hash == h && e.key == k) { return e; }
           cur = e.next;
         }
@@ -593,16 +593,16 @@ impl HashMap<K, V> {
 
   // Move every entry into `n` new buckets.
   fn __rehash(n: unsigned) {
-    old: memory::Buffer<__Entry<K, V>?> = self.__buckets;
-    self.__buckets = memory::Buffer<__Entry<K, V>?>(n);
+    old: memory::Buffer<_Entry<K, V>?> = self.__buckets;
+    self.__buckets = memory::Buffer<_Entry<K, V>?>(n);
     i: unsigned = 0;
     while (i < old.len()) {
-      cur: __Entry<K, V>? = old.copy(i);
+      cur: _Entry<K, V>? = old.copy(i);
       while (cur != None) {
         match cur {
-          e: __Entry<K, V> {
+          e: _Entry<K, V> {
             cur = e.next;
-            b: unsigned = __bucket(e.hash, n);
+            b: unsigned = _bucket(e.hash, n);
             e.next = self.__buckets.copy(b);
             self.__buckets.set(b, e);
           }
@@ -616,7 +616,7 @@ impl HashMap<K, V> {
 
 // The bucket of hash `h` among `n`: the hash's bits read as an unsigned
 // number, modulo `n`, so a negative hash lands in a bucket too.
-fn __bucket(h: int, n: unsigned) -> unsigned {
+fn _bucket(h: int, n: unsigned) -> unsigned {
   return unsigned(h) % n;
 }
 
@@ -657,7 +657,7 @@ impl HashSet<K> {
 // priority first when `__max` is False, the highest when True; elements of
 // equal priority pop in the order they were pushed.  Every element carries a
 // sequence number for that, and the heap orders by (priority, sequence).
-class __Heap<T> {
+class _Heap<T> {
   __values: memory::Buffer<T>;
   __priorities: memory::Buffer<int>;
   __order: memory::Buffer<unsigned>;
@@ -665,7 +665,7 @@ class __Heap<T> {
   __max: bool;
 }
 
-impl __Heap<T> {
+impl _Heap<T> {
   fn __init__(max: bool) {
     self.__values = memory::Buffer<T>(0);
     self.__priorities = memory::Buffer<int>(0);
@@ -757,19 +757,19 @@ impl __Heap<T> {
   }
 
   view fn __nonEmpty(what: view Str) {
-    if (self.__values.len() == 0) { __panic(what + " on an empty priority queue"); }
+    if (self.__values.len() == 0) { _panic(what + " on an empty priority queue"); }
   }
 }
 
 // A priority queue that pops the element of lowest priority first, and of
 // equal priorities the one pushed first.  push and pop are O(log n).
 class MinPriorityQueue<T> {
-  __heap: __Heap<T>;
+  __heap: _Heap<T>;
 }
 
 impl MinPriorityQueue<T> {
   // An empty queue.
-  fn __init__() { self.__heap = __Heap<T>(False); }
+  fn __init__() { self.__heap = _Heap<T>(False); }
 
   view fn len() -> unsigned { return self.__heap.len(); }
   view fn isEmpty() -> bool { return self.__heap.len() == 0; }
@@ -793,12 +793,12 @@ impl MinPriorityQueue<T> {
 // A priority queue that pops the element of highest priority first, and of
 // equal priorities the one pushed first.  push and pop are O(log n).
 class MaxPriorityQueue<T> {
-  __heap: __Heap<T>;
+  __heap: _Heap<T>;
 }
 
 impl MaxPriorityQueue<T> {
   // An empty queue.
-  fn __init__() { self.__heap = __Heap<T>(True); }
+  fn __init__() { self.__heap = _Heap<T>(True); }
 
   view fn len() -> unsigned { return self.__heap.len(); }
   view fn isEmpty() -> bool { return self.__heap.len() == 0; }

@@ -626,7 +626,7 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     }
     // A private type of an imported module, spelled bare: it is that
     // module's own (a qualified spelling is reported below).
-    if (names::isPrivateName(ct->getName()) &&
+    if (names::isModulePrivateName(ct->getName()) &&
         ct->getName().find(names::kQualSep) == std::string::npos &&
         ct->getName().find('<') == std::string::npos) // not an instantiation
       if (auto o = ImportedTypeOrigins.find(ct->getName());
@@ -2720,6 +2720,8 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
 
 bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   bool ok = rejectFreeViewFns(node);
+  if (!rejectTopLevelTypePrivate(node))
+    ok = false;
   if (!rejectBodyInits(node))
     ok = false;
 
@@ -3267,7 +3269,7 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
   }
 
   // A public function cannot hand an importer a type it could not name.
-  if (!isModulePrivateName(node->getName()) &&
+  if (!isModuleOwnName(node->getName()) &&
       node->getName().find('<') == std::string::npos) {
     const std::string who =
         "'" + displayName(node->getName()) + "' is public but ";

@@ -30,9 +30,9 @@ qualifier: `collections::List<int>()`.
   (`u32`, `unsigned`, …), or a class with an `impl Hashable for` block.
 - A broken precondition panics: `pop` on an empty container, an index out of range,
   `get` of a key a map does not have.
-- The library's `__` names are [private](06-modules.md#private-to-the-module): a
+- The library's `_` and `__` names are [private](06-modules.md#private-to-the-module): a
   container's `__` fields and methods are reachable only from its own methods, and the
-  modules' `__` functions and classes (`collections::__Entry`, `memory::__new`) only from
+  modules' `_` functions and classes (`collections::_Entry`, `memory::_new`) only from
   inside the module.  A program that names one is rejected (`'__size' is private to
   'HashMap<int, int>': it is reachable only from its own methods`).
 - The [sized numeric types](01-language-basics.md#sized-numeric-types) are elements and

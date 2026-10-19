@@ -874,8 +874,8 @@ class Emitter {
       O << classStruct(c->Name) << kSpace << kLBrace << kSpace << comment(note)
         << kNewline;
       O << kIndentUnit << stmt(declare(pointerTo(kRtMethod), kFieldVTable))
-        << kNewline << kIndentUnit << stmt(declare(kInt64, kFieldStrong))
-        << kNewline << kIndentUnit << stmt(declare(kInt64, kFieldWeak))
+        << kNewline << kIndentUnit << stmt(declare(kInt32, kFieldStrong))
+        << kNewline << kIndentUnit << stmt(declare(kInt32, kFieldWeak))
         << kNewline;
       for (const auto &f : c->Fields)
         O << kIndentUnit

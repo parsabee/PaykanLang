@@ -1,9 +1,10 @@
-// 54 — private members: the `__` prefix
+// 54 — private members: the `__` and `_` prefixes
 // Exercises: `__` fields and methods of classes and structs read, assigned
 //            and called from the type's own methods, `impl` blocks, trait
 //            impls, `static fn`s and lambdas inside methods (and from the
-//            type's other instances); a `__` free function and a `__` class
-//            used anywhere in the module; a generic class with a private
+//            type's other instances); `_` fields and methods, the module's
+//            own, used from a free function; a `_` free function and a `_`
+//            class used anywhere in the module; a generic class with a private
 //            field, whose instantiations share the template's methods; the
 //            default `__init__` taking private fields; `toString` and `==`
 //            seeing every field.
@@ -38,10 +39,11 @@ impl P {
   static fn origin() -> P { p = P(0, 0); p.__x = 1; return p; }
 }
 
-class __Node { v: int; next: __Node?; }
-fn __sum(n: view __Node) -> int {
+class _Node { v: int; next: _Node?; }
+impl _Node { view fn _len() -> int { match self.next { m: _Node { return 1 + m._len(); } None { return 1; } } } }
+fn _sum(n: view _Node) -> int {
   match n.next {
-    m: __Node { return n.v + __sum(m); }
+    m: _Node { return n.v + _sum(m); }
     None { return n.v; }
   }
 }
@@ -69,11 +71,11 @@ fn main() -> int {
   q = P(2, 3);                              // the private field, as a constructor argument
   println(Str(p.x()) + " " + Str(q.x()) + " " + q.toString() + " " + Str(p == P(2, 0)));
 
-  chain = __Node(1, __Node(2, __Node(3, None)));
+  chain = _Node(1, _Node(2, _Node(3, None)));
   b = Box("s");
   b.set("t");
   o = Box("u");
   b.take(o);
-  println(Str(__sum(chain)) + " " + b.get());
+  println(Str(_sum(chain)) + " " + b.get() + " " + Str(chain._len()));
   return 0;
 }

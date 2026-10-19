@@ -12,18 +12,18 @@
 // The buffer holds its own reference to each value it stores and drops it
 // when the slot is overwritten or shrunk away, or the buffer dies.
 //
-// Names starting with `__` are private (docs/language/06-modules.md,
-// "Private to the module"): the `__` native functions are the module's own,
+// Names starting with `_` are private (docs/language/06-modules.md,
+// "Private to the module"): the `_` native functions are the module's own,
 // and `Buffer`'s `__data` is reachable only from its methods.
 
-native fn __new<T>(n: unsigned) -> Obj = "PaykanBuffer_new";
-native fn __len<T>(b: view Obj) -> unsigned = "PaykanBuffer_len";
-native fn __get<T>(b: view Obj, i: unsigned) -> view T = "PaykanBuffer_get";
-native fn __copy<T>(b: view Obj, i: unsigned) -> T = "PaykanBuffer_copy";
-native fn __set<T>(b: inout Obj, i: unsigned, v: view T) = "PaykanBuffer_set";
-native fn __reserve<T>(b: inout Obj, n: unsigned) = "PaykanBuffer_reserve";
-native fn __grow<T>(b: inout Obj, by: unsigned) = "PaykanBuffer_grow";
-native fn __shrink<T>(b: inout Obj, by: unsigned) = "PaykanBuffer_shrink";
+native fn _new<T>(n: unsigned) -> Obj = "PaykanBuffer_new";
+native fn _len<T>(b: view Obj) -> unsigned = "PaykanBuffer_len";
+native fn _get<T>(b: view Obj, i: unsigned) -> view T = "PaykanBuffer_get";
+native fn _copy<T>(b: view Obj, i: unsigned) -> T = "PaykanBuffer_copy";
+native fn _set<T>(b: inout Obj, i: unsigned, v: view T) = "PaykanBuffer_set";
+native fn _reserve<T>(b: inout Obj, n: unsigned) = "PaykanBuffer_reserve";
+native fn _grow<T>(b: inout Obj, by: unsigned) = "PaykanBuffer_grow";
+native fn _shrink<T>(b: inout Obj, by: unsigned) = "PaykanBuffer_shrink";
 
 class Buffer<T> {
   __data: Obj;
@@ -31,41 +31,41 @@ class Buffer<T> {
 
 impl Buffer<T> {
   // A buffer of `n` new slots.
-  fn __init__(n: unsigned) { self.__data = __new<T>(n); }
+  fn __init__(n: unsigned) { self.__data = _new<T>(n); }
 
   // The number of slots.
-  view fn len() -> unsigned { return __len<T>(self.__data); }
+  view fn len() -> unsigned { return _len<T>(self.__data); }
 
   // Slot `i`, for i < len().
-  view fn get(i: unsigned) -> view T { return __get<T>(self.__data, i); }
+  view fn get(i: unsigned) -> view T { return _get<T>(self.__data, i); }
 
   // A copy of slot `i`, to keep.
-  view fn copy(i: unsigned) -> T { return __copy<T>(self.__data, i); }
+  view fn copy(i: unsigned) -> T { return _copy<T>(self.__data, i); }
 
   // Store `v` in slot `i`.
-  fn set(i: unsigned, v: view T) { __set<T>(self.__data, i, v); }
+  fn set(i: unsigned, v: view T) { _set<T>(self.__data, i, v); }
 
   // Make the buffer at least `n` slots long.
-  fn reserve(n: unsigned) { __reserve<T>(self.__data, n); }
+  fn reserve(n: unsigned) { _reserve<T>(self.__data, n); }
 
   // Add `by` new slots at the end.
-  fn grow(by: unsigned) { __grow<T>(self.__data, by); }
+  fn grow(by: unsigned) { _grow<T>(self.__data, by); }
 
   // Drop the last `by` slots.
-  fn shrink(by: unsigned) { __shrink<T>(self.__data, by); }
+  fn shrink(by: unsigned) { _shrink<T>(self.__data, by); }
 
   // Append `v` in a new slot.
   fn push(v: view T) {
-    __grow<T>(self.__data, 1);
-    __set<T>(self.__data, __len<T>(self.__data) - 1, v);
+    _grow<T>(self.__data, 1);
+    _set<T>(self.__data, _len<T>(self.__data) - 1, v);
   }
 
   // Exchange slots `i` and `j`.
   fn swap(i: unsigned, j: unsigned) {
-    a: T = __copy<T>(self.__data, i);
-    b: T = __copy<T>(self.__data, j);
-    __set<T>(self.__data, i, b);
-    __set<T>(self.__data, j, a);
+    a: T = _copy<T>(self.__data, i);
+    b: T = _copy<T>(self.__data, j);
+    _set<T>(self.__data, i, b);
+    _set<T>(self.__data, j, a);
   }
 }
 
